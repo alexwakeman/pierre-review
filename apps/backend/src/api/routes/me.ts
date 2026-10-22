@@ -19,7 +19,6 @@ import {
   setMyTurnSettings,
 } from '../../auth/account.js';
 import { resolveLargePrThreshold } from '../../db/code-loc.js';
-import { eraseAccountData } from '../../db/erase-account.js';
 import { exportAccountData } from '../../db/export-account.js';
 import { accountIdOf } from '../plugins/auth.js';
 import { getAuthNotices } from '../../sync/auth-notices.js';
@@ -145,20 +144,8 @@ const myTurnSettingsSchema = {
   },
 };
 
-// Erasure requires the caller to retype their own GitHub login. maxLength bounds the string
-// (every GitHub login is ≤ 39 chars) so the body can't be used to push a large payload.
-const deleteAccountSchema = {
-  body: {
-    type: 'object',
-    required: ['confirmLogin'],
-    additionalProperties: false,
-    properties: { confirmLogin: { type: 'string', minLength: 1, maxLength: 64 } },
-  },
-};
-
 /**
- * `MeResponse.ai`. `enabled` is the ONE agentic switch (config.aiEnabled: local and not
- * LIMN_AI_DISABLED) — the same value that decides whether `registerAgenticRoutes` registers
+ * `MeResponse.ai`. `enabled` is the ONE agentic switch (config.aiEnabled: not LIMN_AI_DISABLED) — the same value that decides whether `registerAgenticRoutes` registers
  * anything. `runtime` is the one-time SDK download (ai/runtime.ts). `auth` is `detectClaudeAuth`'s
  * HEURISTIC (a `~/.claude` directory counts): it decides only whether a Run button or the one
  * "Sign in to Claude Code or set ANTHROPIC_API_KEY" line shows, never whether the feature is
@@ -192,17 +179,15 @@ export async function meRoutes(app: FastifyInstance): Promise<void> {
       // per-workspace and reads standing `my_turn` card counts off the daily brief, so all
       // three had no reader left and were pure per-request work on the SPA's first call.
       // If you need a count here again, prefer the brief's fold over re-adding one.
-      deploymentMode: config.deploymentMode,
       // THE AGENTIC FEATURES — Claude Review (+ chat, follow-up, ticket check, auto review),
-      // AI Fix. LOCAL ONLY.
+      // AI Fix.
       ai: agenticAiStatus(),
       // ML severity/category enrichment of bot comments. True iff something can score bot comments right now: the local model once it is set
       // up, or a configured severity-api.
       mlSeverity: isMlScoringAvailable(),
       // The local scorer's one-time download, when this deployment can run one at all.
       ...(config.mlLocalEnabled ? { ml: { state: mlStatus.state, message: mlStatus.message } } : {}),
-      // The in-app merge conflict resolver. CORE and free, and now registered in BOTH modes —
-      // so this is a constant, kept on the wire because the SPA gates its "Resolve conflicts"
+      // The in-app merge conflict resolver. Always registered — so this is a constant, kept on the wire because the SPA gates its "Resolve conflicts"
       // button on it and a field that disappears is a field every caller has to re-learn.
       // ⚠ NOT a git-version probe: /api/me does not shell out on every SPA boot. A git too old
       // for `merge-tree --write-tree` is refused by the OPEN route with `git_too_old`.
@@ -225,7 +210,7 @@ export async function meRoutes(app: FastifyInstance): Promise<void> {
       // The MY TURN settings, RAW and nullable (the stored overrides) — the `blastRadius` rule: the
       // SPA resolves them through the ONE `resolveMyTurnSettings`, so nothing is duplicated here.
       myTurnSettings: req.account?.myTurnSettings ?? null,
-      // Orgs currently SAML-blocked for this account (empty in the normal case + in local).
+      // Orgs currently SAML-blocked for this account (empty in the normal case).
       authNotices: getAuthNotices(accountId),
     };
   });
@@ -318,14 +303,8 @@ export async function meRoutes(app: FastifyInstance): Promise<void> {
     return body;
   });
 
-  // ---- Data-subject rights (UK/EU GDPR Arts. 15, 17, 20; CCPA/CPRA) ----
-  //
-  // Both are SELF-SERVICE by design. A privacy policy that says "email us to be deleted" is a
-  // promise backed by a human remembering to run SQL; these two routes are the promise backed
-  // by code, and they are what the policy at /privacy §9 points at.
-
-  // Access + portability: the whole account as one JSON document. The sealed GitHub token is
-  // excluded (see db/export-account.ts) — an export is a file people email to themselves.
+  // Access + portability: the whole account as one JSON document (db/export-account.ts). Erasure
+  // is deleting the local database file.
   app.get('/api/me/export', async (req, reply) => {
     const accountId = accountIdOf(req);
     const data = await exportAccountData(accountId);
@@ -342,58 +321,6 @@ export async function meRoutes(app: FastifyInstance): Promise<void> {
     reply.type('application/json');
     return data;
   });
-
-  // Erasure. Irreversible, and deliberately requires the caller to type their own GitHub login
-  // into `confirmLogin` — not as security (the session already proves who they are) but as
-  // INTENT: this destroys every synced repository and cannot be undone, so a mis-click or a
-  // stray fetch must not be sufficient. The cross-origin guard already blocks a foreign page
-  // from issuing it at all.
-  app.delete(
-    '/api/me/account',
-    { schema: deleteAccountSchema },
-    async (req, reply) => {
-      const account = req.account;
-      if (!account) {
-        return reply.code(401).send({ error: 'Unauthorized', message: 'Sign in first.' });
-      }
-      const { confirmLogin } = req.body as { confirmLogin: string };
-      if (
-        !account.githubLogin ||
-        confirmLogin.trim().toLowerCase() !== account.githubLogin.toLowerCase()
-      ) {
-        return reply.code(400).send({
-          error: 'BadRequest',
-          message: 'confirmLogin must match your GitHub username exactly.',
-        });
-      }
-      // A local install is a single implicit account synthesized from `gh api user` at every
-      // startup — deleting it would be recreated seconds later, and the user's actual delete
-      // action is removing the SQLite file. Refuse rather than pretend.
-      if (account.isLocal) {
-        return reply.code(400).send({
-          error: 'BadRequest',
-          message:
-            'This is a local install: there is no hosted account to delete. Remove the ' +
-            'database file (see `pierre --help` for its location) to erase everything.',
-        });
-      }
-
-      req.log.warn({ accountId: account.id }, 'account erasure requested');
-      const result = await eraseAccountData(account.id);
-      req.log.warn(
-        { accountId: account.id, reposDeleted: result.reposDeleted },
-        'account erased',
-      );
-      // Drop the session too, or the browser keeps presenting a cookie for an account that no
-      // longer exists (which resolves to `null` and 401s confusingly).
-      try {
-        req.session.delete();
-      } catch {
-        /* no session plugin in local mode — unreachable here, but harmless */
-      }
-      return { status: 'deleted', reposDeleted: result.reposDeleted };
-    },
-  );
 
   // The account-wide inbox. Unscoped on purpose (see `getMyTurn`): the browser-notification
   // watcher reads exactly this call — and without `onePerPr`, which is the board's rule.

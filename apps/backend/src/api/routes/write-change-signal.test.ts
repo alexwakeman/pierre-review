@@ -21,7 +21,6 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 const DB_PATH = '/tmp/pierre-write-change-signal-test.sqlite';
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
-process.env.DEPLOYMENT_MODE = 'local';
 
 const closePullRequest = vi.fn();
 const reopenPullRequest = vi.fn();

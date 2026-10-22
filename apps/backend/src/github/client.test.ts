@@ -100,7 +100,7 @@ describe('graphqlChecksHint', () => {
       },
     ]);
     expect(hint).toContain('CI checks');
-    expect(hint).toContain('re-authorize');
+    expect(hint).toContain('gh auth refresh');
   });
 
   it('stays SILENT for a NOT_FOUND (so a deleted PR is not mislabelled a checks problem)', () => {
@@ -120,7 +120,7 @@ describe('graphqlChecksHint', () => {
       },
     ]);
     expect(hint).toContain('SAML');
-    expect(hint).toContain('re-authorize');
+    expect(hint).toContain('gh auth refresh');
   });
 });
 

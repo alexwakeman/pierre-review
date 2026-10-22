@@ -1,1 +1,0 @@
-ALTER TABLE "review_threads" ADD COLUMN "resolved_at" timestamp with time zone;

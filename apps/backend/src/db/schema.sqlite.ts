@@ -1,13 +1,7 @@
-// SQLite schema (local / default deployment mode, via better-sqlite3).
+// The SQLite schema (via better-sqlite3) — the app's only schema.
 //
-// This is the canonical schema for LOCAL mode. Its Postgres twin lives in
-// `schema.pg.ts` and MUST be kept structurally identical (same table + column
-// names, same `$type`s) — the shared query layer is typed against ONE of them
-// and cast in `client.ts`, so any drift breaks the cast's soundness. See the
-// `assertSchemaParity` test for the structural guard.
-//
-// Multi-tenancy: every GitHub entity is owned by an `accounts` row. Locally
-// there is exactly ONE synthesized account (id 1, isLocal=true). `accountId` is
+// Multi-tenancy: every GitHub entity is owned by an `accounts` row. There is
+// exactly ONE synthesized account (id 1, isLocal=true). `accountId` is
 // denormalized onto the tables that anchor list/feed isolation (repos,
 // pullRequests, events, claudeReviews); everything else reaches its account
 // transitively via repoId/prId. `users` and `commitFiles`
@@ -85,18 +79,16 @@ export const accounts = sqliteTable('accounts', {
   // login. Shown wherever the signed-in identity appears (header, greeting).
   displayName: text('display_name'),
   avatarUrl: text('avatar_url'),
-  // AES-256-GCM sealed access token (iv:tag:ciphertext, base64). Null for the
-  // local account, whose token comes live from `gh auth token`.
+  // DORMANT: the sealed per-user token of the retired hosted mode. Never written now —
+  // the token comes live from `gh auth token`. Kept so existing databases need no migration.
   accessTokenEnc: text('access_token_enc'),
   isLocal: integer('is_local', { mode: 'boolean' }).notNull().default(false),
   createdAt: integer('created_at', { mode: 'timestamp' })
     .notNull()
     .default(sql`(unixepoch())`),
   lastLoginAt: integer('last_login_at', { mode: 'timestamp' }),
-  // Last time a loaded frontend was seen talking to the backend (cloud: stamped,
-  // throttled, by the per-request account hook + an SPA heartbeat). The scheduler
-  // syncs only accounts active within config.syncActiveWindowMinutes, so a tenant
-  // with no open tab stops being re-synced. Null until first activity.
+  // DORMANT: the retired hosted mode's activity stamp (it gated scheduled sync). Never
+  // written now; kept so existing databases need no migration.
   lastActiveAt: integer('last_active_at', { mode: 'timestamp' }),
   // Last time this account VIEWED the Activity Feed — a server-side "seen" marker (the
   // successor to the removed per-item "Done"). Makes "new My Turn since you were last here"
@@ -1170,7 +1162,7 @@ export const claudeReviews = sqliteTable(
     // always been plain text in the database (no CHECK, no pg enum), and a TS-only enum made the
     // row type lie about rows from a RETIRED model (the old Opus 4.8's runs are still here). The
     // offered list lives once, in packages/shared `CLAUDE_REVIEW_MODELS`, which the generate route
-    // validates against; retiring a model no longer edits either schema. Twin: schema.pg.ts.
+    // validates against; retiring a model no longer edits the schema.
     model: text('model').notNull(),
     // Null until the agent decides whether it explored the worktree.
     scope: text('scope', { enum: ['diff_only', 'worktree'] }),

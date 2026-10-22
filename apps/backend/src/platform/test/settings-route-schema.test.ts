@@ -77,7 +77,6 @@ beforeAll(async () => {
 
   const ctx = {
     db: drizzle(sqlite, { schema: { ...settingsSchema } }),
-    isPg: false,
     accountIdOf: () => ACCOUNT,
     queries: { defaultWorkspaceId: async () => WORKSPACE },
     log: { warn: () => {}, info: () => {}, error: () => {} },

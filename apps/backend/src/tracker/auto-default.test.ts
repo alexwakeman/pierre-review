@@ -63,8 +63,7 @@ let answer: (vars: Record<string, unknown>) => { data: unknown; errors?: unknown
 function build(): TrackerContext {
   return {
     db: drizzle(sqlite),
-    isPg: false,
-    host: { isCloud: false },
+    host: {},
     accountIdOf: () => 1,
     defaultWorkspaceId: async () => 1,
     log: { warn: () => {}, info: () => {}, error: () => {} },

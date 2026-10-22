@@ -995,9 +995,9 @@ async function processOne(
       return;
     }
     // Bring the branch current and let a LATER tick re-evaluate against fresh CI.
-    // A clone-based rebase is local-only (config.canRebaseUpdate === !isCloud); in cloud we
-    // fall back to GitHub's native merge-in, which is the only clone-free option.
-    if (work.updateStrategy === 'rebase' && !config.isCloud) {
+    // 'rebase' is the clone-based rebase; 'merge' is GitHub's native merge-in (the dependency
+    // policy's choice — never a force-push onto a bot's branch).
+    if (work.updateStrategy === 'rebase') {
       const { updatePrBranchFromTrunk } = await import('../coding/merge.js');
       // Stamped BEFORE the call, for the same reason 'merging' and 'enqueuing' are: the
       // clone-based rebase (clone, fetch, rebase, force-push) runs for tens of seconds while the

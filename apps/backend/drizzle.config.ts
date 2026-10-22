@@ -1,6 +1,6 @@
 import { defineConfig } from 'drizzle-kit';
 
-// SQLite (local mode) config. The Postgres config lives in drizzle.pg.config.ts.
+// drizzle-kit config (SQLite).
 const dbUrl = process.env.DATABASE_URL ?? './data/pierre-review.sqlite';
 
 export default defineConfig({

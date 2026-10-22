@@ -22,9 +22,8 @@ export interface TrackerLog {
 export interface TrackerContext {
   log: TrackerLog;
   host: {
-    isCloud: boolean;
     // SEAL / OPEN a secret at rest (core auth/crypto.ts AES-256-GCM). Present ONLY when the process
-    // has a valid ENCRYPTION_KEY — always in cloud, locally only when the operator set one. Absent,
+    // has a valid ENCRYPTION_KEY (only when the operator set one). Absent,
     // the token is stored `plain:` (./secret.ts), the same trust as that machine's `gh` token.
     sealSecret?: (plain: string) => string;
     openSecret?: (sealed: string) => string;
@@ -32,7 +31,6 @@ export interface TrackerContext {
   accountIdOf(req: FastifyRequest): number;
   db: any;
   schema: Record<string, any>;
-  isPg: boolean;
   // The account's Default workspace (core `ensureDefaultWorkspace`) — the `?workspace=` fallback.
   defaultWorkspaceId(accountId: number): Promise<number>;
   // GitHub GraphQL as ONE account (the GitHub Issues adapter). The token is resolved per call from

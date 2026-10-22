@@ -210,7 +210,7 @@ export function registerTrackerRoutes(
       if (access.issue.provider !== 'jira') {
         return reply.code(400).send({ error: 'NotJira', message: MSG_NOT_JIRA });
       }
-      const prepared = prepareTrackerCall(access, { cloud: ctx.host.isCloud, transport: opts.transport });
+      const prepared = prepareTrackerCall(access, { transport: opts.transport });
       if (!prepared.ok) return reply.code(prepared.status).send({ error: prepared.error, message: prepared.message });
       try {
         const fields = await fetchJiraFields(prepared.call);
@@ -238,7 +238,7 @@ export function registerTrackerRoutes(
           message: 'This workspace does not use Linear. Set Linear as the issue tracker in Settings.',
         });
       }
-      const prepared = prepareTrackerCall(access, { cloud: ctx.host.isCloud, transport: opts.transport });
+      const prepared = prepareTrackerCall(access, { transport: opts.transport });
       if (!prepared.ok) return reply.code(prepared.status).send({ error: prepared.error, message: prepared.message });
       try {
         const v = await fetchLinearViewer(prepared.call);
@@ -408,7 +408,6 @@ async function detectedTicketGate(
     );
   }
   const prepared = prepareTrackerCall(found.access, {
-    cloud: ctx.host.isCloud,
     transport,
     github: githubAccessFor(ctx, accountId),
   });

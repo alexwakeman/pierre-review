@@ -144,12 +144,9 @@ describe('buildSlackReport — every link points into Limn', () => {
     ({
       queries: board == null ? {} : { getPendingBoard: async () => board },
       db: drizzle(sqlite),
-      isPg: false,
       log: { warn: () => {}, error: () => {}, info: () => {} },
       host: {
         version: '0.0.0',
-        deploymentMode: 'local' as const,
-        isCloud: false,
         ...(appWebUrl === undefined ? {} : { appWebUrl }),
       },
       schema: { workspaces, pullRequests, users },

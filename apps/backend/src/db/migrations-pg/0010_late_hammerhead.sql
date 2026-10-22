@@ -1,1 +1,0 @@
-ALTER TABLE "accounts" ADD COLUMN "feed_last_seen_at" timestamp with time zone;

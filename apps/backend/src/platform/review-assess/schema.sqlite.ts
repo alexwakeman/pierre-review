@@ -1,7 +1,6 @@
 // ⚠ DORMANT: comment_assessments (the single-thread validity check, REMOVED). Nothing reads or writes this table any more; it stays declared so the
 // account erasure, retention prune and isolation test still cover it. Never drop it.
-// Plugin-owned SQLite schema for Comment-validity assessment (local mode). Structural twin of
-// `schema.pg.ts` (identical table + column names + nullability). Migrated by the host's
+// Platform-owned SQLite schema for Comment-validity assessment. Migrated by the host's
 // runPluginMigrations via ../migrations/0011_comment_assess.sql; this module is ONLY the typed
 // query surface. accountId is denormalized onto every row (the plugin's own verify:isolation
 // guarantee); every query filters it.

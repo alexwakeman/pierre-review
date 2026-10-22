@@ -14,7 +14,7 @@ import { sseStream } from '../api/sse.js';
 import { anyCiRunning, ciStatesRequestIds } from '../lib/ciReview.js';
 
 // THE CI REVIEW's server state (docs/API.md § CI review): its own Claude run, beside the code
-// review. Gated by the caller on `me.ai.enabled` (local, free) — the routes are absent in the cloud.
+// review. Gated by the caller on `me.ai.enabled` (local, free) — the routes are absent under LIMN_AI_DISABLED.
 
 export const ciReviewKey = (prId: number): readonly unknown[] => ['ci-review', prId];
 // The batched states' query-key PREFIX (the full key appends the sorted id list).

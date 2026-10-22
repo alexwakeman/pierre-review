@@ -34,7 +34,6 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 const DB_PATH = '/tmp/pierre-conflict-land-test.sqlite';
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
-process.env.DEPLOYMENT_MODE = 'local';
 
 /* ─────────────────────────────── the stubs ─────────────────────────────── */
 

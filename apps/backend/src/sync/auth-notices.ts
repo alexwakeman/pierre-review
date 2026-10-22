@@ -1,16 +1,14 @@
 import type { AuthNotice } from '@pierre-review/shared';
 
 // Process-local record of orgs whose sync is currently BLOCKED by SAML SSO for an account — the
-// sign-in token authenticates but isn't SSO-authorized for that org (see docs/GITHUB-AUTH-SETUP.md
-// "the SAML wall"). Populated by the sync (recordSamlBlock when a repo's fetch is SAML-forbidden,
+// `gh` token authenticates but isn't SSO-authorized for that org. Populated by the sync (recordSamlBlock when a repo's fetch is SAML-forbidden,
 // cleared when any repo of that org next syncs cleanly), read by /api/me to drive the global
 // "Reconnect GitHub" banner.
 //
 // Deliberately IN-MEMORY, not persisted: it's a rare, self-healing state. After a restart it
 // simply repopulates on the next sync tick, and it clears itself once the user re-authorizes and
-// the org reads cleanly again — so a DB column + dual-dialect migration would be overkill. (Cloud
-// runs a single Fastify process, so the sync that writes this and the /api/me that reads it share
-// the same map.) Local mode never watches SAML orgs / never populates this.
+// the org reads cleanly again — so a DB column + migration would be overkill. (One process: the
+// sync that writes this and the /api/me that reads it share the same map.)
 
 const blockedOrgsByAccount = new Map<number, Set<string>>();
 

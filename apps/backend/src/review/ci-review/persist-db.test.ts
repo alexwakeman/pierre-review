@@ -17,7 +17,6 @@ import type { AgentContext } from '../agent-context.js';
 const DB_PATH = '/tmp/pierre-ci-review-persist-db.sqlite';
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
-process.env.DEPLOYMENT_MODE = 'local';
 
 vi.mock('../claude-review/ai-ready.js', () => ({ agenticRunReady: () => true }));
 
@@ -156,10 +155,9 @@ beforeAll(async () => {
   ctx = {
     db,
     schema,
-    isPg: false,
     runTransaction,
     recordAiUsage: async () => {},
-    host: { isCloud: false },
+    host: {},
     llm: { detectAuth: () => ({ status: 'ok' }) },
     aiCredits: { check: async () => ({ agentBlocked: false }) },
     log: { info: () => {}, warn: () => {}, error: () => {} },

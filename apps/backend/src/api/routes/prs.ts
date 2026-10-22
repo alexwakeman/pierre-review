@@ -927,7 +927,7 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
         behindBy: m.behindBy,
         baseRef: m.baseRef,
         canUpdateBranch: behind && !conflicts,
-        canRebaseUpdate: !config.isCloud,
+        canRebaseUpdate: true,
         // Only report a queue when the base branch actually has one — `enabled:false` would
         // otherwise make the control render a "merge queue" section for every repo.
         mergeQueue:
@@ -1469,39 +1469,9 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
       }
       const info = await fetchPrHeadInfo(token, ctx.owner, ctx.name, ctx.number);
 
-      if (config.isCloud) {
-        // Cloud: native update-branch (merge trunk in). No clone/git on the host.
-        const out = await updatePullRequestBranch(
-          token,
-          ctx.owner,
-          ctx.name,
-          ctx.number,
-          info.headSha,
-        );
-        if (!out.ok) {
-          reply.status(409);
-          return out.reason === 'head_moved'
-            ? { error: 'HeadMoved', headMoved: true, message: out.message }
-            : { error: 'Conflicts', conflicts: true, message: out.message };
-        }
-        // ⚠ SETTLE, THEN ANSWER. This route used to stamp nothing and resync nothing, so the
-        // SPA's board refetch re-read `behind` and the old head and the Update-branch card came
-        // straight back. GitHub merges the base in ASYNCHRONOUSLY (202, no sha), so the only
-        // expectation we can state is "the head moved off the one we updated from"; the inline
-        // wait is deadline-bounded and the rest goes to the settle ladder. Never throws.
-        await settlePrAfterWrite({
-          accountId,
-          prId: ctx.prId,
-          log: asSyncLogger(req.log),
-          expect: { headNot: info.headSha },
-        });
-        const result: UpdateBranchResult = { ok: true, headSha: null, strategy: 'merge' };
-        return result;
-      }
-
-      // Local: clone-based rebase (default) or merge from trunk. Nothing on this path resolves a
+      // Clone-based rebase (default) or merge from trunk. Nothing on this path resolves a
       // conflict: any conflict aborts with CONFLICTS_UNRESOLVED (→ the 409 below). Dynamic
-      // import so the clone/git machinery is only loaded on this path (never in cloud).
+      // import so the clone/git machinery is only loaded on this path.
       const strat = strategy === 'merge' ? 'merge' : 'rebase';
       const { updatePrBranchFromTrunk } = await import('../../coding/merge.js');
       const out = await updatePrBranchFromTrunk({

@@ -91,22 +91,18 @@ export async function cheapComplete(
   // its rung would resolve to nothing; the two-rung ladder IS `agentComplete`.
   // Locally the Agent SDK reaches the reader's own Claude, so the local off switch
   // (LIMN_AI_DISABLED) must hold on that route: a one-shot call may not reach it behind the switch.
-  const route = cheapRoute(config.isCloud, opts.apiKey, opts.localRoute);
-  if (route === 'agent' && !config.isCloud && !config.aiEnabled) throw new Error('Claude is switched off here.');
+  const route = cheapRoute(opts.apiKey, opts.localRoute);
+  if (route === 'agent' && !config.aiEnabled) throw new Error('Claude is switched off here.');
   return route === 'api' ? rawComplete(opts.apiKey!, model, opts) : agentComplete(model, opts);
 }
 
 /**
  * Which path one cheap completion takes (exported for the test). A passed key takes the API —
- * except LOCALLY on a call marked `localRoute: 'agent'`, which stays on the Agent SDK.
+ * except on a call marked `localRoute: 'agent'`, which stays on the Agent SDK.
  */
-export function cheapRoute(
-  isCloud: boolean,
-  apiKey: string | undefined,
-  localRoute?: 'agent',
-): 'api' | 'agent' {
+export function cheapRoute(apiKey: string | undefined, localRoute?: 'agent'): 'api' | 'agent' {
   if (!apiKey) return 'agent';
-  if (!isCloud && localRoute === 'agent') return 'agent';
+  if (localRoute === 'agent') return 'agent';
   return 'api';
 }
 

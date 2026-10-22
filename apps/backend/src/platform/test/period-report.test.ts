@@ -644,7 +644,6 @@ describe('generatePeriodReport — persistence', () => {
     ctx = {
       ...seams,
       db,
-      isPg: false,
       recordAiUsage: async () => {},
     } as unknown as ProContext;
   });
@@ -947,7 +946,6 @@ describe('forecast_json round trip', () => {
     const ctx = {
       ...seams,
       db: drizzle(sqlite, { schema: { ...periodSchema } }),
-      isPg: false,
       recordAiUsage: async () => {},
     } as unknown as ProContext;
     return { sqlite, ctx };

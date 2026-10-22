@@ -109,9 +109,8 @@ describe('Slack event signals', () => {
     sqlite.exec(migrationSql('0040_slack_event_signals.sql'));
     ctx = {
       db: drizzle(sqlite, { schema: { ...settingsSchema, ...slackSchema } }),
-      isPg: false,
       log: { warn: () => {}, error: () => {}, info: () => {} },
-      host: { version: '0', deploymentMode: 'local', isCloud: false, appWebUrl: BASE },
+      host: { version: '0', appWebUrl: BASE },
       schema: core,
     } as unknown as ProContext;
   });
@@ -183,9 +182,8 @@ describe('Slack routes', () => {
     });
     const ctx = {
       db: drizzle(sqlite, { schema: { ...settingsSchema } }),
-      isPg: false,
       log: { warn: () => {}, error: () => {}, info: () => {} },
-      host: { version: '0', deploymentMode: 'local', isCloud: false },
+      host: { version: '0', },
       schema: { workspaces: ws },
       accountIdOf: () => 1,
       queries: { defaultWorkspaceId: async () => 1 },

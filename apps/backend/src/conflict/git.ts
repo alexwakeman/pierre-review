@@ -116,7 +116,7 @@ export async function gitTry(
  * `git merge-tree --write-tree` needs git 2.38. Probed ONCE per process and memoised — the
  * open route turns a false into `git_too_old` and the overlay prints it once.
  *
- * ⚠ This is NOT on `/api/me`. `MeResponse.conflictResolver` is `!config.isCloud` and shells
+ * ⚠ This is NOT on `/api/me`. `MeResponse.conflictResolver` is a constant and shells
  * out to nothing; probing git on every SPA boot to answer a question the open route can
  * answer once is the trade this replaced.
  */

@@ -16,7 +16,7 @@ import { relativeTime, safeExternalUrl } from '../lib/ui.js';
 // print two different percentages for one run.
 import { PHASE_LABEL, fixProgressPct } from '../lib/aiFixProgress.js';
 import { useAiCapabilities } from '../hooks/useAiCapabilities.js';
-import { AiCloudNote, AiRunGate } from './AiSetup.js';
+import { AiRunGate } from './AiSetup.js';
 import { useFilters } from '../store/filters.js';
 import {
   aiFixStartMutationKey,
@@ -90,13 +90,7 @@ export function AiFixTab({ pr }: { pr: PrDetail }): JSX.Element {
     }
   }, [aiFixTabFocus, pr.id, consumeAiFixTabFocus]);
 
-  if (!aiFix) {
-    return (
-      <div className="p-4">
-        <AiCloudNote />
-      </div>
-    );
-  }
+  if (!aiFix) return <></>;
 
   return (
     <div className="pb-6">

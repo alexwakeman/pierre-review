@@ -14,7 +14,6 @@ import { join } from 'node:path';
 const DB_PATH = join(tmpdir(), 'pierre-story-health-test.sqlite');
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
-process.env.DEPLOYMENT_MODE = 'local';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 let db: any;

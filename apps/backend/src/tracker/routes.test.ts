@@ -82,8 +82,6 @@ const corePullRequests = sqliteTable('pull_requests', {
 // A reversible fake of core's AES-GCM seam — enough to prove the row holds the SEALED form.
 const host = {
   version: 'test',
-  deploymentMode: 'local' as const,
-  isCloud: false,
   sealSecret: (p: string) => `enc(${Buffer.from(p).toString('hex')})`,
   openSecret: (s: string) => Buffer.from(/^enc\((.*)\)$/.exec(s)?.[1] ?? '', 'hex').toString('utf8'),
 };
@@ -147,7 +145,6 @@ beforeAll(async () => {
 
   ctx = {
     db: drizzle(sqlite),
-    isPg: false,
     host,
     accountIdOf: () => ACCOUNT,
     defaultWorkspaceId: async () => WS_NO_TOKEN,
@@ -403,18 +400,6 @@ describe('3. the ticket route is not a Jira proxy', () => {
     expect(res.body).not.toContain('internal-hostname-leak');
   });
 
-  it('CLOUD mode refuses an http base URL before any request', async () => {
-    await put(WS, { issue: { baseUrl: 'http://acme.atlassian.net' }, jira: { token: TOKEN } });
-    host.isCloud = true;
-    try {
-      const res = await ticket(10, 'ENG-7');
-      expect(res.statusCode).toBe(502);
-      expect(res.json().code).toBe('blocked');
-      expect(calls).toHaveLength(0);
-    } finally {
-      host.isCloud = false;
-    }
-  });
 });
 
 describe('4. auto review fetches the ticket on the server (resolveAutoReviewTicket)', () => {

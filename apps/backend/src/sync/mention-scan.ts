@@ -63,21 +63,9 @@ export interface MentionScanStats {
   failures: number;
 }
 
-/** Which accounts are worth scanning this tick. Mirrors the sync loop's activity gate. */
+/** Which accounts to scan this tick: every account. */
 async function activeAccountIds(): Promise<Array<{ id: number; login: string }>> {
-  const rows = config.isCloud
-    ? await db
-        .select({ id: accounts.id, login: accounts.githubLogin })
-        .from(accounts)
-        .where(
-          gte(
-            accounts.lastActiveAt,
-            new Date(Date.now() - config.syncActiveWindowMinutes * 60_000),
-          ),
-        )
-        .execute()
-    : await db.select({ id: accounts.id, login: accounts.githubLogin }).from(accounts).execute();
-  return rows;
+  return db.select({ id: accounts.id, login: accounts.githubLogin }).from(accounts).execute();
 }
 
 /**

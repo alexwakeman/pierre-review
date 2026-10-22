@@ -148,7 +148,7 @@ export async function loadWorkPlan(
   accountId: number,
   scopeKey: string,
 ): Promise<StoredRow | null> {
-  const pro = proSchemaFor(ctx.isPg);
+  const pro = proSchemaFor();
   const rows = (await ctx.db
     .select()
     .from(pro.proWorkPlans)
@@ -362,7 +362,7 @@ export function registerWorkPlanRoutes(
       const output: StoredOutput = validated ?? EMPTY_OUTPUT;
       const outputJson = JSON.stringify(output);
       const now = new Date();
-      const pro = proSchemaFor(ctx.isPg);
+      const pro = proSchemaFor();
       await ctx.runTransaction(async (tx) => {
         await tx
           .insert(pro.proWorkPlans)

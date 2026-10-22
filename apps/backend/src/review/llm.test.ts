@@ -18,20 +18,14 @@ describe('cheapRequestShape', () => {
 // reaches the metered API, even with SUMMARY_ANTHROPIC_API_KEY. Reports / Bots Monitoring (unmarked)
 // keep the key's route.
 describe('cheapRoute', () => {
-  it("takes the Agent SDK locally for a call marked localRoute 'agent', even with a key", () => {
-    expect(cheapRoute(false, 'sk-ant-summary', 'agent')).toBe('agent');
-    expect(cheapRoute(false, undefined, 'agent')).toBe('agent');
+  it("takes the Agent SDK for a call marked localRoute 'agent', even with a key", () => {
+    expect(cheapRoute('sk-ant-summary', 'agent')).toBe('agent');
+    expect(cheapRoute(undefined, 'agent')).toBe('agent');
   });
 
-  it('keeps the API locally for an unmarked call with a key; no key is always the Agent SDK', () => {
-    expect(cheapRoute(false, 'sk-ant-summary')).toBe('api');
-    expect(cheapRoute(false, undefined)).toBe('agent');
-  });
-
-  it('takes the API in cloud whenever a key was passed, marked or not', () => {
-    expect(cheapRoute(true, 'sk-ant-summary')).toBe('api');
-    expect(cheapRoute(true, 'sk-ant-summary', 'agent')).toBe('api');
-    expect(cheapRoute(true, undefined)).toBe('agent');
-    expect(cheapRoute(true, '')).toBe('agent');
+  it('keeps the API for an unmarked call with a key; no key is always the Agent SDK', () => {
+    expect(cheapRoute('sk-ant-summary')).toBe('api');
+    expect(cheapRoute(undefined)).toBe('agent');
+    expect(cheapRoute('')).toBe('agent');
   });
 });

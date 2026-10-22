@@ -8,7 +8,7 @@ import { api } from '../api/client.js';
 import { useAiCapabilities } from './useAiCapabilities.js';
 
 // CHECK A STORY AGAINST THE DOCS — server state (docs/API.md § Check a story against the docs; CORE,
-// free, LOCAL ONLY). Gated on `me.ai.enabled`: the routes are absent in the cloud.
+// free, LOCAL ONLY). Gated on `me.ai.enabled`: the routes are absent under LIMN_AI_DISABLED.
 //
 // ⚠ NOTHING FETCHES ON A BOARD'S MOUNT: the only caller is the Story section, which only the story view
 // mounts (never the Open PRs board). The GET reads the stored run (no model, no tracker call) and polls

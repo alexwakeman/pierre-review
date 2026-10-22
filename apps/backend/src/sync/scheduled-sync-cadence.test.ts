@@ -14,7 +14,6 @@ import type { Logger } from './sync-repo.js';
 vi.mock('./sync-repo.js', () => ({ syncRepo: vi.fn() }));
 vi.mock('../config.js', () => ({
   config: {
-    isCloud: false,
     backfillDays: 90,
     syncOverlapMinutes: 20,
     commitFileConcurrency: 10,

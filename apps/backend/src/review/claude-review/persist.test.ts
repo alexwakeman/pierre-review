@@ -26,7 +26,6 @@ import type { AgentContext as ProContext } from '../agent-context.js';
 const DB_PATH = '/tmp/pierre-claude-review-persist.sqlite';
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
-process.env.DEPLOYMENT_MODE = 'local';
 
 let db: any;
 let schema: any;
@@ -81,7 +80,6 @@ beforeAll(async () => {
   ctx = {
     db,
     schema,
-    isPg: false,
     runTransaction: client.runTransaction,
     log: { warn: () => {}, info: () => {}, error: () => {} },
     recordAiUsage: async () => {},

@@ -90,7 +90,7 @@ export async function readTargetRows(
   ctx: ProContext,
   accountId: number,
 ): Promise<SlackTargetRow[]> {
-  const pro = proSchemaFor(ctx.isPg);
+  const pro = proSchemaFor();
   const rows = (await ctx.db
     .select({
       accountId: pro.workspaceSlackTargets.accountId,
@@ -198,7 +198,7 @@ export async function writeTarget(
   workspaceId: number,
   patch: WorkspaceSlackTargetUpdate,
 ): Promise<void> {
-  const pro = proSchemaFor(ctx.isPg);
+  const pro = proSchemaFor();
   const rows = await readTargetRows(ctx, accountId);
   const prior = rows.find((r) => r.workspaceId === workspaceId) ?? null;
   if (prior == null && rows.length >= SLACK_TARGET_WORKSPACE_CAP) {
@@ -271,7 +271,7 @@ export async function deleteTarget(
   accountId: number,
   workspaceId: number,
 ): Promise<void> {
-  const pro = proSchemaFor(ctx.isPg);
+  const pro = proSchemaFor();
   await ctx.db
     .delete(pro.workspaceSlackTargets)
     .where(
@@ -334,7 +334,7 @@ export async function stampSlot(
   workspaceId: number,
   slot: string,
 ): Promise<void> {
-  const pro = proSchemaFor(ctx.isPg);
+  const pro = proSchemaFor();
   await ctx.db
     .update(pro.workspaceSlackTargets)
     .set({ lastSentSlot: slot, lastSentAt: new Date() })

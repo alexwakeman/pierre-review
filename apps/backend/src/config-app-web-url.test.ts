@@ -42,9 +42,8 @@ describe('config.appWebUrl', () => {
   });
 
   it('does NOT follow APP_BASE_URL when nothing here serves the SPA', async () => {
-    // THE REGRESSION, PINNED. docs/LOCAL-CLOUD-TESTING.md § Option A runs `DEPLOYMENT_MODE=cloud
-    // pnpm dev` with APP_BASE_URL=:4000 set (the OAuth callback needs it) while Vite still serves
-    // the SPA. Keying appWebUrl on "is APP_BASE_URL set" would put that mode back on the 404.
+    // THE REGRESSION, PINNED. `pnpm dev` with APP_BASE_URL=:4000 set while Vite still serves the
+    // SPA: keying appWebUrl on "is APP_BASE_URL set" would put that setup back on the 404.
     process.env.APP_BASE_URL = 'http://localhost:4000';
     const { config } = await load();
     expect(config.appBaseUrl).toBe('http://localhost:4000'); // the API origin is untouched…

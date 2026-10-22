@@ -31,7 +31,6 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 const DB_PATH = '/tmp/pierre-reopen-route-test.sqlite';
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
-process.env.DEPLOYMENT_MODE = 'local';
 
 const reopenPullRequest = vi.fn();
 // Spread the real module so every export this route file (and its siblings) don't stub still

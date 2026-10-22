@@ -11,7 +11,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
 process.env.DATABASE_URL = '/tmp/pierre-conflict-session-test.sqlite';
-process.env.DEPLOYMENT_MODE = 'local';
 process.env.DISABLE_SCHEDULER = 'true';
 
 import type { ConflictSessionEvent } from '@pierre-review/shared';

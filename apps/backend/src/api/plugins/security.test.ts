@@ -2,14 +2,12 @@
 // Host guard. Driven through a real Fastify instance with `app.inject` so the hooks run in the
 // order they will in production.
 //
-// LOCAL MODE is what these cover, because local mode is where the hole was: it has no auth at
-// all (every request resolves to the single implicit account), so CORS `origin: true` meant any
+// The hole these cover: the app has no auth at all (every request resolves to the single implicit account), so CORS `origin: true` meant any
 // page the developer happened to have open could read their whole synced GitHub dataset and
 // drive their write actions. Env is set BEFORE importing config, per the retention.test.ts
 // pattern.
 import { beforeAll, describe, expect, it } from 'vitest';
 
-process.env.DEPLOYMENT_MODE = 'local';
 process.env.DATABASE_URL = '/tmp/pierre-security-test.sqlite';
 process.env.DISABLE_SCHEDULER = 'true';
 process.env.RATE_LIMIT_DISABLED = 'true'; // isolate the guards from the limiter
@@ -28,22 +26,19 @@ beforeAll(async () => {
   security.registerHostGuard(app);
   security.registerCrossOriginGuard(app);
 
-  // Stand-ins for a read, a state-changing write, the guarded mutating GET, and an
-  // HMAC-authenticated webhook.
+  // Stand-ins for a read and a state-changing write.
   app.get('/api/timeline', async () => ({ ok: true }));
   app.post('/api/repos/1/sync', async () => ({ started: true }));
-  app.get('/api/auth/reconnect', async () => ({ reconnecting: true }));
-  app.post('/api/webhooks/github', async () => ({ received: true }));
   app.get('/app/', async () => 'spa');
   await app.ready();
 });
 
 const LOCALHOST = { host: 'localhost:4000' };
 
-describe('isAllowedOrigin (local mode)', () => {
+describe('isAllowedOrigin', () => {
   it('accepts loopback origins on any port', () => {
-    // Any port, because the legitimate ports are not knowable here: Vite dev (5173), the landing
-    // dev server (5174), the isolated demo stack (5273), and whatever PORT the packaged CLI uses.
+    // Any port, because the legitimate ports are not knowable here: Vite dev (5173), the isolated
+    // demo stack (5273), and whatever PORT the packaged CLI uses.
     for (const o of [
       'http://localhost:5173',
       'http://localhost:4000',
@@ -90,8 +85,7 @@ describe('cross-origin state-change guard', () => {
   });
 
   // The core of it. A cross-origin POST is DELIVERED regardless of CORS — CORS only decides
-  // whether the attacker's page may read the RESPONSE. In local mode there is no cookie to
-  // miss, so without this guard the write simply executed as the local user.
+  // whether the attacker's page may read the RESPONSE. There is no cookie to miss, so without this guard the write simply executed as the local user.
   it('BLOCKS a cross-site write', async () => {
     const res = await app.inject({
       method: 'POST',
@@ -140,34 +134,6 @@ describe('cross-origin state-change guard', () => {
     });
     expect(res.statusCode).toBe(200);
   });
-
-  // /api/auth/reconnect revokes the GitHub grant and drops the session, so it needs POST-grade
-  // protection despite being a GET.
-  it('guards the mutating GET /api/auth/reconnect', async () => {
-    const blocked = await app.inject({
-      method: 'GET',
-      url: '/api/auth/reconnect',
-      headers: { ...LOCALHOST, 'sec-fetch-site': 'cross-site' },
-    });
-    expect(blocked.statusCode).toBe(403);
-
-    const allowed = await app.inject({
-      method: 'GET',
-      url: '/api/auth/reconnect',
-      headers: { ...LOCALHOST, 'sec-fetch-site': 'same-origin' },
-    });
-    expect(allowed.statusCode).toBe(200);
-  });
-
-  // GitHub/Stripe send neither Origin nor Sec-Fetch-*; they authenticate by HMAC instead.
-  it('exempts the signed webhook receivers', async () => {
-    const res = await app.inject({
-      method: 'POST',
-      url: '/api/webhooks/github',
-      headers: { ...LOCALHOST, 'sec-fetch-site': 'cross-site' },
-    });
-    expect(res.statusCode).toBe(200);
-  });
 });
 
 describe('Host guard (DNS rebinding)', () => {
@@ -208,7 +174,7 @@ describe('security headers', () => {
     expect(res.headers['cross-origin-resource-policy']).toBe('same-origin');
   });
 
-  it('sends the SPA CSP for /app, naming no third party in local mode', async () => {
+  it('sends the SPA CSP for /app, naming no third party', async () => {
     const res = await app.inject({ method: 'GET', url: '/app/', headers: LOCALHOST });
     const csp = String(res.headers['content-security-policy']);
     expect(csp).toContain("default-src 'self'");
@@ -220,12 +186,12 @@ describe('security headers', () => {
     // Third-party markdown images are allowed; the font is self-hosted.
     expect(csp).toContain("img-src 'self' data: blob: https:");
     expect(csp).toContain("font-src 'self'");
-    // Local mode phones home to nobody — no Google origins in the policy.
+    // The app phones home to nobody — no Google origins in the policy.
     expect(csp).not.toContain('googletagmanager');
     expect(csp).toContain("frame-ancestors 'none'");
   });
 
-  it('does not send HSTS in local mode (it would pin localhost to HTTPS)', async () => {
+  it('does not send HSTS (it would pin localhost to HTTPS)', async () => {
     const res = await app.inject({ method: 'GET', url: '/api/timeline', headers: LOCALHOST });
     expect(res.headers['strict-transport-security']).toBeUndefined();
   });

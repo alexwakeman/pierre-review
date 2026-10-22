@@ -14,8 +14,6 @@ import { DependencyAutoMergeSection } from './DependencyAutoMergeSection.js';
 import { SonarSection } from './SonarSection.js';
 import { ReferenceDocsSection } from './ReferenceDocsSection.js';
 import { FlowSettingsSection } from './FlowSettingsSection.js';
-import { GithubAppInstallSection } from './GithubAppInstallSection.js';
-import { YourDataSection } from './YourDataSection.js';
 import { useSettingsWorkspace } from './workspaceScope.js';
 import { CloseIcon } from '../Icons.js';
 import { escapeOwnedByControl } from '../../lib/escapeOwner.js';
@@ -29,7 +27,7 @@ import type { SettingsFocus } from '../../store/settingsModal.js';
 //
 // ── THE MODAL IS TWO HALVES, SPLIT BY GRAIN, AND THE SPLIT IS THE LAYOUT ──────────────────────
 // GLOBAL FIRST, then ONE "Workspace" heading and everything scoped beneath it. Before this, the
-// two grains were interleaved — an account key, then cloud account sections, then a per-workspace
+// two grains were interleaved — an account key, then account sections, then a per-workspace
 // cadence, then an account-wide bot toggle, then two more per-workspace sections — and a reader
 // had to know each section's grain to know what a Save would touch. Nothing announced it except
 // each section repeating "— acme-web" in its own heading, which is the same fact three times and
@@ -41,9 +39,8 @@ import type { SettingsFocus } from '../../store/settingsModal.js';
 // team's. Sections below it dropped the name from their titles; they keep it only in a sentence
 // that names a DIFFERENT workspace (see SlackSection's cap disclosure).
 //
-// ⚠ THE ORDER IS THE GRAIN. Global half: GitHub App / benchmark consent / your data stay
-// CLOUD-ONLY; everything else shows in both modes. Workspace half: every section is free and reads
-// its own workspace row, so none of them waits on another's request.
+// ⚠ THE ORDER IS THE GRAIN. Global half first. Workspace half: every section reads its own
+// workspace row, so none of them waits on another's request.
 //
 // `scopeReady` holds back the WHOLE workspace half: nothing workspace-scoped may render OR be
 // written against an unresolved id.
@@ -68,7 +65,6 @@ export function SettingsModal({
   onClose: () => void;
 }): JSX.Element {
   const aiEnabled = useAiCapabilities().enabled;
-  const isCloud = useMe().data?.deploymentMode === 'cloud';
   // ⚠ `workspaceId === null` MEANS "NOT RESOLVED YET", NOT "NONE". Nothing scoped may render
   // against it and nothing may be WRITTEN against it — a PUT with no `?workspace=` is answered by
   // the account's DEFAULT workspace, so a save fired during resolution lands on a team the user
@@ -186,28 +182,16 @@ export function SettingsModal({
 
         <div className="min-h-0 flex-1 space-y-4 overflow-auto px-4 py-3">
           {/* ── GLOBAL. One account, every workspace. ─────────────────────────────────────── */}
-          {/* GitHub App install — CORE/free, cloud-only. Signing in via the App does NOT install
-              it, and the install link otherwise lives only on the signed-out SignInGate, so a
-              signed-in user has no other route to it. Self-gates on the App provider being
-              configured. */}
-          {isCloud && <GithubAppInstallSection />}
-          {/* Cross-org benchmark consent — CORE/free, cloud-only, a plain /api/me flag. */}
-          {/* Large-PR threshold — CORE/free and in BOTH modes (no `isCloud` gate: an
-              `npx pierre-review` user gets the flag, so they get its setting). */}
+          {/* Large-PR threshold. */}
           <LargePrThresholdSection />
           {/* Blast radius — /api/me-backed like the section above it. */}
           <BlastRadiusSection />
           {/* My Turn — which card types count as your turn, their order, and the ranking weights.
               Account-grained and /api/me-backed like the two above it. */}
           <MyTurnSection />
-          {/* Local bot-comment scoring's one-time download. Free and account-level; renders nothing
-              where there is nothing to set up (cloud, LIMN_ML_DISABLED). */}
+          {/* Local bot-comment scoring's one-time download. Account-level; renders nothing where
+              there is nothing to set up (LIMN_ML_DISABLED). */}
           <BotScoringSection />
-          {/* Data-subject rights (export / delete / cookie choice) — CORE/free, cloud-only. This
-              is the self-service machinery the privacy policy at /privacy §9 points at; a local
-              install has no hosted account to erase (the data is the user's own SQLite file), so
-              the backend refuses it there and the section is hidden rather than 400-ing. */}
-          {isCloud && <YourDataSection />}
 
           {/* ── WORKSPACE. One team — the one selected in the rail — named ONCE, here. ────── */}
           {/* The half carries no rule of its own: `SectionShell` already draws one under the last

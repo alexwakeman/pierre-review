@@ -143,7 +143,6 @@ describe('a cadence change against stored reports', () => {
     llmCalls = 0;
     ctx = {
       db: drizzle(sqlite, { schema: { ...periodSchema } }),
-      isPg: false,
       recordAiUsage: async () => {},
       queries: {
         getPeriodMetrics: async (

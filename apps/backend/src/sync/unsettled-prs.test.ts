@@ -23,7 +23,6 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 const DB_PATH = '/tmp/pierre-unsettled-prs-test.sqlite';
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
-process.env.DEPLOYMENT_MODE = 'local';
 
 /** What the stubbed GitHub answers for each node id asked: observation fields, or omitted. */
 let answer: (nodeId: string) => Record<string, unknown> | null = () => ({

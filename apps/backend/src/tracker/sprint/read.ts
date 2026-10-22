@@ -188,7 +188,6 @@ export async function readWorkspaceSprint(
       return { ok: false, stored: 0, code: 'no_tracker' };
     }
     const prepared = prepareTrackerCall(access, {
-      cloud: ctx.host.isCloud,
       transport: opts.transport,
       github: githubAccessFor(ctx, accountId),
     });
@@ -391,7 +390,7 @@ export async function expandSprintGhosts(
     const access = trackerAccessOf(ctx.host, row);
     const provider = access.issue.provider;
     if (provider == null || maybeAdapterFor(provider)?.reader == null) return 0;
-    const prepared = prepareTrackerCall(access, { cloud: ctx.host.isCloud, transport: opts.transport, github: githubAccessFor(ctx, accountId) });
+    const prepared = prepareTrackerCall(access, { transport: opts.transport, github: githubAccessFor(ctx, accountId) });
     if (!prepared.ok) return 0;
     if (backoffCode(accountId, workspaceId, accessFingerprint(prepared.call), now()) != null) return 0;
     const projectKeys = await sprintProjectKeys(ctx, accountId, workspaceId, provider, prepared.call.apiRoot);

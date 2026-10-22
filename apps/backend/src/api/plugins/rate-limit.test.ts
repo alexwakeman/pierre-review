@@ -368,7 +368,6 @@ describe('tierFor — GitHub quota spenders', () => {
     expect(tiers('POST', '/api/me/large-pr-threshold')).not.toContain('github_write');
     // The neighbours a loose prefix would have taken with it.
     expect(tiers('GET', '/api/mention-candidates')).toEqual(['read']);
-    expect(tiers('DELETE', '/api/me/account')).toEqual(['read']);
   });
 
   // PUT /api/me/blast-radius-config — the blast-radius reading settings. Same shape and same
@@ -857,40 +856,6 @@ describe('tierFor — merge-conflict resolver', () => {
     expect(tiers('POST', '/api/prs/12/merge')).toEqual(['github_write']);
     expect(tiers('POST', '/api/prs/12/update-branch')).toEqual(['github_write']);
     expect(tiers('POST', '/api/prs/12/refresh')).toEqual(['pr_detail', 'read']);
-  });
-});
-
-describe('tierFor — unauthenticated surface', () => {
-  it('buckets sign-in by itself (it is reachable without a session)', () => {
-    expect(tiers('GET', '/api/auth/login')).toEqual(['auth']);
-    expect(tiers('GET', '/api/auth/callback')).toEqual(['auth']);
-  });
-
-  // Webhooks are legitimately bursty (a busy org pushing), so they get a high ceiling — but not
-  // an absent one, since each delivery can enqueue a sync.
-  it('gives signed webhooks a high but finite ceiling', () => {
-    expect(tiers('POST', '/api/webhooks/github')).toEqual(['webhook']);
-    expect(TIERS.webhook.limit).toBeGreaterThan(TIERS.ai.limit);
-  });
-
-  // The contact form is the one anonymous route whose cost is somebody's attention, so it
-  // takes the strictest bucket in the file — and the ticket mint shares it, because minting
-  // is the step a bot has to complete before it can post.
-  it('puts both contact paths in the contact tier', () => {
-    expect(tiers('POST', '/api/contact')).toEqual(['contact']);
-    expect(tiers('GET', '/api/contact/ticket')).toEqual(['contact']);
-  });
-
-  it('rations contact more tightly than anything else, over an HOUR not a minute', () => {
-    expect(TIERS.contact.limit).toBeLessThan(TIERS.ai.limit);
-    expect(TIERS.contact.windowMs).toBeGreaterThan(60_000);
-  });
-
-  // The near-miss this file records over and over: a loose prefix swallowing a sibling
-  // vocabulary. `/api/contact` must not capture a path that merely starts with it.
-  it('does not swallow a sibling path', () => {
-    expect(tiers('GET', '/api/contacts')).toEqual(['read']);
-    expect(tiers('GET', '/api/contact-something')).toEqual(['read']);
   });
 });
 

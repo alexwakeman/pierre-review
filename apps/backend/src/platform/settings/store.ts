@@ -190,7 +190,7 @@ export async function readSettingsRow(
   ctx: ProContext,
   accountId: number,
 ): Promise<SettingsRow | null> {
-  const pro = proSchemaFor(ctx.isPg);
+  const pro = proSchemaFor();
   const rows = (await ctx.db
     .select()
     .from(pro.proSettings)
@@ -350,7 +350,7 @@ export async function writeProSettings(
   accountId: number,
   patch: ProSettingsPatch,
 ): Promise<ProSettings> {
-  const pro = proSchemaFor(ctx.isPg);
+  const pro = proSchemaFor();
   const existing = await readSettingsRow(ctx, accountId);
   const cols = merge(existing, patch);
   const now = new Date();
@@ -414,7 +414,7 @@ export async function readWorkspaceSettingsRow(
   accountId: number,
   workspaceId: number,
 ): Promise<WorkspaceSettingsRow | null> {
-  const pro = proSchemaFor(ctx.isPg);
+  const pro = proSchemaFor();
   const rows = (await ctx.db
     .select({
       sprintCadenceDays: pro.proWorkspaceSettings.sprintCadenceDays,
@@ -590,7 +590,7 @@ export async function writeWorkspaceSettings(
   workspaceId: number,
   patch: WorkspaceProSettingsUpdate,
 ): Promise<WorkspaceProSettings> {
-  const pro = proSchemaFor(ctx.isPg);
+  const pro = proSchemaFor();
   const existing = await readWorkspaceSettingsRow(ctx, accountId, workspaceId);
   const cols = mergeWorkspace(existing, patch);
   const now = new Date();

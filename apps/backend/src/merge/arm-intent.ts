@@ -108,8 +108,7 @@ export async function defaultMergeMethod(
   return null;
 }
 
-/** The update strategy MergeWhenReadyControl stores for a click: a clone-based rebase where it
- *  can run (local), GitHub's native merge-in otherwise. */
+/** The update strategy MergeWhenReadyControl stores for a click: a clone-based rebase. */
 export function clickUpdateStrategy(): 'rebase' | 'merge' {
-  return config.isCloud ? 'merge' : 'rebase';
+  return 'rebase';
 }

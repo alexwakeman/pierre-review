@@ -20,7 +20,6 @@ import type { JiraTransport } from '../tracker/jira/fetch.js';
 const DB_PATH = `${process.env.DATABASE_URL ?? '/tmp/pierre-sonar'}.sonar-db.sqlite`;
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
-process.env.DEPLOYMENT_MODE = 'local';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 let db: any;
@@ -142,7 +141,6 @@ beforeAll(async () => {
     schema,
     accountIdOf: () => 1,
     log: { info() {}, warn() {}, error() {} } as any,
-    isCloud: false,
     transport,
     postDeps,
     isMergeOfHead: async () => false,
@@ -413,7 +411,7 @@ describe('auto-posting after an auto review', () => {
     liveHead = H3;
     analysedSha = H3;
     await app.inject({ method: 'POST', url: `/api/prs/${prA}/sonar/refresh`, payload: {} });
-    const ctx = { db, schema, isPg: false, log: { info() {}, warn() {}, error() {} } } as any;
+    const ctx = { db, schema, log: { info() {}, warn() {}, error() {} } } as any;
     const settings = await import('../review/claude-review/auto-settings.js');
     const { maybeAutoPostSonar } = await import('./post.js');
     const run = () => maybeAutoPostSonar(ctx, { accountId: 1, prId: prA, headSha: H3 }, postDeps);

@@ -18,7 +18,6 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 const DB_PATH = '/tmp/pierre-pr-files-head-route-test.sqlite';
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
-process.env.DEPLOYMENT_MODE = 'local';
 
 const fetchPrFilesPage = vi.fn();
 const resolvePrDiffRefs = vi.fn();

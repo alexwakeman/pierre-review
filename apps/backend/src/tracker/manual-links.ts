@@ -173,7 +173,6 @@ export async function resolveTicketRefs(
   const found = await detectPrTickets(ctx, accountId, pr);
   if (found == null) return { ok: false, status: 400, error: 'NotJira', message: MSG_NO_READING_TRACKER };
   const prepared = prepareTrackerCall(found.access, {
-    cloud: ctx.host.isCloud,
     transport: opts.transport,
     github: githubAccessFor(ctx, accountId),
   });

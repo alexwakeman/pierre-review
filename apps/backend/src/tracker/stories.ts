@@ -123,7 +123,6 @@ export async function resolvePrTickets(
     const first = keys[0] ?? null;
     if (first == null) return null;
     const prepared = prepareTrackerCall(found.access, {
-      cloud: ctx.host.isCloud,
       transport: opts.transport,
       github: githubAccessFor(ctx, accountId),
     });

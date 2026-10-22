@@ -7,14 +7,14 @@ import { getMlStatus, installMl } from '../../ml/runtime.js';
 // (onnxruntime-node + the tokenizer) and the severity model, downloaded into the data directory,
 // progress streamed as SSE. ml/runtime.ts owns the work; this route only relays it.
 //
-// LOCAL ONLY, STRUCTURALLY: registered only when `config.mlLocalEnabled` (false in cloud and under
-// LIMN_ML_DISABLED), and it refuses again on its own if ever reached in cloud.
+// Registered only when `config.mlLocalEnabled` (false under LIMN_ML_DISABLED), and it refuses again
+// on its own if ever reached with it switched off.
 //
 // ⚠ A POST: the disconnect signal is the REPLY socket, never `req.raw.on('close')`. A disconnect
 // only unsubscribes — the download is single-flight, so a reload re-POSTs and joins it.
 export async function mlRuntimeRoutes(app: FastifyInstance): Promise<void> {
   app.post('/api/ml/install', async (_req, reply) => {
-    if (config.isCloud || !config.mlLocalEnabled) {
+    if (!config.mlLocalEnabled) {
       return reply.code(404).send({ error: 'NotFound', message: 'Not available here.' });
     }
     const before = getMlStatus();

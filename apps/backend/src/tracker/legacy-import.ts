@@ -1,4 +1,4 @@
-import { db, isPg } from '../db/client.js';
+import { db } from '../db/client.js';
 
 // THE ONE-TIME MOVE OF THE PLUGIN-ERA TRACKER DATA INTO CORE (apiVersion 23).
 //
@@ -38,24 +38,6 @@ interface Tx {
 const client = (): any => (db as unknown as { $client: any }).$client;
 
 async function withTx<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
-  if (isPg) {
-    const conn = await client().connect();
-    const tx: Tx = {
-      all: async (q, p = []) => (await conn.query(q, p)).rows as Row[],
-      run: async (q, p = []) => (await conn.query(q, p)).rowCount ?? 0,
-    };
-    try {
-      await conn.query('BEGIN');
-      const out = await fn(tx);
-      await conn.query('COMMIT');
-      return out;
-    } catch (err) {
-      await conn.query('ROLLBACK').catch(() => {});
-      throw err;
-    } finally {
-      conn.release();
-    }
-  }
   const sqlite = client();
   // better-sqlite3 is synchronous; every awaited call below resolves without yielding to other I/O.
   const toSqlite = (q: string): string => q.replace(/\$\d+/g, '?');
@@ -79,13 +61,6 @@ async function withTx<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
 }
 
 async function columnsOf(tx: Tx, table: string): Promise<Set<string>> {
-  if (isPg) {
-    const rows = await tx.all(
-      'SELECT column_name FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = $1',
-      [table],
-    );
-    return new Set(rows.map((r) => String(r.column_name)));
-  }
   const exists = await tx.all("SELECT name FROM sqlite_master WHERE type = 'table' AND name = $1", [table]);
   if (exists.length === 0) return new Set();
   const rows = await tx.all(`PRAGMA table_info(${table})`);

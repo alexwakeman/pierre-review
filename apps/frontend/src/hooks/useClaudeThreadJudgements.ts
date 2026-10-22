@@ -16,7 +16,7 @@ import { useAiCapabilities } from './useAiCapabilities.js';
 // review read (a run finishing, the PR's head moving) refreshes this too, with no second list of
 // invalidations to keep in step.
 //
-// Gated on `me.ai.enabled` (cloud registers no agentic routes): off ⇒ no request, no marker.
+// Gated on `me.ai.enabled` (no agentic routes register under LIMN_AI_DISABLED): off ⇒ no request, no marker.
 
 export function claudeThreadJudgementsKey(prId: number): unknown[] {
   return ['claude-review', prId, 'thread-judgements'];

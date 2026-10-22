@@ -23,7 +23,6 @@ import { join } from 'node:path';
 const DB_PATH = join(tmpdir(), 'pierre-sprint-read-test.sqlite');
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
-process.env.DEPLOYMENT_MODE = 'local';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 let db: any;
@@ -279,7 +278,7 @@ describe('a workspace the ticket worker backed off', () => {
       import('../calls.js'),
       import('../worker.js'),
     ]);
-    const prepared = prepareTrackerCall(trackerAccessOf(ctx.host, await readWorkspaceTrackerRow(ctx, 1, wsA)), { cloud: false });
+    const prepared = prepareTrackerCall(trackerAccessOf(ctx.host, await readWorkspaceTrackerRow(ctx, 1, wsA)), {});
     if (!prepared.ok) throw new Error('call did not prepare');
     const now = T0 + 150 * DAY;
     worker.__backOffForTest(1, wsA, worker.accessFingerprint(prepared.call), now + 3_600_000, 'unauthorized');

@@ -686,8 +686,7 @@ export function ChecksTab({
           <Row label="Conflicts">
             <div className="flex flex-wrap items-center gap-2 text-xs font-medium leading-relaxed text-gray-700 dark:text-gray-200">
               {/* ⚠ THE BUTTON IS GATED, THE ROW IS NOT (see the ⚠ two paragraphs up). A reader
-                  without push access — or in cloud, where the resolver's routes are not registered
-                  at all — sees the GitHub link alone, which is exactly what this row was before
+                  without push access sees the GitHub link alone, which is exactly what this row was before
                   the button existed. HIDE, never disable. And nothing here fetches:
                   `ResolveConflictsButton` decides from the resolved verdict, the synced
                   `viewerCanPush` and the App-root ['me'] cache. */}

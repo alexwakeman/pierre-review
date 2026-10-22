@@ -100,7 +100,7 @@ export async function readPrAnnotationRows(
   prId: number,
   kinds?: readonly string[],
 ): Promise<AnnotationRow[]> {
-  const t = proSchemaFor(ctx.isPg).prCommentAnnotations;
+  const t = proSchemaFor().prCommentAnnotations;
   const where =
     kinds && kinds.length > 0
       ? and(eq(t.accountId, accountId), eq(t.prId, prId), inArray(t.kind, [...kinds]))
@@ -116,7 +116,7 @@ export async function readAnnotation(
   targetKind: string,
   targetId: number,
 ): Promise<AnnotationRow | null> {
-  const t = proSchemaFor(ctx.isPg).prCommentAnnotations;
+  const t = proSchemaFor().prCommentAnnotations;
   const rows = (await ctx.db
     .select(ROW_COLUMNS(t))
     .from(t)
@@ -153,7 +153,7 @@ export interface UpsertArgs {
 
 /** The single writer for `pr_comment_annotations`. */
 export async function upsertAnnotation(ctx: ProContext, a: UpsertArgs): Promise<void> {
-  const t = proSchemaFor(ctx.isPg).prCommentAnnotations;
+  const t = proSchemaFor().prCommentAnnotations;
   const set = {
     repoId: a.repoId,
     prId: a.prId,

@@ -1,1 +1,0 @@
-ALTER TABLE "repos" ADD COLUMN "viewer_permission" text;

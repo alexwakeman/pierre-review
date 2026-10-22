@@ -164,7 +164,7 @@ const corePullRequests = sqliteTable('pull_requests', {
   state: text('state'),
 });
 
-const host = { version: 'test', deploymentMode: 'local' as const, isCloud: false };
+const host = { version: 'test' };
 
 let app: FastifyInstance;
 let sqlite: Database.Database;
@@ -219,7 +219,6 @@ beforeAll(async () => {
 
   ctx = {
     db: drizzle(sqlite),
-    isPg: false,
     host,
     accountIdOf: () => ACCOUNT,
     defaultWorkspaceId: async () => WS_NO_TOKEN,

@@ -24,7 +24,7 @@ import { api } from '../api/client.js';
 // the cache policy.
 export const DETAIL_GC_TIME = 1000 * 60 * 45;
 
-// PR / thread detail carries the bulky text that, in cloud mode, is hydrated on
+// PR / thread detail carries the bulky text that, under lean storage, is hydrated on
 // demand from GitHub and persisted to IndexedDB (see lib/queryPersist.ts). We mark
 // it `staleTime: Infinity` so an already-fetched detail is NEVER refetched on its
 // own — unchanged text is served from the browser with zero network. Freshness is

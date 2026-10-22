@@ -20,7 +20,6 @@ import type { FlowTrendWeek } from '@pierre-review/shared';
 const DB_PATH = `/tmp/pierre-flow-trend-test-${process.pid}.sqlite`;
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
-process.env.DEPLOYMENT_MODE = 'local';
 process.env.WORK_TIMEZONE = 'UTC';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */

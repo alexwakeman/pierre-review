@@ -430,8 +430,7 @@ beforeAll(async () => {
   for (const stmt of migration('0090_linear_links.sql').split('--> statement-breakpoint')) sqlite.exec(stmt);
   ctx = {
     db: drizzle(sqlite),
-    isPg: false,
-    host: { isCloud: false, ...seal },
+    host: { ...seal },
     accountIdOf: () => accountOfRequest,
     defaultWorkspaceId: async (accountId: number) => (accountId === A ? 1 : 90),
     log: { warn: () => {}, info: () => {}, error: () => {} },

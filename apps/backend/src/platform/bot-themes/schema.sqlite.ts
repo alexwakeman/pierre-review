@@ -1,6 +1,6 @@
 // Plugin-owned SQLite schema (local mode) for the Bots "Themes" AI summary — a Haiku qualitative
 // read of what the automated reviewers are flagging over a WORKSPACE's repos in a window.
-// Structural twin: `schema.pg.ts` (same table + column names + nullability). Migrated by the host
+// Migrated by the host
 // via ctx.registerMigrations (the .sql under ../migrations); this module is ONLY the typed query
 // surface.
 import { sql } from 'drizzle-orm';

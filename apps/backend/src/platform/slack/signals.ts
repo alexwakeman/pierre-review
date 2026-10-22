@@ -106,7 +106,7 @@ export async function claimNotice(
   kind: 'merge' | 'review',
   refId: number,
 ): Promise<boolean> {
-  const pro = proSchemaFor(ctx.isPg);
+  const pro = proSchemaFor();
   const t = pro.slackSignalNotices;
   const rows = await ctx.db
     .insert(t)

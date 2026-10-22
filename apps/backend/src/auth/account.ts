@@ -11,11 +11,9 @@ import type {
 import { compactMyTurnSettings } from '@pierre-review/shared';
 import { db, schema } from '../db/client.js';
 import { getGithubTokenAsync } from '../github/auth.js';
-import { decryptToken } from './crypto.js';
 
-// A tenant identity. The non-sensitive view of an `accounts` row (the encrypted
-// token is never carried here). In local mode there is exactly one (id 1,
-// isLocal=true); in cloud mode one per signed-in GitHub user.
+// A tenant identity. The non-sensitive view of an `accounts` row. Limn runs locally, so there is
+// one (id 1, isLocal=true); the accountId columns stay so the data model keeps its scoping.
 export interface Account {
   id: number;
   githubUserId: string;
@@ -92,18 +90,16 @@ let cachedLocalAccount: Account | null = null;
  *
  * A workspace id is the only scope this app has: every scoped read resolves one, repos land in
  * the Default on sync, and reviewer rows key on it. An account with no workspace therefore has
- * no reachable state at all — not an empty board but a resolver with nothing to return — so both
- * account-creation paths below close the gap at the moment the row is created. Migration 0044
- * backfills a Default for every account that existed when it ran; this covers every account
- * created afterwards, which in cloud is all of them.
+ * no reachable state at all — not an empty board but a resolver with nothing to return — so
+ * account resolution closes the gap at startup. Migration 0044 backfills a Default for every
+ * account that existed when it ran.
  *
  * `db/queries.ts` STATICALLY imports `getAccountUserId` from this file, so the import here is
- * DYNAMIC to avoid closing that cycle for the same
- * reason. It costs nothing: both callers are cold (process startup / an OAuth
- * callback) and the module is cached after the first call.
+ * DYNAMIC to avoid closing that cycle. It costs nothing: the caller is cold (process startup)
+ * and the module is cached after the first call.
  *
  * It is deliberately NOT swallowed. `ensureDefaultWorkspace` only throws when the partial unique
- * index `workspaces_one_default` is missing, i.e. migration 0044 never ran — and both callers run
+ * index `workspaces_one_default` is missing, i.e. migration 0044 never ran — and the caller runs
  * `runMigrations()` first. Failing there names the real fault; swallowing it would instead have
  * every later request resolve a scope that does not exist.
  */
@@ -119,7 +115,7 @@ async function ensureAccountWorkspace(accountId: number): Promise<void> {
  *
  * A missing/unauthenticated/offline `gh` is non-fatal — it leaves "you" unknown and
  * triage degrades gracefully to empty. (A failing DB is not: see
- * `ensureAccountWorkspace`.) Local mode only.
+ * `ensureAccountWorkspace`.)
  */
 export async function ensureLocalAccount(): Promise<Account | null> {
   const account = await resolveLocalAccount();
@@ -201,96 +197,12 @@ export function getLocalAccountCached(): Account | null {
  * Measured on the shipping large-PR threshold before this existed: POST 900 → 200 OK with
  * `{threshold: 900}`, then `/api/me` → `{threshold: 1500, isDefault: true}`.
  *
- * A no-op in cloud (there is no cache: `registerAccountContext` reads the row per request) and a
- * no-op for any account that is not the cached one.
+ * A no-op for any account that is not the cached one.
  */
 export async function refreshLocalAccountCache(accountId: number): Promise<void> {
   if (cachedLocalAccount == null || cachedLocalAccount.id !== accountId) return;
   const fresh = await getAccountById(accountId);
   if (fresh) cachedLocalAccount = fresh;
-}
-
-/**
- * Upsert a cloud account from a completed OAuth sign-in (keyed on the GitHub
- * user node id). Re-login refreshes the login/avatar, the encrypted token, and
- * lastLoginAt, and guarantees the account's Default workspace. Returns the account.
- *
- * This is the ONLY path that creates a cloud account, so it is the only place a
- * brand-new tenant can be given the one scope the app has — migration 0044's
- * backfill can only reach accounts that already existed when it ran.
- */
-export async function upsertCloudAccount(input: {
-  githubUserId: string;
-  githubLogin: string;
-  displayName: string | null;
-  avatarUrl: string | null;
-  accessTokenEnc: string;
-}): Promise<Account> {
-  const { accounts } = schema;
-  const now = new Date();
-  const rows = await db
-    .insert(accounts)
-    .values({
-      githubUserId: input.githubUserId,
-      githubLogin: input.githubLogin,
-      displayName: input.displayName,
-      avatarUrl: input.avatarUrl,
-      accessTokenEnc: input.accessTokenEnc,
-      isLocal: false,
-      lastLoginAt: now,
-      // Seed activity at sign-in so the user's repos are eligible on the very next
-      // scheduled sync tick (don't wait for the first heartbeat).
-      lastActiveAt: now,
-    })
-    .onConflictDoUpdate({
-      target: accounts.githubUserId,
-      set: {
-        githubLogin: input.githubLogin,
-        displayName: input.displayName,
-        avatarUrl: input.avatarUrl,
-        accessTokenEnc: input.accessTokenEnc,
-        lastLoginAt: now,
-        lastActiveAt: now,
-      },
-    })
-    .returning()
-    .execute();
-  const account = rowToAccount(rows[0]!);
-  // Before returning: the callback redirects straight to /app, which immediately resolves a
-  // workspace scope. Creating it here (not lazily on that first request) means a sign-in that
-  // cannot produce a usable tenant fails at sign-in, where the error is attributable.
-  await ensureAccountWorkspace(account.id);
-  return account;
-}
-
-// In-memory throttle for the activity stamp below: accountId → last-stamp epoch ms.
-// A loaded SPA is chatty (timeline, polls, heartbeat), so we only touch the DB at
-// most once per window per account.
-const lastActiveStampMs = new Map<number, number>();
-const ACTIVE_STAMP_THROTTLE_MS = 60_000;
-
-/**
- * Record that a loaded frontend for this account just talked to the backend
- * (drives the scheduler's "only sync accounts with an open tab" gate). Throttled
- * in-memory and fire-and-forget — a dropped stamp only means a slightly staler
- * signal, and the next request re-stamps. Cloud-only in practice (the caller gates
- * on isCloud; local has a single always-synced account).
- */
-export function stampAccountActive(accountId: number): void {
-  const now = Date.now();
-  const last = lastActiveStampMs.get(accountId) ?? 0;
-  if (now - last < ACTIVE_STAMP_THROTTLE_MS) return;
-  lastActiveStampMs.set(accountId, now);
-  const { accounts } = schema;
-  void db
-    .update(accounts)
-    .set({ lastActiveAt: new Date() })
-    .where(eq(accounts.id, accountId))
-    .execute()
-    .catch(() => {
-      // Best-effort: roll back the throttle so the next request retries the stamp.
-      lastActiveStampMs.delete(accountId);
-    });
 }
 
 /** Load an account by id. */
@@ -474,30 +386,23 @@ export async function getAccountUserId(
 }
 
 /**
- * Resolve the GitHub access token to use for an account's API calls.
- * - Local account (isLocal): live `gh auth token` (no token stored).
- * - Cloud account: decrypt the stored AES-256-GCM sealed token.
- * Throws if the account is missing or a cloud account has no stored token.
+ * Resolve the GitHub access token to use for an account's API calls: the live `gh auth token`
+ * (nothing is stored). Throws if the account is missing.
  */
 export async function getAccessToken(accountId: number): Promise<string> {
   const { accounts } = schema;
   const rows = await db
-    .select()
+    .select({ id: accounts.id })
     .from(accounts)
     .where(eq(accounts.id, accountId))
     .limit(1)
     .execute();
-  const row = rows[0];
-  if (!row) throw new Error(`account ${accountId} not found`);
+  if (!rows[0]) throw new Error(`account ${accountId} not found`);
   // The ASYNC form: this runs on request paths (PR-detail hydration, repo search, every write
   // action), and the synchronous `gh auth token` it used to call blocked the event loop for
   // 50–300ms per call while forking a child process. Both are now cached with a short TTL and
   // share one in-flight invocation — see github/auth.ts.
-  if (row.isLocal) return getGithubTokenAsync();
-  if (!row.accessTokenEnc) {
-    throw new Error(`account ${accountId} has no stored access token (re-auth needed)`);
-  }
-  return decryptToken(row.accessTokenEnc);
+  return getGithubTokenAsync();
 }
 
 /** Shape an Account as the legacy LocalUser wire type for /api/me. */

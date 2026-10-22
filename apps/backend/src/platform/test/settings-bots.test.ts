@@ -73,7 +73,7 @@ beforeEach(() => {
   raw = sqlite;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const db = drizzle(sqlite) as any;
-  ctx = { db, isPg: false } as unknown as ProContext;
+  ctx = { db } as unknown as ProContext;
 });
 
 // Write the legacy blob straight onto the row (upserting it if this account has none yet).

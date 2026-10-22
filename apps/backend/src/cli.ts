@@ -15,30 +15,17 @@ interface CliOptions {
   open: boolean;
   port?: number;
   db?: string;
-  cloud: boolean;
   help: boolean;
 }
 
 function parseArgs(argv: string[]): CliOptions {
-  const opts: CliOptions = { open: true, cloud: false, help: false };
+  const opts: CliOptions = { open: true, help: false };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     switch (arg) {
       case '--no-open':
         opts.open = false;
         break;
-      case '--cloud':
-        opts.cloud = true;
-        break;
-      case '--mode': {
-        const v = argv[++i];
-        if (v !== 'local' && v !== 'cloud') {
-          console.error('--mode requires `local` or `cloud`');
-          process.exit(1);
-        }
-        opts.cloud = v === 'cloud';
-        break;
-      }
       case '--port': {
         const v = argv[++i];
         const n = v ? Number.parseInt(v, 10) : NaN;
@@ -94,10 +81,6 @@ Options:
   --no-open        Don't open the browser (also honours NO_OPEN env)
   --port <n>       Port to listen on (also PORT env, default 4000)
   --db <path>      SQLite DB path (also DATABASE_URL env)
-  --cloud          Run the deployed (cloud) experience: Postgres + landing page
-                   + GitHub-App OAuth. Requires cloud env (see docs). Equivalent
-                   to DEPLOYMENT_MODE=cloud. Skips the gh-auth pre-check.
-  --mode <m>       'local' (default) or 'cloud'
   -h, --help       Show this help
 
 The old \`pierre-review\` package now only forwards to this one; it will be removed.
@@ -105,15 +88,9 @@ The old \`pierre-review\` package now only forwards to this one; it will be remo
 Your data lives in ~/.limn (LIMN_DATA_DIR overrides). An existing ~/.pierre-review
 is moved there once, on first start.
 
-Prerequisite (local mode):
+Prerequisite:
   Requires the GitHub CLI (https://cli.github.com), authenticated via
   \`gh auth login\`. The dashboard reads your activity using your gh token.
-
-Prerequisite (--cloud):
-  Postgres + a GitHub sign-in method (an OAuth App and/or a GitHub App). See
-  docs/GITHUB-AUTH-SETUP.md. Provide DATABASE_URL, APP_BASE_URL, SESSION_SECRET,
-  ENCRYPTION_KEY, and at least one of GITHUB_OAUTH_CLIENT_ID+SECRET or
-  GITHUB_APP_CLIENT_ID+SECRET.
 `);
 }
 
@@ -244,18 +221,6 @@ async function runStatusCommand(argv: string[]): Promise<void> {
     process.exit(0);
   }
 
-  // status is LOCAL-only — it reads your on-disk SQLite database directly.
-  if (process.env.DEPLOYMENT_MODE === 'cloud') {
-    console.error(
-      '`limn status` is local-only — it reads your local SQLite database.',
-    );
-    process.exit(1);
-  }
-  // Pin local BEFORE the dynamic import: config.ts loads .env files on import, and
-  // process.loadEnvFile never overrides an already-set var — so an .env-declared
-  // DEPLOYMENT_MODE=cloud can't flip status onto the Postgres driver after the guard.
-  process.env.DEPLOYMENT_MODE = 'local';
-
   // ── map flags → env BEFORE any dynamic import (config/db snapshot env on load) ──
   // resolve() the --db flag against the CWD (what the user means by a relative path);
   // config.ts resolves relative paths against the INSTALL dir, so an unresolved value
@@ -292,7 +257,7 @@ async function runStatusCommand(argv: string[]): Promise<void> {
 
 // ── `limn ai install` / `limn ai status` — the AI runtime, from the terminal ──────
 // The same download the app's "Set up AI" button runs (ai/runtime.ts): the pinned Agent SDK and
-// its three peers into ~/.limn/ai-runtime via `npm install --prefix`. Local only.
+// its three peers into ~/.limn/ai-runtime via `npm install --prefix`.
 async function runAiCommand(argv: string[]): Promise<void> {
   const sub = argv[0];
   if (sub !== 'install' && sub !== 'status') {
@@ -307,10 +272,6 @@ Anthropic API key: sign in to Claude Code, or set ANTHROPIC_API_KEY.
 Set LIMN_CLAUDE_PATH to use your installed \`claude\` and skip its bundled copy.
 `);
     process.exit(sub === undefined || sub === '--help' || sub === '-h' ? 0 : 1);
-  }
-  if (process.env.DEPLOYMENT_MODE === 'cloud') {
-    console.error('AI review and fix run on your machine only: npx limn-review');
-    process.exit(1);
   }
   if (process.env.LIMN_AI_DISABLED === 'true') {
     console.error('AI is turned off here (LIMN_AI_DISABLED=true).');
@@ -344,7 +305,7 @@ Set LIMN_CLAUDE_PATH to use your installed \`claude\` and skip its bundled copy.
 
 // ── `limn ml install` / `limn ml status` — local bot-comment scoring ───────────────
 // The same download the app's "Set up" runs (ml/runtime.ts): onnxruntime-node + the tokenizer
-// into ~/.limn/ml-runtime, and the severity model into ~/.limn/ml-models. Local only.
+// into ~/.limn/ml-runtime, and the severity model into ~/.limn/ml-models.
 async function runMlCommand(argv: string[]): Promise<void> {
   const sub = argv[0];
   if (sub !== 'install' && sub !== 'status') {
@@ -357,10 +318,6 @@ Usage:
 It runs on this machine. Nothing is sent anywhere to score a comment.
 `);
     process.exit(sub === undefined || sub === '--help' || sub === '-h' ? 0 : 1);
-  }
-  if (process.env.DEPLOYMENT_MODE === 'cloud') {
-    console.error('Local scoring runs on your machine only: npx limn-review');
-    process.exit(1);
   }
   if (process.env.LIMN_ML_DISABLED === 'true') {
     console.error('Bot comment scoring is turned off here (LIMN_ML_DISABLED=true).');
@@ -435,41 +392,33 @@ async function main(): Promise<void> {
   if (opts.port !== undefined) process.env.PORT = String(opts.port);
   if (opts.db !== undefined) process.env.DATABASE_URL = resolve(opts.db);
   if (opts.open === false) process.env.NO_OPEN = '1';
-  if (opts.cloud) process.env.DEPLOYMENT_MODE = 'cloud';
-  const isCloud = process.env.DEPLOYMENT_MODE === 'cloud';
 
   // Production mode: skip pino-pretty (not shipped) and enable static serving.
   process.env.NODE_ENV ??= 'production';
 
-  if (!isCloud) {
-    // ── local: default the DB to a user-writable home location (mkdir -p) ────
-    // The package dir is read-only for global installs, so never write there.
-    await migrateDataDir();
-    if (!process.env.DATABASE_URL) {
-      process.env.DATABASE_URL = await defaultLocalDbPath();
-    }
-    try {
-      mkdirSync(dirname(process.env.DATABASE_URL), { recursive: true });
-    } catch {
-      /* best-effort; client.ts also mkdirs */
-    }
-
-    // ── pre-check gh auth with a friendly message (contract §6) ─────────────
-    ghAuthPreCheck();
+  // ── default the DB to a user-writable home location (mkdir -p) ────────────
+  // The package dir is read-only for global installs, so never write there.
+  await migrateDataDir();
+  if (!process.env.DATABASE_URL) {
+    process.env.DATABASE_URL = await defaultLocalDbPath();
   }
-  // Cloud mode: no gh pre-check (each account brings its own OAuth token) and no
-  // SQLite home default (DATABASE_URL must be a Postgres URL). config.ts /
-  // assertCloudConfig validate the required cloud env at boot.
+  try {
+    mkdirSync(dirname(process.env.DATABASE_URL), { recursive: true });
+  } catch {
+    /* best-effort; client.ts also mkdirs */
+  }
+
+  // ── pre-check gh auth with a friendly message (contract §6) ─────────────
+  ghAuthPreCheck();
 
   const port = process.env.PORT ? Number.parseInt(process.env.PORT, 10) : 4000;
   const base = `http://localhost:${port}`;
-  // Local goes straight to the app; cloud opens the public landing page.
-  const url = isCloud ? `${base}/` : `${base}/app`;
+  const url = `${base}/app`;
 
   // ── banner ────────────────────────────────────────────────────────────────
   const { LIMN_ASCII, TAGLINE } = await import('./ascii.js');
   console.log(cyan(LIMN_ASCII));
-  console.log(`  ${dim(isCloud ? 'cloud mode — multi-tenant' : TAGLINE)}`);
+  console.log(`  ${dim(TAGLINE)}`);
   console.log('');
   console.log(`  ${cyan('▸')} ${bold(url)}`);
   console.log('');

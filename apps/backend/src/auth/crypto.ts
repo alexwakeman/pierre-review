@@ -1,10 +1,10 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import { config } from '../config.js';
 
-// AES-256-GCM sealing of per-account GitHub access tokens at rest. The key is
-// ENCRYPTION_KEY (32 bytes as 64 hex chars; generate with `openssl rand -hex 32`).
-// Stored form is `iv:tag:ciphertext`, each base64. Tokens are decrypted in-memory
-// per call and NEVER logged.
+// AES-256-GCM sealing of stored secrets (the per-workspace tracker and SonarCloud tokens) at rest.
+// The key is ENCRYPTION_KEY (32 bytes as 64 hex chars; generate with `openssl rand -hex 32`).
+// Stored form is `iv:tag:ciphertext`, each base64. Secrets are decrypted in-memory per call and
+// NEVER logged.
 const ALGO = 'aes-256-gcm';
 
 function key(): Buffer {
@@ -41,11 +41,10 @@ export function decryptToken(enc: string): string {
   ]).toString('utf8');
 }
 
-// Whether sealing is available on this process: ENCRYPTION_KEY is set and is 32 bytes. Always true
-// in cloud (`assertCloudConfig` refuses to boot otherwise); true locally only when the operator set
-// a key. The Pro plugin's optional `host.sealSecret` / `host.openSecret` seam is wired from this, so
-// a plugin-stored secret (the per-workspace Jira token) is sealed wherever a key exists and stored
-// plain only on a local install without one — the same trust as that machine's `gh` token.
+// Whether sealing is available on this process: ENCRYPTION_KEY is set and is 32 bytes (only when
+// the operator set a key). The tracker's `host.sealSecret` / `host.openSecret` are wired from this,
+// so a stored secret is sealed wherever a key exists and stored plain without one — the same trust
+// as that machine's `gh` token.
 export function sealingAvailable(): boolean {
   return Buffer.from(config.encryptionKey, 'hex').length === 32;
 }

@@ -130,7 +130,6 @@ const seedRawTracker = (accountId: number, ws: number, provider: string, baseUrl
 const makeCtx = (): ProContext =>
   ({
     db: drizzle(sqlite, { schema: { ...settingsSchema } }),
-    isPg: false,
     log: { warn: () => {}, error: () => {}, info: () => {} },
     schema: { workspaceRepos: coreWorkspaceRepos },
   }) as unknown as ProContext;

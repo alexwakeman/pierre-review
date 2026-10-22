@@ -1,6 +1,6 @@
 import { config } from '../config.js';
 import { accountIdOf } from '../api/plugins/auth.js';
-import { db, schema, isPg } from '../db/client.js';
+import { db, schema } from '../db/client.js';
 import { decryptToken, encryptToken, sealingAvailable } from '../auth/crypto.js';
 import type { TrackerContext, TrackerLog } from './context.js';
 
@@ -18,18 +18,16 @@ export function buildTrackerContext(log: TrackerLog = consoleLog): TrackerContex
   return {
     log,
     host: {
-      isCloud: config.isCloud,
-      // Sealing whenever a key exists (always in cloud). Same functions the plugin was handed.
+      // Sealing whenever ENCRYPTION_KEY is set.
       ...(sealingAvailable() ? { sealSecret: encryptToken, openSecret: decryptToken } : {}),
     },
     accountIdOf,
     db,
     schema: schema as unknown as Record<string, unknown> as TrackerContext['schema'],
-    isPg,
     // Dynamic: db/queries.ts imports the PR-detail enricher, which imports this module.
     defaultWorkspaceId: async (accountId) => (await import('../db/queries.js')).ensureDefaultWorkspace(accountId),
-    // GitHub Issues reads with the ACCOUNT's own token, resolved per call (local: `gh auth token`;
-    // cloud: the sealed per-user token). ⚠ No token is held here between calls.
+    // GitHub Issues reads with the account's token, resolved per call (`gh auth token`).
+    // ⚠ No token is held here between calls.
     github: {
       graphql: async (accountId, query, variables) => {
         const [{ getAccessToken }, { getGraphqlClientFor, graphqlTolerant }] = await Promise.all([

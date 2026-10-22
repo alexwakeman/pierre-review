@@ -36,7 +36,6 @@ import type { AgentContext } from '../agent-context.js';
 const DB_PATH = '/tmp/pierre-auto-review-settings.sqlite';
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
-process.env.DEPLOYMENT_MODE = 'local';
 
 let closeDb: (() => void) | undefined;
 let ctx: AgentContext;
@@ -67,7 +66,6 @@ beforeAll(async () => {
   ctx = {
     db: client.db,
     schema: client.schema,
-    isPg: false,
     accountIdOf: () => 1,
     log: { warn: () => {}, info: () => {}, error: () => {} },
   } as any as AgentContext;

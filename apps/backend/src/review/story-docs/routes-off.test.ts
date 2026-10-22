@@ -12,7 +12,6 @@ describe('story docs routes with agentic AI off', () => {
   it('404 on both routes', async () => {
     vi.resetModules();
     process.env.LIMN_AI_DISABLED = 'true';
-    process.env.DEPLOYMENT_MODE = 'local';
     process.env.DISABLE_SCHEDULER = 'true';
     process.env.DATABASE_URL = '/tmp/pierre-storydocs-off.sqlite';
     const { registerStoryDocsRoutes } = await import('./routes.js');

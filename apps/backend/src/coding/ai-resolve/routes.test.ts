@@ -4,7 +4,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 
 process.env.DATABASE_URL = '/tmp/pierre-ai-resolve-routes-test.sqlite';
-process.env.DEPLOYMENT_MODE = 'local';
 process.env.DISABLE_SCHEDULER = 'true';
 
 type PrCtx = { state: string; viewerPermission: string | null } | null;

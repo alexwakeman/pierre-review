@@ -22,7 +22,6 @@ import type { AgentContext as ProContext } from '../agent-context.js';
 const DB_PATH = '/tmp/pierre-claude-review-chat.sqlite';
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
-process.env.DEPLOYMENT_MODE = 'local';
 
 let db: any;
 let schema: any;
@@ -65,9 +64,8 @@ beforeAll(async () => {
   ctx = {
     db,
     schema,
-    isPg: false,
     runTransaction: client.runTransaction,
-    host: { isCloud: false },
+    host: {},
     log: { warn: () => {}, info: () => {}, error: () => {} },
     recordAiUsage: async (row: any) => {
       usage.push(row);
@@ -327,9 +325,9 @@ describe('routes', () => {
     expect(wrongFinding.statusCode).toBe(404);
   });
 
-  it('registers nothing in cloud or without the seam', async () => {
+  it('registers nothing without the seam', async () => {
     const { default: Fastify } = await import('fastify');
-    for (const over of [{ host: { isCloud: true } }, { review: { ...ctx.review, chat: undefined } }]) {
+    for (const over of [{ review: { ...ctx.review, chat: undefined } }]) {
       const app = Fastify({ logger: false });
       chat.registerClaudeReviewChatRoutes(app, { ...ctx, ...over, accountIdOf: () => 1 } as any);
       await app.ready();

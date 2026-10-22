@@ -22,7 +22,7 @@ export function prepareTrackerCall(
   access: WorkspaceTrackerAccess,
   // `github`: the account's GitHub access (`githubAccessFor`) — required by GitHub Issues, ignored
   // by every other provider.
-  opts: { cloud: boolean; transport?: JiraTransport; github?: GithubCallAccess },
+  opts: { transport?: JiraTransport; github?: GithubCallAccess },
 ): PreparedCall {
   const adapter = maybeAdapterFor(access.issue.provider);
   if (adapter?.reader == null || access.issue.provider == null) {
@@ -71,7 +71,9 @@ export function prepareTrackerCall(
         email: access.email,
         token: access.token.state === 'ok' ? access.token.token : '',
       },
-      policy: { cloud: opts.cloud },
+      // The public-address guard (`policy.cloud`) is for a hosted server; this app runs on the
+      // reader's own machine, where an intranet Jira is a legitimate address.
+      policy: { cloud: false },
       transport: opts.transport,
       ...(access.issue.provider === 'github' ? { github: opts.github } : {}),
     },

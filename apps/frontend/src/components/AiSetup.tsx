@@ -1,7 +1,6 @@
 import type { ReactNode } from 'react';
 import {
   AI_AUTH_LINE,
-  AI_CLOUD_NOTE,
   AI_SETUP_LABEL,
   useAiCapabilities,
   useAiRuntimeInstall,
@@ -72,11 +71,3 @@ export function AiRuntimeSetup(): JSX.Element | null {
   );
 }
 
-/** The hosted app's one line where an agentic tab used to be. Renders nothing locally. */
-export function AiCloudNote({ className = '' }: { className?: string }): JSX.Element | null {
-  const ai = useAiCapabilities();
-  if (ai.enabled || !ai.cloud) return null;
-  return (
-    <span className={`text-xs text-gray-600 dark:text-gray-300 ${className}`}>{AI_CLOUD_NOTE}</span>
-  );
-}

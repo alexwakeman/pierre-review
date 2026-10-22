@@ -15,7 +15,6 @@ import type { AgentContext } from '../agent-context.js';
 const DB_PATH = '/tmp/pierre-claude-review-ci-failures-db.sqlite';
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
-process.env.DEPLOYMENT_MODE = 'local';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 let db: any;
@@ -100,7 +99,6 @@ beforeAll(async () => {
   ctx = {
     db,
     schema,
-    isPg: false,
     runTransaction: client.runTransaction,
     recordAiUsage: async () => {},
     log: { info: () => {}, warn: () => {}, error: () => {} },

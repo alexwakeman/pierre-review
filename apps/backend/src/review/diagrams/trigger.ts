@@ -82,7 +82,7 @@ const defaultDeps: TriggerDeps = {
   },
   dailyCap: config.sequenceDiagramDailyCap,
   // The ONE agentic switch (config.aiEnabled); the routes and the manager check it too.
-  enabled: config.aiEnabled && !config.isCloud,
+  enabled: config.aiEnabled,
 };
 
 /** The wire members of a story (also the manager's, kept here so the rules need no manager). */

@@ -2014,7 +2014,7 @@ if (existsSync(join(PRO_DIR, 'migrations'))) {
   // 1. The plugin's migrations, via the REAL core migrator (pro_migrations bookkeeping
   //    included). This is the one sanctioned raw-$client DDL path.
   const { runPluginMigrations } = await import('../src/platform/migrate.js');
-  await runPluginMigrations(join(PRO_DIR, 'migrations'), join(PRO_DIR, 'migrations-pg'));
+  await runPluginMigrations(join(PRO_DIR, 'migrations'));
 
   // The plugin tables aren't in the core drizzle schema, so seed them through the raw
   // better-sqlite3 handle (script-only; the app itself always goes through drizzle).

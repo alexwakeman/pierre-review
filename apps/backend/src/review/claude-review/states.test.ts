@@ -21,7 +21,6 @@ import { eq as eqOp } from 'drizzle-orm';
 const DB_PATH = '/tmp/pierre-claude-review-states.sqlite';
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
-process.env.DEPLOYMENT_MODE = 'local';
 
 // The manager's live auto-review holds, per (account 1) PR id. Another account sees none.
 const holds = new Map<number, 'queued' | 'running'>();
@@ -79,7 +78,6 @@ beforeAll(async () => {
   ctx = {
     db,
     schema,
-    isPg: false,
     runTransaction: client.runTransaction,
     log: { warn: () => {}, info: () => {}, error: () => {} },
     // The account comes from a test header so one app serves both tenants.

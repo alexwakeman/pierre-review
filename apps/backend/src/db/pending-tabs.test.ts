@@ -29,7 +29,6 @@ import { PENDING_LIMITS } from '@pierre-review/shared';
 const DB_PATH = '/tmp/pierre-pending-tabs-test.sqlite';
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
-process.env.DEPLOYMENT_MODE = 'local';
 
 // The one PR the (mocked) CODEOWNERS lookup can name a reviewer for — everything else gets none.
 let suggestFor = -1;

@@ -38,7 +38,6 @@ import type {
   AdvisorProfilePutBody,
   AdvisorRefineBody,
   AdvisorRefineResponse,
-  AuthProvidersResponse,
   AddReviewCommentBody,
   AddReviewCommentResult,
   RequestReviewersBody,
@@ -291,7 +290,7 @@ async function handle<T>(res: Response): Promise<T> {
 }
 
 function get<T>(url: string): Promise<T> {
-  // `credentials: 'same-origin'` sends the sealed session cookie in cloud mode;
+  // `credentials: 'same-origin'`;
   // it's harmless (and a no-op) in local mode where there is no cookie.
   return fetch(url, { credentials: 'same-origin' }).then((r) => handle<T>(r));
 }
@@ -874,16 +873,6 @@ export const api = {
     fetch('/api/activity/feed/mark-seen', jsonBody('POST')).then((r) =>
       handle<{ feedLastSeenAt: string }>(r),
     ),
-  // Which GitHub sign-in providers this deployment offers. Read signed-OUT by the SignInGate
-  // and signed-IN by the Settings "GitHub App" section (which needs `appSlug` for the install
-  // link). Exempt from the cloud auth gate, so it resolves in both states.
-  authProviders: () => get<AuthProvidersResponse>('/api/auth/providers'),
-  // Cross-org benchmark consent (cloud-only): opt in/out of contributing aggregate weekly
-  // review-bot stats. Opting in seeds contributions server-side; opting out deletes them.
-  setBenchmarkConsent: (optIn: boolean) =>
-    fetch('/api/me/benchmark-consent', jsonBody('POST', { optIn })).then((r) =>
-      handle<{ status: string; benchmarkOptIn: boolean }>(r),
-    ),
   // The account's large-PR threshold, in lines of CODE churn. ACCOUNT-GRAINED — there is no
   // `?workspace=`, and the backend strips an unknown key rather than rejecting it, so a caller
   // that "scoped" this would get a silent account-wide write. `null` RESETS to the product
@@ -1291,9 +1280,6 @@ export const api = {
     ).then((r) => handle<{ sent: boolean; message?: string }>(r)),
 
   me: () => get<MeResponse>('/api/me'),
-  // Cloud-mode sign-out. 204 No Content; resolves once the session is cleared.
-  logout: (): Promise<Response> =>
-    fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' }),
   myTurn: () => get<MyTurnResponse>('/api/my-turn'),
   // Take one My Turn subject off the plate until something newer happens on it, and bring it back.
   // A PR, or a repository for a red default branch; the id is in the path.

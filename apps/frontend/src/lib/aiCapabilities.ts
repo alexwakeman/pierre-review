@@ -10,14 +10,11 @@ import type { MeResponse } from '@pierre-review/shared';
  * exists — hiding it until a credential is detected would hide it from exactly the people who have
  * not set one up yet, and the detection is a heuristic anyway (the run is the real check).
  *
- * `enabled: false` covers two cases the SPA tells apart with `cloud`: the hosted app (show one "runs
- * on your machine" line where the tab used to be) and a local `LIMN_AI_DISABLED=true` (show nothing).
- * An older server with no `ai` block reads as disabled.
+ * `enabled: false` is `LIMN_AI_DISABLED=true` (show nothing). An older server with no `ai` block
+ * reads as disabled.
  */
 export interface AiCapabilities {
   enabled: boolean;
-  /** Hosted deployment — agentic AI never runs there; show `AI_CLOUD_NOTE` instead. */
-  cloud: boolean;
   runtime: MeResponse['ai']['runtime'];
   runtimeMessage: string | null;
   auth: MeResponse['ai']['auth'];
@@ -26,7 +23,6 @@ export interface AiCapabilities {
   ready: boolean;
 }
 
-export const AI_CLOUD_NOTE = 'Review and fix run on your machine: npx limn-review';
 export const AI_AUTH_LINE = 'Sign in to Claude Code or set ANTHROPIC_API_KEY';
 export const AI_SETUP_LABEL = 'Set up AI (one-time ~110 MB download)';
 
@@ -37,7 +33,6 @@ export function aiCapabilitiesOf(me: MeResponse | undefined): AiCapabilities {
   const auth = ai?.auth ?? 'none';
   return {
     enabled,
-    cloud: me?.deploymentMode === 'cloud',
     runtime,
     runtimeMessage: ai?.runtimeMessage ?? null,
     auth,

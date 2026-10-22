@@ -166,7 +166,7 @@ export function commentBurstRoute(input: {
 
 /** Can auto review run in this process at all? The Settings toggle and the sweeper both ask. */
 export function autoReviewAvailable(ctx: AgentContext): boolean {
-  return AGENTIC_AI_ENABLED && !ctx.host.isCloud;
+  return AGENTIC_AI_ENABLED;
 }
 
 /** 00:00 UTC of the day `nowMs` falls in — the daily cap's day. */

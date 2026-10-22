@@ -650,7 +650,7 @@ async function loadRows(
   accountId: number,
   workspaceId: number,
 ): Promise<ReportRow[]> {
-  const pro = proSchemaFor(ctx.isPg);
+  const pro = proSchemaFor();
   return (await ctx.db
     .select()
     .from(pro.workspacePeriodReports)
@@ -814,7 +814,7 @@ interface PersistInput {
 }
 
 async function persistReport(ctx: ProContext, input: PersistInput): Promise<void> {
-  const pro = proSchemaFor(ctx.isPg);
+  const pro = proSchemaFor();
   const values = {
     accountId: input.accountId,
     workspaceId: input.workspaceId,

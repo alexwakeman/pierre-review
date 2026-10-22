@@ -13,7 +13,6 @@ import { PR_REF_RESOLVE_MAX, type ResolvePrRefsResponse } from '@pierre-review/s
 const DB_PATH = '/tmp/pierre-pr-refs-route.sqlite';
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
-process.env.DEPLOYMENT_MODE = 'local';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 let closeDb: (() => Promise<void> | void) | undefined;

@@ -20,7 +20,6 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 const DB_PATH = '/tmp/pierre-review-request-history-test.sqlite';
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
-process.env.DEPLOYMENT_MODE = 'local';
 
 const gqlCalls: { ids: string[] }[] = [];
 let gqlAnswer: (ids: string[]) => unknown = () => ({ nodes: [] });

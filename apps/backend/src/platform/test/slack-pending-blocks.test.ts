@@ -29,7 +29,7 @@ import {
 
 const BASE = 'https://limn.example';
 const ctx = (appWebUrl: string | undefined = BASE): ProContext =>
-  ({ host: { version: '0', deploymentMode: 'local', isCloud: false, appWebUrl } }) as unknown as ProContext;
+  ({ host: { version: '0', appWebUrl } }) as unknown as ProContext;
 const mk = (text: string) => ({ type: 'section', text: { type: 'mrkdwn', text, verbatim: true } });
 const texts = (blocks: unknown[]): string[] =>
   (blocks as Array<{ text: { text: string } }>).map((b) => b.text.text);

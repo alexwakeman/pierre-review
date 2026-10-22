@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { config } from '../config.js';
 import { accountIdOf } from '../api/plugins/auth.js';
-import { db, schema, runTransaction, isPg } from '../db/client.js';
+import { db, schema, runTransaction } from '../db/client.js';
 import * as hostQueries from '../db/queries.js';
 // Period-over-period reporting (apiVersion 20). The metric vector and the coverage rule live in
 // their own core module — window-pure SQL that deliberately shares nothing with queries.ts's
@@ -66,8 +66,6 @@ export async function bindPlatform(app: FastifyInstance): Promise<void> {
     log: app.log,
     host: {
       version: process.env.npm_package_version ?? '0.0.0',
-      deploymentMode: config.deploymentMode,
-      isCloud: config.isCloud,
       // The ONE spelling of the SPA's BROWSER-FACING base (config.ts `appWebUrl`). Passed across
       // the seam so the plugin never re-derives it from the environment — see the contract's note.
       //
@@ -84,9 +82,7 @@ export async function bindPlatform(app: FastifyInstance): Promise<void> {
     db: db as unknown as ProDb,
     schema,
     runTransaction: runTransaction as unknown as ProContext['runTransaction'],
-    isPg,
-    registerMigrations: (sqliteFolder, pgFolder) =>
-      runPluginMigrations(sqliteFolder, pgFolder),
+    registerMigrations: (folder) => runPluginMigrations(folder),
     registerRetention: (handler) => registerRetentionHandler(handler),
     registerAccountErasure: (handler) => registerAccountErasureHandler(handler),
     // The plugin's comparison-window resolver becomes core's reporting window (db/reporting-window.ts).
@@ -273,16 +269,9 @@ export async function bindPlatform(app: FastifyInstance): Promise<void> {
       commitFilesAndOpenPr: (prArgs) => commitFilesAndOpenPr(prArgs),
     },
     // (No `review` seam since apiVersion 22: Claude Review is core — review/agent-context.ts.)
-    // The merge-conflict resolver's per-hunk seam — still LOCAL ONLY, but ⚠ NO LONGER FOR THE
-    // REASON IT WAS. The original argument was that cloud had no session to address, because the
-    // six core resolver routes were registered behind `!config.isCloud`. They are now registered
-    // UNCONDITIONALLY and cloud sessions are real, so that argument is retired: this is now an
-    // OPEN PRODUCT DECISION about a paid AI route, not a structural impossibility. Enabling it in
-    // cloud means a per-hunk LLM call billed per tenant, so it wants the same deliberate gating
-    // the other advanced-AI surfaces get — decide it there, not by deleting this line.
-    // (The plugin's per-hunk conflict suggestion that read this seam is REMOVED; the optional
-    // seam stays on the contract, unread, so `apiVersion` did not move.)
-    conflicts: config.isCloud ? undefined : makeConflictSeam(),
+    // The merge-conflict resolver's per-hunk seam. (The plugin's per-hunk conflict suggestion that
+    // read this seam is REMOVED; the optional seam stays on the contract, unread.)
+    conflicts: makeConflictSeam(),
   };
 
   await registerPlatform(app, ctx);

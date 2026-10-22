@@ -26,7 +26,6 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 const DB_PATH = '/tmp/pierre-pr-settle-test.sqlite';
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
-process.env.DEPLOYMENT_MODE = 'local';
 
 /** What the stubbed GitHub read writes into the PR row on each call — a queue, last one sticks. */
 let githubAnswers: Array<Record<string, unknown> | 'throw'> = [];

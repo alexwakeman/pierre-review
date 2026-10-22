@@ -1,21 +1,9 @@
-import { existsSync } from 'node:fs';
-import { resolve } from 'node:path';
 import Fastify, { LogController, type FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
 import fastifyStatic from '@fastify/static';
-import {
-  config,
-  intFromEnv,
-  serverServesSpa,
-  spaLandingDir,
-  spaPublicDir,
-} from './config.js';
+import { config, intFromEnv, serverServesSpa, spaPublicDir } from './config.js';
 import { registerErrorHandler } from './api/plugins/error-handler.js';
-import {
-  registerAccountContext,
-  registerAuthGate,
-  registerSession,
-} from './api/plugins/auth.js';
+import { registerAccountContext } from './api/plugins/auth.js';
 import {
   corsOriginDelegate,
   registerCrossOriginGuard,
@@ -23,7 +11,6 @@ import {
   registerSecurityHeaders,
 } from './api/plugins/security.js';
 import { registerRateLimit } from './api/plugins/rate-limit.js';
-import { authRoutes } from './api/routes/auth.js';
 import { healthRoutes } from './api/routes/health.js';
 import { aiRuntimeRoutes } from './api/routes/ai-runtime.js';
 import { mlRuntimeRoutes } from './api/routes/ml-runtime.js';
@@ -48,11 +35,9 @@ import { dailyBriefRoutes } from './api/routes/daily-brief.js';
 import { dependencyMergeRoutes } from './api/routes/dependency-merge.js';
 import { flowRoutes } from './api/routes/flow.js';
 import { sprintStoriesRoutes } from './api/routes/sprint-stories.js';
-import { contactRoutes } from './api/routes/contact.js';
 import { botTriageRoutes } from './api/routes/bot-triage.js';
 import { mlLabelRoutes } from './api/routes/ml-labels.js';
 import { reactionRoutes } from './api/routes/reactions.js';
-import { webhookRoutes } from './api/routes/webhooks.js';
 
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
@@ -67,16 +52,13 @@ export async function buildApp(): Promise<FastifyInstance> {
     logController: new LogController({
       disableRequestLogging: process.env.NODE_ENV === 'production',
     }),
-    // CLOUD ONLY. Railway terminates TLS and forwards, so without this every
-    // request's `req.ip` is the proxy's and `req.protocol` is http — which would
-    // collapse the rate limiter's IP fallback into a single shared bucket. It is
-    // deliberately NOT enabled locally: there is no proxy there, so trusting
-    // X-Forwarded-For would let any client choose its own rate-limit key.
-    trustProxy: config.isCloud,
+    // No proxy sits in front of a local server, so X-Forwarded-For is never trusted (it
+    // would let any client choose its own rate-limit key).
+    trustProxy: false,
     // Cap request bodies. Fastify's default is already 1 MiB; pinning it here makes
     // it an explicit, reviewable decision rather than a framework default, and
     // 256 KiB is well above the largest legitimate body (a review draft, a settings
-    // object, a webhook delivery) while shrinking the memory a flood can pin.
+    // object) while shrinking the memory a flood can pin.
     bodyLimit: intFromEnv('BODY_LIMIT_BYTES', 256 * 1024),
     // Refuse a request whose headers never finish arriving (slowloris) and one whose
     // body stalls mid-stream. Fastify/Node default both to effectively unbounded.
@@ -99,7 +81,6 @@ export async function buildApp(): Promise<FastifyInstance> {
         paths: [
           'req.headers.authorization',
           'req.headers.cookie',
-          'req.headers["x-hub-signature-256"]',
           'res.headers["set-cookie"]',
           'err.config.headers',
           'err.request.headers',
@@ -109,7 +90,6 @@ export async function buildApp(): Promise<FastifyInstance> {
           'headers.cookie',
           '*.access_token',
           '*.accessToken',
-          '*.accessTokenEnc',
           '*.client_secret',
           '*.clientSecret',
           '*.apiKey',
@@ -128,12 +108,11 @@ export async function buildApp(): Promise<FastifyInstance> {
   });
 
   // Security response headers (CSP per surface, nosniff, frame-deny, referrer,
-  // permissions) plus — cloud only — HSTS and the www → apex canonical 301.
-  // Registered FIRST so the headers ride on every response, including that redirect,
-  // the 404/error bodies and the static assets. See api/plugins/security.ts.
+  // permissions). Registered FIRST so the headers ride on every response, including
+  // redirects, the 404/error bodies and the static assets. See api/plugins/security.ts.
   registerSecurityHeaders(app);
 
-  // LOCAL only: reject a request whose Host header isn't loopback. The server binds
+  // Reject a request whose Host header isn't loopback. The server binds
   // 127.0.0.1, so nothing on the network can reach it — but a DNS-rebinding attack
   // makes an attacker-controlled hostname resolve there, at which point their page
   // becomes same-origin and every origin check above stops helping. A rebound request
@@ -141,32 +120,21 @@ export async function buildApp(): Promise<FastifyInstance> {
   // has deliberately bound a non-loopback HOST.
   registerHostGuard(app);
 
-  // CORS: an allowlist in BOTH modes now. Cloud = the deployment's own origin, with
-  // credentials so the session cookie rides along. Local = any LOOPBACK origin on any
-  // port (dev 5173/5174, the demo stack 5273, the packaged CLI on its own port) —
-  // previously this was `origin: true`, which reflected ANY origin. Combined with
-  // local mode having no auth at all (every request resolves to the single local
-  // account), that let any page the developer happened to have open read their whole
-  // synced GitHub dataset with a cross-origin fetch. See security.ts.
-  await app.register(cors, {
-    origin: corsOriginDelegate,
-    credentials: config.isCloud,
-  });
+  // CORS: an allowlist of LOOPBACK origins on any port (dev 5173, the demo stack 5273, the
+  // packaged CLI on its own port) — previously this was `origin: true`, which reflected ANY
+  // origin. Combined with there being no auth at all (every request resolves to the single local
+  // account), that let any page the developer happened to have open read their whole synced
+  // GitHub dataset with a cross-origin fetch. See security.ts.
+  await app.register(cors, { origin: corsOriginDelegate, credentials: false });
 
   // Reject state-changing /api calls that arrive from a foreign origin. NOT redundant
   // with CORS: CORS only decides whether the attacker's page may READ the response —
-  // a simple cross-origin POST is still delivered and still executes. Belt to
-  // SameSite=Lax's braces in cloud; in local mode it is the only thing standing
-  // between a drive-by page and an authenticated write.
+  // a simple cross-origin POST is still delivered and still executes. It is the only thing
+  // standing between a drive-by page and an authenticated write.
   registerCrossOriginGuard(app);
 
-  // Cloud only: parse the sealed session cookie BEFORE the account-context hook
-  // reads it.
-  if (config.isCloud) await registerSession(app);
-
-  // Attach `request.account` to every request (local account in local mode; the
-  // session's account in cloud mode). Must run after CORS/session and before the
-  // route registrations so every handler can read `request.account` / accountIdOf().
+  // Attach `request.account` to every request (the local account). Must run after CORS and
+  // before the route registrations so every handler can read `request.account` / accountIdOf().
   registerAccountContext(app);
 
   // Rate limiting. AFTER registerAccountContext so buckets key on the account id (the
@@ -176,52 +144,24 @@ export async function buildApp(): Promise<FastifyInstance> {
   // api/plugins/rate-limit.ts.
   registerRateLimit(app);
 
-  // Cloud only: 401 unauthenticated /api data routes (after account context).
-  if (config.isCloud) registerAuthGate(app);
-
-  // Single-process production mode: serve the built SPA (under /app) and, in
-  // cloud mode, the landing page (at /) when the bundled assets exist next to the
-  // compiled server (release/dist → release/public + release/public-landing). In
-  // dev there is no sibling public dir, so this no-ops and Vite serves the UI by
-  // proxying /api back to this server — dev stays unchanged.
-  // ⚠ THESE THREE COME FROM config.ts, NOT AN INLINE existsSync. `serverServesSpa` is also what
-  // decides `config.appWebUrl` — whether a deep link handed to a PERSON may point at this origin
-  // at all — so the two answers must be the same answer. Spelled twice they could drift silently:
-  // a digest link that 404s, or a static root that never registers.
-  const publicDir = spaPublicDir;
-  const publicLandingDir = spaLandingDir;
-  const serveSpa = serverServesSpa;
-  const serveLanding =
-    config.isCloud && existsSync(resolve(publicLandingDir, 'index.html'));
-  if (serveSpa) {
+  // Single-process production mode: serve the built SPA (under /app) when the bundled assets
+  // exist next to the compiled server (release/dist → release/public). In dev there is no
+  // sibling public dir, so this no-ops and Vite serves the UI by proxying /api back to this
+  // server — dev stays unchanged.
+  // ⚠ `serverServesSpa` COMES FROM config.ts, NOT AN INLINE existsSync: it also decides
+  // `config.appWebUrl` — whether a deep link handed to a PERSON may point at this origin at all —
+  // so the two answers must be the same answer.
+  if (serverServesSpa) {
     // SPA built with base '/app/', so its assets live under /app/.
     await app.register(fastifyStatic, {
-      root: publicDir,
+      root: spaPublicDir,
       prefix: '/app/',
       wildcard: false,
     });
   }
-  if (serveLanding) {
-    // Landing built with base '/', served at the origin root (assets at /assets).
-    await app.register(fastifyStatic, {
-      root: publicLandingDir,
-      prefix: '/',
-      wildcard: false,
-      decorateReply: !serveSpa,
-    });
-  }
 
-  // The single not-found handler routes /app → SPA, / → landing (cloud) or → /app
-  // (local), and unknown /api → JSON 404.
-  registerErrorHandler(app, {
-    serveSpa,
-    serveLanding,
-    publicDir,
-    publicLandingDir,
-  });
-
-  // OAuth sign-in routes (cloud only; ungated by the auth gate above).
-  if (config.isCloud) await app.register(authRoutes);
+  // The single not-found handler routes /app → SPA, / → /app, and unknown /api → JSON 404.
+  registerErrorHandler(app, { serveSpa: serverServesSpa, publicDir: spaPublicDir });
 
   await app.register(healthRoutes);
   await app.register(repoRoutes);
@@ -233,18 +173,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(timelineRoutes);
   await app.register(prRoutes);
   await app.register(prRefRoutes);
-  // Merge-conflict resolver (CORE / free, BOTH MODES). Registered UNCONDITIONALLY — it used to be
-  // local-only, on the argument that the cloud image has no clone directory and no git. Both are
-  // now false: the image ships git, and `config.cloneDir` resolves to the container's ephemeral
-  // filesystem in cloud (config.ts `defaultCloneDir`), swept by the same janitor that runs
-  // locally. There is still no CONFLICT_RESOLVER_ENABLED and there must not be one: a per-handler
-  // env check looks like a gate while being one Railway variable away from not being one.
-  //
-  // Nothing about the routes changed for multi-tenancy, because nothing about them was ever
-  // single-tenant: `getPrWriteContext(id, accountId)` answers 404 for another tenant's id and
-  // every git fetch carries the CALLER'S OWN token (review/clone-manager.ts `fetchRefIntoClone`),
-  // so the shared clone cache holds objects, never permission. `conflicts-cloud.test.ts` is the
-  // proof and asserts all three.
+  // Merge-conflict resolver. Registered unconditionally.
   await app.register(conflictRoutes);
   await app.register(threadRoutes);
   await app.register(meRoutes);
@@ -283,33 +212,21 @@ export async function buildApp(): Promise<FastifyInstance> {
   // authoritative post-write groups. Registered in both modes; their rate-limit tiers are
   // spelled out explicitly in api/plugins/rate-limit.ts.
   await app.register(reactionRoutes);
-  // The public contact form (POST /api/contact + its ticket mint). Registered in both
-  // modes for symmetry, but it is a CLOUD feature: local mode never serves the landing
-  // page at all (`/` 302s to /app). Inert until CONTACT_SLACK_WEBHOOK_URL is set — both
-  // routes 503 unconfigured, which is what the form reads to decide whether to render.
-  // ⚠ It is ANONYMOUS by design, so it is exempted from the cloud auth gate
-  // (api/plugins/auth.ts) and its rate-limit tier keys on IP rather than an account.
-  await app.register(contactRoutes);
-  // GitHub App webhook receiver (real-time sync Phase 1). Registered in both modes;
-  // inert until GITHUB_APP_WEBHOOK_SECRET is set (501s unconfigured). Additive on top of
-  // the periodic poll — see docs/REALTIME-SYNC.md.
-  await app.register(webhookRoutes);
-  // "Set up AI" — the one-time AI runtime download (ai/runtime.ts). LOCAL ONLY: never registered in
-  // cloud or under LIMN_AI_DISABLED (`config.aiEnabled` is false in both).
-  if (!config.isCloud && config.aiEnabled) await app.register(aiRuntimeRoutes);
-  // "Set up" for local bot-comment scoring (ml/runtime.ts). LOCAL ONLY, like the AI download:
-  // `config.mlLocalEnabled` is false in cloud and under LIMN_ML_DISABLED.
-  if (!config.isCloud && config.mlLocalEnabled) await app.register(mlRuntimeRoutes);
-  // The agentic features — Claude Review (+ chat, follow-up, ticket check, auto review), review
-  // memory and AI Fix's fixer. CORE and FREE, LOCAL ONLY: `registerAgenticRoutes` registers
-  // NOTHING in cloud (an explicit `isCloud` check) or under LIMN_AI_DISABLED. review/agentic.ts.
+  // "Set up AI" — the one-time AI runtime download (ai/runtime.ts). Not registered under
+  // LIMN_AI_DISABLED.
+  if (config.aiEnabled) await app.register(aiRuntimeRoutes);
+  // "Set up" for local bot-comment scoring (ml/runtime.ts). Not registered under LIMN_ML_DISABLED.
+  if (config.mlLocalEnabled) await app.register(mlRuntimeRoutes);
+  // The agentic features — Claude Review (+ chat, follow-up, ticket check, auto review) and AI
+  // Fix's fixer. `registerAgenticRoutes` registers NOTHING under LIMN_AI_DISABLED.
+  // review/agentic.ts.
   registerAgenticRoutes(app);
-  // THE ISSUE TRACKER (CORE, FREE, BOTH MODES — apiVersion 23; docs/TRACKERS.md): the workspace's
+  // THE ISSUE TRACKER (docs/TRACKERS.md): the workspace's
   // tracker settings, the stored-ticket routes behind the PR pane's story panel, the Open PRs ticket
   // row and stacks. Unconditional: no capability, no plugin.
   registerTracker(app);
   // SONARCLOUD (CORE, FREE; docs/SONARCLOUD.md): the workspace's SonarCloud settings + connection
-  // check, a PR's stored snapshot, a refresh, and (local only) the one PR comment.
+  // check, a PR's stored snapshot, a refresh, and the one PR comment.
   registerSonar(app);
 
   return app;

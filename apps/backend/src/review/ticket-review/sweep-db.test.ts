@@ -20,9 +20,10 @@ import type { AgentContext } from '../agent-context.js';
 const DB_PATH = '/tmp/pierre-ticket-review-sweep-db.sqlite';
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
-process.env.DEPLOYMENT_MODE = 'local';
 
-vi.mock('../claude-review/ai-ready.js', () => ({ agenticRunReady: () => true }));
+// `aiReady` lets one test hold the kick's own immediate sweep back, so the NEXT tick sees the kick.
+let aiReady = true;
+vi.mock('../claude-review/ai-ready.js', () => ({ agenticRunReady: () => aiReady }));
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 let db: any;
@@ -182,10 +183,9 @@ beforeAll(async () => {
   ctx = {
     db,
     schema,
-    isPg: false,
     runTransaction: client.runTransaction,
     recordAiUsage: async () => {},
-    host: { isCloud: false },
+    host: {},
     llm: { detectAuth: () => ({ status: 'ok' }) },
     aiCredits: { check: async () => ({ agentBlocked: false }) },
     log: { info: () => {}, warn: () => {}, error: () => {} },
@@ -272,7 +272,11 @@ describe('ticket review sweep', () => {
     const r = await sweep.runTicketReviewSweep(ctx, T0 + 20 * 60_000, deps());
     expect(r.considered).toContain(T4);
     expect(r.queued).toEqual([]);
-    sweep.kickTicketSweep({ ...ctx, host: { isCloud: true } } as AgentContext, 1, pr.old!);
+    // The kick's own immediate sweep finds AI not ready and stops before consuming the kick, so
+    // the next tick is the one that sees it.
+    aiReady = false;
+    sweep.kickTicketSweep(ctx, 1, pr.old!);
+    aiReady = true;
     const kicked = await sweep.runTicketReviewSweep(ctx, T0 + 21 * 60_000, deps());
     expect(kicked.queued).toEqual([{ ident: T4, trigger: 'auto', workspaceId: ws }]);
   });
