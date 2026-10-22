@@ -23,6 +23,14 @@ import { createHash } from 'node:crypto';
 
 const CADENCE_DAYS = 14;
 const PERIOD_COUNT = 8;
+const MONTH_COUNT = 3;
+/** How far into the current sprint the demo sits (days since it started). */
+export const SPRINT_DAYS_IN = 8;
+
+/** The current sprint's start (UTC midnight, SPRINT_DAYS_IN days back) — shared with the tracker seed. */
+export function currentSprintStart(now: Date): number {
+  return Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) - SPRINT_DAYS_IN * 86_400_000;
+}
 
 export interface PeriodCtx {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -35,6 +43,9 @@ interface Win {
   key: string;
   fromMs: number;
   toMs: number;
+  grain: 'sprint' | 'month';
+  /** The period's real length in days (28-31 for a month). */
+  days: number;
 }
 
 /** `sprint-<YYYY-MM-DD>` over the period's UTC start day — the product's own key form. */
@@ -60,14 +71,24 @@ export async function seedPeriodReports(ctx: PeriodCtx): Promise<number> {
   );
   const dayMs = 86_400_000;
   const cadenceMs = CADENCE_DAYS * dayMs;
-  // The CURRENT period began at `anchor`; everything before it is completed.
-  const anchor = midnight - (midnight % cadenceMs) + (midnight % cadenceMs === 0 ? 0 : 0);
+  // The CURRENT period began at `anchor`; everything before it is completed. It is pinned
+  // SPRINT_DAYS_IN days back, so the demo always opens mid-sprint: "this sprint so far" has a
+  // week of work in it, and the Jira sprint (seed-demo-features.ts) shares these dates.
+  const anchor = midnight - SPRINT_DAYS_IN * dayMs;
   const currentStart = anchor;
 
-  const windows: Win[] = [];
+  const sprintWindows: Win[] = [];
   for (let i = PERIOD_COUNT; i >= 1; i--) {
     const fromMs = currentStart - i * cadenceMs;
-    windows.push({ key: keyFor(fromMs), fromMs, toMs: fromMs + cadenceMs });
+    sprintWindows.push({ key: keyFor(fromMs), fromMs, toMs: fromMs + cadenceMs, grain: 'sprint', days: CADENCE_DAYS });
+  }
+  // The last MONTH_COUNT completed calendar months, oldest first — the Month grid's periods.
+  const monthWindows: Win[] = [];
+  for (let i = MONTH_COUNT; i >= 1; i--) {
+    const fromMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1);
+    const toMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i + 1, 1);
+    const key = `month-${new Date(fromMs).toISOString().slice(0, 7)}`;
+    monthWindows.push({ key, fromMs, toMs, grain: 'month', days: Math.round((toMs - fromMs) / dayMs) });
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -97,12 +118,12 @@ export async function seedPeriodReports(ctx: PeriodCtx): Promise<number> {
         repo_ids_json, coverage_json, metrics_json, metrics_schema_version, comparison_json,
         forecast_json, movements_json, suggested_json, lanes_json, narrative_md, model,
         payload_hash, data_fingerprint, credits_spent, input_tokens, output_tokens, generated_at)
-     VALUES (?, ?, ?, ?, ?, 'sprint', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
 
   let written = 0;
 
-  for (const ws of workspaces) {
+  for (const ws of workspaces) for (const windows of [sprintWindows, monthWindows]) {
     const scope = { workspaceId: ws.id, repoIds: ws.repoIds };
     // Compute every window once — the headline vector, its coverage and its lanes.
     const computed: {
@@ -197,8 +218,12 @@ export async function seedPeriodReports(ctx: PeriodCtx): Promise<number> {
       const completeBehind = computed.slice(0, i).filter(
         (x) => x.tracked.length === ws.repoIds.length,
       ).length;
+      // A month row REFUSES its forecast (`uneven_periods`): the fit runs on the array index, and
+      // 28-vs-31 days is a swing it would read as signal.
       const forecasts =
-        isNewest && completeBehind >= 4
+        c.win.grain === 'month'
+          ? c.metrics.slice(0, 4).map((m) => ({ available: false, key: m.key, reason: 'uneven_periods' }))
+          : isNewest && completeBehind >= 4
           ? c.metrics.slice(0, 4).map((m) => {
               if (m.value == null) {
                 return { available: false, key: m.key, reason: 'insufficient_history' };
@@ -235,12 +260,12 @@ export async function seedPeriodReports(ctx: PeriodCtx): Promise<number> {
       // The narrative — written the way the product's own prompt constrains it:
       // it names the populations apart, never pairs a headline figure with a
       // prior-period one, and states the refusal rather than papering over it.
-      const narrative = isNewest && ws.narrate ? narrativeFor(ws.name, c, comparison, movements) : null;
+      const narrative = isNewest && ws.narrate ? narrativeFor(ws.name, c, comparison, movements, c.win.grain) : null;
 
       const hash = createHash('sha256')
         .update(
           [
-            ws.id, c.win.key, CADENCE_DAYS, ws.repoIds.join(','),
+            ws.id, c.win.key, c.win.days, ws.repoIds.join(','),
             PERIOD_METRICS_SCHEMA_VERSION,
             ...c.metrics.map((m) => `${m.key}=${m.value}`),
           ].join('|'),
@@ -248,7 +273,7 @@ export async function seedPeriodReports(ctx: PeriodCtx): Promise<number> {
         .digest('hex');
 
       insert.run(
-        1, ws.id, c.win.key, sec(c.win.fromMs), sec(c.win.toMs), CADENCE_DAYS,
+        1, ws.id, c.win.key, sec(c.win.fromMs), sec(c.win.toMs), c.win.grain, c.win.days,
         JSON.stringify(ws.repoIds),
         JSON.stringify({
           trackedRepos: c.tracked.length,
@@ -258,7 +283,7 @@ export async function seedPeriodReports(ctx: PeriodCtx): Promise<number> {
         JSON.stringify(c.metrics),
         PERIOD_METRICS_SCHEMA_VERSION,
         JSON.stringify(comparison),
-        JSON.stringify({ forecasts, disclosure: isNewest && completeBehind >= 4
+        JSON.stringify({ forecasts, disclosure: c.win.grain === 'sprint' && isNewest && completeBehind >= 4
           ? `fitted on the ${c.tracked.length} of ${ws.repoIds.length} repositories tracked across all 5 periods`
           : null }),
         JSON.stringify(movements),
@@ -280,7 +305,8 @@ export async function seedPeriodReports(ctx: PeriodCtx): Promise<number> {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function narrativeFor(wsName: string, c: any, comparison: any, movements: any[]): string {
+function narrativeFor(wsName: string, c: any, comparison: any, movements: any[], grain: 'sprint' | 'month'): string {
+  const span = grain === 'month' ? 'month' : 'period';
   const get = (k: string): number | null => c.metrics.find((m: any) => m.key === k)?.value ?? null;
   const merged = get('merged_prs');
   const lead = get('median_lead_time_hours');
@@ -290,12 +316,12 @@ function narrativeFor(wsName: string, c: any, comparison: any, movements: any[])
     n == null ? 'not measured' : `${Math.round(n * 10) / 10}${unit}`;
   const mover = movements[0];
   const moverLine = mover
-    ? `The biggest move was ${mover.key.replace(/_/g, ' ')}, ${mover.percentChange != null ? `${mover.percentChange > 0 ? 'up' : 'down'} ${Math.abs(mover.percentChange)}%` : 'changed'} against the previous period.`
+    ? `The biggest move was ${mover.key.replace(/_/g, ' ')}, ${mover.percentChange != null ? `${mover.percentChange > 0 ? 'up' : 'down'} ${Math.abs(mover.percentChange)}%` : 'changed'} against the previous ${span}.`
     : 'Nothing moved far enough to call a change.';
 
   return `## What happened
 
-${wsName} merged ${num(merged)} pull requests this period. Half cleared in ${num(lead, 'h')} from opening to merge, and the first human review landed after ${num(firstReview, 'h')} on average. Review bots left ${num(botComments)} comments across the same work.
+${wsName} merged ${num(merged)} pull requests this ${span}. Half cleared in ${num(lead, 'h')} from opening to merge, and the first human review landed after ${num(firstReview, 'h')} on average. Review bots left ${num(botComments)} comments across the same work.
 
 ${moverLine} ${comparison.subsetDisclosure ? `The comparison ${comparison.subsetDisclosure}.` : ''}
 

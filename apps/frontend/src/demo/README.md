@@ -92,9 +92,22 @@ first use, and cached:
 - every number under a key ending in `At` or `Ms` that lies within ±3 years of `capturedAt` is
   read as epoch milliseconds and moves by `delta`.
 
-Durations (`waitMs: 5400000`) are nowhere near an epoch, so they stay. Dates without a time
-(`2026-10-20`) and period keys (`sprint-2026-10-06`) do not move: the SPA sends them back in
-request paths, where they must still match the recording.
+Calendar values move by whole calendar units, so they stay calendar values and agree with each
+other:
+
+- a timestamp at exactly UTC midnight (a period's start, a sprint's dates) moves by `days`, the
+  delta rounded to whole days — it is still a midnight;
+- a date without a time (`2026-10-20`) and a sprint period key (`sprint-2026-10-06`) move by the
+  same `days`;
+- a month period key (`month-2026-09`) moves by `months`, the calendar months between
+  `capturedAt` and now, so the month in progress at capture is the month in progress now; an object
+  carrying a month `periodKey` gets its `periodStart`, `periodEnd` and `cadenceDays` rewritten to
+  the shifted month.
+
+Durations (`waitMs: 5400000`) are nowhere near an epoch, so they stay. The SPA sends period keys
+back in request paths (`/api/pro/insights/reports/sprint-…`): `DemoServer.handle` moves every key
+and date in a request's PATH back by the same amounts (`Rebaser.unshiftPath`) before matching.
+Date-like QUERY values need nothing, because matching drops them.
 
 ## Writes
 
@@ -118,6 +131,33 @@ least one finished run per kind**: a `GET /api/prs/:id/claude-review` with a suc
 succeeded ticket `review`, `GET /api/prs/:id/ci-review`, `GET /api/prs/:id/claude-review/thread-check`
 and `GET /api/docs/story-alignment?ident=…` with a succeeded run. Without one, that start answers
 "Not available in the demo." (Check threads has a built-in fallback.)
+
+## The real recording
+
+`data/recording.json` is made by the recorder from the fictional Acme data the demo seeder writes:
+
+```sh
+pnpm demo:record          # seed a scratch DB, boot an isolated stack, walk the SPA, write the file
+pnpm --filter @pierre-review/frontend build:demo
+pnpm demo:verify          # serve dist-demo at /demo/ and open every view (--later=40: 40 days on)
+```
+
+- `apps/backend/scripts/seed-demo.ts` and its siblings write the data: `seed-demo-tracker.ts` (a
+  fictional Jira site read through the real tracker worker, This Sprint's briefs, themes and paths),
+  `seed-demo-agentic.ts` (finished Claude Reviews, Check threads, a CI review, AI Fix and a plan,
+  ticket reviews, designs, the reference library and a docs check — each stored by the product's
+  own pipeline with a written answer at its model seam) and `seed-demo-platform.ts` (settings
+  through the real routes, merge state, and the written summaries through a fake Anthropic endpoint
+  in the seed process). No model is called.
+- `scripts/record-demo.mjs` boots the backend with no credential that works (a fake token and
+  `ANTHROPIC_BASE_URL` on a closed loopback port) and never presses a Run, Post, Merge or Save
+  button. `scripts/record-demo-steps.mjs` is the walk. The few reads that are live GitHub calls in
+  the product (the Changes tab's files, a job log, the merge control's options, reactions) are
+  answered in the browser by `scripts/lib/demo-github.mjs` from the same fictional code
+  (`scripts/lib/demo-diffs.mjs`).
+- Every GET is kept once per normalised path (the default workspace first); the batched read POSTs
+  are merged into one entry per path; finished runs' `…/stream` endpoints are read from the backend
+  as frame lists.
 
 ## The sample recording
 

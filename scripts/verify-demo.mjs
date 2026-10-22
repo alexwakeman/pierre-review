@@ -1,0 +1,130 @@
+// THE STATIC DEMO'S SMOKE PASS — `pnpm demo:verify` (after `pnpm --filter @pierre-review/frontend
+// build:demo`). Serves apps/frontend/dist-demo at /demo/ through the real site server
+// (apps/site), opens every view of the demo in Chromium and checks, per view:
+//   • no uncaught page error;
+//   • the page is not blank (the SPA has no error boundary: a render throw unmounts everything);
+//   • `window.__limnDemo.log` has no 'missing' entry — a request the recording could not answer.
+// Screenshots of the key views land in /tmp/limn-demo-shots/.
+//
+//   node scripts/verify-demo.mjs                 every view, as if opened now
+//   node scripts/verify-demo.mjs --later=40      …as if opened 40 days after the recording
+//   node scripts/verify-demo.mjs --only=pr:113   one view (substring match)
+import { spawn } from 'node:child_process';
+import { mkdirSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { chromium } from 'playwright';
+
+const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
+const PORT = Number(process.env.VERIFY_PORT ?? 4391);
+const BASE = `http://127.0.0.1:${PORT}/demo/`;
+const SHOTS = '/tmp/limn-demo-shots';
+const args = process.argv.slice(2);
+const LATER_DAYS = Number(args.find((a) => a.startsWith('--later='))?.slice(8) ?? 0);
+const ONLY = args.find((a) => a.startsWith('--only='))?.slice(7);
+mkdirSync(SHOTS, { recursive: true });
+
+const ident = (k) => encodeURIComponent(`ticket:jira:https://acme.atlassian.net#${k}`);
+const story = (k) => encodeURIComponent(`jira:https://acme.atlassian.net#${k}`);
+
+/** [name, query, screenshot?] */
+const VIEWS = [
+  ['open-prs', '?view=activity', 'open-prs'],
+  ...['my_turn', 'claude', 'fixing', 'review', 'threads', 'land', 'deps'].map((t) => [`pending:${t}`, `?view=activity&activityRepo=attention&attnTab=${t}`, t === 'my_turn' ? 'pending' : t === 'deps' ? 'pending-deps' : null]),
+  ['feed', '?view=activity&activityRepo=feed', 'feed'],
+  ['feed:classification', '?view=activity&activityRepo=feed&feedTab=classification', 'bot-classification'],
+  ...['roi', 'themes', 'advisor', 'benchmark'].map((t) => [`bots:${t}`, `?view=activity&activityRepo=bots&botsTab=${t}`, t === 'roi' ? 'bots-roi' : t === 'themes' ? 'bots-themes' : null]),
+  ['bot-detail:8', '?view=bot-detail:8', null],
+  ...['overview', 'stories', 'bottlenecks'].map((t) => [`reports:${t}`, `?view=activity&activityRepo=insights&insightsTab=${t}`, t === 'overview' ? 'reports' : t === 'bottlenecks' ? 'chronology' : null]),
+  ['reports:month', '?view=activity&activityRepo=insights&reportGrain=month', 'reports-month'],
+  ['docs', '?view=activity&activityRepo=docs', 'docs'],
+  ...['themes', 'paths', 'people', 'merged'].map((t) => [`sprint:${t}`, `?view=sprint&sprintTab=${t}`, t === 'themes' ? 'sprint-themes' : t === 'paths' ? 'sprint-paths' : null]),
+  ['sprint:tray', `?view=sprint&sprintTab=themes&sprintStory=${story('PLAT-292')}`, 'sprint-tray'],
+  ['ticket:PLAT-292', `?view=${ident('PLAT-292')}`, 'story-view'],
+  ['ticket:PLAT-301', `?view=${ident('PLAT-301')}`, null],
+  ['ticket:INFRA-260', `?view=${ident('INFRA-260')}`, null],
+  ['timeline', '?view=timeline&preset=30d', 'timeline'],
+  ...[113, 114, 105, 116].flatMap((id) =>
+    ['overview', 'threads', 'changes', 'claude_review', 'ai_fix'].map((t) => [
+      `pr:${id}:${t}`,
+      `?view=pr-detail:${id}&prTab=${t}`,
+      id === 113 ? `pr-113-${t}` : id === 114 && (t === 'ai_fix' || t === 'claude_review') ? `pr-114-${t}` : null,
+    ]),
+  ),
+  ['user-activity:2', '?view=user-activity:2', null],
+  ['ws2:open-prs', '?view=activity&workspace=2', null],
+];
+
+async function main() {
+  const site = spawn(join(ROOT, 'apps', 'backend', 'node_modules', '.bin', 'tsx'), ['apps/site/src/server.ts'], {
+    cwd: ROOT,
+    env: { ...process.env, PORT: String(PORT), HOST: '127.0.0.1', DEMO_DIR: join(ROOT, 'apps', 'frontend', 'dist-demo') },
+    stdio: ['ignore', 'ignore', 'inherit'],
+  });
+  const stopSite = () => {
+    try {
+      site.kill('SIGTERM');
+    } catch {
+      /* gone */
+    }
+  };
+  process.on('exit', stopSite);
+  for (let i = 0; i < 100; i++) {
+    try {
+      if ((await fetch(BASE)).ok) break;
+    } catch {
+      /* not up */
+    }
+    await new Promise((r) => setTimeout(r, 200));
+  }
+
+  const browser = await chromium.launch({ headless: true });
+  const context = await browser.newContext({ viewport: { width: 1440, height: 950 }, colorScheme: 'dark', reducedMotion: 'reduce' });
+  await context.addInitScript(() => localStorage.setItem('pierre:onboarded', '1'));
+  const page = await context.newPage();
+  if (LATER_DAYS > 0) await page.clock.install({ time: new Date(Date.now() + LATER_DAYS * 86_400_000) });
+  const failures = [];
+  const shots = [];
+  let pageErrors = [];
+  page.on('pageerror', (e) => pageErrors.push(e.message));
+
+  for (const [name, query, shot] of VIEWS) {
+    if (ONLY && !name.includes(ONLY)) continue;
+    pageErrors = [];
+    await page.goto(`${BASE}${query}`, { waitUntil: 'load' });
+    // The app mounts once the recording is loaded; then let the in-browser API answer and the view
+    // settle (recorded streams replay over a few seconds).
+    await page.waitForFunction(() => document.body.innerText.trim().length > 300, null, { timeout: 20_000 }).catch(() => {});
+    await page.waitForTimeout(1800);
+    const text = await page.evaluate(() => document.body.innerText.trim().length);
+    const missing = await page.evaluate(() => {
+      const d = window.__limnDemo;
+      return d ? d.log.filter((e) => e.stage === 'missing').map((e) => `${e.method} ${e.url}`) : ['(no demo server)'];
+    });
+    const problems = [];
+    if (pageErrors.length) problems.push(`page errors: ${[...new Set(pageErrors)].join(' | ').slice(0, 300)}`);
+    if (text < 200) problems.push(`nearly blank (${text} chars)`);
+    if (missing.length) problems.push(`missing: ${[...new Set(missing)].join(', ').slice(0, 600)}`);
+    if (shot) {
+      const file = join(SHOTS, `${shot}.png`);
+      await page.screenshot({ path: file });
+      shots.push(file);
+    }
+    console.log(`${problems.length ? '✗' : '✓'} ${name}${problems.length ? `\n    ${problems.join('\n    ')}` : ''}`);
+    if (problems.length) failures.push(name);
+    // A fresh log per view.
+    await page.evaluate(() => {
+      if (window.__limnDemo) window.__limnDemo.log.length = 0;
+    });
+  }
+  await browser.close();
+  stopSite();
+  console.log(`\n${failures.length === 0 ? '✅' : '⚠'} ${VIEWS.length - failures.length} of ${VIEWS.length} views clean${LATER_DAYS ? ` (as if ${LATER_DAYS} days later)` : ''}`);
+  console.log(`screenshots (${shots.length}): ${SHOTS}`);
+  process.exit(failures.length === 0 ? 0 : 1);
+}
+
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
