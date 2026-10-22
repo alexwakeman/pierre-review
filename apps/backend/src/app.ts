@@ -26,6 +26,7 @@ import { registerRateLimit } from './api/plugins/rate-limit.js';
 import { authRoutes } from './api/routes/auth.js';
 import { healthRoutes } from './api/routes/health.js';
 import { aiRuntimeRoutes } from './api/routes/ai-runtime.js';
+import { mlRuntimeRoutes } from './api/routes/ml-runtime.js';
 import { registerAgenticRoutes } from './review/agentic.js';
 import { registerTracker } from './tracker/index.js';
 import { registerSonar } from './sonar/index.js';
@@ -304,6 +305,9 @@ export async function buildApp(): Promise<FastifyInstance> {
   // "Set up AI" — the one-time AI runtime download (ai/runtime.ts). LOCAL ONLY: never registered in
   // cloud or under LIMN_AI_DISABLED (`config.aiEnabled` is false in both).
   if (!config.isCloud && config.aiEnabled) await app.register(aiRuntimeRoutes);
+  // "Set up" for local bot-comment scoring (ml/runtime.ts). LOCAL ONLY, like the AI download:
+  // `config.mlLocalEnabled` is false in cloud and under LIMN_ML_DISABLED.
+  if (!config.isCloud && config.mlLocalEnabled) await app.register(mlRuntimeRoutes);
   // The agentic features — Claude Review (+ chat, follow-up, ticket check, auto review), review
   // memory and AI Fix's fixer. CORE and FREE, LOCAL ONLY: `registerAgenticRoutes` registers
   // NOTHING in cloud (an explicit `isCloud` check) or under LIMN_AI_DISABLED. review/agentic.ts.

@@ -42,13 +42,16 @@ import {
   type BotScope,
 } from '../db/queries.js';
 import {
-  isSeverityApiConfigured,
+  isMlScoringAvailable,
   scoreComments,
-  severityApiAnswered,
-  severityHealth,
+  scorerAnswered,
+  scorerBatchLimits,
+  scorerHealth,
+  scorerLabel,
+  scorerPaused,
   type SeverityRequestItem,
   type SeverityResult,
-} from '../ml/severity-client.js';
+} from '../ml/scorer.js';
 
 const { accounts, users } = schema;
 
@@ -95,6 +98,8 @@ let lastError: string | null = null;
 // of a dev machine without the sibling repo running), true = it did. The UI must NOT claim a
 // scoring phase is in progress against a service that is not there.
 let serviceHealthy: boolean | null = null;
+/** The reason scoring is deliberately paused (e.g. on battery), logged once per pause. */
+let pausedReason: string | null = null;
 // True when the last answered probe reported the MARKER FALLBACK rather than the ONNX model.
 let markerFallback = false;
 
@@ -368,9 +373,18 @@ export async function runMlEnrichmentTick(log: MlLog): Promise<TickStats> {
   // true by the time `void runMlEnrichmentTick(log)` returns, so that there is no instant where
   // a client can observe every repo idle AND no scoring in flight. Introducing an await above
   // this line reopens the gap the sync indicator exists to close.
-  if (!isSeverityApiConfigured()) return stats;
+  if (!isMlScoringAvailable()) return stats;
   if (running) return stats;
   if (Date.now() < backoffUntil) return stats;
+  // A deliberate pause (the local scorer on battery) is not a failure and not unavailability:
+  // say so once per pause, then skip quietly until it lifts.
+  const paused = scorerPaused();
+  if (paused) {
+    if (pausedReason !== paused) log.info(`ml enrichment: paused (${paused})`);
+    pausedReason = paused;
+    return stats;
+  }
+  pausedReason = null;
   running = true;
   runStartedAt = Date.now();
   runLabelled = 0;
@@ -381,7 +395,7 @@ export async function runMlEnrichmentTick(log: MlLog): Promise<TickStats> {
 
   try {
     if (!healthLogged) {
-      const health = await severityHealth();
+      const health = await scorerHealth();
       // Only CONSUME the once-per-process flag when the service actually answered. Setting it
       // before the await meant a service that was merely slow to start (a ~150 MB model loads on
       // first request) burned the single probe on a failure, and a marker-fallback deployment
@@ -393,7 +407,7 @@ export async function runMlEnrichmentTick(log: MlLog): Promise<TickStats> {
       markerFallback = health !== null && !health.taxonomyLoaded;
       if (!health) {
         log.warn(
-          `ml enrichment: severity-api at ${config.severityApiUrl} did not answer /health; will retry`,
+          `ml enrichment: ${scorerLabel()} did not answer /health; will retry`,
         );
       } else if (!health.taxonomyLoaded) {
         log.warn(
@@ -401,7 +415,7 @@ export async function runMlEnrichmentTick(log: MlLog): Promise<TickStats> {
             '(models_loaded.taxonomy=false) — labels will be lower quality. See docs/ML-SEVERITY.md.',
         );
       } else {
-        log.info(`ml enrichment: severity-api ready at ${config.severityApiUrl}`);
+        log.info(`ml enrichment: scoring with ${scorerLabel()}`);
       }
     }
 
@@ -500,10 +514,11 @@ async function enrichWorkspace(
   // LENGTH-SORTED so each batch is internally uniform — see packBatches.
   trimmed.sort((a, b) => a.body.length - b.body.length);
 
+  const limits = scorerBatchLimits();
   const batches = packBatches(
     trimmed.map((t) => ({ ...t.candidate, body: t.body })),
-    config.mlBatchMaxItems,
-    config.mlBatchMaxChars,
+    limits.maxItems,
+    limits.maxChars,
   );
 
   const concurrency = Math.max(1, config.mlConcurrency);
@@ -539,7 +554,7 @@ async function enrichWorkspace(
         // own dev database reliably produce one — so only a failure that proves unreachability
         // clears the flag. Whether the tick is making progress is a separate question, answered
         // by `failures`/`labelled` rather than by this.
-        serviceHealthy = severityApiAnswered(err);
+        serviceHealthy = scorerAnswered(err);
         stats.failures += 1;
         // One failed batch does not condemn the rest of the tick, but a service that is down
         // fails every batch — so stop this workspace and let the failure counter decide.
@@ -600,5 +615,6 @@ export function __resetMlEnrichmentState(): void {
   lastFinishedAt = null;
   lastError = null;
   serviceHealthy = null;
+  pausedReason = null;
   markerFallback = false;
 }

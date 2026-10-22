@@ -78,6 +78,7 @@ Usage:
   limn [options]
   limn status [options]
   limn ai install
+  limn ml install
 
 Commands:
   status           Your cross-repo "my turn" queue in the terminal, with
@@ -85,6 +86,9 @@ Commands:
   ai install       Download the AI runtime Claude Review and AI Fix run on
                    (one time, about 110 MB). The app offers the same button.
   ai status        Say whether the AI runtime is set up
+  ml install       Download the model that scores bot review comments
+                   (one time, about 240 MB). The app offers the same button.
+  ml status        Say whether bot comment scoring is set up
 
 Options:
   --no-open        Don't open the browser (also honours NO_OPEN env)
@@ -338,6 +342,60 @@ Set LIMN_CLAUDE_PATH to use your installed \`claude\` and skip its bundled copy.
   }
 }
 
+// ── `limn ml install` / `limn ml status` — local bot-comment scoring ───────────────
+// The same download the app's "Set up" runs (ml/runtime.ts): onnxruntime-node + the tokenizer
+// into ~/.limn/ml-runtime, and the severity model into ~/.limn/ml-models. Local only.
+async function runMlCommand(argv: string[]): Promise<void> {
+  const sub = argv[0];
+  if (sub !== 'install' && sub !== 'status') {
+    console.log(`limn ml — the model that scores bot review comments
+
+Usage:
+  limn ml install   Download it (one time, about 240 MB) into ~/.limn
+  limn ml status    Say whether it is set up
+
+It runs on this machine. Nothing is sent anywhere to score a comment.
+`);
+    process.exit(sub === undefined || sub === '--help' || sub === '-h' ? 0 : 1);
+  }
+  if (process.env.DEPLOYMENT_MODE === 'cloud') {
+    console.error('Local scoring runs on your machine only: npx limn-review');
+    process.exit(1);
+  }
+  if (process.env.LIMN_ML_DISABLED === 'true') {
+    console.error('Bot comment scoring is turned off here (LIMN_ML_DISABLED=true).');
+    process.exit(1);
+  }
+  await migrateDataDir();
+  const { getMlStatus, installMl } = await import('./ml/runtime.js');
+
+  if (sub === 'status') {
+    const st = getMlStatus();
+    const words =
+      st.state === 'ready' ? 'Bot comment scoring is set up.' : 'Bot comment scoring is not set up. Run: limn ml install';
+    console.log(st.message ? `${words} ${st.message}` : words);
+    process.exit(st.state === 'ready' ? 0 : 1);
+  }
+
+  let lastPct = '';
+  const result = await installMl((p) => {
+    if (p.phase === 'downloading') {
+      // The model download reports every percent; print each tenth.
+      const pct = /(\d+)%$/.exec(p.message)?.[1];
+      if (pct !== undefined) {
+        const tenth = String(Math.floor(Number(pct) / 10));
+        if (tenth === lastPct) return;
+        lastPct = tenth;
+      }
+      console.log(`  ${dim(p.message)}`);
+    } else if (p.phase !== 'failed') console.log(`${cyan('▸')} ${p.message}`);
+  });
+  if (!result.ok) {
+    console.error(bold(result.message));
+    process.exit(1);
+  }
+}
+
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
 
@@ -357,6 +415,10 @@ async function main(): Promise<void> {
   }
   if (argv[0] === 'ai') {
     await runAiCommand(argv.slice(1));
+    return;
+  }
+  if (argv[0] === 'ml') {
+    await runMlCommand(argv.slice(1));
     return;
   }
 

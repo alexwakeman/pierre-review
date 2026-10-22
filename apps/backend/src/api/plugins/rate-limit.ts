@@ -136,6 +136,9 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // matching shape: "minutes of network work, started by a click". EXACT `===`: `/api/ai` is a
   // family other routes may join, and none of them should inherit this decision.
   if (path === '/api/ai/runtime/install') return [TIERS.sync];
+  // "Set up" for local bot-comment scoring: the same shape (npm install + ~150 MB of model files
+  // over the user's own bandwidth, single-flight in ml/runtime.ts), the same bucket, spelled exactly.
+  if (path === '/api/ml/install') return [TIERS.sync];
 
   // ---- Workspace CRUD: `read`, RECORDED rather than inherited ----
   //

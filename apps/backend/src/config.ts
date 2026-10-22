@@ -310,6 +310,13 @@ export const config = {
           /\/$/,
           '',
         ),
+  // LOCAL SCORING (docs/ML-NODE-PORT.md): the same model, run in this process's own worker thread
+  // by onnxruntime-node — no Python, no second process. On by default locally (it still needs its
+  // first-use download, "Set up" in the app); never in cloud, which keeps the Railway service.
+  // LIMN_ML_DISABLED=true turns it off. LIMN_ML_SCORER picks the scorer: `auto` (the default:
+  // local when it is set up, else the HTTP service above when configured), `local` or `http`.
+  mlLocalEnabled: !isCloud && process.env.LIMN_ML_DISABLED !== 'true',
+  mlScorer: (['local', 'http'] as const).find((v) => v === process.env.LIMN_ML_SCORER) ?? ('auto' as const),
   // Extra headers for every severity-api call, as a JSON object string — e.g.
   // `SEVERITY_API_HEADERS='{"X-Severity-Token":"…"}'`. Empty in both shipped deployments, which
   // reach the service over private DNS (cloud) or loopback (local) and need no credential. It

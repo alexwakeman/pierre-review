@@ -263,6 +263,45 @@ for (const name of AI_RUNTIME_PACKAGES) {
   aiRuntimePins[name] = installed;
 }
 
+// ---- The local scoring runtime + model (`limnMlRuntime`, `limnMlModels`) ----
+//
+// Bot-comment severity runs in-process on onnxruntime-node (docs/ML-NODE-PORT.md). Same posture as
+// the AI SDKs: onnxruntime-node is ~300 MB unpacked (every platform's binaries), so neither it nor
+// the tokenizer is a dependency — apps/backend/src/ml/runtime.ts installs them ON FIRST USE at the
+// exact versions GENERATED here, and downloads the model from the files `limnMlModels` lists.
+// ⚠ Both field names are spelled once more in ml/runtime.ts; the asserts below read them back.
+const ML_RUNTIME_FIELD = 'limnMlRuntime';
+const ML_MODELS_FIELD = 'limnMlModels';
+const ML_RUNTIME_PACKAGES = ['onnxruntime-node', '@huggingface/tokenizers'];
+const mlRuntimePins = {};
+for (const name of ML_RUNTIME_PACKAGES) {
+  const declared = backendPkg.dependencies?.[name];
+  if (!declared) fail(`apps/backend/package.json does not declare ${name} — the ML runtime pins come from there`);
+  const pkgJson = join(backendDir, 'node_modules', ...name.split('/'), 'package.json');
+  if (!existsSync(pkgJson)) fail(`${name} is not installed in apps/backend/node_modules — run pnpm install`);
+  const installed = JSON.parse(readFileSync(realpathSync(pkgJson), 'utf8')).version;
+  if (!EXACT_VERSION.test(installed)) fail(`${name}: installed version ${installed} is not an exact version`);
+  if (!satisfies(installed, declared)) fail(`${name}: installed ${installed} does not satisfy ${declared}`);
+  mlRuntimePins[name] = installed;
+}
+// The model's files are published separately, as assets of a `ml-models-<version>` GitHub release
+// on this repo; scripts/ml-models-manifest.mjs writes this file from them (docs/ML-NODE-PORT.md,
+// Phase 4). Without it the release lists no model and "Set up" says so.
+const mlModelsPath = join(backendDir, 'ml-models.json');
+const mlModels = existsSync(mlModelsPath) ? JSON.parse(readFileSync(mlModelsPath, 'utf8')) : null;
+if (mlModels) {
+  if (typeof mlModels.version !== 'string' || !Array.isArray(mlModels.files) || mlModels.files.length === 0) {
+    fail('apps/backend/ml-models.json must carry a version and a non-empty files list');
+  }
+  for (const f of mlModels.files) {
+    if (!/^[0-9a-f]{64}$/.test(f.sha256 ?? '') || !String(f.url ?? '').startsWith('https://') || typeof f.size !== 'number') {
+      fail(`apps/backend/ml-models.json: ${f.path} needs an https url, a sha256 and a size`);
+    }
+  }
+} else {
+  log('no apps/backend/ml-models.json — this release will not list a model to download');
+}
+
 const manifest = {
   // Renamed from `pierre-review` (same release that made Claude Review and AI Fix free). The old
   // package gets a deprecation stub — scripts/deprecated-pierre-review/ — published by hand.
@@ -325,6 +364,9 @@ const manifest = {
   license: 'SEE LICENSE IN LICENSE',
   // Not a dependency field: npm ignores it. ai/runtime.ts reads it to know what to download.
   [AI_RUNTIME_FIELD]: aiRuntimePins,
+  // Not dependency fields either: ml/runtime.ts reads them to install / download on first use.
+  [ML_RUNTIME_FIELD]: mlRuntimePins,
+  ...(mlModels ? { [ML_MODELS_FIELD]: mlModels } : {}),
 };
 
 // --with-pro: the cloud image runs the @pierre/pro summary-AI plugin, so it needs the runtime
@@ -563,6 +605,46 @@ if (aiImportHits.length > 0) {
 // …and the loader itself must still be the thing that imports them, or the grep proves nothing.
 if (!/import\(specifierFor\(spec\)\)/.test(readFileSync(runtimeJs, 'utf8'))) {
   fail('dist/ai/runtime.js no longer loads packages the way this guardrail expects — re-check it');
+}
+
+// ---- No model runtime in the manifest either; ONE module imports it ----
+for (const field of ['dependencies', 'optionalDependencies', 'peerDependencies']) {
+  const leaked = ML_RUNTIME_PACKAGES.filter((d) => d in (manifest[field] ?? {}));
+  if (leaked.length > 0) fail(`ML runtime package(s) leaked into release/package.json ${field}: ${leaked.join(', ')}`);
+}
+for (const name of ML_RUNTIME_PACKAGES) {
+  if (writtenManifest[ML_RUNTIME_FIELD]?.[name] !== mlRuntimePins[name]) {
+    fail(`${ML_RUNTIME_FIELD}.${name} does not match the installed workspace version`);
+  }
+}
+const mlRuntimeSrc = readFileSync(join(backendDir, 'src', 'ml', 'runtime.ts'), 'utf8');
+for (const field of [ML_RUNTIME_FIELD, ML_MODELS_FIELD]) {
+  if (!mlRuntimeSrc.includes(`'${field}'`)) fail(`apps/backend/src/ml/runtime.ts no longer reads the '${field}' field`);
+}
+const ML_SPECIFIER = new RegExp(
+  String.raw`(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*|^\s*import\s*)(['"])(?:onnxruntime-node|onnxruntime-common|@huggingface\/tokenizers)(?:\/[^'"]*)?\1`,
+  'm',
+);
+const mlRuntimeJs = join(releaseDist, 'ml', 'runtime.js');
+const mlImportHits = [];
+const scanMlImports = (d) => {
+  for (const entry of readdirSync(d)) {
+    const full = join(d, entry);
+    if (statSync(full).isDirectory()) {
+      scanMlImports(full);
+      continue;
+    }
+    if (!entry.endsWith('.js') || full === mlRuntimeJs) continue;
+    for (const line of readFileSync(full, 'utf8').split('\n')) {
+      if (ML_SPECIFIER.test(line)) mlImportHits.push(`${relative(releaseDir, full)}: ${line.trim()}`);
+    }
+  }
+};
+scanMlImports(releaseDist);
+if (mlImportHits.length > 0) {
+  console.error('Model runtime imported outside dist/ml/runtime.js:');
+  for (const h of mlImportHits) console.error(`  ${h}`);
+  fail('load onnxruntime-node and the tokenizer through apps/backend/src/ml/runtime.ts');
 }
 
 log(`release assembled at ${releaseDir}`);

@@ -31,7 +31,8 @@ import {
   entitledProCapabilities,
 } from '../../pro/contract.js';
 import { getAuthNotices } from '../../sync/auth-notices.js';
-import { isSeverityApiConfigured } from '../../ml/severity-client.js';
+import { isMlScoringAvailable } from '../../ml/scorer.js';
+import { getMlStatus } from '../../ml/runtime.js';
 import { getAiRuntimeStatus } from '../../ai/runtime.js';
 import { detectClaudeAuth, NO_CLAUDE_AUTH_MESSAGE } from '../../review/auth.js';
 import { getMyTurn } from '../../db/queries.js';
@@ -222,6 +223,7 @@ export async function meRoutes(app: FastifyInstance): Promise<void> {
         agentCreditsRemaining: c.agentCreditsRemaining,
       };
     }
+    const mlStatus = getMlStatus();
     return {
       user,
       // NOTE: this response deliberately carries NO My-Turn counts. It used to return a
@@ -239,8 +241,11 @@ export async function meRoutes(app: FastifyInstance): Promise<void> {
       // ML severity/category enrichment of bot comments — FREE TIER, so a TOP-LEVEL field and
       // NOT part of `pro` above: `entitledProCapabilities` returns all-false for a cloud
       // account on the free plan, which would hide this from exactly the users it is for.
-      // True iff a severity-api is reachable for this deployment; false under `npx`.
-      mlSeverity: isSeverityApiConfigured(),
+      // True iff something can score bot comments right now: the local model once it is set
+      // up, or a configured severity-api.
+      mlSeverity: isMlScoringAvailable(),
+      // The local scorer's one-time download, when this deployment can run one at all.
+      ...(config.mlLocalEnabled ? { ml: { state: mlStatus.state, message: mlStatus.message } } : {}),
       // The in-app merge conflict resolver. CORE and free, and now registered in BOTH modes —
       // so this is a constant, kept on the wire because the SPA gates its "Resolve conflicts"
       // button on it and a field that disappears is a field every caller has to re-learn.

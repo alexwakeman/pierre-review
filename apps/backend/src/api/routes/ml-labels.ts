@@ -5,7 +5,7 @@ import {
   getPrMlLabels,
   type MlBacklog,
 } from '../../db/ml-labels.js';
-import { isSeverityApiConfigured } from '../../ml/severity-client.js';
+import { isMlScoringAvailable } from '../../ml/scorer.js';
 import { getMlEnrichmentState } from '../../sync/ml-enrichment.js';
 import { accountIdOf } from '../plugins/auth.js';
 
@@ -65,7 +65,7 @@ export async function mlLabelRoutes(app: FastifyInstance): Promise<void> {
     { schema: { querystring: { type: 'object', additionalProperties: false, properties: {} } } },
     async (req): Promise<MlEnrichmentStatus> => {
       const accountId = accountIdOf(req);
-      const enabled = isSeverityApiConfigured();
+      const enabled = isMlScoringAvailable();
       const state = getMlEnrichmentState();
       // Skip the scan entirely when the feature is off: the client is polling only because it
       // cannot know that until it asks once, and the counts would be meaningless anyway.

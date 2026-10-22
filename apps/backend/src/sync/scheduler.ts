@@ -9,7 +9,7 @@ import { AUTO_MERGE_CRON, runAutoMergeTick } from '../merge/auto-merge-runner.js
 import { runDependencyPolicyTick } from '../merge/dependency-policy.js';
 import { runMlEnrichmentTick } from './ml-enrichment.js';
 import { MENTION_SCAN_CRON, runMentionScanTick } from './mention-scan.js';
-import { isSeverityApiConfigured } from '../ml/severity-client.js';
+import { isMlScoringPossible } from '../ml/scorer.js';
 import { runConflictJanitorTick } from '../conflict/janitor.js';
 import { TRACKER_TICKET_CRON, runTrackerTick } from '../tracker/worker.js';
 import { trackerContext } from '../tracker/runtime.js';
@@ -96,7 +96,9 @@ export function startScheduler(log: FastifyBaseLogger): void {
   // pulls "bot text with no label yet" from the DB rather than being fed by a sync hook, so a
   // webhook-delivered comment and an hour-old backfill are the same kind of work to it. The
   // tick is wall-clock bounded and never throws, so a slow or absent service costs nothing.
-  if (isSeverityApiConfigured()) {
+  // Registered whenever scoring COULD come on: the local model can be set up mid-session, and
+  // each tick checks availability itself.
+  if (isMlScoringPossible()) {
     if (cron.validate(config.mlEnrichmentCron)) {
       mlEnrichmentTask = cron.schedule(config.mlEnrichmentCron, () => {
         void runMlEnrichmentTick(log);

@@ -138,7 +138,7 @@ function readJson(path: string): Record<string, unknown> | null {
  * which ESM ignores, so a package found there would be one the real import cannot see. (Under
  * pnpm/vitest NODE_PATH points into the workspace store, which is how this was found.)
  */
-function findPackageDir(spec: string, fromDir: string): string | null {
+export function findPackageDir(spec: string, fromDir: string): string | null {
   let dir = resolve(fromDir);
   for (;;) {
     const candidate = join(dir, 'node_modules', spec);
@@ -205,10 +205,98 @@ export function esmEntryOf(pkgDir: string, subpath = '.'): string | null {
   return existsSync(file) ? file : null;
 }
 
-function installedVersion(pkgDir: string | null): string | null {
+export function installedVersion(pkgDir: string | null): string | null {
   if (!pkgDir) return null;
   const v = readJson(join(pkgDir, 'package.json'))?.version;
   return typeof v === 'string' ? v : null;
+}
+
+// ---- npm (shared with ml/runtime.ts, which installs its own first-use packages the same way) ----
+
+export interface NpmCommand {
+  command: string;
+  args: string[];
+}
+
+/**
+ * npm's own JS entry run with THIS node, so there is no shell and no PATH guessing on Windows
+ * (where `npm` is a .cmd that cannot be spawned without one).
+ */
+export function resolveNpm(env: NodeJS.ProcessEnv = process.env): NpmCommand | null {
+  const viaEnv = env.npm_execpath;
+  if (viaEnv && /npm-cli\.c?js$/.test(viaEnv) && existsSync(viaEnv)) {
+    return { command: process.execPath, args: [viaEnv] };
+  }
+  const nodeDir = dirname(process.execPath);
+  for (const candidate of [
+    join(nodeDir, '..', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+    join(nodeDir, 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+  ]) {
+    if (existsSync(candidate)) return { command: process.execPath, args: [candidate] };
+  }
+  if (process.platform !== 'win32') return { command: 'npm', args: [] };
+  return null;
+}
+
+export interface NpmExit {
+  code: number | null;
+  error: string | null;
+  timedOut: boolean;
+  /** The last few non-empty output lines, for the failure message. */
+  tail: string[];
+}
+
+/** Run one npm command to completion. Never throws; a spawn failure comes back as `error`. */
+export function spawnNpm(
+  npm: NpmCommand,
+  args: string[],
+  opts: { cwd: string; env: NodeJS.ProcessEnv; timeoutMs: number; onLine?: (line: string) => void },
+): Promise<NpmExit> {
+  const tail: string[] = [];
+  return new Promise<NpmExit>((done) => {
+    let child: ChildProcess;
+    try {
+      child = spawn(npm.command, args, {
+        cwd: opts.cwd,
+        env: { ...opts.env, npm_config_loglevel: 'http' },
+        stdio: ['ignore', 'pipe', 'pipe'],
+        shell: false,
+        windowsHide: true,
+      });
+    } catch (err) {
+      done({ code: null, error: (err as Error).message, timedOut: false, tail });
+      return;
+    }
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill('SIGTERM');
+    }, opts.timeoutMs);
+    const onData = (buf: Buffer): void => {
+      for (const raw of buf.toString('utf8').split(/\r?\n/)) {
+        const line = raw.trim();
+        if (!line) continue;
+        tail.push(line);
+        if (tail.length > 8) tail.shift();
+        opts.onLine?.(line);
+      }
+    };
+    child.stdout?.on('data', onData);
+    child.stderr?.on('data', onData);
+    child.on('error', (err: NodeJS.ErrnoException) => {
+      clearTimeout(timer);
+      done({
+        code: null,
+        error: err.code === 'ENOENT' ? 'npm was not found. Install Node.js with npm, then try again.' : err.message,
+        timedOut: false,
+        tail,
+      });
+    });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      done({ code, error: null, timedOut, tail });
+    });
+  });
 }
 
 // ---- the runtime -------------------------------------------------------------------------------
@@ -384,24 +472,6 @@ export function createAiRuntime(opts: AiRuntimeOptions = {}) {
     }
   }
 
-  function resolveNpm(): { command: string; args: string[] } | null {
-    // Run npm's own JS entry with THIS node, so there is no shell and no PATH guessing on Windows
-    // (where `npm` is a .cmd that cannot be spawned without one).
-    const viaEnv = env.npm_execpath;
-    if (viaEnv && /npm-cli\.c?js$/.test(viaEnv) && existsSync(viaEnv)) {
-      return { command: process.execPath, args: [viaEnv] };
-    }
-    const nodeDir = dirname(process.execPath);
-    for (const candidate of [
-      join(nodeDir, '..', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js'),
-      join(nodeDir, 'node_modules', 'npm', 'bin', 'npm-cli.js'),
-    ]) {
-      if (existsSync(candidate)) return { command: process.execPath, args: [candidate] };
-    }
-    if (process.platform !== 'win32') return { command: 'npm', args: [] };
-    return null;
-  }
-
   function install(
     onProgress?: (p: AiRuntimeInstallProgress) => void,
     installOpts: InstallOptions = {},
@@ -431,7 +501,7 @@ export function createAiRuntime(opts: AiRuntimeOptions = {}) {
         'This copy of Limn does not list which AI runtime versions to download. Update Limn and try again.',
       );
     }
-    const npm = installOpts.npm ?? resolveNpm();
+    const npm = installOpts.npm ?? resolveNpm(env);
     if (!npm) return failWith('npm was not found. Install Node.js with npm, then try again.');
 
     lastFailure = null;
@@ -474,55 +544,13 @@ export function createAiRuntime(opts: AiRuntimeOptions = {}) {
     if (env.LIMN_CLAUDE_PATH?.trim()) args.push('--omit=optional');
 
     const timeoutMs = installOpts.timeoutMs ?? 10 * 60_000;
-    const tail: string[] = [];
-    const exit = await new Promise<{ code: number | null; error: string | null; timedOut: boolean }>(
-      (done) => {
-        let child: ChildProcess;
-        try {
-          child = spawn(npm.command, args, {
-            cwd: staging,
-            env: { ...env, npm_config_loglevel: 'http' },
-            stdio: ['ignore', 'pipe', 'pipe'],
-            shell: false,
-            windowsHide: true,
-          });
-        } catch (err) {
-          done({ code: null, error: (err as Error).message, timedOut: false });
-          return;
-        }
-        let timedOut = false;
-        const timer = setTimeout(() => {
-          timedOut = true;
-          child.kill('SIGTERM');
-        }, timeoutMs);
-        const onData = (buf: Buffer): void => {
-          for (const raw of buf.toString('utf8').split(/\r?\n/)) {
-            const line = raw.trim();
-            if (!line) continue;
-            tail.push(line);
-            if (tail.length > 8) tail.shift();
-            emit({ phase: 'downloading', message: line.slice(0, 200) });
-          }
-        };
-        child.stdout?.on('data', onData);
-        child.stderr?.on('data', onData);
-        child.on('error', (err: NodeJS.ErrnoException) => {
-          clearTimeout(timer);
-          done({
-            code: null,
-            error:
-              err.code === 'ENOENT'
-                ? 'npm was not found. Install Node.js with npm, then try again.'
-                : err.message,
-            timedOut: false,
-          });
-        });
-        child.on('close', (code) => {
-          clearTimeout(timer);
-          done({ code, error: null, timedOut });
-        });
-      },
-    );
+    const exit = await spawnNpm(npm, args, {
+      cwd: staging,
+      env,
+      timeoutMs,
+      onLine: (line) => emit({ phase: 'downloading', message: line.slice(0, 200) }),
+    });
+    const tail = exit.tail;
 
     if (exit.error || exit.timedOut || exit.code !== 0) {
       rmSync(staging, { recursive: true, force: true });

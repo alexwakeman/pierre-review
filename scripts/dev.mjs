@@ -1,5 +1,8 @@
-// `pnpm dev` — the local dev loop: backend (:4000) + frontend (:5173), plus the
-// `packages/ml` severity-api (:8799) when that submodule is checked out.
+// `pnpm dev` — the local dev loop: backend (:4000) + frontend (:5173). Bot comments are scored
+// IN-PROCESS by the Node port (apps/backend/src/ml, docs/ML-NODE-PORT.md), which reads the model
+// from packages/ml/serving_assets — so the Python severity-api is NOT started by default.
+// PIERRE_ML_HTTP=1 brings the old loop back (start packages/ml's severity-api on :8799 and score
+// over HTTP with LIMN_ML_SCORER=http), e.g. to compare the two.
 //
 // WHY THIS IS A SCRIPT AND NOT A `concurrently` ONE-LINER. Whether the ML service is available
 // is a runtime question (is the submodule checked out? is `uv` installed?), and its answer
@@ -9,9 +12,11 @@
 // that nothing is draining, which is a worse failure than the feature being quietly off. One
 // decision, made here, used for both.
 //
+//   PIERRE_ML_HTTP=1       also start the Python severity-api and score over HTTP (see above)
+//   LIMN_ML_DISABLED=true  no bot-comment scoring at all (the backend's own switch)
 //   PIERRE_ML_DIR=…        override the submodule location (default: packages/ml)
 //   SEVERITY_API_PORT=…    port for the severity-api (default 8799)
-//   PIERRE_ML_DISABLED=1   run the app without it
+//   PIERRE_ML_DISABLED=1   with PIERRE_ML_HTTP=1: don't start the service after all
 //   PIERRE_ML_FULL_SPEED=1 don't deprioritize the classifier (dev-ml.mjs starts it under
 //                          `nice -n 15` + OMP/ORT thread caps so a grinding backlog can't
 //                          starve the backend/browser — dev loop only, never production)
@@ -27,7 +32,8 @@ import { ML_DIR, ML_PORT, probePort, severityApiUnavailable } from './dev-ml.mjs
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
-const blocked = severityApiUnavailable();
+const useHttp = process.env.PIERRE_ML_HTTP === '1';
+const blocked = useHttp ? severityApiUnavailable() : 'the Node scorer is the default; PIERRE_ML_HTTP=1 starts it';
 
 // The port is part of the SAME single decision as `blocked`, and for the same reason: whatever
 // answers here decides both whether to start a service and whether the backend may be pointed at
@@ -38,12 +44,14 @@ const blocked = severityApiUnavailable();
 //   'stranger' someone else holds the port: uvicorn would die with EADDRINUSE, `concurrently`
 //              would not restart it, and pointing the backend here anyway is what produces the
 //              "mlSeverity on, backlog draining nowhere" lie this file exists to prevent.
-const occupant = blocked === null ? await probePort() : 'free';
+const occupant = useHttp && blocked === null ? await probePort() : 'free';
 const withMl = blocked === null && occupant !== 'stranger';
 const startMl = withMl && occupant === 'free';
 
 const env = { ...process.env };
 if (withMl) {
+  // Without this, `auto` would still prefer the local model and the service would sit idle.
+  env.LIMN_ML_SCORER ??= 'http';
   env.SEVERITY_API_DEFAULT_URL = `http://127.0.0.1:${ML_PORT}`;
   console.log(`[dev] severity-api: ${ML_DIR} → ${env.SEVERITY_API_DEFAULT_URL}`);
   if (!startMl) {
@@ -56,7 +64,7 @@ if (withMl) {
   }
 } else {
   const reason = blocked ?? `:${ML_PORT} is held by something that is not a severity-api`;
-  console.log(`[dev] severity-api off (${reason}) — bot comments will carry no ML labels.`);
+  console.log(`[dev] severity-api off (${reason}).`);
 }
 
 const jobs = [

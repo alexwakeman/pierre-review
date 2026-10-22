@@ -4292,6 +4292,12 @@ export type AiRuntimeInstallEvent =
   | { type: 'done'; runtime: 'ready' }
   | { type: 'error'; message: string };
 
+/** One event on `POST /api/ml/install`'s SSE stream ("Set up" for local bot-comment scoring). */
+export type MlInstallEvent =
+  | { type: 'progress'; phase: 'starting' | 'downloading' | 'verifying'; message: string }
+  | { type: 'done' }
+  | { type: 'error'; message: string };
+
 export interface MeResponse {
   user: LocalUser | null;
   // (Claude Review and AI Fix are gated on `ai` below — core, free, local-only.)
@@ -4303,9 +4309,16 @@ export interface MeResponse {
   // Is ML severity/category enrichment of bot comments live on this deployment? FREE TIER, so
   // it deliberately does NOT live inside `pro` — `entitledProCapabilities` zeroes that whole
   // object for a cloud account on the free plan, which is exactly this feature's audience.
-  // True iff the backend has a reachable severity-api configured (SEVERITY_API_URL); false
-  // under `npx pierre-review`, which ships no model. Gates every ML query the SPA makes.
+  // True iff something can score bot comments RIGHT NOW: the local model once it is set up, or
+  // a configured severity-api. Gates every ML query the SPA makes.
   mlSeverity: boolean;
+  // LOCAL bot-comment scoring's one-time download (docs/ML-NODE-PORT.md). Absent in cloud and
+  // under LIMN_ML_DISABLED, where there is nothing to set up. 'absent' ⇒ the SPA offers "Set up";
+  // 'failed' carries `message`. Top-level for the `mlSeverity` reason.
+  ml?: {
+    state: 'ready' | 'absent' | 'installing' | 'failed';
+    message: string | null;
+  };
   // Can this deployment resolve merge conflicts in-app? True in local mode; false in cloud,
   // where the routes are not registered at all. FREE/CORE, so TOP-LEVEL and NOT inside `pro`
   // — `entitledProCapabilities` zeroes that object for a free cloud account (the same

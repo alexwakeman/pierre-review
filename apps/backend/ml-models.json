@@ -1,0 +1,35 @@
+{
+  "version": "sev-2560f333b0f3",
+  "files": [
+    {
+      "path": "modernbert-onnx/input_format.json",
+      "url": "https://github.com/alexwakeman/pierre-review/releases/download/ml-models-sev-2560f333b0f3/modernbert-onnx__input_format.json",
+      "sha256": "ecef79a2589f2789c27ce50bfa90d9012d60e2d4aa304807de247e01002346a1",
+      "size": 22
+    },
+    {
+      "path": "modernbert-onnx/severity/model_quantized.onnx",
+      "url": "https://github.com/alexwakeman/pierre-review/releases/download/ml-models-sev-2560f333b0f3/modernbert-onnx__severity__model_quantized.onnx",
+      "sha256": "3d1e28fff97c13d164c7d9b2c25e3c8dc873f50874dfc1ae41ede81f7619cd89",
+      "size": 150653333
+    },
+    {
+      "path": "modernbert-onnx/severity/config.json",
+      "url": "https://github.com/alexwakeman/pierre-review/releases/download/ml-models-sev-2560f333b0f3/modernbert-onnx__severity__config.json",
+      "sha256": "47a9d75816c184c6a0fc98cca268de1f9eeb5c90f8f40c065d5f211e921fc5cc",
+      "size": 1455
+    },
+    {
+      "path": "modernbert-onnx/severity/tokenizer.json",
+      "url": "https://github.com/alexwakeman/pierre-review/releases/download/ml-models-sev-2560f333b0f3/modernbert-onnx__severity__tokenizer.json",
+      "sha256": "ca870c678352403d107496dc78899fa666ed0f56fef63e88ae398fafe5d78c45",
+      "size": 3583326
+    },
+    {
+      "path": "modernbert-onnx/severity/calibration.json",
+      "url": "https://github.com/alexwakeman/pierre-review/releases/download/ml-models-sev-2560f333b0f3/modernbert-onnx__severity__calibration.json",
+      "sha256": "f242409f4cc52ef6d9eea1182ad2bf74c440907a713021c290bdd071590c3646",
+      "size": 296
+    }
+  ]
+}

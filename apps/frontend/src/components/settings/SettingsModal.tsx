@@ -10,6 +10,7 @@ import { BenchmarkConsentSection } from './BenchmarkConsentSection.js';
 import { LargePrThresholdSection } from './LargePrThresholdSection.js';
 import { BlastRadiusSection } from './BlastRadiusSection.js';
 import { MyTurnSection, MY_TURN_SECTION_HEADING_ID } from './MyTurnSection.js';
+import { BotScoringSection } from './BotScoringSection.js';
 import { PendingMuteSection } from './PendingMuteSection.js';
 import { DependencyAutoMergeSection } from './DependencyAutoMergeSection.js';
 import { SonarSection } from './SonarSection.js';
@@ -238,6 +239,9 @@ export function SettingsModal({
               Free, account-grained and /api/me-backed like the two above it, so it sits on this
               side of the pro-settings gate too. */}
           <MyTurnSection />
+          {/* Local bot-comment scoring's one-time download. Free and account-level; renders nothing
+              where there is nothing to set up (cloud, LIMN_ML_DISABLED). */}
+          <BotScoringSection />
           {/* Data-subject rights (export / delete / cookie choice) — CORE/free, cloud-only. This
               is the self-service machinery the privacy policy at /privacy §9 points at; a local
               install has no hosted account to erase (the data is the user's own SQLite file), so

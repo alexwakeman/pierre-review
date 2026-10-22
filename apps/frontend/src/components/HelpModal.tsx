@@ -162,6 +162,21 @@ export function HelpModal({ onClose }: { onClose: () => void }): JSX.Element {
             <code>npx limn-review</code>.
           </Section>
 
+          <Section title="Bot comment scoring (free, on your machine)">
+            A small model labels each comment a review bot leaves, from <strong>nit</strong> to{' '}
+            <strong>critical</strong>, so you can see which ones matter. With{' '}
+            <Code>npx limn-review</Code>, turn it on once: <strong>Settings → Bot comment
+            scoring → Set up</strong> (<strong>Set up AI</strong> does it too), or run{' '}
+            <Code>npx limn-review ml install</Code>. That downloads about 240 MB into{' '}
+            <Code>~/.limn</Code>. It scores on this machine and sends nothing anywhere. It runs in
+            the background at low priority, using at most half of one CPU core, and pauses on
+            battery, so a large backlog of old comments takes a while. To score faster, start Limn
+            with <Code>LIMN_ML_CPU_SHARE=1</Code>; to keep scoring on battery,{' '}
+            <Code>LIMN_ML_ON_BATTERY=run</Code>; to turn it off, <Code>LIMN_ML_DISABLED=true</Code>.
+            Check it with <Code>npx limn-review ml status</Code>. The hosted app scores comments for
+            you, with nothing to set up.
+          </Section>
+
           <Section title="Keyboard">
             <Kbd>/</Kbd> focus search · <Kbd>j</Kbd>/<Kbd>k</Kbd> cycle PRs ·{' '}
             <Kbd>i</Kbd> Activity console · <Kbd>Esc</Kbd> leave a tab/overlay, else clear the

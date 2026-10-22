@@ -33,7 +33,7 @@ It runs **two ways from one codebase**, selected by `DEPLOYMENT_MODE`:
 | [TRACKERS](docs/TRACKERS.md) | the issue tracker (CORE, free): the adapter seam, Jira, GitHub Issues, Linear, stored tickets + worker, idents, the sealed token |
 | [SONARCLOUD](docs/SONARCLOUD.md) | the SonarCloud integration (CORE, free): per-workspace sealed token, the per-(PR, head) snapshot, the review block, the one PR comment, AI Fix's `Q<n>` items |
 | [REFERENCE-DOCS](docs/REFERENCE-DOCS.md) | the workspace reference library (CORE, local-only, agentic): upload / URL ingest, the INDEX → CONTENTS → section tree, the Sonnet build, the docs chat, `docsContextFor` |
-| [ML-SEVERITY](docs/ML-SEVERITY.md) | ML severity/category of bot comments (`packages/ml`) |
+| [ML-SEVERITY](docs/ML-SEVERITY.md) · [ML-NODE-PORT](docs/ML-NODE-PORT.md) | ML severity/category of bot comments (`packages/ml`) · the in-process scorer (`ml/`) |
 | [PERIOD-REPORTING](docs/PERIOD-REPORTING.md) | window purity, coverage bias, actor lanes, the person vector |
 | [PRO-PLUGIN-AND-ACTIVITY](docs/PRO-PLUGIN-AND-ACTIVITY.md) | plugin seam/apiVersion, Activity, Feed, the bot platform, the impact note, the work plan |
 | [PRO-PLATFORM](docs/PRO-PLATFORM.md) | the Pro platform's own deep-dive |
@@ -181,9 +181,10 @@ All from the repo root unless noted.
 | `pnpm shots` | landing-screenshot pipeline: seed → Pro shots → restart OSS → free shots → teardown |
 | `pnpm package` | assemble `./release` for publishing |
 
-`DEPLOYMENT_MODE=local` (default) vs `cloud` selects the whole stack. **`pnpm dev` also starts
-the `packages/ml` severity-api when that submodule is checked out** (`PIERRE_ML_DIR`,
-`SEVERITY_API_PORT`, `PIERRE_ML_DISABLED=1`); every "can't run it" path exits 0, so a clone
+`DEPLOYMENT_MODE=local` (default) vs `cloud` selects the whole stack. **`pnpm dev` scores bot comments with the
+in-process Node port, reading the model from `packages/ml/serving_assets`; `PIERRE_ML_HTTP=1`
+starts the Python severity-api instead** (`PIERRE_ML_DIR`, `SEVERITY_API_PORT`,
+`PIERRE_ML_DISABLED=1`, and it sets `LIMN_ML_SCORER=http`); every "can't run it" path exits 0, so a clone
 without `--recurse-submodules` still gets the dev loop. ⚠ It exports
 `SEVERITY_API_DEFAULT_URL`, never `SEVERITY_API_URL` — `process.loadEnvFile` does NOT overwrite
 an already-set variable, so a command-line `SEVERITY_API_URL` would BEAT your `.env`. Config
@@ -1367,11 +1368,21 @@ Every bot-authored review comment / PR comment / review body is labelled with a 
 (`nit`·`minor`·`major`·`critical`) and up to eight **categories** by the `severity-api`
 microservice from **`packages/ml`**. Full detail: **[docs/ML-SEVERITY.md](docs/ML-SEVERITY.md)**.
 
-- **`SEVERITY_API_URL` IS THE WHOLE GATE.** Unset ⇒ no worker, `/api/me` reports
-  `mlSeverity:false`, the SPA issues zero ML queries — which keeps the feature dark under
-  `npx limn-review`. ⚠ The flag is **top-level** on `MeResponse`, NOT part of `pro`:
-  `entitledProCapabilities` zeroes that object for free cloud accounts, exactly this feature's
-  audience.
+- **TWO SCORERS, ONE SEAM (`ml/scorer.ts`)** — the LOCAL model (onnxruntime-node in a CHILD
+  PROCESS at background priority, `ml/`; local mode only, a first-use ~240 MB download: "Set up" / `limn ml install`) or the
+  HTTP `severity-api` (`SEVERITY_API_URL`; cloud's Railway service). `LIMN_ML_SCORER=auto` picks local
+  when set up. ⚠ **Availability CHANGES AT RUNTIME** (a "Set up" mid-session), so every gate asks
+  `isMlScoringAvailable()` when it matters; the cron registers on `isMlScoringPossible()`. Unavailable
+  ⇒ `/api/me` `mlSeverity:false` and the SPA issues zero ML queries. ⚠ The local port is held to the
+  Python BYTE FOR BYTE by `packages/ml/data/parity` (markers, model text, chunks, decode, the exact
+  `model_version` via a ported BLAKE2b) — regexes are written in their PYTHON source and compiled by
+  `pyRe` (`ml/markers.ts`); [docs/ML-NODE-PORT.md](docs/ML-NODE-PORT.md). ⚠ **IT MUST NEVER SLOW THE
+  MACHINE** (~1 CPU-second per comment; a fresh install owes thousands): one comment per run (a
+  padded batch MOVES the label), 1 thread, `taskpolicy -b` / nice 19, a duty cycle (`LIMN_ML_CPU_SHARE`,
+  default 0.5 of a core), paused on battery — `ml/throttle.ts`. Never a worker thread (priority is
+  per-PROCESS on macOS). ⚠ `mlSeverity`/`ml` are
+  **top-level** on `MeResponse`, NOT part of `pro`: `entitledProCapabilities` zeroes that object for
+  free cloud accounts, exactly this feature's audience.
 - **Enrichment is a PULL-BASED BACKGROUND WORKER (`sync/ml-enrichment.ts`), never a sync
   step** — `persistPr` runs inside `runTransaction`, so an awaited `fetch` there would hold the
   single sqlite write lock across network latency. The worker re-derives "bot text with no
@@ -1604,6 +1615,10 @@ The traps:
   path, never by name), and never fork a shared fold to dodge this.
 - **pnpm is PINNED** (`packageManager: pnpm@9.15.9`); bumping it means regenerating
   `pnpm-lock.yaml` or native builds fail (`ERR_PNPM_IGNORED_BUILDS`).
+- **Nor the model runtime**: `onnxruntime-node` + `@huggingface/tokenizers` install on first use
+  at the `limnMlRuntime` pins; the model downloads from `limnMlModels` (written by
+  `scripts/ml-models-manifest.mjs`, sha256-pinned). ⚠ `ml/runtime.ts` is the ONLY module that may
+  value-import them — the build greps `release/dist` for it.
 - **No AI SDK in the manifest; installed on first use.** The agentic features ship as code,
   but `@anthropic-ai/claude-agent-sdk` (~110 MB native binary), `@anthropic-ai/sdk`,
   `@modelcontextprotocol/sdk` and `zod` are downloaded into `~/.limn/ai-runtime` by "Set up AI"

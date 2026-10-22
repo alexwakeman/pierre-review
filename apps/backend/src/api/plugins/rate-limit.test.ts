@@ -925,6 +925,11 @@ describe('the AI runtime download', () => {
     expect(tiers('POST', '/api/ai/runtime/install-now')).not.toEqual(['sync']);
     expect(tiers('GET', '/api/ai/runtime')).toEqual(['read']);
   });
+
+  it('puts the local scoring download, POST /api/ml/install, on the sync tier too', () => {
+    expect(tiers('POST', '/api/ml/install')).toEqual(['sync']);
+    expect(tiers('POST', '/api/ml/install-now')).not.toEqual(['sync']);
+  });
 });
 
 describe('tier limits are ordered sensibly', () => {
