@@ -58,7 +58,7 @@ posts **one** GitHub review (inline + body + verdict).
   `settingSources:[]`, `maxTurns`/`maxBudgetUsd` caps, `AbortController` cancel), `submit-map.ts`,
   `model-options.ts`, `prepare.ts` (`gh pr diff` + `NOISE_GLOBS` stripping + per-file metrics +
   cap), `clone-manager.ts`, `post-review.ts` + `post-seam.ts`, `pricing.ts`, `chat-agent.ts`. The
-  product half, moved back from the plugin at apiVersion 22 and published under FSL-1.1-MIT:
+  product half, moved back from the plugin at apiVersion 22 and published under the Limn License 1.0:
   `claude-review/` (`manager.ts` — in-memory queue, one review/PR, `PRO_REVIEW_CONCURRENCY`, the
   auto lane, startup reconcile; `routing.ts`, `prompts.ts`, `follow-up.ts`, `ticket.ts`,
   `persist.ts`, `routes.ts`, `chat.ts`, `auto.ts`, `auto-settings.ts`, `specialists.ts`) and

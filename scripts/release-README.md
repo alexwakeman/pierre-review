@@ -125,9 +125,11 @@ locally instead — a larger database, but PR detail then works fully offline.
 
 ## License
 
-Source-available under the **Functional Source License (FSL-1.1-MIT)** — see
-[LICENSE](./LICENSE). You may use, self-host, and modify Limn freely; you may
-**not** offer it as a competing commercial or hosted product. Each release
-automatically converts to the **MIT License** two years after its publication.
+Source-available under the **Limn License 1.0** — see [LICENSE](./LICENSE).
+Limn is free for individuals and for any team or organisation where 3 people or
+fewer use it. More than 3 people in one organisation need a commercial licence —
+ask through the [contact form](https://pierre-review.com/contact). You may
+**not** offer Limn, or a product built from it, as a competing commercial
+product or service.
 The AI runtime Limn downloads on first use is Anthropic's, under Anthropic's own
 terms; it is not part of this package.
