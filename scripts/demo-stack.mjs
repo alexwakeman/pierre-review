@@ -19,10 +19,10 @@
 // Why the backend runs with `gh` OFF the PATH: ensureLocalAccount() shells out
 // to `gh api user` at boot and would overwrite the seeded "Morgan Diaz" local
 // account with YOUR GitHub identity, emptying the My Turn triage in the shots.
-// The children get a minimal PATH (a shim dir holding only `node` + the system
-// dirs), so `gh` is unreachable no matter where it's installed.
+// The children get a minimal PATH (a shim dir holding `node` and a `gh` that always fails, ahead of the system
+// dirs) and no GH_*/GITHUB_* token variables, so `gh` never answers no matter where it is installed.
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtempSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -49,6 +49,10 @@ const VIDEO_ARGS = args.filter((a) => !WRAPPER_FLAGS.has(a) && !a.endsWith('.png
 // --- a gh-free PATH the children can still find node on -----------------------
 const shimDir = mkdtempSync(join(tmpdir(), 'pierre-demo-bin-'));
 symlinkSync(process.execPath, join(shimDir, 'node'));
+// /usr/bin stays on the PATH, so a gh there would still answer — a `gh` that always fails sits
+// first, and (below) no GH_*/GITHUB_* token variable reaches a child, so the boot can never replace
+// the seeded viewer with your real GitHub identity.
+writeFileSync(join(shimDir, 'gh'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
 const SAFE_PATH = [shimDir, '/usr/bin', '/bin', '/usr/sbin', '/sbin'].join(':');
 
 const baseEnv = {
@@ -65,6 +69,7 @@ const baseEnv = {
   // disabled, so nothing ever actually calls this URL; it only needs to be non-empty.
   SEVERITY_API_URL: 'http://127.0.0.1:8799',
 };
+for (const k of ['GH_TOKEN', 'GITHUB_TOKEN', 'GH_ENTERPRISE_TOKEN', 'GITHUB_ENTERPRISE_TOKEN', 'GH_HOST']) delete baseEnv[k];
 // (The agentic features are core and on by default locally — no flag; PRO_ADVANCED_AI_ENABLED is gone.)
 
 // --- helpers -------------------------------------------------------------------

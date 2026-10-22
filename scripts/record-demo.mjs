@@ -20,7 +20,11 @@
 //
 // ⚠ NOTHING TOUCHES YOUR REAL STACK: its own ports (4310 / 5383), its own database
 // (/tmp/limn-record.sqlite), `gh` off the PATH (as scripts/demo-stack.mjs explains — the boot
-// would otherwise replace the seeded viewer, Morgan Diaz, with your GitHub identity).
+// would otherwise replace the seeded viewer, Morgan Diaz, with your GitHub identity). "Off the PATH"
+// is three guards, because /usr/bin stays on it and a gh there authenticates from the environment:
+// every GH_*/GITHUB_* token variable is stripped from the children, a `gh` shim that always fails
+// sits FIRST on the PATH, and recording.json is refused unless /api/me answers as the fictional
+// viewer (`user.login` === VIEWER_LOGIN) — a recording carrying your identity is never written.
 import { spawn, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -47,10 +51,14 @@ const KEEP = args.includes('--keep');
 const PROBE = args.includes('--probe');
 const HEADED = args.includes('--headed');
 const ONLY = args.find((a) => a.startsWith('--only='))?.slice('--only='.length);
+// The seeded viewer (apps/backend/scripts/seed-demo.ts). The recording must answer as them.
+const VIEWER_LOGIN = 'morgan-diaz';
 
 // --- a gh-free PATH the children can still find node on --------------------------------------
 const shimDir = mkdtempSync(join(tmpdir(), 'limn-record-bin-'));
 symlinkSync(process.execPath, join(shimDir, 'node'));
+// A `gh` that always fails, ahead of any /usr/bin/gh: the boot can never learn a real identity.
+writeFileSync(join(shimDir, 'gh'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
 const SAFE_PATH = [shimDir, '/usr/bin', '/bin', '/usr/sbin', '/sbin'].join(':');
 
 mkdirSync(DATA_DIR, { recursive: true });
@@ -76,6 +84,8 @@ const baseEnv = {
 };
 delete baseEnv.ANTHROPIC_API_KEY;
 delete baseEnv.SUMMARY_ANTHROPIC_API_KEY;
+// gh (and anything else) authenticates from these regardless of HOME — none may reach a child.
+for (const k of ['GH_TOKEN', 'GITHUB_TOKEN', 'GH_ENTERPRISE_TOKEN', 'GITHUB_ENTERPRISE_TOKEN', 'GH_HOST']) delete baseEnv[k];
 
 // --- process helpers ---------------------------------------------------------------------------
 const children = new Set();
@@ -544,6 +554,20 @@ async function main() {
   if (PROBE) {
     writeFileSync('/tmp/limn-record-probe.json', JSON.stringify({ errors, seen }, null, 1));
     console.log(`probe → /tmp/limn-record-probe.json (${seen.length} responses, ${errors.length} page errors)`);
+  }
+  // ⚠ Refuse to write a recording that answers as anyone but the fictional viewer — the live
+  // backend AND every recorded /api/me must agree, or your real GitHub identity would ship in it.
+  const liveMe = await fetch(`http://localhost:${BACKEND_PORT}/api/me`)
+    .then((r) => (r.ok ? r.json() : null))
+    .catch(() => null);
+  const logins = [liveMe, ...entries.filter((e) => e.path === '/api/me').map((e) => e.body)].map(
+    (b) => b?.user?.login ?? null,
+  );
+  if (logins.some((l) => l !== VIEWER_LOGIN)) {
+    teardown();
+    throw new Error(
+      `refusing to write the recording: /api/me answered as ${JSON.stringify([...new Set(logins)])}, not '${VIEWER_LOGIN}'`,
+    );
   }
   const recording = { version: 1, capturedAt, entries };
   const outPath = PROBE ? '/tmp/limn-record-probe-recording.json' : OUT;
