@@ -3,7 +3,7 @@ import type { ActivityRepo, RepoBranchStatus, ThreadStateCounts } from '@pierre-
 import { useActivity } from '../../hooks/useActivity.js';
 import { useBranchStatus } from '../../hooks/useBranchStatus.js';
 import { useRepos } from '../../hooks/useTimeline.js';
-import { useProCapabilities, useWorkspaceOpenPrs } from '../../hooks/useTriage.js';
+import { useWorkspaceOpenPrs } from '../../hooks/useTriage.js';
 import { openPrsTabCount } from '../../lib/openPrsTab.js';
 import { useFilters } from '../../store/filters.js';
 import { MaintainerShield } from '../MaintainerShield.js';
@@ -33,7 +33,6 @@ import { BotSettingsPanel } from './BotSettingsPanel.js';
 import { effectiveFeedTab, feedTabsFor } from './feedTabsModel.js';
 import { FirstRunOnboarding } from './FirstRunOnboarding.js';
 import { OpenPrsDetail } from './OpenPrsDetail.js';
-import { ProBadge } from '../ProGate.js';
 
 // DEFAULT LANDING = OPEN PRS, for every tier. The rail's top entry is what opens: Open PRs is one
 // card per open PR (it was a fixed tab of its own until it moved here), and Pending — the ranked
@@ -207,8 +206,7 @@ function RepoConsole({ repo }: { repo: ActivityRepo }): JSX.Element {
 // The Activity "Triage Console with a Briefing Feed": a fixed left rail (the cross-repo pseudo-
 // rows, then this WORKSPACE's repos, flat) + a right detail that defaults to Open PRs (the first
 // rail line) and narrows to a single-repo console on selection. Entirely on the core query layer —
-// no AI. The Pro surfaces are the Bots Monitoring and Reports rail entries (each locked as a
-// whole when unentitled) and the per-repo digest banner inside RepoFeedHeader.
+// no AI.
 //
 // SCOPE IS ONE WORKSPACE, always — the WHOLE workspace. There is no "all repos", no multi-select,
 // and (deliberately) NO second visibility axis on top: this console reads `filters.workspaceId` and
@@ -223,9 +221,8 @@ export function ActivityView(): JSX.Element {
   const workspaceId = useFilters((s) => s.workspaceId);
   const activityRepoId = useFilters((s) => s.activityRepoId);
   const setActivityRepo = useFilters((s) => s.setActivityRepo);
-  const { workspaceInsights } = useProCapabilities();
-  // The cross-repo Feed's inner sub-tab: 'feed' (the consolidated stream) and the FREE "Bot
-  // classification". (The Pro "Discussion themes" tab is REMOVED.)
+  // The cross-repo Feed's inner sub-tab: 'feed' (the consolidated stream) and "Bot
+  // classification". (The "Discussion themes" tab is REMOVED.)
   // ('compare' is NOT a member — cross-workspace comparison is Reports' "By workspace" axis.)
   const feedInnerTab = useFilters((s) => s.feedInnerTab);
   const setFeedInnerTab = useFilters((s) => s.setFeedInnerTab);
@@ -269,22 +266,21 @@ export function ActivityView(): JSX.Element {
   // observer, not a new request. Blank (never 0) until it answers.
   const openPrsQuery = useWorkspaceOpenPrs();
   const openPrsCount = openPrsTabCount(openPrsQuery.data, openPrsQuery.isPlaceholderData);
-  // The CORE/free **Pending** cards console — always available, no Pro gate.
+  // The **Pending** cards console — always available.
   const showingAttention = activityRepoId === 'attention';
   const showingInsights = activityRepoId === 'insights';
-  // Docs — the workspace reference library. CORE, free, LOCAL ONLY: the rail entry exists only where
+  // Docs — the workspace reference library. LOCAL ONLY: the rail entry exists only where
   // agentic AI runs (`me.ai.enabled`). A `?activityRepo=docs` link opened elsewhere still selects the
   // pane, which then says in one line why there is nothing to show.
   const showingDocs = activityRepoId === 'docs';
   const aiEnabled = useAiCapabilities().enabled;
-  // Bots Monitoring (BotsView) — Pro as a whole on `botDepth`. The RAIL ENTRY is listed on every
-  // tier (visible-but-locked); BotsView renders the lock for the whole pane when unentitled.
+  // Bots Monitoring (BotsView).
   const showingBots = activityRepoId === 'bots';
 
-  // (The one-shot "default to Insights when Pro is on" effect lived here — removed with P3.1:
+  // (The one-shot "default to Insights" effect lived here — removed with P3.1:
   // Pending is the default landing; see the note at the top.)
 
-  // The cross-repo Feed's sub-tab bar: Feed | Bot classification (FREE on every tier). The rules
+  // The cross-repo Feed's sub-tab bar: Feed | Bot classification. The rules
   // live in `feedTabsModel.ts`.
   const feedTabs = useMemo(() => feedTabsFor(), []);
   // DERIVED, never written back to the store.
@@ -408,8 +404,6 @@ export function ActivityView(): JSX.Element {
               Monitoring (the user's order); bot classification itself lives on the Feed's own
               "Bot classification" tab, so moving Bots Monitoring down separates nothing that
               filters the stream from the stream.
-              ⚠ Bots Monitoring and Reports are PRO AS A WHOLE: listed on every tier with one
-              ProBadge each, their panes locked (ProLockPanel) when unentitled.
               (The "Compare workspaces" entry was folded into Reports' "By workspace" axis.) */}
 
           {/* OPEN PRS pseudo-row — FIRST, and the default landing: one card per open PR in the
@@ -441,8 +435,7 @@ export function ActivityView(): JSX.Element {
 
           {/* PENDING pseudo-row — the worklist, SECOND under Open PRs. Everything waiting on you
               or the workspace, in tabs, each ranked by db/work-plan.ts's Do next score
-              (db/pending-tabs.ts). CORE/free — the RANK is code, only its narration is Pro — so
-              it's ALWAYS shown.
+              (db/pending-tabs.ts). ALWAYS shown.
               ⚠ LABEL-ONLY rename from "Needs attention": the rail id stays `'attention'` — it is
               in bookmarks and in history entries Back replays (`?activityRepo=attention`). */}
           <button
@@ -454,7 +447,7 @@ export function ActivityView(): JSX.Element {
                 ? 'border-sky-500 bg-sky-50 dark:bg-sky-950/30'
                 : 'border-transparent hover:bg-gray-50 dark:hover:bg-gray-800/50'
             }`}
-            title="Everything waiting on you or your workspace, ranked most actionable first (free)"
+            title="Everything waiting on you or your workspace, ranked most actionable first"
           >
             {/* A STOPWATCH, not a warning triangle. This rail entry is a standing worklist that
                 is non-empty on every healthy day, and a warning glyph sitting permanently in the
@@ -474,7 +467,7 @@ export function ActivityView(): JSX.Element {
 
           {/* DOCS pseudo-row — under Pending, LOCAL ONLY (`me.ai.enabled`): the workspace's
               reference library (DocsView) — the documents, their contents, a section viewer and the
-              docs chat. `?activityRepo=docs`. FREE: no ProBadge. */}
+              docs chat. `?activityRepo=docs`. */}
           {aiEnabled && (
             <button
               type="button"
@@ -524,10 +517,7 @@ export function ActivityView(): JSX.Element {
               value stays `activityRepoId === 'insights'` on purpose — it is transient but
               referenced across several files (useUrlState's `?activityRepo=insights`, FilterBar's
               `isInsights`), and renaming a wire/URL-visible token buys nothing but broken deep
-              links.
-              PRO AS A WHOLE (`periodReports`), flow metrics included: VISIBLE on every tier with
-              ONE ProBadge here, and InsightsView renders `ProLockPanel` for the whole pane when
-              the account is not entitled. */}
+              links. */}
           <button
             type="button"
             onClick={() => setActivityRepo('insights')}
@@ -537,7 +527,7 @@ export function ActivityView(): JSX.Element {
                 ? 'border-sky-500 bg-sky-50 dark:bg-sky-950/30'
                 : 'border-transparent hover:bg-gray-50 dark:hover:bg-gray-800/50'
             }`}
-            title="Flow metrics and period reports for this workspace (Pro)"
+            title="Flow metrics and period reports for this workspace"
           >
             <span className="shrink-0 text-ai-signal">
               <WorkspaceIcon />
@@ -545,15 +535,11 @@ export function ActivityView(): JSX.Element {
             <span className="min-w-0 flex-1 truncate font-semibold text-gray-700 dark:text-gray-200">
               Reports
             </span>
-            <ProBadge variant="tab" className="shrink-0" title="Reports are part of Pro." />
           </button>
 
           {/* BOTS MONITORING pseudo-row (LABEL-ONLY rename of "Bots"; the rail id stays 'bots').
-              PRO AS A WHOLE (`botDepth`): VISIBLE on every tier with ONE ProBadge here, and the
-              whole pane — every sub-tab, Settings included — renders `ProLockPanel` when the
-              account is not entitled (BotsView gates itself). No per-sub-tab badges inside.
-              Bot HIDING on the Feed and Timeline stays free: it reads the stored/auto
-              classification through `/api/bot-reviewers`, which is not gated. */}
+              Bot HIDING on the Feed and Timeline reads the stored/auto classification through
+              `/api/bot-reviewers`. */}
           <button
             type="button"
             onClick={() => setActivityRepo('bots')}
@@ -563,7 +549,7 @@ export function ActivityView(): JSX.Element {
                 ? 'border-sky-500 bg-sky-50 dark:bg-sky-950/30'
                 : 'border-transparent hover:bg-gray-50 dark:hover:bg-gray-800/50'
             }`}
-            title="Measure and triage this workspace's review bots (Pro)"
+            title="Measure and triage this workspace's review bots"
           >
             <span className="shrink-0">
               <BotIcon />
@@ -571,9 +557,6 @@ export function ActivityView(): JSX.Element {
             <span className="min-w-0 flex-1 truncate font-semibold text-gray-700 dark:text-gray-200">
               Bots Monitoring
             </span>
-            {/* UNCONDITIONAL, like every tier label here: keyed on the capability it would flicker
-                on every cold load (capabilities read all-false until /api/me lands). */}
-            <ProBadge variant="tab" className="shrink-0" title="Bots Monitoring is part of Pro." />
           </button>
 
           {/* The workspace's repos — a FLAT list. There is nothing to group by: a repo belongs to
@@ -616,23 +599,21 @@ export function ActivityView(): JSX.Element {
       <div className="relative min-h-0 flex-1 overflow-y-auto p-3">
         {noReposAtAll ? (
           // First-run: detect the viewer's recent repos + one-click add. Hoisted above the
-          // rail-entry branches so a zero-repo account always lands here (a Pro account could
-          // otherwise auto-select Insights and never reach the empty state).
+          // rail-entry branches so a zero-repo account always lands here.
           <FirstRunOnboarding />
         ) : showingOpenPrs ? (
           // Open PRs — the default landing. Owns its own empty-workspace state.
           <OpenPrsDetail />
         ) : showingBots ? (
-          // Bots Monitoring — Pro as a whole; BotsView renders the lock itself. Scoped to the
+          // Bots Monitoring. Scoped to the
           // whole active WORKSPACE (never the timeline's repo picker; the bot feed likewise ignores
           // the human-member filter); carries its own empty states, so it renders even before any
           // repo data loads.
           <BotsView />
         ) : showingAttention && !noRepos ? (
-          // The CORE/free **Pending** board — the tabs in `PENDING_TABS`, each a scored list with
-          // its own count. The default landing. Renders on every tier, before repo data loads (its
-          // own empty/loading states); the Pro narration decorates it and is never required for it
-          // to be complete. Its narrowings (a seated kind, the banner's "Only yours")
+          // The **Pending** board — the tabs in `PENDING_TABS`, each a scored list with
+          // its own count. Renders before repo data loads (its own empty/loading states); the
+          // work-plan narration decorates it and is never required for it to be complete. Its narrowings (a seated kind, the banner's "Only yours")
           // show as the selected tab and chip on the board itself, so no banner sits above it.
           // ⚠ `!noRepos`: an EMPTY workspace falls through to the "move some in" guidance below.
           // Pending is where the app opens, so without it a workspace just made in "Manage repos &
@@ -651,7 +632,7 @@ export function ActivityView(): JSX.Element {
               : 'Detecting the repos you work on…'}
           </div>
         ) : showingFeed ? (
-          // The workspace Feed — a STREAM and nothing else. Beside it: the FREE "Bot
+          // The workspace Feed — a STREAM and nothing else. Beside it: the "Bot
           // classification" tab (who counts as a bot here — the Bots hiding on this Feed reads it).
           //
           // ⚠ Every survey panel has left it and none may come back: the work plan (the Pending
@@ -682,8 +663,7 @@ export function ActivityView(): JSX.Element {
               })}
             </div>
             {visibleFeedTab === 'classification' ? (
-              // FREE on every tier — who counts as a bot in this Workspace. The price editor on
-              // each card renders only with `botDepth`; nothing else here is gated.
+              // Who counts as a bot in this Workspace, plus each bot's price.
               <BotSettingsPanel />
             ) : (
               <FeedView />

@@ -217,10 +217,10 @@ export function PendingOrderInfo({
 // ── the per-card explanation ───────────────────────────────────────────────────────────────
 
 /** What the card list hands every card so it can explain its own position. Null outside the
- *  Pending board (the Pro Insights pane renders the same cards with no ranking behind them). */
+ *  Pending board (the Insights pane renders the same cards with no ranking behind them). */
 export interface PendingBoardInfo extends PendingBoardState {
   onOpenGuide: () => void;
-  /** The Pro plan's one-sentence line per card id, shown on the card wherever it sits. */
+  /** The work plan's one-sentence line per card id, shown on the card wherever it sits. */
   whyById?: Map<string, string>;
 }
 

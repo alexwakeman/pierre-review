@@ -39,7 +39,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 // (open/merged/closed) · CI recovery time, matching the Insights pane's primaries — and fold the
 // rest (including "CI failures by stage", hidden by default by product decision) behind a "More
 // charts" expander. Absent ⇒ the full sectioned grid (the analytics modal wants everything).
-// `omitPrimaries` (the Pro "More charts" slot): the surrounding WorkspaceMetricsPanel already
+// `omitPrimaries` (the "More charts" slot): the surrounding WorkspaceMetricsPanel already
 // shows its own throughput/CI-recovery up front AND its own CI-failures card inside the fold, so
 // the slot's grid must not repeat any of the three — the folded section showed the same concept
 // twice from two data sources before this flag existed.
@@ -188,10 +188,10 @@ export function Charts({
   );
 
   // The sectioned charts grid. `includePrimaries` = render the primary cards inline (the full
-  // modal view); false = OMIT them (the collapsible repo view shows them up front / the Pro slot's
+  // modal view); false = OMIT them (the collapsible repo view shows them up front / the slot's
   // host panel owns them, so the folded grid must not repeat them). `includeCiStage` keeps
   // "CI failures by stage" available in the FOLD when the primaries are omitted — the collapsible
-  // view hides it by default but must still offer it, while the Pro slot omits it entirely (the
+  // view hides it by default but must still offer it, while the slot omits it entirely (the
   // host panel renders its own CI-failures card in the same fold).
   const grid = (includePrimaries: boolean, includeCiStage = includePrimaries): JSX.Element => (
     <div className="space-y-4">

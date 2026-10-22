@@ -17,8 +17,7 @@ export function UserMenu({
   // entry is shown only when true.
   canSignOut: boolean;
   onSignOut: () => void;
-  // Opens the user-configuration modal. Shown only when there's at least one Pro setting to
-  // configure (the caller gates on capabilities).
+  // Opens the user-configuration modal.
   onOpenSettings: (() => void) | null;
 }): JSX.Element {
   const [open, setOpen] = useState(false);

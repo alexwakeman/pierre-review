@@ -6,10 +6,10 @@ import { workspaceKey } from './useActivity.js';
 import { TICKET_LINKS_KEY } from './useTicketLinks.js';
 import { TICKET_MERGED_PRS_KEY } from './useTicketMergedPrs.js';
 
-// THE WORKSPACE'S ISSUE TRACKER (CORE, free — apiVersion 23; docs/TRACKERS.md). One tracker per
+// THE WORKSPACE'S ISSUE TRACKER (apiVersion 23; docs/TRACKERS.md). One tracker per
 // workspace on core's `workspace_trackers` row: `GET`/`PUT /api/workspaces/:id/tracker`. It left the
 // plugin's per-workspace settings route with the rest of the tracker, so it is answered in every
-// install — no capability, no plugin — and the token is still WRITE-ONLY (`jira.hasToken`).
+// install, and the token is still WRITE-ONLY (`jira.hasToken`).
 //
 // ⚠ THE KEY CARRIES `ws:<id>` AND THE FETCH IDLES ON AN UNRESOLVED SCOPE (`workspaceId === null`
 // is "not resolved yet"), like every scoped query.
@@ -29,9 +29,8 @@ export function useWorkspaceTracker(enabled: boolean, workspaceId: number | null
 
 /**
  * Whether THIS workspace links tickets — a provider AND a non-blank base URL, the server's one
- * liveness test (tracker/settings.ts `isIssueConfigured`). It replaced the Pro `issueLinks`
- * capability as the gate on the Open PRs "Group by ticket" view and the ticket row: the tracker is
- * free now, so the question is no longer "may this account" but "has this workspace set one up".
+ * liveness test (tracker/settings.ts `isIssueConfigured`) — the gate on the Open PRs "Group by
+ * ticket" view and the ticket row: "has this workspace set one up".
  * false while unresolved — nothing tracker-shaped renders on a guess.
  */
 export function useTrackerOn(workspaceId: number | null): boolean {

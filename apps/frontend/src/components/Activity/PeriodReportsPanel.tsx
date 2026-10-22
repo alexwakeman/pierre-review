@@ -27,12 +27,9 @@ import {
   PERIOD_METRICS_SCHEMA_VERSION,
 } from '@pierre-review/shared';
 import { useFilters } from '../../store/filters.js';
-import { useAiUsage } from '../../hooks/useAiUsage.js';
-import { useProCapabilities } from '../../hooks/useTriage.js';
 import {
   periodReportGenerateMutationKey,
   periodReportModelChoices,
-  reportModelLabel,
   useGeneratePeriodReport,
   usePeriodMonthToDate,
   usePeriodReport,
@@ -47,7 +44,6 @@ import {
   RefreshIcon,
   ThinSampleIcon,
 } from '../Icons.js';
-import { ProLockPanel, useProGateState } from '../ProGate.js';
 import type { Fmt, MetricMeta } from './periodReportMarkdown.js';
 import {
   METRIC_META,
@@ -795,16 +791,7 @@ function MetricTable({
                   {meta.note && <div className="text-[11px] text-gray-400">{meta.note}</div>}
                   {/* The C4 expander. Only rendered when the response carries the axis — the
                       server already omits it for single-workspace accounts, older plugins send
-                      nothing, and in both cases this row is byte-identical to the pre-axis one.
-                      ⚠ NO `Pro` CHIP HERE, AND THE FEATURE IS STILL PRO. This expander repeats
-                      once per METRIC ROW, so the badge was drawn a dozen times down one column —
-                      a chip repeated that often stops reading as a mark and starts reading as
-                      noise. It was only ever a LABEL: the axis rides the one-report GET, which is
-                      `/api/pro/*` and 402s unentitled, and this whole panel is already behind
-                      `periodReports` (`ProLockPanel` above). Removing the chip removes no gate.
-                      The Pro mark for this surface lives where it belongs and is drawn ONCE — on
-                      the Reports tab itself (InsightsView's `ProBadge variant="tab"`) and on this
-                      panel's own heading. */}
+                      nothing, and in both cases this row is byte-identical to the pre-axis one. */}
                   {byWorkspace != null && (
                     <button
                       type="button"
@@ -1048,7 +1035,7 @@ function ReportBody({
 
       {/* ⚠ "NOT COMPUTED" IS NOT "NO PRIOR PERIOD", and they had the same pixels.
           A BACKFILLED period (spec §8: up to 8 prior periods stored metrics-only on first
-          generate — no LLM, no credits, `model: ''`) carries an EMPTY comparison and EMPTY
+          generate — no LLM, `model: ''`) carries an EMPTY comparison and EMPTY
           forecasts by construction, not because anything was missing. Rendered through the normal
           path, every row read "no prior period" and every forecast read "—", which is a claim
           about the DATA rather than about what was run — and it invited the reader to press
@@ -1091,8 +1078,8 @@ function ReportBody({
 
       <MetricTable report={report} byWorkspace={byWorkspace} />
 
-      {/* The narration. A backfilled period has none by design (metrics-only, no LLM, no
-          credits) — say that plainly rather than showing an empty box. */}
+      {/* The narration. A backfilled period has none by design (metrics-only, no LLM) — say
+          that plainly rather than showing an empty box. */}
       {report.narrative ? (
         <div className="rounded-md border border-ai-hairline bg-white/60 p-3 dark:bg-gray-900/40">
           <SummaryMarkdown markdown={report.narrative} prRefs={[]} onOpenPr={() => {}} />
@@ -1138,27 +1125,19 @@ function GenerateControls({
   // and the server default stay in charge, which is what we want when there is nothing to choose.
   const [model, setModel] = useState<string | null>(null);
   const effectiveModel = model ?? modelInfo?.model ?? null;
-  const estimate = choices.find((c) => c.id === effectiveModel)?.estimate ?? null;
   // A ONE-OPTION `<select>` is a control that cannot be operated: it invites a click, absorbs it,
   // and changes nothing. Haiku is the only selectable model now (REPORT_MODELS in the plugin's
-  // llm/seam.ts), so the whole label comes out — but the QUOTE beside it does not, because "what
-  // will this cost" is a live question whether or not there is anything to pick. The test is on
-  // the SERVER's list length, not on a hardcoded id, so re-adding a model server-side brings the
+  // llm/seam.ts), so the whole label comes out. The test is on the SERVER's list length, not on a hardcoded id, so re-adding a model server-side brings the
   // selector back with no frontend release.
   const showModelPicker = choices.length > 1;
   const generate = useGeneratePeriodReport(workspaceId, periodKey);
   // Mount-shared in-flight state. `generate.isPending` is per-mount and resets to "Generate" the
-  // moment this component remounts (a sub-tab switch mid-run), which invites a second BILLED POST
+  // moment this component remounts (a sub-tab switch mid-run), which invites a second model run
   // — the CiAnalysisCard lesson. The mutation KEY is what two mounts share.
   const running =
     useIsMutating({ mutationKey: periodReportGenerateMutationKey(workspaceId, periodKey) }) > 0;
 
-  const usage = useAiUsage(true);
-  const outOfCredits =
-    usage.data?.summaryTurnLimit != null && (usage.data.summaryTurnsRemaining ?? 0) <= 0;
-
-  const blocked =
-    workspaceId == null || periodKey == null || outOfCredits || running || reportLoading;
+  const blocked = workspaceId == null || periodKey == null || running || reportLoading;
   const result = generate.data;
 
   return (
@@ -1181,33 +1160,15 @@ function GenerateControls({
             </select>
           </label>
         )}
-        {/* The estimate sits BESIDE the selector and updates as it changes, so a switch that
-            costs several times more is visible before the click rather than in next month's
-            usage. SERVED, not computed here — the prices and the token envelope are the
-            server's, and a second copy of either only ever produces a differently-wrong promise
-            about money. Credits, never dollars: the app's one currency for AI spend.
-            ⚠ It stays mounted when the selector is HIDDEN: with one model there is nothing to
-            switch between, but a button about to spend credits must still say how many. The
-            tooltip then carries the model name the vanished label used to. */}
-        {estimate && (
-          <span
-            className="text-[11px] text-gray-400"
-            title={`Estimated cost of one generation with ${reportModelLabel(estimate.model)}, priced by the server`}
-          >
-            ≈ {estimate.estimatedCredits} credits
-          </span>
-        )}
         <button
           type="button"
           onClick={() => generate.mutate(model != null ? { model } : {})}
           disabled={blocked}
           className="rounded border border-ai-border px-2 py-0.5 text-[11px] font-medium text-ai-signal hover:border-ai-signal/60 hover:bg-ai-surface-2 disabled:opacity-50"
           title={
-            outOfCredits
-              ? 'Out of AI credits — resets next month'
-              : hasReport
-                ? 'Write this period up again. The stored figures are immutable; regenerating replaces the narrative for this model.'
-                : 'Compute this period and write it up. The first generation also backfills earlier periods (figures only, no AI, no credits) so the forecast has a series.'
+            hasReport
+              ? 'Write this period up again. The stored figures are immutable; regenerating replaces the narrative for this model.'
+              : 'Compute this period and write it up. The first generation also backfills earlier periods (figures only, no AI) so the forecast has a series.'
           }
         >
           {running
@@ -1239,35 +1200,14 @@ function GenerateControls({
           No sprint cadence is configured, so there is no period to report on.
         </div>
       )}
-      {result?.creditsExhausted && (
-        <div className="text-[11px] text-amber-600 dark:text-amber-400">
-          Out of AI credits this month — the figures were computed and stored, but the write-up was
-          skipped. Narration resumes on the 1st.
-        </div>
-      )}
-      {/* THE ACTUAL SPEND, after the fact — the RECEIPT that pairs with the quote above, taken
-          from the server's own metering (`spend`) rather than by re-quoting the estimate, which
-          would only ever be the guess printed back at the reader.
-          `spend` is ABSENT on a cached or credit-blocked run because neither charged anything, and
-          that absence is meaningful: it renders as "nothing spent", never as 0 credits charged. A
-          silent no-op button reads as broken, which is why the cache hit says so out loud.
-          The remaining balance is deliberately NOT quoted at this instant: the mutation
-          invalidates ['ai-usage'] and the refetch lands a moment later, so any number here would
-          be the PRE-run one. Track usage (above) shows the live figure. */}
-      {/* ⚠ `generated === false` is OVERLOADED and cannot stand alone as "cache hit": it is also
-          false when credits ran out and when no cadence is configured, both of which already print
-          their own line above. Keying the cache message on it alone put "Out of AI credits this
-          month" and "Already had this one — served from cache" on screen together, which is not
-          two facts but a contradiction. */}
-      {result != null && !generate.isError && !result.creditsExhausted && !result.cadenceMissing && (
+      {/* What ran. A silent no-op button reads as broken, which is why the cache hit says so out
+          loud. ⚠ `generated === false` is also false when no cadence is configured, which already
+          prints its own line above — so that case is excluded here. */}
+      {result != null && !generate.isError && !result.cadenceMissing && (
         <div className="text-[11px] text-gray-400">
           {result.generated === false
-            ? 'Already had this one — served from cache, nothing spent.'
-            : result.spend
-              ? `Generated with ${result.spend.model} · ${result.spend.credits} credits${
-                  usage.data?.summaryTurnLimit != null ? ' · 1 monthly summary turn' : ''
-                }.`
-              : `Generated with ${result.report?.model ?? effectiveModel ?? 'the default model'}.`}
+            ? 'Already had this one — served from cache.'
+            : `Generated with ${result.spend?.model ?? result.report?.model ?? effectiveModel ?? 'the default model'}.`}
         </div>
       )}
     </div>
@@ -1335,21 +1275,17 @@ function Skeleton(): JSX.Element {
 
 // ── The panel ────────────────────────────────────────────────────────────────────────────────
 export function PeriodReportsPanel(): JSX.Element | null {
-  const { periodReports } = useProCapabilities();
-  // Entitlement, resolved AGAINST /api/me's flight rather than read naked — see the gate below.
-  // A hook, so it sits above every early return (hooks-order rule).
-  const gate = useProGateState(periodReports);
   // null until the workspaces query resolves the account's Default. Nothing workspace-scoped may
   // render — and nothing billable may fire — before then.
   const workspaceId = useFilters((s) => s.workspaceId);
 
   // ⚠ THE GRAIN IS A READING CHOICE, HELD IN THE STORE AND MIRRORED TO `?reportGrain=`. It is
   // deliberately NOT the sprint-cadence setting: that is a stored per-workspace fact which also
-  // grids the FREE flow-metrics comparison window on another tab, so overloading it would move a
+  // grids the flow-metrics comparison window on another tab, so overloading it would move a
   // number on a screen nobody was looking at.
   const grain = useFilters((s) => s.insightsReportGrain);
   const setGrain = useFilters((s) => s.setInsightsReportGrain);
-  const list = usePeriodReportsList(periodReports, workspaceId, grain);
+  const list = usePeriodReportsList(true, workspaceId, grain);
   const periods = useMemo<PeriodReportListItem[]>(() => list.data?.periods ?? [], [list.data]);
   // Stored artifacts this workspace's CURRENT cadence grid cannot name — reports generated under a
   // cadence the team has since changed, plus anything aged past the look-back horizon. They are
@@ -1397,13 +1333,13 @@ export function PeriodReportsPanel(): JSX.Element | null {
   // hooks are always called (hook order), and exactly one is enabled.
   const selectedItem = periods.find((p) => p.periodKey === selectedKey) ?? null;
   const isMonthToDate = selectedItem?.inProgress === true;
-  const stored = usePeriodReport(periodReports && !isMonthToDate, workspaceId, selectedKey);
-  const live = usePeriodMonthToDate(periodReports && isMonthToDate, workspaceId);
+  const stored = usePeriodReport(!isMonthToDate, workspaceId, selectedKey);
+  const live = usePeriodMonthToDate(isMonthToDate, workspaceId);
   const report = isMonthToDate ? live : stored;
 
   // The "Copy as Markdown" text — the report rendered by the deterministic exporter, built from
   // the SAME METRIC_META/REFUSAL_TEXT/rowFigures this panel renders (periodReportMarkdown.ts).
-  // Hook sits above the capability early-return (hooks-order rule); empty string ⇒ CopyButton
+  // Hook sits above the early returns (hooks-order rule); empty string ⇒ CopyButton
   // renders nothing.
   const reportMarkdown = useMemo(() => {
     const r = report.data?.report;
@@ -1418,44 +1354,9 @@ export function PeriodReportsPanel(): JSX.Element | null {
     }
   }, [report.data]);
 
-  // ⚠ THE TWO HALVES OF THIS GATE ARE DIFFERENT SITUATIONS AND MUST STAY SPLIT.
-  //
-  // No capability = a FREE account. Since Reports became a free-visible rail entry (the flow
-  // metrics live above this panel), a free user reaches this code every time they open the pane,
-  // so silence here is a missing explanation rather than a clean absence.
-  //
-  // ── WHAT CHANGED: VISIBLE-BUT-LOCKED, IN BOTH MODES ────────────────────────────────────────
-  // This used to answer with a one-line nudge in cloud and NOTHING in OSS/local, on the reasoning
-  // that a local install has nothing to upgrade to. Two things were wrong with that. The reader
-  // of a local install was left staring at a "Period reports [Pro]" heading with a blank space
-  // under it, which reads as a broken pane rather than an unbought one; and "local" is not
-  // "unpaid" — a flag-less `pnpm dev` with the plugin checked out reports `periodReports: false`
-  // too, so the silent branch was also what a developer saw. Both now land on the same locked
-  // pane, which states what the view answers and carries ONE link. `ProLockPanel` picks the URL
-  // per deployment mode (same-origin `/pricing` in cloud, the public site in local, because local
-  // never serves the landing) — that decision lives in exactly one place, not here.
-  //
-  // Routed through `useProGateState` rather than `!periodReports` directly: `useProCapabilities()`
-  // is an ALL-FALSE literal until /api/me resolves, so the naked check paints "See what Pro
-  // includes" for one frame on every cold load OF AN ACCOUNT THAT PAYS.
-  if (gate === 'pending') return <Skeleton />;
-  if (gate === 'locked') {
-    return (
-      // ⚠ A testid DISTINCT from the entitled body's `period-reports` — same-id states are how a
-      // screenshot pipeline photographs a lock screen and ships it as marketing.
-      <ProLockPanel heading="Period reports" testId="period-reports-locked">
-        A stored report for each completed period: what moved since the one before it, which of
-        those movements the history can actually stand behind, and a forecast that refuses rather
-        than guessing when the data is too thin.
-      </ProLockPanel>
-    );
-  }
-  // `enabled: false` from the route is the OTHER case entirely: the capability IS on (this query
-  // only runs when it is), and the plugin has self-disabled its reports surface — a stale
-  // /api/me, or `DIGEST_ENABLED` flipping. That is a PAYING account, so it must render nothing
-  // rather than either the "no periods yet" empty state (copy that invites a click which cannot
-  // work) or, worse, the LOCKED PANE above — which would invite a customer who has already paid
-  // to go and pay again. Never collapse these two branches into one "no reports" state.
+  // `enabled: false` from the route: the reports surface is switched off server-side. Render
+  // nothing rather than the "no periods yet" empty state, whose copy invites a click which cannot
+  // work.
   if (list.data?.enabled === false) return null;
 
   // Fold `isPlaceholderData` into loading everywhere: a stale window's numbers under a new

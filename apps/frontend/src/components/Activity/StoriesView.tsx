@@ -24,7 +24,7 @@ import {
 // Reports → "Stories" — how well the team's TICKETS were written.
 //
 //   • The two charts and every story, over the workspace's REPORTING WINDOW (GET /api/stories,
-//     core, Pro on `periodReports`), named by its own caption. (The agentic story report that used
+//     core), named by its own caption. (The agentic story report that used
 //     to head this tab was removed 2026-10-18.)
 //
 // ⚠ THE WINDOW AND THE LISTS ARE THE SERVER'S. The response echoes the window (named through the

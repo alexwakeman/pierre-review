@@ -99,7 +99,7 @@ export function ResolverPanes({
   fileErrors: Readonly<Record<number, string>>;
   loadFile: (index: number) => Promise<ConflictFileContent | null>;
   onRetryFile: (index: number) => void;
-  /** `suggestionId` → the accepted Pro suggestion's lines, for READING. The store holds only the
+  /** `suggestionId` → the accepted suggestion's lines, for READING. The store holds only the
    *  opaque handle (the text lives in the server's session), so the centre pane needs them handed
    *  in; a `'suggestion'` decision whose lines are not to hand renders as undecided rather than as
    *  something else's text. Absent until the per-hunk suggestion ships. */

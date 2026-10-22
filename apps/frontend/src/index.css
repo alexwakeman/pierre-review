@@ -1236,7 +1236,7 @@ body {
   animation: activity-flash 1.8s ease-out forwards;
 }
 
-/* A quick fade-in for freshly-regenerated Pro digest text (keyed by generatedAt so it
+/* A quick fade-in for freshly-regenerated digest text (keyed by generatedAt so it
    replays on each new summary). The old text stays readable — dimmed — until the new
    text arrives, then this eases it in. */
 @keyframes digest-fade-in {
@@ -1258,7 +1258,7 @@ body {
   }
 }
 
-/* ---- Pro digest refresh: skeleton placeholder ---- */
+/* ---- Digest refresh: skeleton placeholder ---- */
 /* While a card's summary regenerates we drop the old text and show a faint placeholder
    with a slow, gentle "shine swipe". Kept DELIBERATELY subtle (low-opacity fill, a
    soft low-alpha sweep, a slow period) — it should read as "quietly working", not
@@ -1489,8 +1489,8 @@ body {
    result through a red ribbon, all three describing one accepted change, and it put a wash over a
    pane with no lines and no button. `.mr-filler`'s hatch owns "nothing here" alone now.
 
-   ⚠ `--mr-conflict` IS NOT `--ai-signal`. Vermilion is the AI surface's accent and the Pro badge
-   draws in it; a merge conflict is not an AI marker, and borrowing that hue would make every
+   ⚠ `--mr-conflict` IS NOT `--ai-signal`. Vermilion is the AI surface's accent; a merge
+   conflict is not an AI marker, and borrowing that hue would make every
    contested hunk look like something a model produced.
 
    ⚠ SPACE-SEPARATED CHANNELS. `rgb(var(--mr-change) / 0.12)` only composites when the variable

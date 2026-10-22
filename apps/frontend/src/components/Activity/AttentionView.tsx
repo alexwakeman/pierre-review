@@ -11,8 +11,6 @@ import {
   useAttentionCards,
   useAttentionLiveness,
 } from '../../hooks/useAttentionCards.js';
-import { useAiUsage } from '../../hooks/useAiUsage.js';
-import { useMe, useProCapabilities } from '../../hooks/useTriage.js';
 import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
 import {
   useGenerateWorkPlan,
@@ -41,9 +39,9 @@ import { MyTurnDismissedList } from './MyTurnDismissedList.js';
 import { PendingGuideModal, PendingOrderInfo } from './PendingInfo.js';
 import { capSentence } from './pendingExplain.js';
 
-// The **Pending** rail entry (CORE/free) — the attention cards (your turn / stalled reviews
-// / untouched threads / reviewer load / needs-a-reviewer) that used to sit under the Pro Insights
-// AI panels, now a first-class rail entry available on every tier. Scoped to the ACTIVE WORKSPACE
+// The **Pending** rail entry — the attention cards (your turn / stalled reviews / untouched
+// threads / reviewer load / needs-a-reviewer) that used to sit under the Insights AI panels, now a
+// first-class rail entry. Scoped to the ACTIVE WORKSPACE
 // (a plain id, the only scope this app has); the bot cards live in the free Bots console, so
 // they're excluded here.
 const BOT_CARD_KINDS = new Set<InsightCard['kind']>(['bot_signal', 'bot_only_review']);
@@ -323,26 +321,20 @@ export function AttentionView(): JSX.Element {
   }, [data?.cards, view.cards]);
   useAttentionLiveness(workspaceId, livenessPrIds, !isLoading && !isError);
 
-  // ── THE PRO NARRATION (optional, additive) ────────────────────────────────────────────────
+  // ── THE WORK-PLAN NARRATION (optional, additive) ──────────────────────────────────────────
   //
-  // ⚠ EVERYTHING ELSE ON THIS SCREEN IS THE FREE PRODUCT AND MUST STAY THAT WAY. The tabs, their
-  // counts and their order all come from `/api/attention` alone. With the Pro submodule absent,
-  // `useWorkPlan` self-gates on the capability and never fetches, every value below is undefined,
-  // and the screen is complete.
+  // ⚠ The tabs, their counts and their order all come from `/api/attention` alone; the screen is
+  // complete without the narration. The narration runs on the reader's own Claude, so it shows
+  // only where agentic AI is enabled.
   //
-  // The plan still picks its items across kinds (its evidence is the Pro seam's, unchanged); its
-  // headline sits above the tabs and each `why` line lands on its card in whichever tab the card
-  // lives.
-  const { workPlan: canNarrate } = useProCapabilities();
-  const isCloud = useMe().data?.deploymentMode === 'cloud';
+  // The plan still picks its items across kinds; its headline sits above the tabs and each `why`
+  // line lands on its card in whichever tab the card lives.
+  const canNarrate = aiEnabled;
   const wp = useWorkPlan(workspaceId, canNarrate);
   const generate = useGenerateWorkPlan(workspaceId);
   // ⚠ THE SHARED MUTATION KEY, never a per-mount `isPending`: a per-mount flag resets the button
-  // to "Plan my day" on a tab switch mid-run, which invites a second BILLED POST.
+  // to "Plan my day" on a tab switch mid-run, which invites a second model run.
   const busy = useWorkPlanGenerating(workspaceId);
-  const usage = useAiUsage(canNarrate);
-  const outOfCredits =
-    usage.data?.summaryTurnLimit != null && (usage.data.summaryTurnsRemaining ?? 0) <= 0;
   const plan = wp.data?.enabled ? (wp.data.plan ?? null) : null;
 
   // The join: a narration step names a WORK-PLAN row id; the board renders CARDS. `cardId` is the
@@ -365,11 +357,9 @@ export function AttentionView(): JSX.Element {
 
   const notice = generate.data?.throttled
     ? 'A plan is already being written — the latest shows here shortly.'
-    : generate.data?.creditsExhausted
-      ? 'Out of AI credits this month — the plan below is the last one written.'
-      : generate.data?.empty
-        ? 'Nothing needs doing in this workspace right now.'
-        : null;
+    : generate.data?.empty
+      ? 'Nothing needs doing in this workspace right now.'
+      : null;
 
   // ── "HOW IS THIS ORDERED" ─────────────────────────────────────────────────────────────────
   const [guideOpen, setGuideOpen] = useState(false);
@@ -471,7 +461,7 @@ export function AttentionView(): JSX.Element {
         <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-200">Pending</h2>
         {/* How the board is gathered and ordered — a short popover with a way into the guide. */}
         <PendingOrderInfo onOpenGuide={openGuide} rules={data?.rules} />
-        {/* ── the Pro narration's controls + honesty signals ──────────────────────────────
+        {/* ── the narration's controls + honesty signals ──────────────────────────────
             ⚠ `stale` matters: the tabs re-order on the attention query's own clock while the
             prose does not, so without it the italic lines would silently describe a list that
             has moved. */}
@@ -495,13 +485,8 @@ export function AttentionView(): JSX.Element {
             <button
               type="button"
               onClick={() => generate.mutate()}
-              disabled={outOfCredits}
               className="rounded bg-ai-signal px-2.5 py-0.5 text-[11px] font-semibold text-white hover:opacity-90 disabled:opacity-50 dark:text-gray-950"
-              title={
-                outOfCredits
-                  ? 'Out of AI credits — resets next month'
-                  : 'Have the model say why some items are worth doing now. The tabs, figures and order are computed either way.'
-              }
+              title="Have the model say why some items are worth doing now. The tabs, figures and order are computed either way."
             >
               {plan != null ? (
                 <span className="inline-flex items-center gap-1">
@@ -514,17 +499,6 @@ export function AttentionView(): JSX.Element {
             </button>
             )}
           </div>
-        )}
-        {/* Capability off: cloud gets ONE line, OSS/local gets nothing at all (absence, never an
-            advert). ⚠ IT MUST NOT IMPLY THE ORDER IS PRO — the order is free; only the sentences
-            are not. */}
-        {!canNarrate && isCloud && !isLoading && !isError && (data?.cards.length ?? 0) > 0 && (
-          <span className="ml-auto text-[11px] text-gray-500 dark:text-gray-400">
-            <span className="mr-1 rounded bg-ai-signal/15 px-1 text-[11px] font-semibold text-ai-signal">
-              Pro
-            </span>
-            Have the model say why some of these come first.
-          </span>
         )}
       </div>
 

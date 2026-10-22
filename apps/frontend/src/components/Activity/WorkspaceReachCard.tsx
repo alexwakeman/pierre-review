@@ -12,12 +12,10 @@ import { InfoButton } from '../InfoModal.js';
 // SAME resolver the chip on every board card calls, so this card and those chips can never
 // disagree, and the Settings sensitivity dial repaints it live with no cache invalidation.
 //
-// ── FREE ON EVERY TIER ───────────────────────────────────────────────────────────────────────
+// ── WHERE IT MOUNTS ──────────────────────────────────────────────────────────────────────────
 //
-// No `ProGate`, no capability read, no 402 — blast radius is CORE and so is its home. It mounts
-// inside `WorkspaceRepoActivityCharts`, i.e. in `WorkspaceFlowMetrics`, never inside
-// `WorkspaceMetricsPanel` (which is ALSO mounted per-repo behind a Pro gate, where a per-repo
-// breakdown is one row for paying accounts only).
+// Inside `WorkspaceRepoActivityCharts`, i.e. in `WorkspaceFlowMetrics`, never inside
+// `WorkspaceMetricsPanel` (which is ALSO mounted per-repo, where a per-repo breakdown is one row).
 //
 // ── THE POPULATION IS "MERGED IN THE REPORTING WINDOW" ───────────────────────────────────────
 //

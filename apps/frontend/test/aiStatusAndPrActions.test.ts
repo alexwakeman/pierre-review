@@ -99,7 +99,6 @@ describe('This Sprint refresh: the ticket-checks note', () => {
     expect(ticketChecksNote({ started: 1, skipped: null })).toBe('Checking 1 ticket against its pull requests.');
     expect(ticketChecksNote({ started: 3, skipped: null })).toBe('Checking 3 tickets against their pull requests.');
     expect(ticketChecksNote({ started: 0, skipped: 'no_credential' })).toBe('Ticket checks need Claude set up first.');
-    expect(ticketChecksNote({ started: 0, skipped: 'credits' })).toBe('No credits left for ticket checks.');
   });
 });
 

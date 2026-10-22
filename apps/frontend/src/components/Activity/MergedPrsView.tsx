@@ -18,7 +18,6 @@ import { reportingWindowCaption, reportingWindowPhrase, windowDates } from './re
 //
 // ⚠ THE WINDOW IS THE SERVER'S, never re-derived here: the response echoes it and the header names
 // it through the shared reporting-window spelling, so this tab and the flow tiles say the same thing.
-// FREE on every tier (the This Sprint rail line has no Pro gate; the route never 402s).
 // The repo dropdown narrows client-side and is this tab's OWN state (not Open PRs' store filter,
 // not the Timeline picker). The Group by ticket / List choice is shared with Open PRs (one
 // per-viewer preference).

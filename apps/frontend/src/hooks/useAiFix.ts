@@ -12,8 +12,8 @@ import { api } from '../api/client.js';
 import { sseStream } from '../api/sse.js';
 import { invalidateAfterPrWrite } from './prCacheSync.js';
 
-// Query/mutation hooks for the AI Fix tab. Mirrors useClaudeReview; every query's
-// `enabled` is gated on the relevant Pro capability by the caller.
+// Query/mutation hooks for the AI Fix tab. Mirrors useClaudeReview; every query's `enabled` is
+// gated by the caller.
 
 export function useAiFix(prId: number | null, enabled: boolean) {
   return useQuery<AiFixResponse>({

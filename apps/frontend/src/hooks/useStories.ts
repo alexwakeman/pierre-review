@@ -2,22 +2,17 @@ import { skipToken, useQuery } from '@tanstack/react-query';
 import type { StoriesResponse } from '@pierre-review/shared';
 import { api } from '../api/client.js';
 import { workspaceKey } from './useActivity.js';
-import { useProCapabilities } from './useTriage.js';
 
-// Reports → Stories. Pro with the rest of Reports (`periodReports`): the route 402s without it, so
-// the hook ANDs the capability into its own `enabled` — the SPA must never learn the paywall by
-// polling a 402. (The agentic story report that used to head this tab was removed 2026-10-18.)
+// Reports → Stories. (The agentic story report that used to head this tab was removed 2026-10-18.)
 
 export function storiesKey(workspaceId: number | null): [string, string] {
   return ['stories', workspaceKey(workspaceId)];
 }
 
 export function useStories(workspaceId: number | null) {
-  const { periodReports } = useProCapabilities();
   return useQuery<StoriesResponse>({
     queryKey: storiesKey(workspaceId),
     queryFn: workspaceId == null ? skipToken : () => api.stories(workspaceId),
-    enabled: periodReports,
     // Folded from synced rows; it can only move when a sync lands.
     staleTime: 60_000,
     refetchInterval: 5 * 60_000,

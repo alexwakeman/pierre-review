@@ -162,9 +162,8 @@ describe('the reach card, by source guard', () => {
     expect(REACH).toMatch(/with reach unknown/);
   });
 
-  it('is free on every tier', () => {
-    // No ProGate, no capability read, no 402: blast radius is CORE and so is its home. The Reports
-    // rail entry is ungated precisely because these free metrics live there.
+  it('carries no gate', () => {
+    // No capability read and no lock: blast radius renders for everyone.
     for (const src of [REACH, FOLD, HOOK, ACTIVITY]) {
       expect(src).not.toMatch(/^import .*ProGate/m);
       expect(src).not.toMatch(/<ProGate|<ProLockPanel|useProCapabilities\(|useProGateState\(/);

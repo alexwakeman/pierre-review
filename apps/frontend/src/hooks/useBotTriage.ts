@@ -14,7 +14,6 @@ import type {
 } from '@pierre-review/shared';
 import { api } from '../api/client.js';
 import { ACTIVITY_GC_TIME, workspaceKey } from './useActivity.js';
-import { useProCapabilities } from './useTriage.js';
 import { invalidateAfterPrWrite } from './prCacheSync.js';
 
 // Per-request cap on the workspace-wide resolve: the client chunks a larger reviewed selection into
@@ -28,21 +27,8 @@ const RESOLVE_CHUNK_SIZE = 25;
 // gcTime only keeps the last snapshot resident so the charts/table repaint WARM immediately
 // instead of blank. Reuses the Activity ceiling (45 min).
 
-// The bot-triage read/write hooks — deterministic, no AI on either tier. Every getter is
+// The bot-triage read/write hooks — deterministic, no AI. Every getter is
 // account-scoped server-side; these are plain DB reads that refresh on the sync cadence.
-//
-// ── WHICH OF THESE ARE FREE AND WHICH ARE PAID ──────────────────────────────────────────────────
-// FREE (`botTriage`): the reviewer listing + the judgement/identity write/reset hooks (Feed → Bot
-// classification is free so an `npx` install can do it; `useSetReviewerCost`'s route 402s without
-// `botDepth`, and its only caller renders the price editor only with it), and per-PR dedup.
-// Free means free — no `enabled` gate on any of them.
-//
-// PAID (Bots Monitoring is Pro as a whole): `useBotAnalytics` (on the union `botDepth ||
-// periodReports`), the bot-only-PR list, the resolvable bot-thread read, `useBotBehaviour` (whose
-// route lives in the plugin), and the volume family and per-vendor / flagging drill-downs, whose
-// hooks live in useBotVolume.ts, useBotVendorPrs.ts and useBotFlagging.ts. Those routes 402, so
-// every hook reaching one takes an `enabled` that its CALLER ANDs with the capability, or a mounted
-// component re-fires the 402 on its own cadence. `useBotBehaviour` below gates itself.
 
 // ── THE TWO SCOPE INPUTS, AND WHY THEY ARE SEPARATE SLOTS ───────────────────────────────────────
 // `workspaceId` decides the VERDICT — who counts as an automated reviewer, what its vendor and
@@ -74,16 +60,6 @@ export function repoKeySlot(repoIds?: number[] | null): string {
 // ⚠ THE PRICE IS PER WORKSPACE. Within this one response there is exactly one row per actor, so a
 // total here is a plain sum — but the same actor's row in another workspace may legitimately hold
 // a different number, and nothing may add those together. `enabled` lets the caller gate the fetch.
-//
-// ── PAID: EVERY CALLER PASSES ITS CAPABILITY AS `enabled` ────────────────────────────────────────
-// `/api/bot-analytics` 402s without `botDepth || periodReports` (it no longer narrows for a free
-// account), so every mount ANDs the capability into `enabled` — BotsView, BotRoiPanel,
-// BotPrsDetail, BotFlaggingDetail. A new caller that leaves it out polls a 402 every five minutes.
-//
-// ⚠ THE CLIENT DECIDES WHAT TO DRAW FROM `/api/me`, NEVER BY SNIFFING THIS PAYLOAD. The zeroed
-// `totals` fields are a wire artefact of three REQUIRED keys on `BotAnalyticsResponse`, not a
-// measurement — the paid consumers (BotRoiPanel and its drill-downs) gate on the capability and
-// never render them.
 export function useBotAnalytics(
   workspaceId: number | null,
   window: BotWindowKind,
@@ -106,10 +82,7 @@ export function useBotAnalytics(
 
 // Bot BEHAVIOUR analytics (TTFR / LoC-to-comments / 24h heatmap / follow-ups) over the selected
 // window. Same workspace/repoIds resolution and the same two-slot key rule as useBotAnalytics.
-// Deterministic compute, but the SURFACE is Pro depth (plan P0.2): the route moved to
-// /api/pro/bot-behaviour behind the `botDepth` capability, so this hook gates the fetch on it —
-// with botDepth false (OSS: the route doesn't exist; free cloud: it would 402) NOTHING is
-// fetched and no error surfaces; consumers simply render nothing. Return shape is unchanged.
+// Deterministic compute (`/api/pro/bot-behaviour`).
 // `botUserId` narrows the response to ONE bot (the per-bot depth drill-down tab, plan P1.1/C1) —
 // the server admits only ids in the workspace's review-role set, so a stale id yields the empty
 // response, never someone else's data. It gets its OWN key slot (`bot:<id>` — the refineQueryKey
@@ -122,7 +95,6 @@ export function useBotBehaviour(
   repoIds?: number[] | null,
   botUserId?: number | null,
 ) {
-  const { botDepth } = useProCapabilities();
   return useQuery<BotBehaviourResponse>({
     queryKey: [
       'bot-behaviour',
@@ -135,7 +107,7 @@ export function useBotBehaviour(
       workspaceId == null
         ? skipToken
         : () => api.botBehaviour(window, workspaceId, repoIds, botUserId),
-    enabled: enabled && botDepth,
+    enabled,
     refetchInterval: 5 * 60_000,
     refetchIntervalInBackground: false,
     staleTime: 60_000,
@@ -172,12 +144,9 @@ export function useBotOnlyPrs(
 // tag, ThreadList's resolve count and the bot colour map. There is no rows/reviewers split any
 // more — one grain, one row.
 //
-// ⚠ FREE ROUTE, PAID COLUMNS. The listing itself must never be gated — it is the identity and
-// colour backbone for the whole SPA (feed vendor tags, ThreadList, BotTriageCard, the People
-// picker) and it backs the free classification screen. But the PRICE columns
-// (`costMonthlyUsd` / `effectiveMonthlyUsd`) arrive null-and-'flat' for an account without
-// `botDepth` — the server strips them, so a consumer that shows a price is showing one the account
-// is entitled to rather than one the client was trusted to hide.
+// ⚠ The listing itself must never be gated — it is the identity and colour backbone for the whole
+// SPA (feed vendor tags, ThreadList, BotTriageCard, the People picker) and it backs the
+// classification screen.
 //
 // ⚠ THE WORKSPACE IS THE GRAIN, so it is REQUIRED and it is in the key. Identity used to be
 // account-wide, which is why several callers deliberately passed nothing; under this model an

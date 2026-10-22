@@ -90,7 +90,7 @@ export function FlowPointersPanel({
         <p className="mt-3 text-xs text-ai-ink">Nothing merged in this window to write about.</p>
       ) : result == null ? (
         <p className="mt-3 text-xs text-ai-ink">
-          {q.isLoading ? 'Loading…' : 'No pointers for this window yet. Writing them uses AI credits.'}
+          {q.isLoading ? 'Loading…' : 'No pointers for this window yet.'}
         </p>
       ) : (
         <ul className="mt-3 space-y-3">
@@ -122,9 +122,6 @@ export function FlowPointersPanel({
       )}
       {last?.throttled && (
         <p className="mt-1 text-xs text-ai-ink">Written moments ago — try again in a minute.</p>
-      )}
-      {last?.creditsExhausted && (
-        <p className="mt-1 text-xs text-ai-ink">Out of AI credits for this month.</p>
       )}
       {generate.isError && (
         <p className="mt-1 text-xs text-rose-700 dark:text-rose-400">

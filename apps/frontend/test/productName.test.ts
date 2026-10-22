@@ -3,7 +3,7 @@
 //
 // `BOT_VENDOR_META` is one of THREE copies of the automated-reviewer label map — the others are
 // `labelFor` in apps/backend/src/sync/reviewer-classify.ts (which also persists the label) and
-// `BOT_LABELS` in the Pro plugin's Slack digest. They had drifted on both unbranded keys: the
+// `BOT_LABELS` in the plugin's Slack digest. They had drifted on both unbranded keys: the
 // Slack copy was still emitting "Pierre · Claude" long after the rename, and "In-house AI" after
 // the other two had rejected that wording. The three unbranded labels now come from shared.
 //

@@ -97,7 +97,6 @@ import type {
   RepoWorkspaceMetricsResponse,
   WorkspaceMetricsDetailResponse,
   WorkspaceMetricsResponse,
-  AiUsageResponse,
   BotWindowKind,
   BotAnalyticsResponse,
   BotThemesResponse,
@@ -915,25 +914,25 @@ export const api = {
       '/api/me/my-turn-settings',
       jsonBody('PUT', { settings } as MyTurnSettingsBody),
     ).then((r) => handle<MyTurnSettingsResponse>(r)),
-  // Workspace review-intelligence "Insights" (Pro; workspaceInsights capability) — the attention
-  // CARDS (+ the sprint report). The flow-metric HEADER moved OUT to the free
+  // Workspace review-intelligence "Insights" — the attention CARDS (+ the sprint report). The
+  // flow-metric HEADER moved OUT to
   // /api/workspace-metrics, the Retro panel was deleted, and cross-workspace comparison is the
   // Reports "By workspace" axis (carried on `periodReport`).
   workspaceInsights: (workspaceId: number) =>
     get<WorkspaceInsightsResponse>(withQuery('/api/pro/insights', workspaceParam(workspaceId))),
   // The workspace flow-metric header (DORA-ish tiles + trends) AND the per-repo "where is the work
-  // happening?" breakdown — CORE/free, both rendered in the "Flow metrics" section on Reports. One
+  // happening?" breakdown, both rendered in the "Flow metrics" section on Reports. One
   // response, one scope, one window; it also echoes the resolved `workspaceId`.
   workspaceMetrics: (workspaceId: number) =>
     get<WorkspaceMetricsResponse>(withQuery('/api/workspace-metrics', workspaceParam(workspaceId))),
   // This Sprint → "Merged so far" — every PR merged in the workspace's REPORTING WINDOW, as Open PRs
-  // card rows. FREE (no 402); one scope, one window, echoed.
+  // card rows. One scope, one window, echoed.
   mergedPrs: (workspaceId: number) =>
     get<MergedPrsResponse>(withQuery('/api/merged-prs', workspaceParam(workspaceId))),
-  // Reports → Stories (core, Pro on `periodReports`): every ticket with a PR merged in the window.
+  // Reports → Stories: every ticket with a PR merged in the window.
   stories: (workspaceId: number) =>
     get<StoriesResponse>(withQuery('/api/stories', workspaceParam(workspaceId))),
-  // This Sprint (a fixed tab; core, FREE — no route here 402s). The graph GET
+  // This Sprint (a fixed tab). The graph GET
   // stamps the workspace as viewed, which is what lets the worker read its sprint at all. Both GETs
   // are DB only.
   sprintGraph: (workspaceId: number) =>
@@ -986,34 +985,29 @@ export const api = {
       withQuery('/api/attention/liveness', workspaceParam(workspaceId)),
       jsonBody('POST', body),
     ).then((r) => handle<AttentionLivenessResponse>(r)),
-  // The daily brief (CORE/free, counts only — plan P3.1/P3.3). `rollup` adds the per-workspace
-  // counts (the Workspace badges read them); the Pro narration is a SEPARATE synthesis fetch,
+  // The daily brief (counts only — plan P3.1/P3.3). `rollup` adds the per-workspace counts (the
+  // Workspace badges read them); the narration is a SEPARATE synthesis fetch,
   // never this route.
   dailyBrief: (workspaceId: number, rollup: boolean) =>
     get<DailyBriefResponse>(
       withQuery('/api/daily-brief', workspaceParam(workspaceId), rollup ? 'rollup=1' : undefined),
     ),
-  // The Chronology tab (PAID on `periodReports` — the route 402s with `{error:'pro required'}`;
-  // deterministic all the same, no model anywhere behind it): where human review time goes in this
+  // The Chronology tab (deterministic, no model anywhere behind it): where human review time goes in this
   // workspace, as evidence cells with sample floors, plus a NAMED refusal for every kind that could
   // not clear one. `days` is the window; the server clamps it to [7, 90] rather than trusting it,
   // so a bookmarked value can never widen the scan.
-  //
-  // ⚠ `useFlowFindings` gates its `enabled` on the same capability, so an unentitled SPA never
-  // calls this. It polls on a 5-minute interval — an ungated hook would be a 402 on a timer, per
-  // mounted pane, and the panel would report a paywall as "Could not load this workspace's flow."
+
   // `'reporting'` (the panel's default) is the workspace's REPORTING WINDOW, resolved server-side;
   // a number is the fixed 30/60/90-day view.
   flowFindings: (workspaceId: number, window: number | 'reporting' = 'reporting') =>
     get<FlowResponse>(
       withQuery('/api/flow-findings', workspaceParam(workspaceId), flowWindowParam(window)),
     ),
-  // Chronology "Over time" (PAID `periodReports`, same gate as above): the last 26 weeks of the
+  // Chronology "Over time": the last 26 weeks of the
   // same ledger, the event markers and a before/after lens per marked week. Fixed span, no window.
   flowTrend: (workspaceId: number) =>
     get<FlowTrendResponse>(withQuery('/api/flow-trend', workspaceParam(workspaceId))),
-  // The per-metric PR drill-down behind the flow-metric tiles (loaded on tile click) — CORE/free
-  // too, so a Feed tile opens the drill-down for everyone.
+  // The per-metric PR drill-down behind the flow-metric tiles (loaded on tile click).
   workspaceMetricsDetail: (workspaceId: number) =>
     get<WorkspaceMetricsDetailResponse>(
       withQuery('/api/workspace-metrics/detail', workspaceParam(workspaceId)),
@@ -1026,8 +1020,6 @@ export const api = {
   // (`workspaceComparison` / `GET /api/workspace-metrics/compare` were DELETED with the "Compare
   // workspaces" rail entry — cross-workspace comparison is the Reports "By workspace" axis now,
   // carried on `periodReport`'s response as the optional `byWorkspace` field.)
-  // Month-to-date AI-usage rollup (credits, split by seam). Covers all account AI spend.
-  aiUsage: () => get<AiUsageResponse>('/api/pro/ai-usage'),
   // (`sprintReport` / `refreshSprintReport` were REMOVED with `SprintReportCard` (the C7 cut
   // list); the `/api/pro/sprint-report*` plugin routes still exist server-side but have no SPA
   // consumer. `retroReport` / `refreshRetroReport` were REMOVED with the Insights "Retro" panel and its
@@ -1037,7 +1029,7 @@ export const api = {
   repoClaudeReviews: (repoId: number) =>
     get<RepoClaudeReviewsResponse>(`/api/repos/${repoId}/claude-reviews`),
 
-  // ---- Period-over-period reports (Pro `periodReports`; /api/pro/insights/reports/*) ----
+  // ---- Period-over-period reports (/api/pro/insights/reports/*) ----
   // A stored, forwardable artifact for ONE completed sprint-cadence period: its window-pure
   // metric vector, a coverage-stable comparison against the prior period, and a refusable
   // forecast. The two GETs are FREE (plain DB reads of an immutable row — a stale row is
@@ -1093,9 +1085,8 @@ export const api = {
       ),
       jsonBody('POST', body),
     ).then((r) => handle<PeriodReportGenerateResponse>(r)),
-  // ---- The blast-radius impact note (Pro, prSummary) ----
-  // The stored note for this PR. A pure cache read (free); the run POST below is the only billing
-  // path.
+  // ---- The blast-radius impact note ----
+  // The stored note for this PR. A pure cache read; the run POST below is the only model call.
   prAnnotations: (prId: number, kinds?: AnnotationKind[]) =>
     get<PrAnnotationsResponse>(
       withQuery(
@@ -1141,13 +1132,12 @@ export const api = {
   // UI so "sync complete" is not claimed while the model is still scoring what the walk fetched.
   mlStatus: () => get<MlEnrichmentStatus>('/api/ml-status'),
 
-  // ---- Pro per-account settings (packages/pro `pro_settings`; the config modal) ----
+  // ---- Per-account reporting settings (`pro_settings`) ----
   // ⚠ WHAT IS LEFT HERE IS ONE READING PREFERENCE PLUS THE BOT TOGGLES. Three things left this
   // route for the WORKSPACE grain and none of them kept an account-level default beneath it: the
   // Slack digest (plugin 0030), and the sprint cadence + the Jira/Linear tracker (plugin 0031).
   // `sprint.cadenceDays` / `sprint.startDate` / `issue` still ride the read shape but are ALWAYS
   // empty, and the PUT schema STRIPS them silently — write `updateWorkspaceProSettings` instead.
-  // Absent plugin → 404. Only fetched when at least one Pro capability is on.
   proSettings: () => get<ProSettings>('/api/pro/settings'),
   // ⚠ THERE IS NO `updateProSettings` ANY MORE, AND THE ROUTE IT WROTE IS NOT GONE — it simply has
   // nothing left to write. The comparison-window MODE was the last live field on it and moved to
@@ -1157,7 +1147,7 @@ export const api = {
   // for it would be a write that always answers 200 and always changes nothing. Restore it only
   // alongside a field the account grain genuinely owns.
 
-  // ---- The PER-WORKSPACE Pro config (packages/pro `pro_workspace_settings`) ----
+  // ---- The PER-WORKSPACE reporting config (`pro_workspace_settings`) ----
   // ONE route, ONE row: the sprint cadence + phase anchor and the comparison mode. (The Jira/Linear
   // tracker left it for CORE at apiVersion 23 — `workspaceTracker` below.) Properties of the
   // TEAM, so scoped by `?workspace=` like every other
@@ -1566,7 +1556,7 @@ export const api = {
       jsonBody('PUT', { docsInReview } satisfies SetReferenceDocsSettingsBody),
     ).then((r) => handle<ReferenceDocsSettings>(r)),
 
-  // ---- AI Fix (Pro) ----
+  // ---- AI Fix ----
   aiFix: (prId: number) => get<AiFixResponse>(`/api/pro/prs/${prId}/ai-fix`),
   aiFixStatus: (prId: number) =>
     get<AiFixStatusResponse>(`/api/pro/prs/${prId}/ai-fix/status`),
@@ -1766,7 +1756,7 @@ export const api = {
         bounds ? `toMs=${bounds.toMs}` : undefined,
       ),
     ),
-  // ── Bot Tuning Advisor (Pro; /api/pro/advisor/*) ─────────────────────────────────────────
+  // ── Bot Tuning Advisor (/api/pro/advisor/*) ─────────────────────────────────────────
   // Workspace-scoped like the Bots rail (never repo-narrowed — the advisor always covers the
   // whole workspace; the config-PR names its target repo explicitly in the body).
   advisorFindings: (workspaceId: number) =>
@@ -1839,7 +1829,7 @@ export const api = {
     fetch('/api/pro/advisor/config-events', jsonBody('POST', body)).then((r) =>
       handle<{ ok: boolean }>(r),
     ),
-  // The Bots "What they're flagging" AI summary (Pro Haiku) — the revived Themes report, merged
+  // The Bots "What they're flagging" AI summary (Haiku) — the revived Themes report, merged
   // with the deterministic Bots layer. GET is a pure cache read; the refresh POST is the only
   // billing path. `repoIds` narrows the DATA to the per-repo Bots console tab (membership ∩
   // narrow server-side) — sent whenever the array exists, INCLUDING empty (repoIdsParam).
@@ -1862,10 +1852,8 @@ export const api = {
       ),
       jsonBody('POST'),
     ).then((r) => handle<BotThemesResponse>(r)),
-  // Bot behaviour analytics (TTFR / LoC-to-comments / week×hour heatmap / follow-ups). MOVED to
-  // the plugin behind the `botDepth` capability (plan P0.2) — callers gate on it via
-  // useProCapabilities, so with botDepth false this is never fetched (in OSS the route does not
-  // exist at all). Same window/workspace/repoIds wiring as botAnalytics — both scope parameters
+  // Bot behaviour analytics (TTFR / LoC-to-comments / week×hour heatmap / follow-ups). Same
+  // window/workspace/repoIds wiring as botAnalytics — both scope parameters
   // are sent. `botUserId` narrows the whole response to ONE bot (the per-bot depth drill-down
   // tab, plan P1.1/C1) — the server admits only ids in the workspace's review-role set.
   botBehaviour: (
@@ -1883,15 +1871,14 @@ export const api = {
         botUserId != null ? `botUserId=${botUserId}` : undefined,
       ),
     ),
-  // The PEER COHORT distributions (`botDepth`): the bundled `bot_monitor.benchmark_fit` artifact
+  // The PEER COHORT distributions: the bundled `bot_monitor.benchmark_fit` artifact
   // from packages/ml, projected. ⚠ NO WORKSPACE PARAMETER AND NO `workspaceId` ECHO — deliberate:
   // the artifact is identical for every tenant and names no repository and no actor, so there is
   // no scope to narrow and no cross-tenant surface. Nothing about the caller reaches the response.
   //
   // `cells` selects `vendor:band` cohorts (at most BOT_BENCHMARK_MAX_CELLS — the server 400s over
   // the cap rather than truncating, because a truncated list reads as "those cohorts do not
-  // exist"). Omit it for the manifest alone, which is what the picker needs. Callers must AND the
-  // `botDepth` capability into their own `enabled`, or the SPA polls a 402.
+  // exist"). Omit it for the manifest alone, which is what the picker needs.
   botBenchmark: (cells?: Array<{ vendor: string; band: number }>) =>
     get<BotBenchmarkResponse>(
       withQuery(
@@ -1901,14 +1888,13 @@ export const api = {
           : undefined,
       ),
     ),
-  // The CUSTOMER side of the benchmark (`botDepth`): the caller's own (repository × vendor) metric
+  // The CUSTOMER side of the benchmark: the caller's own (repository × vendor) metric
   // vector, folded over the CORPUS's populations, placed in an activity band and compared against
   // the cell. ⚠ A SIBLING OF `botBenchmark`, NOT AN OPTION ON IT — the cohort response is identical
   // for every tenant and takes no scope; this one IS tenant data, so it is workspace-scoped and
   // echoes `workspaceId`, and its rate tier is argued from a database fold rather than a response
   // body. `repoIds` narrows the DATA only (server-side it is intersected with the workspace's
-  // membership); send it whenever the array exists, INCLUDING when empty. Callers must AND the
-  // `botDepth` capability into their own `enabled`, or the SPA polls a 402.
+  // membership); send it whenever the array exists, INCLUDING when empty.
   botBenchmarkPlacement: (workspaceId: number, repoIds?: number[]) =>
     get<BotBenchmarkPlacementResponse>(
       withQuery(
@@ -1919,31 +1905,28 @@ export const api = {
     ),
   // The ONE synthesis endpoint (plan P2.1): GET = the free cached read + stale flag (never
   // generates); POST = the only billing path. One params builder for both verbs so the row the
-  // POST writes and the row the GET reads can never be addressed differently. Callers gate on the
-  // `activityDigest` capability (useSynthesis) — in OSS the route does not exist at all.
+  // POST writes and the row the GET reads can never be addressed differently.
   synthesis: (p: SynthesisRequestParams) =>
     get<SynthesisResponse>(withQuery('/api/pro/synthesis', ...synthesisQueryParts(p))),
   synthesisGenerate: (p: SynthesisRequestParams) =>
     fetch(withQuery('/api/pro/synthesis', ...synthesisQueryParts(p)), jsonBody('POST')).then(
       (r) => handle<SynthesisResponse>(r),
     ),
-  // ---- The work plan (Pro): "what should I work on today" ----------------------------------
+  // ---- The work plan: "what should I work on today" ----------------------------------
   // GET = free. It returns the DETERMINISTIC, code-derived worklist (`evidence`) plus any stored
   // narration and a `stale` probe; it never generates and never bills. POST = the only billing
   // path — it writes the Haiku narration over the SAME evidence. Both verbs address the row
   // through `workPlanQueryParts`, so the plan the POST stores is the plan the GET reads back.
   //
   // The panel renders `evidence` with or without a `plan`: the worklist is real data that stands
-  // on its own, and the model only annotates it. Callers gate on the `workPlan` capability
-  // (useWorkPlan) — in OSS the route does not exist at all, and on free cloud it answers
-  // `enabled: false`, which is an answer and not an error.
+  // on its own, and the model only annotates it. `enabled: false` is an answer, not an error.
   workPlan: (p: WorkPlanRequestParams) =>
     get<WorkPlanResponse>(withQuery('/api/pro/work-plan', ...workPlanQueryParts(p))),
   workPlanGenerate: (p: WorkPlanRequestParams) =>
     fetch(withQuery('/api/pro/work-plan', ...workPlanQueryParts(p)), jsonBody('POST')).then((r) =>
       handle<WorkPlanResponse>(r),
     ),
-  // Chronology's pointers (Pro, `periodReports`). ONE builder for both verbs so the POST writes the
+  // Chronology's pointers. ONE builder for both verbs so the POST writes the
   // row the GET reads: the workspace and the Chronology window. The GET never generates; the POST
   // is the only billing path.
   flowPointers: (workspaceId: number, window: number | 'reporting') =>

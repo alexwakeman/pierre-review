@@ -30,11 +30,8 @@ import { ChartCard, ChartEmpty, PALETTE, type Series } from '../charts/common.js
 // submodule gitlink move — for a chart that is already thirty lines below the sparkline it
 // enlarges, on the surface that owns the counts, the colours and the drill-down.
 //
-// ⚠ ENTITLEMENT IS INHERITED, NOT RE-STATED. The whole inflation index is PAID (`botDepth`) and
-// `weekly` additionally carries its own absent/present flag because it is an extra scan WIDTH
-// (`inflationHistory` in `getBotAnalytics`). An unentitled account receives `vendors: []` from the
-// route (`api/routes/bot-triage.ts`'s narrowed shape), so there are no rows to fold and this card
-// renders NOTHING — it never has an empty-chart state to design for a locked reader.
+// `weekly` carries its own absent/present flag because it is an extra scan WIDTH
+// (`inflationHistory` in `getBotAnalytics`).
 //
 // ⚠ THE MARKS ARE NOT CLICKABLE, ON PURPOSE. The Inflation cell's counts open the flagging
 // drill-down, and the identity that makes that safe is "the number clicked IS the list's
@@ -127,9 +124,7 @@ export function inflationHistory(rows: InflationHistoryRow[]): InflationHistory 
       continue;
     }
     // `weekly` absent on a badged bot means twelve zero buckets (the server drops an all-zero
-    // series). It is ALSO the shape an unentitled fold would produce — unreachable here, because
-    // an unentitled account receives no vendor rows at all, so the two cannot be confused on this
-    // surface.
+    // series).
     const weekly = inf.weekly;
     if (weekly == null || weekly.length === 0) {
       quiet.push(r.label);

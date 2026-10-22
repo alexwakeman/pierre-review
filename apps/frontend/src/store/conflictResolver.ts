@@ -48,7 +48,7 @@ export interface ResolverSession {
   /** `${fileIndex}:${regionId}` → the decision. A region the reader has not decided is simply
    *  ABSENT: `undecided` is the absence of an entry, never a member of the enum. */
   decisions: Record<string, ConflictDecision>;
-  /** `${fileIndex}:${regionId}` → the accepted Pro suggestion's opaque handle. Kept apart from
+  /** `${fileIndex}:${regionId}` → the accepted suggestion's opaque handle. Kept apart from
    *  `decisions` because a `'suggestion'` decision is worthless without it, and the commit body
    *  carries the two as separate fields. */
   suggestionIds: Record<string, string>;

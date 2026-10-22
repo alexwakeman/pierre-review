@@ -1,4 +1,4 @@
-// Bot Tuning Advisor hooks (Pro; /api/pro/advisor/*). Query keys carry the `ws:<id>`
+// Bot Tuning Advisor hooks (/api/pro/advisor/*). Query keys carry the `ws:<id>`
 // segment and use skipToken while workspaceId === null (nothing workspace-scoped may fetch
 // before the scope resolves — the request would be answered from the account's DEFAULT and
 // cached under the wrong key).

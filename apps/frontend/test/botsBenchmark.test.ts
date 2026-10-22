@@ -2,17 +2,14 @@
 //
 // WHAT THIS PINS, and why each half is worth a test rather than a comment:
 //
-//   1. THE GATE, IN BOTH DIRECTIONS. `botDepth` decides what is SEEN (`benchmarkBodyFor`) and,
-//      separately, what is ASKED FOR (`useBotBenchmarkPlacement`'s own `enabled`). A client gate is
-//      not a monetisation gate — the route 402s — and an unentitled pane that kept polling would
-//      hammer a 402 on its own cadence. The two are one decision written twice and they must not
-//      drift.
+//   1. NO GATE. The panel renders for everyone and the placement query has no capability term;
+//      the definitions read is still click-gated so it never fetches on mount.
 //
 //   2. THE DERIVED-TAB RULE. `botsInnerTab` is ONE scalar shared by the cross-repo rail and the
 //      per-repo console, so the visible tab is DERIVED per render and never written back. A
 //      corrective `setBotsInnerTab()` permanently forgets the reader's choice — and correcting
-//      `'benchmark'` away for an unentitled reader would land a bookmarked `?botsTab=benchmark`
-//      somewhere else with nothing on screen explaining why.
+//      `'benchmark'` away would land a bookmarked `?botsTab=benchmark` somewhere else with nothing
+//      on screen explaining why.
 //
 //   3. EVERY REFUSAL IS ITS OWN SENTENCE — FOURTEEN OF THEM. "We have never measured this bot"
 //      (DeepSource is real), "we have too little of it", "this is not a product", "this stratum is
@@ -56,10 +53,9 @@
 // runs under `vitest --root apps/frontend` with NO DOM (`vitest.config.ts` includes
 // `test/**/*.test.ts` only, the React plugin is not applied, and neither jsdom nor a React renderer
 // is installed anywhere in the monorepo). A hook's `enabled` cannot be observed without mounting it,
-// so the one thing that stops an unentitled SPA polling a 402 is asserted against the module's
-// source. Every guard here was mutation-tested: deleting the `enabled` line, swapping the lock's
-// testid, re-adding a per-unit cost block and relaxing `showCost` back to `botDepth` each turn this
-// file red.
+// so it is asserted against the module's source. Every guard here was mutation-tested: deleting the
+// click gate, re-adding a per-unit cost block and relaxing `showCost` off the rail mount each turn
+// this file red.
 //
 // ⚠ A SOURCE GUARD MUST PIN A CLAIM, NOT A COINCIDENCE. Each one below is anchored on the thing
 // that would be WRONG if it changed — a presence check, a testid whose claim changed grain, a basis
@@ -99,7 +95,6 @@ import {
   absentMetricRows,
   anomalyRows,
   bandFitNote,
-  benchmarkBodyFor,
   collapsedCostRefusal,
   collapsedExclusion,
   collapsedWorkspaceCostRefusal,
@@ -324,45 +319,15 @@ const rollupRefused = (reason: BotBenchmarkRollupRefusalReason) =>
    1. The gate, in both directions
    ───────────────────────────────────────────────────────────────────────────────────────── */
 
-describe('the botDepth gate', () => {
-  it('shows the panel only when entitled, and NOTHING while /api/me is unresolved', () => {
-    expect(benchmarkBodyFor('entitled')).toBe('panel');
-    expect(benchmarkBodyFor('locked')).toBe('locked');
-    // ⚠ The blank beat is the point: `useProCapabilities()` is all-false until /api/me lands, so a
-    // two-way branch paints "See what Pro includes" for one frame AT AN ACCOUNT THAT PAYS.
-    expect(benchmarkBodyFor('pending')).toBe('blank');
-    // …and it is never the panel, which would be the mirror-image lie — showing a reader data we
-    // are about to tell them they cannot see.
-    expect(benchmarkBodyFor('pending')).not.toBe('panel');
-  });
-
-  // ⚠ SOURCE GUARD — see the file header. There is no renderer in this suite, and this line is the
-  // only thing between an unentitled mount and a 402 on a timer.
-  it('ANDs the capability into the placement query’s own enabled', () => {
-    const src = readFileSync(
-      fileURLToPath(new URL('../src/hooks/useBotBenchmark.ts', import.meta.url)),
-      'utf8',
-    );
-    expect(src).toMatch(/enabled:\s*botDepth\s*,/);
-    // The click-gated definitions read is gated on the capability AND on being opened — it must
-    // not fetch 16 KB of prose on mount.
-    expect(src).toMatch(/enabled:\s*botDepth\s*&&\s*open\s*,/);
-  });
-
-  // ⚠ SOURCE GUARD — the locked body must not answer to the entitled body's test id, or a
-  // misconfigured screenshot run photographs the lock and ships it as a marketing shot.
-  it('gives the locked pane a testid distinct from the entitled panel’s', () => {
-    const view = readFileSync(
-      fileURLToPath(new URL('../src/components/Activity/BotsView.tsx', import.meta.url)),
-      'utf8',
-    );
-    const panel = readFileSync(
-      fileURLToPath(new URL('../src/components/Activity/BenchmarkPanel.tsx', import.meta.url)),
-      'utf8',
-    );
-    expect(view).toContain('testId="benchmark-locked"');
-    expect(panel).toContain('data-testid="benchmark-panel"');
-    expect(view).not.toContain('testId="benchmark-panel"');
+describe('the Benchmark tab has no gate', () => {
+  it('mounts the panel directly and the placement query carries no capability term', () => {
+    const view = sourceOf('components/Activity/BotsView.tsx');
+    expect(view).toContain('<BenchmarkPanel repoId={repoId} />');
+    expect(view).not.toMatch(/ProLockPanel|useProGateState|useProCapabilities/);
+    const hooks = sourceOf('hooks/useBotBenchmark.ts');
+    expect(hooks).not.toMatch(/botDepth|useProCapabilities/);
+    // The definitions read is still CLICK-GATED — it must not fetch 16 KB of prose on mount.
+    expect(hooks).toMatch(/enabled:\s*open\s*,/);
   });
 });
 
@@ -371,11 +336,10 @@ describe('the botDepth gate', () => {
    ───────────────────────────────────────────────────────────────────────────────────────── */
 
 describe('the visible Bots sub-tab is DERIVED, never written back', () => {
-  it('keeps `benchmark` selected on every tier — it is visible-but-locked, not absent', () => {
-    // A capability is not even an input here. That is the assertion: the body locks, the TAB never
-    // moves, so a bookmarked `?botsTab=benchmark` lands where it says it will.
-    expect(effectiveBotsTab('benchmark', { showAdvisor: false, showThemes: false })).toBe('benchmark');
-    expect(effectiveBotsTab('benchmark', { showAdvisor: true, showThemes: true })).toBe('benchmark');
+  it('keeps `benchmark` selected on both mounts', () => {
+    // The TAB never moves, so a bookmarked `?botsTab=benchmark` lands where it says it will.
+    expect(effectiveBotsTab('benchmark', { showAdvisor: false })).toBe('benchmark');
+    expect(effectiveBotsTab('benchmark', { showAdvisor: true })).toBe('benchmark');
   });
 
   // ⚠ AND THE MOUNT IS NOT AN INPUT EITHER — which matters MORE since the grain split, not less.
@@ -386,70 +350,44 @@ describe('the visible Bots sub-tab is DERIVED, never written back', () => {
   // rule is that WHICH BODY IS DRAWN is decided inside the pane, and the TAB never moves.
   it('takes no repoId, and cannot be made to degrade `benchmark` on the per-repo mount', () => {
     // Behavioural: an opts object that smuggles a mount in changes nothing, on either mount.
-    const withRepo = { showAdvisor: false, showThemes: false, repoId: 7 } as {
-      showAdvisor: boolean;
-      showThemes: boolean;
-    };
+    const withRepo = { showAdvisor: false, repoId: 7 } as { showAdvisor: boolean };
     expect(effectiveBotsTab('benchmark', withRepo)).toBe('benchmark');
-    expect(effectiveBotsTab('benchmark', { showAdvisor: false, showThemes: false })).toBe('benchmark');
-    // Structural: two parameters, and the second's shape is CAPABILITIES ALONE. It now holds two
-    // of them — `showThemes` joined when the themes report got its own tab — and that is the point
-    // of pinning the source text rather than the arity: both members are capability booleans, and a
-    // mount-aware signature would have to arrive here first.
+    expect(effectiveBotsTab('benchmark', { showAdvisor: false })).toBe('benchmark');
+    // Structural: two parameters, and the second's shape is the advisor flag alone.
     expect(effectiveBotsTab).toHaveLength(2);
     expect(sourceOf('components/Activity/benchmarkModel.ts')).toMatch(
-      /export function effectiveBotsTab\(\s*raw: BotsInnerTab,\s*opts: \{ showAdvisor: boolean; showThemes: boolean \},?\s*\)/,
+      /export function effectiveBotsTab\(\s*raw: BotsInnerTab,\s*opts: \{ showAdvisor: boolean \},?\s*\)/,
     );
   });
 
   it('keeps `roi` selected too — the same posture, older', () => {
-    expect(effectiveBotsTab('roi', { showAdvisor: false, showThemes: false })).toBe('roi');
+    expect(effectiveBotsTab('roi', { showAdvisor: false })).toBe('roi');
   });
 
-  it('degrades ONLY the members that are not LISTED without their capability', () => {
-    expect(effectiveBotsTab('advisor', { showAdvisor: false, showThemes: false })).toBe('roi');
-    expect(effectiveBotsTab('advisor', { showAdvisor: true, showThemes: true })).toBe('advisor');
-    // ⚠ `themes` TAKES THE ADVISOR'S POSTURE, NOT ROI'S. It is listed only when `activityDigest`
-    // holds, so an unentitled `?botsTab=themes` has no tab to land on and must degrade; a locked
-    // body instead would make it a SEVENTH visible-but-locked surface, which ProGate.tsx's header
-    // says needs its own written argument, and would draw a blank pane on OSS besides.
-    expect(effectiveBotsTab('themes', { showAdvisor: false, showThemes: false })).toBe('roi');
-    expect(effectiveBotsTab('themes', { showAdvisor: false, showThemes: true })).toBe('themes');
-  });
-
-  it('reads the two capabilities INDEPENDENTLY — neither implies the other', () => {
-    // ⚠ `botAdvisor` and `activityDigest` are different capabilities on different tiers, and an
-    // account can hold either alone. Collapsing them into one `showPro` flag would delete a working
-    // tab for half the accounts that paid for it.
-    expect(effectiveBotsTab('themes', { showAdvisor: true, showThemes: false })).toBe('roi');
-    expect(effectiveBotsTab('advisor', { showAdvisor: false, showThemes: true })).toBe('roi');
+  it('degrades ONLY `advisor`, and only where it is not listed (the per-repo console)', () => {
+    expect(effectiveBotsTab('advisor', { showAdvisor: false })).toBe('roi');
+    expect(effectiveBotsTab('advisor', { showAdvisor: true })).toBe('advisor');
+    // `themes` renders on both mounts now, so it never degrades.
+    expect(effectiveBotsTab('themes', { showAdvisor: false })).toBe('themes');
+    expect(effectiveBotsTab('themes', { showAdvisor: true })).toBe('themes');
   });
 
   it('leaves every other member alone', () => {
     for (const tab of BOTS_INNER_TABS) {
-      if (tab === 'advisor' || tab === 'themes') continue;
-      expect(effectiveBotsTab(tab, { showAdvisor: false, showThemes: false })).toBe(tab);
+      if (tab === 'advisor') continue;
+      expect(effectiveBotsTab(tab, { showAdvisor: false })).toBe(tab);
     }
   });
 
-  it('lists the themes tab only when entitled, and never locks it', () => {
-    // ⚠ THE FEED'S SETUP, MIRRORED — `Activity/index.tsx` builds its own tab list the same way.
-    // A conditional push, not a ProLockPanel body.
+  it('lists the themes tab on both mounts, with one panel mount', () => {
     const view = sourceOf('components/Activity/BotsView.tsx');
-    expect(view).toMatch(/showThemes \? \[\{ key: 'themes', label: 'Themes' \} as const\] : \[\]/);
-    // ⚠ NOT MOUNT-GATED, unlike the advisor: the report is genuinely per-repo (repoScope narrows
-    // the data and the plugin keys the narrowed report separately), so gating it on the rail would
-    // silently delete a working surface on the per-repo Bots console.
-    expect(view).toMatch(/const showThemes = activityDigest;/);
-    expect(view).not.toMatch(/showThemes = repoId == null/);
-    // ⚠ ONE MOUNT, AND IT IS THE TAB'S. A panel left behind in the `roi` branch would render twice
-    // for an entitled reader and pay for the header space it no longer earns.
+    expect(view).toMatch(/\{ key: 'themes', label: 'Themes' \},/);
+    // ⚠ ONE MOUNT, AND IT IS THE TAB'S. A panel left behind in the `roi` branch would render twice.
     expect((view.match(/<BotThemesPanel/g) ?? []).length).toBe(1);
     expect(view).toMatch(/effectiveTab === 'themes' \?/);
-    expect(view).not.toContain('ProLockPanel repoId');
   });
 
-  it('is URL-parsed on every tier, so a bookmark can reach the locked tab', () => {
+  it('is URL-parsed, so a bookmark can reach the tab', () => {
     const src = readFileSync(
       fileURLToPath(new URL('../src/hooks/useUrlState.ts', import.meta.url)),
       'utf8',
@@ -2411,19 +2349,14 @@ describe('money lives on exactly one side of the grain split', () => {
 });
 
 describe('the ROI table’s money is Workspace-grained too', () => {
-  it('gates the $/acted-on column on the RAIL mount, not merely on the capability', () => {
+  it('gates the $/acted-on column on the RAIL mount', () => {
     // ⚠ THE SAME FACT, ONE PANEL OVER. `costPerActedOnUsd` divides a WORKSPACE price by the work
     // measured in whatever scope the request asked for, so on a repository's Bots tab it is a whole
     // subscription over one repository's threads — the identical upper bound the benchmark rollup
     // exists to retire. The column is HIDDEN there rather than disabled or dashed, because a
     // disabled control still asserts that a figure exists.
-    //
-    // ⚠ AND `showCost` MUST NOT BE "SIMPLIFIED" BACK TO `botDepth`. Its second conjunct is live —
-    // every per-repo Bots tab reaches the `false` branch — which is exactly the shape a later reader
-    // mistakes for a redundant gate.
     const roi = sourceOf('components/Activity/BotRoiPanel.tsx');
-    expect(roi).toMatch(/const showCost = botDepth && repoId == null;/);
-    expect(roi).not.toMatch(/showCost=\{botDepth\}/);
+    expect(roi).toMatch(/const showCost = repoId == null;/);
     expect(roi).toMatch(/showCost=\{showCost\}/);
     // ⚠ AND THE PROSE THAT DESCRIBES THE COLUMN RIDES THE SAME PREDICATE. A footer still telling a
     // reader to "set a price to see $/acted-on" on a tab that will never show it is a bug report

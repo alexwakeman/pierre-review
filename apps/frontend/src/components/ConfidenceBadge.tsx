@@ -2,7 +2,7 @@ import type { AddressedConfidence } from '@pierre-review/shared';
 import { CONFIDENCE_META, vendorInk } from '../lib/ui.js';
 
 // A compact "how sure are we it was addressed?" pill rendered beside a thread's StateBadge for
-// likely_addressed threads. DETERMINISTIC (free) — distinct from the Pro ✨ verdict marker. Hidden
+// likely_addressed threads. DETERMINISTIC — distinct from the ✨ verdict marker. Hidden
 // for `none` (nothing to say). The `reason` machine tag (e.g. 'outdated+commit') shows in the tooltip.
 export function ConfidenceBadge({
   confidence,

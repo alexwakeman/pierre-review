@@ -2,10 +2,9 @@ import { useFilters } from '../../store/filters.js';
 import { DetectedReviewersTable } from '../settings/DetectedReviewersTable.js';
 
 // The Feed rail's "Bot classification" sub-tab — **who counts as a bot in this Workspace, what
-// kind of bot it is, and who it is** (plus, with `botDepth`, what it costs here). FREE on every
-// tier, both modes: classification is what the Feed's and Timeline's bot hiding reads, so an
-// `npx` install must be able to correct it. It used to be Bots Monitoring → Settings; it moved
-// here when Bots Monitoring went Pro as a whole (a legacy `?botsTab=settings` lands here).
+// kind of bot it is, who it is, and what it costs here**. Classification is what the Feed's and
+// Timeline's bot hiding reads. It used to be Bots Monitoring → Settings (a legacy
+// `?botsTab=settings` lands here).
 //
 // ── A BOT IS A PER-WORKSPACE OBJECT ─────────────────────────────────────────────────────────
 // One `workspace_reviewers` row per (account, workspace, actor) carries ALL of it: the judgement

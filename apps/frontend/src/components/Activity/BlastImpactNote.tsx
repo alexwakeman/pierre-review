@@ -8,11 +8,11 @@ import {
   useRunImpactNote,
 } from '../../hooks/useAnnotations.js';
 import { useBlastConfig } from '../../hooks/useBlastRadius.js';
-import { useProCapabilities } from '../../hooks/useTriage.js';
+import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
 
-// ── THE IMPACT NOTE — blast radius's Pro half ────────────────────────────────────────────────
+// ── THE IMPACT NOTE — blast radius's AI half ────────────────────────────────────────────────
 //
-// THE CODE DECIDES THE LEVEL, FREE; THE MODEL EXPLAINS THE CONSEQUENCE, PAID. Exactly the split
+// THE CODE DECIDES THE LEVEL; THE MODEL EXPLAINS THE CONSEQUENCE. Exactly the split
 // the work plan and Chronology live by. The chip beside this says Low / Medium / High and lists
 // the signals that decided it; this adds the one thing file paths cannot answer — what could
 // break, and what to read first.
@@ -23,7 +23,7 @@ import { useProCapabilities } from '../../hooks/useTriage.js';
 // "actually this is fine" is a model that can talk a maintainer out of reviewing a migration.
 // Escalation is safe precisely because its only effect is making someone look harder.
 //
-// ⚠ PR DETAIL ONLY, AND CLICK-GATED. It is a billed call, so it may not appear on a Pending card
+// ⚠ PR DETAIL ONLY, AND CLICK-GATED. It is a model call, so it may not appear on a Pending card
 // or in the timeline — the board may not fetch on mount, and a board that billed on mount would
 // be worse still. Nothing here requests anything until the button is pressed; the stored note is
 // read from the ONE shared per-PR annotation query.
@@ -83,13 +83,11 @@ export function BlastImpactNote({
   prId: number;
   hasBlast: boolean;
 }): JSX.Element | null {
-  // ⚠ THE CAPABILITY IS ANDed INTO THE HOOK'S OWN `enabled`, not just used to hide a button —
-  // otherwise the SPA polls a route that 402s. Server-enforced too; a client gate is not a
-  // monetisation gate.
-  const canAsk = useProCapabilities().prSummary;
+  // The note runs on the reader's own Claude, so it shows only where agentic AI is enabled.
+  const canAsk = useAiCapabilities().enabled;
   // The reader's own preference, account-grained beside the sensitivity dial. ⚠ ANDed into
-  // `enabled` for the same reason the capability is: hiding the note must stop the QUERY too, or
-  // "hidden" still costs a request on every PR open.
+  // `enabled`: hiding the note must stop the QUERY too, or "hidden" still costs a request on every
+  // PR open.
   const wanted = useBlastConfig().showImpactNote;
   const [collapsed, setCollapsed] = useState(readCollapsed);
   // ⚠ THE WRITE IS IN THE HANDLER, NOT INSIDE THE STATE UPDATER — and that is a correctness rule,
@@ -196,11 +194,6 @@ export function BlastImpactNote({
 
       {state.error != null && (
         <span className="text-[11px] text-red-500">{state.error}</span>
-      )}
-      {state.result?.creditsExhausted === true && (
-        <span className="text-[11px] text-gray-500 dark:text-gray-400">
-          Out of AI credits for this month.
-        </span>
       )}
     </div>
   );

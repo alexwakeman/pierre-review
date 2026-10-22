@@ -5,10 +5,9 @@ import { api } from '../api/client.js';
 import { workspaceKey } from './useActivity.js';
 import { repoKeySlot } from './useBotTriage.js';
 
-// The Bots "What they're flagging" AI summary (Pro Haiku) — the revived Themes report, merged
+// The Bots "What they're flagging" AI summary (Haiku) — the revived Themes report, merged
 // with the deterministic Bots layer. Cached per (window, WORKSPACE, repo narrowing) so switching
-// any of the three reads its own cached report. Only fetched when the AI-summary capability is on
-// (`enabled`); absent the plugin the route 404s.
+// any of the three reads its own cached report. Only fetched when `enabled`.
 //
 // The `ws:<id>` segment is the SAME string the plugin persists in `scope_key`
 // (`themesScopeKey(workspaceId, …)` → `ws:<id>` + an `|r:` suffix when narrowed), so the client
@@ -34,7 +33,7 @@ const NOTICE_MS = 5000;
 
 // Generate/regenerate the themes report (the only billing path). Writes the fresh result into the
 // shared cache so the panel updates in place; surfaces a transient `notice` when the server
-// throttled, the account is out of credits, or the scope/window is empty — so a no-op click
+// throttled or the scope/window is empty — so a no-op click
 // doesn't read as a silent failure.
 //
 // ⚠ The `setQueryData` key must be built the SAME way as the read above (one `workspaceKey` +
@@ -68,12 +67,8 @@ export function useRefreshBotThemes(
     },
     onSuccess: (data) => {
       qc.setQueryData(['bot-themes', window, workspaceKey(workspaceId), repoKeySlot(repoIds)], data);
-      // A generation may have spent credits → refresh the meter + the out-of-credits gate.
-      void qc.invalidateQueries({ queryKey: ['ai-usage'] });
       setNotice(
-        data.creditsExhausted
-          ? 'Out of AI credits this month — the summary resumes on the 1st.'
-          : data.empty
+        data.empty
             // An empty scope/window doesn't touch the stored report — the server returns it
             // alongside `empty` so the panel keeps showing it rather than flashing "No summary yet".
             ? data.result != null

@@ -1,4 +1,4 @@
-// The Bots "Advisor" inner tab (Pro `botAdvisor`) — the Bot Tuning Advisor's home. Findings
+// The Bots "Advisor" inner tab — the Bot Tuning Advisor's home. Findings
 // arrive as deterministic INTENTS grouped per bot (evidence + retro-check + capability
 // overlay); the outputs are a brief (the universal fallback, default until a tuning PR has
 // merged), a config PR, or a GitHub issue against the bot's own repo. The Tune/Drop pills on
@@ -19,7 +19,6 @@ import type {
 } from '@pierre-review/shared';
 import { useFilters } from '../../store/filters.js';
 import { InfoButton } from '../InfoModal.js';
-import { useProCapabilities } from '../../hooks/useTriage.js';
 import { useRepos } from '../../hooks/useTimeline.js';
 import {
   advisorConfigPrMutationKey,
@@ -644,8 +643,7 @@ export function BotAdvisorPanel(): JSX.Element {
   const workspaceId = useFilters((s) => s.workspaceId);
   const advisorFocus = useFilters((s) => s.advisorFocus);
   const clearAdvisorFocus = useFilters((s) => s.clearAdvisorFocus);
-  const { botAdvisor } = useProCapabilities();
-  const { data, isLoading, error } = useAdvisorFindings(workspaceId, botAdvisor);
+  const { data, isLoading, error } = useAdvisorFindings(workspaceId, true);
   const { data: allRepos } = useRepos();
   const repos = useMemo(
     () => (allRepos ?? []).filter((r) => r.workspaceId === workspaceId),
@@ -655,7 +653,6 @@ export function BotAdvisorPanel(): JSX.Element {
   // Focus (from the Tune/Drop pills) wins until the user picks; picking clears the focus.
   const selectedBotKey = advisorFocus?.botKey ?? pickedBotKey;
 
-  if (!botAdvisor) return <div />;
   if (isLoading) {
     return <div className="p-3 text-xs text-gray-400">Computing advisor findings…</div>;
   }

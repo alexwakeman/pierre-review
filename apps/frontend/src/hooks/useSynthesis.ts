@@ -11,7 +11,6 @@ import type {
 import { api, type SynthesisRequestParams } from '../api/client.js';
 import { workspaceKey } from './useActivity.js';
 import { repoKeySlot } from './useBotTriage.js';
-import { useProCapabilities } from './useTriage.js';
 
 // The synthesis verdict (plan P2.1) — the GET-backed cached read + the generate mutation, for
 // every surface that mounts a SynthesisCard (P2.2's drill-downs, P2.3's Measure card).
@@ -25,9 +24,6 @@ import { useProCapabilities } from './useTriage.js';
 // `useIsMutating`, or a tab switch mid-run resets the button to "Summarise" and invites a second
 // BILLED POST. `synthesisKeySlots` is the one spelling of those segments — the query key, the
 // mutation key and the setQueryData write all build from it, so they cannot drift.
-//
-// ⚠ NOTHING FETCHES WITHOUT `activityDigest` (§8.20): in OSS the route does not exist, on free
-// cloud it would 402 — either way the hook goes quiet and the card renders the nudge/nothing.
 
 export interface SynthesisDescriptor {
   kind: SynthesisScopeKind;
@@ -86,14 +82,13 @@ export function useSynthesis(
   d: SynthesisDescriptor,
   enabled = true,
 ) {
-  const { activityDigest } = useProCapabilities();
   return useQuery<SynthesisResponse>({
     queryKey: ['synthesis', ...synthesisKeySlots(workspaceId, d)],
     // `skipToken`, not a bare `enabled`: it narrows workspaceId to a number, so a request the
     // server would answer from the account's DEFAULT workspace cannot be written (§ the
     // workspaceId-null rule — nothing renders workspace-scoped data while unresolved).
     queryFn: workspaceId == null ? skipToken : () => api.synthesis(requestParams(workspaceId, d)),
-    enabled: enabled && activityDigest,
+    enabled,
     staleTime: 60_000,
   });
 }
@@ -115,8 +110,6 @@ export function useGenerateSynthesis(workspaceId: number | null, d: SynthesisDes
       // Written under the SAME slots the read uses — a hand-spelled key here is how a
       // "Summarise" click appears to do nothing until the next refetch.
       qc.setQueryData<SynthesisResponse>(['synthesis', ...slots], data);
-      // A generation may have spent credits → refresh the meter + the out-of-credits gate.
-      void qc.invalidateQueries({ queryKey: ['ai-usage'] });
     },
   });
 }

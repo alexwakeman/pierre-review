@@ -4,7 +4,7 @@ import { api } from '../api/client.js';
 import { workspaceScopeKey } from '../store/filters.js';
 
 // Every query key that reflects the workspace-scoped Activity/Insights surface (rail aggregate,
-// consolidated feed + its head poll, Pro digests, workspace insights, sprint report). Invalidate
+// consolidated feed + its head poll, digests, workspace insights, sprint report). Invalidate
 // ALL of them whenever the scope's repo set changes (add a repo / move one between workspaces) or
 // a sync lands, so the Activity console tracks its workspace live — no manual Refresh. These are
 // all cheap DB reads (the AI summaries are GET-only here; regeneration is a separate, delta-gated
@@ -47,7 +47,7 @@ export const ACTIVITY_QUERY_KEYS = [
  * request carrying `?workspace=` fixes the wire; only this fixes the cache.
  *
  * The format is NOT re-spelled here — it delegates to the store's `workspaceScopeKey`, which is
- * the one definition of `ws:<id>`. That prefix is the SAME vocabulary the Pro plugin persists in
+ * the one definition of `ws:<id>`. That prefix is the SAME vocabulary the server persists in
  * `scope_key` (`scopeKeyFor(workspaceId)`, plugin migration 0020), so a cached AI answer and the
  * cache slot it renders into agree by construction, and a legacy `'3'` (team 3) can never alias
  * workspace 3.

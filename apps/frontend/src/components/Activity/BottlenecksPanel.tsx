@@ -95,15 +95,6 @@ import {
 // COUNT from the wire, never a finding), and the server's own sentence only where no figure says
 // the same thing. `workHeadline`, `headline`, `narrative` and the tables' sentences ride the wire
 // unrendered: each restated a chart that now sits beside it.
-//
-// ⚠ PRO (`periodReports`), AND THIS COMPONENT HOLDS NO CAPABILITY READ. The gate is three places,
-// none of them here: `GET /api/flow-findings` 402s (the monetisation gate), `useFlowFindings`
-// gates its `enabled` on the same flag so the SPA never learns it by error, and InsightsView
-// swaps this panel for `ProLockPanel` under a `Pro`-badged tab. Keeping the capability out of here
-// is what lets the "Measuring…" / "Could not load" branch below stay a two-state question about
-// the REQUEST: mount this panel and there is, by construction, an entitled request in flight. If
-// entitlement flips mid-session the whole body is replaced by the lock on the same render, because
-// InsightsView reads the same /api/me — this file never has to render a paywall.
 
 /** The evidence rows carry no author identity, so the lookup is always empty by construction. */
 const NO_AUTHOR_LOOKUP = new Map<number, never>() as never;

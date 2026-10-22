@@ -95,13 +95,13 @@ export function HelpModal({ onClose }: { onClose: () => void }): JSX.Element {
             you can <strong>bulk-resolve</strong> the ones a later commit likely addressed —
             always a confirm-gated, one-click action that resolves the threads on GitHub, never
             automatic. Who counts as a bot <em>in this Workspace</em> is set on{' '}
-            <strong>Feed → Bot classification</strong> (free): it is exactly what the Feed and the
+            <strong>Feed → Bot classification</strong>: it is exactly what the Feed and the
             Timeline hide by default. A bot is <em>one card per Workspace</em>, merged by GitHub
             handle however many repos it runs in: bot or person, its role (a{' '}
             <strong>quality&nbsp;check</strong> such as SonarCloud is kept out of the review-bot
-            figures), its vendor name and, with Pro, its <strong>price</strong>. Prices are per
-            Workspace and never added up across Workspaces. The <strong>Bots Monitoring</strong>{' '}
-            console (Pro) measures them: per-vendor keep / tune / rarely used verdicts, cost and
+            figures), its vendor name and its <strong>price</strong>. Prices are per Workspace
+            and never added up across Workspaces. The <strong>Bots Monitoring</strong> console
+            measures them: per-vendor keep / tune / rarely used verdicts, cost and
             severity inflation (<strong>ROI</strong>), what they keep flagging (
             <strong>Themes</strong>) and how your bots compare with the same vendor elsewhere (
             <strong>Benchmark</strong>).
@@ -117,27 +117,21 @@ export function HelpModal({ onClose }: { onClose: () => void }): JSX.Element {
             the top five are{' '}
             <strong>Do next</strong>. <strong>Settings → My Turn</strong> chooses what counts as
             your turn and how the three are weighed. The{' '}
-            <strong>i</strong> beside the title, and on every card, explains the order. The ranking
-            is computed, free, and identical on every plan; Pro adds a sentence per item saying why
-            it is worth doing now.
+            <strong>i</strong> beside the title, and on every card, explains the order.{' '}
+            <strong>Plan my day</strong> adds a sentence per item saying why it is worth doing now.
           </Section>
 
           <Section title="Reports">
             <strong>Flow metrics</strong> for the selected Workspace — throughput, lead time,
-            time-to-first-review, CI success &amp; recovery — are free and sit at the top of this
-            pane. Below them, Pro adds the period-over-period report.{' '}
-            <strong>Track&nbsp;usage</strong> shows your month-to-date AI credits.
-            The attention cards are not here — they are free, and live on{' '}
-            <strong>Pending</strong>.
+            time-to-first-review, CI success &amp; recovery — sit at the top of this pane, with
+            the period-over-period report below them. The attention cards are not here — they live
+            on <strong>Pending</strong>.
           </Section>
 
           <Section title="PR detail & threads">
             Opening a PR shows <strong>Overview</strong> (checks, reviewers &amp; approvals,
             summary, comments), <strong>Threads</strong> (grouped by file, with code
-            anchors), and <strong>Activity</strong>. Reply or resolve inline. On the Pro
-            tier, each thread offers a <strong>Comment check</strong> — a critical,
-            retained AI read of whether the comment holds up, with the thread and diff as
-            context, so you can decide what to do.
+            anchors), and <strong>Activity</strong>. Reply or resolve inline.
           </Section>
 
           <Section title="Timeline">
@@ -148,7 +142,7 @@ export function HelpModal({ onClose }: { onClose: () => void }): JSX.Element {
             <strong>Activity</strong> and <strong>Timeline</strong> plus any PR tabs you open.
           </Section>
 
-          <Section title="Claude Review and AI Fix (free, on your machine)">
+          <Section title="Claude Review and AI Fix (on your machine)">
             The <strong>Claude Review</strong> tab reviews a PR into findings; you pick which to
             post as one GitHub review. <strong>AI Fix</strong> edits the branch for you to push.
             Both run on your own Claude Code or Anthropic API key — Limn stores no key and charges
@@ -158,7 +152,7 @@ export function HelpModal({ onClose }: { onClose: () => void }): JSX.Element {
             <code>npx limn-review</code>.
           </Section>
 
-          <Section title="Bot comment scoring (free, on your machine)">
+          <Section title="Bot comment scoring (on your machine)">
             A small model labels each comment a review bot leaves, from <strong>nit</strong> to{' '}
             <strong>critical</strong>, so you can see which ones matter. With{' '}
             <Code>npx limn-review</Code>, turn it on once: <strong>Settings → Bot comment

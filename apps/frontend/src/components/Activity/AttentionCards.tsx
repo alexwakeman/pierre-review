@@ -164,10 +164,9 @@ import {
 // The attention-card list — the stalled-review / untouched-thread / reviewer-load / needs-a-reviewer
 // cards, with the full drill-down behaviour (click a card to open the PR / thread, inline thread
 // reply+resolve, suggested-reviewer assign, lazy PR summary, and back-from-a-click flash). Extracted
-// from InsightsView so it can be rendered in BOTH the (Pro) Insights pane and the CORE/free Feed
-// **Pending** rail entry — the same JSX, just fed from a different data hook. It depends only on core
-// stores/hooks (usePinnedTabs / useFilters / usePr / useThread / useRequestReviewers), so it's tier-
-// agnostic. Callers pass already-filtered `cards` (bot cards excluded upstream).
+// from InsightsView so it can be rendered in BOTH the Insights pane and the **Pending** rail entry —
+// the same JSX, just fed from a different data hook. It depends only on core stores/hooks
+// (usePinnedTabs / useFilters / usePr / useThread / useRequestReviewers). Callers pass already-filtered `cards` (bot cards excluded upstream).
 
 // Left-accent + label per severity — the same visual grammar as the Feed's cards.
 const SEV: Record<InsightSeverity, { border: string; dot: string }> = {
@@ -3000,7 +2999,7 @@ function PendingCard({ card, board }: { card: InsightCard; board: PendingBoardAp
               : undefined
         }
       />
-      {/* GENERATED (Pro work plan) — its own line, palette and mark, never mixed with a fact. */}
+      {/* GENERATED (work plan) — its own line, palette and mark, never mixed with a fact. */}
       {whyLine != null && whyLine.trim() !== '' && (
         <p className="mt-1 flex items-start gap-1 text-[12px] italic text-ai-ink">
           <SparkleIcon size={11} className="mt-0.5 shrink-0 not-italic text-ai-signal" />
@@ -3061,7 +3060,7 @@ export function AttentionCards({
   people?: InsightCard[];
   /**
    * The Pending board's placement data, which turns on every card's info button and carries the
-   * Pro plan's per-card lines. Absent on any other mount (the Pro Insights pane).
+   * work plan's per-card lines. Absent on any other mount (the Insights pane).
    */
   explain?: Pick<
     PendingBoardInfo,

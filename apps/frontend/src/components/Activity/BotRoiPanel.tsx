@@ -25,8 +25,7 @@ import {
   useResolvableBotThreads,
 } from '../../hooks/useBotTriage.js';
 import { useMlSeverityEnabled } from '../../hooks/useMlLabels.js';
-import { useProCapabilities } from '../../hooks/useTriage.js';
-import { useProSettings, useHasProSettings } from '../../hooks/useProSettings.js';
+import { useProSettings } from '../../hooks/useProSettings.js';
 import { useFilters } from '../../store/filters.js';
 import { usePinnedTabs, type TabBotMeta } from '../../store/pinnedTabs.js';
 import {
@@ -41,7 +40,6 @@ import { formatAvg, volumeByKey } from '../../lib/botVolume.js';
 import { useBotVolume } from '../../hooks/useBotVolume.js';
 import { useBotColors } from '../../hooks/useBotColors.js';
 import { ArrowIcon, BotIcon, ResolveIcon } from '../Icons.js';
-import { ProLockPanel, useProGateState } from '../ProGate.js';
 import { InfoButton } from '../InfoModal.js';
 import { SeverityBar } from '../MlSeverityBadge.js';
 import { LineChart } from '../charts/LineChart.js';
@@ -49,43 +47,23 @@ import { BarChart } from '../charts/BarChart.js';
 import { ChartCard, ChartEmpty, PALETTE, type Series } from '../charts/common.js';
 import { InflationHistoryChart } from './InflationHistoryChart.js';
 
-// Bot ROI / utilisation panel — PAID (`botDepth`), rendered in the Bots rail console. Still
-// deterministic and model-free: a per-bot signal-to-noise table + a 12-week thread-volume trend +
-// keep/tune/noisy verdicts + the ML flagging strip. Paid does not mean AI-backed here; it means the
-// ANALYSIS is the product.
+// Bot ROI / utilisation panel, rendered in the Bots rail console. Deterministic and model-free: a
+// per-bot signal-to-noise table + a 12-week thread-volume trend + keep/tune/noisy verdicts + the ML
+// flagging strip.
 //
-// ── THE WHOLE PANEL IS THE PAID UNIT, AND IT DID NOT USED TO BE ────────────────────────────────
-// Only three cost surfaces used to ride `botDepth` (the $/acted-on column, the "Depth →" pill, the
-// price editor in Settings) while the table around them was free. That line never held up: the
-// table IS the answer people buy — what each bot produced, what got acted on, what sat. So the
-// component now gates as one, and an unentitled reader gets `ProLockPanel` in this component's own
-// place rather than absence, which is the deliberate reversal for this surface (see ProGate.tsx's
-// header for the six surfaces it applies to and the ones that stay silently absent).
-//
-// ⚠ WHAT DID **NOT** GO PAID, AND MUST NOT BE SWEPT IN LATER. Three things sit in this file or next
-// to this mount and stay free:
-//   • `ResolveBacklogBanner` — exported from here but MOUNTED in BotsView, outside the panel. It is
-//     free triage, and it must keep working when the panel is locked.
-//   • `TuningSuggestions` — HOISTED out of this component's body into BotsView's free area for
-//     exactly that reason (it is a `botTriage` free surface). It is exported, not local, now.
-//   • The amber "only a bot reviewed N open PRs" governance caution — never lived here, reads
-//     `totals.botOnlyPrs` off the same response, and the server keeps that field populated for
-//     unentitled accounts precisely so it survives (see the narrowing in
-//     api/routes/bot-triage.ts's `/api/bot-analytics`).
+// `ResolveBacklogBanner` and `TuningSuggestions` are exported from here but MOUNTED in BotsView,
+// outside the panel.
 //
 // SCOPE IS ONE WORKSPACE (+ an optional repo narrowing on the DATA). A bot is a per-WORKSPACE
 // object, so a vendor running in six of the workspace's repos is ONE row here, merged by GitHub
 // handle.
 //
 // COST IS SERVER-RESOLVED on each analytics row (`costMonthlyUsd` / `costPerActedOnUsd`), read
-// from `workspace_reviewers.monthly_cents` — a CORE table, but the route now strips the column for
-// an account without `botDepth`, so an unentitled client is not merely HIDING a price it received.
-// The old client-side overlay from pro_settings `bots.cost` is gone: a per-LOGIN map could not be
+// from `workspace_reviewers.monthly_cents`. The old client-side overlay from pro_settings `bots.cost` is gone: a per-LOGIN map could not be
 // edited or cleared from the surface that displayed it. All that remains of it is `legacyOnlyUsd` —
 // a POINTER at a price plugin migration 0019 could not move onto a row, shown in the cell's tooltip
 // and never applied (see `resolveVendorCost`: filling a null from that blob silently resurrected
-// prices the user had deliberately CLEARED, with no write path left to remove them). Its fetch
-// stays gated on plugin presence so the pure OSS path never calls /api/pro/settings.
+// prices the user had deliberately CLEARED, with no write path left to remove them).
 //
 // ⚠ PRICE IS PER WORKSPACE, AND MUST NEVER BE SUMMED ACROSS WORKSPACES. Inside this response there
 // is exactly ONE row per actor, so a total over the visible rows is a plain, correct sum (that is
@@ -288,17 +266,8 @@ function EffectivenessChart({ vendors }: { vendors: BotVendorAnalytics[] }): JSX
 // attached (mute rules were removed): the fix is to tune the bot on its own platform, or use
 // the confirm-gated "resolve addressed threads" flow. Purely informational.
 //
-// ⚠ EXPORTED, AND MOUNTED BY BotsView — NOT BY THE PANEL BELOW. It is a FREE (`botTriage`) surface
-// and the panel around it is not, so it was hoisted out of the panel body when the panel went paid;
-// leaving it in place would have taken it paid with everything else, silently. Its data
-// (`BotAnalyticsResponse.suggestions`) is deliberately kept populated for unentitled accounts by
-// the route's narrowing — the two facts are one decision and have to move together.
-//
-// It renders ABOVE the ROI table now rather than below it, which is the visible cost of the hoist:
-// an entitled reader used to meet it as a footnote to the table and now meets it as a heading over
-// one. Both readings are honest (it names bot × path, not a table cell), and the alternative —
-// duplicating the mount so each tier gets its own position — would put two of these on one screen
-// for a paying account.
+// ⚠ EXPORTED, AND MOUNTED BY BotsView — NOT BY THE PANEL BELOW, so it renders ABOVE the ROI
+// table. Do not mount it twice.
 export function TuningSuggestions({
   suggestions,
 }: {
@@ -390,11 +359,10 @@ function Tile({
   );
 }
 
-// ── "What the bots are flagging" — the ML severity totals strip (no AI; PAID with the panel) ──
-// ⚠ NOT the same thing as the per-COMMENT ML severity badges, which are free on every tier and read
-// a different route (`/api/prs/:id/ml-labels`). This is the workspace-grain rollup, it lives inside
-// `BotRoiPanel`, and it goes paid with it. `MeResponse.mlSeverity` is still its OTHER gate and is
-// unrelated to entitlement — it says whether the deployment scores at all.
+// ── "What the bots are flagging" — the ML severity totals strip (no AI) ───────────────────────
+// ⚠ NOT the same thing as the per-COMMENT ML severity badges, which read a different route
+// (`/api/prs/:id/ml-labels`). This is the workspace-grain rollup and lives inside `BotRoiPanel`.
+// `MeResponse.mlSeverity` is its gate — it says whether the deployment scores at all.
 // The survivor of the retired standalone BotSeverityPanel: its per-bot table merged into the
 // VendorTable below (the ML columns), and these totals + top-category chips rehomed here — now
 // computed from the SAME response and therefore the SAME WINDOW as every other number on the
@@ -673,15 +641,8 @@ function MlTotalsStrip({
  * apply, and showing a greyed-out verdict column would invite reading one anyway. The counts are
  * NOT in `totals` either, so the summary line above stays a review-bot number.
  *
- * ⚠ IT GOES PAID WITH THE PANEL, AND THE MIS-ROLE SAFEGUARD DOES NOT. This section used to be the
- * argument against ever hiding the panel: re-role a bot to `quality_check` in the free Settings tab
- * and it drops out of `vendors`, so without a home here it would look like detection had stopped
- * seeing it. That argument no longer holds, because the ROLE ITSELF IS EDITED ON A FREE SCREEN THAT
- * LISTS IT: Feed → Bot classification renders an "Other automation" list (quality gates, dependency bots,
- * code agents, …) with each row's role picker, so the bot the user just re-roled is visible, named
- * and re-rolable one click from where they changed it. This section is the ROI-tier restatement of
- * that fact, not its only witness. If the free classification list is ever narrowed to review bots, this
- * reasoning breaks and the section has to be hoisted next to `TuningSuggestions`.
+ * A bot re-roled to `quality_check` drops out of `vendors`; Feed → Bot classification also lists
+ * it under "Other automation", so the re-role stays visible from where it was made.
  *
  * `<details>` rather than React state: it is a disclosure with no other behaviour, and the browser
  * already gets keyboard + a11y right for free.
@@ -854,9 +815,6 @@ function vendorKeyUserId(key: string): number | null {
 // contradicted our label, over the same window as every other cell. The counts are the verdict;
 // the weekly sparkline beside them is the history.
 //
-// ⚠ THE WHOLE COLUMN IS PAID (`botDepth`), counts included. It used to be a split tier (counts
-// free, history paid), but the cell is a cell of the ROI table and that table went behind
-// `botDepth` in one piece, so an unentitled account receives no `vendors[]` to draw it in.
 // `weekly` keeps its own absent/present flag because it is an extra scan WIDTH in the getter, not
 // just a field to drop.
 //
@@ -879,7 +837,7 @@ function vendorKeyUserId(key: string): number | null {
 // the `|bot:<id>|` refineQueryKey slot) — so the number clicked IS the list's `filteredTotal`:
 // both are the same `vendorAgreementOf` fold of the same windowed scan, server-side.
 
-// The tiny Pro sparkline: the two weekly disagreement series in the two directions' fixed colours
+// The tiny sparkline: the two weekly disagreement series in the two directions' fixed colours
 // (amber = the bot called it worse, violet = we did — the removed charts' palette). Decorative
 // trend context only, so it is aria-hidden; the counts beside it carry the numbers.
 //
@@ -1010,11 +968,7 @@ function VendorTable({
   onOpenVolume: ((bot: { userId: number; label: string }) => void) | null;
   // Opens the per-bot DEPTH drill-down tab (plan P1.1/C1) — its own small cell/pill, because the
   // row's existing click targets keep their jobs (the vendor chip opens the comments/PRs
-  // drill-down; the Comments/PR cell opens the volume list). Paid (`botDepth`): null renders NO
-  // depth chrome at all. ⚠ That null is now UNREACHABLE from the live mount — the whole panel gates
-  // on the same capability, so every table this renders is already an entitled one. The prop keeps
-  // its contract (and its `null` branch) because it is the local statement of which tier the pill
-  // belongs to, and because a table rendered under any narrower future gate still needs it.
+  // drill-down; the Comments/PR cell opens the volume list). null renders NO depth chrome at all.
   onOpenDepth:
     | ((bot: { userId: number; label: string; login: string | null; kind: AutomatedReviewerKind }) => void)
     | null;
@@ -1028,21 +982,16 @@ function VendorTable({
   onOpenInflation: ((direction: 'over' | 'under', bots: BotFlaggingBotNarrowing) => void) | null;
   // The $/acted-on cost column — false renders NO cost chrome at all (header AND cell).
   //
-  // ⚠ THIS IS THE ONE PROP HERE THAT IS NOT JUST A TIER GATE — IT IS ALSO A GRAIN GATE. The
-  // caller passes `botDepth && repoId == null`: paid, AND measured over the whole Workspace. The
+  // ⚠ THIS IS A GRAIN GATE. The caller passes `repoId == null`: measured over the whole Workspace. The
   // numerator is a monthly WORKSPACE price and the denominator is the acted-on threads in
   // whatever scope this table was measured at, so the two halves only describe one population on
-  // the un-narrowed mount. Unlike `onOpenDepth`'s null, this false IS reachable from the live
-  // mount — every per-repo Bots tab hits it.
+  // the un-narrowed mount — every per-repo Bots tab hits false.
   //
-  // The upgrade nudge for pricing lives on the price editor in Feed → Bot classification, never on
-  // this table — a locked TABLE and an in-table upsell are two different answers to the same
-  // question. And nothing in here may reintroduce a cost figure behind a caveat: the caveat was
-  // tried and the grain moved instead.
+  // Nothing in here may reintroduce a cost figure behind a caveat: the caveat was tried and the
+  // grain moved instead.
   showCost: boolean;
-  // The Bot Tuning Advisor entry point (Pro `botAdvisor`): per-row Tune/Drop pills that open
-  // the Advisor tab focused on this bot. BOTH null in free mode → the Actions column does not
-  // render at all (hidden, not upsold).
+  // The Bot Tuning Advisor entry point: per-row Tune/Drop pills that open the Advisor tab focused
+  // on this bot. BOTH null (the per-repo mount) → the Actions column does not render at all.
   onTune?: ((key: string) => void) | null;
   onDrop?: ((key: string) => void) | null;
 }): JSX.Element {
@@ -1200,7 +1149,7 @@ function VendorTable({
                 className="px-2 py-1.5 text-right font-medium"
                 // ⚠ THE OLD "narrowed to a single repo…" CAVEAT IS GONE BECAUSE THE STATE IS.
                 // This column no longer renders on the per-repo mount at all (`showCost` is
-                // `botDepth && repoId == null`), so both halves of the figure now describe the
+                // `repoId == null`), so both halves of the figure now describe the
                 // same population — the whole Workspace — and a caveat about a case that cannot
                 // occur would only teach the reader to distrust a number that is exact. The
                 // cross-workspace warning stays: prices are per Workspace and are never summed.
@@ -1450,7 +1399,7 @@ function VendorTable({
                         </td>
                       );
                     })}
-                    {/* Inflation — counts + (Pro) sparkline. NOT dashed on dormant: like the ML
+                    {/* Inflation — counts + sparkline. NOT dashed on dormant: like the ML
                         cells above, its window population is labels, not threads, and the cell
                         carries its own dash rule (badges nothing ⇒ dash, never zero). */}
                     <td className="border-l border-gray-200 px-2 py-1.5 text-right dark:border-gray-800">
@@ -1589,9 +1538,7 @@ export function ResolveBacklogBanner({
   workspaceId: number | null;
   repoIds: number[] | null;
 }): JSX.Element | null {
-  // Bots Monitoring is Pro (`botDepth`) and the route 402s without it.
-  const { botDepth } = useProCapabilities();
-  const { data } = useResolvableBotThreads(workspaceId, botDepth, repoIds);
+  const { data } = useResolvableBotThreads(workspaceId, true, repoIds);
   const openBotThreadsDetail = useFilters((s) => s.openBotThreadsDetail);
   const totalThreads = data?.totalThreads ?? 0;
 
@@ -1623,11 +1570,6 @@ export function ResolveBacklogBanner({
 // activity in it surface. It does NOT change the judgement — who counts as a bot is the
 // workspace's answer either way.
 //
-// PAID (`botDepth`) — the whole component. THE LOCK LIVES HERE, not at the mount, deliberately:
-// this component has one mount today (BotsView, serving both the cross-repo rail and the per-repo
-// console) and a gate at the mount would have to be re-remembered by the next one. Everything the
-// mount keeps free — the governance caution, the resolve backlog, the hoisted tuning suggestions,
-// the bot feed — stays exactly where it is and keeps rendering around the lock.
 export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element | null {
   const window = useFilters((s) => s.botAnalyticsWindow);
   const setWindow = useFilters((s) => s.setBotAnalyticsWindow);
@@ -1635,22 +1577,12 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
   const openBotOnlyDetail = useFilters((s) => s.openBotOnlyDetail);
   // The "what the bots are flagging" tiles/chips → the flagging drill-down tab.
   const openBotFlaggingDetail = useFilters((s) => s.openBotFlaggingDetail);
-  // The Tune/Drop pills → the Advisor tab, focused on the clicked bot. Pro-gated
-  // (`botAdvisor`), hidden-not-upsold, and cross-repo-rail only: the Advisor tab itself
+  // The Tune/Drop pills → the Advisor tab, focused on the clicked bot. Cross-repo-rail only: the
+  // Advisor tab itself
   // doesn't render in the per-repo console (it is workspace-grain, like Themes), so a pill
   // there would navigate nowhere.
   const focusAdvisor = useFilters((s) => s.focusAdvisor);
-  // `botDepth` is now the gate on the WHOLE panel, not just the $/acted-on column it used to
-  // cover. `botTriage` is untouched and still gates the free classification/identity settings
-  // surfaces.
-  //
-  // ⚠ `useProGateState`, NOT a bare `!botDepth`. `useProCapabilities()` answers an all-false
-  // literal while /api/me is in flight, so the naked read paints the upgrade panel for one frame
-  // on every cold load — at an account that pays. The three-valued gate holds that frame back.
-  const { botAdvisor, botDepth } = useProCapabilities();
-  const gate = useProGateState(botDepth);
-  const entitled = gate === 'entitled';
-  const advisorPillsOn = botAdvisor && repoId == null;
+  const advisorPillsOn = repoId == null;
   // ⚠ MONEY IS WORKSPACE-GRAINED, SO IT RENDERS ONLY ON THE WORKSPACE-GRAINED MOUNT.
   // `costPerActedOnUsd` is this bot's whole MONTHLY WORKSPACE price divided by the acted-on
   // threads in the measured scope. On the bare rail mount both halves describe the same
@@ -1664,23 +1596,14 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
   // This is the same grain move the Bots → Benchmark rollup makes: money lives at the workspace
   // grain or it does not ship. A reader who wants the exact figure has it one rail up.
   //
-  // ⚠ NOT NOW-TRIVIAL — see the note below the lock: these per-control gates are the local
-  // statement of which tier (and now which GRAIN) each control belongs to. This one carries a
-  // second predicate and must not be inlined away.
-  const showCost = botDepth && repoId == null;
+  const showCost = repoId == null;
   // The workspace decides the VERDICT; `repoIds` only narrows the measured data. Both occupy
   // their own query-key slot, so either change refetches and two workspaces can never share a
   // cache entry.
-  //
-  // ⚠ BOTH FETCHES ARE GATED ON THE SAME FLAG THE RENDER IS. Hooks cannot sit behind the early
-  // return below, so without this the locked panel would still poll `/api/bot-analytics` every
-  // five minutes and hit the 402 on `/api/bot-analytics/volume` on every mount. (The analytics
-  // query still RUNS in practice — BotsView holds an enabled observer on the identical key for the
-  // free governance caution — but this panel stops being a reason for it, which is what keeps the
-  // gate honest if that caution ever moves.)
+
   const workspaceId = useFilters((s) => s.workspaceId);
   const repoScope = useMemo(() => (repoId != null ? [repoId] : null), [repoId]);
-  const { data, isLoading, isError } = useBotAnalytics(workspaceId, window, entitled, repoScope);
+  const { data, isLoading, isError } = useBotAnalytics(workspaceId, window, true, repoScope);
   // ⚠ THE VOLUME QUERY TAKES THE SAME TRIPLE, AND SO DOES THE DRILL-DOWN IT OPENS — workspace,
   // window, repo narrowing. The column reproduces the drill-down's own numbers (both fold ONE
   // server-side scan), so measuring them at different scopes would leave the list quietly
@@ -1698,7 +1621,7 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
     data: volume,
     isLoading: volumeFetching,
     isPlaceholderData: volumeStale,
-  } = useBotVolume(workspaceId, window, entitled, repoScope);
+  } = useBotVolume(workspaceId, window, true, repoScope);
   const volumeLoading = volumeFetching || volumeStale;
   const openBotVolumeDetail = useFilters((s) => s.openBotVolumeDetail);
   // The per-bot DEPTH drill-down tab (plan P1.1/C1) — keyed on the bot's users.id, with the
@@ -1715,11 +1638,8 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
   const showMlStrip = mlEnabled && ml != null;
   const showMlColumns = mlEnabled && (ml?.labelled ?? 0) > 0;
   // The DEPRECATED per-login cost blob. Read ONLY to POINT AT a stranded price in the tooltip of
-  // a row the server resolved to null — never to fill that null (see `resolveVendorCost`). Still
-  // gated on plugin presence so the pure OSS path never hits /api/pro/settings (which 404s without
-  // the plugin) — and OSS installs have no legacy blob anyway, since cost only ever lived in the
-  // plugin's table before this.
-  const { data: settings } = useProSettings(useHasProSettings());
+  // a row the server resolved to null — never to fill that null (see `resolveVendorCost`).
+  const { data: settings } = useProSettings(true);
 
   const legacyCostByLogin = useMemo(
     () => new Map((settings?.bots.cost ?? []).map((c) => [c.login, c.monthlyUsd])),
@@ -1740,57 +1660,6 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
   // Volume only: no verdict, no noise ratio, no $/acted-on, because those are the ROI judgements
   // that were deliberately withheld.
   const qualityChecks = data?.qualityChecks ?? [];
-
-  // ── THE GATE ────────────────────────────────────────────────────────────────────────────────
-  // Below every hook, because hooks cannot be conditional — and below the derived values above so
-  // the entitled path reads exactly as it did before this line existed.
-  //
-  // `pending` renders NOTHING rather than a skeleton: /api/me is fetched at app boot and is
-  // resolved long before anyone reaches the Bots rail, so a skeleton here would be a frame of
-  // chrome for a state nobody sees, and a wrong guess (lock, then table) is worse than a beat of
-  // nothing. `locked` names the view and what it answers — never the price.
-  //
-  // ⚠ THE LOCKED BODY CARRIES ITS OWN TEST ID. `bot-roi-panel` stays on the entitled body alone:
-  // scripts/capture-shots.mjs waits on it in the PRO pass, and a shared id would let a
-  // misconfigured (flag-less) shots run photograph the lock and ship it as the marketing
-  // screenshot with nothing failing.
-  if (gate === 'pending') return null;
-  if (gate === 'locked') {
-    // ⚠ THE COST CLAUSE IS GATED ON THE SAME PREDICATE THE COLUMN IS, AND HERE IS WHY.
-    //
-    // Rule 2 of ProGate is "say what the view ANSWERS, never what it costs", and this clause
-    // passes that test on its own terms — "what that works out to per acted-on comment" is a
-    // question, not a price tag. It fails a different test: a lock is a PROMISE about what
-    // paying reveals, and on the per-repo mount paying now reveals everything in this sentence
-    // EXCEPT that clause. Leaving it would be the one thing worse than an advert — an
-    // unentitled reader pays, opens this very tab, and the promised figure is not there. The
-    // reader would have no way to learn that the answer exists one rail up, at a different
-    // grain, which is a fact about the product, not about their subscription.
-    //
-    // So the clause survives on the rail mount, where it is true, and is dropped on the per-repo
-    // mount, where the entitled view does not answer it. The remaining sentence still names four
-    // questions, so the locked pane keeps doing its job on both mounts.
-    return (
-      <ProLockPanel heading="Bot ROI" testId="bot-roi-locked">
-        What each review bot actually produced this window: threads raised, how many your team used,
-        how long they sat, how much repeated another bot
-        {showCost ? (
-          <> — and what that works out to per used comment against the price of the seat.</>
-        ) : (
-          <>.</>
-        )}
-      </ProLockPanel>
-    );
-  }
-
-  // ⚠ EVERYTHING BELOW RUNS ONLY UNDER `botDepth`, so a per-control gate that reads `botDepth`
-  // ALONE (the "Depth →" pill) is now trivially true. Those are kept as the local statement of
-  // which tier each control belongs to — and as the thing that still holds if this panel's gate is
-  // ever narrowed back to a per-column one.
-  //
-  // ⚠ `showCost` IS NO LONGER ONE OF THEM. It is `botDepth && repoId == null`, and the second
-  // conjunct is live: the $/acted-on column really does disappear on the per-repo mount, for the
-  // grain reason written where `showCost` is declared. Do not "simplify" it back to `botDepth`.
 
   // The panel's one explanation. The grace figure is the server's constant (`overdueGraceMs`), read
   // off the response rather than retyped; it is absent only before the first response lands.
@@ -1840,13 +1709,8 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
     // The "Review-bot ROI" heading was dropped (the rail line already has a header); just the
     // window/date-range picker remains, right-aligned.
     //
-    // ⚠ THE WINDOW PICKER IS INSIDE THE PAID PANEL, and it writes the SHARED `botAnalyticsWindow`
-    // field that BotsView's free caution and the hoisted tuning suggestions also read. That is
-    // deliberate: an unentitled reader keeps the default window with no control, and neither free
-    // surface makes a window CLAIM in its copy (the caution says "Open PRs only, any age"; the
-    // suggestions name a bot × path, not a period). Hoisting the picker would put a control for a
-    // locked panel in the free area; labelling the free surfaces with a window they cannot change
-    // would be worse still.
+    // The window picker writes the SHARED `botAnalyticsWindow` field that BotsView's caution and
+    // the hoisted tuning suggestions also read; neither makes a window CLAIM in its copy.
     <div className="flex flex-wrap items-center gap-2">
       <span className="inline-flex items-center gap-1 text-[11px] text-gray-500 dark:text-gray-400">
         How this is measured
@@ -1974,23 +1838,18 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
               disagree: direction,
             })
           }
-          // "Depth →" — Pro depth only (`botDepth`, hidden-not-upsold like the cost column).
-          // The meta is the chip/header label + the repo narrowing THIS table was measured at,
+          // "Depth →". The meta is the chip/header label + the repo narrowing THIS table was measured at,
           // so the tab describes the same scope as the row that was clicked.
-          onOpenDepth={
-            botDepth
-              ? (b) => {
-                  const meta: TabBotMeta = {
-                    id: b.userId,
-                    login: b.login,
-                    label: b.label,
-                    kind: b.kind,
-                    repoId: repoId ?? null,
-                  };
-                  openBotDetailTab(b.userId, meta);
-                }
-              : null
-          }
+          onOpenDepth={(b) => {
+            const meta: TabBotMeta = {
+              id: b.userId,
+              login: b.login,
+              label: b.label,
+              kind: b.kind,
+              repoId: repoId ?? null,
+            };
+            openBotDetailTab(b.userId, meta);
+          }}
           onTune={advisorPillsOn ? (key) => focusAdvisor(key, 'tune') : null}
           onDrop={advisorPillsOn ? (key) => focusAdvisor(key, 'drop') : null}
         />
@@ -2028,10 +1887,8 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
             />
           )}
         </div>
-        {/* `TuningSuggestions` USED TO SIT HERE and now renders in BotsView, above this panel:
-            it is a free `botTriage` surface and this panel is not, so leaving it inside would have
-            taken it paid the moment the panel was gated. Do not re-add it — two mounts would draw
-            it twice for a paying account. */}
+        {/* `TuningSuggestions` USED TO SIT HERE and now renders in BotsView, above this panel.
+            Do not re-add it — two mounts would draw it twice. */}
         <QualityCheckSection rows={qualityChecks} botColor={botColor} />
         {/* ⚠ THE PRICING INSTRUCTION IS GATED ON THE SAME PREDICATE AS THE COLUMN IT DESCRIBES.
             "Set a price to see $/acted-on" is a promise about THIS table, and on the per-repo

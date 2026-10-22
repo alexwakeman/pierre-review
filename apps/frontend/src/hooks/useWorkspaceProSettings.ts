@@ -4,7 +4,7 @@ import { api } from '../api/client.js';
 import { workspaceKey } from './useActivity.js';
 import { periodReportsListKey } from './usePeriodReports.js';
 
-// The PER-WORKSPACE Pro config (Pro `pro_workspace_settings`; /api/pro/settings/workspace) —
+// The PER-WORKSPACE reporting config (`pro_workspace_settings`; /api/pro/settings/workspace) —
 // ONE row holding the sprint cadence + phase anchor and the comparison-window MODE. (The Jira/Linear
 // tracker left it for CORE at apiVersion 23 — hooks/useWorkspaceTracker.ts.)
 //

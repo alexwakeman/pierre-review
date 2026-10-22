@@ -2,9 +2,8 @@ import type { MeResponse } from '@pierre-review/shared';
 
 /**
  * THE ONE GATE for the agentic AI surfaces — Claude Review (run, follow-up, ticket check, auto
- * review, the review chat), review memory and AI Fix. It reads the TOP-LEVEL `me.ai` block, never
- * `me.pro`: these features are FREE and run on the reader's own Claude, and `entitledProCapabilities`
- * zeroes `pro` for a free cloud account (the `mlSeverity` argument).
+ * review, the review chat), review memory and AI Fix. It reads the TOP-LEVEL `me.ai` block: these
+ * features run on the reader's own Claude.
  *
  * ⚠ VISIBILITY IS `enabled` ALONE. Locally the tabs and buttons ALWAYS render; a missing runtime or
  * credential changes what sits in place of the Run button (`AiRunGate`), never whether the surface

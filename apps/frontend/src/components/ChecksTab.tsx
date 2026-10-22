@@ -871,7 +871,7 @@ export function ChecksTab({
           non-draft), arm "merge when ready" (same gate; its own eligibility inside) and
           close-without-merging (push OR author + open, HIDDEN while an auto-merge is armed).
           Each control expands in place; the approvers themselves read from the green ✓ badges
-          in the Reviews row above. The Pro "check addressed" run used to sit here too — it is
+          in the Reviews row above. The "check addressed" run used to sit here too — it is
           now folded into the single "Check review" bar above the tabs, which covers the same
           threads and comments in one combined call per target, so leaving both would let a
           user pay twice for one judgement.

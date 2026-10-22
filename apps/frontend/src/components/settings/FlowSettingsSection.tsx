@@ -24,8 +24,8 @@ const DAYS: { iso: number; short: string }[] = [
 ];
 
 /**
- * CHRONOLOGY'S WORKING HOURS AND WAIT BUDGETS for the selected workspace — CORE, free to set on
- * every tier (Chronology itself is Pro; a setting is not a report), stored on the workspace row.
+ * CHRONOLOGY'S WORKING HOURS AND WAIT BUDGETS for the selected workspace, stored on the workspace
+ * row.
  *
  * ⚠ BLANK MEANS DEFAULT. A budget slider resting on its default mark follows the product default,
  * and the form sends only what differs from it (`buildFlowSettingsBody`), so a later change to a

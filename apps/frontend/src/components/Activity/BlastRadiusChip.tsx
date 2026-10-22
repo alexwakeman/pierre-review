@@ -135,9 +135,8 @@ export function BlastRadiusChip({
   // in one area, with tests" — the same sentence twice. The signal vector underneath is what
   // makes the click worth making on every pull request.
   //
-  // ⚠ FREE FOR EVERY USER, AND THAT IS A FACT ABOUT THE DATA, NOT A PRICING CHOICE: every line
-  // below is computed by `blastRadius()` and `blastSignalsFor()`. No model is in this call path.
-  // The Pro half of blast radius is the impact NOTE, which is a different component.
+  // Every line below is computed by `blastRadius()` and `blastSignalsFor()`. No model is in this
+  // call path. The AI half of blast radius is the impact NOTE, which is a different component.
   if (!expandable) {
     return (
       <span className={shell} title={verdict.label}>

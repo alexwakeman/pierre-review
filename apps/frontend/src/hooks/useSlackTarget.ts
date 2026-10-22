@@ -5,9 +5,8 @@ import type {
 } from '@pierre-review/shared';
 import { api } from '../api/client.js';
 import { workspaceKey } from './useActivity.js';
-import { useProCapabilities } from './useTriage.js';
 
-// The Slack delivery target for ONE workspace (Pro `workspace_slack_targets`;
+// The Slack delivery target for ONE workspace (`workspace_slack_targets`;
 // GET/PUT/DELETE /api/pro/slack/target?workspace=<id>).
 //
 // ⚠ THE KEY CARRIES `ws:<id>`, unlike the plural predecessor it replaces. That one fetched the
@@ -27,12 +26,10 @@ export function slackTargetKey(workspaceId: number | null): [string, string] {
 }
 
 export function useSlackTarget(enabled: boolean, workspaceId: number | null) {
-  // ⚠ STRICTLY PRO: the route 402s without `slackDigest`, so the capability is ANDed in here.
-  const entitled = useProCapabilities().slackDigest;
   return useQuery<WorkspaceSlackTargetResponse>({
     queryKey: slackTargetKey(workspaceId),
     queryFn: workspaceId == null ? skipToken : () => api.slackTarget(workspaceId),
-    enabled: enabled && entitled,
+    enabled,
     staleTime: 60_000,
   });
 }
