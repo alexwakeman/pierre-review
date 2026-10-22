@@ -1,0 +1,57 @@
+/* The demo notice bar (banner.ts). The app below it keeps its full-height layout: #root gives up
+   exactly the bar's height. Contrast on #111827: #e5e7eb 14.7:1, #fde68a 14.3:1, #93c5fd 9.6:1 —
+   all well above AA for 12px text. */
+body.limn-demo #root {
+  height: calc(100% - 28px);
+}
+
+#limn-demo-bar {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  height: 28px;
+  padding: 0 16px;
+  overflow: hidden;
+  white-space: nowrap;
+  background: #111827;
+  border-bottom: 1px solid #374151;
+  color: #e5e7eb;
+  font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-size: 12px;
+  line-height: 1;
+}
+
+#limn-demo-bar .limn-demo-notice {
+  color: #fde68a;
+  font-weight: 600;
+}
+
+#limn-demo-bar code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  color: #e5e7eb;
+}
+
+#limn-demo-bar .limn-demo-link {
+  margin-left: auto;
+  color: #93c5fd;
+  text-decoration: underline;
+}
+
+#limn-demo-bar .limn-demo-link:focus-visible {
+  outline: 2px solid #93c5fd;
+  outline-offset: 2px;
+}
+
+@media (max-width: 640px) {
+  #limn-demo-bar .limn-demo-install {
+    display: none;
+  }
+}
+
+@media print {
+  #limn-demo-bar {
+    display: none;
+  }
+}

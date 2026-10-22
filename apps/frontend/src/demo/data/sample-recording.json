@@ -1,0 +1,3005 @@
+{
+ "version": 1,
+ "capturedAt": "2026-10-22T19:24:35.776Z",
+ "entries": [
+  {
+   "method": "GET",
+   "path": "/api/me",
+   "status": 200,
+   "body": {
+    "user": {
+     "login": "morgan-diaz",
+     "githubId": "MDQ6VXNlcjE=",
+     "avatarUrl": null,
+     "displayName": "Morgan Diaz"
+    },
+    "deploymentMode": "local",
+    "mlSeverity": false,
+    "conflictResolver": false,
+    "ai": {
+     "enabled": false,
+     "runtime": "ready",
+     "runtimeMessage": null,
+     "auth": "ok",
+     "authMessage": null
+    },
+    "largePrCodeLocThreshold": 1500,
+    "largePrCodeLocThresholdIsDefault": true,
+    "blastRadius": null,
+    "myTurnSettings": null,
+    "authNotices": []
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/api/workspaces",
+   "status": 200,
+   "body": {
+    "workspaces": [
+     {
+      "id": 1,
+      "name": "Default",
+      "repoIds": [
+       10
+      ],
+      "repoCount": 1,
+      "isDefault": true,
+      "createdAt": "2026-08-23T19:24:35.772Z"
+     }
+    ]
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/api/repos",
+   "status": 200,
+   "body": [
+    {
+     "id": 10,
+     "owner": "acme",
+     "name": "web",
+     "fullName": "acme/web",
+     "createdAt": "2026-08-23T19:24:35.772Z",
+     "lastFullSyncAt": "2026-10-21T19:24:35.772Z",
+     "lastIncrementalSyncAt": "2026-10-22T19:24:35.772Z",
+     "lastSyncStatus": "ok",
+     "lastSyncError": null,
+     "workspaceId": 1
+    }
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/users",
+   "status": 200,
+   "body": [
+    {
+     "id": 1,
+     "githubLogin": "morgan-diaz",
+     "displayName": "Morgan Diaz",
+     "avatarUrl": null,
+     "isBot": false
+    },
+    {
+     "id": 2,
+     "githubLogin": "alice",
+     "displayName": "Alice",
+     "avatarUrl": null,
+     "isBot": false
+    },
+    {
+     "id": 3,
+     "githubLogin": "bob",
+     "displayName": "Bob",
+     "avatarUrl": null,
+     "isBot": false
+    }
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/mergers",
+   "status": 200,
+   "body": []
+  },
+  {
+   "method": "GET",
+   "path": "/api/my-turn",
+   "status": 200,
+   "body": {
+    "awaitingReview": [
+     {
+      "prId": 101,
+      "repoFullName": "acme/web",
+      "number": 101,
+      "title": "Inbox: add login form",
+      "authorId": 2,
+      "state": "open",
+      "openedAt": "2026-10-17T19:24:35.772Z",
+      "githubUrl": "https://github.com/acme/web/pull/101",
+      "alsoRequested": 0
+     },
+     {
+      "prId": 102,
+      "repoFullName": "acme/web",
+      "number": 102,
+      "title": "Inbox: fix auth race",
+      "authorId": 2,
+      "state": "open",
+      "openedAt": "2026-10-18T19:24:35.772Z",
+      "githubUrl": "https://github.com/acme/web/pull/102",
+      "alsoRequested": 0
+     },
+     {
+      "prId": 103,
+      "repoFullName": "acme/web",
+      "number": 103,
+      "title": "Inbox: tidy router",
+      "authorId": 3,
+      "state": "open",
+      "openedAt": "2026-10-19T19:24:35.772Z",
+      "githubUrl": "https://github.com/acme/web/pull/103",
+      "alsoRequested": 0
+     }
+    ],
+    "yourPrs": [],
+    "approvedPrs": [],
+    "threadsAwaiting": [],
+    "watchedRepoPrs": [
+     {
+      "prId": 104,
+      "repoFullName": "acme/web",
+      "number": 104,
+      "title": "Watched repo PR by bob",
+      "authorId": 3,
+      "state": "open",
+      "openedAt": "2026-10-20T19:24:35.772Z",
+      "githubUrl": "https://github.com/acme/web/pull/104"
+     }
+    ],
+    "claudeReviewsToAction": [],
+    "users": [
+     {
+      "id": 1,
+      "githubLogin": "morgan-diaz",
+      "displayName": "Morgan Diaz",
+      "avatarUrl": null,
+      "isBot": false
+     },
+     {
+      "id": 2,
+      "githubLogin": "alice",
+      "displayName": "Alice",
+      "avatarUrl": null,
+      "isBot": false
+     },
+     {
+      "id": 3,
+      "githubLogin": "bob",
+      "displayName": "Bob",
+      "avatarUrl": null,
+      "isBot": false
+     }
+    ],
+    "mentions": [],
+    "threadReplies": [],
+    "commentReplies": [],
+    "pushedSince": [],
+    "ownCiRed": [],
+    "ownConflicts": [],
+    "ownReady": [],
+    "ownThreads": [],
+    "redTrunks": [],
+    "order": [
+     "review_request",
+     "mention",
+     "thread",
+     "thread_reply",
+     "comment_reply",
+     "pushed_since",
+     "own_ci_red",
+     "own_conflicts",
+     "trunk_red",
+     "pr_approved",
+     "own_ready",
+     "your_pr",
+     "own_thread",
+     "claude_review",
+     "watched_repo_pr"
+    ],
+    "off": [
+     "own_ci_red",
+     "own_conflicts",
+     "trunk_red",
+     "own_ready",
+     "own_thread",
+     "watched_repo_pr"
+    ],
+    "configKey": "own_ci_red,own_conflicts,own_ready,own_thread,trunk_red,watched_repo_pr|off"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/api/auto-merge",
+   "status": 200,
+   "body": {
+    "requests": []
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/api/open-prs?workspace=1",
+   "status": 200,
+   "body": {
+    "prs": [
+     {
+      "id": 101,
+      "repoId": 10,
+      "number": 101,
+      "additions": 12,
+      "deletions": 3,
+      "changedFiles": 2,
+      "isApproved": false,
+      "isChangesRequested": false,
+      "title": "Inbox: add login form",
+      "authorId": 2,
+      "state": "open",
+      "isDraft": false,
+      "isStalled": false,
+      "openedAt": "2026-10-17T19:24:35.772Z",
+      "firstReviewAt": null,
+      "lastCommitAt": "2026-10-18T19:24:35.772Z",
+      "mergedAt": null,
+      "closedAt": null,
+      "updatedAt": "2026-10-18T19:24:35.772Z",
+      "threadCounts": {
+       "resolved": 0,
+       "likely_addressed": 0,
+       "replied_unresolved": 0,
+       "untouched": 0
+      },
+      "ciStatus": "success",
+      "mergeable": "mergeable",
+      "mergeStateStatus": "clean",
+      "labels": [],
+      "reasonTag": "awaiting_your_review",
+      "reviewRequestedFromMe": true,
+      "newSinceLastViewed": null
+     },
+     {
+      "id": 102,
+      "repoId": 10,
+      "number": 102,
+      "additions": 12,
+      "deletions": 3,
+      "changedFiles": 2,
+      "isApproved": false,
+      "isChangesRequested": false,
+      "title": "Inbox: fix auth race",
+      "authorId": 2,
+      "state": "open",
+      "isDraft": false,
+      "isStalled": false,
+      "openedAt": "2026-10-18T19:24:35.772Z",
+      "firstReviewAt": null,
+      "lastCommitAt": "2026-10-19T19:24:35.772Z",
+      "mergedAt": null,
+      "closedAt": null,
+      "updatedAt": "2026-10-19T19:24:35.772Z",
+      "threadCounts": {
+       "resolved": 0,
+       "likely_addressed": 0,
+       "replied_unresolved": 0,
+       "untouched": 0
+      },
+      "ciStatus": "success",
+      "mergeable": "mergeable",
+      "mergeStateStatus": "clean",
+      "labels": [],
+      "reasonTag": "awaiting_your_review",
+      "reviewRequestedFromMe": true,
+      "newSinceLastViewed": null
+     },
+     {
+      "id": 103,
+      "repoId": 10,
+      "number": 103,
+      "additions": 12,
+      "deletions": 3,
+      "changedFiles": 2,
+      "isApproved": false,
+      "isChangesRequested": false,
+      "title": "Inbox: tidy router",
+      "authorId": 3,
+      "state": "open",
+      "isDraft": false,
+      "isStalled": false,
+      "openedAt": "2026-10-19T19:24:35.772Z",
+      "firstReviewAt": null,
+      "lastCommitAt": "2026-10-20T19:24:35.772Z",
+      "mergedAt": null,
+      "closedAt": null,
+      "updatedAt": "2026-10-20T19:24:35.772Z",
+      "threadCounts": {
+       "resolved": 0,
+       "likely_addressed": 0,
+       "replied_unresolved": 0,
+       "untouched": 0
+      },
+      "ciStatus": "success",
+      "mergeable": "mergeable",
+      "mergeStateStatus": "clean",
+      "labels": [],
+      "reasonTag": "awaiting_your_review",
+      "reviewRequestedFromMe": true,
+      "newSinceLastViewed": null
+     },
+     {
+      "id": 104,
+      "repoId": 10,
+      "number": 104,
+      "additions": 12,
+      "deletions": 3,
+      "changedFiles": 2,
+      "isApproved": false,
+      "isChangesRequested": false,
+      "title": "Watched repo PR by bob",
+      "authorId": 3,
+      "state": "open",
+      "isDraft": false,
+      "isStalled": false,
+      "openedAt": "2026-10-20T19:24:35.772Z",
+      "firstReviewAt": null,
+      "lastCommitAt": "2026-10-21T19:24:35.772Z",
+      "mergedAt": null,
+      "closedAt": null,
+      "updatedAt": "2026-10-21T19:24:35.772Z",
+      "threadCounts": {
+       "resolved": 0,
+       "likely_addressed": 0,
+       "replied_unresolved": 0,
+       "untouched": 0
+      },
+      "ciStatus": "success",
+      "mergeable": "mergeable",
+      "mergeStateStatus": "clean",
+      "labels": [],
+      "reasonTag": "awaiting_your_review",
+      "reviewRequestedFromMe": true,
+      "newSinceLastViewed": null
+     },
+     {
+      "id": 105,
+      "repoId": 10,
+      "number": 105,
+      "additions": 12,
+      "deletions": 3,
+      "changedFiles": 2,
+      "isApproved": false,
+      "isChangesRequested": false,
+      "title": "Other: docs pass",
+      "authorId": 2,
+      "state": "open",
+      "isDraft": false,
+      "isStalled": false,
+      "openedAt": "2026-10-21T19:24:35.772Z",
+      "firstReviewAt": null,
+      "lastCommitAt": "2026-10-22T19:24:35.772Z",
+      "mergedAt": null,
+      "closedAt": null,
+      "updatedAt": "2026-10-22T19:24:35.772Z",
+      "threadCounts": {
+       "resolved": 0,
+       "likely_addressed": 0,
+       "replied_unresolved": 0,
+       "untouched": 0
+      },
+      "ciStatus": "success",
+      "mergeable": "mergeable",
+      "mergeStateStatus": "clean",
+      "labels": [],
+      "reasonTag": "awaiting_your_review",
+      "reviewRequestedFromMe": true,
+      "newSinceLastViewed": null
+     }
+    ]
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/api/timeline?workspace=1",
+   "status": 200,
+   "body": {
+    "prs": [
+     {
+      "id": 101,
+      "repoId": 10,
+      "number": 101,
+      "additions": 12,
+      "deletions": 3,
+      "changedFiles": 2,
+      "isApproved": false,
+      "isChangesRequested": false,
+      "title": "Inbox: add login form",
+      "authorId": 2,
+      "state": "open",
+      "isDraft": false,
+      "isStalled": false,
+      "openedAt": "2026-10-17T19:24:35.772Z",
+      "firstReviewAt": null,
+      "lastCommitAt": "2026-10-18T19:24:35.772Z",
+      "mergedAt": null,
+      "closedAt": null,
+      "updatedAt": "2026-10-18T19:24:35.772Z",
+      "threadCounts": {
+       "resolved": 0,
+       "likely_addressed": 0,
+       "replied_unresolved": 0,
+       "untouched": 0
+      },
+      "ciStatus": "success",
+      "mergeable": "mergeable",
+      "mergeStateStatus": "clean",
+      "labels": [],
+      "reasonTag": "awaiting_your_review",
+      "reviewRequestedFromMe": true,
+      "newSinceLastViewed": null
+     },
+     {
+      "id": 102,
+      "repoId": 10,
+      "number": 102,
+      "additions": 12,
+      "deletions": 3,
+      "changedFiles": 2,
+      "isApproved": false,
+      "isChangesRequested": false,
+      "title": "Inbox: fix auth race",
+      "authorId": 2,
+      "state": "open",
+      "isDraft": false,
+      "isStalled": false,
+      "openedAt": "2026-10-18T19:24:35.772Z",
+      "firstReviewAt": null,
+      "lastCommitAt": "2026-10-19T19:24:35.772Z",
+      "mergedAt": null,
+      "closedAt": null,
+      "updatedAt": "2026-10-19T19:24:35.772Z",
+      "threadCounts": {
+       "resolved": 0,
+       "likely_addressed": 0,
+       "replied_unresolved": 0,
+       "untouched": 0
+      },
+      "ciStatus": "success",
+      "mergeable": "mergeable",
+      "mergeStateStatus": "clean",
+      "labels": [],
+      "reasonTag": "awaiting_your_review",
+      "reviewRequestedFromMe": true,
+      "newSinceLastViewed": null
+     },
+     {
+      "id": 103,
+      "repoId": 10,
+      "number": 103,
+      "additions": 12,
+      "deletions": 3,
+      "changedFiles": 2,
+      "isApproved": false,
+      "isChangesRequested": false,
+      "title": "Inbox: tidy router",
+      "authorId": 3,
+      "state": "open",
+      "isDraft": false,
+      "isStalled": false,
+      "openedAt": "2026-10-19T19:24:35.772Z",
+      "firstReviewAt": null,
+      "lastCommitAt": "2026-10-20T19:24:35.772Z",
+      "mergedAt": null,
+      "closedAt": null,
+      "updatedAt": "2026-10-20T19:24:35.772Z",
+      "threadCounts": {
+       "resolved": 0,
+       "likely_addressed": 0,
+       "replied_unresolved": 0,
+       "untouched": 0
+      },
+      "ciStatus": "success",
+      "mergeable": "mergeable",
+      "mergeStateStatus": "clean",
+      "labels": [],
+      "reasonTag": "awaiting_your_review",
+      "reviewRequestedFromMe": true,
+      "newSinceLastViewed": null
+     },
+     {
+      "id": 104,
+      "repoId": 10,
+      "number": 104,
+      "additions": 12,
+      "deletions": 3,
+      "changedFiles": 2,
+      "isApproved": false,
+      "isChangesRequested": false,
+      "title": "Watched repo PR by bob",
+      "authorId": 3,
+      "state": "open",
+      "isDraft": false,
+      "isStalled": false,
+      "openedAt": "2026-10-20T19:24:35.772Z",
+      "firstReviewAt": null,
+      "lastCommitAt": "2026-10-21T19:24:35.772Z",
+      "mergedAt": null,
+      "closedAt": null,
+      "updatedAt": "2026-10-21T19:24:35.772Z",
+      "threadCounts": {
+       "resolved": 0,
+       "likely_addressed": 0,
+       "replied_unresolved": 0,
+       "untouched": 0
+      },
+      "ciStatus": "success",
+      "mergeable": "mergeable",
+      "mergeStateStatus": "clean",
+      "labels": [],
+      "reasonTag": "awaiting_your_review",
+      "reviewRequestedFromMe": true,
+      "newSinceLastViewed": null
+     },
+     {
+      "id": 105,
+      "repoId": 10,
+      "number": 105,
+      "additions": 12,
+      "deletions": 3,
+      "changedFiles": 2,
+      "isApproved": false,
+      "isChangesRequested": false,
+      "title": "Other: docs pass",
+      "authorId": 2,
+      "state": "open",
+      "isDraft": false,
+      "isStalled": false,
+      "openedAt": "2026-10-21T19:24:35.772Z",
+      "firstReviewAt": null,
+      "lastCommitAt": "2026-10-22T19:24:35.772Z",
+      "mergedAt": null,
+      "closedAt": null,
+      "updatedAt": "2026-10-22T19:24:35.772Z",
+      "threadCounts": {
+       "resolved": 0,
+       "likely_addressed": 0,
+       "replied_unresolved": 0,
+       "untouched": 0
+      },
+      "ciStatus": "success",
+      "mergeable": "mergeable",
+      "mergeStateStatus": "clean",
+      "labels": [],
+      "reasonTag": "awaiting_your_review",
+      "reviewRequestedFromMe": true,
+      "newSinceLastViewed": null
+     }
+    ],
+    "events": [
+     {
+      "id": 9000,
+      "repoId": 10,
+      "actorId": 2,
+      "prId": 101,
+      "type": "pr_opened",
+      "occurredAt": "2026-10-17T19:24:35.772Z",
+      "threadId": null,
+      "derivedState": null,
+      "refId": 101,
+      "reviewState": null
+     },
+     {
+      "id": 9001,
+      "repoId": 10,
+      "actorId": 2,
+      "prId": 102,
+      "type": "pr_opened",
+      "occurredAt": "2026-10-18T19:24:35.772Z",
+      "threadId": null,
+      "derivedState": null,
+      "refId": 102,
+      "reviewState": null
+     },
+     {
+      "id": 9002,
+      "repoId": 10,
+      "actorId": 3,
+      "prId": 103,
+      "type": "pr_opened",
+      "occurredAt": "2026-10-19T19:24:35.772Z",
+      "threadId": null,
+      "derivedState": null,
+      "refId": 103,
+      "reviewState": null
+     },
+     {
+      "id": 9003,
+      "repoId": 10,
+      "actorId": 3,
+      "prId": 104,
+      "type": "pr_opened",
+      "occurredAt": "2026-10-20T19:24:35.772Z",
+      "threadId": null,
+      "derivedState": null,
+      "refId": 104,
+      "reviewState": null
+     },
+     {
+      "id": 9004,
+      "repoId": 10,
+      "actorId": 2,
+      "prId": 105,
+      "type": "pr_opened",
+      "occurredAt": "2026-10-21T19:24:35.772Z",
+      "threadId": null,
+      "derivedState": null,
+      "refId": 105,
+      "reviewState": null
+     },
+     {
+      "id": 8001,
+      "repoId": 10,
+      "actorId": 1,
+      "prId": 101,
+      "type": "review_submitted",
+      "occurredAt": "2026-10-19T19:24:35.772Z",
+      "threadId": null,
+      "derivedState": null,
+      "refId": 5001,
+      "reviewState": "commented"
+     },
+     {
+      "id": 8002,
+      "repoId": 10,
+      "actorId": 3,
+      "prId": 103,
+      "type": "pr_comment",
+      "occurredAt": "2026-10-18T19:24:35.772Z",
+      "threadId": null,
+      "derivedState": null,
+      "refId": 6001,
+      "reviewState": null
+     }
+    ]
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/api/attention?workspace=1",
+   "status": 200,
+   "body": {
+    "cards": [
+     {
+      "prId": 201,
+      "repoId": 10,
+      "repoFullName": "acme/web",
+      "prNumber": 81,
+      "prTitle": "Bump tornado from 6.4.1 to 6.5",
+      "authorId": 4,
+      "githubUrl": "https://github.com/acme/web/pull/81",
+      "ciStatus": "success",
+      "changedFiles": 1,
+      "additions": 3,
+      "deletions": 3,
+      "openedAt": "2026-10-20T19:24:35.772Z",
+      "authorIsBot": true,
+      "authorBotKind": "dependabot",
+      "automation": {
+       "role": "dependency",
+       "kind": "dependabot",
+       "source": "account"
+      },
+      "inMergeQueue": null,
+      "mergeQueueEntryState": null,
+      "reviewDecision": null,
+      "reviewApprovals": 0,
+      "reviewChangesRequested": false,
+      "reviewers": [],
+      "reviewerCount": 0,
+      "id": "security:201",
+      "kind": "security",
+      "severity": "high",
+      "mergeStateStatus": "clean",
+      "mergeable": "mergeable",
+      "lastCommitAt": "2026-10-20T19:24:35.772Z",
+      "relevance": "maintained",
+      "viewerCanPush": true,
+      "dependencyUpdate": true,
+      "depState": "ready",
+      "fix": "proven",
+      "alerts": [],
+      "alertCount": 0,
+      "advisoryIds": [
+       "GHSA-9qr9-h5gf-34mp"
+      ],
+      "detail": "Fixes GHSA-9qr9-h5gf-34mp",
+      "stateDetail": "Nothing is blocking this — it can land now"
+     },
+     {
+      "prId": 202,
+      "repoId": 10,
+      "repoFullName": "acme/web",
+      "prNumber": 82,
+      "prTitle": "Bump eslint from 9.1.0 to 9.2.0",
+      "authorId": 4,
+      "githubUrl": "https://github.com/acme/web/pull/82",
+      "ciStatus": "success",
+      "changedFiles": 1,
+      "additions": 3,
+      "deletions": 3,
+      "openedAt": "2026-10-20T19:24:35.772Z",
+      "authorIsBot": true,
+      "authorBotKind": "dependabot",
+      "automation": {
+       "role": "dependency",
+       "kind": "dependabot",
+       "source": "account"
+      },
+      "inMergeQueue": null,
+      "mergeQueueEntryState": null,
+      "reviewDecision": null,
+      "reviewApprovals": 0,
+      "reviewChangesRequested": false,
+      "reviewers": [],
+      "reviewerCount": 0,
+      "id": "deps:202",
+      "kind": "dependency_bump",
+      "severity": "info",
+      "mergeStateStatus": "behind",
+      "mergeable": "mergeable",
+      "lastCommitAt": "2026-10-20T19:24:35.772Z",
+      "relevance": "maintained",
+      "viewerCanPush": true,
+      "depState": "behind",
+      "detail": "GitHub blocks the merge until the branch is updated"
+     }
+    ],
+    "users": [
+     {
+      "id": 4,
+      "githubLogin": "dependabot[bot]",
+      "displayName": null,
+      "avatarUrl": null,
+      "isBot": true
+     }
+    ],
+    "tabs": [
+     {
+      "key": "my_turn",
+      "total": 0,
+      "kindTotals": {
+       "my_turn": 0
+      },
+      "cardIds": [],
+      "authorTotals": {
+       "people": 0,
+       "automation": 0
+      },
+      "kindAuthorTotals": {
+       "my_turn": {
+        "people": 0,
+        "automation": 0
+       }
+      },
+      "relevanceTotals": {
+       "mine": 0,
+       "others": 0
+      },
+      "relevanceAuthorTotals": {
+       "mine": {
+        "people": 0,
+        "automation": 0
+       },
+       "others": {
+        "people": 0,
+        "automation": 0
+       }
+      }
+     },
+     {
+      "key": "claude",
+      "total": 0,
+      "kindTotals": {
+       "my_turn": 0
+      },
+      "cardIds": [],
+      "authorTotals": {
+       "people": 0,
+       "automation": 0
+      },
+      "kindAuthorTotals": {
+       "my_turn": {
+        "people": 0,
+        "automation": 0
+       }
+      }
+     },
+     {
+      "key": "fixing",
+      "total": 0,
+      "kindTotals": {
+       "ci_failing": 0,
+       "conflicts": 0
+      },
+      "cardIds": [],
+      "authorTotals": {
+       "people": 0,
+       "automation": 0
+      },
+      "kindAuthorTotals": {
+       "ci_failing": {
+        "people": 0,
+        "automation": 0
+       },
+       "conflicts": {
+        "people": 0,
+        "automation": 0
+       }
+      }
+     },
+     {
+      "key": "review",
+      "total": 0,
+      "kindTotals": {
+       "stalled_review": 0,
+       "reviewer_routing": 0
+      },
+      "cardIds": [],
+      "authorTotals": {
+       "people": 0,
+       "automation": 0
+      },
+      "kindAuthorTotals": {
+       "stalled_review": {
+        "people": 0,
+        "automation": 0
+       },
+       "reviewer_routing": {
+        "people": 0,
+        "automation": 0
+       }
+      }
+     },
+     {
+      "key": "threads",
+      "total": 0,
+      "kindTotals": {
+       "untouched_thread": 0
+      },
+      "cardIds": [],
+      "authorTotals": {
+       "people": 0,
+       "automation": 0
+      },
+      "kindAuthorTotals": {
+       "untouched_thread": {
+        "people": 0,
+        "automation": 0
+       }
+      }
+     },
+     {
+      "key": "land",
+      "total": 0,
+      "kindTotals": {
+       "merge": 0,
+       "update_branch": 0
+      },
+      "cardIds": [],
+      "authorTotals": {
+       "people": 0,
+       "automation": 0
+      },
+      "kindAuthorTotals": {
+       "merge": {
+        "people": 0,
+        "automation": 0
+       },
+       "update_branch": {
+        "people": 0,
+        "automation": 0
+       }
+      }
+     },
+     {
+      "key": "deps",
+      "total": 2,
+      "kindTotals": {
+       "security": 1,
+       "dependency_bump": 1
+      },
+      "cardIds": [
+       "security:201",
+       "deps:202"
+      ],
+      "authorTotals": {
+       "people": 0,
+       "automation": 2
+      },
+      "kindAuthorTotals": {
+       "security": {
+        "people": 0,
+        "automation": 1
+       },
+       "dependency_bump": {
+        "people": 0,
+        "automation": 1
+       }
+      }
+     }
+    ],
+    "scores": {},
+    "rules": {
+     "weights": {
+      "proximity": 0.5,
+      "stall": 0.3,
+      "relevance": 0.2
+     },
+     "preset": "balanced",
+     "myTurnOrder": [
+      "review_request",
+      "mention",
+      "thread",
+      "thread_reply",
+      "comment_reply",
+      "pushed_since",
+      "own_ci_red",
+      "own_conflicts",
+      "trunk_red",
+      "pr_approved",
+      "own_ready",
+      "your_pr",
+      "own_thread",
+      "claude_review",
+      "watched_repo_pr"
+     ],
+     "myTurnOff": [
+      "own_ci_red",
+      "own_conflicts",
+      "trunk_red",
+      "own_ready",
+      "own_thread",
+      "watched_repo_pr"
+     ]
+    }
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/api/daily-brief?workspace=1",
+   "status": 200,
+   "body": {
+    "workspaceId": 1,
+    "counts": {
+     "myTurn": 0,
+     "stalled": 0,
+     "untouchedThreads": 0,
+     "needsReviewer": 0,
+     "resolveBacklog": 0,
+     "botAnomalies": [],
+     "trunkRed": [],
+     "security": 0
+    },
+    "generatedAt": "2026-10-22T19:24:35.772Z"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/api/branch-status?workspace=1",
+   "status": 200,
+   "body": {
+    "repos": [
+     {
+      "repoId": 10,
+      "branchName": "main",
+      "headSha": "abc1234",
+      "ciStatus": "success",
+      "lastCommitAt": "2026-10-21T19:24:35.772Z",
+      "failingChecks": [],
+      "mergedPrs": []
+     }
+    ]
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/api/bot-reviewers?workspace=1",
+   "status": 200,
+   "body": {
+    "workspaceId": 1,
+    "reviewers": [],
+    "repoIds": [
+     10
+    ],
+    "workspaceSeatCount": 0,
+    "generatedAt": "2026-10-22T19:24:35.772Z"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/api/activity?workspace=1",
+   "status": 200,
+   "body": {
+    "repos": [
+     {
+      "repoId": 10,
+      "repoFullName": "acme/web",
+      "stats": {
+       "openPrs": 5,
+       "draftPrs": 0,
+       "mergedLast7d": 0,
+       "stalledPrs": 0,
+       "botThreads": 0,
+       "botThreadsActedOn": 0,
+       "medianHoursToFirstReview": null,
+       "oldestUnreviewed": null
+      },
+      "threadTotals": {
+       "resolved": 0,
+       "likely_addressed": 0,
+       "replied_unresolved": 0,
+       "untouched": 1
+      },
+      "maintainerIds": [],
+      "attentionCount": 1,
+      "hasUnread": false,
+      "prs": [
+       {
+        "id": 101,
+        "repoId": 10,
+        "number": 101,
+        "additions": 12,
+        "deletions": 3,
+        "changedFiles": 2,
+        "isApproved": false,
+        "isChangesRequested": false,
+        "title": "Inbox: add login form",
+        "authorId": 2,
+        "state": "open",
+        "isDraft": false,
+        "isStalled": false,
+        "openedAt": "2026-10-17T19:24:35.772Z",
+        "firstReviewAt": null,
+        "lastCommitAt": "2026-10-18T19:24:35.772Z",
+        "mergedAt": null,
+        "closedAt": null,
+        "updatedAt": "2026-10-18T19:24:35.772Z",
+        "threadCounts": {
+         "resolved": 0,
+         "likely_addressed": 0,
+         "replied_unresolved": 0,
+         "untouched": 0
+        },
+        "ciStatus": "success",
+        "mergeable": "mergeable",
+        "mergeStateStatus": "clean",
+        "labels": [],
+        "reasonTag": "awaiting_your_review",
+        "reviewRequestedFromMe": true,
+        "newSinceLastViewed": null
+       },
+       {
+        "id": 102,
+        "repoId": 10,
+        "number": 102,
+        "additions": 12,
+        "deletions": 3,
+        "changedFiles": 2,
+        "isApproved": false,
+        "isChangesRequested": false,
+        "title": "Inbox: fix auth race",
+        "authorId": 2,
+        "state": "open",
+        "isDraft": false,
+        "isStalled": false,
+        "openedAt": "2026-10-18T19:24:35.772Z",
+        "firstReviewAt": null,
+        "lastCommitAt": "2026-10-19T19:24:35.772Z",
+        "mergedAt": null,
+        "closedAt": null,
+        "updatedAt": "2026-10-19T19:24:35.772Z",
+        "threadCounts": {
+         "resolved": 0,
+         "likely_addressed": 0,
+         "replied_unresolved": 0,
+         "untouched": 0
+        },
+        "ciStatus": "success",
+        "mergeable": "mergeable",
+        "mergeStateStatus": "clean",
+        "labels": [],
+        "reasonTag": "awaiting_your_review",
+        "reviewRequestedFromMe": true,
+        "newSinceLastViewed": null
+       },
+       {
+        "id": 103,
+        "repoId": 10,
+        "number": 103,
+        "additions": 12,
+        "deletions": 3,
+        "changedFiles": 2,
+        "isApproved": false,
+        "isChangesRequested": false,
+        "title": "Inbox: tidy router",
+        "authorId": 3,
+        "state": "open",
+        "isDraft": false,
+        "isStalled": false,
+        "openedAt": "2026-10-19T19:24:35.772Z",
+        "firstReviewAt": null,
+        "lastCommitAt": "2026-10-20T19:24:35.772Z",
+        "mergedAt": null,
+        "closedAt": null,
+        "updatedAt": "2026-10-20T19:24:35.772Z",
+        "threadCounts": {
+         "resolved": 0,
+         "likely_addressed": 0,
+         "replied_unresolved": 0,
+         "untouched": 0
+        },
+        "ciStatus": "success",
+        "mergeable": "mergeable",
+        "mergeStateStatus": "clean",
+        "labels": [],
+        "reasonTag": "awaiting_your_review",
+        "reviewRequestedFromMe": true,
+        "newSinceLastViewed": null
+       },
+       {
+        "id": 104,
+        "repoId": 10,
+        "number": 104,
+        "additions": 12,
+        "deletions": 3,
+        "changedFiles": 2,
+        "isApproved": false,
+        "isChangesRequested": false,
+        "title": "Watched repo PR by bob",
+        "authorId": 3,
+        "state": "open",
+        "isDraft": false,
+        "isStalled": false,
+        "openedAt": "2026-10-20T19:24:35.772Z",
+        "firstReviewAt": null,
+        "lastCommitAt": "2026-10-21T19:24:35.772Z",
+        "mergedAt": null,
+        "closedAt": null,
+        "updatedAt": "2026-10-21T19:24:35.772Z",
+        "threadCounts": {
+         "resolved": 0,
+         "likely_addressed": 0,
+         "replied_unresolved": 0,
+         "untouched": 0
+        },
+        "ciStatus": "success",
+        "mergeable": "mergeable",
+        "mergeStateStatus": "clean",
+        "labels": [],
+        "reasonTag": "awaiting_your_review",
+        "reviewRequestedFromMe": true,
+        "newSinceLastViewed": null
+       },
+       {
+        "id": 105,
+        "repoId": 10,
+        "number": 105,
+        "additions": 12,
+        "deletions": 3,
+        "changedFiles": 2,
+        "isApproved": false,
+        "isChangesRequested": false,
+        "title": "Other: docs pass",
+        "authorId": 2,
+        "state": "open",
+        "isDraft": false,
+        "isStalled": false,
+        "openedAt": "2026-10-21T19:24:35.772Z",
+        "firstReviewAt": null,
+        "lastCommitAt": "2026-10-22T19:24:35.772Z",
+        "mergedAt": null,
+        "closedAt": null,
+        "updatedAt": "2026-10-22T19:24:35.772Z",
+        "threadCounts": {
+         "resolved": 0,
+         "likely_addressed": 0,
+         "replied_unresolved": 0,
+         "untouched": 0
+        },
+        "ciStatus": "success",
+        "mergeable": "mergeable",
+        "mergeStateStatus": "clean",
+        "labels": [],
+        "reasonTag": "awaiting_your_review",
+        "reviewRequestedFromMe": true,
+        "newSinceLastViewed": null
+       }
+      ]
+     }
+    ],
+    "generatedAt": "2026-10-22T19:24:35.772Z"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/api/activity/feed?authors=humans&limit=25&offset=0&workspace=1",
+   "status": 200,
+   "body": {
+    "items": [
+     {
+      "id": "feed:6001",
+      "isMyTurn": true,
+      "myTurnReasons": [
+       "authored"
+      ],
+      "commentId": null,
+      "kind": "review_comment",
+      "occurredAt": "2026-10-21T19:24:35.772Z",
+      "repoId": 10,
+      "repoFullName": "acme/web",
+      "prId": 101,
+      "prNumber": 101,
+      "prTitle": "Activity: fix auth race",
+      "prState": "open",
+      "actorId": 3,
+      "content": "Can you take another look at this?",
+      "threadId": 5001,
+      "path": "src/login.ts",
+      "line": 10,
+      "reasonTag": "your_pr_new_comments",
+      "reviewState": null,
+      "githubUrl": "https://github.com/acme/web/pull/101",
+      "mergedById": null,
+      "reviewers": null,
+      "ciStatus": null,
+      "changedFilesCount": null,
+      "affectedThreads": null,
+      "commitCount": null,
+      "changeSummary": null,
+      "mergedComments": []
+     },
+     {
+      "id": "feed:7000",
+      "isMyTurn": false,
+      "myTurnReasons": [],
+      "commentId": null,
+      "kind": "pr_opened",
+      "occurredAt": "2026-10-18T19:24:35.772Z",
+      "repoId": 10,
+      "repoFullName": "acme/web",
+      "prId": 105,
+      "prNumber": 105,
+      "prTitle": "Other: docs pass",
+      "prState": "open",
+      "actorId": 2,
+      "content": null,
+      "threadId": null,
+      "path": null,
+      "line": null,
+      "reasonTag": null,
+      "reviewState": null,
+      "githubUrl": "https://github.com/acme/web/pull/105",
+      "mergedById": null,
+      "reviewers": null,
+      "ciStatus": null,
+      "changedFilesCount": null,
+      "affectedThreads": null,
+      "commitCount": null,
+      "changeSummary": null,
+      "mergedComments": []
+     },
+     {
+      "id": "feed:7001",
+      "isMyTurn": false,
+      "myTurnReasons": [],
+      "commentId": null,
+      "kind": "pr_merged",
+      "occurredAt": "2026-10-17T19:24:35.772Z",
+      "repoId": 10,
+      "repoFullName": "acme/web",
+      "prId": 105,
+      "prNumber": 105,
+      "prTitle": "Other: docs pass",
+      "prState": "merged",
+      "actorId": 2,
+      "content": null,
+      "threadId": null,
+      "path": null,
+      "line": null,
+      "reasonTag": null,
+      "reviewState": null,
+      "githubUrl": "https://github.com/acme/web/pull/105",
+      "mergedById": 2,
+      "reviewers": null,
+      "ciStatus": null,
+      "changedFilesCount": null,
+      "affectedThreads": null,
+      "commitCount": null,
+      "changeSummary": null,
+      "mergedComments": []
+     }
+    ],
+    "users": [
+     {
+      "id": 1,
+      "githubLogin": "morgan-diaz",
+      "displayName": "Morgan Diaz",
+      "avatarUrl": null,
+      "isBot": false
+     },
+     {
+      "id": 2,
+      "githubLogin": "alice",
+      "displayName": "Alice",
+      "avatarUrl": null,
+      "isBot": false
+     },
+     {
+      "id": 3,
+      "githubLogin": "bob",
+      "displayName": "Bob",
+      "avatarUrl": null,
+      "isBot": false
+     }
+    ],
+    "total": 3,
+    "generatedAt": "2026-10-22T19:24:35.772Z"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/api/merged-prs?workspace=1",
+   "status": 200,
+   "body": {
+    "prs": [],
+    "workspaceId": 1,
+    "window": {
+     "mode": "rolling_14",
+     "from": "2026-10-08T19:24:35.772Z",
+     "to": "2026-10-22T19:24:35.772Z",
+     "end": "2026-10-22T19:24:35.772Z",
+     "days": 14,
+     "elapsedDays": 14
+    },
+    "truncated": false
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/api/sprint-graph?workspace=1",
+   "status": 200,
+   "body": {
+    "workspaceId": 1,
+    "trackerOn": true,
+    "changeToken": "e2e0000000000001",
+    "provider": "jira",
+    "source": {
+     "kind": "sprint",
+     "provider": "jira",
+     "names": [
+      "Sprint 42"
+     ]
+    },
+    "read": {
+     "readAt": "2026-10-22T19:10:11.772Z",
+     "checkedAt": "2026-10-22T19:10:11.772Z",
+     "error": null,
+     "truncated": false
+    },
+    "aiEnabled": true,
+    "themes": null,
+    "paths": {
+     "paths": [
+      {
+       "title": "Magic link waits on email",
+       "tickets": [
+        "ACME-9",
+        "ACME-2"
+       ],
+       "idents": [
+        "jira:https://acme.atlassian.net#ACME-9",
+        "jira:https://acme.atlassian.net#ACME-2"
+       ],
+       "advice": "Finish the email service before the sign-in work.",
+       "risk": "high"
+      }
+     ],
+     "callouts": [
+      {
+       "title": "Nobody owns this",
+       "tickets": [
+        "ACME-2"
+       ],
+       "idents": [
+        "jira:https://acme.atlassian.net#ACME-2"
+       ]
+      }
+     ],
+     "createdAt": "2026-10-22T18:55:47.772Z"
+    },
+    "pathsStatus": {
+     "state": "current",
+     "stale": false,
+     "lastAttemptAt": "2026-10-22T18:55:47.772Z",
+     "failure": null
+    },
+    "pace": {
+     "daysElapsed": 4,
+     "daysTotal": 14,
+     "timeUsedPct": 29,
+     "tickets": 2,
+     "live": 2,
+     "done": 0,
+     "productReview": 0,
+     "codeMerged": 0,
+     "openDependencies": 1,
+     "chains": 1
+    },
+    "people": [
+     {
+      "name": "Amy",
+      "names": [
+       "Amy"
+      ],
+      "reviewsWaiting": null
+     }
+    ],
+    "sprintDates": {
+     "startsAt": "2026-10-19T19:24:35.772Z",
+     "endsAt": "2026-11-02T19:24:35.772Z",
+     "source": "tracker"
+    },
+    "signals": [],
+    "ghostsTruncated": false,
+    "briefs": {
+     "current": 2,
+     "pending": 1
+    },
+    "statusLayout": {
+     "order": [
+      {
+       "name": "To Do",
+       "category": "new",
+       "count": 1,
+       "auto": true,
+       "stage": "not_started",
+       "bucketId": "not_started"
+      },
+      {
+       "name": "In Progress",
+       "category": "indeterminate",
+       "count": 1,
+       "auto": true,
+       "stage": "in_progress",
+       "bucketId": "in_progress"
+      },
+      {
+       "name": "In Review",
+       "category": "indeterminate",
+       "count": 0,
+       "auto": true,
+       "stage": "in_review",
+       "bucketId": "in_review"
+      },
+      {
+       "name": "Done",
+       "category": "done",
+       "count": 0,
+       "auto": true,
+       "stage": "done",
+       "bucketId": "done"
+      }
+     ],
+     "orderSource": "jira_board",
+     "codingBegins": "In Progress",
+     "codingEnds": "In Review",
+     "evidence": [
+      {
+       "status": "In Progress",
+       "withPrs": 3,
+       "allMerged": 0
+      },
+      {
+       "status": "In Review",
+       "withPrs": 4,
+       "allMerged": 3
+      }
+     ],
+     "buckets": [
+      {
+       "id": "not_started",
+       "name": "Not started",
+       "meaning": "not_started",
+       "statuses": [
+        {
+         "name": "To Do",
+         "category": "new",
+         "count": 1,
+         "auto": true,
+         "stage": "not_started",
+         "bucketId": "not_started"
+        }
+       ]
+      },
+      {
+       "id": "in_progress",
+       "name": "In progress",
+       "meaning": "in_progress",
+       "statuses": [
+        {
+         "name": "In Progress",
+         "category": "indeterminate",
+         "count": 1,
+         "auto": true,
+         "stage": "in_progress",
+         "bucketId": "in_progress"
+        }
+       ]
+      },
+      {
+       "id": "in_review",
+       "name": "Code review",
+       "meaning": "in_review",
+       "statuses": [
+        {
+         "name": "In Review",
+         "category": "indeterminate",
+         "count": 0,
+         "auto": true,
+         "stage": "in_review",
+         "bucketId": "in_review"
+        }
+       ]
+      },
+      {
+       "id": "product_review",
+       "name": "Product review",
+       "meaning": "product_review",
+       "statuses": []
+      },
+      {
+       "id": "done",
+       "name": "Complete",
+       "meaning": "done",
+       "statuses": [
+        {
+         "name": "Done",
+         "category": "done",
+         "count": 0,
+         "auto": true,
+         "stage": "done",
+         "bucketId": "done"
+        }
+       ]
+      }
+     ],
+     "columns": [
+      {
+       "id": "not_started",
+       "name": "Not started",
+       "meaning": "not_started"
+      },
+      {
+       "id": "in_progress",
+       "name": "In progress",
+       "meaning": "in_progress"
+      },
+      {
+       "id": "in_review",
+       "name": "Code review",
+       "meaning": "in_review"
+      },
+      {
+       "id": "product_review",
+       "name": "Product review",
+       "meaning": "product_review"
+      },
+      {
+       "id": "done",
+       "name": "Complete",
+       "meaning": "done"
+      }
+     ],
+     "settings": {
+      "buckets": null,
+      "mergedColumn": true
+     }
+    },
+    "nodes": [
+     {
+      "ident": "jira:https://acme.atlassian.net#ACME-1",
+      "key": "ACME-1",
+      "title": "Export a report as CSV",
+      "url": "https://acme.atlassian.net/browse/ACME-1",
+      "provider": "jira",
+      "ghost": false,
+      "depth": 0,
+      "status": {
+       "name": "To Do",
+       "category": "new"
+      },
+      "stage": "not_started",
+      "bucketId": "not_started",
+      "column": "not_started",
+      "issueType": "Story",
+      "assignee": {
+       "name": "Amy",
+       "avatarUrl": null
+      },
+      "epic": {
+       "key": "ACME-100",
+       "title": "Reports"
+      },
+      "brief": {
+       "state": "current",
+       "summary": "Lets a manager download any report as a CSV file.",
+       "oneLiner": "Download any report as CSV",
+       "criteriaCount": 3,
+       "criteriaDerived": true
+      },
+      "check": null,
+      "checkRunning": false,
+      "prs": [],
+      "degree": 1,
+      "theme": null
+     },
+     {
+      "ident": "jira:https://acme.atlassian.net#ACME-2",
+      "key": "ACME-2",
+      "title": "Sign in with a magic link",
+      "url": "https://acme.atlassian.net/browse/ACME-2",
+      "provider": "jira",
+      "ghost": false,
+      "depth": 0,
+      "status": {
+       "name": "In Progress",
+       "category": "indeterminate"
+      },
+      "stage": "in_progress",
+      "bucketId": "in_progress",
+      "column": "in_progress",
+      "issueType": "Story",
+      "assignee": null,
+      "epic": null,
+      "brief": {
+       "state": "current",
+       "summary": "Users sign in from a one-time link sent by email.",
+       "oneLiner": "Sign in from an email link",
+       "criteriaCount": 2,
+       "criteriaDerived": false
+      },
+      "check": {
+       "met": 1,
+       "partlyMet": 0,
+       "notMet": 1,
+       "unsettled": 0,
+       "total": 2,
+       "checkedAt": "2026-10-19T10:00:00.000Z",
+       "stale": false
+      },
+      "checkRunning": false,
+      "prs": [
+       {
+        "prId": 101,
+        "number": 101,
+        "repoFullName": "acme/web",
+        "title": "Inbox: add login form",
+        "state": "open",
+        "draft": false,
+        "ciState": "failure",
+        "url": "https://github.com/acme/web/pull/101",
+        "author": {
+         "login": "ada",
+         "name": "Ada Lovelace",
+         "isBot": false
+        }
+       }
+      ],
+      "degree": 2,
+      "theme": null
+     },
+     {
+      "ident": "jira:https://acme.atlassian.net#ACME-9",
+      "key": "ACME-9",
+      "title": "Email sending service",
+      "url": "https://acme.atlassian.net/browse/ACME-9",
+      "provider": "jira",
+      "ghost": true,
+      "depth": 1,
+      "status": {
+       "name": "In Progress",
+       "category": "indeterminate"
+      },
+      "stage": "in_progress",
+      "bucketId": "in_progress",
+      "column": "in_progress",
+      "issueType": "Story",
+      "assignee": {
+       "name": "Ben",
+       "avatarUrl": null
+      },
+      "epic": null,
+      "brief": {
+       "state": "pending",
+       "summary": null,
+       "oneLiner": null,
+       "criteriaCount": 0,
+       "criteriaDerived": false
+      },
+      "check": null,
+      "checkRunning": false,
+      "prs": [],
+      "degree": 1,
+      "theme": null
+     }
+    ],
+    "edges": [
+     {
+      "from": "jira:https://acme.atlassian.net#ACME-2",
+      "to": "jira:https://acme.atlassian.net#ACME-9",
+      "kind": "depends_on",
+      "source": "tracker",
+      "quote": null
+     },
+     {
+      "from": "jira:https://acme.atlassian.net#ACME-2",
+      "to": "jira:https://acme.atlassian.net#ACME-1",
+      "kind": "concurrent",
+      "source": "text",
+      "quote": "built together with ACME-1"
+     }
+    ]
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/api/sprint-graph/token?workspace=1",
+   "status": 200,
+   "body": {
+    "workspaceId": 1,
+    "changeToken": "e2e0000000000001"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/api/workspaces/1/tracker",
+   "status": 200,
+   "body": {
+    "workspaceId": 1,
+    "issue": {
+     "provider": null,
+     "baseUrl": null,
+     "projectKeys": [],
+     "matchScope": "title_branch"
+    },
+    "jira": {
+     "email": null,
+     "hasToken": false
+    },
+    "providerChosen": false,
+    "githubIssuesRepos": []
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/api/workspaces/1/sonar",
+   "status": 200,
+   "body": {
+    "workspaceId": 1,
+    "organization": null,
+    "hasToken": false,
+    "tokenUnreadable": false,
+    "repos": []
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/api/workspaces/1/docs-settings",
+   "status": 200,
+   "body": {
+    "workspaceId": 1,
+    "docsInReview": false
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/api/pro/settings/workspace?workspace=1",
+   "status": 200,
+   "body": {
+    "workspaceId": 1,
+    "cadenceDays": null,
+    "startDate": null,
+    "comparisonMode": "rolling_14"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/api/pro/slack/target?workspace=1",
+   "status": 200,
+   "body": {
+    "workspaceId": 1,
+    "workspaceName": "Default",
+    "target": null,
+    "cap": 10,
+    "configuredCount": 0
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/api/docs?workspace=1",
+   "status": 200,
+   "body": {
+    "workspaceId": 1,
+    "docs": [],
+    "docsInReview": false,
+    "maxBytes": 26214400
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/api/docs/chats?workspace=1",
+   "status": 200,
+   "body": {
+    "workspaceId": 1,
+    "conversations": []
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/api/docs/tree?workspace=1",
+   "status": 200,
+   "body": {
+    "workspaceId": 1,
+    "index": "# Reference library\n\nNo documents yet.\n",
+    "doc": null,
+    "contents": null,
+    "sections": []
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/api/ticket-merged-prs?keys=&workspace=1",
+   "status": 200,
+   "body": {
+    "workspaceId": 1,
+    "tickets": []
+   }
+  },
+  {
+   "method": "POST",
+   "path": "/api/claude-review/states",
+   "status": 200,
+   "body": {
+    "states": []
+   }
+  },
+  {
+   "method": "POST",
+   "path": "/api/claude-review/thread-judgements",
+   "status": 200,
+   "body": {
+    "prs": []
+   }
+  },
+  {
+   "method": "POST",
+   "path": "/api/ticket-reviews/states",
+   "status": 200,
+   "body": {
+    "states": []
+   }
+  },
+  {
+   "method": "POST",
+   "path": "/api/ci-reviews/states",
+   "status": 200,
+   "body": {
+    "states": []
+   }
+  },
+  {
+   "method": "POST",
+   "path": "/api/ticket-links",
+   "status": 200,
+   "body": {
+    "prs": [],
+    "titlesComplete": true
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/api/threads/5001",
+   "status": 200,
+   "body": {
+    "id": 5001,
+    "prId": 101,
+    "path": "src/login.ts",
+    "line": 10,
+    "isResolved": false,
+    "isOutdated": false,
+    "derivedState": "replied_unresolved",
+    "addressedConfidence": "low",
+    "addressedReason": null,
+    "originalCommenterId": 3,
+    "createdAt": "2026-10-21T19:24:35.772Z",
+    "comments": [
+     {
+      "id": 9001,
+      "authorId": 3,
+      "body": "Can you take another look at this?",
+      "diffHunk": null,
+      "createdAt": "2026-10-21T19:24:35.772Z",
+      "url": null
+     }
+    ],
+    "url": null
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/api/prs/101",
+   "status": 200,
+   "body": {
+    "id": 101,
+    "repoId": 10,
+    "repoFullName": "acme/web",
+    "number": 101,
+    "title": "Inbox: add login form",
+    "body": "Fixture PR body.",
+    "authorId": 2,
+    "state": "open",
+    "isDraft": false,
+    "isStalled": false,
+    "openedAt": "2026-10-17T19:24:35.772Z",
+    "firstReviewAt": null,
+    "lastCommitAt": "2026-10-18T19:24:35.772Z",
+    "mergedAt": null,
+    "mergedById": null,
+    "closedAt": null,
+    "updatedAt": "2026-10-18T19:24:35.772Z",
+    "githubUrl": "https://github.com/acme/web/pull/101",
+    "headSha": "deadbeef",
+    "ciStatus": "success",
+    "mergeable": "mergeable",
+    "mergeStateStatus": "clean",
+    "labels": [],
+    "checkRuns": [],
+    "additions": 1,
+    "deletions": 0,
+    "changedFilesCount": 1,
+    "files": [],
+    "requestedReviewers": [],
+    "reviewDecision": null,
+    "reviewStandings": [],
+    "reviewerCount": 0,
+    "tickets": [],
+    "headRefName": "feature/e2e-branch",
+    "baseRefName": "main",
+    "inMergeQueue": null,
+    "mergeQueueEntryState": null,
+    "viewerCanApprove": false,
+    "viewerCanPush": false,
+    "viewerCanClose": false,
+    "viewerCanReopen": false,
+    "viewerHasApprovedStanding": false,
+    "viewerReviewStanding": null,
+    "threads": [],
+    "reviews": [],
+    "comments": [],
+    "commits": [],
+    "users": [
+     {
+      "id": 1,
+      "githubLogin": "morgan-diaz",
+      "displayName": "Morgan Diaz",
+      "avatarUrl": null,
+      "isBot": false
+     },
+     {
+      "id": 2,
+      "githubLogin": "alice",
+      "displayName": "Alice",
+      "avatarUrl": null,
+      "isBot": false
+     },
+     {
+      "id": 3,
+      "githubLogin": "bob",
+      "displayName": "Bob",
+      "avatarUrl": null,
+      "isBot": false
+     }
+    ],
+    "lastViewedAt": null,
+    "newSinceLastViewed": null
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/api/prs/101/ci-review",
+   "status": 200,
+   "body": {
+    "prId": 101,
+    "review": null,
+    "state": {
+     "prId": 101,
+     "status": "none",
+     "staleBecause": null,
+     "latestRunId": null,
+     "runningRunId": null,
+     "headSha": null,
+     "counts": null,
+     "refused": null,
+     "checkedAt": null
+    }
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/api/prs/101/ticket-reviews",
+   "status": 200,
+   "body": {
+    "prId": 101,
+    "tickets": []
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/api/prs/101/sequence-diagrams",
+   "status": 200,
+   "body": {
+    "prId": 101,
+    "pr": {
+     "diagram": {
+      "id": 1,
+      "kind": "pr",
+      "prId": 101,
+      "ticketIdent": null,
+      "ticketKey": null,
+      "status": "succeeded",
+      "trigger": "review",
+      "title": "Rate import",
+      "caption": "Rows are checked, then each rate is stored once.",
+      "design": {
+       "acts": [
+        {
+         "id": "imp",
+         "title": "Import"
+        },
+        {
+         "id": "save",
+         "title": "Save"
+        }
+       ],
+       "layers": [
+        "domain",
+        "data"
+       ],
+       "cells": [
+        {
+         "id": "c1",
+         "act": "imp",
+         "layer": "domain",
+         "label": "Reject rows with no account",
+         "pattern": "Guard clause",
+         "change": "new",
+         "pr": null,
+         "files": [
+          "src/import.ts"
+         ]
+        },
+        {
+         "id": "c2",
+         "act": "save",
+         "layer": "data",
+         "label": "Store each rate once",
+         "pattern": "Repository",
+         "change": "changed",
+         "pr": null,
+         "files": []
+        }
+       ],
+       "arrows": [
+        {
+         "from": "c1",
+         "to": "c2",
+         "label": "valid rows"
+        }
+       ]
+      },
+      "headSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "members": [],
+      "refusal": null,
+      "error": null,
+      "current": true,
+      "createdAt": "2026-10-17T00:00:00.000Z",
+      "completedAt": "2026-10-17T00:01:00.000Z",
+      "costUsd": 0.4
+     },
+     "latest": null
+    },
+    "stories": []
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/api/prs/101/claude-review/thread-check",
+   "status": 200,
+   "body": {
+    "prId": 101,
+    "check": null,
+    "progress": null
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/api/prs/102",
+   "status": 200,
+   "body": {
+    "id": 102,
+    "repoId": 10,
+    "repoFullName": "acme/web",
+    "number": 102,
+    "title": "Inbox: fix auth race",
+    "body": "Fixture PR body.",
+    "authorId": 2,
+    "state": "open",
+    "isDraft": false,
+    "isStalled": false,
+    "openedAt": "2026-10-18T19:24:35.772Z",
+    "firstReviewAt": null,
+    "lastCommitAt": "2026-10-19T19:24:35.772Z",
+    "mergedAt": null,
+    "mergedById": null,
+    "closedAt": null,
+    "updatedAt": "2026-10-19T19:24:35.772Z",
+    "githubUrl": "https://github.com/acme/web/pull/102",
+    "headSha": "deadbeef",
+    "ciStatus": "success",
+    "mergeable": "mergeable",
+    "mergeStateStatus": "clean",
+    "labels": [],
+    "checkRuns": [],
+    "additions": 1,
+    "deletions": 0,
+    "changedFilesCount": 1,
+    "files": [],
+    "requestedReviewers": [],
+    "reviewDecision": null,
+    "reviewStandings": [],
+    "reviewerCount": 0,
+    "tickets": [],
+    "headRefName": "feature/e2e-branch",
+    "baseRefName": "main",
+    "inMergeQueue": null,
+    "mergeQueueEntryState": null,
+    "viewerCanApprove": false,
+    "viewerCanPush": false,
+    "viewerCanClose": false,
+    "viewerCanReopen": false,
+    "viewerHasApprovedStanding": false,
+    "viewerReviewStanding": null,
+    "threads": [],
+    "reviews": [],
+    "comments": [],
+    "commits": [],
+    "users": [
+     {
+      "id": 1,
+      "githubLogin": "morgan-diaz",
+      "displayName": "Morgan Diaz",
+      "avatarUrl": null,
+      "isBot": false
+     },
+     {
+      "id": 2,
+      "githubLogin": "alice",
+      "displayName": "Alice",
+      "avatarUrl": null,
+      "isBot": false
+     },
+     {
+      "id": 3,
+      "githubLogin": "bob",
+      "displayName": "Bob",
+      "avatarUrl": null,
+      "isBot": false
+     }
+    ],
+    "lastViewedAt": null,
+    "newSinceLastViewed": null
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/api/prs/102/ci-review",
+   "status": 200,
+   "body": {
+    "prId": 102,
+    "review": null,
+    "state": {
+     "prId": 102,
+     "status": "none",
+     "staleBecause": null,
+     "latestRunId": null,
+     "runningRunId": null,
+     "headSha": null,
+     "counts": null,
+     "refused": null,
+     "checkedAt": null
+    }
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/api/prs/102/ticket-reviews",
+   "status": 200,
+   "body": {
+    "prId": 102,
+    "tickets": []
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/api/prs/102/sequence-diagrams",
+   "status": 200,
+   "body": {
+    "prId": 102,
+    "pr": {
+     "diagram": {
+      "id": 1,
+      "kind": "pr",
+      "prId": 102,
+      "ticketIdent": null,
+      "ticketKey": null,
+      "status": "succeeded",
+      "trigger": "review",
+      "title": "Rate import",
+      "caption": "Rows are checked, then each rate is stored once.",
+      "design": {
+       "acts": [
+        {
+         "id": "imp",
+         "title": "Import"
+        },
+        {
+         "id": "save",
+         "title": "Save"
+        }
+       ],
+       "layers": [
+        "domain",
+        "data"
+       ],
+       "cells": [
+        {
+         "id": "c1",
+         "act": "imp",
+         "layer": "domain",
+         "label": "Reject rows with no account",
+         "pattern": "Guard clause",
+         "change": "new",
+         "pr": null,
+         "files": [
+          "src/import.ts"
+         ]
+        },
+        {
+         "id": "c2",
+         "act": "save",
+         "layer": "data",
+         "label": "Store each rate once",
+         "pattern": "Repository",
+         "change": "changed",
+         "pr": null,
+         "files": []
+        }
+       ],
+       "arrows": [
+        {
+         "from": "c1",
+         "to": "c2",
+         "label": "valid rows"
+        }
+       ]
+      },
+      "headSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "members": [],
+      "refusal": null,
+      "error": null,
+      "current": true,
+      "createdAt": "2026-10-17T00:00:00.000Z",
+      "completedAt": "2026-10-17T00:01:00.000Z",
+      "costUsd": 0.4
+     },
+     "latest": null
+    },
+    "stories": []
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/api/prs/102/claude-review/thread-check",
+   "status": 200,
+   "body": {
+    "prId": 102,
+    "check": null,
+    "progress": null
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/api/prs/103",
+   "status": 200,
+   "body": {
+    "id": 103,
+    "repoId": 10,
+    "repoFullName": "acme/web",
+    "number": 103,
+    "title": "Inbox: tidy router",
+    "body": "Fixture PR body.",
+    "authorId": 3,
+    "state": "open",
+    "isDraft": false,
+    "isStalled": false,
+    "openedAt": "2026-10-19T19:24:35.772Z",
+    "firstReviewAt": null,
+    "lastCommitAt": "2026-10-20T19:24:35.772Z",
+    "mergedAt": null,
+    "mergedById": null,
+    "closedAt": null,
+    "updatedAt": "2026-10-20T19:24:35.772Z",
+    "githubUrl": "https://github.com/acme/web/pull/103",
+    "headSha": "deadbeef",
+    "ciStatus": "success",
+    "mergeable": "mergeable",
+    "mergeStateStatus": "clean",
+    "labels": [],
+    "checkRuns": [],
+    "additions": 1,
+    "deletions": 0,
+    "changedFilesCount": 1,
+    "files": [],
+    "requestedReviewers": [],
+    "reviewDecision": null,
+    "reviewStandings": [],
+    "reviewerCount": 0,
+    "tickets": [],
+    "headRefName": "feature/e2e-branch",
+    "baseRefName": "main",
+    "inMergeQueue": null,
+    "mergeQueueEntryState": null,
+    "viewerCanApprove": false,
+    "viewerCanPush": false,
+    "viewerCanClose": false,
+    "viewerCanReopen": false,
+    "viewerHasApprovedStanding": false,
+    "viewerReviewStanding": null,
+    "threads": [],
+    "reviews": [],
+    "comments": [],
+    "commits": [],
+    "users": [
+     {
+      "id": 1,
+      "githubLogin": "morgan-diaz",
+      "displayName": "Morgan Diaz",
+      "avatarUrl": null,
+      "isBot": false
+     },
+     {
+      "id": 2,
+      "githubLogin": "alice",
+      "displayName": "Alice",
+      "avatarUrl": null,
+      "isBot": false
+     },
+     {
+      "id": 3,
+      "githubLogin": "bob",
+      "displayName": "Bob",
+      "avatarUrl": null,
+      "isBot": false
+     }
+    ],
+    "lastViewedAt": null,
+    "newSinceLastViewed": null
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/api/prs/103/ci-review",
+   "status": 200,
+   "body": {
+    "prId": 103,
+    "review": null,
+    "state": {
+     "prId": 103,
+     "status": "none",
+     "staleBecause": null,
+     "latestRunId": null,
+     "runningRunId": null,
+     "headSha": null,
+     "counts": null,
+     "refused": null,
+     "checkedAt": null
+    }
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/api/prs/103/ticket-reviews",
+   "status": 200,
+   "body": {
+    "prId": 103,
+    "tickets": []
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/api/prs/103/sequence-diagrams",
+   "status": 200,
+   "body": {
+    "prId": 103,
+    "pr": {
+     "diagram": {
+      "id": 1,
+      "kind": "pr",
+      "prId": 103,
+      "ticketIdent": null,
+      "ticketKey": null,
+      "status": "succeeded",
+      "trigger": "review",
+      "title": "Rate import",
+      "caption": "Rows are checked, then each rate is stored once.",
+      "design": {
+       "acts": [
+        {
+         "id": "imp",
+         "title": "Import"
+        },
+        {
+         "id": "save",
+         "title": "Save"
+        }
+       ],
+       "layers": [
+        "domain",
+        "data"
+       ],
+       "cells": [
+        {
+         "id": "c1",
+         "act": "imp",
+         "layer": "domain",
+         "label": "Reject rows with no account",
+         "pattern": "Guard clause",
+         "change": "new",
+         "pr": null,
+         "files": [
+          "src/import.ts"
+         ]
+        },
+        {
+         "id": "c2",
+         "act": "save",
+         "layer": "data",
+         "label": "Store each rate once",
+         "pattern": "Repository",
+         "change": "changed",
+         "pr": null,
+         "files": []
+        }
+       ],
+       "arrows": [
+        {
+         "from": "c1",
+         "to": "c2",
+         "label": "valid rows"
+        }
+       ]
+      },
+      "headSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "members": [],
+      "refusal": null,
+      "error": null,
+      "current": true,
+      "createdAt": "2026-10-17T00:00:00.000Z",
+      "completedAt": "2026-10-17T00:01:00.000Z",
+      "costUsd": 0.4
+     },
+     "latest": null
+    },
+    "stories": []
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/api/prs/103/claude-review/thread-check",
+   "status": 200,
+   "body": {
+    "prId": 103,
+    "check": null,
+    "progress": null
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/api/prs/104",
+   "status": 200,
+   "body": {
+    "id": 104,
+    "repoId": 10,
+    "repoFullName": "acme/web",
+    "number": 104,
+    "title": "Watched repo PR by bob",
+    "body": "Fixture PR body.",
+    "authorId": 3,
+    "state": "open",
+    "isDraft": false,
+    "isStalled": false,
+    "openedAt": "2026-10-20T19:24:35.772Z",
+    "firstReviewAt": null,
+    "lastCommitAt": "2026-10-21T19:24:35.772Z",
+    "mergedAt": null,
+    "mergedById": null,
+    "closedAt": null,
+    "updatedAt": "2026-10-21T19:24:35.772Z",
+    "githubUrl": "https://github.com/acme/web/pull/104",
+    "headSha": "deadbeef",
+    "ciStatus": "success",
+    "mergeable": "mergeable",
+    "mergeStateStatus": "clean",
+    "labels": [],
+    "checkRuns": [],
+    "additions": 1,
+    "deletions": 0,
+    "changedFilesCount": 1,
+    "files": [],
+    "requestedReviewers": [],
+    "reviewDecision": null,
+    "reviewStandings": [],
+    "reviewerCount": 0,
+    "tickets": [],
+    "headRefName": "feature/e2e-branch",
+    "baseRefName": "main",
+    "inMergeQueue": null,
+    "mergeQueueEntryState": null,
+    "viewerCanApprove": false,
+    "viewerCanPush": false,
+    "viewerCanClose": false,
+    "viewerCanReopen": false,
+    "viewerHasApprovedStanding": false,
+    "viewerReviewStanding": null,
+    "threads": [],
+    "reviews": [],
+    "comments": [],
+    "commits": [],
+    "users": [
+     {
+      "id": 1,
+      "githubLogin": "morgan-diaz",
+      "displayName": "Morgan Diaz",
+      "avatarUrl": null,
+      "isBot": false
+     },
+     {
+      "id": 2,
+      "githubLogin": "alice",
+      "displayName": "Alice",
+      "avatarUrl": null,
+      "isBot": false
+     },
+     {
+      "id": 3,
+      "githubLogin": "bob",
+      "displayName": "Bob",
+      "avatarUrl": null,
+      "isBot": false
+     }
+    ],
+    "lastViewedAt": null,
+    "newSinceLastViewed": null
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/api/prs/104/ci-review",
+   "status": 200,
+   "body": {
+    "prId": 104,
+    "review": null,
+    "state": {
+     "prId": 104,
+     "status": "none",
+     "staleBecause": null,
+     "latestRunId": null,
+     "runningRunId": null,
+     "headSha": null,
+     "counts": null,
+     "refused": null,
+     "checkedAt": null
+    }
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/api/prs/104/ticket-reviews",
+   "status": 200,
+   "body": {
+    "prId": 104,
+    "tickets": []
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/api/prs/104/sequence-diagrams",
+   "status": 200,
+   "body": {
+    "prId": 104,
+    "pr": {
+     "diagram": {
+      "id": 1,
+      "kind": "pr",
+      "prId": 104,
+      "ticketIdent": null,
+      "ticketKey": null,
+      "status": "succeeded",
+      "trigger": "review",
+      "title": "Rate import",
+      "caption": "Rows are checked, then each rate is stored once.",
+      "design": {
+       "acts": [
+        {
+         "id": "imp",
+         "title": "Import"
+        },
+        {
+         "id": "save",
+         "title": "Save"
+        }
+       ],
+       "layers": [
+        "domain",
+        "data"
+       ],
+       "cells": [
+        {
+         "id": "c1",
+         "act": "imp",
+         "layer": "domain",
+         "label": "Reject rows with no account",
+         "pattern": "Guard clause",
+         "change": "new",
+         "pr": null,
+         "files": [
+          "src/import.ts"
+         ]
+        },
+        {
+         "id": "c2",
+         "act": "save",
+         "layer": "data",
+         "label": "Store each rate once",
+         "pattern": "Repository",
+         "change": "changed",
+         "pr": null,
+         "files": []
+        }
+       ],
+       "arrows": [
+        {
+         "from": "c1",
+         "to": "c2",
+         "label": "valid rows"
+        }
+       ]
+      },
+      "headSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "members": [],
+      "refusal": null,
+      "error": null,
+      "current": true,
+      "createdAt": "2026-10-17T00:00:00.000Z",
+      "completedAt": "2026-10-17T00:01:00.000Z",
+      "costUsd": 0.4
+     },
+     "latest": null
+    },
+    "stories": []
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/api/prs/104/claude-review/thread-check",
+   "status": 200,
+   "body": {
+    "prId": 104,
+    "check": null,
+    "progress": null
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/api/prs/105",
+   "status": 200,
+   "body": {
+    "id": 105,
+    "repoId": 10,
+    "repoFullName": "acme/web",
+    "number": 105,
+    "title": "Other: docs pass",
+    "body": "Fixture PR body.",
+    "authorId": 2,
+    "state": "open",
+    "isDraft": false,
+    "isStalled": false,
+    "openedAt": "2026-10-21T19:24:35.772Z",
+    "firstReviewAt": null,
+    "lastCommitAt": "2026-10-22T19:24:35.772Z",
+    "mergedAt": null,
+    "mergedById": null,
+    "closedAt": null,
+    "updatedAt": "2026-10-22T19:24:35.772Z",
+    "githubUrl": "https://github.com/acme/web/pull/105",
+    "headSha": "deadbeef",
+    "ciStatus": "success",
+    "mergeable": "mergeable",
+    "mergeStateStatus": "clean",
+    "labels": [],
+    "checkRuns": [],
+    "additions": 1,
+    "deletions": 0,
+    "changedFilesCount": 1,
+    "files": [],
+    "requestedReviewers": [],
+    "reviewDecision": null,
+    "reviewStandings": [],
+    "reviewerCount": 0,
+    "tickets": [],
+    "headRefName": "feature/e2e-branch",
+    "baseRefName": "main",
+    "inMergeQueue": null,
+    "mergeQueueEntryState": null,
+    "viewerCanApprove": false,
+    "viewerCanPush": false,
+    "viewerCanClose": false,
+    "viewerCanReopen": false,
+    "viewerHasApprovedStanding": false,
+    "viewerReviewStanding": null,
+    "threads": [],
+    "reviews": [],
+    "comments": [],
+    "commits": [],
+    "users": [
+     {
+      "id": 1,
+      "githubLogin": "morgan-diaz",
+      "displayName": "Morgan Diaz",
+      "avatarUrl": null,
+      "isBot": false
+     },
+     {
+      "id": 2,
+      "githubLogin": "alice",
+      "displayName": "Alice",
+      "avatarUrl": null,
+      "isBot": false
+     },
+     {
+      "id": 3,
+      "githubLogin": "bob",
+      "displayName": "Bob",
+      "avatarUrl": null,
+      "isBot": false
+     }
+    ],
+    "lastViewedAt": null,
+    "newSinceLastViewed": null
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/api/prs/105/ci-review",
+   "status": 200,
+   "body": {
+    "prId": 105,
+    "review": null,
+    "state": {
+     "prId": 105,
+     "status": "none",
+     "staleBecause": null,
+     "latestRunId": null,
+     "runningRunId": null,
+     "headSha": null,
+     "counts": null,
+     "refused": null,
+     "checkedAt": null
+    }
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/api/prs/105/ticket-reviews",
+   "status": 200,
+   "body": {
+    "prId": 105,
+    "tickets": []
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/api/prs/105/sequence-diagrams",
+   "status": 200,
+   "body": {
+    "prId": 105,
+    "pr": {
+     "diagram": {
+      "id": 1,
+      "kind": "pr",
+      "prId": 105,
+      "ticketIdent": null,
+      "ticketKey": null,
+      "status": "succeeded",
+      "trigger": "review",
+      "title": "Rate import",
+      "caption": "Rows are checked, then each rate is stored once.",
+      "design": {
+       "acts": [
+        {
+         "id": "imp",
+         "title": "Import"
+        },
+        {
+         "id": "save",
+         "title": "Save"
+        }
+       ],
+       "layers": [
+        "domain",
+        "data"
+       ],
+       "cells": [
+        {
+         "id": "c1",
+         "act": "imp",
+         "layer": "domain",
+         "label": "Reject rows with no account",
+         "pattern": "Guard clause",
+         "change": "new",
+         "pr": null,
+         "files": [
+          "src/import.ts"
+         ]
+        },
+        {
+         "id": "c2",
+         "act": "save",
+         "layer": "data",
+         "label": "Store each rate once",
+         "pattern": "Repository",
+         "change": "changed",
+         "pr": null,
+         "files": []
+        }
+       ],
+       "arrows": [
+        {
+         "from": "c1",
+         "to": "c2",
+         "label": "valid rows"
+        }
+       ]
+      },
+      "headSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "members": [],
+      "refusal": null,
+      "error": null,
+      "current": true,
+      "createdAt": "2026-10-17T00:00:00.000Z",
+      "completedAt": "2026-10-17T00:01:00.000Z",
+      "costUsd": 0.4
+     },
+     "latest": null
+    },
+    "stories": []
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/api/prs/105/claude-review/thread-check",
+   "status": 200,
+   "body": {
+    "prId": 105,
+    "check": null,
+    "progress": null
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/api/prs/102/claude-review",
+   "status": 200,
+   "body": {
+    "enabled": true,
+    "auth": "ok",
+    "review": {
+     "id": 7001,
+     "prId": 102,
+     "headSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "status": "succeeded",
+     "model": "claude-sonnet-5",
+     "scope": "diff_only",
+     "reviewMode": "diff_only",
+     "routeReason": null,
+     "summary": "The race is fixed by awaiting the token refresh before the retry. One edge case is left: a second 401 during the refresh.",
+     "verdict": "COMMENT",
+     "userBody": null,
+     "userVerdict": null,
+     "costUsd": 0.41,
+     "inputTokens": 18200,
+     "outputTokens": 1900,
+     "cacheReadTokens": 52000,
+     "cacheCreationTokens": 0,
+     "numTurns": 6,
+     "diffBytes": 4100,
+     "diffCapped": false,
+     "error": null,
+     "excludedFiles": [],
+     "postedReviewId": null,
+     "postedAt": null,
+     "createdAt": "2026-10-22T18:54:35.776Z",
+     "finishedAt": "2026-10-22T18:56:35.776Z",
+     "trigger": "manual",
+     "findings": [
+      {
+       "id": 7101,
+       "reviewId": 7001,
+       "path": "src/auth/refresh.ts",
+       "line": 42,
+       "side": "RIGHT",
+       "diffAnchorId": "src/auth/refresh.ts:R42",
+       "severity": "warning",
+       "title": "A second 401 during the refresh retries forever",
+       "body": "If the refresh call itself answers 401, `retry()` runs again with the same expired token. Stop after one refresh attempt.",
+       "editedBody": null,
+       "suggestion": null,
+       "diffHunk": null,
+       "anchored": true,
+       "fileInDiff": true,
+       "included": true,
+       "postedAt": null,
+       "githubCommentId": null,
+       "postedCommentKind": null,
+       "createdAt": "2026-10-22T18:56:35.776Z"
+      }
+     ]
+    },
+    "history": [
+     {
+      "id": 7001,
+      "headSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "status": "succeeded",
+      "model": "claude-sonnet-5",
+      "scope": "diff_only",
+      "reviewMode": "diff_only",
+      "verdict": "COMMENT",
+      "userVerdict": null,
+      "costUsd": 0.41,
+      "postedAt": null,
+      "createdAt": "2026-10-22T18:54:35.776Z",
+      "finishedAt": "2026-10-22T18:56:35.776Z",
+      "trigger": "manual"
+     }
+    ],
+    "autoReview": null
+   }
+  }
+ ]
+}

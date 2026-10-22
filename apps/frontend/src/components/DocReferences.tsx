@@ -33,7 +33,8 @@ const VERDICT_TONE: Record<ReviewDocVerdict, string> = {
   context: 'bg-gray-500/10 text-gray-700 dark:text-gray-300',
 };
 
-const SPA_BASE = '/app/';
+// The SPA's base path: '/app/' in the app, '/demo/' in the static demo.
+const SPA_BASE = import.meta.env.BASE_URL;
 
 /**
  * One library link. ⚠ The workspace is the one whose library the SERVER checked this against

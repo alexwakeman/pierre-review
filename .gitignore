@@ -42,3 +42,6 @@ playwright-report/
 
 # Retired Pro submodule checkout (folded into apps/backend/src/platform)
 /packages/pro/
+
+# The static demo build (apps/frontend `pnpm build:demo`), served by apps/site at /demo/.
+apps/frontend/dist-demo/
