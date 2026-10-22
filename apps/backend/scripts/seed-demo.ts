@@ -29,6 +29,19 @@
 // the Haiku-backed feature is filmable on a stack with no API key. See
 // scripts/seed-addressed-check.ts; it says so at length.
 //
+// THE STATIC DEMO (apps/frontend/src/demo, recorded by scripts/record-demo.mjs) needs every surface
+// populated, so three siblings run at the end, each through the product's own code:
+//   • seed-demo-tracker.ts   a fictional Jira site (acme.atlassian.net) behind Platform: the PR
+//                            ticket worker, the sprint read, briefs, themes and critical paths.
+//   • seed-demo-agentic.ts   the code behind the main PRs (scripts/lib/demo-diffs.mjs), finished
+//                            Claude Reviews, a review chat, Check threads, a CI review, AI Fix and a
+//                            plan, ticket reviews, designs, the reference library and a docs check.
+//   • seed-demo-platform.ts  settings through the real routes (with their Chronology markers), merge
+//                            state, bot themes / Chronology pointers / the work-plan wording / impact
+//                            notes. A model is never called: every answer is written at its seam.
+// The current sprint (seed-periods.ts SPRINT_DAYS_IN) is pinned eight days in, so "this sprint so
+// far" always has a week of work in it.
+//
 // Run against a throwaway DB (NEVER the real one):
 //   pnpm --filter @pierre-review/backend seed:demo
 //   (≡ DATABASE_URL=/tmp/pierre-demo.sqlite DISABLE_SCHEDULER=true tsx scripts/seed-demo.ts)
@@ -77,6 +90,9 @@ await runMigrations();
 const now = new Date();
 const day = (n: number): Date => new Date(now.getTime() - n * 86_400_000);
 const min = (n: number): Date => new Date(now.getTime() - n * 60_000);
+// A commit SHA for a fictional commit: 40 hex characters, stable per seed string. Real GitHub SHAs
+// are hex, and some routes validate that (SonarCloud's `?head=` must match /^[0-9a-f]{7,64}$/).
+const hexSha = (seed: string): string => createHash('sha1').update(`acme-demo:${seed}`).digest('hex');
 
 // ---- account (id 1 = "me" = Morgan Diaz) -----------------------------------
 const ME = 1; // users.id for Morgan Diaz
@@ -317,7 +333,7 @@ const prRows = PRS.map((p) => {
     mergedAt: p.state === 'merged' ? closed : null,
     closedAt: p.state === 'merged' ? closed : null,
     updatedAt: lastCommit ?? opened,
-    headSha: `sha${p.id}headcommit`,
+    headSha: hexSha(`${p.id}head`),
     // A merged PR passed CI to land — default it to green (unless the seed pins a status).
     // Drives the Flow-metrics "Merge CI success %" tile, which counts merged-in-sprint PRs
     // by ciStatus; without this the recent merges (which set no `ci`) read as 0% success.
@@ -744,9 +760,9 @@ const commitRows: { id: number; sha: string; prId: number; authorId: number; com
 for (const p of prRows) {
   const first = p.openedAt;
   const second = p.lastCommitAt ?? p.openedAt;
-  commitRows.push({ id: commitDbId++, sha: `${p.headSha}-1`, prId: p.id, authorId: p.authorId!, committerId: p.authorId!, message: `${p.title}`, committedAt: first });
+  commitRows.push({ id: commitDbId++, sha: second.getTime() !== first.getTime() ? hexSha(`${p.id}c1`) : p.headSha, prId: p.id, authorId: p.authorId!, committerId: p.authorId!, message: `${p.title}`, committedAt: first });
   if (second.getTime() !== first.getTime()) {
-    commitRows.push({ id: commitDbId++, sha: `${p.headSha}-2`, prId: p.id, authorId: p.authorId!, committerId: p.authorId!, message: `Address review feedback`, committedAt: second });
+    commitRows.push({ id: commitDbId++, sha: p.headSha, prId: p.id, authorId: p.authorId!, committerId: p.authorId!, message: `Address review feedback`, committedAt: second });
   }
 }
 await db.insert(schema.commits).values(commitRows).execute();
@@ -800,7 +816,7 @@ await db
     id: 1,
     accountId: 1,
     prId: 113,
-    headSha: 'sha113headcommit',
+    headSha: hexSha('113head'),
     status: 'succeeded',
     model: 'claude-sonnet-5',
     scope: 'diff_only',
@@ -1266,7 +1282,7 @@ const histPrRows = histPrs.map((p) => ({
   mergedAt: p.state === 'merged' ? p.closeAt : null,
   closedAt: p.closeAt,
   updatedAt: p.closeAt,
-  headSha: `sha${p.id}headcommit`,
+  headSha: hexSha(`${p.id}head`),
   ciStatus: 'success' as const,
   mergeable: 'mergeable' as const,
   mergeStateStatus: 'clean' as const,
@@ -1429,7 +1445,7 @@ for (const p of histPrs) {
     const frac = nCommits === 1 ? rand() : i / (nCommits - 1);
     const committedAt = workMoment(new Date(lo + frac * (hi - lo)), p.openedAt);
     histCommitRows.push({
-      id: cid, sha: `sha${p.id}c${i}`, prId: p.id, authorId: p.authorId, committerId: p.authorId,
+      id: cid, sha: i === nCommits - 1 ? hexSha(`${p.id}head`) : hexSha(`${p.id}c${i}`), prId: p.id, authorId: p.authorId, committerId: p.authorId,
       message: i === 0 ? p.title : pick(['Address review feedback', 'Fix lint', 'Add tests', 'Tidy up']),
       committedAt,
     });
@@ -1523,7 +1539,7 @@ const ciStatusEventRows: {
 for (const c of [...RECENT_CYCLES, ...OLD_CYCLES]) {
   const repoId = repoOfPr.get(c.prId);
   if (repoId == null) continue; // skip if a referenced PR isn't seeded
-  const headSha = `sha${c.prId}headcommit`;
+  const headSha = hexSha(`${c.prId}head`);
   ciStatusEventRows.push({
     id: cseId++, accountId: 1, repoId, prId: c.prId, headSha,
     status: 'failure', failingChecks: [c.stage], observedAt: hAgo(c.failHrsAgo),
@@ -2036,7 +2052,7 @@ if (existsSync(join(PRO_DIR, 'migrations'))) {
   //    above). The 14-day cadence is unchanged.
   const sprintStart = new Date(now);
   sprintStart.setUTCHours(0, 0, 0, 0);
-  sprintStart.setUTCDate(sprintStart.getUTCDate() - 11);
+  sprintStart.setUTCDate(sprintStart.getUTCDate() - 8); // = seed-periods.ts SPRINT_DAYS_IN
   raw
     .prepare(
       `INSERT INTO pro_settings (account_id, sprint_cadence_days, sprint_start_at,
@@ -2167,7 +2183,7 @@ if (existsSync(join(PRO_DIR, 'migrations'))) {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
-      1, INFRA, 114, 'sha114headcommit', 'succeeded', 'claude-sonnet-5', 'ci_analysis',
+      1, INFRA, 114, hexSha('114head'), 'succeeded', 'claude-sonnet-5', 'ci_analysis',
       'Corrected the inverted autoscaling bounds on `module.workers`: `min_size` back to 2 and `max_size` up to 8, keeping `desired_size = 4` inside the valid range. `terraform plan` validates cleanly with this patch applied.',
       'fix(eks): correct worker node-group autoscaling bounds (min 2, max 8)',
       [
@@ -2237,8 +2253,41 @@ if (proSeeded) {
       { id: WEB_WS, name: 'Web', repoIds: [WEB, 4, 5], narrate: false },
     ],
   });
-  console.log(`  period reports: ${periodRows} rows (14-day cadence, newest narrated)`);
+  console.log(`  period reports: ${periodRows} rows (14-day sprints + calendar months, newest narrated)`);
 
+}
+
+// ===========================================================================
+// THE ISSUE TRACKER + THIS SPRINT (scripts/seed-demo-tracker.ts): a fictional Jira site read
+// through the real tracker worker and sprint read, then briefs, themes and critical paths.
+// ===========================================================================
+{
+  const { seedDemoTracker } = await import('./seed-demo-tracker.js');
+  const t = await seedDemoTracker({ db, schema, now, workspaceId: PLATFORM_WS });
+  console.log(
+    `  this sprint: ${t.sprintTickets} Jira tickets + ${t.ghosts} outside it, ${t.briefs} briefs, ${t.themes} themes, ${t.paths} critical paths`,
+  );
+}
+
+// ===========================================================================
+// THE AGENTIC RUNS (scripts/seed-demo-agentic.ts): Claude Reviews, a review chat, Check threads,
+// a CI review, AI Fix + a plan, ticket reviews, designs, the reference library and its chat, and a
+// story's docs check — each stored by the product's own pipeline with a written answer at its seam.
+// ===========================================================================
+{
+  const { seedDemoAgentic } = await import('./seed-demo-agentic.js');
+  const a = await seedDemoAgentic({ db, schema, now, platformWs: PLATFORM_WS });
+  console.log(`  agentic runs: ${JSON.stringify(a)}`);
+}
+
+// ===========================================================================
+// SETTINGS, MERGE STATE AND THE WRITTEN SUMMARIES (scripts/seed-demo-platform.ts) — last, because
+// the summaries and the work-plan wording hash what everything above wrote.
+// ===========================================================================
+{
+  const { seedDemoPlatform } = await import('./seed-demo-platform.js');
+  const p = await seedDemoPlatform({ db, schema, now, platformWs: PLATFORM_WS, webWs: WEB_WS });
+  console.log(`  platform: ${JSON.stringify(p)}`);
 }
 
 await closeDb();

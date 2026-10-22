@@ -104,7 +104,10 @@ export class DemoServer {
 
   async handle(method: string, url: string, bodyText: string | null, signal: AbortSignal | null): Promise<Response> {
     const m = method.toUpperCase();
-    const u = new URL(url, 'http://demo.invalid');
+    const asked = new URL(url, 'http://demo.invalid');
+    // A period key the SPA read from a rebased body comes back in the path: move it back to the
+    // recording's calendar before anything matches it (rebase.ts).
+    const u = new URL(this.rebaser.unshiftPath(asked.pathname + asked.search), 'http://demo.invalid');
     let body: unknown;
     if (bodyText) {
       try {

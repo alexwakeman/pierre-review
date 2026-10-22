@@ -45,9 +45,53 @@ describe('time rebase', () => {
     expect(out.count).toBe(CAPTURED_MS); // not an *At / *Ms key
   });
 
-  it('leaves dates without a time, period keys and other strings alone', () => {
-    const out = r.rebase({ day: '2026-01-09', key: 'sprint-2026-01-05', title: 'Fix 2026-01-09T08:30:00Z parsing' });
-    expect(out).toEqual({ day: '2026-01-09', key: 'sprint-2026-01-05', title: 'Fix 2026-01-09T08:30:00Z parsing' });
+  it('moves calendar values by whole days: midnights, dates and sprint keys together', () => {
+    const late = makeRebaser(CAPTURED, CAPTURED_MS + 10 * DAY + 5 * 3_600_000); // 10 days 5 hours
+    const out = late.rebase({
+      start: '2026-01-05T00:00:00.000Z',
+      at: '2026-01-09T08:30:00.000Z',
+      day: '2026-01-09',
+      key: 'sprint-2026-01-05',
+      title: 'Fix 2026-01-09T08:30:00Z parsing',
+    });
+    expect(out.start).toBe('2026-01-15T00:00:00.000Z'); // still a midnight
+    expect(out.at).toBe('2026-01-19T13:30:00.000Z'); // the exact delta
+    expect(out.day).toBe('2026-01-19');
+    expect(out.key).toBe('sprint-2026-01-15'); // the same days as `start`
+    expect(out.title).toBe('Fix 2026-01-09T08:30:00Z parsing'); // prose is left alone
+  });
+
+  it("moves month keys by calendar months and rewrites that period's dates", () => {
+    const later = makeRebaser(CAPTURED, Date.parse('2026-03-02T09:00:00.000Z')); // January → March
+    expect(later.months).toBe(2);
+    const out = later.rebase({
+      periods: [
+        { periodKey: 'month-2025-12', periodStart: '2025-12-01T00:00:00.000Z', periodEnd: '2026-01-01T00:00:00.000Z', cadenceDays: 31 },
+        { periodKey: 'month-2026-01', periodStart: '2026-01-01T00:00:00.000Z', periodEnd: '2026-02-01T00:00:00.000Z', cadenceDays: 31, inProgress: true },
+      ],
+      priorPeriodKey: 'month-2025-12',
+    });
+    expect(out.periods[0]).toEqual({ periodKey: 'month-2026-02', periodStart: '2026-02-01T00:00:00.000Z', periodEnd: '2026-03-01T00:00:00.000Z', cadenceDays: 28 });
+    expect(out.periods[1]).toMatchObject({ periodKey: 'month-2026-03', periodStart: '2026-03-01T00:00:00.000Z', cadenceDays: 31, inProgress: true });
+    expect(out.priorPeriodKey).toBe('month-2026-02');
+  });
+
+  it("moves period keys in a request path back to the recording's calendar", () => {
+    const later = makeRebaser(CAPTURED, Date.parse('2026-03-02T09:00:00.000Z'));
+    const shifted = later.rebase({ s: 'sprint-2026-01-05', m: 'month-2025-12' });
+    expect(later.unshiftPath(`/api/pro/insights/reports/${shifted.s}?workspace=1`)).toBe('/api/pro/insights/reports/sprint-2026-01-05?workspace=1');
+    expect(later.unshiftPath(`/api/pro/insights/reports/${shifted.m}/generate`)).toBe('/api/pro/insights/reports/month-2025-12/generate');
+    expect(later.unshiftPath('/api/prs/113?x=sprint-2026-03-01')).toBe('/api/prs/113?x=sprint-2026-03-01'); // the query is not a path
+  });
+
+  it('answers a shifted period key from the entry recorded under the original one', async () => {
+    const srv = new DemoServer(
+      recording([{ method: 'GET', path: '/api/pro/insights/reports/sprint-2026-01-05?workspace=1', status: 200, body: { report: { periodKey: 'sprint-2026-01-05' } } }]),
+      { now: () => CAPTURED_MS + 30 * DAY },
+    );
+    const res = await srv.handle('GET', '/api/pro/insights/reports/sprint-2026-02-04?workspace=1', null, null);
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { report: { periodKey: string } }).report.periodKey).toBe('sprint-2026-02-04');
   });
 
   it('serves rebased bodies from the server, and the same answer twice', async () => {

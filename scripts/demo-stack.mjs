@@ -31,6 +31,8 @@ const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const BACKEND = join(ROOT, 'apps', 'backend');
 const FRONTEND = join(ROOT, 'apps', 'frontend');
 const DB = '/tmp/pierre-demo.sqlite';
+// The demo's own data directory (the reference library's files, clones): never ~/.limn.
+const DATA_DIR = '/tmp/pierre-demo-data';
 const BACKEND_PORT = 4100;
 const FRONTEND_PORT = 5273;
 
@@ -53,6 +55,7 @@ const baseEnv = {
   ...process.env,
   PATH: SAFE_PATH,
   DATABASE_URL: DB,
+  LIMN_DATA_DIR: DATA_DIR,
   DISABLE_SCHEDULER: 'true',
   ANTHROPIC_API_KEY: 'dummy',
   // The ML severity gate IS the URL (config.severityApiUrl): without it /api/me reports
