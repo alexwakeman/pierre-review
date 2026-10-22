@@ -285,7 +285,11 @@ review reference, a Story "Check against docs" point, a chat citation (above), a
 that BORROWS one — opens the section scrolled to that passage, highlighted, with ONE line above the page
 ("The quoted passage is highlighted." + a clear button). When the words are no longer there (the
 document was rebuilt since), the line reads "The quoted words are no longer in this section." and the
-view lands on the anchor. ⚠ **ONE FOLD**: the quote fold lives in shared `reference-docs-quote.ts` —
+view lands on the anchor. ⚠ A browser without the CSS Custom Highlight API still scrolls to the passage
+but the line reads "Scrolled to the quoted passage." — it never claims a highlight nothing painted
+(`quoteStripText`). ⚠ **The header skip is the SERVER's**: the viewer leaves off the H1 and exactly ONE
+blockquote after it (`sectionHeaderEnd`, the crumbs-and-nav lines `sectionBodyOf` drops), so a body that
+opens with its own blockquote is still searched. ⚠ **ONE FOLD**: the quote fold lives in shared `reference-docs-quote.ts` —
 `foldForQuote` / `quoteAppearsIn` for the server's check over MARKDOWN, and `foldRenderedText`, its
 mapped twin over the RENDERED text (same character rules; markdown-syntax steps only on the markdown
 side; a block or table-cell boundary folds to one space, so a "High | 1.15" table-row quote matches

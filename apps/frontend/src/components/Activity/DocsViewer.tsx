@@ -6,7 +6,13 @@ import {
   rehypeDocHeadingAnchors,
   resolveDocLink,
 } from '../../lib/referenceDocs.js';
-import { findQuoteRanges, type QuoteTextSegment } from '../../lib/docQuoteMatch.js';
+import {
+  findQuoteRanges,
+  quoteStripText,
+  sectionHeaderEnd,
+  type QuoteOutcome,
+  type QuoteTextSegment,
+} from '../../lib/docQuoteMatch.js';
 import { safeExternalUrl } from '../../lib/ui.js';
 import { ArrowIcon, CloseIcon } from '../Icons.js';
 import { Markdown, type RehypePlugins } from '../Markdown.js';
@@ -104,10 +110,12 @@ function clearHighlight(): void {
 }
 
 /**
- * Find `quote` in the rendered file under `root`, paint it and scroll `box` to it. True when found.
- * `isSection` ⇒ the leading H1 and the blockquote after it are the server-written header, never matched.
+ * Find `quote` in the rendered file under `root`, paint it and scroll `box` to it: `'painted'`,
+ * `'found'` (scrolled to, but this browser cannot paint a highlight) or `'missing'`.
+ * `isSection` ⇒ the leading H1 and the ONE blockquote after it are the server-written header, never
+ * matched (`sectionHeaderEnd` — the same header the server's `sectionBodyOf` leaves off).
  */
-function highlightQuote(box: HTMLElement, root: HTMLElement, quote: string, anchor: string | null, isSection: boolean): boolean {
+function highlightQuote(box: HTMLElement, root: HTMLElement, quote: string, anchor: string | null, isSection: boolean): QuoteOutcome {
   const nodes: Text[] = [];
   const segments: QuoteTextSegment[] = [];
   const blockIds = new Map<Element, number>();
@@ -131,14 +139,13 @@ function highlightQuote(box: HTMLElement, root: HTMLElement, quote: string, anch
   let bodyFrom = 0;
   const md = root.querySelector('h1');
   if (isSection && md != null) {
-    let last: Element = md;
-    while (last.nextElementSibling?.tagName === 'BLOCKQUOTE') last = last.nextElementSibling;
+    const last: Element = sectionHeaderEnd(md);
     const next = nodes.findIndex((t) => !last.contains(t) && (last.compareDocumentPosition(t) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0);
     bodyFrom = next < 0 ? nodes.length : next;
   }
   const heading = anchor != null ? Array.from(root.querySelectorAll<HTMLElement>('[data-doc-anchor]')).find((h) => h.dataset.docAnchor === anchor) ?? null : null;
   const ranges = findQuoteRanges(segments, quote, { bodyFrom, preferFrom: after(heading) });
-  if (ranges == null || ranges.length === 0) return false;
+  if (ranges == null || ranges.length === 0) return 'missing';
   const domRanges = ranges.map((r) => {
     const range = document.createRange();
     range.setStart(nodes[r.startSeg]!, r.startOffset);
@@ -150,6 +157,7 @@ function highlightQuote(box: HTMLElement, root: HTMLElement, quote: string, anch
     const H = (globalThis as unknown as { Highlight: new (...r: Range[]) => unknown }).Highlight;
     reg.set(HIGHLIGHT, new H(...domRanges));
   }
+  const outcome: QuoteOutcome = reg != null ? 'painted' : 'found';
   // Scroll THIS box (never `scrollIntoView`) so the passage sits a third of the way down; a passage
   // in a wide table also scrolls that table's own sideways box.
   const first = domRanges[0]!;
@@ -161,7 +169,7 @@ function highlightQuote(box: HTMLElement, root: HTMLElement, quote: string, anch
     const wr = wide.getBoundingClientRect();
     if (rect.left < wr.left || rect.right > wr.right) wide.scrollLeft += rect.left - wr.left - 16;
   }
-  return true;
+  return outcome;
 }
 
 export function DocsViewer({
@@ -179,8 +187,8 @@ export function DocsViewer({
   const box = useRef<HTMLDivElement | null>(null);
   const page = useRef<HTMLDivElement | null>(null);
   const data = section.data;
-  /** The strip's state for THIS open (keyed by seq): found, gone, or cleared by the reader. */
-  const [quoteState, setQuoteState] = useState<{ seq: number; status: 'found' | 'missing' | 'cleared' } | null>(null);
+  /** The strip's state for THIS open (keyed by seq): painted, found, gone, or cleared by the reader. */
+  const [quoteState, setQuoteState] = useState<{ seq: number; status: QuoteOutcome | 'cleared' } | null>(null);
 
   const onAnchor = useCallback((anchor: string) => {
     if (box.current != null) scrollToAnchor(box.current, anchor);
@@ -197,9 +205,9 @@ export function DocsViewer({
     clearHighlight();
     if (box.current == null || data == null) return;
     if (open.quote != null && !cleared && page.current != null && data.path === open.path) {
-      const found = highlightQuote(box.current, page.current, open.quote, open.anchor, isSection);
-      setQuoteState((s) => (s?.seq === open.seq && s.status === 'cleared' ? s : { seq: open.seq, status: found ? 'found' : 'missing' }));
-      if (found) return;
+      const outcome = highlightQuote(box.current, page.current, open.quote, open.anchor, isSection);
+      setQuoteState((s) => (s?.seq === open.seq && s.status === 'cleared' ? s : { seq: open.seq, status: outcome }));
+      if (outcome !== 'missing') return;
     }
     if (!cleared) scrollToAnchor(box.current, open.anchor);
   }, [data, open.path, open.anchor, open.quote, open.seq, isSection, cleared]);
@@ -277,14 +285,14 @@ export function DocsViewer({
           className="flex items-center gap-2 border-b border-gray-200 px-3 py-1.5 text-xs text-gray-700 dark:border-gray-800 dark:text-gray-200"
           data-testid="docs-quote-strip"
         >
-          {strip === 'found' && <span aria-hidden="true" className="doc-quote-swatch h-3 w-3 shrink-0 rounded-sm" />}
+          {strip === 'painted' && <span aria-hidden="true" className="doc-quote-swatch h-3 w-3 shrink-0 rounded-sm" />}
           <span className="min-w-0 flex-1">
-            {strip === 'found' ? 'The quoted passage is highlighted.' : 'The quoted words are no longer in this section.'}
+            {quoteStripText(strip)}
           </span>
           <button
             type="button"
             onClick={clearQuote}
-            aria-label={strip === 'found' ? 'Clear the highlight' : 'Dismiss'}
+            aria-label={strip === 'painted' ? 'Clear the highlight' : 'Dismiss'}
             className="shrink-0 rounded p-0.5 text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-gray-100"
           >
             <CloseIcon size={12} />
