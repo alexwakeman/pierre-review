@@ -4811,7 +4811,8 @@ export type AutoPostSkipReason =
 //              (the reader's own standing verdict — their latest APPROVED / CHANGES_REQUESTED; a
 //              COMMENTED reply never supersedes it, a DISMISSED one stands for nothing — was given by
 //              a PERSON), 'already_requested' (a REQUEST_CHANGES wanted while Limn's own earlier
-//              automatic one still stands), 'reviews_unreadable' (the live read failed — never guess), 'refused' (GitHub turned
+//              automatic one still stands — or an APPROVE that would supersede it while an earlier
+//              blocker behind it is still unjudged), 'reviews_unreadable' (the live read failed — never guess), 'refused' (GitHub turned
 //              the verdict down — branch rules, permissions — so the same review went again as a
 //              COMMENT, leaving just the comments), 'impact' (an APPROVE on a PR whose impact level
 //              the workspace does not allow to be auto-approved — `approveImpact`), null when sent

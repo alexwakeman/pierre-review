@@ -1508,6 +1508,12 @@ auto-posting: claim before any GitHub write, never retried.
     words (`dismiss_failed`). Recorded as `ClaudeAutoPostRecord.liftedBlock` (on the wire too); the
     tab prints "Lifted Claude’s earlier request for changes." / "Couldn’t lift …: <why>". A run whose
     only write is the lift (no review sent) is `posted` / `failed` by the dismissal alone.
+  - ⚠ "No blocker IN THIS RUN" is not enough: every blocker BEHIND the block must be judged settled
+    first. An earlier blocker this run's follow-up left `not_checked` (over the cap, unreported,
+    carried — `unsettledEarlierBlockers`), or a blocker of the blocking run that never reached GitHub
+    (only a posted finding is followed up, so nothing would ever judge it —
+    `loadUnpostedBlockersOfBlock`), holds the lift: no dismissal, and a wanted APPROVE that would
+    supersede the block is held as `already_requested`.
   - Cost: a DB pre-check (any earlier auto REQUEST_CHANGES on this PR?) gates the extra live review
     read, so an ordinary run reads nothing more.
 - **AUTO RESOLVE** also answers an accepted REPLY (`reply_accepted`: the acknowledgement, then the

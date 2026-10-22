@@ -32,7 +32,11 @@
 //   3b. THE LIFT: a run with NO blocker (whatever the auto-verdict switch says now) while Limn's own
 //      automatic REQUEST_CHANGES still stands withdraws it — superseded by this run's APPROVE, else
 //      DISMISSED (`LIFT_BLOCK_MESSAGE`) after the post, inside the same claim, once, recorded as
-//      `liftedBlock`, settled. A DB pre-check keeps the live read off ordinary runs;
+//      `liftedBlock`, settled. A DB pre-check keeps the live read off ordinary runs. ⚠ Only when no
+//      blocker BEHIND the block is unjudged: none left 'not_checked' in this run's follow-up
+//      (`unsettledEarlierBlockers`) and none of the blocking run's own blockers that never reached
+//      GitHub (`loadUnpostedBlockersOfBlock` — never followed up, so never judged). Otherwise no
+//      dismissal, and an APPROVE over the block is held as 'already_requested';
 //   4. nothing to post and nothing but COMMENT to send ⇒ `skipped` — `already_posted` (with the
 //      ids) when the dedupe alone emptied it, else `nothing_new` — no GitHub write;
 //   5. the LIVE PR is still open, not a draft, at the reviewed head (a moved head ⇒ `failed`);
@@ -422,6 +426,91 @@ export async function loadLimnAutoBlockIds(
   return ids;
 }
 
+// The follow-up statuses that SETTLE an earlier finding. Anything else is still open or unjudged.
+const SETTLED_FOLLOW_UP = new Set(['addressed', 'no_longer_applies', 'reply_accepted']);
+
+/**
+ * The earlier BLOCKERS this run's follow-up left unsettled that `autoVerdictFor` cannot see: an
+ * open one is raised again as one of this run's findings (and counted there, or ignored by the
+ * reader), so what is left is a blocker the run did NOT judge — 'not_checked' (over the cap, never
+ * reported, carried) — or an open one with no re-raise. Returns their earlier finding ids.
+ * ⚠ A run with any of these may not say "Claude's blocking findings are fixed."
+ */
+export function unsettledEarlierBlockers(
+  review: Pick<ClaudeReview, 'findings'> & { followUp?: { items: ReadonlyArray<{ priorFindingId: number; severity: ClaudeFindingSeverity; status: string }> } | null },
+): number[] {
+  const reraised = new Set<number>();
+  for (const f of review.findings) if (f.priorFindingId != null) reraised.add(f.priorFindingId);
+  const out: number[] = [];
+  for (const it of review.followUp?.items ?? []) {
+    if (it.severity !== 'blocker' || SETTLED_FOLLOW_UP.has(it.status)) continue;
+    if (reraised.has(it.priorFindingId)) continue;
+    out.push(it.priorFindingId);
+  }
+  return out;
+}
+
+/**
+ * The blockers of the run that SET Limn's block (the run whose `auto_post.githubReviewId` is
+ * `githubReviewId`) that never reached GitHub — not posted by that run, nor by any earlier one
+ * (follow-up chain or path + title). Only a POSTED finding is followed up, so nothing ever judges
+ * these: while one exists, the block may not be lifted. Returns their finding ids.
+ */
+export async function loadUnpostedBlockersOfBlock(
+  ctx: AgentContext,
+  accountId: number,
+  prId: number,
+  githubReviewId: string,
+  earlier: readonly EarlierFinding[],
+): Promise<number[]> {
+  const t = s(ctx);
+  const cr = t.claudeReviews;
+  const crf = t.claudeReviewFindings;
+  const runs = (await ctx.db
+    .select({ id: cr.id, autoPost: cr.autoPost })
+    .from(cr)
+    .where(and(eq(cr.prId, prId), eq(cr.accountId, accountId)))
+    .execute()) as Array<{ id: number; autoPost: ClaudeAutoPostRecord | null }>;
+  const blockRun = runs.find((r) => r.autoPost?.githubReviewId != null && String(r.autoPost.githubReviewId) === githubReviewId);
+  // No such run: the caller only passes ids `loadLimnAutoBlockIds` read, so this is a race — hold.
+  if (!blockRun) return [-1];
+  const rows = (await ctx.db
+    .select({
+      id: crf.id,
+      path: crf.path,
+      title: crf.title,
+      severity: crf.severity,
+      included: crf.included,
+      postedAt: crf.postedAt,
+      priorFindingId: crf.priorFindingId,
+      storyRef: crf.storyRef,
+    })
+    .from(crf)
+    .where(eq(crf.reviewId, blockRun.id))
+    .execute()) as Array<{
+    id: number;
+    path: string;
+    title: string;
+    severity: ClaudeFindingSeverity;
+    included: boolean | null;
+    postedAt: unknown;
+    priorFindingId: number | null;
+    storyRef: string | null;
+  }>;
+  const onGithub = new Map(earlier.map((e) => [e.id, e.onGithub]));
+  return rows
+    .filter(
+      (f) =>
+        f.severity === 'blocker' &&
+        f.storyRef == null &&
+        !isReaderIgnoredFinding(f) &&
+        f.postedAt == null &&
+        onGithub.get(f.id) !== true &&
+        !alreadyOnGithub(f, earlier),
+    )
+    .map((f) => f.id);
+}
+
 /** Stamp the local review row dismissed (GitHub has accepted the dismissal; a sync reconciles anyway). */
 async function stampReviewDismissed(ctx: AgentContext, prId: number, githubReviewId: string): Promise<void> {
   const rv = s(ctx).reviews;
@@ -652,9 +741,12 @@ async function autoPostReview(
   // withdraw an earlier AUTOMATIC request for changes of Limn's that still stands. A DB pre-check
   // first, so an ordinary run costs no extra GitHub read.
   const noBlocker = autoVerdictFor(review.verdict, review.findings) !== 'REQUEST_CHANGES';
+  // ⚠ "No blocker" from this run's OWN findings is not enough to lift: an earlier blocker the run
+  // did not judge (a 'not_checked' follow-up) is still open as far as anyone knows.
+  const unjudgedBlockers = unsettledEarlierBlockers(review);
   // (Read for a REQUEST_CHANGES too: the gate must tell Limn's own standing block from a person's.)
   const limnBlockIds = !facts.authorIsMe ? await loadLimnAutoBlockIds(ctx, accountId, prId, reviewId) : new Set<string>();
-  const mayLift = noBlocker && limnBlockIds.size > 0;
+  const mayLift = noBlocker && unjudgedBlockers.length === 0 && limnBlockIds.size > 0;
   if (picked.toPost.length === 0 && (wanted == null || wanted === 'COMMENT') && !mayLift) return skip(...nothingReason());
 
   const pctx = await getReviewPostContext(ctx, reviewId, accountId);
@@ -693,12 +785,28 @@ async function autoPostReview(
       ctx.log.warn(`auto post review ${reviewId}: could not read the PR's reviews: ${errText(err)}`);
     }
   }
+  // Limn's own block stands: every blocker behind it must be JUDGED settled before it is lifted —
+  // none left unjudged in this run's follow-up, and none of the blocking run's own blockers that
+  // never reached GitHub (only a posted finding is ever followed up, so nothing would judge it).
+  let blockersRemain = unjudgedBlockers.length > 0;
+  if (!blockersRemain && noBlocker && standing.state === 'LIMN_AUTO_CHANGES_REQUESTED' && standing.reviewId != null) {
+    try {
+      blockersRemain = (await loadUnpostedBlockersOfBlock(ctx, accountId, prId, standing.reviewId, earlier)).length > 0;
+    } catch (err) {
+      ctx.log.warn(`auto post review ${reviewId}: could not read the blocking run's findings: ${errText(err)}`);
+      blockersRemain = true;
+    }
+  }
   if (wanted != null && wanted !== 'COMMENT') {
     verdict = verdictGate(wanted, { authorIsMe: facts.authorIsMe, ownLatest: standing.state, ...(impact ? { impact } : {}) });
+    // An APPROVE over Limn's own block is a lift too: held while a blocker behind it is unjudged.
+    if (verdict.submitted === 'APPROVE' && standing.state === 'LIMN_AUTO_CHANGES_REQUESTED' && blockersRemain) {
+      verdict = { ...verdict, submitted: 'COMMENT', heldReason: 'already_requested' };
+    }
   }
-  // Limn's own automatic request for changes still stands and this run has no blocker: lift it —
-  // superseded by the APPROVE this run sends, else dismissed after the post.
-  const liftId = noBlocker && standing.state === 'LIMN_AUTO_CHANGES_REQUESTED' ? standing.reviewId : null;
+  // Limn's own automatic request for changes still stands, this run has no blocker and none behind
+  // the block is left unjudged: lift it — superseded by the APPROVE this run sends, else dismissed.
+  const liftId = noBlocker && !blockersRemain && standing.state === 'LIMN_AUTO_CHANGES_REQUESTED' ? standing.reviewId : null;
   if (picked.toPost.length === 0 && (verdict?.submitted ?? 'COMMENT') === 'COMMENT' && liftId == null) {
     return skip(...nothingReason());
   }
