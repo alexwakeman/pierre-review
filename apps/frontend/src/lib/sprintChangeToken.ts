@@ -26,3 +26,13 @@ export function sprintTokenChanged(i: SprintTokenInput): boolean {
   if (i.tokenUpdatedAt <= i.graphUpdatedAt) return false;
   return i.token !== i.seed;
 }
+
+/**
+ * Should SprintView re-fetch the board now? At most ONCE PER OBSERVED TOKEN: `lastActedAt` is the
+ * `tokenUpdatedAt` the previous automatic re-fetch was issued for. A FAILED re-fetch leaves the
+ * graph's `dataUpdatedAt` old, so `changed` comes back true the moment it settles — without this it
+ * re-fired every second or two for as long as the endpoint failed. Now it waits for the next poll.
+ */
+export function sprintShouldAutoRefetch(i: { changed: boolean; tokenUpdatedAt: number; lastActedAt: number | null }): boolean {
+  return i.changed && i.lastActedAt !== i.tokenUpdatedAt;
+}

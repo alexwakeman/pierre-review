@@ -77,7 +77,7 @@ export function sprintTokenKey(workspaceId: number | null): [string, string] {
 export function useSprintChangeToken(
   workspaceId: number | null,
   graph: { changeToken: string | undefined; updatedAt: number; fetching: boolean } | null,
-): { changed: boolean } {
+): { changed: boolean; tokenUpdatedAt: number } {
   const qc = useQueryClient();
   const seed = graph?.changeToken;
   const graphUpdatedAt = graph?.updatedAt;
@@ -110,7 +110,7 @@ export function useSprintChangeToken(
       graphUpdatedAt: graph.updatedAt,
       graphFetching: graph.fetching,
     });
-  return { changed };
+  return { changed, tokenUpdatedAt: q.dataUpdatedAt };
 }
 
 export function useSprintRefresh(workspaceId: number | null) {

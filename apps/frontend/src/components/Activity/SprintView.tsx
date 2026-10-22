@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useId, useMemo, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { sprintShouldAutoRefetch } from '../../lib/sprintChangeToken.js';
 import {
   SPRINT_GHOST_MAX,
   SPRINT_TICKETS_MAX,
@@ -71,7 +72,7 @@ export function SprintView({ view }: { view: SprintBoardView }): JSX.Element {
   const workspaceId = useFilters((s) => s.workspaceId);
   const { data, isLoading, isError, isFetching, refetch, dataUpdatedAt } = useSprintGraph(workspaceId);
   const refresh = useSprintRefresh(workspaceId);
-  const { changed } = useSprintChangeToken(
+  const { changed, tokenUpdatedAt } = useSprintChangeToken(
     workspaceId,
     data != null && data.trackerOn ? { changeToken: data.changeToken, updatedAt: dataUpdatedAt, fetching: isFetching } : null,
   );
@@ -108,9 +109,14 @@ export function SprintView({ view }: { view: SprintBoardView }): JSX.Element {
   const askOn = useSprintAiOn();
   // The sprint changed since the board was loaded: re-fetch it now (the board only, no tracker read).
   // Not while the reader's own Refresh is landing — that already re-reads the board.
+  // ONCE PER OBSERVED TOKEN (`sprintShouldAutoRefetch`): a failed re-fetch waits for the next poll.
+  const autoRefetchedFor = useRef<number | null>(null);
   useEffect(() => {
-    if (changed && !refreshing && awaitRead == null) void refetch();
-  }, [changed, refreshing, awaitRead, refetch]);
+    if (refreshing || awaitRead != null) return;
+    if (!sprintShouldAutoRefetch({ changed, tokenUpdatedAt, lastActedAt: autoRefetchedFor.current })) return;
+    autoRefetchedFor.current = tokenUpdatedAt;
+    void refetch();
+  }, [changed, tokenUpdatedAt, refreshing, awaitRead, refetch]);
   const openStory = useOpenStory();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [askOpen, setAskOpen] = useState(false);
