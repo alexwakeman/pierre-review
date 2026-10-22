@@ -190,7 +190,13 @@ export async function postStoryGapsComment(
   }
 }
 
-/** The gaps a post would carry now: target this PR, not posted (nor any earlier raise), not in flight. */
+/**
+ * The gaps a post would carry now: target this PR, not posted (nor any earlier raise), not in flight.
+ * ⚠ Each item is CLAIMED (`posting` + `held`) in the same synchronous step as its in-flight check,
+ * BEFORE any await: two posts under different (run, target PR) keys can both select an un-owned gap
+ * (it targets whichever PR each reader is viewing), and a claim taken after the await let both carry
+ * it. An item dropped by the chain check is released at once; the rest on exit (the caller).
+ */
 async function selectGaps(
   ctx: AgentContext,
   accountId: number,
@@ -198,13 +204,20 @@ async function selectGaps(
   targetPrId: number,
   viewedPrId: number | null,
   only: ReadonlySet<number> | null,
+  held: number[],
 ): Promise<TicketReviewItem[]> {
   const out: TicketReviewItem[] = [];
   for (const item of run.items) {
     if (only != null && !only.has(item.id)) continue;
     if (storyGapTarget(item, viewedPrId) !== targetPrId) continue;
     if (item.posted != null || posting.has(item.id)) continue;
-    if (await postedInChain(ctx, accountId, item.priorItemId)) continue;
+    posting.add(item.id);
+    held.push(item.id);
+    if (await postedInChain(ctx, accountId, item.priorItemId)) {
+      posting.delete(item.id);
+      held.splice(held.indexOf(item.id), 1);
+      continue;
+    }
     out.push(item);
   }
   return out;
@@ -234,13 +247,10 @@ async function postInsideClaim(
   if (run.status !== 'succeeded' || latest?.id !== run.id) return { kind: 'superseded' };
   const member = run.members.find((m) => m.prId === targetPrId);
   if (!member) return { kind: 'not_a_member' };
-  const gaps = await selectGaps(ctx, accountId, run, targetPrId, a.viewedPrId, a.itemIds ? new Set(a.itemIds) : null);
+  // Claims each gap it selects (released by the caller on exit).
+  const gaps = await selectGaps(ctx, accountId, run, targetPrId, a.viewedPrId, a.itemIds ? new Set(a.itemIds) : null, held);
   const notAsked = a.notAsked ?? [];
   if (gaps.length === 0 && notAsked.length === 0) return { kind: 'already_posted' };
-  for (const g of gaps) {
-    posting.add(g.id);
-    held.push(g.id);
-  }
   const pr = await getReviewPrContext(ctx, targetPrId, accountId);
   if (!pr) return { kind: 'not_found', message: `PR ${targetPrId} not found` };
 
