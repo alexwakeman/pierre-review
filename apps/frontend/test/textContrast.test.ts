@@ -219,3 +219,29 @@ describe('text contrast', () => {
     expect(report).toBe('');
   });
 });
+
+describe('the reference-docs quote highlight (index.css `::highlight(doc-quote)`)', () => {
+  // The Custom Highlight API paints from a pseudo-element rule no class scan can see, so its two
+  // colour pairs are read from the stylesheet and measured here: text on its own wash, both themes.
+  const css = readFileSync(join(SRC, 'index.css'), 'utf8');
+  const rule = (selector: string): { bg: string; fg: string } => {
+    const at = css.indexOf(`${selector} {`);
+    expect(at).toBeGreaterThanOrEqual(0);
+    const body = css.slice(at, css.indexOf('}', at));
+    const bg = /background-color:\s*(#[0-9a-f]{6})/i.exec(body)?.[1];
+    const fg = /(?:^|[\s;{])color:\s*(#[0-9a-f]{6})/i.exec(body)?.[1];
+    expect(bg).toBeDefined();
+    expect(fg).toBeDefined();
+    return { bg: bg!, fg: fg! };
+  };
+
+  it('clears AA in the light theme', () => {
+    const { bg, fg } = rule('\n::highlight(doc-quote)');
+    expect(contrastRatio(fg, bg)).toBeGreaterThanOrEqual(AA_BODY);
+  });
+
+  it('clears AA in the dark theme', () => {
+    const { bg, fg } = rule('.dark ::highlight(doc-quote)');
+    expect(contrastRatio(fg, bg)).toBeGreaterThanOrEqual(AA_BODY);
+  });
+});

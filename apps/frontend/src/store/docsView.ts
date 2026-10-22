@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { LibraryLocation } from '../lib/referenceDocs.js';
+import type { DocsDeepLink } from '../lib/docReferences.js';
 
 // Activity → Docs: what the reader has open, PER WORKSPACE, for the visit (not in the URL, not
 // persisted). A module store rather than component state so leaving the rail line and coming back
@@ -9,6 +9,11 @@ import type { LibraryLocation } from '../lib/referenceDocs.js';
 export interface DocsOpen {
   path: string;
   anchor: string | null;
+  /**
+   * The SERVER-CHECKED words the link rests on (a review reference, a story-docs point, a chat
+   * citation, a finding's borrowed quote), highlighted in the section; null = anchor only.
+   */
+  quote: string | null;
   /** Bumped on every open, so re-opening the same anchor scrolls to it again. */
   seq: number;
 }
@@ -21,7 +26,7 @@ interface DocsViewState {
   conversation: Record<number, string | null | undefined>;
   /** Below the wide breakpoint the viewer and the chat share one column. */
   narrowPane: 'viewer' | 'chat';
-  openPath: (workspaceId: number, path: string, anchor?: string | null) => void;
+  openPath: (workspaceId: number, path: string, anchor?: string | null, quote?: string | null) => void;
   toggleExpanded: (workspaceId: number, docId: number) => void;
   setExpanded: (workspaceId: number, docId: number, on: boolean) => void;
   setConversation: (workspaceId: number, conversationId: string | null) => void;
@@ -31,8 +36,8 @@ interface DocsViewState {
    * URL hydrate before the workspace resolves and consumed ONCE by the pane (which knows the
    * workspace). The serializer does not emit those keys, so the link is a one-shot by design.
    */
-  pendingDeepLink: LibraryLocation | null;
-  seatDeepLink: (loc: LibraryLocation | null) => void;
+  pendingDeepLink: DocsDeepLink | null;
+  seatDeepLink: (loc: DocsDeepLink | null) => void;
 }
 
 let seq = 0;
@@ -42,8 +47,8 @@ export const useDocsView = create<DocsViewState>((set) => ({
   expanded: {},
   conversation: {},
   narrowPane: 'viewer',
-  openPath: (workspaceId, path, anchor = null) =>
-    set((s) => ({ open: { ...s.open, [workspaceId]: { path, anchor, seq: ++seq } }, narrowPane: 'viewer' })),
+  openPath: (workspaceId, path, anchor = null, quote = null) =>
+    set((s) => ({ open: { ...s.open, [workspaceId]: { path, anchor, quote, seq: ++seq } }, narrowPane: 'viewer' })),
   toggleExpanded: (workspaceId, docId) =>
     set((s) => {
       const cur = s.expanded[workspaceId] ?? [];

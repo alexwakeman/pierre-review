@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { REFERENCE_DOCS_CHAT_MAX_QUESTION_CHARS, type ReferenceDocsChatMessage } from '@pierre-review/shared';
 import {
   useAskDocs,
@@ -31,10 +31,16 @@ function Answer({
   onOpen,
 }: {
   message: ReferenceDocsChatMessage;
-  onOpen: (path: string, anchor: string | null) => void;
+  onOpen: (path: string, anchor: string | null, quote?: string | null) => void;
 }): JSX.Element {
-  // A chat answer speaks from the library root (`<slug>/sections/…`).
-  const renderLink = useDocLinkRenderer(LIBRARY_INDEX_PATH, onOpen);
+  // A chat answer speaks from the library root (`<slug>/sections/…`). An inline link highlights the
+  // quote the server checked for its citation (the first verified one per path#anchor).
+  const quoteFor = useCallback(
+    (path: string, anchor: string | null): string | null =>
+      message.citations.find((c) => c.path === path && c.anchor === anchor)?.quote ?? null,
+    [message.citations],
+  );
+  const renderLink = useDocLinkRenderer(LIBRARY_INDEX_PATH, onOpen, undefined, quoteFor);
   return (
     <div className="space-y-1.5">
       <div className="text-[13px] text-gray-800 dark:text-gray-100">
@@ -48,7 +54,7 @@ function Answer({
               <li key={`${c.path}#${c.anchor ?? ''}`}>
                 <button
                   type="button"
-                  onClick={() => onOpen(c.path, c.anchor)}
+                  onClick={() => onOpen(c.path, c.anchor, c.quote ?? null)}
                   className="inline-flex items-start gap-1 text-left text-xs text-sky-700 hover:underline dark:text-sky-300"
                 >
                   <BookIcon size={12} className="mt-0.5 shrink-0" />
@@ -72,7 +78,7 @@ export function DocsChat({
   workspaceId: number;
   /** False while the library has no built document (the server would refuse). */
   canAsk: boolean;
-  onOpen: (path: string, anchor: string | null) => void;
+  onOpen: (path: string, anchor: string | null, quote?: string | null) => void;
 }): JSX.Element {
   const active = useDocsView((s) => s.conversation[workspaceId] ?? null);
   const setConversation = useDocsView((s) => s.setConversation);

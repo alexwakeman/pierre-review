@@ -9,7 +9,8 @@
 //   DocLink                 one library link (also the story docs check, Activity/StoryDocsAlignment.tsx)
 //
 // Every link opens the section in Activity → Docs: a click seats it in-app (store/openDocs.ts), and the
-// href is a real deep link (lib/docReferences.ts) for a new tab. All text is PLAIN TEXT — a quote is the
+// href is a real deep link (lib/docReferences.ts) for a new tab. A link whose target has a checked
+// `quote` (a reference, a story-docs point, a finding's borrowed quote) highlights it there. All text is PLAIN TEXT — a quote is the
 // document's words, never markdown to render.
 import type { MouseEvent, ReactNode } from 'react';
 import {
@@ -18,7 +19,7 @@ import {
   type ReviewDocReference,
   type ReviewDocVerdict,
 } from '@pierre-review/shared';
-import { docsDeepLink } from '../lib/docReferences.js';
+import { borrowedQuote, docsDeepLink } from '../lib/docReferences.js';
 import { citationLabel } from '../lib/referenceDocs.js';
 import { REVIEW_CHIP, REVIEW_META } from '../lib/reviewStyles.js';
 import { openDocsSection } from '../store/openDocs.js';
@@ -55,7 +56,7 @@ export function DocLink({ target, children }: { target: ReferenceDocCitation; ch
     // A plain click opens it in-app; a modified click (new tab / window) follows the deep link.
     if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
     e.preventDefault();
-    openDocsSection(workspaceId, target.path, target.anchor);
+    openDocsSection(workspaceId, target.path, target.anchor, target.quote ?? null);
   };
   return (
     <a
@@ -156,14 +157,24 @@ export function DocReferencesBlock({ references }: { references: readonly Review
   );
 }
 
-/** A finding's library citations: "Reference: Document › Section". Nothing when it has none. */
-export function DocCitationLinks({ citations }: { citations: readonly ReferenceDocCitation[] | undefined }): JSX.Element | null {
+/**
+ * A finding's library citations: "Reference: Document › Section". Nothing when it has none. A citation
+ * borrows the quote of the run's ONE matching reference (`borrowedQuote`), else opens at its anchor.
+ */
+export function DocCitationLinks({
+  citations,
+  references,
+}: {
+  citations: readonly ReferenceDocCitation[] | undefined;
+  /** The same run's references, whose quotes a citation may borrow. */
+  references?: readonly ReviewDocReference[] | null;
+}): JSX.Element | null {
   if (citations == null || citations.length === 0) return null;
   return (
     <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5">
       <span className={REVIEW_META}>Reference:</span>
       {citations.map((c) => (
-        <DocLink key={`${c.path}#${c.anchor ?? ''}`} target={c}>
+        <DocLink key={`${c.path}#${c.anchor ?? ''}`} target={{ ...c, quote: borrowedQuote(c, references) ?? undefined }}>
           {citationLabel(c)}
         </DocLink>
       ))}

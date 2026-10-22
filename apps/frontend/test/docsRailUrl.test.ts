@@ -37,6 +37,13 @@ describe('the Docs rail link', () => {
     expect(readFromUrl().activityRepoId).toBe('docs');
   });
 
+  it('never emits a deep link key — the quote included (one-shot)', () => {
+    location.search = '?activityRepo=docs&doc=a&section=01-x.md&anchor=h&quote=some%20words';
+    writeToUrl(state({ activityRepoId: 'docs' }));
+    expect(location.search).toContain('activityRepo=docs');
+    for (const k of ['doc=', 'section=', 'anchor=', 'quote=']) expect(location.search).not.toContain(k);
+  });
+
   it('selecting it from another rail line is a real switch', () => {
     useFilters.setState({ activityRepoId: 'feed' });
     useFilters.getState().setActivityRepo('docs');

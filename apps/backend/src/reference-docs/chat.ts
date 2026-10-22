@@ -7,7 +7,7 @@ import { docsContextFor } from './context.js';
 import { readLibraryFile } from './library.js';
 import { parseLibraryPath } from './paths.js';
 import { CHAT_SYSTEM_PROMPT, buildChatPrompt, type ChatPriorTurn } from './prompts.js';
-import { markdownLinkTargets } from './render.js';
+import { extractCitations } from './chat-quotes.js';
 import { conversationRows, insertChatTurn, listDocRows, toChatMessage, type DocRow } from './store.js';
 
 // THE DOCS CHAT (docs/REFERENCE-DOCS.md § The chat). Ad hoc questions about a workspace's library,
@@ -19,14 +19,17 @@ import { conversationRows, insertChatTurn, listDocRows, toChatMessage, type DocR
 //   • ONE TURN AT A TIME PER ACCOUNT, claimed SYNCHRONOUSLY before the first await.
 //   • Nothing is stored unless an answer came back; a failed turn that still cost money is metered.
 //   • CITATIONS are the answer's links that name a real file of THIS library (a strict path grammar,
-//     then a read) — the SPA opens them through GET /api/docs/section.
+//     then a read) — the SPA opens them through GET /api/docs/section. A section citation carries the
+//     quote beside its link when it passes the review quote check (chat-quotes.ts), so the viewer
+//     highlights it.
 
 export const CHAT_MAX_PRIOR_TURNS = 8;
 export const CHAT_TRANSCRIPT_MAX_CHARS = 40_000;
 const STORED_ANSWER_CHARS = 20_000;
 const CHAT_TIMEOUT_MS = 5 * 60_000;
-const MAX_CITATIONS = 30;
 export const CONVERSATION_ID = /^[a-f0-9]{16,32}$/;
+
+export { extractCitations };
 
 const inFlight = new Set<number>();
 
@@ -53,39 +56,6 @@ export function priorTurns(rows: ReadonlyArray<{ role: string; content: string }
     kept.unshift(t);
   }
   return kept;
-}
-
-/**
- * The answer's links that name a file of this library, de-duplicated, with the document and section
- * titles from the stored rows. Anything else (an outside URL, a made-up path) is not a citation.
- */
-export function extractCitations(
-  text: string,
-  docs: ReadonlyArray<Pick<DocRow, 'slug' | 'title' | 'sections' | 'builtAt'>>,
-  exists: (path: string) => boolean,
-): ReferenceDocCitation[] {
-  const bySlug = new Map(docs.filter((d) => d.builtAt != null).map((d) => [d.slug, d]));
-  const out: ReferenceDocCitation[] = [];
-  const seen = new Set<string>();
-  for (const raw of markdownLinkTargets(text)) {
-    const parsed = parseLibraryPath(raw.replace(/^<|>$/g, ''));
-    if (!parsed || parsed.path.kind === 'index') continue;
-    const doc = bySlug.get(parsed.path.slug);
-    if (!doc || !exists(parsed.path.path)) continue;
-    const key = `${parsed.path.path}#${parsed.anchor ?? ''}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    const section = parsed.path.kind === 'section' ? (doc.sections ?? []).find((s) => s.path === parsed.path.path) : undefined;
-    out.push({
-      path: parsed.path.path,
-      anchor: parsed.anchor,
-      docSlug: doc.slug,
-      docTitle: doc.title,
-      sectionTitle: section?.title ?? null,
-    });
-    if (out.length >= MAX_CITATIONS) break;
-  }
-  return out;
 }
 
 export interface AskArgs {
@@ -157,7 +127,7 @@ export async function askDocs(ctx: AgentContext, a: AskArgs): Promise<ReferenceD
     const docs = await listDocRows(a.accountId, a.workspaceId);
     const citations = extractCitations(text, docs, (path) => {
       const parsed = parseLibraryPath(path);
-      return parsed != null && readLibraryFile(a.accountId, a.workspaceId, parsed.path) != null;
+      return parsed != null ? readLibraryFile(a.accountId, a.workspaceId, parsed.path) : null;
     });
     const saved = await insertChatTurn(a.accountId, a.workspaceId, conversationId, a.question, {
       text,

@@ -24,5 +24,6 @@ export * from './blast-radius.js';
 export * from './sonar.js';
 export * from './sequence-diagrams.js';
 export * from './reference-docs.js';
+export * from './reference-docs-quote.js';
 export * from './sprint-members.js';
 export * from './story-docs-alignment.js';

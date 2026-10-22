@@ -4693,7 +4693,8 @@ conversation on screen, the narrow-width Read / Ask tab) per WORKSPACE in the mo
   folder, refuses `..` past the root, `/`, `%`, `?` and `\`, then holds the result to the client copy
   of the server's strict grammar (`parseLibraryPath`). Library → opens in the viewer; `#anchor` →
   scrolls the viewer's OWN box (never `scrollIntoView`); absolute → `safeExternalUrl`, new tab;
-  anything else → plain text. It reaches the shared `Markdown` through its `renderLink` prop.
+  anything else → plain text. It reaches the shared `Markdown` through its `renderLink` prop. Its optional
+  `quoteFor` lookup gives a library result the checked `quote` it carries (the chat's citations).
 - Headings get `data-doc-anchor` from a rehype plugin run AFTER the sanitizer (which prefixes every
   `id`), using a copy of the server's `headingAnchor` + duplicate numbering, so `#anchor` lands.
 - The left tree is built from the structured `sections` (`docTreeRows`, the shape of CONTENTS.md),
@@ -4741,5 +4742,23 @@ href is a DEEP LINK (`lib/docReferences.ts` `docsDeepLink`:
 `/app/?workspace=&activityRepo=docs&doc=<slug>&section=<NN-name.md>&anchor=`) for a modified click / new
 tab. ⚠ The URL hydrate seats it in `useDocsView.pendingDeepLink` (`parseDocsDeepLink`, the strict
 grammar again) and the pane opens it ONCE, where the workspace is known, then expands that document; the
-serializer never emits `doc`/`section`/`anchor`, so the link is one-shot by design. Quotes and notes render
+serializer never emits `doc`/`section`/`anchor`/`quote`, so the link is one-shot by design. Quotes and notes render
 as plain text.
+
+**The quote highlight** ([REFERENCE-DOCS.md](REFERENCE-DOCS.md) § The SPA → The quote highlight).
+`DocsOpen.quote` (store) carries the checked words from every entry point — `DocLink` (`target.quote`:
+review / ticket / story-docs references, and `DocCitationLinks`' `borrowedQuote` from the run's
+references), the chat's citation buttons and inline links (`useDocLinkRenderer`'s `quoteFor`, looked up
+in `message.citations` by `path#anchor`), and the deep link's `quote=` (≤ 300 chars on parse, plain text).
+`DocsViewer` walks ITS OWN page's text nodes into segments (a block or cell boundary = one space), skips
+the server header (the leading H1 + the blockquote after it), and asks `lib/docQuoteMatch.ts`
+`findQuoteRanges` — the occurrence at or after the anchor heading wins, else the first in the body.
+- ⚠ **Painted with the CSS Custom Highlight API** (`CSS.highlights.set('doc-quote', …)`, styled by
+  `::highlight(doc-quote)` in index.css) — never a `<mark>` spliced into React's DOM and never a rehype
+  plugin keyed on the quote (it would re-parse the memoised Markdown on every open). No API ⇒ scroll only.
+  Cleared on every open, on Clear and on unmount.
+- ⚠ **Explicit text colour in both themes** (the Search `<mark>` lesson); `textContrast.test.ts` reads the
+  four hexes from index.css and measures them.
+- Scrolls the viewer's OWN box (the passage a third of the way down; `.md-table-scroll` sideways too) —
+  never `scrollIntoView`. Not found ⇒ the anchor as before, plus the strip's not-found line.
+- ⚠ No RegExp over the document's text: the fold is a character walk, the search `indexOf`.

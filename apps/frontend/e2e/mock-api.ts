@@ -1210,4 +1210,5 @@ export const fixtures = {
   ATTENTION,
   DAILY_BRIEF,
   BRANCH_STATUS,
+  ME_RESPONSE,
 };

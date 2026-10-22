@@ -19,13 +19,36 @@ describe('docsDeepLink', () => {
       kind: 'section',
       slug: 'billing-handbook',
       anchor: null,
+      quote: null,
     });
+  });
+
+  it('carries the quote, as plain text, and round-trips it', () => {
+    const quote = 'Refunds are paid “within fourteen days” & never <b>twice</b>';
+    const href = docsDeepLink('/app/', 4, { path: 'billing-handbook/sections/04-refunds.md', anchor: 'refunds', quote });
+    expect(href).toContain('&quote=');
+    expect(parseDocsDeepLink(href.slice(href.indexOf('?')))?.quote).toBe(quote);
+  });
+
+  it('omits an empty quote', () => {
+    expect(docsDeepLink('/app/', 4, { path: 'a/sections/01-x.md', anchor: null, quote: '  ' })).not.toContain('quote=');
   });
 });
 
 describe('parseDocsDeepLink', () => {
   it('doc alone opens its contents', () => {
     expect(parseDocsDeepLink('?activityRepo=docs&doc=billing-handbook')?.path).toBe('billing-handbook/CONTENTS.md');
+  });
+
+  it('caps a quote and drops an empty one', () => {
+    const long = 'x'.repeat(1000);
+    expect(parseDocsDeepLink(`?activityRepo=docs&doc=a&section=01-x.md&quote=${long}`)?.quote?.length).toBe(300);
+    expect(parseDocsDeepLink('?activityRepo=docs&doc=a&section=01-x.md&quote=')?.quote).toBeNull();
+    expect(parseDocsDeepLink('?activityRepo=docs&doc=a&section=01-x.md')?.quote).toBeNull();
+  });
+
+  it('a quote never rescues a bad path', () => {
+    expect(parseDocsDeepLink('?activityRepo=docs&doc=../etc&section=01-x.md&quote=hello')).toBeNull();
   });
 
   it('keeps a valid anchor', () => {

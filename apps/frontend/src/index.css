@@ -1874,3 +1874,24 @@ body {
   }
 }
 
+
+/* ---- the reference-docs quote highlight ---- */
+/* Activity → Docs paints a server-checked quote with the CSS Custom Highlight API
+   (components/Activity/DocsViewer.tsx), so React's DOM is never touched. ⚠ BOTH colours are explicit
+   in BOTH themes — the Search <mark> lesson: a wash with an inherited text colour measured 1.9:1 in
+   dark mode. test/textContrast.test.ts reads these four hexes from here and measures them (AA 4.5:1).
+   The swatch on the viewer's one-line strip wears the same wash. */
+::highlight(doc-quote) {
+  background-color: #fde68a; /* amber-200 */
+  color: #111827; /* gray-900 */
+}
+.dark ::highlight(doc-quote) {
+  background-color: #92400e; /* amber-800 */
+  color: #fef3c7; /* amber-100 */
+}
+.doc-quote-swatch {
+  background-color: #fde68a;
+}
+.dark .doc-quote-swatch {
+  background-color: #92400e;
+}
