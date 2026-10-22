@@ -938,7 +938,9 @@ always the router's; the models are Opus 5.5 and Sonnet 5 only. Details:
   a per-workspace SEALED write-only token to the FIXED host through the tracker's guarded GET; ONE
   stored snapshot per (account, PR, head) that every reader uses (only a review run and Refresh call
   SonarCloud), capped at 50 with the cut stated; fenced into the review prompt, AI Fix's `Q<n>` items,
-  and ONE PR comment per (PR, head), claimed before the write, never retried (auto: the `sonar` kind).
+  and ONE GitHub review per (PR, head) — an inline thread per issue on a changed RIGHT line, the rest
+  in full in the body (never a fallback line), an issue KEY threaded on an earlier head never threaded
+  again — claimed before the write, never retried, 422 read back (auto: the `sonar` kind).
   ⚠ Every PR call is keyed by PR NUMBER (latest analysis, any commit): a read is stored only when
   `project_pull_requests/list` says it analysed THIS head (or GitHub's merge commit of it), else
   `not_analyzed` with nothing kept. ⚠ Prose in the comment is HTML-escaped (`safeProse`).

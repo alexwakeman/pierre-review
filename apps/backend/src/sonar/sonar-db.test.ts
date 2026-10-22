@@ -77,13 +77,29 @@ const transport: JiraTransport = async (url, headers) => {
   }
 };
 
-const postComment = vi.fn();
+const postReview = vi.fn();
 let liveHead = HEAD;
+// The live diff: src/a.ts lines 1-2 are added (I0 and I1 sit on them); line 3 is not in the diff.
+let liveDiffText = ['diff --git a/src/a.ts b/src/a.ts', '--- a/src/a.ts', '+++ b/src/a.ts', '@@ -0,0 +1,2 @@', '+x', '+y'].join('\n');
+const findLandedReview = vi.fn(async (..._a: unknown[]): Promise<string | null> => null);
 const postDeps = {
   livePr: vi.fn(async () => ({ headSha: liveHead, state: 'open', draft: false, merged: false })),
-  postComment,
+  liveDiff: vi.fn(async () => liveDiffText),
+  postReview,
+  findLandedReview,
+  reviewComments: vi.fn(async (_o: string, _n: string, _p: number, reviewId: string) =>
+    ((postReview.mock.calls.at(-1)?.[3]?.comments ?? []) as Array<{ path: string; line: number; body: string }>).map((c, i) => ({
+      id: Number(reviewId.replace(/\D/g, '') || 0) * 100 + i,
+      path: c.path,
+      line: c.line,
+      side: 'RIGHT' as const,
+      body: c.body,
+    })),
+  ),
   settle: vi.fn(async () => ({ visible: true })),
 };
+const bodyOf = (call = 0): string => postReview.mock.calls[call]![3].body as string;
+const commentsOf = (call = 0): Array<{ path: string; line: number; side: string; body: string }> => postReview.mock.calls[call]![3].comments;
 
 beforeAll(async () => {
   for (const x of ['', '-shm', '-wal']) rmSync(DB_PATH + x, { force: true });
@@ -141,8 +157,10 @@ afterAll(async () => {
 });
 
 beforeEach(() => {
-  postComment.mockReset();
-  postComment.mockImplementation(async () => ({ commentId: 'IC1' }));
+  postReview.mockReset();
+  postReview.mockImplementation(async () => ({ reviewId: '501' }));
+  findLandedReview.mockReset();
+  findLandedReview.mockImplementation(async () => null);
   liveHead = HEAD;
 });
 
@@ -236,34 +254,63 @@ describe('snapshots and the one comment', () => {
     expect((await app.inject({ method: 'POST', url: `/api/prs/${prB}/sonar/post`, payload: { headSha: HEAD } })).statusCode).toBe(404);
   });
 
-  it('posts ONCE per (PR, head), claim before the write, even with two presses at once', async () => {
+  it('posts ONE review ONCE per (PR, head) — threads on diff lines, the rest in the body — claim before the write', async () => {
     let release: () => void = () => {};
-    postComment.mockImplementation(
-      () => new Promise((res) => (release = () => res({ commentId: 'IC9' }))),
+    postReview.mockImplementation(
+      () => new Promise((res) => (release = () => res({ reviewId: '9' }))),
     );
     const a = app.inject({ method: 'POST', url: `/api/prs/${prA}/sonar/post`, payload: { headSha: HEAD } });
     // Let the first request reach the GitHub call, then press again.
-    await vi.waitFor(() => expect(postComment).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(postReview).toHaveBeenCalledTimes(1));
     const [{ post }] = await db.select({ post: schema.sonarSnapshots.post }).from(schema.sonarSnapshots).execute();
     expect(post.status).toBe('posting');
+    // The planned threads are on the claim, so a cut-off post still counts them as on GitHub.
+    expect(post.inline.map((p: any) => p.key)).toEqual(['I0', 'I1']);
     const b = await app.inject({ method: 'POST', url: `/api/prs/${prA}/sonar/post`, payload: { headSha: HEAD } });
     expect(b.statusCode).toBe(409);
     expect(b.json().error).toBe('AlreadyPosted');
     release();
     const done = await a;
     expect(done.statusCode).toBe(200);
-    expect(done.json().snapshot.post).toMatchObject({ status: 'posted', commentId: 'IC9', trigger: 'manual', issueCount: 3 });
-    expect(postComment).toHaveBeenCalledTimes(1);
-    const body = postComment.mock.calls[0]![3] as string;
-    expect(body).toContain('<!-- pierre:claude-review-sonar v=1 -->');
-    expect(body).toContain('Do X');
+    expect(done.json().snapshot.post).toMatchObject({
+      status: 'posted',
+      githubReviewId: '9',
+      commentId: null,
+      trigger: 'manual',
+      issueCount: 3,
+      summaryCount: 1,
+      alreadyCount: 0,
+      inline: [
+        { key: 'I0', path: 'src/a.ts', line: 1, commentId: '900' },
+        { key: 'I1', path: 'src/a.ts', line: 2, commentId: '901' },
+      ],
+    });
+    expect(postReview).toHaveBeenCalledTimes(1);
+    expect(postReview.mock.calls[0]![3].commitId).toBe(HEAD);
+    // I0 + I1 are on changed lines: one thread each, on the RIGHT side, each with the marker.
+    expect(commentsOf().map((c) => [c.path, c.line, c.side])).toEqual([
+      ['src/a.ts', 1, 'RIGHT'],
+      ['src/a.ts', 2, 'RIGHT'],
+    ]);
+    for (const c of commentsOf()) {
+      expect(c.body).toContain('<!-- pierre:claude-review-sonar v=1 -->');
+      expect(c.body).toContain('Do X');
+    }
+    expect(commentsOf()[0]!.body).toContain('Fix me 0');
+    // I2 (line 3, outside the diff) is in the body in full; the threaded ones are only counted.
+    const body = bodyOf();
+    expect(body).toMatch(/<!-- pierre:claude-review-sonar v=1 a=[0-9a-f]{12} -->/);
+    expect(body).toContain('2 issues are on the changed lines, as comments there.');
+    expect(body).toContain('Fix me 2');
+    expect(body).toContain('`src/a.ts:3`');
+    expect(body).not.toContain('Fix me 0');
     // A manual post carries no "posted automatically" footer.
     expect(body).not.toContain('Posted automatically');
     // A re-read of the same head keeps the claim.
     await app.inject({ method: 'POST', url: `/api/prs/${prA}/sonar/refresh`, payload: {} });
     const again = await app.inject({ method: 'POST', url: `/api/prs/${prA}/sonar/post`, payload: { headSha: HEAD } });
     expect(again.statusCode).toBe(409);
-    expect(postComment).toHaveBeenCalledTimes(1);
+    expect(postReview).toHaveBeenCalledTimes(1);
   });
 
   it('a GitHub failure is recorded and never retried; a moved head posts nothing', async () => {
@@ -274,16 +321,70 @@ describe('snapshots and the one comment', () => {
     liveHead = 'c'.repeat(40);
     const moved = await app.inject({ method: 'POST', url: `/api/prs/${prA}/sonar/post`, payload: { headSha: H2 } });
     expect(moved.json().error).toBe('HeadMoved');
-    expect(postComment).not.toHaveBeenCalled();
+    expect(postReview).not.toHaveBeenCalled();
     liveHead = H2;
-    postComment.mockImplementation(async () => {
+    postReview.mockImplementation(async () => {
       throw new Error('HTTP 403');
     });
     const failed = await app.inject({ method: 'POST', url: `/api/prs/${prA}/sonar/post`, payload: { headSha: H2 } });
     expect(failed.json().snapshot.post).toMatchObject({ status: 'failed', error: 'HTTP 403' });
+    // It looked for the review before calling it a failure.
+    expect(findLandedReview).toHaveBeenCalledTimes(1);
     const retry = await app.inject({ method: 'POST', url: `/api/prs/${prA}/sonar/post`, payload: { headSha: H2 } });
     expect(retry.statusCode).toBe(409);
-    expect(postComment).toHaveBeenCalledTimes(1);
+    expect(postReview).toHaveBeenCalledTimes(1);
+  });
+
+  it('a new head never re-threads an issue already threaded on an earlier head (by key)', async () => {
+    const { eq } = await import('drizzle-orm');
+    // Head H4: I0 and I1 were threaded on HEAD (posted) — and on H2 nothing landed (failed).
+    const H4 = '4'.repeat(40);
+    await db.update(schema.pullRequests).set({ headSha: H4 }).where(eq(schema.pullRequests.id, prA)).execute();
+    analysedSha = H4;
+    liveHead = H4;
+    await app.inject({ method: 'POST', url: `/api/prs/${prA}/sonar/refresh`, payload: {} });
+    const res = await app.inject({ method: 'POST', url: `/api/prs/${prA}/sonar/post`, payload: { headSha: H4 } });
+    expect(res.statusCode).toBe(200);
+    expect(commentsOf()).toEqual([]);
+    const body = bodyOf();
+    expect(body).toContain('Already on GitHub from an earlier commit:');
+    expect(body).toContain('`src/a.ts:1`');
+    expect(body).toContain('`src/a.ts:2`');
+    expect(body).not.toContain('Fix me 0');
+    expect(body).toContain('Fix me 2');
+    expect(res.json().snapshot.post).toMatchObject({ status: 'posted', alreadyCount: 2, summaryCount: 1, inline: [] });
+  });
+
+  it('a POST that errors but landed is adopted, never recorded as failed', async () => {
+    const { eq } = await import('drizzle-orm');
+    const H5 = '5'.repeat(40);
+    await db.update(schema.pullRequests).set({ headSha: H5 }).where(eq(schema.pullRequests.id, prA)).execute();
+    analysedSha = H5;
+    liveHead = H5;
+    await app.inject({ method: 'POST', url: `/api/prs/${prA}/sonar/refresh`, payload: {} });
+    postReview.mockImplementation(async () => {
+      throw new Error('HTTP 422: An internal error occurred');
+    });
+    findLandedReview.mockImplementation(async () => '77');
+    const res = await app.inject({ method: 'POST', url: `/api/prs/${prA}/sonar/post`, payload: { headSha: H5 } });
+    expect(res.json().snapshot.post).toMatchObject({ status: 'posted', githubReviewId: '77', error: null });
+    expect(findLandedReview.mock.calls[0]![3]).toMatchObject({ commitId: H5, body: bodyOf() });
+  });
+
+  it('an issue with no line, or a diff that cannot be read, goes to the summary — never a guessed line', async () => {
+    const { splitSonarIssues } = await import('./comment.js');
+    const { buildAnchorIndex } = await import('../github/diff-anchor.js');
+    const issue = (key: string, path: string | null, line: number | null) => ({ key, kind: 'issue', path, line }) as any;
+    const index = buildAnchorIndex(liveDiffText);
+    const s = splitSonarIssues(
+      [issue('A', 'src/a.ts', 1), issue('B', 'src/a.ts', null), issue('C', null, null), issue('D', 'src/a.ts', 9), issue('E', 'src/b.ts', 1), issue('F', 'src/a.ts', 2)],
+      index,
+      new Set(['F']),
+    );
+    expect(s.inline.map((i) => i.key)).toEqual(['A']);
+    expect(s.summary.map((i) => i.key)).toEqual(['B', 'C', 'D', 'E']);
+    expect(s.already.map((i) => i.key)).toEqual(['F']);
+    expect(splitSonarIssues([issue('A', 'src/a.ts', 1)], null, new Set()).summary).toHaveLength(1);
   });
 
   it('the account export never carries the token', async () => {
@@ -320,14 +421,14 @@ describe('auto-posting after an auto review', () => {
     expect(await run()).toEqual({ kind: 'off' });
     await settings.setWorkspaceAutoReview(ctx, 1, wsA, { autoPost: { enabled: true, scope: 'all', kinds: { sonar: false } } as any });
     expect(await run()).toEqual({ kind: 'off' });
-    expect(postComment).not.toHaveBeenCalled();
+    expect(postReview).not.toHaveBeenCalled();
     await settings.setWorkspaceAutoReview(ctx, 1, wsA, { autoPost: { kinds: { sonar: true } } as any });
     const out = await run();
     expect(out.kind).toBe('done');
-    expect(postComment).toHaveBeenCalledTimes(1);
-    expect(postComment.mock.calls[0]![3]).toContain('Posted automatically');
+    expect(postReview).toHaveBeenCalledTimes(1);
+    expect(bodyOf()).toContain('Posted automatically');
     expect((out as any).snapshot.post).toMatchObject({ status: 'posted', trigger: 'auto' });
     expect((await run()).kind).toBe('already_posted');
-    expect(postComment).toHaveBeenCalledTimes(1);
+    expect(postReview).toHaveBeenCalledTimes(1);
   });
 });

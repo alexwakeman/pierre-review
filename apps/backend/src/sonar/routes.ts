@@ -31,7 +31,7 @@ import { postSonarSnapshot, defaultSonarPostDeps, type SonarPostDeps } from './p
 //   POST /api/workspaces/:id/sonar/check   "Test connection" with the SAVED token.
 //   GET  /api/prs/:id/sonar?head=<sha>     the STORED snapshot — never calls SonarCloud.
 //   POST /api/prs/:id/sonar/refresh        { headSha? } read SonarCloud for that head NOW.
-//   POST /api/prs/:id/sonar/post           { headSha } ONE PR comment, once per (PR, head).
+//   POST /api/prs/:id/sonar/post           { headSha } ONE GitHub review, once per (PR, head).
 //                                          LOCAL ONLY (it posts through the `gh` session, like
 //                                          every other Claude Review post).
 //

@@ -230,7 +230,8 @@ byte-for-byte unchanged. Full contract: [REFERENCE-DOCS.md](REFERENCE-DOCS.md) �
 When the PR's workspace has SonarCloud set up, a run takes (or reuses) the head's stored snapshot before
 it builds the prompt and adds a fenced "SonarCloud analysis of this commit" block (the 25 most severe of
 up to 50 items, as evidence, never to be copied). The tab shows a **SonarCloud** section after CI check
-with a "Post SonarCloud findings" button: ONE PR comment per (PR, head), claimed before the write, never
+with a "Post SonarCloud findings" button: ONE separate GitHub review per (PR, head) — inline threads on
+changed lines, everything else in its summary body (docs/SONARCLOUD.md § Posting) — claimed before the write, never
 retried; an auto review posts it under auto-posting's `sonar` kind. AI Fix seeds the same items as
 `Q<n>`. Contract: [SONARCLOUD.md](SONARCLOUD.md).
 
