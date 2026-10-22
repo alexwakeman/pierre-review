@@ -357,9 +357,9 @@ const manifest = {
     'cli',
     'team',
   ],
-  // Source-available under the Functional Source License (FSL-1.1-MIT): use / self-host /
-  // modify freely, but no competing commercial or hosted product; each release converts to
-  // MIT two years after publication. The full text ships as LICENSE (copied below). npm's
+  // Source-available under the Limn License 1.0: free for individuals and for organisations
+  // where at most 3 people use it, a commercial licence above that, no competing product, and
+  // no conversion to MIT. The full text ships as LICENSE (copied below). npm's
   // documented form for a non-SPDX license is "SEE LICENSE IN <file>".
   license: 'SEE LICENSE IN LICENSE',
   // Not a dependency field: npm ignores it. ai/runtime.ts reads it to know what to download.

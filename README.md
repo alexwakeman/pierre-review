@@ -197,10 +197,15 @@ See `CLAUDE.md` for the architecture, conventions, and the local/cloud split.
 
 ## License
 
-Pierre is **source-available** under the [Functional Source License
-(FSL-1.1-MIT)](./LICENSE). You may use, self-host, and modify it freely; you may
-**not** offer it as a competing commercial or hosted product. Each release
-automatically converts to the **MIT License** two years after its publication.
+Limn is **source-available** under the [Limn License 1.0](./LICENSE).
 
-(The private `@pierre/pro` plugin is a separate, proprietary component and is not
-covered by this license.)
+- **Free** for individuals, and for any team or organisation where **3 people or
+  fewer** use it. You may use, copy and change it.
+- **More than 3 people** in one organisation (affiliates count together) need a
+  commercial licence — ask through the
+  [contact form](https://pierre-review.com/contact).
+- You may **not** offer Limn, or a product built from it, as a competing
+  commercial product or service.
+- Copies you pass on must keep the licence and copyright notice.
+
+The licence does not convert to MIT or any other licence over time.
