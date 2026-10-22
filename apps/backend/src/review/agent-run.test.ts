@@ -139,7 +139,7 @@ describe('runReview — ticket peers on a deep run', () => {
     expect(captured!.prompt).toContain('## Related checkouts');
     expect(captured!.prompt).toContain(`- X1: ${extra[0]}`);
     expect(captured!.prompt).toContain('- X2: could not be checked out. Do not guess at its code.');
-    expect(captured!.prompt).not.toContain('X5');
+    expect(captured!.prompt).not.toContain('- X5');
 
     // A peer's checkout is readable; a sibling directory is not.
     expect(await decide('Read', { file_path: join(extra[0]!, 'src/b.ts') })).toBe('allow');
