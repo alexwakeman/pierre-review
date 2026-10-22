@@ -336,8 +336,9 @@ export default function ForDevelopers(): JSX.Element {
                   Your Claude, not ours
                 </h3>
                 <p className="text-list text-ink-body">
-                  It runs on your own Claude Code or Anthropic API key: the Claude Code session
-                  you are signed in to, or <span className="text-ink">ANTHROPIC_API_KEY</span>.{' '}
+                  It runs on your own Claude Code login or Anthropic API key: the Claude Code
+                  session you are signed in to, or{' '}
+                  <span className="text-ink">ANTHROPIC_API_KEY</span>.{' '}
                   {SITE_NAME} stores no key and charges nothing for it. The first time, it asks
                   for a one-time download of about 110 MB. It runs on your machine, with{' '}
                   <span className="text-ink">{INSTALL_COMMAND}</span>. Codex support is coming

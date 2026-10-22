@@ -33,7 +33,7 @@ limn
 
 Claude Review (a code review of any PR, follow-ups, a check against a user
 story you paste, and a chat about the review) and AI Fix are free. They run on
-your own Claude Code or Anthropic API key: sign in to Claude Code, or set
+your own Claude Code login or Anthropic API key: sign in to Claude Code, or set
 `ANTHROPIC_API_KEY`. Limn stores no key and charges nothing for it.
 
 - **First use downloads the AI runtime, once (about 110 MB).** Press
@@ -45,7 +45,10 @@ your own Claude Code or Anthropic API key: sign in to Claude Code, or set
 - The reviewer reads code. It cannot edit files, run commands or reach the web.
 - The fixer edits files. It has no shell, and builds and tests nothing.
 - Nothing is posted or pushed until you press the button.
+- `LIMN_AI_USE_API_KEY=true` uses `ANTHROPIC_API_KEY` even when you are signed
+  in to Claude Code.
 - `LIMN_AI_DISABLED=true` turns every AI feature off.
+- Today it targets Claude users. Codex support is coming soon.
 
 ## Prerequisites
 
