@@ -17,6 +17,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import type { TicketReviewItem, TicketReviewMember } from '@pierre-review/shared';
 import {
+  autoLiftLine,
   autoPostFailureLine,
   autoPostSkipLine,
   autoResolveLabel,
@@ -86,7 +87,10 @@ describe('skips, verdicts and resolves', () => {
     expect(autoVerdictLine({ status: 'failed', verdict: v('APPROVE', 'APPROVE', null) })).toBeNull();
     expect(autoVerdictLine({ status: 'posted', verdict: v('APPROVE', 'COMMENT', 'own_pr') })).toBe('Not approved: this is your own PR.');
     expect(autoVerdictLine({ status: 'skipped', verdict: v('REQUEST_CHANGES', 'COMMENT', 'prior_review') })).toBe(
-      'Changes not requested: your last review on GitHub still stands.',
+      'Changes not requested: your own review on GitHub still stands.',
+    );
+    expect(autoVerdictLine({ status: 'posted', verdict: v('REQUEST_CHANGES', 'COMMENT', 'already_requested') })).toBe(
+      'Changes already requested by Claude’s earlier review.',
     );
     expect(autoVerdictLine({ status: 'posted', verdict: v('REQUEST_CHANGES', 'COMMENT', 'refused') })).toBe(
       'Changes not requested: GitHub refused it, so the comments were posted on their own.',
@@ -98,6 +102,17 @@ describe('skips, verdicts and resolves', () => {
     expect(autoVerdictLine({ status: 'posted', verdict: held('unknown') })).toBe('Not approved: impact unknown.');
     expect(autoVerdictLine({ status: 'posted', verdict: v('COMMENT', 'COMMENT', null) })).toBeNull();
     expect(autoVerdictLine({ status: 'posted' })).toBeNull();
+  });
+
+  it("lifting Claude's own earlier request for changes: dismissed, or why not; a superseding approve says nothing more", () => {
+    const l = (how: 'superseded' | 'dismissed' | 'dismiss_failed', error: string | null = null) => ({ reviewId: '1', how, error });
+    expect(autoLiftLine({ liftedBlock: l('dismissed') })).toBe('Lifted Claude’s earlier request for changes.');
+    expect(autoLiftLine({ liftedBlock: l('dismiss_failed', 'Restricted.') })).toBe('Couldn’t lift Claude’s earlier request for changes: Restricted.');
+    expect(autoLiftLine({ liftedBlock: l('superseded') })).toBeNull();
+    expect(autoLiftLine({})).toBeNull();
+    // A lift-only run that failed prints the lift line, not a second "Couldn't post" line.
+    expect(autoPostFailureLine({ status: 'failed', error: 'Restricted.', liftedBlock: l('dismiss_failed', 'Restricted.') })).toBeNull();
+    expect(src('components/ClaudeReviewTab.tsx')).toContain('autoLiftLine(review.autoPost)');
   });
 
   it('auto resolve: resolved, or the error', () => {

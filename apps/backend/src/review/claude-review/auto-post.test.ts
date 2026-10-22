@@ -620,22 +620,45 @@ describe('auto verdict', () => {
   it('the gate: own PR and a standing verdict hold it to COMMENT; unreadable never guesses', () => {
     expect(ap.verdictGate('APPROVE', { authorIsMe: true, ownLatest: 'none' })).toEqual({ wanted: 'APPROVE', submitted: 'COMMENT', heldReason: 'own_pr' });
     expect(ap.verdictGate('APPROVE', { authorIsMe: false, ownLatest: 'none' })).toEqual({ wanted: 'APPROVE', submitted: 'APPROVE', heldReason: null });
-    expect(ap.verdictGate('REQUEST_CHANGES', { authorIsMe: false, ownLatest: 'COMMENTED' }).submitted).toBe('REQUEST_CHANGES');
-    for (const s of ['APPROVED', 'CHANGES_REQUESTED', 'DISMISSED'] as const) {
+    for (const s of ['APPROVED', 'CHANGES_REQUESTED'] as const) {
       expect(ap.verdictGate('APPROVE', { authorIsMe: false, ownLatest: s })).toEqual({ wanted: 'APPROVE', submitted: 'COMMENT', heldReason: 'prior_review' });
+      expect(ap.verdictGate('REQUEST_CHANGES', { authorIsMe: false, ownLatest: s }).heldReason).toBe('prior_review');
     }
     expect(ap.verdictGate('APPROVE', { authorIsMe: false, ownLatest: 'unreadable' }).heldReason).toBe('reviews_unreadable');
-    // The latest of YOUR submitted reviews decides; pending and other people's are ignored.
+    // Limn's OWN automatic request for changes is not the reader's: an APPROVE goes over it, a second
+    // request for changes is held.
+    expect(ap.verdictGate('APPROVE', { authorIsMe: false, ownLatest: 'LIMN_AUTO_CHANGES_REQUESTED' })).toEqual({
+      wanted: 'APPROVE',
+      submitted: 'APPROVE',
+      heldReason: null,
+    });
+    expect(ap.verdictGate('REQUEST_CHANGES', { authorIsMe: false, ownLatest: 'LIMN_AUTO_CHANGES_REQUESTED' })).toEqual({
+      wanted: 'REQUEST_CHANGES',
+      submitted: 'COMMENT',
+      heldReason: 'already_requested',
+    });
+  });
+
+  it('the standing verdict is your latest DECISIVE review: a COMMENTED reply never supersedes it, DISMISSED stands for nothing', () => {
     const list = [
       { login: 'Me', state: 'APPROVED' },
       { login: 'alice', state: 'CHANGES_REQUESTED' },
       { login: 'me', state: 'COMMENTED' },
       { login: 'me', state: 'PENDING' },
     ];
-    expect(ap.ownLatestReview(list, 'me')).toBe('COMMENTED');
+    expect(ap.ownLatestReview(list, 'me')).toBe('APPROVED');
     expect(ap.ownLatestReview(list.slice(0, 2), 'me')).toBe('APPROVED');
+    expect(ap.ownLatestReview([{ login: 'me', state: 'CHANGES_REQUESTED' }, { login: 'me', state: 'COMMENTED' }], 'me')).toBe(
+      'CHANGES_REQUESTED',
+    );
+    expect(ap.ownLatestReview([{ login: 'me', state: 'APPROVED' }, { login: 'me', state: 'DISMISSED' }, { login: 'me', state: 'COMMENTED' }], 'me')).toBe('none');
+    expect(ap.ownLatestReview([{ login: 'me', state: 'COMMENTED' }], 'me')).toBe('none');
     expect(ap.ownLatestReview([], 'me')).toBe('none');
     expect(ap.ownLatestReview(list, null)).toBe('unreadable');
+    // Limn's own automatic block is matched by its stored review id only.
+    const block = [{ id: 41, login: 'me', state: 'CHANGES_REQUESTED' }, { id: 42, login: 'me', state: 'COMMENTED' }];
+    expect(ap.ownStandingReview(block, 'me', new Set(['41']))).toEqual({ state: 'LIMN_AUTO_CHANGES_REQUESTED', reviewId: '41' });
+    expect(ap.ownStandingReview(block, 'me', new Set(['7']))).toEqual({ state: 'CHANGES_REQUESTED', reviewId: '41' });
   });
 
   it('off ⇒ always COMMENT, and no live review read', async () => {
@@ -855,6 +878,150 @@ describe('auto verdict', () => {
     expect(ap.isVerdictRefusal(Object.assign(new Error('x'), { status: 403 }))).toBe(true);
     for (const status of [401, 429, 500, 502]) expect(ap.isVerdictRefusal(Object.assign(new Error('x'), { status }))).toBe(false);
     expect(ap.isVerdictRefusal(new Error('network'))).toBe(false);
+  });
+});
+
+describe("lifting Limn's own automatic request for changes", () => {
+  const dismissReview = vi.fn(async (..._a: unknown[]): Promise<{ ok: true } | { ok: false; message: string }> => ({ ok: true }));
+  const liftDeps = (impact: 'high' | 'medium' | 'low' | null = 'low') => ({ ...deps(), dismissReview, impactLevel: vi.fn(async () => impact) });
+
+  /** Run A: a blocker on alice's PR, auto-posted as REQUEST_CHANGES (GitHub review 'R1'). */
+  async function blockedPr(): Promise<number> {
+    await setPost(true, { scope: 'all', autoVerdict: true });
+    const pr = await makePr({ author: 'alice' });
+    const a = await run(pr, [{ severity: 'blocker', title: 'Null deref' }]);
+    await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: a }, liftDeps());
+    expect(await rec(a)).toMatchObject({
+      githubReviewId: 'R1',
+      verdict: { submitted: 'REQUEST_CHANGES' },
+    } as any);
+    postReview.mockClear();
+    liveReviews.mockClear();
+    settle.mockClear();
+    // On GitHub: Limn's block, then a thread reply (a COMMENTED review) — the reply never supersedes it.
+    liveReviewList = [
+      { id: 'R1', login: 'me', state: 'CHANGES_REQUESTED' } as any,
+      { id: 'R2', login: 'me', state: 'COMMENTED' } as any,
+    ];
+    return pr;
+  }
+  const rec = async (id: number) => (await db.select().from(schema.claudeReviews).where((await import('drizzle-orm')).eq(schema.claudeReviews.id, id)).execute())[0].autoPost;
+
+  beforeEach(() => {
+    dismissReview.mockReset();
+    dismissReview.mockImplementation(async () => ({ ok: true }));
+  });
+  afterAll(async () => {
+    await setPost(true, { autoVerdict: false, approveImpact: { high: true, medium: true, low: true } });
+  });
+
+  it('a later clean run APPROVES over it (the regression): superseded, nothing dismissed', async () => {
+    const pr = await blockedPr();
+    const b = await run(pr, [], 'auto', 'APPROVE');
+    await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: b }, liftDeps('high'));
+    expect(postReview.mock.calls[0]![0].verdict).toBe('APPROVE');
+    expect(dismissReview).not.toHaveBeenCalled();
+    const r = await rec(b);
+    expect(r).toMatchObject({ status: 'posted', verdict: { submitted: 'APPROVE', heldReason: null }, liftedBlock: { reviewId: 'R1', how: 'superseded' } });
+    expect((await persist.getClaudeReviewById(ctx, b, 1))?.autoPost?.liftedBlock?.how).toBe('superseded');
+  });
+
+  it('an APPROVE held by impact DISMISSES it instead — once, stamped, settled', async () => {
+    const pr = await blockedPr();
+    await setPost(true, { approveImpact: { high: false } });
+    await db
+      .insert(schema.reviews)
+      .values({ githubNodeId: 'PRR_R1', prId: pr, authorId: users.me, state: 'changes_requested', databaseId: 'R1', submittedAt: new Date() })
+      .execute();
+    const b = await run(pr, [], 'auto', 'APPROVE');
+    await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: b }, liftDeps('high'));
+    expect(postReview).not.toHaveBeenCalled();
+    expect(dismissReview).toHaveBeenCalledTimes(1);
+    expect(dismissReview.mock.calls[0]!.slice(1)).toEqual(['acme', 'api', expect.any(Number), 'R1', ap.LIFT_BLOCK_MESSAGE]);
+    expect(ap.LIFT_BLOCK_MESSAGE).toBe("Claude's blocking findings are fixed.");
+    expect(await rec(b)).toMatchObject({
+      status: 'posted',
+      error: null,
+      verdict: { wanted: 'APPROVE', submitted: 'COMMENT', heldReason: 'impact' },
+      liftedBlock: { reviewId: 'R1', how: 'dismissed', error: null },
+    });
+    const { eq } = await import('drizzle-orm');
+    expect((await db.select().from(schema.reviews).where(eq(schema.reviews.prId, pr)).execute())[0].state).toBe('dismissed');
+    expect(settle).toHaveBeenCalledTimes(1);
+    // Never twice.
+    expect((await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: b }, liftDeps('high'))).kind).toBe('already_claimed');
+    expect(dismissReview).toHaveBeenCalledTimes(1);
+    await setPost(true, { approveImpact: { high: true } });
+  });
+
+  it('auto verdict since switched OFF, warnings left: the comments post, then the block is dismissed', async () => {
+    const pr = await blockedPr();
+    await setPost(true, { autoVerdict: false });
+    const b = await run(pr, [{ severity: 'warning', title: 'Slow loop' }], 'auto', 'COMMENT');
+    await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: b }, liftDeps());
+    expect(postReview.mock.calls[0]![0].verdict).toBe('COMMENT');
+    expect(dismissReview).toHaveBeenCalledTimes(1);
+    expect(await rec(b)).toMatchObject({ status: 'posted', liftedBlock: { how: 'dismissed' } });
+  });
+
+  it('a run that still has a blocker never lifts it, and holds a second request as already_requested', async () => {
+    const pr = await blockedPr();
+    const b = await run(pr, [{ severity: 'blocker', title: 'Another bug' }]);
+    await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: b }, liftDeps());
+    expect(postReview.mock.calls[0]![0].verdict).toBe('COMMENT');
+    expect(dismissReview).not.toHaveBeenCalled();
+    const r = await rec(b);
+    expect(r.verdict).toMatchObject({ wanted: 'REQUEST_CHANGES', heldReason: 'already_requested' });
+    expect(r.liftedBlock).toBeUndefined();
+  });
+
+  it("a request for changes the READER posted (even with Limn's marker) is never lifted", async () => {
+    await setPost(true, { scope: 'all', autoVerdict: true });
+    const pr = await makePr({ author: 'alice' });
+    // No earlier AUTO run sent it: it is the reader's own (e.g. the manual Post button).
+    liveReviewList = [{ id: 'R7', login: 'me', state: 'CHANGES_REQUESTED' } as any];
+    const b = await run(pr, [], 'auto', 'APPROVE');
+    await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: b }, liftDeps());
+    expect(postReview).not.toHaveBeenCalled();
+    expect(dismissReview).not.toHaveBeenCalled();
+    expect((await rec(b)).verdict.heldReason).toBe('prior_review');
+  });
+
+  it('a refused dismissal is recorded in GitHub’s words and never retried', async () => {
+    const pr = await blockedPr();
+    await setPost(true, { autoVerdict: false });
+    dismissReview.mockImplementation(async () => ({ ok: false, message: 'Dismissing reviews is restricted.' }));
+    const b = await run(pr, [], 'auto', 'APPROVE');
+    const out = await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: b }, liftDeps());
+    expect(out.kind).toBe('done');
+    expect(await rec(b)).toMatchObject({
+      status: 'failed',
+      error: 'Dismissing reviews is restricted.',
+      liftedBlock: { how: 'dismiss_failed', error: 'Dismissing reviews is restricted.' },
+    });
+    expect(settle).not.toHaveBeenCalled();
+    await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: b }, liftDeps());
+    expect(dismissReview).toHaveBeenCalledTimes(1);
+  });
+
+  it('once someone else’s verdict (or a dismissal) stands, there is nothing to lift', async () => {
+    const pr = await blockedPr();
+    await setPost(true, { autoVerdict: false });
+    liveReviewList = [
+      { id: 'R1', login: 'me', state: 'DISMISSED' } as any,
+      { id: 'R3', login: 'me', state: 'COMMENTED' } as any,
+    ];
+    const b = await run(pr, [], 'auto', 'APPROVE');
+    expect(await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: b }, liftDeps())).toEqual({ kind: 'skipped', reason: 'nothing_new' });
+    expect(dismissReview).not.toHaveBeenCalled();
+  });
+
+  it('with no automatic block on record, a clean run reads no reviews at all', async () => {
+    await setPost(true, { scope: 'all', autoVerdict: false });
+    const pr = await makePr({ author: 'alice' });
+    const b = await run(pr, [], 'auto', 'APPROVE');
+    expect(await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: b }, liftDeps())).toEqual({ kind: 'skipped', reason: 'nothing_new' });
+    expect(liveReviews).not.toHaveBeenCalled();
   });
 });
 

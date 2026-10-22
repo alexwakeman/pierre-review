@@ -182,6 +182,7 @@ export function autoPostWireOf(v: unknown): ClaudeAutoPostWire | null {
       ? { alreadyPostedCount: Array.isArray(r.alreadyPostedFindingIds) ? r.alreadyPostedFindingIds.length : 0 }
       : {}),
     ...(r.verdict != null && typeof r.verdict === 'object' ? { verdict: r.verdict } : {}),
+    ...(r.liftedBlock != null && typeof r.liftedBlock === 'object' ? { liftedBlock: r.liftedBlock } : {}),
   };
 }
 

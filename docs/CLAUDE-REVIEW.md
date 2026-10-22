@@ -1454,9 +1454,15 @@ auto-posting: claim before any GitHub write, never retried.
   still COUNTS), whatever the kind toggles say: any blocker ⇒
   REQUEST_CHANGES; APPROVE only when Claude approved AND there is no blocker and no warning; else
   COMMENT. A non-COMMENT verdict is sent only (a) off the reader's own PR (GitHub refuses
-  self-approval → `own_pr`) and (b) when the reader's own latest review — read LIVE
-  (`GET …/pulls/:n/reviews`, the synced table can lag) — is none or COMMENTED (`prior_review`; a failed
-  read is `reviews_unreadable`, never a guess), and (c) for an APPROVE, when the workspace allows
+  self-approval → `own_pr`) and (b) when the reader has no STANDING verdict — read LIVE
+  (`GET …/pulls/:n/reviews`, the synced table can lag; `ownStandingReview`): their latest DECISIVE
+  review (APPROVED / CHANGES_REQUESTED / DISMISSED). ⚠ A COMMENTED review never supersedes one on
+  GitHub, and EVERY thread reply — Limn's auto-resolve and pushback replies included — is a COMMENTED
+  review, so the old "latest review of any kind" read let an automatic APPROVE out over a person's
+  standing request for changes after a single reply. A latest DISMISSED stands for nothing (GitHub's
+  meaning too — so a person's review the author dismissed no longer holds it). A person's standing
+  verdict ⇒ `prior_review` ("…: your own review on GitHub still stands."); a failed
+  read is `reviews_unreadable`, never a guess, and (c) for an APPROVE, when the workspace allows
   auto-approve at the PR's IMPACT level (`approveImpact: {high, medium, low}`, all on by default,
   overrides-only inside `auto_post_settings`; the level is the blast-radius chip's, read by
   `getPrImpactLevel` through the shared resolver + the account's config; UNKNOWN is held as HIGH; a
@@ -1472,6 +1478,27 @@ auto-posting: claim before any GitHub write, never retried.
   Safe because a refused POST created nothing (the seam posts PR-level comments only after the review
   lands). A 5xx / network / rate-limit failure is ambiguous and is NEVER retried; a refused bare
   verdict with no comments posts nothing more (`failed`).
+- ⚠ **LIMN LIFTS ITS OWN AUTOMATIC BLOCK** (`loadLimnAutoBlockIds`, `LIFT_BLOCK_MESSAGE`). An
+  automatic REQUEST_CHANGES is posted under the reader's account, so GitHub cannot tell it from the
+  reader's own — and the gate used to hold every later APPROVE as `prior_review`, leaving a PR
+  "changes requested" by Limn after Limn itself had judged the blockers fixed (PR 530, 2026-10-22). Now:
+  - Limn's own block is identified EXACTLY by an earlier run's stored `auto_post.githubReviewId`
+    whose `verdict.submitted` is REQUEST_CHANGES — ⚠ NEVER by the marker or body: a review the reader
+    sent with the Post button carries the same marker and is THEIR judgement, never lifted.
+  - While it is the reader's standing verdict: a wanted APPROVE goes out over it (GitHub supersedes
+    the same user's request; `liftedBlock.how: 'superseded'`); a wanted REQUEST_CHANGES is held as
+    `already_requested` ("Changes already requested by Claude’s earlier review.").
+  - A run with NO blocker (`autoVerdictFor ≠ REQUEST_CHANGES`, computed whatever the auto-verdict
+    switch says NOW — switching it off must not freeze a block Limn left) that does not land an
+    APPROVE (held by impact, only warnings left, verdict switched off, a refused approve) DISMISSES it
+    with "Claude's blocking findings are fixed." — after the run's review, inside the same claim, at
+    the reviewed head, once, never retried. Success stamps the local review row `dismissed` and
+    settles (`deps.settle`); a refusal (branch rules restrict dismissing) is recorded in GitHub's
+    words (`dismiss_failed`). Recorded as `ClaudeAutoPostRecord.liftedBlock` (on the wire too); the
+    tab prints "Lifted Claude’s earlier request for changes." / "Couldn’t lift …: <why>". A run whose
+    only write is the lift (no review sent) is `posted` / `failed` by the dismissal alone.
+  - Cost: a DB pre-check (any earlier auto REQUEST_CHANGES on this PR?) gates the extra live review
+    read, so an ordinary run reads nothing more.
 - **AUTO RESOLVE** also answers an accepted REPLY (`reply_accepted`: the acknowledgement, then the
   resolve) and **AUTO PUSHBACK** posts one reply on a disputed one — § Replies to Limn's findings.
 - **AUTO RESOLVE** (`autoResolve`, OFF by default; `claude-review/auto-resolve.ts`, called from

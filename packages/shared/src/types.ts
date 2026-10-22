@@ -4942,8 +4942,10 @@ export type AutoPostSkipReason =
 //   wanted     the verdict the findings gave (APPROVE / REQUEST_CHANGES / COMMENT)
 //   submitted  the event actually sent — COMMENT whenever `heldReason` is set
 //   heldReason why `wanted` was not sent: 'own_pr' (GitHub refuses self-approval), 'prior_review'
-//              (the reader's own latest review is APPROVED / CHANGES_REQUESTED / DISMISSED),
-//              'reviews_unreadable' (the live read failed — never guess), 'refused' (GitHub turned
+//              (the reader's own standing verdict — their latest APPROVED / CHANGES_REQUESTED; a
+//              COMMENTED reply never supersedes it, a DISMISSED one stands for nothing — was given by
+//              a PERSON), 'already_requested' (a REQUEST_CHANGES wanted while Limn's own earlier
+//              automatic one still stands), 'reviews_unreadable' (the live read failed — never guess), 'refused' (GitHub turned
 //              the verdict down — branch rules, permissions — so the same review went again as a
 //              COMMENT, leaving just the comments), 'impact' (an APPROVE on a PR whose impact level
 //              the workspace does not allow to be auto-approved — `approveImpact`), null when sent
@@ -4954,7 +4956,7 @@ export type AutoVerdictEvent = 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT';
 export interface ClaudeAutoVerdictRecord {
   wanted: AutoVerdictEvent;
   submitted: AutoVerdictEvent;
-  heldReason: 'own_pr' | 'prior_review' | 'reviews_unreadable' | 'refused' | 'impact' | null;
+  heldReason: 'own_pr' | 'prior_review' | 'already_requested' | 'reviews_unreadable' | 'refused' | 'impact' | null;
   impact?: 'high' | 'medium' | 'low' | 'unknown' | null;
   // GitHub's answer when heldReason is 'refused'.
   refusedError?: string | null;
@@ -4973,6 +4975,17 @@ export interface ClaudeAutoPostRecord {
   alreadyPostedFindingIds?: number[];
   // Set when auto verdict was on for the run (absent = off, or an older record).
   verdict?: ClaudeAutoVerdictRecord | null;
+  // Set when this run lifted Limn's OWN earlier automatic REQUEST_CHANGES (absent otherwise).
+  liftedBlock?: ClaudeAutoLiftRecord | null;
+}
+// Limn lifting its own earlier AUTOMATIC request for changes (matched by an earlier run's
+// `githubReviewId`, never by marker) on a run with no blocker: 'superseded' (this run's APPROVE
+// landed over it), 'dismissed' (dismissed on GitHub), 'dismiss_failed' (GitHub's words in `error`;
+// never retried).
+export interface ClaudeAutoLiftRecord {
+  reviewId: string;
+  how: 'superseded' | 'dismissed' | 'dismiss_failed';
+  error: string | null;
 }
 // On the wire (`ClaudeReview.autoPost`): the record without the id lists.
 // Where a finding's point is already on GitHub (`ClaudeFinding.earlierPost`).
@@ -4995,6 +5008,7 @@ export interface ClaudeAutoPostWire {
   // With reason 'already_posted': how many findings an earlier post already covered.
   alreadyPostedCount?: number;
   verdict?: ClaudeAutoVerdictRecord | null;
+  liftedBlock?: ClaudeAutoLiftRecord | null;
 }
 
 // What CI auto-posting did with ONE auto CI review run (`ci_reviews.auto_post`, migration 0091 /

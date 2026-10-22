@@ -878,7 +878,11 @@ always the router's; the models are Opus 5.5 and Sonnet 5 only. Details:
   (`workspaces.auto_post_enabled`, NULL = off) + overrides-only scope/kinds on the auto-review route.
   It posts UNDER THE READER'S OWN GITHUB ACCOUNT, ONE review (questions inline too), event `COMMENT`
   unless the OFF-by-default `autoVerdict` lets a STRICTER verdict through (never on the reader's own
-  PR, never over their standing APPROVED/CHANGES_REQUESTED, read LIVE), footer + the hidden marker on
+  PR, never over their standing APPROVED/CHANGES_REQUESTED, read LIVE = their latest DECISIVE review:
+  a COMMENTED reply never supersedes it, DISMISSED stands for nothing). ⚠ Limn's OWN earlier AUTO
+  REQUEST_CHANGES (matched by a stored `auto_post.githubReviewId`, NEVER the marker — a manual Post is
+  the reader's) is not theirs: a later APPROVE goes over it, and a later run with no blocker that does
+  not approve DISMISSES it, once, recorded, settled (`liftedBlock`). Footer + the hidden marker on
   every body (so `isLimnPostedComment` holds and it never re-triggers a review). An auto APPROVE also
   needs the workspace's switch for the PR's impact level (`approveImpact`, High/Medium/Low, all on;
   the shared blast resolver; UNKNOWN counts as High). The OFF-by-default
