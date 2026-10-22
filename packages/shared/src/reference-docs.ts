@@ -197,6 +197,12 @@ export interface ReferenceDocCitation {
   docSlug: string;
   docTitle: string;
   sectionTitle: string | null;
+  /**
+   * The words the link rests on, CHECKED against the section by the server, so the viewer can
+   * highlight them. A chat citation carries one when the answer quoted the passage beside the link
+   * (docs/REFERENCE-DOCS.md § The chat); a finding's citation never stores one. Absent = anchor only.
+   */
+  quote?: string;
 }
 
 export interface ReferenceDocsChatMessage {
@@ -346,6 +352,25 @@ export function referenceDocCitationsFromStored(raw: unknown): ReferenceDocCitat
       sectionTitle: typeof c.sectionTitle === 'string' && c.sectionTitle !== '' ? c.sectionTitle : null,
     });
     if (out.length >= REVIEW_DOC_FINDING_CITATIONS_MAX) break;
+  }
+  return out;
+}
+
+/** A chat answer's stored citations, re-read defensively ([] when none); a quote is kept only as a short string. */
+export function chatCitationsFromStored(raw: unknown): ReferenceDocCitation[] {
+  if (!Array.isArray(raw)) return [];
+  const out: ReferenceDocCitation[] = [];
+  for (const c of raw) {
+    if (!isObj(c) || typeof c.path !== 'string' || typeof c.docSlug !== 'string' || typeof c.docTitle !== 'string') continue;
+    const quote = typeof c.quote === 'string' ? c.quote.trim() : '';
+    out.push({
+      path: c.path,
+      anchor: typeof c.anchor === 'string' && c.anchor !== '' ? c.anchor : null,
+      docSlug: c.docSlug,
+      docTitle: c.docTitle,
+      sectionTitle: typeof c.sectionTitle === 'string' && c.sectionTitle !== '' ? c.sectionTitle : null,
+      ...(quote !== '' && quote.length <= REVIEW_DOC_QUOTE_MAX_CHARS ? { quote } : {}),
+    });
   }
   return out;
 }

@@ -146,10 +146,15 @@ export function renderIndex(entries: readonly IndexEntry[]): string {
 
 /** Every link target in a markdown text (`[x](target)`), in order. An escaped `\[` opens nothing. */
 export function markdownLinkTargets(md: string): string[] {
-  const out: string[] = [];
+  return markdownLinks(md).map((l) => l.target);
+}
+
+/** Every `[text](target)` link with where it sits: [start, end) of the whole link. */
+export function markdownLinks(md: string): Array<{ target: string; start: number; end: number }> {
+  const out: Array<{ target: string; start: number; end: number }> = [];
   const re = /(?<!\\)\[(?:\\.|[^\]\\])*\]\(([^)\s]+)\)/g;
   let m: RegExpExecArray | null;
-  while ((m = re.exec(md)) != null) out.push(m[1]!);
+  while ((m = re.exec(md)) != null) out.push({ target: m[1]!, start: m.index, end: m.index + m[0].length });
   return out;
 }
 

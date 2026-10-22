@@ -1,4 +1,5 @@
 import { and, asc, desc, eq, inArray, isNotNull, sql } from 'drizzle-orm';
+import { chatCitationsFromStored } from '@pierre-review/shared';
 import type {
   ReferenceDoc,
   ReferenceDocCitation,
@@ -341,7 +342,7 @@ export function toChatMessage(r: ChatRow): ReferenceDocsChatMessage {
     id: r.id,
     role: r.role === 'assistant' ? 'assistant' : 'user',
     text: r.content,
-    citations: Array.isArray(r.citations) ? r.citations : [],
+    citations: chatCitationsFromStored(r.citations),
     createdAt: iso(r.createdAt)!,
     costUsd: r.costUsd ?? null,
   };

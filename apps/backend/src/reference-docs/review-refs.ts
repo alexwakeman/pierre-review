@@ -13,9 +13,13 @@ import {
   type ReviewDocReference,
   type ReviewDocVerdict,
 } from '@pierre-review/shared';
+import { foldForQuote, quoteAppearsIn } from '@pierre-review/shared';
 import { parseLibraryPath, SECTION_FILE } from './paths.js';
 import { docsNavigationPrompt } from './prompts.js';
 import { fileAnchors, SECTION_HEADER_MARK } from './render.js';
+
+// The quote fold lives in shared (reference-docs-quote.ts) so the SPA's highlight folds the same way.
+export { foldForQuote, quoteAppearsIn };
 
 // THE LIBRARY IN REVIEWS (docs/REFERENCE-DOCS.md § Use in reviews) — the shared half every review
 // that may read the workspace's reference library uses: Claude Review (claude-review/), the ticket
@@ -141,24 +145,6 @@ export interface LibrarySnapshot {
   read(path: string): string | null;
 }
 
-/** Fold the text a quote is compared on: emphasis, escapes, link targets, typography, whitespace. */
-export function foldForQuote(s: string): string {
-  return s
-    .normalize('NFKC')
-    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/\\([\\`*_{}[\]()#+\-.!|>~])/g, '$1')
-    .replace(/[*_`~]/g, '')
-    .replace(/[‘’‛′]/g, "'")
-    .replace(/[“”‟″]/g, '"')
-    .replace(/[‐-―−]/g, '-')
-    .replace(/ /g, ' ')
-    .replace(/^\s*(?:[>|]|[-+]\s|\d+[.)]\s)+/gm, ' ')
-    .replace(/\s*\|\s*/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .toLowerCase();
-}
-
 /** The section's own text: the server-written header (mark, title, trail, nav) left off. */
 export function sectionBodyOf(text: string): string {
   const lines = text.split('\n');
@@ -168,23 +154,6 @@ export function sectionBodyOf(text: string): string {
   // The header's blank line, crumbs, nav and blank line — at most four lines, never into the body.
   for (let k = 0; k < 4 && i < lines.length && (lines[i] === '' || lines[i]!.startsWith('> ')); k += 1) i += 1;
   return lines.slice(i).join('\n');
-}
-
-/** Does `quote` appear in `body`? "…" / "..." in the quote skips words (the pieces must be in order). */
-export function quoteAppearsIn(body: string, quote: string): boolean {
-  const hay = foldForQuote(body);
-  const pieces = quote
-    .split(/…|\.{3,}/)
-    .map(foldForQuote)
-    .filter((p) => p !== '');
-  if (pieces.length === 0) return false;
-  let from = 0;
-  for (const p of pieces) {
-    const at = hay.indexOf(p, from);
-    if (at < 0) return false;
-    from = at + p.length;
-  }
-  return true;
 }
 
 const letters = (s: string): number => (s.match(/[\p{L}\p{N}]/gu) ?? []).length;
