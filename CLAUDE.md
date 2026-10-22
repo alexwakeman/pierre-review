@@ -951,7 +951,8 @@ always the router's; the models are Opus 5.5 and Sonnet 5 only. Details:
   every scanner over page or robots text is LINEAR (no backtracking RegExp over untrusted input — it
   runs on the event loop) — [docs/REFERENCE-DOCS.md](docs/REFERENCE-DOCS.md) § Following links.
   SPA: Activity → **Docs** (`?activityRepo=docs`, rail entry on `me.ai.enabled` only); ⚠ every link in
-  it goes through ONE resolver, `lib/referenceDocs.ts` `resolveDocLink` ([docs/FRONTEND.md](docs/FRONTEND.md)
+  it goes through ONE resolver, `lib/referenceDocs.ts` `resolveDocLink`; a link carrying a server-CHECKED quote
+  highlights it through the ONE quote fold in shared `reference-docs-quote.ts` (server check + SPA match) ([docs/FRONTEND.md](docs/FRONTEND.md)
   § Activity → Docs). ⚠ **In reviews** (PR review, ticket review; sqlite `0117` / pg
   `0104`): the library is a READ-ONLY path-guard root (`readOnlyRoots`), every `docReferences` entry is
   CHECKED by `reference-docs/review-refs.ts` (link = a built section of THAT workspace, quote in it) or

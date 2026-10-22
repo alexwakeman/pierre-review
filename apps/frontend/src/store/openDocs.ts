@@ -8,10 +8,10 @@ import { usePinnedTabs } from './pinnedTabs.js';
 // ⚠ `workspaceId` is the library the reference was checked against. The Docs pane shows the SELECTED
 // workspace's library, so a reference from another workspace's PR switches to that workspace first
 // (the same public setter openMyTurnInWorkspace uses), or the pane would show a different library.
-export function openDocsSection(workspaceId: number, path: string, anchor: string | null): void {
+export function openDocsSection(workspaceId: number, path: string, anchor: string | null, quote: string | null = null): void {
   const filters = useFilters.getState();
   if (filters.workspaceId !== workspaceId) filters.setWorkspace(workspaceId, null);
-  useDocsView.getState().openPath(workspaceId, path, anchor);
+  useDocsView.getState().openPath(workspaceId, path, anchor, quote);
   usePinnedTabs.getState().showActivity();
   useFilters.getState().setActivityRepo('docs');
 }

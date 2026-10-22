@@ -14,6 +14,7 @@ import type {
   PostReviewResult,
   PrDetail,
   PrFilesResponse,
+  ReviewDocReference,
   ReviewMode,
   User,
 } from '@pierre-review/shared';
@@ -608,6 +609,7 @@ export function FindingRow({
   onPostReminder,
   actions = true,
   selection = null,
+  docReferences = null,
 }: {
   prId: number;
   finding: ClaudeFinding;
@@ -645,6 +647,8 @@ export function FindingRow({
   actions?: boolean;
   // A leading control in the card's header (the fix picker's tick box). null ⇒ none.
   selection?: ReactNode;
+  // The run's reference-library passages: a citation borrows the quote of its ONE matching reference.
+  docReferences?: readonly ReviewDocReference[] | null;
 }): JSX.Element {
   const [copied, setCopied] = useState(false);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -942,7 +946,7 @@ export function FindingRow({
           {!detailsHidden && (
           <>
           {/* The reference-library sections this finding rests on (server-checked). */}
-          <DocCitationLinks citations={finding.docCitations} />
+          <DocCitationLinks citations={finding.docCitations} references={docReferences} />
           {/* Code anchor → reveals this finding's file/line in the Changes tab when the
               file is in the PR's changeset, else (as before) opens it on GitHub. The small
               ↗ beside it always exits to the PR diff line on GitHub — today's behaviour,
@@ -1297,6 +1301,7 @@ function ClaudesReview({
       priorStatus={priorStatusById.get(f.id)}
       alreadyPosted={alreadyPostedIds.has(f.id)}
       storyLabel={storyLabel}
+      docReferences={review.docReferences}
       onOpenInChanges={onOpenInChanges}
       onToggle={(included) => onToggleFinding(f.id, included)}
       onReword={(editedBody) => onRewordFinding(f.id, editedBody)}

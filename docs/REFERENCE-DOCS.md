@@ -227,6 +227,19 @@ answers fenced as context, the question fenced as the one instruction). One turn
 (claimed synchronously). **Citations** are the answer's links that parse as library paths
 (`parseLibraryPath`) AND name a file of a built document of THIS workspace — anything else (a made-up
 section, `../`, a web link) is dropped; the SPA opens them through `GET /api/docs/section?path=`.
+
+**A citation's quote** (`chat-quotes.ts`, no migration — inside the stored `citations` JSON, optional
+`quote` on `ReferenceDocCitation`). The prompt asks for the exact words in quotation marks beside each
+link, and real answers already did (`*"…"* ([Section](slug/sections/…#a))`, or a `> "…"` blockquote
+above the line). For each SECTION link the server takes candidates nearest first — quoted spans on the
+link's line, then its paragraph, then the paragraph itself if it is a blockquote, then a blockquote just
+before or after (≤ 8, clipped to `REVIEW_DOC_QUOTE_MAX_CHARS`) — and keeps the FIRST that has
+`REVIEW_DOC_QUOTE_MIN_CHARS` letters and passes the SAME check a review's quote passes
+(`quoteAppearsIn` over `sectionBodyOf`, so header words never count). ⚠ An unchecked quote is DROPPED,
+never stored: the link opens at its anchor. Citations stay de-duplicated on `path#anchor`; the first
+verified quote wins and a later link to the same place fills in one that had none, so an inline link in
+the answer looks its quote up by `path#anchor`. Every scan is indexOf / a character walk (model output
+is untrusted). Rows stored before this have no quote and read unchanged (`chatCitationsFromStored`).
 Spend: `DOCS_CHAT_BUDGET_USD` (1), `DOCS_CHAT_MAX_TURNS` (30), feature `reference_docs_chat`.
 
 ## Paths a request names (`paths.ts`)
@@ -266,6 +279,20 @@ words ("Crawling 6 of 25", "Summarising sections (3 of 12)") from its SSE stream
 polled as the fallback; a failed one shows its error and "Try again". Remove confirms inline. The
 Settings switch is "Use reference docs in Claude Review" (draft + Save, off by default). Detail and the
 landmines: [FRONTEND.md](FRONTEND.md) § Activity → Docs.
+
+**The quote highlight.** Every link that carries a server-checked quote — a review reference, a ticket
+review reference, a Story "Check against docs" point, a chat citation (above), and a finding's citation
+that BORROWS one — opens the section scrolled to that passage, highlighted, with ONE line above the page
+("The quoted passage is highlighted." + a clear button). When the words are no longer there (the
+document was rebuilt since), the line reads "The quoted words are no longer in this section." and the
+view lands on the anchor. ⚠ **ONE FOLD**: the quote fold lives in shared `reference-docs-quote.ts` —
+`foldForQuote` / `quoteAppearsIn` for the server's check over MARKDOWN, and `foldRenderedText`, its
+mapped twin over the RENDERED text (same character rules; markdown-syntax steps only on the markdown
+side; a block or table-cell boundary folds to one space, so a "High | 1.15" table-row quote matches
+across `<td>`s). Change a character rule in one and you change it in the other, or a checked passage
+stops highlighting (a test pins them equal on plain text). ⚠ **A finding borrows** the quote of the same
+run's reference to the same section (and the same anchor when both name one) ONLY when exactly one
+passage matches (`borrowedQuote`); else it opens at its anchor.
 
 ## Storage (migration 0116 / pg 0103)
 
@@ -353,9 +380,10 @@ Section" line, and a compact block in Story check (the whole story; this PR's sh
 `about` names one of ITS criteria / missing items, `shareDocReferences`) and in This
 Sprint's Code check. Every link opens the section in Activity → Docs — a click in-app
 (`store/openDocs.ts`), the href a deep link for a new tab:
-`/app/?workspace=<id>&activityRepo=docs&doc=<slug>&section=<NN-name.md>[&anchor=<a>]`
+`/app/?workspace=<id>&activityRepo=docs&doc=<slug>&section=<NN-name.md>[&anchor=<a>][&quote=<words>]`
 (`lib/docReferences.ts`; the URL hydrate seats it, the pane opens it once and expands that document; the
-serializer never emits those keys). The quote and note render as PLAIN TEXT.
+serializer never emits those keys). The quote and note render as PLAIN TEXT, and the quote drives the
+viewer's highlight (§ The SPA → The quote highlight).
 
 Not done: posting references to GitHub (a library link means nothing there), and folding the library into
 the sprint brief / story passes (above).
@@ -418,7 +446,8 @@ duplicates, non-HTML and failing pages skipped, cancel, the ranking fence + vali
 fake model, the bundle) · `convert.test.ts` (sniffing, HTML conversion) ·
 `build-judge.test.ts` · `agent-policy.test.ts` (no shell, the write guard) · `reference-docs-db.test.ts`
 (upload → build → the three levels with a FAKE agent, path + tenancy refusals, the chat's citations,
-remove, erasure deletes files) · `review-refs.test.ts` (the reference check — a quote not in its section,
+remove, erasure deletes files) · `chat-quotes.test.ts` (a chat citation's quote: candidates, the check,
+header and too-short quotes dropped, first verified wins, the stored re-read, the two folds agree) · `review-refs.test.ts` (the reference check — a quote not in its section,
 a link outside the library, header-only quotes, anchors; the OFF ⇒ unchanged pins) ·
 `review/path-guard.test.ts` (read-only roots) · `review/claude-review/docs-pipeline.test.ts` (on/off
 end to end) · `review/story-docs/` — `shortlist.test.ts` (bad / unbuilt / unlisted sections dropped, the
@@ -427,4 +456,7 @@ retry, the CONTENTS budget), `validate.test.ts` (shape refused, ungrounded and o
 `inputs.test.ts` (the criteria and text order), `routes-db.test.ts` (refusals, a run end to end with fake
 models, out of date, last good kept, tenancy, cap, restart), `routes-off.test.ts` (404 off). Not covered by a test: the ticket review's
 pipeline with the library (no pipeline test exists for it; its builders are pinned), and a real Word file through mammoth, a real agent
-run (PDF or sections), the SSE stream's event order.
+run (PDF or sections), the SSE stream's event order. The SPA's matcher and borrow rule are in
+`apps/frontend/test/docQuoteMatch.test.ts` (hand-run), the highlight colours in `textContrast.test.ts`, and
+the highlight end to end (deep link → `CSS.highlights`, the strip, the not-found line) in
+`apps/frontend/e2e/docs-quote-highlight.spec.ts` (mocked API).

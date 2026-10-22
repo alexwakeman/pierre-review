@@ -51,6 +51,15 @@ describe('parseLibraryPath (the client copy of the server grammar)', () => {
 });
 
 describe('resolveDocLink', () => {
+  it('carries the quote its lookup names for the resolved path and anchor (a chat citation’s)', () => {
+    const quoteFor = (path: string, anchor: string | null): string | null =>
+      path === 'billing/sections/03-refunds.md' && anchor === 'fees' ? 'paid within fourteen days' : null;
+    const hit = resolveDocLink('INDEX.md', 'billing/sections/03-refunds.md#fees', quoteFor);
+    expect(hit).toMatchObject({ kind: 'library', quote: 'paid within fourteen days' });
+    expect(resolveDocLink('INDEX.md', 'billing/sections/03-refunds.md', quoteFor)).toMatchObject({ quote: null });
+    expect(resolveDocLink('INDEX.md', 'billing/sections/03-refunds.md#fees')).toMatchObject({ quote: null });
+  });
+
   it('follows INDEX.md links to a document’s contents', () => {
     expect(lib('INDEX.md', 'billing/CONTENTS.md')).toBe('billing/CONTENTS.md');
   });

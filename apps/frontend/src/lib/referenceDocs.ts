@@ -51,7 +51,8 @@ export function parseLibraryPath(raw: string): LibraryLocation | null {
 }
 
 export type ResolvedDocLink =
-  | { kind: 'library'; location: LibraryLocation }
+  /** `quote`: the server-checked words this link carries (a chat citation's), for the viewer to highlight. */
+  | { kind: 'library'; location: LibraryLocation; quote: string | null }
   /** `#anchor` alone: a heading in the file on screen. */
   | { kind: 'anchor'; anchor: string }
   /** An absolute URL. The caller still passes it through `safeExternalUrl`. */
@@ -63,9 +64,14 @@ const SCHEME = /^[a-z][a-z0-9+.-]*:/i;
 
 /**
  * Resolve a link found in the library file at `fromPath` (use `LIBRARY_INDEX_PATH` for text that
- * speaks from the library root, like a chat answer).
+ * speaks from the library root, like a chat answer). `quoteFor` names the checked quote a library link
+ * carries (the chat looks it up in its citations); a link inside a library file carries none.
  */
-export function resolveDocLink(fromPath: string, rawHref: string | null | undefined): ResolvedDocLink {
+export function resolveDocLink(
+  fromPath: string,
+  rawHref: string | null | undefined,
+  quoteFor?: (path: string, anchor: string | null) => string | null,
+): ResolvedDocLink {
   if (rawHref == null) return { kind: 'none' };
   const href = rawHref.trim().replace(/^<|>$/g, '');
   if (href === '') return { kind: 'none' };
@@ -91,7 +97,7 @@ export function resolveDocLink(fromPath: string, rawHref: string | null | undefi
     out.push(seg);
   }
   const location = parseLibraryPath(`${out.join('/')}${anchorPart}`);
-  return location ? { kind: 'library', location } : { kind: 'none' };
+  return location ? { kind: 'library', location, quote: quoteFor?.(location.path, location.anchor) ?? null } : { kind: 'none' };
 }
 
 /** The server's heading anchor (split.ts `headingAnchor`), so `#anchor` links land on the heading. */

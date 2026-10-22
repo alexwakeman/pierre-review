@@ -55,7 +55,7 @@ import { DocsViewer } from './DocsViewer.js';
 
 const MUTED = 'text-gray-500 dark:text-gray-400';
 const SMALL_BUTTON = 'text-xs text-sky-700 hover:underline disabled:opacity-50 dark:text-sky-300';
-const DEFAULT_OPEN: DocsOpen = { path: LIBRARY_INDEX_PATH, anchor: null, seq: 0 };
+const DEFAULT_OPEN: DocsOpen = { path: LIBRARY_INDEX_PATH, anchor: null, quote: null, seq: 0 };
 const LIBRARY_W_KEY = 'pierre:docsLibraryWidth';
 const CHAT_W_KEY = 'pierre:docsChatWidth';
 const LIBRARY_COLLAPSED_KEY = 'pierre:docsLibraryCollapsed';
@@ -403,7 +403,10 @@ function DocsPane({ workspaceId }: { workspaceId: number }): JSX.Element {
   const openPath = useDocsView((s) => s.openPath);
   const narrowPane = useDocsView((s) => s.narrowPane);
   const setNarrowPane = useDocsView((s) => s.setNarrowPane);
-  const onOpen = useCallback((path: string, anchor: string | null) => openPath(workspaceId, path, anchor), [openPath, workspaceId]);
+  const onOpen = useCallback(
+    (path: string, anchor: string | null, quote: string | null = null) => openPath(workspaceId, path, anchor, quote),
+    [openPath, workspaceId],
+  );
 
   // A DEEP LINK (`&doc=…&section=…`, lib/docReferences.ts — a review's reference opened in a new tab):
   // opened ONCE, here, where the workspace is known; its document's contents are expanded when the
@@ -414,7 +417,7 @@ function DocsPane({ workspaceId }: { workspaceId: number }): JSX.Element {
   const expandSlug = useRef<string | null>(null);
   useEffect(() => {
     if (pending == null) return;
-    openPath(workspaceId, pending.path, pending.anchor);
+    openPath(workspaceId, pending.path, pending.anchor, pending.quote);
     expandSlug.current = pending.slug;
     seatDeepLink(null);
   }, [pending, openPath, seatDeepLink, workspaceId]);
