@@ -91,13 +91,51 @@ export interface MatchResult {
 }
 
 /**
- * Looks recorded entries up by method + normalised path, then by method + pathname alone.
- * When a pathname was recorded more than once, the query-less lookup answers the FIRST one
- * recorded — the recorder visits the default scope first.
+ * IDENTITY PARAMETERS name WHOSE data a read is — a workspace, a bot, a person, a ticket, a
+ * document. The query-less fallback may ignore every other parameter (a sort, a limit, a window,
+ * a cursor), but never one of these: an entry recorded for another workspace, bot or ticket is
+ * somebody else's answer. With no entry for the same identity the lookup answers nothing, and the
+ * per-route fallback / 404 applies instead.
+ */
+export const IDENTITY_PARAMS: readonly string[] = [
+  'workspace',
+  'authorUserIds',
+  'botUserId',
+  'disagree',
+  'userIds',
+  'prIds',
+  'repoId',
+  'ident',
+  'key',
+  'keys',
+  'doc',
+  'docId',
+  'path',
+  'kind',
+  'sourceReviewId',
+  'q',
+];
+
+/** A comma list compares as a set; every other value as written. */
+function identityValue(v: string | null): string | null {
+  if (v == null) return null;
+  return v.includes(',') ? v.split(',').sort().join(',') : v;
+}
+
+/**
+ * Looks recorded entries up by method + normalised path, then by method + pathname alone among
+ * the entries that agree on every IDENTITY parameter. When several agree, the query-less lookup
+ * answers the FIRST one recorded — the recorder visits the default scope first.
+ *
+ * `?workspace=` follows the server's rule: absent or unknown means the DEFAULT workspace (read
+ * off the recorded `GET /api/workspaces`), so `?workspace=1` and no parameter at all are the same
+ * identity when 1 is the default. One recorded workspace is never answered with another's data.
  */
 export class RecordingIndex {
   private readonly exact = new Map<string, RecordingEntry>();
   private readonly byPath = new Map<string, RecordingEntry[]>();
+  private readonly knownWorkspaces = new Set<string>();
+  private defaultWorkspace: string | null = null;
 
   constructor(entries: readonly RecordingEntry[]) {
     for (const e of entries) {
@@ -108,7 +146,35 @@ export class RecordingIndex {
       const list = this.byPath.get(pathKey);
       if (list) list.push(e);
       else this.byPath.set(pathKey, [e]);
+      if (method === 'GET' && pathnameOf(e.path) === '/api/workspaces') this.learnWorkspaces(e.body);
     }
+  }
+
+  private learnWorkspaces(body: unknown): void {
+    const list = body != null && typeof body === 'object' ? (body as { workspaces?: unknown }).workspaces : undefined;
+    if (!Array.isArray(list)) return;
+    for (const w of list) {
+      if (w == null || typeof w !== 'object') continue;
+      const { id, isDefault } = w as { id?: unknown; isDefault?: unknown };
+      if (typeof id !== 'number') continue;
+      this.knownWorkspaces.add(String(id));
+      if (isDefault === true && this.defaultWorkspace == null) this.defaultWorkspace = String(id);
+    }
+  }
+
+  /** The workspace a `?workspace=` value resolves to (the server's default-on-unknown rule). */
+  private workspaceOf(v: string | null): string | null {
+    if (this.defaultWorkspace == null) return v;
+    return v != null && this.knownWorkspaces.has(v) ? v : this.defaultWorkspace;
+  }
+
+  private sameIdentity(asked: URLSearchParams, recorded: URLSearchParams): boolean {
+    for (const name of IDENTITY_PARAMS) {
+      const a = name === 'workspace' ? this.workspaceOf(asked.get(name)) : identityValue(asked.get(name));
+      const r = name === 'workspace' ? this.workspaceOf(recorded.get(name)) : identityValue(recorded.get(name));
+      if (a !== r) return false;
+    }
+    return true;
   }
 
   match(method: string, url: string): MatchResult | null {
@@ -116,8 +182,10 @@ export class RecordingIndex {
     const exact = this.exact.get(`${m} ${normalisePath(url)}`);
     if (exact) return { entry: exact, how: 'exact' };
     const list = this.byPath.get(`${m} ${pathnameOf(url)}`);
-    if (list && list[0]) return { entry: list[0], how: 'path' };
-    return null;
+    if (!list) return null;
+    const asked = new URL(url, 'http://demo.invalid').searchParams;
+    const hit = list.find((e) => this.sameIdentity(asked, new URL(e.path, 'http://demo.invalid').searchParams));
+    return hit ? { entry: hit, how: 'path' } : null;
   }
 
   /** Every entry recorded for a method + pathname (used by the batched read POSTs). */

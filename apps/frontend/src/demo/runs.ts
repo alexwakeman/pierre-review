@@ -25,6 +25,9 @@ export interface SimulatedRun {
   template: Record<string, unknown>;
   /** The status the run ends in. */
   finalStatus: string;
+  /** An AI Fix pushed in THIS session. Kept apart from the template, whose recorded push state
+   *  belongs to another run and is cleared on every read. */
+  pushed?: { pushedBranch: string; pushedAt: string };
 }
 
 const DURATION_MS: Record<RunKind, number> = {
@@ -119,6 +122,7 @@ export class RunSimulator {
     for (const k of ['postedAt', 'postedReviewId', 'pushedAt', 'pushedBranch', 'pushedPrNumber', 'pushedPrUrl', 'autoPost']) {
       if (k in o) o[k] = null;
     }
+    if (run.pushed) Object.assign(o, run.pushed);
     if (run.kind === 'claude-review' || run.kind === 'ai-fix' || run.kind === 'thread-check') {
       const head = this.prHeadSha(run.prId);
       if (head && 'headSha' in o) o.headSha = head;
@@ -398,9 +402,12 @@ export class RunSimulator {
       if (!run) return null;
       if (m[2] === 'push') {
         const pr = run.prId != null ? this.srv.recorded('GET', `/api/prs/${run.prId}`) : undefined;
+        const commitSha = (run.id * 7919).toString(16).padStart(40, '0');
+        // A second push of the same fix is the first one's answer, not a new push.
+        if (run.pushed) return { status: 200, body: { pushedBranch: run.pushed.pushedBranch, commitSha } };
         const branch = isRecord(pr) && typeof pr.headRefName === 'string' ? pr.headRefName : 'limn/ai-fix';
-        run.template = { ...run.template, pushedBranch: branch, pushedAt: this.srv.nowIso() };
-        return { status: 200, body: { pushedBranch: branch, commitSha: (run.id * 7919).toString(16).padStart(40, '0') } };
+        run.pushed = { pushedBranch: branch, pushedAt: this.srv.nowIso() };
+        return { status: 200, body: { pushedBranch: branch, commitSha } };
       }
       if (m[2] === 'plan/discard') {
         run.finalStatus = 'cancelled';

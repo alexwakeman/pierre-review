@@ -64,7 +64,12 @@ exactly this:
 2. Hand-written routes (`routes.ts`): `/api/me`, the "nothing changed" answers, the batched read
    POSTs and every write.
 3. The recording: exact method + normalised path, then the same method + pathname with the query
-   ignored (the first entry recorded for that pathname wins — record the default workspace first).
+   ignored EXCEPT its identity parameters (`IDENTITY_PARAMS` in `recording.ts`: `workspace`,
+   `authorUserIds`, `botUserId`, `disagree`, `userIds`, `prIds`, `repoId`, `ident`, `key`, …).
+   Among the entries that agree on all of them the first recorded wins; with none, the lookup
+   misses and the next stage answers. `workspace` follows the server's rule: absent or unknown is
+   the default workspace (from the recorded `GET /api/workspaces`), so one recorded workspace is
+   never answered with another's data.
 4. `GET_FALLBACKS` in `routes.ts`: small, fully known shapes for per-PR reads (thread-check status,
    suggested reviewers, ML labels, SonarCloud, …).
 5. Otherwise a GET answers `404 { "error": "NotInDemo", "message": "Not available in the demo." }`,
@@ -72,7 +77,9 @@ exactly this:
    `…/stream` GET is an empty stream that closes at once.
 
 A paged list (`{ items, total }`) is served with `total` cut to what the recording holds, so the
-SPA never asks for a page that is not there.
+SPA never asks for a page that is not there. A cursor-paged list (`{ items, nextCursor }`) keeps
+its `nextCursor` only when the page it names was recorded under that exact query, and a `cursor`
+request the recording does not hold answers no items and no further cursor.
 
 ### Batched read POSTs
 
@@ -92,17 +99,23 @@ first use, and cached:
 - every number under a key ending in `At` or `Ms` that lies within ±3 years of `capturedAt` is
   read as epoch milliseconds and moves by `delta`.
 
-Calendar values move by whole calendar units, so they stay calendar values and agree with each
-other:
+Calendar values move by whole calendar units, so they stay calendar values, keep their weekday
+and agree with each other:
 
-- a timestamp at exactly UTC midnight (a period's start, a sprint's dates) moves by `days`, the
-  delta rounded to whole days — it is still a midnight;
+- a timestamp on an exact hour (zero minutes, seconds and milliseconds) is a calendar boundary —
+  a period's start, a sprint's dates, a week bucket, at UTC midnight or at a local midnight such
+  as `T23:00Z` — and moves by `days`, the delta rounded to whole WEEKS, so a Monday week is still
+  a Monday week; recorded event times are almost never on the hour;
 - a date without a time (`2026-10-20`) and a sprint period key (`sprint-2026-10-06`) move by the
   same `days`;
 - a month period key (`month-2026-09`) moves by `months`, the calendar months between
   `capturedAt` and now, so the month in progress at capture is the month in progress now; an object
   carrying a month `periodKey` gets its `periodStart`, `periodEnd` and `cadenceDays` rewritten to
-  the shifted month.
+  the shifted month, and an in-progress month's `elapsedDays` is recomputed from its shifted
+  start. The month's metric values are still the capture's.
+
+Event times move by the exact delta while calendar values move by whole weeks, so a calendar
+value can sit up to three and a half days away from the events around it.
 
 Durations (`waitMs: 5400000`) are nowhere near an epoch, so they stay. The SPA sends period keys
 back in request paths (`/api/pro/insights/reports/sprint-…`): `DemoServer.handle` moves every key
@@ -112,12 +125,21 @@ Date-like QUERY values need nothing, because matching drops them.
 ## Writes
 
 `routes.ts` simulates every write the SPA makes and keeps the effect in memory (`overlay.ts`):
-a merge marks the PR merged and drops it from Open PRs, a resolved thread reads resolved, a reply
-or comment appears, approve / request changes / withdraw change the reader's standing, auto-merge
-arm and disarm show in the armed list, workspace edits and every settings PUT are read back.
+a merge marks the PR merged and drops it from Open PRs (a second merge answers 409
+`NotMergeable`), a resolved thread reads resolved, a reply or comment appears, approve / request
+changes / withdraw change the reader's standing, auto-merge arm and disarm show in the armed list,
+workspace edits and every settings PUT are read back, and a pushed AI Fix reads pushed.
+The Pending reads (`/api/attention`, `/api/my-turn`, `/api/daily-brief`, `/api/pro/work-plan`)
+drop every card of a PR merged or closed here and every My Turn entry dismissed here (listed
+under "Dismissed" until it is brought back), take the removed cards off each tab's, kind's and
+lens's count, and carry the overlay's PR fields (merge state, queue) on the cards that stay.
 Questions to Claude (the review chat, the docs chat, This Sprint's "Ask Claude") answer with one
 plain line saying Claude is not connected in the demo. Repository adds, syncs and other writes it
 cannot fake answer "Not available in the demo." in the SPA's error shape.
+
+**The in-app conflict resolver is not in the demo.** The demo's `/api/me` answers
+`conflictResolver: false`, so no surface offers "Resolve conflicts"; a conflicts card still shows
+the conflict.
 
 ### Agentic runs
 
