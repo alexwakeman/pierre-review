@@ -528,11 +528,11 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // outside both families above and below, so the verb alone would park its reads on `ai`:
   //   POST /api/ticket-reviews                          starts agent runs        → ai + ai_hourly
   //   POST /api/ticket-reviews/states                   batched DB + plugin rows → read
-  //   POST /api/ticket-reviews/:id/items/:itemId/post   one GitHub comment       → github_write
+  //   POST /api/ticket-reviews/:id/post                 one GitHub comment       → github_write
   //   GET  …/:id, …/:id/stream, /api/prs/:id/ticket-reviews                      → read
   if (path === '/api/ticket-reviews' && mutating) return [TIERS.ai, TIERS.aiHourly];
   if (path === '/api/ticket-reviews/states') return [TIERS.read];
-  if (mutating && /^\/api\/ticket-reviews\/\d+\/items\/\d+\/post$/.test(path)) return [TIERS.githubWrite];
+  if (mutating && /^\/api\/ticket-reviews\/\d+\/post$/.test(path)) return [TIERS.githubWrite];
   if (path.startsWith('/api/ticket-reviews')) return [TIERS.read];
   // STORY LABEL RUN (Reports → Stories; path kept from the retired Story health), EXACT paths:
   //   POST /api/story-health/label          starts ONE label run (≤150 Haiku calls) → ai + ai_hourly

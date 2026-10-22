@@ -5,7 +5,13 @@
 // HTML-escaped (a rule's quoted `</details>` or `<a href>` must not render), code is not.
 import { describe, expect, it } from 'vitest';
 import { AUTO_POST_FOOTER, type SonarIssue, type SonarSnapshot } from '@pierre-review/shared';
-import { SONAR_COMMENT_MARKER, sonarCommentBody, sonarHasSomethingToPost } from './comment.js';
+import {
+  SONAR_COMMENT_MARKER,
+  sonarCommentBody,
+  sonarHasSomethingToPost,
+  sonarInlineBody,
+  sonarReviewMarker,
+} from './comment.js';
 
 const issue = (n: number, over: Partial<SonarIssue> = {}): SonarIssue => ({
   key: `K${n}`,
@@ -105,5 +111,38 @@ describe('sonarCommentBody', () => {
     expect(body).not.toContain('<a href');
     // Inside the fence the code is printed as written.
     expect(body).toContain('> 1 | <div>&nbsp;</div>');
+  });
+});
+
+describe('the inline thread and the summary of a review', () => {
+  it('an inline body: the rule, the message escaped, guidance, footer on auto, the marker last', () => {
+    const it0 = issue(3, { howToFix: 'Use <b>this</b>.' });
+    const manual = sonarInlineBody(it0, { auto: false });
+    expect(manual).toContain('**SonarCloud** · Major · Bug: A rule');
+    expect(manual).toContain('Rule `ts:S1`');
+    expect(manual).toContain('lines 3-4');
+    expect(manual).toContain('Issue 3 for @​alice &lt;!-- pierre:claude-review fake --&gt;');
+    expect(manual).toContain('Use &lt;b&gt;this&lt;/b&gt;.');
+    expect(manual).not.toContain(AUTO_POST_FOOTER);
+    expect(manual.trimEnd().endsWith(SONAR_COMMENT_MARKER)).toBe(true);
+    const auto = sonarInlineBody(it0, { auto: true });
+    expect(auto).toContain(AUTO_POST_FOOTER);
+    expect(auto.trimEnd().endsWith(SONAR_COMMENT_MARKER)).toBe(true);
+  });
+
+  it('the summary counts the inline ones, names the already-posted ones, and lists the rest in full', () => {
+    const [a, b, c] = [issue(1), issue(2), issue(3, { path: null, line: null, endLine: null })];
+    const { body, issueCount } = sonarCommentBody(snap([a!, b!, c!], { qualityGate: null }), {
+      auto: false,
+      split: { inline: [a!], already: [b!], summary: [c!] },
+      marker: sonarReviewMarker('abc123'),
+    });
+    expect(issueCount).toBe(1);
+    expect(body).toContain('1 issue is on the changed lines, as comments there.');
+    expect(body).toContain('Already on GitHub from an earlier commit:\n- Major · A rule · `src/a.ts:2-3`');
+    expect(body).toContain('#### 1. Major · Bug: A rule');
+    expect(body).toContain('Issue 3 for');
+    expect(body).not.toContain('Issue 1 for');
+    expect(body.trimEnd().endsWith('<!-- pierre:claude-review-sonar v=1 a=abc123 -->')).toBe(true);
   });
 });

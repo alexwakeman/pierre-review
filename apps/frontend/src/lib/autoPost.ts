@@ -4,6 +4,7 @@
 import type {
   AutoPostSkipReason,
   AutoPostStatus,
+  ClaudeAutoLiftRecord,
   ClaudeAutoVerdictRecord,
   ClaudeFinding,
   FindingAutoResolveRecord,
@@ -54,9 +55,11 @@ export function effectivePost(
  * A skip says nothing: nothing was meant to be posted.
  */
 export function autoPostFailureLine(
-  a: { status: AutoPostStatus; error: string | null } | null | undefined,
+  a: { status: AutoPostStatus; error: string | null; liftedBlock?: ClaudeAutoLiftRecord | null } | null | undefined,
 ): string | null {
   if (a == null) return null;
+  // A run whose only write was lifting Claude's earlier block: `autoLiftLine` says what failed.
+  if (a.status === 'failed' && a.liftedBlock?.how === 'dismiss_failed') return null;
   const why = a.error != null && a.error.trim() !== '' ? a.error.trim() : 'GitHub did not accept it.';
   if (a.status === 'failed') return `Couldn’t post automatically: ${why}`;
   if (a.status === 'partial') return `Couldn’t post all of it automatically: ${why}`;
@@ -94,7 +97,10 @@ export function autoVerdictLine(
     case 'own_pr':
       return `${verb}: this is your own PR.`;
     case 'prior_review':
-      return `${verb}: your last review on GitHub still stands.`;
+      // Only a PERSON's standing review holds it (Limn's own automatic one never does).
+      return `${verb}: your own review on GitHub still stands.`;
+    case 'already_requested':
+      return 'Changes already requested by Claude’s earlier review.';
     case 'reviews_unreadable':
       return `${verb}: couldn’t read your earlier reviews on GitHub.`;
     case 'impact':
@@ -109,6 +115,16 @@ export function autoVerdictLine(
     default:
       return null;
   }
+}
+
+/** What happened to Claude's earlier automatic request for changes, when this run lifted it; else
+ *  null. A superseding APPROVE says nothing more than "Approved automatically." */
+export function autoLiftLine(a: { liftedBlock?: ClaudeAutoLiftRecord | null } | null | undefined): string | null {
+  const l = a?.liftedBlock;
+  if (l == null || l.how === 'superseded') return null;
+  if (l.how === 'dismissed') return 'Lifted Claude’s earlier request for changes.';
+  const why = l.error != null && l.error.trim() !== '' ? l.error.trim() : 'GitHub did not accept it.';
+  return `Couldn’t lift Claude’s earlier request for changes: ${why}`;
 }
 
 /** A finding's auto-resolve, in words: resolved, or why not. null when it was never tried. */

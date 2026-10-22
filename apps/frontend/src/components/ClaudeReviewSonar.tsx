@@ -1,5 +1,5 @@
 // SONARCLOUD in the Claude Review tab (docs/SONARCLOUD.md § The review tab): the head's quality gate
-// and issue cards, a Refresh and the one "Post SonarCloud findings" comment. The CARD
+// and issue cards, a Refresh and the one "Post SonarCloud findings" review. The CARD
 // (`SonarIssueRow`) is also what the AI Fix picker draws for a SonarCloud item, with a tick box in
 // `selection` and no buttons (it has none of its own).
 //
@@ -168,8 +168,17 @@ function postLine(s: SonarSnapshot, visible: boolean | null): string | null {
   if (p.status === 'posting') return 'Posting to GitHub…';
   if (p.status === 'failed') return `Posting failed: ${p.error ?? 'GitHub refused it.'}`;
   const who = p.trigger === 'auto' ? 'Posted automatically' : 'Posted';
+  const later = visible === false ? ' It’ll show up here shortly.' : '';
+  // A review (since 2026-10-22): threads on the changed lines + a summary. Older rows were one comment.
+  if (p.inline != null) {
+    const parts: string[] = [];
+    if (p.inline.length > 0) parts.push(`${p.inline.length} on the changed lines`);
+    parts.push(`${p.summaryCount ?? 0} in the summary${p.truncated ? ' (the rest did not fit)' : ''}`);
+    if ((p.alreadyCount ?? 0) > 0) parts.push(`${p.alreadyCount} already there from an earlier commit`);
+    return `${who} to GitHub: ${parts.join(', ')}.${later}`;
+  }
   const cut = p.truncated ? ` (${p.issueCount} issues fitted in one comment)` : '';
-  return visible === false ? `${who} to GitHub${cut}. It’ll show up here shortly.` : `${who} to GitHub${cut}.`;
+  return `${who} to GitHub${cut}.${later}`;
 }
 
 /** The review tab's SonarCloud section, for the reviewed head. */
@@ -228,7 +237,11 @@ export function ClaudeReviewSonarSection({
             <p>
               The 50 most severe are kept. Claude Review sees them as evidence and AI Fix can take them on.
             </p>
-            <p>“Post SonarCloud findings” adds one comment to the PR, once per commit.</p>
+            <p>
+              “Post SonarCloud findings” adds one review to the PR, once per commit: a comment on each issue
+              that sits on a changed line, and a summary with everything else. An issue already commented on
+              for an earlier commit is only named in the summary.
+            </p>
           </div>
         </InfoButton>
       }

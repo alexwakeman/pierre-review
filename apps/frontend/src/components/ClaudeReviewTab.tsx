@@ -26,6 +26,7 @@ import {
 } from '@pierre-review/shared';
 import { formatDate, formatUsd, relativeTime, safeExternalUrl } from '../lib/ui.js';
 import {
+  autoLiftLine,
   autoPostFailureLine,
   autoPostSkipLine,
   autoResolveLabel,
@@ -2086,6 +2087,17 @@ export function ClaudeReviewTab({
           )}
           {autoVerdictLine(review.autoPost) != null && (
             <p className="text-xs text-gray-600 dark:text-gray-300">{autoVerdictLine(review.autoPost)}</p>
+          )}
+          {autoLiftLine(review.autoPost) != null && (
+            <p
+              className={
+                review.autoPost?.liftedBlock?.how === 'dismiss_failed'
+                  ? 'text-xs text-amber-700 dark:text-amber-300'
+                  : 'text-xs text-gray-600 dark:text-gray-300'
+              }
+            >
+              {autoLiftLine(review.autoPost)}
+            </p>
           )}
           <MentionTextarea
             prId={pr.id}

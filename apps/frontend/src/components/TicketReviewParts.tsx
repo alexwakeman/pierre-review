@@ -4,7 +4,9 @@
 //
 // `viewedPrId` is the PR the reader is looking at, or null in the story view, where no PR is
 // "this one": there a row shows who delivers it and where it belongs, and NO Post button (posting
-// stays per PR, in the pane). A posted item still says where it was posted.
+// stays per PR, in the pane). A posted item still says where it was posted. In the pane, posting is
+// ONE "Post N gaps to …" button per target PR (`storyGapGroups`): the gaps go to GitHub as ONE
+// collated PR comment, never one comment per item.
 //
 // "What this PR adds" (`PrCardDisclosure`) is a member's CONTRIBUTION CARD at its current head: a
 // model-written description of the PR, collapsed by default, drawn from the review already loaded
@@ -31,7 +33,8 @@ import {
 } from '@pierre-review/shared';
 import { StoryDocsCriterionDetail } from './Activity/StoryDocsAlignment.js';
 import { ApiError } from '../api/client.js';
-import { usePostTicketItem } from '../hooks/useTicketReview.js';
+import { useIsMutating } from '@tanstack/react-query';
+import { storyGapsPostKey, usePostStoryGaps } from '../hooks/useTicketReview.js';
 import {
   CLEAN_CLASS,
   OUTDATED_CLASS,
@@ -46,10 +49,11 @@ import {
   memberPrIdsOf,
   membersWithCards,
   missingItems,
-  postButtonLabel,
-  postTargetOf,
+  postGapsButtonLabel,
+  storyGapGroups,
   notRequestedPostedLabel,
   postedLabel,
+  type StoryGapGroup,
   TICKET_PR_CARD_CHANGE_LABEL,
   TICKET_PR_CARD_KIND_LABEL,
   type TicketCurrency,
@@ -152,25 +156,14 @@ function EvidenceRef({
   );
 }
 
-/** Post ONE item, on the PR it belongs to. Gone for good once GitHub gave a comment id. */
-function ItemPost({
-  item,
-  review,
-  viewedPrId,
-}: {
-  item: TicketReviewItem;
-  review: TicketReview;
-  viewedPrId: number;
-}): JSX.Element | null {
-  const post = usePostTicketItem(viewedPrId);
-  const target = postTargetOf(item, viewedPrId, review.members);
-  const posted = postedLabel(item, review.members, viewedPrId);
-  if (posted != null)
-    return (
-      <span className={`text-xs ${MUTED}`}>
-        <PrRefText text={posted} />
-      </span>
-    );
+/**
+ * ONE "Post N gaps to …" button for one target PR: every unposted gap whose comment lands there goes
+ * in ONE collated PR comment. Gone for good once GitHub gave a comment id (the items then read
+ * "Posted"). The "Posting…" state is shared across mounts through the mutation key.
+ */
+function StoryGapsPostButton({ group, review, viewedPrId }: { group: StoryGapGroup; review: TicketReview; viewedPrId: number }): JSX.Element {
+  const post = usePostStoryGaps(viewedPrId, review.id, group.prId);
+  const posting = useIsMutating({ mutationKey: storyGapsPostKey(review.id, group.prId) }) > 0;
   if (post.isSuccess) {
     return (
       <span className={`text-xs ${MUTED}`}>
@@ -186,18 +179,11 @@ function ItemPost({
     <span className="inline-flex flex-wrap items-center gap-2">
       <button
         type="button"
-        disabled={post.isPending}
-        onClick={() =>
-          post.mutate({
-            ticketReviewId: review.id,
-            itemId: item.id,
-            targetPrId: target.prId,
-            memberPrIds: memberPrIdsOf(review),
-          })
-        }
+        disabled={posting}
+        onClick={() => post.mutate({ memberPrIds: memberPrIdsOf(review) })}
         className={BTN_PRIMARY}
       >
-        {post.isPending ? 'Posting…' : postButtonLabel(target, viewedPrId)}
+        {posting ? 'Posting…' : postGapsButtonLabel(group, viewedPrId)}
       </button>
       {post.isError && <span className={`text-xs ${ERROR_TEXT}`}>{post.error.message || 'Could not post.'}</span>}
     </span>
@@ -205,18 +191,54 @@ function ItemPost({
 }
 
 /**
- * The item's action line: Post (and Send to chat, while this PR's Review chat is on screen) in the
- * pane; in the stack only where it was posted, if it was.
+ * The pane's posting row: one button per PR the run's unposted gaps land on — or, in this PR's slim
+ * share (`onlyThisPr`), the one for this PR. The count is the server's own selection (owner PR, else
+ * the viewed PR), so it says exactly how many go in the comment.
+ */
+export function StoryGapsPost({
+  review,
+  viewedPrId,
+  onlyThisPr = false,
+}: {
+  review: TicketReview;
+  viewedPrId: number;
+  onlyThisPr?: boolean;
+}): JSX.Element | null {
+  const groups = useMemo(
+    () => storyGapGroups(review, viewedPrId).filter((g) => !onlyThisPr || g.prId === viewedPrId),
+    [review, viewedPrId, onlyThisPr],
+  );
+  if (groups.length === 0) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {groups.map((g) => (
+        <StoryGapsPostButton key={g.prId} group={g} review={review} viewedPrId={viewedPrId} />
+      ))}
+    </div>
+  );
+}
+
+/**
+ * The item's action line: where it was posted, if it was (and Send to chat, while this PR's Review
+ * chat is on screen) in the pane; in the stack only where it was posted. Posting itself is the ONE
+ * "Post N gaps to …" button per PR above the list.
  */
 function ItemAction({ item, review, viewedPrId }: { item: TicketReviewItem; review: TicketReview; viewedPrId: number | null }): JSX.Element | null {
   if (viewedPrId != null) {
+    const posted = postedLabel(item, review.members, viewedPrId);
+    // ⚠ The SERVER's rule (`resolveChatPins`): a story item can join this PR's chat only when this
+    // PR started that ticket review or is one of its members. The ticket's latest review may predate
+    // this PR joining the ticket — then it offers no pin that would 404.
+    const chat = review.originPrId === viewedPrId || review.members.some((m) => m.prId === viewedPrId);
+    if (posted == null && !chat) return null;
     return (
       <div className="mt-1.5 flex flex-wrap items-center gap-2">
-        <ItemPost item={item} review={review} viewedPrId={viewedPrId} />
-        {/* ⚠ The SERVER's rule (`resolveChatPins`): a story item can join this PR's chat only when
-            this PR started that ticket review or is one of its members. The ticket's latest review
-            may predate this PR joining the ticket — then it offers no pin that would 404. */}
-        {(review.originPrId === viewedPrId || review.members.some((m) => m.prId === viewedPrId)) && (
+        {posted != null && (
+          <span className={`text-xs ${MUTED}`}>
+            <PrRefText text={posted} />
+          </span>
+        )}
+        {chat && (
         <SendToChatButton
           prId={viewedPrId}
           reviewId={null}
@@ -451,6 +473,7 @@ export function TicketResults({
     <div className="space-y-3">
       {autoPostFailed != null && <p className="text-xs text-amber-700 dark:text-amber-300">{autoPostFailed}</p>}
       {a.summary != null && a.summary !== '' && <Markdown prRefs>{a.summary}</Markdown>}
+      {viewedPrId != null && <StoryGapsPost review={review} viewedPrId={viewedPrId} />}
       {a.criteria.length > 0 && (
         <ul className="space-y-1.5">
           {a.criteria.map((c, i) => (

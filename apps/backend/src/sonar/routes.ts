@@ -31,7 +31,7 @@ import { postSonarSnapshot, defaultSonarPostDeps, type SonarPostDeps } from './p
 //   POST /api/workspaces/:id/sonar/check   "Test connection" with the SAVED token.
 //   GET  /api/prs/:id/sonar?head=<sha>     the STORED snapshot — never calls SonarCloud.
 //   POST /api/prs/:id/sonar/refresh        { headSha? } read SonarCloud for that head NOW.
-//   POST /api/prs/:id/sonar/post           { headSha } ONE PR comment, once per (PR, head).
+//   POST /api/prs/:id/sonar/post           { headSha } ONE GitHub review, once per (PR, head).
 //                                          LOCAL ONLY (it posts through the `gh` session, like
 //                                          every other Claude Review post).
 //
@@ -267,7 +267,7 @@ export function registerSonarRoutes(app: FastifyInstance, ctx: SonarRouteCtx): v
           case 'not_found':
             return notFound(reply, 'SonarCloud snapshot');
           case 'nothing_to_post':
-            return reply.code(409).send({ error: 'NothingToPost', message: 'SonarCloud found nothing to post on this commit.' });
+            return reply.code(409).send({ error: 'NothingToPost', message: 'Nothing new to post on this commit: every issue is already on GitHub, or there are none.' });
           case 'already_posted':
             return reply.code(409).send({ error: 'AlreadyPosted', message: 'These SonarCloud findings were already posted for this commit.' });
           case 'head_moved':

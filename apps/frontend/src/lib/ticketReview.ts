@@ -285,9 +285,40 @@ export function postTargetOf(
   return { prId, label: m != null ? memberLabel(m) : null };
 }
 
-export function postButtonLabel(target: { prId: number; label: string | null }, viewedPrId: number): string {
-  if (target.prId === viewedPrId) return 'Post';
-  return target.label != null ? `Post on ${target.label}` : 'Post on its PR';
+/** One "Post N gaps to …" button: the not-yet-posted items whose comment lands on `prId`. */
+export interface StoryGapGroup {
+  prId: number;
+  label: string | null;
+  itemIds: number[];
+}
+
+/**
+ * The unposted items of a run grouped by the PR their ONE collated comment lands on (owner PR, else
+ * the PR being viewed) — the viewed PR's group first, then in the run's member order. Posted items
+ * (own or inherited) are left out, so a group disappears once its comment is on GitHub.
+ */
+export function storyGapGroups(
+  review: Pick<TicketReview, 'items' | 'members'>,
+  viewedPrId: number,
+): StoryGapGroup[] {
+  const groups = new Map<number, StoryGapGroup>();
+  for (const item of review.items) {
+    if (item.posted != null) continue;
+    const t = postTargetOf(item, viewedPrId, review.members);
+    const g = groups.get(t.prId) ?? { prId: t.prId, label: t.label, itemIds: [] };
+    g.itemIds.push(item.id);
+    groups.set(t.prId, g);
+  }
+  const order = (prId: number): number => (prId === viewedPrId ? -1 : review.members.findIndex((m) => m.prId === prId));
+  return [...groups.values()].sort((a, b) => order(a.prId) - order(b.prId));
+}
+
+/** "Post 3 gaps to this PR" / "Post 1 gap to api#88". */
+export function postGapsButtonLabel(g: Pick<StoryGapGroup, 'prId' | 'label' | 'itemIds'>, viewedPrId: number): string {
+  const n = g.itemIds.length;
+  const what = `${n} ${n === 1 ? 'gap' : 'gaps'}`;
+  const where = g.prId === viewedPrId ? 'this PR' : (g.label ?? 'its PR');
+  return `Post ${what} to ${where}`;
 }
 
 /** The posted marker, or null while not posted. */

@@ -27,7 +27,8 @@ import {
   memberLabel,
   memberPrIdsOf,
   planStoryStart,
-  postButtonLabel,
+  postGapsButtonLabel,
+  storyGapGroups,
   postTargetOf,
   postedLabel,
   recheckBody,
@@ -183,8 +184,28 @@ describe('attribution and posting', () => {
     expect(postTargetOf(item(), 1, MEMBERS)).toEqual({ prId: 1, label: null });
     const t = postTargetOf(item({ ownerPrId: 2 }), 1, MEMBERS);
     expect(t).toEqual({ prId: 2, label: 'api#88' });
-    expect(postButtonLabel(t, 1)).toBe('Post on api#88');
-    expect(postButtonLabel({ prId: 1, label: null }, 1)).toBe('Post');
+    expect(postGapsButtonLabel({ ...t, itemIds: [7] }, 1)).toBe('Post 1 gap to api#88');
+    expect(postGapsButtonLabel({ prId: 1, label: null, itemIds: [7, 8, 9] }, 1)).toBe('Post 3 gaps to this PR');
+  });
+
+  it('groups the unposted gaps by the PR their ONE comment lands on, the viewed PR first', () => {
+    const posted = { prId: 2, commentId: '1', postedAt: '2026-10-01T00:00:00Z', carried: false };
+    const groups = storyGapGroups(
+      {
+        members: MEMBERS,
+        items: [
+          item({ id: 1, ownerPrId: 2 }),
+          item({ id: 2, ownerPrId: null }),
+          item({ id: 3, ownerPrId: 2 }),
+          item({ id: 4, ownerPrId: 2, posted }),
+        ],
+      },
+      1,
+    );
+    expect(groups).toEqual([
+      { prId: 1, label: null, itemIds: [2] },
+      { prId: 2, label: 'api#88', itemIds: [1, 3] },
+    ]);
   });
 
   it('a posted item (its own or inherited) says so — there is no Post to offer again', () => {

@@ -188,8 +188,9 @@ export async function postReview(args: PostReviewArgs): Promise<PostReviewOutcom
 // after answering). Exported so a test can make it instant.
 export const LANDED_READBACK_DELAYS_MS: number[] = [0, 2000];
 
-/** The review a failed POST created anyway, or null. Never throws (a failed read is "not found"). */
-async function findLandedReview(
+/** The review a failed POST created anyway, or null. Never throws (a failed read is "not found").
+ *  Also the SonarCloud post's read-back (sonar/post.ts). */
+export async function findLandedReview(
   owner: string,
   name: string,
   prNumber: number,

@@ -115,9 +115,12 @@ export type SonarSnapshotState =
   | 'unauthorized'
   | 'error';
 
-// The one PR-level comment carrying a snapshot's issues, once per (PR, head) (`sonar_snapshots.post`).
-//   posting  claimed; the GitHub call is in flight — or was cut off, and is never retried
-//   posted   on GitHub (`commentId`)
+// The ONE GitHub review carrying a snapshot's issues, once per (PR, head) (`sonar_snapshots.post`):
+// inline threads on the changed lines + a summary body with everything else. Records from before
+// 2026-10-22 describe one PR comment (`commentId`, no `inline`).
+//   posting  claimed; the GitHub call is in flight — or was cut off, and is never retried (its
+//            `inline` keys count as possibly on GitHub for every later head)
+//   posted   on GitHub (`githubReviewId`; `commentId` on an older record)
 //   failed   GitHub refused; `error` says why. Never retried.
 // An AUTO post that decides not to post (switched off, not your PR, nothing to post) writes NOTHING,
 // so a person may still post by hand.
@@ -125,11 +128,26 @@ export interface SonarPostRecord {
   status: 'posting' | 'posted' | 'failed';
   at: string;
   trigger: 'manual' | 'auto';
+  // An older record's PR comment; null on a review record.
   commentId: string | null;
   error: string | null;
-  // How many issues the comment carried, and whether it had to leave some out to fit GitHub's limit.
+  // How many issues the post carried (inline + in full in the summary), and whether the summary had
+  // to leave some out to fit GitHub's limit.
   issueCount: number;
   truncated: boolean;
+  githubReviewId?: string | null;
+  // The issues posted as inline threads (planned at the claim; `commentId` once read back).
+  inline?: SonarInlinePost[];
+  // Issues listed in full in the summary (no file or line, or a line outside the diff).
+  summaryCount?: number;
+  // Issues already threaded on an earlier commit of the PR, listed by name in the summary.
+  alreadyCount?: number;
+}
+export interface SonarInlinePost {
+  key: string;
+  path: string;
+  line: number;
+  commentId: string | null;
 }
 
 export interface SonarSnapshot {
@@ -160,7 +178,7 @@ export interface SonarPrResponse {
   snapshot: SonarSnapshot | null;
 }
 
-// `POST /api/prs/:id/sonar/post` { headSha } — ONE PR comment, once per (PR, head).
+// `POST /api/prs/:id/sonar/post` { headSha } — ONE GitHub review, once per (PR, head).
 export interface SonarPostResponse {
   snapshot: SonarSnapshot;
   // GitHub 201'd but the comment is not in Limn's copy yet. NEVER offer a retry on this.

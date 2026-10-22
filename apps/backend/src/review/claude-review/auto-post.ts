@@ -22,10 +22,17 @@
 //      Claude — any blocker ⇒ REQUEST_CHANGES; APPROVE only when Claude approved AND there is no
 //      blocker and no warning (included, non-story findings of the run); else COMMENT. A non-COMMENT
 //      verdict is SENT only when the PR is not the reader's own (GitHub refuses self-approval) and
-//      the reader's own latest review, read LIVE from GitHub (the synced table can lag), is none or
-//      COMMENTED, and an APPROVE only when the workspace allows auto-approve at the PR's IMPACT
+//      the reader has no STANDING verdict, read LIVE from GitHub (the synced table can lag): their
+//      latest DECISIVE review (a COMMENTED reply never supersedes one; DISMISSED stands for nothing),
+//      and an APPROVE only when the workspace allows auto-approve at the PR's IMPACT
 //      level (`approveImpact`; the blast-radius level from the shared resolver, unknown = high).
-//      Otherwise the event is COMMENT and the record says why;
+//      Otherwise the event is COMMENT and the record says why. ⚠ Limn's OWN earlier AUTOMATIC
+//      REQUEST_CHANGES (an earlier run's `auto_post.githubReviewId` — never the marker: a manual Post
+//      is the reader's own) is not the reader's: an APPROVE goes out over it;
+//   3b. THE LIFT: a run with NO blocker (whatever the auto-verdict switch says now) while Limn's own
+//      automatic REQUEST_CHANGES still stands withdraws it — superseded by this run's APPROVE, else
+//      DISMISSED (`LIFT_BLOCK_MESSAGE`) after the post, inside the same claim, once, recorded as
+//      `liftedBlock`, settled. A DB pre-check keeps the live read off ordinary runs;
 //   4. nothing to post and nothing but COMMENT to send ⇒ `skipped` — `already_posted` (with the
 //      ids) when the dedupe alone emptied it, else `nothing_new` — no GitHub write;
 //   5. the LIVE PR is still open, not a draft, at the reviewed head (a moved head ⇒ `failed`);
@@ -196,8 +203,15 @@ export function autoVerdictFor(
   return 'COMMENT';
 }
 
-/** The reader's own latest review on the PR, as read live: none, its state, or unreadable. */
-export type OwnLatestReview = 'none' | 'COMMENTED' | 'APPROVED' | 'CHANGES_REQUESTED' | 'DISMISSED' | 'unreadable';
+/**
+ * The reader's STANDING verdict on the PR, as read live: their latest DECISIVE review (a COMMENTED
+ * review never supersedes an APPROVED / CHANGES_REQUESTED on GitHub, and every thread reply is a
+ * COMMENTED review), none (a latest DISMISSED has no standing), or unreadable.
+ * 'LIMN_AUTO_CHANGES_REQUESTED' = the standing review is Limn's OWN earlier AUTOMATIC request for
+ * changes — matched by a stored `auto_post.githubReviewId`, never by marker or body (a manual Post
+ * carries the same marker and is the reader's own judgement).
+ */
+export type OwnLatestReview = 'none' | 'APPROVED' | 'CHANGES_REQUESTED' | 'LIMN_AUTO_CHANGES_REQUESTED' | 'unreadable';
 
 /** A PR's impact level as the auto-approve gate reads it: null (the resolver drew nothing) → 'unknown'. */
 export type ImpactLevel = 'high' | 'medium' | 'low' | 'unknown';
@@ -208,7 +222,9 @@ export function impactAllowsApprove(level: ImpactLevel, allowed: AutoApproveImpa
 }
 
 /** Is the wanted verdict sent? Only off the reader's own PR, at an impact level the workspace allows
- *  to be approved (APPROVE only), and over no standing verdict of theirs. */
+ *  to be approved (APPROVE only), and over no standing verdict of theirs. Limn's OWN earlier automatic
+ *  request for changes is not theirs: an APPROVE goes out over it (and supersedes it on GitHub); a
+ *  second REQUEST_CHANGES is held as 'already_requested'. */
 export function verdictGate(
   wanted: AutoVerdictEvent,
   g: { authorIsMe: boolean; ownLatest: OwnLatestReview; impact?: { level: ImpactLevel; allowed: AutoApproveImpact } },
@@ -222,29 +238,64 @@ export function verdictGate(
     return { ...v, impact };
   }
   if (g.ownLatest === 'unreadable') return { wanted, submitted: 'COMMENT', heldReason: 'reviews_unreadable' };
-  if (g.ownLatest !== 'none' && g.ownLatest !== 'COMMENTED') return { wanted, submitted: 'COMMENT', heldReason: 'prior_review' };
+  if (g.ownLatest === 'LIMN_AUTO_CHANGES_REQUESTED') {
+    return wanted === 'APPROVE'
+      ? { wanted, submitted: wanted, heldReason: null }
+      : { wanted, submitted: 'COMMENT', heldReason: 'already_requested' };
+  }
+  if (g.ownLatest !== 'none') return { wanted, submitted: 'COMMENT', heldReason: 'prior_review' };
   return { wanted, submitted: wanted, heldReason: null };
 }
 
-/** The reader's latest submitted review in a live GitHub list (oldest first; PENDING ignored). */
-export function ownLatestReview(
-  reviews: readonly { login: string | null; state: string }[],
-  login: string | null,
-): OwnLatestReview {
-  if (!login) return 'unreadable';
-  const mine = reviews.filter((r) => r.login != null && r.login.toLowerCase() === login.toLowerCase() && r.state !== 'PENDING');
-  const last = mine[mine.length - 1];
-  if (!last) return 'none';
-  switch (last.state) {
-    case 'COMMENTED':
-    case 'APPROVED':
-    case 'CHANGES_REQUESTED':
-    case 'DISMISSED':
-      return last.state;
-    default:
-      return 'unreadable';
-  }
+/** One review in a live GitHub list (oldest first). `id` is GitHub's numeric review id. */
+export interface LiveReview {
+  id?: string | number | null;
+  login: string | null;
+  state: string;
 }
+
+/**
+ * The reader's standing verdict in a live GitHub list (oldest first): the latest of their DECISIVE
+ * reviews — COMMENTED and PENDING are skipped, because neither supersedes a standing APPROVED or
+ * CHANGES_REQUESTED on GitHub; a latest DISMISSED stands for nothing. `limnAutoBlockIds` = the ids of
+ * Limn's own earlier AUTOMATIC REQUEST_CHANGES reviews on this PR (`loadLimnAutoBlockIds`).
+ */
+export function ownStandingReview(
+  reviews: readonly LiveReview[],
+  login: string | null,
+  limnAutoBlockIds: ReadonlySet<string> = new Set(),
+): { state: OwnLatestReview; reviewId: string | null } {
+  if (!login) return { state: 'unreadable', reviewId: null };
+  const me = login.toLowerCase();
+  for (let i = reviews.length - 1; i >= 0; i -= 1) {
+    const r = reviews[i]!;
+    if (r.login == null || r.login.toLowerCase() !== me) continue;
+    if (r.state === 'COMMENTED' || r.state === 'PENDING') continue;
+    const reviewId = r.id != null ? String(r.id) : null;
+    switch (r.state) {
+      case 'DISMISSED':
+        return { state: 'none', reviewId: null };
+      case 'APPROVED':
+        return { state: 'APPROVED', reviewId };
+      case 'CHANGES_REQUESTED':
+        return {
+          state: reviewId != null && limnAutoBlockIds.has(reviewId) ? 'LIMN_AUTO_CHANGES_REQUESTED' : 'CHANGES_REQUESTED',
+          reviewId,
+        };
+      default:
+        return { state: 'unreadable', reviewId: null };
+    }
+  }
+  return { state: 'none', reviewId: null };
+}
+
+/** The reader's standing verdict alone (`ownStandingReview` with no Limn ids). */
+export function ownLatestReview(reviews: readonly LiveReview[], login: string | null): OwnLatestReview {
+  return ownStandingReview(reviews, login).state;
+}
+
+/** GitHub's timeline message when Limn dismisses its own automatic request for changes. */
+export const LIFT_BLOCK_MESSAGE = "Claude's blocking findings are fixed.";
 
 /** The review body's lead: the summary's first plain sentence, else a count. */
 export function autoReviewBodyLead(summary: string | null, commentCount: number): string {
@@ -280,7 +331,17 @@ export interface AutoPostDeps {
   // The account's own GitHub login (the reviewer whose standing verdict the gate reads).
   accountLogin(accountId: number): Promise<string | null>;
   // EVERY review on the PR, LIVE from GitHub, oldest first.
-  liveReviews(owner: string, name: string, prNumber: number): Promise<Array<{ login: string | null; state: string }>>;
+  liveReviews(owner: string, name: string, prNumber: number): Promise<LiveReview[]>;
+  // Dismiss ONE review (Limn's own automatic request for changes). Never throws on a refusal: GitHub's
+  // words come back. Optional so an older test fake reads as "cannot dismiss".
+  dismissReview?(
+    accountId: number,
+    owner: string,
+    name: string,
+    prNumber: number,
+    reviewId: string,
+    message: string,
+  ): Promise<{ ok: true } | { ok: false; message: string }>;
   // The PR's blast-radius level through the shared resolver + the account's config (null = none
   // drawn). Optional so a test fake without it reads as unknown.
   impactLevel?(accountId: number, prId: number): Promise<'high' | 'medium' | 'low' | null>;
@@ -316,18 +377,60 @@ export const defaultAutoPostDeps: AutoPostDeps = {
   },
   async liveReviews(owner, name, prNumber) {
     const { ghRestGet } = await import('../../github/client.js');
-    const out: Array<{ login: string | null; state: string }> = [];
+    const out: LiveReview[] = [];
     for (let page = 1; page <= 10; page += 1) {
-      const rows = await ghRestGet<Array<{ user: { login: string } | null; state: string }>>(
+      const rows = await ghRestGet<Array<{ id: number; user: { login: string } | null; state: string }>>(
         `/repos/${owner}/${name}/pulls/${prNumber}/reviews?per_page=100&page=${page}`,
       );
-      for (const r of rows) out.push({ login: r.user?.login ?? null, state: r.state });
+      for (const r of rows) out.push({ id: r.id, login: r.user?.login ?? null, state: r.state });
       if (rows.length < 100) return out;
     }
     // More than 1,000 reviews: the latest one may be beyond what was read — never guess.
     throw new Error('Too many reviews to read.');
   },
+  async dismissReview(accountId, owner, name, prNumber, reviewId, message) {
+    const { getAccessToken } = await import('../../auth/account.js');
+    const { dismissPrReview } = await import('../../github/mutations.js');
+    const token = await getAccessToken(accountId);
+    const res = await dismissPrReview(token, owner, name, prNumber, Number(reviewId), message);
+    return res.ok ? { ok: true } : { ok: false, message: res.message };
+  },
 };
+
+/**
+ * The GitHub ids of Limn's own earlier AUTOMATIC REQUEST_CHANGES reviews on this PR (account-scoped):
+ * every earlier run whose auto-post landed a review that was SENT as REQUEST_CHANGES. A review the
+ * reader posted with the Post button is never here — that is their own judgement.
+ */
+export async function loadLimnAutoBlockIds(
+  ctx: AgentContext,
+  accountId: number,
+  prId: number,
+  beforeReviewId: number,
+): Promise<Set<string>> {
+  const cr = s(ctx).claudeReviews;
+  const rows = (await ctx.db
+    .select({ autoPost: cr.autoPost })
+    .from(cr)
+    .where(and(eq(cr.prId, prId), eq(cr.accountId, accountId), lt(cr.id, beforeReviewId)))
+    .execute()) as Array<{ autoPost: ClaudeAutoPostRecord | null }>;
+  const ids = new Set<string>();
+  for (const r of rows) {
+    const a = r.autoPost;
+    if (a?.githubReviewId != null && a.verdict?.submitted === 'REQUEST_CHANGES') ids.add(String(a.githubReviewId));
+  }
+  return ids;
+}
+
+/** Stamp the local review row dismissed (GitHub has accepted the dismissal; a sync reconciles anyway). */
+async function stampReviewDismissed(ctx: AgentContext, prId: number, githubReviewId: string): Promise<void> {
+  const rv = s(ctx).reviews;
+  await ctx.db
+    .update(rv)
+    .set({ state: 'dismissed' })
+    .where(and(eq(rv.prId, prId), eq(rv.databaseId, githubReviewId)))
+    .execute();
+}
 
 /** The synced facts `autoPostEligibility` reads. null = not this account's PR. */
 export async function readAutoPostPrFacts(
@@ -545,7 +648,14 @@ async function autoPostReview(
     picked.alreadyPosted.length > 0 ? ['already_posted', picked.alreadyPosted.map((f) => f.id)] : ['nothing_new', undefined];
   const wanted: AutoVerdictEvent | null = ws.settings.autoVerdict ? autoVerdictFor(review.verdict, review.findings) : null;
   if (wanted != null && wanted === 'COMMENT') verdict = verdictGate('COMMENT', { authorIsMe: facts.authorIsMe, ownLatest: 'none' });
-  if (picked.toPost.length === 0 && (wanted == null || wanted === 'COMMENT')) return skip(...nothingReason());
+  // LIFTING LIMN'S OWN BLOCK: a run with NO blocker (whatever the auto-verdict switch says now) may
+  // withdraw an earlier AUTOMATIC request for changes of Limn's that still stands. A DB pre-check
+  // first, so an ordinary run costs no extra GitHub read.
+  const noBlocker = autoVerdictFor(review.verdict, review.findings) !== 'REQUEST_CHANGES';
+  // (Read for a REQUEST_CHANGES too: the gate must tell Limn's own standing block from a person's.)
+  const limnBlockIds = !facts.authorIsMe ? await loadLimnAutoBlockIds(ctx, accountId, prId, reviewId) : new Set<string>();
+  const mayLift = noBlocker && limnBlockIds.size > 0;
+  if (picked.toPost.length === 0 && (wanted == null || wanted === 'COMMENT') && !mayLift) return skip(...nothingReason());
 
   const pctx = await getReviewPostContext(ctx, reviewId, accountId);
   if (!pctx) return { kind: 'not_found' };
@@ -557,36 +667,44 @@ async function autoPostReview(
 
   // The verdict gate reads the reader's own reviews LIVE: a stale synced row must never let an
   // automatic APPROVE overwrite a person's REQUEST_CHANGES.
+  const wantsVerdict = wanted != null && wanted !== 'COMMENT';
+  // THE IMPACT GATE (APPROVE only): read before the live reviews, so a held approve costs no
+  // GitHub call. A failed read is 'unknown', which is held as if high — never guessed down.
+  let impact: { level: ImpactLevel; allowed: AutoApproveImpact } | undefined;
+  if (wanted === 'APPROVE' && !facts.authorIsMe) {
+    let level: ImpactLevel = 'unknown';
+    try {
+      level = (await deps.impactLevel?.(accountId, prId)) ?? 'unknown';
+    } catch (err) {
+      ctx.log.warn(`auto post review ${reviewId}: could not read the PR's impact: ${errText(err)}`);
+    }
+    impact = { level, allowed: ws.settings.approveImpact };
+  }
+  const impactHeld = impact != null && !impactAllowsApprove(impact.level, impact.allowed);
+  let standing: { state: OwnLatestReview; reviewId: string | null } = { state: 'unreadable', reviewId: null };
+  if (!facts.authorIsMe && ((wantsVerdict && !impactHeld) || mayLift)) {
+    try {
+      const [login, reviews] = await Promise.all([
+        deps.accountLogin(accountId),
+        deps.liveReviews(pctx.owner, pctx.name, pctx.prNumber),
+      ]);
+      standing = ownStandingReview(reviews, login, limnBlockIds);
+    } catch (err) {
+      ctx.log.warn(`auto post review ${reviewId}: could not read the PR's reviews: ${errText(err)}`);
+    }
+  }
   if (wanted != null && wanted !== 'COMMENT') {
-    // THE IMPACT GATE (APPROVE only): read before the live reviews, so a held approve costs no
-    // GitHub call. A failed read is 'unknown', which is held as if high — never guessed down.
-    let impact: { level: ImpactLevel; allowed: AutoApproveImpact } | undefined;
-    if (wanted === 'APPROVE' && !facts.authorIsMe) {
-      let level: ImpactLevel = 'unknown';
-      try {
-        level = (await deps.impactLevel?.(accountId, prId)) ?? 'unknown';
-      } catch (err) {
-        ctx.log.warn(`auto post review ${reviewId}: could not read the PR's impact: ${errText(err)}`);
-      }
-      impact = { level, allowed: ws.settings.approveImpact };
-    }
-    const impactHeld = impact != null && !impactAllowsApprove(impact.level, impact.allowed);
-    let ownLatest: OwnLatestReview = 'unreadable';
-    if (!facts.authorIsMe && !impactHeld) {
-      try {
-        const [login, reviews] = await Promise.all([
-          deps.accountLogin(accountId),
-          deps.liveReviews(pctx.owner, pctx.name, pctx.prNumber),
-        ]);
-        ownLatest = ownLatestReview(reviews, login);
-      } catch (err) {
-        ctx.log.warn(`auto post review ${reviewId}: could not read the PR's reviews: ${errText(err)}`);
-      }
-    }
-    verdict = verdictGate(wanted, { authorIsMe: facts.authorIsMe, ownLatest, ...(impact ? { impact } : {}) });
-    if (picked.toPost.length === 0 && verdict.submitted === 'COMMENT') return skip(...nothingReason());
+    verdict = verdictGate(wanted, { authorIsMe: facts.authorIsMe, ownLatest: standing.state, ...(impact ? { impact } : {}) });
+  }
+  // Limn's own automatic request for changes still stands and this run has no blocker: lift it —
+  // superseded by the APPROVE this run sends, else dismissed after the post.
+  const liftId = noBlocker && standing.state === 'LIMN_AUTO_CHANGES_REQUESTED' ? standing.reviewId : null;
+  if (picked.toPost.length === 0 && (verdict?.submitted ?? 'COMMENT') === 'COMMENT' && liftId == null) {
+    return skip(...nothingReason());
   }
   const event: AutoVerdictEvent = verdict?.submitted ?? 'COMMENT';
+  // Nothing but the lift to do: no review is sent at all.
+  const sendsReview = picked.toPost.length > 0 || event !== 'COMMENT';
 
   const record: ClaudeAutoPostRecord = {
     status: 'posting',
@@ -622,52 +740,100 @@ async function autoPostReview(
       dryRun: false,
     });
 
-  try {
-    let outcome;
+  // Did the review half go wrong outright (thrown, or the head moved)? Then nothing more is written.
+  let reviewFailed = false;
+  let refusedBare = false;
+  if (sendsReview) {
     try {
-      outcome = await submit(event);
+      let outcome;
+      try {
+        outcome = await submit(event);
+      } catch (err) {
+        // ⚠ THE ONE RETRY: GitHub REFUSED the verdict (a 4xx on the review POST — branch rules,
+        // permissions). A refused POST created nothing (the seam posts PR-level comments only after
+        // the review lands), so sending the same review once more as a COMMENT cannot double-post.
+        // Never on a COMMENT, never on an ambiguous failure (5xx, network, rate limit), never twice.
+        if (event === 'COMMENT' || !isVerdictRefusal(err)) throw err;
+        verdict = { ...(verdict as ClaudeAutoVerdictRecord), submitted: 'COMMENT', heldReason: 'refused', refusedError: errText(err).slice(0, 300) };
+        record.verdict = verdict;
+        // A bare verdict with no comments behind it: nothing is left to post. GitHub created
+        // nothing, so a lift may still go ahead.
+        if (picked.toPost.length === 0) {
+          refusedBare = true;
+          throw err;
+        }
+        ctx.log.warn(`auto post review ${reviewId}: GitHub refused ${event}; posting the comments alone`);
+        outcome = await submit('COMMENT');
+      }
+      if (outcome.headMoved) {
+        reviewFailed = true;
+        errors.push('The PR changed since this review.');
+      } else if ('postedReviewId' in outcome) {
+        // GitHub has 201'd: from here nothing may throw or retry.
+        record.githubReviewId = outcome.postedReviewId;
+        for (const id of outcome.inlineFindingIds) posted.add(id);
+        for (const pc of outcome.prComments) posted.add(pc.findingId);
+        await markReviewPosted(ctx, reviewId, outcome.postedReviewId, outcome.inlineFindingIds, outcome.prComments, {
+          auto: true,
+          inlineComments: outcome.inlineComments,
+        }).catch((err) => ctx.log.warn(`auto post review ${reviewId}: could not record the post: ${errText(err)}`));
+        if (picked.toPost.some((f) => !posted.has(f.id))) errors.push('Some comments could not be posted.');
+      }
     } catch (err) {
-      // ⚠ THE ONE RETRY: GitHub REFUSED the verdict (a 4xx on the review POST — branch rules,
-      // permissions). A refused POST created nothing (the seam posts PR-level comments only after
-      // the review lands), so sending the same review once more as a COMMENT cannot double-post.
-      // Never on a COMMENT, never on an ambiguous failure (5xx, network, rate limit), never twice.
-      if (event === 'COMMENT' || !isVerdictRefusal(err)) throw err;
-      verdict = { ...(verdict as ClaudeAutoVerdictRecord), submitted: 'COMMENT', heldReason: 'refused', refusedError: errText(err).slice(0, 300) };
-      record.verdict = verdict;
-      // A bare verdict with no comments behind it: nothing is left to post.
-      if (picked.toPost.length === 0) throw err;
-      ctx.log.warn(`auto post review ${reviewId}: GitHub refused ${event}; posting the comments alone`);
-      outcome = await submit('COMMENT');
+      reviewFailed = !refusedBare;
+      errors.push(errText(err));
     }
-    if (outcome.headMoved) {
-      errors.push('The PR changed since this review.');
-    } else if ('postedReviewId' in outcome) {
-      // GitHub has 201'd: from here nothing may throw or retry.
-      record.githubReviewId = outcome.postedReviewId;
-      for (const id of outcome.inlineFindingIds) posted.add(id);
-      for (const pc of outcome.prComments) posted.add(pc.findingId);
-      await markReviewPosted(ctx, reviewId, outcome.postedReviewId, outcome.inlineFindingIds, outcome.prComments, {
-        auto: true,
-        inlineComments: outcome.inlineComments,
-      }).catch((err) => ctx.log.warn(`auto post review ${reviewId}: could not record the post: ${errText(err)}`));
-      if (picked.toPost.some((f) => !posted.has(f.id))) errors.push('Some comments could not be posted.');
-    }
-  } catch (err) {
-    errors.push(errText(err));
   }
 
   const landed = record.githubReviewId != null;
+  // THE LIFT, inside the same claim, once: an APPROVE that landed supersedes Limn's own block on
+  // GitHub; otherwise it is DISMISSED. Never retried; a refusal is recorded in GitHub's words.
+  let dismissed = false;
+  if (liftId != null && !reviewFailed) {
+    if (landed && verdict?.submitted === 'APPROVE') {
+      record.liftedBlock = { reviewId: liftId, how: 'superseded', error: null };
+    } else {
+      let res: { ok: true } | { ok: false; message: string };
+      try {
+        res = deps.dismissReview
+          ? await deps.dismissReview(accountId, pctx.owner, pctx.name, pctx.prNumber, liftId, LIFT_BLOCK_MESSAGE)
+          : { ok: false, message: 'Dismissing is not available.' };
+      } catch (err) {
+        res = { ok: false, message: errText(err) };
+      }
+      if (res.ok) {
+        dismissed = true;
+        record.liftedBlock = { reviewId: liftId, how: 'dismissed', error: null };
+        await stampReviewDismissed(ctx, prId, liftId).catch((err) =>
+          ctx.log.warn(`auto post review ${reviewId}: could not stamp the dismissal: ${errText(err)}`),
+        );
+      } else {
+        record.liftedBlock = { reviewId: liftId, how: 'dismiss_failed', error: res.message.slice(0, 300) };
+      }
+    }
+  }
+
+  // A run whose only write was the lift: posted when it took, failed (GitHub's words) when not.
+  const liftOnly = !sendsReview;
   const final: ClaudeAutoPostRecord = {
     ...record,
-    status: !landed ? 'failed' : errors.length > 0 ? 'partial' : 'posted',
+    status: liftOnly
+      ? dismissed
+        ? 'posted'
+        : 'failed'
+      : !landed
+        ? 'failed'
+        : errors.length > 0
+          ? 'partial'
+          : 'posted',
     at: nowIso(),
-    error: errors[0] ?? null,
+    error: liftOnly ? (dismissed ? null : (record.liftedBlock?.error ?? null)) : (errors[0] ?? null),
     postedFindingIds: [...posted],
   };
   await writeRecord(ctx, reviewId, final).catch((err) =>
     ctx.log.warn(`auto post review ${reviewId}: could not record the result: ${errText(err)}`),
   );
-  if (landed) {
+  if (landed || dismissed) {
     await deps.settle({ accountId, prId, log: ctx.log }).catch(() => ({ visible: false }));
   }
   return { kind: 'done', record: final };

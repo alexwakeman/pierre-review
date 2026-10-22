@@ -874,7 +874,11 @@ always the router's; the models are Opus 5.5 and Sonnet 5 only. Details:
   (`workspaces.auto_post_enabled`, NULL = off) + overrides-only scope/kinds on the auto-review route.
   It posts UNDER THE READER'S OWN GITHUB ACCOUNT, ONE review (questions inline too), event `COMMENT`
   unless the OFF-by-default `autoVerdict` lets a STRICTER verdict through (never on the reader's own
-  PR, never over their standing APPROVED/CHANGES_REQUESTED, read LIVE), footer + the hidden marker on
+  PR, never over their standing APPROVED/CHANGES_REQUESTED, read LIVE = their latest DECISIVE review:
+  a COMMENTED reply never supersedes it, DISMISSED stands for nothing). ⚠ Limn's OWN earlier AUTO
+  REQUEST_CHANGES (matched by a stored `auto_post.githubReviewId`, NEVER the marker — a manual Post is
+  the reader's) is not theirs: a later APPROVE goes over it, and a later run with no blocker that does
+  not approve DISMISSES it, once, recorded, settled (`liftedBlock`). Footer + the hidden marker on
   every body (so `isLimnPostedComment` holds and it never re-triggers a review). An auto APPROVE also
   needs the workspace's switch for the PR's impact level (`approveImpact`, High/Medium/Low, all on;
   the shared blast resolver; UNKNOWN counts as High). The OFF-by-default
@@ -883,7 +887,9 @@ always the router's; the models are Opus 5.5 and Sonnet 5 only. Details:
   `auto_post` record is CLAIMED (compare-and-set from NULL, `status:'posting'`) BEFORE any GitHub
   write; a failure is recorded and shown, NEVER retried, and a run cut off mid-post counts as
   possibly posted forever. Dedupe is the follow-up chain + `similarTitles` over every earlier run;
-  story gaps post only on the owner PR (no owner ⇒ not posted). § Auto-posting.
+  story gaps post only on the owner PR (no owner ⇒ not posted), as ONE collated PR comment per (run,
+  target PR) — by hand too (one "Post N gaps to …" per PR, no per-item Post), every item stamped with
+  that one comment id, a later check posting only the new gaps. § Auto-posting.
 - **FAILED CI IS A SEPARATE PROCESS, THE CI REVIEW** (`src/review/ci-review/`; sqlite `0082` / pg
   `0069`): one run per (PR, head, sorted failing check names), never inside a PR review — new PR-review
   runs read no logs and store no `ci_failures` (old rows read as history). The head's checks by COMMIT
@@ -930,7 +936,9 @@ always the router's; the models are Opus 5.5 and Sonnet 5 only. Details:
   a per-workspace SEALED write-only token to the FIXED host through the tracker's guarded GET; ONE
   stored snapshot per (account, PR, head) that every reader uses (only a review run and Refresh call
   SonarCloud), capped at 50 with the cut stated; fenced into the review prompt, AI Fix's `Q<n>` items,
-  and ONE PR comment per (PR, head), claimed before the write, never retried (auto: the `sonar` kind).
+  and ONE GitHub review per (PR, head) — an inline thread per issue on a changed RIGHT line, the rest
+  in full in the body (never a fallback line), an issue KEY threaded on an earlier head never threaded
+  again — claimed before the write, never retried, 422 read back (auto: the `sonar` kind).
   ⚠ Every PR call is keyed by PR NUMBER (latest analysis, any commit): a read is stored only when
   `project_pull_requests/list` says it analysed THIS head (or GitHub's merge commit of it), else
   `not_analyzed` with nothing kept. ⚠ Prose in the comment is HTML-escaped (`safeProse`).

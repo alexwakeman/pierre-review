@@ -174,7 +174,7 @@ describe('the wiring', () => {
     expect(panel).toMatch(/<BriefSummary brief=\{summary\.brief\} docsItems=\{briefNotes\.items\} afterCriteria=\{designNode\} \/>/);
     expect(panel.match(/<StoryDesignSection\s/g)).toHaveLength(1);
     // No Post anywhere in the stack, and no dependency or reference cards.
-    expect(panel).not.toMatch(/usePostTicketItem|ItemPost|references|Other tickets/);
+    expect(panel).not.toMatch(/usePostStoryGaps|StoryGapsPost|references|Other tickets/);
     // The per-stack request never sits on the cards list itself, and the board never mounts the
     // section (every read in it starts on mount): only the story view's single stack does.
     const cards = src('components/Activity/OpenPrsCards.tsx');
@@ -240,9 +240,12 @@ describe('the wiring', () => {
     expect(parts).not.toMatch(/useQuery\(|fetch\(/);
   });
 
-  it('the Post button only renders with a viewed PR', () => {
+  it('the ONE "Post N gaps" button per PR only renders with a viewed PR; no per-item Post', () => {
     const parts = src('components/TicketReviewParts.tsx');
-    expect(parts).toMatch(/if \(viewedPrId != null\) \{\s*return \(\s*<div className="mt-1\.5[^"]*">\s*<ItemPost /);
+    expect(parts).toContain('{viewedPrId != null && <StoryGapsPost review={review} viewedPrId={viewedPrId} />}');
+    expect(parts).not.toMatch(/ItemPost|usePostTicketItem/);
+    // The slim share offers the one for this PR.
+    expect(src('components/TicketCoverage.tsx')).toContain('<StoryGapsPost review={review} viewedPrId={pr.id} onlyThisPr />');
   });
 });
 

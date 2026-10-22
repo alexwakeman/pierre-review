@@ -230,7 +230,8 @@ byte-for-byte unchanged. Full contract: [REFERENCE-DOCS.md](REFERENCE-DOCS.md) �
 When the PR's workspace has SonarCloud set up, a run takes (or reuses) the head's stored snapshot before
 it builds the prompt and adds a fenced "SonarCloud analysis of this commit" block (the 25 most severe of
 up to 50 items, as evidence, never to be copied). The tab shows a **SonarCloud** section after CI check
-with a "Post SonarCloud findings" button: ONE PR comment per (PR, head), claimed before the write, never
+with a "Post SonarCloud findings" button: ONE separate GitHub review per (PR, head) — inline threads on
+changed lines, everything else in its summary body (docs/SONARCLOUD.md § Posting) — claimed before the write, never
 retried; an auto review posts it under auto-posting's `sonar` kind. AI Fix seeds the same items as
 `Q<n>`. Contract: [SONARCLOUD.md](SONARCLOUD.md).
 
@@ -1093,15 +1094,25 @@ route strips a stale `ticket`/`tickets` key. Wire contract: [API.md](API.md) § 
   that THREW or was cut off by a restart stores no fingerprint (`retryable`, the boot reconcile), so
   it is.
 - **Posted by a click, or by AUTO-POSTING when the owner PR's workspace switched it on** (§
-  Auto-posting — automatic runs only, owner PR only). One Post button per unmet / partly met / missing item, targeting
-  `owner_pr_id` (Claude's `expectedIn` member), else the viewed PR, pinned to the head the run
-  judged (`HeadMoved` otherwise). A re-raised item inherits its earlier posting (`prior_item_id`), so
-  nothing posts twice; only the ticket's latest succeeded run may post (`Superseded`). ⚠ The route
-  takes its in-process claim BEFORE the "already posted?" check and re-reads the item inside it — a
-  check made before the claim can be answered by a request that has since posted and released it.
-  The SPA says "Already posted" only for `AlreadyPosted`; `HeadMoved` / `Superseded` keep the button
-  and print the reason. The body
-  carries the `<!-- pierre:claude-review` marker, so it never triggers an auto PR review.
+  Auto-posting — automatic runs only, owner PR only). ⚠ **THE GAPS GO AS ONE PR-LEVEL COMMENT PER
+  (run, target PR)** (`ticket-review/post-item.ts` `postStoryGapsComment`, `POST
+  /api/ticket-reviews/:id/post {viewedPrId, targetPrId}`) — never one comment per item, never inline.
+  An item's target is `owner_pr_id` (Claude's `expectedIn` member), else the viewed PR; the SPA shows
+  ONE "Post N gaps to <PR>" button per target (`lib/ticketReview.ts` `storyGapGroups`, the server's
+  own selection, so N is what goes in), and the per-item Post buttons are GONE. Pinned to the head
+  the run judged (`HeadMoved` otherwise). The body (`storyGapsCommentBody`): "**BMD-7 story check**
+  on abc1234: 3 gaps." then one block per gap ("**AC2 · Not met:** <criterion>", the file line when it
+  belongs in that PR, the explanation), then — auto only, when that kind is on — "#### Not asked for"
+  with its entries; built under 60,000 characters, what does not fit COUNTED and left unposted. ⚠
+  "Never twice" stays PER ITEM: after the 201 EVERY item in the comment is stamped with the one comment
+  id (the posted_* columns); a later check posts a NEW collated comment of only the gaps not yet posted
+  (nothing is ever edited). A re-raised item inherits its earlier posting (`prior_item_id`); only the
+  ticket's latest succeeded run may post (`Superseded`). ⚠ The in-process claim (keyed `run:targetPr`
+  AND holding every item id it may post) is taken BEFORE the "already posted?" check and the run is
+  re-read inside it — a check made before the claim can be answered by a request that has since posted
+  and released it. The SPA says "Already posted" only for `AlreadyPosted`; `HeadMoved` / `Superseded`
+  keep the button and print the reason. The body ends with the footer (auto) + the finding marker, so
+  it never triggers an auto PR review.
 - **AI Fix**: a MANUAL review-seeded fix includes the items this PR owns from each ticket's latest
   succeeded run (refs `S<t>-AC<n>` / `S<t>-M<n>`); an AUTO fix never does. Those items are model
   text drawn from Jira and other people's PRs, and the fixer WRITES — so it, too, runs behind the
@@ -1454,9 +1465,15 @@ auto-posting: claim before any GitHub write, never retried.
   still COUNTS), whatever the kind toggles say: any blocker ⇒
   REQUEST_CHANGES; APPROVE only when Claude approved AND there is no blocker and no warning; else
   COMMENT. A non-COMMENT verdict is sent only (a) off the reader's own PR (GitHub refuses
-  self-approval → `own_pr`) and (b) when the reader's own latest review — read LIVE
-  (`GET …/pulls/:n/reviews`, the synced table can lag) — is none or COMMENTED (`prior_review`; a failed
-  read is `reviews_unreadable`, never a guess), and (c) for an APPROVE, when the workspace allows
+  self-approval → `own_pr`) and (b) when the reader has no STANDING verdict — read LIVE
+  (`GET …/pulls/:n/reviews`, the synced table can lag; `ownStandingReview`): their latest DECISIVE
+  review (APPROVED / CHANGES_REQUESTED / DISMISSED). ⚠ A COMMENTED review never supersedes one on
+  GitHub, and EVERY thread reply — Limn's auto-resolve and pushback replies included — is a COMMENTED
+  review, so the old "latest review of any kind" read let an automatic APPROVE out over a person's
+  standing request for changes after a single reply. A latest DISMISSED stands for nothing (GitHub's
+  meaning too — so a person's review the author dismissed no longer holds it). A person's standing
+  verdict ⇒ `prior_review` ("…: your own review on GitHub still stands."); a failed
+  read is `reviews_unreadable`, never a guess, and (c) for an APPROVE, when the workspace allows
   auto-approve at the PR's IMPACT level (`approveImpact: {high, medium, low}`, all on by default,
   overrides-only inside `auto_post_settings`; the level is the blast-radius chip's, read by
   `getPrImpactLevel` through the shared resolver + the account's config; UNKNOWN is held as HIGH; a
@@ -1472,6 +1489,27 @@ auto-posting: claim before any GitHub write, never retried.
   Safe because a refused POST created nothing (the seam posts PR-level comments only after the review
   lands). A 5xx / network / rate-limit failure is ambiguous and is NEVER retried; a refused bare
   verdict with no comments posts nothing more (`failed`).
+- ⚠ **LIMN LIFTS ITS OWN AUTOMATIC BLOCK** (`loadLimnAutoBlockIds`, `LIFT_BLOCK_MESSAGE`). An
+  automatic REQUEST_CHANGES is posted under the reader's account, so GitHub cannot tell it from the
+  reader's own — and the gate used to hold every later APPROVE as `prior_review`, leaving a PR
+  "changes requested" by Limn after Limn itself had judged the blockers fixed (PR 530, 2026-10-22). Now:
+  - Limn's own block is identified EXACTLY by an earlier run's stored `auto_post.githubReviewId`
+    whose `verdict.submitted` is REQUEST_CHANGES — ⚠ NEVER by the marker or body: a review the reader
+    sent with the Post button carries the same marker and is THEIR judgement, never lifted.
+  - While it is the reader's standing verdict: a wanted APPROVE goes out over it (GitHub supersedes
+    the same user's request; `liftedBlock.how: 'superseded'`); a wanted REQUEST_CHANGES is held as
+    `already_requested` ("Changes already requested by Claude’s earlier review.").
+  - A run with NO blocker (`autoVerdictFor ≠ REQUEST_CHANGES`, computed whatever the auto-verdict
+    switch says NOW — switching it off must not freeze a block Limn left) that does not land an
+    APPROVE (held by impact, only warnings left, verdict switched off, a refused approve) DISMISSES it
+    with "Claude's blocking findings are fixed." — after the run's review, inside the same claim, at
+    the reviewed head, once, never retried. Success stamps the local review row `dismissed` and
+    settles (`deps.settle`); a refusal (branch rules restrict dismissing) is recorded in GitHub's
+    words (`dismiss_failed`). Recorded as `ClaudeAutoPostRecord.liftedBlock` (on the wire too); the
+    tab prints "Lifted Claude’s earlier request for changes." / "Couldn’t lift …: <why>". A run whose
+    only write is the lift (no review sent) is `posted` / `failed` by the dismissal alone.
+  - Cost: a DB pre-check (any earlier auto REQUEST_CHANGES on this PR?) gates the extra live review
+    read, so an ordinary run reads nothing more.
 - **AUTO RESOLVE** also answers an accepted REPLY (`reply_accepted`: the acknowledgement, then the
   resolve) and **AUTO PUSHBACK** posts one reply on a disputed one — § Replies to Limn's findings.
 - **AUTO RESOLVE** (`autoResolve`, OFF by default; `claude-review/auto-resolve.ts`, called from
@@ -1552,10 +1590,12 @@ auto-posting: claim before any GitHub write, never retried.
   for good) both manual post routes answer `409 AutoPostInProgress`.
 - **STORY GAPS** (`ticket-review/auto-post.ts`): posted ONLY on the member PR the run names as the
   owner (`owner_pr_id`, Claude's `expectedIn` — the manual button's target); NO owner ⇒ not posted.
-  The owner's OWN workspace decides (switch, kind, scope) and it must pass the same PR rules. Each
-  item goes through `postTicketItem` (`ticket-review/post-item.ts`, extracted from the route): the
+  The owner's OWN workspace decides (switch, kind, scope) and it must pass the same PR rules. ONE
+  collated comment per target PR — its gaps, then its "Not asked for" entries under their own heading
+  — through `postStoryGapsComment` (`ticket-review/post-item.ts`, the manual route's own function): the
   SAME synchronous claim, the same in-claim re-read, `postedInChain` and the Superseded check, so a
-  click and an auto post cannot both land. Never twice across runs: the item's own / inherited
+  click and an auto post cannot both land; every item in it is stamped with the one comment id and a
+  "Not asked for" entry records it too. Never twice across runs: the item's own / inherited
   posting (`prior_item_id`), plus any earlier run's item with the same `ticketItemMatchKey`. Only
   the ticket's LATEST succeeded run posts (`not_latest`). "Not asked for" items have no row: they post
   on the member that did them (`prId`), and their postings live on `ticket_reviews.auto_post.

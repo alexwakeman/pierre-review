@@ -1,7 +1,7 @@
 # SonarCloud
 
 CORE and free. A workspace can save a SonarCloud token; Limn then reads each pull request's
-SonarCloud analysis and feeds it to Claude Review, AI Fix and one PR comment. Code: `apps/backend/src/sonar/`
+SonarCloud analysis and feeds it to Claude Review, AI Fix and one GitHub review per commit. Code: `apps/backend/src/sonar/`
 (server), `apps/frontend/src/components/ClaudeReviewSonar.tsx` + `components/settings/SonarSection.tsx`
 (SPA), shared types in `packages/shared/src/sonar.ts`.
 
@@ -19,7 +19,7 @@ SonarCloud analysis and feeds it to Claude Review, AI Fix and one PR comment. Co
   account export reduces it to `hasToken`, and no log line names it. `readSonarAccessForPr` is the
   one function that opens it, and its callers send it to SonarCloud only.
 - **Reads never call SonarCloud.** A snapshot per (account, PR, head) is stored in
-  `sonar_snapshots`; the review tab, the review prompt, AI Fix's seed and the comment all read that row.
+  `sonar_snapshots`; the review tab, the review prompt, AI Fix's seed and the posted review all read that row.
   Only four things take a snapshot: a Claude Review run (before it builds the prompt), the Refresh
   button, an auto post (re-reading a head whose earlier read found no analysis of it) and opening /
   starting an AI Fix (waits at most 8 s; a slower read lands for the next open).
@@ -106,17 +106,40 @@ is absent when the workspace has no SonarCloud set up and nothing was stored.
 
 ## Posting (`sonar/post.ts`, `sonar/comment.ts`)
 
-ONE PR-level comment per (PR, head):
+ONE GitHub REVIEW (event `COMMENT`) per (PR, head) — a separate review from Claude's, with its own
+button, record and `sonar` auto kind. It replaced one PR-level comment (2026-10-22); older records
+(`commentId`, no `inline`) still read as one comment.
 
 1. a snapshot at that head that read `ok`, with issues or a failing gate;
-2. **THE CLAIM BEFORE THE WRITE** — `sonar_snapshots.post` NULL → `{status:'posting'}` by
-   compare-and-set. Two presses, two tabs or a restart can never post twice;
-3. the LIVE PR is open and still at that head (a moved head posts nothing — `409 HeadMoved`);
-4. the comment; then `posted` (with GitHub's comment id) or `failed` (with the error); then
-   `settlePrAfterWrite`. **Never retried.** A post cut off mid-flight stays `posting` for good.
+2. the LIVE PR is open and still at that head (a moved head posts nothing — `409 HeadMoved`);
+3. **THE SPLIT** (`splitSonarIssues`, pure) against the live diff with noise files stripped — the same
+   anchor index the Claude review post uses (`github/diff-anchor.ts`):
+   - an issue whose `path` + `line` is an addable RIGHT-side line → its OWN inline thread there
+     (`sonarInlineBody`: severity, type, rule, effort, link, message, "How to fix");
+   - everything else — no file, no line, a line outside the diff, a file the noise strip dropped, a
+     gate item — goes IN FULL in the review body. ⚠ **NEVER on the file's first change**
+     (`fallbackAnchor` is NOT used): a SonarCloud issue pinned to an unrelated line misleads;
+   - ⚠ **DEDUPE BY ISSUE KEY ACROSS HEADS**: a key in an EARLIER head's `post.inline`
+     (`sonarKeysAlreadyInline`; a `posting` record counts — it may be on GitHub; a `failed` one does
+     not) is never threaded again — the body names it under "Already on GitHub from an earlier commit".
+     Keys are stable across analyses (one dev-DB PR: 50 rows over 4 heads, 26 keys).
+   - an unreadable diff (too large, `gh` failing) ⇒ nothing inline, everything in the body. Nothing new
+     at all (every issue already threaded, gate not failing) ⇒ `nothing_to_post`, nothing claimed;
+4. **THE CLAIM BEFORE THE WRITE** — `sonar_snapshots.post` NULL → `{status:'posting', inline:[planned
+   keys]}` by compare-and-set. Two presses, two tabs or a restart can never post twice;
+5. ONE `POST …/pulls/:n/reviews` pinned to the head (one write, so no partial state). ⚠ An error is NOT
+   proof nothing posted: GitHub has answered 422 for a review it published, so the body's marker carries
+   a per-attempt nonce (`sonarReviewMarker`) and `findLandedReview` (post-seam.ts) adopts THIS attempt's
+   review. Then the inline comment ids are read back best-effort (`matchReviewComments`); then `posted`
+   (`githubReviewId`, `inline[].commentId`, `summaryCount`, `alreadyCount`) or `failed` (with the
+   error); then `settlePrAfterWrite`. **Never retried.** A post cut off mid-flight stays `posting` for good.
 
-The body: a lead line ("SonarCloud on abc1234: 50 of 132 issues, highest severity first"), the gate's
-failing conditions in words, the new-code measures, a link to the analysis, then one block per failing
+The tab's line says "Posted to GitHub: 12 on the changed lines, 5 in the summary, 3 already there from
+an earlier commit."; the ⓘ explains the split.
+
+The review BODY: a lead line ("SonarCloud on abc1234: 50 of 132 issues, highest severity first"), the gate's
+failing conditions in words, the new-code measures, a link to the analysis, "N issues are on the changed
+lines, as comments there.", the already-posted list (one line each), then one block per failing
 coverage / duplication condition (with its files; not counted as issues), then per item: severity, type and rule name; the rule key,
 place, effort and a link; SonarCloud's message; the flagged lines in a fence longer than any backtick run
 in them; and "How to fix" in a `<details>`. Every SonarCloud string is made safe (`safeCommentText`: no
@@ -124,8 +147,11 @@ in them; and "How to fix" in a `<details>`. Every SonarCloud string is made safe
 guidance quotes its own code examples, `htmlToText` decodes them back to tags, and GitHub renders tags in
 a comment — a quoted `</details>` closed our block early and a quoted `<a href>` became a live link posted
 under the reader's name. Code spans and fences are literal and are NOT escaped. Built under 60,000 characters (GitHub's limit is 65,536); items that do not fit
-are COUNTED in a closing line. The hidden marker `<!-- pierre:claude-review-sonar v=1 -->` always ends
-it, so `isLimnPostedComment` knows it and it never re-triggers an auto review. An auto post adds
+are COUNTED in a closing line. The hidden marker `<!-- pierre:claude-review-sonar v=1 -->` (the body's
+with `a=<nonce>` added) always ends the body AND every inline thread, so `isLimnPostedComment` knows them
+and they never re-trigger an auto review — which also keeps them out of "other reviewers' threads" (no
+thread judgement, no reply judging), and the distinct `-sonar` marker keeps posted-state / auto-resolve
+from adopting one as a finding's thread. An auto post adds
 `AUTO_POST_FOOTER`; a manual one does not (the same as every other manual post).
 
 **Auto**: after a SUCCEEDED AUTO review, `maybeAutoPostSonar` posts when the workspace's auto-posting is
@@ -178,5 +204,5 @@ Every id is a PATH id: another account's workspace or PR is a 404.
   SonarCloud and are not exported.
 
 Tests: `sonar/gather.test.ts` (ranking, cap, cut, rule cache, states), `sonar/comment.test.ts`,
-`sonar/sonar-db.test.ts` (token never returned or exported, settings, post once, auto post),
+`sonar/sonar-db.test.ts` (token never returned or exported, settings, post once, inline vs summary, cross-head key dedupe, a 422-but-landed review adopted, auto post),
 `coding/ai-fix/review-seed.test.ts` § SonarCloud items, `claude-review/prompts.test.ts` § SonarCloud.
