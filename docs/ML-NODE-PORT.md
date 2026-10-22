@@ -110,7 +110,7 @@ with a console warning, when `packages/ml` is not checked out.
   ported exactly (sort by length, ≤ 4096 padded tokens, scatter back by index), `BigInt64Array`
   tensors. ⚠ Keep the "never fewer rows than inputs" throw: the enrichment worker zips by position.
 - Verify the arena-shrink run option has a Node equivalent; if not, fall back to recreating
-  sessions after a large batch (the Railway memory incident is why this option exists).
+  sessions after a large batch (the hosted severity-api's memory incident is why this option exists).
 - `model_version`: do NOT re-implement the blake2b digest (Node's `createHash` cannot produce
   blake2b-128). The publish step (Phase 4) writes Python's exact `compose_model_version` string
   into the model manifest and Node reads it, so existing stored labels keep their version.
@@ -139,7 +139,8 @@ the plan above, each measured:
   app should not hold ~0.5 GB for a feature that runs in bursts. Threads: `min(4, cpus/2)`.
 - `ml/scorer.ts` exposes the same `scoreComments`/`health` shape `ml-enrichment.ts` already uses.
   It picks the LOCAL scorer when the runtime + models are ready, else the HTTP client when
-  `SEVERITY_API_URL` is set (transition and cloud only), else nothing. `ml-enrichment.ts` changes
+  `SEVERITY_API_URL` is set (an opt-in: `PIERRE_ML_HTTP=1` in dev, or a rented endpoint), else
+  nothing. `ml-enrichment.ts` changes
   its import and nothing else; the character budget, packing and `isMlScoring` stay as they are.
 
 **Built** (`ml/scorer-process.ts`, `ml/local-scorer.ts`, `ml/scorer.ts`; `config.mlLocalEnabled`,
@@ -202,12 +203,12 @@ that version would keep the old bytes. In dev nothing is downloaded: `pnpm dev` 
 
 - `MeResponse.mlSeverity` becomes "the local scorer is ready OR the HTTP one is configured".
   Add `MeResponse.ml: { state: 'ready' | 'absent' | 'installing' | 'failed' }` for the setup line,
-  top-level like `ai` (free feature; `entitledProCapabilities` must never zero it).
+  top-level like `ai`.
 - Everything downstream (badges, `isMlScoring`, the per-PR label index) is unchanged.
 
 **Built.**
-- **Backend:** `MeResponse.ml` (absent in cloud and under LIMN_ML_DISABLED) and
-  `POST /api/ml/install` (SSE, `sync` tier, local only).
+- **Backend:** `MeResponse.ml` (absent under LIMN_ML_DISABLED) and
+  `POST /api/ml/install` (SSE, `sync` tier).
 - **SPA:** Settings → "Bot comment scoring" (`BotScoringSection`). "Set up AI" chains into the same
   download when scoring is not set up, which is decision 3's single button.
 
@@ -217,8 +218,9 @@ Run both scorers on the real dev DB for a few days, writing the local result to 
 and report disagreement by vendor. Cut over when it matches the Phase 0 bar. Then:
 
 - remove the `packages/ml` launch from `pnpm dev`, and `SEVERITY_API_DEFAULT_URL`;
-- delete `ml/severity-client.ts` and the HTTP branch if cloud mode is retired too (the
-  free-and-local decision), else keep it as the cloud path;
+- the hosted mode is retired (2026-10-22), so the HTTP branch (`ml/severity-client.ts`) survives
+  only as an OPT-IN scorer — `SEVERITY_API_URL` / `LIMN_ML_SCORER=http`, e.g. a rented endpoint
+  to drain a large backlog — never the default path;
 - update ML-SEVERITY.md and the CLAUDE.md ML section.
 
 ## Shadow check on real data (2026-10-21)

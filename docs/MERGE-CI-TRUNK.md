@@ -149,7 +149,7 @@ any repo without a merge queue. ⚠ It is SPREAD, never assigned: `queue` is nul
 FAILED, and "we never asked" must not reach the client wearing the same `null` GitHub uses for
 "this base branch requires no review". Absent → the control falls back to the synced row.
 
-### Resolving conflicts in the app (`src/conflict/`, CORE/free, BOTH MODES)
+### Resolving conflicts in the app (`src/conflict/`, CORE)
 
 **This retracts an old claim.** Until this shipped, several places in this repo said some version
 of *"resolving conflicts is a git operation this app does not perform, and GitHub offers no button
@@ -159,35 +159,23 @@ conflict, and the `conflicts` Pending card still carries **no merge affordance**
 gained is the resolver entry.
 
 **Where it exists: everywhere.** `app.ts` registers `conflictRoutes` unconditionally and
-`MeResponse.conflictResolver` is `true` in both modes. ⚠ **This RETRACTS "LOCAL ONLY"**, which rested
-on two claims that are no longer true — that the cloud image has no git, and that it has no clone
-directory. It ships git, and `config.cloneDir` resolves to the container's ephemeral filesystem in
-cloud (`/tmp/pierre-review/clones`), swept by the same janitor that runs locally. ⚠ **There is still no
-`CONFLICT_RESOLVER_ENABLED` and there must not be** — a per-handler env check looks like a gate and
-is one Railway variable away from not being one. The field stays on the wire as a constant because
-the SPA's entry gate reads it and a field that disappears is a field every caller has to re-learn.
-It is CORE and free in both modes: no `ProGate`, no upsell, no seventh visible-but-locked surface.
+`MeResponse.conflictResolver` is `true`. ⚠ **There is no `CONFLICT_RESOLVER_ENABLED` and there must
+not be** — a per-handler env check looks like a gate and is one variable away from not being one.
+The field stays on the wire as a constant because the SPA's entry gate reads it and a field that
+disappears is a field every caller has to re-learn.
 
-**Nothing about the routes changed for multi-tenancy, because nothing about them was ever
-single-tenant.** Ownership is `getPrWriteContext(id, accountId)` on all seven (→ 404, so the family
-is not an existence oracle), write permission is re-checked on all seven (→ 403), and ⚠ **every git fetch
-goes out under the CALLER'S OWN token**, into a ref namespaced by session id
-(`fetchRefIntoClone`, review/clone-manager.ts). That last property was incidental under one account
-and is now LOAD-BEARING: the clone cache is keyed `owner__name` and shared across tenants, so it
-holds OBJECTS, never permission — a tenant who cannot read a private repository cannot fetch from
-it, whoever else has already cloned it. `conflicts-cloud.test.ts` pins all of it; it used to assert
-the resolver's paths 404 in cloud and was INVERTED rather than deleted, because this is the moment
-that proof has to get stronger.
+**Ownership** is `getPrWriteContext(id, accountId)` on all seven routes (→ 404, so the family is not
+an existence oracle), write permission is re-checked on all seven (→ 403), and ⚠ **every git fetch
+goes out under the CALLER'S OWN token**, into a ref namespaced by session id (`fetchRefIntoClone`,
+review/clone-manager.ts) — the clone cache is keyed `owner__name` and holds OBJECTS, never
+permission.
 
-**Two caps, two sentences, and neither names another tenant.** A resolver job is a clone, two
-fetches and a merge-tree. ONE running job per ACCOUNT ("you're already resolving another pull
-request"), and a small global ceiling on top ("the service is busy") — computed inside the same
-SYNCHRONOUS claim window as the per-PR slot, with ⚠ **no `await` between the check and the write**,
-or two POSTs a tick apart both claim. ⚠ **The two refusals are not one sentence with a variable in
-it.** The predecessor was a single process-global cap of 2 whose own comment reasoned from "the
-LOCAL mode's single account", so in cloud one tenant opening two resolvers told every other tenant
-that *"Two pull requests are already being prepared"* — false about their work, and a disclosure
-about somebody else's.
+**Two caps, two sentences.** A resolver job is a clone, two fetches and a merge-tree. ONE running
+job per ACCOUNT ("you're already resolving another pull request"), and a small global ceiling on top
+("the service is busy") — computed inside the same SYNCHRONOUS claim window as the per-PR slot, with
+⚠ **no `await` between the check and the write**, or two POSTs a tick apart both claim. ⚠ **The two
+refusals are not one sentence with a variable in it**, and the global one names no count and no pull
+request.
 
 **The entry is click-gated and fetches nothing.** `ResolveConflictsButton` is the ONE entry, mounted
 on three surfaces (the PR pane's Conflicts row, `MergeControl`'s expanded conflict box, the Pending
@@ -318,7 +306,7 @@ of that was protecting:
   no file and no region. Two tabs on one PR did it across the process.
   `MAX_EDIT_CHARS_PER_SESSION` is the bound.
 - **WHAT DID NOT.** The COMMIT body still carries nothing but indexes, ids and enum members.
-  `'edited'` travels as an opaque `editId` exactly as an accepted Pro suggestion travels as a
+  `'edited'` travels as an opaque `editId` exactly as an accepted Claude suggestion travels as a
   `suggestionId`; the server re-folds its OWN regions through `foldFile` and hashes the result. So
   the property that mattered — **the server commits only bytes it folded, from a request that names
   no content** — is unchanged. A `custom` member carrying its lines inline is still forbidden, and
@@ -435,17 +423,16 @@ a 30-minute idle TTL, a **4-hour absolute lifetime `touch()` cannot extend**, an
 caps of **3 per account / 24 per process** (LRU eviction of a SETTLED record, this account's share
 first). ⚠ **The TTL alone bounds nothing**: every manifest read touches, the SPA polls the manifest
 for as long as the overlay is mounted, and each retained record holds a whole `ConflictModel` — up
-to `CONFLICT_MAX_TOTAL_BYTES` (8 MiB) of file text — in a process every tenant shares. The
+to `CONFLICT_MAX_TOTAL_BYTES` (8 MiB) of file text — in the one server process. The
 client keeps decisions in `store/conflictResolver.ts` under a key pinned to
 `(prId, headSha, baseSha, modelHash)`, so a moved head simply does not find them. ⚠ The reflex in
 this repo is to add a table; here it is wrong — the model is source code, it is pinned to two SHAs,
-and it is worthless the instant either moves. ⚠ **Shipping in cloud does NOT change this.** A
-redeploy loses every session and that is correct, not a gap to close: a row that survived a restart
+and it is worthless the instant either moves. A restart loses every session and that is correct, not a gap to close: a row that survived a restart
 would survive into a world where the push it describes may be wrong, and the reader's decisions are
 in the SPA's own store under the pinned key already.
 
-**A cut stream is not a lost session, and that took a fix.** ⚠ **Railway ends every HTTP request at
-15 minutes; a session lives 30.** So a reader who took their time got the SSE stream cut at minute
+**A cut stream is not a lost session, and that took a fix.** ⚠ **A proxy may end an HTTP request
+long before a session's 30 minutes** (the hosted mode's Railway edge cut at 15). So a reader who took their time got the SSE stream cut at minute
 15, pressed Commit at minute 16, the route answered 202 and PUSHED, and not one phase frame came
 back — the overlay sat on "Starting…" forever while **the push may well have landed**. The recovery
 channel already existed: the manifest GET returns the whole commit state, is a Map lookup on the
@@ -476,7 +463,7 @@ its shape. The SPA half — the write set refetched again when the resolver clos
 the shell running the PR's live poll itself when no other mount does — is in
 [docs/FRONTEND.md](FRONTEND.md).
 
-**A redeploy must not kill a push in flight.** The process's one `SIGTERM` handler (`index.ts`)
+**A restart must not kill a push in flight.** The process's one `SIGTERM` handler (`index.ts`)
 refuses new claims, waits for running jobs to reach zero or 120s (the timeout on a single git
 subprocess), then closes. ⚠ **It exists for the in-flight push and nothing else** — it does not
 preserve sessions and must not grow into something that does. It cannot hang: the drain is bounded,
@@ -494,16 +481,15 @@ in the live map, runs `git gc --prune=now` past a loose-object threshold, then t
 **It must exclude live sessions** — at boot every conflict ref is an orphan by definition, but a
 running process has sessions sitting at `ready` whose commit re-reads those refs. ⚠ **Do not
 parallelise the loop**: MEASURED, 16 concurrent `git config` calls took 1,779ms against 131ms for
-one. The cloud operational picture — the ephemeral disk, why there is no Railway volume, and the
-drain window — is in [docs/DEPLOY-RAILWAY.md](DEPLOY-RAILWAY.md).
+one. The shutdown drain window (`conflict/session.ts` `beginShutdown`, awaited by `index.ts`) lets a
+running land finish before the process exits.
 
 **No worktree, at any phase.** `merge-tree --write-tree` performs a full three-way merge with no
 index and no working tree; the oracle cross-check runs `merge-file` over three loose files in
 `os.tmpdir()`. That makes the resolver immune to the worktree defect classes rather than dependent
 on their fix, and it is why a session costs nothing to hold open. ⚠ **No git 2.40+ flags** either —
-no `merge-tree --merge-base=`, no `-X ours|theirs`, no `merge-file --object-id`; the cloud image is
-on 2.39.5 where all three exit 129 — which is now a live constraint rather than a hedge against a
-later port. ⚠ **"No worktree" is about WORKTREES, not clones.** It does clone: `buildConflictModel`
+no `merge-tree --merge-base=`, no `-X ours|theirs`, no `merge-file --object-id`; on git 2.39 (still
+common on Debian-based machines) all three exit 129. ⚠ **"No worktree" is about WORKTREES, not clones.** It does clone: `buildConflictModel`
 and the land path both go through the shared `ensureClone`, blobless and checkout-less. Measured
 worst case for one clone is 111 MB; a cold clone is 3.6s (bevy) to 13.7s (golang/go).
 The one floor is 2.38 for `--write-tree`, probed once and refused as `git_too_old` at the open route.
@@ -512,14 +498,14 @@ Routes and tiers: [docs/API.md](API.md). The SPA's landmines, the `--mr-*` palet
 defects found by running it: [docs/FRONTEND.md](FRONTEND.md) § The merge-conflict resolver. The
 clone-cache hardening it rests on: [docs/SECURITY.md](SECURITY.md).
 
-### Resolve with Claude (`src/coding/ai-resolve/`, CORE, free, LOCAL ONLY)
+### Resolve with Claude (`src/coding/ai-resolve/`, CORE, agentic)
 
 The agentic half of the resolver. **Claude's answer is reviewed IN THE RESOLVER** — the run decides
 regions; it never commits, pushes or writes a file.
 
 - **Agentic, so it follows the agentic rule.** Its three routes (`POST|GET|DELETE
-  /api/prs/:id/conflicts/ai-resolve`) are registered by `registerAgenticRoutes` and 404 in cloud and
-  under `LIMN_AI_DISABLED`. The resolver's own seven routes still run in both modes. Ownership and
+  /api/prs/:id/conflicts/ai-resolve`) are registered by `registerAgenticRoutes` and 404 under
+  `LIMN_AI_DISABLED`. The resolver's own seven routes still run then. Ownership and
   write permission on all three, the resolver's rule (→ 404 / 403).
 - **One run = one conflict session, then one read-only agent.** The run claims (or re-attaches to)
   the PR's session with `autoApply: false`, waits for the build (`runOpen`), then runs the agent in a
@@ -628,8 +614,8 @@ A Pierre-side standing intent in `auto_merge_requests`, re-evaluated on its own 
 (`AUTO_MERGE_CRON` `*/2`, registered in `scheduler.ts` under the same `disableScheduler` gate as
 sync — hence the UI saying it only lands while the app is running). Bounded per tick
 (`MAX_INTENTS_PER_TICK` 25, least-recently-checked first so a backlog rotates), one tick at a
-time, grouped per account so each tenant's token is fetched once and one bad token fails only
-that tenant.
+time, grouped per account so each account's token is fetched once and one bad token fails only
+that account.
 
 **It deliberately does NOT use GitHub's `enablePullRequestAutoMerge`**, which has 422'd since
 2026-03-25 on any PR that does not ALREADY meet its merge requirements — i.e. exactly the PRs
@@ -655,9 +641,9 @@ calls/hour at 25 intents. The gates it feeds:
    would adopt a concurrent human push as consented-to code. The runner records what it ASKED
    for and lets a later tick prove the move via (2).
    ⚠ **The record is the `update_issued_against_oid` COLUMN, not the `pendingUpdates` Map.** The
-   Map was the only record until sqlite `0061`/pg `0048`, and losing it on a restart did not read
+   Map was the only record until migration `0061`, and losing it on a restart did not read
    as "I forgot" — it read as an unexplained head move, whose safe answer is to disarm. Under
-   `pnpm dev` that is every file save and in cloud every deploy, so an unrelated code push could
+   `pnpm dev` that is every file save and for an `npx` user every upgrade, so an unrelated code push could
    kill an intent with a message blaming the user's branch. The Map survives only as a **freshness
    hint** (TTL 15 min); when it is empty the column still proves the SHA and the three GitHub-side
    proofs in (2) are what actually establish the commit is ours.
@@ -701,8 +687,7 @@ calls/hour at 25 intents. The gates it feeds:
 point) — only `mergeStateStatus === 'behind'` means GitHub is blocking. Treating `behindBy` as a
 blocker parked every clean armed PR forever, and freshening on it every tick pushed a merge
 commit (and a CI run) every two minutes for the intent's 72h life; hence `freshenedIntents`,
-which honours "update before merging" exactly ONCE. A local rebase (`coding/merge.ts`, local-only
-— cloud has no clone) IS synchronous and returns the sha it pushed, so re-pinning to that adopts
+which honours "update before merging" exactly ONCE. A local rebase (`coding/merge.ts`) IS synchronous and returns the sha it pushed, so re-pinning to that adopts
 nothing we didn't produce. On success the runner stamps the PR merged locally (like the
 interactive route) and sets `merged`; a merge/close that happened outside Pierre becomes
 `disarmed_blocked`, NOT `merged` — the latter means "the watcher did it" and would raise a false
@@ -732,7 +717,7 @@ block — and both fixed here:
   blocker until the 72-hour expiry**, having updated exactly once, against a trunk long gone.
 
 The fix, per `(accountId, repoId)` — ⚠ **the composite key, never `repoId` alone**: two accounts
-can track the same repo, and a repoId-keyed group would serialise one tenant's landings behind
+can track the same repo, and a repoId-keyed group would serialise one account's landings behind
 another's:
 
 1. **Armed DIRECT-merge intents form a FIFO ordered `armedAt ASC, id ASC`** — click order. ⚠ The
@@ -818,7 +803,7 @@ the headline phrases a position only when `queuePosition > 1`. `phase` is whatev
 STORED (up to a tick ago) while the position is recomputed LIVE per request, so the slot-holder
 merging inside the same tick that parked a row left the card reading "Waiting its turn — 1 of 1 on
 this repo" for two minutes; position 1 falls through to a neutral "Next up on this repo". **No migration was needed**: `phase`
-is a plain `text` column in both dialects (sqlite `0055` / pg `0042` add it with no CHECK), and
+is a plain `text` column in both dialects (migration `0055` add it with no CHECK), and
 drizzle's `text(..., { enum })` is TypeScript-only metadata.
 
 **The three marks live in the runner's process memory** — `yieldedForFailedChecks`,
@@ -831,7 +816,7 @@ parameter), which is why `api/routes/prs.ts` imports the runner: every one of th
 observation of GitHub made inside the tick, so the runner is the only thing that can own them.
 
 **`phase` — the machine-readable half of `lastReason`** (shared `ArmedMergePhase`, a nullable
-column on `auto_merge_requests`, sqlite `0055` / pg `0042`). `lastReason` is PROSE for a human
+column on `auto_merge_requests`, migration `0055`). `lastReason` is PROSE for a human
 and is **NULL at success**, so a cross-PR surface reading it alone would be string-matching a log
 line that goes blank exactly when it matters. Every watcher write therefore sets phase and prose
 in the SAME `updateAutoMergeState` call — they cannot disagree — and the rules are:
@@ -993,7 +978,7 @@ for a PR the stack was already showing. Four rules hold it together:
   `useMergeOptions` per armed PR (~3 GitHub calls each — the reason the row carries its own
   identity and phase).
 
-### Dependency auto-merge (`merge/dependency-policy.ts`, CORE/free, both modes)
+### Dependency auto-merge (`merge/dependency-policy.ts`, CORE)
 
 Two features over ONE classifier — `authorAutomationFor(...).role === 'dependency'` with the
 workspace's bot maps, the same resolution the Dependencies tab's membership reads:
@@ -1179,7 +1164,7 @@ read through the same reader (below) and only displayed — nothing counts them.
 
 ### Trunk CI transition log (`trunk_ci_status_events`)
 
-Written by `sync/branch-status.ts` (migration `0052` / pg `0039`), trimmed hybrid (newest-200 ∪
+Written by `sync/branch-status.ts` (migration `0052`), trimmed hybrid (newest-200 ∪
 the 14-day window — `staleTrunkCiEventIds`). It first fed the Activity Feed's "CI failures" rows;
 those rows, the `feedCiLens` pill, `getCiFailureFeedItems` / `getTrunkCiFailureFeedItems` and
 `isCiFeedKind` are DELETED (the Feed carries no CI items; Pending owns red builds). The log itself

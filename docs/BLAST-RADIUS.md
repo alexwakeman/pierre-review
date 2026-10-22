@@ -16,20 +16,19 @@ and disagree with the verdict.
 **The product promise is the LOW chip.** High and medium are useful; the reason the feature exists
 is to let someone merge a third of their queue after a glance instead of a review.
 
-Tiering: the **level is CORE and free** in both deployment modes, with no AI and no GitHub calls.
-Only the **impact note** — two sentences explaining what could break — is Pro, on the existing
-`prSummary` capability.
+The **level is CORE and deterministic**, with no AI and no GitHub calls. Only the **impact note** —
+two sentences explaining what could break — calls a model, shown while `me.ai.enabled`.
 
 ---
 
 ## The three parts
 
-| Part | Where | Tier |
+| Part | Where | Model? |
 |---|---|---|
-| The signal vector, folded from stored `files[]` | `db/blast-radius.ts` | CORE, free |
-| The co-change ("hub file") index | `db/file-coupling.ts` + `repo_file_coupling` | CORE, free |
-| The level + the reasons | `packages/shared/src/blast-radius.ts` → `blastRadius()` (re-exported by `lib/ui.ts`) | CORE, free |
-| The impact note | `packages/pro/src/annotations/` — kind `impact` | **Pro** (`prSummary`) |
+| The signal vector, folded from stored `files[]` | `db/blast-radius.ts` | no |
+| The co-change ("hub file") index | `db/file-coupling.ts` + `repo_file_coupling` | no |
+| The level + the reasons | `packages/shared/src/blast-radius.ts` → `blastRadius()` (re-exported by `lib/ui.ts`) | no |
+| The impact note | `apps/backend/src/platform/annotations/` — kind `impact` | **yes** (Haiku, the credential ladder) |
 
 **The wire carries SIGNALS, never a level.** Exactly the rule `codeLoc` follows, for the same three
 payoffs: the sensitivity dial becomes a pure render-time comparison (change it in Settings and
@@ -145,7 +144,7 @@ file now uses something it did not, which is a real change with real reach. They
 apart in a diff. If it is ever added it belongs beside `deps` — carried for narration, never as a
 reason to lower a level.
 
-The Pro impact note is fed the same fact and told it **outranks the file paths** — otherwise a
+The impact note is fed the same fact and told it **outranks the file paths** — otherwise a
 model shown "crypto/ touched" reaches for a security consequence a documentation change does not
 have. `promptLevelFor` mirrors the cap so the note never explains a verdict the reader is not
 looking at, and `contentKind` is folded into the payload hash so a note written *before* the diff
@@ -201,7 +200,7 @@ cannot be **called** here:
 
 1. It runs on the **diff body**, fetched through the `gh` CLI — a GitHub call per PR, and
    **nothing on the Pending board may fetch on mount**.
-2. Claude Review is **local-only** and force-disabled in cloud; blast radius works in both.
+2. Claude Review is off under `LIMN_AI_DISABLED`; blast radius never is.
 3. Its gate is deliberately over-conservative (*any ambiguity → worktree*) because over-routing
    there only costs money. Over-routing here marks everything high and the feature stops meaning
    anything.
@@ -234,7 +233,7 @@ AGGREGATE view of the level in the product.
 
 **The window is the Reports rule.** Every Reports figure is tied to the workspace's reporting window
 (this sprint so far when it has a sprint cadence, else the trailing 7/14 days), resolved once on the
-server by core `db/reporting-window.ts` — which asks the plugin's `resolveComparisonWindow`. The card
+server by core `db/reporting-window.ts` — which asks the platform's `resolveComparisonWindow`. The card
 used to be a snapshot of the pull requests open at that moment: it read as a sprint figure beside the
 tiles, and it emptied whenever nothing happened to be open. It now rides `reach` on the
 `/api/workspace-metrics` response (`db/merged-reach.ts`), measured over the same window as the tiles
@@ -274,15 +273,14 @@ a key. The chip's own palette cannot be reused as fills: its greens/greys/ambers
 text pairs, `PALETTE.green` is the success green the chip rejects by name (and 2.28:1 here),
 `PALETTE.gray` is 2.54:1 and the chip's amber 2.15:1.
 
-**Pro, with the rest of Reports** (`periodReports`): `/api/workspace-metrics` 402s without it and the
-whole Reports pane is one `ProLockPanel`. The LEVEL itself (the chip on cards, PR detail, Feed,
-timeline) stays free on every tier.
+It lives in Reports, beside the flow metrics, on the same `/api/workspace-metrics` response. The
+LEVEL itself also shows on cards, PR detail, Feed and timeline.
 
-## The expansion is free, because it is deterministic
+## The expansion needs no model, because it is deterministic
 
 Every reason and every figure in the disclosure comes from `blastRadius()` and `blastSignalsFor()`.
-**No model is in that call path** — so it is open to every user on every tier. (The Pro half of
-blast radius is the impact *note*, a different component.)
+**No model is in that call path**, so it shows even with AI switched off. (The model-written half
+of blast radius is the impact *note*, a different component.)
 
 ⚠ **EVERY pull request expands, not only multi-reason ones — and that is only defensible because
 the panel shows the EVIDENCE, not just the reasons.** An earlier cut opened onto `reasons[]` alone,
@@ -331,20 +329,20 @@ on the note itself. ⚠ The inline link sends the **whole config**, because the 
 blob rather than merging — sending `{showImpactNote:false}` alone would silently reset the
 reader's dial and surface opt-outs.
 
-The checkbox renders even for an account with no plugin: this is a **reading preference, not an
-entitlement**, so a reader who turns it off stays off if they later gain the capability.
+The checkbox renders even while AI is off: this is a **reading preference**, so a reader who turns
+it off stays off if they later switch AI on.
 
-## The impact note (Pro)
+## The impact note
 
-**The code decides the level, free. The model explains the consequence, paid.** The same split the
-work plan and Chronology live by.
+**The code decides the level. The model explains the consequence.** The same split the
+work plan and Chronology live by. The SPA offers it while `me.ai.enabled`, and its Run button goes
+through the one `AiRunGate`.
 
-- Rides **`prSummary`** — now its ONLY feature (the comment checks that shared the tier and the
-  annotations module were REMOVED 2026-10-18; the module holds `impact` alone, and the read skips
-  their DORMANT rows). **No new capability.**
+- The annotations module's ONLY kind (the comment checks that shared it were REMOVED 2026-10-18;
+  the read skips their DORMANT rows).
 - Lands as `kind: 'impact'`, `targetKind: 'pull_request'`, `targetId = prId` on the **existing**
   `pr_comment_annotations` table — whose unique index is already
-  `(accountId, kind, targetKind, targetId)`, so **no plugin migration**.
+  `(accountId, kind, targetKind, targetId)`, so **no migration**.
 - Inherits the whole cost machinery: the payload-hash cache ($0 on unchanged), the pure cached GET
   (opening a PR costs nothing), the one billing path, the per-account in-flight slot, the
   min-interval, `shouldStop` on socket close.
@@ -436,7 +434,6 @@ empty PR still refuses.
 ```bash
 pnpm typecheck && pnpm test                                    # includes the fixture suite
 ./apps/backend/node_modules/.bin/vitest run --root apps/frontend   # the LEVEL rules — hand-run
-./apps/backend/node_modules/.bin/vitest run --root packages/pro    # hand-run
 pnpm --filter @pierre-review/backend verify:isolation           # both new id-addressed getters
 ```
 

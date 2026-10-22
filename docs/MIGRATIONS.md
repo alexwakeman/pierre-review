@@ -5,92 +5,59 @@
 > cross-cutting landmines. Add new detail HERE, not to CLAUDE.md. References to other
 > sections of the old CLAUDE.md resolve via the doc map at the top of CLAUDE.md.
 
-## Replaying the pg chain (the only thing that verifies a pg migration)
+## Two migration folders, one database
 
-`pnpm test` is SQLite-only. **No automated check ever executes a `migrations-pg/` file**, so a pg
-twin can be malformed, unregistered, or subtly divergent and every suite stays green. The single
-source of confidence is replaying it by hand into a throwaway database. Last done **2026-09-09** on
-**PostgreSQL 16.9**: core **52/52** through the real runner, the newest twin being
-`0051_pr_content_kind` (two nullable text columns on `pull_requests`, DDL-only — nothing a
-with-data pass could prove that the column types do not). (The plugin twins were NOT re-run that
-day and did not need to be — blast radius adds no plugin migration, because the `impact`
-annotation fits the existing `pr_comment_annotations` unique index. Their last full replay is the
-2026-09-07 pass below: all **33**, full table parity with SQLite, the only absentee being
-`pro_migrations`, which the plugin's own runner creates rather than a `.sql` file.)
+Limn runs on SQLite only. There are two migration sets, both applied at boot, core first:
 
-⚠ **`0050_repo_file_coupling` WAS REPLAYED *WITH DATA*, deliberately** — unlike a DDL-only twin
-there is something a schema dump cannot prove. The table's whole write path is an
-`onConflictDoUpdate` on `(account_id, repo_id)`, and CLAUDE.md's standing rule is that a stale
-conflict target **type-checks perfectly and raises only at RUNTIME, in both dialects, when a row is
-actually written**. So the replay ran the exact `ON CONFLICT (account_id, repo_id) DO UPDATE` the
-builder emits, twice: one row survived, carrying the second write's values. `0049`'s `jsonb`
-column was round-tripped in the same pass.
+- **Core** — `apps/backend/src/db/migrations/` (`0000`+), applied by drizzle's migrator through
+  `meta/_journal.json` (`"version": "6"`). ⚠ **The journal is hand-maintained**: a `.sql` file on
+  disk with no journal entry SILENTLY SKIPS — the boot looks perfect and every query against the
+  new relation 500s. Prefer hand-writing additive migrations over a full `pnpm db:generate`.
+- **Platform** — `apps/backend/src/platform/migrations/` (`0001`–`0040`, the former Pro plugin's),
+  applied by `platform/migrate.ts` `runPluginMigrations` after core's (`bindPlatform` →
+  `registerPlatform` → `ctx.registerMigrations`). Filename-sorted, NO journal (do not add one),
+  each file once by NAME, recorded in **`pro_migrations`** (`name`, `applied_at`) — the same
+  bookkeeping plugin-era installs already carry, so nothing re-runs after the fold. A file is handed
+  whole to `better-sqlite3`'s `exec`, so it takes NO `--> statement-breakpoint`. ⚠ A failing
+  platform migration now FAILS THE BOOT (it rethrows through `bindPlatform`); under the plugin it
+  silently dropped the whole plugin to OSS mode, which is why older entries below are written so
+  defensively. The release copies the folder to `release/dist/platform/migrations`.
 
-There is a **standing local Postgres** on `:5432` (the `bng-metric-backend-postgres-1` container,
-user/password `dev`/`dev`). Use a SEPARATE database inside it — never the app database that
-container exists for.
-
-```bash
-# 1. throwaway database
-docker exec bng-metric-backend-postgres-1 psql -U dev -d postgres -c "DROP DATABASE IF EXISTS limn_migration_test;"
-docker exec bng-metric-backend-postgres-1 psql -U dev -d postgres -c "CREATE DATABASE limn_migration_test;"
-
-# 2. the CORE chain, through the real runner (so the journal is exercised, not bypassed)
-DEPLOYMENT_MODE=cloud \
-DATABASE_URL="postgres://dev:dev@127.0.0.1:5432/limn_migration_test" \
-ENCRYPTION_KEY=$(python3 -c "print('0'*64)") SESSION_SECRET=$(python3 -c "print('0'*64)") \
-APP_BASE_URL="http://localhost:4000" \
-pnpm --filter @pierre-review/backend db:migrate
-
-# 3. the PLUGIN twins — filename order, no journal, stop on first error
-for f in $(ls packages/pro/migrations-pg/*.sql | sort); do
-  docker exec -i bng-metric-backend-postgres-1 \
-    psql -U dev -d limn_migration_test -v ON_ERROR_STOP=1 -q < "$f" || echo "FAIL $f"
-done
-```
-
-**What to assert afterwards**, because "it ran" is not the same as "it is right":
-
-- the recorded migration count equals `migrations-pg/meta/_journal.json`'s `entries.length`
-  (a file present on disk but absent from the journal SILENTLY SKIPS — this is the failure mode
-  the journal discipline exists for, and it looks like a perfect boot);
-- the pg `public` table list matches SQLite's, modulo `pro_migrations` (created by the plugin's
-  runner, not by a `.sql` file);
-- any column a recent migration added is actually there, with the expected type.
-
-⚠ **An empty replay proves DDL, never DATA.** Both `0040`/`0041`-style backfills ran against zero
-rows here. To check a data-shaping divergence you must run BOTH dialects' expressions over the
-same real inputs and diff them order-independently — Postgres sorts by locale and SQLite by byte,
-so a naive `diff` is nothing but collation noise. That is how the `[bot]`-stripping divergence in
-`0053`/pg `0040` was cleared: identical across all 4,561 real logins, differing only on shapes
-(`foo[bot]bar`, a leading `[bot]`) that GitHub cannot produce.
+**Postgres (removed 2026-10-22).** Until the hosted mode was deleted, every core and plugin
+migration had a hand-written Postgres twin (`migrations-pg/`, a squashed baseline at pg `0000` plus
+additive files up to pg `0111`, journal `"version": "7"`), kept column-parity with SQLite by
+`schema-parity.test.ts`, and replayed by hand against a throwaway database because the unit suite
+never executed one (last full replay: core pg `0051`, plugin `0033`, PostgreSQL 16.9,
+2026-09-09). The pg files, `schema.pg.ts`, the parity test and the pg scripts are gone; the pg
+numbers that used to sit beside each SQLite number below have been dropped. Some entries still
+explain a choice by a dialect divergence that no longer exists — read those as history.
 
 ## History & planning
 
 SQLite migrations (`0000`+) track the schema's evolution — `0008_multitenant_accounts`
 added the `accounts` table + `accountId` + composite uniques; `0009`/`0010` added lean
 storage; `0013` Claude-review routing (`reviewMode`/`routeReason`); `0014`
-`accounts.lastActiveAt`; `0026` `accounts.aiCreditAllowance`; the **Bot-Triage** trio `0027`
-(`users.github_type`), `0028` (`bot_review_classification`), `0029` (`bot_mute_rules`) — pg
-baseline `0016`, plus plugin migration `0009` (`pro_settings` + 11 `bot_*` columns); `0037`
-(pg `0024`) the four `author_id` indexes the contributor popover needs. The **merge / CI / trunk**
-batch adds `0038` (pg `0025`) `auto_merge_requests`; `0039` (pg `0026`) the four `repos`
-default-branch columns + `branch_commits`; `0040` (pg `0027`) `pull_requests.review_decision`;
-`0041` (pg `0028`) `branch_commits.failing_checks` + `.pr_number` + the
+`accounts.lastActiveAt` and `0026` `accounts.aiCreditAllowance` (both dormant since 2026-10-22: no
+idle-account sync gate, no credit metering); the **Bot-Triage** trio `0027`
+(`users.github_type`), `0028` (`bot_review_classification`), `0029` (`bot_mute_rules`), plus
+platform migration `0009` (`pro_settings` + 11 `bot_*` columns); `0037` the four `author_id` indexes the contributor popover needs. The **merge / CI / trunk**
+batch adds `0038` `auto_merge_requests`; `0039` the four `repos`
+default-branch columns + `branch_commits`; `0040` `pull_requests.review_decision`;
+`0041` `branch_commits.failing_checks` + `.pr_number` + the
 `(account_id, repo_id, number)` PR index the commit→PR resolution needs — all additive and
 nullable, so there is no backfill (the branch sync re-upserts the same window every tick, and the
-read resolves null → `[]`/null meanwhile). `0042`/`0043` (pg `0029`/`0030`) RE-KEYED the bot object
+read resolves null → `[]`/null meanwhile). `0042`/`0043` RE-KEYED the bot object
 from (account, author) to (account, REPO, author) and then NORMALISED the actor-grain columns out
-into `account_reviewers`; **`0044`/`0045` (pg `0031`/`0032`) superseded both** and are, again, ONE
+into `account_reviewers`; **`0044`/`0045` superseded both** and are, again, ONE
 change in two steps — read them together:
 
 ```
-0044 / pg 0031  RE-HOME   repo grouping:  teams (m2m)  →  workspaces (1:N), + a Default per account
-0045 / pg 0032  COLLAPSE  the bot object: repo_reviewers + account_reviewers → workspace_reviewers
+0044  RE-HOME   repo grouping:  teams (m2m)  →  workspaces (1:N), + a Default per account
+0045  COLLAPSE  the bot object: repo_reviewers + account_reviewers → workspace_reviewers
 ```
 
 **`0044`** creates `workspaces` + `workspace_repos`, backfills one workspace per existing team
-**WITH THE TEAM IDS PRESERVED** (a URL, a bookmark, a persisted filter and — after plugin `0020` —
+**WITH THE TEAM IDS PRESERVED** (a URL, a bookmark, a persisted filter and — after platform `0020` —
 a cache row all carry the number; renumbering would silently repoint them at a different repo set),
 adds a Default per account under a **three-level name fallback** (`Default` → `Default workspace` →
 `Default (workspace <accountId>)`, because `workspaces_account_name` is unique and a user may
@@ -116,16 +83,15 @@ DROPS both legacy tables. Two fold rules are deliberate and were argued out rath
   the fallback.
 
 `monthly_cents` needs no CORE backfill: on this branch's databases the values are already in
-`account_reviewers` and `0045` folds them in. **Plugin `0019` is now a guarded NO-OP** — it read
+`account_reviewers` and `0045` folds them in. **Platform `0019` is a guarded NO-OP** — it read
 `repo_reviewers` and wrote `account_reviewers`, both of which core `0045` drops, and core migrations
-ALWAYS run first (`index.ts` completes `runMigrations()` before `bindProPlugin()` →
+ALWAYS run first (`index.ts` completes `runMigrations()` before `bindPlatform()` →
 `ctx.registerMigrations` → `runPluginMigrations`), so unfixed it would raise "no such table" on
-every database that had not already applied it — fresh installs, fresh cloud deploys, the demo
-seeder, CI. ⚠ **That failure is TOTAL and SILENT**: `pro/migrate.ts` rethrows, `bind.ts` logs
-`pro register() failed — OSS mode`, every capability goes false and every `/api/pro/*` 404s with
-nothing thrown. It is fixed by stubbing the two legacy tables and dropping them again (sqlite) /
-a `to_regclass` guard (pg), which is safe precisely because core always drops them first.
-**Plugin `0020` does two jobs**: (A) it ABSORBS `0019`'s backfill for databases upgrading from a
+every database that had not already applied it — fresh installs, the demo seeder, CI. (Under the
+plugin that failure was TOTAL and SILENT — the whole plugin dropped to OSS mode; today it fails the
+boot.) It is fixed by stubbing the two legacy tables and dropping them again, which is safe
+precisely because core always drops them first.
+**Platform `0020` does two jobs**: (A) it ABSORBS `0019`'s backfill for databases upgrading from a
 pre-`0043` release, reading `pro_settings.bot_cost_json` straight into
 `workspace_reviewers.monthly_cents` under the same rules — **UPDATE only, never INSERT** (fabricating
 a row would invent `automated`/`confidence`/`source` judgements nobody made, and a fabricated
@@ -136,18 +102,14 @@ tables to the `ws:<workspaceId>` vocabulary — **the four regenerable REPORT ca
 two USER-AUTHORED tables (`pinned_prompts`, `sprint_chat_history`) are RE-KEYED BY CASE** (`'<n>'` →
 `'ws:<n>'` where that workspace exists, everything else → the Default), because `0044` preserves the
 ids precisely so cache rows can follow them and a blanket move to Default would file a transcript
-where its own workspace can never surface it. ⚠ **Plugin migrations take NO
-`--> statement-breakpoint`** (the runner hands the whole file to `client.exec`/`Pool.query`; the
-marker is core-migrator syntax and is not valid SQL), and the pg twin wraps its work in
-`DO $$ … EXCEPTION WHEN others THEN RAISE WARNING …` exactly like pg `0019` — a failure here would
-cost the user every Pro feature, and `0020` is pure DELETE/UPDATE over regenerable or re-keyable
-rows, i.e. the safest possible thing to downgrade to a warning. `packages/pro/migrations/
+where its own workspace can never surface it. ⚠ **Platform migrations take NO
+`--> statement-breakpoint`** (the runner hands the whole file to `client.exec`; the
+marker is core-migrator syntax and is not valid SQL). `platform/migrations/
 0007_comparison_mode.sql` and `0010_team_scope.sql` **must STAY**: a database replaying from empty
-runs them before reaching `0020`. Plugin migration `0017` adds `pr_comment_annotations` (+ backfills
-`comment_assessments` as `kind='validity'`); plugin `0018` **DROPS `retro_reports`** (both
-dialects) — `0008`/`0010`, which create and widen it, must STAY, since a database replaying from
+runs them before reaching `0020`. Platform migration `0017` adds `pr_comment_annotations` (+ backfills
+`comment_assessments` as `kind='validity'`); platform `0018` **DROPS `retro_reports`** — `0008`/`0010`, which create and widen it, must STAY, since a database replaying from
 empty still runs them first.
-**`0046` (pg `0033`) DROPS the two "watched" columns** — `repos.inbox_watch` and
+**`0046` DROPS the two "watched" columns** — `repos.inbox_watch` and
 `repos.inbox_watch_started_at` — and with them the whole second visibility axis (see the `repos`
 bullet under **Data model**). It is a pure `DROP COLUMN` pair with no backfill, because the property
 worth keeping already had a home: the "New PRs" cutoff moved to `repos.created_at`, which is NOT
@@ -159,51 +121,9 @@ started. Two things to know if you touch it:
   `repos_account_idx` and `repos_id_account`, and none mentions either column — so no 12-step table
   rebuild is needed. That was CHECKED against a real database, not assumed; re-check before adding a
   `DROP COLUMN` for anything else.
-- **The two files are deliberately NOT symmetrical.** The pg twin uses `DROP COLUMN IF EXISTS`; the
-  sqlite one cannot, because SQLite has no such clause. drizzle's migrator records each file once so
-  a normal run is fine, but the sqlite file is **not hand-replayable**.
-
-**BOTH journals are hand-maintained, and the pg half is the one that gets forgotten.**
-`run-migrations.ts` picks the folder AND the migrator by mode, and each migrator reads its OWN
-folder's `meta/_journal.json` — a file that is not registered **SILENTLY SKIPS**. sqlite entries are
-`"version": "6"`, **pg entries are `"version": "7"`**; every file through sqlite `0052` /
-pg `0039` is registered (the two twins of a pair share one `when`, e.g. `1786300000000` for
-`0052`/pg `0039`). (Plugin migrations are discovered by filename sort and have NO journal — that
-requirement is core-only, do not add one.) An unregistered pg file produces a perfectly
-successful-looking boot that then 500s on a missing relation for every query. **Do not run
-`pnpm db:generate:pg` for an incremental change** — it squashes the baseline; `0031`/`0032` are
-hand-written additive, exactly like `0029`/`0030`, and so is `0033`.
-
-**Eight places the two dialects genuinely diverge in `0044`/`0045` vs `0031`/`0032`**, none of which
-may be "harmonised": pg `serial` does NOT advance on an explicit-id INSERT, so `0031` needs a
-`setval` between the team-id-preserving insert and the Default backfill (without it the Default
-insert takes `nextval = 1`, collides with preserved team id 1, and **the migration aborts and cloud
-never boots** — and its `is_called` third argument must be false on an empty table so a fresh
-deploy's first workspace is id 1, not 2); pg has no `max(boolean)` so `0032` uses `bool_or`; boolean
-literals (`is_default = 1` vs bare `is_default`); **integer flags inside a pg boolean expression** —
-`manual_aut`/`manual_any`/`any_review` are integer `MAX(CASE … 1 ELSE 0 END)` in BOTH dialects, so
-`CASE WHEN f.aut AND f.manual_aut THEN …` raises `argument of AND must be type boolean, not type
-integer` and aborts the whole migration (it must be `… AND f.manual_aut = 1`); **the pg
-`to_regclass` guard covers ONLY the statements that READ `teams`/`team_repos`** — wrapping the
-Default backfill and the unassigned-repo sweep as well would make a pg database without `teams`
-create zero workspaces and zero memberships while the sqlite twin's stub tables always run them,
-i.e. two files implementing two different algorithms; `reasons_json` is `jsonb` in pg so the
-synthesised CASE needs `::jsonb`; `WHERE true` before `ON CONFLICT` is a sqlite parsing
-disambiguator only; and the partial-index predicate differs (`WHERE is_default = 1` vs
-`WHERE is_default`).
-
-The Postgres baseline (`migrations-pg/`) is a squash — cloud starts empty (synced data is
-regenerable; no SQLite→Postgres migration). **Postgres was PROVEN once by hand for the migrations
-that existed at the time** (through pg `0030`), which retired the standing "the pg twins are
-exercised by nothing" gap for those files. It was a POINT-IN-TIME result, not a guarantee: nothing
-automated re-checks it and the suite still runs on SQLite only, so **pg `0031`/`0032`/`0033` and plugin
-`0020`'s pg twin are unverified until someone repeats the replay** (see the throwaway-container
-recipe under Dependency posture, and mind the `DROP SCHEMA public CASCADE` gotcha there — it leaves
-drizzle's own `drizzle` schema behind and the migrator then no-ops, reporting success having done
-nothing).
 **Known gaps on this branch:**
 - ✅ **CLOSED — the Slack digest is now PER WORKSPACE, capped** (plugin migration `0030`,
-  `workspace_slack_targets`). This entry used to read "the one remaining account-wide Pro cron
+  `workspace_slack_targets`). This entry used to read "the one remaining account-wide plugin cron
   covers the DEFAULT workspace only", a deliberate reduction taken over iterating all workspaces
   "which would multiply a billed LLM call by workspace count on a sweep". **That reduction has been
   reversed on purpose, and the cost story is now this:**
@@ -225,8 +145,8 @@ nothing).
   - ⚠ **`slack_last_sent_slot` moved with it and had to.** It was ONE column per account; under a
     per-workspace sweep a single marker re-sends the workspaces that already went out and skips
     the ones that had not. Migration `0030` CARRIES the old marker onto the Default-workspace row
-    so the first sweep after an upgrade does not re-post an already-delivered digest — pinned by
-    `packages/pro/test/slack-targets.test.ts`.
+      so the first sweep after an upgrade does not re-post an already-delivered digest — pinned by
+    `platform/test/slack-targets.test.ts`.
   - The seven `pro_settings.slack_*` columns are now **DORMANT** (still present, removed from the
     drizzle schema, never selected, never written) — the `ai_update_mode` precedent. ONE live
     spelling.
@@ -242,80 +162,10 @@ nothing).
   login→`ReviewBotKind` only. A stored workspace judgement and the `quality_check` role never reach
   that surface (the bulk-resolve OFFER on the same screen DOES consult the classification, so the
   two can disagree by design).
-- ✅ **The pg chain is REPLAYED AND GREEN through pg `0051` — see § Replaying the pg chain below.**
-  ⚠ pg `0052`–`0098` and plugin `0034`–`0037` + `0040` are NOT (written 2026-09-19/10-07 with the Postgres down; see the
-  note after `0068_my_turn_settings`). Last re-run **2026-09-09** on the standing local Postgres
-  (16.9): core through `db:migrate`
-  (**52 applied = 52 journal entries**, the newest being `0051_pr_content_kind`), with
-  `accounts.blast_radius_config` present as `jsonb` and `repo_file_coupling` carrying both FKs plus
-  its `rfc_account_repo` unique index. Blast radius adds NO plugin migration, so the **33** plugin
-  twins were not re-run; their last full replay is the 2026-09-07 pass, which also confirmed
-  `pull_requests` at 33 columns in BOTH dialects and `my_turn_dismissals` ABSENT.
-  ⚠ **`0047_drop_my_turn_dismissals` is DESTRUCTIVE and ONE-WAY** — there is no down migration and no
+- ⚠ **`0047_drop_my_turn_dismissals` is DESTRUCTIVE and ONE-WAY** — there is no down migration and no
   archive step. It is safe only because the predicate that made the table necessary now exists
   (docs/BACKEND.md § My Turn — the ball rule); a dismissal row has nothing left to mean.
-  ⚠ **`0046_merge_queue_state` is DDL-ONLY and was replayed as such, deliberately.** Unlike
-  `0045_pending_mute` it carries no FK, no backfill and no tenancy claim — two nullable columns with
-  NO DEFAULT — so there is nothing a WITH-DATA pass could prove that the column types do not. The
-  absent DEFAULT is the whole contract (null = "not observed", never "not queued") and is enforced
-  by `sync/upsert.ts`, not by the schema.
-  ⚠ **`0045_pending_mute` was exercised WITH DATA, not just DDL**, because its whole tenancy claim
-  is a COMPOSITE FK and a DDL-only replay proves nothing about one. Two accounts, one repo each:
-  the legitimate `(900, repo 9000)` row inserted; the cross-account `(901, repo 9000)` pair was
-  REFUSED by `pending_muted_repos_repo_account_fk` ("Key (repo_id, account_id)=(9000, 901) is not
-  present in table repos"); a duplicate was refused by `pending_muted_repos_account_repo`; and
-  `DELETE FROM repos` cascaded the row away, which is what lets `deleteRepo`'s explicit delete be
-  belt-and-braces rather than the only bound.
-  ⚠ **Both new twins were exercised WITH DATA, not just DDL**, since both carry a backfill and the
-  standing warning is that an empty replay proves DDL only. Seeded three accounts: one with
-  `comparison_mode='sprint'`, `bot_slack_digest=true`, THREE workspaces (one already holding a
-  `pro_workspace_settings` row with `sprint_cadence_days=7`) and TWO Slack target rows; one with an
-  explicit `comparison_mode='rolling_14'` and the flag off; one with the flag on and NO target row.
-  Result: 0032 wrote `'sprint'` into all three of the first account's workspaces (the pre-existing
-  row UPDATED, keeping its cadence 7 — `DO NOTHING` would have skipped exactly the workspace that
-  had bothered to configure a sprint), copied NOTHING for the explicit `rolling_14` (the product
-  default is not a stored value) and nothing for the NULL; 0033 switched on both of the first
-  account's deliveries, left the flag-off account's row NULL (which reads as false) and created NO
-  row for the account with the flag on and no delivery — a row there is a delivery, and
-  `webhook_url` is NOT NULL. A second pass of both files changed no counts.
-  (Earlier: **2026-09-02**, 45 core + 30 plugin twins through `0030_workspace_slack_targets`.) Both new named composite FKs VERIFIED by hand: an insert of
-  `(workspace_id, account_id) = (20, 1)` where workspace 20 belongs to account 2 is rejected by the
-  database, and deleting the owning workspace CASCADES the config row away.
-  ⚠ **`0030` was also exercised WITH DATA, not just DDL** — the standing warning that "an empty
-  replay proves DDL, never DATA" applies squarely to its `INSERT … SELECT`. Seeded a `pro_settings`
-  row with a whitespace-padded webhook, a `twice_daily` cadence, a timezone and a
-  `slack_last_sent_slot`, plus a second account holding a blank webhook: the migration produced
-  exactly one row, on the account's `is_default` workspace, `btrim`-ed, **carrying the dedupe
-  marker** (the column whose absence would re-post an already-delivered digest on the first sweep
-  after an upgrade), and nothing for the blank account. The sqlite twin's `trim()` / `is_default = 1`
-  path is pinned by `packages/pro/test/slack-targets.test.ts`.
-  ✅ **`0031_workspace_issue_tracker` WAS REPLAYED ON pg on 2026-09-03** (it had been in the
-  standing "unreplayed until someone repeats this" bucket; this line used to say so and was stale
-  for one day — ⚠ if you replay the chain, UPDATE THIS LINE, because a stale "unreplayed" warning
-  and a stale "replayed" claim are equally misleading and only one of them is safe). Two things
-  were exercised WITH DATA, and are what to re-exercise on any future replay:
-  because both are `INSERT … SELECT` behaviour rather than DDL: (a) the backfill fans an account's
-  `issue_*` config into a row for **EVERY** workspace it owns, not just `is_default` — the opposite
-  of `0030`'s shape, and a Default-only result is the regression to watch for; (b) the
-  `ON CONFLICT … DO UPDATE` must UPDATE a workspace that already carries a `0029` cadence row
-  rather than skipping it, and must leave that row's `sprint_cadence_days` intact. The sqlite twin's
-  behaviour is pinned by `packages/pro/test/workspace-settings.test.ts`. ⚠ **THE TWO DIALECTS
-  DIVERGE ON REPLAY-SAFETY HERE, DELIBERATELY**: the pg file uses `ADD COLUMN IF NOT EXISTS` (it
-  must — a plugin pg migration that throws is downgraded to a WARNING and silently drops the whole
-  plugin to OSS mode), while SQLite has no such syntax and re-execing the sqlite file raises
-  "duplicate column name", exactly like plugin `0006`'s bare `ADD COLUMN`. Run-once is guaranteed by
-  `pro_migrations`, not by the statement; the DATA half is idempotent in both.
-  ⚠ `0029` also DROPs `wpr_account_ws_period_model` and recreates it as
-  `wpr_account_ws_period_model_cadence`; `persistReport`'s `onConflictDoUpdate` target moved with
-  it, and a half-applied swap would leave `workspace_period_reports` with no unique key at all —
-  which is why that file is deliberately UNWRAPPED (no warning-downgrading `DO` block). Earlier, as
-  of 2026-08-27, core `0000`→`0043` (44/44) and all 28 plugin pg twins (`0028_work_plan` replayed
-  into a throwaway DB the day it was written, and idempotent on a second run) — including plugin `0020`,
-  the `0021`–`0027` batch and `0027`'s deliberately UNWRAPPED `CREATE TABLE` — apply cleanly into
-  a throwaway database on PostgreSQL 16.9, reaching full table parity with SQLite.
-  ⚠ **This is a by-hand one-off, not CI, so it goes stale the moment anyone adds a migration.**
-  The suite is SQLite-only and will stay silent about it.
-- **`trunk_ci_status_events` (`0052` / pg `0039`) has NO BACKFILL.** The table is append-only and
+- **`trunk_ci_status_events` (`0052`) has NO BACKFILL.** The table is append-only and
   written only by `sync/branch-status.ts`, on a TRANSITION, at the end of a full repo walk — and
   the one-time CI-history backfill (`sync/backfill-ci-history.ts`) synthesizes only the PR-side
   `ci_status_events`, deliberately not this. So the Feed's `trunk_ci_failed` half stays EMPTY for
@@ -333,9 +183,9 @@ nothing).
   consolidation cut list); the plugin's `sprint-report.ts` routes and the Slack digest's use of
   `refreshSprintReport` survive. (`PresetPromptPanel` is also importer-less, but its server side
   is deliberately kept.)
-- **`packages/pro/test/` and `apps/frontend/test/` still do not run in CI** (see Tests above) — and
-  they now hold the workspace refactor's frontend evidence (`workspaceScope.test.ts`,
-  `botReviewerQueryKey.test.ts`) plus the plugin's cross-account isolation suite.
+- **`apps/frontend/test/` still does not run in CI** — and it holds the workspace refactor's frontend
+  evidence (`workspaceScope.test.ts`, `botReviewerQueryKey.test.ts`). The platform's tests, including
+  its cross-account isolation suite, run with the backend's `pnpm test` since the fold.
 - Auto-merge's retarget guard still compares the last SYNCED base ref rather than a stored
   `expected_base_ref` (see `merge/auto-merge-runner.ts`).
 
@@ -348,35 +198,26 @@ home of "Reset name to auto". With one row per actor per workspace the row exist
 completed by the bucket predicate, which is `!automated && (isManualOverride || identitySource ===
 'manual')` — ⚠ `isManualOverride` ALONE is not enough, because a *renamed* actor carries
 `identitySource === 'manual'` with `source === 'auto'` and would fall under no bucket at all.
-**Docs:**
-`docs/SYNC.md`, `docs/DEPLOY-RAILWAY.md`, `docs/GITHUB-AUTH-SETUP.md`,
-`docs/LOCAL-CLOUD-TESTING.md`, `docs/DOMAIN-REPUTATION.md` (Safe Browsing + Search Console),
-`docs/BILLING-STRIPE.md` (Stripe Payment Link + webhook → `accounts.plan` entitlement),
-`docs/RELEASE.md`.
+**Docs:** `docs/SYNC.md`, `docs/DATA-MODEL.md`, `docs/RELEASE.md`.
 
 
 
-## `0047` / pg `0034` — `ml_comment_labels`
+## `0047` — `ml_comment_labels`
 
-Additive, hand-written in both dialects (never `db:generate:pg` — it squashes the pg baseline).
+Additive, hand-written.
 Creates the one table behind [ML-SEVERITY.md](ML-SEVERITY.md): ML severity/category labels for
-bot-authored text. Journal entries `idx 47 / version "6"` and `idx 34 / version "7"`, sharing
-`when: 1785800000000` as every paired twin does.
+bot-authored text. Journal entry `idx 47 / version "6"`, `when: 1785800000000`.
 
 Points worth remembering:
 
 - All three id FKs (`account_id`, `repo_id`, `pr_id`) are **ON DELETE cascade**, so the table
   joins NEITHER `deleteRepo` nor `deletePrSubtree` — the `search_index` precedent. It IS in
   `accountScopedTables()` and is deleted explicitly in `eraseAccountData`, because erasure must
-  not depend on which dialect enforces FKs.
+  not depend on `foreign_keys=ON`.
 - `target_id` has **no FK**: it names a row in one of three tables depending on `target_kind`,
   which is exactly why `target_kind` is part of the unique `mcl_account_target`.
-- Dialect columns: sqlite `real` / pg `double precision` for `severity_prob`; sqlite
-  `text ... mode:'json'` / pg `jsonb` for the two category columns; sqlite `integer` /
-  pg `boolean` for `is_summary`; sqlite `integer` + `DEFAULT (unixepoch())` / pg
-  `timestamp with time zone` + `DEFAULT now()` for the three timestamps.
-- ✅ **pg `0034` HAS now been replayed against a real Postgres** — see `0048` / pg `0035` below,
-  which replayed the whole pg chain (`0000`→`0035`) into a throwaway database on Postgres 17.
+- Columns: `real` for `severity_prob`; `text ... mode:'json'` for the two category columns;
+  `integer` for `is_summary`; `integer` + `DEFAULT (unixepoch())` for the three timestamps.
 - ⚠ A running `tsx watch` dev server applies migrations on every restart, so editing a `.sql`
   file AFTER the watcher has already applied it leaves the dev DB on the old DDL with the new
   file's hash unrecorded. Drop the table, delete its `__drizzle_migrations` row, re-run
@@ -384,13 +225,12 @@ Points worth remembering:
 
 
 
-## `0048` / pg `0035` — `ml_comment_labels.vendor_severity`
+## `0048` — `ml_comment_labels.vendor_severity`
 
 Two additive nullable `text` columns — `vendor_severity` (`nit`…`critical`) and
 `vendor_severity_confidence` (`high`/`medium`/`low`) — carrying the REVIEW BOT'S OWN declared
 severity, which the severity-api's marker parser already extracted and we were discarding.
-Journal entries `idx 48 / version "6"` and `idx 35 / version "7"`, sharing
-`when: 1785900000000`. No index (read out of an already-fetched label row, never a predicate)
+Journal entry `idx 48 / version "6"`, `when: 1785900000000`. No index (read out of an already-fetched label row, never a predicate)
 and no backfill.
 
 - **This is not an input to our label.** On `gold_v2_sample` (300 comments, fresh label-free
@@ -410,14 +250,8 @@ and no backfill.
   mutation-tested exactly that (removing the two `set:` keys fails two cases).
 - **Existing rows keep NULL.** Labels are never re-scored (ML-SEVERITY.md § known gaps), so
   historical rows gain a vendor claim only via `pnpm ml:enrich --reset`. A null renders nothing.
-- ✅ **Replayed against a real Postgres 17.** The entire pg chain `0000`→`0035` was applied in
-  journal order into a throwaway database (`docker exec … psql -v ON_ERROR_STOP=1`), then
-  smoke-tested at row level: the insert stores the claim, an `ON CONFLICT (account_id,
-  target_kind, target_id) DO UPDATE` re-write with NULLs clears it, the row count stays 1 and our
-  own `severity` is untouched. Re-applying `0035` is a no-op (`ADD COLUMN IF NOT EXISTS`). This
-  also closes the standing gap on pg `0031`–`0034` — by hand, once; CI still does not do it.
 
-## `0050` / pg `0037` — `users.app_slug`
+## `0050` — `users.app_slug`
 
 One additive nullable `text` column on the GLOBAL `users` table: the GitHub App slug behind an
 actor's comments (`performed_via_github_app.slug`, REST-only), which `sync/app-attribution.ts`
@@ -434,9 +268,9 @@ backfill.
   `classifyReviewer` cannot read, so it was never wired to anything). The column fills only when
   something invokes the probe; wiring it in now needs a CORE-side gate, never a plugin setting.
 
-## Plugin `0021` — Bot Tuning Advisor tables
+## Platform `0021` — Bot Tuning Advisor tables
 
-Three account-scoped plugin tables (sqlite + pg twins, filename-sorted, NO journal, no
+Three account-scoped platform tables (filename-sorted, NO journal, no
 `--> statement-breakpoint`): `advisor_recommendations` (unique
 `(account_id, workspace_id, dedupe_key)`), `advisor_bot_profiles` (unique
 `(account_id, workspace_id, bot_user_id)` + the NAMED composite FK
@@ -447,14 +281,12 @@ ON DELETE CASCADE because core's `deleteWorkspace` cannot re-home plugin rows), 
 `advisor_config_events` (append-only, index `(account_id, repo_id, occurred_at)`, no unique).
 Unlike the DO-block data migrations, this is pure `CREATE TABLE IF NOT EXISTS` DDL (the
 0014/0017 idiom). All three are in `eraseProByAccountId` and the isolation-test seeds; none is
-PR-keyed, so `pruneProByPrIds` is deliberately unchanged. ⚠ The pg twin (like plugin `0020`'s)
-has not been replayed against a real Postgres.
+PR-keyed, so `pruneProByPrIds` is deliberately unchanged.
 
-## `0052` / pg `0039` — `trunk_ci_status_events`
+## `0052` — `trunk_ci_status_events`
 
-One additive table in both dialects, hand-written (never `db:generate:pg` — it squashes the pg
-baseline), **no backfill**. Journal entries `idx 52 / version "6"` and `idx 39 / version "7"`,
-sharing `when: 1786300000000`. It is the TRUNK twin of `ci_status_events`:
+One additive table, hand-written, **no backfill**. Journal entry `idx 52 / version "6"`,
+`when: 1786300000000`. It is the TRUNK twin of `ci_status_events`:
 `branch_commits.ci_status` is updated IN PLACE by the branch snapshot's idempotent upsert, so a
 trunk commit that turns red hours after it landed carries no record of WHEN — its only timestamps are
 `committed_at` (git commit time) and `created_at` (first insertion), and presenting either as
@@ -473,8 +305,8 @@ cascade`), nullable `branch_name`, `head_sha`, `status`, `failing_checks`, `obse
   block runs OUTSIDE the snapshot's transaction inside its own `try` — strictly non-fatal, like
   everything else in the branch snapshot.
 - **`failing_checks` is `BranchCheckRun[]`, NOT `ci_status_events`' bare `string[]`** — same
-  column name, different shape, matching `branch_commits` on purpose (sqlite `text mode:'json'`,
-  pg `jsonb`, `$type<>()` in both schemas so the difference is a compile-time fact). The Feed
+  column name, different shape, matching `branch_commits` on purpose (`text mode:'json'`
+  with `$type<>()`, so the difference is a compile-time fact). The Feed
   normalises to bare names on the wire.
 - **`observed_at` is OUR observation time** (the branch query selects no `completedAt`), so UI
   copy says "detected", never "failed at".
@@ -496,10 +328,10 @@ cascade`), nullable `branch_name`, `head_sha`, `status`, `failing_checks`, `obse
   checklist rather than in the `KNOWN_UNCHECKED` exemption `ci_status_events` sits in.
 - **No backfill, by construction** — see the known-gaps entry above.
 
-## Plugin `0022` — `pr_comment_annotations.evidence`
+## Platform `0022` — `pr_comment_annotations.evidence`
 
-One additive nullable `text` column on the plugin's annotation table (sqlite + pg twins,
-filename-sorted, NO journal, no `--> statement-breakpoint`): the GROUNDING DIFF the `addressed`
+One additive nullable `text` column on the platform's annotation table (filename-sorted, NO
+journal, no `--> statement-breakpoint`): the GROUNDING DIFF the `addressed`
 verdict was judged against, as the JSON `annotations/evidence.ts#encodeEvidence` writes
 (`{v:1, baseSha, headSha, path, outcome:'changed'|'untouched'|'unavailable', patch, previousPath,
 note}`). Written for `addressed` rows with `target_kind='thread'` only; every other kind stores an
@@ -515,34 +347,25 @@ explicit NULL.
   marks every existing addressed row stale exactly once. (It has moved twice more since, for the
   same one-off reason each time: `t3|` when `isResolved` entered the hash, `t4|` when the evidence
   window re-anchored on the thread's ROOT comment. Current prefix: **`t4|`** — see
-  docs/PRO-PLUGIN-AND-ACTIVITY.md.)
-- **The sqlite file is a plain `ALTER TABLE … ADD COLUMN`** (SQLite has no `IF NOT EXISTS` there,
-  and `pro_migrations` guarantees one application); the pg twin is `ADD COLUMN IF NOT EXISTS`
-  inside the standard `DO $$ … EXCEPTION WHEN others THEN RAISE WARNING` wrapper. ⚠ Be honest
-  about what that warning path costs HERE: `readPrAnnotationRows` SELECTs this column, so a
-  database that took the warning 500s on the annotations GET — the "Check review" surface breaks
-  while the rest of the plugin keeps serving. That is still the better trade than a raise, which
-  takes the WHOLE plugin dark (OSS-mode degrade) with nothing anyone would connect to this file;
-  the fix is to delete the row from `pro_migrations` and restart once the cause is cleared.
-- ⚠ The pg twin has not been replayed against a real Postgres.
+  docs/PLATFORM.md.)
+- **The file is a plain `ALTER TABLE … ADD COLUMN`** (SQLite has no `IF NOT EXISTS` there,
+  and `pro_migrations` guarantees one application). If it ever fails, delete its row from
+  `pro_migrations` and restart once the cause is cleared.
 
-## Plugin `0024` — `ai_fixes.comment_targets` + `comment_verdicts`
+## Platform `0024` — `ai_fixes.comment_targets` + `comment_verdicts`
 
 ⚠ **DORMANT since core `0078`**: the comments seed was removed; these columns are no longer written
 or read (old rows keep their data).
 
-Two additive nullable `text` columns holding JSON on the plugin's `ai_fixes` table (sqlite + pg
-twins, filename-sorted, NO journal, no `--> statement-breakpoint`; the pg twin is
-`ADD COLUMN IF NOT EXISTS` inside the standard `DO $$ … EXCEPTION WHEN others THEN RAISE WARNING`
-wrapper). They are the record of a **comments-seeded** fix run — the "fix from comments" workflow:
+Two additive nullable `text` columns holding JSON on the `ai_fixes` table (filename-sorted, NO journal, no `--> statement-breakpoint`). They are the record of a **comments-seeded** fix run — the "fix from comments" workflow:
 `comment_targets` is the `AiFixCommentTarget[]` the run was given (written at INSERT, in prompt
 order, each carrying its `C<n>` ref label), `comment_verdicts` the `AiFixCommentVerdict[]` the
 agent reported (written on SUCCESS). `ref` is the join key between the two; both are NULL on every
 other seed.
 
-- **`0023` is the Insights chat-answer-window pair**, so this one is `0024` in both folders.
-- **Nullable with no default, deliberately.** `packages/pro/test/isolation.test.ts` auto-applies
-  every file in `packages/pro/migrations` (`readdirSync` + sort) and inserts `ai_fixes` rows from a
+- **`0023` is the Insights chat-answer-window pair**, so this one is `0024`.
+- **Nullable with no default, deliberately.** `platform/test/isolation.test.ts` auto-applies
+  every file in `platform/migrations` (`readdirSync` + sort) and inserts `ai_fixes` rows from a
   FIXED value list — a `NOT NULL` column without a default would break that suite.
 - **Stored, not re-derived.** The targets are resolved once at launch (bodies, authors, file
   anchors and hydrated anchor hunks), and the prompt is rendered and stored at the same moment, so
@@ -551,27 +374,20 @@ other seed.
 - **The verdicts are the agent's SELF-REPORT and are stored as commentary only.** The authoritative
   changeset is still the captured git diff — `filesTouched` inside a verdict is labelled as the
   agent's own account wherever the UI shows it.
-- ⚠ What the pg warning path costs here: the ai-fix GET SELECTs both columns, so a database that
-  took the warning 500s that route — the whole AI Fix tab breaks while the rest of the plugin keeps
-  serving. Still the better trade than a raise, which takes the WHOLE plugin dark (OSS-mode
-  degrade); the fix is to delete the row from `pro_migrations` and restart once the cause is
-  cleared.
-- ⚠ The pg twin has not been replayed against a real Postgres.
 
-⚠ **Plugin `0003`'s eight `ai_fixes` columns are DORMANT**: `resolved_strategy`, `resolved_patch`,
+
+⚠ **Platform `0003`'s eight `ai_fixes` columns are DORMANT**: `resolved_strategy`, `resolved_patch`,
 `resolved_diff`, `resolved_base_sha`, `resolved_files_changed`, `resolved_conflict_files`,
 `resolved_at`, `resolve_error`. They held AI Fix's stored rebase artifact, and that
-trunk-reconciliation path was removed (docs/PRO-PLUGIN-AND-ACTIVITY.md § AI Fix pushes as-is). They
-are undeclared in both `packages/pro/src/ai-fix/schema.{sqlite,pg}.ts` (a comment there names the
+trunk-reconciliation path was removed (docs/CLAUDE-REVIEW.md § AI Fix). They
+are undeclared in `platform/ai-fix/schema.sqlite.ts` (a comment there names the
 set), so drizzle never selects or writes them — which also stopped the getters reading the stored
 mbox/diff blobs on every tab load. Old rows keep their values (2 on the dev database) until retention
-or erasure removes the whole row. Do NOT drop them in an ad-hoc migration: a failed plugin migration
-drops the whole plugin to OSS mode, and the plugin's pg twins from `0034` on are unreplayed. None is
-indexed, so a later batched `DROP COLUMN` is possible. (Same batch, core side: `claude_reviews.model`
-lost its TypeScript-only drizzle `enum:` in both schemas. The column was always plain `text` with no
-CHECK and no pg enum, so there is no migration; see docs/CLAUDE-REVIEW.md § Models.)
+or erasure removes the whole row. None is indexed, so a later batched `DROP COLUMN` is possible. (Same batch, core side:
+`claude_reviews.model` lost its TypeScript-only drizzle `enum:`. The column was always plain `text`
+with no CHECK, so there is no migration; see docs/CLAUDE-REVIEW.md § Models.)
 
-## `0053` / pg `0040` — re-derive `workspace_reviewers.role` against five vocabularies
+## `0053` — re-derive `workspace_reviewers.role` against five vocabularies
 
 Five `UPDATE`s, one per non-review role, over rows whose `source <> 'manual'`. No schema change —
 this is a pure data correction, and it exists because of a read-order property that makes a
@@ -592,16 +408,13 @@ code-only fix insufficient.
   re-derived, exactly as migration `0042`'s backfill had it. The judgement half is owned by
   `source`. ⚠ The flip side is a real, accepted limitation: where a human classified ONE row of a
   duplicated identity, the pair now splits across two lanes (see the known-gaps list in CLAUDE.md).
-- **It supersedes `0042`'s / pg `0029`'s narrower quality-check list** rather than repeating it.
-- ⚠ **THE ONE DIALECT DIVERGENCE:** sqlite strips the `[bot]` suffix with
-  `replace(lower(github_login), '[bot]', '')`, pg with
-  `regexp_replace(lower("github_login"), '\[bot\]$', '')`. Same operation, each in its dialect's
-  idiom — and the stripping itself is load-bearing, because the same actor exists as two `users`
+- **It supersedes `0042`'s's narrower quality-check list** rather than repeating it.
+- **The `[bot]` suffix is stripped** with `replace(lower(github_login), '[bot]', '')` — and the
+  stripping itself is load-bearing, because the same actor exists as two `users`
   rows with different GitHub node ids and a list covering one spelling splits it across two roles.
   `replace()` is safe on sqlite because no GitHub login may contain `[` or `]`.
-- ⚠ The pg twin has not been replayed against a real Postgres.
 
-## `0054` / pg `0041` — brand the automations stored as `in_house`
+## `0054` — brand the automations stored as `in_house`
 
 One `UPDATE` per vendor kind (68 of them), over rows whose identity was never set by a human. No
 schema change; a data correction with the same read-order justification as `0053`.
@@ -627,30 +440,28 @@ schema change; a data correction with the same read-order justification as `0053
     silently overwriting that is how a correction is lost.
   - `label = NULL` — the label CACHES the kind's display name, and the old rows hold the literal
     "In-house AI" or the bare login. Leaving it would print "In-house AI" beside a SonarQube chip.
-- ⚠ **The dialect divergence is the same as `0053`**: `replace(lower(…), '[bot]', '')` on sqlite,
-  `regexp_replace(lower(…), '\[bot\]$', '')` on Postgres.
+- The `[bot]` strip is the same as `0053`'s.
+
 - **Verified on a live database.** After applying, the only rows left at `in_house` were the ones
   that should be: four genuinely unknown logins (`cdp-github-action`, `erxes-dev-agent`,
   `tjpeel-ee`, a user literally named `Copilot`) and nine rows a human had named
   (`identity_source: 'manual'`), which the guard is there to protect.
-- ⚠ The pg twin has not been replayed against a real Postgres.
 
-## Plugin `0025`/`0026` — period reports · `0027` — `pro_synthesis`
+## Platform `0025`/`0026` — period reports · `0027` — `pro_synthesis`
 
 **`0025`** (`workspace_period_reports` + `sprint_cadence` settings surface) and **`0026`**
-(the lanes column) are the apiVersion-20 period-reporting storage — recorded in
-[PRO-PLUGIN-AND-ACTIVITY.md](PRO-PLUGIN-AND-ACTIVITY.md); the file-level rules here are the
-standard plugin ones (filename-sorted, NO journal, no `--> statement-breakpoint`).
+(the lanes column) are the period-reporting storage — recorded in
+[PERIOD-REPORTING.md](PERIOD-REPORTING.md); the file-level rules here are the
+standard platform ones (filename-sorted, NO journal, no `--> statement-breakpoint`).
 
 **`0027` creates `pro_synthesis`** — the ONE cache table behind `GET/POST /api/pro/synthesis`
 (drill-down verdict cards, the workspace "What they're flagging" synthesis, brief/roll-up/person
-narration; full contract in PRO-PLUGIN-AND-ACTIVITY.md § apiVersion 21). One row per
+narration; full contract in [PLATFORM.md](PLATFORM.md) § The synthesis seam). One row per
 `(account_id, scope_key)` with a unique index (`pro_synthesis_account_scope`) — every
 `onConflictDoUpdate` in `synthesis/routes.ts` targets exactly that pair (the 0042/0045 lesson is
 cited at the write site). Facts that live at the DDL grain:
 
-- **`output` is JSON as `text` in BOTH dialects** — never jsonb, never drizzle `mode:'json'` —
-  so the twins stay structurally identical and one serializer owns the blob (the
+- **`output` is JSON as `text`** — never drizzle `mode:'json'` — so one serializer owns the blob (the
   `workspace_period_reports` rule).
 - **`input_count`/`analyzed_count` are REAL COLUMNS**, not facts buried in the blob: the
   "Summarised X of Y" coverage line is the disclosure that keeps a capped synthesis honest, and
@@ -660,14 +471,7 @@ cited at the write site). Facts that live at the DDL grain:
   `bot_theme_reports` family), not a keyed history. It is in `retention.ts`'s
   `eraseProByAccountId` and deliberately NOT in `pruneProByPrIds` (no pr_id grain — it ages by
   STALENESS: the payload hash moves as the underlying items churn).
-- ⚠ **The pg twin's CREATE is BARE — no `DO $$ … EXCEPTION` wrapper — on purpose**, exactly like
-  `0021`'s and `0025`'s CREATEs. The warning-wrapper trade only makes sense when the feature can
-  degrade around the missing DDL; a missing TABLE cannot (every synthesis call would 500 forever
-  while `pro_migrations` records the file as applied, with no way back except editing that table
-  by hand). A raise is the honest outcome, and `IF NOT EXISTS` covers the one benign replay.
-- ⚠ The pg twin has not been replayed against a real Postgres (nor have `0025`/`0026`'s).
-
-### `0061_auto_merge_durable_anchors` (pg `0048`)
+### `0061_auto_merge_durable_anchors`
 
 Two nullable `text` columns on `auto_merge_requests`, no backfill and no default.
 
@@ -676,34 +480,34 @@ Two nullable `text` columns on `auto_merge_requests`, no backfill and no default
   as "the PR was retargeted" and disarmed an intent nobody had touched. NULL on pre-existing rows,
   which fall back to the synced value exactly as before.
 - `update_issued_against_oid` — the head SHA an in-flight `update-branch` was issued against. It
-  lived only in a process-local Map, so a restart (every `pnpm dev` file save; every cloud deploy)
+  lived only in a process-local Map, so a restart (every `pnpm dev` file save; every upgrade)
   turned the watcher's OWN merge commit into an unexplained head move and disarmed the intent.
 
 ⚠ **NULL MEANS "NOT RECORDED", AND THAT IS WHY NEITHER TAKES A DEFAULT.** A default on
 `expected_base_ref` would assert the user consented to a branch nobody asked them about.
 
-### `0065_workspace_flow_settings` (pg `0052`)
+### `0065_workspace_flow_settings`
 
-One nullable JSON column, `workspaces.flow_settings` (sqlite `text`, pg `jsonb`) — Chronology's
+One nullable JSON column, `workspaces.flow_settings` (`text`) — Chronology's
 working hours and budgets as OVERRIDES ONLY. No backfill: NULL is "every default", which is right
 for every existing row. See docs/DATA-MODEL.md.
 
-### `0066_review_request_events` (pg `0053`)
+### `0066_review_request_events`
 
 The review-request HISTORY table (`review_request_events`, a PR child with no `account_id`, unique
 `(pr_id, github_node_id)`, both FKs) plus `pull_requests.review_requests_synced_at`. No backfill in
 SQL: the one-time GitHub backfill (`sync/backfill-review-requests.ts`) fills it after walks, keyed
 on the NULL stamp. See docs/DATA-MODEL.md and docs/BOTTLENECKS.md § Asking for a review.
 
-### Plugin `0034_flow_pointers`
+### Platform `0034_flow_pointers`
 
 `pro_flow_pointers`, the Chronology pointers cache — the `pro_work_plans` shape exactly
 (`(account_id, scope_key)` unique, no FK, erased with the account, never pruned per PR).
 
-### `0067_pr_security_signals` (pg `0054`)
+### `0067_pr_security_signals`
 
 Four nullable columns on `pull_requests` — `dependency_vendor`, `security_fix`, `advisory_ids`
-(sqlite `text` json / pg `jsonb`) and `security_checked_at` — with no backfill in SQL: NULL
+(`text` json) and `security_checked_at` — with no backfill in SQL: NULL
 `security_checked_at` is "never classified", and the GitHub backfill
 (`sync/backfill-pr-security.ts`) works through open automation PRs after walks. See
 docs/DATA-MODEL.md § dependency + security signals and docs/SYNC.md.
@@ -713,25 +517,24 @@ per-org App (three for `role`, seven for `kind`): the stored role and kind beat 
 read, so a code-only vocabulary change never reaches a workspace whose Bots tab already classified
 them. Same three conditions as `0053`/`0054` (`source <> 'manual'`; `identity_source <> 'manual'`
 with `kind IN ('in_house','vendor')`; `label = NULL`), and the same `replace` vs `regexp_replace`
-divergence. Both twins share `when` `1789696800000`.
+divergence. Journal `when` `1789696800000`.
 
-### `0068_my_turn_settings` (pg `0055`)
+### `0068_my_turn_settings`
 
 Three nullable columns, no backfill in SQL:
 
-- `accounts.my_turn_settings` (sqlite `text` json / pg `jsonb`) — the reader's My Turn settings as
+- `accounts.my_turn_settings` (`text` json) — the reader's My Turn settings as
   OVERRIDES ONLY; NULL is "every default", which is right for every existing row (the `0062`
   `blast_radius_config` rule). See docs/DATA-MODEL.md § `accounts.my_turn_settings`.
-- `pr_mentions.mentioned_at` (sqlite `integer` / pg `timestamp with time zone`) and
+- `pr_mentions.mentioned_at` (`integer`) and
   `pr_mentions.mentioned_by_user_id` (`integer`, no FK) — the newest human mention's time and
   author. Existing rows stay NULL until the mention scanner's next tick restamps them (it re-derives
   the whole set every tick), and a NULL row shows no card. The table's unique is unchanged, so the
   scanner's new `onConflictDoUpdate` targets the existing `prm_account_pr`.
 
-Both twins share `when` `1789783200000` (one day after `0067`/`0054`). The pg file uses
-`ADD COLUMN IF NOT EXISTS`, so a half-applied replay can re-run.
+Journal `when` `1789783200000` (one day after `0067`).
 
-### `0069_my_turn_dismissals` (pg `0056`)
+### `0069_my_turn_dismissals`
 
 A unique index `pull_requests_id_account` on `pull_requests (id, account_id)` — never a lookup (`id`
 is the primary key), only the parent key of the new composite FK — and the `my_turn_dismissals`
@@ -739,22 +542,20 @@ table: `account_id` (FK accounts, cascade), nullable `pr_id` + `repo_id` with NA
 `my_turn_dismissals_pr_account_fk` / `_repo_account_fk` against `(id, account_id)`, `dismissed_at`
 NOT NULL, and two unique indexes `(account_id, pr_id)` / `(account_id, repo_id)`. A composite FK
 with a NULL member is not checked (MATCH SIMPLE), which is what lets one table carry both subject
-kinds. ⚠ Same table NAME as the one `0060`/pg `0047` dropped, different contract — see the file's
-header and docs/DATA-MODEL.md. No backfill. Twins share `when` `1789869600000`.
+kinds. ⚠ Same table NAME as the one `0060` dropped, different contract — see the file's
+header and docs/DATA-MODEL.md. No backfill. Journal `when` `1789869600000`.
 
-### `0070_claude_review_follow_up_ticket` (pg `0057`)
+### `0070_claude_review_follow_up_ticket`
 
 Four nullable columns, no backfill: `claude_reviews.ticket`, `.ticket_assessment` and `.follow_up`
-(sqlite `text` json / pg `jsonb`) and `claude_review_findings.prior_finding_id` (`integer`). The
+(`text` json) and `claude_review_findings.prior_finding_id` (`integer`). The
 last is a SOFT reference with NO FK on purpose — it always points at a finding of the same PR, and
 `retention.ts` + `deleteRepo` delete a PR's findings in one `inArray(reviewId, …)` statement, so an
 FK would only add delete-ordering risk. `claude_reviews.model` needed nothing for the new
-`claude-opus-5-5` id: it is plain `text` in both dialects (no CHECK, no pg enum). Claude Review is
-local-only, so the pg columns exist for parity. Twins share `when` `1789956000000`; the pg file
-uses `ADD COLUMN IF NOT EXISTS`. `src/db/claude-review-follow-up-columns.test.ts` runs the sqlite
+`claude-opus-5-5` id: it is plain `text` (no CHECK). Journal `when` `1789956000000`. `src/db/claude-review-follow-up-columns.test.ts` runs the sqlite
 half through the real migrator in CI. Contracts: docs/CLAUDE-REVIEW.md.
 
-### Plugin `0035_workspace_jira_api`
+### Platform `0035_workspace_jira_api`
 
 Four nullable `text` columns on `pro_workspace_settings` — `jira_email`, `jira_token` (a
 CREDENTIAL: `sealed:v1:…` / `plain:…`, see SECURITY.md), `jira_ac_field_id`, `jira_ac_field_name`.
@@ -762,32 +563,27 @@ No backfill (NULL = no Jira API access), no new erasure entry (the table is alre
 account), tenancy unchanged (0029's composite FK). ⚠ **`jira_ac_field_id` / `jira_ac_field_name` went DORMANT one
 release later** — the acceptance-criteria field moved to the Claude Review panel, per ticket
 (docs/CLAUDE-REVIEW.md). They stay in the table and are undeclared in both schema modules; do not
-drop them. The sqlite file is bare `ADD COLUMN` (run-once
-via `pro_migrations`); the pg twin uses `ADD COLUMN IF NOT EXISTS`. ⚠ Every hand-built test DB
+drop them. The file is bare `ADD COLUMN` (run-once via `pro_migrations`). ⚠ Every hand-built test DB
 that replays `0029`/`0031`/`0032` and then touches the store must replay `0035` too — the store now
 SELECTs the four columns (`workspace-settings.test.ts`, `settings-route-schema.test.ts`,
-`jira-routes.test.ts`; `isolation.test.ts` replays the whole folder). ⚠ **The pg twin is NOT
-replayed** — the plugin should reach **35** there.
+`jira-routes.test.ts`; `isolation.test.ts` replays the whole folder).
 
-### `0071_claude_review_trigger` (pg `0058`)
+### `0071_claude_review_trigger`
 
 One column, `claude_reviews.trigger` — `text NOT NULL DEFAULT 'manual'`, `'manual' | 'auto'` (who
-started the run; `'auto'` = the plugin's per-workspace auto-review sweeper). The default makes every
+started the run; `'auto'` = the per-workspace auto-review sweeper). The default makes every
 existing row a click, which is what it was. CORE, not a plugin table, because a CORE read needs it:
 `getUnactionedClaudeReviews` carries it to the My Turn card, which labels an auto run "Auto review".
-Twins share `when` `1790042400000`; the pg file uses `ADD COLUMN IF NOT
-EXISTS`. `src/db/my-turn-claude-review.test.ts` runs the sqlite half through the real migrator.
-⚠ **The pg twin is NOT replayed.**
+Journal `when` `1790042400000`. `src/db/my-turn-claude-review.test.ts` runs the sqlite half through the real migrator.
 
-### `0072_commit_message_headline` (pg `0059`)
+### `0072_commit_message_headline`
 
 One nullable column, `commits.message_headline` — GitHub's `messageHeadline` (first line, at most 200
 chars), read by My Turn's "Pushed since" card. NULL is "not synced yet": the walk selects it on every
 pass (not lean-gated) and writes it only when received, and `sync/backfill-commit-headlines.ts` fills
-open PRs' older commits after each walk. Separate from `message` (the lean-gated full body). The pg
-file uses `ADD COLUMN IF NOT EXISTS`. ⚠ **The pg twin is NOT replayed.**
+open PRs' older commits after each walk. Separate from `message` (the lean-gated full body).
 
-### `0073_claude_review_chat` (pg `0060`)
+### `0073_claude_review_chat`
 
 A new CORE table, `claude_review_chat_messages` — one row per Claude Review chat message (a
 review's general thread when `finding_id` is NULL, else one finding's thread), plus the unique
@@ -796,95 +592,80 @@ table's composite tenancy FK `crcm_review_account_fk (review_id, account_id) →
 account_id)` (the `pull_requests_id_account` trick from `0069`). `finding_id` is a plain FK to
 `claude_review_findings`; every FK cascades, and both delete paths (`deleteRepo`, retention's
 `deletePrSubtree`) plus `eraseAccountData` delete the rows explicitly, before the findings and runs.
-CORE because the parents are core tables and only core's delete paths can reach it; the Pro plugin
-writes it through `ctx.schema`. Twins share `when` `1790215200000`. ⚠ **The pg twin is NOT
-replayed** — worth one step: insert a message whose `account_id` does not own its `review_id` and
-check it raises `crcm_review_account_fk`.
+CORE because the parents are core tables and only core's delete paths can reach it; the plugin
+writes it through `ctx.schema`. Journal `when` `1790215200000`.
 
-### Plugin `0036_workspace_auto_review`
+### Platform `0036_workspace_auto_review`
 
-Two nullable columns on `pro_workspace_settings`: `auto_review_enabled` (sqlite integer / pg
-boolean) and `auto_review_enabled_at` (sqlite integer / pg `timestamptz`) — the switch-on moment the
+Two nullable columns on `pro_workspace_settings`: `auto_review_enabled` (integer) and `auto_review_enabled_at` (integer) — the switch-on moment the
 sweeper reviews from. No backfill (NULL = off). ⚠ Like `0035`, every hand-built test DB that touches
 the store must replay it (the store SELECTs both columns): `workspace-settings.test.ts`,
-`settings-route-schema.test.ts`, `jira-routes.test.ts`. ⚠ **The pg twin is NOT replayed.**
+`settings-route-schema.test.ts`, `jira-routes.test.ts`.
 
-### `0087_auto_post` (pg `0074`)
+### `0087_auto_post`
 
 AUTO-POSTING of Claude review output (docs/CLAUDE-REVIEW.md § Auto-posting). Six nullable columns,
 no defaults, no backfill — so no insert path has to name any of them (deliberately NOT the 0083/0084
 `NOT NULL DEFAULT` shape, whose SQLite DDL default could not be changed later):
-`workspaces.auto_post_enabled` (sqlite `integer` / pg `boolean`; NULL/false = OFF for every workspace,
-existing and new), `workspaces.auto_post_settings` (sqlite `text` JSON / pg `jsonb`; OVERRIDES ONLY
+`workspaces.auto_post_enabled` (`integer`; NULL/false = OFF for every workspace,
+existing and new), `workspaces.auto_post_settings` (`text` JSON; OVERRIDES ONLY
 `{ scope?, kinds? }`, resolved through `resolveAutoPostSettings`), `claude_reviews.auto_post` and
 `ticket_reviews.auto_post` (JSON: what auto-posting did with that run — the claim is a compare-and-set
-from NULL), and `claude_review_findings.posted_auto` / `ticket_review_items.posted_auto` (sqlite
-`integer` / pg `boolean`; true = "Posted automatically"). Every column sits on an existing table, so
-neither delete path, erasure nor `accountScopedTables()` changes. Journal `when` `1790928000000` in
-both folders. ⚠ **The pg twin is NOT replayed** (`ADD COLUMN IF NOT EXISTS`, so a re-run no-ops).
+from NULL), and `claude_review_findings.posted_auto` / `ticket_review_items.posted_auto` (`integer`;
+true = "Posted automatically"). Every column sits on an existing table, so
+neither delete path, erasure nor `accountScopedTables()` changes. Journal `when` `1790928000000`.
 
-### `0086_ticket_review_pr_cards` (pg `0073`)
+### `0086_ticket_review_pr_cards`
 
 One new table, `ticket_review_pr_cards` — the ticket review's CONTRIBUTION CARDS (docs/CLAUDE-REVIEW.md
 § Ticket review; contract in schema.sqlite.ts): one row per `(account_id, pr_id, head_sha)` (unique
-`trpc_account_pr_head_ux`, `saveCards`' upsert target), `card` JSON (sqlite `text` / pg `jsonb`),
-`source` (`story_check` | `prepass`), `model`, nullable `cost_usd` (sqlite `real` / pg `double
-precision`), `created_at`. Tenancy is STRUCTURAL: the named composite FK `trpc_pr_account_fk (pr_id,
+`trpc_account_pr_head_ux`, `saveCards`' upsert target), `card` JSON (`text`),
+`source` (`story_check` | `prepass`), `model`, nullable `cost_usd` (`real`), `created_at`. Tenancy is STRUCTURAL: the named composite FK `trpc_pr_account_fk (pr_id,
 account_id) → pull_requests(id, account_id)` ON DELETE cascade (plus the usual `account_id` FK). No
 backfill: cards appear as ticket reviews run. Both delete paths clear it through
 `db/ticket-review-prune.ts`; `eraseAccountData` + `accountScopedTables()` own it. Journal `when`
-`1790841600000` in both folders. ⚠ **The pg twin is NOT replayed** — worth one step: insert a card
-whose `account_id` does not own its `pr_id` and check it raises `trpc_pr_account_fk`, then upsert the
-same `(account_id, pr_id, head_sha)` twice and check one row remains.
+`1790841600000`.
 
-### `0085_auto_review_daily_cap` (pg `0072`)
+### `0085_auto_review_daily_cap`
 
-One nullable column, `workspaces.auto_review_daily_cap` (sqlite `integer` / pg `integer`, no
+One nullable column, `workspaces.auto_review_daily_cap` (`integer`, no
 default) — the per-workspace auto Claude review daily cap (docs/CLAUDE-REVIEW.md § Auto review).
 OVERRIDES ONLY: NULL means the product default `AUTO_REVIEW_DAILY_CAP` (20), resolved through
 `resolveAutoReviewDailyCap`; a PUT of exactly 20 stores NULL. No backfill, and no workspace insert
 has to name it. Written only by `setWorkspaceAutoReview` (the route bounds it 1..500), read by the
-sweeper's roster (`listAutoReviewWorkspaces`) and the wire shape. Journal `when` `1790838000000` in
-both folders. ⚠ **The pg twin is NOT replayed** (`ADD COLUMN IF NOT EXISTS`, so a re-run no-ops).
+sweeper's roster (`listAutoReviewWorkspaces`) and the wire shape. Journal `when` `1790838000000`.
 
-### `0084_auto_fix_off_by_default` (pg `0071`)
+### `0084_auto_fix_off_by_default`
 
 Auto AI Fix is OFF by default. It runs one `UPDATE` switching every workspace off; the switch
-shipped one release earlier, so nobody had time to choose it. pg also runs
-`ALTER COLUMN … SET DEFAULT false`. ⚠ **SQLite cannot change a column default in place**, so
+shipped one release earlier, so nobody had time to choose it. ⚠ **SQLite cannot change a column default in place**, so
 0083's DDL default (1) stays. Both workspace inserts in `db/queries.ts` (`ensureDefaultWorkspace`,
 `createWorkspace`) therefore write `autoFixEnabled: false` explicitly, and the read side treats only
 an explicit `true` as on. A raw insert that omits the column on SQLite still gets 1, so never add a
-third insert path without the value. Journal `when` is `1790751600000`. ⚠ **The pg twin is NOT
-replayed.**
+third insert path without the value. Journal `when` is `1790751600000`.
 
-### `0083_workspace_auto_fix` (pg `0070`)
+### `0083_workspace_auto_fix`
 
-One column, `workspaces.auto_fix_enabled` (sqlite `integer DEFAULT 1 NOT NULL` / pg `boolean DEFAULT
-true NOT NULL`) — the per-workspace auto AI Fix switch (docs/CLAUDE-REVIEW.md § AI Fix → AUTO FIX).
+One column, `workspaces.auto_fix_enabled` (`integer DEFAULT 1 NOT NULL`) — the per-workspace auto AI Fix switch (docs/CLAUDE-REVIEW.md § AI Fix → AUTO FIX).
 ⚠ **DEFAULT TRUE on purpose**: auto fix ran unconditionally before this column, so every existing
 workspace keeps that until someone switches it off; no backfill. Written only by
 `setWorkspaceAutoReview`, read by `maybeStartAutoFix` via `readWorkspaceAutoFixForPr`. Journal `when`
-`1790665200000` in both folders. ⚠ **The pg twin is NOT replayed** (`ADD COLUMN IF NOT EXISTS`, so a
-re-run no-ops).
+`1790665200000`.
 
-### `0082_ci_reviews` (pg `0069`)
+### `0082_ci_reviews`
 
 Two new core tables for the CI REVIEW (docs/CLAUDE-REVIEW.md § CI review), no change to any existing
 core table. `ci_reviews` (one run per (PR, head, failing check set); `account_id` denormalised, a
 unique `(id, account_id)` — `ci_reviews_id_account` — for the child's composite FK, and
 `cir_pr_account_fk` `(pr_id, account_id)` → `pull_requests` `ON DELETE cascade`) and
 `ci_review_items` (one per failing check; `ciri_review_account_fk`). `workspace_id` is a SOFT
-reference like `ticket_reviews.workspace_id`. ⚠ `ci_review_items.job_id` is `bigint` on pg (GitHub
-Actions job ids are past 2^31; sqlite's `integer` is already 64-bit) — the parity test reads both as
-`number:int`. A PR delete prunes through `db/ci-review-prune.ts` in BOTH `deleteRepo` and
+reference like `ticket_reviews.workspace_id`. `ci_review_items.job_id` is `integer`, which SQLite stores as 64-bit (GitHub Actions job ids are
+past 2^31). A PR delete prunes through `db/ci-review-prune.ts` in BOTH `deleteRepo` and
 `deletePrSubtree`; both tables are in `accountScopedTables()` + `eraseAccountData`.
 `claude_reviews.ci_failures` (`0077`) becomes LEGACY (no new run writes it). Journal `when`
-`1790661600000` in both folders. ⚠ **The pg twin is NOT replayed** — worth one step: insert a run
-whose `account_id` does not own its `pr_id` and check it raises `cir_pr_account_fk`, and store a
-`job_id` above 2^31.
+`1790661600000`.
 
-### `0081_review_request_requester` (pg `0068`)
+### `0081_review_request_requester`
 
 One nullable column, `review_request_events.requester_user_id` (FK `users.id`) — who asked for the
 review, from the ReviewRequestedEvent's `actor` (docs/DATA-MODEL.md § `review_request_events`). Plus
@@ -894,13 +675,10 @@ That puts them on the EXISTING history backfill's worklist (`sync/backfill-revie
 which now takes un-stamped OPEN PRs first, then in-window merged ones, under the same 100-per-repo
 cap and budget contract) so each is re-read once and re-stamped — no new fetch path. Merged and
 closed PRs are left alone: no card reads their requester. Until the re-read lands, Chronology
-counts those open PRs as "not known". sqlite `ALTER TABLE … ADD … REFERENCES` + the `UPDATE` behind
-a breakpoint; pg `ADD COLUMN IF NOT EXISTS … REFERENCES` + the same `UPDATE`. Journal `when`
-`1790658000000` in both folders. ⚠ **The pg twin is NOT replayed** — worth
-one step: seed an open PR with a stamped request row, migrate, and check the stamp is NULL and a
-merged PR's is untouched.
+counts those open PRs as "not known". `ALTER TABLE … ADD … REFERENCES` + the `UPDATE` behind a breakpoint. Journal `when`
+`1790658000000`.
 
-### `0080_ticket_reviews` (pg `0067`) + plugin `0039_jira_ticket_peers`
+### `0080_ticket_reviews` + platform `0039_jira_ticket_peers`
 
 Three new core tables for the TICKET review (docs/CLAUDE-REVIEW.md § Ticket review), no change to
 any existing core table. `ticket_reviews` (one run per ticket ident; `account_id` denormalised, a
@@ -912,11 +690,9 @@ cascade`) and `ticket_review_items` (`tri_review_account_fk`). `workspace_id`, `
 `accountScopedTables()` + `eraseAccountData`. The plugin half adds `pro_pr_jira_tickets.changed_at`
 (moves only when story text or membership moves) and two indexes, `(account_id, api_root,
 issue_key)` for the members read and `(account_id, changed_at)` for the sweeper. Not fixed in the
-unreleased `0079`: its story columns are now LEGACY (no new run writes them). ⚠ **Neither pg twin
-is replayed** — worth one step: insert a member whose `account_id` does not own its `pr_id` and
-check it raises `trm_pr_account_fk`.
+unreleased `0079`: its story columns are now LEGACY (no new run writes them).
 
-### `0079_claude_finding_story` (pg `0066`)
+### `0079_claude_finding_story`
 
 Two nullable columns on `claude_review_findings`, no backfill: `story_index` (integer — the ticket's
 0-based position on the run) and `story_ref` (text — the criterion's ref `AC2`, or a not-done item's
@@ -926,12 +702,12 @@ per "Not done" item of the run's user-story assessment (`review/claude-review/ti
 finding and on every older row (an older review keeps its story results in the stories section only,
 and the AI Fix seed still builds `S…` items for it). The retired per-ticket "Post as comment" needed
 no migration to remove: its record lived inside the `ticket_assessment` JSON, and an old row's
-`posted` key is ignored on read. Journal `when` `1790650800000` in both folders (one step after
-`0078`/pg `0065`). ⚠ **The pg twin is NOT replayed.**
+`posted` key is ignored on read. Journal `when` `1790650800000` (one step after
+`0078`).
 
-### `0078_ai_fix_change_report` (pg `0065`)
+### `0078_ai_fix_change_report`
 
-Three nullable `text` columns on core `ai_fixes`, no backfill (pg twin `ADD COLUMN IF NOT EXISTS`,
+Three nullable `text` columns on core `ai_fixes`, no backfill (
 text JSON like the table's other JSON columns). `trigger` — `'manual' | 'auto'` (`'auto'` is the
 auto-review agent calling `startReviewFix`; NULL reads as `'manual'`). `review_items` — the
 `AiFixReviewItem[]` a `'review'` run was given, each with the ref the agent must cite (`F1`, `P1`,
@@ -940,76 +716,69 @@ written at INSERT, NULL on a plain run. `change_report` — the validated `AiFix
 (per-file summary + refs, the refs it deliberately did not fix, the refs it never mentioned);
 written on SUCCESS. The removed comments seed's `comment_targets` / `comment_verdicts` (plugin
 `0024`, adopted by `0074`) stay in place: old rows keep their data, nothing reads it. Shares `when`
-`1790647200000` across both journals (one step after `0077`/pg `0064`). ⚠ The pg twin is NOT
-replayed.
+`1790647200000` (one step after `0077`).
 
-### `0077_claude_review_ci_failures` (pg `0064`)
+### `0077_claude_review_ci_failures`
 
 One nullable column on `claude_reviews`, no backfill: `ci_failures` (JSON / jsonb), one object
 `{state, checkCount, failures[]}` — the reviewed head's CI as the run saw it and, per failing check,
 Claude's diagnosis or the server's `not_checked` reason (see [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) §
 Failed CI on the reviewed head). NULL on every older row reads on the wire as `ciFailures: null` /
-`ciState: null` ("did not look at CI"). Journal `when` `1790560800000` in both folders. ⚠ **The pg
-twin is NOT replayed.**
+`ciState: null` ("did not look at CI"). Journal `when` `1790560800000`.
 
-### `0076_claude_review_threads` (pg `0063`)
+### `0076_claude_review_threads`
 
 Two nullable columns on `claude_reviews`, no backfill. `thread_assessments` (JSON / jsonb): every
 OTHER open review thread on the PR as the run judged it (validity + addressed; see
 [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Other reviewers' threads); NULL on every older row reads on the
 wire as "did not assess threads". `comments_through` (unix seconds / timestamptz): the newest
 qualifying review-thread comment the run saw — the comment half of the auto re-review key; NULL ⇒ the
-row's `created_at` stands in, so the deploy does not re-review every commented PR. ⚠ **The pg twin is
-NOT replayed.**
+row's `created_at` stands in, so the deploy does not re-review every commented PR.
 
-### `0075_review_lens_drop_learnings` (pg `0062`)
+### `0075_review_lens_drop_learnings`
 
 Two unrelated Claude Review changes in one file. `claude_review_findings.lens` (nullable text, no
 backfill): the specialist angle a DEEP review's finding came from (`ClaudeFindingLens`); NULL = a
 general finding, and every older row. And `DROP TABLE IF EXISTS review_learnings` — review memory
 was deleted (capture, retrieval, prompt block, the two routes, the shared types). DROP takes the
 five `rl_*` indexes with it. Nothing recreates the table: core `0074`'s `CREATE … IF NOT EXISTS`
-already ran on every install that reaches `0075`, and the plugin's own DDL for it was stripped at
-apiVersion 22. ⚠ **The pg twin is NOT replayed.**
+already ran on every install that reaches `0075`, and the plugin's own DDL for it was stripped when Claude Review moved to core.
 
-### `0074_adopt_agentic_tables` (pg `0061`) + plugin `0037_auto_review_to_core`
+### `0074_adopt_agentic_tables` + platform `0037_auto_review_to_core`
 
-Claude Review, review memory and AI Fix's fixer moved from the plugin into CORE (apiVersion 22), and
+Claude Review, review memory and AI Fix's fixer moved from the plugin into CORE (2026-10), and
 their two tables moved with them — **ADOPTED IN PLACE, never renamed**. `0074` is `CREATE TABLE IF
 NOT EXISTS` + `CREATE [UNIQUE] INDEX IF NOT EXISTS` for `review_learnings` and `ai_fixes` with the
 plugin's FINAL column set and its own index names (`rl_*`, `af_*`), **no foreign keys** (SQLite
 cannot add one to an existing table without a rebuild, so a fresh and an adopted install would
 differ; tenancy is the query layer + `verify:isolation`), plus two plain columns on core
-`workspaces`: `auto_review_enabled` / `auto_review_enabled_at`. On the dev DB and on Railway the
+`workspaces`: `auto_review_enabled` / `auto_review_enabled_at`. On the dev DB the
 tables already exist, so the CREATEs are no-ops and the rows stay. The fresh `ai_fixes` omits plugin
 `0003`'s eight dormant `resolved_*` / `resolve_error` columns (nothing declares them; an adopted
-table that still has them reads identically). The pg twin also `ADD COLUMN IF NOT EXISTS`es the two
-comments-seed columns; SQLite cannot, so an install whose plugin stopped before plugin `0024`
-(pre-apiVersion 19) would keep an `ai_fixes` without them — no such install is known.
+table that still has them reads identically). SQLite cannot `ADD COLUMN IF NOT EXISTS`, so an install whose plugin stopped before plugin `0024`
+would keep an `ai_fixes` without the two comments-seed columns — no such install is known.
 
 ⚠ **THE PLUGIN'S COPY OF THAT DDL WAS STRIPPED IN THE SAME CHANGE** — plugin `0001` keeps only
 `repo_digests`, `0002` only `ai_pr_analyses`, `0003` and `0024` are COMMENT-ONLY. Core migrations
 run before the plugin binds, so on a FRESH SQLite install core creates the full `ai_fixes` first;
 left as statements, `0003`/`0024`'s bare `ALTER TABLE ai_fixes ADD COLUMN` would throw "duplicate
-column" and the plugin migrator would drop the WHOLE plugin to OSS mode silently. Editing an applied
+column" and the plugin migrator would have dropped the WHOLE plugin to OSS mode silently (today:
+fail the boot). Editing an applied
 plugin file is safe — `pro_migrations` tracks the filename only.
 
 Plugin `0037` copies each workspace's auto-review switch from `pro_workspace_settings` into core
 `workspaces` ONCE: only an ON switch with a floor, only onto the same `(account, workspace)`, and
 never over a value the new core route already wrote (`WHERE auto_review_enabled IS NULL`). It lives
 in the PLUGIN because a core statement naming `pro_workspace_settings` would fail on every install
-that never had the plugin; the pg twin downgrades a failure to a WARNING. The plugin columns are
-dormant (the `0031` precedent). Pinned by `packages/pro/test/auto-review-to-core.test.ts`; every
+that never had the plugin. The plugin columns are
+dormant (the `0031` precedent). Pinned by `platform/test/auto-review-to-core.test.ts`; every
 hand-built plugin test DB that runs ALL plugin migrations needs the two core columns on its
 `workspaces` stub (`isolation`, `period-report`, `period-month-grain`, `period-cadence-change`).
 Ownership moved with the tables: `deleteRepo`, retention's `deletePrSubtree`, `eraseAccountData` and
 `accountScopedTables()` cover them (before, the plugin had NO deleteRepo hook and both orphaned on a
 repo removal); the plugin's `pruneProByPrIds` / `eraseProByAccountId` no longer name them.
-⚠ **The pg twins are NOT replayed** — worth one step each: run `0061` against a database where the
-plugin already created both tables (every statement must no-op) and against a fresh one; then run
-plugin `0037` with one ON row and check it lands on the right workspace only.
 
-### Plugin `0038_pr_jira_tickets`
+### Platform `0038_pr_jira_tickets`
 
 Two new plugin tables, no change to any existing one. `pro_pr_jira_tickets` — the STORED Jira
 tickets, one row per `(account_id, pr_id, issue_key)` (unique index
@@ -1019,30 +788,10 @@ on `(account_id, workspace_id, issue_type_id)` for the per-issue-type re-derivat
 issue_type_id)` (unique `pro_jira_ac_fields_account_ws_site_type`). No FKs (the plugin family); no
 backfill — the worker fills the table on its first tick, new tickets first, 40 per account per
 pass. Both are in `eraseProByAccountId`; ticket rows are also in `pruneProByPrIds`. Column parity is
-PINNED by `packages/pro/test/jira-ticket-schema-parity.test.ts` (the first plugin twin pair with a
-parity test). `pro_workspace_settings.jira_ac_field_*` (0035) stay dormant. Rationale:
-[PRO-PLUGIN-AND-ACTIVITY.md](PRO-PLUGIN-AND-ACTIVITY.md) § Stored Jira tickets.
-✅ **The pg twin WAS replayed** (2026-10-03, a throwaway `postgres:16-alpine`): applied twice (every
-statement no-ops the second time), both unique indexes present, the three time columns are
-`timestamp with time zone`, and both `ON CONFLICT … DO UPDATE` targets the code uses resolved
-against a real row. It was replayed in ISOLATION, not on top of the full plugin chain (it names no
-other table, so the chain cannot change its outcome).
+PINNED by `platform/test/jira-ticket-schema-parity.test.ts`. `pro_workspace_settings.jira_ac_field_*` (0035) stay dormant. Rationale:
+[TRACKERS.md](TRACKERS.md).
 
-⚠ **NONE OF THE PG TWINS ABOVE HAS BEEN REPLAYED** (`0052`–`0077` and plugin `0034`–`0037` + `0040`; plugin
-`0038`/`0039` are `SELECT 1;` stubs since apiVersion 23). The
-standing Postgres was not running when they were written (2026-09-19 onwards); the SQLite halves ran
-through the real runner on the dev database and in every test DB. Repeat § Replaying the pg chain —
-core should reach **78 applied = 78 journal entries** (`0000`–`0077`) and the plugin **39** — and check
-`review_request_events` carries both FKs and its unique index, that `workspaces.flow_settings`,
-`pull_requests.advisory_ids` and `accounts.my_turn_settings` are `jsonb`, and that
-`security_checked_at` and `pr_mentions.mentioned_at` are `timestamp with time zone`. ⚠ `0055` is
-worth one WITH-DATA step: run the scanner's `ON CONFLICT (account_id, pr_id) DO UPDATE` against an
-existing row and check the row was restamped, not duplicated. `0056` is worth one too: dismiss the
-same PR twice through `dismissMyTurn` (`ON CONFLICT (account_id, pr_id) DO UPDATE`) and check one row
-survives with the second timestamp, and that inserting a pair whose `pr_id` belongs to another
-account raises `my_turn_dismissals_pr_account_fk`.
-
-### `0088_issue_tracker` (pg `0075`) — the issue tracker moves to CORE (apiVersion 23)
+### `0088_issue_tracker` — the issue tracker moves to CORE
 
 Three tables, no data. `workspace_trackers` — ONE tracker per workspace (provider, base URL, project
 keys, match scope, `auth_email` + the SEALED `auth_token`), unique `(account_id, workspace_id)`
@@ -1068,83 +817,72 @@ same index name), the `0074` / ai_fixes precedent.
   of the two install shapes would fail the boot. A new table has one shape everywhere.
 - **Plugin `0038`/`0039` were stripped to `SELECT 1;`** in the same change: a fresh install no longer
   grows `pro_pr_jira_tickets`, and `0039`'s bare `ALTER TABLE` on a table that no longer exists would
-  throw and drop the WHOLE plugin to OSS mode. An install that already ran them keeps what they made
+  have thrown and dropped the WHOLE plugin to OSS mode. An install that already ran them keeps what they made
   (recorded in `pro_migrations`); the move empties it.
 - Ownership: both delete paths (`deleteRepo`, retention's `deletePrSubtree`) prune `tracker_tickets`
   by PR; `eraseAccountData` and `accountScopedTables()` cover all three; the account export carries
   `workspace_trackers` with the token reduced to `hasToken`.
 
-### `0089_github_issue_links` (pg `0076`) — the issues a PR closes (GitHub Issues adapter)
+### `0089_github_issue_links` — the issues a PR closes (GitHub Issues adapter)
 
-Two additive columns on `pull_requests`: `closing_issues` (sqlite JSON text / pg `jsonb`, lower-cased
+Two additive columns on `pull_requests`: `closing_issues` (JSON text, lower-cased
 `owner/repo#12` keys in GitHub's order) and `closing_issues_checked_at`. Written ONLY by the tracker
 worker's targeted `nodes(ids:)` step (`tracker/github/links.ts`), and only for PRs in a workspace
 whose tracker is GitHub Issues — the repo walk's query is unchanged. ⚠ NULL is "never read", never
 "closes nothing" (`[]` is the positive statement); the worker neither prunes nor reads a PR whose
-links are NULL. No data to move, no index (every read is by PR id). Journal `when` `1791100800000` in
-both folders. ⚠ **The pg twin is NOT replayed** (`ADD COLUMN IF NOT EXISTS`, so a re-run no-ops).
-- ⚠ **The pg twin is NOT replayed.** Worth a WITH-DATA step: create the plugin's pg tables with a
-  row each, boot, and check the move ran (rows in core, source NULLed/empty) and that a cross-account
-  `(workspace_id, account_id)` insert raises `workspace_trackers_workspace_account_fk`.
+links are NULL. No data to move, no index (every read is by PR id). Journal `when` `1791100800000`.
 
-### `0090_linear_links` (pg `0077`) — the Linear issues a PR is attached to (Linear adapter)
+### `0090_linear_links` — the Linear issues a PR is attached to (Linear adapter)
 
-Three additive columns on `pull_requests`: `linear_links` (sqlite JSON text / pg `jsonb`, upper-cased
+Three additive columns on `pull_requests`: `linear_links` (JSON text, upper-cased
 `ENG-123` keys in Linear's order), `linear_links_root` (the Linear workspace, `https://linear.app/<key>`,
 the read was made against) and `linear_links_checked_at`. Written ONLY by the tracker worker's Linear
 linker (`tracker/linear/links.ts`, batched `attachmentsForURL`), only for PRs in a workspace whose
 tracker is Linear with a saved key — the repo walk's query is unchanged. ⚠ NULL is "never read", and a
 root other than the workspace's current one counts as never read; unlike GitHub's `closing_issues`
 the links ADD to key detection, so NULL never hides a detected ticket. No data to move, no index
-(every read is by PR id). Journal `when` `1791187200000` in both folders. ⚠ **The pg twin is NOT
-replayed** (`ADD COLUMN IF NOT EXISTS`, so a re-run no-ops).
+(every read is by PR id). Journal `when` `1791187200000`.
 
 
-### Plugin `0040_slack_event_signals` — the two Slack event signals
+### Platform `0040_slack_event_signals` — the two Slack event signals
 
 Two nullable boolean switches on `workspace_slack_targets` (`notify_reviews`, `notify_merges`; NULL
 reads as off) and a new table `slack_signal_notices (account_id, kind, ref_id)` with unique index
 `slack_signal_notices_account_kind_ref` — the claimed "already sent" markers (`kind` `merge` keys the
 PR id, `review` the Claude Review run id). No data to move, no FK onto core (open-core boundary); the
 table is in the plugin's erasure hook. No core migration: the merger was already synced
-(`pull_requests.merged_by_id`). ⚠ **The pg twin is NOT replayed** (`ADD COLUMN IF NOT EXISTS` /
-`CREATE … IF NOT EXISTS`, so a re-run no-ops); the plugin chain now ends at **40**.
+(`pull_requests.merged_by_id`).; the plugin chain now ends at **40**.
 
-### `0093_dependency_auto_merge` (pg `0080`) — dependency auto-merge
+### `0093_dependency_auto_merge` — dependency auto-merge
 
 Additive: `workspaces.dependency_auto_merge` (nullable boolean, NULL = OFF), `auto_merge_requests
 .armed_by_policy` (nullable boolean, NULL = a person armed it) and a new table
 `auto_merge_policy_skips` (`(account_id, pr_id)` unique `amps_account_pr`, composite FK
 `amps_pr_account_fk` against `pull_requests(id, account_id)`, cascade). No data to move; existing
-intents read as a person's. Journal `when` `1791446400000` in both folders. Contract:
-docs/MERGE-CI-TRUNK.md § Dependency auto-merge. ⚠ **The pg twin is NOT replayed** (`IF NOT EXISTS`
-throughout, so a re-run no-ops).
+intents read as a person's. Journal `when` `1791446400000`. Contract:
+docs/MERGE-CI-TRUNK.md § Dependency auto-merge.
 
-### `0094_repo_uses_github_issues` (pg `0081`) — GitHub Issues as the automatic default tracker
+### `0094_repo_uses_github_issues` — GitHub Issues as the automatic default tracker
 
 Additive: `repos.uses_github_issues` (nullable boolean; NULL = never answered) and
 `repos.github_issues_checked_at` (timestamp). Plus ONE data step: `UPDATE workspace_trackers SET
 provider = 'none' WHERE provider IS NULL`. From here on `provider` NULL (or no row) means "no choice
 stored → follow the automatic default" and the literal `'none'` is a chosen None; every NULL row that
 existed before was somebody choosing None (the legacy move copies only rows with a value), so it
-keeps that meaning. Journal `when` `1791532800000` in both folders, slotted BEFORE `0095` / pg
-`0082` (written concurrently) — ⚠ drizzle's sqlite migrator skips an entry whose `when` is at or
+keeps that meaning. Journal `when` `1791532800000`, slotted BEFORE `0095` (written concurrently) — ⚠ drizzle's sqlite migrator skips an entry whose `when` is at or
 below the newest APPLIED one, so a DB that had already applied 0095 before 0094 existed would skip
 0094 silently; none did at the time of writing. Contract: docs/TRACKERS.md § Automatic default.
-⚠ **The pg twin is NOT replayed** (`ADD COLUMN IF NOT EXISTS`; the UPDATE is idempotent).
 
-### `0096_workspace_setting_events` (pg `0083`) — settings history for Chronology "Over time"
+### `0096_workspace_setting_events` — settings history for Chronology "Over time"
 
 Additive: a new APPEND-ONLY table `workspace_setting_events` (`account_id`, `workspace_id`, `kind`,
 `summary`, `occurred_at`), index `workspace_setting_events_account_ws_time_idx`, and the named
 COMPOSITE FK `workspace_setting_events_workspace_account_fk` onto `workspaces (id, account_id)` with
 cascade (the `workspace_trackers` precedent — every writer gets the workspace id from a request path).
 GOING FORWARD ONLY: nothing is backfilled, and the page states the first row's date as the start of
-settings history. In `accountScopedTables()` and erased explicitly. Journal `when` `1791705600000` in
-both folders (after `0095` / pg `0082`). Contract: docs/BOTTLENECKS.md § Over time.
-⚠ **The pg twin is NOT replayed** (`IF NOT EXISTS` throughout).
+settings history. In `accountScopedTables()` and erased explicitly. Journal `when` `1791705600000` (after `0095`). Contract: docs/BOTTLENECKS.md § Over time.
 
-### `0097_story_reports` (pg `0084`) — the story report's runs
+### `0097_story_reports` — the story report's runs
 
 Additive: a new table `story_reports` — one row per agentic story-report run (Reports → Stories):
 `window_choice`, `from_at`/`to_at`, `range_json`, `model`, `status` (queued · running · succeeded ·
@@ -1153,16 +891,14 @@ succeeded), `dropped_json`, `error`, `cost_usd`, `input_tokens`, `output_tokens`
 `created_at`, `completed_at`. Index `story_reports_account_ws_window_idx` on (account, workspace,
 window_choice, created_at), and the named COMPOSITE FK `story_reports_workspace_account_fk` onto
 `workspaces (id, account_id)` with cascade (`workspace_id` arrives in a POST body; a report is
-regenerable). In `accountScopedTables()` and erased explicitly. Journal `when` `1791792000000` in
-both folders (after `0096` / pg `0083`). Contract: docs/CLAUDE-REVIEW.md § Story report.
+regenerable). In `accountScopedTables()` and erased explicitly. Journal `when` `1791792000000` (after `0096`). Contract: docs/CLAUDE-REVIEW.md § Story report.
 ⚠ **DORMANT since 2026-10-18** — the story report was removed; the table is kept, never dropped
 (no read or write; still erased).
 It REPLACED the per-story notes, whose plugin migration `0041_story_notes` was never committed and is
-DELETED (both dialects). A dev DB that ran it keeps an orphan `pro_story_notes` table (harmless) and
+DELETED. A dev DB that ran it keeps an orphan `pro_story_notes` table (harmless) and
 its `pro_migrations` record — never reuse the file name `0041_story_notes.sql`.
-⚠ **The pg twin is NOT replayed** (`IF NOT EXISTS` throughout).
 
-### `0098_tracker_ticket_dates` (pg `0085`) — a ticket's own created / resolved dates
+### `0098_tracker_ticket_dates` — a ticket's own created / resolved dates
 
 Additive: two NULLABLE timestamp columns on `tracker_tickets` — `issue_created_at` and
 `issue_resolved_at` (Jira `created` / `resolutiondate`, GitHub Issues `createdAt` / `closedAt`, Linear
@@ -1170,11 +906,11 @@ Additive: two NULLABLE timestamp columns on `tracker_tickets` — `issue_created
 stays NULL until its next read (open PRs: the 30-minute TTL; merged PRs: the worker's bounded
 ticket-dates nudge, `tracker/dates-backfill.ts`). The positive-answer rule applies (an absent field
 keeps the stored value; null clears). Neither column moves `changed_at`. Journal `when`
-`1791878400000` in both folders (after `0097` / pg `0084`). Contract: docs/TRACKERS.md § Created and
+`1791878400000` (after `0097`). Contract: docs/TRACKERS.md § Created and
 resolved dates. ⚠ The tracker test suites exec single migrations by name — each one that execs
-`0088_issue_tracker.sql` now execs `0098` too. ⚠ **The pg twin is NOT replayed** (`IF NOT EXISTS`).
+`0088_issue_tracker.sql` now execs `0098` too.
 
-### `0099_story_labels` (pg `0086`) — Story health's model labels
+### `0099_story_labels` — Story health's model labels
 
 Additive: a new table `story_labels` — `account_id` (FK `accounts`, cascade), `ident`, `text_hash`,
 `rubric_version`, `criteria_json`, `story_json`, `criteria_count`, `model`, `cost_usd`,
@@ -1182,10 +918,10 @@ Additive: a new table `story_labels` — `account_id` (FK `accounts`, cascade), 
 ident, rubric_version, text_hash) — the label run's insert is `ON CONFLICT DO NOTHING` on exactly
 that target. No workspace column (a ticket's story is one fact per account) and so no composite FK
 (no request body names a row). In `accountScopedTables()`, erased explicitly, and checked by
-`verify:isolation`. Journal `when` `1791964800000` in both folders (after `0098` / pg `0085`).
-Contract: docs/CLAUDE-REVIEW.md § Story labels. ⚠ **The pg twin is NOT replayed** (`IF NOT EXISTS`).
+`verify:isolation`. Journal `when` `1791964800000` (after `0098`).
+Contract: docs/CLAUDE-REVIEW.md § Story labels.
 
-### `0100_sprint_stories` (pg `0087`) — This sprint (then under Reports; now This Sprint, a fixed tab)
+### `0100_sprint_stories` — This sprint (then under Reports; now This Sprint, a fixed tab)
 
 Additive: five new tables — `sprint_reads`, `sprint_tickets`, `sprint_ticket_repos`,
 `sprint_assessments`, `tracker_writes` (docs/DATA-MODEL.md § This Sprint). Uniques (every
@@ -1195,31 +931,30 @@ Additive: five new tables — `sprint_reads`, `sprint_tickets`, `sprint_ticket_r
 `workspaces(id, account_id)` on all five and onto `repos(id, account_id)` on `sprint_ticket_repos`,
 all cascade. In `accountScopedTables()`, erased explicitly, `deleteRepo` deletes
 `sprint_ticket_repos` rows, checked by `verify:isolation`. Contract: docs/TRACKERS.md § The sprint list
-read / § The write-back. ⚠ **The pg twin is NOT replayed** (`IF NOT EXISTS`).
+read / § The write-back.
 
-### `0101_sprint_reads_api_root` (pg `0088`) — the site a sprint list was read from
+### `0101_sprint_reads_api_root` — the site a sprint list was read from
 
 Additive `sprint_reads.api_root text` (NULL before the first read). With `provider`, the GET
 (`db/sprint-stories.ts`) spots a workspace that moved to another tracker or site since its stored read
 and resets that row (`resetSprintReadForSite`: no source, no read time, due now) so the page says
 "Reading…" instead of the old read's time over an empty list. A separate migration because `0100` was
-already applied in development. ⚠ pg `0088` NOT replayed.
+already applied in development.
 
-### `0102_workspace_sprint_checks` (pg `0089`) — which chips a workspace raises
-`workspaces.sprint_checks` (sqlite text JSON / pg jsonb), OVERRIDES ONLY (`SprintChecks`): NULL = every
+### `0102_workspace_sprint_checks` — which chips a workspace raises
+`workspaces.sprint_checks` (text JSON), OVERRIDES ONLY (`SprintChecks`): NULL = every
 Reports → This sprint check on for every issue type. Read and written only by `db/sprint-checks.ts`.
-⚠ pg `0089` NOT replayed.
 
-### `0103_sprint_statuses_and_blockers` (pg `0090`) — sections by status, blocking links
+### `0103_sprint_statuses_and_blockers` — sections by status, blocking links
 Six additive, nullable columns, no new table (so `accountScopedTables()` is unchanged):
 `tracker_tickets` + `sprint_tickets` gain `blocked_by_json` (the ticket's blocking tracker links,
 `TicketLinkBlocker[]`; NULL = not read, never "none") and `status_id`; `sprint_reads` gains
 `status_order_json` (the automatic status order); `workspaces` gains `sprint_statuses` (the
-per-workspace override). Sqlite text JSON / pg jsonb. Journal `when` `1792051203000`. Ships with
+per-workspace override). Text JSON. Journal `when` `1792051203000`. Ships with
 rubric 2 of the story labels (`STORY_RUBRIC_VERSION` 2 — a code bump, no migration: old
-`story_labels` rows simply stop counting). ⚠ pg `0090` NOT replayed.
+`story_labels` rows simply stop counting).
 
-### `0104_sprint_ticket_repos_saved` (pg `0091`) — "the reader saved this ticket's repos"
+### `0104_sprint_ticket_repos_saved` — "the reader saved this ticket's repos"
 One additive, nullable column, no new table: `sprint_tickets.repos_saved_at`, stamped by `PUT
 /api/sprint-stories/repos` even for an EMPTY set. NULL = never saved, so the CONFIDENT repo
 suggestions are the accepted set by default (`effectiveSprintRepos`); a ticket with stored
@@ -1229,20 +964,19 @@ pruned row takes it with it. The same release changes the SHAPE of `workspaces.s
 (2026-10-17: the shape moved again, to `{buckets, mergedColumn}` — user-defined status buckets — also
 with NO migration; both older shapes are converted on read. docs/TRACKERS.md § The status order and
 buckets.)
-Journal `when` `1792051204000`. ⚠ pg `0091` NOT replayed.
+Journal `when` `1792051204000`.
 
-### `0106_sprint_ref_tickets` (pg `0093`) — referenced tickets' status
+### `0106_sprint_ref_tickets` — referenced tickets' status
 One additive table, `sprint_ref_tickets` (account, workspace, ident, provider, api_root, issue_key,
 title, status_name, status_category, url, read_at), unique `(account_id, workspace_id, ident)` (the
 lookup's `onConflictDoUpdate` target), index `(account_id, issue_key)`, named composite FK onto
 `workspaces(id, account_id)` with cascade. Written only by the sprint read (docs/TRACKERS.md § The
 sprint list read → Referenced tickets). Ships with rubric 4 of the story labels (`STORY_RUBRIC_VERSION`
-4 — a code bump: every story relabels). Journal `when` sqlite `1792051203003` / pg `1792051204002`.
-⚠ pg `0093` NOT replayed.
+4 — a code bump: every story relabels). Journal `when` `1792051203003`.
 
-### `0107_sprint_graph` (pg `0094`) — the sprint graph: ghost text, briefs; the write-back's table dropped
+### `0107_sprint_graph` — the sprint graph: ghost text, briefs; the write-back's table dropped
 Additive on `sprint_ref_tickets`: `description`, `acceptance_criteria`, `issue_type_name`,
-`assignee_name`, `assignee_avatar_url`, `blocked_by_json` (sqlite text / pg jsonb) and `depth` (integer
+`assignee_name`, `assignee_avatar_url`, `blocked_by_json` (text) and `depth` (integer
 NOT NULL DEFAULT 1 — existing rows read as named by the sprint). New table `sprint_briefs` (account,
 workspace, ident, text_hash, brief_version, summary, criteria_json, criteria_derived, references_json,
 model, cost/tokens, created_at), unique `(account_id, workspace_id, ident)` (the pass's
@@ -1250,171 +984,163 @@ model, cost/tokens, created_at), unique `(account_id, workspace_id, ident)` (the
 `accountScopedTables()` + erasure + `verify:isolation`. `DROP TABLE IF EXISTS tracker_writes` — the
 write-back is removed (its rows are history of a feature that no longer exists; nothing reads them).
 `workspaces.sprint_checks` is NOT dropped (SQLite needs a table rebuild): it is dormant. Journal `when`
-sqlite `1792051203004` / pg `1792051204003`. ⚠ pg `0094` NOT replayed.
+`1792051203004`.
 
-### `0108_sprint_themes` (pg `0095`) — the sprint graph's themes
+### `0108_sprint_themes` — the sprint graph's themes
 New table `sprint_themes` (account, workspace, input_hash, theme_version, themes_json, assignments_json,
 model, cost/tokens, created_at), unique `(account_id, workspace_id)` (the pass's `onConflictDoUpdate`
 target), named composite FK `sprint_themes_workspace_account_fk` onto `workspaces(id, account_id)` with
 cascade; in `accountScopedTables()` + erasure + `verify:isolation`. Purely additive. Journal `when`
-sqlite `1792051203005` / pg `1792051204004`. ⚠ pg `0095` NOT replayed.
+`1792051203005`.
 
-### `0109_sprint_story` (pg `0096`) — the sprint story (⚠ DORMANT since `0120` / pg `0107`)
+### `0109_sprint_story` — the sprint story (⚠ DORMANT since `0120`)
 New table `sprint_story` (account, workspace, input_hash, story_version, story_json, model, cost/tokens,
 created_at), unique `(account_id, workspace_id)` (the pass's `onConflictDoUpdate` target), named
 composite FK `sprint_story_workspace_account_fk` onto `workspaces(id, account_id)` with cascade; in
 `accountScopedTables()` + erasure + `verify:isolation`. Purely additive. Journal `when` sqlite
-`1792137603005` / pg `1792137604004`. ⚠ pg `0096` NOT replayed.
+`1792137603005`.
 
-### `0110_finding_reminder` (pg `0097`) — Claude Review reminders
-`claude_review_findings.reminder` (sqlite `text` JSON / pg `jsonb`, nullable): the latest "Post reminder"
+### `0110_finding_reminder` — Claude Review reminders
+`claude_review_findings.reminder` (`text` JSON, nullable): the latest "Post reminder"
 of an already-posted finding (`ClaudeFindingReminder`; earlier reminders' comment ids in
 `earlierCommentIds`). NULL = none. Never the finding's own post. Purely additive; no new table, so
 nothing joins `accountScopedTables()` (the column rides the findings' existing delete paths). Journal
-`when` sqlite `1792137603006` / pg `1792137604005`. ⚠ pg `0097` NOT replayed.
+`when` `1792137603006`.
 
-### `0111_sprint_dates_story_attempt` (pg `0098`) — the sprint's dates + the story pass's last attempt (the three `story_attempt_*` columns DORMANT since `0120` / pg `0107`)
+### `0111_sprint_dates_story_attempt` — the sprint's dates + the story pass's last attempt (the three `story_attempt_*` columns DORMANT since `0120`)
 Five nullable columns on `sprint_reads`: `sprint_starts_at` / `sprint_ends_at` (the tracker's own sprint
 dates, written by every good sprint read — docs/TRACKERS.md § The sprint list read) and
 `story_attempt_at` / `story_attempt_hash` / `story_attempt_error` (the sprint story pass's last attempt
 that called Claude and its failure code, NULL = stored — the backoff of the retired story pass). Purely additive on an already account-scoped table; `resetSprintReadForSite` clears all
-five. Journal `when` sqlite `1792137603007` / pg `1792137604006`. ⚠ pg `0098` NOT replayed.
+five. Journal `when` `1792137603007`.
 
-### `0112_sprint_view_snapshots` (pg `0099`) — "Since you last looked" on This Sprint
+### `0112_sprint_view_snapshots` — "Since you last looked" on This Sprint
 New table `sprint_view_snapshots`: ONE row per (account, workspace) with two slots, `current_json` /
 `current_at` (the latest view's snapshot: each sprint ticket's stage + the merged pull requests on sprint
 tickets) and `baseline_json` / `baseline_at` (the previous visit's last view; NULL until a second visit).
 Written and read only by `db/sprint-signals.ts` (docs/CLAUDE-REVIEW.md § Sprint paths → The code cards).
 Account FK (cascade) + the NAMED composite FK `sprint_view_snapshots_workspace_account_fk` onto
 `workspaces (id, account_id)`; unique `(account_id, workspace_id)`; in `accountScopedTables()`, erased,
-checked by `verify:isolation`. Journal `when` sqlite `1792137603008` / pg `1792137604007`. ⚠ pg `0099` NOT
-replayed.
+checked by `verify:isolation`. Journal `when` `1792137603008`.
 
-### `0113_ai_fix_plan` (pg `0100`) — AI Fix plan mode
+### `0113_ai_fix_plan` — AI Fix plan mode
 Six nullable columns on `ai_fixes`, no backfill: `plan` (JSON `AiFixPlan`), `plan_transcript` (JSON
 `AiFixPlanMessage[]`), `plan_status` (`planning | plan_ready | approved | discarded | failed`; NULL = never
 planned), `plan_revision` (integer), `plan_seed` (JSON `{kind, text}`, server-only) and `plan_cost_usd`
-(sqlite `real` / pg `double precision`). Text JSON like the table's other JSON columns. A plan row carries
+(`real`). Text JSON like the table's other JSON columns. A plan row carries
 the new `status = 'planned'` until it is approved or discarded (docs/CLAUDE-REVIEW.md § Plan mode). No new
 table, so `accountScopedTables()` / erasure / both delete paths already cover it. Journal `when` sqlite
-`1792137603009` / pg `1792137604008`. ⚠ pg `0100` NOT replayed.
+`1792137603009`.
 
-### `0114_sonarcloud` (pg `0101`) — SonarCloud
+### `0114_sonarcloud` — SonarCloud
 Two new tables (docs/SONARCLOUD.md). `workspace_sonar`: one row per workspace — `organization`, the SEALED
 write-only `auth_token` (tracker/secret.ts forms), `project_keys` (JSON map repoId → key, overrides only),
 `updated_at`; the named COMPOSITE FK `workspace_sonar_workspace_account_fk` onto `workspaces (id, account_id)`
 and unique `(account_id, workspace_id)`. `sonar_snapshots`: one row per `(account_id, pr_id, head_sha)`
-(unique) — `state`, `message`, `project_key`, `quality_gate` / `issues` / `post` JSON (sqlite text, pg
-jsonb), `total_issues`, `total_hotspots`, `fetched_at`. No FK on `pr_id` (the tracker_tickets precedent),
+(unique) — `state`, `message`, `project_key`, `quality_gate` / `issues` / `post` JSON (text), `total_issues`, `total_hotspots`, `fetched_at`. No FK on `pr_id` (the tracker_tickets precedent),
 so BOTH delete paths delete it explicitly. Both tables are in `accountScopedTables()`, erased, and checked
-by `verify:isolation`. Journal `when` sqlite `1792137603010` / pg `1792137604009`. ⚠ pg `0101` NOT replayed.
+by `verify:isolation`. Journal `when` `1792137603010`.
 
-### `0115_sequence_diagrams` (pg `0102`) — sequence diagrams
+### `0115_sequence_diagrams` — sequence diagrams
 One new table (docs/CLAUDE-REVIEW.md § Sequence diagrams). `sequence_diagrams`: one row per
 `(account_id, kind, subject, fingerprint)` (unique `sequence_diagrams_subject_fp`) — `kind` `pr|story`,
 `subject` (the PR id as text, or the ticket ident), `pr_id` (pr rows; NULL on story rows), `ticket_key`,
-`head_sha`, `members` JSON (sqlite text, pg jsonb), `trigger`, `status`, `model`, `title`, `caption`,
-`diagram_type`, `source`, `refusal`, `error`, the run's telemetry (`cost_usd` sqlite real / pg double
-precision) and three timestamps; index `(account_id, created_at)` for the daily cap. No FK on `pr_id`
+`head_sha`, `members` JSON (text), `trigger`, `status`, `model`, `title`, `caption`,
+`diagram_type`, `source`, `refusal`, `error`, the run's telemetry (`cost_usd` real) and three timestamps; index `(account_id, created_at)` for the daily cap. No FK on `pr_id`
 (the sonar_snapshots precedent): BOTH delete paths delete PR rows explicitly; story rows go with the
 account. In `accountScopedTables()`, erased, and checked by `verify:isolation`. Journal `when` sqlite
-`1792137603011` / pg `1792137604010`. ⚠ pg `0102` NOT replayed.
+`1792137603011`.
 
-### `0118_sequence_diagram_runs` (pg `0105`) — one sequence-diagram row per run
+### `0118_sequence_diagram_runs` — one sequence-diagram row per run
 Drops the unique `sequence_diagrams_subject_fp` and creates the plain index
 `sequence_diagrams_subject_fp_idx` on the same columns. A Redraw at the same fingerprint used to REWRITE
 the row holding the good diagram (clearing it, for good if the redraw failed); every queued run is now
 its own row and nothing writes `ON CONFLICT` on this table any more. Story rows now also go with a
 deleted member PR in both delete paths (`db/sequence-diagram-prune.ts`; code, not DDL). Journal `when`
-sqlite `1792137605014` / pg `1792137605015`. ⚠ pg `0105` NOT replayed.
+`1792137605014`.
 
-### `0119_design_diagrams` (pg `0106`) — the design grid replaces Mermaid
-One nullable JSON column on `sequence_diagrams`: `design` (sqlite `text` json mode / pg `jsonb`) — the
+### `0119_design_diagrams` — the design grid replaces Mermaid
+One nullable JSON column on `sequence_diagrams`: `design` (`text` json mode) — the
 validated `DesignDiagram` (docs/CLAUDE-REVIEW.md § Design diagrams). `source` is KEPT and no longer
 written. No backfill and no row deletes: design-era rows are told apart by `diagram_type = 'design'`
-(stamped at queue time, code not DDL), and the reads ignore every other row. pg twin uses
-`ADD COLUMN IF NOT EXISTS`; NOT replayed on Postgres yet.
+(stamped at queue time, code not DDL), and the reads ignore every other row.
 
-### `0116_reference_docs` (pg `0103`) — the reference docs library
-One column and two tables (docs/REFERENCE-DOCS.md). `workspaces.docs_in_review` (sqlite integer / pg
-boolean, nullable, no default — NULL/false = off). `reference_docs`: one row per document — `slug`
+### `0116_reference_docs` — the reference docs library
+One column and two tables (docs/REFERENCE-DOCS.md). `workspaces.docs_in_review` (integer, nullable, no default — NULL/false = off). `reference_docs`: one row per document — `slug`
 (unique `(account_id, workspace_id, slug)`), `title`, `source_kind`, `source_name`, `source_url`,
-`byte_size`, `status`, `progress`, `stage`, `error`, `section_count`, `sections` / `topics` JSON (sqlite
-text, pg jsonb), `summary`, `page_count`, the latest build's telemetry (`cost_usd` sqlite real / pg double
-precision) and `created_at` / `updated_at` / `build_started_at` / `built_at`. `reference_doc_chat_messages`:
+`byte_size`, `status`, `progress`, `stage`, `error`, `section_count`, `sections` / `topics` JSON (text), `summary`, `page_count`, the latest build's telemetry (`cost_usd` real) and `created_at` / `updated_at` / `build_started_at` / `built_at`. `reference_doc_chat_messages`:
 `conversation_id`, `role`, `content`, `citations` JSON, telemetry, `created_at`; index
 `(account_id, workspace_id, conversation_id)`. Both take the named COMPOSITE FK onto
 `workspaces (id, account_id)` (`reference_docs_workspace_account_fk`, `reference_doc_chat_workspace_account_fk`).
 The text lives as FILES under `<docsDir>/<accountId>/<workspaceId>/`, removed by erasure and the workspace
 delete route. Both tables in `accountScopedTables()`, erased, and checked by `verify:isolation`. Journal
-`when` sqlite `1792137603012` / pg `1792137604011`. ⚠ pg `0103` NOT replayed.
+`when` `1792137603012`.
 
-### `0117_review_doc_references` (pg `0104`) — reference docs in reviews
+### `0117_review_doc_references` — reference docs in reviews
 Two nullable JSON columns, no index (docs/REFERENCE-DOCS.md § Use in reviews). `claude_reviews.doc_references`
-(sqlite text / pg jsonb): the reference-library passages a PR review used, each server-checked — NULL = the
+(text): the reference-library passages a PR review used, each server-checked — NULL = the
 run did not read the library, `[]` = it read it and kept nothing. `claude_review_findings.doc_citations`
-(sqlite text / pg jsonb): the library sections one finding rests on, NULL = none. The ticket review and the
+(text): the library sections one finding rests on, NULL = none. The ticket review and the
 sprint check need NO column: theirs ride their existing JSON (`ticket_reviews.assessment.references`,
 `sprint_assessments.body_json.references`). Both columns sit on tables already in the delete paths and
-erasure. Journal `when` sqlite `1792137604013` / pg `1792137604014`. ⚠ pg `0104` NOT replayed.
+erasure. Journal `when` `1792137604013`.
 
-### `0120_sprint_paths` (pg `0107`) — the sprint builder's critical paths
+### `0120_sprint_paths` — the sprint builder's critical paths
 New table `sprint_paths`: ONE row per (account, workspace) — `input_hash`, `paths_version`, `paths_json`
-(sqlite text JSON / pg jsonb; ticket KEYS only), `model`, `cost_usd` (sqlite real / pg double precision),
+(text JSON; ticket KEYS only), `model`, `cost_usd` (real),
 `input_tokens`, `output_tokens`, `written_at` (all nullable: a row may hold only an attempt or a counted
 run), the last attempt `attempt_at` / `attempt_hash` / `attempt_error`, today's run count `runs_day`
 ('YYYY-MM-DD' UTC) + `runs_today` (not null, default 0), `created_at` / `updated_at`. Unique
 `(account_id, workspace_id)` — EVERY `onConflictDoUpdate` on it targets exactly that; account FK (cascade)
 + the NAMED composite FK `sprint_paths_workspace_account_fk` onto `workspaces (id, account_id)`; in
 `accountScopedTables()`, erased, checked by `verify:isolation` (docs/CLAUDE-REVIEW.md § Sprint paths).
-⚠ It REPLACES the Haiku sprint story: `sprint_story` (`0109` / pg `0096`) and
-`sprint_reads.story_attempt_at / _hash / _error` (`0111` / pg `0098`) are DORMANT from here — never
+⚠ It REPLACES the Haiku sprint story: `sprint_story` (`0109`) and
+`sprint_reads.story_attempt_at / _hash / _error` (`0111`) are DORMANT from here — never
 written or read, kept for their rows (`sprint_story` is still erased). Journal `when` sqlite
-`1792137607016` / pg `1792137607017`. ⚠ pg `0107` NOT replayed.
+`1792137607016`.
 
-### `0121_story_docs_alignments` (pg `0108`) — check a story against the docs
+### `0121_story_docs_alignments` — check a story against the docs
 New table `story_docs_alignments`: ONE row PER RUN (a click) — `ident`, `ticket_key`, `status`, the
 `fingerprint` + its parts `story_hash` / `criteria_hash` / `library_hash` / `version`, `criteria_source`,
-`criteria_json` / `shortlist_json` / `result_json` (sqlite text JSON / pg jsonb), `error`, `shortlist_model`,
+`criteria_json` / `shortlist_json` / `result_json` (text JSON), `error`, `shortlist_model`,
 `model`, `cost_usd` (both calls), tokens, turns, `created_at` / `started_at` / `completed_at`. NO unique
 index (so no `onConflictDoUpdate` target to keep in step); indexes `(account_id, workspace_id, ident, id)`
 and `(account_id, created_at)` (the daily cap). Account FK (cascade) + the NAMED composite FK
 `story_docs_alignments_workspace_account_fk` onto `workspaces (id, account_id)`, ON DELETE cascade — a
 deleted workspace takes its runs (their links name THAT library; NOT re-homed to Default by
 `deleteWorkspace`). In `accountScopedTables()`, erased, checked by `verify:isolation`; not exported (model
-output, regenerable). Journal `when` sqlite `1792137608016` / pg `1792137608017`. ⚠ pg `0108` NOT replayed.
+output, regenerable). Journal `when` `1792137608016`.
 
-### `0122_claude_thread_checks` (pg `0109`) — Check threads
+### `0122_claude_thread_checks` — Check threads
 New table `claude_thread_checks`: ONE row PER RUN of the light threads-only pass — `workspace_id`
 (the auto daily cap), `pr_id`, `repo_id`, `head_sha`, `trigger` (`manual|auto`), `status`, `model`,
-`threads_sent`, `thread_assessments` (the WHOLE reconciled set; sqlite text JSON / pg jsonb),
+`threads_sent`, `thread_assessments` (the WHOLE reconciled set; text JSON),
 `comments_through`, `refused`, `error`, cost/tokens/turns, `started_at` / `completed_at` / `created_at`.
 NO unique index (no `onConflictDoUpdate` target). Indexes `(account_id, pr_id, created_at)` and
 `(account_id, workspace_id, created_at)`. Account FK (cascade) + the NAMED composite FK
 `ctc_pr_account_fk` onto `pull_requests (id, account_id)`, ON DELETE cascade (the `ci_reviews`
 pattern, so neither delete path needs an entry). In `accountScopedTables()`, erased, checked by
-`verify:isolation`. Journal `when` sqlite `1792137609016` / pg `1792137609017`. ⚠ pg `0109` NOT replayed.
+`verify:isolation`. Journal `when` `1792137609016`.
 
-### `0123_sprint_brief_one_liner` (pg `0110`) — the sprint card's one line
-`ALTER TABLE sprint_briefs ADD one_liner text` (nullable; pg `ADD COLUMN IF NOT EXISTS`). Written by the
+### `0123_sprint_brief_one_liner` — the sprint card's one line
+`ALTER TABLE sprint_briefs ADD one_liner text` (nullable). Written by the
 brief pass from `SPRINT_BRIEF_VERSION` 5; a row without it is a pre-v5 brief and no longer current. Column
 only — no new table, so no `accountScopedTables()` / erasure / `verify:isolation` change (`sprint_briefs`
 is already covered). The `onConflictDoUpdate` `set:` in `storeSprintBrief` carries it. Journal `when`
-sqlite `1792137610016` / pg `1792137610017`. ⚠ pg `0110` NOT replayed.
+`1792137610016`.
 
-### `0124_reference_doc_crawl` (pg `0111`) — "Follow links" on a web page
-`ALTER TABLE reference_docs ADD COLUMN crawl_json` (sqlite `text` JSON / pg `jsonb`, nullable;
+### `0124_reference_doc_crawl` — "Follow links" on a web page
+`ALTER TABLE reference_docs ADD COLUMN crawl_json` (`text` JSON, nullable;
 `ReferenceDocCrawl`). NULL = one page or an uploaded file (every existing row). Column only — no new
 table, so no `accountScopedTables()` / erasure / `verify:isolation` change (`reference_docs` is already
 covered). [REFERENCE-DOCS.md](REFERENCE-DOCS.md) § Following links. Journal `when` sqlite
-`1792137611016` / pg `1792137611017`. ⚠ pg `0111` NOT replayed.
+`1792137611016`.
 
 ### No migration — "Check against code" removed (2026-10-18): `sprint_ticket_repos` + `sprint_assessments` DORMANT
 
 The sprint drawer, its repo picker and "Check against code" (`review/sprint-assess/`) were removed with
-the story view. NO drop migration: `sprint_ticket_repos` (`0100` / pg `0087`), `sprint_assessments`
-(`0100` / pg `0087`, `mode` from `0105` / pg `0092`) and `sprint_tickets.repos_saved_at` (`0104` / pg
-`0091`) stay in both schemas, both journals and `accountScopedTables()` + erasure; nothing reads or
+the story view. NO drop migration: `sprint_ticket_repos` (`0100`), `sprint_assessments`
+(`0100`, `mode` from `0105`) and `sprint_tickets.repos_saved_at` (`0104`) stay in the schema, the journal and `accountScopedTables()` + erasure; nothing reads or
 writes them (`deleteRepo` and the sprint read's prune still delete `sprint_ticket_repos` rows). The two
 json columns of `sprint_assessments` are typed `unknown` now that the shared body types are gone.
 
@@ -1425,4 +1151,4 @@ the per-hunk conflict suggestion, the per-repo digest, "Discussion themes", pres
 **no migration in either repo**: `repo_digests`, `human_theme_reports`, `comment_assessments`,
 `addressed_checks`, `ai_pr_analyses` and `preset_reports` stay declared, erased and pruned; nothing
 reads or writes them. `pr_comment_annotations` stays live for `impact`; its comment-kind rows and
-`pro_synthesis`'s `brief` / `rollup` rows are dormant. See DATA-MODEL.md § Dormant Pro plugin tables.
+`pro_synthesis`'s `brief` / `rollup` rows are dormant. See DATA-MODEL.md § Dormant tables.

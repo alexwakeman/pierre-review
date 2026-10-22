@@ -216,6 +216,9 @@ and fail with a duplicate-version error — poisoning an innocent merge.
 - **The unscoped name `limn-review` must already be owned** (reserved) on npm by
   the publishing account before automation can publish to it.
 
+- **The package is the app only.** The landing, the contact form and the static demo
+  are NOT in the tarball; they ship as the website ([below](#the-website-deploy-siteyml)).
+
 ### First publish (claiming the name)
 
 The **very first** publish may need to be done **manually** to claim the unscoped
@@ -274,3 +277,38 @@ It is **not enabled by default.** To turn it on:
      env:
        NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
    ```
+
+---
+
+## The website (`deploy-site.yml`)
+
+pierre-review.com is a separate deploy, unrelated to the npm release: ONE small Node
+service, `apps/site` (plain `node:http`, no runtime deps), serving the prerendered landing
+(`apps/landing/dist`), the static demo at `/demo/` (`apps/frontend/dist-demo`, see
+[DEMO.md](DEMO.md)), `/api/health` and the contact form (`GET /api/contact/ticket` +
+`POST /api/contact`, delivered to a Slack incoming webhook). There is no app server, no
+database and no sign-in in it. Routes, headers and env: `apps/site/README.md`.
+
+`.github/workflows/deploy-site.yml` runs on pushes to `main` that touch `apps/landing`,
+`apps/site`, `apps/frontend`, `packages/shared`, the `Dockerfile`, `.dockerignore`,
+`railway.json`, the lockfile or the root `package.json` (plus manual dispatch; the release
+bot's `chore(release):` commits never redeploy):
+
+1. **test** — `pnpm --filter @pierre-review/site test` and the landing build (the
+   prerender guardrails throw on a contentless page, so a broken prerender fails here,
+   not on the live site).
+2. **build-and-push** — `docker build` of the root `Dockerfile` (landing, then the demo
+   when the frontend defines `build:demo`, then the site service; the backend's native
+   modules are never installed), pushed to `ghcr.io/<owner>/limn-site:latest` and `:<sha>`.
+3. **Railway redeploy** — best-effort `railway redeploy` when `RAILWAY_TOKEN` is set
+   (`RAILWAY_SERVICE` beside a project-scoped token); a failed redeploy never fails the
+   build. Without a token, turn on Railway's "redeploy on image change", or point Railway
+   at the repo and let it build the `Dockerfile` itself via `railway.json` (start command
+   `node site/dist/server.js`, health check `/api/health`).
+
+Secrets (all optional): `VITE_GA_ID` (build-time, inlined into the landing; unset = no
+analytics), `RAILWAY_TOKEN`, `RAILWAY_SERVICE`. Railway service variables:
+`CONTACT_SLACK_WEBHOOK_URL` (unset = the form says it is unavailable),
+`CONTACT_TICKET_SECRET`, `SITE_URL` (turns on the www → apex 301), `HSTS_MAX_AGE`,
+`TRUST_PROXY_HOPS` (set to 1 in the image — ⚠ the rate limit reads `X-Forwarded-For` from
+the RIGHT, so trusting the client-written leftmost entry would let a bot rotate past it).

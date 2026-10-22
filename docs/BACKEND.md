@@ -9,21 +9,14 @@
 
 ### Startup & auth
 
-`index.ts` (cloud: `assertCloudConfig()` first) runs migrations, prunes redundant events,
-builds the app, starts the scheduler, listens. Auth differs by mode (see **Deployment
-modes**):
-
-- **Local:** one synthesized account (id 1). `ensureLocalAccount()` shells out to
-  `gh api user` at startup, caches the identity on the `accounts` row (refreshed ~daily;
-  non-fatal offline — you lose "my turn" triage). API calls use `gh auth token`; SQLite
-  opens `journal_mode=WAL` + `foreign_keys=ON`.
-- **Cloud:** no `gh`; accounts are per-user via one of two GitHub sign-in providers,
-  side by side (configure either/both; SignInGate offers what's set): an **OAuth App**
-  (`public_repo` scope, no install) and/or a **GitHub App** (private org repos need the App
-  installed there). Both mint a user token, encrypted at rest. The chosen provider is folded
-  into the OAuth `state` so the single callback exchanges against the right client id/secret.
-  `assertCloudConfig()` fails loud at boot on a missing cloud env var; DB is a node-postgres
-  `Pool`.
+`index.ts` runs migrations, prunes redundant events, sweeps the clone cache, ensures the local
+account, builds the app, starts the agentic background work, binds the platform
+(`bindPlatform`, `platform/context.ts` → `registerPlatform`), starts the tracker worker and the
+scheduler, listens. There is one synthesized account (id 1): `ensureLocalAccount()`
+shells out to `gh api user` at startup, caches the identity on the `accounts` row (refreshed
+~daily; non-fatal offline — you lose "my turn" triage). API calls use `gh auth token`
+(`getAccessToken`); SQLite opens `journal_mode=WAL` + `foreign_keys=ON`. There is no sign-in,
+no session and no hosted mode.
 
 ### One-shot model calls (`review/llm.ts` `cheapComplete`)
 
@@ -56,17 +49,14 @@ sprint Ask are request/response — the mutation's pending state is the status.
 ### Sync pipeline (`src/sync/`)
 
 Pulls PR activity from GitHub into the DB; fully idempotent. **See
-[docs/SYNC.md](docs/SYNC.md)** for the full pipeline (triggers, two-phase backfill vs
+[SYNC.md](SYNC.md)** for the full pipeline (triggers, two-phase backfill vs
 incremental, fetch loop, cancel, rate limits). In brief:
 
 - **Trigger** (`scheduler.ts`): `node-cron` at `config.syncCron` →
   `syncAllRepos()` (off via `config.disableScheduler`); also repo-add + the manual/deep
-  `POST /api/repos/:id/sync`. The periodic pass **skips accounts idle >
-  `config.syncActiveWindowMinutes`** (default 15; `accounts.lastActiveAt` is stamped on each
-  request from a loaded SPA) — a tenant with no open tab stops being re-synced (cloud-only;
-  local is always-on).
-- **Adaptive polling is the PRIMARY sync strategy in BOTH modes** (docs/REALTIME-SYNC.md;
-  `config.syncAdaptive` defaults to **`true` everywhere**). The cron is a **tick**, not a
+  `POST /api/repos/:id/sync`. The periodic pass is always-on.
+- **Adaptive polling is THE sync strategy** (docs/REALTIME-SYNC.md;
+  `config.syncAdaptive` defaults to **`true`**). The cron is a **tick**, not a
   cadence — `isDue()` gates each repo by activity bucket (hot <1h→120s, warm <6h→300s,
   cold→900s), and incremental syncs run a conditional REST probe first (a `304` costs no rate
   limit), with a 30-min floor forcing a re-walk. ⚠ The floor walk uses the same `since`
@@ -76,16 +66,7 @@ incremental, fetch loop, cancel, rate limits). In brief:
   **`syncCron`'s default keys off `syncAdaptive`: `*/1` adaptive, `*/5` not** — a `*/5` tick
   would pin every repo to 5 min and negate the hot bucket, so the two MUST move together.
   **Landmine: an explicitly-set `SYNC_CRON` wins**, so
-  a deployment pinning `*/5` silently keeps the old cadence with adaptive on.
-- **Webhooks are ADDITIVE on top, cloud only** (`POST /api/webhooks/github` →
-  `enqueuePrSync`/`syncOnePr`, targeted, seconds). They are NOT the cloud default because an
-  installation needs **admin on the repo** — third-party public repos can never be covered, so
-  adaptive is the floor everywhere. Webhooks need **three** things or they silently deliver
-  nothing: the secret env var, the **event subscriptions** (default NONE), and the App
-  **installed**. Coverage is per **repo**, not per user: the receiver routes by `(owner,name)`
-  across every account that has it added, so one install serves every tenant. Signing in via the App
-  (`/login/oauth/authorize`) does **not** install it — Settings' `GithubAppInstallSection` is
-  the in-app path (the SignInGate link is unreachable once signed in).
+  an install pinning `*/5` silently keeps the old cadence with adaptive on.
 - **Plan** (`sync-manager.ts`): never-synced → **full backfill** (`since = now −
   backfillDays`, default 90), run **two-phase** (a fast ~14-day foreground pass, then the
   deep backfill in the background) so the board fills in seconds; else **incremental** from
@@ -122,16 +103,16 @@ incremental, fetch loop, cancel, rate limits). In brief:
   must NOT be lowered: the connection has no failures-first ordering, so a smaller page can
   return 100 green contexts on a red commit — a caret with nothing behind it.
 
-**Lean storage (both modes; default).** `config.persistBodies=false` by default
+**Lean storage (default).** `config.persistBodies=false` by default
 (`PERSIST_BODIES=true` stores everything — larger DB, fully-offline detail).
-**Comment + review bodies are ALWAYS persisted** (both modes): `reviews.body`,
+**Comment + review bodies are ALWAYS persisted**: `reviews.body`,
 `reviewComments.body`, and `prComments.body` are stored unconditionally so the
 consolidated Feed can render full markdown (and review bodies still drive
 substantive-review detection). Only the truly bulky, regenerable text stays
 **lean-gated** — under lean, sync neither persists nor fetches the **PR description**
 (`pullRequests.body`), the review-comment **`diffHunk`**, commit **`message`**, and the
 **`checkRuns` JSON** (the `ciStatus` enum is kept); `reviewComments.excerpt` is always
-kept too. That gated text (per-tenant-duplicated) is **hydrated on demand** when a
+kept too. That gated text is **hydrated on demand** when a
 PR/thread opens (`sync/hydrate-detail.ts` → `PR_DETAIL_QUERY`, matched by node id/sha) and
 **browser-cached** in IndexedDB (`PersistQueryClientProvider`; `pr`/`thread` queries
 `staleTime:Infinity`; `useDetailCache.ts` invalidates on a newer feed `updatedAt`, or when a
@@ -202,7 +183,7 @@ Two more things the reopen stamp does that its mirror does not:
 
 The update is account-scoped in its OWN predicate (`eq(pullRequests.accountId, accountId)`) rather
 than inheriting the route's check, and the events insert derives `repoId`/`nodeId` from that scoped
-UPDATE's `.returning()`, so it cannot reach another tenant's repo. Route contract, permission rule
+UPDATE's `.returning()`, so it cannot reach another account's repo. Route contract, permission rule
 and failure codes: [API.md](API.md).
 
 ---
@@ -252,7 +233,7 @@ one-line swap rather than a redesign.
 
 ### What was fixed, and what must NOT be "fixed"
 
-Fixed at four sites: the plugin's annotations run routes (**JSON and SSE**), the
+Fixed at four sites: the platform's annotations run routes (**JSON and SSE**), the
 digest-regenerate SSE, and the per-item resolution-check route. (Only the annotations run route —
 now the impact note's — survives; the others were REMOVED 2026-10-18.)
 
@@ -262,7 +243,7 @@ GET's `req.raw` does not close early (see the probe above), so "harmonising" the
 change with no upside and a real risk of reintroducing the asymmetry.
 
 **Any NEW POST that wants a client-disconnect abort needs this** — it is the shape every billed
-loop here uses. The in-code comment at `packages/pro/src/annotations/routes.ts` restates the reasoning at the call
+loop here uses. The in-code comment at `platform/annotations/routes.ts` restates the reasoning at the call
 site so a reader does not have to find this doc first.
 
 ## My Turn — the ball rule
@@ -273,7 +254,7 @@ event discharges it.** Derived on every read from `reviews`, `review_comments`, 
 merge and CI columns and `repos`' default-branch columns). Nothing about a CARD is stored: there is
 no "done" state and no tombstone. A card appears when the state says so and vanishes when the state
 says so. What IS stored is the reader's choice of which TYPES exist (§ Settings: gates and
-promotions) and — since sqlite `0069` / pg `0056` — a per-SUBJECT dismissal whose only power is to
+promotions) and — since migration `0069` — a per-SUBJECT dismissal whose only power is to
 hide what happened BEFORE it (§ Dismissals and one card per PR).
 
 ### Claude reviews have their own Pending tab
@@ -371,8 +352,7 @@ author id that is known, is not you, and is not in the global automation set (be
 - **S6 reads a clock the scanner stamps** (`sync/mention-scan.ts`, [SYNC.md](SYNC.md) § "@mention
   derivation"): the newest mention of you by a human on each PR. A row with a NULL `mentioned_at`
   (the scanner has not restamped it since migration `0068`) shows no card — under-notifying is the
-  safe direction. A new mention shows within one scan tick (5 min); in cloud the scanner covers only
-  recently active accounts, so a returning reader waits one tick.
+  safe direction. A new mention shows within one scan tick (5 min).
 - **Your APPROVAL discharges S3a, S3b and S3d.** An `approved` review of yours on the PR STRICTLY
   later than the thread card's clock means you read the reply and approved without answering — done.
   Applied to the seeds inside `getThreadTurns` (`approvedSince`). Only `approved` counts (a
@@ -456,7 +436,7 @@ Deleting the button without this makes the board strictly worse.
 ⚠ **`getUnactionedClaudeReviews` must count posted FINDINGS, not the parent run's `postedAt`.** The
 per-finding post route stamps `claude_review_findings.posted_at` and never the parent, so a run-only
 test makes the card immortal. Measured: 96 runs / 2 stamped, 287 findings / 62 stamped. Fixed
-CORE-side, because the plugin-side fix heals no already-unstamped run.
+in the core fold, because a fix at the writer heals no already-unstamped run.
 
 ⚠ **The Claude card obeys the ball rule too, and it did not until 2026-09-30.** It retired only on
 Claude-Review-internal stamps, so approving the PR (in the pane or on github.com) left it up — real
@@ -502,7 +482,7 @@ a model payload.
   headline-free). "and N more" is `humanCommitsAfter − commits.length`. ⚠ `headline: null` is "not
   synced yet" and renders as such, never as an empty line.
 
-`commits.message_headline` (sqlite `0072` / pg `0059`) is GitHub's `messageHeadline`, SELECTED ON
+`commits.message_headline` (migration `0072`) is GitHub's `messageHeadline`, SELECTED ON
 EVERY WALK (not lean-gated like `message`, which stays the full body for PR detail), capped at 200
 chars and written ONLY when the key was received (`persistPr` spreads `{}` otherwise). Commits
 stored before the column existed are filled by `sync/backfill-commit-headlines.ts` after every walk
@@ -533,7 +513,7 @@ Quotes are `CardExcerpt`s: plain text (markdown and HTML stripped), at most
 comment is brought into view with a leading "…".
 
 - ⚠ **They ride `withFailingChecks`** — only `GET /api/attention` asks (`withBoardFacts` in
-  `getWorkspaceInsights`). The brief, the work plan and every Pro payload never pay for these reads.
+  `getWorkspaceInsights`). The brief, the work plan and every narration payload never pay for these reads.
 - ⚠ **Read AFTER the board LISTS, for the listed cards only.** The board folds UNCAPPED, so reading
   over every built card read ~1,600 comment bodies per load on a real workspace to decorate ~50.
   `buildPendingBoard` passes a `BoardFactsSink`; the fold registers its jobs and the board runs them
@@ -545,12 +525,12 @@ comment is brought into view with a leading "…".
   on an outdated thread or a bot marker), an unmapped author. The SPA drops that clause.
 - **No `requesterId` for `review_request`.** The review-request history stores who was ASKED, not
   who asked: `REVIEW_REQUEST_HISTORY_NODE` selects no `actor`. Adding it needs the selection, a
-  column on `review_request_events` (both dialects) and a backfill.
+  column on `review_request_events` and a backfill.
 
 ### Settings: gates and promotions
 
 The reader decides which types exist, how My turn orders them and how Pending ranks cards
-(Settings → My Turn). FREE, both modes, every tier, PER ACCOUNT: one account is one reader, and the
+(Settings → My Turn). PER ACCOUNT: one account is one reader, and the
 same settings apply in every workspace.
 
 - **Storage is overrides only.** `accounts.my_turn_settings` is NULL until the reader changes
@@ -596,14 +576,14 @@ same settings apply in every workspace.
     `trunkHeadFailingChecks`; null when unknown), looked up by the red head itself, so a direct push
     with no landing PR is still named. It is
     REPO-grained: `kind === 'my_turn'` no longer implies a PR, and every consumer branches on
-    `reason === 'trunk_red'` before treating one as a PR (the scorer, the card renderer, the Pro
+    `reason === 'trunk_red'` before treating one as a PR (the scorer, the card renderer, the
     sprint report).
 - **The Pending mute still rides `relevance`** for every new type (`relevanceFor`), so a muted
   repo's rows stay listed as `'none'`; a mute never removes a row. A switched-off type does.
 - **The ranking settings.** The type ORDER groups My turn (`tabGroupRank`, `groupByReason`), and the
   three Do next WEIGHTS (integer percents, steps of 10, summing to 100; presets Balanced 50/30/20,
   Mine first 30/10/60, Oldest first 20/70/10, Quick wins 80/10/10) reach `scoreCards` for every tab
-  and for the Pro work plan. `rankPendingTabs` returns them as `rules` on `/api/attention`, so the
+  and for the work plan. `rankPendingTabs` returns them as `rules` on `/api/attention`, so the
   board explains the order the reader actually got ([FRONTEND.md](FRONTEND.md) § The Pending tabs).
   Measured on the dev DB before the build (773 listed cards): under Balanced, 401 of them outrank a
   fresh direct review request; under Mine first, none do. Balanced stays the default, so nobody's
@@ -619,7 +599,7 @@ same settings apply in every workspace.
 ## The Dependencies tab — dependency automation and security (CORE)
 
 The last Pending tab (`deps` in `PENDING_TABS`) holds two card kinds: **`security`** and
-**`dependency_bump`**. Deterministic, free on every tier, no model, no new route and no new table
+**`dependency_bump`**. Deterministic, no model, no new route and no new table
 (the four `pull_requests` columns it reads are in [DATA-MODEL.md](DATA-MODEL.md) § `pull_requests` —
 dependency + security signals). Built in `getWorkspaceInsights` (`db/queries.ts`), ranked in
 `db/pending-tabs.ts`, scored in `db/work-plan.ts`.
@@ -699,7 +679,7 @@ Dependencies-tab membership, so the three cannot disagree. It is read ONCE per f
   REVIEW_BOTS seed still wins; a STORED kind beats the new seed, and only a NULL stored kind takes
   it. ⚠ **EXACT LOGINS ONLY** (`exactAutomationVendorUsers`): this map is also the bot drill-downs'
   "is this id classified here" gate, which then resolves the login, so a prefix match
-  (`semgrep-code-<org>`) would hand any tenant another org's name. A prefixed login still counts as
+  (`semgrep-code-<org>`) would hand a workspace another org's name. A prefixed login still counts as
   automation and still gets its role; only its brand waits for a workspace row.
   `classificationKindForUserForAccount` is unchanged: it feeds the cross-org benchmark.
 - **The ROLE** is `authorAutomationFor` (`db/dependency-cards.ts`, pure): (1) a dependency
@@ -721,7 +701,7 @@ Dependencies-tab membership, so the three cannot disagree. It is read ONCE per f
   used only when that row is red. `prRef` spreads `failingChecks` / `failingCheckTotal` only while
   the row is red AND its `headSha` equals the head the names were read at; the head itself never
   reaches the card. The names fold runs only under `{ withFailingChecks: true }`, which
-  `GET /api/attention` alone passes: the daily brief (×12 under rollup), the work plan and the Pro
+  `GET /api/attention` alone passes: the daily brief (×12 under rollup), the work plan and the narration
   payloads pay for no extra read, and the names never enter a `detail`, a work-plan fact or
   `insightsHash`. `getBranchStatus` and the trunk arms share ONE trunk reader,
   `trunkHeadFailingChecks` (`db/branch-queries.ts`).
@@ -751,18 +731,16 @@ comment rows of open PRs into live alerts. The rules are the detector's (`evalua
   `account_id`. Every read is keyed by `pr_id IN (prIds)`, and the only caller passes the fold's
   account-scoped `openPrIds`. Never export a variant that takes ids from a request.
   `verify:isolation` checks it directly: the reader answers for the ids it is handed, even when
-  another tenant's PR carries the same comment.
+  another account's PR carries the same comment.
 - ⚠ **THE SQL PRE-FILTER MAY BE LOOSER THAN THE EVALUATOR, NEVER STRICTER.** It is built from
   `SECURITY_ALERT_PREFILTER`, because a tool's "all clear" (Socket's "All alerts resolved") names no
   advisory and must still reach the evaluator: the latest row decides. The evaluator re-applies
-  every literal EXACT-CASE, so SQLite's case-blind `LIKE` and Postgres' case-sensitive one alert on
-  the same rows.
+  every literal EXACT-CASE, because SQLite's `LIKE` is case-blind.
 - **Comments and reviews are narrowed to the tools' own accounts**, with the same looseness: an
   author-gated rule reads only its tool's login; an author-free rule (Frogbot, Checkmarx, which post
   through `github-actions` or a person's token) reads any row carrying its marker
   (`AUTHOR_FREE_ALERT_MARKERS`, held to the rules by `pending-deps.test.ts`). **Threads are not
-  narrowed**: the `reviewer` fallback reads every automated root carrying any literal, which no
-  narrower `LIKE` can promise on Postgres. Measured on Erxes (83 active PRs, 5.2 MB of comment text,
+  narrowed**: the `reviewer` fallback reads every automated root carrying any literal, which no narrower `LIKE` can promise. Measured on Erxes (83 active PRs, 5.2 MB of comment text,
   99.8% of it automation's own): all literals over every comment and review took ~65 ms of a
   ~400 ms fold; the narrowed reads take ~10 ms; threads stay ~60 ms. Gating on the automated
   authors instead was slower.
@@ -794,7 +772,7 @@ comment rows of open PRs into live alerts. The rules are the detector's (`evalua
   repos the viewer only READS. Exempting security would be a one-predicate change plus a separate
   id set, or every other kind would re-admit the quiet PRs.
 - **The brief** gains one line, `security` = `kindTotals.security` (uncapped, like the other survey
-  lines), which opens the board isolated to `security`. It is templated and is not among the Pro
+  lines), which opens the board isolated to `security`. It is templated and is not among the work plan
   narration's inputs, so no stored brief re-bills. `dependency_bump` is counted by no line: an
   update is housekeeping.
 

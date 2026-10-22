@@ -19,25 +19,25 @@
 The Insights → **Reports** pane is a **stored, forwardable artifact per completed period**
 ("5 Aug – 19 Aug"), its comparison against the prior one, and a **refusable** forecast.
 
-**The numbers are CORE, free and deterministic** — no model, no GitHub quota, no new core
+**The numbers are CORE and deterministic** — no model, no GitHub quota, no new core
 table:
 
-| Layer | Lives in | Tier |
+| Layer | Lives in | Part |
 |---|---|---|
 | The **metric vector** (15 keys), coverage, the lane breakdown | `db/period-metrics.ts` | CORE |
 | The **forecast estimator** (pure, no I/O, no db import) | `db/forecast.ts` | CORE |
 | **Who did the work** — the seven-lane actor resolver | `db/actor-lanes.ts` | CORE |
 | The **1:1 person vector** (no caller since 2026-10-22 — the People report is removed; kept behind the required `getPersonPeriod` seam) | `db/person-period.ts` | CORE |
-| **Storage, narration, routes, hashing, backfill** | `packages/pro/src/insights/period-report.ts` (+ pro migrations `0025`/`0026`) | Pro `periodReports` |
+| **Storage, narration, routes, hashing, backfill** | `apps/backend/src/platform/insights/period-report.ts` (+ platform migrations `0025`/`0026`) | platform |
 
 > ⚠ **REMOVED 2026-10-22:** "Ask about this period" (the chat under a report), the People report
 > and 1:1 prep, with their routes. Rules below that mention them are history; what they protected
 > (one-person-per-request, the union gate on the bot routes) is described where it still applies.
 
-The plugin half — the stored rows, the Haiku narration, `/api/pro/insights/period*`, the
-`payloadHashFor` cache key, the "By workspace" axis and the (removed) People-report contract — is
-documented in [PRO-PLUGIN-AND-ACTIVITY.md](PRO-PLUGIN-AND-ACTIVITY.md) (§ apiVersion 21,
-§ The People report). This doc is the core side: the definitions, why they are shaped this
+The platform half — the stored rows, the Haiku narration (shown while `me.ai.enabled`; the numbers
+render without it), `/api/pro/insights/period*`, the `payloadHashFor` cache key, the "By workspace"
+axis and the (removed) People-report contract — is documented in [PLATFORM.md](PLATFORM.md)
+(§ The synthesis seam, § The sprint cadence is PER-WORKSPACE, § The People report). This doc is the core side: the definitions, why they are shaped this
 way, and what will bite you.
 
 ⚠ **`period-metrics.ts` writes its own SQL and reuses NONE of the existing getters, on
@@ -52,72 +52,17 @@ bytes** around offset 132k, so every search tool silently under-reports matches 
 
 ---
 
-## What an UNENTITLED reader sees: visible-but-locked, not absent
+## The by-workspace axis has no surface of its own
 
-The app's older posture on a capability the account does not have is **absence** — the control
-is simply not rendered, and there is no nudge (`WorkspaceBotCharts` returns null, the "Depth →"
-pill is omitted). That posture is deliberate and still correct for most controls.
+It rides `byWorkspace` on the one-report GET, it has no route of its own
+(`GET /api/workspace-metrics/compare` is deleted and must not return), and its only control is the
+per-metric "By workspace" expander inside the period report. (Until 2026-10-22 Period reports,
+Chronology and the Bots ROI panel were Pro, visible-but-locked; every gate, badge and lock pane went
+with the plugin.)
 
-**Period reports and the by-workspace axis are exceptions**, along with
-Chronology and the Bots ROI panel: they are **VISIBLE-BUT-LOCKED**. The pane exists, it carries a
-`Pro` badge, and an unentitled reader lands on a calm statement of what the view answers plus one
-link. Everything renders through the one shared component — **`components/ProGate.tsx`**
-(`ProBadge`, `ProLockPanel`, `useProGateState`) — and nothing hand-rolls either half.
-
-| Surface | Locked pane lives in | `data-testid` |
-|---|---|---|
-| Period reports | `PeriodReportsPanel` (replaces the whole panel) | `period-reports-locked` |
-| By workspace | *(none — transitively gated, see below)* | — |
-
-Four rules, each of which has a matching comment in the code:
-
-- ⚠ **THE LOCKED PANE'S TESTID IS NOT THE ENTITLED BODY'S.** `PeriodReportsPanel`'s real body is
-  `period-reports`; the lock is `period-reports-locked`. Sharing one id is how a screenshot
-  pipeline photographs a lock screen and ships it as marketing (`scripts/capture-shots.mjs` waits
-  on testids).
-- ⚠ **`enabled: false` IS NOT "UNENTITLED" AND MUST STAY SILENT.** `GET /api/pro/insights/reports`
-  answers `{enabled:false}` when the plugin has self-disabled its reports surface (a stale
-  `/api/me`, `PRO_DIGEST_ENABLED` flipping). That is a **paying** account. Both
-  `PeriodReportsPanel` and `PersonPeriodSection` keep this as a separate branch returning `null` —
-  collapsing the two asks a customer to buy what they have already bought.
-- ⚠ **NEVER READ THE CAPABILITY NAKED — GO THROUGH `useProGateState`.** `useProCapabilities()`
-  returns an all-false literal until `/api/me` resolves, so `!periodReports ? <lock/> : <real/>`
-  paints "See what Pro includes" for one frame on every cold load **of an account that pays**.
-  The helper holds at `'pending'` for that flight and resolves an `/api/me` error to `'locked'`.
-- **ONE LOCK PER PANE.** `PeriodPeopleSection` gained an *intrinsic* `periodReports` guard (it was
-  previously safe only because of where it is mounted, and it fires eight roster queries on
-  mount), but that guard returns `null` — the reader is already looking at the panel's lock a few
-  rows above, and a second dashed box under it reads as two broken sections.
-
-**The by-workspace axis has no independent surface.** It rides `byWorkspace` on the one-report
-GET, it has no route of its own (`GET /api/workspace-metrics/compare` is deleted and must not
-return), and its only control is the per-metric "By workspace" expander inside the already-gated
-panel. So it is gated **transitively** and carries only the badge on that expander — there is
-nothing to lock, because an unentitled reader never reaches the table the expander sits in.
-
-**Local/OSS is gated too, and that is a real change to the dev loop.** `entitledProCapabilities`
-short-circuits on `account.isLocal`, so local entitlement collapses to whatever the plugin
-published — and the plugin publishes `periodReports: PRO_DIGEST_ENABLED === 'true'`. A flag-less
-`pnpm dev` with the submodule checked out therefore reports `periodReports: false` and now shows
-the **locked** panes where it used to show nothing. `pnpm demo` and the shots Pro pass set the
-flag; the ordinary dev loop does not. Set `PRO_DIGEST_ENABLED=true` to work on these panes.
-
-**Server enforcement is unchanged and already exists — three layers, none of them client-side:**
-the routes are `/api/pro/*`, so a free cloud account is 402'd by the blanket gate in
-`api/plugins/auth.ts`; in OSS the routes are never registered; and the plugin self-gates on
-`DIGEST_ENABLED`. Every hook already takes the capability as its `enabled`
-(`usePeriodReportsList`, `usePeriodReport`), so nothing polls a paywall.
-
-⚠ (History — the People report and `/api/bot-authoring` were removed 2026-10-22; the two
-`/api/bot-analytics` routes keep the union.) **The People report's BOT sections read three routes it does not own** — `/api/bot-analytics`,
-`/api/bot-analytics/vendor/:key/comments` and `/api/bot-authoring`, all core and all shared with
-the Bots ROI panel, which gates on **`botDepth`**. **All three now carry an entitlement check, and
-all three take the UNION `botDepth || periodReports`** (`botAnalyticsEntitled`, one predicate in
-`api/routes/bot-triage.ts`) — because `botDepth` alone would open a report a Reports customer paid
-for with every bot section blank and no explanation on screen. Their client hooks mirror the same
-predicate, and so must any future one. Two of the three refuse outright (402); `/api/bot-analytics`
-NARROWS instead, because the same response also feeds two free surfaces in `BotsView` — details in
-[API.md](API.md).
+⚠ **`enabled: false` STAYS SILENT.** `GET /api/pro/insights/reports` can still answer
+`{enabled:false}`; `PeriodReportsPanel` keeps that as a branch returning `null` rather than an
+error.
 
 ---
 
@@ -238,7 +183,7 @@ a stored `repo_ids_json` and a recomputed one compare byte-for-byte.
 ### 2. The comparison runs over the coverage-stable SUBSET
 
 A comparison is drawn over the **intersection of the two periods' tracked sets**, so it is
-like-for-like; the plugin recomputes the prior period over that subset scope
+like-for-like; the platform recomputes the prior period over that subset scope
 (`comparison.subsetRepoIds` + a `subsetDisclosure` string such as *"covers 12 of 18 repos
 tracked across both periods"*). An empty intersection, a changed cadence or a missing prior
 period is a **named refusal**, never a fabricated number.
@@ -324,7 +269,7 @@ forecast was computed — distinct from a refused comparison and from a genuine 
 
 ## `PERIOD_METRICS_SCHEMA_VERSION` = 2
 
-The version is **folded into the plugin's `payloadHashFor`** (`v:${…}` alongside the `p3|`
+The version is **folded into the platform's `payloadHashFor`** (`v:${…}` alongside the `p3|`
 formula prefix, the workspace, the period key, the cadence, the model, the sorted repo ids, the
 coverage fraction, every metric value+sample size and the comparison's subset ids). That makes
 a bump **self-executing**: every stored row's hash moves at once, so each row reads `stale` and
@@ -342,12 +287,11 @@ history as comparable.
 |---|---|
 | `packages/shared/src/types.ts` | the wire contract |
 | `apps/backend/src/db/period-metrics.ts` | **mirrored, not imported** |
-| `packages/pro/src/insights/period-report.ts` | **mirrored, not imported** |
+| `apps/backend/src/platform/insights/period-report.ts` | **mirrored, not imported** |
 
-The backend cannot import the shared package at RUNTIME: it is **types-only and not shipped**,
-so `build-release.mjs` greps `release/dist` and FAILS the build on a real value import — the
-same reason `AI_CREDITS_PER_USD` is inlined in `db/credits.ts`. `PERIOD_METRIC_KEYS` is
-mirrored for the identical reason. **`period-metrics.test.ts` imports the shared originals** (a
+The mirror dates from when the shared package was **types-only and not shipped** (a value import
+failed the release build). Shared is now vendored into the release ([PACKAGING.md](PACKAGING.md)),
+but the mirrors stay — `PERIOD_METRIC_KEYS` is mirrored the same way. **`period-metrics.test.ts` imports the shared originals** (a
 test is not in `release/dist`) and asserts the arrays are identical, so drift is caught in CI
 rather than by a reader.
 
@@ -381,7 +325,7 @@ its own additive block and costs the existing periods nothing.
 
 ### ⚠ A `_pct` metric MUST join `PCT_METRIC_KEYS`
 
-`PCT_METRIC_KEYS` lives in the **plugin** (`insights/period-report.ts`) and declares the
+`PCT_METRIC_KEYS` lives in the **platform** (`platform/insights/period-report.ts`) and declares the
 metrics measured on a 0–100 scale. Their forecast declares `{max: 100}`; without it a rising
 series projects **"CI success ≈ 104% (98–110%)"** — not a bold call but an impossible number.
 
@@ -505,8 +449,7 @@ to `users.isBot` + the vocabularies re-admits an actor a person has explicitly m
 because such an actor usually *has* a bot-ish login or a stale global flag, which is exactly
 WHY someone corrected it by hand. What does not win is the mere ABSENCE of an automated verdict.
 
-`users` is a **GLOBAL** table, so the `isBot` sweep is read **by id** and never handed to a
-tenant; `ActorLanes.laneOf(null)` is `human` (a deleted GitHub account is unattributable, and
+`users` is a **GLOBAL** table, so the `isBot` sweep is read **by id** and never handed out whole; `ActorLanes.laneOf(null)` is `human` (a deleted GitHub account is unattributable, and
 calling it automation would be a claim we cannot support).
 
 ### The lane breakdown counts ALL THREE comment channels
@@ -545,10 +488,9 @@ The fold is two queries:
 1. **CANDIDATES** — every PR with a non-pending review submitted in `[from, to)`. A superset
    (a PR whose first HUMAN review is in-window necessarily has a review in-window), ordered
    newest-first so the dedupe keeps the most recent on hitting the cap. Deduped in TS rather
-   than with a `groupBy`, deliberately: `min(submitted_at)` comes back as an **epoch integer on
-   SQLite and a `Date` on Postgres** (drizzle's `mode: 'timestamp'` mapping applies to selected
-   COLUMNS, not to `sql` fragments) — a dialect divergence this file has no reason to acquire
-   for a trivial fold.
+   than with a `groupBy`, deliberately: `min(submitted_at)` comes back as a raw **epoch integer**
+   (drizzle's `mode: 'timestamp'` mapping applies to selected COLUMNS, not to `sql` fragments) —
+   a conversion this file has no reason to acquire for a trivial fold.
 2. **EVERY non-pending review on a candidate PR, across ALL TIME.**
 
 ⚠ **The unbounded time range in query 2 is the whole point and must not be "optimised" back to
@@ -562,8 +504,7 @@ exactly the rows the fold is looking for.
 
 ⚠ **A different KIND of cap from the other scan caps in this file, and much smaller for a
 reason that is not memory.** Because query 2 must look outside the window, the candidate ids
-travel as **BIND PARAMETERS** in an `IN (…)`. **SQLite caps those at 32,766 and Postgres at
-65,535**, so reusing `PERIOD_PR_SCAN_CAP` (20,000) would sit one busy quarter away from a hard
+travel as **BIND PARAMETERS** in an `IN (…)`. **SQLite caps those at 32,766**, so reusing `PERIOD_PR_SCAN_CAP` (20,000) would sit one busy quarter away from a hard
 driver error rather than a truncated result. A period is a sprint: 5,000 human-reviewed PRs in
 one is far beyond anything real. (`PERIOD_COMMENT_SCAN_CAP` is 200,000 and bounds the row
 scans, not the bind list.)
@@ -607,11 +548,11 @@ ACCOUNT, so two teams sharing an account read each other's fortnights under thei
 
 ### Storage: a new table, never a wider `pro_settings` key
 
-`pro_workspace_settings` (plugin migration **0029**, both dialects), one row per
+`pro_workspace_settings` (platform migration **0029**), one row per
 `(account_id, workspace_id)`, holding `sprint_cadence_days` + `sprint_start_at` and nothing else.
 
 ⚠ **Do NOT widen `pro_settings`' unique index to `(account_id, workspace_id)`.** It is an
-ACCOUNT-grained table and what is left live on it is genuinely account-wide — by plugin 0033 that
+ACCOUNT-grained table and what is left live on it is genuinely account-wide — by platform 0033 that
 is the narration model, the vestigial auto-resolve pair and the legacy `bot_cost_json` blob;
 everything else has MOVED to a per-workspace table rather than forking this one (the tracker and
 the cadence in 0031, the comparison mode in 0032, the bot Slack-digest toggle in 0033, the Slack
@@ -632,11 +573,11 @@ that one is a stored artifact somebody forwarded.
 resolveSprintCadence(ctx, accountId, workspaceId) -> { cadenceDays, startAtMs }
 ```
 
-in `packages/pro/src/settings/store.ts`. Every consumer goes through it: `getComparisonWindow`,
+in `platform/settings/store.ts`. Every consumer goes through it: `getComparisonWindow`,
 `getInsightsRangeWindow`, `periodGrid` (via `currentSprintWindow`), the People report's grid, the
 sprint report and the Slack digest.
 
-⚠ **THE ACCOUNT-LEVEL FALLBACK IS GONE (plugin migration 0031).** The resolver reads the workspace
+⚠ **THE ACCOUNT-LEVEL FALLBACK IS GONE (platform migration 0031).** The resolver reads the workspace
 row or answers "no cadence" — TWO STATES, NO CHAIN. `pro_settings.sprint_cadence_days` /
 `sprint_start_at` are **dormant**: still in the database, undeclared in both drizzle schema
 modules, therefore never selected and never written. `SprintCadence` lost its `source` field with
@@ -680,7 +621,7 @@ pair is null reads **identically** to no row at all, and a test pins that equiva
 ever answered differently, clearing a cadence would behave differently depending on whether the
 workspace happened to have a tracker configured.
 
-### ⚠ `comparisonMode` IS PER-WORKSPACE TOO (plugin migration 0032), and the old claim was FALSE
+### ⚠ `comparisonMode` IS PER-WORKSPACE TOO (platform migration 0032), and the old claim was FALSE
 
 This doc used to say: *"`comparisonMode` stays account-wide. Rolling-7 / rolling-14 /
 sprint-position is a reading preference with no per-team meaning."* It is not, and
@@ -808,7 +749,7 @@ length — a surface that mutates for a reason its reader cannot see.
 
 `GET`/`PUT /api/pro/settings/workspace?workspace=<id>` (`WorkspaceProSettings` /
 `WorkspaceProSettingsUpdate`) carries all THREE per-workspace settings — the sprint pair, the issue
-tracker and, since plugin 0032, the comparison mode. `?workspace=` degrades through
+tracker and, since platform 0032, the comparison mode. `?workspace=` degrades through
 `resolveRequestWorkspaceId` like every scoped route; `cadenceDays: null` CLEARS the cadence by
 NULLING the pair (the row survives — it holds two other settings); an **omitted** `startDate` keeps
 the stored anchor, so a cadence-only edit does not silently re-phase the grid; `comparisonMode` is
@@ -839,7 +780,7 @@ is the **calendar**: real months aligned to the 1st in **UTC**, 28–31 days lon
 configuration at all. Plus one live view, **month to date**.
 
 `PeriodGrain = 'sprint' | 'month'` (shared). It is a **READING CHOICE CARRIED ON THE REQUEST,
-never a stored setting** — folding it into `pro_workspace_settings` would silently move the FREE
+never a stored setting** — folding it into `pro_workspace_settings` would silently move the
 flow-metrics comparison window on another tab, which nobody asked for by picking a grain on
 Reports. The SPA holds it in `filters.insightsReportGrain`, mirrored to `?reportGrain=month`.
 
@@ -891,7 +832,7 @@ error that must be answered per grain. `windowAt` is the ONE place the arithmeti
 
 ⚠ **A month needs its OWN title formatter.** `periodEnd` is the EXCLUSIVE bound, so the sprint
 formatter renders August as **"1 Aug – 1 Sep"** — a 32-day span that does not exist, on a document
-somebody forwards. `formatPeriodRange(from, to, grain)` (plugin) and `periodTitle(start, end, grain)`
+somebody forwards. `formatPeriodRange(from, to, grain)` (platform) and `periodTitle(start, end, grain)`
 (SPA) both take a trailing optional grain.
 
 ⚠ **`periodDayKey`'s `YYYY-MM-DD` cannot express a month.** A month named by its first day is
@@ -902,7 +843,7 @@ why only the LIST route takes `?grain=`; every other route is handed a key and d
 parameter can disagree with the key beside it (`period-routes.ts`, `person-routes.ts`).
 
 ⚠ **Months align to UTC midnight, NOT to the Slack digest's send-time zone**
-(`workspace_slack_targets.timezone` since plugin 0030; it was `pro_settings.slack_timezone`). Hanging the report grid off it would move a stored artifact's window when
+(`workspace_slack_targets.timezone` since platform 0030; it was `pro_settings.slack_timezone`). Hanging the report grid off it would move a stored artifact's window when
 somebody edited an unrelated notification setting, and would make `month-2026-08` disagree with its
 own start instant for every reader east of Greenwich. Every other boundary in this feature is UTC.
 
@@ -939,9 +880,9 @@ unstorable, and both are load-bearing elsewhere:
 2. **`payloadHashFor` folds nothing `Date.now()`-derived**, or a dormant workspace re-bills on a
    timer. An open period's upper bound IS `Date.now()`, so it could not enter that hash honestly.
 
-So: no row, no `payload_hash`, no narration, no model, no credits, `stale: false` always, and
+So: no row, no `payload_hash`, no narration, no model, `stale: false` always, and
 **no Generate button — absent, not disabled**, exactly like an archived report. `buildMonthToDate`
-takes no `LlmClient` and no `aiCredits`, so the absence of billing is structural rather than
+takes no `LlmClient`, so the absence of billing is structural rather than
 policed.
 
 **The comparison is an ELAPSED-SLICE comparison, not month-against-month.** Seventeen days of
@@ -970,14 +911,14 @@ confidently around it.
 The alternative, normalising counts to a per-day rate before fitting, was **rejected**:
 
 - Core's estimator is deliberately told NOTHING about which metric it is fitting (the same reason
-  `PCT_METRIC_KEYS` lives in the plugin). The plugin would have to classify all fifteen keys as
+  `PCT_METRIC_KEYS` lives in the platform). The platform would have to classify all fifteen keys as
   count / median / percentage and get every one right, silently.
 - A per-day projection is a **different metric** from the one in the table above it ("2.4 merged
   PRs per day" vs "merged PRs"). Redefining a key's units per grain is precisely what
   `PERIOD_METRICS_SCHEMA_VERSION` exists to forbid — a metric is RENAMED, never redefined.
 
 So every key refuses with the new `PeriodRefusalReason` member **`uneven_periods`** (a trailing
-union member — `apiVersion` stays **21**), and `REFUSAL_TEXT` in `periodReportMarkdown.ts` being a
+union member), and `REFUSAL_TEXT` in `periodReportMarkdown.ts` being a
 `Record<PeriodRefusalReason, string>` made the copy a compile error rather than a blank cell.
 **The sprint grain still forecasts**, which is what makes the refusal a statement about the grain
 rather than a switch-off.
@@ -1041,7 +982,7 @@ running past today under a caption saying "to date".
 Not strictly period-reporting, but it is the same "one row must not mix two window
 populations" defect at the **bot** grain, and it arrived with this work (the People report's
 bot sections need `getBotAnalytics` to cover a COMPLETED period, which has no `BotWindowKind`
-spelling — hence the apiVersion-18 `{kind, fromMs, toMs}` window form).
+spelling — hence the `{kind, fromMs, toMs}` window form).
 
 **The defect.** `getBotAnalytics` honoured an explicit `toMs` in only TWO of its folds. The
 automated thread scan, `mergedPastRows`, `getMlWindowAggregates` and `countUnlabelledBotText`
@@ -1070,7 +1011,7 @@ exactly one period. Pinned by `db/bot-analytics-window-bounds.test.ts`.
 
 ## See also
 
-- [PRO-PLUGIN-AND-ACTIVITY.md](PRO-PLUGIN-AND-ACTIVITY.md) — the plugin half: stored rows,
+- [PLATFORM.md](PLATFORM.md) — the platform half: stored rows,
   `payloadHashFor`, the Haiku narration + the D4 digit gate, the "By workspace" axis
   (`getPeriodMetricsForWorkspaces`), and the removed **People report** (history).
 - [API.md](API.md) — `/api/pro/insights/period*`, `/api/bot-analytics` (`fromMs`/`toMs`).

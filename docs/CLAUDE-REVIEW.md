@@ -12,53 +12,73 @@ against the selected PR, returns **structured JSON findings** (persisted per hea
 history kept), lets the user author their own review + tick which findings to post, then
 posts **one** GitHub review (inline + body + verdict).
 
-- **FREE, ON BY DEFAULT, LOCAL-ONLY — and ALWAYS VISIBLE locally.** Since apiVersion 22 Claude
-  Review (with its follow-up, ticket check, auto review and chat) and AI Fix's fixer
-  are CORE again — no plan, no opt-in flag. They run on the user's OWN Claude Code session or
-  `ANTHROPIC_API_KEY`; Limn stores no key and charges nothing for them. ONE switch,
-  `config.aiEnabled` = `!isCloud && LIMN_AI_DISABLED !== 'true'`; `ENABLE_CLAUDE_REVIEW`,
+- **ON BY DEFAULT and ALWAYS VISIBLE.** Claude Review (with its follow-up, ticket check, auto
+  review and chat) and AI Fix's fixer are core — no plan, no opt-in flag. They run on the user's
+  OWN Claude Code login or `ANTHROPIC_API_KEY`; Limn stores no key and charges nothing. ONE switch,
+  `config.aiEnabled` = `LIMN_AI_DISABLED !== 'true'`; `ENABLE_CLAUDE_REVIEW`,
   `PRO_ADVANCED_AI_ENABLED` and its alias `PRO_CLAUDE_REVIEW_ENABLED` are DELETED as gates (the
   manager's second-guard constant, once `CLAUDE_REVIEW_ENABLED`, is `AGENTIC_AI_ENABLED` =
   `config.aiEnabled`).
-  - ⚠ **CLOUD IS OFF BY AN EXPLICIT `isCloud` CHECK**: `registerAgenticRoutes` (`review/agentic.ts`)
-    registers NOTHING there, so the routes 404 (pinned by `review/agentic.test.ts`). It used to
-    rest on an env var being unset. `api/plugins/auth.ts`'s `isProPath` 402 still lists every
-    Claude Review URL and covers the fixer's `/api/pro/` paths — the SECOND guard.
   - `LIMN_AI_DISABLED=true` is the kill switch for a team that forbids AI tooling: no agentic
-    route registers and `MeResponse.ai.enabled` is false, so every surface hides.
-  - `MeResponse.ai` (TOP-LEVEL, never inside `pro`, so `entitledProCapabilities` cannot zero it):
-    `enabled`, `runtime` (the one-time SDK download, `ai/runtime.ts`), `auth` + `authMessage`
-    (`detectClaudeAuth`'s heuristic). No credential replaces the Run button with ONE line —
-    `NO_CLAUDE_AUTH_MESSAGE`, "Sign in to Claude Code or set ANTHROPIC_API_KEY" — never hides the
-    feature. The run itself is the authoritative check.
+    route registers (`registerAgenticRoutes`, `review/agentic.ts`), `cheapComplete` refuses on
+    every rung, and `MeResponse.ai.enabled` is false, so every AI surface hides.
+  - `MeResponse.ai` (top-level): `enabled`, `runtime` (the one-time SDK download,
+    `ai/runtime.ts`), `auth` + `authMessage` (`detectClaudeAuth`'s pre-flight). No credential
+    replaces the Run button with ONE line — `NO_CLAUDE_AUTH_MESSAGE`, "Sign in to Claude Code or
+    set ANTHROPIC_API_KEY" — through the one `AiRunGate`, and never hides the feature. The run
+    itself is the authoritative check.
   - Safety facts the copy may state, and nothing more: the reviewer reads code and cannot edit
     files, run commands or reach the web; the fixer edits files, has no shell, builds and tests
     nothing; nothing is posted or pushed until the reader presses the button — EXCEPT what a
     workspace has switched AUTO-POSTING on for (§ Auto-posting; off by default). Never promise
-    subscription billing.
-- **Auth is a TWO-RUNG ladder and there is no stored key** (`review/auth.ts`,
-  `applyClaudeReviewAuth`): an **ambient Claude session** (`CLAUDE_CODE_OAUTH_TOKEN` or a
-  logged-in `claude` on disk) is PREFERRED — the run STRIPS any `ANTHROPIC_API_KEY` for its
-  duration so the Agent SDK draws on the subscription instead of metering, restored in
-  `finally`, gated on `reviewConcurrency===1` to avoid an env race — and otherwise the
-  environment's `ANTHROPIC_API_KEY` is left exactly as it is for the SDK to pick up.
-  `detectClaudeAuth` is a best-effort pre-flight over the same two rungs (the first real SDK
-  auth error is the authoritative gate).
-  ⚠ **THE BYO KEY IS RETIRED.** The Settings form, `GET`/`PUT /api/claude-review/key`,
-  `ReviewSeam.setLocalKey` and every reader of `~/.pierre-review/config.json`'s
-  `anthropicApiKey` are gone; an already-stored value is left on disk **untouched and never
-  read** (stopping the read was the decision, destroying the file was not — which is also why
-  there is no "clear it" route). `review/local-settings.ts` is DELETED (the per-review
-  budget is the `REVIEW_BUDGET_USD` env var alone). Pinned by `review/auth.test.ts`, whose two ⚠ cases are exactly "a stored
-  key never makes `detectClaudeAuth` say ok" and "a stored key is never written into the
-  environment".
+    subscription billing. Copy reads "your own Claude Code login or Anthropic API key". Codex
+    support is "coming soon"; today it targets Claude users.
+
+### The credential ladder
+
+ONE ladder for EVERY model call Limn makes — the agent runs (Claude Review, AI Fix, the ticket /
+CI reviews, diagrams, sprint paths, the docs build and chat, Resolve with Claude, every chat) AND
+the one-shot completions (`review/llm.ts` `cheapComplete`, which the sprint briefs/themes, story
+labels, docs ranking, sprint Ask and every platform feature — period reports, synthesis, work-plan
+wording, Chronology pointers, bot themes, the impact note, the advisor's refine, the Slack report —
+go through). It lives in **`ai/credentials.ts`** and nowhere else:
+
+1. **The local Claude Code login** (default) — `CLAUDE_CODE_OAUTH_TOKEN`, or a logged-in `claude`
+   on disk (`hasClaudeLogin`, a heuristic over the credential files). Used through the Agent SDK;
+   any `ANTHROPIC_API_KEY` is HIDDEN from that run, or the SDK would prefer it and silently meter.
+2. **`ANTHROPIC_API_KEY`** from the environment — the alternative when there is no login. Agent
+   runs hand it to the Agent SDK; one-shot completions call the Anthropic API directly (the SDK
+   loaded through `ai/runtime.ts` `loadAnthropicSdk`).
+
+`LIMN_AI_USE_API_KEY=true` flips the order when a key is set. `LIMN_AI_DISABLED=true` refuses
+everything (checked by the callers; the ladder answers only "which credential"). Nothing is
+stored; the ladder is read at call time, so an env change takes effect on the next call.
+
+- Every Agent SDK `query` spreads **`agentAuthOptions()`** — the ladder's environment as the
+  query's `env` option (`agentSdkEnv`: login → without `ANTHROPIC_API_KEY`; key → without
+  `CLAUDE_CODE_OAUTH_TOKEN`) — so a login run never sees the key and two concurrent runs cannot
+  race on `process.env`. `review/auth.ts` `applyClaudeReviewAuth` still mirrors the same choice
+  onto `process.env` for anything else a run spawns, only when the caller says no other run shares
+  the env.
+- `detectClaudeAuth` (`review/auth.ts`) is the pre-flight view of the same ladder; the first real
+  SDK auth error is the authoritative gate.
+- ⚠ **`SUMMARY_ANTHROPIC_API_KEY`, the `apiKey` / `localRoute` / credential options and the
+  key-only Reports/Bots clients are GONE** (2026-10-22): the platform uses one Haiku client over
+  `cheapComplete`. Same model whichever rung answers.
+- ⚠ **THE BYO KEY IS RETIRED.** The Settings form, `GET`/`PUT /api/claude-review/key`,
+  `ReviewSeam.setLocalKey` and every reader of `~/.pierre-review/config.json`'s `anthropicApiKey`
+  are gone; an already-stored value is left on disk **untouched and never read**. The per-review
+  budget is the `REVIEW_BUDGET_USD` env var alone.
+- Pinned by `ai/credentials.test.ts` (login, key, opt-in, none, disabled), `review/llm-ladder.test.ts`
+  (incl. the platform clients) and `review/auth.test.ts`.
+
 - **ALL OF IT IS CORE now** (`apps/backend/src/review/`). The security-sensitive half:
   `agent.ts` (the SDK run: an in-process MCP `submit_review` tool — `schema.ts` — captures
   structured output; read-only tools, `cwd` = a worktree, `bypassPermissions`,
   `settingSources:[]`, `maxTurns`/`maxBudgetUsd` caps, `AbortController` cancel), `submit-map.ts`,
   `model-options.ts`, `prepare.ts` (`gh pr diff` + `NOISE_GLOBS` stripping + per-file metrics +
   cap), `clone-manager.ts`, `post-review.ts` + `post-seam.ts`, `pricing.ts`, `chat-agent.ts`. The
-  product half, moved back from the plugin at apiVersion 22 and published under the Limn License 1.0:
+  product half, moved back from the plugin into core (2026-10) and published under the Limn License 1.0:
   `claude-review/` (`manager.ts` — in-memory queue, one review/PR, `PRO_REVIEW_CONCURRENCY`, the
   auto lane, startup reconcile; `routing.ts`, `prompts.ts`, `follow-up.ts`, `ticket.ts`,
   `persist.ts`, `routes.ts`, `chat.ts`, `auto.ts`, `auto-settings.ts`, `specialists.ts`) and
@@ -67,22 +87,22 @@ posts **one** GitHub review (inline + body + verdict).
     subscriber), retrieval, the "Reviewer preferences from past reviews" prompt block, the
     "From your past reviews in this repo (N signals)" panel's two routes
     (`GET /api/pro/prs/:id/review-learnings`, `GET /api/pro/claude-reviews/:reviewId/actions`), the
-    shared types and the `review_learnings` table (DROPPED by sqlite `0075` / pg `0062`; gone from
+    shared types and the `review_learnings` table (DROPPED by migration `0075`; gone from
     both schemas, both delete paths, erasure, `accountScopedTables()` and `verify:isolation`). It
     never improved a review. Do not bring it back as a prompt block: the review prompt carries the
     PR, the optional user stories, the previous review's findings and the other reviewers' open
     threads, nothing about the reader.
   - ⚠ **They take ONE context argument, `AgentContext`** (`review/agent-context.ts`), built by
     `buildAgentContext` from DIRECT core imports — `ctx.review.*`, `ctx.coding.generateFix` /
-    `applyAndPush`, `ctx.github.*`, `ctx.aiCredits`, `ctx.db` / `ctx.schema`.
-    It is not `ProContext`: those seams were DELETED from the plugin contract. The argument stays
+    `applyAndPush`, `ctx.github.*`, `ctx.db` / `ctx.schema`.
+    It is not `ProContext` (the platform's context): those seams were DELETED from that contract. The argument stays
     because the tests pass a fake one and the queues carry it per item. Every SDK-bearing module is
     still reached through a lazy `await import()` inside the member that runs it.
   - Registration: routes in `buildApp` via `registerAgenticRoutes`; the process-level half
     (the auto-review sweeper, the crash-orphan reconciles) once at boot via
     `startAgenticBackground` (index.ts).
-  - **No Pro input.** The OPTIONAL plugin seam `ProContext.registerAgenticProviders?`
-    (`review/plugin-providers.ts`) is GONE since apiVersion 23: the ticket review's members and
+    - **No platform input.** The old plugin seam `ProContext.registerAgenticProviders?`
+    (`review/plugin-providers.ts`) is GONE: the ticket review's members and
     story, and a deep review's "Related PRs", come from core's tracker through
     `tracker/ticket-source.ts` ([TRACKERS.md](TRACKERS.md) § Peers).
   - The URL paths never moved: the SPA client calls exactly what it called before.
@@ -182,7 +202,7 @@ posts **one** GitHub review (inline + body + verdict).
     rows. "Reset to default" sends `fieldId: null`. "None of these" empties this tab's criteria only
     and is never saved. Removing a tab does NOT clear the choice (it belongs to the issue type). An
     old per-browser choice (localStorage `limn:jira-ac-field:v1:…`) is moved to the server ONCE on
-    the next pull and the key deleted (`legacyAcFieldToMigrate`). Candidate text is wiki markup rewritten to markdown by the plugin
+    the next pull and the key deleted (`legacyAcFieldToMigrate`). Candidate text is wiki markup rewritten to markdown by the tracker
     (`candidateText` → `jiraWikiToMarkdown`), like the description.
   - **In `ClaudesReview`** (latest AND historic runs): the templated `followUpSentence` sits above
     Claude's summary; then **Previous review** — open items first (Not addressed, Partly addressed,
@@ -255,8 +275,8 @@ praise comment already on GitHub is still Limn's own comment. The ticket review 
   reopening on its old model. A request with no `model` runs it.
 - **Opus 4.8 (`claude-opus-4-8`) is REMOVED, not just unoffered.** It is gone from the
   `ClaudeReviewModel` union, `CLAUDE_REVIEW_MODEL_LABELS`, the price table (`review/pricing.ts`
-  `RATES`) and `EFFORT_CAPABLE_MODELS`. `claude_reviews.model` has NO drizzle `enum:` in either
-  core schema — it was always plain `text` in both dialects (no CHECK, no pg enum), so no migration —
+  `RATES`) and `EFFORT_CAPABLE_MODELS`. `claude_reviews.model` has NO drizzle `enum:` — it was always
+  plain `text` (no CHECK), so no migration —
   and `ClaudeReview.model` / `ClaudeReviewSummary.model` are typed `string`. Stored 4.8 rows
   therefore read back verbatim and the SPA prints the raw id (labels are looked up only for the
   offered list). Nothing re-prices a stored run; an id outside `RATES` falls back to Sonnet 5 rates
@@ -289,7 +309,7 @@ praise comment already on GitHub is still Limn's own comment. The ticket review 
   per-token price, so `aiFixBudgetUsd` went from $3 to **$5**: the heaviest succeeded Sonnet 5 fix
   in the dev DB cost $2.34, about $3.12 at Opus 5.5 rates for the same tokens. An explicit
   `AI_FIX_BUDGET_USD` still beats the default. Pinned by `review/claude-review-ticket.test.ts`,
-  `packages/pro/test/ai-fix-routes.test.ts` and `apps/frontend/test/aiFixModelDefault.test.ts`.
+  `coding/ai-fix/routes.test.ts` and `apps/frontend/test/aiFixModelDefault.test.ts`.
 - Price (live estimate only; the recorded cost is the SDK's own): Opus 5.5 is $4 in / $20 out per
   MTok, cache write $5, cache read $0.20.
 - **THE OFFERED LIST IS TWO MODELS: Opus 5.5 and Sonnet 5.** Sonnet 4.6 and Haiku 4.5 went the
@@ -336,8 +356,7 @@ and decides which are worth consulting for THIS change:
   run cannot reach a built-in agent either). Pinned by `claude-review/specialists.test.ts`.
 - **Findings flow through the lead.** A specialist replies in plain text; the lead checks it against
   the code, drops what it cannot confirm, and submits the rest through `submit_review` with the
-  finding's optional `lens` set. `lens` is stored on `claude_review_findings.lens` (sqlite `0075` /
-  pg `0062`, nullable, no backfill; a stored value outside `CLAUDE_FINDING_LENSES` reads as null)
+  finding's optional `lens` set. `lens` is stored on `claude_review_findings.lens` (migration `0075`, nullable, no backfill; a stored value outside `CLAUDE_FINDING_LENSES` reads as null)
   and rides `ClaudeFinding.lens` (labels: `CLAUDE_FINDING_LENS_LABELS`). null = a general finding.
 - **A deep review always looks at the design**: the worktree system prompt (`systemPromptForMode(
   'worktree', offered)` appends the catalogue section) asks for a `lens: 'design'` finding for
@@ -537,8 +556,7 @@ which replies count), `follow-up.ts` (`judgeReplyReport`, the gate), `auto-resol
   accepted + `autoResolve` on ⇒ auto resolve posts the acknowledgement, then resolves (outcome
   `reply_accepted` + `acceptKind`; an already-resolved thread is a no-op). Disputed + auto-posting on
   ⇒ `auto-pushback.ts` posts ONE reply (footer + `PUSHBACK_REPLY_MARKER`), never resolves, recorded
-  on the owner row's `claude_review_findings.pushback` (`FindingPushbackRecord`, sqlite `0092` / pg
-  `0079`). ⚠ **AT MOST ONE PUSHBACK PER THREAD, EVER**: the record is claimed from NULL, and a
+  on the owner row's `claude_review_findings.pushback` (`FindingPushbackRecord`, migration `0092`). ⚠ **AT MOST ONE PUSHBACK PER THREAD, EVER**: the record is claimed from NULL, and a
   pushback marker already on the thread (posted by hand) blocks it too. A later run may still accept.
 - **Manual runs (or the switches off)** post nothing: the "Previous review" row shows the reply's
   author + excerpt and the text as a draft, with "Post reply" ("Reply and resolve" for an accepted
@@ -612,14 +630,14 @@ other open comment, so "Generate fix from this review" can produce one fix for a
   malformed entries dropped, the first report per ref wins, an unreported thread `not_checked`;
   explanation clipped to 1,000 characters, `draftReply` to 1,500, the stored excerpt (first comment)
   to 600. Output order: sent (R order), carried, over the cap.
-- **Stored** on `claude_reviews.thread_assessments` (sqlite `0076` / pg `0063`, nullable JSON, no
+- **Stored** on `claude_reviews.thread_assessments` (migration `0076`, nullable JSON, no
   backfill) and served verbatim as `ClaudeReview.threadAssessments` (`ClaudeThreadAssessment[]`;
   **null = the run did not assess threads** — an older row, a skip, a failed run — never `[]`), plus
   `ClaudeReview.threadAssessmentCounts` folded server-side by shared `threadAssessmentCounts`. The
   "still needs a fix" rule is ONE shared function, `isThreadToFix` (valid / partly valid AND not /
   partly addressed AND NOT resolved — `resolved` is stored on the assessment; absent = an older,
   unresolved-only row). `draftReply` is a suggestion only; nothing posts it.
-- **The Pro Haiku per-thread annotations are REMOVED (2026-10-18)** (validity / addressed / simplify,
+- **The old plugin's Haiku per-thread annotations are REMOVED (2026-10-18)** (validity / addressed / simplify,
   the "Check review" button). This review's thread judgements are the ONE AI judgement of a thread;
   the BotTriageCard's "real issues" count reads them too.
 - **AI Fix.** "Generate fix from this review" sends ONLY the review id
@@ -648,8 +666,8 @@ CODE, not by prompt:
 
 ### Check threads — a light, threads-only pass (2026-10-18)
 
-`review/claude-review/thread-check.ts` (+ `-agent`, `-persist`, `-routes`). CORE, free, LOCAL ONLY
-(registered by `registerAgenticRoutes`). Wire: [API.md](API.md) § Check threads.
+`review/claude-review/thread-check.ts` (+ `-agent`, `-persist`, `-routes`). Registered by
+`registerAgenticRoutes`. Wire: [API.md](API.md) § Check threads.
 
 - **WHAT IT JUDGES: only the threads that CHANGED since their last judgement** — never judged, a
   comment newer than the judgement, a resolve or unresolve since, or new commits (judged at another
@@ -674,7 +692,7 @@ CODE, not by prompt:
   `THREAD_CHECK_BUDGET_USD` ($1), `THREAD_CHECK_MAX_TURNS` (20), auto `THREAD_CHECK_DAILY_CAP` (30
   per workspace per UTC day; clicks never count). One run per PR (claimed synchronously), the ONE
   shared `REVIEW_CONCURRENCY` slot (`registerReviewSlotPeer`; a PR-review click goes first).
-- **STORED** in `claude_thread_checks` (sqlite `0122` / pg `0109`): one row per run, the WHOLE
+- **STORED** in `claude_thread_checks` (migration `0122`): one row per run, the WHOLE
   reconciled set (changed + carried) in `thread_assessments`, `comments_through` = the newest
   qualifying comment it covered. Composite FK onto `pull_requests (id, account_id)` (cascade, like
   `ci_reviews`); erased; in `accountScopedTables()`; checked by `verify:isolation`.
@@ -712,7 +730,7 @@ it with the review's own invalidations — never a per-card fetch. "Latest" is t
 non-skip run with `thread_assessments`, with any later Check threads run folded over it (THE ONE
 FOLD above; the response adds `checkId`, and `reviewId` is null for a check-only PR); a run in
 flight, failed or skipped leaves the previous judgements standing. Each judgement now carries
-`reason` (one line) and `resolved`; the SPA's two pills (validity + state) read them. The Pro Haiku "addressed" check panel is an explicit, separate output and is
+`reason` (one line) and `resolved`; the SPA's two pills (validity + state) read them. The removed Haiku "addressed" check panel was an explicit, separate output and is
 NOT replaced. ⚠ **The Threads tab's State chips count and filter what the CARDS show**
 (`threadStateBucket` / `threadStateBucketCounts`, same module): a thread wearing a Claude marker sits
 under its own "Claude judged" chip (shown only when one exists), never under the derived state its
@@ -737,17 +755,17 @@ derived states.
 process (`src/review/ci-review/`), modelled on the ticket review: own tables, own claim, own lane,
 own cap, own budget. New PR-review runs read no logs, carry no "CI failures" prompt section, and
 `submit_review` has no `ciFailures` field (a stray one is stripped). `claude_reviews.ci_failures`
-(sqlite `0077` / pg `0064`) stays as READ-ONLY history: the SPA shows an old run's diagnosis only
+(migration `0077`) stays as READ-ONLY history: the SPA shows an old run's diagnosis only
 when the PR has no CI review. ⚠ The SPA shows a CI diagnosis (either kind) ONLY for the PR's
 CURRENT head — an earlier commit's is hidden whether the head is green or red
 (`ciRunAtCurrentHead`, docs/FRONTEND.md). Wire contract: [API.md](API.md) § CI review.
 
 - **Keyed per (PR, head commit, sorted failing check names).** `ci_reviews` (one row per run,
-  history kept) + `ci_review_items` (one row per failing check), sqlite `0082` / pg `0069`. Two keys
+  history kept) + `ci_review_items` (one row per failing check), migration `0082`. Two keys
   per run (`currency.ts`): `failing_key` = sha256 of the names the run READ live; `trigger_key` = the
   SYNCED names that started an automatic run. Currency and "is it due?" accept EITHER, so a lagging
-  sync never re-runs the same failures nor reads a fresh run as stale. `job_id` is BIGINT on pg
-  (Actions job ids are past 2^31). Tenancy is structural: composite FKs `(pr_id, account_id)` →
+  sync never re-runs the same failures nor reads a fresh run as stale. `job_id` is a 64-bit SQLite
+  integer (Actions job ids are past 2^31). Ownership is structural: composite FKs `(pr_id, account_id)` →
   `pull_requests` and `(ci_review_id, account_id)` → `ci_reviews`; both delete paths call
   `db/ci-review-prune.ts`; erasure + `accountScopedTables()` + `verify:isolation` cover both tables.
 - **Reads (CORE, server-side, `AgentContext.ci`, all never-throw)** — `prepare.ts`
@@ -848,8 +866,8 @@ CURRENT head — an earlier commit's is hidden whether the head is green or red
 ## Design diagrams (how a change is built — its own process)
 
 A SEPARATE agentic process (`src/review/diagrams/`), never inside the PR review, the ticket review or
-the CI review: own table, own claim, own lane, own cap, own budget. CORE, free, LOCAL ONLY (routes in
-`registerAgenticRoutes`; the SPA gates on `me.ai`). **Sonnet 5 always** (`DIAGRAM_MODEL`); nothing on
+the CI review: own table, own claim, own lane, own cap, own budget. Routes in `registerAgenticRoutes`; the SPA
+gates on `me.ai`. **Sonnet 5 always** (`DIAGRAM_MODEL`); nothing on
 the wire picks the model. Wire contract: [API.md](API.md) § Design diagrams. It REPLACED the Mermaid
 sequence diagrams (2026-10-17): those were stack-trace detailed (12 participants, 5000px wide); a
 design is the stages, layers and patterns used to deliver the change, readable without zooming. The
@@ -888,7 +906,7 @@ table, the routes' paths, the queue and the `SEQUENCE_DIAGRAM_*` env names keep 
   `SEQUENCE_DIAGRAM_VERSION` AND `DESIGN_DIAGRAM_VERSION` — the latter's arrival made every
   Mermaid-era fingerprint stale, so every current head draws once more as a design. Bump it when the
   prompt, the validator or the vocabulary changes what a run produces.
-- **Storage** `sequence_diagrams` (sqlite `0115`+`0118`+`0119` / pg `0102`+`0105`+`0106`): ONE row per RUN — subject =
+- **Storage** `sequence_diagrams` (migrations `0115` + `0118` + `0119`): ONE row per RUN — subject =
   the PR id or the ticket ident. ⚠ A Redraw at the same fingerprint is a NEW row, never a rewrite: the
   slot (`routes.ts` `slotFor`) shows the newest SUCCEEDED row under the newest run, so the good diagram
   stays up while a redraw runs and after it fails, is cancelled or is cut off by a restart (0115's
@@ -898,7 +916,7 @@ table, the routes' paths, the queue and the `SEQUENCE_DIAGRAM_*` env names keep 
   finds the stories through their accounts and filters the JSON in code).
   `accountScopedTables()`, erasure, `verify:isolation`. ⚠ **ONLY DESIGN-ERA ROWS ARE READ**: every run
   queued now is stamped `diagram_type = 'design'` at INSERT and a succeeded one carries the `design`
-  JSON column (`0119`/pg `0106`); the slot reads take only stamped rows, and a succeeded one only with
+  JSON column (`0119`); the slot reads take only stamped rows, and a succeeded one only with
   a design — so a stored Mermaid row is "No design yet" and the next review (or Redraw) draws a design.
   `source` is KEPT (no column drops) and never written.
 - **The slot pool.** A registered PEER of the ONE `REVIEW_CONCURRENCY` (`registerReviewSlotPeer`): a
@@ -1006,18 +1024,17 @@ route strips a stale `ticket`/`tickets` key. Wire contract: [API.md](API.md) § 
   on the SAME fingerprint since the last success. Order: never checked first, then stale; newest member
   activity first within each (≤ 40 examined). Each goes through `startTicketReview(…, trigger: 'manual')`:
   a person pressed the button, so it is ahead of automatic items and NOT counted against
-  `TICKET_REVIEW_DAILY_CAP`. No credential → `skipped: 'no_credential'`; no credits → `'credits'`; the 202
+  `TICKET_REVIEW_DAILY_CAP`. No credential → `skipped: 'no_credential'`; the 202
   carries `ticketChecks {started, skipped}`. The cards read the latest SUCCEEDED run's verdicts from the DB
   on the graph GET (`db/sprint-ticket-checks.ts`: three batched queries; `stale` = a member PR gone /
   closed / pushed / merged since, or a new open / merged PR in the workspace — ⚠ a ticket-TEXT edit is
   NOT seen there).
-- **Tables** `ticket_reviews` / `ticket_review_members` / `ticket_review_items` (sqlite `0080`, pg
-  `0067`), tenancy STRUCTURAL via named composite FKs. Deleting a PR prunes its member rows and drops
+- **Tables** `ticket_reviews` / `ticket_review_members` / `ticket_review_items` (migration `0080`), ownership STRUCTURAL via named composite FKs. Deleting a PR prunes its member rows and drops
   a run left with none (`db/ticket-review-prune.ts`, in BOTH delete paths).
 - **Currency is a fingerprint**: sha256 of `TICKET_REVIEW_VERSION`, the story hash and the sorted
   `prId:headSha:state` of the members, recomputed from synced columns on every read
   (`deriveTicketReviewState`) — `stale` names why (`story_edited`, `pr_added`, `pr_left`,
-  `pr_pushed`, `pr_merged`). Core's `tracker_tickets.changed_at` (migration `0088`; plugin `0039` before apiVersion 23) moves only
+  `pr_pushed`, `pr_merged`). Core's `tracker_tickets.changed_at` (migration `0088`; plugin `0039` before the tracker moved to core) moves only
   when the story text or membership moves (`storyOrMembershipMoved`), and feeds the sweeper.
 - ⚠ **ONE STORY PER TICKET, WHOEVER ASKS** (`jiraStoryFor` → core's `ticketStory`, `tracker/peers.ts`): the
   FRESHEST stored row across every PR on the ticket (newest `fetched_at`). The run, the sweeper, the
@@ -1028,7 +1045,7 @@ route strips a stale `ticket`/`tickets` key. Wire contract: [API.md](API.md) § 
   `ticketStory`, `ticketMembers`) reads the STORED rows only (`resolvePrTickets(..., { storedOnly: true })`); a key the worker has not
   reached yet is simply not there until it is. That is why every ticket-review route except start
   and post sits on the `read` tier.
-- **CONTRIBUTION CARDS** (`cards.ts`, table `ticket_review_pr_cards`, sqlite `0086` / pg `0073`): a
+- **CONTRIBUTION CARDS** (`cards.ts`, table `ticket_review_pr_cards`, migration `0086`): a
   factual, VERDICT-FREE description of what ONE PR's head does — `summary`, `interfaces` (endpoint /
   field / event / config / export / schema / other, added / changed / removed — the cross-PR contract,
   the part that matters most), `criteria` it moves forward (how, files) and `looseEnds` (TODOs, stubs,
@@ -1157,7 +1174,7 @@ and Claude assesses EACH ON ITS OWN**; the screen renders one section per ticket
   `storyFindingsFrom(tickets, assessments, strippedDiff)` over the run's FINAL assessments (fresh or
   carried) — deterministic, no model call — and every criterion judged `not_met` / `partly_met` and
   every `missing` ("Not done") item becomes a row of `claude_review_findings`, tagged with its origin
-  (`story_index` + `story_ref`, migration `0079` / pg `0066`; wire `ClaudeFinding.story: {index,
+  (`story_index` + `story_ref`, migration `0079`; wire `ClaudeFinding.story: {index,
   ref}`, `ref` = the criterion's `AC2` or the not-done item's `M1`). `notRequested` ("Not asked
   for"), `met`, `unclear` and `not_checked` NEVER become findings: they stay in the read-only
   stories section.
@@ -1169,7 +1186,7 @@ and Claude assesses EACH ON ITS OWN**; the screen renders one section per ticket
     `storyCommentLead(finding, review.tickets)` builds `BMD-1040 · AC2 (not met): <criterion>` (a
     story with no key is `Story N`; a gap reads `BMD-1040 · Not done: <title>`; one line, defanged
     against @-mention pings), the routes pass it as `storyLead` (`PostReviewFinding.storyLead?`,
-    optional, no apiVersion bump) and `findingCommentBody` / `prLevelFindingBody` put it FIRST —
+    optional) and `findingCommentBody` / `prLevelFindingBody` put it FIRST —
     single post and Submit review alike — so GitHub (where the title is not posted) still names the
     story. Storing it repeated the card's title on screen. Rows stored before carry the lead in
     `body`: `stripStoredStoryLead` removes it on read (persist.ts) and again before posting (a reword
@@ -1221,7 +1238,7 @@ and Claude assesses EACH ON ITS OWN**; the screen renders one section per ticket
 - **The 400 contract.** `POST /api/prs/:id/claude-review` declares `ticket` and `tickets` in its body schema
   (ajv's `removeAdditional` would strip it otherwise) with no `maxLength`; over a cap it answers
   `400 { error: 'TicketInvalid', field, message }` and starts nothing. Never truncated. Control
-  characters (other than tab/newline) are refused (pg jsonb cannot hold `\u0000`).
+  characters (other than tab/newline) are refused (a JSON column must never carry `\u0000`).
 - **Stored at QUEUE time** on `claude_reviews.ticket`, so a failed or cancelled run still prefills
   the panel for the re-run.
 - **Reconcile** (`ticket.ts` `reconcileTicketAssessment`): Claude's list in its order, renumbered
@@ -1231,7 +1248,7 @@ and Claude assesses EACH ON ITS OWN**; the screen renders one section per ticket
   nothing. Gap lists ("Asked for but
   not done", "Added but not asked for") are capped at 20 and clipped. Stored on
   `claude_reviews.ticket_assessment`.
-- **Fill from Jira** (core `tracker/` since apiVersion 23; it was plugin `jira/`, migration `0035`). When the PR carries a Jira ticket the
+- **Fill from Jira** (core `tracker/` since 2026-10; it was plugin `jira/`, migration `0035`). When the PR carries a Jira ticket the
   existing detection found AND its workspace has a saved Jira token, `PrDetail.tickets[i]
   .canFetchDetails` is true and the EXPANDED panel shows one "Fill from KEY" button per such
   ticket. `GET /api/prs/:id/tracker-ticket?key=` answers the STORED row the tracker's worker wrote
@@ -1266,12 +1283,11 @@ and Claude assesses EACH ON ITS OWN**; the screen renders one section per ticket
 
 ## Auto review (per workspace)
 
-Settings → Workspace → **Auto Claude review** (shown wherever `MeResponse.ai.enabled` is — local,
-free; **OFF until switched on**, because it spends the user's own Claude in the background). When a
+Settings → Workspace → **Auto Claude review** (shown wherever `MeResponse.ai.enabled` is; **OFF until switched on**, because it spends the user's own Claude in the background). When a
 workspace switches it on, Claude reviews each **human-authored, non-draft PR OPENED at
 or after that moment** — once per HEAD, plus once per burst of new review comments (see re-review below) — with the same model (`DEFAULT_CLAUDE_REVIEW_MODEL`) and
 per-review budget as the Review button. Storage: CORE `workspaces.auto_review_enabled` +
-`auto_review_enabled_at` (core `0074` / pg `0061`; it lived on the plugin's
+`auto_review_enabled_at` (core `0074`; it lived on the plugin's
 `pro_workspace_settings` (plugin `0036`) until Claude Review left the plugin, and plugin `0037`
 copied each ON switch across once — those plugin columns are dormant). Read and written through
 `GET`/`PUT /api/workspaces/:id/auto-review` (`claude-review/auto-settings.ts`, 404 for another
@@ -1279,7 +1295,7 @@ account's workspace; the PUT body takes `enabled` and/or `autoFixEnabled`, at le
 left out keeps its stored value); `setWorkspaceAutoReview` is the ONE writer of both switches. `enabled_at`
 is re-stamped on every off → on (whole seconds, so the echo matches what SQLite stores), KEPT on a
 repeated on, and cleared on off, so nothing opened while it was off is picked up. Runs carry `claude_reviews.trigger = 'auto'`
-(core `0071` / pg `0058`; `'manual'` is the default).
+(core `0071`; `'manual'` is the default).
 
 - **THE PIPELINE, AS ONE STATE DESCRIPTION.** Each minute the sweeper reads the candidates (first
   reviews, and re-reviews of a moved head or of new comments). A candidate is:
@@ -1334,7 +1350,7 @@ repeated on, and cleared on off, so nothing opened while it was off is picked up
   Starting from the Open PRs tab).
 - ⚠ **AN AUTO PR REVIEW CARRIES NO STORY** (since the ticket review split). `startAutoItem` no
   longer asks for a story (the plugin's `resolveReviewTicket` provider is gone — `registerAgenticProviders`
-  left the contract at apiVersion 23). Tickets are the ticket review's: its own sweeper re-checks them (§ Ticket review
+  left the contract when the tracker moved to core). Tickets are the ticket review's: its own sweeper re-checks them (§ Ticket review
   → Cascade), and the FIRST auto PR review of a PR kicks that sweeper (`onAutoReviewLaunched`) so the
   two start together. The ticket review reads Jira from core's STORED tickets only; a key the
   worker has not reached yet waits for it.
@@ -1354,7 +1370,7 @@ repeated on, and cleared on off, so nothing opened while it was off is picked up
   but whose unresolved review threads gained a QUALIFYING comment — a PERSON's or a CODE-REVIEW
   bot's, never Limn's own (`isLimnPostedComment`, § Other reviewers' threads, so posting a review
   never re-triggers it) — newer than what every run at that head covered: its
-  `claude_reviews.comments_through` (sqlite `0076` / pg `0063`; the newest qualifying comment the run
+  `claude_reviews.comments_through` (migration `0076`; the newest qualifying comment the run
   saw, written when it loads the threads), else its `created_at` (older rows, or a run that failed
   before loading — never 0, or a deploy would re-review every commented PR). `reReview` items carry
   `commentsAtMs` (null for a moved head) and `reason: 'head' | 'comments'`. ⚠ **THE SETTLE KEY IS
@@ -1380,14 +1396,12 @@ repeated on, and cleared on off, so nothing opened while it was off is picked up
   `head` is null when the PR's head is unknown.
 - **THE COST GUARD**: a daily cap of auto runs per workspace per **UTC** day, counting
   today's auto rows plus items still waiting in the lane. The cap is SET PER WORKSPACE in Settings
-  ("Up to N auto reviews a day", `workspaces.auto_review_daily_cap`, migration 0085 / pg 0072):
+  ("Up to N auto reviews a day", `workspaces.auto_review_daily_cap`, migration 0085):
   OVERRIDES ONLY — NULL is the default `AUTO_REVIEW_DAILY_CAP` = 20, folded by
   `resolveAutoReviewDailyCap` for both the wire and the sweeper's roster; the PUT bounds it 1..500.
-  First reviews and re-reviews share it (one busy PR's pushes can use most of it). Past it, PRs wait for the next day. An
-  account whose agent credits are spent sits the tick out.
-- ⚠ **IT NEVER RUNS WHERE CLAUDE REVIEW IS OFF.** `autoReviewAvailable` = `config.aiEnabled` AND a
-  local host, checked separately; in cloud (and under LIMN_AI_DISABLED) neither the job nor the
-  auto-review routes are registered.
+  First reviews and re-reviews share it (one busy PR's pushes can use most of it). Past it, PRs wait for the next day.
+- ⚠ **IT NEVER RUNS WHERE CLAUDE REVIEW IS OFF.** `autoReviewAvailable` = `config.aiEnabled`; under
+  LIMN_AI_DISABLED neither the job nor the auto-review routes are registered.
 - **Who hears about it.** ⚠ **OWNERSHIP IS PRIMARY**: an auto run raises the My Turn "Claude
   review ready" card for the account whose workspace switched it on, exactly like a manual run —
   there is NO author / requested-reviewer audience test (an earlier cut had one and dropped auto
@@ -1400,26 +1414,25 @@ repeated on, and cleared on off, so nothing opened while it was off is picked up
   Claude Review tab's header, running row and History options
   (`ClaudeReview`/`ClaudeReviewSummary.trigger`). The Feed's Claude item is not labelled.
 
-## The Slack "Claude Review ran" signal (Pro)
+## The Slack "Claude Review ran" signal
 
 When a run SUCCEEDS — manual or auto — `manager.ts`'s `launch` calls core
-`emitClaudeReviewCompleted({ accountId, prId, reviewId, trigger })` (`pro/event-hooks.ts`):
+`emitClaudeReviewCompleted({ accountId, prId, reviewId, trigger })` (`platform/event-hooks.ts`):
 fire-and-forget, after the run is stored, never thrown into the review. Failed and cancelled runs
-emit nothing. The plugin decides the rest (the workspace's `notify_reviews` switch, entitlement, a
-`skip`-routed run is silent, once per run): docs/PRO-PLUGIN-AND-ACTIVITY.md § The Slack EVENT
-signals. Ticket reviews do not emit.
+emit nothing. The platform decides the rest (the workspace's `notify_reviews` switch, a `skip`-routed run is
+silent, once per run): [PLATFORM.md](PLATFORM.md) § The Slack EVENT signals. Ticket reviews do not emit.
 
 ## Auto-posting (per workspace)
 
 Settings → Workspace → Auto Claude review → **Post Claude reviews to GitHub automatically**. OFF for
 every workspace, existing and new, until someone switches it on (`workspaces.auto_post_enabled`,
 NULL/false = off; `auto_post_settings` is OVERRIDES ONLY `{ scope?, kinds? }`, folded by
-`resolveAutoPostSettings`; sqlite `0087` / pg `0074`). Read and written through the auto-review route
+`resolveAutoPostSettings`; migration `0087`). Read and written through the auto-review route
 (`autoPost` on `WorkspaceAutoReviewSettings` / `SetWorkspaceAutoReviewBody`; `setWorkspaceAutoReview`
-is still the ONE writer). Local-only like every agentic feature: the route and both hooks exist only
+is still the ONE writer). Like every agentic feature, the route and both hooks exist only
 where `config.aiEnabled` registers them.
 
-**Migration 0091 / pg 0078 — the shared contract for the next batch** (types in `packages/shared`):
+**Migration 0091 — the shared contract for the next batch** (types in `packages/shared`):
 `AutoPostKinds.ciFailures` (default ON; record `ci_reviews.auto_post` = `CiAutoPostRecord`, one PR
 comment per (PR, head, failing set)); `WorkspaceAutoPostSettings.autoVerdict` / `.autoResolve`
 (default OFF, inside `auto_post_settings`; records `ClaudeAutoPostRecord.verdict` =
@@ -1576,7 +1589,7 @@ auto-posting: claim before any GitHub write, never retried.
   (`posted-state.ts` `reminderLead` / `findingCommentUrl`, riding as the comment's LEAD before any story
   lead), then the finding's text, the footer when there is one and Limn's hidden marker — so
   `isLimnPostedComment` holds. It is RECORDED BESIDE the original, never instead of it:
-  `claude_review_findings.reminder` (sqlite `0110` / pg `0097`, `ClaudeFindingReminder`; the latest one,
+  `claude_review_findings.reminder` (migration `0110`, `ClaudeFindingReminder`; the latest one,
   earlier reminders' comment ids kept in `earlierCommentIds`, stored only) → the tab adds "Reminder posted
   · <ago>" linking it. `posted_at` / `github_comment_id` / `earlierPost` are untouched, so the follow-up
   chain, auto resolve and pushback keep reading the original thread; ⚠ every reminder comment is CLAIMED
@@ -1621,10 +1634,10 @@ After a review **succeeds**, the reader can ask Claude about it: ONE **thread** 
 (the "Review chat" section, directly under Story check and OPEN by default), which covers every
 finding. The per-finding
 threads' route (`?findingId=`) still answers, for threads stored before the button was removed, but
-nothing on screen opens a new one. Free and local-only like the rest of Claude Review. Host:
+nothing on screen opens a new one. Agentic like the rest of Claude Review. Host:
 `review/chat-agent.ts`, reached as `ctx.review.chat` on the core `AgentContext`. Product:
 `review/claude-review/chat.ts`. SPA: `components/ClaudeReviewChat.tsx` +
-`hooks/useClaudeReviewChat.ts`. Table: `claude_review_chat_messages` (core `0073` / pg `0060`).
+`hooks/useClaudeReviewChat.ts`. Table: `claude_review_chat_messages` (core `0073`).
 
 - **AN AGENT THAT MIRRORS THE REVIEW'S MODE.** A worktree review's questions are answered with
   Read/Glob/Grep on a worktree checked out at the **REVIEWED** head (`review.headSha`), never the
@@ -1650,7 +1663,7 @@ nothing on screen opens a new one. Free and local-only like the rest of Claude R
   reviewed commit; the PR has moved on."
 - **COST GATES** (the sprint-chat pattern): one answer per ACCOUNT at a time, the slot claimed
   SYNCHRONOUSLY before the first await (`409 Busy` otherwise), a process cap of 2, the
-  `agentBlocked` credit check inside the try/finally, `recordAiUsage({seam:'agent', feature:
+  `recordAiUsage({seam:'agent', feature:
   'claude_review_chat'})` for any turn that cost money — answered or not. Nothing is stored unless an
   answer came back; then the question and the answer are stored together.
 - **Never carried across reviews**: a new review of the same PR starts with empty threads; an older
@@ -1664,7 +1677,7 @@ nothing on screen opens a new one. Free and local-only like the rest of Claude R
   and the question shows as the pending turn (read off the shared mutation's variables), with the
   shared `RegenProgressBar` easing under it while Claude answers.
 
-### Send to chat — "explain these" (sqlite `0095` / pg `0082`)
+### Send to chat — "explain these" (migration `0095`)
 
 Every finding card (`FindingRow`, older story findings included) and every not-done / partly-done
 story item of a ticket review (`TicketReviewParts.tsx` `ItemAction`, PR pane only) carries **Send to
@@ -1700,21 +1713,20 @@ answers with ONE CARD PER PIN (what it means, why it matters, where, what would 
 
 ## AI Fix (the agentic fixer)
 
-CORE, free and local-only since apiVersion 22 (`apps/backend/src/coding/ai-fix/`: `manager.ts`,
+CORE since 2026-10 (`apps/backend/src/coding/ai-fix/`: `manager.ts`,
 `routes.ts`, `review-seed.ts`, `pr-context.ts`, `prompts.ts`, `persist.ts`; the agent itself is
-`coding/agent.ts`). Its table `ai_fixes` is core since sqlite `0074` / pg `0061`; `trigger`,
-`review_items` and `change_report` since `0078` / pg `0065`. The PR summary stayed PRO (one-shot
-Haiku, `prSummary`).
+`coding/agent.ts`). Its table `ai_fixes` is core since migration `0074`; `trigger`,
+`review_items` and `change_report` since `0078`. (The one-shot AI PR summary was removed
+2026-10-18.)
 
 - **The paths kept their historical `/api/pro/` prefix** — `GET|POST /api/pro/prs/:id/ai-fix`,
   `…/ai-fix/status`, `…/ai-fix/stream`, `…/ai-fix/cancel`, `GET /api/pro/ai-fixes/:fixId`,
-  `POST /api/pro/ai-fixes/:fixId/push` — so the SPA client did not move. Nothing about them is
-  paid; they register only through `registerAgenticRoutes`.
+  `POST /api/pro/ai-fixes/:fixId/push` — so the SPA client did not move. They register only through `registerAgenticRoutes`.
 - **ONE ENTRY POINT IN THE SPA, TWO ON THE ROUTE** (`AiFixSeed`): `review` (the FIX PICKER in the
   AI Fix tab, reached also from the Claude Review tab) and `plain` (an instruction — the route still
   accepts it, the SPA no longer offers it; the tab's CI list, AI summary and text box are gone). With
   no succeeded Claude review the tab says so and offers "Open Claude Review". ⚠ The picked-comments
-  basket (`comments`) and the Pro CI diagnosis (`ci_analysis`) were REMOVED as seeds: the route
+  basket (`comments`) and the old CI diagnosis (`ci_analysis`) were REMOVED as seeds: the route
   answers `400 SeedRemoved`, but rows stored under them still READ (`AiFixStoredSeed`) and render
   as history ("no longer offered"). Their `comment_targets` / `comment_verdicts` columns are dormant.
 - **THE FIX PICKER** (`components/AiFix/FixPicker.tsx`, `GET /api/pro/prs/:id/ai-fix/preview
@@ -1778,9 +1790,8 @@ Haiku, `prSummary`).
 - **AUTO FIX** (`coding/ai-fix/auto-fix.ts` `maybeStartAutoFix`, called fire-and-forget by the
   review manager after an AUTO run is saved as succeeded — a failure here never touches the
   review). ⚠ **ONLY THE READER'S OWN PR**: `pull_requests.author_id → users.github_login` equals
-  `accounts.github_login` (case-insensitive), local and cloud alike; anyone else's PR gets nothing
-  and records nothing. ⚠ **THE WORKSPACE SWITCH**: `workspaces.auto_fix_enabled` (core `0083` / pg
-  `0070`), **OFF by default** since core `0084` / pg `0071` (which switched every existing workspace
+  `accounts.github_login` (case-insensitive); anyone else's PR gets nothing
+  and records nothing. ⚠ **THE WORKSPACE SWITCH**: `workspaces.auto_fix_enabled` (core `0083`), **OFF by default** since core `0084` (which switched every existing workspace
   off; SQLite keeps 0083's DDL default of 1, so both workspace inserts write `false`), edited in
   Settings → Workspace → Auto Claude review as a second checkbox, "Auto AI Fix on your own PRs"
   (dimmed and inert while auto review is off; its value is kept), and carried on the same
@@ -1827,7 +1838,7 @@ Haiku, `prSummary`).
 
 ### Plan mode ("Plan first", manual fixes only)
 
-A MANUAL fix may plan before it builds (2026-10-16; sqlite `0113` / pg `0100`). The picker's "Plan
+A MANUAL fix may plan before it builds (2026-10-16; migration `0113`). The picker's "Plan
 first" checkbox turns Start into **Make a plan** → `POST /api/pro/prs/:id/ai-fix/plan` (the SAME body
 as the fix start, parsed by the same `parseStartBody`) → `manager.ts startPlan`.
 
@@ -1904,7 +1915,7 @@ merge-conflict resolver and lands from there. It is reached from the resolver's 
 from a "Resolve merge conflicts with Claude" card at the top of the AI Fix tab, and from an
 OPTIONAL, default-off checkbox in the fix picker ("Also resolve merge conflicts with `<base>`"),
 shown only when the PR conflicts. Ticked, both runs start; the fix and the merge are separate
-results and separate commits. Same rules as every agentic run: local only, `me.ai` + `AiRunGate`,
+results and separate commits. Same rules as every agentic run: `me.ai` + `AiRunGate`,
 no shell (and here no write tools either), cost on the usage ledger as `ai_resolve`. Full contract:
 [docs/MERGE-CI-TRUNK.md](MERGE-CI-TRUNK.md) § Resolve with Claude.
 
@@ -1962,8 +1973,7 @@ The agentic story report (one Haiku 5.5 run across 10-20 code-picked stories, th
 top of Reports → Stories) is GONE: `StoryReportCard`, its hooks and client methods, the
 `/api/story-reports*` routes, `src/review/story-report/`, `db/story-selection.ts`, its rate-limit tiers,
 `STORY_REPORT_BUDGET_USD` / `STORY_REPORT_MAX_TURNS`, and its shared types. Reports → Stories keeps its
-charts and lists (`GET /api/stories`, `db/stories.ts`). ⚠ The `story_reports` table (sqlite `0097` /
-pg `0084`) is DORMANT — kept, never dropped, still in `accountScopedTables()` + erasure; nothing reads
+charts and lists (`GET /api/stories`, `db/stories.ts`). ⚠ The `story_reports` table (migration `0097`) is DORMANT — kept, never dropped, still in `accountScopedTables()` + erasure; nothing reads
 or writes it (docs/DATA-MODEL.md). It had replaced the plugin's per-story notes (`pro_story_notes`,
 deleted; a dev DB may still hold an orphan `pro_story_notes` table, which is harmless).
 
@@ -1994,8 +2004,7 @@ DELETED (2026-10-11, "not adding anything"): no `GET /api/story-health`, no pane
   the new labels (picks never depend on labels), and the row's `costUsd` is agent + labels (each still
   recorded under its own feature). A cancel cancels the label pass too. A rubric bump therefore
   relabels on the next report, with no reader action.
-- **Gating**: agentic, so LOCAL-ONLY — registered only through `registerAgenticRoutes` — AND Pro with
-  the rest of Reports (`periodReports`, 402 before any DB work). With `config.aiEnabled` false no label
+- **Gating**: agentic — registered only through `registerAgenticRoutes`. With `config.aiEnabled` false no label
   is made or read; only what code knows is shown.
 - **THE RUBRIC** (`STORY_RUBRIC_VERSION` 2, 2026-10-11): rubric 1's yes/no answers (`bundled`,
   `dependsOnOtherWork`, `outOfScopeStated`, `dependencyNamed`, `nonCodeWork`) were too vague to act on,
@@ -2065,7 +2074,7 @@ DELETED (2026-10-11, "not adding anything"): no `GET /api/story-health`, no pane
   calls once its recorded spend reaches `STORY_LABEL_BUDGET_USD` (default $1); at most
   CONCURRENCY − 1 small calls already in flight finish past it. Measured noise of the labels on a
   weekly rate: median 2–4 points, p90 7–12 (`STORY_LABEL_NOISE`).
-- **Storage**: `story_labels` (sqlite `0099` / pg `0086`; docs/DATA-MODEL.md), insert
+- **Storage**: `story_labels` (migration `0099`; docs/DATA-MODEL.md), insert
   `ON CONFLICT DO NOTHING` on (account, ident, rubric version, text hash): the first answer stands.
 - **Held rates**: a rate whose judgement has not passed an agreement test is HELD from the story
   report (`STORY_ISSUE_RATES_HELD`: Spec gaps — saturated, gap types κ 0.13–0.47); the cards still show
@@ -2091,11 +2100,11 @@ Started by a sprint refresh).
 
 - **Where**: `src/review/sprint-briefs/` — `prompt.ts`, `validate.ts`, `manager.ts`, `index.ts`; the
   input and the store are core `db/sprint-briefs.ts`; the to-do list is `db/sprint-graph.ts`
-  `sprintBriefTodo` (the graph's own fold). Table `sprint_briefs` (sqlite `0107` / pg `0094`), one row per
+  `sprintBriefTodo` (the graph's own fold). Table `sprint_briefs` (migration `0107`), one row per
   (account, workspace, ident), replaced by each new brief.
 - **WHEN**: after every stored sprint read (`setAfterSprintRead`, set only by `registerAgenticRoutes`;
   it REPLACES the story-label trigger This sprint used to have — the story labels themselves are
-  untouched) — local, `config.aiEnabled`, Reports entitlement and a credential. Never on a view. ONE pass
+  untouched) — `config.aiEnabled` and a credential. Never on a view. ONE pass
   per (account, workspace), claimed synchronously; a read landing mid-pass re-runs it once after.
 - **WHAT**: graph nodes with no CURRENT brief — sprint first, then ghosts by depth, ≤
   `SPRINT_BRIEF_RUN_CAP` (120) per pass. ⚠ A ghost's references come from its brief, so after each round
@@ -2110,7 +2119,7 @@ Started by a sprint refresh).
   is a new version.
 - **THE PROMPT** (`SPRINT_BRIEF_SYSTEM`): the summary (one or two sentences, ≤ 400); the **`oneLiner`**
   (version 5, 2026-10-20: one plain line ≤ `SPRINT_BRIEF_CAPS.oneLiner` 90 naming what the ticket
-  delivers, no full stop, no key — the card face; column `one_liner`, sqlite `0123` / pg `0110`; the bump
+  delivers, no full stop, no key — the card face; column `one_liner`, migration `0123`; the bump
   re-briefs every sprint ticket and ghost ONCE, and the themes re-run only if a summary changed); the CRITERIA itemised
   in the Open PRs Story check's words ("one entry per testable requirement, whether written as bullets,
   numbered lists, Given/When/Then scenarios, tables or prose … the criterion in one short sentence", ≤
@@ -2145,10 +2154,10 @@ lane per theme, "Other" last; the Critical path view's count table rows too).
 
 - **Where**: `src/review/sprint-themes/` — `prompt.ts`, `validate.ts`, `manager.ts`; the input and store
   are core `db/sprint-themes.ts`, the to-do is `db/sprint-graph.ts` `sprintThemeTodo` /
-  `sprintThemeInputOf`. Table `sprint_themes` (sqlite `0108` / pg `0095`): ONE row per (account,
+  `sprintThemeInputOf`. Table `sprint_themes` (migration `0108`): ONE row per (account,
   workspace), replaced by each pass.
 - **WHEN**: right AFTER the brief pass, from the same after-read seam (`review/sprint-briefs/index.ts`;
-  local only, `config.aiEnabled`, Reports entitlement, a credential). A brief pass that answered `busy`
+  `config.aiEnabled`, a credential). A brief pass that answered `busy`
   starts none (the running one's caller themes after it). ⚠ It CALLS THE MODEL ONLY WHEN THE INPUT HASH
   CHANGED: the sprint tickets' keys + CURRENT brief summaries (a pending brief hashes its title in the
   summary's place, so the brief landing re-runs it) + `SPRINT_THEME_VERSION`. A read that changed nothing
@@ -2191,12 +2200,11 @@ COUNTS EVERY NUMBER; the model picks and words, with NO digit anywhere in its te
 - **Where**: `src/review/sprint-paths/` — `prompt.ts`, `validate.ts`, `agent.ts` (the SDK half),
   `manager.ts`; the input, store, pace and people are core `db/sprint-paths.ts`; the to-do is
   `db/sprint-graph.ts` `sprintPathsTodo` (folds exactly as `getSprintGraph` does, WITHOUT stamping the view or
-  kicking a read) / `sprintPathsInputOf` (the ONE builder both share). Table `sprint_paths` (sqlite `0120` /
-  pg `0107`), ONE row per (account, workspace). The SPA half is This Sprint's **Critical path** view
+  kicking a read) / `sprintPathsInputOf` (the ONE builder both share). Table `sprint_paths` (migration `0120`), ONE row per (account, workspace). The SPA half is This Sprint's **Critical path** view
   (`components/Activity/SprintBoards.tsx` `SprintPathsView`, state fold `sprintPathsModel.ts`; one lane per
   path on the lane board — docs/FRONTEND.md § This Sprint); the stored paths also mark the
   critical cards and arrows on the Theme and People views.
-- **WHEN — THE AFTER-READ CHAIN** (`review/sprint-briefs/index.ts` `runSprintAfterRead`; local only,
+- **WHEN — THE AFTER-READ CHAIN** (`review/sprint-briefs/index.ts` `runSprintAfterRead`;
   registered by `registerAgenticRoutes`, never on a view): briefs (Haiku — every sprint ticket and ghost gets
   a summary) → themes (Haiku) → paths. A brief pass that did not finish starts nothing after it. The page
   reads `queued` while the chain holds the workspace (`markSprintPathsQueued`, released on every path).
@@ -2241,7 +2249,7 @@ COUNTS EVERY NUMBER; the model picks and words, with NO digit anywhere in its te
   (AI off, no credential — `pathsCanRun` from the route — or fewer than 4 sprint tickets).
 - **COST**: `SPRINT_PATHS_BUDGET_USD` (default $1) and `SPRINT_PATHS_MAX_TURNS` (8) per run, env only; spend
   recorded under feature `sprint_paths`, seam `agent`.
-- **THE PACE** (`SprintGraphResponse.pace`, `sprintPaceOf`; free, code only, AI off too): `daysElapsed` /
+- **THE PACE** (`SprintGraphResponse.pace`, `sprintPaceOf`; code only, AI off too): `daysElapsed` /
   `daysTotal` / `timeUsedPct` from the real sprint window (null without one), and over SPRINT tickets:
   `tickets`, `live` (not in a Complete bucket), `done`, `productReview` (drawn in a Product review column: placed there, or moved by the merge rule),
   `codeMerged` (≥ 1 merged PR, none open, any column), `openDependencies` (`depends_on` edges from a live
@@ -2253,7 +2261,7 @@ COUNTS EVERY NUMBER; the model picks and words, with NO digit anywhere in its te
   `review_requests` row for any mapped login (`reviewsWaitingByLogin` — the same "reviews waiting" population the removed
   People report used). ⚠ No mapped login → `null`, never 0. GitHub-only members are not assignees and are left out.
 - **THE CODE CARDS** (`SprintGraphResponse.signals`, `db/sprint-signals.ts`; shared `SprintSignal`,
-  `SPRINT_SIGNAL_LABEL`): FREE on every tier, NO model, templated sentences in digits over counts taken from
+  `SPRINT_SIGNAL_LABEL`): NO model, templated sentences in digits over counts taken from
   the SAME folded graph, computed on every GET from the DB only (never a tracker or GitHub call), shown with
   AI off too. Each carries its idents, drawn as ticket-key buttons that open the story view. On the Critical
   path view they follow Claude's call-outs, in order **Since you last looked**, **Out of step**, **Blocked
@@ -2275,7 +2283,7 @@ COUNTS EVERY NUMBER; the model picks and words, with NO digit anywhere in its te
     sides.
   - *Since you last looked* (`sinceLastLookedSignal`): stage moves grouped by the new stage (Complete
     first), tickets added to the sprint, PRs merged on sprint tickets — against a per-(account, workspace)
-    BASELINE in `sprint_view_snapshots` (sqlite `0112` / pg `0099`). Two slots: CURRENT is refreshed on
+    BASELINE in `sprint_view_snapshots` (migration `0112`). Two slots: CURRENT is refreshed on
     every view; ⚠ it rolls into BASELINE only when it is ≥ `SPRINT_VISIT_GAP_MS` (30 min) old, i.e. the
     previous VISIT ended — so the page's own refetches (every 5 s while a pass runs) never erase the diff,
     and a move that happened while the reader was looking is not news. The title is "Since 3 hours ago"
@@ -2286,8 +2294,8 @@ COUNTS EVERY NUMBER; the model picks and words, with NO digit anywhere in its te
 
 ## Ask about this sprint (This Sprint)
 
-`POST /api/sprint-graph/ask` — one Haiku 5.5 answer per turn (`review/sprint-ask/`), LOCAL ONLY
-(`registerAgenticRoutes`); free — no Pro gate, the SPA gates it on `me.ai`. Grounded ONLY in the stored graph
+`POST /api/sprint-graph/ask` — one Haiku 5.5 answer per turn (`review/sprint-ask/`), registered by
+`registerAgenticRoutes`; the SPA gates it on `me.ai`. Grounded ONLY in the stored graph
 (`getSprintGraph`: tickets with stage, status, assignee, epic, brief summary, criteria count and PRs; the
 links; the sprint builder's stored critical paths and call-outs), the whole map inside ONE nonce fence and the prior turns inside another — a previous answer is
 model text over the same data. ⚠ The turn cap is SERVER-side (`capAskHistory`: the newest

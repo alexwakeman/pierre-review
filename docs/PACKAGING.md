@@ -16,24 +16,25 @@ named after the package and errors when none is, so `npx limn-review` needs it. 
 free; the old name gets a hand-published forwarding stub (`scripts/deprecated-pierre-review/`, its
 README carries the manual `npm deprecate` step — see [RELEASE.md](RELEASE.md)). Tarball is **built artifacts only** (no
 `.ts`/src/configs/tests). CI publishing (version computation, atomic tag+commit, idempotent
-publish) is in **[docs/RELEASE.md](docs/RELEASE.md)** — **never run `npm publish`/`npm login`
+publish) is in **[RELEASE.md](RELEASE.md)** — **never run `npm publish`/`npm login`
 from here**; let CI (or the user) do it.
 
-**Single-process production.** One Fastify server serves the JSON API (`/api`), the SPA
-(`/app`), and — in cloud — the landing (`/`). Static serving is gated on sibling
-`public/index.html` + `public-landing/index.html` (in the release, **absent in the dev
-tree**, so `pnpm dev`'s Vite proxy is unchanged). All routing is the **single**
-`setNotFoundHandler` (`api/plugins/error-handler.ts`): unknown `/api` → JSON 404; `/app*`
-→ SPA; `/` + other → landing (cloud) or 302 `/app` (local). SPA built `base:'/app/'`.
+**Single-process production.** One Fastify server serves the JSON API (`/api`) and the SPA
+(`/app`). Static serving is gated on a sibling `public/index.html` (in the release, **absent in
+the dev tree**, so `pnpm dev`'s Vite proxy is unchanged). All routing is the **single**
+`setNotFoundHandler` (`api/plugins/error-handler.ts`): unknown `/api` → JSON 404; `/app*` → SPA;
+`/` + anything else → 302 `/app/`. SPA built `base:'/app/'`. **The npm package ships the app
+only** — the marketing site (landing, contact form, the static demo) is a separate service,
+`apps/site`, deployed on its own (below and [RELEASE.md](RELEASE.md) § The website).
 
 **The landing is PRERENDERED at build time** (`apps/landing/prerender.mjs`, chained after
-`vite build`). It used to be a pure CSR SPA: every URL returned the same ~7.8 KB shell whose
-whole `<body>` was an empty `#root` + a splash caret, so anything that doesn't execute JS —
-an AI agent, a link unfurler, a text browser, a crawler on a render budget — saw a site with
-no content and no way to tell `/pricing` from `/privacy`. Now a Vite **SSR build** of
-`src/entry-server.tsx` renders each route through `renderToStaticMarkup` into
-`dist/<route>/index.html` (21–70 KB of real content), with that route's own
-title/description/**canonical** baked in. Load-bearing details:
+`vite build`) and served by `apps/site`, never by the backend. It used to be a pure CSR SPA:
+every URL returned the same ~7.8 KB shell whose whole `<body>` was an empty `#root` + a splash
+caret, so anything that doesn't execute JS — an AI agent, a link unfurler, a text browser, a
+crawler on a render budget — saw a site with no content and no way to tell `/pricing` from
+`/privacy`. Now a Vite **SSR build** of `src/entry-server.tsx` renders each route through
+`renderToStaticMarkup` into `dist/<route>/index.html` (21–70 KB of real content), with that
+route's own title/description/**canonical** baked in. Load-bearing details:
 - **`src/lib/routes.ts` is the ONE source of truth** for per-route SEO copy — read by the
   pages' `useSeo()` (which now only matters for client-side hops) AND by the prerenderer, so
   the static head and the hydrated head cannot drift.
@@ -41,40 +42,38 @@ title/description/**canonical** baked in. Load-bearing details:
   prerenderer replaces those regions and **throws if they're missing**. Deleting them silently
   reverts the whole site to a contentless shell.
 - **`createRoot`, NOT `hydrateRoot`** — several components deliberately differ between the
-  static and browser trees (`HeroWordmark` starts resolved so crawlers see "Pierre" not the
-  mid-animation "PR"; `CookieBanner` renders nothing until it has read `localStorage`). A
-  fresh client render reaches the same end state with no mismatch failure mode.
+  static and browser trees (`HeroWordmark` starts resolved so crawlers see the finished word,
+  not the mid-animation one; `CookieBanner` renders nothing until it has read `localStorage`).
+  A fresh client render reaches the same end state with no mismatch failure mode.
 - **`router.setStaticPath()`** pins `currentPath()` per render — without it every route
   prerenders as the home page.
-- Serving: `@fastify/static` (`wildcard: false`) already answers `/pricing/` from its
-  directory-index scan; **`/pricing` (the canonical form) falls through to the not-found
-  handler**, which resolves it against a Set of routes scanned **once at boot** — so a URL can
-  only ever select an entry found on disk and no request path is ever joined onto a filesystem
-  root. The seven legacy routes (`/features`, `/how-it-works`, `/bots`, `/pro`, `/pricing`,
-  `/insights`, `/reviews`) each get a copy of whichever role page now carries their
-  content, whose canonical already points there.
+- The legacy routes (`/features`, `/how-it-works`, `/bots`, `/pro`, `/pricing`, `/insights`,
+  `/reviews`) are ALIASES written by the prerenderer: each gets a copy of whichever page now
+  carries its content, whose canonical already points there (⚠ `/pricing` goes to CONTACT —
+  the licence path). It also writes `dist/404.html`, which `apps/site` answers unknown paths
+  with.
 - **Guardrails, because the failure is SILENT** (a broken prerender still looks perfect in a
-  browser): `prerender.mjs` asserts every route in `PRERENDER_PATHS` plus a hard floor (8: home, the two role pages, the models page, contact, and three legal ones) and a per-page byte floor, `build-release.mjs` asserts
-  each `public-landing/<route>/index.html` exists and contains real content, and
-  `api/plugins/landing-routes.test.ts` covers the routing + traversal.
+  browser): `prerender.mjs` asserts every route in `PRERENDER_PATHS` plus a hard floor and a
+  per-page byte floor. `deploy-site.yml` runs the landing build before it builds the image, so
+  a broken prerender fails the deploy, not the live site.
 
 **CLI** (`cli.ts` → `dist/cli.js`): the **`limn status` subcommand** (peeled off argv
 BEFORE `parseArgs`, whose default case rejects bare tokens) renders the cross-repo My-Turn
 queue in the terminal via `status.ts` — one section per type in the reader's order (Settings → My
 Turn), with a dim footer naming the types switched off — OSC-8 clickable links (non-TTY falls back to
 `label (url)`), `--watch` repaint loop (new-since-tick bullets), `--sync` (re-syncs ≤ every
-5 min under watch), `--interval/--db`; LOCAL-only (refuses cloud), refuses to create an
+5 min under watch), `--interval/--db`; refuses to create an
 empty DB without `--sync`, one-shot `runMigrations → ensureLocalAccount → getMyTurn →
 closeDb` lifecycle, env mapped before any config/db import. The server path parses
-`--no-open/--port/--db/--cloud/--mode` (+ env),
-maps them to env **before** importing config, sets `NODE_ENV=production`. Local first moves a
+`--no-open/--port/--db` (+ env),
+maps them to env **before** importing config, sets `NODE_ENV=production`. It first moves a
 pre-rename `~/.pierre-review` to `~/.limn` (below), then defaults the DB to
 `~/.limn/pierre-review.sqlite` (never the read-only install dir; the FILE keeps its old name so the
-move carries it and its WAL files untouched) + pre-checks `gh auth token`; `--cloud` skips both (Postgres `DATABASE_URL`; `assertCloudConfig` at
-boot). Prints the banner + URL, boots via `start()` (guarded run-as-main), opens the
+move carries it and its WAL files untouched) + pre-checks `gh auth token`. Prints the banner + URL, boots via `start()` (guarded run-as-main), opens the
 browser (built-in, no dep) unless `--no-open`. **`limn ai install` / `limn ai status`** run the
-same AI-runtime download as the app's "Set up AI" button (below); local only, refused under
-`LIMN_AI_DISABLED=true`.
+same AI-runtime download as the app's "Set up AI" button (below); refused under
+`LIMN_AI_DISABLED=true`. **`limn ml install`** downloads the bot-comment severity model
+([ML-SEVERITY.md](ML-SEVERITY.md)).
 
 **The data directory is `~/.limn`** (`data-dir.ts`; `LIMN_DATA_DIR` overrides; `config.dataDir`).
 It holds the CLI's DB, the clone cache (`CLONE_DIR` overrides), `config.json` (the per-review
@@ -86,29 +85,38 @@ purpose — a half-copied SQLite file beside a deleted original is the failure i
 `data-dir.test.ts` pins all four cases over a temp home.
 
 **Two load-bearing traps:**
-- **`@pierre-review/shared` is types-only** and NOT a published dep — the backend must
-  `import type` only (offenders use local `const` copies); the release greps `release/dist`
-  and **fails** on any real shared import/require.
-- **pnpm is pinned** (`packageManager: pnpm@9.15.9`) so CI, the Railway `Dockerfile`, and
+- **`@pierre-review/shared` is NOT a published dep, and is NOT types-only** — the conflict
+  resolver's `foldFile`/`foldToText`/`CONFLICT_MODEL_VERSION` are real code the SPA and the
+  server's land path must agree on to the byte. `build-release.mjs` compiles the package,
+  VENDORS it at `release/dist/shared` and rewrites every emitted `@pierre-review/shared`
+  specifier to a relative path; the guardrail fails on a specifier the rewrite MISSED. Never add
+  the package to the curated manifest, and never fork a shared fold to dodge this.
+- **pnpm is pinned** (`packageManager: pnpm@9.15.9`) so CI, the site's `Dockerfile`, and
   local dev match; a newer pnpm blocks native builds (`ERR_PNPM_IGNORED_BUILDS` on
   `better-sqlite3`/`esbuild` — also in `pnpm.onlyBuiltDependencies`). Bumping = regenerate
   `pnpm-lock.yaml`.
 
 **`pnpm package`** (`scripts/build-release.mjs`) assembles `./release/`: builds
-frontend(`/app`)+landing+backend, copies compiled JS + both migration folders +
-SPA→`public/` + landing→`public-landing/`, generates `package.json` (curated deps:
-**drop** shared **and all AI SDKs** (`@anthropic-ai/*`, `@modelcontextprotocol/sdk`, `zod`),
-**add** `@fastify/static|cookie|secure-session`, `pg`). Sanity asserts fail on a missing key
-file, a leaked `.ts`, a shared runtime import, **any AI SDK in `dependencies` /
-`optionalDependencies` / `peerDependencies`**, a missing or inexact AI-runtime pin, or **an AI SDK
-specifier in any emitted JS file other than `dist/ai/runtime.js`**. `better-sqlite3` is a native
-runtime dep; `pg` loads only in cloud.
+frontend (`/app`) + backend + shared, copies compiled JS + the core migration folder + SPA →
+`public/`, vendors shared at `dist/shared`, copies the platform's `migrations` and `data`
+(the bundled peer-benchmark corpus) to `dist/platform/` beside the compiled modules that read
+them, and generates `package.json` (curated deps: `@fastify/cors`, `@fastify/static`,
+`@octokit/graphql`, `better-sqlite3`, `drizzle-orm`, `fastify`, `node-cron`, `yaml` (the
+advisor's config emitters) …; **no AI SDK** (`@anthropic-ai/*`, `@modelcontextprotocol/sdk`,
+`zod`) and no model runtime). Sanity asserts fail on a missing key file (including
+`dist/platform/index.js`, its first migration and `benchmark-fit.json` — ⚠ a missing `data`
+copy fails ONLY in the release: dev reads it from `src/` and looks perfect, while the package
+answers the benchmark with `available:false`), a leaked `.ts`, an un-rewritten shared
+specifier, **any AI SDK in `dependencies` / `optionalDependencies` / `peerDependencies`**, a
+missing or inexact AI-runtime pin, or **an AI SDK specifier in any emitted JS file other than
+`dist/ai/runtime.js`**. `better-sqlite3` is a native runtime dep.
 
 ### No AI SDK in the manifest; installed on first use
 
-Claude Review (run, follow-up, ticket check, auto review, chat) and AI Fix are FREE
-and ship in the package **as code** — LOCAL ONLY, on the user's own Claude Code session or
-`ANTHROPIC_API_KEY` (`review/auth.ts`). The four SDKs they run on —
+Every model-backed feature (Claude Review, AI Fix, the reports and narration, …) ships in
+the package **as code** and runs on the user's own Claude Code login or `ANTHROPIC_API_KEY` —
+the ONE credential ladder in `ai/credentials.ts` ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § The
+credential ladder). The four SDKs they run on —
 `@anthropic-ai/claude-agent-sdk`, `@anthropic-ai/sdk`, `@modelcontextprotocol/sdk`, `zod` — are
 NOT dependencies: the Agent SDK carries a native `claude` binary, ~110 MB to download and ~240 MB
 unpacked per platform, against a ~18 MB package. `optionalDependencies` is no escape (npm installs
@@ -121,7 +129,7 @@ them by default, and a dependent package cannot switch off its dependency's plat
   declares. ⚠ The field name is spelled twice — the script and `AI_RUNTIME_MANIFEST_FIELD` in
   `ai/runtime.ts` — and the script fails if they diverge.
 - **The download** (`installAiRuntime`): "Set up AI (one-time ~110 MB download)" in the app →
-  `POST /api/ai/runtime/install` (SSE progress; local only — registered only when
+  `POST /api/ai/runtime/install` (SSE progress; registered only when
   `config.aiEnabled`; `sync` rate-limit tier), or `limn ai install`. It writes a `package.json`
   carrying the pins into a STAGING dir and runs `npm install --prefix <staging> --ignore-scripts
   --no-package-lock` — npm's own `npm-cli.js` under `process.execPath`, `shell: false`, no string
@@ -142,9 +150,8 @@ them by default, and a dependent package cannot switch off its dependency's plat
   Both `schema.ts` files therefore BUILD their shapes from a zod handed in
   (`buildSubmitReviewShape(z)`), and `submitReviewShape()` is async.
 - **Dev is unchanged**: when the workspace's own `node_modules` resolve the Agent SDK + zod
-  (`pnpm dev`, the test suite) the loader imports by plain bare specifier, first. The cloud image
-  is the third case — `@anthropic-ai/sdk` is a real dependency there (`--with-pro`) and there is no
-  runtime dir — so a package missing from one source falls through to the other.
+  (`pnpm dev`, the test suite) the loader imports by plain bare specifier, first, and a package
+missing from one source falls through to the other (the `<dataDir>/ai-runtime` install).
 - **Status** (`getAiRuntimeStatus()` → `MeResponse.ai.runtime`): `ready` | `absent` | `installing` |
   `failed` (+ `runtimeMessage`). A runtime installed at OTHER versions (an upgrade moved the pins)
   reads `absent` with "Set up AI again", but still loads until replaced.
@@ -158,30 +165,3 @@ them by default, and a dependent package cannot switch off its dependency's plat
   `ai/runtime.ts` (`loadMammoth` / `loadTurndown` / `loadTurndownGfm` — the dist grep covers them). ⚠ A
   runtime installed BEFORE them is **stale, not absent** (`AI_RUNTIME_LATER_PACKAGES`): every agent
   still loads, the status says "Set up AI again", and only a Word or web-page build refuses until then.
-
-**`--with-pro` (the PAID cloud image ONLY).** `build-release.mjs --with-pro` additionally: builds
-`@pierre/pro` to `packages/pro/dist` (via the new `tsconfig.build.json` + `pnpm --filter @pierre/pro
-build`), copies `packages/pro/{dist,migrations,migrations-pg}`→`release/pro/` (preserving the
-dist↔migrations sibling layout so the plugin's `../migrations` URL resolves), adds **only**
-`@anthropic-ai/sdk` to the manifest, at the SAME exact version as the AI-runtime pin (core's
-`review/llm.ts` raw metered path, reached through the loader's fall-through — the agentic SDKs +
-`zod` stay forbidden even here), and extends the shared-import grep to `release/pro`. The `Dockerfile`
-gates this on `ARG WITH_PRO=` (empty default = byte-identical OSS image): non-empty ⇒ build the plugin
-+ `pnpm package --with-pro` + `ENV PRO_PLUGIN_PATH=/app/pro/dist/index.js`. `.github/workflows/deploy-cloud.yml`
-(workflow_dispatch) checks out the private submodule via `PRO_DEPLOY_KEY`, `docker build --build-arg
-WITH_PRO=true`, pushes to private GHCR; Railway deploys that image. The public `release.yml` NEVER
-passes `--with-pro`, so its no-AI-SDK-in-the-manifest guarantee is intact. See `docs/DEPLOY-RAILWAY.md` §"the paid
-Pro tier".
-
-**Credit metering (paid cloud).** `AI_CREDITS_PER_USD` is **1250** ($1 model cost = 1250 credits;
-also inlined in `pro/insights/routes.ts` + `db/credits.ts` — keep the three in lockstep). Core owns
-the allowance math: `db/credits.ts` `aiCreditStatus(account,now)` → `{allowanceCredits,usedCredits,
-remainingCredits,blocked}` (local `isLocal` = null/unmetered; paid cloud = `accounts.aiCreditAllowance
-?? 2500`; free cloud = 0), summed from the `ai_usage` ledger since the UTC month start (auto-resets on
-the 1st; migration `0026` added the nullable column). Exposed as **`ctx.aiCredits.check`**; the plugin
-gates the digest (`runRefresh`) + sprint (`refreshSprintReport`) generators on `blocked`, returning a
-`creditsExhausted` state (the SPA disables Generate/Regenerate + shows the used/2500 meter in
-`TrackUsage`). Agentic entry points aren't gated yet — dead code while agentic is off in cloud +
-unmetered locally; wire them when a metered agentic tier ships.
-
-

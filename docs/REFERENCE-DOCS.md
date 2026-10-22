@@ -1,8 +1,8 @@
 # Reference docs — the workspace library
 
 A workspace's reference material (PDF, Word, text, markdown, web pages), turned into a markdown tree
-that an agent navigates by REASONING over contents, not by embedding search. CORE, free, **LOCAL ONLY**
-(agentic; registered by `registerAgenticRoutes`, absent in cloud and under `LIMN_AI_DISABLED`). Sonnet 5
+that an agent navigates by REASONING over contents, not by embedding search. CORE and agentic
+(registered by `registerAgenticRoutes`, absent under `LIMN_AI_DISABLED`). Sonnet 5
 does the content building. Code: `apps/backend/src/reference-docs/`. Wire types:
 `packages/shared/src/reference-docs.ts`. Routes: [API.md](API.md) § Reference docs.
 
@@ -81,10 +81,10 @@ NULs) — then the NAME tells markdown (`.md`/`.markdown`/`.mdx`) from HTML (`.h
   its `bodyLimit` (25 MB + 1 KiB); every other route keeps the 256 KiB default.
 - **Web page**: `POST /api/docs/url`. The page is fetched by the BUILD (its converting stage), so the
   route answers at once and a Rebuild re-fetches. `url-fetch.ts`: http/https only, no `user:pass@`;
-  **never loopback, link-local (cloud metadata), multicast, reserved or `localhost`** in either mode
-  (`localhost` is Limn's own unauthenticated API locally); **private networks — RFC1918, CGNAT,
-  unique-local — and intranet names (`.local`, single-label) are allowed in LOCAL mode only**
-  (`PagePolicy.privateNetwork = !isCloud`; the reader's company wiki is the point), refused in cloud.
+  **never loopback, link-local (cloud metadata), multicast, reserved or `localhost`**
+  (`localhost` is Limn's own unauthenticated API); **private networks — RFC1918, CGNAT,
+  unique-local — and intranet names (`.local`, single-label) are allowed**
+  (`defaultPagePolicy()` → `privateNetwork: true`; the reader's company wiki is the point).
   Judged up front for an IP literal and AT CONNECT TIME through the tracker's `guardedLookup` with the
   policy's predicate for a name (no DNS-rebinding second answer; ANY blocked answer refuses); redirects followed **only on the same host** (≤ 3, never https → http), each re-checked; 20s
   per exchange; the 25 MB cap while reading. A URL may serve a PDF, text or markdown as well as HTML.
@@ -101,7 +101,7 @@ NULs) — then the NAME tells markdown (`.md`/`.markdown`/`.mdx`) from HTML (`.h
   installed before they existed is STALE, not absent (`AI_RUNTIME_LATER_PACKAGES`): every agent still
   runs, and only a Word or web-page build says "Set up AI again" ([PACKAGING.md](PACKAGING.md)).
 
-## Following links (`crawl.ts`, `crawl-rank.ts`, `robots.ts`; sqlite `0124` / pg `0111`)
+## Following links (`crawl.ts`, `crawl-rank.ts`, `robots.ts`; migration `0124`)
 
 "Add web page" with **Links to follow** set to 1, 2 or 3 levels stores `reference_docs.crawl_json`
 (`ReferenceDocCrawl`: `depth`, `maxPages` = `REFERENCE_DOC_CRAWL_MAX_PAGES` (25), and — after a
@@ -207,7 +207,7 @@ agent reads it with tools, and the prompt says it is data).
 
 **Spend.** `DOCS_BUILD_BUDGET_USD` (6) and `DOCS_BUILD_MAX_TURNS` (250), env only; recorded with
 `recordAiUsage` feature `reference_docs_build`; cost/tokens/turns on the row. Routes preflight the
-Claude credential and agentic credits.
+Claude credential.
 
 **Failure keeps the old version.** `built_at` non-null = a built version is on disk (`available` on the
 wire) and listed in INDEX.md; a rebuild that fails or is cancelled leaves it there. A build of a
@@ -298,17 +298,17 @@ stops highlighting (a test pins them equal on plain text). ⚠ **A finding borro
 run's reference to the same section (and the same anchor when both name one) ONLY when exactly one
 passage matches (`borrowedQuote`); else it opens at its anchor.
 
-## Storage (migration 0116 / pg 0103)
+## Storage (migration 0116)
 
 `reference_docs` (unique `(account_id, workspace_id, slug)`; named composite FK onto
 `workspaces (id, account_id)`) and `reference_doc_chat_messages` (index `(account_id, workspace_id,
 conversation_id)`; same FK), plus `workspaces.docs_in_review`. Both tables are in
 `accountScopedTables()`, erased (files too), exported (metadata + chat; the text is the user's own
-upload), and checked by `verify:isolation`. `reference_docs.crawl_json` (sqlite `0124` / pg `0111`,
+upload), and checked by `verify:isolation`. `reference_docs.crawl_json` (migration `0124`,
 nullable JSON) is a column on the same row, so it needed no new erasure or isolation entry.
 [MIGRATIONS.md](MIGRATIONS.md).
 
-## Use in reviews (`review-refs.ts`; sqlite `0117` / pg `0104`)
+## Use in reviews (`review-refs.ts`; migration `0117`)
 
 Two agentic runs read the library when the workspace's switch (`docs_in_review`) is ON and a document is
 built — `reviewDocsFor(accountId, workspaceId)` (context.ts) returns the folder exactly when
@@ -392,10 +392,10 @@ viewer's highlight (§ The SPA → The quote highlight).
 Not done: posting references to GitHub (a library link means nothing there), and folding the library into
 the sprint brief / story passes (above).
 
-## Check a story against the docs (`review/story-docs/`; sqlite `0121` / pg `0108`)
+## Check a story against the docs (`review/story-docs/`; migration `0121`)
 
 A per-story button in the Story section (Open PRs ticket stack and the story view). MANUAL ONLY — never
-automatic, never on view. CORE, free, LOCAL ONLY: `registerAgenticRoutes` registers the two routes (docs/API.md
+automatic, never on view. `registerAgenticRoutes` registers the two routes (docs/API.md
 § Check a story against the docs). Contract: `packages/shared/src/story-docs-alignment.ts`.
 
 - **The gate** is `docCount > 0` (a built document in THIS workspace) + agentic AI on. It IGNORES the

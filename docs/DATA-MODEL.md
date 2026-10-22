@@ -21,15 +21,17 @@ computed during sync and **stored** on `reviewThreads.derivedState`:
 negatives from renames/deletes) — **the UI communicates that uncertainty**; covered by
 fixture tests (see Conventions).
 
-### Data model (`src/db/schema.sqlite.ts` + its `schema.pg.ts` twin are authoritative)
+### Data model (`src/db/schema.sqlite.ts` is authoritative; the platform's tables live in `src/platform/**/schema.sqlite.ts`)
 
-30 tables. Multi-tenancy as above (`accountId` denormalized onto the anchor tables;
+SQLite only (Postgres was removed 2026-10-22 — [MIGRATIONS.md](MIGRATIONS.md)). Multi-account
+isolation as above (`accountId` denormalized onto the anchor tables;
 `users` + `commitFiles` global). The core entities:
 
-- **`accounts`** — a tenant. Local mode has exactly one (`id 1`, `isLocal=true`,
-  synthesized from `gh api user`); cloud has one per signed-in user (encrypted
-  `accessTokenEnc`). `lastActiveAt` gates the periodic sync (see Sync). Replaces the
-  old `localUser` singleton. Also holds the reader's account-grained settings as overrides-only
+- **`accounts`** — the owner of everything. There is exactly one (`id 1`, `isLocal=true`,
+  synthesized from `gh api user`); every query still filters by `accountId`, and
+  `verify:isolation` still proves it. `accessTokenEnc`, `lastActiveAt`, `plan`,
+  `stripeCustomerId`, `aiCreditAllowance` and `benchmarkOptIn` are DORMANT (§ Dormant tables).
+  Replaces the old `localUser` singleton. Also holds the reader's account-grained settings as overrides-only
   JSON (`blast_radius_config`, and `my_turn_settings` — § `accounts.my_turn_settings` below).
 - **`repos`** — the account's repos (`accountId`; unique `(accountId, owner, name)` and
   `(accountId, githubNodeId)`). The `repos_id_account` unique index is NOT a lookup index — it is
@@ -49,8 +51,8 @@ fixture tests (see Conventions).
   key still present, so `sync-repo.ts` degrades the whole field to `undefined` (preserve) whenever
   `onPartial` fired — only a CLEAN response may clear a stored description.
   **There is NO second visibility axis.** `inbox_watch` / `inbox_watch_started_at` — a per-repo
-  "watched" toggle that quietly narrowed the Feed, recent activity, My Turn and the Pro digest
-  collection to a subset of the added repos — were DROPPED in migration `0046` (pg `0033`). With
+  "watched" toggle that quietly narrowed the Feed, recent activity, My Turn and the per-repo digest
+  collection to a subset of the added repos — were DROPPED in migration `0046` . With
   Workspaces the **Workspace IS the scope**, and a second axis on top of it only made it ambiguous
   which of the two a given screen was obeying. **Every repo in a workspace is fully live**: Feed,
   Activity, My Turn and Bots all cover it. The one property the watch window really bought is the
@@ -76,9 +78,7 @@ fixture tests (see Conventions).
     BODIES, so both are COMPOSITE against `(id, account_id)` and NAMED
     (`workspace_repos_workspace_account_fk` / `workspace_repos_repo_account_fk`) so the violation
     message is greppable. A cross-account `(account, workspace)` or `(account, repo)` pair fails in
-    the DATABASE, in every code path. ⚠ `schema-parity.test.ts` compares COLUMNS ONLY — not indexes
-    and **not foreign keys** — so a composite FK declared in one dialect and omitted in the other
-    passes parity. Diff the two files' `foreignKey({name, columns, foreignColumns})` blocks by eye.
+    the DATABASE, in every code path.
   - ⚠ **A repo with NO membership row is invisible to every workspace-scoped read** — no PRs, no
     feed rows, no bots, silently. Closed on both sides: `sync/upsert.ts` `upsertRepo` inserts the
     membership row in the SAME `runTransaction` as the repo row (`ON CONFLICT DO NOTHING`, so a
@@ -92,8 +92,8 @@ fixture tests (see Conventions).
     the workspace's repos AND its `workspace_reviewers` rows to Default *inside its transaction*
     before deleting the row, so the cascade finds nothing to do. Step two is not optional — see the
     landmine under **One bot object** below.
-- **`workspaces.pendingMuted`** + **`pendingMutedRepos`** — **THE PENDING MUTE** (CORE, free, both
-  modes; migration `0058` / pg `0045`). "Stop these Pending items claiming my turn." A muted repo's
+- **`workspaces.pendingMuted`** + **`pendingMutedRepos`** — **THE PENDING MUTE** (CORE,
+  migration `0058`). "Stop these Pending items claiming my turn." A muted repo's
   my-turn rows are downgraded to `relevance: 'none'` (hence `personal: false`) inside `getMyTurn`,
   at the ONE place `personal` is folded from `relevance` — so the Pending card relabels to the
   neutral "Review or reply", the browser notification stops, and every `myTurnPersonal` figure drops
@@ -152,11 +152,11 @@ fixture tests (see Conventions).
   when lean); `reviewComments.excerpt` always holds a short preview.
 - **`commits`** (`sha`+`prId`) + **`commitFiles`** (`sha` → changed paths, cached). ⚠ `commitFiles`
   is **GLOBAL** (content-addressed by sha, no `accountId`), so every reader must reach it through
-  shas already proven to belong to the tenant — never by a bare path predicate. Two readers do
+  shas already proven to belong to the account — never by a bare path predicate. Two readers do
   this today: the addressing-commit resolution in `queries.ts` and `db/person-period.ts`'s
-  person-evidence path-area fold (which joins through the tenant-scoped commit shas of an
+  person-evidence path-area fold (which joins through the account-scoped commit shas of an
   already-capped authored-PR set, which is also what bounds its scan). `verify:isolation` seeds
-  both tenants with a decoy path bucket so a dropped join leaks rather than finding nothing.
+  two accounts with a decoy path bucket so a dropped join leaks rather than finding nothing.
 - **`events`** — the timeline feed; `accountId`, unique `(accountId, dedupeKey)`, typed
   (`pr_opened`/`pr_merged`/`pr_closed`/`review_submitted`/`review_comment`/`pr_comment`/
   `commit_pushed`). Only *substantive* reviews emit an event (an empty `commented` review is
@@ -165,7 +165,7 @@ fixture tests (see Conventions).
   `requestedReviewers`); re-derived each sync (GitHub drops the request once a review lands).
 - **`prViews`** — last-viewed SHA + ts per PR ("new since you looked"); **`syncState`** —
   per-repo sync bookkeeping.
-  ⚠ **`myTurnDismissals` IS GONE** (dropped in sqlite `0060` / pg `0047`, with the routes, the wire
+  ⚠ **`myTurnDismissals` IS GONE** (dropped in migration `0060`, with the routes, the wire
   types and the SPA's "Done" button). It was the manual compensation for a My Turn fold that had no
   "have I acted" predicate; that predicate now exists — see
   [docs/BACKEND.md](BACKEND.md) § My Turn — the ball rule — so a card clears itself and there is
@@ -179,14 +179,14 @@ fixture tests (see Conventions).
   `(prId, headSha)`); Claude's `summary`/`verdict` read-only, the user's
   `userBody`/`userVerdict` are what post. Each run records its `reviewMode`/`routeReason`;
   findings carry `anchored`/`included` + the agent's wording. **Not** in the lean timeline;
-  loaded on demand. Three JSON columns (migration `0070` / pg `0057`): `ticket` (the optional user
+  loaded on demand. Three JSON columns (migration `0070`): `ticket` (the optional user
   story, stored at QUEUE time, with its AC1..n split), `ticketAssessment` and `followUp` (what the
   run found about the previous succeeded review's comments). `claudeReviewFindings.priorFindingId`
   is a SOFT reference (no FK, always the same PR) to the earlier finding a finding re-raises.
   `model` is plain `text` with NO drizzle `enum:` in either schema, so a run from a retired model
   (the old Opus 4.8) reads back with its id intact; the offered list lives only in `packages/shared`
   `CLAUDE_REVIEW_MODELS`. Contracts: docs/CLAUDE-REVIEW.md.
-- **AUTO-POSTING columns** (migration `0087` / pg `0074`, all nullable, no defaults, no new table —
+- **AUTO-POSTING columns** (migration `0087`, all nullable, no defaults, no new table —
   docs/CLAUDE-REVIEW.md § Auto-posting): `workspaces.autoPostEnabled` (NULL/false = OFF, for every
   workspace until switched on) + `workspaces.autoPostSettings` (JSON `StoredAutoPostSettings`,
   OVERRIDES ONLY — `{scope?, kinds?}`, folded by `resolveAutoPostSettings`; the ONE writer is
@@ -197,13 +197,13 @@ fixture tests (see Conventions).
   posted "Not asked for" entries, which have no item row); `claudeReviewFindings.postedAuto` /
   `ticketReviewItems.postedAuto` (true = posted automatically — display only; a ticket item's flag is
   carried with its inherited posting). A person's post never writes the flag.
-- **`claudeReviewChatMessages`** — the Claude Review CHAT (migration `0073` / pg `0060`): one row
+- **`claudeReviewChatMessages`** — the Claude Review CHAT (migration `0073`): one row
   per message about ONE succeeded run, `role` `'user' | 'assistant'`, `findingId` NULL for the run's
   general thread or a finding OF THAT RUN. Carries `accountId`, with a composite FK
   `(reviewId, accountId) → claudeReviews(id, accountId)`. Assistant rows record `model`, `costUsd`
   and tokens. Never carried across runs. Joins BOTH delete paths, ahead of the findings it FKs.
   Contract: docs/CLAUDE-REVIEW.md § Chat about a review.
-- **`ticketReviewPrCards`** — ticket review CONTRIBUTION CARDS (migration `0086` / pg `0073`): one row
+- **`ticketReviewPrCards`** — ticket review CONTRIBUTION CARDS (migration `0086`): one row
   per `(accountId, prId, headSha)` (unique `trpc_account_pr_head_ux`, the `saveCards` upsert target —
   a re-write of the same head REPLACES the card). `card` is JSON `StoredTicketPrCard`: the model-written,
   verdict-free body (`summary`, `interfaces`, `criteria`, `looseEnds`) plus `changedFiles` (server-
@@ -220,12 +220,11 @@ fixture tests (see Conventions).
   queue at arm time — the watcher ENQUEUES instead of direct-merging), `enqueuedAt` (when the
   WATCHER enqueued; the attribution record — merged-while-set resolves 'merged', a human's queue
   entry never does, and disarm-with-it-set also dequeues; reset by every re-arm), `state`
-  (`ArmedMergeState`), `expiresAt`, `lastCheckedAt`, `lastReason`, `armedByPolicy` (0093 / pg
-  0080: the dependency auto-merge setting armed it — it lands like a click's, once REQUIRED
+  (`ArmedMergeState`), `expiresAt`, `lastCheckedAt`, `lastReason`, `armedByPolicy` (0093: the dependency auto-merge setting armed it — it lands like a click's, once REQUIRED
   checks pass, `unstable` included; NULL/false = a person). FKs cascade from
   `accounts`/`pullRequests`. Both
   exported (Art. 15 — it records an action the user asked the server to take) and erased.
-- **`autoMergePolicySkips`** (`auto_merge_policy_skips`, 0093 / pg 0080) — one row per
+- **`autoMergePolicySkips`** (`auto_merge_policy_skips`, 0093) — one row per
   `(accountId, prId)` whose auto-merge intent a PERSON cancelled; the dependency setting never
   re-arms it. Composite FK `amps_pr_account_fk (pr_id, account_id) → pull_requests`. Joins both
   delete paths, `eraseAccountData` and `accountScopedTables()`. `workspaces.dependency_auto_merge`
@@ -267,11 +266,11 @@ fixture tests (see Conventions).
   `(prId, headSha)` pair in JS, because the `IN × IN` query over-matches. Two caveats:
   `checkContextState` maps CANCELLED to neutral, so a cancelled-only failure stores `[]`; and the
   writer does not follow the partial-response policy, so a tolerant response with nulled contexts
-  but a red rollup also writes `[]`. Both degrade to "no names", never "0 failing" — and a cloud
-  GitHub App token without checks read may therefore show no names at all. The number of names a
+  but a red rollup also writes `[]`. Both degrade to "no names", never "0 failing" — and a token
+  without checks read may therefore show no names at all. The number of names a
   row holds is bounded by the sync's `contexts(first: 100)` read.
 - **`trunkCiStatusEvents`** — the default-branch CI **transition log** (`accountId` denormalized;
-  migration `0052` / pg `0039`), the trunk twin of `ciStatusEvents`. It has to exist because
+  migration `0052`), the trunk twin of `ciStatusEvents`. It has to exist because
   `branchCommits.ciStatus` is updated IN PLACE by the snapshot's idempotent upsert, so a commit
   that turns red hours after it landed carries no record of WHEN — the only timestamps on that row
   are `committedAt` and `createdAt`, and presenting either as "trunk CI failed at" would be a lie.
@@ -337,11 +336,9 @@ fixture tests (see Conventions).
     is a bot" cannot rename the vendor as a side effect. Under the merged table that is the only
     thing stopping it.
 
-  **`monthlyCents`** (INTEGER, nullable) is the bot's monthly price — CORE/free, moved out of the
-  plugin's account-wide `pro_settings.bot_cost_json` blob. INTEGER CENTS in BOTH dialects on
-  purpose: pg `numeric` has no sqlite twin and node-postgres returns it as a STRING (silently
-  breaking the shared `number` wire type), while REAL is a float64 that can't hold money; the WIRE
-  is DOLLARS, converted only at the store boundary. **TWO states, not three** — NULL = "no price
+  **`monthlyCents`** (INTEGER, nullable) is the bot's monthly price, moved out of the
+  plugin's account-wide `pro_settings.bot_cost_json` blob. INTEGER CENTS on purpose: REAL is a
+  float64 that can't hold money; the WIRE is DOLLARS, converted only at the store boundary. **TWO states, not three** — NULL = "no price
   set", `0` = "recorded as free"; nothing inherits, so there is no chain behind a `??`.
   - ⚠ **PRICE IS PER WORKSPACE, and this was a deliberate product decision that OVERRULES the old
     "you buy ONE subscription from a vendor" argument.** Bots are configured at the Workspace level
@@ -368,13 +365,13 @@ fixture tests (see Conventions).
     verbatim: same single writer (`setReviewerCost`, one UPDATE), same standalone cost route,
     never in the PATCH body, never in any derived write; clearing the price resets the model to
     `'flat'` in that same UPDATE.
-    ⚠ **THE PLUGIN NOW READS THIS PAIR TOO** — the Bots → Benchmark tab's cost block
-    (`packages/pro/src/bots/benchmark/{collect,cost}.ts`) selects `monthly_cents` + `cost_model` on
+    ⚠ **THE BENCHMARK READS THIS PAIR TOO** — the Bots → Benchmark tab's cost block
+    (`platform/bots/benchmark/{collect,cost}.ts`) selects `monthly_cents` + `cost_model` on
     the SAME single-workspace-predicate read that fetches the judgement beside them, and resolves
-    `per_seat` through the OPTIONAL host seam `ProHostQueries.workspaceHumanSeatCount?` — core's own
+    `per_seat` through the host seam `ProHostQueries.workspaceHumanSeatCount?` — core's own
     function, so there is still exactly ONE multiplier in the product and the Benchmark cannot quote
     a different monthly figure for the same bot than the ROI table does. It is a READ ONLY: nothing
-    in the plugin writes either column, and `null` never becomes `0` on the way past. A per-seat
+    in the platform writes either column, and `null` never becomes `0` on the way past. A per-seat
     price the seam cannot resolve is EXCLUDED from the figure and disclosed, never read as the unit.
   - ⚠ **Never sum cost ACROSS workspaces on one screen.** Six workspaces each listing a $120
     CodeRabbit is either six subscriptions or one seen six ways and **the app must not assert
@@ -383,17 +380,16 @@ fixture tests (see Conventions).
     `monthlyCostTotal`'s dedupe-by-`userId` is then a trivially-satisfied standing invariant and is
     kept as the cheap guard that it was never handed two workspaces' rows.
   - ⚠ The value is **CLAMPED to the int4 cents ceiling** (`$21,474,836.47`) in the query layer AND
-    bounded by the route schema: above it Postgres RAISES `integer out of range` while SQLite's
-    64-bit integers accept it happily, so an unbounded field means the same request succeeds locally
-    and 500s in cloud.
+    bounded by the route schema, so every fold can assume a 32-bit cents value (SQLite's 64-bit
+    integers would accept more).
 
-  The plugin-owned `pro_settings` still HAS its 11 `bot_*` columns, and **NONE of them is live any
+  The platform's `pro_settings` still HAS its 11 `bot_*` columns, and **NONE of them is live any
   more**. `bot_cost_json` is a deprecated READ-only legacy source (`ProSettingsUpdate.bots.cost` was
   REMOVED, there is no write path left); `bot_slack_digest` was the last live one and went DORMANT
-  in plugin migration **0033**, when the "Review bots" Slack block became a property of the DELIVERY
+  in platform migration **0033**, when the "Review bots" Slack block became a property of the DELIVERY
   (`workspace_slack_targets.bot_digest`, one row per (account, workspace)) — a single account flag
   had been deciding the CONTENT of N independently-scheduled messages about N different teams' bots
-  ever since plugin 0030 made the digest per-workspace; the migration copied the account value onto
+  ever since platform 0030 made the digest per-workspace; the migration copied the account value onto
   every existing target row. The other NINE are **DORMANT** — present in every database, dropped from the drizzle schema modules and from the
   wire, never selected and never written, with **no migration**: `bot_auto_resolve*` backed the
   removed mute feature; `bot_inhouse_detect` / `bot_auto_tag` / `bot_login_allowlist` /
@@ -405,8 +401,7 @@ fixture tests (see Conventions).
   auto-triage-cron feature was **removed** — see the note below; migration `0029` still creates
   the now-orphaned `bot_mute_rules` table in existing DBs but no code binds it.)
 
-Conventions: timestamps are unix-epoch integers in SQLite (`mode:'timestamp'`) /
-`timestamptz` in Postgres — both infer `Date` in the read layer (one hand-rolled epoch
+Conventions: timestamps are unix-epoch integers (`mode:'timestamp'`), read as `Date` (one hand-rolled epoch
 comparison in `getTimeline` uses `tsBound` to bridge). Node IDs are the stable identity;
 reads are **accountId-scoped**; **triage fields are computed on read** (`triage.ts`:
 `reasonTag`, `reviewRequestedFromMe`, `newSinceLastViewed`, approvals, `isStalled`) — not
@@ -415,7 +410,7 @@ stored.
 
 
 
-## `ml_comment_labels` (CORE, free tier — ML severity/category on bot text)
+## `ml_comment_labels` (CORE — ML severity/category on bot text)
 
 One row per classified target. Written ONLY by the background enrichment worker
 (`sync/ml-enrichment.ts`), which batches text to the `severity-api` microservice from the
@@ -448,7 +443,7 @@ contract: [ML-SEVERITY.md](ML-SEVERITY.md).
 
 
 
-## `review_request_events` (CORE, free — who was asked to review, and when)
+## `review_request_events` (CORE — who was asked to review, and when)
 
 Every `ReviewRequestedEvent` / `ReviewRequestRemovedEvent` on a PR's timeline (first 25 per PR):
 `kind` (`requested` | `removed`), `occurred_at`, `reviewer_kind` (`user` | `team` | `unknown`),
@@ -457,7 +452,7 @@ and `team_slug`. It exists because `review_requests` holds only OUTSTANDING requ
 drops one the moment the person reviews, so "was a person or a team asked, and how soon did anyone
 look" was unanswerable for a merged PR. Read by Chronology (docs/BOTTLENECKS.md § Asking for a review).
 
-- **A PR CHILD WITH NO `account_id`** (the `review_requests` precedent): it reaches its tenant
+- **A PR CHILD WITH NO `account_id`** (the `review_requests` precedent): it reaches its account
   through `pr_id`, so it is NOT in `accountScopedTables()` — it is in BOTH delete paths
   (`deletePrSubtree`, `deleteRepo`) and the account erasure reaches it through the repo loop.
 - **Immutable**: unique `(pr_id, github_node_id)`, written `onConflictDoNothing` by
@@ -466,7 +461,7 @@ look" was unanswerable for a merged PR. Read by Chronology (docs/BOTTLENECKS.md 
   response that carried the selection; an EMPTY list is a positive statement and is stamped, a
   missing or nulled selection writes nothing. NULL is "not known", never "nobody was asked", and it
   is the backfill's worklist.
-- **`requester_user_id` — WHO ASKED** (migration `0081` / pg `0068`): the request event's `actor`
+- **`requester_user_id` — WHO ASKED** (migration `0081`): the request event's `actor`
   (users AND bots), set on `requested` rows only (a withdrawal's actor is not stored). NULL = not
   known: a row written before `0081`, GitHub's ghost actor, or a removal. ⚠ **The one column that is
   NOT immutable-once-written**: it arrived after the rows did, so a response that CARRIED the
@@ -475,18 +470,18 @@ look" was unanswerable for a merged PR. Read by Chronology (docs/BOTTLENECKS.md 
   Pending `review_request` card's `requesterId` heading fact (docs/BACKEND.md § Heading facts).
   `0081` un-stamps OPEN PRs whose requests lack it, so the backfill re-reads each once.
 
-## `workspaces.flow_settings` (CORE, free — Chronology's working hours and budgets)
+## `workspaces.flow_settings` (CORE — Chronology's working hours and budgets)
 
-JSON (sqlite `text` json / pg `jsonb`) holding OVERRIDES ONLY: NULL until someone changes
+JSON (`text` json) holding OVERRIDES ONLY: NULL until someone changes
 something, then just those fields. Every reader resolves through `resolveFlowSettings`
 (`packages/shared/src/flow-settings.ts`), so a later change to a product default reaches every
 workspace that never overrode it — the `accounts.blast_radius_config` precedent. Per WORKSPACE
 because two teams in two zones in one account work different hours. Written only by
 `PUT /api/workspaces/:id/flow-settings`, which replaces the whole set.
 
-## `accounts.my_turn_settings` (CORE, free — Settings → My Turn)
+## `accounts.my_turn_settings` (CORE — Settings → My Turn)
 
-JSON (sqlite `text` json / pg `jsonb`, migration `0068` / pg `0055`) holding OVERRIDES ONLY:
+JSON (`text` json, migration `0068`) holding OVERRIDES ONLY:
 which My Turn card types are shown (`show`), the red-default-branch scope (`trunkScope`), the type
 order (`order`, stored as all fifteen once changed) and the Do next weights (`weights`, integer
 percents in steps of 10 summing to 100). NULL until the reader changes something, and never a
@@ -497,7 +492,7 @@ Per ACCOUNT, not per workspace: one account is one reader. Written only by
 `PUT /api/me/my-turn-settings`; exported with the account; erased with the `accounts` row. Contract:
 [BACKEND.md](BACKEND.md) § My Turn — Settings: gates and promotions.
 
-## `my_turn_dismissals` (CORE, free — Pending → My turn → "Dismiss")
+## `my_turn_dismissals` (CORE — Pending → My turn → "Dismiss")
 
 One row per dismissed SUBJECT — `pr_id` for a pull request, `repo_id` for a red default branch;
 exactly one is set (the writer's rule). One column of substance, `dismissed_at`, stored ROUNDED UP
@@ -513,7 +508,7 @@ anywhere). Written by `PUT`/`DELETE /api/my-turn/dismissals/:kind/:id`; deleted 
 and `eraseAccountData`; in `accountScopedTables()`. Not in the account export, like the Pending mute.
 Contract: [BACKEND.md](BACKEND.md) § My Turn — dismissals and one card per PR.
 
-## `pr_mentions` (CORE, free — "@you was mentioned on this PR")
+## `pr_mentions` (CORE — "@you was mentioned on this PR")
 
 One row per `(account, PR)` where a PERSON other than the viewer `@`-mentions the viewer's login in
 a PR comment, a review body or an inline review comment. It feeds My Turn's **`mention` card type**
@@ -523,7 +518,7 @@ be the mention arm of the "New PRs" relevance flag; that arm is gone, and a ment
 card.) Written ONLY by `sync/mention-scan.ts` (`db/pr-mentions.ts` `syncAccountMentions`); read by
 a join inside `getMyTurn`.
 
-- **`mentioned_at` / `mentioned_by_user_id`** (migration `0068` / pg `0055`) are the NEWEST
+- **`mentioned_at` / `mentioned_by_user_id`** (migration `0068`) are the NEWEST
   qualifying mention's time and author — a person, not the viewer, not in the global automation set
   (`globalAutomationUserIds`). The card clears when the viewer acts after `mentioned_at`, and comes
   back when a newer mention restamps it. ⚠ **NULL is "not stamped yet", never "no mention"**: rows
@@ -534,7 +529,7 @@ a join inside `getMyTurn`.
   found nothing" row. Absence is the SAFE answer: a deployment whose scanner has never run shows no
   mention cards and nothing else changes.
 - **WHY A TABLE, NOT A COLUMN ON `pull_requests`.** The fact is derived, re-derivable and about a
-  `(tenant, PR)` pair rather than about the PR; it is sparse (12 rows out of 8.5k PRs on this
+  `(account, PR)` pair rather than about the PR; it is sparse (12 rows out of 8.5k PRs on this
   repo's own dev account). Widening the hottest table in the schema — and every sync upsert that
   writes it — for a column that is false 99.9% of the time buys nothing.
 - **`login` is PROVENANCE, not a denormalised copy of `accounts.github_login`** (stored
@@ -556,9 +551,9 @@ a join inside `getMyTurn`.
   `ml_comment_labels` and `search_index`. (Recorded here because `branchCommits`' absence from
   that export was an omission nobody wrote down; this one is a choice.)
 
-## `pull_requests` — dependency + security signals (CORE, free)
+## `pull_requests` — dependency + security signals (CORE)
 
-Four small DERIVED columns (migration `0067` / pg `0054`), read at sync by
+Four small DERIVED columns (migration `0067`), read at sync by
 `sync/security-detect.ts` from the PR's title, branch, labels and FULL `bodyText`:
 
 | Column | Holds |
@@ -594,9 +589,9 @@ Four small DERIVED columns (migration `0067` / pg `0054`), read at sync by
   footer is a positive statement that the group is a version update.
 - No new table, so erasure, both delete paths and the account export already cover the columns.
 
-## The issue tracker — `workspace_trackers`, `tracker_tickets`, `pro_jira_ac_fields` (CORE, free)
+## The issue tracker — `workspace_trackers`, `tracker_tickets`, `pro_jira_ac_fields` (CORE)
 
-Core since apiVersion 23 (migration `0088` / pg `0075`); the contract is [TRACKERS.md](TRACKERS.md).
+Core since migration `0088`; the contract is [TRACKERS.md](TRACKERS.md).
 
 - **`workspace_trackers`** — ONE row per `(account_id, workspace_id)`: `provider` (a
   `TrackerProvider`; a value with no adapter reads as none), `base_url`, `project_keys`
@@ -612,7 +607,7 @@ Core since apiVersion 23 (migration `0088` / pg `0075`); the contract is [TRACKE
   `api_root = 'https://github.com'`, `issue_key = 'owner/repo#12'`, and its ident names the repo in
   the root (`github:https://github.com/owner/repo#12`) — convert ONLY through shared
   `trackerTicketIdent` / `trackerTicketRow`.
-- **`pull_requests.closing_issues` / `closing_issues_checked_at`** (sqlite `0089` / pg `0076`) — the
+- **`pull_requests.closing_issues` / `closing_issues_checked_at`** (migration `0089`) — the
   issues a PR closes, as GitHub states them (`owner/repo#12` keys), read only for GitHub Issues
   workspaces by the tracker worker. ⚠ NULL = never read, `[]` = closes nothing.
 - **`pro_jira_ac_fields`** — ADOPTED from the plugin (name kept): the criteria field per
@@ -620,7 +615,7 @@ Core since apiVersion 23 (migration `0088` / pg `0075`); the contract is [TRACKE
 - ⚠ The plugin-era copies (`pro_workspace_settings.issue_*`/`jira_*`, `pro_pr_jira_tickets`) are
   MOVED and cleared at boot, never read again; the columns are dormant.
 
-## `workspace_setting_events` — when a workspace setting changed (CORE; sqlite `0096` / pg `0083`)
+## `workspace_setting_events` — when a workspace setting changed (CORE; migration `0096`)
 
 APPEND-ONLY history read by Chronology's "Over time" markers (docs/BOTTLENECKS.md § Over time). One
 row per REAL change — `kind` (`WorkspaceSettingEventKind`: `auto_review` · `auto_fix` · `auto_post` ·
@@ -637,7 +632,7 @@ Named composite FK onto `workspaces (id, account_id)`, cascade; in `accountScope
 real MOVE (a re-assignment to the same workspace keeps it), so the "repo joined" marker dates a moved
 repo by its arrival. Nothing else reads the column.
 
-## `story_reports` — the story report's runs (CORE; sqlite `0097` / pg `0084`)
+## `story_reports` — the story report's runs (CORE; migration `0097`)
 
 ⚠ **DORMANT since 2026-10-18** — the agentic story report was REMOVED (UI, routes, agent). Never read
 or written; still in `accountScopedTables()` + erasure (and `verify:isolation` still pins its composite
@@ -655,7 +650,7 @@ per (account, workspace, window_choice) is what the card shows. `fingerprint` is
 derived from now. Named composite FK onto `workspaces (id,
 account_id)`, cascade (a report is regenerable); in `accountScopedTables()` and erased explicitly.
 
-## `story_labels` — the story labels (CORE; sqlite `0099` / pg `0086`)
+## `story_labels` — the story labels (CORE; migration `0099`)
 
 One row per (account, story `ident`, `rubric_version`, `text_hash`): Haiku 5.5's answers to the FIXED
 story rubric (`review/story-labels/prompt.ts`, shared `STORY_RUBRIC_VERSION`) — `criteria_json`
@@ -672,21 +667,21 @@ into the three story issues (shared `story-issues.ts`); the issues are never sto
 fact per account. Every read predicates on `account_id` (`currentLabelRowsFor`); in
 `accountScopedTables()` and erased explicitly.
 
-## This Sprint — six tables (CORE; sqlite `0100` / pg `0087`, `0107` / pg `0094`)
+## This Sprint — six tables (CORE; migration `0100`, `0107`)
 
 - **`workspaces.sprint_checks`** — DORMANT since 2026-10-12 (the checks left with This sprint's chips): never read or written; kept rather than rebuilding the table.
 - **`sprint_reads`** — one per (account, workspace): the demand gate (`viewed_at`), `next_read_at`,
   the last good `source_json` + `read_at`, `error_code`, `truncated`, and the `provider` + `api_root`
-  (sqlite `0101` / pg `0088`) it was read from — a workspace that moved tracker or site since is
+  (migration `0101`) it was read from — a workspace that moved tracker or site since is
   reset on the next view (no source, no read time, due now).
 - **`sprint_tickets`** — one per (account, workspace, `ident`): the sprint list's tickets, PR or not
   (they cannot live in `tracker_tickets`, keyed on a PR). Story text, status, assignee, project /
   epic / components, `sprint_name`, `in_sprint` (false once a read stops returning it),
   `first_seen_at` (insert-only), `next_check_at` (dormant since the write-back left),
-  `repos_saved_at` (sqlite `0104` / pg `0091`: the reader saved this ticket's repos — even an empty set;
+  `repos_saved_at` (migration `0104`: the reader saved this ticket's repos — even an empty set;
   NULL = never, so the confident suggestions are the default; the read's upsert never sets it). Pruned
   90 days after `last_seen_at`, with its accepted repos.
-- **`sprint_ref_tickets`** (sqlite `0106` / pg `0093`; text + `depth` sqlite `0107` / pg `0094`) — one per
+- **`sprint_ref_tickets`** (migration `0106`; text + `depth` migration `0107`) — one per
   (account, workspace, `ident`): a ticket outside the sprint that the sprint NAMES (depth 1) or a GHOST
   CHAIN reaches (depth 2–3): key, title, status, description, criteria, type, assignee, links
   (`blocked_by_json`) and `depth`, written ONLY by the sprint read's batched lookups
@@ -703,21 +698,21 @@ fact per account. Every read predicates on `account_id` (`currentLabelRowsFor`);
   still in `accountScopedTables()` + erasure; kept, never dropped). One row per "Check against code"
   run: status/phase/mode, the validated body (format 6), `fingerprint`, `repos_json`, cost. A run left
   `running` when the feature was removed stays so — nothing sweeps it any more.
-- **`sprint_briefs`** (sqlite `0107` / pg `0094`) — one per (account, workspace, `ident`): the Haiku BRIEF
-  of a sprint ticket or ghost — `summary`, `one_liner` (≤ 90, the card face; sqlite `0123` / pg `0110`,
+- **`sprint_briefs`** (migration `0107`) — one per (account, workspace, `ident`): the Haiku BRIEF
+  of a sprint ticket or ghost — `summary`, `one_liner` (≤ 90, the card face; migration `0123`,
   NULL on pre-v5 rows), `criteria_json` (`[{n, text}]`), `criteria_derived`,
   `references_json` (rubric-4 relations, verified quotes), model, cost — CURRENT while `text_hash` and
   `brief_version` match today's (`db/sprint-briefs.ts`). Written only by `review/sprint-briefs/`;
   replaced by each new brief.
-- **`sprint_themes`** (sqlite `0108` / pg `0095`) — ONE per (account, workspace): the sprint-wide Haiku
+- **`sprint_themes`** (migration `0108`) — ONE per (account, workspace): the sprint-wide Haiku
   THEMES — `themes_json` (`[{name}]`, 3–8) and `assignments_json` (`[{ident, theme}]`, every sprint
   ticket once), model, cost — CURRENT while `input_hash` (sprint keys + brief summaries) and
   `theme_version` match today's (`db/sprint-themes.ts`). Written only by `review/sprint-themes/`;
   replaced by each pass.
-- **`sprint_story`** (sqlite `0109` / pg `0096`) — ⚠ DORMANT since sqlite `0120` / pg `0107`: the retired
+- **`sprint_story`** (migration `0109`) — ⚠ DORMANT since migration `0120`: the retired
   Haiku sprint STORY (`story_json` `{headline, focus, storylines}`). Nothing writes or reads it; the rows
   stay and are still erased. `sprint_reads.story_attempt_*` is dormant with it.
-- **`sprint_paths`** (sqlite `0120` / pg `0107`) — ONE per (account, workspace): the SPRINT BUILDER's last
+- **`sprint_paths`** (migration `0120`) — ONE per (account, workspace): the SPRINT BUILDER's last
   stored answer — `paths_json` (`{paths: [{title, tickets, advice, risk}], callouts: [{title, tickets}]}`,
   ticket KEYS only; idents are resolved on read), `input_hash` + `paths_version` (CURRENT while both match
   today's, `db/sprint-paths.ts`), model, cost, `written_at` — plus the last ATTEMPT (`attempt_at / _hash /
@@ -726,28 +721,28 @@ fact per account. Every read predicates on `account_id` (`currentLabelRowsFor`);
   paths. Written only by `review/sprint-paths/` (+ `noteSprintPathsRun` / `recordSprintPathsAttempt`);
   ⚠ every `onConflictDoUpdate` targets exactly `[accountId, workspaceId]`. Same account FK, composite
   workspace FK, `accountScopedTables()`, erasure and `verify:isolation` as above.
-- **`story_docs_alignments`** (sqlite `0121` / pg `0108`) — "Check against docs" on a story: ONE ROW PER RUN
+- **`story_docs_alignments`** (migration `0121`) — "Check against docs" on a story: ONE ROW PER RUN
   (a click), keyed for reads by (account, workspace, ident). The run's input hashes (story, criteria, built
   library, version), the criteria it checked, the Haiku shortlist and — on success only — the GROUNDED result
   (`StoryDocsAlignmentResult`). No unique index. Same account FK, composite workspace FK (ON DELETE cascade —
   ⚠ NOT re-homed by `deleteWorkspace`: its links name that workspace's library), `accountScopedTables()`,
   erasure and `verify:isolation`. Written only by `review/story-docs/` (docs/REFERENCE-DOCS.md).
-- **`sprint_view_snapshots`** (sqlite `0112` / pg `0099`) — ONE per (account, workspace): "Since you last
+- **`sprint_view_snapshots`** (migration `0112`) — ONE per (account, workspace): "Since you last
   looked" on This Sprint — `current_json` / `current_at` (the latest view's snapshot: ident → stage, merged
   PR ids on sprint tickets) and `baseline_json` / `baseline_at` (the previous visit's last view). Every GET
   `/api/sprint-graph` refreshes current; it rolls current into baseline first only when `current_at` is
   older than `SPRINT_VISIT_GAP_MS` (30 min). Written and read only by `db/sprint-signals.ts`.
 All nine carry `account_id` (cascade) and a composite FK onto `workspaces(id, account_id)`; all are
 in `accountScopedTables()`, erased explicitly, and checked by `verify:isolation`. `tracker_writes` (the
-write-back log) is DROPPED by sqlite `0107` / pg `0094`.
+write-back log) is DROPPED by migration `0107`.
 
-`tracker_tickets.issue_created_at` / `issue_resolved_at` (sqlite `0098` / pg `0085`): the ticket's own
+`tracker_tickets.issue_created_at` / `issue_resolved_at` (migration `0098`): the ticket's own
 created / resolved instants. ⚠ The table is ONE ROW PER (account, PR, key), so several rows can carry a
 ticket's date; the story label run takes the freshest-READ non-null one (`createdDatesFor`). NULL = not read
 since 0098, or the tracker said none — never "created at epoch". Not story text: never moves
 `changed_at`.
 
-Sqlite `0103` / pg `0090` (status sections + blockers; no new table):
+Sqlite `0103` (status sections + blockers; no new table):
 
 - **`tracker_tickets.blocked_by_json` / `sprint_tickets.blocked_by_json`** — the ticket's BLOCKING tracker
   links (`TicketLinkBlocker[]`: key, title, status, category, relation, url; ≤ 20), read in the same
@@ -768,11 +763,29 @@ Sqlite `0103` / pg `0090` (status sections + blockers; no new table):
   `{order, deliveredFrom}` shapes are converted on read into four buckets (no migration). Contract:
   [TRACKERS.md](TRACKERS.md) § The status order and buckets.
 
-## Dormant Pro plugin tables (since 2026-10-18)
+## Dormant tables
 
-The one-shot Haiku features below were REMOVED; their plugin tables are **DORMANT** — never read or
-written, still declared in the plugin's schema modules, still erased with the account, pruned by
-retention and pinned by the plugin's isolation test. Never drop them.
+DORMANT = never read or written, still declared in a schema module (core or platform), still
+erased with the account and pruned by retention where they were, pinned by the isolation tests.
+**Never drop them** — a drop is a migration every existing install must run, for no gain.
+
+**Removed 2026-10-22 with the hosted mode, billing and the cloud benchmark collection** (no
+migration):
+
+| Table / column | Was |
+|---|---|
+| `accounts.access_token_enc` | the sealed per-user GitHub token of a signed-in hosted account |
+| `accounts.last_active_at` | the hosted mode's activity stamp that gated scheduled sync for idle accounts |
+| `accounts.plan`, `accounts.stripe_customer_id` | Stripe billing (`free`/`pro`, set by the Stripe webhook) |
+| `accounts.ai_credit_allowance` | the monthly AI-credit allowance of the metered hosted plan (`db/credits.ts`, deleted) |
+| `accounts.benchmark_opt_in` | consent to contribute to the cross-org benchmark |
+
+`ai_usage` stays LIVE: `recordAiUsage` still records every model call's spend; only the credit
+meter that read it is gone. The Postgres schema and its migrations were deleted outright
+([MIGRATIONS.md](MIGRATIONS.md)).
+
+**Removed 2026-10-18 and 2026-10-22: the one-shot Haiku features and the Reports chat** (platform
+tables):
 
 | Table | Was |
 |---|---|
@@ -792,8 +805,7 @@ kinds), and `pro_synthesis` kinds `brief` / `rollup` and, since 2026-10-22, `per
 mints, so no live read can reach them).
 
 Since 2026-10-22 the People report and 1:1 prep are gone with no table of their own to retire: core
-`db/person-period.ts` stays wired behind the REQUIRED, now caller-less `ProHostQueries.getPersonPeriod`
-(removing it is an apiVersion bump), and core `db/automation-output.ts` (the `/api/bot-authoring`
+`db/person-period.ts` stays wired behind the now caller-less `ProHostQueries.getPersonPeriod`, and core `db/automation-output.ts` (the `/api/bot-authoring`
 fold) was deleted outright — it read only live tables.
 
 ## The automation vocabulary — `AUTOMATION_VENDORS`, `ReviewerRole`, `AutomatedReviewerKind`
@@ -807,8 +819,7 @@ Three vocabularies describe an automated actor, and they are **orthogonal axes, 
 | Price | `monthlyCents` + `costModel` | what does it cost | (no provenance; one writer) |
 
 All three live in ONE `workspace_reviewers` row — see **`workspaceReviewers`** above. Judgement and identity are edited
-FREE on every tier (Feed → Bot classification); price is `botDepth` (`PUT …/cost` 402s, and every
-route echoing a row strips it).
+on Feed → Bot classification; price through the separate `PUT …/cost`.
 
 ### `ReviewerRole` has SIX members, and EXACTLY ONE is the reviewer cohort
 
@@ -876,7 +887,7 @@ Classifier step **1b** brands them. Migration **`0054`** re-derives `kind` for r
 so the brand name shows.
 
 ⚠ **`ReviewBotKind` must NEVER absorb the other families.** It is the AI-reviewer cohort: it
-drives the review-bot badge and keys the rows the cross-org benchmark contributes.
+drives the review-bot badge and the peer-benchmark's vendor cells.
 
 ### Prefixes, the security vendors, and the marker-only kinds
 
@@ -904,33 +915,21 @@ drives the review-bot badge and keys the rows the cross-org benchmark contribute
   the new seed (only a NULL stored kind takes it), and a manual "human" removes the actor from
   both. ⚠ **Exact logins only, never a prefix**: the map is also the bot drill-downs' "is this id
   classified here" gate, which then resolves the login, and a `semgrep-code-<org>` login names
-  another tenant's organisation. ⚠ **`classificationKindForUserForAccount` is unchanged** — it
-  feeds the cross-org benchmark, whose rows leave the tenant, and this work must not move it.
+  another organisation.
   The automation SET that goes with it (`hiddenBotUserIds`, widened with `github_type = 'Bot'` and
   the vendor logins) is in [BACKEND.md](BACKEND.md) § The Dependencies tab.
 
-## `REVIEW_BOT_KINDS` is an ALLOW-list — `getBenchmarkContributions`
+## `REVIEW_BOT_KINDS` is an ALLOW-list
 
-```ts
-export const REVIEW_BOT_KINDS: ReadonlySet<string>   // shared/types.ts, MIRRORED into queries.ts
-export function isBenchmarkableVendorKind(kind): boolean
-```
-
-`getBenchmarkContributions` decides which vendor rows may be contributed to the cross-org
-benchmark. **Those rows LEAVE THE TENANT and cannot be recalled.**
-
-The old test was a **deny-list**: `kind !== 'in_house' && kind !== 'pierre' && kind !== 'vendor'`.
-That was correct **only while `ReviewBotKind` was the entire branded universe**. The moment
-`AutomatedReviewerKind` grew quality-gate / dependency / code-agent / release / housekeeping
-brands, **every one of them would have passed it** — shipping a linter's volume into a shared
-cross-org *review-bot* cohort, permanently, for everyone, with no way to un-ship it.
-
-An allow-list cannot fail that way: **a new kind is excluded until someone deliberately adds
-it here.**
-
-⚠ **Pinned by `db/benchmark-vendor-kinds.test.ts`, which goes THROUGH THE GETTER.** This matters
-more than it sounds: a unit test that merely pinned the SET's contents passed happily while the
-predicate was mutated back to the deny-list. The set is not the invariant — the *filter* is.
+`REVIEW_BOT_KINDS` (shared `types.ts`) is the set of kinds that count as AI REVIEWERS — the
+review-bot badge, `role: 'review'` seeding (`db/dependency-cards.ts`) and the peer benchmark's
+vendor vocabulary. It is an ALLOW-list on purpose: the old deny-list
+(`kind !== 'in_house' && kind !== 'pierre' && kind !== 'vendor'`) was correct only while
+`ReviewBotKind` was the entire branded universe, and the moment `AutomatedReviewerKind` grew
+quality-gate / dependency / code-agent / release / housekeeping brands every one of them would have
+passed it. **A new kind is excluded until someone deliberately adds it here.** (Its sharpest
+consumer, `getBenchmarkContributions` — whose rows LEFT the account for the cross-org cohort — was
+removed with the cloud benchmark collection on 2026-10-22.)
 
 ## `vendorKindsForRole` always includes the STORED kind
 
@@ -960,13 +959,12 @@ re-roled a live row.
 ## `onConflictDoUpdate` inventory — the conflict target of every writer, per table
 
 ⚠ **When a unique index CHANGES, every `onConflictDoUpdate` on that table must change with it.**
-A stale target **type-checks perfectly** and raises *"no unique or exclusion constraint matching
-the ON CONFLICT specification"* at **RUNTIME**, in **both dialects**, and **only when a row is
-actually written** — so an insert-only test never reaches the branch. The bot writers took this
+A stale target **type-checks perfectly** and raises *"ON CONFLICT clause does not match any
+PRIMARY KEY or UNIQUE constraint"* at **RUNTIME**, and **only when a row is actually written** — so an insert-only test never reaches the branch. The bot writers took this
 hit twice in a row (`0042` re-keyed to three columns, `0045` re-keyed the three columns again).
 
-**Before adding a writer: `grep -n onConflictDo` over BOTH trees (core + `packages/pro`) and
-check every hit against its table's declared unique.**
+**Before adding a writer: `grep -n onConflictDo` over `apps/backend/src` (core AND `platform/`)
+and check every hit against its table's declared unique.**
 
 | Table | Conflict target | Writers |
 |---|---|---|
@@ -981,14 +979,13 @@ check every hit against its table's declared unique.**
 | `pr_views` | `prId` | `markPrViewed` (~5416), the bulk mark-all (~5447) |
 | `auto_merge_requests` | `[accountId, prId]` — current state, not a log; re-arm OVERWRITES, disarm DELETEs | `armAutoMerge` (~14009) |
 | `auto_merge_policy_skips` | `[accountId, prId]` (`amps_account_pr`) — **`onConflictDoNothing`** | `recordPolicySkip` (merge/dependency-policy.ts) |
-| `benchmark_contributions` | `[accountId, vendorKind, weekStart]` | the benchmark rollup (~13444) |
 | `ml_comment_labels` | `(account_id, target_kind, target_id)` (`mcl_account_target`) | `db/ml-labels.ts` (the enrichment worker's ONLY writer) |
 | `pr_mentions` | `(account_id, pr_id)` (`prm_account_pr`), `onConflictDoUpdate` (restamps `login`, `repo_id`, `mentioned_at`, `mentioned_by_user_id`) | `db/pr-mentions.ts` `syncAccountMentions` (the mention scanner's ONLY writer) |
 | `workspace_trackers` | `[accountId, workspaceId]` (`workspace_trackers_account_workspace`) | `tracker/settings.ts` `writeWorkspaceTracker` (the ONLY writer; seeds every column from the stored row, never deletes) + the boot-time move (`tracker/legacy-import.ts`, raw `ON CONFLICT DO NOTHING`) |
 | `tracker_tickets` | `[accountId, prId, issueKey]` (`tracker_tickets_account_pr_key`) | `tracker/store.ts` `upsertTicketRow` (the worker's ONLY write; owns `changed_at`) + the boot-time move |
 | `pro_jira_ac_fields` | `[accountId, workspaceId, apiRoot, issueTypeId]` (`pro_jira_ac_fields_account_ws_site_type`) | `tracker/store.ts` `writeAcFieldSetting` |
 | `ticket_review_pr_cards` | `[accountId, prId, headSha]` (`trpc_account_pr_head_ux`), `onConflictDoUpdate` (replaces `card`, `source`, `model`, `cost_usd`, `created_at`) | `review/ticket-review/cards.ts` `saveCards` (the ONLY writer: pre-pass + story-check cards) |
-| `accounts` | the account uniques | `auth/account.ts` (`ensureLocalAccount`, `upsertCloudAccount`) |
+| `accounts` | the account uniques | `auth/account.ts` (`ensureLocalAccount`) |
 | `repos` head/trunk columns | `[accountId, githubNodeId]` / `branch_commits` composite | `sync/branch-status.ts`, `sync/sync-repo.ts` |
 
 ⚠ **`persist()` must NOT share one values object between the insert and the `set:`.** It did,
@@ -996,8 +993,9 @@ and that was correct while the table held one grain. With judgement + identity +
 row, a shared object overwrites a human's vendor name on every auto pass — and if `monthlyCents`
 ever crept into it, every auto pass would silently wipe the price the user typed. It builds the
 `set:` per workspace from the two stored provenance flags and **emits no statement when neither
-half may be written**. It is a **READ-THEN-NARROW, not an `onConflictDoUpdate … WHERE`** —
-drizzle spells `setWhere` differently per dialect while `db` is pg-typed.
+half may be written**. It is a **READ-THEN-NARROW, not an `onConflictDoUpdate … WHERE`** — it was
+written when `setWhere` was spelled differently per dialect, and the read-then-narrow keeps the
+rule visible in one place.
 
 ## Reading the bot table — `resolveWorkspaceReviewers` and its helper roster
 
@@ -1031,12 +1029,13 @@ facts is per workspace:
 
 ⚠ **The old failure is worth remembering when writing a NEW read.** Helpers that collapsed the
 multi-row table one-row-per-author (`new Map(rows.map(…))`, `limit(1)`, no `ORDER BY`) returned
-rows in **heap order, which flips after any UPDATE on Postgres** — so the same query answered
-differently on the two dialects, and differently on the same dialect after an edit. Go through
+rows in **storage order**, which is not a contract (it flipped after any UPDATE on Postgres while
+that existed) — so the same query could answer differently after an edit. Go through
 `resolveWorkspaceReviewers`.
 
-**The ONLY account-wide sweep is the cross-org benchmark**, and it gets **two explicitly named
-functions rather than a null sentinel**, so no ordinary read can reach it by accident:
+**The ONLY account-wide sweep was the cross-org benchmark** (removed 2026-10-22); its **two
+explicitly named functions** remain, caller-less, rather than a null sentinel any ordinary read
+could reach by accident:
 
 - `automatedReviewerUserIdsForAccount(accountId, role)`
 - `classificationKindForUserForAccount(accountId)`

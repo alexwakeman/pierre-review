@@ -1,9 +1,7 @@
 # Sync pipeline
 
-How pierre-review pulls PR activity from GitHub into the database. The **same code
-runs in both deployment modes** — the only differences are the token source (`gh`
-CLI locally, decrypted OAuth in cloud) and the DB dialect (SQLite vs Postgres). The
-read API and frontend never call GitHub directly; they read what sync has written
+How pierre-review pulls PR activity from GitHub into the local SQLite database, on the
+token of the logged-in `gh` CLI. The read API and frontend never call GitHub directly; they read what sync has written
 (the one exception is on-demand text **hydration**, see [Lean storage](#lean-storage-interaction)).
 
 **Code:** `apps/backend/src/sync/` — `scheduler.ts`, `sync-manager.ts`,
@@ -167,8 +165,7 @@ aren't missed; idempotent upserts make the re-fetch duplicate-free.
 > stops at the first PR with `updatedAt < since`, so a PR whose only change is one of those
 > is never re-read by a walk — the 30-min re-walk floor included, since it uses the same
 > window. Those signals arrive another way: the unsettled-PR backstop after every walk
-> (merge state and stale CI, below), the post-write settle ladder, webhooks on installed
-> repos, and the open PR pane's live refresh
+> (merge state and stale CI, below), the post-write settle ladder, and the open PR pane's live refresh
 > ([REALTIME-SYNC.md § Post-write settle](REALTIME-SYNC.md#post-write-settle)).
 
 ---
@@ -205,8 +202,8 @@ aren't missed; idempotent upserts make the re-fetch duplicate-free.
 paths:
 
 - Backed by the **permanent `commitFiles` cache** — SHAs are immutable, so the cache
-  never expires and re-syncs are free. The table is **global** (content-addressed,
-  shared across tenants).
+  never expires and re-syncs are free. The table is **global** (content-addressed, no
+  `accountId`).
 - Cache misses are fetched via REST (`GET /repos/:owner/:name/commits/:sha`) through a
   **fixed worker pool** (`COMMIT_FILE_CONCURRENCY`, default **10**) that keeps that
   many requests in flight at once. These REST calls typically dominate sync latency.
@@ -239,7 +236,7 @@ comments, commits, review requests, and timeline events) in **one transaction**
   NOTHING`. ⚠ The `DO NOTHING` is load-bearing — a re-sync of an existing repo must
   never move it out of the workspace a human put it in. Membership is all it writes: there
   is no second visibility axis to set (`repos.inbox_watch` and the whole "watched" concept
-  were dropped in migration `0046` / pg `0033` — every repo in a workspace is fully live).
+  were dropped in migration `0046` — every repo in a workspace is fully live).
   A repo with no membership row would be invisible to every workspace-scoped read, which is
   why the read path also repairs the diff (`ensureRepoMemberships`).
 - Only **substantive** reviews emit a `review_submitted` event (an empty "commented"
@@ -289,9 +286,9 @@ resumed on the next sync for an existing repo).
 
 ## Tokens, rate limits, isolation
 
-- The token is resolved **per repo** via `getAccessToken(accountId)` (`gh auth token`
-  locally; decrypted OAuth token in cloud) and threaded into the fetch — **never**
-  module-cached (a cached token would leak across accounts in cloud).
+- The token is resolved **per repo** via `getAccessToken(accountId)` (`gh auth token`, itself
+  cached 5 min in `github/auth.ts`) and threaded into the fetch — `github/client.ts` keeps no
+  module-level token of its own.
 - Every persisted row is stamped with the owning **`accountId`**; sync is per-account.
 - `syncAllRepos` wraps each repo in its own `try/catch`, so one bad token or
   inaccessible repo doesn't abort the loop.
@@ -357,7 +354,7 @@ All via env (see `config.ts`); defaults in parentheses.
 | `FOREGROUND_SYNC_DAYS` | `14` | Two-phase phase-1 window (must be `< BACKFILL_DAYS` to two-phase). |
 | `SYNC_OVERLAP_MINUTES` | `20` | Trailing re-fetch window on incremental syncs. |
 | `SYNC_CRON` | `*/1` (`*/5` if adaptive is off) | Scheduler **tick**. Under adaptive polling this is not the per-repo cadence — it's how often the due-check runs; the bucket intervals decide what actually syncs. Setting it explicitly overrides the adaptive default, which keeps the old cadence. |
-| `SYNC_ADAPTIVE` | `true` (both modes) | Adaptive cadence + conditional probe ([REALTIME-SYNC.md](REALTIME-SYNC.md) Phase 2) — the primary strategy everywhere, since webhooks only cover repos the App is installed on. `false` restores the fixed-clock re-walk. |
+| `SYNC_ADAPTIVE` | `true` | Adaptive cadence + conditional probe ([REALTIME-SYNC.md](REALTIME-SYNC.md) Phase 2) — the primary sync strategy. `false` restores the fixed-clock re-walk. |
 | `SYNC_HOT/WARM/COLD_INTERVAL_SEC` | `120` / `300` / `900` | Min seconds between attempts per activity bucket (adaptive only). |
 | `SYNC_FLOOR_INTERVAL_SEC` | `1800` | Force a re-walk this often even when the probe says unchanged — bounds how long a quiet repo goes unwalked. ⚠ It uses the same `since` window, so it does NOT catch changes that leave `updatedAt` alone (CI finishing, mergeability computed); the unsettled-PR backstop ([REALTIME-SYNC.md § Post-write settle](REALTIME-SYNC.md#post-write-settle)) does. |
 | `COMMIT_FILE_CONCURRENCY` | `10` | Concurrent commit-file REST fetches per page. |
@@ -416,16 +413,16 @@ no per-deployment decision to make), rotates accounts like the ML worker, and is
 bounded at 60s per tick; the request path then does one indexed join on `pr_mentions`.
 
 **Why a FULL re-derive per tick, and not a cursor.** A watermark over the three comment tables has
-to be right about four different ways the corpus changes, and every wrong answer is silent:
+to be right about three different ways the corpus changes, and every wrong answer is silent:
 
 | Change | What a cursor gets wrong |
 |---|---|
 | a 90-day **backfill** | inserts rows whose `created_at` predates any time-based watermark |
 | a body **edit** | changes neither the row's id nor its `created_at` |
 | a **deleted** comment | must REMOVE a mention; an insert-only writer never can |
-| Postgres **sequence gaps** | ids commit out of order, so an id watermark can skip a row forever |
 
-Re-deriving the whole set and diffing it against what is stored is correct under all four with no
+
+Re-deriving the whole set and diffing it against what is stored is correct under all three with no
 state to keep, and it is affordable because the expensive half is bounded by the MATCHES, not the
 corpus. ⚠ **The delete half is load-bearing**: without it the mention card becomes a ratchet that
 only ever widens. ⚠ **So is the restamp**: a stored row counts as unchanged only when its login,
@@ -443,9 +440,7 @@ colleague's second "@you?" on the same PR never brings it back. The tick logs `+
   actually re-derived under the new login;
 - ⚠ an account whose `github_login` has not resolved yet (local mode before `gh api user`
   answers) is **skipped**, never scanned as the empty string — deriving an empty set would delete
-  every stored row, i.e. a transient `gh` outage would clear every mention card;
-- in cloud the tick scans only recently active accounts (the sync loop's activity gate), so a
-  reader returning after a break sees new mentions one tick after they come back.
+  every stored row, i.e. a transient `gh` outage would clear every mention card.
 
 Absence never widens: a row with a NULL `mentioned_at` (every row, between migration `0068` and the
 first tick after it) shows no card, and with no rows at all there are simply no mention cards, which

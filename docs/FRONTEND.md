@@ -136,10 +136,11 @@ Three layers, deliberately separated:
      be preserved, but `'all'`/`'teams'`/`[2,4]` have no image, and half-migrating persisted state
      is worse than discarding it.
 
-**Auth gate (cloud only).** `App.tsx` calls `useMe()` first; a **401** (cloud, signed out)
-renders `<SignInGate>` instead of the app, and a **sign-out** control shows when
-`me.deploymentMode === 'cloud'`. Local `/api/me` never 401s, so the app renders as before.
-`api/client.ts` sends `credentials` (the session cookie) on every request.
+**No sign-in.** `/api/me` never 401s — the server resolves every request to the one local
+account — so `App.tsx` renders the app directly. (`SignInGate`, sign-out, the GitHub App and "Your
+data" Settings sections, GA + the cookie banner and `useAuthProviders` were removed 2026-10-22
+with the hosted mode; GA and its consent banner live only on the website, `apps/landing`.) An
+expired SAML authorisation shows the reconnect banner, which now says `gh auth refresh`.
 
 ### UI regions (`App.tsx`)
 
@@ -169,7 +170,7 @@ renders `<SignInGate>` instead of the app, and a **sign-out** control shows when
     means "every repo IN THIS WORKSPACE"; it canonicalises to `null` at all-or-none and won't hide
     the last one. ⚠ **No per-row remove** (a visibility panel that deletes a repo is a footgun;
     removal lives in `WorkspaceManager`) and **no per-row watch toggle** — the "watched" concept is
-    gone (migration `0046` / pg `0033`); every repo in a workspace is fully live. Its empty state is
+    gone (migration `0046`); every repo in a workspace is fully live. Its empty state is
     the ordinary *empty-workspace* state: "No repos in this workspace — move some in from Manage
     repos & workspaces."
   - **⚠ Activity, the Feed, Bots and Reports ALWAYS cover every repo in the selected Workspace —
@@ -303,7 +304,7 @@ renders `<SignInGate>` instead of the app, and a **sign-out** control shows when
      `ThreadStateBar`; nothing with no threads), merge readiness (`mergeVerdict()` through
      `MERGE_TONE_CHIP`; a draft shows only `mergeVerdictWarning`'s branch facts; `unknown` and
      `draft` draw nothing).
-  2. **The ticket row** (CORE tracker, free — shown where the workspace has one, `useTrackerOn`; only
+  2. **The ticket row** (CORE tracker — shown where the workspace has one, `useTrackerOn`; only
      when the PR names a ticket — NEVER an empty row):
      `TicketIcon`, then each ticket as `KEY · title` (key mono, title truncating, the row wraps for
      several), a link through `safeExternalUrl` or PLAIN TEXT when no link is known (never a
@@ -317,9 +318,8 @@ renders `<SignInGate>` instead of the app, and a **sign-out** control shows when
      add a key detection did not find, linked by its stored url, else `jiraBrowsePrefix + key`.
      ⚠ The Claude panel's story ALIGNMENT pills stay where they are: they are the review's
      judgement of the story, a different fact from "which ticket is this", so not a duplicate.
-  **GROUPED BY TICKET — the default where the tracker runs** (CORE, free — `useTrackerOn(workspaceId)`,
-  i.e. THIS workspace has a provider and a base URL (it replaced the Pro `issueLinks` capability at
-  apiVersion 23); header toggle "Group by ticket / List", `OpenPrsViewToggle`, hidden without one). The page becomes
+  **GROUPED BY TICKET — the default where the tracker runs** (`useTrackerOn(workspaceId)`,
+  i.e. THIS workspace has a provider and a base URL); header toggle "Group by ticket / List", `OpenPrsViewToggle`, hidden without one). The page becomes
   one STACK per ticket — a `<section>` landmark with an `h3` header over its cards (which drop to
   `h4`). Membership and order are the pure `lib/openPrsStacks.ts` `stackOpenPrs` (pinned in
   `test/openPrsStacks.test.ts`). ⚠ **A stack NEVER collapses** (2026-10-18): no chevron, no header
@@ -640,8 +640,8 @@ Activity / Changes, + a presence-gated **Bot activity** + Claude Review / AI Fix
   survives on the chip's `title`. ⚠ **THE ROW IS NOT GATED ON `viewerCanPush`; THE BUTTON INSIDE IT
   IS.** Unlike the Pending `conflicts` CARD, which is writable-repos-only, this row is a statement of
   fact about a pane that is already open, and the Status chip states it to every reader anyway;
-  gating it would make the pane say less than its own first row. A reader without push access — or
-  anyone in cloud, where the resolver's routes are not registered — sees the link alone, which is
+  gating it would make the pane say less than its own first row. A reader without push access
+  sees the link alone, which is
   exactly what this row was before the button existed. ⚠ **The link carries its own verb**, so the
   row reads correctly with the button present AND absent: its predecessor was the sentence "Resolve
   the conflicts on GitHub.", which, once a button offering to do it here sits beside it, sends the
@@ -690,7 +690,7 @@ Activity / Changes, + a presence-gated **Bot activity** + Claude Review / AI Fix
   `ChecksTab`. (The AI PR summary under the description and the per-comment "Check review" + its
   annotations are REMOVED 2026-10-18.) The **Checks
   row** lists the checks + re-run control and opens only when there are checks to list
-  (`checksRowVisible` is DELETED with the Pro `CiAnalysisCard`: why CI failed is the CI review's
+  (`checksRowVisible` is DELETED with the old `CiAnalysisCard`: why CI failed is the CI review's
   job now — docs/CLAUDE-REVIEW.md § CI review).
 - **Threads** — `ThreadList`/`ThreadView`: review threads grouped by file, **newest first**
   (files by most-recent thread; within a file by `createdAt` desc), with code anchors +
@@ -1146,9 +1146,9 @@ navigate away from the PR the reader is already in.
 
 #### Emoji reactions (`ReactionBar` + `hooks/useReactions.ts`)
 
-CORE/free, and **nothing is stored or synced** — no column, no migration, no sync step; state is
+CORE, and **nothing is stored or synced** — no column, no migration, no sync step; state is
 read live from GitHub. Exactly **two mounts**: `ThreadView/CommentBlock` (which reaches all seven
-`ThreadCard` mount sites at once — Threads tab, Feed, search results, attention cards, the Pro
+`ThreadCard` mount sites at once — Threads tab, Feed, search results, attention cards, the
 themes drill-down, the diff's inline pill) and PrDetail's conversation list (PR comments + review bodies,
 the kind riding the same `isComment` discriminator as the ML badge). There is deliberately **no
 thread-level bar** (`PullRequestReviewThread` is not in GitHub's `Reactable` interface) and no
@@ -1183,16 +1183,22 @@ read-only variant — the write gate is GitHub's own `viewerCanReact`.
   Chips carry `stopPropagation` + a `data-noactivate` marker because they sit inside
   click-to-open cards.
 
-### The agentic AI surfaces — free, local, gated on `me.ai` (`useAiCapabilities`)
+### The AI surfaces — gated on `me.ai` (`useAiCapabilities`)
 
-Claude Review (run, follow-up, user-story check, auto review, the review chat) and AI Fix are
-**FREE and LOCAL-ONLY** (review memory is deleted, table and all). They run on the reader's own Claude Code session or
-`ANTHROPIC_API_KEY`; Limn stores no key and charges nothing. Every SPA gate reads the TOP-LEVEL
-`MeResponse.ai` through **`hooks/useAiCapabilities.ts`** (pure half: `lib/aiCapabilities.ts`) —
-never `useProCapabilities()`, whose `aiFix`/`claudeReview`/`aiAnalysis`/`reviewMemory` members are
-gone (apiVersion 22). `test/aiGating.test.ts` fails on a component that reads them off `pro` again.
+EVERY model-backed surface gates on the TOP-LEVEL `MeResponse.ai` through
+**`hooks/useAiCapabilities.ts`** (pure half: `lib/aiCapabilities.ts`) and swaps its Run button
+through the one `AiRunGate`: the agentic ones — Claude Review (run, follow-up, user-story check,
+auto review, the review chat), AI Fix, Resolve with Claude, the docs library — AND the one-shot
+ones — Bot themes (the Bots Themes sub-tab is ABSENT while AI is off), the synthesis cards,
+Chronology pointers, the period-report write-up, the impact note and the work-plan narration. They
+run on the reader's own Claude Code login or `ANTHROPIC_API_KEY` (the one credential ladder,
+docs/CLAUDE-REVIEW.md § The credential ladder); Limn stores no key and charges nothing. Copy reads
+"your own Claude Code login or Anthropic API key". There is no `me.pro`, no `useProCapabilities`,
+no `ProGate` (`ProBadge` / `ProLockPanel` / `useProGateState`) and no AI-credit meter ("Track
+usage") — all removed 2026-10-22; `test/aiGating.test.ts` fails if a capability, a lock or a meter
+reappears.
 
-- **VISIBILITY IS `ai.enabled` ALONE** (`!isCloud && !LIMN_AI_DISABLED`). Locally the tabs, the Open
+- **VISIBILITY IS `ai.enabled` ALONE** (`LIMN_AI_DISABLED !== 'true'`). Locally the tabs, the Open
   PRs column, the Feed's Claude pill and the Settings switch ALWAYS render. ⚠ Never
   hide a surface on `runtime`/`auth`: hiding it until a credential is detected hides it from exactly
   the people who have not set one up, and the detection is a heuristic (the run is the real check).
@@ -1207,19 +1213,17 @@ gone (apiVersion 22). `test/aiGating.test.ts` fails on a component that reads th
 - **The install is ONE per page** — a module-level store in `useAiCapabilities.ts`, so two "Set up
   AI" buttons show one progress line and cannot start two downloads; an install the SERVER reports
   (`runtime: 'installing'`, e.g. `limn ai install` in a terminal) is watched by polling `['me']`.
-- **Cloud (`ai.enabled` false, `deploymentMode: 'cloud'`)**: the tabs are not listed and
-  `AiCloudNote` prints "Review and fix run on your machine: npx limn-review" where they were — no
-  `ProBadge`, no upsell, because these are not paid. A local kill switch prints nothing.
-- **Money, not credits.** Local agent runs show US$ (`formatUsd` in `lib/ui.ts`) — a credit figure
-  would invent a Limn price for the reader's own spend. Track usage's agentic row does the same and
-  shows only where `ai.enabled`. Credits stay on the Pro one-shot Haiku features.
+- **`LIMN_AI_DISABLED=true`**: the agentic tabs are not listed and the one-shot blocks do not
+  render; nothing prints in their place.
+- **Money, not credits.** Runs show US$ (`formatUsd` in `lib/ui.ts`) — a credit figure would invent
+  a Limn price for the reader's own spend.
 - **ONE STATUS LINE FOR EVERY AGENTIC PASS** — `components/AiStatusLine.tsx`: the stage in words,
   an optional "N of M", and the elapsed clock; no spinner, and it fetches nothing (each surface feeds
   it what it has: Claude Review's SSE phase, Check threads' poll, the sprint read's `briefs` +
   `passes` via `sprintAiPass`, or a single request's pending state — the impact note, the work-plan
   wording, sprint Ask, the docs check). A new agentic pass uses it; `test/aiStatusAndPrActions.test.ts`
   pins the mounts.
-- **The Pro CI-analysis card is DELETED** (Claude Review diagnoses failing CI). The AI summary, the
+- **The old CI-analysis card is DELETED** (the CI review diagnoses failing CI). The AI summary, the
   CI list and the instruction box LEFT the AI Fix tab; the tab is the fixer and its picker only.
 - **Plan mode in the AI Fix tab** ("Plan first" beside the model, then `AiFix/PlanPanel.tsx`;
   contract docs/CLAUDE-REVIEW.md § Plan mode). ⚠ A row with `status === 'planned'` is ALWAYS drawn by
@@ -1424,8 +1428,7 @@ gone (apiVersion 22). `test/aiGating.test.ts` fails on a component that reads th
   them comes back. On the Open PRs panel story findings count in the severity pills like any finding;
   the story alignment pills are unchanged.
 - **Auto review** is `AutoReviewSection` over the CORE `GET`/`PUT /api/workspaces/:id/auto-review`
-  (`hooks/useWorkspaceAutoReview.ts`), mounted on `ai.enabled` and NOT behind the plugin's
-  `/api/pro/settings` gate. OFF per workspace until switched on.
+  (`hooks/useWorkspaceAutoReview.ts`), mounted on `ai.enabled`. OFF per workspace until switched on.
   - **Auto-posting** lives in the SAME section and the SAME Save (`autoPost` on the auto-review route;
     only a changed `autoPost` is sent): the master switch "Post Claude reviews to GitHub
     automatically", a "Which PRs" radio pair (`'mine'` — "PRs you are asked to review, and your own"
@@ -1499,16 +1502,15 @@ Backend contract: [docs/CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § AI Fix.
 
 ---
 
-## The calm-consolidation surfaces (apiVersion 21 wave)
+## The calm-consolidation surfaces
 
-**Default landing = OPEN PRS, for every tier** (Pending until 2026-10-09). The rail reads Open
+**Default landing = OPEN PRS** (Pending until 2026-10-09). The rail reads Open
 PRs · Pending · Feed · Bots · Reports and its top entry is what opens. `activityRepoId` defaults to
 `'open-prs'`, the ONE rail value omitted from the URL; `'attention'` and `'feed'` are EMITTED and
 PARSED so a Pending or Feed link survives. An unknown or legacy value (`compare`, garbage) and a URL
 naming no console land on Open PRs — except a legacy Pending link carrying `attn*` keys, which still
 lands on Pending. The Feed is the stream alone (`FeedView`). (The landing was the Feed from
-P3.1 until Pending took it; the older one-shot "auto-select Insights when Pro is on" effect,
-`insightsDefaultApplied` + `suppressInsightsDefault()`, is deleted.) The Insights rail entry is
+P3.1 until Pending took it.) The Insights rail entry is
 relabelled **"Reports"** — ⚠ LABEL-ONLY: the store/URL token stays `activityRepoId ===
 'insights'` (it is wire/URL-visible across `useUrlState`, FilterBar; renaming it buys nothing
 but broken deep links).
@@ -1518,74 +1520,51 @@ but broken deep links).
   it through `useMyTurnByWorkspace`; it still refetches in lockstep with `['attention-cards']` /
   `['work-plan']`). Gone with it: `openBriefLine`, the "Elsewhere" roll-up,
   `myTurnOtherCapDisclosure`, `ciFailingCapDisclosure`, and the Feed's bot-anomaly / red-trunk
-  lines (red trunks show atop Activity → Open PRs; bot anomalies on Bots). The Pro synthesis seam's
-  `kind:'brief'`/`'rollup'` ordering narration is still served and validated by the plugin, but
-  no SPA surface requests it: dormant, not removed.
-- **`BotTriageCard`** (`components/BotTriageCard.tsx`, CORE/free): the per-PR verdict sentence —
+  lines (red trunks show atop Activity → Open PRs; bot anomalies on Bots). The synthesis seam's
+  `kind:'brief'`/`'rollup'` narration was removed 2026-10-18.
+- **`BotTriageCard`** (`components/BotTriageCard.tsx`): the per-PR verdict sentence —
   "N bot comments: X real issues · Y likely addressed · Z nit-flagged — [Resolve]". The "real
-  issues" segment is the PRO fold (stored validity/addressed annotations behind `prSummary`;
-  the annotation-index query isn't even issued without it) — a free account renders
+  issues" segment reads the latest Claude review's STORED thread judgements
+  (`useClaudeThreadJudgements`; the card never runs one) — without them it renders
   "X awaiting a look" from the derived-state rollup in that slot instead. Mounted
   TWICE (full atop the Threads tab, compact in the Overview attention area); renders ONLY at
   ≥5 union-bot review comments and issues NO extra query below the threshold (the
   ThreadAssessment 60-empty-boxes lesson) — everything it reads is already shared (the
-  workspace-reviewer listing, the per-PR ML label index, the per-PR annotation index; a pure
-  cached GET — the card can never bill). ⚠ Bot membership is the CLIENT MIRROR of the server's
+  workspace-reviewer listing, the per-PR ML label index, the batched thread-judgement read — the
+  card can never bill). ⚠ Bot membership is the CLIENT MIRROR of the server's
   UNION set (workspace judgement wins both ways, the wire `User.isBot` fallback) — deliberately NOT the
   legacy login-string classification PrDetail's bot chips still use; and every figure comes from
   the SAME folds the Threads tab uses (`rollupCounts`/`threadSeverities`/
   `resolvableBotThreadIds`) restricted to the bot subset, so card and tab cannot disagree.
 - **Bots view is `ROI ('roi' = Measure) | Themes | Advisor | Benchmark`** (`'settings'` LEFT the
-  union: bot classification is the FREE Feed → Bot classification tab, bullet below)
+  union: bot classification is the Feed → Bot classification tab, bullet below)
   (`botsInnerTab` lost `'behaviour'` — transient + URL-silent, so member removal is safe — gained
-  `'benchmark'`, and has since REGAINED `'themes'`; see "The Bots Themes panel" below). ⚠ **TWO
-  GATING POSTURES SIT IN THIS ONE STRIP AND BOTH ARE DELIBERATE**: `'roi'` and `'benchmark'` are
-  visible-but-locked (`botDepth`) and are NEVER corrected away, while `'advisor'` (`botAdvisor`)
-  and `'themes'` (`activityDigest`) are LISTED only when entitled and degrade to `'roi'` in
-  `effectiveBotsTab`. ⚠ **Superseded at the entry level: the WHOLE Bots Monitoring pane (rail label
-  "Bots Monitoring", store value `'bots'`) is Pro on `botDepth`** — `BotsView` renders one
-  `ProLockPanel` for every sub-tab, and no sub-tab wears a badge.
-  ⚠ **THE `roi`
-  SUB-TAB IS PAID (`botDepth`) AND THE WHOLE `BotRoiPanel` LOCKS IN PLACE** — the tab stays
-  selectable (no corrective `setBotsInnerTab`; only `'advisor'` and `'themes'` are corrected, and
-  only because neither is LISTED without its capability), wears an
-  unconditional `ProBadge variant="tab"`, and the BODY renders `ProLockPanel`
-  (`testId="bot-roi-locked"`, distinct from the entitled `bot-roi-panel` so the screenshot pipeline
-  can never photograph the lock). Inside the panel and therefore paid: the vendor table, its
-  keep / tune / rarely used verdicts (the label for the `noisy` verdict id), the **Inflation column INCLUDING its current-window counts** (the
-  weekly sparkline stays separately conditional on `mlInflation.weekly`, an extra scan width — as
-  does `InflationHistoryChart`, the enlarged twin of that sparkline in this panel's chart row, on
-  the same field and the same `showMlColumns` gate; contract in docs/ML-SEVERITY.md § The enlarged
-  inflation chart), the deterministic **"What the bots are flagging"** ML totals strip
-  (`MlTotalsStrip` — no AI, paid with the panel), the volume column and every drill-down.
-  ⚠ The AI report titled **"What they're flagging"** LEFT this panel and is the `Bots → Themes`
-  sub-tab (`activityDigest`, listed only when entitled) — which is also what pulled the two
-  near-identical headings apart: they used to sit on one screen, and now cannot. What stays FREE around it, in `BotsView`: the amber bot-only governance caution, the
-  resolve backlog, the **hoisted `TuningSuggestions` box** (moved OUT of the panel so the narrowed
-  `/api/bot-analytics` can keep feeding it — do not move it back, and note it now sits ABOVE the
-  table for entitled readers) and the bot feed. `WorkspaceBotCharts`
-  (`botDepth`) keeps the older ABSENCE posture on purpose — a second upsell stacked under the first
-  reads as a paywall page.
-- ⚠ **`BotRoiPanel`'s `$/acted-on` COLUMN IS A GRAIN GATE AS WELL AS A TIER GATE:
-  `showCost = botDepth && repoId == null`.** A price is stored ONCE PER WORKSPACE, so dividing a
-  whole month of it by ONE repository's work reads as spend and cannot be summed across repos — the
-  same argument that deleted `BotBenchmarkPlacementUnit.cost`. The RAIL mount keeps the column and
-  its footer instruction (that data is already workspace-grained and therefore already exact); the
-  per-repo mount loses the `<th>`, the `<td>` and the "set a monthly price" clause, and gets a
-  REPLACEMENT sentence naming the reason and pointing at the rail — an elision alone reads as a bug
-  or a permissions glitch, and invites the next reader to "restore" the column. ⚠ **Do NOT simplify
-  `showCost` back to `botDepth`** (its `false` branch used to be unreachable from the live mount and
-  the docstring said so; every per-repo Bots tab reaches it now). The `ProLockPanel` body drops its
-  cost clause on the per-repo mount too — a lock is a PROMISE about what paying reveals, and paying
-  no longer reveals that figure there.
-- **The Bots Monitoring RAIL ENTRY is PRO AS A WHOLE (`botDepth`)**, like Reports
-  (`periodReports`): listed on every tier with ONE `ProBadge`, the whole pane one `ProLockPanel`
-  when unentitled (both mounts — rail and the per-repo console's Bots tab). Its routes 402
-  (`/api/bot-analytics*`, `/api/bot-threads/*`) and every hook ANDs `botDepth`. ⚠ Bot HIDING on the
-  Feed/Timeline and bot CLASSIFICATION are NOT this screen and stay free: `/api/bot-reviewers` and
-  its writes are ungated (only `PUT …/cost` 402s).
-- **Bot classification is a FEED sub-tab, FREE on every tier** — the Feed strip is `Feed | Bot
-  classification` (`feedInnerTab` ∈ `FEED_INNER_TABS`, `?feedTab=classification`; the Pro "Discussion
+  `'benchmark'`, and has since REGAINED `'themes'`; see "The Bots Themes panel" below). `'themes'`
+  is LISTED only while `me.ai.enabled` and `'advisor'` only on the rail (`repoId == null`); both
+  degrade to `'roi'` in `effectiveBotsTab` (render-only, never written back). Inside `BotRoiPanel`:
+  the vendor table, its keep / tune / rarely used verdicts (the label for the `noisy` verdict id),
+  the **Inflation column** (the weekly sparkline stays separately conditional on
+  `mlInflation.weekly`, an extra scan width — as does `InflationHistoryChart`, the enlarged twin of
+  that sparkline in this panel's chart row, on the same field and the same `showMlColumns` gate;
+  contract in docs/ML-SEVERITY.md § The enlarged inflation chart), the deterministic **"What the
+  bots are flagging"** ML totals strip (`MlTotalsStrip` — no AI), the volume column and every
+  drill-down. ⚠ The AI report titled **"What they're flagging"** LEFT this panel and is the
+  `Bots → Themes` sub-tab — which is also what pulled the two near-identical headings apart: they
+  used to sit on one screen, and now cannot. Around it, in `BotsView`: the amber bot-only
+  governance caution, the resolve backlog, the **hoisted `TuningSuggestions` box** (moved OUT of
+  the panel — do not move it back; it sits ABOVE the table) and the bot feed. (Until 2026-10-22 the
+  whole Bots Monitoring pane was Pro, visible-but-locked; the locks, badges and gated hooks are
+  gone.)
+- ⚠ **`BotRoiPanel`'s `$/acted-on` COLUMN IS A GRAIN GATE: `showCost = repoId == null`.** A price
+  is stored ONCE PER WORKSPACE, so dividing a whole month of it by ONE repository's work reads as
+  spend and cannot be summed across repos — the same argument that deleted
+  `BotBenchmarkPlacementUnit.cost`. The RAIL mount keeps the column and its footer instruction (that
+  data is already workspace-grained and therefore already exact); the per-repo mount loses the
+  `<th>`, the `<td>` and the "set a monthly price" clause, and gets a REPLACEMENT sentence naming
+  the reason and pointing at the rail — an elision alone reads as a bug or a permissions glitch,
+  and invites the next reader to "restore" the column. ⚠ **Do NOT simplify `showCost` to `true`.**
+- **Bot classification is a FEED sub-tab** — the Feed strip is `Feed | Bot
+  classification` (`feedInnerTab` ∈ `FEED_INNER_TABS`, `?feedTab=classification`; the "Discussion
   themes" tab is REMOVED 2026-10-18 and a legacy `?feedTab=themes` lands on the Feed, because the
   URL reader seats only listed values; the visible tab is DERIVED by `effectiveFeedTab` in
   `Activity/feedTabsModel.ts`, never written back). It mounts `BotSettingsPanel` →
@@ -1595,12 +1574,12 @@ but broken deep links).
   whose text colour is picked by contrast (`lib/botAvatar.ts`); name + login; Role and vendor chips;
   the vendor colour as a thin LEFT accent (non-text use only); a person-judged row drawn muted. Then
   the controls: Counts as Bot | Person, Role + the explicit **Apply role** button, Vendor + label +
-  Save name, the two resets. The PRICE editor and workspace total render only with `botDepth` and are
-  otherwise ABSENT (no badge, no nudge). ⚠ A legacy `?activityRepo=bots&botsTab=settings` is mapped
+  Save name, the two resets. The PRICE editor ("Price for this Workspace") and the workspace total
+  sit on the card too. ⚠ A legacy `?activityRepo=bots&botsTab=settings` is mapped
   by `readFromUrl` to `activityRepo=feed` + `feedInnerTab='classification'`. Tests:
   `test/feedInnerTab.test.ts`, `test/botAvatar.test.ts`, `test/urlHistory.test.ts`.
 
-### Bots → Benchmark (the peer-cohort placement, `botDepth`)
+### Bots → Benchmark (the peer-cohort placement)
 
 `BenchmarkPanel.tsx` + the pure `benchmarkModel.ts` + `hooks/useBotBenchmark.ts`, mounted by
 `BotsView`'s `BenchmarkTabBody`. It renders `GET /api/pro/bot-benchmark/placement` — this
@@ -1610,7 +1589,7 @@ in a per-vendor activity band and ranked against the fitted cell. Tests:
 
 - ⚠ **ONE COMPONENT, TWO BODIES, AND `repoId` IS WHAT PICKS ONE.** `BenchmarkPanel({repoId})`
   computes `isRail = repoId == null` and passes it into `Body` **as its own prop** — deliberately
-  NOT `data.rollup != null`, so a version skew (an older plugin serving no rollup) cannot silently
+  NOT `data.rollup != null`, so a version skew (an older build serving no rollup) cannot silently
   change which screen the reader believes they are on.
   - **RAIL (`repoId == null`)**: header meta → truncation note → `FindingsSection` → **the ROLLUP
     CARDS** → absent metrics → `MeasuredDisclosure` → disclosures. **NO `UnitCard` renders here.**
@@ -1618,7 +1597,7 @@ in a per-vendor activity band and ranked against the fitted cell. Tests:
     thirteen metric strips, band placement and refusals — **MINUS money entirely**. The old
     `CostBlock` is DELETED, not hidden: `BotBenchmarkPlacementUnit.cost` is off the wire, and a
     `?repoIds=`-narrowed request receives no `rollup` either, so there is no figure in the payload
-    for a future renderer to find. See [docs/PRO-PLUGIN-AND-ACTIVITY.md](PRO-PLUGIN-AND-ACTIVITY.md)
+    for a future renderer to find. See [docs/PLATFORM.md](PLATFORM.md)
     § "The WORKSPACE ROLLUP".
   - ⚠ **THE FINDINGS SECTION LEADS ON BOTH SCREENS, UNCHANGED.** An anomaly is per (repository ×
     reviewer) and stays that way — it is the one thing on the rail that names a repository, because
@@ -1635,15 +1614,11 @@ in a per-vendor activity band and ranked against the fitted cell. Tests:
   - The truncation note's remedy clause ("open a repository's own Bots tab", plus the sentence
     saying money is withheld while counters and spread still render) is **rail-only**; on the
     repository tab that advice is a no-op, and it shipped unconditional.
-- ⚠ **SIXTH VISIBLE-BUT-LOCKED SURFACE, and the argument is in `ProGate.tsx`'s header.** It could
-  have hidden inside the already-locked `roi` branch; it does not, because it is the only place in
-  the product that answers "is this bot NORMAL?", and an absent tab leaves that question
-  undiscoverable. Tab listed on every tier, unconditional `ProBadge variant="tab"`, body renders
-  `ProLockPanel testId="benchmark-locked"` — DISTINCT from the entitled `benchmark-panel`.
+- It is the only place in the product that answers "is this bot NORMAL?" — the tab is always
+  listed (`benchmark-panel`).
 - ⚠ **THE VISIBLE TAB IS DERIVED AND `'benchmark'` IS NEVER CORRECTED.** `effectiveBotsTab()`
-  (in `benchmarkModel.ts`, so it can be tested without a renderer) degrades ONLY `'advisor'`;
-  `?botsTab=benchmark` is parsed on every tier off `BOTS_INNER_TABS` itself, so an unentitled
-  bookmark lands on the tab it names and meets the lock there.
+  (in `benchmarkModel.ts`, so it can be tested without a renderer) degrades only `'advisor'` (off
+  the rail) and `'themes'` (AI off); `?botsTab=benchmark` is parsed off `BOTS_INNER_TABS` itself.
 - ⚠ **THE ANOMALY LIST IS THE HEADLINE; the distributions are evidence beneath it.** A percentile
   alone is trivia — the server's four templated `action` sentences are the product. Each finding
   renders BOTH gates separately (`share` and `magnitude`), never their conjunction, so a reader can
@@ -1670,10 +1645,8 @@ in a per-vendor activity band and ranked against the fitted cell. Tests:
   alone. ⚠ `repoKeySlot([])` and `repoKeySlot(null)` BOTH return `'all'` while the wire distinguishes
   them, so a caller that ever passes a FILTERED array would serve an empty selection's answer out of
   the whole-workspace cache slot. `useBotBenchmarkPlacement` is the tab's only query; the "How these are
-  measured" disclosure (`useBotBenchmarkSpecs`) is CLICK-GATED (`enabled: botDepth && open`) —
-  the Pending-board precedent, where an eager per-card fetch became 150 GitHub calls. Both hooks AND
-  `botDepth` into their own `enabled`, because a mounted-but-unentitled pane would otherwise poll a
-  402 on a timer.
+  measured" disclosure (`useBotBenchmarkSpecs`) is CLICK-GATED (`enabled: open`) —
+  the Pending-board precedent, where an eager per-card fetch became 150 GitHub calls.
 - ⚠ **THE DEFINITIONS ARE SERVED, NEVER RE-TYPED.** `METRIC_LABEL` holds DISPLAY names only; the
   numerator/denominator/population comes from `metricSpecs` on the cohort route, because the app's
   own bot columns are NOT these columns.
@@ -1734,7 +1707,7 @@ in a per-vendor activity band and ranked against the fitted cell. Tests:
   ("recorded as free"), and a **`monthlyUsd` of `null`** is a price somebody entered whose per-seat
   unit could not be multiplied out (`price_unresolved`). Both refuse every derived figure with a
   sentence rather than printing US$0.00 three times. Contract:
-  [docs/PRO-PLUGIN-AND-ACTIVITY.md](PRO-PLUGIN-AND-ACTIVITY.md) § "The WORKSPACE ROLLUP" (the
+  [docs/PLATFORM.md](PLATFORM.md) § "The WORKSPACE ROLLUP" (the
   superseded per-repository § "Cost on the Benchmark tab" keeps the reasoning behind every rule the
   fold still imports). What the renderer owns:
   - ⚠ **TESTIDS ARE `benchmark-workspace-cost-*` WHEREVER THE CLAIM CHANGED GRAIN** (the block, its
@@ -1888,9 +1861,8 @@ in a per-vendor activity band and ranked against the fitted cell. Tests:
   ALWAYS rendered whatever the synthesis state (a failed/absent synthesis adds NOTHING and the
   deterministic list stays primary); every rendered number is SERVER-computed (`cluster.count`,
   `remainderCount`, analyzed/total — the card never counts); staleness is PASSIVE (the GET's
-  `stale` flag → badge + Regenerate, nothing regenerates on its own); free-tier posture is the
-  cost-nudge precedent (cloud → Pro chip + one-line nudge, OSS/local → null; nothing fetched
-  either way — `useSynthesis` gates on `activityDigest`). Mutation keys share the canonical
+  `stale` flag → badge + Regenerate, nothing regenerates on its own); with AI off the card renders
+  nothing and fetches nothing (`useSynthesis(…, aiEnabled)`, `me.ai.enabled`). Mutation keys share the canonical
   scope-key segment so two mounts of one scope share in-flight state.
 - **Reports pane (`PeriodReportsPanel`)**: Reports-FIRST — `InsightsSubTab` and the whole
   sub-tab apparatus are deleted. (The ad-hoc chat that lived INSIDE the report, "Ask about this
@@ -1922,15 +1894,6 @@ in a per-vendor activity band and ranked against the fitted cell. Tests:
   `personPeriod` / `botAuthoring` methods. `hooks/useMemberSections.ts` STAYS — FilterBar's Members
   dropdown builds from it. A hand-typed `?insightsTab=people` lands on Reports → Overview
   (`test/urlHistory.test.ts`). The `user-activity` tab is the contributor's feed only.
-- ⚠ The gate on the picker is now INTRINSIC, not positional: `PeriodPeopleSection` carries its own
-  `if (!periodReports) return null` above the eight roster/repo/workspace/reviewer queries it
-  fires, rather than relying on where it happens to be mounted. `PeopleReportDetail`'s check sits
-  deliberately BEFORE its seed check — a tab restored after a live downgrade used to report a
-  billing problem as "This period is no longer listed for the current workspace".
-- ⚠ A `list.data?.enabled === false` branch is KEPT SEPARATE from the lock in all three components
-  and still returns null: that is a PAYING account whose plugin self-disabled, and showing it the
-  lock would bill-nudge a customer who already paid.
-
 Deleted outright with this wave: `BotBehaviourPanel`,
 `WorkspaceComparisonPanel` + `useWorkspaceComparison` + the `'compare'` rail value (no longer
 URL-parsed — a legacy `?activityRepo=compare` link lands on the rail default, now Open PRs),
@@ -1945,17 +1908,12 @@ was first restored as a card at the top of the ROI view and then moved onto its 
 `Feed | Themes` strip. The three drill-down `SynthesisCard` mounts (`BotVolumeDetail`,
 `BotFlaggingDetail`, `BotThreadsDetail`) are untouched and still serve slice-scoped Summarise, and
 `MlTotalsStrip` — the deterministic "What the bots are flagging" severity totals, a different
-surface with a confusingly similar heading — stays INSIDE the paid `BotRoiPanel`, on the same
+surface with a confusingly similar heading — stays INSIDE `BotRoiPanel`, on the same
 windowed `/api/bot-analytics` response as the columns beside it.
 
-⚠ **THE TAB IS LISTED ONLY WHEN `activityDigest` HOLDS, and that posture is the whole point.** It
-is the Feed's, not ROI's. A listed-and-locked Themes body would be a SEVENTH visible-but-locked
-surface, and `components/ProGate.tsx` keeps that set at six with a written argument that the next
-one needs its own; and on the OSS build the panel returns `null`, so an always-listed tab would
-draw a blank pane. The panel's gate is therefore a single `if (!activityDigest) return null` —
-The free-cloud Pro nudge it inherited from `SynthesisCard` is
-DELETED, not disabled: on a conditionally-listed tab it was unreachable, and reviving it would
-quietly re-open the seventh-surface argument.
+⚠ **THE TAB IS LISTED ONLY WHILE `me.ai.enabled`** — a model writes the report, so with AI off an
+always-listed tab would draw a blank pane. The panel's own gate is the same single `aiEnabled`
+check (`useAiCapabilities()`), and `effectiveBotsTab` degrades a stored `'themes'` to `'roi'`.
 
 ⚠ **NO WINDOW PICKER, AND NO HEIGHT CAP.** The panel reads `botAnalyticsWindow`, whose one writer
 is the picker inside `BotRoiPanel` (which argues on the record against being hoisted); a second
@@ -1967,9 +1925,9 @@ Measure surface off screen, and nothing sits beneath the panel on its own tab.
 
 ⚠ **IT WORKS ON THE PER-REPO BOTS CONSOLE TOO**, unlike `'advisor'`. `BotsView` passes `repoScope`
 (`[repoId]` on the console, `null` on the rail), the client gives the narrowed report its own
-cache slot via `repoKeySlot`, and the plugin's `scope_key` carries the matching `|r:` suffix — so a
+cache slot via `repoKeySlot`, and the platform's `scope_key` carries the matching `|r:` suffix — so a
 repo's Bots tab gets its own real report rather than the workspace's. `showThemes` is therefore
-`activityDigest` alone, never `repoId == null && activityDigest`.
+`me.ai.enabled` alone, never `repoId == null && …`.
 
 ⚠ **The caption must distinguish the two figure classes**: per-theme comment counts, per-bot
 volume/acted-on and the area split are exact code folds; the themes themselves and the
@@ -1982,7 +1940,7 @@ discloses `n of m PRs loaded` while partial, and its **ML severity mix is over t
 sample, not a population**.
 
 `useBotThemes` keys on `['bot-themes', window, workspaceKey(workspaceId), repoKeySlot(repoIds)]`
-— the two-slot rule from `useBotTriage`, and the `ws:<id>` segment is the same string the plugin
+— the two-slot rule from `useBotTriage`, and the `ws:<id>` segment is the same string the platform
 persists as `scope_key`. ⚠ `useRefreshBotThemes` shares its MUTATION key per scope
 (`useIsMutating`), because a board switch mid-run unmounts the panel and a per-mount `isPending`
 would reset the button to "Generate" while the Haiku run is still in flight — the
@@ -1990,143 +1948,14 @@ would reset the button to "Generate" while the Haiku run is still in flight — 
 (one `workspaceKey` + one `repoKeySlot` call each) or a Regenerate appears to do nothing until
 the next refetch.
 
-### The ad-hoc chat is a transcript (`AdHocChatPanel` + `adHocChatModel.ts`)
-
-> ⚠ **REMOVED 2026-10-22** — the chat, these files and its store slices are deleted; kept as history.
-
-Expanded by DEFAULT, completed turns rendered oldest→newest ABOVE the input, each turn keeping
-its OWN caption (window · generated time · answering model) so a transcript that legitimately
-spans two report periods stays honest. State is `sprintChatThreads: Record<string,
-SprintChatTurn[]>` in the filters store, keyed `workspaceScopeKey(workspaceId)` (`ws:<id>` — the
-same vocabulary the server persists; never a bare `String(id)`), transient and URL-silent. A
-turn holds the wire response VERBATIM rather than a projection, so a field added later flows
-through without a store change. Clearing a thread destroys no record: every turn was persisted
-server-side as its own history row at answer time.
-
-- ⚠ **The completed turn is appended in `useSprintChat`'s HOOK-level `onSuccess`, never a
-  `mutate()` callback.** Mutate-scoped callbacks die with the observer, and the panel fires
-  `chat.reset()` on a workspace switch / history pick / "New conversation" while clicking a PR
-  ref unmounts it mid-flight — either would `removeObserver` the pending mutation, so a billed,
-  server-persisted answer would silently miss the live transcript and the NEXT ask would send a
-  history missing that turn (so "why is that?" resolves against the wrong previous answer).
-  Hook-level callbacks run from `Mutation.execute` regardless of observers. The scope is captured
-  as **`onMutate` context**, because the options closure is not ask-stable — every re-render
-  while pending `setOptions`-swaps it, so by completion `workspaceId` can be another workspace's.
-- Only a response carrying a real `answer` becomes a turn; throttled / out-of-credits shapes
-  render as notices off the mutation's own data and must not occupy one of the ten slots. The
-  composer clears on send-success (guarded so text typed toward the NEXT question survives) and
-  is RETAINED on error/throttle on purpose — it aids retry.
-- **The cap UX**: at `SPRINT_CHAT_MAX_TURNS` pairs the input disables behind a "New
-  conversation" affordance. The server independently re-caps, so this is ergonomics, not
-  enforcement. `trimmedTurns > 0` on an answer is whispered under it — a reference the model
-  visibly missed otherwise reads as a model failure.
-- **Scrolling is STICKY, not unconditional**: `stickToBottomRef` is tracked continuously via
-  `onScroll` (it must be read as it stood BEFORE new content grew `scrollHeight`, so it cannot be
-  computed inside the effect), and a SEND always re-arms it while an arrival respects where the
-  reader scrolled to — Sonnet-length waits are long enough to re-read earlier turns.
-- **Suggestion pills are TWO LABELLED GROUPS** (`suggestionGroups` in the pure
-  `adHocChatModel.ts`): "From this report" — templated from the viewed report's own significant
-  deltas, so it renders only when a report is on screen — and "Quick questions", the built-ins.
-  They are different claims (client-computed figures vs generic asks) and one merged array also
-  carried a latent duplicate-`key` risk. Once a conversation exists the BUILT-INS collapse behind
-  their caption (derived from `thread.length` per render, never written back). Model-proposed
-  follow-up chips are FILLED pills inside the transcript, attached to the NEWEST answer only and
-  hidden while an ask is pending. ⚠ Every pill prompt must stay ≤500 chars — the server's
-  `MAX_QUESTION` truncates SILENTLY, so a mid-sentence cut would ship a live mispowered pill with
-  no error anywhere (pinned by `test/sprintChatThread.test.ts`).
-
-### The Reports People picker + the People report tab
-
-> ⚠ **REMOVED 2026-10-22** — the picker, the tab and every file named here except `hooks/useMemberSections.ts` (FilterBar still uses it) are deleted; kept as history.
-
-`PeriodPeopleSection` is a PICKER: a row of maintainer shortcut pills, then a text field with
-"Begin report" beside it, opening `UserSelectPanel`'s extracted `MemberSectionList` (same
-Maintainers / per-repo / Other grouping) plus a flat alphabetical BOTS section from
-`useDetectedReviewers` (the union truth — comment-only reviewers included), multi-select straight
-to removable chips.
-
-- **The panel opens UPWARD, as an OVERLAY** — `absolute bottom-full left-0 mb-1 w-full max-w-md
-  z-30` (the `ReactionBar` spelling) on a `relative` wrapper that stays INSIDE the click-outside
-  `<section>`, because `useClickOutside` needs one root over both the field and the panel. It used
-  to be a plain in-flow block: the picker is the LAST child of a long report inside
-  `Activity/index.tsx`'s scroll pane, so opening it pushed the field itself down and out from under
-  the cursor. Being out of flow, it now needs `shadow-lg` and an opaque background to read as a
-  panel. **"Begin report" lives in the FLEX ROW with the field** (`flex max-w-md items-center
-  gap-2`, input `flex-1`, button `shrink-0`) — never inside the panel, which unmounts on close.
-  Its `disabled`/`title`/`onClick` bindings are unchanged (`beginDisabledReason` and
-  `openPeopleReport` are unit-pinned).
-- ⚠ **The panel's scroller carries NO PADDING, and that is load-bearing.** Chromium clamps
-  `position: sticky; top: 0` to the scroll container's CONTENT box, so `p-1.5` on the same element
-  as `overflow-y-auto` pinned every repo header 6px below the panel's inner edge, with rows
-  passing visibly through the band. The padded SHELL and the bare `max-h-72 overflow-y-auto`
-  scroller are two elements — `UserSelectPanel`'s own dialog/scroller shape, which is exactly why
-  the toolbar Members dropdown never had the gap — and the "Maintainers · select all" quick-select
-  sits in the shell so it stops sliding under the pinned repo names. **Do NOT fix this with a
-  negative `top`/`-mt` on the header**: `MemberSectionList` is SHARED, and the toolbar dropdown
-  (whose scroller is already unpadded) would gain the 6px back as an overlap.
-- **The maintainer pills are a SHORTCUT, not a ranking.** Up to ten pill-shaped `<label>`
-  checkboxes above the field, one per maintainer of the workspace — `maintainerIds` straight off
-  the builder, so already workspace-narrowed and bot-free (humans only: nothing can earn a pill
-  without merge rights, so there is no bot half). DEFAULT-VISIBLE and DEFAULT-UNCHECKED: ⚠ each
-  checked chip is a separately BILLED narrative generation when Begin runs, so a pre-selected row
-  would spend credits on a page load. The cut to ten is made on repo BREADTH — how many of the
-  workspace's in-scope repos list the person in `mergers`, a fact about merge RIGHTS, not about
-  output — and that breadth **never reaches the screen**: after the cut the row re-sorts
-  ALPHABETICALLY (the `orderSelections` idiom, `userId` tiebreak) and renders no number, no count,
-  no figure. That is what keeps the row on the right side of PREP, NOT SCORING; a strip sorted
-  visibly by an N beside each name is the scoreboard the three guardrail comments forbid.
-  ⚠ **The sort must be TOTAL before the slice** — `maintainerIds` iterates in the `mergers`
-  payload's order, i.e. `getMergers`' `selectDistinct` with no `ORDER BY` = server HEAP order,
-  which flips after any UPDATE on Postgres, so a bare `.slice(0, 10)` hands local and cloud a
-  different ten.
-- ⚠ **The section used to list the ACCOUNT's users across every workspace.** FilterBar's member
-  `useMemo` was extracted to the pure `hooks/useMemberSections.ts` (`buildMemberSections`) so the
-  picker reuses ONE fold with a different SCOPE and a different BOT VERDICT: `inScopeRepoIds` =
-  the WHOLE active workspace's membership (the repo picker is Timeline-only), the UNION bot
-  predicate (workspace `automated` ∪ the wire `User.isBot`, a manual "human" winning both ways), and
-  **`includeRosterRemainder: false`** — that remainder was the cross-workspace bleed. FilterBar
-  passes exactly the inputs it always computed, so its output is byte-identical (fixture-pinned
-  by `test/memberSections.test.ts`).
-- ⚠ **MAJOR BUG CAUGHT IN REVIEW: the picker first used `useSearchTimeline`/`useSearchOpenPrs`,
-  which are TIMELINE-ONLY.** `buildTimelineSearch` emits `filters.repoIds` and windows by the
-  board's Range preset — neither control is mounted on the Reports pane, so a narrowing left on
-  the board silently dropped workspace members with no visible cause, and an older completed
-  period could not offer anyone quiet since. It now uses `rosterTimelineSearch` /
-  `useRosterTimeline` (workspace-wide, `excludeBots=false`, windowed by the PERIOD BEING
-  REPORTED so the string is STABLE per period rather than churning with the board's live `to`)
-  plus `useWorkspaceOpenPrs`. It deliberately does NOT share the board's cache entry — one extra
-  lean fetch, accepted for the same reason `useSearchTimeline` accepts its own. Pinned by
-  `test/peopleRosterScope.test.ts` in the `workspaceOpenPrsScope` idiom, including the
-  falsifiable half. The reported window is DERIVED from `insightsReportKey` (falling back to the
-  newest listed period), never written back.
-- **The report is an ephemeral SINGLETON pinned tab**: `TabKind 'people-report'` /
-  `PEOPLE_REPORT_TAB_KEY`, a full-main overlay in `App.tsx` at `max-w-[100rem]`, rendered from
-  the transient `peopleReportSeed { workspaceId, periodKey, selections[] }` (the
-  `themeThreadsSeed` discipline — read-not-consumed for the tab's lifetime, a second Begin
-  RE-SEEDS in place, excluded from `persist` and from `parseTabKey` so a reload drops it, which
-  it must since the seed lives only in memory). ⚠ **`workspaceId` IS PART OF THE SEED**: period
-  keys are cadence-grid strings, so another workspace sharing the grid would resolve the key and
-  render the OLD workspace's selections against the NEW workspace's data under the same heading.
-- **Sections render ALPHABETICALLY by label with humans and bots interleaved** (`orderSelections`
-  in the pure `lib/peopleReport.ts`, unit-tested) — the seed preserves click order and the render
-  ignores it. Never metric-sorted, never kind-grouped-then-ranked: PREP, NOT SCORING. Human
-  sections loop the one-person GET with `evidence=1`; the Pro `person_report` narrative is
-  generated SEQUENTIALLY through a narration queue so two sections never bill concurrently, with
-  a throttle backoff and a one-attempt-per-staleness-observation guard (a hard failure must stop
-  ASKING, or it holds the queue's single grant under a "queued…" label with nothing running).
-  Bot sections are deterministic, no AI. Every per-section query key carries `ws:` + `u:<userId>`
-  + `pw:<from>-<to>` fixed-arity slots, so two chips can never share a cache entry.
-
-### This Sprint (free; a fixed tab — formerly "Activity → This Sprint")
+### This Sprint (a fixed tab — formerly "Activity → This Sprint")
 
 (The heading keeps its old name because links point at it.) This Sprint is a **FIXED TAB** beside
 Activity — strip order Activity · This Sprint · Timeline; `activeTab === 'sprint'`, `?view=sprint`,
 rendered by `components/Sprint/SprintTabView.tsx` in its own `sprint-overlay` (App.tsx). It was an
 Activity rail line under Pending (`activityRepo: 'sprint'`) until 2026-10-20; `'sprint'` LEFT the
-`activityRepoId` union and the rail entry is gone. It is FREE — no
-`ProBadge`, no `ProLockPanel`, and none of its routes 402 (`/api/sprint-graph*`, `/api/merged-prs`,
-the sprint refresh / statuses routes, `GET /api/ticket-story`). The agentic part ("Ask Claude")
-stays LOCAL-ONLY and gated on `me.ai.enabled` through `useAiCapabilities()`, never a Pro capability.
+`activityRepoId` union and the rail entry is gone. The agentic part ("Ask Claude") is gated on
+`me.ai.enabled` through `useAiCapabilities()`.
 Viewing any of the three views stamps `sprint_reads.viewed_at`, which is what lets the worker read the
 sprint. The API route keeps its old name (`GET /api/sprint-graph`); only the SPA's wording changed.
 
@@ -2310,10 +2139,10 @@ sprint. The API route keeps its old name (`GET /api/sprint-graph`); only the SPA
   SprintView re-fetches the graph AUTOMATICALLY (no tracker read, no ticket checks) — not while the
   reader's own Refresh is landing. Nothing changed ⇒ no graph read and no re-layout; an absent token (an
   older server, the e2e catch-all) never triggers one.
-- **The toolbar's Refresh** reads the sprint from the tracker AND, local with AI on, starts up to
+- **The toolbar's Refresh** reads the sprint from the tracker AND, with AI on, starts up to
   `SPRINT_REFRESH_TICKET_CHECKS` (3) ticket checks server-side; the response's `ticketChecks` is said
   for 10 s under the toolbar (`ticketChecksNote`: "Checking 2 tickets against their pull requests.", or
-  why none could start — no Claude credential, no credits; nothing when none needed one).
+  why none could start — no Claude credential; nothing when none needed one).
 - **"Ask Claude about this sprint"** (`SprintAskPanel`, inline under the toolbar — never a fixed
   bottom-right element; shown only where `me.ai.enabled` and the response's `aiEnabled`): the transcript
   lives in the module store `useSprintAskTranscript` (per workspace, memory only) and ⚠ the completed turn
@@ -2355,8 +2184,7 @@ sprint. The API route keeps its old name (`GET /api/sprint-graph`); only the SPA
 ### Reports → Overview | Stories | Chronology (`insightsTab`)
 
 `InsightsView` is a THREE-TAB pane (Overview · Stories · Chronology; This Sprint and Merged so far
-left for their own rail line, above). **Overview** is the pane as it was — free Flow metrics above the
-Pro-badged Period reports. **Chronology** is the COURT LEDGER panel (`BottlenecksPanel.tsx`, contract in
+left for their own rail line, above). **Overview** is the pane as it was — Flow metrics above the Period reports. **Chronology** is the COURT LEDGER panel (`BottlenecksPanel.tsx`, contract in
 [BOTTLENECKS.md](BOTTLENECKS.md)). ⚠ It renders NO PERSON — not a login, not an avatar, not a
 per-head count — and the server sends no actor ids, which makes that structural rather than a
 convention this file has to remember.
@@ -2364,20 +2192,15 @@ convention this file has to remember.
 - ⚠ **The visible tab is DERIVED, never written back** — `effectiveTab` normalises an unknown
   `?insightsTab=` FOR THE RENDER ONLY. Exactly the `feedInnerTab` / `botsInnerTab` rule: a
   corrective `set…()` permanently forgets the reader's choice.
-- ⚠ **`'bottlenecks'` IS NOW GATED AND THE DERIVE STILL MUST NOT LEARN ABOUT IT.** The parenthetical
-  "the moment a member becomes gated" is no longer hypothetical: Chronology went PRO on
-  `periodReports`. `effectiveInsightsTab` keeps exactly one job — normalising a value outside the
-  union — and must NOT gain a capability fallback. An unentitled `?insightsTab=bottlenecks` ships in
-  bookmarks and in history entries Back replays; it has to land on the tab the URL named and render
-  the LOCKED pane there. A fallback would silently redirect the reader to Overview with no
-  explanation, and would make the function impure, breaking the round-trip `urlHistory.test.ts`
-  pins. **The gate lives in the PANE, never in the tab resolution.**
+- ⚠ **`effectiveInsightsTab` keeps exactly one job** — normalising a value outside the union. If a
+  member ever becomes conditional, the condition lives in the PANE, never in the tab resolution: a
+  fallback would silently redirect a bookmarked `?insightsTab=…` with no explanation and make the
+  function impure, breaking the round-trip `urlHistory.test.ts` pins.
 - The store key lives in `freshDefaults()` only, so **no `FILTER_STORAGE_VERSION` bump is owed**,
   and `'overview'` — the current default — is the OMITTED URL value.
 - **Stories** (`?insightsTab=stories`, `StoriesView.tsx` + pure `storiesModel.ts`,
   `test/storiesModel.test.ts`) — how well the TICKETS were written: the two charts, then every story behind ONE "All N stories" disclosure (Fell short · Not reviewed · Reviewed,
-  no gaps), over the REPORTING WINDOW (`GET /api/stories`, `useStories`, key `['stories','ws:<id>']`,
-  `periodReports` ANDed into `enabled`), named by the reporting-window caption. No tracker → one
+  no gaps), over the REPORTING WINDOW (`GET /api/stories`, `useStories`, key `['stories','ws:<id>']`), named by the reporting-window caption. No tracker → one
   sentence. The server orders `shortfall` / `unchecked`; the SPA never re-ranks them. The per-story
   AI notes, their "Write note" buttons and the pattern chips are DELETED.
   - ⚠ **The agentic story report is REMOVED (2026-10-18)** — `StoryReportCard.tsx`,
@@ -2395,30 +2218,14 @@ convention this file has to remember.
     `RepoRows`' optional `rowAction` (one labelled control under the name; the row and its bars stay
     unclickable). The key still opens the tracker.
   - Every explanation sits behind an `InfoButton`; no caption paragraphs. No e2e spec mounts
-    Reports (the mock's `periodReports` is false), so `e2e/mock-api.ts` has no `/api/stories`
-    fixture; add a typed one if a spec ever opens the tab (today the catch-all `{}` reads as "no
+    Reports, so `e2e/mock-api.ts` has no `/api/stories` fixture; add a typed one if a spec ever opens the tab (today the catch-all `{}` reads as "no
     tracker": the tab prints one sentence).
   - ⚠ **Story health is DELETED** (2026-10-11, "not adding anything"): no `StoryHealth.tsx`, no
     `useStoryHealth`, no `GET /api/story-health`. Do not re-add a weekly-chart panel here. The label
     run's client methods (`api.startStoryLabelRun` etc.) remain with no screen calling them.
-- ⚠ **Superseded: the WHOLE Reports pane is Pro (`periodReports`)** — `InsightsView` renders one
-  `ProLockPanel` when unentitled, the rail entry carries the one `ProBadge`, and the inner badges
-  below were REMOVED (the inner locks remain as defence in depth). `useWorkspaceMetrics` /
-  `useWorkspaceMetricsDetail` AND `periodReports` into `enabled`; the routes 402. Historical note:
-  the rail entry used to be ungated, and BOTH tabs stay listed and selectable. What was gated was two BODIES, each
-  VISIBLE-BUT-LOCKED: `PeriodReportsPanel` (`period-reports-locked`) and the Chronology tab
-  (`chronology-locked`, wrapping `BottlenecksPanel`). Both wear a `ProBadge` from
-  `components/ProGate.tsx` — `variant="heading"` on the "Period reports" `<h3>`, `variant="tab"`
-  inside the Chronology `<button>` so the accessible name composes as "Chronology, Pro feature" —
-  and both badges are UNCONDITIONAL: they tell a paying admin which panes a free teammate cannot
-  open, and a badge keyed on the capability would flicker while `/api/me` is in flight.
-- ⚠ **Route the body through `useProGateState(cap)`, never a naked `!cap`.** `useProCapabilities()`
-  reads all-false until `/api/me` resolves, so the obvious branch paints "See what Pro includes" for
-  one frame at an account that PAYS. `'pending'` (which now also covers an /api/me ERROR — entitlement
-  unknown is not entitlement denied) renders null or the host's own skeleton.
-- ⚠ **`BottlenecksPanel` itself holds NO capability read**, which is what keeps its
+- ⚠ **`BottlenecksPanel` holds NO gate of its own**, which is what keeps its
   "Measuring…" / "Could not load this workspace's flow." branch a two-state question about the
-  REQUEST rather than a paywall it has to render. `useFlowFindings` gates its own `enabled`
+  REQUEST. `useFlowFindings` gates its own `enabled`
   (unconditionally — the hook has one mount and the query POLLS, so a disabled query also stops the
   five-minute timer).
 - **The panel is two halves, WORKING hours above and CLOCK hours below** (docs/BOTTLENECKS.md), and
@@ -2456,8 +2263,7 @@ convention this file has to remember.
   the lightness band.
 - ⚠ **Every sentence is still the server's.** The panel adds LABELLED FIGURES ("took more than a
   working day"), never a composed claim. The one exception is `FlowPointersPanel`, which is a
-  model's text and is styled apart on the `--ai-*` tokens with the sparkle; its hook
-  (`useFlowPointers`) ANDs `periodReports` into `enabled`, the GET never generates, and every mount
+  model's text and is styled apart on the `--ai-*` tokens with the sparkle; it shows while `me.ai.enabled`, the GET never generates, and every mount
   of one scope shares the `['flow-pointers-generate', ws, days]` mutation key.
 - ⚠ **Working-hour figures never print in days** (`formatWorkHours`): "2d" reads as calendar days.
 - **Settings → Workspace → "Working hours and budgets"** (`FlowSettingsSection`, CORE, above the
@@ -2482,8 +2288,8 @@ answering the question the workspace-wide tiles cannot: *which* repository.
 
 **ONE REPORTING WINDOW FOR THE WHOLE SECTION.** Every Reports figure is tied to the workspace's
 reporting window — this sprint so far when it has a sprint cadence, else the trailing 7/14 days —
-resolved ONCE per request on the server (core `db/reporting-window.ts`, asking the plugin's
-`resolveComparisonWindow`; trailing 14 days in OSS) and echoed as `window` on
+resolved ONCE per request on the server (core `db/reporting-window.ts`, asking the platform's
+`resolveComparisonWindow`) and echoed as `window` on
 `/api/workspace-metrics`. The windowed tiles sit under a heading naming it ("This sprint so far" /
 "Last 14 days"); **Open pull requests** and **Red checks now** are SNAPSHOTS and sit apart under
 **"Right now"**; the trend band is labelled **"Last 12 weeks"**. Those two groups are the labelled
@@ -2500,9 +2306,8 @@ Both are horizontal ROW LISTS drawn by `components/charts/RepoRows.tsx` (a `<tab
 repository name written out in full on the left, a stacked bar per measure, every figure printed.
 
 - ⚠ **THEY MOUNT IN `WorkspaceFlowMetrics`, NEVER INSIDE `WorkspaceMetricsPanel`.** That panel has
-  TWO mounts — this one, and `RepoInsightsPanel` for a SINGLE repo behind the Pro
-  `workspaceInsights` gate. A per-repository comparison there degenerates to one row, and would
-  appear only for paying accounts, on the one screen where it answers nothing.
+  TWO mounts — this one, and `RepoInsightsPanel` for a SINGLE repo. A per-repository comparison
+  there degenerates to one row, on the one screen where it answers nothing.
 - ⚠ **TWO COLUMNS, TWO SCALES, TWO ORIGINS — NEVER ONE BLENDED SCORE.** `RepoRows` computes one
   maximum PER COLUMN and divides by it, so a drawn bar length is a ratio *inside* one column and
   never a number the reader compares across the two. That division is NOT the banned normalised
@@ -2540,8 +2345,7 @@ repository name written out in full on the left, a stacked bar per measure, ever
     were never sized, beside six neighbours with none. `RepoRows`' `noteFor` prints **"lines cover
     43 of 45 PRs"** under that repository's name. The aggregate sentence stays the COUNT ("2 pull
     requests have no recorded size"); it never says where they are, which is what the row is for.
-- ⚠ **THE REACH CARD IS FREE, AND ITS LEVEL COMES FROM THE ONE RESOLVER.** No `ProGate`, no
-  capability read, no 402. The server sends SIGNALS per merged PR (`blast`, `codeLoc`,
+- ⚠ **THE REACH CARD'S LEVEL COMES FROM THE ONE RESOLVER.** The server sends SIGNALS per merged PR (`blast`, `codeLoc`,
   `codeLocIsLowerBound` — the open-PR rows' folds, `db/merged-reach.ts`), never a level, and
   `foldWorkspaceReach` calls `blastRadius()` — the same function the chip calls, with the same
   config — so a bar and a chip can never disagree, and the Settings sensitivity dial repaints it
@@ -2795,7 +2599,7 @@ Dependencies (plus My turn for a direct summons); the server contract is [BACKEN
   entry.
 - **Removed with the cross-kind head**: `doNextIds`, the "already in Do next" chip, the header "My turn"
   pill (the tab replaces it), `AttentionIsolationBanner` (the selected tab and chip say the same
-  thing on the board itself) and the spread/superseded explanations. The Pro plan still picks its
+  thing on the board itself) and the spread/superseded explanations. The work plan still picks its
   rows across kinds; its headline and `parked` line sit above the tabs and each `why` lands on its
   card in whichever tab — `PendingCard` reads it from `PendingBoardContext` for EVERY kind (before,
   only three kinds were passed a `why`, so most narrated rows never showed theirs).
@@ -2937,7 +2741,7 @@ Every Pending card, on all seven tabs, reads top to bottom in one order, everyth
    sha) · on <PR title> (a button → Overview) · `repo#N` (org dropped when every card on the board
    shares it) · ↗ · ⓘ. Inside My turn "Your turn" is NOT printed (the tab says it); "In your repos"
    and the neutral label stay, and an ABSENT `relevance` is neutral.
-3. **The Pro `why` line** (model prose, labelled apart), directly under it.
+3. **The work plan's `why` line** (model prose, labelled apart, only while `me.ai.enabled`), directly under it.
 4. **The event's own content** — the attributed reply (only when the heading's quote was cut), up
    to 3 pushed commits, the failing checks the heading did not name, suggested reviewers, the
    advisory, a thread's opening comment (`firstComment`), the trunk card's "Last landed: #354 … by
@@ -3293,7 +3097,7 @@ phrase it two ways.
   prose stays ON THE WIRE — it is the fallback for a client that does not know the phase — and is
   simply not drawn beneath its own restatement.
 
-## The story view (the ticket tab, `kind: 'ticket'`, CORE/free)
+## The story view (the ticket tab, `kind: 'ticket'`, CORE)
 
 ONE ticket, Open PRs style: `Ticket/StoryViewBody.tsx` renders the SAME ticket stack the Open PRs board
 draws — `OpenPrsCards` with `story={{ticket, merged}}` (`storyStack`, `lib/openPrsStacks.ts`) — never a
@@ -3397,7 +3201,7 @@ docs" ([docs/REFERENCE-DOCS.md](REFERENCE-DOCS.md) § Check a story against the 
   `components/DocReferences.tsx`): plain click ⇒ `openDocsSection(ref.workspaceId, path, anchor)`, modified
   click ⇒ the `docsDeepLink` href, with the quote as the same italic blockquote beneath. Never a raw href.
 
-## The merge-conflict resolver (`components/conflicts/`, CORE/free, BOTH MODES)
+## The merge-conflict resolver (`components/conflicts/`, CORE)
 
 The three-pane overlay behind **Resolve conflicts**. What it is, what the wand does and how it
 lands: [docs/MERGE-CI-TRUNK.md](MERGE-CI-TRUNK.md) § Resolving conflicts in the app. The SPA
@@ -3552,12 +3356,10 @@ landmines:
   would take both sides of the region being edited and Enter would leave for the commit step.
   `resolverControls.test.ts` pins the guard AND its position. ⚠ **An edited region's centre is
   green, both sides paint NOTHING and it draws NO ribbon** — the text came from neither pane — and
-  the strip word `Your text` is what says so. Editing is CORE and free; `unchanged` context is
+  the strip word `Your text` is what says so. Editing is CORE; `unchanged` context is
   read-only and the server refuses it.
-- ⚠ **"Ask Claude" is ABSENT, not locked, when unentitled.** The six visible-but-locked surfaces are
-  an ENUMERATED exception in `components/ProGate.tsx` and a seventh needs its own written argument
-  there. This is one paid control inside a screen already doing its whole job for a free reader; a
-  lock would advertise into a working feature.
+- ⚠ **"Ask Claude" is ABSENT, not disabled, while AI is off.** The resolver does its whole job
+  without it.
 - ⚠ **AN UNSUPPORTED FILE IS LISTED AND DISABLED, NEVER HIDDEN** (`FileMenu`) — it is exactly why
   the PR stays conflicted after a commit, and hiding it leaves nothing on screen to explain that.
   No "partly decided" ring either: a part-decided file says `1 of 3 decided` in words, which is also
@@ -3616,25 +3418,31 @@ server's 30-minute TTL is still the backstop.
 
 `components/settings/SettingsModal.tsx`. Every GLOBAL section first, then ONE `Workspace · <name>`
 heading and every workspace-scoped section beneath it. Before this the two grains were interleaved
-— an account key, cloud account sections, a per-workspace cadence, an account-wide bot toggle, two
+— an account key, account sections, a per-workspace cadence, an account-wide bot toggle, two
 more per-workspace sections — and the only thing announcing a section's grain was each
 workspace-scoped one appending `— acme-web` to its own title, which said nothing about the ones
 that carried no suffix.
 
 | # | Section | Grain | Gate |
 |---|---|---|---|
-| 1 | `GithubAppInstallSection` | global | `isCloud` (+ self-gates on the App provider) |
-| 2 | `BenchmarkConsentSection` | global | `isCloud` |
-| 3 | `LargePrThresholdSection` | global | none — both modes, every tier |
-| 4 | `BlastRadiusSection` | global | none — both modes, every tier |
-| 5 | `MyTurnSection` (Settings → My Turn) | global (per ACCOUNT) | none — CORE/free, both modes, every tier |
-| 6 | `YourDataSection` | global | `isCloud` |
+| 1 | `LargePrThresholdSection` | global | none |
+| 2 | `BlastRadiusSection` | global | none |
+| 3 | `MyTurnSection` (Settings → My Turn) | global (per ACCOUNT) | none |
+| 4 | `BotScoringSection` (the local scorer's one-time download) | global | renders nothing under `LIMN_ML_DISABLED` |
 | — | **`Workspace · <name>`** | — | none — the scope resolving is the only gate |
-| 7 | `PendingMuteSection` | workspace | none — CORE/free, both modes, every tier |
-| 8 | `FlowSettingsSection` (working hours and budgets) | workspace | none — CORE/free, both modes, every tier |
-| 9 | `SprintSection` (cadence + comparison window) | workspace | `caps.workspaceInsights` + `proReady` |
-| 10 | `SlackSettings` → `SlackSection` (schedule, the bot block, the two event switches) | workspace | VISIBLE-BUT-LOCKED: `ProLockPanel` without `caps.slackDigest`; the form on `caps.slackDigest` + `proReady`. The "Claude review ran" switch shows only with `me.ai.enabled` |
-| 9b | `IssueLinksSection` (the issue tracker + Jira API access) | workspace | none — CORE/free, both modes, every tier (apiVersion 23); renders above the pro-settings gate, after `FlowSettingsSection`. The Jira API access block shows whenever the SAVED tracker is Jira with a base URL — no longer behind `me.ai.enabled` (the token feeds free surfaces) |
+| 5 | `PendingMuteSection` | workspace | none |
+| 6 | `FlowSettingsSection` (working hours and budgets) | workspace | none |
+| 7 | `IssueLinksSection` (the issue tracker + Jira API access) | workspace | none. The Jira API access block shows whenever the SAVED tracker is Jira with a base URL — not behind `me.ai.enabled` (the token feeds non-AI surfaces) |
+| 8 | `SonarSection` | workspace | none |
+| 9 | `DependencyAutoMergeSection` | workspace | none |
+| 10 | `SprintSection` (cadence + comparison window) | workspace | none |
+| 11 | `SlackSection` (schedule, the bot block, the two event switches) | workspace | none. The "Claude review ran" switch shows only with `me.ai.enabled` |
+| 12 | `AutoReviewSection` | workspace | `me.ai.enabled` |
+| 13 | `ReferenceDocsSection` | workspace | `me.ai.enabled` |
+
+(`GithubAppInstallSection`, `BenchmarkConsentSection` and `YourDataSection` were removed
+2026-10-22 with the hosted mode; so was every `caps.*` / `proReady` gate — the modal opens with no
+`/api/pro/settings` wait.)
 
 - ⚠ **THE HEADING IS THE NAMING RULE NOW, AND IT IS STILL LOAD-BEARING.** There is no workspace
   picker in Settings — the rail's selection is the scope — so a screen that does not say which team
@@ -3645,36 +3453,16 @@ that carried no suffix.
   heading names its workspace itself.
 - ⚠ **A CONTROL AT THE ACCOUNT GRAIN GOES ABOVE THE HEADING, WITH ITS OWN SAVE.** One Save spanning
   two grains is how an edit meant for one team travels to every team. The comparison-window mode was
-  the last such control and it is gone from the account grain (plugin 0032) — so `SprintSection` has
+  the last such control and it is gone from the account grain (platform 0032) — so `SprintSection` has
   one Save because it has one grain, not because mixing became safe.
-- ⚠ **THE GLOBAL HALF SITS ABOVE THE `pro_settings` LOADING GATE AND MUST STAY THERE.** Every
-  section in it reads `/api/me` or `/api/auth/providers`, never `pro_settings` (which 404s with no
-  plugin), so an OSS install still gets its large-PR threshold and a cloud account still gets
-  export/delete when the Pro fetch fails outright. That fetch is now PURELY a gate — no section
-  reads account `ProSettings` any more — and `useProSettings` is enabled only when the Workspace
-  half has something in it.
 - ⚠ **`workspaceId === null` HOLDS BACK THE WHOLE HALF, IN ONE PLACE.** Three sections each
   rendering their own `ScopePendingSection` under a heading that cannot yet name anybody reads as
   three broken sections rather than one unfinished request. Each section KEEPS its own guard — that
   one sits at the point of the WRITE, where a PUT with no `?workspace=` would be answered by the
   account's Default.
-- ⚠ **THE WORKSPACE HALF'S GATE IS SPLIT, AND THE SPLIT WAS A CORRECTNESS FIX RATHER THAN A LAYOUT
-  CHANGE.** It used to be ONE `useHasProWorkspaceSettings()` gate (three PAID caps) with a
-  `proReady` wait inside it, so a FREE per-workspace control could not be mounted here at all: with
-  no plugin the heading never rendered — which is the public `npx limn-review` release — and with
-  a plugin present it would still have waited on `/api/pro/settings`, a request it does not read.
-  That is the same defect the global half is built to avoid, one grain over. Now the HEADING renders
-  on the scope alone (the free `PendingMuteSection` is what makes it never empty, exactly as
-  `LargePrThresholdSection` is for the global half), and `proReady` wraps ONLY the paid sections,
-  with the "Workspace settings unavailable." line speaking for them alone. **A free workspace-scoped
-  section must never be placed below `proReady`.**
-- ⚠ **TWO GATE FUNCTIONS, DELIBERATELY.** `useHasProSettings` stays wide (it gates the avatar-menu
-  entry and `BotRoiPanel`'s legacy-cost fetch); `useHasProWorkspaceSettings` is the PRO SECTION
-  INVENTORY — the list where every cap must still own a section — and gates the `/api/pro/settings`
-  FETCH plus the paid sections. It no longer gates the heading, and must not again. Narrowing the
-  first would take the Settings entry away from accounts that still have the global half.
+- ⚠ **The HEADING renders on the scope alone** and no section waits on a request it does not read.
 
-### `MyTurnSection` — Settings → My Turn (CORE, free)
+### `MyTurnSection` — Settings → My Turn
 
 What counts as your turn, the order My turn lists the types in, and the Do next weights every
 Pending tab ranks by. ACCOUNT-grained (one account is one reader, every workspace), carried RAW by
@@ -3720,7 +3508,7 @@ two neighbours. One Save for the section. The server contract is [BACKEND.md](BA
   `configKey` rather than announcing the backlog of a type just switched on (§ Per-workspace "My
   Turn" below).
 
-### `PendingMuteSection` — the Pending mute (CORE, free)
+### `PendingMuteSection` — the Pending mute (CORE)
 
 One workspace switch plus a checkbox list of that workspace's repositories, one Save.
 `PUT /api/workspaces/:id/pending-mute`; current state is read off the `Workspace` row
@@ -3832,8 +3620,7 @@ The seven syntax colours that used to live here as `--mr-hl-*` inside `.mr-code`
   nothing here" are different facts). On screen it ringed an untaken block in red beside the green
   one that won. `codeTokens.test.ts` asserts no such SELECTOR exists — it matches a rule, not a
   mention, so the reasoning can stay written down in `index.css` beside the deletion.
-- ⚠ **`--mr-conflict` IS NOT `--ai-signal`.** Vermilion is the AI surface's accent and the Pro badge
-  draws in it; a merge conflict is not an AI marker, and borrowing that hue would make every
+- ⚠ **`--mr-conflict` IS NOT `--ai-signal`.** Vermilion is the AI surface's accent; a merge conflict is not an AI marker, and borrowing that hue would make every
   contested hunk look like something a model produced.
 - ⚠ **`test/textContrast.test.ts` CANNOT SEE ANY OF THEM.** That scanner resolves Tailwind utilities
   with a numeric shade (`text-gray-400`); a custom property matches nothing it looks for. The guard
@@ -3914,8 +3701,7 @@ need a className branch, not a var in the hex table.
 Bot comments carry a severity/category badge, threads a worst-severity rollup, the Threads tab a
 severity filter, and the Bots ROI tab a "What the bots are flagging" block. All of it reads ONE
 per-PR query (`['ml-labels', prId]`, `staleTime: Infinity`) — the badge never fetches, and a
-target with no label renders nothing. Gated on `MeResponse.mlSeverity` (a TOP-LEVEL field, not a
-`pro` capability). `threadSeverityFilter` is a global store field and carries the same
+target with no label renders nothing. Gated on `MeResponse.mlSeverity` (a TOP-LEVEL field). `threadSeverityFilter` is a global store field and carries the same
 `selectedPrId === prId` guard as `threadStateFilter`. Detail: [ML-SEVERITY.md](ML-SEVERITY.md).
 
 ## The Feed: people OR bots, one Feed, icons on the cards
@@ -4262,7 +4048,7 @@ tied to me" (I wrote it, it was requested of me, someone replied to my thread, I
 and "this happened in a repo I maintain". A new PR by someone else in your repo is **orbit, not
 ownership** — reporting the two as one figure is what made the banner read as a nag. `relevance` is
 that boolean un-collapsed: `'direct'` · `'maintained'` · `'none'`. Wire contract:
-[PRO-PLUGIN-AND-ACTIVITY.md](PRO-PLUGIN-AND-ACTIVITY.md). On the client:
+[PLATFORM.md](PLATFORM.md). On the client:
 
 - **THREE CARD LABELS, from `cardKindLabel` (`AttentionCards.tsx`)** — `'direct'` → "Your turn",
   `'maintained'` → "In your repos", `'none'` → the neutral `KIND_LABEL.my_turn` ("Review or
@@ -4295,7 +4081,7 @@ that boolean un-collapsed: `'direct'` · `'maintained'` · `'none'`. Wire contra
 A `ci_failing` card is a red build the viewer is on the hook for: `arm: 'your_pr'` (an open PR they
 authored whose head CI is red) or `arm: 'trunk'` (the default branch of a repo they MAINTAIN is red
 now). Server contract + the two things it deliberately does NOT compute:
-[PRO-PLUGIN-AND-ACTIVITY.md](PRO-PLUGIN-AND-ACTIVITY.md) § "The `ci_failing` card". On the client:
+[PLATFORM.md](PLATFORM.md) § "The `ci_failing` card". On the client:
 
 - **The KIND label stays neutral** (`KIND_LABEL.ci_failing = 'CI failing'` — the isolation banner
   reads it); the OWNERSHIP claim is per card, from `arm`, in `cardKindLabel` — the same split
@@ -4570,7 +4356,7 @@ viewBox, `currentColor`, a `size` prop, `title` as the a11y switch — absent me
 Each of these is a decision, not an oversight, and "finishing the migration" would break something:
 
 - **Regex matchers and test fixtures.** `sync/review-fingerprint.ts`,
-  `sync/bot-resolution-markers.ts`, `packages/pro/src/bot-themes/build.ts` and `db/queries.ts`
+  `sync/bot-resolution-markers.ts`, `platform/bot-themes/build.ts` and `db/queries.ts`
   (~9195, use `grep -a`) match ⚠️ 🛠️ 🧹 💡 ✅ **that review vendors write into their own comment
   bodies**. Changing one silently breaks bot classification and no test fails loudly.
 - **`Activity/periodReportMarkdown.ts`** — a markdown export people paste elsewhere. It has no DOM,
@@ -4674,12 +4460,12 @@ project keys with SonarCloud's `<owner>_<repo>` as the placeholder, and a click-
 that asks for a save first. Contract: [SONARCLOUD.md](SONARCLOUD.md).
 
 
-## Activity → Docs (the reference library; local only)
+## Activity → Docs (the reference library)
 
 A rail line under Pending, `activityRepoId: 'docs'` / `?activityRepo=docs` (parsed AND emitted —
 pinned by test/docsRailUrl.test.ts). The rail ENTRY renders only on `me.ai.enabled`
 (`useAiCapabilities`); a `?activityRepo=docs` link opened where AI is off still selects the pane, which
-says in one line why it is empty. FREE, no ProBadge. Contract: [REFERENCE-DOCS.md](REFERENCE-DOCS.md)
+says in one line why it is empty. Contract: [REFERENCE-DOCS.md](REFERENCE-DOCS.md)
 § The SPA.
 
 `Activity/DocsView.tsx` (library column + layout), `DocsViewer.tsx` (one library file), `DocsChat.tsx`
@@ -4762,3 +4548,32 @@ the server header (the leading H1 + the blockquote after it), and asks `lib/docQ
 - Scrolls the viewer's OWN box (the passage a third of the way down; `.md-table-scroll` sideways too) —
   never `scrollIntoView`. Not found ⇒ the anchor as before, plus the strip's not-found line.
 - ⚠ No RegExp over the document's text: the fold is a character walk, the search `indexOf`.
+
+## The static demo runtime (`src/demo/`)
+
+The website's `/demo/` is THIS SPA, built from a different entry with every `/api/*` request
+answered in the browser from a recording. End to end (seed → record → build → serve):
+[DEMO.md](DEMO.md); the format and matching rules: `apps/frontend/src/demo/README.md`.
+
+- `vite build --mode demo` (`pnpm --filter @pierre-review/frontend build:demo`, or `dev:demo` on the
+  Vite dev server) — `vite.config.ts` `limnDemo()` sets `base: '/demo/'`, writes `dist-demo/`,
+  defines `import.meta.env.VITE_LIMN_DEMO = '1'` and rewrites `index.html` to load
+  `src/demo/entry.ts` instead of `src/main.tsx`. ⚠ **The normal build is byte-for-byte unchanged**:
+  the demo is a separate entry and a plugin enabled only in `--mode demo`, so no app module may
+  import from `src/demo/`, and no app module needs to know it is in a demo.
+- `entry.ts` loads the recording (`virtual:limn-demo-recording` → `data/recording.json` when it
+  exists, else `data/sample-recording.json`), wraps `window.fetch` (`install.ts`), CLEARS the
+  persisted query cache (`pierre-query-cache` in IndexedDB — a reload must start from the recording
+  again), mounts the notice bar ("Demo: sample data, nothing is sent." — `banner.ts`, `demo.css`) and
+  only then imports `../main.tsx`.
+- ⚠ **The SPA's own URLs must follow `import.meta.env.BASE_URL`**, never a literal `/app/` — that
+  is what lets routing work under `/demo/`.
+- ⚠ **No inline script, no `eval`**: the site's demo CSP (`apps/site/src/security.ts`) holds the
+  demo to the same `script-src 'self'` as the app.
+- Writes are simulated into an in-memory overlay (`overlay.ts`, `routes.ts`); agentic starts replay a
+  recorded finished run of the same kind (`runs.ts`, `sse.ts`). `window.__limnDemo.log` lists every
+  request and which stage answered it.
+- ⚠ **A route the SPA calls at boot needs a recorded answer or a `GET_FALLBACKS` entry**, exactly
+  like the e2e fixtures (`e2e/mock-api.ts`, from which the sample recording is generated): an
+  unrecorded GET answers `404 NotInDemo`, and an unguarded `.map` over a missing array blanks the app.
+
