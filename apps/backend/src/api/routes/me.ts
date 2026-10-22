@@ -147,7 +147,7 @@ const myTurnSettingsSchema = {
 /**
  * `MeResponse.ai`. `enabled` is the ONE agentic switch (config.aiEnabled: not LIMN_AI_DISABLED) — the same value that decides whether `registerAgenticRoutes` registers
  * anything. `runtime` is the one-time SDK download (ai/runtime.ts). `auth` is `detectClaudeAuth`'s
- * HEURISTIC (a `~/.claude` directory counts): it decides only whether a Run button or the one
+ * disk check (a credentials file or a signed-in `oauthAccount`, never a bare `~/.claude`): it decides only whether a Run button or the one
  * "Sign in to Claude Code or set ANTHROPIC_API_KEY" line shows, never whether the feature is
  * visible — the run itself is the authoritative check. Disabled ⇒ the other fields are inert.
  */

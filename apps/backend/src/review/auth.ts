@@ -2,7 +2,8 @@ import { hasClaudeLogin, resolveAiCredential } from '../ai/credentials.js';
 
 // The pre-flight view of the ONE credential ladder (ai/credentials.ts): the reader's Claude Code
 // login first, else ANTHROPIC_API_KEY (or the key first under LIMN_AI_USE_API_KEY=true). Detection
-// is intentionally fuzzy — the login is a heuristic (credential files on disk). If it guesses
+// reads the disk (a credentials file, or `oauthAccount` in the Claude config — never a bare
+// `~/.claude`, which any run creates). If it guesses
 // wrong, the first real call surfaces the authoritative auth error; this is only a friendly
 // pre-flight, not a hard gate.
 

@@ -16,9 +16,10 @@
 // LIMN_AI_DISABLED=true (config.aiEnabled) turns every model call off; that switch is checked by
 // the callers, not here, because this module answers only "which credential", never "may we".
 //
-// Nothing is stored. Detection of the login is a heuristic (credential files on disk); a wrong
+// Nothing is stored. Detection of the login reads the disk (a credentials file, or `oauthAccount`
+// recorded in the Claude config — see hasClaudeLogin); a wrong
 // guess surfaces as the SDK's own auth error on the first real call.
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -41,18 +42,46 @@ export function prefersApiKey(env: NodeJS.ProcessEnv = process.env): boolean {
 }
 
 /**
+ * Does this Claude Code config file record a signed-in account? The CLI writes a non-empty
+ * `oauthAccount` object on sign-in and removes it on logout — on macOS, where the token itself is
+ * in the Keychain, it is the only on-disk signal. A missing, unreadable or unparseable file is no.
+ */
+function configRecordsLogin(path: string): boolean {
+  try {
+    if (!existsSync(path)) return false;
+    const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'));
+    if (!parsed || typeof parsed !== 'object') return false;
+    const account = (parsed as { oauthAccount?: unknown }).oauthAccount;
+    return !!account && typeof account === 'object' && Object.keys(account).length > 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Is a Claude Code login available (an OAuth token, or a logged-in session on disk)? Deliberately
  * ignores API keys: it answers "can this run on the reader's own Claude, not a meter?".
+ *
+ * ⚠ A BARE `~/.claude` DIRECTORY OR `~/.claude.json` IS NOT A LOGIN. Merely running Claude Code —
+ * including the Agent SDK on the API-key route — creates both, so counting them moved a key-only
+ * reader onto the login route after their first run and stripped their key from every later one.
+ * Only a credentials file, CLAUDE_CODE_OAUTH_TOKEN, or a config recording `oauthAccount` counts.
+ * CLAUDE_CONFIG_DIR (which the SDK subprocess inherits) is checked before the defaults.
  */
-export function hasClaudeLogin(env: NodeJS.ProcessEnv = process.env): boolean {
-  if (env.CLAUDE_CODE_OAUTH_TOKEN) return true;
-  const home = homedir();
-  return [
+export function hasClaudeLogin(
+  env: NodeJS.ProcessEnv = process.env,
+  home: string = homedir(),
+): boolean {
+  if (env.CLAUDE_CODE_OAUTH_TOKEN?.trim()) return true;
+  const cfg = env.CLAUDE_CONFIG_DIR?.trim();
+  const credentialFiles = [
+    ...(cfg ? [join(cfg, '.credentials.json')] : []),
     join(home, '.claude', '.credentials.json'),
     join(home, '.config', 'claude', '.credentials.json'),
-    join(home, '.claude.json'),
-    join(home, '.claude'),
-  ].some((path) => existsSync(path));
+  ];
+  if (credentialFiles.some((path) => existsSync(path))) return true;
+  const configFiles = [...(cfg ? [join(cfg, '.claude.json')] : []), join(home, '.claude.json')];
+  return configFiles.some(configRecordsLogin);
 }
 
 /** Which credential the next model call uses. Read at call time, so an env change takes effect. */
