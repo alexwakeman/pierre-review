@@ -956,7 +956,7 @@ export function PinnedTabsBar(): JSX.Element {
         title="Activity — per-repo triage console"
       />
       {/* This Sprint — the tracker's current sprint (Theme · Critical path · People · Merged so far).
-          A fixed tab since it left the Activity rail; FREE on every tier. */}
+          A fixed tab since it left the Activity rail. */}
       <FixedChip
         active={activeTab === 'sprint'}
         onClick={showSprint}

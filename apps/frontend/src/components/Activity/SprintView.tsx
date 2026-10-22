@@ -330,7 +330,6 @@ export function sprintAiPass(
 export function ticketChecksNote(c: SprintRefreshTicketChecks | undefined): string | null {
   if (c == null) return null;
   if (c.skipped === 'no_credential') return 'Ticket checks need Claude set up first.';
-  if (c.skipped === 'credits') return 'No credits left for ticket checks.';
   if (c.started <= 0) return null;
   return c.started === 1 ? 'Checking 1 ticket against its pull requests.' : `Checking ${c.started} tickets against their pull requests.`;
 }

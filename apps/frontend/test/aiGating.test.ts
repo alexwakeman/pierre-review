@@ -9,8 +9,8 @@ import {
 } from '../src/lib/aiCapabilities.js';
 import { formatUsd } from '../src/lib/ui.js';
 
-// The agentic AI surfaces (Claude Review, review chat, review memory, AI Fix) are FREE and
-// local-only. They gate on the TOP-LEVEL `me.ai`, never on a Pro capability.
+// The agentic AI surfaces (Claude Review, review chat, review memory, AI Fix) are local-only.
+// They gate on the TOP-LEVEL `me.ai`.
 
 function me(ai: MeResponse['ai'] | undefined, deploymentMode: 'local' | 'cloud' = 'local'): MeResponse {
   return { deploymentMode, ai } as unknown as MeResponse;
@@ -83,14 +83,14 @@ describe('the wiring', () => {
   walk(root);
   const read = (p: string): string => readFileSync(p, 'utf8');
 
-  it('no SPA file reads an agentic flag off the Pro capabilities', () => {
+  it('no SPA file gates on a paid capability, a lock pane or the AI-credit meter', () => {
+    // Nothing in Limn is paid: no capability read, no `me.pro`, no lock pane, no usage meter.
     for (const f of files) {
       const s = read(f);
-      expect(s, f).not.toMatch(/useProCapabilities\(\)\.(aiFix|claudeReview|aiAnalysis|reviewMemory)\b/);
       expect(s, f).not.toMatch(
-        /const \{[^}]*\b(aiFix|claudeReview|aiAnalysis|reviewMemory)\b[^}]*\} = useProCapabilities\(\)/,
+        /useProCapabilities|useProGateState|ProLockPanel|ProBadge|ProGate\.js|useAiUsage|TrackUsage/,
       );
-      expect(s, f).not.toMatch(/caps\.(aiFix|claudeReview|aiAnalysis|reviewMemory)\b/);
+      expect(s, f).not.toMatch(/\.data\?\.pro\b|\bme\??\.pro\b/);
     }
   });
 
@@ -112,7 +112,7 @@ describe('the wiring', () => {
     expect(read(join(root, 'components', 'ClaudeReviewChat.tsx'))).toMatch(/<AiRunGate>/);
   });
 
-  it('the Pro CI-failure card is gone: Claude Review owns why CI failed', () => {
+  it('the CI-failure card is gone: Claude Review owns why CI failed', () => {
     expect(existsSync(join(root, 'components', 'CiAnalysisCard.tsx'))).toBe(false);
     expect(read(join(root, 'components', 'ChecksTab.tsx'))).not.toMatch(/CiAnalysisCard/);
   });

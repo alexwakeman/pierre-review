@@ -20,7 +20,6 @@ import type {
   CostModel,
 } from '@pierre-review/shared';
 import type { BotsInnerTab } from '../../store/filters.js';
-import type { ProGateState } from '../ProGate.js';
 import { BOT_VENDOR_META } from '../../lib/ui.js';
 
 // The render model for **Bots → Benchmark** — "how does our review bot compare with the same
@@ -63,52 +62,14 @@ import { BOT_VENDOR_META } from '../../lib/ui.js';
  * `setBotsInnerTab()` would permanently forget the reader's choice for the mount that DOES render
  * it — the rule `feedInnerTab` / `insightsTab` carry the same comment against.
  *
- * ⚠ `'benchmark'` IS CAPABILITY-GATED AND STILL RETURNS ITSELF. It is VISIBLE-BUT-LOCKED, so an
- * unentitled `?botsTab=benchmark` — which ships in bookmarks and in history entries Back replays —
- * must land on the tab the URL named and render the LOCKED pane there. Redirecting it to `roi`
- * would drop the reader on a screen that explains nothing. Only the members that are not LISTED
- * without their capability degrade (two postures in one strip, both deliberate).
- *
- * ⚠ THE SECOND OPTION IS A SECOND CAPABILITY, NOT A SECOND READING OF THE FIRST. `'themes'` is
- * gated on `activityDigest` (the AI-summary tier) while `'advisor'` is `botAdvisor`, and neither
- * implies the other — an account can hold either alone. They share only the POSTURE: listed when
- * entitled, absent otherwise, so a raw value naming an unlisted tab has no tab to land on and must
- * degrade rather than leave the strip with nothing selected.
- *
- * ⚠ `'themes'` DOES NOT ALSO GATE ON THE MOUNT the way `'advisor'` does. The advisor is
- * workspace-grain and is only offered on the cross-repo rail (`repoId == null`); the themes report
- * is genuinely per-repo — the client keys the narrowed report into its own cache slot and the
- * plugin's `scope_key` carries the same `|r:` suffix — so the per-repo console gets its own real
- * report rather than the workspace's, and gating it on the rail would delete a working surface.
+ * Only `'advisor'` can degrade: it is workspace-grain and offered on the cross-repo rail alone
+ * (`repoId == null`), so a raw value naming it on the per-repo console has no tab to land on.
+ * Every other member — `'themes'` and `'benchmark'` included, which render on BOTH mounts — returns
+ * itself.
  */
-export function effectiveBotsTab(
-  raw: BotsInnerTab,
-  opts: { showAdvisor: boolean; showThemes: boolean },
-): BotsInnerTab {
+export function effectiveBotsTab(raw: BotsInnerTab, opts: { showAdvisor: boolean }): BotsInnerTab {
   if (raw === 'advisor' && !opts.showAdvisor) return 'roi';
-  if (raw === 'themes' && !opts.showThemes) return 'roi';
   return raw;
-}
-
-/** What the Benchmark tab renders. */
-export type BenchmarkBody = 'blank' | 'locked' | 'panel';
-
-/**
- * The visible-but-locked gate, as a pure decision the tab body switches on.
- *
- * ⚠ `'pending'` RENDERS NOTHING, AND THAT IS THE POINT. `useProCapabilities()` reads all-false
- * until `/api/me` resolves, so the obvious `!botDepth ? lock : panel` paints "See what Pro
- * includes" for one frame on every cold load AT AN ACCOUNT THAT PAYS — and an unresolved `/api/me`
- * is `'pending'` whatever the reason, in flight OR errored, because "you have not paid" is a claim
- * a client is not entitled to make off a 502.
- *
- * ⚠ THIS DECIDES ONLY WHAT IS SEEN. A client gate is not a monetisation gate: the route 402s and
- * `useBotBenchmarkPlacement` ANDs the same capability into its own `enabled`, so an unentitled
- * mount asks for nothing rather than polling a 402.
- */
-export function benchmarkBodyFor(gate: ProGateState): BenchmarkBody {
-  if (gate === 'pending') return 'blank';
-  return gate === 'locked' ? 'locked' : 'panel';
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────────────────────

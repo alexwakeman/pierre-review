@@ -2,9 +2,8 @@ import { skipToken, useIsMutating, useMutation, useQuery, useQueryClient } from 
 import type { WorkPlanResponse } from '@pierre-review/shared';
 import { api, type WorkPlanRequestParams } from '../api/client.js';
 import { workspaceKey } from './useActivity.js';
-import { useProCapabilities } from './useTriage.js';
 
-// The Pro work plan — "what should I work on today" for ONE workspace. Modelled on
+// The work plan — "what should I work on today" for ONE workspace. Modelled on
 // `useSynthesis` because the seam is the same shape: a FREE GET (the deterministic worklist + any
 // stored narration + a `stale` probe, never generating) and a BILLED POST (the narration itself).
 //
@@ -18,10 +17,6 @@ import { useProCapabilities } from './useTriage.js';
 // can be mounted more than once across a tab switch, and a per-mount `isPending` resets the button
 // to "Plan my day" mid-run — inviting a second BILLED POST. `useWorkPlanGenerating` reads the
 // in-flight state off the shared mutation key via `useIsMutating`, and the card MUST use it.
-//
-// ⚠ NOTHING FETCHES WITHOUT THE `workPlan` CAPABILITY: in OSS the route does not exist, and on
-// free cloud it would answer `enabled: false` — either way the hook stays quiet and the card
-// renders the nudge (cloud) or nothing at all (local/OSS).
 
 /** The canonical client-side key segments for one work-plan scope. */
 export function workPlanKeySlots(workspaceId: number | null): (string | number)[] {
@@ -37,10 +32,9 @@ function requestParams(workspaceId: number): WorkPlanRequestParams {
 
 /**
  * The cached plan + the deterministic evidence behind it. FREE — the server never generates on
- * this path, so this query is safe to mount eagerly wherever the capability is on.
+ * this path, so this query is safe to mount eagerly.
  */
 export function useWorkPlan(workspaceId: number | null, enabled = true) {
-  const { workPlan } = useProCapabilities();
   return useQuery<WorkPlanResponse>({
     queryKey: ['work-plan', ...workPlanKeySlots(workspaceId)],
     // `skipToken`, not a bare `enabled`: it NARROWS workspaceId to a number, so a request the
@@ -48,7 +42,7 @@ export function useWorkPlan(workspaceId: number | null, enabled = true) {
     // (`workspaceId === null` means "not resolved yet" — nothing workspace-scoped may render or
     // fetch while it is null).
     queryFn: workspaceId == null ? skipToken : () => api.workPlan(requestParams(workspaceId)),
-    enabled: enabled && workPlan,
+    enabled,
     staleTime: 60_000,
     // ⚠ THE SAME CADENCE AS `useDailyBrief` AND `useAttentionCards`, DELIBERATELY. The plan's
     // entire claim is that it describes the same population as the board and the daily-brief
@@ -94,8 +88,6 @@ export function useGenerateWorkPlan(workspaceId: number | null) {
           ? { ...data, stale: prev.stale }
           : data,
       );
-      // A generation may have spent credits → refresh the meter and the out-of-credits gate.
-      void qc.invalidateQueries({ queryKey: ['ai-usage'] });
       // ⚠ AND RE-READ THE BOARD, so the head and the prose describe ONE fold.
       //
       // The narration joins a step to a card through `WorkPlanItem.cardId`, then INTERSECTS with
@@ -107,10 +99,9 @@ export function useGenerateWorkPlan(workspaceId: number | null) {
       // them — no misattribution, but no sentence either.
       //
       // Refetching the board here brings the two into phase, so the model's work is actually
-      // rendered. It is ONE extra `search`-tier read per user-initiated, billed generation.
-      // ⚠ It must stay an INVALIDATION, never a source of the board's ORDER: the head is served
-      // free by core `/api/attention`, and a board whose ranking depended on a Pro response would
-      // put the free product's ordering behind the paywall.
+      // rendered. It is ONE extra `search`-tier read per user-initiated generation.
+      // ⚠ It must stay an INVALIDATION, never a source of the board's ORDER: the head is served by
+      // core `/api/attention`, and the board's ranking must never depend on a model's answer.
       void qc.invalidateQueries({ queryKey: ['attention-cards'] });
     },
   });

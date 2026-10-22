@@ -9,7 +9,6 @@ import type {
 } from '@pierre-review/shared';
 import { useBotBehaviour } from '../../hooks/useBotTriage.js';
 import { useBotVolumeScatter } from '../../hooks/useBotVolume.js';
-import { useProCapabilities } from '../../hooks/useTriage.js';
 import { useFilters } from '../../store/filters.js';
 import { useBotColors } from '../../hooks/useBotColors.js';
 import {
@@ -44,8 +43,7 @@ import {
 // "Behaviour" inner tab (plan P1.1/C1, trimmed again by P1.2/C2): findings density,
 // PR-size-vs-volume, cross-bot overlap and "where bots work" — and NOTHING ELSE at workspace
 // grain. Rendered as a COLLAPSED-BY-DEFAULT "Workspace charts" section at the bottom of the ROI
-// (Measure) branch of BotsView, gated on the `botDepth` capability (absent — not upsold —
-// without it). Per-BOT depth (the old BotCard stack + that bot's severity/category slices) lives
+// (Measure) branch of BotsView. Per-BOT depth (the old BotCard stack + that bot's severity/category slices) lives
 // in the per-bot drill-down tab instead (BotDetailPanel, opened from the ROI table's "Depth →"
 // pill); the old workspace ML block's inflation charts became the ROI table's Inflation column —
 // where the HISTORY has since regrown a readable card of its own (`InflationHistoryChart`, in
@@ -383,7 +381,7 @@ function DensityTrendChart({
 // The workspace-grain ML block that used to live here (both severity mixes, the two inflation
 // charts, "Severity over time", "Categories per vendor", "Category activity over time") was CUT
 // by plan P1.2/C2: the inflation counts became the ROI table's Inflation column (its sparkline is
-// the `botDepth` history — and, since, an enlarged twin of that sparkline in the same panel's
+// the history — and, since, an enlarged twin of that sparkline in the same panel's
 // chart row), and the per-bot severity-over-time slice + category mix live on the per-bot depth
 // tab (BotDetailPanel). What survives here is exactly what that tab still imports:
 // `MlBotView` (the per-bot join shape), `MlSeverityTrendChart` (rendered there over a
@@ -935,22 +933,18 @@ function BotVolumeSizeChart({
 }
 
 // The collapsed-by-default "Workspace charts" section — the bottom of the ROI (Measure) branch
-// of BotsView. Gated on `botDepth`: without the capability it renders NOTHING (absent, not
-// upsold — the P0.2/P0.3 posture). Nothing is fetched until the section is opened.
-export function WorkspaceBotCharts({ repoId }: { repoId?: number } = {}): JSX.Element | null {
+// of BotsView. Nothing is fetched until the section is opened.
+export function WorkspaceBotCharts({ repoId }: { repoId?: number } = {}): JSX.Element {
   const [open, setOpen] = useState(false);
   const window = useFilters((s) => s.botAnalyticsWindow);
   const workspaceId = useFilters((s) => s.workspaceId);
   const repoScope = useMemo(() => (repoId != null ? [repoId] : null), [repoId]);
   const botColor = useBotColors(workspaceId);
-  const { botDepth } = useProCapabilities();
   // Fetch ONLY while the section is open — the default (collapsed) Bots view must not issue the
-  // whole-workspace behaviour request. `useBotBehaviour` additionally self-gates on botDepth.
+  // whole-workspace behaviour request.
   const { data, isLoading, isError } = useBotBehaviour(workspaceId, window, open, repoScope);
   const bots = data?.bots ?? [];
   const windowLabel = WINDOWS.find((w) => w.key === window)?.label ?? '';
-
-  if (!botDepth) return null;
 
   return (
     <div className="space-y-3" data-testid="workspace-bot-charts">

@@ -57,6 +57,8 @@ import type {
   StoryDocsAlignmentResponse,
   SprintGraphResponse,
   SprintGraphTokenResponse,
+  WorkspaceProSettings,
+  WorkspaceSlackTargetResponse,
 } from '@pierre-review/shared';
 // VALUES, not types — the fixtures quote the shipped default rather than re-typing 1500, and
 // build the Pending tabs from the shipped list rather than re-typing it.
@@ -284,11 +286,9 @@ const ME_RESPONSE: MeResponse = {
   largePrCodeLocThreshold: LARGE_PR_CODE_LOC_DEFAULT,
   largePrCodeLocThresholdIsDefault: true,
   blastRadius: null,
-  // Pro tier for e2e: every Pro AI feature stays off so the console renders
-  // without the AI panels. (Claude Review and AI Fix are free now and gate on `ai` above.)
-  // "My Turn" is CORE / free (not a Pro capability), so the Feed's isMyTurn cards/toggle render
-  // regardless of these flags. `workspaceInsights` (the
-  // former `teamInsights`) off keeps the Insights rail line hidden.
+  // ⚠ UNREAD BY THE SPA, which no longer reads `me.pro` or `me.aiUsage` (nothing is gated). They
+  // stay only while `MeResponse` still declares them; delete both keys when the shared type drops
+  // them.
   pro: {
     activityDigest: false,
     botAdvisor: false,
@@ -304,7 +304,6 @@ const ME_RESPONSE: MeResponse = {
   // No My Turn overrides — the product defaults, resolved by the SPA through the shared resolver.
   myTurnSettings: null,
   authNotices: [],
-  // AI balances (summary turns + agent credits). Unmetered/none for the e2e local tier.
   aiUsage: null,
 };
 
@@ -1187,7 +1186,26 @@ export async function installMockApi(page: Page): Promise<void> {
       if (path.endsWith('/api/ticket-merged-prs')) {
         return json(route, { workspaceId: WORKSPACE.id, tickets: [] } satisfies TicketMergedPrsResponse);
       }
-      // Pro endpoints — disabled in e2e (pro:{activityDigest:false}); harmless stub.
+      // Settings → Workspace renders the sprint grid and the Slack section unconditionally, so
+      // both reads get a real, typed answer rather than the generic stub below.
+      if (path.endsWith('/api/pro/settings/workspace')) {
+        return json(route, {
+          workspaceId: WORKSPACE.id,
+          cadenceDays: null,
+          startDate: null,
+          comparisonMode: 'rolling_14',
+        } satisfies WorkspaceProSettings);
+      }
+      if (path.endsWith('/api/pro/slack/target')) {
+        return json(route, {
+          workspaceId: WORKSPACE.id,
+          workspaceName: WORKSPACE.name,
+          target: null,
+          cap: 10,
+          configuredCount: 0,
+        } satisfies WorkspaceSlackTargetResponse);
+      }
+      // Every other `/api/pro/*` read: a harmless "switched off" stub.
       if (path.includes('/api/pro/')) {
         return json(route, { enabled: false, model: 'claude-haiku-5-5', generatedAt: iso(0) });
       }

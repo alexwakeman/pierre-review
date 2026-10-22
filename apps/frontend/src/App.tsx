@@ -86,7 +86,6 @@ export default function App(): JSX.Element {
   const settingsFocus = useSettingsModal((s) => s.focus);
   const openSettings = useSettingsModal((s) => s.openSettings);
   const closeSettings = useSettingsModal((s) => s.closeSettings);
-  // The config modal (and its avatar-menu entry) only exist when there's a Pro setting to show.
 
   // Opt-in browser notifications for new My Turn items + completed Claude reviews.
   // Shared pref (the Claude-review banner reads it too); the watcher fires only
@@ -373,13 +372,8 @@ export default function App(): JSX.Element {
               user={meUser}
               canSignOut={isCloud}
               onSignOut={onSignOut}
-              // ⚠ UNGATED, AND THAT IS THE FIX FOR A REAL REGRESSION. This read
-              // `hasProSettings ? … : null`, which is FALSE when the plugin is absent — i.e. the
-              // public `npx pierre-review` release. The modal now opens with a GLOBAL half that
-              // includes the large-PR threshold, which is CORE, free, and ungated on every tier,
-              // so gating the only entry point on a PRO capability stranded a free setting behind
-              // a menu item that never rendered. The modal can no longer be empty in any
-              // configuration, so the entry point no longer needs a gate.
+              // ⚠ UNGATED: the modal always has sections to show (the large-PR threshold among
+              // them), so the entry point needs no gate.
               onOpenSettings={() => openSettings()}
             />
           )}

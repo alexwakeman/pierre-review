@@ -39,7 +39,6 @@ import {
   useSetWorkspaceReviewer,
 } from '../../hooks/useBotTriage.js';
 import { useBotColors } from '../../hooks/useBotColors.js';
-import { useProCapabilities } from '../../hooks/useTriage.js';
 import { useRepos } from '../../hooks/useTimeline.js';
 import { SectionShell, inputCls } from './ui.js';
 
@@ -90,11 +89,8 @@ type ReviewerPatch = Omit<WorkspaceReviewerPatchBody, 'workspaceId'>;
 
 type BotColorFn = (bot: { login?: string | null; kind: AutomatedReviewerKind }) => string;
 
-// The bot classification surface — Feed → Bot classification. FREE on every tier, both modes, and
-// the screen carries no capability gate: classifying a reviewer, naming its vendor and setting its
-// role all work on a plugin-less `npx` install. The one paid thing on it is the PRICE (`botDepth`)
-// — the editor on each card and the workspace total — and without the capability those are simply
-// ABSENT (no badge, no nudge). See the note at `showCost` for how that is enforced.
+// The bot classification surface — Feed → Bot classification: classifying a reviewer, naming its
+// vendor, setting its role and its PRICE (the editor on each card and the workspace total).
 //
 // ── ONE CARD PER BOT, IN A GRID ─────────────────────────────────────────────────────────────
 // Each entry is a distinct bordered card (1 column on a phone, 2–3 wide): a header with the bot's
@@ -156,20 +152,6 @@ export function DetectedReviewersTable({
   // would paint these bots from some other Workspace's vendor names.
   const botColor = useBotColors(workspaceId);
 
-  // ── THE COST SURFACES ARE PAID (`botDepth`), THE REST OF THIS SCREEN IS FREE ──────────────
-  // Classification / identity / role editing is ungated (an `npx` user must be able to classify a
-  // reviewer — the Feed's bot hiding reads it). Only the price editor and the workspace cost total
-  // read `showCost`, and without it they are ABSENT: no ProBadge, no upsell line.
-  //
-  // ⚠ THE SERVER ENFORCES BOTH HALVES NOW, ON ALL FOUR ROUTES THAT ECHO A REVIEWER ROW. `PUT
-  // …/cost` has always 402'd; as of the ROI gate the LISTING this screen reads strips
-  // `costMonthlyUsd` / `costModel` / `effectiveMonthlyUsd` for an unentitled account — and so do
-  // the PATCH and both resets, which this screen also calls and which would otherwise be a
-  // perfectly good read path for the same numbers (`stripCost`, api/routes/bot-triage.ts). So
-  // `showCost` is a rendering decision over data that is genuinely absent, not a client-side
-  // curtain over a price that arrived anyway.
-  const { botDepth: showCost } = useProCapabilities();
-
   const patch = useSetWorkspaceReviewer();
   const cost = useSetReviewerCost();
   const resetJudgement = useResetReviewerJudgement();
@@ -206,10 +188,7 @@ export function DetectedReviewersTable({
     patch.error ?? cost.error ?? resetJudgement.error ?? resetIdentity.error;
 
   const title = 'Bot classification';
-  // The cost clause only when the cost surfaces actually render (`botDepth`).
-  const desc = showCost
-    ? 'Who counts as a bot in this Workspace, what kind of bot it is, and what it costs here.'
-    : 'Who counts as a bot in this Workspace and what kind of bot it is.';
+  const desc = 'Who counts as a bot in this Workspace, what kind of bot it is, and what it costs here.';
   // The six roles, reachable by touch and keyboard. The role picker's `title` carries the same
   // text, but a hover tooltip is not an explanation anyone on a phone can read.
   const info = (
@@ -227,12 +206,10 @@ export function DetectedReviewersTable({
         A change here reaches every repo in this Workspace. The repo chips on each card show where
         that bot is active.
       </p>
-      {showCost && (
-        <p>
-          Prices are set per Workspace and are never added up across Workspaces: the same bot can
-          have a different price in each.
-        </p>
-      )}
+      <p>
+        Prices are set per Workspace and are never added up across Workspaces: the same bot can have
+        a different price in each.
+      </p>
     </InfoButton>
   );
 
@@ -279,7 +256,6 @@ export function DetectedReviewersTable({
             note="Counted in the review-bot figures."
             reviewers={buckets.reviewBots}
             workspaceSeatCount={workspaceSeatCount}
-            showCost={showCost}
             repoName={repoName}
             botColor={botColor}
             busy={busy}
@@ -301,7 +277,6 @@ export function DetectedReviewersTable({
             note="Shown in the feed, left out of the review-bot figures."
             reviewers={buckets.qualityChecks}
             workspaceSeatCount={workspaceSeatCount}
-            showCost={showCost}
             repoName={repoName}
             botColor={botColor}
             busy={busy}
@@ -323,7 +298,6 @@ export function DetectedReviewersTable({
             note="Detection leaves these alone until you reset them."
             reviewers={buckets.markedNotBots}
             workspaceSeatCount={workspaceSeatCount}
-            showCost={showCost}
             repoName={repoName}
             botColor={botColor}
             busy={busy}
@@ -335,9 +309,7 @@ export function DetectedReviewersTable({
             onResetIdentity={(userId) => resetIdentity.mutate({ userId, workspaceId })}
           />
 
-          {/* The workspace cost total — a cost surface (`botDepth`). Without the capability it is
-              simply absent: no badge, no upsell line. */}
-          {showCost && (
+          {/* The workspace cost total. */}
           <p className="text-xs text-gray-500 dark:text-gray-400">
             {costTotal.totalUsd == null ? (
               <>
@@ -360,7 +332,6 @@ export function DetectedReviewersTable({
               </>
             )}
           </p>
-          )}
 
           {/* Search-to-promote: find a reviewer this Workspace currently treats as human and mark
               them automated. One button now — the judgement is Workspace-wide, so there is no repo
@@ -380,7 +351,7 @@ export function DetectedReviewersTable({
               <p className="text-xs text-gray-500 dark:text-gray-400">
                 Type a reviewer&apos;s name to treat them as an automated reviewer in this
                 Workspace. They join the <span className="font-medium">Review bots</span> list
-                above, where you set the vendor{showCost ? ' and the price' : ''}.
+                above, where you set the vendor and the price.
               </p>
             ) : matches.length === 0 ? (
               <p className="text-xs text-gray-500 dark:text-gray-400">
@@ -437,7 +408,6 @@ function ReviewerList({
   note,
   reviewers,
   workspaceSeatCount,
-  showCost,
   repoName,
   botColor,
   busy,
@@ -450,8 +420,6 @@ function ReviewerList({
   note: string;
   reviewers: WorkspaceReviewer[];
   workspaceSeatCount: number;
-  /** Paid `botDepth`: false hides every price control (absence, never an error). */
-  showCost: boolean;
   repoName: Map<number, string>;
   botColor: BotColorFn;
   busy: boolean;
@@ -477,7 +445,6 @@ function ReviewerList({
             key={r.userId}
             reviewer={r}
             workspaceSeatCount={workspaceSeatCount}
-            showCost={showCost}
             repoName={repoName}
             botColor={botColor}
             busy={busy}
@@ -507,7 +474,6 @@ function ReviewerList({
 function ReviewerCard({
   reviewer,
   workspaceSeatCount,
-  showCost,
   repoName,
   botColor,
   busy,
@@ -518,8 +484,6 @@ function ReviewerCard({
 }: {
   reviewer: WorkspaceReviewer;
   workspaceSeatCount: number;
-  /** Paid `botDepth`: false hides the price editor (absence, never an error). */
-  showCost: boolean;
   repoName: Map<number, string>;
   botColor: BotColorFn;
   busy: boolean;
@@ -713,7 +677,7 @@ function ReviewerCard({
               onClick={() => {
                 if (r.automated) onPatch(r.userId, { automated: false });
               }}
-              title={`Treat this account as a person in this Workspace — every repo in it. Its vendor name${showCost ? ' and price are' : ' is'} kept, and your other Workspaces are unaffected.`}
+              title={`Treat this account as a person in this Workspace — every repo in it. Its vendor name and price are kept, and your other Workspaces are unaffected.`}
               className={segmentCls(!r.automated)}
             >
               Person
@@ -726,7 +690,7 @@ function ReviewerCard({
               type="button"
               disabled={busy}
               onClick={() => onResetJudgement(r.userId)}
-              title={`Forget your bot / person and role judgement for this Workspace and let detection decide again. The vendor name${showCost ? ' and the price are' : ' is'} untouched.`}
+              title={`Forget your bot / person and role judgement for this Workspace and let detection decide again. The vendor name and the price are untouched.`}
               className="rounded border border-dashed border-gray-300 px-2 py-0.5 text-[11px] font-medium text-gray-600 hover:bg-gray-100 disabled:opacity-40 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
             >
               Reset classification
@@ -784,7 +748,7 @@ function ReviewerCard({
             Set by you — detection will not change it in this Workspace until you reset. Resetting
             keeps the bot&apos;s{' '}
             <span className="font-medium text-gray-600 dark:text-gray-300">
-              {showCost ? 'name and price' : 'name'}
+              name and price
             </span>
             .
           </p>
@@ -850,7 +814,7 @@ function ReviewerCard({
               type="button"
               disabled={busy}
               onClick={() => onResetIdentity(r.userId)}
-              title={`Forget the vendor and label you set and let detection name this bot again in this Workspace.${showCost ? ' The monthly price is kept, and the' : ' The'} bot / not-a-bot verdict is unchanged.`}
+              title={`Forget the vendor and label you set and let detection name this bot again in this Workspace. The monthly price is kept, and the bot / not-a-bot verdict is unchanged.`}
               className="rounded border border-gray-300 px-2 py-0.5 text-[11px] font-medium text-gray-600 hover:bg-gray-100 disabled:opacity-40 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
             >
               Reset name
@@ -861,20 +825,12 @@ function ReviewerCard({
             one thing a user is afraid of losing here is the number they typed into the box below. */}
         {r.identitySource === 'manual' && (
           <p className="text-[11px] text-gray-500 dark:text-gray-400">
-            Reset hands the vendor and label back to detection for this Workspace
-            {showCost && (
-              <>
-                {' '}—{' '}
-                <span className="font-medium text-gray-600 dark:text-gray-300">the price is kept</span>
-              </>
-            )}
-            . Bot or person does not change.
+            Reset hands the vendor and label back to detection for this Workspace —{' '}
+            <span className="font-medium text-gray-600 dark:text-gray-300">the price is kept</span>. Bot or person does not change.
           </p>
         )}
 
-        {/* ── PRICE (no provenance; one writer) ── Paid (`botDepth`): with the capability off the
-            editor is simply absent — no badge, no nudge. */}
-        {showCost && (
+        {/* ── PRICE (no provenance; one writer) ── */}
         <CostEditor
           // Remount on a userId change so a half-typed number (or a flipped pricing mode) can never
           // survive onto another bot.
@@ -886,7 +842,6 @@ function ReviewerCard({
           busy={busy}
           onApply={(v, m) => onCost(r.userId, v, m)}
         />
-        )}
       </div>
     </li>
   );

@@ -3,7 +3,6 @@ import type { BotBehaviourAnomaly, BotBehaviourBotStat, BotBehaviourMlBot } from
 import { usePinnedTabs, parseBotDetailKey } from '../../store/pinnedTabs.js';
 import { useBotBehaviour } from '../../hooks/useBotTriage.js';
 import { useMlSeverityEnabled } from '../../hooks/useMlLabels.js';
-import { useProCapabilities } from '../../hooks/useTriage.js';
 import { useFilters } from '../../store/filters.js';
 import { useBotColors } from '../../hooks/useBotColors.js';
 import { ML_CATEGORY_COLOR, ML_CATEGORY_LABEL, automatedReviewerMeta, vendorInk } from '../../lib/ui.js';
@@ -35,9 +34,6 @@ import {
 // judgement; the repo narrowing the ROI row was measured at rides the tab's botMeta; the window
 // is the shared `botAnalyticsWindow` store field (the drill-down rule — a local window would let
 // this tab and the table it was opened from disagree about one bot).
-//
-// Pro depth (`botDepth`) — the pill that opens this tab only renders under the capability, and
-// the hook self-gates, so without it this panel renders a quiet absence line, never an error.
 
 // A duration axis formatter (BarChart/LineChart never pass null).
 const durAxis = (n: number): string => fmtDuration(n);
@@ -296,7 +292,6 @@ export function BotDetailPanel(): JSX.Element {
   const window = useFilters((s) => s.botAnalyticsWindow);
   const setWindow = useFilters((s) => s.setBotAnalyticsWindow);
   const workspaceId = useFilters((s) => s.workspaceId);
-  const { botDepth } = useProCapabilities();
   const botColor = useBotColors(workspaceId);
   const mlEnabled = useMlSeverityEnabled();
   // The repo narrowing the ROI row was measured at (per-repo Bots console), captured at open
@@ -336,14 +331,6 @@ export function BotDetailPanel(): JSX.Element {
   let body: JSX.Element;
   if (userId == null) {
     body = <div className="text-sm text-gray-500 dark:text-gray-400">No bot selected.</div>;
-  } else if (!botDepth) {
-    // Free-tier posture: the pill that opens this tab only renders under `botDepth`, so this is
-    // a stale tab after a capability change — absence, never an error or a dead fetch loop.
-    body = (
-      <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-400 dark:border-gray-700">
-        Per-bot depth isn’t available on this plan.
-      </div>
-    );
   } else if (isLoading) {
     body = (
       <div className="h-40 animate-pulse rounded-lg border border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-900/40" />

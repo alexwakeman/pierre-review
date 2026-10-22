@@ -13,7 +13,7 @@ import {
 //
 // ONE component for every surface. It is mounted twice in the tree — inside `CommentBlock`
 // (which reaches all SEVEN ThreadCard mount sites at once: Threads tab, Feed, search results,
-// attention cards, Pro themes drill-down, the diff's inline pill) and inside PrDetail's conversation
+// attention cards, themes drill-down, the diff's inline pill) and inside PrDetail's conversation
 // list (PR comments + review bodies). There is deliberately no read-only variant: the write
 // gate is GitHub's own `viewerCanReact`, so a second component would only be a second way to
 // get the gate wrong, and an un-mounted variant is exactly how a feature ships unreachable.

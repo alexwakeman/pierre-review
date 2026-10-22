@@ -115,7 +115,6 @@ export function useAskClaudeReviewChat(reviewId: number) {
           : prev,
       );
       void qc.invalidateQueries({ queryKey: key });
-      void qc.invalidateQueries({ queryKey: ['ai-usage'] });
       if (variables.prId != null) {
         void qc.invalidateQueries({ queryKey: ['claude-review-chat-history', variables.prId] });
       }

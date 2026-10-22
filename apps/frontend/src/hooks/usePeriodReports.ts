@@ -1,4 +1,4 @@
-// Period-over-period reports (Pro `periodReports`; /api/pro/insights/reports/*) — the Insights
+// Period-over-period reports (/api/pro/insights/reports/*) — the Insights
 // "Reports" sub-tab.
 //
 // Every key carries the `ws:<id>` segment and every fetch holds itself idle on `skipToken` while
@@ -149,10 +149,6 @@ export function useGeneratePeriodReport(workspaceId: number | null, periodKey: s
       // that was generated, and the reader may have switched grains while it ran; matching on the
       // key PREFIX covers both lists without either having to name the other.
       void qc.invalidateQueries({ queryKey: ['period-reports', workspaceKey(workspaceId)] });
-      // A real generation spends the summary-turn budget → refresh the meter and the
-      // out-of-credits gate. A `generated: false` cache hit spent nothing, but re-reading a
-      // cheap counter is not worth a branch.
-      void qc.invalidateQueries({ queryKey: ['ai-usage'] });
     },
   });
 }

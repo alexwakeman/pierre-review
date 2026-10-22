@@ -10,9 +10,7 @@ import { WorkspaceRepoActivityCharts } from './WorkspaceRepoActivityCharts.js';
 // ⚠ IT LIVES ON **REPORTS**, NOT THE FEED. It sat at the top of the cross-repo Feed for one
 // generation, which put a workspace-wide SURVEY above a chronological STREAM and pushed the feed
 // itself two screens down. Reports is where analytics belongs and where the period framing gives
-// the numbers a denominator — and moving it is exactly why the Reports rail entry is no longer
-// Pro-gated: this panel is free, so hiding its only home behind the Pro wall would have taken a
-// free feature away.
+// the numbers a denominator.
 //
 // ⚠ It is in the Feed/Bots/Reports class: it covers EVERY repo in the workspace and never reads
 // `filters.repoIds`. The repo picker is Timeline-only.
@@ -23,10 +21,9 @@ import { WorkspaceRepoActivityCharts } from './WorkspaceRepoActivityCharts.js';
 // numbers. Also renders nothing when the workspace has no repos.
 //
 // ⚠ THE PER-REPO BREAKDOWN IS MOUNTED HERE, NOT INSIDE `WorkspaceMetricsPanel`. That panel has TWO
-// mounts: this one (the whole workspace) and `RepoInsightsPanel`, which renders it for ONE repo
-// behind the Pro `workspaceInsights` gate. A per-repository comparison there degenerates to a
-// single row — and would appear only for paying accounts, on the one screen where it answers
-// nothing. Its activity half rides the SAME `/api/workspace-metrics` response as the panel above
+// mounts: this one (the whole workspace) and `RepoInsightsPanel`, which renders it for ONE repo.
+// A per-repository comparison there degenerates to a single row, on the one screen where it
+// answers nothing. Its activity half rides the SAME `/api/workspace-metrics` response as the panel above
 // it, so there is no second request and the two halves can never be a refresh apart.
 //
 // ⚠ `WorkspaceRepoActivityCharts` NOW OWNS A SECOND CARD BESIDE ITS OWN — `WorkspaceReachCard`,

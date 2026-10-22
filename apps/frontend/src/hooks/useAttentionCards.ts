@@ -8,8 +8,8 @@ import { api } from '../api/client.js';
 import { workspaceKey } from './useActivity.js';
 
 // The **Pending** cards (stalled reviews / untouched threads / reviewer load / needs-a-
-// reviewer) — CORE/free, powering the Activity rail's **Pending** entry. Same scope semantics
-// + sync cadence as the Pro Insights hook, but NO capability gate (every tier). The workspace is in
+// reviewer) — powering the Activity rail's **Pending** entry. Same scope semantics + sync cadence
+// as the Insights hook. The workspace is in
 // the cache key so each one caches independently, and the key stays `['attention-cards', …]` so a
 // reviewer "Assign" (which invalidates that PREFIX — see usePrWrites) refreshes every workspace's
 // copy of the tab.

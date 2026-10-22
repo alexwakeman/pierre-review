@@ -2,12 +2,8 @@ import { skipToken, useIsMutating, useMutation, useQuery, useQueryClient } from 
 import type { FlowPointersResponse } from '@pierre-review/shared';
 import { api } from '../api/client.js';
 import { workspaceKey } from './useActivity.js';
-import { useProCapabilities } from './useTriage.js';
 
-// Chronology's POINTERS — the Pro, credit-metered Haiku narration beside the court ledger.
-//
-// ⚠ GATED ON `periodReports`, THE FLAG CHRONOLOGY ITSELF RIDES, and ANDed into `enabled` so the SPA
-// never learns the paywall by error (every hook reaching a gated route does this).
+// Chronology's POINTERS — the Haiku narration beside the court ledger.
 //
 // ⚠ THE GET NEVER GENERATES. It is safe to mount with the panel: it reads the cache and reports
 // whether the evidence has moved. The POST is the only billing path, and every mount of one scope
@@ -18,11 +14,9 @@ export function flowPointersKeySlots(workspaceId: number | null, days: number | 
 }
 
 export function useFlowPointers(workspaceId: number | null, days: number | 'reporting') {
-  const { periodReports } = useProCapabilities();
   return useQuery<FlowPointersResponse>({
     queryKey: ['flow-pointers', ...flowPointersKeySlots(workspaceId, days)],
     queryFn: workspaceId == null ? skipToken : () => api.flowPointers(workspaceId, days),
-    enabled: periodReports,
     // Folded from synced rows; it can only move when a sync lands. The Chronology panel's cadence.
     staleTime: 60_000,
     refetchInterval: 5 * 60_000,
@@ -41,12 +35,11 @@ export function useGenerateFlowPointers(workspaceId: number | null, days: number
       return api.flowPointersGenerate(workspaceId, days);
     },
     onSuccess: (data) => {
-      // ⚠ `stale` is a GET-only field: a throttled or out-of-credits reply serves the cached row
+      // ⚠ `stale` is a GET-only field: a throttled reply serves the cached row
       // and omits it, and overwriting would quietly relabel an out-of-date answer as current.
       qc.setQueryData<FlowPointersResponse>(['flow-pointers', ...slots], (prev) =>
         data.stale === undefined && prev?.stale !== undefined ? { ...data, stale: prev.stale } : data,
       );
-      void qc.invalidateQueries({ queryKey: ['ai-usage'] });
     },
   });
 }

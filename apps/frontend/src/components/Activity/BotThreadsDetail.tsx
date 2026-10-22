@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useProCapabilities } from '../../hooks/useTriage.js';
 import type {
   AddressedConfidence,
   AddressedConfidenceCounts,
@@ -139,11 +138,9 @@ export function BotThreadsDetail(): JSX.Element {
   // drill-down opens.
   const focusRepoId = useFilters((s) => s.botThreadsFocusRepoId);
   const repoScope = useMemo(() => (focusRepoId != null ? [focusRepoId] : null), [focusRepoId]);
-  // Pro (`botDepth`) with the rest of Bots Monitoring; the route 402s without it.
-  const { botDepth } = useProCapabilities();
   const { data, isLoading, isError, refetch, isFetching } = useResolvableBotThreads(
     workspaceId,
-    botDepth,
+    true,
     repoScope,
   );
   const resolve = useScopeResolveBotThreads();
@@ -676,8 +673,7 @@ export function BotThreadsDetail(): JSX.Element {
       {header}
       {/* P2.2 — the synthesis VERDICT leads, carrying this tab's exact scope (the workspace-wide
           windowless backlog, focus-repo narrowed). Under a client-side repo filter or the
-          high-confidence subset the list renders exactly as today; free/OSS posture is the
-          card's own (nudge on cloud, absence on OSS). */}
+          high-confidence subset the list renders exactly as today. */}
       {synthDescriptor != null ? (
         <SynthesisCard workspaceId={workspaceId} descriptor={synthDescriptor}>
           {receipts}

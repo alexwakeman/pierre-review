@@ -233,7 +233,7 @@ export function WorkspaceMetricsPanel({
     : [];
 
   // Defined ONCE, rendered in the folded "More charts" section of BOTH branches (default grid
-  // and Pro slot). Hidden by default by product decision; when a `moreChartsSlot` is present the
+  // and the slot). Hidden by default by product decision; when a `moreChartsSlot` is present the
   // slot's grid omits its own per-repo CI-failures twin (Charts omitPrimaries) so the folded
   // section never shows the same concept twice from two data sources.
   const ciFailuresCard = (

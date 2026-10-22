@@ -230,7 +230,7 @@ export function PointersInfo(): JSX.Element {
         It names no one and writes no figures; every figure on this page is measured. Each pointer
         links the pull requests it is based on, and a pointer that cites none is dropped.
       </p>
-      <p>Writing pointers uses AI credits. Nothing is written until you press the button.</p>
+      <p>Nothing is written until you press the button.</p>
     </>
   );
 }

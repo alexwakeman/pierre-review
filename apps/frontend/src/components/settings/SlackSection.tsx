@@ -7,8 +7,6 @@ import {
   useUpdateSlackTarget,
 } from '../../hooks/useSlackTarget.js';
 import { InfoButton } from '../InfoModal.js';
-import { ProLockPanel, useProGateState } from '../ProGate.js';
-import { useProCapabilities } from '../../hooks/useTriage.js';
 import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
 import { Field, SaveButton, SectionShell, inputCls } from './ui.js';
 import { ScopePendingSection, useSettingsWorkspace } from './workspaceScope.js';
@@ -57,25 +55,6 @@ const hourLabel = (h: number): string => {
  * times. The name STAYS in the sentences where it disambiguates one workspace from ANOTHER (the
  * cap disclosure points at a different team's settings), and only there.
  */
-/**
- * Slack in Settings, behind its Pro gate. ⚠ STRICTLY PRO (`slackDigest`): Slack is an ORG feature,
- * so an unentitled reader sees the section LOCKED — never the form — and no hook below fires (the
- * routes 402 anyway). `ready` is the modal's plugin-settings gate, which only the real form waits on.
- */
-export function SlackSettings({ ready }: { ready: boolean }): JSX.Element | null {
-  const gate = useProGateState(useProCapabilities().slackDigest);
-  if (gate === 'pending') return null;
-  if (gate === 'locked') {
-    return (
-      <ProLockPanel heading="Slack" testId="slack-locked">
-        Post this workspace’s Pending board to a team channel on a schedule, and say when a pull
-        request merges or a Claude review runs.
-      </ProLockPanel>
-    );
-  }
-  return ready ? <SlackSection /> : null;
-}
-
 export function SlackSection(): JSX.Element {
   const { workspaceId, name } = useSettingsWorkspace();
   const query = useSlackTarget(workspaceId != null, workspaceId);
@@ -227,7 +206,7 @@ export function SlackSection(): JSX.Element {
           </p>
           <p>
             Every workspace with a digest writes its own sprint summary on every send, so at most{' '}
-            {data.cap} workspaces can have one. A summary costs nothing when the workspace’s
+            {data.cap} workspaces can have one. A summary is not rewritten when the workspace’s
             activity has not changed.
           </p>
         </InfoButton>

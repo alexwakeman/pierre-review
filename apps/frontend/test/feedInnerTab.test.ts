@@ -1,5 +1,5 @@
 // The Feed rail's sub-tab strip: Feed · Bot classification (FREE). The visible tab is DERIVED from
-// the raw choice, never written back. (The Pro "Discussion themes" tab is REMOVED.)
+// the raw choice, never written back. (The "Discussion themes" tab is REMOVED.)
 //
 //   ./apps/backend/node_modules/.bin/vitest run --root apps/frontend
 import { describe, expect, it } from 'vitest';

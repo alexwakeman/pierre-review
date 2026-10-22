@@ -5,7 +5,6 @@ import type {
   MeResponse,
   MyTurnResponse,
   OpenPrsResponse,
-  ProCapabilities,
   RepoAnalytics,
 } from '@pierre-review/shared';
 import { api } from '../api/client.js';
@@ -141,25 +140,6 @@ export function useMe() {
     noteBlastConfig(blast);
   }, [blast]);
   return q;
-}
-
-// Premium capability flags. All-false until /api/me loads and in OSS mode (no @pierre/pro
-// plugin). ⚠ The agentic tools (Claude Review, review memory, AI Fix) are NOT here — they are free
-// and read `me.ai` through `useAiCapabilities`.
-export function useProCapabilities(): ProCapabilities {
-  return (
-    useMe().data?.pro ?? {
-      activityDigest: false,
-      prSummary: false,
-      workspaceInsights: false,
-      slackDigest: false,
-      botTriage: false,
-      botAdvisor: false,
-      periodReports: false,
-      botDepth: false,
-      workPlan: false,
-    }
-  );
 }
 
 export function useMyTurn() {

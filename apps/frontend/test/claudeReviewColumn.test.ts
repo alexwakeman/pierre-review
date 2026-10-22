@@ -266,11 +266,11 @@ describe('fillDraftFromJira — the one fill', () => {
 describe('the wiring', () => {
   const src = (p: string) => readFileSync(join(__dirname, '..', 'src', p), 'utf8');
 
-  it('the panel and its request are gated on the FREE agentic AI flag (me.ai), never Pro', () => {
+  it('the panel and its request are gated on the agentic AI flag (me.ai)', () => {
     const cards = src('components/Activity/OpenPrsCards.tsx');
     expect(cards).toMatch(/const claudeOn = useAiCapabilities\(\)\.enabled;/);
-    // NO Pro read on the cards at all: the ticket row is the CORE tracker's (apiVersion 23), gated
-    // on whether THIS workspace has one — never the Claude panel's gate.
+    // The ticket row is the CORE tracker's (apiVersion 23), gated on whether THIS workspace has
+    // one — never the Claude panel's gate.
     expect(cards).not.toMatch(/useProCapabilities\(/);
     // The ticket answer is read by the first-paint gate (one hook, list level), on THIS workspace's
     // tracker — never on the Claude panel's gate.

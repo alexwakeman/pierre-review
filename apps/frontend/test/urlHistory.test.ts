@@ -837,7 +837,7 @@ describe('the Activity sub-tab strips', () => {
   });
 
   // ⚠ LEGACY: the classification screen used to be Bots Monitoring → Settings. An old bookmark (or
-  // a history entry Back replays) must land on its new home, not on a Pro lock.
+  // a history entry Back replays) must land on its new home.
   it('maps a legacy ?botsTab=settings link to Feed → Bot classification', () => {
     seat('/app/?workspace=5&view=activity&activityRepo=bots&botsTab=settings');
     applyUrlToStores({ fromPop: true });

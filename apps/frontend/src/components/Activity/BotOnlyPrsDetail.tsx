@@ -1,5 +1,4 @@
 import { useMemo, useState } from 'react';
-import { useProCapabilities } from '../../hooks/useTriage.js';
 import type { BotOnlyPrItem, BotWindowKind, User } from '@pierre-review/shared';
 import { useBotOnlyPrs } from '../../hooks/useBotTriage.js';
 import { useUsers } from '../../hooks/useTimeline.js';
@@ -170,12 +169,10 @@ export function BotOnlyPrsDetail(): JSX.Element {
   // persists for the tab's lifetime; only reset when the next drill-down opens.
   const focusRepoId = useFilters((s) => s.botOnlyFocusRepoId);
   const repoScope = useMemo(() => (focusRepoId != null ? [focusRepoId] : null), [focusRepoId]);
-  // Pro (`botDepth`) with the rest of Bots Monitoring; the route 402s without it.
-  const { botDepth } = useProCapabilities();
   const { data, isLoading, isError, refetch, isFetching } = useBotOnlyPrs(
     workspaceId,
     window,
-    botDepth,
+    true,
     repoScope,
   );
   const prs = useMemo(() => data?.prs ?? [], [data]);

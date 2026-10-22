@@ -10,7 +10,6 @@ import { useAutoLoadSentinel } from '../../hooks/useAutoLoadSentinel.js';
 import { useBotColors } from '../../hooks/useBotColors.js';
 import { useBotFlagging } from '../../hooks/useBotFlagging.js';
 import { useBotAnalytics } from '../../hooks/useBotTriage.js';
-import { useProCapabilities } from '../../hooks/useTriage.js';
 import { useRepos, useUsers } from '../../hooks/useTimeline.js';
 import { useFilters } from '../../store/filters.js';
 import { usePinnedTabs, type TabMeta } from '../../store/pinnedTabs.js';
@@ -151,8 +150,7 @@ function PopulationPicker({
       : null;
   // Gated on the family so the two arms that render no dropdown never fetch. `enabled: false` still
   // serves a cached entry, which is all this needs anyway.
-  const { botDepth } = useProCapabilities();
-  const { data } = useBotAnalytics(workspaceId, window, botDepth && family != null, repoIds);
+  const { data } = useBotAnalytics(workspaceId, window, family != null, repoIds);
   const ml = data?.ml;
 
   // The option lists, counts folded in. Built here rather than at each `<option>` so a background
@@ -804,7 +802,7 @@ export function BotFlaggingDetail(): JSX.Element {
       {header}
       {/* P2.2 — the synthesis VERDICT leads, carrying this drill-down's exact scope. With no
           expressible descriptor (overlap tile / matrix cell / multi-bot set) the list renders
-          exactly as today; free/OSS posture is the card's own (nudge on cloud, absence on OSS). */}
+          exactly as today. */}
       {synthDescriptor != null ? (
         <SynthesisCard workspaceId={workspaceId} descriptor={synthDescriptor}>
           {receipts}

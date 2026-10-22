@@ -181,7 +181,6 @@ function useLibraryMutation<V>(workspaceId: number | null, fn: (v: V) => Promise
         );
       }
       invalidateLibrary(qc, workspaceId);
-      void qc.invalidateQueries({ queryKey: ['ai-usage'] });
     },
   });
 }
@@ -272,7 +271,6 @@ export function useAskDocs(workspaceId: number | null) {
         if ((view.conversation[data.workspaceId] ?? null) == null) view.setConversation(data.workspaceId, data.conversationId);
       }
       void qc.invalidateQueries({ queryKey: conversationsKey(data.workspaceId) });
-      void qc.invalidateQueries({ queryKey: ['ai-usage'] });
     },
   });
 }

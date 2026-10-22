@@ -47,25 +47,19 @@ export type RepoConsoleTab = 'activity' | 'bots';
 
 // The Reports pane's OWN sub-tab strip, reintroduced with two members and nothing in common with
 // the deleted `InsightsSubTab` above except the surface it sits on:
-//   • 'overview'    — exactly what the pane already was (free Flow metrics + the Pro Period
-//                     reports half, each carrying its own posture).
-//   • 'bottlenecks' — the human-lane findings from `GET /api/flow-findings` (PAID `periodReports`,
-//                     deterministic — no model anywhere in it). The Bots rail's twin: that one
+//   • 'overview'    — exactly what the pane already was (Flow metrics + Period reports).
+//   • 'bottlenecks' — the human-lane findings from `GET /api/flow-findings` (deterministic — no
+//                     model anywhere in it). The Bots rail's twin: that one
 //                     measures automation, this one measures where HUMAN review time goes.
 // ⚠ 'bottlenecks' IS A LABEL-ONLY MISMATCH: the tab reads **"Chronology"** on screen and the store
 // and URL literal stays `'bottlenecks'`. Same rule as "Pending" (store `'attention'`) and "Reports"
 // (store `'insights'`) — the literal ships in bookmarks and in history entries Back replays, so
 // renaming it would silently drop readers onto Overview. Rename the LABEL, never the member.
 //
-// ⚠ `'bottlenecks'` IS GATED (`periodReports`) AND THE DERIVE STILL HAS ONLY ONE JOB. The two are
-// not in tension, and the reason matters: `effectiveInsightsTab` normalises a value outside the
-// union and NOTHING ELSE — it must NOT gain a capability fallback. An unentitled
-// `?insightsTab=bottlenecks` ships in bookmarks and in history entries Back replays, and it has to
-// land on the tab the URL named and render the LOCKED pane there; redirecting it to Overview would
-// silently drop the reader onto a different screen with no explanation, and would make the derive
-// impure (breaking the round-trip urlHistory.test.ts pins). The GATE LIVES IN THE PANE, never in
-// the tab resolution. The RAIL ENTRY itself stays ungated on every tier — the free flow metrics
-// live under Overview precisely so it can.
+// ⚠ THE DERIVE HAS ONLY ONE JOB: `effectiveInsightsTab` normalises a value outside the union and
+// NOTHING ELSE. A `?insightsTab=bottlenecks` ships in bookmarks and in history entries Back replays,
+// and it has to land on the tab the URL named; making the derive impure would break the round-trip
+// urlHistory.test.ts pins.
 //
 // ⚠ This is the OPPOSITE of `BotsView`'s `effectiveTab`, which does correct `'advisor'` away. That
 // one predates the visible-but-locked posture; do not copy it here, and note that BotsView's own
@@ -105,29 +99,20 @@ export function sprintTabFromUrl(raw: string | null | undefined): SprintInnerTab
   if (raw === 'graph') return 'themes';
   return (SPRINT_INNER_TABS as readonly string[]).includes(raw ?? '') ? (raw as SprintInnerTab) : null;
 }
-// The Bots rail's sub-tab strip. ⚠ TWO POSTURES IN ONE UNION, both deliberate:
-//   • `'advisor'` (`botAdvisor`) and `'themes'` (`activityDigest`) are only LISTED when entitled,
-//     and BotsView's `effectiveBotsTab` degrades either to `'roi'` when it is not — the older
-//     "absent, never upsold" posture, which is also the FEED's, whose Themes tab this one mirrors.
-//   • `'roi'` and `'benchmark'` are VISIBLE-BUT-LOCKED (`botDepth`): listed on every tier, badged,
-//     and their BODIES render `ProLockPanel`. They must NEVER be corrected away, or an unentitled
-//     `?botsTab=benchmark` from a bookmark lands somewhere else and explains nothing.
-//   • (`'settings'` LEFT this union: bot classification is FREE and is the Feed rail's
-//     "Bot classification" sub-tab now — `FeedInnerTab` below. A legacy `?botsTab=settings` is
-//     mapped there by useUrlState's read.)
-// ⚠ `'themes'` TOOK THE FIRST POSTURE ON PURPOSE. A locked Themes body would be a SEVENTH
-// visible-but-locked surface, and `components/ProGate.tsx` keeps that set at exactly six with a
-// written argument saying the next one needs its own; on the OSS build `BotThemesPanel` returns
-// `null`, so an always-listed tab would draw a blank pane there.
+// The Bots rail's sub-tab strip. `'advisor'` is workspace-grain and LISTED only on the cross-repo
+// rail; BotsView's `effectiveBotsTab` degrades it to `'roi'` on the per-repo console. Every other
+// member shows on both mounts. (`'settings'` LEFT this union: bot classification is the Feed rail's
+// "Bot classification" sub-tab now — `FeedInnerTab` below. A legacy `?botsTab=settings` is mapped
+// there by useUrlState's read.)
 // The visible member is DERIVED per render (`effectiveBotsTab` in `Activity/benchmarkModel.ts`);
 // a corrective `setBotsInnerTab()` permanently forgets the reader's choice for the OTHER mount
 // that shares this one scalar (the per-repo console's Bots tab).
 export type BotsInnerTab = 'roi' | 'themes' | 'advisor' | 'benchmark';
 export const BOTS_INNER_TABS: readonly BotsInnerTab[] = ['roi', 'themes', 'advisor', 'benchmark'];
 // The Feed rail's sub-tab strip: 'feed' (the stream, the default) and 'classification' — "Bot
-// classification", FREE on every tier: who counts as a bot in this Workspace, its role and vendor
-// (and, with `botDepth`, its price). The visible member is DERIVED per render (`effectiveFeedTab` in
-// `Activity/feedTabsModel.ts`), never written back. ('themes' — the Pro "Discussion themes" — is
+// classification": who counts as a bot in this Workspace, its role, vendor and price. The visible
+// member is DERIVED per render (`effectiveFeedTab` in `Activity/feedTabsModel.ts`), never written
+// back. ('themes' — the "Discussion themes" — is
 // REMOVED; a legacy `?feedTab=themes` is not a member, so the URL reader leaves the Feed default.)
 export type FeedInnerTab = 'feed' | 'classification';
 export const FEED_INNER_TABS: readonly FeedInnerTab[] = ['feed', 'classification'];
@@ -518,8 +503,7 @@ export interface FilterState {
   // (like feedAuthors) — owned by the Bot-ROI panel; drives the useBotAnalytics query key.
   botAnalyticsWindow: BotWindowKind;
   // Which inner sub-tab the Bots view shows: 'roi' (the Measure surface — the ROI panel),
-  // 'themes' (the Pro "What they're flagging" AI report, `activityDigest`), 'advisor' (the Pro Bot
-  // Tuning Advisor — findings → config-PR/brief/issue outputs), 'benchmark' (the peer-cohort
+  // 'themes' (the "What they're flagging" AI report), 'advisor' (the Bot Tuning Advisor — findings → config-PR/brief/issue outputs), 'benchmark' (the peer-cohort
   // placement). (The classification tab, once 'settings' here, is the Feed's 'classification'.)
   // ('behaviour' was REMOVED in plan P1.1/C1: per-bot depth is the bot-detail drill-down tab and
   // the workspace charts a collapsed section under ROI. ⚠ 'themes' WAS ALSO REMOVED THEN — folded
@@ -529,17 +513,14 @@ export interface FilterState {
   // URL-silent, so both the drop and the return are safe: no persisted blob can hold or resurrect
   // a member.) A single scalar (both the cross-repo rail Bots view and the per-repo console Bots tab
   // share one BotsView). BotsView's
-  // effectiveTab fallback still owns any degradation ('advisor' and 'themes' are capability-gated
-  // — the derived-effective-tab rule). Transient (never persisted) — but NOT URL-silent, unlike
+  // effectiveTab fallback still owns any degradation ('advisor' is rail-only — the
+  // derived-effective-tab rule). Transient (never persisted) — but NOT URL-silent, unlike
   // its neighbours here; see the next paragraph.
   //
   // ⚠ URL-SERIALIZED (`?botsTab=themes|advisor|benchmark`, the 'roi' default omitted) and a
   // NAVIGATION key, but ONLY alongside `activityRepo=bots` — the cross-repo Bots rail, where the
   // strip is on screen. The per-repo console's Bots tab shares this scalar and does NOT emit it; a
   // sub-tab that is not visible is not a view. Still transient: URL-visible ≠ persisted.
-  //
-  // ⚠ 'benchmark' (the peer-cohort placement, `botDepth`) is VISIBLE-BUT-LOCKED, so it is never
-  // corrected away — see the BotsInnerTab declaration above.
   botsInnerTab: BotsInnerTab;
   // The Advisor tab's one-shot focus, set by the Tune/Drop pills on the Bots table: which
   // bot the advisor should open on, and with what intent ('tune' = its tuning findings,
@@ -564,10 +545,9 @@ export interface FilterState {
   // but ONLY alongside the cross-repo Feed rail entry, where the strip is on screen. The READ seats
   // only a listed value, so the retired `?feedTab=themes` lands on the Feed.
   feedInnerTab: FeedInnerTab;
-  // Which inner sub-tab the Reports pane shows: 'overview' (free Flow metrics + the Pro Period
-  // reports) or 'bottlenecks' — labelled "Chronology" on screen, the court ledger, Pro on
-  // `periodReports`. See InsightsInnerTab for why the literal and the label differ, and for why a
-  // gated member still must not gain a capability fallback in the derive.
+  // Which inner sub-tab the Reports pane shows: 'overview' (Flow metrics + Period reports) or
+  // 'bottlenecks' — labelled "Chronology" on screen, the court ledger. See InsightsInnerTab for why
+  // the literal and the label differ.
   //
   // Transient — freshDefaults() ONLY, never in FilterDefaults / pickFilterBarState, so NO
   // FILTER_STORAGE_VERSION bump is owed for it: nothing persists it, and a version that tracks

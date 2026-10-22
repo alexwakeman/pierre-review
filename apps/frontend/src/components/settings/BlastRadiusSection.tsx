@@ -144,11 +144,8 @@ export function BlastRadiusSection(): JSX.Element {
         </div>
       </Field>
 
-      {/* The Pro impact note's visibility. Rendered unconditionally — including for an account
-          with no plugin — because this is a READING PREFERENCE, not an entitlement: a reader who
-          turns it off should stay off if they later gain the capability, and the note itself
-          gates on `pro.prSummary` separately. The copy names what it controls rather than
-          assuming the reader knows the feature exists. */}
+      {/* The impact note's visibility — a READING PREFERENCE. The copy names what it controls
+          rather than assuming the reader knows the feature exists. */}
       <Field
         label="AI impact note"
         htmlFor="blast-impact-note"

@@ -237,7 +237,7 @@ describe('the four resolver roles', () => {
   });
 
   it('does not borrow the AI accent for a conflict', () => {
-    // ⚠ vermilion is the AI surface's accent and the Pro badge draws in it. A merge conflict is
+    // ⚠ vermilion is the AI surface's accent. A merge conflict is
     // not something a model produced, and sharing the hue would say it was.
     const aiSignal = blockCarrying(':root', '--ai-signal');
     const ai = tokens(aiSignal, 'ai')['signal'];

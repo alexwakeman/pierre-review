@@ -1,7 +1,5 @@
 import type { ReactNode } from 'react';
 import type { StoredSynthesis } from '@pierre-review/shared';
-import { useMe, useProCapabilities } from '../../hooks/useTriage.js';
-import { useAiUsage } from '../../hooks/useAiUsage.js';
 import { RefreshIcon } from '../Icons.js';
 import {
   useGenerateSynthesis,
@@ -20,9 +18,6 @@ import {
 //  - Every rendered number is SERVER-COMPUTED (D4): the "<count> <label>" cluster lines take
 //    `cluster.count` (|validated itemIds|), the remainder line takes `remainderCount`, and the
 //    coverage line takes analyzed/total — nothing here counts, sums or re-derives.
-//  - Free-tier posture: capability off + cloud → the Pro chip and a one-line nudge; capability
-//    off + OSS/local → null (absence, never an error) — the DetectedReviewersTable cost-nudge
-//    precedent. Nothing is fetched either way (useSynthesis gates on `activityDigest`).
 //  - Staleness is PASSIVE: the GET's `stale` flag renders a badge + Regenerate; nothing
 //    regenerates on its own (the annotations staleness model).
 //
@@ -84,36 +79,13 @@ export function SynthesisCard({
   /** The host surface's receipt list — ALWAYS rendered, synthesis or not (§8.20). */
   children?: ReactNode;
 }): JSX.Element | null {
-  const { activityDigest } = useProCapabilities();
-  const isCloud = useMe().data?.deploymentMode === 'cloud';
-
-  const query = useSynthesis(workspaceId, descriptor, activityDigest);
+  const query = useSynthesis(workspaceId, descriptor);
   const generate = useGenerateSynthesis(workspaceId, descriptor);
   const busy = useSynthesisGenerating(workspaceId, descriptor);
-  const usage = useAiUsage(activityDigest);
-  const outOfCredits =
-    usage.data?.summaryTurnLimit != null && (usage.data.summaryTurnsRemaining ?? 0) <= 0;
-
-  // Capability off: OSS renders the list alone (absence, never an error); cloud renders the one
-  // Pro nudge above it.
-  if (!activityDigest) {
-    if (!isCloud) return children == null ? null : <>{children}</>;
-    return (
-      <>
-        <p className="mb-2 text-[12px] text-gray-500 dark:text-gray-400">
-          <span className="mr-1 rounded bg-ai-signal/15 px-1 text-[11px] font-semibold text-ai-signal">
-            Pro
-          </span>
-          A summary of what this list adds up to is part of Pro.
-        </p>
-        {children}
-      </>
-    );
-  }
 
   const resp = query.data;
   const synthesis = resp?.enabled ? (resp.synthesis ?? null) : null;
-  // The plugin tier is off server-side (enabled:false), or the read failed: nothing extra — the
+  // The summary is off server-side (enabled:false), or the read failed: nothing extra — the
   // deterministic list stays primary (§8.20).
   if (query.isError || (resp != null && !resp.enabled)) {
     return children == null ? null : <>{children}</>;
@@ -121,11 +93,9 @@ export function SynthesisCard({
 
   const generateNotice = generate.data?.throttled
     ? 'A summary is already generating — showing the latest shortly.'
-    : generate.data?.creditsExhausted
-      ? 'Out of AI credits this month — the summary resumes on the 1st.'
-      : generate.data?.empty
-        ? 'Nothing to summarise in this scope yet.'
-        : null;
+    : generate.data?.empty
+      ? 'Nothing to summarise in this scope yet.'
+      : null;
 
   return (
     <>
@@ -135,9 +105,6 @@ export function SynthesisCard({
       >
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm font-semibold text-gray-800 dark:text-gray-100">{title}</span>
-          <span className="shrink-0 rounded bg-ai-signal/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-ai-signal">
-            Pro
-          </span>
           {synthesis && resp?.stale && (
             <span
               className="shrink-0 rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400"
@@ -149,13 +116,9 @@ export function SynthesisCard({
           <button
             type="button"
             onClick={() => generate.mutate()}
-            disabled={busy || outOfCredits || workspaceId == null}
+            disabled={busy || workspaceId == null}
             className="ml-auto rounded bg-ai-signal px-2.5 py-0.5 text-[11px] font-semibold text-white hover:opacity-90 disabled:opacity-50 dark:text-gray-950"
-            title={
-              outOfCredits
-                ? 'Out of AI credits — resets next month'
-                : 'Group this list into recurring clusters (runs the Haiku model; unchanged items cost nothing)'
-            }
+            title="Group this list into recurring clusters (runs the Haiku model; unchanged items are not re-read)"
           >
             {busy ? (
               'Summarising…'
@@ -177,11 +140,6 @@ export function SynthesisCard({
         )}
         {!generate.isError && generateNotice && (
           <div className="mt-1.5 text-[11px] text-gray-400">{generateNotice}</div>
-        )}
-        {outOfCredits && (
-          <div className="mt-1.5 text-[11px] text-amber-600 dark:text-amber-400">
-            Out of AI credits this month — any existing summary still shows.
-          </div>
         )}
 
         {synthesis ? (

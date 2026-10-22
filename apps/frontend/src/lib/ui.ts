@@ -50,19 +50,10 @@ import type {
   TimelinePr,
   User,
 } from '@pierre-review/shared';
-import { AI_CREDITS_PER_USD, reviewBotKind } from '@pierre-review/shared';
+import { reviewBotKind } from '@pierre-review/shared';
 
-// AI cost is conveyed in CREDITS, never dollars (1¢ = 5 credits ⇒ $1 = 500 credits), to
-// decouple the app's price from its underlying running cost. Raw USD stays in the data;
-// format it as credits at the display edge. Used everywhere AI spend surfaces (Track usage,
-// Claude Review) so the whole app is non-currency + consistent.
-export function usdToCredits(usd: number): number {
-  return Math.max(0, Math.round(usd * AI_CREDITS_PER_USD));
-}
-
-// ⚠ EXCEPT THE LOCAL AGENT RUNS (Claude Review, the review chat, AI Fix). Those spend the reader's
-// OWN Claude Code session or Anthropic API key and Limn bills nothing for them, so a credit figure
-// would invent a Limn price. They show plain money, as the provider would charge it.
+// AI runs spend the reader's OWN Claude Code session or Anthropic API key and Limn bills nothing
+// for them, so their cost shows as plain money, as the provider would charge it.
 export function formatUsd(usd: number): string {
   const v = Math.max(0, usd);
   if (v > 0 && v < 0.01) return 'under US$0.01';
@@ -296,7 +287,7 @@ export const MY_TURN_REASON_META: Record<MyTurnReason, { label: string; title: s
 // reads "CodeRabbit flagged…" (or "In-house / custom" / "Limn · Claude") not a bare bot login.
 //
 // ⚠ THIS MAP HAS TWO SIBLINGS AND THEY HAVE DRIFTED BEFORE: the backend's `labelFor`
-// (sync/reviewer-classify.ts, which also PERSISTS the label) and the Pro plugin's Slack
+// (sync/reviewer-classify.ts, which also PERSISTS the label) and the plugin's Slack
 // `BOT_LABELS` (packages/pro/src/slack/report.ts). The three UNBRANDED kinds at the bottom now
 // read one spelling from `GENERIC_REVIEWER_LABELS` in shared, because those were the two keys
 // the three copies disagreed on. The branded labels are still hand-kept in triplicate — change

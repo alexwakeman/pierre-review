@@ -4,8 +4,8 @@ import { api } from '../api/client.js';
 import { workspaceKey } from './useActivity.js';
 
 // Auto Claude review for ONE workspace — CORE (`workspaces.auto_review_enabled[_at]`, migration
-// 0074 / pg 0061), read and written on `/api/workspaces/:id/auto-review`. It moved out of the Pro
-// `pro_workspace_settings` row when Claude Review went free, so it no longer waits on the plugin.
+// 0074 / pg 0061), read and written on `/api/workspaces/:id/auto-review`. It moved out of the
+// `pro_workspace_settings` row.
 //
 // ⚠ THE KEY CARRIES `ws:<id>` AND THE FETCH IDLES ON AN UNRESOLVED SCOPE (`workspaceId === null`
 // means "not resolved yet"), like every scoped query here. `enabled` is the caller's `me.ai.enabled`

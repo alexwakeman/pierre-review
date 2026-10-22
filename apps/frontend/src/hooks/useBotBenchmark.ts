@@ -6,10 +6,8 @@ import type {
 import { api } from '../api/client.js';
 import { workspaceKey } from './useActivity.js';
 import { repoKeySlot } from './useBotTriage.js';
-import { useProCapabilities } from './useTriage.js';
 
-// The two reads behind **Bots → Benchmark**. Both are PAID on `botDepth` and both 402 server-side;
-// the `enabled` gates below are what stop the SPA finding that out by error on a timer.
+// The two reads behind **Bots → Benchmark**.
 //
 // ⚠ ONE FETCH ON MOUNT, AND ONLY ONE. The panel owns exactly `useBotBenchmarkPlacement` — the
 // placement response already carries the cohort's quantiles, median CI, direction, unit, band label
@@ -17,12 +15,6 @@ import { useProCapabilities } from './useTriage.js';
 // The Pending board is the precedent that makes this a rule rather than a preference: an eager
 // per-card fetch there turned a fifty-card board into 150 GitHub calls. The second read below is
 // CLICK-GATED and fetches nothing until a reader opens the definitions.
-//
-// ⚠ `useProCapabilities()` IS ALL-FALSE UNTIL /api/me RESOLVES, so an entitled account holds both
-// queries idle for one beat and then fires. That ordering is correct: the alternative is issuing a
-// request we may not be allowed to make. The panel is not mounted during that beat either — its
-// body routes through `useProGateState`, which waits on the same /api/me rather than painting a
-// lock at a paying customer.
 
 /** The canonical key for one placement scope. Every scoped key carries `ws:<id>`; `repoIds` gets
  *  its OWN slot because the same narrowing under two workspaces is two different answers. */
@@ -51,17 +43,12 @@ export function botBenchmarkPlacementQueryKey(
  * refreshes when the reader returns to the tab, which is when they are looking.
  */
 export function useBotBenchmarkPlacement(workspaceId: number | null, repoIds: number[] | null) {
-  const { botDepth } = useProCapabilities();
   return useQuery<BotBenchmarkPlacementResponse>({
     queryKey: botBenchmarkPlacementQueryKey(workspaceId, repoIds),
     queryFn:
       workspaceId == null
         ? skipToken
         : () => api.botBenchmarkPlacement(workspaceId, repoIds ?? undefined),
-    // ⚠ THE CAPABILITY, AND-ed IN HERE rather than left to the caller. `GET
-    // /api/pro/bot-benchmark/placement` 402s without `botDepth`, and a hook that leaves the gate to
-    // its call site is one forgotten argument away from an unentitled pane polling a 402.
-    enabled: botDepth,
     staleTime: 5 * 60_000,
   });
 }
@@ -80,13 +67,12 @@ export function useBotBenchmarkPlacement(workspaceId: number | null, repoIds: nu
  * the panel renders display LABELS from its own model and the DEFINITIONS from here.
  */
 export function useBotBenchmarkSpecs(open: boolean) {
-  const { botDepth } = useProCapabilities();
   return useQuery<BotBenchmarkResponse>({
     // No scope segment: the cohort artifact is identical for every tenant and takes no
     // `?workspace=`, so a `ws:` slot here would invent a scope the route does not have.
     queryKey: ['bot-benchmark-manifest'],
     queryFn: () => api.botBenchmark(),
-    enabled: botDepth && open,
+    enabled: open,
     // The artifact only changes when the image is rebuilt.
     staleTime: Infinity,
   });

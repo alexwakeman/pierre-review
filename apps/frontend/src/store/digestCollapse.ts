@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-// Per-repo collapse state for the Pro digest cards (the Feed collection + the single-repo
+// Per-repo collapse state for the digest cards (the Feed collection + the single-repo
 // console). Persisted to localStorage so a repo whose digest you collapsed (because its summary
 // is redundant to you) stays collapsed across reloads. Mirrors the timeline's collapsed-rows.
 const KEY = 'pierre:collapsedDigests';

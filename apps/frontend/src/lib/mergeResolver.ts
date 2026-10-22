@@ -82,7 +82,7 @@ export function wireDecisionFor(slot: SlotDecision): ConflictDecision | null {
  * `store/conflictResolver.ts`'s header insists on.
  */
 export interface HeldRegionText {
-  /** `${fileIndex}:${regionId}` → an accepted Pro suggestion's handle. */
+  /** `${fileIndex}:${regionId}` → an accepted suggestion's handle. */
   suggestionIds?: Readonly<Record<string, string>> | undefined;
   /** `suggestionId` → its lines. */
   suggestionLines?: Readonly<Record<string, string[]>> | undefined;

@@ -5,7 +5,7 @@ import { fixtures, installMockApi } from './mock-api.js';
 //   • a bare URL lands on the OPEN PRS tab (the default view); Activity opens on its Pending rail
 //     entry; an empty workspace lands on the guidance to move repos in
 //   • the rail reads Open PRs, Pending, This Sprint, Feed, Reports, Bots Monitoring
-//   • This Sprint is free (no Pro badge) and a legacy ?insightsTab=sprint|merged link lands on it
+//   • This Sprint is a fixed tab and a legacy ?insightsTab=sprint|merged link lands on it
 //   • the Open PRs trunk strip arrives collapsed, and expands on a click
 //   • a Feed link names `?activityRepo=feed`, and the consolidated stream renders there, flat —
 //     the stream ALONE (no daily brief, no trunk strip, no open-PR panel)
@@ -105,8 +105,7 @@ test.describe('Activity Feed / click-to-detail flows', () => {
         overlay(page)
           .locator('button[aria-pressed]')
           .evaluateAll((els) =>
-            // The LABEL span only: Reports and Bots Monitoring carry a Pro badge after it, and
-            // Open PRs a count.
+            // The LABEL span only: Open PRs carries a count after it.
             els.slice(0, 5).map((el) => (el.querySelector('.truncate')?.textContent ?? '').trim()),
           ),
       )

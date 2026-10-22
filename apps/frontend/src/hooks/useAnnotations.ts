@@ -10,7 +10,7 @@ import type {
 } from '@pierre-review/shared';
 import { api } from '../api/client.js';
 
-// The blast-radius IMPACT NOTE's storage (Pro; the prSummary capability) — the one kind left on
+// The blast-radius IMPACT NOTE's storage — the one kind left on
 // the annotations platform. ONE query per PR holds the stored note; the render site looks it up by
 // (kind, targetKind, targetId).
 //

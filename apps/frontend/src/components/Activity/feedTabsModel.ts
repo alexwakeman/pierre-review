@@ -1,8 +1,7 @@
 // The Feed rail's sub-tab strip, as pure decisions so they can be tested without a renderer.
 //
-// Two members: `feed` (the stream, the default) and `classification` ("Bot classification", FREE
-// on every tier — who counts as a bot in this Workspace, its role and its vendor). (The Pro
-// `themes` member — "Discussion themes" — is REMOVED; a legacy `?feedTab=themes` lands on the
+// Two members: `feed` (the stream, the default) and `classification` ("Bot classification" — who
+// counts as a bot in this Workspace, its role and its vendor). (The `themes` member — "Discussion themes" — is REMOVED; a legacy `?feedTab=themes` lands on the
 // Feed because the URL reader seats only listed values.)
 //
 // ⚠ THE VISIBLE TAB IS DERIVED, NEVER WRITTEN BACK. `effectiveFeedTab` falls back for the render

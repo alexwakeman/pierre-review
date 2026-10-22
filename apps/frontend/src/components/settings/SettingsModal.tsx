@@ -1,9 +1,8 @@
 import { useEffect } from 'react';
-import { useMe, useProCapabilities } from '../../hooks/useTriage.js';
+import { useMe } from '../../hooks/useTriage.js';
 import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
-import { useHasProWorkspaceSettings, useProSettings } from '../../hooks/useProSettings.js';
 import { SprintSection } from './SprintSection.js';
-import { SlackSettings } from './SlackSection.js';
+import { SlackSection } from './SlackSection.js';
 import { IssueLinksSection, ISSUE_TRACKER_SECTION_HEADING_ID } from './IssueLinksSection.js';
 import { AutoReviewSection } from './AutoReviewSection.js';
 import { BenchmarkConsentSection } from './BenchmarkConsentSection.js';
@@ -43,31 +42,12 @@ import type { SettingsFocus } from '../../store/settingsModal.js';
 // team's. Sections below it dropped the name from their titles; they keep it only in a sentence
 // that names a DIFFERENT workspace (see SlackSection's cap disclosure).
 //
-// ⚠ THE ORDER IS THE GRAIN, BUT THE GATES ARE UNCHANGED — a reorder that quietly widened one would
-// be a much worse bug than the confusion it fixed. Global half: GitHub App / benchmark consent /
-// your data stay CLOUD-ONLY; the large-PR threshold stays ungated in both modes on every tier.
-// Workspace half: the Pending mute, Chronology's hours and the Issue tracker are CORE/free, then
-// `workspaceInsights` / `slackDigest` exactly as before. (The tracker was behind `issueLinks` until
-// apiVersion 23 moved it into core — it no longer waits on the plugin at all.)
+// ⚠ THE ORDER IS THE GRAIN. Global half: GitHub App / benchmark consent / your data stay
+// CLOUD-ONLY; everything else shows in both modes. Workspace half: every section is free and reads
+// its own workspace row, so none of them waits on another's request.
 //
-// ⚠ THE GLOBAL HALF SITS ABOVE THE pro_settings LOADING GATE AND MUST STAY THERE. Every section in
-// it reads /api/me or /api/auth/providers, never `pro_settings` — which 404s with no plugin — so an
-// OSS install still gets its large-PR threshold, and a cloud account still gets export/delete, when
-// the Pro fetch fails outright. Anything moved above that gate must be independent of it; anything
-// moved below it waits on a request it does not need.
-//
-// ⚠ THE WORKSPACE HALF NOW HAS A FREE SECTION IN IT, AND SPLITTING ITS GATE WAS A CORRECTNESS FIX,
-// NOT A LAYOUT CHANGE. The half used to be ONE `hasWorkspaceSections` gate (three PAID caps) with
-// a `proReady` wait inside it, so a free per-workspace control literally could not be mounted
-// here: with no plugin the heading never rendered, and with a plugin present it would still have
-// waited on `/api/pro/settings` — a request it does not read and that 404s in OSS mode. That is
-// the same defect the global half was built to avoid, one grain over. So:
-//   • the HEADING renders whenever the SCOPE has resolved — there is always at least one free
-//     workspace section under it (the Pending mute), exactly as the large-PR threshold is what
-//     keeps the global half from ever being empty;
-//   • `proReady` now wraps ONLY the Pro sections, and its "unavailable" line speaks for them alone.
-// `scopeReady` still holds back the WHOLE half: nothing workspace-scoped may render OR be written
-// against an unresolved id.
+// `scopeReady` holds back the WHOLE workspace half: nothing workspace-scoped may render OR be
+// written against an unresolved id.
 //
 // ── TWO SECTIONS WERE DELETED HERE, NEITHER SHOULD RETURN ────────────────────────────────────
 // "Anthropic API key" — the BYO key stored in `~/.pierre-review/config.json` is RETIRED. Local
@@ -88,20 +68,8 @@ export function SettingsModal({
   focus?: SettingsFocus | null;
   onClose: () => void;
 }): JSX.Element {
-  const caps = useProCapabilities();
   const aiEnabled = useAiCapabilities().enabled;
   const isCloud = useMe().data?.deploymentMode === 'cloud';
-  // ⚠ THE FETCH IS STILL HERE, AND IT IS NOW PURELY A GATE. No section reads account
-  // `ProSettings` any more — the comparison-window mode was the last one and moved to the
-  // workspace row in plugin migration 0032. What it still buys is the CONNECTIVITY answer the
-  // Workspace half's PAID sections depend on: with no plugin (or a plugin that fails to bind) this
-  // 404s, and they render one honest "unavailable" line instead of three sections each
-  // discovering it separately. Keep it enabled only when there is a paid section to gate.
-  //
-  // ⚠ IT IS THE PRO INVENTORY ONLY, AND IT NO LONGER GATES THE HEADING. The free Pending-mute
-  // section lives under the same heading and must not wait on this request — see the note above.
-  const hasWorkspaceSections = useHasProWorkspaceSettings();
-  const proSettings = useProSettings(hasWorkspaceSections);
   // ⚠ `workspaceId === null` MEANS "NOT RESOLVED YET", NOT "NONE". Nothing scoped may render
   // against it and nothing may be WRITTEN against it — a PUT with no `?workspace=` is answered by
   // the account's DEFAULT workspace, so a save fired during resolution lands on a team the user
@@ -189,7 +157,6 @@ export function SettingsModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const proReady = proSettings.data != null;
   const scopeReady = workspaceId != null;
 
   return (
@@ -219,7 +186,7 @@ export function SettingsModal({
         </div>
 
         <div className="min-h-0 flex-1 space-y-4 overflow-auto px-4 py-3">
-          {/* ── GLOBAL. One account, every workspace. Nothing here reads pro_settings. ────── */}
+          {/* ── GLOBAL. One account, every workspace. ─────────────────────────────────────── */}
           {/* GitHub App install — CORE/free, cloud-only. Signing in via the App does NOT install
               it, and the install link otherwise lives only on the signed-out SignInGate, so a
               signed-in user has no other route to it. Self-gates on the App provider being
@@ -228,16 +195,12 @@ export function SettingsModal({
           {/* Cross-org benchmark consent — CORE/free, cloud-only, a plain /api/me flag. */}
           {isCloud && <BenchmarkConsentSection />}
           {/* Large-PR threshold — CORE/free and in BOTH modes (no `isCloud` gate: an
-              `npx pierre-review` user gets the flag, so they get its setting). ⚠ It is the reason
-              this modal is never empty on any tier, which is what lets the Pro half be gated
-              without gating the modal itself. */}
+              `npx pierre-review` user gets the flag, so they get its setting). */}
           <LargePrThresholdSection />
-          {/* Blast radius — free and /api/me-backed like the section above it, so it belongs on
-              this side of the pro-settings loading gate. */}
+          {/* Blast radius — /api/me-backed like the section above it. */}
           <BlastRadiusSection />
           {/* My Turn — which card types count as your turn, their order, and the ranking weights.
-              Free, account-grained and /api/me-backed like the two above it, so it sits on this
-              side of the pro-settings gate too. */}
+              Account-grained and /api/me-backed like the two above it. */}
           <MyTurnSection />
           {/* Local bot-comment scoring's one-time download. Free and account-level; renders nothing
               where there is nothing to set up (cloud, LIMN_ML_DISABLED). */}
@@ -253,10 +216,7 @@ export function SettingsModal({
               global section (there is always at least one — the large-PR threshold), and a second
               line 16px below it reads as a rendering glitch rather than a boundary. The heading
               and its scope sentence are what mark the half. */}
-          {/* ⚠ THE HEADING IS NOT GATED ON A CAPABILITY. There is always at least one free
-              workspace-scoped section beneath it (the Pending mute), so a heading over nothing is
-              not reachable — the same guarantee `LargePrThresholdSection` gives the global half.
-              It IS gated on the scope resolving, below. */}
+          {/* The heading is gated on the scope resolving, below, and on nothing else. */}
           <section className="pt-1">
             <div className="mb-3">
               <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-100">
@@ -287,55 +247,34 @@ export function SettingsModal({
               </p>
             ) : (
               <div className="space-y-4">
-                {/* Pending mute — CORE/free, both modes, every tier, and deliberately ABOVE the
-                    pro-settings gate for the same reason the large-PR threshold sits above it in
-                    the global half: it reads `/api/workspaces`, never `pro_settings`, so it must
-                    not wait on a request that 404s with no plugin. It is also what makes this
-                    heading non-empty on `npx pierre-review`. */}
+                {/* Pending mute — reads `/api/workspaces`. */}
                 <PendingMuteSection />
-                {/* Chronology's working hours and budgets — CORE, free to set, and read from the
-                    workspace row, so it too sits above the pro-settings gate. */}
+                {/* Chronology's working hours and budgets, read from the workspace row. */}
                 <FlowSettingsSection />
-                {/* The issue tracker for THIS workspace — CORE and free on every tier, in both
-                    modes, read from core's `workspace_trackers` row (apiVersion 23), so it sits
-                    above the pro-settings gate with the other free sections. */}
+                {/* The issue tracker for THIS workspace, read from core's `workspace_trackers`
+                    row. */}
                 <IssueLinksSection />
-                {/* SonarCloud for THIS workspace — CORE, free, both modes, its own core row
-                    (`workspace_sonar`), so it too sits above the pro-settings gate. */}
+                {/* SonarCloud for THIS workspace — its own row (`workspace_sonar`). */}
                 <SonarSection />
-                {/* Dependency auto-merge — CORE, free, both modes, read from the workspace row. */}
+                {/* Dependency auto-merge, read from the workspace row. */}
                 <DependencyAutoMergeSection />
-                {/* ⚠ ONLY THE PAID SECTIONS WAIT ON THE PLUGIN, and this line speaks for them
-                    alone — it used to speak for the whole half, which is precisely why a free
-                    section could not live here. */}
-                {hasWorkspaceSections && !proReady && (
-                  <p className="py-2 text-center text-xs text-gray-400">
-                    {proSettings.isError
-                      ? 'Workspace settings unavailable.'
-                      : 'Loading this workspace’s settings…'}
-                  </p>
-                )}
                 {/* The sprint grid for THIS workspace: cadence, phase anchor, and — since
                     plugin migration 0032 — the comparison-window mode that composes with them.
                     One grain, one Save. */}
-                {proReady && caps.workspaceInsights && <SprintSection />}
+                <SprintSection />
                 {/* The Slack digest for THIS workspace (`/api/pro/slack/target?workspace=`),
                     schedule and content together: the "Review bots" block is a field on the same
                     row (plugin migration 0033). ⚠ IT USED TO EDIT THE ACCOUNT'S WHOLE SELECTION
                     — a multi-select plus an "apply this webhook to all" button — so a Save could
                     add, or by omission silently cancel, deliveries for teams the reader was not
                     looking at. One row now. The cap disclosure stayed: with no picker there is no
-                    screen listing every delivery, and each one is a billed report on every
-                    send. */}
-                {/* ⚠ STRICTLY PRO, VISIBLE-BUT-LOCKED: an unentitled reader sees the Slack
-                    section as a lock panel (Slack is an org feature), never the form. */}
-                <SlackSettings ready={proReady} />
-                {/* Auto Claude review of new human PRs in THIS workspace — CORE/free, read from
-                    the workspace row (core migration 0074), so it does NOT wait on the plugin
-                    gate. Claude Review is local-only, so this appears only where it can run. */}
+                    screen listing every delivery. */}
+                <SlackSection />
+                {/* Auto Claude review of new human PRs in THIS workspace, read from the workspace
+                    row (core migration 0074). Shown only where Claude Review can run. */}
                 {aiEnabled && <AutoReviewSection />}
-                {/* Reference docs in Claude Review — CORE, local-only like the review itself, read
-                    from the workspace row (`docs_in_review`), OFF by default. */}
+                {/* Reference docs in Claude Review — local-only like the review itself, read from
+                    the workspace row (`docs_in_review`), OFF by default. */}
                 {aiEnabled && <ReferenceDocsSection />}
               </div>
             )}

@@ -70,9 +70,8 @@ import { anchorLineFromHunk } from '../lib/diff.js';
 import type { DiffFocusTarget } from './diff/FileDiffView.js';
 import { PrCommentComposer } from './PrCommentComposer.js';
 import { SkeletonBlock, SkeletonLine } from './Skeleton.js';
-// The two Pro-only agentic tabs are the heaviest components in the app (~3k LOC combined,
-// pulling their own deep imports) and are gated behind Pro capabilities most sessions never
-// open. Lazy-load them so they leave the initial bundle and fetch on first open. (Named
+// The two agentic tabs are the heaviest components in the app (~3k LOC combined, pulling their
+// own deep imports) and most sessions never open them. Lazy-load them so they leave the initial bundle and fetch on first open. (Named
 // exports → mapped to `default` for React.lazy.)
 const ClaudeReviewTab = lazy(() =>
   import('./ClaudeReviewTab.js').then((m) => ({ default: m.ClaudeReviewTab })),
@@ -703,7 +702,7 @@ export function PrDetail({
   // with `db/blast-radius.ts` on any file the two lists do not share. See usePrBlast's header.
   const blastFields = usePrBlast(prId);
   const { data: repos } = useRepos();
-  // The agentic tabs are FREE and local-only: `me.ai.enabled`, never a Pro capability. Locally they
+  // The agentic tabs are local-only: `me.ai.enabled`. Locally they
   // always list; a missing runtime or credential is handled INSIDE the tab, in place of Run.
   const aiEnabled = useAiCapabilities().enabled;
   const claudeReviewEnabled = aiEnabled;
@@ -1035,7 +1034,7 @@ export function PrDetail({
 
   const usersById = useMemo(() => indexUsers(pr?.users), [pr]);
 
-  // PR-scoped bot behaviour (EXPERIMENTAL, CORE — not Pro): a CHEAP client gate that ENABLES the
+  // PR-scoped bot behaviour (EXPERIMENTAL): a CHEAP client gate that ENABLES the
   // fetch (the tab's actual visibility is the server's confirmed count, see botTabVisible below).
   // Reviews carry the precise account-scoped `automatedKind`; a thread-opening / commenting bot
   // falls back to the global users.isBot. Known residual: a reviewer manually classified as
@@ -1368,10 +1367,10 @@ export function PrDetail({
             expandable
           />
         </div>
-        {/* The Pro half of blast radius, on its own line under the metadata row — two sentences
+        {/* The AI half of blast radius, on its own line under the metadata row — two sentences
             need the width, and a click-gated button does not belong inline among the counts.
             ⚠ `hasBlast` gates it on the CHIP having something to explain: with no measurement
-            there is no chip and no button, which is the same silence the free half keeps. */}
+            there is no chip and no button. */}
         <BlastImpactNote prId={prId} hasBlast={blastFields.blast != null} />
       </div>
 

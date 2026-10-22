@@ -1,6 +1,4 @@
 import type { BotThemesResult } from '@pierre-review/shared';
-import { useProCapabilities } from '../../hooks/useTriage.js';
-import { useAiUsage } from '../../hooks/useAiUsage.js';
 import { useFilters } from '../../store/filters.js';
 import { usePinnedTabs } from '../../store/pinnedTabs.js';
 import { useBotThemes, useRefreshBotThemes } from '../../hooks/useBotThemes.js';
@@ -9,7 +7,7 @@ import { InfoButton } from '../InfoModal.js';
 import { ThemesReportBody, ThemesSkeleton } from './ThemesReportView.js';
 import { prRefToMeta } from './ThemeThreadsDetail.js';
 
-// The Bots "What they're flagging" panel (Pro Haiku) — the QUALITATIVE layer of the Bots console:
+// The Bots "What they're flagging" panel (Haiku) — the QUALITATIVE layer of the Bots console:
 // what the automated reviewers are actually flagging (nature + criticality + where), read from the
 // deduped comment stream. Every deterministic figure (per-bot volume, area split, coverage, the
 // per-theme comment counts) comes straight from the build fold; the themes, narrative AND the
@@ -19,9 +17,6 @@ import { prRefToMeta } from './ThemeThreadsDetail.js';
 // ── IT OWNS THE `Bots → Themes` SUB-TAB ────────────────────────────────────────────────────────
 // It used to be a card at the TOP of the Measure (`roi`) surface, above the caution banners, the
 // ROI table, the charts and the bot feed. It is now the whole body of its own sub-tab.
-//   • STRICTLY Pro, on `activityDigest` (the AI-summary capability, NOT `botDepth`), and the ONE
-//     gate is `return null`: the tab is LISTED only when entitled, so an unentitled reader never
-//     mounts this. The free-cloud nudge this panel carried over from `SynthesisCard` is DELETED — see the gate below for why it may not come back.
 //   • Scoped to the current WORKSPACE + window + `repoIds` narrowing: the per-repo Bots console tab
 //     passes `[repoId]` so it measures that repo alone (the cached report is keyed with the same
 //     narrowing on both sides — the client's repoKeySlot and the plugin's scope_key `|r:` suffix).
@@ -73,33 +68,17 @@ function BotCoverageLine({ result }: { result: BotThemesResult }): JSX.Element {
 }
 
 export function BotThemesPanel({ repoIds }: { repoIds: number[] | null }): JSX.Element | null {
-  const { activityDigest } = useProCapabilities();
   const window = useFilters((s) => s.botAnalyticsWindow);
   const workspaceId = useFilters((s) => s.workspaceId);
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
   const openThemeThreads = useFilters((s) => s.openThemeThreadsDetail);
 
-  const query = useBotThemes(window, activityDigest, workspaceId, repoIds);
+  const query = useBotThemes(window, true, workspaceId, repoIds);
   // Generation is the one BILLED path here, so it refuses outright while the workspace is
   // unresolved rather than spending on the account's Default (see useRefreshBotThemes).
   const refresh = useRefreshBotThemes(window, workspaceId, repoIds);
-  const usage = useAiUsage(activityDigest);
-  const outOfCredits = usage.data?.summaryTurnLimit != null && (usage.data.summaryTurnsRemaining ?? 0) <= 0;
 
-  // Capability off: nothing, on EVERY deployment mode — absence, never an error, and nothing is
-  // fetched either way. A single `return null`: the tab
-  // that mounts this panel is LISTED ONLY when `activityDigest` holds, so an unentitled reader
-  // never reaches this component at all.
-  //
-  // ⚠ THE FREE-CLOUD NUDGE THAT USED TO SIT HERE IS DELETED, not disabled. It was
-  // `SynthesisCard`'s posture, carried over from the days this panel was a card at the TOP of the
-  // Measure surface, where a one-line upsell above the free measurements had somewhere to sit. On
-  // a tab of its own it had become unreachable code that, if the tab were ever listed
-  // unconditionally, would quietly turn Themes into a SEVENTH visible-but-locked surface —
-  // `components/ProGate.tsx` holds that set at six and says the next one needs its own argument.
-  if (!activityDigest) return null;
-
-  // The plugin tier is off server-side (enabled:false), or the read failed: nothing. An empty tab
+  // The summary is off server-side (enabled:false), or the read failed: nothing. An empty tab
   // body rather than an error box — this is a cached READ, and the Generate button it would be
   // hiding is the only thing a reader could do about it anyway.
   const resp = query.data;
@@ -131,19 +110,12 @@ export function BotThemesPanel({ repoIds }: { repoIds: number[] | null }): JSX.E
           </p>
         </InfoButton>
         <span className="text-[11px] text-gray-500 dark:text-gray-400">AI read</span>
-        <span className="shrink-0 rounded bg-ai-signal/10 px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-ai-signal">
-          Pro
-        </span>
         <button
           type="button"
           onClick={() => refresh.mutate()}
-          disabled={busy || outOfCredits || workspaceId == null}
+          disabled={busy || workspaceId == null}
           className="ml-auto rounded bg-ai-signal px-3 py-1 text-[11px] font-semibold text-white hover:opacity-90 disabled:opacity-50 dark:text-gray-950"
-          title={
-            outOfCredits
-              ? 'Out of AI credits — resets next month'
-              : 'Summarise what the review bots are flagging in this scope (runs the Haiku model; unchanged comments cost nothing)'
-          }
+          title="Summarise what the review bots are flagging in this scope (runs the Haiku model; unchanged comments are not re-read)"
         >
           {busy ? (
             'Summarising…'
@@ -164,11 +136,6 @@ export function BotThemesPanel({ repoIds }: { repoIds: number[] | null }): JSX.E
         </div>
       )}
       {!refresh.isError && refresh.notice && <div className="mt-2 text-[11px] text-gray-400">{refresh.notice}</div>}
-      {outOfCredits && (
-        <div className="mt-2 text-[11px] text-amber-600 dark:text-amber-400">
-          Out of AI credits this month — the summary resumes on the 1st. Any existing summary still shows.
-        </div>
-      )}
 
       {busy && !result ? (
         <ThemesSkeleton />

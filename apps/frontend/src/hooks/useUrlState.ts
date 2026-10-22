@@ -367,8 +367,7 @@ export function readFromUrl(): Partial<FilterState> {
     // and was not parsed here either. That made the period report unforwardable — `?report=` names
     // a period on a console the link could not select, so the recipient landed on the Feed and saw
     // no report at all. It is parsed and emitted now. (The one-shot landing default that used to
-    // auto-select this rail entry for Pro accounts is GONE — the store default is 'open-prs' on
-    // every tier.)
+    // auto-select this rail entry is GONE — the store default is 'open-prs'.)
     else if (activityRepo === 'insights') out.activityRepoId = 'insights';
     // ('sprint' is NOT a rail value any more: This Sprint is a fixed tab, and a legacy
     // `?activityRepo=sprint` lands on it via landingTabFromUrl. The rail keeps its default.)
@@ -433,23 +432,19 @@ export function readFromUrl(): Partial<FilterState> {
     if (Number.isFinite(n)) out.feedIsolatedPrId = n;
   }
   // The two Activity sub-tab strips. ⚠ THE RAW CHOICE IS SEATED HERE, never a corrected one:
-  // both consumers DERIVE a visible tab from the capabilities they can see (BotsView's
-  // `effectiveTab`, ActivityView's `effectiveFeedTab`), and writing a correction back would
-  // permanently forget a choice the moment a capability blinked.
+  // both consumers DERIVE a visible tab (BotsView's `effectiveTab`, ActivityView's
+  // `effectiveFeedTab`), and writing a correction back would permanently forget a choice.
   const feedTab = p.get('feedTab');
   if ((FEED_INNER_TABS as readonly string[]).includes(feedTab ?? '')) {
     out.feedInnerTab = feedTab as FeedInnerTab;
   }
-  // ⚠ 'benchmark' IS PARSED ON EVERY TIER, capability or not. It is one of the visible-but-locked
-  // members, so an unentitled bookmark must land on the tab it names and meet the LOCK there —
-  // dropping it here would silently seat 'roi' and explain nothing.
   const botsTab = p.get('botsTab');
   if ((BOTS_INNER_TABS as readonly string[]).includes(botsTab ?? '')) {
     out.botsInnerTab = botsTab as BotsInnerTab;
   }
   // ⚠ LEGACY: `?activityRepo=bots&botsTab=settings` was Bots Monitoring → Settings, the bot
-  // classification screen. Classification is FREE and lives on the Feed now, so that bookmark (and
-  // the history entries Back replays) lands on Feed → Bot classification instead of a Pro lock.
+  // classification screen. Classification lives on the Feed now, so that bookmark (and the history
+  // entries Back replays) lands on Feed → Bot classification.
   else if (botsTab === 'settings' && activityRepo === 'bots') {
     out.activityRepoId = 'feed';
     out.feedInnerTab = 'classification';

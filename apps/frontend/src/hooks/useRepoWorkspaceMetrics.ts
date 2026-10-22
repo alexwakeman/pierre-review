@@ -6,7 +6,7 @@ import { api } from '../api/client.js';
 // repo — powers the per-repo Activity console's Insights-style panel. Same refresh cadence as
 // useWorkspaceInsights (computed on read from already-synced data; refetch on the main sync
 // cadence + window focus); cached per repo. Returns `{ enabled, metrics }` — `enabled:false` when
-// the Pro plugin/capability is off, `metrics:null` when the repo isn't owned / has no data.
+// the server has the surface off, `metrics:null` when the repo isn't owned / has no data.
 //
 // ⚠ IT TAKES NO WORKSPACE, and must not: the route holds a repo id and resolves that repo's OWN
 // workspace server-side (a repo belongs to exactly one). Passing the SELECTED workspace here would

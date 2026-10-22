@@ -5,12 +5,10 @@ import type {
   WorkspaceMetricsResponse,
 } from '@pierre-review/shared';
 import { api } from '../api/client.js';
-import { useProCapabilities } from './useTriage.js';
 
 // The workspace flow-metric header (DORA-ish tiles + trend charts) plus the per-repo "where is the
 // work happening?" breakdown under it, rendered in the "Flow metrics" section of the REPORTS rail
-// entry. PRO on `periodReports` with the rest of Reports: the route 402s without it, so the
-// capability is ANDed into `enabled` HERE (one place for every caller), or the SPA polls a 402.
+// entry.
 //
 // ⚠ ONE FETCH FOR THE WHOLE SECTION. The tiles, the 12-week trends and the per-repo pair all ride
 // this ONE response, so they can never be a refresh apart — and the per-repo half costs no extra
@@ -24,20 +22,17 @@ import { useProCapabilities } from './useTriage.js';
 // under whatever workspace resolves a moment later.
 export function useWorkspaceMetrics(workspaceId: number | null) {
   const id = workspaceId;
-  const { periodReports } = useProCapabilities();
   return useQuery<WorkspaceMetricsResponse>({
     queryKey: ['workspace-metrics', `ws:${id}`],
     queryFn: id == null ? skipToken : () => api.workspaceMetrics(id),
-    enabled: periodReports,
     refetchInterval: 5 * 60_000, // main sync cadence
     refetchIntervalInBackground: false,
     staleTime: 60_000,
   });
 }
 
-// This Sprint → "Merged so far": every PR merged in the workspace's reporting window. FREE on every
-// tier (the route never 402s), so no capability is ANDed into `enabled`. Same `ws:<id>` key
-// discipline and `skipToken` hold as `useWorkspaceMetrics`.
+// This Sprint → "Merged so far": every PR merged in the workspace's reporting window. Same
+// `ws:<id>` key discipline and `skipToken` hold as `useWorkspaceMetrics`.
 export function useMergedPrs(workspaceId: number | null) {
   const id = workspaceId;
   return useQuery<MergedPrsResponse>({
@@ -49,10 +44,9 @@ export function useMergedPrs(workspaceId: number | null) {
   });
 }
 
-// Workspace review-intelligence "Insights" (Pro; the `workspaceInsights` capability). The cards
-// are computed on read from already-synced data, so refetching on the main sync cadence (~5 min)
-// keeps the board fresh without a manual refresh; also refetches on window focus. `enabled` is
-// gated on the capability by the caller (hidden entirely in OSS / when Pro is off).
+// Workspace review-intelligence "Insights". The cards are computed on read from already-synced
+// data, so refetching on the main sync cadence (~5 min) keeps the board fresh without a manual
+// refresh; also refetches on window focus.
 //
 // `workspaceId` narrows both the metrics header and every insight card to that workspace's repos.
 // It is a plain integer on the wire (`?workspace=<id>`) — there is no scope union, no sentinel and

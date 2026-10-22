@@ -16,10 +16,8 @@ import { api } from '../api/client.js';
 import { useAiCapabilities } from './useAiCapabilities.js';
 import { workspaceKey } from './useActivity.js';
 
-// This Sprint (a fixed tab beside Activity) — the sprint GRAPH. FREE on every tier: no route here
-// 402s, so no hook ANDs a Pro capability into `enabled`. "Ask Claude about this sprint" is agentic and
-// LOCAL-ONLY (its route is not registered in cloud), so it gates on `me.ai.enabled` — the agentic gate,
-// never a Pro one. ("Check against code" and the drawer were REMOVED; a ticket opens in the story view.)
+// This Sprint (a fixed tab beside Activity) — the sprint GRAPH. "Ask Claude about this sprint" is
+// agentic and LOCAL-ONLY (its route is not registered in cloud), so it gates on `me.ai.enabled`. ("Check against code" and the drawer were REMOVED; a ticket opens in the story view.)
 //
 // ⚠ SHARED MUTATION KEYS. The UI reads `useIsMutating` — never a per-mount `isPending`, which resets on
 // a tab switch mid-request and would offer a second billed run.
@@ -161,7 +159,6 @@ export function useSprintAiOn(): boolean {
  *  its prior turns; the server caps how many it reads (`SPRINT_ASK_MAX_TURNS`). Shared mutation key per
  *  workspace, so a second mount cannot fire a second billed ask. */
 export function useSprintAsk(workspaceId: number | null) {
-  const qc = useQueryClient();
   return useMutation<SprintAskResponse, Error, { question: string; history: SprintAskTurn[] }>({
     mutationKey: ['sprint-ask', workspaceKey(workspaceId)],
     retry: false,
@@ -179,7 +176,6 @@ export function useSprintAsk(workspaceId: number | null) {
         costUsd: data.costUsd,
         trimmedTurns: data.trimmedTurns,
       });
-      void qc.invalidateQueries({ queryKey: ['ai-usage'] });
     },
   });
 }
