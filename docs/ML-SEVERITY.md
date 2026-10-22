@@ -10,8 +10,10 @@ render on the comments themselves and roll up on the Bots interface.
 The classifier is its own repo, **[`pierre-ml`](https://github.com/alexwakeman/pierre-ml)**,
 vendored here as the **`packages/ml`** submodule: a fine-tuned ModernBERT (ONNX int8, CPU)
 severity model plus a deterministic marker-based category parser, exposed as the
-**`severity-api`** microservice. It is stateless — text in, labels out — and this repo owns all
-persistence. It builds, versions and deploys on its own; the submodule is a pinned pointer, not
+**`severity-api`** microservice. The backend runs the SAME model in-process through a Node port
+(`ml/`, [ML-NODE-PORT.md](ML-NODE-PORT.md)), which is the default; the Python service is an opt-in
+HTTP scorer. Either way it is stateless — text in, labels out — and this repo owns all
+persistence. `packages/ml` builds and versions on its own; the submodule is a pinned pointer, not
 a merge of the two codebases.
 
 > Read `packages/ml/docs/SEVERITY_API_INTEGRATION.md` for the service's own contract
@@ -21,26 +23,24 @@ a merge of the two codebases.
 
 ---
 
-## Availability — and why `npx` doesn't get it
+## Availability — two scorers, one seam
 
-| | severity-api | Enrichment |
+| | Scorer | Enrichment |
 |---|---|---|
-| **cloud** (Railway) | `severity-api` service, private DNS | on |
-| **local dev** (this checkout + the sibling repo) | `127.0.0.1:8799` via `serve_local.sh` | on |
-| **`npx limn-review`** | none — the published package ships no model | **off** |
+| **`npx limn-review`** | the LOCAL model, after a one-time ~240 MB download ("Set up" in Settings → Bot comment scoring, or `limn ml install`) | on once set up |
+| **`pnpm dev`** | the LOCAL model, read straight from `packages/ml/serving_assets` (or `LIMN_ML_MODELS_DIR`) — nothing to download | on |
+| **opt-in HTTP** | the Python `severity-api` at `SEVERITY_API_URL` (`PIERRE_ML_HTTP=1` in dev starts it on `:8799` and sets `LIMN_ML_SCORER=http`; or a rented endpoint for a large backlog) | on |
 
-**The gate is one env var: `SEVERITY_API_URL`.** Unset ⇒ no worker is scheduled, `/api/me`
-reports `mlSeverity: false`, and the SPA issues zero ML queries. That is also what keeps it
-dark under `npx`: the npm package contains no model, no Python, and no service — and
-`config.ts` resolves its `.env` search paths against the **install** directory, so an npx user
-has nowhere to put the variable even if they knew it (the README tells npx users to pass vars
-inline, which is why this is a soft gate rather than a hard packaged-build check).
+`ml/scorer.ts` picks: `LIMN_ML_SCORER=auto` (default) takes the local model when it is ready, else
+the HTTP service when `SEVERITY_API_URL` is set, else nothing; `local` / `http` force one.
+`LIMN_ML_DISABLED=true` turns the local scorer off; `ML_SEVERITY_DISABLED=true` drops the URL.
+⚠ **Availability CHANGES AT RUNTIME** (a "Set up" mid-session), so every gate asks
+`isMlScoringAvailable()` when it matters; the cron registers on `isMlScoringPossible()`. With
+nothing available `/api/me` reports `mlSeverity: false` and the SPA issues zero ML queries.
 
-`ML_SEVERITY_DISABLED=true` is the kill switch for a deployment that has the URL set.
-
-The two read routes stay **registered in every mode** and answer honestly when the service is
-absent (`enabled: false`, empty label sets) rather than 404ing, so a deployment that gains the
-service later needs no client change. The SPA's gate is `MeResponse.mlSeverity`, never a 404.
+The two read routes stay **always registered** and answer honestly when no scorer is available
+(`enabled: false`, empty label sets) rather than 404ing, so an install that sets the scorer up
+later needs no client change. The SPA's gate is `MeResponse.mlSeverity`, never a 404.
 
 ---
 
@@ -61,7 +61,7 @@ and its cost tracks **total text**, not item count:
 | 32 long (~1.4 k chars each) | 28.4 s | 887 ms |
 
 A real account's bot corpus in this repo's own dev database is ~17.5 k items ≈ 7 M chars — over
-an hour of inference locally, perhaps 15–25 min on the deployed service. Two things make that
+an hour of inference on a laptop CPU. Two things make that
 fatal inline:
 
 - `persistPr` runs **entirely inside `runTransaction`**, which on SQLite is a manual
@@ -156,7 +156,7 @@ The worker therefore:
 3. **sorts the pool by body length** so each batch is internally uniform,
 4. fills batches to `ML_BATCH_MAX_CHARS` (24 000) **and** `ML_BATCH_MAX_ITEMS` (128, service
    cap 256),
-5. runs `ML_CONCURRENCY` (2 — the deployed service runs 2 uvicorn workers; more just queues)
+5. runs `ML_CONCURRENCY` (2 — the service runs 2 uvicorn workers; more just queues)
    requests at a time until `ML_TICK_BUDGET_MS` (90 s) is spent.
 
 Measured effect of step 3 on the dev corpus: **482 labels in 71 s** (≈6.8 items/s) versus the
@@ -164,7 +164,7 @@ Measured effect of step 3 on the dev corpus: **482 labels in 71 s** (≈6.8 item
 
 **Tenant fairness.** A tick's budget is finite and one workspace can eat a whole pool of it, so
 the account list is walked from a **rotating cursor** rather than always from account 1 —
-otherwise a busy tenant at the front starves everyone behind it not just this tick but every
+otherwise a busy workspace at the front starves everyone behind it not just this tick but every
 tick. Same reasoning as the auto-merge runner's least-recently-checked ordering; the cursor is
 process-local and a restart resetting it is harmless.
 
@@ -211,8 +211,8 @@ exactly the user-defined bots the feature is meant to cover.
 
 ## Data model
 
-One new core table, **`ml_comment_labels`** (schema.sqlite.ts / schema.pg.ts;
-migrations `0047` / pg `0034`). One row per classified target.
+One new core table, **`ml_comment_labels`** (schema.sqlite.ts;
+migrations `0047`). One row per classified target.
 
 | column | notes |
 |---|---|
@@ -271,7 +271,7 @@ enforces FKs.
 |---|---|
 | `GET /api/prs/:id/ml-labels` | **THE per-PR index** → `PrMlLabelsResponse`. Every badge on the page reads this one query (React Query dedupes; `staleTime: Infinity`), so a 60-thread PR costs one request, not 60. A target with no label is simply absent. Ownership 404 via the getter. Carries the vendor's own badge (`vendorSeverity` / `vendorSeverityConfidence`, both nullable) alongside ours, purely so the client can render the disagreement. Rate tier `read` — recorded explicitly, not inherited, because it sits inside the `/api/prs/<id>/` family whose other members hydrate from GitHub |
 | ~~`GET /api/bot-severity`~~ | **DELETED** (the consolidation cut list). The Bots rail's severity surface lives entirely on `/api/bot-analytics` (the WINDOWED `ml` block + per-vendor `ml*` fields, computed by `getMlWindowAggregates`); a corpus-wide, unwindowed twin with no SPA consumer was one more predicate to hold in parity for zero renderers. `getBotSeverityRollup` STAYS in `db/ml-labels.ts` as the documented reference for the findings-only exclusion semantics the merged fold mirrors; `useBotSeverity`/`botSeverityKey` and the client method are gone with the route |
-| `GET /api/bot-analytics/vendor/:key/comments?window&workspace&repoIds[&fromMs&toMs]` | The per-bot COMMENTS drill-down → `BotVendorCommentsResponse`: everything one automated reviewer said in the ROI window (inline review comments with path + thread state, PR comments, non-empty review bodies), each row's `MlLabel` shipped **INLINE** via a LEFT JOIN on `(account_id, target_kind, target_id)` — one request, never the per-PR index per row. Capped 3 000/source, newest-first, `truncated` flag. `key` = `u<userId>` \| `'pierre'` (the sentinel answers empty — verbatim reviews are human-posted); anything else 400s. Lives in `db/ml-labels.ts` (`getBotVendorComments`) — deliberately NOT a re-export of `getBotReviewComments`, whose row shape is lockstepped into `packages/pro` and which is role-`'review'` while this also serves quality-check rows. Its `window` parameter was widened to the `getBotAnalytics` form (`BotWindowKind | {kind, fromMs, toMs}`) so the People report's per-bot evidence cards can cover a COMPLETED period; the optional `fromMs`/`toMs` query pair is route-validated (only-together, ordered, span ≤ 200d, else **400**) and applied under the `toBound` rule below. ⚠ **Rate tier `search`** (bodies + a three-way label join); its `/prs` sibling stays `read` (metadata only). Pinned in `rate-limit.test.ts` |
+| `GET /api/bot-analytics/vendor/:key/comments?window&workspace&repoIds[&fromMs&toMs]` | The per-bot COMMENTS drill-down → `BotVendorCommentsResponse`: everything one automated reviewer said in the ROI window (inline review comments with path + thread state, PR comments, non-empty review bodies), each row's `MlLabel` shipped **INLINE** via a LEFT JOIN on `(account_id, target_kind, target_id)` — one request, never the per-PR index per row. Capped 3 000/source, newest-first, `truncated` flag. `key` = `u<userId>` \| `'pierre'` (the sentinel answers empty — verbatim reviews are human-posted); anything else 400s. Lives in `db/ml-labels.ts` (`getBotVendorComments`) — deliberately NOT a re-export of `getBotReviewComments`, whose row shape is hand-mirrored in `platform/bot-themes/build.ts` and which is role-`'review'` while this also serves quality-check rows. Its `window` parameter was widened to the `getBotAnalytics` form (`BotWindowKind | {kind, fromMs, toMs}`) so the People report's per-bot evidence cards can cover a COMPLETED period; the optional `fromMs`/`toMs` query pair is route-validated (only-together, ordered, span ≤ 200d, else **400**) and applied under the `toBound` rule below. ⚠ **Rate tier `search`** (bodies + a three-way label join); its `/prs` sibling stays `read` (metadata only). Pinned in `rate-limit.test.ts` |
 | `GET /api/ml-status` | The worker's live state → `MlEnrichmentStatus` (incl. `unscorable`, the NULL-body legacy population — never part of `pending`), so the sync UI can show the scoring pass (above). **NO scope parameter** — the worker walks every workspace, so a workspace-scoped backlog would under-report the work actually running. Same `search` tier as the rollup, for the same reason (its backlog half is those unlabelled-count joins, once per workspace) — plus a ~3 s per-account cache on the scan, because this one is POLLED and a tier bounds request count, not per-request work |
 
 Both are **pure reads**. There is no generate endpoint and no mutating verb: the model is only
@@ -332,14 +332,11 @@ attaches stored labels to a handful of capped comment rows — same coercions, o
   non-summary comments carries a selected severity (not when its *worst* equals it — filtering
   to "major" should surface the thread with one major among five nits). The row hides itself
   entirely when nothing on the PR is labelled.
-- **The merged Bots ROI table (`BotRoiPanel`) — PAID (`botDepth`)** — the severity surface on the
-  Bots rail. ⚠ **THIS IS WHERE THE TIER LINE FALLS, AND IT IS A GRAIN LINE, NOT A FEATURE LINE.**
+- **The merged Bots ROI table (`BotRoiPanel`)** — the severity surface on the Bots rail.
   Everything ABOVE this bullet — the per-COMMENT badge, `ThreadList`'s severity pills, the per-PR
-  `BotTriageCard` grade, all served by the untouched, free `GET /api/prs/:id/ml-labels` — stays
-  FREE ON EVERY TIER: the ruler is free. Everything in THIS bullet is the workspace-grain
-  SCOREBOARD folded from those labels, and it is paid: the `MlTotalsStrip`, the per-vendor `ml*`
-  columns, the Inflation column *counts included*, and the flagging drill-downs behind them. An
-  unentitled `/api/bot-analytics` carries no `ml` block and no `vendors[]` at all. The
+  `BotTriageCard` grade — is served by `GET /api/prs/:id/ml-labels`; everything in THIS bullet is
+  the workspace-grain SCOREBOARD folded from those labels: the `MlTotalsStrip`, the per-vendor
+  `ml*` columns, the Inflation column, and the flagging drill-downs behind them. The
   old standalone `BotSeverityPanel` (its own `/api/bot-severity` fetch, corpus-wide while every
   panel around it was windowed) is RETIRED; what survives, all computed from the ONE windowed
   `/api/bot-analytics` response (`ml` block + per-vendor `ml*` fields), is:
@@ -377,20 +374,17 @@ attaches stored labels to a handful of capped comment rows — same coercions, o
     The gate reads the RAW share, not the rounded `mlNitPct` the column shows, and never
     `vendorSeverity`. Matrix pinned by `bot-analytics-verdict.test.ts`; the fold, the split and
     the overlap count by `bot-analytics-ml.test.ts`.
-- **The workspace ML charts moved to the PAID depth tier and the ROI table** (the
+- **The workspace ML charts moved to the depth surfaces and the ROI table** (the
   consolidation's C2/P1.2). `BotBehaviourPanel` and the Bots "Behaviour" tab are DELETED;
-  `/api/bot-behaviour` moved into the plugin as `GET /api/pro/bot-behaviour` (`botDepth`), still
+  `/api/bot-behaviour` moved to `GET /api/pro/bot-behaviour`, still
   carrying the additive `ml` block (`BotBehaviourMl`) with its two grains — flat counts describe
   the SELECTED WINDOW, `weekly` covers the 84-day trend span on the SAME `weekStarts` boundaries
   as `trend` (a second copy of that arithmetic is how two charts come to disagree by a week with
   nothing failing) — and the same role-`'review'` bot set. Where the seven charts went:
   - **The severity INFLATION INDEX is now the ROI table's Inflation column** (`mlInflation` on
-    the same `/api/bot-analytics` vendor row). ⚠ **THE WHOLE COLUMN IS PAID NOW, counts included** —
-    it used to be a split tier (current-window `overCall`/`underCall` COUNTS free, history paid),
-    but the cell is a cell of the vendor table and that table went behind `botDepth` in one piece,
-    so an unentitled account receives no `vendors[]` to draw it in. The ≤12-week `weekly` sparkline
-    keeps its own absent/present flag anyway (`inflationHistory` in `getBotAnalytics` — absent,
-    never an error), because it is an extra scan WIDTH rather than just a field to drop.
+    the same `/api/bot-analytics` vendor row). The ≤12-week `weekly` sparkline keeps its own
+    absent/present flag (`inflationHistory` in `getBotAnalytics`, which the route always passes),
+    because it is an extra scan WIDTH rather than just a field to drop.
     The semantics travelled unchanged: `vendorAgree`/`vendorOverCall`/`vendorUnderCall` partition
     the bot's BADGED findings on the `vendorDeclared` denominator (`agree + over + under ===
     vendorDeclared`, exactly as `SeverityAgreementMatrix` has it); an unbadged finding is SILENCE
@@ -432,7 +426,7 @@ attaches stored labels to a handful of capped comment rows — same coercions, o
     agreed with every one). Pure fold + its rules: `apps/frontend/test/inflationHistory.test.ts`
     (hand-run; the frontend suite is not in CI).
   - **The per-bot severity-over-time slice + category mix live on the per-bot DEPTH tab**
-    (`BotDetailPanel`, the `bot-detail` pinned drill-down, Pro `botDepth`): `MlSeverityTrendChart`
+    (`BotDetailPanel`, the `bot-detail` pinned drill-down): `MlSeverityTrendChart`
     over a single-bot view — the nit(1)…critical(4) `yDomain` survives (the default 0→niceMax
     scale ticks at 0 and 5, two values a severity cannot take), and **a week with no findings is
     a GAP, never 0** — there is nothing below `nit`. `WorkspaceBotCharts` keeps exactly what that
@@ -462,7 +456,7 @@ Store: `threadSeverityFilter` is a **global** field, so `PrDetail` applies it on
 `selectedPrId === prId` — the same guard `threadStateFilter` needs, for the same reason (a PR
 opened via a pinned tab would otherwise inherit another PR's preset and silently hide threads).
 
-**Deliberately NOT badged (yet):** `CommentCard` (the Pro theme drill-down) and the Feed's
+**Deliberately NOT badged (yet):** `CommentCard` (the theme drill-down) and the Feed's
 PR-comment / review card bodies. Both are cross-PR lists, so a badge there would need one
 per-PR index query *per card*. The feed's inline **threads** do get badges, because those go
 through `ThreadCard` and each names a single PR. The sanctioned cross-PR pattern is the
@@ -474,20 +468,23 @@ Comments drill-down's: ship the label INLINE on each row of ONE response, server
 
 | Var | Default | Meaning |
 |---|---|---|
-| `SEVERITY_API_URL` | *(unset)* | **The gate.** Base URL of the severity-api. Cloud: `http://severity-api.railway.internal:8080`. Local: `http://127.0.0.1:8799`. Unset ⇒ the whole feature is inert |
-| `ML_SEVERITY_DISABLED` | `false` | Kill switch for a deployment that has the URL set |
+| `LIMN_ML_SCORER` | `auto` | `auto` (local when set up, else HTTP when configured) · `local` · `http` |
+| `LIMN_ML_DISABLED` | `false` | Turns the local scorer off |
+| `LIMN_ML_MODELS_DIR` | *(unset)* | Read the model from here instead of `~/.limn/ml-models` (dev falls back to `packages/ml/serving_assets`) |
+| `LIMN_ML_CPU_SHARE` | `0.5` | The local scorer's duty cycle, in cores (`ml/throttle.ts`) |
+| `SEVERITY_API_URL` | *(unset)* | The OPT-IN HTTP scorer's base URL, e.g. `http://127.0.0.1:8799` |
+| `SEVERITY_API_HEADERS` | *(unset)* | JSON object of extra headers, for a rented endpoint |
+| `ML_SEVERITY_DISABLED` | `false` | Drops `SEVERITY_API_URL` |
 | `ML_ENRICHMENT_CRON` | `*/2 * * * *` | The worker tick |
 | `ML_TICK_BUDGET_MS` | `90000` | Wall-clock ceiling per tick (kept under the cron period) |
 | `ML_BATCH_MAX_ITEMS` | `128` | Items per request (service hard cap 256 → 422) |
 | `ML_BATCH_MAX_CHARS` | `24000` | **The budget that matters** — see batching above |
-| `ML_CONCURRENCY` | `2` | In-flight requests (matches the deploy's 2 uvicorn workers) |
+| `ML_CONCURRENCY` | `2` | In-flight HTTP requests (the service runs 2 uvicorn workers) |
 | `ML_REQUEST_TIMEOUT_MS` | `120000` | Generous: cold start loads a ~150 MB model |
 | `ML_BODY_MAX_CHARS` | `6000` | Client-side trim; the model truncates at 512 tokens regardless |
 
-Cloud wiring: set `SEVERITY_API_URL` on the **backend** service to the severity-api's private
-DNS name. Both services must sit in the **same Railway project + environment** for private
-networking to resolve, and severity-api must **not** get a public domain (it is unauthenticated
-by design).
+⚠ The severity-api is unauthenticated by design: never expose one on a public address without
+the `SEVERITY_API_HEADERS` credential in front of it.
 
 ---
 
@@ -518,7 +515,7 @@ clone without `--recurse-submodules` must get exactly the dev loop it always had
 | `PIERRE_ML_DISABLED=1` | run the app without it |
 
 ⚠ **`SEVERITY_API_WORKERS` and `ML_CONCURRENCY` are two halves of one number.** The client sends
-`ML_CONCURRENCY` (2) requests at once *because the deployed service runs two uvicorn workers* — so
+`ML_CONCURRENCY` (2) requests at once *because the service runs two uvicorn workers* — so
 a one-worker local service is the single topology the shipped defaults do not fit. Both batches
 serialize on the one worker, and since the category axis moved to a model head each batch costs
 **two** ONNX forwards rather than one, so the second batch reliably outran the client's 120 s
@@ -531,7 +528,7 @@ box (each worker resident-loads both ~150 MB int8 heads).
 ⚠ **The service's resident memory is set by the LARGEST BATCH SHAPE it has ever run, not by
 traffic.** ONNX Runtime's CPU arena grows to the peak activation working set and, by default,
 never gives it back. One 32 × 512-token mini-batch takes a session from ~0.15 GB to ~1.45 GB
-(measured on macOS). The Railway service went 0.65 → 4.71 GB in one backlog burst on 2026-09-15
+(measured on macOS). The hosted service (Railway, retired with the hosted mode) went 0.65 → 4.71 GB in one backlog burst on 2026-09-15
 and then stayed there with no traffic (~$40/month of memory) — with only TWO sessions (severity ×
 2 workers; the category model was not in the image, see below), so ~2 GB each, most likely two
 concurrent requests landing on one worker. With both heads loaded the service holds FOUR. The backend's `ML_BATCH_MAX_CHARS` does NOT bound this: it caps
@@ -866,7 +863,7 @@ breaks a tie, never becomes a low-confidence fallback, and never reaches the mod
   "high severity" exceed 100% — a vendor posting one MAJOR-scored walkthrough per PR reaches it
   reliably. Summaries have their own counter and nothing divides by `labelled`.
 - **The rollup's 50 k scan cap needs an ORDER BY and must announce itself.** Without the order,
-  a truncated scan returns storage-engine order — which differs by dialect and shifts on Postgres
+    a truncated scan returns storage-engine order — which is not a contract
   after an UPDATE, so the same workspace reports different totals run to run. `truncated: true`
   is what stops a capped sample being read as a total.
 - **Every store action that resets `threadStateFilter` must reset `threadSeverityFilter` too.**
@@ -930,9 +927,8 @@ breaks a tie, never becomes a low-confidence fallback, and never reaches the mod
 - **The rollup only counts actors the workspace currently calls bots.** A label whose author has
   since been marked human is stored but excluded — correct, and the reason a naive isolation
   fixture for it passes vacuously (see below).
-- **`MeResponse.mlSeverity` is top-level, not inside `pro`.** `entitledProCapabilities` zeroes
-  the whole `pro` object for a cloud account on the free plan — i.e. exactly this feature's
-  audience.
+- **`MeResponse.mlSeverity` / `ml` are top-level**, beside `ai`.
+
 - **A running `tsx watch` dev server applies migrations at every restart.** Editing a migration
   `.sql` *after* the watcher has already applied it leaves the dev DB on the old DDL with the
   new file's hash unrecorded. Drop the table, delete its `__drizzle_migrations` row, re-run
@@ -1024,9 +1020,7 @@ breaks a tie, never becomes a low-confidence fallback, and never reaches the mod
   `target_created_at` was stored for); `getBotSeverityRollup` survives in `db/ml-labels.ts` as
   the exclusion-semantics reference only.
 - **Feed card bodies and `CommentCard` carry no badge** — see UI above.
-- **pg `0034` has not been replayed against a real Postgres** (the unit suite is SQLite-only).
-  Same status as pg `0031`–`0033`; the throwaway-container recipe is in
-  `docs/SECURITY.md` § dependency posture.
+
 - **One bad comment blocks a whole workspace's backlog, indefinitely.** A batch failure sets
   `hardFailure` and abandons that workspace for the tick — correct when the service is down (it
   stops N pointless round trips), but wrong for a single rejected comment: the candidate query
@@ -1043,8 +1037,9 @@ breaks a tie, never becomes a low-confidence fallback, and never reaches the mod
   input the service rejects will hold its workspace exactly the same way. A per-item retry
   counter, or splitting a failed batch to isolate the offender, is the durable fix — the sync
   UI's stalled-detection only stops it LYING about the situation.
-- **Not exercised in CI.** The Docker image is not pushed anywhere and CI has no severity-api,
-  so the enrichment path is only ever run locally or in cloud.
+- **Not exercised end to end in CI.** CI has neither the model nor a severity-api; the port is held
+  to the Python by the parity fixtures (`packages/ml/data/parity`), and the enrichment path runs
+  only on a developer's or user's machine.
 
 ---
 
@@ -1057,15 +1052,16 @@ the assumption costs time:
 - **It is NOT a pnpm workspace.** The root `pnpm-workspace.yaml` globs `apps/*` + `packages/*`,
   but `packages/ml` **has no `package.json`**, so the glob simply skips it. `pnpm install`,
   `pnpm build`, `pnpm typecheck` and `pnpm test` never see it. Do not add one.
-- **It is NEVER IMPORTED.** The backend talks to it **over HTTP only** (`SEVERITY_API_URL` →
-  `POST /score/*`). There is no code path from a `.ts` file into this directory; the only
-  in-repo references are the dev script's spawn (`scripts/dev-ml.mjs` → the sibling's own
-  `scripts/serve_local.sh`) and this documentation.
-- **It builds, versions and DEPLOYS INDEPENDENTLY.** The submodule is a **pinned pointer, not a
+- **It is NEVER IMPORTED.** No `.ts` file imports from it. The backend reads two things out of
+  it: in dev, the local scorer loads the model FILES from `serving_assets/` (`ml/runtime.ts`), and
+  the opt-in HTTP scorer talks to its service (`SEVERITY_API_URL` → `POST /score/*`, spawned by
+  `scripts/dev-ml.mjs` under `PIERRE_ML_HTTP=1`).
+- **It builds and versions INDEPENDENTLY.** The submodule is a **pinned pointer, not a
   merge of the two codebases** — its own repo
-  ([`pierre-ml`](https://github.com/alexwakeman/pierre-ml)) owns its release cycle, and cloud runs
-  it as a separate Railway service. Bumping the gitlink here changes which commit you get
-  locally; it does not deploy anything.
+  ([`pierre-ml`](https://github.com/alexwakeman/pierre-ml)) owns its release cycle and publishes
+  the model files the npm install downloads (`limnMlModels`, written by
+  `scripts/ml-models-manifest.mjs`). Bumping the gitlink here changes which commit you get
+  locally; it does not publish anything.
 - **Absent ⇒ the labels are simply dark.** A clone without `--recurse-submodules` is a fully
   working checkout; `git submodule update --init` fetches it.
 

@@ -16,53 +16,21 @@ Three courts, and they partition the open life of a pull request:
 | The engine | `apps/backend/src/db/pr-intervals.ts` (courts) + `db/flow-detail.ts` (working hours, budgets, per-PR) + `db/working-hours.ts` (the calendar) |
 | Settings | `packages/shared/src/flow-settings.ts` · `workspaces.flow_settings` · `PUT /api/workspaces/:id/flow-settings` · `components/settings/FlowSettingsSection.tsx` |
 | Request history | `review_request_events` · `sync/upsert.ts` `persistReviewRequestHistory` · `sync/backfill-review-requests.ts` |
-| Pointers (Pro, model) | core `db/flow-pointers.ts` (evidence) · `packages/pro/src/flow-pointers/` · `GET`/`POST /api/pro/flow-pointers` · `Activity/FlowPointersPanel.tsx` |
+| Pointers (model) | core `db/flow-pointers.ts` (evidence) · `apps/backend/src/platform/flow-pointers/` · `GET`/`POST /api/pro/flow-pointers` · `Activity/FlowPointersPanel.tsx` |
 | The route | `apps/backend/src/api/routes/flow.ts` — `GET /api/flow-findings?workspace&window=reporting|days` (default: the reporting window) · `GET /api/flow-trend?workspace` (Over time, 26 weeks) |
 | Over time | core `db/flow-trend.ts` (+ `flowCoreFigures` in `db/flow-detail.ts`, `loadFlowPopulation` in `db/pr-intervals.ts`, `localWeeksEndingAt` in `db/working-hours.ts`) · `db/workspace-setting-events.ts` + `db/setting-event-write.ts` (`workspace_setting_events`) · `packages/shared/src/flow-trend.ts` · `hooks/useFlowTrend.ts` · `Activity/ChronologyTrend.tsx` + `chronologyTrendModel.ts` · `components/charts/EventMarkers.tsx` |
 | The contract | `FlowResponse` and friends in `packages/shared/src/types.ts` |
 | The panel | `apps/frontend/src/components/Activity/BottlenecksPanel.tsx` + `bottlenecksModel.ts` + `ChronologyCharts.tsx` / `ChronologyTables.tsx` / `chronologyModel.ts` + `chronologyInfo.tsx` (the modal copy) · `components/InfoModal.tsx` · `components/charts/ChartPopover.tsx` |
-| Tests | `db/flow-trend.test.ts` · `apps/frontend/test/chronologyTrendModel.test.ts` · `db/pr-intervals.test.ts` · `db/flow-detail.test.ts` · `db/working-hours.test.ts` · `sync/review-request-history.test.ts` · `api/routes/workspace-flow-settings.test.ts` · the `getFlowCourts` block in `verify-isolation.ts` · `packages/pro/test/flow-pointers.test.ts` · `apps/frontend/test/chronologyModel.test.ts` + `flowSettingsForm.test.ts` |
+| Tests | `db/flow-trend.test.ts` · `apps/frontend/test/chronologyTrendModel.test.ts` · `db/pr-intervals.test.ts` · `db/flow-detail.test.ts` · `db/working-hours.test.ts` · `sync/review-request-history.test.ts` · `api/routes/workspace-flow-settings.test.ts` · the `getFlowCourts` block in `verify-isolation.ts` · `platform/test/flow-pointers.test.ts` · `apps/frontend/test/chronologyModel.test.ts` + `flowSettingsForm.test.ts` |
 
 Deterministic, **no model touches any part of it except the Pointers block**, which is a separate,
-opt-in, credit-metered generation (below) — and **PRO**, on the existing `periodReports` capability.
+opt-in generation (below), shown while `me.ai.enabled`. It lives in Reports (`insightsTab:
+'bottlenecks'`).
 
-## Tier
-
-**Pro, on `periodReports`** — deliberately not a capability of its own. Chronology and the period
-report answer the same question at two grains ("where did a completed stretch of work actually
-go"), and a fifteenth `ProCapabilities` member would mean bumping `apiVersion` across four literals
-in two repositories to gate one route. `apiVersion` stays **21** and `packages/pro` is untouched.
-
-Three places carry it, and they are ONE decision written three times:
-
-| Where | What |
-|---|---|
-| `api/routes/flow.ts` | `if (!req.account \|\| !entitledProCapabilities(req.account).periodReports)` → `402 {error:'pro required'}`. **THE monetisation gate**; same shape as `PUT /api/bot-reviewers/:userId/cost`. |
-| `hooks/useFlowFindings.ts` | `enabled: periodReports`. Stops the SPA learning it by error — this query **polls**, so an ungated hook is a 402 every five minutes, per mounted pane, forever. |
-| `Activity/InsightsView.tsx` | The tab keeps its place in the strip, wears a `ProBadge`, and opens onto `ProLockPanel` (`chronology-locked`) instead of the panel. |
-
-- ⚠ **THE ENGINE STAYS CAPABILITY-BLIND.** `getFlowCourts` takes no flag and reads no account
-  state; `verify:isolation` calls that fold directly. The free/paid line is a ROUTING decision, and
-  the day it moves into `pr-intervals.ts` those assertions need an account to run. Same reason the
-  `[7, 90]` window clamp lives in the engine and the entitlement check does not.
-- ⚠ **THE WHOLE REPORTS RAIL ENTRY IS PRO (`periodReports`)**, flow metrics included: listed on
-  every tier with one ProBadge, the whole pane one `ProLockPanel` when unentitled. The Chronology
-  tab's own lock stays as defence in depth.
-- ⚠ **VISIBLE-BUT-LOCKED, WHICH REVERSES THE APP'S USUAL POSTURE** (elsewhere a missing capability
-  is silent absence — `WorkspaceBotCharts` returns null, the "Depth →" pill is omitted). The
-  reversal is scoped to two whole rail entries (Reports, Bots Monitoring);
-  `apps/frontend/src/components/ProGate.tsx` names them and owns the badge and the locked pane. Nothing hand-rolls either.
-- ⚠ **AN UNENTITLED `?insightsTab=bottlenecks` RENDERS THE LOCK UNDER THE TAB IT NAMED.**
-  `effectiveInsightsTab` normalises values outside the union only — never a gated member. That
-  literal ships in bookmarks and in history entries Back replays, and a redirect to Overview would
-  explain nothing.
-- ⚠ **LOCAL IS GATED TOO, and needed no entitlement change to be.**
-  `entitledProCapabilities` hands a local account whatever the bound plugin advertises, and the
-  plugin advertises `periodReports: PRO_DIGEST_ENABLED === 'true'`. So OSS (no plugin) is locked —
-  and so is a **flag-less `pnpm dev` with the submodule checked out**, which is the ordinary dev
-  loop. `pnpm demo` and the screenshot pipeline's Pro pass both set the flag.
-- The 402 is pinned in both directions by `api/routes/bot-triage-entitlement.test.ts` (402 with no
-  capabilities or `botDepth` alone, 200 with `periodReports`), and the tier by `rate-limit.test.ts`.
+⚠ **THE ENGINE TAKES NO FLAG.** `getFlowCourts` reads no account state; `verify:isolation` calls
+that fold directly, so anything that ever gates this surface belongs in the ROUTE, never in
+`pr-intervals.ts`. Same reason the `[7, 90]` window clamp lives in the engine. (Until 2026-10-22 the
+route 402'd without the Pro plugin's `periodReports` capability; that gate is gone with the plugin.)
 
 ## What this replaced, and why
 
@@ -153,24 +121,24 @@ test that pins it.
 **The DEFAULT is the workspace's REPORTING WINDOW** — the window every Reports figure is tied to:
 this sprint so far when the workspace has a sprint cadence, else the trailing 7/14 days.
 `?window=reporting` (also what a request with neither `?window` nor `?days` means) resolves it on the
-route through the ONE resolver, core `db/reporting-window.ts` `getReportingWindow` (the plugin's
+route through the ONE resolver, core `db/reporting-window.ts` `getReportingWindow` (the platform's
 `resolveComparisonWindow` when bound), and hands it to `getFlowCourts(…, { reporting })`; the response
 echoes it as `reportingWindow`, every templated sentence names it ("merged so far this sprint" /
 "in the last 14 days"), and the panel's picker labels it "This sprint" / "Last 14 days". It is NOT
 floored at seven days — early in a sprint the window is short by definition, and the too-few-PRs
 refusals are what keep a thin sample from reading as a finding — but it is still capped at 90 days.
-The pointers follow it (`getFlowPointerEvidence(…, { reporting: true })`; the plugin keys a sprint's
+The pointers follow it (`getFlowPointerEvidence(…, { reporting: true })`; the platform keys a sprint's
 cache row on the sprint start and a rolling window's on its mode).
 
 The 30/60/90-day options are the longer views: `?days` clamps to `[7, 90]` and the CLAMPED value is
 echoed as `windowDays`; only a positive integer `?days=` picks a fixed span — absent, garbage or an
-unknown `?window=` is the reporting window (core route and plugin pointers route alike), because every sentence on screen names it. The picker's choice is remembered
+unknown `?window=` is the reporting window (core route and platform pointers route alike), because every sentence on screen names it. The picker's choice is remembered
 for the session only (a module variable), as before. The window is on `mergedAt`, two-sided and half-open `[from, to)` — a cycle-time
 figure belongs to the period the work COMPLETED in, matching `db/period-metrics.ts`.
 
 ## Over time — the last 26 weeks, with event markers
 
-`GET /api/flow-trend` (same 402 gate, `search` tier) feeds ONE section under the budgets, "Over time ·
+`GET /api/flow-trend` (`search` tier) feeds ONE section under the budgets, "Over time ·
 Last 26 weeks", with four charts on one fetch: where the working hours went (a stacked area of the
 working-hour split per week), each wait against its budget (one cell per week, coloured within /
 acceptable / past limit against TODAY's budgets, which the page says), working hours saved against a
@@ -223,7 +191,7 @@ baseline, and a before/after lens opened from any marker.
 working day** — a PR opened on Friday afternoon was charged a weekend, and "Friday" read as the
 slowest day (70 clock hours median, 7 working hours). So everything the panel now LEADS with counts
 working hours only, in the workspace's own zone, days and hours (`workspaces.flow_settings`,
-Settings → Workspace → "Working hours and budgets"; CORE and free to set).
+Settings → Workspace → "Working hours and budgets"; CORE).
 
 - **Stored as overrides only.** NULL until someone changes something, then only what they changed;
   every reader goes through `resolveFlowSettings`, so a later change to a product default reaches
@@ -232,7 +200,7 @@ Settings → Workspace → "Working hours and budgets"; CORE and free to set).
   every field would freeze today's defaults into any workspace whose owner merely pressed Save.
   The Settings form is sliders on a stepped scale (see docs/FRONTEND.md); it still sends overrides
   only.
-- **The default zone** is the machine's own locally, UTC in the cloud, `WORK_TIMEZONE` over both
+- **The default zone** is the machine's own, `WORK_TIMEZONE` over it (UTC if neither is valid)
   (`config.defaultWorkTimezone`, echoed on `/api/me` as `workTimeZone`).
 - **The calendar** (`db/working-hours.ts`) precomputes each working day's window through Intl, so a
   clock change is simply a day one hour shorter in UTC terms; `between(a, b)` is two binary searches
@@ -281,7 +249,7 @@ per-PR rows are capped at 1,000, and a figure counted over a sample was wrong ex
 - **Landing tail.** PRs approved for more than a working day. A ticket key (title, else branch)
   offers SIBLINGS — PRs in another repository under the same ticket that merged between this one's
   approval and a day after its merge. A sibling that landed before the approval cannot have held
-  it, so it is not offered. The key extractor is the Pro one's no-allow-list fallback.
+  it, so it is not offered. The key extractor is the tracker's no-allow-list fallback.
   `siblingsOver` counts the PRs approved for over a working day that had at least one sibling.
 - **Concentration names no one.** Per repository: how many people gave first reviews, the busiest
   one's share, and their first-look median against everyone else's ("slower" at 1.25× and 30
@@ -314,21 +282,20 @@ and without it; a leaf connection adds nothing).
   (1.8 working hours against 3.1). When the stored history says so, `directiveFor` drops that
   clause. With no history, the default stands.
 - A PR child with no `account_id` (the `review_requests` precedent): in BOTH delete paths, erased
-  through the repo loop; `verify:isolation` seeds history for one tenant and proves the other's
+  through the repo loop; `verify:isolation` seeds history for one account and proves the other's
   fold sees none.
 
-## Pointers (Pro, the one model-written block)
+## Pointers (the one model-written block)
 
 Three to five short pointers — a **pattern**, an **example worth copying**, a thing to **try** —
 each citing the PRs behind it. **The code picks the evidence, the model writes the sentences.**
 Core `db/flow-pointers.ts` folds the evidence from the same `getFlowCourts` pass the panel renders
 (bounded rows — the slowest 25, the fastest 15, 20 from the middle — plus, per size band, its
 slowest and quickest PR with the first thing a person other than the author said, @handles
-masked), handed to the plugin through the optional `ProHostQueries.getFlowPointerEvidence`
-(apiVersion stays 21). The plugin is the work plan's shape gate for gate: a free GET (cache +
-staleness, never generates) and a POST (the only billing path) with a synchronously claimed
-in-flight slot, a min-interval on billed runs, the credit check inside the slot, the payload-hash
-$0 cache and `recordAiUsage` on spend. Rate tiers: POST `ai`+`ai_hourly`, GET `search`.
+masked), handed to `platform/flow-pointers/` through `ProHostQueries.getFlowPointerEvidence`. It is the
+work plan's shape gate for gate: a GET (cache + staleness, never generates) and a POST (the only
+billing path) with a synchronously claimed in-flight slot, a min-interval on billed runs, the
+payload-hash $0 cache and `recordAiUsage` on spend. Rate tiers: POST `ai`+`ai_hourly`, GET `search`.
 
 - ⚠ **THE PARSE IS THE MECHANISM.** Cited ids ⊆ the evidence (strays counted), the D4 Unicode digit
   gate, an @-handle gate, a length cap, and a pointer with no surviving citation dropped WHOLE.
@@ -344,4 +311,4 @@ $0 cache and `recordAiUsage` on spend. Rate tiers: POST `ai`+`ai_hourly`, GET `s
   asked first. Measured on real data at v2: five of five survived, under forty words each. A later
   copy steer (lead with what the quickest pull requests did that others could copy; `example` is
   asked for first) did NOT bump the version: the stored pointers do not contradict it, and a bump
-  would mark every workspace's paid pointers out of date for a change of emphasis.
+  would mark every workspace's billed pointers out of date for a change of emphasis.

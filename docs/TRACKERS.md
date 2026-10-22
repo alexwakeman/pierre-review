@@ -1,11 +1,10 @@
-# Issue trackers — the tracker seam (CORE, free, both modes)
+# Issue trackers — the tracker seam (CORE)
 
 The issue tracker links the tickets a pull request names, reads each ticket when the PR arrives,
 and feeds every surface that shows a ticket: the PR pane's ticket chips and story panel, the Open
 PRs ticket row and ticket stacks (with their "Merged (n)" panel), the ticket modal, the ticket
-review's members and story, and a deep PR review's "Related PRs". It is **CORE and FREE on every
-tier, in local and cloud, and in the public `npx limn-review` install** (which ships without the
-private plugin). It lived in the plugin until **apiVersion 23**; this document is the contract
+review's members and story, and a deep PR review's "Related PRs". It is **CORE**: it lived in
+the private Pro plugin until the plugin's apiVersion 23 (2026-10), and this document is the contract
 since the move. Code: `apps/backend/src/tracker/`.
 
 > Phases. Phase 1: the seam, Jira as the first adapter, Linear kept link-only. Phase 2: the GitHub
@@ -68,7 +67,7 @@ is not stored under lean storage and is not a source either.
   setting): narrows an allowlisted setup to the title. Inert without keys — the Settings control
   is disabled and says why.
 - ⚠ **The workspace is the PR's own.** A repo belongs to exactly one workspace; a repo with NO
-  membership row, or another tenant's repo, has NO tracker — absent, never a neighbour's.
+  membership row, or another account's repo, has NO tracker — absent, never a neighbour's.
 - `detectForAccess` is the ONE rule; the PR chips, the ticket routes, the Open PRs batch and the
   worker all call it. It also appends the tickets a person added by hand (§ Adding a ticket by hand).
 
@@ -159,7 +158,7 @@ it keeps: **a view still never calls a reader.** `GET /api/sprint-graph` only st
   nearest-due open milestone across the workspace's repos (never an overdue one; ≤ 20 repos per pass,
   `truncated` when cut). Project keys / team keys are the ones seen on this workspace's stored
   `tracker_tickets` (+ the tracker's `project_keys`); none → `no_projects`.
-- **The sprint's DATES** (sqlite `0111` / pg `0098`, `sprint_reads.sprint_starts_at / _ends_at`): read
+- **The sprint's DATES** (migration `0111`, `sprint_reads.sprint_starts_at / _ends_at`): read
   off the same answers, never a second call — the Jira sprint field's `startDate` / `endDate` (Cloud
   objects; Server's `…[startDate=…,endDate=<null>,…]` string, `sprintsOf`), Linear's `activeCycle {
   startsAt endsAt }`, a GitHub milestone's `dueOn` as the END only. Several active sprints / cycles →
@@ -182,7 +181,7 @@ it keeps: **a view still never calls a reader.** `GET /api/sprint-graph` only st
   view (no source, no read time, due now). It also stores the automatic status order (§ The status
   order) and each ticket's blocking links + status id (§ Blocking links).
 - **Referenced tickets and GHOST CHAINS** (`tracker/sprint/ref-status.ts`, `sprint_ref_tickets`,
-  sqlite `0106` + `0107` / pg `0093` + `0094`): the sprint's fold (`GET /api/sprint-graph`) carries the
+  sqlite `0106` + `0107` + `0094`): the sprint's fold (`GET /api/sprint-graph`) carries the
   tickets a sprint ticket depends on, runs alongside, builds on or replaces — inside the sprint or not —
   and follows the chain outside it (A → B → C); the Critical path view draws the ones a path names in
   "Outside the sprint". So after storing the list the read asks the tracker for them **WITH THEIR
@@ -212,8 +211,7 @@ it keeps: **a view still never calls a reader.** `GET /api/sprint-graph` only st
 
 The links a ticket WAITS ON, stored on both `tracker_tickets` and `sprint_tickets` as
 `blocked_by_json` (shared `TicketLinkBlocker[]`: the linked issue's key, title, status + category, the
-relation phrase from THIS ticket's side, and an https browse URL; ≤ 20). Migration sqlite `0103` /
-pg `0090`. They feed the "Blocked" story issue (docs/CLAUDE-REVIEW.md § Story issues). No extra call:
+relation phrase from THIS ticket's side, and an https browse URL; ≤ 20). Migration migration `0103`. They feed the "Blocked" story issue (docs/CLAUDE-REVIEW.md § Story issues). No extra call:
 
 - **Jira** — `fields.issuelinks` from the `fields=*all` answer the reader and the sprint list already
   make (`blockedByOf`, `jira/client.ts`). A link carries the OTHER issue on one side: `inwardIssue` →
@@ -308,13 +306,13 @@ reader of `stage` works whatever the buckets are.
 ## No write-back
 
 Limn never writes to a tracker. The per-ticket write-back (`tracker/write/`, `tracker_writes`) was
-removed on 2026-10-12 with This sprint's chips and findings; sqlite `0107` / pg `0094` drop the table.
+removed on 2026-10-12 with This sprint's chips and findings; migration `0107` drop the table.
 
 ## Created and resolved dates (`tracker/dates.ts`, `tracker/dates-backfill.ts`)
 
 Every reader returns the ticket's OWN created / resolved instants on `FetchedTicket`
 (`issueCreatedAt` / `issueResolvedAt`), and the worker stores them on `tracker_tickets`
-(`issue_created_at` / `issue_resolved_at`, sqlite `0098` / pg `0085`). The story label run buckets
+(`issue_created_at` / `issue_resolved_at`, migration `0098`). The story label run buckets
 stories by the CREATED week.
 
 | Provider | Created | Resolved | Cost |
@@ -348,8 +346,7 @@ stories by the CREATED week.
 ## Peers — the ticket review's source
 
 `tracker/peers.ts`, read by the ticket review and a deep PR review through
-`tracker/ticket-source.ts` (it was the OPTIONAL plugin seam `AgenticProviders`; core always answers
-now). ⚠ **STORED ROWS ONLY** (`resolvePrTickets(…, { storedOnly: true })`) — these are view paths.
+`tracker/ticket-source.ts` (it was the plugin seam `AgenticProviders`; core always answers now). ⚠ **STORED ROWS ONLY** (`resolvePrTickets(…, { storedOnly: true })`) — these are view paths.
 
 - `ticketsForPr(account, pr)` — the PR's readable tickets as clipped, validated stories.
 - `ticketMembers(account, ident)` — every PR on the ticket: this account, the same provider + site,
@@ -367,7 +364,7 @@ A workspace with **no stored tracker choice** (no `workspace_trackers` row, or `
 **GitHub Issues** when at least one of its repos uses it, else no tracker. A **stored choice always
 wins, "None" included** — a chosen None is stored as the literal `'none'` (`NONE_PROVIDER`;
 `maybeAdapterFor('none')` is null, so it reads as no tracker), because NULL means "no choice"
-(migration sqlite `0094` / pg `0081` turned only an ALL-NULL pre-existing row — the one a None save alone writes — into `'none'`; a NULL provider beside any other stored value, e.g. a legacy-moved match scope, stays unchosen, and `tracker/legacy-import.ts` leaves its NULL providers NULL so both upgrade orders agree).
+(migration migration `0094` turned only an ALL-NULL pre-existing row — the one a None save alone writes — into `'none'`; a NULL provider beside any other stored value, e.g. a legacy-moved match scope, stays unchosen, and `tracker/legacy-import.ts` leaves its NULL providers NULL so both upgrade orders agree).
 
 - **A repo "uses GitHub Issues"** when issues are ENABLED and at least one issue was linked to a PR
   in the last 90 days: `repos.uses_github_issues` (+ `github_issues_checked_at`), written by
@@ -408,7 +405,7 @@ Jira token (the token is dropped only when the stored URL itself moves to anothe
   "Closes owner/repo#12" (cross-repository included) or a Development-panel link. A bare "#12" is
   not a ticket; the PR title and branch are not read at all. The adapter's `linker`
   (`github/links.ts`) reads them and stores them on the PR: `pull_requests.closing_issues`
-  (+ `closing_issues_checked_at`, migration sqlite `0089` / pg `0076`).
+  (+ `closing_issues_checked_at`, migration migration `0089`).
 - ⚠ **COST: ZERO FOR EVERY OTHER WORKSPACE.** The links are NOT a field on the repo walk's query
   (shared by every workspace). The worker runs the linker first in each pass, for PRs in a GitHub
   Issues workspace only: `nodes(ids:)` over ≤ 50 PRs with one `closingIssuesReferences(first: 10)`
@@ -456,8 +453,7 @@ Jira token (the token is dropped only when the stored URL itself moves to anothe
 A Linear workspace asks for three things (shared `TRACKER_PROVIDER_FIELDS`): the **workspace URL**
 (`https://linear.app/acme` — an IDENTITY, never fetched), an optional **team-key allowlist** + match
 scope (detection, exactly as Jira), and a **personal API key** (write-only, sealed — § Credential).
-Cloud OAuth (a Linear OAuth app per Limn install) is NOT built; it is the obvious next step for cloud,
-where pasting a personal key is the only route today.
+Linear OAuth is NOT built; pasting a personal key is the only route.
 
 - **IDENTITY.** The root is the Linear WORKSPACE (Linear's API calls it the organisation):
   `https://linear.app/<urlKey>`, lower-cased — shared `linearSiteRoot`, the ONE fold, run on the
@@ -477,7 +473,7 @@ where pasting a personal key is the only route today.
   Linear, so it sees what lean storage never keeps. (2) Then the keys detection finds in the title and
   branch, with the allowlist + match scope, exactly as Jira. `detect` is the UNION, links first
   (`from: 'link'`). The links are stored on the PR — `pull_requests.linear_links` (+ `linear_links_root`,
-  `linear_links_checked_at`; migration sqlite `0090` / pg `0077`).
+  `linear_links_checked_at`; migration migration `0090`).
   - ⚠ **THE LINKS ADD; THEY NEVER GATE** (`linker.required = false`, unlike GitHub's). NULL ("never
     read", or read against another root) is simply "detection alone": the PR pane never goes blank, a
     workspace without the integration still links by key, and a link-only Linear workspace (no key)
@@ -507,7 +503,7 @@ where pasting a personal key is the only route today.
   (the SPA hides "Change"; the ac-field route refuses the id).
 - **THE CALL** goes to ONE FIXED HOST, `https://api.linear.app/graphql`, as a POST through the same
   transport as Jira's (`jira/fetch.ts` `nodeTransport`, which takes an optional body): no redirects, a
-  10 s timeout, a 5 MiB cap, https + connect-time public-address check in cloud. The key is sent as
+  10 s timeout, a 5 MiB cap. The key is sent as
   `Authorization: <key>` — ⚠ never `Bearer` (Linear 400s an API key sent that way).
 - **ERRORS.** `AUTHENTICATION_ERROR` / 401 → `unauthorized` (workspace backoff 30 min; route sentence
   "Linear rejected this key. Save a new personal API key in Settings."); "Entity not found" →
@@ -537,7 +533,7 @@ block, named for its first provider — `jira.token` / `jira.hasToken` / `jira.c
   host, or for Linear a different workspace (`linear.app/acme` → `linear.app/other`) — so a token typed
   for one site is never sent to another.
 - **Sealed whenever the process can seal**: `sealed:v1:<iv:tag:ct>` (core `auth/crypto.ts`,
-  AES-256-GCM, ENCRYPTION_KEY — always in cloud); `plain:<token>` on a local install without a key,
+  AES-256-GCM, when the operator set ENCRYPTION_KEY); `plain:<token>` without a key,
   the same trust as that machine's `gh` token. Both prefixes stay readable; an unopenable `sealed:`
   value reads as `unreadable` ("save it again"), never sent as garbage.
 - The account export carries the tracker row with the token reduced to `hasToken`
@@ -549,9 +545,10 @@ Every call to a customer-named host goes through ONE helper — never a bare `fe
 FIXED, never customer-named; its POST rides the same transport for the same no-redirect, timeout and
 size rules — § Linear.) GET only, a 10 s
 timeout, a 5 MiB cap, **no redirects** (a 3xx is an error; following it would forward the
-Authorization header), JSON only. In **cloud**: https only, and the host must resolve to PUBLIC
-addresses, checked at CONNECT time through the socket's own `lookup` (closes DNS rebinding).
-Local allows http and LAN hosts (an on-prem Jira is normal). Details: [SECURITY.md](SECURITY.md).
+Authorization header), JSON only. http and LAN hosts are allowed (an on-prem Jira is normal; the
+policy flag is `{ cloud: false }`). The STRICT policy (`{ cloud: true }`: https only, and the host
+must resolve to PUBLIC addresses, checked at CONNECT time through the socket's own `lookup`, which
+closes DNS rebinding) is what SonarCloud's fixed host is called with. Details: [SECURITY.md](SECURITY.md).
 
 ## Routes (`tracker/routes.ts`; contracts in [API.md](API.md))
 
@@ -569,33 +566,30 @@ Local allows http and LAN hosts (an on-prem Jira is normal). Details: [SECURITY.
 
 ⚠ **NOT A TRACKER PROXY.** The ticket routes address a PULL REQUEST (ownership → 404), re-run
 detection on it and answer only for a key detection found. Every failure is a 502 carrying a
-sentence we wrote, never the tracker's body, URL or header. Tenancy of `workspace_trackers` is ALSO
+sentence we wrote, never the tracker's body, URL or header. Ownership of `workspace_trackers` is ALSO
 structural — the named composite FK `workspace_trackers_workspace_account_fk`.
 `verify:isolation` covers every route and table (both accounts share a site AND a key, so a dropped
 account predicate has something to leak).
 
-## The move from the plugin (apiVersion 23)
+## The move from the plugin (2026-10)
 
-- **Migration** sqlite `0088` / pg `0075`: creates `workspace_trackers` and `tracker_tickets`,
+- **Migration** migration `0088`: creates `workspace_trackers` and `tracker_tickets`,
   adopts `pro_jira_ac_fields`. It copies NO data — the source tables are the plugin's, absent on a
   fresh or plugin-less install, and SQLite cannot test for a table in SQL.
-- **The boot-time MOVE** (`tracker/legacy-import.ts`, run by `startTracker` AFTER the plugin binds,
-  so its own migrations have run): tests each source table and column for existence, copies
+- **The boot-time MOVE** (`tracker/legacy-import.ts`, run by `startTracker` AFTER the platform binds,
+  so the platform's migrations have run): tests each source table and column for existence, copies
   `pro_workspace_settings.issue_*`/`jira_email`/`jira_token` → `workspace_trackers` and
   `pro_pr_jira_tickets` → `tracker_tickets` (provider `'jira'`) with ON CONFLICT DO NOTHING, and in
   the SAME transaction NULLs those columns / deletes those rows. A MOVE, so it runs every boot with
   no marker: a second boot finds nothing, a token is never at rest in two places, and a value
   cleared in core is never resurrected. The token moves in its stored form — nobody re-enters it.
-- **Plugin side**: `src/jira/` and `src/issue-links/` deleted; plugin migrations `0038`/`0039`
-  stripped to `SELECT 1;` (an install that ran them keeps what they made; a fresh install no longer
-  grows the old table, and 0039's bare `ALTER` would otherwise fail and drop the whole plugin to OSS);
+- **Plugin side**: `src/jira/` and `src/issue-links/` deleted; plugin (now platform) migrations
+  `0038`/`0039` stripped to `SELECT 1;` (an install that ran them keeps what they made; a fresh
+  install no longer grows the old table, and 0039's bare `ALTER` would otherwise fail);
   the tracker columns on `pro_workspace_settings` are DORMANT (undeclared, never read or written).
-- **Contract**: `ProCapabilities.issueLinks`, `ProContext.registerPrDetailEnricher` (required — its
-  removal alone forces the bump), `registerAgenticProviders`, `registerRepoSyncedHook` and
-  `host.sealSecret`/`openSecret` are gone; **apiVersion 22 → 23** in all four literals. A 22 plugin
-  would run its own Jira worker and routes against tables core now owns, so the gate refusing it is
-  the safe outcome.
-- **SPA**: no capability gate. The Open PRs "Group by ticket" view and ticket row show wherever THIS
-  workspace has a tracker (`useTrackerOn`); the PR pane's slim story check reads
-  `PrDetail.tickets != null`; Settings → Issue tracker is ungated (both modes, every tier), and the
-  Jira API access block is no longer behind `me.ai.enabled` — the token feeds free surfaces too.
+- **Contract**: `ProContext.registerPrDetailEnricher`, `registerAgenticProviders`,
+  `registerRepoSyncedHook` and `host.sealSecret`/`openSecret` are gone.
+- **SPA**: The Open PRs "Group by ticket" view and ticket row show wherever THIS workspace has a
+  tracker (`useTrackerOn`); the PR pane's slim story check reads `PrDetail.tickets != null`;
+  Settings → Issue tracker is always shown, and the Jira API access block is not behind
+  `me.ai.enabled` — the token feeds non-AI surfaces too.

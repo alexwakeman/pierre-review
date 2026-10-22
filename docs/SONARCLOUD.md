@@ -1,6 +1,6 @@
 # SonarCloud
 
-CORE and free. A workspace can save a SonarCloud token; Limn then reads each pull request's
+CORE. A workspace can save a SonarCloud token; Limn then reads each pull request's
 SonarCloud analysis and feeds it to Claude Review, AI Fix and one GitHub review per commit. Code: `apps/backend/src/sonar/`
 (server), `apps/frontend/src/components/ClaudeReviewSonar.tsx` + `components/settings/SonarSection.tsx`
 (SPA), shared types in `packages/shared/src/sonar.ts`.
@@ -11,11 +11,11 @@ SonarCloud analysis and feeds it to Claude Review, AI Fix and one GitHub review 
   host: the organization and project keys travel only as URL-encoded query parameters (`sonar/client.ts`
   `sonarUrl`, which also refuses any path that is not `api/<letters>`).
 - **Every call goes through the tracker's guarded GET** (`tracker/jira/fetch.ts` `jiraGetJson`) with the
-  cloud policy always on: GET only, no redirect followed (a 3xx would hand the token to a host nobody
+  STRICT policy (`{ cloud: true }`) always on: GET only, no redirect followed (a 3xx would hand the token to a host nobody
   chose), a 10 s timeout, a 5 MiB body cap, JSON only, https + public addresses. The token is sent as
   `Authorization: Bearer <token>`.
-- **The token is WRITE-ONLY and SEALED.** Stored through `tracker/secret.ts` (`sealed:v1:` with an
-  ENCRYPTION_KEY, always in cloud; else `plain:`). No response carries it (`hasToken` only), the
+- **The token is WRITE-ONLY and SEALED.** Stored through `tracker/secret.ts` (`sealed:v1:` when the
+  operator set ENCRYPTION_KEY; else `plain:`). No response carries it (`hasToken` only), the
   account export reduces it to `hasToken`, and no log line names it. `readSonarAccessForPr` is the
   one function that opens it, and its callers send it to SonarCloud only.
 - **Reads never call SonarCloud.** A snapshot per (account, PR, head) is stored in
@@ -40,7 +40,7 @@ SonarCloud analysis and feeds it to Claude Review, AI Fix and one GitHub review 
 
 ## Settings (Settings → Workspace → SonarCloud)
 
-One `workspace_sonar` row per workspace (migration 0114 / pg 0101): `organization`, the sealed
+One `workspace_sonar` row per workspace (migration 0114): `organization`, the sealed
 `auth_token`, and `project_keys` — a JSON map `repoId → key` of OVERRIDES only. A repo with no override
 uses SonarCloud's GitHub-import default, `<owner>_<repo>` (`defaultSonarProjectKey`). A key equal to the
 default is not stored; a key for a repo outside the workspace is refused (400); overrides for repos that
@@ -99,7 +99,7 @@ finding only when it agrees, and not to copy the list. The texts join the nonce-
 
 The tab's **SonarCloud** section (`ClaudeReviewSonarSection`, after CI check) reads the stored snapshot
 for the reviewed head — never SonarCloud on mount. Header: the gate chip and "50 of 132 issues"; an ⓘ
-holds the explanation. Actions: "Open in SonarCloud", Refresh, and "Post SonarCloud findings" (local only).
+holds the explanation. Actions: "Open in SonarCloud", Refresh, and "Post SonarCloud findings".
 Each card (`SonarIssueRow`) shows severity, type, rule, effort, the message, the place (a link into
 Changes when the PR touches the file), the flagged lines, and "How to fix" behind a chevron. The section
 is absent when the workspace has no SonarCloud set up and nothing was stored.
@@ -190,7 +190,7 @@ The picker draws the review tab's own card (`card: {kind:'sonar', issue}`) with 
 | `POST /api/workspaces/:id/sonar/check` | search + read | `SonarConnectionCheck` with the saved token |
 | `GET /api/prs/:id/sonar?head=` | read | `SonarPrResponse` — stored, no SonarCloud call |
 | `POST /api/prs/:id/sonar/refresh {headSha?}` | search + read | read SonarCloud now; 409 `SonarNotConfigured` |
-| `POST /api/prs/:id/sonar/post {headSha}` | github_write | local only; 409 `AlreadyPosted` / `HeadMoved` / `NothingToPost` / `NotOpen` |
+| `POST /api/prs/:id/sonar/post {headSha}` | github_write | 409 `AlreadyPosted` / `HeadMoved` / `NothingToPost` / `NotOpen` |
 
 Every id is a PATH id: another account's workspace or PR is a 404.
 

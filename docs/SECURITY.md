@@ -14,74 +14,49 @@ and helmet's default CSP is wrong for this app three ways over.
 
 **`api/plugins/security.ts`** — registered FIRST in `app.ts` so headers ride on every response
 (redirects, 404s, static assets):
-- **CSP per surface**: `/api` → `default-src 'none'`; `/app*` → the SPA policy; else the landing
-  policy. `style-src 'unsafe-inline'` is unavoidable and accepted (React style attrs +
+- **CSP per surface**: `/api` → `default-src 'none'`; everything else → the SPA policy (the
+  backend serves no landing). `style-src 'unsafe-inline'` is unavoidable and accepted (React style attrs +
   vis-timeline positions items by mutating `element.style`); **`script-src` stays strict** — no
   `'unsafe-inline'`, no `'unsafe-eval'` (verified: no `eval`/`new Function` in vis-timeline /
   vis-data / vis-util). `img-src https:` is REQUIRED — comment bodies are third-party markdown
-  embedding arbitrary hosts. Google origins enter the CSP **only in cloud**.
+  embedding arbitrary hosts. No third-party origin is in it at all — the SPA loads no analytics.
 - nosniff, `X-Frame-Options: DENY` + `frame-ancestors 'none'`, `Referrer-Policy:
   strict-origin-when-cross-origin` (app URLs carry repo/PR ids), `Permissions-Policy`, COOP;
   `/api` also gets `Cross-Origin-Resource-Policy: same-origin` + `Cache-Control: no-store`.
-  HSTS + the www→apex 301 moved here from `app.ts` (still cloud-gated).
-- **`corsOriginDelegate` — CORS is now an ALLOWLIST IN BOTH MODES.** Local mode was
+  No HSTS: the server is plain http on loopback.
+- **`corsOriginDelegate` — CORS is an ALLOWLIST.** It was
   `origin: true` (reflect ANY origin) *and* has no auth (every request resolves to account 1),
   so **any page the developer had open could read their whole synced GitHub dataset
   cross-origin and drive their write actions**. That was the audit's one CRITICAL. Local now
   allows any **loopback** origin on any port (dev 5173/5174, demo 5273, the packaged CLI's own
-  port); cloud allows exactly `config.appBaseUrl`. `ALLOWED_ORIGINS` adds more.
+  port). `ALLOWED_ORIGINS` adds more.
 - **`registerCrossOriginGuard` — NOT redundant with CORS.** CORS only decides whether the
   attacker's page may READ the response; a simple cross-origin POST is still delivered and still
   executes. Rejects state-changing `/api` calls whose `Sec-Fetch-Site: cross-site` (falling back
-  to `Origin`); header-less clients (curl/CLI/webhooks) pass, since CSRF needs a browser. Also
-  guards the mutating GET `/api/auth/reconnect`. Exempts the HMAC-authenticated webhook routes.
-- **`registerHostGuard`** (local, loopback binds only) — 421s a non-loopback `Host`, the
+  to `Origin`); header-less clients (curl/CLI) pass, since CSRF needs a browser.
+- **`registerHostGuard`** (loopback binds only) — 421s a non-loopback `Host`, the
   DNS-rebinding case that survives every origin check. `ALLOWED_HOSTS` opts a named host back in.
 
-**The public contact form** (`api/routes/contact.ts`, cloud in practice — local never serves the
-landing) is the ONE anonymous, human-facing write surface, so its controls are worth stating
-together. It is exempt from the cloud auth gate BY DESIGN (`/api/contact`, `/api/contact/ticket`):
-somebody asking for a trial has no account, and somebody reporting that sign-in is broken cannot
-sign in to say so. What stands in for authentication:
+**The public contact form lives in `apps/site`, not here** (moved 2026-10-22 with the landing;
+`apps/site/src/contact.ts`, `rate-limit.ts`, `security.ts`, documented in `apps/site/README.md`).
+It is the ONE anonymous, human-facing write surface the project runs, and kept its layers on the
+move: a honeypot field (answered 200 and dropped — an error tells the bot's author which field
+gave them away), a server-SIGNED minimum fill time (`GET /api/contact/ticket` mints
+`<issuedAtMs>.<hmac>`, the POST needs an age in [3s, 6h]; a client-sent "elapsed" field would be
+the submitter's to choose), 5 per HOUR per IP shared by the mint and the submit, no third-party
+widget (so no CSP widening), a Slack-webhook sink whose URL is re-validated, every visitor
+string Slack-escaped, and nothing stored (a FAILED delivery is logged in full, the one place a
+message persists). ⚠ **The site's rate limit reads `X-Forwarded-For` from the RIGHT**,
+`TRUST_PROXY_HOPS` entries in — the leftmost entry is client-written. The site also owns the
+public posture the backend no longer has: per-surface CSP (landing, demo, API), HSTS
+(`HSTS_MAX_AGE`) and the www → apex 301 (`SITE_URL`).
 
-- **A honeypot field.** `website` is declared in the body schema and dropped when non-empty, with a
-  200 rather than a 400 — an error tells the bot's author which field gave them away.
-  ⚠ **IT MUST STAY DECLARED IN THE SCHEMA.** Fastify configures ajv with `removeAdditional: true`,
-  so an UNdeclared property is silently stripped from `req.body` before the handler runs: the whole
-  layer would read `undefined` forever and every bot would pass, with nothing failing.
-- **A signed minimum fill time.** `GET /api/contact/ticket` returns `<issuedAtMs>.<hmac>`; the POST
-  verifies the signature and requires an age in [3s, 6h]. The timestamp is signed HERE, which is
-  the point — a client-sent "elapsed" field would be the submitter's to choose. Stateless (no
-  replay table), so the rate limit is what bounds reuse. The key is derived from `SESSION_SECRET`
-  via a labelled HMAC so it shares no material with the session cookie; with no secret set it is a
-  per-process random, and a restart invalidates outstanding tickets.
-- **The `contact` rate tier, 5 per HOUR, keyed by IP** — the strictest bucket in the file. Following
-  the token gives an unusual answer here: the route spends no GitHub quota, no model dollars and
-  barely any database, and still belongs at the bottom, because what it actually spends is a
-  PERSON READING A MESSAGE. Both paths share the bucket, the mint deliberately included: a bot must
-  fetch a ticket before it can post one.
-- **No third party, and therefore no CSP change.** A Turnstile/reCAPTCHA widget would need
-  `script-src` AND `frame-src` (currently `'none'`) widened on the landing CSP plus a privacy-policy
-  line. That remains available if the layers above stop being enough; it is a decision to take
-  deliberately, not a side effect of adding a form.
-- **Delivery is a Slack webhook, and the URL is re-validated at the sink** —
-  `normalizeContactWebhookUrl`, a deliberate small copy of the plugin's allowlist (core cannot
-  import from `packages/pro`). Exact host, `https` only, `/services/` prefix, query and fragment
-  dropped, `redirect: 'error'`, response body never surfaced. Keep the two in step.
-- **Every visitor string is Slack-escaped before the payload is assembled** (`&`, `<`, `>` — the
-  only three characters special in Slack message text), so a submission cannot forge a link, a
-  channel reference or an `@`-mention in the notification it produces.
-- **Nothing is written to the database** — the message is passed straight through. A FAILED delivery
-  is logged in full so it is not lost, which is the one place a message persists; the privacy policy
-  says so. ⚠ The log field is `from:`, never `name:` — pino treats `name` as the LOGGER's name and
-  swallows it into the line prefix.
-
-**`api/plugins/rate-limit.ts`** — fixed-window buckets keyed by **accountId** (the thing that
-spends money), IP fallback for unauthenticated routes. Registered AFTER `registerAccountContext`.
-Tiers: `ai` 20/min **+ `ai_hourly` 120/h**, `pr_detail` 60/min, `github_write` 60/min, `sync`
-20/min, `search` 60/min, `auth` 30/min, `webhook` 600/min, `read` 600/min, **`contact` 5/HOUR**. **Landmine: Claude
-Review kept its PRE-plugin paths** (`/api/prs/:id/claude-review*`, `/api/claude-reviews/*`,
-`/api/claude-findings/*`), so `tierFor` matches those EXPLICITLY — a `/api/pro/` prefix test
+**`api/plugins/rate-limit.ts`** — fixed-window buckets keyed by **accountId** (the single local
+account; the key still bounds a runaway loop in the SPA or a script). Registered AFTER
+`registerAccountContext`. Tiers: `ai` 20/min **+ `ai_hourly` 120/h**, `pr_detail` 60/min,
+`github_write` 60/min, `sync` 20/min, `search` 60/min, `read` 600/min. **Landmine: Claude
+Review kept its historical paths** (`/api/prs/:id/claude-review*`, `/api/claude-reviews/*`,
+`/api/claude-findings/*`), so `tierFor` matches those EXPLICITLY — a path-prefix test
 would leave the most expensive routes on the 600/min read tier. `RATE_LIMIT_DISABLED=true` is the
 escape hatch; `RATE_LIMIT_<TIER>` tunes a bucket. The `pr_detail` matcher covers `GET
 /api/prs/:id` **plus `/merge-options`, `/files`, `/checks/:jobId/logs` and `/suggested-reviewers`**
@@ -97,36 +72,33 @@ agreeing with the code is only evidence of intent when the code is right. Genuin
 correctly on `read`: `/bot-behaviour`, `/bot-dedup`, `/mention-candidates`, the retrieval-only
 `/claude-review`, the cached `GET …/annotations`, `GET /api/auto-merge` and `GET /api/branch-status`.
 
-**Fastify factory hardening** (`app.ts`): `trustProxy: config.isCloud` (Railway proxies — without
-it the limiter's IP fallback collapses into one bucket; NOT set locally, where it would let a
-client choose its own key), `bodyLimit` 256 KiB (one route raises it: the 25 MB reference-docs upload), `requestTimeout` 60s,
+**Fastify factory hardening** (`app.ts`): `trustProxy: false` (it would let a client choose its
+own rate-limit key), `bodyLimit` 256 KiB (one route raises it: the 25 MB reference-docs upload), `requestTimeout` 60s,
 `routerOptions.maxParamLength` 200 (top-level is FSTDEP022-deprecated), and a pino **`redact`**
 list — an `err` from a failed HTTP call carries the outgoing `Authorization: token gho_…` /
 `x-api-key: sk-ant-…` headers and pino serializes errors deeply.
 
 **Other fixes worth knowing:**
-- **`error-handler.ts`**: 5xx bodies are GENERIC in cloud (`err.message` on a 500 is whatever
-  Postgres/GitHub/Anthropic said — query fragments, paths, upstream bodies). 4xx stay verbatim
-  (author-written contract text); local passes 5xx through (the operator IS the caller).
+- **`error-handler.ts`**: every status passes `err.message` through — the operator IS the
+  caller, on their own machine, and should not have to read the terminal to debug their own
+  instance.
 - **`db/queries.ts` `listUsers(accountId)`** — `users` stays GLOBAL storage but the LISTING is
   account-scoped via 6 correlated subqueries (event actors, PR authors/mergers, requested
-  reviewers, review + comment authors). Unscoped, it handed any tenant every other tenant's
-  synced contributors. **`PATCH /api/users/:id` + `setUserBot` were DELETED** — a global,
+  reviewers, review + comment authors). **`PATCH /api/users/:id` + `setUserBot` were DELETED** — a global,
   ownership-free write of the sticky `isBotOverridden` flag, with no frontend caller; bot
   classification is the account-scoped `PATCH /api/bot-reviewers/:userId`.
 - **`getTimeline`**: window CLAMPED to `config.retentionDays` in the route + hard row caps
   (`TIMELINE_PR_ROW_CAP` 5k / `TIMELINE_EVENT_ROW_CAP` 20k, newest-first) returning
   `truncated?: true`. `?from=1970&to=2100` used to materialise the whole retained dataset.
 - **`github/codeowners.ts` ReDoS**: each `**/` compiled to its own nullable `(?:.*/)?`, so
-  `('**/' × 14) + 'zzz.txt'` in a repo-supplied CODEOWNERS froze the single-threaded server for
-  every tenant. Runs of `**/` are now COLLAPSED (semantically identical) + caps on file size,
+  `('**/' × 14) + 'zzz.txt'` in a repo-supplied CODEOWNERS froze the single-threaded server. Runs of `**/` are now COLLAPSED (semantically identical) + caps on file size,
   rule count, pattern length and paths matched.
 - **`github/auth.ts`**: `gh auth token` is CACHED (5-min TTL + in-flight coalescing) and has an
   async form. `getAccessToken` used the SYNC one on every request — 50–300ms of blocked event
   loop plus a forked process per request.
-- **`sync/hydrate-detail.ts`**: 60s cache + in-flight map. **`persistBodies` is FALSE by default
-  in BOTH modes** (the old module comment claimed otherwise), so every `GET /api/prs/:id` ran
-  `PR_DETAIL_QUERY` against GitHub — a loop over ids drained the tenant's 5k points/hour.
+- **`sync/hydrate-detail.ts`**: 60s cache + in-flight map. Lean storage hydrates detail on
+  demand, so every `GET /api/prs/:id` ran `PR_DETAIL_QUERY` against GitHub — a loop over ids
+  drained the account's 5k points/hour.
   **A write that must be visible IMMEDIATELY has to bust that cache** —
   `invalidatePrHydration(accountId, owner, name, number)`. Deleting the cache entry alone is NOT
   enough: a fetch started *before* the write is still in the in-flight map, and the next reader
@@ -152,7 +124,7 @@ list — an `err` from a failed HTTP call carries the outgoing `Authorization: t
   "the host owns the commit" — still true, and now enforced harder, but say so in prose because
   the grep no longer finds it. The fixer's build/test capability went with the shell, and the SPA
   says "Not built or tested here." beside the diff — it promises no CI (see
-  [docs/PRO-PLUGIN-AND-ACTIVITY.md](PRO-PLUGIN-AND-ACTIVITY.md) § The fix agent has no shell).
+  [PLATFORM.md](PLATFORM.md) § The fix agent has no shell).
 
 **The local clone cache (`~/.limn/clones`) — five fixes, and the standing invariant.**
 The AI-Fix agent, Claude Review and now the merge-conflict resolver all work inside this cache, so
@@ -190,7 +162,7 @@ clone count. **The invariant: a GitHub token never reaches disk.**
   `user's-branch`, `a+b`, `ünicode/x` are all valid GitHub branches.
 - **A bounded startup sweep + an age-paired LRU** (`sweepCloneCache`, awaited in `index.ts` between
   the event cleanup and `ensureLocalAccount` — the credential repair must finish before
-  `bindProPlugin` can start a fix that reuses a clone). Per clone: clean origin → tighten perms →
+  `bindPlatform` can start a fix that reuses a clone). Per clone: clean origin → tighten perms →
   `git worktree prune` → remove `.worktrees/` entries that are neither live nor within
   `worktreeTtlMs` → prune again → delete every `refs/pierre/conflict/*` (no job survives a restart,
   so at boot they are orphans by definition). ⚠ **BOUNDED**: `Promise.race` against
@@ -211,50 +183,47 @@ clone count. **The invariant: a GitHub token never reaches disk.**
   builds a real repo with a committed symlink and asserts both that the call throws AND that the
   outside file does not exist — the non-vacuous half.
 
-- **Cross-tenant in-memory state (plugin)**: `getReviewStatus`, `listActiveReviews(accountId)`,
-  `requestReviewCancel(prId, accountId)` and `getFixStatus` all key on prId in PROCESS-GLOBAL
-  maps — they now verify the entry's own `accountId`, and the claude-review SSE stream checks PR
-  ownership BEFORE `reply.hijack()` (the ai-fix pattern). Previously a foreign running PR
-  streamed another tenant's live agent activity (file paths + source snippets).
-- **Slack webhook SSRF (plugin)**: `normalizeSlackWebhookUrl` is an ALLOWLIST
+- **Account-keyed in-memory state**: `getReviewStatus`, `listActiveReviews(accountId)`,
+  `requestReviewCancel(prId, accountId)` and `getFixStatus` key on prId in PROCESS-GLOBAL maps and
+  verify the entry's own `accountId`, and the claude-review SSE stream checks PR ownership BEFORE
+  `reply.hijack()` (the ai-fix pattern). There is one account now; the checks stay because the
+  ownership rule is the query layer's everywhere else and `verify:isolation` still asserts it.
+- **Slack webhook SSRF (`platform/slack/`)**: `normalizeSlackWebhookUrl` is an ALLOWLIST
   (`https://hooks.slack.com/services/…` only, exact host — not `endsWith`), enforced at BOTH the
   storage and the `fetch` sink, `redirect: 'error'`, and the response body no longer comes back
-  in the error (it was a read primitive against the Railway private network).
+  in the error (it was a read primitive against whatever network the server sits on).
   ⚠ **There are now N webhooks per account**, one per configured workspace
-  (`workspace_slack_targets`, plugin 0030) — so the storage-side half runs in `slack/targets.ts`'s
+  (`workspace_slack_targets`, platform migration 0030) — so the storage-side half runs in `slack/targets.ts`'s
   `writeTarget`, and **any further write path must route through the same normaliser**: a write
   that skips it bypasses the control at storage time, leaving only the sink check standing.
   A bad URL refuses the write outright and changes NOTHING — not even the fields beside it, since
   the URL is validated before the upsert is built — and each of the six classic bypasses is pinned
-  in `packages/pro/test/slack-targets.test.ts`.
+  in `platform/test/slack-targets.test.ts`.
   ⚠ **The write path is now SINGLE-WORKSPACE** (`PUT /api/pro/slack/target?workspace=<id>`; the
   plural `/targets` and its whole-selection body are DELETED). The workspace id therefore arrives
   in a QUERY resolved by `resolveRequestWorkspaceId` rather than in a request BODY as a list — one
   fewer place a client-supplied id reaches a write — with the named composite FK
   `workspace_slack_targets_workspace_account_fk` still the structural backstop beneath it.
-- **Slack digest text is escaped and verbatim (plugin).** `&`, `<` and `>` are escaped in model
+- **Slack digest text is escaped and verbatim.** `&`, `<` and `>` are escaped in model
   output, PR titles and the workspace name (all attacker- or user-influenced), so none of them can
   forge a link or write `<!channel>`. Every mrkdwn object is `verbatim: true`, so Slack does not
   auto-link bare URLs or parse `@here`/`@channel`/`#channel` in that text. Every `href` in the
   message is one that `slack/links.ts` built from `appWebUrl` plus integer ids; model-emitted URLs
   never survive as links.
-- **The Slack webhook URL is stored PLAINTEXT — a decision re-made when the count went from one
-  per account to N** (plugin migration 0030's header carries the full argument). Short form: it is
-  write-only capability to one channel the account owner chose, granting no read of Slack and
-  carrying no tenant data — different in KIND from the GitHub token, which is AES-256-GCM sealed
-  because it reads private source. Multiplying the count multiplies blast radius of the same
-  shape, not its kind. Sealing was rejected because `ENCRYPTION_KEY` is CLOUD-ONLY, so a sealed
-  column would be sealed in one deployment mode and plaintext in the other — two storage formats
-  for one field — and a key rotation would silently break every delivery. The mitigations that do
-  apply are enforced in code and must stay: **never returned by any route** (`configured` only),
+- **The Slack webhook URL is stored PLAINTEXT** (platform migration 0030's header carries the
+  argument). It is write-only capability to one channel the owner chose, granting no read of
+  Slack — different in KIND from a tracker token, which reads the team's whole tracker. Sealing
+  was rejected because `ENCRYPTION_KEY` is optional, so a sealed column would hold two storage
+  formats for one field, and a key rotation would silently break every delivery. The mitigations
+  are enforced in code and must stay: **never returned by any route** (`configured` only),
   **never logged** (the cron and the test route log account + workspace ids), and every write
-  through the allowlist. REVISIT if core grows a mode-independent secret-sealing seam.
-- **The per-workspace tracker token (`workspace_trackers.auth_token`, CORE since apiVersion 23 —
-  it was the plugin's `pro_workspace_settings.jira_token`, plugin 0035, and was MOVED in its stored
-  form) IS SEALED, unlike the Slack webhook** — different in KIND: it READS the team's whole tracker.
+  through the allowlist.
+- **The per-workspace tracker token (`workspace_trackers.auth_token` — it was
+  `pro_workspace_settings.jira_token`, platform migration 0035, and was MOVED in its stored form) IS
+  SEALED when it can be, unlike the Slack webhook** — different in KIND: it READS the team's whole tracker.
   Core seals it itself (`tracker/secret.ts` over `auth/crypto.ts` AES-256-GCM, wired in
-  `tracker/runtime.ts`), whenever `ENCRYPTION_KEY` is a valid 32-byte key — always in cloud, locally
-  only if the operator set one. Stored as `sealed:v1:<iv:tag:ct>`, or
+  `tracker/runtime.ts`), whenever `ENCRYPTION_KEY` is a valid 32-byte key (only if the operator set
+  one). Stored as `sealed:v1:<iv:tag:ct>`, or
   `plain:<token>` on a local install with no key (the same trust as that machine's `gh` token and
   SQLite file). This ACCEPTS the two-format cost the webhook note rejected, because a read
   credential is worth it and the prefix makes both forms readable: a `sealed:` value the host cannot
@@ -269,37 +238,35 @@ clone count. **The invariant: a GitHub token never reaches disk.**
   linear.app, so moving the URL from `linear.app/acme` to `linear.app/other` removes it. There is
   **no SSRF surface**: the workspace URL is an identity, never fetched, and every call goes to the
   FIXED `https://api.linear.app/graphql` — still through the tracker transport (no redirects, so the
-  key is never forwarded; 10 s timeout; 5 MB cap; https + public addresses in cloud). The key is sent
+  key is never forwarded; 10 s timeout; 5 MB cap). The key is sent
   as `Authorization: <key>` (never `Bearer`). The PUT refuses a value not shaped like a personal key
   (`lin_api_…`), so a GitHub or Jira token pasted into the wrong box is never stored or sent to
   Linear. A key belonging to another Linear workspace than the saved URL is refused on read
   (`bad_url`, workspace backoff) rather than storing that workspace's tickets under this one's
   idents. Linear's rate limits are pre-empted from its `x-ratelimit-*` headers per key (in memory)
   and a `RATELIMITED` answer is a quiet 5-minute workspace backoff. The connection check
-  (`GET …/tracker/linear-check`) is on `search` in `tierFor`. ⚠ OAuth for cloud is NOT built: a cloud
-  user pastes a personal key, which reads everything that user can see in Linear — the same scope a
-  Jira API token has.
-- **Jira SSRF (core `tracker/jira/fetch.ts`, moved intact from the plugin at apiVersion 23) — the
-  base URL is customer-typed, so every Jira call is a
+  (`GET …/tracker/linear-check`) is on `search` in `tierFor`. A personal key reads everything
+  that user can see in Linear — the same scope a Jira API token has.
+- **Jira SSRF (`tracker/jira/fetch.ts`) — the base URL is customer-typed, so every Jira call is a
   server-side request to a place they chose.** ONE helper, `jiraGetJson`, makes every call: GET
   only, 10s timeout, 5 MB body cap, JSON only, and **NO REDIRECTS** — any 3xx is an error, so the
-  Authorization header is never forwarded to a host nobody chose. In CLOUD additionally: https
-  only, and the host must resolve to PUBLIC addresses — loopback, RFC1918, CGNAT, link-local
-  (incl. 169.254.169.254), unique-local, multicast, reserved, unspecified and v4-mapped/NAT64 forms
-  of those are refused, an IP literal up front and a NAME **at connect time through the socket's own
-  `lookup`** (refusing if ANY answer is private), so there is no second resolution for DNS
-  rebinding to exploit. LOCAL allows http and LAN hosts (on-prem Jira; the operator is the only
-  caller). A failure answers `502` with a sentence we wrote — never Jira's body. The ticket route
+  Authorization header is never forwarded to a host nobody chose. http and LAN hosts are
+  allowed (on-prem Jira; the operator is the only caller). The STRICT policy (`{ cloud: true }`
+  — https only, and the address guard `guardedLookup`: loopback, RFC1918, CGNAT, link-local incl.
+  169.254.169.254, unique-local, multicast, reserved, unspecified and v4-mapped/NAT64 forms, an IP
+  literal up front and a NAME **at connect time through the socket's own `lookup`**, so there is no
+  second resolution for DNS rebinding to exploit) is what SonarCloud's fixed host is called with. A failure answers `502` with a sentence we wrote — never Jira's body. The ticket route
   additionally refuses any key the PR's own detection did not find, so the saved token cannot be
   used as a general Jira reader. Pinned in `apps/backend/src/tracker/jira/fetch.test.ts` (real
   sockets) and `tracker/routes.test.ts`. Rate tiers: every route that can reach the customer's Jira
   (the ticket GET/refresh/ac-field, the connection check, the tracker PUT and `POST
   /api/ticket-links`, whose kicks spend it) is on `search`, by exact path in `tierFor`.
-- **Reference-docs web pages (core `reference-docs/url-fetch.ts`, LOCAL ONLY) — a page address the
-  reader typed, fetched by the docs build.** STRICTER than the Jira guard and in BOTH modes: http/https
-  only, no credentials in the URL, **no private or local addresses ever** (the same blocklist, plus
-  `localhost`/`.local`/single-label names; an IP literal up front, a name at connect time through the
-  tracker's `guardedLookup`), redirects followed ONLY on the same host (≤ 3, never https → http, each
+- **Reference-docs web pages (`reference-docs/url-fetch.ts`) — a page address the
+  reader typed, fetched by the docs build.** http/https only, no credentials in the URL,
+  **never loopback, link-local, multicast, reserved or `localhost`** (Limn's own unauthenticated
+  API), while private networks and intranet names ARE allowed (`privateNetwork: true` — the reader's
+  company wiki is the point); an IP literal up front, a name at connect time through the tracker's
+  `guardedLookup` with the policy's predicate, redirects followed ONLY on the same host (≤ 3, never https → http, each
   re-vetted), 20s per exchange, 25 MB while reading. Pinned in `url-fetch.test.ts`. A "Follow links"
   crawl (`crawl.ts`) sends EVERY hop, robots.txt included, through the same `fetchPage`, and adds a
   same-host rule (exact host + port), ≤ 25 pages, 2 MB per linked page and a visited set; anchors and
@@ -308,35 +275,24 @@ clone count. **The invariant: a GitHub token never reaches disk.**
   parser); the file's kind is sniffed from its bytes. The docs agents deny Bash, run under the path
   guard, and the PDF build's Write/Edit are confined to `staging/sections/*.md` by a second hook
   ([REFERENCE-DOCS.md](REFERENCE-DOCS.md)).
-- **`resolution-check` fan-out (plugin)**: `MAX_TARGETS_PER_BATCH` 50 + per-account in-flight set
+- **`resolution-check` fan-out (platform)**: `MAX_TARGETS_PER_BATCH` 50 + per-account in-flight set
   + 30s interval + abort wiring on the JSON twin. One billed LLM call per thread, uncapped, on an
   app built for bot-flooded PRs. (The route itself was REMOVED 2026-10-18.)
-- **402 entitlement gate** (`plugins/auth.ts` `isProPath`) now covers the non-`/api/pro/`
-  Claude-Review paths. Latent today (agentic is off in cloud) — real the day it is enabled.
-- **`assertCloudConfig`** now rejects a `SESSION_SECRET` under 32 bytes or a placeholder (it is
-  stretched by a single SHA-256 into the session sealing key, bypassing secure-session's own
-  minimum + its slow KDF, so a weak one is brute-forceable → forge any account's cookie), and a
-  non-https `APP_BASE_URL` (the cookie's `secure` flag derives from that scheme).
 - **SQLite file perms** 0600 + dir 0700 (incl. the `-wal`/`-shm` siblings).
-- **Dockerfile** runs as `USER node`, not root. **CI** gained a **blocking** `pnpm audit
-  --audit-level high --prod`; all 8 highs that existed were cleared (see Dependency posture).
-- **`.gitignore`** is `.env*` + `!*.example` — it was `.env` + `.env.local` only, and the docs
-  tell readers to create `.env.cloud` with `SESSION_SECRET`/`ENCRYPTION_KEY` in it.
+- **CI** runs a **blocking** `pnpm audit --audit-level high --prod`; all 8 highs that existed
+  were cleared (see Dependency posture). The site image's `Dockerfile` runs as `USER node`.
+- **`.gitignore`** is `.env*` + `!*.example` — it was `.env` + `.env.local` only.
 
-**GDPR / privacy.** GA4 is now **consent-gated in BOTH bundles** (`lib/consent.ts` +
-`CookieBanner`, storage key shared so answering on the landing carries into the app): gtag.js is
-never FETCHED before an explicit grant (configuring-but-denying still contacts Google), Consent
-Mode v2 defaults denied, Google Signals + ad personalisation off, withdrawal deletes the `_ga`
-cookies. **The brand font is SELF-HOSTED** (`src/fonts/*.woff2`, relative `url()` so Vite
-base-prefixes it to `/app/`) — the Google Fonts `<link>` leaked every viewer's IP to Google
-(breaking local mode's no-phone-home promise) and forced an inline `onload` handler that would
-have needed `script-src 'unsafe-inline'`. New landing routes **`/privacy`, `/cookies`, `/terms`**
-(+ footer column, sitemap, a terms line on `SignInGate`). Data-subject rights are SELF-SERVICE:
-`GET /api/me/export` (`db/export-account.ts` — explicit column lists; the sealed token is NEVER
-in the output) and `DELETE /api/me/account` (`db/erase-account.ts`, confirm-by-typing-your-login,
-refused in local mode). Erasure reuses `deleteRepo` per repo, then the enumerated account-level
-tables, then calls the **new optional `ctx.registerAccountErasure` seam** so the plugin drops its
-own 14 account-scoped tables (`eraseProByAccountId`).
+**Privacy.** Limn phones nothing home: no analytics in the SPA (GA and its cookie banner live
+only on the website, `apps/landing`, consent-gated), and **the brand font is SELF-HOSTED**
+(`src/fonts/*.woff2`, relative `url()` so Vite base-prefixes it to `/app/`) — the Google Fonts
+`<link>` leaked every viewer's IP to Google and forced an inline `onload` handler that would
+have needed `script-src 'unsafe-inline'`. `GET /api/me/export` (`db/export-account.ts` —
+explicit column lists; no secret is ever in the output) is the portability half; erasure is
+deleting the local database file. `db/erase-account.ts` (`eraseAccountData`, `deleteRepo` per
+repo, then the enumerated account-level tables, then the platform's `registerAccountErasure`
+handler, `eraseProByAccountId`) has no route any more but stays the checklist the retention and
+delete paths are measured against.
 **Landmine: `accountScopedTables()` in `erase-account.ts` is a CHECKLIST the test iterates** — a
 new `accountId`-bearing table that isn't added there fails `erase-account.test.ts` rather than
 silently surviving a deletion the user was told was complete. (It caught `teamRepos` once already.)
@@ -346,8 +302,8 @@ drop of one is correct and intended (two bot tables collapsed into one), and it 
 because an off-by-one in a checklist is exactly how a table gets missed. ⚠ **`workspaceRepos`
 carries its own `accountId`, not only `workspaceId`/`repoId`**, so it belongs on the list in its own
 right rather than as a cascade dependent. `eraseAccountData` deletes child-before-parent
-(`workspaceReviewers` → `workspaceRepos` → `workspaces`) inside one transaction: Postgres checks FKs
-immediately, so relying on the cascades alone would be dialect-dependent. `export-account.ts` was a
+(`workspaceReviewers` → `workspaceRepos` → `workspaces`) inside one transaction: SQLite enforces FKs
+only under `foreign_keys=ON`, so relying on the cascades alone would depend on a pragma. `export-account.ts` was a
 RENAME, not an addition — both bot collections became the single `workspaceReviewers`, and `teams`
 became `workspaces` with each row carrying its `repoIds`.
 
@@ -362,8 +318,7 @@ code this app actually runs, so they are worth knowing:
   self-hosted font, `/` → 302, JSON 404 on unknown `/api`, and five traversal payloads — no leak).
 - **`drizzle-orm` 0.38.4 → ^0.45.2** — SQL injection via improperly escaped SQL identifiers, in
   the whole query layer. Also bumped `drizzle-kit` → ^0.31.10, and `fastify` → ^5.10.0.
-  **`packages/pro` declares the same two as devDeps and MUST stay in lockstep**, or the plugin
-  type-checks against a different drizzle than `ctx.db` actually is.
+  
 - Transitives no direct bump reaches are pinned in root `pnpm.overrides`: `fast-uri` ^3.1.4,
   `find-my-way` ^9.7.0, `hono` ^4.12.32, `@hono/node-server` ^2.0.12, `shell-quote` ^1.9.0
   (arrived with drizzle 0.45's `gel`), and `brace-expansion@>=3.0.0 <5.0.7` → ^5.0.8 — note the
@@ -378,32 +333,18 @@ code this app actually runs, so they are worth knowing:
   (moderate — via `vis-data`, and the bug needs v3/v5/v6 with a `buf` argument; vis-data calls v4
   with none) and `body-parser` (low — inside express inside the MCP SDK, an AI dep that ships in
   no release artifact).
-- **Verification beyond the unit suite** (which runs on SQLite only): a Postgres smoke on a
-  throwaway container exercised `getTimeline` / `getActivity` / `getOpenPrs` / `getMyTurn` /
-  `getMergers` / `listUsers` / `getConsolidatedFeed` / `searchPrs` (raw-`sql` templates) /
-  the scope resolver / the workspace metrics getter — 10/10 on drizzle 0.45 + node-postgres, plus
-  pg migrations from empty. **Gotcha found doing it:** `DROP SCHEMA public CASCADE` does NOT
-  reset a pg dev database — drizzle keeps its journal in a separate `drizzle` schema, so the
-  migrator then reports "Migrations applied" having done nothing. Drop both schemas.
 - Fastify 5.10 deprecated the top-level `disableRequestLogging` (FSTDEP023); it moved to
   `logController: new LogController({...})`. Same class of fix as `routerOptions.maxParamLength`
   — a boot-time deprecation warning is noise in the terminal of every packaged-CLI user.
 
 **Tests:** `api/plugins/security.test.ts` (15), `api/plugins/rate-limit.test.ts` (15),
 `db/erase-account.test.ts` (8), a codeowners ReDoS regression, and
-`packages/pro/test/slack-webhook-url.test.ts`.
+`platform/test/slack-webhook-url.test.ts`.
 
-**Two suites exist that CI does not run — a known gap, both needing a devDependency + script
-decision (each would touch the root lockfile, which is why neither was taken unilaterally):**
-- `packages/pro/test/` — **9 files / 135 tests**, runnable via `packages/pro/vitest.config.ts`
-  (which aliases `better-sqlite3` to the backend's copy and exports a PLAIN object, since
-  `vitest/config` is unresolvable from a package without vitest): `./apps/backend/node_modules/.bin/vitest
-  run --root packages/pro`. The plugin still declares no `test` script and no vitest devDep, so
-  `pnpm -r test` skips it — including its cross-account isolation suite, whose fixture replays a
-  **hardcoded, curated** plugin-migration list against an in-memory SQLite holding only plugin
-  tables (so plugin `0020`, which reads core `workspaces`, needs a minimal core stub in that
-  fixture) and whose scope-isolation assertions are non-vacuous only because its seeded rows use
-  the `ws:` vocabulary.
+**One suite exists that CI does not run — a known gap, needing a devDependency + script
+decision (it would touch the root lockfile). The platform's tests (`apps/backend/src/platform/test/`)
+used to be the second; folded into the backend, they now run with `pnpm test`, including the
+cross-account isolation suite.**
 - `apps/frontend/test/` — **9 files / 127 tests**, same arrangement (`apps/frontend/vitest.config.ts`,
   `include` pinned to `test/**` so vitest can't collect the Playwright `e2e/*.spec.ts` and fail).
   Kept OUTSIDE `src/` so `pnpm typecheck` never tries to resolve the uninstalled vitest types.
