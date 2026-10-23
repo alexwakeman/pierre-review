@@ -23,9 +23,14 @@ export function GetStarted(): JSX.Element {
             Free. One command.
           </h2>
           <p className="mb-6 max-w-[56ch] text-pretty text-lede text-ink-soft">
-            {SITE_NAME} runs on your machine. It reads GitHub through your{' '}
+            {SITE_NAME} runs only on your machine. It reads GitHub through your{' '}
             <span className="text-ink">gh</span> login and keeps its data in a file on your
             disk. There is no account and nothing to pay.
+          </p>
+          <p className="mb-6 max-w-[56ch] text-pretty text-lede text-ink">
+            Nothing is sent to us. We run no server for the app, and it has no tracking. Your
+            code and pull requests go only between your machine and GitHub — and to Anthropic,
+            on your own account, when you ask Claude to review or fix something.
           </p>
           <p className="mb-9 font-mono text-mono-row text-ink">{INSTALL_COMMAND}</p>
           <div className="flex flex-wrap items-center gap-3.5">
@@ -35,6 +40,7 @@ export function GetStarted(): JSX.Element {
         </div>
         <ul className="flex flex-col gap-3.5">
           <DashItem>100% free. No sign-in, no card, no repository limit.</DashItem>
+          <DashItem>Runs only on your machine. No data is sent to our servers.</DashItem>
           <DashItem>
             Available only from npm: <span className="text-ink">{INSTALL_COMMAND}</span>.
             Needs Node 20 or later.

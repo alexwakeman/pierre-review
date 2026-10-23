@@ -144,6 +144,9 @@ export default function Home(): JSX.Element {
             Install it from npm: <span className="text-ink">{INSTALL_COMMAND}</span>. Built for
             Claude users today; Codex support is coming soon.
           </p>
+          <p className="mb-3 max-w-reassure font-mono text-mono-nav text-ink">
+            It runs only on your machine. No data from the app is ever sent to our servers.
+          </p>
           <p className="mb-11 max-w-reassure font-mono text-mono-nav text-secondary">
             Free for individuals, and for organisations where no more than {FREE_TEAM_SIZE}{' '}
             people use it. More users than that need a licence —{' '}

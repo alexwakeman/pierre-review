@@ -53,7 +53,7 @@ export type RouteSeo = {
 export const ROUTE_SEO: Record<string, RouteSeo> = {
   '/': {
     title: `${SITE_NAME} — plan your day across every repository`,
-    description: `${SITE_NAME} opens on one board that answers what to work on today: review requests, replies, red builds, conflicts and pull requests ready to land, from every repository, ranked. You decide what counts as your turn and in what order. Claude reviews and fixes pull requests on your own Claude login. 100% free, runs on your machine: npx ${NPM_PACKAGE}.`,
+    description: `${SITE_NAME} opens on one board that answers what to work on today: review requests, replies, red builds, conflicts and pull requests ready to land, from every repository, ranked. You decide what counts as your turn and in what order. Claude reviews and fixes pull requests on your own Claude login. 100% free, and it runs only on your machine — no data is sent to our servers: npx ${NPM_PACKAGE}.`,
   },
   '/for-developers': {
     title: `For developers — plan your day, by your own rules · ${SITE_NAME}`,
