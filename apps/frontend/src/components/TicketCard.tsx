@@ -6,13 +6,13 @@
 // line, then its tags as WORDS (lib/laneBoard.ts `ticketCardTags`: "CI failing", "No PR" or
 // "n PRs · m open", "No owner" — dropped where the person line says "Unassigned" instead).
 //
-//   PERSON   Critical path and Theme: the assignee's name in a PILL on its own line, full width,
-//            truncated with an ellipsis. The spelling is the People lane's (lib/laneBoard.ts
+//   PERSON   Critical path and Theme: the assignee's name in a PILL at the BOTTOM RIGHT, beside the
+//            tags, as wide as the name up to 60% of the card, then truncated with an ellipsis. The spelling is the People lane's (lib/laneBoard.ts
 //            `assigneeLabel`), so one person never reads two ways on one page. The full name is in the
 //            card's accessible name AND the pill's `title`. Nobody assigned holds the line open
-//            ("Unassigned"). People (the lane IS the person): the same line carries the ticket's theme.
+//            ("Unassigned"). People (the lane IS the person): the same slot carries the ticket's theme.
 //   HEIGHT   every card is the same height whatever it carries: the title keeps two lines, the
-//            one-liner, criteria, person/theme and tags one each. An empty slot stays open. Cards fill
+//            one-liner, criteria, and tags + person/theme one each. An empty slot stays open. Cards fill
 //            their slot, so a grid row's cards line up.
 //   BORDER   (lib/laneBoard.ts `ticketCardBorder`) solid accent, 2px = on a critical path; dashed =
 //            waiting on another unfinished ticket; both = dashed accent. A card with an open or merged
@@ -138,26 +138,6 @@ export function TicketCard({
             <RefreshIcon size={10} className="shrink-0 animate-spin text-gray-500 motion-reduce:animate-none dark:text-gray-400" />
           )}
         </span>
-        {/* ONE person-or-theme line, always held open, so every card on every view keeps one height. */}
-        <span aria-hidden data-testid="ticket-person-line" className="mt-0.5 flex h-5 w-full min-w-0 items-center text-[11px] leading-5">
-          {show === 'theme' ? (
-            node.theme != null && (
-              <span className="truncate rounded bg-gray-100 px-1 text-gray-700 dark:bg-gray-800 dark:text-gray-200">{node.theme}</span>
-            )
-          ) : person != null ? (
-            <span
-              data-testid="ticket-person"
-              title={person}
-              className="block w-full min-w-0 truncate rounded-full bg-gray-200 px-1.5 font-medium text-gray-800 dark:bg-gray-700 dark:text-gray-100"
-            >
-              {person}
-            </span>
-          ) : (
-            <span data-testid="ticket-person" className="truncate px-1.5 text-gray-600 dark:text-gray-300">
-              Unassigned
-            </span>
-          )}
-        </span>
         {/* One line, always 20px, never wrapping: only the PR-count tag shrinks and truncates, so
             "CI failing" and "No owner" can never fall off the face. */}
         <span aria-hidden className="mt-0.5 flex h-5 w-full items-center gap-x-1.5 text-[11px] leading-5">
@@ -171,6 +151,27 @@ export function TicketCard({
                 {t}
               </span>
             ))}
+          </span>
+          {/* Bottom right: the person pill (or the theme on People), as long as the name, capped so
+              the tags keep room; a longer name truncates with an ellipsis. */}
+          <span data-testid="ticket-person-line" className="flex h-5 min-w-0 max-w-[60%] shrink-0 items-center">
+            {show === 'theme' ? (
+              node.theme != null && (
+                <span className="truncate rounded bg-gray-100 px-1 text-gray-700 dark:bg-gray-800 dark:text-gray-200">{node.theme}</span>
+              )
+            ) : person != null ? (
+              <span
+                data-testid="ticket-person"
+                title={person}
+                className="min-w-0 truncate rounded-full bg-gray-200 px-1.5 font-medium text-gray-800 dark:bg-gray-700 dark:text-gray-100"
+              >
+                {person}
+              </span>
+            ) : (
+              <span data-testid="ticket-person" className="truncate text-gray-600 dark:text-gray-300">
+                Unassigned
+              </span>
+            )}
           </span>
         </span>
       </button>

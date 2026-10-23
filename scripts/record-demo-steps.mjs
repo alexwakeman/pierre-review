@@ -17,7 +17,12 @@ const enc = encodeURIComponent;
 const DEEP_PRS = [113, 114, 105, 116, 111];
 const MORE_PRS = [141, 142, 104, 106, 2278, 2196, 2349, 2207, 2213];
 const WEB_PRS = [101, 112, 140];
-const TICKETS = ['PLAT-292', 'PLAT-301', 'PLAT-288', 'PLAT-305', 'PLAT-312', 'PLAT-296', 'PLAT-297', 'INFRA-231', 'INFRA-244', 'INFRA-260', 'INFRA-248', 'INFRA-199'];
+// EVERY sprint card, ghosts included: a card click opens its story in the tray, so a missing one
+// reads "Couldn't load this story." in the demo.
+const TICKETS = [
+  'PLAT-292', 'PLAT-301', 'PLAT-288', 'PLAT-305', 'PLAT-312', 'PLAT-296', 'PLAT-297', 'PLAT-310', 'PLAT-315', 'PLAT-318',
+  'INFRA-231', 'INFRA-244', 'INFRA-260', 'INFRA-248', 'INFRA-252', 'INFRA-199', 'INFRA-180',
+];
 const PEOPLE = [1, 2, 5, 6, 3];
 const BOTS = [8, 9, 10, 20];
 
