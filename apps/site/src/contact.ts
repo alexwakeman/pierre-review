@@ -45,7 +45,7 @@ export const MIN_FILL_MS = 3_000;
 export const MAX_TICKET_MS = 6 * 60 * 60 * 1000;
 
 /**
- * The ticket signer. `secret` is CONTACT_TICKET_SECRET (or the legacy SESSION_SECRET);
+ * The ticket signer. `secret` is CONTACT_TICKET_SECRET;
  * without one a per-process random key is used, so a restart invalidates outstanding
  * tickets — one visitor asked to reload, which beats a key readable from the source.
  *

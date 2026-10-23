@@ -92,6 +92,8 @@ export function cspFor(path: string): string {
 export interface SecurityOptions {
   /** e.g. https://limn-review.com — enables the www → apex redirect. */
   canonicalOrigin: string | null;
+  /** Other hosts (e.g. the old pierre-review.com) sent to canonicalOrigin with a 301. */
+  redirectHosts?: readonly string[];
   /** 0 disables HSTS. */
   hstsMaxAge: number;
 }
@@ -120,7 +122,8 @@ export function applySecurity(
       canonicalHost = '';
     }
     const host = (req.headers.host ?? '').toLowerCase().split(':')[0] ?? '';
-    if (canonicalHost && host !== canonicalHost && host === `www.${canonicalHost}`) {
+    const legacy = (opts.redirectHosts ?? []).some((h) => h.toLowerCase() === host);
+    if (canonicalHost && host !== canonicalHost && (host === `www.${canonicalHost}` || legacy)) {
       res.statusCode = 301;
       res.setHeader('Location', `${opts.canonicalOrigin.replace(/\/$/, '')}${req.url ?? '/'}`);
       res.end();

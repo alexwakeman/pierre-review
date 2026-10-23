@@ -221,6 +221,30 @@ describe('the security headers', () => {
       await stop(r);
     }
   });
+
+  it('redirects the old domain to the canonical one, and serves only listed hosts that way', async () => {
+    const r = await start({ redirectHosts: ['pierre-review.com', 'www.pierre-review.com'] });
+    try {
+      const { request } = await import('node:http');
+      const hit = (host: string) =>
+        new Promise<{ status: number; location: string | undefined }>((resolve, reject) => {
+          const req = request(`${r.base}/for-developers`, { headers: { host } }, (resp) => {
+            resolve({ status: resp.statusCode ?? 0, location: resp.headers.location });
+            resp.resume();
+          });
+          req.on('error', reject);
+          req.end();
+        });
+      for (const host of ['pierre-review.com', 'WWW.pierre-review.com:443']) {
+        const res = await hit(host);
+        expect(res.status).toBe(301);
+        expect(res.location).toBe('https://limn-review.com/for-developers');
+      }
+      expect((await hit('something-else.up.railway.app')).status).not.toBe(301);
+    } finally {
+      await stop(r);
+    }
+  });
 });
 
 describe('the demo', () => {

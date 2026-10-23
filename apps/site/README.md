@@ -54,8 +54,9 @@ pool), `headersTimeout` is 75 s, and `requestTimeout` (30 s) is the slow-loris g
 | `LANDING_DIR` | `../landing/dist` | the built landing |
 | `DEMO_DIR` | `../frontend/dist-demo` | the built demo |
 | `CONTACT_SLACK_WEBHOOK_URL` | — | where contact messages go; unset = form unavailable |
-| `CONTACT_TICKET_SECRET` | `SESSION_SECRET` (its old name), else random | signs the fill-time ticket |
-| `SITE_URL` | `APP_BASE_URL` (its old name), else none | canonical origin for the www redirect |
+| `CONTACT_TICKET_SECRET` | random per process | signs the fill-time ticket |
+| `SITE_URL` | none | canonical origin for the www redirect |
+| `REDIRECT_HOSTS` | none | comma list of other hosts 301'd to `SITE_URL`, e.g. `pierre-review.com,www.pierre-review.com` |
 | `HSTS_MAX_AGE` | 31536000 | seconds; 0 disables |
 | `TRUST_PROXY_HOPS` | 0 | proxies that append to `X-Forwarded-For` |
 

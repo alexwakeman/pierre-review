@@ -35,10 +35,12 @@ export interface SiteOptions {
   demoDir: string;
   /** CONTACT_SLACK_WEBHOOK_URL. Empty ⇒ the form reports itself unavailable. */
   contactWebhookUrl: string;
-  /** CONTACT_TICKET_SECRET (or SESSION_SECRET). Null ⇒ a per-process random key. */
+  /** CONTACT_TICKET_SECRET. Null ⇒ a per-process random key. */
   ticketSecret: string | null;
   /** SITE_URL, e.g. https://limn-review.com. Enables the www → apex redirect. */
   canonicalOrigin: string | null;
+  /** REDIRECT_HOSTS: other hosts 301'd to canonicalOrigin (the old domain). */
+  redirectHosts?: readonly string[];
   /** HSTS_MAX_AGE seconds; 0 disables. */
   hstsMaxAge: number;
   /** TRUST_PROXY_HOPS: proxies in front of us that append to X-Forwarded-For. */
@@ -331,7 +333,7 @@ export function createSiteHandler(opts: SiteOptions): (req: IncomingMessage, res
   async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const url = req.url ?? '/';
     const path = url.split('?')[0] ?? '/';
-    if (applySecurity(req, res, path, { canonicalOrigin: opts.canonicalOrigin, hstsMaxAge: opts.hstsMaxAge })) {
+    if (applySecurity(req, res, path, { canonicalOrigin: opts.canonicalOrigin, redirectHosts: opts.redirectHosts, hstsMaxAge: opts.hstsMaxAge })) {
       return;
     }
 

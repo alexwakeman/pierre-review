@@ -7,10 +7,11 @@
 //   DEMO_DIR                   built demo app. Default ../frontend/dist-demo.
 //   CONTACT_SLACK_WEBHOOK_URL  Slack incoming webhook for the contact form. Unset ⇒ the
 //                              form says it is unavailable.
-//   CONTACT_TICKET_SECRET      signs the form's fill-time ticket. Falls back to
-//                              SESSION_SECRET (its old name), then to a random key.
+//   CONTACT_TICKET_SECRET      signs the form's fill-time ticket. Unset ⇒ a random key
+//                              per process.
 //   SITE_URL                   canonical origin, for the www → apex redirect.
-//                              Falls back to APP_BASE_URL (its old name).
+//   REDIRECT_HOSTS             comma list of other hosts 301'd to SITE_URL
+//                              (the old pierre-review.com).
 //   HSTS_MAX_AGE               seconds; 0 disables. Default 31536000.
 //   TRUST_PROXY_HOPS           proxies in front that append to X-Forwarded-For
 //                              (Railway: 1). Default 0 — the header is ignored.
@@ -40,14 +41,18 @@ const logger: Logger = {
 
 const landingDir = resolve(process.env.LANDING_DIR ?? join(siteRoot, '..', 'landing', 'dist'));
 const demoDir = resolve(process.env.DEMO_DIR ?? join(siteRoot, '..', 'frontend', 'dist-demo'));
-const canonical = (process.env.SITE_URL ?? process.env.APP_BASE_URL ?? '').trim().replace(/\/$/, '');
+const canonical = (process.env.SITE_URL ?? '').trim().replace(/\/$/, '');
 
 const handler = createSiteHandler({
   landingDir,
   demoDir,
   contactWebhookUrl: process.env.CONTACT_SLACK_WEBHOOK_URL ?? '',
-  ticketSecret: process.env.CONTACT_TICKET_SECRET || process.env.SESSION_SECRET || null,
+  ticketSecret: process.env.CONTACT_TICKET_SECRET || null,
   canonicalOrigin: canonical || null,
+  redirectHosts: (process.env.REDIRECT_HOSTS ?? '')
+    .split(',')
+    .map((h) => h.trim())
+    .filter(Boolean),
   hstsMaxAge: intFromEnv('HSTS_MAX_AGE', 31536000),
   trustProxyHops: intFromEnv('TRUST_PROXY_HOPS', 0),
   logger,

@@ -20,10 +20,9 @@ name: Deploy site
 # Railway service variables (runtime; set in the Railway dashboard):
 #   CONTACT_SLACK_WEBHOOK_URL  Slack incoming webhook the contact form posts to. Unset =
 #                              the form says it is unavailable.
-#   CONTACT_TICKET_SECRET      signs the form's fill-time ticket (SESSION_SECRET, its old
-#                              name, is still read). Unset = a random key per process.
-#   SITE_URL                   https://limn-review.com — turns on the www → apex 301
-#                              (APP_BASE_URL, its old name, is still read).
+#   CONTACT_TICKET_SECRET      signs the form's fill-time ticket. Unset = a random key per process.
+#   SITE_URL                   https://limn-review.com — turns on the www → apex 301.
+#   REDIRECT_HOSTS             pierre-review.com,www.pierre-review.com — 301'd to SITE_URL.
 #   HSTS_MAX_AGE               seconds, default 31536000; 0 disables.
 #   PORT                       injected by Railway.
 #   TRUST_PROXY_HOPS           set to 1 in the image; leave it.
