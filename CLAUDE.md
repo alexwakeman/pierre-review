@@ -662,6 +662,12 @@ Publishing is CI-only — **never run `npm publish`/`npm login` here**.
   must stay byte-for-byte free of it (separate entry, `--mode demo` only), and it must hold the
   site's CSP (no inline script, no eval). `data/recording.json` replaces the sample when present.
   Format and matching rules: [apps/frontend/src/demo/README.md](apps/frontend/src/demo/README.md).
+- ⚠ **EVERY USER-VISIBLE CHANGE MUST REACH THE DEMO, IN THE SAME COMMIT.** UI ships there by
+  itself; DATA does not. A new route/view/tab/field, a changed shape or an unseeded feature: seed it
+  (`seed-demo*.ts`, fictional Acme), visit it in `scripts/record-demo-steps.mjs` + `verify-demo.mjs`
+  `VIEWS`, `pnpm demo:record`, `build:demo` + `pnpm demo:verify`, commit `recording.json`
+  ([docs/DEMO.md](docs/DEMO.md) § Keeping it current). PR CI and `deploy-site.yml` run
+  verify-demo (a failure blocks the deploy), but it sees only MISSING answers, never a stale shape.
 
 ## Migrations
 

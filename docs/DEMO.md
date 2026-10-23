@@ -93,6 +93,27 @@ The root `Dockerfile` runs `build:demo` (`--if-present`) after the landing build
 `dist-demo` into the image; `.github/workflows/deploy-site.yml` rebuilds and redeploys on pushes to
 `main` that touch `apps/frontend/**` among others.
 
+## Keeping it current
+
+The demo runs the current SPA code, so a change that only touches the UI reaches it on the next deploy
+with nothing to do. The DATA is the committed `recording.json`, so any change to what the SPA reads needs
+a re-record **in the same commit**:
+
+| Change | What to do |
+|---|---|
+| New view, tab, drawer or popover that fetches | add a step to `scripts/record-demo-steps.mjs` and a row to `VIEWS` in `scripts/verify-demo.mjs` |
+| New feature, or one with no rows in the demo | seed it in `apps/backend/scripts/seed-demo*.ts` (fictional Acme data only; model output written as stored rows, never a live call) |
+| New route, new field, or a changed response shape | re-record so the stored answers have the new shape |
+| New write (a button that changes something) | simulate it in `apps/frontend/src/demo/routes.ts` (or `runs.ts` for an agentic run) so it does not answer "Not available in the demo" |
+
+Then: `pnpm demo:record` → `pnpm --filter @pierre-review/frontend build:demo` → `pnpm demo:verify` and
+`node scripts/verify-demo.mjs --later=40` → commit `apps/frontend/src/demo/data/recording.json`.
+
+**What guards it.** PR CI (`ci.yml`) and the site deploy (`deploy-site.yml`, which will not push the image
+on a failure) both run `verify-demo`: every listed view must load with no page error, no blank page and no
+request the recording cannot answer. It cannot see a view missing from `VIEWS`, or a stored answer whose
+SHAPE is stale but still renders. The re-record is the author's job.
+
 ## What the demo simulates
 
 - **Writes** — merge, approve / request changes / withdraw, reply, resolve, comments, auto-merge

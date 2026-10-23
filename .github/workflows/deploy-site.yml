@@ -40,6 +40,7 @@ on:
       - 'apps/site/**'
       - 'apps/frontend/**'
       - 'packages/shared/**'
+      - 'scripts/verify-demo.mjs'
       - 'Dockerfile'
       - '.dockerignore'
       - 'railway.json'
@@ -76,8 +77,30 @@ jobs:
       - name: Landing build (prerender guardrails)
         run: pnpm --filter @pierre-review/landing build
 
+  # The static demo must answer every request the CURRENT SPA makes, on every view, with no page error
+  # and no blank page. A UI change that calls a route the recording lacks fails here, before the image
+  # ships. Fix: extend the seed/steps and re-record (`pnpm demo:record`), see CLAUDE.md § the demo.
+  demo:
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'workflow_dispatch' || !startsWith(github.event.head_commit.message, 'chore(release):') }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - name: Build the demo
+        run: pnpm --filter @pierre-review/frontend build:demo
+      - name: Every demo view answers (now, and as if opened 40 days later)
+        run: |
+          node scripts/verify-demo.mjs
+          node scripts/verify-demo.mjs --later=40
+
   build-and-push:
-    needs: test
+    needs: [test, demo]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

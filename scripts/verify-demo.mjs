@@ -56,7 +56,7 @@ const VIEWS = [
 ];
 
 async function main() {
-  const site = spawn(join(ROOT, 'apps', 'backend', 'node_modules', '.bin', 'tsx'), ['apps/site/src/server.ts'], {
+  const site = spawn(join(ROOT, 'apps', 'site', 'node_modules', '.bin', 'tsx'), ['apps/site/src/server.ts'], {
     cwd: ROOT,
     env: { ...process.env, PORT: String(PORT), HOST: '127.0.0.1', DEMO_DIR: join(ROOT, 'apps', 'frontend', 'dist-demo') },
     stdio: ['ignore', 'ignore', 'inherit'],

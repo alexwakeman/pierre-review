@@ -78,6 +78,14 @@ jobs:
       - name: E2E regression tests (My Turn / Feed / Focus)
         run: pnpm test:e2e
 
+      # The static demo (limn-review.com/demo/) must answer every request the SPA in THIS PR makes.
+      # A failure lists the missing requests: extend the seed + recorder steps and run
+      # `pnpm demo:record` (CLAUDE.md § The website and the demo).
+      - name: Demo answers every view
+        run: |
+          pnpm --filter @pierre-review/frontend build:demo
+          node scripts/verify-demo.mjs
+
       - name: Upload Playwright report on failure
         if: failure()
         uses: actions/upload-artifact@v4
