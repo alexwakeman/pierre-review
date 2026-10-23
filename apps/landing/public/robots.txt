@@ -1,6 +1,6 @@
-# https://pierre-review.com
+# https://limn-review.com
 User-agent: *
 Allow: /
 Disallow: /api/
 
-Sitemap: https://pierre-review.com/sitemap.xml
+Sitemap: https://limn-review.com/sitemap.xml

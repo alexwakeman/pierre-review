@@ -2,7 +2,7 @@
 //
 // WHY THIS EXISTS
 // The landing page is a client-rendered React SPA. Before this script, every URL
-// on pierre-review.com returned the same ~7.8 KB shell whose entire <body> was an
+// on limn-review.com returned the same ~7.8 KB shell whose entire <body> was an
 // empty #root plus a splash caret — so anything that does not execute JavaScript
 // (an AI agent fetching the page, a link unfurler, a text browser, a crawler on a
 // render budget) saw a site with no content and no way to tell /pricing from

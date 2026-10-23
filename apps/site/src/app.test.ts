@@ -58,7 +58,7 @@ async function start(over: Partial<SiteOptions> = {}): Promise<Running> {
       demoDir: demo,
       contactWebhookUrl: WEBHOOK,
       ticketSecret: 'secret',
-      canonicalOrigin: 'https://pierre-review.com',
+      canonicalOrigin: 'https://limn-review.com',
       hstsMaxAge: 31536000,
       trustProxyHops: 1,
       logger: quiet,
@@ -208,7 +208,7 @@ describe('the security headers', () => {
       // Raw request: fetch() will not let us set Host.
       const { request } = await import('node:http');
       const res = await new Promise<{ status: number; location: string | undefined }>((resolve, reject) => {
-        const req = request(`${r.base}/contact?x=1`, { headers: { host: 'www.pierre-review.com' } }, (resp) => {
+        const req = request(`${r.base}/contact?x=1`, { headers: { host: 'www.limn-review.com' } }, (resp) => {
           resolve({ status: resp.statusCode ?? 0, location: resp.headers.location });
           resp.resume();
         });
@@ -216,7 +216,7 @@ describe('the security headers', () => {
         req.end();
       });
       expect(res.status).toBe(301);
-      expect(res.location).toBe('https://pierre-review.com/contact?x=1');
+      expect(res.location).toBe('https://limn-review.com/contact?x=1');
     } finally {
       await stop(r);
     }

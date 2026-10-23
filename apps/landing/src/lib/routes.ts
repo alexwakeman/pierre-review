@@ -16,11 +16,9 @@ import { FREE_TEAM_SIZE, NPM_PACKAGE, SITE_NAME } from './site';
 // The product name comes from lib/site.ts, never a literal, so a rename does not
 // have to be re-applied across nine strings here.
 //
-// THE DOMAIN IS DELIBERATELY UNCHANGED. The rename is staged: the brand is Limn,
-// but pierre-review.com stays until the identifier tranche ships, because Safe
-// Browsing and Search Console verification are per-domain and non-transferable.
+// The site lives at limn-review.com (moved from the old pierre-review.com on 2026-10-23).
 
-export const SITE_URL = 'https://pierre-review.com';
+export const SITE_URL = 'https://limn-review.com';
 export const OG_IMAGE = `${SITE_URL}/og-image.png`;
 
 export type RouteSeo = {
@@ -58,19 +56,19 @@ export const ROUTE_SEO: Record<string, RouteSeo> = {
     description: `${SITE_NAME} opens on one board that answers what to work on today: review requests, replies, red builds, conflicts and pull requests ready to land, from every repository, ranked. You decide what counts as your turn and in what order. Claude reviews and fixes pull requests on your own Claude login. 100% free, runs on your machine: npx ${NPM_PACKAGE}.`,
   },
   '/for-developers': {
-    title: 'For developers — plan your day, by your own rules',
+    title: `For developers — plan your day, by your own rules · ${SITE_NAME}`,
     description: `A red build, two reviews waiting, a reply on a thread you had moved on from, a conflict that appeared overnight. ${SITE_NAME} puts all of it on one board across every repository, ranked, with what to do next at the top. You decide what counts as your turn and how it is ordered, then finish the work in place — reply, approve, merge, resolve the conflict. Claude reviews and fixes pull requests on your own Claude Code login or Anthropic API key, on your machine; Codex support is coming soon. Free, with no repository limit.`,
   },
   '/for-managers': {
-    title: 'For engineering managers — see the whole review loop, people and bots',
+    title: `For engineering managers — the whole review loop, people and bots · ${SITE_NAME}`,
     description: `Throughput, lead time and where the waiting happens across every repository you own, with people counted apart from automation. A forwardable report per sprint, an hour-by-hour account of who was holding each pull request, and a keep / tune / rarely used verdict on every review bot you pay for. Free, on your own machine.`,
   },
   '/contact': {
-    title: `Contact — licences, questions and bug reports`,
+    title: `Contact — licences, questions and bug reports · ${SITE_NAME}`,
     description: `${SITE_NAME} is free for individuals, and for organisations where no more than ${FREE_TEAM_SIZE} people use it. More users than that need a licence: ask for one here. Questions and bug reports are welcome too.`,
   },
   '/how-we-measure': {
-    title: 'How we measure — the two models, in plain English',
+    title: `How we measure — the two models, in plain English · ${SITE_NAME}`,
     description: `Almost everything ${SITE_NAME} shows you is counted, not predicted. Two questions resist counting and have a model each: how serious a review-bot comment is, and whether your bots are doing well compared with the same bots in comparable repositories. What each one is for, how it was built, and how we know it works.`,
   },
   '/privacy': {

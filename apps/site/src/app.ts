@@ -1,4 +1,4 @@
-// The request handler for pierre-review.com.
+// The request handler for limn-review.com.
 //
 //   /                  the prerendered landing (apps/landing/dist)
 //   /demo/             the static demo build — an SPA, so unknown paths without a file
@@ -37,7 +37,7 @@ export interface SiteOptions {
   contactWebhookUrl: string;
   /** CONTACT_TICKET_SECRET (or SESSION_SECRET). Null ⇒ a per-process random key. */
   ticketSecret: string | null;
-  /** SITE_URL, e.g. https://pierre-review.com. Enables the www → apex redirect. */
+  /** SITE_URL, e.g. https://limn-review.com. Enables the www → apex redirect. */
   canonicalOrigin: string | null;
   /** HSTS_MAX_AGE seconds; 0 disables. */
   hstsMaxAge: number;

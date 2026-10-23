@@ -282,7 +282,7 @@ It is **not enabled by default.** To turn it on:
 
 ## The website (`deploy-site.yml`)
 
-pierre-review.com is a separate deploy, unrelated to the npm release: ONE small Node
+limn-review.com is a separate deploy, unrelated to the npm release: ONE small Node
 service, `apps/site` (plain `node:http`, no runtime deps), serving the prerendered landing
 (`apps/landing/dist`), the static demo at `/demo/` (`apps/frontend/dist-demo`, see
 [DEMO.md](DEMO.md)), `/api/health` and the contact form (`GET /api/contact/ticket` +

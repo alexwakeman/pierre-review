@@ -1,6 +1,6 @@
 # @pierre-review/site
 
-The one small Node service behind pierre-review.com. Plain `node:http`, no runtime
+The one small Node service behind limn-review.com. Plain `node:http`, no runtime
 dependencies. Limn itself is local-only (`npx limn-review`), so this serves the website and
 nothing else:
 

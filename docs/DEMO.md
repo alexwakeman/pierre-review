@@ -1,6 +1,6 @@
 # The static demo (`/demo/` on the website)
 
-> The website hosts a frontend-only demo of Limn at `https://pierre-review.com/demo/`. It is the
+> The website hosts a frontend-only demo of Limn at `https://limn-review.com/demo/`. It is the
 > REAL SPA, built from a second entry, with every `/api/*` request answered in the browser from a
 > recording of sample (Acme) data. Nothing is sent anywhere and there is no backend behind it; a
 > reload starts from the recording again. The runtime's own reference — the recording format, the

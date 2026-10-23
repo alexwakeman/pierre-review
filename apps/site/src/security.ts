@@ -1,4 +1,4 @@
-// Security headers for pierre-review.com. Ported from the cloud branch of the old
+// Security headers for limn-review.com. Ported from the cloud branch of the old
 // backend plugin (apps/backend/src/api/plugins/security.ts): the same CSP for the
 // landing, a CSP for the demo app, a locked-down one for /api, HSTS and the
 // www → apex redirect. Everything is computed once; the per-request work is a few
@@ -90,7 +90,7 @@ export function cspFor(path: string): string {
 }
 
 export interface SecurityOptions {
-  /** e.g. https://pierre-review.com — enables the www → apex redirect. */
+  /** e.g. https://limn-review.com — enables the www → apex redirect. */
   canonicalOrigin: string | null;
   /** 0 disables HSTS. */
   hstsMaxAge: number;

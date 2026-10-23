@@ -647,7 +647,7 @@ Publishing is CI-only — **never run `npm publish`/`npm login` here**.
 
 ## The website (`apps/site`) and the demo
 
-- **`apps/site`** serves pierre-review.com: the prerendered landing, `/demo/`, `/api/health` and
+- **`apps/site`** serves limn-review.com: the prerendered landing, `/demo/`, `/api/health` and
   the contact form (`/api/contact`, Slack webhook; honeypot + signed fill time + 5/hour per IP).
   Deployed by the root `Dockerfile` / `railway.json` via `.github/workflows/deploy-site.yml`. ⚠ Its
   rate limit reads `X-Forwarded-For` from the RIGHT (`TRUST_PROXY_HOPS`). The contact form is the

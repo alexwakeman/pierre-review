@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "The tiny service behind pierre-review.com: the landing pages, the static demo at /demo/, and the contact form.",
+  "description": "The tiny service behind limn-review.com: the landing pages, the static demo at /demo/, and the contact form.",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/server.js",

@@ -25,7 +25,7 @@ no hosted backend. `npx limn-review` opens straight to the app. Every feature is
 free (see [License](#license)). (The package was `pierre-review`; that name is
 deprecated, and `~/.pierre-review` moves to `~/.limn` once, on first boot.)
 
-> **Try the demo — [pierre-review.com/demo/](https://pierre-review.com/demo/)**
+> **Try the demo — [limn-review.com/demo/](https://limn-review.com/demo/)**
 > The real app in your browser, on sample data. Nothing is sent anywhere.
 
 ## Screenshots
@@ -154,7 +154,7 @@ From a checkout, `pnpm dev` reads the model from the `packages/ml` submodule.
 - `pnpm --filter @pierre-review/frontend build:demo` builds the static demo — the real
   app on recorded sample data — into `apps/frontend/dist-demo/`, served at `/demo/`.
   See [apps/frontend/src/demo/README.md](apps/frontend/src/demo/README.md).
-- `apps/site` is the small service behind pierre-review.com: the landing pages, the
+- `apps/site` is the small service behind limn-review.com: the landing pages, the
   demo and the contact form. See [apps/site/README.md](apps/site/README.md).
 
 ## Layout
@@ -178,7 +178,7 @@ Limn is **source-available** under the [Limn License 1.0](./LICENSE).
   fewer** use it. You may use, copy and change it.
 - **More than 3 people** in one organisation (affiliates count together) need a
   commercial licence — ask through the
-  [contact form](https://pierre-review.com/contact).
+  [contact form](https://limn-review.com/contact).
 - You may **not** offer Limn, or a product built from it, as a competing
   commercial product or service.
 - Copies you pass on must keep the licence and copyright notice.

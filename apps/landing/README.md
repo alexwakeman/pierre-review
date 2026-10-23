@@ -1,6 +1,6 @@
 # @pierre-review/landing
 
-Public marketing site for Limn (pierre-review.com). Built independently — it shares no
+Public marketing site for Limn (limn-review.com). Built independently — it shares no
 runtime code with the timeline SPA — and served at `/` by the small site service in
 [`apps/site`](../site/README.md), which also serves the static demo at `/demo/` and the
 contact form's API.

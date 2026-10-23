@@ -12,7 +12,7 @@ into a local SQLite file, and serves the dashboard from a single local process.
 **100% free.** Every feature, no paid tier, no sign-up (see [License](#license)
 for the one limit, on large organisations).
 
-**Try it first:** the [live demo](https://pierre-review.com/demo/) is the real
+**Try it first:** the [live demo](https://limn-review.com/demo/) is the real
 app on sample data, in your browser. No install, no sign-in.
 
 > **Renamed.** This package used to be `pierre-review`. The command is now `limn`
@@ -138,7 +138,7 @@ locally instead — a larger database, but PR detail then works fully offline.
 Source-available under the **Limn License 1.0** — see [LICENSE](./LICENSE).
 Limn is free for individuals, and for organisations where no more than 3 people
 use it (affiliates count together). More users than that need a licence — ask
-through the [contact form](https://pierre-review.com/contact?topic=licence). You may
+through the [contact form](https://limn-review.com/contact?topic=licence). You may
 **not** offer Limn, or a product built from it, as a competing commercial
 product or service.
 The AI runtime Limn downloads on first use is Anthropic's, under Anthropic's own

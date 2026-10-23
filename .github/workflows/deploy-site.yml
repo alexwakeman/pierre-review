@@ -1,6 +1,6 @@
 name: Deploy site
 
-# Builds the image behind pierre-review.com — the landing pages, the static demo at
+# Builds the image behind limn-review.com — the landing pages, the static demo at
 # /demo/ and the contact form, served by apps/site — pushes it to GitHub Container
 # Registry, and asks Railway to redeploy it.
 #
@@ -22,7 +22,7 @@ name: Deploy site
 #                              the form says it is unavailable.
 #   CONTACT_TICKET_SECRET      signs the form's fill-time ticket (SESSION_SECRET, its old
 #                              name, is still read). Unset = a random key per process.
-#   SITE_URL                   https://pierre-review.com — turns on the www → apex 301
+#   SITE_URL                   https://limn-review.com — turns on the www → apex 301
 #                              (APP_BASE_URL, its old name, is still read).
 #   HSTS_MAX_AGE               seconds, default 31536000; 0 disables.
 #   PORT                       injected by Railway.

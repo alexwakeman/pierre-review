@@ -37,7 +37,7 @@ export default function Terms(): JSX.Element {
       intro={
         <>
           <p>
-            These terms cover this website, <span className="font-mono text-ink">pierre-review.com</span>,
+            These terms cover this website, <span className="font-mono text-ink">limn-review.com</span>,
             and the {SITE_NAME} software you install from npm. There is no hosted version of{' '}
             {SITE_NAME} and no account to sign up for.
           </p>

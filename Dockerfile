@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 #
-# The image behind pierre-review.com: the landing pages, the static demo at /demo/ and
+# The image behind limn-review.com: the landing pages, the static demo at /demo/ and
 # the contact form, served by ONE small Node process (apps/site). Nothing else.
 #
 # Limn itself is local-only — `npx limn-review` on your own machine. There is no

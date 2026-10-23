@@ -9,14 +9,12 @@
 //
 // SCOPE OF THE RENAME (Pierre → Limn), staged in two tranches:
 //
-//   DONE — every user-visible string: this site, the SPA's chrome, the CLI banner,
+//   DONE — the domain (limn-review.com, 2026-10-23) and every user-visible string: this site, the SPA's chrome, the CLI banner,
 //          and the re-captured screenshots. Then, in the release that made Claude
 //          Review and AI Fix free, the npm package: `pierre-review` → `limn-review`
 //          (bin `limn`, with `pierre-review` kept as a deprecated alias) and the
 //          data dir ~/.pierre-review → ~/.limn (moved once, on first boot).
 //   OUT  — identifiers that are migrations rather than text edits:
-//           · the domain pierre-review.com (Safe Browsing + Search Console
-//             verification is per-domain and non-transferable)
 //           · the ~20 `pierre:*` localStorage keys, one of which is shared with
 //             the SPA bundle to carry cookie consent across the two apps
 //           · the AutomatedReviewerKind `'pierre'` — a persisted DB value AND a
