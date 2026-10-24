@@ -31,13 +31,13 @@ export type RouteSeo = {
 /**
  * Canonical, indexable routes. Order is the order they appear in the sitemap.
  *
- * THE SITE IS FOUR CONTENT PAGES plus the three legal ones. /features, /bots,
- * /pro, /pricing, /how-it-works and /arcade were removed together: the product
- * pages were organised by FEATURE AREA, which meant a developer and a manager
- * read the same five pages and neither found the half addressed to them. The
- * content now sits on one page per reader.
+ * THE SITE IS FIVE CONTENT PAGES plus the three legal ones: home, Getting
+ * started, Reporting and metrics, How we measure and Contact. The earlier
+ * feature-area pages (/features, /bots, /pro, /pricing, /how-it-works, /arcade)
+ * and then the two role pages (/for-developers, /for-managers) were retired;
+ * their URLs survive as aliases.
  *
- * /contact is the fourth, and it is load-bearing rather than courtesy: an
+ * /contact is the fifth, and it is load-bearing rather than courtesy: an
  * organisation where more than FREE_TEAM_SIZE people use Limn needs a licence,
  * and this is where it asks. See src/pages/Contact.tsx.
  *
@@ -52,16 +52,16 @@ export type RouteSeo = {
  */
 export const ROUTE_SEO: Record<string, RouteSeo> = {
   '/': {
-    title: `${SITE_NAME} — plan your day across every repository`,
-    description: `${SITE_NAME} opens on one board that answers what to work on today: review requests, replies, red builds, conflicts and pull requests ready to land, from every repository, ranked. You decide what counts as your turn and in what order. Claude reviews and fixes pull requests on your own Claude login. 100% free, and it runs only on your machine — no data is sent to our servers: npx ${NPM_PACKAGE}.`,
+    title: `${SITE_NAME} — code review, gathered and checked on your own Claude`,
+    description: `${SITE_NAME} reviews each pull request against its story and your docs on your own Claude Code login, posts the review to GitHub automatically, and AI Fix fixes the findings and failing CI. Free for up to ${FREE_TEAM_SIZE} people, it runs on your machine: npx ${NPM_PACKAGE}.`,
   },
-  '/for-developers': {
-    title: `For developers — plan your day, by your own rules · ${SITE_NAME}`,
-    description: `A red build, two reviews waiting, a reply on a thread you had moved on from, a conflict that appeared overnight. ${SITE_NAME} puts all of it on one board across every repository, ranked, with what to do next at the top. You decide what counts as your turn and how it is ordered, then finish the work in place — reply, approve, merge, resolve the conflict. Claude reviews and fixes pull requests on your own Claude Code login or Anthropic API key, on your machine; Codex support is coming soon. Free, with no repository limit.`,
+  '/getting-started': {
+    title: `Getting started — install, run and connect · ${SITE_NAME}`,
+    description: `Run ${SITE_NAME} with one command: npx ${NPM_PACKAGE}. Then turn on Claude, add the scoring model for review-bot comments, add your repositories, and connect Jira or Linear and Slack. It runs on your machine and uses your logged-in gh.`,
   },
-  '/for-managers': {
-    title: `For engineering managers — the whole review loop, people and bots · ${SITE_NAME}`,
-    description: `Throughput, lead time and where the waiting happens across every repository you own, with people counted apart from automation. A forwardable report per sprint, an hour-by-hour account of who was holding each pull request, and a keep / tune / rarely used verdict on every review bot you pay for. Free, on your own machine.`,
+  '/reporting': {
+    title: `Reporting and metrics — where the work is and where it waits · ${SITE_NAME}`,
+    description: `${SITE_NAME} Reports' headline figures cover one stated window, and anything else says so in its heading. A report per sprint or month, Chronology for where every hour of review goes, 26 weeks of history, where the work is happening across your repositories, and what your review bots are worth. It runs on your own machine.`,
   },
   '/contact': {
     title: `Contact — licences, questions and bug reports · ${SITE_NAME}`,

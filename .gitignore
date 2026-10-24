@@ -45,3 +45,4 @@ playwright-report/
 
 # The static demo build (apps/frontend `pnpm build:demo`), served by apps/site at /demo/.
 apps/frontend/dist-demo/
+.taste-skill/

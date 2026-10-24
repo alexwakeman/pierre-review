@@ -4,6 +4,7 @@ import { Link } from '../router';
 import { DEMO_PATH, FREE_TEAM_SIZE, INSTALL_COMMAND, LICENSE_URL, SITE_NAME } from '../lib/site';
 import {
   LEGAL_CONTROLLER,
+  LEGAL_LINK,
   LegalNote,
   LegalPage,
   LegalSection,
@@ -25,23 +26,23 @@ import {
 // Limn at, because it reads repositories with your token) and §5 (AI output is a
 // suggestion, not a review you can rely on).
 
-const LINK =
-  'border-b border-signal-fill text-ink transition-colors duration-hover ease-standard hover:text-signal-text';
+const LINK = LEGAL_LINK;
 
 export default function Terms(): JSX.Element {
   useSeo(seoFor('/terms'));
 
   return (
     <LegalPage
+      pigment="madder"
       title="Terms of use"
       intro={
         <>
           <p>
-            These terms cover this website, <span className="font-mono text-ink">limn-review.com</span>,
+            These terms cover this website, limn-review.com,
             and the {SITE_NAME} software you install from npm. There is no hosted version of{' '}
             {SITE_NAME} and no account to sign up for.
           </p>
-          <div className="mt-5">
+          <div>
             <LegalNote title="The software is licensed under the Limn License">
               <p>
                 Your right to use the software comes from the{' '}
@@ -69,7 +70,7 @@ export default function Terms(): JSX.Element {
       <LegalSection id="what" heading="2. What Limn is">
         <P>
           {SITE_NAME} is software that runs on your own computer. You install and start it with{' '}
-          <span className="font-mono text-ink">{INSTALL_COMMAND}</span>. It reads pull-request
+          <code>{INSTALL_COMMAND}</code>. It reads pull-request
           activity from the GitHub repositories you choose, using your own GitHub login, and
           stores it in a file on your machine. We do not run a server for it and we receive
           none of that data.

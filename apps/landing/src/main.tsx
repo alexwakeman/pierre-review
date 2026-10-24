@@ -2,6 +2,9 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
 import './index.css';
+// The board design every page uses, plus the shared header/footer. Every rule is scoped
+// under .lb / .lb-nav / .lb-foot. After index.css (Tailwind's reset) on purpose.
+import './board.css';
 
 // NOTE: analytics is deliberately NOT started here any more. It used to run at module
 // load, which meant gtag.js was fetched before the page had even rendered — i.e.

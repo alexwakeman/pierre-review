@@ -1,0 +1,226 @@
+/* ===========================================================================
+   The legal pages (Privacy, Cookies, Terms; shell in components/legal.tsx).
+   Layout and reading typography only; the tokens, tiles, pigments and buttons
+   come from src/board.css. Every rule is scoped under `.lb.legal`.
+
+   CLASSES
+     header   .lg-head > .tile.lg-name (h1) · .tile.<pigment>.lg-date (p)
+     column   article.lg-col > .lg-intro + .lg-body
+     prose    .lg-sec (h2 + .lg-flow) · .lg-flow (stacked paragraphs/lists)
+              · ul.lg-ul · strong.lg-t · a.lg-a · code
+     callout  .lg-note > p.lg-note-t + .lg-flow  (may hold a .btn)
+     table    .lg-table > table
+   =========================================================================== */
+
+/* ---- header board ----------------------------------------------------- */
+.lb.legal .lg-head {
+  grid-template-rows: minmax(clamp(200px, 22vw, 300px), auto);
+}
+.lb.legal .lg-name {
+  grid-column: span 9;
+  display: flex;
+  align-items: flex-end;
+  padding: clamp(24px, 3vw, 40px);
+}
+.lb.legal .lg-name h1 {
+  font-size: var(--step-head);
+  line-height: 1.02;
+  max-width: 14ch;
+}
+.lb.legal .lg-date {
+  grid-column: span 3;
+  display: flex;
+  align-items: flex-end;
+  padding: clamp(24px, 3vw, 40px);
+}
+.lb.legal .lg-date p {
+  font-size: var(--step-lead);
+  font-weight: 500;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+}
+
+/* ---- the reading column ----------------------------------------------- */
+.lb.legal .lg-col {
+  max-width: 70ch;
+  margin: clamp(56px, 7vw, 104px) auto 0;
+  padding-inline: clamp(6px, 2vw, 24px);
+  font-size: clamp(17px, 16px + 0.2vw, 18px);
+  line-height: 1.7;
+  color: #d9d7d2;
+}
+.lb.legal .lg-intro > p,
+.lb.legal .lg-intro > div > p {
+  font-size: clamp(19px, 17px + 0.4vw, 21px);
+  line-height: 1.55;
+  color: var(--ink);
+}
+.lb.legal .lg-intro > * + * {
+  margin-top: 28px;
+}
+.lb.legal .lg-body {
+  margin-top: clamp(48px, 5vw, 72px);
+}
+.lb.legal .lg-flow > * + * {
+  margin-top: 1em;
+}
+
+/* ---- sections ---------------------------------------------------------- */
+.lb.legal .lg-sec {
+  padding-top: 32px;
+  border-top: 1px solid rgba(241, 241, 239, 0.14);
+  scroll-margin-top: 24px;
+}
+.lb.legal .lg-sec + .lg-sec {
+  margin-top: clamp(44px, 5vw, 64px);
+}
+.lb.legal .lg-sec h2 {
+  font-size: clamp(26px, 22px + 0.8vw, 32px);
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  margin-bottom: 18px;
+}
+
+/* ---- prose elements --------------------------------------------------- */
+.lb.legal .lg-ul {
+  list-style: disc;
+  padding-left: 1.25em;
+  margin: 0;
+}
+.lb.legal .lg-ul > li + li {
+  margin-top: 0.75em;
+}
+.lb.legal .lg-ul > li::marker {
+  color: var(--gold);
+}
+.lb.legal .lg-t {
+  font-weight: 600;
+  color: var(--ink);
+}
+.lb.legal em {
+  font-style: italic;
+}
+.lb.legal .lg-a {
+  color: var(--ink);
+  text-decoration: underline;
+  text-decoration-color: var(--gold);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.2em;
+  transition: color 0.15s ease;
+}
+.lb.legal .lg-a:hover {
+  color: var(--gold);
+}
+.lb.legal .lg-col code {
+  color: var(--ink);
+  background: var(--surface-2);
+  padding: 0.1em 0.35em;
+  overflow-wrap: anywhere;
+}
+
+/* ---- the callout ------------------------------------------------------ */
+.lb.legal .lg-note {
+  background: var(--surface);
+  border-top: 3px solid var(--gold);
+  padding: 22px 24px 24px;
+  font-size: clamp(17px, 16px + 0.2vw, 18px);
+  line-height: 1.6;
+  color: var(--ink);
+}
+.lb.legal .lg-intro .lg-note p {
+  font-size: inherit;
+  line-height: inherit;
+}
+.lb.legal .lg-note .lg-note-t {
+  font-weight: 600;
+  font-size: clamp(19px, 17px + 0.4vw, 21px);
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+  color: var(--gold);
+  margin-bottom: 10px;
+}
+.lb.legal .lg-note .btn {
+  margin-top: 6px;
+  font-size: 16px;
+  padding: 13px 18px;
+}
+
+/* ---- tables ----------------------------------------------------------- */
+.lb.legal .lg-table {
+  overflow-x: auto;
+  background: var(--surface);
+}
+.lb.legal .lg-table table {
+  width: 100%;
+  min-width: 36rem;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 16px;
+  line-height: 1.5;
+}
+.lb.legal .lg-table th {
+  padding: 14px 16px;
+  font-weight: 600;
+  color: var(--ink);
+  background: var(--surface-2);
+  vertical-align: bottom;
+}
+.lb.legal .lg-table td {
+  padding: 14px 16px;
+  vertical-align: top;
+  border-top: 1px solid rgba(241, 241, 239, 0.1);
+}
+
+/* ---- narrow screens --------------------------------------------------- */
+@media (max-width: 760px) {
+  .lb.legal .lg-head {
+    grid-template-rows: auto;
+  }
+  .lb.legal .lg-name,
+  .lb.legal .lg-date {
+    grid-column: 1 / -1;
+  }
+  .lb.legal .lg-name {
+    min-height: 180px;
+  }
+  .lb.legal .lg-note {
+    padding: 18px;
+  }
+}
+
+/* ---- tables on a phone: each row stacks into labelled lines ------------ */
+@media (max-width: 600px) {
+  .lb.legal .lg-table table,
+  .lb.legal .lg-table tbody,
+  .lb.legal .lg-table tr,
+  .lb.legal .lg-table td {
+    display: block;
+    min-width: 0;
+  }
+  .lb.legal .lg-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+  .lb.legal .lg-table tr {
+    padding: 8px 0;
+  }
+  .lb.legal .lg-table tr + tr {
+    border-top: 1px solid rgba(241, 241, 239, 0.14);
+  }
+  .lb.legal .lg-table td {
+    padding: 6px 16px;
+    border-top: 0;
+  }
+  .lb.legal .lg-table td::before {
+    content: attr(data-label);
+    display: block;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--ink);
+  }
+}

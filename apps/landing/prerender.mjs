@@ -191,8 +191,8 @@ if (smallest < 12000) {
   throw new Error(`smallest page is ${smallest} bytes — prerendered content is missing`);
 }
 
-// Legacy inbound links. The five feature-area pages and the arcade were folded into
-// the two role pages, and every one of those URLs is in somebody's bookmarks, in a
+// Legacy inbound links. The five feature-area pages, the arcade and then the two role
+// pages (/for-developers, /for-managers) were retired, and every one of those URLs is in somebody's bookmarks, in a
 // search index, and in the sitemap Google fetched last week. They are deliberately
 // NOT in ROUTE_SEO — they would be duplicate content there — but each still writes
 // real HTML: a copy of whichever surviving page now carries its content, whose
@@ -200,17 +200,19 @@ if (smallest < 12000) {
 // needs to collapse the duplicate. This mirrors the alias table in App.tsx; change
 // both together.
 const ALIASES = {
-  features: 'for-developers',
+  'for-developers': 'getting-started',
+  'for-managers': 'reporting',
+  features: 'getting-started',
   'how-it-works': 'how-we-measure',
-  bots: 'for-managers',
-  pro: 'for-managers',
-  // ⚠ /pricing goes to CONTACT, not to for-managers like its five siblings. Somebody
+  bots: 'reporting',
+  pro: 'reporting',
+  // ⚠ /pricing goes to CONTACT, not to a content page like its siblings. Somebody
   // arriving on /pricing is asking what it costs; the contact page answers that in its
   // first two lines (free, unless the organisation is bigger than three people) and is
   // where a licence is asked for. Mirrors the alias table in App.tsx.
   pricing: 'contact',
-  insights: 'for-managers',
-  reviews: 'for-managers',
+  insights: 'reporting',
+  reviews: 'reporting',
 };
 for (const [alias, target] of Object.entries(ALIASES)) {
   mkdirSync(join(dist, alias), { recursive: true });

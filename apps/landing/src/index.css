@@ -2,149 +2,35 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ---- typefaces, SELF-HOSTED ------------------------------------------------
-   Archivo (display), Newsreader (body), JetBrains Mono (labels/data/nav) — all
-   SIL Open Font License 1.1, latin subset, static cuts.
+/* ---- global base ------------------------------------------------------------
+   Tailwind contributes only its preflight reset here; every page is styled by
+   board.css (the dark "board of tiles": tokens, the Albert Sans face, the shared
+   header and footer) plus one page-scoped file per page, all under `.lb`.
 
-   These are BUNDLED, never fetched from Google, and that is not a preference:
-
-     1. `font-src 'self'` on the landing CSP (apps/backend/src/api/plugins/
-        security.ts) blocks fonts.gstatic.com outright.
-     2. `style-src 'self' 'unsafe-inline'` does NOT permit a <link> to
-        fonts.googleapis.com — 'unsafe-inline' covers inline style CONTENT, not a
-        foreign host.
-     3. security.test.ts asserts the `font-src 'self'` directive, so allowlisting
-        a font CDN fails CI before it ever reaches a browser.
-
-   Beyond the CSP it is a GDPR requirement: a fonts.gstatic.com request discloses
-   every visitor's IP + UA to Google BEFORE they have consented to anything, which
-   is exactly the third-party transfer the cookie banner exists to gate — and it
-   would break local mode's no-phone-home promise. Google Fonts also wants a
-   <link ... onload="this.media='all'"> handler, which would force
-   script-src 'unsafe-inline' into the CSP.
-
-   The design bundle's own mock uses the forbidden <link>; that is prototype
-   scaffolding, and its README says "self-host or subset".
-
-   STATIC CUTS, NOT VARIABLE FONTS. Measured on the real latin subsets: five
-   static files total 96,612 B, whereas the variable equivalents total 354,328 B
-   — Newsreader's two-axis (opsz + wght) roman+italic pair alone is 278,908 B.
-   The cost of that choice is that tokens.json's "Newsreader — optical sizing on"
-   cannot be honoured (`opsz` is a variable axis, so `font-optical-sizing` is a
-   no-op here). At a single 17–22px reading size that is not a visible loss.
-
-   The url() paths MUST stay relative. Vite hashes these and rewrites the
-   reference prefixed by the app's `base` — an absolute '/fonts/x.woff2' would
-   resolve outside the base and 404. */
-@font-face {
-  font-family: 'Archivo';
-  font-style: normal;
-  font-weight: 500;
-  font-display: swap;
-  src: url('./fonts/archivo-latin-500.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Archivo';
-  font-style: normal;
-  font-weight: 600;
-  font-display: swap;
-  src: url('./fonts/archivo-latin-600.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Newsreader';
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url('./fonts/newsreader-latin-400.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Newsreader';
-  font-style: italic;
-  font-weight: 400;
-  font-display: swap;
-  src: url('./fonts/newsreader-latin-400-italic.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'JetBrains Mono';
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url('./fonts/jetbrains-mono-latin-400.woff2') format('woff2');
-}
+   The typeface is SELF-HOSTED (the @font-face blocks are in board.css, the .woff2
+   files in src/fonts/), never fetched from Google: `font-src 'self'` on the site's
+   CSP blocks fonts.gstatic.com (apps/site pins it in a test), and a gstatic
+   request would disclose every visitor's IP to Google before consent. */
 
 :root {
-  /* Light-only. The previous site was `dark`; the Feint direction is paper. */
-  color-scheme: light;
+  /* Dark-only: every page is a board page. */
+  color-scheme: dark;
 }
 
 html,
 body {
   margin: 0;
-}
-
-body {
-  @apply bg-paper font-serif text-body text-ink-body;
-  -webkit-font-smoothing: antialiased;
-  text-rendering: optimizeLegibility;
-}
-
-/* ---- native disclosure (the pricing FAQ) ----
-   The FAQ is native <details>/<summary> so keyboard behaviour and the no-JS case
-   come free. These two rules only remove the UA's default triangle — the +/−
-   glyph is rendered in the markup and swapped with Tailwind's `group-open:`
-   variant, so there is no JS and no custom accordion. */
-details > summary {
-  list-style: none;
-  cursor: pointer;
-}
-details > summary::-webkit-details-marker {
-  display: none;
+  /* The board's ground on every page, including overscroll and the moment
+     before a page's own `.lb` root paints. Same value as board.css's --bg. */
+  background: #0f1012;
 }
 
 /* ---- motion ----
-   The site does not move, with ONE sanctioned exception. The CSS-driven motion
-   is still just the terminal caret blink plus a 120ms colour fade on links and
-   buttons; under reduced motion the rule below kills both and the caret renders
-   solid.
-
-   THERE ARE NOW TWO EXCEPTIONS, and NEITHER IS COVERED BY THE RULE BELOW.
-
-   ONE — the hero rain (components/feint/Rain.tsx): notification sprites falling
-   behind the home page's headline and fading out as they go. It is an argument
-   rather than a decoration (the storm keeps arriving and goes quiet before it
-   reaches you), it is confined to the hero <header>, and it is deliberately
-   faint: 0.16 alpha at the top, superlinear fade, no vermilion. It is a
-   requestAnimationFrame loop painting to a canvas, and `animation: none` /
-   `transition: none` reach neither — a rAF loop is script, not a CSS animation,
-   and a canvas paint is not a property transition.
-
-   TWO — the walkthrough (components/feint/VideoFrame.tsx): a silent 28-second
-   screen recording of six screens, under the headline, which plays ONCE. A
-   playing <video> is not an animation or a transition either, and no
-   `Permissions-Policy` header stops one: MEASURED in Chromium, a script-initiated
-   `play()` on a MUTED video succeeds under `autoplay=()` just as it does with no
-   policy at all. Server headers are the wrong layer for this question anyway —
-   they say what is ALLOWED, never what the reader asked for.
-
-   ⚠ IT NEVER LOOPS. `loop` is not set and `ended` does not rewind it: repeating
-   is a button the reader presses. A screen recording that restarts itself is
-   motion nobody asked to have again, which is the thing a reduced-motion setting
-   is most obviously about.
-
-   BOTH check `matchMedia('(prefers-reduced-motion: reduce)')` themselves and
-   subscribe to its `change` event. Under reduced motion the rain paints ONE
-   static frame of the same seeded arrangement and starts no loop; the clip mounts
-   no <video> at all and renders its poster still beside the six chapters AS REAL
-   TEXT — which is why the captions were taken out of the pixels. Any future
-   JS-driven motion on this site inherits that obligation: this rule is a floor,
-   not a guarantee.
-
-   ⚠ PRESSING PLAY UNDER REDUCED MOTION IS FINE, AND THE BUTTON IS OFFERED. A
-   reader who presses Play has asked for motion. Reduced motion means "do not
-   move unless I ask"; it does not mean "never move".
-
-   The arcade cabinet at /arcade is not an exception — it is the game, it only
-   runs while its field has focus, and it makes the same matchMedia check. */
+   The CSS motion is the board's reveal (`.rise`, armed by useReveal) and short
+   colour fades on links and buttons. Under reduced motion the rule below stops
+   all of it. Any future script-driven motion must make its own
+   matchMedia('(prefers-reduced-motion: reduce)') check: this rule is a floor,
+   not a guarantee. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

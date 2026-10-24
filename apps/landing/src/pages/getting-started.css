@@ -1,0 +1,281 @@
+/* ===========================================================================
+   GETTING STARTED — page rules on top of the board (src/board.css).
+   Everything is scoped under `.lb.gs`.
+
+     header   section.board.gs-head > .tile.gs-title (h1, p.gs-lead)
+              · .tile.verdigris.gs-need (h2, ul, p)
+     steps    ol.gs-steps > li.gs-step > section.board.gs-row(.wide)
+              > .tile.gs-txt.<pigment> > .gs-in (span.gs-n, h2, p, .gs-cmd, p.gs-note)
+              · .tile.gs-shot (figure.gs-fig(.gs-phone-hide) > figcaption + a > img,
+                or .gs-term)
+     command  .gs-cmd > pre > code + button.gs-copy
+     close    section.board.gs-close > .tile.gold.gs-close-mid · .tile.gs-close-side
+   =========================================================================== */
+
+/* ---- header ----------------------------------------------------------- */
+.lb.gs .gs-head .gs-title {
+  grid-column: 1 / 9;
+  min-height: 380px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 24px;
+  padding: 32px;
+}
+.lb.gs .gs-head h1 {
+  font-size: clamp(64px, 9vw, 150px);
+  font-weight: 500;
+  letter-spacing: -0.05em;
+  line-height: 0.85;
+}
+.lb.gs .gs-lead {
+  font-size: var(--step-lead);
+  line-height: 1.3;
+  max-width: 34ch;
+  color: var(--muted);
+}
+.lb.gs .gs-need {
+  grid-column: 9 / 13;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 16px;
+  padding: 32px;
+}
+.lb.gs .gs-need h2 {
+  font-size: clamp(28px, 2.6vw, 40px);
+}
+.lb.gs .gs-need ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.lb.gs .gs-need li {
+  padding: 10px 12px;
+  background: #ffffff1a;
+}
+
+/* ---- steps ------------------------------------------------------------ */
+.lb.gs .gs-steps {
+  list-style: none;
+  margin: clamp(80px, 9vw, 130px) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: clamp(56px, 6vw, 96px);
+}
+.lb.gs .gs-txt {
+  grid-column: 1 / 6;
+  padding: 32px;
+}
+.lb.gs .gs-in {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.lb.gs .gs-shot {
+  grid-column: 6 / 13;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 24px;
+  padding: 28px;
+  background: #141518;
+}
+.lb.gs .gs-row.wide .gs-txt {
+  grid-column: 1 / 8;
+}
+.lb.gs .gs-row.wide .gs-shot {
+  grid-column: 8 / 13;
+}
+@media (min-width: 1101px) {
+  /* The long strips read better full width, under the text. */
+  .lb.gs .gs-row.wide .gs-txt {
+    grid-column: 1 / -1;
+  }
+  .lb.gs .gs-row.wide .gs-shot {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+  /* A tall screenshot column beside: the text rides down with the reader
+     instead of leaving an empty pigment field under it. `.tile` clips with
+     overflow: hidden, which would make the tile the sticky scroll box; clip
+     keeps the clipping without that. */
+  .lb.gs .gs-txt {
+    overflow: clip;
+  }
+  .lb.gs .gs-in {
+    position: sticky;
+    top: 32px;
+  }
+}
+.lb.gs .gs-n {
+  font-size: clamp(56px, 6vw, 96px);
+  font-weight: 500;
+  letter-spacing: -0.05em;
+  line-height: 0.8;
+  opacity: 0.55;
+}
+.lb.gs .gs-txt h2 {
+  font-size: clamp(32px, 3.4vw, 52px);
+  margin-bottom: 4px;
+}
+.lb.gs .gs-txt p {
+  max-width: 52ch;
+}
+.lb.gs .gs-txt b {
+  font-weight: 600;
+}
+.lb.gs .gs-note {
+  font-size: 16px;
+  opacity: 0.85;
+}
+.lb.gs .gs-txt code {
+  overflow-wrap: anywhere;
+}
+
+/* Screenshots keep their own shape: no crop, no grayscale. */
+.lb.gs .gs-fig {
+  margin: 0;
+  min-width: 0;
+}
+.lb.gs .gs-fig figcaption {
+  font-size: 14px;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+.lb.gs .gs-fig a {
+  display: block;
+}
+.lb.gs .gs-fig img {
+  width: 100%;
+  height: auto;
+  object-fit: contain;
+  outline: 1px solid #ffffff1f;
+  outline-offset: -1px;
+}
+
+/* ---- command with copy button ----------------------------------------- */
+.lb.gs .gs-cmd {
+  display: flex;
+  align-items: stretch;
+  background: #0000004d;
+  max-width: 100%;
+}
+.lb.gs .gs-cmd pre {
+  flex: 1;
+  margin: 0;
+  padding: 14px 20px 14px 16px;
+  overflow-x: auto;
+  min-width: 0;
+}
+.lb.gs .gs-cmd code {
+  font-size: 17px;
+  white-space: pre;
+}
+.lb.gs .gs-copy {
+  flex: none;
+  border: 0;
+  cursor: pointer;
+  padding: 0 18px;
+  background: var(--ink);
+  color: var(--dark);
+  font: 500 15px / 1 'Albert Sans', system-ui, sans-serif;
+}
+.lb.gs .gs-copy:hover {
+  background: #ffffff;
+}
+
+/* ---- terminal (step 1) ------------------------------------------------- */
+.lb.gs .gs-term pre {
+  margin: 0;
+  padding: 8px 4px;
+  overflow-x: auto;
+  font-size: 17px;
+  line-height: 1.6;
+}
+.lb.gs .gs-term code {
+  white-space: pre;
+}
+.lb.gs .gs-dim {
+  color: var(--muted);
+}
+.lb.gs .gs-acc {
+  color: #8fd0bd;
+}
+
+/* ---- close ------------------------------------------------------------ */
+.lb.gs .gs-close .gs-close-mid {
+  grid-column: 1 / 10;
+  min-height: 320px;
+  padding: 44px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 18px;
+}
+.lb.gs .gs-close h2 {
+  font-size: clamp(34px, 3.4vw, 52px);
+}
+.lb.gs .gs-close .gs-close-side {
+  grid-column: 10 / 13;
+}
+
+/* ---- tablet + phone --------------------------------------------------- */
+@media (max-width: 1100px) {
+  .lb.gs .gs-txt,
+  .lb.gs .gs-shot,
+  .lb.gs .gs-row.wide .gs-txt,
+  .lb.gs .gs-row.wide .gs-shot {
+    grid-column: 1 / -1;
+  }
+}
+@media (max-width: 760px) {
+  .lb.gs .gs-head .gs-title,
+  .lb.gs .gs-need {
+    grid-column: 1 / -1;
+    min-height: 0;
+    padding: 24px;
+  }
+  .lb.gs .gs-head .gs-title {
+    min-height: 220px;
+  }
+  .lb.gs .gs-head h1 {
+    font-size: 17vw;
+  }
+  .lb.gs .gs-txt {
+    padding: 24px;
+  }
+  .lb.gs .gs-shot {
+    padding: 16px;
+  }
+  .lb.gs .gs-cmd code,
+  .lb.gs .gs-term pre {
+    font-size: 15px;
+  }
+  /* A long command wraps rather than scrolling under the Copy button. */
+  .lb.gs .gs-cmd pre {
+    padding: 12px 14px 12px 12px;
+  }
+  .lb.gs .gs-cmd code {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .lb.gs .gs-copy {
+    padding: 0 14px;
+  }
+  .lb.gs .gs-phone-hide {
+    display: none;
+  }
+  .lb.gs .gs-close .gs-close-mid {
+    grid-column: 1 / -1;
+    padding: 28px;
+    min-height: 0;
+  }
+  .lb.gs .gs-close .gs-close-side {
+    display: none;
+  }
+}

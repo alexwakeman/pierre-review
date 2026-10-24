@@ -24,8 +24,8 @@ const OUT = process.argv[2] ?? '/tmp/limn-site-copy.md';
 
 const PAGES = [
   ['Home', '/', 'index.html'],
-  ['For developers', '/for-developers', 'for-developers/index.html'],
-  ['For engineering managers', '/for-managers', 'for-managers/index.html'],
+  ['Getting started', '/getting-started', 'getting-started/index.html'],
+  ['Reporting and metrics', '/reporting', 'reporting/index.html'],
   ['How we measure', '/how-we-measure', 'how-we-measure/index.html'],
   ['Contact', '/contact', 'contact/index.html'],
 ];

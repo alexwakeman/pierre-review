@@ -1,0 +1,348 @@
+/* ===========================================================================
+   "How we measure" (pages/HowWeMeasure.tsx). Layout only; the tokens, tiles,
+   pigments and buttons come from src/board.css. Every rule is scoped under
+   `.lb.hwm`, so nothing here reaches another page.
+
+   CLASSES
+     shared   .hwm-shot (screenshot tile: <figure>, image at its own ratio)
+              · .hwm-txt (h3 + paragraphs) · .hwm-list (square-marked ul)
+              · .hwm-word (a model's name, large) · .hwm-big (a stand-out line)
+     header   .hwm-head > .hwm-name (h1, .hwm-lead) · .ph.hwm-pic · .verdigris.hwm-say
+              · .gold.hwm-go (.btns)
+     model    .hwm-model > .board > .hwm-id (.hwm-word, .hwm-story > b + span)
+              · .hwm-q (h2, .hwm-cols) · .hwm-shot · .hwm-txt tiles
+              (grader: .hwm-id-l .hwm-q-r .hwm-wide .hwm-side .hwm-proof .hwm-feeds;
+               benchmark: .hwm-q-l .hwm-id-r .hwm-side-l .hwm-wide-r .hwm-refuse .hwm-feeds)
+     else     .hwm-else > .gold.hwm-else-id · .hwm-else-h · .hwm-else-a · .lapis.hwm-else-b
+     start    .hwm-start > .gold.hwm-start-main (h2, p, code.hwm-cmd, .btns) · .hwm-start-list
+   =========================================================================== */
+
+/* ---- shared ----------------------------------------------------------- */
+.lb.hwm .hwm-shot {
+  margin: 0;
+  padding: 10px;
+  background: var(--surface-2);
+  display: flex;
+  align-items: center;
+}
+.lb.hwm .hwm-shot a {
+  display: block;
+  width: 100%;
+}
+.lb.hwm .hwm-shot img {
+  height: auto;
+  object-fit: initial;
+}
+.lb.hwm h2 {
+  font-size: clamp(34px, 3.6vw, 56px);
+}
+.lb.hwm .hwm-txt {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 36px;
+}
+.lb.hwm .hwm-txt h3 {
+  font-size: clamp(26px, 2.4vw, 36px);
+  margin-bottom: 4px;
+}
+.lb.hwm .hwm-txt p {
+  max-width: 58ch;
+}
+.lb.hwm .hwm-word {
+  font-size: clamp(40px, 4vw, 64px);
+  font-weight: 500;
+  letter-spacing: -0.045em;
+  line-height: 0.95;
+}
+.lb.hwm .hwm-big {
+  font-size: var(--step-lead);
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+}
+.lb.hwm .hwm-big strong {
+  font-weight: 600;
+}
+.lb.hwm .hwm-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.lb.hwm .hwm-list li {
+  position: relative;
+  padding: 12px 14px 12px 38px;
+  background: #ffffff0f;
+  line-height: 1.4;
+}
+.lb.hwm .hwm-list li::before {
+  content: '';
+  position: absolute;
+  left: 14px;
+  top: calc(12px + 0.45em);
+  width: 10px;
+  height: 10px;
+  background: var(--gold);
+}
+.lb.hwm .gold .hwm-list li {
+  background: #1211101a;
+}
+.lb.hwm .gold .hwm-list li::before {
+  background: var(--dark);
+}
+.lb.hwm .hwm-list a {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* ---- header ----------------------------------------------------------- */
+.lb.hwm .hwm-head {
+  grid-template-rows: minmax(340px, auto) minmax(180px, auto);
+}
+.lb.hwm .hwm-name {
+  grid-column: 1 / 9;
+  grid-row: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 28px;
+  padding: 32px;
+}
+.lb.hwm .hwm-name h1 {
+  font-size: clamp(56px, 7.4vw, 124px);
+  font-weight: 500;
+  letter-spacing: -0.05em;
+  line-height: 0.9;
+  max-width: 11ch;
+}
+.lb.hwm .hwm-lead {
+  font-size: var(--step-lead);
+  line-height: 1.3;
+  max-width: 44ch;
+  color: var(--muted);
+}
+.lb.hwm .hwm-pic {
+  grid-column: 9 / 13;
+  grid-row: 1 / 3;
+  min-height: 460px;
+}
+.lb.hwm .hwm-say,
+.lb.hwm .hwm-go {
+  grid-row: 2;
+  display: flex;
+  align-items: flex-end;
+  padding: 28px;
+}
+.lb.hwm .hwm-say {
+  grid-column: 1 / 5;
+  font-size: 24px;
+  line-height: 1.2;
+  letter-spacing: -0.015em;
+}
+.lb.hwm .hwm-go {
+  grid-column: 5 / 9;
+}
+
+/* ---- model sections --------------------------------------------------- */
+.lb.hwm .hwm-id {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 40px;
+  padding: 32px;
+  min-height: 340px;
+}
+.lb.hwm .hwm-story {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 17px;
+  line-height: 1.4;
+  max-width: 32ch;
+}
+.lb.hwm .hwm-story b {
+  font-weight: 600;
+  font-size: 19px;
+}
+.lb.hwm .hwm-q {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 32px;
+  padding: 36px;
+}
+.lb.hwm .hwm-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 32px;
+}
+
+/* grader: name left, question right; shot wide + build side; proof wide + feeds */
+.lb.hwm .hwm-id-l {
+  grid-column: 1 / 5;
+  grid-row: 1;
+}
+.lb.hwm .hwm-q-r {
+  grid-column: 5 / 13;
+  grid-row: 1;
+}
+.lb.hwm .hwm-wide {
+  grid-column: 1 / 8;
+  grid-row: 2;
+}
+.lb.hwm .hwm-side {
+  grid-column: 8 / 13;
+  grid-row: 2;
+}
+.lb.hwm .hwm-proof {
+  grid-column: 1 / 8;
+  grid-row: 3;
+}
+.lb.hwm .hwm-model .hwm-feeds {
+  grid-column: 8 / 13;
+  grid-row: 3;
+  justify-content: flex-end;
+}
+
+/* benchmark: mirrored */
+.lb.hwm .hwm-q-l {
+  grid-column: 1 / 9;
+  grid-row: 1;
+}
+.lb.hwm .hwm-id-r {
+  grid-column: 9 / 13;
+  grid-row: 1;
+}
+.lb.hwm .hwm-side-l {
+  grid-column: 1 / 6;
+  grid-row: 2;
+}
+.lb.hwm .hwm-wide-r {
+  grid-column: 6 / 13;
+  grid-row: 2;
+}
+.lb.hwm .hwm-refuse {
+  grid-column: 1 / 8;
+  grid-row: 3;
+}
+.lb.hwm .hwm-flip .hwm-feeds {
+  grid-column: 8 / 13;
+  grid-row: 3;
+}
+
+/* ---- and nowhere else ------------------------------------------------- */
+.lb.hwm .hwm-else-id {
+  grid-column: 1 / 5;
+  display: flex;
+  align-items: flex-end;
+  padding: 32px;
+  min-height: 260px;
+}
+.lb.hwm .hwm-else-h {
+  grid-column: 5 / 13;
+  display: flex;
+  align-items: flex-end;
+  padding: 36px;
+}
+.lb.hwm .hwm-else-h h2 {
+  max-width: 24ch;
+}
+.lb.hwm .hwm-else-a {
+  grid-column: 1 / 7;
+}
+.lb.hwm .hwm-else-b {
+  grid-column: 7 / 13;
+}
+
+/* ---- start ------------------------------------------------------------ */
+.lb.hwm .hwm-start-main {
+  grid-column: 1 / 8;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 44px;
+}
+.lb.hwm .hwm-start-main h2 {
+  margin-bottom: 8px;
+}
+.lb.hwm .hwm-start-main p:not(.btns) {
+  max-width: 56ch;
+}
+.lb.hwm .hwm-cmd {
+  font-size: 18px;
+}
+.lb.hwm .hwm-start-list {
+  grid-column: 8 / 13;
+  justify-content: center;
+}
+
+/* ---- tablet ----------------------------------------------------------- */
+@media (max-width: 1100px) and (min-width: 761px) {
+  .lb.hwm .hwm-model .board > *,
+  .lb.hwm .hwm-else > *,
+  .lb.hwm .hwm-start > * {
+    grid-column: 1 / -1;
+    grid-row: auto;
+  }
+  .lb.hwm .hwm-model .hwm-id-l,
+  .lb.hwm .hwm-model .hwm-id-r {
+    min-height: 0;
+  }
+  .lb.hwm .hwm-else-id {
+    min-height: 0;
+  }
+}
+
+/* ---- phone ------------------------------------------------------------ */
+@media (max-width: 760px) {
+  .lb.hwm .board > * {
+    grid-column: 1 / -1 !important;
+    grid-row: auto !important;
+  }
+  .lb.hwm .hwm-head {
+    grid-template-rows: none;
+  }
+  .lb.hwm .hwm-name {
+    padding: 22px;
+    min-height: 260px;
+  }
+  .lb.hwm .hwm-name h1 {
+    font-size: clamp(34px, 11vw, 64px);
+    max-width: none;
+  }
+  /* The longest heading on the page: smaller on a phone so it holds to two lines. */
+  .lb.hwm .hwm-else-h h2 {
+    font-size: clamp(20px, 5.8vw, 34px);
+    max-width: none;
+  }
+  .lb.hwm .hwm-pic {
+    min-height: 0;
+    aspect-ratio: 4 / 3;
+  }
+  .lb.hwm .hwm-say {
+    font-size: 20px;
+  }
+  .lb.hwm .hwm-txt,
+  .lb.hwm .hwm-q,
+  .lb.hwm .hwm-id,
+  .lb.hwm .hwm-say,
+  .lb.hwm .hwm-go,
+  .lb.hwm .hwm-else-id,
+  .lb.hwm .hwm-else-h,
+  .lb.hwm .hwm-start-main {
+    padding: 24px;
+  }
+  .lb.hwm .hwm-id,
+  .lb.hwm .hwm-else-id {
+    min-height: 0;
+  }
+  .lb.hwm .hwm-cols {
+    grid-template-columns: 1fr;
+    gap: 18px;
+  }
+  .lb.hwm .hwm-shot {
+    padding: 6px;
+  }
+}

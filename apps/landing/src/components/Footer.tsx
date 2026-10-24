@@ -1,31 +1,22 @@
 import { useCallback } from 'react';
+import type { MouseEvent } from 'react';
 import { Link } from '../router';
 import { resetConsent } from '../lib/consent';
 import { analyticsConfigured, revokeAnalytics } from '../lib/analytics';
 import { DEMO_PATH, LICENSE_URL, REPO_URL, SITE_NAME } from '../lib/site';
 
 // ---------------------------------------------------------------------------
-// The footer, condensed to two mono lines — a © line with a link row, and the
-// desktop-today note. It replaced five columns of nineteen links.
+// The footer, on the board's dark ground (styles: .lb-foot in board.css): the
+// name built as four pigment blocks, four columns of links, the picture credits,
+// and a last line with the © and "Back to top".
 //
-// DELIBERATELY WIDER THAN THE MOCK. The design's pricing footer carries no links
-// at all and its home footer carries four; two of the links that drops are
-// compliance rather than decoration:
+// Two of these links are compliance, not decoration, and must stay on every page:
 //
 //   · "Cookie settings" is the consent-WITHDRAWAL control. GDPR requires
 //     withdrawal to be as easy as granting and reachable from a persistent
 //     place — not only from a banner that has already been dismissed.
-//   · /cookies and /terms must stay reachable from every page.
-//
-// The design README explicitly permits this ("the full existing footer link
-// columns can be restored from the live site; the mock shows the condensed
-// form"), so this keeps the condensed FORM and restores the required links.
+//   · /privacy, /cookies and /terms.
 // ---------------------------------------------------------------------------
-
-const FADE = 'transition-colors duration-hover ease-standard';
-const FOCUS =
-  'focus:outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink';
-const LINK = `hover:text-ink ${FADE} ${FOCUS}`;
 
 export default function Footer(): JSX.Element {
   // Clearing the stored choice re-shows the banner (CookieBanner listens for the
@@ -36,61 +27,68 @@ export default function Footer(): JSX.Element {
     resetConsent();
   }, []);
 
-  return (
-    <footer className="border-t border-rule px-gutter py-[26px] font-mono text-mono-caption text-secondary">
-      <div className="flex flex-wrap items-baseline justify-between gap-x-8 gap-y-3">
-        <span>© 2026 {SITE_NAME}. Built for sprint situational awareness.</span>
+  const backToTop = useCallback((e: MouseEvent<HTMLAnchorElement>) => {
+    e.preventDefault();
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    window.scrollTo({ top: 0, behavior: reduce ? 'auto' : 'smooth' });
+  }, []);
 
-        <span className="flex flex-wrap items-baseline gap-x-5 gap-y-2">
-          <Link to="/for-developers" className={LINK}>
-            For developers
-          </Link>
-          <Link to="/for-managers" className={LINK}>
-            For managers
-          </Link>
-          <Link to="/how-we-measure" className={LINK}>
-            How we measure
-          </Link>
-          <Link to="/contact" className={LINK}>
-            Contact
-          </Link>
-          <Link to={DEMO_PATH} className={LINK}>
-            Demo
-          </Link>
-          <a
-            href={REPO_URL}
-            target="_blank"
-            rel="noreferrer noopener"
-            className={LINK}
-          >
+  const letters = SITE_NAME.toUpperCase().split('');
+
+  return (
+    <footer className="lb-foot">
+      <div className="blocks" role="img" aria-label={SITE_NAME}>
+        {letters.map((ch, i) => (
+          <div key={i} className="blk" aria-hidden="true">
+            {ch}
+          </div>
+        ))}
+      </div>
+
+      <div className="flinks">
+        <div>
+          <Link to="/#gather">Gather</Link>
+          <Link to="/#check">Check</Link>
+          <Link to="/#act">Act</Link>
+        </div>
+        <div>
+          <Link to="/getting-started">Getting started</Link>
+          <Link to="/reporting">Reporting and metrics</Link>
+          <Link to="/how-we-measure">How we measure</Link>
+        </div>
+        <div>
+          <Link to={DEMO_PATH}>Demo</Link>
+          <Link to="/contact">Contact</Link>
+          <a href={REPO_URL} target="_blank" rel="noreferrer noopener">
             GitHub
           </a>
-          <a href={LICENSE_URL} target="_blank" rel="noreferrer noopener" className={LINK}>
+          <a href={LICENSE_URL} target="_blank" rel="noreferrer noopener">
             Licence
           </a>
-          <Link to="/privacy" className={LINK}>
-            Privacy
-          </Link>
-          <Link to="/cookies" className={LINK}>
-            Cookies
-          </Link>
-          <Link to="/terms" className={LINK}>
-            Terms
-          </Link>
+        </div>
+        <div>
+          <Link to="/privacy">Privacy</Link>
+          <Link to="/cookies">Cookies</Link>
+          <Link to="/terms">Terms</Link>
           {analyticsConfigured() && (
-            <button type="button" onClick={changeCookieChoice} className={LINK}>
+            <button type="button" onClick={changeCookieChoice}>
               Cookie settings
             </button>
           )}
-        </span>
+        </div>
+        <p className="c muted">
+          Pictures: Nicholas Hilliard, self-portrait, 1577; a leaf from a Book of Hours, around 1500
+          (The Met); Jacques de Guyse at his desk, Master of Antoine Rolin, around 1500; illuminated
+          initials H and N (Art Institute of Chicago, CC0). Public domain or CC0.
+        </p>
       </div>
 
-      {/* The roadmap link went with /how-it-works. The fact it carried is still worth
-          stating — a phone visitor should know before they install it — so it stays as
-          plain text rather than pointing at a page that no longer exists. */}
-      <p className="mt-4 max-w-caption">
-        {SITE_NAME} is a desktop experience today. A phone-friendly build is planned.
-      </p>
+      <div className="last">
+        <span>© 2026 {SITE_NAME}</span>
+        <a className="btn" href="#" onClick={backToTop}>
+          Back to top
+        </a>
+      </div>
     </footer>
   );
 }

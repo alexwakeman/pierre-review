@@ -3,7 +3,7 @@ import type { AnchorHTMLAttributes, MouseEvent, ReactNode } from 'react';
 
 // A tiny dependency-free client router for the marketing site. Real (clean) URLs
 // — apps/site serves each route's prerendered page, so deep-links and reloads of
-// /for-developers, /contact, … all work. Crawlers
+// /getting-started, /contact, … all work. Crawlers
 // follow the real <a href> links; per-route <title>/meta are set by useSeo().
 
 const ROUTE_EVENT = 'pierre:route';

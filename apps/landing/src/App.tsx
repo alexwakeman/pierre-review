@@ -1,16 +1,18 @@
 import { useEffect } from 'react';
-import { useRoute } from './router';
+import { Link, useRoute } from './router';
 import { initAnalytics, trackPageView } from './lib/analytics';
 import { useSeo } from './lib/seo';
 import { NOT_FOUND_SEO } from './lib/routes';
+import { DEMO_PATH } from './lib/site';
 import Nav from './components/Nav';
 import Footer from './components/Footer';
 import CookieBanner from './components/CookieBanner';
 import { LightboxProvider } from './components/Lightbox';
-import { InkButton, Section } from './components/feint/primitives';
+import { useReveal } from './components/board/useReveal';
+import './components/chrome.css';
 import Home from './pages/Home';
-import ForDevelopers from './pages/ForDevelopers';
-import ForManagers from './pages/ForManagers';
+import GettingStarted from './pages/GettingStarted';
+import Reporting from './pages/Reporting';
 import HowWeMeasure from './pages/HowWeMeasure';
 import Contact from './pages/Contact';
 import Privacy from './pages/Privacy';
@@ -19,8 +21,8 @@ import Terms from './pages/Terms';
 
 const ROUTES: Record<string, () => JSX.Element> = {
   '/': Home,
-  '/for-developers': ForDevelopers,
-  '/for-managers': ForManagers,
+  '/getting-started': GettingStarted,
+  '/reporting': Reporting,
   '/how-we-measure': HowWeMeasure,
   // Contact. Also where an organisation with more than three people asks for a
   // licence, which is why /pricing aliases to it below.
@@ -30,34 +32,46 @@ const ROUTES: Record<string, () => JSX.Element> = {
   '/privacy': Privacy,
   '/cookies': Cookies,
   '/terms': Terms,
-  // Legacy inbound links. The five feature-area pages and the arcade were folded into
-  // the two role pages; each old URL resolves to whichever of them now carries its
+  // Legacy inbound links. The five feature-area pages, the arcade and then the two role
+  // pages were retired; each old URL resolves to whichever page now carries its
   // content, so a bookmark or a search result lands on something rather than a 404.
   // The prerenderer writes the same mapping to disk (see prerender.mjs), and the
   // canonical in that HTML points at the surviving page.
-  '/features': ForDevelopers,
+  '/for-developers': GettingStarted,
+  '/for-managers': Reporting,
+  '/features': GettingStarted,
   '/how-it-works': HowWeMeasure,
-  '/bots': ForManagers,
-  '/pro': ForManagers,
+  '/bots': Reporting,
+  '/pro': Reporting,
   // /pricing goes to CONTACT: its first two lines say what it costs (nothing, unless
   // the organisation has more than three users) and how to get a licence.
   '/pricing': Contact,
-  '/insights': ForManagers,
-  '/reviews': ForManagers,
+  '/insights': Reporting,
+  '/reviews': Reporting,
 };
 
 function NotFound(): JSX.Element {
   useSeo(NOT_FOUND_SEO);
+  const ref = useReveal<HTMLDivElement>();
   return (
-    <Section divider="none" pad="lg">
-      <h1 className="mb-5 max-w-[22ch] font-display text-h2-sm font-semibold text-ink type:text-h2-major">
-        This page wandered off.
-      </h1>
-      <p className="mb-9 max-w-[56ch]">
-        The link is dead, but the timeline isn’t. Let’s get you back.
-      </p>
-      <InkButton to="/">Back to home</InkButton>
-    </Section>
+    <div className="lb notfound" ref={ref}>
+      <section className="board nf">
+        <div className="tile nf-head rise">
+          <h1>This page wandered off.</h1>
+        </div>
+        <div className="tile lapis nf-say rise">
+          <p>The link is dead, but the timeline isn’t. Let’s get you back.</p>
+          <div className="btns">
+            <Link className="btn" to="/">
+              Back to home
+            </Link>
+            <a className="btn alt" href={DEMO_PATH}>
+              Quick demo
+            </a>
+          </div>
+        </div>
+      </section>
+    </div>
   );
 }
 
@@ -80,10 +94,9 @@ export default function App(): JSX.Element {
 
   return (
     <LightboxProvider>
-      {/* The 1280px canvas. The design is a fixed max canvas with 56px gutters
-          rather than a full-bleed layout, so the `paper-alt` bands stop at the
-          canvas edge too — beyond it is plain paper, from `body`. */}
-      <div className="mx-auto min-h-screen max-w-canvas">
+      {/* Every page is a board page (root `.lb`), so the header, the page and the
+          footer all run full width; each page lays out its own tiles. */}
+      <div className="lb-app">
         <Nav />
         <main>
           <Page />

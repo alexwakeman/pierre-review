@@ -1,15 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
-import { MonoLabel } from './feint/primitives';
 
 // ---------------------------------------------------------------------------
 // The contact form.
 //
-// ⚠ IT IS PART OF THE DESIGN SYSTEM, WHICH HAS NO FORM PRIMITIVES because until
-// now the site had no form. What is here follows the same rules as everything
-// else: square corners, 1px hairlines, no shadow, no fill on a resting input, no
-// icons. An input is a line of type on a rule — the same object the ruled lists'
-// rows are.
+// It is drawn in the board theme (src/board.css). The form's own styles live in
+// pages/contact.css, scoped under `.lb.contact`, so this component must render
+// inside that page root: square corners, a quiet field on the dark ground, a gold
+// focus ring, and errors in madder (never an alarm red).
 //
 // ---- Three things a marketing form usually gets wrong, and how this one does not
 //
@@ -46,17 +44,6 @@ const TOPICS: { value: string; label: string }[] = [
 type Ready = 'checking' | 'ready' | 'unavailable' | 'busy';
 type Phase = 'idle' | 'sending' | 'sent';
 
-const FOCUS =
-  'focus:outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink';
-
-// An input is a rule with type on it. `bg-transparent` rather than a fill, because
-// paper is the ground everywhere else on this site and a grey box here would be the
-// only filled rectangle in the whole design.
-const FIELD =
-  `w-full border-b border-rule-strong bg-transparent py-2.5 font-display text-body-sm text-ink ` +
-  `placeholder:text-secondary hover:border-ink focus:border-ink transition-colors duration-hover ` +
-  `ease-standard ${FOCUS}`;
-
 function Field({
   id,
   label,
@@ -69,12 +56,10 @@ function Field({
   children: React.ReactNode;
 }): JSX.Element {
   return (
-    <div className="mb-7">
-      <label htmlFor={id} className="mb-2 block">
-        <MonoLabel>{label}</MonoLabel>
-      </label>
+    <div className="c-field">
+      <label htmlFor={id}>{label}</label>
       {children}
-      {hint && <p className="mt-2 font-mono text-mono-caption text-secondary">{hint}</p>}
+      {hint && <p className="c-hint">{hint}</p>}
     </div>
   );
 }
@@ -167,15 +152,13 @@ export function ContactForm(): JSX.Element {
 
   if (phase === 'sent') {
     return (
-      <div className="max-w-answer border-t border-ink pt-8">
-        <h2 className="mb-4 font-display text-h3 font-semibold text-ink">
-          That’s with us.
-        </h2>
-        <p className="mb-2 text-body-sm text-ink-body">
-          You’ll get a reply at <span className="text-ink">{email}</span>, usually the same
+      <div className="c-state c-sent" role="status">
+        <h2>That’s with us.</h2>
+        <p>
+          You’ll get a reply at <b>{email}</b>, usually the same
           day.
         </p>
-        <p className="font-mono text-mono-caption text-secondary">
+        <p className="muted">
           If you asked about a licence, the reply says what it covers and what it costs.
         </p>
       </div>
@@ -184,9 +167,9 @@ export function ContactForm(): JSX.Element {
 
   if (ready === 'busy') {
     return (
-      <div className="max-w-answer border-t border-ink pt-8">
-        <h2 className="mb-4 font-display text-h3 font-semibold text-ink">The form is busy.</h2>
-        <p className="text-body-sm text-ink-body">
+      <div className="c-state">
+        <h2>The form is busy.</h2>
+        <p>
           It has had a lot of requests from your address. Try again later.
         </p>
       </div>
@@ -195,17 +178,14 @@ export function ContactForm(): JSX.Element {
 
   if (ready === 'unavailable') {
     return (
-      <div className="max-w-answer border-t border-ink pt-8">
-        <h2 className="mb-4 font-display text-h3 font-semibold text-ink">
-          The form isn’t taking messages right now.
-        </h2>
-        <p className="text-body-sm text-ink-body">
+      <div className="c-state">
+        <h2>The form isn’t taking messages right now.</h2>
+        <p>
           Rather than accept something it cannot deliver, it says so. Open an issue on{' '}
           <a
             href="https://github.com/alexwakeman/pierre-review/issues"
             target="_blank"
             rel="noreferrer noopener"
-            className={`border-b border-signal-fill text-ink hover:text-signal-text ${FOCUS}`}
           >
             GitHub
           </a>{' '}
@@ -218,13 +198,13 @@ export function ContactForm(): JSX.Element {
   const busy = phase === 'sending' || ready === 'checking';
 
   return (
-    <form onSubmit={submit} className="max-w-answer border-t border-ink pt-8" noValidate={false}>
+    <form onSubmit={submit} className="c-form" noValidate={false}>
       <Field id="contact-topic" label="What is this about">
         <select
           id="contact-topic"
           value={topic}
           onChange={(e) => setTopic(e.target.value)}
-          className={`${FIELD} appearance-none`}
+          className="c-input c-select"
         >
           {TOPICS.map((o) => (
             <option key={o.value} value={o.value}>
@@ -244,7 +224,7 @@ export function ContactForm(): JSX.Element {
           autoComplete="name"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          className={FIELD}
+          className="c-input"
         />
       </Field>
 
@@ -262,7 +242,7 @@ export function ContactForm(): JSX.Element {
           autoComplete="email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          className={FIELD}
+          className="c-input"
         />
       </Field>
 
@@ -279,13 +259,13 @@ export function ContactForm(): JSX.Element {
           maxLength={2500}
           value={message}
           onChange={(e) => setMessage(e.target.value)}
-          className={`${FIELD} resize-y`}
+          className="c-input c-area"
         />
       </Field>
 
       {/* The honeypot. Off-canvas rather than display:none — see the header note.
           It is a real, reachable input that no person will ever type into. */}
-      <div aria-hidden="true" className="absolute left-[-9999px] top-auto h-px w-px overflow-hidden">
+      <div aria-hidden="true" className="c-pot">
         <label htmlFor="contact-website">Website</label>
         <input
           id="contact-website"
@@ -299,10 +279,7 @@ export function ContactForm(): JSX.Element {
       </div>
 
       {error && (
-        <p
-          role="alert"
-          className="mb-6 border-l border-signal-fill pl-4 text-body-sm text-signal-text"
-        >
+        <p role="alert" className="c-error">
           {error}
         </p>
       )}
@@ -315,7 +292,7 @@ export function ContactForm(): JSX.Element {
           swallows a message. For a visitor with JavaScript the checking state lasts one
           round trip and is never seen. */}
       <noscript>
-        <p className="mb-6 border-l border-signal-fill pl-4 text-body-sm text-ink-body">
+        <p className="c-note">
           This form needs JavaScript to send. With it switched off, open an issue at
           github.com/alexwakeman/pierre-review/issues instead — it reaches the same person.
         </p>
@@ -324,15 +301,15 @@ export function ContactForm(): JSX.Element {
       <button
         type="submit"
         disabled={busy}
-        className={`inline-block bg-ink px-6 py-[15px] font-display text-[16px] font-semibold text-paper hover:bg-[#08080A] disabled:cursor-not-allowed disabled:bg-muted transition-colors duration-hover ease-standard ${FOCUS}`}
+        className="btn c-send"
       >
         {phase === 'sending' ? 'Sending…' : 'Send'}
       </button>
 
-      <p className="mt-5 max-w-reassure font-mono text-mono-nav text-secondary">
+      <p className="c-small muted">
         Your message goes to one person, not a ticketing queue. What the form collects and
         how long it is kept is in the{' '}
-        <a href="/privacy" className={`border-b border-signal-fill text-ink hover:text-signal-text ${FOCUS}`}>
+        <a href="/privacy">
           privacy policy
         </a>
         .

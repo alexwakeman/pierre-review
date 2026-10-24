@@ -1,0 +1,365 @@
+/* ===========================================================================
+   "Reporting and metrics" (pages/Reporting.tsx). Layout only; the tokens,
+   tiles, pigments and buttons come from src/board.css. Every rule is scoped
+   under `.lb.rep`, so nothing here reaches the home page.
+
+   CLASSES
+     shared     .shot (screenshot tile: <figure>, image at its own ratio, no crop)
+                · .r-chap (h2 + p over a section) · .r-txt (heading + copy tile)
+     header     .r-head > .r-name (h1, .r-lead) · .ph.r-pic · .r-say · .r-say2
+     split      .r-split > .r-txt + .shot.r-wide  (.r-flip puts the shot first)
+     period     .r-period > .r-chap + .board > .r-full · .r-fact×3 · .r-sumtxt · .r-sum
+     chronology .r-chron > .r-txt (ul.r-courts) · .r-wide · .r-big (.r-fig > span) · .r-proof
+     bots       .r-bots > .r-bclaim · .r-bshot · .r-btxt · .r-bshot2
+     close      .r-close > .r-flank · .gold.r-mid · .r-flank
+   =========================================================================== */
+
+/* ---- shared ----------------------------------------------------------- */
+.lb.rep .shot {
+  margin: 0;
+  padding: 10px;
+  background: var(--surface-2);
+  display: flex;
+  align-items: center;
+}
+.lb.rep .shot a {
+  display: block;
+  width: 100%;
+}
+.lb.rep .shot img {
+  height: auto;
+  object-fit: initial;
+}
+.lb.rep h2 {
+  font-size: clamp(34px, 3.6vw, 56px);
+}
+.lb.rep .r-chap {
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  gap: 24px;
+  padding: 0 10px 32px;
+  align-items: end;
+}
+.lb.rep .r-chap h2 {
+  grid-column: 1 / 7;
+  font-size: var(--step-head);
+}
+.lb.rep .r-chap p {
+  grid-column: 7 / 13;
+  font-size: var(--step-lead);
+  line-height: 1.3;
+}
+.lb.rep .r-chap p.muted {
+  margin-top: -12px;
+  font-size: var(--step-body);
+  line-height: 1.45;
+}
+.lb.rep .r-txt {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 36px;
+}
+.lb.rep .r-txt p {
+  max-width: 40ch;
+}
+.lb.rep .r-full {
+  grid-column: 1 / -1;
+}
+
+/* ---- header ----------------------------------------------------------- */
+.lb.rep .r-head {
+  grid-template-rows: minmax(300px, auto) minmax(180px, auto);
+}
+.lb.rep .r-name {
+  grid-column: 1 / 9;
+  grid-row: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 24px;
+  padding: 28px;
+}
+.lb.rep .r-name h1 {
+  font-size: clamp(56px, 7.4vw, 124px);
+  font-weight: 500;
+  letter-spacing: -0.05em;
+  line-height: 0.9;
+}
+.lb.rep .r-lead {
+  font-size: var(--step-lead);
+  line-height: 1.3;
+  max-width: 36ch;
+}
+.lb.rep .r-pic {
+  grid-column: 9 / 13;
+  grid-row: 1 / 3;
+  min-height: 420px;
+}
+.lb.rep .r-pic img {
+  object-position: center 30%;
+}
+.lb.rep .r-say,
+.lb.rep .r-say2 {
+  grid-row: 2;
+  display: flex;
+  align-items: flex-end;
+  font-size: 24px;
+  line-height: 1.2;
+  letter-spacing: -0.015em;
+}
+.lb.rep .r-say {
+  grid-column: 1 / 5;
+}
+.lb.rep .r-say2 {
+  grid-column: 5 / 9;
+}
+
+/* ---- split ------------------------------------------------------------ */
+.lb.rep .r-split .r-txt {
+  grid-column: 1 / 5;
+}
+.lb.rep .r-split .r-wide {
+  grid-column: 5 / 13;
+}
+.lb.rep .r-split.r-flip .r-wide {
+  grid-column: 1 / 9;
+  grid-row: 1;
+}
+.lb.rep .r-split.r-flip .r-txt {
+  grid-column: 9 / 13;
+  grid-row: 1;
+}
+
+/* ---- period ----------------------------------------------------------- */
+.lb.rep .r-fact {
+  grid-column: span 4;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 200px;
+}
+.lb.rep .r-fact b {
+  font-size: clamp(26px, 2.4vw, 36px);
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  line-height: 1.05;
+}
+.lb.rep .r-fact p {
+  font-size: 17px;
+  line-height: 1.45;
+}
+.lb.rep .r-sumtxt {
+  grid-column: 1 / 5;
+  display: flex;
+  align-items: flex-end;
+  font-size: var(--step-lead);
+  line-height: 1.3;
+}
+.lb.rep .r-sum {
+  grid-column: 5 / 13;
+}
+
+/* ---- chronology ------------------------------------------------------- */
+.lb.rep .r-chron .r-txt {
+  grid-column: 1 / 5;
+}
+.lb.rep .r-chron .r-wide {
+  grid-column: 5 / 13;
+}
+.lb.rep .r-courts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 17px;
+}
+.lb.rep .r-courts li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.lb.rep .r-courts .sw {
+  flex: none;
+  width: 12px;
+  height: 12px;
+}
+.lb.rep .r-big {
+  grid-column: 1 / 6;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 32px;
+  min-height: 320px;
+  padding: 36px;
+}
+.lb.rep .r-fig {
+  font-size: clamp(72px, 9vw, 150px);
+  font-weight: 600;
+  letter-spacing: -0.05em;
+  line-height: 0.9;
+  font-variant-numeric: tabular-nums;
+}
+.lb.rep .r-fig span {
+  display: block;
+  margin-top: 16px;
+  font-size: var(--step-body);
+  font-weight: 400;
+  letter-spacing: 0;
+  line-height: 1.4;
+  opacity: 0.9;
+}
+.lb.rep .r-proof {
+  grid-column: 6 / 13;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 36px;
+}
+.lb.rep .r-proof h3 {
+  font-size: clamp(28px, 2.6vw, 40px);
+}
+.lb.rep .r-proof p {
+  max-width: 52ch;
+}
+.lb.rep .r-proof .src {
+  margin-top: auto;
+  font-size: 15px;
+  color: var(--muted);
+}
+
+/* ---- bots ------------------------------------------------------------- */
+.lb.rep .r-bclaim {
+  grid-column: 1 / 6;
+  grid-row: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 36px;
+}
+.lb.rep .r-bclaim p {
+  font-size: var(--step-lead);
+  line-height: 1.3;
+  max-width: 28ch;
+}
+.lb.rep .r-bshot {
+  grid-column: 6 / 13;
+  grid-row: 1;
+}
+.lb.rep .r-bshot2 {
+  grid-column: 1 / 8;
+  grid-row: 2;
+}
+.lb.rep .r-btxt {
+  grid-column: 8 / 13;
+  grid-row: 2;
+  display: flex;
+  align-items: flex-end;
+  padding: 36px;
+}
+.lb.rep .r-btxt p {
+  max-width: 36ch;
+}
+
+/* ---- close ------------------------------------------------------------ */
+.lb.rep .r-close > div {
+  min-height: 360px;
+}
+.lb.rep .r-flank {
+  grid-column: span 2;
+}
+.lb.rep .r-mid {
+  grid-column: 3 / 11;
+  padding: 44px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 18px;
+}
+.lb.rep .r-mid h2 {
+  font-size: clamp(34px, 3.4vw, 52px);
+}
+.lb.rep .r-mid code {
+  font-size: 17px;
+}
+
+/* ---- tablet ----------------------------------------------------------- */
+@media (max-width: 1100px) and (min-width: 761px) {
+  .lb.rep .r-split .r-txt,
+  .lb.rep .r-split .r-wide,
+  .lb.rep .r-split.r-flip .r-txt,
+  .lb.rep .r-split.r-flip .r-wide,
+  .lb.rep .r-chron .r-txt,
+  .lb.rep .r-chron .r-wide,
+  .lb.rep .r-big,
+  .lb.rep .r-proof,
+  .lb.rep .r-bclaim,
+  .lb.rep .r-bshot,
+  .lb.rep .r-bshot2,
+  .lb.rep .r-btxt,
+  .lb.rep .r-sumtxt,
+  .lb.rep .r-sum {
+    grid-column: 1 / -1;
+    grid-row: auto;
+  }
+  .lb.rep .r-chap h2,
+  .lb.rep .r-chap p {
+    grid-column: 1 / -1;
+  }
+}
+
+/* ---- phone ------------------------------------------------------------ */
+@media (max-width: 760px) {
+  .lb.rep .board > * {
+    grid-column: 1 / -1 !important;
+    grid-row: auto !important;
+  }
+  .lb.rep .r-head {
+    grid-template-rows: none;
+  }
+  .lb.rep .r-name {
+    padding: 22px;
+    min-height: 260px;
+  }
+  .lb.rep .r-name h1 {
+    font-size: 15vw;
+  }
+  .lb.rep .r-pic {
+    min-height: 0;
+    aspect-ratio: 4 / 3;
+  }
+  .lb.rep .r-say,
+  .lb.rep .r-say2 {
+    font-size: 20px;
+    min-height: 120px;
+  }
+  .lb.rep .r-chap h2,
+  .lb.rep .r-chap p {
+    grid-column: 1 / -1;
+  }
+  .lb.rep .r-txt,
+  .lb.rep .r-big,
+  .lb.rep .r-proof,
+  .lb.rep .r-bclaim,
+  .lb.rep .r-btxt,
+  .lb.rep .r-mid {
+    padding: 24px;
+  }
+  .lb.rep .r-fact {
+    min-height: 0;
+  }
+  .lb.rep .r-big {
+    min-height: 0;
+  }
+  .lb.rep .shot {
+    padding: 6px;
+  }
+  .lb.rep .r-close > div {
+    min-height: 0;
+  }
+  .lb.rep .r-flank {
+    display: none;
+  }
+}

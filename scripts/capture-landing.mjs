@@ -15,9 +15,10 @@ const ONLY = process.argv[2]; // 'mobile' | 'desktop' | undefined
 
 const PAGES = [
   ['home', '/'],
-  ['for-developers', '/for-developers'],
-  ['for-managers', '/for-managers'],
+  ['getting-started', '/getting-started'],
+  ['reporting', '/reporting'],
   ['how-we-measure', '/how-we-measure'],
+  ['contact', '/contact'],
 ];
 const DEVICES = [
   ['desktop', { width: 1440, height: 900 }, 2, false],

@@ -1,11 +1,17 @@
-import { useCallback } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useSeo } from '../lib/seo';
 import { seoFor } from '../lib/routes';
 import { Link } from '../router';
-import { resetConsent, consentChoice } from '../lib/consent';
+import {
+  resetConsent,
+  consentChoice,
+  onConsentChange,
+  type ConsentChoice,
+} from '../lib/consent';
 import { revokeAnalytics } from '../lib/analytics';
 import { SITE_NAME } from '../lib/site';
 import {
+  LEGAL_LINK,
   LegalNote,
   LegalPage,
   LegalSection,
@@ -24,7 +30,13 @@ import {
 export default function Cookies(): JSX.Element {
   useSeo(seoFor('/cookies'));
 
-  const current = typeof window === 'undefined' ? null : consentChoice();
+  // Read after mount (the prerender has no storage) and kept current: the banner
+  // that "Change my choice" reopens fires the consent event when answered.
+  const [current, setCurrent] = useState<ConsentChoice | null>(null);
+  useEffect(() => {
+    setCurrent(consentChoice());
+    return onConsentChange(setCurrent);
+  }, []);
 
   // Clearing the stored choice fires the consent event, which makes the banner
   // reappear so the visitor can answer again. Also stop any already-loaded tag.
@@ -36,6 +48,7 @@ export default function Cookies(): JSX.Element {
 
   return (
     <LegalPage
+      pigment="verdigris"
       title="Cookie policy"
       intro={
         <>
@@ -43,7 +56,7 @@ export default function Cookies(): JSX.Element {
             This site sets two cookies, both for analytics, and only if you agreed to them.
             There is no sign-in, so there is no session cookie.
           </p>
-          <div className="mt-5">
+          <div>
             <LegalNote title="Your current choice">
               <p>
                 {current === 'granted'
@@ -55,7 +68,7 @@ export default function Cookies(): JSX.Element {
               <button
                 type="button"
                 onClick={change}
-                className="mt-2 border border-ink px-4 py-2 font-display text-[15px] font-semibold text-ink transition-colors duration-hover ease-standard hover:bg-ink hover:text-paper focus:outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink"
+                className="btn"
               >
                 Change my choice
               </button>
@@ -66,16 +79,17 @@ export default function Cookies(): JSX.Element {
     >
       <LegalSection id="list" heading="Every cookie, in full">
         <LegalTable
+          label="Every cookie, in full"
           columns={['Name', 'Type', 'Purpose', 'Lifetime']}
           rows={[
             [
-              <span className="font-mono text-xs">_ga</span>,
+              <code>_ga</code>,
               'Analytics — consent required',
               'Google Analytics: distinguishes one visitor from another so page views can be counted.',
               '2 years',
             ],
             [
-              <span className="font-mono text-xs">_ga_&lt;ID&gt;</span>,
+              <code>_ga_&lt;ID&gt;</code>,
               'Analytics — consent required',
               'Google Analytics: keeps session state for this specific property.',
               '2 years',
@@ -107,15 +121,15 @@ export default function Cookies(): JSX.Element {
           </li>
           <li>
             <T>Changing your mind deletes the cookies.</T> Withdrawing consent expires{' '}
-            <span className="font-mono text-xs">_ga</span> and{' '}
-            <span className="font-mono text-xs">_ga_&lt;ID&gt;</span> on your device
+            <code>_ga</code> and{' '}
+            <code>_ga_&lt;ID&gt;</code> on your device
             immediately and stops all further measurement.
           </li>
         </UL>
         <P>
           Google is the recipient of this data and acts as our processor; the transfer is to
           the United States. See §§2 and 4 of the{' '}
-          <Link to="/privacy" className="border-b border-signal-fill text-ink transition-colors duration-hover ease-standard hover:text-signal-text">
+          <Link to="/privacy" className={LEGAL_LINK}>
             privacy policy
           </Link>{' '}
           for the legal detail.
@@ -137,7 +151,7 @@ export default function Cookies(): JSX.Element {
             href="https://tools.google.com/dlpage/gaoptout"
             target="_blank"
             rel="noreferrer noopener"
-            className="border-b border-signal-fill text-ink transition-colors duration-hover ease-standard hover:text-signal-text"
+            className={LEGAL_LINK}
           >
             Analytics opt-out extension
           </a>

@@ -4,6 +4,7 @@ import { Link } from '../router';
 import { SITE_NAME } from '../lib/site';
 import {
   LEGAL_CONTROLLER,
+  LEGAL_LINK,
   LegalNote,
   LegalPage,
   LegalSection,
@@ -26,14 +27,14 @@ import {
 // to Anthropic on the reader's own credentials), because that is true and a reader
 // deploying it for a team needs to know.
 
-const LINK =
-  'border-b border-signal-fill text-ink transition-colors duration-hover ease-standard hover:text-signal-text';
+const LINK = LEGAL_LINK;
 
 export default function Privacy(): JSX.Element {
   useSeo(seoFor('/privacy'));
 
   return (
     <LegalPage
+      pigment="lapis"
       title="Privacy policy"
       intro={
         <>
@@ -41,7 +42,7 @@ export default function Privacy(): JSX.Element {
             This notice explains what personal data this website collects, why, and what you
             can do about it. It also says what the {SITE_NAME} app does on your own machine.
           </p>
-          <div className="mt-5">
+          <div>
             <LegalNote title="The short version">
               <p>
                 There are no accounts. On this site we collect only what you type into the
@@ -149,6 +150,7 @@ export default function Privacy(): JSX.Element {
       <LegalSection id="processors" heading="4. Who else the website data reaches">
         <P>No data is sold, and there are no advertising or data-broker relationships.</P>
         <LegalTable
+          label="Who else the website data reaches"
           columns={['Recipient', 'What they receive', 'Where', 'When']}
           rows={[
             [

@@ -8,15 +8,16 @@ import {
   type ReactNode,
 } from 'react';
 import { SITE_NAME } from '../lib/site';
+import './chrome.css';
 
-// A single, app-wide screenshot lightbox. Any image surface (a <ShotFrame>, the
-// Pro walkthrough steps) calls `useLightbox().open` to blow a screenshot up to
-// effectively full-screen on an ink scrim.
+// A single, app-wide screenshot lightbox. Any image surface (the screenshots on
+// Getting started and Reporting) calls `useLightbox().open` to blow a screenshot up to
+// effectively full-screen on a dark scrim (styles: chrome.css, .lb-lightbox).
 //
 // The image itself carries NO border, radius, shadow or filter — the design's rule
 // is that a product screenshot ships un-stylised, and "Enlarge opens a lightbox at
-// native resolution" is exactly where that matters most. The scrim is ink; small
-// text on it uses the on-dark stops.
+// native resolution" is exactly where that matters most. The scrim is the
+// board's dark ground; its buttons are board buttons.
 //
 // Two ways to open:
 //   • open(item)                 — a single image. Tapping it toggles fit ⇄ zoom
@@ -119,15 +120,15 @@ export function LightboxProvider({ children }: { children: ReactNode }): JSX.Ele
           aria-modal="true"
           aria-label={current.title ?? current.alt}
           onClick={close}
-          className="fixed inset-0 z-[100] flex flex-col bg-ink/95"
+          className="lb-lightbox"
         >
           {/* top bar — title (+ gallery position) + close. Clicks here fall through to
               the scrim and dismiss too (only the image swallows its click). */}
-          <div className="flex items-center justify-between gap-3 px-4 py-3 sm:px-6 sm:py-4">
-            <span className="flex min-w-0 items-center gap-2 font-mono text-mono-caption text-on-dark-secondary">
-              <span className="min-w-0 truncate">{current.title ?? SITE_NAME.toLowerCase()}</span>
+          <div className="top">
+            <span className="ttl">
+              <span>{current.title ?? SITE_NAME.toLowerCase()}</span>
               {isGallery && (
-                <span className="shrink-0 tabular-nums text-on-dark-tertiary" aria-live="polite">
+                <span className="pos" aria-live="polite">
                   {index + 1} / {count}
                 </span>
               )}
@@ -137,20 +138,16 @@ export function LightboxProvider({ children }: { children: ReactNode }): JSX.Ele
               type="button"
               onClick={close}
               aria-label="Close"
-              className="inline-flex items-center gap-1.5 border border-on-dark-secondary/40 px-3 py-1.5 font-mono text-mono-caption text-on-dark-body transition-colors duration-hover ease-standard hover:border-on-dark-primary hover:text-on-dark-primary focus:outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-on-dark-primary"
+              className="btn alt"
             >
-              <CloseIcon className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">Close</span>
-              <span className="sm:hidden">Esc</span>
+              <CloseIcon />
+              <span className="lg">Close</span>
+              <span className="sm">Esc</span>
             </button>
           </div>
 
           {/* stage — the backdrop click here also closes; the image swallows its own */}
-          <div
-            className={`relative min-h-0 flex-1 overflow-auto px-3 pb-2 sm:px-6 ${
-              zoomed ? '' : 'flex items-center justify-center'
-            }`}
-          >
+          <div className={zoomed ? 'stage' : 'stage fit'}>
             <img
               src={current.src}
               alt={current.alt}
@@ -161,13 +158,7 @@ export function LightboxProvider({ children }: { children: ReactNode }): JSX.Ele
                 else setZoomed((z) => !z);
               }}
               style={zoomed ? { width: 'min(1600px, 240vw)' } : undefined}
-              className={
-                zoomed
-                  ? 'mx-auto block h-auto max-w-none cursor-zoom-out'
-                  : `block max-h-full max-w-full ${
-                      isGallery ? 'cursor-pointer' : 'cursor-zoom-in'
-                    }`
-              }
+              className={zoomed ? 'zoom' : isGallery ? 'fit next' : 'fit'}
             />
 
             {/* prev / next — only for a gallery. Fixed to the viewport edges so they
@@ -181,9 +172,9 @@ export function LightboxProvider({ children }: { children: ReactNode }): JSX.Ele
                     e.stopPropagation();
                     go(-1);
                   }}
-                  className="fixed left-2 top-1/2 z-[101] -translate-y-1/2 border border-on-dark-secondary/40 bg-ink p-2.5 text-on-dark-body transition-colors duration-hover ease-standard hover:border-on-dark-primary hover:text-on-dark-primary focus:outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-on-dark-primary sm:left-4"
+                  className="btn alt step prev"
                 >
-                  <Chevron className="h-5 w-5 rotate-180" />
+                  <Chevron />
                 </button>
                 <button
                   type="button"
@@ -192,16 +183,16 @@ export function LightboxProvider({ children }: { children: ReactNode }): JSX.Ele
                     e.stopPropagation();
                     go(1);
                   }}
-                  className="fixed right-2 top-1/2 z-[101] -translate-y-1/2 border border-on-dark-secondary/40 bg-ink p-2.5 text-on-dark-body transition-colors duration-hover ease-standard hover:border-on-dark-primary hover:text-on-dark-primary focus:outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-on-dark-primary sm:right-4"
+                  className="btn alt step next"
                 >
-                  <Chevron className="h-5 w-5" />
+                  <Chevron />
                 </button>
               </>
             )}
           </div>
 
           {/* hint */}
-          <p className="pointer-events-none px-4 pb-3 pt-1 text-center font-mono text-[11px] text-on-dark-tertiary">
+          <p className="hint">
             {isGallery
               ? 'Tap the image or use ‹ › / arrow keys for the next shot · tap outside or press Esc to close'
               : `Tap the image to ${zoomed ? 'fit it to the screen' : 'zoom in'} · tap outside or press Esc to close`}
@@ -212,7 +203,7 @@ export function LightboxProvider({ children }: { children: ReactNode }): JSX.Ele
   );
 }
 
-function CloseIcon({ className }: { className?: string }): JSX.Element {
+function CloseIcon(): JSX.Element {
   return (
     <svg
       viewBox="0 0 24 24"
@@ -222,14 +213,13 @@ function CloseIcon({ className }: { className?: string }): JSX.Element {
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"
-      className={className}
     >
       <path d="M18 6 6 18M6 6l12 12" />
     </svg>
   );
 }
 
-function Chevron({ className }: { className?: string }): JSX.Element {
+function Chevron(): JSX.Element {
   return (
     <svg
       viewBox="0 0 24 24"
@@ -239,7 +229,6 @@ function Chevron({ className }: { className?: string }): JSX.Element {
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"
-      className={className}
     >
       <path d="m9 6 6 6-6 6" />
     </svg>

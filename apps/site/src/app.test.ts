@@ -228,7 +228,7 @@ describe('the security headers', () => {
       const { request } = await import('node:http');
       const hit = (host: string) =>
         new Promise<{ status: number; location: string | undefined }>((resolve, reject) => {
-          const req = request(`${r.base}/for-developers`, { headers: { host } }, (resp) => {
+          const req = request(`${r.base}/getting-started`, { headers: { host } }, (resp) => {
             resolve({ status: resp.statusCode ?? 0, location: resp.headers.location });
             resp.resume();
           });
@@ -238,7 +238,7 @@ describe('the security headers', () => {
       for (const host of ['pierre-review.com', 'WWW.pierre-review.com:443']) {
         const res = await hit(host);
         expect(res.status).toBe(301);
-        expect(res.location).toBe('https://limn-review.com/for-developers');
+        expect(res.location).toBe('https://limn-review.com/getting-started');
       }
       expect((await hit('something-else.up.railway.app')).status).not.toBe(301);
     } finally {

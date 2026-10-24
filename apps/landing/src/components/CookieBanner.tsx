@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
-import { InlineLink } from './feint/primitives';
+import { Link } from '../router';
 import { analyticsConfigured, initAnalytics, revokeAnalytics } from '../lib/analytics';
 import { consentChoice, onConsentChange, setConsent } from '../lib/consent';
+import './chrome.css';
 
 // The consent prompt. Three rules it exists to satisfy (see lib/consent.ts for the
 // full reasoning):
@@ -47,42 +48,29 @@ export default function CookieBanner(): JSX.Element | null {
       role="dialog"
       aria-modal="false"
       aria-label="Cookie choices"
-      // A ruled strip on paper, not a floating card: no radius, no shadow, no
-      // backdrop blur. It reads as a footnote to the page rather than an overlay
-      // on top of it, which is the whole point — refusing must not feel costly.
-      className="fixed inset-x-0 bottom-0 z-50 border-t border-ink bg-paper"
+      // One dark tile floating at the bottom (styles: chrome.css, .lb-banner). It
+      // covers no more than a strip and blocks nothing, so refusing never feels costly.
+      className="lb-banner"
     >
-      <div className="mx-auto flex max-w-canvas flex-col gap-5 px-gutter py-5 rail:flex-row rail:items-center rail:justify-between">
-        <p className="max-w-answer text-list">
-          We&apos;d like to use Google Analytics to count page views and see which pages
-          people find useful. It sets a cookie and shares your IP address with Google.
-          Nothing loads unless you say yes, and the site works exactly the same either
-          way.{' '}
-          <InlineLink to="/cookies">Cookie policy</InlineLink>
-          {' · '}
-          <InlineLink to="/privacy">Privacy</InlineLink>
-        </p>
-        {/* Equal visual weight, deliberately. Decline is not a de-emphasised link. */}
-        <div className="flex shrink-0 gap-3">
-          <button
-            type="button"
-            onClick={decline}
-            className={`${BTN} border border-ink text-ink hover:bg-ink hover:text-paper`}
-          >
-            Decline
-          </button>
-          <button
-            type="button"
-            onClick={accept}
-            className={`${BTN} border border-ink bg-ink text-paper hover:bg-[#08080A]`}
-          >
-            Accept
-          </button>
-        </div>
+      <p>
+        We&apos;d like to use Google Analytics to count page views and see which pages
+        people find useful. It sets a cookie and shares your IP address with Google.
+        Nothing loads unless you say yes, and the site works exactly the same either
+        way.{' '}
+        <Link to="/cookies">Cookie policy</Link>
+        {' · '}
+        <Link to="/privacy">Privacy</Link>
+      </p>
+      {/* Equal visual weight, deliberately. Decline is not a de-emphasised link:
+          both are full board buttons of the same size, one outlined, one filled. */}
+      <div className="acts">
+        <button type="button" onClick={decline} className="btn alt">
+          Decline
+        </button>
+        <button type="button" onClick={accept} className="btn">
+          Accept
+        </button>
       </div>
     </div>
   );
 }
-
-const BTN =
-  'px-5 py-2.5 font-display text-[15px] font-semibold transition-colors duration-hover ease-standard focus:outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink';
