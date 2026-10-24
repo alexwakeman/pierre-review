@@ -52,7 +52,7 @@ export type RouteSeo = {
  */
 export const ROUTE_SEO: Record<string, RouteSeo> = {
   '/': {
-    title: `${SITE_NAME} — code review, gathered and checked on your own Claude`,
+    title: `${SITE_NAME} — automated code review, story and docs alignment, on your machine`,
     description: `${SITE_NAME} reviews each pull request against its story and your docs on your own Claude Code login, posts the review to GitHub automatically, and AI Fix fixes the findings and failing CI. Free for up to ${FREE_TEAM_SIZE} people, it runs on your machine: npx ${NPM_PACKAGE}.`,
   },
   '/getting-started': {

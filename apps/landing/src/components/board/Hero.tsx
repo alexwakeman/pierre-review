@@ -38,14 +38,14 @@ export function Hero() {
     <section className="board hero" aria-label="Limn">
       <div className="tile name">
         <h1>
-          Limn<span className="vh"> — code review on your own Claude</span>
+          Limn<span className="vh"> — automated, local code review</span>
         </h1>
       </div>
       <div className="tile ph p1">
         <img src={hilliard} width={1280} height={1283} alt="Nicholas Hilliard's self-portrait miniature, 1577" />
       </div>
       <div className="tile lapis say">
-        <p>Code review, gathered and checked on your own Claude.</p>
+        <p>Code review, story alignment, docs alignment. Automated, on your machine.</p>
       </div>
       <div className="tile anim" aria-hidden="true">
         <HeroDots />
