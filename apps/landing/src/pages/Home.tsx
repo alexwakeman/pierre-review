@@ -5,6 +5,7 @@ import { Hero } from '../components/board/Hero';
 import { GatherCheckAct } from '../components/board/GatherCheckAct';
 import { Gather } from '../components/board/Gather';
 import { Check } from '../components/board/Check';
+import { SavesTime } from '../components/board/SavesTime';
 import { Act } from '../components/board/Act';
 import { Velocity } from '../components/board/Velocity';
 import { Cost } from '../components/board/Cost';
@@ -22,7 +23,7 @@ import { Close } from '../components/board/Close';
 // element as it scrolls in. Without JS, or with reduced motion, nothing is hidden,
 // so the prerendered HTML shows every word.
 //
-// Running order: hero · Gather. Check. Act. · Gather · Check · Act · velocity ·
+// Running order: hero · Gather. Check. Act. · Gather · Check · time saved · Act · velocity ·
 // cost · licence · questions · run it.
 // ---------------------------------------------------------------------------
 
@@ -35,6 +36,7 @@ export default function Home(): JSX.Element {
       <GatherCheckAct />
       <Gather />
       <Check />
+      <SavesTime />
       <Act />
       <Velocity />
       <Cost />

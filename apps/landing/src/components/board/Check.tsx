@@ -105,45 +105,6 @@ export function Check() {
           <p>Limn draws one for every review, made for that change. Each part cites the files behind it, so you can follow the key ideas straight to the code.</p>
         </div>
       </div>
-      <div className="board bots" style={{ marginTop: 'var(--gap)' }}>
-        <div className="tile gold b-ml rise">
-          <h3>Checks the checkers</h3>
-          <p>
-            Limn's own model scores every CodeRabbit, Copilot and Sonar comment from nit to critical, on your machine, without
-            trusting the bot's own label.
-          </p>
-          <p className="fig">
-            <b>70%</b> agreement with an independent grader on 300 bot comments. CodeRabbit's own label: <b>47%</b>, on the ones it labelled.
-          </p>
-        </div>
-        <div className="tile b-cost rise" data-ui="">
-          <div className="ui-k">Review bots · this month · sample data</div>
-          <div className="cost-rows">
-            <div>
-              <span>CodeRabbit</span>
-              <span>212 comments</span>
-              <span>38 acted on</span>
-              <b>$0.79 each</b>
-            </div>
-            <div>
-              <span>Copilot</span>
-              <span>96 comments</span>
-              <span>31 acted on</span>
-              <b>$0.61 each</b>
-            </div>
-            <div>
-              <span>Claude via Limn</span>
-              <span>54 findings</span>
-              <span>40 acted on</span>
-              <b>no seat</b>
-            </div>
-          </div>
-          <div className="cap">
-            <b>What each bot costs</b>
-            <span>Per finding your team actually acted on.</span>
-          </div>
-        </div>
-      </div>
     </section>
   );
 }

@@ -1344,3 +1344,13 @@ body:has(.lb) {
 .lb .btns { display: flex; flex-wrap: wrap; gap: 10px; }
 .lb .gold .btn.alt { background: transparent; color: var(--dark); box-shadow: inset 0 0 0 2px var(--dark); }
 .lb .gold .btn.alt:hover { background: rgba(18, 17, 16, .1); }
+
+/* ---- time it saves you: six chores, each with what happens now ---------- */
+.lb .saves-grid { list-style: none; margin: 0; padding: 0; grid-auto-rows: minmax(190px, auto); }
+.lb .saves-grid > li { grid-column: span 4; display: flex; flex-direction: column; justify-content: space-between; gap: 18px; padding: 28px; }
+.lb .saves-grid h3 { font-size: clamp(24px, 2.2vw, 32px); letter-spacing: -0.03em; line-height: 1.1; }
+.lb .saves-grid p { font-size: 18px; line-height: 1.4; max-width: 34ch; }
+.lb .saves-0 { background: var(--lapis) var(--g-lapis); }
+.lb .saves-2 { background: var(--verdigris) var(--g-verdigris); }
+@media (max-width: 1100px) { .lb .saves-grid > li { grid-column: span 6; } }
+@media (max-width: 760px) { .lb .saves-grid > li { grid-column: 1 / -1; min-height: 0; } }

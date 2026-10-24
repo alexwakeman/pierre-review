@@ -276,6 +276,10 @@ export default function Reporting(): JSX.Element {
         <div className="tile verdigris r-bclaim rise">
           <h2 id="r-bot-h">What your bots are worth</h2>
           <p>Bot comments graded nit, minor, major or critical by Limn's own model, on your own machine.</p>
+          <p>
+            On 300 bot comments, the model agreed with an independent grader 70% of the time. CodeRabbit&rsquo;s own label
+            agreed 47% of the time, on the ones it labelled.
+          </p>
           <p>What each bot costs per comment your team acted on.</p>
         </div>
         <Shot
