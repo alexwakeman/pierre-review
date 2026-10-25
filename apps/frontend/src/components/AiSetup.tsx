@@ -45,7 +45,10 @@ export function AiRunGate({
 }
 
 export function AiAuthLine(): JSX.Element {
-  return <span className="text-xs text-gray-600 dark:text-gray-300">{AI_AUTH_LINE}</span>;
+  // The server's own sentence when it sent one (e.g. "Codex is not available…" under
+  // LIMN_AI_PROVIDER=codex), else the default sign-in line.
+  const ai = useAiCapabilities();
+  return <span className="text-xs text-gray-600 dark:text-gray-300">{ai.authMessage ?? AI_AUTH_LINE}</span>;
 }
 
 /** The "Set up AI" button, its progress line, and a failure with Retry. */

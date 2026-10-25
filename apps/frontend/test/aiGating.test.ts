@@ -52,6 +52,11 @@ describe('aiCapabilitiesOf', () => {
   it('the copy is the owner-approved wording', () => {
     expect(AI_AUTH_LINE).toBe('Sign in to Claude Code or set ANTHROPIC_API_KEY');
   });
+
+  it("the auth line prints the server's own sentence when it sent one (e.g. Codex not available yet)", () => {
+    const src = readFileSync(new URL('../src/components/AiSetup.tsx', import.meta.url), 'utf8');
+    expect(src).toMatch(/ai\.authMessage \?\? AI_AUTH_LINE/);
+  });
 });
 
 describe('formatUsd (local agent runs show money, never credits)', () => {
