@@ -7,7 +7,7 @@
 // false and its message stays CODEX_NOT_AVAILABLE_MESSAGE until the runners land.
 import type { AiUsageReading } from '@pierre-review/shared';
 import { config } from '../../config.js';
-import { resolveCodexCredential } from '../credentials.js';
+import { codexCredentialRunnable, resolveCodexCredential } from '../credentials.js';
 import type { ProviderUsageSource } from '../provider.js';
 import { codexBinaryPath, getCodexRuntimeStatus, type AiRuntimeState } from '../runtime.js';
 import {
@@ -32,6 +32,12 @@ export const NO_CODEX_AUTH_MESSAGE = 'Sign in to Codex with ChatGPT: limn ai log
 export const CODEX_API_KEY_NOT_AVAILABLE_MESSAGE =
   'Codex with an OpenAI API key is not available yet — sign in with ChatGPT';
 
+/**
+ * auth.json is in Limn's home but no `account/read` has said what KIND of sign-in it is (and the file
+ * does not say). FAIL CLOSED: nothing runs on it (ai/credentials.ts `codexCredentialRunnable`).
+ */
+export const CODEX_SIGN_IN_UNCHECKED_MESSAGE = 'Limn could not check the Codex sign-in yet — try again in a moment';
+
 export interface CodexDetail {
   /** The Codex program is there (the download, or LIMN_CODEX_PATH). */
   installed: boolean;
@@ -43,6 +49,9 @@ export interface CodexDetail {
   plan: string | null;
   /** The credential rung a run would use. */
   route: 'login' | 'api_key' | 'none';
+  /** A run may start: installed, and a sign-in KNOWN to be ChatGPT (never the refused key route,
+   *  never a sign-in whose kind is not known yet). */
+  runnable: boolean;
   /** One sentence when Codex could not run for want of the install or a credential; else null. */
   message: string | null;
 }
@@ -50,15 +59,27 @@ export interface CodexDetail {
 function detailFrom(signed: { signedIn: boolean; plan: string | null }): CodexDetail {
   const rt = getCodexRuntimeStatus();
   const installed = rt.runtime === 'ready';
-  const route = resolveCodexCredential().route;
+  const credential = resolveCodexCredential();
+  const route = credential.route;
   const message = !installed
     ? (rt.runtimeMessage ?? CODEX_NOT_INSTALLED_MESSAGE)
     : route === 'none'
       ? NO_CODEX_AUTH_MESSAGE
       : route === 'api_key'
         ? CODEX_API_KEY_NOT_AVAILABLE_MESSAGE
-        : null;
-  return { installed, runtime: rt.runtime, runtimeMessage: rt.runtimeMessage, signedIn: signed.signedIn, plan: signed.plan, route, message };
+        : codexCredentialRunnable(credential)
+          ? null
+          : CODEX_SIGN_IN_UNCHECKED_MESSAGE;
+  return {
+    installed,
+    runtime: rt.runtime,
+    runtimeMessage: rt.runtimeMessage,
+    signedIn: signed.signedIn,
+    plan: signed.plan,
+    route,
+    runnable: installed && codexCredentialRunnable(credential),
+    message,
+  };
 }
 
 /**

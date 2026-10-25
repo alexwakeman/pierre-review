@@ -112,10 +112,17 @@ describe('the probe', () => {
     const log = calls();
     const spawns = log.filter((c) => Array.isArray(c.argv));
     expect(spawns).toHaveLength(1);
-    // The lockdown rides on the app-server's argv too (a second layer over Limn's config.toml).
-    const { lockedConfig } = await import('./config.js');
-    expect(spawns[0]).toMatchObject({ argv: ['app-server', '--strict-config', ...lockedConfig()], codexHome: codexHome(), apiKey: false });
+    // The lockdown rides on the app-server's argv too (a second layer over Limn's config.toml), then
+    // the STUB model catalog, so the app-server never refreshes the model list online.
+    const { lockedConfig, APP_SERVER_MODEL_CATALOG, APP_SERVER_MODEL_CATALOG_FILE } = await import('./config.js');
+    const catalog = join(codexHome(), APP_SERVER_MODEL_CATALOG_FILE);
+    expect(spawns[0]).toMatchObject({
+      argv: ['app-server', '--strict-config', ...lockedConfig(), '-c', `model_catalog_json=${JSON.stringify(catalog)}`],
+      codexHome: codexHome(),
+      apiKey: false,
+    });
     expect(spawns[0]!.argv).toContain('features.remote_plugin=false');
+    expect(JSON.parse(readFileSync(catalog, 'utf8'))).toEqual(APP_SERVER_MODEL_CATALOG);
     expect(log.find((c) => c.method === 'account/read')?.params).toEqual({ refreshToken: true });
     // ⚠ Never the reader's own ~/.codex.
     expect(codexHome()).toBe(join(root, 'data', 'codex'));
@@ -206,6 +213,48 @@ describe('the cache', () => {
     expect(await AS.codexAccount()).toEqual({ signedIn: true, plan: 'plus' });
     expect(await AS.codexAccount()).toEqual({ signedIn: true, plan: 'plus' });
     expect(n).toBe(1);
+  });
+
+  it('confirmCodexAccount() (before a run): waits for one read; a failing probe is forced again at most every 15 s', async () => {
+    let n = 0;
+    let fail = true;
+    AS._setCodexProbeForTest(async () => {
+      n++;
+      if (fail) throw new Error('offline');
+      return result(1, 1);
+    });
+    const T = 50_000_000;
+    await AS.confirmCodexAccount(T);
+    expect(n).toBe(1);
+    expect(AS.codexSignedInCached()).toBeNull(); // still unknown: the run refuses
+    await AS.confirmCodexAccount(T + 5_000); // inside 15 s: no new process
+    expect(n).toBe(1);
+    fail = false;
+    await AS.confirmCodexAccount(T + AS.CODEX_CONFIRM_RETRY_MS);
+    expect(n).toBe(2);
+    expect(AS.codexSignedInCached()?.type).toBe('chatgpt');
+    await AS.confirmCodexAccount(T + 60_000); // known now: nothing waits, nothing starts
+    expect(n).toBe(2);
+  });
+
+  it('FEWER PROCESSES: a due probe reads on an app-server that is already up (a drain’s), then is not due again', async () => {
+    AS._setCodexProbeForTest(null); // the REAL probe path, over the fake program
+    const T = 70_000_000;
+    const server = await AS.CodexAppServer.start(opts());
+    try {
+      const p = AS.shareCodexProbe(server, { nowMs: T });
+      expect(p).not.toBeNull();
+      await p;
+      // Shared: not due again for the interval, so neither the kick nor a second share starts anything.
+      expect(AS.shareCodexProbe(server, { nowMs: T + 1_000 })).toBeNull();
+      expect(AS.kickCodexProbe({ nowMs: T + 1_000 })).toBeNull();
+    } finally {
+      server.close();
+      await server.exited;
+    }
+    expect(AS.codexSignedInCached()).toEqual({ signedIn: true, type: 'chatgpt', plan: 'plus' });
+    expect(calls().filter((c) => Array.isArray(c.argv))).toHaveLength(1); // ONE process for both
+    expect(calls().filter((c) => c.method === 'account/read')).toHaveLength(1);
   });
 });
 

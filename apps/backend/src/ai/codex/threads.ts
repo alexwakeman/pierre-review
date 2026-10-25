@@ -12,20 +12,38 @@
 //     of them: `thread/delete` (its `threads` row, its history rows and its rollout file — measured on
 //     0.164), then the rollout file again, then the thread's `logs` rows (`thread/delete` leaves those;
 //     Limn deletes them by `thread_id` with better-sqlite3 under a short busy timeout).
-//   • A `thread/delete` that fails keeps its id (and its rollout file, which the retry needs) pending
-//     for the NEXT drain — the next settled run or the next sweep; after MAX_DELETE_ATTEMPTS the file
-//     and the log rows go anyway and the row is left to the day-old sweep.
+//   • ⚠ THE ROLLOUT FILE GOES IN THAT DRAIN WHATEVER `thread/delete` ANSWERS — it is the whole prompt
+//     and every diff. Only the ID stays pending, for the ROW retry: measured on 0.164, `thread/delete`
+//     does NOT need the file (with the rollout gone it still deleted the `threads` row and the history
+//     rows, answering `{}`), and a thread already gone answers "no rollout found for thread id …",
+//     which counts as DONE — so a delete that timed out but went through is fine.
+//   • While ids are pending, a short unref'd timer drains again after 1, then 5, then 15 minutes
+//     (DELETE_RETRY_DELAYS_MS); after MAX_DELETE_ATTEMPTS the id is dropped and the row is left to the
+//     day-old sweep. Pending ids live in memory only: after a restart the boot sweep finds the rows.
 //   • `armCodexThreadSweeps(home)` — the sweep now and then every SWEEP_INTERVAL_MS (a quarter of a
 //     day) while Limn runs: every thread last updated over a day ago (a run cut off by a crash or a
 //     killed Limn) through `thread/list` + `thread/delete`, every rollout file and `logs` row over a day.
+//     Armed at BOOT when Limn's Codex home exists (`armCodexThreadSweepsAtBoot`), and before a run.
+//   • FEWER APP-SERVERS: a drain whose app-server is up anyway also takes the account probe's reads when
+//     one is due (app-server.ts `shareCodexProbe`), so the probe does not start a second process.
 //   • Erasure removes the sqlite FILES themselves (rollouts.ts `eraseCodexHistory`).
 //
 // Rows are deleted through Codex's own API wherever one exists, never by writing Codex's tables
 // directly — except `logs`, which no API reaches. Everything here is best-effort and never throws: a
 // cleanup failure must not fail the run it follows.
-import { readdirSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { limnAppServerOptions, withCodexAppServer, type AppServerSpawnOptions, type CodexAppServer } from './app-server.js';
+import { config } from '../../config.js';
+import { codexBinaryPath } from '../runtime.js';
+import {
+  APP_SERVER_PROBE_TIMEOUT_MS,
+  limnAppServerOptions,
+  shareCodexProbe,
+  withCodexAppServer,
+  type AppServerSpawnOptions,
+  type CodexAppServer,
+} from './app-server.js';
+import { codexHome } from './home.js';
 import { deleteThreadRollouts, ROLLOUT_MAX_AGE_MS, sweepOldRollouts } from './rollouts.js';
 
 /** A thread id is a UUID; anything else is never sent anywhere. */
@@ -40,8 +58,12 @@ const SWEEP_DRAIN_TIMEOUT_MS = 60_000;
 const LOGS_DB = /^logs_\d+\.sqlite$/;
 /** At most this many pages of `thread/list` per sweep (a page is 100). */
 const MAX_SWEEP_PAGES = 20;
-/** Attempts at `thread/delete` before an id is left to the day-old sweep. */
-export const MAX_DELETE_ATTEMPTS = 3;
+/** After a failed `thread/delete`, drain again after these delays (1, then 5, then 15 minutes). */
+export const DELETE_RETRY_DELAYS_MS: readonly number[] = [60_000, 5 * 60_000, 15 * 60_000];
+/** Attempts at `thread/delete` before an id is left to the day-old sweep: the first + one per delay. */
+export const MAX_DELETE_ATTEMPTS = DELETE_RETRY_DELAYS_MS.length + 1;
+/** Codex 0.164's answer for a thread that is not there (no row and no rollout): already gone = done. */
+const ALREADY_GONE = /no rollout found/i;
 /** The periodic sweep's interval: a quarter of the age it removes. */
 export const SWEEP_INTERVAL_MS = Math.floor(ROLLOUT_MAX_AGE_MS / 4);
 
@@ -135,16 +157,20 @@ interface HomeQueue {
   again: boolean;
   /** Threads the last sweep deleted (the tests). */
   lastSweepDeleted: number;
+  /** The armed retry drain while ids are pending (unref'd). */
+  retry: NodeJS.Timeout | null;
 }
 
 type SpawnResolver = () => AppServerSpawnOptions | null;
 let resolveSpawn: SpawnResolver = () => limnAppServerOptions();
+/** A drain takes the account probe's reads on its own app-server when one is due (off in the tests). */
+let shareProbe = true;
 let now: () => number = Date.now;
 const queues = new Map<string, HomeQueue>();
 
 function queueFor(home: string): HomeQueue {
   let q = queues.get(home);
-  if (!q) queues.set(home, (q = { pending: new Map(), sweep: false, running: null, again: false, lastSweepDeleted: 0 }));
+  if (!q) queues.set(home, (q = { pending: new Map(), sweep: false, running: null, again: false, lastSweepDeleted: 0, retry: null }));
   return q;
 }
 
@@ -167,23 +193,27 @@ async function drainOnce(home: string, q: HomeQueue): Promise<void> {
             try {
               await s.request('thread/delete', { threadId });
               deleted.add(threadId);
-            } catch {
-              /* refused: retried on the next drain */
+            } catch (err) {
+              // Already gone (an earlier delete went through): done. Anything else: retried.
+              if (ALREADY_GONE.test((err as Error).message)) deleted.add(threadId);
             }
           }
-          if (!sweep) return;
-          for (const threadId of await oldThreads(s, cutoffMs)) {
-            if (deleted.has(threadId)) continue;
-            try {
-              await s.request('thread/delete', { threadId });
-              swept++;
-            } catch {
-              /* the next sweep tries again */
+          if (sweep) {
+            for (const threadId of await oldThreads(s, cutoffMs)) {
+              if (deleted.has(threadId)) continue;
+              try {
+                await s.request('thread/delete', { threadId });
+                swept++;
+              } catch {
+                /* the next sweep tries again */
+              }
             }
           }
+          // The process is up anyway: a DUE account probe reads on it instead of starting another.
+          if (shareProbe) await shareCodexProbe(s);
         },
         spawnOpts,
-        sweep ? SWEEP_DRAIN_TIMEOUT_MS : THREAD_CLEANUP_TIMEOUT_MS,
+        (sweep ? SWEEP_DRAIN_TIMEOUT_MS : THREAD_CLEANUP_TIMEOUT_MS) + (shareProbe ? APP_SERVER_PROBE_TIMEOUT_MS : 0),
       );
     } catch {
       /* the app-server could not start, or timed out: the undeleted ids stay pending */
@@ -191,13 +221,12 @@ async function drainOnce(home: string, q: HomeQueue): Promise<void> {
   }
   for (const threadId of ids) {
     const attempts = (q.pending.get(threadId) ?? 0) + 1;
+    // ⚠ The rollout file goes EVERY time, whatever `thread/delete` answered (the row retry needs only
+    // the id — see the header).
+    deleteThreadRollouts(home, threadId);
     // No Codex program (spawnOpts null) ⇒ nothing will ever delete the row: no retry.
-    if (deleted.has(threadId) || !spawnOpts || attempts >= MAX_DELETE_ATTEMPTS) {
-      q.pending.delete(threadId);
-      deleteThreadRollouts(home, threadId);
-    } else {
-      q.pending.set(threadId, attempts); // its rollout stays for the retry's `thread/delete`
-    }
+    if (deleted.has(threadId) || !spawnOpts || attempts >= MAX_DELETE_ATTEMPTS) q.pending.delete(threadId);
+    else q.pending.set(threadId, attempts);
     // The log rows go every time (`thread/delete` never reaches them).
     await purgeCodexLogs(home, { threadId });
   }
@@ -206,6 +235,26 @@ async function drainOnce(home: string, q: HomeQueue): Promise<void> {
     sweepOldRollouts(home, ROLLOUT_MAX_AGE_MS, nowMs);
     await purgeCodexLogs(home, { olderThanMs: cutoffMs });
   }
+}
+
+/**
+ * While ids are pending, drain again after a short delay (1, then 5, then 15 minutes — by the most
+ * attempts any pending id has had). Unref'd: it never keeps Limn alive. Cleared when nothing is pending.
+ */
+function armRetry(home: string, q: HomeQueue): void {
+  if (q.retry) {
+    clearTimeout(q.retry);
+    q.retry = null;
+  }
+  if (q.pending.size === 0) return;
+  const most = Math.max(...q.pending.values());
+  const delay = DELETE_RETRY_DELAYS_MS[Math.min(Math.max(most, 1), DELETE_RETRY_DELAYS_MS.length) - 1]!;
+  const t = setTimeout(() => {
+    q.retry = null;
+    void kick(home);
+  }, delay);
+  t.unref?.();
+  q.retry = t;
 }
 
 /** Start a drain, or mark one more as needed. Never rejects. */
@@ -229,6 +278,7 @@ function kick(home: string): Promise<void> {
       } while (q.again);
     } finally {
       q.running = null;
+      armRetry(home, q);
     }
   })();
   return q.running;
@@ -286,16 +336,36 @@ export function armCodexThreadSweeps(home: string): void {
   tick();
 }
 
+/**
+ * AT BOOT: arm the sweep when Limn's Codex home EXISTS (and Codex is installed, and AI is on) — so a
+ * row or rollout a previous process left behind (a crash, a kill, a pending retry lost with it) is
+ * swept without waiting for the next Codex run. Nothing is created: no home, no sweep.
+ */
+export function armCodexThreadSweepsAtBoot(env: NodeJS.ProcessEnv = process.env): boolean {
+  if (!config.aiEnabled) return false;
+  const home = codexHome(env);
+  if (!existsSync(home) || !codexBinaryPath()) return false;
+  armCodexThreadSweeps(home);
+  return true;
+}
+
 /** Test hooks: the app-server and the clock; `null` restores the real ones and clears every queue. */
-export function _setCodexCleanupForTest(opts: { spawn?: SpawnResolver; now?: () => number } | null): void {
+export function _setCodexCleanupForTest(opts: { spawn?: SpawnResolver; now?: () => number; shareProbe?: boolean } | null): void {
   if (opts === null) {
     resolveSpawn = () => limnAppServerOptions();
     now = Date.now;
+    shareProbe = true;
     for (const t of armed.values()) if (t) clearTimeout(t);
     armed.clear();
+    for (const q of queues.values()) if (q.retry) clearTimeout(q.retry);
     queues.clear();
     return;
   }
-  if (opts.spawn) resolveSpawn = opts.spawn;
+  // A test's own app-server is not Limn's: it shares the probe only when asked to.
+  if (opts.spawn) {
+    resolveSpawn = opts.spawn;
+    shareProbe = false;
+  }
   if (opts.now) now = opts.now;
+  if (opts.shareProbe !== undefined) shareProbe = opts.shareProbe;
 }

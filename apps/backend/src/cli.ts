@@ -308,12 +308,15 @@ installed codex program.
       const d = await detectCodex();
       const plan = d.plan ? ` (${d.plan})` : '';
       console.log(
-        d.route === 'login'
+        d.runnable
           ? `Codex is set up and signed in${plan}.`
           : d.route === 'api_key'
             ? // The API-key route is REFUSED until it can be priced: say so, never "it works".
               `Codex is set up. ${CODEX_API_KEY_NOT_AVAILABLE_MESSAGE}: limn ai login codex`
-            : 'Codex is set up but not signed in. Run: limn ai login codex',
+            : d.route === 'login'
+              ? // A sign-in no `account/read` has confirmed: never "signed in" on a guess.
+                `Codex is set up. ${d.message ?? 'The Codex sign-in could not be checked.'}`
+              : 'Codex is set up but not signed in. Run: limn ai login codex',
       );
     } else if (c.runtimeMessage) {
       console.log(`Codex: ${c.runtimeMessage}`);

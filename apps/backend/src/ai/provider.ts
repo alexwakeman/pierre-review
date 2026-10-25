@@ -31,7 +31,7 @@ import type { AiUsageReading } from '@pierre-review/shared';
 import type { CodexProgress, TokenUsage } from './codex/events.js';
 import { claudeProvider } from './providers/claude.js';
 import { codexProvider } from './providers/codex.js';
-import { resolveAiCredential, resolveCodexCredential } from './credentials.js';
+import { codexCredentialRunnable, resolveAiCredential, resolveCodexCredential } from './credentials.js';
 import { aiProviderSetting, codexRunnable } from './provider-setting.js';
 
 export type AgentProviderId = 'claude' | 'codex';
@@ -293,14 +293,14 @@ export function getActiveProvider(env: NodeJS.ProcessEnv = process.env): AgentPr
 }
 
 /**
- * What the auto rule reads. ⚠ Codex is ready ONLY on a ChatGPT sign-in (`route === 'login'`): the
- * OpenAI API-key route is REFUSED until it can be priced, so a key alone must never make auto pick
- * Codex (where every run would then fail on the refusal).
+ * What the auto rule reads. ⚠ Codex is ready ONLY on a sign-in KNOWN to be ChatGPT
+ * (`codexCredentialRunnable`): the OpenAI API-key route is REFUSED until it can be priced, so a key
+ * alone — or a sign-in whose kind no probe has confirmed — must never make auto pick Codex.
  */
 export function autoReadiness(env: NodeJS.ProcessEnv = process.env): { claudeReady: boolean; codexReady: boolean; codexRunnable: boolean } {
   return {
     claudeReady: resolveAiCredential(env).route !== 'none',
-    codexReady: resolveCodexCredential(env).route === 'login',
+    codexReady: codexCredentialRunnable(resolveCodexCredential(env)),
     codexRunnable: CODEX_RUNNABLE,
   };
 }

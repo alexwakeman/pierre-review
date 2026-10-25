@@ -130,25 +130,42 @@ export function agentAuthOptions(): { env: Record<string, string | undefined> } 
 // THE SAME TWO RUNGS, for Codex:
 //   1. THE CODEX SIGN-IN IN LIMN'S OWN HOME (`~/.limn/codex`, `limn ai login codex`) — a ChatGPT plan
 //      pays, measured by the token-weighted share of its windows (ai/budget.ts). Read from the cached
-//      `account/read` (ai/codex/app-server.ts); before the first read, from `auth.json` being there
-//      (a heuristic like Claude's disk check — the background probe corrects it within seconds).
+//      `account/read` (ai/codex/app-server.ts); before the first read, from auth.json's NON-SECRET
+//      `auth_mode` (and whether its API-key field is filled in — the value is never read out).
 //   2. OPENAI_API_KEY from the environment, handed to the run as CODEX_API_KEY. NEVER STORED: Limn does
 //      not run `codex login --with-api-key` (that would write the key into its home).
-// LIMN_AI_USE_API_KEY=true flips the order, as for Claude. A key the reader stored in Limn's home by
-// hand (`CODEX_HOME=~/.limn/codex codex login --with-api-key`) counts as the API-key rung.
+// A key the reader stored in Limn's home by hand (`CODEX_HOME=~/.limn/codex codex login --with-api-key`)
+// counts as the API-key rung.
+//
+// ⚠ FAIL CLOSED. Only a sign-in KNOWN to be ChatGPT may run (`codexCredentialRunnable`). The API-key
+// route is refused until it can be priced (ai/codex/detect.ts), so a stored key taken for "a sign-in"
+// would run and be recorded at US$ 0 under no cap. A sign-in whose kind is not known yet (no probe has
+// answered and auth.json does not say) is `method: 'unconfirmed'`: never runnable — the run path waits
+// for one fresh `account/read` first (ai/providers/codex.ts `runnableCredential`).
+//
+// ⚠ LIMN_AI_USE_API_KEY=true (shared with Claude) does NOT push a ChatGPT sign-in onto the key route
+// while that route is refused: the sign-in is consulted first. Without one, the flag still puts
+// OPENAI_API_KEY ahead of a key stored in the home.
 //
 // ⚠ The reader's own `~/.codex` is never consulted: its sign-in is not Limn's.
 
 export type CodexCredential =
   | { route: 'login'; method: 'chatgpt' }
+  /** auth.json is there but its kind is not known yet: NEVER runnable (see the header). */
+  | { route: 'login'; method: 'unconfirmed' }
   | { route: 'api_key'; method: 'api_key'; apiKey: string }
   | { route: 'api_key'; method: 'stored_api_key' }
   | { route: 'none' };
 
-/** What the sign-in check knows: the cached `account/read`, else whether auth.json is there. */
+/** The ONE runnable Codex credential: a sign-in KNOWN to be ChatGPT. Everything else is refused. */
+export function codexCredentialRunnable(c: CodexCredential): c is { route: 'login'; method: 'chatgpt' } {
+  return c.route === 'login' && c.method === 'chatgpt';
+}
+
+/** What the sign-in check knows: the cached `account/read`, else what auth.json says. */
 export interface CodexLoginKnown {
   signedIn: boolean;
-  /** 'chatgpt' | 'apiKey' | another kind | null when not read yet. */
+  /** 'chatgpt' | 'apiKey' | another kind | null when not known (not read yet, or not readable). */
   type: string | null;
 }
 
@@ -157,13 +174,38 @@ function codexEnvApiKey(env: NodeJS.ProcessEnv): string | undefined {
   return k ? k : undefined;
 }
 
-/** The sign-in in Limn's Codex home: the cached account read, else the disk heuristic. Sync. */
+/**
+ * The KIND of sign-in an auth.json in Limn's home holds, from its NON-SECRET fields only: `auth_mode`
+ * (0.164 writes `chatgpt` or `apikey`) and whether `OPENAI_API_KEY` is filled in (the value is never
+ * read out, logged or returned). Fail closed — anything not clearly one kind is null ("not known"):
+ *   • `auth_mode: "apikey"`, or no `auth_mode` and a filled-in key → 'apiKey' (Codex's own default);
+ *   • `auth_mode: "chatgpt"` with NO key filled in → 'chatgpt';
+ *   • unreadable, unparseable, another mode, or chatgpt WITH a key → null.
+ */
+export function codexAuthFileKind(path: string): string | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(path, 'utf8'));
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+  const rec = parsed as { auth_mode?: unknown; OPENAI_API_KEY?: unknown };
+  const hasKey = typeof rec.OPENAI_API_KEY === 'string' && rec.OPENAI_API_KEY.trim() !== '';
+  if (rec.auth_mode === undefined || rec.auth_mode === null) return hasKey ? 'apiKey' : null;
+  if (typeof rec.auth_mode !== 'string') return null;
+  const mode = rec.auth_mode.trim().toLowerCase();
+  if (mode === 'apikey') return 'apiKey';
+  if (mode === 'chatgpt') return hasKey ? null : 'chatgpt';
+  return null;
+}
+
+/** The sign-in in Limn's Codex home: the cached account read, else auth.json's kind. Sync. */
 export function codexLoginKnown(env: NodeJS.ProcessEnv = process.env): CodexLoginKnown {
   const cached = codexSignedInCached();
   if (cached) return { signedIn: cached.signedIn, type: cached.type };
-  return existsSync(join(codexHome(env), 'auth.json'))
-    ? { signedIn: true, type: null }
-    : { signedIn: false, type: null };
+  const path = join(codexHome(env), 'auth.json');
+  return existsSync(path) ? { signedIn: true, type: codexAuthFileKind(path) } : { signedIn: false, type: null };
 }
 
 /** Which credential the next Codex run uses. Read at call time. */
@@ -172,10 +214,13 @@ export function resolveCodexCredential(
   login: (env: NodeJS.ProcessEnv) => CodexLoginKnown = codexLoginKnown,
 ): CodexCredential {
   const apiKey = codexEnvApiKey(env);
-  if (apiKey && prefersApiKey(env)) return { route: 'api_key', method: 'api_key', apiKey };
   const known = login(env);
+  // The sign-in FIRST, whatever LIMN_AI_USE_API_KEY says: the key route is refused (see the header).
+  if (known.signedIn && known.type === 'chatgpt') return { route: 'login', method: 'chatgpt' };
+  if (known.signedIn && known.type === null) return { route: 'login', method: 'unconfirmed' };
+  if (apiKey && prefersApiKey(env)) return { route: 'api_key', method: 'api_key', apiKey };
   if (known.signedIn && known.type === 'apiKey') return { route: 'api_key', method: 'stored_api_key' };
-  if (known.signedIn) return { route: 'login', method: 'chatgpt' };
+  // Another kind of sign-in (neither ChatGPT nor a key) pays for nothing Limn can run on: not a rung.
   if (apiKey) return { route: 'api_key', method: 'api_key', apiKey };
   return { route: 'none' };
 }

@@ -44,6 +44,10 @@ const T = vi.hoisted(() => {
     trustWrites: [] as any[],
     /** 'record' and 'cleanup:<threadId>', in the order they happened. */
     order: [] as string[],
+    /** The cached `account/read` (null = none yet), and what one fresh probe would answer. */
+    cached: { value: null as null | { signedIn: boolean; type: string | null; plan: string | null } },
+    probeAnswer: { value: null as null | { signedIn: boolean; type: string | null; plan: string | null } },
+    confirms: { n: 0 },
   };
 });
 
@@ -82,8 +86,13 @@ vi.mock('../codex/workspace-mcp.js', () => ({
 vi.mock('../codex/app-server.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../codex/app-server.js')>()),
   codexAccount: async () => ({ signedIn: true, plan: 'plus' }),
-  // No cached `account/read`: the ladder falls back to auth.json being in Limn's home.
-  codexSignedInCached: () => null,
+  // No cached `account/read` unless a test sets one: the ladder reads auth.json's kind in Limn's home.
+  codexSignedInCached: () => T.cached.value,
+  // "Wait for one fresh probe" (before a run on a sign-in whose kind is not known): answers probeAnswer.
+  confirmCodexAccount: async () => {
+    T.confirms.n++;
+    if (T.probeAnswer.value) T.cached.value = T.probeAnswer.value;
+  },
 }));
 vi.mock('../../db/usage.js', () => ({
   recordAiUsage: async (row: unknown) => {
@@ -185,21 +194,31 @@ function cfg(argv: string[]): Map<string, string> {
 }
 
 const savedKey = process.env.OPENAI_API_KEY;
+const savedUseKey = process.env.LIMN_AI_USE_API_KEY;
+/** auth.json fixtures: NON-secret shapes only (a placeholder where Codex would keep a key). */
+const CHATGPT_AUTH = JSON.stringify({ auth_mode: 'chatgpt', OPENAI_API_KEY: null, tokens: { id_token: 'fixture', access_token: 'fixture', refresh_token: 'fixture' } });
+const STORED_KEY_AUTH = JSON.stringify({ auth_mode: 'apikey', OPENAI_API_KEY: 'sk-fixture-not-a-key' });
 beforeEach(() => {
   mkdirSync(T.home, { recursive: true });
-  writeFileSync(join(T.home, 'auth.json'), '{}'); // a Codex sign-in was made (contents never read)
+  // A ChatGPT sign-in, as 0.164 writes it (the fixture holds no secret: only the non-secret fields).
+  writeFileSync(join(T.home, 'auth.json'), CHATGPT_AUTH);
   delete process.env.OPENAI_API_KEY;
   T.trusted.value = false;
   T.installed.value = true;
   T.recorded.length = 0;
   T.trustWrites.length = 0;
   T.order.length = 0;
+  T.cached.value = null;
+  T.probeAnswer.value = null;
+  T.confirms.n = 0;
   C._resetCodexTrustCacheForTest();
 });
 afterEach(() => {
   if (existsSync(T.log)) unlinkSync(T.log);
   if (savedKey === undefined) delete process.env.OPENAI_API_KEY;
   else process.env.OPENAI_API_KEY = savedKey;
+  if (savedUseKey === undefined) delete process.env.LIMN_AI_USE_API_KEY;
+  else process.env.LIMN_AI_USE_API_KEY = savedUseKey;
 });
 afterAll(() => rmSync(T.root, { recursive: true, force: true }));
 
@@ -288,6 +307,63 @@ describe('complete()', () => {
     } finally {
       delete process.env.LIMN_CODEX_PATH;
     }
+  });
+
+  // ---- FAIL CLOSED before the first account/read (the stored key must never run at a recorded US$ 0) ----
+
+  it('a key STORED in Limn’s home, before any probe answered: the refused key route — nothing runs, nothing is recorded', async () => {
+    writeFileSync(join(T.home, 'auth.json'), STORED_KEY_AUTH);
+    expect(C.codexProvider.credentialRoute()).toBe('api_key');
+    await expect(C.codexProvider.complete({ prompt: 'COMPLETE', usageRecord: { accountId: 3, seam: 'summary', feature: 'x' } as any })).rejects.toThrow(
+      'Codex with an OpenAI API key is not available yet — sign in with ChatGPT',
+    );
+    await expect(C.runAgentUnchecked(spec('GOOD'))).rejects.toThrow('Codex with an OpenAI API key is not available yet');
+    expect(calls()).toEqual([]);
+    expect(T.recorded).toEqual([]);
+    expect(P.autoReadiness().codexReady).toBe(false);
+  });
+
+  it('an auth.json whose kind is NOT known: the run waits for ONE fresh probe, and refuses when it still is not known', async () => {
+    writeFileSync(join(T.home, 'auth.json'), '{ not json');
+    await expect(C.codexProvider.complete({ prompt: 'COMPLETE' })).rejects.toThrow('Limn could not check the Codex sign-in yet');
+    expect(T.confirms.n).toBe(1);
+    expect(calls()).toEqual([]);
+    expect(T.recorded).toEqual([]);
+    // Not runnable anywhere: auto never picks it, and detect() says the sentence, never "available".
+    expect(P.autoReadiness().codexReady).toBe(false);
+    process.env.LIMN_CODEX_PATH = T.bin;
+    try {
+      const d = await C.codexProvider.detect();
+      expect(d).toMatchObject({ available: false, message: 'Limn could not check the Codex sign-in yet — try again in a moment' });
+    } finally {
+      delete process.env.LIMN_CODEX_PATH;
+    }
+  });
+
+  it('…and runs once that probe says ChatGPT; refuses when it says a stored key', async () => {
+    T.trusted.value = true;
+    writeFileSync(join(T.home, 'auth.json'), '{}'); // no auth_mode, no key: not known
+    T.probeAnswer.value = { signedIn: true, type: 'apiKey', plan: null };
+    await expect(C.codexProvider.complete({ prompt: 'COMPLETE' })).rejects.toThrow('Codex with an OpenAI API key is not available yet');
+    expect(calls()).toEqual([]);
+    T.cached.value = null;
+    T.probeAnswer.value = { signedIn: true, type: 'chatgpt', plan: 'plus' };
+    expect((await C.codexProvider.complete({ prompt: 'COMPLETE' })).text).toBe('hello there');
+    expect(T.confirms.n).toBe(2);
+  });
+
+  it('LIMN_AI_USE_API_KEY=true (shared with Claude) never pushes a ChatGPT sign-in onto the refused key route', async () => {
+    T.trusted.value = true;
+    process.env.LIMN_AI_USE_API_KEY = 'true';
+    process.env.OPENAI_API_KEY = 'sk-test';
+    expect(C.codexProvider.credentialRoute()).toBe('login');
+    expect(P.autoReadiness().codexReady).toBe(true);
+    const out = await C.codexProvider.complete({ prompt: 'COMPLETE' });
+    expect(out.costUsd).toBe(0);
+    const [call] = calls();
+    // The sign-in pays: no key reaches the child.
+    expect(call.envKeys).not.toContain('OPENAI_API_KEY');
+    expect(call.envKeys).not.toContain('CODEX_API_KEY');
   });
 
   it('a missing Codex install is an AiRuntimeMissingError with Codex’s own sentence, and starts nothing', async () => {

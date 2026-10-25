@@ -40,6 +40,8 @@
 // IS Limn's own, and the hook's trust entry is ignored under that flag), and
 // `--dangerously-bypass-hook-trust` (the trust entry replaces it). The prompt is never an argv
 // element: it goes in on stdin (`-`), so a large diff cannot hit ARG_MAX.
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { CodexHookConfig, CodexMcpConfig } from './types.js';
 
 /** The part of a run the argv depends on (an `AgentRunSpec` satisfies it). */
@@ -104,17 +106,23 @@ const c = (key: string, value: TomlValue): string[] => ['-c', `${key}=${tomlValu
  *   • home.ts writes it into Limn's own `config.toml`, so EVERY process started in that home — the
  *     app-server (thread cleanup, the sweep, the readings, a sign-in), the hook trust probe, a run —
  *     inherits it. Measured on 0.164: an app-server WITHOUT it fetched the remote plugin catalog
- *     (`ps/plugins/list`) and held five connections to chatgpt.com; with it, none.
+ *     (`ps/plugins/list`) and synced remote plugins; with it, no plugin catalog fetch and no plugin
+ *     sync. ⚠ NOT "no traffic": it does not stop the ONLINE MODEL REFRESH (an authenticated GET of
+ *     chatgpt.com's Codex model list) — that takes `model_catalog_json`, which only an APP-SERVER may
+ *     carry (`appServerConfig` below: a run needs the real catalog) — nor the remote-control loop.
  *   • `lockedConfig()` passes the SAME pairs with `-c` on every `codex exec` and app-server start — a
  *     second layer, so a hand-edited config.toml cannot unlock a run.
- * Each key is checked by the 0.164 CLI under --strict-config (live.test.ts 2b).
+ * Each key is checked by the 0.164 CLI under --strict-config (live.test.ts 2b; the app-server's
+ * `model_catalog_json` by 2d).
  *
  * ⚠ REMOTE CONTROL CANNOT BE SWITCHED OFF BY CONFIG in 0.164: `features.remote_control` is a REMOVED
  * flag (a no-op), `allow_remote_control` is a requirements.toml key read only from /etc/codex or a
  * managed profile (never CODEX_HOME), and `remoteControl/disable` needs experimentalApi and changes no
- * persisted state. Every app-server therefore logs "remote control websocket loop started" — but the
- * status stays `disabled` and no connection is made (no enrollment, no socket held: measured with
- * lsof). Limn keeps app-server starts few instead (threads.ts batches every cleanup into one).
+ * persisted state. Every app-server therefore starts the IDLE remote-control loop ("remote control
+ * websocket loop started") — its status stays `disabled` and nothing enrols, but the loop runs for as
+ * long as the process does. Limn keeps app-server starts FEW instead: threads.ts batches every cleanup
+ * into one process, the account probe runs at most every 5 minutes, and a drain whose process is up
+ * anyway takes a due probe's reads on it (app-server.ts `shareCodexProbe`).
  */
 export const LOCKED_SETTINGS: ReadonlyArray<readonly [string, TomlValue]> = [
   ['approval_policy', 'never'],
@@ -142,6 +150,65 @@ export const LOCKED_SETTINGS: ReadonlyArray<readonly [string, TomlValue]> = [
 /** The locked keys every run (and every app-server) carries, in order, as `-c` pairs. */
 export function lockedConfig(): string[] {
   return LOCKED_SETTINGS.flatMap(([k, v]) => c(k, v));
+}
+
+// ---- the app-server's model catalog ---------------------------------------------------------------
+//
+// ⚠ NO ONLINE MODEL REFRESH FROM AN APP-SERVER. Measured on 0.164 (2026-10-25, Limn's own home, no
+// model run): an app-server started the way Limn starts one — `--strict-config` + the lockdown above —
+// still did an authenticated GET of chatgpt.com's Codex model list (`models_cache.json`'s `fetched_at`
+// moved from 19:10 to 19:41 on one `account/read`). `features.remote_models` is a REMOVED flag (a
+// no-op). The key that stops it is `model_catalog_json`: with a catalog given, Codex never refreshes
+// online (the same start left `fetched_at` untouched). It must name at least ONE model with
+// instructions, so the app-server gets this STUB — a hidden, API-less model no app-server call uses
+// (account reads, thread deletes, the sweep, a sign-in and the hook trust probe never start a turn).
+//
+// ⚠ APP-SERVERS ONLY, NEVER `codex exec` AND NEVER config.toml: a run needs the REAL catalog (the
+// model's instructions, its tools, its reasoning levels), so a run still refreshes it online — that
+// fetch is the run's own, on a run the reader started. This key is therefore NOT in LOCKED_SETTINGS.
+
+/** The stub catalog's file, in Limn's own Codex home (written by `appServerConfig`). */
+export const APP_SERVER_MODEL_CATALOG_FILE = 'limn-app-server-models.json';
+
+/** The ONE model the stub catalog lists: hidden, not in the API, never run. */
+export const APP_SERVER_MODEL_CATALOG = {
+  models: [
+    {
+      slug: 'limn-app-server-no-model',
+      display_name: 'Limn app-server (no model)',
+      base_instructions: '',
+      supported_reasoning_levels: [],
+      shell_type: 'default',
+      visibility: 'hide',
+      supported_in_api: false,
+      priority: 0,
+      support_verbosity: false,
+      truncation_policy: { mode: 'tokens', limit: 10000 },
+      experimental_supported_tools: [],
+    },
+  ],
+} as const;
+
+/**
+ * The `-c` pairs EVERY app-server Limn starts carries: the lockdown, then `model_catalog_json` = the
+ * stub (written into `home` first when missing or different). Synchronous: the spawn options are.
+ */
+export function appServerConfig(home: string): string[] {
+  const file = join(home, APP_SERVER_MODEL_CATALOG_FILE);
+  const content = `${JSON.stringify(APP_SERVER_MODEL_CATALOG, null, 2)}\n`;
+  try {
+    if (!existsSync(file) || readFileSync(file, 'utf8') !== content) {
+      mkdirSync(home, { recursive: true, mode: 0o700 });
+      const tmp = `${file}.tmp-${process.pid}-${Date.now()}`;
+      writeFileSync(tmp, content, { mode: 0o600 });
+      renameSync(tmp, file);
+    }
+  } catch {
+    // Unwritable: start WITHOUT the key rather than name a file that is not there (Codex refuses to
+    // start on a missing catalog). The refresh then happens, as before this fix.
+    return lockedConfig();
+  }
+  return [...lockedConfig(), ...c('model_catalog_json', file)];
 }
 
 /** The sandbox keys: read-only, or workspace-write confined to `writeRoots`. */

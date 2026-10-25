@@ -3,9 +3,17 @@
 // reads AGENTS.md, or the user's skills, or writes to /tmp.
 //
 //   pnpm --filter @pierre-review/backend test ai/codex/config
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
+  APP_SERVER_MODEL_CATALOG,
+  APP_SERVER_MODEL_CATALOG_FILE,
+  appServerConfig,
   buildExecArgs,
+  LOCKED_SETTINGS,
+  lockedConfig,
   codexBaseEnv,
   codexChildEnv,
   hookConfig,
@@ -206,5 +214,40 @@ describe('resume, env and TOML', () => {
     expect(tomlString('tab\tq"\\')).toBe('"tab\\tq\\"\\\\"');
     expect(tomlValue({ 'a.b': [1, true, 's'] })).toBe('{"a.b" = [1, true, "s"]}');
     expect(() => tomlValue(Number.NaN)).toThrow();
+  });
+});
+
+describe('the app-server model catalog (no online model refresh)', () => {
+  it('every app-server gets the lockdown, then model_catalog_json = a STUB written into the home', () => {
+    const home = mkdtempSync(join(tmpdir(), 'limn-codex-catalog-'));
+    try {
+      const file = join(home, APP_SERVER_MODEL_CATALOG_FILE);
+      expect(appServerConfig(home)).toEqual([...lockedConfig(), '-c', `model_catalog_json=${JSON.stringify(file)}`]);
+      const written = JSON.parse(readFileSync(file, 'utf8'));
+      expect(written).toEqual(APP_SERVER_MODEL_CATALOG);
+      // Codex refuses an empty catalog; the one model is hidden, not in the API, with instructions.
+      expect(written.models).toHaveLength(1);
+      expect(written.models[0]).toMatchObject({ visibility: 'hide', supported_in_api: false, base_instructions: '' });
+      // A hand-edited file is put back.
+      writeFileSync(file, '{"models":[]}');
+      appServerConfig(home);
+      expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(APP_SERVER_MODEL_CATALOG);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+  it('an unwritable home starts WITHOUT the key (Codex refuses a catalog file that is not there)', () => {
+    const home = mkdtempSync(join(tmpdir(), 'limn-codex-catalog-ro-'));
+    chmodSync(home, 0o500);
+    try {
+      expect(appServerConfig(home)).toEqual(lockedConfig());
+    } finally {
+      chmodSync(home, 0o700);
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+  it('NEVER in LOCKED_SETTINGS (config.toml and every run): a run needs the real catalog', () => {
+    expect(LOCKED_SETTINGS.map(([k]) => k)).not.toContain('model_catalog_json');
+    expect(lockedConfig().some((a) => a.startsWith('model_catalog_json'))).toBe(false);
   });
 });

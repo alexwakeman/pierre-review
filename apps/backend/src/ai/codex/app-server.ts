@@ -20,7 +20,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import type { AiAccountTokenSpan, AiUsageReading } from '@pierre-review/shared';
 import { codexBinaryPath } from '../runtime.js';
-import { lockedConfig } from './config.js';
+import { appServerConfig } from './config.js';
 import { codexHome, codexProcessEnv } from './home.js';
 import {
   accountTokensInWindow,
@@ -232,8 +232,9 @@ export function limnAppServerOptions(env: NodeJS.ProcessEnv = process.env): AppS
   // `--strict-config`: an unknown key in Limn's config.toml stops the process with a named error
   // instead of being ignored (measured: `app-server` honours it; `login`/`debug`/`features` refuse
   // the flag, so the CLI's sign-in runs without it). The lockdown rides along with `-c` too, on top
-  // of the copy in Limn's config.toml (config.ts `LOCKED_SETTINGS`).
-  return { binary, env: codexProcessEnv(env), cwd: home, args: ['--strict-config', ...lockedConfig()] };
+  // of the copy in Limn's config.toml (config.ts `LOCKED_SETTINGS`), plus the app-server's stub model
+  // catalog, so no app-server refreshes the model list online (config.ts `appServerConfig`).
+  return { binary, env: codexProcessEnv(env), cwd: home, args: ['--strict-config', ...appServerConfig(home)] };
 }
 
 /** Run `fn` against a fresh app-server and close it, within `timeoutMs` overall. */
@@ -283,26 +284,29 @@ export async function probeCodexAccount(
   // refreshes its own token.
   { refreshToken = true }: { refreshToken?: boolean } = {},
 ): Promise<CodexProbeResult> {
-  return withCodexAppServer(async (s) => {
-    const account = parseCodexAccount(await s.request('account/read', { refreshToken }));
-    // Windows and token counts exist only for a ChatGPT sign-in; an API key has neither.
-    if (!account?.signedIn || account.type !== 'chatgpt') {
-      return { atMs: nowMs(), account, reading: null, lifetimeTokens: null, daily: null };
-    }
-    const [limits, usage] = await Promise.all([
-      s.request('account/rateLimits/read', null).catch(() => null),
-      s.request('account/usage/read', null).catch(() => null),
-    ]);
-    const at = nowMs();
-    const tokens = parseCodexTokenUsage(usage);
-    return {
-      atMs: at,
-      account,
-      reading: readingFromCodexRateLimits(limits, at),
-      lifetimeTokens: tokens?.lifetimeTokens ?? null,
-      daily: tokens?.daily ?? null,
-    };
-  }, opts);
+  return withCodexAppServer((s) => readCodexAccountOn(s, nowMs, refreshToken), opts);
+}
+
+/** The probe's three reads, on an app-server that is ALREADY running (its own, or a drain's). */
+async function readCodexAccountOn(s: CodexAppServer, nowMs: () => number, refreshToken: boolean): Promise<CodexProbeResult> {
+  const account = parseCodexAccount(await s.request('account/read', { refreshToken }));
+  // Windows and token counts exist only for a ChatGPT sign-in; an API key has neither.
+  if (!account?.signedIn || account.type !== 'chatgpt') {
+    return { atMs: nowMs(), account, reading: null, lifetimeTokens: null, daily: null };
+  }
+  const [limits, usage] = await Promise.all([
+    s.request('account/rateLimits/read', null).catch(() => null),
+    s.request('account/usage/read', null).catch(() => null),
+  ]);
+  const at = nowMs();
+  const tokens = parseCodexTokenUsage(usage);
+  return {
+    atMs: at,
+    account,
+    reading: readingFromCodexRateLimits(limits, at),
+    lifetimeTokens: tokens?.lifetimeTokens ?? null,
+    daily: tokens?.daily ?? null,
+  };
 }
 
 interface CodexCache {
@@ -376,6 +380,43 @@ export function kickCodexProbe(opts: { nowMs?: number; force?: boolean } = {}): 
     }
   })();
   return cache.inFlight;
+}
+
+/**
+ * FEWER APP-SERVERS: when a probe is DUE and an app-server is already running in Limn's home (the
+ * thread-cleanup drain's, ai/codex/threads.ts), take the probe's reads on THAT process instead of
+ * starting another. Same single-flight and the same interval as `kickCodexProbe`; null when no probe
+ * is due (or one is already running, or a test replaced the prober). Never rejects.
+ */
+export function shareCodexProbe(server: CodexAppServer, opts: { nowMs?: number } = {}): Promise<void> | null {
+  const nowMs = opts.nowMs ?? Date.now();
+  if (proberOverride || cache.inFlight || nowMs - cache.lastAttemptMs < CODEX_PROBE_MIN_INTERVAL_MS) return null;
+  cache.lastAttemptMs = nowMs;
+  cache.inFlight = (async () => {
+    try {
+      noteProbe(await readCodexAccountOn(server, Date.now, true));
+    } catch (err) {
+      cache.lastError = (err as Error).message;
+    } finally {
+      cache.inFlight = null;
+    }
+  })();
+  return cache.inFlight;
+}
+
+/** A run that finds no `account/read` yet forces a probe at most this often (no stampede of processes). */
+export const CODEX_CONFIRM_RETRY_MS = 15_000;
+
+/**
+ * Before a RUN, when no `account/read` has answered yet (boot, just after a sign-in or out, or every
+ * probe so far failed): wait for one — the one in flight, else a fresh one (forced, but at most every
+ * CODEX_CONFIRM_RETRY_MS). Never rejects; the caller re-reads the credential afterwards and refuses
+ * when it is still not known (ai/providers/codex.ts `runnableCredential`).
+ */
+export async function confirmCodexAccount(nowMs: number = Date.now()): Promise<void> {
+  if (cache.last) return;
+  const p = cache.inFlight ?? kickCodexProbe({ nowMs, force: nowMs - cache.lastAttemptMs >= CODEX_CONFIRM_RETRY_MS });
+  if (p) await p;
 }
 
 /** Forget the account (after a sign-in or sign-out) and probe again now. */

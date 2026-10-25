@@ -17,6 +17,8 @@
 //   2. The config.toml Limn writes passes the real CLI's `--strict-config`; a bogus key does not.
 //   2b. EVERY locked `-c` key (config.ts `lockedConfig`) is accepted by the real CLI's `--strict-config`,
 //      one at a time, and a bogus one is refused.
+//   2d. An app-server takes Limn's stub model catalog (`model_catalog_json`, config.ts `appServerConfig`)
+//      under --strict-config and starts.
 // Model runs (≤ 2 small gpt-6-luna runs at low effort, + at most one validation retry):
 //   3. `complete()` answers in the caller's schema — under the trusted guard with EMPTY roots.
 //   4. An UNCHECKED read-only agent run reads the fixture THROUGH the workspace MCP server, under the
@@ -30,7 +32,8 @@
 //      logs, and Codex's own `logs` since the runs began show NO remote plugin catalog fetch and no
 //      remote-control activity beyond the idle loop line 0.164 always writes (it cannot be switched
 //      off by config — config.ts `LOCKED_SETTINGS`); `cache/codex_apps_*` and the remote plugin
-//      staging folder were not written again.
+//      staging folder were not written again; and `models_cache.json`'s `fetched_at` did not move (no
+//      online model refresh from Limn's app-server).
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -183,6 +186,23 @@ describe.skipIf(!LIVE)('Codex, live (LIMN_CODEX_LIVE=1)', () => {
     expect((await acceptedByStrictConfig('features.limn_bogus_zz=false')).ok).toBe(false);
   }, 60_000);
 
+  it("2d. an app-server takes Limn's STUB model catalog (`model_catalog_json`) under --strict-config (model-less)", async () => {
+    const { appServerConfig } = await import('./config.js');
+    const { codexChildEnv } = await import('./config.js');
+    const AS = await import('./app-server.js');
+    const home = mkdtempSync(join(dir, 'catalog-home-'));
+    const args = ['--strict-config', ...appServerConfig(home)];
+    expect(args.some((a) => a.startsWith('model_catalog_json='))).toBe(true);
+    // It STARTS (an unknown key, or a catalog Codex cannot read, stops it before `initialize`).
+    const server = await AS.CodexAppServer.start({ binary: bin, env: codexChildEnv(home), cwd: home, args });
+    try {
+      expect(await server.request('account/read', { refreshToken: false })).toMatchObject({ account: null });
+    } finally {
+      server.close();
+      await server.exited;
+    }
+  }, 60_000);
+
 
   it('3. complete() answers in the caller’s schema (model run 1)', async (ctx) => {
     if (!signedIn) ctx.skip(); // Limn's own Codex home holds no live sign-in: limn ai login codex
@@ -315,6 +335,12 @@ describe.skipIf(!LIVE)('Codex, live (LIMN_CODEX_LIVE=1)', () => {
     const home = codexHome();
     const sinceSec = Math.floor(runsStartedAt / 1000) - 1;
     const statuses: unknown[] = [];
+    // The online MODEL REFRESH: Codex rewrites `fetched_at` in models_cache.json when it refreshes the
+    // list. Measured 2026-10-25: a bare app-server moved it on one account/read; with Limn's stub
+    // catalog it did not (config.ts `appServerConfig`).
+    const modelsCache = join(home, 'models_cache.json');
+    const fetchedAt = (): unknown => (existsSync(modelsCache) ? (JSON.parse(readFileSync(modelsCache, 'utf8')) as { fetched_at?: unknown }).fetched_at : null);
+    const fetchedBefore = fetchedAt();
     const server = await AS.CodexAppServer.start(AS.limnAppServerOptions()!);
     try {
       server.on('remoteControl/status/changed', (p) => statuses.push((p as { status?: unknown }).status));
@@ -326,6 +352,7 @@ describe.skipIf(!LIVE)('Codex, live (LIMN_CODEX_LIVE=1)', () => {
       await server.exited;
     }
     await new Promise((r) => setTimeout(r, 1_000));
+    expect(fetchedAt()).toEqual(fetchedBefore); // no online model refresh from Limn's app-server
     expect(statuses.length).toBeGreaterThan(0);
     expect(statuses.every((s) => s === 'disabled')).toBe(true);
     const logs = readdirSync(home).find((f) => /^logs_\d+\.sqlite$/.test(f));

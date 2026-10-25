@@ -5,8 +5,12 @@
 //   • a settled run's thread is QUEUED and deleted in the background through Codex's own
 //     `thread/delete`, its rollout file goes, and its `logs` rows go (nobody else's);
 //   • ids queued together share ONE app-server start (a batch per drain);
-//   • a refused `thread/delete` keeps its id — and its rollout file — for the NEXT drain, which retries
-//     it; after MAX_DELETE_ATTEMPTS the file goes anyway;
+//   • ⚠ the rollout file goes in the FIRST drain whatever `thread/delete` answers; a refused delete keeps
+//     only its ID, retried by the next drain or by the retry timer (1, 5, 15 minutes, unref'd); "no
+//     rollout found" (0.164's answer for a thread already gone) is DONE; after MAX_DELETE_ATTEMPTS the
+//     id is dropped;
+//   • a drain does not answer the account probe on a test's own app-server; at boot the sweep is armed
+//     only when Limn's Codex home exists;
 //   • with no app-server at all, the file and the logs still go and nothing is retried;
 //   • the sweep lists EVERY source kind (exec runs are not "interactive"), archived or not, deletes only
 //     threads last updated over a day ago, drops log rows older than a day, and shares a drain with
@@ -23,6 +27,8 @@ import {
   _setCodexCleanupForTest,
   armCodexThreadSweeps,
   drainCodexThreadCleanup,
+  armCodexThreadSweepsAtBoot,
+  DELETE_RETRY_DELAYS_MS,
   MAX_DELETE_ATTEMPTS,
   pendingCodexThreadIds,
   purgeCodexLogs,
@@ -41,6 +47,7 @@ let home = '';
 let log = '';
 let fake = '';
 let refuse = '';
+let gone = '';
 
 function logsDb(rows: Array<{ thread: string | null; ts: number }>): string {
   const f = join(home, 'logs_2.sqlite');
@@ -82,6 +89,7 @@ beforeEach(() => {
   log = `${base}-requests.jsonl`;
   fake = `${base}-fake-codex.mjs`;
   refuse = `${base}-refuse.txt`;
+  gone = `${base}-gone.txt`;
   // thread/list answers two threads: A updated 2 days ago (not archived), B an hour ago.
   writeFileSync(
     fake,
@@ -101,6 +109,10 @@ createInterface({ input: process.stdin }).on('line', (l) => {
     ];
     return out({ id: m.id, result: { data, nextCursor: null } });
   }
+  if (m.method === 'thread/delete' && existsSync(${JSON.stringify(gone)}) && readFileSync(${JSON.stringify(gone)}, 'utf8').includes(m.params.threadId)) {
+    // 0.164's own answer for a thread with no row and no rollout left (measured).
+    return out({ id: m.id, error: { code: -32600, message: 'no rollout found for thread id ' + m.params.threadId } });
+  }
   if (m.method === 'thread/delete' && existsSync(${JSON.stringify(refuse)}) && readFileSync(${JSON.stringify(refuse)}, 'utf8').includes(m.params.threadId)) {
     return out({ id: m.id, error: { code: -32600, message: 'refused' } });
   }
@@ -116,7 +128,7 @@ afterEach(async () => {
   _setCodexCleanupForTest(null);
   vi.useRealTimers();
   rmSync(home, { recursive: true, force: true });
-  for (const f of [log, fake, refuse]) rmSync(f, { force: true });
+  for (const f of [log, fake, refuse, gone]) rmSync(f, { force: true });
 });
 
 describe('the cleanup queue', () => {
@@ -142,13 +154,16 @@ describe('the cleanup queue', () => {
     expect(deletes().sort()).toEqual([A, B, C].sort());
   });
 
-  it('a refused thread/delete stays pending (its rollout kept for the retry) and the NEXT drain retries it', async () => {
+  it('a refused thread/delete: its ROLLOUT GOES AT ONCE, only the id stays pending, and the NEXT drain retries it', async () => {
     writeFileSync(refuse, A);
     const fileA = rollout(A);
+    logsDb([{ thread: A, ts: NOW }]);
     queueCodexThreadCleanup(home, A);
     await drainCodexThreadCleanup(home);
     expect(pendingCodexThreadIds(home)).toEqual([A]);
-    expect(existsSync(fileA)).toBe(true);
+    // ⚠ The prompt and every diff are in that file: never kept for a retry (the row retry needs only the id).
+    expect(existsSync(fileA)).toBe(false);
+    expect(logThreads()).toEqual([]);
     // Codex accepts it now: the next settled run's drain takes both, on ONE app-server.
     rmSync(refuse);
     const before = starts();
@@ -158,6 +173,46 @@ describe('the cleanup queue', () => {
     expect(deletes()).toEqual([A, A, B]);
     expect(pendingCodexThreadIds(home)).toEqual([]);
     expect(existsSync(fileA)).toBe(false);
+  });
+
+  it('"no rollout found" (a delete that timed out but went through) counts as DONE: nothing stays pending', async () => {
+    writeFileSync(gone, A);
+    queueCodexThreadCleanup(home, A);
+    await drainCodexThreadCleanup(home);
+    expect(deletes()).toEqual([A]);
+    expect(pendingCodexThreadIds(home)).toEqual([]);
+  });
+
+  it(`while ids are pending a short UNREF'D timer drains again after ${DELETE_RETRY_DELAYS_MS.map((d) => d / 60_000).join(', ')} minutes; nothing pending ⇒ no timer`, async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    writeFileSync(refuse, A);
+    queueCodexThreadCleanup(home, A);
+    await drainCodexThreadCleanup(home);
+    expect(deletes()).toEqual([A]);
+    for (let i = 0; i < DELETE_RETRY_DELAYS_MS.length; i++) {
+      const delay = DELETE_RETRY_DELAYS_MS[i]!;
+      vi.advanceTimersByTime(delay - 1);
+      await drainCodexThreadCleanup(home);
+      expect(deletes()).toHaveLength(i + 1); // not yet
+      vi.advanceTimersByTime(1);
+      await drainCodexThreadCleanup(home);
+      expect(deletes()).toHaveLength(i + 2); // the retry ran
+    }
+    // MAX_DELETE_ATTEMPTS reached: dropped (left to the day-old sweep), and no timer is left.
+    expect(deletes()).toHaveLength(MAX_DELETE_ATTEMPTS);
+    expect(pendingCodexThreadIds(home)).toEqual([]);
+    expect(vi.getTimerCount()).toBe(0);
+    // Codex accepts at the first retry ⇒ cleared, no further timer.
+    rmSync(refuse);
+    writeFileSync(refuse, B);
+    queueCodexThreadCleanup(home, B);
+    await drainCodexThreadCleanup(home);
+    expect(vi.getTimerCount()).toBe(1);
+    rmSync(refuse);
+    vi.advanceTimersByTime(DELETE_RETRY_DELAYS_MS[0]!);
+    await drainCodexThreadCleanup(home);
+    expect(pendingCodexThreadIds(home)).toEqual([]);
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it(`gives up after ${MAX_DELETE_ATTEMPTS} refusals: the file goes, the row is left to the sweep`, async () => {
@@ -229,6 +284,25 @@ describe('the sweep', () => {
     vi.advanceTimersByTime(1);
     await drainCodexThreadCleanup(home);
     expect(listCount()).toBe(4);
+  });
+
+  it('armed at BOOT only when Limn’s Codex home exists (and Codex is installed): nothing is created', async () => {
+    const data = mkdtempSync(join(tmpdir(), 'limn-codex-boot-'));
+    const saved = process.env.LIMN_CODEX_PATH;
+    process.env.LIMN_CODEX_PATH = fake;
+    try {
+      const env = { ...process.env, LIMN_DATA_DIR: data };
+      expect(armCodexThreadSweepsAtBoot(env)).toBe(false); // no <data>/codex yet
+      expect(existsSync(join(data, 'codex'))).toBe(false);
+      mkdirSync(join(data, 'codex'));
+      expect(armCodexThreadSweepsAtBoot(env)).toBe(true);
+      await drainCodexThreadCleanup(join(data, 'codex'));
+      expect(requests().filter((r) => r.method === 'thread/list')).toHaveLength(2); // the sweep ran at once
+    } finally {
+      if (saved === undefined) delete process.env.LIMN_CODEX_PATH;
+      else process.env.LIMN_CODEX_PATH = saved;
+      rmSync(data, { recursive: true, force: true });
+    }
   });
 
   it('purgeCodexLogs with nothing to match deletes nothing, and a home without logs is fine', async () => {

@@ -51,7 +51,13 @@ import { config } from '../../config.js';
 // db/usage.js is imported LAZILY (in `record`): db/client opens the database at import time, and the
 // provider registry is imported by every runner and test that never writes a ledger row.
 import { buildExecArgs, codexChildEnv, toResumeArgs } from '../codex/config.js';
-import { CODEX_API_KEY_NOT_AVAILABLE_MESSAGE, codexUsageSource, detectCodex } from '../codex/detect.js';
+import { confirmCodexAccount } from '../codex/app-server.js';
+import {
+  CODEX_API_KEY_NOT_AVAILABLE_MESSAGE,
+  CODEX_SIGN_IN_UNCHECKED_MESSAGE,
+  codexUsageSource,
+  detectCodex,
+} from '../codex/detect.js';
 import {
   addUsage,
   cleanCodexError,
@@ -79,7 +85,7 @@ import type {
   ModelRole,
   ProviderStatus,
 } from '../provider.js';
-import { codexRunEnv, resolveCodexCredential, type CodexCredential } from '../credentials.js';
+import { codexCredentialRunnable, codexRunEnv, resolveCodexCredential, type CodexCredential } from '../credentials.js';
 import {
   CODEX_NOT_AVAILABLE_MESSAGE,
   codexKindNotAvailableMessage,
@@ -266,15 +272,27 @@ async function withScratch<T>(fn: (dir: string) => Promise<T>): Promise<T> {
 // ---- complete -----------------------------------------------------------------------------------
 
 /**
- * The credential a run may use, or a throw with the one sentence: no credential, or the API-key route
- * (refused until it can be priced — see the header). Then the program: a missing install throws
- * `CodexNotInstalledError`, an AiRuntimeMissingError, so a cheap caller stops its pass at once.
+ * The credential a run may use, or a throw with the one sentence: no credential, the API-key route
+ * (refused until it can be priced — see the header), or a sign-in whose KIND is not known. Then the
+ * program: a missing install throws `CodexNotInstalledError`, an AiRuntimeMissingError, so a cheap
+ * caller stops its pass at once.
+ *
+ * ⚠ FAIL CLOSED: only a sign-in KNOWN to be ChatGPT runs (ai/credentials.ts `codexCredentialRunnable`).
+ * Before the first `account/read` (boot, just after a sign-in or out, a probe that keeps failing) and
+ * when auth.json does not say, the run waits for ONE fresh probe and decides again — never runs on a
+ * guess, since a key stored in the home would otherwise run and be recorded at US$ 0.
  */
-async function runnableCredential(): Promise<Extract<CodexCredential, { route: 'login' }>> {
+async function runnableCredential(): Promise<{ route: 'login'; method: 'chatgpt' }> {
   if (!config.aiEnabled) throw new Error('AI is switched off here.');
-  const credential = resolveCodexCredential();
+  let credential = resolveCodexCredential();
+  if (credential.route === 'login' && credential.method === 'unconfirmed') {
+    await codexBinary();
+    await confirmCodexAccount();
+    credential = resolveCodexCredential();
+  }
   if (credential.route === 'none') throw new Error(CODEX_SIGN_IN_MESSAGE);
   if (credential.route === 'api_key') throw new Error(CODEX_API_KEY_NOT_AVAILABLE_MESSAGE);
+  if (!codexCredentialRunnable(credential)) throw new Error(CODEX_SIGN_IN_UNCHECKED_MESSAGE);
   await codexBinary();
   return credential;
 }
@@ -695,8 +713,8 @@ async function detect(): Promise<ProviderStatus> {
   const runnable = codexRunnable();
   return {
     id: 'codex',
-    // ⚠ The API-key route is refused (unpriced): only a ChatGPT sign-in can run.
-    available: runnable && d.installed && d.route === 'login',
+    // ⚠ Only a sign-in KNOWN to be ChatGPT can run: never the refused key route, never an unknown kind.
+    available: runnable && d.runnable,
     route: d.route,
     message: d.message ?? (runnable ? null : CODEX_NOT_AVAILABLE_MESSAGE),
     installed: d.installed,

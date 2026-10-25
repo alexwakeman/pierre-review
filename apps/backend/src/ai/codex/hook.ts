@@ -28,7 +28,7 @@
 // defined. Re-check on every CLI bump (`codexHookTrustHash` vs `hooks/list` `currentHash`).
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { codexBaseEnv, codexChildEnv, lockedConfig } from './config.js';
+import { appServerConfig, codexBaseEnv, codexChildEnv } from './config.js';
 import { helperCommand, shellWord } from './entry.js';
 import { encodeGuardRoots, GUARD_ENV, type GuardRoots } from './hook-rule.js';
 import type { CodexHookConfig } from './types.js';
@@ -141,8 +141,9 @@ export async function listSessionHooks(binary: string, home: string, hook: Codex
     // The run allow-list (config.ts `codexChildEnv`, no API key): a trust read must not be satisfied
     // by, or bill, a key from Limn's environment, nor see anything else of Limn's.
     const env = codexChildEnv(home, process.env);
-    // The lockdown with `-c` as well as in the home's config.toml (config.ts `LOCKED_SETTINGS`).
-    const child = spawn(binary, ['app-server', '--strict-config', ...lockedConfig(), '-c', hook.override], {
+    // The lockdown with `-c` as well as in the home's config.toml (config.ts `LOCKED_SETTINGS`), and the
+    // app-server's stub model catalog (no online model refresh — config.ts `appServerConfig`).
+    const child = spawn(binary, ['app-server', '--strict-config', ...appServerConfig(home), '-c', hook.override], {
       env,
       stdio: ['pipe', 'pipe', 'ignore'],
     });

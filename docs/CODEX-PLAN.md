@@ -98,9 +98,11 @@ users.
   `features.daemon_auto_start=false`), so every process in Limn's home inherits it — the app-server
   for cleanup, sweep, readings and sign-in, and the hook trust probe — and the same pairs still ride
   every `codex exec` AND app-server start with `-c` (the trust probe now runs `--strict-config` too).
-  Measured on 0.164: a bare app-server fetched the remote plugin catalog (`ps/plugins/list`), synced
-  remote plugins into `plugins/` and held five connections to chatgpt.com; with the lockdown, none
-  (lsof), and Codex's own logs since the live runs show no catalog fetch.
+  Measured on 0.164: a bare app-server fetched the remote plugin catalog (`ps/plugins/list`) and
+  synced remote plugins into `plugins/`; with the lockdown, no plugin catalog fetch and no plugin
+  sync. ⚠ CORRECTED in round 4: the lockdown did NOT stop all traffic — every app-server still
+  refreshed the Codex MODEL LIST online (an authenticated GET to chatgpt.com) and still runs the idle
+  remote-control loop.
 - ⚠ REMOTE CONTROL CANNOT BE SWITCHED OFF BY CONFIG in 0.164: `features.remote_control` is a REMOVED
   flag, `allow_remote_control` is read only from `/etc/codex/requirements.toml` or a managed profile
   (never `CODEX_HOME`), `remoteControl/disable` changes nothing persisted, and the undocumented
@@ -116,6 +118,34 @@ users.
   API-key refusal sentence. A missing Codex install names `limn ai install codex` in the docs crawl and
   the sprint "Ask" (they printed Claude's remedy).
 - Account erasure also removes `plugins/` and `cache/codex_apps_*` (written before the lockdown).
+
+**Phase 2 review fixes, round 4 (2026-10-25)** (branch `codex/p2-fix4`):
+- FAIL CLOSED ON THE SIGN-IN KIND. Before the first `account/read` (boot, just after a sign-in or out,
+  or while probes fail) the ladder reads `auth.json`'s NON-SECRET `auth_mode` (and only whether its
+  key field is filled in): `apikey` (or no mode and a key) is the refused key rung, `chatgpt` with no
+  key is the sign-in, anything else is `unconfirmed`. Only a sign-in KNOWN to be ChatGPT runs
+  (`codexCredentialRunnable`) — in `complete()`/`runAgent`, `auto`, `detect()`, `/api/me` and `limn ai
+  status`. A run on an `unconfirmed` sign-in waits for ONE fresh probe (forced at most every 15 s) and
+  refuses ("Limn could not check the Codex sign-in yet — try again in a moment") when it is still not
+  known. Before this, a key stored in Limn's home counted as the ChatGPT route and ran at US$ 0.
+- `LIMN_AI_USE_API_KEY=true` (shared with Claude) no longer pushes a ChatGPT sign-in onto the refused
+  key route: while that route is refused, the Codex ladder consults the sign-in first.
+- A run's ROLLOUT FILE goes in the first drain whatever `thread/delete` answers. Measured on 0.164:
+  `thread/delete` does not need the file (with the rollout gone it still deleted the `threads` row and
+  the history rows), and a thread already gone answers "no rollout found for thread id …", which counts
+  as done. Only the id stays pending; an unref'd timer retries after 1, 5 and 15 minutes (4 attempts in
+  all, then the day-old sweep). The sweep is armed AT BOOT when `~/.limn/codex` exists.
+- NO ONLINE MODEL REFRESH FROM AN APP-SERVER. Measured on 0.164 in Limn's own home (no model run): an
+  app-server started with the full lockdown moved `models_cache.json`'s `fetched_at` (19:10 → 19:41) on
+  one `account/read`; started with `model_catalog_json` it did not. `features.remote_models` is a
+  removed flag. So every app-server Limn starts (probe, cleanup and sweep, sign-in, hook trust probe)
+  gets `-c model_catalog_json=<home>/limn-app-server-models.json`, a one-model STUB (hidden, not in
+  the API, never run — Codex refuses an empty catalog). It is NOT in `LOCKED_SETTINGS`: a `codex exec`
+  run needs the real catalog, so a run still refreshes the model list online, on a run the reader
+  started. Live test 2d checks the key under `--strict-config`.
+- ⚠ The idle REMOTE-CONTROL LOOP still starts in every app-server (round 3: no config switches it off
+  in 0.164). Limn starts as few as it can: one per cleanup drain, the probe at most every 5 minutes,
+  and a drain whose app-server is up anyway takes a DUE probe's reads on it (`shareCodexProbe`).
 
 Original status: Written 2026-10-23 after checking the current Codex docs and the published
 `@openai/codex-sdk` 0.164.0 type definitions. The work is meant to be carried out by subagents

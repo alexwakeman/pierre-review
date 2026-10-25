@@ -167,15 +167,46 @@ describe('the Codex credential ladder', () => {
     expect(C.resolveCodexCredential({ OPENAI_API_KEY: ' sk ' }, signedOut)).toEqual({ route: 'api_key', method: 'api_key', apiKey: 'sk' });
     expect(C.resolveCodexCredential({}, signedOut)).toEqual({ route: 'none' });
   });
-  it('LIMN_AI_USE_API_KEY=true puts the key first', () => {
-    expect(C.resolveCodexCredential({ OPENAI_API_KEY: 'sk', LIMN_AI_USE_API_KEY: 'true' }, signedIn)).toEqual({
-      route: 'api_key',
-      method: 'api_key',
-      apiKey: 'sk',
-    });
+  it('LIMN_AI_USE_API_KEY=true (shared with Claude) never pushes a ChatGPT sign-in onto the REFUSED key route', () => {
+    const env = { OPENAI_API_KEY: 'sk', LIMN_AI_USE_API_KEY: 'true' };
+    expect(C.resolveCodexCredential(env, signedIn)).toEqual({ route: 'login', method: 'chatgpt' });
+    // Nor a sign-in a probe has yet to name (the run waits for that probe first).
+    expect(C.resolveCodexCredential(env, () => ({ signedIn: true, type: null }))).toEqual({ route: 'login', method: 'unconfirmed' });
+    // With no ChatGPT sign-in it still puts the environment's key ahead of a key stored in the home.
+    expect(C.resolveCodexCredential(env, () => ({ signedIn: true, type: 'apiKey' }))).toEqual({ route: 'api_key', method: 'api_key', apiKey: 'sk' });
+    expect(C.resolveCodexCredential(env, signedOut)).toEqual({ route: 'api_key', method: 'api_key', apiKey: 'sk' });
   });
   it('a key stored in the home by hand is the key rung (no ChatGPT windows to read)', () => {
     expect(C.resolveCodexCredential({}, () => ({ signedIn: true, type: 'apiKey' }))).toEqual({ route: 'api_key', method: 'stored_api_key' });
+  });
+  it('FAIL CLOSED: only a sign-in KNOWN to be ChatGPT is runnable; an unknown kind is "unconfirmed", another kind is no rung', () => {
+    const unknown = C.resolveCodexCredential({}, () => ({ signedIn: true, type: null }));
+    expect(unknown).toEqual({ route: 'login', method: 'unconfirmed' });
+    expect(C.codexCredentialRunnable(unknown)).toBe(false);
+    expect(C.codexCredentialRunnable(C.resolveCodexCredential({}, signedIn))).toBe(true);
+    expect(C.codexCredentialRunnable({ route: 'api_key', method: 'stored_api_key' })).toBe(false);
+    expect(C.resolveCodexCredential({}, () => ({ signedIn: true, type: 'chatgptAuthTokens' }))).toEqual({ route: 'none' });
+  });
+  it("auth.json's KIND, from its non-secret fields only (fixtures — never a real sign-in)", () => {
+    const f = join(root, 'auth-kind.json');
+    const kind = (o: unknown): string | null => {
+      writeFileSync(f, typeof o === 'string' ? o : JSON.stringify(o));
+      return C.codexAuthFileKind(f);
+    };
+    expect(kind({ auth_mode: 'chatgpt', OPENAI_API_KEY: null, tokens: { access_token: 'fixture' } })).toBe('chatgpt');
+    expect(kind({ auth_mode: 'apikey', OPENAI_API_KEY: 'sk-fixture' })).toBe('apiKey');
+    expect(kind({ auth_mode: 'ApiKey' })).toBe('apiKey');
+    // No auth_mode: a filled-in key is a key (Codex's own default); nothing else is known.
+    expect(kind({ OPENAI_API_KEY: 'sk-fixture' })).toBe('apiKey');
+    expect(kind({ tokens: { access_token: 'fixture' } })).toBeNull();
+    expect(kind({})).toBeNull();
+    // ChatGPT mode WITH a key filled in, another mode, or a broken file: not known (a probe decides).
+    expect(kind({ auth_mode: 'chatgpt', OPENAI_API_KEY: 'sk-fixture' })).toBeNull();
+    expect(kind({ auth_mode: 'agentIdentity' })).toBeNull();
+    expect(kind({ auth_mode: 7 })).toBeNull();
+    expect(kind('{ not json')).toBeNull();
+    expect(kind('[]')).toBeNull();
+    expect(C.codexAuthFileKind(join(root, 'no-such-auth.json'))).toBeNull();
   });
   it("the reader's own ~/.codex/auth.json counts for nothing; Limn's home's does (until the probe answers)", () => {
     mkdirSync(join(process.env.HOME!, '.codex'), { recursive: true });
@@ -185,6 +216,9 @@ describe('the Codex credential ladder', () => {
     mkdirSync(join(root, 'fresh-data', 'codex'), { recursive: true });
     writeFileSync(join(root, 'fresh-data', 'codex', 'auth.json'), '{}');
     expect(C.codexLoginKnown(env)).toEqual({ signedIn: true, type: null });
+    writeFileSync(join(root, 'fresh-data', 'codex', 'auth.json'), JSON.stringify({ auth_mode: 'apikey', OPENAI_API_KEY: 'sk-fixture' }));
+    expect(C.codexLoginKnown(env)).toEqual({ signedIn: true, type: 'apiKey' });
+    expect(C.resolveCodexCredential({ ...env, OPENAI_API_KEY: '', LIMN_AI_USE_API_KEY: '' })).toEqual({ route: 'api_key', method: 'stored_api_key' });
     rmSync(join(process.env.HOME!, '.codex'), { recursive: true, force: true });
   });
   it("a run's environment: CODEX_HOME always; the login strips every key; the key rung passes CODEX_API_KEY only", () => {
