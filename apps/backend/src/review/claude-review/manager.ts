@@ -692,6 +692,12 @@ async function runPipeline(
       headSha: p.headSha,
     })),
     ...(docs != null ? { docsDir: docs.dir } : {}),
+    // Who to bill when the provider writes its own ledger row (Codex), and — for an AUTOMATIC review
+    // on Codex, where Limn runs each specialist as its own run — the spend budget asked before each.
+    usage: { accountId: item.accountId, prId: item.prId },
+    ...(item.trigger === 'auto'
+      ? { allowSpecialistStart: () => automaticRunAllowed(ctx, item.accountId, 'auto review specialist') }
+      : {}),
     applyAuthEnv: APPLY_AUTH_ENV,
     abortController: controller,
     onProgress: (p) =>
@@ -713,6 +719,7 @@ async function runPipeline(
     numTurns: res.numTurns,
     diffBytes: prep.diffBytes,
     diffCapped: prep.diffCapped,
+    ...(res.usageRecorded ? { usageRecorded: true } : {}),
   };
   if (res.aborted) {
     await markReviewCancelled(ctx, reviewId);

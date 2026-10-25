@@ -199,6 +199,29 @@ users.
   dispatch guard's refusal sentence), `allowStart` asked before each start, the batch's US$ split
   evenly and no start once spent; answers in order, a failure never stops the others.
 
+**Phase 3 stream (a) built 2026-10-25** (branch `codex/p3-review`): `review`, `review_chat` and
+`thread_check` are in `ai/codex/kinds/review.ts`.
+- ONE provider per run: each runner asks `getActiveProvider()` ONCE (`const provider = …`; the seam
+  test accepts that form) and branches on `provider.id === 'codex'`. With Claude active nothing below
+  runs: prompts, tools, models, budgets and the auth env are byte-for-byte as before.
+- CODEX WORDS WITHOUT TOUCHING CLAUDE'S PROMPTS: `review/codex-wording.ts` swaps known Claude sentences
+  in the FINISHED prompt (Codex side written with `{Tool}` refs and rendered by `ai/prompt-tools.ts`).
+  `codex-wording.test.ts` renders every variant and fails on a Claude-only word left behind, and on a
+  swap whose Claude sentence no prompt carries any more.
+- THE DEPTHS: the role from the review's model (Opus → deep, Sonnet → standard), Codex effort = the
+  role's on a worktree run and ONE STEP LOWER diff-only (`review/codex-review.ts codexReviewEffort`).
+- SPECIALISTS: Limn runs them BEFORE the lead through `runCodexSpecialists` (one door: the active
+  provider), picked in CODE (`pickCodexSpecialists`: offered only, accessibility first, design last, at
+  most the cap), each `{ report }`; their reports reach the lead FENCED, a skipped/failed one NAMED. An
+  AUTOMATIC review asks the spend gate before each (`RunReviewArgs.allowSpecialistStart`).
+- USAGE: the runners pass `usageRecord` (new optional `usage` on the args), so Codex writes its own
+  ledger row (one per specialist too, `claude_review:<lens>`); the result says `usageRecorded` and the
+  manager's cost-gated row is skipped. Codex tokens are never priced as Claude's (US$ from the outcome).
+- Live (`review/codex-review-live.test.ts`, 2 runs, gpt-6-luna low): a diff-only review with the real
+  prompts passed the strict `submit_review` schema; Check threads read through MCP and judged R1.
+- Open: the stored `claude_reviews.model` (and the chat row's) still names the Claude model the run
+  was ASKED for; the product copy says "Claude" (Phase 4).
+
 Original status: Written 2026-10-23 after checking the current Codex docs and the published
 `@openai/codex-sdk` 0.164.0 type definitions. The work is meant to be carried out by subagents
 through the Workflow tool, in the phases below, with the user confirming the decisions in § 6 first.

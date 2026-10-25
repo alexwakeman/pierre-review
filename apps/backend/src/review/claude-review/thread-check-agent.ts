@@ -1,14 +1,22 @@
 import type { ClaudeReviewModel } from '@pierre-review/shared';
 import { loadZod } from '../../ai/runtime.js';
-import { claudeModelChoice, getActiveProvider, type AgentToolServer, type AgentOutcome } from '../../ai/provider.js';
+import {
+  claudeModelChoice,
+  getActiveProvider,
+  type AgentToolServer,
+  type AgentOutcome,
+  type ModelChoice,
+} from '../../ai/provider.js';
 import { config } from '../../config.js';
 import type { ReviewThreadReport } from '../../platform/contract.js';
-import { DISALLOWED_TOOLS } from '../agent.js';
+import { DISALLOWED_TOOLS, isJsonAnswerLine } from '../agent.js';
 import { applyClaudeReviewAuth } from '../auth.js';
 import { estimateCostUsd } from '../pricing.js';
 import { buildSubmitThreadsShape } from './thread-check-schema.js';
 import { emptyUsage, type UsageTokens } from '../usage.js';
 import { DISPATCH_TOOL_NAMES } from './specialists.js';
+import { codexReviewEffort, codexReviewModelOverride } from '../codex-review.js';
+import { codexThreadCheckText } from '../codex-wording.js';
 
 // CHECK THREADS — the SDK half (the CI review's agent.ts, one tool narrower). The manager
 // (thread-check.ts) plans, prepares the read-only worktree and the prompt, and cleans up; this
@@ -46,6 +54,8 @@ export interface RunThreadCheckArgs {
   applyAuthEnv: boolean;
   abortController: AbortController;
   onProgress(p: { recentActivity: string[]; usage: { inputTokens: number; outputTokens: number; costUsd: number } }): void;
+  // Who to bill, for a provider that writes its own ledger row (Codex; ai/provider.ts `usageRecord`).
+  usage?: { accountId: number; prId: number | null; repoId?: number | null };
 }
 
 export interface RunThreadCheckResult {
@@ -57,10 +67,17 @@ export interface RunThreadCheckResult {
   inputTokens: number | null;
   outputTokens: number | null;
   numTurns: number | null;
+  // True when the provider already wrote the run's ledger row (Codex): the manager must not again.
+  usageRecorded?: boolean;
 }
 
 export async function runThreadCheckAgent(args: RunThreadCheckArgs): Promise<RunThreadCheckResult> {
   const { model, abortController } = args;
+  // THE PROVIDER, asked once (LIMN_AI_PROVIDER). `onCodex` is the Codex port (docs/CODEX-PLAN.md Phase
+  // 3, stream a); with Claude active none of it runs and the check is exactly what it was.
+  const provider = getActiveProvider();
+  const onCodex = provider.id === 'codex';
+  const usageRecorded = onCodex && args.usage != null;
   let outcome: AgentOutcome | null = null;
   let restoreEnv: (() => void) | null = null;
   let liveUsage: UsageTokens = emptyUsage();
@@ -68,7 +85,8 @@ export async function runThreadCheckAgent(args: RunThreadCheckArgs): Promise<Run
     const usage = outcome?.usage ?? liveUsage;
     const hasUsage = usage.inputTokens + usage.outputTokens + usage.cacheReadTokens > 0;
     return {
-      costUsd: outcome?.costUsd ?? (hasUsage ? estimateCostUsd(model, usage) : null),
+      // ⚠ Codex tokens are never priced as Claude's: its outcome carries its own US$ (0 on ChatGPT).
+      costUsd: outcome?.costUsd ?? (hasUsage ? (onCodex ? 0 : estimateCostUsd(model, usage)) : null),
       inputTokens: usage.inputTokens,
       outputTokens: usage.outputTokens,
       numTurns: outcome?.numTurns ?? null,
@@ -80,10 +98,12 @@ export async function runThreadCheckAgent(args: RunThreadCheckArgs): Promise<Run
     failureReason,
     aborted,
     ...telemetry(),
+    ...(usageRecorded ? { usageRecorded: true } : {}),
   });
 
   try {
-    restoreEnv = applyClaudeReviewAuth(args.applyAuthEnv);
+    // Codex: its child gets its own allow-listed environment (ai/codex/config.ts), never this one.
+    if (!onCodex) restoreEnv = applyClaudeReviewAuth(args.applyAuthEnv);
     const shape = buildSubmitThreadsShape(await loadZod());
     let captured: ReviewThreadReport[] | null = null;
     const tools: AgentToolServer = {
@@ -102,12 +122,19 @@ export async function runThreadCheckAgent(args: RunThreadCheckArgs): Promise<Run
     };
     const policy = threadCheckToolPolicy();
     const activity: string[] = [];
-    ({ outcome } = await getActiveProvider().runAgent({
+    const effort = args.worktrees.length > 0 ? 'worktree' : 'diff_only';
+    // Codex: the prompts in Codex's words (codex-wording.ts), the role's effort (one step lower with no
+    // checkout), its own ledger row.
+    const override = onCodex ? codexReviewModelOverride() : null;
+    const modelChoice: ModelChoice = override
+      ? { role: claudeModelChoice(model).role, id: override.model }
+      : claudeModelChoice(model);
+    ({ outcome } = await provider.runAgent({
       kind: 'thread_check',
-      model: claudeModelChoice(model),
-      effort: args.worktrees.length > 0 ? 'worktree' : 'diff_only',
-      prompt: args.prompt,
-      system: args.systemPrompt,
+      model: modelChoice,
+      effort,
+      prompt: onCodex ? codexThreadCheckText(args.prompt) : args.prompt,
+      system: onCodex ? codexThreadCheckText(args.systemPrompt) : args.systemPrompt,
       // ⚠ THE CONFINEMENT (the provider's path guard, first on PreToolUse — a deny holds under
       // bypassPermissions): the scratch cwd and the worktrees, nothing else.
       cwd: args.cwd,
@@ -117,18 +144,32 @@ export async function runThreadCheckAgent(args: RunThreadCheckArgs): Promise<Run
       tools,
       budget: { usd: config.threadCheckBudgetUsd, turns: config.threadCheckMaxTurns },
       abortController,
+      ...(args.usage
+        ? {
+            usageRecord: {
+              accountId: args.usage.accountId,
+              seam: 'agent' as const,
+              feature: 'thread_check',
+              prId: args.usage.prId,
+              repoId: args.usage.repoId ?? null,
+            },
+          }
+        : {}),
+      codex: { resultTool: 'submit_threads', effort: override?.effort ?? codexReviewEffort(modelChoice.role, effort) },
       claude: { allowedTools: policy.allowedTools, disallowedTools: policy.disallowedTools },
       onProgress: (p) => {
         if (p.kind === 'step') {
           if (p.usage) liveUsage = p.usage;
           for (const line of p.lines) {
-            activity.push(line.startsWith(THREAD_CHECK_TOOL_NAME) ? 'Saving the judgements…' : line);
+            // Codex's final answer arrives as a message (the JSON itself): worded as the save step too.
+            const saving = line.startsWith(THREAD_CHECK_TOOL_NAME) || (onCodex && isJsonAnswerLine(line));
+            activity.push(saving ? 'Saving the judgements…' : line);
             if (activity.length > ACTIVITY_LOG_CAP) activity.shift();
           }
           const live = liveUsage;
           args.onProgress({
             recentActivity: [...activity],
-            usage: { inputTokens: live.inputTokens, outputTokens: live.outputTokens, costUsd: estimateCostUsd(model, live) },
+            usage: { inputTokens: live.inputTokens, outputTokens: live.outputTokens, costUsd: onCodex ? 0 : estimateCostUsd(model, live) },
           });
         } else if (p.kind === 'outcome') {
           outcome = p.outcome;
@@ -143,7 +184,7 @@ export async function runThreadCheckAgent(args: RunThreadCheckArgs): Promise<Run
           : 'agent finished without calling submit_threads';
       return fail(reason, false);
     }
-    return { submitted: true, threads: captured, aborted: false, ...telemetry() };
+    return { submitted: true, threads: captured, aborted: false, ...telemetry(), ...(usageRecorded ? { usageRecorded: true } : {}) };
   } catch (err) {
     if (abortController.signal.aborted) return fail(undefined, true);
     return fail(err instanceof Error ? err.message : String(err), false);

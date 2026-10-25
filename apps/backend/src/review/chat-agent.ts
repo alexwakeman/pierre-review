@@ -1,7 +1,13 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { claudeModelChoice, getActiveProvider, type AgentToolServer, type AgentOutcome } from '../ai/provider.js';
+import {
+  claudeModelChoice,
+  getActiveProvider,
+  type AgentToolServer,
+  type AgentOutcome,
+  type ModelChoice,
+} from '../ai/provider.js';
 import type { ReviewChatArgs, ReviewChatResult } from '../platform/contract.js';
 import { config } from '../config.js';
 import { applyClaudeReviewAuth } from './auth.js';
@@ -9,6 +15,8 @@ import { cleanupCloneCache, prepWorktree, removeWorktreeLocked } from './clone-m
 import { estimateCostUsd } from './pricing.js';
 import { emptyUsage, type UsageTokens } from './usage.js';
 import { submitExplanationsShape } from './claude-review/chat-explain.js';
+import { codexReviewEffort, codexReviewModelOverride } from './codex-review.js';
+import { codexChatText } from './codex-wording.js';
 
 // ctx.review.chat — ONE answered question about a succeeded Claude Review. The plugin owns the
 // product (the prompt, the stored transcript, gating, metering); core owns the run, exactly as for
@@ -61,6 +69,12 @@ export function chatToolsFor(
 
 export async function runReviewChat(args: ReviewChatArgs): Promise<ReviewChatResult> {
   const { model, mode, abortController } = args;
+  // THE PROVIDER, asked once (LIMN_AI_PROVIDER). `onCodex` is the Codex port (docs/CODEX-PLAN.md Phase
+  // 3, stream a); with Claude active none of it runs and the turn is exactly what it was.
+  const provider = getActiveProvider();
+  const onCodex = provider.id === 'codex';
+  // Codex writes its own ledger row when told who to bill; chat.ts must then not write one too.
+  const usageRecorded = onCodex && args.usage != null;
   let worktreePath: string | null = null;
   let repoCloneDir: string | null = null;
   let tempCwd: string | null = null;
@@ -77,7 +91,8 @@ export async function runReviewChat(args: ReviewChatArgs): Promise<ReviewChatRes
     const usage = outcome?.usage ?? liveUsage;
     const hasUsage = usage.inputTokens + usage.outputTokens + usage.cacheReadTokens > 0;
     return {
-      costUsd: outcome?.costUsd ?? (hasUsage ? estimateCostUsd(model, usage) : null),
+      // ⚠ Codex tokens are never priced as Claude's: its outcome carries its own US$ (0 on ChatGPT).
+      costUsd: outcome?.costUsd ?? (hasUsage ? (onCodex ? 0 : estimateCostUsd(model, usage)) : null),
       // Input as the reader would count it: fresh + cache reads + cache writes.
       inputTokens: usage.inputTokens + usage.cacheReadTokens + usage.cacheCreationTokens,
       outputTokens: usage.outputTokens,
@@ -90,6 +105,7 @@ export async function runReviewChat(args: ReviewChatArgs): Promise<ReviewChatRes
     failureReason,
     ...telemetry(),
     aborted,
+    ...(usageRecorded ? { usageRecorded: true } : {}),
   });
 
   try {
@@ -112,7 +128,8 @@ export async function runReviewChat(args: ReviewChatArgs): Promise<ReviewChatRes
     // An explain turn spends one more turn on the submit call and usually reads a file per item.
     if (args.explain) maxTurns += EXPLAIN_EXTRA_TURNS;
     const { builtinTools, allowedTools, disallowedTools } = chatToolsFor(mode, args.explain === true);
-    restoreEnv = applyClaudeReviewAuth(args.applyAuthEnv);
+    // Codex: its child gets its own allow-listed environment (ai/codex/config.ts), never this one.
+    if (!onCodex) restoreEnv = applyClaudeReviewAuth(args.applyAuthEnv);
 
     // THROUGH THE PROVIDER (ai/provider.ts; Claude's is ai/providers/claude.ts). From the AI runtime
     // (ai/runtime.ts); a missing one throws into the catch below.
@@ -134,12 +151,18 @@ export async function runReviewChat(args: ReviewChatArgs): Promise<ReviewChatRes
         ],
       };
     }
-    ({ outcome } = await getActiveProvider().runAgent({
+    // Codex: the same prompts in Codex's words (codex-wording.ts), the review's own depth (the role,
+    // one effort step lower on a diff-only review), its own ledger row.
+    const override = onCodex ? codexReviewModelOverride() : null;
+    const modelChoice: ModelChoice = override
+      ? { role: claudeModelChoice(model).role, id: override.model }
+      : claudeModelChoice(model);
+    ({ outcome } = await provider.runAgent({
       kind: 'review_chat',
-      model: claudeModelChoice(model),
+      model: modelChoice,
       effort: mode,
-      prompt: args.prompt,
-      system: args.systemPrompt,
+      prompt: onCodex ? codexChatText(args.prompt) : args.prompt,
+      system: onCodex ? codexChatText(args.systemPrompt) : args.systemPrompt,
       // ⚠ The same PATH GUARD the review runs under (review/path-guard.ts), put first on PreToolUse
       // by the provider: under bypassPermissions nothing else confines an absolute path, so the
       // file tools may read cwd and nothing else.
@@ -150,6 +173,21 @@ export async function runReviewChat(args: ReviewChatArgs): Promise<ReviewChatRes
       ...(tools ? { tools } : {}),
       budget: { usd: config.reviewChatBudgetUsd, turns: maxTurns },
       abortController,
+      ...(args.usage
+        ? {
+            usageRecord: {
+              accountId: args.usage.accountId,
+              seam: 'agent' as const,
+              feature: 'claude_review_chat',
+              prId: args.usage.prId,
+              repoId: args.usage.repoId ?? null,
+            },
+          }
+        : {}),
+      codex: {
+        ...(tools ? { resultTool: 'submit_explanations' } : {}),
+        effort: override?.effort ?? codexReviewEffort(modelChoice.role, mode),
+      },
       // `tools` is the BASE SET the model can see at all ([] = no built-in tools); allowedTools
       // only skips prompts. Both say the same thing, plus the deny list.
       claude: { builtinTools, allowedTools, disallowedTools },
@@ -171,7 +209,9 @@ export async function runReviewChat(args: ReviewChatArgs): Promise<ReviewChatRes
             : 'agent finished without calling submit_explanations';
         return fail(reason, false);
       }
-      return { ok: true, text: lastText.trim(), submitted, ...telemetry(), aborted: false };
+      // Codex: the step text IS the final JSON answer, not prose; the cards carry the answer.
+      const text = onCodex ? '' : lastText.trim();
+      return { ok: true, text, submitted, ...telemetry(), aborted: false, ...(usageRecorded ? { usageRecorded: true } : {}) };
     }
     const finalText =
       outcome?.text?.trim()
@@ -184,7 +224,7 @@ export async function runReviewChat(args: ReviewChatArgs): Promise<ReviewChatRes
           : 'agent finished without answering';
       return fail(reason, false);
     }
-    return { ok: true, text: finalText, ...telemetry(), aborted: false };
+    return { ok: true, text: finalText, ...telemetry(), aborted: false, ...(usageRecorded ? { usageRecorded: true } : {}) };
   } catch (err) {
     if (abortController.signal.aborted) return fail(undefined, true);
     return fail(err instanceof Error ? err.message : String(err), false);

@@ -49,6 +49,8 @@ type Telemetry = {
   inputTokens?: number | null;
   outputTokens?: number | null;
   numTurns?: number | null;
+  // The provider already wrote the run's ledger row (Codex; RunThreadCheckResult.usageRecorded).
+  usageRecorded?: boolean;
 };
 
 export function threadCheckWire(r: ThreadCheckRow): ThreadCheckRun {
@@ -142,6 +144,7 @@ async function recordUsage(
   run: Pick<ThreadCheckRow, 'model' | 'prId' | 'repoId'> | null,
   tm: Telemetry,
 ): Promise<void> {
+  if (tm.usageRecorded) return;
   if (run == null || tm.costUsd == null || !Number.isFinite(tm.costUsd) || tm.costUsd <= 0) return;
   await ctx
     .recordAiUsage({
