@@ -160,3 +160,32 @@ describe('LIMN_AI_USE_API_KEY=true — the opt-in that puts the key first', () =
     expect(detectClaudeAuth()).toEqual({ status: 'ok', method: 'oauth_token' });
   });
 });
+
+// LIMN_AI_PROVIDER=codex selects a provider that cannot run yet. The pre-flight must say so — it
+// is what /api/me's `ai.auth`, every Run gate and every background sweeper (`agenticRunReady`) read
+// — or a signed-in Claude keeps every button live in front of a run that rejects at once.
+describe('detectClaudeAuth — LIMN_AI_PROVIDER=codex', () => {
+  let prevProvider: string | undefined;
+  beforeEach(() => {
+    prevProvider = process.env.LIMN_AI_PROVIDER;
+  });
+  afterEach(() => {
+    if (prevProvider === undefined) delete process.env.LIMN_AI_PROVIDER;
+    else process.env.LIMN_AI_PROVIDER = prevProvider;
+  });
+
+  it('answers none with the not-available sentence even when Claude is signed in', async () => {
+    const { CODEX_NOT_AVAILABLE_MESSAGE } = await import('../ai/provider.js');
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = 'tok';
+    process.env.LIMN_AI_PROVIDER = 'codex';
+    expect(detectClaudeAuth()).toEqual({ status: 'none', message: CODEX_NOT_AVAILABLE_MESSAGE });
+  });
+
+  it('claude and auto are unchanged', () => {
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = 'tok';
+    for (const v of ['claude', 'auto', '']) {
+      process.env.LIMN_AI_PROVIDER = v;
+      expect(detectClaudeAuth()).toEqual({ status: 'ok', method: 'oauth_token' });
+    }
+  });
+});

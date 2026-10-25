@@ -20,11 +20,14 @@
 //
 // THE CHOICE: `LIMN_AI_PROVIDER` = `claude` | `auto` (default: `auto`, which is Claude — the one the
 // rules were tuned on, docs/CODEX-PLAN.md § 6). `codex` is ACCEPTED but answers "not available
-// yet": its placeholder's `detect()` says so, and a run or completion rejects with that sentence
-// (every caller already turns a rejection into a readable failure). Nothing crashes.
+// yet": the pre-flight every Run gate and background sweeper asks (`review/auth.ts`
+// `detectClaudeAuth`, which feeds `MeResponse.ai` and `ctx.llm.detectAuth`) answers 'none' with
+// that sentence, so the Run button is replaced by it and no sweeper starts a run; a run or
+// completion that starts anyway rejects with the same sentence. Nothing crashes.
 import type { SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { AiUsageReading } from '@pierre-review/shared';
 import { claudeProvider } from './providers/claude.js';
+import { aiProviderSetting, CODEX_NOT_AVAILABLE_MESSAGE } from './provider-setting.js';
 
 export type AgentProviderId = 'claude' | 'codex';
 
@@ -187,26 +190,14 @@ export interface AgentProvider {
 
 // ---- the registry -------------------------------------------------------------------------------
 
-export const AI_PROVIDER_ENV = 'LIMN_AI_PROVIDER';
-
-export type AiProviderSetting = 'claude' | 'codex' | 'auto';
-
-export const CODEX_NOT_AVAILABLE_MESSAGE =
-  'Codex is not available in this version of Limn yet. Unset LIMN_AI_PROVIDER (or set it to claude) to use Claude.';
-
-/** The reader's `LIMN_AI_PROVIDER`, read at call time. Unset, empty or unknown ⇒ 'auto'. */
-export function aiProviderSetting(env: NodeJS.ProcessEnv = process.env): AiProviderSetting {
-  const raw = env[AI_PROVIDER_ENV]?.trim().toLowerCase();
-  if (raw === 'claude' || raw === 'codex' || raw === 'auto') return raw;
-  return 'auto';
-}
+export { AI_PROVIDER_ENV, aiProviderSetting, CODEX_NOT_AVAILABLE_MESSAGE, type AiProviderSetting } from './provider-setting.js';
 
 const notAvailable = (): Error => new Error(CODEX_NOT_AVAILABLE_MESSAGE);
 
 /**
  * The Codex PLACEHOLDER: `LIMN_AI_PROVIDER=codex` is accepted, and every question it is asked
- * answers "not available yet" — `detect()` says so, a run or a completion rejects with that one
- * sentence, its credential route is 'none' (so the budget is off), and it has no usage reading.
+ * answers "not available yet" — `detect()` and the pre-flight (`detectClaudeAuth`) say so, a run
+ * or a completion rejects with that one sentence, its credential route is 'none' (so the budget is off), and it has no usage reading.
  */
 export const codexPlaceholderProvider: AgentProvider = {
   id: 'codex',

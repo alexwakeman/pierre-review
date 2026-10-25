@@ -25,7 +25,7 @@ import { getAuthNotices } from '../../sync/auth-notices.js';
 import { isMlScoringAvailable } from '../../ml/scorer.js';
 import { getMlStatus } from '../../ml/runtime.js';
 import { getAiRuntimeStatus } from '../../ai/runtime.js';
-import { detectClaudeAuth, NO_CLAUDE_AUTH_MESSAGE } from '../../review/auth.js';
+import { detectClaudeAuth } from '../../review/auth.js';
 import { getMyTurn } from '../../db/queries.js';
 import { clearDailyBriefCountsFor } from '../../db/daily-brief.js';
 import { dismissMyTurn, restoreMyTurn } from '../../db/my-turn-dismissals.js';
@@ -149,7 +149,8 @@ const myTurnSettingsSchema = {
  * anything. `runtime` is the one-time SDK download (ai/runtime.ts). `auth` is `detectClaudeAuth`'s
  * disk check (a credentials file or a signed-in `oauthAccount`, never a bare `~/.claude`): it decides only whether a Run button or the one
  * "Sign in to Claude Code or set ANTHROPIC_API_KEY" line shows, never whether the feature is
- * visible — the run itself is the authoritative check. Disabled ⇒ the other fields are inert.
+ * visible — the run itself is the authoritative check. Under LIMN_AI_PROVIDER=codex it answers
+ * none with the "Codex is not available" sentence (review/auth.ts). Disabled ⇒ the other fields are inert.
  */
 function agenticAiStatus(): MeResponse['ai'] {
   if (!config.aiEnabled) {
@@ -162,7 +163,7 @@ function agenticAiStatus(): MeResponse['ai'] {
     runtime: rt.runtime,
     runtimeMessage: rt.runtimeMessage,
     auth: auth.status === 'ok' ? 'ok' : 'none',
-    authMessage: auth.status === 'ok' ? null : NO_CLAUDE_AUTH_MESSAGE,
+    authMessage: auth.status === 'ok' ? null : auth.message,
   };
 }
 

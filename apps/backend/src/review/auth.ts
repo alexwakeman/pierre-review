@@ -1,4 +1,5 @@
 import { hasClaudeLogin, resolveAiCredential } from '../ai/credentials.js';
+import { aiProviderSetting, CODEX_NOT_AVAILABLE_MESSAGE } from '../ai/provider-setting.js';
 
 // The pre-flight view of the ONE credential ladder (ai/credentials.ts): the reader's Claude Code
 // login first, else ANTHROPIC_API_KEY (or the key first under LIMN_AI_USE_API_KEY=true). Detection
@@ -19,6 +20,10 @@ export function hasAmbientClaudeAuth(): boolean {
 export const NO_CLAUDE_AUTH_MESSAGE = 'Sign in to Claude Code or set ANTHROPIC_API_KEY';
 
 export function detectClaudeAuth(): ClaudeAuthResult {
+  // `LIMN_AI_PROVIDER=codex` selects a provider that cannot run yet (ai/provider.ts), so the
+  // pre-flight says so: the Run gate shows that sentence instead of a button bound to fail, and
+  // every background sweeper (`agenticRunReady`) waits instead of starting a doomed run.
+  if (aiProviderSetting() === 'codex') return { status: 'none', message: CODEX_NOT_AVAILABLE_MESSAGE };
   const c = resolveAiCredential();
   if (c.route !== 'none') return { status: 'ok', method: c.method };
   // ⚠ THIS SENTENCE IS RENDERED IN THE SPA, NOT JUST LOGGED — it is the ONE line that replaces
