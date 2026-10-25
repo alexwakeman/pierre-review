@@ -9,6 +9,7 @@ import {
 import { fence } from '../../reference-docs/prompts.js';
 import { citationOf, type LibrarySnapshot } from '../../reference-docs/review-refs.js';
 import { pickReviewNonce } from '../claude-review/prompts.js';
+import { cheapUsage, type CheapUsage } from '../cheap-usage.js';
 import type { CompleteFn } from '../story-labels/manager.js';
 import type { StoryText } from './inputs.js';
 
@@ -225,7 +226,7 @@ export async function runShortlist(args: {
   input: ShortlistPromptInput;
   lib: LibrarySnapshot;
   complete?: CompleteFn;
-  onUsage?(u: { costUsd: number; inputTokens: number; outputTokens: number }): Promise<void> | void;
+  onUsage?(u: CheapUsage): Promise<void> | void;
 }): Promise<ShortlistRunResult> {
   const { labelCostUsd } = await import('../story-labels/manager.js');
   const complete: CompleteFn = args.complete ?? (await import('../llm.js')).cheapComplete;
@@ -234,13 +235,14 @@ export async function runShortlist(args: {
   const prompt = buildShortlistPrompt(args.input, nonce);
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const res = await complete({ model: STORY_DOCS_SHORTLIST_MODEL, system: SHORTLIST_SYSTEM, prompt, maxTokens: 900 });
-    const inputTokens = res.usage?.inputTokens ?? 0;
-    const outputTokens = res.usage?.outputTokens ?? 0;
-    const costUsd = labelCostUsd(inputTokens, outputTokens);
+    const u = cheapUsage(res, STORY_DOCS_SHORTLIST_MODEL, labelCostUsd);
+    const inputTokens = u.inputTokens ?? 0;
+    const outputTokens = u.outputTokens ?? 0;
+    const costUsd = u.costUsd;
     out.costUsd += costUsd;
     out.inputTokens += inputTokens;
     out.outputTokens += outputTokens;
-    await args.onUsage?.({ costUsd, inputTokens, outputTokens });
+    await args.onUsage?.(u);
     const v = validateShortlist(res.text, args.lib);
     if (v.ok) {
       out.entries = v.entries;

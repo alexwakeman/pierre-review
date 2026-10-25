@@ -214,7 +214,7 @@ async function generateReport(
     }
   }
 
-  const { parsed, costUsd, inputTokens, outputTokens } = await runThemesLlm(llm, build);
+  const { parsed, costUsd, inputTokens, outputTokens, provider, model } = await runThemesLlm(llm, build);
   // The spend happened the moment the model answered — arm the min interval off that fact (never
   // off a cache hit above) and record it before anything else can fail. parseThemes is total, so
   // there is no throw path between the model call and here; the ledger write stays best-effort.
@@ -224,7 +224,8 @@ async function generateReport(
       accountId,
       seam: 'summary',
       feature: 'bot_themes',
-      model: DIGEST_MODEL,
+      model: model ?? DIGEST_MODEL,
+      provider,
       costUsd,
       inputTokens,
       outputTokens,

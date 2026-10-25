@@ -250,7 +250,14 @@ export function parseThemes(text: string): ParsedThemes {
 export async function runThemesLlm(
   llm: LlmClient,
   build: BotThemesBuild,
-): Promise<{ parsed: ParsedThemes; costUsd: number; inputTokens: number; outputTokens: number }> {
+): Promise<{
+  parsed: ParsedThemes;
+  costUsd: number;
+  inputTokens: number;
+  outputTokens: number;
+  provider?: 'claude' | 'codex';
+  model?: string;
+}> {
   const out = await llm.complete({
     system: SYSTEM,
     user: JSON.stringify(build.payload),
@@ -261,5 +268,7 @@ export async function runThemesLlm(
     costUsd: out.costUsd,
     inputTokens: out.inputTokens,
     outputTokens: out.outputTokens,
+    provider: out.provider,
+    ...(out.model ? { model: out.model } : {}),
   };
 }

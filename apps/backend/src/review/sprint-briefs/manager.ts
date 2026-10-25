@@ -6,6 +6,7 @@ import { expandGhostsAfterBriefs } from '../../tracker/sprint/hooks.js';
 import { AiRuntimeMissingError } from '../../ai/runtime.js';
 import type { AgentContext } from '../agent-context.js';
 import { pickReviewNonce } from '../claude-review/prompts.js';
+import { cheapUsage } from '../cheap-usage.js';
 import { labelCostUsd, type CompleteFn } from '../story-labels/manager.js';
 import { briefMaxTokens, SPRINT_BRIEF_SYSTEM, sprintBriefPrompt, sprintBriefUntrusted } from './prompt.js';
 import { validateSprintBrief } from './validate.js';
@@ -160,12 +161,13 @@ async function onePass(
             prompt: sprintBriefPrompt(t.input, nonce),
             maxTokens: briefMaxTokens(t.input.criteria.length, t.input.links.length),
           });
-          const inputTokens = out.usage?.inputTokens ?? 0;
-          const outputTokens = out.usage?.outputTokens ?? 0;
-          const costUsd = labelCostUsd(inputTokens, outputTokens);
+          const u = cheapUsage(out, SPRINT_BRIEF_MODEL, labelCostUsd);
+          const inputTokens = u.inputTokens ?? 0;
+          const outputTokens = u.outputTokens ?? 0;
+          const costUsd = u.costUsd;
           res.costUsd += costUsd;
           await ctx
-            .recordAiUsage({ accountId, seam: 'summary', feature: 'sprint_briefs', model: SPRINT_BRIEF_MODEL, costUsd, inputTokens, outputTokens })
+            .recordAiUsage({ accountId, seam: 'summary', feature: 'sprint_briefs', ...u })
             .catch((err) => ctx.log.warn({ err }, 'sprint briefs: usage record failed'));
           const v = validateSprintBrief(
             out.text,

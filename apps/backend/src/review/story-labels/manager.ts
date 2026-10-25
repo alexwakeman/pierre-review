@@ -8,6 +8,8 @@ import {
 } from '@pierre-review/shared';
 import { AiRuntimeMissingError } from '../../ai/runtime.js';
 import type { StoryLabelInput } from '../../db/story-label-input.js';
+import { cheapUsage } from '../cheap-usage.js';
+import type { CheapCompleteResult } from '../llm.js';
 import type { AgentContext } from '../agent-context.js';
 import { pickReviewNonce } from '../claude-review/prompts.js';
 import { labelMaxTokens, STORY_LABEL_SYSTEM, storyLabelPrompt, storyLabelUntrusted } from './prompt.js';
@@ -44,10 +46,8 @@ export interface StoryToLabel {
 }
 
 export interface CompleteFn {
-  (opts: { model: string; system: string; prompt: string; maxTokens: number }): Promise<{
-    text: string;
-    usage?: { inputTokens: number; outputTokens: number };
-  }>;
+  // The cheap seam's result: a Codex answer also names its provider, model and own US$ (review/cheap-usage.ts).
+  (opts: { model: string; system: string; prompt: string; maxTokens: number }): Promise<CheapCompleteResult>;
 }
 
 interface Slot {
@@ -254,19 +254,17 @@ async function runLabels(
             prompt: storyLabelPrompt(s.input, nonce),
             maxTokens: labelMaxTokens(s.input.criteria.length),
           });
-          const inputTokens = res.usage?.inputTokens ?? 0;
-          const outputTokens = res.usage?.outputTokens ?? 0;
-          const costUsd = labelCostUsd(inputTokens, outputTokens);
+          const u = cheapUsage(res, STORY_LABEL_MODEL, labelCostUsd);
+          const inputTokens = u.inputTokens ?? 0;
+          const outputTokens = u.outputTokens ?? 0;
+          const costUsd = u.costUsd;
           status.costUsd += costUsd;
           await ctx
             .recordAiUsage({
               accountId: a.accountId,
               seam: 'summary',
               feature: 'story_labels',
-              model: STORY_LABEL_MODEL,
-              costUsd,
-              inputTokens,
-              outputTokens,
+              ...u,
             })
             .catch((err) => ctx.log.warn({ err }, 'story labels: usage record failed'));
           const v = validateStoryLabels(res.text, s.input.criteria.length, {

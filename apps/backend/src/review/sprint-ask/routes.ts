@@ -10,6 +10,7 @@ import { resolveWorkspaceScope } from '../../db/queries.js';
 import type { AgentContext } from '../agent-context.js';
 import { AiRuntimeMissingError } from '../../ai/runtime.js';
 import { pickReviewNonce } from '../claude-review/prompts.js';
+import { cheapUsage } from '../cheap-usage.js';
 import { labelCostUsd, type CompleteFn } from '../story-labels/manager.js';
 import { capAskHistory, SPRINT_ASK_SYSTEM, sprintAskPrompt, sprintAskUntrusted, sprintMapText } from './prompt.js';
 
@@ -75,11 +76,12 @@ export function registerSprintAskRoutes(app: FastifyInstance, ctx: AgentContext)
         prompt: sprintAskPrompt(map, turns, question, nonce),
         maxTokens: ANSWER_TOKENS,
       });
-      const inputTokens = out.usage?.inputTokens ?? 0;
-      const outputTokens = out.usage?.outputTokens ?? 0;
-      const costUsd = labelCostUsd(inputTokens, outputTokens);
+      const u = cheapUsage(out, SPRINT_BRIEF_MODEL, labelCostUsd);
+      const inputTokens = u.inputTokens ?? 0;
+      const outputTokens = u.outputTokens ?? 0;
+      const costUsd = u.costUsd;
       await ctx
-        .recordAiUsage({ accountId, seam: 'summary', feature: 'sprint_ask', model: SPRINT_BRIEF_MODEL, costUsd, inputTokens, outputTokens })
+        .recordAiUsage({ accountId, seam: 'summary', feature: 'sprint_ask', ...u })
         .catch((err) => ctx.log.warn({ err }, 'sprint ask: usage record failed'));
       const answer = out.text.trim();
       return {

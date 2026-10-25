@@ -433,7 +433,7 @@ describe('ranking', () => {
     const usage: number[] = [];
     const rank = makeLinkRanker({
       complete: async () => ({ text: texts.shift()!, usage: { inputTokens: 1000, outputTokens: 100 } }),
-      onUsage: (u) => void usage.push(u.inputTokens),
+      onUsage: (u) => void usage.push(u.inputTokens ?? -1),
     });
     const out = await rank(req);
     expect(out.scores?.get(0)).toBe(3);

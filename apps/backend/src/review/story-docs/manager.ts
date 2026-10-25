@@ -241,10 +241,7 @@ async function runPipeline(job: StoryDocsJob, controller: AbortController): Prom
           accountId,
           seam: 'summary',
           feature: 'story_docs_shortlist',
-          model: STORY_DOCS_SHORTLIST_MODEL,
-          costUsd: u.costUsd,
-          inputTokens: u.inputTokens,
-          outputTokens: u.outputTokens,
+          ...u,
         })
         .catch((err) => ctx.log.warn({ err }, 'story docs: usage record failed')),
   });

@@ -41,6 +41,12 @@ export interface CheapCompleteOpts {
 export interface CheapCompleteResult {
   text: string;
   usage?: { inputTokens: number; outputTokens: number };
+  /** Which provider answered. Absent ⇒ Claude. ⚠ A Codex answer is NOT priced at Claude's rates. */
+  provider?: 'claude' | 'codex';
+  /** The model that answered, when the provider reports it (Codex always does). */
+  model?: string;
+  /** The provider's own US$ for the call (Codex: 0 on a ChatGPT login). Absent ⇒ the caller prices. */
+  costUsd?: number;
 }
 
 const DEFAULT_MODEL = 'claude-haiku-5-5';

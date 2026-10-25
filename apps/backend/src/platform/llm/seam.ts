@@ -15,6 +15,11 @@ export interface LlmClient {
     inputTokens: number;
     outputTokens: number;
     costUsd: number;
+    // Who answered. 'codex' ⇒ `costUsd` is Codex's OWN figure (0 on a ChatGPT login), never a Claude
+    // price, and `model` is the Codex model: a ledger row must spread both (provider + model).
+    provider?: 'claude' | 'codex';
+    /** The answering model when the provider named it (Codex); absent ⇒ the caller's own model. */
+    model?: string;
   }>;
 }
 
@@ -37,6 +42,31 @@ export function haikuCostUsd(inputTokens: number, outputTokens: number): number 
   return priceTokens(REPORT_MODEL_PRICING[HAIKU_MODEL], inputTokens, outputTokens);
 }
 
+type HostResult = Awaited<ReturnType<ProContext['llm']['complete']>>;
+
+/**
+ * The host's answer → the client's. A CODEX answer keeps Codex's own US$ (0 on a ChatGPT login), its
+ * model and its provider — never a Claude price; a Claude answer is priced at the caller's rates.
+ */
+function fromHost(
+  res: HostResult,
+  claudeCostUsd: (inputTokens: number, outputTokens: number) => number,
+): Awaited<ReturnType<LlmClient['complete']>> {
+  const inputTokens = res.usage?.inputTokens ?? 0;
+  const outputTokens = res.usage?.outputTokens ?? 0;
+  if (res.provider === 'codex') {
+    return {
+      text: res.text,
+      inputTokens,
+      outputTokens,
+      costUsd: res.costUsd ?? 0,
+      provider: 'codex',
+      ...(res.model ? { model: res.model } : {}),
+    };
+  }
+  return { text: res.text, inputTokens, outputTokens, costUsd: claudeCostUsd(inputTokens, outputTokens), provider: 'claude' };
+}
+
 export function makeHaikuClient(ctx: ProContext): LlmClient {
   return {
     async complete(req) {
@@ -46,10 +76,7 @@ export function makeHaikuClient(ctx: ProContext): LlmClient {
         prompt: req.user,
         maxTokens: req.maxTokens,
       });
-      const inputTokens = res.usage?.inputTokens ?? 0;
-      const outputTokens = res.usage?.outputTokens ?? 0;
-      const costUsd = haikuCostUsd(inputTokens, outputTokens);
-      return { text: res.text, inputTokens, outputTokens, costUsd };
+      return fromHost(res, haikuCostUsd);
     },
   };
 }
@@ -219,10 +246,7 @@ export function makeReportClient(ctx: ProContext, model: ReportModel): LlmClient
         prompt: req.user,
         maxTokens: req.maxTokens,
       });
-      const inputTokens = res.usage?.inputTokens ?? 0;
-      const outputTokens = res.usage?.outputTokens ?? 0;
-      const costUsd = priceTokens(price, inputTokens, outputTokens);
-      return { text: res.text, inputTokens, outputTokens, costUsd };
+      return fromHost(res, (i, o) => priceTokens(price, i, o));
     },
   };
 }

@@ -1,7 +1,6 @@
 import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  REFERENCE_DOC_CRAWL_RANK_MODEL,
   type ReferenceDocCrawl,
   type ReferenceDocSourceKind,
   type ReferenceDocStatus,
@@ -207,7 +206,7 @@ async function crawlSource(job: Job, row: DocRow, crawl: ReferenceDocCrawl, repo
     complete: (o) => cheapComplete(o),
     onUsage: (u) =>
       ctx
-        .recordAiUsage({ accountId, seam: 'summary', feature: 'docs_crawl_rank', model: REFERENCE_DOC_CRAWL_RANK_MODEL, ...u })
+        .recordAiUsage({ accountId, seam: 'summary', feature: 'docs_crawl_rank', ...u })
         .catch(() => {}),
   });
   let outcome;

@@ -1183,6 +1183,11 @@ export interface ProContext {
     }): Promise<{
       text: string;
       usage?: { inputTokens: number; outputTokens: number };
+      // Who answered (review/llm.ts CheapCompleteResult). 'codex' ⇒ `costUsd` is Codex's own figure
+      // and `model` the Codex model: never price it at a Claude rate. Optional ⇒ no apiVersion bump.
+      provider?: 'claude' | 'codex';
+      model?: string;
+      costUsd?: number;
     }>;
     // Best-effort detection of whether Claude auth is available (for a pre-flight
     // before an LLM/agent run). Mirrors Claude Review's detectClaudeAuth.

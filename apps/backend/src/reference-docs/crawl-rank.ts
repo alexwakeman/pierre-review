@@ -1,5 +1,6 @@
 import { REFERENCE_DOC_CRAWL_RANK_MODEL } from '@pierre-review/shared';
 import { pickReviewNonce } from '../review/claude-review/prompts.js';
+import { cheapUsage, type CheapUsage } from '../review/cheap-usage.js';
 import { labelCostUsd, type CompleteFn } from '../review/story-labels/manager.js';
 import type { RankAnswer, RankFn, RankRequest } from './crawl.js';
 
@@ -80,7 +81,7 @@ export function parseRankAnswer(text: string, count: number): Map<number, number
 export interface LinkRankerDeps {
   complete: CompleteFn;
   /** Records each call's cost (ai_usage). Failures are the caller's to swallow. */
-  onUsage?: (u: { costUsd: number; inputTokens: number; outputTokens: number }) => Promise<void> | void;
+  onUsage?: (u: CheapUsage) => Promise<void> | void;
 }
 
 /** The crawl's RankFn over a completion seam. A thrown completion (no runtime, no credential) propagates. */
@@ -96,13 +97,14 @@ export function makeLinkRanker(deps: LinkRankerDeps): RankFn {
         prompt: crawlRankPrompt(req, nonce),
         maxTokens: 64 + req.links.length * 16,
       });
-      const inputTokens = res.usage?.inputTokens ?? 0;
-      const outputTokens = res.usage?.outputTokens ?? 0;
-      const costUsd = labelCostUsd(inputTokens, outputTokens);
+      const u = cheapUsage(res, REFERENCE_DOC_CRAWL_RANK_MODEL, labelCostUsd);
+      const inputTokens = u.inputTokens ?? 0;
+      const outputTokens = u.outputTokens ?? 0;
+      const costUsd = u.costUsd;
       out.costUsd += costUsd;
       out.inputTokens += inputTokens;
       out.outputTokens += outputTokens;
-      await deps.onUsage?.({ costUsd, inputTokens, outputTokens });
+      await deps.onUsage?.(u);
       out.scores = parseRankAnswer(res.text, req.links.length);
     }
     return out;
