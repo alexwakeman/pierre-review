@@ -171,6 +171,20 @@ finding is checked by a second agent, then fixed in the same phase.
 
 ## 6. Decisions for the user (before Phase 1)
 
+**DECIDED 2026-10-25** (after the spike):
+- **Codex sign-in:** Limn's OWN Codex home, `~/.limn/codex` (one extra `codex login`, from Settings
+  or `limn ai login codex`). Limn writes its whole `config.toml` there, including the hook trust
+  entry; non-ephemeral session files there make validation retries (`exec resume`) possible. The
+  user's `~/.codex` is never read or written.
+- **ChatGPT share:** TOKEN-WEIGHTED — Limn's tokens in the window ÷ the account's tokens in the
+  window (`account/usage/read`) × the window's `usedPercent` (`account/rateLimits/read`). Whole-percent
+  readings, so the share is coarse; copy says so behind the ⓘ.
+- **Default when both are signed in:** Claude. Codex is chosen in Settings until Phase 5.
+- **Scope:** ONE provider for every AI feature in v1.
+- Still open: decision 5 (the Phase 5 PRs and quota), asked at Phase 5.
+
+Original questions:
+
 1. When both Claude and Codex are signed in, which does `auto` use? (Suggested: Claude, the one
    the rules were tuned on, until Phase 5 says otherwise.)
 2. Should the provider be one choice for everything, or per feature (for example Codex for
