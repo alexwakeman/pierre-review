@@ -106,7 +106,10 @@ const REPORTING = `- Report each passage you relied on in \`docReferences\`: the
  * (`docsNavigationPrompt`), then what THIS kind of run does with it and how to report it.
  */
 export function docsReviewPromptBlock(dir: string, kind: DocsReviewKind): string {
-  const nav = docsNavigationPrompt(dir);
+  // ⚠ ALWAYS the Claude words: both callers re-word the FINISHED block for Codex themselves
+  // (review/codex-wording.ts, ticket-review/prompts.ts codexDocsWording), and their swaps match
+  // Claude's sentences — a block already rendered for the active provider would slip past them.
+  const nav = docsNavigationPrompt(dir, 'claude');
   if (kind === 'pr' || kind === 'pr_diff_only') {
     return `${nav}
 
