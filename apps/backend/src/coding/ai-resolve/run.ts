@@ -15,6 +15,7 @@ import {
 } from '../../conflict/session.js';
 import { acceptAiChoices, AI_CHOICE_REFUSAL_TEXT, type AiChoiceInput } from './validate.js';
 import { buildAiResolvePrompt } from './prompt.js';
+import { partialSpendOf } from '../partial-spend.js';
 
 /**
  * "RESOLVE WITH CLAUDE" — the agentic half of the merge-conflict resolver (CORE, free, LOCAL ONLY:
@@ -176,6 +177,14 @@ async function runJob(
 ): Promise<void> {
   let worktree: { owner: string; name: string; repoCloneDir: string; worktreePath: string } | null =
     null;
+  // Declared out here so the catch can keep what an answer already got accepted (below).
+  const accepted = new Map<string, ConflictAiChoice>();
+  let summary: string | null = null;
+  // CODEX: its final answer IS the call, so the FIRST answer with refused choices says so
+  // (`isError`) to earn the provider's one retry with the refusals as its reason. A second answer
+  // is kept as it is — the regions it still gets wrong stay undecided for the reader, exactly as
+  // on Claude when the model stops calling. Claude's replies are today's, byte for byte.
+  let codexRetryAsked = false;
   try {
     if (created) await input.runOpen(rec, input.log);
     else await waitForBuild(rec);
@@ -233,13 +242,6 @@ async function runJob(
     const prepared = await prepWorktree(model.owner, model.name, model.number, model.headSha, token);
     worktree = { owner: model.owner, name: model.name, ...prepared };
 
-    const accepted = new Map<string, ConflictAiChoice>();
-    let summary: string | null = null;
-    // CODEX: its final answer IS the call, so the FIRST answer with refused choices says so
-    // (`isError`) to earn the provider's one retry with the refusals as its reason. A second answer
-    // is kept as it is — the regions it still gets wrong stay undecided for the reader, exactly as
-    // on Claude when the model stops calling. Claude's replies are today's, byte for byte.
-    let codexRetryAsked = false;
     const shape = await submitResolutionShape();
     const tools: AgentToolServer = {
       server: 'resolve',
@@ -324,6 +326,18 @@ async function runJob(
   } catch (err) {
     if (abort.signal.aborted) {
       settle(rec, { status: 'cancelled', choices: [] });
+    } else if (codexRetryAsked && accepted.size > 0) {
+      // CODEX: the first answer was partly refused and its one retry then FAILED (bad shape, a
+      // non-zero exit, a timeout). What the first answer validly decided stands — as on Claude, where
+      // a model that stops calling keeps every accepted region; the rest stay undecided for the
+      // reader. (`codexRetryAsked` is only ever set on Codex.) Codex wrote its own ledger row.
+      input.log.warn({ err, prId: rec.prId }, 'ai-resolve: the Codex retry failed; keeping the accepted choices');
+      settle(rec, {
+        status: 'succeeded',
+        choices: [...accepted.values()],
+        summary,
+        costUsd: partialSpendOf(err)?.costUsd ?? null,
+      });
     } else {
       input.log.warn({ err, prId: rec.prId }, 'ai-resolve run failed');
       settle(rec, { status: 'failed', error: 'Claude couldn’t finish resolving these conflicts.' });

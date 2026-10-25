@@ -478,6 +478,25 @@ describe('the docs build on Codex (kind: docs_build)', () => {
     expect(retry.stdin).not.toMatch(/finish_document|record_sections/);
   });
 
+  it('a first answer that records NOTHING (no finish attempt used): the retry is still the last attempt and is accepted with what it has', async () => {
+    plays('docs-build-badnames.jsonl', 'docs-build-missing.jsonl');
+    const res = await run('sections', setup()).p;
+    expect(calls()).toHaveLength(2);
+    expect(calls()[1].stdin).toMatch(/999-nope\.md/);
+    expect(res.failureReason).toBeUndefined();
+    expect(res.finish?.title).toBe('Billing handbook');
+    expect([...res.state.recorded.keys()]).toEqual(['001-introduction.md']);
+  });
+
+  it('a first answer that fails Limn’s shape check (the handler never ran): the retry is the last attempt', async () => {
+    plays('docs-build-notjson.jsonl', 'docs-build-missing.jsonl');
+    const res = await run('sections', setup()).p;
+    expect(calls()).toHaveLength(2);
+    expect(res.failureReason).toBeUndefined();
+    expect(res.finish?.title).toBe('Billing handbook');
+    expect([...res.state.recorded.keys()]).toEqual(['001-introduction.md']);
+  });
+
   it('a PDF never runs on Codex: refused with its own sentence before anything starts', async () => {
     plays('docs-build-good.jsonl');
     const res = await run('pdf', setup()).p;

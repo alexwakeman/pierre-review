@@ -23,7 +23,7 @@ import {
 } from '../../lib/claudeReviewFollowUp.js';
 import { fixPillLabel } from '../../lib/claudeAutoReview.js';
 import { unlockReviewSound } from '../../lib/sound.js';
-import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
+import { aiReadyFor, useAiCapabilities } from '../../hooks/useAiCapabilities.js';
 import { CheckIcon, SparkleIcon } from '../Icons.js';
 import { VerdictIcon } from '../VerdictIcon.js';
 import { AutoMark, GREY_PILL, MUTED, PILL } from './ClaudeReviewCell.js';
@@ -201,7 +201,7 @@ export function ClaudeReviewActions({
 }): JSX.Element | null {
   const start = useStartReviewFromList(prId);
   const starting = useClaudeReviewStarting(prId);
-  const ready = useAiCapabilities().ready;
+  const ready = aiReadyFor(useAiCapabilities(), 'review');
   const cell = reviewCellFor(state, starting);
   const held = heldByAutoReview(state);
   const showError = start.isError && !starting && (held || !isAutoReviewHoldError(start.error));

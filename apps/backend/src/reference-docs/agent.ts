@@ -214,8 +214,11 @@ export async function runBuildAgent(args: RunBuildArgs): Promise<RunBuildResult>
   const provider = getActiveProvider();
   const onCodex = provider.id === 'codex';
   const state = newBuildState(args.mode, args.expected);
-  // Codex answers at most twice (its one retry): that retry is the build's last finish attempt.
-  if (onCodex) state.finishAttempts = MAX_FINISH_ATTEMPTS - 2;
+  // Codex answers at most twice (its one retry): that retry is the build's LAST finish attempt,
+  // whatever became of the first answer — refused by judgeRecord before any finish was tried, or
+  // failing Limn's shape check so the handler never ran. The provider says when its retry starts
+  // (`status` with `retry`), and the handler then forces the attempt count (below).
+  let codexRetrying = false;
   let finish: AcceptedFinish | null = null;
   let outcome: AgentOutcome | null = null;
   let restoreEnv: (() => void) | null = null;
@@ -300,6 +303,7 @@ export async function runBuildAgent(args: RunBuildArgs): Promise<RunBuildResult>
           const rec = judgeRecord(state, { sections: p.sections }, written);
           emit();
           if (rec.isError) return text(codexRefusalWords(rec.reply), true);
+          if (codexRetrying) state.finishAttempts = Math.max(state.finishAttempts, MAX_FINISH_ATTEMPTS - 1);
           const j = judgeFinish(state, { title: p.title, summary: p.summary, topics: p.topics }, written);
           if ('accepted' in j) {
             finish = j.accepted;
@@ -365,6 +369,8 @@ export async function runBuildAgent(args: RunBuildArgs): Promise<RunBuildResult>
           emit();
         } else if (p.kind === 'outcome') {
           outcome = p.outcome;
+        } else if (p.kind === 'status' && p.retry === true) {
+          codexRetrying = true;
         }
       },
     }));

@@ -634,7 +634,7 @@ export async function runAgentUnchecked(spec: AgentRunSpec): Promise<AgentRunRes
           if (!first.threadId) {
             failure = `Codex's answer did not pass Limn's checks: ${verdict.reason}`;
           } else {
-            spec.onProgress?.({ kind: 'status', text: 'Correcting the answer' });
+            spec.onProgress?.({ kind: 'status', text: 'Correcting the answer', retry: true });
             const retry = await runCodexExec(toResumeArgs(args, first.threadId), {
               cwd,
               env,

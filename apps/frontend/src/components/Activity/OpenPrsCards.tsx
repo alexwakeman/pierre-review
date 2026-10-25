@@ -2,7 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type R
 import type { ClaudeReviewPrState, TicketMergedPr, TicketReviewState, TimelinePr, User } from '@pierre-review/shared';
 import { useRepos, useUsers } from '../../hooks/useTimeline.js';
 import { useMaintainersByRepo } from '../../hooks/useMaintainers.js';
-import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
+import { aiReadyFor, useAiCapabilities } from '../../hooks/useAiCapabilities.js';
 import { useClaudeReviewStarting, useClaudeReviewStates } from '../../hooks/useClaudeReview.js';
 import { useWorkspaceAutoReview } from '../../hooks/useWorkspaceAutoReview.js';
 import { reviewWorkInProgress } from '../../lib/claudeReviewColumn.js';
@@ -707,7 +707,7 @@ function StackCoverage({
   state: TicketReviewState | undefined;
   prId: number;
 }): JSX.Element | null {
-  const ready = useAiCapabilities().ready;
+  const ready = aiReadyFor(useAiCapabilities(), 'ticket_review');
   const start = useStartTicketReview(ident);
   const starting = useTicketReviewStarting(ident);
   const cov = ticketCoverage(state);

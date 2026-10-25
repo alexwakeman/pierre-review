@@ -30,7 +30,7 @@ import { ciCardPill } from '../../lib/ciReview.js';
 import { fixPillLabel } from '../../lib/claudeAutoReview.js';
 import { unlockReviewSound } from '../../lib/sound.js';
 import type { CardTicketPill, CoverageTone } from '../../lib/ticketReview.js';
-import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
+import { aiReadyFor, useAiCapabilities } from '../../hooks/useAiCapabilities.js';
 import { CheckIcon, SparkleIcon, WarningIcon } from '../Icons.js';
 import { VerdictIcon } from '../VerdictIcon.js';
 
@@ -127,7 +127,7 @@ export function ClaudeReviewPanel({
   // Not set up yet (no AI runtime, or no Claude credential detected): Review opens the PR's
   // Claude Review tab, which says what is missing in place of its own Run button. The panel has
   // no room for that sentence, and a start here would only fail.
-  const ready = useAiCapabilities().ready;
+  const ready = aiReadyFor(useAiCapabilities(), 'review');
   const run = (e: MouseEvent): void => {
     e.stopPropagation();
     if (!ready) {

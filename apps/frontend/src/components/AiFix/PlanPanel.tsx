@@ -224,9 +224,12 @@ export function PlanPanel({
         </div>
       )}
 
+      {/* Three buttons, three gates: "Update plan" is a PLAN run, "Approve and build" a FIX run (a
+          provider may run one and not the other — Codex), and "Discard plan" runs no model at all,
+          so it is never gated: a plan must always be clearable, or it blocks the PR's auto fixes. */}
       {ready && plan && (
-        <AiRunGate kind="plan" auth={auth}>
-          <div className="mt-3">
+        <div className="mt-3">
+          <AiRunGate kind="plan" auth={auth} meter={false}>
             <textarea
               aria-label="Change the plan"
               className="w-full rounded border border-gray-300 bg-transparent px-2 py-1 text-xs dark:border-gray-700"
@@ -247,19 +250,23 @@ export function PlanPanel({
                 Keep it under {AI_FIX_PLAN_MAX_MESSAGE_CHARS.toLocaleString('en-US')} characters.
               </p>
             )}
-            <div className="mt-2 flex flex-wrap items-center gap-2">
+            <div className="mt-2">
               <button type="button" data-ai-run className={BTN_SECONDARY} disabled={busy || text === '' || tooLong} onClick={send}>
                 Update plan
               </button>
+            </div>
+          </AiRunGate>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <AiRunGate kind="fix" auth={auth}>
               <button type="button" data-ai-run className={BTN_PRIMARY} disabled={busy} onClick={doApprove}>
                 Approve and build
               </button>
-              <button type="button" className={BTN_SECONDARY} disabled={busy} onClick={() => discard.mutate(fix.id)}>
-                Discard plan
-              </button>
-            </div>
+            </AiRunGate>
+            <button type="button" className={BTN_SECONDARY} disabled={busy} onClick={() => discard.mutate(fix.id)}>
+              Discard plan
+            </button>
           </div>
-        </AiRunGate>
+        </div>
       )}
       {actionError != null && <p className="mt-1 text-[12px] text-red-600 dark:text-red-400">{errText(actionError)}</p>}
     </div>

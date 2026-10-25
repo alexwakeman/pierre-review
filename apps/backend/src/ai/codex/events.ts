@@ -136,7 +136,8 @@ export function cleanCodexError(message: string): string {
 
 /** What a runner shows while a run works — provider-neutral. */
 export type CodexProgress =
-  | { kind: 'status'; text: string }
+  /** `retry`: the provider is about to run its ONE retry turn (ai/providers/codex.ts). */
+  | { kind: 'status'; text: string; retry?: true }
   | { kind: 'tool'; tool: string; status: 'started' | 'completed' | 'failed'; text: string; detail: string | null }
   | { kind: 'file_change'; paths: string[]; status: 'completed' | 'failed' | 'in_progress' }
   | { kind: 'message'; text: string }

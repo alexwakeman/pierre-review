@@ -183,6 +183,10 @@ switch (scenario) {
     if (resumed) { msg({ choices: [{ file: 0, region: 1, fingerprint: 'fp1', decision: 'theirs', lines: null, rationale: 'main renamed it', confidence: 'high' }], summary: 'Took main.' }); done(150, 20); }
     else { msg({ choices: [{ file: 0, region: 1, fingerprint: 'WRONG', decision: 'theirs', lines: null, rationale: 'x', confidence: 'high' }], summary: 'First go.' }); done(80, 10); }
     break;
+  case 'resolve_partial_then_fail':
+    if (resumed) { msg('not json at all'); done(150, 20); }
+    else { msg({ choices: [{ file: 0, region: 1, fingerprint: 'fp1', decision: 'theirs', lines: null, rationale: 'main renamed it', confidence: 'high' }, { file: 0, region: 3, fingerprint: 'WRONG', decision: 'ours', lines: null, rationale: null, confidence: null }], summary: 'Took main for one.' }); done(80, 10); }
+    break;
   case 'resolve_refused_twice':
     msg({ choices: [{ file: 0, region: 1, fingerprint: 'WRONG', decision: 'theirs', lines: null, rationale: null, confidence: null }], summary: 'Tried.' }); done(80, 10); break;
   default: msg('?'); done(1, 1);
@@ -451,6 +455,8 @@ describe('Resolve with Claude, on Codex', () => {
           regions: [
             { id: 0, kind: 'unchanged', base: ['a'], ours: ['a'], theirs: ['a'], fingerprint: 'fp0', wand: null, mergedLines: null },
             { id: 1, kind: 'conflict', base: ['b'], ours: ['c'], theirs: ['d'], fingerprint: 'fp1', wand: null, mergedLines: null },
+            { id: 2, kind: 'unchanged', base: ['e'], ours: ['e'], theirs: ['e'], fingerprint: 'fp2', wand: null, mergedLines: null },
+            { id: 3, kind: 'conflict', base: ['f'], ours: ['g'], theirs: ['h'], fingerprint: 'fp3', wand: null, mergedLines: null },
           ],
         },
       ],
@@ -525,6 +531,22 @@ describe('Resolve with Claude, on Codex', () => {
     expect(view.status).toBe('succeeded');
     expect(view.choices).toEqual([]);
     expect(T.recorded).toHaveLength(1);
+  });
+
+  it('a retry that FAILS keeps what the first answer got accepted: succeeded, never failed', async () => {
+    scenario('resolve_partial_then_fail');
+    const { view, recordAiUsage } = await resolveOnce();
+    const [, retry] = calls();
+    expect(retry.resumed).toBe(true);
+    expect(retry.stdin).toContain('fingerprint does not match the region');
+    expect(view.status).toBe('succeeded');
+    expect(view.choices).toEqual([
+      expect.objectContaining({ fileIndex: 0, regionId: 1, decision: 'theirs', rationale: 'main renamed it' }),
+    ]);
+    expect(view.summary).toBe('Took main for one.');
+    // The provider recorded the run's usage once; the run module wrote none.
+    expect(T.recorded).toHaveLength(1);
+    expect(recordAiUsage).not.toHaveBeenCalled();
   });
 });
 

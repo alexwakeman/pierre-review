@@ -167,6 +167,33 @@ describe('the wiring', () => {
     expect(read(join(root, 'components', 'ClaudeReviewChat.tsx'))).toMatch(/<AiRunGate kind="review_chat">/);
   });
 
+  it('no board button starts a run off the top-level `ready`: each asks its own kind', () => {
+    // Under Codex the top-level `auth` stays 'none' while `review` / `ticket_review` are 'ok'.
+    for (const f of files) {
+      expect(read(f), f).not.toMatch(/useAiCapabilities\(\)\.ready\b|\bai\.ready\b/);
+    }
+    const act = join(root, 'components', 'Activity');
+    expect(read(join(act, 'OpenPrsCards.tsx'))).toMatch(/aiReadyFor\(useAiCapabilities\(\), 'ticket_review'\)/);
+    expect(read(join(act, 'PendingClaude.tsx'))).toMatch(/aiReadyFor\(useAiCapabilities\(\), 'review'\)/);
+    expect(read(join(act, 'ClaudeReviewCell.tsx'))).toMatch(/aiReadyFor\(useAiCapabilities\(\), 'review'\)/);
+  });
+
+  it('the plan panel gates each button on what it runs; Discard runs no model and is never gated', () => {
+    const src = read(join(root, 'components', 'AiFix', 'PlanPanel.tsx'));
+    const planGate = src.slice(src.indexOf('<AiRunGate kind="plan"'), src.indexOf('</AiRunGate>'));
+    expect(planGate).toMatch(/Update plan/);
+    expect(planGate).not.toMatch(/Approve and build|Discard plan/);
+    const fixGate = src.slice(src.indexOf('<AiRunGate kind="fix"'));
+    expect(fixGate.slice(0, fixGate.indexOf('</AiRunGate>'))).toMatch(/Approve and build/);
+    // Discard sits after every gate has closed.
+    expect(src.lastIndexOf('</AiRunGate>')).toBeLessThan(src.lastIndexOf('Discard plan'));
+    // AI Fix offers "Plan first" only when the provider can run a plan.
+    const tab = read(join(root, 'components', 'AiFixTab.tsx'));
+    expect(tab).toMatch(/const canPlan = aiAuthFor\(ai, 'plan'\)\.auth !== 'none'/);
+    expect(tab).toMatch(/const planFirst = planFirstPicked && canPlan/);
+    expect(tab).toMatch(/\{canPlan && \(\s*<label/);
+  });
+
   it('every gate names its run kind (a gate with none reads the strictest, "any agent" answer)', () => {
     for (const f of files) {
       for (const m of read(f).matchAll(/<AiRunGate\b[^>]*>/g)) {

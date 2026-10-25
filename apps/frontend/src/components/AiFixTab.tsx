@@ -15,7 +15,7 @@ import { relativeTime, safeExternalUrl } from '../lib/ui.js';
 // The fix run's phase ladder lives in lib/ so this tab and the bottom-right AiFixBanner cannot
 // print two different percentages for one run.
 import { PHASE_LABEL, fixProgressPct } from '../lib/aiFixProgress.js';
-import { useAiCapabilities } from '../hooks/useAiCapabilities.js';
+import { aiAuthFor, useAiCapabilities } from '../hooks/useAiCapabilities.js';
 import { AiRunGate } from './AiSetup.js';
 import { useFilters } from '../store/filters.js';
 import {
@@ -125,8 +125,12 @@ function FixerSection({
   const startPlan = useStartPlan(pr.id);
   const cancelFix = useCancelFix(pr.id);
   // "Plan first" (plan mode, manual only): a read-only planning pass the reader steers and approves
-  // before anything is built. Off by default.
-  const [planFirst, setPlanFirst] = useState(false);
+  // before anything is built. Off by default. A provider that cannot run a PLAN (Codex, until it is
+  // ported) gets no checkbox and never sends one — "Make a plan" would only fail.
+  const ai = useAiCapabilities();
+  const canPlan = aiAuthFor(ai, 'plan').auth !== 'none';
+  const [planFirstPicked, setPlanFirst] = useState(false);
+  const planFirst = planFirstPicked && canPlan;
 
   const noteAiFixRun = useFilters((s) => s.noteAiFixRun);
   // In-flight read off the SHARED start key, not this mount's `startFix.isPending` — a per-mount
@@ -309,15 +313,17 @@ function FixerSection({
                         </option>
                       ))}
                     </select>
-                    <label className="flex cursor-pointer items-center gap-1.5 text-xs text-gray-800 dark:text-gray-100">
-                      <input
-                        type="checkbox"
-                        checked={planFirst}
-                        disabled={fixStarting}
-                        onChange={(e) => setPlanFirst(e.target.checked)}
-                      />
-                      Plan first
-                    </label>
+                    {canPlan && (
+                      <label className="flex cursor-pointer items-center gap-1.5 text-xs text-gray-800 dark:text-gray-100">
+                        <input
+                          type="checkbox"
+                          checked={planFirst}
+                          disabled={fixStarting}
+                          onChange={(e) => setPlanFirst(e.target.checked)}
+                        />
+                        Plan first
+                      </label>
+                    )}
                     {/* No AI runtime or no Claude credential: one line (or the one-time setup) in
                         place of the start button. */}
                     <AiRunGate kind="fix" auth={data?.auth}>
