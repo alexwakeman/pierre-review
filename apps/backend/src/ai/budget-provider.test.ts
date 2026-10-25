@@ -106,6 +106,10 @@ describe('the ledger is read per provider', () => {
     let at = weekFrom - 60_000;
     AS._setCodexProbeForTest(async () => ({ atMs: at, account, reading, lifetimeTokens: lifetime, daily: null }));
     await AS.kickCodexProbe({ force: true, nowMs: at });
+    // A sample just before the 5-hour window opened (no account use since the week opened): the
+    // week's start sample is DAYS older than that window, so it cannot count as its start.
+    at = fiveReset - 5 * 3600_000 - 60_000;
+    await AS.kickCodexProbe({ force: true, nowMs: at });
     lifetime = 1400;
     at = now;
     await AS.kickCodexProbe({ force: true, nowMs: now });

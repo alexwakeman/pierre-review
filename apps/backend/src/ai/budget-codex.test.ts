@@ -18,6 +18,7 @@ import {
   decideAiBudget,
   ledgerTokensIn,
   resolveAiBudgetSettings,
+  type AiAccountTokenSpan,
   type AiLedgerRow,
   type AiUsageReading,
 } from '@pierre-review/shared';
@@ -36,6 +37,9 @@ function reading(weekPct: number | null, fivePct: number | null): AiUsageReading
 }
 const row = (atMs: number, inputTokens: number, outputTokens = 0): AiLedgerRow => ({ atMs, usd: 0, inputTokens, outputTokens });
 const on = resolveAiBudgetSettings({ enabled: true });
+// The account's tokens over the WHOLE window (the span the fold then counts Limn's rows over too).
+const span = (r: AiUsageReading | null, which: 'week' | 'five_hour', tokens: number | null): AiAccountTokenSpan | null =>
+  tokens == null ? null : { tokens, ...budgetWindowStart(r, NOW, which) };
 
 function decide(r: AiUsageReading | null, ledger: AiLedgerRow[], week: number | null, five: number | null, settings = on) {
   return decideAiBudget({
@@ -46,7 +50,7 @@ function decide(r: AiUsageReading | null, ledger: AiLedgerRow[], week: number | 
     costs: NO_COSTS,
     nowMs: NOW,
     provider: 'codex',
-    accountTokens: { week, fiveHour: five },
+    accountTokens: { week: span(r, 'week', week), fiveHour: span(r, 'five_hour', five) },
   });
 }
 
@@ -59,8 +63,8 @@ describe('codexWindowSharePct — one window', () => {
     expect(codexWindowSharePct(0, 0, 90)).toBe(0);
     expect(codexWindowSharePct(0, null, 90)).toBe(0);
   });
-  it("the account's tokens unknown or zero ⇒ the whole usedPercent is taken as Limn's (cautious)", () => {
-    expect(codexWindowSharePct(10, null, 7)).toBe(7);
+  it("the account's tokens UNKNOWN ⇒ the share is unknown (null, never blocks); KNOWN but zero ⇒ all of the window", () => {
+    expect(codexWindowSharePct(10, null, 7)).toBeNull();
     expect(codexWindowSharePct(10, 0, 7)).toBe(7);
   });
   it('weights the window by Limn’s fraction of the tokens, capped at all of it', () => {
@@ -123,6 +127,42 @@ describe('the windows', () => {
     const own = decide(reading(30, 6), [row(NOW - H, 100)], 1000, 100, resolveAiBudgetSettings({ enabled: true, fiveHourSharePct: 10 }));
     expect(own.overBudget).toBe(false);
   });
+  it("Limn's tokens are counted over the SAME span as the account's, never the whole window", () => {
+    // After a restart the account is only known over the last hour (300 tokens), while Limn spent
+    // 900 tokens earlier in the week and 100 in that hour. Same span: 100/300 of a 30% week = 10%,
+    // not 900+100 over 300 (capped to all of it, 30%).
+    const r = reading(30, 30);
+    const ledger = [row(NOW - 2 * D, 900), row(NOW - 30 * 60_000, 100)];
+    const s = decideAiBudget({
+      settings: resolveAiBudgetSettings({ enabled: true, weekSharePct: 50, fiveHourSharePct: 50 }),
+      route: 'login',
+      reading: r,
+      ledger,
+      costs: NO_COSTS,
+      nowMs: NOW,
+      provider: 'codex',
+      accountTokens: { week: { tokens: 300, fromMs: NOW - H, inclusive: false }, fiveHour: { tokens: 300, fromMs: NOW - H, inclusive: false } },
+    });
+    expect(s.subscription?.usedSharePct).toBe(10);
+    expect(s.subscription?.fiveHourUsedSharePct).toBe(10);
+  });
+  it('no account count at all ⇒ the share is unknown and nothing blocks, even with Limn’s tokens in a full window', () => {
+    const s = decide(reading(99, 99), [row(NOW - H, 5000)], null, null);
+    expect(s.subscription?.usedSharePct).toBeNull();
+    expect(s.subscription?.fiveHourUsedSharePct).toBeNull();
+    expect(s.overBudget).toBe(false);
+  });
+  it('a share over the line with NO reset read is never over (there is no moment the pause would end)', () => {
+    const noReset: AiUsageReading = {
+      week: { utilization: 50, resetsAtMs: null, observedAtMs: NOW },
+      fiveHour: { utilization: 50, resetsAtMs: null, observedAtMs: NOW },
+      subscriptionType: 'plus',
+    };
+    const s = decide(noReset, [row(NOW - H, 1000)], 1000, 1000);
+    expect(s.subscription?.usedSharePct).toBe(50);
+    expect(s.overBudget).toBe(false);
+    expect(s.resumesAt).toBeNull();
+  });
   it('a window whose reset has passed no longer applies: unknown, never over', () => {
     const stale: AiUsageReading = {
       week: { utilization: 80, resetsAtMs: NOW - H, observedAtMs: NOW - 2 * H },
@@ -156,7 +196,7 @@ describe('the decision and the header view on Codex', () => {
       nowMs: NOW,
       todayFromMs: NOW - 12 * H,
       provider: 'codex',
-      accountTokens: { week: 400, fiveHour: 400 },
+      accountTokens: { week: span(reading(10, 4), 'week', 400), fiveHour: span(reading(10, 4), 'five_hour', 400) },
     });
     expect(v.provider).toBe('codex');
     expect(v.account?.week?.usedPct).toBe(10);

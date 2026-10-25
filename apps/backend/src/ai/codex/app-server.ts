@@ -18,7 +18,7 @@
 // only when nothing has ever been read — the CLI and `detect()` use them, never a request path.
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
-import type { AiUsageReading } from '@pierre-review/shared';
+import type { AiAccountTokenSpan, AiUsageReading } from '@pierre-review/shared';
 import { codexBinaryPath } from '../runtime.js';
 import { codexHome, codexProcessEnv } from './home.js';
 import {
@@ -414,10 +414,10 @@ export function codexRateLimitsCached(): AiUsageReading | null {
 }
 
 /**
- * The account's tokens in `[fromMs, toMs]` — from the CACHE only (it never waits on a process; the
+ * The account's tokens over a span starting as near `fromMs` as is known, WITH that span's start (Limn's ledger is counted from it) — from the CACHE only (it never waits on a process; the
  * probe that fills it runs in the background). Null when not known. See `accountTokensInWindow`.
  */
-export async function codexAccountTokens(window: { fromMs: number; toMs: number }): Promise<number | null> {
+export async function codexAccountTokens(window: { fromMs: number; toMs: number }): Promise<AiAccountTokenSpan | null> {
   return accountTokensInWindow(cache.samples, cache.last?.daily ?? null, window.fromMs, window.toMs);
 }
 

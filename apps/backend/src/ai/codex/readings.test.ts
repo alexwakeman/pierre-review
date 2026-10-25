@@ -97,39 +97,43 @@ describe('account/usage/read', () => {
   });
 });
 
-describe("the account's tokens in a window", () => {
+describe("the account's tokens in a window — WITH the span they cover", () => {
   const H = 3600_000;
   const D = 24 * H;
+  const M = 60_000;
   const T0 = Date.UTC(2026, 9, 20);
-  it('EXACT from two lifetime samples bracketing the window', () => {
+  it('EXACT from a sample taken just before the window opened (within the probe interval + slack)', () => {
     const samples = [
-      { atMs: T0 - H, lifetimeTokens: 1000 },
+      { atMs: T0 - 4 * M, lifetimeTokens: 1000 },
       { atMs: T0 + H, lifetimeTokens: 1300 },
       { atMs: T0 + 3 * H, lifetimeTokens: 1600 },
     ];
-    expect(accountTokensInWindow(samples, null, T0, T0 + 4 * H)).toBe(600);
+    expect(accountTokensInWindow(samples, null, T0, T0 + 4 * H)).toEqual({ tokens: 600, fromMs: T0 - 4 * M, inclusive: false });
     // The newest sample at or before the window's END: one taken later is not counted.
-    expect(accountTokensInWindow(samples, null, T0, T0 + 2 * H)).toBe(300);
+    expect(accountTokensInWindow(samples, null, T0, T0 + 2 * H)).toEqual({ tokens: 300, fromMs: T0 - 4 * M, inclusive: false });
+  });
+  it('a start sample OLDER than the limit is not the window’s start: the inside samples give a shorter span', () => {
+    // The sample days before the window would count the account's use before it (Limn's share too small).
+    const samples = [
+      { atMs: T0 - 2 * D, lifetimeTokens: 0 },
+      { atMs: T0 + H, lifetimeTokens: 50_000 },
+      { atMs: T0 + 2 * H, lifetimeTokens: 50_080 },
+    ];
+    expect(accountTokensInWindow(samples, null, T0, T0 + 3 * H)).toEqual({ tokens: 80, fromMs: T0 + H, inclusive: false });
+    // With a single inside sample there is nothing to say: unknown.
+    expect(accountTokensInWindow(samples.slice(0, 2), null, T0, T0 + 3 * H)).toBeNull();
   });
   it('a 5-hour window with no sample before it is UNKNOWN — never a whole day from the buckets', () => {
     const daily = [{ startMs: T0, tokens: 99_999 }];
     expect(accountTokensInWindow([{ atMs: T0 + 2 * H, lifetimeTokens: 5 }], daily, T0 + H, T0 + 6 * H)).toBeNull();
   });
-  it('a week with no early sample falls back to the daily buckets that overlap it', () => {
+  it('a week with no early sample falls back to the daily buckets that overlap it, from the first bucket’s start', () => {
     const daily = [
       { startMs: T0 - 8 * D, tokens: 1 }, // before the week
       { startMs: T0 - D, tokens: 10 }, // overlaps its first hours
       { startMs: T0 + 3 * D, tokens: 100 },
     ];
-    expect(accountTokensInWindow([], daily, T0 - 12 * H, T0 + 7 * D - 12 * H)).toBe(110);
-  });
-  it('no sample before the window but two inside it ⇒ their difference, a LOWER bound', () => {
-    const samples = [
-      { atMs: T0 + H, lifetimeTokens: 50 },
-      { atMs: T0 + 2 * H, lifetimeTokens: 80 },
-    ];
-    expect(accountTokensInWindow(samples, null, T0, T0 + 3 * H)).toBe(30);
-    expect(accountTokensInWindow(samples.slice(0, 1), null, T0, T0 + 3 * H)).toBeNull();
+    expect(accountTokensInWindow([], daily, T0 - 12 * H, T0 + 7 * D - 12 * H)).toEqual({ tokens: 110, fromMs: T0 - D, inclusive: true });
   });
   it('EMPTY daily buckets are unknown, not zero (a Plus account answered [] while it had used tokens)', () => {
     expect(accountTokensInWindow([], [], T0, T0 + 7 * D)).toBeNull();
@@ -139,3 +143,4 @@ describe("the account's tokens in a window", () => {
     expect(accountTokensInWindow([], [], T0, T0)).toBeNull();
   });
 });
+

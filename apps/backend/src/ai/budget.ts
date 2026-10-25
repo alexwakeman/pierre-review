@@ -52,6 +52,7 @@ import {
   budgetWindowStart,
   decideAiBudget,
   type AiAccountTokens,
+  type AiAccountTokenSpan,
   liveFiveHourReset,
   liveWeekReset,
   resolveAiBudgetSettings,
@@ -127,7 +128,7 @@ async function readingFor(provider: AgentProvider): Promise<AiUsageReading | nul
 
 /** Codex on a ChatGPT sign-in: the account's tokens in each budget window (from the probe's cache). */
 async function codexAccountTokensFor(reading: AiUsageReading | null, nowMs: number): Promise<AiAccountTokens> {
-  const span = async (which: 'week' | 'five_hour'): Promise<number | null> =>
+  const span = async (which: 'week' | 'five_hour'): Promise<AiAccountTokenSpan | null> =>
     codexAccountTokens({ fromMs: budgetWindowStart(reading, nowMs, which).fromMs, toMs: nowMs });
   const [week, fiveHour] = await Promise.all([span('week'), span('five_hour')]);
   return { week, fiveHour };

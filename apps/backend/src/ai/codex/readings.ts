@@ -2,7 +2,7 @@
 // generated protocol schemas, `GetAccountResponse`, `GetAccountRateLimitsResponse`,
 // `GetAccountTokenUsageResponse`). Every parser answers null on a shape it does not recognise —
 // "no reading", which never blocks anything — and never throws.
-import type { AiUsageReading, AiUsageWindowReading } from '@pierre-review/shared';
+import type { AiAccountTokenSpan, AiUsageReading, AiUsageWindowReading } from '@pierre-review/shared';
 
 export interface CodexAccountInfo {
   /** A live sign-in (`account/read` with `refreshToken: true` answered an account). */
@@ -121,39 +121,57 @@ export interface LifetimeSample {
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
- * THE ACCOUNT'S TOKENS IN A WINDOW `[fromMs, toMs]` — the denominator of the token-weighted share
- * (docs/CODEX-PLAN.md § 6). Pure.
+ * How old a sample taken BEFORE a window may be and still count as that window's start: the probe's
+ * interval (5 minutes, ai/codex/app-server.ts) plus slack. An older one would put tokens the account
+ * spent BEFORE the window into the count, which makes Limn's share look SMALLER — the unsafe side.
+ */
+export const START_SAMPLE_MAX_AGE_MS = 15 * 60 * 1000;
+
+/**
+ * THE ACCOUNT'S TOKENS OVER A SPAN THAT STARTS AS CLOSE TO `fromMs` AS IS KNOWN, and that span's
+ * start — the denominator of the token-weighted share (docs/CODEX-PLAN.md § 6). ⚠ The caller counts
+ * LIMN'S tokens from the SAME `fromMs` (and `inclusive`) it returns, never from the window's own
+ * start: numerator and denominator over two different spans was the over-attribution this replaced
+ * (samples live in memory, so after a restart or a sign-in the account was counted over an hour while
+ * Limn's ledger was counted over the whole week). Pure.
  *
- *   1. EXACT, when a lifetime sample was taken at or before the window opened: the newest sample's
- *      count minus that one's. (The probe samples at most every 5 minutes while Limn runs; samples
- *      live in memory, so after a restart this needs the window to have opened since.)
- *   2. A LOWER BOUND, when two or more samples fall inside the window but none before it: newest
- *      minus oldest. Too few account tokens makes Limn's share look LARGER — the cautious side.
- *   3. DAILY BUCKETS, for a window of a day or more only: every bucket whose day overlaps the
- *      window. It can over-count the first day, which makes Limn's share look SMALLER, so it is
- *      never used for the 5-hour window, where a whole day's tokens could hide all of Limn's.
- *      (Measured 2026-10-25 on a Plus account: `dailyUsageBuckets` came back EMPTY, so in practice
- *      the samples carry the week.)
- *   4. null — unknown. The share fold then takes the whole window's `usedPercent` as Limn's (the
- *      cautious reading; docs/CODEX-PLAN.md § 8.1).
+ *   1. EXACT: a sample at or before `fromMs`, taken no more than `maxStartAgeMs` before it → the newest
+ *      sample's count minus that one's, from the sample's time (Limn's rows AFTER it).
+ *   2. A SHORTER SPAN, when no such sample exists but two or more fall inside the window: newest minus
+ *      oldest, from the OLDEST INSIDE sample's time.
+ *   3. DAILY BUCKETS, for a window of a day or more only: every bucket overlapping the window, from
+ *      the first such bucket's start (Limn's rows from then on, that start included). Never for the
+ *      5-hour window. (Measured 2026-10-25 on a Plus account: `dailyUsageBuckets` came back EMPTY.)
+ *   4. null — unknown. The share is then UNKNOWN too (null, which never blocks).
  */
 export function accountTokensInWindow(
   samples: readonly LifetimeSample[],
   daily: readonly CodexDailyTokens[] | null,
   fromMs: number,
   toMs: number,
-): number | null {
+  maxStartAgeMs: number = START_SAMPLE_MAX_AGE_MS,
+): AiAccountTokenSpan | null {
   if (!(toMs > fromMs)) return null;
   const sorted = [...samples].sort((a, b) => a.atMs - b.atMs);
-  const before = sorted.filter((s) => s.atMs <= fromMs).at(-1);
   const newest = sorted.filter((s) => s.atMs <= toMs).at(-1);
-  if (before && newest) return Math.max(0, newest.lifetimeTokens - before.lifetimeTokens);
+  const before = sorted.filter((s) => s.atMs <= fromMs).at(-1);
+  if (before && newest && fromMs - before.atMs <= maxStartAgeMs) {
+    return { tokens: Math.max(0, newest.lifetimeTokens - before.lifetimeTokens), fromMs: before.atMs, inclusive: false };
+  }
   const inside = sorted.filter((s) => s.atMs > fromMs && s.atMs <= toMs);
-  if (inside.length >= 2) return Math.max(0, inside.at(-1)!.lifetimeTokens - inside[0]!.lifetimeTokens);
+  if (inside.length >= 2) {
+    return { tokens: Math.max(0, inside.at(-1)!.lifetimeTokens - inside[0]!.lifetimeTokens), fromMs: inside[0]!.atMs, inclusive: false };
+  }
   if (daily && daily.length > 0 && toMs - fromMs >= DAY_MS) {
-    return daily
-      .filter((b) => b.startMs + DAY_MS > fromMs && b.startMs <= toMs)
-      .reduce((s, b) => s + b.tokens, 0);
+    const hit = daily.filter((b) => b.startMs + DAY_MS > fromMs && b.startMs <= toMs);
+    if (hit.length > 0) {
+      return {
+        tokens: hit.reduce((s, b) => s + b.tokens, 0),
+        fromMs: Math.min(...hit.map((b) => b.startMs)),
+        inclusive: true,
+      };
+    }
   }
   return null;
 }
+

@@ -179,9 +179,9 @@ describe('the cache', () => {
     life = 175;
     at = 1000 + 3600_000;
     await AS.kickCodexProbe({ force: true });
-    expect(await AS.codexAccountTokens({ fromMs: 1000, toMs: 1000 + 3600_000 })).toBe(75);
-    // No sample before this window opened: the two inside it are a LOWER bound (the cautious side).
-    expect(await AS.codexAccountTokens({ fromMs: 500, toMs: 1000 + 3600_000 })).toBe(75);
+    expect(await AS.codexAccountTokens({ fromMs: 1000, toMs: 1000 + 3600_000 })).toEqual({ tokens: 75, fromMs: 1000, inclusive: false });
+    // No sample before this window opened: the two inside it give a shorter span, named.
+    expect(await AS.codexAccountTokens({ fromMs: 500, toMs: 1000 + 3600_000 })).toEqual({ tokens: 75, fromMs: 1000, inclusive: false });
     expect(await AS.codexAccountTokens({ fromMs: 500, toMs: 2000 })).toBeNull();
   });
 

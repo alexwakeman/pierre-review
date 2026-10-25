@@ -229,12 +229,25 @@ export type AiBudgetMode = 'subscription' | 'api_key' | 'off';
 export type AiBudgetProvider = 'claude' | 'codex';
 
 /**
- * Codex (ChatGPT sign-in): the ACCOUNT's tokens in each window — the denominator of the
- * token-weighted share. Null = not known (Limn's share is then taken as the whole window's figure).
+ * The ACCOUNT's tokens over one span, and where that span STARTS. ⚠ Limn's own tokens are counted
+ * over the SAME span (`fromMs`, `inclusive`), never over the whole window: the account's count may
+ * cover less than the window (its samples live in memory, so a restart or a sign-in shortens it), and a
+ * ratio of a whole window's numerator to a part-window's denominator over-attributes the use to Limn.
+ */
+export interface AiAccountTokenSpan {
+  tokens: number;
+  fromMs: number;
+  /** Whether a ledger row AT `fromMs` belongs to the span (a day bucket's start: yes; a sample: no). */
+  inclusive: boolean;
+}
+
+/**
+ * Codex (ChatGPT sign-in): the ACCOUNT's tokens per window — the denominator of the token-weighted
+ * share. Null = not known: Limn's share of that window is then UNKNOWN (null, which never blocks).
  */
 export interface AiAccountTokens {
-  week: number | null;
-  fiveHour: number | null;
+  week: AiAccountTokenSpan | null;
+  fiveHour: AiAccountTokenSpan | null;
 }
 
 /**
@@ -551,16 +564,18 @@ function windowSpend(
  * `limnTokens ÷ accountTokens × usedPercent`. Pure.
  *   • `usedPercent` null (no reading) ⇒ null: unknown, which never blocks.
  *   • Limn used nothing ⇒ 0, whatever the account did.
- *   • the account's tokens unknown or zero while Limn used some ⇒ the whole `usedPercent` (cautious:
- *     every token in the window is taken as Limn's).
- *   • the ratio is capped at 1 — Limn cannot have used more than the account (a lagging account
- *     count must not inflate the share past the window's own figure).
+ *   • the account's tokens UNKNOWN (null) while Limn used some ⇒ null: unknown, which never blocks.
+ *     (It used to be the whole `usedPercent`, which blocked every automatic run after a restart.)
+ *   • the account's tokens KNOWN but zero while Limn used some (a lagging count) ⇒ the whole
+ *     `usedPercent` — the ratio is capped at 1: Limn cannot have used more than the account.
+ * ⚠ `limnTokens` and `accountTokens` must cover the SAME span (AiAccountTokenSpan).
  */
 export function codexWindowSharePct(limnTokens: number, accountTokens: number | null, usedPercent: number | null): number | null {
   if (usedPercent == null || !Number.isFinite(usedPercent)) return null;
   const used = Math.min(100, Math.max(0, usedPercent));
   if (!Number.isFinite(limnTokens) || limnTokens <= 0) return 0;
-  if (accountTokens == null || !Number.isFinite(accountTokens) || accountTokens <= 0) return used;
+  if (accountTokens == null || !Number.isFinite(accountTokens)) return null;
+  if (accountTokens <= 0) return used;
   return Math.min(1, limnTokens / accountTokens) * used;
 }
 
@@ -614,8 +629,11 @@ export function codexShares(input: {
     const { fromMs, inclusive } = budgetWindowStart(reading, nowMs, which);
     const reset = which === 'week' ? liveWeekReset(reading, nowMs) : liveFiveHourReset(reading, nowMs);
     const used = liveUsedPercent(which === 'week' ? reading?.week : reading?.fiveHour, reset);
-    const account = (which === 'week' ? input.accountTokens?.week : input.accountTokens?.fiveHour) ?? null;
-    const share = codexWindowSharePct(ledgerTokensIn(ledger, fromMs, inclusive, nowMs), account, used);
+    const span = (which === 'week' ? input.accountTokens?.week : input.accountTokens?.fiveHour) ?? null;
+    // Limn's tokens over the SAME span the account's were counted over (never over a wider one); with
+    // no account count, over the window (only "used nothing ⇒ 0" can then be said).
+    const limn = span ? ledgerTokensIn(ledger, span.fromMs, span.inclusive, nowMs) : ledgerTokensIn(ledger, fromMs, inclusive, nowMs);
+    const share = codexWindowSharePct(limn, span ? span.tokens : null, used);
     return share == null ? null : round2(share);
   };
   return { week: one('week'), fiveHour: one('five_hour') };
@@ -633,8 +651,10 @@ function codexSubscriptionStatus(input: AiBudgetInput): {
   const fiveReset = liveFiveHourReset(reading, nowMs);
   const fiveShare = effectiveFiveHourSharePct(settings);
   const shares = codexShares({ reading, ledger: input.ledger, accountTokens: input.accountTokens, nowMs });
-  const overWeek = shares.week != null && shares.week >= settings.weekSharePct;
-  const overFiveHour = shares.fiveHour != null && shares.fiveHour >= fiveShare;
+  // ⚠ Over only with a LIVE RESET read: the window's own figure falls back at its reset, and without
+  // one there is no moment the pause would end — so a share with no known reset is never over.
+  const overWeek = weekReset != null && shares.week != null && shares.week >= settings.weekSharePct;
+  const overFiveHour = fiveReset != null && shares.fiveHour != null && shares.fiveHour >= fiveShare;
   return {
     sub: {
       // No Claude subscription kind and no picker: Codex reports its plan and its own windows.
