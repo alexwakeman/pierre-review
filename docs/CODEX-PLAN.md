@@ -25,6 +25,26 @@ retry via `exec resume`; writes read from git; a write run refuses without a tru
 prices are TODO (`CODEX_PRICES_PER_MTOK`, US$ 0 until filled). The pre-flight still keeps Codex from
 users.
 
+**Phase 2 integrated 2026-10-25** (branch `codex/p2-integrated`: the three streams merged).
+- ONE `CodexHookConfig` (`ai/codex/types.ts`, stream B's shape): `override` goes on the argv VERBATIM
+  (`config.ts hookConfig` never re-serialises it — the trust hash and `hooks/list` read that text),
+  `trustKey` + `trustedHash` feed `ensureCodexHomeConfig`, `env` (`LIMN_CODEX_GUARD`) is merged LAST
+  into the `codex exec` environment.
+- EVERY agent run (read-only too) writes the hook's trust entry into Limn's own home, then refuses
+  unless `verifyHookTrusted` says Codex will run it and it denies a canary. No `--ignore-user-config`:
+  Limn writes that home's whole `config.toml`.
+- The child's environment: `codexRunEnv` decides the credential, `codexChildEnv` cuts it to the
+  minimum, `hook.env` last. `credentialRoute`/`detect`/`usage` are stream C's (`resolveCodexCredential`,
+  `detectCodex`, `codexUsageSource`).
+- Availability: `LIMN_AI_PROVIDER=codex` runs `complete()` on Codex; every agent kind answers "not
+  available yet" (`CODEX_AGENT_KINDS` empty). `CODEX_RUNNABLE` = every kind ported (false), so `auto`
+  never picks Codex, the pre-flight answers 'none' and `/api/me` reports `providers.codex.available:
+  false`; `detect()` gives the same answer. A cancelled Codex run's $0 row with NULL tokens is kept.
+- Live (`ai/codex/live.test.ts`, Limn's own home ONLY — the per-stream live tests that copied
+  `~/.codex/auth.json` were removed): the hash agrees with `hooks/list`, Limn's config passes
+  `--strict-config`, `complete()` answers in a schema, and an unchecked read-only run read through the
+  MCP server while the trusted hook refused `../outside/secret.env`.
+
 Original status: Written 2026-10-23 after checking the current Codex docs and the published
 `@openai/codex-sdk` 0.164.0 type definitions. The work is meant to be carried out by subagents
 through the Workflow tool, in the phases below, with the user confirming the decisions in § 6 first.
@@ -139,7 +159,7 @@ bounds writes, and that is recorded as a decision.
   `{"event_name","hooks":[{"async","command","timeout","type"}],"matcher"}`, pinned in `hook.test.ts`
   against `hooks/list`. `verifyHookTrusted` = `hooks/list` says `trusted` with our hash, AND the
   command denies a canary call.
-- Live (`mcp-hook.live.test.ts`, 2 runs on gpt-6-luna): the hook ran for MCP calls and
+- Live (stream B's own run, since folded into `live.test.ts`; 2 runs on gpt-6-luna): the hook ran for MCP calls and
   `apply_patch` with its env roots, and denied `../outside/secret.env` and `../outside/pwned.txt`.
   Codex 0.164 sends `apply_patch` input as `{"command":"*** Begin Patch…"}`.
 

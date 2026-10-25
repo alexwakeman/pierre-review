@@ -20,9 +20,20 @@ const MCP: CodexMcpConfig = {
   id: 'workspace',
   command: '/usr/bin/node',
   args: ['/limn/workspace-mcp.js', '--read', '/wt'],
+  env: {},
   default_tools_approval_mode: 'approve',
 };
-const HOOK: CodexHookConfig = { matcher: 'apply_patch|mcp__workspace__.*', command: '/limn/guard.sh', hash: 'sha256:abc' };
+const HOOK_OVERRIDE =
+  'hooks.PreToolUse=[{matcher="apply_patch|mcp__workspace__.*", hooks=[{type="command", command="/limn/guard.sh", timeout=30}]}]';
+const HOOK: CodexHookConfig = {
+  override: HOOK_OVERRIDE,
+  matcher: 'apply_patch|mcp__workspace__.*',
+  command: '/limn/guard.sh',
+  timeoutSec: 30,
+  trustKey: '/<session-flags>/config.toml:pre_tool_use:0:0',
+  trustedHash: 'sha256:abc',
+  env: { LIMN_CODEX_GUARD: 'roots' },
+};
 const CTX: CodexExecContext = {
   home: '/home/.limn/codex',
   mcp: MCP,
@@ -149,13 +160,13 @@ describe('the workspace MCP server', () => {
 });
 
 describe('the path-guard hook', () => {
-  it('hooks.PreToolUse = ONE entry with the matcher and the command handler', () => {
-    expect(cfg(readArgs()).get('hooks.PreToolUse')).toBe(
-      '[{"matcher" = "apply_patch|mcp__workspace__.*", "hooks" = [{"type" = "command", "command" = "/limn/guard.sh"}]}]',
-    );
+  it("hooks.PreToolUse = hook.ts's own override, VERBATIM (the text Codex hashes and hooks/list read)", () => {
+    expect(hookConfig(HOOK)).toEqual(['-c', HOOK_OVERRIDE]);
+    const a = readArgs();
+    expect(a.filter((x) => x.startsWith('hooks.'))).toEqual([HOOK_OVERRIDE]);
   });
-  it('carries a timeout only when given', () => {
-    expect(cfg(hookConfig({ ...HOOK, timeoutSec: 10 })).get('hooks.PreToolUse')).toContain('"timeout" = 10');
+  it("the hook's environment never reaches the argv (it rides the process env)", () => {
+    expect(readArgs().join(' ')).not.toContain('LIMN_CODEX_GUARD');
   });
   it('is absent when null', () => expect(cfg(readArgs({ hook: null })).has('hooks.PreToolUse')).toBe(false));
 });

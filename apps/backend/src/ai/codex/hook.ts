@@ -5,7 +5,7 @@
 // as source `sessionFlags`, key `/<session-flags>/config.toml:pre_tool_use:0:0`, and runs it ONLY
 // when CODEX_HOME/config.toml trusts it: `[hooks.state."<key>"] trusted_hash = "sha256:<hex>"`
 // (a trust given with `-c` does not count, and is ignored under `--ignore-user-config`). Limn owns its
-// CODEX_HOME (`~/.limn/codex`, decided 2026-10-25), so stream C's `ensureCodexHomeConfig` writes that
+// CODEX_HOME (`~/.limn/codex`, decided 2026-10-25), so home.ts `ensureCodexHomeConfig` writes that
 // entry from `hookTrustToml(hook)`.
 //
 // ⚠ AN UNTRUSTED HOOK IS SKIPPED SILENTLY — no warning in the stream or on stderr, and the call it
@@ -130,8 +130,13 @@ interface ListedHook {
 /** Ask `codex app-server` (CODEX_HOME=`home`) for `hooks/list` with the hook given as a session flag. */
 export async function listSessionHooks(binary: string, home: string, hook: CodexHookConfig, timeoutMs = 20_000): Promise<ListedHook[] | null> {
   return new Promise((resolve) => {
+    // The probe's environment never carries an API key (as home.ts `codexProcessEnv`): a trust read
+    // must not be satisfied by, or bill, a key from Limn's environment.
+    const env: NodeJS.ProcessEnv = { ...process.env, CODEX_HOME: home };
+    delete env.OPENAI_API_KEY;
+    delete env.CODEX_API_KEY;
     const child = spawn(binary, ['app-server', '-c', hook.override], {
-      env: { ...process.env, CODEX_HOME: home },
+      env,
       stdio: ['pipe', 'pipe', 'ignore'],
     });
     let settled = false;

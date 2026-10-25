@@ -277,8 +277,8 @@ export interface CodexProbeResult {
 export async function probeCodexAccount(
   opts: AppServerSpawnOptions,
   nowMs: () => number = Date.now,
-  // `false` only for the opt-in live test, which runs on a COPY of the reader's sign-in: a refresh
-  // there would rotate the refresh token and sign the reader's own Codex out.
+  // `false` only where a refresh must not happen (a sign-in Limn does not own). Limn's own home
+  // refreshes its own token.
   { refreshToken = true }: { refreshToken?: boolean } = {},
 ): Promise<CodexProbeResult> {
   return withCodexAppServer(async (s) => {

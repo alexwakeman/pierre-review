@@ -48,14 +48,18 @@ describe.skipIf(!LIVE)('Codex, live (LIMN_CODEX_LIVE=1)', () => {
     bin = codexBinaryPath() ?? '';
     if (!bin) throw new Error('no Codex program: run `limn ai install codex` or set LIMN_CODEX_LIVE_BIN');
 
-    const AS = await import('./app-server.js');
-    const opts = AS.limnAppServerOptions();
-    try {
-      const probe = await AS.probeCodexAccount(opts!);
-      signedIn = !!probe.account?.signedIn;
-    } catch {
-      signedIn = false;
+    // No sign-in file in Limn's home ⇒ not signed in, and nothing is started there (Codex would
+    // create the folder). Otherwise `account/read` decides: a dead sign-in also skips the model runs.
+    const { codexHome } = await import('./home.js');
+    if (existsSync(join(codexHome(), 'auth.json'))) {
+      const AS = await import('./app-server.js');
+      try {
+        signedIn = !!(await AS.probeCodexAccount(AS.limnAppServerOptions()!)).account?.signedIn;
+      } catch {
+        signedIn = false;
+      }
     }
+    if (!signedIn) console.log(`[codex live] ${codexHome()} holds no live sign-in: the model runs are skipped`);
 
     dir = realpathSync(mkdtempSync(join(tmpdir(), 'limn-codex-live-')));
     repo = join(dir, 'repo');

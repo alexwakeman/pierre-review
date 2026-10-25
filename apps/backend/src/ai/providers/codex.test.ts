@@ -1,7 +1,7 @@
 // THE CODEX PROVIDER (ai/providers/codex.ts), offline: a FAKE `codex` binary (a node script) plays
 // recorded-shape event streams chosen by the prompt, and logs every argv, stdin, the schema file and
-// the child's env keys. Limn's Codex home, the hook, the MCP config and the ledger are mocked (they
-// belong to streams B and C and to the database). What is pinned:
+// the child's env keys. Limn's Codex home, the hook's trust check, the MCP config, the app-server and
+// the ledger are mocked (their own suites cover them). What is pinned:
 //   1. complete(): read-only, no MCP server, no hook, an empty scratch cwd, Codex's `fast` model even
 //      when handed a Claude id, the system prompt as developer_instructions, `--output-schema` for a
 //      JSON caller, US$ 0 on a login, a ledger row with provider 'codex' when billed, a clear sentence
@@ -10,7 +10,8 @@
 //   3. the run itself (runAgentUnchecked): the strict schema on disk, the answer mapped back to the
 //      tool's arguments and judged by the tool's OWN handler, ONE retry via `exec resume` whose usage
 //      is the thread's cumulative figure (so the run's total is not double-counted), a second failure
-//      fails the run but still records usage; a WRITE run refuses without a trusted hook, and its
+//      fails the run but still records usage; EVERY run (read-only too) refuses without a trusted
+//      hook, whose trust entry is written first and whose environment reaches the child; a write run's
 //      changed files come from GIT — a write the stream never reported is found, a write outside the
 //      write root fails the run; a cancelled run records NULL tokens.
 //
@@ -37,16 +38,28 @@ const T = vi.hoisted(() => {
     log: path.join(root, 'calls.jsonl'),
     trusted: { value: false },
     recorded: [] as any[],
+    trustWrites: [] as any[],
   };
 });
 
-vi.mock('../codex/home.js', () => ({
+vi.mock('../codex/home.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../codex/home.js')>()),
   codexBinary: async () => T.bin,
   codexHome: () => T.home,
-  ensureCodexHomeConfig: async () => {},
+  ensureCodexHomeConfig: async (hook: unknown) => {
+    T.trustWrites.push(hook);
+  },
 }));
 vi.mock('../codex/hook.js', () => ({
-  pathGuardHook: () => ({ matcher: 'apply_patch|mcp__workspace__.*', command: '/limn/guard', hash: 'sha256:test' }),
+  pathGuardHook: (roots: { read: string[]; write: string[] }) => ({
+    override: 'hooks.PreToolUse=[{matcher="apply_patch|mcp__.*", hooks=[{type="command", command="/limn/guard", timeout=30}]}]',
+    matcher: 'apply_patch|mcp__.*',
+    command: '/limn/guard',
+    timeoutSec: 30,
+    trustKey: '/<session-flags>/config.toml:pre_tool_use:0:0',
+    trustedHash: 'sha256:test',
+    env: { LIMN_CODEX_GUARD: JSON.stringify(roots) },
+  }),
   verifyHookTrusted: async () => T.trusted.value,
 }));
 vi.mock('../codex/workspace-mcp.js', () => ({
@@ -54,13 +67,15 @@ vi.mock('../codex/workspace-mcp.js', () => ({
     id: 'workspace',
     command: '/usr/bin/node',
     args: ['/limn/mcp.js', ...roots.read],
+    env: {},
     default_tools_approval_mode: 'approve',
   }),
 }));
-vi.mock('../codex/app-server.js', () => ({
+vi.mock('../codex/app-server.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../codex/app-server.js')>()),
   codexAccount: async () => ({ signedIn: true, plan: 'plus' }),
-  codexRateLimits: async () => null,
-  codexAccountTokens: async () => null,
+  // No cached `account/read`: the ladder falls back to auth.json being in Limn's home.
+  codexSignedInCached: () => null,
 }));
 vi.mock('../../db/usage.js', () => ({
   recordAiUsage: async (row: unknown) => {
@@ -148,6 +163,7 @@ beforeEach(() => {
   delete process.env.OPENAI_API_KEY;
   T.trusted.value = false;
   T.recorded.length = 0;
+  T.trustWrites.length = 0;
   C._resetCodexTrustCacheForTest();
 });
 afterEach(() => {
@@ -281,6 +297,7 @@ const spec = (prompt: string, over: Record<string, unknown> = {}): any => ({
 describe('runAgentUnchecked() — one read-only run', () => {
   beforeEach(() => {
     handled = [];
+    T.trusted.value = true;
   });
 
   it('sends the STRICT schema, maps the answer back to the tool’s arguments, and lets the tool’s own handler judge it', async () => {
@@ -302,16 +319,33 @@ describe('runAgentUnchecked() — one read-only run', () => {
     expect(c.get('model_reasoning_effort')).toBe('"high"');
     expect(c.get('sandbox_mode')).toBe('"read-only"');
     expect(c.get('mcp_servers.workspace.default_tools_approval_mode')).toBe('"approve"');
-    // Untrusted hook on a READ-ONLY run: it goes without (the MCP server guards reads).
-    expect(c.has('hooks.PreToolUse')).toBe(false);
+    // The guard rides every run, verbatim; its roots ride the child's ENVIRONMENT, never the argv.
+    expect(c.get('hooks.PreToolUse')).toContain('/limn/guard');
+    expect(call.envKeys).toContain('LIMN_CODEX_GUARD');
+    expect(call.argv.join(' ')).not.toContain('LIMN_CODEX_GUARD');
+    // Its trust entry was written into Limn's home BEFORE the run.
+    expect(T.trustWrites).toEqual([expect.objectContaining({ trustedHash: 'sha256:test' })]);
     expect(T.recorded).toEqual([expect.objectContaining({ accountId: 9, prId: 4, provider: 'codex', model: 'gpt-6-astra', inputTokens: 100, outputTokens: 10 })]);
     expect(progress.length).toBeGreaterThan(0);
   });
 
-  it('carries a trusted hook when the guard is trusted', async () => {
-    T.trusted.value = true;
-    await C.runAgentUnchecked(spec('GOOD'));
-    expect(cfg(calls()[0].argv).get('hooks.PreToolUse')).toContain('/limn/guard');
+  it('refuses a READ-ONLY run too when the guard is not trusted (Codex would skip it silently)', async () => {
+    T.trusted.value = false;
+    await expect(C.runAgentUnchecked(spec('GOOD'))).rejects.toThrow(C.HOOK_NOT_TRUSTED_MESSAGE);
+    expect(calls()).toEqual([]);
+  });
+
+  it("never hands Limn's secrets to the child: only the minimum, CODEX_HOME and the guard's roots", async () => {
+    process.env.ANTHROPIC_API_KEY_TEST_SENTINEL = 'x';
+    try {
+      await C.runAgentUnchecked(spec('GOOD'));
+    } finally {
+      delete process.env.ANTHROPIC_API_KEY_TEST_SENTINEL;
+    }
+    const keys = calls()[0].envKeys as string[];
+    expect(keys).not.toContain('ANTHROPIC_API_KEY_TEST_SENTINEL');
+    expect(keys).toContain('CODEX_HOME');
+    expect(keys).toContain('LIMN_CODEX_GUARD');
   });
 
   it('retries ONCE on the same thread with the reason, and counts the resumed turn’s tokens once', async () => {
@@ -393,7 +427,9 @@ describe('models and prices', () => {
     expect(C.codexCostUsd('m', u, 'api_key', { m: { input: 1, cachedInput: 0.1, output: 4 } })).toBeCloseTo(1 + 0.1 + 4);
     expect(C.codexCostUsd('m', null, 'api_key', { m: { input: 1, cachedInput: 0.1, output: 4 } })).toBe(0);
   });
-  it('detect() reports a working login (the pre-flight still keeps Codex from users in Phase 2)', async () => {
-    expect(await C.codexProvider.detect()).toEqual({ id: 'codex', available: true, route: 'login', message: null });
+  it('detect() reports the sign-in but never `available` in Phase 2 (no agent kind runs on Codex)', async () => {
+    const d = await C.codexProvider.detect();
+    expect(d).toMatchObject({ id: 'codex', available: false, message: expect.any(String) });
+    expect(P.CODEX_RUNNABLE).toBe(false);
   });
 });

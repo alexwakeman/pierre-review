@@ -227,7 +227,7 @@ async function record(
       prId: rec.prId ?? null,
       repoId: rec.repoId ?? null,
       provider: 'codex',
-      // The token-weighted share is the budget's fold (stream C), not a per-run figure.
+      // The token-weighted share is the budget's fold (ai/budget.ts), not a per-run figure.
       sharePct: null,
     });
   } catch (err) {
@@ -325,7 +325,7 @@ export function runRoots(spec: Pick<AgentRunSpec, 'cwd' | 'roots' | 'readOnlyRoo
   };
 }
 
-// Trust is read per (home, hash) once per process: the answer only changes when stream C rewrites
+// Trust is read per (home, hash) once per process: the answer only changes when ensureCodexHomeConfig rewrites
 // the home's config, which it does before the first run.
 const trustCache = new Map<string, boolean>();
 async function hookIfTrusted(home: string, hook: CodexHookConfig): Promise<boolean> {

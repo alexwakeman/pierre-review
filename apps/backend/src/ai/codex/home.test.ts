@@ -8,6 +8,7 @@
 //      ~/.codex/auth.json counts for NOTHING; a run's environment carries exactly one key or none.
 //
 //   pnpm --filter @pierre-review/backend test ai/codex/home
+import type { CodexHookConfig } from './types.js';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -31,10 +32,14 @@ afterAll(() => {
 const H = await import('./home.js');
 const C = await import('../credentials.js');
 
-const hook = (n: number) => ({
-  override: `[{matcher="apply_patch", hooks=[{type="command", command="/guard-${n}"}]}]`,
-  stateKey: '/<session-flags>/config.toml:pre_tool_use:0:0',
+const hook = (n: number): CodexHookConfig => ({
+  override: `hooks.PreToolUse=[{matcher="apply_patch", hooks=[{type="command", command="/guard-${n}", timeout=30}]}]`,
+  matcher: 'apply_patch',
+  command: `/guard-${n}`,
+  timeoutSec: 30,
+  trustKey: '/<session-flags>/config.toml:pre_tool_use:0:0',
   trustedHash: `sha256:${String(n).repeat(64).slice(0, 64)}`,
+  env: {},
 });
 
 describe("Limn's Codex home", () => {
@@ -65,17 +70,17 @@ describe("Limn's Codex home", () => {
     const text = readFileSync(join(H.codexHome(), 'config.toml'), 'utf8');
     expect(text).toContain('[hooks.state."/<session-flags>/config.toml:pre_tool_use:0:0"]');
     expect(text).toContain(`trusted_hash = "${hook(1).trustedHash}"`);
-    expect(H.parseTrustEntries(text)).toEqual(new Map([[hook(1).stateKey, hook(1).trustedHash]]));
+    expect(H.parseTrustEntries(text)).toEqual(new Map([[hook(1).trustKey, hook(1).trustedHash]]));
     // A new hash for the same key replaces it.
     await H.ensureCodexHomeConfig(hook(2));
     expect(H.parseTrustEntries(readFileSync(join(H.codexHome(), 'config.toml'), 'utf8'))).toEqual(
-      new Map([[hook(2).stateKey, hook(2).trustedHash]]),
+      new Map([[hook(2).trustKey, hook(2).trustedHash]]),
     );
   });
 
   it('two writers at once lose nothing', async () => {
-    const a = { ...hook(3), stateKey: 'k-a' };
-    const b = { ...hook(4), stateKey: 'k-b' };
+    const a = { ...hook(3), trustKey: 'k-a' };
+    const b = { ...hook(4), trustKey: 'k-b' };
     await Promise.all([H.ensureCodexHomeConfig(a), H.ensureCodexHomeConfig(b)]);
     const entries = H.parseTrustEntries(readFileSync(join(H.codexHome(), 'config.toml'), 'utf8'));
     expect(entries.get('k-a')).toBe(a.trustedHash);

@@ -105,7 +105,8 @@ describe('the registry (LIMN_AI_PROVIDER)', () => {
       id: 'codex',
       available: false,
       route: 'none',
-      message: P.CODEX_NOT_AVAILABLE_MESSAGE,
+      // The install sentence first (as /api/me), else CODEX_NOT_AVAILABLE_MESSAGE.
+      message: 'Codex is not set up yet. Run: limn ai install codex',
       installed: false,
       signedIn: false,
       plan: null,

@@ -24,8 +24,8 @@
 //   projects."<cwd>".trust_level="untrusted"  belt and braces: the repo's `.codex/` layer loads only
 //                              for a project trusted in CODEX_HOME's config, which Limn writes itself.
 //   developer_instructions     the system prompt, when the run has one.
-//   mcp_servers.workspace.*    Limn's workspace server (stream B) — the run's ONLY way to read files.
-//   hooks.PreToolUse           the path guard (stream B), trusted by Limn's own home (stream C).
+//   mcp_servers.workspace.*    Limn's workspace server (workspace-mcp.ts) — the run's ONLY way to read files.
+//   hooks.PreToolUse           the path guard (hook.ts), trusted by Limn's own home (home.ts).
 //
 // What is deliberately ABSENT: `--ephemeral` (a validation retry is `exec resume`, which needs the
 // session file — kept in Limn's OWN Codex home, never ~/.codex), `--ignore-user-config` (the config

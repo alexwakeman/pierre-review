@@ -2,7 +2,7 @@
 //   1. every fold summing the ledger for the budget reads the ACTIVE provider's rows only — a Codex
 //      row (there are none yet in real use) never counts toward Claude's week or its cycle cost;
 //   2. `recordAiUsage` writes 'claude' unless told otherwise, and carries a share when given;
-//   3. with LIMN_AI_PROVIDER=codex (the "not available yet" placeholder) and no Codex credential the
+//   3. with LIMN_AI_PROVIDER=codex (agents "not available yet") and no Codex credential the
 //      budget answers route 'none', budget off, no probe — and nothing throws;
 //   4. with a Codex ChatGPT sign-in (a faked app-server probe) the budget judges CODEX's windows by
 //      the token-weighted share, through the same gate; a $0 Codex row with tokens is kept.
@@ -77,7 +77,7 @@ describe('the ledger is read per provider', () => {
     expect((await B.readCycleCosts(7, now, 'codex')).reviewMeanUsd).toBe(9);
   });
 
-  it('LIMN_AI_PROVIDER=codex: the placeholder answers — route none, budget off, no probe, no throw', async () => {
+  it('LIMN_AI_PROVIDER=codex with no Codex credential — route none, budget off, no probe, no throw', async () => {
     process.env.LIMN_AI_PROVIDER = 'codex';
     const snap = await B.aiBudgetSnapshot(7, { probe: 'always' });
     expect(snap.status.route).toBe('none');
@@ -114,14 +114,16 @@ describe('the ledger is read per provider', () => {
       accountId: 7, seam: 'agent', feature: 'claude_review', model: 'gpt-6-luna', costUsd: 0,
       provider: 'codex', inputTokens: 150, outputTokens: 50,
     });
-    // The $0 Codex row is KEPT (its tokens are the share's numerator); a $0 Claude row still is not.
+    // The $0 Codex row is KEPT (its tokens are the share's numerator) — and so is a cancelled Codex
+    // run's row with NULL tokens ("tokens unknown", CODEX-SPIKE.md § 9: every run is recorded, and an
+    // unknown figure is never written as zero). A $0 Claude row still is not.
     const before = (await db.select().from(schema.aiUsage).execute()).length;
     await U.recordAiUsage({ accountId: 7, seam: 'agent', feature: 'claude_review', model: 'claude-x', costUsd: 0, inputTokens: 9 });
     await U.recordAiUsage({ accountId: 7, seam: 'agent', feature: 'claude_review', model: 'gpt-6-luna', costUsd: 0, provider: 'codex' });
-    expect((await db.select().from(schema.aiUsage).execute()).length).toBe(before);
-    expect(
-      (await db.select().from(schema.aiUsage).execute()).filter((r: any) => r.provider === 'codex' && r.costUsd === 0),
-    ).toHaveLength(1);
+    expect((await db.select().from(schema.aiUsage).execute()).length).toBe(before + 1);
+    const codexRows = (await db.select().from(schema.aiUsage).execute()).filter((r: any) => r.provider === 'codex' && r.costUsd === 0);
+    expect(codexRows).toHaveLength(2);
+    expect(codexRows.filter((r: any) => r.inputTokens === null && r.outputTokens === null)).toHaveLength(1);
     await B.writeAiBudgetSettings(7, { enabled: true });
     try {
       const snap = await B.aiBudgetSnapshot(7, { probe: false, nowMs: now + 1000 });
