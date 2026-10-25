@@ -10,7 +10,7 @@
 // This script NEVER publishes. Publishing is the user's job (`cd release &&
 // npm publish`). It does build, assemble, and verify only.
 
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import {
   cpSync,
   existsSync,
@@ -364,8 +364,59 @@ mustExist.push(
   'dist/platform/migrations/0001_init.sql',
   'dist/platform/data/benchmark/benchmark-fit.json',
 );
+// Codex's two helper processes (apps/backend/src/ai/codex/): the workspace MCP server and the
+// path-guard hook. Codex starts them by FILE PATH (ai/codex/entry.ts picks the compiled `.js`
+// sibling in a release), so a missing file only shows when a Codex run starts.
+const CODEX_HELPER_ENTRIES = ['dist/ai/codex/workspace-mcp-main.js', 'dist/ai/codex/path-guard-hook-main.js'];
+mustExist.push(...CODEX_HELPER_ENTRIES);
 for (const rel of mustExist) {
   if (!existsSync(join(releaseDir, rel))) fail(`missing required file: ${rel}`);
+}
+
+// The helpers must load from a release install that carries NO AI package (and start fast, once
+// per run / per tool call): everything they import, transitively, is a `node:` built-in or a
+// relative file. A bare specifier here would be ERR_MODULE_NOT_FOUND inside Codex — where the only
+// symptom is an agent that cannot read code, or a hook that exits 1 and so lets every call through.
+{
+  const SPEC = /(?:\bfrom\s*|\bimport\s*\(\s*|^\s*import\s*)(['"])([^'"]+)\1/gm;
+  for (const entry of CODEX_HELPER_ENTRIES) {
+    const seen = new Set();
+    const queue = [join(releaseDir, entry)];
+    while (queue.length > 0) {
+      const file = queue.pop();
+      if (seen.has(file)) continue;
+      seen.add(file);
+      if (!existsSync(file)) fail(`${entry} imports a missing file: ${relative(releaseDir, file)}`);
+      for (const m of readFileSync(file, 'utf8').matchAll(SPEC)) {
+        const spec = m[2];
+        if (spec.startsWith('node:')) continue;
+        if (spec.startsWith('./') || spec.startsWith('../')) queue.push(resolve(dirname(file), spec));
+        else fail(`${entry} must import only node: built-ins and relative files, but ${relative(releaseDir, file)} imports '${spec}'`);
+      }
+    }
+  }
+}
+
+// …and both actually RUN from the release tree: the server answers tools/list, and the hook
+// denies a call to a foreign MCP server with exit 2 (a hook that crashes exits 1 = allowed).
+{
+  const mcp = spawnSync(process.execPath, [join(releaseDir, 'dist/ai/codex/workspace-mcp-main.js'), '--read', releaseDir], {
+    input: `${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} })}\n${JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list' })}\n`,
+    encoding: 'utf8',
+    timeout: 20_000,
+  });
+  const listed = (mcp.stdout ?? '').split('\n').filter(Boolean).map((l) => JSON.parse(l)).find((m) => m.id === 2);
+  const names = listed?.result?.tools?.map((t) => t.name).join(',');
+  if (names !== 'read_file,list_files,search') fail(`release workspace MCP server did not list its tools: ${mcp.stderr || names}`);
+  const hook = spawnSync(process.execPath, [join(releaseDir, 'dist/ai/codex/path-guard-hook-main.js')], {
+    input: JSON.stringify({ hook_event_name: 'PreToolUse', tool_name: 'mcp__other__x', tool_input: {}, cwd: releaseDir }),
+    env: { ...process.env, LIMN_CODEX_GUARD: JSON.stringify({ read: [releaseDir], write: [] }) },
+    encoding: 'utf8',
+    timeout: 20_000,
+  });
+  if (hook.status !== 2 || !/Limn path guard/.test(hook.stderr ?? '')) {
+    fail(`release path-guard hook did not deny a foreign MCP call (exit ${hook.status}): ${hook.stderr}`);
+  }
 }
 
 // No .ts files anywhere under release/.
