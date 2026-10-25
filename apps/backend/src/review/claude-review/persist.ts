@@ -1679,6 +1679,8 @@ export async function markReviewRouted(
 }
 
 export interface ReviewSuccessData {
+  // The provider already wrote this run's ledger row (Codex; RunReviewResult.usageRecorded).
+  usageRecorded?: boolean;
   scope: ClaudeReviewScope | null;
   summary: string;
   verdict: ClaudeReviewVerdict;
@@ -1765,7 +1767,7 @@ export async function saveReviewSuccess(
         .execute();
     }
   });
-  await recordReviewUsage(ctx, id, data.costUsd, data.inputTokens, data.outputTokens).catch(() => {});
+  if (!data.usageRecorded) await recordReviewUsage(ctx, id, data.costUsd, data.inputTokens, data.outputTokens).catch(() => {});
 }
 
 export interface ReviewFailTelemetry {
@@ -1779,6 +1781,8 @@ export interface ReviewFailTelemetry {
   diffCapped?: boolean | null;
   scope?: ClaudeReviewScope | null;
   excludedFiles?: string[];
+  // The provider already wrote this run's ledger row (Codex; RunReviewResult.usageRecorded).
+  usageRecorded?: boolean;
 }
 
 export async function markReviewFailed(
@@ -1807,7 +1811,9 @@ export async function markReviewFailed(
     })
     .where(eq(cr.id, id))
     .execute();
-  await recordReviewUsage(ctx, id, telemetry.costUsd, telemetry.inputTokens, telemetry.outputTokens).catch(() => {});
+  if (!telemetry.usageRecorded) {
+    await recordReviewUsage(ctx, id, telemetry.costUsd, telemetry.inputTokens, telemetry.outputTokens).catch(() => {});
+  }
 }
 
 export async function markReviewCancelled(ctx: AgentContext, id: number): Promise<void> {

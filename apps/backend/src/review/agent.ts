@@ -2,7 +2,15 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { TICKET_REVIEW_PEER_MAX_FOR_PR_REVIEW, type ClaudeFindingLens } from '@pierre-review/shared';
-import { claudeModelChoice, getActiveProvider, type AgentOutcome } from '../ai/provider.js';
+import {
+  claudeModelChoice,
+  getActiveProvider,
+  type AgentOutcome,
+  type AgentRunSpec,
+  type ModelChoice,
+} from '../ai/provider.js';
+import { runCodexSpecialists } from '../ai/codex/specialists.js';
+import { loadZod } from '../ai/runtime.js';
 import type { RunReviewArgs, RunReviewResult } from '../platform/contract.js';
 import { config } from '../config.js';
 import { submitReviewShape, type SubmitReviewPayload } from './schema.js';
@@ -18,10 +26,19 @@ import { estimateCostUsd } from './pricing.js';
 import { mapSubmittedReview } from './submit-map.js';
 import {
   DISPATCH_TOOL_NAMES,
+  SPECIALIST_MAX_TURNS,
   createDispatchGuard,
   specialistAgents,
   type DispatchGuard,
 } from './claude-review/specialists.js';
+import {
+  codexReviewEffort,
+  codexReviewModelOverride,
+  codexSpecialistSpecs,
+  pickCodexSpecialists,
+  specialistReportsSection,
+} from './codex-review.js';
+import { codexReviewSystemPrompt, codexReviewUserPrompt } from './codex-wording.js';
 import { emptyUsage, type UsageTokens } from './usage.js';
 
 // The security-sensitive HALF of ctx.review.runReview (the plugin owns routing/prompts/
@@ -140,6 +157,14 @@ const ACTIVITY_LOG_CAP = 25;
 
 export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
   const { model, mode, onProgress, abortController } = args;
+  // THE PROVIDER, asked ONCE per run (LIMN_AI_PROVIDER). Everything below that says `onCodex` is the
+  // Codex port (docs/CODEX-PLAN.md Phase 3, stream a); with Claude active, none of it runs and the
+  // run is exactly what it was.
+  const provider = getActiveProvider();
+  const onCodex = provider.id === 'codex';
+  // Codex only: the specialists' tokens (Limn runs them as separate runs; on Claude they are part of
+  // the one run's usage already).
+  let specialistUsage: UsageTokens = emptyUsage();
 
   let worktreePath: string | null = null;
   let repoCloneDir: string | null = null;
@@ -157,10 +182,12 @@ export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
     RunReviewResult,
     'costUsd' | 'inputTokens' | 'outputTokens' | 'cacheReadTokens' | 'cacheCreationTokens' | 'numTurns'
   > => {
-    const usage = outcome?.usage ?? liveUsage;
+    const lead = outcome?.usage ?? liveUsage;
+    const usage = onCodex ? addTokens(lead, specialistUsage) : lead;
     const hasUsage = usage.inputTokens + usage.outputTokens + usage.cacheReadTokens > 0;
     return {
-      costUsd: outcome?.costUsd ?? (hasUsage ? estimateCostUsd(model, usage) : null),
+      // ⚠ Codex tokens are never priced as Claude's: its outcome carries its own US$ (0 on ChatGPT).
+      costUsd: outcome?.costUsd ?? (hasUsage ? (onCodex ? 0 : estimateCostUsd(model, usage)) : null),
       inputTokens: usage.inputTokens,
       outputTokens: usage.outputTokens,
       cacheReadTokens: usage.cacheReadTokens,
@@ -177,7 +204,11 @@ export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
     findings: [],
     ...telemetry(),
     aborted,
+    ...(usageRecorded ? { usageRecorded: true } : {}),
   });
+  // Codex writes its own ledger rows when told who to bill (ai/providers/codex.ts); the manager must
+  // then not write one too. Claude: false, the manager records as before.
+  const usageRecorded = onCodex && args.usage != null;
 
   try {
     // Working directory + tool surface per mode. A worktree review clones + checks out the
@@ -188,6 +219,9 @@ export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
     let prompt = args.prompt;
     // The ticket peers' checkouts, readable beside cwd (empty unless a deep run was handed peers).
     const peerDirs: string[] = [];
+    // The "Related checkouts" tail appended to the prompt (a deep run with peers), kept for the Codex
+    // specialists' briefs.
+    let checkoutsTail = '';
     // The workspace's reference library, READ-ONLY, when the manager handed one (null ⇒ unchanged run).
     const docsDir = args.docsDir ?? null;
     const policy = reviewToolPolicy(mode, args.specialists, docsDir != null);
@@ -212,7 +246,8 @@ export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
         peerCleanup = prepared.cleanup;
         const checkouts = peers.map((p, i) => ({ ref: p.ref, path: prepared.peers[i]?.path ?? null }));
         for (const c of checkouts) if (c.path) peerDirs.push(c.path);
-        prompt = `${prompt}\n${relatedCheckoutsSection(checkouts)}`;
+        checkoutsTail = `\n${relatedCheckoutsSection(checkouts)}`;
+        prompt = `${prompt}${checkoutsTail}`;
       }
     } else {
       tempCwd = mkdtempSync(join(tmpdir(), 'pierre-review-'));
@@ -222,7 +257,8 @@ export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
     }
     // Establish this run's auth (prefer ambient, strip an explicit key). The plugin decides
     // whether it's safe to mutate process.env (its concurrency === 1); restored in finally.
-    restoreEnv = applyClaudeReviewAuth(args.applyAuthEnv);
+    // Codex: its child gets its own allow-listed environment (ai/codex/config.ts), never this one.
+    if (!onCodex) restoreEnv = applyClaudeReviewAuth(args.applyAuthEnv);
 
     // ---- run the agent ----
     // THROUGH THE PROVIDER (ai/provider.ts; Claude's is ai/providers/claude.ts). Effort guides
@@ -251,17 +287,69 @@ export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
     // prior phase doesn't linger through the agent's whole first turn.
     onProgress({ phase: 'reviewing', reviewMode: mode });
 
+    // ---- Codex only: the model, its effort, the prompts in Codex words, and the specialists ----
+    // The role keeps the router's depth (Opus → deep, Sonnet → standard); the effort is the role's on a
+    // worktree run and one step lower on a diff-only one (codex-review.ts). The live test may pin both.
+    const override = onCodex ? codexReviewModelOverride() : null;
+    const modelChoice: ModelChoice = override
+      ? { role: claudeModelChoice(model).role, id: override.model }
+      : claudeModelChoice(model);
+    const codexEffort = override?.effort ?? codexReviewEffort(modelChoice.role, mode);
+    const codexUsage = args.usage
+      ? { accountId: args.usage.accountId, seam: 'agent' as const, feature: 'claude_review', prId: args.usage.prId, repoId: args.usage.repoId ?? null }
+      : undefined;
+    let system = args.systemPrompt;
+    let leadBudgetUsd = config.reviewBudgetUsd;
+    if (onCodex) {
+      system = codexReviewSystemPrompt(args.systemPrompt, policy.specialists);
+      // § 3.5: LIMN runs the specialists BEFORE the lead (the cap, the catalogue, read-only and the
+      // budget enforced in ai/codex/specialists.ts) and hands their reports to it, fenced.
+      if (policy.specialists.length > 0) {
+        const picks = pickCodexSpecialists(policy.specialists);
+        const z = await loadZod();
+        const brief = codexReviewUserPrompt(args.prompt);
+        const tail = checkoutsTail ? codexReviewUserPrompt(checkoutsTail) : '';
+        const specs = codexSpecialistSpecs(z, picks, brief).map((sp) => ({ ...sp, prompt: `${sp.prompt}${tail}` }));
+        for (const lens of picks) pushActivity(`Asking the ${lens} specialist`);
+        onProgress({ phase: 'reviewing', recentActivity: [...activity], reviewMode: mode });
+        const batch = await runCodexSpecialists({
+          specialists: specs,
+          offered: policy.specialists,
+          model: modelChoice,
+          cwd,
+          roots: peerDirs,
+          readOnlyRoots: docsDir != null ? [docsDir] : [],
+          budget: { usd: config.reviewBudgetUsd, turns: SPECIALIST_MAX_TURNS },
+          abortController,
+          ...(args.allowSpecialistStart ? { allowStart: args.allowSpecialistStart } : {}),
+          ...(codexUsage ? { usageRecord: codexUsage } : {}),
+          // ONE door: the active provider's runAgent (the kind's allow-list check included).
+          run: (sp: AgentRunSpec) => provider.runAgent({ ...sp, codex: { ...sp.codex, effort: codexEffort } }),
+          onProgress: (name, p) => {
+            if (p.kind !== 'step') return;
+            for (const line of p.lines) pushActivity(`${name}: ${line}`);
+            onProgress({ phase: 'reviewing', recentActivity: [...activity], reviewMode: mode });
+          },
+        });
+        for (const a of batch.answers) if (a?.outcome?.usage) specialistUsage = addTokens(specialistUsage, a.outcome.usage);
+        if (abortController.signal.aborted) return fail(undefined, true);
+        if (leadBudgetUsd != null) leadBudgetUsd = Math.max(0, leadBudgetUsd - batch.costUsd);
+        prompt = `${prompt}\n${specialistReportsSection(batch.answers.filter(Boolean), batch.refused)}`;
+      }
+      prompt = codexReviewUserPrompt(prompt);
+    }
+
     // ⚠ THE PATH GUARD, on EVERY run (the provider puts it first on PreToolUse): under
     // bypassPermissions nothing else confines an absolute path, and the prompt is attacker-authored.
     // The file tools may read cwd and the peers' checkouts, nothing else. (A diff-only run has no
     // file tools; it is guarded anyway, so a future tool is never unconfined by default.)
     // The library is a READ-ONLY root: Read/Glob/Grep may reach it, nothing else may name it.
-    ({ outcome } = await getActiveProvider().runAgent({
+    ({ outcome } = await provider.runAgent({
       kind: 'review',
-      model: claudeModelChoice(model),
+      model: modelChoice,
       effort: mode,
       prompt,
-      system: args.systemPrompt,
+      system,
       cwd,
       roots: peerDirs,
       readOnlyRoots: docsDir != null ? [docsDir] : [],
@@ -282,8 +370,10 @@ export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
       },
       // User-set per-review cap (local settings) when present, else the operator default —
       // plus headroom for each specialist a deep run is offered (they share this one budget).
-      budget: { usd: config.reviewBudgetUsd, turns: maxTurns },
+      budget: { usd: leadBudgetUsd, turns: maxTurns },
       abortController,
+      ...(codexUsage ? { usageRecord: codexUsage } : {}),
+      codex: { resultTool: 'submit_review', effort: codexEffort },
       claude: {
         allowedTools: policy.allowedTools,
         disallowedTools: policy.disallowedTools,
@@ -305,13 +395,14 @@ export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
       onProgress: (p) => {
         if (p.kind === 'step') {
           if (p.usage) liveUsage = p.usage;
-          for (const line of p.lines) pushActivity(line);
+          // Codex's final answer arrives as a message (the JSON itself): worded as Claude's submit call.
+          for (const line of p.lines) pushActivity(onCodex && isJsonAnswerLine(line) ? 'Submitting review…' : line);
           const live = liveUsage;
           onProgress({
             phase: 'reviewing',
             recentActivity: [...activity],
             reviewMode: mode,
-            usage: { ...live, estCostUsd: estimateCostUsd(model, live) },
+            usage: { ...live, estCostUsd: onCodex ? 0 : estimateCostUsd(model, live) },
           });
         } else if (p.kind === 'outcome') {
           // Kept as it arrives, so a run that throws AFTER its outcome still reports it.
@@ -337,6 +428,7 @@ export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
       ...mapped,
       ...telemetry(),
       aborted: false,
+      ...(usageRecorded ? { usageRecorded: true } : {}),
     };
   } catch (err) {
     // A user cancel aborts the SDK iterator, surfacing as an error here.
@@ -370,6 +462,21 @@ export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
       });
     }
   }
+}
+
+/** A Codex step line that is its final JSON answer (shown as the submit step, never as raw JSON). */
+export function isJsonAnswerLine(line: string): boolean {
+  return /^\s*\{\s*"/.test(line);
+}
+
+/** Two token tallies, summed (the Codex specialists' beside the lead's). */
+function addTokens(a: UsageTokens, b: UsageTokens): UsageTokens {
+  return {
+    inputTokens: a.inputTokens + b.inputTokens,
+    outputTokens: a.outputTokens + b.outputTokens,
+    cacheReadTokens: a.cacheReadTokens + b.cacheReadTokens,
+    cacheCreationTokens: a.cacheCreationTokens + b.cacheCreationTokens,
+  };
 }
 
 function errorMessage(err: unknown): string {

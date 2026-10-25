@@ -75,7 +75,11 @@ describe('the provider seam', () => {
   it('every runner goes through the active provider', () => {
     for (const f of RUNNERS) {
       const src = code(readFileSync(join(SRC, f), 'utf8'));
-      expect(src, `${f} must call the provider`).toMatch(/getActiveProvider\(\)\.(runAgent|complete)\(/);
+      // Directly, or through the active provider asked ONCE per run (`const provider = getActiveProvider()`,
+      // the Codex ports: the run's wording and its call must agree on the provider).
+      const direct = /getActiveProvider\(\)\.(runAgent|complete)\(/.test(src);
+      const once = /const provider = getActiveProvider\(\);/.test(src) && /\bprovider\.(runAgent|complete)\(/.test(src);
+      expect(direct || once, `${f} must call the provider`).toBe(true);
     }
     // The resolver runs through the fixer's run core (coding/agent.ts runAgentInWorktree).
     expect(code(readFileSync(join(SRC, 'coding/ai-resolve/run.ts'), 'utf8'))).toMatch(/runAgentInWorktree\(/);

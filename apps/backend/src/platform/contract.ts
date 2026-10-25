@@ -494,6 +494,14 @@ export interface RunReviewArgs {
   // a finding's `docRefs`. Absent/null ⇒ the run is exactly as before. Core-only (Claude Review left
   // the plugin), so no apiVersion question.
   docsDir?: string | null;
+  // WHO TO BILL, for a provider that writes its own ledger row (Codex: a ChatGPT run is US$ 0, so the
+  // manager's cost-gated row would never be written; ai/provider.ts `usageRecord`). Claude ignores it
+  // and the manager records Claude's run exactly as before. Core-only.
+  usage?: { accountId: number; prId: number | null; repoId?: number | null };
+  // Asked before EACH specialist starts on a CODEX deep review, where Limn runs them as separate runs
+  // (ai/codex/specialists.ts `allowStart`; the manager passes the spend-budget gate for an automatic
+  // review). Claude's specialists are sub-agents of the one run and never ask it. Core-only.
+  allowSpecialistStart?: (lens: string) => boolean | Promise<boolean>;
 }
 
 export interface RunReviewResult {
@@ -519,7 +527,9 @@ export interface RunReviewResult {
   ciFailures?: ReviewCiFailureReport[];
   // A docs run only (RunReviewArgs.docsDir): the model's `docReferences`, RAW — the manager checks each
   // against the library before anything is stored.
-  docReferences?: unknown;
+  docReferences?: unknown;  // True when the PROVIDER already wrote this run's ledger row (Codex, given `usage`): the manager
+  // must not record it again. Absent ⇒ the manager records it as it always did (Claude).
+  usageRecorded?: boolean;
 }
 
 // The ticked findings the plugin hands to postReview (the plugin read them from the core
@@ -626,6 +636,8 @@ export interface ReviewChatArgs {
   // An "explain these" turn (review/claude-review/chat-explain.ts): the run also gets the in-process
   // `submit_explanations` tool and succeeds ONLY by calling it. Optional, so no apiVersion bump.
   explain?: boolean;
+  // Who to bill, for a provider that writes its own ledger row (Codex) — RunReviewArgs.usage.
+  usage?: { accountId: number; prId: number | null; repoId?: number | null };
 }
 
 export interface ReviewChatResult {
@@ -639,6 +651,8 @@ export interface ReviewChatResult {
   outputTokens: number;
   numTurns: number | null;
   aborted: boolean;
+  // True when the provider already wrote the turn's ledger row (Codex) — RunReviewResult.usageRecorded.
+  usageRecorded?: boolean;
 }
 
 export interface ReviewSeam {

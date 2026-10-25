@@ -603,13 +603,16 @@ export async function answerReviewChat(
         applyAuthEnv: chatMayApplyAuthEnv(),
         abortController,
         ...(explain ? { explain: true } : {}),
+        // Who to bill when the provider writes its own ledger row (Codex).
+        usage: { accountId, prId: review.prId },
       });
     } finally {
       clearTimeout(timer);
     }
 
     // Meter whatever it cost, answered or not — a failed agent turn still spent.
-    if (result.costUsd != null && Number.isFinite(result.costUsd) && result.costUsd > 0) {
+    // (Codex writes its own row: `usageRecorded`.)
+    if (!result.usageRecorded && result.costUsd != null && Number.isFinite(result.costUsd) && result.costUsd > 0) {
       await ctx
         .recordAiUsage({
           accountId,

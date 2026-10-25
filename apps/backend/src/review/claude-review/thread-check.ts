@@ -408,6 +408,8 @@ async function runPipeline(
       applyAuthEnv: REVIEW_APPLY_AUTH_ENV,
       abortController: controller,
       onProgress: (p) => progress({ phase: 'checking', recentActivity: p.recentActivity, usage: p.usage }),
+      // Who to bill when the provider writes its own ledger row (Codex).
+      usage: { accountId, prId, repoId: pr.repoId ?? null },
     });
     progress({ phase: 'saving' });
     const telemetry = {
@@ -415,6 +417,7 @@ async function runPipeline(
       inputTokens: res.inputTokens,
       outputTokens: res.outputTokens,
       numTurns: res.numTurns,
+      ...(res.usageRecorded ? { usageRecorded: true } : {}),
     };
     if (res.aborted) {
       await markThreadCheckCancelled(ctx, accountId, checkId, telemetry);
