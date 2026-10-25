@@ -2,18 +2,14 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
-import { claudeExecutableOptions, loadAgentSdk } from '../ai/runtime.js';
-import { agentAuthOptions } from '../ai/credentials.js';
+import { claudeModelChoice, getActiveProvider, type AgentToolServer } from '../ai/provider.js';
 import type { ReviewChatArgs, ReviewChatResult } from '../platform/contract.js';
 import { config } from '../config.js';
 import { applyClaudeReviewAuth } from './auth.js';
 import { cleanupCloneCache, prepWorktree, removeWorktreeLocked } from './clone-manager.js';
-import { createPathGuard, pathGuardHook } from './path-guard.js';
-import { sdkModelOptions } from './model-options.js';
 import { estimateCostUsd } from './pricing.js';
 import { recordUsage, sumModelUsage, sumUsageMap, type UsageTokens } from './usage.js';
 import { submitExplanationsShape } from './claude-review/chat-explain.js';
-import { ISOLATED_MCP, ownToolsOnlyHook } from '../ai/agent-isolation.js';
 
 // ctx.review.chat — ONE answered question about a succeeded Claude Review. The plugin owns the
 // product (the prompt, the stored transcript, gating, metering); core owns the run, exactly as for
@@ -119,70 +115,59 @@ export async function runReviewChat(args: ReviewChatArgs): Promise<ReviewChatRes
     const { builtinTools, allowedTools, disallowedTools } = chatToolsFor(mode, args.explain === true);
     restoreEnv = applyClaudeReviewAuth(args.applyAuthEnv);
 
-    // From the AI runtime (ai/runtime.ts); a missing one throws into the catch below.
-    const { query, createSdkMcpServer, tool } = await loadAgentSdk();
-    let mcpServers: Record<string, ReturnType<typeof createSdkMcpServer>> | undefined;
+    // THROUGH THE PROVIDER (ai/provider.ts; Claude's is ai/providers/claude.ts). From the AI runtime
+    // (ai/runtime.ts); a missing one throws into the catch below.
+    let tools: AgentToolServer | undefined;
     if (args.explain) {
       const shape = await submitExplanationsShape();
-      mcpServers = {
-        chat: createSdkMcpServer({
-          name: 'chat',
-          version: '1.0.0',
-          tools: [
-            tool(
-              'submit_explanations',
-              'Submit one card per item the developer asked about. Call this EXACTLY once, at the end.',
-              shape,
-              async (a) => {
-                submitted = a;
-                return { content: [{ type: 'text', text: 'Explanations recorded.' }] };
-              },
-            ),
-          ],
-        }),
+      tools = {
+        server: 'chat',
+        tools: [
+          {
+            name: 'submit_explanations',
+            description: 'Submit one card per item the developer asked about. Call this EXACTLY once, at the end.',
+            shape,
+            handle: (a) => {
+              submitted = a;
+              return { text: 'Explanations recorded.' };
+            },
+          },
+        ],
       };
     }
-    const q = query({
+    ({ result } = await getActiveProvider().runAgent({
+      kind: 'review_chat',
+      model: claudeModelChoice(model),
+      effort: mode,
       prompt: args.prompt,
-      options: {
-        model,
-        ...sdkModelOptions(model, mode),
-        systemPrompt: args.systemPrompt,
-        cwd,
-        permissionMode: 'bypassPermissions',
-        // `tools` is the BASE SET the model can see at all ([] = no built-in tools); allowedTools
-        // only skips prompts. Both say the same thing, plus the deny list.
-        tools: builtinTools,
-        allowedTools,
-        disallowedTools,
-        maxTurns,
-        maxBudgetUsd: config.reviewChatBudgetUsd,
-        settingSources: [],
-        ...ISOLATED_MCP,
-        // ⚠ The same PATH GUARD the review runs under (review/path-guard.ts): under
-        // bypassPermissions nothing else confines an absolute path, so the file tools may read
-        // cwd and nothing else.
-        hooks: { PreToolUse: [pathGuardHook(createPathGuard(cwd, [])), ownToolsOnlyHook(Object.keys(mcpServers ?? {}))] },
-        ...(mcpServers ? { mcpServers } : {}),
-        abortController,
-        ...claudeExecutableOptions(),
-        ...agentAuthOptions(),
-      },
-    });
-
-    for await (const message of q) {
-      if (message.type === 'assistant') {
-        try {
-          recordUsage(usageByUuid, message);
-        } catch {
-          /* usage shape varies — never let it break the run */
+      system: args.systemPrompt,
+      // ⚠ The same PATH GUARD the review runs under (review/path-guard.ts), put first on PreToolUse
+      // by the provider: under bypassPermissions nothing else confines an absolute path, so the
+      // file tools may read cwd and nothing else.
+      cwd,
+      roots: [],
+      readOnlyRoots: [],
+      writeRoots: [],
+      ...(tools ? { tools } : {}),
+      budget: { usd: config.reviewChatBudgetUsd, turns: maxTurns },
+      abortController,
+      // `tools` is the BASE SET the model can see at all ([] = no built-in tools); allowedTools
+      // only skips prompts. Both say the same thing, plus the deny list.
+      claude: { builtinTools, allowedTools, disallowedTools },
+      onMessage: (message) => {
+        if (message.type === 'assistant') {
+          try {
+            recordUsage(usageByUuid, message);
+          } catch {
+            /* usage shape varies — never let it break the run */
+          }
+          const text = assistantText(message);
+          if (text) lastText = text;
+        } else if (message.type === 'result') {
+          result = message;
         }
-        const text = assistantText(message);
-        if (text) lastText = text;
-      } else if (message.type === 'result') {
-        result = message;
-      }
-    }
+      },
+    }));
 
     if (args.explain) {
       if (submitted === undefined) {

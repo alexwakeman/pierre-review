@@ -1,17 +1,13 @@
 import type { SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
-import type { z as Zod } from 'zod';
 import type { ClaudeReviewModel } from '@pierre-review/shared';
-import { claudeExecutableOptions, loadAgentSdk, loadZod } from '../../ai/runtime.js';
-import { agentAuthOptions } from '../../ai/credentials.js';
-import { ISOLATED_MCP, ownToolsOnlyHook } from '../../ai/agent-isolation.js';
+import { loadZod } from '../../ai/runtime.js';
+import { claudeModelChoice, getActiveProvider, type AgentToolServer } from '../../ai/provider.js';
 import { config } from '../../config.js';
 import type { ReviewThreadReport } from '../../platform/contract.js';
 import { DISALLOWED_TOOLS, describeAssistantBlocks } from '../agent.js';
 import { applyClaudeReviewAuth } from '../auth.js';
-import { sdkModelOptions } from '../model-options.js';
-import { createPathGuard, pathGuardHook } from '../path-guard.js';
 import { estimateCostUsd } from '../pricing.js';
-import { buildThreadReportItem } from '../schema.js';
+import { buildSubmitThreadsShape } from './thread-check-schema.js';
 import { recordUsage, sumModelUsage, sumUsageMap, type UsageTokens } from '../usage.js';
 import { DISPATCH_TOOL_NAMES } from './specialists.js';
 
@@ -29,16 +25,9 @@ export const THREAD_CHECK_TOOL_NAME = 'mcp__threads__submit_threads';
 const ALLOWED_TOOLS = ['Read', 'Glob', 'Grep', THREAD_CHECK_TOOL_NAME];
 const ACTIVITY_LOG_CAP = 25;
 
-type ZodNs = typeof Zod;
-
-/** The `submit_threads` shape: the review's own thread item (review/schema.ts), so they never drift. */
-export function buildSubmitThreadsShape(z: ZodNs) {
-  return {
-    threads: z
-      .array(buildThreadReportItem(z))
-      .describe("One entry per thread in the 'Review threads' section, each ref once. Leave out a ref you cannot judge."),
-  };
-}
+// The `submit_threads` shape lives in ./thread-check-schema.ts (the result-schema registry builds it
+// from there); re-exported under its old home.
+export { buildSubmitThreadsShape };
 
 /** The tool policy for a check. Pure, so the no-shell, no-dispatch rule is testable. */
 export function threadCheckToolPolicy(): { allowedTools: string[]; disallowedTools: string[] } {
@@ -96,76 +85,65 @@ export async function runThreadCheckAgent(args: RunThreadCheckArgs): Promise<Run
 
   try {
     restoreEnv = applyClaudeReviewAuth(args.applyAuthEnv);
-    const { createSdkMcpServer, query, tool } = await loadAgentSdk();
     const shape = buildSubmitThreadsShape(await loadZod());
     let captured: ReviewThreadReport[] | null = null;
-    const server = createSdkMcpServer({
-      name: 'threads',
-      version: '1.0.0',
+    const tools: AgentToolServer = {
+      server: 'threads',
       tools: [
-        tool(
-          'submit_threads',
-          'Submit your judgement of every review thread. Call this EXACTLY once, at the end.',
+        {
+          name: 'submit_threads',
+          description: 'Submit your judgement of every review thread. Call this EXACTLY once, at the end.',
           shape,
-          async (a) => {
+          handle: async (a) => {
             if (captured == null) captured = (a as { threads: ReviewThreadReport[] }).threads ?? [];
-            return { content: [{ type: 'text', text: 'Threads recorded.' }] };
+            return { text: 'Threads recorded.' };
           },
-        ),
+        },
       ],
-    });
-    const guard = createPathGuard(args.cwd, args.worktrees);
+    };
     const policy = threadCheckToolPolicy();
-    const q = query({
-      prompt: args.prompt,
-      options: {
-        model,
-        ...sdkModelOptions(model, args.worktrees.length > 0 ? 'worktree' : 'diff_only'),
-        systemPrompt: args.systemPrompt,
-        cwd: args.cwd,
-        additionalDirectories: [...args.worktrees],
-        permissionMode: 'bypassPermissions',
-        allowedTools: policy.allowedTools,
-        disallowedTools: policy.disallowedTools,
-        maxTurns: config.threadCheckMaxTurns,
-        // ⚠ THE CONFINEMENT LIVES HERE, not in the prompt: a PreToolUse deny holds under
-        // bypassPermissions.
-        hooks: { PreToolUse: [pathGuardHook(guard), ownToolsOnlyHook(['threads'])] },
-        maxBudgetUsd: config.threadCheckBudgetUsd,
-        settingSources: [],
-        ...ISOLATED_MCP,
-        mcpServers: { threads: server },
-        abortController,
-        ...claudeExecutableOptions(),
-        ...agentAuthOptions(),
-      },
-    });
-
     const activity: string[] = [];
-    for await (const message of q) {
-      if (message.type === 'assistant') {
-        try {
-          recordUsage(usageByUuid, message);
-        } catch {
-          /* usage shape varies — never let it break the run */
-        }
-        try {
-          for (const line of describeAssistantBlocks(message)) {
-            activity.push(line.startsWith(THREAD_CHECK_TOOL_NAME) ? 'Saving the judgements…' : line);
-            if (activity.length > ACTIVITY_LOG_CAP) activity.shift();
+    ({ result } = await getActiveProvider().runAgent({
+      kind: 'thread_check',
+      model: claudeModelChoice(model),
+      effort: args.worktrees.length > 0 ? 'worktree' : 'diff_only',
+      prompt: args.prompt,
+      system: args.systemPrompt,
+      // ⚠ THE CONFINEMENT (the provider's path guard, first on PreToolUse — a deny holds under
+      // bypassPermissions): the scratch cwd and the worktrees, nothing else.
+      cwd: args.cwd,
+      roots: [...args.worktrees],
+      readOnlyRoots: [],
+      writeRoots: [],
+      tools,
+      budget: { usd: config.threadCheckBudgetUsd, turns: config.threadCheckMaxTurns },
+      abortController,
+      claude: { allowedTools: policy.allowedTools, disallowedTools: policy.disallowedTools },
+      onMessage: (message) => {
+        if (message.type === 'assistant') {
+          try {
+            recordUsage(usageByUuid, message);
+          } catch {
+            /* usage shape varies — never let it break the run */
           }
-        } catch {
-          /* never let progress derivation break the run */
+          try {
+            for (const line of describeAssistantBlocks(message)) {
+              activity.push(line.startsWith(THREAD_CHECK_TOOL_NAME) ? 'Saving the judgements…' : line);
+              if (activity.length > ACTIVITY_LOG_CAP) activity.shift();
+            }
+          } catch {
+            /* never let progress derivation break the run */
+          }
+          const live = sumUsageMap(usageByUuid);
+          args.onProgress({
+            recentActivity: [...activity],
+            usage: { inputTokens: live.inputTokens, outputTokens: live.outputTokens, costUsd: estimateCostUsd(model, live) },
+          });
+        } else if (message.type === 'result') {
+          result = message;
         }
-        const live = sumUsageMap(usageByUuid);
-        args.onProgress({
-          recentActivity: [...activity],
-          usage: { inputTokens: live.inputTokens, outputTokens: live.outputTokens, costUsd: estimateCostUsd(model, live) },
-        });
-      } else if (message.type === 'result') {
-        result = message;
-      }
-    }
+      },
+    }));
 
     if (!captured) {
       const reason =

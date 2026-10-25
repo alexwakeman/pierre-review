@@ -1,14 +1,10 @@
 import type { SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import { STORY_DOCS_ALIGNMENT_MODEL, type ClaudeReviewModel } from '@pierre-review/shared';
-import { claudeExecutableOptions, loadAgentSdk } from '../../ai/runtime.js';
-import { agentAuthOptions } from '../../ai/credentials.js';
-import { ISOLATED_MCP, ownToolsOnlyHook } from '../../ai/agent-isolation.js';
+import { claudeModelChoice, getActiveProvider, type AgentToolServer } from '../../ai/provider.js';
 import { config } from '../../config.js';
 import { DISALLOWED_TOOLS } from '../agent.js';
 import { applyClaudeReviewAuth } from '../auth.js';
 import { DISPATCH_TOOL_NAMES } from '../claude-review/specialists.js';
-import { sdkModelOptions } from '../model-options.js';
-import { createPathGuard, pathGuardHook } from '../path-guard.js';
 import { estimateCostUsd } from '../pricing.js';
 import { recordUsage, sumModelUsage, sumUsageMap, type UsageTokens } from '../usage.js';
 import { STORY_DOCS_TOOL_NAME } from './prompts.js';
@@ -108,71 +104,62 @@ export async function runStoryDocsAgent(args: RunStoryDocsAgentArgs): Promise<Ru
 
   try {
     restoreEnv = applyClaudeReviewAuth(args.applyAuthEnv);
-    const { createSdkMcpServer, query, tool } = await loadAgentSdk();
     const shape = await submitAlignmentShape();
     let attempts = 0;
-    const server = createSdkMcpServer({
-      name: 'storydocs',
-      version: '1.0.0',
+    const tools: AgentToolServer = {
+      server: 'storydocs',
       tools: [
-        tool(
-          STORY_DOCS_TOOL_NAME,
-          'Submit the whole check of the story against the docs. Its shape is checked at once: a refusal lists what to fix.',
+        {
+          name: STORY_DOCS_TOOL_NAME,
+          description: 'Submit the whole check of the story against the docs. Its shape is checked at once: a refusal lists what to fix.',
           shape,
-          async (a) => {
-            if (accepted != null) return { content: [{ type: 'text', text: 'Already recorded.' }] };
+          handle: async (a) => {
+            if (accepted != null) return { text: 'Already recorded.' };
             if (attempts >= MAX_SUBMIT_ATTEMPTS) {
-              return { content: [{ type: 'text', text: 'No more attempts. Stop now.' }], isError: true };
+              return { text: 'No more attempts. Stop now.', isError: true };
             }
             attempts += 1;
             const j = judgeSubmission(a, attempts, args.alignment);
             if ('accepted' in j) {
               accepted = j.accepted;
-              return { content: [{ type: 'text', text: 'Recorded.' }] };
+              return { text: 'Recorded.' };
             }
             lastRefusal = j.refusal;
-            return { content: [{ type: 'text', text: j.reply }], isError: true };
+            return { text: j.reply, isError: true };
           },
-        ),
+        },
       ],
-    });
+    };
     // ⚠ THE CONFINEMENT LIVES HERE, not in the prompt: a PreToolUse deny holds under bypassPermissions.
-    const guard = createPathGuard(args.cwd, [], { readOnlyRoots: args.roots });
     const policy = storyDocsToolPolicy();
-    const q = query({
+    ({ result } = await getActiveProvider().runAgent({
+      kind: 'story_docs',
+      model: claudeModelChoice(model),
+      effort: 'worktree',
       prompt: args.prompt,
-      options: {
-        model,
-        ...sdkModelOptions(model, 'worktree'),
-        systemPrompt: args.systemPrompt,
-        cwd: args.cwd,
-        additionalDirectories: [...args.roots],
-        permissionMode: 'bypassPermissions',
-        allowedTools: policy.allowedTools,
-        disallowedTools: policy.disallowedTools,
-        maxTurns: config.storyDocsMaxTurns,
-        hooks: { PreToolUse: [pathGuardHook(guard), ownToolsOnlyHook(['storydocs'])] },
-        maxBudgetUsd: config.storyDocsBudgetUsd,
-        settingSources: [],
-        ...ISOLATED_MCP,
-        mcpServers: { storydocs: server },
-        abortController,
-        ...claudeExecutableOptions(),
-        ...agentAuthOptions(),
-      },
-    });
-
-    for await (const message of q) {
-      if (message.type === 'assistant') {
-        try {
-          recordUsage(usageByUuid, message);
-        } catch {
-          /* usage shape varies — never let it break the run */
+      system: args.systemPrompt,
+      // ⚠ THE CONFINEMENT (the provider's path guard): the scratch cwd, and the shortlisted
+      // documents READ-ONLY.
+      cwd: args.cwd,
+      roots: [],
+      readOnlyRoots: [...args.roots],
+      writeRoots: [],
+      tools,
+      budget: { usd: config.storyDocsBudgetUsd, turns: config.storyDocsMaxTurns },
+      abortController,
+      claude: { allowedTools: policy.allowedTools, disallowedTools: policy.disallowedTools },
+      onMessage: (message) => {
+        if (message.type === 'assistant') {
+          try {
+            recordUsage(usageByUuid, message);
+          } catch {
+            /* usage shape varies — never let it break the run */
+          }
+        } else if (message.type === 'result') {
+          result = message;
         }
-      } else if (message.type === 'result') {
-        result = message;
-      }
-    }
+      },
+    }));
 
     if (accepted == null) {
       const reason =

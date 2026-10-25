@@ -4,6 +4,7 @@ import type { ConflictAiChoice, ConflictAiResolution } from '@pierre-review/shar
 import { config } from '../../config.js';
 import { getAccessToken } from '../../auth/account.js';
 import type { AgentContext } from '../../review/agent-context.js';
+import type { AgentToolServer } from '../../ai/provider.js';
 import {
   claimSession,
   getSession,
@@ -217,10 +218,9 @@ async function runJob(
       return;
     }
 
-    const [{ runAgentInWorktree }, { loadAgentSdk }, { prepWorktree }, { submitResolutionShape }] =
+    const [{ runAgentInWorktree }, { prepWorktree }, { submitResolutionShape }] =
       await Promise.all([
         import('../agent.js'),
-        import('../../ai/runtime.js'),
         import('../../review/clone-manager.js'),
         import('./schema.js'),
       ]);
@@ -230,17 +230,16 @@ async function runJob(
 
     const accepted = new Map<string, ConflictAiChoice>();
     let summary: string | null = null;
-    const { createSdkMcpServer, tool } = await loadAgentSdk();
     const shape = await submitResolutionShape();
-    const server = createSdkMcpServer({
-      name: 'resolve',
-      version: '1.0.0',
+    const tools: AgentToolServer = {
+      server: 'resolve',
       tools: [
-        tool(
-          'submit_resolution',
-          'Submit your decisions for the conflict regions. Call again with only the refused ones to fix them.',
+        {
+          name: 'submit_resolution',
+          description:
+            'Submit your decisions for the conflict regions. Call again with only the refused ones to fix them.',
           shape,
-          async (a) => {
+          handle: (a) => {
             const p = a as unknown as { choices?: AiChoiceInput[]; summary?: string };
             if (typeof p.summary === 'string' && p.summary.trim() !== '') {
               summary = p.summary.trim().slice(0, 2000);
@@ -256,11 +255,11 @@ async function runJob(
                       (r) => `- file=${r.file} region=${r.region}: ${AI_CHOICE_REFUSAL_TEXT[r.refusal]}`,
                     ),
                   ].join('\n');
-            return { content: [{ type: 'text', text }] };
+            return { text };
           },
-        ),
+        },
       ],
-    });
+    };
 
     const outcome = await runAgentInWorktree({
       worktreePath: worktree.worktreePath,
@@ -269,7 +268,9 @@ async function runJob(
       prompt: built.prompt,
       allowedTools: READ_TOOLS,
       disallowedTools: DENIED_TOOLS,
-      mcpServers: { resolve: server },
+      kind: 'resolve',
+      tools,
+      writes: false,
       maxTurns: config.aiFixMaxTurns,
       maxBudgetUsd: config.aiFixBudgetUsd,
       abortController: abort,

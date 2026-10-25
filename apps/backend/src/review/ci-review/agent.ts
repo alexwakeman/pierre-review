@@ -1,17 +1,13 @@
 import type { SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { ClaudeReviewModel } from '@pierre-review/shared';
-import { claudeExecutableOptions, loadAgentSdk } from '../../ai/runtime.js';
-import { agentAuthOptions } from '../../ai/credentials.js';
+import { claudeModelChoice, getActiveProvider, type AgentToolServer } from '../../ai/provider.js';
 import { config } from '../../config.js';
 import { DISALLOWED_TOOLS, describeAssistantBlocks } from '../agent.js';
 import { applyClaudeReviewAuth } from '../auth.js';
 import { DISPATCH_TOOL_NAMES } from '../claude-review/specialists.js';
-import { sdkModelOptions } from '../model-options.js';
-import { createPathGuard, pathGuardHook } from '../path-guard.js';
 import { estimateCostUsd } from '../pricing.js';
 import { recordUsage, sumModelUsage, sumUsageMap, type UsageTokens } from '../usage.js';
 import { submitCiReviewShape, type SubmitCiReviewPayload } from './schema.js';
-import { ISOLATED_MCP, ownToolsOnlyHook } from '../../ai/agent-isolation.js';
 
 // THE CI REVIEW'S AGENT RUN — the SDK half. The manager (manager.ts) reads the checks and logs,
 // prepares the scratch working directory and the PR's read-only worktree, builds the prompts, and
@@ -87,77 +83,66 @@ export async function runCiReviewAgent(args: RunCiAgentArgs): Promise<RunCiAgent
 
   try {
     restoreEnv = applyClaudeReviewAuth(args.applyAuthEnv);
-    const { createSdkMcpServer, query, tool } = await loadAgentSdk();
     const shape = await submitCiReviewShape();
     let captured: SubmitCiReviewPayload | null = null;
-    const server = createSdkMcpServer({
-      name: 'ci',
-      version: '1.0.0',
+    const tools: AgentToolServer = {
+      server: 'ci',
       tools: [
-        tool(
-          'submit_ci_review',
-          'Submit why each failing check failed. Call this EXACTLY once, at the end.',
+        {
+          name: 'submit_ci_review',
+          description: 'Submit why each failing check failed. Call this EXACTLY once, at the end.',
           shape,
-          async (a) => {
+          handle: (a) => {
             captured = a as unknown as SubmitCiReviewPayload;
-            return { content: [{ type: 'text', text: 'CI review recorded.' }] };
+            return { text: 'CI review recorded.' };
           },
-        ),
+        },
       ],
-    });
-    const guard = createPathGuard(args.cwd, args.worktrees);
+    };
     const policy = ciToolPolicy();
-    const q = query({
-      prompt: args.prompt,
-      options: {
-        model,
-        ...sdkModelOptions(model, 'worktree'),
-        systemPrompt: args.systemPrompt,
-        cwd: args.cwd,
-        additionalDirectories: [...args.worktrees],
-        permissionMode: 'bypassPermissions',
-        allowedTools: policy.allowedTools,
-        disallowedTools: policy.disallowedTools,
-        maxTurns: config.ciReviewMaxTurns,
-        // ⚠ THE CONFINEMENT LIVES HERE, not in the prompt: a PreToolUse deny holds under
-        // bypassPermissions.
-        hooks: { PreToolUse: [pathGuardHook(guard), ownToolsOnlyHook(['ci'])] },
-        maxBudgetUsd: config.ciReviewBudgetUsd,
-        settingSources: [],
-        ...ISOLATED_MCP,
-        mcpServers: { ci: server },
-        abortController,
-        ...claudeExecutableOptions(),
-        ...agentAuthOptions(),
-      },
-    });
-
     const activity: string[] = [];
-    for await (const message of q) {
-      if (message.type === 'assistant') {
-        try {
-          recordUsage(usageByUuid, message);
-        } catch {
-          /* usage shape varies — never let it break the run */
-        }
-        try {
-          for (const line of describeAssistantBlocks(message)) {
-            const t = line.startsWith(CI_TOOL_NAME) ? 'Submitting the CI review…' : line;
-            activity.push(t);
-            if (activity.length > ACTIVITY_LOG_CAP) activity.shift();
+    ({ result } = await getActiveProvider().runAgent({
+      kind: 'ci_review',
+      model: claudeModelChoice(model),
+      effort: 'worktree',
+      prompt: args.prompt,
+      system: args.systemPrompt,
+      // ⚠ THE CONFINEMENT (the provider's path guard, first on PreToolUse — a deny holds under
+      // bypassPermissions): the scratch cwd and the PR's worktree, nothing else.
+      cwd: args.cwd,
+      roots: [...args.worktrees],
+      readOnlyRoots: [],
+      writeRoots: [],
+      tools,
+      budget: { usd: config.ciReviewBudgetUsd, turns: config.ciReviewMaxTurns },
+      abortController,
+      claude: { allowedTools: policy.allowedTools, disallowedTools: policy.disallowedTools },
+      onMessage: (message) => {
+        if (message.type === 'assistant') {
+          try {
+            recordUsage(usageByUuid, message);
+          } catch {
+            /* usage shape varies — never let it break the run */
           }
-        } catch {
-          /* never let progress derivation break the run */
+          try {
+            for (const line of describeAssistantBlocks(message)) {
+              const t = line.startsWith(CI_TOOL_NAME) ? 'Submitting the CI review…' : line;
+              activity.push(t);
+              if (activity.length > ACTIVITY_LOG_CAP) activity.shift();
+            }
+          } catch {
+            /* never let progress derivation break the run */
+          }
+          const live = sumUsageMap(usageByUuid);
+          args.onProgress({
+            recentActivity: [...activity],
+            usage: { inputTokens: live.inputTokens, outputTokens: live.outputTokens, costUsd: estimateCostUsd(model, live) },
+          });
+        } else if (message.type === 'result') {
+          result = message;
         }
-        const live = sumUsageMap(usageByUuid);
-        args.onProgress({
-          recentActivity: [...activity],
-          usage: { inputTokens: live.inputTokens, outputTokens: live.outputTokens, costUsd: estimateCostUsd(model, live) },
-        });
-      } else if (message.type === 'result') {
-        result = message;
-      }
-    }
+      },
+    }));
 
     if (!captured) {
       const reason =

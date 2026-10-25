@@ -465,6 +465,11 @@ library, sprint briefs/paths and every one-shot completion. Details:
   history. Plan mode is MANUAL and READ-ONLY. URL paths kept (`/api/pro/prs/:id/ai-fix*`).
 - **The moved modules take ONE `AgentContext`** (`review/agent-context.ts`), never the platform
   context.
+- ⚠ **EVERY MODEL CALL GOES THROUGH `ai/provider.ts`** ([docs/CODEX-PLAN.md](docs/CODEX-PLAN.md)
+  § 3.1): runners call `getActiveProvider().runAgent`, `cheapComplete` calls `.complete`. ONLY
+  `ai/providers/claude.ts` (+ `ai/runtime.ts`) calls `query`/loads an SDK, and adds the path guard,
+  own-tools hook and isolation to every run (`provider-seam.test.ts`). Budget folds filter
+  `ai_usage.provider` (sqlite `0127`).
 - **SonarCloud** ([docs/SONARCLOUD.md](docs/SONARCLOUD.md)) and **reference docs**
   ([docs/REFERENCE-DOCS.md](docs/REFERENCE-DOCS.md)): sealed write-only tokens; one stored Sonar
   snapshot per (PR, head) kept only when SonarCloud analysed THIS head; the docs library is

@@ -65,9 +65,16 @@ describe('the coding agent runs without a shell', () => {
 describe('the fixer is confined to its worktree', () => {
   // The fixer WRITES under bypassPermissions; without this hook an absolute path (~/.zshrc) in a
   // seed item would be written outside the worktree. Behaviour: review/path-guard.test.ts.
+  // Since the provider seam (ai/provider.ts) the hook is built by the provider from the run's cwd and
+  // roots (ai/providers/claude.ts), so the pin is split in two: the fixer hands the worktree as cwd
+  // with NO other root, and the provider puts the path guard over exactly cwd + roots FIRST on
+  // PreToolUse, then the own-tools-only hook for the run's one server.
   it('runs behind the path guard rooted at the worktree', () => {
-    expect(SRC).toContain(
-      'hooks: { PreToolUse: [pathGuardHook(createPathGuard(opts.worktreePath)), ownToolsOnlyHook(Object.keys(opts.mcpServers))] }',
+    expect(SRC).toContain('cwd: opts.worktreePath,\n    roots: [],\n    readOnlyRoots: [],');
+    const provider = readFileSync(fileURLToPath(new URL('../ai/providers/claude.ts', import.meta.url)), 'utf8');
+    expect(provider).toContain('const guard = createPathGuard(spec.cwd, spec.roots, { readOnlyRoots: spec.readOnlyRoots });');
+    expect(provider).toMatch(
+      /PreToolUse: \[\s*pathGuardHook\(guard\),\s*ownToolsOnlyHook\(spec\.tools \? \[spec\.tools\.server\] : \[\]\),/,
     );
   });
 });

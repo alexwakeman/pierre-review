@@ -1,16 +1,18 @@
 import type { SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
-import { claudeExecutableOptions, loadAgentSdk, type AgentSdk } from '../ai/runtime.js';
-import { agentAuthOptions } from '../ai/credentials.js';
+import {
+  claudeModelChoice,
+  getActiveProvider,
+  type AgentKind,
+  type AgentToolServer,
+} from '../ai/provider.js';
 import { config } from '../config.js';
 import { getAccessToken } from '../auth/account.js';
 import { applyClaudeReviewAuth } from '../review/auth.js';
-import { createPathGuard, pathGuardHook } from '../review/path-guard.js';
 import {
   cleanupCloneCache,
   prepWorktree,
   removeWorktreeLocked,
 } from '../review/clone-manager.js';
-import { sdkModelOptions } from '../review/model-options.js';
 import { estimateCostUsd } from '../review/pricing.js';
 import {
   recordUsage,
@@ -32,7 +34,6 @@ import {
 } from './ai-fix/plan.js';
 import { captureWorktreeDiff } from './git.js';
 import { describeAssistantBlocks } from './activity.js';
-import { ISOLATED_MCP, ownToolsOnlyHook } from '../ai/agent-isolation.js';
 import { withPartialSpend } from './partial-spend.js';
 
 // The WRITE tool surface for the fixer: Read/Glob/Grep to explore, Write/Edit/MultiEdit to
@@ -99,8 +100,6 @@ const PLAN_MAX_TURNS = 25;
 // disabled thinking / a thinking budget / a forced tool_choice, none of which is sent here).
 const ACTIVITY_LOG_CAP = 25;
 
-type SdkMcpServer = ReturnType<AgentSdk['createSdkMcpServer']>;
-
 interface LiveUsage {
   inputTokens: number;
   outputTokens: number;
@@ -118,13 +117,18 @@ function emptyUsage(): LiveUsage {
 }
 
 interface AgentRunOptions {
+  /** Which agent this is (ai/provider.ts `AgentKind`). */
+  kind: AgentKind;
   worktreePath: string;
   model: string;
   systemPrompt?: string;
   prompt: string;
   allowedTools: string[];
   disallowedTools: string[];
-  mcpServers: Record<string, SdkMcpServer>;
+  /** The run's result tools (submit_fix / submit_plan / submit_resolution), one server. */
+  tools: AgentToolServer;
+  /** True ⇒ the run may write inside the worktree (the fixer); false ⇒ read-only. */
+  writes: boolean;
   maxTurns: number;
   maxBudgetUsd: number;
   abortController: AbortController;
@@ -164,43 +168,9 @@ export async function runAgentInWorktree(
   const usageByUuid = new Map<string, UsageTokens>();
   let result: SDKResultMessage | null = null;
 
-  const maxTurns = opts.maxTurns;
-  // 'worktree' ⇒ config.reviewEffort, exactly the effort this path always used.
-  const modelOptions = sdkModelOptions(model, 'worktree');
-
   // The credential ladder (ai/credentials.ts): the Claude Code login, else ANTHROPIC_API_KEY. Restored below.
   const restoreEnv = applyClaudeReviewAuth(true);
   try {
-  // From the AI runtime (ai/runtime.ts) — downloaded on first use for an npm install.
-  const { query } = await loadAgentSdk();
-  const q = query({
-    prompt: opts.prompt,
-    options: {
-      model,
-      ...modelOptions,
-      ...(opts.systemPrompt ? { systemPrompt: opts.systemPrompt } : {}),
-      cwd: opts.worktreePath,
-      permissionMode: 'bypassPermissions',
-      allowedTools: opts.allowedTools,
-      disallowedTools: opts.disallowedTools,
-      maxTurns,
-      maxBudgetUsd: opts.maxBudgetUsd,
-      settingSources: [],
-      ...ISOLATED_MCP,
-      mcpServers: opts.mcpServers,
-      abortController: opts.abortController,
-      // ⚠ THE PATH GUARD (review/path-guard.ts): file tools stay inside the worktree. Under
-      // bypassPermissions nothing else confines an ABSOLUTE path, and this agent WRITES — a seed
-      // item (PR text, review threads, a ticket review's items) saying "also add this to
-      // ~/.zshrc" would otherwise write outside the worktree, where captureWorktreeDiff never
-      // shows it to the reader.
-      hooks: { PreToolUse: [pathGuardHook(createPathGuard(opts.worktreePath)), ownToolsOnlyHook(Object.keys(opts.mcpServers))] },
-      // LIMN_CLAUDE_PATH → the user's own `claude` instead of the SDK's bundled binary.
-      ...claudeExecutableOptions(),
-      ...agentAuthOptions(),
-    },
-  });
-
   const activity: string[] = [];
   const pushActivity = (line: string): void => {
     const trimmed = line.trim();
@@ -218,27 +188,49 @@ export async function runAgentInWorktree(
   };
 
   try {
-  for await (const message of q) {
-    if (message.type === 'assistant') {
-      try {
-        recordUsage(usageByUuid, message);
-      } catch {
-        /* usage shape varies — never let it break the run */
+  // THROUGH THE PROVIDER (ai/provider.ts; Claude's is ai/providers/claude.ts). It OWNS the sandbox
+  // config (`permissionMode:'bypassPermissions'`, `settingSources:[]`, the isolated MCP config) and
+  // puts ⚠ THE PATH GUARD first on PreToolUse: file tools stay inside the worktree (cwd, no other
+  // root). Under bypassPermissions nothing else confines an ABSOLUTE path, and this agent WRITES — a
+  // seed item (PR text, review threads, a ticket review's items) saying "also add this to ~/.zshrc"
+  // would otherwise write outside the worktree, where captureWorktreeDiff never shows it to the
+  // reader. 'worktree' effort ⇒ config.reviewEffort, exactly the effort this path always used.
+  ({ result } = await getActiveProvider().runAgent({
+    kind: opts.kind,
+    model: claudeModelChoice(model),
+    effort: 'worktree',
+    prompt: opts.prompt,
+    ...(opts.systemPrompt ? { system: opts.systemPrompt } : {}),
+    cwd: opts.worktreePath,
+    roots: [],
+    readOnlyRoots: [],
+    writeRoots: opts.writes ? [opts.worktreePath] : [],
+    tools: opts.tools,
+    budget: { usd: opts.maxBudgetUsd, turns: opts.maxTurns },
+    abortController: opts.abortController,
+    claude: { allowedTools: opts.allowedTools, disallowedTools: opts.disallowedTools },
+    onMessage: (message) => {
+      if (message.type === 'assistant') {
+        try {
+          recordUsage(usageByUuid, message);
+        } catch {
+          /* usage shape varies — never let it break the run */
+        }
+        try {
+          for (const line of describeAssistantBlocks(message)) pushActivity(line);
+        } catch {
+          /* never let progress derivation break the run */
+        }
+        const live = sumUsageMap(usageByUuid);
+        opts.onActivity?.([...activity], {
+          ...live,
+          estCostUsd: estimateCostUsd(model, live),
+        });
+      } else if (message.type === 'result') {
+        result = message;
       }
-      try {
-        for (const line of describeAssistantBlocks(message)) pushActivity(line);
-      } catch {
-        /* never let progress derivation break the run */
-      }
-      const live = sumUsageMap(usageByUuid);
-      opts.onActivity?.([...activity], {
-        ...live,
-        estCostUsd: estimateCostUsd(model, live),
-      });
-    } else if (message.type === 'result') {
-      result = message;
-    }
-  }
+    },
+  }));
   } catch (err) {
     // A cancel may surface as a throw from the iterator: fall through to the aborted result.
     // Any other failure carries what was spent so far (`partialSpendOf`).
@@ -306,18 +298,16 @@ export async function runCodingAgent(
       token,
     ));
 
-    const { createSdkMcpServer, tool } = await loadAgentSdk();
     const fixShape = await submitFixShape();
     let captured: SubmitFixPayload | null = null;
-    const server = createSdkMcpServer({
-      name: 'fix',
-      version: '1.0.0',
+    const tools: AgentToolServer = {
+      server: 'fix',
       tools: [
-        tool(
-          'submit_fix',
-          'Report the fix you applied. Call this EXACTLY once, at the very end, after editing files.',
-          fixShape,
-          async (a) => {
+        {
+          name: 'submit_fix',
+          description: 'Report the fix you applied. Call this EXACTLY once, at the very end, after editing files.',
+          shape: fixShape,
+          handle: (a) => {
             const p = a as unknown as SubmitFixPayload;
             captured = {
               summary: p.summary,
@@ -326,21 +316,23 @@ export async function runCodingAgent(
               changes: p.changes,
               unaddressed: p.unaddressed,
             };
-            return { content: [{ type: 'text', text: 'Fix recorded.' }] };
+            return { text: 'Fix recorded.' };
           },
-        ),
+        },
       ],
-    });
+    };
 
     onProgress({ phase: 'fixing' });
     const outcome = await runAgentInWorktree({
+      kind: 'fix',
       worktreePath,
       model,
       systemPrompt: args.systemPrompt,
       prompt: args.prompt,
       allowedTools: FIX_TOOLS,
       disallowedTools: DISALLOWED_TOOLS,
-      mcpServers: { fix: server },
+      tools,
+      writes: true,
       maxTurns: args.maxTurns ?? config.aiFixMaxTurns,
       maxBudgetUsd: args.maxBudgetUsd ?? config.aiFixBudgetUsd,
       abortController,
@@ -433,43 +425,41 @@ export async function runPlanAgent(args: GeneratePlanArgs): Promise<GeneratePlan
     onProgress({ phase: 'cloning' });
     ({ repoCloneDir, worktreePath } = await prepWorktree(owner, name, prNumber, baseSha, token));
 
-    const { createSdkMcpServer, tool } = await loadAgentSdk();
     const planShape = await submitPlanShape();
     let accepted: RawPlanSubmission | null = null;
-    const server = createSdkMcpServer({
-      name: 'plan',
-      version: '1.0.0',
+    const tools: AgentToolServer = {
+      server: 'plan',
       tools: [
-        tool(
-          'submit_plan',
-          'Submit the plan. Call this once, at the end, after reading the code.',
-          planShape,
-          async (a) => {
+        {
+          name: 'submit_plan',
+          description: 'Submit the plan. Call this once, at the end, after reading the code.',
+          shape: planShape,
+          handle: (a) => {
             const p = a as unknown as RawPlanSubmission;
             const problems = checkPlanSubmission(p, args.shownRefs);
             if (problems.length > 0) {
               return {
-                content: [
-                  { type: 'text', text: `The plan was not recorded. Fix this and call submit_plan again:\n- ${problems.join('\n- ')}` },
-                ],
+                text: `The plan was not recorded. Fix this and call submit_plan again:\n- ${problems.join('\n- ')}`,
               };
             }
             accepted = { summary: p.summary, steps: p.steps, notAddressed: p.notAddressed, reply: p.reply };
-            return { content: [{ type: 'text', text: 'Plan recorded.' }] };
+            return { text: 'Plan recorded.' };
           },
-        ),
+        },
       ],
-    });
+    };
 
     onProgress({ phase: 'planning' });
     const outcome = await runAgentInWorktree({
+      kind: 'plan',
       worktreePath,
       model: args.model,
       systemPrompt: args.systemPrompt,
       prompt: args.prompt,
       allowedTools: PLAN_TOOLS,
       disallowedTools: PLAN_DISALLOWED_TOOLS,
-      mcpServers: { plan: server },
+      tools,
+      writes: false,
       maxTurns: args.maxTurns ?? PLAN_MAX_TURNS,
       maxBudgetUsd: args.maxBudgetUsd,
       abortController,

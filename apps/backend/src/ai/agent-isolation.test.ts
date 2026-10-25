@@ -35,7 +35,11 @@ describe('agent isolation', () => {
     const sites = sourceFiles(SRC).filter(
       (f) => !f.endsWith('agent-isolation.ts') && /(?:const|await)\s+\w*\s*=?\s*query\(\{/.test(readFileSync(f, 'utf8')),
     );
-    expect(sites.length).toBeGreaterThanOrEqual(7);
+    // Since the provider seam (ai/provider.ts), every run and completion is built in ONE place — the
+    // Claude provider — so the isolation is spread there once for all of them (it used to be checked
+    // across the 7+ runner modules that each called query() themselves). provider-seam.test.ts pins
+    // that no other module calls query().
+    expect(sites.map((f) => relative(SRC, f).split('\\').join('/'))).toEqual(['ai/providers/claude.ts']);
     for (const f of sites) {
       const src = readFileSync(f, 'utf8');
       const where = relative(SRC, f);

@@ -1,17 +1,13 @@
 import type { SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { ClaudeReviewModel } from '@pierre-review/shared';
-import { claudeExecutableOptions, loadAgentSdk } from '../../ai/runtime.js';
-import { agentAuthOptions } from '../../ai/credentials.js';
 import { config } from '../../config.js';
 import { DISALLOWED_TOOLS, describeAssistantBlocks } from '../agent.js';
 import { applyClaudeReviewAuth } from '../auth.js';
 import { DISPATCH_TOOL_NAMES } from '../claude-review/specialists.js';
-import { sdkModelOptions } from '../model-options.js';
-import { createPathGuard, pathGuardHook } from '../path-guard.js';
 import { estimateCostUsd } from '../pricing.js';
 import { recordUsage, sumModelUsage, sumUsageMap, type UsageTokens } from '../usage.js';
 import { submitTicketReviewShape, type SubmitTicketReviewPayload } from './schema.js';
-import { ISOLATED_MCP, ownToolsOnlyHook } from '../../ai/agent-isolation.js';
+import { claudeModelChoice, getActiveProvider, type AgentToolServer } from '../../ai/provider.js';
 
 // THE TICKET REVIEW'S AGENT RUN — the SDK half. The manager (manager.ts) prepares the scratch
 // working directory (MEMBERS.md) and every member's read-only worktree, builds the prompts, and
@@ -90,79 +86,69 @@ export async function runTicketReviewAgent(args: RunTicketAgentArgs): Promise<Ru
 
   try {
     restoreEnv = applyClaudeReviewAuth(args.applyAuthEnv);
-    const { createSdkMcpServer, query, tool } = await loadAgentSdk();
     const docsDir = args.docsDir ?? null;
     const shape = await submitTicketReviewShape({ docs: docsDir != null });
     let captured: SubmitTicketReviewPayload | null = null;
-    const server = createSdkMcpServer({
-      name: 'ticket',
-      version: '1.0.0',
+    const tools: AgentToolServer = {
+      server: 'ticket',
       tools: [
-        tool(
-          'submit_ticket_review',
-          'Submit your verdict on the ticket. Call this EXACTLY once, at the end.',
+        {
+          name: 'submit_ticket_review',
+          description: 'Submit your verdict on the ticket. Call this EXACTLY once, at the end.',
           shape,
-          async (a) => {
+          handle: async (a) => {
             captured = a as unknown as SubmitTicketReviewPayload;
-            return { content: [{ type: 'text', text: 'Ticket review recorded.' }] };
+            return { text: 'Ticket review recorded.' };
           },
-        ),
+        },
       ],
-    });
+    };
     // The library is a READ-ONLY root: Read/Glob/Grep may reach it, nothing else may name it.
-    const guard = createPathGuard(args.cwd, args.worktrees, { readOnlyRoots: docsDir != null ? [docsDir] : [] });
     const policy = ticketToolPolicy();
-    const q = query({
-      prompt: args.prompt,
-      options: {
-        model,
-        ...sdkModelOptions(model, 'worktree'),
-        systemPrompt: args.systemPrompt,
-        cwd: args.cwd,
-        additionalDirectories: docsDir != null ? [...args.worktrees, docsDir] : [...args.worktrees],
-        permissionMode: 'bypassPermissions',
-        allowedTools: policy.allowedTools,
-        disallowedTools: policy.disallowedTools,
-        maxTurns: config.ticketReviewMaxTurns,
-        // ⚠ THE CONFINEMENT LIVES HERE, not in the prompt: a PreToolUse deny holds under
-        // bypassPermissions.
-        hooks: { PreToolUse: [pathGuardHook(guard), ownToolsOnlyHook(['ticket'])] },
-        maxBudgetUsd: config.ticketReviewBudgetUsd,
-        settingSources: [],
-        ...ISOLATED_MCP,
-        mcpServers: { ticket: server },
-        abortController,
-        ...claudeExecutableOptions(),
-        ...agentAuthOptions(),
-      },
-    });
-
     const activity: string[] = [];
-    for await (const message of q) {
-      if (message.type === 'assistant') {
-        try {
-          recordUsage(usageByUuid, message);
-        } catch {
-          /* usage shape varies — never let it break the run */
-        }
-        try {
-          for (const line of describeAssistantBlocks(message)) {
-            const t = line.startsWith(TICKET_TOOL_NAME) ? 'Submitting the ticket review…' : line;
-            activity.push(t);
-            if (activity.length > ACTIVITY_LOG_CAP) activity.shift();
+    ({ result } = await getActiveProvider().runAgent({
+      kind: 'ticket_review',
+      model: claudeModelChoice(model),
+      effort: 'worktree',
+      prompt: args.prompt,
+      system: args.systemPrompt,
+      // ⚠ THE CONFINEMENT (the provider's path guard, first on PreToolUse — a deny holds under
+      // bypassPermissions): the scratch cwd and the members' worktrees, and the reference library
+      // READ-ONLY when in use.
+      cwd: args.cwd,
+      roots: [...args.worktrees],
+      readOnlyRoots: docsDir != null ? [docsDir] : [],
+      writeRoots: [],
+      tools,
+      budget: { usd: config.ticketReviewBudgetUsd, turns: config.ticketReviewMaxTurns },
+      abortController,
+      claude: { allowedTools: policy.allowedTools, disallowedTools: policy.disallowedTools },
+      onMessage: (message) => {
+        if (message.type === 'assistant') {
+          try {
+            recordUsage(usageByUuid, message);
+          } catch {
+            /* usage shape varies — never let it break the run */
           }
-        } catch {
-          /* never let progress derivation break the run */
+          try {
+            for (const line of describeAssistantBlocks(message)) {
+              const t = line.startsWith(TICKET_TOOL_NAME) ? 'Submitting the ticket review…' : line;
+              activity.push(t);
+              if (activity.length > ACTIVITY_LOG_CAP) activity.shift();
+            }
+          } catch {
+            /* never let progress derivation break the run */
+          }
+          const live = sumUsageMap(usageByUuid);
+          args.onProgress({
+            recentActivity: [...activity],
+            usage: { inputTokens: live.inputTokens, outputTokens: live.outputTokens, costUsd: estimateCostUsd(model, live) },
+          });
+        } else if (message.type === 'result') {
+          result = message;
         }
-        const live = sumUsageMap(usageByUuid);
-        args.onProgress({
-          recentActivity: [...activity],
-          usage: { inputTokens: live.inputTokens, outputTokens: live.outputTokens, costUsd: estimateCostUsd(model, live) },
-        });
-      } else if (message.type === 'result') {
-        result = message;
-      }
-    }
+      },
+    }));
 
     if (!captured) {
       const reason =

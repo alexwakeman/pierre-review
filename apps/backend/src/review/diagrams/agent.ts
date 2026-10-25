@@ -1,14 +1,10 @@
 import type { SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { ClaudeReviewModel } from '@pierre-review/shared';
-import { claudeExecutableOptions, loadAgentSdk } from '../../ai/runtime.js';
-import { agentAuthOptions } from '../../ai/credentials.js';
-import { ISOLATED_MCP, ownToolsOnlyHook } from '../../ai/agent-isolation.js';
+import { claudeModelChoice, getActiveProvider, type AgentToolServer } from '../../ai/provider.js';
 import { config } from '../../config.js';
 import { DISALLOWED_TOOLS, describeAssistantBlocks } from '../agent.js';
 import { applyClaudeReviewAuth } from '../auth.js';
 import { DISPATCH_TOOL_NAMES } from '../claude-review/specialists.js';
-import { sdkModelOptions } from '../model-options.js';
-import { createPathGuard, pathGuardHook } from '../path-guard.js';
 import { estimateCostUsd } from '../pricing.js';
 import { recordUsage, sumModelUsage, sumUsageMap, type UsageTokens } from '../usage.js';
 import { submitDesignShape, type SubmitDesignPayload } from './schema.js';
@@ -114,82 +110,71 @@ export async function runDiagramAgent(args: RunDiagramAgentArgs): Promise<RunDia
 
   try {
     restoreEnv = applyClaudeReviewAuth(args.applyAuthEnv);
-    const { createSdkMcpServer, query, tool } = await loadAgentSdk();
     const shape = await submitDesignShape();
     let attempts = 0;
-    const server = createSdkMcpServer({
-      name: 'diagram',
-      version: '1.0.0',
+    const tools: AgentToolServer = {
+      server: 'diagram',
       tools: [
-        tool(
-          'submit_design',
-          'Submit the one design grid. It is checked at once: a refusal lists what to fix.',
+        {
+          name: 'submit_design',
+          description: 'Submit the one design grid. It is checked at once: a refusal lists what to fix.',
           shape,
-          async (a) => {
-            if (accepted != null) return { content: [{ type: 'text', text: 'Design already recorded.' }] };
+          handle: async (a) => {
+            if (accepted != null) return { text: 'Design already recorded.' };
             if (attempts >= MAX_SUBMIT_ATTEMPTS) {
-              return { content: [{ type: 'text', text: 'No more attempts. Stop now.' }], isError: true };
+              return { text: 'No more attempts. Stop now.', isError: true };
             }
             attempts += 1;
             const j = judgeSubmission(a as unknown as Partial<SubmitDesignPayload>, attempts, args.design);
             if ('accepted' in j) {
               accepted = j.accepted;
-              return { content: [{ type: 'text', text: 'Design recorded.' }] };
+              return { text: 'Design recorded.' };
             }
             lastRefusal = j.refusal;
-            return { content: [{ type: 'text', text: j.reply }], isError: true };
+            return { text: j.reply, isError: true };
           },
-        ),
+        },
       ],
-    });
-    const guard = createPathGuard(args.cwd, args.roots);
+    };
     const policy = diagramToolPolicy();
-    const q = query({
-      prompt: args.prompt,
-      options: {
-        model,
-        ...sdkModelOptions(model, 'worktree'),
-        systemPrompt: args.systemPrompt,
-        cwd: args.cwd,
-        additionalDirectories: [...args.roots],
-        permissionMode: 'bypassPermissions',
-        allowedTools: policy.allowedTools,
-        disallowedTools: policy.disallowedTools,
-        maxTurns: config.sequenceDiagramMaxTurns,
-        // ⚠ THE CONFINEMENT LIVES HERE, not in the prompt: a PreToolUse deny holds under
-        // bypassPermissions.
-        hooks: { PreToolUse: [pathGuardHook(guard), ownToolsOnlyHook(['diagram'])] },
-        maxBudgetUsd: config.sequenceDiagramBudgetUsd,
-        settingSources: [],
-        ...ISOLATED_MCP,
-        mcpServers: { diagram: server },
-        abortController,
-        ...claudeExecutableOptions(),
-        ...agentAuthOptions(),
-      },
-    });
-
     const activity: string[] = [];
-    for await (const message of q) {
-      if (message.type === 'assistant') {
-        try {
-          recordUsage(usageByUuid, message);
-        } catch {
-          /* usage shape varies — never let it break the run */
-        }
-        try {
-          for (const line of describeAssistantBlocks(message)) {
-            activity.push(line.startsWith(DIAGRAM_TOOL_NAME) ? 'Submitting the design…' : line);
-            if (activity.length > ACTIVITY_LOG_CAP) activity.shift();
+    ({ result } = await getActiveProvider().runAgent({
+      kind: 'diagram',
+      model: claudeModelChoice(model),
+      effort: 'worktree',
+      prompt: args.prompt,
+      system: args.systemPrompt,
+      // ⚠ THE CONFINEMENT (the provider's path guard, first on PreToolUse — a deny holds under
+      // bypassPermissions): the scratch cwd and the roots, nothing else.
+      cwd: args.cwd,
+      roots: [...args.roots],
+      readOnlyRoots: [],
+      writeRoots: [],
+      tools,
+      budget: { usd: config.sequenceDiagramBudgetUsd, turns: config.sequenceDiagramMaxTurns },
+      abortController,
+      claude: { allowedTools: policy.allowedTools, disallowedTools: policy.disallowedTools },
+      onMessage: (message) => {
+        if (message.type === 'assistant') {
+          try {
+            recordUsage(usageByUuid, message);
+          } catch {
+            /* usage shape varies — never let it break the run */
           }
-          args.onProgress?.({ recentActivity: [...activity] });
-        } catch {
-          /* never let progress derivation break the run */
+          try {
+            for (const line of describeAssistantBlocks(message)) {
+              activity.push(line.startsWith(DIAGRAM_TOOL_NAME) ? 'Submitting the design…' : line);
+              if (activity.length > ACTIVITY_LOG_CAP) activity.shift();
+            }
+            args.onProgress?.({ recentActivity: [...activity] });
+          } catch {
+            /* never let progress derivation break the run */
+          }
+        } else if (message.type === 'result') {
+          result = message;
         }
-      } else if (message.type === 'result') {
-        result = message;
-      }
-    }
+      },
+    }));
 
     if (accepted == null) {
       const reason =

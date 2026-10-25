@@ -2,6 +2,18 @@
 
 Status: PLAN, not built. **Phase 0 (the spike) ran 2026-10-25 — read [CODEX-SPIKE.md](CODEX-SPIKE.md) first: its "Plan changes" section SUPERSEDES the matching parts of §§ 2, 3, 6, 7 and 8 below** (strict-config, the extra locked keys, the `/tmp` write leak, silent untrusted hooks, MCP approval mode, CLI not SDK, app-server rate limits in whole percent, models).
 
+**Phase 1 (the seam) built 2026-10-25** (branch `codex/phase1-seam`): `apps/backend/src/ai/provider.ts`
+(the interface, the registry — `LIMN_AI_PROVIDER` = `claude` | `auto`, `codex` answers "not available
+yet"), `ai/providers/claude.ts` (today's Agent SDK code moved behind `runAgent` / `complete` /
+`detect` and the usage reading; the 12 runners, `cheapComplete` and so `ctx.llm` go through it),
+`ai/result-schemas.ts` (§ 3.4: one strict JSON Schema per result, derived from the same zod shape the
+Claude tool uses; `strictAnswerToToolArgs` maps a strict answer back to the tool's arguments), and
+§ 8.1's ledger column (`ai_usage.provider` + `share_pct`, sqlite `0127`; the budget's folds read the
+active provider's rows and reading). Where the spec still carries Claude-only knobs they sit under
+`spec.claude` (SDK tool names, extra hooks, specialist agents), and `onMessage` receives Agent SDK
+messages: Phase 3 ports each runner off them. Models are ROLES (`deep`/`standard`/`fast`) with the
+exact id every call site used passed as an explicit override, so no model moved.
+
 Original status: Written 2026-10-23 after checking the current Codex docs and the published
 `@openai/codex-sdk` 0.164.0 type definitions. The work is meant to be carried out by subagents
 through the Workflow tool, in the phases below, with the user confirming the decisions in § 6 first.

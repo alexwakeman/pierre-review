@@ -3,20 +3,16 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { ClaudeReviewModel, ClaudeReviewTicket, TicketPrCardBody } from '@pierre-review/shared';
-import { claudeExecutableOptions, loadAgentSdk } from '../../ai/runtime.js';
-import { agentAuthOptions } from '../../ai/credentials.js';
 import { config } from '../../config.js';
 import { DISALLOWED_TOOLS } from '../agent.js';
 import { applyClaudeReviewAuth } from '../auth.js';
 import { DISPATCH_TOOL_NAMES } from '../claude-review/specialists.js';
 import { capDiff } from '../post-review.js';
-import { sdkModelOptions } from '../model-options.js';
-import { createPathGuard, pathGuardHook } from '../path-guard.js';
 import { estimateCostUsd } from '../pricing.js';
 import { recordUsage, sumModelUsage, sumUsageMap, type UsageTokens } from '../usage.js';
 import { normaliseCard } from './cards.js';
 import { submitPrCardShape } from './schema.js';
-import { ISOLATED_MCP, ownToolsOnlyHook } from '../../ai/agent-isolation.js';
+import { claudeModelChoice, getActiveProvider, type AgentToolServer } from '../../ai/provider.js';
 
 // THE CARD PRE-PASS — a cheap per-PR run that writes a CONTRIBUTION CARD (cards.ts) for each member
 // a ticket review cannot read as a diff (more than TICKET_REVIEW_MAX_DIFFS lack a card at their
@@ -163,52 +159,49 @@ export const runCardAgent: RunCardAgent = async ({ input, ticket, nonce, signal,
   signal.addEventListener('abort', onAbort);
   try {
     restoreEnv = applyClaudeReviewAuth(applyAuthEnv);
-    const { createSdkMcpServer, query, tool } = await loadAgentSdk();
     const shape = await submitPrCardShape();
     let captured: unknown = null;
-    const server = createSdkMcpServer({
-      name: 'card',
-      version: '1.0.0',
+    const tools: AgentToolServer = {
+      server: 'card',
       tools: [
-        tool('submit_pr_card', 'Submit the description of this pull request. Call this EXACTLY once.', shape, async (a) => {
-          captured = a;
-          return { content: [{ type: 'text', text: 'Recorded.' }] };
-        }),
+        {
+          name: 'submit_pr_card',
+          description: 'Submit the description of this pull request. Call this EXACTLY once.',
+          shape,
+          handle: async (a) => {
+            captured = a;
+            return { text: 'Recorded.' };
+          },
+        },
       ],
-    });
+    };
     const policy = prepassToolPolicy();
-    const q = query({
+    ({ result } = await getActiveProvider().runAgent({
+      kind: 'pr_card',
+      model: claudeModelChoice(model),
+      effort: 'diff_only',
       prompt: buildPrepassPrompt(input, ticket, nonce),
-      options: {
-        model,
-        ...sdkModelOptions(model, 'diff_only'),
-        systemPrompt: TICKET_CARD_SYSTEM_PROMPT,
-        cwd: scratch,
-        permissionMode: 'bypassPermissions',
-        allowedTools: policy.allowedTools,
-        disallowedTools: policy.disallowedTools,
-        maxTurns: TICKET_CARD_MAX_TURNS,
-        hooks: { PreToolUse: [pathGuardHook(createPathGuard(scratch, [])), ownToolsOnlyHook(['card'])] },
-        maxBudgetUsd: config.ticketCardBudgetUsd,
-        settingSources: [],
-        ...ISOLATED_MCP,
-        mcpServers: { card: server },
-        abortController: controller,
-        ...claudeExecutableOptions(),
-        ...agentAuthOptions(),
-      },
-    });
-    for await (const message of q) {
-      if (message.type === 'assistant') {
-        try {
-          recordUsage(usageByUuid, message);
-        } catch {
-          /* usage shape varies — never let it break the run */
+      system: TICKET_CARD_SYSTEM_PROMPT,
+      cwd: scratch,
+      roots: [],
+      readOnlyRoots: [],
+      writeRoots: [],
+      tools,
+      budget: { usd: config.ticketCardBudgetUsd, turns: TICKET_CARD_MAX_TURNS },
+      abortController: controller,
+      claude: { allowedTools: policy.allowedTools, disallowedTools: policy.disallowedTools },
+      onMessage: (message) => {
+        if (message.type === 'assistant') {
+          try {
+            recordUsage(usageByUuid, message);
+          } catch {
+            /* usage shape varies — never let it break the run */
+          }
+        } else if (message.type === 'result') {
+          result = message;
         }
-      } else if (message.type === 'result') {
-        result = message;
-      }
-    }
+      },
+    }));
     if (captured == null) {
       return { payload: null, costUsd: cost(), failure: `card not submitted (${result?.subtype ?? 'no result'})` };
     }

@@ -3,8 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import { TICKET_REVIEW_PEER_MAX_FOR_PR_REVIEW, type ClaudeFindingLens } from '@pierre-review/shared';
-import { claudeExecutableOptions, loadAgentSdk } from '../ai/runtime.js';
-import { agentAuthOptions } from '../ai/credentials.js';
+import { claudeModelChoice, getActiveProvider } from '../ai/provider.js';
 import type { RunReviewArgs, RunReviewResult } from '../platform/contract.js';
 import { config } from '../config.js';
 import { submitReviewShape, type SubmitReviewPayload } from './schema.js';
@@ -15,9 +14,7 @@ import {
   prepWorktree,
   removeWorktreeLocked,
 } from './clone-manager.js';
-import { createPathGuard, pathGuardHook } from './path-guard.js';
 import { relatedCheckoutsSection } from './claude-review/prompts.js';
-import { sdkModelOptions } from './model-options.js';
 import { estimateCostUsd } from './pricing.js';
 import { mapSubmittedReview } from './submit-map.js';
 import {
@@ -32,7 +29,6 @@ import {
   sumUsageMap,
   type UsageTokens,
 } from './usage.js';
-import { ISOLATED_MCP, ownToolsOnlyHook } from '../ai/agent-isolation.js';
 
 // The security-sensitive HALF of ctx.review.runReview (the plugin owns routing/prompts/
 // persistence; core owns the SDK run). Given a resolved mode + the plugin-built prompts +
@@ -229,95 +225,22 @@ export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
       // With the library, the cap leaves room for the INDEX → CONTENTS → sections walk.
       maxTurns = reviewMaxTurnsFor(mode, docsDir != null);
     }
-    // Effort guides thinking depth + token spend — the dominant cost knob. Per-mode, and only
-    // for the offered models (EFFORT_CAPABLE_MODELS). Opus 5.5 also gets an
-    // explicit adaptive-thinking config (see model-options.ts).
-    const modelOptions = sdkModelOptions(model, mode);
-
     // Establish this run's auth (prefer ambient, strip an explicit key). The plugin decides
     // whether it's safe to mutate process.env (its concurrency === 1); restored in finally.
     restoreEnv = applyClaudeReviewAuth(args.applyAuthEnv);
 
     // ---- run the agent ----
-    // The SDK and zod come from the AI runtime (ai/runtime.ts) — downloaded on first use for an
-    // npm install. A missing runtime throws here and lands in the catch as a readable failure.
-    const { createSdkMcpServer, query, tool } = await loadAgentSdk();
+    // THROUGH THE PROVIDER (ai/provider.ts; Claude's is ai/providers/claude.ts). Effort guides
+    // thinking depth + token spend — the dominant cost knob — per mode (`effort`), and only for the
+    // offered models (review/model-options.ts). The SDK and zod come from the AI runtime
+    // (ai/runtime.ts) — downloaded on first use for an npm install. A missing runtime throws here and
+    // lands in the catch as a readable failure.
     const reviewShape = await submitReviewShape({ docs: docsDir != null });
     let captured: SubmitReviewPayload | null = null;
-    const server = createSdkMcpServer({
-      name: 'review',
-      version: '1.0.0',
-      tools: [
-        tool(
-          'submit_review',
-          'Submit your structured review. Call this EXACTLY once, at the end.',
-          reviewShape,
-          async (a) => {
-            captured = a as unknown as SubmitReviewPayload;
-            return { content: [{ type: 'text', text: 'Review recorded.' }] };
-          },
-        ),
-      ],
-    });
 
     // Deep review: the specialist catalogue + the dispatch guard (a fresh count per run).
     const guard: DispatchGuard | null =
       policy.specialists.length > 0 ? createDispatchGuard(policy.specialists) : null;
-    // ⚠ THE PATH GUARD, on EVERY run (review/path-guard.ts): under bypassPermissions nothing else
-    // confines an absolute path, and the prompt is attacker-authored. The file tools may read cwd
-    // and the peers' checkouts, nothing else. (A diff-only run has no file tools; it is guarded
-    // anyway, so a future tool is never unconfined by default.)
-    // The library is a READ-ONLY root: Read/Glob/Grep may reach it, nothing else may name it.
-    const pathGuard = createPathGuard(cwd, peerDirs, { readOnlyRoots: docsDir != null ? [docsDir] : [] });
-    const extraDirs = docsDir != null ? [...peerDirs, docsDir] : peerDirs;
-
-    const q = query({
-      prompt,
-      options: {
-        model,
-        ...modelOptions,
-        systemPrompt: args.systemPrompt,
-        cwd,
-        permissionMode: 'bypassPermissions',
-        allowedTools: policy.allowedTools,
-        disallowedTools: policy.disallowedTools,
-        maxTurns,
-        ...(extraDirs.length > 0 ? { additionalDirectories: extraDirs } : {}),
-        ...(guard ? { agents: specialistAgents(policy.specialists) } : {}),
-        // PreToolUse hooks run before the tool, and their deny holds under bypassPermissions
-        // (canUseTool would never be asked). Every hook must allow a call for it to run.
-        hooks: {
-          PreToolUse: [
-            pathGuardHook(pathGuard),
-            ownToolsOnlyHook(['review']),
-            // ⚠ THE SPECIALIST CAP LIVES HERE, not in the prompt.
-            ...(guard
-              ? [
-                  {
-                    hooks: [
-                      async (input: { hook_event_name: string; tool_name?: string; tool_input?: unknown }) =>
-                        input.hook_event_name === 'PreToolUse'
-                          ? guard.decide(input.tool_name ?? '', input.tool_input)
-                          : { continue: true },
-                    ],
-                  },
-                ]
-              : []),
-          ],
-        },
-        // User-set per-review cap (local settings) when present, else the operator default —
-        // plus headroom for each specialist a deep run is offered (they share this one budget).
-        maxBudgetUsd: config.reviewBudgetUsd,
-        // Don't inherit the host's .claude settings / CLAUDE.md / skills.
-        settingSources: [],
-        ...ISOLATED_MCP,
-        mcpServers: { review: server },
-        abortController,
-        // LIMN_CLAUDE_PATH → the user's own `claude` instead of the SDK's bundled binary.
-        ...claudeExecutableOptions(),
-        ...agentAuthOptions(),
-      },
-    });
 
     // Rolling, newest-last log of what the agent is doing right now, surfaced via onProgress.
     const activity: string[] = [];
@@ -334,29 +257,82 @@ export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
     // prior phase doesn't linger through the agent's whole first turn.
     onProgress({ phase: 'reviewing', reviewMode: mode });
 
-    for await (const message of q) {
-      if (message.type === 'assistant') {
-        try {
-          recordUsage(usageByUuid, message);
-        } catch {
-          /* usage shape varies — never let it break the run */
+    // ⚠ THE PATH GUARD, on EVERY run (the provider puts it first on PreToolUse): under
+    // bypassPermissions nothing else confines an absolute path, and the prompt is attacker-authored.
+    // The file tools may read cwd and the peers' checkouts, nothing else. (A diff-only run has no
+    // file tools; it is guarded anyway, so a future tool is never unconfined by default.)
+    // The library is a READ-ONLY root: Read/Glob/Grep may reach it, nothing else may name it.
+    ({ result } = await getActiveProvider().runAgent({
+      kind: 'review',
+      model: claudeModelChoice(model),
+      effort: mode,
+      prompt,
+      system: args.systemPrompt,
+      cwd,
+      roots: peerDirs,
+      readOnlyRoots: docsDir != null ? [docsDir] : [],
+      writeRoots: [],
+      tools: {
+        server: 'review',
+        tools: [
+          {
+            name: 'submit_review',
+            description: 'Submit your structured review. Call this EXACTLY once, at the end.',
+            shape: reviewShape,
+            handle: (a) => {
+              captured = a as unknown as SubmitReviewPayload;
+              return { text: 'Review recorded.' };
+            },
+          },
+        ],
+      },
+      // User-set per-review cap (local settings) when present, else the operator default —
+      // plus headroom for each specialist a deep run is offered (they share this one budget).
+      budget: { usd: config.reviewBudgetUsd, turns: maxTurns },
+      abortController,
+      claude: {
+        allowedTools: policy.allowedTools,
+        disallowedTools: policy.disallowedTools,
+        ...(guard ? { agents: specialistAgents(policy.specialists) } : {}),
+        // ⚠ THE SPECIALIST CAP LIVES HERE, not in the prompt.
+        extraPreToolUse: guard
+          ? [
+              {
+                hooks: [
+                  async (input: { hook_event_name: string; tool_name?: string; tool_input?: unknown }) =>
+                    input.hook_event_name === 'PreToolUse'
+                      ? guard.decide(input.tool_name ?? '', input.tool_input)
+                      : { continue: true },
+                ],
+              },
+            ]
+          : [],
+      },
+      onMessage: (message) => {
+        if (message.type === 'assistant') {
+          try {
+            recordUsage(usageByUuid, message);
+          } catch {
+            /* usage shape varies — never let it break the run */
+          }
+          try {
+            for (const line of describeAssistantBlocks(message, specialistByToolUse)) pushActivity(line);
+          } catch {
+            /* never let progress derivation break the run */
+          }
+          const live = sumUsageMap(usageByUuid);
+          onProgress({
+            phase: 'reviewing',
+            recentActivity: [...activity],
+            reviewMode: mode,
+            usage: { ...live, estCostUsd: estimateCostUsd(model, live) },
+          });
+        } else if (message.type === 'result') {
+          // Kept as each message arrives, so a run that throws AFTER its result still reports it.
+          result = message;
         }
-        try {
-          for (const line of describeAssistantBlocks(message, specialistByToolUse)) pushActivity(line);
-        } catch {
-          /* never let progress derivation break the run */
-        }
-        const live = sumUsageMap(usageByUuid);
-        onProgress({
-          phase: 'reviewing',
-          recentActivity: [...activity],
-          reviewMode: mode,
-          usage: { ...live, estCostUsd: estimateCostUsd(model, live) },
-        });
-      } else if (message.type === 'result') {
-        result = message;
-      }
-    }
+      },
+    }));
 
     if (!captured) {
       const reason =

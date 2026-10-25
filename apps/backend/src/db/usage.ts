@@ -22,6 +22,10 @@ export interface AiUsageRecord {
   outputTokens?: number | null;
   prId?: number | null;
   repoId?: number | null;
+  /** Which AI provider spent it (ai/provider.ts). Absent ⇒ 'claude', the only one in Phase 1. */
+  provider?: 'claude' | 'codex';
+  /** A subscription run's rise in its provider's weekly window, in percent, when reported. */
+  sharePct?: number | null;
 }
 
 // Append one usage row. Best-effort + non-fatal: a ledger write must never break the
@@ -41,6 +45,8 @@ export async function recordAiUsage(row: AiUsageRecord): Promise<void> {
       outputTokens: row.outputTokens ?? null,
       prId: row.prId ?? null,
       repoId: row.repoId ?? null,
+      provider: row.provider ?? 'claude',
+      sharePct: row.sharePct ?? null,
       occurredAt: new Date(),
     })
     .execute();

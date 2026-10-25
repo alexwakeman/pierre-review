@@ -833,6 +833,7 @@ export const aiUsage = sqliteTable(
     feature: text('feature').notNull(),
     model: text('model').notNull(),
     costUsd: real('cost_usd').notNull(),
+    // Nullable: a cancelled run (or a provider that reports no token figure) has none.
     inputTokens: integer('input_tokens'),
     outputTokens: integer('output_tokens'),
     prId: integer('pr_id'),
@@ -840,6 +841,12 @@ export const aiUsage = sqliteTable(
     occurredAt: integer('occurred_at', { mode: 'timestamp' })
       .notNull()
       .default(sql`(unixepoch())`),
+    // Which AI provider spent it (ai/provider.ts; migration 0127). Every fold that sums `cost_usd`
+    // for the spend budget filters on it — a budget is per provider. Every row before 0127 is Claude's.
+    provider: text('provider').notNull().default('claude'),
+    // A subscription run's rise in its provider's weekly window, in percent, when the provider
+    // reports one (docs/CODEX-PLAN.md § 8.1). Null for Claude, whose share is costed from US$.
+    sharePct: real('share_pct'),
   },
   (t) => ({
     accountOccurredIdx: index('au_account_occurred').on(t.accountId, t.occurredAt),

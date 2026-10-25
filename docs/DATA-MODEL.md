@@ -786,7 +786,8 @@ migration):
 | `accounts.benchmark_opt_in` | consent to contribute to the cross-org benchmark |
 
 `ai_usage` stays LIVE: `recordAiUsage` still records every model call's spend; only the credit
-meter that read it is gone. The Postgres schema and its migrations were deleted outright
+meter that read it is gone. Since `0127` each row names its `provider` (`'claude'` unless told
+otherwise) and may carry a `share_pct`; the spend budget sums ONE provider's rows. The Postgres schema and its migrations were deleted outright
 ([MIGRATIONS.md](MIGRATIONS.md)).
 
 **Removed 2026-10-18 and 2026-10-22: the one-shot Haiku features and the Reports chat** (platform

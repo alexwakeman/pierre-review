@@ -2,16 +2,18 @@ import { readdirSync } from 'node:fs';
 import { basename, dirname, resolve } from 'node:path';
 import type { SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { ClaudeReviewModel } from '@pierre-review/shared';
-import { claudeExecutableOptions, loadAgentSdk } from '../ai/runtime.js';
-import { agentAuthOptions } from '../ai/credentials.js';
-import { ISOLATED_MCP, ownToolsOnlyHook } from '../ai/agent-isolation.js';
+import {
+  claudeModelChoice,
+  getActiveProvider,
+  type AgentToolReply,
+  type AgentToolServer,
+} from '../ai/provider.js';
 import { config } from '../config.js';
 import { describeAssistantBlocks } from '../review/agent.js';
 import { applyClaudeReviewAuth } from '../review/auth.js';
 import type { DispatchDecision } from '../review/claude-review/specialists.js';
 import { DISPATCH_TOOL_NAMES } from '../review/claude-review/specialists.js';
-import { sdkModelOptions } from '../review/model-options.js';
-import { createPathGuard, pathGuardHook, resolveReal } from '../review/path-guard.js';
+import { resolveReal } from '../review/path-guard.js';
 import { estimateCostUsd } from '../review/pricing.js';
 import { recordUsage, sumModelUsage, sumUsageMap, type UsageTokens } from '../review/usage.js';
 import {
@@ -199,91 +201,97 @@ export async function runBuildAgent(args: RunBuildArgs): Promise<RunBuildResult>
 
   try {
     restoreEnv = applyClaudeReviewAuth(args.applyAuthEnv);
-    const { createSdkMcpServer, query, tool } = await loadAgentSdk();
     const shapes = await buildToolShapes();
-    const text = (t: string, isError = false) => ({ content: [{ type: 'text' as const, text: t }], ...(isError ? { isError: true } : {}) });
-    const server = createSdkMcpServer({
-      name: 'docs',
-      version: '1.0.0',
+    const text = (t: string, isError = false): AgentToolReply => ({ text: t, ...(isError ? { isError: true } : {}) });
+    const tools: AgentToolServer = {
+      server: 'docs',
       tools: [
-        tool('record_sections', 'Record section titles and one-line summaries, in reading order. Call it after each batch.', shapes.record, async (a) => {
-          if (finish != null) return text('The document is already finished.');
-          const j = judgeRecord(state, a, listWritten(args.sectionsDir));
-          emit();
-          return text(j.reply, j.isError);
-        }),
-        tool('progress', 'What is recorded so far and what is left.', shapes.empty, async () =>
-          text(progressReply(state, listWritten(args.sectionsDir))),
-        ),
-        tool('finish_document', 'Close the build with the document summary and topics. Call it once, at the end.', shapes.finish, async (a) => {
-          if (finish != null) return text('Already finished. Stop now.');
-          const j = judgeFinish(state, a, listWritten(args.sectionsDir));
-          if ('accepted' in j) {
-            finish = j.accepted;
-            return text('Finished. Stop now.');
-          }
-          return text(j.reply, true);
-        }),
+        {
+          name: 'record_sections',
+          description: 'Record section titles and one-line summaries, in reading order. Call it after each batch.',
+          shape: shapes.record,
+          handle: async (a) => {
+            if (finish != null) return text('The document is already finished.');
+            const j = judgeRecord(state, a, listWritten(args.sectionsDir));
+            emit();
+            return text(j.reply, j.isError);
+          },
+        },
+        {
+          name: 'progress',
+          description: 'What is recorded so far and what is left.',
+          shape: shapes.empty,
+          handle: async () => text(progressReply(state, listWritten(args.sectionsDir))),
+        },
+        {
+          name: 'finish_document',
+          description: 'Close the build with the document summary and topics. Call it once, at the end.',
+          shape: shapes.finish,
+          handle: async (a) => {
+            if (finish != null) return text('Already finished. Stop now.');
+            const j = judgeFinish(state, a, listWritten(args.sectionsDir));
+            if ('accepted' in j) {
+              finish = j.accepted;
+              return text('Finished. Stop now.');
+            }
+            return text(j.reply, true);
+          },
+        },
       ],
-    });
+    };
     const policy = docsToolPolicy(args.mode);
-    const guard = createPathGuard(args.cwd, []);
-    const preToolUse = [pathGuardHook(guard), ownToolsOnlyHook(['docs'])];
-    if (args.mode === 'pdf') preToolUse.push(sectionsWriteGuardHook(args.sectionsDir, args.cwd));
-    const q = query({
+    ({ result } = await getActiveProvider().runAgent({
+      kind: 'docs_build',
+      model: claudeModelChoice(model),
+      effort: 'worktree',
       prompt: args.prompt,
-      options: {
-        model,
-        ...sdkModelOptions(model, 'worktree'),
-        systemPrompt: args.systemPrompt,
-        cwd: args.cwd,
-        permissionMode: 'bypassPermissions',
-        tools: policy.builtinTools,
+      system: args.systemPrompt,
+      // ⚠ THE CONFINEMENT LIVES IN THE HOOKS, not in the prompt (a PreToolUse deny holds under
+      // bypassPermissions): the provider's path guard rooted at the staging folder, then — on a PDF
+      // build — the sections-write guard.
+      cwd: args.cwd,
+      roots: [],
+      readOnlyRoots: [],
+      writeRoots: args.mode === 'pdf' ? [args.sectionsDir] : [],
+      tools,
+      budget: { usd: config.docsBuildBudgetUsd, turns: config.docsBuildMaxTurns },
+      abortController: args.abortController,
+      claude: {
+        builtinTools: policy.builtinTools,
         allowedTools: policy.allowedTools,
         disallowedTools: policy.disallowedTools,
-        maxTurns: config.docsBuildMaxTurns,
-        // ⚠ THE CONFINEMENT LIVES HERE, not in the prompt: a PreToolUse deny holds under
-        // bypassPermissions.
-        hooks: { PreToolUse: preToolUse },
-        maxBudgetUsd: config.docsBuildBudgetUsd,
-        settingSources: [],
-        ...ISOLATED_MCP,
-        mcpServers: { docs: server },
-        abortController: args.abortController,
-        ...claudeExecutableOptions(),
-        ...agentAuthOptions(),
+        extraPreToolUse: args.mode === 'pdf' ? [sectionsWriteGuardHook(args.sectionsDir, args.cwd)] : [],
       },
-    });
-
-    for await (const message of q) {
-      if (message.type === 'assistant') {
-        try {
-          recordUsage(usageByUuid, message);
-        } catch {
-          /* usage shape varies — never let it break the run */
-        }
-        try {
-          const content = (message as { message?: { content?: unknown } }).message?.content;
-          if (Array.isArray(content)) {
-            for (const b of content as Array<{ type?: string; name?: string; input?: Record<string, unknown> }>) {
-              if (b?.type === 'tool_use' && b.name === 'Read' && typeof b.input?.file_path === 'string' && /\.pdf$/i.test(b.input.file_path)) {
-                const p = lastPageRead(b.input.pages);
-                if (p != null && p > pagesRead) pagesRead = p;
+      onMessage: (message) => {
+        if (message.type === 'assistant') {
+          try {
+            recordUsage(usageByUuid, message);
+          } catch {
+            /* usage shape varies — never let it break the run */
+          }
+          try {
+            const content = (message as { message?: { content?: unknown } }).message?.content;
+            if (Array.isArray(content)) {
+              for (const b of content as Array<{ type?: string; name?: string; input?: Record<string, unknown> }>) {
+                if (b?.type === 'tool_use' && b.name === 'Read' && typeof b.input?.file_path === 'string' && /\.pdf$/i.test(b.input.file_path)) {
+                  const p = lastPageRead(b.input.pages);
+                  if (p != null && p > pagesRead) pagesRead = p;
+                }
               }
             }
+            for (const line of describeAssistantBlocks(message)) {
+              activity.push(line);
+              if (activity.length > ACTIVITY_LOG_CAP) activity.shift();
+            }
+            emit();
+          } catch {
+            /* never let progress derivation break the run */
           }
-          for (const line of describeAssistantBlocks(message)) {
-            activity.push(line);
-            if (activity.length > ACTIVITY_LOG_CAP) activity.shift();
-          }
-          emit();
-        } catch {
-          /* never let progress derivation break the run */
+        } else if (message.type === 'result') {
+          result = message;
         }
-      } else if (message.type === 'result') {
-        result = message;
-      }
-    }
+      },
+    }));
     if (finish == null) {
       return done(
         result && result.subtype !== 'success'
@@ -343,42 +351,39 @@ export async function runDocsChatAgent(args: RunChatArgs): Promise<RunChatResult
   });
   try {
     restoreEnv = applyClaudeReviewAuth(args.applyAuthEnv);
-    const { query } = await loadAgentSdk();
     const policy = docsToolPolicy('chat');
-    const q = query({
+    ({ result } = await getActiveProvider().runAgent({
+      kind: 'docs_chat',
+      model: claudeModelChoice(model),
+      effort: 'worktree',
       prompt: args.prompt,
-      options: {
-        model,
-        ...sdkModelOptions(model, 'worktree'),
-        systemPrompt: args.systemPrompt,
-        cwd: args.cwd,
-        permissionMode: 'bypassPermissions',
-        tools: policy.builtinTools,
+      system: args.systemPrompt,
+      // The provider's path guard, rooted at the library folder; no result tools.
+      cwd: args.cwd,
+      roots: [],
+      readOnlyRoots: [],
+      writeRoots: [],
+      budget: { usd: config.docsChatBudgetUsd, turns: config.docsChatMaxTurns },
+      abortController: args.abortController,
+      claude: {
+        builtinTools: policy.builtinTools,
         allowedTools: policy.allowedTools,
         disallowedTools: policy.disallowedTools,
-        maxTurns: config.docsChatMaxTurns,
-        maxBudgetUsd: config.docsChatBudgetUsd,
-        settingSources: [],
-        ...ISOLATED_MCP,
-        hooks: { PreToolUse: [pathGuardHook(createPathGuard(args.cwd, [])), ownToolsOnlyHook([])] },
-        abortController: args.abortController,
-        ...claudeExecutableOptions(),
-        ...agentAuthOptions(),
       },
-    });
-    for await (const message of q) {
-      if (message.type === 'assistant') {
-        try {
-          recordUsage(usageByUuid, message);
-        } catch {
-          /* usage shape varies */
+      onMessage: (message) => {
+        if (message.type === 'assistant') {
+          try {
+            recordUsage(usageByUuid, message);
+          } catch {
+            /* usage shape varies */
+          }
+          const t = assistantText(message);
+          if (t) lastText = t;
+        } else if (message.type === 'result') {
+          result = message;
         }
-        const t = assistantText(message);
-        if (t) lastText = t;
-      } else if (message.type === 'result') {
-        result = message;
-      }
-    }
+      },
+    }));
     const finalText =
       result && result.subtype === 'success' && typeof result.result === 'string' && result.result.trim()
         ? result.result.trim()

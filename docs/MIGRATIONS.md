@@ -1146,6 +1146,16 @@ stored false is off. Written only by `setWorkspaceAutoReview`; read by review/di
 `verify:isolation` change (`workspaces` is already covered). [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md)
 § Design diagrams. Journal `when` sqlite `1792137613016`.
 
+### `0127_ai_usage_provider` — the spend ledger names its AI provider
+`ALTER TABLE ai_usage ADD provider text DEFAULT 'claude' NOT NULL` + `ADD share_pct real` (nullable).
+The provider seam (`ai/provider.ts`, [CODEX-PLAN.md](CODEX-PLAN.md) § 8.1): every row before it was
+Claude's, and SQLite fills the default into existing rows; `share_pct` is a subscription run's rise in
+its provider's weekly window when the provider reports one (NULL for every Claude row). Token columns
+stay nullable. Every budget fold over the ledger (`ai/budget.ts` `readLedger`, `readCycleCosts`)
+filters on `provider` = the active provider. Column only — `ai_usage` is already in
+`accountScopedTables()`, erasure and the export. Pinned fresh + upgraded by
+`db/ai-usage-provider-migration.test.ts`. Journal `when` sqlite `1792137614016`.
+
 ### No migration — "Check against code" removed (2026-10-18): `sprint_ticket_repos` + `sprint_assessments` DORMANT
 
 The sprint drawer, its repo picker and "Check against code" (`review/sprint-assess/`) were removed with

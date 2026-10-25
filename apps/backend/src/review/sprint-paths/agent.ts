@@ -3,13 +3,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import { SPRINT_PATHS_CAPS, type ClaudeReviewModel } from '@pierre-review/shared';
-import { AiRuntimeMissingError, claudeExecutableOptions, loadAgentSdk, loadZod } from '../../ai/runtime.js';
-import { agentAuthOptions } from '../../ai/credentials.js';
-import { ISOLATED_MCP, ownToolsOnlyHook } from '../../ai/agent-isolation.js';
+import { AiRuntimeMissingError, loadZod } from '../../ai/runtime.js';
+import { claudeModelChoice, getActiveProvider, type AgentToolServer } from '../../ai/provider.js';
+import { buildSubmitPathsShape } from './schema.js';
 import type { SprintPathsInput, StoredPathsJson } from '../../db/sprint-paths.js';
 import { applyClaudeReviewAuth } from '../auth.js';
-import { sdkModelOptions } from '../model-options.js';
-import { createPathGuard, pathGuardHook } from '../path-guard.js';
 import { estimateCostUsd } from '../pricing.js';
 import { recordUsage, sumModelUsage, sumUsageMap, type UsageTokens } from '../usage.js';
 import { validateSprintPaths } from './validate.js';
@@ -116,83 +114,64 @@ export const runSprintPathsAgent: SprintPathsAgentRunner = async (args) => {
     };
   };
   try {
-    const { query, createSdkMcpServer, tool } = await loadAgentSdk();
     const z = await loadZod();
     let attempts = 0;
-    // ⚠ DELIBERATELY LOOSE: plain strings and arrays. The SERVER's validator judges the answer inside
-    // the tool and replies with what to fix; a zod refusal reads far worse to the model.
-    const shape = {
-      paths: z
-        .array(
-          z.object({
-            title: z.string(),
-            tickets: z.array(z.string()).describe('ticket keys from the map, in the order the work must happen'),
-            advice: z.string().describe('one plain sentence, no digits'),
-            risk: z.string().describe('high, medium or low'),
-          }),
-        )
-        .describe(`at most ${SPRINT_PATHS_CAPS.maxPaths}, riskiest first`),
-      callouts: z
-        .array(z.object({ title: z.string(), tickets: z.array(z.string()) }))
-        .describe(`at most ${SPRINT_PATHS_CAPS.maxCallouts}`),
-    };
-    const server = createSdkMcpServer({
-      name: 'paths',
-      version: '1.0.0',
+    // ⚠ DELIBERATELY LOOSE (./schema.ts): the SERVER's validator judges the answer inside the tool.
+    const shape = buildSubmitPathsShape(z);
+    const tools: AgentToolServer = {
+      server: 'paths',
       tools: [
-        tool('submit_paths', 'Submit the critical paths and call-outs. It is checked at once: a refusal lists what to fix.', shape, async (a: unknown) => {
-          if (accepted != null) return { content: [{ type: 'text', text: 'Already recorded.' }] };
-          if (attempts >= SPRINT_PATHS_CAPS.maxSubmits) {
-            return { content: [{ type: 'text', text: 'No more attempts. Stop now.' }], isError: true };
-          }
-          attempts += 1;
-          const j = judgePathsSubmission(a, attempts, args.input);
-          if ('accepted' in j) {
-            accepted = j.accepted;
-            return { content: [{ type: 'text', text: 'Recorded.' }] };
-          }
-          lastRefusal = j.refusal;
-          return { content: [{ type: 'text', text: j.reply }], isError: true };
-        }),
+        {
+          name: 'submit_paths',
+          description: 'Submit the critical paths and call-outs. It is checked at once: a refusal lists what to fix.',
+          shape,
+          handle: async (a: unknown) => {
+            if (accepted != null) return { text: 'Already recorded.' };
+            if (attempts >= SPRINT_PATHS_CAPS.maxSubmits) {
+              return { text: 'No more attempts. Stop now.', isError: true };
+            }
+            attempts += 1;
+            const j = judgePathsSubmission(a, attempts, args.input);
+            if ('accepted' in j) {
+              accepted = j.accepted;
+              return { text: 'Recorded.' };
+            }
+            lastRefusal = j.refusal;
+            return { text: j.reply, isError: true };
+          },
+        },
       ],
-    });
+    };
     restoreEnv = applyClaudeReviewAuth(args.applyAuthEnv);
     cwd = mkdtempSync(join(tmpdir(), 'limn-sprint-paths-'));
     const policy = sprintPathsToolPolicy();
-    const q = query({
+    ({ result } = await getActiveProvider().runAgent({
+      kind: 'sprint_paths',
+      model: claudeModelChoice(args.model),
+      effort: 'diff_only',
       prompt: args.prompt,
-      options: {
-        model: args.model,
-        ...sdkModelOptions(args.model, 'diff_only'),
-        systemPrompt: args.systemPrompt,
-        cwd,
-        permissionMode: 'bypassPermissions',
-        tools: policy.tools,
-        allowedTools: policy.allowedTools,
-        disallowedTools: policy.disallowedTools,
-        maxTurns: args.maxTurns,
-        maxBudgetUsd: args.maxBudgetUsd,
-        settingSources: [],
-        mcpServers: { paths: server },
-        ...ISOLATED_MCP,
-        // ⚠ THE CONFINEMENT LIVES HERE, not in the prompt: a PreToolUse deny holds under bypassPermissions.
-        hooks: { PreToolUse: [pathGuardHook(createPathGuard(cwd)), ownToolsOnlyHook(['paths'])] },
-        abortController: args.abortController,
-        ...claudeExecutableOptions(),
-        ...agentAuthOptions(),
-      },
-    });
-    for await (const message of q) {
-      if (message.type === 'assistant') {
-        try {
-          recordUsage(usageByUuid, message);
-        } catch {
-          /* usage shape varies — never let it break the run */
+      system: args.systemPrompt,
+      // ⚠ THE CONFINEMENT (the provider's path guard — a deny holds under bypassPermissions).
+      cwd,
+      roots: [],
+      readOnlyRoots: [],
+      writeRoots: [],
+      tools,
+      budget: { usd: args.maxBudgetUsd, turns: args.maxTurns },
+      abortController: args.abortController,
+      claude: { builtinTools: policy.tools, allowedTools: policy.allowedTools, disallowedTools: policy.disallowedTools },
+      onMessage: (message) => {
+        if (message.type === 'assistant') {
+          try {
+            recordUsage(usageByUuid, message);
+          } catch {
+            /* usage shape varies — never let it break the run */
+          }
+        } else if (message.type === 'result') {
+          result = message;
         }
-      } else if (message.type === 'result') {
-        result = message;
-      }
-    }
+      },
+    }));
     return done();
   } catch (err) {
     return done({ runtimeMissing: err instanceof AiRuntimeMissingError, error: err instanceof Error ? err.message : String(err) });
