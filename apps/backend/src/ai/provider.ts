@@ -27,6 +27,8 @@
 import type { SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { AiUsageReading } from '@pierre-review/shared';
 import { claudeProvider } from './providers/claude.js';
+import { detectCodex, codexUsageSource } from './codex/detect.js';
+import { resolveAiCredential, resolveCodexCredential } from './credentials.js';
 import { aiProviderSetting, CODEX_NOT_AVAILABLE_MESSAGE } from './provider-setting.js';
 
 export type AgentProviderId = 'claude' | 'codex';
@@ -158,6 +160,12 @@ export interface ProviderStatus {
   route: 'login' | 'api_key' | 'none';
   /** One plain sentence when not available. */
   message: string | null;
+  /** Codex only (Phase 2): its program is installed. */
+  installed?: boolean;
+  /** Codex only: Limn's own Codex home holds a live sign-in (`account/read`). */
+  signedIn?: boolean;
+  /** Codex only: the ChatGPT plan, when signed in with one. */
+  plan?: string | null;
 }
 
 /**
@@ -194,30 +202,46 @@ export { AI_PROVIDER_ENV, aiProviderSetting, CODEX_NOT_AVAILABLE_MESSAGE, type A
 
 const notAvailable = (): Error => new Error(CODEX_NOT_AVAILABLE_MESSAGE);
 
+/** Codex's model ids per role (docs/CODEX-SPIKE.md § 8; re-check on every CLI bump). */
+export const CODEX_MODEL_FOR_ROLE: Record<ModelRole, string> = {
+  deep: 'gpt-6-astra',
+  standard: 'gpt-6.1-sol',
+  fast: 'gpt-6-luna',
+};
+
 /**
- * The Codex PLACEHOLDER: `LIMN_AI_PROVIDER=codex` is accepted, and every question it is asked
- * answers "not available yet" — `detect()` and the pre-flight (`detectClaudeAuth`) say so, a run
- * or a completion rejects with that one sentence, its credential route is 'none' (so the budget is off), and it has no usage reading.
+ * The Codex PLACEHOLDER until its runners land (Phase 3): `LIMN_AI_PROVIDER=codex` is accepted, a
+ * run or a completion rejects with "not available yet", and the pre-flight (`detectClaudeAuth`)
+ * says so. What it DOES answer truthfully since Phase 2 (ai/codex/): `detect()` — installed, signed
+ * in, plan, credential rung, but `available: false` with the same sentence; `credentialRoute()` —
+ * the Codex ladder (a ChatGPT sign-in in Limn's own home, else OPENAI_API_KEY), so the spend budget
+ * judges Codex's own windows; and `usage` — the app-server's rate-limit reading.
  */
 export const codexPlaceholderProvider: AgentProvider = {
   id: 'codex',
-  resolveModel: (choice) => choice.id ?? choice.role,
+  // A call site's exact id is a CLAUDE id (claudeModelChoice): Codex keeps only the role.
+  resolveModel: (choice) =>
+    choice.id && !choice.id.startsWith('claude') ? choice.id : CODEX_MODEL_FOR_ROLE[choice.role],
   runAgent: async () => {
     throw notAvailable();
   },
   complete: async () => {
     throw notAvailable();
   },
-  detect: async () => ({ id: 'codex', available: false, route: 'none', message: CODEX_NOT_AVAILABLE_MESSAGE }),
-  credentialRoute: () => 'none',
-  usage: {
-    readingFromMessage: () => null,
-    probe: async () => {
-      throw notAvailable();
-    },
-    readingFromProbe: () => null,
-    probeReady: () => false,
+  detect: async () => {
+    const d = await detectCodex();
+    return {
+      id: 'codex',
+      available: false,
+      route: d.route,
+      message: CODEX_NOT_AVAILABLE_MESSAGE,
+      installed: d.installed,
+      signedIn: d.signedIn,
+      plan: d.plan,
+    };
   },
+  credentialRoute: () => resolveCodexCredential().route,
+  usage: codexUsageSource,
 };
 
 /** One provider by id. */
@@ -225,9 +249,31 @@ export function getProvider(id: AgentProviderId): AgentProvider {
   return id === 'codex' ? codexPlaceholderProvider : claudeProvider;
 }
 
+/**
+ * Can Codex run agents in this version? FALSE until Phase 3 ports the runners — so `auto` never
+ * picks it, even when Codex is the only sign-in (it would pick a provider bound to refuse).
+ */
+export const CODEX_RUNNABLE = false;
+
+/**
+ * THE `auto` RULE (docs/CODEX-PLAN.md § 6, DECIDED): Claude when both are signed in, Claude when
+ * neither is; Codex only when it alone has a credential AND can run. Pure.
+ */
+export function pickAutoProvider(s: { claudeReady: boolean; codexReady: boolean; codexRunnable: boolean }): AgentProviderId {
+  return s.codexRunnable && s.codexReady && !s.claudeReady ? 'codex' : 'claude';
+}
+
 /** THE provider every run and completion uses, per `LIMN_AI_PROVIDER` (read at call time). */
 export function getActiveProvider(env: NodeJS.ProcessEnv = process.env): AgentProvider {
-  return aiProviderSetting(env) === 'codex' ? codexPlaceholderProvider : claudeProvider;
+  const setting = aiProviderSetting(env);
+  if (setting === 'codex') return codexPlaceholderProvider;
+  if (setting === 'claude' || !CODEX_RUNNABLE) return claudeProvider;
+  const picked = pickAutoProvider({
+    claudeReady: resolveAiCredential(env).route !== 'none',
+    codexReady: resolveCodexCredential(env).route !== 'none',
+    codexRunnable: CODEX_RUNNABLE,
+  });
+  return getProvider(picked);
 }
 
 /**

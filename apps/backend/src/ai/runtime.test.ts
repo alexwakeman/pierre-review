@@ -1,7 +1,7 @@
 // The AI runtime loader (ai/runtime.ts), over temp directories only — never the developer's
 // ~/.limn. Every runtime here is built with `workspaceFrom` pointed at an EMPTY directory, which is
 // what an `npx limn-review` install looks like: no AI SDK in its own node_modules.
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, existsSync, writeFileSync, readdirSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, existsSync, writeFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -9,7 +9,9 @@ import {
   AI_RUNTIME_MANIFEST_FIELD,
   AI_RUNTIME_PACKAGES,
   AiRuntimeMissingError,
+  CODEX_PACKAGE,
   claudeExecutableOptions,
+  codexBinaryIn,
   createAiRuntime,
   esmEntryOf,
 } from './runtime.js';
@@ -25,6 +27,18 @@ const PINS = {
 } as const;
 
 const PLATFORM_PKG = `@anthropic-ai/claude-agent-sdk-${process.platform}-${process.arch}`;
+const CODEX_PLATFORM_PKG = `@openai/codex-${process.platform}-${process.arch}`;
+const CODEX_TRIPLE = (
+  {
+    'darwin-x64': 'x86_64-apple-darwin',
+    'darwin-arm64': 'aarch64-apple-darwin',
+    'linux-x64': 'x86_64-unknown-linux-musl',
+    'linux-arm64': 'aarch64-unknown-linux-musl',
+    'win32-x64': 'x86_64-pc-windows-msvc',
+    'win32-arm64': 'aarch64-pc-windows-msvc',
+  } as Record<string, string>
+)[`${process.platform}-${process.arch}`]!;
+const CODEX_PIN = '0.164.0';
 
 let root: string;
 let dataDir: string;
@@ -233,6 +247,13 @@ if (${JSON.stringify(behaviour)} !== 'no-binary' && !args.includes('--omit=optio
   writeFileSync(join(bin, 'package.json'), JSON.stringify({ name: ${JSON.stringify(PLATFORM_PKG)}, version: '0.0.0' }));
   writeFileSync(join(bin, process.platform === 'win32' ? 'claude.exe' : 'claude'), 'binary');
 }
+// The Codex CLI's native program: an OPTIONAL dependency too, one platform package (npm alias).
+if ('@openai/codex' in deps && ${JSON.stringify(behaviour)} !== 'no-binary') {
+  const plat = join(prefix, 'node_modules', ${JSON.stringify(CODEX_PLATFORM_PKG)});
+  mkdirSync(join(plat, 'vendor', ${JSON.stringify(CODEX_TRIPLE)}, 'bin'), { recursive: true });
+  writeFileSync(join(plat, 'package.json'), JSON.stringify({ name: '@openai/codex', version: deps['@openai/codex'] + '-plat' }));
+  writeFileSync(join(plat, 'vendor', ${JSON.stringify(CODEX_TRIPLE)}, 'bin', process.platform === 'win32' ? 'codex.exe' : 'codex'), 'binary');
+}
 await new Promise((r) => setTimeout(r, 50));
 `,
     );
@@ -344,6 +365,93 @@ await new Promise((r) => setTimeout(r, 50));
     seedPackages(join(dataDir, 'ai-runtime'));
     const mod = (await runtime().load('turndown')) as { default?: { which: string } };
     expect(mod.default?.which).toBe('turndown');
+  });
+
+  // ---- Codex (docs/CODEX-PLAN.md § 3.7): the CLI rides the same directory, only when asked ----
+
+  const withCodexPin = (): void =>
+    writeFileSync(
+      join(packageRoot, 'package.json'),
+      JSON.stringify({ name: 'limn-review', [AI_RUNTIME_MANIFEST_FIELD]: { ...PINS, [CODEX_PACKAGE]: CODEX_PIN } }),
+    );
+
+  it('a Claude install never downloads Codex, even when this copy pins it', async () => {
+    withCodexPin();
+    const rt = runtime();
+    expect(await rt.install(undefined, { npm: fakeNpm('ok') })).toEqual({ ok: true });
+    const manifest = JSON.parse(readFileSync(join(dataDir, 'ai-runtime', 'package.json'), 'utf8'));
+    expect(manifest.dependencies).toEqual(PINS);
+    expect(rt.codexStatus()).toEqual({ runtime: 'absent', runtimeMessage: null });
+    expect(rt.codexBinary()).toBeNull();
+  });
+
+  it('install with codex: the exact pin, verified, and its native program located', async () => {
+    withCodexPin();
+    const rt = runtime();
+    const phases: string[] = [];
+    expect(await rt.install((p) => phases.push(p.message), { npm: fakeNpm('ok'), providers: ['codex'] })).toEqual({ ok: true });
+    const manifest = JSON.parse(readFileSync(join(dataDir, 'ai-runtime', 'package.json'), 'utf8'));
+    expect(manifest.dependencies).toEqual({ ...PINS, [CODEX_PACKAGE]: CODEX_PIN });
+    expect(rt.codexStatus()).toEqual({ runtime: 'ready', runtimeMessage: null });
+    expect(rt.status()).toEqual({ runtime: 'ready', runtimeMessage: null });
+    const bin = rt.codexBinary();
+    expect(bin).toBe(
+      join(realpathSync(rt.runtimeDir), 'node_modules', CODEX_PLATFORM_PKG, 'vendor', CODEX_TRIPLE, 'bin', process.platform === 'win32' ? 'codex.exe' : 'codex'),
+    );
+    expect(phases.at(-1)).toBe('AI is set up, with Codex.');
+    // A later Claude-only install (an update, "Set up AI again") KEEPS Codex.
+    expect(await rt.install(undefined, { npm: fakeNpm('ok') })).toEqual({ ok: true });
+    expect(JSON.parse(readFileSync(join(dataDir, 'ai-runtime', 'package.json'), 'utf8')).dependencies[CODEX_PACKAGE]).toBe(CODEX_PIN);
+    expect(rt.codexStatus().runtime).toBe('ready');
+  });
+
+  it('a Codex download without its platform program fails, naming it, and keeps the old runtime', async () => {
+    withCodexPin();
+    const rt = runtime();
+    const result = await rt.install(undefined, { npm: fakeNpm('no-binary'), providers: ['codex'] });
+    expect(result.ok).toBe(false);
+    // The Claude binary is missing too in this mode, and is checked first; either way nothing swapped in.
+    expect(existsSync(join(dataDir, 'ai-runtime'))).toBe(false);
+    expect(rt.codexStatus().runtime).toBe('failed');
+  });
+
+  it('refuses to download Codex when this copy does not pin it', async () => {
+    const rt = runtime();
+    const result = await rt.install(undefined, { npm: fakeNpm('ok'), providers: ['codex'] });
+    expect(result).toEqual({ ok: false, message: expect.stringMatching(/which Codex version/) });
+    expect(npmCalls()).toBe(0);
+  });
+
+  it('a Codex at another pin still runs, and says "set up again"', async () => {
+    withCodexPin();
+    const rt = runtime();
+    await rt.install(undefined, { npm: fakeNpm('ok'), providers: ['codex'] });
+    writeFileSync(
+      join(packageRoot, 'package.json'),
+      JSON.stringify({ name: 'limn-review', [AI_RUNTIME_MANIFEST_FIELD]: { ...PINS, [CODEX_PACKAGE]: '0.165.0' } }),
+    );
+    const later = runtime();
+    expect(later.codexStatus()).toEqual({ runtime: 'absent', runtimeMessage: expect.stringMatching(/Set up Codex again/) });
+    expect(later.codexBinary()).not.toBeNull();
+  });
+
+  it('LIMN_CODEX_PATH stands in for the download', () => {
+    const rt = createAiRuntime({ dataDir, workspaceFrom: emptyWorkspace, packageRoot, env: { LIMN_CODEX_PATH: 'bin/my-codex' } });
+    expect(rt.codexStatus()).toEqual({ runtime: 'ready', runtimeMessage: null });
+    expect(rt.codexBinary()).toBe(join(process.cwd(), 'bin', 'my-codex'));
+  });
+});
+
+describe('codexBinaryIn', () => {
+  it('finds the platform program from the CLI package, and nothing on an unknown platform', () => {
+    const prefix = join(root, 'codex-prefix');
+    write(join(prefix, 'node_modules', '@openai', 'codex', 'package.json'), JSON.stringify({ name: '@openai/codex', version: CODEX_PIN }));
+    expect(codexBinaryIn(prefix)).toBeNull();
+    const exe = join(prefix, 'node_modules', '@openai', 'codex-linux-arm64', 'vendor', 'aarch64-unknown-linux-musl', 'bin', 'codex');
+    write(exe, 'binary');
+    write(join(prefix, 'node_modules', '@openai', 'codex-linux-arm64', 'package.json'), JSON.stringify({ name: '@openai/codex' }));
+    expect(codexBinaryIn(prefix, 'linux', 'arm64')).toBe(realpathSync(exe));
+    expect(codexBinaryIn(prefix, 'sunos', 'x64')).toBeNull();
   });
 });
 

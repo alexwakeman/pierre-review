@@ -1,7 +1,8 @@
 // THE PROVIDER SEAM (ai/provider.ts): the registry and what the Claude provider puts on a run.
 //   1. `LIMN_AI_PROVIDER`: unset / empty / 'claude' / 'auto' / garbage ⇒ Claude; 'codex' is ACCEPTED
-//      and answers "not available yet" — `detect()` says so, a run and a completion reject with that
-//      sentence, its credential route is 'none' and it has no usage reading. Nothing throws on read.
+//      and answers "not available yet" — `detect()` says so (with the install / sign-in facts), a run
+//      and a completion reject with that sentence; its credential route is Codex's own ladder and its
+//      usage comes from the app-server probe only. `auto` never picks Codex while it cannot run.
 //   2. Roles resolve to Claude's models, and an explicit id ALWAYS wins (no call site's model moves).
 //   3. The Claude provider's `runAgent` builds the SAME query() options each runner used to build:
 //      the isolation, the path guard FIRST then the own-tools hook then the run's extras, the result
@@ -16,9 +17,18 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 let captured: { prompt: unknown; options: any } | null = null;
 let replies: unknown[] = [];
 
+// Codex's home lives under the data directory: point it at an empty temp folder, never ~/.limn.
+process.env.LIMN_DATA_DIR = (await import('node:fs')).mkdtempSync(
+  (await import('node:path')).join((await import('node:os')).tmpdir(), 'limn-provider-test-'),
+);
+delete process.env.OPENAI_API_KEY;
+
 vi.mock('./runtime.js', () => ({
   claudeExecutableOptions: () => ({ pathToClaudeCodeExecutable: '/x/claude' }),
   getAiRuntimeStatus: () => ({ runtime: 'ready', runtimeMessage: null }),
+  // Codex is not installed in this test.
+  codexBinaryPath: () => null,
+  getCodexRuntimeStatus: () => ({ runtime: 'absent', runtimeMessage: null }),
   loadAnthropicSdk: async () => {
     throw new Error('not in this test');
   },
@@ -74,20 +84,70 @@ describe('the registry (LIMN_AI_PROVIDER)', () => {
     const codex = P.getActiveProvider({ LIMN_AI_PROVIDER: 'codex' });
     expect(codex.id).toBe('codex');
     expect(P.getProvider('codex')).toBe(codex);
+    // Phase 2: detect() reports the install and the sign-in truthfully, but never `available`.
     expect(await codex.detect()).toEqual({
       id: 'codex',
       available: false,
       route: 'none',
       message: P.CODEX_NOT_AVAILABLE_MESSAGE,
+      installed: false,
+      signedIn: false,
+      plan: null,
     });
     expect(codex.credentialRoute()).toBe('none');
     await expect(codex.complete({ prompt: 'hi' })).rejects.toThrow(P.CODEX_NOT_AVAILABLE_MESSAGE);
     await expect(
       codex.runAgent({} as Parameters<typeof codex.runAgent>[0]),
     ).rejects.toThrow(P.CODEX_NOT_AVAILABLE_MESSAGE);
+    // The exec stream carries no rate limits; the usage comes from the app-server probe.
     expect(codex.usage.readingFromMessage({ type: 'rate_limit_event' }, 0)).toBeNull();
     expect(codex.usage.probeReady()).toBe(false);
-    await expect(codex.usage.probe()).rejects.toThrow(P.CODEX_NOT_AVAILABLE_MESSAGE);
+    await expect(codex.usage.probe()).rejects.toThrow(/Codex is not set up yet/);
+  });
+
+  it('with OPENAI_API_KEY set, the Codex placeholder reports the API-key rung — and still runs nothing', async () => {
+    process.env.OPENAI_API_KEY = 'sk-test';
+    try {
+      const codex = P.getProvider('codex');
+      expect(codex.credentialRoute()).toBe('api_key');
+      expect((await codex.detect()).available).toBe(false);
+      await expect(codex.complete({ prompt: 'hi' })).rejects.toThrow(P.CODEX_NOT_AVAILABLE_MESSAGE);
+    } finally {
+      delete process.env.OPENAI_API_KEY;
+    }
+  });
+
+  it('auto never picks Codex while it cannot run, even when it is the only credential', () => {
+    expect(P.CODEX_RUNNABLE).toBe(false);
+    process.env.OPENAI_API_KEY = 'sk-test';
+    try {
+      expect(P.getActiveProvider({ OPENAI_API_KEY: 'sk-test' }).id).toBe('claude');
+    } finally {
+      delete process.env.OPENAI_API_KEY;
+    }
+  });
+});
+
+describe('the auto rule (decided: Claude when both are signed in)', () => {
+  const pick = P.pickAutoProvider;
+  it('both signed in ⇒ Claude; neither ⇒ Claude; Claude alone ⇒ Claude', () => {
+    expect(pick({ claudeReady: true, codexReady: true, codexRunnable: true })).toBe('claude');
+    expect(pick({ claudeReady: false, codexReady: false, codexRunnable: true })).toBe('claude');
+    expect(pick({ claudeReady: true, codexReady: false, codexRunnable: true })).toBe('claude');
+  });
+  it('Codex alone ⇒ Codex, but only once Codex can run', () => {
+    expect(pick({ claudeReady: false, codexReady: true, codexRunnable: true })).toBe('codex');
+    expect(pick({ claudeReady: false, codexReady: true, codexRunnable: false })).toBe('claude');
+  });
+});
+
+describe('Codex models are roles (docs/CODEX-SPIKE.md § 8)', () => {
+  it('deep / standard / fast resolve to the pinned Codex models; a Claude id never reaches Codex', () => {
+    const codex = P.getProvider('codex');
+    expect(P.CODEX_MODEL_FOR_ROLE).toEqual({ deep: 'gpt-6-astra', standard: 'gpt-6.1-sol', fast: 'gpt-6-luna' });
+    expect(codex.resolveModel({ role: 'fast' })).toBe('gpt-6-luna');
+    expect(codex.resolveModel(P.claudeModelChoice('claude-opus-5-5'))).toBe('gpt-6-astra');
+    expect(codex.resolveModel({ role: 'standard', id: 'gpt-6-sol' })).toBe('gpt-6-sol');
   });
 });
 

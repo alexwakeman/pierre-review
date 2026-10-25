@@ -13,6 +13,7 @@ import {
 import { registerRateLimit } from './api/plugins/rate-limit.js';
 import { healthRoutes } from './api/routes/health.js';
 import { aiRuntimeRoutes } from './api/routes/ai-runtime.js';
+import { aiCodexRoutes } from './api/routes/ai-codex.js';
 import { aiBudgetRoutes } from './api/routes/ai-budget.js';
 import { mlRuntimeRoutes } from './api/routes/ml-runtime.js';
 import { registerAgenticRoutes } from './review/agentic.js';
@@ -216,6 +217,8 @@ export async function buildApp(): Promise<FastifyInstance> {
   // "Set up AI" — the one-time AI runtime download (ai/runtime.ts). Not registered under
   // LIMN_AI_DISABLED.
   if (config.aiEnabled) await app.register(aiRuntimeRoutes);
+  // The Codex sign-in for Limn's own Codex home (docs/CODEX-PLAN.md § 6). Same gate: local, AI on.
+  if (config.aiEnabled) await app.register(aiCodexRoutes);
   // The Claude spend budget (ai/budget.ts): GET/PUT /api/ai/budget. Not registered under
   // LIMN_AI_DISABLED.
   if (config.aiEnabled) await app.register(aiBudgetRoutes);

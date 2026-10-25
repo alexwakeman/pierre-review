@@ -11,7 +11,8 @@ export type AiUsageSeam = 'summary' | 'agent';
 // One billable AI operation to append to the ledger. `costUsd` is the authoritative
 // dollar cost (SDK-reported where available, else priced from tokens); it is stored but
 // NEVER surfaced to the client — only credits are (AI_CREDITS_PER_USD). A row with a
-// non-finite / non-positive cost is dropped (nothing to bill).
+// non-finite / negative cost is dropped, and so is a $0 one — EXCEPT a Codex row carrying tokens
+// or a share (a ChatGPT-plan run has no price; see recordAiUsage).
 export interface AiUsageRecord {
   accountId: number;
   seam: AiUsageSeam;
@@ -32,7 +33,15 @@ export interface AiUsageRecord {
 // feature that spent the money, so callers `.catch()` or await-in-try. Drops rows with
 // no real cost (a $0 ambient-session completion isn't worth a row).
 export async function recordAiUsage(row: AiUsageRecord): Promise<void> {
-  if (!Number.isFinite(row.costUsd) || row.costUsd <= 0) return;
+  if (!Number.isFinite(row.costUsd) || row.costUsd < 0) return;
+  // ⚠ A CODEX run on a ChatGPT sign-in has NO price — it is recorded at US$0 WITH ITS TOKENS, because
+  // those tokens are the numerator of the Codex budget's token-weighted share (packages/shared
+  // ai-budget.ts). Dropping it would read every Codex window as 0% Limn. A $0 row with nothing in it
+  // (and every $0 Claude row) is still not worth one.
+  if (row.costUsd === 0) {
+    const tokens = (row.inputTokens ?? 0) + (row.outputTokens ?? 0);
+    if ((row.provider ?? 'claude') === 'claude' || (tokens <= 0 && row.sharePct == null)) return;
+  }
   await db
     .insert(aiUsage)
     .values({

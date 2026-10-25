@@ -4096,6 +4096,81 @@ export type AiRuntimeInstallEvent =
   | { type: 'done'; runtime: 'ready' }
   | { type: 'error'; message: string };
 
+/** POST /api/ai/runtime/install body (optional). `codex` adds the Codex CLI to the download (Claude's
+ *  SDKs always come). Absent ⇒ Claude only. */
+export interface AiRuntimeInstallBody {
+  provider?: AiProviderId;
+}
+
+/** The AI providers Limn knows (docs/CODEX-PLAN.md). ONE is active for every AI feature. */
+export type AiProviderId = 'claude' | 'codex';
+
+/** `MeResponse.ai.providers.claude` — Claude's own credential, whichever provider is active. */
+export interface AiClaudeProviderStatus {
+  auth: 'ok' | 'none';
+  route: 'login' | 'api_key' | 'none';
+  /** One sentence when `auth` is 'none'. */
+  message: string | null;
+}
+
+/** `MeResponse.ai.providers.codex` — the Codex install and Limn's own Codex sign-in. */
+export interface AiCodexProviderStatus {
+  /** The Codex program (installed on request: "Set up AI" with Codex, `limn ai install codex`). */
+  runtime: 'ready' | 'absent' | 'installing' | 'failed';
+  runtimeMessage: string | null;
+  /** A credential is there: a ChatGPT sign-in in Limn's Codex home, or OPENAI_API_KEY. */
+  auth: 'ok' | 'none';
+  route: 'login' | 'api_key' | 'none';
+  /** Signed in to Codex in Limn's own home (by the last `account/read`). */
+  signedIn: boolean;
+  /** The ChatGPT plan ('plus', 'pro', …), when signed in with one. */
+  plan: string | null;
+  /** Can Codex run Limn's AI features in this version? False until its agents are ported. */
+  available: boolean;
+  /** One sentence when it cannot run (not set up, no sign-in, or not available yet). */
+  message: string | null;
+}
+
+// THE CODEX SIGN-IN (routes in apps/backend/src/api/routes/ai-codex.ts; Limn's OWN Codex home,
+// `~/.limn/codex` — the reader's `~/.codex` is never touched). Local only, like every AI route.
+//   GET  /api/ai/codex/login         → CodexLoginResponse (poll while `waiting`)
+//   POST /api/ai/codex/login         body CodexLoginBody → CodexLoginResponse (starts or joins one)
+//   POST /api/ai/codex/login/cancel  → CodexLoginResponse
+//   POST /api/ai/codex/logout        → CodexLogoutResponse
+export type CodexLoginMethod = 'browser' | 'device';
+
+export type CodexLoginState =
+  | { state: 'idle' }
+  | {
+      state: 'waiting';
+      method: CodexLoginMethod;
+      /** Browser flow: the page to open (Codex listens for its callback on this machine). */
+      authUrl: string | null;
+      /** Device flow: the page to open and the one-time code to type there. */
+      verificationUrl: string | null;
+      userCode: string | null;
+      startedAt: string;
+    }
+  | { state: 'done' }
+  | { state: 'failed'; message: string };
+
+export interface CodexLoginBody {
+  /** Default 'browser'. 'device' suits a machine whose browser cannot reach this one. */
+  method?: CodexLoginMethod;
+}
+
+export interface CodexLoginResponse {
+  login: CodexLoginState;
+  /** By the last `account/read` (cached; refreshed after a sign-in finishes). */
+  signedIn: boolean;
+  plan: string | null;
+}
+
+export interface CodexLogoutResponse {
+  ok: boolean;
+  message: string | null;
+}
+
 /** One event on `POST /api/ml/install`'s SSE stream ("Set up" for local bot-comment scoring). */
 export type MlInstallEvent =
   | { type: 'progress'; phase: 'starting' | 'downloading' | 'verifying'; message: string }
@@ -4129,12 +4204,21 @@ export interface MeResponse {
   //    ⇒ the SPA offers "Set up AI"; 'failed' carries `runtimeMessage`.
   //  - `auth`: whether a Claude credential was detected (a heuristic — the run itself is the real
   //    check). 'none' ⇒ one line in place of every Run button; `authMessage` is that line.
+  //  - `provider`: the ACTIVE provider (LIMN_AI_PROVIDER; `auto` = Claude when both are signed in).
+  //    `runtime` / `auth` above describe IT. Codex answers auth 'none' with "not available yet"
+  //    until its agents are ported.
+  //  - `providers`: each provider's own facts, whichever is active (for Settings → AI, Phase 4).
   ai: {
     enabled: boolean;
     runtime: 'ready' | 'absent' | 'installing' | 'failed';
     runtimeMessage: string | null;
     auth: 'ok' | 'none';
     authMessage: string | null;
+    provider: AiProviderId;
+    providers: {
+      claude: AiClaudeProviderStatus;
+      codex: AiCodexProviderStatus;
+    };
   };
   // The time zone Chronology counts working hours in for a workspace that never set one — the
   // machine's own zone, `WORK_TIMEZONE` over it. The Settings form

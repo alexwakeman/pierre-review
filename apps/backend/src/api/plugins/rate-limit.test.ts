@@ -879,6 +879,14 @@ describe('the AI runtime download', () => {
     expect(tiers('GET', '/api/ai/runtime')).toEqual(['read']);
   });
 
+  it('puts the Codex sign-in POSTs on the sync tier and leaves its poll on read', () => {
+    expect(tiers('POST', '/api/ai/codex/login')).toEqual(['sync']);
+    expect(tiers('POST', '/api/ai/codex/login/cancel')).toEqual(['sync']);
+    expect(tiers('POST', '/api/ai/codex/logout')).toEqual(['sync']);
+    expect(tiers('GET', '/api/ai/codex/login')).toEqual(['read']);
+    expect(tiers('POST', '/api/ai/codex/login-now')).not.toEqual(['sync']);
+  });
+
   it('puts the local scoring download, POST /api/ml/install, on the sync tier too', () => {
     expect(tiers('POST', '/api/ml/install')).toEqual(['sync']);
     expect(tiers('POST', '/api/ml/install-now')).not.toEqual(['sync']);

@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
-import type { AiRuntimeInstallEvent } from '@pierre-review/shared';
+import type { AiRuntimeInstallBody, AiRuntimeInstallEvent } from '@pierre-review/shared';
 import { config } from '../../config.js';
-import { getAiRuntimeStatus, installAiRuntime } from '../../ai/runtime.js';
+import { getAiRuntimeStatus, getCodexRuntimeStatus, installAiRuntime } from '../../ai/runtime.js';
 
 // POST /api/ai/runtime/install — "Set up AI": download the pinned AI runtime (the Agent SDK and its
 // three peers, ~110 MB) into `<dataDir>/ai-runtime`, streaming npm's progress as SSE.
@@ -15,11 +15,20 @@ import { getAiRuntimeStatus, installAiRuntime } from '../../ai/runtime.js';
 // Conventions). And a disconnect only UNSUBSCRIBES: the download is single-flight and keeps going,
 // so a reload re-POSTs and joins the same run instead of starting a second one.
 export async function aiRuntimeRoutes(app: FastifyInstance): Promise<void> {
-  app.post('/api/ai/runtime/install', async (_req, reply) => {
+  app.post('/api/ai/runtime/install', async (req, reply) => {
     if (!config.aiEnabled) {
       return reply.code(404).send({ error: 'NotFound', message: 'Not available here.' });
     }
+    // Optional body `{ provider: 'codex' }` adds the Codex CLI (docs/CODEX-PLAN.md § 3.7). Anything
+    // else in it is ignored; an unknown provider is refused before a byte is downloaded.
+    const body = (req.body ?? {}) as AiRuntimeInstallBody;
+    const provider = body.provider ?? 'claude';
+    if (provider !== 'claude' && provider !== 'codex') {
+      return reply.code(400).send({ error: 'BadRequest', message: 'provider must be claude or codex.' });
+    }
     const before = getAiRuntimeStatus();
+    const codexBefore = getCodexRuntimeStatus();
+    const alreadyReady = before.runtime === 'ready' && (provider !== 'codex' || codexBefore.runtime === 'ready');
 
     reply.hijack();
     const raw = reply.raw;
@@ -48,16 +57,19 @@ export async function aiRuntimeRoutes(app: FastifyInstance): Promise<void> {
     });
 
     // Already there (a second tab, or the workspace's own SDK in dev): say so and stop.
-    if (before.runtime === 'ready') {
+    if (alreadyReady) {
       send({ type: 'done', runtime: 'ready' });
       finish();
       return;
     }
 
-    const result = await installAiRuntime((p) => {
-      if (p.phase === 'done' || p.phase === 'failed') return; // the terminal event is sent below
-      send({ type: 'progress', phase: p.phase, message: p.message });
-    });
+    const result = await installAiRuntime(
+      (p) => {
+        if (p.phase === 'done' || p.phase === 'failed') return; // the terminal event is sent below
+        send({ type: 'progress', phase: p.phase, message: p.message });
+      },
+      { providers: [provider] },
+    );
     if (result.ok) send({ type: 'done', runtime: 'ready' });
     else send({ type: 'error', message: result.message });
     finish();

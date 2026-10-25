@@ -255,22 +255,36 @@ async function runStatusCommand(argv: string[]): Promise<void> {
   });
 }
 
-// ── `limn ai install` / `limn ai status` — the AI runtime, from the terminal ──────
+// ── `limn ai install|status|login|logout` — the AI runtime and Codex's sign-in, from the terminal ──
 // The same download the app's "Set up AI" button runs (ai/runtime.ts): the pinned Agent SDK and
-// its three peers into ~/.limn/ai-runtime via `npm install --prefix`.
+// its three peers into ~/.limn/ai-runtime via `npm install --prefix` — plus, with `codex`, the Codex
+// CLI. `login codex` / `logout codex` sign Limn's OWN Codex home (~/.limn/codex) in and out; the
+// reader's own ~/.codex is never touched.
 async function runAiCommand(argv: string[]): Promise<void> {
   const sub = argv[0];
-  if (sub !== 'install' && sub !== 'status') {
+  const target = argv[1];
+  const known = sub === 'install' || sub === 'status' || sub === 'login' || sub === 'logout';
+  const targetOk =
+    sub === 'install' ? target === undefined || target === 'claude' || target === 'codex'
+    : sub === 'login' || sub === 'logout' ? target === 'codex'
+    : true;
+  if (!known || !targetOk) {
     console.log(`limn ai — the AI runtime Claude Review and AI Fix run on
 
 Usage:
-  limn ai install   Download it (one time, about 110 MB) into ~/.limn/ai-runtime
-  limn ai status    Say whether it is set up
+  limn ai install          Download it (one time, about 110 MB) into ~/.limn/ai-runtime
+  limn ai install codex    The same, plus the Codex CLI
+  limn ai status           Say whether it is set up
+  limn ai login codex      Sign Limn's own Codex in (add --device-auth on a headless machine)
+  limn ai logout codex     Sign it out
 
 Claude Review and AI Fix are free. They run on your own Claude Code login or
 Anthropic API key: sign in to Claude Code, or set ANTHROPIC_API_KEY.
 Set LIMN_AI_USE_API_KEY=true to use the key even when you are signed in.
 Set LIMN_CLAUDE_PATH to use your installed \`claude\` and skip its bundled copy.
+
+Codex keeps its own sign-in in ~/.limn/codex (your ~/.codex is not used), or
+uses OPENAI_API_KEY. Set LIMN_CODEX_PATH to use your installed codex program.
 `);
     process.exit(sub === undefined || sub === '--help' || sub === '-h' ? 0 : 1);
   }
@@ -279,25 +293,68 @@ Set LIMN_CLAUDE_PATH to use your installed \`claude\` and skip its bundled copy.
     process.exit(1);
   }
   await migrateDataDir();
-  const { getAiRuntimeStatus, installAiRuntime, aiRuntimePins } = await import('./ai/runtime.js');
+  const { getAiRuntimeStatus, getCodexRuntimeStatus, installAiRuntime, aiRuntimePins, codexRuntimePin } =
+    await import('./ai/runtime.js');
 
   if (sub === 'status') {
     const s = getAiRuntimeStatus();
     const words =
       s.runtime === 'ready' ? 'AI is set up.' : 'AI is not set up. Run: limn ai install';
     console.log(s.runtimeMessage ? `${words} ${s.runtimeMessage}` : words);
+    const c = getCodexRuntimeStatus();
+    if (c.runtime === 'ready') {
+      const { detectCodex } = await import('./ai/codex/detect.js');
+      const d = await detectCodex();
+      const plan = d.plan ? ` (${d.plan})` : '';
+      console.log(
+        d.route === 'login'
+          ? `Codex is set up and signed in${plan}.`
+          : d.route === 'api_key'
+            ? 'Codex is set up and uses an API key.'
+            : 'Codex is set up but not signed in. Run: limn ai login codex',
+      );
+    } else if (c.runtimeMessage) {
+      console.log(`Codex: ${c.runtimeMessage}`);
+    }
     process.exit(s.runtime === 'ready' ? 0 : 1);
   }
 
+  if (sub === 'login' || sub === 'logout') {
+    const { codexBinaryPath } = await import('./ai/runtime.js');
+    const { codexHome, codexProcessEnv, ensureCodexHomeConfig, CODEX_NOT_INSTALLED_MESSAGE } = await import(
+      './ai/codex/home.js'
+    );
+    const bin = codexBinaryPath();
+    if (!bin) {
+      console.error(CODEX_NOT_INSTALLED_MESSAGE);
+      process.exit(1);
+    }
+    // File-store auth in Limn's own home BEFORE anything is written there.
+    await ensureCodexHomeConfig(null);
+    const args = sub === 'logout' ? ['logout'] : ['login', ...(argv.includes('--device-auth') ? ['--device-auth'] : [])];
+    if (sub === 'login') console.log(dim(`Signing Limn's own Codex in (${codexHome()}). Your ~/.codex is not used.`));
+    const { spawnSync } = await import('node:child_process');
+    // The terminal is attached: Codex prints its own URL or device code and waits for the reader.
+    const r = spawnSync(bin, args, { stdio: 'inherit', env: codexProcessEnv(), cwd: codexHome() });
+    process.exit(r.status ?? 1);
+  }
+
+  const withCodex = target === 'codex';
   const pins = aiRuntimePins();
   if (pins) {
-    console.log(bold('Setting up AI (one-time download, about 110 MB):'));
+    console.log(bold(`Setting up AI (one-time download, about 110 MB${withCodex ? ', plus Codex' : ''}):`));
     for (const [name, version] of Object.entries(pins)) console.log(`  ${dim(`${name}@${version}`)}`);
+    const codexPin = withCodex ? codexRuntimePin() : null;
+    if (codexPin) console.log(`  ${dim(`@openai/codex@${codexPin}`)}`);
   }
-  const result = await installAiRuntime((p) => {
-    if (p.phase === 'downloading') console.log(`  ${dim(p.message)}`);
-    else if (p.phase !== 'failed') console.log(`${cyan('▸')} ${p.message}`);
-  });
+  const result = await installAiRuntime(
+    (p) => {
+      if (p.phase === 'downloading') console.log(`  ${dim(p.message)}`);
+      else if (p.phase !== 'failed') console.log(`${cyan('▸')} ${p.message}`);
+    },
+    { providers: withCodex ? ['claude', 'codex'] : ['claude'] },
+  );
+  if (result.ok && withCodex) console.log(dim('Next: limn ai login codex'));
   if (!result.ok) {
     console.error(bold(result.message));
     process.exit(1);

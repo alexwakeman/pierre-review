@@ -217,6 +217,30 @@ for (const name of AI_RUNTIME_PACKAGES) {
   aiRuntimePins[name] = installed;
 }
 
+// ---- The Codex CLI pin (`limnAiRuntime['@openai/codex']`) ----
+//
+// The Codex CLI (docs/CODEX-PLAN.md § 3.7) is NOT a workspace dependency — its native program is
+// ~360 MB unpacked per platform, so no dev checkout carries it. Its pin is therefore DECLARED, exact,
+// in apps/backend/package.json's own `limnAiRuntime` field (which ai/runtime.ts also reads in dev),
+// and copied here. ai/runtime.ts installs it only when the reader asks ("Set up AI" with Codex,
+// `limn ai install codex`) and NEVER imports it: it runs the native program.
+const CODEX_RUNTIME_PACKAGES = ['@openai/codex'];
+// Every AI package spelling that must never be a dependency or a value import: the CLI and its SDK.
+const CODEX_SPECIFIERS = ['@openai/codex', '@openai/codex-sdk'];
+const declaredAiRuntime = backendPkg[AI_RUNTIME_FIELD] ?? {};
+for (const name of CODEX_RUNTIME_PACKAGES) {
+  const v = declaredAiRuntime[name];
+  if (typeof v !== 'string' || !EXACT_VERSION.test(v)) {
+    fail(`apps/backend/package.json ${AI_RUNTIME_FIELD}.${name} must be an exact version, got ${JSON.stringify(v)}`);
+  }
+  aiRuntimePins[name] = v;
+}
+for (const name of Object.keys(declaredAiRuntime)) {
+  if (!CODEX_RUNTIME_PACKAGES.includes(name)) {
+    fail(`apps/backend/package.json ${AI_RUNTIME_FIELD} may only declare ${CODEX_RUNTIME_PACKAGES.join(', ')} (got ${name}) — the other pins come from the workspace install`);
+  }
+}
+
 // ---- The local scoring runtime + model (`limnMlRuntime`, `limnMlModels`) ----
 //
 // Bot-comment severity runs in-process on onnxruntime-node (docs/ML-NODE-PORT.md). Same posture as
@@ -455,21 +479,32 @@ if (sharedHits.length > 0) {
 // `optionalDependencies` — npm installs optional ones by default, and a dependent package cannot
 // switch off its dependency's platform binary under `npx`). They arrive on first use instead, at
 // the pins in `limnAiRuntime`.
-const AI_DEPS = ['@anthropic-ai/claude-agent-sdk', '@anthropic-ai/sdk', '@modelcontextprotocol/sdk', 'zod', ...DOC_CONVERTERS];
+const AI_DEPS = [
+  '@anthropic-ai/claude-agent-sdk',
+  '@anthropic-ai/sdk',
+  '@modelcontextprotocol/sdk',
+  'zod',
+  ...DOC_CONVERTERS,
+  // The Codex CLI (and its platform packages, all named `@openai/codex-<platform>`) and its SDK.
+  ...CODEX_SPECIFIERS,
+];
 for (const field of ['dependencies', 'optionalDependencies', 'peerDependencies']) {
-  const leaked = AI_DEPS.filter((d) => d in (manifest[field] ?? {}));
+  const leaked = Object.keys(manifest[field] ?? {}).filter(
+    (d) => AI_DEPS.includes(d) || d.startsWith('@openai/codex'),
+  );
   if (leaked.length > 0) fail(`AI SDK(s) leaked into release/package.json ${field}: ${leaked.join(', ')}`);
 }
 
-// The pins must exist, be exact, cover all four, and be what the written manifest actually says.
+// The pins must exist, be exact, cover all of them (the Codex CLI's included), and be what the
+// written manifest actually says.
 const writtenManifest = JSON.parse(readFileSync(join(releaseDir, 'package.json'), 'utf8'));
 const writtenPins = writtenManifest[AI_RUNTIME_FIELD] ?? {};
-for (const name of AI_RUNTIME_PACKAGES) {
+for (const name of [...AI_RUNTIME_PACKAGES, ...CODEX_RUNTIME_PACKAGES]) {
   const v = writtenPins[name];
   if (typeof v !== 'string' || !EXACT_VERSION.test(v)) {
     fail(`${AI_RUNTIME_FIELD}.${name} must be an exact version, got ${JSON.stringify(v)}`);
   }
-  if (v !== aiRuntimePins[name]) fail(`${AI_RUNTIME_FIELD}.${name} does not match the installed workspace version`);
+  if (v !== aiRuntimePins[name]) fail(`${AI_RUNTIME_FIELD}.${name} does not match the installed (or declared) version`);
 }
 const runtimeSrc = readFileSync(join(backendDir, 'src', 'ai', 'runtime.ts'), 'utf8');
 if (!runtimeSrc.includes(`AI_RUNTIME_MANIFEST_FIELD = '${AI_RUNTIME_FIELD}'`)) {
@@ -481,9 +516,22 @@ if (!runtimeSrc.includes(`AI_RUNTIME_MANIFEST_FIELD = '${AI_RUNTIME_FIELD}'`)) {
 // imports are erased at emit, so any specifier left in the JS is a real one. Subpaths
 // (`zod/v4`, `@anthropic-ai/sdk/resources`) count.
 const AI_SPECIFIER = new RegExp(
-  String.raw`(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*|^\s*import\s*)(['"])(?:@anthropic-ai\/claude-agent-sdk|@anthropic-ai\/sdk|@modelcontextprotocol\/sdk|zod|mammoth|turndown|turndown-plugin-gfm)(?:\/[^'"]*)?\1`,
+  String.raw`(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*|^\s*import\s*)(['"])(?:@anthropic-ai\/claude-agent-sdk|@anthropic-ai\/sdk|@modelcontextprotocol\/sdk|zod|mammoth|turndown|turndown-plugin-gfm|@openai\/codex(?:-[a-z0-9-]+)?)(?:\/[^'"]*)?\1`,
   'm',
 );
+// ⚠ The Codex CLI is never imported AT ALL — not even by dist/ai/runtime.js, which only locates its
+// native program on disk. So a Codex specifier in an import is refused EVERYWHERE, the loader
+// included.
+const CODEX_IMPORT = new RegExp(
+  String.raw`(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*|^\s*import\s*)(['"])@openai\/codex(?:-[a-z0-9-]+)?(?:\/[^'"]*)?\1`,
+  'm',
+);
+{
+  const text = readFileSync(join(releaseDist, 'ai', 'runtime.js'), 'utf8');
+  for (const line of text.split('\n')) {
+    if (CODEX_IMPORT.test(line)) fail(`dist/ai/runtime.js imports the Codex CLI — it must only run its program: ${line.trim()}`);
+  }
+}
 const runtimeJs = join(releaseDist, 'ai', 'runtime.js');
 const aiImportHits = [];
 const scanAiImports = (d) => {
