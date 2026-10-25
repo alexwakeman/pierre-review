@@ -216,6 +216,17 @@ document deleted mid-run puts nothing on disk. Boot (`startup.ts`): interrupted 
 library/source folder no row accounts for. A deleted workspace's folder is removed by the delete route
 (its rows go with the workspace cascade); erasure removes `<docsDir>/<accountId>/` after the rows.
 
+**On Codex** (`LIMN_AI_PROVIDER=codex`, kind `docs_build`; docs/CODEX-PLAN.md § Phase 3 stream (d)).
+A `'sections'` build runs through the same `runAgent`, reading the staging folder through Limn's
+workspace server (read-only, the same folder the path guard allows). Codex has no tools of Limn's own,
+so `record_sections` and `finish_document` arrive as ONE final answer, `submit_document` (the two shapes
+side by side), judged by the SAME `judgeRecord` then `judgeFinish`. Codex gets two answers (its one
+retry), so its retry is the build's LAST finish attempt (`finishAttempts` starts at
+`MAX_FINISH_ATTEMPTS - 2`). ⚠ A PDF REFUSES on Codex before anything is written or run
+(`CODEX_PDF_MESSAGE`): its pages are read through Claude's own `Read`, and Limn's `read_file` shows no
+binary file. The "Summarising sections (n of m)" count moves only when the answer arrives. Codex writes
+its own ledger row (`usageRecord`, provider `codex`), so the manager records none for it.
+
 ## The chat (`chat.ts`)
 
 `POST /api/docs/chat {workspaceId?, conversationId?, question}` → ONE Sonnet 5 answer, synchronous (5
@@ -241,6 +252,8 @@ verified quote wins and a later link to the same place fills in one that had non
 the answer looks its quote up by `path#anchor`. Every scan is indexOf / a character walk (model output
 is untrusted). Rows stored before this have no quote and read unchanged (`chatCitationsFromStored`).
 Spend: `DOCS_CHAT_BUDGET_USD` (1), `DOCS_CHAT_MAX_TURNS` (30), feature `reference_docs_chat`.
+On Codex (kind `docs_chat`) the chat has no result tool: Codex's final message is the answer, the
+library is its one read-only root, and the citations and quotes are checked exactly as above.
 
 ## Paths a request names (`paths.ts`)
 

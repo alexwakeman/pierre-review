@@ -42,6 +42,8 @@ export const RESULT_TOOL_NAMES = [
   'record_sections',
   // The docs build's closing call (beside record_sections): a result too.
   'finish_document',
+  // The docs build on CODEX: record_sections + finish_document as ONE final answer (Phase 3).
+  'submit_document',
 ] as const;
 export type ResultToolName = (typeof RESULT_TOOL_NAMES)[number];
 
@@ -69,6 +71,7 @@ const BUILDERS: Record<ResultToolName, ShapeBuilder> = {
   submit_explanations: async (z) => (await import('../review/claude-review/chat-explain.js')).buildSubmitExplanationsShape(z),
   record_sections: async (z) => (await import('../reference-docs/schema.js')).buildRecordSectionsShape(z),
   finish_document: async (z) => (await import('../reference-docs/schema.js')).buildFinishShape(z),
+  submit_document: async (z) => (await import('../reference-docs/schema.js')).buildSubmitDocumentShape(z),
 };
 
 /** The raw zod shape the Claude tool `name` is registered with. `z` defaults to the AI runtime's. */

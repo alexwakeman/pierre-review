@@ -43,8 +43,8 @@ import {
   type Telemetry,
 } from './persist.js';
 import {
-  PR_DIAGRAM_SYSTEM_PROMPT,
-  STORY_DIAGRAM_SYSTEM_PROMPT,
+  prDiagramSystemPrompt,
+  storyDiagramSystemPrompt,
   buildPrDiagramPrompt,
   buildStoryDiagramPrompt,
   diagramUntrustedTexts,
@@ -223,6 +223,8 @@ async function finishWithAgent(
       design: args.design,
       applyAuthEnv: REVIEW_APPLY_AUTH_ENV,
       abortController: controller,
+      // Codex records its own ledger row from this (its model, US$ 0 on a ChatGPT login, its tokens).
+      usageRecord: { accountId, seam: 'agent', feature: 'sequence_diagram', prId: args.prId },
     });
     const telemetry: Telemetry = {
       costUsd: res.costUsd,
@@ -230,7 +232,8 @@ async function finishWithAgent(
       outputTokens: res.outputTokens,
       numTurns: res.numTurns,
     };
-    await recordDiagramUsage(ctx, { accountId, model: DIAGRAM_MODEL, prId: args.prId }, telemetry);
+    // A Codex run's row is already written (by its provider, as Codex): never a second, Claude-named one.
+    if (res.provider !== 'codex') await recordDiagramUsage(ctx, { accountId, model: DIAGRAM_MODEL, prId: args.prId }, telemetry);
     if (res.aborted) {
       await markDiagramCancelled(ctx, accountId, diagramId, telemetry);
       return;
@@ -335,7 +338,7 @@ async function runPrPipeline(job: DiagramJob, controller: AbortController): Prom
     const nonce = pickReviewNonce(diagramUntrustedTexts([promptPr], null));
     await finishWithAgent(job, controller, {
       roots: [path],
-      systemPrompt: PR_DIAGRAM_SYSTEM_PROMPT,
+      systemPrompt: prDiagramSystemPrompt(),
       prompt: buildPrDiagramPrompt({ pr: promptPr, nonce }),
       prId,
       design: designContextFor('pr', [promptPr]),
@@ -421,7 +424,7 @@ async function runStoryPipeline(job: DiagramJob, controller: AbortController): P
     const nonce = pickReviewNonce(diagramUntrustedTexts(prs, promptTicket));
     await finishWithAgent(job, controller, {
       roots,
-      systemPrompt: STORY_DIAGRAM_SYSTEM_PROMPT,
+      systemPrompt: storyDiagramSystemPrompt(),
       prompt: buildStoryDiagramPrompt({ ticket: promptTicket, prs, nonce }),
       prId: null,
       design: designContextFor('story', prs),

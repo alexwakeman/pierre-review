@@ -17,7 +17,7 @@ import {
 import type { AgentContext } from '../agent-context.js';
 import { pickReviewNonce } from '../claude-review/prompts.js';
 import type { SprintPathsAgentResult, SprintPathsAgentRunner } from './agent.js';
-import { SPRINT_PATHS_SYSTEM, sprintPathsPrompt, sprintPathsUntrusted } from './prompt.js';
+import { sprintPathsPrompt, sprintPathsSystem, sprintPathsUntrusted } from './prompt.js';
 import { validateSprintPaths } from './validate.js';
 
 // THE SPRINT BUILDER'S PASS (docs/CLAUDE-REVIEW.md § Sprint paths). LOCAL ONLY and agentic: started after
@@ -110,16 +110,19 @@ export async function runSprintPathsPass(
     const out = await runner({
       input,
       model: SPRINT_PATHS_MODEL,
-      systemPrompt: SPRINT_PATHS_SYSTEM,
+      systemPrompt: sprintPathsSystem(),
       prompt: sprintPathsPrompt(input, pickReviewNonce(sprintPathsUntrusted(input))),
       maxTurns: config.sprintPathsMaxTurns,
       maxBudgetUsd: config.sprintPathsBudgetUsd,
       applyAuthEnv,
       abortController: new AbortController(),
+      // Codex records its own ledger row from this (its model, US$ 0 on a ChatGPT login, its tokens).
+      usageRecord: { accountId, seam: 'agent', feature: 'sprint_paths' },
     });
     const costUsd = out.costUsd ?? 0;
     res.costUsd = costUsd;
-    if (costUsd > 0) {
+    // A Codex run's row is already written (by its provider, as Codex): never a second, Claude-named one.
+    if (costUsd > 0 && out.provider !== 'codex') {
       await ctx
         .recordAiUsage({
           accountId,

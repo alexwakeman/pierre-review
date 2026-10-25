@@ -3,7 +3,15 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SPRINT_PATHS_CAPS, type ClaudeReviewModel } from '@pierre-review/shared';
 import { AiRuntimeMissingError, loadZod } from '../../ai/runtime.js';
-import { claudeModelChoice, getActiveProvider, type AgentToolServer, type AgentOutcome } from '../../ai/provider.js';
+import { either } from '../../ai/prompt-tools.js';
+import {
+  claudeModelChoice,
+  getActiveProvider,
+  type AgentOutcome,
+  type AgentProviderId,
+  type AgentToolServer,
+  type AgentUsageRecord,
+} from '../../ai/provider.js';
 import { buildSubmitPathsShape } from './schema.js';
 import type { SprintPathsInput, StoredPathsJson } from '../../db/sprint-paths.js';
 import { applyClaudeReviewAuth } from '../auth.js';
@@ -23,6 +31,11 @@ import { validateSprintPaths } from './validate.js';
 //     lists every problem; at most SPRINT_PATHS_CAPS.maxSubmits calls. The first ACCEPTED answer wins.
 //   • The SDK is loaded ONLY through ai/runtime.ts; this module is reached through a lazy import from
 //     the manager, so booting the server never loads it.
+//   • ON CODEX (kind 'sprint_paths'): the same run through the active provider. No tool: the final
+//     message IS the answer, checked against the strict `submit_paths` schema of the SAME shape and
+//     handed to the SAME handler (so `validateSprintPaths` judges it), one refusal retried on the
+//     thread. Its workspace server sees only the throwaway cwd (empty). Codex records its own ledger
+//     row (`usageRecord`), so the manager records none for a Codex run (`provider`).
 
 export const SPRINT_PATHS_TOOL = 'mcp__paths__submit_paths';
 export const SPRINT_PATHS_DISALLOWED_TOOLS = [
@@ -50,6 +63,7 @@ export function judgePathsSubmission(
   payload: unknown,
   attempt: number,
   input: Pick<SprintPathsInput, 'keys'>,
+  provider: AgentProviderId = 'claude',
 ): { accepted: StoredPathsJson } | { reply: string; refusal: string } {
   const v = validateSprintPaths(payload, input);
   if (v.ok) return { accepted: v.value };
@@ -58,7 +72,7 @@ export function judgePathsSubmission(
     refusal: v.problems.join(' '),
     reply: last
       ? `Refused:\n${v.message}\nThat was the last attempt; stop now.`
-      : `Refused:\n${v.message}\nFix every point and call submit_paths again with the whole answer.`,
+      : `Refused:\n${v.message}\n${either('Fix every point and call submit_paths again with the whole answer.', 'Fix every point and answer again with the whole answer.', provider)}`,
   };
 }
 
@@ -71,6 +85,8 @@ export interface SprintPathsAgentArgs {
   maxBudgetUsd: number;
   applyAuthEnv: boolean;
   abortController: AbortController;
+  /** Who to bill. A provider that records its own usage (Codex) writes the ledger row from it. */
+  usageRecord?: AgentUsageRecord;
 }
 
 export interface SprintPathsAgentResult {
@@ -86,6 +102,8 @@ export interface SprintPathsAgentResult {
   runtimeMissing: boolean;
   /** Log-only detail of a thrown failure; never sent to a client. */
   error: string | null;
+  /** Which provider ran it. 'codex' ⇒ its ledger row is already written. Absent ⇒ Claude. */
+  provider?: AgentProviderId;
 }
 
 export type SprintPathsAgentRunner = (args: SprintPathsAgentArgs) => Promise<SprintPathsAgentResult>;
@@ -97,6 +115,9 @@ export const runSprintPathsAgent: SprintPathsAgentRunner = async (args) => {
   let accepted: StoredPathsJson | null = null;
   let lastRefusal: string | null = null;
   let liveUsage: UsageTokens = emptyUsage();
+  // Who runs it (the same LIMN_AI_PROVIDER read the run's own `getActiveProvider()` makes): its words
+  // in the handlers' replies, and whether its ledger row is already written.
+  const provider = getActiveProvider();
   const done = (extra: Partial<SprintPathsAgentResult> = {}): SprintPathsAgentResult => {
     const usage = outcome?.usage ?? liveUsage;
     const hasUsage = usage.inputTokens + usage.outputTokens + usage.cacheReadTokens > 0;
@@ -109,6 +130,7 @@ export const runSprintPathsAgent: SprintPathsAgentRunner = async (args) => {
       outputTokens: usage.outputTokens,
       runtimeMissing: false,
       error: null,
+      provider: provider.id,
       ...extra,
     };
   };
@@ -130,7 +152,7 @@ export const runSprintPathsAgent: SprintPathsAgentRunner = async (args) => {
               return { text: 'No more attempts. Stop now.', isError: true };
             }
             attempts += 1;
-            const j = judgePathsSubmission(a, attempts, args.input);
+            const j = judgePathsSubmission(a, attempts, args.input, provider.id);
             if ('accepted' in j) {
               accepted = j.accepted;
               return { text: 'Recorded.' };
@@ -159,6 +181,9 @@ export const runSprintPathsAgent: SprintPathsAgentRunner = async (args) => {
       budget: { usd: args.maxBudgetUsd, turns: args.maxTurns },
       abortController: args.abortController,
       claude: { builtinTools: policy.tools, allowedTools: policy.allowedTools, disallowedTools: policy.disallowedTools },
+      // Codex: the answer is the run's final message (the strict `submit_paths` schema).
+      codex: { resultTool: 'submit_paths' },
+      ...(args.usageRecord ? { usageRecord: args.usageRecord } : {}),
       onProgress: (p) => {
         if (p.kind === 'step') {
           if (p.usage) liveUsage = p.usage;

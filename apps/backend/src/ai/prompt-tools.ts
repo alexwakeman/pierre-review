@@ -86,3 +86,11 @@ export function promptTools(provider: AgentProviderId = activeProviderId()): Pro
     either: (c, x) => either(c, x, provider),
   };
 }
+
+/**
+ * The provider's own name, for user-facing copy that says who did (or could not do) the work:
+ * "Claude could not answer" vs "Codex could not answer". A Claude sentence stays byte-identical.
+ */
+export function providerName(provider: AgentProviderId = activeProviderId()): 'Claude' | 'Codex' {
+  return provider === 'claude' ? 'Claude' : 'Codex';
+}

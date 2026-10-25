@@ -1,12 +1,13 @@
 import { randomBytes } from 'node:crypto';
 import type { ReferenceDocCitation, ReferenceDocsChatResponse } from '@pierre-review/shared';
+import { providerName } from '../ai/prompt-tools.js';
 import type { AgentContext } from '../review/agent-context.js';
 import { chatMayApplyAuthEnv } from '../review/claude-review/manager.js';
 import { pickReviewNonce } from '../review/claude-review/prompts.js';
 import { docsContextFor } from './context.js';
 import { readLibraryFile } from './library.js';
 import { parseLibraryPath } from './paths.js';
-import { CHAT_SYSTEM_PROMPT, buildChatPrompt, type ChatPriorTurn } from './prompts.js';
+import { buildChatPrompt, chatSystemPrompt, type ChatPriorTurn } from './prompts.js';
 import { extractCitations } from './chat-quotes.js';
 import { conversationRows, insertChatTurn, listDocRows, toChatMessage, type DocRow } from './store.js';
 
@@ -72,7 +73,7 @@ export async function askDocs(ctx: AgentContext, a: AskArgs): Promise<ReferenceD
     throw new DocsChatError(400, 'BadConversation', 'Not a conversation id.');
   }
   if (inFlight.has(a.accountId)) {
-    throw new DocsChatError(409, 'Busy', 'Claude is still answering your last question.');
+    throw new DocsChatError(409, 'Busy', `${providerName()} is still answering your last question.`);
   }
   inFlight.add(a.accountId); // claimed before the first await
   try {
@@ -93,16 +94,19 @@ export async function askDocs(ctx: AgentContext, a: AskArgs): Promise<ReferenceD
       const { runDocsChatAgent } = await import('./agent.js');
       res = await runDocsChatAgent({
         cwd: library.dir,
-        systemPrompt: CHAT_SYSTEM_PROMPT,
+        systemPrompt: chatSystemPrompt(),
         prompt: buildChatPrompt(prior, a.question, nonce),
         applyAuthEnv: chatMayApplyAuthEnv(),
         abortController: controller,
+        // Codex records its own ledger row from this (its model, US$ 0 on a ChatGPT login, its tokens).
+        usageRecord: { accountId: a.accountId, seam: 'agent', feature: 'reference_docs_chat' },
       });
     } finally {
       clearTimeout(timer);
       a.signal.removeEventListener('abort', onAbort);
     }
-    if (res.costUsd != null && res.costUsd > 0) {
+    // A Codex run's row is already written (by its provider, as Codex): never a second, Claude-named one.
+    if (res.provider !== 'codex' && res.costUsd != null && res.costUsd > 0) {
       await ctx
         .recordAiUsage({
           accountId: a.accountId,
@@ -118,7 +122,7 @@ export async function askDocs(ctx: AgentContext, a: AskArgs): Promise<ReferenceD
     if (!res.ok) {
       if (res.aborted) throw new DocsChatError(499, 'Cancelled', 'The question was cancelled.');
       ctx.log.warn(`docs chat failed: ${res.failureReason ?? 'unknown'}`);
-      throw new DocsChatError(502, 'NoAnswer', 'Claude could not answer that. Try again.');
+      throw new DocsChatError(502, 'NoAnswer', `${providerName(res.provider)} could not answer that. Try again.`);
     }
     const text = res.text.length > STORED_ANSWER_CHARS ? `${res.text.slice(0, STORED_ANSWER_CHARS)}…` : res.text;
     const docs = await listDocRows(a.accountId, a.workspaceId);

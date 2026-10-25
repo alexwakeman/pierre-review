@@ -7,6 +7,8 @@ import {
   type ReferenceDocStreamEvent,
 } from '@pierre-review/shared';
 import { CodexNotInstalledError } from '../ai/codex/home.js';
+import { providerName } from '../ai/prompt-tools.js';
+import { activeProviderId } from '../ai/provider-setting.js';
 import { AiRuntimeMissingError } from '../ai/runtime.js';
 import { config } from '../config.js';
 import type { AgentContext } from '../review/agent-context.js';
@@ -25,7 +27,7 @@ import { CrawlRefusal, bundleCrawlMarkdown, crawlSite, type BundlePage } from '.
 import { makeLinkRanker } from './crawl-rank.js';
 import { installDocFolder, readSource, saveSource, writeIndex } from './library.js';
 import { stagingRoot } from './paths.js';
-import { BUILD_PDF_SYSTEM_PROMPT, BUILD_SECTIONS_SYSTEM_PROMPT, buildPdfPrompt, buildSectionsPrompt } from './prompts.js';
+import { BUILD_PDF_SYSTEM_PROMPT, buildPdfPrompt, buildSectionsPrompt, buildSectionsSystemPrompt } from './prompts.js';
 import { draftsFromWritten, renderDocFolder, trimTitle } from './assemble.js';
 import { sectionFileNames, validateDocFolder } from './render.js';
 import { DocumentTooLongError, MAX_SECTIONS, splitMarkdown, type DraftSection } from './split.js';
@@ -228,7 +230,7 @@ async function crawlSource(job: Job, row: DocRow, crawl: ReferenceDocCrawl, repo
                 ? `No links were followed. ${err.message}`
                 : err instanceof AiRuntimeMissingError
                 ? 'Claude is not set up here, so no links were followed. Press "Set up AI", then rebuild.'
-                : 'Claude could not be reached to choose which links to follow.',
+                : `${providerName()} could not be reached to choose which links to follow.`,
             );
           }
         },
@@ -307,6 +309,12 @@ async function runBuild(job: Job, controller: AbortController): Promise<void> {
     let pageCount: number | null = null;
 
     if (effective === 'pdf') {
+      // ⚠ A PDF is read through Claude's own Read tool: Codex cannot read one (reference-docs/agent.ts).
+      // Refused before anything is written or run — free.
+      if (activeProviderId() === 'codex') {
+        const { CODEX_PDF_MESSAGE } = await import('./agent.js');
+        throw new BuildRefusal(CODEX_PDF_MESSAGE);
+      }
       mode = 'pdf';
       pageCount = pdfPageCount(body);
       if (pageCount != null && pageCount > config.docsPdfMaxPages) {
@@ -356,10 +364,12 @@ async function runBuild(job: Job, controller: AbortController): Promise<void> {
       cwd: staging,
       sectionsDir,
       expected: names,
-      systemPrompt: mode === 'pdf' ? BUILD_PDF_SYSTEM_PROMPT : BUILD_SECTIONS_SYSTEM_PROMPT,
+      systemPrompt: mode === 'pdf' ? BUILD_PDF_SYSTEM_PROMPT : buildSectionsSystemPrompt(),
       prompt: mode === 'pdf' ? buildPdfPrompt(promptDoc, pageCount, nonce) : buildSectionsPrompt(promptDoc, drafts, names, nonce),
       applyAuthEnv: REVIEW_APPLY_AUTH_ENV,
       abortController: controller,
+      // Codex records its own ledger row from this (its model, US$ 0 on a ChatGPT login, its tokens).
+      usageRecord: { accountId, seam: 'agent', feature: 'reference_docs_build' },
       onProgress: (p) => {
         if (mode === 'sections') {
           const frac = p.expected > 0 ? p.recorded / p.expected : 0;
@@ -383,7 +393,8 @@ async function runBuild(job: Job, controller: AbortController): Promise<void> {
       outputTokens: res.outputTokens,
       numTurns: res.numTurns,
     };
-    if (res.costUsd != null && res.costUsd > 0) {
+    // A Codex run's row is already written (by its provider, as Codex): never a second, Claude-named one.
+    if (res.provider !== 'codex' && res.costUsd != null && res.costUsd > 0) {
       await ctx
         .recordAiUsage({
           accountId,
@@ -397,7 +408,7 @@ async function runBuild(job: Job, controller: AbortController): Promise<void> {
         .catch(() => {});
     }
     if (res.aborted) return await finishFailed('Cancelled.', telemetry);
-    if (res.finish == null) return await finishFailed(res.failureReason ?? 'Claude did not finish the document.', telemetry);
+    if (res.finish == null) return await finishFailed(res.failureReason ?? `${providerName(res.provider)} did not finish the document.`, telemetry);
 
     // ---- indexing ----
     report('indexing', 90, 'Building the contents', true);
@@ -411,7 +422,7 @@ async function runBuild(job: Job, controller: AbortController): Promise<void> {
       const order = [...res.state.order, ...outstanding(res.state, readdirMd(sectionsDir))];
       finalDrafts = draftsFromWritten(order, res.state.recorded, (f) => readFileSync(join(sectionsDir, f), 'utf8'));
     }
-    if (finalDrafts.length === 0) return await finishFailed('Claude wrote no sections.', telemetry);
+    if (finalDrafts.length === 0) return await finishFailed(`${providerName(res.provider)} wrote no sections.`, telemetry);
     if (finalDrafts.length > MAX_SECTIONS) {
       return await finishFailed(`This document is too long: ${finalDrafts.length} sections, and the limit is ${MAX_SECTIONS}.`, telemetry);
     }

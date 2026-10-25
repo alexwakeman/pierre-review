@@ -9,6 +9,7 @@ import { config } from '../../config.js';
 import { resolveWorkspaceScope } from '../../db/queries.js';
 import type { AgentContext } from '../agent-context.js';
 import { AiRuntimeMissingError } from '../../ai/runtime.js';
+import { either, providerName } from '../../ai/prompt-tools.js';
 import { pickReviewNonce } from '../claude-review/prompts.js';
 import { cheapUsage } from '../cheap-usage.js';
 import { labelCostUsd, type CompleteFn } from '../story-labels/manager.js';
@@ -48,9 +49,11 @@ export function registerSprintAskRoutes(app: FastifyInstance, ctx: AgentContext)
       reply.status(404);
       return { error: 'not_found' };
     }
-    if (ctx.llm.detectAuth('complete').status !== 'ok') {
+    const auth = ctx.llm.detectAuth('complete');
+    if (auth.status !== 'ok') {
       reply.status(503);
-      return { error: 'no_credential', message: 'No Claude login or API key found.' };
+      // Claude's sentence as it always was; Codex's pre-flight names its own remedy.
+      return { error: 'no_credential', message: either('No Claude login or API key found.', auth.message ?? 'Codex is not signed in.') };
     }
     const accountId = ctx.accountIdOf(req);
     const scope = await resolveWorkspaceScope(accountId, body.workspaceId);
@@ -86,9 +89,10 @@ export function registerSprintAskRoutes(app: FastifyInstance, ctx: AgentContext)
       const answer = out.text.trim();
       return {
         workspaceId: scope.workspaceId,
-        answer: answer === '' ? 'Claude gave no answer. Try asking again.' : answer,
+        answer: answer === '' ? `${providerName(u.provider)} gave no answer. Try asking again.` : answer,
         trimmedTurns: trimmed,
-        model: SPRINT_BRIEF_MODEL,
+        // The model that answered (Claude: the brief model, as always; Codex: its own).
+        model: u.model,
         costUsd,
       };
     } catch (err) {
@@ -99,7 +103,7 @@ export function registerSprintAskRoutes(app: FastifyInstance, ctx: AgentContext)
       }
       ctx.log.warn({ accountId, err: String(err).slice(0, 200) }, 'sprint ask: completion failed');
       reply.status(502);
-      return { error: 'failed', message: 'Claude could not answer. Try again.' };
+      return { error: 'failed', message: `${providerName()} could not answer. Try again.` };
     }
   });
 }

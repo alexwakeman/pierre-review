@@ -267,6 +267,31 @@ users.
   has no turn cap; its wall-clock timeout applies); the stored ticket/CI run row's `model` column is still
   the requested Claude id.
 
+**Phase 3 stream (d) built 2026-10-25** (branch `codex/p3-docs`, on the foundation): `diagram`,
+`sprint_paths`, `docs_build`, `docs_chat` in `ai/codex/kinds/docs.ts`.
+- Each runner asks `getActiveProvider().runAgent` with `codex.resultTool` naming its result tool, so the
+  strict schema is the SAME shape's (`submit_design`, `submit_paths`, and for the docs build the new
+  `submit_document` = `record_sections` + `finish_document` side by side, in `ai/result-schemas.ts`), and
+  the answer reaches the SAME handler: `validateDesign`, the sprint digit gate (`validateSprintPaths`),
+  `judgeRecord` + `judgeFinish` are unchanged. A handler's refusal is worded for Codex ("answer again")
+  only on Codex (`either`).
+- Read roots are exactly the Claude path guard's (diagram: the scratch cwd + the checkouts; paths: an
+  empty throwaway cwd; build: the staging folder; chat: the library); no write roots.
+- Prompts: `prDiagramSystemPrompt`/`storyDiagramSystemPrompt`/`sprintPathsSystem`/
+  `buildSectionsSystemPrompt`/`chatSystemPrompt` (and the shared `docsNavigationPrompt`) take a provider
+  (default: the active one); the old constants are the Claude rendering, pinned by hash.
+- Usage: each runner passes `usageRecord`; Codex writes its own row (provider `codex`, its model, US$ 0
+  on a sign-in, NULL tokens when cancelled) and the manager skips its Claude-named row for a Codex run
+  (`provider` on the runner's result).
+- ⚠ A PDF docs build REFUSES on Codex (`CODEX_PDF_MESSAGE`): Codex cannot read PDF pages.
+- One-shot callers (briefs, themes, labels, sprint Ask, crawl rank, story-docs shortlist, the platform's
+  reports, synthesis, annotations, work plan, flow pointers, bot themes, Slack) already recorded
+  provider-correct rows through `cheapUsage` / `fromHost`; the sprint Ask now echoes the answering model
+  and names Codex in its failure sentences.
+- Tests: `ai/codex/kinds/docs.test.ts` (recorded-shape JSONL in `ai/codex/__fixtures__/docs/`: success,
+  a schema or validator refusal + the one retry, cancellation, the budget gate) and the opt-in
+  `docs.live.test.ts` (2 runs on gpt-6-luna at low, the model overridden in the test only).
+
 Original status: Written 2026-10-23 after checking the current Codex docs and the published
 `@openai/codex-sdk` 0.164.0 type definitions. The work is meant to be carried out by subagents
 through the Workflow tool, in the phases below, with the user confirming the decisions in § 6 first.
