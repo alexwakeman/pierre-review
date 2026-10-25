@@ -73,7 +73,8 @@ describe('/api/me — the AI provider on the wire', () => {
     // The background probe answers; the next /api/me reports it.
     await waitFor(async () => (await app.inject({ method: 'GET', url: '/api/me' })).json().ai.providers.codex.signedIn);
     const later = (await app.inject({ method: 'GET', url: '/api/me' })).json();
-    expect(later.ai.providers.codex).toEqual({
+    const { kinds, ...rest } = later.ai.providers.codex;
+    expect(rest).toEqual({
       runtime: 'ready',
       runtimeMessage: null,
       auth: 'ok',
@@ -83,6 +84,15 @@ describe('/api/me — the AI provider on the wire', () => {
       available: false,
       message: 'Codex is not available in this version of Limn yet. Unset LIMN_AI_PROVIDER (or set it to claude) to use Claude.',
     });
+    // Codex's OWN per-kind answer while Claude is active: every ported kind 'ok' (signed in), every
+    // other kind its not-ported sentence — `available` stays false while any kind is missing.
+    const P = await import('../../ai/provider.js');
+    for (const k of P.ALL_RUN_KINDS) {
+      if (P.codexRunKindReady(k)) expect(kinds[k], k).toEqual({ auth: 'ok', message: null });
+      else expect(kinds[k], k).toEqual({ auth: 'none', message: P.codexKindNotAvailableMessage(k as never) });
+    }
+    expect(kinds.complete).toEqual({ auth: 'ok', message: null });
+    expect(Object.keys(kinds).sort()).toEqual([...P.ALL_RUN_KINDS].sort());
   }, 60_000);
 
   it('LIMN_AI_PROVIDER=codex: the provider is codex and the pre-flight still says "not available"', async () => {

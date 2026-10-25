@@ -27,7 +27,7 @@ import { getAuthNotices } from '../../sync/auth-notices.js';
 import { isMlScoringAvailable } from '../../ml/scorer.js';
 import { getMlStatus } from '../../ml/runtime.js';
 import { getAiRuntimeStatus } from '../../ai/runtime.js';
-import { detectClaudeAuth, NO_CLAUDE_AUTH_MESSAGE } from '../../review/auth.js';
+import { codexKindStatus, detectClaudeAuth, NO_CLAUDE_AUTH_MESSAGE } from '../../review/auth.js';
 import { resolveAiCredential } from '../../ai/credentials.js';
 import { codexDetailCached } from '../../ai/codex/detect.js';
 import { ALL_RUN_KINDS, CODEX_NOT_AVAILABLE_MESSAGE, CODEX_RUNNABLE, getActiveProvider } from '../../ai/provider.js';
@@ -183,6 +183,7 @@ function agenticAiStatus(): MeResponse['ai'] {
           plan: null,
           available: false,
           message: null,
+          kinds: kindsStatus(() => ({ auth: 'none', message: null })),
         },
       },
     };
@@ -195,7 +196,7 @@ function agenticAiStatus(): MeResponse['ai'] {
   const codex = codexDetailCached();
   return {
     enabled: true,
-    // Still Claude's download: "Set up AI" installs it, and Codex runs nothing yet (Phase 4 moves the
+    // Still Claude's download: "Set up AI" installs it, and Codex runs no agent here until every kind is ported (Phase 4 moves the
     // gate onto the active provider's own runtime, `providers.codex.runtime`).
     runtime: rt.runtime,
     runtimeMessage: rt.runtimeMessage,
@@ -224,6 +225,12 @@ function agenticAiStatus(): MeResponse['ai'] {
         plan: codex.plan,
         available: CODEX_RUNNABLE && codex.runnable,
         message: codex.message ?? (CODEX_RUNNABLE ? null : CODEX_NOT_AVAILABLE_MESSAGE),
+        // Codex's OWN answer per run kind, whichever provider is active: a kind no stream has ported
+        // yet says so in its own sentence (Phase 3 left `plan` out until a live run passes).
+        kinds: kindsStatus((kind) => {
+          const r = codexKindStatus(kind);
+          return r.status === 'ok' ? { auth: 'ok', message: null } : { auth: 'none', message: r.message };
+        }),
       },
     },
   };

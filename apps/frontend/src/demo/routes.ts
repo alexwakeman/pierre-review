@@ -83,6 +83,7 @@ export function meBody(srv: DemoServer): Record<string, unknown> {
           plan: null,
           available: false,
           message: null,
+          kinds: aiKindsAll({ auth: 'none', message: null }),
         },
       },
     },

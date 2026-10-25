@@ -54,6 +54,15 @@ export function detectClaudeAuth(kind?: AiRunKind): ClaudeAuthResult {
   return { status: 'none', message: NO_CLAUDE_AUTH_MESSAGE };
 }
 
+/**
+ * CODEX'S OWN per-kind answer, whichever provider is active (`/api/me`'s `providers.codex.kinds`):
+ * the same rule as the Codex pre-flight, so a kind no stream has ported says so in its own sentence
+ * even while Claude runs everything.
+ */
+export function codexKindStatus(kind: AiRunKind): ClaudeAuthResult {
+  return detectCodexAuth(kind);
+}
+
 /** The Codex half of the pre-flight (see `detectClaudeAuth`). */
 function detectCodexAuth(kind: AiRunKind | undefined): ClaudeAuthResult {
   if (kind === undefined) {

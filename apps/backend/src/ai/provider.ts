@@ -324,7 +324,7 @@ export function getProvider(id: AgentProviderId): AgentProvider {
 
 /**
  * Can Codex run agents in this version? Only once EVERY agent kind is in `CODEX_AGENT_KINDS`
- * (provider-setting.ts `codexRunnable`) — FALSE in Phase 2, so `auto` never picks Codex (it would
+ * (provider-setting.ts `codexRunnable`) — still FALSE after Phase 3 (`plan` is not ported), so `auto` never picks Codex (it would
  * pick a provider bound to refuse), the pre-flight answers "not available", and `/api/me` reports
  * `providers.codex.available: false`. `complete()` runs on Codex regardless (LIMN_AI_PROVIDER=codex).
  */

@@ -299,6 +299,8 @@ const ME_RESPONSE: MeResponse = {
         plan: null,
         available: false,
         message: null,
+        // Codex is not set up in these fixtures: every kind reads 'none'.
+        kinds: aiKindsAll({ auth: 'none', message: 'Codex is not set up.' }),
       },
     },
   },

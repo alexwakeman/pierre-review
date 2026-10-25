@@ -99,6 +99,10 @@ describe('the registry (LIMN_AI_PROVIDER)', () => {
     // Phase 3: each stream adds the kinds it ported to its own file; every OTHER kind says so in one
     // sentence, and a ported kind passes the allow-list and stops at the sign-in (none in this test).
     expect(P.codexRunnable()).toBe(P.ALL_AGENT_KINDS.every((k) => P.CODEX_AGENT_KINDS.has(k)));
+    // Phase 3 integrated: every kind but `plan` is ported (its live run has not passed yet), so Codex
+    // is still not runnable and `auto` stays on Claude. Adding `plan` to fix.ts flips both lines.
+    expect(P.ALL_AGENT_KINDS.filter((k) => !P.CODEX_AGENT_KINDS.has(k))).toEqual(['plan']);
+    expect(P.CODEX_RUNNABLE).toBe(false);
     for (const kind of P.ALL_AGENT_KINDS.filter((k) => !P.CODEX_AGENT_KINDS.has(k))) {
       await expect(
         codex.runAgent({ kind } as Parameters<typeof codex.runAgent>[0]),

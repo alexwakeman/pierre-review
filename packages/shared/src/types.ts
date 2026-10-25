@@ -4192,6 +4192,12 @@ export interface AiCodexProviderStatus {
   available: boolean;
   /** One sentence when it cannot run (not set up, no sign-in, or not available yet). */
   message: string | null;
+  /**
+   * Codex's own answer per run kind, WHICHEVER provider is active: 'ok' only for a kind Codex can run
+   * in this version (`complete`, or a ported agent kind) AND a ChatGPT sign-in; otherwise the one
+   * sentence (not ported yet, not set up, no sign-in).
+   */
+  kinds: Record<AiRunKind, AiKindStatus>;
 }
 
 // THE CODEX SIGN-IN (routes in apps/backend/src/api/routes/ai-codex.ts; Limn's OWN Codex home,

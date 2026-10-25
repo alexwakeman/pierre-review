@@ -35,6 +35,7 @@ const READY: MeResponse['ai'] = {
       plan: null,
       available: false,
       message: null,
+      kinds: aiKindsAll({ auth: 'none', message: null }),
     },
   },
 };

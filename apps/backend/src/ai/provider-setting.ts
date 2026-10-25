@@ -70,7 +70,7 @@ export const ALL_AGENT_KINDS: readonly AgentKind[] = Object.keys(KIND_WORDS) as 
 /**
  * Can Codex run agents in this version? Only when EVERY kind is ported — so `auto` never picks a
  * provider bound to refuse some run, and `/api/me` never says Codex is available while a Run gate
- * would refuse. FALSE in Phase 2 (the allow-list is empty; only `complete()` runs on Codex).
+ * would refuse. Still FALSE after Phase 3: every kind but `plan` is ported (docs/CODEX-PLAN.md § Phase 3 status).
  */
 export function codexRunnable(allow: ReadonlySet<AgentKind> = CODEX_AGENT_KINDS): boolean {
   return ALL_AGENT_KINDS.every((k) => allow.has(k));

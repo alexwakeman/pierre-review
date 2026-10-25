@@ -199,6 +199,20 @@ users.
   dispatch guard's refusal sentence), `allowStart` asked before each start, the batch's US$ split
   evenly and no start once spent; answers in order, a failure never stops the others.
 
+**Phase 3 status (integrated 2026-10-25, branch `codex/p3-integrated`)**: the four stream branches
+below are merged. `CODEX_AGENT_KINDS` holds 13 of the 14 agent kinds; ⚠ the ONE missing kind is `plan`
+(Plan first — ported in code, passing offline, but its live run on gpt-6-luna at low effort answered
+with no steps; stream (b) below). So `codexRunnable()` / `CODEX_RUNNABLE` stay FALSE: `auto` never
+picks Codex, `/api/me` reports `providers.codex.available: false` with the "not available" sentence,
+and under `LIMN_AI_PROVIDER=codex` the top-level pre-flight (no kind) answers 'none' while each ported
+kind's own pre-flight answers 'ok' once signed in. `/api/me` now also carries
+`providers.codex.kinds` — Codex's OWN per-run-kind answer whichever provider is active (ported +
+signed in ⇒ 'ok'; `plan` ⇒ its "Codex cannot run AI Fix plans … yet" sentence). `provider.test.ts`
+pins the missing list to `['plan']`: adding `plan` to `ai/codex/kinds/fix.ts` after a passing live
+run flips Codex to runnable with no other change. Claude stays the default under `auto` when both are
+signed in (decided, `pickAutoProvider`). Claude's behaviour is unchanged: `prompt-golden.json`,
+`no-shell.test.ts` and every Claude agent test pass untouched by the merge.
+
 **Phase 3 stream (a) built 2026-10-25** (branch `codex/p3-review`): `review`, `review_chat` and
 `thread_check` are in `ai/codex/kinds/review.ts`.
 - ONE provider per run: each runner asks `getActiveProvider()` ONCE (`const provider = …`; the seam
