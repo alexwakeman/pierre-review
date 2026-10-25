@@ -1,6 +1,8 @@
 # Plan: Codex (OpenAI) as a second AI provider
 
-Status: PLAN, not built. Written 2026-10-23 after checking the current Codex docs and the published
+Status: PLAN, not built. **Phase 0 (the spike) ran 2026-10-25 — read [CODEX-SPIKE.md](CODEX-SPIKE.md) first: its "Plan changes" section SUPERSEDES the matching parts of §§ 2, 3, 6, 7 and 8 below** (strict-config, the extra locked keys, the `/tmp` write leak, silent untrusted hooks, MCP approval mode, CLI not SDK, app-server rate limits in whole percent, models).
+
+Original status: Written 2026-10-23 after checking the current Codex docs and the published
 `@openai/codex-sdk` 0.164.0 type definitions. The work is meant to be carried out by subagents
 through the Workflow tool, in the phases below, with the user confirming the decisions in § 6 first.
 
