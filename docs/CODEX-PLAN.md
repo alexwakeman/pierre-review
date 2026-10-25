@@ -247,6 +247,26 @@ users.
   2026-10-25: the WRITE run passed (the hook let `src/math.ts` through and denied `../outside`, `/tmp`
   and `$TMPDIR`; none of the files exists); the plan run failed as above.
 
+**Phase 3 stream (c) built 2026-10-25** (branch `codex/p3-tickets`): `ticket_review`, `pr_card`,
+`ci_review`, `story_docs` are in `ai/codex/kinds/tickets.ts`.
+- Each manager resolves the provider ONCE (`activeProviderId()`), words its prompts for it
+  (`promptTools(provider)`: `ticketReviewSystemPrompt`/`buildTicketReviewPrompt`, `ticketCardSystemPrompt`/
+  `buildPrepassPrompt`, `ciReviewSystemPrompt`/`buildCiReviewPrompt`, `storyDocsSystemPrompt`/
+  `buildStoryDocsPrompt` take a trailing `t`) and hands the same id to its runner. The old constants stay
+  as the Claude render; every Claude prompt is pinned byte-for-byte against
+  `ai/codex/kinds/__fixtures__/tickets-claude-prompts.json`, written from the code BEFORE the port. The
+  shared library block (`docsReviewPromptBlock`, review-refs.ts) is NOT edited: the ticket prompt re-words
+  it for Codex locally (`codexDocsWording`), and a test asserts no Claude tool name survives.
+- `review/run-provider.ts`: the Claude env tweak runs on Claude only; the live status-line US$ is Claude's
+  price table on Claude only (0 on Codex); a Codex run is billed by the PROVIDER from `usageRecord`, and the
+  managers' own recorders skip it (`ledgerByProvider` on the telemetry). The card and run rows store the
+  model the provider actually ran (`res.model`).
+- Story docs: the shape judge's refusal is worded per provider; Codex gets ONE retry (Claude: up to 3
+  calls), and a run that ends refused twice reports `no usable answer: <last refusal>` as on Claude.
+- Not changed: the per-run `budget.usd`/`turns` are Claude-enforced only (a Codex ChatGPT run is US$ 0 and
+  has no turn cap; its wall-clock timeout applies); the stored ticket/CI run row's `model` column is still
+  the requested Claude id.
+
 Original status: Written 2026-10-23 after checking the current Codex docs and the published
 `@openai/codex-sdk` 0.164.0 type definitions. The work is meant to be carried out by subagents
 through the Workflow tool, in the phases below, with the user confirming the decisions in § 6 first.

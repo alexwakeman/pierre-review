@@ -278,6 +278,13 @@ describe('ticket review persistence', () => {
       ['ticket_review', 4],
       ['ticket_review', 1],
     ]);
+    // A provider that wrote its OWN ledger row (Codex, review/run-provider.ts): the run keeps its
+    // figures, and no second row is written here.
+    usage.length = 0;
+    const codex = await start();
+    await persist.markTicketReviewFailed(ctx, 1, codex, 'x', { costUsd: 2, ledgerByProvider: true });
+    expect((await persist.getTicketReviewRow(ctx, 1, codex))?.costUsd).toBe(2);
+    expect(usage).toEqual([]);
     const orphan = await start();
     expect(await persist.reconcileOrphanedTicketReviews(ctx)).toBeGreaterThanOrEqual(1);
     const row = await persist.getTicketReviewRow(ctx, 1, orphan);

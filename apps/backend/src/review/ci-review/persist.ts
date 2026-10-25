@@ -266,7 +266,14 @@ export interface CiItemWrite extends ClaudeCiFailure {
   suggestion: string | null;
 }
 
-type Telemetry = { costUsd?: number | null; inputTokens?: number | null; outputTokens?: number | null; numTurns?: number | null };
+type Telemetry = {
+  costUsd?: number | null;
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+  numTurns?: number | null;
+  // The PROVIDER wrote the ledger row (Codex records its own): never a second one here.
+  ledgerByProvider?: boolean;
+};
 
 /** Store a succeeded run: the summary, then one item per failing check, in one transaction. */
 export async function saveCiReviewSuccess(
@@ -331,7 +338,7 @@ async function recordCiReviewUsage(
   run: Pick<CiReviewRow, 'model' | 'prId' | 'repoId'> | null,
   t: Telemetry,
 ): Promise<void> {
-  if (run == null || t.costUsd == null || !Number.isFinite(t.costUsd) || t.costUsd <= 0) return;
+  if (run == null || t.ledgerByProvider === true || t.costUsd == null || !Number.isFinite(t.costUsd) || t.costUsd <= 0) return;
   await ctx
     .recordAiUsage({
       accountId,

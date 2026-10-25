@@ -98,6 +98,7 @@ describe('the registry (LIMN_AI_PROVIDER)', () => {
     expect(P.getProvider('codex')).toBe(codex);
     // Phase 3: each stream adds the kinds it ported to its own file; every OTHER kind says so in one
     // sentence, and a ported kind passes the allow-list and stops at the sign-in (none in this test).
+    expect(P.codexRunnable()).toBe(P.ALL_AGENT_KINDS.every((k) => P.CODEX_AGENT_KINDS.has(k)));
     for (const kind of P.ALL_AGENT_KINDS.filter((k) => !P.CODEX_AGENT_KINDS.has(k))) {
       await expect(
         codex.runAgent({ kind } as Parameters<typeof codex.runAgent>[0]),
@@ -176,7 +177,9 @@ describe('the kinds (Phase 3 foundation)', () => {
       ['diagram', 'sprint_paths', 'docs_build', 'docs_chat'],
     ];
     files.forEach((f, i) => expect(f.every((k) => own[i]!.includes(k)), String(i)).toBe(true));
-    expect([...P.CODEX_AGENT_KINDS]).toEqual(files.flat());
+    const all = files.flat();
+    expect(new Set(all).size).toBe(all.length);
+    expect([...P.CODEX_AGENT_KINDS]).toEqual(all);
   });
 
   it('the backend’s kind list is the shared one, and every run kind adds the one-shot `complete`', async () => {
