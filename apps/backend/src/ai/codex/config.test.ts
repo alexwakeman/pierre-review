@@ -104,6 +104,8 @@ describe('the exec flags', () => {
 describe('the locked keys (one test each)', () => {
   const c = cfg(readArgs());
   it('approval_policy = never', () => expect(c.get('approval_policy')).toBe('"never"'));
+  it('forced_login_method = chatgpt (Codex itself refuses a stored or env API key while that route is refused)', () =>
+    expect(c.get('forced_login_method')).toBe('"chatgpt"'));
   it('features.shell_tool = false (NO SHELL)', () => expect(c.get('features.shell_tool')).toBe('false'));
   it('features.view_image = false', () => expect(c.get('features.view_image')).toBe('false'));
   it('web_search = disabled', () => expect(c.get('web_search')).toBe('"disabled"'));

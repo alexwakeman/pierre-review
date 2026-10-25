@@ -116,7 +116,8 @@ export function lockdownToml(settings: ReadonlyArray<readonly [string, TomlValue
  *
  *   • `cli_auth_credentials_store = "file"` — the sign-in lives in THIS folder's auth.json, never the
  *     OS keychain (where it would be shared with, and rotated by, the reader's own Codex).
- *   • `forced_login_method` is deliberately NOT set (the API-key route is refused in code, not here).
+ *   • `forced_login_method = "chatgpt"` (part of the lockdown below): while the API-key route is refused,
+ *     Codex itself refuses a key stored in this home, so a stale cached "ChatGPT" cannot run one.
  *   • `check_for_update_on_startup = false` — the version is Limn's pin, not "latest".
  *   • THE WHOLE LOCKDOWN (config.ts `LOCKED_SETTINGS`): no shell, no history, no analytics, no apps,
  *     plugins, remote plugins, memories, goals… — so EVERY process in this home inherits it, the

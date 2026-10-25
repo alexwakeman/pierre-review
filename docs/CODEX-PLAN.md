@@ -147,6 +147,26 @@ users.
   in 0.164). Limn starts as few as it can: one per cleanup drain, the probe at most every 5 minutes,
   and a drain whose app-server is up anyway takes a DUE probe's reads on it (`shareCodexProbe`).
 
+**Phase 2 review fixes, round 5 (2026-10-25)** (branch `codex/p2-fix5`):
+- CODEX ITSELF REFUSES A STORED KEY. After the first `account/read` the ladder trusts the cache over
+  `auth.json`, so a key stored by hand in Limn's home since the last probe rode the cached "ChatGPT"
+  and ran at US$ 0. `forced_login_method = "chatgpt"` is now in `LOCKED_SETTINGS` (config.toml AND
+  `-c` on every exec and app-server) while the key route is refused. Measured on 0.164 in scratch
+  homes with a DUMMY stored key: without it `codex exec` sent the key (a 401 "Incorrect API key" from
+  api.openai.com); with it — in config.toml only, `-c` only, or both — exec stops before any request
+  ("ChatGPT login is required, but an API key is currently being used. Logging out.") and ⚠ DELETES
+  that auth.json; `CODEX_API_KEY` in the environment is refused the same way; an app-server's
+  `account/read` answers `account: null` (signed out). Live: the ChatGPT sign-in in `~/.limn/codex`
+  still runs (live test 3, one gpt-6-luna run) and 2b accepts the key under `--strict-config`.
+- The run path ALSO compares `auth.json`'s kind with the cache before every run
+  (`codexAuthFileAgreesWithCache`): auth.json gone while cached signed in, a known kind different from
+  the cached type, or a ChatGPT auth.json while cached signed out ⇒ `recheckCodexAccount` (forget the
+  account, one fresh probe, forced at most every 15 s); still disagreeing ⇒ refused as not checked.
+- PROBE GENERATIONS. `invalidateCodexState` (sign-in / sign-out) bumps a generation and drops the
+  in-flight probe, so the forced probe is never a stale read from a process started before the change
+  (via `kickCodexProbe` or `shareCodexProbe`); a probe's result from an older generation is ignored,
+  and it clears `inFlight` only while that is still its own promise.
+
 Original status: Written 2026-10-23 after checking the current Codex docs and the published
 `@openai/codex-sdk` 0.164.0 type definitions. The work is meant to be carried out by subagents
 through the Workflow tool, in the phases below, with the user confirming the decisions in § 6 first.

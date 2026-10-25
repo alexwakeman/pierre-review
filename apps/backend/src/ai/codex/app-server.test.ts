@@ -237,6 +237,80 @@ describe('the cache', () => {
     expect(n).toBe(2);
   });
 
+  it('a sign-in/out INVALIDATES an in-flight probe: the forced probe is a NEW one, and the stale answer is ignored', async () => {
+    // A probe started BEFORE the change: it will answer "ChatGPT" (read from the old auth.json).
+    let releaseOld!: () => void;
+    const oldGate = new Promise<void>((r) => (releaseOld = r));
+    let n = 0;
+    AS._setCodexProbeForTest(async () => {
+      n++;
+      await oldGate;
+      return result(1000, 10);
+    });
+    const stale = AS.kickCodexProbe({ force: true });
+    expect(stale).not.toBeNull();
+    // The change: the forced probe must not be the stale one handed back.
+    AS._setCodexProbeForTest(async () => {
+      n++;
+      return result(2000, null, false);
+    }, { keepState: true });
+    const fresh = AS.invalidateCodexState();
+    expect(fresh).not.toBeNull();
+    expect(fresh).not.toBe(stale);
+    await fresh;
+    expect(n).toBe(2);
+    expect(AS.codexSignedInCached()?.signedIn).toBe(false);
+    // The stale probe finishes LATER: its pre-change answer is dropped, never cached.
+    releaseOld();
+    await stale;
+    expect(AS.codexSignedInCached()?.signedIn).toBe(false);
+  });
+
+  it('a stale probe that finishes while a NEWER one runs never clears the newer in-flight slot (no second process)', async () => {
+    let releaseOld!: () => void;
+    const oldGate = new Promise<void>((r) => (releaseOld = r));
+    let releaseNew!: () => void;
+    const newGate = new Promise<void>((r) => (releaseNew = r));
+    let n = 0;
+    AS._setCodexProbeForTest(async () => {
+      n++;
+      await oldGate;
+      throw new Error('old process');
+    });
+    const stale = AS.kickCodexProbe({ force: true });
+    AS._setCodexProbeForTest(async () => {
+      n++;
+      await newGate;
+      return result(3000, 1);
+    }, { keepState: true });
+    const fresh = AS.invalidateCodexState();
+    releaseOld();
+    await stale;
+    // The newer probe is still THE in-flight one: a kick joins it, starts nothing, and the old error is not recorded.
+    expect(AS.kickCodexProbe({ force: true })).toBe(fresh);
+    expect(AS.codexStateCached().lastError).toBeNull();
+    releaseNew();
+    await fresh;
+    expect(n).toBe(2);
+    expect(AS.codexSignedInCached()?.type).toBe('chatgpt');
+  });
+
+  it('recheckCodexAccount() (auth.json disagrees with the cache): a fresh probe, forced at most every 15 s', async () => {
+    let n = 0;
+    AS._setCodexProbeForTest(async () => {
+      n++;
+      return result(1, 1);
+    });
+    const T = 90_000_000;
+    await AS.recheckCodexAccount(T);
+    expect(n).toBe(1);
+    expect(AS.codexSignedInCached()?.type).toBe('chatgpt');
+    await AS.recheckCodexAccount(T + 5_000); // inside 15 s: no new process
+    expect(n).toBe(1);
+    await AS.recheckCodexAccount(T + AS.CODEX_CONFIRM_RETRY_MS);
+    expect(n).toBe(2);
+  });
+
   it('FEWER PROCESSES: a due probe reads on an app-server that is already up (a drain’s), then is not due again', async () => {
     AS._setCodexProbeForTest(null); // the REAL probe path, over the fake program
     const T = 70_000_000;

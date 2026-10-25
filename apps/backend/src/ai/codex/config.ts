@@ -18,6 +18,7 @@
 //                              `default_tools_approval_mode="approve"` or every read fails.
 //   features.shell_tool=false  NO SHELL (CLAUDE.md: anything an agent reads from a PR is untrusted).
 //   features.view_image=false  no image reads (a leak the plan missed).
+//   forced_login_method="chatgpt"  only a ChatGPT sign-in runs (the API-key route is refused).
 //   web_search="disabled", history.persistence="none", analytics.enabled=false, agents.enabled=false.
 //   features.image_generation=false, features.goals=false, features.apps=false (the ChatGPT apps /
 //   connectors, `codex_apps`), features.plugins=false, features.remote_plugin=false and
@@ -126,6 +127,15 @@ const c = (key: string, value: TomlValue): string[] => ['-c', `${key}=${tomlValu
  */
 export const LOCKED_SETTINGS: ReadonlyArray<readonly [string, TomlValue]> = [
   ['approval_policy', 'never'],
+  // ⚠ WHILE THE API-KEY ROUTE IS REFUSED (ai/codex/detect.ts): only a ChatGPT sign-in may run. Codex
+  // itself refuses anything else — measured on 0.164 with a stored (dummy) key in the home: `codex exec`
+  // stops before any request ("ChatGPT login is required, but an API key is currently being used.
+  // Logging out." — it DELETES that auth.json), CODEX_API_KEY in the environment is refused the same
+  // way, and `account/read` answers `account: null`. Without it the stored key ran (a 401 from
+  // api.openai.com proved it was sent). The code checks too (ai/providers/codex.ts
+  // `runnableCredential`); this is the layer a stale cache cannot get past. Remove it when the
+  // API-key route is priced and opened.
+  ['forced_login_method', 'chatgpt'],
   ['features.shell_tool', false],
   ['features.view_image', false],
   ['web_search', 'disabled'],

@@ -315,6 +315,12 @@ interface CodexCache {
   lastAttemptMs: number;
   lastError: string | null;
   inFlight: Promise<void> | null;
+  /**
+   * Bumped by `invalidateCodexState` (a sign-in or out). A probe remembers the generation it started
+   * in and is IGNORED when it finishes in an older one — its process may have read the account from
+   * BEFORE the change — and it clears `inFlight` only while that is still its own promise.
+   */
+  gen: number;
   /** Lifetime token samples, oldest first, the last 8 days. */
   samples: LifetimeSample[];
 }
@@ -322,7 +328,9 @@ interface CodexCache {
 const SAMPLE_KEEP_MS = 8 * 24 * 60 * 60 * 1000;
 const SAMPLE_MAX = 4000;
 
-const cache: CodexCache = { last: null, lastAttemptMs: 0, lastError: null, inFlight: null, samples: [] };
+const cache: CodexCache = { last: null, lastAttemptMs: 0, lastError: null, inFlight: null, gen: 0, samples: [] };
+/** When `recheckCodexAccount` last forced a probe. */
+let lastRecheckMs = Number.NEGATIVE_INFINITY;
 
 export type CodexProber = () => Promise<CodexProbeResult>;
 let proberOverride: CodexProber | null = null;
@@ -334,8 +342,10 @@ export function _setCodexProbeForTest(p: CodexProber | null, opts: { keepState?:
   cache.last = null;
   cache.lastAttemptMs = 0;
   cache.lastError = null;
+  cache.gen++;
   cache.inFlight = null;
   cache.samples = [];
+  lastRecheckMs = Number.NEGATIVE_INFINITY;
 }
 
 function noteProbe(r: CodexProbeResult): void {
@@ -369,17 +379,31 @@ export function kickCodexProbe(opts: { nowMs?: number; force?: boolean } = {}): 
     prober = () => probeCodexAccount(spawnOpts);
   }
   cache.lastAttemptMs = nowMs;
-  const run = prober;
-  cache.inFlight = (async () => {
+  return startProbe(prober);
+}
+
+/**
+ * Run one probe as THE in-flight one, in the current generation. A result (or error) from a probe whose
+ * generation was overtaken by `invalidateCodexState` is dropped, and it never clears a newer probe's
+ * `inFlight`.
+ */
+function startProbe(read: () => Promise<CodexProbeResult>): Promise<void> {
+  const gen = cache.gen;
+  // Declared first: the body's `finally` compares against it.
+  let p!: Promise<void>;
+  p = (async () => {
     try {
-      noteProbe(await run());
+      // Never synchronously: `p` must be assigned before this body can reach `finally`.
+      const r = await Promise.resolve().then(read);
+      if (gen === cache.gen) noteProbe(r);
     } catch (err) {
-      cache.lastError = (err as Error).message;
+      if (gen === cache.gen) cache.lastError = (err as Error).message;
     } finally {
-      cache.inFlight = null;
+      if (cache.inFlight === p) cache.inFlight = null;
     }
   })();
-  return cache.inFlight;
+  cache.inFlight = p;
+  return p;
 }
 
 /**
@@ -392,16 +416,7 @@ export function shareCodexProbe(server: CodexAppServer, opts: { nowMs?: number }
   const nowMs = opts.nowMs ?? Date.now();
   if (proberOverride || cache.inFlight || nowMs - cache.lastAttemptMs < CODEX_PROBE_MIN_INTERVAL_MS) return null;
   cache.lastAttemptMs = nowMs;
-  cache.inFlight = (async () => {
-    try {
-      noteProbe(await readCodexAccountOn(server, Date.now, true));
-    } catch (err) {
-      cache.lastError = (err as Error).message;
-    } finally {
-      cache.inFlight = null;
-    }
-  })();
-  return cache.inFlight;
+  return startProbe(() => readCodexAccountOn(server, Date.now, true));
 }
 
 /** A run that finds no `account/read` yet forces a probe at most this often (no stampede of processes). */
@@ -419,12 +434,36 @@ export async function confirmCodexAccount(nowMs: number = Date.now()): Promise<v
   if (p) await p;
 }
 
-/** Forget the account (after a sign-in or sign-out) and probe again now. */
+/**
+ * Forget the account (after a sign-in or sign-out) and probe again now. ⚠ A NEW GENERATION: a probe
+ * already in flight may have read the account before the change, so it is dropped (its answer will be
+ * ignored), never handed back as this forced probe.
+ */
 export function invalidateCodexState(): Promise<void> | null {
+  cache.gen++;
+  cache.inFlight = null;
   cache.last = null;
   cache.samples = [];
   cache.lastAttemptMs = 0;
   return kickCodexProbe({ force: true });
+}
+
+
+/**
+ * Before a RUN whose cached account disagrees with auth.json (ai/credentials.ts
+ * `codexAuthFileAgreesWithCache`): forget the account and wait for a fresh probe — at most every
+ * CODEX_CONFIRM_RETRY_MS (inside that, wait for the probe in flight, if any), so a disagreement that
+ * persists cannot start a process per run. Never rejects; the caller re-reads and refuses when the two
+ * still disagree.
+ */
+export async function recheckCodexAccount(nowMs: number = Date.now()): Promise<void> {
+  if (nowMs - lastRecheckMs < CODEX_CONFIRM_RETRY_MS) {
+    if (cache.inFlight) await cache.inFlight;
+    return;
+  }
+  lastRecheckMs = nowMs;
+  const p = invalidateCodexState();
+  if (p) await p;
 }
 
 /** The cached state, without starting anything. Cheap and sync. */

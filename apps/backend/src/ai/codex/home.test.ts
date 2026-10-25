@@ -48,7 +48,7 @@ describe("Limn's Codex home", () => {
     expect(H.codexHome({ LIMN_DATA_DIR: '/x/y' })).toBe(join('/x/y', 'codex'));
   });
 
-  it('writes the whole config.toml: file auth, no forced login method, no history, no analytics', async () => {
+  it('writes the whole config.toml: file auth, ChatGPT-only sign-in, no history, no analytics', async () => {
     await H.ensureCodexHomeConfig(null);
     const file = join(H.codexHome(), 'config.toml');
     const text = readFileSync(file, 'utf8');
@@ -56,7 +56,9 @@ describe("Limn's Codex home", () => {
     expect(text).toContain('check_for_update_on_startup = false');
     expect(text).toMatch(/\[history\]\npersistence = "none"/);
     expect(text).toMatch(/\[analytics\]\nenabled = false/);
-    expect(text).not.toContain('forced_login_method');
+    // While the API-key route is refused, Codex itself refuses a key stored in the home (a top-level key).
+    expect(text).toContain('forced_login_method = "chatgpt"');
+    expect(text.indexOf('forced_login_method')).toBeLessThan(text.indexOf('['));
     expect(text).not.toContain('hooks.state');
     if (process.platform !== 'win32') {
       expect(statSync(H.codexHome()).mode & 0o777).toBe(0o700);

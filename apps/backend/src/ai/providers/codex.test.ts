@@ -48,6 +48,7 @@ const T = vi.hoisted(() => {
     cached: { value: null as null | { signedIn: boolean; type: string | null; plan: string | null } },
     probeAnswer: { value: null as null | { signedIn: boolean; type: string | null; plan: string | null } },
     confirms: { n: 0 },
+    rechecks: { n: 0 },
   };
 });
 
@@ -92,6 +93,12 @@ vi.mock('../codex/app-server.js', async (importOriginal) => ({
   confirmCodexAccount: async () => {
     T.confirms.n++;
     if (T.probeAnswer.value) T.cached.value = T.probeAnswer.value;
+  },
+  // "Forget the account and probe again" (auth.json disagrees with the cache): the cache is cleared,
+  // then holds probeAnswer (null = the probe failed).
+  recheckCodexAccount: async () => {
+    T.rechecks.n++;
+    T.cached.value = T.probeAnswer.value;
   },
 }));
 vi.mock('../../db/usage.js', () => ({
@@ -211,6 +218,7 @@ beforeEach(() => {
   T.cached.value = null;
   T.probeAnswer.value = null;
   T.confirms.n = 0;
+  T.rechecks.n = 0;
   C._resetCodexTrustCacheForTest();
 });
 afterEach(() => {
@@ -350,6 +358,47 @@ describe('complete()', () => {
     T.probeAnswer.value = { signedIn: true, type: 'chatgpt', plan: 'plus' };
     expect((await C.codexProvider.complete({ prompt: 'COMPLETE' })).text).toBe('hello there');
     expect(T.confirms.n).toBe(2);
+  });
+
+  // ---- AFTER the first account/read: auth.json is compared with the cache before EVERY run ----
+
+  it('a key stored by hand AFTER a ChatGPT read: the cache is not trusted — a fresh probe, then the refused key route', async () => {
+    T.cached.value = { signedIn: true, type: 'chatgpt', plan: 'plus' };
+    writeFileSync(join(T.home, 'auth.json'), STORED_KEY_AUTH);
+    // The probe fails (cache cleared): the ladder falls back to auth.json's kind — a stored key.
+    await expect(C.codexProvider.complete({ prompt: 'COMPLETE', usageRecord: { accountId: 3, seam: 'summary', feature: 'x' } as any })).rejects.toThrow(
+      'Codex with an OpenAI API key is not available yet',
+    );
+    expect(T.rechecks.n).toBe(1);
+    await expect(C.runAgentUnchecked(spec('GOOD'))).rejects.toThrow('Codex with an OpenAI API key is not available yet');
+    expect(calls()).toEqual([]);
+    expect(T.recorded).toEqual([]);
+  });
+
+  it('…refuses as not checked when a fresh probe STILL says ChatGPT over a stored-key auth.json', async () => {
+    T.cached.value = { signedIn: true, type: 'chatgpt', plan: 'plus' };
+    T.probeAnswer.value = { signedIn: true, type: 'chatgpt', plan: 'plus' };
+    writeFileSync(join(T.home, 'auth.json'), STORED_KEY_AUTH);
+    await expect(C.codexProvider.complete({ prompt: 'COMPLETE' })).rejects.toThrow('Limn could not check the Codex sign-in yet');
+    expect(T.rechecks.n).toBe(1);
+    expect(calls()).toEqual([]);
+    expect(T.recorded).toEqual([]);
+  });
+
+  it('…and a sign-out since the cached ChatGPT read (auth.json gone) re-probes and refuses', async () => {
+    T.cached.value = { signedIn: true, type: 'chatgpt', plan: 'plus' };
+    T.probeAnswer.value = { signedIn: false, type: null, plan: null };
+    unlinkSync(join(T.home, 'auth.json'));
+    await expect(C.codexProvider.complete({ prompt: 'COMPLETE' })).rejects.toThrow();
+    expect(T.rechecks.n).toBe(1);
+    expect(calls()).toEqual([]);
+  });
+
+  it('a cached ChatGPT read that auth.json AGREES with runs with no extra probe', async () => {
+    T.trusted.value = true;
+    T.cached.value = { signedIn: true, type: 'chatgpt', plan: 'plus' };
+    expect((await C.codexProvider.complete({ prompt: 'COMPLETE' })).text).toBe('hello there');
+    expect(T.rechecks.n).toBe(0);
   });
 
   it('LIMN_AI_USE_API_KEY=true (shared with Claude) never pushes a ChatGPT sign-in onto the refused key route', async () => {

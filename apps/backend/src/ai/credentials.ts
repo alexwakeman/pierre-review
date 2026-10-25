@@ -135,7 +135,10 @@ export function agentAuthOptions(): { env: Record<string, string | undefined> } 
 //   2. OPENAI_API_KEY from the environment, handed to the run as CODEX_API_KEY. NEVER STORED: Limn does
 //      not run `codex login --with-api-key` (that would write the key into its home).
 // A key the reader stored in Limn's home by hand (`CODEX_HOME=~/.limn/codex codex login --with-api-key`)
-// counts as the API-key rung.
+// counts as the API-key rung — and Codex ITSELF refuses it while that rung is refused:
+// `forced_login_method = "chatgpt"` is in the lockdown (ai/codex/config.ts `LOCKED_SETTINGS`), so
+// `codex exec` stops before any request ("ChatGPT login is required, but an API key is currently being
+// used. Logging out." — and it deletes that auth.json), and `account/read` answers signed out.
 //
 // ⚠ FAIL CLOSED. Only a sign-in KNOWN to be ChatGPT may run (`codexCredentialRunnable`). The API-key
 // route is refused until it can be priced (ai/codex/detect.ts), so a stored key taken for "a sign-in"
@@ -206,6 +209,29 @@ export function codexLoginKnown(env: NodeJS.ProcessEnv = process.env): CodexLogi
   if (cached) return { signedIn: cached.signedIn, type: cached.type };
   const path = join(codexHome(env), 'auth.json');
   return existsSync(path) ? { signedIn: true, type: codexAuthFileKind(path) } : { signedIn: false, type: null };
+}
+
+/**
+ * Does auth.json in Limn's home still say what the CACHED `account/read` says? Checked before every
+ * run (ai/providers/codex.ts `runnableCredential`), because after the first read `codexLoginKnown`
+ * trusts the cache over the file: a sign-out, or a key stored by hand in the home since the last probe
+ * (`codex login --with-api-key`), would otherwise ride the cached "ChatGPT" until the next probe.
+ *
+ * Only a KNOWN disagreement counts — auth.json gone while the cache says signed in, or auth.json's kind
+ * known (`codexAuthFileKind`) and different from the cached type. A file whose kind is not known (null)
+ * leaves the probe's answer standing: the probe is the authority there. No cached read ⇒ true (the
+ * ladder already reads the file).
+ */
+export function codexAuthFileAgreesWithCache(env: NodeJS.ProcessEnv = process.env): boolean {
+  const cached = codexSignedInCached();
+  if (!cached) return true;
+  const path = join(codexHome(env), 'auth.json');
+  if (!existsSync(path)) return !cached.signedIn;
+  const kind = codexAuthFileKind(path);
+  // Cached as signed out: only a ChatGPT sign-in written since disagrees. (A stored key reads as signed
+  // out under `forced_login_method = "chatgpt"` — config.ts LOCKED_SETTINGS — and is no disagreement.)
+  if (!cached.signedIn) return kind !== 'chatgpt';
+  return kind === null || kind === cached.type;
 }
 
 /** Which credential the next Codex run uses. Read at call time. */

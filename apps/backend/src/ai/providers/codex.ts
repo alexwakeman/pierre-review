@@ -51,7 +51,7 @@ import { config } from '../../config.js';
 // db/usage.js is imported LAZILY (in `record`): db/client opens the database at import time, and the
 // provider registry is imported by every runner and test that never writes a ledger row.
 import { buildExecArgs, codexChildEnv, toResumeArgs } from '../codex/config.js';
-import { confirmCodexAccount } from '../codex/app-server.js';
+import { confirmCodexAccount, recheckCodexAccount } from '../codex/app-server.js';
 import {
   CODEX_API_KEY_NOT_AVAILABLE_MESSAGE,
   CODEX_SIGN_IN_UNCHECKED_MESSAGE,
@@ -85,7 +85,13 @@ import type {
   ModelRole,
   ProviderStatus,
 } from '../provider.js';
-import { codexCredentialRunnable, codexRunEnv, resolveCodexCredential, type CodexCredential } from '../credentials.js';
+import {
+  codexAuthFileAgreesWithCache,
+  codexCredentialRunnable,
+  codexRunEnv,
+  resolveCodexCredential,
+  type CodexCredential,
+} from '../credentials.js';
 import {
   CODEX_NOT_AVAILABLE_MESSAGE,
   codexKindNotAvailableMessage,
@@ -280,10 +286,21 @@ async function withScratch<T>(fn: (dir: string) => Promise<T>): Promise<T> {
  * ⚠ FAIL CLOSED: only a sign-in KNOWN to be ChatGPT runs (ai/credentials.ts `codexCredentialRunnable`).
  * Before the first `account/read` (boot, just after a sign-in or out, a probe that keeps failing) and
  * when auth.json does not say, the run waits for ONE fresh probe and decides again — never runs on a
- * guess, since a key stored in the home would otherwise run and be recorded at US$ 0.
+ * guess, since a key stored in the home would otherwise run and be recorded at US$ 0. After the first
+ * read, auth.json is still compared with the cache before EVERY run (`codexAuthFileAgreesWithCache`),
+ * and Codex itself refuses a stored key (`forced_login_method = "chatgpt"`, ai/codex/config.ts).
  */
 async function runnableCredential(): Promise<{ route: 'login'; method: 'chatgpt' }> {
   if (!config.aiEnabled) throw new Error('AI is switched off here.');
+  // ⚠ The cache wins over auth.json once an `account/read` has answered, so compare the two FIRST: a
+  // sign-out, or a key stored in the home by hand since the last probe, must not ride a cached
+  // "ChatGPT". On a disagreement, forget the account and wait for a fresh probe; still disagreeing
+  // afterwards ⇒ refused as not checked.
+  if (!codexAuthFileAgreesWithCache()) {
+    await codexBinary();
+    await recheckCodexAccount();
+    if (!codexAuthFileAgreesWithCache()) throw new Error(CODEX_SIGN_IN_UNCHECKED_MESSAGE);
+  }
   let credential = resolveCodexCredential();
   if (credential.route === 'login' && credential.method === 'unconfirmed') {
     await codexBinary();
