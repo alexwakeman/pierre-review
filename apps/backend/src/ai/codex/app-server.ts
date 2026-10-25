@@ -20,6 +20,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import type { AiAccountTokenSpan, AiUsageReading } from '@pierre-review/shared';
 import { codexBinaryPath } from '../runtime.js';
+import { lockedConfig } from './config.js';
 import { codexHome, codexProcessEnv } from './home.js';
 import {
   accountTokensInWindow,
@@ -230,8 +231,9 @@ export function limnAppServerOptions(env: NodeJS.ProcessEnv = process.env): AppS
   mkdirSync(home, { recursive: true, mode: 0o700 });
   // `--strict-config`: an unknown key in Limn's config.toml stops the process with a named error
   // instead of being ignored (measured: `app-server` honours it; `login`/`debug`/`features` refuse
-  // the flag, so the CLI's sign-in runs without it).
-  return { binary, env: codexProcessEnv(env), cwd: home, args: ['--strict-config'] };
+  // the flag, so the CLI's sign-in runs without it). The lockdown rides along with `-c` too, on top
+  // of the copy in Limn's config.toml (config.ts `LOCKED_SETTINGS`).
+  return { binary, env: codexProcessEnv(env), cwd: home, args: ['--strict-config', ...lockedConfig()] };
 }
 
 /** Run `fn` against a fresh app-server and close it, within `timeoutMs` overall. */

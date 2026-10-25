@@ -6,6 +6,7 @@ import {
   type ReferenceDocStatus,
   type ReferenceDocStreamEvent,
 } from '@pierre-review/shared';
+import { CodexNotInstalledError } from '../ai/codex/home.js';
 import { AiRuntimeMissingError } from '../ai/runtime.js';
 import { config } from '../config.js';
 import type { AgentContext } from '../review/agent-context.js';
@@ -222,7 +223,10 @@ async function crawlSource(job: Job, row: DocRow, crawl: ReferenceDocCrawl, repo
           } catch (err) {
             ctx.log.warn(`reference doc ${job.docId}: link ranking failed: ${err instanceof Error ? err.message : String(err)}`);
             throw new CrawlRefusal(
-              err instanceof AiRuntimeMissingError
+              // ⚠ A missing Codex is an AiRuntimeMissingError too: its own sentence names its remedy.
+              err instanceof CodexNotInstalledError
+                ? `No links were followed. ${err.message}`
+                : err instanceof AiRuntimeMissingError
                 ? 'Claude is not set up here, so no links were followed. Press "Set up AI", then rebuild.'
                 : 'Claude could not be reached to choose which links to follow.',
             );

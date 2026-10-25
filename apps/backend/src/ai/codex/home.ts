@@ -14,7 +14,7 @@ import { join } from 'node:path';
 import { resolveDataDir } from '../../data-dir.js';
 import { codexBinaryPath } from '../runtime.js';
 import { AiRuntimeMissingError } from '../runtime-errors.js';
-import { codexBaseEnv } from './config.js';
+import { codexBaseEnv, LOCKED_SETTINGS, tomlValue, type TomlValue } from './config.js';
 import type { CodexHookConfig } from './types.js';
 
 /** The folder under the data directory. */
@@ -90,18 +90,41 @@ export function parseTrustEntries(toml: string): Map<string, string> {
 }
 
 /**
+ * `LOCKED_SETTINGS` as TOML: the top-level keys first, then one `[table]` per first key segment (in
+ * first-seen order). Every locked key has at most two segments; a deeper one is refused loudly.
+ */
+export function lockdownToml(settings: ReadonlyArray<readonly [string, TomlValue]> = LOCKED_SETTINGS): string[] {
+  const top: string[] = [];
+  const tables = new Map<string, string[]>();
+  for (const [key, value] of settings) {
+    const parts = key.split('.');
+    if (parts.length > 2 || parts.some((p) => !/^[a-z_]+$/.test(p))) throw new Error(`Not a simple Codex config key: ${key}`);
+    if (parts.length === 1) top.push(`${key} = ${tomlValue(value)}`);
+    else {
+      const rows = tables.get(parts[0]!) ?? [];
+      rows.push(`${parts[1]} = ${tomlValue(value)}`);
+      tables.set(parts[0]!, rows);
+    }
+  }
+  const out = [...top];
+  for (const [table, rows] of tables) out.push('', `[${table}]`, ...rows);
+  return out;
+}
+
+/**
  * Limn's whole config.toml, from the hook trust entries to keep. Pure.
  *
  *   • `cli_auth_credentials_store = "file"` — the sign-in lives in THIS folder's auth.json, never the
  *     OS keychain (where it would be shared with, and rotated by, the reader's own Codex).
- *   • `forced_login_method` is deliberately NOT set: a ChatGPT sign-in and an API key both work.
+ *   • `forced_login_method` is deliberately NOT set (the API-key route is refused in code, not here).
  *   • `check_for_update_on_startup = false` — the version is Limn's pin, not "latest".
- *   • `history.persistence = "none"` — no prompt history (pull-request text is untrusted input).
- *   • `analytics.enabled = false`.
+ *   • THE WHOLE LOCKDOWN (config.ts `LOCKED_SETTINGS`): no shell, no history, no analytics, no apps,
+ *     plugins, remote plugins, memories, goals… — so EVERY process in this home inherits it, the
+ *     app-server included (which otherwise fetched the remote plugin catalog on every start).
  *   • one `[hooks.state."<key>"] trusted_hash` per trusted path-guard hook.
  *
- * Everything that locks a RUN down (sandbox, shell off, MCP, the hook itself) is passed per run with
- * `-c` by the runner, under `--strict-config`; this file only holds what must persist.
+ * A run still passes the same keys with `-c` (and its sandbox, MCP server and hook) under
+ * `--strict-config`: the file is the floor, the argv the second layer.
  */
 export function codexHomeConfigToml(trust: ReadonlyMap<string, string>): string {
   const lines = [
@@ -109,12 +132,7 @@ export function codexHomeConfigToml(trust: ReadonlyMap<string, string>): string 
     '# Your own ~/.codex is never read or written by Limn.',
     'cli_auth_credentials_store = "file"',
     'check_for_update_on_startup = false',
-    '',
-    '[history]',
-    'persistence = "none"',
-    '',
-    '[analytics]',
-    'enabled = false',
+    ...lockdownToml(),
   ];
   for (const [key, hash] of [...trust.entries()].sort(([a], [b]) => a.localeCompare(b))) {
     lines.push('', `[hooks.state.${tomlString(key)}]`, `trusted_hash = ${tomlString(hash)}`);

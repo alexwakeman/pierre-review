@@ -25,9 +25,9 @@
 //
 // ⚠ SESSION FILES AND ROWS. Not being ephemeral, every run leaves a rollout (the prompt, the PR's
 // text, diffs) AND a second copy in Codex's own sqlite state in Limn's Codex home: when the run settles
-// its thread is deleted through Codex's `thread/delete` (rows + rollout) and its log rows go
-// (ai/codex/threads.ts); older leftovers are swept once per process; account erasure removes the files
-// (ai/codex/rollouts.ts `eraseCodexHistory`).
+// and its usage is RECORDED, its thread is queued (ai/codex/threads.ts, one batched app-server per
+// drain, in the background) for Codex's `thread/delete` (rows + rollout) and its log rows go; older
+// leftovers are swept every few hours; account erasure removes the files (rollouts.ts `eraseCodexHistory`).
 //
 // ⚠ WRITES ARE READ FROM GIT, NEVER FROM THE STREAM. A refused or failed patch emits no event (spike
 // § 4), so the changed files are what `git status` shows changed in the write roots between the start
@@ -63,7 +63,7 @@ import {
 } from '../codex/events.js';
 import { pathGuardHook, verifyHookTrusted } from '../codex/hook.js';
 import { codexBinary, codexHome, ensureCodexHomeConfig } from '../codex/home.js';
-import { forgetCodexThread, sweepOldCodexThreadsOnce } from '../codex/threads.js';
+import { armCodexThreadSweeps, queueCodexThreadCleanup } from '../codex/threads.js';
 import { runCodexExec, type CodexExecResult } from '../codex/run.js';
 import type { CodexHookConfig } from '../codex/types.js';
 import { workspaceMcpConfig } from '../codex/workspace-mcp.js';
@@ -310,17 +310,21 @@ async function complete(req: CompleteRequest): Promise<CompleteResult> {
       { cwd, writeRoots: [], ...(req.system ? { system: req.system } : {}) },
       { home, mcp: null, hook, schemaPath, model, effort: CODEX_EFFORT_FOR_ROLE[role] },
     );
-    sweepOldCodexThreadsOnce(home);
+    armCodexThreadSweeps(home);
     const res = await runCodexExec(args, {
       cwd,
       env: codexExecEnv(credential, hook),
       stdin: req.prompt,
       timeoutMs: DEFAULT_COMPLETE_TIMEOUT_MS,
     });
-    // The run is settled: its thread (rows, session file, log rows — the prompt, in full) goes now.
-    await forgetCodexThread(home, res.threadId);
     const costUsd = codexCostUsd(model, res.usage, route);
-    await record(req.usageRecord, model, res.usage, costUsd);
+    // The usage row FIRST; then the settled run's thread (rows, session file, log rows — the prompt, in
+    // full) is queued for removal in the background (threads.ts), never on the answer's path.
+    try {
+      await record(req.usageRecord, model, res.usage, costUsd);
+    } finally {
+      queueCodexThreadCleanup(home, res.threadId);
+    }
     const failure = execFailure(res);
     if (failure) throw new CodexRunError(failure, res.cancelled);
     const text = res.finalResponse.trim();
@@ -539,7 +543,7 @@ export async function runAgentUnchecked(spec: AgentRunSpec): Promise<AgentRunRes
   // asked whether it will RUN the hook (and the hook must refuse a canary call). An untrusted hook is
   // skipped SILENTLY by Codex, so a run whose guard is not proven never starts — read-only or not.
   const { hook, home } = await trustedGuard({ read: roots.read, write: roots.write });
-  sweepOldCodexThreadsOnce(home);
+  armCodexThreadSweeps(home);
 
   const before = isWrite ? await Promise.all(roots.write.map(gitSnapshot)) : [];
 
@@ -608,11 +612,14 @@ export async function runAgentUnchecked(spec: AgentRunSpec): Promise<AgentRunRes
     // NULL only when the FIRST turn's own tokens are unknown (run.ts reports null for a stopped run).
     if (!first || first.cancelled || first.usage == null) usage = null;
 
-    // The run is settled (its retry included): its thread goes now — rows, session file, log rows.
-    await forgetCodexThread(home, first?.threadId ?? final?.threadId ?? null);
-
+    // The run is settled (its retry included). The usage row FIRST; then its thread — rows, session
+    // file, log rows — is queued for removal in the background (threads.ts).
     const costUsd = codexCostUsd(model, usage, route);
-    await record(spec.usageRecord, model, usage, costUsd);
+    try {
+      await record(spec.usageRecord, model, usage, costUsd);
+    } finally {
+      queueCodexThreadCleanup(home, first?.threadId ?? final?.threadId ?? null);
+    }
 
     // Writes, read from git — whatever the stream says, and even when the run failed (a partial
     // edit is still on disk and the caller must know).

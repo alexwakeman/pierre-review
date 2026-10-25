@@ -93,6 +93,30 @@ users.
   `CodexNotInstalledError`, an `AiRuntimeMissingError`, so a cheap pass stops. A new sign-in never joins
   a start a cancel overtook.
 
+**Phase 2 review fixes, round 3 (2026-10-25)** (branch `codex/p2-fix3`):
+- THE WHOLE LOCKDOWN lives in Limn's `config.toml` (one list, `config.ts LOCKED_SETTINGS`, + the new
+  `features.daemon_auto_start=false`), so every process in Limn's home inherits it — the app-server
+  for cleanup, sweep, readings and sign-in, and the hook trust probe — and the same pairs still ride
+  every `codex exec` AND app-server start with `-c` (the trust probe now runs `--strict-config` too).
+  Measured on 0.164: a bare app-server fetched the remote plugin catalog (`ps/plugins/list`), synced
+  remote plugins into `plugins/` and held five connections to chatgpt.com; with the lockdown, none
+  (lsof), and Codex's own logs since the live runs show no catalog fetch.
+- ⚠ REMOTE CONTROL CANNOT BE SWITCHED OFF BY CONFIG in 0.164: `features.remote_control` is a REMOVED
+  flag, `allow_remote_control` is read only from `/etc/codex/requirements.toml` or a managed profile
+  (never `CODEX_HOME`), `remoteControl/disable` changes nothing persisted, and the undocumented
+  `CODEX_INTERNAL_APP_SERVER_REMOTE_CONTROL_DISABLED` did not stop it. Every app-server still logs
+  "remote control websocket loop started … initial_desired_state=Unknown" and "starting … connection
+  cycle … current_status=Disabled" — but its status stays `disabled`, nothing enrols, and no socket is
+  held. Limn keeps app-server starts few instead (below).
+- Usage is RECORDED FIRST; a settled run's thread is then queued (`threads.ts`) on a per-home serial
+  queue drained in the background: ONE app-server per drain for every pending id (and the sweep, when
+  due). A refused `thread/delete` keeps its id and rollout for the next drain (≤ 3 attempts). The
+  sweep re-arms every 6 h (a quarter of its one-day age) instead of once per process.
+- `auto` counts Codex ready only on a ChatGPT sign-in (`route === 'login'`); `limn ai status` prints the
+  API-key refusal sentence. A missing Codex install names `limn ai install codex` in the docs crawl and
+  the sprint "Ask" (they printed Claude's remedy).
+- Account erasure also removes `plugins/` and `cache/codex_apps_*` (written before the lockdown).
+
 Original status: Written 2026-10-23 after checking the current Codex docs and the published
 `@openai/codex-sdk` 0.164.0 type definitions. The work is meant to be carried out by subagents
 through the Workflow tool, in the phases below, with the user confirming the decisions in § 6 first.

@@ -304,14 +304,15 @@ installed codex program.
     console.log(s.runtimeMessage ? `${words} ${s.runtimeMessage}` : words);
     const c = getCodexRuntimeStatus();
     if (c.runtime === 'ready') {
-      const { detectCodex } = await import('./ai/codex/detect.js');
+      const { detectCodex, CODEX_API_KEY_NOT_AVAILABLE_MESSAGE } = await import('./ai/codex/detect.js');
       const d = await detectCodex();
       const plan = d.plan ? ` (${d.plan})` : '';
       console.log(
         d.route === 'login'
           ? `Codex is set up and signed in${plan}.`
           : d.route === 'api_key'
-            ? 'Codex is set up and uses an API key.'
+            ? // The API-key route is REFUSED until it can be priced: say so, never "it works".
+              `Codex is set up. ${CODEX_API_KEY_NOT_AVAILABLE_MESSAGE}: limn ai login codex`
             : 'Codex is set up but not signed in. Run: limn ai login codex',
       );
     } else if (c.runtimeMessage) {

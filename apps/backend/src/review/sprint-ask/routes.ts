@@ -94,7 +94,8 @@ export function registerSprintAskRoutes(app: FastifyInstance, ctx: AgentContext)
     } catch (err) {
       if (err instanceof AiRuntimeMissingError) {
         reply.status(503);
-        return { error: 'runtime', message: 'The AI runtime is not set up.' };
+        // Its own sentence names the remedy (Claude's "Set up AI", or `limn ai install codex`).
+        return { error: 'runtime', message: err.message };
       }
       ctx.log.warn({ accountId, err: String(err).slice(0, 200) }, 'sprint ask: completion failed');
       reply.status(502);

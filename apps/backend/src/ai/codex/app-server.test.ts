@@ -112,7 +112,10 @@ describe('the probe', () => {
     const log = calls();
     const spawns = log.filter((c) => Array.isArray(c.argv));
     expect(spawns).toHaveLength(1);
-    expect(spawns[0]).toMatchObject({ argv: ['app-server', '--strict-config'], codexHome: codexHome(), apiKey: false });
+    // The lockdown rides on the app-server's argv too (a second layer over Limn's config.toml).
+    const { lockedConfig } = await import('./config.js');
+    expect(spawns[0]).toMatchObject({ argv: ['app-server', '--strict-config', ...lockedConfig()], codexHome: codexHome(), apiKey: false });
+    expect(spawns[0]!.argv).toContain('features.remote_plugin=false');
     expect(log.find((c) => c.method === 'account/read')?.params).toEqual({ refreshToken: true });
     // ⚠ Never the reader's own ~/.codex.
     expect(codexHome()).toBe(join(root, 'data', 'codex'));

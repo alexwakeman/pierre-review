@@ -289,12 +289,20 @@ export function getActiveProvider(env: NodeJS.ProcessEnv = process.env): AgentPr
   const setting = aiProviderSetting(env);
   if (setting === 'codex') return codexProvider;
   if (setting === 'claude' || !CODEX_RUNNABLE) return claudeProvider;
-  const picked = pickAutoProvider({
+  return getProvider(pickAutoProvider(autoReadiness(env)));
+}
+
+/**
+ * What the auto rule reads. ⚠ Codex is ready ONLY on a ChatGPT sign-in (`route === 'login'`): the
+ * OpenAI API-key route is REFUSED until it can be priced, so a key alone must never make auto pick
+ * Codex (where every run would then fail on the refusal).
+ */
+export function autoReadiness(env: NodeJS.ProcessEnv = process.env): { claudeReady: boolean; codexReady: boolean; codexRunnable: boolean } {
+  return {
     claudeReady: resolveAiCredential(env).route !== 'none',
-    codexReady: resolveCodexCredential(env).route !== 'none',
+    codexReady: resolveCodexCredential(env).route === 'login',
     codexRunnable: CODEX_RUNNABLE,
-  });
-  return getProvider(picked);
+  };
 }
 
 /**

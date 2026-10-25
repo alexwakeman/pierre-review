@@ -23,9 +23,10 @@
 //   connectors, `codex_apps`), features.plugins=false, features.remote_plugin=false and
 //   features.tool_suggest=false + features.skill_mcp_dependency_install=false (a plugin, connector or
 //   MCP dependency INSTALLED mid-run), features.memories=false
-//   + memories.generate_memories=false + memories.use_memories=false — each a way for a run to reach
-//   or keep something beyond the files Limn hands it. Every key is checked by the 0.164 CLI under
-//   --strict-config (live.test.ts), so a key a later CLI drops fails loudly, never silently.
+//   + memories.generate_memories=false + memories.use_memories=false, features.daemon_auto_start=false
+//   — each a way for a run to reach or keep something beyond the files Limn hands it. Every key is
+//   checked by the 0.164 CLI under --strict-config (live.test.ts), so a key a later CLI drops fails
+//   loudly, never silently. The SAME list is written into Limn's config.toml (`LOCKED_SETTINGS`).
 //   project_doc_max_bytes=0    ⚠ the ONLY thing that keeps a PR's own AGENTS.md out of the prompt.
 //   skills.include_instructions=false  ⚠ user skills arrive through HOME, not CODEX_HOME.
 //   projects."<cwd>".trust_level="untrusted"  belt and braces: the repo's `.codex/` layer loads only
@@ -97,29 +98,50 @@ const c = (key: string, value: TomlValue): string[] => ['-c', `${key}=${tomlValu
 
 // ---- the builder --------------------------------------------------------------------------------
 
-/** The locked keys every run carries, in order. Exported for the test. */
+/**
+ * THE LOCKDOWN: every key that keeps a Codex process from reaching or keeping anything beyond what Limn
+ * hands it, as [dotted key, value]. ONE list, used twice (docs/CODEX-PLAN.md, review fixes round 3):
+ *   • home.ts writes it into Limn's own `config.toml`, so EVERY process started in that home — the
+ *     app-server (thread cleanup, the sweep, the readings, a sign-in), the hook trust probe, a run —
+ *     inherits it. Measured on 0.164: an app-server WITHOUT it fetched the remote plugin catalog
+ *     (`ps/plugins/list`) and held five connections to chatgpt.com; with it, none.
+ *   • `lockedConfig()` passes the SAME pairs with `-c` on every `codex exec` and app-server start — a
+ *     second layer, so a hand-edited config.toml cannot unlock a run.
+ * Each key is checked by the 0.164 CLI under --strict-config (live.test.ts 2b).
+ *
+ * ⚠ REMOTE CONTROL CANNOT BE SWITCHED OFF BY CONFIG in 0.164: `features.remote_control` is a REMOVED
+ * flag (a no-op), `allow_remote_control` is a requirements.toml key read only from /etc/codex or a
+ * managed profile (never CODEX_HOME), and `remoteControl/disable` needs experimentalApi and changes no
+ * persisted state. Every app-server therefore logs "remote control websocket loop started" — but the
+ * status stays `disabled` and no connection is made (no enrollment, no socket held: measured with
+ * lsof). Limn keeps app-server starts few instead (threads.ts batches every cleanup into one).
+ */
+export const LOCKED_SETTINGS: ReadonlyArray<readonly [string, TomlValue]> = [
+  ['approval_policy', 'never'],
+  ['features.shell_tool', false],
+  ['features.view_image', false],
+  ['web_search', 'disabled'],
+  ['history.persistence', 'none'],
+  ['analytics.enabled', false],
+  ['agents.enabled', false],
+  ['project_doc_max_bytes', 0],
+  ['skills.include_instructions', false],
+  ['features.image_generation', false],
+  ['features.goals', false],
+  ['features.apps', false],
+  ['features.plugins', false],
+  ['features.remote_plugin', false],
+  ['features.tool_suggest', false],
+  ['features.skill_mcp_dependency_install', false],
+  ['features.memories', false],
+  ['features.daemon_auto_start', false],
+  ['memories.generate_memories', false],
+  ['memories.use_memories', false],
+];
+
+/** The locked keys every run (and every app-server) carries, in order, as `-c` pairs. */
 export function lockedConfig(): string[] {
-  return [
-    ...c('approval_policy', 'never'),
-    ...c('features.shell_tool', false),
-    ...c('features.view_image', false),
-    ...c('web_search', 'disabled'),
-    ...c('history.persistence', 'none'),
-    ...c('analytics.enabled', false),
-    ...c('agents.enabled', false),
-    ...c('project_doc_max_bytes', 0),
-    ...c('skills.include_instructions', false),
-    ...c('features.image_generation', false),
-    ...c('features.goals', false),
-    ...c('features.apps', false),
-    ...c('features.plugins', false),
-    ...c('features.remote_plugin', false),
-    ...c('features.tool_suggest', false),
-    ...c('features.skill_mcp_dependency_install', false),
-    ...c('features.memories', false),
-    ...c('memories.generate_memories', false),
-    ...c('memories.use_memories', false),
-  ];
+  return LOCKED_SETTINGS.flatMap(([k, v]) => c(k, v));
 }
 
 /** The sandbox keys: read-only, or workspace-write confined to `writeRoots`. */

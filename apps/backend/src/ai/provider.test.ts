@@ -152,6 +152,15 @@ describe('the auto rule (decided: Claude when both are signed in)', () => {
     expect(pick({ claudeReady: false, codexReady: false, codexRunnable: true })).toBe('claude');
     expect(pick({ claudeReady: true, codexReady: false, codexRunnable: true })).toBe('claude');
   });
+  it('an OpenAI API key ALONE never makes Codex ready (the key route is refused): auto stays Claude', () => {
+    const env: NodeJS.ProcessEnv = { ...process.env, OPENAI_API_KEY: 'sk-test-only-key' };
+    delete env.CODEX_API_KEY;
+    const r = P.autoReadiness(env);
+    expect(r.codexReady).toBe(false);
+    // Even with no Claude credential and a Codex able to run, auto does not pick a refused route.
+    expect(pick({ ...r, claudeReady: false, codexRunnable: true })).toBe('claude');
+    expect(P.getActiveProvider({ ...env, LIMN_AI_PROVIDER: 'auto' }).id).toBe('claude');
+  });
   it('Codex alone ⇒ Codex, but only once Codex can run', () => {
     expect(pick({ claudeReady: false, codexReady: true, codexRunnable: true })).toBe('codex');
     expect(pick({ claudeReady: false, codexReady: true, codexRunnable: false })).toBe('claude');

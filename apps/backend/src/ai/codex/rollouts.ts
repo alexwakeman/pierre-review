@@ -6,12 +6,13 @@
 //   • `deleteThreadRollouts(home, threadId)` — after a run SETTLES (its retry included), its own
 //     files go. The provider calls it for every run that reported a thread id, success or not.
 //   • `sweepOldRollouts(home, maxAgeMs)` — anything older than a day (a run cut off by a crash, a
-//     killed Limn): once per process, before the first run.
+//     killed Limn): by threads.ts's periodic sweep.
 //   • `removeAllRollouts(home)` — every rollout (Codex is local-only, so the home has ONE account).
 //   • `eraseCodexHistory(home)` — ACCOUNT ERASURE: every rollout AND Codex's own sqlite state in the
 //     home, which keeps a second copy of every thread (`state_<n>`, `thread_history_<n>`, `logs_<n>`,
 //     `memories_<n>`, `goals_<n>`, `queue_<n>` .sqlite, each with its -wal/-shm). The per-run and aged
-//     removal of a thread's ROWS is ai/codex/threads.ts (through Codex's own `thread/delete`).
+//     removal of a thread's ROWS is ai/codex/threads.ts (through Codex's own `thread/delete`). Also
+//     the remote apps/plugins leftovers: `plugins/` and `cache/codex_apps_*`.
 //
 // The sign-in (auth.json), config.toml and installation_id are NEVER touched.
 // Every function is best-effort and never throws: a cleanup failure must not fail the run it follows.
@@ -78,14 +79,6 @@ export function sweepOldRollouts(home: string, maxAgeMs: number = ROLLOUT_MAX_AG
   return n;
 }
 
-let swept = false;
-/** `sweepOldRollouts` once per process (the provider calls it before a run). */
-export function sweepOldRolloutsOnce(home: string): void {
-  if (swept) return;
-  swept = true;
-  sweepOldRollouts(home);
-}
-
 /** Erasure: every rollout in the home, the folders included. Never the sign-in or the config. */
 export function removeAllRollouts(home: string): void {
   for (const d of ROLLOUT_DIRS) {
@@ -101,6 +94,13 @@ export function removeAllRollouts(home: string): void {
 export const CODEX_STATE_FILE = /^(state|thread_history|logs|memories|goals|queue)_\d+\.sqlite(-wal|-shm|-journal)?$/;
 /** Folders of per-run leftovers, removed whole at erasure. */
 const ERASE_DIRS = [...ROLLOUT_DIRS, 'shell_snapshots', 'thread-writer-locks'] as const;
+/**
+ * What the ChatGPT apps / remote plugin features left behind in the home (written before Limn's
+ * config.toml locked them off): `plugins/` (the remote catalogue's installs and their staging folder)
+ * and `cache/codex_apps_*` (the connectors' server info and tool list). Removed at erasure.
+ */
+const ERASE_REMOTE_DIRS = ['plugins'] as const;
+const CODEX_APPS_CACHE = /^codex_apps_/;
 /** Never erased: the sign-in, Limn's config, Codex's install id. */
 const KEEP = new Set(['auth.json', 'config.toml', 'installation_id']);
 
@@ -110,12 +110,19 @@ const KEEP = new Set(['auth.json', 'config.toml', 'installation_id']);
  */
 export function eraseCodexHistory(home: string): string[] {
   const removed: string[] = [];
-  for (const d of ERASE_DIRS) {
+  for (const d of [...ERASE_DIRS, ...ERASE_REMOTE_DIRS]) {
     try {
       rmSync(join(home, d), { recursive: true, force: true });
     } catch {
       /* best effort */
     }
+  }
+  try {
+    for (const name of readdirSync(join(home, 'cache'))) {
+      if (CODEX_APPS_CACHE.test(name)) rmSync(join(home, 'cache', name), { recursive: true, force: true });
+    }
+  } catch {
+    /* no cache folder */
   }
   let names: string[];
   try {

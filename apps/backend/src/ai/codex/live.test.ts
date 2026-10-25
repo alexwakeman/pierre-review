@@ -22,8 +22,15 @@
 //   4. An UNCHECKED read-only agent run reads the fixture THROUGH the workspace MCP server, under the
 //      trusted hook (which ran with its roots — `LIMN_CODEX_GUARD` reached it), the outside read is
 //      refused, the secret never reaches the answer, and the PR's AGENTS.md never reaches the prompt.
-//   5. Afterwards NOTHING of either run is left in Limn's Codex home: no rollout file, no `threads`,
-//      `thread_turns`, `thread_items` or `logs` row written since the runs began.
+//   5. Afterwards (once the background cleanup queue has drained) NOTHING of either run is left in
+//      Limn's Codex home: no rollout file, no `threads`, `thread_turns`, `thread_items` or `logs` row
+//      written since the runs began.
+//   6. NOTHING REMOTE: an app-server started the way Limn starts one (Limn's config.toml + the `-c`
+//      lockdown) reports remote control `disabled`, holds it open long enough for Codex to flush its
+//      logs, and Codex's own `logs` since the runs began show NO remote plugin catalog fetch and no
+//      remote-control activity beyond the idle loop line 0.164 always writes (it cannot be switched
+//      off by config — config.ts `LOCKED_SETTINGS`); `cache/codex_apps_*` and the remote plugin
+//      staging folder were not written again.
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -251,6 +258,9 @@ describe.skipIf(!LIVE)('Codex, live (LIMN_CODEX_LIVE=1)', () => {
     if (!signedIn) ctx.skip();
     const { readdirSync, statSync } = await import('node:fs');
     const { codexHome } = await import('./home.js');
+    // The cleanup runs in the background after each run's usage row (threads.ts): wait for it.
+    const { drainCodexThreadCleanup } = await import('./threads.js');
+    await drainCodexThreadCleanup(codexHome());
     const Database = (await import('better-sqlite3')).default;
     const home = codexHome();
     const sinceSec = Math.floor(runsStartedAt / 1000) - 1;
@@ -294,6 +304,48 @@ describe.skipIf(!LIVE)('Codex, live (LIMN_CODEX_LIVE=1)', () => {
     if (logs) left.logs = count(logs, `SELECT count(*) AS n FROM logs WHERE thread_id IS NOT NULL AND ts >= ${sinceSec}`);
     console.log('[live 5] left in', home, JSON.stringify(left));
     expect(Object.values(left).every((n) => n === 0)).toBe(true);
+  }, 60_000);
+
+  it('6. nothing remote: remote control stays disabled; no plugin catalog fetch, no apps cache (app-server, model-less)', async (ctx) => {
+    if (!signedIn) ctx.skip(); // remote control and the remote catalogue need a ChatGPT sign-in
+    const { readdirSync } = await import('node:fs');
+    const { codexHome } = await import('./home.js');
+    const AS = await import('./app-server.js');
+    const Database = (await import('better-sqlite3')).default;
+    const home = codexHome();
+    const sinceSec = Math.floor(runsStartedAt / 1000) - 1;
+    const statuses: unknown[] = [];
+    const server = await AS.CodexAppServer.start(AS.limnAppServerOptions()!);
+    try {
+      server.on('remoteControl/status/changed', (p) => statuses.push((p as { status?: unknown }).status));
+      await server.request('account/read', { refreshToken: false });
+      // Codex 0.164 flushes its log rows on a ~10 s timer: hold the process open past one.
+      await new Promise((r) => setTimeout(r, 13_000));
+    } finally {
+      server.close();
+      await server.exited;
+    }
+    await new Promise((r) => setTimeout(r, 1_000));
+    expect(statuses.length).toBeGreaterThan(0);
+    expect(statuses.every((s) => s === 'disabled')).toBe(true);
+    const logs = readdirSync(home).find((f) => /^logs_\d+\.sqlite$/.test(f));
+    expect(logs).toBeDefined();
+    const db = new Database(join(home, logs!), { fileMustExist: true, timeout: 2_000 });
+    let rows: Array<{ target: string; body: string | null }>;
+    try {
+      rows = db
+        .prepare(`SELECT target, feedback_log_body AS body FROM logs WHERE ts >= ? AND (target LIKE '%remote%' OR target LIKE '%plugin%' OR feedback_log_body LIKE '%remote control%' OR feedback_log_body LIKE '%plugin%')`)
+        .all(sinceSec) as Array<{ target: string; body: string | null }>;
+    } finally {
+      db.close();
+    }
+    const idle = /^(app-server remote control websocket loop started|starting app-server remote control websocket connection cycle) .*(initial_desired_state=Unknown|current_status=Disabled)/;
+    const loud = rows.filter((r) => !idle.test(r.body ?? ''));
+    console.log('[live 6] remote-control idle lines:', rows.length - loud.length, 'other remote/plugin lines:', JSON.stringify(loud.map((r) => [r.target, (r.body ?? '').slice(0, 120)])));
+    expect(loud).toEqual([]);
+    const cache = join(home, 'cache');
+    expect(existsSync(cache) ? readdirSync(cache).filter((n) => n.startsWith('codex_apps_')) : []).toEqual([]);
+    expect(existsSync(join(home, 'plugins', '.remote-plugin-install-staging'))).toBe(false);
   }, 60_000);
 });
 

@@ -77,4 +77,20 @@ describe('Codex rollouts', () => {
     expect(existsSync(join(home, 'installation_id'))).toBe(true);
     expect(existsSync(join(home, 'unrelated.sqlite'))).toBe(true);
   });
+
+  it('account erasure removes the remote apps/plugins leftovers: plugins/ and cache/codex_apps_*, nothing else in cache/', () => {
+    setup();
+    const staging = join(home, 'plugins', '.remote-plugin-install-staging');
+    const remote = join(home, 'plugins', 'cache', 'openai-curated-remote', 'sites');
+    const apps = join(home, 'cache', 'codex_apps_tools');
+    const appsInfo = join(home, 'cache', 'codex_apps_server_info');
+    const other = join(home, 'cache', 'something_else');
+    for (const d of [staging, remote, apps, appsInfo, other]) mkdirSync(d, { recursive: true });
+    writeFileSync(join(apps, 'c5e4.json'), '{}');
+    eraseCodexHistory(home);
+    expect(existsSync(join(home, 'plugins'))).toBe(false);
+    expect(existsSync(apps)).toBe(false);
+    expect(existsSync(appsInfo)).toBe(false);
+    expect(existsSync(other)).toBe(true);
+  });
 });

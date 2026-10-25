@@ -64,6 +64,35 @@ describe("Limn's Codex home", () => {
     }
   });
 
+  it('writes THE WHOLE LOCKDOWN into config.toml, so every process in the home (the app-server too) inherits it', async () => {
+    const { LOCKED_SETTINGS, tomlValue } = await import('./config.js');
+    await H.ensureCodexHomeConfig(null);
+    const text = readFileSync(join(H.codexHome(), 'config.toml'), 'utf8');
+    // Each table's rows, as written.
+    const tables = new Map<string, Map<string, string>>([['', new Map()]]);
+    let cur = '';
+    for (const line of text.split('\n')) {
+      const t = /^\[([a-z_]+)\]$/.exec(line);
+      if (t) tables.set((cur = t[1]!), new Map());
+      else if (/^\[/.test(line)) cur = '<other>';
+      else {
+        const kv = /^([a-z_]+) = (.*)$/.exec(line);
+        if (kv && cur !== '<other>') tables.get(cur)!.set(kv[1]!, kv[2]!);
+      }
+    }
+    for (const [key, value] of LOCKED_SETTINGS) {
+      const [a, b] = key.split('.');
+      const got = b === undefined ? tables.get('')!.get(a!) : tables.get(a!)?.get(b);
+      expect(got, key).toBe(tomlValue(value));
+    }
+    // The ones that reached the network from a bare app-server (measured on 0.164), by name.
+    for (const k of ['apps', 'plugins', 'remote_plugin', 'tool_suggest', 'memories', 'goals', 'daemon_auto_start']) {
+      expect(tables.get('features')!.get(k), k).toBe('false');
+    }
+    // Top-level keys come before the first table (TOML would read them as the table's otherwise).
+    expect(text.indexOf('approval_policy')).toBeLessThan(text.indexOf('['));
+  });
+
   it("adds the hook's trust entry and keeps it through a later write without a hook", async () => {
     await H.ensureCodexHomeConfig(hook(1));
     await H.ensureCodexHomeConfig(null);

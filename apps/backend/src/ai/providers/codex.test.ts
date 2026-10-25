@@ -42,6 +42,8 @@ const T = vi.hoisted(() => {
     installed: { value: true },
     recorded: [] as any[],
     trustWrites: [] as any[],
+    /** 'record' and 'cleanup:<threadId>', in the order they happened. */
+    order: [] as string[],
   };
 });
 
@@ -85,7 +87,15 @@ vi.mock('../codex/app-server.js', async (importOriginal) => ({
 }));
 vi.mock('../../db/usage.js', () => ({
   recordAiUsage: async (row: unknown) => {
+    T.order.push('record');
     T.recorded.push(row);
+  },
+}));
+// The thread cleanup queue (its own suite: ai/codex/threads.test.ts): only the ORDER is pinned here.
+vi.mock('../codex/threads.js', () => ({
+  armCodexThreadSweeps: () => {},
+  queueCodexThreadCleanup: (_home: string, threadId: string | null) => {
+    T.order.push(`cleanup:${threadId}`);
   },
 }));
 
@@ -183,6 +193,7 @@ beforeEach(() => {
   T.installed.value = true;
   T.recorded.length = 0;
   T.trustWrites.length = 0;
+  T.order.length = 0;
   C._resetCodexTrustCacheForTest();
 });
 afterEach(() => {
@@ -236,6 +247,11 @@ describe('complete()', () => {
     expect(T.recorded).toEqual([
       expect.objectContaining({ accountId: 3, feature: 'sprint_briefs', provider: 'codex', model: 'gpt-6-luna', costUsd: 0, inputTokens: 10, outputTokens: 2, sharePct: null }),
     ]);
+  });
+
+  it('records the usage FIRST, then queues the thread cleanup (never awaited before the ledger row)', async () => {
+    await C.codexProvider.complete({ prompt: 'COMPLETE', usageRecord: { accountId: 3, seam: 'summary', feature: 'x' } as any });
+    expect(T.order).toEqual(['record', 'cleanup:th-x']);
   });
 
   it('keeps an explicit NON-Claude model id', async () => {
@@ -468,17 +484,9 @@ describe('runAgentUnchecked() — one read-only run', () => {
     expect(T.recorded).toEqual([expect.objectContaining({ inputTokens: 60, outputTokens: 6 })]);
   });
 
-  it('deletes the run’s own session file once it settles, and no other', async () => {
-    const day = join(T.home, 'sessions', '2026', '10', '25');
-    mkdirSync(day, { recursive: true });
-    const mine = join(day, 'rollout-2026-10-25T10-00-00-th-x.jsonl');
-    const other = join(day, 'rollout-2026-10-25T10-00-00-th-other.jsonl');
-    writeFileSync(mine, '{}');
-    writeFileSync(other, '{}');
+  it('records the usage FIRST, then queues ITS thread for cleanup (files and rows: ai/codex/threads.test.ts)', async () => {
     await C.runAgentUnchecked(spec('GOOD'));
-    expect(existsSync(mine)).toBe(false);
-    expect(existsSync(other)).toBe(true); // another run's (still fresh) file is not this run's to delete
-    rmSync(join(T.home, 'sessions'), { recursive: true, force: true });
+    expect(T.order).toEqual(['record', 'cleanup:th-x']);
   });
 
   it('needs exactly one result tool unless one is named', () => {
