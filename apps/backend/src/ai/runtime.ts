@@ -55,7 +55,7 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { resolveDataDir } from '../data-dir.js';
 
@@ -163,6 +163,56 @@ export function findPackageDir(spec: string, fromDir: string): string | null {
         return candidate;
       }
     }
+    const parent = dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+}
+
+/**
+ * A package INSIDE one install prefix only: `<prefix>/node_modules/<spec>`, with no walk up the
+ * ancestors. ⚠ Codex is looked up this way: `findPackageDir` would happily return a Codex installed
+ * in any parent folder (a project's own node_modules, a global prefix), which is not the program at
+ * Limn's pin.
+ */
+export function findPackageDirIn(spec: string, prefix: string): string | null {
+  const candidate = join(resolve(prefix), 'node_modules', spec);
+  if (!existsSync(join(candidate, 'package.json'))) return null;
+  try {
+    return realpathSync(candidate);
+  } catch {
+    return candidate;
+  }
+}
+
+/**
+ * `findPackageDir`, but the walk STOPS at `stopAt` (inclusive): nothing above the install prefix is
+ * looked at. For the Codex platform package, resolved from the CLI package's own directory the way
+ * its bin/codex.js does (npm may nest it, or hoist it to the prefix). A `fromDir` outside `stopAt`
+ * finds nothing.
+ */
+export function findPackageDirWithin(spec: string, fromDir: string, stopAt: string): string | null {
+  const real = (p: string): string => {
+    try {
+      return realpathSync(p);
+    } catch {
+      return resolve(p);
+    }
+  };
+  const stop = real(stopAt);
+  let dir = real(fromDir);
+  const rel = relative(stop, dir);
+  if (rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) return null;
+  for (;;) {
+    const candidate = join(dir, 'node_modules', spec);
+    if (existsSync(join(candidate, 'package.json'))) {
+      try {
+        return realpathSync(candidate);
+      } catch {
+        return candidate;
+      }
+    }
+    if (dir === stop) return null;
     const parent = dirname(dir);
     if (parent === dir) return null;
     dir = parent;
@@ -338,10 +388,11 @@ export function codexBinaryIn(
 ): string | null {
   const target = CODEX_TARGETS[`${platform}-${arch}`];
   if (!target) return null;
-  const cliDir = findPackageDir(CODEX_PACKAGE, fromDir);
+  // ⚠ Only INSIDE the prefix: never a Codex (or its platform program) from a parent folder.
+  const cliDir = findPackageDirIn(CODEX_PACKAGE, fromDir);
   if (!cliDir) return null;
   const exe = platform === 'win32' ? 'codex.exe' : 'codex';
-  const platformDir = findPackageDir(target.pkg, cliDir);
+  const platformDir = findPackageDirWithin(target.pkg, cliDir, fromDir);
   for (const vendorRoot of [platformDir ? join(platformDir, 'vendor') : null, join(cliDir, 'vendor')]) {
     if (!vendorRoot) continue;
     const file = join(vendorRoot, target.triple, 'bin', exe);
@@ -426,7 +477,7 @@ export function createAiRuntime(opts: AiRuntimeOptions = {}) {
   /** The Codex CLI under `fromDir`: 'ready' at its pin, 'stale' at another, 'no_binary' without the
    *  platform program (an optional dependency npm may silently skip), 'absent' when not there. */
   function codexDirState(fromDir: string): 'ready' | 'absent' | 'stale' | 'no_binary' {
-    const dir = findPackageDir(CODEX_PACKAGE, fromDir);
+    const dir = findPackageDirIn(CODEX_PACKAGE, fromDir);
     const have = installedVersion(dir);
     if (!dir || !have) return 'absent';
     if (!codexBinaryIn(fromDir)) return 'no_binary';
@@ -602,7 +653,7 @@ export function createAiRuntime(opts: AiRuntimeOptions = {}) {
     if (inFlight) return inFlight.finally(detach);
     const withCodex =
       (installOpts.providers ?? ['claude']).includes('codex') ||
-      (existsSync(join(runtimeDir, 'package.json')) && findPackageDir(CODEX_PACKAGE, runtimeDir) !== null);
+      (existsSync(join(runtimeDir, 'package.json')) && findPackageDirIn(CODEX_PACKAGE, runtimeDir) !== null);
     inFlightCodex = withCodex;
     inFlight = runInstall(installOpts, withCodex).finally(() => {
       inFlight = null;
@@ -721,7 +772,7 @@ export function createAiRuntime(opts: AiRuntimeOptions = {}) {
       );
     }
     if (codexWant) {
-      const codexDir = findPackageDir(CODEX_PACKAGE, staging);
+      const codexDir = findPackageDirIn(CODEX_PACKAGE, staging);
       if (!codexDir || installedVersion(codexDir) !== codexWant) {
         rmSync(staging, { recursive: true, force: true });
         return failWith(`The download finished but ${CODEX_PACKAGE} ${codexWant} is missing from it. Try again: limn ai install codex`);

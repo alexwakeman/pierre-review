@@ -122,6 +122,46 @@ setInterval(() => {}, 1000);
     expect(res.signal).toBe('SIGKILL');
   });
 
+  // A grandchild (stands in for the MCP server / hook) that IGNORES SIGTERM, writes its pid, and lives.
+  const withGrandchild = (pidFile: string, tail: string): string => `
+import { spawn } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
+const g = spawn(process.execPath, ['-e', "process.on('SIGTERM',()=>{}); setInterval(()=>{},1000)"], { stdio: 'ignore' });
+writeFileSync(${JSON.stringify(pidFile)}, String(g.pid));
+${tail}
+`;
+  const alive = (pid: number): boolean => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const gone = async (pid: number): Promise<boolean> => {
+    for (let i = 0; i < 40 && alive(pid); i++) await new Promise((r) => setTimeout(r, 50));
+    return !alive(pid);
+  };
+
+  it.skipIf(process.platform === 'win32')('a cancel ends the WHOLE process group, not just the CLI (the MCP server, the hook)', async () => {
+    const pidFile = join(dir, 'grandchild-cancel.pid');
+    const bin = fake(withGrandchild(pidFile, `process.on('SIGTERM', () => process.exit(0));\n${WAIT_FOREVER}`));
+    const ac = new AbortController();
+    const res = await runCodexExec(['exec'], { cwd: dir, env, binary: bin, signal: ac.signal, killGraceMs: 200, onEvent: () => ac.abort() });
+    expect(res.cancelled).toBe(true);
+    const gpid = Number(readFileSync(pidFile, 'utf8'));
+    expect(await gone(gpid)).toBe(true);
+  });
+
+  it.skipIf(process.platform === 'win32')('a CLI that exits on its own leaves no straggler in its group', async () => {
+    const pidFile = join(dir, 'grandchild-exit.pid');
+    const bin = fake(withGrandchild(pidFile, `process.stdout.write(${JSON.stringify(line({ type: 'turn.started' }))} + '\\n'); process.exit(0);`));
+    const res = await runCodexExec(['exec'], { cwd: dir, env, binary: bin, killGraceMs: 200 });
+    expect(res.exitCode).toBe(0);
+    const gpid = Number(readFileSync(pidFile, 'utf8'));
+    expect(await gone(gpid)).toBe(true);
+  });
+
   it('a non-zero exit RESOLVES with its stderr (refusals appear only there)', async () => {
     const bin = fake(`process.stderr.write('Error loading config.toml: unknown configuration field \`x\`\\n'); process.exit(1);`);
     const res = await runCodexExec(['exec'], { cwd: dir, env, binary: bin });

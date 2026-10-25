@@ -10,10 +10,18 @@
 //                   (its only way to see files), writes (if any) through `apply_patch` inside a
 //                   `workspace-write` sandbox confined to the write roots, guarded by the PreToolUse
 //                   hook. Its RESULT TOOL becomes a strict JSON Schema (ai/result-schemas.ts); the final
-//                   answer is mapped back to the tool's arguments (`strictAnswerToToolArgs`) and handed
-//                   to the SAME handler the Claude tool calls — the handler is the validator, so no
-//                   server-side check moves. A rejected answer gets ONE retry on the same thread
-//                   (`exec resume`, possible because the run is NOT ephemeral), then the run fails.
+//                   answer is mapped back to the tool's arguments (`strictAnswerToToolArgs`), PARSED
+//                   against the tool's own zod shape (exactly what Claude's MCP layer does before a
+//                   handler runs — the handlers only cast their input), and only the parsed data is
+//                   handed to the SAME handler the Claude tool calls, so no server-side check moves.
+//                   A rejected answer (a shape issue or the handler's refusal) gets ONE retry on the
+//                   same thread (`exec resume`, possible because the run is NOT ephemeral), then the
+//                   run fails. Any throw after the first spawn is a FAILURE of the run, never an
+//                   escape: the usage is still recorded and the writes still verified.
+//
+// ⚠ SESSION FILES. Not being ephemeral, every run leaves a rollout (the prompt, the PR's text, diffs)
+// in Limn's Codex home: it is deleted when the run settles, older leftovers are swept once per process,
+// and account erasure removes them all (ai/codex/rollouts.ts).
 //
 // ⚠ WRITES ARE READ FROM GIT, NEVER FROM THE STREAM. A refused or failed patch emits no event (spike
 // § 4), so the changed files are what `git status` shows changed in the write roots between the start
@@ -24,7 +32,8 @@
 // ⚠ USAGE: Codex reports tokens, never US$. On a ChatGPT login a run costs US$ 0 and its tokens are
 // recorded (the budget's share is token-weighted, § 8.1); on an API key the tokens are priced from
 // CODEX_PRICES_PER_MTOK. A resumed turn reports the thread's CUMULATIVE usage, so the retry adds only
-// its delta; a cancelled run records NULL tokens.
+// its delta; a cancelled run records NULL tokens. ⚠ Reasoning tokens are a SUBSET of output tokens and
+// are never added to them.
 import { execFile } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
@@ -47,6 +56,7 @@ import {
 } from '../codex/events.js';
 import { pathGuardHook, verifyHookTrusted } from '../codex/hook.js';
 import { codexHome, ensureCodexHomeConfig } from '../codex/home.js';
+import { deleteThreadRollouts, sweepOldRolloutsOnce } from '../codex/rollouts.js';
 import { runCodexExec, type CodexExecResult } from '../codex/run.js';
 import type { CodexHookConfig } from '../codex/types.js';
 import { workspaceMcpConfig } from '../codex/workspace-mcp.js';
@@ -223,7 +233,8 @@ async function record(
       model,
       costUsd,
       inputTokens: usage ? usage.inputTokens : null,
-      outputTokens: usage ? usage.outputTokens + usage.reasoningOutputTokens : null,
+      // ⚠ Reasoning tokens are a SUBSET of output tokens: never added on top.
+      outputTokens: usage ? usage.outputTokens : null,
       prId: rec.prId ?? null,
       repoId: rec.repoId ?? null,
       provider: 'codex',
@@ -270,12 +281,15 @@ async function complete(req: CompleteRequest): Promise<CompleteResult> {
       { cwd, writeRoots: [], ...(req.system ? { system: req.system } : {}) },
       { home, mcp: null, hook: null, schemaPath, model, effort: CODEX_EFFORT_FOR_ROLE[role] },
     );
+    sweepOldRolloutsOnce(home);
     const res = await runCodexExec(args, {
       cwd,
       env: codexExecEnv(credential, null),
       stdin: req.prompt,
       timeoutMs: DEFAULT_COMPLETE_TIMEOUT_MS,
     });
+    // The run is settled: its session file (the prompt, in full) goes now.
+    deleteThreadRollouts(home, res.threadId);
     const costUsd = codexCostUsd(model, res.usage, route);
     await record(req.usageRecord, model, res.usage, costUsd);
     const failure = execFailure(res);
@@ -284,9 +298,8 @@ async function complete(req: CompleteRequest): Promise<CompleteResult> {
     if (!text) throw new Error('Codex returned no text. Check the Codex sign-in: limn ai login codex');
     return {
       text,
-      ...(res.usage
-        ? { usage: { inputTokens: res.usage.inputTokens, outputTokens: res.usage.outputTokens + res.usage.reasoningOutputTokens } }
-        : {}),
+      // ⚠ Reasoning tokens are a SUBSET of output tokens: never added on top.
+      ...(res.usage ? { usage: { inputTokens: res.usage.inputTokens, outputTokens: res.usage.outputTokens } } : {}),
       provider: 'codex' as const,
       model,
       costUsd,
@@ -431,14 +444,39 @@ function retryPrompt(reason: string): string {
 
 type Verdict = { ok: true } | { ok: false; reason: string };
 
-async function judge(tool: AgentResultTool, toolSchema: JsonSchema, text: string): Promise<Verdict> {
+type ZodNs = Awaited<ReturnType<typeof loadZod>>;
+
+/** At most this many schema issues are named in the retry prompt (the rest are counted). */
+const MAX_ISSUES_NAMED = 8;
+
+/** Zod's issues as one plain reason for the retry prompt: `path: message`, a handful at most. */
+export function issuesReason(issues: ReadonlyArray<{ path: ReadonlyArray<PropertyKey>; message: string }>): string {
+  const named = issues.slice(0, MAX_ISSUES_NAMED).map((i) => {
+    const path = i.path.map((p) => (typeof p === 'number' ? `[${p}]` : String(p))).join('.').replace(/\.\[/g, '[');
+    return `${path || '(the answer)'}: ${i.message}`;
+  });
+  const more = issues.length - named.length;
+  return `The answer does not match the result's shape. ${named.join('; ')}${more > 0 ? `; and ${more} more` : ''}.`;
+}
+
+/**
+ * The final answer → the result handler, the way Claude's MCP layer does it: PARSED against the
+ * tool's zod shape first (the handlers only cast their input — they trust the SDK to have parsed it),
+ * and only the parsed data is handed on. A parse failure is a rejected answer with the issues as its
+ * reason (so the one retry can correct exactly that); the handler never sees an unparsed object.
+ * Exported for the test.
+ */
+export async function judge(z: ZodNs, tool: AgentResultTool, toolSchema: JsonSchema, text: string): Promise<Verdict> {
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
   } catch {
     return { ok: false, reason: 'The final answer was not valid JSON.' };
   }
-  const reply = await tool.handle(strictAnswerToToolArgs(toolSchema, parsed));
+  const args = strictAnswerToToolArgs(toolSchema, parsed);
+  const checked = z.object(tool.shape as Parameters<ZodNs['object']>[0]).safeParse(args);
+  if (!checked.success) return { ok: false, reason: issuesReason(checked.error.issues) };
+  const reply = await tool.handle(checked.data);
   return reply.isError ? { ok: false, reason: reply.text } : { ok: true };
 }
 
@@ -464,7 +502,8 @@ export async function runAgentUnchecked(spec: AgentRunSpec): Promise<AgentRunRes
 
   const resultTool = pickResultTool(spec);
   let toolSchema: JsonSchema | null = null;
-  if (resultTool) toolSchema = shapeToJsonSchema(await loadZod(), resultTool.shape);
+  const z = await loadZod();
+  if (resultTool) toolSchema = shapeToJsonSchema(z, resultTool.shape);
 
   const mcp = workspaceMcpConfig(roots);
   // THE GUARD IS NOT OPTIONAL. Its trust entry is written into Limn's own home first, then Codex is
@@ -474,6 +513,7 @@ export async function runAgentUnchecked(spec: AgentRunSpec): Promise<AgentRunRes
   await ensureCodexHomeConfig(hook);
   const home = codexHome();
   if (!(await hookIfTrusted(home, hook))) throw new Error(HOOK_NOT_TRUSTED_MESSAGE);
+  sweepOldRolloutsOnce(home);
 
   const before = isWrite ? await Promise.all(roots.write.map(gitSnapshot)) : [];
 
@@ -495,39 +535,53 @@ export async function runAgentUnchecked(spec: AgentRunSpec): Promise<AgentRunRes
     };
     const signal = spec.abortController.signal;
 
-    const first = await runCodexExec(args, { cwd, env, signal, onEvent, stdin: spec.prompt, timeoutMs });
-    let usage: TokenUsage | null = first.usage;
-    let final = first;
-    let failure = execFailure(first);
+    // ⚠ EVERYTHING AFTER THE FIRST SPAWN IS INSIDE ONE try. A throw there (a result handler that
+    // throws, a retry that cannot start) becomes the run's FAILURE — never an escape that skips the
+    // ledger row, the write verification or the session-file cleanup below.
+    let first: CodexExecResult | null = null;
+    let final: CodexExecResult | null = null;
+    let usage: TokenUsage | null = null;
+    let failure: string | null = null;
+    try {
+      first = await runCodexExec(args, { cwd, env, signal, onEvent, stdin: spec.prompt, timeoutMs });
+      final = first;
+      usage = first.usage;
+      failure = execFailure(first);
 
-    let verdict: Verdict = { ok: true };
-    if (!failure && resultTool && toolSchema) {
-      verdict = await judge(resultTool, toolSchema, first.finalResponse);
-      if (!verdict.ok) {
-        if (!first.threadId) {
-          failure = `Codex's answer did not pass Limn's checks: ${verdict.reason}`;
-        } else {
-          spec.onProgress?.({ kind: 'status', text: 'Correcting the answer' });
-          const retry = await runCodexExec(toResumeArgs(args, first.threadId), {
-            cwd,
-            env,
-            signal,
-            onEvent,
-            stdin: retryPrompt(verdict.reason),
-            timeoutMs,
-          });
-          // ⚠ The resumed turn reports the THREAD's total: add only its own delta.
-          usage = addUsage(usage, retry.usage ? usageDelta(retry.usage, first.usage) : null);
-          final = retry;
-          failure = execFailure(retry);
-          if (!failure) {
-            verdict = await judge(resultTool, toolSchema, retry.finalResponse);
-            if (!verdict.ok) failure = `Codex's answer did not pass Limn's checks: ${verdict.reason}`;
+      if (!failure && resultTool && toolSchema) {
+        let verdict = await judge(z, resultTool, toolSchema, first.finalResponse);
+        if (!verdict.ok) {
+          if (!first.threadId) {
+            failure = `Codex's answer did not pass Limn's checks: ${verdict.reason}`;
+          } else {
+            spec.onProgress?.({ kind: 'status', text: 'Correcting the answer' });
+            const retry = await runCodexExec(toResumeArgs(args, first.threadId), {
+              cwd,
+              env,
+              signal,
+              onEvent,
+              stdin: retryPrompt(verdict.reason),
+              timeoutMs,
+            });
+            // ⚠ The resumed turn reports the THREAD's total: add only its own delta.
+            usage = addUsage(usage, retry.usage ? usageDelta(retry.usage, first.usage) : null);
+            final = retry;
+            failure = execFailure(retry);
+            if (!failure) {
+              verdict = await judge(z, resultTool, toolSchema, retry.finalResponse);
+              if (!verdict.ok) failure = `Codex's answer did not pass Limn's checks: ${verdict.reason}`;
+            }
           }
         }
       }
+    } catch (err) {
+      failure = `Codex's run failed: ${(err as Error).message || 'unknown error'}`;
     }
-    if (final.cancelled || first.cancelled) usage = null;
+    const cancelled = !!(first?.cancelled || final?.cancelled);
+    if (cancelled) usage = null;
+
+    // The run is settled (its retry included): its session files go now, success or not.
+    deleteThreadRollouts(home, first?.threadId ?? final?.threadId ?? null);
 
     const costUsd = codexCostUsd(model, usage, route);
     await record(spec.usageRecord, model, usage, costUsd);
@@ -536,7 +590,13 @@ export async function runAgentUnchecked(spec: AgentRunSpec): Promise<AgentRunRes
     // edit is still on disk and the caller must know).
     let filesChanged: string[] | null = null;
     if (isWrite) {
-      const after = await Promise.all(roots.write.map(gitSnapshot));
+      let after: GitSnapshot[] | null = null;
+      try {
+        after = await Promise.all(roots.write.map(gitSnapshot));
+      } catch (err) {
+        // What Codex left on disk cannot be read, so the run cannot be trusted.
+        throw new CodexRunError(`Limn could not read what Codex changed (${(err as Error).message}); the run is not used.`, cancelled);
+      }
       if (before.some((b) => b.top === null) || after.some((a) => a.top === null)) {
         filesChanged = null; // not a repo: cannot verify (a write run's worktree always is one)
       } else {
@@ -545,14 +605,14 @@ export async function runAgentUnchecked(spec: AgentRunSpec): Promise<AgentRunRes
         const writeReal = roots.write.map(realOr);
         const outside = filesChanged.filter((p) => !writeReal.some((r) => inside(r, p)));
         if (outside.length > 0) {
-          const err = new CodexRunError(`Codex changed files outside its folder (${outside.length}); the run is not used.`);
+          const err = new CodexRunError(`Codex changed files outside its folder (${outside.length}); the run is not used.`, cancelled);
           err.filesChanged = filesChanged;
           throw err;
         }
       }
       const claimed = new Set(
         [first, final].flatMap((r) =>
-          r.events.flatMap((e) =>
+          (r?.events ?? []).flatMap((e) =>
             e.type === 'item.completed' && e.item.type === 'file_change' && e.item.status === 'completed'
               ? e.item.changes.map((c) => realOr(resolve(cwd, c.path)))
               : [],
@@ -562,11 +622,14 @@ export async function runAgentUnchecked(spec: AgentRunSpec): Promise<AgentRunRes
       const unreported = (filesChanged ?? []).filter((p) => !claimed.has(p));
       if (unreported.length > 0) console.warn(`[codex] ${unreported.length} changed file(s) the stream did not report`);
     }
-    const refusals = [...stderrRefusals(first.stderr), ...(final !== first ? stderrRefusals(final.stderr) : [])];
+    const refusals = [
+      ...(first ? stderrRefusals(first.stderr) : []),
+      ...(final && final !== first ? stderrRefusals(final.stderr) : []),
+    ];
     if (refusals.length > 0) console.warn(`[codex] ${refusals.length} tool call(s) refused: ${refusals[0]}`);
 
-    if (failure) {
-      const err = new CodexRunError(failure, final.cancelled || first.cancelled);
+    if (failure || !first || !final) {
+      const err = new CodexRunError(failure ?? 'Codex did not run.', cancelled);
       err.filesChanged = filesChanged;
       throw err;
     }
@@ -581,6 +644,7 @@ export async function runAgentUnchecked(spec: AgentRunSpec): Promise<AgentRunRes
     };
   });
 }
+
 
 // ---- detect -------------------------------------------------------------------------------------
 

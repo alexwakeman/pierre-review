@@ -4,6 +4,12 @@
 //
 //   • An AbortSignal (or the timeout) sends SIGTERM, then SIGKILL after a grace period. ⚠ The CLI
 //     exits 0 on SIGTERM (measured, ~20 ms), so "cancelled" is OUR flag, never read off the exit code.
+//   • ⚠ THE WHOLE PROCESS GROUP IS SIGNALLED, never the one pid. The native CLI starts children of its
+//     own (Limn's workspace MCP server, the PreToolUse hook, a sandboxed tool), and a signal to the CLI
+//     alone can leave them running. So the child is spawned DETACHED (its own process group; POSIX
+//     only — on Windows the child alone is signalled) and every signal goes to `-pid`, ESRCH-safe.
+//     When the CLI exits, whatever is left in its group is ended too, and a Limn process that exits
+//     mid-run SIGKILLs every live group (`process.on('exit')`).
 //   • A cancelled or timed-out run reports `usage: null` — Codex emits no `turn.completed` for it, and
 //     an unknown figure is never written as zero.
 //   • It RESOLVES for every run that started (any exit code); the caller decides what a non-zero exit
@@ -47,6 +53,31 @@ export interface CodexExecResult {
 
 const STDERR_KEEP = 64 * 1024;
 
+/** POSIX: a run is its own process group. Windows has no `-pid`; the child alone is signalled. */
+const GROUPS = process.platform !== 'win32';
+
+/** Signal a run's process group (POSIX) or its child (Windows). Never throws: ESRCH means "gone". */
+export function signalRun(pid: number | undefined, sig: NodeJS.Signals): void {
+  if (pid === undefined) return;
+  try {
+    process.kill(GROUPS ? -pid : pid, sig);
+  } catch {
+    // ESRCH: the group is already gone. EPERM: not ours. Neither is an error of the run.
+  }
+}
+
+// Every live run, so a Limn that exits mid-run does not orphan a Codex process group.
+const live = new Set<number>();
+let exitHooked = false;
+function track(pid: number): void {
+  live.add(pid);
+  if (exitHooked) return;
+  exitHooked = true;
+  process.on('exit', () => {
+    for (const p of live) signalRun(p, 'SIGKILL');
+  });
+}
+
 export async function runCodexExec(args: readonly string[], opts: CodexExecOptions): Promise<CodexExecResult> {
   const binary = opts.binary ?? (await codexBinary());
   if (opts.signal?.aborted) {
@@ -58,9 +89,10 @@ export async function runCodexExec(args: readonly string[], opts: CodexExecOptio
       cwd: opts.cwd,
       env: opts.env,
       stdio: ['pipe', 'pipe', 'pipe'],
-      // Its own process group is not needed: the CLI's MCP children are its to reap, and SIGTERM
-      // left no process behind in the spike.
+      // Its OWN process group, so a stop reaches the MCP server, the hook and any tool it started.
+      detached: GROUPS,
     });
+    if (child.pid !== undefined) track(child.pid);
 
     const events: CodexEvent[] = [];
     let stdoutBuf = '';
@@ -70,14 +102,18 @@ export async function runCodexExec(args: readonly string[], opts: CodexExecOptio
     let killTimer: NodeJS.Timeout | undefined;
     let timeout: NodeJS.Timeout | undefined;
     let settled = false;
+    const grace = opts.killGraceMs ?? 5_000;
 
-    const stop = (): void => {
-      if (child.exitCode !== null || child.signalCode !== null) return;
-      child.kill('SIGTERM');
-      killTimer = setTimeout(() => {
-        if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
-      }, opts.killGraceMs ?? 5_000);
+    // SIGTERM the group now, SIGKILL it after the grace. The SIGKILL goes out whatever the leader did
+    // meanwhile: a straggler in the group is exactly what it is for. Once only.
+    const stopGroup = (): void => {
+      if (killTimer) return;
+      signalRun(child.pid, 'SIGTERM');
+      killTimer = setTimeout(() => signalRun(child.pid, 'SIGKILL'), grace);
       killTimer.unref?.();
+    };
+    const stop = (): void => {
+      if (!settled) stopGroup();
     };
     const onAbort = (): void => {
       cancelled = true;
@@ -126,8 +162,11 @@ export async function runCodexExec(args: readonly string[], opts: CodexExecOptio
       settled = true;
       if (stdoutBuf.trim()) handleLine(stdoutBuf);
       if (timeout) clearTimeout(timeout);
-      if (killTimer) clearTimeout(killTimer);
       opts.signal?.removeEventListener('abort', onAbort);
+      if (child.pid !== undefined) live.delete(child.pid);
+      // Whatever the CLI left in its group is ended now (ESRCH-safe; usually there is nothing).
+      if (killTimer) clearTimeout(killTimer);
+      signalRun(child.pid, 'SIGKILL');
       const s = summarizeEvents(events);
       const stopped = cancelled || timedOut;
       resolve({
@@ -150,7 +189,13 @@ export async function runCodexExec(args: readonly string[], opts: CodexExecOptio
       if (timeout) clearTimeout(timeout);
       if (killTimer) clearTimeout(killTimer);
       opts.signal?.removeEventListener('abort', onAbort);
+      if (child.pid !== undefined) live.delete(child.pid);
       reject(new Error(`Could not start Codex (${(err as NodeJS.ErrnoException).code ?? err.message}).`));
+    });
+    // The leader exited: a straggler in its group may still hold stdout open, which would hold back
+    // 'close' indefinitely. Signal the group now (SIGTERM, then SIGKILL after the grace).
+    child.on('exit', () => {
+      if (!settled) stopGroup();
     });
     child.on('close', finish);
   });

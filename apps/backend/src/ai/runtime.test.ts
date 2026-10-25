@@ -453,6 +453,26 @@ describe('codexBinaryIn', () => {
     expect(codexBinaryIn(prefix, 'linux', 'arm64')).toBe(realpathSync(exe));
     expect(codexBinaryIn(prefix, 'sunos', 'x64')).toBeNull();
   });
+
+  it('never finds a Codex installed ABOVE the prefix (a parent folder, a global prefix)', () => {
+    // A Codex (CLI + platform program) in a PARENT folder's node_modules; the prefix itself is empty.
+    const parent = join(root, 'codex-parent');
+    const prefix = join(parent, 'inner', 'ai-runtime');
+    write(join(prefix, 'package.json'), '{}');
+    write(join(parent, 'node_modules', '@openai', 'codex', 'package.json'), JSON.stringify({ name: '@openai/codex', version: CODEX_PIN }));
+    const exe = join(parent, 'node_modules', '@openai', 'codex-linux-arm64', 'vendor', 'aarch64-unknown-linux-musl', 'bin', 'codex');
+    write(exe, 'binary');
+    write(join(parent, 'node_modules', '@openai', 'codex-linux-arm64', 'package.json'), JSON.stringify({ name: 'x' }));
+    expect(codexBinaryIn(prefix, 'linux', 'arm64')).toBeNull();
+    // The CLI inside the prefix, its platform program only ABOVE it: still nothing.
+    write(join(prefix, 'node_modules', '@openai', 'codex', 'package.json'), JSON.stringify({ name: '@openai/codex', version: CODEX_PIN }));
+    expect(codexBinaryIn(prefix, 'linux', 'arm64')).toBeNull();
+    // Hoisted to the prefix: found.
+    const inner = join(prefix, 'node_modules', '@openai', 'codex-linux-arm64', 'vendor', 'aarch64-unknown-linux-musl', 'bin', 'codex');
+    write(inner, 'binary');
+    write(join(prefix, 'node_modules', '@openai', 'codex-linux-arm64', 'package.json'), JSON.stringify({ name: 'x' }));
+    expect(codexBinaryIn(prefix, 'linux', 'arm64')).toBe(realpathSync(inner));
+  });
 });
 
 describe('LIMN_CLAUDE_PATH', () => {

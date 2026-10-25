@@ -222,7 +222,10 @@ function firstText(content: unknown): string | null {
 
 // ---- usage --------------------------------------------------------------------------------------
 
-/** Tokens, provider-neutral. */
+/**
+ * Tokens, provider-neutral. ⚠ `reasoningOutputTokens` is a SUBSET of `outputTokens` (as cached input is
+ * of input) — it is kept for display only and must never be ADDED to `outputTokens`.
+ */
 export interface TokenUsage {
   inputTokens: number;
   cachedInputTokens: number;

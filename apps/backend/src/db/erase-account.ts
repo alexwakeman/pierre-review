@@ -1,4 +1,6 @@
 import { and, eq } from 'drizzle-orm';
+import { codexHome } from '../ai/codex/home.js';
+import { removeAllRollouts } from '../ai/codex/rollouts.js';
 import { removeAccountDocs } from '../reference-docs/library.js';
 import { db, runTransaction, schema } from './client.js';
 import { deleteRepo } from './queries.js';
@@ -293,6 +295,13 @@ export async function eraseAccountData(accountId: number): Promise<EraseResult> 
   //    uploads. After the rows, so a failure here leaves files the boot janitor removes — never rows
   //    pointing at deleted files.
   removeAccountDocs(accountId);
+
+  // 5. Codex's session files ("rollouts": prompts, pull-request text, diffs) in Limn's OWN Codex home
+  //    (ai/codex/rollouts.ts). Limn runs locally, so that home serves this one account; the sign-in
+  //    and config.toml stay (they are the machine's, removed by `limn ai logout codex`).
+  //    ⚠ A test run never touches the REAL home: under vitest only an explicit LIMN_DATA_DIR is erased.
+  const underTest = process.env.VITEST === 'true' && !process.env.LIMN_DATA_DIR;
+  if (!underTest) removeAllRollouts(codexHome());
 
   return { reposDeleted };
 }

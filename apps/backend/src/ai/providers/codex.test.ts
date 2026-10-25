@@ -106,12 +106,23 @@ appendFileSync(${JSON.stringify(T.log)}, JSON.stringify({
 }) + '\\n');
 const out = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
 const msg = (text) => out({ type: 'item.completed', item: { id: 'm', type: 'agent_message', text } });
-const done = (i, o) => out({ type: 'turn.completed', usage: { input_tokens: i, cached_input_tokens: 0, cache_write_input_tokens: 0, output_tokens: o, reasoning_output_tokens: 0 } });
+const done = (i, o, r = 0) => out({ type: 'turn.completed', usage: { input_tokens: i, cached_input_tokens: 0, cache_write_input_tokens: 0, output_tokens: o, reasoning_output_tokens: r } });
 const scenario = resumeId ? resumeId.replace(/^th-/, '') : stdin.split(/\\s/)[0];
 const thread = (s) => out({ type: 'thread.started', thread_id: 'th-' + s });
 switch (scenario) {
   case 'COMPLETE': thread('x'); out({ type: 'turn.started' }); msg('  hello there  '); done(10, 2); break;
   case 'GOOD': thread('x'); msg('{"answer":"yes","note":null}'); done(100, 10); break;
+  case 'COMPLETEREASON': thread('x'); msg('hi'); done(10, 8, 6); break;
+  case 'REASON': thread('x'); msg('{"answer":"yes","note":null}'); done(100, 10, 7); break;
+  case 'SHAPEBAD':
+    thread('SHAPEBAD');
+    if (resumeId) { msg('{"answer":"yes","note":"fine"}'); done(200, 20); } else { msg('{"answer":"yes","note":7}'); done(100, 10); }
+    break;
+  case 'THROW': thread('x'); msg('{"answer":"throw","note":null}'); done(60, 6); break;
+  case 'WRITETHROW':
+    thread('x');
+    writeFileSync(join(cwd, 'partial.txt'), 'p');
+    msg('{"answer":"throw","note":null}'); done(50, 5); break;
   case 'BADTHENGOOD':
     thread('BADTHENGOOD');
     if (resumeId) { msg('{"answer":"fixed","note":"n"}'); done(250, 30); } else { msg('not json'); done(100, 10); }
@@ -258,6 +269,7 @@ const resultTool = {
   handle: (args: unknown) => {
     handled.push(args);
     const a = args as { answer?: unknown };
+    if (a.answer === 'throw') throw new Error('handler blew up');
     return typeof a.answer === 'string' && a.answer !== 'wrong'
       ? { text: 'ok' }
       : { text: 'answer must not be "wrong"', isError: true };
@@ -375,6 +387,44 @@ describe('runAgentUnchecked() — one read-only run', () => {
     expect(T.recorded).toEqual([expect.objectContaining({ inputTokens: null, outputTokens: null, costUsd: 0 })]);
   });
 
+  it('PARSES the answer against the tool’s zod shape before the handler: a shape issue is retried with its path, never handed on', async () => {
+    const out = await C.runAgentUnchecked(spec('SHAPEBAD'));
+    // `note: 7` passes this handler's own check, yet it must never reach it.
+    expect(handled).toEqual([{ answer: 'yes', note: 'fine' }]);
+    const [, retry] = calls();
+    expect(retry.stdin).toContain('note:');
+    expect(out.text).toBe('{"answer":"yes","note":"fine"}');
+  });
+
+  it('counts reasoning tokens ONCE (they are a subset of output tokens)', async () => {
+    const out = await C.runAgentUnchecked(spec('REASON'));
+    expect(out.usage).toMatchObject({ outputTokens: 10, reasoningOutputTokens: 7 });
+    expect(T.recorded).toEqual([expect.objectContaining({ inputTokens: 100, outputTokens: 10 })]);
+    const res = await C.codexProvider.complete({ prompt: 'COMPLETEREASON', usageRecord: { accountId: 1, seam: 'summary', feature: 'x' } as any });
+    expect(res.usage).toEqual({ inputTokens: 10, outputTokens: 8 });
+    expect(T.recorded[1]).toMatchObject({ outputTokens: 8 });
+  });
+
+  it('a handler that THROWS fails the run as a CodexRunError, and the tokens are still recorded', async () => {
+    const err = await C.runAgentUnchecked(spec('THROW')).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(C.CodexRunError);
+    expect((err as Error).message).toBe("Codex's run failed: handler blew up");
+    expect(T.recorded).toEqual([expect.objectContaining({ inputTokens: 60, outputTokens: 6 })]);
+  });
+
+  it('deletes the run’s own session file once it settles, and no other', async () => {
+    const day = join(T.home, 'sessions', '2026', '10', '25');
+    mkdirSync(day, { recursive: true });
+    const mine = join(day, 'rollout-2026-10-25T10-00-00-th-x.jsonl');
+    const other = join(day, 'rollout-2026-10-25T10-00-00-th-other.jsonl');
+    writeFileSync(mine, '{}');
+    writeFileSync(other, '{}');
+    await C.runAgentUnchecked(spec('GOOD'));
+    expect(existsSync(mine)).toBe(false);
+    expect(existsSync(other)).toBe(true); // another run's (still fresh) file is not this run's to delete
+    rmSync(join(T.home, 'sessions'), { recursive: true, force: true });
+  });
+
   it('needs exactly one result tool unless one is named', () => {
     const other = { ...resultTool, name: 'submit_plan' };
     expect(() => C.pickResultTool({ tools: { server: 's', tools: [resultTool, other] } })).toThrow(/exactly one result tool/);
@@ -401,6 +451,15 @@ describe('runAgentUnchecked() — a write run', () => {
     expect(c.get('sandbox_mode')).toBe('"workspace-write"');
     expect(c.get('sandbox_workspace_write.exclude_slash_tmp')).toBe('true');
     expect(c.has('hooks.PreToolUse')).toBe(true);
+  });
+
+  it('a handler that throws on a WRITE run still reports what is on disk', async () => {
+    T.trusted.value = true;
+    const wt = repo();
+    const err = await C.runAgentUnchecked(spec('WRITETHROW', { cwd: wt, writeRoots: [wt] })).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(C.CodexRunError);
+    expect((err as InstanceType<typeof C.CodexRunError>).filesChanged).toEqual([join(realpathSync(wt), 'partial.txt')]);
+    expect(T.recorded).toHaveLength(1);
   });
 
   it('a change outside the write roots fails the run', async () => {
