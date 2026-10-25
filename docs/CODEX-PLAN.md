@@ -123,6 +123,26 @@ worktree. A `PreToolUse` hook on `apply_patch` repeats the path check as a secon
 shows hooks can be enabled per run without the interactive trust step; if not, the sandbox alone
 bounds writes, and that is recorded as a decision.
 
+**Built in Phase 2(b)** (branch `codex/p2-mcp-hook`, `apps/backend/src/ai/codex/`):
+- `workspace-mcp.ts` (+ entry `workspace-mcp-main.ts`, tools in `workspace-files.ts`): a hand-rolled
+  newline JSON-RPC server, NOT the MCP SDK — it is Codex's child process, so it cannot use
+  `ai/runtime.ts`'s loader, and node built-ins keep a Codex-only install free of the MCP SDK.
+  Every path is placed by `realPathFor` in `review/path-guard.ts` (the Claude hook's rule).
+  `search` and globs run on `linear-regex.ts` (a Pike VM, no back-references or look-around),
+  and every cap is stated in the answer.
+- `hook.ts` (+ entry `path-guard-hook-main.ts`, rule in `hook-rule.ts`): denies writes outside the
+  write roots, and every MCP tool that is not `mcp__workspace__*`. It fails closed (exit 2) on any
+  error. ⚠ The roots travel in `LIMN_CODEX_GUARD` (`hook.env`, which the runner MUST merge into the
+  `codex exec` env), so the command and its trust hash are the same for every run. There is ONE
+  trust slot per key, so concurrent runs with different hashes would untrust each other without a
+  word. The trust hash is sha256 of sorted-key JSON
+  `{"event_name","hooks":[{"async","command","timeout","type"}],"matcher"}`, pinned in `hook.test.ts`
+  against `hooks/list`. `verifyHookTrusted` = `hooks/list` says `trusted` with our hash, AND the
+  command denies a canary call.
+- Live (`mcp-hook.live.test.ts`, 2 runs on gpt-6-luna): the hook ran for MCP calls and
+  `apply_patch` with its env roots, and denied `../outside/secret.env` and `../outside/pwned.txt`.
+  Codex 0.164 sends `apply_patch` input as `{"command":"*** Begin Patch…"}`.
+
 ### 3.4 Results instead of `submit_*` tools
 
 The 13 result tools (`submit_review`, `submit_fix`, `submit_plan`, `submit_resolution`,

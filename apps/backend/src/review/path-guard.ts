@@ -58,6 +58,17 @@ function expandHome(p: string): string {
   return p;
 }
 
+/**
+ * THE ONE RESOLUTION RULE: `raw` (a path an agent named) resolved against `from` — `~` expanded,
+ * `..` folded, symlinks followed on the deepest existing ancestor. Null for a path carrying a NUL
+ * byte (never a real file name; refused). The Claude hook above and Codex's workspace MCP server +
+ * PreToolUse hook (`ai/codex/`) all place a path through this, then test it with `isWithin`.
+ */
+export function realPathFor(raw: string, from: string): string | null {
+  if (raw.includes('\u0000')) return null;
+  return resolveReal(resolve(from, expandHome(raw)));
+}
+
 /** True when `p` is `root` or inside it (both already absolute and real). */
 export function isWithin(root: string, p: string): boolean {
   const rel = relative(root, p);
@@ -94,9 +105,8 @@ export function createPathGuard(
   });
   // 'rw' = inside an ordinary root; 'ro' = inside a read-only root only; null = outside every root.
   const placed = (raw: string, from: string): 'rw' | 'ro' | null => {
-    if (raw.includes('\u0000')) return null;
-    const abs = resolve(from, expandHome(raw));
-    const real = resolveReal(abs);
+    const real = realPathFor(raw, from);
+    if (real == null) return null;
     if (roots.some((r) => isWithin(r, real))) return 'rw';
     if (readOnly.some((r) => isWithin(r, real))) return 'ro';
     return null;
