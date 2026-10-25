@@ -31,6 +31,10 @@ interface Session {
 let state: CodexLoginState = { state: 'idle' };
 let session: Session | null = null;
 let starting: Promise<CodexLoginState> | null = null;
+// ⚠ Bumped by every cancel (and every start). A start that awaits across a cancel finds a different
+// number when it resumes and touches NOTHING — no session, no state — so a "cancelled" sign-in can
+// neither come back to life as `waiting` nor be overwritten as `failed` by the start it cancelled.
+let generation = 0;
 
 /** The sign-in's state, for the SPA's poll. */
 export function codexLoginState(): CodexLoginState {
@@ -53,18 +57,28 @@ const str = (v: unknown): string | null => (typeof v === 'string' && v.length > 
 export function startCodexLogin(method: CodexLoginMethod, opts: { timeoutMs?: number } = {}): Promise<CodexLoginState> {
   if (starting) return starting;
   if (session && state.state === 'waiting') return Promise.resolve(state);
+  const gen = ++generation;
+  const current = (): boolean => gen === generation;
   starting = (async (): Promise<CodexLoginState> => {
     const spawnOpts = limnAppServerOptions();
     if (!spawnOpts) return (state = { state: 'failed', message: CODEX_NOT_INSTALLED_MESSAGE });
+    let server: CodexAppServer | null = null;
     try {
       // The home must hold file-store auth BEFORE the sign-in writes anything.
       await ensureCodexHomeConfig(null);
-      const server = await CodexAppServer.start(spawnOpts);
+      if (!current()) return state; // cancelled meanwhile
+      server = await CodexAppServer.start(spawnOpts);
+      if (!current()) {
+        server.close();
+        return state;
+      }
+      const own = server;
       const timer = setTimeout(() => {
         void cancelCodexLogin('The sign-in took too long and was stopped. Try again.');
       }, opts.timeoutMs ?? CODEX_LOGIN_TIMEOUT_MS);
       session = { server, loginId: null, timer };
       server.on('account/login/completed', (params) => {
+        if (session?.server !== own) return; // a cancelled (or replaced) sign-in's late answer
         const p = (params ?? {}) as { success?: unknown; error?: unknown; loginId?: unknown };
         if (session?.loginId && str(p.loginId) && p.loginId !== session.loginId) return; // another flow's
         state =
@@ -75,7 +89,7 @@ export function startCodexLogin(method: CodexLoginMethod, opts: { timeoutMs?: nu
         void invalidateCodexState();
       });
       void server.exited.then(() => {
-        if (session?.server === server && state.state === 'waiting') {
+        if (session?.server === own && state.state === 'waiting') {
           state = { state: 'failed', message: 'Codex stopped before the sign-in finished. Try again.' };
           endSession();
         }
@@ -83,7 +97,8 @@ export function startCodexLogin(method: CodexLoginMethod, opts: { timeoutMs?: nu
       const res = (await server.request('account/login/start', {
         type: method === 'device' ? 'chatgptDeviceCode' : 'chatgpt',
       })) as Record<string, unknown> | null;
-      if (session) session.loginId = str(res?.loginId);
+      if (!current() || session?.server !== own) return state; // cancelled while it started
+      session.loginId = str(res?.loginId);
       state = {
         state: 'waiting',
         method,
@@ -98,6 +113,12 @@ export function startCodexLogin(method: CodexLoginMethod, opts: { timeoutMs?: nu
       }
       return state;
     } catch (err) {
+      // A start the reader cancelled fails BECAUSE of the cancel (its server was closed): the cancel's
+      // state stands, and the session (if any) is the cancel's to have ended, not ours.
+      if (!current()) {
+        if (server && session?.server !== server) server.close();
+        return state;
+      }
       endSession();
       return (state = { state: 'failed', message: `The Codex sign-in could not start: ${(err as Error).message}` });
     }
@@ -109,6 +130,7 @@ export function startCodexLogin(method: CodexLoginMethod, opts: { timeoutMs?: nu
 
 /** Stop a running sign-in. `message` set ⇒ it ends as `failed` with it; otherwise back to idle. */
 export async function cancelCodexLogin(message?: string): Promise<CodexLoginState> {
+  generation++; // a start still in flight now owns nothing (see `generation`)
   const s = session;
   if (s) {
     if (s.loginId) await s.server.request('account/login/cancel', { loginId: s.loginId }, 5_000).catch(() => {});
@@ -137,6 +159,7 @@ export async function codexLogout(): Promise<string | null> {
 
 /** Test hook. */
 export function _resetCodexLoginForTest(): void {
+  generation++;
   endSession();
   state = { state: 'idle' };
   starting = null;

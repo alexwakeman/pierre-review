@@ -48,6 +48,7 @@ process.stdin.on('data', (d) => {
         ok({ summary: { lifetimeTokens: 12345 }, dailyUsageBuckets: [{ startDate: '2026-10-25', tokens: 500 }] });
         break;
       case 'account/login/start':
+        if (mode === 'login-slow') { setTimeout(() => ok({ type: 'chatgpt', loginId: 'L1', authUrl: 'https://auth.openai.com/oauth/authorize?x=1' }), 400); break; }
         if (m.params?.type === 'chatgptDeviceCode') ok({ type: 'chatgptDeviceCode', loginId: 'L2', userCode: 'ABCD-1234', verificationUrl: 'https://auth.openai.com/codex/device' });
         else ok({ type: 'chatgpt', loginId: 'L1', authUrl: 'https://auth.openai.com/oauth/authorize?x=1' });
         if (mode === 'login-ok') setTimeout(() => send({ jsonrpc: '2.0', method: 'account/login/completed', params: { success: true, loginId: m.params?.type === 'chatgptDeviceCode' ? 'L2' : 'L1', error: null } }), 50);

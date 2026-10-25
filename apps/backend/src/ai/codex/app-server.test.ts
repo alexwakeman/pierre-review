@@ -236,6 +236,22 @@ describe('the sign-in', () => {
     expect(calls().find((c) => c.method === 'account/login/cancel')?.params).toEqual({ loginId: 'L2' });
   });
 
+  it('a cancel DURING the start window wins: the start it cancelled never overwrites it, nor comes back as waiting', async () => {
+    process.env.FAKE_CODEX_MODE = 'login-slow';
+    const pending = L.startCodexLogin('browser');
+    // Cancel while `account/login/start` is still unanswered (the fake answers after 400 ms).
+    await new Promise((r) => setTimeout(r, 150));
+    expect(await L.cancelCodexLogin()).toEqual({ state: 'idle' });
+    expect(await pending).toEqual({ state: 'idle' });
+    await new Promise((r) => setTimeout(r, 500));
+    expect(L.codexLoginState()).toEqual({ state: 'idle' });
+    // Cancelled before the process even started: the same.
+    const early = L.startCodexLogin('browser');
+    await L.cancelCodexLogin();
+    expect(await early).toEqual({ state: 'idle' });
+    expect(L.codexLoginState()).toEqual({ state: 'idle' });
+  });
+
   it('a refused sign-in says so', async () => {
     process.env.FAKE_CODEX_MODE = 'login-fail';
     await L.startCodexLogin('browser');
