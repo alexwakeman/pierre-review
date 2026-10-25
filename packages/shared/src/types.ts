@@ -4118,7 +4118,10 @@ export interface AiCodexProviderStatus {
   /** The Codex program (installed on request: "Set up AI" with Codex, `limn ai install codex`). */
   runtime: 'ready' | 'absent' | 'installing' | 'failed';
   runtimeMessage: string | null;
-  /** A credential is there: a ChatGPT sign-in in Limn's Codex home, or OPENAI_API_KEY. */
+  /**
+   * A credential that can RUN is there: a ChatGPT sign-in in Limn's Codex home. ⚠ The API-key route
+   * (`route: 'api_key'`, OPENAI_API_KEY) reads 'none' — it is refused until Limn can price it.
+   */
   auth: 'ok' | 'none';
   route: 'login' | 'api_key' | 'none';
   /** Signed in to Codex in Limn's own home (by the last `account/read`). */

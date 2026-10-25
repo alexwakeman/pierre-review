@@ -251,6 +251,17 @@ export async function writeAiBudgetSettings(
 
 // ---- the status and the gate ----------------------------------------------------------------------
 
+/**
+ * Where the ledger read starts: the week, today, and every account-token span's start (a Codex day
+ * bucket can start before the week window; Limn's tokens must be counted over the account's span
+ * EXACTLY, so the read must reach back to it). Exported for the test.
+ */
+export function ledgerSinceMs(nowMs: number, accountTokens: AiAccountTokens | null): number {
+  const starts = [nowMs - WEEK_MS, localMidnightMs(nowMs)];
+  for (const s of [accountTokens?.week, accountTokens?.fiveHour]) if (s && Number.isFinite(s.fromMs)) starts.push(s.fromMs);
+  return Math.min(...starts);
+}
+
 /** Limn's recorded spend since `sinceMs` — ONE provider's rows only (a budget is per provider). */
 async function readLedger(accountId: number, sinceMs: number, providerId: AgentProviderId): Promise<LedgerRow[]> {
   const { aiUsage } = schema;
@@ -361,16 +372,17 @@ export async function aiBudgetSnapshot(accountId: number, opts: AiBudgetStatusOp
   const probe = opts.probe ?? 'when_on';
   if (route === 'login' && (probe === 'always' || (probe === 'when_on' && settings.enabled))) kickUsageProbe(nowMs, provider);
   const isCodex = provider.id === 'codex';
-  const [reading, ledger, costs] = await Promise.all([
-    route === 'login' ? readingFor(provider) : Promise.resolve(null),
-    readLedger(accountId, Math.min(nowMs - WEEK_MS, localMidnightMs(nowMs)), provider.id),
+  const reading = route === 'login' ? await readingFor(provider) : null;
+  // Codex's share is TOKEN-WEIGHTED (packages/shared ai-budget.ts): the account's tokens over a span,
+  // and Limn's counted over EXACTLY that span — so the ledger is read from the EARLIEST span start (a
+  // day bucket may start before the week window).
+  const accountTokens = isCodex && route === 'login' ? await codexAccountTokensFor(reading, nowMs) : null;
+  const [ledger, costs] = await Promise.all([
+    readLedger(accountId, ledgerSinceMs(nowMs, accountTokens), provider.id),
     settings.enabled && route === 'login' && !isCodex
       ? readCycleCosts(accountId, nowMs, provider.id)
       : Promise.resolve(NO_CYCLE_COSTS),
   ]);
-  // Codex's share is TOKEN-WEIGHTED (packages/shared ai-budget.ts): the account's tokens over the
-  // SAME windows the fold counts Limn's in.
-  const accountTokens = isCodex && route === 'login' ? await codexAccountTokensFor(reading, nowMs) : null;
   const providerId = provider.id;
   return {
     settings,

@@ -53,8 +53,7 @@ users.
   recorded as Codex (its model, its own US$) — `review/cheap-usage.ts`, the platform `LlmClient`.
 - The run is its own process group; every stop signals `-pid` (MCP server, hook and tools included).
 - Session files ("rollouts") are deleted when a run settles, swept after a day, erased with the account
-  (`ai/codex/rollouts.ts`). ⚠ Codex's own sqlite state in the home (`state_5`, `logs_2`,
-  `thread_history_1`) is NOT touched yet.
+  (`ai/codex/rollouts.ts`). Codex's own sqlite copy is handled since the second round (below).
 - The hook's matcher is `.*` and the rule an ALLOW-list (write tools and `mcp__workspace__*`
   path-checked, `update_plan`; everything else denied). Patch headers count only in header position.
 - The share's account tokens carry the SPAN they cover (`AiAccountTokenSpan`) and Limn's ledger is
@@ -62,6 +61,37 @@ users.
   an UNKNOWN share (never blocks); a share with no live reset is never over.
 - Codex is looked up inside `<runtimeDir>/node_modules` only; a sign-in cancelled while starting
   stays cancelled.
+
+**Phase 2 review fixes, round 2 (2026-10-25)** (branch `codex/p2-fix2`):
+- `complete()` runs under the SAME trusted path-guard hook as an agent run, with EMPTY read and write
+  roots (every tool but `update_plan` denied), and refuses unless `verifyHookTrusted` proves Codex will
+  run it. More locked `-c` keys, each accepted by the 0.164 CLI under `--strict-config` (live test 2b):
+  `features.image_generation`, `features.goals`, `features.apps` (connectors, `codex_apps`),
+  `features.plugins`, `features.remote_plugin`, `features.tool_suggest`,
+  `features.skill_mcp_dependency_install`, `features.memories`, `memories.generate_memories`,
+  `memories.use_memories` — all `false`.
+- The OPENAI_API_KEY route is REFUSED ("Codex with an OpenAI API key is not available yet — sign in
+  with ChatGPT") in `complete()`, `runAgent`, `detect()` and `/api/me` (`auth: 'none'`, not available)
+  until `CODEX_PRICES_PER_MTOK` holds real prices: unpriced, it recorded US$ 0 and no US$ cap tripped.
+- A Limn killed by SIGINT/SIGHUP/SIGTERM (no 'exit' event) SIGKILLs every live Codex group first, then
+  re-raises the signal when nobody else listens for it (`ai/codex/run.ts`).
+- Codex 0.164 keeps a second copy of every thread in sqlite in Limn's home. A settled run's thread is
+  deleted through Codex's own app-server `thread/delete` (its `threads` row, history rows and rollout),
+  and its `logs` rows (which no API reaches) by `thread_id` with better-sqlite3; threads and log rows
+  older than a day are swept once per process (`ai/codex/threads.ts`). Erasure deletes the sqlite
+  files themselves (`state_`, `thread_history_`, `logs_`, `memories_`, `goals_`, `queue_` + -wal/-shm),
+  never auth.json, config.toml or installation_id.
+- Every Codex-related process (the app-server, a sign-in, the hook trust probe and canary) gets the
+  run's environment ALLOW-LIST (`config.ts codexBaseEnv`), never Limn's whole environment.
+- "Set up AI" stages Codex APART from Claude: a Claude-only install keeps (moves) the old Codex and
+  never re-downloads it; a failed Codex download is recorded as Codex's failure alone and never fails
+  Claude's install.
+- The token-weighted share counts Limn's ledger over EXACTLY the account count's span — its start and
+  its END (`AiAccountTokenSpan.toMs`: the newest sample, or the last day bucket's end) — and the ledger
+  read reaches back to the earliest span start (`ledgerSinceMs`).
+- A validation retry whose usage is unknown keeps the first turn's tokens. A missing Codex install is a
+  `CodexNotInstalledError`, an `AiRuntimeMissingError`, so a cheap pass stops. A new sign-in never joins
+  a start a cancel overtook.
 
 Original status: Written 2026-10-23 after checking the current Codex docs and the published
 `@openai/codex-sdk` 0.164.0 type definitions. The work is meant to be carried out by subagents

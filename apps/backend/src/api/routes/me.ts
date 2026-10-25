@@ -204,11 +204,13 @@ function agenticAiStatus(): MeResponse['ai'] {
       codex: {
         runtime: codex.runtime,
         runtimeMessage: codex.runtimeMessage,
-        auth: codex.route === 'none' ? 'none' : 'ok',
+        // ⚠ Only a ChatGPT sign-in can run Codex: the API-key route is refused until it can be priced
+        // (its message is ai/codex/detect.ts CODEX_API_KEY_NOT_AVAILABLE_MESSAGE).
+        auth: codex.route === 'login' ? 'ok' : 'none',
         route: codex.route,
         signedIn: codex.signedIn,
         plan: codex.plan,
-        available: CODEX_RUNNABLE && codex.installed && codex.route !== 'none',
+        available: CODEX_RUNNABLE && codex.installed && codex.route === 'login',
         message: codex.message ?? (CODEX_RUNNABLE ? null : CODEX_NOT_AVAILABLE_MESSAGE),
       },
     },

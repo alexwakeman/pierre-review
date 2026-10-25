@@ -7,9 +7,13 @@
 //     files go. The provider calls it for every run that reported a thread id, success or not.
 //   • `sweepOldRollouts(home, maxAgeMs)` — anything older than a day (a run cut off by a crash, a
 //     killed Limn): once per process, before the first run.
-//   • `removeAllRollouts(home)` — account erasure (Codex is local-only, so the home has ONE account).
+//   • `removeAllRollouts(home)` — every rollout (Codex is local-only, so the home has ONE account).
+//   • `eraseCodexHistory(home)` — ACCOUNT ERASURE: every rollout AND Codex's own sqlite state in the
+//     home, which keeps a second copy of every thread (`state_<n>`, `thread_history_<n>`, `logs_<n>`,
+//     `memories_<n>`, `goals_<n>`, `queue_<n>` .sqlite, each with its -wal/-shm). The per-run and aged
+//     removal of a thread's ROWS is ai/codex/threads.ts (through Codex's own `thread/delete`).
 //
-// Only `sessions/` and `archived_sessions/` are touched; the sign-in (auth.json) and config.toml never.
+// The sign-in (auth.json), config.toml and installation_id are NEVER touched.
 // Every function is best-effort and never throws: a cleanup failure must not fail the run it follows.
 import { readdirSync, rmSync, statSync, unlinkSync } from 'node:fs';
 import { basename, join } from 'node:path';
@@ -91,4 +95,37 @@ export function removeAllRollouts(home: string): void {
       /* best effort */
     }
   }
+}
+
+/** Codex's own sqlite state files (with their WAL, shared-memory and journal files). */
+export const CODEX_STATE_FILE = /^(state|thread_history|logs|memories|goals|queue)_\d+\.sqlite(-wal|-shm|-journal)?$/;
+/** Folders of per-run leftovers, removed whole at erasure. */
+const ERASE_DIRS = [...ROLLOUT_DIRS, 'shell_snapshots', 'thread-writer-locks'] as const;
+/** Never erased: the sign-in, Limn's config, Codex's install id. */
+const KEEP = new Set(['auth.json', 'config.toml', 'installation_id']);
+
+/**
+ * Account erasure: every rollout and every one of Codex's sqlite state files in Limn's Codex home.
+ * Never the sign-in, config.toml or installation_id. Returns the names removed (for the test).
+ */
+export function eraseCodexHistory(home: string): string[] {
+  const removed: string[] = [];
+  for (const d of ERASE_DIRS) {
+    try {
+      rmSync(join(home, d), { recursive: true, force: true });
+    } catch {
+      /* best effort */
+    }
+  }
+  let names: string[];
+  try {
+    names = readdirSync(home);
+  } catch {
+    return removed;
+  }
+  for (const name of names) {
+    if (KEEP.has(name) || !CODEX_STATE_FILE.test(name)) continue;
+    if (unlinkQuiet(join(home, name))) removed.push(name);
+  }
+  return removed;
 }

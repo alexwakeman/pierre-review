@@ -30,7 +30,10 @@ interface Session {
 
 let state: CodexLoginState = { state: 'idle' };
 let session: Session | null = null;
-let starting: Promise<CodexLoginState> | null = null;
+// The start in flight, TAGGED with its generation: a POST joins it only while it is still the current
+// one. ⚠ A start that a cancel overtook keeps running until it notices; a new sign-in must not join it
+// (it would answer the cancelled state), and its `finally` must not clear a NEWER start's slot.
+let starting: { gen: number; promise: Promise<CodexLoginState> } | null = null;
 // ⚠ Bumped by every cancel (and every start). A start that awaits across a cancel finds a different
 // number when it resumes and touches NOTHING — no session, no state — so a "cancelled" sign-in can
 // neither come back to life as `waiting` nor be overwritten as `failed` by the start it cancelled.
@@ -55,11 +58,11 @@ const str = (v: unknown): string | null => (typeof v === 'string' && v.length > 
  * open, or `failed` with one sentence. Never throws.
  */
 export function startCodexLogin(method: CodexLoginMethod, opts: { timeoutMs?: number } = {}): Promise<CodexLoginState> {
-  if (starting) return starting;
+  if (starting && starting.gen === generation) return starting.promise;
   if (session && state.state === 'waiting') return Promise.resolve(state);
   const gen = ++generation;
   const current = (): boolean => gen === generation;
-  starting = (async (): Promise<CodexLoginState> => {
+  const promise = (async (): Promise<CodexLoginState> => {
     const spawnOpts = limnAppServerOptions();
     if (!spawnOpts) return (state = { state: 'failed', message: CODEX_NOT_INSTALLED_MESSAGE });
     let server: CodexAppServer | null = null;
@@ -123,9 +126,10 @@ export function startCodexLogin(method: CodexLoginMethod, opts: { timeoutMs?: nu
       return (state = { state: 'failed', message: `The Codex sign-in could not start: ${(err as Error).message}` });
     }
   })().finally(() => {
-    starting = null;
+    if (starting?.gen === gen) starting = null;
   });
-  return starting;
+  starting = { gen, promise };
+  return promise;
 }
 
 /** Stop a running sign-in. `message` set ⇒ it ends as `failed` with it; otherwise back to idle. */

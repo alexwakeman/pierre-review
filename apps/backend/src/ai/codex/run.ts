@@ -10,6 +10,13 @@
 //     only — on Windows the child alone is signalled) and every signal goes to `-pid`, ESRCH-safe.
 //     When the CLI exits, whatever is left in its group is ended too, and a Limn process that exits
 //     mid-run SIGKILLs every live group (`process.on('exit')`).
+//   • ⚠ A SIGNAL KILLS LIMN WITHOUT 'exit'. SIGINT (Ctrl-C), SIGHUP (the terminal closed) and SIGTERM
+//     end a Node process by default with NO 'exit' event, and a detached group outlives its parent —
+//     so Codex would be orphaned, still spending. Once, at the first run, a handler per signal SIGKILLs
+//     every live group; then, when it is the ONLY listener for that signal (nobody else decided what
+//     the signal means), it removes itself and RE-RAISES the signal, so the default action still ends
+//     Limn exactly as before. When another listener exists (index.ts drains on SIGTERM and then calls
+//     process.exit), that listener owns the exit and 'exit' fires as usual.
 //   • A cancelled or timed-out run reports `usage: null` — Codex emits no `turn.completed` for it, and
 //     an unknown figure is never written as zero.
 //   • It RESOLVES for every run that started (any exit code); the caller decides what a non-zero exit
@@ -69,13 +76,39 @@ export function signalRun(pid: number | undefined, sig: NodeJS.Signals): void {
 // Every live run, so a Limn that exits mid-run does not orphan a Codex process group.
 const live = new Set<number>();
 let exitHooked = false;
+
+/** SIGKILL every live run's group (sync: it runs from 'exit' and from signal handlers). */
+function killLive(): void {
+  for (const p of live) signalRun(p, 'SIGKILL');
+}
+
+/** The signals that end Node WITHOUT an 'exit' event. */
+export const FATAL_SIGNALS: readonly NodeJS.Signals[] = ['SIGINT', 'SIGHUP', 'SIGTERM'];
+
+function onFatalSignal(sig: NodeJS.Signals): void {
+  killLive();
+  const mine = signalHandlers.get(sig);
+  // Somebody else listens for this signal: it decides what happens (and exits through 'exit').
+  if (!mine || process.listenerCount(sig) > 1) return;
+  // Ours alone: restore the default action and re-raise, so Limn ends as it would have without us.
+  process.removeListener(sig, mine);
+  signalHandlers.delete(sig);
+  process.kill(process.pid, sig);
+}
+const signalHandlers = new Map<NodeJS.Signals, () => void>();
+
 function track(pid: number): void {
   live.add(pid);
   if (exitHooked) return;
   exitHooked = true;
-  process.on('exit', () => {
-    for (const p of live) signalRun(p, 'SIGKILL');
-  });
+  process.on('exit', killLive);
+  // Windows has no process groups and no POSIX signal semantics to restore: 'exit' only there.
+  if (!GROUPS) return;
+  for (const sig of FATAL_SIGNALS) {
+    const h = (): void => onFatalSignal(sig);
+    signalHandlers.set(sig, h);
+    process.on(sig, h);
+  }
 }
 
 export async function runCodexExec(args: readonly string[], opts: CodexExecOptions): Promise<CodexExecResult> {

@@ -40,7 +40,9 @@
 // `limnAiRuntime['@openai/codex']`, DECLARED in apps/backend/package.json's own `limnAiRuntime`
 // (the CLI is not a workspace dependency — 360 MB unpacked in every dev checkout) and copied into
 // the release manifest by scripts/build-release.mjs. An install keeps Codex if it is already there,
-// so re-running "Set up AI" for Claude never removes it.
+// so re-running "Set up AI" for Claude never removes it — and never re-downloads it either: Codex is
+// staged APART from Claude's packages, so a Codex failure is recorded as Codex's alone and never
+// blocks Claude's install or repair.
 //
 // ⚠ NOTHING ELSE MAY IMPORT THESE PACKAGES. Type-only imports are fine (erased at emit); a value
 // import anywhere else fails with ERR_MODULE_NOT_FOUND on an npm install — and only when someone
@@ -49,6 +51,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import {
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   renameSync,
@@ -58,6 +61,7 @@ import {
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { resolveDataDir } from '../data-dir.js';
+import { AiRuntimeMissingError } from './runtime-errors.js';
 
 export const AI_RUNTIME_PACKAGES = [
   '@anthropic-ai/claude-agent-sdk',
@@ -123,17 +127,8 @@ export interface AiRuntimeInstallProgress {
 }
 export type AiRuntimeInstallResult = { ok: true } | { ok: false; message: string };
 
-export const AI_RUNTIME_MISSING_MESSAGE =
-  'AI is not set up yet. Press "Set up AI" in Limn, or run: limn ai install';
-
-/** Thrown by a loader when no source carries the package. Its message is safe to show. */
-export class AiRuntimeMissingError extends Error {
-  readonly code = 'AI_RUNTIME_MISSING';
-  constructor(readonly pkg: string) {
-    super(AI_RUNTIME_MISSING_MESSAGE);
-    this.name = 'AiRuntimeMissingError';
-  }
-}
+// The error (and its sentence) live in ./runtime-errors.ts so a subclass can load without this module.
+export { AI_RUNTIME_MISSING_MESSAGE, AiRuntimeMissingError } from './runtime-errors.js';
 
 // ---- package location (no exports-map surprises) ----------------------------------------------
 
@@ -651,69 +646,39 @@ export function createAiRuntime(opts: AiRuntimeOptions = {}) {
     // Codex while a Claude-only download runs joins it too; Codex then still reads 'absent' and the
     // next press downloads it.
     if (inFlight) return inFlight.finally(detach);
-    const withCodex =
-      (installOpts.providers ?? ['claude']).includes('codex') ||
-      (existsSync(join(runtimeDir, 'package.json')) && findPackageDirIn(CODEX_PACKAGE, runtimeDir) !== null);
-    inFlightCodex = withCodex;
-    inFlight = runInstall(installOpts, withCodex).finally(() => {
+    const codexRequested = (installOpts.providers ?? ['claude']).includes('codex');
+    inFlightCodex = codexRequested;
+    inFlight = runInstall(installOpts, codexRequested).finally(() => {
       inFlight = null;
       inFlightCodex = false;
     });
     return inFlight.finally(detach);
   }
 
-  async function runInstall(installOpts: InstallOptions, withCodex: boolean): Promise<AiRuntimeInstallResult> {
-    const failWith = (message: string): AiRuntimeInstallResult => {
-      lastFailure = message;
-      if (withCodex) lastCodexFailure = message;
-      emit({ phase: 'failed', message });
-      return { ok: false, message };
-    };
+  /** Write a staging prefix's package.json. Throws on a write failure. */
+  function writeStagingManifest(dir: string, dependencies: Record<string, string>): void {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, 'package.json'),
+      JSON.stringify(
+        {
+          name: 'limn-ai-runtime',
+          private: true,
+          description: 'The AI runtime Limn downloads on first use. Safe to delete; Limn can download it again.',
+          dependencies,
+        },
+        null,
+        2,
+      ) + '\n',
+    );
+  }
 
-    const want = pins();
-    if (!want) {
-      return failWith(
-        'This copy of Limn does not list which AI runtime versions to download. Update Limn and try again.',
-      );
-    }
-    const codexWant = withCodex ? codexPin() : null;
-    if (withCodex && !codexWant) {
-      return failWith('This copy of Limn does not list which Codex version to download. Update Limn and try again.');
-    }
-    const dependencies: Record<string, string> = { ...want, ...(codexWant ? { [CODEX_PACKAGE]: codexWant } : {}) };
-    const npm = installOpts.npm ?? resolveNpm(env);
-    if (!npm) return failWith('npm was not found. Install Node.js with npm, then try again.');
-
-    lastFailure = null;
-    if (withCodex) lastCodexFailure = null;
-    emit({
-      phase: 'starting',
-      message: withCodex
-        ? 'Starting the one-time download (about 110 MB, plus the Codex program).'
-        : 'Starting the one-time download (about 110 MB).',
-    });
-
-    const staging = `${runtimeDir}.staging-${process.pid}-${Date.now()}`;
-    try {
-      mkdirSync(staging, { recursive: true });
-      writeFileSync(
-        join(staging, 'package.json'),
-        JSON.stringify(
-          {
-            name: 'limn-ai-runtime',
-            private: true,
-            description: 'The AI runtime Limn downloads on first use. Safe to delete; Limn can download it again.',
-            dependencies,
-          },
-          null,
-          2,
-        ) + '\n',
-      );
-    } catch (err) {
-      rmSync(staging, { recursive: true, force: true });
-      return failWith(`Could not write to ${dataDir}: ${(err as Error).message}`);
-    }
-
+  /** `npm install` into one staging prefix. Null on success, else the one sentence of why not. */
+  async function npmInto(
+    staging: string,
+    npm: { command: string; args: string[] },
+    opts: { omitOptional: boolean; timeoutMs: number; retry: string },
+  ): Promise<string | null> {
     const args = [
       ...npm.args,
       'install',
@@ -726,32 +691,126 @@ export function createAiRuntime(opts: AiRuntimeOptions = {}) {
       '--ignore-scripts',
       '--no-package-lock',
     ];
-    // Using your own `claude`: skip the SDK's bundled ~110 MB binary (its optional dependencies).
-    // ⚠ Not with Codex: its platform program is an optional dependency too, and npm cannot omit one
-    // package's optionals and keep another's.
-    if (env.LIMN_CLAUDE_PATH?.trim() && !withCodex) args.push('--omit=optional');
-
-    const timeoutMs = installOpts.timeoutMs ?? 10 * 60_000;
+    if (opts.omitOptional) args.push('--omit=optional');
     const exit = await spawnNpm(npm, args, {
       cwd: staging,
       env,
-      timeoutMs,
+      timeoutMs: opts.timeoutMs,
       onLine: (line) => emit({ phase: 'downloading', message: line.slice(0, 200) }),
     });
-    const tail = exit.tail;
-
-    if (exit.error || exit.timedOut || exit.code !== 0) {
-      rmSync(staging, { recursive: true, force: true });
-      if (exit.error) return failWith(exit.error);
-      if (exit.timedOut) {
-        return failWith(
-          `The download took longer than ${Math.round(timeoutMs / 60_000)} minutes and was stopped. Check your network and try again: limn ai install`,
-        );
-      }
+    if (exit.error) return exit.error;
+    if (exit.timedOut) {
+      return `The download took longer than ${Math.round(opts.timeoutMs / 60_000)} minutes and was stopped. Check your network and try again: ${opts.retry}`;
+    }
+    if (exit.code !== 0) {
+      const tail = exit.tail;
       const last = tail.filter((l) => /err/i.test(l)).slice(-2).join(' ') || tail.slice(-1)[0] || '';
+      return `The download failed (npm exit code ${exit.code}). Check your network or proxy and try again: ${opts.retry}${last ? `. npm said: ${last.slice(0, 300)}` : ''}`;
+    }
+    return null;
+  }
+
+  /** The Codex package folders (`@openai/codex`, `@openai/codex-<platform>`) directly under a prefix. */
+  function codexPackageNames(prefix: string): string[] {
+    try {
+      return readdirSync(join(prefix, 'node_modules', '@openai')).filter((n) => n === 'codex' || n.startsWith('codex-'));
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Move every Codex package folder from one prefix into another (same filesystem: a rename each).
+   * Returns the moves made, so a failed swap can put them back.
+   */
+  function moveCodex(from: string, to: string): Array<{ from: string; to: string }> {
+    const moved: Array<{ from: string; to: string }> = [];
+    const names = codexPackageNames(from);
+    if (names.length === 0) return moved;
+    mkdirSync(join(to, 'node_modules', '@openai'), { recursive: true });
+    try {
+      for (const n of names) {
+        const a = join(from, 'node_modules', '@openai', n);
+        const b = join(to, 'node_modules', '@openai', n);
+        rmSync(b, { recursive: true, force: true });
+        renameSync(a, b);
+        moved.push({ from: a, to: b });
+      }
+    } catch (err) {
+      for (const m of moved.reverse()) {
+        try {
+          renameSync(m.to, m.from);
+        } catch {
+          /* best effort */
+        }
+      }
+      throw err;
+    }
+    return moved;
+  }
+
+  // ⚠ A CODEX PROBLEM NEVER BLOCKS CLAUDE'S INSTALL OR REPAIR. Claude's packages are staged on their
+  // own; Codex — only when asked for — in a SEPARATE staging prefix, and a Codex failure is recorded as
+  // Codex's alone (`lastCodexFailure`), never as Claude's. Whatever Codex the old runtime had is
+  // carried over UNTOUCHED (moved, never re-downloaded) unless a fresh one was staged successfully, so
+  // a Claude-only "Set up AI" neither re-installs Codex nor removes it.
+  async function runInstall(installOpts: InstallOptions, codexRequested: boolean): Promise<AiRuntimeInstallResult> {
+    const failWith = (message: string): AiRuntimeInstallResult => {
+      lastFailure = message;
+      // Codex rides the same runtime directory: a Claude download that failed set up no Codex either.
+      if (codexRequested) lastCodexFailure = message;
+      emit({ phase: 'failed', message });
+      return { ok: false, message };
+    };
+    const codexOnlyFailure = (message: string): AiRuntimeInstallResult => {
+      lastCodexFailure = message;
+      emit({ phase: 'failed', message });
+      return { ok: false, message };
+    };
+
+    const want = pins();
+    if (!want) {
       return failWith(
-        `The download failed (npm exit code ${exit.code}). Check your network or proxy and try again: limn ai install${last ? `. npm said: ${last.slice(0, 300)}` : ''}`,
+        'This copy of Limn does not list which AI runtime versions to download. Update Limn and try again.',
       );
+    }
+    const codexWant = codexRequested ? codexPin() : null;
+    if (codexRequested && !codexWant) {
+      // A Codex problem: Claude's state is not touched.
+      return codexOnlyFailure('This copy of Limn does not list which Codex version to download. Update Limn and try again.');
+    }
+    const npm = installOpts.npm ?? resolveNpm(env);
+    if (!npm) return failWith('npm was not found. Install Node.js with npm, then try again.');
+
+    lastFailure = null;
+    if (codexRequested) lastCodexFailure = null;
+    emit({
+      phase: 'starting',
+      message: codexRequested
+        ? 'Starting the one-time download (about 110 MB, plus the Codex program).'
+        : 'Starting the one-time download (about 110 MB).',
+    });
+
+    const stamp = `${process.pid}-${Date.now()}`;
+    const staging = `${runtimeDir}.staging-${stamp}`;
+    try {
+      writeStagingManifest(staging, { ...want });
+    } catch (err) {
+      rmSync(staging, { recursive: true, force: true });
+      return failWith(`Could not write to ${dataDir}: ${(err as Error).message}`);
+    }
+
+    const timeoutMs = installOpts.timeoutMs ?? 10 * 60_000;
+    // Using your own `claude`: skip the SDK's bundled ~110 MB binary (its optional dependencies). Codex
+    // is staged apart, so this no longer depends on whether Codex comes too.
+    const claudeError = await npmInto(staging, npm, {
+      omitOptional: !!env.LIMN_CLAUDE_PATH?.trim(),
+      timeoutMs,
+      retry: 'limn ai install',
+    });
+    if (claudeError) {
+      rmSync(staging, { recursive: true, force: true });
+      return failWith(claudeError);
     }
 
     emit({ phase: 'verifying', message: 'Checking the download.' });
@@ -771,36 +830,76 @@ export function createAiRuntime(opts: AiRuntimeOptions = {}) {
         `The download finished but the Claude Code program for ${process.platform}-${process.arch} is missing from it. Try again: limn ai install. Or set LIMN_CLAUDE_PATH to your own claude.`,
       );
     }
+
+    // ---- Codex: a fresh one (when asked for, in its own staging), else the old one, carried over ----
+    let codexError: string | null = null;
+    let codexStaging: string | null = null;
     if (codexWant) {
-      const codexDir = findPackageDirIn(CODEX_PACKAGE, staging);
-      if (!codexDir || installedVersion(codexDir) !== codexWant) {
-        rmSync(staging, { recursive: true, force: true });
-        return failWith(`The download finished but ${CODEX_PACKAGE} ${codexWant} is missing from it. Try again: limn ai install codex`);
+      codexStaging = `${runtimeDir}.codex-staging-${stamp}`;
+      try {
+        writeStagingManifest(codexStaging, { [CODEX_PACKAGE]: codexWant });
+        // ⚠ Never --omit=optional: Codex's platform program IS an optional dependency.
+        codexError = await npmInto(codexStaging, npm, { omitOptional: false, timeoutMs, retry: 'limn ai install codex' });
+      } catch (err) {
+        codexError = `Could not write to ${dataDir}: ${(err as Error).message}`;
       }
-      if (!codexBinaryIn(staging)) {
-        rmSync(staging, { recursive: true, force: true });
-        return failWith(
-          `The download finished but the Codex program for ${process.platform}-${process.arch} is missing from it. Try again: limn ai install codex`,
-        );
+      if (!codexError) {
+        const codexDir = findPackageDirIn(CODEX_PACKAGE, codexStaging);
+        if (!codexDir || installedVersion(codexDir) !== codexWant) {
+          codexError = `The download finished but ${CODEX_PACKAGE} ${codexWant} is missing from it. Try again: limn ai install codex`;
+        } else if (!codexBinaryIn(codexStaging)) {
+          codexError = `The download finished but the Codex program for ${process.platform}-${process.arch} is missing from it. Try again: limn ai install codex`;
+        }
       }
     }
+    const freshCodex = codexWant !== null && codexError === null && codexStaging !== null;
+    const oldHasCodex = existsSync(join(runtimeDir, 'package.json')) && findPackageDirIn(CODEX_PACKAGE, runtimeDir) !== null;
+    const codexSource = freshCodex ? codexStaging : oldHasCodex ? runtimeDir : null;
+    let carried: Array<{ from: string; to: string }> = [];
+    if (codexSource) {
+      try {
+        carried = moveCodex(codexSource, staging);
+        const v = installedVersion(findPackageDirIn(CODEX_PACKAGE, staging));
+        if (v) writeStagingManifest(staging, { ...want, [CODEX_PACKAGE]: v });
+      } catch (err) {
+        // Codex could not be carried: Claude is still set up; only Codex reports it.
+        codexError ??= `Codex could not be kept while AI was set up again (${(err as Error).message}). Run: limn ai install codex`;
+      }
+    }
+    if (codexStaging) rmSync(codexStaging, { recursive: true, force: true });
 
     // Swap in place: the previous runtime (if any) moves aside first, so a failure here leaves
     // either the old one or the new one — never half of each.
-    const old = `${runtimeDir}.old-${process.pid}-${Date.now()}`;
+    const old = `${runtimeDir}.old-${stamp}`;
     try {
       if (existsSync(runtimeDir)) renameSync(runtimeDir, old);
       renameSync(staging, runtimeDir);
     } catch (err) {
       if (!existsSync(runtimeDir) && existsSync(old)) renameSync(old, runtimeDir);
+      // A Codex carried out of the old runtime goes back where it was.
+      if (codexSource === runtimeDir) {
+        for (const m of carried.reverse()) {
+          try {
+            renameSync(m.to, m.from);
+          } catch {
+            /* best effort */
+          }
+        }
+      }
       rmSync(staging, { recursive: true, force: true });
       return failWith(`Could not finish setting up AI in ${runtimeDir}: ${(err as Error).message}`);
     }
     rmSync(old, { recursive: true, force: true });
 
     lastFailure = null;
-    if (withCodex) lastCodexFailure = null;
-    emit({ phase: 'done', message: withCodex ? 'AI is set up, with Codex.' : 'AI is set up.' });
+    if (codexError) {
+      // Claude is set up; Codex is not — that is Codex's failure alone.
+      lastCodexFailure = codexError;
+      emit({ phase: 'done', message: `AI is set up. Codex is not: ${codexError}` });
+      return { ok: false, message: codexError };
+    }
+    if (codexRequested) lastCodexFailure = null;
+    emit({ phase: 'done', message: freshCodex ? 'AI is set up, with Codex.' : 'AI is set up.' });
     return { ok: true };
   }
 

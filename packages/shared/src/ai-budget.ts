@@ -229,16 +229,19 @@ export type AiBudgetMode = 'subscription' | 'api_key' | 'off';
 export type AiBudgetProvider = 'claude' | 'codex';
 
 /**
- * The ACCOUNT's tokens over one span, and where that span STARTS. ⚠ Limn's own tokens are counted
- * over the SAME span (`fromMs`, `inclusive`), never over the whole window: the account's count may
- * cover less than the window (its samples live in memory, so a restart or a sign-in shortens it), and a
- * ratio of a whole window's numerator to a part-window's denominator over-attributes the use to Limn.
+ * The ACCOUNT's tokens over one span, and where that span STARTS AND ENDS. ⚠ Limn's own tokens are
+ * counted over EXACTLY the same span (`fromMs`, `inclusive`, `toMs`), never over the whole window: the
+ * account's count may cover less than the window (its samples live in memory, so a restart or a sign-in
+ * shortens it; it ends at the NEWEST sample, not now; a day bucket starts before the window), and a
+ * ratio of one span's numerator to another span's denominator mis-attributes the use to Limn.
  */
 export interface AiAccountTokenSpan {
   tokens: number;
   fromMs: number;
   /** Whether a ledger row AT `fromMs` belongs to the span (a day bucket's start: yes; a sample: no). */
   inclusive: boolean;
+  /** The span's last instant: a ledger row AT or before it belongs (the newest sample; a day's last ms). */
+  toMs: number;
 }
 
 /**
@@ -630,9 +633,12 @@ export function codexShares(input: {
     const reset = which === 'week' ? liveWeekReset(reading, nowMs) : liveFiveHourReset(reading, nowMs);
     const used = liveUsedPercent(which === 'week' ? reading?.week : reading?.fiveHour, reset);
     const span = (which === 'week' ? input.accountTokens?.week : input.accountTokens?.fiveHour) ?? null;
-    // Limn's tokens over the SAME span the account's were counted over (never over a wider one); with
-    // no account count, over the window (only "used nothing ⇒ 0" can then be said).
-    const limn = span ? ledgerTokensIn(ledger, span.fromMs, span.inclusive, nowMs) : ledgerTokensIn(ledger, fromMs, inclusive, nowMs);
+    // Limn's tokens over EXACTLY the span the account's were counted over (its start AND its end —
+    // never a wider one); with no account count, over the window (only "used nothing ⇒ 0" can then be
+    // said).
+    const limn = span
+      ? ledgerTokensIn(ledger, span.fromMs, span.inclusive, Math.min(nowMs, span.toMs))
+      : ledgerTokensIn(ledger, fromMs, inclusive, nowMs);
     const share = codexWindowSharePct(limn, span ? span.tokens : null, used);
     return share == null ? null : round2(share);
   };

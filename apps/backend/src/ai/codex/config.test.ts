@@ -6,6 +6,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildExecArgs,
+  codexBaseEnv,
   codexChildEnv,
   hookConfig,
   mcpConfig,
@@ -105,6 +106,18 @@ describe('the locked keys (one test each)', () => {
     expect(c.get('project_doc_max_bytes')).toBe('0'));
   it('skills.include_instructions = false (user skills arrive through HOME)', () =>
     expect(c.get('skills.include_instructions')).toBe('false'));
+  it('features.image_generation = false', () => expect(c.get('features.image_generation')).toBe('false'));
+  it('features.goals = false', () => expect(c.get('features.goals')).toBe('false'));
+  it('features.apps = false (ChatGPT apps / connectors: codex_apps)', () => expect(c.get('features.apps')).toBe('false'));
+  it('features.plugins = false', () => expect(c.get('features.plugins')).toBe('false'));
+  it('features.remote_plugin = false', () => expect(c.get('features.remote_plugin')).toBe('false'));
+  it('features.tool_suggest = false (no plugin / connector install suggested mid-run)', () =>
+    expect(c.get('features.tool_suggest')).toBe('false'));
+  it('features.skill_mcp_dependency_install = false', () =>
+    expect(c.get('features.skill_mcp_dependency_install')).toBe('false'));
+  it('features.memories = false', () => expect(c.get('features.memories')).toBe('false'));
+  it('memories.generate_memories = false', () => expect(c.get('memories.generate_memories')).toBe('false'));
+  it('memories.use_memories = false', () => expect(c.get('memories.use_memories')).toBe('false'));
   it('the working root is an UNTRUSTED project — as ONE inline table (Codex splits -c keys on every dot)', () => {
     expect(c.get('projects')).toBe('{"/wt" = {"trust_level" = "untrusted"}}');
     const dotted = cfg(buildExecArgs({ cwd: '/a/.claude/wt.x', writeRoots: [] }, CTX));
@@ -184,6 +197,7 @@ describe('resume, env and TOML', () => {
     const env = codexChildEnv('/h', { PATH: '/bin', HOME: '/u', ANTHROPIC_API_KEY: 'k', GITHUB_TOKEN: 'g', OPENAI_API_KEY: 'o' });
     expect(env).toEqual({ CODEX_HOME: '/h', PATH: '/bin', HOME: '/u' });
     expect(codexChildEnv('/h', {}, 'sk-x')).toEqual({ CODEX_HOME: '/h', CODEX_API_KEY: 'sk-x' });
+    expect(codexBaseEnv({ PATH: '/bin', OPENAI_API_KEY: 'o', SESSION_SECRET: 's', LANG: 'C' })).toEqual({ PATH: '/bin', LANG: 'C' });
   });
   it('TOML strings are valid for every input: lone surrogates and DEL are escaped', () => {
     expect(tomlString('a\ud800b')).toBe('"a�b"');

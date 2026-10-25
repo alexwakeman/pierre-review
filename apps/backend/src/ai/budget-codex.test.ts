@@ -39,7 +39,7 @@ const row = (atMs: number, inputTokens: number, outputTokens = 0): AiLedgerRow =
 const on = resolveAiBudgetSettings({ enabled: true });
 // The account's tokens over the WHOLE window (the span the fold then counts Limn's rows over too).
 const span = (r: AiUsageReading | null, which: 'week' | 'five_hour', tokens: number | null): AiAccountTokenSpan | null =>
-  tokens == null ? null : { tokens, ...budgetWindowStart(r, NOW, which) };
+  tokens == null ? null : { tokens, ...budgetWindowStart(r, NOW, which), toMs: NOW };
 
 function decide(r: AiUsageReading | null, ledger: AiLedgerRow[], week: number | null, five: number | null, settings = on) {
   return decideAiBudget({
@@ -141,7 +141,30 @@ describe('the windows', () => {
       costs: NO_COSTS,
       nowMs: NOW,
       provider: 'codex',
-      accountTokens: { week: { tokens: 300, fromMs: NOW - H, inclusive: false }, fiveHour: { tokens: 300, fromMs: NOW - H, inclusive: false } },
+      accountTokens: {
+        week: { tokens: 300, fromMs: NOW - H, inclusive: false, toMs: NOW },
+        fiveHour: { tokens: 300, fromMs: NOW - H, inclusive: false, toMs: NOW },
+      },
+    });
+    expect(s.subscription?.usedSharePct).toBe(10);
+    expect(s.subscription?.fiveHourUsedSharePct).toBe(10);
+  });
+  it("…and over EXACTLY its END too: Limn's rows after the account's newest sample are not in the count", () => {
+    // The account's count ends 20 minutes ago (its newest probe sample): 300 tokens, Limn's 100 of
+    // them. Limn's 200-token run AFTER that sample is in neither count — counting it would make the
+    // share 300/300 of the week, not 100/300.
+    const s = decideAiBudget({
+      settings: resolveAiBudgetSettings({ enabled: true, weekSharePct: 50, fiveHourSharePct: 50 }),
+      route: 'login',
+      reading: reading(30, 30),
+      ledger: [row(NOW - 30 * 60_000, 100), row(NOW - 10 * 60_000, 200)],
+      costs: NO_COSTS,
+      nowMs: NOW,
+      provider: 'codex',
+      accountTokens: {
+        week: { tokens: 300, fromMs: NOW - H, inclusive: false, toMs: NOW - 20 * 60_000 },
+        fiveHour: { tokens: 300, fromMs: NOW - H, inclusive: false, toMs: NOW - 20 * 60_000 },
+      },
     });
     expect(s.subscription?.usedSharePct).toBe(10);
     expect(s.subscription?.fiveHourUsedSharePct).toBe(10);

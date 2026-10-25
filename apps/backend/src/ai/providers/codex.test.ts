@@ -2,10 +2,12 @@
 // recorded-shape event streams chosen by the prompt, and logs every argv, stdin, the schema file and
 // the child's env keys. Limn's Codex home, the hook's trust check, the MCP config, the app-server and
 // the ledger are mocked (their own suites cover them). What is pinned:
-//   1. complete(): read-only, no MCP server, no hook, an empty scratch cwd, Codex's `fast` model even
+//   1. complete(): read-only, no MCP server, the TRUSTED path-guard hook with EMPTY roots (refused,
+//      starting nothing, when the hook is not trusted), an empty scratch cwd, Codex's `fast` model even
 //      when handed a Claude id, the system prompt as developer_instructions, `--output-schema` for a
 //      JSON caller, US$ 0 on a login, a ledger row with provider 'codex' when billed, a clear sentence
-//      with no credential, and CODEX_API_KEY (never OPENAI_API_KEY or anything else) on the key route.
+//      with no credential, the API-key route REFUSED (unpriced) and a missing install an
+//      AiRuntimeMissingError.
 //   2. runAgent(): the allow-list (EMPTY) answers the not-available sentence for every kind.
 //   3. the run itself (runAgentUnchecked): the strict schema on disk, the answer mapped back to the
 //      tool's arguments and judged by the tool's OWN handler, ONE retry via `exec resume` whose usage
@@ -37,6 +39,7 @@ const T = vi.hoisted(() => {
     bin: path.join(root, 'fake-codex.mjs'),
     log: path.join(root, 'calls.jsonl'),
     trusted: { value: false },
+    installed: { value: true },
     recorded: [] as any[],
     trustWrites: [] as any[],
   };
@@ -44,7 +47,10 @@ const T = vi.hoisted(() => {
 
 vi.mock('../codex/home.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../codex/home.js')>()),
-  codexBinary: async () => T.bin,
+  codexBinary: async () => {
+    if (!T.installed.value) throw new (await importOriginal<typeof import('../codex/home.js')>()).CodexNotInstalledError();
+    return T.bin;
+  },
   codexHome: () => T.home,
   ensureCodexHomeConfig: async (hook: unknown) => {
     T.trustWrites.push(hook);
@@ -139,6 +145,7 @@ switch (scenario) {
     thread('x');
     writeFileSync(join(dirname(cwd), 'outside.txt'), 'x');
     msg('{"answer":"yes","note":null}'); done(50, 5); break;
+  case 'BADTHENCANCEL': thread('BADTHENCANCEL'); msg('not json'); done(100, 10); break;
   case 'HANG': process.on('SIGTERM', () => process.exit(0)); thread('x'); out({ type: 'turn.started' }); setInterval(() => {}, 1000); break;
   default: thread('x'); msg('?'); done(1, 1);
 }
@@ -173,6 +180,7 @@ beforeEach(() => {
   writeFileSync(join(T.home, 'auth.json'), '{}'); // a Codex sign-in was made (contents never read)
   delete process.env.OPENAI_API_KEY;
   T.trusted.value = false;
+  T.installed.value = true;
   T.recorded.length = 0;
   T.trustWrites.length = 0;
   C._resetCodexTrustCacheForTest();
@@ -187,6 +195,10 @@ afterAll(() => rmSync(T.root, { recursive: true, force: true }));
 // ---- 1. complete --------------------------------------------------------------------------------
 
 describe('complete()', () => {
+  beforeEach(() => {
+    T.trusted.value = true;
+  });
+
   it('runs read-only, tool-less, in an EMPTY scratch dir, on Codex’s fast model even when given a Claude id', async () => {
     const out = await C.codexProvider.complete({ model: 'claude-haiku-5-5', role: 'fast', system: 'SYS', prompt: 'COMPLETE please' });
     expect(out).toEqual({ text: 'hello there', usage: { inputTokens: 10, outputTokens: 2 }, provider: 'codex', model: 'gpt-6-luna', costUsd: 0 });
@@ -197,7 +209,12 @@ describe('complete()', () => {
     expect(c.get('sandbox_mode')).toBe('"read-only"');
     expect(c.get('developer_instructions')).toBe('"SYS"');
     expect(c.get('features.shell_tool')).toBe('false');
-    expect([...c.keys()].some((k) => k.startsWith('mcp_servers') || k.startsWith('hooks'))).toBe(false);
+    expect([...c.keys()].some((k) => k.startsWith('mcp_servers'))).toBe(false);
+    // ⚠ The SAME trusted guard as an agent run, with EMPTY roots (everything but update_plan denied):
+    // its trust entry written first, its roots in the child's environment.
+    expect(c.get('hooks.PreToolUse')).toContain('/limn/guard');
+    expect(T.trustWrites).toEqual([expect.objectContaining({ env: { LIMN_CODEX_GUARD: JSON.stringify({ read: [], write: [] }) } })]);
+    expect(call.envKeys).toContain('LIMN_CODEX_GUARD');
     expect(call.argv).not.toContain('--output-schema');
     expect(call.stdin).toBe('COMPLETE please');
     expect(call.cwdIsEmpty).toBe(true);
@@ -232,14 +249,39 @@ describe('complete()', () => {
     expect(C.codexProvider.credentialRoute()).toBe('none');
   });
 
-  it('on the API-key route, hands the key over as CODEX_API_KEY only', async () => {
+  it('fails CLOSED: with the guard not trusted it refuses and starts nothing (complete() is fed untrusted text)', async () => {
+    T.trusted.value = false;
+    await expect(C.codexProvider.complete({ prompt: 'COMPLETE' })).rejects.toThrow(C.HOOK_NOT_TRUSTED_MESSAGE);
+    expect(calls()).toEqual([]);
+  });
+
+  it('REFUSES the API-key route (unpriced: it would record US$ 0 and never trip a cap), starting nothing', async () => {
     unlinkSync(join(T.home, 'auth.json'));
     process.env.OPENAI_API_KEY = 'sk-test';
     expect(C.codexProvider.credentialRoute()).toBe('api_key');
-    await C.codexProvider.complete({ prompt: 'COMPLETE' });
-    const keys = calls()[0].envKeys as string[];
-    expect(keys).toContain('CODEX_API_KEY');
-    expect(keys).not.toContain('OPENAI_API_KEY');
+    await expect(C.codexProvider.complete({ prompt: 'COMPLETE' })).rejects.toThrow(
+      'Codex with an OpenAI API key is not available yet — sign in with ChatGPT',
+    );
+    await expect(C.runAgentUnchecked(spec('GOOD'))).rejects.toThrow('Codex with an OpenAI API key is not available yet');
+    expect(calls()).toEqual([]);
+    // Installed (LIMN_CODEX_PATH), on the key route: detect() says the sentence, never "available".
+    process.env.LIMN_CODEX_PATH = T.bin;
+    try {
+      const d = await C.codexProvider.detect();
+      expect(d).toMatchObject({ route: 'api_key', available: false, message: 'Codex with an OpenAI API key is not available yet — sign in with ChatGPT' });
+    } finally {
+      delete process.env.LIMN_CODEX_PATH;
+    }
+  });
+
+  it('a missing Codex install is an AiRuntimeMissingError with Codex’s own sentence, and starts nothing', async () => {
+    T.installed.value = false;
+    const err = await C.codexProvider.complete({ prompt: 'COMPLETE' }).catch((e: unknown) => e);
+    const { AiRuntimeMissingError } = await import('../runtime.js');
+    expect(err).toBeInstanceOf(AiRuntimeMissingError);
+    expect((err as Error).message).toBe('Codex is not set up yet. Run: limn ai install codex');
+    expect(await C.runAgentUnchecked(spec('GOOD')).catch((e: unknown) => e)).toBeInstanceOf(AiRuntimeMissingError);
+    expect(calls()).toEqual([]);
   });
 
   it('a failed turn rejects with Codex’s own reason', async () => {
@@ -378,6 +420,20 @@ describe('runAgentUnchecked() — one read-only run', () => {
     expect(calls()).toHaveLength(2);
     expect(calls()[1].stdin).toContain('answer must not be "wrong"');
     expect(T.recorded).toEqual([expect.objectContaining({ inputTokens: 300, outputTokens: 40 })]);
+  });
+
+  it('a retry whose usage is unknown (cancelled) KEEPS the first turn’s known tokens', async () => {
+    const ac = new AbortController();
+    const p = C.runAgentUnchecked(
+      spec('BADTHENCANCEL', {
+        abortController: ac,
+        onProgress: (e: { kind: string; text?: string }) => {
+          if (e.kind === 'status' && e.text === 'Correcting the answer') ac.abort();
+        },
+      }),
+    );
+    await expect(p).rejects.toMatchObject({ name: 'AbortError' });
+    expect(T.recorded).toEqual([expect.objectContaining({ inputTokens: 100, outputTokens: 10 })]);
   });
 
   it('a cancelled run rejects as an AbortError and records NULL tokens', async () => {

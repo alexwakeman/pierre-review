@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -12,6 +12,7 @@ import {
   pathGuardHook,
   SESSION_FLAG_PRE_TOOL_USE_KEY,
 } from './hook.js';
+import { CODEX_ENV_ALLOW } from './config.js';
 import { decideCodexToolCall, decodeGuardRoots, encodeGuardRoots, GUARD_ENV, writePaths } from './hook-rule.js';
 
 let dir: string;
@@ -214,18 +215,23 @@ describe('the hook process (dev entry under tsx)', () => {
 }, 60_000);
 
 describe('verifyHookTrusted / inspectHookTrust — the SILENT-SKIP check', () => {
-  // A fake `codex` whose `app-server` answers hooks/list with whatever FAKE_HOOKS says.
+  // A fake `codex` whose `app-server` answers hooks/list with what fake-hooks.json says, and records
+  // the environment it was given (fake-env.json).
   let fake: string;
+  const hooksFile = (): string => join(dir, 'fake-hooks.json');
+  const envFile = (): string => join(dir, 'fake-env.json');
   beforeAll(() => {
     fake = join(dir, 'fake-codex');
     writeFileSync(
       fake,
       `#!${process.execPath}
+const fs = require('node:fs');
+fs.writeFileSync(${JSON.stringify(join(dir, 'fake-env.json'))}, JSON.stringify(Object.keys(process.env).sort()));
 const rl = require('node:readline').createInterface({ input: process.stdin });
 rl.on('line', (l) => {
   const m = JSON.parse(l);
   if (m.id === 1) process.stdout.write(JSON.stringify({ id: 1, result: {} }) + '\\n');
-  if (m.id === 2) process.stdout.write(JSON.stringify({ id: 2, result: { data: [{ hooks: JSON.parse(process.env.FAKE_HOOKS) }] } }) + '\\n');
+  if (m.id === 2) process.stdout.write(JSON.stringify({ id: 2, result: { data: [{ hooks: JSON.parse(fs.readFileSync(${JSON.stringify(join(dir, 'fake-hooks.json'))}, 'utf8')) }] } }) + '\\n');
 });
 `,
     );
@@ -233,15 +239,28 @@ rl.on('line', (l) => {
   });
 
   const withFake = async (hooks: unknown[]) => {
-    const prev = process.env.FAKE_HOOKS;
-    process.env.FAKE_HOOKS = JSON.stringify(hooks);
-    try {
-      return await inspectHookTrust(dir, pathGuardHook({ read: [wt], write: [] }), { binary: fake });
-    } finally {
-      if (prev === undefined) delete process.env.FAKE_HOOKS;
-      else process.env.FAKE_HOOKS = prev;
-    }
+    writeFileSync(hooksFile(), JSON.stringify(hooks));
+    return inspectHookTrust(dir, pathGuardHook({ read: [wt], write: [] }), { binary: fake });
   };
+
+  it("the trust probe sees the run allow-list + CODEX_HOME, never Limn's secrets", async () => {
+    process.env.LIMN_TEST_SECRET_SENTINEL = 'x';
+    process.env.OPENAI_API_KEY_SAVED = process.env.OPENAI_API_KEY ?? '';
+    process.env.OPENAI_API_KEY = 'sk-should-not-pass';
+    try {
+      await withFake([]);
+    } finally {
+      delete process.env.LIMN_TEST_SECRET_SENTINEL;
+      if (process.env.OPENAI_API_KEY_SAVED) process.env.OPENAI_API_KEY = process.env.OPENAI_API_KEY_SAVED;
+      else delete process.env.OPENAI_API_KEY;
+      delete process.env.OPENAI_API_KEY_SAVED;
+    }
+    const keys = JSON.parse(readFileSync(envFile(), 'utf8')) as string[];
+    expect(keys).toContain('CODEX_HOME');
+    expect(keys).not.toContain('LIMN_TEST_SECRET_SENTINEL');
+    expect(keys).not.toContain('OPENAI_API_KEY');
+    expect(keys.every((k) => ['CODEX_HOME', ...CODEX_ENV_ALLOW].includes(k) || k === '__CF_USER_TEXT_ENCODING')).toBe(true);
+  }, 30_000);
   const h = () => pathGuardHook({ read: [wt], write: [] });
   const entry = (over: object) => ({ key: SESSION_FLAG_PRE_TOOL_USE_KEY, source: 'sessionFlags', currentHash: h().trustedHash, trustStatus: 'trusted', enabled: true, ...over });
 

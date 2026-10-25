@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync }
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { deleteThreadRollouts, removeAllRollouts, sweepOldRollouts } from './rollouts.js';
+import { deleteThreadRollouts, eraseCodexHistory, removeAllRollouts, sweepOldRollouts } from './rollouts.js';
 
 let home = '';
 afterEach(() => rmSync(home, { recursive: true, force: true }));
@@ -54,5 +54,27 @@ describe('Codex rollouts', () => {
     expect(existsSync(join(home, 'archived_sessions'))).toBe(false);
     expect(existsSync(f.auth)).toBe(true);
     expect(existsSync(f.config)).toBe(true);
+  });
+
+  it('account erasure also removes Codex’s own sqlite state (and its -wal/-shm), never auth.json, config.toml or installation_id', () => {
+    const f = setup();
+    const state = [
+      'state_5.sqlite', 'state_5.sqlite-wal', 'state_5.sqlite-shm',
+      'thread_history_1.sqlite', 'thread_history_1.sqlite-wal',
+      'logs_2.sqlite', 'logs_2.sqlite-shm',
+      'memories_1.sqlite', 'goals_1.sqlite', 'queue_1.sqlite-wal',
+    ];
+    for (const n of state) writeFileSync(join(home, n), 'x');
+    writeFileSync(join(home, 'installation_id'), 'id');
+    writeFileSync(join(home, 'unrelated.sqlite'), 'x');
+    mkdirSync(join(home, 'shell_snapshots'));
+    expect(eraseCodexHistory(home).sort()).toEqual([...state].sort());
+    for (const n of state) expect(existsSync(join(home, n))).toBe(false);
+    expect(existsSync(join(home, 'sessions'))).toBe(false);
+    expect(existsSync(join(home, 'shell_snapshots'))).toBe(false);
+    expect(existsSync(f.auth)).toBe(true);
+    expect(existsSync(f.config)).toBe(true);
+    expect(existsSync(join(home, 'installation_id'))).toBe(true);
+    expect(existsSync(join(home, 'unrelated.sqlite'))).toBe(true);
   });
 });

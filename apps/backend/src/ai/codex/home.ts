@@ -13,6 +13,8 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import { join } from 'node:path';
 import { resolveDataDir } from '../../data-dir.js';
 import { codexBinaryPath } from '../runtime.js';
+import { AiRuntimeMissingError } from '../runtime-errors.js';
+import { codexBaseEnv } from './config.js';
 import type { CodexHookConfig } from './types.js';
 
 /** The folder under the data directory. */
@@ -21,11 +23,16 @@ export const CODEX_HOME_DIR_NAME = 'codex';
 /** Shown wherever Codex is not set up. One sentence, the command to run. */
 export const CODEX_NOT_INSTALLED_MESSAGE = 'Codex is not set up yet. Run: limn ai install codex';
 
-/** Thrown by `codexBinary` when the Codex program is not installed. Its message is safe to show. */
-export class CodexNotInstalledError extends Error {
-  readonly code = 'CODEX_NOT_INSTALLED';
+/**
+ * Thrown by `codexBinary` (and the provider) when the Codex program is not installed. Its message is
+ * safe to show. ⚠ An `AiRuntimeMissingError`: every cheap caller stops its pass on THAT class (one
+ * missing install is not N failed briefs), so a missing Codex must be one too — with Codex's message.
+ */
+export class CodexNotInstalledError extends AiRuntimeMissingError {
+  readonly codexCode = 'CODEX_NOT_INSTALLED';
   constructor() {
-    super(CODEX_NOT_INSTALLED_MESSAGE);
+    super('@openai/codex');
+    this.message = CODEX_NOT_INSTALLED_MESSAGE;
     this.name = 'CodexNotInstalledError';
   }
 }
@@ -44,14 +51,21 @@ export async function codexBinary(): Promise<string> {
 
 /**
  * The environment of a Codex process that is NOT a model run (the app-server probe, a sign-in,
- * sign-out): the inherited one, with `CODEX_HOME` set to Limn's home and every API-key variable
- * removed — so `account/read` reports the STORED sign-in, never a key from the environment, and a
- * sign-in can never be satisfied by one.
+ * sign-out): the SAME allow-list a run gets (config.ts `codexBaseEnv` — never Limn's whole
+ * environment, which may carry ANTHROPIC_API_KEY, a GitHub token, the session secret…) with
+ * `CODEX_HOME` = Limn's home. No API-key variable is on the list, so `account/read` reports the
+ * STORED sign-in, never a key from the environment, and a sign-in can never be satisfied by one.
+ * `interactive` (the CLI's `codex login`, attached to the reader's terminal) adds only what a
+ * terminal program opening a browser needs (TERM, DISPLAY, WAYLAND_DISPLAY, BROWSER) — no secrets.
  */
-export function codexProcessEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
-  const out: NodeJS.ProcessEnv = { ...env, CODEX_HOME: codexHome(env) };
-  delete out.OPENAI_API_KEY;
-  delete out.CODEX_API_KEY;
+export function codexProcessEnv(env: NodeJS.ProcessEnv = process.env, opts: { interactive?: boolean } = {}): Record<string, string> {
+  const out: Record<string, string> = { ...codexBaseEnv(env), CODEX_HOME: codexHome(env) };
+  if (opts.interactive) {
+    for (const k of ['TERM', 'DISPLAY', 'WAYLAND_DISPLAY', 'BROWSER']) {
+      const v = env[k];
+      if (v) out[k] = v;
+    }
+  }
   return out;
 }
 

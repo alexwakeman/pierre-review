@@ -334,6 +334,44 @@ describe('runSprintBriefPass', () => {
     expect((await runSprintBriefPass(ctx() as never, 1, 5, { aiEnabled: true, entitled: async () => false })).state).toBe('not_entitled');
   });
 
+  it('a missing Codex install STOPS the pass (an AiRuntimeMissingError), unlike an ordinary failure', async () => {
+    const { CodexNotInstalledError } = await import('../../ai/codex/home.js');
+    const many = async () => [todo('A-1'), todo('A-2'), todo('A-3'), todo('A-4'), todo('A-5'), todo('A-6'), todo('A-7'), todo('A-8')];
+    const missing = vi.fn(async () => {
+      throw new CodexNotInstalledError();
+    });
+    const res = await runSprintBriefPass(ctx() as never, 1, 5, {
+      aiEnabled: true,
+      entitled: async () => true,
+      complete: missing,
+      todo: (() => {
+        let n = 0;
+        return async () => (n++ === 0 ? many() : []);
+      })(),
+      store: async () => {},
+      expand: async () => 0,
+    });
+    expect(res.stoppedBy).toBe('runtime');
+    // Only the calls already in flight when the first one failed (one per worker), never the rest.
+    expect(missing.mock.calls.length).toBeLessThanOrEqual(4);
+    const plain = vi.fn(async () => {
+      throw new Error('boom');
+    });
+    const other = await runSprintBriefPass(ctx() as never, 1, 5, {
+      aiEnabled: true,
+      entitled: async () => true,
+      complete: plain,
+      todo: (() => {
+        let n = 0;
+        return async () => (n++ === 0 ? many() : []);
+      })(),
+      store: async () => {},
+      expand: async () => 0,
+    });
+    expect(other.stoppedBy).toBeNull();
+    expect(plain.mock.calls.length).toBe(8);
+  });
+
   it('one pass per workspace: a read landing mid-pass re-runs it once', async () => {
     let release!: () => void;
     const gate = new Promise<void>((r) => (release = r));

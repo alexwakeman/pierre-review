@@ -156,11 +156,16 @@ export function accountTokensInWindow(
   const newest = sorted.filter((s) => s.atMs <= toMs).at(-1);
   const before = sorted.filter((s) => s.atMs <= fromMs).at(-1);
   if (before && newest && fromMs - before.atMs <= maxStartAgeMs) {
-    return { tokens: Math.max(0, newest.lifetimeTokens - before.lifetimeTokens), fromMs: before.atMs, inclusive: false };
+    return { tokens: Math.max(0, newest.lifetimeTokens - before.lifetimeTokens), fromMs: before.atMs, inclusive: false, toMs: newest.atMs };
   }
   const inside = sorted.filter((s) => s.atMs > fromMs && s.atMs <= toMs);
   if (inside.length >= 2) {
-    return { tokens: Math.max(0, inside.at(-1)!.lifetimeTokens - inside[0]!.lifetimeTokens), fromMs: inside[0]!.atMs, inclusive: false };
+    return {
+      tokens: Math.max(0, inside.at(-1)!.lifetimeTokens - inside[0]!.lifetimeTokens),
+      fromMs: inside[0]!.atMs,
+      inclusive: false,
+      toMs: inside.at(-1)!.atMs,
+    };
   }
   if (daily && daily.length > 0 && toMs - fromMs >= DAY_MS) {
     const hit = daily.filter((b) => b.startMs + DAY_MS > fromMs && b.startMs <= toMs);
@@ -169,6 +174,8 @@ export function accountTokensInWindow(
         tokens: hit.reduce((s, b) => s + b.tokens, 0),
         fromMs: Math.min(...hit.map((b) => b.startMs)),
         inclusive: true,
+        // The last bucket's last millisecond (the fold also stops at now).
+        toMs: Math.max(...hit.map((b) => b.startMs)) + DAY_MS - 1,
       };
     }
   }

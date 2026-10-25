@@ -283,8 +283,9 @@ Anthropic API key: sign in to Claude Code, or set ANTHROPIC_API_KEY.
 Set LIMN_AI_USE_API_KEY=true to use the key even when you are signed in.
 Set LIMN_CLAUDE_PATH to use your installed \`claude\` and skip its bundled copy.
 
-Codex keeps its own sign-in in ~/.limn/codex (your ~/.codex is not used), or
-uses OPENAI_API_KEY. Set LIMN_CODEX_PATH to use your installed codex program.
+Codex keeps its own ChatGPT sign-in in ~/.limn/codex (your ~/.codex is not used).
+Codex with an OpenAI API key is not available yet. Set LIMN_CODEX_PATH to use your
+installed codex program.
 `);
     process.exit(sub === undefined || sub === '--help' || sub === '-h' ? 0 : 1);
   }
@@ -335,7 +336,7 @@ uses OPENAI_API_KEY. Set LIMN_CODEX_PATH to use your installed codex program.
     if (sub === 'login') console.log(dim(`Signing Limn's own Codex in (${codexHome()}). Your ~/.codex is not used.`));
     const { spawnSync } = await import('node:child_process');
     // The terminal is attached: Codex prints its own URL or device code and waits for the reader.
-    const r = spawnSync(bin, args, { stdio: 'inherit', env: codexProcessEnv(), cwd: codexHome() });
+    const r = spawnSync(bin, args, { stdio: 'inherit', env: codexProcessEnv(process.env, { interactive: true }), cwd: codexHome() });
     process.exit(r.status ?? 1);
   }
 

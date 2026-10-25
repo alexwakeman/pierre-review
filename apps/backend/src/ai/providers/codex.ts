@@ -2,9 +2,13 @@
 // Runs the pinned Codex CLI DIRECTLY (`codex exec --json`, argv from ai/codex/config.ts) in Limn's OWN
 // Codex home (ai/codex/home.ts — never ~/.codex), and turns what it prints into Limn's results.
 //
-//   complete(req)   one turn, READ-ONLY, no MCP server, no hook, in an EMPTY scratch directory (so
-//                   there is nothing to read even in principle), the `fast` model at low effort
-//                   unless told otherwise; `outputSchema` → `--output-schema` for a JSON caller.
+//   complete(req)   one turn, READ-ONLY, no MCP server, in an EMPTY scratch directory (so there is
+//                   nothing to read even in principle), the `fast` model at low effort unless told
+//                   otherwise; `outputSchema` → `--output-schema` for a JSON caller. ⚠ It is fed
+//                   UNTRUSTED text (a ticket, a PR), so it runs under the SAME trusted path-guard hook
+//                   as an agent run, with EMPTY read and write roots — every tool call but `update_plan`
+//                   is denied — and refuses (fails closed) unless `verifyHookTrusted` says Codex will
+//                   run that hook.
 //   runAgent(spec)  ⚠ ONLY for kinds in CODEX_AGENT_KINDS (EMPTY in Phase 2 — every kind answers
 //                   `codexKindNotAvailableMessage`). The run reads through Limn's workspace MCP server
 //                   (its only way to see files), writes (if any) through `apply_patch` inside a
@@ -19,21 +23,24 @@
 //                   run fails. Any throw after the first spawn is a FAILURE of the run, never an
 //                   escape: the usage is still recorded and the writes still verified.
 //
-// ⚠ SESSION FILES. Not being ephemeral, every run leaves a rollout (the prompt, the PR's text, diffs)
-// in Limn's Codex home: it is deleted when the run settles, older leftovers are swept once per process,
-// and account erasure removes them all (ai/codex/rollouts.ts).
+// ⚠ SESSION FILES AND ROWS. Not being ephemeral, every run leaves a rollout (the prompt, the PR's
+// text, diffs) AND a second copy in Codex's own sqlite state in Limn's Codex home: when the run settles
+// its thread is deleted through Codex's `thread/delete` (rows + rollout) and its log rows go
+// (ai/codex/threads.ts); older leftovers are swept once per process; account erasure removes the files
+// (ai/codex/rollouts.ts `eraseCodexHistory`).
 //
 // ⚠ WRITES ARE READ FROM GIT, NEVER FROM THE STREAM. A refused or failed patch emits no event (spike
 // § 4), so the changed files are what `git status` shows changed in the write roots between the start
 // and the end of the run; a changed path outside the write roots fails the run.
-// ⚠ AN UNTRUSTED HOOK IS SKIPPED SILENTLY (spike § 5). A WRITE run therefore refuses unless
-// `verifyHookTrusted` says the guard will run; a READ-ONLY run goes without it (the MCP server is the
-// read guard, the read-only sandbox the write guard).
+// ⚠ AN UNTRUSTED HOOK IS SKIPPED SILENTLY (spike § 5). EVERY run — complete() and every agent run,
+// read-only or not — therefore refuses unless `verifyHookTrusted` says the guard will run.
 // ⚠ USAGE: Codex reports tokens, never US$. On a ChatGPT login a run costs US$ 0 and its tokens are
-// recorded (the budget's share is token-weighted, § 8.1); on an API key the tokens are priced from
-// CODEX_PRICES_PER_MTOK. A resumed turn reports the thread's CUMULATIVE usage, so the retry adds only
-// its delta; a cancelled run records NULL tokens. ⚠ Reasoning tokens are a SUBSET of output tokens and
-// are never added to them.
+// recorded (the budget's share is token-weighted, § 8.1). ⚠ THE API-KEY ROUTE IS REFUSED until
+// CODEX_PRICES_PER_MTOK holds real prices (every entry is null): a run there would record US$ 0 and the
+// api_key budget and every per-pass US$ cap would never trip. A resumed turn reports the thread's
+// CUMULATIVE usage, so the retry adds only its delta; a retry whose usage is unknown keeps the first
+// turn's known tokens, and only a first turn that was itself cancelled records NULL. ⚠ Reasoning
+// tokens are a SUBSET of output tokens and are never added to them.
 import { execFile } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
@@ -44,7 +51,7 @@ import { config } from '../../config.js';
 // db/usage.js is imported LAZILY (in `record`): db/client opens the database at import time, and the
 // provider registry is imported by every runner and test that never writes a ledger row.
 import { buildExecArgs, codexChildEnv, toResumeArgs } from '../codex/config.js';
-import { codexUsageSource, detectCodex } from '../codex/detect.js';
+import { CODEX_API_KEY_NOT_AVAILABLE_MESSAGE, codexUsageSource, detectCodex } from '../codex/detect.js';
 import {
   addUsage,
   cleanCodexError,
@@ -55,8 +62,8 @@ import {
   type TokenUsage,
 } from '../codex/events.js';
 import { pathGuardHook, verifyHookTrusted } from '../codex/hook.js';
-import { codexHome, ensureCodexHomeConfig } from '../codex/home.js';
-import { deleteThreadRollouts, sweepOldRolloutsOnce } from '../codex/rollouts.js';
+import { codexBinary, codexHome, ensureCodexHomeConfig } from '../codex/home.js';
+import { forgetCodexThread, sweepOldCodexThreadsOnce } from '../codex/threads.js';
 import { runCodexExec, type CodexExecResult } from '../codex/run.js';
 import type { CodexHookConfig } from '../codex/types.js';
 import { workspaceMcpConfig } from '../codex/workspace-mcp.js';
@@ -86,7 +93,7 @@ import {
   toStrictJsonSchema,
   type JsonSchema,
 } from '../result-schemas.js';
-import { loadZod } from '../runtime.js';
+import { AiRuntimeMissingError, loadZod } from '../runtime.js';
 
 const execFileP = promisify(execFile);
 
@@ -258,15 +265,37 @@ async function withScratch<T>(fn: (dir: string) => Promise<T>): Promise<T> {
 
 // ---- complete -----------------------------------------------------------------------------------
 
-async function complete(req: CompleteRequest): Promise<CompleteResult> {
+/**
+ * The credential a run may use, or a throw with the one sentence: no credential, or the API-key route
+ * (refused until it can be priced — see the header). Then the program: a missing install throws
+ * `CodexNotInstalledError`, an AiRuntimeMissingError, so a cheap caller stops its pass at once.
+ */
+async function runnableCredential(): Promise<Extract<CodexCredential, { route: 'login' }>> {
   if (!config.aiEnabled) throw new Error('AI is switched off here.');
   const credential = resolveCodexCredential();
+  if (credential.route === 'none') throw new Error(CODEX_SIGN_IN_MESSAGE);
+  if (credential.route === 'api_key') throw new Error(CODEX_API_KEY_NOT_AVAILABLE_MESSAGE);
+  await codexBinary();
+  return credential;
+}
+
+/** The guard's trust entry is written into Limn's home, then Codex must prove it will RUN it. */
+async function trustedGuard(roots: { read: string[]; write: string[] }): Promise<{ hook: CodexHookConfig; home: string }> {
+  const hook = pathGuardHook(roots);
+  await ensureCodexHomeConfig(hook);
+  const home = codexHome();
+  if (!(await hookIfTrusted(home, hook))) throw new Error(HOOK_NOT_TRUSTED_MESSAGE);
+  return { hook, home };
+}
+
+async function complete(req: CompleteRequest): Promise<CompleteResult> {
+  const credential = await runnableCredential();
   const route = credential.route;
-  if (route === 'none') throw new Error(CODEX_SIGN_IN_MESSAGE);
   const role = req.role ?? 'fast';
   const model = resolveCodexModel({ role, ...(req.model ? { id: req.model } : {}) });
-  await ensureCodexHomeConfig(null);
-  const home = codexHome();
+  // THE GUARD, with EMPTY roots: every tool call but `update_plan` is denied (hook-rule.ts). Fail
+  // closed: an untrusted hook would be skipped silently, so the run never starts without proof.
+  const { hook, home } = await trustedGuard({ read: [], write: [] });
 
   return withScratch(async (scratch) => {
     // An EMPTY working root: no MCP server, no shell, read-only — nothing to read, nothing to write.
@@ -279,17 +308,17 @@ async function complete(req: CompleteRequest): Promise<CompleteResult> {
     }
     const args = buildExecArgs(
       { cwd, writeRoots: [], ...(req.system ? { system: req.system } : {}) },
-      { home, mcp: null, hook: null, schemaPath, model, effort: CODEX_EFFORT_FOR_ROLE[role] },
+      { home, mcp: null, hook, schemaPath, model, effort: CODEX_EFFORT_FOR_ROLE[role] },
     );
-    sweepOldRolloutsOnce(home);
+    sweepOldCodexThreadsOnce(home);
     const res = await runCodexExec(args, {
       cwd,
-      env: codexExecEnv(credential, null),
+      env: codexExecEnv(credential, hook),
       stdin: req.prompt,
       timeoutMs: DEFAULT_COMPLETE_TIMEOUT_MS,
     });
-    // The run is settled: its session file (the prompt, in full) goes now.
-    deleteThreadRollouts(home, res.threadId);
+    // The run is settled: its thread (rows, session file, log rows — the prompt, in full) goes now.
+    await forgetCodexThread(home, res.threadId);
     const costUsd = codexCostUsd(model, res.usage, route);
     await record(req.usageRecord, model, res.usage, costUsd);
     const failure = execFailure(res);
@@ -348,7 +377,9 @@ async function hookIfTrusted(home: string, hook: CodexHookConfig): Promise<boole
   let ok = false;
   try {
     ok = await verifyHookTrusted(home, hook);
-  } catch {
+  } catch (err) {
+    // A missing install is ITS OWN answer (an AiRuntimeMissingError stops a pass), never "untrusted".
+    if (err instanceof AiRuntimeMissingError) throw err;
     ok = false;
   }
   if (ok) trustCache.set(key, ok); // never cache a "no": the next run re-checks after a fix
@@ -490,10 +521,8 @@ async function runAgent(spec: AgentRunSpec): Promise<AgentRunResult> {
  * test only; `runAgent` (the provider's) is the one door, and it checks `CODEX_AGENT_KINDS` first.
  */
 export async function runAgentUnchecked(spec: AgentRunSpec): Promise<AgentRunResult> {
-  if (!config.aiEnabled) throw new Error('AI is switched off here.');
-  const credential = resolveCodexCredential();
+  const credential = await runnableCredential();
   const route = credential.route;
-  if (route === 'none') throw new Error(CODEX_SIGN_IN_MESSAGE);
   const model = resolveCodexModel(spec.model);
   const effort = spec.codex?.effort ?? CODEX_EFFORT_FOR_ROLE[spec.model.role];
   const roots = runRoots(spec);
@@ -509,11 +538,8 @@ export async function runAgentUnchecked(spec: AgentRunSpec): Promise<AgentRunRes
   // THE GUARD IS NOT OPTIONAL. Its trust entry is written into Limn's own home first, then Codex is
   // asked whether it will RUN the hook (and the hook must refuse a canary call). An untrusted hook is
   // skipped SILENTLY by Codex, so a run whose guard is not proven never starts — read-only or not.
-  const hook = pathGuardHook({ read: roots.read, write: roots.write });
-  await ensureCodexHomeConfig(hook);
-  const home = codexHome();
-  if (!(await hookIfTrusted(home, hook))) throw new Error(HOOK_NOT_TRUSTED_MESSAGE);
-  sweepOldRolloutsOnce(home);
+  const { hook, home } = await trustedGuard({ read: roots.read, write: roots.write });
+  sweepOldCodexThreadsOnce(home);
 
   const before = isWrite ? await Promise.all(roots.write.map(gitSnapshot)) : [];
 
@@ -563,8 +589,9 @@ export async function runAgentUnchecked(spec: AgentRunSpec): Promise<AgentRunRes
               stdin: retryPrompt(verdict.reason),
               timeoutMs,
             });
-            // ⚠ The resumed turn reports the THREAD's total: add only its own delta.
-            usage = addUsage(usage, retry.usage ? usageDelta(retry.usage, first.usage) : null);
+            // ⚠ The resumed turn reports the THREAD's total: add only its own delta. A retry whose
+            // usage is unknown (cancelled, no turn.completed) KEEPS the first turn's known tokens.
+            if (retry.usage) usage = addUsage(usage, usageDelta(retry.usage, first.usage));
             final = retry;
             failure = execFailure(retry);
             if (!failure) {
@@ -578,10 +605,11 @@ export async function runAgentUnchecked(spec: AgentRunSpec): Promise<AgentRunRes
       failure = `Codex's run failed: ${(err as Error).message || 'unknown error'}`;
     }
     const cancelled = !!(first?.cancelled || final?.cancelled);
-    if (cancelled) usage = null;
+    // NULL only when the FIRST turn's own tokens are unknown (run.ts reports null for a stopped run).
+    if (!first || first.cancelled || first.usage == null) usage = null;
 
-    // The run is settled (its retry included): its session files go now, success or not.
-    deleteThreadRollouts(home, first?.threadId ?? final?.threadId ?? null);
+    // The run is settled (its retry included): its thread goes now — rows, session file, log rows.
+    await forgetCodexThread(home, first?.threadId ?? final?.threadId ?? null);
 
     const costUsd = codexCostUsd(model, usage, route);
     await record(spec.usageRecord, model, usage, costUsd);
@@ -660,7 +688,8 @@ async function detect(): Promise<ProviderStatus> {
   const runnable = codexRunnable();
   return {
     id: 'codex',
-    available: runnable && d.installed && d.route !== 'none',
+    // ⚠ The API-key route is refused (unpriced): only a ChatGPT sign-in can run.
+    available: runnable && d.installed && d.route === 'login',
     route: d.route,
     message: d.message ?? (runnable ? null : CODEX_NOT_AVAILABLE_MESSAGE),
     installed: d.installed,

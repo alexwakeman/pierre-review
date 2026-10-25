@@ -7,9 +7,12 @@
 //   • a non-zero exit RESOLVES with its stderr (the caller decides), a missing binary REJECTS.
 //
 //   pnpm --filter @pierre-review/backend test ai/codex/run
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 import type { CodexEvent } from './events.js';
 import { runCodexExec } from './run.js';
@@ -189,4 +192,62 @@ ${tail}
     expect(res.exitCode).toBe(0);
     expect(res.events).toHaveLength(1);
   });
+});
+
+// ⚠ A SIGNAL ENDS NODE WITHOUT 'exit', and a detached group outlives its parent. A real "Limn" process
+// (tsx, the dev build) starts a run whose fake Codex ignores SIGTERM; the test then signals LIMN. The
+// Codex group must be gone, and Limn must still end BY that signal (the handler re-raises it).
+describe('a Limn killed by a signal mid-run', () => {
+  const tsx = pathToFileURL(createRequire(import.meta.url).resolve('tsx')).href;
+  const runTs = pathToFileURL(join(dirname(fileURLToPath(import.meta.url)), 'run.ts')).href;
+  const alive = (pid: number): boolean => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const waitFor = async (pred: () => boolean, ms: number): Promise<boolean> => {
+    const end = Date.now() + ms;
+    while (Date.now() < end) {
+      if (pred()) return true;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    return pred();
+  };
+
+  it.each(['SIGINT', 'SIGHUP', 'SIGTERM'] as const)('%s: the Codex group is killed, and Limn still ends by the signal', async (sig) => {
+    const pidFile = join(dir, `codex-pid-${sig}.txt`);
+    const bin = fake(`
+import { writeFileSync } from 'node:fs';
+process.on('SIGTERM', () => {}); // ignores the polite stop: only a SIGKILL ends it
+writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));
+setInterval(() => {}, 1000);
+`);
+    const script = join(dir, `limn-${sig}.mjs`);
+    writeFileSync(
+      script,
+      `const { runCodexExec } = await import(${JSON.stringify(runTs)});
+void runCodexExec(['exec', '-'], { cwd: ${JSON.stringify(dir)}, env: { PATH: process.env.PATH ?? '' }, binary: ${JSON.stringify(bin)} });
+setInterval(() => {}, 1000);
+`,
+    );
+    const limn = spawn(process.execPath, ['--import', tsx, script], { stdio: 'ignore' });
+    const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((r) => limn.on('exit', (code, signal) => r({ code, signal })));
+    try {
+      expect(await waitFor(() => existsSync(pidFile) && readFileSync(pidFile, 'utf8') !== '', 20_000)).toBe(true);
+      const codexPid = Number(readFileSync(pidFile, 'utf8'));
+      expect(alive(codexPid)).toBe(true);
+      limn.kill(sig);
+      expect(await exited).toEqual({ code: null, signal: sig });
+      expect(await waitFor(() => !alive(codexPid), 5_000)).toBe(true);
+    } finally {
+      limn.kill('SIGKILL');
+      if (existsSync(pidFile)) {
+        const p = Number(readFileSync(pidFile, 'utf8'));
+        if (p > 0 && alive(p)) process.kill(p, 'SIGKILL');
+      }
+    }
+  }, 40_000);
 });

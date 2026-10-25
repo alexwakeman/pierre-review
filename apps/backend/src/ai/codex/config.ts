@@ -19,6 +19,13 @@
 //   features.shell_tool=false  NO SHELL (CLAUDE.md: anything an agent reads from a PR is untrusted).
 //   features.view_image=false  no image reads (a leak the plan missed).
 //   web_search="disabled", history.persistence="none", analytics.enabled=false, agents.enabled=false.
+//   features.image_generation=false, features.goals=false, features.apps=false (the ChatGPT apps /
+//   connectors, `codex_apps`), features.plugins=false, features.remote_plugin=false and
+//   features.tool_suggest=false + features.skill_mcp_dependency_install=false (a plugin, connector or
+//   MCP dependency INSTALLED mid-run), features.memories=false
+//   + memories.generate_memories=false + memories.use_memories=false — each a way for a run to reach
+//   or keep something beyond the files Limn hands it. Every key is checked by the 0.164 CLI under
+//   --strict-config (live.test.ts), so a key a later CLI drops fails loudly, never silently.
 //   project_doc_max_bytes=0    ⚠ the ONLY thing that keeps a PR's own AGENTS.md out of the prompt.
 //   skills.include_instructions=false  ⚠ user skills arrive through HOME, not CODEX_HOME.
 //   projects."<cwd>".trust_level="untrusted"  belt and braces: the repo's `.codex/` layer loads only
@@ -102,6 +109,16 @@ export function lockedConfig(): string[] {
     ...c('agents.enabled', false),
     ...c('project_doc_max_bytes', 0),
     ...c('skills.include_instructions', false),
+    ...c('features.image_generation', false),
+    ...c('features.goals', false),
+    ...c('features.apps', false),
+    ...c('features.plugins', false),
+    ...c('features.remote_plugin', false),
+    ...c('features.tool_suggest', false),
+    ...c('features.skill_mcp_dependency_install', false),
+    ...c('features.memories', false),
+    ...c('memories.generate_memories', false),
+    ...c('memories.use_memories', false),
   ];
 }
 
@@ -191,11 +208,23 @@ export function codexChildEnv(
   base: NodeJS.ProcessEnv = process.env,
   apiKey: string | null = null,
 ): Record<string, string> {
-  const out: Record<string, string> = { CODEX_HOME: home };
-  for (const k of ['PATH', 'HOME', 'TMPDIR', 'LANG', 'LC_ALL', 'SYSTEMROOT', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA']) {
+  const out: Record<string, string> = { ...codexBaseEnv(base), CODEX_HOME: home };
+  if (apiKey) out.CODEX_API_KEY = apiKey;
+  return out;
+}
+
+/** The ONE allow-list of inherited variables every process Limn starts for Codex may see. */
+export const CODEX_ENV_ALLOW = ['PATH', 'HOME', 'TMPDIR', 'LANG', 'LC_ALL', 'SYSTEMROOT', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA'] as const;
+
+/**
+ * The allow-listed part of `base`, and nothing else — the base of EVERY Codex-related process (a run,
+ * the app-server, a sign-in, the hook's canary): never Limn's whole environment, never an API key.
+ */
+export function codexBaseEnv(base: NodeJS.ProcessEnv = process.env): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const k of CODEX_ENV_ALLOW) {
     const v = base[k];
     if (v !== undefined && v !== '') out[k] = v;
   }
-  if (apiKey) out.CODEX_API_KEY = apiKey;
   return out;
 }

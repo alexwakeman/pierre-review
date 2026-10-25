@@ -97,14 +97,33 @@ describe("Limn's Codex home", () => {
     expect(existsSync(join(process.env.HOME!, '.codex'))).toBe(false);
   });
 
-  it('a non-run process gets CODEX_HOME and no API key', () => {
-    const env = H.codexProcessEnv({ PATH: '/bin', OPENAI_API_KEY: 'sk', CODEX_API_KEY: 'sk2', LIMN_DATA_DIR: '/d' });
-    expect(env).toEqual({ PATH: '/bin', LIMN_DATA_DIR: '/d', CODEX_HOME: join('/d', 'codex') });
+  it('a non-run process gets the run allow-list + CODEX_HOME: no API key, nothing else of Limn’s', () => {
+    const env = H.codexProcessEnv({
+      PATH: '/bin',
+      OPENAI_API_KEY: 'sk',
+      CODEX_API_KEY: 'sk2',
+      LIMN_DATA_DIR: '/d',
+      ANTHROPIC_API_KEY: 'a',
+      GITHUB_TOKEN: 'g',
+      SESSION_SECRET: 's',
+      TERM: 'xterm',
+    });
+    expect(env).toEqual({ PATH: '/bin', CODEX_HOME: join('/d', 'codex') });
+    // The interactive CLI sign-in adds the terminal's own variables, still no secret.
+    expect(H.codexProcessEnv({ PATH: '/bin', LIMN_DATA_DIR: '/d', TERM: 'xterm', GITHUB_TOKEN: 'g' }, { interactive: true })).toEqual({
+      PATH: '/bin',
+      TERM: 'xterm',
+      CODEX_HOME: join('/d', 'codex'),
+    });
   });
 
-  it('codexBinary() refuses with the setup sentence when Codex is not installed', async () => {
+  it('codexBinary() refuses with the setup sentence when Codex is not installed — as an AiRuntimeMissingError', async () => {
     delete process.env.LIMN_CODEX_PATH;
     await expect(H.codexBinary()).rejects.toThrow('Codex is not set up yet. Run: limn ai install codex');
+    const { AiRuntimeMissingError } = await import('../runtime.js');
+    const err = await H.codexBinary().catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(AiRuntimeMissingError);
+    expect(err).toBeInstanceOf(H.CodexNotInstalledError);
   });
 });
 

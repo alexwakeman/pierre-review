@@ -22,7 +22,15 @@ import { CODEX_NOT_INSTALLED_MESSAGE } from './home.js';
 import { readingFromCodexRateLimits } from './readings.js';
 
 /** The one line shown when Codex is installed but nothing can pay for a run. */
-export const NO_CODEX_AUTH_MESSAGE = 'Sign in to Codex (limn ai login codex) or set OPENAI_API_KEY';
+export const NO_CODEX_AUTH_MESSAGE = 'Sign in to Codex with ChatGPT: limn ai login codex';
+
+/**
+ * ⚠ The API-key route is REFUSED until Limn can price it (ai/providers/codex.ts CODEX_PRICES_PER_MTOK
+ * is all null): a run there would record US$ 0, so the api_key budget and every per-pass US$ cap would
+ * never trip. Shown wherever that route is the one a run would take.
+ */
+export const CODEX_API_KEY_NOT_AVAILABLE_MESSAGE =
+  'Codex with an OpenAI API key is not available yet — sign in with ChatGPT';
 
 export interface CodexDetail {
   /** The Codex program is there (the download, or LIMN_CODEX_PATH). */
@@ -43,7 +51,13 @@ function detailFrom(signed: { signedIn: boolean; plan: string | null }): CodexDe
   const rt = getCodexRuntimeStatus();
   const installed = rt.runtime === 'ready';
   const route = resolveCodexCredential().route;
-  const message = !installed ? (rt.runtimeMessage ?? CODEX_NOT_INSTALLED_MESSAGE) : route === 'none' ? NO_CODEX_AUTH_MESSAGE : null;
+  const message = !installed
+    ? (rt.runtimeMessage ?? CODEX_NOT_INSTALLED_MESSAGE)
+    : route === 'none'
+      ? NO_CODEX_AUTH_MESSAGE
+      : route === 'api_key'
+        ? CODEX_API_KEY_NOT_AVAILABLE_MESSAGE
+        : null;
   return { installed, runtime: rt.runtime, runtimeMessage: rt.runtimeMessage, signedIn: signed.signedIn, plan: signed.plan, route, message };
 }
 

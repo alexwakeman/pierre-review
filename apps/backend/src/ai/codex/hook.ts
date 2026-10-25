@@ -28,6 +28,7 @@
 // defined. Re-check on every CLI bump (`codexHookTrustHash` vs `hooks/list` `currentHash`).
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { codexBaseEnv, codexChildEnv } from './config.js';
 import { helperCommand, shellWord } from './entry.js';
 import { encodeGuardRoots, GUARD_ENV, type GuardRoots } from './hook-rule.js';
 import type { CodexHookConfig } from './types.js';
@@ -104,8 +105,9 @@ const CANARY_TOOL = 'mcp__limn_canary__probe';
 /** Run the hook's own command on a call it must deny. True when it exits 2. */
 export function hookDeniesCanary(hook: CodexHookConfig, timeoutMs = 15_000): Promise<boolean> {
   return new Promise((resolve) => {
+    // The hook's own environment, as `codex exec` would hand it on: the run allow-list + the roots.
     const child = spawn('/bin/sh', ['-c', hook.command], {
-      env: { ...process.env, ...hook.env },
+      env: { ...codexBaseEnv(process.env), ...hook.env },
       stdio: ['pipe', 'ignore', 'ignore'],
     });
     const timer = setTimeout(() => {
@@ -136,11 +138,9 @@ interface ListedHook {
 /** Ask `codex app-server` (CODEX_HOME=`home`) for `hooks/list` with the hook given as a session flag. */
 export async function listSessionHooks(binary: string, home: string, hook: CodexHookConfig, timeoutMs = 20_000): Promise<ListedHook[] | null> {
   return new Promise((resolve) => {
-    // The probe's environment never carries an API key (as home.ts `codexProcessEnv`): a trust read
-    // must not be satisfied by, or bill, a key from Limn's environment.
-    const env: NodeJS.ProcessEnv = { ...process.env, CODEX_HOME: home };
-    delete env.OPENAI_API_KEY;
-    delete env.CODEX_API_KEY;
+    // The run allow-list (config.ts `codexChildEnv`, no API key): a trust read must not be satisfied
+    // by, or bill, a key from Limn's environment, nor see anything else of Limn's.
+    const env = codexChildEnv(home, process.env);
     const child = spawn(binary, ['app-server', '-c', hook.override], {
       env,
       stdio: ['pipe', 'pipe', 'ignore'],

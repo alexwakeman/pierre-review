@@ -15,18 +15,34 @@
 //      `ensureCodexHomeConfig` writes makes it `trusted`, and the SAME hook in a home without the entry
 //      is reported untrusted, which `verifyHookTrusted` turns into false (the silent-skip case).
 //   2. The config.toml Limn writes passes the real CLI's `--strict-config`; a bogus key does not.
+//   2b. EVERY locked `-c` key (config.ts `lockedConfig`) is accepted by the real CLI's `--strict-config`,
+//      one at a time, and a bogus one is refused.
 // Model runs (≤ 2 small gpt-6-luna runs at low effort, + at most one validation retry):
-//   3. `complete()` answers in the caller's schema.
+//   3. `complete()` answers in the caller's schema — under the trusted guard with EMPTY roots.
 //   4. An UNCHECKED read-only agent run reads the fixture THROUGH the workspace MCP server, under the
 //      trusted hook (which ran with its roots — `LIMN_CODEX_GUARD` reached it), the outside read is
 //      refused, the secret never reaches the answer, and the PR's AGENTS.md never reaches the prompt.
+//   5. Afterwards NOTHING of either run is left in Limn's Codex home: no rollout file, no `threads`,
+//      `thread_turns`, `thread_items` or `logs` row written since the runs began.
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { lockedConfig } from './config.js';
 
 const LIVE = process.env.LIMN_CODEX_LIVE === '1';
+
+/** Every locked `-c` pair, as [key, "key=value"] (config.ts `lockedConfig`). */
+const LOCKED_PAIRS: Array<[string, string]> = (() => {
+  const a = lockedConfig();
+  const out: Array<[string, string]> = [];
+  for (let i = 0; i < a.length; i += 2) {
+    const kv = a[i + 1]!;
+    out.push([kv.slice(0, kv.indexOf('=')), kv]);
+  }
+  return out;
+})();
 
 describe.skipIf(!LIVE)('Codex, live (LIMN_CODEX_LIVE=1)', () => {
   let dir = '';
@@ -114,6 +130,53 @@ describe.skipIf(!LIVE)('Codex, live (LIMN_CODEX_LIVE=1)', () => {
     expect(yes.stderr).not.toMatch(/unknown configuration field/);
   }, 90_000);
 
+  // ---- the locked keys, one by one, against the REAL CLI's --strict-config (model-less) ----
+  // Each `-c` key Limn locks must be one this CLI KNOWS: an unknown key is an error under
+  // --strict-config (Limn's guarantee that a typo cannot silently unlock). The run is stopped the
+  // moment the config is accepted (`thread.started`), in a scratch home with no sign-in.
+  const acceptedByStrictConfig = async (kv: string): Promise<{ ok: boolean; stderr: string }> => {
+    const { spawn } = await import('node:child_process');
+    const { codexChildEnv } = await import('./config.js');
+    const home = mkdtempSync(join(dir, 'strict-key-'));
+    return new Promise((resolve) => {
+      const child = spawn(bin, ['exec', '--json', '--strict-config', '--skip-git-repo-check', '-C', home, '-c', kv, '-'], {
+        env: codexChildEnv(home),
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      let stdout = '';
+      let stderr = '';
+      let done = false;
+      const finish = (ok: boolean): void => {
+        if (done) return;
+        done = true;
+        child.kill('SIGKILL');
+        resolve({ ok, stderr });
+      };
+      child.stdout.on('data', (d: Buffer) => {
+        stdout += d.toString('utf8');
+        if (stdout.includes('"thread.started"')) finish(true);
+      });
+      child.stderr.on('data', (d: Buffer) => {
+        stderr += d.toString('utf8');
+        if (/unknown configuration field|Error loading config/.test(stderr)) finish(false);
+      });
+      child.on('close', () => finish(false));
+      child.stdin.end('hi');
+      setTimeout(() => finish(false), 30_000);
+    });
+  };
+
+  it.each(LOCKED_PAIRS)('2b. --strict-config accepts the locked key %s (model-less)', async (_key, kv) => {
+    const r = await acceptedByStrictConfig(kv);
+    expect(r.ok ? '' : r.stderr.slice(-300)).toBe('');
+    expect(r.ok).toBe(true);
+  }, 60_000);
+
+  it('2c. …and refuses a bogus one (model-less)', async () => {
+    expect((await acceptedByStrictConfig('features.limn_bogus_zz=false')).ok).toBe(false);
+  }, 60_000);
+
+
   it('3. complete() answers in the caller’s schema (model run 1)', async (ctx) => {
     if (!signedIn) ctx.skip(); // Limn's own Codex home holds no live sign-in: limn ai login codex
     const { codexProvider } = await import('../providers/codex.js');
@@ -181,6 +244,57 @@ describe.skipIf(!LIVE)('Codex, live (LIMN_CODEX_LIVE=1)', () => {
     expect(hookDenied || stepFailed).toBe(true);
     console.log('[live 4] hook calls:', JSON.stringify(hookCalls.map((h) => [h.tool, h.allow])));
   }, 300_000);
+
+  // ---- after the model runs: nothing of them is left in Limn's Codex home ----
+  const runsStartedAt = Date.now();
+  it('5. no rollout file, thread row, history row or log row of these runs is left in Limn’s Codex home', async (ctx) => {
+    if (!signedIn) ctx.skip();
+    const { readdirSync, statSync } = await import('node:fs');
+    const { codexHome } = await import('./home.js');
+    const Database = (await import('better-sqlite3')).default;
+    const home = codexHome();
+    const sinceSec = Math.floor(runsStartedAt / 1000) - 1;
+    // Rollout files written since the runs began.
+    const fresh: string[] = [];
+    const walk = (d: string, depth: number): void => {
+      if (depth > 5) return;
+      let es: import('node:fs').Dirent[] = [];
+      try {
+        es = readdirSync(d, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const e of es) {
+        const p = join(d, e.name);
+        if (e.isDirectory()) walk(p, depth + 1);
+        else if (e.name.startsWith('rollout-') && statSync(p).mtimeMs >= runsStartedAt - 1000) fresh.push(p);
+      }
+    };
+    walk(join(home, 'sessions'), 0);
+    walk(join(home, 'archived_sessions'), 0);
+    expect(fresh).toEqual([]);
+    // Codex's own sqlite copy: no thread, turn, item or log row from these runs.
+    const count = (file: string, sql: string): number => {
+      const db = new Database(join(home, file), { fileMustExist: true, timeout: 2_000 });
+      try {
+        return (db.prepare(sql).get() as { n: number }).n;
+      } finally {
+        db.close();
+      }
+    };
+    const files = readdirSync(home);
+    const one = (re: RegExp): string | undefined => files.find((f) => re.test(f));
+    const state = one(/^state_\d+\.sqlite$/);
+    const history = one(/^thread_history_\d+\.sqlite$/);
+    const logs = one(/^logs_\d+\.sqlite$/);
+    const left: Record<string, number> = {};
+    if (state) left.threads = count(state, `SELECT count(*) AS n FROM threads WHERE updated_at >= ${sinceSec}`);
+    if (history) left.thread_turns = count(history, `SELECT count(*) AS n FROM thread_turns WHERE started_at >= ${sinceSec}`);
+    if (history) left.thread_items = count(history, `SELECT count(*) AS n FROM thread_items WHERE created_at_ms >= ${sinceSec * 1000}`);
+    if (logs) left.logs = count(logs, `SELECT count(*) AS n FROM logs WHERE thread_id IS NOT NULL AND ts >= ${sinceSec}`);
+    console.log('[live 5] left in', home, JSON.stringify(left));
+    expect(Object.values(left).every((n) => n === 0)).toBe(true);
+  }, 60_000);
 });
 
 if (!LIVE) {

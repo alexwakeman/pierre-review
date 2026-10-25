@@ -55,6 +55,21 @@ afterAll(async () => {
   for (const x of ['', '-shm', '-wal']) rmSync(DB_PATH + x, { force: true });
 });
 
+describe('the ledger read reaches back to the account-token span', () => {
+  it('ledgerSinceMs: the week, today, and an earlier span start (a day bucket opening before the week)', () => {
+    const now = Date.UTC(2026, 9, 25, 12);
+    const week = now - 7 * 24 * 3600_000;
+    expect(B.ledgerSinceMs(now, null)).toBe(week);
+    const bucket = week - 12 * 3600_000;
+    expect(
+      B.ledgerSinceMs(now, {
+        week: { tokens: 1, fromMs: bucket, inclusive: true, toMs: now },
+        fiveHour: { tokens: 1, fromMs: now - 3600_000, inclusive: false, toMs: now },
+      }),
+    ).toBe(bucket);
+  });
+});
+
 describe('the ledger is read per provider', () => {
   it('recordAiUsage writes claude by default and keeps a given provider and share', async () => {
     const rows = await db.select().from(schema.aiUsage).execute();
@@ -110,14 +125,16 @@ describe('the ledger is read per provider', () => {
     // week's start sample is DAYS older than that window, so it cannot count as its start.
     at = fiveReset - 5 * 3600_000 - 60_000;
     await AS.kickCodexProbe({ force: true, nowMs: at });
-    lifetime = 1400;
-    at = now;
-    await AS.kickCodexProbe({ force: true, nowMs: now });
     // Limn's own Codex runs this week: 150 + 50 = 200 tokens (the earlier codex row reported none).
     await U.recordAiUsage({
       accountId: 7, seam: 'agent', feature: 'claude_review', model: 'gpt-6-luna', costUsd: 0,
       provider: 'codex', inputTokens: 150, outputTokens: 50,
     });
+    // The account's newest sample comes AFTER Limn's run (the account's count ends there, and Limn's
+    // is counted to exactly that instant).
+    lifetime = 1400;
+    at = Date.now() + 1;
+    await AS.kickCodexProbe({ force: true, nowMs: at });
     // The $0 Codex row is KEPT (its tokens are the share's numerator) — and so is a cancelled Codex
     // run's row with NULL tokens ("tokens unknown", CODEX-SPIKE.md § 9: every run is recorded, and an
     // unknown figure is never written as zero). A $0 Claude row still is not.

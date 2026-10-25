@@ -211,7 +211,7 @@ describe('the AI runtime loader', () => {
 describe('installing the AI runtime', () => {
   /** A stand-in for npm: honours `--prefix`, installs the package.json's dependencies as fakes. */
   function fakeNpm(
-    behaviour: 'ok' | 'fail' | 'wrong-version' | 'no-binary',
+    behaviour: 'ok' | 'fail' | 'wrong-version' | 'no-binary' | 'codex-fail',
   ): { command: string; args: string[] } {
     const script = join(root, `fake-npm-${behaviour}.mjs`);
     const counter = join(root, 'npm-calls');
@@ -230,6 +230,10 @@ if (${JSON.stringify(behaviour)} === 'fail') {
 }
 console.log('http fetch GET 200 https://registry.npmjs.org/zod');
 const deps = JSON.parse(readFileSync(join(prefix, 'package.json'), 'utf8')).dependencies;
+if (${JSON.stringify(behaviour)} === 'codex-fail' && '@openai/codex' in deps) {
+  console.error('npm ERR! 404 @openai/codex-darwin-arm64 not found');
+  process.exit(1);
+}
 for (const [name, version] of Object.entries(deps)) {
   const dir = join(prefix, 'node_modules', name);
   mkdirSync(dir, { recursive: true });
@@ -399,9 +403,43 @@ await new Promise((r) => setTimeout(r, 50));
       join(realpathSync(rt.runtimeDir), 'node_modules', CODEX_PLATFORM_PKG, 'vendor', CODEX_TRIPLE, 'bin', process.platform === 'win32' ? 'codex.exe' : 'codex'),
     );
     expect(phases.at(-1)).toBe('AI is set up, with Codex.');
-    // A later Claude-only install (an update, "Set up AI again") KEEPS Codex.
+    // Claude and Codex are staged APART: two downloads.
+    expect(npmCalls()).toBe(2);
+    // A later Claude-only install (an update, "Set up AI again") KEEPS Codex — and never re-downloads it.
     expect(await rt.install(undefined, { npm: fakeNpm('ok') })).toEqual({ ok: true });
+    expect(npmCalls()).toBe(3);
     expect(JSON.parse(readFileSync(join(dataDir, 'ai-runtime', 'package.json'), 'utf8')).dependencies[CODEX_PACKAGE]).toBe(CODEX_PIN);
+    expect(rt.codexStatus().runtime).toBe('ready');
+    expect(rt.codexBinary()).toBe(bin);
+    expect(readdirSync(dataDir)).toEqual(['ai-runtime']);
+  });
+
+  it('⚠ a Claude-only "Set up AI" never fails for Codex: a broken Codex download is not even attempted', async () => {
+    withCodexPin();
+    const rt = runtime();
+    expect(await rt.install(undefined, { npm: fakeNpm('ok'), providers: ['codex'] })).toEqual({ ok: true });
+    // Codex's registry is down now; Claude's repair must still go through, keeping the old Codex.
+    expect(await rt.install(undefined, { npm: fakeNpm('codex-fail') })).toEqual({ ok: true });
+    expect(rt.status()).toEqual({ runtime: 'ready', runtimeMessage: null });
+    expect(rt.codexStatus()).toEqual({ runtime: 'ready', runtimeMessage: null });
+  });
+
+  it('⚠ a failed Codex download is CODEX’s failure alone: Claude is set up, an old Codex is kept', async () => {
+    withCodexPin();
+    const rt = runtime();
+    // No Codex yet: Claude installs; Codex reports the failure and nothing else does.
+    const first = await rt.install(undefined, { npm: fakeNpm('codex-fail'), providers: ['codex'] });
+    expect(first).toEqual({ ok: false, message: expect.stringMatching(/limn ai install codex/) });
+    expect(rt.status()).toEqual({ runtime: 'ready', runtimeMessage: null });
+    expect(rt.codexStatus()).toEqual({ runtime: 'failed', runtimeMessage: (first as { message: string }).message });
+    expect(readdirSync(dataDir)).toEqual(['ai-runtime']);
+    // With a working Codex in place, a failed re-download KEEPS it.
+    expect(await rt.install(undefined, { npm: fakeNpm('ok'), providers: ['codex'] })).toEqual({ ok: true });
+    const bin = rt.codexBinary();
+    const again = await rt.install(undefined, { npm: fakeNpm('codex-fail'), providers: ['codex'] });
+    expect(again.ok).toBe(false);
+    expect(rt.status().runtime).toBe('ready');
+    expect(rt.codexBinary()).toBe(bin);
     expect(rt.codexStatus().runtime).toBe('ready');
   });
 
@@ -415,11 +453,13 @@ await new Promise((r) => setTimeout(r, 50));
     expect(rt.codexStatus().runtime).toBe('failed');
   });
 
-  it('refuses to download Codex when this copy does not pin it', async () => {
+  it('refuses to download Codex when this copy does not pin it — as Codex’s failure, never Claude’s', async () => {
     const rt = runtime();
     const result = await rt.install(undefined, { npm: fakeNpm('ok'), providers: ['codex'] });
     expect(result).toEqual({ ok: false, message: expect.stringMatching(/which Codex version/) });
     expect(npmCalls()).toBe(0);
+    expect(rt.status().runtime).not.toBe('failed');
+    expect(rt.codexStatus().runtime).toBe('failed');
   });
 
   it('a Codex at another pin still runs, and says "set up again"', async () => {

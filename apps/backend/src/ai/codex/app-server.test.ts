@@ -14,7 +14,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { writeFakeCodex } from './fake-codex.test-support.js';
+import { setFakeCodex, writeFakeCodex } from './fake-codex.test-support.js';
 
 let root: string;
 let fake: string;
@@ -27,7 +27,7 @@ beforeAll(() => {
   logFile = join(root, 'calls.log');
   process.env.LIMN_DATA_DIR = join(root, 'data');
   process.env.LIMN_CODEX_PATH = fake;
-  process.env.FAKE_CODEX_LOG = logFile;
+  setFakeCodex(fake, { log: logFile });
   // An API key in the parent environment must NOT reach the probe or the sign-in.
   process.env.OPENAI_API_KEY = 'sk-must-not-leak';
 });
@@ -45,7 +45,7 @@ const { codexHome } = await import('./home.js');
 afterEach(() => {
   AS._setCodexProbeForTest(null);
   L._resetCodexLoginForTest();
-  process.env.FAKE_CODEX_MODE = 'signedin';
+  setFakeCodex(fake, { mode: 'signedin' });
   rmSync(logFile, { force: true });
 });
 
@@ -62,7 +62,7 @@ const opts = () => {
 
 describe('the JSON-RPC client', () => {
   it('initializes, answers results and errors, and closes its process', async () => {
-    process.env.FAKE_CODEX_MODE = 'error';
+    setFakeCodex(fake, { mode: 'error' });
     const s = await AS.CodexAppServer.start(opts());
     const limits = await s.request('account/rateLimits/read', null);
     expect((limits as { rateLimits: { planType: string } }).rateLimits.planType).toBe('plus');
@@ -83,7 +83,7 @@ describe('the JSON-RPC client', () => {
   });
 
   it('times a request out instead of hanging', async () => {
-    process.env.FAKE_CODEX_MODE = 'hang';
+    setFakeCodex(fake, { mode: 'hang' });
     const s = await AS.CodexAppServer.start(opts());
     await expect(s.request('account/read', { refreshToken: true }, 200)).rejects.toThrow(/did not answer account\/read/);
     s.close();
@@ -119,7 +119,7 @@ describe('the probe', () => {
   });
 
   it('signed out: no window and no token read', async () => {
-    process.env.FAKE_CODEX_MODE = 'signedout';
+    setFakeCodex(fake, { mode: 'signedout' });
     const r = await AS.probeCodexAccount(opts());
     expect(r.account).toEqual({ signedIn: false, type: null, plan: null });
     expect(r.reading).toBeNull();
@@ -179,9 +179,9 @@ describe('the cache', () => {
     life = 175;
     at = 1000 + 3600_000;
     await AS.kickCodexProbe({ force: true });
-    expect(await AS.codexAccountTokens({ fromMs: 1000, toMs: 1000 + 3600_000 })).toEqual({ tokens: 75, fromMs: 1000, inclusive: false });
+    expect(await AS.codexAccountTokens({ fromMs: 1000, toMs: 1000 + 3600_000 })).toEqual({ tokens: 75, fromMs: 1000, inclusive: false, toMs: 1000 + 3600_000 });
     // No sample before this window opened: the two inside it give a shorter span, named.
-    expect(await AS.codexAccountTokens({ fromMs: 500, toMs: 1000 + 3600_000 })).toEqual({ tokens: 75, fromMs: 1000, inclusive: false });
+    expect(await AS.codexAccountTokens({ fromMs: 500, toMs: 1000 + 3600_000 })).toEqual({ tokens: 75, fromMs: 1000, inclusive: false, toMs: 1000 + 3600_000 });
     expect(await AS.codexAccountTokens({ fromMs: 500, toMs: 2000 })).toBeNull();
   });
 
@@ -208,7 +208,7 @@ describe('the cache', () => {
 
 describe('the sign-in', () => {
   it('browser flow: answers the URL, then completion ⇒ done, and the account is read again', async () => {
-    process.env.FAKE_CODEX_MODE = 'login-ok';
+    setFakeCodex(fake, { mode: 'login-ok' });
     const s = await L.startCodexLogin('browser');
     expect(s).toMatchObject({ state: 'waiting', method: 'browser', authUrl: 'https://auth.openai.com/oauth/authorize?x=1' });
     for (let i = 0; i < 50 && L.codexLoginState().state === 'waiting'; i++) await new Promise((r) => setTimeout(r, 20));
@@ -221,7 +221,7 @@ describe('the sign-in', () => {
   });
 
   it('device flow: answers the page and the code', async () => {
-    process.env.FAKE_CODEX_MODE = 'login-hang';
+    setFakeCodex(fake, { mode: 'login-hang' });
     const s = await L.startCodexLogin('device');
     expect(s).toMatchObject({
       state: 'waiting',
@@ -237,7 +237,7 @@ describe('the sign-in', () => {
   });
 
   it('a cancel DURING the start window wins: the start it cancelled never overwrites it, nor comes back as waiting', async () => {
-    process.env.FAKE_CODEX_MODE = 'login-slow';
+    setFakeCodex(fake, { mode: 'login-slow' });
     const pending = L.startCodexLogin('browser');
     // Cancel while `account/login/start` is still unanswered (the fake answers after 400 ms).
     await new Promise((r) => setTimeout(r, 150));
@@ -252,15 +252,31 @@ describe('the sign-in', () => {
     expect(L.codexLoginState()).toEqual({ state: 'idle' });
   });
 
+  it('a NEW sign-in after a cancel never joins the start that cancel overtook (it would answer "idle")', async () => {
+    setFakeCodex(fake, { mode: 'login-slow' });
+    const dead = L.startCodexLogin('browser');
+    await new Promise((r) => setTimeout(r, 150));
+    await L.cancelCodexLogin();
+    // The overtaken start is still in flight (its answer comes at 400 ms): a fresh press starts anew.
+    const fresh = L.startCodexLogin('browser');
+    expect(fresh).not.toBe(dead);
+    expect(await dead).toEqual({ state: 'idle' });
+    expect(await fresh).toMatchObject({ state: 'waiting', authUrl: 'https://auth.openai.com/oauth/authorize?x=1' });
+    // …and the overtaken start's own clean-up did not clear the fresh one's slot: a third press joins it.
+    expect(await L.startCodexLogin('browser')).toMatchObject({ state: 'waiting' });
+    expect(L.codexLoginState()).toMatchObject({ state: 'waiting' });
+    await L.cancelCodexLogin();
+  });
+
   it('a refused sign-in says so', async () => {
-    process.env.FAKE_CODEX_MODE = 'login-fail';
+    setFakeCodex(fake, { mode: 'login-fail' });
     await L.startCodexLogin('browser');
     for (let i = 0; i < 50 && L.codexLoginState().state === 'waiting'; i++) await new Promise((r) => setTimeout(r, 20));
     expect(L.codexLoginState()).toEqual({ state: 'failed', message: 'access denied' });
   });
 
   it('a sign-in the reader never finishes is stopped', async () => {
-    process.env.FAKE_CODEX_MODE = 'login-hang';
+    setFakeCodex(fake, { mode: 'login-hang' });
     await L.startCodexLogin('browser', { timeoutMs: 100 });
     for (let i = 0; i < 50 && L.codexLoginState().state === 'waiting'; i++) await new Promise((r) => setTimeout(r, 20));
     expect(L.codexLoginState()).toMatchObject({ state: 'failed', message: expect.stringMatching(/too long/) });

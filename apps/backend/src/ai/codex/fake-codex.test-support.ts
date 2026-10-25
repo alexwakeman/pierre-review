@@ -1,15 +1,19 @@
 // A STAND-IN `codex` PROGRAM for the offline tests: `codex app-server` speaking newline JSON-RPC with
 // the answers the spike recorded from 0.164.0 (docs/CODEX-SPIKE.md § 6), and `codex login|logout` that
 // just log and exit. Written to a temp folder as an executable node script; its behaviour is chosen by
-// FAKE_CODEX_MODE and every call is appended to FAKE_CODEX_LOG (method, CODEX_HOME, whether an API
-// key reached it) so a test can assert what Limn sent and with which environment.
+// `mode` and every call is appended to `log` (method, CODEX_HOME, whether an API key reached it) so a
+// test can assert what Limn sent and with which environment. ⚠ Both ride a SIDECAR file
+// (`<script>.json`, `setFakeCodex`), never the environment: Limn hands a Codex process only its
+// allow-list (config.ts `codexBaseEnv`), so a variable set in the test's environment never arrives.
 import { chmodSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const SCRIPT = String.raw`#!/usr/bin/env node
-const { appendFileSync } = require('node:fs');
-const mode = process.env.FAKE_CODEX_MODE || 'signedin';
-const logFile = process.env.FAKE_CODEX_LOG;
+const { appendFileSync, readFileSync } = require('node:fs');
+let side = {};
+try { side = JSON.parse(readFileSync(process.argv[1] + '.json', 'utf8')); } catch {}
+const mode = side.mode || 'signedin';
+const logFile = side.log;
 const log = (o) => { if (logFile) appendFileSync(logFile, JSON.stringify(o) + '\n'); };
 const sub = process.argv[2];
 log({ argv: process.argv.slice(2), codexHome: process.env.CODEX_HOME || null, apiKey: !!(process.env.OPENAI_API_KEY || process.env.CODEX_API_KEY), cwd: process.cwd() });
@@ -70,4 +74,13 @@ export function writeFakeCodex(dir: string): string {
   writeFileSync(file, SCRIPT);
   chmodSync(file, 0o755);
   return file;
+}
+
+const sidecars = new Map<string, { mode?: string; log?: string }>();
+
+/** Set the fake's behaviour (`mode`) and call log (`log`) — merged into its sidecar file. */
+export function setFakeCodex(fake: string, patch: { mode?: string; log?: string }): void {
+  const next = { ...(sidecars.get(fake) ?? {}), ...patch };
+  sidecars.set(fake, next);
+  writeFileSync(`${fake}.json`, JSON.stringify(next));
 }

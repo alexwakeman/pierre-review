@@ -108,9 +108,11 @@ describe("the account's tokens in a window — WITH the span they cover", () => 
       { atMs: T0 + H, lifetimeTokens: 1300 },
       { atMs: T0 + 3 * H, lifetimeTokens: 1600 },
     ];
-    expect(accountTokensInWindow(samples, null, T0, T0 + 4 * H)).toEqual({ tokens: 600, fromMs: T0 - 4 * M, inclusive: false });
+    // The span ENDS at the newest sample (T0 + 3h), not at the window's end: Limn's rows after it are
+    // not in the account's count either.
+    expect(accountTokensInWindow(samples, null, T0, T0 + 4 * H)).toEqual({ tokens: 600, fromMs: T0 - 4 * M, inclusive: false, toMs: T0 + 3 * H });
     // The newest sample at or before the window's END: one taken later is not counted.
-    expect(accountTokensInWindow(samples, null, T0, T0 + 2 * H)).toEqual({ tokens: 300, fromMs: T0 - 4 * M, inclusive: false });
+    expect(accountTokensInWindow(samples, null, T0, T0 + 2 * H)).toEqual({ tokens: 300, fromMs: T0 - 4 * M, inclusive: false, toMs: T0 + H });
   });
   it('a start sample OLDER than the limit is not the window’s start: the inside samples give a shorter span', () => {
     // The sample days before the window would count the account's use before it (Limn's share too small).
@@ -119,7 +121,7 @@ describe("the account's tokens in a window — WITH the span they cover", () => 
       { atMs: T0 + H, lifetimeTokens: 50_000 },
       { atMs: T0 + 2 * H, lifetimeTokens: 50_080 },
     ];
-    expect(accountTokensInWindow(samples, null, T0, T0 + 3 * H)).toEqual({ tokens: 80, fromMs: T0 + H, inclusive: false });
+    expect(accountTokensInWindow(samples, null, T0, T0 + 3 * H)).toEqual({ tokens: 80, fromMs: T0 + H, inclusive: false, toMs: T0 + 2 * H });
     // With a single inside sample there is nothing to say: unknown.
     expect(accountTokensInWindow(samples.slice(0, 2), null, T0, T0 + 3 * H)).toBeNull();
   });
@@ -133,7 +135,13 @@ describe("the account's tokens in a window — WITH the span they cover", () => 
       { startMs: T0 - D, tokens: 10 }, // overlaps its first hours
       { startMs: T0 + 3 * D, tokens: 100 },
     ];
-    expect(accountTokensInWindow([], daily, T0 - 12 * H, T0 + 7 * D - 12 * H)).toEqual({ tokens: 110, fromMs: T0 - D, inclusive: true });
+    // From the first overlapping bucket's START to the last one's END (its last millisecond).
+    expect(accountTokensInWindow([], daily, T0 - 12 * H, T0 + 7 * D - 12 * H)).toEqual({
+      tokens: 110,
+      fromMs: T0 - D,
+      inclusive: true,
+      toMs: T0 + 4 * D - 1,
+    });
   });
   it('EMPTY daily buckets are unknown, not zero (a Plus account answered [] while it had used tokens)', () => {
     expect(accountTokensInWindow([], [], T0, T0 + 7 * D)).toBeNull();

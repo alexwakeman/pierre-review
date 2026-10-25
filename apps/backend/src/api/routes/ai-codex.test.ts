@@ -9,7 +9,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { writeFakeCodex } from '../../ai/codex/fake-codex.test-support.js';
+import { setFakeCodex, writeFakeCodex } from '../../ai/codex/fake-codex.test-support.js';
 
 const DB_PATH = '/tmp/pierre-ai-codex-routes-test.sqlite';
 process.env.DATABASE_URL = DB_PATH;
@@ -17,7 +17,7 @@ process.env.DISABLE_SCHEDULER = 'true';
 const root = mkdtempSync(join(tmpdir(), 'limn-ai-codex-routes-'));
 process.env.LIMN_DATA_DIR = join(root, 'data');
 process.env.LIMN_CODEX_PATH = writeFakeCodex(root);
-process.env.FAKE_CODEX_MODE = 'login-hang';
+setFakeCodex(process.env.LIMN_CODEX_PATH, { mode: 'login-hang' });
 delete process.env.OPENAI_API_KEY;
 delete process.env.LIMN_AI_PROVIDER;
 delete process.env.LIMN_AI_DISABLED;
