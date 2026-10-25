@@ -205,7 +205,7 @@ export async function runTicketReviewSweep(
   const ticketsForPr = providers.ticketsForPr;
   if (!autoReviewAvailable(ctx)) return result;
   if (sweeping) return result;
-  if (!agenticRunReady(ctx)) {
+  if (!agenticRunReady(ctx, 'ticket_review')) {
     result.stopped = 'ai_not_ready';
     return result;
   }

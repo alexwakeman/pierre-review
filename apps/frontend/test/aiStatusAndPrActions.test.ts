@@ -62,7 +62,7 @@ describe('Check threads', () => {
     expect(src('components/PrDetail.tsx')).toContain('<CheckThreadsButton prId={pr.id} />');
     expect(src('components/ClaudeReviewTab.tsx')).toContain('<CheckThreadsButton prId={checkThreadsPrId} />');
     // Gated like Claude Review.
-    expect(src('components/CheckThreadsButton.tsx')).toContain('<AiRunGate>');
+    expect(src('components/CheckThreadsButton.tsx')).toContain('<AiRunGate kind="thread_check">');
   });
   it('the Claude Review tab renders its threads from the current judgements', () => {
     expect(src('components/ClaudeReviewTab.tsx')).toContain('data.currentThreadAssessments');

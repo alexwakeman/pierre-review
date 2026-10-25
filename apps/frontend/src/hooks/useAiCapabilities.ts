@@ -12,7 +12,9 @@ import { aiCapabilitiesOf, type AiCapabilities } from '../lib/aiCapabilities.js'
 export {
   AI_AUTH_LINE,
   AI_SETUP_LABEL,
+  aiAuthFor,
   aiCapabilitiesOf,
+  aiReadyFor,
   type AiCapabilities,
 } from '../lib/aiCapabilities.js';
 

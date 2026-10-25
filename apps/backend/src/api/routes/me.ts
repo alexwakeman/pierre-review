@@ -1,5 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type {
+  AiKindStatus,
+  AiRunKind,
   BlastRadiusConfigBody,
   BlastRadiusConfigResponse,
   LargePrThresholdBody,
@@ -28,7 +30,7 @@ import { getAiRuntimeStatus } from '../../ai/runtime.js';
 import { detectClaudeAuth, NO_CLAUDE_AUTH_MESSAGE } from '../../review/auth.js';
 import { resolveAiCredential } from '../../ai/credentials.js';
 import { codexDetailCached } from '../../ai/codex/detect.js';
-import { CODEX_NOT_AVAILABLE_MESSAGE, CODEX_RUNNABLE, getActiveProvider } from '../../ai/provider.js';
+import { ALL_RUN_KINDS, CODEX_NOT_AVAILABLE_MESSAGE, CODEX_RUNNABLE, getActiveProvider } from '../../ai/provider.js';
 import { getMyTurn } from '../../db/queries.js';
 import { clearDailyBriefCountsFor } from '../../db/daily-brief.js';
 import { dismissMyTurn, restoreMyTurn } from '../../db/my-turn-dismissals.js';
@@ -154,6 +156,10 @@ const myTurnSettingsSchema = {
  * "Sign in to Claude Code or set ANTHROPIC_API_KEY" line shows, never whether the feature is
  * visible — the run itself is the authoritative check. Under LIMN_AI_PROVIDER=codex it answers
  * none with the "Codex is not available" sentence (review/auth.ts). Disabled ⇒ the other fields are inert.
+ *
+ * `kinds` is the SAME pre-flight asked PER RUN KIND (every agent kind, and 'complete' for the one-shot
+ * features): under Claude every entry repeats `auth`; under Codex a kind it can run reads 'ok' while
+ * the top-level `auth` (no kind = "any agent") stays 'none' until every kind can.
  */
 function agenticAiStatus(): MeResponse['ai'] {
   const provider = getActiveProvider().id;
@@ -164,6 +170,7 @@ function agenticAiStatus(): MeResponse['ai'] {
       runtimeMessage: null,
       auth: 'none',
       authMessage: null,
+      kinds: kindsStatus(() => ({ auth: 'none', message: null })),
       provider,
       providers: {
         claude: { auth: 'none', route: 'none', message: null },
@@ -194,6 +201,10 @@ function agenticAiStatus(): MeResponse['ai'] {
     runtimeMessage: rt.runtimeMessage,
     auth: auth.status === 'ok' ? 'ok' : 'none',
     authMessage: auth.status === 'ok' ? null : auth.message,
+    kinds: kindsStatus((kind) => {
+      const r = detectClaudeAuth(kind);
+      return r.status === 'ok' ? { auth: 'ok', message: null } : { auth: 'none', message: r.message };
+    }),
     provider,
     providers: {
       claude: {
@@ -216,6 +227,11 @@ function agenticAiStatus(): MeResponse['ai'] {
       },
     },
   };
+}
+
+/** One entry per run kind, in `ALL_RUN_KINDS` order. */
+function kindsStatus(of: (kind: AiRunKind) => AiKindStatus): Record<AiRunKind, AiKindStatus> {
+  return Object.fromEntries(ALL_RUN_KINDS.map((k) => [k, of(k)])) as Record<AiRunKind, AiKindStatus>;
 }
 
 export async function meRoutes(app: FastifyInstance): Promise<void> {

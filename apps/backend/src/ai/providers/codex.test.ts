@@ -506,7 +506,23 @@ describe('runAgentUnchecked() — one read-only run', () => {
     });
     // strict `note: null` → absent for the tool (optional-not-nullable)
     expect(handled).toEqual([{ answer: 'yes' }]);
-    expect(out).toMatchObject({ result: null, provider: 'codex', text: '{"answer":"yes","note":null}', costUsd: 0, filesChanged: null, threadId: 'th-x' });
+    expect(out).toMatchObject({ provider: 'codex', text: '{"answer":"yes","note":null}', costUsd: 0, filesChanged: null, threadId: 'th-x' });
+    // THE NEUTRAL STREAM (ai/provider.ts): the answer as a step (its text), the turn's tokens as a step,
+    // then the outcome, also returned (Codex counts no turns; its tokens in the neutral shape).
+    const outcome = {
+      subtype: 'success',
+      text: '{"answer":"yes","note":null}',
+      costUsd: 0,
+      numTurns: null,
+      usage: { inputTokens: 100, outputTokens: 10, cacheReadTokens: 0, cacheCreationTokens: 0 },
+    };
+    expect(out.outcome).toEqual(outcome);
+    const neutral = (progress as Array<{ kind: string }>).filter((p) => p.kind === 'step' || p.kind === 'outcome');
+    expect(neutral).toEqual([
+      { kind: 'step', lines: ['{"answer":"yes","note":null}'], text: '{"answer":"yes","note":null}', usage: null },
+      { kind: 'step', lines: [], text: '', usage: { inputTokens: 100, outputTokens: 10, cacheReadTokens: 0, cacheCreationTokens: 0 } },
+      { kind: 'outcome', outcome },
+    ]);
     expect(out.usage).toEqual({ inputTokens: 100, cachedInputTokens: 0, outputTokens: 10, reasoningOutputTokens: 0 });
     // deep role (a Claude Opus id) → Codex's deep model, high effort
     expect(call.argv[call.argv.indexOf('-m') + 1]).toBe('gpt-6-astra');
@@ -579,8 +595,19 @@ describe('runAgentUnchecked() — one read-only run', () => {
 
   it('a cancelled run rejects as an AbortError and records NULL tokens', async () => {
     const ac = new AbortController();
-    const p = C.runAgentUnchecked(spec('HANG', { abortController: ac, onProgress: () => ac.abort() }));
+    let seenOutcome: unknown = null;
+    const p = C.runAgentUnchecked(
+      spec('HANG', {
+        abortController: ac,
+        onProgress: (e: { kind: string; outcome?: unknown }) => {
+          if (e.kind === 'outcome') seenOutcome = e.outcome;
+          else ac.abort();
+        },
+      }),
+    );
     await expect(p).rejects.toMatchObject({ name: 'AbortError', message: 'The run was cancelled.' });
+    // The neutral outcome still says how it ended, with no tokens known.
+    expect(seenOutcome).toEqual({ subtype: 'cancelled', text: null, costUsd: 0, numTurns: null, usage: null });
     expect(T.recorded).toEqual([expect.objectContaining({ inputTokens: null, outputTokens: null, costUsd: 0 })]);
   });
 

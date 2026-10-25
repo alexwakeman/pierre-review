@@ -115,7 +115,7 @@ export function BotThemesPanel({ repoIds }: { repoIds: number[] | null }): JSX.E
         </InfoButton>
         <span className="text-[11px] text-gray-500 dark:text-gray-400">AI read</span>
         <span className="ml-auto">
-          <AiRunGate>
+          <AiRunGate kind="complete">
             <button
               type="button"
               onClick={() => refresh.mutate()}

@@ -176,7 +176,7 @@ export function DocsChat({
       </div>
 
       <div className="space-y-1.5 border-t border-gray-200 px-3 py-2 dark:border-gray-800">
-        <AiRunGate>
+        <AiRunGate kind="docs_chat">
           <form
             className="flex items-end gap-2"
             onSubmit={(e) => {

@@ -1,3 +1,4 @@
+import type { AiRunKind } from '@pierre-review/shared';
 import type { FastifyBaseLogger, FastifyRequest } from 'fastify';
 import { config } from '../config.js';
 import { accountIdOf } from '../api/plugins/auth.js';
@@ -61,7 +62,9 @@ export interface AgentContext {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   schema: Record<string, any>;
   runTransaction: typeof runTransaction;
-  llm: { detectAuth(): DetectAuthResult };
+  // The pre-flight PER RUN KIND (review/auth.ts `detectClaudeAuth`): pass the kind about to run —
+  // an agent kind, or 'complete' for a one-shot feature. No kind ⇒ "any agent" (the strictest answer).
+  llm: { detectAuth(kind?: AiRunKind): DetectAuthResult };
   recordAiUsage(row: AiUsageRecord): Promise<void>;
   github: Pick<
     GithubSeam,
@@ -141,8 +144,8 @@ export function buildAgentContext(log: FastifyBaseLogger): AgentContext {
     schema: schema as unknown as Record<string, unknown> as AgentContext['schema'],
     runTransaction,
     llm: {
-      detectAuth: () => {
-        const r = detectClaudeAuth();
+      detectAuth: (kind) => {
+        const r = detectClaudeAuth(kind);
         return r.status === 'ok' ? { status: 'ok' } : { status: 'none', message: r.message };
       },
     },

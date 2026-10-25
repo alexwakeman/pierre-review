@@ -352,7 +352,7 @@ async function startRun(
 ): Promise<StartFixResult> {
   const { accountId, prId } = input;
 
-  const auth = ctx.llm.detectAuth();
+  const auth = ctx.llm.detectAuth(mode);
   if (auth.status !== 'ok') return { status: 'no_auth', message: auth.message };
 
   // Hard agentic cap: refuse a run once the account's monthly agent credit allowance is spent
@@ -761,7 +761,7 @@ export async function sendPlanMessage(
   const left = config.aiFixBudgetUsd - (row.planCostUsd ?? 0);
   if (left < MIN_PLAN_PASS_BUDGET_USD) return { status: 'budget_spent' };
 
-  const auth = ctx.llm.detectAuth();
+  const auth = ctx.llm.detectAuth('plan');
   if (auth.status !== 'ok') return { status: 'no_auth', message: auth.message };
 
   const prId = row.prId;
@@ -856,7 +856,7 @@ export async function approvePlan(
   if (row.status !== 'planned' || parsePlanStatus(row.planStatus) !== 'plan_ready' || !plan || !seed)
     return { status: 'not_ready' };
 
-  const auth = ctx.llm.detectAuth();
+  const auth = ctx.llm.detectAuth('fix');
   if (auth.status !== 'ok') return { status: 'no_auth', message: auth.message };
 
   const prId = row.prId;

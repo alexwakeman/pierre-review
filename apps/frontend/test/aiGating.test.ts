@@ -2,9 +2,12 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { MeResponse } from '@pierre-review/shared';
+import { aiKindsAll } from '@pierre-review/shared';
 import {
   AI_AUTH_LINE,
+  aiAuthFor,
   aiCapabilitiesOf,
+  aiReadyFor,
 } from '../src/lib/aiCapabilities.js';
 import { formatUsd } from '../src/lib/ui.js';
 
@@ -69,7 +72,45 @@ describe('aiCapabilitiesOf', () => {
 
   it("the auth line prints the server's own sentence when it sent one (e.g. Codex not available yet)", () => {
     const src = readFileSync(new URL('../src/components/AiSetup.tsx', import.meta.url), 'utf8');
-    expect(src).toMatch(/ai\.authMessage \?\? AI_AUTH_LINE/);
+    expect(src).toMatch(/aiAuthFor\(ai, kind\)\.message \?\? AI_AUTH_LINE/);
+  });
+});
+
+describe('the pre-flight PER RUN KIND (`me.ai.kinds`)', () => {
+  const NOT_YET = 'Codex cannot run AI Fix in this version of Limn yet.';
+  // Codex as active: the top-level answer stays 'none' (not every kind runs), one kind is ported.
+  const CODEX: MeResponse['ai'] = {
+    ...READY,
+    auth: 'none',
+    authMessage: 'Codex is not available in this version of Limn yet.',
+    provider: 'codex',
+    kinds: {
+      ...aiKindsAll({ auth: 'none', message: NOT_YET }),
+      review: { auth: 'ok', message: null },
+      complete: { auth: 'ok', message: null },
+    },
+  };
+
+  it('a kind Codex runs is ready while the top-level answer is not', () => {
+    const ai = aiCapabilitiesOf(me(CODEX));
+    expect(ai.ready).toBe(false);
+    expect(aiReadyFor(ai, 'review')).toBe(true);
+    expect(aiReadyFor(ai, 'complete')).toBe(true);
+    expect(aiReadyFor(ai, 'fix')).toBe(false);
+    expect(aiAuthFor(ai, 'fix')).toEqual({ auth: 'none', message: NOT_YET });
+    // No kind named: the top-level answer and sentence.
+    expect(aiAuthFor(ai, undefined)).toEqual({ auth: 'none', message: 'Codex is not available in this version of Limn yet.' });
+  });
+
+  it('on Claude every kind repeats the top-level answer; an older server with no map falls back to it', () => {
+    const claude = aiCapabilitiesOf(me({ ...READY, kinds: aiKindsAll({ auth: 'ok', message: null }) }));
+    expect(aiReadyFor(claude, 'fix')).toBe(true);
+    const older = aiCapabilitiesOf(me(READY));
+    expect(older.kinds).toEqual({});
+    expect(aiAuthFor(older, 'fix')).toEqual({ auth: 'ok', message: null });
+    const olderNone = aiCapabilitiesOf(me({ ...READY, auth: 'none', authMessage: 'x' }));
+    expect(aiReadyFor(olderNone, 'review')).toBe(false);
+    expect(aiAuthFor(olderNone, 'review')).toEqual({ auth: 'none', message: 'x' });
   });
 });
 
@@ -119,10 +160,18 @@ describe('the wiring', () => {
     expect(tab).not.toMatch(/formatUsd\(/);
   });
 
-  it('every agentic start button sits behind the one gate', () => {
-    expect(read(join(root, 'components', 'ClaudeReviewTab.tsx'))).toMatch(/<AiRunGate auth=\{data\?\.auth\}>/);
-    expect(read(join(root, 'components', 'AiFixTab.tsx'))).toMatch(/<AiRunGate auth=\{data\?\.auth\}>/);
-    expect(read(join(root, 'components', 'ClaudeReviewChat.tsx'))).toMatch(/<AiRunGate>/);
+  it('every agentic start button sits behind the one gate, naming its run kind', () => {
+    expect(read(join(root, 'components', 'ClaudeReviewTab.tsx'))).toMatch(/<AiRunGate kind="review" auth=\{data\?\.auth\}>/);
+    expect(read(join(root, 'components', 'AiFixTab.tsx'))).toMatch(/<AiRunGate kind="fix" auth=\{data\?\.auth\}>/);
+    expect(read(join(root, 'components', 'ClaudeReviewChat.tsx'))).toMatch(/<AiRunGate kind="review_chat">/);
+  });
+
+  it('every gate names its run kind (a gate with none reads the strictest, "any agent" answer)', () => {
+    for (const f of files) {
+      for (const m of read(f).matchAll(/<AiRunGate\b[^>]*>/g)) {
+        expect(m[0], f).toMatch(/ kind="[a-z_]+"/);
+      }
+    }
   });
 
   it('every one-shot AI surface shows only while AI is on and runs behind the one gate', () => {
@@ -139,10 +188,16 @@ describe('the wiring', () => {
     ]) {
       const s = activity(n);
       expect(s, n).toMatch(/useAiCapabilities\(\)\.enabled/);
-      expect(s, n).toMatch(/<AiRunGate>/);
+      // A one-shot: it runs on any signed-in provider (Codex too).
+      expect(s, n).toMatch(/<AiRunGate kind="complete">/);
     }
-    for (const n of ['PeriodReportsPanel.tsx', 'SprintAskPanel.tsx', 'DocsView.tsx', 'DocsChat.tsx']) {
-      expect(activity(n), n).toMatch(/<AiRunGate>/);
+    for (const [n, kind] of [
+      ['PeriodReportsPanel.tsx', 'complete'],
+      ['SprintAskPanel.tsx', 'complete'],
+      ['DocsView.tsx', 'docs_build'],
+      ['DocsChat.tsx', 'docs_chat'],
+    ] as const) {
+      expect(activity(n), n).toMatch(new RegExp(`<AiRunGate kind="${kind}">`));
     }
     expect(read(join(root, 'components', 'Activity', 'BotsView.tsx'))).toMatch(
       /showThemes = useAiCapabilities\(\)\.enabled/,

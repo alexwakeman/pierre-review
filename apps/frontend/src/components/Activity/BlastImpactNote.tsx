@@ -116,7 +116,7 @@ export function BlastImpactNote({
         <AiStatusLine stage="Reading the change" />
       )}
       {note == null && !state.running && (
-        <AiRunGate>
+        <AiRunGate kind="complete">
           <button
             type="button"
             onClick={() => run()}
@@ -182,7 +182,7 @@ export function BlastImpactNote({
             {note.stale && !state.running && (
               // The pull request has changed since this was written. ⚠ The re-run is the SAME
               // billed path; it is offered, never taken automatically.
-              <AiRunGate>
+              <AiRunGate kind="complete">
                 <button
                   type="button"
                   onClick={() => run()}

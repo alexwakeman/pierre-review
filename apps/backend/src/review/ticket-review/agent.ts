@@ -1,13 +1,12 @@
-import type { SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { ClaudeReviewModel } from '@pierre-review/shared';
 import { config } from '../../config.js';
-import { DISALLOWED_TOOLS, describeAssistantBlocks } from '../agent.js';
+import { DISALLOWED_TOOLS } from '../agent.js';
 import { applyClaudeReviewAuth } from '../auth.js';
 import { DISPATCH_TOOL_NAMES } from '../claude-review/specialists.js';
 import { estimateCostUsd } from '../pricing.js';
-import { recordUsage, sumModelUsage, sumUsageMap, type UsageTokens } from '../usage.js';
+import { emptyUsage, type UsageTokens } from '../usage.js';
 import { submitTicketReviewShape, type SubmitTicketReviewPayload } from './schema.js';
-import { claudeModelChoice, getActiveProvider, type AgentToolServer } from '../../ai/provider.js';
+import { claudeModelChoice, getActiveProvider, type AgentToolServer, type AgentOutcome } from '../../ai/provider.js';
 
 // THE TICKET REVIEW'S AGENT RUN — the SDK half. The manager (manager.ts) prepares the scratch
 // working directory (MEMBERS.md) and every member's read-only worktree, builds the prompts, and
@@ -63,17 +62,17 @@ export function ticketToolPolicy(): { allowedTools: string[]; disallowedTools: s
 
 export async function runTicketReviewAgent(args: RunTicketAgentArgs): Promise<RunTicketAgentResult> {
   const { model, abortController } = args;
-  let result: SDKResultMessage | null = null;
+  let outcome: AgentOutcome | null = null;
   let restoreEnv: (() => void) | null = null;
-  const usageByUuid = new Map<string, UsageTokens>();
+  let liveUsage: UsageTokens = emptyUsage();
   const telemetry = (): Pick<RunTicketAgentResult, 'costUsd' | 'inputTokens' | 'outputTokens' | 'numTurns'> => {
-    const usage = sumModelUsage(result) ?? sumUsageMap(usageByUuid);
+    const usage = outcome?.usage ?? liveUsage;
     const hasUsage = usage.inputTokens + usage.outputTokens + usage.cacheReadTokens > 0;
     return {
-      costUsd: result?.total_cost_usd ?? (hasUsage ? estimateCostUsd(model, usage) : null),
+      costUsd: outcome?.costUsd ?? (hasUsage ? estimateCostUsd(model, usage) : null),
       inputTokens: usage.inputTokens,
       outputTokens: usage.outputTokens,
-      numTurns: result?.num_turns ?? null,
+      numTurns: outcome?.numTurns ?? null,
     };
   };
   const fail = (failureReason: string | undefined, aborted: boolean): RunTicketAgentResult => ({
@@ -106,7 +105,7 @@ export async function runTicketReviewAgent(args: RunTicketAgentArgs): Promise<Ru
     // The library is a READ-ONLY root: Read/Glob/Grep may reach it, nothing else may name it.
     const policy = ticketToolPolicy();
     const activity: string[] = [];
-    ({ result } = await getActiveProvider().runAgent({
+    ({ outcome } = await getActiveProvider().runAgent({
       kind: 'ticket_review',
       model: claudeModelChoice(model),
       effort: 'worktree',
@@ -123,37 +122,29 @@ export async function runTicketReviewAgent(args: RunTicketAgentArgs): Promise<Ru
       budget: { usd: config.ticketReviewBudgetUsd, turns: config.ticketReviewMaxTurns },
       abortController,
       claude: { allowedTools: policy.allowedTools, disallowedTools: policy.disallowedTools },
-      onMessage: (message) => {
-        if (message.type === 'assistant') {
-          try {
-            recordUsage(usageByUuid, message);
-          } catch {
-            /* usage shape varies — never let it break the run */
+      onProgress: (p) => {
+        if (p.kind === 'step') {
+          if (p.usage) liveUsage = p.usage;
+          for (const line of p.lines) {
+            const t = line.startsWith(TICKET_TOOL_NAME) ? 'Submitting the ticket review…' : line;
+            activity.push(t);
+            if (activity.length > ACTIVITY_LOG_CAP) activity.shift();
           }
-          try {
-            for (const line of describeAssistantBlocks(message)) {
-              const t = line.startsWith(TICKET_TOOL_NAME) ? 'Submitting the ticket review…' : line;
-              activity.push(t);
-              if (activity.length > ACTIVITY_LOG_CAP) activity.shift();
-            }
-          } catch {
-            /* never let progress derivation break the run */
-          }
-          const live = sumUsageMap(usageByUuid);
+          const live = liveUsage;
           args.onProgress({
             recentActivity: [...activity],
             usage: { inputTokens: live.inputTokens, outputTokens: live.outputTokens, costUsd: estimateCostUsd(model, live) },
           });
-        } else if (message.type === 'result') {
-          result = message;
+        } else if (p.kind === 'outcome') {
+          outcome = p.outcome;
         }
       },
     }));
 
     if (!captured) {
       const reason =
-        result && result.subtype !== 'success'
-          ? `agent stopped (${result.subtype}) without submitting the ticket review`
+        outcome && outcome.subtype !== 'success'
+          ? `agent stopped (${outcome.subtype}) without submitting the ticket review`
           : 'agent finished without calling submit_ticket_review';
       return fail(reason, false);
     }

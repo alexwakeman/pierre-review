@@ -247,7 +247,7 @@ function TicketBlock({
         {shown != null && <ReviewedAgo at={shown.completedAt} />}
         <span className="ml-auto">
           {!running && (
-            <AiRunGate>
+            <AiRunGate kind="ticket_review">
               <button
                 type="button"
                 disabled={starting}
@@ -346,7 +346,7 @@ function LegacyBlock({
         <span className="ml-auto inline-flex flex-wrap items-center gap-2">
           <span className={`text-xs ${MUTED}`}>Checked on this PR only</span>
           <ReviewedAgo at={legacy.finishedAt} />
-          <AiRunGate>
+          <AiRunGate kind="ticket_review">
             <button
               type="button"
               disabled={start.isPending}
@@ -433,7 +433,7 @@ function StoryInput({ pr, entries }: { pr: PrDetail; entries: readonly TicketEnt
       )}
       {n > 0 && (
         <div className="mt-2 flex flex-wrap items-center gap-2">
-          <AiRunGate>
+          <AiRunGate kind="ticket_review">
             <button
               type="button"
               disabled={!check.ok || start.isPending}

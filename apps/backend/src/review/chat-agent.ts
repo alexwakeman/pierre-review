@@ -1,14 +1,13 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
-import { claudeModelChoice, getActiveProvider, type AgentToolServer } from '../ai/provider.js';
+import { claudeModelChoice, getActiveProvider, type AgentToolServer, type AgentOutcome } from '../ai/provider.js';
 import type { ReviewChatArgs, ReviewChatResult } from '../platform/contract.js';
 import { config } from '../config.js';
 import { applyClaudeReviewAuth } from './auth.js';
 import { cleanupCloneCache, prepWorktree, removeWorktreeLocked } from './clone-manager.js';
 import { estimateCostUsd } from './pricing.js';
-import { recordUsage, sumModelUsage, sumUsageMap, type UsageTokens } from './usage.js';
+import { emptyUsage, type UsageTokens } from './usage.js';
 import { submitExplanationsShape } from './claude-review/chat-explain.js';
 
 // ctx.review.chat — ONE answered question about a succeeded Claude Review. The plugin owns the
@@ -65,24 +64,24 @@ export async function runReviewChat(args: ReviewChatArgs): Promise<ReviewChatRes
   let worktreePath: string | null = null;
   let repoCloneDir: string | null = null;
   let tempCwd: string | null = null;
-  let result: SDKResultMessage | null = null;
+  let outcome: AgentOutcome | null = null;
   let restoreEnv: (() => void) | null = null;
   let lastText = '';
   let submitted: unknown = undefined;
-  const usageByUuid = new Map<string, UsageTokens>();
+  let liveUsage: UsageTokens = emptyUsage();
 
   const telemetry = (): Pick<
     ReviewChatResult,
     'costUsd' | 'inputTokens' | 'outputTokens' | 'numTurns'
   > => {
-    const usage = sumModelUsage(result) ?? sumUsageMap(usageByUuid);
+    const usage = outcome?.usage ?? liveUsage;
     const hasUsage = usage.inputTokens + usage.outputTokens + usage.cacheReadTokens > 0;
     return {
-      costUsd: result?.total_cost_usd ?? (hasUsage ? estimateCostUsd(model, usage) : null),
+      costUsd: outcome?.costUsd ?? (hasUsage ? estimateCostUsd(model, usage) : null),
       // Input as the reader would count it: fresh + cache reads + cache writes.
       inputTokens: usage.inputTokens + usage.cacheReadTokens + usage.cacheCreationTokens,
       outputTokens: usage.outputTokens,
-      numTurns: result?.num_turns ?? null,
+      numTurns: outcome?.numTurns ?? null,
     };
   };
   const fail = (failureReason: string | undefined, aborted: boolean): ReviewChatResult => ({
@@ -135,7 +134,7 @@ export async function runReviewChat(args: ReviewChatArgs): Promise<ReviewChatRes
         ],
       };
     }
-    ({ result } = await getActiveProvider().runAgent({
+    ({ outcome } = await getActiveProvider().runAgent({
       kind: 'review_chat',
       model: claudeModelChoice(model),
       effort: mode,
@@ -154,17 +153,12 @@ export async function runReviewChat(args: ReviewChatArgs): Promise<ReviewChatRes
       // `tools` is the BASE SET the model can see at all ([] = no built-in tools); allowedTools
       // only skips prompts. Both say the same thing, plus the deny list.
       claude: { builtinTools, allowedTools, disallowedTools },
-      onMessage: (message) => {
-        if (message.type === 'assistant') {
-          try {
-            recordUsage(usageByUuid, message);
-          } catch {
-            /* usage shape varies — never let it break the run */
-          }
-          const text = assistantText(message);
-          if (text) lastText = text;
-        } else if (message.type === 'result') {
-          result = message;
+      onProgress: (p) => {
+        if (p.kind === 'step') {
+          if (p.usage) liveUsage = p.usage;
+          if (p.text) lastText = p.text;
+        } else if (p.kind === 'outcome') {
+          outcome = p.outcome;
         }
       },
     }));
@@ -172,21 +166,21 @@ export async function runReviewChat(args: ReviewChatArgs): Promise<ReviewChatRes
     if (args.explain) {
       if (submitted === undefined) {
         const reason =
-          result && result.subtype !== 'success'
-            ? `agent stopped (${result.subtype}) without submitting explanations`
+          outcome && outcome.subtype !== 'success'
+            ? `agent stopped (${outcome.subtype}) without submitting explanations`
             : 'agent finished without calling submit_explanations';
         return fail(reason, false);
       }
       return { ok: true, text: lastText.trim(), submitted, ...telemetry(), aborted: false };
     }
     const finalText =
-      result && result.subtype === 'success' && typeof result.result === 'string' && result.result.trim()
-        ? result.result.trim()
+      outcome?.text?.trim()
+        ? outcome.text.trim()
         : lastText.trim();
     if (!finalText) {
       const reason =
-        result && result.subtype !== 'success'
-          ? `agent stopped (${result.subtype}) without answering`
+        outcome && outcome.subtype !== 'success'
+          ? `agent stopped (${outcome.subtype}) without answering`
           : 'agent finished without answering';
       return fail(reason, false);
     }
@@ -218,17 +212,4 @@ export async function runReviewChat(args: ReviewChatArgs): Promise<ReviewChatRes
       });
     }
   }
-}
-
-/** The text blocks of one assistant message, joined. Defensive — the SDK shape varies. */
-function assistantText(message: unknown): string {
-  const content = (message as { message?: { content?: unknown } })?.message?.content;
-  if (!Array.isArray(content)) return '';
-  const parts: string[] = [];
-  for (const raw of content) {
-    if (!raw || typeof raw !== 'object') continue;
-    const block = raw as { type?: unknown; text?: unknown };
-    if (block.type === 'text' && typeof block.text === 'string') parts.push(block.text);
-  }
-  return parts.join('\n').trim();
 }

@@ -1808,7 +1808,7 @@ export function ClaudeReviewTab({
                 </option>
               ))}
             </select>
-            <AiRunGate auth={data?.auth}>
+            <AiRunGate kind="review" auth={data?.auth}>
             <button
               type="button"
               onClick={onRunClick}

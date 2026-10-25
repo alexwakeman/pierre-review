@@ -110,7 +110,7 @@ export async function runCiReviewSweep(
 ): Promise<CiSweepResult> {
   const result: CiSweepResult = { considered: [], queued: [], stopped: null };
   if (!autoReviewAvailable(ctx) || sweeping) return result;
-  if (!agenticRunReady(ctx)) {
+  if (!agenticRunReady(ctx, 'ci_review')) {
     result.stopped = 'ai_not_ready';
     return result;
   }

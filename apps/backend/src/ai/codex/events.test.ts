@@ -13,7 +13,9 @@ import {
   cleanCodexError,
   isBypassWarning,
   parseEventLine,
+  codexTokensAsAgentTokens,
   progressFromEvent,
+  stepFromEvent,
   stderrRefusals,
   stderrTail,
   summarizeEvents,
@@ -116,6 +118,37 @@ describe('no sign-in', () => {
     for (const e of errs) {
       expect(e).toMatchObject({ message: 'unexpected status 401 Unauthorized: Missing bearer or basic authentication in header' });
     }
+  });
+});
+
+describe('the neutral step (ai/provider.ts)', () => {
+  it('a read-only run: a line per tool call as it starts, the messages with their text, the tokens at turn end', () => {
+    const steps = events('read-mcp.jsonl').map(stepFromEvent).filter((s) => s !== null);
+    const lines = steps.flatMap((s) => s!.lines);
+    expect(lines).toContain('Listing files');
+    expect(lines).toContain('Reading README.md');
+    // The tool's COMPLETION adds no second line.
+    expect(lines.filter((l) => l === 'Reading README.md')).toHaveLength(1);
+    const texts = steps.map((s) => s!.text).filter(Boolean);
+    expect(texts[texts.length - 1]).toBe(summarizeEvents(events('read-mcp.jsonl')).finalResponse.trim());
+    const withUsage = steps.filter((s) => s!.usage);
+    expect(withUsage).toHaveLength(1);
+    expect(withUsage[0]!.usage).toEqual(summarizeEvents(events('read-mcp.jsonl')).usage);
+  });
+
+  it('a write run names the files it edited; the bypass warnings are no step', () => {
+    const steps = events('write-bypass.jsonl').map(stepFromEvent).filter((s) => s !== null);
+    expect(steps.flatMap((s) => s!.lines).some((l) => l.startsWith('Edited '))).toBe(true);
+    for (const e of events('write-bypass.jsonl').filter(isBypassWarning)) expect(stepFromEvent(e)).toBeNull();
+  });
+
+  it('Codex tokens in the neutral shape: cached input counted once, as cache reads; reasoning never added', () => {
+    expect(codexTokensAsAgentTokens({ inputTokens: 100, cachedInputTokens: 30, outputTokens: 10, reasoningOutputTokens: 7 })).toEqual({
+      inputTokens: 70,
+      outputTokens: 10,
+      cacheReadTokens: 30,
+      cacheCreationTokens: 0,
+    });
   });
 });
 

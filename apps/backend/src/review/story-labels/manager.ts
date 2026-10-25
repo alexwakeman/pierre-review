@@ -235,7 +235,7 @@ async function runLabels(
     if (status.stoppedBy == null) status.stoppedBy = why;
   };
   try {
-    if (ctx.llm.detectAuth().status !== 'ok') {
+    if (ctx.llm.detectAuth('complete').status !== 'ok') {
       stop('auth');
       status.state = 'failed';
       return;

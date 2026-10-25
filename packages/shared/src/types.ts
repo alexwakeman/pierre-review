@@ -4105,6 +4105,66 @@ export interface AiRuntimeInstallBody {
 /** The AI providers Limn knows (docs/CODEX-PLAN.md). ONE is active for every AI feature. */
 export type AiProviderId = 'claude' | 'codex';
 
+/**
+ * Every AGENT Limn runs (the backend's `AgentKind`, apps/backend/src/ai/provider.ts — this is its one
+ * list). A provider may run some kinds and not others (Codex, while its agents are being ported).
+ */
+export type AiAgentKind =
+  | 'review'
+  | 'review_chat'
+  | 'fix'
+  | 'plan'
+  | 'resolve'
+  | 'ticket_review'
+  | 'pr_card'
+  | 'ci_review'
+  | 'thread_check'
+  | 'diagram'
+  | 'sprint_paths'
+  | 'story_docs'
+  | 'docs_build'
+  | 'docs_chat';
+
+/**
+ * What a Run gate asks about: one agent kind, or `'complete'` — the ONE-SHOT features (sprint briefs
+ * and themes, story labels, the sprint "Ask", the impact note, work-plan wording, …), which run on any
+ * signed-in provider.
+ */
+export type AiRunKind = AiAgentKind | 'complete';
+
+/** Every agent kind, in one order (the backend's `ALL_AGENT_KINDS` is pinned to the same set). */
+export const AI_AGENT_KINDS: readonly AiAgentKind[] = [
+  'review',
+  'review_chat',
+  'fix',
+  'plan',
+  'resolve',
+  'ticket_review',
+  'pr_card',
+  'ci_review',
+  'thread_check',
+  'diagram',
+  'sprint_paths',
+  'story_docs',
+  'docs_build',
+  'docs_chat',
+];
+
+/** Every run kind: the agent kinds, then the one-shot `complete`. */
+export const AI_RUN_KINDS: readonly AiRunKind[] = [...AI_AGENT_KINDS, 'complete'];
+
+/** A `MeResponse.ai.kinds` map giving every kind the same answer (the demo, tests, Claude). */
+export function aiKindsAll(status: AiKindStatus): Record<AiRunKind, AiKindStatus> {
+  return Object.fromEntries(AI_RUN_KINDS.map((k) => [k, { ...status }])) as Record<AiRunKind, AiKindStatus>;
+}
+
+/** `MeResponse.ai.kinds[kind]` — can the ACTIVE provider run this kind here? */
+export interface AiKindStatus {
+  auth: 'ok' | 'none';
+  /** The one sentence in place of the Run button when `auth` is 'none'. */
+  message: string | null;
+}
+
 /** `MeResponse.ai.providers.claude` — Claude's own credential, whichever provider is active. */
 export interface AiClaudeProviderStatus {
   auth: 'ok' | 'none';
@@ -4211,12 +4271,17 @@ export interface MeResponse {
   //    `runtime` / `auth` above describe IT. Codex answers auth 'none' with "not available yet"
   //    until its agents are ported.
   //  - `providers`: each provider's own facts, whichever is active (for Settings → AI, Phase 4).
+  //  - `kinds`: the SAME pre-flight per run kind (`AiRunKind`). Under Claude every kind repeats
+  //    `auth`/`authMessage`; under Codex a kind it can run says 'ok' while `auth` above stays 'none'
+  //    until EVERY kind can. A Run gate that names its kind reads its entry (`AiRunGate kind=…`).
+  //    Optional: an older server omits it and every gate falls back to `auth`.
   ai: {
     enabled: boolean;
     runtime: 'ready' | 'absent' | 'installing' | 'failed';
     runtimeMessage: string | null;
     auth: 'ok' | 'none';
     authMessage: string | null;
+    kinds?: Record<AiRunKind, AiKindStatus>;
     provider: AiProviderId;
     providers: {
       claude: AiClaudeProviderStatus;

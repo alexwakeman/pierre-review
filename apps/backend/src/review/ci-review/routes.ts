@@ -100,7 +100,7 @@ export function registerCiReviewRoutes(app: FastifyInstance, ctx: AgentContext):
       reply.status(409);
       return { error: 'NoHead', message: 'This PR has not been synced yet.' };
     }
-    const auth = ctx.llm.detectAuth();
+    const auth = ctx.llm.detectAuth('ci_review');
     if (auth.status === 'none') {
       reply.status(400);
       return { error: 'NoClaudeAuth', message: auth.message };

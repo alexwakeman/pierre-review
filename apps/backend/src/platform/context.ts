@@ -93,8 +93,9 @@ export async function bindPlatform(app: FastifyInstance): Promise<void> {
     registerEventHooks: (hooks) => registerProEventHooks(hooks, app.log),
     llm: {
       complete: cheapComplete,
-      detectAuth: () => {
-        const r = detectClaudeAuth();
+      // The platform's llm is the ONE-SHOT client: its pre-flight asks about 'complete'.
+      detectAuth: (kind) => {
+        const r = detectClaudeAuth(kind ?? 'complete');
         return r.status === 'ok'
           ? { status: 'ok' }
           : { status: 'none', message: r.message };

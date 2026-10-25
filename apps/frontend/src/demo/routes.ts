@@ -3,7 +3,7 @@
 // make, answered with a plausible success shaped by the shared types and folded into the
 // in-memory overlay so later reads show it.
 
-import { LARGE_PR_CODE_LOC_DEFAULT } from '@pierre-review/shared';
+import { aiKindsAll, LARGE_PR_CODE_LOC_DEFAULT } from '@pierre-review/shared';
 import { normalisePath } from './recording.js';
 import type { DemoReply, DemoRequest, DemoRoute, DemoServer } from './server.js';
 import { fakeSha, isRecord, notInDemo } from './util.js';
@@ -69,6 +69,8 @@ export function meBody(srv: DemoServer): Record<string, unknown> {
       runtimeMessage: null,
       auth: 'ok',
       authMessage: null,
+      // Claude answers every run kind alike (the demo runs Claude).
+      kinds: aiKindsAll({ auth: 'ok', message: null }),
       provider: 'claude',
       providers: {
         claude: { auth: 'ok', route: 'login', message: null },

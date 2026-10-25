@@ -136,7 +136,7 @@ export function StoryDocsButton({
   const data = q.data;
   if (!ai.enabled || data == null || !data.available) return null;
   return (
-    <AiRunGate>
+    <AiRunGate kind="story_docs">
       <button type="button" className={BTN} disabled={docsChecking(data, starting)} onClick={() => start.mutate()}>
         {docsButtonLabel(data, starting)}
       </button>

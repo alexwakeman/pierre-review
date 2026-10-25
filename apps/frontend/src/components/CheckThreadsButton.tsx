@@ -74,7 +74,7 @@ export function CheckThreadsButton({ prId }: { prId: number }): JSX.Element | nu
 
   return (
     <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1">
-      <AiRunGate>
+      <AiRunGate kind="thread_check">
         <button
           type="button"
           onClick={() => start.mutate()}

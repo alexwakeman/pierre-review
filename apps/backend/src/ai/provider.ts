@@ -15,24 +15,35 @@
 // the result tools (name + zod shape + handler; `ai/result-schemas.ts` derives the STRICT JSON
 // Schema a provider without tools needs), the turn and US$ caps, the abort signal, and the usage
 // reading the spend budget folds (`ProviderUsageSource`). What is still Claude's own sits under
-// `spec.claude` — the SDK tool names, the extra PreToolUse hooks and the specialist agents — and the
-// messages `onMessage` receives are the Agent SDK's. Phase 3 ports each runner off those.
+// `spec.claude` — the SDK tool names, the extra PreToolUse hooks, the specialist agents and the raw
+// Agent SDK message tap (`spec.claude.onMessage`, the one escape hatch: see its comment).
+//
+// THE NEUTRAL RUN STREAM (Phase 3 foundation). Every provider reports a run the same way, through
+// `spec.onProgress` and the returned `AgentRunResult.outcome`:
+//   • `step` — one model step: its activity lines (already worded, per `spec.activity`), its text and
+//     the run's LIVE token tally so far (Claude: one per assistant message, derived inside
+//     providers/claude.ts exactly as each runner used to; Codex: from ai/codex/events.ts);
+//   • `outcome` — how the run ended (subtype, final text on success, US$, turns, whole-run tokens),
+//     emitted the moment it is known, so a run that throws AFTER it still reports it;
+//   • Codex's finer progress kinds (`status`, `tool`, `file_change`, `message`, `error`) for the
+//     status line. A runner reads the facts it needs and never a raw SDK message.
 //
 // THE CHOICE: `LIMN_AI_PROVIDER` = `claude` | `auto` (default: `auto`, which is Claude — the one the
 // rules were tuned on, docs/CODEX-PLAN.md § 6). `codex` is ACCEPTED and, since Phase 2, resolves to
 // the real Codex provider (`ai/providers/codex.ts`) — but ONLY its one-shot `complete()` runs. Its
-// `runAgent` answers "not available yet" for every kind outside `CODEX_AGENT_KINDS` (empty until
-// Phase 3 ports each agent), and the pre-flight every Run gate and background sweeper asks
-// (`review/auth.ts` `detectClaudeAuth`, which feeds `MeResponse.ai` and `ctx.llm.detectAuth`) still
-// answers 'none' with that sentence, so no Run button or sweeper offers Codex to a user yet. Nothing
-// crashes.
+// `runAgent` answers "not available yet" for every kind outside `CODEX_AGENT_KINDS` (the union of
+// the four Phase 3 streams' files, ai/codex/kinds/*.ts — all empty until each ports its agents). The
+// pre-flight every Run gate and background sweeper asks (`review/auth.ts` `detectClaudeAuth(kind)`,
+// which feeds `MeResponse.ai` + its per-kind `kinds` map and `ctx.llm.detectAuth(kind)`) answers PER
+// KIND: a one-shot ('complete') or a ported kind is runnable once Codex is installed and signed in with
+// ChatGPT; every other kind answers its own "Codex cannot run … yet" sentence. Nothing crashes.
 import type { SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
-import type { AiUsageReading } from '@pierre-review/shared';
+import type { AiAgentKind, AiUsageReading } from '@pierre-review/shared';
 import type { CodexProgress, TokenUsage } from './codex/events.js';
+import type { UsageTokens } from '../review/usage.js';
 import { claudeProvider } from './providers/claude.js';
 import { codexProvider } from './providers/codex.js';
-import { codexCredentialRunnable, resolveAiCredential, resolveCodexCredential } from './credentials.js';
-import { aiProviderSetting, codexRunnable } from './provider-setting.js';
+import { activeProviderId, codexRunnable } from './provider-setting.js';
 
 export type AgentProviderId = 'claude' | 'codex';
 
@@ -48,22 +59,12 @@ export interface ModelChoice {
   id?: string;
 }
 
-/** Which agent this is — for logs, tests and (Phase 2+) per-kind provider config. */
-export type AgentKind =
-  | 'review'
-  | 'review_chat'
-  | 'fix'
-  | 'plan'
-  | 'resolve'
-  | 'ticket_review'
-  | 'pr_card'
-  | 'ci_review'
-  | 'thread_check'
-  | 'diagram'
-  | 'sprint_paths'
-  | 'story_docs'
-  | 'docs_build'
-  | 'docs_chat';
+/**
+ * Which agent this is — for logs, tests and per-kind provider config (`CODEX_AGENT_KINDS`, the
+ * per-kind pre-flight). The ONE list lives in packages/shared (`AiAgentKind`), because `/api/me`
+ * answers per kind (`MeResponse.ai.kinds`).
+ */
+export type AgentKind = AiAgentKind;
 
 /** What a result tool's handler answers the model with. `isError` absent ⇒ not sent at all. */
 export interface AgentToolReply {
@@ -105,11 +106,50 @@ export interface ClaudeRunOptions {
   extraPreToolUse?: ClaudePreToolUseEntry[];
   /** SDK sub-agents (Claude Review's specialists). Absent ⇒ not sent. */
   agents?: Record<string, unknown>;
+  /**
+   * ⚠ THE CLAUDE-ONLY ESCAPE HATCH: every raw Agent SDK message, in order, BEFORE the neutral
+   * `onProgress` events derived from it. Only for a fact no neutral event carries. A throw here ends
+   * the run like a throw in the loop body. Users (keep this list current):
+   *   • reference-docs/agent.ts (the docs build) — the PDF page a `Read` reached (`pages`), a Claude
+   *     tool's own argument, for the "page N of M" line. Codex reads no PDF pages through its tools.
+   */
+  onMessage?(message: AgentMessage): void;
 }
 
-/** Provider-neutral agent message, for now the Agent SDK's (Phase 2 normalises Codex's events). */
+/** A raw Agent SDK message — `spec.claude.onMessage` only. Runners read the neutral stream instead. */
 export type AgentMessage = SDKMessage;
 export type AgentResultMessage = SDKResultMessage;
+
+/** The run's tokens, provider-neutral (review/usage.ts's shape: input EXCLUSIVE of the cache buckets). */
+export type AgentTokens = UsageTokens;
+
+/**
+ * How a run ended — the neutral form of Claude's result message (Codex: built by its provider).
+ * `subtype` is 'success' or the reason it stopped (Claude's own words: 'error_max_turns',
+ * 'error_max_budget_usd', 'error_during_execution'; Codex: 'error' | 'cancelled').
+ */
+export interface AgentOutcome {
+  subtype: string;
+  /** The final text answer — on success only, untrimmed (Claude: the result message's `result`). */
+  text: string | null;
+  /** The provider's own US$ for the run (Claude: `total_cost_usd`), or null when it gave none. */
+  costUsd: number | null;
+  /** Model turns (Claude: `num_turns`), or null when the provider does not count them. */
+  numTurns: number | null;
+  /** The AUTHORITATIVE whole-run tokens (Claude: summed `modelUsage`), or null when not reported. */
+  usage: AgentTokens | null;
+}
+
+/** One model step (Claude: one assistant message). */
+export interface AgentStep {
+  kind: 'step';
+  /** Human-readable activity lines for this step (tool labels, clipped text), in order. */
+  lines: string[];
+  /** The step's text, joined and trimmed ('' when it had none). */
+  text: string;
+  /** The run's LIVE token tally so far (de-duplicated per request), or null when not known yet. */
+  usage: AgentTokens | null;
+}
 
 export interface AgentRunSpec {
   kind: AgentKind;
@@ -131,9 +171,15 @@ export interface AgentRunSpec {
   tools?: AgentToolServer;
   budget: { usd: number | undefined; turns: number };
   abortController: AbortController;
-  /** Every message the run streams, in order. A throw here ends the run like a throw in a loop body. */
-  onMessage?(message: AgentMessage): void;
-  /** Provider-neutral progress (Codex today; Phase 3 moves the runners' status lines onto it). */
+  /**
+   * Which words the activity lines use: 'review' (the read tools, Claude Review's specialists) or
+   * 'fix' (the write tools too). Absent ⇒ 'review'.
+   */
+  activity?: 'review' | 'fix';
+  /**
+   * The neutral run stream (see the header): steps, the outcome, Codex's status kinds. A throw here
+   * ends the run like a throw in the loop body did.
+   */
   onProgress?(progress: AgentProgress): void;
   /** Who to bill. Given ⇒ a provider that records its own usage (Codex) writes the ledger row. */
   usageRecord?: AgentUsageRecord;
@@ -142,8 +188,11 @@ export interface AgentRunSpec {
   codex?: CodexRunOptions;
 }
 
-/** Provider-neutral progress: a status sentence, a tool step, file changes, a message, an error. */
-export type AgentProgress = CodexProgress;
+/**
+ * Provider-neutral progress: a model step and the run's outcome (BOTH providers), plus Codex's finer
+ * kinds — a status sentence, a tool call, file changes, a message, an error.
+ */
+export type AgentProgress = AgentStep | { kind: 'outcome'; outcome: AgentOutcome } | CodexProgress;
 
 /** The ledger row's identity (db/usage.ts `AiUsageRecord`, minus what the provider knows itself). */
 export interface AgentUsageRecord {
@@ -164,8 +213,8 @@ export interface CodexRunOptions {
 }
 
 export interface AgentRunResult {
-  /** The run's final result message (Claude's), or null when it ended without one (always, on Codex). */
-  result: AgentResultMessage | null;
+  /** How the run ended (the same value the `outcome` progress event carried), or null when it never said. */
+  outcome: AgentOutcome | null;
   /** Which provider ran it. Absent ⇒ Claude (Phase 1 shape). */
   provider?: AgentProviderId;
   /** Codex: the final answer as text (the JSON when the run had a result tool). */
@@ -259,6 +308,11 @@ export {
   codexKindReady,
   codexRunnable,
   ALL_AGENT_KINDS,
+  ALL_RUN_KINDS,
+  activeProviderId,
+  autoReadiness,
+  codexRunKindReady,
+  pickAutoProvider,
   type AiProviderSetting,
 } from './provider-setting.js';
 export { CODEX_MODEL_FOR_ROLE } from './providers/codex.js';
@@ -277,32 +331,12 @@ export function getProvider(id: AgentProviderId): AgentProvider {
 export const CODEX_RUNNABLE: boolean = codexRunnable();
 
 /**
- * THE `auto` RULE (docs/CODEX-PLAN.md § 6, DECIDED): Claude when both are signed in, Claude when
- * neither is; Codex only when it alone has a credential AND can run. Pure.
+ * THE provider every run and completion uses, per `LIMN_AI_PROVIDER` (read at call time). The choice
+ * itself — and the `auto` rule (`pickAutoProvider`, `autoReadiness`) — lives in provider-setting.ts
+ * (`activeProviderId`), so the pre-flight asks the SAME question without importing this registry.
  */
-export function pickAutoProvider(s: { claudeReady: boolean; codexReady: boolean; codexRunnable: boolean }): AgentProviderId {
-  return s.codexRunnable && s.codexReady && !s.claudeReady ? 'codex' : 'claude';
-}
-
-/** THE provider every run and completion uses, per `LIMN_AI_PROVIDER` (read at call time). */
 export function getActiveProvider(env: NodeJS.ProcessEnv = process.env): AgentProvider {
-  const setting = aiProviderSetting(env);
-  if (setting === 'codex') return codexProvider;
-  if (setting === 'claude' || !CODEX_RUNNABLE) return claudeProvider;
-  return getProvider(pickAutoProvider(autoReadiness(env)));
-}
-
-/**
- * What the auto rule reads. ⚠ Codex is ready ONLY on a sign-in KNOWN to be ChatGPT
- * (`codexCredentialRunnable`): the OpenAI API-key route is REFUSED until it can be priced, so a key
- * alone — or a sign-in whose kind no probe has confirmed — must never make auto pick Codex.
- */
-export function autoReadiness(env: NodeJS.ProcessEnv = process.env): { claudeReady: boolean; codexReady: boolean; codexRunnable: boolean } {
-  return {
-    claudeReady: resolveAiCredential(env).route !== 'none',
-    codexReady: codexCredentialRunnable(resolveCodexCredential(env)),
-    codexRunnable: CODEX_RUNNABLE,
-  };
+  return getProvider(activeProviderId(env));
 }
 
 /**

@@ -225,7 +225,7 @@ export function PlanPanel({
       )}
 
       {ready && plan && (
-        <AiRunGate auth={auth}>
+        <AiRunGate kind="plan" auth={auth}>
           <div className="mt-3">
             <textarea
               aria-label="Change the plan"

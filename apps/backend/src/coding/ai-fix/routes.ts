@@ -254,7 +254,7 @@ export function registerAiFixRoutes(app: FastifyInstance, ctx: AgentContext): vo
         return reply.send(resp);
       }
 
-      const auth = ctx.llm.detectAuth();
+      const auth = ctx.llm.detectAuth('fix');
       const viewerCanPush = await getViewerCanPush(ctx, accountId, pr.repoId);
       const latest = await getLatestFix(ctx, accountId, prId);
       const history = await listFixHistory(ctx, accountId, prId);

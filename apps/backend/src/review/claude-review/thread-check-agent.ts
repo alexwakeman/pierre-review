@@ -1,14 +1,13 @@
-import type { SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { ClaudeReviewModel } from '@pierre-review/shared';
 import { loadZod } from '../../ai/runtime.js';
-import { claudeModelChoice, getActiveProvider, type AgentToolServer } from '../../ai/provider.js';
+import { claudeModelChoice, getActiveProvider, type AgentToolServer, type AgentOutcome } from '../../ai/provider.js';
 import { config } from '../../config.js';
 import type { ReviewThreadReport } from '../../platform/contract.js';
-import { DISALLOWED_TOOLS, describeAssistantBlocks } from '../agent.js';
+import { DISALLOWED_TOOLS } from '../agent.js';
 import { applyClaudeReviewAuth } from '../auth.js';
 import { estimateCostUsd } from '../pricing.js';
 import { buildSubmitThreadsShape } from './thread-check-schema.js';
-import { recordUsage, sumModelUsage, sumUsageMap, type UsageTokens } from '../usage.js';
+import { emptyUsage, type UsageTokens } from '../usage.js';
 import { DISPATCH_TOOL_NAMES } from './specialists.js';
 
 // CHECK THREADS — the SDK half (the CI review's agent.ts, one tool narrower). The manager
@@ -62,17 +61,17 @@ export interface RunThreadCheckResult {
 
 export async function runThreadCheckAgent(args: RunThreadCheckArgs): Promise<RunThreadCheckResult> {
   const { model, abortController } = args;
-  let result: SDKResultMessage | null = null;
+  let outcome: AgentOutcome | null = null;
   let restoreEnv: (() => void) | null = null;
-  const usageByUuid = new Map<string, UsageTokens>();
+  let liveUsage: UsageTokens = emptyUsage();
   const telemetry = (): Pick<RunThreadCheckResult, 'costUsd' | 'inputTokens' | 'outputTokens' | 'numTurns'> => {
-    const usage = sumModelUsage(result) ?? sumUsageMap(usageByUuid);
+    const usage = outcome?.usage ?? liveUsage;
     const hasUsage = usage.inputTokens + usage.outputTokens + usage.cacheReadTokens > 0;
     return {
-      costUsd: result?.total_cost_usd ?? (hasUsage ? estimateCostUsd(model, usage) : null),
+      costUsd: outcome?.costUsd ?? (hasUsage ? estimateCostUsd(model, usage) : null),
       inputTokens: usage.inputTokens,
       outputTokens: usage.outputTokens,
-      numTurns: result?.num_turns ?? null,
+      numTurns: outcome?.numTurns ?? null,
     };
   };
   const fail = (failureReason: string | undefined, aborted: boolean): RunThreadCheckResult => ({
@@ -103,7 +102,7 @@ export async function runThreadCheckAgent(args: RunThreadCheckArgs): Promise<Run
     };
     const policy = threadCheckToolPolicy();
     const activity: string[] = [];
-    ({ result } = await getActiveProvider().runAgent({
+    ({ outcome } = await getActiveProvider().runAgent({
       kind: 'thread_check',
       model: claudeModelChoice(model),
       effort: args.worktrees.length > 0 ? 'worktree' : 'diff_only',
@@ -119,36 +118,28 @@ export async function runThreadCheckAgent(args: RunThreadCheckArgs): Promise<Run
       budget: { usd: config.threadCheckBudgetUsd, turns: config.threadCheckMaxTurns },
       abortController,
       claude: { allowedTools: policy.allowedTools, disallowedTools: policy.disallowedTools },
-      onMessage: (message) => {
-        if (message.type === 'assistant') {
-          try {
-            recordUsage(usageByUuid, message);
-          } catch {
-            /* usage shape varies — never let it break the run */
+      onProgress: (p) => {
+        if (p.kind === 'step') {
+          if (p.usage) liveUsage = p.usage;
+          for (const line of p.lines) {
+            activity.push(line.startsWith(THREAD_CHECK_TOOL_NAME) ? 'Saving the judgements…' : line);
+            if (activity.length > ACTIVITY_LOG_CAP) activity.shift();
           }
-          try {
-            for (const line of describeAssistantBlocks(message)) {
-              activity.push(line.startsWith(THREAD_CHECK_TOOL_NAME) ? 'Saving the judgements…' : line);
-              if (activity.length > ACTIVITY_LOG_CAP) activity.shift();
-            }
-          } catch {
-            /* never let progress derivation break the run */
-          }
-          const live = sumUsageMap(usageByUuid);
+          const live = liveUsage;
           args.onProgress({
             recentActivity: [...activity],
             usage: { inputTokens: live.inputTokens, outputTokens: live.outputTokens, costUsd: estimateCostUsd(model, live) },
           });
-        } else if (message.type === 'result') {
-          result = message;
+        } else if (p.kind === 'outcome') {
+          outcome = p.outcome;
         }
       },
     }));
 
     if (!captured) {
       const reason =
-        result && result.subtype !== 'success'
-          ? `agent stopped (${result.subtype}) without submitting the threads`
+        outcome && outcome.subtype !== 'success'
+          ? `agent stopped (${outcome.subtype}) without submitting the threads`
           : 'agent finished without calling submit_threads';
       return fail(reason, false);
     }

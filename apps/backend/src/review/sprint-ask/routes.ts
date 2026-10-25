@@ -48,7 +48,7 @@ export function registerSprintAskRoutes(app: FastifyInstance, ctx: AgentContext)
       reply.status(404);
       return { error: 'not_found' };
     }
-    if (ctx.llm.detectAuth().status !== 'ok') {
+    if (ctx.llm.detectAuth('complete').status !== 'ok') {
       reply.status(503);
       return { error: 'no_credential', message: 'No Claude login or API key found.' };
     }

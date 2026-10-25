@@ -137,7 +137,7 @@ async function onePass(
 ): Promise<SprintBriefPassResult> {
   const res = empty('done');
   try {
-    if (ctx.llm.detectAuth().status !== 'ok') return { ...res, state: 'no_credential' };
+    if (ctx.llm.detectAuth('complete').status !== 'ok') return { ...res, state: 'no_credential' };
     if (!(await (seams.entitled ?? accountHasReports)(accountId))) return { ...res, state: 'not_entitled' };
   } catch {
     return { ...res, state: 'failed' };

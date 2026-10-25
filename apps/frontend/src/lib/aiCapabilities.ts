@@ -1,4 +1,4 @@
-import type { MeResponse } from '@pierre-review/shared';
+import type { AiKindStatus, AiRunKind, MeResponse } from '@pierre-review/shared';
 
 /**
  * THE ONE GATE for the agentic AI surfaces — Claude Review (run, follow-up, ticket check, auto
@@ -19,6 +19,11 @@ export interface AiCapabilities {
   runtimeMessage: string | null;
   auth: MeResponse['ai']['auth'];
   authMessage: string | null;
+  /**
+   * The same pre-flight PER RUN KIND (`MeResponse.ai.kinds`): under Codex a kind it can run is 'ok'
+   * while `auth` above stays 'none'. Absent (an older server) ⇒ every kind reads `auth`.
+   */
+  kinds: Partial<Record<AiRunKind, AiKindStatus>>;
   /** Enabled, runtime installed, and a credential detected — a Run button may show. */
   ready: boolean;
 }
@@ -37,7 +42,22 @@ export function aiCapabilitiesOf(me: MeResponse | undefined): AiCapabilities {
     runtimeMessage: ai?.runtimeMessage ?? null,
     auth,
     authMessage: ai?.authMessage ?? null,
+    kinds: ai?.kinds ?? {},
     ready: enabled && runtime === 'ready' && auth === 'ok',
   };
+}
+
+/** `ready` for ONE run kind: enabled, runtime installed, and that kind's pre-flight says 'ok'. */
+export function aiReadyFor(ai: AiCapabilities, kind: AiRunKind): boolean {
+  return ai.enabled && ai.runtime === 'ready' && aiAuthFor(ai, kind).auth === 'ok';
+}
+
+/**
+ * The pre-flight for ONE run kind: its own entry when the server sent one, else the top-level
+ * answer. The sentence is the kind's own, else the top-level one.
+ */
+export function aiAuthFor(ai: AiCapabilities, kind: AiRunKind | undefined): { auth: 'ok' | 'none'; message: string | null } {
+  const k = kind != null ? ai.kinds[kind] : undefined;
+  return k ? { auth: k.auth, message: k.message ?? ai.authMessage } : { auth: ai.auth, message: ai.authMessage };
 }
 

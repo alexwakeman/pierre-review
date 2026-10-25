@@ -186,7 +186,7 @@ export function registerTicketReviewRoutes(app: FastifyInstance, ctx: AgentConte
       reply.status(404);
       return { error: 'NotFound', message: `PR ${body.prId} not found` };
     }
-    const auth = ctx.llm.detectAuth();
+    const auth = ctx.llm.detectAuth('ticket_review');
     if (auth.status === 'none') {
       reply.status(400);
       return { error: 'NoClaudeAuth', message: auth.message };

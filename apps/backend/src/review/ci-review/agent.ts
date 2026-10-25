@@ -1,12 +1,11 @@
-import type { SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { ClaudeReviewModel } from '@pierre-review/shared';
-import { claudeModelChoice, getActiveProvider, type AgentToolServer } from '../../ai/provider.js';
+import { claudeModelChoice, getActiveProvider, type AgentToolServer, type AgentOutcome } from '../../ai/provider.js';
 import { config } from '../../config.js';
-import { DISALLOWED_TOOLS, describeAssistantBlocks } from '../agent.js';
+import { DISALLOWED_TOOLS } from '../agent.js';
 import { applyClaudeReviewAuth } from '../auth.js';
 import { DISPATCH_TOOL_NAMES } from '../claude-review/specialists.js';
 import { estimateCostUsd } from '../pricing.js';
-import { recordUsage, sumModelUsage, sumUsageMap, type UsageTokens } from '../usage.js';
+import { emptyUsage, type UsageTokens } from '../usage.js';
 import { submitCiReviewShape, type SubmitCiReviewPayload } from './schema.js';
 
 // THE CI REVIEW'S AGENT RUN — the SDK half. The manager (manager.ts) reads the checks and logs,
@@ -60,17 +59,17 @@ export function ciToolPolicy(): { allowedTools: string[]; disallowedTools: strin
 
 export async function runCiReviewAgent(args: RunCiAgentArgs): Promise<RunCiAgentResult> {
   const { model, abortController } = args;
-  let result: SDKResultMessage | null = null;
+  let outcome: AgentOutcome | null = null;
   let restoreEnv: (() => void) | null = null;
-  const usageByUuid = new Map<string, UsageTokens>();
+  let liveUsage: UsageTokens = emptyUsage();
   const telemetry = (): Pick<RunCiAgentResult, 'costUsd' | 'inputTokens' | 'outputTokens' | 'numTurns'> => {
-    const usage = sumModelUsage(result) ?? sumUsageMap(usageByUuid);
+    const usage = outcome?.usage ?? liveUsage;
     const hasUsage = usage.inputTokens + usage.outputTokens + usage.cacheReadTokens > 0;
     return {
-      costUsd: result?.total_cost_usd ?? (hasUsage ? estimateCostUsd(model, usage) : null),
+      costUsd: outcome?.costUsd ?? (hasUsage ? estimateCostUsd(model, usage) : null),
       inputTokens: usage.inputTokens,
       outputTokens: usage.outputTokens,
-      numTurns: result?.num_turns ?? null,
+      numTurns: outcome?.numTurns ?? null,
     };
   };
   const fail = (failureReason: string | undefined, aborted: boolean): RunCiAgentResult => ({
@@ -101,7 +100,7 @@ export async function runCiReviewAgent(args: RunCiAgentArgs): Promise<RunCiAgent
     };
     const policy = ciToolPolicy();
     const activity: string[] = [];
-    ({ result } = await getActiveProvider().runAgent({
+    ({ outcome } = await getActiveProvider().runAgent({
       kind: 'ci_review',
       model: claudeModelChoice(model),
       effort: 'worktree',
@@ -117,37 +116,29 @@ export async function runCiReviewAgent(args: RunCiAgentArgs): Promise<RunCiAgent
       budget: { usd: config.ciReviewBudgetUsd, turns: config.ciReviewMaxTurns },
       abortController,
       claude: { allowedTools: policy.allowedTools, disallowedTools: policy.disallowedTools },
-      onMessage: (message) => {
-        if (message.type === 'assistant') {
-          try {
-            recordUsage(usageByUuid, message);
-          } catch {
-            /* usage shape varies — never let it break the run */
+      onProgress: (p) => {
+        if (p.kind === 'step') {
+          if (p.usage) liveUsage = p.usage;
+          for (const line of p.lines) {
+            const t = line.startsWith(CI_TOOL_NAME) ? 'Submitting the CI review…' : line;
+            activity.push(t);
+            if (activity.length > ACTIVITY_LOG_CAP) activity.shift();
           }
-          try {
-            for (const line of describeAssistantBlocks(message)) {
-              const t = line.startsWith(CI_TOOL_NAME) ? 'Submitting the CI review…' : line;
-              activity.push(t);
-              if (activity.length > ACTIVITY_LOG_CAP) activity.shift();
-            }
-          } catch {
-            /* never let progress derivation break the run */
-          }
-          const live = sumUsageMap(usageByUuid);
+          const live = liveUsage;
           args.onProgress({
             recentActivity: [...activity],
             usage: { inputTokens: live.inputTokens, outputTokens: live.outputTokens, costUsd: estimateCostUsd(model, live) },
           });
-        } else if (message.type === 'result') {
-          result = message;
+        } else if (p.kind === 'outcome') {
+          outcome = p.outcome;
         }
       },
     }));
 
     if (!captured) {
       const reason =
-        result && result.subtype !== 'success'
-          ? `agent stopped (${result.subtype}) without submitting the CI review`
+        outcome && outcome.subtype !== 'success'
+          ? `agent stopped (${outcome.subtype}) without submitting the CI review`
           : 'agent finished without calling submit_ci_review';
       return fail(reason, false);
     }

@@ -126,7 +126,7 @@ export async function runSprintTicketChecks(
   const max = opts.max ?? SPRINT_REFRESH_TICKET_CHECKS;
   const deps = opts.deps ?? DEFAULT_DEPS(ctx);
   try {
-    if (ctx.llm.detectAuth().status === 'none') return { started: 0, skipped: 'no_credential' };
+    if (ctx.llm.detectAuth('ticket_review').status === 'none') return { started: 0, skipped: 'no_credential' };
     const all = (await deps.candidates(accountId, workspaceId)).filter(hasLivePr).filter((c) => !deps.held(accountId, c.ident));
     if (all.length === 0) return { started: 0, skipped: null };
     const states = await deps.states(

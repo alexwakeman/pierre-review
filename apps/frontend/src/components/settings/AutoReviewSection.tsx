@@ -10,7 +10,7 @@ import {
   type AutoPostKinds,
   type AutoPostScope,
 } from '@pierre-review/shared';
-import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
+import { aiReadyFor, useAiCapabilities } from '../../hooks/useAiCapabilities.js';
 import { AiAuthLine, AiRuntimeSetup } from '../AiSetup.js';
 import { InfoButton } from '../InfoModal.js';
 import {
@@ -119,7 +119,7 @@ export function AutoReviewSection(): JSX.Element {
   const settings = useWorkspaceAutoReview(true, workspaceId);
   const update = useSetWorkspaceAutoReview(workspaceId);
   const ai = useAiCapabilities();
-  const aiReady = ai.ready;
+  const aiReady = aiReadyFor(ai, 'review');
 
   const stored = settings.data?.autoReview ?? null;
   const storedOn = stored?.enabled === true;

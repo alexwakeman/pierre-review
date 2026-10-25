@@ -66,6 +66,7 @@ import type {
 // build the Pending tabs from the shipped list rather than re-typing it.
 import {
   AI_BUDGET_DEFAULTS,
+  aiKindsAll,
   LARGE_PR_CODE_LOC_DEFAULT,
   PENDING_TABS,
   pendingTabHolds,
@@ -284,6 +285,8 @@ const ME_RESPONSE: MeResponse = {
     runtimeMessage: null,
     auth: 'ok',
     authMessage: null,
+    // Claude answers every run kind alike.
+    kinds: aiKindsAll({ auth: 'ok', message: null }),
     provider: 'claude',
     providers: {
       claude: { auth: 'ok', route: 'login', message: null },

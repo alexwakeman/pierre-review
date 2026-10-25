@@ -1,15 +1,14 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import { SPRINT_PATHS_CAPS, type ClaudeReviewModel } from '@pierre-review/shared';
 import { AiRuntimeMissingError, loadZod } from '../../ai/runtime.js';
-import { claudeModelChoice, getActiveProvider, type AgentToolServer } from '../../ai/provider.js';
+import { claudeModelChoice, getActiveProvider, type AgentToolServer, type AgentOutcome } from '../../ai/provider.js';
 import { buildSubmitPathsShape } from './schema.js';
 import type { SprintPathsInput, StoredPathsJson } from '../../db/sprint-paths.js';
 import { applyClaudeReviewAuth } from '../auth.js';
 import { estimateCostUsd } from '../pricing.js';
-import { recordUsage, sumModelUsage, sumUsageMap, type UsageTokens } from '../usage.js';
+import { emptyUsage, type UsageTokens } from '../usage.js';
 import { validateSprintPaths } from './validate.js';
 
 // THE SPRINT BUILDER'S AGENT RUN (docs/CLAUDE-REVIEW.md § Sprint paths) — the SDK half. Agentic ONLY so
@@ -92,20 +91,20 @@ export interface SprintPathsAgentResult {
 export type SprintPathsAgentRunner = (args: SprintPathsAgentArgs) => Promise<SprintPathsAgentResult>;
 
 export const runSprintPathsAgent: SprintPathsAgentRunner = async (args) => {
-  let result: SDKResultMessage | null = null;
+  let outcome: AgentOutcome | null = null;
   let restoreEnv: (() => void) | null = null;
   let cwd: string | null = null;
   let accepted: StoredPathsJson | null = null;
   let lastRefusal: string | null = null;
-  const usageByUuid = new Map<string, UsageTokens>();
+  let liveUsage: UsageTokens = emptyUsage();
   const done = (extra: Partial<SprintPathsAgentResult> = {}): SprintPathsAgentResult => {
-    const usage = sumModelUsage(result) ?? sumUsageMap(usageByUuid);
+    const usage = outcome?.usage ?? liveUsage;
     const hasUsage = usage.inputTokens + usage.outputTokens + usage.cacheReadTokens > 0;
     return {
       accepted,
       lastRefusal,
-      subtype: result?.subtype ?? null,
-      costUsd: result?.total_cost_usd ?? (hasUsage ? estimateCostUsd(args.model, usage) : null),
+      subtype: outcome?.subtype ?? null,
+      costUsd: outcome?.costUsd ?? (hasUsage ? estimateCostUsd(args.model, usage) : null),
       inputTokens: usage.inputTokens + usage.cacheReadTokens + usage.cacheCreationTokens,
       outputTokens: usage.outputTokens,
       runtimeMissing: false,
@@ -145,7 +144,7 @@ export const runSprintPathsAgent: SprintPathsAgentRunner = async (args) => {
     restoreEnv = applyClaudeReviewAuth(args.applyAuthEnv);
     cwd = mkdtempSync(join(tmpdir(), 'limn-sprint-paths-'));
     const policy = sprintPathsToolPolicy();
-    ({ result } = await getActiveProvider().runAgent({
+    ({ outcome } = await getActiveProvider().runAgent({
       kind: 'sprint_paths',
       model: claudeModelChoice(args.model),
       effort: 'diff_only',
@@ -160,15 +159,11 @@ export const runSprintPathsAgent: SprintPathsAgentRunner = async (args) => {
       budget: { usd: args.maxBudgetUsd, turns: args.maxTurns },
       abortController: args.abortController,
       claude: { builtinTools: policy.tools, allowedTools: policy.allowedTools, disallowedTools: policy.disallowedTools },
-      onMessage: (message) => {
-        if (message.type === 'assistant') {
-          try {
-            recordUsage(usageByUuid, message);
-          } catch {
-            /* usage shape varies — never let it break the run */
-          }
-        } else if (message.type === 'result') {
-          result = message;
+      onProgress: (p) => {
+        if (p.kind === 'step') {
+          if (p.usage) liveUsage = p.usage;
+        } else if (p.kind === 'outcome') {
+          outcome = p.outcome;
         }
       },
     }));

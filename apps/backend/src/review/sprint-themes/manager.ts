@@ -74,7 +74,7 @@ export async function runSprintThemePass(
   running.add(k);
   setSprintPassRunning('themes', accountId, workspaceId, true);
   try {
-    if (ctx.llm.detectAuth().status !== 'ok') return { ...res, state: 'no_credential' };
+    if (ctx.llm.detectAuth('complete').status !== 'ok') return { ...res, state: 'no_credential' };
     if (!(await (seams.entitled ?? accountHasReports)(accountId))) return { ...res, state: 'not_entitled' };
     const todo = seams.todo ?? (async (a: number, w: number) => (await import('../../db/sprint-graph.js')).sprintThemeTodo(a, w));
     const input = await todo(accountId, workspaceId);

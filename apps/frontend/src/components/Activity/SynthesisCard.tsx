@@ -118,7 +118,7 @@ export function SynthesisCard({
             </span>
           )}
           <span className="ml-auto">
-            <AiRunGate>
+            <AiRunGate kind="complete">
               <button
                 type="button"
                 onClick={() => generate.mutate()}

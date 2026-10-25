@@ -133,7 +133,7 @@ export function SprintAskPanel({
         {ask.isError && !asking && <p className="text-xs text-rose-700 dark:text-rose-400">{ask.error.message}</p>}
       </div>
       <div className="border-t border-gray-200 px-3 py-2 dark:border-gray-800">
-        <AiRunGate>
+        <AiRunGate kind="complete">
           <form
             className="flex items-end gap-2"
             onSubmit={(e) => {

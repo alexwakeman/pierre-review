@@ -1,21 +1,20 @@
 import { readdirSync } from 'node:fs';
 import { basename, dirname, resolve } from 'node:path';
-import type { SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { ClaudeReviewModel } from '@pierre-review/shared';
 import {
   claudeModelChoice,
   getActiveProvider,
+  type AgentOutcome,
   type AgentToolReply,
   type AgentToolServer,
 } from '../ai/provider.js';
 import { config } from '../config.js';
-import { describeAssistantBlocks } from '../review/agent.js';
 import { applyClaudeReviewAuth } from '../review/auth.js';
 import type { DispatchDecision } from '../review/claude-review/specialists.js';
 import { DISPATCH_TOOL_NAMES } from '../review/claude-review/specialists.js';
 import { resolveReal } from '../review/path-guard.js';
 import { estimateCostUsd } from '../review/pricing.js';
-import { recordUsage, sumModelUsage, sumUsageMap, type UsageTokens } from '../review/usage.js';
+import { emptyUsage, type UsageTokens } from '../review/usage.js';
 import {
   judgeFinish,
   judgeRecord,
@@ -113,14 +112,14 @@ export interface AgentTelemetry {
   numTurns: number | null;
 }
 
-function telemetryOf(model: ClaudeReviewModel, result: SDKResultMessage | null, usageByUuid: Map<string, UsageTokens>): AgentTelemetry {
-  const usage = sumModelUsage(result) ?? sumUsageMap(usageByUuid);
+function telemetryOf(model: ClaudeReviewModel, outcome: AgentOutcome | null, liveUsage: UsageTokens): AgentTelemetry {
+  const usage = outcome?.usage ?? liveUsage;
   const hasUsage = usage.inputTokens + usage.outputTokens + usage.cacheReadTokens > 0;
   return {
-    costUsd: result?.total_cost_usd ?? (hasUsage ? estimateCostUsd(model, usage) : null),
+    costUsd: outcome?.costUsd ?? (hasUsage ? estimateCostUsd(model, usage) : null),
     inputTokens: usage.inputTokens + usage.cacheReadTokens + usage.cacheCreationTokens,
     outputTokens: usage.outputTokens,
-    numTurns: result?.num_turns ?? null,
+    numTurns: outcome?.numTurns ?? null,
   };
 }
 
@@ -173,9 +172,9 @@ export async function runBuildAgent(args: RunBuildArgs): Promise<RunBuildResult>
   const model = DOCS_MODEL;
   const state = newBuildState(args.mode, args.expected);
   let finish: AcceptedFinish | null = null;
-  let result: SDKResultMessage | null = null;
+  let outcome: AgentOutcome | null = null;
   let restoreEnv: (() => void) | null = null;
-  const usageByUuid = new Map<string, UsageTokens>();
+  let liveUsage: UsageTokens = emptyUsage();
   let pagesRead = 0;
   const activity: string[] = [];
   const emit = (): void => {
@@ -196,7 +195,7 @@ export async function runBuildAgent(args: RunBuildArgs): Promise<RunBuildResult>
     finish,
     failureReason,
     aborted,
-    ...telemetryOf(model, result, usageByUuid),
+    ...telemetryOf(model, outcome, liveUsage),
   });
 
   try {
@@ -240,7 +239,7 @@ export async function runBuildAgent(args: RunBuildArgs): Promise<RunBuildResult>
       ],
     };
     const policy = docsToolPolicy(args.mode);
-    ({ result } = await getActiveProvider().runAgent({
+    ({ outcome } = await getActiveProvider().runAgent({
       kind: 'docs_build',
       model: claudeModelChoice(model),
       effort: 'worktree',
@@ -261,14 +260,11 @@ export async function runBuildAgent(args: RunBuildArgs): Promise<RunBuildResult>
         allowedTools: policy.allowedTools,
         disallowedTools: policy.disallowedTools,
         extraPreToolUse: args.mode === 'pdf' ? [sectionsWriteGuardHook(args.sectionsDir, args.cwd)] : [],
-      },
-      onMessage: (message) => {
-        if (message.type === 'assistant') {
-          try {
-            recordUsage(usageByUuid, message);
-          } catch {
-            /* usage shape varies — never let it break the run */
-          }
+        // ⚠ THE CLAUDE-ONLY ESCAPE HATCH (ai/provider.ts `ClaudeRunOptions.onMessage`): the PDF page a
+        // `Read` reached is an argument of Claude's own Read tool (`pages`), which no neutral step
+        // carries. It runs BEFORE that message's step, so the step's progress line shows the page.
+        onMessage: (message) => {
+          if (message.type !== 'assistant') return;
           try {
             const content = (message as { message?: { content?: unknown } }).message?.content;
             if (Array.isArray(content)) {
@@ -279,23 +275,28 @@ export async function runBuildAgent(args: RunBuildArgs): Promise<RunBuildResult>
                 }
               }
             }
-            for (const line of describeAssistantBlocks(message)) {
-              activity.push(line);
-              if (activity.length > ACTIVITY_LOG_CAP) activity.shift();
-            }
-            emit();
           } catch {
             /* never let progress derivation break the run */
           }
-        } else if (message.type === 'result') {
-          result = message;
+        },
+      },
+      onProgress: (p) => {
+        if (p.kind === 'step') {
+          if (p.usage) liveUsage = p.usage;
+          for (const line of p.lines) {
+            activity.push(line);
+            if (activity.length > ACTIVITY_LOG_CAP) activity.shift();
+          }
+          emit();
+        } else if (p.kind === 'outcome') {
+          outcome = p.outcome;
         }
       },
     }));
     if (finish == null) {
       return done(
-        result && result.subtype !== 'success'
-          ? `Claude stopped (${result.subtype}) before finishing the document.`
+        outcome && outcome.subtype !== 'success'
+          ? `Claude stopped (${outcome.subtype}) before finishing the document.`
           : 'Claude finished without closing the document.',
         false,
       );
@@ -326,33 +327,23 @@ export interface RunChatResult extends AgentTelemetry {
   aborted: boolean;
 }
 
-function assistantText(message: unknown): string {
-  const content = (message as { message?: { content?: unknown } })?.message?.content;
-  if (!Array.isArray(content)) return '';
-  return content
-    .filter((b): b is { type: 'text'; text: string } => !!b && typeof b === 'object' && b.type === 'text' && typeof b.text === 'string')
-    .map((b) => b.text)
-    .join('\n')
-    .trim();
-}
-
 export async function runDocsChatAgent(args: RunChatArgs): Promise<RunChatResult> {
   const model = DOCS_MODEL;
-  let result: SDKResultMessage | null = null;
+  let outcome: AgentOutcome | null = null;
   let restoreEnv: (() => void) | null = null;
   let lastText = '';
-  const usageByUuid = new Map<string, UsageTokens>();
+  let liveUsage: UsageTokens = emptyUsage();
   const fail = (failureReason: string | undefined, aborted: boolean): RunChatResult => ({
     ok: false,
     text: '',
     failureReason,
     aborted,
-    ...telemetryOf(model, result, usageByUuid),
+    ...telemetryOf(model, outcome, liveUsage),
   });
   try {
     restoreEnv = applyClaudeReviewAuth(args.applyAuthEnv);
     const policy = docsToolPolicy('chat');
-    ({ result } = await getActiveProvider().runAgent({
+    ({ outcome } = await getActiveProvider().runAgent({
       kind: 'docs_chat',
       model: claudeModelChoice(model),
       effort: 'worktree',
@@ -370,28 +361,23 @@ export async function runDocsChatAgent(args: RunChatArgs): Promise<RunChatResult
         allowedTools: policy.allowedTools,
         disallowedTools: policy.disallowedTools,
       },
-      onMessage: (message) => {
-        if (message.type === 'assistant') {
-          try {
-            recordUsage(usageByUuid, message);
-          } catch {
-            /* usage shape varies */
-          }
-          const t = assistantText(message);
-          if (t) lastText = t;
-        } else if (message.type === 'result') {
-          result = message;
+      onProgress: (p) => {
+        if (p.kind === 'step') {
+          if (p.usage) liveUsage = p.usage;
+          if (p.text) lastText = p.text;
+        } else if (p.kind === 'outcome') {
+          outcome = p.outcome;
         }
       },
     }));
     const finalText =
-      result && result.subtype === 'success' && typeof result.result === 'string' && result.result.trim()
-        ? result.result.trim()
+      outcome?.text?.trim()
+        ? outcome.text.trim()
         : lastText.trim();
     if (!finalText) {
-      return fail(result && result.subtype !== 'success' ? `Claude stopped (${result.subtype}) without answering.` : 'Claude did not answer.', false);
+      return fail(outcome && outcome.subtype !== 'success' ? `Claude stopped (${outcome.subtype}) without answering.` : 'Claude did not answer.', false);
     }
-    return { ok: true, text: finalText, aborted: false, ...telemetryOf(model, result, usageByUuid) };
+    return { ok: true, text: finalText, aborted: false, ...telemetryOf(model, outcome, liveUsage) };
   } catch (err) {
     if (args.abortController.signal.aborted) return fail(undefined, true);
     return fail(err instanceof Error ? err.message : String(err), false);

@@ -8,7 +8,11 @@
 //   3. The Claude provider's `runAgent` builds the SAME query() options each runner used to build:
 //      the isolation, the path guard FIRST then the own-tools hook then the run's extras, the result
 //      tools as ONE in-process server, `additionalDirectories` only when there are roots, the base
-//      tool set / system prompt / agents only when given, and every message reaches `onMessage`.
+//      tool set / system prompt / agents only when given, and every message reaches the Claude-only
+//      `claude.onMessage` escape hatch.
+//   4. THE NEUTRAL STREAM: per assistant message ONE `step` (the de-duplicated live usage, the activity
+//      lines in the run's vocabulary, the text), the result message as the `outcome` (also returned),
+//      a specialist's steps prefixed only on a review run, and the escape hatch BEFORE the step.
 //
 //   pnpm --filter @pierre-review/backend test ai/provider
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -17,6 +21,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 let captured: { prompt: unknown; options: any } | null = null;
 let replies: unknown[] = [];
+// A test may replace the SDK's message stream (null: one empty assistant message, then the result).
+let stream: unknown[] | null = null;
 
 // Codex's home lives under the data directory: point it at an empty temp folder, never ~/.limn.
 process.env.LIMN_DATA_DIR = (await import('node:fs')).mkdtempSync(
@@ -46,6 +52,10 @@ vi.mock('./runtime.js', () => ({
       return (async function* () {
         const server = options.mcpServers ? Object.values(options.mcpServers)[0] : null;
         for (const t of (server as any)?.server?.tools ?? []) replies.push(await t.handler({ x: 1 }));
+        if (stream) {
+          for (const m of stream) yield m;
+          return;
+        }
         yield { type: 'assistant', message: { content: [] } };
         yield { type: 'result', subtype: 'success', total_cost_usd: 0.5, num_turns: 2 };
       })();
@@ -60,6 +70,7 @@ const { ISOLATED_MCP } = await import('./agent-isolation.js');
 afterEach(() => {
   captured = null;
   replies = [];
+  stream = null;
 });
 
 describe('the registry (LIMN_AI_PROVIDER)', () => {
@@ -142,6 +153,38 @@ describe('the registry (LIMN_AI_PROVIDER)', () => {
     } finally {
       delete process.env.OPENAI_API_KEY;
     }
+  });
+});
+
+describe('the kinds (Phase 3 foundation)', () => {
+  it('CODEX_AGENT_KINDS is the union of the four streams’ files, each EMPTY until it ports a runner', async () => {
+    const files = await Promise.all([
+      import('./codex/kinds/review.js').then((m) => m.CODEX_REVIEW_KINDS),
+      import('./codex/kinds/fix.js').then((m) => m.CODEX_FIX_KINDS),
+      import('./codex/kinds/tickets.js').then((m) => m.CODEX_TICKETS_KINDS),
+      import('./codex/kinds/docs.js').then((m) => m.CODEX_DOCS_KINDS),
+    ]);
+    expect(files).toEqual([[], [], [], []]);
+    expect([...P.CODEX_AGENT_KINDS]).toEqual(files.flat());
+  });
+
+  it('the backend’s kind list is the shared one, and every run kind adds the one-shot `complete`', async () => {
+    const { AI_AGENT_KINDS, AI_RUN_KINDS } = await import('@pierre-review/shared');
+    expect([...P.ALL_AGENT_KINDS].sort()).toEqual([...AI_AGENT_KINDS].sort());
+    expect([...P.ALL_RUN_KINDS].sort()).toEqual([...AI_RUN_KINDS].sort());
+    expect(P.ALL_RUN_KINDS.at(-1)).toBe('complete');
+    // `complete` runs on Codex now; an agent kind only once its stream ports it.
+    expect(P.codexRunKindReady('complete')).toBe(true);
+    expect(P.codexRunKindReady('review')).toBe(false);
+    expect(P.codexRunKindReady('review', new Set(['review']))).toBe(true);
+  });
+
+  it('the active provider is one question, asked by the registry and the pre-flight alike', () => {
+    for (const v of [undefined, '', 'claude', 'auto']) {
+      const env = v === undefined ? {} : { LIMN_AI_PROVIDER: v };
+      expect(P.activeProviderId(env)).toBe('claude');
+    }
+    expect(P.activeProviderId({ LIMN_AI_PROVIDER: 'codex' })).toBe('codex');
   });
 });
 
@@ -233,11 +276,11 @@ describe('the Claude provider builds the same query() options the runners did', 
         extraPreToolUse: [extra],
         agents: { design: {} },
         builtinTools: ['Read'],
+        onMessage: (m) => seen.push(m.type),
       },
-      onMessage: (m) => seen.push(m.type),
     });
     expect(seen).toEqual(['assistant', 'result']);
-    expect(out.result).toMatchObject({ type: 'result', total_cost_usd: 0.5 });
+    expect(out.outcome).toEqual({ subtype: 'success', text: null, costUsd: 0.5, numTurns: 2, usage: null });
     const o = captured!.options;
     expect(captured!.prompt).toBe('PROMPT');
     expect(o).toMatchObject({
@@ -311,10 +354,110 @@ describe('the Claude provider builds the same query() options the runners did', 
     await expect(
       claudeProvider.runAgent({
         ...baseSpec(),
-        onMessage: () => {
-          throw new Error('boom');
+        claude: {
+          ...baseSpec().claude,
+          onMessage: () => {
+            throw new Error('boom');
+          },
         },
       }),
     ).rejects.toThrow('boom');
+  });
+
+  it('a throw from onProgress ends the run the same way', async () => {
+    await expect(
+      claudeProvider.runAgent({
+        ...baseSpec(),
+        onProgress: () => {
+          throw new Error('bang');
+        },
+      }),
+    ).rejects.toThrow('bang');
+  });
+});
+
+describe('the neutral stream (Claude): steps and the outcome, derived from the SDK messages', () => {
+  const assistant = (over: Record<string, unknown>, content: unknown[], usage: Record<string, number> = {}) => ({
+    type: 'assistant',
+    message: { content, usage },
+    ...over,
+  });
+
+  it('one step per assistant message: de-duplicated live usage, the activity lines, the text; then the outcome', async () => {
+    stream = [
+      assistant({ request_id: 'r1', uuid: 'u1' }, [{ type: 'text', text: 'Looking  at\nthe code' }], { input_tokens: 10, output_tokens: 1 }),
+      // The SAME request re-emitted (a thinking + a tool message): counted once, by per-field max.
+      assistant({ request_id: 'r1', uuid: 'u2' }, [{ type: 'tool_use', id: 't1', name: 'Read', input: { file_path: '/w/a.ts' } }], { input_tokens: 10, output_tokens: 5 }),
+      assistant({ request_id: 'r2', uuid: 'u3' }, [{ type: 'tool_use', id: 't2', name: 'mcp__review__submit_review', input: {} }], { input_tokens: 3, output_tokens: 2, cache_read_input_tokens: 7 }),
+      { type: 'user', message: { content: [] } },
+      {
+        type: 'result',
+        subtype: 'success',
+        result: 'All done.',
+        total_cost_usd: 0.25,
+        num_turns: 3,
+        modelUsage: { 'claude-opus-5-5': { inputTokens: 13, outputTokens: 7, cacheReadInputTokens: 7, cacheCreationInputTokens: 0 } },
+      },
+    ];
+    const progress: any[] = [];
+    const out = await claudeProvider.runAgent({ ...baseSpec(), kind: 'review', onProgress: (p) => progress.push(p) });
+    expect(progress.map((p) => p.kind)).toEqual(['step', 'step', 'step', 'outcome']);
+    expect(progress[0]).toEqual({
+      kind: 'step',
+      lines: ['Looking at the code'],
+      text: 'Looking  at\nthe code',
+      usage: { inputTokens: 10, outputTokens: 1, cacheReadTokens: 0, cacheCreationTokens: 0 },
+    });
+    expect(progress[1]).toMatchObject({ lines: ['Read /w/a.ts'], text: '', usage: { inputTokens: 10, outputTokens: 5 } });
+    expect(progress[2]).toMatchObject({ lines: ['Submitting review…'], usage: { inputTokens: 13, outputTokens: 7, cacheReadTokens: 7 } });
+    const outcome = {
+      subtype: 'success',
+      text: 'All done.',
+      costUsd: 0.25,
+      numTurns: 3,
+      usage: { inputTokens: 13, outputTokens: 7, cacheReadTokens: 7, cacheCreationTokens: 0 },
+    };
+    expect(progress[3]).toEqual({ kind: 'outcome', outcome });
+    expect(out.outcome).toEqual(outcome);
+  });
+
+  it("an error result keeps Claude's subtype and no text; a missing cost or turn count is null", async () => {
+    stream = [{ type: 'result', subtype: 'error_max_turns', result: 'partial' }];
+    const out = await claudeProvider.runAgent({ ...baseSpec() });
+    expect(out.outcome).toEqual({ subtype: 'error_max_turns', text: null, costUsd: null, numTurns: null, usage: null });
+  });
+
+  it("the fixer's vocabulary names the write tools", async () => {
+    stream = [assistant({ uuid: 'a' }, [{ type: 'tool_use', id: 'x', name: 'mcp__fix__submit_fix', input: {} }])];
+    const fix: any[] = [];
+    await claudeProvider.runAgent({ ...baseSpec(), kind: 'fix', activity: 'fix', onProgress: (p) => fix.push(p) });
+    expect(fix[0].lines).toEqual(['Recording fix summary…']);
+    const read: any[] = [];
+    await claudeProvider.runAgent({ ...baseSpec(), onProgress: (p) => read.push(p) });
+    expect(read[0].lines).toEqual(['mcp__fix__submit_fix …']);
+  });
+
+  it("a specialist's own steps carry its name, on a review run only", async () => {
+    stream = [
+      assistant({ uuid: 'a' }, [{ type: 'tool_use', id: 'd1', name: 'Agent', input: { subagent_type: 'security' } }]),
+      assistant({ uuid: 'b', parent_tool_use_id: 'd1' }, [{ type: 'tool_use', id: 'r', name: 'Read', input: { file_path: '/w/x.ts' } }]),
+    ];
+    const review: any[] = [];
+    await claudeProvider.runAgent({ ...baseSpec(), kind: 'review', onProgress: (p) => review.push(p) });
+    expect(review.map((p) => p.lines)).toEqual([['Asking the security specialist'], ['security: Read /w/x.ts']]);
+    const other: any[] = [];
+    await claudeProvider.runAgent({ ...baseSpec(), kind: 'ci_review', onProgress: (p) => other.push(p) });
+    expect(other[1].lines).toEqual(['Read /w/x.ts']);
+  });
+
+  it('the escape hatch sees each raw message BEFORE its step', async () => {
+    stream = [assistant({ uuid: 'a' }, [{ type: 'text', text: 'hi' }])];
+    const order: string[] = [];
+    await claudeProvider.runAgent({
+      ...baseSpec(),
+      claude: { ...baseSpec().claude, onMessage: (m) => order.push(`raw:${m.type}`) },
+      onProgress: (p) => order.push(p.kind),
+    });
+    expect(order).toEqual(['raw:assistant', 'step']);
   });
 });

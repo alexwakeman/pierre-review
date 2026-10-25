@@ -1,12 +1,11 @@
-import type { SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import { STORY_DOCS_ALIGNMENT_MODEL, type ClaudeReviewModel } from '@pierre-review/shared';
-import { claudeModelChoice, getActiveProvider, type AgentToolServer } from '../../ai/provider.js';
+import { claudeModelChoice, getActiveProvider, type AgentToolServer, type AgentOutcome } from '../../ai/provider.js';
 import { config } from '../../config.js';
 import { DISALLOWED_TOOLS } from '../agent.js';
 import { applyClaudeReviewAuth } from '../auth.js';
 import { DISPATCH_TOOL_NAMES } from '../claude-review/specialists.js';
 import { estimateCostUsd } from '../pricing.js';
-import { recordUsage, sumModelUsage, sumUsageMap, type UsageTokens } from '../usage.js';
+import { emptyUsage, type UsageTokens } from '../usage.js';
 import { STORY_DOCS_TOOL_NAME } from './prompts.js';
 export { storyDocsRoots } from './prompts.js';
 import { submitAlignmentShape } from './schema.js';
@@ -79,19 +78,19 @@ export interface RunStoryDocsAgentResult {
 export async function runStoryDocsAgent(args: RunStoryDocsAgentArgs): Promise<RunStoryDocsAgentResult> {
   const model = args.model ?? (STORY_DOCS_ALIGNMENT_MODEL as ClaudeReviewModel);
   const { abortController } = args;
-  let result: SDKResultMessage | null = null;
+  let outcome: AgentOutcome | null = null;
   let restoreEnv: (() => void) | null = null;
-  const usageByUuid = new Map<string, UsageTokens>();
+  let liveUsage: UsageTokens = emptyUsage();
   let accepted: unknown | null = null;
   let lastRefusal: string | null = null;
   const telemetry = (): Pick<RunStoryDocsAgentResult, 'costUsd' | 'inputTokens' | 'outputTokens' | 'numTurns'> => {
-    const usage = sumModelUsage(result) ?? sumUsageMap(usageByUuid);
+    const usage = outcome?.usage ?? liveUsage;
     const hasUsage = usage.inputTokens + usage.outputTokens + usage.cacheReadTokens > 0;
     return {
-      costUsd: result?.total_cost_usd ?? (hasUsage ? estimateCostUsd(model, usage) : null),
+      costUsd: outcome?.costUsd ?? (hasUsage ? estimateCostUsd(model, usage) : null),
       inputTokens: usage.inputTokens,
       outputTokens: usage.outputTokens,
-      numTurns: result?.num_turns ?? null,
+      numTurns: outcome?.numTurns ?? null,
     };
   };
   const fail = (failureReason: string | undefined, aborted: boolean): RunStoryDocsAgentResult => ({
@@ -132,7 +131,7 @@ export async function runStoryDocsAgent(args: RunStoryDocsAgentArgs): Promise<Ru
     };
     // ⚠ THE CONFINEMENT LIVES HERE, not in the prompt: a PreToolUse deny holds under bypassPermissions.
     const policy = storyDocsToolPolicy();
-    ({ result } = await getActiveProvider().runAgent({
+    ({ outcome } = await getActiveProvider().runAgent({
       kind: 'story_docs',
       model: claudeModelChoice(model),
       effort: 'worktree',
@@ -148,15 +147,11 @@ export async function runStoryDocsAgent(args: RunStoryDocsAgentArgs): Promise<Ru
       budget: { usd: config.storyDocsBudgetUsd, turns: config.storyDocsMaxTurns },
       abortController,
       claude: { allowedTools: policy.allowedTools, disallowedTools: policy.disallowedTools },
-      onMessage: (message) => {
-        if (message.type === 'assistant') {
-          try {
-            recordUsage(usageByUuid, message);
-          } catch {
-            /* usage shape varies — never let it break the run */
-          }
-        } else if (message.type === 'result') {
-          result = message;
+      onProgress: (p) => {
+        if (p.kind === 'step') {
+          if (p.usage) liveUsage = p.usage;
+        } else if (p.kind === 'outcome') {
+          outcome = p.outcome;
         }
       },
     }));
@@ -165,8 +160,8 @@ export async function runStoryDocsAgent(args: RunStoryDocsAgentArgs): Promise<Ru
       const reason =
         lastRefusal != null
           ? `no usable answer: ${lastRefusal}`
-          : result && result.subtype !== 'success'
-            ? `agent stopped (${result.subtype}) without submitting`
+          : outcome && outcome.subtype !== 'success'
+            ? `agent stopped (${outcome.subtype}) without submitting`
             : `agent finished without calling ${STORY_DOCS_TOOL_NAME}`;
       return fail(reason, false);
     }

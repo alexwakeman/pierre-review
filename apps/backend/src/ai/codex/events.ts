@@ -220,6 +220,57 @@ function firstText(content: unknown): string | null {
   return null;
 }
 
+// ---- the neutral step (ai/provider.ts "the neutral run stream") ----------------------------------
+
+/**
+ * One event as a neutral STEP (`AgentStep`, minus its kind): the activity line it adds, the text it
+ * carries, and the run's tokens so far. Null for an event that is no step. A tool call counts when it
+ * STARTS (its line), an edit when it completes, the agent's message when it completes (its text, and
+ * a clipped line), and `turn.completed` carries the tokens (the THREAD's cumulative figure, which for
+ * one run and its retry is the run's own). The status-line kinds (`progressFromEvent`) are separate.
+ */
+export interface CodexStep {
+  lines: string[];
+  text: string;
+  usage: TokenUsage | null;
+}
+
+export function stepFromEvent(e: CodexEvent): CodexStep | null {
+  if (isBypassWarning(e)) return null;
+  if (e.type === 'turn.completed') return { lines: [], text: '', usage: toTokenUsage(e.usage) };
+  const p = progressFromEvent(e);
+  if (!p) return null;
+  if (p.kind === 'tool' && p.status === 'started') return { lines: [p.text], text: '', usage: null };
+  if (p.kind === 'file_change' && p.status === 'completed' && p.paths.length > 0) {
+    return { lines: [`Edited ${clip(p.paths.join(', '), 120)}`], text: '', usage: null };
+  }
+  if (p.kind === 'message') {
+    const text = p.text.trim();
+    const line = clip(text.replace(/\s+/g, ' '), 120);
+    return { lines: line ? [line] : [], text, usage: null };
+  }
+  return null;
+}
+
+/**
+ * Codex's tokens in the neutral shape (review/usage.ts `UsageTokens`): input EXCLUSIVE of the cache,
+ * the cached input as cache reads, no cache-write figure (Codex folds it into input). Reasoning
+ * tokens are a SUBSET of output tokens and are never added.
+ */
+export function codexTokensAsAgentTokens(u: TokenUsage): {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
+} {
+  return {
+    inputTokens: Math.max(0, u.inputTokens - u.cachedInputTokens),
+    outputTokens: u.outputTokens,
+    cacheReadTokens: u.cachedInputTokens,
+    cacheCreationTokens: 0,
+  };
+}
+
 // ---- usage --------------------------------------------------------------------------------------
 
 /**

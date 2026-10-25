@@ -167,6 +167,38 @@ users.
   (via `kickCodexProbe` or `shareCodexProbe`); a probe's result from an older generation is ignored,
   and it clears `inFlight` only while that is still its own promise.
 
+**Phase 3 foundation built 2026-10-25** (branch `codex/p3-foundation`, before the four porting streams):
+- THE NEUTRAL RUN STREAM. `spec.onProgress` carries, from BOTH providers, a `step` per model step
+  (worded activity lines, the step's text, the run's live de-duplicated tokens) and the run's `outcome`
+  (subtype, final text on success, US$, turns, whole-run tokens; also `AgentRunResult.outcome`, which
+  replaced the raw `result`). Claude derives them inside `providers/claude.ts` exactly as the runners
+  did (the activity labellers MOVED to `providers/claude-activity.ts`; `spec.activity: 'fix'` picks the
+  fixer's words; the specialist prefix is kept for the whole run on `kind: 'review'` only). Codex derives
+  them from `ai/codex/events.ts` `stepFromEvent` (+ `codexTokensAsAgentTokens`) and emits its outcome
+  before it returns or throws. EVERY runner reads only the neutral stream now. The ONE Claude-only
+  escape hatch is `spec.claude.onMessage` (raw SDK messages, before their step), used by the docs build
+  alone, for the PDF page a Claude `Read` reached.
+- THE PRE-FLIGHT IS PER KIND. `detectClaudeAuth(kind?)`, `ctx.llm.detectAuth(kind?)` and
+  `agenticRunReady(ctx, kind)`: under Codex a kind in `CODEX_AGENT_KINDS` — or `'complete'`, the
+  one-shots — is 'ok' when Codex is installed and signed in with ChatGPT; another kind answers
+  `codexKindNotAvailableMessage(kind)`; no kind means "any agent" (not until every kind runs). The
+  platform's `ctx.llm` (the one-shot client) defaults to `'complete'`. `/api/me` adds
+  `ai.kinds: Record<AiRunKind, AiKindStatus>` (shared `AiAgentKind`/`AiRunKind`, `aiKindsAll`), and every
+  `AiRunGate` names its `kind` (`aiAuthFor`/`aiReadyFor` in the SPA). The active provider is ONE question
+  (`provider-setting.ts activeProviderId`), asked by the registry and the pre-flight alike.
+- `CODEX_AGENT_KINDS` = the union of `ai/codex/kinds/{review,fix,tickets,docs}.ts`, each EMPTY: a stream
+  adds its kinds to its own file in the commit that ports them.
+- THE PROMPT SEAM: `ai/prompt-tools.ts`. Mark a tool reference `{Read}`/`{Glob}`/`{Grep}`/`{Write}`/
+  `{Edit}`/`{MultiEdit}`/`{Bash}`/`{submit_x}` and render it per provider: Claude drops the braces only
+  (byte-identical; a test renders every prompt source and prompt-golden.json to itself), Codex gets
+  `read_file`/`list_files`/`search`/`apply_patch`/"your final JSON answer"; `submitSentence` swaps a whole
+  "call submit_x …" sentence for `CODEX_FINAL_ANSWER_SENTENCE`; `either` for anything else.
+- SPECIALISTS ON CODEX (§ 3.5): `ai/codex/specialists.ts runCodexSpecialists` — N read-only Codex runs in
+  parallel (one door: the provider's `runAgent`), each its own instructions and strict schema
+  (`submit_specialist`), capped at CLAUDE_REVIEW_MAX_SPECIALISTS (catalogue names, each once, the
+  dispatch guard's refusal sentence), `allowStart` asked before each start, the batch's US$ split
+  evenly and no start once spent; answers in order, a failure never stops the others.
+
 Original status: Written 2026-10-23 after checking the current Codex docs and the published
 `@openai/codex-sdk` 0.164.0 type definitions. The work is meant to be carried out by subagents
 through the Workflow tool, in the phases below, with the user confirming the decisions in § 6 first.

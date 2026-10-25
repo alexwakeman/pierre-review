@@ -226,7 +226,7 @@ export function TicketPasteBox({
       {note != null && <p className={`text-xs ${MUTED}`}>{note}</p>}
       <div className="flex flex-wrap items-center gap-2">
         {n > 0 && (
-          <AiRunGate>
+          <AiRunGate kind="ticket_review">
             <button
               type="button"
               disabled={reading || check.isPending}

@@ -93,7 +93,7 @@ export async function runSprintPathsPass(
     await recordAttempt(accountId, workspaceId, hash, error).catch((err) => ctx.log.warn({ err: String(err).slice(0, 200) }, 'sprint paths: attempt record failed'));
   };
   try {
-    if (ctx.llm.detectAuth().status !== 'ok') return { ...res, state: 'no_credential' };
+    if (ctx.llm.detectAuth('sprint_paths').status !== 'ok') return { ...res, state: 'no_credential' };
     if (!(await (seams.entitled ?? accountExists)(accountId))) return { ...res, state: 'not_entitled' };
     const todo = seams.todo ?? (async (a: number, w: number) => (await import('../../db/sprint-graph.js')).sprintPathsTodo(a, w));
     const input = await todo(accountId, workspaceId);

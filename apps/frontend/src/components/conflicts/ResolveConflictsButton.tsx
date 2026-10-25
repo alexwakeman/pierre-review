@@ -4,7 +4,7 @@ import { conflictResolverEntryVisible, type ConflictResolverEntry } from '../../
 import { useMe } from '../../hooks/useTriage.js';
 import { openConflictResolver, type ResolverTarget } from '../../store/conflictResolver.js';
 import { CaretIcon, ConflictIcon, SparkleIcon } from '../Icons.js';
-import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
+import { aiReadyFor, useAiCapabilities } from '../../hooks/useAiCapabilities.js';
 import { useClickOutside } from '../../hooks/useClickOutside.js';
 import {
   cancelConflictAiRun,
@@ -114,7 +114,7 @@ function ResolveConflictsMenu({
   const run = useConflictAiRun(target.prId);
   const active = conflictAiRunActive(run);
   const ai = useAiCapabilities();
-  const aiReady = ai.ready;
+  const aiReady = aiReadyFor(ai, 'resolve');
   useClickOutside(rootRef, () => setOpen(false), open);
   useEffect(() => {
     if (!open) return;
@@ -201,7 +201,7 @@ function ResolveConflictsMenu({
             </button>
           ) : (
             <div className="px-3 py-1.5">
-              <AiRunGate>
+              <AiRunGate kind="resolve">
                 <span />
               </AiRunGate>
             </div>

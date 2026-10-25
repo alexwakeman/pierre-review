@@ -1189,9 +1189,11 @@ export interface ProContext {
       model?: string;
       costUsd?: number;
     }>;
-    // Best-effort detection of whether Claude auth is available (for a pre-flight
-    // before an LLM/agent run). Mirrors Claude Review's detectClaudeAuth.
-    detectAuth(): { status: 'ok' | 'none'; message?: string };
+    // Best-effort detection of whether the ACTIVE provider can run (a pre-flight before an LLM
+    // call). Mirrors Claude Review's detectClaudeAuth, PER RUN KIND: this is the ONE-SHOT client,
+    // so no kind means 'complete' (which runs on Codex too). A trailing optional parameter: no
+    // apiVersion bump.
+    detectAuth(kind?: 'complete'): { status: 'ok' | 'none'; message?: string };
   };
   queries: ProHostQueries;
   // Append one billable AI operation to the core AI-usage ledger. Lets the plugin record

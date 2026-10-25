@@ -28,7 +28,7 @@ import {
   type SprintCardData,
   type SprintLaneData,
 } from '../../lib/laneBoard.js';
-import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
+import { aiAuthFor, useAiCapabilities } from '../../hooks/useAiCapabilities.js';
 import { AiRunGate } from '../AiSetup.js';
 import { InfoButton } from '../InfoModal.js';
 import { HoverPopover } from '../HoverPopover.js';
@@ -288,7 +288,7 @@ export function SprintPathsView({ data, actions }: { data: SprintGraphResponse; 
   });
   // 'none' with AI on: the one credential / set-up line when that is why, else no heading at all.
   const ai = useAiCapabilities();
-  const gateLine = ai.enabled && (ai.runtime !== 'ready' || ai.auth === 'none');
+  const gateLine = ai.enabled && (ai.runtime !== 'ready' || aiAuthFor(ai, 'sprint_paths').auth === 'none');
   const heading = view.kind !== 'none' || gateLine;
   const paths = view.kind === 'paths' ? view.paths : null;
   const columns = data.statusLayout?.columns ?? null;
@@ -318,7 +318,7 @@ export function SprintPathsView({ data, actions }: { data: SprintGraphResponse; 
             </span>
           )}
           {view.kind === 'off' && <span className={`text-xs ${MUTED}`}>Claude is off here, so there are no critical paths.</span>}
-          {view.kind === 'none' && <AiRunGate>{null}</AiRunGate>}
+          {view.kind === 'none' && <AiRunGate kind="sprint_paths">{null}</AiRunGate>}
         </div>
       )}
       {view.kind === 'paths' && view.note?.kind === 'failed' && <p className={`text-xs ${MUTED}`}>{view.note.text}</p>}

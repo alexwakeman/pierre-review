@@ -61,7 +61,9 @@ import {
 import {
   addUsage,
   cleanCodexError,
+  codexTokensAsAgentTokens,
   progressFromEvent,
+  stepFromEvent,
   stderrRefusals,
   stderrTail,
   usageDelta,
@@ -74,6 +76,7 @@ import { runCodexExec, type CodexExecResult } from '../codex/run.js';
 import type { CodexHookConfig } from '../codex/types.js';
 import { workspaceMcpConfig } from '../codex/workspace-mcp.js';
 import type {
+  AgentOutcome,
   AgentProvider,
   AgentResultTool,
   AgentRunResult,
@@ -594,9 +597,21 @@ export async function runAgentUnchecked(spec: AgentRunSpec): Promise<AgentRunRes
     );
     const env = codexExecEnv(credential, hook);
     const timeoutMs = spec.codex?.timeoutMs ?? DEFAULT_AGENT_TIMEOUT_MS;
+    // THE NEUTRAL STREAM (ai/provider.ts): the status-line kinds, then the step the event makes (its
+    // activity line, its text, the run's tokens so far — turn.completed carries the thread's total,
+    // which for a run and its retry is the run's own).
     const onEvent = (e: Parameters<NonNullable<Parameters<typeof runCodexExec>[1]['onEvent']>>[0]): void => {
       const p = progressFromEvent(e);
       if (p) spec.onProgress?.(p);
+      const step = stepFromEvent(e);
+      if (step) {
+        spec.onProgress?.({
+          kind: 'step',
+          lines: step.lines,
+          text: step.text,
+          usage: step.usage ? codexTokensAsAgentTokens(step.usage) : null,
+        });
+      }
     };
     const signal = spec.abortController.signal;
 
@@ -655,6 +670,21 @@ export async function runAgentUnchecked(spec: AgentRunSpec): Promise<AgentRunRes
     } finally {
       queueCodexThreadCleanup(home, first?.threadId ?? final?.threadId ?? null);
     }
+    // The neutral outcome (ai/provider.ts), emitted once, before the run returns or throws.
+    const settle = (subtype: string, text: string | null): AgentOutcome => {
+      const outcome: AgentOutcome = {
+        subtype,
+        text,
+        costUsd,
+        numTurns: null,
+        usage: usage ? codexTokensAsAgentTokens(usage) : null,
+      };
+      spec.onProgress?.({ kind: 'outcome', outcome });
+      return outcome;
+    };
+    const failedOutcome = (): void => {
+      settle(cancelled ? 'cancelled' : 'error', null);
+    };
 
     // Writes, read from git — whatever the stream says, and even when the run failed (a partial
     // edit is still on disk and the caller must know).
@@ -665,6 +695,7 @@ export async function runAgentUnchecked(spec: AgentRunSpec): Promise<AgentRunRes
         after = await Promise.all(roots.write.map(gitSnapshot));
       } catch (err) {
         // What Codex left on disk cannot be read, so the run cannot be trusted.
+        failedOutcome();
         throw new CodexRunError(`Limn could not read what Codex changed (${(err as Error).message}); the run is not used.`, cancelled);
       }
       if (before.some((b) => b.top === null) || after.some((a) => a.top === null)) {
@@ -675,6 +706,7 @@ export async function runAgentUnchecked(spec: AgentRunSpec): Promise<AgentRunRes
         const writeReal = roots.write.map(realOr);
         const outside = filesChanged.filter((p) => !writeReal.some((r) => inside(r, p)));
         if (outside.length > 0) {
+          failedOutcome();
           const err = new CodexRunError(`Codex changed files outside its folder (${outside.length}); the run is not used.`, cancelled);
           err.filesChanged = filesChanged;
           throw err;
@@ -699,12 +731,13 @@ export async function runAgentUnchecked(spec: AgentRunSpec): Promise<AgentRunRes
     if (refusals.length > 0) console.warn(`[codex] ${refusals.length} tool call(s) refused: ${refusals[0]}`);
 
     if (failure || !first || !final) {
+      failedOutcome();
       const err = new CodexRunError(failure ?? 'Codex did not run.', cancelled);
       err.filesChanged = filesChanged;
       throw err;
     }
     return {
-      result: null,
+      outcome: settle('success', final.finalResponse),
       provider: 'codex',
       text: final.finalResponse,
       usage,

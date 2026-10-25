@@ -168,7 +168,7 @@ export function CiCheckSection({
       }
       actions={
         !running ? (
-          <AiRunGate>
+          <AiRunGate kind="ci_review">
             <button
               type="button"
               disabled={starting}

@@ -78,7 +78,7 @@ export function FlowPointersPanel({
           )}
         </div>
         {!data.empty && (
-          <AiRunGate>
+          <AiRunGate kind="complete">
             <button
               type="button"
               disabled={generating}

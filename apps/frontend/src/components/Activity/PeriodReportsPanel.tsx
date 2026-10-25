@@ -1163,7 +1163,7 @@ function GenerateControls({
         )}
         {/* The write-up is a model run: hidden when AI is off, swapped for the one setup or
             sign-in line when it cannot run (AiRunGate). */}
-        <AiRunGate>
+        <AiRunGate kind="complete">
           <button
             type="button"
             onClick={() => generate.mutate(model != null ? { model } : {})}

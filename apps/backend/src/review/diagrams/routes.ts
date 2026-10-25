@@ -100,7 +100,7 @@ async function preflight(
   accountId: number,
   reply: FastifyReply,
 ): Promise<{ error: string; message: string } | null> {
-  const auth = ctx.llm.detectAuth();
+  const auth = ctx.llm.detectAuth('diagram');
   if (auth.status === 'none') {
     reply.status(400);
     return { error: 'NoClaudeAuth', message: auth.message ?? 'No Claude credential found.' };

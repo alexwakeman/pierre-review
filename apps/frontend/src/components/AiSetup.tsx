@@ -1,7 +1,9 @@
 import type { ReactNode } from 'react';
+import type { AiRunKind } from '@pierre-review/shared';
 import {
   AI_AUTH_LINE,
   AI_SETUP_LABEL,
+  aiAuthFor,
   useAiCapabilities,
   useAiRuntimeInstall,
   useAiRuntimePoll,
@@ -17,6 +19,10 @@ import { AiBudgetMeter, OverBudgetConfirm } from './AiBudget.js';
  * `auth` lets a surface pass a fresher answer than `/api/me` (the Claude Review route reports its
  * own); either one saying `'none'` wins.
  *
+ * `kind` names what the button runs (an agent kind, or 'complete' for a one-shot feature), so the gate
+ * reads `/api/me`'s answer FOR THAT KIND (`ai.kinds`): a provider may run some kinds and not others
+ * (Codex, while its agents are being ported). Without it, the top-level answer ("any agent").
+ *
  * THE CLAUDE SPEND BUDGET rides here, so every AI surface gets it: the compact meter after the
  * button while the budget is on, and — over budget — the button takes two presses (the run is the
  * reader's choice, never refused). `meter={false}` drops the meter where a surface has no room.
@@ -24,16 +30,18 @@ import { AiBudgetMeter, OverBudgetConfirm } from './AiBudget.js';
 export function AiRunGate({
   children,
   auth,
+  kind,
   meter = true,
 }: {
   children: ReactNode;
   auth?: 'ok' | 'none';
+  kind?: AiRunKind;
   meter?: boolean;
 }): JSX.Element | null {
   const ai = useAiCapabilities();
   if (!ai.enabled) return null;
   if (ai.runtime !== 'ready') return <AiRuntimeSetup />;
-  if (ai.auth === 'none' || auth === 'none') return <AiAuthLine />;
+  if (aiAuthFor(ai, kind).auth === 'none' || auth === 'none') return <AiAuthLine kind={kind} />;
   // A gate with nothing inside (a surface that only wants the setup/auth line) gets no budget UI.
   if (children == null) return null;
   return (
@@ -44,11 +52,11 @@ export function AiRunGate({
   );
 }
 
-export function AiAuthLine(): JSX.Element {
-  // The server's own sentence when it sent one (e.g. "Codex is not available…" under
-  // LIMN_AI_PROVIDER=codex), else the default sign-in line.
+export function AiAuthLine({ kind }: { kind?: AiRunKind } = {}): JSX.Element {
+  // The server's own sentence when it sent one (e.g. "Codex cannot run … yet" under
+  // LIMN_AI_PROVIDER=codex — the kind's own when the gate named one), else the default sign-in line.
   const ai = useAiCapabilities();
-  return <span className="text-xs text-gray-600 dark:text-gray-300">{ai.authMessage ?? AI_AUTH_LINE}</span>;
+  return <span className="text-xs text-gray-600 dark:text-gray-300">{aiAuthFor(ai, kind).message ?? AI_AUTH_LINE}</span>;
 }
 
 /** The "Set up AI" button, its progress line, and a failure with Retry. */

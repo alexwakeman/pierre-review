@@ -8,9 +8,11 @@
 // leaves the PR qualifying, so the first tick after "Set up AI" (or a sign-in) reviews it.
 // A click needs no such guard: the reader sees the failure and can press Review again.
 import { getAiRuntimeStatus } from '../../ai/runtime.js';
+import type { AiAgentKind } from '@pierre-review/shared';
 import type { AgentContext } from '../agent-context.js';
 
-export function agenticRunReady(ctx: Pick<AgentContext, 'llm'>): boolean {
+/** `kind`: the agent the sweeper is about to start (the pre-flight answers per kind). */
+export function agenticRunReady(ctx: Pick<AgentContext, 'llm'>, kind: AiAgentKind): boolean {
   if (getAiRuntimeStatus().runtime !== 'ready') return false;
-  return ctx.llm.detectAuth().status === 'ok';
+  return ctx.llm.detectAuth(kind).status === 'ok';
 }

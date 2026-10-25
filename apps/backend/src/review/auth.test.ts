@@ -20,7 +20,20 @@
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+// THE PER-KIND PRE-FLIGHT under Codex (below) reads Codex's CACHED detail and the allow-list. Both are
+// faked: the detail is set per test, and stream (a)'s file is made to carry 'review' — as if that
+// stream had ported it — so a kind Codex can run and one it cannot are both exercised.
+const codex = vi.hoisted(() => ({
+  detail: { runnable: false, message: 'Codex is not set up yet. Run: limn ai install codex' as string | null },
+}));
+vi.mock('../ai/codex/detect.js', async (orig) => ({
+  ...(await orig<typeof import('../ai/codex/detect.js')>()),
+  codexDetailCached: () => codex.detail,
+}));
+vi.mock('../ai/codex/kinds/review.js', () => ({ CODEX_REVIEW_KINDS: ['review'] }));
+
 import { applyClaudeReviewAuth, detectClaudeAuth, hasAmbientClaudeAuth } from './auth.js';
 
 let home: string;
@@ -187,5 +200,34 @@ describe('detectClaudeAuth — LIMN_AI_PROVIDER=codex', () => {
       process.env.LIMN_AI_PROVIDER = v;
       expect(detectClaudeAuth()).toEqual({ status: 'ok', method: 'oauth_token' });
     }
+  });
+
+  it('on Claude every run kind gets the one answer', () => {
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = 'tok';
+    process.env.LIMN_AI_PROVIDER = 'claude';
+    for (const kind of ['review', 'fix', 'docs_chat', 'complete'] as const) {
+      expect(detectClaudeAuth(kind)).toEqual({ status: 'ok', method: 'oauth_token' });
+    }
+  });
+
+  it('PER KIND: a kind Codex cannot run says so by name; one it can (and one-shots) needs the install + a ChatGPT sign-in', async () => {
+    const { codexKindNotAvailableMessage, CODEX_NOT_AVAILABLE_MESSAGE } = await import('../ai/provider.js');
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = 'tok';
+    process.env.LIMN_AI_PROVIDER = 'codex';
+    // Not set up: the runnable kinds answer Codex's own sentence; the others name themselves.
+    codex.detail = { runnable: false, message: 'Codex is not set up yet. Run: limn ai install codex' };
+    expect(detectClaudeAuth('review')).toEqual({ status: 'none', message: 'Codex is not set up yet. Run: limn ai install codex' });
+    expect(detectClaudeAuth('complete')).toEqual({ status: 'none', message: 'Codex is not set up yet. Run: limn ai install codex' });
+    expect(detectClaudeAuth('fix')).toEqual({ status: 'none', message: codexKindNotAvailableMessage('fix') });
+    // Installed and signed in with ChatGPT.
+    codex.detail = { runnable: true, message: null };
+    expect(detectClaudeAuth('review')).toEqual({ status: 'ok', method: 'chatgpt' });
+    expect(detectClaudeAuth('complete')).toEqual({ status: 'ok', method: 'chatgpt' });
+    expect(detectClaudeAuth('fix')).toEqual({ status: 'none', message: codexKindNotAvailableMessage('fix') });
+    // No kind = "any agent": not until EVERY kind can run.
+    expect(detectClaudeAuth()).toEqual({ status: 'none', message: CODEX_NOT_AVAILABLE_MESSAGE });
+    // Not runnable for want of a known ChatGPT sign-in, with no sentence of its own: the sign-in line.
+    codex.detail = { runnable: false, message: null };
+    expect(detectClaudeAuth('complete')).toEqual({ status: 'none', message: 'Sign in to Codex with ChatGPT: limn ai login codex' });
   });
 });

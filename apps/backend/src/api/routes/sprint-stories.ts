@@ -34,7 +34,7 @@ export async function sprintStoriesRoutes(app: FastifyInstance): Promise<void> {
     const accountId = accountIdOf(req);
     const scope = await resolveWorkspaceScope(accountId, q.workspace);
     // A builder pass needs a credential too; without one `pathsStatus` would promise paths for ever.
-    const pathsCanRun = config.aiEnabled && (await import('../../review/auth.js')).detectClaudeAuth().status === 'ok';
+    const pathsCanRun = config.aiEnabled && (await import('../../review/auth.js')).detectClaudeAuth('sprint_paths').status === 'ok';
     return getSprintGraph(accountId, scope.workspaceId, { aiEnabled: config.aiEnabled, now: Date.now(), pathsCanRun });
   });
 

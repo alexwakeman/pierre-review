@@ -1,8 +1,8 @@
-import type { SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import {
   claudeModelChoice,
   getActiveProvider,
   type AgentKind,
+  type AgentOutcome,
   type AgentToolServer,
 } from '../ai/provider.js';
 import { config } from '../config.js';
@@ -14,12 +14,7 @@ import {
   removeWorktreeLocked,
 } from '../review/clone-manager.js';
 import { estimateCostUsd } from '../review/pricing.js';
-import {
-  recordUsage,
-  sumModelUsage,
-  sumUsageMap,
-  type UsageTokens,
-} from '../review/usage.js';
+import type { UsageTokens } from '../review/usage.js';
 import type { ClaudeReviewModel } from '@pierre-review/shared';
 import type {
   GenerateFixArgs,
@@ -33,7 +28,6 @@ import {
   type RawPlanSubmission,
 } from './ai-fix/plan.js';
 import { captureWorktreeDiff } from './git.js';
-import { describeAssistantBlocks } from './activity.js';
 import { withPartialSpend } from './partial-spend.js';
 
 // The WRITE tool surface for the fixer: Read/Glob/Grep to explore, Write/Edit/MultiEdit to
@@ -141,7 +135,8 @@ interface AgentRunOptions {
 }
 
 interface AgentRunOutcome {
-  result: SDKResultMessage | null;
+  /** How the run ended (the provider's neutral outcome), or null when it never said. */
+  outcome: AgentOutcome | null;
   usage: LiveUsage;
   costUsd: number | null;
   numTurns: number | null;
@@ -165,8 +160,8 @@ export async function runAgentInWorktree(
   opts: AgentRunOptions,
 ): Promise<AgentRunOutcome> {
   const model = opts.model as ClaudeReviewModel;
-  const usageByUuid = new Map<string, UsageTokens>();
-  let result: SDKResultMessage | null = null;
+  let liveUsage: UsageTokens = emptyUsage();
+  let outcome: AgentOutcome | null = null;
 
   // The credential ladder (ai/credentials.ts): the Claude Code login, else ANTHROPIC_API_KEY. Restored below.
   const restoreEnv = applyClaudeReviewAuth(true);
@@ -182,7 +177,7 @@ export async function runAgentInWorktree(
   // What the run has spent so far, from the streamed assistant turns. A cancelled or failed run
   // still bills: the caller records this (a planning pass counts it against the plan's budget).
   const spentSoFar = (): { usage: LiveUsage; costUsd: number | null } => {
-    const u = sumUsageMap(usageByUuid);
+    const u = { ...liveUsage };
     const has = u.inputTokens + u.outputTokens + u.cacheReadTokens > 0;
     return { usage: u, costUsd: has ? estimateCostUsd(model, u) : null };
   };
@@ -195,7 +190,7 @@ export async function runAgentInWorktree(
   // seed item (PR text, review threads, a ticket review's items) saying "also add this to ~/.zshrc"
   // would otherwise write outside the worktree, where captureWorktreeDiff never shows it to the
   // reader. 'worktree' effort ⇒ config.reviewEffort, exactly the effort this path always used.
-  ({ result } = await getActiveProvider().runAgent({
+  ({ outcome } = await getActiveProvider().runAgent({
     kind: opts.kind,
     model: claudeModelChoice(model),
     effort: 'worktree',
@@ -209,25 +204,19 @@ export async function runAgentInWorktree(
     budget: { usd: opts.maxBudgetUsd, turns: opts.maxTurns },
     abortController: opts.abortController,
     claude: { allowedTools: opts.allowedTools, disallowedTools: opts.disallowedTools },
-    onMessage: (message) => {
-      if (message.type === 'assistant') {
-        try {
-          recordUsage(usageByUuid, message);
-        } catch {
-          /* usage shape varies — never let it break the run */
-        }
-        try {
-          for (const line of describeAssistantBlocks(message)) pushActivity(line);
-        } catch {
-          /* never let progress derivation break the run */
-        }
-        const live = sumUsageMap(usageByUuid);
+    // The fixer's words for its steps (the write tools too).
+    activity: 'fix',
+    onProgress: (p) => {
+      if (p.kind === 'step') {
+        if (p.usage) liveUsage = p.usage;
+        for (const line of p.lines) pushActivity(line);
+        const live = liveUsage;
         opts.onActivity?.([...activity], {
           ...live,
           estCostUsd: estimateCostUsd(model, live),
         });
-      } else if (message.type === 'result') {
-        result = message;
+      } else if (p.kind === 'outcome') {
+        outcome = p.outcome;
       }
     },
   }));
@@ -240,7 +229,7 @@ export async function runAgentInWorktree(
   if (opts.abortController.signal.aborted) {
     const spent = spentSoFar();
     return {
-      result,
+      outcome,
       usage: spent.usage,
       costUsd: spent.costUsd,
       numTurns: null,
@@ -248,14 +237,14 @@ export async function runAgentInWorktree(
     };
   }
 
-  const usage = sumModelUsage(result) ?? sumUsageMap(usageByUuid);
+  const usage = outcome?.usage ?? liveUsage;
   const hasUsage =
     usage.inputTokens + usage.outputTokens + usage.cacheReadTokens > 0;
   const costUsd =
-    result?.total_cost_usd ?? (hasUsage ? estimateCostUsd(model, usage) : null);
+    outcome?.costUsd ?? (hasUsage ? estimateCostUsd(model, usage) : null);
 
   return {
-    result,
+    outcome,
     usage: {
       inputTokens: usage.inputTokens,
       outputTokens: usage.outputTokens,
@@ -263,7 +252,7 @@ export async function runAgentInWorktree(
       cacheCreationTokens: usage.cacheCreationTokens,
     },
     costUsd,
-    numTurns: result?.num_turns ?? null,
+    numTurns: outcome?.numTurns ?? null,
     aborted: false,
   };
   } finally {

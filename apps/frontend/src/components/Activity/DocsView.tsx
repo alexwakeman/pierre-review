@@ -5,7 +5,7 @@ import {
   REFERENCE_DOC_MAX_BYTES,
   type ReferenceDoc,
 } from '@pierre-review/shared';
-import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
+import { aiReadyFor, useAiCapabilities } from '../../hooks/useAiCapabilities.js';
 import {
   useAddReferenceDocUrl,
   useCancelReferenceDoc,
@@ -213,7 +213,7 @@ function DocRow({
               Cancel
             </button>
           ) : (
-            ai.ready && (
+            aiReadyFor(ai, 'docs_build') && (
               <button type="button" className={SMALL_BUTTON} disabled={rebuild.isPending} onClick={() => rebuild.mutate(doc.id)}>
                 {doc.status === 'failed' ? 'Try again' : 'Rebuild'}
               </button>
@@ -539,7 +539,7 @@ function DocsPane({ workspaceId }: { workspaceId: number }): JSX.Element {
               </button>
             )}
           </div>
-          <AiRunGate>
+          <AiRunGate kind="docs_build">
             <AddDocs workspaceId={workspaceId} maxBytes={maxBytes} />
           </AiRunGate>
           <div className="min-h-0 flex-1 overflow-y-auto">

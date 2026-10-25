@@ -320,7 +320,7 @@ function FixerSection({
                     </label>
                     {/* No AI runtime or no Claude credential: one line (or the one-time setup) in
                         place of the start button. */}
-                    <AiRunGate auth={data?.auth}>
+                    <AiRunGate kind="fix" auth={data?.auth}>
                       <button
                         type="button"
                         className={BTN_PRIMARY}

@@ -1,7 +1,6 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { ClaudeReviewModel, ClaudeReviewTicket, TicketPrCardBody } from '@pierre-review/shared';
 import { config } from '../../config.js';
 import { DISALLOWED_TOOLS } from '../agent.js';
@@ -9,10 +8,10 @@ import { applyClaudeReviewAuth } from '../auth.js';
 import { DISPATCH_TOOL_NAMES } from '../claude-review/specialists.js';
 import { capDiff } from '../post-review.js';
 import { estimateCostUsd } from '../pricing.js';
-import { recordUsage, sumModelUsage, sumUsageMap, type UsageTokens } from '../usage.js';
+import { emptyUsage, type UsageTokens } from '../usage.js';
 import { normaliseCard } from './cards.js';
 import { submitPrCardShape } from './schema.js';
-import { claudeModelChoice, getActiveProvider, type AgentToolServer } from '../../ai/provider.js';
+import { claudeModelChoice, getActiveProvider, type AgentToolServer, type AgentOutcome } from '../../ai/provider.js';
 
 // THE CARD PRE-PASS — a cheap per-PR run that writes a CONTRIBUTION CARD (cards.ts) for each member
 // a ticket review cannot read as a diff (more than TICKET_REVIEW_MAX_DIFFS lack a card at their
@@ -145,13 +144,13 @@ export type RunCardAgent = (args: {
 /** One card via the Agent SDK (Sonnet 5, diff-only, one tool). Never throws. */
 export const runCardAgent: RunCardAgent = async ({ input, ticket, nonce, signal, applyAuthEnv }) => {
   const model = TICKET_CARD_MODEL;
-  let result: SDKResultMessage | null = null;
+  let outcome: AgentOutcome | null = null;
   let restoreEnv: (() => void) | null = null;
-  const usageByUuid = new Map<string, UsageTokens>();
+  let liveUsage: UsageTokens = emptyUsage();
   const cost = (): number | null => {
-    const usage = sumModelUsage(result) ?? sumUsageMap(usageByUuid);
+    const usage = outcome?.usage ?? liveUsage;
     const has = usage.inputTokens + usage.outputTokens + usage.cacheReadTokens > 0;
-    return result?.total_cost_usd ?? (has ? estimateCostUsd(model, usage) : null);
+    return outcome?.costUsd ?? (has ? estimateCostUsd(model, usage) : null);
   };
   const scratch = mkdtempSync(join(tmpdir(), 'pierre-ticket-card-'));
   const controller = new AbortController();
@@ -176,7 +175,7 @@ export const runCardAgent: RunCardAgent = async ({ input, ticket, nonce, signal,
       ],
     };
     const policy = prepassToolPolicy();
-    ({ result } = await getActiveProvider().runAgent({
+    ({ outcome } = await getActiveProvider().runAgent({
       kind: 'pr_card',
       model: claudeModelChoice(model),
       effort: 'diff_only',
@@ -190,20 +189,16 @@ export const runCardAgent: RunCardAgent = async ({ input, ticket, nonce, signal,
       budget: { usd: config.ticketCardBudgetUsd, turns: TICKET_CARD_MAX_TURNS },
       abortController: controller,
       claude: { allowedTools: policy.allowedTools, disallowedTools: policy.disallowedTools },
-      onMessage: (message) => {
-        if (message.type === 'assistant') {
-          try {
-            recordUsage(usageByUuid, message);
-          } catch {
-            /* usage shape varies — never let it break the run */
-          }
-        } else if (message.type === 'result') {
-          result = message;
+      onProgress: (p) => {
+        if (p.kind === 'step') {
+          if (p.usage) liveUsage = p.usage;
+        } else if (p.kind === 'outcome') {
+          outcome = p.outcome;
         }
       },
     }));
     if (captured == null) {
-      return { payload: null, costUsd: cost(), failure: `card not submitted (${result?.subtype ?? 'no result'})` };
+      return { payload: null, costUsd: cost(), failure: `card not submitted (${outcome?.subtype ?? 'no result'})` };
     }
     return { payload: captured, costUsd: cost(), failure: null };
   } catch (err) {

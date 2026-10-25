@@ -101,7 +101,7 @@ async function workspaceOf(accountId: number, raw: unknown): Promise<number> {
 }
 
 async function preflight(ctx: AgentContext, accountId: number, reply: FastifyReply): Promise<ErrorBody | null> {
-  const auth = ctx.llm.detectAuth();
+  const auth = ctx.llm.detectAuth('docs_build');
   if (auth.status === 'none') return fail(reply, 400, 'NoClaudeAuth', auth.message ?? 'No Claude credential found.');
   return null;
 }

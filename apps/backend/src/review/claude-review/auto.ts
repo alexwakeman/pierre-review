@@ -237,7 +237,7 @@ export async function runAutoReviewSweep(
   if (sweeping) return result; // re-entrancy: a slow tick must not double-enqueue
   // AI not set up yet (no runtime, or no Claude credential): queue nothing, so no PR gets a failed
   // row that would use up its one automatic review. The PRs still qualify on a later tick.
-  if (!agenticRunReady(ctx)) {
+  if (!agenticRunReady(ctx, 'review')) {
     result.stopped = 'ai_not_ready';
     return result;
   }

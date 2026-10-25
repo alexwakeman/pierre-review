@@ -81,7 +81,7 @@ export function ConflictAiCard({ pr }: { pr: PrDetail }): JSX.Element {
         </div>
       ) : (
         <div className="mt-2 flex flex-wrap items-center gap-2">
-          <AiRunGate>
+          <AiRunGate kind="resolve">
             <button type="button" className={BTN} onClick={() => startConflictAiRun(target)}>
               {done != null ? 'Run again' : 'Resolve merge conflicts with Claude'}
             </button>

@@ -356,7 +356,7 @@ async function startAutoItem(a: AutoItem): Promise<void> {
   try {
     // AI went away since the sweep (runtime removed, signed out): drop the item BEFORE its row
     // exists, or the PR's one automatic review is spent on a failure (ai-ready.ts).
-    if (!agenticRunReady(ctx)) return;
+    if (!agenticRunReady(ctx, 'review')) return;
     // THE CLAUDE SPEND BUDGET (ai/budget.ts): over it, drop the item before its row exists — the
     // sweeper re-derives it once the budget is under its limit again.
     if (!(await automaticRunAllowed(ctx, accountId, 'auto review'))) return;

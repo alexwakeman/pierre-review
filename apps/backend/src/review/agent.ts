@@ -1,9 +1,8 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import { TICKET_REVIEW_PEER_MAX_FOR_PR_REVIEW, type ClaudeFindingLens } from '@pierre-review/shared';
-import { claudeModelChoice, getActiveProvider } from '../ai/provider.js';
+import { claudeModelChoice, getActiveProvider, type AgentOutcome } from '../ai/provider.js';
 import type { RunReviewArgs, RunReviewResult } from '../platform/contract.js';
 import { config } from '../config.js';
 import { submitReviewShape, type SubmitReviewPayload } from './schema.js';
@@ -23,12 +22,7 @@ import {
   specialistAgents,
   type DispatchGuard,
 } from './claude-review/specialists.js';
-import {
-  recordUsage,
-  sumModelUsage,
-  sumUsageMap,
-  type UsageTokens,
-} from './usage.js';
+import { emptyUsage, type UsageTokens } from './usage.js';
 
 // The security-sensitive HALF of ctx.review.runReview (the plugin owns routing/prompts/
 // persistence; core owns the SDK run). Given a resolved mode + the plugin-built prompts +
@@ -152,25 +146,26 @@ export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
   let tempCwd: string | null = null;
   // The ticket peers' read-only checkouts (deep runs only); `cleanup` removes them in finally.
   let peerCleanup: (() => Promise<void>) | null = null;
-  let result: SDKResultMessage | null = null;
+  // How the run ended (the provider's neutral outcome), kept as it arrives.
+  let outcome: AgentOutcome | null = null;
   let restoreEnv: (() => void) | null = null;
-  // Per-message usage keyed by message UUID (latest-wins): the SDK re-emits a message per
-  // turn, so a naive SUM double-counts (~2×). The PERSISTED totals prefer the result
-  // message's authoritative `modelUsage` (see telemetry()).
-  const usageByUuid = new Map<string, UsageTokens>();
+  // The run's LIVE token tally (the provider de-duplicates it per request: the SDK re-emits a
+  // message per turn, so a naive SUM double-counts ~2×). The PERSISTED totals prefer the outcome's
+  // authoritative whole-run usage (see telemetry()).
+  let liveUsage: UsageTokens = emptyUsage();
   const telemetry = (): Pick<
     RunReviewResult,
     'costUsd' | 'inputTokens' | 'outputTokens' | 'cacheReadTokens' | 'cacheCreationTokens' | 'numTurns'
   > => {
-    const usage = sumModelUsage(result) ?? sumUsageMap(usageByUuid);
+    const usage = outcome?.usage ?? liveUsage;
     const hasUsage = usage.inputTokens + usage.outputTokens + usage.cacheReadTokens > 0;
     return {
-      costUsd: result?.total_cost_usd ?? (hasUsage ? estimateCostUsd(model, usage) : null),
+      costUsd: outcome?.costUsd ?? (hasUsage ? estimateCostUsd(model, usage) : null),
       inputTokens: usage.inputTokens,
       outputTokens: usage.outputTokens,
       cacheReadTokens: usage.cacheReadTokens,
       cacheCreationTokens: usage.cacheCreationTokens,
-      numTurns: result?.num_turns ?? null,
+      numTurns: outcome?.numTurns ?? null,
     };
   };
   const fail = (failureReason: string | undefined, aborted: boolean): RunReviewResult => ({
@@ -242,10 +237,9 @@ export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
     const guard: DispatchGuard | null =
       policy.specialists.length > 0 ? createDispatchGuard(policy.specialists) : null;
 
-    // Rolling, newest-last log of what the agent is doing right now, surfaced via onProgress.
+    // Rolling, newest-last log of what the agent is doing right now, surfaced via onProgress. The
+    // provider words each step's lines (a specialist's own steps carry its name).
     const activity: string[] = [];
-    // Dispatch tool_use id → specialist name, so a specialist's own steps are labelled as its.
-    const specialistByToolUse = new Map<string, string>();
     const pushActivity = (line: string): void => {
       const trimmed = line.trim();
       if (!trimmed) return;
@@ -262,7 +256,7 @@ export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
     // The file tools may read cwd and the peers' checkouts, nothing else. (A diff-only run has no
     // file tools; it is guarded anyway, so a future tool is never unconfined by default.)
     // The library is a READ-ONLY root: Read/Glob/Grep may reach it, nothing else may name it.
-    ({ result } = await getActiveProvider().runAgent({
+    ({ outcome } = await getActiveProvider().runAgent({
       kind: 'review',
       model: claudeModelChoice(model),
       effort: mode,
@@ -308,36 +302,28 @@ export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
             ]
           : [],
       },
-      onMessage: (message) => {
-        if (message.type === 'assistant') {
-          try {
-            recordUsage(usageByUuid, message);
-          } catch {
-            /* usage shape varies — never let it break the run */
-          }
-          try {
-            for (const line of describeAssistantBlocks(message, specialistByToolUse)) pushActivity(line);
-          } catch {
-            /* never let progress derivation break the run */
-          }
-          const live = sumUsageMap(usageByUuid);
+      onProgress: (p) => {
+        if (p.kind === 'step') {
+          if (p.usage) liveUsage = p.usage;
+          for (const line of p.lines) pushActivity(line);
+          const live = liveUsage;
           onProgress({
             phase: 'reviewing',
             recentActivity: [...activity],
             reviewMode: mode,
             usage: { ...live, estCostUsd: estimateCostUsd(model, live) },
           });
-        } else if (message.type === 'result') {
-          // Kept as each message arrives, so a run that throws AFTER its result still reports it.
-          result = message;
+        } else if (p.kind === 'outcome') {
+          // Kept as it arrives, so a run that throws AFTER its outcome still reports it.
+          outcome = p.outcome;
         }
       },
     }));
 
     if (!captured) {
       const reason =
-        result && result.subtype !== 'success'
-          ? `agent stopped (${result.subtype}) without submitting a review`
+        outcome && outcome.subtype !== 'success'
+          ? `agent stopped (${outcome.subtype}) without submitting a review`
           : 'agent finished without calling submit_review';
       return fail(reason, false);
     }
@@ -389,91 +375,4 @@ export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
 function errorMessage(err: unknown): string {
   if (err instanceof Error) return err.message;
   return String(err);
-}
-
-const TEXT_SNIPPET_CAP = 120;
-const BASH_CMD_CAP = 80;
-
-/**
- * Turn one assistant message into a few short, human-readable progress lines: a label per
- * tool_use block plus a clipped snippet of any assistant text. Defensive throughout — the
- * SDK content/tool-input shapes vary, so every access is guarded and this never throws.
- */
-export function describeAssistantBlocks(
-  message: unknown,
-  specialistByToolUse: Map<string, string> = new Map(),
-): string[] {
-  const lines: string[] = [];
-  const m = message as { message?: { content?: unknown }; parent_tool_use_id?: unknown };
-  const content = m?.message?.content;
-  if (!Array.isArray(content)) return lines;
-  // A message from inside a specialist carries the dispatch's tool_use id.
-  const parent = typeof m.parent_tool_use_id === 'string' ? m.parent_tool_use_id : null;
-  const owner = parent ? specialistByToolUse.get(parent) : undefined;
-  const prefix = owner ? `${owner}: ` : '';
-
-  for (const raw of content) {
-    if (!raw || typeof raw !== 'object') continue;
-    const block = raw as { type?: unknown; name?: unknown; input?: unknown; text?: unknown };
-
-    if (block.type === 'tool_use') {
-      const name = typeof block.name === 'string' ? block.name : 'Tool';
-      const input =
-        block.input && typeof block.input === 'object'
-          ? (block.input as Record<string, unknown>)
-          : {};
-      if (DISPATCH_TOOL_NAMES.includes(name) && typeof (block as { id?: unknown }).id === 'string') {
-        const type = typeof input.subagent_type === 'string' ? input.subagent_type : 'specialist';
-        specialistByToolUse.set((block as { id: string }).id, type);
-      }
-      lines.push(prefix + labelToolUse(name, input));
-    } else if (block.type === 'text' && typeof block.text === 'string') {
-      const snippet = clip(block.text.replace(/\s+/g, ' ').trim(), TEXT_SNIPPET_CAP);
-      if (snippet) lines.push(prefix + snippet);
-    }
-  }
-  return lines;
-}
-
-/** Build a short label for a tool call from its name + a truncated first arg. */
-function labelToolUse(name: string, input: Record<string, unknown>): string {
-  const str = (v: unknown): string | null =>
-    typeof v === 'string' && v.trim().length > 0 ? v.trim() : null;
-
-  switch (name) {
-    case 'Read': {
-      const p = str(input.file_path) ?? str(input.path);
-      return p ? `Read ${p}` : 'Read …';
-    }
-    case 'Glob': {
-      const p = str(input.pattern);
-      return p ? `Glob ${p}` : 'Glob …';
-    }
-    case 'Grep': {
-      const p = str(input.pattern);
-      return p ? `Grep "${clip(p, BASH_CMD_CAP)}"` : 'Grep …';
-    }
-    case 'Bash': {
-      const c = str(input.command);
-      return c ? `Bash ${clip(c, BASH_CMD_CAP)}` : 'Bash …';
-    }
-    case 'mcp__review__submit_review':
-      return 'Submitting review…';
-    case 'Agent':
-    case 'Task': {
-      const t = str(input.subagent_type);
-      return t ? `Asking the ${t} specialist` : 'Asking a specialist';
-    }
-    default: {
-      for (const key of Object.keys(input)) {
-        const v = str(input[key]);
-        if (v) return `${name} ${clip(v, BASH_CMD_CAP)}`;
-      }
-      return `${name} …`;
-    }
-  }
-}
-
-function clip(s: string, max: number): string {
-  return s.length > max ? `${s.slice(0, max)}…` : s;
 }

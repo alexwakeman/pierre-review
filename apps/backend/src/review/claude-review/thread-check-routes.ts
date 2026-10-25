@@ -64,7 +64,7 @@ export function registerThreadCheckRoutes(app: FastifyInstance, ctx: AgentContex
       reply.status(409);
       return { error: 'NoHead', message: 'This pull request has not been synced yet.' };
     }
-    const auth = ctx.llm.detectAuth();
+    const auth = ctx.llm.detectAuth('thread_check');
     if (auth.status === 'none') {
       reply.status(400);
       return { error: 'NoClaudeAuth', message: auth.message };

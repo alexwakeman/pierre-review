@@ -483,7 +483,7 @@ export function AttentionView(): JSX.Element {
             )}
             {busy && <AiStatusLine stage="Writing the plan" />}
             {!busy && (
-            <AiRunGate>
+            <AiRunGate kind="complete">
               <button
                 type="button"
                 onClick={() => generate.mutate()}

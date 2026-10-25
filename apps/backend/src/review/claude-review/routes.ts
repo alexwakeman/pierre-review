@@ -200,7 +200,7 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
       };
     }
     const accountId = ctx.accountIdOf(req);
-    const auth = ctx.llm.detectAuth();
+    const auth = ctx.llm.detectAuth('review');
     const review = await getLatestClaudeReview(ctx, id, accountId);
     const autoReview = autoReviewHold(id, accountId);
     // The judgements as they stand now: the latest review's, with later Check threads runs over it.
@@ -243,7 +243,7 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
     const model = body.model ?? DEFAULT_CLAUDE_REVIEW_MODEL;
     if (!AGENTIC_AI_ENABLED) return featureOff(reply);
 
-    const auth = ctx.llm.detectAuth();
+    const auth = ctx.llm.detectAuth('review');
     if (auth.status === 'none') {
       reply.status(400);
       return { error: 'NoClaudeAuth', message: auth.message };

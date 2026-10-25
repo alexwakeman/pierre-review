@@ -89,7 +89,7 @@ export async function startAiResolve(
   input: StartAiResolveInput,
 ): Promise<StartAiResolveResult> {
   const { accountId, prId } = input;
-  const auth = ctx.llm.detectAuth();
+  const auth = ctx.llm.detectAuth('resolve');
   if (auth.status !== 'ok') return { status: 'no_auth', message: auth.message };
   // Local accounts are unmetered, so this never refuses there; it is here so the rule cannot be
   // forgotten if the feature ever leaves local.

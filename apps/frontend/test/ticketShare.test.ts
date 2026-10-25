@@ -216,7 +216,7 @@ describe('the wiring', () => {
     expect(docsBlock).not.toMatch(/<button|AiRunGate/);
     const docsBtn = docs.slice(docs.indexOf('export function StoryDocsButton'), docs.indexOf('export function StoryDocsAlignmentBlock'));
     expect(docsBtn).toMatch(/!ai\.enabled \|\| data == null \|\| !data\.available\) return null/);
-    expect(docsBtn).toMatch(/<AiRunGate>/);
+    expect(docsBtn).toMatch(/<AiRunGate kind="story_docs">/);
   });
 
   it('the pane shows only this PR’s share where the story view holds the story, and opens it', () => {

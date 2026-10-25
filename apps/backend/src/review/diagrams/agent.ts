@@ -1,12 +1,11 @@
-import type { SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { ClaudeReviewModel } from '@pierre-review/shared';
-import { claudeModelChoice, getActiveProvider, type AgentToolServer } from '../../ai/provider.js';
+import { claudeModelChoice, getActiveProvider, type AgentToolServer, type AgentOutcome } from '../../ai/provider.js';
 import { config } from '../../config.js';
-import { DISALLOWED_TOOLS, describeAssistantBlocks } from '../agent.js';
+import { DISALLOWED_TOOLS } from '../agent.js';
 import { applyClaudeReviewAuth } from '../auth.js';
 import { DISPATCH_TOOL_NAMES } from '../claude-review/specialists.js';
 import { estimateCostUsd } from '../pricing.js';
-import { recordUsage, sumModelUsage, sumUsageMap, type UsageTokens } from '../usage.js';
+import { emptyUsage, type UsageTokens } from '../usage.js';
 import { submitDesignShape, type SubmitDesignPayload } from './schema.js';
 import { validateDesign, type AcceptedDesign, type DesignContext } from './validate.js';
 
@@ -85,19 +84,19 @@ export function judgeSubmission(
 
 export async function runDiagramAgent(args: RunDiagramAgentArgs): Promise<RunDiagramAgentResult> {
   const { model, abortController } = args;
-  let result: SDKResultMessage | null = null;
+  let outcome: AgentOutcome | null = null;
   let restoreEnv: (() => void) | null = null;
-  const usageByUuid = new Map<string, UsageTokens>();
+  let liveUsage: UsageTokens = emptyUsage();
   let accepted: AcceptedDesign | null = null;
   let lastRefusal: string | null = null;
   const telemetry = (): Pick<RunDiagramAgentResult, 'costUsd' | 'inputTokens' | 'outputTokens' | 'numTurns'> => {
-    const usage = sumModelUsage(result) ?? sumUsageMap(usageByUuid);
+    const usage = outcome?.usage ?? liveUsage;
     const hasUsage = usage.inputTokens + usage.outputTokens + usage.cacheReadTokens > 0;
     return {
-      costUsd: result?.total_cost_usd ?? (hasUsage ? estimateCostUsd(model, usage) : null),
+      costUsd: outcome?.costUsd ?? (hasUsage ? estimateCostUsd(model, usage) : null),
       inputTokens: usage.inputTokens,
       outputTokens: usage.outputTokens,
-      numTurns: result?.num_turns ?? null,
+      numTurns: outcome?.numTurns ?? null,
     };
   };
   const fail = (failureReason: string | undefined, aborted: boolean): RunDiagramAgentResult => ({
@@ -138,7 +137,7 @@ export async function runDiagramAgent(args: RunDiagramAgentArgs): Promise<RunDia
     };
     const policy = diagramToolPolicy();
     const activity: string[] = [];
-    ({ result } = await getActiveProvider().runAgent({
+    ({ outcome } = await getActiveProvider().runAgent({
       kind: 'diagram',
       model: claudeModelChoice(model),
       effort: 'worktree',
@@ -154,24 +153,20 @@ export async function runDiagramAgent(args: RunDiagramAgentArgs): Promise<RunDia
       budget: { usd: config.sequenceDiagramBudgetUsd, turns: config.sequenceDiagramMaxTurns },
       abortController,
       claude: { allowedTools: policy.allowedTools, disallowedTools: policy.disallowedTools },
-      onMessage: (message) => {
-        if (message.type === 'assistant') {
+      onProgress: (p) => {
+        if (p.kind === 'step') {
+          if (p.usage) liveUsage = p.usage;
           try {
-            recordUsage(usageByUuid, message);
-          } catch {
-            /* usage shape varies — never let it break the run */
-          }
-          try {
-            for (const line of describeAssistantBlocks(message)) {
+            for (const line of p.lines) {
               activity.push(line.startsWith(DIAGRAM_TOOL_NAME) ? 'Submitting the design…' : line);
               if (activity.length > ACTIVITY_LOG_CAP) activity.shift();
             }
             args.onProgress?.({ recentActivity: [...activity] });
           } catch {
-            /* never let progress derivation break the run */
+            /* never let a progress listener break the run */
           }
-        } else if (message.type === 'result') {
-          result = message;
+        } else if (p.kind === 'outcome') {
+          outcome = p.outcome;
         }
       },
     }));
@@ -180,8 +175,8 @@ export async function runDiagramAgent(args: RunDiagramAgentArgs): Promise<RunDia
       const reason =
         lastRefusal != null
           ? `no usable design: ${lastRefusal}`
-          : result && result.subtype !== 'success'
-            ? `agent stopped (${result.subtype}) without submitting a design`
+          : outcome && outcome.subtype !== 'success'
+            ? `agent stopped (${outcome.subtype}) without submitting a design`
             : 'agent finished without calling submit_design';
       return fail(reason, false);
     }

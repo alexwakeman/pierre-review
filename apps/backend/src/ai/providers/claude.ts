@@ -24,8 +24,10 @@ import { config } from '../../config.js';
 import { NO_CLAUDE_AUTH_MESSAGE } from '../../review/auth.js';
 import { sdkModelOptions } from '../../review/model-options.js';
 import { createPathGuard, pathGuardHook } from '../../review/path-guard.js';
+import { recordUsage, sumModelUsage, sumUsageMap, type UsageTokens } from '../../review/usage.js';
 import type {
   AgentMessage,
+  AgentOutcome,
   AgentProvider,
   AgentResultMessage,
   AgentRunResult,
@@ -37,6 +39,7 @@ import type {
   ProviderStatus,
 } from '../provider.js';
 import { foldRateLimitEvent, parseUsageProbe } from './claude-usage.js';
+import { assistantText, describeFixBlocks, describeReviewBlocks } from './claude-activity.js';
 
 /** Claude's model per role. A call site that must keep an exact id passes it (`ModelChoice.id`). */
 export const CLAUDE_MODEL_FOR_ROLE: Readonly<Record<ModelRole, string>> = {
@@ -115,12 +118,52 @@ async function runAgent(spec: AgentRunSpec): Promise<AgentRunResult> {
     },
   });
 
-  let result: AgentResultMessage | null = null;
+  // THE NEUTRAL STREAM (ai/provider.ts header), derived HERE from each SDK message exactly as every
+  // runner used to derive it: per assistant message, the per-request usage map (de-duplicated, a
+  // usage shape that throws is skipped), the activity lines and the text → ONE `step`; the result
+  // message → the `outcome`. The raw message goes to `spec.claude.onMessage` (the escape hatch) FIRST.
+  const usageByRequest = new Map<string, UsageTokens>();
+  // Dispatch tool_use id → specialist name, so a specialist's own steps are labelled as its. Kept for
+  // the whole run only for Claude Review (the one run with specialists, as review/agent.ts did).
+  const specialistByToolUse = new Map<string, string>();
+  const describe = (message: unknown): string[] =>
+    spec.activity === 'fix'
+      ? describeFixBlocks(message)
+      : describeReviewBlocks(message, spec.kind === 'review' ? specialistByToolUse : new Map());
+  let outcome: AgentOutcome | null = null;
   for await (const message of q) {
-    if (message.type === 'result') result = message;
-    spec.onMessage?.(message as AgentMessage);
+    spec.claude.onMessage?.(message as AgentMessage);
+    if (message.type === 'assistant') {
+      try {
+        recordUsage(usageByRequest, message);
+      } catch {
+        /* usage shape varies — never let it break the run */
+      }
+      let lines: string[] = [];
+      try {
+        lines = describe(message);
+      } catch {
+        /* never let progress derivation break the run */
+      }
+      spec.onProgress?.({ kind: 'step', lines, text: assistantText(message), usage: sumUsageMap(usageByRequest) });
+    } else if (message.type === 'result') {
+      outcome = outcomeOf(message as AgentResultMessage);
+      spec.onProgress?.({ kind: 'outcome', outcome });
+    }
   }
-  return { result };
+  return { outcome };
+}
+
+/** Claude's result message → the neutral outcome. Exported for the test. */
+export function outcomeOf(result: AgentResultMessage): AgentOutcome {
+  const r = result as AgentResultMessage & { result?: unknown };
+  return {
+    subtype: String(r.subtype),
+    text: r.subtype === 'success' && typeof r.result === 'string' ? r.result : null,
+    costUsd: typeof r.total_cost_usd === 'number' ? r.total_cost_usd : null,
+    numTurns: typeof r.num_turns === 'number' ? r.num_turns : null,
+    usage: sumModelUsage(r),
+  };
 }
 
 // ---- complete (the cheap one-shot seam; review/llm.ts `cheapComplete` calls it) -----------------
