@@ -1,12 +1,15 @@
 import { readdirSync } from 'node:fs';
 import { basename, dirname, resolve } from 'node:path';
 import type { ClaudeReviewModel } from '@pierre-review/shared';
+import { providerName } from '../ai/prompt-tools.js';
 import {
   claudeModelChoice,
   getActiveProvider,
   type AgentOutcome,
+  type AgentProviderId,
   type AgentToolReply,
   type AgentToolServer,
+  type AgentUsageRecord,
 } from '../ai/provider.js';
 import { config } from '../config.js';
 import { applyClaudeReviewAuth } from '../review/auth.js';
@@ -16,6 +19,7 @@ import { resolveReal } from '../review/path-guard.js';
 import { estimateCostUsd } from '../review/pricing.js';
 import { emptyUsage, type UsageTokens } from '../review/usage.js';
 import {
+  MAX_FINISH_ATTEMPTS,
   judgeFinish,
   judgeRecord,
   newBuildState,
@@ -41,6 +45,20 @@ import { buildToolShapes } from './schema.js';
 // Bash is denied OUTRIGHT in all three (absent from the allow list AND on the deny list), and the
 // PATH GUARD (review/path-guard.ts) confines every path to the run's folder: the document is a
 // stranger's text and `bypassPermissions` confines nothing on its own.
+//
+// ON CODEX (docs/CODEX-PLAN.md Phase 3, kinds 'docs_build' + 'docs_chat'): the same runs through the
+// active provider's `runAgent`, reading through Limn's workspace MCP server confined to the SAME folder
+// the Claude path guard allows (the staging folder / the library), read-only.
+//   build   'sections' only. Codex has no tools of Limn's own, so it answers ONCE with every section's
+//           summary and the document summary and topics (`submit_document` = the record_sections and
+//           finish_document shapes side by side), judged by the SAME judgeRecord + judgeFinish. Codex
+//           gets two answers (its one retry), so its retry is the build's LAST finish attempt — where
+//           the Claude build, after MAX_FINISH_ATTEMPTS, accepts what it has rather than fail.
+//           ⚠ A 'pdf' build REFUSES on Codex before any run (CODEX_PDF_MESSAGE): the PDF's pages are
+//           read through Claude's own Read tool, which Codex has no equivalent of (Limn's read_file
+//           shows no binary file), and its section writes are guarded by a Claude-only hook.
+//   chat    no result tool: Codex's final message is the answer, exactly as Claude's result text is.
+// Codex records its own ledger row (`usageRecord`), so the callers record none for a Codex run.
 
 export const DOCS_MODEL: ClaudeReviewModel = 'claude-sonnet-5';
 export const DOCS_TOOLS = {
@@ -110,9 +128,27 @@ export interface AgentTelemetry {
   inputTokens: number | null;
   outputTokens: number | null;
   numTurns: number | null;
+  /** Which provider ran it. 'codex' ⇒ its ledger row is already written. */
+  provider: AgentProviderId;
 }
 
-function telemetryOf(model: ClaudeReviewModel, outcome: AgentOutcome | null, liveUsage: UsageTokens): AgentTelemetry {
+/** Why a PDF never builds on Codex (see the header). Shown on the document. */
+export const CODEX_PDF_MESSAGE =
+  'Codex cannot read PDF files. Upload the document as Word, text or markdown, or use Claude for PDFs.';
+
+/** Codex's words for a judge's refusal: it answers again, it never calls a tool. */
+export function codexRefusalWords(reply: string): string {
+  return reply
+    .replace(/ Fix these and call record_sections again\./g, ' Fix these and answer again with the whole answer.')
+    .replace(/ Then call finish_document again\./g, ' Then answer again with the whole answer.');
+}
+
+function telemetryOf(
+  model: ClaudeReviewModel,
+  outcome: AgentOutcome | null,
+  liveUsage: UsageTokens,
+  provider: AgentProviderId,
+): AgentTelemetry {
   const usage = outcome?.usage ?? liveUsage;
   const hasUsage = usage.inputTokens + usage.outputTokens + usage.cacheReadTokens > 0;
   return {
@@ -120,6 +156,7 @@ function telemetryOf(model: ClaudeReviewModel, outcome: AgentOutcome | null, liv
     inputTokens: usage.inputTokens + usage.cacheReadTokens + usage.cacheCreationTokens,
     outputTokens: usage.outputTokens,
     numTurns: outcome?.numTurns ?? null,
+    provider,
   };
 }
 
@@ -151,6 +188,8 @@ export interface RunBuildArgs {
   applyAuthEnv: boolean;
   abortController: AbortController;
   onProgress?(p: BuildProgress): void;
+  /** Who to bill. A provider that records its own usage (Codex) writes the ledger row from it. */
+  usageRecord?: AgentUsageRecord;
 }
 
 export interface RunBuildResult extends AgentTelemetry {
@@ -170,7 +209,13 @@ const listWritten = (dir: string): string[] => {
 
 export async function runBuildAgent(args: RunBuildArgs): Promise<RunBuildResult> {
   const model = DOCS_MODEL;
+  // Who runs it (the same LIMN_AI_PROVIDER read the run's own `getActiveProvider()` makes): its words
+  // in the handlers' replies, and whether its ledger row is already written.
+  const provider = getActiveProvider();
+  const onCodex = provider.id === 'codex';
   const state = newBuildState(args.mode, args.expected);
+  // Codex answers at most twice (its one retry): that retry is the build's last finish attempt.
+  if (onCodex) state.finishAttempts = MAX_FINISH_ATTEMPTS - 2;
   let finish: AcceptedFinish | null = null;
   let outcome: AgentOutcome | null = null;
   let restoreEnv: (() => void) | null = null;
@@ -195,8 +240,11 @@ export async function runBuildAgent(args: RunBuildArgs): Promise<RunBuildResult>
     finish,
     failureReason,
     aborted,
-    ...telemetryOf(model, outcome, liveUsage),
+    ...telemetryOf(model, outcome, liveUsage, provider.id),
   });
+
+  // A PDF build never runs on Codex (see the header): refused before anything starts.
+  if (onCodex && args.mode === 'pdf') return done(CODEX_PDF_MESSAGE, false);
 
   try {
     restoreEnv = applyClaudeReviewAuth(args.applyAuthEnv);
@@ -238,6 +286,30 @@ export async function runBuildAgent(args: RunBuildArgs): Promise<RunBuildResult>
         },
       ],
     };
+    // CODEX: ONE result — the sections and the closing call together, judged in that order by the
+    // SAME two judges (a record refusal stops before the finish is tried).
+    if (onCodex) {
+      tools.tools.push({
+        name: 'submit_document',
+        description: "Every section's summary, then the document summary and topics, in one answer.",
+        shape: shapes.document,
+        handle: async (a) => {
+          if (finish != null) return text('Already finished.');
+          const p = (a ?? {}) as Record<string, unknown>;
+          const written = listWritten(args.sectionsDir);
+          const rec = judgeRecord(state, { sections: p.sections }, written);
+          emit();
+          if (rec.isError) return text(codexRefusalWords(rec.reply), true);
+          const j = judgeFinish(state, { title: p.title, summary: p.summary, topics: p.topics }, written);
+          if ('accepted' in j) {
+            finish = j.accepted;
+            return text('Finished.');
+          }
+          const recProblems = rec.reply.includes('Not recorded:') ? ` ${codexRefusalWords(rec.reply)}` : '';
+          return text(`${codexRefusalWords(j.reply)}${recProblems}`, true);
+        },
+      });
+    }
     const policy = docsToolPolicy(args.mode);
     ({ outcome } = await getActiveProvider().runAgent({
       kind: 'docs_build',
@@ -255,6 +327,9 @@ export async function runBuildAgent(args: RunBuildArgs): Promise<RunBuildResult>
       tools,
       budget: { usd: config.docsBuildBudgetUsd, turns: config.docsBuildMaxTurns },
       abortController: args.abortController,
+      // Codex: the whole build is the run's final answer (the strict `submit_document` schema).
+      codex: { resultTool: 'submit_document' },
+      ...(args.usageRecord ? { usageRecord: args.usageRecord } : {}),
       claude: {
         builtinTools: policy.builtinTools,
         allowedTools: policy.allowedTools,
@@ -296,8 +371,8 @@ export async function runBuildAgent(args: RunBuildArgs): Promise<RunBuildResult>
     if (finish == null) {
       return done(
         outcome && outcome.subtype !== 'success'
-          ? `Claude stopped (${outcome.subtype}) before finishing the document.`
-          : 'Claude finished without closing the document.',
+          ? `${providerName(provider.id)} stopped (${outcome.subtype}) before finishing the document.`
+          : `${providerName(provider.id)} finished without closing the document.`,
         false,
       );
     }
@@ -318,6 +393,8 @@ export interface RunChatArgs {
   prompt: string;
   applyAuthEnv: boolean;
   abortController: AbortController;
+  /** Who to bill. A provider that records its own usage (Codex) writes the ledger row from it. */
+  usageRecord?: AgentUsageRecord;
 }
 
 export interface RunChatResult extends AgentTelemetry {
@@ -329,6 +406,9 @@ export interface RunChatResult extends AgentTelemetry {
 
 export async function runDocsChatAgent(args: RunChatArgs): Promise<RunChatResult> {
   const model = DOCS_MODEL;
+  // Who runs it (the same LIMN_AI_PROVIDER read the run's own `getActiveProvider()` makes): its words
+  // in the handlers' replies, and whether its ledger row is already written.
+  const provider = getActiveProvider();
   let outcome: AgentOutcome | null = null;
   let restoreEnv: (() => void) | null = null;
   let lastText = '';
@@ -338,7 +418,7 @@ export async function runDocsChatAgent(args: RunChatArgs): Promise<RunChatResult
     text: '',
     failureReason,
     aborted,
-    ...telemetryOf(model, outcome, liveUsage),
+    ...telemetryOf(model, outcome, liveUsage, provider.id),
   });
   try {
     restoreEnv = applyClaudeReviewAuth(args.applyAuthEnv);
@@ -356,6 +436,7 @@ export async function runDocsChatAgent(args: RunChatArgs): Promise<RunChatResult
       writeRoots: [],
       budget: { usd: config.docsChatBudgetUsd, turns: config.docsChatMaxTurns },
       abortController: args.abortController,
+      ...(args.usageRecord ? { usageRecord: args.usageRecord } : {}),
       claude: {
         builtinTools: policy.builtinTools,
         allowedTools: policy.allowedTools,
@@ -375,9 +456,10 @@ export async function runDocsChatAgent(args: RunChatArgs): Promise<RunChatResult
         ? outcome.text.trim()
         : lastText.trim();
     if (!finalText) {
-      return fail(outcome && outcome.subtype !== 'success' ? `Claude stopped (${outcome.subtype}) without answering.` : 'Claude did not answer.', false);
+      const who = providerName(provider.id);
+      return fail(outcome && outcome.subtype !== 'success' ? `${who} stopped (${outcome.subtype}) without answering.` : `${who} did not answer.`, false);
     }
-    return { ok: true, text: finalText, aborted: false, ...telemetryOf(model, outcome, liveUsage) };
+    return { ok: true, text: finalText, aborted: false, ...telemetryOf(model, outcome, liveUsage, provider.id) };
   } catch (err) {
     if (args.abortController.signal.aborted) return fail(undefined, true);
     return fail(err instanceof Error ? err.message : String(err), false);

@@ -1,0 +1,4 @@
+{"type": "thread.started", "thread_id": "THREAD"}
+{"type": "turn.started"}
+{"type": "item.completed", "item": {"id": "item_1", "type": "agent_message", "text": "{\"paths\": [{\"title\": \"Writer before export\", \"tickets\": [\"BMD-1080\", \"BMD-1081\"], \"advice\": \"Get the writer reviewed this week.\", \"risk\": \"high\"}], \"callouts\": [{\"title\": \"Merged, not signed off\", \"tickets\": [\"BMD-1090\"]}]}"}}
+{"type": "turn.completed", "usage": {"input_tokens": 20000, "cached_input_tokens": 0, "cache_write_input_tokens": 0, "output_tokens": 500, "reasoning_output_tokens": 0}}

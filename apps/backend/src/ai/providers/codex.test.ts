@@ -433,8 +433,10 @@ describe('complete()', () => {
 // ---- 2. the allow-list ---------------------------------------------------------------------------
 
 describe('runAgent() — the allow-list', () => {
-  it('is EMPTY in Phase 2: every kind answers its not-available sentence and starts nothing', async () => {
-    for (const kind of ['review', 'fix', 'plan', 'resolve', 'docs_chat'] as const) {
+  it('every kind NOT yet ported answers its not-available sentence and starts nothing', async () => {
+    const notPorted = P.ALL_AGENT_KINDS.filter((k) => !P.CODEX_AGENT_KINDS.has(k));
+    expect(notPorted.length).toBeGreaterThan(0);
+    for (const kind of notPorted) {
       await expect(C.codexProvider.runAgent({ kind } as any)).rejects.toThrow(P.codexKindNotAvailableMessage(kind));
     }
     expect(calls()).toEqual([]);

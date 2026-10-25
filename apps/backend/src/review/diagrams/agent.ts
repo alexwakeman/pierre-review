@@ -1,5 +1,13 @@
 import type { ClaudeReviewModel } from '@pierre-review/shared';
-import { claudeModelChoice, getActiveProvider, type AgentToolServer, type AgentOutcome } from '../../ai/provider.js';
+import { either } from '../../ai/prompt-tools.js';
+import {
+  claudeModelChoice,
+  getActiveProvider,
+  type AgentOutcome,
+  type AgentProviderId,
+  type AgentToolServer,
+  type AgentUsageRecord,
+} from '../../ai/provider.js';
 import { config } from '../../config.js';
 import { DISALLOWED_TOOLS } from '../agent.js';
 import { applyClaudeReviewAuth } from '../auth.js';
@@ -23,6 +31,13 @@ import { validateDesign, type AcceptedDesign, type DesignContext } from './valid
 // `DesignContext` — its PR refs and changed files): a refused design is answered with EVERY problem
 // and what to do about it, and the model may call again, at most MAX_SUBMIT_ATTEMPTS times. Only a
 // design that passed is returned — the manager validates it once more before storing.
+//
+// ON CODEX (docs/CODEX-PLAN.md Phase 3, kind 'diagram'): the same run through the active provider's
+// `runAgent`. Codex has no `submit_design` tool: its final message IS the design, checked against the
+// strict schema of the SAME shape and handed to the SAME handler (so `validateDesign` judges it), one
+// refused answer retried on the thread. Reads go through Limn's workspace MCP server, confined to the
+// same roots the Claude path guard allows. Codex records its own ledger row (`usageRecord`), so the
+// manager records none for a Codex run (`provider`).
 
 export const DIAGRAM_TOOL_NAME = 'mcp__diagram__submit_design';
 const ALLOWED_TOOLS = ['Read', 'Glob', 'Grep', DIAGRAM_TOOL_NAME];
@@ -40,6 +55,8 @@ export interface RunDiagramAgentArgs {
   applyAuthEnv: boolean;
   abortController: AbortController;
   onProgress?(p: { recentActivity: string[] }): void;
+  /** Who to bill. A provider that records its own usage (Codex) writes the ledger row from it. */
+  usageRecord?: AgentUsageRecord;
 }
 
 export interface RunDiagramAgentResult {
@@ -52,6 +69,8 @@ export interface RunDiagramAgentResult {
   inputTokens: number | null;
   outputTokens: number | null;
   numTurns: number | null;
+  /** Which provider ran it. 'codex' ⇒ its ledger row is already written. */
+  provider: AgentProviderId;
 }
 
 /** The tool policy for a diagram run. Pure, so the no-shell, no-dispatch rule is testable. */
@@ -70,6 +89,7 @@ export function judgeSubmission(
   payload: Partial<SubmitDesignPayload>,
   attempt: number,
   ctx: DesignContext,
+  provider: AgentProviderId = 'claude',
 ): { accepted: AcceptedDesign } | { reply: string; refusal: string } {
   const v = validateDesign(payload, ctx);
   if (v.ok) return { accepted: v.value };
@@ -78,18 +98,21 @@ export function judgeSubmission(
     refusal: v.problems.join(' '),
     reply: last
       ? `Refused:\n${v.message}\nThat was the last attempt; stop now.`
-      : `Refused:\n${v.message}\nFix every point and call submit_design again with the whole design.`,
+      : `Refused:\n${v.message}\n${either('Fix every point and call submit_design again with the whole design.', 'Fix every point and answer again with the whole design.', provider)}`,
   };
 }
 
 export async function runDiagramAgent(args: RunDiagramAgentArgs): Promise<RunDiagramAgentResult> {
   const { model, abortController } = args;
+  // Who runs it (the same LIMN_AI_PROVIDER read the run's own `getActiveProvider()` makes): its words
+  // in the handlers' replies, and whether its ledger row is already written.
+  const provider = getActiveProvider();
   let outcome: AgentOutcome | null = null;
   let restoreEnv: (() => void) | null = null;
   let liveUsage: UsageTokens = emptyUsage();
   let accepted: AcceptedDesign | null = null;
   let lastRefusal: string | null = null;
-  const telemetry = (): Pick<RunDiagramAgentResult, 'costUsd' | 'inputTokens' | 'outputTokens' | 'numTurns'> => {
+  const telemetry = (): Pick<RunDiagramAgentResult, 'costUsd' | 'inputTokens' | 'outputTokens' | 'numTurns' | 'provider'> => {
     const usage = outcome?.usage ?? liveUsage;
     const hasUsage = usage.inputTokens + usage.outputTokens + usage.cacheReadTokens > 0;
     return {
@@ -97,6 +120,7 @@ export async function runDiagramAgent(args: RunDiagramAgentArgs): Promise<RunDia
       inputTokens: usage.inputTokens,
       outputTokens: usage.outputTokens,
       numTurns: outcome?.numTurns ?? null,
+      provider: provider.id,
     };
   };
   const fail = (failureReason: string | undefined, aborted: boolean): RunDiagramAgentResult => ({
@@ -124,7 +148,7 @@ export async function runDiagramAgent(args: RunDiagramAgentArgs): Promise<RunDia
               return { text: 'No more attempts. Stop now.', isError: true };
             }
             attempts += 1;
-            const j = judgeSubmission(a as unknown as Partial<SubmitDesignPayload>, attempts, args.design);
+            const j = judgeSubmission(a as unknown as Partial<SubmitDesignPayload>, attempts, args.design, provider.id);
             if ('accepted' in j) {
               accepted = j.accepted;
               return { text: 'Design recorded.' };
@@ -153,12 +177,17 @@ export async function runDiagramAgent(args: RunDiagramAgentArgs): Promise<RunDia
       budget: { usd: config.sequenceDiagramBudgetUsd, turns: config.sequenceDiagramMaxTurns },
       abortController,
       claude: { allowedTools: policy.allowedTools, disallowedTools: policy.disallowedTools },
+      // Codex: the design is the run's final answer (the strict `submit_design` schema).
+      codex: { resultTool: 'submit_design' },
+      ...(args.usageRecord ? { usageRecord: args.usageRecord } : {}),
       onProgress: (p) => {
         if (p.kind === 'step') {
           if (p.usage) liveUsage = p.usage;
           try {
             for (const line of p.lines) {
-              activity.push(line.startsWith(DIAGRAM_TOOL_NAME) ? 'Submitting the design…' : line);
+              // Codex has no submit tool: its final message (the JSON design) reads as the same line.
+              const submitting = line.startsWith(DIAGRAM_TOOL_NAME) || (provider.id === 'codex' && line.startsWith('{'));
+              activity.push(submitting ? 'Submitting the design…' : line);
               if (activity.length > ACTIVITY_LOG_CAP) activity.shift();
             }
             args.onProgress?.({ recentActivity: [...activity] });

@@ -1,0 +1,4 @@
+{"type": "thread.started", "thread_id": "THREAD"}
+{"type": "turn.started"}
+{"type": "item.started", "item": {"id": "item_1", "type": "mcp_tool_call", "server": "workspace", "tool": "list_files", "arguments": {}, "result": null, "error": null, "status": "in_progress"}}
+{"type": "item.completed", "item": {"id": "item_1", "type": "mcp_tool_call", "server": "workspace", "tool": "list_files", "arguments": {}, "result": {"content": [{"type": "text", "text": "a.ts"}], "structured_content": null}, "error": null, "status": "completed"}}

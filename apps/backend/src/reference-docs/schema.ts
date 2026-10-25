@@ -36,12 +36,26 @@ export function buildFinishShape(z: ZodNs) {
   };
 }
 
+/**
+ * CODEX'S ONE RESULT for a 'sections' build (docs/CODEX-PLAN.md Phase 3): Codex has no tools of Limn's
+ * own, so `record_sections` and `finish_document` arrive together as its final answer — the SAME two
+ * shapes side by side (their keys do not overlap), judged by the SAME `judgeRecord` + `judgeFinish`.
+ */
+export function buildSubmitDocumentShape(z: ZodNs) {
+  return { ...buildRecordSectionsShape(z), ...buildFinishShape(z) };
+}
+
 export type RecordSectionsShape = ReturnType<typeof buildRecordSectionsShape>;
 export type FinishShape = ReturnType<typeof buildFinishShape>;
 export type RecordSectionsPayload = Zod.infer<Zod.ZodObject<RecordSectionsShape>>;
 export type FinishPayload = Zod.infer<Zod.ZodObject<FinishShape>>;
 
-export async function buildToolShapes(): Promise<{ record: RecordSectionsShape; finish: FinishShape; empty: Record<string, never> }> {
+export async function buildToolShapes(): Promise<{
+  record: RecordSectionsShape;
+  finish: FinishShape;
+  document: ReturnType<typeof buildSubmitDocumentShape>;
+  empty: Record<string, never>;
+}> {
   const z = await loadZod();
-  return { record: buildRecordSectionsShape(z), finish: buildFinishShape(z), empty: {} };
+  return { record: buildRecordSectionsShape(z), finish: buildFinishShape(z), document: buildSubmitDocumentShape(z), empty: {} };
 }

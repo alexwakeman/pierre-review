@@ -92,13 +92,14 @@ describe('the registry (LIMN_AI_PROVIDER)', () => {
     expect(P.getProvider('claude')).toBe(claudeProvider);
   });
 
-  it("codex resolves to the Codex provider; every agent kind still answers 'not available yet'", async () => {
+  it("codex resolves to the Codex provider; every agent kind not yet ported still answers 'not available yet'", async () => {
     const codex = P.getActiveProvider({ LIMN_AI_PROVIDER: 'codex' });
     expect(codex.id).toBe('codex');
     expect(P.getProvider('codex')).toBe(codex);
-    // Phase 2: the allow-list is EMPTY, so no agent runs on Codex — each kind says so in one sentence.
-    expect(P.CODEX_AGENT_KINDS.size).toBe(0);
-    for (const kind of ['review', 'fix', 'ci_review', 'docs_build'] as const) {
+    // Phase 3 fills the allow-list stream by stream: every kind NOT in it says so in one sentence.
+    const notPorted = P.ALL_AGENT_KINDS.filter((k) => !P.CODEX_AGENT_KINDS.has(k));
+    expect(notPorted.length).toBeGreaterThan(0);
+    for (const kind of notPorted) {
       await expect(
         codex.runAgent({ kind } as Parameters<typeof codex.runAgent>[0]),
       ).rejects.toThrow(P.codexKindNotAvailableMessage(kind));
@@ -157,14 +158,16 @@ describe('the registry (LIMN_AI_PROVIDER)', () => {
 });
 
 describe('the kinds (Phase 3 foundation)', () => {
-  it('CODEX_AGENT_KINDS is the union of the four streams’ files, each EMPTY until it ports a runner', async () => {
+  it('CODEX_AGENT_KINDS is the union of the four streams’ files, each holding only what it ported', async () => {
     const files = await Promise.all([
       import('./codex/kinds/review.js').then((m) => m.CODEX_REVIEW_KINDS),
       import('./codex/kinds/fix.js').then((m) => m.CODEX_FIX_KINDS),
       import('./codex/kinds/tickets.js').then((m) => m.CODEX_TICKETS_KINDS),
       import('./codex/kinds/docs.js').then((m) => m.CODEX_DOCS_KINDS),
     ]);
-    expect(files).toEqual([[], [], [], []]);
+    // Stream (d) ported its four kinds (ai/codex/kinds/docs.test.ts); no kind is in two files.
+    expect([...files[3]!].sort()).toEqual(['diagram', 'docs_build', 'docs_chat', 'sprint_paths']);
+    expect(new Set(files.flat()).size).toBe(files.flat().length);
     expect([...P.CODEX_AGENT_KINDS]).toEqual(files.flat());
   });
 
