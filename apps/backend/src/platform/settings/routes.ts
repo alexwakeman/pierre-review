@@ -4,6 +4,7 @@ import type {
   WorkspaceProSettings,
   WorkspaceProSettingsUpdate,
 } from '@pierre-review/shared';
+import { HOURLY_COST_MAX_USD } from '@pierre-review/shared';
 import type { ProContext } from '../contract.js';
 import { REPORT_MODELS } from '../llm/seam.js';
 import { resolveRequestWorkspaceId } from '../insights/workspace-request.js';
@@ -182,6 +183,13 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: ProContext): v
             // `cadenceDays` REQUIRED (so clearing a cadence is always explicit), which would make a
             // mode-only patch impossible to express.
             comparisonMode: { type: 'string', enum: ['rolling_7', 'rolling_14', 'sprint'] },
+            // ⚠ MUST BE LISTED (same silent strip). The hourly cost of engineering time in US$,
+            // plugin migration 0041; `null` clears it.
+            hourlyCostUsd: {
+              type: ['number', 'null'],
+              exclusiveMinimum: 0,
+              maximum: HOURLY_COST_MAX_USD,
+            },
             // (NO `jira` section either — same move, same route, same silent strip.)
             // (NO `autoReview` section: auto Claude review moved to core with Claude Review —
             // `PUT /api/workspaces/:id/auto-review`. A stale client's key is STRIPPED by

@@ -108,6 +108,7 @@ function fakeDeps(over: Partial<TriggerDeps> & { files?: StoredPrFile[] | null; 
   const drawn = new Set<string>();
   const refused: Array<{ kind: string; subject: string }> = [];
   const deps: TriggerDeps = {
+    switchedOn: async () => true,
     prContext: async () => ({
       prId: 7,
       repoId: 1,
@@ -145,6 +146,45 @@ function fakeDeps(over: Partial<TriggerDeps> & { files?: StoredPrFile[] | null; 
 }
 
 describe('maybeDrawDiagramsAfterReview', () => {
+  it('the workspace switch OFF queues nothing, stores nothing and reads no PR', async () => {
+    const prContext = vi.fn(async () => null);
+    const { deps, queued, refused } = fakeDeps({ switchedOn: async () => false, prContext });
+    for (const reviewTrigger of ['manual', 'auto'] as const) {
+      const r = await maybeDrawDiagramsAfterReview(ctx, { accountId: 1, prId: 7, reviewTrigger }, deps);
+      expect(r).toEqual({ pr: 'switched_off', stories: [] });
+    }
+    expect(queued).toHaveLength(0);
+    expect(refused).toHaveLength(0);
+    expect(prContext).not.toHaveBeenCalled();
+  });
+
+  it('the switch is asked about THIS PR, and ON draws as before', async () => {
+    const asked: Array<[number, number]> = [];
+    const { deps } = fakeDeps({
+      switchedOn: async (_c, accountId, prId) => {
+        asked.push([accountId, prId]);
+        return true;
+      },
+    });
+    const r = await maybeDrawDiagramsAfterReview(ctx, { accountId: 3, prId: 7, reviewTrigger: 'auto' }, deps);
+    expect(asked).toEqual([[3, 7]]);
+    expect(r.pr).toBe('queued');
+  });
+
+  it('over the Claude spend budget: an AUTO review draws nothing, a MANUAL review still draws', async () => {
+    const allow = vi.fn(async () => false);
+    const overCtx = { ...ctx, aiBudget: { allowAutomaticRun: allow } } as unknown as AgentContext;
+    const auto = fakeDeps();
+    const r1 = await maybeDrawDiagramsAfterReview(overCtx, { accountId: 1, prId: 7, reviewTrigger: 'auto' }, auto.deps);
+    expect(r1.pr).toBe('over_budget');
+    expect(auto.queued).toHaveLength(0);
+    allow.mockClear();
+    const manual = fakeDeps();
+    const r2 = await maybeDrawDiagramsAfterReview(overCtx, { accountId: 1, prId: 7, reviewTrigger: 'manual' }, manual.deps);
+    expect(r2.pr).toBe('queued');
+    expect(allow).not.toHaveBeenCalled();
+  });
+
   it('a MANUAL review and an AUTO review both draw (PR + story)', async () => {
     for (const reviewTrigger of ['manual', 'auto'] as const) {
       const { deps, queued } = fakeDeps();

@@ -17,6 +17,7 @@ import { config } from '../../config.js';
 import type { AgentContext } from '../agent-context.js';
 import { getTicketSource } from '../../tracker/ticket-source.js';
 import { agenticRunReady } from './ai-ready.js';
+import { automaticRunAllowed } from '../budget-gate.js';
 import { decideReviewMode } from './routing.js';
 import { offeredSpecialists } from './specialists.js';
 import {
@@ -356,6 +357,9 @@ async function startAutoItem(a: AutoItem): Promise<void> {
     // AI went away since the sweep (runtime removed, signed out): drop the item BEFORE its row
     // exists, or the PR's one automatic review is spent on a failure (ai-ready.ts).
     if (!agenticRunReady(ctx)) return;
+    // THE CLAUDE SPEND BUDGET (ai/budget.ts): over it, drop the item before its row exists — the
+    // sweeper re-derives it once the budget is under its limit again.
+    if (!(await automaticRunAllowed(ctx, accountId, 'auto review'))) return;
     const prCtx = await getReviewPrContext(ctx, prId, accountId);
     if (!prCtx?.headSha) return;
     // ONE RUN PER KEY: a person may have reviewed this head (and, for a comment-triggered

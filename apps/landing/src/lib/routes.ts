@@ -57,7 +57,7 @@ export const ROUTE_SEO: Record<string, RouteSeo> = {
   },
   '/getting-started': {
     title: `Getting started — install, run and connect · ${SITE_NAME}`,
-    description: `Run ${SITE_NAME} with one command: npx ${NPM_PACKAGE}. Then turn on Claude, add the scoring model for review-bot comments, add your repositories, and connect Jira or Linear and Slack. It runs on your machine and uses your logged-in gh.`,
+    description: `Run ${SITE_NAME} with one command: npx ${NPM_PACKAGE}. Then turn on Claude, give Limn a share of your weekly Claude usage, add the scoring model for review-bot comments, add your repositories, and connect Jira or Linear and Slack. It runs on your machine and uses your logged-in gh.`,
   },
   '/reporting': {
     title: `Reporting and metrics — where the work is and where it waits · ${SITE_NAME}`,

@@ -52,7 +52,10 @@ export function DesignLegend({ story }: { story: boolean }): JSX.Element {
       </p>
       {story && <p>Each card names the pull request that does it.</p>}
       <p>Click a card to open its file in the Changes tab. Empty cells are expected.</p>
-      <p>It is drawn again after a review of a new commit. Pull requests that change no code get none.</p>
+      <p>
+        It is drawn again after a review of a new commit, unless that is turned off in Settings. Pull requests that
+        change no code get none.
+      </p>
       <p>Claude works the design out from the code, so check it before relying on it.</p>
     </div>
   );

@@ -161,6 +161,8 @@ import type {
   MyTurnSettings,
   MyTurnSettingsBody,
   MyTurnSettingsResponse,
+  AiBudgetBody,
+  AiBudgetResponse,
   RepoAnalytics,
   RepoClaudeReviewsResponse,
   OpenPrsResponse,
@@ -903,6 +905,17 @@ export const api = {
       '/api/me/my-turn-settings',
       jsonBody('PUT', { settings } as MyTurnSettingsBody),
     ).then((r) => handle<MyTurnSettingsResponse>(r)),
+  // THE CLAUDE SPEND BUDGET (one per machine; backend ai/budget.ts). Registered only when AI is on.
+  // `status.overBudget` ⇒ automatic runs are paused (`status.limitedBy` says by the week or the
+  // 5-hour session); a Run click should warn and ask first. `usage` feeds the header's usage item and
+  // its popover (Claude's own windows, Limn's runs/tokens this week, the API key's US$), and
+  // `usage.weekPctPerUsd` turns a run's `costUsd` into "x% of your week" via the shared
+  // `runWeekShareText` on a subscription (null ⇒ API key: show US$; unknown subscription: nothing).
+  // The SAME route and the SAME query key serve the header, the meter, the toast and Settings.
+  // `setAiBudget({ fiveHourSharePct: null })` returns the 5-hour share to "same as weekly".
+  aiBudget: () => get<AiBudgetResponse>('/api/ai/budget'),
+  setAiBudget: (body: AiBudgetBody) =>
+    fetch('/api/ai/budget', jsonBody('PUT', body)).then((r) => handle<AiBudgetResponse>(r)),
   // Workspace review-intelligence "Insights" — the attention CARDS (+ the sprint report). The
   // flow-metric HEADER moved OUT to
   // /api/workspace-metrics, the Retro panel was deleted, and cross-workspace comparison is the

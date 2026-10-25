@@ -591,9 +591,16 @@ export async function seedEstate(ctx: EstateCtx): Promise<EstateResult> {
         // The derived state. A merged pull request's threads mostly got dealt
         // with; an open one's mostly did not — which is what makes the backlog
         // on the Bots page a real number rather than a decoration.
+        //
+        // ⚠ CURSOR BUGBOT IS THE ONE THE TEAM MOSTLY IGNORES (about one thread in six used), so
+        // Bots → ROI shows its "Turning it off would save $… a year" line (it carries a price).
+        // Same one draw of `r` with different cut points; still deterministic (later draws shift
+        // because Cursor gets fewer human replies).
         const r = rnd();
         const derived =
-          g.state === 'merged'
+          v === CURSOR
+            ? r < 0.07 ? 'resolved' : r < 0.12 ? 'likely_addressed' : r < 0.17 ? 'replied_unresolved' : 'untouched'
+            : g.state === 'merged'
             ? r < 0.46 ? 'resolved' : r < 0.7 ? 'likely_addressed' : r < 0.82 ? 'replied_unresolved' : 'untouched'
             : r < 0.18 ? 'resolved' : r < 0.34 ? 'likely_addressed' : r < 0.46 ? 'replied_unresolved' : 'untouched';
 

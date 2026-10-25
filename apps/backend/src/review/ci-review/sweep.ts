@@ -3,6 +3,7 @@ import { config } from '../../config.js';
 import { globalAutomationUserIds } from '../../db/automation-ids.js';
 import type { AgentContext } from '../agent-context.js';
 import { agenticRunReady } from '../claude-review/ai-ready.js';
+import { automaticRunAllowed } from '../budget-gate.js';
 import { autoReviewAvailable, utcDayStartMs } from '../claude-review/auto.js';
 import { listAutoReviewWorkspaces } from '../claude-review/auto-settings.js';
 import { ciReviewDue } from './currency.js';
@@ -62,6 +63,8 @@ export interface CiSweepResult {
   considered: number[];
   queued: Array<{ prId: number; workspaceId: number }>;
   stopped: 'lane_full' | 'ai_not_ready' | null;
+  // True when the Claude spend budget paused an account this tick (its work waits, nothing is lost).
+  overBudget?: boolean;
 }
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -126,6 +129,11 @@ export async function runCiReviewSweep(
 
     for (const [accountId, enabled] of byAccount) {
       if (result.stopped) break;
+      // THE CLAUDE SPEND BUDGET (ai/budget.ts): over it, nothing is queued; the failing sets stay due.
+      if (!(await automaticRunAllowed(ctx, accountId, 'CI review'))) {
+        result.overBudget = true;
+        continue;
+      }
       const red = (await redOpenPrs(ctx, accountId, [...enabled.keys()]))
         .filter((p) => p.authorId == null || !automation.has(p.authorId))
         .sort((a, b) => a.prId - b.prId)

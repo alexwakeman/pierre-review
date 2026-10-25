@@ -2,6 +2,7 @@ import { parseTicketIdent, type SequenceDiagramKind, type SequenceDiagramMember 
 import { config } from '../../config.js';
 import { getTicketSource } from '../../tracker/ticket-source.js';
 import type { AgentContext } from '../agent-context.js';
+import { automaticRunAllowed } from '../budget-gate.js';
 import {
   diagramSkipReason,
   prDiagramFingerprint,
@@ -15,6 +16,7 @@ import type { StartDiagramArgs, StartDiagramResult } from './manager.js';
 import {
   countReviewDiagramsSince,
   diagramExistsAt,
+  diagramsSwitchedOnForPr,
   getDiagramPrContext,
   getPrFileStats,
   markDiagramRefused,
@@ -35,6 +37,10 @@ import {
 //                  at most MAX_TICKETS. A ticket with MORE THAN ONE open or merged PR queues ONE
 //                  'story' diagram under the same rules, its fingerprint over every member's head and
 //                  state — so a push to ANY member redraws it after that member's next review.
+//
+// ⚠ THE PER-WORKSPACE SWITCH (`workspaces.auto_diagrams_enabled`, migration 0126, ON by default):
+// switched off for the PR's workspace ⇒ 'switched_off' and nothing is queued or stored. It gates
+// THIS automatic draw only — the reader's own Draw / Redraw (routes.ts → startDiagram) still works.
 
 export const MAX_TICKETS = 3;
 
@@ -46,6 +52,8 @@ export function utcDayStartMs(nowMs: number): number {
 
 export interface TriggerDeps {
   prContext: typeof getDiagramPrContext;
+  // The PR's workspace switch (ON by default; only a stored false is off).
+  switchedOn: typeof diagramsSwitchedOnForPr;
   exists: typeof diagramExistsAt;
   usedToday: typeof countReviewDiagramsSince;
   held(accountId: number, kind: SequenceDiagramKind, subject: string): Promise<boolean>;
@@ -68,6 +76,7 @@ const manager = () => import('./manager.js');
 
 const defaultDeps: TriggerDeps = {
   prContext: getDiagramPrContext,
+  switchedOn: diagramsSwitchedOnForPr,
   exists: diagramExistsAt,
   usedToday: countReviewDiagramsSince,
   held: async (accountId, kind, subject) => (await manager()).diagramHeld(accountId, kind, subject),
@@ -97,7 +106,18 @@ export function toDiagramMembers(members: readonly StoryMember[]): SequenceDiagr
   }));
 }
 
-export type TriggerOutcome = 'queued' | 'busy' | 'already_running' | 'disabled' | DiagramSkip | 'no_head';
+// 'over_budget': the Claude spend budget is reached (ai/budget.ts) — nothing queued; the next review
+// (or Redraw) asks again.
+// 'switched_off': the PR's workspace turned automatic diagrams off (Settings) — nothing queued.
+export type TriggerOutcome =
+  | 'queued'
+  | 'busy'
+  | 'already_running'
+  | 'disabled'
+  | 'switched_off'
+  | DiagramSkip
+  | 'no_head'
+  | 'over_budget';
 
 export interface TriggerResult {
   pr: TriggerOutcome;
@@ -110,7 +130,8 @@ function fold(codes: readonly CodeAnswer[]): CodeAnswer {
   return 'no';
 }
 
-/** Never throws. `reviewTrigger` is recorded in the log only: manual and auto reviews both draw. */
+/** Never throws. Manual and auto reviews both draw; `reviewTrigger` decides only whether the Claude
+ *  spend budget is asked (auto only). */
 export async function maybeDrawDiagramsAfterReview(
   ctx: AgentContext,
   a: { accountId: number; prId: number; reviewTrigger: 'manual' | 'auto' },
@@ -121,6 +142,17 @@ export async function maybeDrawDiagramsAfterReview(
   if (!deps.enabled) return result;
   const { accountId, prId } = a;
   try {
+    // The workspace switch first: off means no budget read, no PR read, nothing stored.
+    if (!(await deps.switchedOn(ctx, accountId, prId))) {
+      result.pr = 'switched_off';
+      return result;
+    }
+    // THE CLAUDE SPEND BUDGET asks only after an AUTO review: a diagram after a review the reader
+    // started is part of that run (the reader already chose it, past the over-budget confirm).
+    if (a.reviewTrigger === 'auto' && !(await automaticRunAllowed(ctx, accountId, 'diagrams'))) {
+      result.pr = 'over_budget';
+      return result;
+    }
     const pr = await deps.prContext(ctx, accountId, prId);
     if (!pr || !pr.headSha) {
       result.pr = 'no_head';

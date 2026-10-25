@@ -293,6 +293,7 @@ export const STEPS = [
     run: (h) => h.go(`?view=activity&workspace=2&activityRepo=${r}`),
   })),
   { name: 'ws2:sprint', run: (h) => h.go('?view=sprint&workspace=2') },
+  { name: 'ws2:chronology', run: (h) => h.go('?view=activity&workspace=2&activityRepo=insights&insightsTab=bottlenecks') },
   ...WEB_PRS.flatMap((id) =>
     ['overview', 'threads', 'claude_review'].map((t) => ({
       name: `pr:${id}:${t}`,

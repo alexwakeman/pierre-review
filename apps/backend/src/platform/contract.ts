@@ -1193,6 +1193,10 @@ export interface ProContext {
   // its own summary/agent spend (digests, sprint report, AI Fix) into the SAME ledger the
   // core Claude Review path writes, so month-to-date usage is summable across features.
   recordAiUsage(row: AiUsageRecord): Promise<void>;
+  // THE CLAUDE SPEND BUDGET's gate (core ai/budget.ts). Every AUTOMATIC (scheduled) model call the
+  // platform makes asks it first and SKIPS the call when it answers false — today the Slack digest's
+  // sprint summary. A reader's click never asks. Optional: absent (a test's fake ctx) ⇒ allowed.
+  aiBudget?: { allowAutomaticRun(accountId: number, what: string): Promise<boolean> };
   // apiVersion 22: `reviewEvents` and `registerLearningsProvider` LEFT with Claude Review's memory,
   // and `review` with Claude Review itself (all core now). apiVersion 23: `registerAgenticProviders`
   // LEFT too — its only members were the tracker's (the Jira fill and the ticket review's

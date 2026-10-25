@@ -13,6 +13,7 @@ import {
 import { registerRateLimit } from './api/plugins/rate-limit.js';
 import { healthRoutes } from './api/routes/health.js';
 import { aiRuntimeRoutes } from './api/routes/ai-runtime.js';
+import { aiBudgetRoutes } from './api/routes/ai-budget.js';
 import { mlRuntimeRoutes } from './api/routes/ml-runtime.js';
 import { registerAgenticRoutes } from './review/agentic.js';
 import { registerTracker } from './tracker/index.js';
@@ -215,6 +216,9 @@ export async function buildApp(): Promise<FastifyInstance> {
   // "Set up AI" — the one-time AI runtime download (ai/runtime.ts). Not registered under
   // LIMN_AI_DISABLED.
   if (config.aiEnabled) await app.register(aiRuntimeRoutes);
+  // The Claude spend budget (ai/budget.ts): GET/PUT /api/ai/budget. Not registered under
+  // LIMN_AI_DISABLED.
+  if (config.aiEnabled) await app.register(aiBudgetRoutes);
   // "Set up" for local bot-comment scoring (ml/runtime.ts). Not registered under LIMN_ML_DISABLED.
   if (config.mlLocalEnabled) await app.register(mlRuntimeRoutes);
   // The agentic features — Claude Review (+ chat, follow-up, ticket check, auto review) and AI

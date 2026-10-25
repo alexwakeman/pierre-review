@@ -110,6 +110,24 @@ export async function getDiagramPrContext(ctx: Ctx, accountId: number, prId: num
   return rows[0] ?? null;
 }
 
+/**
+ * Is automatic diagram drawing on for the workspace holding this PR's repo
+ * (`workspaces.auto_diagrams_enabled`, migration 0126)? ON by default: only a stored false is off,
+ * so a repo with no membership row (or an unknown PR) reads ON — the trigger's own checks decide.
+ */
+export async function diagramsSwitchedOnForPr(ctx: Ctx, accountId: number, prId: number): Promise<boolean> {
+  const { workspaces: w, workspaceRepos: wr, pullRequests: pr } = s(ctx);
+  const rows = (await ctx.db
+    .select({ on: w.autoDiagramsEnabled })
+    .from(pr)
+    .innerJoin(wr, and(eq(wr.repoId, pr.repoId), eq(wr.accountId, accountId)))
+    .innerJoin(w, and(eq(w.id, wr.workspaceId), eq(w.accountId, accountId)))
+    .where(and(eq(pr.id, prId), eq(pr.accountId, accountId)))
+    .limit(1)
+    .execute()) as Array<{ on: boolean | null }>;
+  return rows[0]?.on !== false;
+}
+
 /** The stored file lists of these PRs (this account only) — the story's "any code?" pre-check. */
 export async function getPrFileStats(
   ctx: Ctx,

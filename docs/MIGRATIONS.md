@@ -1136,6 +1136,16 @@ table, so no `accountScopedTables()` / erasure / `verify:isolation` change (`ref
 covered). [REFERENCE-DOCS.md](REFERENCE-DOCS.md) § Following links. Journal `when` sqlite
 `1792137611016`.
 
+### `0126_workspace_auto_diagrams` — design diagrams after each review, per workspace
+`ALTER TABLE workspaces ADD auto_diagrams_enabled integer DEFAULT 1 NOT NULL`. ⚠ **DEFAULT TRUE on
+purpose**: a diagram was drawn after every review before this column, so every workspace, existing
+and new, keeps that until someone switches it off; no backfill, and the inserts in `db/queries.ts`
+need not name it (the DDL default is the product default, unlike `0083`/`0084`). Read side: only a
+stored false is off. Written only by `setWorkspaceAutoReview`; read by review/diagrams/trigger.ts via
+`diagramsSwitchedOnForPr`. Column only — no new table, so no `accountScopedTables()` / erasure /
+`verify:isolation` change (`workspaces` is already covered). [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md)
+§ Design diagrams. Journal `when` sqlite `1792137613016`.
+
 ### No migration — "Check against code" removed (2026-10-18): `sprint_ticket_repos` + `sprint_assessments` DORMANT
 
 The sprint drawer, its repo picker and "Check against code" (`review/sprint-assess/`) were removed with

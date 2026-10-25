@@ -203,3 +203,26 @@ export function lensSignificance(row: {
   if (row.verdict !== 'shift' || row.before == null || row.after == null || row.after === row.before) return null;
   return row.after < row.before ? 'better' : 'worse';
 }
+
+// ── Hours saved in US$ ───────────────────────────────────────────────────────────────────────
+
+/** Whole US dollars, thousands separated: `$11,400`. Cents only when the figure has them and is
+ *  under $100 (an hourly rate of $87.50 stays legible). */
+export function usd(v: number): string {
+  const abs = Math.abs(v);
+  const cents = abs < 100 && Math.round(abs * 100) % 100 !== 0;
+  return `$${abs.toLocaleString('en-US', {
+    minimumFractionDigits: cents ? 2 : 0,
+    maximumFractionDigits: cents ? 2 : 0,
+  })}`;
+}
+
+/**
+ * The working hours saved (or lost) priced at the workspace's hourly cost: |hours| × rate, rounded
+ * to the dollar — the sign is already on the hours figure beside it. Null when no rate is set or
+ * the rate is not a positive number (a blank figure, never a $0).
+ */
+export function hoursCostUsd(hours: number, hourlyCostUsd: number | null): number | null {
+  if (hourlyCostUsd == null || !Number.isFinite(hourlyCostUsd) || hourlyCostUsd <= 0) return null;
+  return Math.round(Math.abs(Math.round(hours)) * hourlyCostUsd);
+}

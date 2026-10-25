@@ -138,3 +138,15 @@ describe('lensSignificance', () => {
     expect(lensSignificance({ verdict: 'shift', before: 3, after: 3 })).toBeNull();
   });
 });
+
+describe('hours saved in US$', () => {
+  it('prices whole hours at the rate, sign-free', async () => {
+    const { hoursCostUsd, usd } = await import('../src/components/Activity/chronologyTrendModel.js');
+    expect(hoursCostUsd(120.4, 95)).toBe(11_400);
+    expect(hoursCostUsd(-120, 95)).toBe(11_400);
+    expect(hoursCostUsd(120, null)).toBeNull();
+    expect(hoursCostUsd(120, 0)).toBeNull();
+    expect(usd(11_400)).toBe('$11,400');
+    expect(usd(87.5)).toBe('$87.50');
+  });
+});

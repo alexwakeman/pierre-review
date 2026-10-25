@@ -10,6 +10,7 @@
      split      .r-split > .r-txt + .shot.r-wide  (.r-flip puts the shot first)
      period     .r-period > .r-chap + .board > .r-full · .r-fact×3 · .r-sumtxt · .r-sum
      chronology .r-chron > .r-txt (ul.r-courts) · .r-wide · .r-big (.r-fig > span) · .r-proof
+                · .r-usd (h3 + p)
      bots       .r-bots > .r-bclaim · .r-bshot · .r-btxt · .r-bshot2
      close      .r-close > .r-flank · .gold.r-mid · .r-flank
    =========================================================================== */
@@ -230,6 +231,23 @@
   color: var(--muted);
 }
 
+.lb.rep .r-usd {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 16px 24px;
+  align-items: end;
+  padding: 36px;
+}
+.lb.rep .r-usd h3 {
+  grid-column: 1 / 6;
+  font-size: clamp(28px, 2.6vw, 40px);
+}
+.lb.rep .r-usd p {
+  grid-column: 6 / 13;
+  max-width: 52ch;
+}
+
 /* ---- bots ------------------------------------------------------------- */
 .lb.rep .r-bclaim {
   grid-column: 1 / 6;
@@ -261,6 +279,12 @@
 }
 .lb.rep .r-btxt p {
   max-width: 36ch;
+}
+.lb.rep .r-btxt {
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 16px;
 }
 
 /* ---- close ------------------------------------------------------------ */
@@ -342,6 +366,7 @@
   .lb.rep .r-txt,
   .lb.rep .r-big,
   .lb.rep .r-proof,
+  .lb.rep .r-usd,
   .lb.rep .r-bclaim,
   .lb.rep .r-btxt,
   .lb.rep .r-mid {
@@ -349,6 +374,10 @@
   }
   .lb.rep .r-fact {
     min-height: 0;
+  }
+  .lb.rep .r-usd h3,
+  .lb.rep .r-usd p {
+    grid-column: 1 / -1;
   }
   .lb.rep .r-big {
     min-height: 0;

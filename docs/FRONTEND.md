@@ -1429,6 +1429,10 @@ reappears.
   the story alignment pills are unchanged.
 - **Auto review** is `AutoReviewSection` over the CORE `GET`/`PUT /api/workspaces/:id/auto-review`
   (`hooks/useWorkspaceAutoReview.ts`), mounted on `ai.enabled`. OFF per workspace until switched on.
+  - **Design diagrams** ride the SAME section and Save: "Draw a design diagram after each review"
+    (`autoDiagramsEnabled`, ON by default; only a stored false reads off). ⚠ NOT dimmed by auto review
+    — a diagram follows EVERY review, yours or automatic. Sent only when changed. The ⓘ says it saves
+    about a third of Claude's review usage; the Design ⓘ in the review tab says it can be turned off.
   - **Auto-posting** lives in the SAME section and the SAME Save (`autoPost` on the auto-review route;
     only a changed `autoPost` is sent): the master switch "Post Claude reviews to GitHub
     automatically", a "Which PRs" radio pair (`'mine'` — "PRs you are asked to review, and your own"
@@ -1462,6 +1466,47 @@ reappears.
   behind "Show N more" — a to-fix row is never hidden. A not-valid comment's addressed pill is grey (`threadAddressedClass`), never red. path:line opens the thread in the Threads tab
   (PrDetail's `openThreadInThreads`); the GitHub link goes through `safeExternalUrl`; every comment
   and Claude string is plain text. `draftReply` offers Copy only — no route posts it.
+
+### The Claude spend budget on screen (`components/AiBudget.tsx`, `lib/aiBudget.ts`)
+
+ONE query, `useAiBudget` (`['ai-budget']`, account-grained, no `ws:` segment, polled every 2 minutes
+while the tab is visible), feeds every surface below; the decision is the server's (`ai/budget.ts`),
+`lib/aiBudget.ts` only words it.
+
+- **The header usage item** (`components/AiUsageMenu.tsx`, beside the light/dark button; shown while
+  `me.ai.enabled` and `usage.route !== 'none'`): ONE figure from `headerUsageOf` — budget on (subscription):
+  Limn's used share ÷ its limit, the week or the 5-hour session, whichever is closer (the title says
+  which; over budget, the one the server's `limitedBy` names); budget off: Claude's own whole-account
+  weekly figure; API key: % of the weekly US$ budget, or this week's US$ with none set. Each figure has
+  its own label ("AI quota for Limn:" for a budget, "Claude this week:" for the account figure, "Limn AI,
+  last 7 days:" for unbudgeted API spend) — never a bare "Claude", which read as Claude's own quota. The label is
+  screen-reader only (and in the title): the item SHOWS just the icon and the figure, at every width. Click → a `role="dialog"` popover (Escape / outside click close it)
+  built by `usageDetailOf`: Limn's week and 5-hour shares with limits, runs and tokens this week,
+  Claude's account windows (5-hour, week, per-model) as used / left / resets, "Updated N min ago", and
+  a link to Settings → Claude spend. ⚠ Unknown pieces are LEFT OUT, never shown as 0.
+- **A run's cost** (Claude Review's meta line and live estimate, Docs chat, Ask Claude about this
+  sprint): ONE wording, `useRunCostText()` → `runCostText(costUsd, usage)`. API key: US$. Claude
+  subscription: "0.3% of your week" from the server's `usage.weekPctPerUsd` rate (the frontend holds no
+  estimate table); unknown subscription or no answer yet: nothing. ⚠ Never call `formatUsd` on a
+  Claude run's cost directly. Bot prices and Chronology's hourly cost are not Claude runs and keep US$.
+
+- **The meter** (`AiBudgetMeter`, mounted by `AiRunGate` beside every Run button while the budget is
+  on): "Limn: 2% of your week · limit 5%" on a subscription, "This week $4.10 of $25" on an API key,
+  "Limn: pick your subscription" while it is unknown. ⚠ A subscription is worded in percentages
+  only — never a US$ figure.
+- **The toast** (`AiBudgetToast`, in the ONE header strip): "Limn has used its share of your week.
+  Automatic runs resume <day, time>." (`limitedBy: 'five_hour'`: "…its share of this 5-hour
+  session…"; API key: "…its weekly budget…").
+- **The second press** (`OverBudgetConfirm`): over budget, only the gate's RUN control (`data-ai-run`,
+  else the only button) is held once and armed for 15 s; an ⓘ / Discard beside it works as usual.
+- **Settings → Claude spend** (`ClaudeSpendSection`): subscription = the share (1–50 %), the
+  subscription (shown when Claude's report settles it; else a picker of `status.subscription.pickFrom`
+  — the Max pair for a reported "max"), "Limn has used X% of your week" and "about N automatic
+  reviews a working day" (the SAVED share's figure; hidden while the share is edited). The 5-hour
+  share FOLLOWS the weekly one: a collapsed `<details>` "Set a separate 5-hour limit" (open when one
+  is stored) holds its box; empty = `fiveHourSharePct: null` = same as weekly, "Use the weekly share"
+  clears it (draft/body in `settings/claudeSpendForm.ts`). API key = "Weekly budget (US$)", no 5-hour
+  setting. The explanation is behind the ⓘ.
 
 ### The AI Fix tab (`AiFixTab.tsx`, `components/AiFix/FixPicker.tsx`, `components/AiFix/FixReport.tsx`)
 

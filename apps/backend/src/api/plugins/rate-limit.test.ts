@@ -862,6 +862,14 @@ describe('tierFor — merge-conflict resolver', () => {
 describe('the AI runtime download', () => {
   // "Set up AI" spends bandwidth and a child process, not model dollars or GitHub quota, and is
   // single-flight inside ai/runtime.ts — so it takes the `sync` bucket, spelled exactly.
+  it('keeps the Claude spend budget routes on read (no model, no GitHub)', () => {
+    expect(tiers('GET', '/api/ai/budget')).toEqual(['read']);
+    expect(tiers('PUT', '/api/ai/budget')).toEqual(['read']);
+    expect(tiers('PUT', '/api/ai/budget')).not.toContain('ai');
+    // The header's usage item reads the same route: no second usage route, no `ai` bucket on a poll.
+    expect(tiers('GET', '/api/ai/budget')).not.toContain('ai');
+  });
+
   it('puts POST /api/ai/runtime/install on the sync tier', () => {
     expect(tiers('POST', '/api/ai/runtime/install')).toEqual(['sync']);
   });

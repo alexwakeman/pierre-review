@@ -4,6 +4,7 @@ import { accountIdOf } from '../api/plugins/auth.js';
 import { db, schema, runTransaction } from '../db/client.js';
 import * as hostQueries from '../db/queries.js';
 import { recordAiUsage, type AiUsageRecord } from '../db/usage.js';
+import { buildAiBudgetGate, type AiBudgetGate } from '../ai/budget.js';
 import { getAccessToken } from '../auth/account.js';
 import { fetchPrHeadInfo, fetchPrUnifiedDiff } from '../github/mutations.js';
 import { fetchCompareDiff } from '../github/compare.js';
@@ -127,6 +128,9 @@ export interface AgentContext {
     ): Promise<string | null>;
   };
   registerScheduledJob(cron: string, handler: () => Promise<void> | void, label?: string): void;
+  // THE CLAUDE SPEND BUDGET's gate (ai/budget.ts). Every AUTOMATIC run asks it before it queues —
+  // through `automaticRunAllowed` (./budget-gate.ts), never directly. Absent (a test's fake) ⇒ allowed.
+  aiBudget?: AiBudgetGate;
 }
 
 export function buildAgentContext(log: FastifyBaseLogger): AgentContext {
@@ -222,5 +226,6 @@ export function buildAgentContext(log: FastifyBaseLogger): AgentContext {
       },
     },
     registerScheduledJob,
+    aiBudget: buildAiBudgetGate({ info: (m) => log.info(m) }),
   };
 }

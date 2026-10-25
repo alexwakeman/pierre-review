@@ -8,6 +8,7 @@ import type {
   WorkspaceProSettings,
   WorkspaceProSettingsUpdate,
 } from '@pierre-review/shared';
+import { HOURLY_COST_MAX_USD } from '@pierre-review/shared';
 import type { ProContext } from '../contract.js';
 import { proSchemaFor } from '../db.js';
 import { DEFAULT_REPORT_MODEL, resolveReportModel, type ReportModel } from '../llm/seam.js';
@@ -403,6 +404,8 @@ export interface WorkspaceSettingsRow {
   sprintStartAt: Date | number | null;
   /** 'rolling_7' | 'rolling_14' | 'sprint'; null = unset → the product default. Plugin 0032. */
   comparisonMode: SprintComparisonMode | null;
+  /** US cents an hour of engineering time; null = not set. Plugin 0041. */
+  hourlyCostCents: number | null;
   // (auto_review_enabled / _at, plugin 0036, are DORMANT: auto Claude review moved to core
   // `workspaces` with Claude Review — plugin 0037 copied the values across. Never read here.)
 }
@@ -420,6 +423,7 @@ export async function readWorkspaceSettingsRow(
       sprintCadenceDays: pro.proWorkspaceSettings.sprintCadenceDays,
       sprintStartAt: pro.proWorkspaceSettings.sprintStartAt,
       comparisonMode: pro.proWorkspaceSettings.comparisonMode,
+      hourlyCostCents: pro.proWorkspaceSettings.hourlyCostCents,
     })
     .from(pro.proWorkspaceSettings)
     .where(
@@ -444,7 +448,15 @@ export function toWorkspaceProSettings(
     cadenceDays: days != null && days >= 1 ? days : null,
     startDate: startMs == null ? null : new Date(startMs).toISOString(),
     comparisonMode: comparisonModeOf(row),
+    hourlyCostUsd: hourlyCostUsdOf(row),
   };
+}
+
+/** The workspace's hourly cost in US$, or null when unset. A non-positive stored value (only a
+ *  hand-written UPDATE could put one there — the writer refuses it) reads as unset. */
+export function hourlyCostUsdOf(row: WorkspaceSettingsRow | null): number | null {
+  const cents = row?.hourlyCostCents ?? null;
+  return cents != null && cents > 0 ? cents / 100 : null;
 }
 
 /**
@@ -522,6 +534,7 @@ interface WorkspaceMutableCols {
   sprintCadenceDays: number | null;
   sprintStartAt: Date | null;
   comparisonMode: SprintComparisonMode | null;
+  hourlyCostCents: number | null;
 }
 
 /**
@@ -548,6 +561,7 @@ export function mergeWorkspace(
     // ⚠ SEEDED FROM `existing` like every other column — the third setting on this row as of
     // plugin 0032, and therefore the newest way an unrelated patch could NULL a neighbour.
     comparisonMode: existing?.comparisonMode ?? null,
+    hourlyCostCents: existing?.hourlyCostCents ?? null,
   };
 
   if (patch.sprint) {
@@ -572,6 +586,17 @@ export function mergeWorkspace(
   // product default. A junk value is IGNORED (the field is left as stored) rather than written.
   if (patch.comparisonMode !== undefined && VALID_COMPARISON.includes(patch.comparisonMode))
     out.comparisonMode = patch.comparisonMode;
+
+  // The hourly cost (plugin 0041). `null` CLEARS; omitted keeps; a positive finite figure is stored
+  // as whole cents. Anything else (0, negative, NaN, past the cap) is ignored rather than written.
+  if (patch.hourlyCostUsd === null) out.hourlyCostCents = null;
+  else if (
+    typeof patch.hourlyCostUsd === 'number' &&
+    Number.isFinite(patch.hourlyCostUsd) &&
+    patch.hourlyCostUsd > 0 &&
+    patch.hourlyCostUsd <= HOURLY_COST_MAX_USD
+  )
+    out.hourlyCostCents = Math.round(patch.hourlyCostUsd * 100);
 
   return out;
 }

@@ -7,7 +7,7 @@
      steps    ol.gs-steps > li.gs-step > section.board.gs-row(.wide)
               > .tile.gs-txt.<pigment> > .gs-in (span.gs-n, h2, p, .gs-cmd, p.gs-note)
               · .tile.gs-shot (figure.gs-fig(.gs-phone-hide) > figcaption + a > img,
-                or .gs-term)
+                or .gs-term, or .gs-modes > .gs-mode (b, dl > div > dt + dd))
      command  .gs-cmd > pre > code + button.gs-copy
      close    section.board.gs-close > .tile.gold.gs-close-mid · .tile.gs-close-side
    =========================================================================== */
@@ -205,6 +205,61 @@
 }
 .lb.gs .gs-acc {
   color: #8fd0bd;
+}
+
+/* ---- budget (step 3) -------------------------------------------------- */
+.lb.gs .gs-list {
+  margin: 0;
+  padding: 0 0 0 1.1em;
+  list-style: disc;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 52ch;
+}
+.lb.gs .gs-modes {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.lb.gs .gs-mode {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px 22px;
+  background: #ffffff0a;
+}
+.lb.gs .gs-mode b {
+  font-weight: 600;
+}
+.lb.gs .gs-mode dl {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.lb.gs .gs-mode dl > div {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 16px;
+  padding: 12px 14px;
+  background: #ffffff0d;
+  font-variant-numeric: tabular-nums;
+}
+.lb.gs .gs-mode dt {
+  color: var(--muted);
+}
+.lb.gs .gs-mode dd {
+  margin: 0;
+  min-width: 0;
+  font-weight: 500;
+  /* Short values stay on one line; a sentence-length value (the 5-hour row)
+     wraps inside the row instead of running past it on a phone. */
+  overflow-wrap: anywhere;
+}
+.lb.gs .gs-mode .gs-dim {
+  font-size: 15px;
 }
 
 /* ---- close ------------------------------------------------------------ */

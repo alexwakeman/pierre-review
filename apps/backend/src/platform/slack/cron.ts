@@ -170,7 +170,12 @@ export async function sweepTargets(
     sends.push(
       (async () => {
         try {
-          const message = await buildSlackReport(ctx, llm, row.accountId, row.workspaceId);
+          // THE CLAUDE SPEND BUDGET (core ai/budget.ts): a scheduled send is automatic. Over the
+          // budget it still goes out, with the stored sprint summary instead of a fresh one.
+          const modelAllowed = ctx.aiBudget
+            ? await ctx.aiBudget.allowAutomaticRun(row.accountId, 'Slack sprint summary').catch(() => true)
+            : true;
+          const message = await buildSlackReport(ctx, llm, row.accountId, row.workspaceId, { modelAllowed });
           if (message) await postToSlack(row.webhookUrl, message);
           // Stamp the slot even when there was nothing to report, so it is not retried all day.
           // ⚠ PER ROW — see the note on dueSlot.

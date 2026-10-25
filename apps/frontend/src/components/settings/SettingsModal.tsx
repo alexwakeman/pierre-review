@@ -9,6 +9,7 @@ import { LargePrThresholdSection } from './LargePrThresholdSection.js';
 import { BlastRadiusSection } from './BlastRadiusSection.js';
 import { MyTurnSection, MY_TURN_SECTION_HEADING_ID } from './MyTurnSection.js';
 import { BotScoringSection } from './BotScoringSection.js';
+import { ClaudeSpendSection, CLAUDE_SPEND_SECTION_HEADING_ID } from './ClaudeSpendSection.js';
 import { PendingMuteSection } from './PendingMuteSection.js';
 import { DependencyAutoMergeSection } from './DependencyAutoMergeSection.js';
 import { SonarSection } from './SonarSection.js';
@@ -109,7 +110,9 @@ export function SettingsModal({
         ? MY_TURN_SECTION_HEADING_ID
         : focus === 'issue-tracker'
           ? ISSUE_TRACKER_SECTION_HEADING_ID
-          : null;
+          : focus === 'claude-spend'
+            ? CLAUDE_SPEND_SECTION_HEADING_ID
+            : null;
     let raf: number | null = null;
     let observer: MutationObserver | null = null;
     const INTERACTIONS = ['wheel', 'pointerdown', 'keydown', 'touchstart'] as const;
@@ -192,6 +195,9 @@ export function SettingsModal({
           {/* Local bot-comment scoring's one-time download. Account-level; renders nothing where
               there is nothing to set up (LIMN_ML_DISABLED). */}
           <BotScoringSection />
+          {/* The Claude spend budget — account-grained (it guards this machine's Claude login or
+              API key), read from its own `/api/ai/budget`. Only where AI runs at all. */}
+          {aiEnabled && <ClaudeSpendSection />}
 
           {/* ── WORKSPACE. One team — the one selected in the rail — named ONCE, here. ────── */}
           {/* The half carries no rule of its own: `SectionShell` already draws one under the last

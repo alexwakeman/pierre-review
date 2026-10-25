@@ -236,6 +236,90 @@ stored; the ladder is read at call time, so an env change takes effect on the ne
   `apps/backend/src/ai/runtime.ts`, value-imports them. [PACKAGING.md](PACKAGING.md) owns the
   details and the guardrail. The product modules import no SDK themselves.
 
+### The Claude spend budget (optional, one per machine)
+
+An optional limit that PAUSES Limn's AUTOMATIC model runs before they use up the reader's Claude
+allowance or API bill. OFF until switched on (Settings suggests the defaults). ONE per account =
+per machine (the login / key it guards is the machine's), never per workspace. Types, defaults and
+the estimate table: `packages/shared/src/ai-budget.ts`; the decision, the reading and the gate:
+`ai/budget.ts`; stored on `accounts.ai_budget_settings` + `accounts.ai_budget_reading` (migration
+`0125`). Routes: `GET`/`PUT /api/ai/budget` ([API.md](API.md) § Claude spend budget).
+
+The credential route picks the mode (`decideAiBudget`, pure):
+
+- **Subscription (the login): Limn's SHARE of the week and of the 5-hour session.**
+  `weekSharePct` (whole number 1–50, default 5). Share = Limn's OWN `ai_usage.cost_usd` in the
+  current week ÷ `SUBSCRIPTION_ESTIMATES[sub].week` (ESTIMATES with their source comment — Anthropic
+  publishes no figure). Over when the share ≥ `weekSharePct`. The week is `[reset − 7 days, reset)`
+  when Claude's weekly reset has been read and is still ahead (then `resumesAt` = the reset),
+  otherwise the last 7 days (`resumesAt` = when enough spend rolls out).
+  **The 5-hour share** is measured the same way against `SUBSCRIPTION_ESTIMATES[sub].fiveHour`
+  (Pro 15, Max 5x 75, Max 20x 200, Team 20 — internal, never shown), over `[reset − 5 h, reset)`
+  when Claude's `five_hour` reset has been read and is ahead, else the rolling last 5 hours. Its
+  setting `fiveHourSharePct` is NULL by default = it FOLLOWS `weekSharePct` ("5% a week → 5% a
+  session" — a guess, stated as one); a number (1–50) sets it separately, `null` returns it to
+  following. Over EITHER share pauses automatic runs: `limitedBy` names which (`'week'` when both),
+  `resumesAt` is the later clearing, and the reason is "Limn has used its share of this 5-hour
+  session." for the 5-hour one. ⚠ **The US$ arithmetic is internal** — `status.subscription` carries
+  only percentages, the subscription, `reviewsPerDay`, the window kinds and the resets (a test
+  asserts no dollar field); US$ is for the API key alone. No "pause at N% of Claude's own figure":
+  Claude's usage NEVER blocks. The pure rules (`decideAiBudget`, `aiUsageView`, `rollingSpend`)
+  live in packages/shared so the static demo runs the same ones; `ai/budget.ts` gathers the inputs.
+- **Which subscription** — ONE rule, shared `resolveAiSubscription`: Claude's report of `pro` /
+  `team` is used directly (a pick does not override it); `max` needs the reader to pick Max 5x or
+  Max 20x (the picker offers only the pair, one line asks which); `enterprise` / anything else /
+  no report → the reader picks from all four. Until known: never blocks, `reason` asks for a pick.
+- **The reading** gives the subscription type, the reset times and the header's account-wide
+  figures — never a decision. It holds the `five_hour`, `seven_day` and per-model `seven_day_*`
+  windows (≤ 8), each `{utilization 0–100, resetsAtMs, observedAtMs}`, merged window by window into
+  ONE latest value persisted on `accounts.ai_budget_reading` (a week-only row from before still
+  reads). Two sources: every agent run's `rate_limit_event` (ai/runtime.ts TAPS every Query — the
+  windows named by `unifiedWindows` or `rateLimitType`; its utilisation is a 0–1 FRACTION, converted
+  ×100 on that path, believed from the CLI's header parsing, unproven), and a probe through the Agent
+  SDK's EXPERIMENTAL usage method (login route only, ≤ once per 5 min, single-flight, 20 s timeout,
+  an input stream with no turns so no model call; its utilisation is ALREADY 0–100 — measured on a
+  real Max login — and kept as-is). ⚠ **The probe NEVER blocks a request**: `GET /api/ai/budget`
+  serves the cached reading and starts the probe in the background whatever the budget (the header
+  shows Claude's own figures with the budget off); the gate starts it only while the budget is on. A
+  failure keeps the last reading. ⚠ No shared "≤ 1 means a fraction" guess anywhere. Any throw or
+  shape mismatch = no reading.
+- **The header's usage view** (`usage` on the same response, shared `aiUsageView`): Claude's own
+  windows (a window whose reset has passed is dropped; unknown is absent, never 0), Limn's runs and
+  tokens in the budget's week, Limn's week / 5-hour shares on a known subscription (budget on or
+  off), and on an API key the US$ for the week, the last 5 hours and today (since local midnight).
+- **A run's cost on a subscription is a share of the week, never US$.** Run payloads still carry
+  their recorded `costUsd`; on the login route with a known subscription `usage.weekPctPerUsd` (a
+  RATE, the one US$-named field a subscription carries) turns it into "0.3% of your week" /
+  "<0.1% of your week" through the shared `runWeekShareText`, so the SPA never needs the estimate
+  table. Unknown subscription ⇒ nothing; API key ⇒ US$ as before.
+- **Reviews a working day** (`reviewsPerDay`, shown beside the share): `floor(share × weekly
+  allowance ÷ 5 ÷ cycle)`, cycle = the mean `claude_review` cost over 28 days (fallback $0.42) + the
+  mean `sequence_diagram` cost (fallback $0.22) when ANY of the account's workspaces has
+  `auto_diagrams_enabled`. Null when the subscription is unknown; never NaN / Infinity / negative
+  (shared `reviewsPerDayFor` / `cycleCostUsd`, which the demo reuses).
+- **API key.** A US$ budget per rolling 7 days (`weeklyUsd`, default 25); `status.apiKey {weeklyUsd,
+  usedUsd}`. `resumesAt` = when enough recorded spend rolls out. (The daily budget is gone.)
+
+Settings: `PUT` takes `{enabled, weekSharePct, fiveHourSharePct, subscription, weeklyUsd}` (API key:
+no 5-hour setting is used); an unknown key — including
+the retired `fiveHourPct` / `weekPct` / `dailyUsd` — is a 400, but a stored row still holding them is
+read fine (ignored, dropped on the next write). The GET/PUT answer's `settings.weeklyUsd` is `null`
+off the API-key route (`aiBudgetSettingsView`): no US$ figure on the wire for a subscription.
+
+⚠ **Every AUTOMATIC model run asks the ONE gate first** (`allowAutomaticRun`, reached through
+`review/budget-gate.ts` `automaticRunAllowed` on `AgentContext.aiBudget`, and `ProContext.aiBudget`
+on the platform). Over budget the run is SKIPPED, never queued: auto review's sweep (first reviews,
+re-reviews, Check threads — the settle clocks are kept) and its lane start (manager.ts, before the
+row exists), auto fix (`over_budget` skip reason), the CI and ticket review sweepers (their cursors
+are left alone, so nothing is missed), the design diagrams after an AUTO review, the sprint after-read chain
+(briefs → themes → paths) after a SCHEDULED read, and the Slack digest's sprint summary (the send
+still goes, with the stored summary). Logged once per pause. A run the reader STARTS is never
+refused, nor what follows from it: the diagrams after a MANUAL review and the chain after the
+reader's sprint Refresh (`noteManualSprintRead`, tracker/sprint/hooks.ts) skip the gate. In the SPA,
+over budget, the RUN control inside `AiRunGate` takes a second press (`OverBudgetConfirm`); only the
+Run control — the buttons marked `data-ai-run`, else the gate's only button — never an ⓘ, Discard
+or other button beside it. A new automatic caller must go through the gate.
+
 ## Reference docs in a review
 
 When the PR's workspace has "Use reference docs in Claude Review" on and its library has a built
@@ -891,7 +975,14 @@ table, the routes' paths, the queue and the `SEQUENCE_DIAGRAM_*` env names keep 
   `SEQUENCE_DIAGRAM_STORY_MAX_PRS` = 12 members, else refused `too_many_prs`; at most 3 tickets per PR).
 - **The trigger** (`trigger.ts` `maybeDrawDiagramsAfterReview`): `claude-review/manager.ts` calls it
   fire-and-forget after EVERY SUCCEEDED review, manual or auto. It only QUEUES and never throws, so it
-  can neither block nor fail the review. Skip rules (`fingerprint.ts` `diagramSkipReason`): no CODE
+  can neither block nor fail the review. ⚠ **THE WORKSPACE SWITCH comes first**:
+  `workspaces.auto_diagrams_enabled` (core `0126`, **ON by default** — only a stored false is off),
+  edited in Settings → Auto Claude review as "Draw a design diagram after each review" and written
+  through `GET`/`PUT /api/workspaces/:id/auto-review` as `autoReview.autoDiagramsEnabled`
+  (`setWorkspaceAutoReview`, the ONE writer). Read per PR by `persist.ts` `diagramsSwitchedOnForPr`
+  (through the repo's workspace membership; no membership ⇒ ON). Off ⇒ outcome `switched_off`: no
+  budget read, nothing queued, nothing stored. It gates ONLY this automatic draw — the reader's own
+  Draw / Redraw (`routes.ts` → `startDiagram`, `trigger: 'manual'`) still works. Skip rules (`fingerprint.ts` `diagramSkipReason`): no CODE
   (stored file list through `db/code-loc.ts`'s `isNonCodeFile` — docs/config/lockfile-only ⇒ none;
   unknown ⇒ the pipeline decides from the diff with the same classifier), a row already at this
   fingerprint (any status — a click redraws a failure), one in flight, or the daily cap
@@ -1291,7 +1382,8 @@ per-review budget as the Review button. Storage: CORE `workspaces.auto_review_en
 `pro_workspace_settings` (plugin `0036`) until Claude Review left the plugin, and plugin `0037`
 copied each ON switch across once — those plugin columns are dormant). Read and written through
 `GET`/`PUT /api/workspaces/:id/auto-review` (`claude-review/auto-settings.ts`, 404 for another
-account's workspace; the PUT body takes `enabled` and/or `autoFixEnabled`, at least one, a field
+account's workspace; the PUT body takes `enabled`, `autoFixEnabled` and/or `autoDiagramsEnabled`
+(§ Design diagrams → The trigger), at least one, a field
 left out keeps its stored value); `setWorkspaceAutoReview` is the ONE writer of both switches. `enabled_at`
 is re-stamped on every off → on (whole seconds, so the echo matches what SQLite stores), KEPT on a
 repeated on, and cleared on off, so nothing opened while it was off is picked up. Runs carry `claude_reviews.trigger = 'auto'`

@@ -1078,6 +1078,14 @@ FK. **Platform 0032 added the third and last one: `comparison_mode`.** Control s
 served by ONE writer, `writeWorkspaceSettings` (`WorkspaceProSettings.comparisonMode`,
 `WorkspaceProSettingsUpdate.comparisonMode?`).
 
+**Platform 0041 added `hourly_cost_cents`** — the hourly cost of engineering time, a READING setting
+for Reports → Chronology → Over time ("≈ $X of engineering time at $Y an hour" beside the working
+hours saved; `ChronologyTrend.tsx` `HourlyCost`, priced by `chronologyTrendModel.ts`
+`hoursCostUsd`). Wire: `WorkspaceProSettings.hourlyCostUsd: number | null` (US$, null = not set) and
+`WorkspaceProSettingsUpdate.hourlyCostUsd?` (`null` clears; > 0 and ≤ `HOURLY_COST_MAX_USD`, else
+400). Stored as whole cents, no account default beneath it. It prices the hours estimate and adds no
+claim of its own.
+
 ⚠ **THE MODE MOVED BECAUSE THE CLAIM THAT KEPT IT ACCOUNT-WIDE WAS FALSE.** Four sites asserted it
 was "a reading preference with no per-team meaning"; `resolveComparisonWindow` falsifies that —
 under `'sprint'` a workspace WITH a cadence gets a sprint-position window and one WITHOUT silently
@@ -1166,6 +1174,15 @@ Four surfaces live in `BotsView`, BESIDE the panel rather than inside it:
 `QualityCheckSection` stays in the panel; its mis-role safeguard survives because the
 classification screen (Feed → Bot classification) lists "Other automation" with each row's role
 picker, which is where the re-role happens anyway.
+
+**"Turning it off would save …" (`lib/botSavings.ts` `stopPayingLine`).** Under the table, ONE
+templated sentence per review bot (`vendors` is the `=== 'review'` cohort already) with a positive
+`costMonthlyUsd`, at least `RARELY_USED_MIN_THREADS` (10) threads and `actedOnPct` under
+`RARELY_USED_MAX_PCT` (30 — the same cut as the "Rarely used" verdict): "Cursor Bugbot costs $40 a
+month and your team used 12% of its threads in the last 14 days. Turning it off would save $480 a
+year." Annual = monthly × 12. It reads the ROI row's own figures (no new acted-on measure) and is
+gated on the SAME `showCost = repoId == null` as the `$ per used thread` column, so a repo-narrowed
+mount shows none. No model, no total across bots or Workspaces.
 
 ⚠ **`vendors`, `suggestions` and `totals` are REQUIRED on `BotAnalyticsResponse`.** The SPA decides
 what to draw from the payload's own content, never by inferring a state from zeros.

@@ -63,6 +63,13 @@ import { onOff, writeSettingEvent } from '../../db/setting-event-write.js';
 // while auto review is off, but switching auto review off and on keeps it. The `autoVerdict` and
 // `autoResolve` switches (both OFF by default) ride the same overrides JSON (no column), and so
 // does `approveImpact` (which blast-radius levels an auto verdict may APPROVE; all by default).
+//
+// AUTOMATIC DESIGN DIAGRAMS ride the same route as one more column, `auto_diagrams_enabled`
+// (migration 0126): may a succeeded review (MANUAL OR AUTO) queue its design diagrams
+// (review/diagrams/trigger.ts)? ⚠ ON BY DEFAULT — only a stored false is off, in every reader and
+// in the writer. Independent of `auto_review_enabled`. Off stops only the automatic draw; the
+// Draw / Redraw button still works. Read by the trigger through `diagramsSwitchedOnForPr`
+// (review/diagrams/persist.ts).
 
 /** Auto Claude reviews started per workspace per UTC day. Past it, PRs wait for the next day. */
 export const AUTO_REVIEW_DAILY_CAP = 20;
@@ -163,6 +170,7 @@ interface AutoRow {
   enabled: boolean | null;
   enabledAt: Date | number | null;
   autoFixEnabled: boolean | null;
+  autoDiagramsEnabled: boolean | null;
   dailyCap: number | null;
   autoPostEnabled: boolean | null;
   autoPostSettings: StoredAutoPostSettings | null;
@@ -178,6 +186,8 @@ export function autoReviewOf(row: AutoRow | null): WorkspaceAutoReviewSettings {
     enabledAt: atMs == null ? null : new Date(atMs).toISOString(),
     dailyCap: resolveAutoReviewDailyCap(row?.dailyCap),
     autoFixEnabled: row?.autoFixEnabled === true,
+    // ON unless explicitly switched off (0126).
+    autoDiagramsEnabled: row?.autoDiagramsEnabled !== false,
     autoPost: resolveAutoPostSettings(row?.autoPostEnabled, row?.autoPostSettings),
     autoFix: resolveAutoFixSettings(row?.autoFixSettings),
   };
@@ -254,6 +264,7 @@ const autoCols = (w: AgentContext['schema'][string]) => ({
   enabled: w.autoReviewEnabled,
   enabledAt: w.autoReviewEnabledAt,
   autoFixEnabled: w.autoFixEnabled,
+  autoDiagramsEnabled: w.autoDiagramsEnabled,
   dailyCap: w.autoReviewDailyCap,
   autoPostEnabled: w.autoPostEnabled,
   autoPostSettings: w.autoPostSettings,
@@ -279,7 +290,7 @@ export async function readWorkspaceAutoReview(
 
 /**
  * The ONE writer. null when the workspace is not this account's (→ 404). Each of `enabled` /
- * `autoFixEnabled` / `dailyCap` is optional and a field left out keeps its stored value. A
+ * `autoFixEnabled` / `autoDiagramsEnabled` / `dailyCap` is optional and a field left out keeps its stored value. A
  * `dailyCap` equal to the default is stored as NULL (overrides only). Switching auto review
  * OFF also drops this workspace's items still WAITING in the auto lane (no row yet, so nothing is
  * lost) — they are not reviewed, and not billed, after the switch. A run already started keeps
@@ -301,7 +312,7 @@ export async function setWorkspaceAutoReview(
     .execute()) as AutoRow[];
   const existing = rows[0];
   if (!existing) return null;
-  const { enabled, autoFixEnabled, dailyCap, autoPost, autoFix } = change;
+  const { enabled, autoFixEnabled, autoDiagramsEnabled, dailyCap, autoPost, autoFix } = change;
   const wasOn = existing.enabled === true && toMs(existing.enabledAt) != null;
   let review: Pick<AutoRow, 'enabled' | 'enabledAt'>;
   if (enabled === undefined || (enabled && wasOn)) review = existing;
@@ -319,6 +330,9 @@ export async function setWorkspaceAutoReview(
   // Only a stored true is on (NULL / false = OFF since 0084).
   const fixWas = existing.autoFixEnabled === true;
   const fix = autoFixEnabled ?? fixWas;
+  // Only a stored false is off (ON by default, 0126).
+  const diagramsWas = existing.autoDiagramsEnabled !== false;
+  const diagrams = autoDiagramsEnabled ?? diagramsWas;
   const capOverride =
     dailyCap === undefined ? existing.dailyCap : dailyCap === AUTO_REVIEW_DAILY_CAP ? null : dailyCap;
   // Auto-posting: each field optional; a kind left out keeps its stored value.
@@ -355,6 +369,7 @@ export async function setWorkspaceAutoReview(
     enabled: review.enabled,
     enabledAt: review.enabledAt,
     autoFixEnabled: fix,
+    autoDiagramsEnabled: diagrams,
     dailyCap: capOverride,
     autoPostEnabled: postAfter.enabled,
     autoPostSettings: postOverrides,
@@ -367,6 +382,9 @@ export async function setWorkspaceAutoReview(
   }
   if (autoFixEnabled !== undefined && autoFixEnabled !== fixWas) {
     set.autoFixEnabled = autoFixEnabled;
+  }
+  if (autoDiagramsEnabled !== undefined && autoDiagramsEnabled !== diagramsWas) {
+    set.autoDiagramsEnabled = autoDiagramsEnabled;
   }
   if (dailyCap !== undefined && capOverride !== existing.dailyCap) {
     set.autoReviewDailyCap = capOverride;
@@ -408,6 +426,9 @@ function settingChanges(
   const isOn = next.enabled === true && toMs(next.enabledAt) != null;
   if ('autoReviewEnabled' in set && wasOn !== isOn) out.push(['auto_review', `Auto review ${onOff(isOn)}`]);
   if ('autoReviewDailyCap' in set) out.push(['auto_review', 'Auto review daily limit changed']);
+  if ('autoDiagramsEnabled' in set) {
+    out.push(['auto_review', `Design diagrams after each review ${onOff(next.autoDiagramsEnabled !== false)}`]);
+  }
   if ('autoFixEnabled' in set) out.push(['auto_fix', `Auto fix ${onOff(next.autoFixEnabled === true)}`]);
   if ('autoFixSettings' in set) {
     const was = resolveAutoFixSettings(existing.autoFixSettings).autoPush;
@@ -526,6 +547,7 @@ export function registerAutoReviewSettingsRoutes(app: FastifyInstance, ctx: Agen
           properties: {
             enabled: { type: 'boolean' },
             autoFixEnabled: { type: 'boolean' },
+            autoDiagramsEnabled: { type: 'boolean' },
             // An integer 1..500; anything else (a fraction, a string, out of range) is a 400.
             dailyCap: {
               type: 'integer',

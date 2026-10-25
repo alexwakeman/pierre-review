@@ -4,6 +4,7 @@ import { config } from '../../config.js';
 import type { AgentContext } from '../agent-context.js';
 import { getTicketSource } from '../../tracker/ticket-source.js';
 import { agenticRunReady } from '../claude-review/ai-ready.js';
+import { automaticRunAllowed } from '../budget-gate.js';
 import { autoReviewAvailable, autoReviewDue, utcDayStartMs } from '../claude-review/auto.js';
 import { listAutoReviewWorkspaces } from '../claude-review/auto-settings.js';
 import { onAutoReviewLaunched } from '../claude-review/manager.js';
@@ -112,6 +113,8 @@ export interface TicketSweepResult {
   considered: string[];
   queued: Array<{ ident: string; trigger: 'auto' | 'cascade'; workspaceId: number }>;
   stopped: 'lane_full' | 'ai_not_ready' | null;
+  // True when the Claude spend budget paused an account this tick (its work waits, nothing is lost).
+  overBudget?: boolean;
 }
 
 /**
@@ -224,6 +227,13 @@ export async function runTicketReviewSweep(
 
     for (const [accountId, enabled] of byAccount) {
       if (result.stopped) break;
+      // THE CLAUDE SPEND BUDGET (ai/budget.ts): over it, read nothing and queue nothing. The PR
+      // snapshot, the kicks and the change cursor are left as they are, so every change made while
+      // paused is still "changed" on the first tick back under the limit.
+      if (!(await automaticRunAllowed(ctx, accountId, 'ticket review'))) {
+        result.overBudget = true;
+        continue;
+      }
 
       // ---- 1. what changed since the last tick ----
       const open = await openPrsIn(ctx, accountId, [...enabled.keys()]);

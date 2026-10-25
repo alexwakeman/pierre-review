@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { SPRINT_ASK_QUESTION_MAX, type SprintGraphNode } from '@pierre-review/shared';
 import { useSprintAsk, useSprintAsking, useSprintAskTranscript, type SprintAskShownTurn } from '../../hooks/useSprintStories.js';
 import { rehypeTicketLinks } from '../../lib/ticketLinks.js';
-import { formatUsd } from '../../lib/ui.js';
+import { useRunCostText } from '../../hooks/useAiBudget.js';
 import { AiRunGate } from '../AiSetup.js';
 import { CloseIcon, SparkleIcon } from '../Icons.js';
 import { InfoButton } from '../InfoModal.js';
@@ -31,6 +31,8 @@ export function SprintAskPanel({
   onClose: () => void;
 }): JSX.Element {
   const turns = useSprintAskTranscript((s) => s.turns[workspaceId] ?? EMPTY);
+  // US$ on an API key, the share of the week on a Claude subscription (lib/aiBudget.ts `runCostText`).
+  const costText = useRunCostText();
   const clear = useSprintAskTranscript((s) => s.clear);
   const ask = useSprintAsk(workspaceId);
   const asking = useSprintAsking(workspaceId);
@@ -81,7 +83,7 @@ export function SprintAskPanel({
             requests. It reads nothing else and changes nothing.
           </p>
           <p>It remembers this conversation&rsquo;s earlier questions, up to a limit. The conversation is gone when you leave the page.</p>
-          <p>Each answer runs on your own Claude Code login or Anthropic API key; its cost is shown under it.</p>
+          <p>Each answer runs on your own Claude Code login or Anthropic API key; what it used is shown under it.</p>
         </InfoButton>
         <span className="ml-auto" />
         {turns.length > 0 && (
@@ -111,8 +113,14 @@ export function SprintAskPanel({
               </Markdown>
             </div>
             <p className={`text-[11px] ${MUTED}`}>
-              {t.costUsd != null ? formatUsd(t.costUsd) : 'Cost not reported'}
-              {t.trimmedTurns > 0 && ` · the oldest ${t.trimmedTurns === 1 ? 'question was' : `${t.trimmedTurns} questions were`} not read`}
+              {[
+                costText(t.costUsd) ?? (t.costUsd == null ? 'Cost not reported' : null),
+                t.trimmedTurns > 0
+                  ? `the oldest ${t.trimmedTurns === 1 ? 'question was' : `${t.trimmedTurns} questions were`} not read`
+                  : null,
+              ]
+                .filter((x): x is string => x != null)
+                .join(' · ')}
             </p>
           </div>
         ))}

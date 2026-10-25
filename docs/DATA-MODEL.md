@@ -186,6 +186,11 @@ isolation as above (`accountId` denormalized onto the anchor tables;
   `model` is plain `text` with NO drizzle `enum:` in either schema, so a run from a retired model
   (the old Opus 4.8) reads back with its id intact; the offered list lives only in `packages/shared`
   `CLAUDE_REVIEW_MODELS`. Contracts: docs/CLAUDE-REVIEW.md.
+- **`workspaces.autoDiagramsEnabled`** (`auto_diagrams_enabled`, migration `0126`, `integer DEFAULT 1
+  NOT NULL`) — may a succeeded Claude review (manual or auto) queue its design diagrams? **ON by
+  default**; only a stored false is off (`autoReviewOf`, `diagramsSwitchedOnForPr`). Off stops only
+  the automatic draw (review/diagrams/trigger.ts); Draw / Redraw still works. The ONE writer is
+  `setWorkspaceAutoReview`; docs/CLAUDE-REVIEW.md § Design diagrams.
 - **AUTO-POSTING columns** (migration `0087`, all nullable, no defaults, no new table —
   docs/CLAUDE-REVIEW.md § Auto-posting): `workspaces.autoPostEnabled` (NULL/false = OFF, for every
   workspace until switched on) + `workspaces.autoPostSettings` (JSON `StoredAutoPostSettings`,

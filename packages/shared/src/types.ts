@@ -4479,6 +4479,10 @@ export interface WorkspaceProSettings {
   // sprint-position comparison. Reading the two off different grains is how one setting produced
   // two window shapes with nothing on screen saying which you got.
   comparisonMode: SprintComparisonMode;
+  // The hourly cost of engineering time in US$, for Reports → Chronology's "hours saved" figure
+  // (plugin migration 0041). null = not set: the chart shows hours only. A READING setting with no
+  // account-level default beneath it.
+  hourlyCostUsd: number | null;
   // RETIRED: auto Claude review moved to core with Claude Review (`GET`/`PUT
   // /api/workspaces/:id/auto-review`, `WorkspaceAutoReviewResponse`). The plugin no longer sends
   // this; it stays OPTIONAL so an older plugin still type-checks. Never read it.
@@ -4512,6 +4516,8 @@ export interface SetWorkspaceAutoReviewBody {
   enabled?: boolean;
   // The auto AI Fix switch (`WorkspaceAutoReviewSettings.autoFixEnabled`).
   autoFixEnabled?: boolean;
+  // The automatic design-diagram switch (`WorkspaceAutoReviewSettings.autoDiagramsEnabled`).
+  autoDiagramsEnabled?: boolean;
   // The daily cap (`WorkspaceAutoReviewSettings.dailyCap`): an integer 1..500, else a 400.
   dailyCap?: number;
   // Auto-posting (`WorkspaceAutoReviewSettings.autoPost`). Each field optional; a kind left out
@@ -4553,6 +4559,11 @@ export interface WorkspaceAutoReviewSettings {
   // auto review off keeps it), but it only runs after an auto review, so it does nothing while
   // `enabled` is false. Pushed only when `autoFix.autoPush` is on.
   autoFixEnabled: boolean;
+  // AUTOMATIC DESIGN DIAGRAMS (`workspaces.auto_diagrams_enabled`, migration 0126). After every
+  // succeeded Claude review, MANUAL OR AUTO, queue the PR's design diagram (and its tickets' story
+  // diagrams). ON by default (anything but a stored false reads ON); independent of `enabled`. Off
+  // stops only the automatic draw — the Draw / Redraw button still works.
+  autoDiagramsEnabled: boolean;
   // What an auto fix always includes, and whether a succeeded one is pushed
   // (`workspaces.auto_fix_settings`, migration 0091 / pg 0078, OVERRIDES ONLY). Always a full
   // resolved value — `resolveAutoFixSettings` (auto-settings.ts) is the ONE fold.
@@ -5065,6 +5076,9 @@ export interface WorkspaceProSettingsUpdate {
   // explicit ask, which would make a mode-only patch impossible to express. Omitted = unchanged;
   // there is no "clear" — the mode always has a value, and writing `'rolling_14'` IS the default.
   comparisonMode?: SprintComparisonMode;
+  // The hourly cost of engineering time in US$ (plugin migration 0041). Omitted = unchanged; `null`
+  // CLEARS it; otherwise > 0 and ≤ HOURLY_COST_MAX_USD, stored as whole cents.
+  hourlyCostUsd?: number | null;
   // (NO `jira` section either — same move, same route.)
 }
 
@@ -7361,7 +7375,9 @@ export type ClaudeAutoFixSkipReason =
   // The fixer refused to start (no Claude credential, busy queue, review gone…).
   | 'not_started'
   // Auto AI Fix is switched off for this PR's workspace (`WorkspaceAutoReviewSettings.autoFixEnabled`).
-  | 'off';
+  | 'off'
+  // The Claude spend budget is reached (ai-budget.ts); automatic runs are paused.
+  | 'over_budget';
 
 export type ClaudeAutoFixOutcome =
   | { reviewId: number; status: 'started'; fixId: number }

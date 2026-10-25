@@ -9,7 +9,7 @@ import {
   useDocsConversations,
 } from '../../hooks/useReferenceDocs.js';
 import { LIBRARY_INDEX_PATH, citationLabel } from '../../lib/referenceDocs.js';
-import { formatUsd } from '../../lib/ui.js';
+import { useRunCostText } from '../../hooks/useAiBudget.js';
 import { useDocsView } from '../../store/docsView.js';
 import { AiRunGate } from '../AiSetup.js';
 import { BookIcon, SparkleIcon } from '../Icons.js';
@@ -41,6 +41,8 @@ function Answer({
     [message.citations],
   );
   const renderLink = useDocLinkRenderer(LIBRARY_INDEX_PATH, onOpen, undefined, quoteFor);
+  // US$ on an API key, the share of the week on a Claude subscription (lib/aiBudget.ts `runCostText`).
+  const cost = useRunCostText()(message.costUsd) ?? (message.costUsd == null ? 'Cost not reported' : null);
   return (
     <div className="space-y-1.5">
       <div className="text-[13px] text-gray-800 dark:text-gray-100">
@@ -65,7 +67,7 @@ function Answer({
           </ul>
         </div>
       )}
-      <p className={`text-[11px] ${MUTED}`}>{message.costUsd != null ? formatUsd(message.costUsd) : 'Cost not reported'}</p>
+      {cost != null && <p className={`text-[11px] ${MUTED}`}>{cost}</p>}
     </div>
   );
 }
@@ -124,7 +126,7 @@ export function DocsChat({
           </p>
           <p>Each point links to the section it came from. When two documents disagree, it cites both.</p>
           <p>It remembers the earlier questions in a conversation, up to a limit. It changes nothing.</p>
-          <p>Each answer runs on your own Claude Code login or Anthropic API key; its cost is shown under it.</p>
+          <p>Each answer runs on your own Claude Code login or Anthropic API key; what it used is shown under it.</p>
         </InfoButton>
         <span className="ml-auto" />
         {list.length > 0 && (

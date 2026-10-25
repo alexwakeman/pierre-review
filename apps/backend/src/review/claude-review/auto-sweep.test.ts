@@ -563,3 +563,36 @@ describe('comment bursts → Check threads', () => {
     expect(autoReviewWaiting(42, 1)).toBeNull();
   });
 });
+
+describe('the Claude spend budget gate (ai/budget.ts)', () => {
+  it('⚠ asks the gate per account and queues NOTHING while over budget; the PRs come back after', async () => {
+    answers.set(7, { prIds: [11, 12], autoToday: 0 });
+    const asked: Array<[number, string]> = [];
+    let allow = false;
+    const ctx = makeCtx({
+      aiBudget: {
+        allowAutomaticRun: async (accountId: number, what: string) => {
+          asked.push([accountId, what]);
+          return allow;
+        },
+      },
+    });
+    const paused = await runAutoReviewSweep(ctx, NOW);
+    expect(asked).toEqual([[1, 'auto review']]);
+    expect(paused.overBudget).toBe(true);
+    expect(paused.queued).toBe(0);
+    expect(calls).toEqual([]); // the candidates are not even read
+    expect(enqueued).toEqual([]);
+
+    allow = true;
+    const back = await runAutoReviewSweep(ctx, NOW + 60_000);
+    expect(back.overBudget).toBeUndefined();
+    expect(enqueued.map(([, p]) => p)).toEqual([11, 12]);
+  });
+
+  it('a context without the gate (an older fake) is allowed', async () => {
+    answers.set(7, { prIds: [11], autoToday: 0 });
+    await runAutoReviewSweep(makeCtx(), NOW);
+    expect(enqueued.map(([, p]) => p)).toEqual([11]);
+  });
+});

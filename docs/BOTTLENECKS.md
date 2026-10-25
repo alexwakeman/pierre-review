@@ -184,6 +184,10 @@ baseline, and a before/after lens opened from any marker.
   of the first 8 usable weeks and counting starts the week after; clicking a week (or "Measure hours
   saved from this week" in the lens) moves the start there, against the 8 usable weeks before it.
   Fewer than 4 usable weeks before the start refuses.
+- **Hours saved in US$**: when the Workspace has an hourly cost set
+  (`WorkspaceProSettings.hourlyCostUsd`, platform migration 0041, set/cleared from the chart itself),
+  the figure reads "≈ $X of engineering time at $Y an hour" (|rounded hours| × rate). Blank until
+  set; the explanation is behind its ⓘ.
 
 ## Working hours and budgets
 

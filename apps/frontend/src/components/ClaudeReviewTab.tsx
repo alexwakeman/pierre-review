@@ -25,7 +25,8 @@ import {
   DEFAULT_CLAUDE_REVIEW_MODEL,
   followUpSentence,
 } from '@pierre-review/shared';
-import { formatDate, formatUsd, relativeTime, safeExternalUrl } from '../lib/ui.js';
+import { formatDate, relativeTime, safeExternalUrl } from '../lib/ui.js';
+import { useRunCostText } from '../hooks/useAiBudget.js';
 import {
   autoLiftLine,
   autoPostFailureLine,
@@ -160,11 +161,13 @@ const SEVERITY_ORDER: ClaudeFindingSeverity[] = [
 // The rank + pill palette live in lib/claudeReviewFollowUp.ts, shared with the previous-review
 // list so an earlier comment's severity paints the same pill as a current finding's.
 
-// "abc1234 · Claude Opus 5.5 · US$0.42". A retired model id prints raw.
-function metaLine(review: ClaudeReview): string {
+// "abc1234 · Claude Opus 5.5 · US$0.42" on an API key, "… · 0.3% of your week" on a Claude
+// subscription (`costText`, the ONE run-cost wording). A retired model id prints raw.
+function metaLine(review: ClaudeReview, costText: (usd: number | null | undefined) => string | null): string {
   const label = (CLAUDE_REVIEW_MODEL_LABELS as Record<string, string>)[review.model] ?? review.model;
   const parts: string[] = [shortSha(review.headSha), label];
-  if (review.costUsd != null) parts.push(formatUsd(review.costUsd));
+  const cost = costText(review.costUsd);
+  if (cost != null) parts.push(cost);
   return parts.join(' · ');
 }
 
@@ -1241,6 +1244,7 @@ function ClaudesReview({
   // The CI check section (its own run), after Story check and before the chat.
   ciCheck: ReactNode;
 }): JSX.Element {
+  const costText = useRunCostText();
   // Praise is not a finding: an older run's stored praise is hidden everywhere below (counts,
   // list, follow-up), nothing deleted. The summary carries the one praise line now.
   const review = useMemo(() => withoutPraise(storedReview), [storedReview]);
@@ -1352,7 +1356,7 @@ function ClaudesReview({
           </InfoButton>
         }
       >
-        <div className="text-xs text-gray-500 dark:text-gray-400">{metaLine(review)}</div>
+        <div className="text-xs text-gray-500 dark:text-gray-400">{metaLine(review, costText)}</div>
         {followUpLine != null && <div className="font-medium">{followUpLine}</div>}
         {review.summary != null && review.summary !== '' && <Markdown prRefs>{review.summary}</Markdown>}
       </ReviewSection>
@@ -1687,6 +1691,7 @@ export function ClaudeReviewTab({
   // and self-invalidates the full review on the terminal `done` (so the finished
   // result loads without a poll).
   const { status } = useClaudeReviewStream(pr.id, isRunning);
+  const costText = useRunCostText();
 
   // Which run is shown in Section A: the latest unless the user picked an older
   // one from history. Both are hooks, so they MUST run unconditionally — before
@@ -1740,6 +1745,9 @@ export function ClaudeReviewTab({
   const canEdit = viewingLatest && review != null;
 
   const phase = status?.progress?.phase ?? null;
+  // The live estimate, worded like every run cost: US$ on an API key, the share of the week on a
+  // Claude subscription, nothing when unknown.
+  const liveCost = costText(status?.progress?.usage?.estCostUsd);
   const phaseLabel = phase != null ? (PHASE_LABEL[phase] ?? phase) : 'Starting…';
 
   // ⚠ The server posts the STORED draft body. Clicking Preview blurs the summary box, whose save
@@ -1940,9 +1948,9 @@ export function ClaudeReviewTab({
               </span>
               <span
                 className="font-semibold text-gray-600 dark:text-gray-300"
-                title="Estimated cost so far, on your own Claude Code login or Anthropic API key. Limn charges nothing. The figure recorded when the run finishes is authoritative."
+                title="Estimated so far, on your own Claude Code login or Anthropic API key. Limn charges nothing. The figure recorded when the run finishes is authoritative."
               >
-                ~{formatUsd(status.progress.usage.estCostUsd)}
+                {liveCost != null && `~${liveCost}`}
               </span>
             </div>
           )}

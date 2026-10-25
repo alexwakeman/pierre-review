@@ -151,3 +151,11 @@ export interface FlowTrendResponse {
   /** Days of history the server keeps (RETENTION_DAYS), when that is shorter than the span. */
   retentionDays: number | null;
 }
+
+/**
+ * The highest hourly cost of engineering time a workspace may store, in US$
+ * (`WorkspaceProSettings.hourlyCostUsd`, Reports → Chronology → Over time). A guard against a typo
+ * (an annual salary typed into an hourly box), not a claim about anyone's pay. The route's body
+ * schema and the store both read it.
+ */
+export const HOURLY_COST_MAX_USD = 2_000;

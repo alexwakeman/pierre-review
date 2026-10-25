@@ -53,6 +53,7 @@ const VIEWS = [
   ),
   ['user-activity:2', '?view=user-activity:2', null],
   ['ws2:open-prs', '?view=activity&workspace=2', null],
+  ['ws2:chronology', '?view=activity&workspace=2&activityRepo=insights&insightsTab=bottlenecks', null],
 ];
 
 async function main() {

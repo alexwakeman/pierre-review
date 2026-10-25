@@ -8,7 +8,7 @@ import type {
 } from '@pierre-review/shared';
 import type { ProContext } from '../contract.js';
 import type { LlmClient } from '../llm/seam.js';
-import { refreshSprintReport } from '../insights/sprint-report.js';
+import { refreshSprintReport, storedSprintReport } from '../insights/sprint-report.js';
 import { workspaceScope } from '../insights/workspace-request.js';
 import { getComparisonWindow } from '../settings/store.js';
 import { fitSections, toSlackMrkdwn } from './format.js';
@@ -161,6 +161,9 @@ export async function buildSlackReport(
   llm: LlmClient,
   accountId: number,
   workspaceId: number,
+  // False when the scheduled send found the Claude spend budget reached: the sprint summary is the
+  // stored one, never regenerated. A reader's "Send now" leaves it undefined (a click is not gated).
+  opts: { modelAllowed?: boolean } = {},
 ): Promise<SlackMessage | null> {
   // The board first. Optional seam: an older host has none, and the message is then the sprint
   // summary and bot block alone. A failed read degrades the same way rather than losing the send.
@@ -174,7 +177,10 @@ export async function buildSlackReport(
     }
   }
 
-  const sprint = await refreshSprintReport(ctx, llm, accountId, workspaceId);
+  const sprint =
+    opts.modelAllowed === false
+      ? await storedSprintReport(ctx, accountId, workspaceId)
+      : await refreshSprintReport(ctx, llm, accountId, workspaceId);
   const workspaceRepoIds = new Set((await workspaceScope(ctx, accountId, workspaceId)).repoIds);
 
   // The app deep links. `null` whenever the host published no `appWebUrl` (an older host), in

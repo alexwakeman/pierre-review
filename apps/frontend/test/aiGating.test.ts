@@ -92,10 +92,12 @@ describe('the wiring', () => {
     }
   });
 
-  it('the Claude Review tab prints money, not credits', () => {
+  it('the Claude Review tab words a run’s cost through the ONE formatter, never credits', () => {
+    // US$ on an API key, the share of the week on a subscription (lib/aiBudget.ts `runCostText`).
     const tab = read(join(root, 'components', 'ClaudeReviewTab.tsx'));
     expect(tab).not.toMatch(/usdToCredits/);
-    expect(tab).toMatch(/formatUsd\(/);
+    expect(tab).toMatch(/useRunCostText\(/);
+    expect(tab).not.toMatch(/formatUsd\(/);
   });
 
   it('every agentic start button sits behind the one gate', () => {

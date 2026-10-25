@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { SprintRefreshResponse, TrackerProvider } from '@pierre-review/shared';
 import { resolveRequestWorkspaceId, type TrackerContext } from '../context.js';
-import { startSprintTicketChecks } from './hooks.js';
+import { noteManualSprintRead, startSprintTicketChecks } from './hooks.js';
 import { sprintReadErrorMessage } from './read.js';
 
 // POST /api/sprint-stories/refresh {workspaceId} — "read this workspace's sprint list again now".
@@ -26,6 +26,8 @@ export function registerSprintReadRoutes(app: FastifyInstance, ctx: TrackerConte
     const store = await import('../../db/sprint-store.js');
     await store.noteSprintViewed(accountId, workspaceId);
     await store.markSprintReadDue(accountId, workspaceId);
+    // The reader asked: the briefs after this read skip the Claude spend budget's gate.
+    noteManualSprintRead(accountId, workspaceId);
     store.kickSprintRead(accountId, workspaceId);
     const ticketChecks = await startSprintTicketChecks(accountId, workspaceId);
     const row = await store.readSprintRead(accountId, workspaceId);

@@ -634,7 +634,61 @@ export type AnthropicSdk = typeof import('@anthropic-ai/sdk');
 export type McpSdk = typeof import('@modelcontextprotocol/sdk/server');
 export type ZodModule = typeof import('zod');
 
-export const loadAgentSdk = (): Promise<AgentSdk> => runtime.load<AgentSdk>('@anthropic-ai/claude-agent-sdk');
+export const loadAgentSdk = async (): Promise<AgentSdk> =>
+  tapAgentSdk(await runtime.load<AgentSdk>('@anthropic-ai/claude-agent-sdk'));
+
+// ---- the message tap (the Claude spend budget's usage reading) ------------------------------------
+//
+// Every agent run's message stream passes ONE observer (ai/budget.ts installs it at boot), so the
+// subscription usage the SDK reports (`rate_limit_event`) is folded from EVERY run without each
+// runner remembering to forward it. The tap is invisible to callers: same module members, same Query
+// methods, same messages. An observer that throws is swallowed — the budget never breaks a run.
+
+export type AgentMessageObserver = (message: unknown) => void;
+let agentMessageObserver: AgentMessageObserver | null = null;
+
+/** Install (or clear) the one observer every agent run's messages pass through. */
+export function setAgentMessageObserver(fn: AgentMessageObserver | null): void {
+  agentMessageObserver = fn;
+}
+
+function observe(message: unknown): void {
+  if (!agentMessageObserver) return;
+  try {
+    agentMessageObserver(message);
+  } catch {
+    /* never into the run */
+  }
+}
+
+/** Wrap a Query (an AsyncGenerator with extra methods) so each yielded message is observed. */
+export function tapQuery<Q extends object>(q: Q): Q {
+  const proxy: Q = new Proxy(q, {
+    get(target, prop) {
+      if (prop === 'next') {
+        return async (...args: unknown[]) => {
+          const r = await (target as unknown as AsyncIterator<unknown>).next(...(args as []));
+          if (!r.done) observe(r.value);
+          return r;
+        };
+      }
+      if (prop === Symbol.asyncIterator) return () => proxy;
+      const v: unknown = Reflect.get(target, prop, target);
+      return typeof v === 'function' ? (v as (...a: unknown[]) => unknown).bind(target) : v;
+    },
+  });
+  return proxy;
+}
+
+const tappedSdks = new WeakMap<object, AgentSdk>();
+function tapAgentSdk(mod: AgentSdk): AgentSdk {
+  const hit = tappedSdks.get(mod);
+  if (hit) return hit;
+  const query = ((params: Parameters<AgentSdk['query']>[0]) => tapQuery(mod.query(params))) as AgentSdk['query'];
+  const tapped = { ...mod, query } as AgentSdk;
+  tappedSdks.set(mod, tapped);
+  return tapped;
+}
 export const loadAnthropicSdk = (): Promise<AnthropicSdk> => runtime.load<AnthropicSdk>('@anthropic-ai/sdk');
 export const loadMcpSdk = (): Promise<McpSdk> => runtime.load<McpSdk>('@modelcontextprotocol/sdk');
 export const loadZodModule = (): Promise<ZodModule> => runtime.load<ZodModule>('zod');

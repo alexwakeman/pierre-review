@@ -82,6 +82,7 @@ import type { ClaudeAutoReviewWaiting } from '@pierre-review/shared';
 import { config } from '../../config.js';
 import type { AgentContext } from '../agent-context.js';
 import { agenticRunReady } from './ai-ready.js';
+import { automaticRunAllowed } from '../budget-gate.js';
 import { listAutoReviewWorkspaces } from './auto-settings.js';
 import {
   autoLaneRoom,
@@ -217,6 +218,8 @@ export interface AutoSweepResult {
   checksQueued?: number;
   // Why the sweep stopped early, if it did.
   stopped: 'lane_full' | 'ai_not_ready' | null;
+  // True when the Claude spend budget paused at least one account's automatic runs this tick.
+  overBudget?: boolean;
 }
 
 let sweeping = false;
@@ -248,7 +251,17 @@ export async function runAutoReviewSweep(
     // PUT drops them at once; this catches any other way the switch went off).
     const on = new Set(roster.map((w) => `${w.accountId}:${w.workspaceId}`));
     dropAutoReviews((accountId, workspaceId) => on.has(`${accountId}:${workspaceId}`));
+    // THE CLAUDE SPEND BUDGET (ai/budget.ts): asked once per account per tick. Over it, the account's
+    // workspaces queue nothing (first reviews, re-reviews and Check threads alike) and keep their
+    // settle clocks; the next tick under the limit picks them up.
+    const budgetOk = new Map<number, boolean>();
+    for (const accountId of new Set(roster.map((w) => w.accountId))) {
+      const ok = await automaticRunAllowed(ctx, accountId, 'auto review');
+      budgetOk.set(accountId, ok);
+      if (!ok) result.overBudget = true;
+    }
     for (const ws of roster) {
+      if (budgetOk.get(ws.accountId) === false) continue;
       if (autoLaneRoom() === 0) {
         result.stopped = 'lane_full';
         break;
@@ -409,7 +422,7 @@ export async function runAutoReviewSweep(
     }
     // Forget heads that are no longer candidates (reviewed, closed, switched off) — only after a
     // FULL pass, or a skipped workspace would restart its wait.
-    if (!result.stopped) {
+    if (!result.stopped && !result.overBudget) {
       for (const k of headSeen.keys()) if (!liveHeads.has(k)) headSeen.delete(k);
       for (const k of waitingNow.keys()) if (!livePrs.has(k)) waitingNow.delete(k);
     }

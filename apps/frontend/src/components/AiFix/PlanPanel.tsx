@@ -248,10 +248,10 @@ export function PlanPanel({
               </p>
             )}
             <div className="mt-2 flex flex-wrap items-center gap-2">
-              <button type="button" className={BTN_SECONDARY} disabled={busy || text === '' || tooLong} onClick={send}>
+              <button type="button" data-ai-run className={BTN_SECONDARY} disabled={busy || text === '' || tooLong} onClick={send}>
                 Update plan
               </button>
-              <button type="button" className={BTN_PRIMARY} disabled={busy} onClick={doApprove}>
+              <button type="button" data-ai-run className={BTN_PRIMARY} disabled={busy} onClick={doApprove}>
                 Approve and build
               </button>
               <button type="button" className={BTN_SECONDARY} disabled={busy} onClick={() => discard.mutate(fix.id)}>

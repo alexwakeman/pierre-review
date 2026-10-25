@@ -26,6 +26,7 @@ const SKIP_TEXT: Record<ClaudeAutoFixSkipReason, string> = {
   head_moved: 'the PR has new commits since this review',
   not_started: 'the fixer could not start',
   off: 'auto AI Fix is off for this workspace',
+  over_budget: 'your Claude budget is reached',
 };
 
 /** One line for the Claude Review tab, or null when there is nothing to say. */

@@ -40,7 +40,8 @@
                 · .row.open > .detail
      velocity   section.board.flow > .tile.v-txt (h2, p, p.src) · .tile.v-ui
                 (.courts > div[style=--w,--c] > span + b)
-     cost       section.board.cost > .tile.c1.madder (h2, p) · .tile.ph.c2
+     cost       section.board.cost > .tile.c1.madder (h2, .c1-txt > p, p.c1-budget) · .tile.ph.c2
+                · .tile.ws (h3, form.ws-in > .ws-f×3 (label + input), .ws-out (output, p))
      licence    section.lic > h2 · table.plans (th.rec / td.rec)
      faq        section.faq > .qcol (h2, ul > li.on) · .ans
                 (li may wrap a <button>; it is reset to inherit)
@@ -685,6 +686,99 @@ body:has(.lb) {
 .lb .cost .c2 {
   grid-column: 9 / 13;
 }
+/* The spend-budget line under the lead. */
+.lb .cost .c1-txt {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.lb .cost .c1-budget {
+  max-width: 46ch;
+  opacity: 0.9;
+}
+.lb .cost .c1-budget a {
+  font-weight: 500;
+  white-space: nowrap;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.lb .cost .c1 {
+  gap: 24px;
+}
+
+/* ---- savings worksheet (Worksheet.tsx) --------------------------------
+   One full-width tile under the cost band: heading + three fields on the left,
+   the result on a gold block on the right. Fields are 52px tall, 18px text
+   (no iOS zoom), thumb-sized on a phone. */
+.lb .cost .ws {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(0, 8fr) minmax(0, 4fr);
+  gap: 24px 32px;
+  padding: 36px;
+}
+.lb .ws h3 {
+  grid-column: 1;
+  font-size: clamp(26px, 2.4vw, 36px);
+}
+.lb .ws-in {
+  grid-column: 1;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  align-items: end;
+}
+.lb .ws-f {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.lb .ws-f label {
+  font-size: 16px;
+  color: var(--muted);
+}
+.lb .ws-f input {
+  width: 100%;
+  min-height: 52px;
+  padding: 0 14px;
+  background: #ffffff0d;
+  border: 0;
+  border-bottom: 2px solid var(--muted);
+  border-radius: 0;
+  color: var(--ink);
+  font: 500 18px / 1 'Albert Sans', system-ui, sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+.lb .ws-f input:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+  border-bottom-color: var(--gold);
+}
+.lb .ws-out {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 24px;
+  background: var(--gold) var(--g-gold);
+  color: var(--dark);
+}
+.lb .ws-out output {
+  font-size: clamp(26px, 2.6vw, 40px);
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  line-height: 1.05;
+  font-variant-numeric: tabular-nums;
+}
+.lb .ws-out p {
+  font-size: 16px;
+}
+.lb .ws-out .muted {
+  color: inherit;
+  opacity: 0.75;
+}
 
 /* ---- check examples + bots ------------------------------------------- */
 .lb .ex .tile {
@@ -1236,6 +1330,17 @@ body:has(.lb) {
   }
   .lb .cost .c2 {
     aspect-ratio: 4 / 3;
+  }
+  .lb .cost .ws {
+    grid-template-columns: 1fr;
+    padding: 24px;
+  }
+  .lb .ws-in {
+    grid-template-columns: 1fr;
+  }
+  .lb .ws-out {
+    grid-column: 1;
+    grid-row: auto;
   }
   .lb .row {
     grid-template-columns: 1fr auto;

@@ -647,6 +647,16 @@ export function isSprintRefreshThrottled(
 // DEFAULT WORKSPACE ONLY, where it previously covered every watched repo in the account. Iterating
 // every workspace would multiply a billed LLM call by workspace count on a cron, which is not a
 // change to make silently either.
+/** The stored report, no model call — what the Slack digest sends when the Claude spend budget is
+ *  reached (core ai/budget.ts). */
+export async function storedSprintReport(
+  ctx: ProContext,
+  accountId: number,
+  workspaceId: number,
+): Promise<SprintReport | null> {
+  return loadReport(ctx, accountId, await workspaceScope(ctx, accountId, workspaceId));
+}
+
 export async function refreshSprintReport(
   ctx: ProContext,
   llm: LlmClient,

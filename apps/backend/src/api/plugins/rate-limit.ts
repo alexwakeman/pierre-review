@@ -101,6 +101,12 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // "Set up" for local bot-comment scoring: the same shape (npm install + ~150 MB of model files
   // over the user's own bandwidth, single-flight in ml/runtime.ts), the same bucket, spelled exactly.
   if (path === '/api/ml/install') return [TIERS.sync];
+  // THE CLAUDE SPEND BUDGET: GET/PUT /api/ai/budget (ai/budget.ts). FOLLOWING THE TOKEN: no model
+  // call and no GitHub call. The PUT is one validated UPDATE of one column; the GET (the header's usage
+  // item polls it every ~2 minutes) reads the ledger and may START the usage probe in the background,
+  // which is single-flight and at most once per 5 minutes inside ai/budget.ts — a loop cannot
+  // multiply it. `read`, decided rather than inherited; EXACT `===`. No other usage route exists.
+  if (path === '/api/ai/budget') return [TIERS.read];
 
   // ---- Workspace CRUD: `read`, RECORDED rather than inherited ----
   //

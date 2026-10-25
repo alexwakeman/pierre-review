@@ -444,6 +444,22 @@ describe('the after-read chain', () => {
     });
     expect(order).toEqual(['briefs', 'themes', 'paths']);
   });
+  it('over the Claude spend budget: a scheduled read runs nothing; the reader’s Refresh still runs', async () => {
+    const order: string[] = [];
+    const steps = {
+      briefs: async () => (order.push('briefs'), { state: 'done', stoppedBy: null }),
+      themes: async () => order.push('themes'),
+      paths: async () => order.push('paths'),
+    };
+    const allow = vi.fn(async () => false);
+    const over = { ...ctx, aiBudget: { allowAutomaticRun: allow } };
+    await runSprintAfterRead(over, 1, 2, steps);
+    expect(order).toEqual([]);
+    allow.mockClear();
+    await runSprintAfterRead(over, 1, 2, steps, true);
+    expect(order).toEqual(['briefs', 'themes', 'paths']);
+    expect(allow).not.toHaveBeenCalled();
+  });
   it('a brief pass that did not finish starts nothing after it; a throw is contained', async () => {
     const order: string[] = [];
     await runSprintAfterRead(ctx, 1, 2, {

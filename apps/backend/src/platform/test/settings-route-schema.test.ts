@@ -74,6 +74,7 @@ beforeAll(async () => {
   sqlite.exec(migration('0032_workspace_comparison_mode.sql'));
   sqlite.exec(migration('0035_workspace_jira_api.sql'));
   sqlite.exec(migration('0036_workspace_auto_review.sql'));
+  sqlite.exec(migration('0041_workspace_hourly_cost.sql'));
 
   const ctx = {
     db: drizzle(sqlite, { schema: { ...settingsSchema } }),
@@ -143,6 +144,31 @@ describe('PUT /api/pro/settings/workspace — the schema admits every writable f
       payload: { comparisonMode: 'rolling_3' },
     });
     expect(res.statusCode).toBe(400);
+  });
+});
+
+describe('PUT /api/pro/settings/workspace — the hourly cost (plugin migration 0041)', () => {
+  it('⚠ `hourlyCostUsd` SURVIVES THE ajv PASS, round-trips, and `null` clears it', async () => {
+    expect((await putWorkspace({ hourlyCostUsd: 87.5 })).hourlyCostUsd).toBe(87.5);
+    const get = await app.inject({
+      method: 'GET',
+      url: `/api/pro/settings/workspace?workspace=${WORKSPACE}`,
+    });
+    expect((get.json() as { hourlyCostUsd: number | null }).hourlyCostUsd).toBe(87.5);
+    // An unrelated patch leaves it alone.
+    expect((await putWorkspace({ comparisonMode: 'rolling_7' })).hourlyCostUsd).toBe(87.5);
+    expect((await putWorkspace({ hourlyCostUsd: null })).hourlyCostUsd).toBeNull();
+  });
+
+  it('zero, negative and past-the-cap values are REFUSED', async () => {
+    for (const v of [0, -5, 1_000_000]) {
+      const res = await app.inject({
+        method: 'PUT',
+        url: `/api/pro/settings/workspace?workspace=${WORKSPACE}`,
+        payload: { hourlyCostUsd: v },
+      });
+      expect(res.statusCode).toBe(400);
+    }
   });
 });
 

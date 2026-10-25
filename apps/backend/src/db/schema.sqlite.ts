@@ -64,6 +64,8 @@ import type {
   StoryLevelLabels,
   SprintSource,
   TicketAssessment,
+  AiBudgetSettings,
+  AiUsageReading,
 } from '@pierre-review/shared';
 
 // A tenant. Local mode synthesizes exactly one row (id 1, isLocal=true) from
@@ -137,6 +139,16 @@ export const accounts = sqliteTable('accounts', {
   // before storing), resolved by packages/shared `resolveMyTurnSettings`. ACCOUNT grain: one
   // account = one reader.
   myTurnSettings: text('my_turn_settings', { mode: 'json' }).$type<MyTurnSettings>(),
+  // THE CLAUDE SPEND BUDGET (packages/shared ai-budget.ts, ai/budget.ts). ACCOUNT grain = one per
+  // machine: the Claude login / API key it guards is the machine's, never a workspace's. NULL =
+  // never set (off, the SPA suggests the defaults). One writer: PUT /api/ai/budget (validated).
+  aiBudgetSettings: text('ai_budget_settings', { mode: 'json' }).$type<Partial<AiBudgetSettings>>(),
+  // The LATEST subscription usage reading (the subscription type, and Claude's five_hour, seven_day
+  // and per-model seven_day_* windows: utilisation 0–100 + reset), folded from the Agent SDK's
+  // rate-limit events and the usage probe. Names the subscription, anchors the week and the 5-hour
+  // window, and feeds the header's account figures — never blocks. Persisted so a restart keeps it;
+  // any older shape is normalised on read. Machine state.
+  aiBudgetReading: text('ai_budget_reading', { mode: 'json' }).$type<AiUsageReading>(),
 });
 
 export const repos = sqliteTable(
@@ -1938,6 +1950,11 @@ export const workspaces = sqliteTable(
     // resolved through `resolveAutoFixSettings` (review/claude-review/auto-settings.ts), whose
     // `setWorkspaceAutoReview` is the ONE writer.
     autoFixSettings: text('auto_fix_settings', { mode: 'json' }).$type<StoredAutoFixSettings>(),
+    // AUTOMATIC DESIGN DIAGRAMS (migration 0126): may a succeeded Claude review (manual or auto)
+    // queue its design diagrams (review/diagrams/trigger.ts)? ON by default — only a stored false
+    // is off. Off stops only the automatic draw; Draw / Redraw still works. The ONE writer is
+    // `setWorkspaceAutoReview` (review/claude-review/auto-settings.ts).
+    autoDiagramsEnabled: integer('auto_diagrams_enabled', { mode: 'boolean' }).notNull().default(true),
     // DEPENDENCY AUTO-MERGE (migration 0093 / pg 0080): may the server arm "merge when ready" on
     // every open dependency-automation PR in this workspace's repos (merge/dependency-policy.ts)?
     // NULL/false = OFF, the default for every workspace; nullable with no default, so no insert

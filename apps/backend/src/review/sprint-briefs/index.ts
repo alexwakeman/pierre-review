@@ -1,6 +1,7 @@
 import { markSprintPathsQueued } from '../../db/sprint-paths.js';
 import { setAfterSprintRead } from '../../tracker/sprint/hooks.js';
 import type { AgentContext } from '../agent-context.js';
+import { automaticRunAllowed } from '../budget-gate.js';
 import { runSprintPathsPass } from '../sprint-paths/manager.js';
 import { runSprintThemePass } from '../sprint-themes/manager.js';
 import { registerSprintTicketChecks } from '../ticket-review/sprint-checks.js';
@@ -17,7 +18,7 @@ import { runSprintBriefPass } from './manager.js';
 // running one re-runs and its own caller continues the chain. (The Haiku sprint STORY pass that used to
 // be step 3 is retired; its table is dormant.)
 
-type PassCtx = Pick<AgentContext, 'log' | 'llm' | 'recordAiUsage'>;
+type PassCtx = Pick<AgentContext, 'log' | 'llm' | 'recordAiUsage' | 'aiBudget'>;
 
 export interface SprintAfterReadSteps {
   briefs: (ctx: PassCtx, a: number, w: number) => Promise<{ state: string; stoppedBy?: string | null }>;
@@ -33,7 +34,17 @@ const STEPS: SprintAfterReadSteps = {
 
 /** The chain for one stored read (exported for its order test). The page reads 'queued' while it holds
  *  the workspace (db/sprint-paths.ts), released on EVERY path out of it. Never throws. */
-export async function runSprintAfterRead(ctx: PassCtx, accountId: number, workspaceId: number, steps: SprintAfterReadSteps = STEPS): Promise<void> {
+export async function runSprintAfterRead(
+  ctx: PassCtx,
+  accountId: number,
+  workspaceId: number,
+  steps: SprintAfterReadSteps = STEPS,
+  manual = false,
+): Promise<void> {
+  // THE CLAUDE SPEND BUDGET (ai/budget.ts): after a SCHEDULED read the chain is automatic, so it asks
+  // the gate; over the budget nothing runs and the next read after it recovers catches up (every
+  // pass re-derives what changed). After the reader's own Refresh (`manual`) it is never refused.
+  if (!manual && !(await automaticRunAllowed(ctx, accountId, 'sprint briefs'))) return;
   markSprintPathsQueued(accountId, workspaceId, true);
   try {
     const briefs = await steps.briefs(ctx, accountId, workspaceId);
@@ -49,8 +60,8 @@ export async function runSprintAfterRead(ctx: PassCtx, accountId: number, worksp
 }
 
 export function registerSprintBriefs(ctx: AgentContext): void {
-  setAfterSprintRead((accountId, workspaceId) => {
-    void runSprintAfterRead(ctx, accountId, workspaceId);
+  setAfterSprintRead((accountId, workspaceId, manual) => {
+    void runSprintAfterRead(ctx, accountId, workspaceId, STEPS, manual);
   });
   // The refresh's ticket checks (≤ SPRINT_REFRESH_TICKET_CHECKS per manual refresh) share this one
   // agentic registration point.

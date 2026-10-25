@@ -102,6 +102,7 @@ const applyMigrations = (): void => {
   sqlite.exec(migration('0032_workspace_comparison_mode.sql'));
   sqlite.exec(migration('0035_workspace_jira_api.sql'));
   sqlite.exec(migration('0036_workspace_auto_review.sql'));
+  sqlite.exec(migration('0041_workspace_hourly_cost.sql'));
 };
 
 /** The DORMANT tracker columns, read raw (the plugin's schema no longer declares them). */
@@ -238,6 +239,7 @@ describe('writeWorkspaceSettings — one row, two independently-owned settings',
     expect(Object.keys(await readWorkspaceProSettings(ctx, 1, 2)).sort()).toEqual([
       'cadenceDays',
       'comparisonMode',
+      'hourlyCostUsd',
       'startDate',
       'workspaceId',
     ]);
@@ -329,6 +331,7 @@ describe('migration 0031 moves the account-wide tracker onto every workspace', (
     sqlite.exec(migration('0032_workspace_comparison_mode.sql'));
     sqlite.exec(migration('0035_workspace_jira_api.sql'));
     sqlite.exec(migration('0036_workspace_auto_review.sql'));
+    sqlite.exec(migration('0041_workspace_hourly_cost.sql'));
     ctx = makeCtx();
     const s = await readWorkspaceProSettings(ctx, 1, 2);
     expect(rawIssue(1, 2)?.provider).toBe('jira');
@@ -516,6 +519,7 @@ describe('migration 0032 moves a DIVERGENT account mode onto every workspace', (
     sqlite.exec(migration('0032_workspace_comparison_mode.sql'));
     sqlite.exec(migration('0035_workspace_jira_api.sql'));
     sqlite.exec(migration('0036_workspace_auto_review.sql'));
+    sqlite.exec(migration('0041_workspace_hourly_cost.sql'));
     ctx = makeCtx();
     const s = await readWorkspaceProSettings(ctx, 1, 2);
     expect(s.comparisonMode).toBe('rolling_7');

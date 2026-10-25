@@ -349,7 +349,9 @@ Read [docs/FRONTEND.md](docs/FRONTEND.md) before touching any of:
   `violet-`/`purple-`/`indigo-` hits are deliberate keeps.
 - **Every AI surface gates VISIBILITY on `me.ai.enabled` and its Run button on the ONE
   `AiRunGate`** (`components/AiSetup.tsx`) — agentic and one-shot alike (bot themes, synthesis,
-  pointers, period write-up, impact note, work-plan wording). Runs show US$, never credits.
+  pointers, period write-up, impact note, work-plan wording). Never credits: on an API key a run
+  shows US$; on a subscription it shows its share of the week, never US$ — always through ONE
+  formatter, `useRunCostText()` (`lib/aiBudget.ts` `runCostText`).
 - **The Changes tab's thread fold is RENAME-AWARE** (`indexThreadsByPath`, built once per PR).
 - **Sync-round state** (`syncRound` + `managerOpen`) has ONE driver, `SyncStatus`; the signal
   mailbox is an ARRAY; an open round's empty `scopeIds` is the all-repos sentinel.
@@ -425,6 +427,15 @@ library, sprint briefs/paths and every one-shot completion. Details:
 - **No AI SDK in the npm manifest** — downloaded on first use ("Set up AI" / `limn ai install`)
   and value-imported ONLY by `ai/runtime.ts` (`loadAgentSdk`/`loadAnthropicSdk`/`loadZod`);
   `build-release.mjs` asserts it.
+- **THE CLAUDE SPEND BUDGET** (optional, per machine, `ai/budget.ts`): ⚠ **every AUTOMATIC model
+  run asks the ONE gate first** (`review/budget-gate.ts` `automaticRunAllowed` / `ctx.aiBudget`) and
+  is SKIPPED, never queued, when over; a reader's click is never refused (the SPA asks). On a
+  subscription it is a share of the week and of the 5-hour session (Limn's own spend ÷ the estimated
+  allowance; the 5-hour share follows the weekly one unless set) shown in PERCENTAGES ONLY — no US$
+  on a subscription anywhere; the header item reads the SAME `['ai-budget']` query. Claude's usage
+  reading (from the
+  `loadAgentSdk` Query tap — never add per-runner forwarding) names the subscription and the reset,
+  and NEVER blocks.
 - **The agents' tools**: the reviewer and every chat are read-only with **`Bash` denied**; the
   fixer has Read/Glob/Grep + Write/Edit/MultiEdit + `submit_fix`, `DISALLOWED_TOOLS =
   ['Bash','NotebookEdit']` — **it builds and tests nothing**, and the SPA says "Not built or tested

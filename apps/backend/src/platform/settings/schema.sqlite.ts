@@ -193,6 +193,9 @@ export const proWorkspaceSettings = sqliteTable(
     // NULL/false = off. `autoReviewEnabledAt` is when it was last switched ON and is the floor the
     // sweeper (../claude-review/auto.ts) reviews from: only PRs OPENED at or after it. Re-stamped on
     // every off -> on, so nothing opened while it was off is picked up.
+    // ── The hourly cost of engineering time, in US CENTS (plugin migration 0041) ──────────────
+    // A READING setting for Chronology's "hours saved" figure. NULL = not set (hours only).
+    hourlyCostCents: integer('hourly_cost_cents'),
     autoReviewEnabled: integer('auto_review_enabled', { mode: 'boolean' }),
     autoReviewEnabledAt: integer('auto_review_enabled_at', { mode: 'timestamp' }),
     createdAt: integer('created_at', { mode: 'timestamp' })

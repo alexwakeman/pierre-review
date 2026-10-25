@@ -7,6 +7,7 @@ import { LARGE_PR_CODE_LOC_DEFAULT } from '@pierre-review/shared';
 import { normalisePath } from './recording.js';
 import type { DemoReply, DemoRequest, DemoRoute, DemoServer } from './server.js';
 import { fakeSha, isRecord, notInDemo } from './util.js';
+import { getAiBudget, putAiBudget } from './aiBudget.js';
 
 const OK = (body: unknown): DemoReply => ({ status: 200, body });
 
@@ -201,6 +202,9 @@ function byPr(rows: Record<string, unknown>[], ids: number[]): Record<string, un
 export const ROUTES: DemoRoute[] = [
   // The account. Always local mode with AI and bot-comment scoring on, so every surface shows.
   { method: 'GET', re: /^\/api\/me$/, run: (_r, _m, srv) => OK(meBody(srv)) },
+  // The Claude spend budget: simulated, never recorded (aiBudget.ts says why).
+  { method: 'GET', re: /^\/api\/ai\/budget$/, run: (req, _m, srv) => getAiBudget(req, srv) },
+  { method: 'PUT', re: /^\/api\/ai\/budget$/, run: (req, _m, srv) => putAiBudget(req, srv) },
   {
     method: 'POST',
     re: /^\/api\/me\/large-pr-threshold$/,

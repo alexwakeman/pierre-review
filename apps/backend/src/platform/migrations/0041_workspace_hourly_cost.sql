@@ -1,0 +1,11 @@
+-- Platform migration (SQLite). Run once by platform/migrate.ts, tracked by NAME in
+-- pro_migrations; filename-sorted, no journal, no statement-breakpoint markers.
+--
+-- THE HOURLY COST OF ENGINEERING TIME, PER WORKSPACE. Reports → Chronology → "Over time" turns its
+-- working hours saved into US$ at this rate. A READING setting: NULL = not set, and the chart then
+-- shows hours only. Stored as integer US cents, like `workspace_reviewers.monthly_cents`.
+-- No backfill and no account-level default beneath it: two states, no chain.
+--
+-- Not blind-replayable (SQLite has no ADD COLUMN IF NOT EXISTS); run-once is pro_migrations' job.
+-- The table is already in the platform's erasure handler (retention.ts).
+ALTER TABLE pro_workspace_settings ADD COLUMN hourly_cost_cents integer;

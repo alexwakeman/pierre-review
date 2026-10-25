@@ -6,6 +6,7 @@ import {
   useAiRuntimeInstall,
   useAiRuntimePoll,
 } from '../hooks/useAiCapabilities.js';
+import { AiBudgetMeter, OverBudgetConfirm } from './AiBudget.js';
 
 /**
  * What sits in place of a Run button for an agentic AI surface (Claude Review, the review chat,
@@ -15,19 +16,32 @@ import {
  *
  * `auth` lets a surface pass a fresher answer than `/api/me` (the Claude Review route reports its
  * own); either one saying `'none'` wins.
+ *
+ * THE CLAUDE SPEND BUDGET rides here, so every AI surface gets it: the compact meter after the
+ * button while the budget is on, and — over budget — the button takes two presses (the run is the
+ * reader's choice, never refused). `meter={false}` drops the meter where a surface has no room.
  */
 export function AiRunGate({
   children,
   auth,
+  meter = true,
 }: {
   children: ReactNode;
   auth?: 'ok' | 'none';
+  meter?: boolean;
 }): JSX.Element | null {
   const ai = useAiCapabilities();
   if (!ai.enabled) return null;
   if (ai.runtime !== 'ready') return <AiRuntimeSetup />;
   if (ai.auth === 'none' || auth === 'none') return <AiAuthLine />;
-  return <>{children}</>;
+  // A gate with nothing inside (a surface that only wants the setup/auth line) gets no budget UI.
+  if (children == null) return null;
+  return (
+    <>
+      <OverBudgetConfirm>{children}</OverBudgetConfirm>
+      {meter && <AiBudgetMeter />}
+    </>
+  );
 }
 
 export function AiAuthLine(): JSX.Element {

@@ -36,6 +36,7 @@ import {
   vendorInk,
 } from '../../lib/ui.js';
 import { formatCostInput, resolveVendorCost } from '../../lib/botCost.js';
+import { RARELY_USED_MAX_PCT, RARELY_USED_MIN_THREADS, stopPayingLine } from '../../lib/botSavings.js';
 import { formatAvg, volumeByKey } from '../../lib/botVolume.js';
 import { useBotVolume } from '../../hooks/useBotVolume.js';
 import { useBotColors } from '../../hooks/useBotColors.js';
@@ -1702,6 +1703,11 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
         are never added together. It is shown only on the Bots rail: one repository’s share of a
         Workspace-wide price is not a real cost.
       </p>
+      <p>
+        <span className="font-semibold">Turning it off would save</span>: shown under the table for
+        a priced bot marked Rarely used (at least {RARELY_USED_MIN_THREADS} threads, under{' '}
+        {RARELY_USED_MAX_PCT}% used). The yearly figure is the monthly price times 12.
+      </p>
     </>
   );
 
@@ -1853,6 +1859,24 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
           onTune={advisorPillsOn ? (key) => focusAdvisor(key, 'tune') : null}
           onDrop={advisorPillsOn ? (key) => focusAdvisor(key, 'drop') : null}
         />
+        {/* "What you could stop paying" — one templated sentence per priced, rarely-used review
+            bot (lib/botSavings.ts). Gated on `showCost`, the SAME predicate as the $ column:
+            money lives at Workspace grain, so a repo-narrowed mount shows none. */}
+        {(() => {
+          const lines = vendors
+            .map((v) => ({ key: v.key, text: stopPayingLine(v, window, showCost) }))
+            .filter((l): l is { key: string; text: string } => l.text != null);
+          if (lines.length === 0) return null;
+          return (
+            <div className="space-y-1" data-testid="bot-stop-paying">
+              {lines.map((l) => (
+                <p key={l.key} className="text-[12px] text-gray-700 dark:text-gray-200">
+                  {l.text}
+                </p>
+              ))}
+            </div>
+          );
+        })()}
         {/* Bot-effectiveness charts (per vendor): raw weekly volume, the volume-independent
             effectiveness + verdict, and the acted-on vs untouched split — those three always
             visible. The fourth, severity inflation over time, is the only conditional one: it

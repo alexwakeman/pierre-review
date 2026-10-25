@@ -57,6 +57,7 @@ import { isFixRunning, loadReviewSeed, startReviewFix } from './manager.js';
 import { parseChangeReport, parseReviewItems } from './persist.js';
 import { getFixPrContext } from './pr-context.js';
 import { readWorkspaceAutoFixSettingsForPr } from '../../review/claude-review/auto-settings.js';
+import { automaticRunAllowed } from '../../review/budget-gate.js';
 
 // At most AUTO_FIX_DAILY_CAP (shared) AUTO fixes per PR in any rolling AUTO_FIX_WINDOW_MS.
 export { AUTO_FIX_DAILY_CAP };
@@ -185,6 +186,8 @@ export async function maybeStartAutoFix(
     if (!(await prAuthorIsAccount(ctx, accountId, prId))) return { status: 'not_own' };
     const ws = await readWorkspaceAutoFixSettingsForPr(ctx, accountId, prId);
     if (!ws?.enabled) return skip('off');
+    // THE CLAUDE SPEND BUDGET (ai/budget.ts): over it, no auto fix — the next auto review decides again.
+    if (!(await automaticRunAllowed(ctx, accountId, 'auto fix'))) return skip('over_budget');
     // WHAT an auto fix carries is the workspace's "Always include" sections (AutoFixSettings).
     const include = ws.settings.include;
 

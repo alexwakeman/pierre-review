@@ -23,6 +23,8 @@ import { AutoMergeBanner } from './components/AutoMergeBanner.js';
 import { SyncStatus } from './components/SyncStatus.js';
 import { GlobalLoadingBar } from './components/GlobalLoadingBar.js';
 import { HeaderToastStrip } from './components/HeaderToasts.js';
+import { AiBudgetToast } from './components/AiBudget.js';
+import { AiUsageMenu } from './components/AiUsageMenu.js';
 import { WelcomeBackBanner } from './components/WelcomeBackBanner.js';
 import { HelpModal } from './components/HelpModal.js';
 import { SettingsModal } from './components/settings/SettingsModal.js';
@@ -248,6 +250,8 @@ export default function App(): JSX.Element {
           {/* Agentic AI-Fix runs started this session — the progress UI for a fix started
               outside the AI Fix tab. */}
           <AiFixBanner />
+          {/* Automatic Claude runs paused by the reader's spend budget. */}
+          <AiBudgetToast />
           {/* The way back into a conflict resolver the reader closed with decisions still in the
               store. The resolver has no URL and no history entry, so this card is the ONLY route
               back; it files nothing after a commit, when the pins have already moved. */}
@@ -305,6 +309,8 @@ export default function App(): JSX.Element {
           >
             ?
           </button>
+          {/* Claude usage so far (the spend budget's ONE query); the popover has the detail. */}
+          <AiUsageMenu />
           <button
             type="button"
             onClick={toggleDark}

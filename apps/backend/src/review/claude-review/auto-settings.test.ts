@@ -24,6 +24,11 @@
 //      (`auto_fix_settings`, migration 0091): OFF / the defaults, overrides only, written alone,
 //      validated at the route; GET carries `usage` only while auto review is on.
 //
+//  10. AUTOMATIC DESIGN DIAGRAMS (`auto_diagrams_enabled`, migration 0126): ON for an existing
+//      workspace AND a new one, written alone, survives auto review off → on, round-trips through
+//      the route, and `diagramsSwitchedOnForPr` (review/diagrams/persist.ts) reads it through the
+//      PR's repo membership (no membership ⇒ ON, the default).
+//
 //   pnpm --filter @pierre-review/backend test auto-settings
 import { rmSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -84,6 +89,8 @@ describe('the switch and its floor', () => {
       enabledAt: null,
       dailyCap: s.AUTO_REVIEW_DAILY_CAP,
       autoFixEnabled: false,
+      // Automatic design diagrams are ON by default (0126).
+      autoDiagramsEnabled: true,
       autoPost: { enabled: false, scope: 'mine', kinds: AUTO_POST_DEFAULT_KINDS, autoVerdict: false, autoResolve: false, approveImpact: AUTO_POST_DEFAULT_APPROVE_IMPACT },
       autoFix: { include: AUTO_FIX_DEFAULT_INCLUDE, autoPush: false },
     });
@@ -188,6 +195,76 @@ describe('auto AI Fix — the second switch', () => {
   });
 });
 
+describe('automatic design diagrams — ON by default (0126)', () => {
+  it('reads ON for an existing workspace and one created now; switched alone it touches nothing else', async () => {
+    const before = await s.readWorkspaceAutoReview(ctx, 1, wsA2);
+    expect(before?.autoDiagramsEnabled).toBe(true);
+    const client = await import('../../db/client.js');
+    const [fresh] = await client.db
+      .insert(client.schema.workspaces)
+      .values({ accountId: 1, name: 'Diagrams fresh', isDefault: false })
+      .returning()
+      .execute();
+    expect((await s.readWorkspaceAutoReview(ctx, 1, fresh!.id))?.autoDiagramsEnabled).toBe(true);
+    const off = await s.setWorkspaceAutoReview(ctx, 1, wsA2, { autoDiagramsEnabled: false });
+    expect(off).toEqual({ ...before, autoDiagramsEnabled: false });
+    expect(await s.readWorkspaceAutoReview(ctx, 1, wsA2)).toEqual(off);
+    // Auto review off → on keeps it (stored independently).
+    await s.setWorkspaceAutoReview(ctx, 1, wsA2, { enabled: true });
+    expect((await s.setWorkspaceAutoReview(ctx, 1, wsA2, { enabled: false }))?.autoDiagramsEnabled).toBe(false);
+    const on = await s.setWorkspaceAutoReview(ctx, 1, wsA2, { autoDiagramsEnabled: true });
+    expect(on?.autoDiagramsEnabled).toBe(true);
+    // Another account cannot write it.
+    expect(await s.setWorkspaceAutoReview(ctx, 2, wsA2, { autoDiagramsEnabled: false })).toBeNull();
+    expect((await s.readWorkspaceAutoReview(ctx, 1, wsA2))?.autoDiagramsEnabled).toBe(true);
+  });
+
+  it('diagramsSwitchedOnForPr follows the PR repo’s workspace; no membership ⇒ the default, on', async () => {
+    const { diagramsSwitchedOnForPr } = await import('../diagrams/persist.js');
+    const client = await import('../../db/client.js');
+    const repo = async (node: string) =>
+      (
+        await client.db
+          .insert(client.schema.repos)
+          .values({ accountId: 1, owner: 'acme', name: node, githubNodeId: `R_${node}` })
+          .returning()
+          .execute()
+      )[0]!.id;
+    const pr = async (repoId: number, node: string) =>
+      (
+        await client.db
+          .insert(client.schema.pullRequests)
+          .values({
+            githubNodeId: `PR_${node}`,
+            accountId: 1,
+            repoId,
+            number: 1,
+            title: 't',
+            state: 'open',
+            isDraft: false,
+            openedAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .returning()
+          .execute()
+      )[0]!.id;
+    const inWs = await repo('diagws');
+    const loose = await repo('diagloose');
+    await client.db
+      .insert(client.schema.workspaceRepos)
+      .values({ accountId: 1, workspaceId: wsA2, repoId: inWs })
+      .execute();
+    const prIn = await pr(inWs, 'diagws');
+    const prLoose = await pr(loose, 'diagloose');
+    expect(await diagramsSwitchedOnForPr(ctx, 1, prIn)).toBe(true);
+    await s.setWorkspaceAutoReview(ctx, 1, wsA2, { autoDiagramsEnabled: false });
+    expect(await diagramsSwitchedOnForPr(ctx, 1, prIn)).toBe(false);
+    expect(await diagramsSwitchedOnForPr(ctx, 1, prLoose)).toBe(true);
+    await s.setWorkspaceAutoReview(ctx, 1, wsA2, { autoDiagramsEnabled: true });
+    expect(await diagramsSwitchedOnForPr(ctx, 1, prIn)).toBe(true);
+  });
+});
+
 describe('the daily cap', () => {
   const rawCap = async (id: number) => {
     const client = await import('../../db/client.js');
@@ -286,6 +363,20 @@ describe('GET / PUT /api/workspaces/:id/auto-review', () => {
       url: `/api/workspaces/${wsA2}/auto-review`,
       payload: { autoFixEnabled: true },
     });
+  });
+
+  it('autoDiagramsEnabled round-trips through PUT and GET; a non-boolean is a 400', async () => {
+    const app = await build();
+    const url = `/api/workspaces/${wsA2}/auto-review`;
+    expect((await app.inject({ method: 'GET', url })).json().autoReview.autoDiagramsEnabled).toBe(true);
+    const put = await app.inject({ method: 'PUT', url, payload: { autoDiagramsEnabled: false } });
+    expect(put.statusCode).toBe(200);
+    expect(put.json()).toMatchObject({ workspaceId: wsA2, autoReview: { autoDiagramsEnabled: false } });
+    expect((await app.inject({ method: 'GET', url })).json()).toEqual(put.json());
+    const bad = await app.inject({ method: 'PUT', url, payload: { autoDiagramsEnabled: 'no' } });
+    expect(bad.statusCode).toBe(400);
+    const back = await app.inject({ method: 'PUT', url, payload: { autoDiagramsEnabled: true } });
+    expect(back.json().autoReview.autoDiagramsEnabled).toBe(true);
   });
 
   it('dailyCap round-trips; anything but an integer 1..500 is a 400 and writes nothing', async () => {

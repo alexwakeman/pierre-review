@@ -22,6 +22,8 @@
 import { createHash } from 'node:crypto';
 
 const CADENCE_DAYS = 14;
+/** The demo Platform workspace's hourly cost of engineering time, US cents (fictional). */
+const DEMO_HOURLY_COST_CENTS = 9500;
 const PERIOD_COUNT = 8;
 const MONTH_COUNT = 3;
 /** How far into the current sprint the demo sits (days since it started). */
@@ -96,19 +98,24 @@ export async function seedPeriodReports(ctx: PeriodCtx): Promise<number> {
   const sec = (ms: number): number => Math.floor(ms / 1000);
 
   // ---- the cadence, per workspace (plugin migration 0031's row) -------------
+  // Plus the hourly cost of engineering time (plugin migration 0041), on the FIRST workspace only
+  // (the Default, "Platform"): Reports → Chronology → Over time then shows "≈ $X of engineering
+  // time" there, while the other workspace keeps the unset state ("Set an hourly cost").
   const setCadence = raw.prepare(
     `INSERT INTO pro_workspace_settings
-       (account_id, workspace_id, sprint_cadence_days, sprint_start_at, comparison_mode, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)
+       (account_id, workspace_id, sprint_cadence_days, sprint_start_at, comparison_mode,
+        hourly_cost_cents, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(account_id, workspace_id) DO UPDATE SET
        sprint_cadence_days = excluded.sprint_cadence_days,
        sprint_start_at     = excluded.sprint_start_at,
-       comparison_mode     = excluded.comparison_mode`,
+       comparison_mode     = excluded.comparison_mode,
+       hourly_cost_cents   = excluded.hourly_cost_cents`,
   );
-  for (const ws of workspaces) {
+  for (const [i, ws] of workspaces.entries()) {
     setCadence.run(
       1, ws.id, CADENCE_DAYS, sec(currentStart - PERIOD_COUNT * cadenceMs),
-      'sprint', sec(now.getTime()), sec(now.getTime()),
+      'sprint', i === 0 ? DEMO_HOURLY_COST_CENTS : null, sec(now.getTime()), sec(now.getTime()),
     );
   }
 

@@ -68,6 +68,11 @@ import { ScopePendingSection, useSettingsWorkspace } from './workspaceScope.js';
  * fix-picker section; style bots off by default) and "Push automatically" (OFF) — `autoFix` on the
  * same route, dimmed while auto fix is off.
  *
+ * DESIGN DIAGRAMS (`autoDiagramsEnabled`, `workspaces.auto_diagrams_enabled`, migration 0126) — ON
+ * by default. A diagram is drawn after EVERY review, yours or automatic, so this switch is NOT
+ * dimmed by auto review. Off stops only the automatic draw; the Draw button on the PR still works.
+ * Same Save as the rest.
+ *
  * Under "Approve or request changes", three checkboxes — one per blast-radius level
  * (`autoPost.approveImpact`, overrides-only JSON, all on by default) — say which PRs may be
  * APPROVED automatically. A PR at an unticked level gets a comment-only review instead; requesting
@@ -121,6 +126,9 @@ export function AutoReviewSection(): JSX.Element {
   const storedFix = stored?.autoFixEnabled === true;
   const [on, setOn] = useState(storedOn);
   const [fixOn, setFixOn] = useState(storedFix);
+  // ON unless a stored false says otherwise (an older server sends nothing).
+  const storedDiagrams = stored?.autoDiagramsEnabled !== false;
+  const [diagramsOn, setDiagramsOn] = useState(storedDiagrams);
   const storedCap = stored?.dailyCap ?? 20;
   const [capText, setCapText] = useState(String(storedCap));
   const storedPost = stored?.autoPost ?? null;
@@ -151,6 +159,9 @@ export function AutoReviewSection(): JSX.Element {
   useEffect(() => {
     setFixOn(storedFix);
   }, [workspaceId, storedFix]);
+  useEffect(() => {
+    setDiagramsOn(storedDiagrams);
+  }, [workspaceId, storedDiagrams]);
   useEffect(() => {
     setCapText(String(storedCap));
   }, [workspaceId, storedCap]);
@@ -332,6 +343,25 @@ export function AutoReviewSection(): JSX.Element {
           On since {dateTime(stored.enabledAt)}.
         </p>
       )}
+      <div className="flex items-start gap-1 border-t border-gray-200 pt-2 text-xs dark:border-gray-700">
+        <label className="flex items-start gap-2">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={diagramsOn}
+            onChange={(e) => setDiagramsOn(e.target.checked)}
+          />
+          <span className="font-medium text-gray-700 dark:text-gray-200">
+            Draw a design diagram after each review
+          </span>
+        </label>
+        <InfoButton title="Design diagrams">
+          <p>
+            Claude draws a design diagram after every review, and turning this off saves about a
+            third of Claude’s review usage.
+          </p>
+        </InfoButton>
+      </div>
       <div className={`space-y-1.5 border-t border-gray-200 pt-2 text-xs dark:border-gray-700 ${on ? '' : 'opacity-60'}`}>
         <div className="flex items-start gap-1">
           <label className="flex items-start gap-2">
@@ -468,12 +498,21 @@ export function AutoReviewSection(): JSX.Element {
         </div>
       </div>
       <SaveButton
-        dirty={cap != null && (on !== storedOn || fixOn !== storedFix || capDirty || postDirty || fixSettingsDirty)}
+        dirty={
+          cap != null &&
+          (on !== storedOn ||
+            fixOn !== storedFix ||
+            diagramsOn !== storedDiagrams ||
+            capDirty ||
+            postDirty ||
+            fixSettingsDirty)
+        }
         saving={update.isPending}
         onClick={() =>
           update.mutate({
             enabled: on,
             autoFixEnabled: fixOn,
+            ...(diagramsOn !== storedDiagrams ? { autoDiagramsEnabled: diagramsOn } : {}),
             ...(capDirty && cap != null ? { dailyCap: cap } : {}),
             ...(postDirty
               ? {

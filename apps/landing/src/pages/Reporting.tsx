@@ -27,7 +27,7 @@ import './reporting.css';
 // are the demo's Acme sample data.
 //
 // Running order: header · one window · period reports · Chronology (+ the
-// measured proof figures) · over time · where the work is · bots · This Sprint ·
+// measured proof figures, then hours saved in dollars) · over time · where the work is · bots · This Sprint ·
 // run it.
 // ---------------------------------------------------------------------------
 
@@ -231,6 +231,13 @@ export default function Reporting(): JSX.Element {
             October 2026.
           </p>
         </div>
+        <div className="tile madder r-usd rise">
+          <h3>Hours saved, in dollars</h3>
+          <p>
+            Add an optional hourly cost and the working hours saved also read as an estimate in US$. Until you set one,
+            it stays blank.
+          </p>
+        </div>
       </section>
 
       {/* ---- 4. over time: screenshot left, text right ------------------ */}
@@ -294,6 +301,7 @@ export default function Reporting(): JSX.Element {
             How each bot compares with the same bot in similar-sized public repositories, or a plain sentence saying why it
             can't. Cost is per workspace and never added up across workspaces.
           </p>
+          <p>For a bot whose comments your team rarely acts on, it says what turning it off would save in a year.</p>
         </div>
         <Shot
           className="r-bshot2"

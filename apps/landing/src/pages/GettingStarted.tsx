@@ -18,7 +18,7 @@ import slack from '../assets/pages/gs-slack.jpg';
 import './getting-started.css';
 
 // ---------------------------------------------------------------------------
-// Getting started: install and run, then the five things worth switching on.
+// Getting started: install and run, then the six things worth switching on.
 //
 // The board style (src/board.css) under `.lb`, plus this page's own rules under
 // `.lb.gs` (getting-started.css). The steps are a real <ol>: order matters.
@@ -262,9 +262,70 @@ export default function GettingStarted(): JSX.Element {
 
         <Step
           n={3}
+          id="budget"
+          title="Set a budget"
+          pigment="madder"
+          aside={
+            <div className="gs-modes" aria-label="The two kinds of budget">
+              <div className="gs-mode">
+                <b>On a Claude subscription</b>
+                <dl>
+                  <div>
+                    <dt>Limn's share of your week</dt>
+                    <dd>5%, you choose</dd>
+                  </div>
+                  <div>
+                    <dt>Each 5-hour session</dt>
+                    <dd>same as your week, unless you change it</dd>
+                  </div>
+                </dl>
+              </div>
+              <div className="gs-mode">
+                <b>On an API key</b>
+                <dl>
+                  <div>
+                    <dt>Each week</dt>
+                    <dd>US$ you choose</dd>
+                  </div>
+                </dl>
+              </div>
+            </div>
+          }
+        >
+          <p>
+            In <b>Settings</b>, under <b>Claude spend</b>.
+          </p>
+          <ul className="gs-list">
+            <li>
+              On a Claude subscription, Claude keeps track of how much of your weekly allowance you have used. You
+              choose what share of that week Limn may use: 5% unless you change it, up to 50%. Limn adds up what its own
+              Claude runs use and compares that with your subscription's usual weekly allowance. Anthropic doesn't publish
+              exact allowances, so this is an estimate. If you have Max, Limn asks whether it's Max 5x or Max 20x.
+            </li>
+            <li>
+              Each 5-hour session gets the same share as your week, unless you set it separately.
+            </li>
+            <li>
+              When Limn has used its share, it stops starting automatic Claude runs until your week or session resets.
+              Your own use of Claude is never limited, and runs you start yourself still run after you confirm.
+            </li>
+            <li>
+              The header shows Limn's AI quota: how much of its budget is used, or with no budget, how much of your Claude week. Click it to see when your week and session reset. On a
+              subscription, each run's cost shows as a share of your week, not in dollars.
+            </li>
+            <li>On an API key, set a weekly budget in US dollars.</li>
+          </ul>
+          <p className="gs-note">
+            Want reviews to use less? The design diagram drawn after each review is on by default and can be turned off
+            for each workspace.
+          </p>
+        </Step>
+
+        <Step
+          n={4}
           id="ml"
           title="Add the scoring model"
-          pigment="madder"
+          pigment="lapis"
           wide
           aside={
             <Shots
@@ -303,10 +364,10 @@ export default function GettingStarted(): JSX.Element {
         </Step>
 
         <Step
-          n={4}
+          n={5}
           id="repos"
           title="Add your repositories"
-          pigment="lapis"
+          pigment="verdigris"
           aside={
             <Shots
               shots={[
@@ -340,10 +401,10 @@ export default function GettingStarted(): JSX.Element {
         </Step>
 
         <Step
-          n={5}
+          n={6}
           id="tracker"
           title="Connect Jira or Linear"
-          pigment="verdigris"
+          pigment="madder"
           aside={
             <Shots
               shots={[
@@ -378,10 +439,10 @@ export default function GettingStarted(): JSX.Element {
         </Step>
 
         <Step
-          n={6}
+          n={7}
           id="slack"
           title="Connect Slack"
-          pigment="madder"
+          pigment="lapis"
           aside={
             <Shots
               shots={[

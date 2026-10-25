@@ -54,6 +54,7 @@ import { registerReportingWindowResolver } from '../db/reporting-window.js';
 import { runPluginMigrations } from './migrate.js';
 import { registerProEventHooks } from './event-hooks.js';
 import { registerPlatform } from './index.js';
+import { buildAiBudgetGate } from '../ai/budget.js';
 import type { ProContext, ProDb } from './contract.js';
 
 // Boot binding for the platform (src/platform/ — reporting, Bots Monitoring, Slack, settings).
@@ -213,6 +214,7 @@ export async function bindPlatform(app: FastifyInstance): Promise<void> {
         hostQueries.getAutoReviewCandidates(accountId, workspaceId, opts),
     },
     recordAiUsage: (row) => recordAiUsage(row),
+    aiBudget: buildAiBudgetGate({ info: (m) => app.log.info(m) }),
     registerScheduledJob,
     // AI Fix infra (per-account, cloud-ready). The host owns the security-sensitive
     // clone/agent/push machinery; the plugin only drives it with prompts/model.

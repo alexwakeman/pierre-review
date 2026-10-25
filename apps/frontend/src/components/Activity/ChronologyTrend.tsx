@@ -1,5 +1,6 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import {
+  HOURLY_COST_MAX_USD,
   FLOW_BUDGET_LABEL,
   FLOW_BUDGET_MEASURES,
   FLOW_TREND,
@@ -11,6 +12,7 @@ import {
   type PrCourt,
 } from '@pierre-review/shared';
 import { useFlowTrend } from '../../hooks/useFlowTrend.js';
+import { useUpdateWorkspaceProSettings, useWorkspaceProSettings } from '../../hooks/useWorkspaceProSettings.js';
 import { BOT_VENDOR_META } from '../../lib/ui.js';
 import { EventMarkerLines, EventMarkerRail, type ChartEventMarker } from '../charts/EventMarkers.js';
 import { FloatingTip, niceMax, useChartWidth } from '../charts/common.js';
@@ -24,6 +26,7 @@ import {
   EVENT_KIND_LABEL,
   EVENT_KIND_ORDER,
   eventCounts,
+  hoursCostUsd,
   hoursShort,
   lensChange,
   lensSignificance,
@@ -31,6 +34,7 @@ import {
   runningGain,
   signedHours,
   usableWeek,
+  usd,
   weekLabel,
   type EventCluster,
 } from './chronologyTrendModel.js';
@@ -430,18 +434,116 @@ function BudgetWeather({
 
 // ── (d) Working hours saved against a baseline ───────────────────────────────────────────────
 
+// The hours-saved figure in US$, at the workspace's own hourly cost (a per-workspace READING setting,
+// `WorkspaceProSettings.hourlyCostUsd`, plugin migration 0041). Blank until set; it prices the
+// estimate beside it and adds no claim of its own.
+function HourlyCost({ workspaceId, hours }: { workspaceId: number | null; hours: number }): JSX.Element | null {
+  const settings = useWorkspaceProSettings(workspaceId != null, workspaceId);
+  const update = useUpdateWorkspaceProSettings(workspaceId);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+  if (workspaceId == null || settings.data == null) return null;
+  // `?? null`: an older server sends no field, which reads as "not set".
+  const rate = settings.data.hourlyCostUsd ?? null;
+  const dollars = hoursCostUsd(hours, rate);
+  const parsed = Number(draft);
+  const valid = draft.trim() !== '' && Number.isFinite(parsed) && parsed > 0 && parsed <= HOURLY_COST_MAX_USD;
+  const save = (value: number | null): void => {
+    update.mutate({ hourlyCostUsd: value }, { onSuccess: () => setEditing(false) });
+  };
+  const link = 'text-xs font-medium text-sky-700 hover:underline dark:text-sky-400';
+  const info = (
+    <InfoButton title="Hours saved in dollars">
+      <p>
+        The working hours saved multiplied by the hourly cost you set for this Workspace. It prices
+        the hours figure, which is itself an estimate, and is not money that left a budget.
+      </p>
+      <p>The hourly cost is kept on this machine, for this Workspace only.</p>
+    </InfoButton>
+  );
+  if (editing) {
+    return (
+      <form
+        className="inline-flex flex-wrap items-center gap-1.5 text-xs text-gray-600 dark:text-gray-300"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (valid) save(Math.round(parsed * 100) / 100);
+        }}
+      >
+        <label className="inline-flex items-center gap-1">
+          <span>Hourly cost $</span>
+          <input
+            type="number"
+            inputMode="decimal"
+            min={0.01}
+            max={HOURLY_COST_MAX_USD}
+            step="any"
+            autoFocus
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            className="w-20 rounded border border-gray-300 bg-white px-1.5 py-0.5 tabular-nums dark:border-gray-700 dark:bg-gray-900"
+          />
+          <span>an hour</span>
+        </label>
+        <button type="submit" disabled={!valid || update.isPending} className={`${link} disabled:opacity-50`}>
+          Save
+        </button>
+        {rate != null && (
+          <button type="button" disabled={update.isPending} className={link} onClick={() => save(null)}>
+            Clear
+          </button>
+        )}
+        <button type="button" className={link} onClick={() => setEditing(false)}>
+          Cancel
+        </button>
+        {update.isError && <span className="text-red-600 dark:text-red-400">Could not save.</span>}
+      </form>
+    );
+  }
+  const startEditing = (): void => {
+    setDraft(rate == null ? '' : String(rate));
+    update.reset();
+    setEditing(true);
+  };
+  if (rate == null || dollars == null) {
+    return (
+      <span className="inline-flex items-center gap-1">
+        <button type="button" className={link} onClick={startEditing}>
+          Set an hourly cost
+        </button>
+        {info}
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex flex-wrap items-baseline gap-x-1 text-xs text-gray-600 dark:text-gray-300">
+      <span>
+        ≈ <span className="font-semibold tabular-nums text-gray-900 dark:text-gray-50">{usd(dollars)}</span> of
+        engineering time
+      </span>
+      <span className="text-gray-500 dark:text-gray-400">at {usd(rate)} an hour</span>
+      {info}
+      <button type="button" className={link} onClick={startEditing}>
+        Change
+      </button>
+    </span>
+  );
+}
+
 function GainLine({
   data,
   geo,
   markers,
   from,
   onPickBaseline,
+  workspaceId,
 }: {
   data: FlowTrendResponse;
   geo: Geometry;
   markers: ChartEventMarker[];
   from: number | null;
   onPickBaseline: (week: number | null) => void;
+  workspaceId: number | null;
 }): JSX.Element {
   const [hover, setHover] = useState<number | null>(null);
   const weeks = data.weeks;
@@ -487,6 +589,7 @@ function GainLine({
             {startWeek ? `the week of ${weekLabel(startWeek.weekStart)}` : 'the baseline'}
           </span>
         </div>
+        <HourlyCost workspaceId={workspaceId} hours={last} />
         <span className={NOTE}>
           Baseline: half merged within {hoursShort(gain.baseline)} ({gain.baselineWeeks.length} weeks)
         </span>
@@ -879,6 +982,7 @@ function ChronologyTrendFor({ workspaceId }: { workspaceId: number | null }): JS
                 markers={markers}
                 from={baselineFrom}
                 onPickBaseline={setBaselineFrom}
+                workspaceId={workspaceId}
               />
             </div>
           </div>

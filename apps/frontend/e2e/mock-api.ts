@@ -1,11 +1,13 @@
 import type { Page, Route } from '@playwright/test';
 import type {
+  AiBudgetResponse,
   ThreadCheckStatusResponse,
   ReferenceDocSectionResponse,
   ReferenceDocTreeResponse,
   ReferenceDocsConversationsResponse,
   ReferenceDocsResponse,
   ReferenceDocsSettings,
+  WorkspaceAutoReviewResponse,
   AttentionCardsResponse,
   AttentionLivenessResponse,
   AwaitingReviewItem,
@@ -63,6 +65,7 @@ import type {
 // VALUES, not types — the fixtures quote the shipped default rather than re-typing 1500, and
 // build the Pending tabs from the shipped list rather than re-typing it.
 import {
+  AI_BUDGET_DEFAULTS,
   LARGE_PR_CODE_LOC_DEFAULT,
   PENDING_TABS,
   pendingTabHolds,
@@ -947,6 +950,56 @@ function json(route: Route, body: unknown): Promise<void> {
 // ask for — and matching on the pathname keeps it that way whether or not a given surface has
 // resolved its workspace yet. If a spec ever needs two workspaces to differ, read
 // `new URL(route.request().url()).searchParams.get('workspace')` here and branch on it.
+// The Claude spend budget (GET /api/ai/budget): never set, so off with the shipped defaults. Read
+// only while `me.ai.enabled` (dark above), but served so a spec that flips AI on gets a real shape
+// rather than the catch-all `{}` (the header toast and every Run button read it).
+const AI_BUDGET: AiBudgetResponse = {
+  settings: {
+    enabled: false,
+    weekSharePct: AI_BUDGET_DEFAULTS.weekSharePct,
+    // Follows the weekly share.
+    fiveHourSharePct: null,
+    subscription: null,
+    // The login route: a subscription carries no US$ on the wire.
+    weeklyUsd: null,
+  },
+  isDefault: true,
+  status: {
+    enabled: false,
+    mode: 'off',
+    route: 'login',
+    subscription: null,
+    apiKey: null,
+    overBudget: false,
+    limitedBy: null,
+    reason: null,
+    resumesAt: null,
+  },
+  // The header's usage item: no reading taken and no runs yet — every unknown piece absent.
+  usage: {
+    route: 'login',
+    account: {
+      reportedSubscription: null,
+      subscription: null,
+      fiveHour: null,
+      week: null,
+      models: [],
+      observedAt: null,
+    },
+    limn: {
+      weekFrom: '2026-10-18T00:00:00.000Z',
+      window: 'rolling',
+      runs: 0,
+      inputTokens: null,
+      outputTokens: null,
+      weekSharePct: null,
+      fiveHourSharePct: null,
+    },
+    apiKey: null,
+    weekPctPerUsd: null,
+  },
+};
+
 export async function installMockApi(page: Page): Promise<void> {
   await page.route(
     (url) => url.pathname.startsWith('/api/'),
@@ -964,6 +1017,7 @@ export async function installMockApi(page: Page): Promise<void> {
         return json(route, { suggestedReviewers: [], users: [] });
 
       if (path.endsWith('/api/me')) return json(route, ME_RESPONSE);
+      if (path.endsWith('/api/ai/budget')) return json(route, AI_BUDGET);
       // The one-time AI runtime download streams `AiRuntimeInstallEvent` SSE frames; one `done`
       // frame is a complete, successful install.
       if (path.endsWith('/api/ai/runtime/install'))
@@ -1142,6 +1196,49 @@ export async function installMockApi(page: Page): Promise<void> {
       if (path.endsWith('/api/docs/chats')) {
         return json(route, { workspaceId: WORKSPACE.id, conversations: [] } satisfies ReferenceDocsConversationsResponse);
       }
+      // Settings → Auto Claude review (mounted only while AI is on). Every switch at its default:
+      // auto review, auto fix and auto-posting off; design diagrams after each review ON.
+      if (/\/api\/workspaces\/\d+\/auto-review$/.test(path)) {
+        return json(route, {
+          workspaceId: WORKSPACE.id,
+          autoReview: {
+            enabled: false,
+            enabledAt: null,
+            dailyCap: 20,
+            autoFixEnabled: false,
+            autoDiagramsEnabled: true,
+            autoFix: {
+              include: {
+                findings: true,
+                earlierFindings: true,
+                judgedThreads: true,
+                untouchedThreads: true,
+                ciFailures: true,
+                sonar: true,
+                styleBots: false,
+              },
+              autoPush: false,
+            },
+            autoPost: {
+              enabled: false,
+              scope: 'mine',
+              kinds: {
+                blockers: true,
+                warnings: true,
+                nits: false,
+                questions: true,
+                ciFailures: true,
+                storyGaps: true,
+                sonar: true,
+                notAskedFor: false,
+              },
+              autoVerdict: false,
+              autoResolve: false,
+              approveImpact: { high: true, medium: true, low: true },
+            },
+          },
+        } satisfies WorkspaceAutoReviewResponse);
+      }
       if (/\/api\/workspaces\/\d+\/docs-settings$/.test(path)) {
         return json(route, { workspaceId: WORKSPACE.id, docsInReview: false } satisfies ReferenceDocsSettings);
       }
@@ -1177,6 +1274,7 @@ export async function installMockApi(page: Page): Promise<void> {
           cadenceDays: null,
           startDate: null,
           comparisonMode: 'rolling_14',
+          hourlyCostUsd: null,
         } satisfies WorkspaceProSettings);
       }
       if (path.endsWith('/api/pro/slack/target')) {

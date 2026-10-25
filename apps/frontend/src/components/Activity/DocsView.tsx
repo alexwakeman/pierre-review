@@ -320,6 +320,7 @@ function AddDocs({ workspaceId, maxBytes }: { workspaceId: number; maxBytes: num
           <>
             <button
               type="button"
+              data-ai-run
               onClick={() => inputRef.current?.click()}
               className="inline-flex items-center gap-1 rounded border border-gray-300 px-2 py-1 font-medium text-gray-700 hover:border-gray-400 dark:border-gray-700 dark:text-gray-200 dark:hover:border-gray-500"
             >
@@ -386,6 +387,7 @@ function AddDocs({ workspaceId, maxBytes }: { workspaceId: number; maxBytes: num
         </span>
         <button
           type="submit"
+          data-ai-run
           disabled={addUrl.isPending || url.trim() === ''}
           className="shrink-0 rounded border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700 hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:text-gray-200 dark:hover:border-gray-500"
         >
