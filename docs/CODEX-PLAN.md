@@ -116,12 +116,14 @@ schema), then hands their answers to the main review run. This keeps the cap, th
 cost per specialist in Limn's hands, and does not depend on undocumented subagent behaviour in
 `exec`. The Claude path keeps its SDK subagents.
 
-### 3.6 Cost and budget
+### 3.6 Cost and budget (revised 2026-10-25, see § 8)
 
-- API key: Limn turns tokens into US$ with a price table (as `review/pricing.ts` does for Claude),
-  so `REVIEW_BUDGET_USD` and `recordAiUsage` keep working.
-- ChatGPT login: no per-run price exists. The budget becomes a token ceiling per run kind, the
-  run shows tokens instead of US$, and copy never invents a dollar figure.
+- API key (`OPENAI_API_KEY`): Limn turns tokens into US$ with an OpenAI price table (as
+  `review/pricing.ts` does for Claude), so `REVIEW_BUDGET_USD`, `recordAiUsage` and the spend
+  budget's weekly US$ mode keep working.
+- ChatGPT login: the SAME rule as a Claude subscription — Limn's share of the 5-hour and weekly
+  limits, default 5%, percentages only. Measured from Codex's OWN rate-limit reading (primary =
+  5-hour, secondary = weekly, `used_percent` + reset), not from a guessed dollar allowance (§ 8.1).
 
 ### 3.7 Install, sign-in, choice
 
@@ -188,3 +190,48 @@ finding is checked by a second agent, then fixed in the same phase.
   decision.
 - **Two providers double the test surface.** Recorded Codex event streams as fixtures keep the
   suite offline; only the opt-in live tests spend quota.
+
+## 8. Changes since the plan (assessed 2026-10-25)
+
+### 8.1 The spend budget (`ai/budget.ts`, `packages/shared/src/ai-budget.ts`, migration `0125`)
+
+What landed: an optional per-machine budget, off by default. On a Claude subscription Limn may use a
+share of the week (1–50%, default 5%) and of each 5-hour session (follows the week unless set); on an
+API key, a weekly US$ budget. ONE gate (`allowAutomaticRun` / `review/budget-gate.ts`) is asked
+before every AUTOMATIC run; runs the reader starts warn and need a second press. A header item shows
+Limn's shares and Claude's own windows. Usage is read by tapping every Agent SDK message
+(`ai/runtime.ts` `tapQuery` → `rate_limit_event`) plus a background usage probe.
+
+What it means for Codex:
+
+| Area | Today (Claude only) | Codex change |
+|---|---|---|
+| The gate | One gate, provider-blind callers | Keep ONE gate; it asks the ACTIVE provider's budget. No caller changes. |
+| Subscription share | Limn's recorded US$ ÷ an ESTIMATED weekly/5-hour US$ allowance (`SUBSCRIPTION_ESTIMATES`, third-party figures) | Codex reports tokens, never US$, so the estimate route does not carry over. Better: Codex exposes its own windows — a 5-hour ("primary") and a weekly ("secondary") `used_percent` with reset times. Limn's share = the sum of the `used_percent` RISE across each of Limn's own runs. No estimate table. ⚠ A run while the reader also uses Codex elsewhere over-counts; that errs on the safe side and is acceptable. Fallback only if Phase 0 finds no reading: a ChatGPT-plan estimate table (Plus / Pro / Business), labelled as an estimate like Claude's. |
+| Where the reading comes from | SDK message tap + experimental usage probe | Phase 0 must find it: an event in `exec --json`, the `app-server` `account/rateLimits/read` method, or the session log's `rate_limits` block. Then ONE normalised `AiUsageReading` feeds the same observer, whichever provider produced it. |
+| API key mode | Weekly US$ | Same, with OpenAI prices. |
+| Ledger | `ai_usage.cost_usd` is NOT NULL; no provider column | Migration: add `provider` (default `'claude'`) and a nullable per-run `share_pct` (the rise in the weekly window); a ChatGPT run stores `cost_usd = 0` with its tokens and share. Every fold that sums `cost_usd` filters by provider. |
+| Settings + header | "Claude spend", Claude's windows | "AI spend" naming the provider in use; the popover shows Codex's windows when Codex is active. Same 5% default. |
+| Demo | Claude budget in the recording | A Codex-labelled budget reading too (CLAUDE.md § the demo). |
+
+Phase placement: the provider-neutral reading and ledger column go in **Phase 1** (seam), the Codex
+reading in **Phase 2(c)**, the Settings/header naming in **Phase 4(a)**.
+
+### 8.2 The landing site
+
+It was redesigned (the "pigment board", Getting started and Reporting pages, "Time it saves you",
+the budget step). Codex is now "coming soon" in four places: the Gather board's `Codex` tile
+(`components/board/Gather.tsx`), `Contact.tsx`, `GettingStarted.tsx` and `HowWeMeasure.tsx`; and
+Claude-only budget/cost copy sits in `components/board/Cost.tsx`, `Faq.tsx`, `Check.tsx`, `Act.tsx`,
+`SavesTime.tsx`, `lib/routes.ts` (SEO) and `lib/site.ts`. **Phase 6** therefore grows: the Codex
+tile becomes live, Getting started gains "Install Codex and sign in" plus the budget step for a
+ChatGPT plan, and the FAQ, cost and SEO text name both providers. Until Phase 5 decides, nothing on
+the site changes.
+
+### 8.3 This machine
+
+The Codex CLI is not installed (only a lazy-load shell wrapper). `~/.codex/auth.json` holds a ChatGPT
+sign-in last refreshed by Codex 0.77 in January, which may have expired; `~/.codex/config.toml`
+defines a `railway` MCP server — exactly what `--ignore-user-config` must keep out of Limn's runs.
+Phase 0 installs the pinned CLI into a scratch folder (never globally) and, if the sign-in has
+lapsed, stops for the user to run `codex login`.
