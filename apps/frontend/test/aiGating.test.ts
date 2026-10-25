@@ -20,6 +20,20 @@ const READY: MeResponse['ai'] = {
   runtimeMessage: null,
   auth: 'ok',
   authMessage: null,
+  provider: 'claude',
+  providers: {
+    claude: { auth: 'ok', route: 'login', message: null },
+    codex: {
+      runtime: 'absent',
+      runtimeMessage: null,
+      auth: 'none',
+      route: 'none',
+      signedIn: false,
+      plan: null,
+      available: false,
+      message: null,
+    },
+  },
 };
 
 describe('aiCapabilitiesOf', () => {

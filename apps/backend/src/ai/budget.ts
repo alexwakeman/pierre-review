@@ -37,13 +37,21 @@
 // There is no shared "≤ 1 means a fraction" guess: each path knows its own scale. Any throw or shape
 // mismatch is "no reading" — the windows are then rolling and the subscription is the reader's pick.
 //
+// CODEX (docs/CODEX-PLAN.md § 8.1): the budget judges the ACTIVE provider. On a ChatGPT sign-in the
+// reading is the app-server's `account/rateLimits/read` (ai/codex/app-server.ts — in memory, probed in
+// the background at most every 5 minutes), and Limn's share of each window is TOKEN-WEIGHTED: its own
+// codex ai_usage tokens ÷ the account's tokens in that window (`account/usage/read`) × the window's
+// whole-percent usedPercent. Same gate, same settings, percentages only. An API key is weekly US$.
+//
 // One budget per ACCOUNT (= per machine), never per workspace.
 import { and, eq, gte, inArray } from 'drizzle-orm';
 import {
   AI_BUDGET_DAY_MS,
   AI_BUDGET_WEEK_MS,
   aiUsageView,
+  budgetWindowStart,
   decideAiBudget,
+  type AiAccountTokens,
   liveFiveHourReset,
   liveWeekReset,
   resolveAiBudgetSettings,
@@ -65,6 +73,7 @@ import {
   parseUsageProbe,
 } from './providers/claude-usage.js';
 import { setAgentMessageObserver } from './runtime.js';
+import { codexAccountTokens, codexRateLimitsCached, kickCodexProbe } from './codex/app-server.js';
 
 export const DAY_MS = AI_BUDGET_DAY_MS;
 export const WEEK_MS = AI_BUDGET_WEEK_MS;
@@ -106,9 +115,22 @@ async function loadReading(): Promise<AiUsageReading | null> {
   return memReading;
 }
 
-/** The provider's latest normalised reading. */
+/**
+ * The provider's latest normalised reading. Codex's is the app-server probe's CACHE
+ * (ai/codex/app-server.ts) — in memory only: the probe refreshes it in the background within seconds
+ * of a restart, and until then the reading is unknown, which never blocks.
+ */
 async function readingFor(provider: AgentProvider): Promise<AiUsageReading | null> {
-  return provider.id === 'claude' ? loadReading() : null;
+  if (provider.id === 'codex') return codexRateLimitsCached();
+  return loadReading();
+}
+
+/** Codex on a ChatGPT sign-in: the account's tokens in each budget window (from the probe's cache). */
+async function codexAccountTokensFor(reading: AiUsageReading | null, nowMs: number): Promise<AiAccountTokens> {
+  const span = async (which: 'week' | 'five_hour'): Promise<number | null> =>
+    codexAccountTokens({ fromMs: budgetWindowStart(reading, nowMs, which).fromMs, toMs: nowMs });
+  const [week, fiveHour] = await Promise.all([span('week'), span('five_hour')]);
+  return { week, fiveHour };
 }
 
 function storeReading(next: AiUsageReading): void {
@@ -173,6 +195,9 @@ export function _resetAiBudgetForTest(): void {
  *  ready, not run in the last PROBE_MIN_INTERVAL_MS. Single-flight. Never throws, never awaited by a
  *  request: the caller serves the cached reading. Returns the in-flight promise for tests. */
 export function kickUsageProbe(nowMs: number = Date.now(), provider: AgentProvider = getActiveProvider()): Promise<void> | null {
+  // Codex's probe is the app-server's own (account, windows and token counts in one process), with
+  // the same 5-minute floor and single flight.
+  if (provider.id === 'codex') return provider.usage.probeReady() ? kickCodexProbe({ nowMs }) : null;
   if (provider.id !== 'claude') return null;
   if (probeInFlight) return probeInFlight;
   if (nowMs - lastProbeAtMs < PROBE_MIN_INTERVAL_MS) return null;
@@ -334,16 +359,32 @@ export async function aiBudgetSnapshot(accountId: number, opts: AiBudgetStatusOp
   const { settings, isDefault } = await readAiBudgetSettings(accountId);
   const probe = opts.probe ?? 'when_on';
   if (route === 'login' && (probe === 'always' || (probe === 'when_on' && settings.enabled))) kickUsageProbe(nowMs, provider);
+  const isCodex = provider.id === 'codex';
   const [reading, ledger, costs] = await Promise.all([
     route === 'login' ? readingFor(provider) : Promise.resolve(null),
     readLedger(accountId, Math.min(nowMs - WEEK_MS, localMidnightMs(nowMs)), provider.id),
-    settings.enabled && route === 'login' ? readCycleCosts(accountId, nowMs, provider.id) : Promise.resolve(NO_CYCLE_COSTS),
+    settings.enabled && route === 'login' && !isCodex
+      ? readCycleCosts(accountId, nowMs, provider.id)
+      : Promise.resolve(NO_CYCLE_COSTS),
   ]);
+  // Codex's share is TOKEN-WEIGHTED (packages/shared ai-budget.ts): the account's tokens over the
+  // SAME windows the fold counts Limn's in.
+  const accountTokens = isCodex && route === 'login' ? await codexAccountTokensFor(reading, nowMs) : null;
+  const providerId = provider.id;
   return {
     settings,
     isDefault,
-    status: decideAiBudget({ settings, route, reading, ledger, costs, nowMs }),
-    usage: aiUsageView({ settings, route, reading, ledger, nowMs, todayFromMs: localMidnightMs(nowMs) }),
+    status: decideAiBudget({ settings, route, reading, ledger, costs, nowMs, provider: providerId, accountTokens }),
+    usage: aiUsageView({
+      settings,
+      route,
+      reading,
+      ledger,
+      nowMs,
+      todayFromMs: localMidnightMs(nowMs),
+      provider: providerId,
+      accountTokens,
+    }),
   };
 }
 

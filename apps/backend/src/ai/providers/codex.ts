@@ -25,9 +25,8 @@
 // recorded (the budget's share is token-weighted, § 8.1); on an API key the tokens are priced from
 // CODEX_PRICES_PER_MTOK. A resumed turn reports the thread's CUMULATIVE usage, so the retry adds only
 // its delta; a cancelled run records NULL tokens.
-import type { AiUsageReading } from '@pierre-review/shared';
 import { execFile } from 'node:child_process';
-import { existsSync, realpathSync } from 'node:fs';
+import { realpathSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
@@ -35,8 +34,8 @@ import { promisify } from 'node:util';
 import { config } from '../../config.js';
 // db/usage.js is imported LAZILY (in `record`): db/client opens the database at import time, and the
 // provider registry is imported by every runner and test that never writes a ledger row.
-import { codexAccount, codexRateLimits } from '../codex/app-server.js';
 import { buildExecArgs, codexChildEnv, toResumeArgs } from '../codex/config.js';
+import { codexUsageSource, detectCodex } from '../codex/detect.js';
 import {
   addUsage,
   cleanCodexError,
@@ -47,7 +46,7 @@ import {
   type TokenUsage,
 } from '../codex/events.js';
 import { pathGuardHook, verifyHookTrusted } from '../codex/hook.js';
-import { codexBinary, codexHome, ensureCodexHomeConfig } from '../codex/home.js';
+import { codexHome, ensureCodexHomeConfig } from '../codex/home.js';
 import { runCodexExec, type CodexExecResult } from '../codex/run.js';
 import type { CodexHookConfig } from '../codex/types.js';
 import { workspaceMcpConfig } from '../codex/workspace-mcp.js';
@@ -63,7 +62,13 @@ import type {
   ModelRole,
   ProviderStatus,
 } from '../provider.js';
-import { codexKindNotAvailableMessage, codexKindReady } from '../provider-setting.js';
+import { codexRunEnv, resolveCodexCredential, type CodexCredential } from '../credentials.js';
+import {
+  CODEX_NOT_AVAILABLE_MESSAGE,
+  codexKindNotAvailableMessage,
+  codexKindReady,
+  codexRunnable,
+} from '../provider-setting.js';
 import {
   RESULT_TOOL_NAMES,
   shapeToJsonSchema,
@@ -144,18 +149,36 @@ export function codexCostUsd(
 // ---- the credential ------------------------------------------------------------------------------
 
 /**
- * Which credential a Codex run would use, cheaply and synchronously: Limn's own Codex sign-in (an
- * `auth.json` in Limn's Codex home) first, else OPENAI_API_KEY. ⚠ The file says a sign-in was MADE,
- * not that it still works — `detect()` asks the app-server (`account/read`) for that.
+ * Which credential rung a Codex run would use — the ONE Codex ladder (ai/credentials.ts
+ * `resolveCodexCredential`: Limn's own Codex sign-in first, else OPENAI_API_KEY). Cheap and sync.
+ * ⚠ It says a sign-in was MADE, not that it still works — `detect()` asks the app-server for that.
  */
 export function codexCredentialRoute(env: NodeJS.ProcessEnv = process.env): 'login' | 'api_key' | 'none' {
-  if (existsSync(join(codexHome(), 'auth.json'))) return 'login';
-  if (env.OPENAI_API_KEY?.trim()) return 'api_key';
-  return 'none';
+  return resolveCodexCredential(env).route;
 }
 
-const apiKeyFor = (route: 'login' | 'api_key' | 'none'): string | null =>
-  route === 'api_key' ? (process.env.OPENAI_API_KEY?.trim() ?? null) : null;
+/** The hook's diagnostic log (path-guard-hook-main.ts), forwarded only when set. */
+const GUARD_LOG_ENV = 'LIMN_CODEX_GUARD_LOG';
+
+/**
+ * The `codex exec` process's WHOLE environment. The credential decision is `codexRunEnv`'s (CODEX_HOME
+ * = Limn's home; on a sign-in every API-key variable removed, on the key rung CODEX_API_KEY = the key);
+ * the result is then cut to the minimum `codexChildEnv` keeps (never Limn's whole environment, which
+ * may carry ANTHROPIC_API_KEY, a GitHub token, the session secret…), and the hook's own environment
+ * is merged LAST. ⚠ Without `hook.env` (`LIMN_CODEX_GUARD`, the run's roots) the hook denies every
+ * call. Exported for the test.
+ */
+export function codexExecEnv(
+  credential: CodexCredential,
+  hook: CodexHookConfig | null,
+  base: NodeJS.ProcessEnv = process.env,
+): Record<string, string> {
+  const run = codexRunEnv(base, credential);
+  const env = codexChildEnv(run.CODEX_HOME ?? codexHome(base), run, run.CODEX_API_KEY ?? null);
+  const log = base[GUARD_LOG_ENV];
+  if (hook && log) env[GUARD_LOG_ENV] = log;
+  return hook ? { ...env, ...hook.env } : env;
+}
 
 // ---- shared run plumbing ------------------------------------------------------------------------
 
@@ -226,7 +249,8 @@ async function withScratch<T>(fn: (dir: string) => Promise<T>): Promise<T> {
 
 async function complete(req: CompleteRequest): Promise<CompleteResult> {
   if (!config.aiEnabled) throw new Error('AI is switched off here.');
-  const route = codexCredentialRoute();
+  const credential = resolveCodexCredential();
+  const route = credential.route;
   if (route === 'none') throw new Error(CODEX_SIGN_IN_MESSAGE);
   const role = req.role ?? 'fast';
   const model = resolveCodexModel({ role, ...(req.model ? { id: req.model } : {}) });
@@ -248,7 +272,7 @@ async function complete(req: CompleteRequest): Promise<CompleteResult> {
     );
     const res = await runCodexExec(args, {
       cwd,
-      env: codexChildEnv(home, process.env, apiKeyFor(route)),
+      env: codexExecEnv(credential, null),
       stdin: req.prompt,
       timeoutMs: DEFAULT_COMPLETE_TIMEOUT_MS,
     });
@@ -305,7 +329,7 @@ export function runRoots(spec: Pick<AgentRunSpec, 'cwd' | 'roots' | 'readOnlyRoo
 // the home's config, which it does before the first run.
 const trustCache = new Map<string, boolean>();
 async function hookIfTrusted(home: string, hook: CodexHookConfig): Promise<boolean> {
-  const key = `${home}\u0000${hook.hash}`;
+  const key = `${home}\u0000${hook.trustedHash}`;
   const cached = trustCache.get(key);
   if (cached !== undefined) return cached;
   let ok = false;
@@ -323,7 +347,7 @@ export function _resetCodexTrustCacheForTest(): void {
 }
 
 export const HOOK_NOT_TRUSTED_MESSAGE =
-  "Limn's path guard is not active for Codex yet, so Codex may not change files. Set up AI again: limn ai install";
+  "Limn's path guard is not active for Codex, so Codex may not run here. Set up Codex again: limn ai install codex";
 
 export const CODEX_SIGN_IN_MESSAGE = 'Codex is not signed in. Sign in with: limn ai login codex';
 
@@ -429,7 +453,8 @@ async function runAgent(spec: AgentRunSpec): Promise<AgentRunResult> {
  */
 export async function runAgentUnchecked(spec: AgentRunSpec): Promise<AgentRunResult> {
   if (!config.aiEnabled) throw new Error('AI is switched off here.');
-  const route = codexCredentialRoute();
+  const credential = resolveCodexCredential();
+  const route = credential.route;
   if (route === 'none') throw new Error(CODEX_SIGN_IN_MESSAGE);
   const model = resolveCodexModel(spec.model);
   const effort = spec.codex?.effort ?? CODEX_EFFORT_FOR_ROLE[spec.model.role];
@@ -442,12 +467,13 @@ export async function runAgentUnchecked(spec: AgentRunSpec): Promise<AgentRunRes
   if (resultTool) toolSchema = shapeToJsonSchema(await loadZod(), resultTool.shape);
 
   const mcp = workspaceMcpConfig(roots);
-  const guard = pathGuardHook(roots);
-  await ensureCodexHomeConfig(guard);
+  // THE GUARD IS NOT OPTIONAL. Its trust entry is written into Limn's own home first, then Codex is
+  // asked whether it will RUN the hook (and the hook must refuse a canary call). An untrusted hook is
+  // skipped SILENTLY by Codex, so a run whose guard is not proven never starts — read-only or not.
+  const hook = pathGuardHook({ read: roots.read, write: roots.write });
+  await ensureCodexHomeConfig(hook);
   const home = codexHome();
-  const trusted = await hookIfTrusted(home, guard);
-  if (isWrite && !trusted) throw new Error(HOOK_NOT_TRUSTED_MESSAGE);
-  const hook = trusted ? guard : null;
+  if (!(await hookIfTrusted(home, hook))) throw new Error(HOOK_NOT_TRUSTED_MESSAGE);
 
   const before = isWrite ? await Promise.all(roots.write.map(gitSnapshot)) : [];
 
@@ -461,7 +487,7 @@ export async function runAgentUnchecked(spec: AgentRunSpec): Promise<AgentRunRes
       { cwd, writeRoots: roots.write, ...(spec.system ? { system: spec.system } : {}) },
       { home, mcp, hook, schemaPath, model, effort },
     );
-    const env = codexChildEnv(home, process.env, apiKeyFor(route));
+    const env = codexExecEnv(credential, hook);
     const timeoutMs = spec.codex?.timeoutMs ?? DEFAULT_AGENT_TIMEOUT_MS;
     const onEvent = (e: Parameters<NonNullable<Parameters<typeof runCodexExec>[1]['onEvent']>>[0]): void => {
       const p = progressFromEvent(e);
@@ -558,22 +584,25 @@ export async function runAgentUnchecked(spec: AgentRunSpec): Promise<AgentRunRes
 
 // ---- detect -------------------------------------------------------------------------------------
 
+/**
+ * Installed, signed in (a real `account/read` in Limn's own home), plan, rung — ai/codex/detect.ts.
+ * ⚠ `available` means "can run AGENTS", the same answer `/api/me` gives (`providers.codex.available`):
+ * false until every agent kind is ported (`codexRunnable`), with CODEX_NOT_AVAILABLE_MESSAGE. The
+ * one-shot `complete()` runs on Codex regardless, once installed and signed in.
+ */
 async function detect(): Promise<ProviderStatus> {
   if (!config.aiEnabled) return { id: 'codex', available: false, route: 'none', message: 'AI is switched off here.' };
-  try {
-    await codexBinary();
-  } catch (err) {
-    return { id: 'codex', available: false, route: 'none', message: (err as Error).message };
-  }
-  let signedIn = false;
-  try {
-    signedIn = (await codexAccount()).signedIn;
-  } catch {
-    signedIn = false;
-  }
-  if (signedIn) return { id: 'codex', available: true, route: 'login', message: null };
-  if (process.env.OPENAI_API_KEY?.trim()) return { id: 'codex', available: true, route: 'api_key', message: null };
-  return { id: 'codex', available: false, route: 'none', message: CODEX_SIGN_IN_MESSAGE };
+  const d = await detectCodex();
+  const runnable = codexRunnable();
+  return {
+    id: 'codex',
+    available: runnable && d.installed && d.route !== 'none',
+    route: d.route,
+    message: d.message ?? (runnable ? null : CODEX_NOT_AVAILABLE_MESSAGE),
+    installed: d.installed,
+    signedIn: d.signedIn,
+    plan: d.plan,
+  };
 }
 
 export const codexProvider: AgentProvider = {
@@ -583,12 +612,6 @@ export const codexProvider: AgentProvider = {
   complete,
   detect,
   credentialRoute: () => codexCredentialRoute(),
-  usage: {
-    // `exec --json` carries no rate-limit data (spike § 6): the windows come from the app-server.
-    readingFromMessage: () => null,
-    probe: () => codexRateLimits(),
-    // codexRateLimits already answers a normalised reading (or null).
-    readingFromProbe: (raw) => (raw && typeof raw === 'object' ? (raw as AiUsageReading) : null),
-    probeReady: () => codexCredentialRoute() === 'login',
-  },
+  // `exec --json` carries no rate-limit data (spike § 6): the windows come from the app-server.
+  usage: codexUsageSource,
 };

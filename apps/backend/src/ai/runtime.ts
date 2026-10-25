@@ -33,6 +33,15 @@
 // `@anthropic-ai/sdk` as a real dependency (`--with-pro`, for the metered summary path) and no
 // Agent SDK, so a package missing from one source falls through to the other.
 //
+// ⚠ CODEX (docs/CODEX-PLAN.md § 3.7): `@openai/codex` — the Codex CLI and its native program per
+// platform — rides the SAME runtime directory, but ONLY when the reader asks for it ("Set up AI" with
+// Codex, `limn ai install codex`). It is never imported: Limn runs its native program directly
+// (`codexBinaryPath`), located here, the one module that knows where the runtime lives. Its pin is
+// `limnAiRuntime['@openai/codex']`, DECLARED in apps/backend/package.json's own `limnAiRuntime`
+// (the CLI is not a workspace dependency — 360 MB unpacked in every dev checkout) and copied into
+// the release manifest by scripts/build-release.mjs. An install keeps Codex if it is already there,
+// so re-running "Set up AI" for Claude never removes it.
+//
 // ⚠ NOTHING ELSE MAY IMPORT THESE PACKAGES. Type-only imports are fine (erased at emit); a value
 // import anywhere else fails with ERR_MODULE_NOT_FOUND on an npm install — and only when someone
 // clicks the feature. scripts/build-release.mjs greps the emitted JS and fails the build on one.
@@ -63,6 +72,11 @@ export const AI_RUNTIME_PACKAGES = [
   'turndown-plugin-gfm',
 ] as const;
 export type AiRuntimePackage = (typeof AI_RUNTIME_PACKAGES)[number];
+
+/** The Codex CLI package: installed only on request, never imported (its native program is run). */
+export const CODEX_PACKAGE = '@openai/codex';
+/** Which providers' packages an install brings. Claude's set is always installed. */
+export type AiRuntimeProvider = 'claude' | 'codex';
 
 /**
  * The packages added to the runtime AFTER it first shipped. A runtime directory installed before
@@ -299,6 +313,43 @@ export function spawnNpm(
   });
 }
 
+// ---- the Codex program --------------------------------------------------------------------------
+
+/** Codex's platform packages and their target triples — as `@openai/codex`'s own bin/codex.js
+ *  (0.164.0) maps them. Limn does not run that wrapper: it starts the native program directly. */
+const CODEX_TARGETS: Record<string, { pkg: string; triple: string }> = {
+  'linux-x64': { pkg: '@openai/codex-linux-x64', triple: 'x86_64-unknown-linux-musl' },
+  'linux-arm64': { pkg: '@openai/codex-linux-arm64', triple: 'aarch64-unknown-linux-musl' },
+  'darwin-x64': { pkg: '@openai/codex-darwin-x64', triple: 'x86_64-apple-darwin' },
+  'darwin-arm64': { pkg: '@openai/codex-darwin-arm64', triple: 'aarch64-apple-darwin' },
+  'win32-x64': { pkg: '@openai/codex-win32-x64', triple: 'x86_64-pc-windows-msvc' },
+  'win32-arm64': { pkg: '@openai/codex-win32-arm64', triple: 'aarch64-pc-windows-msvc' },
+};
+
+/**
+ * The Codex native program under an install prefix (`<fromDir>/node_modules/@openai/codex` and its
+ * platform package, wherever npm put it), or null. The platform package is resolved FROM the CLI
+ * package's own directory, the way its bin/codex.js does.
+ */
+export function codexBinaryIn(
+  fromDir: string,
+  platform: string = process.platform,
+  arch: string = process.arch,
+): string | null {
+  const target = CODEX_TARGETS[`${platform}-${arch}`];
+  if (!target) return null;
+  const cliDir = findPackageDir(CODEX_PACKAGE, fromDir);
+  if (!cliDir) return null;
+  const exe = platform === 'win32' ? 'codex.exe' : 'codex';
+  const platformDir = findPackageDir(target.pkg, cliDir);
+  for (const vendorRoot of [platformDir ? join(platformDir, 'vendor') : null, join(cliDir, 'vendor')]) {
+    if (!vendorRoot) continue;
+    const file = join(vendorRoot, target.triple, 'bin', exe);
+    if (existsSync(file)) return file;
+  }
+  return null;
+}
+
 // ---- the runtime -------------------------------------------------------------------------------
 
 export interface AiRuntimeOptions {
@@ -313,6 +364,9 @@ export interface AiRuntimeOptions {
 
 export interface InstallOptions {
   timeoutMs?: number;
+  /** Which providers' packages to install. Claude's set always comes; 'codex' adds the Codex CLI.
+   *  An already-installed Codex is kept whatever this says. Default: ['claude']. */
+  providers?: AiRuntimeProvider[];
   /** Test seam: the program and leading args that stand in for npm. */
   npm?: { command: string; args: string[] };
 }
@@ -357,6 +411,27 @@ export function createAiRuntime(opts: AiRuntimeOptions = {}) {
       out[name] = v;
     }
     return out as AiRuntimePins;
+  }
+
+  /** The Codex CLI's exact pin (`limnAiRuntime['@openai/codex']`), or null when this copy lists none. */
+  function codexPin(): string | null {
+    const fromManifest = readJson(join(packageRoot, 'package.json'))?.[AI_RUNTIME_MANIFEST_FIELD];
+    const v =
+      fromManifest && typeof fromManifest === 'object'
+        ? (fromManifest as Record<string, unknown>)[CODEX_PACKAGE]
+        : undefined;
+    return typeof v === 'string' && EXACT_VERSION.test(v) ? v : null;
+  }
+
+  /** The Codex CLI under `fromDir`: 'ready' at its pin, 'stale' at another, 'no_binary' without the
+   *  platform program (an optional dependency npm may silently skip), 'absent' when not there. */
+  function codexDirState(fromDir: string): 'ready' | 'absent' | 'stale' | 'no_binary' {
+    const dir = findPackageDir(CODEX_PACKAGE, fromDir);
+    const have = installedVersion(dir);
+    if (!dir || !have) return 'absent';
+    if (!codexBinaryIn(fromDir)) return 'no_binary';
+    const want = codexPin();
+    return want && want !== have ? 'stale' : 'ready';
   }
 
   /**
@@ -405,6 +480,9 @@ export function createAiRuntime(opts: AiRuntimeOptions = {}) {
 
   // ---- status ----
   let inFlight: Promise<AiRuntimeInstallResult> | null = null;
+  /** Does the running download include Codex? */
+  let inFlightCodex = false;
+  let lastCodexFailure: string | null = null;
   const listeners = new Set<(p: AiRuntimeInstallProgress) => void>();
   let lastFailure: string | null = null;
 
@@ -428,6 +506,44 @@ export function createAiRuntime(opts: AiRuntimeOptions = {}) {
       };
     }
     return { runtime: 'absent', runtimeMessage: null };
+  }
+
+  function codexOverride(): string | null {
+    const raw = env.LIMN_CODEX_PATH?.trim();
+    if (!raw) return null;
+    return isAbsolute(raw) ? raw : resolve(raw);
+  }
+
+  /**
+   * The Codex CLI's state. `LIMN_CODEX_PATH` (the reader's own `codex` native program) makes it
+   * ready without a download — the same opt-in as LIMN_CLAUDE_PATH, version-unchecked.
+   */
+  function codexStatus(): AiRuntimeStatus {
+    if (inFlight && inFlightCodex) return { runtime: 'installing', runtimeMessage: null };
+    if (codexOverride()) return { runtime: 'ready', runtimeMessage: null };
+    const state = existsSync(join(runtimeDir, 'package.json')) ? codexDirState(runtimeDir) : 'absent';
+    if (state === 'ready') return { runtime: 'ready', runtimeMessage: null };
+    if (lastCodexFailure) return { runtime: 'failed', runtimeMessage: lastCodexFailure };
+    if (state === 'no_binary') {
+      return {
+        runtime: 'absent',
+        runtimeMessage: 'The Codex program is missing from the AI download. Run: limn ai install codex',
+      };
+    }
+    if (state === 'stale') {
+      return { runtime: 'absent', runtimeMessage: 'Limn was updated. Set up Codex again: limn ai install codex' };
+    }
+    return { runtime: 'absent', runtimeMessage: null };
+  }
+
+  /** The Codex program to run, or null when Codex is not set up. */
+  function codexBinary(): string | null {
+    const override = codexOverride();
+    if (override) return override;
+    if (!existsSync(join(runtimeDir, 'package.json'))) return null;
+    // 'stale' still runs (an older pin is a working CLI); "set up again" is the status's job.
+    const state = codexDirState(runtimeDir);
+    return state === 'ready' || state === 'stale' ? codexBinaryIn(runtimeDir) : null;
   }
 
   // ---- loading ----
@@ -480,17 +596,25 @@ export function createAiRuntime(opts: AiRuntimeOptions = {}) {
     const detach = (): void => {
       if (onProgress) listeners.delete(onProgress);
     };
-    // Single-flight: a second press (or a second tab) joins the running download.
+    // Single-flight: a second press (or a second tab) joins the running download. ⚠ A press for
+    // Codex while a Claude-only download runs joins it too; Codex then still reads 'absent' and the
+    // next press downloads it.
     if (inFlight) return inFlight.finally(detach);
-    inFlight = runInstall(installOpts).finally(() => {
+    const withCodex =
+      (installOpts.providers ?? ['claude']).includes('codex') ||
+      (existsSync(join(runtimeDir, 'package.json')) && findPackageDir(CODEX_PACKAGE, runtimeDir) !== null);
+    inFlightCodex = withCodex;
+    inFlight = runInstall(installOpts, withCodex).finally(() => {
       inFlight = null;
+      inFlightCodex = false;
     });
     return inFlight.finally(detach);
   }
 
-  async function runInstall(installOpts: InstallOptions): Promise<AiRuntimeInstallResult> {
+  async function runInstall(installOpts: InstallOptions, withCodex: boolean): Promise<AiRuntimeInstallResult> {
     const failWith = (message: string): AiRuntimeInstallResult => {
       lastFailure = message;
+      if (withCodex) lastCodexFailure = message;
       emit({ phase: 'failed', message });
       return { ok: false, message };
     };
@@ -501,11 +625,22 @@ export function createAiRuntime(opts: AiRuntimeOptions = {}) {
         'This copy of Limn does not list which AI runtime versions to download. Update Limn and try again.',
       );
     }
+    const codexWant = withCodex ? codexPin() : null;
+    if (withCodex && !codexWant) {
+      return failWith('This copy of Limn does not list which Codex version to download. Update Limn and try again.');
+    }
+    const dependencies: Record<string, string> = { ...want, ...(codexWant ? { [CODEX_PACKAGE]: codexWant } : {}) };
     const npm = installOpts.npm ?? resolveNpm(env);
     if (!npm) return failWith('npm was not found. Install Node.js with npm, then try again.');
 
     lastFailure = null;
-    emit({ phase: 'starting', message: 'Starting the one-time download (about 110 MB).' });
+    if (withCodex) lastCodexFailure = null;
+    emit({
+      phase: 'starting',
+      message: withCodex
+        ? 'Starting the one-time download (about 110 MB, plus the Codex program).'
+        : 'Starting the one-time download (about 110 MB).',
+    });
 
     const staging = `${runtimeDir}.staging-${process.pid}-${Date.now()}`;
     try {
@@ -517,7 +652,7 @@ export function createAiRuntime(opts: AiRuntimeOptions = {}) {
             name: 'limn-ai-runtime',
             private: true,
             description: 'The AI runtime Limn downloads on first use. Safe to delete; Limn can download it again.',
-            dependencies: want,
+            dependencies,
           },
           null,
           2,
@@ -541,7 +676,9 @@ export function createAiRuntime(opts: AiRuntimeOptions = {}) {
       '--no-package-lock',
     ];
     // Using your own `claude`: skip the SDK's bundled ~110 MB binary (its optional dependencies).
-    if (env.LIMN_CLAUDE_PATH?.trim()) args.push('--omit=optional');
+    // ⚠ Not with Codex: its platform program is an optional dependency too, and npm cannot omit one
+    // package's optionals and keep another's.
+    if (env.LIMN_CLAUDE_PATH?.trim() && !withCodex) args.push('--omit=optional');
 
     const timeoutMs = installOpts.timeoutMs ?? 10 * 60_000;
     const exit = await spawnNpm(npm, args, {
@@ -583,6 +720,19 @@ export function createAiRuntime(opts: AiRuntimeOptions = {}) {
         `The download finished but the Claude Code program for ${process.platform}-${process.arch} is missing from it. Try again: limn ai install. Or set LIMN_CLAUDE_PATH to your own claude.`,
       );
     }
+    if (codexWant) {
+      const codexDir = findPackageDir(CODEX_PACKAGE, staging);
+      if (!codexDir || installedVersion(codexDir) !== codexWant) {
+        rmSync(staging, { recursive: true, force: true });
+        return failWith(`The download finished but ${CODEX_PACKAGE} ${codexWant} is missing from it. Try again: limn ai install codex`);
+      }
+      if (!codexBinaryIn(staging)) {
+        rmSync(staging, { recursive: true, force: true });
+        return failWith(
+          `The download finished but the Codex program for ${process.platform}-${process.arch} is missing from it. Try again: limn ai install codex`,
+        );
+      }
+    }
 
     // Swap in place: the previous runtime (if any) moves aside first, so a failure here leaves
     // either the old one or the new one — never half of each.
@@ -598,11 +748,12 @@ export function createAiRuntime(opts: AiRuntimeOptions = {}) {
     rmSync(old, { recursive: true, force: true });
 
     lastFailure = null;
-    emit({ phase: 'done', message: 'AI is set up.' });
+    if (withCodex) lastCodexFailure = null;
+    emit({ phase: 'done', message: withCodex ? 'AI is set up, with Codex.' : 'AI is set up.' });
     return { ok: true };
   }
 
-  return { runtimeDir, pins, status, load, install };
+  return { runtimeDir, pins, codexPin, status, codexStatus, codexBinary, load, install };
 }
 
 // ---- the app's runtime ----------------------------------------------------------------------
@@ -625,6 +776,21 @@ export function installAiRuntime(
 /** The exact versions this copy of Limn downloads, or null when it cannot tell. */
 export function aiRuntimePins(): AiRuntimePins | null {
   return runtime.pins();
+}
+
+/** The Codex CLI's exact pin, or null when this copy lists none. */
+export function codexRuntimePin(): string | null {
+  return runtime.codexPin();
+}
+
+/** The Codex CLI's state (the Codex half of "Set up AI"). Cheap and sync. */
+export function getCodexRuntimeStatus(): AiRuntimeStatus {
+  return runtime.codexStatus();
+}
+
+/** The Codex native program to run (LIMN_CODEX_PATH, else the first-use install), or null. */
+export function codexBinaryPath(): string | null {
+  return runtime.codexBinary();
 }
 
 export type AgentSdk = typeof import('@anthropic-ai/claude-agent-sdk');

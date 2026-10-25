@@ -63,7 +63,27 @@ export function meBody(srv: DemoServer): Record<string, unknown> {
     // The in-app conflict resolver has no simulation here (its routes would answer "Not available
     // in the demo."), so the demo hides every door to it.
     conflictResolver: false,
-    ai: { enabled: true, runtime: 'ready', runtimeMessage: null, auth: 'ok', authMessage: null },
+    ai: {
+      enabled: true,
+      runtime: 'ready',
+      runtimeMessage: null,
+      auth: 'ok',
+      authMessage: null,
+      provider: 'claude',
+      providers: {
+        claude: { auth: 'ok', route: 'login', message: null },
+        codex: {
+          runtime: 'absent',
+          runtimeMessage: null,
+          auth: 'none',
+          route: 'none',
+          signedIn: false,
+          plan: null,
+          available: false,
+          message: null,
+        },
+      },
+    },
     authNotices: [],
   };
 }

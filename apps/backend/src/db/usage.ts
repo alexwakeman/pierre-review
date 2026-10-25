@@ -11,7 +11,8 @@ export type AiUsageSeam = 'summary' | 'agent';
 // One billable AI operation to append to the ledger. `costUsd` is the authoritative
 // dollar cost (SDK-reported where available, else priced from tokens); it is stored but
 // NEVER surfaced to the client — only credits are (AI_CREDITS_PER_USD). A row with a
-// non-finite / non-positive cost is dropped (nothing to bill).
+// non-finite / negative cost is dropped, and so is a $0 one — EXCEPT a Codex row carrying tokens
+// or a share (a ChatGPT-plan run has no price; see recordAiUsage).
 export interface AiUsageRecord {
   accountId: number;
   seam: AiUsageSeam;

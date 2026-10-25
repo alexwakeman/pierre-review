@@ -19,6 +19,17 @@
 //     RATE that turns a run's recorded cost into "x% of your week").
 //   • API key — a US$ budget per rolling 7 days. No 5-hour limit.
 //
+// CODEX (docs/CODEX-PLAN.md § 6 + § 8.1, DECIDED 2026-10-25). The budget judges the ACTIVE provider.
+// On a ChatGPT sign-in there are no dollars and no estimate table: Codex reports its OWN windows (a
+// 5-hour and a weekly `usedPercent`, WHOLE numbers, with reset times), and Limn's share of a window is
+// TOKEN-WEIGHTED —
+//     Limn's tokens in the window ÷ the account's tokens in the window × the window's usedPercent
+// (Limn's from ai_usage rows with provider 'codex'; the account's from `account/usage/read`). Same
+// settings, same 5% default, percentages only. ⚠ The reading is in whole percent, so the share is
+// COARSE: while the account's window reads 0% Limn's share reads 0%, and a 5% share can first trip
+// when the window reaches 5% with Limn as all of it. Unknown account tokens take the whole
+// `usedPercent` as Limn's (the cautious reading). An API key is the weekly US$ budget, as for Claude.
+//
 // The PURE decision (`decideAiBudget`) and the header's usage view (`aiUsageView`) live HERE so the
 // backend and the static demo run the same rules; the backend (ai/budget.ts) gathers their inputs.
 
@@ -214,6 +225,18 @@ export function resolveAiSubscription(
 /** Which way the budget is judged right now. */
 export type AiBudgetMode = 'subscription' | 'api_key' | 'off';
 
+/** The AI provider a budget judges. */
+export type AiBudgetProvider = 'claude' | 'codex';
+
+/**
+ * Codex (ChatGPT sign-in): the ACCOUNT's tokens in each window — the denominator of the
+ * token-weighted share. Null = not known (Limn's share is then taken as the whole window's figure).
+ */
+export interface AiAccountTokens {
+  week: number | null;
+  fiveHour: number | null;
+}
+
 /**
  * The subscription half of the status. ⚠ PERCENTAGES ONLY — no US$ field, ever (a test asserts it).
  */
@@ -259,6 +282,8 @@ export interface AiBudgetApiKeyStatus {
 /** The ONE decision, as the API returns it. */
 export interface AiBudgetStatus {
   enabled: boolean;
+  /** The provider the budget judged (the active one). Absent from an older server ⇒ Claude. */
+  provider?: AiBudgetProvider;
   mode: AiBudgetMode;
   /** Which credential the next run uses (ai/credentials.ts). */
   route: 'login' | 'api_key' | 'none';
@@ -388,6 +413,8 @@ export interface AiUsageApiKeyView {
 
 /** GET /api/ai/budget's `usage`. */
 export interface AiUsageView {
+  /** The provider these figures are for (the active one). Absent from an older server ⇒ Claude. */
+  provider?: AiBudgetProvider;
   route: 'login' | 'api_key' | 'none';
   /** Login route only. */
   account: AiUsageAccountView | null;
@@ -452,6 +479,10 @@ export interface AiBudgetInput {
   ledger: readonly AiLedgerRow[];
   costs: AiCycleCostInput;
   nowMs: number;
+  /** The provider judged. Absent ⇒ Claude. */
+  provider?: AiBudgetProvider;
+  /** Codex on a ChatGPT sign-in: the account's tokens per window (see AiAccountTokens). */
+  accountTokens?: AiAccountTokens | null;
 }
 
 /**
@@ -513,6 +544,124 @@ function windowSpend(
   return { usedUsd: r.usedUsd, over: r.usedUsd >= lineUsd, resumesAtMs: r.resumesAtMs };
 }
 
+// ---- Codex: the token-weighted share ------------------------------------------------------------
+
+/**
+ * Limn's share of ONE Codex window, in % of the account's allowance for it (docs/CODEX-PLAN.md § 6):
+ * `limnTokens ÷ accountTokens × usedPercent`. Pure.
+ *   • `usedPercent` null (no reading) ⇒ null: unknown, which never blocks.
+ *   • Limn used nothing ⇒ 0, whatever the account did.
+ *   • the account's tokens unknown or zero while Limn used some ⇒ the whole `usedPercent` (cautious:
+ *     every token in the window is taken as Limn's).
+ *   • the ratio is capped at 1 — Limn cannot have used more than the account (a lagging account
+ *     count must not inflate the share past the window's own figure).
+ */
+export function codexWindowSharePct(limnTokens: number, accountTokens: number | null, usedPercent: number | null): number | null {
+  if (usedPercent == null || !Number.isFinite(usedPercent)) return null;
+  const used = Math.min(100, Math.max(0, usedPercent));
+  if (!Number.isFinite(limnTokens) || limnTokens <= 0) return 0;
+  if (accountTokens == null || !Number.isFinite(accountTokens) || accountTokens <= 0) return used;
+  return Math.min(1, limnTokens / accountTokens) * used;
+}
+
+/** Which budget window: Codex's `primary` (300 min) is the 5-hour one, `secondary` the week. */
+export type AiBudgetWindow = 'week' | 'five_hour';
+
+/**
+ * Where a window starts, as the budget counts it: [reset − length] when the reading's reset is known
+ * and ahead, else the rolling [now − length]. `inclusive` says whether a row AT the start counts (the
+ * reset-anchored window includes its start; the rolling one does not). Pure — the backend asks the
+ * account's tokens for exactly this span.
+ */
+export function budgetWindowStart(
+  reading: AiUsageReading | null,
+  nowMs: number,
+  which: AiBudgetWindow,
+): { fromMs: number; inclusive: boolean } {
+  const len = which === 'week' ? AI_BUDGET_WEEK_MS : AI_BUDGET_FIVE_HOUR_MS;
+  const reset = which === 'week' ? liveWeekReset(reading, nowMs) : liveFiveHourReset(reading, nowMs);
+  return reset != null ? { fromMs: reset - len, inclusive: true } : { fromMs: nowMs - len, inclusive: false };
+}
+
+/** Limn's recorded tokens (input + output) in a window; a run that reported none counts 0. Pure. */
+export function ledgerTokensIn(ledger: readonly AiLedgerRow[], fromMs: number, inclusive: boolean, nowMs: number): number {
+  let n = 0;
+  for (const r of ledger) {
+    if (!(inclusive ? r.atMs >= fromMs : r.atMs > fromMs) || r.atMs > nowMs) continue;
+    const i = typeof r.inputTokens === 'number' && Number.isFinite(r.inputTokens) ? r.inputTokens : 0;
+    const o = typeof r.outputTokens === 'number' && Number.isFinite(r.outputTokens) ? r.outputTokens : 0;
+    n += i + o;
+  }
+  return n;
+}
+
+/** A window's `usedPercent`, while its reset is still ahead (a passed reset's figure no longer applies). */
+function liveUsedPercent(w: AiUsageWindowReading | null | undefined, reset: number | null): number | null {
+  if (w == null || w.utilization == null) return null;
+  if (w.resetsAtMs != null && reset == null) return null;
+  return w.utilization;
+}
+
+/** Limn's token-weighted share of each Codex window. Pure. */
+export function codexShares(input: {
+  reading: AiUsageReading | null;
+  ledger: readonly AiLedgerRow[];
+  accountTokens: AiAccountTokens | null | undefined;
+  nowMs: number;
+}): { week: number | null; fiveHour: number | null } {
+  const { reading, ledger, nowMs } = input;
+  const one = (which: AiBudgetWindow): number | null => {
+    const { fromMs, inclusive } = budgetWindowStart(reading, nowMs, which);
+    const reset = which === 'week' ? liveWeekReset(reading, nowMs) : liveFiveHourReset(reading, nowMs);
+    const used = liveUsedPercent(which === 'week' ? reading?.week : reading?.fiveHour, reset);
+    const account = (which === 'week' ? input.accountTokens?.week : input.accountTokens?.fiveHour) ?? null;
+    const share = codexWindowSharePct(ledgerTokensIn(ledger, fromMs, inclusive, nowMs), account, used);
+    return share == null ? null : round2(share);
+  };
+  return { week: one('week'), fiveHour: one('five_hour') };
+}
+
+function codexSubscriptionStatus(input: AiBudgetInput): {
+  sub: AiBudgetSubscriptionStatus;
+  overWeek: boolean;
+  overFiveHour: boolean;
+  weekResumesAtMs: number | null;
+  fiveHourResumesAtMs: number | null;
+} {
+  const { settings, reading, nowMs } = input;
+  const weekReset = liveWeekReset(reading, nowMs);
+  const fiveReset = liveFiveHourReset(reading, nowMs);
+  const fiveShare = effectiveFiveHourSharePct(settings);
+  const shares = codexShares({ reading, ledger: input.ledger, accountTokens: input.accountTokens, nowMs });
+  const overWeek = shares.week != null && shares.week >= settings.weekSharePct;
+  const overFiveHour = shares.fiveHour != null && shares.fiveHour >= fiveShare;
+  return {
+    sub: {
+      // No Claude subscription kind and no picker: Codex reports its plan and its own windows.
+      subscription: null,
+      subscriptionSource: null,
+      reportedSubscription: reading?.subscriptionType ?? null,
+      pickFrom: null,
+      sharePct: settings.weekSharePct,
+      usedSharePct: shares.week,
+      // No dollar cycle cost on a ChatGPT plan to estimate "reviews a day" from.
+      reviewsPerDay: null,
+      window: weekReset != null ? 'reset' : 'rolling',
+      weekResetsAt: isoOf(weekReset),
+      fiveHourSharePct: fiveShare,
+      fiveHourFollowsWeek: settings.fiveHourSharePct == null,
+      fiveHourUsedSharePct: shares.fiveHour,
+      fiveHourWindow: fiveReset != null ? 'reset' : 'rolling',
+      fiveHourResetsAt: isoOf(fiveReset),
+    },
+    overWeek,
+    overFiveHour,
+    // The window's own figure falls back at its reset; with no reset read, a share is never over.
+    weekResumesAtMs: overWeek ? weekReset : null,
+    fiveHourResumesAtMs: overFiveHour ? fiveReset : null,
+  };
+}
+
 function subscriptionStatus(input: AiBudgetInput): {
   sub: AiBudgetSubscriptionStatus;
   overWeek: boolean;
@@ -520,6 +669,7 @@ function subscriptionStatus(input: AiBudgetInput): {
   weekResumesAtMs: number | null;
   fiveHourResumesAtMs: number | null;
 } {
+  if (input.provider === 'codex') return codexSubscriptionStatus(input);
   const { settings, reading, ledger, nowMs } = input;
   const reported = reading?.subscriptionType ?? null;
   const resolved = resolveAiSubscription(reported, settings.subscription);
@@ -568,6 +718,7 @@ export function decideAiBudget(input: AiBudgetInput): AiBudgetStatus {
   const { settings, route } = input;
   const off: AiBudgetStatus = {
     enabled: settings.enabled,
+    ...(input.provider ? { provider: input.provider } : {}),
     mode: 'off',
     route,
     subscription: null,
@@ -596,7 +747,9 @@ export function decideAiBudget(input: AiBudgetInput): AiBudgetStatus {
   let reason: string | null = null;
   if (overWeek) reason = 'Limn has used its share of your week.';
   else if (overFiveHour) reason = 'Limn has used its share of this 5-hour session.';
-  else if (sub.subscription == null) {
+  else if (input.provider === 'codex') {
+    if (sub.usedSharePct == null && sub.fiveHourUsedSharePct == null) reason = 'Limn has not read your Codex usage yet.';
+  } else if (sub.subscription == null) {
     reason =
       sub.reportedSubscription?.trim().toLowerCase() === 'max'
         ? 'Pick Max 5x or Max 20x so Limn can work out its share.'
@@ -646,6 +799,10 @@ export interface AiUsageViewInput {
   nowMs: number;
   /** Start of "today" on this machine (local midnight), epoch ms. */
   todayFromMs: number;
+  /** The provider these figures are for. Absent ⇒ Claude. */
+  provider?: AiBudgetProvider;
+  /** Codex on a ChatGPT sign-in: the account's tokens per window. */
+  accountTokens?: AiAccountTokens | null;
 }
 
 /** The header's usage view. Pure. ⚠ No US$ amount on the login route (only the documented rate). */
@@ -666,7 +823,24 @@ export function aiUsageView(input: AiUsageViewInput): AiUsageView {
   let weekSharePct: number | null = null;
   let fiveHourSharePct: number | null = null;
   let weekPctPerUsd: number | null = null;
-  if (login) {
+  if (login && input.provider === 'codex') {
+    // Codex: its own two windows, its plan as reported, and Limn's TOKEN-WEIGHTED shares. No Claude
+    // subscription kind, no per-model windows, no US$ rate (a ChatGPT run has no price).
+    const fiveHour = windowView('five_hour', null, reading?.fiveHour, nowMs);
+    const week = windowView('seven_day', null, reading?.week, nowMs);
+    const seen = [fiveHour, week].filter((w): w is AiUsageWindowView => w != null).map((w) => w.observedAt);
+    account = {
+      reportedSubscription: reading?.subscriptionType ?? null,
+      subscription: null,
+      fiveHour,
+      week,
+      models: [],
+      observedAt: seen.length === 0 ? null : seen.sort().at(-1)!,
+    };
+    const shares = codexShares({ reading, ledger, accountTokens: input.accountTokens, nowMs });
+    weekSharePct = shares.week;
+    fiveHourSharePct = shares.fiveHour;
+  } else if (login) {
     const kind = resolveAiSubscription(reading?.subscriptionType ?? null, settings.subscription).kind;
     const models = Object.entries(reading?.models ?? {})
       .map(([k, w]) => windowView(k, aiUsageModelLabel(k), w, nowMs))
@@ -693,6 +867,7 @@ export function aiUsageView(input: AiUsageViewInput): AiUsageView {
     }
   }
   return {
+    ...(input.provider ? { provider: input.provider } : {}),
     route,
     account,
     limn: {

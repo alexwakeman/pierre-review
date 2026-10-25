@@ -49,6 +49,18 @@ const KIND_WORDS: Record<AgentKind, string> = {
   docs_chat: 'the docs chat',
 };
 
+/** Every agent kind (the KIND_WORDS keys, so a new kind cannot be missed: the Record is exhaustive). */
+export const ALL_AGENT_KINDS: readonly AgentKind[] = Object.keys(KIND_WORDS) as AgentKind[];
+
+/**
+ * Can Codex run agents in this version? Only when EVERY kind is ported — so `auto` never picks a
+ * provider bound to refuse some run, and `/api/me` never says Codex is available while a Run gate
+ * would refuse. FALSE in Phase 2 (the allow-list is empty; only `complete()` runs on Codex).
+ */
+export function codexRunnable(allow: ReadonlySet<AgentKind> = CODEX_AGENT_KINDS): boolean {
+  return ALL_AGENT_KINDS.every((k) => allow.has(k));
+}
+
 /** The one sentence a not-yet-ported agent kind answers on Codex. */
 export function codexKindNotAvailableMessage(kind: AgentKind): string {
   return `Codex cannot run ${KIND_WORDS[kind] ?? 'this'} in this version of Limn yet. Unset LIMN_AI_PROVIDER (or set it to claude) to use Claude.`;

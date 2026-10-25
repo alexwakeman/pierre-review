@@ -128,11 +128,13 @@ export function mcpConfig(mcp: CodexMcpConfig): string[] {
   ];
 }
 
-/** The path-guard hook as the ONE PreToolUse entry. */
+/**
+ * The path-guard hook as the ONE PreToolUse entry: hook.ts's own `override`, verbatim. ⚠ Never
+ * re-serialised here — the trust hash and `verifyHookTrusted`'s `hooks/list` read are both of THAT
+ * text, so a second spelling could hash differently and be skipped silently.
+ */
 export function hookConfig(hook: CodexHookConfig): string[] {
-  const handler: Record<string, TomlValue> = { type: 'command', command: hook.command };
-  if (hook.timeoutSec !== undefined) handler.timeout = hook.timeoutSec;
-  return c('hooks.PreToolUse', [{ matcher: hook.matcher, hooks: [handler] }]);
+  return ['-c', hook.override];
 }
 
 /**

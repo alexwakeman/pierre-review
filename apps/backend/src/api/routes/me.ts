@@ -25,7 +25,10 @@ import { getAuthNotices } from '../../sync/auth-notices.js';
 import { isMlScoringAvailable } from '../../ml/scorer.js';
 import { getMlStatus } from '../../ml/runtime.js';
 import { getAiRuntimeStatus } from '../../ai/runtime.js';
-import { detectClaudeAuth } from '../../review/auth.js';
+import { detectClaudeAuth, NO_CLAUDE_AUTH_MESSAGE } from '../../review/auth.js';
+import { resolveAiCredential } from '../../ai/credentials.js';
+import { codexDetailCached } from '../../ai/codex/detect.js';
+import { CODEX_NOT_AVAILABLE_MESSAGE, CODEX_RUNNABLE, getActiveProvider } from '../../ai/provider.js';
 import { getMyTurn } from '../../db/queries.js';
 import { clearDailyBriefCountsFor } from '../../db/daily-brief.js';
 import { dismissMyTurn, restoreMyTurn } from '../../db/my-turn-dismissals.js';
@@ -153,17 +156,62 @@ const myTurnSettingsSchema = {
  * none with the "Codex is not available" sentence (review/auth.ts). Disabled ⇒ the other fields are inert.
  */
 function agenticAiStatus(): MeResponse['ai'] {
+  const provider = getActiveProvider().id;
   if (!config.aiEnabled) {
-    return { enabled: false, runtime: 'absent', runtimeMessage: null, auth: 'none', authMessage: null };
+    return {
+      enabled: false,
+      runtime: 'absent',
+      runtimeMessage: null,
+      auth: 'none',
+      authMessage: null,
+      provider,
+      providers: {
+        claude: { auth: 'none', route: 'none', message: null },
+        codex: {
+          runtime: 'absent',
+          runtimeMessage: null,
+          auth: 'none',
+          route: 'none',
+          signedIn: false,
+          plan: null,
+          available: false,
+          message: null,
+        },
+      },
+    };
   }
   const rt = getAiRuntimeStatus();
   const auth = detectClaudeAuth();
+  // Each provider's OWN facts, whichever is active. Codex's are read from the CACHED `account/read`
+  // (a stale cache kicks the background probe; this request never waits on a process).
+  const claudeRoute = resolveAiCredential().route;
+  const codex = codexDetailCached();
   return {
     enabled: true,
+    // Still Claude's download: "Set up AI" installs it, and Codex runs nothing yet (Phase 4 moves the
+    // gate onto the active provider's own runtime, `providers.codex.runtime`).
     runtime: rt.runtime,
     runtimeMessage: rt.runtimeMessage,
     auth: auth.status === 'ok' ? 'ok' : 'none',
     authMessage: auth.status === 'ok' ? null : auth.message,
+    provider,
+    providers: {
+      claude: {
+        auth: claudeRoute === 'none' ? 'none' : 'ok',
+        route: claudeRoute,
+        message: claudeRoute === 'none' ? NO_CLAUDE_AUTH_MESSAGE : null,
+      },
+      codex: {
+        runtime: codex.runtime,
+        runtimeMessage: codex.runtimeMessage,
+        auth: codex.route === 'none' ? 'none' : 'ok',
+        route: codex.route,
+        signedIn: codex.signedIn,
+        plan: codex.plan,
+        available: CODEX_RUNNABLE && codex.installed && codex.route !== 'none',
+        message: codex.message ?? (CODEX_RUNNABLE ? null : CODEX_NOT_AVAILABLE_MESSAGE),
+      },
+    },
   };
 }
 

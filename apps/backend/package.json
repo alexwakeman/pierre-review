@@ -41,6 +41,9 @@
     "yaml": "^2.8.0",
     "zod": "^4"
   },
+  "limnAiRuntime": {
+    "@openai/codex": "0.164.0"
+  },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.12",
     "@types/node": "^22.10.5",

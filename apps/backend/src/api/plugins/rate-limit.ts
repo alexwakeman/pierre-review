@@ -101,6 +101,13 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // "Set up" for local bot-comment scoring: the same shape (npm install + ~150 MB of model files
   // over the user's own bandwidth, single-flight in ml/runtime.ts), the same bucket, spelled exactly.
   if (path === '/api/ml/install') return [TIERS.sync];
+  // THE CODEX SIGN-IN (api/routes/ai-codex.ts, LOCAL ONLY): a POST starts (or cancels, or signs out)
+  // a `codex app-server` process that talks to OpenAI's sign-in service — no model, no GitHub, but a
+  // child process and a network round trip per press. Single-flight in ai/codex/login.ts; `sync` is
+  // the "process + network, started by a click" bucket. The GET is the SPA's poll: read, DB-free.
+  if (mutating && (path === '/api/ai/codex/login' || path === '/api/ai/codex/login/cancel' || path === '/api/ai/codex/logout')) {
+    return [TIERS.sync];
+  }
   // THE CLAUDE SPEND BUDGET: GET/PUT /api/ai/budget (ai/budget.ts). FOLLOWING THE TOKEN: no model
   // call and no GitHub call. The PUT is one validated UPDATE of one column; the GET (the header's usage
   // item polls it every ~2 minutes) reads the ledger and may START the usage probe in the background,

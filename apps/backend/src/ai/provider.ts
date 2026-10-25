@@ -31,7 +31,8 @@ import type { AiUsageReading } from '@pierre-review/shared';
 import type { CodexProgress, TokenUsage } from './codex/events.js';
 import { claudeProvider } from './providers/claude.js';
 import { codexProvider } from './providers/codex.js';
-import { aiProviderSetting } from './provider-setting.js';
+import { resolveAiCredential, resolveCodexCredential } from './credentials.js';
+import { aiProviderSetting, codexRunnable } from './provider-setting.js';
 
 export type AgentProviderId = 'claude' | 'codex';
 
@@ -211,6 +212,12 @@ export interface ProviderStatus {
   route: 'login' | 'api_key' | 'none';
   /** One plain sentence when not available. */
   message: string | null;
+  /** Codex only (Phase 2): its program is installed. */
+  installed?: boolean;
+  /** Codex only: Limn's own Codex home holds a live sign-in (`account/read`). */
+  signedIn?: boolean;
+  /** Codex only: the ChatGPT plan, when signed in with one. */
+  plan?: string | null;
 }
 
 /**
@@ -250,17 +257,44 @@ export {
   CODEX_NOT_AVAILABLE_MESSAGE,
   codexKindNotAvailableMessage,
   codexKindReady,
+  codexRunnable,
+  ALL_AGENT_KINDS,
   type AiProviderSetting,
 } from './provider-setting.js';
+export { CODEX_MODEL_FOR_ROLE } from './providers/codex.js';
 
 /** One provider by id. */
 export function getProvider(id: AgentProviderId): AgentProvider {
   return id === 'codex' ? codexProvider : claudeProvider;
 }
 
+/**
+ * Can Codex run agents in this version? Only once EVERY agent kind is in `CODEX_AGENT_KINDS`
+ * (provider-setting.ts `codexRunnable`) — FALSE in Phase 2, so `auto` never picks Codex (it would
+ * pick a provider bound to refuse), the pre-flight answers "not available", and `/api/me` reports
+ * `providers.codex.available: false`. `complete()` runs on Codex regardless (LIMN_AI_PROVIDER=codex).
+ */
+export const CODEX_RUNNABLE: boolean = codexRunnable();
+
+/**
+ * THE `auto` RULE (docs/CODEX-PLAN.md § 6, DECIDED): Claude when both are signed in, Claude when
+ * neither is; Codex only when it alone has a credential AND can run. Pure.
+ */
+export function pickAutoProvider(s: { claudeReady: boolean; codexReady: boolean; codexRunnable: boolean }): AgentProviderId {
+  return s.codexRunnable && s.codexReady && !s.claudeReady ? 'codex' : 'claude';
+}
+
 /** THE provider every run and completion uses, per `LIMN_AI_PROVIDER` (read at call time). */
 export function getActiveProvider(env: NodeJS.ProcessEnv = process.env): AgentProvider {
-  return aiProviderSetting(env) === 'codex' ? codexProvider : claudeProvider;
+  const setting = aiProviderSetting(env);
+  if (setting === 'codex') return codexProvider;
+  if (setting === 'claude' || !CODEX_RUNNABLE) return claudeProvider;
+  const picked = pickAutoProvider({
+    claudeReady: resolveAiCredential(env).route !== 'none',
+    codexReady: resolveCodexCredential(env).route !== 'none',
+    codexRunnable: CODEX_RUNNABLE,
+  });
+  return getProvider(picked);
 }
 
 /**

@@ -1,0 +1,143 @@
+// SIGNING LIMN'S OWN CODEX HOME IN AND OUT (docs/CODEX-PLAN.md § 6: one extra sign-in, from Settings
+// or `limn ai login codex`). The SPA's route drives it through `codex app-server`
+// (`account/login/start` → `account/login/completed`), which is `codex login` with structured
+// progress: the browser flow answers the URL to open, the device flow the code to type, and the
+// completion arrives as a notification — no scraping of a terminal program's output. The CLI
+// (`limn ai login codex`, cli.ts) runs `codex login` itself, with CODEX_HOME set and the terminal
+// attached.
+//
+// ⚠ An API KEY IS NEVER STORED. `codex login --with-api-key` would write the key into Limn's home;
+// Limn's rule is "no stored key" (CLAUDE.md, the credential ladder), so the API-key rung reads
+// OPENAI_API_KEY from the environment at run time (ai/credentials.ts `codexRunEnv`).
+//
+// One sign-in at a time per process. The app-server process is kept alive while the reader signs in
+// (it hosts the browser flow's callback server) and stopped on completion, cancel or timeout.
+import type { CodexLoginMethod, CodexLoginState } from '@pierre-review/shared';
+import { codexBinaryPath } from '../runtime.js';
+import { CodexAppServer, invalidateCodexState, limnAppServerOptions, withCodexAppServer } from './app-server.js';
+import { CODEX_NOT_INSTALLED_MESSAGE, ensureCodexHomeConfig } from './home.js';
+
+export type { CodexLoginMethod, CodexLoginState };
+
+/** A sign-in the reader never finishes is stopped after this long. */
+export const CODEX_LOGIN_TIMEOUT_MS = 10 * 60 * 1000;
+
+interface Session {
+  server: CodexAppServer;
+  loginId: string | null;
+  timer: NodeJS.Timeout;
+}
+
+let state: CodexLoginState = { state: 'idle' };
+let session: Session | null = null;
+let starting: Promise<CodexLoginState> | null = null;
+
+/** The sign-in's state, for the SPA's poll. */
+export function codexLoginState(): CodexLoginState {
+  return state;
+}
+
+function endSession(): void {
+  if (!session) return;
+  clearTimeout(session.timer);
+  session.server.close();
+  session = null;
+}
+
+const str = (v: unknown): string | null => (typeof v === 'string' && v.length > 0 ? v : null);
+
+/**
+ * Start a sign-in (or join the one running). Resolves the `waiting` state with what the reader must
+ * open, or `failed` with one sentence. Never throws.
+ */
+export function startCodexLogin(method: CodexLoginMethod, opts: { timeoutMs?: number } = {}): Promise<CodexLoginState> {
+  if (starting) return starting;
+  if (session && state.state === 'waiting') return Promise.resolve(state);
+  starting = (async (): Promise<CodexLoginState> => {
+    const spawnOpts = limnAppServerOptions();
+    if (!spawnOpts) return (state = { state: 'failed', message: CODEX_NOT_INSTALLED_MESSAGE });
+    try {
+      // The home must hold file-store auth BEFORE the sign-in writes anything.
+      await ensureCodexHomeConfig(null);
+      const server = await CodexAppServer.start(spawnOpts);
+      const timer = setTimeout(() => {
+        void cancelCodexLogin('The sign-in took too long and was stopped. Try again.');
+      }, opts.timeoutMs ?? CODEX_LOGIN_TIMEOUT_MS);
+      session = { server, loginId: null, timer };
+      server.on('account/login/completed', (params) => {
+        const p = (params ?? {}) as { success?: unknown; error?: unknown; loginId?: unknown };
+        if (session?.loginId && str(p.loginId) && p.loginId !== session.loginId) return; // another flow's
+        state =
+          p.success === true
+            ? { state: 'done' }
+            : { state: 'failed', message: str(p.error) ?? 'The Codex sign-in did not finish. Try again.' };
+        endSession();
+        void invalidateCodexState();
+      });
+      void server.exited.then(() => {
+        if (session?.server === server && state.state === 'waiting') {
+          state = { state: 'failed', message: 'Codex stopped before the sign-in finished. Try again.' };
+          endSession();
+        }
+      });
+      const res = (await server.request('account/login/start', {
+        type: method === 'device' ? 'chatgptDeviceCode' : 'chatgpt',
+      })) as Record<string, unknown> | null;
+      if (session) session.loginId = str(res?.loginId);
+      state = {
+        state: 'waiting',
+        method,
+        authUrl: str(res?.authUrl),
+        verificationUrl: str(res?.verificationUrl),
+        userCode: str(res?.userCode),
+        startedAt: new Date().toISOString(),
+      };
+      if (!state.authUrl && !state.verificationUrl) {
+        endSession();
+        state = { state: 'failed', message: 'Codex did not say where to sign in. Try again, or run: limn ai login codex' };
+      }
+      return state;
+    } catch (err) {
+      endSession();
+      return (state = { state: 'failed', message: `The Codex sign-in could not start: ${(err as Error).message}` });
+    }
+  })().finally(() => {
+    starting = null;
+  });
+  return starting;
+}
+
+/** Stop a running sign-in. `message` set ⇒ it ends as `failed` with it; otherwise back to idle. */
+export async function cancelCodexLogin(message?: string): Promise<CodexLoginState> {
+  const s = session;
+  if (s) {
+    if (s.loginId) await s.server.request('account/login/cancel', { loginId: s.loginId }, 5_000).catch(() => {});
+    endSession();
+  }
+  state = message ? { state: 'failed', message } : { state: 'idle' };
+  return state;
+}
+
+/** Sign Limn's Codex home out (`account/logout`). Resolves null on success, else one sentence. */
+export async function codexLogout(): Promise<string | null> {
+  if (!codexBinaryPath()) return CODEX_NOT_INSTALLED_MESSAGE;
+  const spawnOpts = limnAppServerOptions();
+  if (!spawnOpts) return CODEX_NOT_INSTALLED_MESSAGE;
+  await cancelCodexLogin();
+  try {
+    await withCodexAppServer((s) => s.request('account/logout', null), spawnOpts);
+    return null;
+  } catch (err) {
+    return `Codex could not sign out: ${(err as Error).message}`;
+  } finally {
+    state = { state: 'idle' };
+    void invalidateCodexState();
+  }
+}
+
+/** Test hook. */
+export function _resetCodexLoginForTest(): void {
+  endSession();
+  state = { state: 'idle' };
+  starting = null;
+}

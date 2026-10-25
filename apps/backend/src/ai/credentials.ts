@@ -22,6 +22,8 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { codexSignedInCached } from './codex/app-server.js';
+import { codexHome } from './codex/home.js';
 
 export type AiCredential =
   | { route: 'login'; method: 'oauth_token' | 'ambient' }
@@ -121,4 +123,76 @@ export function agentSdkEnv(
 /** Spread into every Agent SDK `query({ options })`, beside `claudeExecutableOptions()`. */
 export function agentAuthOptions(): { env: Record<string, string | undefined> } {
   return { env: agentSdkEnv() };
+}
+
+// ---- Codex (docs/CODEX-PLAN.md § 3.7) -------------------------------------------------------------
+//
+// THE SAME TWO RUNGS, for Codex:
+//   1. THE CODEX SIGN-IN IN LIMN'S OWN HOME (`~/.limn/codex`, `limn ai login codex`) — a ChatGPT plan
+//      pays, measured by the token-weighted share of its windows (ai/budget.ts). Read from the cached
+//      `account/read` (ai/codex/app-server.ts); before the first read, from `auth.json` being there
+//      (a heuristic like Claude's disk check — the background probe corrects it within seconds).
+//   2. OPENAI_API_KEY from the environment, handed to the run as CODEX_API_KEY. NEVER STORED: Limn does
+//      not run `codex login --with-api-key` (that would write the key into its home).
+// LIMN_AI_USE_API_KEY=true flips the order, as for Claude. A key the reader stored in Limn's home by
+// hand (`CODEX_HOME=~/.limn/codex codex login --with-api-key`) counts as the API-key rung.
+//
+// ⚠ The reader's own `~/.codex` is never consulted: its sign-in is not Limn's.
+
+export type CodexCredential =
+  | { route: 'login'; method: 'chatgpt' }
+  | { route: 'api_key'; method: 'api_key'; apiKey: string }
+  | { route: 'api_key'; method: 'stored_api_key' }
+  | { route: 'none' };
+
+/** What the sign-in check knows: the cached `account/read`, else whether auth.json is there. */
+export interface CodexLoginKnown {
+  signedIn: boolean;
+  /** 'chatgpt' | 'apiKey' | another kind | null when not read yet. */
+  type: string | null;
+}
+
+function codexEnvApiKey(env: NodeJS.ProcessEnv): string | undefined {
+  const k = env.OPENAI_API_KEY?.trim();
+  return k ? k : undefined;
+}
+
+/** The sign-in in Limn's Codex home: the cached account read, else the disk heuristic. Sync. */
+export function codexLoginKnown(env: NodeJS.ProcessEnv = process.env): CodexLoginKnown {
+  const cached = codexSignedInCached();
+  if (cached) return { signedIn: cached.signedIn, type: cached.type };
+  return existsSync(join(codexHome(env), 'auth.json'))
+    ? { signedIn: true, type: null }
+    : { signedIn: false, type: null };
+}
+
+/** Which credential the next Codex run uses. Read at call time. */
+export function resolveCodexCredential(
+  env: NodeJS.ProcessEnv = process.env,
+  login: (env: NodeJS.ProcessEnv) => CodexLoginKnown = codexLoginKnown,
+): CodexCredential {
+  const apiKey = codexEnvApiKey(env);
+  if (apiKey && prefersApiKey(env)) return { route: 'api_key', method: 'api_key', apiKey };
+  const known = login(env);
+  if (known.signedIn && known.type === 'apiKey') return { route: 'api_key', method: 'stored_api_key' };
+  if (known.signedIn) return { route: 'login', method: 'chatgpt' };
+  if (apiKey) return { route: 'api_key', method: 'api_key', apiKey };
+  return { route: 'none' };
+}
+
+/**
+ * The environment a Codex RUN gets: CODEX_HOME = Limn's home, and per the ladder —
+ *   • login / a stored key → every API-key variable REMOVED, so the sign-in pays, never a meter;
+ *   • API key → CODEX_API_KEY = the key (`codex exec` reads it), OPENAI_API_KEY removed;
+ *   • none → no key either; Codex reports its own auth error.
+ */
+export function codexRunEnv(
+  env: NodeJS.ProcessEnv = process.env,
+  credential: CodexCredential = resolveCodexCredential(env),
+): Record<string, string | undefined> {
+  const out: Record<string, string | undefined> = { ...env, CODEX_HOME: codexHome(env) };
+  delete out.OPENAI_API_KEY;
+  delete out.CODEX_API_KEY;
+  if (credential.route === 'api_key' && credential.method === 'api_key') out.CODEX_API_KEY = credential.apiKey;
+  return out;
 }
