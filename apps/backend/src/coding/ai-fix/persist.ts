@@ -149,7 +149,8 @@ export async function saveFixSuccess(
   // Record the agentic-fixer spend on the shared AI-usage ledger (agent seam). Reads
   // accountId/prId/model back off the row. Best-effort — the whole block (incl. the
   // read-back SELECT) is guarded so a ledger error never flips an already-succeeded fix.
-  if (data.costUsd != null && Number.isFinite(data.costUsd) && data.costUsd > 0) {
+  // A provider that records its own usage (Codex) already wrote this run's row: never a second.
+  if (!data.usageRecorded && data.costUsd != null && Number.isFinite(data.costUsd) && data.costUsd > 0) {
     try {
       const row = (
         (await ctx.db
@@ -313,8 +314,10 @@ function addCost(prev: number | null, cost: number | null): number | null {
 async function recordPlanUsage(
   ctx: AgentContext,
   row: { accountId: number; prId: number; model: string },
-  pass: { costUsd: number | null; usage: { inputTokens: number; outputTokens: number } },
+  pass: { costUsd: number | null; usage: { inputTokens: number; outputTokens: number }; usageRecorded?: boolean },
 ): Promise<void> {
+  // A provider that records its own usage (Codex) already wrote this pass's row: never a second.
+  if (pass.usageRecorded) return;
   if (pass.costUsd == null || !Number.isFinite(pass.costUsd) || pass.costUsd <= 0) return;
   try {
     await ctx.recordAiUsage({
@@ -341,6 +344,7 @@ export async function savePlanSuccess(
     reply: string | null;
     costUsd: number | null;
     usage: { inputTokens: number; outputTokens: number };
+    usageRecorded?: boolean;
   },
 ): Promise<boolean> {
   const t = ctx.schema.aiFixes;
@@ -376,7 +380,7 @@ export async function markPlanPassEnded(
   ctx: AgentContext,
   id: number,
   outcome: { kind: 'failed'; message: string } | { kind: 'cancelled' },
-  pass: { costUsd: number | null; usage: { inputTokens: number; outputTokens: number } } | null = null,
+  pass: { costUsd: number | null; usage: { inputTokens: number; outputTokens: number }; usageRecorded?: boolean } | null = null,
 ): Promise<void> {
   const t = ctx.schema.aiFixes;
   const cur = await readPlanColumns(ctx, id);

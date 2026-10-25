@@ -67,6 +67,8 @@ import {
   type PlanRunProgress,
 } from './plan.js';
 import { config } from '../../config.js';
+import { activeProviderId } from '../../ai/provider-setting.js';
+import type { AgentProviderId } from '../../ai/provider.js';
 
 // In-memory job manager for AI Fix's agentic fixer (CORE, free, local-only — it left the plugin
 // with Claude Review; the PR summary and the CI-failure analysis stayed Pro). A SINGLE global slot (concurrency 1) carries every
@@ -425,10 +427,14 @@ async function startRun(
 
     const trigger: AiFixTrigger = input.trigger ?? 'manual';
 
+    // THE PROVIDER IS PICKED ONCE, HERE: the prompt is worded for it (ai/prompt-tools.ts) and the
+    // queued run is handed the same one, so a prompt never reaches a provider it was not written for.
+    const provider = activeProviderId();
+
     if (mode === 'plan') {
-      const systemPrompt = buildPlanSystemPrompt();
+      const systemPrompt = buildPlanSystemPrompt(provider);
       const nonce = pickReviewNonce([seed.text, pr.title, pr.body ?? '']);
-      const prompt = buildPlanUserPrompt({ pr, diff, seed, nonce });
+      const prompt = buildPlanUserPrompt({ pr, diff, seed, nonce, provider });
       const fixId = await insertQueuedFix(ctx, {
         accountId,
         repoId: pr.repoId,
@@ -459,12 +465,13 @@ async function startRun(
         revision: 1,
         maxBudgetUsd: config.aiFixBudgetUsd,
         hadPlan: false,
+        provider,
       });
       return { status: 'queued', fixId };
     }
 
-    const systemPrompt = buildFixSystemPrompt();
-    const prompt = buildFixUserPrompt({ pr, diff, seed });
+    const systemPrompt = buildFixSystemPrompt(provider);
+    const prompt = buildFixUserPrompt({ pr, diff, seed, provider });
 
     const fixId = await insertQueuedFix(ctx, {
       accountId,
@@ -493,6 +500,7 @@ async function startRun(
       prompt,
       sentRefs,
       trigger,
+      provider,
     });
     return { status: 'queued', fixId };
   } catch (err) {
@@ -529,6 +537,8 @@ interface FixJob {
   // The refs the agent was SHOWN — what its report is validated against at save time.
   sentRefs: readonly string[];
   trigger: AiFixTrigger;
+  // The provider the prompt was worded for; the run uses the same one.
+  provider: AgentProviderId;
 }
 
 async function launchFix(ctx: AgentContext, job: FixJob): Promise<void> {
@@ -569,6 +579,8 @@ async function launchFix(ctx: AgentContext, job: FixJob): Promise<void> {
       prompt: job.prompt,
       abortController: controller,
       onProgress,
+      prId: job.prId,
+      provider: job.provider,
     });
 
     if (result.aborted || controller.signal.aborted) {
@@ -635,6 +647,8 @@ interface PlanJob {
   maxBudgetUsd: number;
   // The row already holds a plan (this is a re-plan).
   hadPlan: boolean;
+  // The provider the prompt was worded for; the pass uses the same one.
+  provider: AgentProviderId;
 }
 
 function queuePlanPass(ctx: AgentContext, job: PlanJob): void {
@@ -683,8 +697,10 @@ async function launchPlanPass(ctx: AgentContext, job: PlanJob): Promise<void> {
       maxBudgetUsd: job.maxBudgetUsd,
       abortController: controller,
       onProgress,
+      prId: job.prId,
+      provider: job.provider,
     });
-    const pass = { costUsd: result.costUsd, usage: result.usage };
+    const pass = { costUsd: result.costUsd, usage: result.usage, ...(result.usageRecorded ? { usageRecorded: true } : {}) };
     if (result.aborted || controller.signal.aborted) {
       await markPlanPassEnded(ctx, job.fixId, { kind: 'cancelled' }, pass);
       finalStatus = job.hadPlan ? 'planned' : 'cancelled';
@@ -809,7 +825,8 @@ export async function sendPlanMessage(
       renderPlanText(plan),
       ...transcript.map((m) => m.text),
     ]);
-    const prompt = buildPlanUserPrompt({ pr, diff, seed, previous: plan, transcript, nonce });
+    const provider = activeProviderId();
+    const prompt = buildPlanUserPrompt({ pr, diff, seed, previous: plan, transcript, nonce, provider });
     queuePlanPass(ctx, {
       fixId: row.id,
       accountId: input.accountId,
@@ -820,12 +837,13 @@ export async function sendPlanMessage(
       // The pass reads the commit the plan was made at.
       baseSha: row.baseSha,
       model: row.model,
-      systemPrompt: buildPlanSystemPrompt(),
+      systemPrompt: buildPlanSystemPrompt(provider),
       prompt,
       shownRefs: shownRefsOf(parseReviewItems(row.reviewItems)),
       revision: revision + 1,
       maxBudgetUsd: left,
       hadPlan: true,
+      provider,
     });
     return { status: 'queued', fixId: row.id };
   } catch (err) {
@@ -886,7 +904,8 @@ export async function approvePlan(
     const diff = await ctx.github.fetchPrDiff(input.accountId, pr.owner, pr.name, pr.number).catch(() => '');
     const planText = renderPlanText(plan);
     const nonce = pickReviewNonce([seed.text, pr.title, pr.body ?? '', planText]);
-    const prompt = buildFixUserPrompt({ pr, diff, seed, plan: { plan, nonce } });
+    const provider = activeProviderId();
+    const prompt = buildFixUserPrompt({ pr, diff, seed, plan: { plan, nonce }, provider });
     if (!(await markPlanApproved(ctx, row.id, { prompt, baseSha }))) {
       release();
       return { status: 'not_ready' };
@@ -900,10 +919,11 @@ export async function approvePlan(
       prNumber: pr.number,
       baseSha,
       model: row.model,
-      systemPrompt: buildFixSystemPrompt(),
+      systemPrompt: buildFixSystemPrompt(provider),
       prompt,
       sentRefs: shownRefsOf(parseReviewItems(row.reviewItems)),
       trigger: 'manual',
+      provider,
     });
     return { status: 'queued', fixId: row.id };
   } catch (err) {

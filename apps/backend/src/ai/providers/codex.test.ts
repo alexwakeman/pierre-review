@@ -8,7 +8,7 @@
 //      JSON caller, US$ 0 on a login, a ledger row with provider 'codex' when billed, a clear sentence
 //      with no credential, the API-key route REFUSED (unpriced) and a missing install an
 //      AiRuntimeMissingError.
-//   2. runAgent(): the allow-list (EMPTY) answers the not-available sentence for every kind.
+//   2. runAgent(): the allow-list answers the not-available sentence for every kind not yet ported.
 //   3. the run itself (runAgentUnchecked): the strict schema on disk, the answer mapped back to the
 //      tool's arguments and judged by the tool's OWN handler, ONE retry via `exec resume` whose usage
 //      is the thread's cumulative figure (so the run's total is not double-counted), a second failure
@@ -433,8 +433,8 @@ describe('complete()', () => {
 // ---- 2. the allow-list ---------------------------------------------------------------------------
 
 describe('runAgent() — the allow-list', () => {
-  it('is EMPTY in Phase 2: every kind answers its not-available sentence and starts nothing', async () => {
-    for (const kind of ['review', 'fix', 'plan', 'resolve', 'docs_chat'] as const) {
+  it('every kind not yet ported answers its not-available sentence and starts nothing', async () => {
+    for (const kind of P.ALL_AGENT_KINDS.filter((k) => !P.CODEX_AGENT_KINDS.has(k))) {
       await expect(C.codexProvider.runAgent({ kind } as any)).rejects.toThrow(P.codexKindNotAvailableMessage(kind));
     }
     expect(calls()).toEqual([]);

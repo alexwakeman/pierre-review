@@ -4,7 +4,8 @@ import type { ConflictAiChoice, ConflictAiResolution } from '@pierre-review/shar
 import { config } from '../../config.js';
 import { getAccessToken } from '../../auth/account.js';
 import type { AgentContext } from '../../review/agent-context.js';
-import type { AgentToolServer } from '../../ai/provider.js';
+import type { AgentProviderId, AgentToolServer, CodexRunOptions } from '../../ai/provider.js';
+import { activeProviderId } from '../../ai/provider-setting.js';
 import {
   claimSession,
   getSession,
@@ -61,6 +62,8 @@ export interface StartAiResolveInput {
   /** Builds the session behind a `created` claim — `runOpen` in api/routes/conflicts.ts, passed
    *  in so this module does not import the route file. */
   runOpen: (rec: ConflictSessionRecord, log: FastifyBaseLogger) => Promise<void>;
+  /** Codex-only run knobs (the opt-in live test's effort). Claude ignores them. */
+  codex?: CodexRunOptions;
 }
 
 function freshView(rec: ConflictSessionRecord, model: string): ConflictAiResolution {
@@ -193,7 +196,9 @@ async function runJob(
       return;
     }
 
-    const built = buildAiResolvePrompt(model);
+    // THE PROVIDER IS PICKED ONCE: the prompt is worded for it (ai/prompt-tools.ts) and the run uses it.
+    const provider: AgentProviderId = activeProviderId();
+    const built = buildAiResolvePrompt(model, undefined, provider);
     if (rec.ai) {
       rec.ai.view = {
         ...rec.ai.view,
@@ -230,6 +235,11 @@ async function runJob(
 
     const accepted = new Map<string, ConflictAiChoice>();
     let summary: string | null = null;
+    // CODEX: its final answer IS the call, so the FIRST answer with refused choices says so
+    // (`isError`) to earn the provider's one retry with the refusals as its reason. A second answer
+    // is kept as it is — the regions it still gets wrong stay undecided for the reader, exactly as
+    // on Claude when the model stops calling. Claude's replies are today's, byte for byte.
+    let codexRetryAsked = false;
     const shape = await submitResolutionShape();
     const tools: AgentToolServer = {
       server: 'resolve',
@@ -255,6 +265,10 @@ async function runJob(
                       (r) => `- file=${r.file} region=${r.region}: ${AI_CHOICE_REFUSAL_TEXT[r.refusal]}`,
                     ),
                   ].join('\n');
+            if (provider === 'codex' && rejected.length > 0 && !codexRetryAsked) {
+              codexRetryAsked = true;
+              return { text, isError: true };
+            }
             return { text };
           },
         },
@@ -277,9 +291,13 @@ async function runJob(
       onActivity: (activity) => {
         if (rec.ai) rec.ai.view = { ...rec.ai.view, recentActivity: activity.slice(-8) };
       },
+      provider,
+      usageRecord: { accountId: rec.accountId, seam: 'agent', feature: 'ai_resolve', prId: rec.prId },
+      ...(input.codex ? { codex: input.codex } : {}),
     });
 
-    if (outcome.costUsd != null && outcome.costUsd > 0) {
+    // A provider that records its own usage (Codex) already wrote this run's row: never a second.
+    if (!outcome.usageRecorded && outcome.costUsd != null && outcome.costUsd > 0) {
       await ctx
         .recordAiUsage({
           accountId: rec.accountId,

@@ -6,6 +6,8 @@
 export interface PartialSpend {
   usage: { inputTokens: number; outputTokens: number };
   costUsd: number | null;
+  /** True ⇒ the provider already wrote the ledger row for this spend (Codex): write no second one. */
+  usageRecorded?: boolean;
 }
 
 const KEY = '__limnPartialSpend';

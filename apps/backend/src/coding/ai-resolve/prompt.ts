@@ -2,6 +2,10 @@ import { randomBytes } from 'node:crypto';
 import type { ConflictModel, ConflictModelFile, ConflictModelRegion } from '../../conflict/model-types.js';
 import { allowedDecisions } from '../../conflict/model.js';
 import { choiceKey } from './validate.js';
+import { PRODUCT_NAME } from '@pierre-review/shared';
+import type { AgentProviderId } from '../../ai/provider.js';
+import { activeProviderId } from '../../ai/provider-setting.js';
+import { promptTools, type PromptTools } from '../../ai/prompt-tools.js';
 
 /**
  * THE PROMPT FOR "RESOLVE WITH CLAUDE".
@@ -105,7 +109,15 @@ function regionBlock(
   return parts.join('\n');
 }
 
-export function buildAiResolvePrompt(model: ConflictModel, nonce?: string): AiResolvePrompt {
+/**
+ * `provider` picks the closing instruction's words (ai/prompt-tools.ts): Claude calls the
+ * `submit_resolution` tool (today's text, byte for byte); Codex gives its final JSON answer.
+ */
+export function buildAiResolvePrompt(
+  model: ConflictModel,
+  nonce?: string,
+  provider: AgentProviderId = activeProviderId(),
+): AiResolvePrompt {
   const n = nonce ?? pickNonce(untrusted(model));
   const supported = model.files.filter((f) => f.unsupported === null);
 
@@ -156,10 +168,10 @@ export function buildAiResolvePrompt(model: ConflictModel, nonce?: string): AiRe
     ...fileSections,
   ].join('\n\n');
 
-  return { system: SYSTEM_PROMPT(n), prompt, offered, decidableTotal };
+  return { system: SYSTEM_PROMPT(n, promptTools(provider)), prompt, offered, decidableTotal };
 }
 
-const SYSTEM_PROMPT = (nonce: string): string =>
+const SYSTEM_PROMPT = (nonce: string, t: PromptTools): string =>
   [
     'You resolve git merge conflicts for a person who will review every choice you make before anything is committed.',
     '',
@@ -180,5 +192,8 @@ const SYSTEM_PROMPT = (nonce: string): string =>
     '- `rationale` is ONE short plain-English sentence a developer can check, naming the evidence (e.g. "main renamed fetchUser to loadUser; kept the PR’s new call under the new name").',
     '- `confidence` is high, medium or low.',
     '',
-    'Call `submit_resolution` with your choices. If it reports refused choices, fix those and call it again with just them. Finish with a one-paragraph `summary` of what you did and what you left.',
+    t.either(
+      'Call `submit_resolution` with your choices. If it reports refused choices, fix those and call it again with just them. Finish with a one-paragraph `summary` of what you did and what you left.',
+      `Give your choices as your final answer: ONE JSON object matching the given schema, and nothing else, with a one-paragraph \`summary\` of what you did and what you left. If ${PRODUCT_NAME} reports refused choices, answer again with those choices fixed.`,
+    ),
   ].join('\n');

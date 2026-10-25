@@ -92,13 +92,14 @@ describe('the registry (LIMN_AI_PROVIDER)', () => {
     expect(P.getProvider('claude')).toBe(claudeProvider);
   });
 
-  it("codex resolves to the Codex provider; every agent kind still answers 'not available yet'", async () => {
+  it("codex resolves to the Codex provider; every kind not yet ported answers 'not available yet'", async () => {
     const codex = P.getActiveProvider({ LIMN_AI_PROVIDER: 'codex' });
     expect(codex.id).toBe('codex');
     expect(P.getProvider('codex')).toBe(codex);
-    // Phase 2: the allow-list is EMPTY, so no agent runs on Codex — each kind says so in one sentence.
-    expect(P.CODEX_AGENT_KINDS.size).toBe(0);
-    for (const kind of ['review', 'fix', 'ci_review', 'docs_build'] as const) {
+    // Phase 3: the allow-list holds only the ported kinds — every other kind says so in one sentence.
+    const unported = P.ALL_AGENT_KINDS.filter((k) => !P.CODEX_AGENT_KINDS.has(k));
+    expect(unported.length).toBeGreaterThan(0);
+    for (const kind of unported) {
       await expect(
         codex.runAgent({ kind } as Parameters<typeof codex.runAgent>[0]),
       ).rejects.toThrow(P.codexKindNotAvailableMessage(kind));
@@ -157,14 +158,26 @@ describe('the registry (LIMN_AI_PROVIDER)', () => {
 });
 
 describe('the kinds (Phase 3 foundation)', () => {
-  it('CODEX_AGENT_KINDS is the union of the four streams’ files, each EMPTY until it ports a runner', async () => {
+  it('CODEX_AGENT_KINDS is the union of the four streams’ files, each holding only its own ported kinds', async () => {
     const files = await Promise.all([
       import('./codex/kinds/review.js').then((m) => m.CODEX_REVIEW_KINDS),
       import('./codex/kinds/fix.js').then((m) => m.CODEX_FIX_KINDS),
       import('./codex/kinds/tickets.js').then((m) => m.CODEX_TICKETS_KINDS),
       import('./codex/kinds/docs.js').then((m) => m.CODEX_DOCS_KINDS),
     ]);
-    expect(files).toEqual([[], [], [], []]);
+    // Each stream's file may name only ITS kinds (its header lists them), each once.
+    const own = [
+      ['review', 'review_chat', 'thread_check'],
+      ['fix', 'plan', 'resolve'],
+      ['ticket_review', 'pr_card', 'ci_review', 'story_docs'],
+      ['diagram', 'sprint_paths', 'docs_build', 'docs_chat'],
+    ];
+    files.forEach((f, i) => {
+      for (const k of f) expect(own[i]).toContain(k);
+      expect(new Set(f).size).toBe(f.length);
+    });
+    // Stream (b) ported AI Fix and Resolve with Claude (Plan first waits on a passing live run).
+    expect(files[1]).toEqual(['fix', 'resolve']);
     expect([...P.CODEX_AGENT_KINDS]).toEqual(files.flat());
   });
 
