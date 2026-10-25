@@ -1,7 +1,7 @@
 // THE PROVIDER SEAM (ai/provider.ts): the registry and what the Claude provider puts on a run.
-//   1. `LIMN_AI_PROVIDER`: unset / empty / 'claude' / 'auto' / garbage ⇒ Claude; 'codex' is ACCEPTED
-//      and answers "not available yet" — `detect()` says so, a run and a completion reject with that
-//      sentence, its credential route is 'none' and it has no usage reading. Nothing throws on read.
+//   1. `LIMN_AI_PROVIDER`: unset / empty / 'claude' / 'auto' / garbage ⇒ Claude; 'codex' resolves to
+//      the Codex provider (Phase 2), whose `runAgent` answers "not available yet" for every kind
+//      outside the (empty) allow-list. Its `complete()` is tested in providers/codex.test.ts.
 //   2. Roles resolve to Claude's models, and an explicit id ALWAYS wins (no call site's model moves).
 //   3. The Claude provider's `runAgent` builds the SAME query() options each runner used to build:
 //      the isolation, the path guard FIRST then the own-tools hook then the run's extras, the result
@@ -70,24 +70,25 @@ describe('the registry (LIMN_AI_PROVIDER)', () => {
     expect(P.getProvider('claude')).toBe(claudeProvider);
   });
 
-  it("codex is accepted and answers 'not available yet' — never crashes", async () => {
+  it("codex resolves to the Codex provider; every agent kind still answers 'not available yet'", async () => {
     const codex = P.getActiveProvider({ LIMN_AI_PROVIDER: 'codex' });
     expect(codex.id).toBe('codex');
     expect(P.getProvider('codex')).toBe(codex);
-    expect(await codex.detect()).toEqual({
-      id: 'codex',
-      available: false,
-      route: 'none',
-      message: P.CODEX_NOT_AVAILABLE_MESSAGE,
-    });
-    expect(codex.credentialRoute()).toBe('none');
-    await expect(codex.complete({ prompt: 'hi' })).rejects.toThrow(P.CODEX_NOT_AVAILABLE_MESSAGE);
-    await expect(
-      codex.runAgent({} as Parameters<typeof codex.runAgent>[0]),
-    ).rejects.toThrow(P.CODEX_NOT_AVAILABLE_MESSAGE);
+    // Phase 2: the allow-list is EMPTY, so no agent runs on Codex — each kind says so in one sentence.
+    expect(P.CODEX_AGENT_KINDS.size).toBe(0);
+    for (const kind of ['review', 'fix', 'ci_review', 'docs_build'] as const) {
+      await expect(
+        codex.runAgent({ kind } as Parameters<typeof codex.runAgent>[0]),
+      ).rejects.toThrow(P.codexKindNotAvailableMessage(kind));
+    }
+    expect(P.codexKindNotAvailableMessage('review')).toBe(
+      'Codex cannot run pull request reviews in this version of Limn yet. Unset LIMN_AI_PROVIDER (or set it to claude) to use Claude.',
+    );
+    // The allow-list is the mechanism Phase 3 fills.
+    expect(P.codexKindReady('review')).toBe(false);
+    expect(P.codexKindReady('review', new Set(['review']))).toBe(true);
+    // No rate-limit data rides a run's messages (the app-server reads the windows).
     expect(codex.usage.readingFromMessage({ type: 'rate_limit_event' }, 0)).toBeNull();
-    expect(codex.usage.probeReady()).toBe(false);
-    await expect(codex.usage.probe()).rejects.toThrow(P.CODEX_NOT_AVAILABLE_MESSAGE);
   });
 });
 

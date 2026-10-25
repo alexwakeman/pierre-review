@@ -19,15 +19,19 @@
 // messages `onMessage` receives are the Agent SDK's. Phase 3 ports each runner off those.
 //
 // THE CHOICE: `LIMN_AI_PROVIDER` = `claude` | `auto` (default: `auto`, which is Claude — the one the
-// rules were tuned on, docs/CODEX-PLAN.md § 6). `codex` is ACCEPTED but answers "not available
-// yet": the pre-flight every Run gate and background sweeper asks (`review/auth.ts`
-// `detectClaudeAuth`, which feeds `MeResponse.ai` and `ctx.llm.detectAuth`) answers 'none' with
-// that sentence, so the Run button is replaced by it and no sweeper starts a run; a run or
-// completion that starts anyway rejects with the same sentence. Nothing crashes.
+// rules were tuned on, docs/CODEX-PLAN.md § 6). `codex` is ACCEPTED and, since Phase 2, resolves to
+// the real Codex provider (`ai/providers/codex.ts`) — but ONLY its one-shot `complete()` runs. Its
+// `runAgent` answers "not available yet" for every kind outside `CODEX_AGENT_KINDS` (empty until
+// Phase 3 ports each agent), and the pre-flight every Run gate and background sweeper asks
+// (`review/auth.ts` `detectClaudeAuth`, which feeds `MeResponse.ai` and `ctx.llm.detectAuth`) still
+// answers 'none' with that sentence, so no Run button or sweeper offers Codex to a user yet. Nothing
+// crashes.
 import type { SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { AiUsageReading } from '@pierre-review/shared';
+import type { CodexProgress, TokenUsage } from './codex/events.js';
 import { claudeProvider } from './providers/claude.js';
-import { aiProviderSetting, CODEX_NOT_AVAILABLE_MESSAGE } from './provider-setting.js';
+import { codexProvider } from './providers/codex.js';
+import { aiProviderSetting } from './provider-setting.js';
 
 export type AgentProviderId = 'claude' | 'codex';
 
@@ -128,12 +132,51 @@ export interface AgentRunSpec {
   abortController: AbortController;
   /** Every message the run streams, in order. A throw here ends the run like a throw in a loop body. */
   onMessage?(message: AgentMessage): void;
+  /** Provider-neutral progress (Codex today; Phase 3 moves the runners' status lines onto it). */
+  onProgress?(progress: AgentProgress): void;
+  /** Who to bill. Given ⇒ a provider that records its own usage (Codex) writes the ledger row. */
+  usageRecord?: AgentUsageRecord;
   claude: ClaudeRunOptions;
+  /** The Codex-only knobs (Phase 3 sets them per runner). */
+  codex?: CodexRunOptions;
+}
+
+/** Provider-neutral progress: a status sentence, a tool step, file changes, a message, an error. */
+export type AgentProgress = CodexProgress;
+
+/** The ledger row's identity (db/usage.ts `AiUsageRecord`, minus what the provider knows itself). */
+export interface AgentUsageRecord {
+  accountId: number;
+  seam: 'summary' | 'agent';
+  feature: string;
+  prId?: number | null;
+  repoId?: number | null;
+}
+
+export interface CodexRunOptions {
+  /** The result tool whose answer ENDS the run, when the run has several tools. */
+  resultTool?: string;
+  /** Wall-clock limit in ms. Absent ⇒ the provider's default. */
+  timeoutMs?: number;
+  /** Reasoning effort override. Absent ⇒ by role. */
+  effort?: string;
 }
 
 export interface AgentRunResult {
-  /** The run's final result message, or null when it ended without one. */
+  /** The run's final result message (Claude's), or null when it ended without one (always, on Codex). */
   result: AgentResultMessage | null;
+  /** Which provider ran it. Absent ⇒ Claude (Phase 1 shape). */
+  provider?: AgentProviderId;
+  /** Codex: the final answer as text (the JSON when the run had a result tool). */
+  text?: string;
+  /** Codex: the run's tokens, or null when not reported (a cancelled turn). */
+  usage?: TokenUsage | null;
+  /** Codex: US$ (0 on a ChatGPT login; priced from tokens on an API key). */
+  costUsd?: number;
+  /** Codex: the files the run changed, read from `git` in its write roots — never from the stream. */
+  filesChanged?: string[] | null;
+  /** Codex: the thread id (its session lives in Limn's own Codex home). */
+  threadId?: string | null;
 }
 
 export interface CompleteRequest {
@@ -143,11 +186,21 @@ export interface CompleteRequest {
   system?: string;
   prompt: string;
   maxTokens?: number;
+  /** A JSON caller's answer schema (strict form). Claude ignores it; Codex passes `--output-schema`. */
+  outputSchema?: Record<string, unknown>;
+  /** Who to bill. Given ⇒ a provider that records its own usage (Codex) writes the ledger row. */
+  usageRecord?: AgentUsageRecord;
 }
 
 export interface CompleteResult {
   text: string;
   usage?: { inputTokens: number; outputTokens: number };
+  /** Which provider answered. Absent ⇒ Claude. A Codex answer's usage is NOT Claude-priced. */
+  provider?: AgentProviderId;
+  /** The model that answered (Codex reports its own; Claude callers know theirs). */
+  model?: string;
+  /** Codex: US$ (0 on a ChatGPT login). */
+  costUsd?: number;
 }
 
 export interface ProviderStatus {
@@ -190,44 +243,24 @@ export interface AgentProvider {
 
 // ---- the registry -------------------------------------------------------------------------------
 
-export { AI_PROVIDER_ENV, aiProviderSetting, CODEX_NOT_AVAILABLE_MESSAGE, type AiProviderSetting } from './provider-setting.js';
-
-const notAvailable = (): Error => new Error(CODEX_NOT_AVAILABLE_MESSAGE);
-
-/**
- * The Codex PLACEHOLDER: `LIMN_AI_PROVIDER=codex` is accepted, and every question it is asked
- * answers "not available yet" — `detect()` and the pre-flight (`detectClaudeAuth`) say so, a run
- * or a completion rejects with that one sentence, its credential route is 'none' (so the budget is off), and it has no usage reading.
- */
-export const codexPlaceholderProvider: AgentProvider = {
-  id: 'codex',
-  resolveModel: (choice) => choice.id ?? choice.role,
-  runAgent: async () => {
-    throw notAvailable();
-  },
-  complete: async () => {
-    throw notAvailable();
-  },
-  detect: async () => ({ id: 'codex', available: false, route: 'none', message: CODEX_NOT_AVAILABLE_MESSAGE }),
-  credentialRoute: () => 'none',
-  usage: {
-    readingFromMessage: () => null,
-    probe: async () => {
-      throw notAvailable();
-    },
-    readingFromProbe: () => null,
-    probeReady: () => false,
-  },
-};
+export {
+  AI_PROVIDER_ENV,
+  aiProviderSetting,
+  CODEX_AGENT_KINDS,
+  CODEX_NOT_AVAILABLE_MESSAGE,
+  codexKindNotAvailableMessage,
+  codexKindReady,
+  type AiProviderSetting,
+} from './provider-setting.js';
 
 /** One provider by id. */
 export function getProvider(id: AgentProviderId): AgentProvider {
-  return id === 'codex' ? codexPlaceholderProvider : claudeProvider;
+  return id === 'codex' ? codexProvider : claudeProvider;
 }
 
 /** THE provider every run and completion uses, per `LIMN_AI_PROVIDER` (read at call time). */
 export function getActiveProvider(env: NodeJS.ProcessEnv = process.env): AgentProvider {
-  return aiProviderSetting(env) === 'codex' ? codexPlaceholderProvider : claudeProvider;
+  return aiProviderSetting(env) === 'codex' ? codexProvider : claudeProvider;
 }
 
 /**

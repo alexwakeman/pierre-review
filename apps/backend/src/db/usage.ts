@@ -30,9 +30,12 @@ export interface AiUsageRecord {
 
 // Append one usage row. Best-effort + non-fatal: a ledger write must never break the
 // feature that spent the money, so callers `.catch()` or await-in-try. Drops rows with
-// no real cost (a $0 ambient-session completion isn't worth a row).
+// no real cost (a $0 ambient-session completion isn't worth a row) — EXCEPT a Codex row: a ChatGPT
+// login reports tokens and never US$, so its row is cost 0 with its tokens (or null tokens for a
+// cancelled run), and the budget's token-weighted share reads exactly those rows (CODEX-PLAN.md § 8.1).
 export async function recordAiUsage(row: AiUsageRecord): Promise<void> {
-  if (!Number.isFinite(row.costUsd) || row.costUsd <= 0) return;
+  if (!Number.isFinite(row.costUsd) || row.costUsd < 0) return;
+  if (row.costUsd === 0 && row.provider !== 'codex') return;
   await db
     .insert(aiUsage)
     .values({

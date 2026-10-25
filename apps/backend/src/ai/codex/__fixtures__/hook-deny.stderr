@@ -1,0 +1,5 @@
+Reading additional input from stdin...
+2026-10-25T13:53:13.021915Z ERROR codex_core::tools::router: error=Command blocked by PreToolUse hook: Limn path guard: refused. Command: *** Begin Patch
+*** Add File: /tmp/limn-codex-spike/fixture/src/DENYME.txt
++hi
+*** End Patch

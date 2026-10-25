@@ -1,0 +1,6 @@
+Reading additional input from stdin...
+2026-10-25T13:52:46.432990Z ERROR codex_core::tools::router: error=patch rejected: writing outside of the project; rejected by user approval settings
+2026-10-25T13:52:48.921941Z ERROR codex_core::tools::router: error=Command blocked by PreToolUse hook: Limn path guard: refused. Command: *** Begin Patch
+*** Add File: /tmp/limn-codex-spike/fixture/src/DENYME.txt
++hi
+*** End Patch

@@ -14,6 +14,17 @@ active provider's rows and reading). Where the spec still carries Claude-only kn
 messages: Phase 3 ports each runner off them. Models are ROLES (`deep`/`standard`/`fast`) with the
 exact id every call site used passed as an explicit override, so no model moved.
 
+**Phase 2(a) (the runner) built 2026-10-25** (branch `codex/p2-runner`): `ai/codex/config.ts` (the
+locked `codex exec` argv; ⚠ `projects` is ONE inline table because Codex splits a `-c` key on every
+dot, quoted or not — a worktree path with a dot failed `--strict-config`), `ai/codex/events.ts` (the
+JSONL fold: progress, final answer, per-turn usage deltas, stderr-only refusals), `ai/codex/run.ts`
+(spawn, stdin prompt, abort/timeout → SIGTERM → SIGKILL; a stopped run has null tokens) and
+`ai/providers/codex.ts` (`complete()` runs on Codex under `LIMN_AI_PROVIDER=codex`; `runAgent` answers
+"not available yet" for every kind outside `CODEX_AGENT_KINDS`, EMPTY until Phase 3; one validation
+retry via `exec resume`; writes read from git; a write run refuses without a trusted hook). API-key
+prices are TODO (`CODEX_PRICES_PER_MTOK`, US$ 0 until filled). The pre-flight still keeps Codex from
+users.
+
 Original status: Written 2026-10-23 after checking the current Codex docs and the published
 `@openai/codex-sdk` 0.164.0 type definitions. The work is meant to be carried out by subagents
 through the Workflow tool, in the phases below, with the user confirming the decisions in § 6 first.
