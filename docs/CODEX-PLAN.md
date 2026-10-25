@@ -45,6 +45,24 @@ users.
   `--strict-config`, `complete()` answers in a schema, and an unchecked read-only run read through the
   MCP server while the trusted hook refused `../outside/secret.env`.
 
+**Phase 2 review fixes 2026-10-25** (branch `codex/p2-fixed`):
+- The final answer is zod-PARSED against the result tool's shape before its handler (as Claude's MCP
+  layer does); a shape issue is the one retry's reason. Any throw after the first spawn is a run
+  FAILURE: usage recorded, writes verified, `CodexRunError.filesChanged` set.
+- Reasoning tokens are a SUBSET of output tokens: never added. A cheap completion Codex answered is
+  recorded as Codex (its model, its own US$) — `review/cheap-usage.ts`, the platform `LlmClient`.
+- The run is its own process group; every stop signals `-pid` (MCP server, hook and tools included).
+- Session files ("rollouts") are deleted when a run settles, swept after a day, erased with the account
+  (`ai/codex/rollouts.ts`). ⚠ Codex's own sqlite state in the home (`state_5`, `logs_2`,
+  `thread_history_1`) is NOT touched yet.
+- The hook's matcher is `.*` and the rule an ALLOW-list (write tools and `mcp__workspace__*`
+  path-checked, `update_plan`; everything else denied). Patch headers count only in header position.
+- The share's account tokens carry the SPAN they cover (`AiAccountTokenSpan`) and Limn's ledger is
+  counted over the same span; a start sample older than 15 minutes is not exact; no account count is
+  an UNKNOWN share (never blocks); a share with no live reset is never over.
+- Codex is looked up inside `<runtimeDir>/node_modules` only; a sign-in cancelled while starting
+  stays cancelled.
+
 Original status: Written 2026-10-23 after checking the current Codex docs and the published
 `@openai/codex-sdk` 0.164.0 type definitions. The work is meant to be carried out by subagents
 through the Workflow tool, in the phases below, with the user confirming the decisions in § 6 first.
