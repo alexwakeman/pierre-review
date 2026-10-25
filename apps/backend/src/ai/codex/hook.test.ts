@@ -45,6 +45,9 @@ describe('codexHookTrustHash — pinned to what Codex 0.164.0 hooks/list reporte
       'sha256:0b8fde24c1b177198f2066bc3b1af8a513c479d58c8b299f587e49eed29a42c8',
     ],
     ['apply_patch', `/usr/bin/env FOO=1 /bin/echo "a b" 'x'`, undefined, 'sha256:50dd98a3b94a4180fbe01ce7887a075f435ab2d0a28bc085ecb16e8f8300b6bf'],
+    // The guard's matcher since it became an allow-list over EVERY tool (read from hooks/list, 0.164.0).
+    ['.*', '/bin/echo', 30, 'sha256:d563d4c7362c9ca298e50f0edc2612bab876a6bdfa1b02909eb75fb540d1f8d8'],
+    ['.*', '/bin/echo', undefined, 'sha256:6e7fb09afa9514d14db4a63a73a6c4a9632b9efe8cc2b071728c29937b725c1e'],
   ])('%s · %s · timeout %s', (matcher, command, timeoutSec, expected) => {
     expect(codexHookTrustHash({ event: 'pre_tool_use', matcher, command, timeoutSec })).toBe(expected);
   });
@@ -122,8 +125,35 @@ describe('decideCodexToolCall', () => {
     expect(decideCodexToolCall('mcp__workspaceX__read', {}, ro(), wt)).toMatchObject({ allow: false });
   });
 
-  it('lets other tools through', () => {
-    expect(decideCodexToolCall('clock__curr_time', {}, ro(), wt)).toEqual({ allow: true });
+  it('is an ALLOW-list: a tool nobody listed is DENIED; only the known-harmless built-ins pass', () => {
+    expect(decideCodexToolCall('update_plan', { plan: [] }, ro(), wt)).toEqual({ allow: true });
+    for (const tool of ['clock__curr_time', 'shell', 'exec_command', 'view_image', 'read_mcp_resource', 'list_mcp_resources', 'spawn_agent', '']) {
+      expect(decideCodexToolCall(tool, {}, rw(), wt), tool).toMatchObject({ allow: false, reason: expect.stringMatching(/is not one Limn allows/) });
+    }
+  });
+
+  it('reads a patch the way Codex does: a header inside a file’s BODY is not a header', () => {
+    // A context line and an added line that merely CONTAIN header text: a valid patch, not refused.
+    const valid = [
+      '*** Begin Patch',
+      '*** Update File: src/a.ts',
+      '@@',
+      ' *** Add File: /etc/passwd',
+      '-old',
+      '+new *** Delete File: /etc/hosts',
+      '*** End of File',
+      '*** Add File: docs/b.md',
+      '+*** Update File: /etc/hosts',
+      '+plain',
+      '*** End Patch',
+    ].join('\n');
+    expect(writePaths({ input: valid })).toEqual(['src/a.ts', 'docs/b.md']);
+    expect(decideCodexToolCall('apply_patch', { input: valid }, rw(), wt)).toEqual({ allow: true });
+    // A real header after the body (in header position again) is still read — and refused.
+    const sneaky = valid.replace('*** End Patch', '*** Delete File: ../outside/x\n*** End Patch');
+    expect(decideCodexToolCall('apply_patch', { input: sneaky }, rw(), wt)).toMatchObject({ allow: false });
+    // CRLF patches too.
+    expect(writePaths({ input: valid.replace(/\n/g, '\r\n') })).toEqual(['src/a.ts', 'docs/b.md']);
   });
 
   it('reads the payload shape Codex 0.164.0 sends for apply_patch (recorded in the live run)', () => {

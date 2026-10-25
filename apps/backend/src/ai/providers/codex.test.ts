@@ -52,8 +52,8 @@ vi.mock('../codex/home.js', async (importOriginal) => ({
 }));
 vi.mock('../codex/hook.js', () => ({
   pathGuardHook: (roots: { read: string[]; write: string[] }) => ({
-    override: 'hooks.PreToolUse=[{matcher="apply_patch|mcp__.*", hooks=[{type="command", command="/limn/guard", timeout=30}]}]',
-    matcher: 'apply_patch|mcp__.*',
+    override: 'hooks.PreToolUse=[{matcher=".*", hooks=[{type="command", command="/limn/guard", timeout=30}]}]',
+    matcher: '.*',
     command: '/limn/guard',
     timeoutSec: 30,
     trustKey: '/<session-flags>/config.toml:pre_tool_use:0:0',

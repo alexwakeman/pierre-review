@@ -32,8 +32,14 @@ import { helperCommand, shellWord } from './entry.js';
 import { encodeGuardRoots, GUARD_ENV, type GuardRoots } from './hook-rule.js';
 import type { CodexHookConfig } from './types.js';
 
-/** Every tool the guard must see: the write tools and every MCP tool (to deny the foreign ones). */
-export const PATH_GUARD_MATCHER = 'apply_patch|Edit|Write|MultiEdit|NotebookEdit|mcp__.*';
+/**
+ * EVERY tool call goes through the guard. ⚠ Not a list of the tools to check: the rule
+ * (hook-rule.ts) is an ALLOW-list, and a matcher that named only the write and MCP tools would let
+ * any tool it did not name run unseen — a built-in a future CLI adds, or one a config switch failed
+ * to remove. Part of the trust hash (Codex re-hashes on a change; `ensureCodexHomeConfig` rewrites
+ * the entry, and `verifyHookTrusted` re-checks).
+ */
+export const PATH_GUARD_MATCHER = '.*';
 /** Seconds Codex waits for the hook (part of the trust hash). */
 export const PATH_GUARD_TIMEOUT_SEC = 30;
 /** The `hooks.state` key Codex gives the FIRST handler of the FIRST `-c` PreToolUse group. */
