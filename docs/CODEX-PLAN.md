@@ -212,6 +212,17 @@ pins the missing list to `['plan']`: adding `plan` to `ai/codex/kinds/fix.ts` af
 run flips Codex to runnable with no other change. Claude stays the default under `auto` when both are
 signed in (decided, `pickAutoProvider`). Claude's behaviour is unchanged: `prompt-golden.json`,
 `no-shell.test.ts` and every Claude agent test pass untouched by the merge.
+- One integration fix: stream (d) made `docsNavigationPrompt` render for the ACTIVE provider, but
+  `docsReviewPromptBlock`'s two callers re-word the finished block for Codex themselves and match
+  Claude's sentences, so the block now always renders Claude's words (`review-refs.ts`); this
+  restored `tickets-claude-prompts.json` and changes nothing under Claude.
+- Live check 2026-10-25 (`~/.limn/codex`, gpt-6-luna, low effort, 4 model runs, US$ 0 each):
+  `/api/me` on a scratch DB with `LIMN_AI_PROVIDER=codex` reported signed in (plus), `available:
+  false`, every kind 'ok' except `plan`. Through the provider directly on a scratch git fixture:
+  a `review` run (30,090 in / 21,248 cached / 200 out), a `fix` WRITE run that edited only
+  `src/math.ts` in the worktree (40,310 / 30,720 / 290), a `ticket_review` run (30,213 / 14,720 /
+  216) and one `complete()` (6,646 / 5). Each wrote one Codex ledger row. Note: the provider's
+  `filesChanged` are ABSOLUTE paths; the fixer reads its own diff from git, so nothing depends on it.
 
 **Phase 3 stream (a) built 2026-10-25** (branch `codex/p3-review`): `review`, `review_chat` and
 `thread_check` are in `ai/codex/kinds/review.ts`.
