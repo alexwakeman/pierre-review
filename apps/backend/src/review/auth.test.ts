@@ -33,6 +33,9 @@ vi.mock('../ai/codex/detect.js', async (orig) => ({
   codexDetailCached: () => codex.detail,
 }));
 vi.mock('../ai/codex/kinds/review.js', () => ({ CODEX_REVIEW_KINDS: ['review'] }));
+// 'fix' stands for a kind Codex cannot run here (its stream's real file ports it; this suite pins the
+// pre-flight's two answers, not which kinds are ported).
+vi.mock('../ai/codex/kinds/fix.js', () => ({ CODEX_FIX_KINDS: [] }));
 
 import { applyClaudeReviewAuth, detectClaudeAuth, hasAmbientClaudeAuth } from './auth.js';
 

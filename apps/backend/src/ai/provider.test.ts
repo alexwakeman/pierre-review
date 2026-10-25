@@ -92,7 +92,7 @@ describe('the registry (LIMN_AI_PROVIDER)', () => {
     expect(P.getProvider('claude')).toBe(claudeProvider);
   });
 
-  it("codex resolves to the Codex provider; every agent kind still answers 'not available yet'", async () => {
+  it("codex resolves to the Codex provider; every kind not yet ported answers 'not available yet'", async () => {
     const codex = P.getActiveProvider({ LIMN_AI_PROVIDER: 'codex' });
     expect(codex.id).toBe('codex');
     expect(P.getProvider('codex')).toBe(codex);

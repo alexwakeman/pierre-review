@@ -1,9 +1,13 @@
 import {
   claudeModelChoice,
   getActiveProvider,
+  getProvider,
   type AgentKind,
   type AgentOutcome,
+  type AgentProviderId,
   type AgentToolServer,
+  type AgentUsageRecord,
+  type CodexRunOptions,
 } from '../ai/provider.js';
 import { config } from '../config.js';
 import { getAccessToken } from '../auth/account.js';
@@ -132,6 +136,19 @@ interface AgentRunOptions {
     activity: string[],
     usage: LiveUsage & { estCostUsd: number },
   ) => void;
+  /**
+   * Which provider runs it (the one the prompt was worded for). Absent ⇒ the active provider
+   * (ai/provider.ts `getActiveProvider`), exactly as before.
+   */
+  provider?: AgentProviderId;
+  /**
+   * Who to bill. A provider that records its own usage (Codex) writes the ledger row from it, and
+   * the result says so (`usageRecorded`) so the caller does not write a second. Claude ignores it:
+   * its callers record from the returned US$ as they always did.
+   */
+  usageRecord?: AgentUsageRecord;
+  /** Codex-only knobs (an explicit reasoning effort for the opt-in live test). Claude ignores them. */
+  codex?: CodexRunOptions;
 }
 
 interface AgentRunOutcome {
@@ -141,6 +158,10 @@ interface AgentRunOutcome {
   costUsd: number | null;
   numTurns: number | null;
   aborted: boolean;
+  /** Which provider ran it. */
+  provider: AgentProviderId;
+  /** True ⇒ the provider already wrote this run's ledger row (Codex): the caller must not write one. */
+  usageRecorded: boolean;
 }
 
 /**
@@ -162,9 +183,19 @@ export async function runAgentInWorktree(
   const model = opts.model as ClaudeReviewModel;
   let liveUsage: UsageTokens = emptyUsage();
   let outcome: AgentOutcome | null = null;
+  const provider = opts.provider ? getProvider(opts.provider) : getActiveProvider();
+  // CODEX (docs/CODEX-PLAN.md Phase 3): its tokens are never Claude-priced. On a ChatGPT sign-in a run
+  // costs US$ 0 (the budget's share is token-weighted, ai/budget.ts), and the provider reports its
+  // own US$ on the outcome — so nothing below estimates a Codex run with Claude's price table. It
+  // records its own ledger row when given `usageRecord` (ai/providers/codex.ts), even for a run that
+  // failed or was cancelled.
+  const isCodex = provider.id === 'codex';
+  const usageRecorded = isCodex && opts.usageRecord != null;
+  const priceOf = (u: UsageTokens): number => (isCodex ? (outcome?.costUsd ?? 0) : estimateCostUsd(model, u));
 
-  // The credential ladder (ai/credentials.ts): the Claude Code login, else ANTHROPIC_API_KEY. Restored below.
-  const restoreEnv = applyClaudeReviewAuth(true);
+  // The credential ladder (ai/credentials.ts): the Claude Code login, else ANTHROPIC_API_KEY. Restored
+  // below. (Claude's only: a Codex run's environment is built by its provider from Limn's Codex home.)
+  const restoreEnv = isCodex ? () => {} : applyClaudeReviewAuth(true);
   try {
   const activity: string[] = [];
   const pushActivity = (line: string): void => {
@@ -176,10 +207,11 @@ export async function runAgentInWorktree(
 
   // What the run has spent so far, from the streamed assistant turns. A cancelled or failed run
   // still bills: the caller records this (a planning pass counts it against the plan's budget).
-  const spentSoFar = (): { usage: LiveUsage; costUsd: number | null } => {
-    const u = { ...liveUsage };
+  const spentSoFar = (): { usage: LiveUsage; costUsd: number | null; usageRecorded?: boolean } => {
+    // Codex emits its whole-run outcome before it throws: its tokens beat the live tally.
+    const u = { ...(isCodex && outcome?.usage ? outcome.usage : liveUsage) };
     const has = u.inputTokens + u.outputTokens + u.cacheReadTokens > 0;
-    return { usage: u, costUsd: has ? estimateCostUsd(model, u) : null };
+    return { usage: u, costUsd: has ? priceOf(u) : null, ...(usageRecorded ? { usageRecorded } : {}) };
   };
 
   try {
@@ -190,7 +222,7 @@ export async function runAgentInWorktree(
   // seed item (PR text, review threads, a ticket review's items) saying "also add this to ~/.zshrc"
   // would otherwise write outside the worktree, where captureWorktreeDiff never shows it to the
   // reader. 'worktree' effort ⇒ config.reviewEffort, exactly the effort this path always used.
-  ({ outcome } = await getActiveProvider().runAgent({
+  ({ outcome } = await provider.runAgent({
     kind: opts.kind,
     model: claudeModelChoice(model),
     effort: 'worktree',
@@ -204,6 +236,8 @@ export async function runAgentInWorktree(
     budget: { usd: opts.maxBudgetUsd, turns: opts.maxTurns },
     abortController: opts.abortController,
     claude: { allowedTools: opts.allowedTools, disallowedTools: opts.disallowedTools },
+    ...(opts.usageRecord ? { usageRecord: opts.usageRecord } : {}),
+    ...(opts.codex ? { codex: opts.codex } : {}),
     // The fixer's words for its steps (the write tools too).
     activity: 'fix',
     onProgress: (p) => {
@@ -213,7 +247,7 @@ export async function runAgentInWorktree(
         const live = liveUsage;
         opts.onActivity?.([...activity], {
           ...live,
-          estCostUsd: estimateCostUsd(model, live),
+          estCostUsd: priceOf(live),
         });
       } else if (p.kind === 'outcome') {
         outcome = p.outcome;
@@ -234,6 +268,8 @@ export async function runAgentInWorktree(
       costUsd: spent.costUsd,
       numTurns: null,
       aborted: true,
+      provider: provider.id,
+      usageRecorded,
     };
   }
 
@@ -241,7 +277,7 @@ export async function runAgentInWorktree(
   const hasUsage =
     usage.inputTokens + usage.outputTokens + usage.cacheReadTokens > 0;
   const costUsd =
-    outcome?.costUsd ?? (hasUsage ? estimateCostUsd(model, usage) : null);
+    outcome?.costUsd ?? (hasUsage ? priceOf(usage) : null);
 
   return {
     outcome,
@@ -254,6 +290,8 @@ export async function runAgentInWorktree(
     costUsd,
     numTurns: outcome?.numTurns ?? null,
     aborted: false,
+    provider: provider.id,
+    usageRecorded,
   };
   } finally {
     restoreEnv();
@@ -327,6 +365,9 @@ export async function runCodingAgent(
       abortController,
       onActivity: (activity, usage) =>
         onProgress({ phase: 'fixing', recentActivity: activity, usage }),
+      ...(args.provider ? { provider: args.provider } : {}),
+      usageRecord: { accountId: args.accountId, seam: 'agent', feature: 'ai_fix', prId: args.prId ?? null },
+      ...(args.codex ? { codex: args.codex } : {}),
     });
 
     // A user cancel aborts the SDK iterator; surface a clean aborted result (the
@@ -342,6 +383,7 @@ export async function runCodingAgent(
         costUsd: null,
         numTurns: null,
         aborted: true,
+        ...(outcome.usageRecorded ? { usageRecorded: true } : {}),
       };
     }
 
@@ -376,6 +418,7 @@ export async function runCodingAgent(
       costUsd: outcome.costUsd,
       numTurns: outcome.numTurns,
       aborted: false,
+      ...(outcome.usageRecorded ? { usageRecorded: true } : {}),
     };
   } finally {
     if (repoCloneDir && worktreePath) {
@@ -415,6 +458,7 @@ export async function runPlanAgent(args: GeneratePlanArgs): Promise<GeneratePlan
     ({ repoCloneDir, worktreePath } = await prepWorktree(owner, name, prNumber, baseSha, token));
 
     const planShape = await submitPlanShape();
+    const planProvider: AgentProviderId = args.provider ?? getActiveProvider().id;
     let accepted: RawPlanSubmission | null = null;
     const tools: AgentToolServer = {
       server: 'plan',
@@ -429,6 +473,10 @@ export async function runPlanAgent(args: GeneratePlanArgs): Promise<GeneratePlan
             if (problems.length > 0) {
               return {
                 text: `The plan was not recorded. Fix this and call submit_plan again:\n- ${problems.join('\n- ')}`,
+                // CODEX: its final answer IS the call, so a refusal must say so (`isError`) to earn the
+                // provider's one retry with this text as the reason. Claude keeps today's reply exactly:
+                // the model reads the text and calls again.
+                ...(planProvider === 'codex' ? { isError: true } : {}),
               };
             }
             accepted = { summary: p.summary, steps: p.steps, notAddressed: p.notAddressed, reply: p.reply };
@@ -453,12 +501,16 @@ export async function runPlanAgent(args: GeneratePlanArgs): Promise<GeneratePlan
       maxBudgetUsd: args.maxBudgetUsd,
       abortController,
       onActivity: (activity, usage) => onProgress({ phase: 'planning', recentActivity: activity, usage }),
+      provider: planProvider,
+      usageRecord: { accountId: args.accountId, seam: 'agent', feature: 'ai_fix_plan', prId: args.prId ?? null },
+      ...(args.codex ? { codex: args.codex } : {}),
     });
 
     // A cancelled pass still hands back what it spent, so the manager records it and counts it
     // against the plan's budget.
+    const recorded = outcome.usageRecorded ? { usageRecorded: true } : {};
     if (outcome.aborted || abortController.signal.aborted) {
-      return { plan: null, usage: outcome.usage, costUsd: outcome.costUsd, numTurns: null, aborted: true };
+      return { plan: null, usage: outcome.usage, costUsd: outcome.costUsd, numTurns: null, aborted: true, ...recorded };
     }
     return {
       plan: accepted as RawPlanSubmission | null,
@@ -466,6 +518,7 @@ export async function runPlanAgent(args: GeneratePlanArgs): Promise<GeneratePlan
       costUsd: outcome.costUsd,
       numTurns: outcome.numTurns,
       aborted: false,
+      ...recorded,
     };
   } finally {
     if (repoCloneDir && worktreePath) {

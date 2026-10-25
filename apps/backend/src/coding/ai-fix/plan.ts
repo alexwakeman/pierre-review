@@ -52,6 +52,12 @@ export interface GeneratePlanArgs {
   maxBudgetUsd: number;
   abortController: AbortController;
   onProgress: (p: PlanRunProgress) => void;
+  /** The PR, for the ledger row a provider that records its own usage (Codex) writes. */
+  prId?: number;
+  /** The provider the prompt was worded for (ai/prompt-tools.ts). Absent ⇒ the active one. */
+  provider?: 'claude' | 'codex';
+  /** Codex-only run knobs (the opt-in live test's effort). */
+  codex?: { effort?: string; timeoutMs?: number };
 }
 
 // What a planning pass returns to the manager (coding/agent.ts `runPlanAgent`).
@@ -62,6 +68,8 @@ export interface GeneratePlanResult {
   costUsd: number | null;
   numTurns: number | null;
   aborted: boolean;
+  /** True ⇒ the provider already wrote this pass's AI-usage ledger row (Codex): write no second one. */
+  usageRecorded?: boolean;
 }
 
 export const PLAN_STEP_TITLE_MAX = 200;

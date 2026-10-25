@@ -79,7 +79,11 @@ describe('the provider seam', () => {
       // the Codex ports: the run's wording and its call must agree on the provider).
       const direct = /getActiveProvider\(\)\.(runAgent|complete)\(/.test(src);
       const once = /const provider = getActiveProvider\(\);/.test(src) && /\bprovider\.(runAgent|complete)\(/.test(src);
-      expect(direct || once, `${f} must call the provider`).toBe(true);
+      // The fixer's run core may be handed the provider its prompt was worded for (Phase 3: one provider
+      // per job, picked by the AI Fix manager / the resolver) — still the registry's, the active one
+      // when none is named: `const provider = opts.provider ? getProvider(…) : getActiveProvider()`.
+      const viaNamed = /getProvider\(opts\.provider\) : getActiveProvider\(\)/.test(src) && /\bprovider\.runAgent\(/.test(src);
+      expect(direct || once || viaNamed, `${f} must call the provider`).toBe(true);
     }
     // The resolver runs through the fixer's run core (coding/agent.ts runAgentInWorktree).
     expect(code(readFileSync(join(SRC, 'coding/ai-resolve/run.ts'), 'utf8'))).toMatch(/runAgentInWorktree\(/);

@@ -223,6 +223,47 @@ describe('maybeStartAutoFix — the author gate', () => {
   });
 });
 
+describe('maybeStartAutoFix — the spend budget, on Codex (docs/CODEX-PLAN.md Phase 3)', () => {
+  it('⚠ Codex over its share of the ChatGPT window ⇒ skipped "over_budget", the seed never loaded and no fix started', async () => {
+    const { budgetWindowStart, decideAiBudget, resolveAiBudgetSettings } = await import('@pierre-review/shared');
+    // Limn is ALL of a week window reading 6% — over the default 5% share (the token-weighted fold).
+    const reading = {
+      week: { utilization: 6, resetsAtMs: NOW + 3 * 24 * HOUR, observedAtMs: NOW },
+      fiveHour: { utilization: 1, resetsAtMs: NOW + 2 * HOUR, observedAtMs: NOW },
+      subscriptionType: 'plus',
+    };
+    const asked: string[] = [];
+    const gated = {
+      ...ctx,
+      aiBudget: {
+        allowAutomaticRun: async (_accountId: number, what: string) => {
+          asked.push(what);
+          const status = decideAiBudget({
+            settings: resolveAiBudgetSettings({ enabled: true }),
+            route: 'login',
+            reading,
+            ledger: [{ atMs: NOW - HOUR, usd: 0, inputTokens: 1000, outputTokens: 0 }],
+            costs: { reviewMeanUsd: null, diagramMeanUsd: null, autoDiagrams: false },
+            nowMs: NOW,
+            provider: 'codex',
+            accountTokens: {
+              week: { tokens: 1000, ...budgetWindowStart(reading, NOW, 'week'), toMs: NOW },
+              fiveHour: { tokens: 1000, ...budgetWindowStart(reading, NOW, 'five_hour'), toMs: NOW },
+            },
+          } as any);
+          return !status.overBudget;
+        },
+      },
+    } as any as AgentContext;
+    const prId = await seedPr(viewerId);
+    const r = await mod.maybeStartAutoFix(gated, { accountId: 1, prId, reviewId: 777 }, deps(), NOW);
+    expect(r).toEqual({ reviewId: 777, status: 'skipped', reason: 'over_budget' });
+    expect(asked).toEqual(['auto fix']);
+    expect(loadInputs.filter((i) => i.reviewId === 777)).toEqual([]);
+    expect(started).toEqual([]);
+  });
+});
+
 describe('maybeStartAutoFix — the workspace switch', () => {
   it('⚠ default OFF for a new workspace; switched off ⇒ skipped "off", seed never loaded; back on ⇒ starts', async () => {
     const q = await import('../../db/queries.js');

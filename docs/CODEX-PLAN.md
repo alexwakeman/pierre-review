@@ -222,6 +222,31 @@ users.
 - Open: the stored `claude_reviews.model` (and the chat row's) still names the Claude model the run
   was ASKED for; the product copy says "Claude" (Phase 4).
 
+**Phase 3 stream (b) built 2026-10-25** (branch `codex/p3-fix`): AI Fix, Plan first, Resolve with Claude.
+- `CODEX_FIX_KINDS` = `fix`, `resolve`. ⚠ NOT `plan` yet: it is ported in code and passes offline, but its
+  one live run (gpt-6-luna, low effort) answered with no steps twice and its own check refused it. Add it
+  after a live run passes.
+- ONE PROVIDER PER JOB: the AI Fix manager and the resolver pick the provider once (`activeProviderId`),
+  word the prompt for it and hand the SAME one to the run (`GenerateFixArgs.provider`,
+  `GeneratePlanArgs.provider`, `runAgentInWorktree({ provider })`). Prompts take an optional provider
+  (`buildFixSystemPrompt(provider)`, …, `buildAiResolvePrompt(model, nonce, provider)`); Claude's text is
+  byte-identical (`WORKTREE_RULES` is now `worktreeRules(t)` over `WORKTREE_RULES_REST`).
+- ROOTS: the fixer writes its worktree only (`writeRoots = [worktree]`, the Claude path guard's cwd);
+  Plan first and the resolver are read-only. The sandbox's only write root is the worktree, `/tmp` and
+  `$TMPDIR` excluded.
+- A refusal IN A RESULT TOOL is `isError` on Codex only, so it earns the provider's one retry: the plan's
+  shown-ref check (every refusal), and the resolver's refused choices (the FIRST answer only — a second
+  answer keeps what was accepted, as on Claude). Claude's tool replies are unchanged.
+- USAGE: the runs pass `usageRecord` (`ai_fix`, `ai_fix_plan`, `ai_resolve`, with the PR); Codex writes
+  its own row, and `usageRecorded` (on the run result, `GenerateFixResult`, `GeneratePlanResult` and the
+  partial spend) stops the caller writing a second. A Codex run is never priced with Claude's table
+  (US$ 0 on a ChatGPT sign-in, live and final).
+- Tests: `coding/codex-fix.test.ts` (offline, real provider + fake `codex` + real git worktree: success,
+  shape failure + retry, double failure, cancellation, the plan check retry, the resolver retry);
+  `ai-fix/auto-fix.test.ts` (the Codex budget skip); `coding/codex-fix.live.test.ts` (opt-in). Live run
+  2026-10-25: the WRITE run passed (the hook let `src/math.ts` through and denied `../outside`, `/tmp`
+  and `$TMPDIR`; none of the files exists); the plan run failed as above.
+
 Original status: Written 2026-10-23 after checking the current Codex docs and the published
 `@openai/codex-sdk` 0.164.0 type definitions. The work is meant to be carried out by subagents
 through the Workflow tool, in the phases below, with the user confirming the decisions in § 6 first.

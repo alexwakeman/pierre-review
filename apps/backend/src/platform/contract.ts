@@ -94,6 +94,12 @@ export interface GenerateFixArgs {
   maxBudgetUsd?: number;
   abortController: AbortController;
   onProgress: (p: CodingProgress) => void;
+  /** The PR, for the ledger row a provider that records its own usage (Codex) writes. */
+  prId?: number;
+  /** The provider the prompt was worded for (ai/prompt-tools.ts). Absent ⇒ the active one. */
+  provider?: 'claude' | 'codex';
+  /** Codex-only run knobs (the opt-in live test's effort). */
+  codex?: { effort?: string; timeoutMs?: number };
 }
 
 // The fix agent's self-report, as the `submit_fix` tool received it (UNVALIDATED — the AI Fix
@@ -123,6 +129,8 @@ export interface GenerateFixResult {
   costUsd: number | null;
   numTurns: number | null;
   aborted: boolean;
+  /** True ⇒ the provider already wrote this run's AI-usage ledger row (Codex): write no second one. */
+  usageRecorded?: boolean;
 }
 
 // Where a completed fix is pushed. 'existing' pushes onto the PR's own head branch
