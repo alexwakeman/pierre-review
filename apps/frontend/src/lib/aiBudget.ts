@@ -202,6 +202,14 @@ export function headerUsageOf(data: AiBudgetResponse): HeaderUsage | null {
 export interface UsageRow {
   label: string;
   value: string;
+  /** How full the row's bar is, 0–100 (a limit's share used, or Claude's own window used); none = no bar. */
+  barPct?: number;
+}
+
+/** A bar's fill, clamped to 0–100; undefined for a figure that isn't a number. */
+function barOf(pct: number | null | undefined): number | undefined {
+  if (pct == null || !Number.isFinite(pct)) return undefined;
+  return Math.min(100, Math.max(0, pct));
 }
 export interface UsageSection {
   title: string;
@@ -274,6 +282,7 @@ export function usageDetailOf(data: AiBudgetResponse, now: number = Date.now()):
           budget != null && budget.weeklyUsd > 0
             ? `${formatRunUsd(k.weekUsd)} of ${formatRunUsd(budget.weeklyUsd)} · ${ratioPct((budget.usedUsd / budget.weeklyUsd) * 100)}`
             : formatRunUsd(k.weekUsd),
+        barPct: budget != null && budget.weeklyUsd > 0 ? barOf((budget.usedUsd / budget.weeklyUsd) * 100) : undefined,
       });
       rows.push({ label: 'Last 5 hours', value: formatRunUsd(k.fiveHourUsd) });
       rows.push({ label: 'Today', value: formatRunUsd(k.todayUsd) });
@@ -298,12 +307,14 @@ export function usageDetailOf(data: AiBudgetResponse, now: number = Date.now()):
     limnRows.push({
       label: 'This week',
       value: `${formatFineSharePct(limn.weekSharePct)} of your week${sub != null ? ` · limit ${sub.sharePct}%` : ''}`,
+      barPct: sub != null && sub.sharePct > 0 ? barOf((limn.weekSharePct / sub.sharePct) * 100) : undefined,
     });
   }
   if (limn.fiveHourSharePct != null) {
     limnRows.push({
       label: 'This 5-hour session',
       value: `${formatFineSharePct(limn.fiveHourSharePct)} of the session${sub != null ? ` · limit ${sub.fiveHourSharePct}%` : ''}`,
+      barPct: sub != null && sub.fiveHourSharePct > 0 ? barOf((limn.fiveHourSharePct / sub.fiveHourSharePct) * 100) : undefined,
     });
   }
   const sections: UsageSection[] = [{ title: 'Limn’s runs', rows: [...limnRows, ...runsRows] }];
@@ -312,7 +323,7 @@ export function usageDetailOf(data: AiBudgetResponse, now: number = Date.now()):
   const push = (label: string, w: AiUsageWindowView | null | undefined): void => {
     if (w == null) return;
     const v = windowValue(w, now);
-    if (v != null) acctRows.push({ label, value: v });
+    if (v != null) acctRows.push({ label, value: v, barPct: barOf(w.usedPct) });
   };
   push('5-hour session', acct?.fiveHour);
   push('Week', acct?.week);

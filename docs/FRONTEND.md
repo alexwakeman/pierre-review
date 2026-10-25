@@ -1483,7 +1483,9 @@ while the tab is visible), feeds every surface below; the decision is the server
   screen-reader only (and in the title): the item SHOWS just the icon and the figure, at every width. Click → a `role="dialog"` popover (Escape / outside click close it)
   built by `usageDetailOf`: Limn's week and 5-hour shares with limits, runs and tokens this week,
   Claude's account windows (5-hour, week, per-model) as used / left / resets, "Updated N min ago", and
-  a link to Settings → Claude spend. ⚠ Unknown pieces are LEFT OUT, never shown as 0.
+  a link to Settings → Claude spend. Each share or window row has a bar under its text (`UsageRow.barPct`):
+  Limn's rows fill against their LIMIT, the account rows show Claude's own % used; amber from 80%, red at
+  100%; counts (runs, tokens) have none. ⚠ Unknown pieces are LEFT OUT, never shown as 0.
 - **A run's cost** (Claude Review's meta line and live estimate, Docs chat, Ask Claude about this
   sprint): ONE wording, `useRunCostText()` → `runCostText(costUsd, usage)`. API key: US$. Claude
   subscription: "0.3% of your week" from the server's `usage.weekPctPerUsd` rate (the frontend holds no

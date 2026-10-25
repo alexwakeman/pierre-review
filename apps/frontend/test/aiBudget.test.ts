@@ -224,6 +224,14 @@ describe('the usage popover', () => {
     expect(d.updated).toBe('Updated 4 min ago');
     expect(JSON.stringify(d)).not.toMatch(/\$/);
   });
+  it('bars: Limn rows fill against their limit, account rows show Claude’s own use; counts have none', () => {
+    const rows = usageDetailOf(resp({}), now).sections.flatMap((s) => s.rows);
+    const bar = (label: string) => rows.find((r) => r.label === label)?.barPct;
+    expect(bar('This week')).toBe(40);
+    expect(bar('5-hour session')).toBe(12);
+    expect(bar('Runs this week')).toBeUndefined();
+    expect(rows.every((r) => r.barPct == null || (r.barPct >= 0 && r.barPct <= 100))).toBe(true);
+  });
   it('unknown pieces are left out, never 0', () => {
     const u = usage({ weekPctPerUsd: null });
     u.account = { reportedSubscription: null, subscription: null, fiveHour: null, week: null, models: [], observedAt: null };

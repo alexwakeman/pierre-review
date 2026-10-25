@@ -89,11 +89,14 @@ export function AiUsageMenu(): JSX.Element | null {
           {detail.sections.map((sec) => (
             <div key={sec.title} className="mt-2.5">
               <p className="text-[11px] font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">{sec.title}</p>
-              <dl className="mt-1 space-y-0.5">
+              <dl className="mt-1 space-y-1.5">
                 {sec.rows.map((r) => (
-                  <div key={r.label} className="flex items-baseline justify-between gap-3">
-                    <dt className="shrink-0 text-gray-600 dark:text-gray-300">{r.label}</dt>
-                    <dd className="text-right tabular-nums text-gray-900 dark:text-gray-50">{r.value}</dd>
+                  <div key={r.label}>
+                    <div className="flex items-baseline justify-between gap-3">
+                      <dt className="shrink-0 text-gray-600 dark:text-gray-300">{r.label}</dt>
+                      <dd className="text-right tabular-nums text-gray-900 dark:text-gray-50">{r.value}</dd>
+                    </div>
+                    {r.barPct != null && <UsageBar pct={r.barPct} />}
                   </div>
                 ))}
               </dl>
@@ -114,6 +117,16 @@ export function AiUsageMenu(): JSX.Element | null {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/** One row's bar: how full it is, amber from 80%, red at 100%. Decorative — the row's text says the figure. */
+function UsageBar({ pct }: { pct: number }) {
+  const fill = pct >= 100 ? 'bg-red-500' : pct >= 80 ? 'bg-amber-500' : 'bg-sky-500';
+  return (
+    <div aria-hidden="true" className="mt-0.5 h-1.5 w-full overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700">
+      <div className={`h-full rounded-full ${fill}`} style={{ width: `${pct}%` }} />
     </div>
   );
 }
