@@ -306,6 +306,8 @@ export interface TicketReviewSuccess {
   inputTokens: number | null;
   outputTokens: number | null;
   numTurns: number | null;
+  // The PROVIDER wrote the ledger row (Codex records its own), so this module must not write a second.
+  ledgerByProvider?: boolean;
   items: readonly TicketItemWrite[];
 }
 
@@ -380,7 +382,14 @@ export async function saveTicketReviewSuccess(
   await recordTicketReviewUsage(ctx, accountId, run, data);
 }
 
-type Telemetry = { costUsd?: number | null; inputTokens?: number | null; outputTokens?: number | null; numTurns?: number | null };
+type Telemetry = {
+  costUsd?: number | null;
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+  numTurns?: number | null;
+  // The PROVIDER wrote the ledger row (Codex records its own): never a second one here.
+  ledgerByProvider?: boolean;
+};
 
 /** The run's spend into the AI-usage ledger — on success, failure and cancel alike (it was billed). */
 async function recordTicketReviewUsage(
@@ -389,7 +398,7 @@ async function recordTicketReviewUsage(
   run: Pick<TicketReviewRow, 'model' | 'originPrId'> | null,
   t: Telemetry,
 ): Promise<void> {
-  if (run == null || t.costUsd == null || !Number.isFinite(t.costUsd) || t.costUsd <= 0) return;
+  if (run == null || t.ledgerByProvider === true || t.costUsd == null || !Number.isFinite(t.costUsd) || t.costUsd <= 0) return;
   await ctx
     .recordAiUsage({
       accountId,

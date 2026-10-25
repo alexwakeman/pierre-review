@@ -1,10 +1,17 @@
 import { STORY_DOCS_ALIGNMENT_MODEL, type ClaudeReviewModel } from '@pierre-review/shared';
-import { claudeModelChoice, getActiveProvider, type AgentToolServer, type AgentOutcome } from '../../ai/provider.js';
+import {
+  claudeModelChoice,
+  type AgentOutcome,
+  type AgentProviderId,
+  type AgentToolServer,
+  type AgentUsageRecord,
+} from '../../ai/provider.js';
+import { promptTools, type PromptTools } from '../../ai/prompt-tools.js';
+import { fallbackCostUsd, ledgerByProvider, runProvider } from '../run-provider.js';
 import { config } from '../../config.js';
 import { DISALLOWED_TOOLS } from '../agent.js';
 import { applyClaudeReviewAuth } from '../auth.js';
 import { DISPATCH_TOOL_NAMES } from '../claude-review/specialists.js';
-import { estimateCostUsd } from '../pricing.js';
 import { emptyUsage, type UsageTokens } from '../usage.js';
 import { STORY_DOCS_TOOL_NAME } from './prompts.js';
 export { storyDocsRoots } from './prompts.js';
@@ -23,6 +30,10 @@ import { alignmentShapeProblems, type AlignmentContext } from './validate.js';
 // MAX_SUBMIT_ATTEMPTS times. Grounding is NOT judged here: a quote that does not check out is dropped at
 // storage and the model is simply told "Recorded." — so a mismatch cannot loop.
 
+// ON CODEX (ai/codex/kinds/tickets.ts): the SAME spec goes to the provider the manager resolved — the
+// read roots are these, `submit_*` becomes the strict final answer handed to the SAME handler, the
+// tool lists below are Claude's only, and the provider writes the ledger row (`ledgerByProvider`).
+
 export const STORY_DOCS_TOOL = `mcp__storydocs__${STORY_DOCS_TOOL_NAME}`;
 const ALLOWED_TOOLS = ['Read', 'Glob', 'Grep', STORY_DOCS_TOOL];
 export const MAX_SUBMIT_ATTEMPTS = 3;
@@ -40,6 +51,7 @@ export function judgeSubmission(
   payload: unknown,
   attempt: number,
   ctx: AlignmentContext,
+  t: PromptTools = promptTools('claude'),
 ): { accepted: unknown } | { reply: string; refusal: string } {
   const problems = alignmentShapeProblems(payload, ctx);
   if (problems.length === 0) return { accepted: payload };
@@ -49,7 +61,7 @@ export function judgeSubmission(
     reply:
       attempt >= MAX_SUBMIT_ATTEMPTS
         ? `Refused:\n${message}\nThat was the last attempt; stop now.`
-        : `Refused:\n${message}\nFix every point and call ${STORY_DOCS_TOOL_NAME} again with the whole answer.`,
+        : `Refused:\n${message}\n${t.either(`Fix every point and call ${STORY_DOCS_TOOL_NAME} again with the whole answer.`, 'Fix every point and answer again with the whole answer.')}`,
   };
 }
 
@@ -62,6 +74,11 @@ export interface RunStoryDocsAgentArgs {
   applyAuthEnv: boolean;
   abortController: AbortController;
   model?: ClaudeReviewModel;
+  // The provider the manager resolved (and worded the prompts for). Absent ⇒ the active one.
+  provider?: AgentProviderId;
+  // Who the ledger row bills. A provider that records its own usage (Codex) writes it from this; on
+  // Claude it is unused and the manager records the run as it always has.
+  usageRecord?: AgentUsageRecord;
 }
 
 export interface RunStoryDocsAgentResult {
@@ -73,24 +90,35 @@ export interface RunStoryDocsAgentResult {
   inputTokens: number | null;
   outputTokens: number | null;
   numTurns: number | null;
+  // The model the run was on (the provider's id for it) and whether the PROVIDER wrote the ledger row.
+  // Absent (a stand-in runner in a test) ⇒ the requested model, and the manager's ledger.
+  model?: string;
+  ledgerByProvider?: boolean;
 }
 
 export async function runStoryDocsAgent(args: RunStoryDocsAgentArgs): Promise<RunStoryDocsAgentResult> {
   const model = args.model ?? (STORY_DOCS_ALIGNMENT_MODEL as ClaudeReviewModel);
   const { abortController } = args;
+  const provider = runProvider(args.provider);
+  const choice = claudeModelChoice(model);
+  const words: PromptTools = promptTools(provider.id);
   let outcome: AgentOutcome | null = null;
   let restoreEnv: (() => void) | null = null;
   let liveUsage: UsageTokens = emptyUsage();
   let accepted: unknown | null = null;
   let lastRefusal: string | null = null;
-  const telemetry = (): Pick<RunStoryDocsAgentResult, 'costUsd' | 'inputTokens' | 'outputTokens' | 'numTurns'> => {
+  const telemetry = (): Pick<
+    RunStoryDocsAgentResult,
+    'costUsd' | 'inputTokens' | 'outputTokens' | 'numTurns' | 'model' | 'ledgerByProvider'
+  > => {
     const usage = outcome?.usage ?? liveUsage;
-    const hasUsage = usage.inputTokens + usage.outputTokens + usage.cacheReadTokens > 0;
     return {
-      costUsd: outcome?.costUsd ?? (hasUsage ? estimateCostUsd(model, usage) : null),
+      costUsd: outcome?.costUsd ?? fallbackCostUsd(provider, model, usage),
       inputTokens: usage.inputTokens,
       outputTokens: usage.outputTokens,
       numTurns: outcome?.numTurns ?? null,
+      model: provider.resolveModel(choice),
+      ledgerByProvider: ledgerByProvider(provider),
     };
   };
   const fail = (failureReason: string | undefined, aborted: boolean): RunStoryDocsAgentResult => ({
@@ -102,7 +130,7 @@ export async function runStoryDocsAgent(args: RunStoryDocsAgentArgs): Promise<Ru
   });
 
   try {
-    restoreEnv = applyClaudeReviewAuth(args.applyAuthEnv);
+    if (provider.id === 'claude') restoreEnv = applyClaudeReviewAuth(args.applyAuthEnv);
     const shape = await submitAlignmentShape();
     let attempts = 0;
     const tools: AgentToolServer = {
@@ -118,7 +146,7 @@ export async function runStoryDocsAgent(args: RunStoryDocsAgentArgs): Promise<Ru
               return { text: 'No more attempts. Stop now.', isError: true };
             }
             attempts += 1;
-            const j = judgeSubmission(a, attempts, args.alignment);
+            const j = judgeSubmission(a, attempts, args.alignment, words);
             if ('accepted' in j) {
               accepted = j.accepted;
               return { text: 'Recorded.' };
@@ -131,9 +159,9 @@ export async function runStoryDocsAgent(args: RunStoryDocsAgentArgs): Promise<Ru
     };
     // ⚠ THE CONFINEMENT LIVES HERE, not in the prompt: a PreToolUse deny holds under bypassPermissions.
     const policy = storyDocsToolPolicy();
-    ({ outcome } = await getActiveProvider().runAgent({
+    ({ outcome } = await provider.runAgent({
       kind: 'story_docs',
-      model: claudeModelChoice(model),
+      model: choice,
       effort: 'worktree',
       prompt: args.prompt,
       system: args.systemPrompt,
@@ -147,6 +175,7 @@ export async function runStoryDocsAgent(args: RunStoryDocsAgentArgs): Promise<Ru
       budget: { usd: config.storyDocsBudgetUsd, turns: config.storyDocsMaxTurns },
       abortController,
       claude: { allowedTools: policy.allowedTools, disallowedTools: policy.disallowedTools },
+      ...(args.usageRecord ? { usageRecord: args.usageRecord } : {}),
       onProgress: (p) => {
         if (p.kind === 'step') {
           if (p.usage) liveUsage = p.usage;
@@ -168,6 +197,9 @@ export async function runStoryDocsAgent(args: RunStoryDocsAgentArgs): Promise<Ru
     return { payload: accepted, lastRefusal, aborted: false, ...telemetry() };
   } catch (err) {
     if (abortController.signal.aborted) return fail(undefined, true);
+    // Codex: a refused answer and its one retry end the run with a THROW (ai/providers/codex.ts), where
+    // Claude's run ends normally after its refusals. The reason is the same either way: the last refusal.
+    if (provider.id !== 'claude' && lastRefusal != null) return fail(`no usable answer: ${lastRefusal}`, false);
     return fail(err instanceof Error ? err.message : String(err), false);
   } finally {
     restoreEnv?.();

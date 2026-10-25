@@ -92,13 +92,13 @@ describe('the registry (LIMN_AI_PROVIDER)', () => {
     expect(P.getProvider('claude')).toBe(claudeProvider);
   });
 
-  it("codex resolves to the Codex provider; every agent kind still answers 'not available yet'", async () => {
+  it("codex resolves to the Codex provider; every agent kind not yet ported answers 'not available yet'", async () => {
     const codex = P.getActiveProvider({ LIMN_AI_PROVIDER: 'codex' });
     expect(codex.id).toBe('codex');
     expect(P.getProvider('codex')).toBe(codex);
-    // Phase 2: the allow-list is EMPTY, so no agent runs on Codex — each kind says so in one sentence.
-    expect(P.CODEX_AGENT_KINDS.size).toBe(0);
-    for (const kind of ['review', 'fix', 'ci_review', 'docs_build'] as const) {
+    // Phase 3: the allow-list fills stream by stream; every kind NOT on it says so in one sentence.
+    expect(P.codexRunnable()).toBe(P.ALL_AGENT_KINDS.every((k) => P.CODEX_AGENT_KINDS.has(k)));
+    for (const kind of P.ALL_AGENT_KINDS.filter((k) => !P.CODEX_AGENT_KINDS.has(k))) {
       await expect(
         codex.runAgent({ kind } as Parameters<typeof codex.runAgent>[0]),
       ).rejects.toThrow(P.codexKindNotAvailableMessage(kind));
@@ -107,7 +107,7 @@ describe('the registry (LIMN_AI_PROVIDER)', () => {
       'Codex cannot run pull request reviews in this version of Limn yet. Unset LIMN_AI_PROVIDER (or set it to claude) to use Claude.',
     );
     // The allow-list is the mechanism Phase 3 fills.
-    expect(P.codexKindReady('review')).toBe(false);
+    expect(P.codexKindReady('review', new Set())).toBe(false);
     expect(P.codexKindReady('review', new Set(['review']))).toBe(true);
     // No rate-limit data rides a run's messages (the app-server reads the windows).
     expect(codex.usage.readingFromMessage({ type: 'rate_limit_event' }, 0)).toBeNull();
@@ -157,15 +157,18 @@ describe('the registry (LIMN_AI_PROVIDER)', () => {
 });
 
 describe('the kinds (Phase 3 foundation)', () => {
-  it('CODEX_AGENT_KINDS is the union of the four streams’ files, each EMPTY until it ports a runner', async () => {
+  it('CODEX_AGENT_KINDS is the union of the four streams’ files, which never share a kind', async () => {
     const files = await Promise.all([
       import('./codex/kinds/review.js').then((m) => m.CODEX_REVIEW_KINDS),
       import('./codex/kinds/fix.js').then((m) => m.CODEX_FIX_KINDS),
       import('./codex/kinds/tickets.js').then((m) => m.CODEX_TICKETS_KINDS),
       import('./codex/kinds/docs.js').then((m) => m.CODEX_DOCS_KINDS),
     ]);
-    expect(files).toEqual([[], [], [], []]);
-    expect([...P.CODEX_AGENT_KINDS]).toEqual(files.flat());
+    const all = files.flat();
+    expect(new Set(all).size).toBe(all.length);
+    expect([...P.CODEX_AGENT_KINDS]).toEqual(all);
+    // Stream (c) ported its four (ai/codex/kinds/tickets.ts).
+    expect([...files[2]!].sort()).toEqual(['ci_review', 'pr_card', 'story_docs', 'ticket_review']);
   });
 
   it('the backend’s kind list is the shared one, and every run kind adds the one-shot `complete`', async () => {
@@ -175,7 +178,7 @@ describe('the kinds (Phase 3 foundation)', () => {
     expect(P.ALL_RUN_KINDS.at(-1)).toBe('complete');
     // `complete` runs on Codex now; an agent kind only once its stream ports it.
     expect(P.codexRunKindReady('complete')).toBe(true);
-    expect(P.codexRunKindReady('review')).toBe(false);
+    expect(P.codexRunKindReady('review', new Set())).toBe(false);
     expect(P.codexRunKindReady('review', new Set(['review']))).toBe(true);
   });
 

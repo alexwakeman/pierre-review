@@ -36,7 +36,9 @@ import {
   reconcileOrphanedStoryDocs,
   saveStoryDocsSuccess,
 } from './persist.js';
-import { STORY_DOCS_SYSTEM_PROMPT, buildStoryDocsPrompt, storyDocsRoots, storyDocsUntrustedTexts } from './prompts.js';
+import { buildStoryDocsPrompt, storyDocsRoots, storyDocsSystemPrompt, storyDocsUntrustedTexts } from './prompts.js';
+import { activeProviderId } from '../../ai/provider-setting.js';
+import { promptTools } from '../../ai/prompt-tools.js';
 import { runShortlist, type ShortlistDoc } from './shortlist.js';
 import { validateAlignment } from './validate.js';
 
@@ -274,18 +276,25 @@ async function runPipeline(job: StoryDocsJob, controller: AbortController): Prom
     scratch = mkdtempSync(join(tmpdir(), 'pierre-storydocs-'));
     const promptInput = { story: inputs.story, criteriaSource: inputs.criteriaSource, criteria: inputs.criteria, shortlist: sl.entries, libraryDir: dir };
     const nonce = pickReviewNonce(storyDocsUntrustedTexts(promptInput));
+    // The provider, resolved ONCE: the prompts are worded for it and the same provider runs them
+    // (review/run-provider.ts). A provider that records its own usage (Codex) bills `usageRecord`.
+    const providerId = activeProviderId();
+    const words = promptTools(providerId);
     const run = seams.runAgent ?? (await import('./agent.js')).runStoryDocsAgent;
     const res = await run({
       cwd: scratch,
       roots: storyDocsRoots(dir, sl.entries),
-      systemPrompt: STORY_DOCS_SYSTEM_PROMPT,
-      prompt: buildStoryDocsPrompt({ ...promptInput, nonce }),
+      systemPrompt: storyDocsSystemPrompt(words),
+      prompt: buildStoryDocsPrompt({ ...promptInput, nonce }, words),
       alignment,
       applyAuthEnv: REVIEW_APPLY_AUTH_ENV,
       abortController: controller,
       model,
+      provider: providerId,
+      usageRecord: { accountId, seam: 'agent', feature: 'story_docs_alignment' },
     });
-    if (res.costUsd != null && Number.isFinite(res.costUsd) && res.costUsd > 0) {
+    // The provider wrote the ledger row itself (Codex) ⇒ never a second one here.
+    if (res.ledgerByProvider !== true && res.costUsd != null && Number.isFinite(res.costUsd) && res.costUsd > 0) {
       await ctx
         .recordAiUsage({
           accountId,

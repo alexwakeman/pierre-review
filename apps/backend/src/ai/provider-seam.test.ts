@@ -75,7 +75,10 @@ describe('the provider seam', () => {
   it('every runner goes through the active provider', () => {
     for (const f of RUNNERS) {
       const src = code(readFileSync(join(SRC, f), 'utf8'));
-      expect(src, `${f} must call the provider`).toMatch(/getActiveProvider\(\)\.(runAgent|complete)\(/);
+      // Either the active provider, or the one its manager resolved once (review/run-provider.ts
+      // `runProvider` — the same registry, so its prompt words and its runner agree).
+      const viaRunProvider = /runProvider\(/.test(src) && /\bprovider\.runAgent\(/.test(src);
+      if (!viaRunProvider) expect(src, `${f} must call the provider`).toMatch(/getActiveProvider\(\)\.(runAgent|complete)\(/);
     }
     // The resolver runs through the fixer's run core (coding/agent.ts runAgentInWorktree).
     expect(code(readFileSync(join(SRC, 'coding/ai-resolve/run.ts'), 'utf8'))).toMatch(/runAgentInWorktree\(/);

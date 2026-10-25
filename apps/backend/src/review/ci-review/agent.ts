@@ -1,10 +1,16 @@
 import type { ClaudeReviewModel } from '@pierre-review/shared';
-import { claudeModelChoice, getActiveProvider, type AgentToolServer, type AgentOutcome } from '../../ai/provider.js';
+import {
+  claudeModelChoice,
+  type AgentOutcome,
+  type AgentProviderId,
+  type AgentToolServer,
+  type AgentUsageRecord,
+} from '../../ai/provider.js';
+import { fallbackCostUsd, ledgerByProvider, liveCostUsd, runProvider } from '../run-provider.js';
 import { config } from '../../config.js';
 import { DISALLOWED_TOOLS } from '../agent.js';
 import { applyClaudeReviewAuth } from '../auth.js';
 import { DISPATCH_TOOL_NAMES } from '../claude-review/specialists.js';
-import { estimateCostUsd } from '../pricing.js';
 import { emptyUsage, type UsageTokens } from '../usage.js';
 import { submitCiReviewShape, type SubmitCiReviewPayload } from './schema.js';
 
@@ -23,6 +29,10 @@ import { submitCiReviewShape, type SubmitCiReviewPayload } from './schema.js';
 // denies any file path outside the working directory and that worktree: under bypassPermissions
 // nothing else confines an absolute path, and the log excerpts are produced by untrusted code.
 
+// ON CODEX (ai/codex/kinds/tickets.ts): the SAME spec goes to the provider the manager resolved — the
+// read roots are these, `submit_*` becomes the strict final answer handed to the SAME handler, the
+// tool lists below are Claude's only, and the provider writes the ledger row (`ledgerByProvider`).
+
 export const CI_TOOL_NAME = 'mcp__ci__submit_ci_review';
 const ALLOWED_TOOLS = ['Read', 'Glob', 'Grep', CI_TOOL_NAME];
 const ACTIVITY_LOG_CAP = 25;
@@ -35,6 +45,11 @@ export interface RunCiAgentArgs {
   prompt: string;
   applyAuthEnv: boolean;
   abortController: AbortController;
+  // The provider the manager resolved (and worded the prompts for). Absent ⇒ the active one.
+  provider?: AgentProviderId;
+  // Who the ledger row bills. A provider that records its own usage (Codex) writes it from this; on
+  // Claude it is unused and the manager records the run as it always has.
+  usageRecord?: AgentUsageRecord;
   onProgress(p: { recentActivity: string[]; usage: { inputTokens: number; outputTokens: number; costUsd: number } }): void;
 }
 
@@ -47,6 +62,10 @@ export interface RunCiAgentResult {
   inputTokens: number | null;
   outputTokens: number | null;
   numTurns: number | null;
+  // The model the run was on (the provider's id for it) and whether the PROVIDER wrote the ledger row.
+  // Absent (a stand-in runner in a test) ⇒ the requested model, and the manager's ledger.
+  model?: string;
+  ledgerByProvider?: boolean;
 }
 
 /** The tool policy for a CI run. Pure, so the no-shell, no-dispatch rule is testable. */
@@ -59,17 +78,20 @@ export function ciToolPolicy(): { allowedTools: string[]; disallowedTools: strin
 
 export async function runCiReviewAgent(args: RunCiAgentArgs): Promise<RunCiAgentResult> {
   const { model, abortController } = args;
+  const provider = runProvider(args.provider);
+  const choice = claudeModelChoice(model);
   let outcome: AgentOutcome | null = null;
   let restoreEnv: (() => void) | null = null;
   let liveUsage: UsageTokens = emptyUsage();
-  const telemetry = (): Pick<RunCiAgentResult, 'costUsd' | 'inputTokens' | 'outputTokens' | 'numTurns'> => {
+  const telemetry = (): Pick<RunCiAgentResult, 'costUsd' | 'inputTokens' | 'outputTokens' | 'numTurns' | 'model' | 'ledgerByProvider'> => {
     const usage = outcome?.usage ?? liveUsage;
-    const hasUsage = usage.inputTokens + usage.outputTokens + usage.cacheReadTokens > 0;
     return {
-      costUsd: outcome?.costUsd ?? (hasUsage ? estimateCostUsd(model, usage) : null),
+      costUsd: outcome?.costUsd ?? fallbackCostUsd(provider, model, usage),
       inputTokens: usage.inputTokens,
       outputTokens: usage.outputTokens,
       numTurns: outcome?.numTurns ?? null,
+      model: provider.resolveModel(choice),
+      ledgerByProvider: ledgerByProvider(provider),
     };
   };
   const fail = (failureReason: string | undefined, aborted: boolean): RunCiAgentResult => ({
@@ -81,7 +103,7 @@ export async function runCiReviewAgent(args: RunCiAgentArgs): Promise<RunCiAgent
   });
 
   try {
-    restoreEnv = applyClaudeReviewAuth(args.applyAuthEnv);
+    if (provider.id === 'claude') restoreEnv = applyClaudeReviewAuth(args.applyAuthEnv);
     const shape = await submitCiReviewShape();
     let captured: SubmitCiReviewPayload | null = null;
     const tools: AgentToolServer = {
@@ -100,9 +122,9 @@ export async function runCiReviewAgent(args: RunCiAgentArgs): Promise<RunCiAgent
     };
     const policy = ciToolPolicy();
     const activity: string[] = [];
-    ({ outcome } = await getActiveProvider().runAgent({
+    ({ outcome } = await provider.runAgent({
       kind: 'ci_review',
-      model: claudeModelChoice(model),
+      model: choice,
       effort: 'worktree',
       prompt: args.prompt,
       system: args.systemPrompt,
@@ -116,6 +138,7 @@ export async function runCiReviewAgent(args: RunCiAgentArgs): Promise<RunCiAgent
       budget: { usd: config.ciReviewBudgetUsd, turns: config.ciReviewMaxTurns },
       abortController,
       claude: { allowedTools: policy.allowedTools, disallowedTools: policy.disallowedTools },
+      ...(args.usageRecord ? { usageRecord: args.usageRecord } : {}),
       onProgress: (p) => {
         if (p.kind === 'step') {
           if (p.usage) liveUsage = p.usage;
@@ -127,7 +150,7 @@ export async function runCiReviewAgent(args: RunCiAgentArgs): Promise<RunCiAgent
           const live = liveUsage;
           args.onProgress({
             recentActivity: [...activity],
-            usage: { inputTokens: live.inputTokens, outputTokens: live.outputTokens, costUsd: estimateCostUsd(model, live) },
+            usage: { inputTokens: live.inputTokens, outputTokens: live.outputTokens, costUsd: liveCostUsd(provider, model, live) },
           });
         } else if (p.kind === 'outcome') {
           outcome = p.outcome;

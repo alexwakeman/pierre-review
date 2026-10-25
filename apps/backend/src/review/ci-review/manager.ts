@@ -34,7 +34,9 @@ import {
   saveCiReviewSuccess,
 } from './persist.js';
 import { readCiInputs } from './prepare.js';
-import { CI_REVIEW_SYSTEM_PROMPT, buildCiReviewPrompt, ciReviewUntrustedTexts } from './prompts.js';
+import { buildCiReviewPrompt, ciReviewSystemPrompt, ciReviewUntrustedTexts } from './prompts.js';
+import { activeProviderId } from '../../ai/provider-setting.js';
+import { promptTools } from '../../ai/prompt-tools.js';
 import { reconcileCiReview, reconcileWithoutModel } from './reconcile.js';
 import type { SubmitCiReviewPayload } from './schema.js';
 
@@ -344,7 +346,11 @@ async function runPipeline(
       diff: diff?.diff ?? null,
     };
     const nonce = pickReviewNonce(ciReviewUntrustedTexts(promptPr, plan));
-    const prompt = buildCiReviewPrompt({ pr: promptPr, plan, nonce });
+    // The provider, resolved ONCE: the prompts are worded for it and the same provider runs them
+    // (review/run-provider.ts). A provider that records its own usage (Codex) bills `usageRecord`.
+    const providerId = activeProviderId();
+    const words = promptTools(providerId);
+    const prompt = buildCiReviewPrompt({ pr: promptPr, plan, nonce }, words);
     scratch = mkdtempSync(join(tmpdir(), 'pierre-ci-review-'));
 
     // ---- the run ----
@@ -354,10 +360,12 @@ async function runPipeline(
       model: job.model,
       cwd: scratch,
       worktrees: [worktreePath],
-      systemPrompt: CI_REVIEW_SYSTEM_PROMPT,
+      systemPrompt: ciReviewSystemPrompt(words),
       prompt,
       applyAuthEnv: REVIEW_APPLY_AUTH_ENV,
       abortController: controller,
+      provider: providerId,
+      usageRecord: { accountId, seam: 'agent', feature: 'ci_review', prId },
       onProgress: (p) => progress({ phase: 'reviewing', recentActivity: p.recentActivity, usage: p.usage }),
     });
 
@@ -367,6 +375,8 @@ async function runPipeline(
       inputTokens: res.inputTokens,
       outputTokens: res.outputTokens,
       numTurns: res.numTurns,
+      // The provider wrote the ledger row (Codex records its own), so persist must not.
+      ...(res.ledgerByProvider ? { ledgerByProvider: true } : {}),
     };
     if (res.aborted) {
       await markCiReviewCancelled(ctx, accountId, runId, telemetry);

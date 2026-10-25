@@ -68,6 +68,8 @@ import {
   type PromptPrior,
 } from './prompts.js';
 import { reconcileTicketReview, type TicketReport } from './reconcile.js';
+import { activeProviderId } from '../../ai/provider-setting.js';
+import { promptTools } from '../../ai/prompt-tools.js';
 
 // THE TICKET REVIEW QUEUE — one run per TICKET (never per PR), beside the PR review's own queue
 // (claude-review/manager.ts) and SEPARATE from it: its own rows, its own claim, its own lane, so a
@@ -328,6 +330,11 @@ async function runPipeline(
   progress: (p: TicketReviewProgress) => void,
 ): Promise<void> {
   const { ctx, accountId, runId } = job;
+  // The provider, resolved ONCE: the prompts are worded for it and the same provider runs them
+  // (review/run-provider.ts). A provider that records its own usage (Codex) bills `usageRecord`.
+  const providerId = activeProviderId();
+  const words = promptTools(providerId);
+  const usageRecord = { accountId, seam: 'agent' as const, feature: 'ticket_review', prId: job.originPrId };
 
   // ---- who is on the ticket, and what it says (refusals are stored, never sampled) ----
   const inputs = await resolveTicketInputs(ctx, accountId, job.ident, {
@@ -400,6 +407,8 @@ async function runPipeline(
               pickNonce: pickReviewNonce,
               signal: controller.signal,
               applyAuthEnv: REVIEW_APPLY_AUTH_ENV,
+              provider: providerId,
+              usageRecord,
             });
       return { diffs, results };
     })();
@@ -534,7 +543,7 @@ async function runPipeline(
       legacy,
       nonce,
       defaultBranches,
-    });
+    }, words);
     scratch = mkdtempSync(join(tmpdir(), 'pierre-ticket-review-'));
     writeFileSync(join(scratch, 'MEMBERS.md'), membersIndex(promptMembers), 'utf8');
     // The workspace's reference library, read-only (docs/REFERENCE-DOCS.md § Use in reviews). null ⇒
@@ -553,11 +562,13 @@ async function runPipeline(
         ...promptMembers.map((m) => m.worktreePath).filter((p): p is string => p != null),
         ...defaultBranches.map((b) => b.path),
       ],
-      systemPrompt: ticketReviewSystemPrompt(docs?.dir ?? null),
+      systemPrompt: ticketReviewSystemPrompt(docs?.dir ?? null, words),
       prompt,
       ...(docs != null ? { docsDir: docs.dir } : {}),
       applyAuthEnv: REVIEW_APPLY_AUTH_ENV,
       abortController: controller,
+      provider: providerId,
+      usageRecord,
       onProgress: (p) => progress({ phase: 'reviewing', recentActivity: p.recentActivity, usage: p.usage }),
     });
 
@@ -569,6 +580,8 @@ async function runPipeline(
       inputTokens: res.inputTokens,
       outputTokens: res.outputTokens,
       numTurns: res.numTurns,
+      // The provider wrote the ledger rows (Codex: this run's and its cards'), so persist must not.
+      ...(res.ledgerByProvider ? { ledgerByProvider: true } : {}),
     };
     if (res.aborted) {
       await markTicketReviewCancelled(ctx, accountId, runId, telemetry);
@@ -594,7 +607,7 @@ async function runPipeline(
         card,
         changedFiles: diffs.get(prId)?.changedFiles ?? [],
         source: 'story_check' as const,
-        model: job.model,
+        model: res.model ?? job.model,
         costUsd: null,
       })),
     ).catch((err) => ctx.log.warn({ err }, `ticket review ${runId}: could not store its cards`));
