@@ -8,15 +8,15 @@ It ships to npm as **Limn** (`npx limn-review`) and runs **only on your machine*
 hosted backend, no sign-in, no stored GitHub credentials (it shells out to your logged-in `gh`).
 **Every feature is free** under the Limn License 1.0 (`LICENSE`: free for individuals and for
 organisations where ≤ 3 people use it; a commercial licence above that, via the contact form; no
-competing use). The agentic features run on the reader's own Claude (Codex: "coming soon").
-The website (landing, a static demo at `/demo/`, the contact form) is a separate tiny service,
-`apps/site`.
+competing use). The agentic features run on the reader's own Claude or Codex (`LIMN_AI_PROVIDER`,
+or Settings → AI). The website (landing, a static demo at `/demo/`, the contact form) is a separate
+tiny service, `apps/site`.
 
 > **How to use this file.** This is the lean operating guide: the mental model, the commands,
 > and the invariants and landmines you must know BEFORE editing. Per-area depth lives in the
 > topic docs below — read the matching doc before non-trivial work in its area, and put NEW
-> detail there, not here. **This file has a hard size budget** (~50k); anything discoverable by
-> grepping the code or reading a route/table definition does not belong in it.
+> detail there, not here. **This file has a hard size budget** (under 48k bytes); anything
+> discoverable by grepping the code or reading a route/table definition does not belong in it.
 
 ## Doc map
 
@@ -28,7 +28,7 @@ The website (landing, a static demo at `/demo/`, the contact form) is a separate
 | [API](docs/API.md) | any route — the per-route contract reference |
 | [FRONTEND](docs/FRONTEND.md) | stores, tabs/overlays, FilterBar scoping, timeline internals, PrDetail, This Sprint |
 | [MERGE-CI-TRUNK](docs/MERGE-CI-TRUNK.md) | merge verdict/queue, auto-merge runner, the in-app conflict resolver, CI logs, trunk status |
-| [CLAUDE-REVIEW](docs/CLAUDE-REVIEW.md) | Claude Review, ticket/CI reviews, diagrams, AI Fix, auto-posting, sprint briefs/paths |
+| [CLAUDE-REVIEW](docs/CLAUDE-REVIEW.md) · [CODEX-PLAN](docs/CODEX-PLAN.md) | Claude Review, ticket/CI reviews, diagrams, AI Fix, auto-posting, sprint briefs/paths, the Codex provider · its build history |
 | [BOTTLENECKS](docs/BOTTLENECKS.md) | the court ledger behind Reports → Chronology, its budgets and pointers |
 | [BLAST-RADIUS](docs/BLAST-RADIUS.md) | the Low/Medium/High reach chip, the co-change index, the impact note |
 | [TRACKERS](docs/TRACKERS.md) | the issue tracker: Jira, GitHub Issues, Linear, stored tickets + worker, the sealed token |
@@ -89,11 +89,9 @@ The load-bearing concept is **derived thread state** (below).
 - Data lives in `~/.limn` (`LIMN_DATA_DIR`); `DATABASE_URL` overrides the SQLite path. Config
   comes from `.env` (repo root) then `apps/backend/.env`.
 
-**Removed 2026-10-22:** cloud mode (`DEPLOYMENT_MODE`, OAuth/GitHub App sign-in, sessions, the
-webhook receiver, `DELETE /api/me/account`), Postgres (`schema.pg.ts`, `migrations-pg`, parity
-tests), the Pro entitlement layer (capabilities, 402s, `ProBadge`/`ProLockPanel`, `MeResponse.pro`,
-apiVersion), credits / Track usage, Stripe billing and the cloud benchmark collection. Their
-tables stay dormant, never dropped. Do not reintroduce any of them.
+**Removed 2026-10-22 — do not reintroduce:** cloud mode, Postgres, the Pro entitlement layer,
+credits, Stripe billing and the cloud benchmark collection (the full list:
+[docs/BACKEND.md](docs/BACKEND.md)). Their tables stay dormant, never dropped.
 
 ---
 
@@ -113,7 +111,7 @@ tables stay dormant, never dropped. Do not reintroduce any of them.
 ```
 pierre-review/
 ├─ apps/
-│  ├─ backend/   src/{index,app,config,cli}.ts · auth/ · ai/ (credentials, runtime) · db/
+│  ├─ backend/   src/{index,app,config,cli}.ts · auth/ · ai/ (provider, credentials, codex/) · db/
 │  │             (schema.sqlite.ts, client.ts, queries.ts, migrations/) · github/ · sync/ (+
 │  │             __fixtures__/threads/) · merge/ · conflict/ · review/ · coding/ · tracker/ ·
 │  │             sonar/ · reference-docs/ · ml/ · platform/ (formerly Pro) · api/{routes,plugins}/
@@ -147,12 +145,10 @@ All from the repo root unless noted.
 | `pnpm test:e2e` · `pnpm verify:ui` | Playwright suite · UI smoke |
 | `pnpm package` | assemble `./release` for publishing |
 
-**`pnpm dev` scores bot comments with the in-process Node port, reading the model from
-`packages/ml/serving_assets`; `PIERRE_ML_HTTP=1` starts the Python severity-api instead**
-(`PIERRE_ML_DIR`, `SEVERITY_API_PORT`, `PIERRE_ML_DISABLED=1`; it sets `LIMN_ML_SCORER=http`);
-every "can't run it" path exits 0, so a clone without submodules still gets the dev loop. ⚠ It
-exports `SEVERITY_API_DEFAULT_URL`, never `SEVERITY_API_URL` — `process.loadEnvFile` does NOT
-overwrite an already-set variable, so a command-line `SEVERITY_API_URL` would BEAT your `.env`.
+**`pnpm dev` scores bot comments in-process (model from `packages/ml/serving_assets`);
+`PIERRE_ML_HTTP=1` runs the Python severity-api instead** ([docs/ML-NODE-PORT.md](docs/ML-NODE-PORT.md)).
+⚠ It exports `SEVERITY_API_DEFAULT_URL`, never `SEVERITY_API_URL` — `process.loadEnvFile` does
+NOT overwrite a set variable, so a command-line `SEVERITY_API_URL` would BEAT your `.env`.
 
 ---
 
@@ -186,9 +182,8 @@ Mechanics: [docs/BACKEND.md](docs/BACKEND.md) · [docs/SYNC.md](docs/SYNC.md) ·
   persisted** (`PERSIST_BODIES=true` stores all).
 - The **default-branch snapshot** ending every repo sync is **STRICTLY NON-FATAL** and two-phase
   for GraphQL cost; `contexts(first:100)` must NOT be lowered.
-- **A completed FULL walk tail-runs the one-time CI-history backfill**
-  (`CI_HISTORY_BACKFILL=false` disables). ⚠ A PR's CI log is touched ONLY when provably its
-  first-observation snapshot.
+- **A completed FULL walk tail-runs the one-time CI-history backfill**. ⚠ A PR's CI log is touched
+  ONLY when provably its first-observation snapshot.
 
 ### Derived thread state — the heart of the app
 
@@ -219,8 +214,8 @@ EXACTLY ONE of which, `'review'`, is the reviewer cohort · `AutomatedReviewerKi
   index in the `.sql` migration (drizzle predicates are inert). ⚠ A repo with NO membership row is
   invisible everywhere, so `ensureRepoMemberships` MUST keep `ON CONFLICT … DO NOTHING`.
 - **`workspaceReviewers` is THE BOT OBJECT** — one row per `(accountId, workspaceId,
-  authorUserId)`: judgement, identity and price (`monthlyCents`, one writer `setReviewerCost`,
-  per_seat multiplied on READ). Price is per WORKSPACE — **never sum cost across workspaces**.
+  authorUserId)`: judgement, identity and price (one writer `setReviewerCost`). Price is per
+  WORKSPACE — **never sum cost across workspaces**.
   ⚠ `deleteWorkspace` re-homes its repos AND its reviewer rows to Default BEFORE deleting.
 - ⚠ Every reviewer-cohort test is **`=== 'review'`, never `!== 'quality_check'`**; **the STORED
   role/kind beats the login seed on read**; `ReviewBotKind` must NEVER absorb non-reviewer brands;
@@ -285,53 +280,41 @@ Read [docs/FRONTEND.md](docs/FRONTEND.md) before touching any of:
   ONLY), tracking the previous id in a ref. **`workspaceId` must NOT live in `FilterDefaults`**.
   Legacy `?team=<int>` with no `?workspace` IS the workspace id.
 - **The repo picker is Timeline-ONLY.** Activity, Feed, Bots and Reports cover the whole workspace.
-- **The Feed is a STREAM (`FeedView`) and nothing else** — no survey panels. It has no My Turn /
-  Needs review / Claude / CI-failure items (Pending owns them). Bot CLASSIFICATION is the Feed's
-  "Bot classification" sub-tab. The "PR events" pill's `Kind` chip row is a PARTITION (empty =
-  all four), client-side, NOT cleared when the parent goes off. A default flip on a persisted key
-  needs a `FILTER_STORAGE_VERSION` bump (now v5; `migratePersistedFilters` steps CHAIN).
+- **The Feed is a STREAM (`FeedView`) and nothing else** — no survey panels and no Pending items
+  (My Turn, Needs review, Claude, CI failures); bot CLASSIFICATION is its own sub-tab. A default
+  flip on a persisted key needs a `FILTER_STORAGE_VERSION` bump (now v5; `migratePersistedFilters`
+  steps CHAIN).
 - **REPORTS IS TIED TO ONE REPORTING WINDOW** — resolved ONCE per request by core
   `db/reporting-window.ts` `getReportingWindow` (the platform registers `resolveComparisonWindow`;
   fallback trailing 14 days). Never re-derive a cadence or add a second resolver. Exceptions are
   LABELLED: "Right now" tiles, "Last 12 weeks", completed periods / month to date, Chronology's
   30/60/90 and "Over time · Last 26 weeks".
 - **"Where the work is happening" = two `charts/RepoRows` cards in `WorkspaceFlowMetrics`**
-  (never `WorkspaceMetricsPanel`): repo activity and merged reach. Each column scales to ITS OWN
-  max; repo names written in full; **unknown is never zero** (`linesChanged: null` → "size
-  unknown"; a null reach verdict is undrawn). Reach rows ship SIGNALS folded by `blastRadius()`.
-- **The Pending board is SEVEN scored TABS** (`PENDING_TABS`, `db/pending-tabs.ts`), each ranked by
-  the ONE scorer (`db/work-plan.ts` `scoreCards`); the top 5 are "Do next". ⚠ **It ranks the
-  UNCAPPED fold, then caps** per list group (`boardListCap` 50); only `/api/attention` passes
-  `uncapped` and `withFailingChecks`. ⚠ **Each count is its own population** (`tab.total`,
-  `kindTotals`, lens totals), and `/api/daily-brief` returns the same figures. ⚠ **The tabs are an
-  ALLOW-list** (a compiler-checked test). Every floor/cap/threshold lives ONCE in
-  `packages/shared/src/pending-rules.ts`. Visible tab is DERIVED (`effectivePendingTab`).
-  "Pending" is a label-only rename; the literal stays `'attention'`.
-- **Pending card actions: NOTHING ON THE BOARD MAY FETCH ON MOUNT.** Merge buttons gate on the
-  card's synced `mergeStateStatus`/`mergeable`/`viewerCanPush` through `mergeVerdict()`; the live
-  merge-options fetch is CLICK-gated; HIDE, never disable. A QUEUED PR shows queue status +
-  "Remove from queue", never Merge (`mergeQueueStatus()`). `conflicts` carries ONE action, the
-  resolver entry, and is minted only in `writableRepoIds`.
-- **Board freshness is ONE batched sweep, `POST /api/attention/liveness`** (one `nodes(ids:)`
-  call; mergeability for a ranked subset ≤ 25 — 50 ids 502s). ⚠ An observed `unknown` never
-  demotes a known merge state. ⚠ **It returns COUNTS, never cards**: refetch `['attention-cards']`
-  + `['daily-brief']` + `['work-plan']` together — the only keys opting out of
-  `refetchOnWindowFocus: false`.
+  (never `WorkspaceMetricsPanel`); **unknown is never zero** (`linesChanged: null` → "size
+  unknown"; a null reach verdict is undrawn).
+- **The Pending board is SEVEN scored TABS** (`PENDING_TABS`, `db/pending-tabs.ts`) ranked by ONE
+  scorer (`db/work-plan.ts` `scoreCards`). ⚠ **It ranks the UNCAPPED fold, then caps**; only
+  `/api/attention` passes `uncapped`. ⚠ **Each count is its own population** (`/api/daily-brief`
+  returns the same figures). ⚠ **The tabs are an ALLOW-list.** Every floor/cap/threshold lives ONCE
+  in `packages/shared/src/pending-rules.ts`. The literal stays `'attention'`.
+- **NOTHING ON THE PENDING BOARD MAY FETCH ON MOUNT.** Merge buttons gate on synced fields through
+  `mergeVerdict()`; live merge options are CLICK-gated; HIDE, never disable. A QUEUED PR never
+  shows Merge. `conflicts` carries ONE action (the resolver), only in `writableRepoIds`.
+- **Board freshness is ONE batched sweep, `POST /api/attention/liveness`** (mergeability for ≤ 25
+  ids — 50 502s). ⚠ An observed `unknown` never demotes a known merge state. ⚠ **It returns
+  COUNTS, never cards**: refetch `['attention-cards']` + `['daily-brief']` + `['work-plan']` together.
 - **MY TURN IS THE BALL RULE, STATE-DERIVED** ([docs/BACKEND.md](docs/BACKEND.md) § My Turn): a
   card exists only while the reader owes an action not taken since the last RELATED event. ⚠ The
-  one stored thing is a per-SUBJECT DISMISSAL timestamp (`my_turn_dismissals`), applied inside
-  `getMyTurn`, discharged once nothing is left. ⚠ **No bot action returns the ball, including a
-  push** (deliberately unlike Chronology); bot-ness via `globalAutomationUserIds`, NEVER
-  `hiddenBotUserIds`. ⚠ **Filter the SEED list, never the built array.** A card says WHY
-  (`MyTurnCard.ball`). One card per PR on the board (`onePerPr`), except Claude reviews.
+  one stored thing is a per-SUBJECT DISMISSAL timestamp, applied inside `getMyTurn`. ⚠ **No bot
+  action returns the ball, including a push**; bot-ness via `globalAutomationUserIds`, NEVER
+  `hiddenBotUserIds`. ⚠ **Filter the SEED list, never the built array.** One card per PR
+  (`onePerPr`), except Claude reviews.
 - **A surface that NOTIFIES counts `myTurnPersonal`; one you OPEN counts `myTurn`.**
-  `attentionRelevance` is three-valued (`'mine'`/`'others'`/`null`) and every entry point SEATS
-  it. `myTurnOther` is never `myTurn - myTurnPersonal`. An ABSENT `relevance` renders the neutral
-  label. `?attnPersonal=1` is still PARSED; `?attnRel=` is the only key emitted.
+  `attentionRelevance` is three-valued and every entry point SEATS it; `myTurnOther` is never
+  `myTurn - myTurnPersonal`; `?attnRel=` is the only key emitted.
 - **THE PENDING MUTE rides `relevance`, once, inside `getMyTurn`** (`db/pending-mute.ts`): a muted
-  repo's rows become `relevance: 'none'` — no screen's population changes. Workspace switch ∪ named
-  repos, OR-ed; ⚠ the write must scope its delete to the named workspace's membership. `muted` is
-  display only.
+  repo's rows become `relevance: 'none'`; no population changes. ⚠ The write must scope its delete
+  to the named workspace's membership.
 - **Visible sub-tabs are DERIVED, never written back** (`effectiveTab`s) — a corrective `set…`
   permanently forgets the choice.
 - **BLAST RADIUS is ONE resolver, `blastRadius()`** (shared `blast-radius.ts`); the wire carries
@@ -343,14 +326,12 @@ Read [docs/FRONTEND.md](docs/FRONTEND.md) before touching any of:
 - `threadStateFilter` is global — PrDetail applies it only when `selectedPrId === prId`.
   `UserName`'s tree SHAPE must not depend on popover-open state.
 - **EVERY ICON IS A COMPONENT IN `components/Icons.tsx`** (exception: `FileTypeIcons.tsx`); no
-  icon emoji/library. What stayed a character is listed in that file's header (regexes over vendor
-  bodies must not change). `CaretIcon` = menu trigger, `ChevronIcon` = expand/collapse.
+  icon emoji/library. `CaretIcon` = menu trigger, `ChevronIcon` = expand/collapse.
 - **The AI surface has EIGHT `--ai-*` tokens** with SPACE-separated channels; surviving
   `violet-`/`purple-`/`indigo-` hits are deliberate keeps.
 - **Every AI surface gates VISIBILITY on `me.ai.enabled` and its Run button on the ONE
-  `AiRunGate`** (`components/AiSetup.tsx`) — agentic and one-shot alike (bot themes, synthesis,
-  pointers, period write-up, impact note, work-plan wording). Never credits: on an API key a run
-  shows US$; on a subscription it shows its share of the week, never US$ — always through ONE
+  `AiRunGate kind=…`** (`components/AiSetup.tsx`), agentic and one-shot alike. Never credits: on an
+  API key a run shows US$; on a subscription its share of the week, never US$ — always through ONE
   formatter, `useRunCostText()` (`lib/aiBudget.ts` `runCostText`).
 - **The Changes tab's thread fold is RENAME-AWARE** (`indexThreadsByPath`, built once per PR).
 - **Sync-round state** (`syncRound` + `managerOpen`) has ONE driver, `SyncStatus`; the signal
@@ -359,8 +340,6 @@ Read [docs/FRONTEND.md](docs/FRONTEND.md) before touching any of:
   toast; cards expand over the page, never grow the header.
 - **Reactions are fetched ON DEMAND, NEVER STORED**, batched into one `POST
   /api/reactions/lookup`; `undefined` renders nothing.
-- **`InsightPrRef.authorIsBot`** resolves like the bot-hiding union (manual judgement, then
-  `users.isBot`, then the login seed); a NULL kind with `authorIsBot: true` renders "Bot".
 
 ---
 
@@ -374,74 +353,86 @@ Full detail: [docs/MERGE-CI-TRUNK.md](docs/MERGE-CI-TRUNK.md). The invariants:
 - **`blocked` carries a ranked `blockers[]`** (`deriveMergeBlockers`, PR detail ONLY), each
   `proven` or `inferred` — only `reviewDecision` can be proven. ⚠ Never assert unresolved threads
   are the blocker. `approved` removes a row, never adds one.
-- **Withdraw approval** dismisses the viewer's own latest APPROVED review (read live), stamps,
-  settles, signals. PR action buttons hide behind one "Show actions" reveal; facts never hide.
+- **Withdraw approval** dismisses the viewer's own latest APPROVED review (read live). PR action
+  buttons hide behind one "Show actions" reveal; facts never hide.
 - **GitHub's merge queue**: membership synced and stamped via `db/pr-merge-queue-stamp.ts` (NOT
   `db/merge-queue.ts`, Limn's own landing order); position/ETA live-only.
 - **Auto-merge (`merge/auto-merge-runner.ts`) is consent-anchored** — never GitHub's
-  `enablePullRequestAutoMerge`. Arming pins `expectedHeadOid`; a head move disarms unless proven
-  our own update-merge; compare-and-set + permission re-check at LAND time. ⚠ **`behindBy > 0` is
-  normal** — only `mergeStateStatus === 'behind'` blocks. Every arm goes through `armIntentLive`
-  (`merge/arm-intent.ts`). Queue repos enqueue head-pinned; freshen BEFORE the first enqueue,
-  never while queued; disarm with `enqueuedAt` also dequeues.
-- **Dependency auto-merge** (`merge/dependency-policy.ts`): OFF by default; a policy intent merges
-  like a click; a person's cancel is never overridden; red CI backs off after ONE live-proven
-  failure (`checks_failed`).
+  `enablePullRequestAutoMerge`. Arming pins `expectedHeadOid`; compare-and-set + permission
+  re-check at LAND time. ⚠ **`behindBy > 0` is normal** — only `mergeStateStatus === 'behind'`
+  blocks. Every arm goes through `armIntentLive`. Queue repos: freshen BEFORE the first enqueue,
+  never while queued.
+- **Dependency auto-merge** (`merge/dependency-policy.ts`): OFF by default; a person's cancel is
+  never overridden; red CI backs off after ONE live-proven failure.
 - **A repo's armed intents land ONE AT A TIME** (`db/merge-queue.ts`; `queued_local` ≠
   `queued`). ⚠ Rules 1–4 still run for every intent; `freshenedIntents` is once per TURN.
-- **Conflicts are resolved in the app** (`src/conflict/`, `components/conflicts/`). ⚠ The commit
-  body carries only indexes, ids and enum members — an edited region travels as an opaque
-  `editId` validated server-side (`POST …/conflicts/edit`); inline `custom` lines are forbidden.
-  Edits inherit the region's line ending and BOM; a superseded `editId` is never evicted. ⚠ The
-  wand NEVER picks a side. ⚠ Nothing is applied before the reader presses something
-  (`autoApply: false`), except a "Resolve with Claude" run the reader started (undecided regions
-  only, undoable). ⚠ Sessions are pinned to `(headSha, baseSha, modelHash)` — **bump
+- **Conflicts are resolved in the app** (`src/conflict/`, `components/conflicts/`; read the doc's
+  § Resolving conflicts first). ⚠ The commit body carries only indexes, ids and enum members — an
+  edited region travels as an opaque `editId` (`POST …/conflicts/edit`). ⚠ The wand NEVER picks a
+  side. ⚠ Nothing is applied before the reader presses something, except a "Resolve with Claude"
+  run the reader started. ⚠ Sessions are pinned to `(headSha, baseSha, modelHash)` — **bump
   `CONFLICT_MODEL_VERSION` with any fold change**. ⚠ The commit is HARD BLOCKED until every
-  decidable region is decided (`CommitPlan.canCommit`, one `commitBlockedReason`). No worktree, no
-  DB rows; a blobless clone cache under `config.cloneDir`. Read the doc's § Resolving conflicts
-  before touching paint, gutter arrows or "Next".
+  decidable region is decided (`CommitPlan.canCommit`).
 - CI logs are live ranged reads of the signed Actions blob URL — **NEVER returned to a client**.
 - Trunk status (`/api/branch-status`) is **informational only** — no counts, badges or My Turn.
 
 ---
 
-## The agentic features (Claude)
+## The agentic features (Claude or Codex)
 
 Claude Review (+ follow-up, auto review, chat, the per-ticket TICKET review, the CI review,
 design diagrams, Check threads), AI Fix (+ Plan first), Resolve with Claude, the reference-docs
-library, sprint briefs/paths and every one-shot completion. Details:
-[docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md). Non-negotiables:
+library, sprint briefs/paths and every one-shot completion — all on ONE provider at a time, Claude
+or Codex. Details: [docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md) (§ Codex, the second provider) ·
+history: [docs/CODEX-PLAN.md](docs/CODEX-PLAN.md). Non-negotiables:
 
 - **ONE switch, `config.aiEnabled` = `LIMN_AI_DISABLED !== 'true'`.** `registerAgenticRoutes`
-  registers NOTHING when off. `MeResponse.ai` carries `enabled` / `runtime` / `auth`; no
-  credential swaps the Run button for ONE line, never hides the feature.
-- **ONE CREDENTIAL LADDER FOR EVERY MODEL CALL** (`ai/credentials.ts` `resolveAiCredential`): the
-  reader's Claude Code login first (a `claude` session on disk or `CLAUDE_CODE_OAUTH_TOKEN`), else
-  the environment's `ANTHROPIC_API_KEY`; `LIMN_AI_USE_API_KEY=true` puts the key first. Agent runs
-  pass the ladder's environment as the query `env` (`agentAuthOptions()`, so a login run never
-  sees the key); one-shot `cheapComplete` (review/llm.ts) takes the Agent SDK on the login and the
-  Anthropic API on the key. **No caller picks its own credential, and nothing is stored.** Copy
-  says "runs on your own Claude Code login or Anthropic API key", never promises subscription
-  billing. Per-review budget: `REVIEW_BUDGET_USD` (default $6.75). Spend is recorded
-  (`recordAiUsage`), never metered.
-- **No AI SDK in the npm manifest** — downloaded on first use ("Set up AI" / `limn ai install`)
-  and value-imported ONLY by `ai/runtime.ts` (`loadAgentSdk`/`loadAnthropicSdk`/`loadZod`);
+  registers NOTHING when off. `MeResponse.ai` carries `enabled` / `runtime` / `auth` / `provider` /
+  `providers` / `kinds` (the pre-flight per run kind); no credential swaps the Run button for ONE
+  line, never hides the feature.
+- ⚠ **EVERY MODEL CALL GOES THROUGH `ai/provider.ts`**: runners call `getActiveProvider().runAgent`,
+  `cheapComplete` calls `.complete`. ONLY `ai/providers/claude.ts` (+ `ai/runtime.ts`) calls
+  `query`/loads an SDK, adding the path guard, own-tools hook and isolation (`provider-seam.test.ts`).
+  The active provider is ONE question, `ai/provider-setting.ts` `activeProviderId`
+  (`LIMN_AI_PROVIDER` = `claude` | `codex` | `auto`, or Settings → AI): `auto` = Claude when both
+  are signed in, Codex only when it alone is. A job asks ONCE and hands that provider to its run.
+  Budget folds filter `ai_usage.provider` (sqlite `0127`); a run is labelled with the provider and
+  model that RAN, never the one asked for.
+- **CLAUDE: ONE CREDENTIAL LADDER** (`ai/credentials.ts` `resolveAiCredential`): the reader's
+  Claude Code login first (a `claude` session on disk or `CLAUDE_CODE_OAUTH_TOKEN`), else the
+  environment's `ANTHROPIC_API_KEY`; `LIMN_AI_USE_API_KEY=true` puts the key first. Agent runs pass
+  the ladder's environment as the query `env` (`agentAuthOptions()`, so a login run never sees the
+  key); `cheapComplete` takes the Agent SDK on the login and the Anthropic API on the key. **No
+  caller picks its own credential, and nothing is stored.** Copy never promises subscription
+  billing. `REVIEW_BUDGET_USD` (default $6.75). Spend is recorded (`recordAiUsage`), never metered.
+- **CODEX** (Phase 3 complete: every agent kind ported, `codexRunnable()` true) runs the pinned CLI
+  directly — `codex exec --json --strict-config` — in Limn's OWN Codex home `~/.limn/codex`
+  (`limn ai login codex` or Settings; a ChatGPT sign-in only — an OpenAI API key is REFUSED until it
+  can be priced). ⚠ The reader's `~/.codex` is NEVER read or written. The lockdown is ONE list
+  (`ai/codex/config.ts` `LOCKED_SETTINGS`: no shell, web, images, plugins or memories;
+  `project_doc_max_bytes=0`); files are read ONLY through Limn's workspace MCP server. ⚠ Codex skips
+  an untrusted hook SILENTLY, so every run refuses unless `verifyHookTrusted` proves the PreToolUse
+  ALLOW-list hook runs. Results are strict JSON Schemas (`ai/result-schemas.ts`) fed to the SAME
+  handlers, one retry via `exec resume`; Limn runs the specialists; writes are read from git; a
+  run's thread is deleted once its usage is recorded. Models: deep `gpt-6-astra`, standard
+  `gpt-6.1-sol`, fast `gpt-6-luna`. ⚠ A Codex change leaves Claude's prompts byte-identical
+  (`prompt-golden.json`); Codex wording goes through `ai/prompt-tools.ts`.
+- **No AI SDK in the npm manifest** — downloaded on first use ("Set up AI" / `limn ai install
+  [codex]`) and value-imported ONLY by `ai/runtime.ts` (`loadAgentSdk`/`loadAnthropicSdk`/`loadZod`);
   `build-release.mjs` asserts it.
-- **THE CLAUDE SPEND BUDGET** (optional, per machine, `ai/budget.ts`): ⚠ **every AUTOMATIC model
-  run asks the ONE gate first** (`review/budget-gate.ts` `automaticRunAllowed` / `ctx.aiBudget`) and
-  is SKIPPED, never queued, when over; a reader's click is never refused (the SPA asks). On a
-  subscription it is a share of the week and of the 5-hour session (Limn's own spend ÷ the estimated
-  allowance; the 5-hour share follows the weekly one unless set) shown in PERCENTAGES ONLY — no US$
-  on a subscription anywhere; the header item reads the SAME `['ai-budget']` query. Claude's usage
-  reading (from the
-  `loadAgentSdk` Query tap — never add per-runner forwarding) names the subscription and the reset,
-  and NEVER blocks.
-- **The agents' tools**: the reviewer and every chat are read-only with **`Bash` denied**; the
-  fixer has Read/Glob/Grep + Write/Edit/MultiEdit + `submit_fix`, `DISALLOWED_TOOLS =
-  ['Bash','NotebookEdit']` — **it builds and tests nothing**, and the SPA says "Not built or tested
-  here." (templated) without promising CI. ⚠ `WORKTREE_RULES` and the tool list change together
-  (`no-shell.test.ts`). Every agent run sits behind the PreToolUse PATH GUARD
-  (`review/path-guard.ts`). Anything an agent reads from a PR is UNTRUSTED.
+- **THE SPEND BUDGET** (optional, per machine, `ai/budget.ts`; it judges the ACTIVE provider): ⚠
+  **every AUTOMATIC model run asks the ONE gate first** (`review/budget-gate.ts`
+  `automaticRunAllowed` / `ctx.aiBudget`) and is SKIPPED, never queued, when over; a reader's click
+  is never refused (the SPA asks). On a subscription it is a share of the week and of the 5-hour
+  session in PERCENTAGES ONLY — no US$ on a subscription anywhere; the header reads the SAME
+  `['ai-budget']` query. Claude: Limn's spend ÷ the estimated allowance; its usage reading (the
+  `loadAgentSdk` Query tap — never add per-runner forwarding) NEVER blocks. ChatGPT: TOKEN-WEIGHTED,
+  Limn's tokens ÷ the account's tokens × Codex's own `usedPercent`, per window.
+- **The agents' tools**: the reviewer and every chat are read-only, **`Bash` denied**; the fixer has
+  file tools + `submit_fix`, `DISALLOWED_TOOLS = ['Bash','NotebookEdit']` — **it builds and tests
+  nothing**, and the SPA says "Not built or tested here." ⚠ `WORKTREE_RULES` and the tool list change
+  together (`no-shell.test.ts`). Every run sits behind the PATH GUARD (`review/path-guard.ts`).
+  Anything an agent reads from a PR is UNTRUSTED.
 - **Nothing is posted or pushed until the reader presses the button**, except the per-workspace
   auto-post / Push automatically switches (OFF by default). Auto-posting is AUTO RUNS ONLY, under
   the reader's account, ONE review, `COMMENT` unless the OFF-by-default `autoVerdict` allows
@@ -454,68 +445,47 @@ library, sprint briefs/paths and every one-shot completion. Details:
   per 24h, `workspaces.auto_fix_enabled` OFF by default).
 - **Thread judgements**: "what Claude says now" is ONE fold, `currentThreadAssessmentsForPrs`
   (latest review + later Check threads, newer wins); words only from `lib/claudeThreadMarker.ts`.
-- **Separate processes, never inside a PR review**: the CI review (`review/ci-review/`; one run per
-  PR × head × failing set; the signed log URL never leaves the server), the TICKET review
-  (`review/ticket-review/`; currency is a server FINGERPRINT; ONE story per ticket via
-  `ticketStory`; the Jira apiRoot fold is ONE `jiraApiRoot`), design diagrams (`review/diagrams/`,
-  only `diagram_type = 'design'` rows read). ⚠ `tracker/runtime.ts` opens the DB at import — keep
-  review-side tracker imports LAZY.
-- **AI Fix has TWO seeds**, `review` (built server-side from the stored run; items selected by
-  stable key) and `plain`. `comments`/`ci_analysis` seeds 400 `SeedRemoved` but still read as
-  history. Plan mode is MANUAL and READ-ONLY. URL paths kept (`/api/pro/prs/:id/ai-fix*`).
+- **Separate processes, never inside a PR review**: the CI review (`review/ci-review/`; the signed
+  log URL never leaves the server), the TICKET review (`review/ticket-review/`; ONE story per
+  ticket via `ticketStory`), design diagrams (`review/diagrams/`). ⚠ `tracker/runtime.ts` opens the
+  DB at import — keep review-side tracker imports LAZY.
+- **AI Fix has TWO seeds**, `review` and `plain` (`comments`/`ci_analysis` 400 `SeedRemoved`, still
+  read as history). Plan mode is MANUAL and READ-ONLY. URL paths kept (`/api/pro/prs/:id/ai-fix*`).
 - **The moved modules take ONE `AgentContext`** (`review/agent-context.ts`), never the platform
   context.
-- ⚠ **EVERY MODEL CALL GOES THROUGH `ai/provider.ts`** ([docs/CODEX-PLAN.md](docs/CODEX-PLAN.md)
-  § 3.1): runners call `getActiveProvider().runAgent`, `cheapComplete` calls `.complete`. ONLY
-  `ai/providers/claude.ts` (+ `ai/runtime.ts`) calls `query`/loads an SDK, and adds the path guard,
-  own-tools hook and isolation to every run (`provider-seam.test.ts`). Budget folds filter
-  `ai_usage.provider` (sqlite `0127`). ⚠ Codex (Phase 3): every agent kind but `plan` is ported
-  (`ai/codex/kinds/*.ts`); `codexRunnable()` stays FALSE until ALL are, so `auto` = Claude and a
-  Codex port must leave Claude's prompts byte-identical (`prompt-golden.json`).
-- **SonarCloud** ([docs/SONARCLOUD.md](docs/SONARCLOUD.md)) and **reference docs**
-  ([docs/REFERENCE-DOCS.md](docs/REFERENCE-DOCS.md)): sealed write-only tokens; one stored Sonar
-  snapshot per (PR, head) kept only when SonarCloud analysed THIS head; the docs library is
-  server-written files, crawls same-host only with LINEAR scanners over untrusted text, and every
-  doc link goes through `resolveDocLink`.
+- **SonarCloud** and **reference docs** ([docs/SONARCLOUD.md](docs/SONARCLOUD.md),
+  [docs/REFERENCE-DOCS.md](docs/REFERENCE-DOCS.md)): sealed write-only tokens; a Sonar snapshot is
+  kept only when SonarCloud analysed THIS head; the docs crawl is same-host, LINEAR scanners over
+  untrusted text, every doc link through `resolveDocLink`.
 
 ## Platform features (formerly Pro)
 
-The old `@pierre/pro` plugin is core code at **`apps/backend/src/platform/`** — reporting
-(Reports, period reports, synthesis, Chronology pointers), Bots Monitoring (ROI, behaviour, the
-bundled peer benchmark, the Tuning Advisor, bot themes), the work-plan wording, the blast impact
-note, Slack and the settings behind them. Free, always on. Deep-dives:
+The old `@pierre/pro` plugin is core code at **`apps/backend/src/platform/`** — reporting, Bots
+Monitoring, the work-plan wording, the impact note, Slack. Free, always on.
 [docs/PLATFORM.md](docs/PLATFORM.md).
 
-- **Bound statically at boot**: `platform/context.ts` `bindPlatform` builds ONE context
-  (`platform/contract.ts` `ProContext`: db, host queries, GitHub helpers, `cheapComplete`,
-  scheduled jobs, retention/erasure/reporting-window registrars) and calls
-  `platform/index.ts` `registerPlatform`. Platform modules read the host ONLY through that ctx —
-  inject a new host dependency there, never import it directly. Tests pass a fake ctx.
-- **Its own migrations**: `platform/migrations/*.sql`, run by `platform/migrate.ts` after core's,
-  filename-sorted, each once by NAME in `pro_migrations` (existing installs re-run nothing). NO
-  journal, NO `--> statement-breakpoint`. A failure now FAILS THE BOOT. Its tables keep their
-  `pro_*` names; typed access via `proSchemaFor()` (`platform/db.ts`).
+- **Bound statically at boot**: `platform/context.ts` `bindPlatform` builds ONE `ProContext`
+  (`platform/contract.ts`) and calls `registerPlatform`. Platform modules read the host ONLY
+  through that ctx — inject a new host dependency there, never import it. Tests pass a fake ctx.
+- **Its own migrations**: `platform/migrations/*.sql`, run after core's, filename-sorted, each once
+  by NAME in `pro_migrations`; NO journal. A failure FAILS THE BOOT. Tables keep their `pro_*` names
+  (`proSchemaFor()`).
 - `ctx.schema` is `Record<string, any>` — a stale table name type-checks and throws only at run
   time. Grep, don't trust the compiler.
 - **Generation is cost-gated**: the payload-hash cache (⚠ **zero `Date.now()`-derived fields** and
   never hash a HYDRATED or derived value, or every judgement reads `stale` forever); a per-account
-  in-flight slot claimed SYNCHRONOUSLY; min-intervals armed on billed runs only. Two mounts of one
-  generation card share the MUTATION key.
+  in-flight slot claimed SYNCHRONOUSLY.
 - ⚠ **The D4 digit gate rejects UNICODE numerals** (`/^[^\p{Nd}\p{No}\p{Nl}]*$/u`). A
   model-derived figure and a code-derived figure are LABELLED APART. Advisor recommendation text is
   TEMPLATED; nothing it computes feeds `botVerdict`.
 - **The work plan: THE CODE RANKS, THE MODEL NARRATES** — the scorer is core (`db/work-plan.ts`);
   the model adds a headline, a `parked` line and one `why` per row, and may name ONLY a listed
   card. ⚠ `ageHours`/`stallRisk`/`score` stay OUT of the payload hash; ONE PR IS ONE JOB.
-- **The peer benchmark** (`GET /api/pro/bot-benchmark[/placement]`) reads the BUNDLED fit at
-  `platform/data/benchmark/benchmark-fit.json` (copied by `build-release.mjs` — a miss is
-  production-only and silent). ⚠ **Refusals are the product** — never normalise one into a
-  distribution shape; staleness is recomputed per request; `?cells=` 400s over 24. ⚠ **Money lives
-  at WORKSPACE grain only**: a `?repoIds=`-NARROWED request builds no rollup, the rollup carries no
-  percentile of its own, `BotRoiPanel` shows cost only when `repoId == null`. ⚠ `$ per acted-on
-  thread` divides by `COST_WINDOW_DAYS` = `DAYS_PER_MONTH` (30.44, pinned by
-  `benchmark-roi-agreement.test.ts`) and REFUSES rather than falling back; `workspace_truncated`
-  outranks every other cost refusal; a cohort median of `0` is NO median.
+- **The peer benchmark** reads the BUNDLED `platform/data/benchmark/benchmark-fit.json` (copied by
+  `build-release.mjs`; a miss is production-only and silent). ⚠ **Refusals are the product** —
+  never normalise one into a distribution shape. ⚠ **Money lives at WORKSPACE grain only** (a
+  `?repoIds=`-NARROWED request builds no rollup). ⚠ `$ per acted-on thread` divides by
+  `COST_WINDOW_DAYS` = `DAYS_PER_MONTH` (30.44) and REFUSES rather than falling back.
 - **Slack** (`platform/slack/`): a TEAM digest — never a card about or naming the configuring
   account. Event signals (Claude Review ran, PR merged) are OFF by default, CLAIMED before the post,
   never retried; a merge is announced only when SEEN LIVE (`sync/merge-notice.ts`).
@@ -526,27 +496,20 @@ note, Slack and the settings behind them. Free, always on. Deep-dives:
 
 - **Period reporting** ([docs/PERIOD-REPORTING.md](docs/PERIOD-REPORTING.md)): metrics are core
   (`db/period-metrics.ts`, `db/forecast.ts`, `db/actor-lanes.ts`); storage and narration are the
-  platform's. Every metric is **WINDOW-PURE** (two-sided `[fromMs, toMs)` on every column).
-  History is **COVERAGE-BIASED** (check contributing repos). **One row never mixes headline and
-  subset populations** (`rowFigures()`). `PERIOD_METRICS_SCHEMA_VERSION` is folded into the hash
-  (three spellings in lockstep); a metric is RENAMED, never redefined. A `_pct` metric joins
-  `PCT_METRIC_KEYS`. Grain (sprint vs calendar month) is a READING choice, never stored; refusals
-  key on grain first; the forecast refuses at month grain; month-to-date is live, un-stored,
-  un-billed. Every reading setting is PER WORKSPACE (`pro_workspace_settings`), no inheritance.
-  An explicit `toMs` reaches every fold of a windowed getter (half-open `lt`).
+  platform's. Every metric is **WINDOW-PURE** (`[fromMs, toMs)` on every column; an explicit `toMs`
+  reaches every fold). History is **COVERAGE-BIASED**. **One row never mixes headline and subset
+  populations** (`rowFigures()`). `PERIOD_METRICS_SCHEMA_VERSION` is in the hash (three spellings
+  in lockstep); a metric is RENAMED, never redefined. Grain (sprint vs month) is a READING choice,
+  never stored. Every reading setting is PER WORKSPACE, no inheritance.
 - **Chronology** ([docs/BOTTLENECKS.md](docs/BOTTLENECKS.md), `db/pr-intervals.ts`): every open
   hour belongs to a court (reviewer / author / landing). ⚠ A bot action never moves the ball and
-  bot-authored PRs are not measured; never-human-touched PRs are excluded; flag only LOPSIDED *AND*
-  SLOW; advice is per court; NO person is named (one exception: the new-contributor marker);
-  working hours lead, clock hours call out; `review_requests_synced_at` NULL is "not known".
-  `getFlowCourts` stays account-row-free because `verify:isolation` calls it.
+  bot-authored PRs are not measured; flag only LOPSIDED *AND* SLOW; NO person is named (except the
+  new-contributor marker). `getFlowCourts` stays account-row-free (`verify:isolation` calls it).
 - **This Sprint** (fixed tab, `?view=sprint`; [docs/FRONTEND.md](docs/FRONTEND.md) § This Sprint):
-  `GET /api/sprint-graph` is DB only; nodes placed in the workspace's STATUS BUCKETS
-  (`db/sprint-status-layout.ts`); edges from ONE fold (`db/sprint-graph-fold.ts`). Briefs (Haiku)
-  and critical paths (Sonnet, no digits in its text, daily cap) are made after a read, never on a
-  view. ONE `LaneBoard` draws Theme / Critical path / People; a card opens the story tray
-  (`Ticket/StoryViewBody.tsx`); tickets open the story view only through `useOpenStory()`. Never
-  bring the force-graph canvas back. Nothing writes to a tracker.
+  `GET /api/sprint-graph` is DB only; edges from ONE fold (`db/sprint-graph-fold.ts`). Briefs and
+  critical paths are made after a read, never on a view. ONE `LaneBoard`; tickets open the story
+  view only through `useOpenStory()`. Never bring the force-graph canvas back. Nothing writes to a
+  tracker.
 - **Trackers** ([docs/TRACKERS.md](docs/TRACKERS.md)): ONE per workspace; a tracker is read when a
   PR is RECEIVED, never when VIEWED (exception: the demand-gated sprint list read). Every
   customer-typed host goes through `tracker/jira/fetch.ts`. Idents only via
@@ -595,9 +558,8 @@ AI route. `api/plugins/security.ts` (CSP, loopback-only CORS, cross-origin guard
 - **Relative imports carry an explicit `.js` everywhere** — backend AND frontend.
 - **`packages/shared` is the only bridge.** Never import backend↔frontend directly.
 - **Colour and contrast are MEASURED.** ⚠ A raw brand hex may not be TEXT colour — go through
-  `vendorInk()` (two variants are FORCED: no single colour clears 4.5:1 on both themes; it sets the
-  `--ink-*` variables only, never `color`). `decorative-mark` is the only contrast opt-out, never
-  on text that says something.
+  `vendorInk()` (it sets the `--ink-*` variables only, never `color`). `decorative-mark` is the
+  only contrast opt-out, never on text that says something.
 - **FOUR PATH CLASSIFIERS, NONE FOLDED INTO ANOTHER**: `NOISE_GLOBS`, `isLockFile`,
   `isNonCodeFile`, `BLAST_SURFACES` + `isTestFile` (`db/code-loc.ts` names all four).
 - **`apps/backend/src/db/queries.ts` CONTAINS LITERAL NUL BYTES** — search it with `grep -a` /
@@ -660,26 +622,20 @@ Publishing is CI-only — **never run `npm publish`/`npm login` here**.
 - The platform's migrations + benchmark data are copied to `release/dist/platform/`.
 - **AI and ML runtimes install on first use** at pins the build writes into `limnAiRuntime` /
   `limnMlRuntime` / `limnMlModels`; only `ai/runtime.ts` / `ml/runtime.ts` may value-import them
-  (the build greps `release/dist`). ⚠ zod comes from the SAME install as the SDK, by its ESM entry.
+  (the build greps `release/dist`); the Codex CLI (`@openai/codex`) is never imported, only run.
+  ⚠ zod comes from the SAME install as the SDK, by its ESM entry.
 - **pnpm is PINNED** (`packageManager: pnpm@9.15.9`); bumping it means regenerating the lockfile.
 
 ## The website (`apps/site`) and the demo
 
-- **`apps/site`** serves limn-review.com: the prerendered landing, `/demo/`, `/api/health` and
-  the contact form (`/api/contact`, Slack webhook; honeypot + signed fill time + 5/hour per IP).
-  Deployed by the root `Dockerfile` / `railway.json` via `.github/workflows/deploy-site.yml`. ⚠ Its
-  rate limit reads `X-Forwarded-For` from the RIGHT (`TRUST_PROXY_HOPS`). The contact form is the
-  commercial-licence path. GA is consent-gated and lives in the landing only, never the SPA.
-  [apps/site/README.md](apps/site/README.md).
+- **`apps/site`** serves limn-review.com: the prerendered landing, `/demo/` and the contact form
+  (the commercial-licence path; [apps/site/README.md](apps/site/README.md)). ⚠ Its rate limit reads
+  `X-Forwarded-For` from the RIGHT (`TRUST_PROXY_HOPS`). GA lives in the landing only, never the SPA.
 - The landing's `<!-- seo:start/end -->` / `<!-- app:start/end -->` markers in
   `apps/landing/index.html` are load-bearing (the prerenderer throws without them).
-- **The static demo** (`apps/frontend/src/demo/`, `build:demo` → `dist-demo/`, base `/demo/`) is
-  the real SPA with `window.fetch` wrapped: every `/api/*` answered in the browser from a
-  RECORDING (Acme data, timestamps rebased to now), writes simulated in an in-memory overlay,
-  agentic runs replayed from a recorded finished run of the same kind. ⚠ A normal `vite build`
-  must stay byte-for-byte free of it (separate entry, `--mode demo` only), and it must hold the
-  site's CSP (no inline script, no eval). `data/recording.json` replaces the sample when present.
-  Format and matching rules: [apps/frontend/src/demo/README.md](apps/frontend/src/demo/README.md).
+- **The static demo** (`apps/frontend/src/demo/`, `build:demo`, base `/demo/`) is the real SPA with
+  `window.fetch` answered from a RECORDING ([its README](apps/frontend/src/demo/README.md)). ⚠ A
+  normal `vite build` must stay byte-for-byte free of it, and it must hold the site's CSP.
 - ⚠ **EVERY USER-VISIBLE CHANGE MUST REACH THE DEMO, IN THE SAME COMMIT.** UI ships there by
   itself; DATA does not. A new route/view/tab/field, a changed shape or an unseeded feature: seed it
   (`seed-demo*.ts`, fictional Acme), visit it in `scripts/record-demo-steps.mjs` + `verify-demo.mjs`

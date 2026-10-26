@@ -316,3 +316,17 @@ payload-hash $0 cache and `recordAiUsage` on spend. Rate tiers: POST `ai`+`ai_ho
   copy steer (lead with what the quickest pull requests did that others could copy; `example` is
   asked for first) did NOT bump the version: the stored pointers do not contradict it, and a bump
   would mark every workspace's billed pointers out of date for a change of emphasis.
+
+## Moved from CLAUDE.md (2026-10-26)
+
+Verbatim text taken out of CLAUDE.md to keep it under its size budget. CLAUDE.md keeps a
+shorter form of each rule; this is the full wording.
+
+### Chronology
+
+- **Chronology** ([docs/BOTTLENECKS.md](BOTTLENECKS.md), `db/pr-intervals.ts`): every open
+  hour belongs to a court (reviewer / author / landing). ⚠ A bot action never moves the ball and
+  bot-authored PRs are not measured; never-human-touched PRs are excluded; flag only LOPSIDED *AND*
+  SLOW; advice is per court; NO person is named (one exception: the new-contributor marker);
+  working hours lead, clock hours call out; `review_requests_synced_at` NULL is "not known".
+  `getFlowCourts` stays account-row-free because `verify:isolation` calls it.

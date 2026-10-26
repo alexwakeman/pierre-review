@@ -4624,3 +4624,96 @@ answered in the browser from a recording. End to end (seed → record → build 
   like the e2e fixtures (`e2e/mock-api.ts`, from which the sample recording is generated): an
   unrecorded GET answers `404 NotInDemo`, and an unguarded `.map` over a missing array blanks the app.
 
+## Moved from CLAUDE.md (2026-10-26)
+
+Verbatim text taken out of CLAUDE.md to keep it under its size budget. CLAUDE.md keeps a
+shorter form of each rule; this is the full wording.
+
+### The Feed
+
+- **The Feed is a STREAM (`FeedView`) and nothing else** — no survey panels. It has no My Turn /
+  Needs review / Claude / CI-failure items (Pending owns them). Bot CLASSIFICATION is the Feed's
+  "Bot classification" sub-tab. The "PR events" pill's `Kind` chip row is a PARTITION (empty =
+  all four), client-side, NOT cleared when the parent goes off. A default flip on a persisted key
+  needs a `FILTER_STORAGE_VERSION` bump (now v5; `migratePersistedFilters` steps CHAIN).
+
+### "Where the work is happening"
+
+- **"Where the work is happening" = two `charts/RepoRows` cards in `WorkspaceFlowMetrics`**
+  (never `WorkspaceMetricsPanel`): repo activity and merged reach. Each column scales to ITS OWN
+  max; repo names written in full; **unknown is never zero** (`linesChanged: null` → "size
+  unknown"; a null reach verdict is undrawn). Reach rows ship SIGNALS folded by `blastRadius()`.
+
+### Pending card actions
+
+- **Pending card actions: NOTHING ON THE BOARD MAY FETCH ON MOUNT.** Merge buttons gate on the
+  card's synced `mergeStateStatus`/`mergeable`/`viewerCanPush` through `mergeVerdict()`; the live
+  merge-options fetch is CLICK-gated; HIDE, never disable. A QUEUED PR shows queue status +
+  "Remove from queue", never Merge (`mergeQueueStatus()`). `conflicts` carries ONE action, the
+  resolver entry, and is minted only in `writableRepoIds`.
+
+### Notify vs open, and the Pending mute
+
+- **A surface that NOTIFIES counts `myTurnPersonal`; one you OPEN counts `myTurn`.**
+  `attentionRelevance` is three-valued (`'mine'`/`'others'`/`null`) and every entry point SEATS
+  it. `myTurnOther` is never `myTurn - myTurnPersonal`. An ABSENT `relevance` renders the neutral
+  label. `?attnPersonal=1` is still PARSED; `?attnRel=` is the only key emitted.
+- **THE PENDING MUTE rides `relevance`, once, inside `getMyTurn`** (`db/pending-mute.ts`): a muted
+  repo's rows become `relevance: 'none'` — no screen's population changes. Workspace switch ∪ named
+  repos, OR-ed; ⚠ the write must scope its delete to the named workspace's membership. `muted` is
+  display only.
+
+### The AI Run gate
+
+- **Every AI surface gates VISIBILITY on `me.ai.enabled` and its Run button on the ONE
+  `AiRunGate`** (`components/AiSetup.tsx`) — agentic and one-shot alike (bot themes, synthesis,
+  pointers, period write-up, impact note, work-plan wording). Never credits: on an API key a run
+  shows US$; on a subscription it shows its share of the week, never US$ — always through ONE
+  formatter, `useRunCostText()` (`lib/aiBudget.ts` `runCostText`).
+
+### `InsightPrRef.authorIsBot`
+
+- **`InsightPrRef.authorIsBot`** resolves like the bot-hiding union (manual judgement, then
+  `users.isBot`, then the login seed); a NULL kind with `authorIsBot: true` renders "Bot".
+
+### The Pending board
+
+- **The Pending board is SEVEN scored TABS** (`PENDING_TABS`, `db/pending-tabs.ts`), each ranked by
+  the ONE scorer (`db/work-plan.ts` `scoreCards`); the top 5 are "Do next". ⚠ **It ranks the
+  UNCAPPED fold, then caps** per list group (`boardListCap` 50); only `/api/attention` passes
+  `uncapped` and `withFailingChecks`. ⚠ **Each count is its own population** (`tab.total`,
+  `kindTotals`, lens totals), and `/api/daily-brief` returns the same figures. ⚠ **The tabs are an
+  ALLOW-list** (a compiler-checked test). Every floor/cap/threshold lives ONCE in
+  `packages/shared/src/pending-rules.ts`. Visible tab is DERIVED (`effectivePendingTab`).
+  "Pending" is a label-only rename; the literal stays `'attention'`.
+
+### Board freshness
+
+- **Board freshness is ONE batched sweep, `POST /api/attention/liveness`** (one `nodes(ids:)`
+  call; mergeability for a ranked subset ≤ 25 — 50 ids 502s). ⚠ An observed `unknown` never
+  demotes a known merge state. ⚠ **It returns COUNTS, never cards**: refetch `['attention-cards']`
+  + `['daily-brief']` + `['work-plan']` together — the only keys opting out of
+  `refetchOnWindowFocus: false`.
+
+### This Sprint
+
+- **This Sprint** (fixed tab, `?view=sprint`; [docs/FRONTEND.md](FRONTEND.md) § This Sprint):
+  `GET /api/sprint-graph` is DB only; nodes placed in the workspace's STATUS BUCKETS
+  (`db/sprint-status-layout.ts`); edges from ONE fold (`db/sprint-graph-fold.ts`). Briefs (Haiku)
+  and critical paths (Sonnet, no digits in its text, daily cap) are made after a read, never on a
+  view. ONE `LaneBoard` draws Theme / Critical path / People; a card opens the story tray
+  (`Ticket/StoryViewBody.tsx`); tickets open the story view only through `useOpenStory()`. Never
+  bring the force-graph canvas back. Nothing writes to a tracker.
+
+### Colour and contrast
+
+- **Colour and contrast are MEASURED.** ⚠ A raw brand hex may not be TEXT colour — go through
+  `vendorInk()` (two variants are FORCED: no single colour clears 4.5:1 on both themes; it sets the
+  `--ink-*` variables only, never `color`). `decorative-mark` is the only contrast opt-out, never
+  on text that says something.
+
+### Icons
+
+- **EVERY ICON IS A COMPONENT IN `components/Icons.tsx`** (exception: `FileTypeIcons.tsx`); no
+  icon emoji/library. What stayed a character is listed in that file's header (regexes over vendor
+  bodies must not change). `CaretIcon` = menu trigger, `ChevronIcon` = expand/collapse.

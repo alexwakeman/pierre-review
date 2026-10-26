@@ -318,3 +318,17 @@ background priority.
 About 8–10 working days: markers 2–3, inference 1–2, worker + seam 1, distribution 2, gate 0.5,
 shadow run 1 plus a few days elapsed. A shared-encoder two-head export (one ~150 MB file for both
 axes) is a later `packages/ml` change and is not needed for this.
+
+## Moved from CLAUDE.md (2026-10-26)
+
+Verbatim text taken out of CLAUDE.md to keep it under its size budget. CLAUDE.md keeps a
+shorter form of each rule; this is the full wording.
+
+### `pnpm dev` and the scorer
+
+**`pnpm dev` scores bot comments with the in-process Node port, reading the model from
+`packages/ml/serving_assets`; `PIERRE_ML_HTTP=1` starts the Python severity-api instead**
+(`PIERRE_ML_DIR`, `SEVERITY_API_PORT`, `PIERRE_ML_DISABLED=1`; it sets `LIMN_ML_SCORER=http`);
+every "can't run it" path exits 0, so a clone without submodules still gets the dev loop. ⚠ It
+exports `SEVERITY_API_DEFAULT_URL`, never `SEVERITY_API_URL` — `process.loadEnvFile` does NOT
+overwrite an already-set variable, so a command-line `SEVERITY_API_URL` would BEAT your `.env`.

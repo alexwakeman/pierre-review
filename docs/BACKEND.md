@@ -785,3 +785,26 @@ non-dependency automation, so the People / Automation lens is offered on no tab 
 
 Tests: `db/pending-deps.test.ts` (the fold, throwaway DB), `db/dependency-cards.test.ts` (the pure
 helpers), `verify:isolation` (the alert reader and the backfill worklist).
+
+## Moved from CLAUDE.md (2026-10-26)
+
+Verbatim text taken out of CLAUDE.md to keep it under its size budget. CLAUDE.md keeps a
+shorter form of each rule; this is the full wording.
+
+### Removed 2026-10-22 (the full list)
+
+**Removed 2026-10-22:** cloud mode (`DEPLOYMENT_MODE`, OAuth/GitHub App sign-in, sessions, the
+webhook receiver, `DELETE /api/me/account`), Postgres (`schema.pg.ts`, `migrations-pg`, parity
+tests), the Pro entitlement layer (capabilities, 402s, `ProBadge`/`ProLockPanel`, `MeResponse.pro`,
+apiVersion), credits / Track usage, Stripe billing and the cloud benchmark collection. Their
+tables stay dormant, never dropped. Do not reintroduce any of them.
+
+### My Turn is the ball rule
+
+- **MY TURN IS THE BALL RULE, STATE-DERIVED** ([docs/BACKEND.md](BACKEND.md) § My Turn): a
+  card exists only while the reader owes an action not taken since the last RELATED event. ⚠ The
+  one stored thing is a per-SUBJECT DISMISSAL timestamp (`my_turn_dismissals`), applied inside
+  `getMyTurn`, discharged once nothing is left. ⚠ **No bot action returns the ball, including a
+  push** (deliberately unlike Chronology); bot-ness via `globalAutomationUserIds`, NEVER
+  `hiddenBotUserIds`. ⚠ **Filter the SEED list, never the built array.** A card says WHY
+  (`MyTurnCard.ball`). One card per PR on the board (`onePerPr`), except Claude reviews.

@@ -82,7 +82,7 @@ pnpm db:studio              # inspect the data
 ## Review and fix with Claude
 
 Every pull request gets a **Claude** tab. It is on by default — there is no flag to
-set. Today it targets Claude users; Codex support is coming soon.
+set. It runs on Claude or on Codex (see [Codex instead of Claude](#codex-instead-of-claude)).
 
 - **Claude Review** — Claude reads the change and returns findings, each tied to a
   line. Tick the ones worth keeping and post them as **one** GitHub review. Paste in
@@ -116,6 +116,27 @@ uses the same two sources, first one wins:
 Set `LIMN_AI_USE_API_KEY=true` to use the key even when you are signed in. With
 neither, the Run button is replaced by one line: *Sign in to Claude Code or set
 ANTHROPIC_API_KEY*. The ladder lives in `apps/backend/src/ai/credentials.ts`.
+
+### Codex instead of Claude
+
+Every AI feature can run on Codex instead, on your own ChatGPT plan. One provider runs
+everything at a time.
+
+```bash
+npx limn-review ai install codex   # adds the Codex CLI to the AI download
+npx limn-review ai login codex     # sign in with ChatGPT (add --device-auth on a headless machine)
+```
+
+Or press **Set up AI** and sign in from **Settings → AI**. Limn keeps its own Codex
+sign-in in `~/.limn/codex`; your `~/.codex` is not read or changed. Codex with an
+OpenAI API key is not available yet.
+
+Pick the provider in **Settings → AI**, or set `LIMN_AI_PROVIDER` to `claude`, `codex`
+or `auto` (the default: Claude when both are signed in, Codex when only Codex is).
+Each run is labelled with the provider and model that ran it. On Codex the models are
+`gpt-6-astra` (deep reviews), `gpt-6.1-sol` and `gpt-6-luna`. The rules are the same:
+no shell, no web, and nothing posted or pushed until you press the button. The spend
+budget counts Limn's share of your ChatGPT plan's 5-hour and weekly limits.
 
 ### One-time setup
 

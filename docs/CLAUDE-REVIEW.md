@@ -11,6 +11,7 @@ A **Claude Review** tab runs the **Claude Agent SDK** (`@anthropic-ai/claude-age
 against the selected PR, returns **structured JSON findings** (persisted per head SHA,
 history kept), lets the user author their own review + tick which findings to post, then
 posts **one** GitHub review (inline + body + verdict).
+With Codex as the provider the same review runs on Codex instead (§ Codex, the second provider).
 
 - **ON BY DEFAULT and ALWAYS VISIBLE.** Claude Review (with its follow-up, ticket check, auto
   review and chat) and AI Fix's fixer are core — no plan, no opt-in flag. They run on the user's
@@ -31,8 +32,8 @@ posts **one** GitHub review (inline + body + verdict).
     files, run commands or reach the web; the fixer edits files, has no shell, builds and tests
     nothing; nothing is posted or pushed until the reader presses the button — EXCEPT what a
     workspace has switched AUTO-POSTING on for (§ Auto-posting; off by default). Never promise
-    subscription billing. Copy reads "your own Claude Code login or Anthropic API key". Codex
-    support is "coming soon"; today it targets Claude users.
+    subscription billing. Copy reads "your own Claude Code login or Anthropic API key", or names
+    the ChatGPT sign-in when Codex is the provider (§ Codex, the second provider).
 
 ### The credential ladder
 
@@ -319,6 +320,128 @@ reader's sprint Refresh (`noteManualSprintRead`, tracker/sprint/hooks.ts) skip t
 over budget, the RUN control inside `AiRunGate` takes a second press (`OverBudgetConfirm`); only the
 Run control — the buttons marked `data-ai-run`, else the gate's only button — never an ⓘ, Discard
 or other button beside it. A new automatic caller must go through the gate.
+
+## Codex, the second provider
+
+Every AI feature can run on Codex (OpenAI) instead of Claude. ONE provider runs every feature at a
+time; there is no per-feature choice. Build history and the measurements behind each rule:
+[CODEX-PLAN.md](CODEX-PLAN.md) and [CODEX-SPIKE.md](CODEX-SPIKE.md) (its "Plan changes" overrule
+the plan). Phase 3 is complete: every agent kind runs on Codex and `codexRunnable()` is true.
+
+### The provider seam
+
+- **`ai/provider.ts`** is the ONE door for every model call. The agent runners call
+  `getActiveProvider().runAgent(spec)`; `review/llm.ts` `cheapComplete` (and so the platform's
+  `ctx.llm`) calls `.complete(req)`. Only `ai/providers/claude.ts` and `ai/runtime.ts` touch an SDK
+  (`provider-seam.test.ts`). The model in a spec is a ROLE (`deep` / `standard` / `fast`), with an
+  optional exact id; each provider resolves it.
+- **`ai/provider-setting.ts`** answers "which provider?" for the registry and the pre-flight alike
+  (it sits apart to avoid an import cycle). `LIMN_AI_PROVIDER` = `claude` | `codex` | `auto`
+  (unset or unknown ⇒ `auto`), and Settings → AI sets the same choice. `activeProviderId()`:
+  `codex` ⇒ Codex, `claude` ⇒ Claude, `auto` ⇒ `pickAutoProvider` — Claude when both are signed in
+  and when neither is; Codex only when it ALONE is signed in (with ChatGPT) and can run every kind.
+  An OpenAI API key alone never makes `auto` pick Codex.
+- **ONE PROVIDER PER JOB.** A manager asks once (`activeProviderId()` or `getActiveProvider()`),
+  words its prompts for that provider and hands the SAME provider to the run, so a setting changed
+  mid-job cannot split it.
+- **The neutral run stream.** Both providers report a run the same way through `spec.onProgress`
+  and `AgentRunResult.outcome`: a `step` per model step (worded activity lines, the step's text,
+  the live token tally) and an `outcome` (subtype, final text, US$, turns, tokens). Runners read
+  only this stream. The one Claude-only escape hatch is `spec.claude.onMessage` (the docs build's
+  PDF page counter).
+- **Per-kind pre-flight.** `detectClaudeAuth(kind)`, `ctx.llm.detectAuth(kind)` and
+  `agenticRunReady(ctx, kind)` answer per run kind (`AiRunKind`: the 14 agent kinds plus
+  `complete`). `/api/me` carries the map as `ai.kinds`, and Codex's own answers as
+  `ai.providers.codex.kinds` whichever provider is active. Every `AiRunGate` names its `kind`.
+- **Prompts.** Claude's prompts are byte-identical to before the seam (`prompt-golden.json`,
+  `tickets-claude-prompts.json`, `no-shell.test.ts`). Codex wording is made in two ways: tool
+  references marked `{Read}` / `{submit_x}` and rendered per provider by `ai/prompt-tools.ts`
+  (Codex gets `read_file`, `list_files`, `search`, `apply_patch`, "your final JSON answer"), and
+  whole-sentence swaps in the finished prompt (`review/codex-wording.ts`, tested so no Claude-only
+  word survives).
+- **Labels.** Every run records the provider and the model that actually ran: an `ai_usage` row
+  carries `provider` (sqlite `0127`), and a review run row stores the Codex model, not the Claude
+  model the picker asked for.
+
+### The Codex runner
+
+- **The CLI, run directly** (`ai/codex/run.ts`, argv from `ai/codex/config.ts`): `codex exec --json
+  --strict-config --skip-git-repo-check -C <cwd> --output-schema <file> -m <model>`, the prompt on
+  stdin. Not the SDK: it cannot pass `--strict-config` and hides stderr, where Codex writes its
+  refusals. `--strict-config` makes an unknown `-c` key an error, so a typo cannot unlock anything.
+  No `--ephemeral` (the retry needs the session file), no `--ignore-user-config` (the config is
+  Limn's own), no `--dangerously-bypass-hook-trust`.
+- **Locked settings**: ONE list, `LOCKED_SETTINGS`, written into Limn's `config.toml` AND passed as
+  `-c` on every `codex exec` and app-server start: `approval_policy="never"`,
+  `forced_login_method="chatgpt"`, no shell, no image reads, no web search, no history, no
+  analytics, no subagents, `project_doc_max_bytes=0` (the only thing that keeps a PR's own
+  `AGENTS.md` out of the prompt), `skills.include_instructions=false`, and every plugin, app,
+  connector, memory and goal feature off. Writes use `sandbox_mode="workspace-write"` with the
+  write roots only, no network, and `/tmp` and `$TMPDIR` excluded; everything else is `read-only`.
+- **Reads: Limn's workspace MCP server** (`ai/codex/workspace-mcp.ts`, `workspace-files.ts`). With
+  the shell off, `read_file`, `list_files` and `search` are the run's only way to see files. Every
+  path is placed by the same rule as the Claude path guard (`realPathFor`) and refused outside the
+  read roots. Globs and search use a linear-time matcher (`linear-regex.ts`). Node built-ins only,
+  because Codex starts it by file path.
+- **The PreToolUse hook** (`ai/codex/hook.ts`, rule in `hook-rule.ts`) is an ALLOW-list with matcher
+  `.*`: write tools only inside the write roots, `mcp__workspace__*` only inside the read roots,
+  `update_plan`; every other tool is denied. It fails closed. ⚠ Codex skips an untrusted hook
+  WITHOUT A WORD, so every run (and every `complete()`) first writes the trust entry into Limn's
+  home and refuses unless `verifyHookTrusted` sees it trusted with our hash AND it denies a canary
+  call. The roots travel in `LIMN_CODEX_GUARD`, so the command and its hash are the same for every
+  run.
+- **Results.** Each result tool (`submit_review`, `submit_fix`, …) becomes ONE strict JSON Schema
+  (`ai/result-schemas.ts`), built from the same zod shape the Claude tool uses. The final answer is
+  mapped back to the tool's arguments, parsed against that shape and handed to the SAME handler,
+  so every server-side check (`validateDesign`, the fix's shown-ref check, the digit gate, …)
+  stays where it is. A rejected answer gets ONE retry on the same thread (`codex exec resume`);
+  then the run fails.
+- **Specialists are run by Limn**, not by Codex subagents (`ai/codex/specialists.ts`): up to the
+  same cap, chosen in code (`pickCodexSpecialists`), each its own read-only run in parallel, before
+  the lead; their reports reach the lead fenced, and a skipped or failed one is named. An automatic
+  review asks the spend gate before each.
+- **Writes are read from git**, never from the event stream (a refused patch emits nothing): the
+  changed files are what `git status` shows in the write roots; a change outside them fails the run.
+- **Effort**: deep = high, standard = medium, fast = low; a diff-only review runs one step lower
+  (`codexReviewEffort`). Default agent timeout 45 minutes; a stop signals the whole process group.
+- **Clean-up.** Codex keeps every run twice in Limn's home (the rollout file and its own sqlite
+  rows), and both hold PR text. Once a run's usage is recorded, its thread is queued
+  (`ai/codex/threads.ts`): one app-server per drain calls `thread/delete`, the rollout file is
+  removed whatever that answers, and the log rows go by `thread_id`. Anything older than a day is
+  swept every six hours and at boot. Account erasure deletes the files (`rollouts.ts`).
+- **What Codex cannot do here**: a PDF docs build refuses on Codex (it cannot read PDF pages).
+
+### Sign-in, models and cost
+
+- **Limn's own Codex home, `~/.limn/codex`** (`ai/codex/home.ts`). Every Codex process Limn starts
+  gets `CODEX_HOME` pointed there. ⚠ The reader's `~/.codex` is never read or written, and its
+  `auth.json` is never copied (a ChatGPT refresh token rotates, so two copies would sign one out).
+  Sign in with `limn ai login codex` (`--device-auth` on a headless machine) or from Settings
+  (`/api/ai/codex/login`, driven through `codex app-server`); `limn ai logout codex` signs out.
+- **ChatGPT sign-in only.** The OpenAI API-key route is REFUSED ("Codex with an OpenAI API key is
+  not available yet — sign in with ChatGPT") until `CODEX_PRICES_PER_MTOK` holds real prices,
+  because an unpriced run would record US$ 0 and no US$ cap would trip. Codex itself enforces it
+  (`forced_login_method="chatgpt"`), and Limn checks the sign-in KIND before every run; a sign-in
+  whose kind is not yet confirmed does not run.
+- **Models per role** (`CODEX_MODEL_FOR_ROLE`, pinned for `@openai/codex` 0.164.0): deep =
+  `gpt-6-astra`, standard = `gpt-6.1-sol`, fast = `gpt-6-luna`. A review on Opus runs deep, on
+  Sonnet standard. A Claude model id passed through is never sent to Codex. Re-check the table on
+  every CLI bump (`codex debug models`).
+- **Usage and cost.** Codex reports tokens, never US$. On a ChatGPT sign-in a run costs US$ 0 and
+  its tokens are recorded; the provider writes its own ledger row (`usageRecord`), so the caller
+  writes none. A cancelled run records NULL tokens. Reasoning tokens are part of output tokens and
+  are never added on top. Per-run `budget.usd` and turn caps are Claude's; a Codex run is bounded
+  by its timeout.
+- **The ChatGPT budget share is TOKEN-WEIGHTED** (`packages/shared/src/ai-budget.ts`
+  `codexWindowSharePct`): Limn's tokens in the window ÷ the account's tokens in the window × the
+  window's `usedPercent`. The windows (5-hour and weekly, whole percent, with resets) come from
+  `account/rateLimits/read`, the account's tokens from `account/usage/read`, read by a background
+  probe at most every 5 minutes. Both counts cover the SAME span. Unknown account tokens leave
+  Limn's share unknown, which never blocks. The share is coarse (whole percent); the copy says so
+  behind the ⓘ.
+- **Install.** The Codex CLI is downloaded on first use into `~/.limn/ai-runtime` ("Set up AI"
+  with Codex, or `limn ai install codex`); `LIMN_CODEX_PATH` points at a codex program of your own.
+  See [PACKAGING.md](PACKAGING.md).
 
 ## Reference docs in a review
 
@@ -2393,3 +2516,80 @@ links; the sprint builder's stored critical paths and call-outs), the whole map 
 model text over the same data. ⚠ The turn cap is SERVER-side (`capAskHistory`: the newest
 `SPRINT_ASK_MAX_TURNS` − 1 pairs, each re-capped; `trimmedTurns` counts the rest). Short Markdown naming
 ticket keys; no ranking of people. Spend: feature `sprint_ask`. Tier `ai` + `ai_hourly`.
+
+## Moved from CLAUDE.md (2026-10-26)
+
+Verbatim text taken out of CLAUDE.md to keep it under its size budget. CLAUDE.md keeps a
+shorter form of each rule; this is the full wording.
+
+### The agentic features (the CLAUDE.md section as of 2026-10-25)
+
+Claude Review (+ follow-up, auto review, chat, the per-ticket TICKET review, the CI review,
+design diagrams, Check threads), AI Fix (+ Plan first), Resolve with Claude, the reference-docs
+library, sprint briefs/paths and every one-shot completion. Details:
+[docs/CLAUDE-REVIEW.md](CLAUDE-REVIEW.md). Non-negotiables:
+
+- **ONE switch, `config.aiEnabled` = `LIMN_AI_DISABLED !== 'true'`.** `registerAgenticRoutes`
+  registers NOTHING when off. `MeResponse.ai` carries `enabled` / `runtime` / `auth`; no
+  credential swaps the Run button for ONE line, never hides the feature.
+- **ONE CREDENTIAL LADDER FOR EVERY MODEL CALL** (`ai/credentials.ts` `resolveAiCredential`): the
+  reader's Claude Code login first (a `claude` session on disk or `CLAUDE_CODE_OAUTH_TOKEN`), else
+  the environment's `ANTHROPIC_API_KEY`; `LIMN_AI_USE_API_KEY=true` puts the key first. Agent runs
+  pass the ladder's environment as the query `env` (`agentAuthOptions()`, so a login run never
+  sees the key); one-shot `cheapComplete` (review/llm.ts) takes the Agent SDK on the login and the
+  Anthropic API on the key. **No caller picks its own credential, and nothing is stored.** Copy
+  says "runs on your own Claude Code login or Anthropic API key", never promises subscription
+  billing. Per-review budget: `REVIEW_BUDGET_USD` (default $6.75). Spend is recorded
+  (`recordAiUsage`), never metered.
+- **No AI SDK in the npm manifest** — downloaded on first use ("Set up AI" / `limn ai install`)
+  and value-imported ONLY by `ai/runtime.ts` (`loadAgentSdk`/`loadAnthropicSdk`/`loadZod`);
+  `build-release.mjs` asserts it.
+- **THE CLAUDE SPEND BUDGET** (optional, per machine, `ai/budget.ts`): ⚠ **every AUTOMATIC model
+  run asks the ONE gate first** (`review/budget-gate.ts` `automaticRunAllowed` / `ctx.aiBudget`) and
+  is SKIPPED, never queued, when over; a reader's click is never refused (the SPA asks). On a
+  subscription it is a share of the week and of the 5-hour session (Limn's own spend ÷ the estimated
+  allowance; the 5-hour share follows the weekly one unless set) shown in PERCENTAGES ONLY — no US$
+  on a subscription anywhere; the header item reads the SAME `['ai-budget']` query. Claude's usage
+  reading (from the
+  `loadAgentSdk` Query tap — never add per-runner forwarding) names the subscription and the reset,
+  and NEVER blocks.
+- **The agents' tools**: the reviewer and every chat are read-only with **`Bash` denied**; the
+  fixer has Read/Glob/Grep + Write/Edit/MultiEdit + `submit_fix`, `DISALLOWED_TOOLS =
+  ['Bash','NotebookEdit']` — **it builds and tests nothing**, and the SPA says "Not built or tested
+  here." (templated) without promising CI. ⚠ `WORKTREE_RULES` and the tool list change together
+  (`no-shell.test.ts`). Every agent run sits behind the PreToolUse PATH GUARD
+  (`review/path-guard.ts`). Anything an agent reads from a PR is UNTRUSTED.
+- **Nothing is posted or pushed until the reader presses the button**, except the per-workspace
+  auto-post / Push automatically switches (OFF by default). Auto-posting is AUTO RUNS ONLY, under
+  the reader's account, ONE review, `COMMENT` unless the OFF-by-default `autoVerdict` allows
+  stricter; ⚠ the `auto_post` record is CLAIMED (compare-and-set) BEFORE any GitHub write, a
+  failure is recorded and NEVER retried. Every posted body carries the hidden marker so
+  `isLimnPostedComment` holds.
+- **Auto review is OFF per workspace until switched on**; ONE start rule (`autoReviewDue`); it
+  re-reviews once per new HEAD; only a PERSON's or a REVIEW bot's (`=== 'review'`) comments count,
+  never Limn's own. A succeeded auto run on the reader's own PR may start an AUTO FIX (≤ 3 per PR
+  per 24h, `workspaces.auto_fix_enabled` OFF by default).
+- **Thread judgements**: "what Claude says now" is ONE fold, `currentThreadAssessmentsForPrs`
+  (latest review + later Check threads, newer wins); words only from `lib/claudeThreadMarker.ts`.
+- **Separate processes, never inside a PR review**: the CI review (`review/ci-review/`; one run per
+  PR × head × failing set; the signed log URL never leaves the server), the TICKET review
+  (`review/ticket-review/`; currency is a server FINGERPRINT; ONE story per ticket via
+  `ticketStory`; the Jira apiRoot fold is ONE `jiraApiRoot`), design diagrams (`review/diagrams/`,
+  only `diagram_type = 'design'` rows read). ⚠ `tracker/runtime.ts` opens the DB at import — keep
+  review-side tracker imports LAZY.
+- **AI Fix has TWO seeds**, `review` (built server-side from the stored run; items selected by
+  stable key) and `plain`. `comments`/`ci_analysis` seeds 400 `SeedRemoved` but still read as
+  history. Plan mode is MANUAL and READ-ONLY. URL paths kept (`/api/pro/prs/:id/ai-fix*`).
+- **The moved modules take ONE `AgentContext`** (`review/agent-context.ts`), never the platform
+  context.
+- ⚠ **EVERY MODEL CALL GOES THROUGH `ai/provider.ts`** ([docs/CODEX-PLAN.md](CODEX-PLAN.md)
+  § 3.1): runners call `getActiveProvider().runAgent`, `cheapComplete` calls `.complete`. ONLY
+  `ai/providers/claude.ts` (+ `ai/runtime.ts`) calls `query`/loads an SDK, and adds the path guard,
+  own-tools hook and isolation to every run (`provider-seam.test.ts`). Budget folds filter
+  `ai_usage.provider` (sqlite `0127`). ⚠ Codex: Phase 3 is complete (see § Codex, the second
+  provider); a Codex change must leave Claude's prompts byte-identical (`prompt-golden.json`).
+- **SonarCloud** ([docs/SONARCLOUD.md](SONARCLOUD.md)) and **reference docs**
+  ([docs/REFERENCE-DOCS.md](REFERENCE-DOCS.md)): sealed write-only tokens; one stored Sonar
+  snapshot per (PR, head) kept only when SonarCloud analysed THIS head; the docs library is
+  server-written files, crawls same-host only with LINEAR scanners over untrusted text, and every
+  doc link goes through `resolveDocLink`.
