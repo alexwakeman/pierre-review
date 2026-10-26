@@ -906,19 +906,6 @@ export interface ProHostQueries {
     scope: BotScopeWire,
     botUserId?: number,
   ): Promise<unknown>;
-  // The per-workspace period vectors behind the Reports "By workspace" axis: for EACH of the
-  // account's workspaces (listWorkspaces order — Default first, then by name), the same
-  // window-pure vector `getPeriodMetrics` computes, over that workspace's full membership.
-  // Returns WorkspacePeriodMetricsRow[] (cast by the plugin):
-  // [{workspaceId, name, isDefault, coverage: {trackedRepos, totalRepos, complete}, metrics}] —
-  // `coverage` is the per-workspace onboarded-mid-window disclosure, measured at the window's
-  // start. WINDOW-PURE (the two-sided predicates ride on getPeriodMetrics), and it carries NO
-  // cost fields at all — cost is per-workspace and must never be summed across workspaces, so it
-  // simply does not travel here.
-  getPeriodMetricsForWorkspaces(
-    accountId: number,
-    window: { fromMs: number; toMs: number },
-  ): Promise<unknown>;
   // The synthesis seam's input assembly (P2.1, now LIVE): the EXACT item rows a drill-down lists
   // for a scope descriptor, so the model summarises precisely the set the receipt list shows.
   // ⚠ One predicate, three consumers — a drill-down's list, its count and this input set read the

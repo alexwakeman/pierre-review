@@ -214,8 +214,7 @@ function RepoConsole({ repo }: { repo: ActivityRepo }): JSX.Element {
 // not even mounted while Activity is the active tab; narrowing here is the RAIL's job — clicking a
 // repo row switches to that repo's console (`activityRepoId`), which is a different mechanism with
 // a visible, obvious control. (The old "Compare workspaces" rail entry — the one entry that
-// stepped outside the workspace — was folded into Reports as the "By workspace" axis; see
-// PeriodReportsPanel.)
+// stepped outside the workspace — is gone, and there is no cross-workspace comparison.)
 export function ActivityView(): JSX.Element {
   useStalenessTick();
   const workspaceId = useFilters((s) => s.workspaceId);
@@ -223,7 +222,7 @@ export function ActivityView(): JSX.Element {
   const setActivityRepo = useFilters((s) => s.setActivityRepo);
   // The cross-repo Feed's inner sub-tab: 'feed' (the consolidated stream) and "Bot
   // classification". (The "Discussion themes" tab is REMOVED.)
-  // ('compare' is NOT a member — cross-workspace comparison is Reports' "By workspace" axis.)
+  // ('compare' is NOT a member — there is no cross-workspace comparison.)
   const feedInnerTab = useFilters((s) => s.feedInnerTab);
   const setFeedInnerTab = useFilters((s) => s.setFeedInnerTab);
   // Scope is the ACTIVE WORKSPACE — the whole of it. Both narrowing arguments are NULL on purpose,
@@ -256,8 +255,8 @@ export function ActivityView(): JSX.Element {
       ? sorted.find((r) => r.repoId === activityRepoId) ?? null
       : null;
   // Open PRs is the default detail (also when nothing is set).
-  // ('compare' left the activityRepoId union with the Compare rail entry — cross-workspace
-  // comparison is Reports' "By workspace" axis now, and a legacy `?activityRepo=compare` link
+  // ('compare' left the activityRepoId union with the Compare rail entry — there is no
+  // cross-workspace comparison, and a legacy `?activityRepo=compare` link
   // already normalizes to Pending in useUrlState.)
   const showingFeed = activityRepoId === 'feed';
   // Open PRs — one card per open PR in the workspace. The default (null included).
@@ -404,7 +403,7 @@ export function ActivityView(): JSX.Element {
               Monitoring (the user's order); bot classification itself lives on the Feed's own
               "Bot classification" tab, so moving Bots Monitoring down separates nothing that
               filters the stream from the stream.
-              (The "Compare workspaces" entry was folded into Reports' "By workspace" axis.) */}
+              (The "Compare workspaces" entry is gone; there is no cross-workspace comparison.) */}
 
           {/* OPEN PRS pseudo-row — FIRST, and the default landing: one card per open PR in the
               workspace, headed by the default-branch strip. Was a fixed tab of its own; a legacy

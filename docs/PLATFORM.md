@@ -101,7 +101,8 @@ filters the stream sits next to the stream.
 ⚠ **"Pending" is a LABEL-ONLY rename of "Needs attention"** — the store/URL literal stays
 `'attention'`: it is in bookmarks and in history entries Back replays, and an unknown
 `?activityRepo=` value now lands the reader on Pending anyway. (The "Compare workspaces" rail
-entry is GONE — cross-workspace comparison is Reports' "By workspace" axis; `'compare'` left the
+entry is GONE, and so is the Reports "By workspace" axis that followed it (2026-10-26) — there is
+no cross-workspace comparison; `'compare'` left the
 `activityRepoId` union and the URL parser, and `lib/workspaceColors.ts` went with
 `WorkspaceComparisonPanel`, its only importer.) **The rail is no
 longer GROUPED** — a repo belongs to exactly one workspace and exactly one workspace is ever in
@@ -591,12 +592,9 @@ in core, the routes and narration in the platform:
   `/api/bot-behaviour`). The optional
   `botUserId` narrows to ONE bot for the bot-detail tab's fetch (must not compute fifteen bots'
   heatmaps to render one); core admits only ids in the workspace's role-`'review'` reviewer set,
-  so a foreign/non-reviewer id yields the EMPTY response, never someone else's data. And
-  `getPeriodMetricsForWorkspaces(accountId, window)` — the Reports "By workspace" axis: the same
-  window-pure vector per workspace (listWorkspaces order), each with a per-workspace coverage
-  disclosure, and ⚠ **NO cost fields, ever** — cost is per workspace and a cross-workspace
-  surface cannot total it honestly, so it simply does not travel. And
-  `getSynthesisInput` (→ `db/synthesis-input.ts`), `getDailyBriefCounts` (→ `db/daily-brief.ts`),
+  so a foreign/non-reviewer id yields the EMPTY response, never someone else's data.
+  (`getPeriodMetricsForWorkspaces`, the seam behind the Reports "By workspace" axis, was REMOVED
+  with it 2026-10-26.) And `getSynthesisInput` (→ `db/synthesis-input.ts`), `getDailyBriefCounts` (→ `db/daily-brief.ts`),
   `getPersonPeriod` (→ `db/person-period.ts`, caller-less since the People report went), each
   TYPED with the shared wire type (`SynthesisInput`/`DailyBriefCounts`/`PersonPeriod`) **because
   the platform's payload hashes fold those very values**, and a cast-and-hope seam is exactly where
@@ -877,8 +875,7 @@ account-level fallback was retired in 0031; `GET`/`PUT
 ⚠ **A cadence change is REFUSE-AND-PRESERVE, and it closed three silent defects** (a stored artifact
 being overwritten in place, most of the history listing as clickable-but-blank, and every colliding
 row reading `stale` forever). The full contract — `cadenceCurrentPool`, the widened
-`workspace_period_reports` unique index, the archive at `<periodKey>@cad<days>`, and the
-by-workspace axis's `cadence_changed` refusal — is in
+`workspace_period_reports` unique index and the archive at `<periodKey>@cad<days>` — is in
 [PERIOD-REPORTING.md](PERIOD-REPORTING.md) § The sprint cadence is PER-WORKSPACE.
 
 ### The Slack digest is PER-WORKSPACE (platform migration 0030), bot block included (0033)

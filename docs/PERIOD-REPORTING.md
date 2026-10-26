@@ -35,8 +35,8 @@ table:
 > (one-person-per-request, the union gate on the bot routes) is described where it still applies.
 
 The platform half — the stored rows, the Haiku narration (shown while `me.ai.enabled`; the numbers
-render without it), `/api/pro/insights/period*`, the `payloadHashFor` cache key, the "By workspace"
-axis and the (removed) People-report contract — is documented in [PLATFORM.md](PLATFORM.md)
+render without it), `/api/pro/insights/period*`, the `payloadHashFor` cache key and the (removed) People-report
+contract — is documented in [PLATFORM.md](PLATFORM.md)
 (§ The synthesis seam, § The sprint cadence is PER-WORKSPACE, § The People report). This doc is the core side: the definitions, why they are shaped this
 way, and what will bite you.
 
@@ -52,13 +52,14 @@ bytes** around offset 132k, so every search tool silently under-reports matches 
 
 ---
 
-## The by-workspace axis has no surface of its own
+## There is no cross-workspace comparison
 
-It rides `byWorkspace` on the one-report GET, it has no route of its own
-(`GET /api/workspace-metrics/compare` is deleted and must not return), and its only control is the
-per-metric "By workspace" expander inside the period report. (Until 2026-10-22 Period reports,
-Chronology and the Bots ROI panel were Pro, visible-but-locked; every gate, badge and lock pane went
-with the plugin.)
+The Reports "By workspace" axis (a per-metric expander under each metric row, riding `byWorkspace`
+on the one-report GET via the `getPeriodMetricsForWorkspaces` seam) was REMOVED 2026-10-26, after
+`GET /api/workspace-metrics/compare` before it. Neither the fold, the seam, the wire field nor the UI
+remains; do not reintroduce one. Every Reports figure is about the ONE viewed workspace. (Until
+2026-10-22 Period reports, Chronology and the Bots ROI panel were Pro, visible-but-locked; every
+gate, badge and lock pane went with the plugin.)
 
 ⚠ **`enabled: false` STAYS SILENT.** `GET /api/pro/insights/reports` can still answer
 `{enabled:false}`; `PeriodReportsPanel` keeps that as a branch returning `null` rather than an
@@ -719,31 +720,13 @@ passed.* `listPeriods` therefore returns `{ periods, archived }`:
   different facts, and a reader needs to know which (one is a setting somebody made and can undo).
 
 `GET /api/pro/insights/reports/:periodKey` answers an archived key BEFORE consulting the grid, via
-`loadArchivedReport`, and serves it **frozen**: `archived: true`, **no by-workspace axis**, and
+`loadArchivedReport`, and serves it **frozen**: `archived: true` and
 `stale: false` with no metrics scan. ⚠ **An archived report must never report staleness.** `stale`
 exists to offer a REGENERATION, and an archived period cannot be regenerated at all — its window is
 not on the grid, so `windowForKey` refuses it. A stale badge there would name an action that does not
 exist, and the action it used to invite is what destroyed the artifact. The SPA hides Generate
 entirely on an archived selection (absent, not disabled) and lists the archive under **"Earlier
 cadences"** at the bottom of the Reports pane.
-
-### The by-workspace axis REFUSES under mixed cadences
-
-`byWorkspaceAxis` hands ONE window (the viewed workspace's period) to every workspace on the account.
-That was right while the cadence was account-wide. It is not once a workspace can run its own: a team
-on a 7-day sprint measured over a 14-day window contributes roughly **double** its per-sprint
-throughput to a column headed "this period" — every count wrong, the medians and percentages wrong
-less visibly and therefore worse.
-
-So the axis returns `{ current: [], prior: null, refusal: 'cadence_changed', refusalWorkspaces }`.
-`cadence_changed` is REUSED rather than given a new `PeriodRefusalReason` member: it already means
-"measured over different-length windows, do not subtract", which is the same claim at a different
-grain. `refusalWorkspaces` names which workspaces diverge (names and cadences only — there are no
-figures to give).
-
-⚠ **It refuses WHOLESALE rather than dropping the mismatched rows.** Silently restricting the table's
-membership would make one team's Reports change shape because ANOTHER team edited their sprint
-length — a surface that mutates for a reason its reader cannot see.
 
 ### The routes and the control
 
@@ -1012,8 +995,8 @@ exactly one period. Pinned by `db/bot-analytics-window-bounds.test.ts`.
 ## See also
 
 - [PLATFORM.md](PLATFORM.md) — the platform half: stored rows,
-  `payloadHashFor`, the Haiku narration + the D4 digit gate, the "By workspace" axis
-  (`getPeriodMetricsForWorkspaces`), and the removed **People report** (history).
+  `payloadHashFor`, the Haiku narration + the D4 digit gate, and the removed **People report**
+  (history).
 - [API.md](API.md) — `/api/pro/insights/period*`, `/api/bot-analytics` (`fromMs`/`toMs`).
 - [DATA-MODEL.md](DATA-MODEL.md) — `repos.createdAt`, `workspaceReviewers` (the bot object),
   `ReviewerRole`.

@@ -46,7 +46,7 @@ const VIEWS = [
   ['feed:classification', '?view=activity&activityRepo=feed&feedTab=classification', 'bot-classification'],
   ...['roi', 'themes', 'advisor', 'benchmark'].map((t) => [`bots:${t}`, `?view=activity&activityRepo=bots&botsTab=${t}`, t === 'roi' ? 'bots-roi' : t === 'themes' ? 'bots-themes' : null]),
   ['bot-detail:8', '?view=bot-detail:8', null],
-  ...['overview', 'stories', 'bottlenecks'].map((t) => [`reports:${t}`, `?view=activity&activityRepo=insights&insightsTab=${t}`, t === 'overview' ? 'reports' : t === 'bottlenecks' ? 'chronology' : null]),
+  ...['overview', 'bottlenecks', 'stories'].map((t) => [`reports:${t}`, `?view=activity&activityRepo=insights&insightsTab=${t}`, t === 'overview' ? 'reports' : t === 'bottlenecks' ? 'chronology' : null]),
   ['reports:month', '?view=activity&activityRepo=insights&reportGrain=month', 'reports-month'],
   ['docs', '?view=activity&activityRepo=docs', 'docs'],
   ...['themes', 'paths', 'people', 'merged'].map((t) => [`sprint:${t}`, `?view=sprint&sprintTab=${t}`, t === 'themes' ? 'sprint-themes' : t === 'paths' ? 'sprint-paths' : null]),

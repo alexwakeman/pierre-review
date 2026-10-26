@@ -7,7 +7,7 @@ import { useFilters } from '../../store/filters.js';
 import { PALETTE } from '../charts/common.js';
 import { RepoRows } from '../charts/RepoRows.js';
 import { ScatterChart } from '../charts/ScatterChart.js';
-import { ChevronIcon, PullRequestIcon } from '../Icons.js';
+import { ChevronIcon, ExternalLinkIcon } from '../Icons.js';
 import { InfoButton } from '../InfoModal.js';
 import { reportingWindowCaption, reportingWindowPhrase, windowDates } from './reportingWindowText.js';
 import {
@@ -17,7 +17,6 @@ import {
   indexStories,
   reviewShortfallParts,
   rowsFor,
-  storyLabel,
   storyMetaParts,
 } from './storiesModel.js';
 
@@ -32,8 +31,10 @@ import {
 // re-ranks them.
 // ⚠ EVERY EXPLANATION SITS BEHIND AN ⓘ — the page carries facts and labels, no caption paragraphs.
 // ⚠ UNKNOWN IS NEVER ZERO: an unsized story is listed under the size chart, never plotted at 0.
-// ⚠ A STORY'S PULL REQUESTS OPEN IN THE STORY VIEW (`useOpenStory`): the "Time and pull requests"
-// rows and every story row carry a named "Pull requests" button; the key still opens the tracker.
+// ⚠ A TICKET'S NAME IS THE LINK TO ITS STORY TAB (`useOpenStory` — the dedicated tab, never This
+// Sprint's tray): in the "Time and pull requests" rows, in every "All n stories" row and in the
+// lists under the size chart. No separate button. The small arrow beside a row's name opens the
+// ticket in the tracker.
 
 const MUTED = 'text-gray-500 dark:text-gray-400';
 const CARD = 'rounded-lg border border-gray-200 p-3 dark:border-gray-800';
@@ -61,23 +62,30 @@ function TimeChartInfo(): JSX.Element {
         workspace&rsquo;s working hours. Pull requests counts every pull request on the ticket, open,
         merged or closed. Each column has its own scale.
       </p>
-      <p>&ldquo;Pull requests&rdquo; under a ticket opens a tab with only that ticket&rsquo;s pull requests.</p>
+      <p>Select a ticket to open its story and pull requests in a tab.</p>
     </>
   );
 }
 
-/** Opens the story view: this story and its pull requests, open and merged. */
-function TicketPrsButton({ story, label }: { story: Pick<StoryRow, 'ident' | 'key' | 'title'>; label: string }): JSX.Element {
+/** A ticket's name — key and title, in full — as the link to its story tab (story + pull requests). */
+function StoryLink({
+  story,
+  className = '',
+}: {
+  story: Pick<StoryRow, 'ident' | 'key' | 'title'>;
+  className?: string;
+}): JSX.Element {
   const openStory = useOpenStory();
+  const title = (story.title ?? '').trim();
   return (
     <button
       type="button"
       onClick={() => openStory({ ident: story.ident, key: story.key, title: story.title })}
-      aria-label={`${label} for ${story.key}`}
-      className="mt-0.5 inline-flex items-center gap-1 rounded border border-gray-300 px-1.5 py-px text-[11px] text-gray-700 hover:border-gray-400 dark:border-gray-700 dark:text-gray-200 dark:hover:border-gray-500"
+      title={`Open the ${story.key} story`}
+      className={`break-words text-left hover:underline ${className}`}
     >
-      <PullRequestIcon size={10} />
-      {label}
+      <span className="font-medium text-sky-700 dark:text-sky-300">{story.key}</span>
+      {title !== '' && <span className="text-gray-800 dark:text-gray-100"> {title}</span>}
     </button>
   );
 }
@@ -203,6 +211,10 @@ function StoriesBlock({
           <ChevronIcon dir={open ? 'down' : 'right'} size={10} />
           All {data.stories.length} {data.stories.length === 1 ? 'story' : 'stories'}
         </button>
+        {/* The split, readable before opening: how many fell short and how many have no review. */}
+        <span className={`ml-2 text-xs ${MUTED}`}>
+          {shortfall.length} fell short · {unchecked.length} not reviewed
+        </span>
         {open && (
           <div className="mt-2 space-y-4">
             <StoryList
@@ -273,18 +285,22 @@ function StoryItem({ story, workingDayHours }: { story: StoryRow; workingDayHour
   const shortParts = reviewShortfallParts(story);
   return (
     <li className={CARD} data-testid="story-row">
-      <div className="text-sm text-gray-800 dark:text-gray-100">
-        {href != null ? (
-          <a href={href} target="_blank" rel="noreferrer" className="font-medium text-sky-700 hover:underline dark:text-sky-300">
-            {story.key}
+      <div className="flex items-start gap-1.5 text-sm">
+        <StoryLink story={story} />
+        {href != null && (
+          <a
+            href={href}
+            target="_blank"
+            rel="noreferrer"
+            aria-label={`Open ${story.key} in the tracker`}
+            title="Open in the tracker"
+            className={`mt-0.5 shrink-0 hover:text-gray-700 dark:hover:text-gray-200 ${MUTED}`}
+          >
+            <ExternalLinkIcon size={12} />
           </a>
-        ) : (
-          <span className="font-medium">{story.key}</span>
-        )}{' '}
-        <span className="break-words">{story.title ?? ''}</span>
+        )}
       </div>
       <div className={`mt-0.5 text-xs ${MUTED}`}>{storyMetaParts(story, workingDayHours).join(' · ')}</div>
-      {story.prs.total > 0 && <TicketPrsButton story={story} label="Pull requests" />}
       {story.review != null && (
         <div className="mt-0.5 text-xs text-gray-700 dark:text-gray-200">
           {TICKET_ALIGNMENT_LABEL[story.review.alignment]}
@@ -312,12 +328,12 @@ function TimeChart({ stories, workingDayHours }: { stories: StoryRow[]; workingD
         labels={m.labels}
         nameHeader="Ticket"
         nameWidthPct={36}
-        rowAction={(i) => {
+        labelFor={(i) => {
           const s = byIdent.get(m.idents[i] ?? '');
-          return s == null ? null : (
-            <span className="block">
-              <TicketPrsButton story={s} label="Pull requests" />
-            </span>
+          return s == null ? (
+            <span className="break-words text-gray-700 dark:text-gray-200">{m.labels[i]}</span>
+          ) : (
+            <StoryLink story={s} />
           );
         }}
         columns={[
@@ -330,6 +346,7 @@ function TimeChart({ stories, workingDayHours }: { stories: StoryRow[]; workingD
             format: (n) => formatWorkingTime(n, workingDayHours),
             axisFormat: (n) => formatWorkingTime(n, workingDayHours).replace(' working days', ' d').replace(' working day', ' d'),
             valueMode: 'total',
+            valueSide: 'before',
             barWidthPct: 18,
             valueWidthPct: 14,
           },
@@ -341,6 +358,7 @@ function TimeChart({ stories, workingDayHours }: { stories: StoryRow[]; workingD
             unknownLabel: 'not measured',
             format: (n) => String(Math.round(n)),
             valueMode: 'total',
+            valueSide: 'before',
             barWidthPct: 18,
             valueWidthPct: 14,
           },
@@ -404,7 +422,7 @@ function UnplottedList({
       <ul className="mt-0.5 space-y-0.5 text-gray-700 dark:text-gray-200">
         {rows.map((s) => (
           <li key={s.ident} className="break-words">
-            {storyLabel(s)}
+            <StoryLink story={s} />
             {detail != null && <span className={MUTED}> · {detail(s)}</span>}
           </li>
         ))}

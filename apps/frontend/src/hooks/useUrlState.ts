@@ -359,8 +359,8 @@ export function readFromUrl(): Partial<FilterState> {
     // 'feed' is parsed EXPLICITLY (it is not the default): the write side emits it, so
     // a Feed link must come back as the Feed rather than fall through to the default.
     else if (activityRepo === 'feed') out.activityRepoId = 'feed';
-    // ('compare' is deliberately NOT parsed: the "Compare workspaces" rail entry was folded into
-    // Reports' "By workspace" axis. A legacy `?activityRepo=compare` link falls through the
+    // ('compare' is deliberately NOT parsed: the "Compare workspaces" rail entry is gone and there
+    // is no cross-workspace comparison. A legacy `?activityRepo=compare` link falls through the
     // parseInt branch below — NaN, nothing set — and lands on the 'open-prs' default, which is
     // the normalization for a value that no longer exists. Any other unknown value does the same.)
     // 'insights' USED to be write-only-by-omission: a landing default that stayed out of the URL
@@ -693,8 +693,7 @@ export function writeToUrl(s: FilterState): void {
     // without it a Pending link would open Open PRs. Emitting a value the read side does not parse would be
     // write-only, so the two halves always change together.
     // (The 'retro' pseudo-row is gone with the Retro panel; the 'compare' pseudo-row is gone
-    // with the Compare rail entry — its surface is Reports' "By workspace" axis, reachable via
-    // `?activityRepo=insights&report=…`.)
+    // with the Compare rail entry; there is no cross-workspace comparison.)
     if (typeof s.activityRepoId === 'number') {
       p.set('activityRepo', String(s.activityRepoId));
     } else if (s.activityRepoId === 'attention') {

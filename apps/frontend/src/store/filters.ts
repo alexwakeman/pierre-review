@@ -74,7 +74,7 @@ export type RepoConsoleTab = 'activity' | 'bots';
 // Back replays (`?insightsTab=sprint|merged`), so useUrlState's READ maps them onto the tab + its
 // sub-tab; they are never emitted again.
 export type InsightsInnerTab = 'overview' | 'stories' | 'bottlenecks';
-export const INSIGHTS_INNER_TABS: readonly InsightsInnerTab[] = ['overview', 'stories', 'bottlenecks'];
+export const INSIGHTS_INNER_TABS: readonly InsightsInnerTab[] = ['overview', 'bottlenecks', 'stories'];
 // The This Sprint tab's sub-tab strip (FREE on every tier): three independent views of the
 // sprint on one lane board — `'themes'` (Theme, the landing panel), `'paths'` (Critical path) and
 // `'people'` (People) — then `'merged'` ("Merged so far", MergedPrsView — every PR merged in the
@@ -534,8 +534,7 @@ export interface FilterState {
   // Which inner sub-tab the cross-repo Feed rail shows: 'feed' (the consolidated feed) or
   // 'classification' (Bot classification).
   //
-  // 'compare' is NOT a member: cross-workspace comparison is the Reports "By workspace" axis
-  // (inside PeriodReportsPanel), no longer a surface of its own anywhere.
+  // 'compare' is NOT a member: there is no cross-workspace comparison anywhere.
   //
   // The consumer DERIVES an effective tab from the visible tab list rather than writing a
   // correction back into the store. Transient (freshDefaults only, never persisted), so removing a
@@ -746,8 +745,8 @@ export interface FilterState {
   // (BotsView); 'insights' is the Reports rail entry.
   // (The 'retro' rail value was REMOVED with the Retro panel — it was already unreachable:
   // nothing called setActivityRepo('retro') and useUrlState never parsed it. 'compare' was
-  // REMOVED with the "Compare workspaces" rail entry — cross-workspace comparison is Reports'
-  // "By workspace" axis now. This field is transient and 'compare' is no longer URL-parsed, so a
+  // REMOVED with the "Compare workspaces" rail entry — there is no cross-workspace comparison.
+  // This field is transient and 'compare' is no longer URL-parsed, so a
   // stale value cannot enter the store; a legacy `?activityRepo=compare` link falls through the
   // read side's parseInt branch and lands on the 'open-prs' default — normalization by
   // construction.)

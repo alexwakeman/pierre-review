@@ -174,10 +174,9 @@ export async function insightsRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
-  // (GET /api/workspace-metrics/compare was DELETED with the "Compare workspaces" rail entry —
-  // cross-workspace comparison now lives inside Reports as the plugin-served "By workspace" axis,
-  // which rides the window-pure getPeriodMetricsForWorkspaces seam instead of the snapshot
-  // WorkspaceMetrics matrix.)
+  // (GET /api/workspace-metrics/compare was DELETED with the "Compare workspaces" rail entry, and
+  // the Reports "By workspace" axis that followed was removed 2026-10-26: there is no
+  // cross-workspace comparison.)
 
   // The attention cards (your turn / red builds that are yours / stalled reviews / untouched
   // threads / reviewer load / needs-a-reviewer / ready-to-land / behind-trunk) — CORE/free (the

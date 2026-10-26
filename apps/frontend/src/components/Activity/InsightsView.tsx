@@ -11,11 +11,11 @@ import { WorkspaceFlowMetrics } from './WorkspaceFlowMetrics.js';
 //
 // ── THE PANE IS THREE TABS ──────────────────────────────────────────────────────────────────
 //   • Overview   — flow metrics, the two "where the work is happening" cards, period reports.
-//   • Stories    — every tracker ticket with a PR merged in the REPORTING WINDOW: two charts and
-//     the lists (StoriesView, GET /api/stories).
 //   • Chronology — the COURT LEDGER (BottlenecksPanel). Deterministic (no model anywhere behind
 //     it) and the twin of the Bots rail — that surface measures automation, this one measures
 //     where people's time went.
+//   • Stories    — every tracker ticket with a PR merged in the REPORTING WINDOW: two charts and
+//     the lists (StoriesView, GET /api/stories). Sits to the RIGHT of Chronology.
 // ("Merged so far" and "This sprint" LEFT this pane for the This Sprint tab —
 // Sprint/SprintTabView; a legacy `?insightsTab=sprint|merged` lands there.)
 //
@@ -48,9 +48,9 @@ export function InsightsView(): JSX.Element {
         {(
           [
             { key: 'overview', label: 'Overview' },
-            { key: 'stories', label: 'Stories' },
             // ⚠ LABEL-ONLY: the store/URL literal stays 'bottlenecks' (see InsightsInnerTab).
             { key: 'bottlenecks', label: 'Chronology' },
+            { key: 'stories', label: 'Stories' },
           ] as const
         ).map((t) => {
           const on = effectiveTab === t.key;

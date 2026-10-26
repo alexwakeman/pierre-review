@@ -17,7 +17,6 @@ import { readSettingsRow, reportModelOf, resolveSprintCadence } from '../setting
 import { resolveRequestScope } from './workspace-request.js';
 import {
   buildMonthToDate,
-  byWorkspaceAxis,
   generatePeriodReport,
   grainOfKey,
   listPeriods,
@@ -46,9 +45,7 @@ import {
 // under `/api/pro/` reaches the predicates below it, and that catch-all would put the two free
 // GETs on the 20/min AI bucket purely because the family also contains a POST. The POST
 // gets [ai, aiHourly]; the list GET gets [read]; the one-report GET gets [search, read] because it
-// carries the "By workspace" axis, whose cost multiplies by workspace count (2 windows × N ×
-// getPeriodMetrics — the deleted /api/workspace-metrics/compare's tier, inherited for the same
-// reason). Every case is pinned in rate-limit.test.ts.
+// can recompute a whole open month live. Every case is pinned in rate-limit.test.ts.
 //
 // ⚠ `?workspace=` resolves through `resolveRequestScope`: absent / unknown / another tenant's id
 // all degrade to the account's DEFAULT workspace, never a 404. Same for an unknown `:periodKey` —
@@ -197,9 +194,8 @@ export function registerPeriodReportRoutes(app: FastifyInstance, ctx: ProContext
         keyGrain,
       );
       // An ARCHIVED key (`sprint-…@cad14`) reads a preserved artifact whose window the current grid
-      // cannot name. It is served FROZEN — no staleness probe, no by-workspace axis (both describe
-      // a live period), and `archived: true` on the report so the SPA captions it as kept rather
-      // than as refreshable. It needs no grid at all, so it is answered before the grid is
+      // cannot name. It is served FROZEN — no staleness probe (it describes a live period), and
+      // `archived: true` on the report so the SPA captions it as kept rather than as refreshable. It needs no grid at all, so it is answered before the grid is
       // consulted: an archived report stays readable even from a workspace whose cadence is
       // currently unset.
       if (archivedParse != null) {
@@ -229,22 +225,11 @@ export function registerPeriodReportRoutes(app: FastifyInstance, ctx: ProContext
         : window == null
           ? null
           : await loadStoredReport(ctx, accountId, scope, window, model);
-      // The "By workspace" axis (C4): computed LIVE, additive/optional on the wire — a stored
-      // report keeps rendering without it, an older client ignores it. Only computed when there
-      // is a report to hang it on (grid != null is implied by window != null), and it returns
-      // null for a single-workspace account (one row compares nothing).
-      // Never on an open period: the axis compares two COMPLETED windows of every workspace, and
-      // hanging it off a month-to-date would put a part-month column beside a whole-month one.
-      const byWorkspace =
-        window == null || grid == null || report == null || report.inProgress === true
-          ? null
-          : await byWorkspaceAxis(ctx, accountId, grid, window);
       const resp: PeriodReportResponse = {
         enabled: true,
         workspaceId: scope.workspaceId,
         report,
         modelInfo: modelInfoFor(model),
-        ...(byWorkspace == null ? {} : { byWorkspace }),
       };
       return reply.send(resp);
     },

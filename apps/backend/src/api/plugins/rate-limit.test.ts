@@ -310,9 +310,8 @@ describe('tierFor — period reports', () => {
 
   it('keeps the list GET on read and puts the one-report GET on the search bucket', () => {
     expect(tiers('GET', '/api/pro/insights/reports')).toEqual(['read']);
-    // The one-report GET carries the "By workspace" axis (C4): 2 windows × N workspaces ×
-    // getPeriodMetrics — the same multiplies-by-workspace-count shape that put the deleted
-    // /api/workspace-metrics/compare on `search`. 60/min, never the 600/min blanket.
+    // The one-report GET can serve the open month live (six indexed scans, the month-to-date
+    // route's cost). 60/min, never the 600/min blanket.
     expect(tiers('GET', '/api/pro/insights/reports/sprint-2026-08-18')).toEqual([
       'search',
       'read',

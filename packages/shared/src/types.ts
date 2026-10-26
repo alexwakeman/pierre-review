@@ -3699,7 +3699,7 @@ export interface UpdateBranchResult {
 //
 // ⚠ `teamName` HERE IS GITHUB'S OWN TEAM (`@org/team`) — NOT this app's workspace. It is parsed
 // straight out of a GitHub payload and stored in `reviewRequests.teamName`. Workspace-side names
-// (`PeriodWorkspaceRow.name`, `Workspace.name`) are the OPPOSITE category and follow the app's
+// (`Workspace.name`) are the OPPOSITE category and follow the app's
 // own vocabulary; renaming this one breaks GitHub-team review-request rendering. Do not touch it.
 export interface RequestedReviewer {
   userId: number | null;
@@ -10883,9 +10883,8 @@ export interface WorkspaceMetricsResponse {
 }
 
 // (The "Compare workspaces" surface — `WorkspaceComparisonRow`/`WorkspaceComparisonResponse` and
-// `GET /api/workspace-metrics/compare` — was DELETED with its rail entry. Cross-workspace
-// comparison now lives inside Reports as the "By workspace" axis: `PeriodByWorkspace` below,
-// window-pure period vectors rather than the snapshot WorkspaceMetrics matrix.)
+// `GET /api/workspace-metrics/compare` — was DELETED with its rail entry, and the Reports "By
+// workspace" axis that replaced it was removed 2026-10-26. There is no cross-workspace comparison.)
 
 // ---- Period-over-period reporting (the Insights "Reports" sub-tab) ----
 // A stored, forwardable artifact for ONE completed period ("18 Aug – 1 Sep"), its comparison
@@ -11237,62 +11236,9 @@ export interface PeriodReportsListResponse {
   archived?: PeriodArchivedReport[];
 }
 
-// ---- The Reports "By workspace" axis (C4 — Compare workspaces folded into Reports) ----
-// One row per WORKSPACE the account owns, carrying the SAME window-pure 15-key vector the headline
-// table renders (`getPeriodMetrics` over that workspace's full membership) — NOT the snapshot
-// WorkspaceMetrics matrix the deleted Compare rail entry used, which was not window-pure and would
-// have put an "as of now" number under a dated period heading.
-//
-// ⚠ NO MONEY TRAVELS HERE, AND NONE MAY BE ADDED. A bot's price is a per-workspace fact, so a
-// cross-workspace surface can never total it — the vector has no cost key and this row adds none.
-//
-// ⚠ ONE POPULATION PER ROW: `current` and `prior` for a given workspace are both computed over
-// that workspace's FULL membership (there is no coverage-stable subset here). The honesty about
-// repos that onboarded mid-window travels as `coverage` — disclosure beside the figures, never a
-// silent substitution of a different population into the subtraction.
-export interface PeriodWorkspaceRow {
-  workspaceId: number;
-  name: string;
-  isDefault: boolean;
-  // Repos tracked at the window's start vs the workspace's membership now — the same shape (and
-  // the same annotation duty) as PeriodReport.coverage, per workspace.
-  coverage: PeriodCoverage;
-  // The full vector in PERIOD_METRIC_KEYS order. An empty workspace yields the all-null vector —
-  // still a row (the axis must name it), and every null renders "—", never 0.
-  metrics: PeriodMetricValue[];
-}
-
-export interface PeriodByWorkspace {
-  // Rows for the viewed period, listWorkspaces order (Default first, then by name).
-  // EMPTY when `refusal` is set — a refused axis has no honest rows.
-  current: PeriodWorkspaceRow[];
-  // Rows for the period before it, same order. `null` = no prior period window exists on the
-  // cadence grid — which must render as "no prior", never as a column of zeros.
-  prior: PeriodWorkspaceRow[] | null;
-  priorPeriodKey: string | null;
-  // ⚠ THE WHOLE AXIS REFUSES WHEN THE COMPARED WORKSPACES DO NOT SHARE THE VIEWED WORKSPACE'S
-  // SPRINT CADENCE. The axis hands ONE window to every workspace; a team on a 7-day sprint
-  // measured over a 14-day window contributes roughly double its per-sprint throughput to a
-  // column headed "this period". `cadence_changed` is reused rather than given a new member —
-  // it already means "measured over different-length windows, do not subtract".
-  //
-  // ⚠ IT REFUSES WHOLESALE RATHER THAN DROPPING THE MISMATCHED ROWS. Silently restricting the
-  // table's membership would make one team's Reports change shape because ANOTHER team edited
-  // their sprint length — a surface mutating for a reason its reader cannot see.
-  refusal?: PeriodRefusalReason;
-  // Which workspaces diverge, named so the reader can act without opening Settings for each one.
-  // Names and cadences only; there are no figures to give. Present only alongside `refusal`.
-  refusalWorkspaces?: { workspaceId: number; name: string; cadenceDays: number | null }[];
-}
-
 export interface PeriodReportResponse {
   enabled: boolean; workspaceId: number; report: PeriodReport | null;
   modelInfo?: PeriodReportModelInfo;
-  // The "By workspace" axis, computed LIVE on this GET (never stored on the report row — a stored
-  // report predating the axis still renders, and the axis reflects today's workspace roster).
-  // OPTIONAL and additive: an older plugin omits it, an older client ignores it. Omitted when the
-  // account owns fewer than two workspaces (one row compares nothing) and when there is no report.
-  byWorkspace?: PeriodByWorkspace;
 }
 
 export interface PeriodReportGenerateResponse {

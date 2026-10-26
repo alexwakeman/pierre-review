@@ -3,7 +3,6 @@ import { and, eq } from 'drizzle-orm';
 import { PERIOD_METRIC_KEYS } from '@pierre-review/shared';
 import type {
   PeriodArchivedReport,
-  PeriodByWorkspace,
   PeriodCoverage,
   PeriodForecast,
   PeriodGrain,
@@ -18,12 +17,11 @@ import type {
   PeriodReportCostEstimate,
   PeriodReportListItem,
   PeriodReportSpend,
-  PeriodWorkspaceRow,
 } from '@pierre-review/shared';
 import type { BotScopeWire, ProContext } from '../contract.js';
 import type { LlmClient } from '../llm/seam.js';
 import { proSchemaFor } from '../db.js';
-import { currentSprintWindow, resolveSprintCadence, type SprintCadence } from '../settings/store.js';
+import { currentSprintWindow, type SprintCadence } from '../settings/store.js';
 import { estimateReportCost, type ReportModel } from '../llm/seam.js';
 import {
   buildSuggestedQuestions,
@@ -464,105 +462,6 @@ export function windowForKey(grid: PeriodGrid, key: string): PeriodWindow | null
   if (!Number.isInteger(raw) || index >= grid.currentIndex) return null;
   if (index < grid.currentIndex - MAX_HISTORY_PERIODS) return null;
   return windowAt(grid, index);
-}
-
-// ── The "By workspace" axis (C4 — Compare workspaces folded into Reports) ────────────────────
-//
-// One period vector per workspace the account owns, for the viewed period AND the one before it,
-// via the `getPeriodMetricsForWorkspaces` host seam — the WINDOW-PURE composition core built for
-// exactly this (never the snapshot getWorkspaceMetrics matrix, which is not window-pure and would
-// put an "as of now" figure under a dated period heading).
-//
-// COMPUTED LIVE ON THE FREE GET, never stored: a stored report predates today's workspace roster,
-// and the axis must reflect the roster the reader owns now. It therefore must NEVER enter any
-// payload hash or the data fingerprint — a roster change would otherwise flip every stored report
-// stale at once.
-//
-// ⚠ ONE POPULATION PER ROW: a workspace's current and prior figures are both its FULL membership;
-// there is no coverage-stable subset here. The onboarded-mid-window honesty travels as the row's
-// `coverage` disclosure. ⚠ NO MONEY: the vector has no cost key and none may be added — cost is
-// per-workspace and must never be summed (or even juxtaposed as a total) across workspaces.
-//
-// COST: 2 windows × N workspaces × getPeriodMetrics — the multiplies-by-workspace-count shape
-// that put the deleted /api/workspace-metrics/compare on the `search` rate tier; the one-report
-// GET sits on the same tier for the same reason (rate-limit.ts's family block).
-export async function byWorkspaceAxis(
-  ctx: ProContext,
-  accountId: number,
-  grid: PeriodGrid,
-  window: PeriodWindow,
-): Promise<PeriodByWorkspace | null> {
-  const rowsFor = (win: PeriodWindow): Promise<PeriodWorkspaceRow[]> =>
-    ctx.queries.getPeriodMetricsForWorkspaces(accountId, {
-      fromMs: win.fromMs,
-      toMs: win.toMs,
-    }) as Promise<PeriodWorkspaceRow[]>;
-  const current = await rowsFor(window);
-  // One workspace compares nothing — omit the axis entirely (and skip the prior window's
-  // N-way scan). The SPA renders no expander; absence, not an error.
-  if (current.length < 2) return null;
-
-  // ⚠ MIXED CADENCES MAKE THESE COLUMNS NOT LIKE-FOR-LIKE, SO THE AXIS REFUSES — NAMED.
-  //
-  // This handler hands ONE window (the VIEWED workspace's period) to every workspace on the
-  // account. That was exactly right while the cadence was an account-wide fact. It is not once a
-  // workspace can run its own: a team on a 7-day sprint measured over a 14-day window contributes
-  // roughly twice its real per-sprint throughput to a column headed "this period", and nothing on
-  // screen says so. Every count metric is affected; the medians and percentages are affected less
-  // obviously and therefore worse.
-  //
-  // The refusal covers the WHOLE TABLE rather than dropping the mismatched rows, deliberately.
-  // Silently restricting membership would make one team's Reports table change shape because
-  // ANOTHER team edited their sprint length — a surface that mutates for reasons its reader cannot
-  // see. `cadence_changed` is reused rather than given a new union member: it already means
-  // exactly "these two things were measured over different-length windows and must not be
-  // subtracted", which is the same claim at a different grain.
-  //
-  // ⚠ AND IT IS A SPRINT-GRAIN CHECK ONLY. At calendar-month grain there is nothing to diverge:
-  // every workspace on the account reads the same August, because the grid is the calendar and
-  // not a per-workspace setting. Running the check anyway would refuse the axis on every month
-  // report for any account where one team has picked a non-default sprint length — a refusal
-  // about a setting that has no bearing on the window being compared.
-  const cadences =
-    grid.grain !== 'sprint'
-      ? []
-      : await Promise.all(
-          current.map(async (row) => ({
-            workspaceId: row.workspaceId,
-            cadence: await resolveSprintCadence(ctx, accountId, row.workspaceId),
-          })),
-        );
-  const gridCadenceDays = grid.grain === 'sprint' ? grid.cadenceDays : null;
-  const divergent = cadences.filter(
-    (c) => (c.cadence.cadenceDays ?? gridCadenceDays) !== gridCadenceDays,
-  );
-  if (divergent.length > 0) {
-    return {
-      // Empty on purpose: a refused axis has no honest rows, and half a table beside a refusal
-      // sentence reads as "here are the ones that worked", which is the silent restriction above.
-      current: [],
-      prior: null,
-      priorPeriodKey: null,
-      refusal: 'cadence_changed',
-      // Named so the SPA can say WHICH workspaces diverge without the reader opening Settings for
-      // each one. Names only — no figures, because there are none to give.
-      refusalWorkspaces: divergent.map((d) => {
-        const name = current.find((r) => r.workspaceId === d.workspaceId)?.name ?? '';
-        return { workspaceId: d.workspaceId, name, cadenceDays: d.cadence.cadenceDays };
-      }),
-    };
-  }
-  // The prior period on the SAME grid. Below the look-back floor there is deliberately no prior:
-  // `prior: null` renders as "no prior", never as a column of zeros.
-  const priorIndex = window.index - 1;
-  const priorWindow =
-    priorIndex >= grid.currentIndex - MAX_HISTORY_PERIODS ? windowAt(grid, priorIndex) : null;
-  const prior = priorWindow == null ? null : await rowsFor(priorWindow);
-  return {
-    current,
-    prior,
-    priorPeriodKey: priorWindow?.key ?? null,
-  };
 }
 
 // ── Host-seam result shapes (cast locally; the seam is typed `Promise<unknown>`) ─────────────

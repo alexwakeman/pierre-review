@@ -229,12 +229,12 @@ function tierFor(method: string, path: string): readonly Tier[] {
   //                               a bounded 8-period metrics backfill: ~20 indexed scans.
   //   GET  …/reports              stored rows + a bounded per-period coverage read. DB only.
   //   GET  …/reports/:periodKey   one stored row + ONE metric-vector recompute for the staleness
-  //                               flag, PLUS the "By workspace" axis (C4): 2 windows ×
-  //                               N workspaces × getPeriodMetrics — the one cost in the family
-  //                               that MULTIPLIES by workspace count, which is the exact shape
-  //                               that put the deleted /api/workspace-metrics/compare on the
-  //                               60/min `search` bucket. Same tier here, same reason. Still DB
-  //                               only — it must NEVER grow a generation leg (the
+  //                               flag, OR — for the open month — the whole month-to-date read
+  //                               live (six indexed scans, the month-to-date route's cost). That
+  //                               keeps it on the 60/min `search` bucket, never the 600/min
+  //                               blanket. (The "By workspace" axis that once rode it, 2 windows ×
+  //                               N workspaces, was removed 2026-10-26.) Still DB only — it must
+  //                               NEVER grow a generation leg (the
   //                               `GET /api/pro/prs/:id/annotations` precedent).
   // Anchored on the exact family prefix so no sibling `/api/pro/insights/*` route is swept in.
   if (path === '/api/pro/insights/reports' || path.startsWith('/api/pro/insights/reports/')) {
@@ -243,8 +243,8 @@ function tierFor(method: string, path: string): readonly Tier[] {
     if (mutating && path.endsWith('/generate')) {
       return [TIERS.ai, TIERS.aiHourly];
     }
-    // The one-report GET carries the by-workspace axis (N × getPeriodMetrics per window) —
-    // `search`, not the 600/min blanket. Anchored at both ends so ONLY `…/reports/:periodKey`
+    // The one-report GET can recompute a whole open month live — `search`, not the 600/min
+    // blanket. Anchored at both ends so ONLY `…/reports/:periodKey`
     // matches: the list root and a GET spelling of `…/generate` stay on the plain read bucket.
     if (/^\/api\/pro\/insights\/reports\/[^/]+$/.test(path)) return [TIERS.search, TIERS.read];
     return [TIERS.read];
@@ -598,9 +598,8 @@ function tierFor(method: string, path: string): readonly Tier[] {
   if (path === '/api/repos/suggested') return [TIERS.search, TIERS.read];
   // (GET /api/workspace-metrics/compare — the old N × getWorkspaceMetrics comparison whose cost
   // multiplied by workspace count, which is what earned it the `search` tier — was DELETED with
-  // the Compare rail entry (C4). The multiplication survives in the Reports "By workspace" axis,
-  // which is why `GET /api/pro/insights/reports/:periodKey` sits on `search` in the family block
-  // above. Its two siblings `/api/workspace-metrics` and `/api/workspace-metrics/detail` remain
+  // the Compare rail entry (C4); the Reports "By workspace" axis that inherited it was removed
+  // 2026-10-26. Its two siblings `/api/workspace-metrics` and `/api/workspace-metrics/detail` remain
   // ordinary single-window reads on the `read` fall-through — they do not multiply by anything.)
   // (GET /api/bot-severity — the standalone ML-severity rollup — was REMOVED on the C7 cut list;
   // its `search` tier entry left with it.)

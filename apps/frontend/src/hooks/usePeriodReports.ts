@@ -133,15 +133,12 @@ export function useGeneratePeriodReport(workspaceId: number | null, periodKey: s
     },
     onSuccess: (data) => {
       // Write the fresh report straight into the shared GET slot so the panel updates in place
-      // (the response carries the same `PeriodReport` the GET serves). PRESERVE the previous
-      // response's `byWorkspace` axis: the generate response does not carry it (it rides only the
-      // one-report GET), and dropping it here would blank every open "By workspace" expansion the
-      // moment a regenerate lands. The period is unchanged, so the axis is still true.
+      // (the response carries the same `PeriodReport` the GET serves). The previous response's
+      // `modelInfo` is kept: the generate response does not carry it.
       qc.setQueryData<PeriodReportResponse>(periodReportKey(workspaceId, periodKey), (old) => ({
         enabled: data.enabled,
         workspaceId: data.workspaceId,
         report: data.report,
-        ...(old?.byWorkspace != null ? { byWorkspace: old.byWorkspace } : {}),
         ...(old?.modelInfo != null ? { modelInfo: old.modelInfo } : {}),
       }));
       // A first generate BACKFILLS up to 8 prior periods (metrics-only, no LLM), so the list

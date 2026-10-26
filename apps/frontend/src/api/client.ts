@@ -948,8 +948,7 @@ export const api = {
     fetch('/api/ai/codex/logout', jsonBody('POST')).then((r) => handle<CodexLogoutResponse>(r)),
   // Workspace review-intelligence "Insights" — the attention CARDS (+ the sprint report). The
   // flow-metric HEADER moved OUT to
-  // /api/workspace-metrics, the Retro panel was deleted, and cross-workspace comparison is the
-  // Reports "By workspace" axis (carried on `periodReport`).
+  // /api/workspace-metrics, the Retro panel was deleted, and there is no cross-workspace comparison.
   workspaceInsights: (workspaceId: number) =>
     get<WorkspaceInsightsResponse>(withQuery('/api/pro/insights', workspaceParam(workspaceId))),
   // The workspace flow-metric header (DORA-ish tiles + trends) AND the per-repo "where is the work
@@ -1050,8 +1049,7 @@ export const api = {
   repoWorkspaceMetrics: (repoId: number) =>
     get<RepoWorkspaceMetricsResponse>(`/api/pro/insights/repo/${repoId}/metrics`),
   // (`workspaceComparison` / `GET /api/workspace-metrics/compare` were DELETED with the "Compare
-  // workspaces" rail entry — cross-workspace comparison is the Reports "By workspace" axis now,
-  // carried on `periodReport`'s response as the optional `byWorkspace` field.)
+  // workspaces" rail entry; the Reports "By workspace" axis that followed was removed 2026-10-26.)
   // (`sprintReport` / `refreshSprintReport` were REMOVED with `SprintReportCard` (the C7 cut
   // list); the `/api/pro/sprint-report*` plugin routes still exist server-side but have no SPA
   // consumer. `retroReport` / `refreshRetroReport` were REMOVED with the Insights "Retro" panel and its

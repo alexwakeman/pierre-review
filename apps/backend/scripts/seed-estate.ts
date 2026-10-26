@@ -10,7 +10,7 @@
 //
 //   1. MULTI-REPO. Five more repositories (eight in total) split across the two
 //      workspaces, so every workspace-scoped surface has something to roll up:
-//      the repo-activity rows, reach per repository, the by-workspace axis, the
+//      the repo-activity rows, reach per repository, the
 //      benchmark's per-repo units and its workspace rollup.
 //
 //   2. THE AI VOLUME, on both sides of it. Code agents (Devin, Sweep) AUTHOR a
