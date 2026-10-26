@@ -99,10 +99,10 @@ describe('the registry (LIMN_AI_PROVIDER)', () => {
     // Phase 3: each stream adds the kinds it ported to its own file; every OTHER kind says so in one
     // sentence, and a ported kind passes the allow-list and stops at the sign-in (none in this test).
     expect(P.codexRunnable()).toBe(P.ALL_AGENT_KINDS.every((k) => P.CODEX_AGENT_KINDS.has(k)));
-    // Phase 3 integrated: every kind but `plan` is ported (its live run has not passed yet), so Codex
-    // is still not runnable and `auto` stays on Claude. Adding `plan` to fix.ts flips both lines.
-    expect(P.ALL_AGENT_KINDS.filter((k) => !P.CODEX_AGENT_KINDS.has(k))).toEqual(['plan']);
-    expect(P.CODEX_RUNNABLE).toBe(false);
+    // Phase 3 complete: every kind is ported (`plan` last, after its live runs passed), so Codex is
+    // runnable; `auto` still picks it only when Claude is not signed in (pickAutoProvider below).
+    expect(P.ALL_AGENT_KINDS.filter((k) => !P.CODEX_AGENT_KINDS.has(k))).toEqual([]);
+    expect(P.CODEX_RUNNABLE).toBe(true);
     for (const kind of P.ALL_AGENT_KINDS.filter((k) => !P.CODEX_AGENT_KINDS.has(k))) {
       await expect(
         codex.runAgent({ kind } as Parameters<typeof codex.runAgent>[0]),
@@ -150,9 +150,9 @@ describe('the registry (LIMN_AI_PROVIDER)', () => {
     }
   });
 
-  it('auto never picks Codex while it cannot run, even when it is the only credential', () => {
-    expect(P.CODEX_RUNNABLE).toBe(false);
-    expect(P.codexRunnable()).toBe(false);
+  it('Codex is runnable (every kind ported), yet an API key alone still never makes auto pick it', () => {
+    expect(P.CODEX_RUNNABLE).toBe(true);
+    expect(P.codexRunnable()).toBe(true);
     // Runnable means EVERY kind is ported, never just one.
     expect(P.codexRunnable(new Set(['review']))).toBe(false);
     expect(P.codexRunnable(new Set(P.ALL_AGENT_KINDS))).toBe(true);

@@ -27,6 +27,7 @@ import type {
 import { submitFixShape, submitPlanShape, type SubmitFixPayload } from './schema.js';
 import {
   checkPlanSubmission,
+  CODEX_PLAIN_TASK_RULE,
   type GeneratePlanArgs,
   type GeneratePlanResult,
   type RawPlanSubmission,
@@ -471,8 +472,12 @@ export async function runPlanAgent(args: GeneratePlanArgs): Promise<GeneratePlan
             const p = a as unknown as RawPlanSubmission;
             const problems = checkPlanSubmission(p, args.shownRefs);
             if (problems.length > 0) {
+              // CODEX: a task with no refs has no step-less answer, so its one retry is told so beside
+              // the problems (CODEX_PLAIN_TASK_RULE) — a refusal for an invented ref alone once led
+              // the retry to drop `notAddressed` and answer with no step at all. Claude's text is today's.
+              const codexHint = planProvider === 'codex' && args.shownRefs.length === 0 ? `\n${CODEX_PLAIN_TASK_RULE}` : '';
               return {
-                text: `The plan was not recorded. Fix this and call submit_plan again:\n- ${problems.join('\n- ')}`,
+                text: `The plan was not recorded. Fix this and call submit_plan again:\n- ${problems.join('\n- ')}${codexHint}`,
                 // CODEX: its final answer IS the call, so a refusal must say so (`isError`) to earn the
                 // provider's one retry with this text as the reason. Claude keeps today's reply exactly:
                 // the model reads the text and calls again.

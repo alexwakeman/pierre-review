@@ -702,9 +702,11 @@ describe('models and prices', () => {
     expect(C.codexCostUsd('m', u, 'api_key', { m: { input: 1, cachedInput: 0.1, output: 4 } })).toBeCloseTo(1 + 0.1 + 4);
     expect(C.codexCostUsd('m', null, 'api_key', { m: { input: 1, cachedInput: 0.1, output: 4 } })).toBe(0);
   });
-  it('detect() reports the sign-in but never `available` in Phase 2 (no agent kind runs on Codex)', async () => {
+  it('detect(): every kind is ported (Phase 3 complete), so `available` is the sign-in alone — none here', async () => {
+    expect(P.CODEX_RUNNABLE).toBe(true);
     const d = await C.codexProvider.detect();
+    // No ChatGPT sign-in in this test: not available, and the sentence says why.
     expect(d).toMatchObject({ id: 'codex', available: false, message: expect.any(String) });
-    expect(P.CODEX_RUNNABLE).toBe(false);
+    expect(d.message).not.toBe(P.CODEX_NOT_AVAILABLE_MESSAGE);
   });
 });

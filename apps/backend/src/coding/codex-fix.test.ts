@@ -131,6 +131,7 @@ const { runCodingAgent, runPlanAgent } = await import('./agent.js');
 const { buildFixSystemPrompt, buildFixUserPrompt, buildPlanSystemPrompt, buildPlanUserPrompt } = await import(
   './ai-fix/prompts.js'
 );
+const { CODEX_PLAIN_TASK_RULE, CODEX_PLAN_REFS_RULE } = await import('./ai-fix/plan.js');
 const C = await import('../ai/providers/codex.js');
 const P = await import('../ai/provider.js');
 
@@ -179,6 +180,16 @@ switch (scenario) {
     if (resumed) { msg(GOOD_PLAN); done(200, 40); }
     else { msg({ ...GOOD_PLAN, steps: [{ ...GOOD_PLAN.steps[0], refs: ['F9'] }] }); done(90, 20); }
     break;
+  case 'plan_no_steps':
+    if (resumed) { msg(GOOD_PLAN); done(200, 40); }
+    else { msg({ ...GOOD_PLAN, steps: [] }); done(90, 20); }
+    break;
+  case 'plan_plain_invented_ref':
+    if (resumed) { msg({ summary: ['Already guarded'], steps: [{ title: 'No change needed', files: ['src/math.ts'], change: 'divide already throws when b is 0.', refs: [] }], notAddressed: null, reply: null }); done(200, 40); }
+    else { msg({ summary: ['Already guarded'], steps: [], notAddressed: [{ ref: 'T1', reason: 'Already done.' }], reply: null }); done(90, 20); }
+    break;
+  case 'plan_empty_twice':
+    msg({ summary: ['Already guarded'], steps: [], notAddressed: null, reply: null }); done(90, 20); break;
   case 'resolve_retry':
     if (resumed) { msg({ choices: [{ file: 0, region: 1, fingerprint: 'fp1', decision: 'theirs', lines: null, rationale: 'main renamed it', confidence: 'high' }], summary: 'Took main.' }); done(150, 20); }
     else { msg({ choices: [{ file: 0, region: 1, fingerprint: 'WRONG', decision: 'theirs', lines: null, rationale: 'x', confidence: 'high' }], summary: 'First go.' }); done(80, 10); }
@@ -256,9 +267,9 @@ const fixArgs = (over: Partial<Parameters<typeof runCodingAgent>[0]> = {}) => ({
 });
 
 describe('the kinds', () => {
-  it('the shipped file lists fix and resolve (plan waits on a passing live run)', async () => {
+  it('the shipped file lists fix, plan and resolve (plan joined after its live runs passed)', async () => {
     const real = await vi.importActual<typeof import('../ai/codex/kinds/fix.js')>('../ai/codex/kinds/fix.js');
-    expect(real.CODEX_FIX_KINDS).toEqual(['fix', 'resolve']);
+    expect(real.CODEX_FIX_KINDS).toEqual(['fix', 'plan', 'resolve']);
     for (const k of ['fix', 'plan', 'resolve'] as const) expect(P.CODEX_AGENT_KINDS.has(k)).toBe(true);
   });
 });
@@ -410,6 +421,48 @@ describe('Plan first on Codex', () => {
     expect(res.costUsd).toBe(0);
     expect(res.usageRecorded).toBe(true);
     expect(T.recorded).toEqual([expect.objectContaining({ feature: 'ai_fix_plan', prId: 7, provider: 'codex', inputTokens: 200 })]);
+  });
+
+  it('a plan with NO steps is refused by the SAME check Claude’s tool runs, retried once, then accepted', async () => {
+    scenario('plan_no_steps');
+    const res = await runPlanAgent(planArgs());
+    const [, retry] = calls();
+    expect(retry.resumed).toBe(true);
+    expect(retry.stdin).toContain('Give at least one step');
+    // A task WITH refs gets no plain-task hint.
+    expect(retry.stdin).not.toContain(CODEX_PLAIN_TASK_RULE);
+    expect((res.plan as any).steps).toHaveLength(1);
+    expect(T.recorded).toHaveLength(1);
+  });
+
+  // The 2026-10-25 live failure, replayed: a plain task (no refs) whose first answer invented ref T1.
+  const plainArgs = () => ({
+    ...planArgs(),
+    prompt: buildPlanUserPrompt({ pr, diff: '', seed: { kind: 'plain', text: 'Make divide throw when b is 0.' }, nonce: 'n0', provider: 'codex' }),
+    shownRefs: [] as string[],
+  });
+
+  it('a plain task: Codex is told there are no refs, and a refusal for an invented ref says a step is still needed', async () => {
+    scenario('plan_plain_invented_ref');
+    const res = await runPlanAgent(plainArgs());
+    const [first, retry] = calls();
+    expect(first.stdin).toContain(CODEX_PLAIN_TASK_RULE);
+    expect(JSON.parse(cfg(first.argv).get('developer_instructions')!)).toContain(CODEX_PLAN_REFS_RULE);
+    expect(retry.stdin).toContain('This task has no item refs');
+    expect(retry.stdin).toContain(CODEX_PLAIN_TASK_RULE);
+    expect(res.plan).toMatchObject({ steps: [expect.objectContaining({ title: 'No change needed', refs: [] })] });
+  });
+
+  it('a plan still step-less after its one retry is never accepted', async () => {
+    scenario('plan_empty_twice');
+    const outcome = await runPlanAgent(plainArgs()).then(
+      (r) => r.plan,
+      (e: Error) => e.message,
+    );
+    expect(calls()).toHaveLength(2);
+    if (typeof outcome === 'string') expect(outcome).toMatch(/at least one step/);
+    else expect(outcome).toBeNull();
+    expect(T.recorded).toHaveLength(1);
   });
 
   it('cancellation: an aborted pass, its row recorded once', async () => {

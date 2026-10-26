@@ -4,6 +4,7 @@ import type { FixPrContext } from './pr-context.js';
 import type { AgentProviderId } from '../../ai/provider.js';
 import { activeProviderId } from '../../ai/provider-setting.js';
 import { promptTools, type PromptTools } from '../../ai/prompt-tools.js';
+import { CODEX_PLAIN_TASK_RULE, CODEX_PLAN_REFS_RULE } from './plan.js';
 
 // AI Fix's agentic-fixer prompts (CORE since the fixer left the plugin). ⚠ THE PRODUCT NAME IS
 // INTERPOLATED, NOT TYPED OUT — compose from PRODUCT_NAME so a rename is a one-line change.
@@ -257,7 +258,7 @@ ${t.either('When the plan is ready, call the submit_plan tool EXACTLY ONCE with:
 - \`summary\`: ${AI_FIX_PLAN_MAX_BULLETS} bullets at most, each one short line (under ${AI_FIX_PLAN_BULLET_MAX_CHARS} characters), plain English, for quick reference.
 - \`steps\`: the detailed plan, one entry per change — \`title\` (a few words), \`files\` (paths relative to the repository root), \`change\` (what you will change and why, a few sentences) and \`refs\` (the refs of the task items it covers, exactly as given, e.g. F3, T1, S1-AC2; [] when the task has no refs).
 - \`notAddressed\`: one entry per item ref you will deliberately NOT fix, with \`reason\` (one or two sentences). Every ref you were shown belongs in a step's \`refs\` or in \`notAddressed\`.
-- \`reply\`: when the person sent a steering message, one or two sentences telling them what you changed in the plan because of it.${t.either('', '\n`steps` must hold at least one entry, unless every item you were given is in `notAddressed`.')}
+- \`reply\`: when the person sent a steering message, one or two sentences telling them what you changed in the plan because of it.${t.either('', `\n${CODEX_PLAN_REFS_RULE}`)}
 ${t.either('If the tool answers that the plan was not recorded, fix what it names and call it again.', `If ${PRODUCT_NAME} answers that the plan was not accepted, fix what it names and answer again.`)}`;
 }
 
@@ -306,7 +307,7 @@ export function buildPlanUserPrompt(input: {
       ? `\nRevise the plan so it takes the person's LATEST steering message into account, keeping what they asked for earlier unless they changed their mind. Read the code where you need to, then ${submitOnce}.`
       : review
         ? `\nRead the code for each item now, then ${submitOnce}, citing every ref you were shown in a step's \`refs\` or in \`notAddressed\`.`
-        : `\nRead the code you need now, then ${submitOnce}.`,
+        : `\nRead the code you need now, then ${submitOnce}.${t.either('', ` ${CODEX_PLAIN_TASK_RULE}`)}`,
   );
   return parts.filter(Boolean).join('\n');
 }

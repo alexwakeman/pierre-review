@@ -72,6 +72,16 @@ export interface GeneratePlanResult {
   usageRecorded?: boolean;
 }
 
+// CODEX ONLY (docs/CODEX-PLAN.md § Phase 3, Plan first): the ref rules, said outright. A live run on
+// gpt-6-luna (2026-10-25) planned a plain task (no refs) whose code already did what was asked: it put an
+// invented ref `T1` in `notAddressed`, was refused for it, dropped `notAddressed` on its one retry and
+// answered with no step at all — refused again. A plain task has no valid step-less answer, so Codex is
+// told so. Claude's prompt is unchanged (prompt-golden).
+export const CODEX_PLAN_REFS_RULE =
+  '`steps` must hold at least one entry, unless every item you were given is in `notAddressed`. Use only the refs the task gives you, exactly as given, and never make one up. A task with no refs always needs at least one step, with `refs` [] and `notAddressed` null; if the code already does what was asked, give one step that names the file and says so in `change`.';
+export const CODEX_PLAIN_TASK_RULE =
+  'This task has no refs: every step\'s `refs` is [], `notAddressed` is null, and `steps` holds at least one entry.';
+
 export const PLAN_STEP_TITLE_MAX = 200;
 export const PLAN_STEP_CHANGE_MAX = 1_200;
 export const PLAN_REASON_MAX = 400;

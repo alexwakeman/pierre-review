@@ -5,14 +5,18 @@
 //   ./node_modules/.bin/vitest run src/coding/codex-fix.live.test.ts
 //
 // ⚠ LIMN'S OWN CODEX HOME ONLY (~/.limn/codex, the `limn ai login codex` sign-in) — never ~/.codex, and
-// nothing here reads, copies or prints a sign-in file. TWO model runs, gpt-6-luna at LOW effort (the
+// nothing here reads, copies or prints a sign-in file. THREE model runs, gpt-6-luna at LOW effort (the
 // role's model is overridden for this test only), + at most one validation retry each:
 //   1. a WRITE run (`runCodingAgent`, kind 'fix') in a scratch git fixture: it edits src/math.ts as
 //      asked, and its attempts to write ../outside, /tmp and $TMPDIR are refused — the hook denies the
 //      outside edit (its own log says so), none of the three files exists afterwards, and the diff
 //      captured from git holds the one file in the worktree;
 //   2. a READ-ONLY run (`runPlanAgent`, kind 'plan') with the real Codex-worded plan prompt: a plan in
-//      the strict schema that names src/math.ts, and the worktree untouched.
+//      the strict schema that names src/math.ts, and the worktree untouched;
+//   3. the same plain task on code that ALREADY does it (the first live failure's real situation): still
+//      a plan with a step, never a step-less answer.
+// Every turn's final message and token counts are logged. LIMN_CODEX_LIVE_PLAN_MODEL picks the plan
+// passes' model (default gpt-6-luna). Run only the plan passes with `-t plan`.
 // The worktree comes from a scratch repository (no clone), the ledger is captured in memory (never the
 // real database), and no GitHub call is made.
 import { execFileSync } from 'node:child_process';
@@ -24,6 +28,8 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 const LIVE = process.env.LIMN_CODEX_LIVE === '1';
+// The plan pass's model: gpt-6-luna unless LIMN_CODEX_LIVE_PLAN_MODEL names another (e.g. the role's own).
+const PLAN_MODEL = process.env.LIMN_CODEX_LIVE_PLAN_MODEL || 'gpt-6-luna';
 
 const L = vi.hoisted(() => {
   // A scratch database path: nothing here may open the real one.
@@ -38,6 +44,27 @@ vi.mock('../db/usage.js', () => ({
     L.recorded.push(row);
   },
 }));
+// Every Codex turn's FINAL MESSAGE TEXT and its token counts are logged (the evidence a failed answer
+// leaves; nothing else in the run keeps it), then the real result is handed on unchanged.
+vi.mock('../ai/codex/run.js', async (orig) => {
+  const real = (await orig()) as typeof import('../ai/codex/run.js');
+  return {
+    ...real,
+    runCodexExec: async (...a: Parameters<typeof real.runCodexExec>) => {
+      const res = await real.runCodexExec(...a);
+      console.log('[codex live] final message:', res.finalResponse);
+      console.log('[codex live] turn usage:', JSON.stringify(res.usage));
+      return res;
+    },
+  };
+});
+// The live test exercises the plan pass whether or not 'plan' is in CODEX_FIX_KINDS yet (it is the
+// evidence that decides whether it may be added), so the kinds list is widened for this file only.
+vi.mock('../ai/codex/kinds/fix.js', async (orig) => {
+  const real = (await orig()) as typeof import('../ai/codex/kinds/fix.js');
+  const kinds = real.CODEX_FIX_KINDS.includes('plan') ? real.CODEX_FIX_KINDS : [...real.CODEX_FIX_KINDS, 'plan'];
+  return { ...real, CODEX_FIX_KINDS: kinds };
+});
 vi.mock('../auth/account.js', () => ({ getAccessToken: async () => 'unused' }));
 vi.mock('../review/clone-manager.js', () => ({
   prepWorktree: async () => ({ repoCloneDir: L.worktree, worktreePath: L.worktree }),
@@ -153,6 +180,9 @@ describe.skipIf(!LIVE)('AI Fix + Plan first on Codex, live (LIMN_CODEX_LIVE=1)',
     execFileSync('git', ['-C', repo, 'checkout', '-q', '--', '.']);
     execFileSync('git', ['-C', repo, 'clean', '-qfd']);
     L.recorded.length = 0;
+    // ⚠ The plan must read the UNFIXED file: the first live failure (2026-10-25) planned against a
+    // fixture that already held run 1's guard, so the honest answer was "nothing to change".
+    expect(readFileSync(join(repo, 'src', 'math.ts'), 'utf8')).not.toContain('division by zero');
     const { runPlanAgent } = await import('./agent.js');
     const { buildPlanSystemPrompt, buildPlanUserPrompt } = await import('./ai-fix/prompts.js');
     const pr = { number: 1, repoFullName: 'scratch/repo', title: 'Guard division', body: null } as any;
@@ -163,7 +193,7 @@ describe.skipIf(!LIVE)('AI Fix + Plan first on Codex, live (LIMN_CODEX_LIVE=1)',
       name: 'repo',
       prNumber: 1,
       baseSha: 'HEAD',
-      model: 'gpt-6-luna',
+      model: PLAN_MODEL,
       systemPrompt: buildPlanSystemPrompt('codex'),
       prompt: buildPlanUserPrompt({
         pr,
@@ -185,6 +215,49 @@ describe.skipIf(!LIVE)('AI Fix + Plan first on Codex, live (LIMN_CODEX_LIVE=1)',
     expect((res.plan as { summary: string[] }).summary.length).toBeGreaterThan(0);
     expect(JSON.stringify((res.plan as { steps: unknown }).steps)).toContain('math.ts');
     expect(execFileSync('git', ['-C', repo, 'status', '--porcelain']).toString()).toBe('');
-    expect(L.recorded).toEqual([expect.objectContaining({ feature: 'ai_fix_plan', provider: 'codex', model: 'gpt-6-luna' })]);
+    expect(L.recorded).toEqual([expect.objectContaining({ feature: 'ai_fix_plan', provider: 'codex', model: PLAN_MODEL })]);
+  }, 600_000);
+  it('3. a plain task the code ALREADY does still comes back as a plan (one step that says so), never step-less', async (t) => {
+    if (!signedIn) return t.skip();
+    execFileSync('git', ['-C', repo, 'checkout', '-q', '--', '.']);
+    execFileSync('git', ['-C', repo, 'clean', '-qfd']);
+    writeFileSync(
+      join(repo, 'src', 'math.ts'),
+      'export const divide = (a: number, b: number) => {\n  if (b === 0) throw new Error("division by zero");\n  return a / b;\n};\n',
+    );
+    execFileSync('git', ['-C', repo, 'commit', '-qam', 'already guarded']);
+    L.recorded.length = 0;
+    const { runPlanAgent } = await import('./agent.js');
+    const { buildPlanSystemPrompt, buildPlanUserPrompt } = await import('./ai-fix/prompts.js');
+    const pr = { number: 1, repoFullName: 'scratch/repo', title: 'Guard division', body: null } as any;
+    const res = await runPlanAgent({
+      accountId: 1,
+      prId: 7,
+      owner: 'scratch',
+      name: 'repo',
+      prNumber: 1,
+      baseSha: 'HEAD',
+      model: PLAN_MODEL,
+      systemPrompt: buildPlanSystemPrompt('codex'),
+      prompt: buildPlanUserPrompt({
+        pr,
+        diff: '',
+        seed: { kind: 'plain', text: 'Make divide in src/math.ts throw when b is 0.' },
+        nonce: 'live1',
+        provider: 'codex',
+      }),
+      shownRefs: [],
+      maxBudgetUsd: 5,
+      abortController: new AbortController(),
+      onProgress: () => {},
+      provider: 'codex',
+      codex: { effort: 'low' },
+    });
+    console.log('[codex live] plan (already done):', JSON.stringify(res.plan));
+    expect(res.aborted).toBe(false);
+    expect(res.plan).not.toBeNull();
+    expect(((res.plan as { steps: unknown[] }).steps ?? []).length).toBeGreaterThan(0);
+    expect(execFileSync('git', ['-C', repo, 'status', '--porcelain']).toString()).toBe('');
+    expect(L.recorded).toEqual([expect.objectContaining({ feature: 'ai_fix_plan', provider: 'codex', model: PLAN_MODEL })]);
   }, 600_000);
 });

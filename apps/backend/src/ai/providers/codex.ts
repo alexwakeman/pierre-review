@@ -754,7 +754,8 @@ export async function runAgentUnchecked(spec: AgentRunSpec): Promise<AgentRunRes
 /**
  * Installed, signed in (a real `account/read` in Limn's own home), plan, rung — ai/codex/detect.ts.
  * ⚠ `available` means "can run AGENTS", the same answer `/api/me` gives (`providers.codex.available`):
- * false until every agent kind is ported (`codexRunnable`), with CODEX_NOT_AVAILABLE_MESSAGE. The
+ * false while any agent kind is not ported (`codexRunnable`; all are since Phase 3), with
+ * CODEX_NOT_AVAILABLE_MESSAGE. The
  * one-shot `complete()` runs on Codex regardless, once installed and signed in.
  */
 async function detect(): Promise<ProviderStatus> {

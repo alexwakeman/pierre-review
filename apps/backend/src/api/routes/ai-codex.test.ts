@@ -2,7 +2,9 @@
 // (ai/codex/fake-codex.test-support.ts) on a throwaway SQLite file — no real Codex, no quota:
 //   1. /api/me carries `ai.provider` ('claude' unless LIMN_AI_PROVIDER says codex) and each
 //      provider's own facts; Codex's sign-in is read in the BACKGROUND (the first /api/me never waits
-//      on a process) and reported once read — and Codex is still NOT available;
+//      on a process) and reported once read — and, every agent kind ported (Phase 3 complete), Codex is
+//      AVAILABLE once signed in; `auto` still picks Claude when both are signed in, Codex when only
+//      Codex is;
 //   2. the sign-in routes: start (browser / device), poll, cancel, sign out; a bad method is a 400;
 //   3. "Set up AI" refuses an unknown provider before downloading anything.
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -65,7 +67,7 @@ const waitFor = async (ok: () => Promise<boolean>): Promise<void> => {
 };
 
 describe('/api/me — the AI provider on the wire', () => {
-  it('Claude is the provider; Codex is installed, its sign-in read in the background, and NOT available', async () => {
+  it('Claude is the provider; Codex is installed, its sign-in read in the background, and available once signed in', async () => {
     const first = (await app.inject({ method: 'GET', url: '/api/me' })).json();
     expect(first.ai.provider).toBe('claude');
     expect(first.ai.providers.claude).toHaveProperty('route');
@@ -81,29 +83,54 @@ describe('/api/me — the AI provider on the wire', () => {
       route: 'login',
       signedIn: true,
       plan: 'plus',
-      available: false,
-      message: 'Codex is not available in this version of Limn yet. Unset LIMN_AI_PROVIDER (or set it to claude) to use Claude.',
+      available: true,
+      message: null,
     });
-    // Codex's OWN per-kind answer while Claude is active: every ported kind 'ok' (signed in), every
-    // other kind its not-ported sentence — `available` stays false while any kind is missing.
+    // Codex's OWN per-kind answer while Claude is active: every kind is ported (`plan` last), so every
+    // run kind is 'ok' once signed in.
     const P = await import('../../ai/provider.js');
     for (const k of P.ALL_RUN_KINDS) {
-      if (P.codexRunKindReady(k)) expect(kinds[k], k).toEqual({ auth: 'ok', message: null });
-      else expect(kinds[k], k).toEqual({ auth: 'none', message: P.codexKindNotAvailableMessage(k as never) });
+      expect(P.codexRunKindReady(k), k).toBe(true);
+      expect(kinds[k], k).toEqual({ auth: 'ok', message: null });
     }
+    expect(kinds.plan).toEqual({ auth: 'ok', message: null });
     expect(kinds.complete).toEqual({ auth: 'ok', message: null });
     expect(Object.keys(kinds).sort()).toEqual([...P.ALL_RUN_KINDS].sort());
   }, 60_000);
 
-  it('LIMN_AI_PROVIDER=codex: the provider is codex and the pre-flight still says "not available"', async () => {
+  it('LIMN_AI_PROVIDER=codex: the provider is codex and the top-level pre-flight answers ok (signed in)', async () => {
     process.env.LIMN_AI_PROVIDER = 'codex';
     try {
       const me = (await app.inject({ method: 'GET', url: '/api/me' })).json();
       expect(me.ai.provider).toBe('codex');
-      expect(me.ai.auth).toBe('none');
-      expect(me.ai.authMessage).toMatch(/Codex is not available/);
+      expect(me.ai.auth).toBe('ok');
+      expect(me.ai.authMessage ?? null).toBeNull();
+      expect(me.ai.kinds.plan).toEqual({ auth: 'ok', message: null });
     } finally {
       delete process.env.LIMN_AI_PROVIDER;
+    }
+  });
+
+  it('LIMN_AI_PROVIDER=auto: Claude when both are signed in, Codex when only Codex is', async () => {
+    const saved = { ...process.env };
+    const emptyHome = mkdtempSync(join(tmpdir(), 'limn-ai-codex-nohome-'));
+    process.env.LIMN_AI_PROVIDER = 'auto';
+    try {
+      // Both: a Claude credential (an OAuth token) and the ChatGPT sign-in read above.
+      process.env.CLAUDE_CODE_OAUTH_TOKEN = 'test-token';
+      expect((await app.inject({ method: 'GET', url: '/api/me' })).json().ai.provider).toBe('claude');
+      // Codex alone: no Claude credential anywhere (an empty home, no token, no key, no config dir).
+      delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+      delete process.env.ANTHROPIC_API_KEY;
+      delete process.env.CLAUDE_CONFIG_DIR;
+      process.env.HOME = emptyHome;
+      expect((await app.inject({ method: 'GET', url: '/api/me' })).json().ai.provider).toBe('codex');
+    } finally {
+      for (const k of ['LIMN_AI_PROVIDER', 'CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY', 'CLAUDE_CONFIG_DIR', 'HOME']) {
+        if (saved[k] === undefined) delete process.env[k];
+        else process.env[k] = saved[k];
+      }
+      rmSync(emptyHome, { recursive: true, force: true });
     }
   });
 });

@@ -1,6 +1,6 @@
 # Plan: Codex (OpenAI) as a second AI provider
 
-Status: PLAN, not built. **Phase 0 (the spike) ran 2026-10-25 — read [CODEX-SPIKE.md](CODEX-SPIKE.md) first: its "Plan changes" section SUPERSEDES the matching parts of §§ 2, 3, 6, 7 and 8 below** (strict-config, the extra locked keys, the `/tmp` write leak, silent untrusted hooks, MCP approval mode, CLI not SDK, app-server rate limits in whole percent, models).
+Status: Phases 0–3 built (Phase 3 COMPLETE 2026-10-25: every agent kind runs on Codex). **Phase 0 (the spike) ran 2026-10-25 — read [CODEX-SPIKE.md](CODEX-SPIKE.md) first: its "Plan changes" section SUPERSEDES the matching parts of §§ 2, 3, 6, 7 and 8 below** (strict-config, the extra locked keys, the `/tmp` write leak, silent untrusted hooks, MCP approval mode, CLI not SDK, app-server rate limits in whole percent, models).
 
 **Phase 1 (the seam) built 2026-10-25** (branch `codex/phase1-seam`): `apps/backend/src/ai/provider.ts`
 (the interface, the registry — `LIMN_AI_PROVIDER` = `claude` | `auto`, `codex` answers "not available
@@ -199,7 +199,34 @@ users.
   dispatch guard's refusal sentence), `allowStart` asked before each start, the batch's US$ split
   evenly and no start once spent; answers in order, a failure never stops the others.
 
-**Phase 3 status (integrated 2026-10-25, branch `codex/p3-integrated`)**: the four stream branches
+**Phase 3 COMPLETE 2026-10-25** (branch `codex/p3-plan`): `plan` joined `ai/codex/kinds/fix.ts`, so
+`CODEX_AGENT_KINDS` holds all 14 agent kinds and `codexRunnable()` / `CODEX_RUNNABLE` are TRUE. `/api/me`
+reports `providers.codex.available` = the ChatGPT sign-in (`message: null` once signed in) and every
+`providers.codex.kinds` entry 'ok'; under `LIMN_AI_PROVIDER=codex` the top-level pre-flight answers 'ok'.
+`auto` still picks Claude when both are signed in and Codex only when Codex alone is
+(`api/routes/ai-codex.test.ts` pins both on the wire; an OpenAI API key alone never counts).
+- WHY THE FIRST PLAN RUN FAILED (read from its stored session file): the live test's fixture already held
+  test 1's guard (`divide` threw on `b === 0`), so the honest answer was "nothing to change". gpt-6-luna
+  answered `steps: []` with an INVENTED ref `T1` in `notAddressed` (the plain task has no refs); the
+  shown-ref check refused `T1`, and the one retry dropped `notAddressed` and kept `steps: []` — which the
+  "at least one step" check refused too. A ref-less task had NO valid step-less answer, and nothing told
+  Codex so.
+- THE FIX (Codex only; Claude's plan prompt, schema and tool replies are byte-identical —
+  `prompt-golden.json`, `no-shell.test.ts`): the Codex system prompt carries `CODEX_PLAN_REFS_RULE` (use only
+  the refs given, never invent one; a ref-less task always needs a step, `notAddressed` null, and code that
+  already does the task gets ONE step saying so); a plain task's user prompt ends with
+  `CODEX_PLAIN_TASK_RULE`; and a refused Codex answer on a ref-less task carries that rule beside the
+  problems (`coding/agent.ts`). Both constants live in `coding/ai-fix/plan.ts`. A step-less plan with
+  nothing in `notAddressed` is refused on BOTH providers by the one shared check (`checkPlanSubmission`,
+  unchanged); on Codex that earns the provider's one retry, and a second step-less answer is never kept.
+- The live test (`coding/codex-fix.live.test.ts`) now logs every turn's final message and token counts,
+  checks the plan reads the UNFIXED file, adds the "already done" case, and admits `plan` for itself
+  whatever `fix.ts` says. Live, `~/.limn/codex`, gpt-6-luna at low effort, 3 model runs, US$ 0 each, no
+  retry needed: the plan before the wording change (25,116 in / 16,000 cached / 250 out), the plan after
+  it (25,348 / 8,576 / 234) and the "already done" plan (25,428 / 16,128 / 237, one step "Confirm zero
+  guard", no change). Each named `src/math.ts`, left the worktree clean and wrote one `ai_fix_plan` row.
+
+**Phase 3 status (integrated 2026-10-25, branch `codex/p3-integrated`; SUPERSEDED by Phase 3 COMPLETE above)**: the four stream branches
 below are merged. `CODEX_AGENT_KINDS` holds 13 of the 14 agent kinds; ⚠ the ONE missing kind is `plan`
 (Plan first — ported in code, passing offline, but its live run on gpt-6-luna at low effort answered
 with no steps; stream (b) below). So `codexRunnable()` / `CODEX_RUNNABLE` stay FALSE: `auto` never
@@ -248,9 +275,8 @@ signed in (decided, `pickAutoProvider`). Claude's behaviour is unchanged: `promp
   was ASKED for; the product copy says "Claude" (Phase 4).
 
 **Phase 3 stream (b) built 2026-10-25** (branch `codex/p3-fix`): AI Fix, Plan first, Resolve with Claude.
-- `CODEX_FIX_KINDS` = `fix`, `resolve`. ⚠ NOT `plan` yet: it is ported in code and passes offline, but its
-  one live run (gpt-6-luna, low effort) answered with no steps twice and its own check refused it. Add it
-  after a live run passes.
+- `CODEX_FIX_KINDS` = `fix`, `resolve` at this stream; `plan` joined at Phase 3 complete (above), after
+  its first live run's no-step answer was traced and the Codex wording fixed.
 - ONE PROVIDER PER JOB: the AI Fix manager and the resolver pick the provider once (`activeProviderId`),
   word the prompt for it and hand the SAME one to the run (`GenerateFixArgs.provider`,
   `GeneratePlanArgs.provider`, `runAgentInWorktree({ provider })`). Prompts take an optional provider

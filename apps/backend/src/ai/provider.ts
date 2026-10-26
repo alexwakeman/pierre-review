@@ -324,9 +324,9 @@ export function getProvider(id: AgentProviderId): AgentProvider {
 
 /**
  * Can Codex run agents in this version? Only once EVERY agent kind is in `CODEX_AGENT_KINDS`
- * (provider-setting.ts `codexRunnable`) — still FALSE after Phase 3 (`plan` is not ported), so `auto` never picks Codex (it would
- * pick a provider bound to refuse), the pre-flight answers "not available", and `/api/me` reports
- * `providers.codex.available: false`. `complete()` runs on Codex regardless (LIMN_AI_PROVIDER=codex).
+ * (provider-setting.ts `codexRunnable`) — TRUE since Phase 3 completed (`plan` was the last kind), so
+ * `auto` may pick Codex (only when Claude is not signed in), and `/api/me` reports
+ * `providers.codex.available` as the ChatGPT sign-in. `complete()` runs on Codex regardless.
  */
 export const CODEX_RUNNABLE: boolean = codexRunnable();
 
