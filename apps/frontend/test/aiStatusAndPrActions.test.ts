@@ -58,7 +58,7 @@ describe('Check threads', () => {
     expect(threadCheckActive('running')).toBe(true);
     for (const s of ['succeeded', 'failed', 'cancelled', null] as const) expect(threadCheckActive(s)).toBe(false);
   });
-  it('sits on the Threads tab and beside the Claude Review tab\'s Review threads section', () => {
+  it('sits on the Changes tab\'s Threads only view and beside the Claude Review tab\'s Review threads section', () => {
     expect(src('components/PrDetail.tsx')).toContain('<CheckThreadsButton prId={pr.id} />');
     expect(src('components/ClaudeReviewTab.tsx')).toContain('<CheckThreadsButton prId={checkThreadsPrId} />');
     // Gated like Claude Review.

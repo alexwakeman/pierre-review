@@ -246,7 +246,7 @@ export function ClaudeReviewThreadsSection({
 }: {
   items: readonly ClaudeThreadAssessment[] | null | undefined;
   counts: ClaudeThreadAssessmentCounts | null | undefined;
-  // Opens the thread in the PR's Threads tab (PrDetail). Absent ⇒ path:line is plain text.
+  // Opens the thread in the PR's Changes tab (PrDetail). Absent ⇒ path:line is plain text.
   onOpenThread?: (threadId: number) => void;
   // Right-aligned header controls ("Check threads").
   actions?: ReactNode;

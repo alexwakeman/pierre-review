@@ -23,7 +23,7 @@ import { BotIcon } from './Icons.js';
 // The per-PR bot triage card (Plan P3.2 / N2): one sentence that turns a bot-comment flood into
 // a decision — "N bot comments: X real issues · Y likely addressed · Z nit-flagged — [Resolve]".
 //
-// Mounted twice: full at the top of the Threads tab, compact in the Overview attention area.
+// Mounted twice: full at the top of the Changes tab's threads, compact in the Overview attention area.
 // Renders ONLY when the PR carries ≥ MIN_BOT_COMMENTS bot-authored review comments; below the
 // threshold (or before its inputs load) it renders NOTHING and enables NO extra query — the
 // ThreadAssessment 60-empty-boxes lesson. Everything it reads is a query the SPA already shares:
@@ -37,7 +37,7 @@ import { BotIcon } from './Icons.js';
 // the fallback, the same rule FeedView's `isUnionBot` applies.
 // Deliberately NOT the legacy login-string classification PrDetail's bot chips still use.
 //
-// Count discipline: every figure is computed by the SAME fold the Threads tab uses on the same
+// Count discipline: every figure is computed by the SAME fold the Changes tab's threads uses on the same
 // rows — `rollupCounts` (the state pills), `threadSeverities` (the severity pills) and
 // `resolvableBotThreadIds` (the resolve offer) — restricted to the union-bot thread subset, so
 // the card and the tab can never disagree about one population.
@@ -78,7 +78,7 @@ export function BotTriageCard({
   pr: PrDetailT;
   usersById: Map<number, User>;
   variant: 'full' | 'compact';
-  /** Compact (Overview) only: open the Threads tab, where the threads live. */
+  /** Compact (Overview) only: open the Changes tab's Threads only view. */
   onOpenThreads?: () => void;
 }): JSX.Element | null {
   // ── hooks first, unconditionally (early returns come after) ──────────────────────────────
@@ -141,7 +141,7 @@ export function BotTriageCard({
   // card on screen into one DB read. Never a run.
   const judgements = useClaudeThreadJudgements(show ? pr.id : null);
 
-  // Free grade: the Threads tab's own state fold over the bot subset.
+  // Free grade: the Threads only view's own state fold over the bot subset.
   const stateCounts = useMemo(() => rollupCounts(botThreads), [botThreads]);
   // ML split: bot threads CONTAINING a nit-severity comment — the tab's contains-fold, reused.
   const nitCount = useMemo(
@@ -166,7 +166,7 @@ export function BotTriageCard({
     return { judged, real, unjudged: botThreads.length - judged };
   }, [judgements, botThreads]);
 
-  // The resolve offer — the EXACT predicate the server re-derives (and the Threads tab's own
+  // The resolve offer — the EXACT predicate the server re-derives (and the Threads only view's own
   // vendor-scoped button uses), over the full thread list with no vendor narrowing.
   const reviewerRoles = useMemo(() => {
     if (detected == null) return null;
@@ -252,8 +252,8 @@ export function BotTriageCard({
             className="ml-auto rounded px-1.5 py-0.5 font-medium text-sky-600 underline-offset-2 hover:underline dark:text-sky-400"
             title={
               resolvableIds.length > 0
-                ? 'Open the Threads tab — the likely-addressed threads can be resolved from there.'
-                : 'Open the Threads tab.'
+                ? 'See the threads. The likely-addressed ones can be resolved there.'
+                : 'See the threads.'
             }
           >
             {resolvableIds.length > 0

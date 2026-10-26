@@ -6,11 +6,8 @@ import type {
   User,
 } from '@pierre-review/shared';
 import { DERIVED_STATES, ML_SEVERITIES } from '@pierre-review/shared';
-import { useMutationState } from '@tanstack/react-query';
-import {
-  RESOLVE_THREAD_MUTATION_KEY,
-  useResolveBotThreads,
-} from '../../hooks/usePrWrites.js';
+import { useResolveBotThreads } from '../../hooks/usePrWrites.js';
+import { useResolveEvents } from '../../hooks/useResolveEvents.js';
 import {
   applyResolveEvents,
   EMPTY_THREAD_COLLAPSE,
@@ -86,6 +83,7 @@ export function ThreadList({
   stateFilter,
   severityFilter,
   openInChangesFor,
+  visibleThreadIds = null,
 }: {
   threads: ThreadDetail[];
   usersById: Map<number, User>;
@@ -113,6 +111,12 @@ export function ThreadList({
   openInChangesFor?: (
     thread: ThreadDetail,
   ) => { run: () => void; approximate: boolean; line: number | null } | null;
+  /**
+   * The Changes tab's file-tree pick: only these threads are listed (null = every file). A view
+   * narrowing, like the pills, so the pill counts stay PR-wide and the collapse state survives
+   * moving between files.
+   */
+  visibleThreadIds?: ReadonlySet<number> | null;
 }): JSX.Element {
   const rowRefs = useRef(new Map<number, HTMLDivElement>());
   const setThreadBotFilter = useFilters((s) => s.setThreadBotFilter);
@@ -162,28 +166,7 @@ export function ThreadList({
   // A resolve that SUCCEEDED anywhere (this tab, the Claude Review tab, a Pending card) collapses
   // its thread at once, before the refetch lands. Each mutation is applied once; the ones already
   // in the cache when this view mounted are history, not news.
-  const resolveWrites = useMutationState({
-    filters: { mutationKey: RESOLVE_THREAD_MUTATION_KEY, status: 'success' },
-    select: (m) => ({
-      id: m.mutationId,
-      at: m.state.submittedAt,
-      vars: m.state.variables as { prId: number; threadId: number; resolved: boolean } | undefined,
-    }),
-  });
-  const seenWritesRef = useRef<Set<number> | null>(null);
-  seenWritesRef.current ??= new Set(resolveWrites.map((w) => w.id));
-  useEffect(() => {
-    const seen = seenWritesRef.current!;
-    const fresh = resolveWrites
-      .filter((w) => !seen.has(w.id))
-      .sort((a, b) => a.at - b.at);
-    if (fresh.length === 0) return;
-    for (const w of fresh) seen.add(w.id);
-    const events = fresh
-      .filter((w) => w.vars != null && w.vars.prId === prId)
-      .map((w) => ({ threadId: w.vars!.threadId, resolved: w.vars!.resolved }));
-    if (events.length > 0) setCollapse((cur) => applyResolveEvents(cur, events));
-  }, [resolveWrites, prId]);
+  useResolveEvents(prId, (events) => setCollapse((cur) => applyResolveEvents(cur, events)));
   // Drop each local verdict once the refetched thread agrees with it.
   useEffect(() => {
     const server = new Map(threads.map((t) => [t.id, t.derivedState === 'resolved'] as const));
@@ -226,12 +209,22 @@ export function ThreadList({
     () =>
       threads.filter(
         (t) =>
+          (visibleThreadIds == null || visibleThreadIds.has(t.id)) &&
           (botFilter ? threadBotKind(t, usersById) === botFilter : true) &&
           (activeStates.size === 0 || activeStates.has(threadStateBucket(t, claudeJudgements))) &&
           (activeSeverities.size === 0 ||
             [...severitiesOf(t)].some((sev) => activeSeverities.has(sev))),
       ),
-    [threads, botFilter, usersById, activeStates, activeSeverities, severitiesOf, claudeJudgements],
+    [
+      threads,
+      visibleThreadIds,
+      botFilter,
+      usersById,
+      activeStates,
+      activeSeverities,
+      severitiesOf,
+      claudeJudgements,
+    ],
   );
 
   // Per-state counts for the pill badges — over the FULL thread list (independent of the active
@@ -301,7 +294,9 @@ export function ThreadList({
   useEffect(() => {
     if (selectedThreadId == null) return;
     const el = rowRefs.current.get(selectedThreadId);
-    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    // 'center', not 'nearest': the Changes tab's sticky bar and this list's sticky filter header
+    // both sit over the top edge, and a 'nearest' scroll from below parks the card under them.
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }, [selectedThreadId]);
 
   // A resolve empties the eligible set — leave "confirm" mode once nothing's left.
@@ -326,7 +321,8 @@ export function ThreadList({
           filter is active). The two filters AND together in `shown`. */}
       {threads.length > 0 && (
         <div
-          className="sticky top-0 z-10 space-y-2 border-b border-gray-100 bg-white/95 px-3 py-2 backdrop-blur dark:border-gray-800 dark:bg-gray-900/95"
+          // Sticks UNDER the Changes tab's own sticky bar (`--diff-sticky-top`, set by ChangesTab).
+          className="sticky top-[var(--diff-sticky-top,0px)] z-10 space-y-2 border-b border-gray-100 bg-white/95 px-3 py-2 backdrop-blur dark:border-gray-800 dark:bg-gray-900/95"
           style={vendor ? { boxShadow: `inset 3px 0 0 ${vendor.color}` } : undefined}
         >
           <div className="flex flex-wrap items-center gap-1.5">
@@ -588,6 +584,8 @@ export function ThreadList({
         <div className="px-3 py-6 text-center text-sm text-gray-500 dark:text-gray-400">
           {activeStates.size > 0
             ? 'No threads in the selected state(s).'
+            : visibleThreadIds != null
+              ? 'No threads on this file.'
             : botFilter
               ? 'No threads from this bot on this PR.'
               : 'No review threads on this PR.'}

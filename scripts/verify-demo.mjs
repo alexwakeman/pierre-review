@@ -56,7 +56,7 @@ const VIEWS = [
   ['ticket:INFRA-260', `?view=${ident('INFRA-260')}`, null],
   ['timeline', '?view=timeline&preset=30d', 'timeline'],
   ...[113, 114, 105, 116].flatMap((id) =>
-    ['overview', 'threads', 'changes', 'claude_review', 'ai_fix'].map((t) => [
+    ['overview', 'changes', 'claude_review', 'ai_fix'].map((t) => [
       `pr:${id}:${t}`,
       `?view=pr-detail:${id}&prTab=${t}`,
       id === 113 ? `pr-113-${t}` : id === 114 && (t === 'ai_fix' || t === 'claude_review') ? `pr-114-${t}` : id === 105 && t === 'claude_review' ? 'pr-105-claude_review' : null,
@@ -78,6 +78,20 @@ const VIEWS = [
           : undefined,
     ]),
   ),
+  // The Changes tab's "Threads only" view (there is no Threads tab): the toggle on the sticky bar
+  // swaps the code for the threads, each with a way back to its code.
+  ...[113, 105].map((id) => [
+    `pr:${id}:changes-threads`,
+    `?view=pr-detail:${id}&prTab=changes`,
+    id === 113 ? 'pr-113-changes-threads' : null,
+    {
+      act: async (page) => {
+        await page.getByRole('button', { name: /^Threads only/ }).first().click();
+        await page.getByTestId('changes-threads-view').waitFor({ timeout: 10_000 });
+      },
+      expect: ['Threads only', 'Show in context'],
+    },
+  ]),
   // Settings → AI: Claude is the default (automatic runs, surfaces without a model menu); picking
   // Codex says so, and the usage item follows.
   [

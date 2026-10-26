@@ -1071,7 +1071,7 @@ export async function installMockApi(page: Page): Promise<void> {
       // The thread cards' Claude marker (one batched POST per screen): no judged run here.
       if (path.endsWith('/api/claude-review/thread-judgements'))
         return json(route, { prs: [] } satisfies ClaudeThreadJudgementsResponse);
-      // The Threads tab's Check threads status (PR detail): never run here.
+      // The Changes tab's Check threads status (PR detail): never run here.
       const threadCheckMatch = path.match(/\/api\/prs\/(\d+)\/claude-review\/thread-check$/);
       if (threadCheckMatch && route.request().method() === 'GET')
         return json(route, {

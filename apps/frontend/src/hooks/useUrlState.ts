@@ -479,7 +479,10 @@ export function readFromUrl(): Partial<FilterState> {
   // store field is a {prId, tab} pair precisely so one PR's tab cannot be read on another's
   // screen. A `?prTab=` with no PR view (or on a `pr-focus`, which renders a timeline) seats
   // nothing rather than arming a pair for a PR nobody is looking at.
-  const prTab = p.get('prTab');
+  // The retired Threads tab lands on Changes, where the threads live now. A `?thread=` beside it
+  // still names the thread: PrDetail's selected-thread effect scrolls to it there.
+  const rawPrTab = p.get('prTab');
+  const prTab = rawPrTab === 'threads' ? 'changes' : rawPrTab;
   if (prTab && (PR_DETAIL_TABS as readonly string[]).includes(prTab)) {
     const viewed = parseTabKey(p.get('view') ?? '');
     if (viewed?.kind === 'pr-detail') {

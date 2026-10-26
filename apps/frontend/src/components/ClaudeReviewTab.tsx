@@ -1629,7 +1629,7 @@ export function ClaudeReviewTab({
   // Provided by PrDetail (which owns the tab state). Absent ⇒ every code anchor keeps its
   // pre-existing GitHub link.
   onOpenInChanges?: OpenInChanges;
-  // Opens a review thread in the Threads tab (PrDetail's `openThreadInThreads`).
+  // Opens a review thread in the Changes tab, scrolled to it (PrDetail's `showThread`).
   onOpenThread?: (threadId: number) => void;
 }): JSX.Element {
   const ai = useAiCapabilities();

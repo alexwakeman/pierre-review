@@ -116,7 +116,6 @@ function pinnedMetaOf(pr: PrDetailT, usersById: Map<number, User>): PinnedPr {
 // whichever provider made it (each run names its own).
 const TAB_LABELS: Record<Tab, string> = {
   overview: 'Overview',
-  threads: 'Threads',
   activity: 'Activity',
   changes: 'Changes',
   bot_activity: 'Bot activity',
@@ -370,7 +369,7 @@ function ActivityList({
 // A review that carries a body counts as a "PR comment" for the conversation view (the
 // note the reviewer wrote when submitting — a plain "Review: comment", or the summary
 // attached to an approval / change-request). Inline review-thread comments live in the
-// Threads tab, so they're NOT counted here.
+// Changes tab's threads, so they're NOT counted here.
 const reviewCommentCount = (pr: PrDetailT): number =>
   pr.reviews.filter((r) => r.body != null && r.body.trim() !== '').length;
 
@@ -416,7 +415,7 @@ type ConversationItem = {
 // summary / "Review: comment"), merged chronologically. Comments map to a `pr_comment`
 // timeline event, reviews to `review_submitted`, so "Show on timeline" reuses the same
 // (type, refId) + recenter mechanism as the Activity tab. Inline review-thread comments
-// are the Threads tab's concern, not this list.
+// are the Changes tab's concern, not this list.
 function PrCommentsList({
   pr,
   usersById,
@@ -461,7 +460,7 @@ function PrCommentsList({
     return () => clearTimeout(t);
   }, [flashId]);
 
-  // ML severity/category labels for this PR — the same one-query-per-PR index the Threads tab
+  // ML severity/category labels for this PR — the same one-query-per-PR index the Changes tab's threads
   // reads, deduped by React Query. Two target kinds meet here: an issue comment is
   // ('pr_comment', prComments.id) and a review body is ('review', reviews.id). Those are
   // SEPARATE id spaces on separate tables, so the lookup must key on `it.kind` — a badge that
@@ -727,10 +726,15 @@ export function PrDetail({
   // and the reveals that opened a pill, NEVER the default (an undecided pill starts from its
   // thread's CURRENT state: open unless resolved). LOCAL here for the same reason as
   // `changesFocus`: both mounts key PrDetail by prId, so this lives exactly as long as this PR's
-  // pane — and it must outlive ChangesTab, which the Changes → Threads → Changes round trip
-  // remounts. A plain Map mutated in place and read only when a pill MOUNTS, so a click re-renders
-  // one pill and never this component.
+  // pane — and it must outlive ChangesTab, which every tab switch remounts. A plain Map mutated in
+  // place and read only when a pill MOUNTS, so a click re-renders one pill and never this component.
   const [threadOpenMemory] = useState(() => new Map<number, boolean>());
+  // The Changes tab's "Threads only" view (the review threads without the code) — there is no
+  // Threads TAB any more. LOCAL for the same reason as `changesFocus`: it belongs to this PR's
+  // pane. Owned here, not in ChangesTab, because the deep links below switch it: a selected thread
+  // whose file has left the diff, the Overview's Bots chip, a state-pill preset. "Show in context"
+  // (`openInChanges`) switches it off.
+  const [changesThreadsOnly, setChangesThreadsOnly] = useState(false);
   // The header CI readout's "show me" — a nonce ChecksTab consumes by scrolling its Status row
   // into view, so the click lands there even when Overview is already the tab on screen (the tab
   // body's scroll container is shared by every tab and never reset). Consumed, not sticky: a
@@ -742,7 +746,7 @@ export function PrDetail({
    *
    * A deep-link target is consumed by ChangesTab when Changes is on screen, but nothing
    * un-sets it afterwards, so it OUTLIVES the visit: land on Changes via a finding anchor, let
-   * anything move the tab away (selecting a thread forces `threads`, a comment deep link forces
+   * anything move the tab away (a review banner forces Claude Review, a comment deep link forces
    * `overview`, …), and the target is still sitting there. Any later arrival at Changes then
    * re-fires the OLD finding's jump — the user asked for "the diff" and got someone else's line.
    *
@@ -760,7 +764,7 @@ export function PrDetail({
   );
   /**
    * THE SAME MOVE, MADE BY THE APP RATHER THAN THE READER — used by every deep-link effect below
-   * (a feed row naming a thread forces Threads, a review banner forces Claude Review, …).
+   * (a Bots chip forces the Changes tab's threads, a review banner forces Claude Review, …).
    *
    * Identical to `goToTab` except that it tells the URL layer this write is a CORRECTION, so the
    * entry is REPLACED instead of pushed. Those effects fire one tick after the open that already
@@ -786,10 +790,21 @@ export function PrDetail({
   ): void => {
     // THE ONE DELIBERATE EXCEPTION to `goToTab`, and the ordering is the whole point: this path
     // exists to SET a focus, and `goToTab` clears it. Move the tab first, then arm the target, so
-    // no clearing sits between the two.
+    // no clearing sits between the two. It is also "Show in context": the code comes back.
     setPrDetailTab(prId, 'changes');
+    setChangesThreadsOnly(false);
     setChangesFocus({ path, line, side, threadId: threadId ?? null, nonce: Date.now() });
   };
+  /** The Changes tab with its "Threads only" view on — where every "see the threads" link lands. */
+  const openThreadsView = useCallback((): void => {
+    goToTab('changes');
+    setChangesThreadsOnly(true);
+  }, [goToTab]);
+  /** The same, made by a deep-link effect rather than the reader: a URL correction. */
+  const seedThreadsView = useCallback((): void => {
+    markUrlCorrection();
+    openThreadsView();
+  }, [openThreadsView]);
   const [activitySince, setActivitySince] = useState<string | null>(null);
   const qc = useQueryClient();
   /**
@@ -847,27 +862,30 @@ export function PrDetail({
   );
 
   /**
-   * CHANGES → THREADS, the return leg. Deliberately calls `goToTab` ITSELF rather than relying on
-   * the `selectedThreadId` effect below: that effect keys on the VALUE, so re-selecting a thread
-   * that is already selected — exactly what happens when the reader arrived in Changes FROM that
-   * thread a moment ago — would not re-fire and the tab would not move. `selectThread` is still
-   * called, because it also clears the state/severity pill presets that could otherwise filter the
-   * target thread out of the list entirely.
+   * SHOW ONE THREAD — the ONE landing for every thread link into this PR (a Pending card, My Turn,
+   * the Feed, a timeline marker, the Claude Review tab's thread rows): the Changes tab with the
+   * code, scrolled to the thread's pill, opened and ringed. It takes the thread → code ladder
+   * (`openInChangesFor`); when the thread's file has left the diff (rung 4) it lands on the
+   * Threads only view instead, with the thread selected so the list scrolls to it. A thread this
+   * pane does not hold (a stale link) lands on the Threads only view too, never on nothing.
    *
-   * ⚠ Keyed on `prId`, NEVER the `pr` object: it reaches the memo'd FileDiffView through
-   * ChangesTab's `threadCtx`, and every refetch of `['pr', prId]` that changes ANY field (a CI
-   * check finishing, a merge-state move) hands back a new `pr` even when `pr.threads` keeps its
-   * identity. Closing over `pr` re-rendered every diff block and every open thread card on each
-   * such tick — MEASURED 1.3–1.5s of long tasks on a 532-thread PR. `prId` is the id `pr.id`
-   * would give (this pane only renders once `usePr(prId)` has loaded it).
+   * `handledThreadRef` is the selected-thread effect's record: a selection made HERE is already
+   * shown, so the effect must not show it a second time.
    */
-  const openThreadInThreads = useCallback(
-    (threadId: number) => {
-      useFilters.getState().selectThread(prId, threadId);
-      goToTab('threads');
-    },
-    [prId, goToTab],
-  );
+  const handledThreadRef = useRef<number | null>(null);
+  const showThread = (threadId: number): void => {
+    const thread = pr?.threads.find((t) => t.id === threadId);
+    const jump = thread != null ? openInChangesFor(thread) : null;
+    if (jump != null) {
+      jump.run();
+      return;
+    }
+    handledThreadRef.current = threadId;
+    // `selectThread` also clears the state/severity pill presets that could filter it out.
+    useFilters.getState().selectThread(prId, threadId);
+    setPrDetailTab(prId, 'changes');
+    setChangesThreadsOnly(true);
+  };
   const openPrFocused = useFilters((s) => s.openPrFocused);
   const openPrFocusTab = usePinnedTabs((s) => s.openPrFocusTab);
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
@@ -911,21 +929,32 @@ export function PrDetail({
   // Keep a full-screen pr-detail tab's label fresh if the PR (re)loads renamed.
   const syncPinnedMeta = usePinnedTabs((s) => s.syncMeta);
 
-  // Selecting a thread (e.g. via a timeline marker) forces the Threads tab,
-  // where the thread list lives and auto-scrolls to the selected thread.
+  // SELECTING A THREAD (a Pending card, My Turn, the Feed, a timeline marker, a `?thread=` link)
+  // shows it in the Changes tab — the code, scrolled to its pill and ringed (`showThread`). Waits
+  // for the PR (the ladder needs its threads and files) and shows each selection ONCE: a refetch
+  // must not yank the reader back to it. A URL correction, like every deep-link effect here.
+  const prLoaded = pr != null;
   useEffect(() => {
-    if (selectedThreadId != null) seedTab('threads');
-  }, [selectedThreadId, seedTab]);
+    if (selectedThreadId == null) {
+      handledThreadRef.current = null;
+      return;
+    }
+    if (!prLoaded || handledThreadRef.current === selectedThreadId) return;
+    handledThreadRef.current = selectedThreadId;
+    markUrlCorrection();
+    showThread(selectedThreadId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- showThread is a fresh closure each render
+  }, [selectedThreadId, prLoaded]);
 
-  // Clicking a review-bot chip in Overview (ChecksTab) sets threadBotFilter → jump to the
-  // Threads tab, which then shows only that vendor's threads.
+  // Clicking a review-bot chip in Overview (ChecksTab) sets threadBotFilter → the Changes tab's
+  // Threads only view, which then shows only that vendor's threads.
   const threadBotFilter = useFilters((s) => s.threadBotFilter);
   useEffect(() => {
-    if (threadBotFilter != null) seedTab('threads');
-  }, [threadBotFilter, seedTab]);
+    if (threadBotFilter != null) seedThreadsView();
+  }, [threadBotFilter, seedThreadsView]);
 
   // Arriving from the resolvable-bot-threads tab presets a derived-state pill (likely_addressed)
-  // → force the Threads tab so the relevant threads are visible immediately. The preset belongs
+  // → force the Threads only view so the relevant threads are visible immediately. The preset belongs
   // to the PR it was set FOR (openPrThreadsFiltered sets selectedPrId + the filter together);
   // guard on selectedPrId === prId — mirroring App's selectedThreadId guard — so opening ANOTHER
   // PR via openPrDetailTab (which never resets the filter) can't inherit it and force the wrong
@@ -939,8 +968,8 @@ export function PrDetail({
   const threadSeverityFilter =
     selectedPrId === prId ? rawThreadSeverityFilter : EMPTY_THREAD_SEVERITY_FILTER;
   useEffect(() => {
-    if (threadStateFilter.size > 0) seedTab('threads');
-  }, [threadStateFilter, seedTab]);
+    if (threadStateFilter.size > 0) seedThreadsView();
+  }, [threadStateFilter, seedThreadsView]);
 
   // A timeline deep link to an Activity entry (e.g. the commit popover) forces the
   // Activity tab and clears the "since" filter so the target is visible; the list
@@ -968,14 +997,12 @@ export function PrDetail({
     if (prChangesFocus && pr && prChangesFocus.prId === pr.id) {
       markUrlCorrection();
       const { threadId } = prChangesFocus;
-      // A Pending comment card names a THREAD: take the same thread → Changes ladder the Threads
-      // tab's "In Changes" uses (live line, else the anchor hunk's, else the file), and when the
-      // file has left the diff, land on the thread in Threads instead.
+      // A Pending comment card names a THREAD: `showThread` takes the thread → code ladder (live
+      // line, else the anchor hunk's, else the file), and when the file has left the diff, lands
+      // on the thread in the Threads only view instead.
       const thread = threadId != null ? pr.threads.find((t) => t.id === threadId) : undefined;
       if (thread != null) {
-        const jump = openInChangesFor(thread);
-        if (jump != null) jump.run();
-        else useFilters.getState().selectThread(prId, thread.id);
+        showThread(thread.id);
       } else {
         openInChanges(prChangesFocus.path, prChangesFocus.line ?? null, 'RIGHT', threadId);
       }
@@ -1378,7 +1405,6 @@ export function PrDetail({
         {(
           [
             'overview',
-            'threads',
             'activity',
             'changes',
             // Also listed while the bot data is still in flight for a reader who ARRIVED on this
@@ -1411,11 +1437,6 @@ export function PrDetail({
               {t === 'overview' && failing > 0 && (
                 <span className="ml-1 text-red-500" title={`${failing} failing`}>
                   <DotIcon size={7} className="inline-block align-middle" />
-                </span>
-              )}
-              {t === 'threads' && pr.threads.length > 0 && (
-                <span className="ml-1 opacity-60" title={`${pr.threads.length} threads`}>
-                  {pr.threads.length}
                 </span>
               )}
               {t === 'changes' && pr.changedFilesCount > 0 && (
@@ -1452,13 +1473,13 @@ export function PrDetail({
               pr={pr}
               usersById={usersById}
               variant="compact"
-              onOpenThreads={() => goToTab('threads')}
+              onOpenThreads={openThreadsView}
             />
             <ChecksTab
               pr={pr}
               usersById={usersById}
               onShowBotActivity={botTabVisible ? () => goToTab('bot_activity') : undefined}
-              onOpenThreads={() => goToTab('threads')}
+              onOpenThreads={openThreadsView}
               statusFocus={statusFocus}
               onStatusFocusConsumed={() => setStatusFocus(null)}
             />
@@ -1484,32 +1505,6 @@ export function PrDetail({
               <PrCommentComposer prId={pr.id} />
             </div>
           </div>
-        ) : effectiveTab === 'threads' ? (
-          <>
-            {/* P3.2: full triage card — threadSeverities / resolvableBotThreadIds are the list's
-                own folds. Its state counts are the DERIVED states (`rollupCounts`); the list's
-                state chips count what the cards show (`threadStateBucket`, "Claude judged"). */}
-            <BotTriageCard pr={pr} usersById={usersById} variant="full" />
-            {/* Check threads: Claude re-judges only the threads that changed (local, me.ai). */}
-            {aiEnabled && pr.threads.length > 0 && (
-              <div className="px-3 pt-2">
-                <CheckThreadsButton prId={pr.id} />
-              </div>
-            )}
-            <ThreadList
-            threads={pr.threads}
-            usersById={usersById}
-            prUrl={pr.githubUrl}
-            prId={pr.id}
-            repoId={pr.repoId}
-            selectedThreadId={selectedThreadId}
-            viewedSince={pr.lastViewedAt}
-            botFilter={threadBotFilter}
-            stateFilter={threadStateFilter}
-            severityFilter={threadSeverityFilter}
-            openInChangesFor={openInChangesFor}
-          />
-          </>
         ) : effectiveTab === 'activity' ? (
           <ActivityList
             pr={pr}
@@ -1523,8 +1518,41 @@ export function PrDetail({
           <ChangesTab
             pr={pr}
             focus={changesFocus}
-            onOpenThread={openThreadInThreads}
             threadOpenMemory={threadOpenMemory}
+            threadsOnly={changesThreadsOnly}
+            onThreadsOnlyChange={setChangesThreadsOnly}
+            renderThreads={(visibleThreadIds) => (
+              // THE THREADS ONLY VIEW — everything the old Changes tab's threads offered: the full bot
+              // triage card, Check threads, the state / severity / vendor pills (guarded to this
+              // PR above), reply and resolve on every card, Claude's judgements, and "Show in
+              // context" back to the code.
+              <>
+                {/* P3.2: full triage card — threadSeverities / resolvableBotThreadIds are the
+                    list's own folds. Its state counts are the DERIVED states (`rollupCounts`); the
+                    list's state chips count what the cards show (`threadStateBucket`). */}
+                <BotTriageCard pr={pr} usersById={usersById} variant="full" />
+                {/* Check threads: Claude re-judges only the threads that changed (local, me.ai). */}
+                {aiEnabled && pr.threads.length > 0 && (
+                  <div className="px-3 pt-2">
+                    <CheckThreadsButton prId={pr.id} />
+                  </div>
+                )}
+                <ThreadList
+                  threads={pr.threads}
+                  usersById={usersById}
+                  prUrl={pr.githubUrl}
+                  prId={pr.id}
+                  repoId={pr.repoId}
+                  selectedThreadId={selectedThreadId}
+                  viewedSince={pr.lastViewedAt}
+                  botFilter={threadBotFilter}
+                  stateFilter={threadStateFilter}
+                  severityFilter={threadSeverityFilter}
+                  openInChangesFor={openInChangesFor}
+                  visibleThreadIds={visibleThreadIds}
+                />
+              </>
+            )}
           />
         ) : effectiveTab === 'bot_activity' ? (
           <PrBotBehaviourTab pr={pr} />
@@ -1535,7 +1563,7 @@ export function PrDetail({
             pr={pr}
             usersById={usersById}
             onOpenInChanges={openInChanges}
-            onOpenThread={openThreadInThreads}
+            onOpenThread={showThread}
           />
         )}
         </Suspense>

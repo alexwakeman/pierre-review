@@ -24,7 +24,7 @@ export function openSearchHit(hit: SearchHit): void {
   usePinnedTabs.getState().openPrDetailTab(hitToMeta(hit));
   if (hit.kind === 'review_comment' && hit.threadId != null) {
     // selectThread sets selectedPrId + selectedThreadId (and clears any stale state-pill preset);
-    // PrDetail's effect then forces the Threads tab and scrolls the thread into view.
+    // PrDetail's effect then opens the Changes tab and scrolls the thread into view.
     useFilters.getState().selectThread(hit.prId, hit.threadId);
   } else {
     // Clean selection on the target PR (clears a stale threadStateFilter preset) so the detail tab

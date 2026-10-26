@@ -12,7 +12,7 @@ import {
 // Emoji reactions on one comment / review body / PR comment (CORE, free tier).
 //
 // ONE component for every surface. It is mounted twice in the tree — inside `CommentBlock`
-// (which reaches all SEVEN ThreadCard mount sites at once: Threads tab, Feed, search results,
+// (which reaches all SEVEN ThreadCard mount sites at once: Threads only view, Feed, search results,
 // attention cards, themes drill-down, the diff's inline pill) and inside PrDetail's conversation
 // list (PR comments + review bodies). There is deliberately no read-only variant: the write
 // gate is GitHub's own `viewerCanReact`, so a second component would only be a second way to

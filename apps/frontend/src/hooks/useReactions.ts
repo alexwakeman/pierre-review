@@ -32,7 +32,7 @@ import { api } from '../api/client.js';
 //
 // ── WHY REACT QUERY UNDERNEATH ───────────────────────────────────────────────────────────
 // Caching per target is what stops a re-render from refetching, and the shared cache entry is
-// also what keeps TWO MOUNTS OF THE SAME COMMENT in agreement: the Threads tab and the Feed can
+// also what keeps TWO MOUNTS OF THE SAME COMMENT in agreement: the Changes tab and the Feed can
 // both be showing one bot comment, and a toggle in either writes the one `['reactions', kind,
 // id]` entry that both read. The mutation carries a per-target key for the same reason at the
 // in-flight level (the `CiAnalysisCard` rule).
