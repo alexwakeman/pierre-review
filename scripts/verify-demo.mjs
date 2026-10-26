@@ -55,7 +55,7 @@ const VIEWS = [
   ['ticket:INFRA-260', `?view=${ident('INFRA-260')}`, null],
   ['timeline', '?view=timeline&preset=30d', 'timeline'],
   ...[113, 114, 105, 116].flatMap((id) =>
-    ['overview', 'changes', 'claude_review', 'ai_fix'].map((t) => [
+    ['overview', 'comments', 'changes', 'claude_review', 'ai_fix'].map((t) => [
       `pr:${id}:${t}`,
       `?view=pr-detail:${id}&prTab=${t}`,
       id === 113 ? `pr-113-${t}` : id === 114 && (t === 'ai_fix' || t === 'claude_review') ? `pr-114-${t}` : id === 105 && t === 'claude_review' ? 'pr-105-claude_review' : null,

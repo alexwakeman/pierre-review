@@ -40,6 +40,7 @@ import { CopyButton } from './CopyButton.js';
 import { UserName } from './UserName.js';
 import { ShowOnTimeline, PrFocusMetaContext } from './ShowOnTimeline.js';
 import {
+  ChevronIcon,
   DotIcon,
   ExternalLinkIcon,
   EyeIcon,
@@ -116,6 +117,8 @@ function pinnedMetaOf(pr: PrDetailT, usersById: Map<number, User>): PinnedPr {
 // whichever provider made it (each run names its own).
 const TAB_LABELS: Record<Tab, string> = {
   overview: 'Overview',
+  comments: 'Comments',
+  // Never listed in the strip (Activity is a section of Overview now); kept for the type.
   activity: 'Activity',
   changes: 'Changes',
   bot_activity: 'Bot activity',
@@ -271,22 +274,25 @@ function ActivityList({
     return () => clearTimeout(t);
   }, [flashKey]);
 
+  // COMPACT: one line per entry (it used to be a whole tab of three-line cards). Same rows, same
+  // order, same two controls — the timeline magnifier and the GitHub link — as icons at the end.
   return (
-    <ul className="divide-y divide-gray-100 dark:divide-gray-800">
+    <ul className="divide-y divide-gray-100 dark:divide-gray-800" data-testid="pr-activity-list">
       {since && (
-        <li className="flex items-center gap-2 bg-sky-500/5 px-3 py-1.5 text-xs text-sky-600 dark:text-sky-400">
+        <li className="flex items-center gap-2 bg-sky-500/5 px-4 py-1 text-xs text-sky-700 dark:text-sky-400">
           <span>Showing {rows.length} since you last looked</span>
           <button
             type="button"
             onClick={onClearSince}
-            className="ml-auto text-gray-400 hover:text-gray-600"
+            className="ml-auto text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
           >
-            show all
+            Show all
           </button>
         </li>
       )}
       {rows.map((r) => {
         const user = r.actorId != null ? usersById.get(r.actorId) : undefined;
+        const href = r.href != null ? safeExternalUrl(r.href) : null;
         return (
           <li
             key={r.key}
@@ -294,75 +300,125 @@ function ActivityList({
               if (el) rowRefs.current.set(r.key, el);
               else rowRefs.current.delete(r.key);
             }}
-            className={`flex items-start gap-2 px-3 py-2 text-sm ${
+            className={`flex items-center gap-1.5 px-4 py-1 text-xs ${
               r.key === flashKey ? 'activity-flash' : ''
             }`}
           >
-            <Avatar user={user} size={20} />
-            <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                <UserName
-                  user={user}
-                  fallbackId={r.actorId}
-                  repoId={pr.repoId}
-                  className="font-medium"
-                />
-                <span className="text-gray-500 dark:text-gray-400">{r.label}</span>
-                {r.sha && (
-                  <span className="inline-flex items-center gap-0.5">
-                    <a
-                      href={safeExternalUrl(r.href ?? `${pr.githubUrl}/commits/${r.sha}`)}
-                      target="_blank"
-                      rel="noreferrer noopener"
-                      className="font-mono text-xs text-gray-500 hover:text-blue-500 dark:text-gray-400"
-                      aria-label={`Commit ${r.sha.slice(0, 7)} on GitHub`}
-                    >
-                      {r.sha.slice(0, 7)}
-                    </a>
-                    <CopyButton text={r.sha} what="commit hash" title="Copy commit hash" />
-                  </span>
-                )}
-                <span className="text-xs text-gray-400" title={dateTime(r.time)}>
-                  · {relativeTime(r.time)}
-                </span>
-              </div>
-              {r.detail && (
-                <div className="mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400" title={r.detail}>
-                  {r.detail.split('\n')[0]}
-                </div>
-              )}
-              <div className="mt-1 flex items-center gap-3 text-xs">
-                {/* Was a hand-rolled "Show" that centred this event on the SHARED
-                    board — a second focus-entry funnel that could drift from the one
-                    every other "show this moment" control uses. It now goes through
-                    ShowOnTimeline, so it opens the PR's OWN isolated timeline tab
-                    (fitted to the PR) with this event centred + glowing. The header's
-                    TimelineIcon button is the one that still means the shared board;
-                    the tooltips are what tell them apart. */}
-                <ShowOnTimeline
-                  prId={pr.id}
-                  at={r.time}
-                  event={r.event}
-                  label="Timeline view"
-                  title="Timeline view — open this PR's own timeline tab, centred on this event"
-                />
-                {r.href && (
-                  <a
-                    href={safeExternalUrl(r.href)}
-                    target="_blank"
-                    rel="noreferrer noopener"
-                    className="text-gray-400 hover:text-blue-500"
-                  >
-                    Open on GitHub{' '}
-                    <ExternalLinkIcon size={11} className="inline-block align-[-0.1em]" />
-                  </a>
-                )}
-              </div>
-            </div>
+            <Avatar user={user} size={16} />
+            <UserName
+              user={user}
+              fallbackId={r.actorId}
+              repoId={pr.repoId}
+              className="shrink-0 font-medium"
+            />
+            <span className="shrink-0 text-gray-500 dark:text-gray-400">{r.label}</span>
+            {r.sha && (
+              <span className="inline-flex shrink-0 items-center gap-0.5">
+                <a
+                  href={safeExternalUrl(r.href ?? `${pr.githubUrl}/commits/${r.sha}`)}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  className="font-mono text-gray-500 hover:text-blue-500 dark:text-gray-400"
+                  aria-label={`Commit ${r.sha.slice(0, 7)} on GitHub`}
+                >
+                  {r.sha.slice(0, 7)}
+                </a>
+                <CopyButton text={r.sha} what="commit hash" title="Copy commit hash" />
+              </span>
+            )}
+            <span
+              className="min-w-0 flex-1 truncate text-gray-500 dark:text-gray-400"
+              title={r.detail}
+            >
+              {r.detail?.split('\n')[0]}
+            </span>
+            <span
+              className="shrink-0 tabular-nums text-gray-500 dark:text-gray-400"
+              title={dateTime(r.time)}
+            >
+              {relativeTime(r.time)}
+            </span>
+            {/* Opens the PR's OWN timeline tab centred on this event (the one focus-entry funnel
+                every "show this moment" control uses). */}
+            <ShowOnTimeline
+              prId={pr.id}
+              at={r.time}
+              event={r.event}
+              title="Show on this PR's own timeline"
+            />
+            {href != null && (
+              <a
+                href={href}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="shrink-0 rounded p-0.5 text-gray-500 hover:text-blue-500 dark:text-gray-400"
+                title="Open on GitHub"
+                aria-label="Open on GitHub"
+              >
+                <ExternalLinkIcon size={12} />
+              </a>
+            )}
           </li>
         );
       })}
     </ul>
+  );
+}
+
+/**
+ * Overview's last section: the PR's Activity (opened, commits, reviews, comments, merged/closed),
+ * newest first. It was a tab of its own; now it sits COLLAPSED at the foot of Overview, and the
+ * header bar is the toggle (the Default branches strip's pattern). `open` is owned by PrDetail,
+ * because a `?prTab=activity` link, the timeline's commit popover and the header's "N new" chip
+ * all open it from outside.
+ */
+export function ActivitySection({
+  open,
+  onToggle,
+  count,
+  scrollNonce,
+  onScrollConsumed,
+  children,
+}: {
+  open: boolean;
+  onToggle: () => void;
+  count: number;
+  /** Set when something outside asks to SEE the section (the header's "N new" chip, an arrival on
+   *  `'activity'`). Consumed after one scroll, so a later return to Overview does not jump. */
+  scrollNonce?: number | null;
+  onScrollConsumed?: () => void;
+  children?: React.ReactNode;
+}): JSX.Element {
+  const ref = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (scrollNonce == null) return;
+    ref.current?.scrollIntoView({ block: 'start' });
+    onScrollConsumed?.();
+    // Keyed on the nonce alone: the callback is a fresh closure every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scrollNonce]);
+  return (
+    <section
+      ref={ref}
+      className="border-t border-gray-200 dark:border-gray-800"
+      data-testid="pr-activity-section"
+    >
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        className="flex w-full items-center gap-2 px-4 py-1.5 text-left hover:bg-gray-50 dark:hover:bg-gray-800/40"
+      >
+        <ChevronIcon dir={open ? 'down' : 'right'} size={10} className="shrink-0 text-gray-500 dark:text-gray-400" />
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+          Activity
+        </span>
+        <span className="ml-auto text-[11px] tabular-nums text-gray-500 dark:text-gray-400">
+          {count} event{count === 1 ? '' : 's'}
+        </span>
+      </button>
+      {open && children}
+    </section>
   );
 }
 
@@ -372,6 +428,11 @@ function ActivityList({
 // Changes tab's threads, so they're NOT counted here.
 const reviewCommentCount = (pr: PrDetailT): number =>
   pr.reviews.filter((r) => r.body != null && r.body.trim() !== '').length;
+
+/** The Comments tab's badge: issue-level PR comments plus reviews that carried a body — exactly
+ *  the items `PrCommentsList` renders, so the badge and the list cannot disagree. */
+export const prConversationCount = (pr: PrDetailT): number =>
+  pr.comments.length + reviewCommentCount(pr);
 
 // Small state pill next to a review author in the conversation, so an approval-with-note
 // reads differently from a plain review comment or a change request.
@@ -806,6 +867,21 @@ export function PrDetail({
     openThreadsView();
   }, [openThreadsView]);
   const [activitySince, setActivitySince] = useState<string | null>(null);
+  // Overview's Activity section: COLLAPSED by default. `'activity'` as the seated tab (an old
+  // `?prTab=activity` link, the timeline's commit popover, the header's "N new" chip) means
+  // "Overview, with this section open" — DERIVED below, never written back. The local flag holds the
+  // reader's own clicks and mirrors an arrival on `'activity'`, so pressing the Overview tab
+  // afterwards does not snap the section shut under them.
+  const [activityOpenLocal, setActivityOpenLocal] = useState(false);
+  const [activityScroll, setActivityScroll] = useState<number | null>(null);
+  useEffect(() => {
+    if (tab !== 'activity') return;
+    setActivityOpenLocal(true);
+    // Arriving on it (a Pending card, an old link) should SHOW the section, which sits below the
+    // fold of Overview. Not when a single entry is targeted: ActivityList scrolls to that row.
+    if (useFilters.getState().activityFocus?.prId !== prId) setActivityScroll((n) => (n ?? 0) + 1);
+  }, [tab, prId]);
+  const activityOpen = activityOpenLocal || tab === 'activity';
   const qc = useQueryClient();
   /**
    * THREAD → CHANGES, with the full fallback ladder. Resolved here because this is the only
@@ -971,9 +1047,9 @@ export function PrDetail({
     if (threadStateFilter.size > 0) seedThreadsView();
   }, [threadStateFilter, seedThreadsView]);
 
-  // A timeline deep link to an Activity entry (e.g. the commit popover) forces the
-  // Activity tab and clears the "since" filter so the target is visible; the list
-  // then scrolls to + flashes it.
+  // A timeline deep link to an Activity entry (e.g. the commit popover) seats `'activity'` —
+  // Overview with its Activity section open — and clears the "since" filter so the target is
+  // visible; the list then scrolls to + flashes it.
   useEffect(() => {
     if (activityFocusForPr) {
       seedTab('activity');
@@ -1021,10 +1097,10 @@ export function PrDetail({
   }, [aiFixTabFocus, pr, aiFixTabEnabled, seedTab]);
 
   // A timeline deep link to a PR comment (the pr_comment popover's "Open in detail
-  // pane") forces the Overview tab, where PrCommentsList then scrolls to + flashes
+  // pane") forces the Comments tab, where PrCommentsList then scrolls to + flashes
   // it. PrCommentsList consumes the signal (not here) once it has scrolled.
   useEffect(() => {
-    if (commentFocusForPr != null) seedTab('overview');
+    if (commentFocusForPr != null) seedTab('comments');
   }, [commentFocusForPr, seedTab]);
 
   // Capture the last-viewed instant before marking (so new comments highlight
@@ -1103,8 +1179,13 @@ export function PrDetail({
    * `botsInnerTab` / `insightsInnerTab` follow.
    */
   const botTabResolved = pr != null && (!hasBots || prBotBehaviour !== undefined);
+  // `'activity'` is not a screen of its own any more: it renders Overview (section open, above).
   const effectiveTab: Tab =
-    tab === 'bot_activity' && botTabResolved && !botTabVisible ? 'overview' : tab;
+    tab === 'activity'
+      ? 'overview'
+      : tab === 'bot_activity' && botTabResolved && !botTabVisible
+        ? 'overview'
+        : tab;
 
   // Keep a pinned tab's label fresh if the PR detail (re)loads with a new title /
   // author (e.g. a renamed PR). No-op when the PR isn't pinned or nothing changed.
@@ -1149,6 +1230,7 @@ export function PrDetail({
   const stateMeta = PR_STATE_META[pr.state];
   const headerCi = prHeaderCi(pr.state, pr.ciStatus);
   const author = pr.authorId != null ? usersById.get(pr.authorId) : undefined;
+  const conversationCount = prConversationCount(pr);
 
   return (
     <PrFocusMetaContext.Provider value={pinnedMetaOf(pr, usersById)}>
@@ -1337,8 +1419,10 @@ export function PrDetail({
               <button
                 type="button"
                 onClick={() => {
+                  // Overview, Activity section open and scrolled to, filtered to what's new.
                   goToTab('activity');
                   setActivitySince(pr.lastViewedAt);
+                  setActivityScroll((n) => (n ?? 0) + 1);
                 }}
                 className="ml-auto shrink-0 rounded bg-sky-500/15 px-1.5 py-0.5 text-xs font-medium text-sky-500 hover:bg-sky-500/25"
                 title="Filter activity to what's new since you last looked"
@@ -1348,29 +1432,34 @@ export function PrDetail({
             ) : null;
           })()}
         </div>
-        <div className="mt-1 flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
-          <Avatar user={author} size={16} />
+        {/* The meta line: REPO first, then the author — 14px (it was 12px and read as fine
+            print). gray-600/gray-300 clears AA on both themes. */}
+        <div
+          className="mt-1 flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300"
+          data-testid="pr-header-meta"
+        >
+          <span className="min-w-0 truncate">{pr.repoFullName}</span>
+          <span aria-hidden className="decorative-mark text-gray-400 dark:text-gray-500">·</span>
+          <Avatar user={author} size={18} />
           <UserName user={author} fallbackId={pr.authorId} repoId={pr.repoId} />
-          <span>·</span>
-          <span>{pr.repoFullName}</span>
-          <span>·</span>
-          <span>opened {relativeTime(pr.openedAt)}</span>
+          <span aria-hidden className="decorative-mark text-gray-400 dark:text-gray-500">·</span>
+          <span className="shrink-0">opened {relativeTime(pr.openedAt)}</span>
           {pr.changedFilesCount > 0 && (
             <>
-              <span>·</span>
+              <span aria-hidden className="decorative-mark text-gray-400 dark:text-gray-500">·</span>
               <button
                 type="button"
                 onClick={() => goToTab('changes')}
                 className="inline-flex shrink-0 items-center gap-1 font-medium"
                 title="View the files changed by this PR"
               >
-                <span className="text-gray-500 dark:text-gray-400">
+                <span>
                   {pr.changedFilesCount} file{pr.changedFilesCount === 1 ? '' : 's'}
                 </span>
-                <span className="text-green-600 dark:text-green-400">
+                <span className="text-green-700 dark:text-green-400">
                   +{pr.additions.toLocaleString()}
                 </span>
-                <span className="text-red-500 dark:text-red-400">
+                <span className="text-red-600 dark:text-red-400">
                   −{pr.deletions.toLocaleString()}
                 </span>
               </button>
@@ -1405,7 +1494,7 @@ export function PrDetail({
         {(
           [
             'overview',
-            'activity',
+            'comments',
             'changes',
             // Also listed while the bot data is still in flight for a reader who ARRIVED on this
             // tab (a deep link / a refresh), so the strip is never showing a screen with no
@@ -1437,6 +1526,11 @@ export function PrDetail({
               {t === 'overview' && failing > 0 && (
                 <span className="ml-1 text-red-500" title={`${failing} failing`}>
                   <DotIcon size={7} className="inline-block align-middle" />
+                </span>
+              )}
+              {t === 'comments' && conversationCount > 0 && (
+                <span className="ml-1 opacity-60" title={`${conversationCount} comments`}>
+                  {conversationCount}
                 </span>
               )}
               {t === 'changes' && pr.changedFilesCount > 0 && (
@@ -1483,37 +1577,47 @@ export function PrDetail({
               statusFocus={statusFocus}
               onStatusFocusConsumed={() => setStatusFocus(null)}
             />
-            <div className="border-t border-gray-200 dark:border-gray-800">
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 pb-1 pt-2">
-                <span className="text-xs font-semibold uppercase tracking-wide text-gray-400">
-                  PR comments
-                  {pr.comments.length + reviewCommentCount(pr) > 0 && (
-                    <span className="ml-1 font-normal opacity-70">
-                      · {pr.comments.length + reviewCommentCount(pr)}
-                    </span>
-                  )}
-                </span>
-              </div>
-              <PrCommentsList
+            {/* The PR's Activity, collapsed at the foot of Overview (it was a tab). */}
+            <ActivitySection
+              open={activityOpen}
+              count={buildActivity(pr).length}
+              scrollNonce={activityScroll}
+              onScrollConsumed={() => setActivityScroll(null)}
+              onToggle={() => {
+                if (activityOpen) {
+                  setActivityOpenLocal(false);
+                  // Shutting it while the seated tab still says "activity" must move the tab, or
+                  // the derived open state would hold it open.
+                  if (tab === 'activity') goToTab('overview');
+                } else {
+                  setActivityOpenLocal(true);
+                }
+              }}
+            >
+              <ActivityList
                 pr={pr}
                 usersById={usersById}
-                viewedSince={pr.lastViewedAt}
-                focusKey={commentFocusForPr}
-                selectedCommentId={selectedCommentId}
-                onFocusConsumed={consumeCommentFocus}
+                since={activitySince}
+                onClearSince={() => setActivitySince(null)}
+                focusEvent={activityFocusForPr}
+                onConsumed={consumeActivityFocus}
               />
-              <PrCommentComposer prId={pr.id} />
-            </div>
+            </ActivitySection>
           </div>
-        ) : effectiveTab === 'activity' ? (
-          <ActivityList
-            pr={pr}
-            usersById={usersById}
-            since={activitySince}
-            onClearSince={() => setActivitySince(null)}
-            focusEvent={activityFocusForPr}
-            onConsumed={consumeActivityFocus}
-          />
+        ) : effectiveTab === 'comments' ? (
+          // The PR conversation (issue comments + review bodies, oldest first) and the composer —
+          // its own tab now, beside Overview.
+          <div className="pt-2">
+            <PrCommentsList
+              pr={pr}
+              usersById={usersById}
+              viewedSince={pr.lastViewedAt}
+              focusKey={commentFocusForPr}
+              selectedCommentId={selectedCommentId}
+              onFocusConsumed={consumeCommentFocus}
+            />
+            <PrCommentComposer prId={pr.id} />
+          </div>
         ) : effectiveTab === 'changes' ? (
           <ChangesTab
             pr={pr}

@@ -600,10 +600,28 @@ Refresh, GitHub) and DetailPane's ✕ wear ONE ink, `PR_HEADER_ICON_BTN` (gray-9
 the title's colour); Refresh's amber stale state and the Stalled / Auto-merge / new-since chips keep
 their colours because they mean something. Pinned in `test/prDetailPlacement.test.ts`.
 
-**Overview → Branch** (`PrBranchLine` in ChecksTab, just above Ticket): the head branch in
-monospace, a muted `→ base`, and a `CopyButton` for the HEAD name only (bare, no fork owner — sync
-does not know the owner). `PrDetail.headRefName`/`baseRefName` come from synced columns; a null head
-omits the row. Long names `break-all`. Pinned in `test/prBranchRow.test.ts`.
+**Header meta line** (`data-testid="pr-header-meta"`): REPO first, then the author's avatar + name,
+"opened …", the file delta button, the large-PR flag and the blast chip — at 14px (`text-sm`,
+gray-600 / dark gray-300; the delta's +/− are green-700 / red-600 so they clear AA). It was 12px
+and author-first.
+
+**Overview → Ticket + branch, ONE row** (`PrTicketBranchLine` in ChecksTab): the ticket chips, then on
+the same line a small "Branch" caption and `PrBranchLine` — the head branch in monospace, a muted
+`→ base`, and a `CopyButton` for the HEAD name only (bare, no fork owner — sync does not know the
+owner). The row is labelled "Ticket" when the PR has a tracker (`tickets != null`; `[]` reads "No
+ticket found") and "Branch" (no caption) when it has none; a null head omits the branch. Long names
+`break-all`. Pinned in `test/prBranchRow.test.ts` + `test/prOverviewLayout.test.ts`.
+
+**Tabs: Overview · Comments · Threads · Changes** (+ the gated ones below). ⚠ **Activity is NOT a tab
+any more** — it is the collapsed **Activity** section at the foot of Overview (`ActivitySection`, a
+compact one-line-per-event list of the same rows: opened, commits, reviews, comments, merged/closed,
+each with the timeline magnifier and a GitHub link). `'activity'` stays a `PrDetailTab` member so an
+old `?prTab=activity` link, the timeline's commit popover (`activityFocus`) and the header's "N new"
+chip still work: it RENDERS Overview with the section open, DERIVED (`effectiveTab`), never written
+back; a local flag mirrors it so pressing Overview afterwards does not snap it shut, and shutting the
+section while seated on `'activity'` moves the tab to `'overview'`. **Comments** (`?prTab=comments`,
+badge = issue comments + review bodies, `prConversationCount`) holds `PrCommentsList` + the composer;
+a PR-comment deep link (`commentFocus`) seats it.
 
 Header carries **Show** + **Focus** links (drive the timeline) and, on OPEN PRs only, a **CI
 readout**: a 12px `CiDot` plus its word (`prHeaderCi(state, ciStatus)` in `lib/ui.ts`, pinned by
@@ -621,8 +639,7 @@ Overview later does not jump. It adds no fetch of its own: it stays fresh throug
 `usePrLiveRefresh`'s `['pr', prId]` invalidation, and `useDetailCacheReconciler` now also
 invalidates `['pr', id]` (never its threads) when the most recently fetched timeline/open-PRs feed
 carries a different `ciStatus` and was fetched after the detail (`ciDetailOutdated`) — CI finishing
-never bumps `updatedAt`. Tabs (Overview /
-Activity / Changes, + a presence-gated **Bot activity** + Claude Review / AI Fix, listed whenever
+never bumps `updatedAt`. Tabs (Overview / Comments / Changes, + a presence-gated **Bot activity** + Claude Review / AI Fix, listed whenever
 `me.ai.enabled` — see **The agentic AI surfaces** below):
 - **Overview** — `ChecksTab.tsx`: CI/checks (each Actions check expands into the inline log
   viewer — see **Merge, CI logs & trunk status**), the **merge verdict** line (open PRs only,
@@ -685,11 +702,15 @@ Activity / Changes, + a presence-gated **Bot activity** + Claude Review / AI Fix
   undo of a close and is itself undone by the Close button beside it, so a two-click gate would be
   ceremony around a reversible act. It prints GitHub's own refusal sentence when the 409 comes back
   — normally the head branch was deleted after the close) — then the PR **Summary** (markdown,
-  clamped to 3 lines, tall images hidden when collapsed). **PR comments** (oldest first) round the
-  tab off — each with a "Show" link — but that list is rendered by **`PrDetail` itself**, not
-  `ChecksTab`. (The AI PR summary under the description and the per-comment "Check review" + its
+  clamped to 3 lines, tall images hidden when collapsed). The collapsed **Activity** section rounds
+  the tab off (rendered by `PrDetail`, not `ChecksTab`); the **PR comments** moved to the Comments
+  tab. (The AI PR summary under the description and the per-comment "Check review" + its
   annotations are REMOVED 2026-10-18.) The **Checks
-  row** lists the checks + re-run control and opens only when there are checks to list
+  row** is ONE collapsed summary line (`ChecksSummary`: chevron + the Default branches strip's
+  pills — "N passed" / "N failing" (failure + error) / "N running", one per state that exists, "all
+  N passed" when every check did — and "N checks" on the right; the whole line toggles, per mount,
+  collapsed even when red). Expanded it lists the checks + re-run control; it renders only when
+  there are checks to list
   (`checksRowVisible` is DELETED with the old `CiAnalysisCard`: why CI failed is the CI review's
   job now — docs/CLAUDE-REVIEW.md § CI review).
 - **There is NO Threads tab** (removed 2026-10-26; a legacy `?prTab=threads` reads as `changes`).
@@ -2893,11 +2914,12 @@ FETCH, so they mount only while Details is open** — the untouched-thread card 
 thread on mount, which broke the board's no-fetch rule (`e2e/pending-cards.spec.ts` pins it).
 
 **Whole-card click opens the EVENT** (`pendingCardEvent`): a thread card its thread, pushed
-commits / your PR's new activity the PR's Activity tab, a mention / comment-after-yours card THE
+commits / your PR's new activity the PR's Activity (`tab: 'activity'` = Overview with the Activity
+section open and scrolled to), a mention / comment-after-yours card THE
 COMMENT when it carries `comment` (`board.openComment`: a comment on a line of code → Changes via
 `openPrChangesAt` with `threadId` + `line`, which PrDetail runs through `openInChangesFor` — the
 thread → Changes ladder that opens its inline pill — falling back to Threads when the file left the
-diff; a PR comment or review body → Overview via `showPrComment(prId, id, kind)`, keyed
+diff; a PR comment or review body → the Comments tab via `showPrComment(prId, id, kind)`, keyed
 `comment:<id>` / `review:<id>` in `PrCommentsList`; without `comment`, Activity), a Claude card the
 review, a red trunk its checks page on GitHub (the "at <sha>" link is the commit itself); the title
 always opens Overview (it seats `prDetailTab` explicitly). A red build on YOUR PR (`ci_failing`'s

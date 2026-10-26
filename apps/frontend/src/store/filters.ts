@@ -118,8 +118,14 @@ export const BOTS_INNER_TABS: readonly BotsInnerTab[] = ['roi', 'themes', 'bench
 // data-gated) — the store holds the CHOICE, never a computed effective tab.
 // There is NO 'threads' member any more: review threads live in the Changes tab (inline in the
 // diff, or its "Threads only" view). The URL layer reads a legacy `?prTab=threads` as 'changes'.
+//
+// ⚠ `'activity'` IS NO LONGER A TAB IN THE STRIP. The Activity list is a collapsible section at the
+// foot of Overview; the member survives so an old `?prTab=activity` link (and the timeline's
+// commit-popover deep link, which seats it) still means something: Overview, with that section
+// OPEN. PrDetail derives both from it; nothing writes it back to `'overview'`.
 export type PrDetailTab =
   | 'overview'
+  | 'comments'
   | 'activity'
   | 'changes'
   | 'bot_activity'
@@ -127,6 +133,7 @@ export type PrDetailTab =
   | 'ai_fix';
 export const PR_DETAIL_TABS: readonly PrDetailTab[] = [
   'overview',
+  'comments',
   'activity',
   'changes',
   'bot_activity',
