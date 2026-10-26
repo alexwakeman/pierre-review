@@ -553,7 +553,14 @@ async function runPipeline(
   // reply is no longer settled on sight: it is judged like an open one (follow-up.ts).
   const settled = await loadSettledByReplyFindings(ctx, item.prId, item.accountId, reviewId);
   const settledIds = new Set(settled.map((f) => f.id));
-  const prior = await loadPriorReviewForFollowUp(ctx, item.prId, item.accountId, reviewId, settledIds);
+  const prior = await loadPriorReviewForFollowUp(
+    ctx,
+    item.prId,
+    item.accountId,
+    reviewId,
+    settledIds,
+    activeProviderId(),
+  );
   // BACKWARD COMPATIBILITY: findings the RETIRED settle-on-sight rule took out of the chain were
   // never judged. Load them as carried items; only the ones whose thread is resolved WITH a
   // person's reply are kept (below), so they are judged once like any other.

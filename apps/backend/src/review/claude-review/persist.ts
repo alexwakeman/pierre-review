@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { and, asc, desc, eq, gte, inArray, isNull, lt, ne, or, sql } from 'drizzle-orm';
 import type {
+  AiProviderId,
   ClaudeFinding,
   ClaudeFindingEarlierPost,
   ClaudeFindingReminder,
@@ -1404,10 +1405,14 @@ export async function loadPriorReviewForFollowUp(
   // TRAILING: earlier findings SETTLED BY A REPLY (`loadSettledByReplyFindings`) — left out of the
   // follow-up entirely, own and carried alike. Absent ⇒ none.
   settledIds: ReadonlySet<number> = new Set(),
+  // TRAILING: follow up only on the latest earlier run BY THIS PROVIDER, so a Codex review after a
+  // Claude one (or the reverse) reviews afresh instead of grading the other's findings — the two
+  // stay comparable side by side. Absent ⇒ the latest run, whichever provider ran it.
+  provider?: AiProviderId,
 ): Promise<PriorReviewForFollowUp | null> {
   const { cr, crf, prs, repos } = tables(ctx);
-  const rows = (await ctx.db
-    .select({ id: cr.id, headSha: cr.headSha, followUp: cr.followUp })
+  const candidates = (await ctx.db
+    .select({ id: cr.id, headSha: cr.headSha, followUp: cr.followUp, provider: cr.provider, model: cr.model })
     .from(cr)
     .innerJoin(prs, eq(prs.id, cr.prId))
     .innerJoin(repos, eq(repos.id, prs.repoId))
@@ -1421,13 +1426,16 @@ export async function loadPriorReviewForFollowUp(
       ),
     )
     .orderBy(desc(cr.id))
-    .limit(1)
+    // NULL provider reads by model (aiRunProvider), so the provider filter runs here, not in SQL.
+    .limit(provider ? 50 : 1)
     .execute()) as Array<{
     id: number;
     headSha: string;
     followUp: ClaudeReviewFollowUpRecord | null;
+    provider: string | null;
+    model: string | null;
   }>;
-  const row = rows[0];
+  const row = provider ? candidates.find((r) => aiRunProvider(r.provider, r.model) === provider) : candidates[0];
   if (!row) return null;
 
   const toPrior = (f: FindingRow, headSha: string, carried: boolean): PriorFindingForFollowUp => ({

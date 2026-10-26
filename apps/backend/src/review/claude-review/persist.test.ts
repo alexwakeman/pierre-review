@@ -261,6 +261,24 @@ describe('ticket + follow-up persistence', () => {
     expect(prior?.findings.map((f) => f.title)).toEqual(['legacy']);
   });
 
+  it('with a provider named, follows up only on that provider’s latest earlier run', async () => {
+    const claudeRun = await persist.insertQueuedReview(ctx, otherPrId, 'p'.repeat(40), 'claude-opus-5-5', 1);
+    await persist.saveReviewSuccess(ctx, claudeRun, success([finding({ title: 'from claude' })]));
+    await persist.markFindingPosted(ctx, (await persist.getClaudeReviewById(ctx, claudeRun, 1))!.findings[0]!.id, 'c-cl', 'pr_comment');
+    const codexRun = await persist.insertQueuedReview(ctx, otherPrId, 'p'.repeat(40), 'claude-opus-5-5', 1);
+    await persist.markReviewRanOn(ctx, codexRun, { provider: 'codex', model: 'gpt-6-astra' });
+    await persist.saveReviewSuccess(ctx, codexRun, success([finding({ title: 'from codex' })]));
+    await persist.markFindingPosted(ctx, (await persist.getClaudeReviewById(ctx, codexRun, 1))!.findings[0]!.id, 'c-cx', 'pr_comment');
+    const next = await persist.insertQueuedReview(ctx, otherPrId, 'p'.repeat(40), 'claude-opus-5-5', 1);
+    // Unnamed: the latest run, whichever provider ran it.
+    expect((await persist.loadPriorReviewForFollowUp(ctx, otherPrId, 1, next))?.reviewId).toBe(codexRun);
+    expect((await persist.loadPriorReviewForFollowUp(ctx, otherPrId, 1, next, new Set(), 'codex'))?.reviewId).toBe(codexRun);
+    // A Claude run passes over the Codex one (an old NULL-provider row on a Claude model reads as Claude).
+    const forClaude = await persist.loadPriorReviewForFollowUp(ctx, otherPrId, 1, next, new Set(), 'claude');
+    expect(forClaude?.reviewId).toBe(claudeRun);
+    expect(forClaude?.findings.map((f) => f.title)).toEqual(['from claude']);
+  });
+
   it("another account's PR ⇒ null", async () => {
     const foreign = await persist.insertQueuedReview(ctx, foreignPrId, 'f'.repeat(40), 'claude-sonnet-5', 2);
     await persist.saveReviewSuccess(ctx, foreign, success([finding({ title: 'foreign' })]));
