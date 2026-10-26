@@ -88,8 +88,7 @@ export function HelpModal({ onClose }: { onClose: () => void }): JSX.Element {
             asked to review, or already chimed in), <strong>Comments</strong> /{' '}
             <strong>PR events</strong> by category, and the <strong>Bots</strong> lens (all → hide
             → only). Click any card to open that PR; <strong>Back</strong> returns you to the exact
-            card. To compare Workspaces, expand any metric row in <strong>Reports</strong> — the
-            “By workspace” breakdown shows every Workspace side by side for that period.
+            card.
           </Section>
 
           <Section title="Review-bot triage">

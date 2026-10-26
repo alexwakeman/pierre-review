@@ -10,7 +10,6 @@ import {
   getPeriodMetrics,
   getPeriodCoverage,
   getPeriodLanes,
-  getPeriodMetricsForWorkspaces,
 } from '../db/period-metrics.js';
 // The synthesis input assembly (P2.1) — its own module for the same reason period-metrics is:
 // §8.3's one-predicate rule is the whole feature, and the module header names which drill-down
@@ -143,10 +142,6 @@ export async function bindPlatform(app: FastifyInstance): Promise<void> {
       // per-bot drill-down tab (the fetch must not compute 15 bots' heatmaps to render one).
       getBotBehaviour: (accountId, window, scope, botUserId) =>
         hostQueries.getBotBehaviourAnalytics(accountId, window, scope, botUserId),
-      // Per-workspace period vectors (the Reports "By workspace" axis). Window-pure — a loop
-      // of getPeriodMetrics over the account's workspaces; carries no cost fields.
-      getPeriodMetricsForWorkspaces: (accountId, window) =>
-        getPeriodMetricsForWorkspaces(accountId, window),
       // The synthesis input assembly (P2.1 — LIVE as of the P2.1 train; the declared-inert throw
       // is swapped for db/synthesis-input.ts, which routes every kind through the drill-down's
       // own fold per §8.3). No contract change — exactly the swap D2's single bump paid for.

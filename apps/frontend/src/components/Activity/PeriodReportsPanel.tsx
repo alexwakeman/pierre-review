@@ -1,11 +1,10 @@
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { JSX } from 'react';
 import { useIsMutating } from '@tanstack/react-query';
 import { AiRunGate } from '../AiSetup.js';
 import type {
   ActorLane,
   ActorLaneBand,
-  PeriodByWorkspace,
   PeriodForecast,
   PeriodLaneStats,
   PeriodLanes,
@@ -19,7 +18,6 @@ import type {
   PeriodArchivedReport,
   PeriodReportListItem,
   PeriodReportModelInfo,
-  PeriodWorkspaceRow,
 } from '@pierre-review/shared';
 import {
   ACTOR_LANES,
@@ -40,7 +38,6 @@ import { CopyButton } from '../CopyButton.js';
 import { InfoButton } from '../InfoModal.js';
 import {
   CaretIcon,
-  ChevronIcon,
   PartialCircleIcon,
   RefreshIcon,
   ThinSampleIcon,
@@ -527,198 +524,8 @@ function LanesPanel({ lanes }: { lanes: PeriodLanes }): JSX.Element | null {
   );
 }
 
-// ── The "By workspace" axis (C4 — Compare workspaces folded into Reports) ────────────────────
-//
-// One metric, every workspace: the expansion under a metric row showing that metric's value per
-// workspace for the viewed period and the one before it. This replaced the standalone "Compare
-// workspaces" matrix, and it inherits Reports' honesty rules wholesale:
-//
-//  • ⚠ ONE POPULATION PER ROW. A workspace's current and prior figures are BOTH its full
-//    membership (the server computes no coverage-stable subset at this grain), so the subtraction
-//    is legitimate — and the onboarded-mid-window honesty travels as the row's own coverage
-//    annotation (◔), the same disclosure the headline report carries. The headline table's
-//    subset figures must never leak into these rows, nor these into it.
-//  • ⚠ The ◔ reads BOTH windows' coverage, not just the current row's. Coverage is measured at
-//    each window's own START, and tracking is monotone (`repos.createdAt <= atMs`), so the
-//    COMMON biased case is prior-partial-with-current-complete — repos onboarded between the
-//    two window starts make the prior figure under-count and the raw change over-state growth,
-//    with nothing visibly wrong on the current side. That is the 39→570 onboarding artifact at
-//    workspace grain; annotating only `row.coverage` missed it entirely.
-//  • The change is the RAW difference, muted and un-arrowed: no significance test runs at
-//    workspace grain, and a percentage off an untested base is noise wearing a suit.
-//  • `null` renders "—", never 0. "No prior period" renders as such, never as a zero column.
-//  • ⚠ NO MONEY. The vector carries no cost key and this axis must never grow one — a bot's
-//    price is per workspace and cross-workspace surfaces cannot even total it honestly.
-function WorkspaceAxis({
-  axis,
-  metricKey,
-  meta,
-}: {
-  axis: PeriodByWorkspace;
-  metricKey: PeriodMetricKey;
-  meta: MetricMeta;
-}): JSX.Element {
-  // ⚠ THE WHOLE AXIS REFUSES WHEN THE COMPARED WORKSPACES DO NOT SHARE THIS ONE'S SPRINT CADENCE,
-  // and it is NAMED. The server hands ONE window to every workspace, so a team on a 7-day sprint
-  // measured over a 14-day window contributes roughly double its per-sprint throughput to a column
-  // headed "this period" — every count wrong, the medians and percentages wrong less visibly and
-  // therefore worse. The server refuses WHOLESALE rather than dropping the mismatched rows, so this
-  // renders a sentence and no table: half a table beside a refusal reads as "here are the ones that
-  // worked", and a table whose membership changes because ANOTHER team edited their settings is a
-  // surface that mutates for a reason its reader cannot see.
-  if (axis.refusal != null) {
-    const diverging = axis.refusalWorkspaces ?? [];
-    return (
-      <div className={`text-[11px] ${MUTED}`}>
-        No like-for-like comparison: these workspaces do not all run the same sprint length, and one
-        window measured over two cadences is not one figure.
-        {diverging.length > 0 && (
-          <>
-            {' '}
-            <span className="text-gray-500 dark:text-gray-400">
-              {diverging
-                .map((w) =>
-                  w.cadenceDays == null
-                    ? `${w.name} (no cadence set)`
-                    : `${w.name} (${w.cadenceDays} days)`,
-                )
-                .join(', ')}
-              .
-            </span>
-          </>
-        )}{' '}
-        Set a matching cadence in Settings to compare them.
-      </div>
-    );
-  }
-  const priorBy =
-    axis.prior == null ? null : new Map(axis.prior.map((r) => [r.workspaceId, r]));
-  const cellFor = (row: PeriodWorkspaceRow | undefined): PeriodMetricValue | undefined =>
-    row?.metrics.find((m) => m.key === metricKey);
-  const changeFmt = changeFmtFor(meta);
-  return (
-    <div className="space-y-0.5">
-      <div className="grid grid-cols-[minmax(8rem,16rem)_5.5rem_5.5rem_1fr] items-baseline gap-2 text-[11px] uppercase tracking-wide text-gray-400">
-        <span>Workspace</span>
-        <span className="text-right">This period</span>
-        <span className="text-right">Prior</span>
-        <span>Change</span>
-      </div>
-      {axis.current.map((row) => {
-        const cur = cellFor(row);
-        const priorRow = priorBy?.get(row.workspaceId);
-        const prior = priorBy == null ? undefined : cellFor(priorRow);
-        const value = cur?.value ?? null;
-        const priorValue = prior?.value ?? null;
-        const delta = value != null && priorValue != null ? value - priorValue : null;
-        // Coverage honesty must consider BOTH windows. Since tracking is monotone, a partial
-        // current side implies a partial prior side (when a prior row exists) — so the three
-        // reachable annotated states are: prior-only partial (repos onboarded between the two
-        // window starts — the change over-states growth), both partial (both under-count), and
-        // current partial with no prior period at all.
-        const curPartial = !row.coverage.complete;
-        const priorCov = priorRow?.coverage;
-        const priorPartial = priorCov != null && !priorCov.complete;
-        const coveragePartial = curPartial || priorPartial;
-        const coverageTitle =
-          curPartial && priorPartial
-            ? `Partial coverage in both windows: ${row.coverage.trackedRepos} of ${row.coverage.totalRepos} repos in this workspace were tracked when this period started, and ${priorCov.trackedRepos} when the prior one did — both figures under-count, and the change mixes two different memberships.`
-            : priorPartial
-              ? `Partial prior coverage: the prior period started before ${priorCov.totalRepos - priorCov.trackedRepos} of ${priorCov.totalRepos} repos in this workspace were tracked, so the prior figure under-counts and the change over-states growth.`
-              : `Partial coverage: ${row.coverage.trackedRepos} of ${row.coverage.totalRepos} repos in this workspace were being tracked when this period started, so its figures under-count the period.`;
-        return (
-          <div
-            key={row.workspaceId}
-            className="grid grid-cols-[minmax(8rem,16rem)_5.5rem_5.5rem_1fr] items-baseline gap-2 text-[11px]"
-          >
-            <span className="flex min-w-0 items-baseline gap-1">
-              <span className="truncate text-gray-600 dark:text-gray-300">{row.name}</span>
-              {row.isDefault && <span className="shrink-0 text-[11px] text-gray-400">default</span>}
-              {/* Per-workspace coverage honesty — the same disclosure the headline report makes,
-                  where THIS workspace's repos onboarded mid-window. Without it a freshly-onboarded
-                  workspace's small figures read as a quiet team rather than a short observation.
-                  Renders when EITHER window's coverage is partial — the title names which window
-                  under-counts, because a complete current window over a partial prior one is a
-                  change biased UPWARD, not a clean row. */}
-              {coveragePartial && (
-                <span
-                  className="shrink-0 text-amber-600 dark:text-amber-400"
-                  title={coverageTitle}
-                >
-                  <PartialCircleIcon />
-                </span>
-              )}
-            </span>
-            <span className="text-right tabular-nums text-gray-700 dark:text-gray-200">
-              {value == null ? '—' : meta.format(value)}
-              {cur?.lowSample && value != null && (
-                <span
-                  className="ml-0.5 align-super text-[11px] text-amber-600 dark:text-amber-400"
-                  title={`Thin sample — ${cur.sampleSize} item${cur.sampleSize === 1 ? '' : 's'} behind this figure.`}
-                  aria-label="thin sample"
-                >
-                  <ThinSampleIcon />
-                </span>
-              )}
-            </span>
-            <span className="text-right tabular-nums text-gray-400">
-              {priorValue == null ? '—' : meta.format(priorValue)}
-            </span>
-            {axis.prior == null ? (
-              <span className={`text-[11px] ${MUTED}`} title="Nothing exists for the period before this one on the cadence grid">
-                no prior period
-              </span>
-            ) : priorValue == null || value == null ? (
-              <span
-                className={`text-[11px] ${MUTED}`}
-                title="One side has no figure for this metric in this workspace, so there is nothing to subtract"
-              >
-                {value == null && priorValue == null ? '—' : 'no prior figure'}
-              </span>
-            ) : delta === 0 ? (
-              <span className={`text-[11px] ${MUTED}`}>no change</span>
-            ) : (
-              <span
-                className={`text-[11px] ${MUTED}`}
-                title={
-                  coveragePartial
-                    ? 'Raw change — coverage-biased: one window was only partially tracked (see the amber partial-coverage marker beside the workspace name), so this difference mixes memberships. No significance test is run at workspace grain, so no percentage and no verdict colour.'
-                    : "Raw change over this workspace's full membership — no significance test is run at workspace grain, so no percentage and no verdict colour"
-                }
-              >
-                {signed(delta!, changeFmt)}
-              </span>
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
 // ── The metric table ─────────────────────────────────────────────────────────────────────────
-function MetricTable({
-  report,
-  byWorkspace,
-}: {
-  report: PeriodReport;
-  // The optional per-workspace axis off the RESPONSE (not the stored report): null on older
-  // plugins, single-workspace accounts and stored-report-only renders — all of which must render
-  // the table exactly as before, expander-less. Absence, never an error.
-  byWorkspace: PeriodByWorkspace | null;
-}): JSX.Element {
-  // Which metric rows are expanded to their per-workspace breakdown (the C4 axis). Local and
-  // transient on purpose: an expansion is a reading gesture, not a filter worth a URL or the
-  // store. Hook sits above every early-return-free map (hooks-order rule).
-  const [expandedKeys, setExpandedKeys] = useState<ReadonlySet<PeriodMetricKey>>(new Set());
-  const toggleExpanded = (key: PeriodMetricKey): void => {
-    setExpandedKeys((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  };
+function MetricTable({ report }: { report: PeriodReport }): JSX.Element {
   // Keyed lookups, so a metric the server did not send (an older schema version, or a key added
   // in a later version) simply renders "—" / "no prior" rather than throwing or landing on the
   // wrong row. PERIOD_METRIC_KEYS is the render order and is part of the contract.
@@ -787,32 +594,13 @@ function MetricTable({
             // An insignificant change must not colour the spark either — the picture and the
             // number have to tell the same story.
             const sparkTone = delta?.significant ? toneHex(fav) : PALETTE.gray;
-            const wsOpen = byWorkspace != null && expandedKeys.has(key);
             return (
-              <Fragment key={key}>
-              <tr className="border-b border-gray-100 last:border-0 dark:border-gray-900">
+              <tr
+                key={key}
+                className="border-b border-gray-100 last:border-0 dark:border-gray-900">
                 <td className="py-1.5 pr-3 align-top">
                   <div className="font-medium text-gray-700 dark:text-gray-200">{meta.label}</div>
                   {meta.note && <div className="text-[11px] text-gray-400">{meta.note}</div>}
-                  {/* The C4 expander. Only rendered when the response carries the axis — the
-                      server already omits it for single-workspace accounts, older plugins send
-                      nothing, and in both cases this row is byte-identical to the pre-axis one. */}
-                  {byWorkspace != null && (
-                    <button
-                      type="button"
-                      onClick={() => toggleExpanded(key)}
-                      aria-expanded={wsOpen}
-                      className="mt-0.5 text-[11px] text-sky-600 hover:underline dark:text-sky-400"
-                      title="This metric, per workspace, for this period and the prior one"
-                    >
-                      <ChevronIcon
-                        dir={wsOpen ? 'down' : 'right'}
-                        size={10}
-                        className="mr-1 inline-block align-[-0.1em]"
-                      />
-                      By workspace
-                    </button>
-                  )}
                 </td>
                 <td className="py-1.5 pr-3 text-right align-top">
                   {/* null is "—", never 0. The `sampleSize` title is only shown when this cell IS
@@ -894,14 +682,6 @@ function MetricTable({
                   />
                 </td>
               </tr>
-              {wsOpen && byWorkspace != null && (
-                <tr className="border-b border-gray-100 last:border-0 dark:border-gray-900">
-                  <td colSpan={6} className="bg-gray-50/60 py-1.5 pl-4 pr-3 dark:bg-gray-900/30">
-                    <WorkspaceAxis axis={byWorkspace} metricKey={key} meta={meta} />
-                  </td>
-                </tr>
-              )}
-              </Fragment>
             );
           })}
         </tbody>
@@ -976,14 +756,7 @@ function Movements({
 }
 
 // ── The report body ──────────────────────────────────────────────────────────────────────────
-function ReportBody({
-  report,
-  byWorkspace,
-}: {
-  report: PeriodReport;
-  // The C4 "By workspace" axis, off the RESPONSE (computed live, never stored on the report).
-  byWorkspace: PeriodByWorkspace | null;
-}): JSX.Element {
+function ReportBody({ report }: { report: PeriodReport }): JSX.Element {
   const comparison = report.comparison;
   // A backfilled, metrics-only row: no comparison was ATTEMPTED (so no refusal either) and no
   // forecast was computed. Distinguishable from a generated report whose comparison was refused —
@@ -1081,7 +854,7 @@ function ReportBody({
         )
       )}
 
-      <MetricTable report={report} byWorkspace={byWorkspace} />
+      <MetricTable report={report} />
 
       {/* The narration. A backfilled period has none by design (metrics-only, no LLM) — say
           that plainly rather than showing an empty box. */}
@@ -1610,10 +1383,9 @@ export function PeriodReportsPanel(): JSX.Element | null {
             </div>
           ) : current ? (
             // Keyed by the period so switching periods remounts the body — every derived map
-            // belongs to ONE period and must not carry over (including the
-            // by-workspace expansions, which are per-period readings too).
+            // belongs to ONE period and must not carry over.
             <div key={current.periodKey}>
-              <ReportBody report={current} byWorkspace={report.data?.byWorkspace ?? null} />
+              <ReportBody report={current} />
             </div>
           ) : (
             <div className="rounded-lg border border-dashed border-gray-300 p-4 text-xs text-gray-500 dark:border-gray-700 dark:text-gray-400">

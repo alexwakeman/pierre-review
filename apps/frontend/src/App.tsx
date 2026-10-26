@@ -147,7 +147,7 @@ export default function App(): JSX.Element {
   // Bots, Reports (store value `'insights'`), and each repo — are not tabs and get no branch
   // here; they are `filters.activityRepoId` values rendered inside <ActivityView/>, which is
   // already covered by `inboxActive`. (The "Compare workspaces" rail line is gone —
-  // cross-workspace comparison is Reports' "By workspace" axis; still no TabKind for it.)
+  // there is no cross-workspace comparison and no TabKind for it.)
   const overlayActive =
     prDetailId != null ||
     inboxActive ||

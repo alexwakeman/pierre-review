@@ -19,10 +19,7 @@ import { ACTIVITY_QUERY_KEYS } from './useActivity.js';
 //    the keys above and the reason is easy to miss: ['workspace-metrics', id] and
 //    ['workspace-metrics-detail', id] carry the workspace id, but a MEMBERSHIP change moves repos
 //    in or out of the SAME id — the key does not change, so nothing would refetch on its own. The
-//    two Reports keys are in the same position AND their responses carry the cross-workspace
-//    "By workspace" axis, which a create/delete/rename of ANY workspace stales regardless of the
-//    id in the key. (They replaced ['workspace-comparison'] here when the Compare rail entry
-//    folded into Reports.)
+//    two Reports keys are in the same position.
 const WORKSPACE_INVALIDATE_KEYS = [
   'workspaces',
   'repos',

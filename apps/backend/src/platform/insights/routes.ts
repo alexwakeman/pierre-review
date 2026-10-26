@@ -92,9 +92,8 @@ export function registerInsightsRoutes(app: FastifyInstance, ctx: ProContext): v
 
   // DELETED: `GET /api/pro/insights/team-comparison` (callerless, 402-gated), and later its core
   // successor `GET /api/workspace-metrics/compare` too (with the Compare rail entry, plan C4).
-  // Cross-workspace comparison now lives inside Reports as the "By workspace" axis on the
-  // one-report GET — window-pure period vectors via the getPeriodMetricsForWorkspaces seam, not
-  // the snapshot metrics matrix. Do not reinstate either route.
+  // The Reports "By workspace" axis that followed was removed 2026-10-26 too: there is no
+  // cross-workspace comparison. Do not reinstate any of them.
 }
 
 // Kept intentionally minimal for the sketch — parseId is exported so future per-repo /

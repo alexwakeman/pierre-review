@@ -2232,9 +2232,10 @@ sprint. The API route keeps its old name (`GET /api/sprint-graph`); only the SPA
 
 ## The Reports pane is three tabs, and the Pending board can now merge
 
-### Reports → Overview | Stories | Chronology (`insightsTab`)
+### Reports → Overview | Chronology | Stories (`insightsTab`)
 
-`InsightsView` is a THREE-TAB pane (Overview · Stories · Chronology; This Sprint and Merged so far
+`InsightsView` is a THREE-TAB pane (Overview · Chronology · Stories — Stories sits to the RIGHT of
+Chronology since 2026-10-26; This Sprint and Merged so far
 left for their own rail line, above). **Overview** is the pane as it was — Flow metrics above the Period reports. **Chronology** is the COURT LEDGER panel (`BottlenecksPanel.tsx`, contract in
 [BOTTLENECKS.md](BOTTLENECKS.md)). ⚠ It renders NO PERSON — not a login, not an avatar, not a
 per-head count — and the server sends no actor ids, which makes that structural rather than a
@@ -2264,10 +2265,14 @@ convention this file has to remember.
     with the new optional props `yScale: 'linear'`, `legend`, `dotColor` and `ScatterPoint.flagged`
     (a hollow SQUARE — shape, not hue alone — for a story in `shortfall`); an unknown size or a null
     criteria count is LISTED under the chart, never plotted at zero. The old call site
-    (`RepoAnalyticsModal`) passes none of them and is unchanged. ⚠ Each "Time and pull requests" row
-    and each story row carries a named "Pull requests" button opening the story view — through
-    `RepoRows`' optional `rowAction` (one labelled control under the name; the row and its bars stay
-    unclickable). The key still opens the tracker.
+    (`RepoAnalyticsModal`) passes none of them and is unchanged. "Time and pull requests" prints each
+    figure BEFORE its bar, right-aligned against it (`RepoRowColumn.valueSide: 'before'`).
+    ⚠ **A TICKET'S NAME IS THE LINK** (`StoryLink`: key + title, a button) to its dedicated story TAB
+    via `useOpenStory()` — in the "Time and pull requests" rows (through `RepoRows`' optional
+    `labelFor`; the row and its bars stay unclickable), in every "All N stories" row and in the "Size
+    unknown" / "No criteria found" lists. No separate "Pull requests" button. A story row's small
+    external-link icon opens the tracker. The disclosure's toggle line also states "N fell short · N
+    not reviewed".
   - Every explanation sits behind an `InfoButton`; no caption paragraphs. No e2e spec mounts
     Reports, so `e2e/mock-api.ts` has no `/api/stories` fixture; add a typed one if a spec ever opens the tab (today the catch-all `{}` reads as "no
     tracker": the tab prints one sentence).
@@ -2344,7 +2349,8 @@ resolved ONCE per request on the server (core `db/reporting-window.ts`, asking t
 `/api/workspace-metrics`. The windowed tiles sit under a heading naming it ("This sprint so far" /
 "Last 14 days"); **Open pull requests** and **Red checks now** are SNAPSHOTS and sit apart under
 **"Right now"**; the trend band is labelled **"Last 12 weeks"**. Those two groups are the labelled
-exceptions. Both cards name the window through `Activity/reportingWindowText.ts` (the shared
+exceptions here; elsewhere in Reports the other LABELLED exceptions are completed periods / month to
+date (Period reports), Chronology's 30/60/90 and its "Over time · Last 26 weeks". Both cards name the window through `Activity/reportingWindowText.ts` (the shared
 spelling in `packages/shared/src/reporting-window.ts`). Changing the cadence or the comparison mode
 invalidates `['workspace-metrics']`, `['flow-findings']` and `['flow-pointers']` too.
 
@@ -3168,7 +3174,7 @@ board.
   `ticket:<ident>` (`TICKET_TAB_PREFIX`; the ident verbatim, `URLSearchParams` escapes it in `view=`)
   for old links; SELF-DESCRIBING from the URL, NOT persisted across reloads.
 - ⚠ **Opened ONLY through `useOpenStory()`** (`lib/ticketTab.ts`) — This Sprint's ticket clicks, Reports
-  → Stories' "Time and pull requests" rows and story rows, a ticket key
+  → Stories' ticket names (chart rows, story rows, unplotted lists), a ticket key
   in any text (`TicketRefLink`, e.g. an "Ask Claude" answer), the PR pane's Ticket row chips (`PrTicketChip`
   in ChecksTab.tsx: the key opens the story, a small icon opens the tracker; needs `TicketRef.ident`, set
   by the server's `prTicketView`, else the chip only links out), and a search's **Stories** facet (dropdown

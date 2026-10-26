@@ -934,31 +934,6 @@ check(
   (await q.getBotDedupClusters(A.prId, 2)) === null,
 );
 
-// ── Cross-WORKSPACE period axis (the Reports "By workspace" rows) ───────────────
-// getPeriodMetricsForWorkspaces takes NO scope at all — it computes one period vector per
-// workspace the caller owns (the deleted getWorkspaceComparisonRows' shape) — so the ONLY
-// isolation surface is `listWorkspaces(accountId)` plus the accountId inside getPeriodMetrics.
-// A leak would show as another tenant's workspace row, or as its PRs inside the caller's numbers.
-// Landmine: B must already own a workspace WITH a repo, or the negative check passes on an empty
-// account and is VACUOUS. wsB is seeded above — do not reorder.
-const { getPeriodMetricsForWorkspaces } = await import('../src/db/period-metrics.js');
-const axisWindow = { fromMs: Date.now() - 14 * 86_400_000, toMs: Date.now() };
-const axisA = await getPeriodMetricsForWorkspaces(1, axisWindow);
-const axisB = await getPeriodMetricsForWorkspaces(2, axisWindow);
-check(
-  "getPeriodMetricsForWorkspaces(A) returns A's own workspaces only",
-  axisA.length > 0 && !axisA.some((r) => r.workspaceId === wsB.id || r.workspaceId === defaultB),
-);
-check(
-  "getPeriodMetricsForWorkspaces(B) returns B's own workspaces only (blocked both ways)",
-  axisB.length > 0 && !axisB.some((r) => r.workspaceId === defaultA),
-);
-check(
-  "getPeriodMetricsForWorkspaces(B) counts only B's repos in its coverage",
-  axisB.reduce((n, r) => n + r.coverage.totalRepos, 0) === 1,
-);
-
-
 // ── Cross-team text search (search_index is accountId-denormalized) ─────────────
 // Seed a search row for each account's PR sharing a common token; searchPrs must return only the
 // caller's rows and leak nothing even when B is handed A's repo id.

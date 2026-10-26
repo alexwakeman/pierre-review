@@ -33,9 +33,9 @@ import { Legend } from './common.js';
 //
 // No row is a button and no cell has a handler. It is a table of numbers a reader looks at; adding
 // N unlabelled keyboard stops to a picture costs every keyboard user and buys nothing. (The rail
-// already owns per-repo navigation.) The ONE exception is an explicit, NAMED control a caller hands in
-// through `rowAction` (Reports → Stories opens a ticket's pull requests from it): one labelled button
-// under the row's name, never the row or a bar.
+// already owns per-repo navigation.) The ONE exception is the row's NAME, which a caller may draw
+// itself through `labelFor` (Reports → Stories makes each ticket name a link to its story tab): the
+// name is the control, never the row or a bar.
 
 export interface RepoRowSegment {
   key: string;
@@ -62,6 +62,9 @@ export interface RepoRowColumn {
   /** `total` prints one figure after the bar (the segments' sum); `segments` prints one figure per
    *  segment, each under its own heading, for a column whose split IS the point. */
   valueMode: 'total' | 'segments';
+  /** Where a `total` figure sits: `after` the bar (default) or `before` it, right-aligned so the
+   *  figure touches the start of its own bar. Ignored for `segments`. */
+  valueSide?: 'before' | 'after';
   /** Column widths as percentages of the table, so the columns line up at any panel width without
    *  measuring anything. */
   barWidthPct: number;
@@ -76,6 +79,10 @@ function valueCellCount(column: RepoRowColumn): number {
   return column.valueMode === 'segments' ? column.segments.length : 1;
 }
 
+function valueBefore(column: RepoRowColumn): boolean {
+  return column.valueMode === 'total' && column.valueSide === 'before';
+}
+
 const HEAD =
   'pb-1 text-[11px] font-semibold text-gray-500 dark:text-gray-400';
 const CELL = 'py-[3px] text-[11px]';
@@ -86,7 +93,7 @@ export function RepoRows({
   nameHeader = 'Repository',
   nameWidthPct = 30,
   noteFor,
-  rowAction,
+  labelFor,
 }: {
   /** The row labels, in the order given — the caller owns the ranking. */
   labels: string[];
@@ -96,8 +103,9 @@ export function RepoRows({
   /** An extra muted line under row `i`'s name — for a per-row disclosure that belongs beside the
    *  repository it is about rather than in an aggregate footnote. */
   noteFor?: (index: number) => string | null;
-  /** An optional named control under row `i`'s name (a button with its own accessible name). */
-  rowAction?: (index: number) => ReactNode;
+  /** Draws row `i`'s name instead of the plain text (e.g. a link). Must still write the name in
+   *  full — `labels[i]` stays the row's key and the reader's only handle on the bar. */
+  labelFor?: (index: number) => ReactNode;
 }): JSX.Element {
   // ⚠ ONE MAXIMUM PER COLUMN, taken over that column alone. The RAW maximum, not a rounded one:
   // the leading repository then draws a full-width bar and the printed figure beside it IS the
@@ -121,10 +129,12 @@ export function RepoRows({
           <col style={{ width: `${nameWidthPct}%` }} />
           {columns.map((c) => (
             <Fragment key={c.key}>
+              {valueBefore(c) && <col style={{ width: `${c.valueWidthPct}%` }} />}
               <col style={{ width: `${c.barWidthPct}%` }} />
-              {Array.from({ length: valueCellCount(c) }, (_, k) => (
-                <col key={k} style={{ width: `${c.valueWidthPct}%` }} />
-              ))}
+              {!valueBefore(c) &&
+                Array.from({ length: valueCellCount(c) }, (_, k) => (
+                  <col key={k} style={{ width: `${c.valueWidthPct}%` }} />
+                ))}
             </Fragment>
           ))}
         </colgroup>
@@ -162,11 +172,14 @@ export function RepoRows({
                   {/* ⚠ THE FULL `owner/name`, WRAPPING. Not truncated, not abbreviated, not hidden
                       behind a tooltip — a reader who cannot recover the name is looking at an
                       unlabelled bar. */}
-                  <span className="break-words text-gray-700 dark:text-gray-200">{label}</span>
+                  {labelFor != null ? (
+                    labelFor(i)
+                  ) : (
+                    <span className="break-words text-gray-700 dark:text-gray-200">{label}</span>
+                  )}
                   {note != null && (
                     <span className="block text-gray-500 dark:text-gray-400">{note}</span>
                   )}
-                  {rowAction?.(i)}
                 </th>
                 {columns.map((c, ci) => {
                   const values = c.values[i] ?? null;
@@ -204,7 +217,8 @@ export function RepoRows({
                     </td>,
                   ];
                   if (c.valueMode === 'total') {
-                    cells.push(
+                    const put = valueBefore(c) ? cells.unshift.bind(cells) : cells.push.bind(cells);
+                    put(
                       <td
                         key={`${c.key}-total`}
                         className={`${CELL} pr-2 text-right align-middle tabular-nums text-gray-700 dark:text-gray-200`}
@@ -244,6 +258,7 @@ export function RepoRows({
             <td />
             {columns.map((c, ci) => (
               <Fragment key={c.key}>
+                {valueBefore(c) && <td />}
                 {/* The scale, under its own column and nowhere near its neighbour's. */}
                 <td className="border-t border-gray-200 pr-2 pt-1 dark:border-gray-800">
                   <span className="flex items-baseline justify-between gap-1 text-[11px] text-gray-500 dark:text-gray-400">
@@ -251,9 +266,8 @@ export function RepoRows({
                     <span className="text-right tabular-nums">{(c.axisFormat ?? c.format)(columnMax[ci] ?? 0)}</span>
                   </span>
                 </td>
-                {Array.from({ length: valueCellCount(c) }, (_, k) => (
-                  <td key={k} />
-                ))}
+                {!valueBefore(c) &&
+                  Array.from({ length: valueCellCount(c) }, (_, k) => <td key={k} />)}
               </Fragment>
             ))}
           </tr>

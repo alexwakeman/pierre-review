@@ -234,8 +234,8 @@ changing a route's shape.** The platform's `/api/pro/*` URL paths are historical
   data narrowing ONLY, bounded by `resolveWorkspaceScope` (`membership ∩ narrow`).
 - Client side: send `repoIds` whenever the array exists — **including when empty** (`if (ids)`,
   never `ids.length > 0`); every scoped React Query key carries a `ws:<id>` segment.
-- ⚠ **`GET /api/feed` and `GET /api/workspace-metrics/compare` are DELETED** — `getFeed` stays,
-  called by `GET /api/activity/feed`; cross-workspace comparison is Reports' "By workspace" axis.
+- ⚠ **`GET /api/feed` is DELETED** (`getFeed` stays, for `GET /api/activity/feed`). There is NO
+  cross-workspace comparison anywhere — do not add one.
 
 ---
 
@@ -284,10 +284,8 @@ Read [docs/FRONTEND.md](docs/FRONTEND.md) before touching any of:
   sub-tabs (bot classification is a Bots Monitoring tab). A default flip on a persisted key needs a `FILTER_STORAGE_VERSION` bump (now v5; `migratePersistedFilters`
   steps CHAIN).
 - **REPORTS IS TIED TO ONE REPORTING WINDOW** — resolved ONCE per request by core
-  `db/reporting-window.ts` `getReportingWindow` (the platform registers `resolveComparisonWindow`;
-  fallback trailing 14 days). Never re-derive a cadence or add a second resolver. Exceptions are
-  LABELLED: "Right now" tiles, "Last 12 weeks", completed periods / month to date, Chronology's
-  30/60/90 and "Over time · Last 26 weeks".
+  `db/reporting-window.ts` `getReportingWindow`; never a second resolver. Exceptions are LABELLED
+  (docs/FRONTEND.md § ONE REPORTING WINDOW).
 - **"Where the work is happening" = two `charts/RepoRows` cards in `WorkspaceFlowMetrics`**
   (never `WorkspaceMetricsPanel`); **unknown is never zero** (`linesChanged: null` → "size
   unknown"; a null reach verdict is undrawn).
@@ -496,7 +494,7 @@ Monitoring, the work-plan wording, the impact note, Slack.
 ## Period reporting, Chronology, This Sprint
 
 - **Period reporting** ([docs/PERIOD-REPORTING.md](docs/PERIOD-REPORTING.md)): metrics are core
-  (`db/period-metrics.ts`, `db/forecast.ts`, `db/actor-lanes.ts`); storage and narration are the
+  (`db/period-metrics.ts` and siblings); storage and narration are the
   platform's. Every metric is **WINDOW-PURE** (`[fromMs, toMs)` on every column; an explicit `toMs`
   reaches every fold). History is **COVERAGE-BIASED**. **One row never mixes headline and subset
   populations** (`rowFigures()`). `PERIOD_METRICS_SCHEMA_VERSION` is in the hash (three spellings
@@ -515,8 +513,8 @@ Monitoring, the work-plan wording, the impact note, Slack.
   PR is RECEIVED, never when VIEWED (exception: the demand-gated sprint list read). Every
   customer-typed host goes through `tracker/jira/fetch.ts`. Idents only via
   `trackerTicketIdent`/`trackerTicketRow`.
-- Removed earlier and still gone: the story report, story-health charts, "Ask about this period",
-  the People report and 1:1 prep (tables dormant, still erased).
+- Still gone: the story report, story-health charts, "Ask about this period", the People report,
+  1:1 prep (tables dormant, still erased).
 
 ## ML severity/category on bot comments (no LLM)
 
