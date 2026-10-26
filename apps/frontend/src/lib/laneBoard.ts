@@ -18,11 +18,10 @@
 //             work). Only between two DRAWN cards — a card in a collapsed column draws no arrow. A
 //             labelled arrow carries a number; arrows with the same words share one.
 //
-//   ORDER     every view's lanes are sorted by their PULL REQUEST count (distinct PRs of any state on the
-//             lane's drawn cards), most first; ties keep the view's own order (a path's risk, a theme's
-//             size, a person's name). The catch-all lanes ("No theme", "Unassigned") stay last. (Owner
-//             decision 2026-10-26: People used to be alphabetical only; the owner asked for PR order on
-//             every view.)
+//   ORDER     the Critical path and Theme lanes are sorted by their PULL REQUEST count (distinct PRs of any
+//             state on the lane's drawn cards), most first; ties keep the view's own order (a path's risk,
+//             a theme's size). ⚠ PEOPLE STAYS ALPHABETICAL — nothing here ranks people (owner, 2026-10-26).
+//             The catch-all lanes ("No theme", "Unassigned") stay last.
 //   FILTERS   `keep` (the board's "Has PRs" / "Needs code" chips, `sprintCardFilter`) drops cards before
 //             layout; borders and "waiting" still read the whole sprint.
 import {
@@ -693,7 +692,8 @@ export function assigneeLabel(node: Pick<SprintGraphNode, 'assignee'>, personOfN
   return p != null && p.name.trim() !== '' ? p.name : raw.trim();
 }
 
-/** PEOPLE: one lane per assignee, by PR count (ties alphabetical), Unassigned last. A person is
+/** PEOPLE: one lane per assignee, ALPHABETICAL, Unassigned last — never by load (prep, not scoring;
+ *  the owner kept this on 2026-10-26 when the other views moved to PR order). A person is
  *  `SprintGraphResponse.people`'s (the shared Members identity), matched on the tracker spelling; an
  *  assignee it does not list gets a lane under the tracker's name. An arrow between two people's lanes
  *  is a hand-off, keyed "<person> waits on <person>"; one inside a lane keys the brief's why. */
@@ -717,12 +717,12 @@ export function peopleBoard(i: BoardInput & { people: ReadonlyArray<SprintPerson
     if (!lanesById.has(lane.id)) lanesById.set(lane.id, lane);
     laneOf.set(n.ident, lane.id);
   }
-  // By PR count (the owner's rule for every view), ties alphabetical, Unassigned last.
+  // Alphabetical, Unassigned last. ⚠ Never by PR count, tickets or reviews: nothing here ranks people.
   const alpha = [...lanesById.values()]
     .sort((a, b) => Number(a.unassigned) - Number(b.unassigned) || a.label.localeCompare(b.label) || a.id.localeCompare(b.id))
     .map((l) => ({ ...l, last: l.unassigned }));
   const cardsOf = new Map(alpha.map((l) => [l.id, cardsFor(nodes.filter((n) => laneOf.get(n.ident) === l.id), l.id, 'people', critical, waiting)]));
-  const order = byPrCount(alpha, (id) => lanePrCount(cardsOf.get(id) ?? []));
+  const order = alpha;
   const cards = order.flatMap((l) => cardsOf.get(l.id) ?? []);
   const columns = sprintColumns(i.columns, needs(cards));
   const lanes: SprintBoard['lanes'] = order.map((l) => {

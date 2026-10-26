@@ -213,7 +213,7 @@ describe('lanes per view', () => {
   });
 });
 
-describe('rows are sorted by their pull request count (every view)', () => {
+describe('rows are sorted by their pull request count (Theme, Critical path; People stays alphabetical)', () => {
   const two = [pr({ prId: 1 }), pr({ prId: 2, state: 'closed' })];
   it('Theme: most PRs first, ties in the stored order, "No theme" last whatever it holds', () => {
     const nodes = [
@@ -238,7 +238,7 @@ describe('rows are sorted by their pull request count (every view)', () => {
     const b = themesBoard({ nodes: [node('A-1', { prs: [shared] }), node('A-2', { prs: [shared] })], edges: [], paths: null, columns: COLUMNS, themes: null });
     expect(lanePrCount(b.cards)).toBe(1);
   });
-  it('People: most PRs first, ties alphabetical, Unassigned last', () => {
+  it('People stays ALPHABETICAL whatever the PR counts, Unassigned last (nothing ranks people)', () => {
     const nodes = [
       node('A-1', { assignee: { name: 'Bea', avatarUrl: null } }),
       node('A-2', { assignee: { name: 'Zed', avatarUrl: null }, prs: two }),
@@ -246,7 +246,7 @@ describe('rows are sorted by their pull request count (every view)', () => {
       node('A-4', { assignee: null, prs: [pr({ prId: 3 }), pr({ prId: 4 }), pr({ prId: 5 })] }),
     ];
     const b = peopleBoard({ nodes, edges: [], paths: null, columns: COLUMNS, people: [] });
-    expect(b.lanes.map((l) => l.label)).toEqual(['Zed', 'Amy', 'Bea', 'Unassigned']);
+    expect(b.lanes.map((l) => l.label)).toEqual(['Amy', 'Bea', 'Zed', 'Unassigned']);
   });
   it('Critical path: most PRs first, ties riskiest first as stored', () => {
     const nodes = [node('A-1'), node('A-2', { prs: [pr({ prId: 1 })] }), node('A-3')];

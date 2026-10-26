@@ -614,7 +614,7 @@ export function SprintThemesView({ data, actions }: { data: SprintGraphResponse;
 
 export function SprintPeopleView({ data, actions }: { data: SprintGraphResponse; actions: SprintCardActions }): JSX.Element {
   const columns = data.statusLayout?.columns ?? null;
-  // By PR count, ties alphabetical, Unassigned last (lib/laneBoard.ts `peopleBoard`).
+  // Alphabetical, Unassigned last — never by load (lib/laneBoard.ts `peopleBoard`).
   const { filter, keep } = useCardFilter();
   const board = useMemo(
     () => peopleBoard({ nodes: data.nodes, edges: data.edges, paths: data.paths, columns, people: data.people, keep }),

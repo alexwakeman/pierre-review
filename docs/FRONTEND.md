@@ -2225,9 +2225,9 @@ sprint. The API route keeps its old name (`GET /api/sprint-graph`); only the SPA
   line of prose on the row and the code's counts sit apart from it. Sprint tickets only.
   An arrow is critical when its two tickets sit next to each other on a stored path; its key is the
   brief's `why`.
-- **PEOPLE** (`SprintPeopleView`, `peopleBoard`) — one lane per assignee, by PR count (ties
-  alphabetical), Unassigned last. ⚠ It was alphabetical only ("prep, not scoring"); the OWNER reversed
-  that on 2026-10-26 ("sort … by number of PRs … same for the other rows on the other tabs"). A person is
+- **PEOPLE** (`SprintPeopleView`, `peopleBoard`) — one lane per assignee, ALPHABETICAL,
+  Unassigned last. ⚠ Never by PR count or load ("prep, not scoring"): on 2026-10-26 the owner moved the
+  Theme and Critical path lanes to PR order and kept People alphabetical. A person is
   `SprintGraphResponse.people`'s (shared `sprintMembers`), matched on the tracker spelling. Header: "n
   tickets" and, ONLY when `reviewsWaiting` is a number, "n reviews waiting" — null prints nothing, never
   0; then the same colour bar as Theme, whose popover carries the same CODE row lines (no model; nothing
