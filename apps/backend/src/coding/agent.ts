@@ -227,7 +227,8 @@ export async function runAgentInWorktree(
   // root). Under bypassPermissions nothing else confines an ABSOLUTE path, and this agent WRITES — a
   // seed item (PR text, review threads, a ticket review's items) saying "also add this to ~/.zshrc"
   // would otherwise write outside the worktree, where captureWorktreeDiff never shows it to the
-  // reader. 'worktree' effort ⇒ config.reviewEffort, exactly the effort this path always used.
+  // reader. 'worktree' mode; the effort is opts.effort (ai/effort.ts `agenticRunEffort`, decided by the AI
+  // Fix manager) or, when absent, `defaultRunEffort` for a worktree run.
   ({ outcome } = await provider.runAgent({
     kind: opts.kind,
     model: claudeModelChoice(model),

@@ -458,8 +458,10 @@ Default, Low, Medium, High, Extra high, Max.
   is `high` on both, which is the fair comparison the user asked for.
 - **Default (NULL) is today's behaviour, exactly**, because today's defaults are not one level:
   Claude medium (diff-only medium on Opus, low on Sonnet), Codex by depth (deep high, standard medium,
-  fast low; diff-only one step lower). A chosen level runs at that level on a worktree run and one
-  step lower diff-only (never below low).
+  fast low; diff-only one step lower). A chosen level runs at that level on a worktree run. Diff-only
+  it runs one step lower, but NEVER below what Default runs that review at — unless the chosen level
+  is itself lower, when it runs at the chosen level (`diffOnlyEffortAt`). ⚠ Without that floor,
+  picking Medium (what Default already runs Opus at) dropped Opus's diff-only reviews to low.
 - **Who it reaches** (`ai/effort.ts` `agenticRunEffort`, read ONCE at the run's start): the PR review
   (`review/agent.ts`: the lead, Claude's specialists through the SDK's per-agent `effort` — sent only
   when a level is chosen — and Codex's Limn-run specialists), its follow-up re-reviews (same runner),
@@ -468,8 +470,12 @@ Default, Low, Medium, High, Extra high, Max.
   (`sdkModelOptions(model, mode, effort)`), Codex as `spec.codex.effort`. Every other kind keeps
   `defaultRunEffort`. A provider switch never changes the level, only who reads it.
 - **Precedence**: an explicitly set `REVIEW_EFFORT` (one of the five) WINS and locks the control
-  ("Set by REVIEW_EFFORT"; the PUT answers 409); it also moves every Claude run's worktree effort, as
-  it always did for Sonnet. `REVIEW_DIFF_ONLY_EFFORT`, when set, decides every diff-only run.
+  ("Set by REVIEW_EFFORT"; the PUT answers 409). `REVIEW_DIFF_ONLY_EFFORT`, when set, decides every
+  diff-only review on both providers, at Default too. ⚠ **Both env vars reach EXACTLY what the
+  control reaches** (the review, AI Fix, Plan first) — `defaultRunEffort` reads no environment, so the
+  CI review, ticket review, diagrams, Check threads, chats and Resolve with Claude keep their fixed
+  depth (Opus 5.5 medium, as under the old pin). Before 2026-10-26 these two variables also moved
+  Sonnet on every Claude kind; that was dropped so the label under the control is the whole story.
 - ⚠ **The Opus 5.5 pin (`PINNED_EFFORT`) is GONE.** What stays fixed is real: Opus 5.5 always gets
   `thinking: {type: 'adaptive'}` and is never sent disabled thinking, a thinking budget or a forced
   tool choice.
@@ -591,20 +597,32 @@ showed.
   together). ⚠ **Both repos must be members of the row's workspace NOW**: a move out (`assignReposToWorkspace`,
   `rehomeReposToDefault`, `deleteWorkspace`) or `deleteRepo` drops the repo's rows
   (`dropRepoRelations`), and every reader joins membership anyway. At most
-  `RELATED_REPOS_MAX_PER_REPO` (8) per repo. Off by default (no rows). In the export and the erasure.
+  `RELATED_REPOS_MAX_PER_REPO` (8) per repo, ⚠ ON BOTH SIDES: `setRelatedRepos` skips a partner that
+  already has 8 relations of its own (Settings disables its box, "already has 8"; `partnerIsFull`),
+  else nine repos each saving [A] gave A nine. Off by default (no rows). In the export and the erasure.
 - **The match** (`review/claude-review/related-repos.ts` `relatedRepoPeersFor`), per related repo, the
   FIRST that holds: (1) an OPEN PR whose head branch has the same name → "Companion PR: same branch
   name"; (2) an OPEN PR whose title or branch carries one of this PR's ticket keys → "Companion PR:
-  same ticket" (`ticketKeysOf`: the tracker's `extractTicketKeys` over the UPPER-CASED title and
-  branch, so `bmd-1048-…` counts — looser than ticket linking, safe because both sides must carry the
-  key in a repo the reader related by hand); (3) a BRANCH of the same name with no PR (one REST read,
+  same ticket" (`sharedTicketKeys`, below); (3) a BRANCH of the same name with no PR (one REST read,
   `fetchBranchHeadSha`, only when 1 and 2 found nothing; never the default branch) → "Companion
   branch"; (4) the DEFAULT BRANCH → "Reference: default branch". Closed PRs and other accounts' rows
   never match. DB only apart from rule 3. Never throws.
-- **The peers** (`manager.ts` `reviewPeersFor`): related CHANGES (1–3) lead, then the ticket peers as
-  before, then default-branch REFERENCES; ONE cap, `TICKET_REVIEW_PEER_MAX_FOR_PR_REVIEW` (still 4: each
-  peer is a full checkout plus prompt bytes, and a related repo is one peer at most). A related repo
-  that already has a ticket peer is skipped — that PR is its companion change. Refs `X1…` in that order.
+- ⚠ **Rule 2's keys are GUARDED** (`sharedTicketKeys`). A lower-case branch key (`bmd-1048-…`) is the
+  same shape as an ordinary `fix-2-login` / `node-18` branch — the tracker's largest false-positive
+  source. With the workspace tracker's project keys set (`workspace_trackers.project_keys`), only
+  those prefixes count, in any case, title or branch (exact). Without them, the branch is read
+  upper-cased but a shared key counts only when at least ONE of the two PRs writes it in upper case in
+  its TITLE, as the tracker reads a title. So `fix-2-login` never matches `fix-2-timeout`, and the BMD
+  case (`BMD-1048: …` in the frontend title, `bmd-1048-…` as the backend branch) still does.
+- **The peers** (`manager.ts` `reviewPeersFor`): related CHANGES (1–3) lead, with a ticket peer that
+  sits IN a related repo beside them; then the other ticket peers as before, then default-branch
+  REFERENCES; ONE cap, `TICKET_REVIEW_PEER_MAX_FOR_PR_REVIEW` (still 4: each peer is a full checkout
+  plus prompt bytes, and a related repo is one peer at most). A related repo that already has a ticket
+  peer is skipped by the walk — that PR is its companion change — and ⚠ that ticket peer is MOVED UP
+  into the leading group, or the cap could drop it after the walk had skipped the repo, and the review
+  read nothing from a repo the reader related. The walk is told the cap (`maxPeers`) and stops once
+  the leading group is full, so no rule-3 GitHub read is spent on a change the cap would drop. Refs
+  `X1…` in that order.
 - **The checkout** (`agent.ts` `checkOutPeers`): a PR peer at its head (`prepPeerWorktrees`), a branch
   or default-branch peer at the branch tip (`prepDefaultBranchCheckouts`, `RunReviewArgs.peers[].kind`).
   All are READ roots: Claude's path guard and `additionalDirectories`, Codex's workspace MCP server and
@@ -669,8 +687,8 @@ praise comment already on GitHub is still Limn's own comment. The ticket review 
   Retiring a model is now a shared-types + pricing + model-options edit, never a schema edit.
 - **Opus 5.5's effort is no longer pinned** (2026-10-26, § The effort setting): every run is sent
   an explicit effort (never the API default) — Settings → AI → Effort for the review and AI Fix,
-  else the Default (medium; diff-only medium on Opus, low on Sonnet), and `REVIEW_EFFORT` /
-  `REVIEW_DIFF_ONLY_EFFORT` move every effort-capable model alike. It always gets
+  else the Default (medium; diff-only medium on Opus, low on Sonnet); `REVIEW_EFFORT` /
+  `REVIEW_DIFF_ONLY_EFFORT` move both models alike, on the review and AI Fix only. It always gets
   `thinking: { type: 'adaptive' }`, which overrides any `MAX_THINKING_TOKENS=0` the environment
   might carry. ⚠ **Opus 5.5 400s on `thinking: {type:'disabled'}`, on a thinking budget
   (`budget_tokens` / `maxThinkingTokens`) and on a forced `tool_choice`** — nothing in the review,

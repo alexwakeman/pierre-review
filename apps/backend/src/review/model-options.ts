@@ -18,9 +18,9 @@
 // EFFORT is passed EXPLICITLY on every run (its API default is 'medium' on Opus 5.5 and 'high' on
 // Sonnet 5; we never rely on an API default staying put). The caller decides it: the review and AI
 // Fix pass `agenticRunEffort` (Settings → AI → Effort, ai/effort.ts); every other run gets
-// `defaultRunEffort` — today's depth. Opus 5.5's effort is no longer PINNED to medium: a chosen level
-// or REVIEW_EFFORT moves it. Default still runs it at medium (diff-only too), so nothing changes
-// until the reader picks.
+// `defaultRunEffort` — today's fixed depth, which no environment variable moves. On the review and AI
+// Fix, Opus 5.5's effort is no longer PINNED to medium: a chosen level or REVIEW_EFFORT moves it.
+// Default still runs it at medium (diff-only too), and every other kind always does.
 import type { AiEffort } from '@pierre-review/shared';
 import { defaultRunEffort } from '../ai/effort.js';
 
@@ -40,7 +40,7 @@ export interface SdkModelOptions {
 /**
  * The model-dependent `query()` options for one run. `effort` is the caller's (the review and AI Fix:
  * `agenticRunEffort`); absent ⇒ `defaultRunEffort` for the mode (Default: worktree medium; diff-only
- * medium on Opus, low on Sonnet; REVIEW_EFFORT / REVIEW_DIFF_ONLY_EFFORT when set). A model outside
+ * medium on Opus, low on Sonnet; no environment variable moves it). A model outside
  * both sets gets `{}`.
  */
 export function sdkModelOptions(model: string, mode: 'diff_only' | 'worktree', effort?: AiEffort): SdkModelOptions {

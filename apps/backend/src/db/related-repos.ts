@@ -66,8 +66,9 @@ export async function getRelatedRepoPairs(
 
 /**
  * REPLACE one repo's relations in its workspace: afterwards the repo is related to exactly the
- * given repos (both ways). Ids that are not members of the workspace, the repo itself and anything
- * past RELATED_REPOS_MAX_PER_REPO are dropped. Returns false when the workspace is not this
+ * given repos (both ways). Ids that are not members of the workspace, the repo itself, anything
+ * past RELATED_REPOS_MAX_PER_REPO and a partner that already has RELATED_REPOS_MAX_PER_REPO
+ * relations of its own are dropped. Returns false when the workspace is not this
  * account's or the repo is not in it (the route answers 404).
  */
 export async function setRelatedRepos(
@@ -95,6 +96,22 @@ export async function setRelatedRepos(
       )
       .execute();
     for (const other of wanted) {
+      // ⚠ THE CAP HOLDS ON BOTH SIDES: a partner already related to RELATED_REPOS_MAX_PER_REPO other
+      // repos is skipped (Settings disables its box), or nine repos each saving [A] would give A nine.
+      // This repo's own rows were deleted above, so the count is the partner's OTHER relations.
+      const partnerRows = await tx
+        .select({ relatedRepoId: repoRelations.relatedRepoId })
+        .from(repoRelations)
+        .where(
+          and(
+            eq(repoRelations.accountId, accountId),
+            eq(repoRelations.workspaceId, workspaceId),
+            eq(repoRelations.repoId, other),
+          ),
+        )
+        .execute();
+      const partnerCount = new Set(partnerRows.map((r) => r.relatedRepoId).filter((id) => id !== other && members.has(id))).size;
+      if (partnerCount >= RELATED_REPOS_MAX_PER_REPO) continue;
       for (const [a, b] of [
         [repoId, other],
         [other, repoId],

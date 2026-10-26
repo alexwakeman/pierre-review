@@ -270,7 +270,7 @@ export function SettingsModal({
                     the workspace row (`docs_in_review`), OFF by default. */}
                 {aiEnabled && <ReferenceDocsSection />}
                 {/* Related repos — repos reviewed together; a deep review reads the matching change
-                    in each (`repo_relations`, migration 0130). Only the AI review reads it. */}
+                    in each (`repo_relations`, migration 0131). Only the AI review reads it. */}
                 {aiEnabled && <RelatedReposSection />}
               </div>
             )}

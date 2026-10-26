@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { RELATED_REPOS_MAX_PER_REPO, TICKET_REVIEW_PEER_MAX_FOR_PR_REVIEW } from '@pierre-review/shared';
 import { useRepos } from '../../hooks/useTimeline.js';
-import { relatedTo, useRelatedRepos, useSetRelatedRepos } from '../../hooks/useRelatedRepos.js';
+import { partnerIsFull, relatedTo, useRelatedRepos, useSetRelatedRepos } from '../../hooks/useRelatedRepos.js';
 import { InfoButton } from '../InfoModal.js';
 import { inputCls, SaveButton, SectionShell } from './ui.js';
 import { ScopePendingSection, useSettingsWorkspace } from './workspaceScope.js';
@@ -75,7 +75,10 @@ export function RelatedReposSection(): JSX.Element {
             Only deep reviews read them, at most {TICKET_REVIEW_PEER_MAX_FOR_PR_REVIEW} per review together with other
             pull requests on the same ticket. The review says what it read.
           </p>
-          <p>A relation works both ways. Moving a repository to another workspace removes its relations.</p>
+          <p>
+            A relation works both ways. Each repository can have at most {RELATED_REPOS_MAX_PER_REPO}. Moving a repository
+            to another workspace removes its relations.
+          </p>
         </InfoButton>
       }
     >
@@ -105,17 +108,26 @@ export function RelatedReposSection(): JSX.Element {
             <div className="max-h-44 space-y-1 overflow-auto rounded border border-gray-200 p-2 dark:border-gray-700">
               {members
                 .filter((r) => r.id !== current)
-                .map((r) => (
-                  <label key={r.id} className="flex items-center gap-2 text-xs">
-                    <input
-                      type="checkbox"
-                      checked={draft.includes(r.id)}
-                      disabled={full && !draft.includes(r.id)}
-                      onChange={() => toggle(r.id)}
-                    />
-                    <span className="truncate text-gray-700 dark:text-gray-200">{r.fullName}</span>
-                  </label>
-                ))}
+                .map((r) => {
+                  // The cap holds on both sides: a repo already related to the most it can take.
+                  const theyAreFull = current != null && partnerIsFull(pairs, current, r.id, RELATED_REPOS_MAX_PER_REPO);
+                  return (
+                    <label key={r.id} className="flex items-center gap-2 text-xs">
+                      <input
+                        type="checkbox"
+                        checked={draft.includes(r.id)}
+                        disabled={!draft.includes(r.id) && (full || theyAreFull)}
+                        onChange={() => toggle(r.id)}
+                      />
+                      <span className="truncate text-gray-700 dark:text-gray-200">{r.fullName}</span>
+                      {theyAreFull && !draft.includes(r.id) && (
+                        <span className="shrink-0 text-[11px] text-gray-500 dark:text-gray-400">
+                          already has {RELATED_REPOS_MAX_PER_REPO}
+                        </span>
+                      )}
+                    </label>
+                  );
+                })}
             </div>
           </div>
           <SaveButton

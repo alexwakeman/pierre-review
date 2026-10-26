@@ -14,7 +14,7 @@ import {
   type ReviewPeerRead,
 } from '@pierre-review/shared';
 import type { ReviewRunPeer, RunReviewResult } from '../../platform/contract.js';
-import { relatedRepoPeersFor } from './related-repos.js';
+import { relatedRepoCompanions } from './related-repos.js';
 import type { CompareDiffResult } from '../../github/compare.js';
 import { config } from '../../config.js';
 import type { AgentContext } from '../agent-context.js';
@@ -891,19 +891,29 @@ export function peersReadOf(peers: readonly ReviewPeer[], checkedOut: readonly s
  * EVERY peer of a deep review, refs assigned in prompt order, at most
  * TICKET_REVIEW_PEER_MAX_FOR_PR_REVIEW (one shared cap):
  *   1. each RELATED REPO's matching change — its PR on the same branch or ticket, or its same-named
- *      branch (related-repos.ts; the reader asked for exactly these, so they lead);
+ *      branch (related-repos.ts; the reader asked for exactly these, so they lead) — and, beside them,
+ *      a ticket peer that sits IN a related repo: that PR IS the repo's companion change, so the repo
+ *      is skipped by the related walk and its ticket peer moves up into this leading group;
  *   2. the OTHER PRs on this PR's tickets (`ticketPeersFor`), as before;
  *   3. a related repo's DEFAULT BRANCH, plain reference, only where nothing matched.
- * A related repo that already has a ticket peer is skipped: that PR IS its companion change. Never
- * throws. Exported for tests.
+ * ⚠ Without the move in 1, a related repo's ticket peer could be cut by the cap AFTER the related walk
+ * had already skipped that repo, so the review read nothing at all from it. The walk is told the cap
+ * (`maxPeers`), so it spends no GitHub read on a change the cap would drop. Never throws. Exported for
+ * tests.
  */
 export async function reviewPeersFor(
   item: Pick<QueueItem, 'ctx' | 'accountId' | 'prId'>,
 ): Promise<ReviewPeer[]> {
   const { ctx, accountId, prId } = item;
   const ticket = await ticketPeersFor(item);
-  const covered = new Set(ticket.map((p) => `${p.owner}/${p.name}`.toLowerCase()));
-  const related = await relatedRepoPeersFor(ctx, accountId, prId, { skipRepoKeys: covered });
+  const repoKey = (p: { owner: string; name: string }): string => `${p.owner}/${p.name}`.toLowerCase();
+  const { peers: related, coveredRepoKeys } = await relatedRepoCompanions(ctx, accountId, prId, {
+    skipRepoKeys: new Set(ticket.map(repoKey)),
+    maxPeers: TICKET_REVIEW_PEER_MAX_FOR_PR_REVIEW,
+  });
+  const covered = new Set(coveredRepoKeys);
+  const leadTicket = ticket.filter((p) => covered.has(repoKey(p)));
+  const otherTicket = ticket.filter((p) => !covered.has(repoKey(p)));
   const asPeer = (r: (typeof related)[number]): Omit<ReviewPeer, 'ref'> =>
     r.pr
       ? {
@@ -938,7 +948,7 @@ export async function reviewPeersFor(
         };
   const changes = related.filter((r) => r.match !== 'default_branch').map(asPeer);
   const references = related.filter((r) => r.match === 'default_branch').map(asPeer);
-  return [...changes, ...ticket, ...references]
+  return [...changes, ...leadTicket, ...otherTicket, ...references]
     .slice(0, TICKET_REVIEW_PEER_MAX_FOR_PR_REVIEW)
     .map((p, i) => ({ ...p, ref: peerRef(i) }));
 }

@@ -184,7 +184,8 @@ function EffortControl({ setting }: { setting: AiEffortSettingStatus }): JSX.Ele
           <p>Higher effort reads more and finds more, and uses more of your plan or costs more.</p>
           <p className="mt-2">
             It applies to AI Review and AI Fix on Claude and Codex. Default runs Claude at medium and Codex at high on its
-            most thorough model. A review of a small change from its diff alone runs one level lower.
+            most thorough model. A review of a small change from its diff alone can run one level lower, but
+            never below Default unless you pick a lower level.
           </p>
           <p className="mt-2">
             At High, Extra high and Max a review may also take more steps: 45, 60 or 75 instead of 30, unless

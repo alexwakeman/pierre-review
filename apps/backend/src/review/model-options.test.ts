@@ -44,12 +44,15 @@ describe('sdkModelOptions', () => {
     }
   });
 
-  it('REVIEW_EFFORT now moves Opus 5.5 too (it always moved Sonnet 5)', () => {
-    process.env.REVIEW_EFFORT = 'high';
-    expect(sdkModelOptions('claude-opus-5-5', 'worktree').effort).toBe('high');
-    expect(sdkModelOptions('claude-sonnet-5', 'worktree').effort).toBe('high');
+  it('with no effort from the caller (every kind but the review and AI Fix), no env var moves it', () => {
+    // REVIEW_EFFORT / REVIEW_DIFF_ONLY_EFFORT reach only the runs the Settings control reaches
+    // (ai/effort.ts agenticRunEffort); a CI review, diagram or chat on Opus stays medium.
+    process.env.REVIEW_EFFORT = 'max';
     process.env.REVIEW_DIFF_ONLY_EFFORT = 'low';
-    expect(sdkModelOptions('claude-opus-5-5', 'diff_only').effort).toBe('low');
+    expect(sdkModelOptions('claude-opus-5-5', 'worktree').effort).toBe('medium');
+    expect(sdkModelOptions('claude-opus-5-5', 'diff_only').effort).toBe('medium');
+    expect(sdkModelOptions('claude-sonnet-5', 'worktree').effort).toBe('medium');
+    expect(sdkModelOptions('claude-sonnet-5', 'diff_only').effort).toBe('low');
   });
 
   it('a model off the offered list gets nothing', () => {

@@ -257,6 +257,26 @@ describe('the setting', () => {
     expect((await rows()).some(([a, b]) => a === extra || b === extra)).toBe(false);
   });
 
+  it('⚠ the cap holds on both sides: nine repos each relating to one give it eight, not nine', async () => {
+    const mk = async (name: string): Promise<number> =>
+      (await db.insert(schema.repos).values({ accountId: 1, owner: 'acme', name, githubNodeId: `R_${name}` }).returning().execute())[0]
+        .id as number;
+    const hub = await mk('hub');
+    const spokes: number[] = [];
+    for (let i = 1; i <= 9; i++) spokes.push(await mk(`spoke${i}`));
+    await q.assignReposToWorkspace(ws, 1, [hub, ...spokes]);
+    for (const s of spokes) expect(await rr.setRelatedRepos(1, ws, s, [hub])).toBe(true);
+    const pairs = (await rr.getRelatedRepoPairs(1, ws))!.filter((p: any) => p.repoId === hub || p.relatedRepoId === hub);
+    expect(pairs).toHaveLength(8);
+    // The ninth spoke's save skipped the full hub: no one-sided row either.
+    expect((await rows()).some(([a, b]) => a === spokes[8] || b === spokes[8])).toBe(false);
+    // Re-saving an EXISTING relation is not "a new one" and survives.
+    expect(await rr.setRelatedRepos(1, ws, spokes[0]!, [hub])).toBe(true);
+    expect((await rows()).some(([a, b]) => a === spokes[0] && b === hub)).toBe(true);
+    await rr.setRelatedRepos(1, ws, hub, []);
+    for (const s of [hub, ...spokes]) await q.deleteRepo(s, 1);
+  });
+
   it('⚠ the composite FKs refuse a row naming another account’s repo or workspace', async () => {
     for (const values of [
       { accountId: 1, workspaceId: ws, repoId: id.web, relatedRepoId: id.foreign },
@@ -314,6 +334,28 @@ describe('the matching rules, in order', () => {
   it('ticket keys are read case-insensitively from the title and the branch', () => {
     expect(picker.ticketKeysOf('Edit area', 'bmd-1048-created-area-edit')).toEqual(['BMD-1048']);
     expect(picker.ticketKeysOf('BMD-1048: Edit', null)).toEqual(['BMD-1048']);
+    // A title is read as the tracker reads it: a lower-case word-number is not a key there.
+    expect(picker.ticketKeysOf('Handle fix-2 names', null)).toEqual([]);
+  });
+
+  it('⚠ a shared key needs one title to write it in upper case, or the workspace’s project keys', () => {
+    const shared = picker.sharedTicketKeys;
+    // The BMD case: the frontend's title names it, the backend only has it in its branch.
+    expect(shared({ title: 'BMD-1048: Edit Created area', branch: BRANCH }, { title: 'Backend', branch: 'bmd-1048-api' })).toEqual([
+      'BMD-1048',
+    ]);
+    // Two ordinary word-number branches never match each other.
+    expect(shared({ title: 'Login fix', branch: 'fix-2-login' }, { title: 'Timeouts', branch: 'fix-2-timeout' })).toEqual([]);
+    expect(shared({ title: 'Bump', branch: 'node-18' }, { title: 'Bump too', branch: 'node-18-ci' })).toEqual([]);
+    // With project keys, only those prefixes count, branch-only too; others never do.
+    expect(shared({ title: 'Edit', branch: 'bmd-1048-a' }, { title: 'Api', branch: 'bmd-1048-b' }, ['BMD'])).toEqual(['BMD-1048']);
+    expect(shared({ title: 'FIX-2 login', branch: 'fix-2-login' }, { title: 'FIX-2', branch: 'fix-2-timeout' }, ['BMD'])).toEqual([]);
+  });
+
+  it('the walk stops once the review has no slot left: no GitHub read for a peer the cap drops', async () => {
+    const peers = await picker.relatedRepoPeersFor(ctx, 1, reviewedPr, { maxPeers: 2 });
+    expect(peers.map((p) => p.name)).toEqual(['api', 'docs']);
+    expect(branchLookups).toEqual([]);
   });
 });
 
@@ -373,5 +415,51 @@ describe('the peers of a deep review', () => {
       { repoFullName: 'acme/infra', kind: 'branch', source: 'related_repo', number: null, branch: BRANCH },
     ]);
     await new Promise((res) => setTimeout(res, 30));
+  });
+});
+
+describe('a related repo’s ticket peer is never lost to the cap', () => {
+  it('it moves up beside the related changes (the finding: the cap used to drop it after the walk skipped its repo)', async () => {
+    const mk = async (name: string): Promise<number> =>
+      (await db.insert(schema.repos).values({ accountId: 1, owner: 'acme', name, githubNodeId: `R_${name}` }).returning().execute())[0]
+        .id as number;
+    const prIn = async (repoId: number, number: number): Promise<number> =>
+      (
+        await db
+          .insert(schema.pullRequests)
+          .values({
+            githubNodeId: `PR_cap_${repoId}_${number}`,
+            accountId: 1,
+            repoId,
+            number,
+            title: `Cap ${number}`,
+            state: 'open',
+            isDraft: false,
+            openedAt: new Date(),
+            updatedAt: new Date(),
+            headSha: 'd'.repeat(40),
+            headRefName: `cap-${number}`,
+            files: [],
+          })
+          .returning()
+          .execute()
+      )[0].id as number;
+    // P3 sits in sdk (RELATED); P1 and P2 in two unrelated repos, newer, so the ticket fold ranks them first.
+    const p3 = await prIn(id.sdk!, 70);
+    const p1 = await prIn(await mk('w1'), 71);
+    const p2 = await prIn(await mk('w2'), 72);
+    _overrideTicketSourceForTest({
+      ticketsForPr: async () => [
+        { ident: 'jira:x#BMD-77', ticket: { title: 't', description: null, acceptanceCriteria: null, key: 'BMD-77' }, ticketHash: 'h' },
+      ],
+      ticketMembers: async () => [p1, p2, p3].map((prId) => ({ prId, workspaceId: ws })),
+    });
+    const peers = await manager.reviewPeersFor({ ctx, accountId: 1, prId: reviewedPr });
+    expect(peers.map((p) => [p.ref, p.repoFullName, p.number, p.source ?? 'ticket'])).toEqual([
+      ['X1', 'acme/api', 21, 'related_repo'],
+      ['X2', 'acme/docs', 30, 'related_repo'],
+      ['X3', 'acme/infra', null, 'related_repo'],
+      ['X4', 'acme/sdk', 70, 'ticket'],
+    ]);
   });
 });

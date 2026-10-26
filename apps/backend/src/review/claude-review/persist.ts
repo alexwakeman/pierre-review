@@ -173,7 +173,7 @@ interface ReviewRow {
   // The reference-library passages the run used, server-checked (migration 0117 / pg 0104). NULL =
   // the run did not read the library.
   docReferences?: unknown;
-  // What it read beside the PR (migration 0130). NULL = nothing.
+  // What it read beside the PR (migration 0131). NULL = nothing.
   peersRead?: unknown;
 }
 

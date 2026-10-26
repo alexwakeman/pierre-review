@@ -13,9 +13,9 @@
 // names the word the provider was actually sent.
 //
 // NULL (never chosen) is DEFAULT: today's behaviour, which is NOT one level — Claude runs medium, Codex
-// runs by depth (deep = high, standard = medium, fast = low). A diff-only review runs one step lower on
-// either (never below low). An explicitly set REVIEW_EFFORT wins over the stored level and locks the
-// control. The backend resolver is apps/backend/src/ai/effort.ts.
+// runs by depth (deep = high, standard = medium, fast = low). A diff-only review runs one step lower,
+// but never below what Default runs it at unless the chosen level is lower still. An explicitly set
+// REVIEW_EFFORT wins over the stored level and locks the control. The backend resolver is apps/backend/src/ai/effort.ts.
 
 /** A reasoning effort, in the providers' own words (the same five on both). */
 export type AiEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';

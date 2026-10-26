@@ -31,3 +31,18 @@ export function relatedTo(pairs: ReadonlyArray<{ repoId: number; relatedRepoId: 
   }
   return out.sort((a, b) => a - b);
 }
+
+/**
+ * Whether `partnerId` cannot take `repoId` as a NEW relation: it already has `max` relations to other
+ * repos (the server skips it — the cap holds on both sides, db/related-repos.ts). A partner already
+ * related to `repoId` is never "full" for it.
+ */
+export function partnerIsFull(
+  pairs: ReadonlyArray<{ repoId: number; relatedRepoId: number }>,
+  repoId: number,
+  partnerId: number,
+  max: number,
+): boolean {
+  const theirs = relatedTo(pairs, partnerId);
+  return !theirs.includes(repoId) && theirs.length >= max;
+}

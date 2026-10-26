@@ -5,7 +5,7 @@
 //   • THE EFFORT (the router's depths): Codex's reasoning effort follows the model's ROLE (deep → high,
 //     standard → medium, ai/providers/codex.ts) on a WORKTREE run, and one step LOWER on a DIFF-ONLY run
 //     — the same "a small, self-contained change gets less thinking" split Claude's `sdkModelOptions`
-//     makes with REVIEW_DIFF_ONLY_EFFORT.
+//     makes (ai/effort.ts `defaultRunEffort`).
 //   • THE SPECIALISTS (§ 3.5): on Claude the lead dispatches them; on Codex LIMN runs them first
 //     (ai/codex/specialists.ts — the cap, the catalogue, the budget and read-only are enforced there),
 //     because Codex's own subagents are undocumented in `exec`. The lead cannot choose, so CODE picks

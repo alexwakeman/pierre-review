@@ -7,18 +7,25 @@
 // Neither ⇒ DEFAULT (null). No DB import here, for the same reason as ai/provider-setting.ts.
 //
 // WHO IT REACHES (`agenticRunEffort`): the PR review (lead, specialists, follow-up re-reviews), AI Fix
-// and Plan first, on BOTH providers. A worktree run sends the level; a diff-only review one step
-// lower (never below low), unless REVIEW_DIFF_ONLY_EFFORT is set, which then decides every diff-only
-// run. Every other agent kind keeps its provider's own depth (`defaultRunEffort`), except that an
-// explicit REVIEW_EFFORT / REVIEW_DIFF_ONLY_EFFORT still moves every Claude run, as it always did for
-// Sonnet.
+// and Plan first, on BOTH providers — and NOTHING ELSE. REVIEW_EFFORT and REVIEW_DIFF_ONLY_EFFORT reach
+// exactly the same runs as the Settings control (REVIEW_EFFORT IS the control, locked), so "Set by
+// REVIEW_EFFORT" under it is the whole story. Every other agent kind (CI review, ticket review,
+// diagrams, Check threads, chats, Resolve with Claude) runs at its provider's own fixed depth
+// (`defaultRunEffort`), which reads no environment.
+//
+// A worktree run sends the level. A diff-only review runs ONE STEP LOWER, but never below what Default
+// runs it at — unless the chosen level is itself below that, when it runs at the chosen level
+// (`diffOnlyEffortAt`). So picking Medium, which is what Default runs Opus 5.5 at, never drops its quick
+// reviews to low. REVIEW_DIFF_ONLY_EFFORT, when set, decides every diff-only review on both providers,
+// at Default too.
 //
 // DEFAULT = today's behaviour, exactly:
 //   • Claude: worktree medium; diff-only medium on Opus 5.5 (the old pin), low on Sonnet 5.
 //   • Codex: by depth (deep = high, standard = medium, fast = low), one step lower diff-only.
-// ⚠ Opus 5.5 is no longer PINNED: a chosen level or REVIEW_EFFORT moves it like any model. What stays
-// fixed is real — adaptive thinking (review/model-options.ts).
-import { isAiEffort, stepDownEffort, type AiEffort, type AiEffortSettingStatus } from '@pierre-review/shared';
+// ⚠ Opus 5.5 is no longer PINNED on the review and AI Fix: a chosen level or REVIEW_EFFORT moves it like
+// any model. Every other kind still runs it at medium. What stays fixed everywhere is adaptive thinking
+// (review/model-options.ts).
+import { AI_EFFORTS, isAiEffort, stepDownEffort, type AiEffort, type AiEffortSettingStatus } from '@pierre-review/shared';
 import type { AgentProviderId, ModelChoice, ModelRole } from './provider.js';
 
 export const REVIEW_EFFORT_ENV = 'REVIEW_EFFORT';
@@ -65,29 +72,38 @@ export const CODEX_DEFAULT_EFFORT_FOR_ROLE: Readonly<Record<ModelRole, AiEffort>
 };
 
 /**
- * The effort a run sends when the Settings level does NOT reach it (every kind outside the review and
- * AI Fix, and those too while the level is Default). Claude: REVIEW_EFFORT / REVIEW_DIFF_ONLY_EFFORT
- * when set, else medium, and diff-only medium on Opus (deep), low otherwise. Codex: by role, one step
- * lower diff-only. Pure in `env`.
+ * The effort a run sends when the Settings level does NOT reach it: every kind outside the review and
+ * AI Fix, and those too while the level is Default. Claude: medium, and diff-only medium on Opus (deep),
+ * low otherwise. Codex: by role, one step lower diff-only. Reads NO environment — REVIEW_EFFORT and
+ * REVIEW_DIFF_ONLY_EFFORT reach only `agenticRunEffort`'s runs. Pure.
  */
-export function defaultRunEffort(
-  provider: AgentProviderId,
-  role: ModelRole,
-  mode: 'diff_only' | 'worktree',
-  env: NodeJS.ProcessEnv = process.env,
-): AiEffort {
+export function defaultRunEffort(provider: AgentProviderId, role: ModelRole, mode: 'diff_only' | 'worktree'): AiEffort {
   if (provider === 'codex') {
     const base = CODEX_DEFAULT_EFFORT_FOR_ROLE[role];
     return mode === 'worktree' ? base : stepDownEffort(base);
   }
-  if (mode === 'worktree') return envEffort(env, REVIEW_EFFORT_ENV) ?? 'medium';
-  return envEffort(env, REVIEW_DIFF_ONLY_EFFORT_ENV) ?? (role === 'deep' ? 'medium' : 'low');
+  if (mode === 'worktree') return 'medium';
+  return role === 'deep' ? 'medium' : 'low';
+}
+
+const rank = (e: AiEffort): number => AI_EFFORTS.indexOf(e);
+const lowerOf = (a: AiEffort, b: AiEffort): AiEffort => (rank(a) <= rank(b) ? a : b);
+const higherOf = (a: AiEffort, b: AiEffort): AiEffort => (rank(a) >= rank(b) ? a : b);
+
+/**
+ * A diff-only review's effort at a chosen `level`, given what Default runs that review at
+ * (`atDefault`): one step lower, but never below `atDefault` — nor above `level`, so a level chosen
+ * below Default runs at that level. Pure.
+ */
+export function diffOnlyEffortAt(level: AiEffort, atDefault: AiEffort): AiEffort {
+  return higherOf(stepDownEffort(level), lowerOf(level, atDefault));
 }
 
 /**
- * THE EFFORT of a review / AI Fix / Plan first run on `provider`: the chosen level on a worktree run,
- * one step lower diff-only (REVIEW_DIFF_ONLY_EFFORT, when set, decides diff-only); Default ⇒
- * `defaultRunEffort`. Read once per run, at its start; the run stores what it used.
+ * THE EFFORT of a review / AI Fix / Plan first run on `provider`: the chosen level on a worktree run;
+ * diff-only, REVIEW_DIFF_ONLY_EFFORT when set (at any level, on both providers), else
+ * `diffOnlyEffortAt`; Default ⇒ `defaultRunEffort`. Read once per run, at its start; the run stores
+ * what it used.
  */
 export function agenticRunEffort(
   provider: AgentProviderId,
@@ -96,9 +112,11 @@ export function agenticRunEffort(
   env: NodeJS.ProcessEnv = process.env,
 ): AiEffort {
   const level = chosenAiEffort(env);
-  if (level == null) return defaultRunEffort(provider, choice.role, mode, env);
-  if (mode === 'worktree') return level;
-  return envEffort(env, REVIEW_DIFF_ONLY_EFFORT_ENV) ?? stepDownEffort(level);
+  const atDefault = defaultRunEffort(provider, choice.role, mode);
+  if (mode === 'worktree') return level ?? atDefault;
+  const fromEnv = envEffort(env, REVIEW_DIFF_ONLY_EFFORT_ENV);
+  if (fromEnv) return fromEnv;
+  return level == null ? atDefault : diffOnlyEffortAt(level, atDefault);
 }
 
 /** How much more room a review gets at a higher level: High ×1.5, Extra high ×2, Max ×2.5. */

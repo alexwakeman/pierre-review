@@ -467,8 +467,8 @@ export const config = {
   reviewDiffCapEnabled: process.env.REVIEW_DIFF_CAP_ENABLED !== 'false',
   reviewDiffCapChars: intFromEnv('REVIEW_DIFF_CAP_CHARS', 60000),
   // Agent `effort` — the dominant cost knob — is NOT read here: REVIEW_EFFORT (the level; it wins over
-  // Settings → AI → Effort) and REVIEW_DIFF_ONLY_EFFORT (every diff-only run) are read at run time by
-  // ai/effort.ts, the one resolver.
+  // Settings → AI → Effort) and REVIEW_DIFF_ONLY_EFFORT (every diff-only review) are read at run time by
+  // ai/effort.ts, the one resolver. Both reach only the review, AI Fix and Plan first.
   // (Review concurrency + queue caps + the routing thresholds moved to the plugin's
   // PRO_REVIEW_* env — the plugin owns the queue/manager + the mode-routing decision.)
 

@@ -249,7 +249,7 @@ export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
     ? { role: claudeModelChoice(model).role, id: override.model }
     : claudeModelChoice(model);
   // THE EFFORT (Settings → AI → Effort, ai/effort.ts): the chosen level on a worktree run, one step
-  // lower diff-only; Default = each provider's own depth (Claude medium, Codex by role). Read once, at
+  // lower diff-only but never below Default's (diffOnlyEffortAt); Default = each provider's own depth (Claude medium, Codex by role). Read once, at
   // the start, and stored on the run (`ranOn.effort`) so its label says what it used.
   const level = chosenAiEffort();
   const levelEffort = agenticRunEffort(provider.id, modelChoice, mode);
