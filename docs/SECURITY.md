@@ -249,7 +249,8 @@ clone count. **The invariant: a GitHub token never reaches disk.**
   that user can see in Linear — the same scope a Jira API token has.
 - **Jira SSRF (`tracker/jira/fetch.ts`) — the base URL is customer-typed, so every Jira call is a
   server-side request to a place they chose.** ONE helper, `jiraGetJson`, makes every call: GET
-  only, 10s timeout, 5 MB body cap, JSON only, and **NO REDIRECTS** — any 3xx is an error, so the
+  only (the ONE exception is `jiraPostJson`, the Jira status transition the reader picks —
+  docs/TRACKERS.md § The status change — under every rule below), 10s timeout, 5 MB body cap, JSON only, and **NO REDIRECTS** — any 3xx is an error, so the
   Authorization header is never forwarded to a host nobody chose. http and LAN hosts are
   allowed (on-prem Jira; the operator is the only caller). The STRICT policy (`{ cloud: true }`
   — https only, and the address guard `guardedLookup`: loopback, RFC1918, CGNAT, link-local incl.

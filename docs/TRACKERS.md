@@ -303,10 +303,48 @@ reader of `stage` works whatever the buckets are.
   would drag the split earlier). The boundary is found over the AUTOMATIC order
   (`db/sprint-status-layout.ts` `inferReviewFrom`, `loadSprintStatusEvidence`).
 
-## No write-back
+## The status change — THE ONE TRACKER WRITE (`tracker/status-change.ts`)
 
-Limn never writes to a tracker. The per-ticket write-back (`tracker/write/`, `tracker_writes`) was
-removed on 2026-10-12 with This sprint's chips and findings; migration `0107` drop the table.
+Limn writes to a tracker in exactly one place: **the Jira status transition the reader picks** from
+the story view's status chip (`components/Ticket/TicketStatusPicker.tsx`, mounted by the story view's
+one stack header — so the story TAB and This Sprint's story TRAY share it). Jira only; GitHub Issues
+and Linear show the status chip as before. Nothing else writes — no worker, no automation, no retry,
+no confirm step (the reader picks the status by name, and it changes AT ONCE). The old per-ticket
+write-back (`tracker/write/`, `tracker_writes`) stays removed (2026-10-12, migration `0107`).
+
+- **The list** — `GET /api/ticket-status/transitions?workspace=&ident=` → `TicketTransitionsResponse`.
+  Made when the picker OPENS, never on mount (`useTicketTransitions`, `enabled: open`, `gcTime: 0`):
+  `GET /rest/api/2/issue/{key}/transitions?expand=transitions.fields` (v2, like every other call, so
+  Server / Data Center work too). Only what can be made without Jira's own form is listed:
+  `isAvailable: false` is dropped, and so is any transition with a REQUIRED field that has no default
+  (Limn fills no fields). Jira lists NOTHING both when the workflow has nowhere to go and when the token
+  may not transition, so an empty list costs ONE more call (`/rest/api/2/mypermissions?…
+  &permissions=TRANSITION_ISSUES`) → `canTransition: false` → "Your Jira token cannot change this
+  issue." (shared `TICKET_STATUS_NO_PERMISSION`); a failed or silent check is `null` → "Jira offers no
+  other status from here." The SPA also hides a transition into the CURRENT status.
+- **The change** — `POST /api/ticket-status?workspace=` `{ident, transitionId}` →
+  `TicketStatusChangeResponse`: `POST …/transitions {transition:{id}}` (`jiraPostJson`, the same guard
+  as every Jira call), then **SETTLE**: `GET …/issue/{key}?fields=status` and write the status Jira
+  reports (name, category, and the status id only when sent) to every stored row of the ticket IN THIS
+  ACCOUNT — `tracker_tickets` on that site (every PR, every workspace), `sprint_tickets` and
+  `sprint_ref_tickets` by ident. `changed_at` does not move (a status is not story text). A failed
+  re-read answers `status: null` (the change WAS made) and marks the PR rows due (`next_check_at` = 0),
+  so the worker reads them at its next pass. The SPA writes the answer into the story view's two
+  caches at once, then refetches `ticket-prs`, `ticket-story`, the sprint graph + token, `ticket-links`
+  and `jira-ticket`.
+- ⚠ **STILL NOT A TRACKER PROXY.** Both routes refuse (`404 TicketNotFound`, before any Jira call) an
+  ident that does not parse, names another site than the workspace's Jira, or names a ticket Limn holds
+  NO row for in this account (a PR's `tracker_tickets` row, or this workspace's `sprint_tickets` /
+  `sprint_ref_tickets` row). A workspace whose tracker is not Jira → `400 NotJira`. `transitionId` is
+  schema-checked (`^[A-Za-z0-9_-]{1,64}$`).
+- **Refusals are our own sentence**, `502 {error:'JiraError', code, message}`: 403 → "Your Jira token
+  cannot change this issue."; a POST's 400 (Jira's answer for a refused transition) → "Jira refused this
+  change."; everything else → `jiraErrorMessage`. The SPA keeps it as one line beside the chip until the
+  next pick. The log carries account, workspace, code and HTTP status — never Jira's body.
+- **Rate tier** `[search, read]` on both (they spend the customer's Jira quota). `verify:isolation`
+  pins the settle (a key both accounts hold moves only the caller's rows) and the gate (a ticket only
+  the other account holds → 404). The demo answers a fixed workflow and keeps the pick in its overlay
+  (`ticketStatuses`), folded into the story view's reads and the sprint graph.
 
 ## Created and resolved dates (`tracker/dates.ts`, `tracker/dates-backfill.ts`)
 
@@ -543,7 +581,8 @@ block, named for its first provider — `jira.token` / `jira.hasToken` / `jira.c
 
 Every call to a customer-named host goes through ONE helper — never a bare `fetch`. (Linear's host is
 FIXED, never customer-named; its POST rides the same transport for the same no-redirect, timeout and
-size rules — § Linear.) GET only, a 10 s
+size rules — § Linear.) GET only — the ONE exception on a customer-named host is `jiraPostJson`, the
+status transition (§ The status change), with every rule below unchanged (a 2xx with no body is fine) — a 10 s
 timeout, a 5 MiB cap, **no redirects** (a 3xx is an error; following it would forward the
 Authorization header), JSON only. http and LAN hosts are allowed (an on-prem Jira is normal; the
 policy flag is `{ cloud: false }`). The STRICT policy (`{ cloud: true }`: https only, and the host
@@ -563,6 +602,8 @@ closes DNS rebinding) is what SonarCloud's fixed host is called with. Details: [
 | `PUT /api/prs/:id/tracker-ticket/ac-field` | the criteria field for the ticket's issue type | `search` |
 | `POST /api/ticket-links` | the Open PRs ticket row, ONE request per board | `search` |
 | `GET /api/ticket-merged-prs?workspace=&keys=` | the stacks' "Merged (n)" panel, DB-only | `read` |
+| `GET /api/ticket-status/transitions?workspace=&ident=` | Jira's allowed transitions, on the picker's open (§ The status change) | `search` |
+| `POST /api/ticket-status?workspace=` | the ONE tracker write: make the picked Jira transition, then settle | `search` |
 
 ⚠ **NOT A TRACKER PROXY.** The ticket routes address a PULL REQUEST (ownership → 404), re-run
 detection on it and answer only for a key detection found. Every failure is a 502 carrying a

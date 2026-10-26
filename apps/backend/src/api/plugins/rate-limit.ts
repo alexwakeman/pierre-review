@@ -488,6 +488,12 @@ function tierFor(method: string, path: string): readonly Tier[] {
   if (!mutating && path === '/api/ticket-merged-prs') return [TIERS.read];
   // GET /api/ticket-prs — the ticket tab: stored ticket rows joined to PRs, DB-only.
   if (!mutating && path === '/api/ticket-prs') return [TIERS.read];
+  // THE ONE TRACKER WRITE (tracker/status-change.ts): GET /api/ticket-status/transitions (one or two
+  // Jira calls, on the picker's open) and POST /api/ticket-status (the transition + its re-read) both
+  // spend the customer's Jira quota with the saved token → `search`, as every other tracker call.
+  // EXACT `===`, method-checked.
+  if (!mutating && path === '/api/ticket-status/transitions') return [TIERS.search, TIERS.read];
+  if (method === 'POST' && path === '/api/ticket-status') return [TIERS.search, TIERS.read];
 
   // ---- AI generation ----
   // `POST /api/pro/prs/:id/annotations/run` (the blast-radius impact note — the one kind left;

@@ -41,6 +41,7 @@ import { registerTicketLinksRoute } from './links.js';
 import { registerTicketMergedPrsRoute } from './merged.js';
 import { registerTicketPrsRoute } from './ticket-prs.js';
 import { registerManualTicketLinkRoute } from './manual-links.js';
+import { registerTicketStatusRoutes } from './status-change.js';
 import { writeSettingEvent } from '../db/setting-event-write.js';
 
 const TRACKER_NAME: Record<string, string> = { jira: 'Jira', github: 'GitHub Issues', linear: 'Linear' };
@@ -71,6 +72,8 @@ const TRACKER_NAME: Record<string, string> = { jira: 'Jira', github: 'GitHub Iss
 //   POST /api/ticket-links                            ./links.ts — the Open PRs ticket row.
 //   GET  /api/ticket-merged-prs                       ./merged.ts — the stacks' "Merged (n)" panel.
 //   GET  /api/ticket-prs                              ./ticket-prs.ts — the ticket tab (one ticket's PRs).
+//   GET  /api/ticket-status/transitions               ./status-change.ts — THE ONE TRACKER WRITE: the
+//   POST /api/ticket-status                           Jira status transition the reader picks.
 //
 // ⚠ LIMN IS NOT A TRACKER PROXY. The ticket routes address a PULL REQUEST (ownership-scoped → 404),
 // resolve that PR's workspace exactly as the enricher does, RE-RUN detection on it and answer only
@@ -259,6 +262,7 @@ export function registerTrackerRoutes(
   registerTicketMergedPrsRoute(app, ctx);
   registerTicketPrsRoute(app, ctx);
   registerManualTicketLinkRoute(app, ctx, opts);
+  registerTicketStatusRoutes(app, ctx, opts);
 
   const idParams = {
     type: 'object',

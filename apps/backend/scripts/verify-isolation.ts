@@ -3589,6 +3589,29 @@ check(
   const own = await app.inject({ method: 'GET', url: `/api/prs/${A.prId}/tracker-ticket?key=ENG-1` });
   check("GET /api/prs/<A's>/tracker-ticket as A → A's story", own.statusCode === 200 && own.json().title === 'A story');
 
+  // THE ONE TRACKER WRITE (tracker/status-change.ts): the settle writes only the caller's rows of a
+  // key both accounts hold, and the gate refuses a key only B holds before any Jira call.
+  const { writeTicketStatus } = await import('../src/tracker/status-change.js');
+  await writeTicketStatus(tctx, 1, SITE, 'ENG-1', IDENT, { name: 'Done', category: 'done', id: '10001' });
+  const afterSettle = await db.select().from(tt).where(and(eq(tt.apiRoot, SITE), eq(tt.issueKey, 'ENG-1'))).execute();
+  check(
+    "writeTicketStatus(A, shared ticket) moves A's row only",
+    afterSettle.find((r) => r.accountId === 1)?.statusName === 'Done' && afterSettle.find((r) => r.accountId === 2)?.statusName === 'To Do',
+  );
+  await db.update(tt).set({ issueKey: 'ENG-2' }).where(and(eq(tt.accountId, 2), eq(tt.issueKey, 'ENG-1'))).execute();
+  const bOnly = await app.inject({
+    method: 'GET',
+    url: `/api/ticket-status/transitions?workspace=${defaultA}&ident=${encodeURIComponent(`jira:${SITE}#ENG-2`)}`,
+  });
+  check("GET /api/ticket-status/transitions for a ticket only B holds, as A → 404", bOnly.statusCode === 404);
+  const bOnlyPost = await app.inject({
+    method: 'POST',
+    url: `/api/ticket-status?workspace=${defaultB}`,
+    payload: { ident: `jira:${SITE}#ENG-2`, transitionId: '21' },
+  });
+  check("POST /api/ticket-status naming B's workspace and B's ticket, as A → 404 (A's own Default)", bOnlyPost.statusCode === 404);
+  await db.update(tt).set({ issueKey: 'ENG-1' }).where(and(eq(tt.accountId, 2), eq(tt.issueKey, 'ENG-2'))).execute();
+
   // GITHUB ISSUES (docs/TRACKERS.md § GitHub Issues): both accounts' PRs CLOSE the same issue, and
   // each has a stored row — so a dropped account predicate on the stored links, the peers or the
   // ticket route has something to leak. No GitHub call is made: every read here is a stored row.

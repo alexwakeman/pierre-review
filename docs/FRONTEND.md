@@ -3183,6 +3183,13 @@ board.
   renders nothing.
 - `['ticket-prs']` is in `invalidateAfterPrWrite`'s workspace half, so a merge from the view's own
   cards repaints it; the sprint refresh invalidates `['ticket-story', ws]`.
+- **The status chip is a PICKER on a Jira ticket** (`Ticket/TicketStatusPicker.tsx`, mounted by
+  `TicketStack` when `single` and `provider === 'jira'`; every other tracker keeps the plain chip) — THE
+  ONE TRACKER WRITE ([TRACKERS.md](TRACKERS.md) § The status change). Opening it fetches Jira's allowed
+  transitions (`useTicketTransitions`, `enabled: open`, `gcTime: 0` — ⚠ never on mount); a pick changes
+  the ticket AT ONCE (`useSetTicketStatus`), writes the answer into both story-view caches and refetches
+  `ticket-prs`, `ticket-story`, the sprint graph + token, `ticket-links` and `jira-ticket`. A transition
+  into the current status is hidden; a refusal stays as one line beside the chip until the next pick.
 
 ### The Story section (`Activity/TicketStorySection.tsx`) — the story view only
 
@@ -4704,7 +4711,8 @@ shorter form of each rule; this is the full wording.
   and critical paths (Sonnet, no digits in its text, daily cap) are made after a read, never on a
   view. ONE `LaneBoard` draws Theme / Critical path / People; a card opens the story tray
   (`Ticket/StoryViewBody.tsx`); tickets open the story view only through `useOpenStory()`. Never
-  bring the force-graph canvas back. Nothing writes to a tracker.
+  bring the force-graph canvas back. The ONE tracker write is the Jira status the reader picks in the
+  story view's header (§ The story view); nothing on the boards writes.
 
 ### Colour and contrast
 
