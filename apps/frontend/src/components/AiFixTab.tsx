@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useIsMutating } from '@tanstack/react-query';
 import {
   aiPickerRequestModel,
+  aiProviderName,
   aiRunProviderName,
   aiRunLabel,
   DEFAULT_AI_FIX_MODEL,
@@ -126,6 +127,8 @@ function FixerSection({
   // the DEFAULT provider's model at the shared default's depth (Opus 5.5, effort pinned to medium
   // server-side) — the same constant the start route falls back to.
   const modelPick = useModelPick('fix', DEFAULT_AI_FIX_MODEL);
+  // The info text names the provider the menu PICKED (the run about to start), not the default.
+  const pickedName = aiProviderName(modelPick.chosen.provider);
   const me = useMe().data;
   const startFix = useStartFix(pr.id);
   const startPlan = useStartPlan(pr.id);
@@ -227,7 +230,7 @@ function FixerSection({
         info={
           <InfoButton title="AI Fix">
             <p>
-              {ai.providerName} reads the PR's code and edits files in a private copy. It has no shell, so it
+              {pickedName} reads the PR's code and edits files in a private copy. It has no shell, so it
               installs, builds and tests nothing.
             </p>
             <p>
@@ -236,9 +239,9 @@ function FixerSection({
               failures and ticket gaps are ticked; style bot comments are not.
             </p>
             <p>
-              Tick Plan first to read {ai.providerName}'s plan, steer it and approve it before anything changes.
+              Tick Plan first to read {pickedName}'s plan, steer it and approve it before anything changes.
             </p>
-            <p>{ai.providerName} reports what it changed in each file and what it left alone, and why.</p>
+            <p>{pickedName} reports what it changed in each file and what it left alone, and why.</p>
             <p>
               Nothing is pushed until you press Push. An automatic fix on your own PR is pushed for
               you only when Push automatically is on in Settings.

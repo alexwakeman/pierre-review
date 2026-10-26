@@ -233,7 +233,8 @@ describe('answerReviewChat', () => {
       });
     const p1 = chat.answerReviewChat(ctx, 1, otherReviewId, { question: 'one' });
     const p2 = chat.answerReviewChat(ctx, 1, otherReviewId, { question: 'two' });
-    expect(await p2).toMatchObject({ ok: false, status: 409, error: 'Busy' });
+    // No provider named: the answer in flight runs on its review's provider, not the default's.
+    expect(await p2).toMatchObject({ ok: false, status: 409, error: 'Busy', message: 'Still answering your last question.' });
     expect(chat.chatInFlightFor(1)).toBe(otherReviewId);
     await vi.waitFor(() => expect(chatCalls).toHaveLength(1));
     release();

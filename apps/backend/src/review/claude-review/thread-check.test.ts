@@ -265,6 +265,27 @@ describe('startThreadCheck', () => {
   });
 });
 
+describe('the provider a check runs on', () => {
+  // A check that stands in for the reader's manual review runs on THAT review's provider (their
+  // pick), never silently on the default: the queued row is labelled with it, and the agent gets it.
+  it("a named provider labels the queued row and reaches the agent", async () => {
+    slot.free = true;
+    agent.calls.length = 0;
+    const pr = await newPr('picked');
+    threadsByPr.set(pr, [thread(1)]);
+    const r = await tc.startThreadCheck(ctx, {
+      accountId: 1, workspaceId: 0, prId: pr, repoId, headSha: HEAD, trigger: 'manual', provider: 'codex',
+    });
+    expect(r).toMatchObject({ outcome: 'queued' });
+    const queued = (await db.select().from(schema.claudeThreadChecks).execute()).find((x: any) => x.prId === pr);
+    expect(queued.provider).toBe('codex');
+    for (let i = 0; i < 50 && tc.threadCheckHeld(1, pr); i += 1) await new Promise((res) => setTimeout(res, 20));
+    expect(agent.calls).toHaveLength(1);
+    expect(agent.calls[0].provider).toBe('codex');
+    slot.free = false;
+  });
+});
+
 describe('the agent and the prompt', () => {
   it('denies Bash and the dispatch tools; allows only the read tools and submit_threads', async () => {
     const { threadCheckToolPolicy, THREAD_CHECK_TOOL_NAME } = await vi.importActual<

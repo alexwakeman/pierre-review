@@ -2,7 +2,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { AiBudgetBody, AiBudgetResponse, AiProviderId } from '@pierre-review/shared';
 import { api } from '../api/client.js';
 import { useAiCapabilities } from './useAiCapabilities.js';
-import { runCostText } from '../lib/aiBudget.js';
+import { useMe } from './useTriage.js';
+import { otherAiProvider, otherReadingWanted, runCostText, usageForRun } from '../lib/aiBudget.js';
 
 // THE ONE QUERY for the Claude spend budget (GET /api/ai/budget). Account-grained (the budget guards
 // the machine's Claude login or API key, not a workspace), so the key has no `ws:` segment. Every
@@ -17,9 +18,9 @@ export const AI_BUDGET_QUERY_KEY = ['ai-budget'] as const;
  * (`['ai-budget', provider]`, `GET /api/ai/budget?provider=`), read only by a Run gate whose menu
  * picked it.
  */
-export function useAiBudget(provider?: AiProviderId | null) {
+export function useAiBudget(provider?: AiProviderId | null, opts: { enabled?: boolean } = {}) {
   const caps = useAiCapabilities();
-  const enabled = caps.enabled;
+  const enabled = caps.enabled && opts.enabled !== false;
   const other = provider != null && provider !== caps.provider ? provider : null;
   return useQuery<AiBudgetResponse>({
     queryKey: other ? [...AI_BUDGET_QUERY_KEY, other] : AI_BUDGET_QUERY_KEY,
@@ -36,12 +37,20 @@ export function useAiBudget(provider?: AiProviderId | null) {
 
 /**
  * A run's cost, worded for the credential: US$ on an API key, the share of the week on a Claude
- * subscription, nothing when unknown (lib/aiBudget.ts `runCostText`). Pass the run's provider so a
- * run by the other provider is never judged by this one's reading. Shares the ONE budget query.
+ * subscription, nothing when unknown (lib/aiBudget.ts `runCostText`). Pass the run's provider: a run
+ * of the DEFAULT provider is judged by the ONE shared budget query, a run of the OTHER (a manual
+ * run's per-run pick) by that provider's own reading (`['ai-budget', other]`), read only while the
+ * other provider holds a credential (`otherReadingWanted`) — never by the wrong provider's.
  */
 export function useRunCostText(): (costUsd: number | null | undefined, runProvider?: AiProviderId | null) => string | null {
-  const usage = useAiBudget().data?.usage;
-  return (costUsd, runProvider) => runCostText(costUsd, usage, runProvider);
+  const caps = useAiCapabilities();
+  const me = useMe().data;
+  const other = otherAiProvider(caps.provider);
+  const readings = {
+    default: useAiBudget().data?.usage,
+    other: useAiBudget(other, { enabled: otherReadingWanted(me, other) }).data?.usage,
+  };
+  return (costUsd, runProvider) => runCostText(costUsd, usageForRun(runProvider, caps.provider, readings), runProvider);
 }
 
 export function useSetAiBudget() {

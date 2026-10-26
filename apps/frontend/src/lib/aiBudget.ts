@@ -8,6 +8,7 @@ import {
   type AiBudgetStatus,
   type AiUsageView,
   type AiUsageWindowView,
+  type MeResponse,
 } from '@pierre-review/shared';
 import { formatUsd as formatRunUsd } from './ui.js';
 
@@ -131,6 +132,36 @@ export function runCostText(
   if (usage.route === 'api_key') return formatRunUsd(costUsd);
   if (usage.route === 'login') return runWeekShareText(costUsd, usage.weekPctPerUsd);
   return null;
+}
+
+/**
+ * THE OTHER PROVIDER (not the default): the one a manual run's model menu may pick beside the default.
+ */
+export function otherAiProvider(defaultProvider: AiProviderId): AiProviderId {
+  return defaultProvider === 'codex' ? 'claude' : 'codex';
+}
+
+/**
+ * Is the other provider's budget reading worth a request? Only when it holds a credential (its runs
+ * are then priced by it); with none, `runCostText` would say nothing anyway.
+ */
+export function otherReadingWanted(me: MeResponse | undefined, other: AiProviderId): boolean {
+  const ai = me?.ai;
+  if (ai?.enabled !== true) return false;
+  const route = other === 'codex' ? ai.providers?.codex?.route : ai.providers?.claude?.route;
+  return route != null && route !== 'none';
+}
+
+/**
+ * The reading a run's cost is judged by: the DEFAULT provider's, or — for a run of the other provider
+ * (a manual run's per-run pick) — the other's own. Absent `runProvider` ⇒ the default's, as before.
+ */
+export function usageForRun(
+  runProvider: AiProviderId | null | undefined,
+  defaultProvider: AiProviderId,
+  readings: { default: AiUsageView | null | undefined; other: AiUsageView | null | undefined },
+): AiUsageView | null | undefined {
+  return runProvider != null && runProvider !== defaultProvider ? readings.other : readings.default;
 }
 
 // ---- the header usage item (C) ------------------------------------------------------------------

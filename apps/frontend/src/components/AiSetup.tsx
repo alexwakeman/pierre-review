@@ -9,7 +9,7 @@ import {
 } from '../hooks/useAiCapabilities.js';
 import { AiBudgetMeter, OverBudgetConfirm } from './AiBudget.js';
 import { useMe } from '../hooks/useTriage.js';
-import { aiRunnableProviders } from '../lib/aiCapabilities.js';
+import { aiGateReadyFor } from '../lib/aiCapabilities.js';
 
 /**
  * What sits in place of a Run button for an agentic AI surface (Claude Review, the review chat,
@@ -33,6 +33,10 @@ import { aiRunnableProviders } from '../lib/aiCapabilities.js';
  * the default's setup or sign-in line shows only when none is. `provider` is the provider the run
  * goes to (the menu's pick), whose budget the meter and the over-budget confirm read; absent ⇒ the
  * default's.
+ *
+ * A FOLLOW-UP SURFACE (`followUp`, with its `kind` and `provider`): a run on a stored run (the review
+ * chat, another plan pass, the build of a plan) goes to `provider` (`useFollowUpProvider`) and to no
+ * other, so the gate is ready only when THAT provider can run the kind (`aiGateReadyFor`).
  */
 export function AiRunGate({
   children,
@@ -40,6 +44,7 @@ export function AiRunGate({
   kind,
   meter = true,
   anyProvider = false,
+  followUp = false,
   provider,
 }: {
   children: ReactNode;
@@ -47,15 +52,19 @@ export function AiRunGate({
   kind?: AiRunKind;
   meter?: boolean;
   anyProvider?: boolean;
+  followUp?: boolean;
   provider?: AiProviderId | null;
 }): JSX.Element | null {
   const ai = useAiCapabilities();
   const me = useMe().data;
   if (!ai.enabled) return null;
-  const anyReady = anyProvider && kind != null && aiRunnableProviders(me, kind).length > 0;
-  if (!anyReady) {
+  const ready = aiGateReadyFor(me, { kind, anyProvider, followUp, provider });
+  if (ready !== true) {
+    // A follow-up pinned to the OTHER provider that cannot run: that provider's own line.
+    if (ready === false && provider != null && provider !== ai.provider) return <AiAuthLine provider={provider} />;
     if (ai.runtime !== 'ready') return <AiRuntimeSetup />;
-    if (aiAuthFor(ai, kind).auth === 'none' || auth === 'none') return <AiAuthLine kind={kind} />;
+    // ⚠ `ready === false`: the provider the follow-up runs on cannot run it — the line, never the button.
+    if (ready === false || aiAuthFor(ai, kind).auth === 'none' || auth === 'none') return <AiAuthLine kind={kind} />;
   }
   // A gate with nothing inside (a surface that only wants the setup/auth line) gets no budget UI.
   if (children == null) return null;
@@ -67,14 +76,14 @@ export function AiRunGate({
   );
 }
 
-export function AiAuthLine({ kind }: { kind?: AiRunKind } = {}): JSX.Element {
+export function AiAuthLine({ kind, provider }: { kind?: AiRunKind; provider?: AiProviderId | null } = {}): JSX.Element {
   // The server's own sentence when it sent one (e.g. "Codex cannot run … yet" under
   // LIMN_AI_PROVIDER=codex — the kind's own when the gate named one), else the ACTIVE provider's
-  // sign-in line.
+  // sign-in line. A NAMED provider other than the active one gets its own sign-in line.
   const ai = useAiCapabilities();
-  return (
-    <span className="text-xs text-gray-600 dark:text-gray-300">{aiAuthFor(ai, kind).message ?? aiSignInLine(ai.provider)}</span>
-  );
+  const line =
+    provider != null && provider !== ai.provider ? aiSignInLine(provider) : (aiAuthFor(ai, kind).message ?? aiSignInLine(ai.provider));
+  return <span className="text-xs text-gray-600 dark:text-gray-300">{line}</span>;
 }
 
 /** The "Set up AI" button, its progress line, and a failure with Retry. */

@@ -363,7 +363,7 @@ export function ReviewChatThread({
           className="w-full resize-y rounded border border-gray-300 bg-white px-2.5 py-1.5 text-[15px] leading-normal dark:border-gray-700 dark:bg-gray-950"
         />
         <div className="flex flex-wrap items-center gap-3">
-          <AiRunGate kind="review_chat" anyProvider provider={chatProvider}>
+          <AiRunGate kind="review_chat" followUp provider={chatProvider}>
             <button type="button" onClick={send} disabled={!canSend} className={BTN_ASK}>
               {busy ? 'Answering…' : 'Ask'}
             </button>

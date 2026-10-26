@@ -13,6 +13,9 @@ import {
   reviewsPerDayText,
   runButtonsIn,
   usedSentence,
+  otherAiProvider,
+  otherReadingWanted,
+  usageForRun,
 } from '../src/lib/aiBudget.js';
 
 const sub = (over: Partial<AiBudgetSubscriptionStatus> = {}): AiBudgetSubscriptionStatus => ({
@@ -174,6 +177,33 @@ describe('a run’s cost (US$ on an API key, the share of the week on a subscrip
   it('a Codex run on a ChatGPT sign-in: never US$, nothing at all (no price, no per-run share)', () => {
     expect(runCostText(0, usage({ provider: 'codex', weekPctPerUsd: null }), 'codex')).toBeNull();
     expect(runCostText(0, usage({ provider: 'codex', weekPctPerUsd: 0.5 }), 'codex')).toBeNull();
+  });
+});
+
+describe('a run of the OTHER provider is priced by its own reading', () => {
+  // The bug: default Codex, Claude on an API key; a run the reader picked on Claude Opus showed no
+  // US$, because only the default's reading was ever read.
+  it('picks the run provider’s own reading, the default’s when absent', () => {
+    const claudeKey = usage({ route: 'api_key', account: null, weekPctPerUsd: null });
+    const codex = usage({ provider: 'codex', weekPctPerUsd: null });
+    const readings = { default: codex, other: claudeKey };
+    expect(otherAiProvider('codex')).toBe('claude');
+    expect(otherAiProvider('claude')).toBe('codex');
+    expect(runCostText(0.42, usageForRun('claude', 'codex', readings), 'claude')).toBe('US$0.42');
+    expect(usageForRun('codex', 'codex', readings)).toBe(codex);
+    expect(usageForRun(null, 'codex', readings)).toBe(codex);
+    // The other reading not read yet: nothing, never the default's figure.
+    expect(runCostText(0.42, usageForRun('claude', 'codex', { default: codex, other: undefined }), 'claude')).toBeNull();
+  });
+  it('reads the other provider only while it holds a credential', () => {
+    const me = (claudeRoute: 'login' | 'api_key' | 'none', codexRoute: 'login' | 'api_key' | 'none', enabled = true) =>
+      ({ ai: { enabled, providers: { claude: { route: claudeRoute }, codex: { route: codexRoute } } } }) as never;
+    expect(otherReadingWanted(me('api_key', 'login'), 'claude')).toBe(true);
+    expect(otherReadingWanted(me('none', 'login'), 'claude')).toBe(false);
+    expect(otherReadingWanted(me('login', 'login'), 'codex')).toBe(true);
+    expect(otherReadingWanted(me('login', 'none'), 'codex')).toBe(false);
+    expect(otherReadingWanted(me('login', 'login', false), 'codex')).toBe(false);
+    expect(otherReadingWanted(undefined, 'codex')).toBe(false);
   });
 });
 

@@ -8,7 +8,7 @@ import type {
 } from '@pierre-review/shared';
 import { aiRunProvider } from '@pierre-review/shared';
 import type { AgentContext } from '../agent-context.js';
-import { claudeModelChoice, expectedRanOn } from '../../ai/provider.js';
+import { claudeModelChoice, queuedRanOn, type AgentProviderId } from '../../ai/provider.js';
 
 // CHECK THREADS — the persistence half: `claude_thread_checks` (migration 0122 / pg 0109) through
 // ctx.db + ctx.schema, like ci-review/persist.ts. Every read predicates on accountId; an id-addressed
@@ -86,6 +86,8 @@ export interface QueueThreadCheckArgs {
   model: string;
   // The newest qualifying comment the run covers (auto: the sweeper's key; manual: the loader's).
   commentsThrough: Date | null;
+  // The provider it will run on (the reader's pick for a check beside a manual review). Absent ⇒ default.
+  provider?: AgentProviderId | null;
 }
 
 export async function insertQueuedThreadCheck(ctx: AgentContext, a: QueueThreadCheckArgs): Promise<number> {
@@ -100,8 +102,8 @@ export async function insertQueuedThreadCheck(ctx: AgentContext, a: QueueThreadC
       headSha: a.headSha,
       trigger: a.trigger,
       status: 'queued',
-      // Labelled by the provider it is expected to run on; the run stamps what ran (`markThreadCheckRanOn`).
-      ...expectedRanOn(claudeModelChoice(a.model)),
+      // Labelled by the provider it will run on; the run stamps what ran (`markThreadCheckRanOn`).
+      ...queuedRanOn(claudeModelChoice(a.model), a.provider),
       commentsThrough: a.commentsThrough,
     })
     .returning({ id: ct.id })

@@ -546,7 +546,7 @@ async function runPipeline(
     // did) starts in its place. Auto runs are unchanged: their comment bursts already route there.
     if (item.trigger === 'manual') {
       void import('./thread-check.js')
-        .then((m) => m.startThreadCheckBesideManualReview(ctx, item.accountId, item.prId))
+        .then((m) => m.startThreadCheckBesideManualReview(ctx, item.accountId, item.prId, item.provider))
         .catch((err) =>
           ctx.log.warn(`thread check beside skip pr ${item.prId}: ${err instanceof Error ? err.message : String(err)}`),
         );

@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { AiKindStatus, AiRunKind, ClaudeReviewSummary, MeResponse } from '@pierre-review/shared';
-import { aiRunnableProviders, aiProviderReadyFor } from '../src/lib/aiCapabilities.js';
+import { aiGateReadyFor, aiRunnableProviders, aiProviderReadyFor } from '../src/lib/aiCapabilities.js';
 import { followUpProviderOf, resolveModelPick } from '../src/lib/modelPick.js';
 import { nextShownReviewId } from '../src/lib/reviewHistory.js';
 import { ReviewHistoryList } from '../src/components/ReviewHistoryList.js';
@@ -124,6 +124,30 @@ describe('the follow-up rule (the chat on its review, another plan pass)', () =>
   });
 });
 
+describe('the Run gate of a follow-up', () => {
+  // ⚠ The bug: the chat gate used "any provider ready". Default Claude (signed out), Codex signed in,
+  // a Claude-run review: the chat runs on Claude (the follow-up rule's fallback) and failed with "Claude
+  // did not answer", where the gate used to show the sign-in line. A follow-up gate reads ITS provider.
+  it('is ready only when the provider the follow-up runs on can run it', () => {
+    const m = me({ def: 'claude', codex: true });
+    const chatOn = followUpProviderOf(m, 'claude', 'review_chat');
+    expect(chatOn).toBe('claude');
+    expect(aiGateReadyFor(m, { kind: 'review_chat', followUp: true, provider: chatOn })).toBe(false);
+    // The picker surface (a new run) is still ready: its menu offers Codex.
+    expect(aiGateReadyFor(m, { kind: 'review', anyProvider: true, provider: 'codex' })).toBe(true);
+    // A Codex review, Codex signed in: the chat runs on Codex and the gate says so.
+    expect(aiGateReadyFor(m, { kind: 'review_chat', followUp: true, provider: followUpProviderOf(m, 'codex', 'review_chat') })).toBe(true);
+    // Plan pass and build: the same rule.
+    expect(aiGateReadyFor(m, { kind: 'plan', followUp: true, provider: followUpProviderOf(m, 'claude', 'plan') })).toBe(false);
+    expect(aiGateReadyFor(m, { kind: 'fix', followUp: true, provider: followUpProviderOf(m, 'codex', 'fix') })).toBe(true);
+  });
+  it('falls back to the default provider’s own checks when no rule applies', () => {
+    expect(aiGateReadyFor(me({ claude: true }), { kind: 'review' })).toBeNull();
+    expect(aiGateReadyFor(me({}), { kind: 'review', anyProvider: true })).toBeNull();
+    expect(aiGateReadyFor(me({ claude: true }), { followUp: true, provider: 'claude' })).toBeNull();
+  });
+});
+
 const run = (id: number, over: Partial<ClaudeReviewSummary> = {}): ClaudeReviewSummary => ({
   id,
   headSha: `${id}`.repeat(40).slice(0, 40),
@@ -209,5 +233,16 @@ describe('the history list', () => {
     expect(html.match(/aria-current="true"/g)).toHaveLength(1);
     const shownRow = html.slice(html.indexOf('data-review-run="1"'));
     expect(shownRow).toContain('Shown');
+  });
+
+  // The shown row sits on blue-50 (#eff6ff): gray-500 text measures 4.45:1 there, under the 4.5:1
+  // floor. Every text inside a row is gray-600 or darker in light mode.
+  it('no row text is gray-500 (it fails 4.5:1 on the shown row’s blue-50)', () => {
+    const latestShown = renderToStaticMarkup(
+      createElement(ReviewHistoryList, { history, shownId: 3, latestId: 3, onShow: () => {} }),
+    );
+    const rows = latestShown.slice(latestShown.indexOf('<ol'));
+    expect(rows).toContain('Latest');
+    expect(rows).not.toMatch(/(^|[\s"])text-gray-500(?=[\s"])/);
   });
 });

@@ -19,6 +19,7 @@ import type {
   User,
 } from '@pierre-review/shared';
 import {
+  aiProviderName,
   aiRunLabel,
   aiRunProvider,
   CLAUDE_FINDING_LENS_LABELS,
@@ -1787,10 +1788,13 @@ export function ClaudeReviewTab({
   // Claude subscription, nothing when unknown.
   // Judged by the provider the RUNNING row runs on (stamped at queue time), never the other one's.
   const liveRow = review != null && (review.status === 'running' || review.status === 'queued') ? review : null;
-  const liveCost = costText(
-    status?.progress?.usage?.estCostUsd,
-    liveRow ? aiRunProvider(liveRow.provider, liveRow.model) : null,
-  );
+  // WHO IS RUNNING: the running row's provider (stamped at queue time with the reader's pick), never
+  // the default's — a Codex run picked while Claude is the default reads "Running Codex review".
+  // Before the row loads, the pick that started it.
+  const liveProvider: AiProviderId = liveRow
+    ? aiRunProvider(liveRow.provider, liveRow.model)
+    : modelPick.chosen.provider;
+  const liveCost = costText(status?.progress?.usage?.estCostUsd, liveProvider);
   const phaseLabel = phase != null ? (PHASE_LABEL[phase] ?? phase) : 'Starting…';
 
   // ⚠ The server posts the STORED draft body. Clicking Preview blurs the summary box, whose save
@@ -1909,7 +1913,7 @@ export function ClaudeReviewTab({
       <div className="empty:hidden">
         <RegenProgressBar
           active={isRunning}
-          label={`Running ${ai.providerName} review`}
+          label={`Running ${aiProviderName(liveProvider)} review`}
           value={reviewProgressPct(status)}
           timeConstantSec={30}
         />
@@ -1979,7 +1983,7 @@ export function ClaudeReviewTab({
               </span>
               <span
                 className="font-semibold text-gray-600 dark:text-gray-300"
-                title={`Estimated so far, on ${aiCredentialWords(ai.provider)}. Limn charges nothing. The figure recorded when the run finishes is authoritative.`}
+                title={`Estimated so far, on ${aiCredentialWords(liveProvider)}. Limn charges nothing. The figure recorded when the run finishes is authoritative.`}
               >
                 {liveCost != null && `~${liveCost}`}
               </span>

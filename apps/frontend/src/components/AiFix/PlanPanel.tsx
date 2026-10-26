@@ -242,7 +242,7 @@ export function PlanPanel({
           so it is never gated: a plan must always be clearable, or it blocks the PR's auto fixes. */}
       {ready && plan && (
         <div className="mt-3">
-          <AiRunGate kind="plan" auth={auth} meter={false} anyProvider provider={passProvider}>
+          <AiRunGate kind="plan" auth={auth} meter={false} followUp provider={passProvider}>
             <textarea
               aria-label="Change the plan"
               className="w-full rounded border border-gray-300 bg-transparent px-2 py-1 text-xs dark:border-gray-700"
@@ -270,7 +270,7 @@ export function PlanPanel({
             </div>
           </AiRunGate>
           <div className="mt-2 flex flex-wrap items-center gap-2">
-            <AiRunGate kind="fix" auth={auth} anyProvider provider={buildProvider}>
+            <AiRunGate kind="fix" auth={auth} followUp provider={buildProvider}>
               <button type="button" data-ai-run className={BTN_PRIMARY} disabled={busy} onClick={doApprove}>
                 Approve and build
               </button>

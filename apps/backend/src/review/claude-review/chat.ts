@@ -554,11 +554,13 @@ export async function answerReviewChat(
   }
   // ⚠ CLAIM THE SLOT SYNCHRONOUSLY — before ANY await — so a double-submit (two mounts, a retry)
   // cannot slip past the credit check and bill twice. Released in the finally.
+  // ⚠ No provider named: the answer in flight runs on ITS review's provider (`followUpProvider`
+  // below), not necessarily the default, and the review is not read yet.
   if (inFlight.has(accountId)) {
-    return { ok: false, status: 409, error: 'Busy', message: `${providerName()} is still answering.` };
+    return { ok: false, status: 409, error: 'Busy', message: 'Still answering your last question.' };
   }
   if (inFlight.size >= CHAT_PROCESS_CAP) {
-    return { ok: false, status: 409, error: 'Busy', message: `${providerName()} is busy. Try again in a moment.` };
+    return { ok: false, status: 409, error: 'Busy', message: 'The service is busy. Try again in a moment.' };
   }
   inFlight.set(accountId, reviewId);
   try {

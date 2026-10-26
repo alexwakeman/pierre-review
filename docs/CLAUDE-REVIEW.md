@@ -332,8 +332,10 @@ the plan). Phase 3 is complete: every agent kind runs on Codex and `codexRunnabl
 
 ### The provider seam
 
-- **`ai/provider.ts`** is the ONE door for every model call. The agent runners call
-  `getActiveProvider().runAgent(spec)`; `review/llm.ts` `cheapComplete` (and so the platform's
+- **`ai/provider.ts`** is the ONE door for every model call. The agent runners call a provider's
+  `runAgent(spec)` — the RUN's provider (`review/run-provider.ts` `runProvider(args.provider)`: the
+  reader's per-run pick, else the default; a runner with no menu gets the default,
+  `getActiveProvider()`); `review/llm.ts` `cheapComplete` (and so the platform's
   `ctx.llm`) calls `.complete(req)`. Only `ai/providers/claude.ts` and `ai/runtime.ts` touch an SDK
   (`provider-seam.test.ts`). The model in a spec is a ROLE (`deep` / `standard` / `fast`), with an
   optional exact id; each provider resolves it.
@@ -380,14 +382,20 @@ the plan). Phase 3 is complete: every agent kind runs on Codex and `codexRunnabl
   - **One spelling on screen**: `packages/shared/src/ai-run-label.ts` `aiRunLabel` ("Claude Opus
     5.5", "Codex · GPT-6 Astra"; `components/AiRunLabel.tsx`); sentences about a stored run name
     `aiRunProviderName(run)` (`ai-provider-words.ts`, the same rule); sentences about the run about
-    to start name the ACTIVE provider (`useAiProviderName`). The model pickers name what will run
+    to start name the provider it WILL run on: on a surface with a model menu, the pick
+    (`aiProviderName(modelPick.chosen.provider)`), and while it runs, the running row's provider
+    (`aiRunProvider(row.provider, row.model)`, stamped at queue time) — "Running Codex review" for a
+    Codex pick while Claude is the default; only a surface WITHOUT a menu names the default
+    (`useAiProviderName`). The model pickers name what will run
     (`aiModelChoiceLabel`: "Codex · GPT-6 Astra (most thorough)"). Never word a provider by hand.
   - **In-situ comparison**: a Codex review of a head Claude already reviewed runs, and both stay in
     history, each labelled (`mixed-providers.test.ts`). Auto review's one-run-per-head counts either
     provider. ⚠ A second review still gets the earlier one as its "Previous review" follow-up, so
     the two are NOT independent. The thread fold lets the newer run win and carries its provider.
   - Run cost follows the RUN's provider (`runCostText(…, provider)`): a Codex run on ChatGPT shows
-    no figure, never US$. Period reports still store the model ASKED for (it is part of the row's
+    no figure, never US$. `useRunCostText()` judges a run of the OTHER provider (a per-run pick) by
+    that provider's own reading (`['ai-budget', other]`, read only while it holds a credential), so a
+    Claude Opus run on an API key shows its US$ while Codex is the default. Period reports still store the model ASKED for (it is part of the row's
     identity); the core one-shot tables (sprint briefs/themes, story labels) store a constant id.
 
 ### The per-run choice (decided 2026-10-26)
@@ -400,7 +408,9 @@ I would pick a preference for auto-review in settings."
   `LIMN_AI_PROVIDER` still wins, `auto` = Claude when both are signed in). It decides auto review,
   auto fix, the CI and ticket auto runs, every scheduled one-shot, and every surface without a model
   menu (Check threads, ticket and CI reviews, diagrams, the docs library, Resolve with Claude, the
-  Open PRs table's one-click review), and it is the menu's opening choice.
+  Open PRs table's one-click review), and it is the menu's opening choice. ⚠ One exception: the
+  Check threads run that starts IN PLACE of a manual review routed `skip` runs on that review's
+  provider (the reader's pick, `startThreadCheckBesideManualReview(…, provider)`).
 - **The menus** (`components/ModelPicker.tsx`, `lib/modelPick.ts`): the Claude Review run (and its
   re-review, the follow-up) and AI Fix (+ Plan first) list the models of EVERY provider that is set
   up, signed in and can run the kind (`aiRunnableProviders`: `me.ai.providers.claude.runtime/auth`,
@@ -410,6 +420,10 @@ I would pick a preference for auto-review in settings."
   these surfaces). One provider ready ⇒ the menu reads as it did. `AiRunGate anyProvider` is ready
   when ANY provider can run the kind; its `provider` is the pick, whose budget the meter and the
   over-budget confirm read (`GET /api/ai/budget?provider=`). A click is never refused by the budget.
+  ⚠ A FOLLOW-UP gate (the review chat, another plan pass, the build of a plan) is `AiRunGate followUp`,
+  NEVER `anyProvider`: the run goes to `useFollowUpProvider`'s provider and no other, so the button
+  shows only when THAT provider can run the kind (`aiGateReadyFor`); a signed-out default with a
+  signed-in Codex shows the default's sign-in line on a Claude review's chat, not an Ask that fails.
 - **The request** carries `{ provider, model }`; `ai/run-choice.ts resolveManualRunChoice` validates
   it in the route: an unknown provider or a model no menu offers ⇒ 400; a NAMED provider with the
   other's model ⇒ 400 `ModelNotOnProvider` ("GPT-6 Astra runs on Codex, not Claude."); the provider
@@ -2660,7 +2674,7 @@ library, sprint briefs/paths and every one-shot completion. Details:
 - **The moved modules take ONE `AgentContext`** (`review/agent-context.ts`), never the platform
   context.
 - ⚠ **EVERY MODEL CALL GOES THROUGH `ai/provider.ts`** ([docs/CODEX-PLAN.md](CODEX-PLAN.md)
-  § 3.1): runners call `getActiveProvider().runAgent`, `cheapComplete` calls `.complete`. ONLY
+  § 3.1): runners call the run's provider's `runAgent` (`runProvider`), `cheapComplete` calls `.complete`. ONLY
   `ai/providers/claude.ts` (+ `ai/runtime.ts`) calls `query`/loads an SDK, and adds the path guard,
   own-tools hook and isolation to every run (`provider-seam.test.ts`). Budget folds filter
   `ai_usage.provider` (sqlite `0127`). ⚠ Codex: Phase 3 is complete (see § Codex, the second

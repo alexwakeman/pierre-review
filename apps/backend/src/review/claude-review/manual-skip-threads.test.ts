@@ -14,10 +14,10 @@ process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
 delete process.env.LIMN_AI_DISABLED;
 
-const beside = vi.hoisted(() => ({ calls: [] as Array<[number, number]> }));
+const beside = vi.hoisted(() => ({ calls: [] as Array<[number, number, string | null | undefined]> }));
 vi.mock('./thread-check.js', () => ({
-  startThreadCheckBesideManualReview: async (_ctx: unknown, accountId: number, prId: number) => {
-    beside.calls.push([accountId, prId]);
+  startThreadCheckBesideManualReview: async (_ctx: unknown, accountId: number, prId: number, provider?: string | null) => {
+    beside.calls.push([accountId, prId, provider]);
     return { outcome: 'refused', reason: 'nothing_changed' };
   },
 }));
@@ -87,8 +87,8 @@ afterAll(() => {
   for (const s of ['', '-shm', '-wal']) rmSync(DB_PATH + s, { force: true });
 });
 
-async function runToEnd(): Promise<string> {
-  const started = await manager.startReview(ctx, 1, prId, 'claude-opus-5-5');
+async function runToEnd(provider: 'claude' | 'codex' = 'claude'): Promise<string> {
+  const started = await manager.startReview(ctx, 1, prId, 'claude-opus-5-5', provider);
   if (!started.ok) throw new Error(`not started: ${started.reason}`);
   for (let i = 0; i < 200; i++) {
     const r = await persist.getClaudeReviewById(ctx, started.reviewId, 1);
@@ -106,12 +106,19 @@ describe('a manual review that reads no code', () => {
     lines = 0;
     expect(await runToEnd()).toBe('skip');
     expect(runs).toBe(0);
-    expect(beside.calls).toEqual([[1, prId]]);
+    expect(beside.calls).toEqual([[1, prId, 'claude']]);
 
     beside.calls.length = 0;
     lines = 3;
     expect(await runToEnd()).toBe('diff_only');
     expect(runs).toBe(1);
     expect(beside.calls).toEqual([]);
+  });
+
+  it("runs the check on the reader's PICKED provider, not the default", async () => {
+    beside.calls.length = 0;
+    lines = 0;
+    expect(await runToEnd('codex')).toBe('skip');
+    expect(beside.calls).toEqual([[1, prId, 'codex']]);
   });
 });

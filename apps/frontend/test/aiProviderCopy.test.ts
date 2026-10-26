@@ -276,7 +276,12 @@ describe('the wiring', () => {
     expect(read('components', 'Activity', 'PendingClaude.tsx')).toMatch(/`Review with \$\{aiName\}`/);
     expect(read('components', 'ClaudeReviewChat.tsx')).toMatch(/`Ask \$\{providerName\} about this review`/);
     expect(read('components', 'Activity', 'SprintView.tsx')).toMatch(/Ask \{aiName\}/);
-    expect(read('components', 'ClaudeReviewTab.tsx')).toMatch(/label=\{`Running \$\{ai\.providerName\} review`\}/);
+    // A RUNNING review names the provider it runs on (the row's, stamped with the reader's pick),
+    // never the default's.
+    expect(read('components', 'ClaudeReviewTab.tsx')).toMatch(/label=\{`Running \$\{aiProviderName\(liveProvider\)\} review`\}/);
+    expect(read('components', 'ClaudeReviewTab.tsx')).toMatch(/aiCredentialWords\(liveProvider\)/);
+    // AI Fix's ⓘ names the PICKED provider.
+    expect(read('components', 'AiFixTab.tsx')).toMatch(/\{pickedName\} reads the PR's code/);
     expect(read('components', 'AiSetup.tsx')).toMatch(/aiSignInLine\(ai\.provider\)/);
   });
 

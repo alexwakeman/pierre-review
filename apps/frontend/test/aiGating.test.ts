@@ -163,8 +163,10 @@ describe('the wiring', () => {
   });
 
   it('every agentic start button sits behind the one gate, naming its run kind', () => {
-    // The picker surfaces and the chat may run on ANY ready provider (the per-run choice), so their
-    // gates say `anyProvider` and name the provider the run goes to (its budget is the one read).
+    // The picker surfaces may run on ANY ready provider (the per-run choice), so their gates say
+    // `anyProvider` and name the provider the run goes to (its budget is the one read). ⚠ A FOLLOW-UP
+    // (the chat, a plan pass, the build) goes to ONE provider, so its gate says `followUp`, never
+    // `anyProvider` — a ready Codex must not offer Ask on a chat that will run on a signed-out Claude.
     expect(read(join(root, 'components', 'ClaudeReviewTab.tsx'))).toMatch(
       /<AiRunGate kind="review" auth=\{data\?\.auth\} anyProvider provider=\{modelPick\.chosen\.provider\}>/,
     );
@@ -172,8 +174,12 @@ describe('the wiring', () => {
       /<AiRunGate kind="fix" auth=\{data\?\.auth\} anyProvider provider=\{modelPick\.chosen\.provider\}>/,
     );
     expect(read(join(root, 'components', 'ClaudeReviewChat.tsx'))).toMatch(
-      /<AiRunGate kind="review_chat" anyProvider provider=\{chatProvider\}>/,
+      /<AiRunGate kind="review_chat" followUp provider=\{chatProvider\}>/,
     );
+    const plan = read(join(root, 'components', 'AiFix', 'PlanPanel.tsx'));
+    expect(plan).toMatch(/<AiRunGate kind="plan" auth=\{auth\} meter=\{false\} followUp provider=\{passProvider\}>/);
+    expect(plan).toMatch(/<AiRunGate kind="fix" auth=\{auth\} followUp provider=\{buildProvider\}>/);
+    expect(plan).not.toMatch(/anyProvider/);
   });
 
   it('no board button starts a run off the top-level `ready`: each asks its own kind', () => {

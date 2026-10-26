@@ -104,6 +104,26 @@ export function aiRunnableProviders(me: MeResponse | undefined, kind: AiRunKind)
 }
 
 /**
+ * IS A RUN GATE'S BUTTON READY, by a provider's own answer — or null when the gate falls back to the
+ * DEFAULT provider's runtime and sign-in checks (AiSetup.tsx `AiRunGate`).
+ *  • `followUp` (a run on a STORED run: the review chat, another plan pass, the build of a plan): the
+ *    run goes to `provider` (`followUpProviderOf`) and NOWHERE ELSE, so the button is ready only when
+ *    THAT provider can run the kind. ⚠ Never "any provider": a ready Codex does not make a chat that
+ *    will run on a signed-out Claude answerable.
+ *  • `anyProvider` (a per-run model menu): ready when ANY provider can run the kind — the run goes to
+ *    the menu's pick, and the menu lists only ready providers.
+ */
+export function aiGateReadyFor(
+  me: MeResponse | undefined,
+  o: { kind?: AiRunKind; anyProvider?: boolean; followUp?: boolean; provider?: AiProviderId | null },
+): boolean | null {
+  if (o.kind == null) return null;
+  if (o.followUp && o.provider != null) return aiProviderReadyFor(me, o.provider, o.kind);
+  if (o.anyProvider && aiRunnableProviders(me, o.kind).length > 0) return true;
+  return null;
+}
+
+/**
  * The pre-flight for ONE run kind: its own entry when the server sent one, else the top-level
  * answer. The sentence is the kind's own, else the top-level one.
  */

@@ -75,6 +75,8 @@ interface Job {
   prId: number;
   checkId: number;
   trigger: ThreadCheckTrigger;
+  // The provider the check runs on: a run the reader started with a pick carries it; absent ⇒ the default.
+  provider: AiProviderId;
 }
 
 const claimed = new Map<string, number>();
@@ -157,6 +159,9 @@ export interface StartThreadCheckArgs {
   // Auto: the sweeper's newest qualifying comment (the re-review key it covers). Manual: null — the
   // loader's newest comment is recorded instead.
   commentsThrough?: Date | null;
+  // The provider to run on — the reader's pick when the check stands in for their manual review
+  // (`startThreadCheckBesideManualReview`). Absent ⇒ the default (`activeProviderId`), read now.
+  provider?: AiProviderId | null;
 }
 
 /**
@@ -171,11 +176,12 @@ export async function startThreadCheck(ctx: AgentContext, a: StartThreadCheckArg
   const auto = a.trigger !== 'manual';
   if (lane.filter((j) => isAuto(j) === auto).length >= (auto ? AUTO_MAX : MANUAL_MAX)) return { outcome: 'busy' };
   claimed.set(key, -1); // reserve synchronously before any await
+  const provider: AiProviderId = a.provider ?? activeProviderId();
 
   let checkId: number;
   let threadsSent: number;
   try {
-    const planned = await planThreadCheck(ctx, a.accountId, a.prId, a.headSha);
+    const planned = await planThreadCheck(ctx, a.accountId, a.prId, a.headSha, provider);
     const insert = () =>
       insertQueuedThreadCheck(ctx, {
         accountId: a.accountId,
@@ -186,6 +192,7 @@ export async function startThreadCheck(ctx: AgentContext, a: StartThreadCheckArg
         trigger: a.trigger,
         model: THREAD_CHECK_MODEL,
         commentsThrough: a.commentsThrough ?? planned?.newestCommentAt ?? null,
+        provider,
       });
     const refusal: ThreadCheckRefusal | null = refusalFor(planned);
     if (refusal) {
@@ -202,7 +209,7 @@ export async function startThreadCheck(ctx: AgentContext, a: StartThreadCheckArg
     throw err;
   }
   claimed.set(key, checkId);
-  const job: Job = { ctx, accountId: a.accountId, prId: a.prId, checkId, trigger: a.trigger };
+  const job: Job = { ctx, accountId: a.accountId, prId: a.prId, checkId, trigger: a.trigger, provider };
   const firstAuto = lane.findIndex(isAuto);
   if (!auto && firstAuto >= 0) lane.splice(firstAuto, 0, job);
   else lane.push(job);
@@ -214,11 +221,13 @@ export async function startThreadCheck(ctx: AgentContext, a: StartThreadCheckArg
 /**
  * A manual Claude review that read no code (routed `skip`) judges no thread, so Check threads runs in
  * its place (manager.ts). Same door and caps as the button; a refusal is only answered. Never throws.
+ * ⚠ It runs on the REVIEW's provider (the reader's pick, `provider`), never silently on the default.
  */
 export async function startThreadCheckBesideManualReview(
   ctx: AgentContext,
   accountId: number,
   prId: number,
+  provider?: AiProviderId | null,
 ): Promise<StartThreadCheckResult | null> {
   try {
     const pr = await getCiPrContext(ctx, accountId, prId);
@@ -230,6 +239,7 @@ export async function startThreadCheckBesideManualReview(
       repoId: pr.repoId,
       headSha: pr.headSha,
       trigger: 'manual',
+      provider: provider ?? null,
     });
   } catch (err) {
     ctx.log.warn(`thread check beside review pr ${prId}: ${err instanceof Error ? err.message : String(err)}`);
@@ -337,7 +347,7 @@ async function runPipeline(
   controller: AbortController,
   progress: (p: ThreadCheckProgress) => void,
 ): Promise<void> {
-  const { ctx, accountId, prId, checkId } = job;
+  const { ctx, accountId, prId, checkId, provider } = job;
   const pr = await getCiPrContext(ctx, accountId, prId);
   if (!pr || !pr.headSha) {
     await markThreadCheckFailed(ctx, accountId, checkId, 'The pull request or its head commit is not known.');
@@ -347,7 +357,7 @@ async function runPipeline(
   // Re-plan at run time: the threads or the head may have moved while it waited for a slot.
   // `startedAt` is stamped as of THIS read, so the fold can tell which review it was planned against.
   const plannedAt = new Date();
-  const planned = await planThreadCheck(ctx, accountId, prId, headSha);
+  const planned = await planThreadCheck(ctx, accountId, prId, headSha, provider);
   const refused = refusalFor(planned);
   if (refused || !planned) {
     await markThreadCheckRefused(ctx, accountId, checkId, refused ?? 'no_threads');
@@ -415,6 +425,7 @@ async function runPipeline(
       onProgress: (p) => progress({ phase: 'checking', recentActivity: p.recentActivity, usage: p.usage }),
       // Who to bill when the provider writes its own ledger row (Codex).
       usage: { accountId, prId, repoId: pr.repoId ?? null },
+      provider,
     });
     progress({ phase: 'saving' });
     // What ran (provider + model id), whatever the outcome.

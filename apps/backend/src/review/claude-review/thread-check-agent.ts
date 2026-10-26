@@ -2,8 +2,8 @@ import type { ClaudeReviewModel } from '@pierre-review/shared';
 import { loadZod } from '../../ai/runtime.js';
 import {
   claudeModelChoice,
-  getActiveProvider,
   ranOn,
+  type AgentProviderId,
   type AiRanOn,
   type AgentToolServer,
   type AgentOutcome,
@@ -19,6 +19,7 @@ import { emptyUsage, type UsageTokens } from '../usage.js';
 import { DISPATCH_TOOL_NAMES } from './specialists.js';
 import { codexReviewEffort, codexReviewModelOverride } from '../codex-review.js';
 import { codexThreadCheckText } from '../codex-wording.js';
+import { runProvider } from '../run-provider.js';
 
 // CHECK THREADS — the SDK half (the CI review's agent.ts, one tool narrower). The manager
 // (thread-check.ts) plans, prepares the read-only worktree and the prompt, and cleans up; this
@@ -58,6 +59,8 @@ export interface RunThreadCheckArgs {
   onProgress(p: { recentActivity: string[]; usage: { inputTokens: number; outputTokens: number; costUsd: number } }): void;
   // Who to bill, for a provider that writes its own ledger row (Codex; ai/provider.ts `usageRecord`).
   usage?: { accountId: number; prId: number | null; repoId?: number | null };
+  // The provider to run on (the check's own, `thread-check.ts` Job). Absent ⇒ the default.
+  provider?: AgentProviderId | null;
 }
 
 export interface RunThreadCheckResult {
@@ -79,7 +82,7 @@ export async function runThreadCheckAgent(args: RunThreadCheckArgs): Promise<Run
   const { model, abortController } = args;
   // THE PROVIDER, asked once (LIMN_AI_PROVIDER). `onCodex` is the Codex port (docs/CODEX-PLAN.md Phase
   // 3, stream a); with Claude active none of it runs and the check is exactly what it was.
-  const provider = getActiveProvider();
+  const provider = runProvider(args.provider);
   const onCodex = provider.id === 'codex';
   const usageRecorded = onCodex && args.usage != null;
   let outcome: AgentOutcome | null = null;

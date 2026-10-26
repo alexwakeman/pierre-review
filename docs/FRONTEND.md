@@ -1487,7 +1487,8 @@ while the tab is visible), feeds every surface below; the decision is the server
   Limn's rows fill against their LIMIT, the account rows show Claude's own % used; amber from 80%, red at
   100%; counts (runs, tokens) have none. ⚠ Unknown pieces are LEFT OUT, never shown as 0.
 - **A run's cost** (Claude Review's meta line and live estimate, Docs chat, Ask Claude about this
-  sprint): ONE wording, `useRunCostText()` → `runCostText(costUsd, usage)`. API key: US$. Claude
+  sprint): ONE wording, `useRunCostText()` → `runCostText(costUsd, usage, runProvider)` — a run of the
+  non-default provider is judged by that provider's own reading (`usageForRun`). API key: US$. Claude
   subscription: "0.3% of your week" from the server's `usage.weekPctPerUsd` rate (the frontend holds no
   estimate table); unknown subscription or no answer yet: nothing. ⚠ Never call `formatUsd` on a
   Claude run's cost directly. Bot prices and Chronology's hourly cost are not Claude runs and keep US$.

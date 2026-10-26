@@ -245,7 +245,15 @@ tab's history):
   provider that ran. `AiRunGate anyProvider` is ready when any provider can run the kind and reads the
   pick's budget (`GET /api/ai/budget?provider=`). `/api/me` adds `providers.claude.runtime`.
 - Follow-ups on a stored run (the review chat, another plan pass, the build of a plan) run on that run's
-  provider while it is signed in, else the default (`followUpProvider`, `useFollowUpProvider`).
+  provider while it is signed in, else the default (`followUpProvider`, `useFollowUpProvider`). Their
+  gate is `AiRunGate followUp` (ready only when THAT provider can run the kind), never `anyProvider`.
+- Check threads started in place of a manual review that routed `skip` runs on the REVIEW's provider
+  (`startThreadCheckBesideManualReview(…, item.provider)` → `StartThreadCheckArgs.provider` → the
+  queued row's label, the carry and `runThreadCheckAgent`); the Check threads button itself has no
+  menu and runs on the default.
+- The run's own provider on screen: the progress label and live-cost title of a running review read
+  the running row's provider; AI Fix's ⓘ names the pick; run cost reads the run provider's own budget
+  reading (`useRunCostText`). The chat's Busy line names no provider.
 - The review tab's `<select>` (shown only with two runs or more) became an always-visible list of EVERY
   run (`components/ReviewHistoryList.tsx`, `findingCount` on `ClaudeReviewSummary`); the shown run never
   moves on its own except to a run the reader just started (`lib/reviewHistory.ts`). AI Fix has no run
