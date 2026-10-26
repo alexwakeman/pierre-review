@@ -37,6 +37,7 @@ import type {
   ReferenceDocCrawl,
   ReferenceDocSectionEntry,
   ReviewDocReference,
+  ReviewPeerRead,
   ReferenceDocCitation,
   StoryDocsAlignmentResult,
   StoryDocsCriterion,
@@ -1273,6 +1274,10 @@ export const claudeReviews = sqliteTable(
     // NULL = the run did not read the library (switch off, empty library, older row). Migration 0117
     // (pg 0104).
     docReferences: text('doc_references', { mode: 'json' }).$type<ReviewDocReference[]>(),
+    // The other code the run READ, read-only (docs/CLAUDE-REVIEW.md § Related repos): ticket peers and
+    // related repos' companion changes, only those that were checked out. NULL = none (or an older
+    // row). Migration 0130.
+    peersRead: text('peers_read', { mode: 'json' }).$type<ReviewPeerRead[]>(),
   },
   (t) => ({
     prIdx: index('cr_pr_idx').on(t.prId),
@@ -2156,6 +2161,52 @@ export const pendingMutedRepos = sqliteTable(
     repoAccountFk: foreignKey({
       name: 'pending_muted_repos_repo_account_fk',
       columns: [t.repoId, t.accountId],
+      foreignColumns: [repos.id, repos.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+// ---- Related repos (CORE, free) — migration 0130 ----
+//
+// Repos of ONE workspace the reader reviews together (a frontend and its backend): a deep review of a
+// PR in one reads the companion change in the other, read-only (docs/CLAUDE-REVIEW.md § Related
+// repos). SYMMETRIC, stored BOTH WAYS (two rows per pair) so every read is one indexed lookup by
+// `repo_id`. Off by default: no rows.
+//
+// ⚠ BOTH REPOS MUST BE MEMBERS OF `workspace_id` NOW. A move out of the workspace deletes the repo's
+// rows (`dropRepoRelations`, called by every membership writer and by `deleteRepo`), and every reader
+// joins membership anyway, so a row a path forgot to delete is never READ. All three ids arrive in a
+// request, so all three are COMPOSITE FKs against `(id, account_id)`.
+export const repoRelations = sqliteTable(
+  'repo_relations',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    workspaceId: integer('workspace_id').notNull(),
+    repoId: integer('repo_id').notNull(),
+    relatedRepoId: integer('related_repo_id').notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    pairUx: uniqueIndex('repo_relations_pair').on(t.accountId, t.workspaceId, t.repoId, t.relatedRepoId),
+    repoIdx: index('repo_relations_account_repo_idx').on(t.accountId, t.repoId),
+    workspaceAccountFk: foreignKey({
+      name: 'repo_relations_workspace_account_fk',
+      columns: [t.workspaceId, t.accountId],
+      foreignColumns: [workspaces.id, workspaces.accountId],
+    }).onDelete('cascade'),
+    repoAccountFk: foreignKey({
+      name: 'repo_relations_repo_account_fk',
+      columns: [t.repoId, t.accountId],
+      foreignColumns: [repos.id, repos.accountId],
+    }).onDelete('cascade'),
+    relatedRepoAccountFk: foreignKey({
+      name: 'repo_relations_related_repo_account_fk',
+      columns: [t.relatedRepoId, t.accountId],
       foreignColumns: [repos.id, repos.accountId],
     }).onDelete('cascade'),
   }),

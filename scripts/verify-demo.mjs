@@ -71,7 +71,10 @@ const VIEWS = [
             },
             expect: ['All reviews of this PR (2)', 'Codex · GPT-6 Astra', 'Claude Opus 5.5', 'Shown'],
           }
-        : undefined,
+        : // #113's latest run read acme/infrastructure's branch of the same name (a related repo).
+          id === 113 && t === 'claude_review'
+          ? { expect: ['Also read: acme/infrastructure @ PLAT-292-upsert-transaction-boundaries'] }
+          : undefined,
     ]),
   ),
   // Settings → AI: Claude is the default (automatic runs, surfaces without a model menu); picking
@@ -94,6 +97,13 @@ const VIEWS = [
       },
       expect: ['Default: Codex.'],
     },
+  ],
+  // Settings → Workspace → Related repos: the seeded pair (acme/api with acme/infrastructure).
+  [
+    'settings:related-repos',
+    '?view=activity',
+    null,
+    { act: openSettings, expect: ['Related repos', 'Reviewed together with', 'acme/api and acme/infrastructure'] },
   ],
   ['user-activity:2', '?view=user-activity:2', null],
   ['ws2:open-prs', '?view=activity&workspace=2', null],

@@ -485,6 +485,30 @@ export async function fetchPrHeadInfo(
   };
 }
 
+/**
+ * The tip of one BRANCH of a repository, or null when it does not exist (404) or cannot be read. A
+ * deep review's related-repo rule 3 (review/claude-review/related-repos.ts): "a branch of the same
+ * name, with no PR". Never throws. Each path segment is encoded on its own, so `feature/x` stays a
+ * nested ref.
+ */
+export async function fetchBranchHeadSha(
+  token: string,
+  owner: string,
+  name: string,
+  branch: string,
+): Promise<string | null> {
+  const ref = branch.split('/').map(encodeURIComponent).join('/');
+  try {
+    const r = await ghRestGetFor<{ object?: { sha?: unknown } }>(
+      token,
+      `/repos/${owner}/${name}/git/ref/heads/${ref}`,
+    );
+    return typeof r?.object?.sha === 'string' && /^[0-9a-f]{40}$/.test(r.object.sha) ? r.object.sha : null;
+  } catch {
+    return null;
+  }
+}
+
 interface RestPullMergeable {
   mergeable: boolean | null;
   mergeable_state: string;

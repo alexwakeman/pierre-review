@@ -1,8 +1,11 @@
 import type { FastifyInstance } from 'fastify';
 import { removeWorkspaceDocs } from '../../reference-docs/library.js';
 import {
+  RELATED_REPOS_MAX_PER_REPO,
   validateFlowSettings,
   type FlowSettings,
+  type RelatedReposResponse,
+  type SetRelatedReposBody,
   type Workspace,
   type WorkspacePendingMuteUpdate,
   type WorkspacesResponse,
@@ -16,6 +19,7 @@ import {
   renameWorkspace,
 } from '../../db/queries.js';
 import { setWorkspacePendingMute } from '../../db/pending-mute.js';
+import { getRelatedRepoPairs, setRelatedRepos } from '../../db/related-repos.js';
 import { setWorkspaceFlowSettings } from '../../db/flow-settings.js';
 import { accountIdOf } from '../plugins/auth.js';
 import { kickGithubIssuesCheck } from '../../tracker/index.js';
@@ -358,6 +362,61 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
         return { error: 'NotFound', message: `Workspace ${id} not found` };
       }
       return { workspace };
+    },
+  );
+
+  // RELATED REPOS (db/related-repos.ts; docs/CLAUDE-REVIEW.md § Related repos) — repos of this
+  // workspace reviewed together: a deep review of a PR in one reads the companion change in the
+  // other. GET lists the pairs (both repos members now); PUT REPLACES one repo's relations, both
+  // ways. Ids outside the membership are ignored. Workspace or repo not this account's / not in the
+  // workspace → 404. DB-only (the workspace-CRUD read tier); the composite FKs refuse a
+  // cross-account id in the database regardless.
+  app.get('/api/workspaces/:id/related-repos', { schema: idParamSchema }, async (req, reply) => {
+    const accountId = accountIdOf(req);
+    const { id } = req.params as { id: number };
+    const pairs = await getRelatedRepoPairs(accountId, id);
+    if (pairs == null) {
+      reply.status(404);
+      return { error: 'NotFound', message: `Workspace ${id} not found` };
+    }
+    const body: RelatedReposResponse = { workspaceId: id, pairs };
+    return body;
+  });
+
+  app.put(
+    '/api/workspaces/:id/related-repos/:repoId',
+    {
+      schema: {
+        params: {
+          type: 'object',
+          required: ['id', 'repoId'],
+          properties: { id: { type: 'integer' }, repoId: { type: 'integer' } },
+        },
+        body: {
+          type: 'object',
+          required: ['relatedRepoIds'],
+          additionalProperties: false,
+          properties: {
+            relatedRepoIds: {
+              type: 'array',
+              maxItems: RELATED_REPOS_MAX_PER_REPO,
+              items: { type: 'integer' },
+            },
+          },
+        },
+      },
+    },
+    async (req, reply) => {
+      const accountId = accountIdOf(req);
+      const { id, repoId } = req.params as { id: number; repoId: number };
+      const { relatedRepoIds } = req.body as SetRelatedReposBody;
+      if (!(await setRelatedRepos(accountId, id, repoId, relatedRepoIds))) {
+        reply.status(404);
+        return { error: 'NotFound', message: 'Not found in this workspace' };
+      }
+      const pairs = (await getRelatedRepoPairs(accountId, id)) ?? [];
+      const body: RelatedReposResponse = { workspaceId: id, pairs };
+      return body;
     },
   );
 

@@ -30,7 +30,7 @@ import {
 
 const golden = JSON.parse(
   readFileSync(new URL('./__fixtures__/prompt-golden.json', import.meta.url), 'utf8'),
-) as Record<'diffOnly' | 'worktree' | 'noBody', string>;
+) as Record<'diffOnly' | 'worktree' | 'noBody' | 'worktreeTicketPeers' | 'worktreeRelated', string>;
 
 const HEAD = 'b'.repeat(40);
 const PRIOR_HEAD = 'a'.repeat(40);
@@ -307,6 +307,62 @@ describe('buildUserPrompt — related PRs on the same ticket', () => {
     expect(tail).toContain('## Related checkouts');
     expect(tail).toContain('- X1: /tmp/wt/one');
     expect(tail).toContain('- X2: could not be checked out. Do not guess at its code.');
+  });
+});
+
+describe('buildUserPrompt — related repos (docs/CLAUDE-REVIEW.md § Related repos)', () => {
+  const ticketOnly = (): string =>
+    buildUserPrompt({
+      ...base,
+      mode: 'worktree',
+      peers: [peer, { ...peer, ref: 'X2', repoFullName: 'acme/docs', number: 3, state: 'merged', files: [] }],
+      nonce: NONCE,
+    });
+  const relatedPeers: PromptPeer[] = [
+    { ref: 'X1', repoFullName: 'acme/web', kind: 'pr', source: 'related_repo', match: 'same_branch', branch: 'eng-12-reset', number: 9, title: 'Reset page', state: 'open', ticketKeys: ['ENG-12'], files: ['src/reset-page.tsx'] },
+    { ref: 'X2', repoFullName: 'acme/mail', kind: 'pr', source: 'related_repo', match: 'same_ticket', branch: 'mail-templates', number: 4, title: 'ENG-12 mail templates', state: 'open', ticketKeys: ['ENG-12'], files: [] },
+    { ref: 'X3', repoFullName: 'acme/infra', kind: 'branch', source: 'related_repo', match: null, branch: 'eng-12-reset', number: null, title: '', state: null, ticketKeys: [], files: [] },
+    { ...peer, ref: 'X4' },
+    { ref: 'X5', repoFullName: 'acme/sdk', kind: 'default_branch', source: 'related_repo', match: null, branch: 'main', number: null, title: '', state: null, ticketKeys: [], files: [] },
+  ];
+  const related = (): string => buildUserPrompt({ ...base, mode: 'worktree', peers: relatedPeers, nonce: NONCE });
+
+  it('ticket peers alone keep the block byte-identical to before (golden, generated from the old builder)', () => {
+    expect(ticketOnly()).toBe(golden.worktreeTicketPeers);
+    expect(ticketOnly()).not.toContain('## Related code in other repositories');
+  });
+
+  it('a related repo widens the block: pinned whole (golden)', () => {
+    expect(related()).toBe(golden.worktreeRelated);
+  });
+
+  it('labels each peer kind, and keeps branch names inside the fence', () => {
+    const p = related();
+    expect(p).toContain('## Related code in other repositories');
+    expect(p).not.toContain('## Related PRs on the same ticket');
+    expect(p).toContain('### X1: acme/web#9 (open) · Companion PR: same branch name');
+    expect(p).toContain('### X2: acme/mail#4 (open) · Companion PR: same ticket');
+    expect(p).toContain('### X3: acme/infra · Companion branch (no pull request)');
+    expect(p).toContain('### X4: acme/web#7 (open) · Shares a ticket');
+    expect(p).toContain('### X5: acme/sdk · Reference: default branch');
+    const x3 = between(p, `---BEGIN RELATED CODE X3 ${NONCE}---`, `---END RELATED CODE X3 ${NONCE}---`);
+    expect(x3).toContain('Branch: eng-12-reset');
+    expect(x3).toContain('there is no pull request');
+    const x5 = between(p, `---BEGIN RELATED CODE X5 ${NONCE}---`, `---END RELATED CODE X5 ${NONCE}---`);
+    expect(x5).toContain('Branch: main');
+    expect(x5).not.toContain('Changed files');
+    // A heading never carries a branch name (other people's text).
+    for (const line of p.split('\n').filter((l) => l.startsWith('### X'))) expect(line).not.toContain('eng-12-reset');
+    expect(p).toContain('"Reference: default branch" is that repository as it stands, not a change');
+    expect(p).toContain("Do not say whether the ticket's acceptance criteria are met");
+  });
+
+  it('the nonce scan covers branch names', () => {
+    expect(untrustedTexts(null, null, null, relatedPeers)).toEqual(expect.arrayContaining(['eng-12-reset', 'main', 'mail-templates']));
+  });
+
+  it('a diff-only review never gets it', () => {
+    expect(buildUserPrompt({ ...base, mode: 'diff_only', peers: relatedPeers, nonce: NONCE })).toBe(golden.diffOnly);
   });
 });
 

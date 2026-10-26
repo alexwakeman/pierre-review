@@ -17,6 +17,7 @@ import { submitReviewShape, type SubmitReviewPayload } from './schema.js';
 import { applyClaudeReviewAuth } from './auth.js';
 import {
   cleanupCloneCache,
+  prepDefaultBranchCheckouts,
   prepPeerWorktrees,
   prepWorktree,
   removeWorktreeLocked,
@@ -156,6 +157,47 @@ export function reviewMaxTurnsFor(
 // How many recent-activity lines to keep in the live progress ring buffer.
 const ACTIVITY_LOG_CAP = 25;
 
+type RunPeer = NonNullable<RunReviewArgs['peers']>[number];
+
+/**
+ * Check out every peer, read-only: PR peers at their heads (`prepPeerWorktrees`), branch and
+ * default-branch peers at the branch tip (`prepDefaultBranchCheckouts`, one per repo). Returns the
+ * path per ref (absent = not checked out); each preparation's cleanup is pushed to `cleanups`.
+ */
+async function checkOutPeers(
+  peers: readonly RunPeer[],
+  cleanups: Array<() => Promise<void>>,
+): Promise<Map<string, string>> {
+  const paths = new Map<string, string>();
+  const prPeers = peers.filter((p): p is Extract<RunPeer, { prNumber: number }> => p.kind == null || p.kind === 'pr');
+  const refPeers = peers.filter((p): p is Extract<RunPeer, { branch: string | null }> => p.kind === 'branch' || p.kind === 'default_branch');
+  const [pr, refs] = await Promise.all([
+    prPeers.length > 0
+      ? prepPeerWorktrees(prPeers.map((p) => ({ owner: p.owner, name: p.name, number: p.prNumber, headSha: p.headSha })))
+      : null,
+    refPeers.length > 0
+      ? prepDefaultBranchCheckouts(refPeers.map((p) => ({ owner: p.owner, name: p.name, branch: p.branch })))
+      : null,
+  ]);
+  if (pr) {
+    cleanups.push(pr.cleanup);
+    prPeers.forEach((p, i) => {
+      const path = pr.peers[i]?.path;
+      if (path) paths.set(p.ref, path);
+    });
+  }
+  if (refs) {
+    cleanups.push(refs.cleanup);
+    // One checkout per repository (deduplicated, case-insensitively), so match by owner/name.
+    for (const p of refPeers) {
+      const key = `${p.owner}/${p.name}`.toLowerCase();
+      const c = refs.checkouts.find((x) => `${x.owner}/${x.name}`.toLowerCase() === key);
+      if (c?.path) paths.set(p.ref, c.path);
+    }
+  }
+  return paths;
+}
+
 export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
   const { model, mode, onProgress, abortController } = args;
   // THE PROVIDER, resolved ONCE per run: the one the manager decided for the job (a manual run's
@@ -170,8 +212,10 @@ export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
   let worktreePath: string | null = null;
   let repoCloneDir: string | null = null;
   let tempCwd: string | null = null;
-  // The ticket peers' read-only checkouts (deep runs only); `cleanup` removes them in finally.
-  let peerCleanup: (() => Promise<void>) | null = null;
+  // The peers' read-only checkouts (deep runs only); each `cleanup` runs in finally.
+  const peerCleanups: Array<() => Promise<void>> = [];
+  // The refs of the peers that were checked out (RunReviewResult.peersCheckedOut).
+  let peersCheckedOut: string[] | null = null;
   // How the run ended (the provider's neutral outcome), kept as it arrives.
   let outcome: AgentOutcome | null = null;
   let restoreEnv: (() => void) | null = null;
@@ -246,17 +290,17 @@ export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
       ));
       cwd = worktreePath;
       maxTurns = reviewMaxTurnsFor(mode, docsDir != null);
-      // OTHER PRs ON THE SAME TICKET, read-only, for cross-repo interactions (claude-review/
-      // prompts.ts "Related PRs"). A peer that fails to check out is said so in the prompt and the
-      // review goes on: peer context is optional, the review of THIS PR is not.
+      // OTHER PRs ON THE SAME TICKET and RELATED REPOS' companion changes, read-only, for
+      // cross-repo interactions (claude-review/prompts.ts "Related PRs"). A PR peer is checked out at
+      // its head; a related repo's branch or default branch at that branch's tip. A peer that fails to
+      // check out is said so in the prompt and the review goes on: peer context is optional, the
+      // review of THIS PR is not.
       const peers = (args.peers ?? []).slice(0, TICKET_REVIEW_PEER_MAX_FOR_PR_REVIEW);
       if (peers.length > 0) {
-        const prepared = await prepPeerWorktrees(
-          peers.map((p) => ({ owner: p.owner, name: p.name, number: p.prNumber, headSha: p.headSha })),
-        );
-        peerCleanup = prepared.cleanup;
-        const checkouts = peers.map((p, i) => ({ ref: p.ref, path: prepared.peers[i]?.path ?? null }));
+        const paths = await checkOutPeers(peers, peerCleanups);
+        const checkouts = peers.map((p) => ({ ref: p.ref, path: paths.get(p.ref) ?? null }));
         for (const c of checkouts) if (c.path) peerDirs.push(c.path);
+        peersCheckedOut = checkouts.filter((c) => c.path != null).map((c) => c.ref);
         checkoutsTail = `\n${relatedCheckoutsSection(checkouts)}`;
         prompt = `${prompt}${checkoutsTail}`;
       }
@@ -435,6 +479,7 @@ export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
       ...mapped,
       ...telemetry(),
       aborted: false,
+      ...(peersCheckedOut != null ? { peersCheckedOut } : {}),
       ...(usageRecorded ? { usageRecorded: true } : {}),
     };
   } catch (err) {
@@ -443,7 +488,7 @@ export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
     return fail(errorMessage(err), false);
   } finally {
     restoreEnv?.();
-    if (peerCleanup) await peerCleanup().catch(() => {});
+    for (const c of peerCleanups) await c().catch(() => {});
     if (repoCloneDir && worktreePath) {
       await removeWorktreeLocked(args.owner, args.name, repoCloneDir, worktreePath).catch(
         () => {},

@@ -22,7 +22,9 @@ const dir = (name: string): string => mkdtempSync(join(root, `${name}-`));
 
 let captured: { prompt: string; options: any } | null = null;
 const peerCalls: any[] = [];
+const branchCalls: any[] = [];
 let peerCleanups = 0;
+let branchCleanups = 0;
 let failPeer: string | null = null;
 
 vi.mock('../ai/runtime.js', () => ({
@@ -63,6 +65,20 @@ vi.mock('./clone-manager.js', () => ({
       },
     };
   },
+  // A related repo's branch / default branch (one checkout per repository).
+  prepDefaultBranchCheckouts: async (repos: Array<{ owner: string; name: string; branch: string | null }>) => {
+    branchCalls.push(repos);
+    return {
+      checkouts: repos.map((r) =>
+        r.name === failPeer
+          ? { ...r, path: null, repoCloneDir: null, sha: null, error: 'checkout failed' }
+          : { ...r, path: dir(`branch-${r.name}`), repoCloneDir: dir('branch-clone'), sha: 'f'.repeat(40), error: null },
+      ),
+      cleanup: async () => {
+        branchCleanups += 1;
+      },
+    };
+  },
 }));
 
 const { runReview } = await import('./agent.js');
@@ -99,7 +115,9 @@ async function decide(toolName: string, toolInput: unknown): Promise<'allow' | '
 beforeEach(() => {
   captured = null;
   peerCalls.length = 0;
+  branchCalls.length = 0;
   peerCleanups = 0;
+  branchCleanups = 0;
   failPeer = null;
 });
 
@@ -121,6 +139,46 @@ describe('runReview — the path guard', () => {
     expect(peerCalls).toEqual([]);
     expect(await decide('Read', { file_path: '/etc/passwd' })).toBe('deny');
     expect(captured!.prompt).toBe('PROMPT');
+  });
+});
+
+describe('runReview — related repos on a deep run (branch and default-branch peers)', () => {
+  it('checks a branch peer out at the branch, a PR peer at its head, reads both, and says which were read', async () => {
+    failPeer = 'docs';
+    const r = await runReview(
+      args({
+        peers: [
+          peer(1),
+          { ref: 'X2', owner: 'acme', name: 'infra', kind: 'branch', branch: 'eng-12-reset' },
+          { ref: 'X3', owner: 'acme', name: 'sdk', kind: 'default_branch', branch: null },
+          { ref: 'X4', owner: 'acme', name: 'docs', kind: 'default_branch', branch: 'main' },
+        ],
+      }),
+    );
+    expect(peerCalls).toEqual([[{ owner: 'acme', name: 'web1', number: 11, headSha: 'b'.repeat(40) }]]);
+    expect(branchCalls).toEqual([
+      [
+        { owner: 'acme', name: 'infra', branch: 'eng-12-reset' },
+        { owner: 'acme', name: 'sdk', branch: null },
+        { owner: 'acme', name: 'docs', branch: 'main' },
+      ],
+    ]);
+    const extra = captured!.options.additionalDirectories as string[];
+    expect(extra).toHaveLength(3);
+    expect(captured!.prompt).toContain(`- X2: ${extra[1]}`);
+    expect(captured!.prompt).toContain('- X4: could not be checked out. Do not guess at its code.');
+    expect(r.peersCheckedOut).toEqual(['X1', 'X2', 'X3']);
+    // The branch checkout is readable; outside is not.
+    expect(await decide('Read', { file_path: join(extra[1]!, 'src/a.ts') })).toBe('allow');
+    expect(await decide('Read', { file_path: '/etc/passwd' })).toBe('deny');
+    expect(peerCleanups).toBe(1);
+    expect(branchCleanups).toBe(1);
+  });
+
+  it('no peers ⇒ nothing checked out and no peersCheckedOut', async () => {
+    const r = await runReview(args());
+    expect(branchCalls).toEqual([]);
+    expect(r.peersCheckedOut).toBeUndefined();
   });
 });
 

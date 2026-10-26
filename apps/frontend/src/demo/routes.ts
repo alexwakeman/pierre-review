@@ -874,6 +874,40 @@ export const ROUTES: DemoRoute[] = [
       return patchWorkspace(srv, Number(m[1]), fields);
     },
   },
+  // Related repos (Settings → Workspace): a GET answers what this session saved, else the recording;
+  // a PUT replaces one repo's relations, both ways, like the server (db/related-repos.ts).
+  {
+    method: 'GET',
+    re: /^\/api\/workspaces\/(\d+)\/related-repos$/,
+    run: (req, _m, srv) => {
+      const key = normalisePath(req.url);
+      return srv.overlay.stored.has(key) ? OK(srv.overlay.stored.get(key)) : null;
+    },
+  },
+  {
+    method: 'PUT',
+    re: /^\/api\/workspaces\/(\d+)\/related-repos\/(\d+)$/,
+    run: (req, m, srv) => {
+      const id = Number(m[1]);
+      const repoId = Number(m[2]);
+      const url = `/api/workspaces/${id}/related-repos`;
+      const cur = currentRead(srv, url);
+      const members = numberList(workspaceList(srv).find((w) => w.id === id)?.repoIds);
+      if (!members.includes(repoId)) return notInDemo(404);
+      const kept = (isRecord(cur) && Array.isArray(cur.pairs) ? cur.pairs.filter(isRecord) : []).filter(
+        (p) => p.repoId !== repoId && p.relatedRepoId !== repoId,
+      );
+      const added = numberList(bodyRecord(req).relatedRepoIds)
+        .filter((r) => r !== repoId && members.includes(r))
+        .map((r) => ({ repoId: Math.min(r, repoId), relatedRepoId: Math.max(r, repoId) }));
+      const pairs = [...kept, ...added].sort(
+        (a, b) => Number(a.repoId) - Number(b.repoId) || Number(a.relatedRepoId) - Number(b.relatedRepoId),
+      );
+      const next = { workspaceId: id, pairs };
+      srv.overlay.stored.set(normalisePath(url), next);
+      return OK(next);
+    },
+  },
   { method: 'PUT', re: /^\/api\/workspaces\/(\d+)\/flow-settings$/, run: (req, m, srv) => patchWorkspace(srv, Number(m[1]), { flowSettings: req.body ?? null }) },
   {
     method: 'POST',

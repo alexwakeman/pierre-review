@@ -401,6 +401,14 @@ describe('tierFor — GitHub quota spenders', () => {
   // GitHub, no model. It takes `read` through the workspace-CRUD line, which is the DECIDED
   // answer for that whole family rather than the bottom-of-function fall-through — pinned here so
   // a later tightening of that prefix cannot silently drop this route somewhere else.
+  // GET / PUT /api/workspaces/:id/related-repos[/:repoId] — related repos (db/related-repos.ts). A
+  // read and a bounded delete/insert inside the workspace's membership: no GitHub, no model. The
+  // review that USES the relation spends its own tier.
+  it('puts related repos on the workspace-CRUD read tier', () => {
+    expect(tiers('GET', '/api/workspaces/3/related-repos')).toEqual(['read']);
+    expect(tiers('PUT', '/api/workspaces/3/related-repos/7')).toEqual(['read']);
+  });
+
   it('puts the Pending mute on the workspace-CRUD read tier', () => {
     expect(tiers('PUT', '/api/workspaces/3/pending-mute')).toEqual(['read']);
     expect(tiers('PUT', '/api/workspaces/3/pending-mute')).not.toContain('github_write');

@@ -11,8 +11,10 @@ import {
   type ClaudeReviewTrigger,
   type ReferenceDocCitation,
   type ReviewDocReference,
+  type ReviewPeerRead,
 } from '@pierre-review/shared';
-import type { RunReviewResult } from '../../platform/contract.js';
+import type { ReviewRunPeer, RunReviewResult } from '../../platform/contract.js';
+import { relatedRepoPeersFor } from './related-repos.js';
 import type { CompareDiffResult } from '../../github/compare.js';
 import { config } from '../../config.js';
 import type { AgentContext } from '../agent-context.js';
@@ -52,6 +54,7 @@ import {
   getReviewPrContext,
   insertQueuedReview,
   markReviewRanOn,
+  markReviewPeersRead,
   isAutoReReviewSettled,
   loadPriorReviewForFollowUp,
   loadSettledByReplyFindings,
@@ -712,13 +715,7 @@ async function runPipeline(
     prompt,
     strippedDiff: prep.strippedDiff,
     specialists,
-    peers: peers.map((p) => ({
-      ref: p.ref,
-      owner: p.owner,
-      name: p.name,
-      prNumber: p.number,
-      headSha: p.headSha,
-    })),
+    peers: peers.map(runPeerOf),
     ...(docs != null ? { docsDir: docs.dir } : {}),
     // Who to bill when the provider writes its own ledger row (Codex), and — for an AUTOMATIC review
     // on Codex, where Limn runs each specialist as its own run — the spend budget asked before each.
@@ -740,6 +737,9 @@ async function runPipeline(
   emit({ phase: 'persisting' });
   // What ran (provider + model id), whatever the outcome — before the row's status moves.
   if (res.ranOn) await markReviewRanOn(ctx, reviewId, res.ranOn);
+  // What it read beside the PR (ticket peers, related repos) — the "Also read" line.
+  const alsoRead = peersReadOf(peers, res.peersCheckedOut);
+  if (alsoRead.length > 0) await markReviewPeersRead(ctx, reviewId, alsoRead);
   const telemetry = {
     costUsd: res.costUsd,
     inputTokens: res.inputTokens,
@@ -859,8 +859,89 @@ async function checkReviewDocs<F extends { docRefs?: unknown }>(
   }
 }
 
-/** A ticket peer ready for the prompt (`PromptPeer`) and for its checkout. */
-export type ReviewPeer = PromptPeer & { owner: string; name: string; headSha: string };
+/** A peer ready for the prompt (`PromptPeer`) and for its checkout. `headSha` is a PR's head; null
+ *  for a branch peer (checked out at the branch's tip). */
+export type ReviewPeer = PromptPeer & { owner: string; name: string; headSha: string | null };
+
+/** The peer as the run checks it out (RunReviewArgs.peers). */
+export function runPeerOf(p: ReviewPeer): ReviewRunPeer {
+  const kind = p.kind ?? 'pr';
+  if (kind === 'pr') return { ref: p.ref, owner: p.owner, name: p.name, prNumber: p.number ?? 0, headSha: p.headSha ?? '' };
+  return { ref: p.ref, owner: p.owner, name: p.name, kind, branch: p.branch ?? null };
+}
+
+/** What a run read, for `claude_reviews.peers_read`: the peers whose refs were checked out. */
+export function peersReadOf(peers: readonly ReviewPeer[], checkedOut: readonly string[] | undefined): ReviewPeerRead[] {
+  const ok = new Set(checkedOut ?? []);
+  return peers
+    .filter((p) => ok.has(p.ref))
+    .map((p) => {
+      const kind = p.kind ?? 'pr';
+      return {
+        repoFullName: p.repoFullName,
+        kind,
+        source: p.source ?? 'ticket',
+        number: kind === 'pr' ? p.number : null,
+        branch: p.branch ?? null,
+      };
+    });
+}
+
+/**
+ * EVERY peer of a deep review, refs assigned in prompt order, at most
+ * TICKET_REVIEW_PEER_MAX_FOR_PR_REVIEW (one shared cap):
+ *   1. each RELATED REPO's matching change — its PR on the same branch or ticket, or its same-named
+ *      branch (related-repos.ts; the reader asked for exactly these, so they lead);
+ *   2. the OTHER PRs on this PR's tickets (`ticketPeersFor`), as before;
+ *   3. a related repo's DEFAULT BRANCH, plain reference, only where nothing matched.
+ * A related repo that already has a ticket peer is skipped: that PR IS its companion change. Never
+ * throws. Exported for tests.
+ */
+export async function reviewPeersFor(
+  item: Pick<QueueItem, 'ctx' | 'accountId' | 'prId'>,
+): Promise<ReviewPeer[]> {
+  const { ctx, accountId, prId } = item;
+  const ticket = await ticketPeersFor(item);
+  const covered = new Set(ticket.map((p) => `${p.owner}/${p.name}`.toLowerCase()));
+  const related = await relatedRepoPeersFor(ctx, accountId, prId, { skipRepoKeys: covered });
+  const asPeer = (r: (typeof related)[number]): Omit<ReviewPeer, 'ref'> =>
+    r.pr
+      ? {
+          kind: 'pr',
+          source: 'related_repo',
+          match: r.match === 'same_branch' ? 'same_branch' : 'same_ticket',
+          branch: r.branch,
+          repoFullName: r.repoFullName,
+          number: r.pr.number,
+          title: r.pr.title,
+          state: 'open',
+          ticketKeys: r.ticketKeys,
+          files: r.pr.files,
+          owner: r.owner,
+          name: r.name,
+          headSha: r.pr.headSha,
+        }
+      : {
+          kind: r.match === 'branch' ? 'branch' : 'default_branch',
+          source: 'related_repo',
+          match: null,
+          branch: r.branch,
+          repoFullName: r.repoFullName,
+          number: null,
+          title: '',
+          state: null,
+          ticketKeys: [],
+          files: [],
+          owner: r.owner,
+          name: r.name,
+          headSha: null,
+        };
+  const changes = related.filter((r) => r.match !== 'default_branch').map(asPeer);
+  const references = related.filter((r) => r.match === 'default_branch').map(asPeer);
+  return [...changes, ...ticket, ...references]
+    .slice(0, TICKET_REVIEW_PEER_MAX_FOR_PR_REVIEW)
+    .map((p, i) => ({ ...p, ref: peerRef(i) }));
+}
 
 /**
  * The OTHER PRs on this PR's tickets, for a deep review's "Related PRs" block — via the optional
@@ -868,11 +949,11 @@ export type ReviewPeer = PromptPeer & { owner: string; name: string; headSha: st
  * (`getReviewPeerContexts`); members may sit in another workspace on the same Jira site. Ranked
  * open first, then the most tickets shared, then the newest; at most
  * TICKET_REVIEW_PEER_MAX_FOR_PR_REVIEW. Never throws: peer context is optional, so a failure costs
- * the block only. Exported for tests.
+ * the block only. Refs are assigned by `reviewPeersFor`.
  */
-export async function reviewPeersFor(
+async function ticketPeersFor(
   item: Pick<QueueItem, 'ctx' | 'accountId' | 'prId'>,
-): Promise<ReviewPeer[]> {
+): Promise<Array<Omit<ReviewPeer, 'ref'>>> {
   const { ctx, accountId, prId } = item;
   const { ticketsForPr, ticketMembers } = getTicketSource();
   try {
@@ -897,8 +978,7 @@ export async function reviewPeersFor(
         shared(b.prId) - shared(a.prId) ||
         b.prId - a.prId,
     );
-    return ctxs.slice(0, TICKET_REVIEW_PEER_MAX_FOR_PR_REVIEW).map((p, i) => ({
-      ref: peerRef(i),
+    return ctxs.slice(0, TICKET_REVIEW_PEER_MAX_FOR_PR_REVIEW).map((p) => ({
       repoFullName: p.repoFullName,
       number: p.number,
       title: p.title,

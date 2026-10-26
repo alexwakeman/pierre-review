@@ -15,6 +15,7 @@ import { PendingMuteSection } from './PendingMuteSection.js';
 import { DependencyAutoMergeSection } from './DependencyAutoMergeSection.js';
 import { SonarSection } from './SonarSection.js';
 import { ReferenceDocsSection } from './ReferenceDocsSection.js';
+import { RelatedReposSection } from './RelatedReposSection.js';
 import { FlowSettingsSection } from './FlowSettingsSection.js';
 import { useSettingsWorkspace } from './workspaceScope.js';
 import { CloseIcon } from '../Icons.js';
@@ -268,6 +269,9 @@ export function SettingsModal({
                 {/* Reference docs in Claude Review — local-only like the review itself, read from
                     the workspace row (`docs_in_review`), OFF by default. */}
                 {aiEnabled && <ReferenceDocsSection />}
+                {/* Related repos — repos reviewed together; a deep review reads the matching change
+                    in each (`repo_relations`, migration 0130). Only the AI review reads it. */}
+                {aiEnabled && <RelatedReposSection />}
               </div>
             )}
           </section>

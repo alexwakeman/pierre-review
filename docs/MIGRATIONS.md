@@ -1156,6 +1156,17 @@ filters on `provider` = the active provider. Column only — `ai_usage` is alrea
 `accountScopedTables()`, erasure and the export. Pinned fresh + upgraded by
 `db/ai-usage-provider-migration.test.ts`. Journal `when` sqlite `1792137614016`.
 
+### `0130_related_repos` — related repos + what a review read beside the PR
+`CREATE TABLE repo_relations (account_id, workspace_id, repo_id, related_repo_id, created_at)` with
+three NAMED composite FKs (`repo_relations_workspace_account_fk`, `…_repo_account_fk`,
+`…_related_repo_account_fk`, all cascade), the unique `repo_relations_pair` on all four keys and the
+index `(account_id, repo_id)`; plus `ALTER TABLE claude_reviews ADD peers_read text` (JSON, NULL on
+every older row). Symmetric, stored both ways; off by default (no rows). Joins
+`accountScopedTables()`, the erasure (before `workspaces`) and the export; `deleteRepo` and every
+membership writer drop a moved repo's rows. `verify:isolation` covers the setting and the
+review-time read. [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Related repos. Journal `when` sqlite
+`1792137617016`.
+
 ### No migration — "Check against code" removed (2026-10-18): `sprint_ticket_repos` + `sprint_assessments` DORMANT
 
 The sprint drawer, its repo picker and "Check against code" (`review/sprint-assess/`) were removed with

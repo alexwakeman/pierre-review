@@ -432,6 +432,29 @@ export async function seedDemoAgentic(c: AgenticSeedCtx): Promise<Record<string,
     .execute();
   out.claude113 = [runA, runB];
 
+  // ---- Related repos (Settings → Workspace → Related repos): acme/api and acme/infrastructure are
+  // reviewed together. #113's latest run read infrastructure's branch of the same name (no PR there),
+  // which the review shows as "Also read". Stored both ways, like the server writes it.
+  for (const [repoId, relatedRepoId] of [
+    [2, 3],
+    [3, 2],
+  ] as const) {
+    await db
+      .insert(schema.repoRelations)
+      .values({ accountId: 1, workspaceId: c.platformWs, repoId, relatedRepoId })
+      .onConflictDoNothing()
+      .execute();
+  }
+  await db
+    .update(schema.claudeReviews)
+    .set({
+      peersRead: [
+        { repoFullName: 'acme/infrastructure', kind: 'branch', source: 'related_repo', number: null, branch: 'PLAT-292-upsert-transaction-boundaries' },
+      ],
+    })
+    .where(eq(schema.claudeReviews.id, runB))
+    .execute();
+
   // ---- #114 (failing CI), #116 and #105: one review each ----
   const run114 = await runClaudeReview(base, c, {
     prId: 114,

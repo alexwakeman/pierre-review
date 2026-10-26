@@ -43,7 +43,7 @@ import {
 } from '../lib/autoPost.js';
 import { unlockReviewSound } from '../lib/sound.js';
 import { useAiCapabilities, useAiProviderName } from '../hooks/useAiCapabilities.js';
-import { aiCredentialWords, aiRunProviderName } from '@pierre-review/shared';
+import { aiCredentialWords, aiRunProviderName, reviewPeerReadLabel } from '@pierre-review/shared';
 import { AiRunGate } from './AiSetup.js';
 import { ModelPicker } from './ModelPicker.js';
 import { ReviewHistoryList } from './ReviewHistoryList.js';
@@ -1372,6 +1372,11 @@ function ClaudesReview({
         }
       >
         <div className="text-xs text-gray-500 dark:text-gray-400">{metaLine(review, costText)}</div>
+        {review.alsoRead != null && review.alsoRead.length > 0 && (
+          <div className="text-xs text-gray-500 dark:text-gray-400">
+            Also read: {review.alsoRead.map(reviewPeerReadLabel).join(', ')}
+          </div>
+        )}
         {followUpLine != null && <div className="font-medium">{followUpLine}</div>}
         {review.summary != null && review.summary !== '' && <Markdown prRefs>{review.summary}</Markdown>}
       </ReviewSection>

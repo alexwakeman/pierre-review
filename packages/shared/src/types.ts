@@ -7444,6 +7444,9 @@ export interface ClaudeReview {
   // server-checked. null/absent = the run did not read the library (switch off, empty library, or a
   // run from before the feature).
   docReferences?: ReviewDocReference[] | null;
+  // The other code this run read, read-only: ticket peers and related repos' companion changes
+  // (docs/CLAUDE-REVIEW.md § Related repos). Only what was checked out. null/absent = none.
+  alsoRead?: ReviewPeerRead[] | null;
 }
 
 // The reviewed commit against the PR's current head (the SYNCED head — DB-only, no GitHub call).
@@ -7968,8 +7971,62 @@ export const TICKET_REVIEW_MAX_DIFFS = 4;
 // from `ticket_reviews` rows of the workspace that started them. Separate from the PR review's own
 // auto cap. The backend's `TICKET_REVIEW_DAILY_CAP` env var overrides it.
 export const TICKET_REVIEW_DAILY_CAP = 20;
-// The most peer PRs (other PRs on the same tickets) a DEEP PR review may read, read-only.
+// The most peers a DEEP PR review may read, read-only: other PRs on the same tickets AND the companion
+// change in each RELATED REPO (Settings → Workspace → Related repos), together. Kept at 4 when related
+// repos joined: each peer is a full checkout plus prompt bytes, and a related repo is one peer at most.
 export const TICKET_REVIEW_PEER_MAX_FOR_PR_REVIEW = 4;
+
+// ---- Related repos (Settings → Workspace; docs/CLAUDE-REVIEW.md § Related repos) ----
+// Repos in one workspace the reader reviews together (a frontend and its backend). SYMMETRIC: a pair
+// is one relation, stored both ways. Off by default (no relations). A deep review of a PR in one
+// reads the companion change in the other, read-only.
+
+/** One related pair, `repoId < relatedRepoId`. */
+export interface RelatedRepoPair {
+  repoId: number;
+  relatedRepoId: number;
+}
+
+/** `GET`/`PUT /api/workspaces/:id/related-repos[/:repoId]`. Only pairs whose two repos are both
+ *  in the workspace now. */
+export interface RelatedReposResponse {
+  workspaceId: number;
+  pairs: RelatedRepoPair[];
+}
+
+/** `PUT /api/workspaces/:id/related-repos/:repoId` — REPLACES that repo's relations. */
+export interface SetRelatedReposBody {
+  relatedRepoIds: number[];
+}
+
+/** The most repos one repo may be related to. */
+export const RELATED_REPOS_MAX_PER_REPO = 8;
+
+/**
+ * What kind of peer a deep review read: a pull request (a ticket peer, or a related repo's PR on the
+ * same branch or ticket), a related repo's branch of the same name with no PR, or a related repo's
+ * default branch as plain reference.
+ */
+export type ReviewPeerKind = 'pr' | 'branch' | 'default_branch';
+
+/** One peer a review run read (`ClaudeReview.alsoRead`) — only those that were checked out. */
+export interface ReviewPeerRead {
+  repoFullName: string;
+  kind: ReviewPeerKind;
+  // Why it was read: it shares a ticket with the PR, or its repo is a related repo.
+  source: 'ticket' | 'related_repo';
+  // The PR number (kind 'pr'), else null.
+  number: number | null;
+  // The branch read (kinds 'branch' and 'default_branch'; the head branch for a PR when known).
+  branch: string | null;
+}
+
+/** "acme/api#12", "acme/api @ feat-x", "acme/api @ main (default branch)". */
+export function reviewPeerReadLabel(p: ReviewPeerRead): string {
+  if (p.kind === 'pr' && p.number != null) return `${p.repoFullName}#${p.number}`;
+  const at = p.branch ? ` @ ${p.branch}` : '';
+  return p.kind === 'default_branch' ? `${p.repoFullName}${at} (default branch)` : `${p.repoFullName}${at}`;
+}
 
 export type TicketReviewStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
 
