@@ -156,10 +156,9 @@ clone count. **The invariant: a GitHub token never reaches disk.**
   leasing on a PINNED sha (`coding/merge.ts` `updatePrBranchFromTrunk` on the head it cloned, and the
   conflict resolver's rebase land on the session's `expectedHeadSha`); AI Fix's `pushResolved`,
   which leased on the CURRENT remote head and so could overwrite commits pushed after the fix was
-  generated, was removed with its rebase path. ⚠ **`git-ops.ts`'s branch-name regex stays exactly
-  where it is** and must not be "de-duplicated" into `pushRef`: it is a stricter convention on
-  names the advisor INVENTS, while `pushRef` is called with real head refs — `feature/#123`,
-  `user's-branch`, `a+b`, `ünicode/x` are all valid GitHub branches.
+  generated, was removed with its rebase path. ⚠ `pushRef` is called with real head refs —
+  `feature/#123`, `user's-branch`, `a+b`, `ünicode/x` are all valid GitHub branches — so its guard
+  is `git check-ref-format`, never a tidy regex.
 - **A bounded startup sweep + an age-paired LRU** (`sweepCloneCache`, awaited in `index.ts` between
   the event cleanup and `ensureLocalAccount` — the credential repair must finish before
   `bindPlatform` can start a fix that reuses a clone). Per clone: clean origin → tighten perms →
@@ -172,16 +171,12 @@ clone count. **The invariant: a GitHub token never reaches disk.**
   exempts a repo from eviction forever. Worktree paths gained `-<pid>-<seq>` and the
   `existsSync → removeWorktree` pre-clear was DELETED: it was the line that destroyed a concurrent
   run's tree.
-- ⚠ **`resolveContainedTargetPath` REFUSES AN IN-TREE SYMLINK; it does not follow one**
-  (`coding/safe-path.ts`). `assertSafeTargetPath` is LEXICAL — repo-relative, no traversal, no drive
-  letter, no `.git` segment at any depth, case-folded — and it runs before any side effect, but it
-  is not sufficient: **a COMMITTED symlink is a real directory entry**, so `link/evil.txt` is
-  traversal-free text that writes wherever `link` points. Containment resolves every EXISTING
-  component of `<root>/<path>` and asserts it stays inside, git records the LINK rather than the
-  target so a link is refused outright, and ⚠ **the ROOT is realpath'd too** (`/tmp` is a symlink to
-  `/private/tmp` on macOS). Called AFTER checkout, immediately before the mkdir/write. Its test
-  builds a real repo with a committed symlink and asserts both that the call throws AND that the
-  outside file does not exist — the non-vacuous half.
+- (`coding/safe-path.ts` — `assertSafeTargetPath` / `resolveContainedTargetPath`, the write-path
+  guards for the Bot Tuning Advisor's config-PR primitive — went with the Advisor, 2026-10-26.
+  Nothing else wrote repo files by path. A new feature that writes a repo-relative path into a
+  worktree must bring back BOTH guards: the lexical one, and the post-checkout containment check
+  that REFUSES an in-tree symlink — a committed symlink is a real directory entry, so
+  `link/evil.txt` is traversal-free text that writes wherever `link` points.)
 
 - **Account-keyed in-memory state**: `getReviewStatus`, `listActiveReviews(accountId)`,
   `requestReviewCancel(prId, accountId)` and `getFixStatus` key on prId in PROCESS-GLOBAL maps and

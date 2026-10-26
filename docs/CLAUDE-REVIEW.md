@@ -41,7 +41,7 @@ ONE ladder for EVERY model call Limn makes — the agent runs (Claude Review, AI
 CI reviews, diagrams, sprint paths, the docs build and chat, Resolve with Claude, every chat) AND
 the one-shot completions (`review/llm.ts` `cheapComplete`, which the sprint briefs/themes, story
 labels, docs ranking, sprint Ask and every platform feature — period reports, synthesis, work-plan
-wording, Chronology pointers, bot themes, the impact note, the advisor's refine, the Slack report —
+wording, Chronology pointers, bot themes, the impact note, the Slack report —
 go through). It lives in **`ai/credentials.ts`** and nowhere else:
 
 1. **The local Claude Code login** (default) — `CLAUDE_CODE_OAUTH_TOKEN`, or a logged-in `claude`

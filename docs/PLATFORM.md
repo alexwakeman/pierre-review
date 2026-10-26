@@ -9,8 +9,8 @@
 ## The platform — the former Pro plugin, folded into core
 
 **What it is.** `apps/backend/src/platform/` holds reporting (Reports, period reports, Chronology
-pointers, the work-plan wording), Bots Monitoring (ROI, behaviour, the peer benchmark, the Bot
-Tuning Advisor, bot themes), the synthesis seam, the blast-radius impact note, the Slack digest and
+pointers, the work-plan wording), Bots Monitoring (ROI, behaviour, the peer benchmark, bot
+themes, bot classification), the synthesis seam, the blast-radius impact note, the Slack digest and
 the per-workspace settings behind them. Until 2026-10-22 it was **`@pierre/pro`**, a private git
 submodule at `packages/pro`, loaded by file path through `pro/bind.ts` behind an `apiVersion`
 handshake and gated by `ProCapabilities`, a 402 on `/api/pro/*` and per-account entitlement.
@@ -151,17 +151,16 @@ Isolation does not interact with it.
 
 **The rail entries' inner sub-tab bars** (all transient + URL-silent, all built DYNAMICALLY so a
 tab exists only where it means something):
-- **Feed** — `Feed` | `Bot classification` (`feedInnerTab: 'feed' | 'classification'`; the Feed
-  "Discussion themes" tab was REMOVED 2026-10-18). **`Compare teams` LEFT this bar** for its own rail entry: it compares every workspace in the
-  account, which is not a property of the Feed's scope and had no business being nested under it.
-  `'compare'` is not a member. (It is TRANSIENT: in
-  `freshDefaults()` but not in `FilterDefaults`/`pickFilterBarState`/`sanitizePersistedFilters`, and
-  `useUrlState` never touches it, so a stale `'compare'` cannot survive a reload and needed no
-  migration.)
+- **Feed** — NO sub-tab bar since 2026-10-26: the Feed is a stream only. `feedInnerTab` and
+  `Activity/feedTabsModel.ts` are deleted; its "Bot classification" tab moved to Bots Monitoring
+  (below), and a legacy `?activityRepo=feed&feedTab=classification` is read onto Bots Monitoring →
+  Classification. (The "Discussion themes" tab went 2026-10-18; `Compare teams` left earlier.)
 - **Bots Monitoring** (`BotsView`; label-only rename, rail id `'bots'`) — `ROI` (the Measure
   surface — see § The Bots ROI panel) | `Themes` (`BotThemesPanel`, LISTED only while
-  `me.ai.enabled` — see § The Bot Themes panel) | `Advisor` (rail only, `showAdvisor = repoId ==
-  null`) | `Benchmark`. Classification moved to the Feed's "Bot classification" sub-tab.
+  `me.ai.enabled` — see § The Bot Themes panel) | `Benchmark` | `Classification` (`BotSettingsPanel`
+  — who counts as a bot, its role, vendor and price; rail only, `showClassification = repoId ==
+  null`; it was the Feed's "Bot classification" sub-tab, and Bots → Settings before that — a legacy
+  `?botsTab=settings` lands here too). The `Advisor` tab is REMOVED (§ Bot Tuning Advisor).
   `'behaviour'` and `'themes'` were both REMOVED from `botsInnerTab` with their tabs:
   per-bot depth is the `bot-detail` pinned drill-down, the workspace charts are a collapsed
   section under ROI (`WorkspaceBotCharts`), and the bot-themes summary became the synthesis seam's
@@ -169,8 +168,9 @@ tab exists only where it means something):
   needed no migration. ⚠ **`'themes'` HAS SINCE RETURNED to `botsInnerTab`**, in two steps: the
   themes PANEL came back first as a card at the top of the ROI branch, and was then moved onto a
   sub-tab of its own so the Bots console mirrors the Feed's `Feed | Themes` strip. The union is
-  `'roi' | 'themes' | 'advisor' | 'benchmark'`. ⚠ Themes is ABSENT while AI is off (a model writes
-  it), so `effectiveBotsTab` (`benchmarkModel.ts`) falls back to ROI. ⚠ Unlike `'advisor'` it is
+  `'roi' | 'themes' | 'benchmark' | 'classification'`; a value outside it (a stale `'advisor'`)
+  renders ROI. ⚠ Themes is ABSENT while AI is off (a model writes it), so `effectiveBotsTab`
+  (`benchmarkModel.ts`) falls back to ROI. ⚠ Unlike `'classification'` it is
   NOT rail-only: the report is genuinely per-repo, so `showThemes` is `me.ai.enabled` alone, never
   `repoId == null && …`.
 - **Insights** — the whole sub-tab apparatus is GONE (`InsightsSubTab`, `insightsSubTab`,
@@ -179,9 +179,9 @@ tab exists only where it means something):
   outright because the field was transient and never URL-emitted (`?report=` reads into
   `insightsReportKey` alone), so no blob or link can carry a stale value.
 
-**Landmine — the visible tab is DERIVED, never written back.** `feedInnerTab` / `botsInnerTab` are
-single scalars that can legitimately hold a key the current context doesn't render (Themes with
-AI off, Advisor on a repo). Each consumer computes an `effectiveTab` fallback for the RENDER only;
+**Landmine — the visible tab is DERIVED, never written back.** `botsInnerTab` / `insightsInnerTab`
+are single scalars that can legitimately hold a key the current context doesn't render (Themes with
+AI off, Classification on a repo). Each consumer computes an `effectiveTab` fallback for the RENDER only;
 a corrective `set…` would permanently forget the user's choice the moment AI flickers off.
 
 **Activity render-perf (client-side; the console + Bots sub-tab mount fresh on every tab switch).**
@@ -303,7 +303,8 @@ sections were removed earlier (above); every one of those `pro_settings` columns
 like `bot_auto_resolve*`, with no migration — `ProSettings.bots.slackDigest` survives on the wire as
 a husk that always reads `false`. ⚠ **`data-testid="bot-settings-section"` IS GONE WITH IT** — shot
 7d in `scripts/capture-shots.mjs` targets `data-testid="bot-settings-panel"`, the classification
-screen (now Feed → "Bot classification"; a legacy `?botsTab=settings` lands there). The
+screen (now Bots Monitoring → "Classification"; a legacy `?botsTab=settings` or
+`?feedTab=classification` lands there). The
 per-reviewer `DetectedReviewersTable` lives there. Deterministic tuning suggestions are **advisory
 only** (no mute action), hoisted OUT of the ROI panel into `BotsView`. **Migrations:** core `0027` (`users.github_type`), `0028` (`bot_review_classification`), `0029`
 (`bot_mute_rules`, now orphaned), `0042` (RE-KEY to `repo_reviewers`, per repo, and
@@ -1172,7 +1173,7 @@ Four surfaces live in `BotsView`, BESIDE the panel rather than inside it:
 
 `TuningSuggestions` reads as a heading over the table rather than a footnote under it.
 `QualityCheckSection` stays in the panel; its mis-role safeguard survives because the
-classification screen (Feed → Bot classification) lists "Other automation" with each row's role
+classification screen (Bots Monitoring → Classification) lists "Other automation" with each row's role
 picker, which is where the re-role happens anyway.
 
 **"Turning it off would save …" (`lib/botSavings.ts` `stopPayingLine`).** Under the table, ONE
@@ -1871,7 +1872,7 @@ mutation-tests its own scan.
 **What the reader is told.** One templated line beside the diff, above the Push controls:
 *"Not built or tested here."* It promises no CI: whole repos here report no checks at all, so "CI
 will run on push" would invent the verification the sentence exists to deny. ⚠ **Not in the model's
-summary** — a product fact is not model prose (the Bot Tuning Advisor precedent). Nothing had to be
+summary** — a product fact is not model prose. Nothing had to be
 retracted: the fixer never made a verification claim on screen. (The `verifying` phase this section
 once warned about went with the rebase path below — its only emitter and its SPA label are gone.)
 
@@ -1924,161 +1925,20 @@ the Anthropic API — and refuses under `LIMN_AI_DISABLED` ([CLAUDE-REVIEW.md](C
 described here before, were removed with the comment annotations; `GithubSeam.fetchCompareDiff` /
 `fetchReviewCommentHunks` stay on the contract, unread.)
 
-## Bot Tuning Advisor (`platform/advisor/`)
+## Bot Tuning Advisor — REMOVED 2026-10-26
 
-Turns the graded-comment corpus (thread states + ML labels + acted-on + overlap + cost) into
-**evidence-backed changes to each bot's configuration**, then measures whether the change worked.
-The pipeline is `Finding → Intent → Emitter → Output`, and the governing constraint is the
-deterministic/templated/LLM boundary: **the recommendation itself is never model-generated**.
-Plan of record: `~/limn/plans/bot-tuning-advisor.md` (2026-08-09; four product decisions recorded
-there — a verification loop, the refine path on the one credential ladder (the BYOK rung is retired),
-DB-primary manifests with repo export, GitHub-issue export in v1).
-
-**Core/platform split (the getBotAnalytics precedent, CI vs not).** CORE owns the deterministic math,
-CI-tested: `getAdvisorFindings` (evidence CELLS — (bot × pathBucket) over threads, (bot × category)
-over labelled findings with thread-linkage disclosed, (bot → partner) overlap, per-bot totals with
-`actedOnNits` + `pathCoveragePct`; floors `ADVISOR_MIN_CELL_THREADS=5` / `ADVISOR_MIN_CELL_FINDINGS=20`
-/ `ADVISOR_AMPLIFY_MIN_ACTED_PCT=70` echoed on the wire; quality checks emit rows but NO cells;
-**path buckets are ADAPTIVE-DEPTH** — every thread aggregates into its depth-1 parent (`a/**`)
-and its depth-2 child (`a/b/**`), emission prefers floor-meeting children and emits the coarse
-parent only when NONE qualifies, so emitted globs never overlap and the retro-check glob-identity
-holds at either depth (a top-level `apps/**` over a monorepo where apps/ IS the codebase was too
-coarse to act on — the free tuning suggestion keeps depth-1); path cells also carry `actedOnNits`,
-the QUIET_PATH_NITS retro numerator),
-`getBotEffectPanel` (five weekly series over the 84-day span split before/after an anchor; volume
-nulls zero-weeks per the behaviour-tab policy) and `db/changepoint.ts` (`detectChangepoints`,
-median±MAD segment comparison, `MIN_BASELINE_POINTS=4`). Advisory invariant inherited and pinned:
-**nothing the advisor computes feeds `botVerdict`**. The shared `botWindowMs` (db/bot-window.ts)
-replaced the seven copy-pasted window ternaries; the shared acted-on predicate
-(`isActedOnThreadState`) replaced the two inline copies.
-
-**Modules (`platform/advisor/`).** Deterministic modules are PURE `(data) => data` — no ctx
-anywhere under `findings/intents/evidence/retro-check/emitters/outputs`; ctx lives only in
-`routes/store/measure/discovery/refine`. `test/advisor/llm-isolation.test.ts` walks the transitive
-import graph and pins that no deterministic module can reach `refine/` (where the one LLM module
-lives beside its pure diff-guard; `outputs/config-pr.ts` takes the guard as an INJECTED function for
-exactly this reason). Intents: SUPPRESS_PATH / QUIET_PATH_NITS / SUPPRESS_CATEGORY /
-LOWER_VERBOSITY (reuses core's ML_NIT pair semantics) / SCOPE_OFF (mirrors the overlap pair) /
-AMPLIFY_PATH / ESCALATE / PROMOTE_TO_LINT (DeepSource first-backtick title templates only —
-measured 1,908 titles → ~250 templates; generic rule-ID regex measured ≤8% yield, not built;
-tag-shaped or >120-char first lines are rejected — DeepSource's HTML run-summary banner crossed
-the fires floor as a "rule" before that guard) / BOOTSTRAP_CONFIG. **The suppression VETO
-(`SUPPRESS_MAX_ACTED_HIGH = 0`):** a path/category cell containing even ONE acted-on high-severity
-finding never earns a full suppress — "4 of 5 ignored" is not licence to silence the one that
-mattered (the erxes `apps/**` case that motivated it). **The MERGED-PAST gate
-(`SUPPRESS_MIN_MERGED_UNTOUCHED = 1`):** a suppression additionally needs ≥1 untouched thread on a
-PR that has SINCE MERGED (`mergedUntouched`, on path + category cells and bot totals) — open-PR
-silence is not final, a merge over the bot's open thread is; the count rides the rationale, the
-evidence line, the brief and the PR body ("N shipped in PRs that merged anyway"). Measured on
-erxes before building: 39% of merged PRs carry an untouched CodeRabbit thread, and both live
-suppressions pass at 19/19 and 6/6. (The companion "resolved with no code change to the flagged
-line" metric was measured and NOT built: commit_files covers only ~32% of erxes's merged-PR
-commits and line-level diffs aren't stored, so it is honestly uncomputable today.) A vetoed path cell falls through to
-**QUIET_PATH_NITS** — keep the path, stop nit-level comments there — which fires when the cell's
-labelled findings are nit-dominated (`QUIET_PATH_MIN_NIT_SHARE = 0.7` over a `floors.minCellThreads`
-labelled floor) and those nits are mostly ignored (`QUIET_PATH_MAX_NIT_ACTED_SHARE = 0.3`); a vetoed
-cell that is NOT nit-dominated produces nothing, which is the honest outcome. CodeRabbit expresses
-it as a `path_instructions` entry for the glob; Greptile degrades to instructions prose; Copilot and
-the generic prose adapter carry it in the managed block.
-
-**Adapters (emitters/).** CodeRabbit (`.coderabbit.yaml` via the eemeli `yaml` **Document** API —
-comments/anchors/ordering survive; `path_filters` gains `!glob`, `path_instructions[]` entries,
-`profile: chill` only when UNSET — a user-set profile degrades to prose, never overwritten),
-Greptile (`greptile.json`, key-order + detected-indent-preserving JSON merge; no published schema —
-hand-maintained), Copilot (`.github/copilot-instructions.md` under the **hard 4,000-char budget**
-computed against existing content; over → lowest-priority slots dropped deterministically and
-reported; SUPPRESS_PATH degrades to an `applyTo`-frontmatter scoped instructions file), the generic
-prose adapter (managed `<!-- limn:advisor:start/end -->` block + a verbatim intents header line;
-never touches a byte outside), and the T3 **manifest interpreter** (executes CONFIRMED
-`advisor_bot_profiles.manifestJson` only — never a guessed schema; hand-rolled structural validator,
-deliberately NOT ajv so the `removeAdditional` input-rewriting trap cannot exist). **Qodo/Sourcery
-are entirely absent, not stubbed** (config surfaces unverified). `yaml` (the emitters' parser/writer) is an `apps/backend` dependency and is in the release
-manifest's curated deps.
-
-**Storage (3 platform tables, migration 0021, none PR-keyed).** `advisor_recommendations` (one
-DECIDED row per (account, workspace, dedupeKey='intent|bot|target|window'); findings stay query
-results — a row exists only once the user acts; every onConflictDoUpdate targets exactly the
-3-column unique), `advisor_bot_profiles` (the one-bot-object rule: T1 answers + T3 manifest in ONE
-row, SEPARATE narrowed `set:` objects per writer — the persist() landmine; **named composite FK
-`advisor_bot_profiles_workspace_account_fk` in the migration SQL only** — drizzle can't declare an
-FK onto a core table across the open-core boundary; ON DELETE CASCADE because core's
-`deleteWorkspace` does not re-home platform rows), `advisor_config_events` (append-only anchor log —
-`user_reported` anchors measure changes Limn never authored; `pr_opened`→`pr_merged` promotion is
-compute-on-read off the synced PR row, writing the `advisor_pr` anchor at mergedAt). All three in
-`eraseProByAccountId` + isolation-test seeds; deliberately NOT in `pruneProByPrIds`.
-
-**Outputs.** Brief (T5, the universal fallback — deterministic markdown, also the issue body;
-client defaults to it until a `pr_merged` row exists in the workspace), config PR (gate chain:
-retro-check computable → parse → plan → serialize → validate → **additive assert** (deep containment
-for yaml/json, outside-markers equality for prose) → `commitFilesAndOpenPr`), GitHub issue (to the
-profile's user-supplied `ownerRepo`). **`POST …/preview` is the config-PR dry-run** — same body,
-same derivation, the full gate chain, but it stops before the seam call and returns the exact
-files the PR would commit (`before`/`after` + the plan's applied/degraded/unsupported items), so
-the generated YAML/JSON/prose is visible before consent; no write permission required, tier
-`pr_detail` (it fetches the config files, writes nothing). The **mandatory retro-check** ("this
-filter would also have hidden N acted-on, M high-severity") is computable for
-SUPPRESS_PATH/SUPPRESS_CATEGORY (cell identity — our emitted globs ARE the cell's aggregated
-prefix, at either depth) and LOWER_VERBOSITY/QUIET_PATH_NITS (`actedOnNits`, bot-level and
-per-path respectively — the nit-scoped simulation covers only the ML-labelled threads, disclosed);
-SCOPE_OFF is honestly **uncomputable → config-PR blocked, brief allowed**. Path coverage (only
-`review_comment`-kind labels can carry a path — 41% corpus-wide in the dev DB) is disclosed on
-every evidence object and rendered in brief + PR body.
-
-**Refine (the ONE LLM touchpoint).** `POST …/refine`, prose targets only — structured formats have
-no LLM code path at all. A plain `cheapComplete` on the ONE credential ladder (`ai/credentials.ts`):
-the reader's Claude Code login, else the environment's `ANTHROPIC_API_KEY`. It used to
-pass `credential:'local-review-key'`, a BYOK→ambient ladder over a key stored in
-`~/.pierre-review/config.json`; that key and the `credential` option are gone.
-Output re-passes the **deterministic diff-guard** (markers intact, intents header verbatim, char
-budget, no fences) — and so does any client-supplied `refinedByPath` at config-PR time; rejected ⇒
-the templated version ships, never an error.
-
-**Core seams.** `readRepoFile`/`listRepoDir` (status-returning, `?ref=`,
-repo-authored bytes size-capped, never executed), `openIssue` (`createIssue` REST — issues aren't
-synced; the URL is stored on the row), `commitFilesAndOpenPr` (`coding/git-ops.ts`:
-default-branch worktree → literal file writes (traversal + `.git/` guarded) → commit → **NEW branch,
-never force** (existing ⇒ `BRANCH_EXISTS` → 409) → `createPullRequest` → `syncOnePr` tail with a
-confirming SELECT; **refuses `.github/workflows/*` outright** — no `workflow` OAuth scope — and the
-route re-refuses it, two layers on purpose; after the 201 nothing throws — `visible:false` copy says
-"shortly", never a retry). It needs `git` on the PATH, like every clone-based feature.
-
-**Discovery.** T1 ask-once profile card (row presence is the suppressor). T2: workflow-file scan
-(count/byte-capped string scan for known bot actions + config args — attacker-authored, never
-executed) + `users.appSlug`, which `sync/app-attribution.ts` now PERSISTS instead of discarding
-(fill-or-update, never cleared by an app-less comment; the probe itself still has no sync-loop
-caller — deep-detect wiring remains future work). T3: structural-tells proposer
-(`discovery/tier3.ts` — glob-shaped arrays under ignore/exclude/skip/filter keys, severity-shaped
-scalars) → single confirm → `manifestJson`; the repo export `.limn/bot-adapter.yml` publishes via
-`manifest-pr`, and on discovery reads the repo copy wins.
-
-**Frontend.** Fifth `botsInnerTab` member `'advisor'` (transient, derived `effectiveTab`, cross-repo rail only — workspace grain). **The entry point is the Bots table's
-per-row Tune/Drop pills**: `focusAdvisor(botKey, intent)` sets the
-focus AND switches the tab in one store action; 'drop' renders the drop-case banner (the bot's ROI
-numbers + the brief as the deliverable). `BotAdvisorPanel`: intents grouped per bot with evidence /
-retro / status chips (dismissed / PR open / PR merged / issue filed), per-intent checkboxes, output
-selector (Brief default until first merged PR; selecting Brief renders it immediately — it is a
-free DB read), repo picker + **Preview changes** (the `…/preview` dry-run rendered as per-file
-generated content + plan-item chips; the result resets when the selection or repo changes so a
-stale preview never sits under new checkboxes), effect panel + T1 profile expanders. Hooks in `useAdvisor.ts` — keys carry `ws:<id>` + skipToken; the config-PR and
-refine mutations share mutationKeys across mounts (the CiAnalysisCard double-bill lesson). The free
-amber `TuningSuggestions` box stays rendered.
-
-**Rate limits.** The `/api/pro/advisor/` block sits ABOVE the `/api/pro/` AI catch-all in `tierFor`
-(else every DB-only advisor POST would ride the 20/min AI bucket): config-pr / manifest-pr / issue →
-`github_write`; refine → `ai`; findings → `search`; discovery + preview → `pr_detail`; everything
-else `read`. Pinned in `rate-limit.test.ts`. (The dry-run route is named `preview`, not
-`config-preview`, so no `endsWith('/config-pr')`-style match can ever prefix-collide with it.)
-
-**Known v1 limits** (deliberate): retro-check prefix-matches only OUR emitted prefix globs
-(`a/**` / `a/b/**`, whichever depth the cell aggregated; user-authored globs in existing configs
-are out of scope, disclosed); CodeRabbit validation is
-structural + round-trip fixtures, not the vendored-JSON-schema/ajv pass the plan sketched (our edits
-are additive into the USER'S file, whose validity is not ours to adjudicate — revisit if a real
-config PR is ever rejected by CodeRabbit's validator); the CodeRabbit assisted-bootstrap
-(`@coderabbitai configuration` comment → parse the synced reply) is not built; Greptile's `.greptile/`
-directory layout is unverified against their docs (single `greptile.json` served first).
-
----
+The Advisor (Bots Monitoring → Advisor: evidence cells → intents → config-PR / brief / issue
+outputs, the effect panel, Tune/Drop pills on the ROI table) is gone, UI AND backend: the tab,
+`BotAdvisorPanel`, `useAdvisor`, every `/api/pro/advisor/*` route and its rate-limit block, the
+`platform/advisor/` modules and adapters, core `getAdvisorFindings` / `getBotEffectPanel`, the
+platform seams only it used (`ctx.coding.commitFilesAndOpenPr`, `github.readRepoFile` /
+`listRepoDir` / `openIssue` / `openPullRequest`), `coding/safe-path.ts`, `prepWorktreeAtRef`,
+`createIssue`, `ghRestGetContentDir`, the `Advisor*` wire types and the `yaml` dependency.
+⚠ **Its three tables stay DORMANT** — `advisor_recommendations`, `advisor_bot_profiles`,
+`advisor_config_events` (platform migration 0021), never dropped. `platform/advisor/schema.sqlite.ts`
+survives ONLY so `retention.ts` still ERASES them and `test/isolation.test.ts` still seeds them; do
+not add a reader. An old `?botsTab=advisor` link is not a member any more and opens the ROI tab.
+`users.app_slug` is still written; its one reader (the discovery tier) went with the Advisor.
 
 ## Chronology pointers — the work plan's shape, over Chronology's evidence
 

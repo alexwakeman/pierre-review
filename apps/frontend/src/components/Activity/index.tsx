@@ -29,8 +29,6 @@ import { DocsView } from './DocsView.js';
 import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
 import { AttentionView } from './AttentionView.js';
 import { BotsView } from './BotsView.js';
-import { BotSettingsPanel } from './BotSettingsPanel.js';
-import { effectiveFeedTab, feedTabsFor } from './feedTabsModel.js';
 import { FirstRunOnboarding } from './FirstRunOnboarding.js';
 import { OpenPrsDetail } from './OpenPrsDetail.js';
 
@@ -221,11 +219,6 @@ export function ActivityView(): JSX.Element {
   const workspaceId = useFilters((s) => s.workspaceId);
   const activityRepoId = useFilters((s) => s.activityRepoId);
   const setActivityRepo = useFilters((s) => s.setActivityRepo);
-  // The cross-repo Feed's inner sub-tab: 'feed' (the consolidated stream) and "Bot
-  // classification". (The "Discussion themes" tab is REMOVED.)
-  // ('compare' is NOT a member — cross-workspace comparison is Reports' "By workspace" axis.)
-  const feedInnerTab = useFilters((s) => s.feedInnerTab);
-  const setFeedInnerTab = useFilters((s) => s.setFeedInnerTab);
   // Scope is the ACTIVE WORKSPACE — the whole of it. Both narrowing arguments are NULL on purpose,
   // and they are null for the SAME reason: each is a TIMELINE-only filter that this console does
   // not show and therefore must not honour. `repoIds: null` means "every repo in this workspace",
@@ -279,12 +272,6 @@ export function ActivityView(): JSX.Element {
 
   // (The one-shot "default to Insights" effect lived here — removed with P3.1:
   // Pending is the default landing; see the note at the top.)
-
-  // The cross-repo Feed's sub-tab bar: Feed | Bot classification. The rules
-  // live in `feedTabsModel.ts`.
-  const feedTabs = useMemo(() => feedTabsFor(), []);
-  // DERIVED, never written back to the store.
-  const visibleFeedTab = effectiveFeedTab(feedInnerTab, feedTabs);
 
   const generatedAt = data?.generatedAt ?? null;
 
@@ -401,9 +388,8 @@ export function ActivityView(): JSX.Element {
               block. Open PRs leads because it is where the app opens; Pending, the ranked worklist,
               is next. (This Sprint was the line under Pending; it is a fixed TAB now, beside
               Activity — `activeTab === 'sprint'`.) The Feed follows as the stream of what happened. Reports sits ABOVE Bots
-              Monitoring (the user's order); bot classification itself lives on the Feed's own
-              "Bot classification" tab, so moving Bots Monitoring down separates nothing that
-              filters the stream from the stream.
+              Monitoring (the user's order); bot classification is Bots Monitoring's
+              "Classification" tab.
               (The "Compare workspaces" entry was folded into Reports' "By workspace" axis.) */}
 
           {/* OPEN PRS pseudo-row — FIRST, and the default landing: one card per open PR in the
@@ -632,43 +618,15 @@ export function ActivityView(): JSX.Element {
               : 'Detecting the repos you work on…'}
           </div>
         ) : showingFeed ? (
-          // The workspace Feed — a STREAM and nothing else. Beside it: the "Bot
-          // classification" tab (who counts as a bot here — the Bots hiding on this Feed reads it).
+          // The workspace Feed — a STREAM and nothing else, with no sub-tabs (bot classification
+          // is Bots Monitoring → Classification).
           //
           // ⚠ Every survey panel has left it and none may come back: the work plan (the Pending
           // head), flow metrics (Reports), the daily-brief strip (DELETED — every line duplicated a
           // Pending tab) and the trunk + open-PR panels (the default-branch strip now heads the Open
           // PRs rail line). Panels of survey above a
           // stream is not a feed.
-          <div className="space-y-3">
-            <div role="tablist" className="flex gap-1 border-b border-gray-200 dark:border-gray-800">
-              {feedTabs.map((t) => {
-                const on = visibleFeedTab === t.key;
-                return (
-                  <button
-                    key={t.key}
-                    type="button"
-                    role="tab"
-                    aria-selected={on}
-                    onClick={() => setFeedInnerTab(t.key)}
-                    className={`-mb-px flex items-center gap-1 rounded-t-md border border-b-0 px-3 py-1.5 text-xs font-medium ${
-                      on
-                        ? 'border-gray-300 bg-white text-sky-600 dark:border-gray-700 dark:bg-gray-950 dark:text-sky-300'
-                        : 'border-transparent text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-900/60'
-                    }`}
-                  >
-                    {t.label}
-                  </button>
-                );
-              })}
-            </div>
-            {visibleFeedTab === 'classification' ? (
-              // Who counts as a bot in this Workspace, plus each bot's price.
-              <BotSettingsPanel />
-            ) : (
-              <FeedView />
-            )}
-          </div>
+          <FeedView />
         ) : isLoading && data == null ? (
           <div className="space-y-3">
             {[0, 1, 2].map((i) => (

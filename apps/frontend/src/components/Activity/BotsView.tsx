@@ -4,7 +4,7 @@ import { useFilters } from '../../store/filters.js';
 import { BotRoiPanel, ResolveBacklogBanner, TuningSuggestions } from './BotRoiPanel.js';
 import { WorkspaceBotCharts } from './WorkspaceBotCharts.js';
 import { BotThemesPanel } from './BotThemesPanel.js';
-import { BotAdvisorPanel } from './BotAdvisorPanel.js';
+import { BotSettingsPanel } from './BotSettingsPanel.js';
 import { BenchmarkPanel } from './BenchmarkPanel.js';
 import { effectiveBotsTab } from './benchmarkModel.js';
 import { BotIcon } from '../Icons.js';
@@ -13,8 +13,9 @@ import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
 // The Bots rail view — "the calm layer above your review bots". It composes:
 //   • the ROI / utilisation panel (per-bot signal-to-noise + trend + keep/tune/noisy verdicts).
 //     (Bot ACTIVITY is not here: it is the Feed's "Bots" side — one Feed, two sides.)
-// Bot CLASSIFICATION (who counts as a bot, its role and vendor) is NOT here: it lives on the Feed
-// rail's "Bot classification" sub-tab (BotSettingsPanel).
+//   • Classification (BotSettingsPanel): who counts as a bot in this Workspace, its role, vendor
+//     and price. It was the Feed's "Bot classification" sub-tab; the Feed is a stream only now.
+// (The Bot Tuning Advisor tab is REMOVED, UI and backend; its advisor_* tables stay dormant.)
 //
 // ── SCOPE: ONE WORKSPACE, ALWAYS ─────────────────────────────────────────────────────────────
 // Every panel here is scoped by `filters.workspaceId` — the single scope this app has. A BOT IS A
@@ -47,13 +48,13 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
   const innerTab = useFilters((s) => s.botsInnerTab);
   const setInnerTab = useFilters((s) => s.setBotsInnerTab);
 
-  // The Advisor is WORKSPACE-scoped with no repo narrowing — cross-repo rail only. Themes is
-  // genuinely per-repo (the panel takes `repoScope`), so it shows on both mounts.
-  const showAdvisor = repoId == null;
+  // Classification is the WORKSPACE's bot list with no repo narrowing — cross-repo rail only.
+  // Themes is genuinely per-repo (the panel takes `repoScope`), so it shows on both mounts.
+  const showClassification = repoId == null;
   // DERIVE the visible tab; never write a correction back to the store (`benchmarkModel.ts`).
   // Themes is written by a model, so it shows only while AI is on.
   const showThemes = useAiCapabilities().enabled;
-  const effectiveTab = effectiveBotsTab(innerTab, { showAdvisor, showThemes });
+  const effectiveTab = effectiveBotsTab(innerTab, { showClassification, showThemes });
 
   return (
     <div className="space-y-3" data-testid="bots-view">
@@ -76,9 +77,8 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
           // second in the strip is what preserves its prominence — a report demoted to the far end
           // of the strip on the day it got its own tab would read as a downgrade.
           ...(showThemes ? [{ key: 'themes', label: 'Themes' } as const] : []),
-          ...(showAdvisor ? [{ key: 'advisor', label: 'Advisor' } as const] : []),
           { key: 'benchmark', label: 'Benchmark' },
-          // (No Settings tab: bot classification is Feed → Bot classification.)
+          ...(showClassification ? [{ key: 'classification', label: 'Classification' } as const] : []),
         ] as const).map((t) => {
           const on = effectiveTab === t.key;
           return (
@@ -100,8 +100,10 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
         })}
       </div>
 
-      {effectiveTab === 'advisor' ? (
-        <BotAdvisorPanel />
+      {effectiveTab === 'classification' ? (
+        // Who counts as a bot in this Workspace, plus each bot's price. The Feed's and the
+        // Timeline's bot hiding read it.
+        <BotSettingsPanel />
       ) : effectiveTab === 'themes' ? (
         /* "What they're flagging" — the workspace-grain qualitative report: every deterministic
            figure (per-bot volume + acted-on, area split, per-theme comment counts, coverage) is the

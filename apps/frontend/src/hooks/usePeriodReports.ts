@@ -4,7 +4,7 @@
 // Every key carries the `ws:<id>` segment and every fetch holds itself idle on `skipToken` while
 // `workspaceId === null`: the scope starts unresolved, and a request sent before it lands is
 // answered from the account's DEFAULT workspace and then cached under whichever key the store
-// eventually settles on. That is the standard rule here (see useAdvisor); it bites
+// eventually settles on. That is the standard rule here; it bites
 // harder on this surface than most, because a report is an artifact people forward — one showing
 // the wrong workspace's numbers under the right workspace's name is not a stale render, it is a
 // wrong document.

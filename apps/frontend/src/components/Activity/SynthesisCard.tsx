@@ -39,7 +39,7 @@ function ClusterLines({ synthesis }: { synthesis: StoredSynthesis }): JSX.Elemen
           {c.configFixable && (
             <span
               className="shrink-0 rounded bg-amber-500/10 px-1 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400"
-              title="This whole cluster looks addressable from the bot's own configuration — see the Advisor for an evidence-backed change. A hint, never an action."
+              title="This whole cluster looks fixable in the bot's own configuration. A hint, never an action."
             >
               config-fixable
             </span>

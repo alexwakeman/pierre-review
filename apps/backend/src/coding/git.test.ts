@@ -110,8 +110,7 @@ describe('commitAll', () => {
 
 describe('assertPushTarget', () => {
   // ⚠ The authority is `git check-ref-format`, not a regex. Every name here is one a real
-  // GitHub head ref can carry, and `pushRef` is already called with real head refs — the
-  // stricter regex in git-ops.ts governs branch names the advisor INVENTS and must stay there.
+  // GitHub head ref can carry, and `pushRef` is already called with real head refs.
   it('accepts the branch names GitHub actually allows', async () => {
     for (const branch of [
       'main',
@@ -120,7 +119,7 @@ describe('assertPushTarget', () => {
       'a+b',
       'ünicode/x',
       'release/v1.2.3',
-      'limn/advisor/config-20260909',
+      'limn/fix/config-20260909',
     ]) {
       await expect(assertPushTarget(branch, []), branch).resolves.toBeUndefined();
     }

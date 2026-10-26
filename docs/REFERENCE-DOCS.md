@@ -282,7 +282,11 @@ The switch is per workspace, `workspaces.docs_in_review` (NULL/false = OFF), via
 
 A rail line under Activity, **Docs** (`?activityRepo=docs`), shown only on `me.ai.enabled`. Three
 columns: the library (every document with its status, each expandable into its contents tree; "All
-documents" opens INDEX.md), a viewer that shows one library file at a time with every link followed
+documents" opens INDEX.md — the tree is COLLAPSED: only its top-level chapters show at first, each row
+with rows under it has its own disclosure button with `aria-expanded`, and two icon buttons above it,
+"Expand all" / "Collapse all" (`ExpandAllIcon` / `CollapseAllIcon`), open or fold every branch;
+the nesting is `docTreeNodes(docTreeRows(…))` in `lib/referenceDocs.ts`, the open set local to the
+mount), a viewer that shows one library file at a time with every link followed
 in-app, and the chat (beside the viewer when wide, a Read / Ask tab when narrow). Adding: drag and
 drop or a file picker (PDF, .docx, .txt, .md, HTML), or "Add web page" with a "Links to follow"
 select (This page only / 1–3 levels; its ⓘ explains the crawl). A crawled document's line reads

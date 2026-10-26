@@ -114,11 +114,9 @@ export async function commitAll(
 // go through assertPushTarget FIRST. The branch name reaching them is not always ours: it can
 // be a PR's own head ref, and in the resolver it can be a name the user typed.
 //
-// ⚠ THE AUTHORITY IS `git check-ref-format`, NOT A REGEX. git-ops.ts's
-// `/^[A-Za-z0-9][A-Za-z0-9._/-]*$/` is a stricter NAMING CONVENTION on branches the advisor
-// INVENTS; it is not a general push guard and must not be hoisted here. `feature/#123`,
-// `user's-branch`, `a+b` and `ünicode/x` are all valid GitHub head refs that regex rejects,
-// and pushRef is already called with real head refs.
+// ⚠ THE AUTHORITY IS `git check-ref-format`, NOT A REGEX. `feature/#123`, `user's-branch`,
+// `a+b` and `ünicode/x` are all valid GitHub head refs a tidy-looking regex would reject, and
+// pushRef is called with real head refs.
 
 /**
  * Names git's own format check accepts but that must never be a push target: they are

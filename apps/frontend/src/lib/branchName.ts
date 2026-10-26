@@ -5,18 +5,17 @@
 // `BranchExists`. This exists so the reader finds out at the keystroke rather than after the
 // server has already spent a clone and a fetch on a name it was always going to refuse.
 //
-// ⚠ THE BACKEND IS THE AUTHORITY AND THE PATTERN IS COPIED FROM IT.
-// `apps/backend/src/coding/git-ops.ts`'s `commitFilesAndOpenPr` check is the original;
-// `test/branchName.test.ts` reads that file and fails if the two literals stop being
-// byte-identical, because a mirror that has drifted is worse than no mirror at all — it refuses
-// names the server would take, and takes names the server will refuse.
+// ⚠ THE SERVER IS THE AUTHORITY. It judges the name with `git check-ref-format` (conflict/land.ts,
+// api/routes/conflicts.ts), which accepts every name this does. This pattern used to be a
+// byte-identical copy of `coding/git-ops.ts`'s check; that copy went with the Bot Tuning Advisor,
+// so this is the one spelling left (pinned by `test/branchName.test.ts`).
 //
 // ⚠ IT IS A NAMING CONVENTION, NOT A PUSH GUARD, AND THE DIFFERENCE MATTERS. `feature/#123`,
 // `user's-branch`, `a+b` and `ünicode/x` are all real GitHub branches that this refuses. That is
 // correct HERE — this names a branch we are about to INVENT — and wrong in `pushRef`, which is
 // handed head refs somebody else chose. The push guard is `assertPushTarget`.
 
-/** ⚠ BYTE-IDENTICAL TO `coding/git-ops.ts`. See the module header. */
+/** The naming convention for a branch we INVENT. See the module header. */
 export const BRANCH_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/;
 
 export type BranchNameRefusal =

@@ -1657,8 +1657,7 @@ body {
    .mr-fill-applied): every one of those encodes a merge state. The syntax colours were the single
    member of that family that is not about merge state at all, and once seven other screens paint
    with them — the Changes tab, thread code anchors, the timeline marker popover, Claude Review's
-   finding hunks and suggestions, the addressed-check evidence patch, the advisor's generated config
-   — an `.mr-` prefix would actively claim they belong to the resolver. Do not fold them back in.
+   finding hunks and suggestions, the addressed-check evidence patch — an `.mr-` prefix would actively claim they belong to the resolver. Do not fold them back in.
 
    Measured against the worst of {page, the four resolver washes, every diff-row and code-block
    ground listed in `codeTokens.test.ts`} in each theme, same formula as above.

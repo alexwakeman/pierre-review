@@ -1,4 +1,3 @@
-import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   BRANCH_NAME_PATTERN,
@@ -72,19 +71,11 @@ describe('checkBranchName', () => {
   });
 });
 
-describe('the mirrored pattern', () => {
-  // ⚠ THE GUARD THAT MATTERS. A mirror that has drifted is worse than no mirror: it refuses names
-  // the server would take and takes names the server will refuse. If this fails, the backend
-  // convention moved and `lib/branchName.ts` has to move with it — do not "fix" the test.
-  it('is byte-identical to the one in coding/git-ops.ts', () => {
-    const source = readFileSync(
-      new URL('../../backend/src/coding/git-ops.ts', import.meta.url).pathname,
-      'utf8',
-    );
-    const match = /if \(!(\/.+?\/)\.test\(branch\)/.exec(source);
-    expect(match, 'the branch-name check in git-ops.ts moved or was rewritten').not.toBeNull();
-    expect(match?.[1]).toBe(`/${BRANCH_NAME_PATTERN.source}/`);
-    // The `..` clause is a second test there and a second test here, for the same reason.
-    expect(source).toContain("branch.includes('..')");
+describe('the pattern', () => {
+  // The backend copy this used to mirror (`coding/git-ops.ts` commitFilesAndOpenPr) went with the
+  // Bot Tuning Advisor; the server now judges a new branch with `git check-ref-format`, which
+  // accepts everything this does. This is the strictest check left, so it stays pinned here.
+  it('is the letter-or-digit-first naming convention', () => {
+    expect(BRANCH_NAME_PATTERN.source).toBe('^[A-Za-z0-9][A-Za-z0-9._/-]*$');
   });
 });

@@ -2324,9 +2324,8 @@ export function narrationPayload(report: PeriodReport): Record<string, unknown> 
         //
         // `phrase` is therefore a BELT, not the cure, and it is kept deliberately: this is a
         // document people forward, the failure is silent and plausible, and the cost of removing
-        // the model's opportunity to pick the wrong number is one string. Same principle as the
-        // Bot Tuning Advisor's templated recommendations — the model supplies the reading, never
-        // the arithmetic. If it ever needs to go, the rename is the part that must stay.
+        // the model's opportunity to pick the wrong number is one string. The principle: the model
+        // supplies the reading, never the arithmetic. If it ever needs to go, the rename is the part that must stay.
         //
         // ⚠ IT CARRIES THE UNIT, which is the other half of the same lesson. Rendered unit-free
         // it read "Reviewer concentration: 50 (was 38.55, +29.70%)" and a reader took the 50 for

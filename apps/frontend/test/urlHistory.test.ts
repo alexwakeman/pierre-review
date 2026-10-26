@@ -143,7 +143,6 @@ beforeEach(() => {
     attentionAuthorLens: null,
     attentionTab: null,
     feedIsolatedPrId: null,
-    feedInnerTab: 'feed',
     botsInnerTab: 'roi',
     insightsInnerTab: 'overview',
     prDetailTab: null,
@@ -814,43 +813,50 @@ describe('the Activity sub-tab strips', () => {
     expect(useFilters.getState().botsInnerTab).toBe('roi');
   });
 
-  // The retired Feed "Discussion themes" tab: its bookmark is not a member any more, so the reader
-  // seats nothing and the Feed's default stands.
+  // The Feed has no sub-tabs: a retired `?feedTab=themes` seats nothing and the Feed stands.
   it('lands a retired ?feedTab=themes on the Feed', () => {
-    seat('/app/?workspace=5&view=activity&feedTab=themes');
-    applyUrlToStores({ fromPop: true });
-    expect(useFilters.getState().feedInnerTab).toBe('feed');
-  });
-
-  // Bot classification is a FEED sub-tab, free on every tier: it pushes, is emitted only beside
-  // the Feed rail entry, and round-trips.
-  it('switching to Feed → Bot classification pushes and round-trips', () => {
-    gesture(() => useFilters.getState().setActivityRepo('feed'));
-    const before = entries.length;
-    gesture(() => useFilters.getState().setFeedInnerTab('classification'));
-    expect(location.search).toContain('feedTab=classification');
-    expect(entries).toHaveLength(before + 1);
-
-    back();
-    expect(useFilters.getState().feedInnerTab).toBe('feed');
-    expect(location.search).not.toContain('feedTab');
-  });
-
-  // ⚠ LEGACY: the classification screen used to be Bots Monitoring → Settings. An old bookmark (or
-  // a history entry Back replays) must land on its new home.
-  it('maps a legacy ?botsTab=settings link to Feed → Bot classification', () => {
-    seat('/app/?workspace=5&view=activity&activityRepo=bots&botsTab=settings');
+    seat('/app/?workspace=5&view=activity&activityRepo=feed&feedTab=themes');
     applyUrlToStores({ fromPop: true });
     expect(useFilters.getState().activityRepoId).toBe('feed');
-    expect(useFilters.getState().feedInnerTab).toBe('classification');
     expect(useFilters.getState().botsInnerTab).toBe('roi');
   });
 
-  it('seats ?feedTab=classification as the raw Feed sub-tab', () => {
+  // Bot classification is a Bots Monitoring tab: it pushes, is emitted only beside the Bots rail
+  // entry, and round-trips.
+  it('switching to Bots Monitoring → Classification pushes and round-trips', () => {
+    gesture(() => useFilters.getState().setActivityRepo('bots'));
+    const before = entries.length;
+    gesture(() => useFilters.getState().setBotsInnerTab('classification'));
+    expect(location.search).toContain('botsTab=classification');
+    expect(entries).toHaveLength(before + 1);
+
+    back();
+    expect(useFilters.getState().botsInnerTab).toBe('roi');
+    expect(location.search).not.toContain('botsTab');
+  });
+
+  // ⚠ LEGACY: the classification screen was Bots Monitoring → Settings, then the Feed's "Bot
+  // classification" sub-tab. Old bookmarks (and history entries Back replays) land on its new home.
+  it('maps a legacy ?botsTab=settings link to Bots Monitoring → Classification', () => {
+    seat('/app/?workspace=5&view=activity&activityRepo=bots&botsTab=settings');
+    applyUrlToStores({ fromPop: true });
+    expect(useFilters.getState().activityRepoId).toBe('bots');
+    expect(useFilters.getState().botsInnerTab).toBe('classification');
+  });
+
+  it('maps a legacy ?feedTab=classification link to Bots Monitoring → Classification', () => {
     seat('/app/?workspace=5&view=activity&activityRepo=feed&feedTab=classification');
     applyUrlToStores({ fromPop: true });
-    expect(useFilters.getState().activityRepoId).toBe('feed');
-    expect(useFilters.getState().feedInnerTab).toBe('classification');
+    expect(useFilters.getState().activityRepoId).toBe('bots');
+    expect(useFilters.getState().botsInnerTab).toBe('classification');
+  });
+
+  // The Bot Tuning Advisor is REMOVED: its old bookmark seats nothing, so the rail opens on ROI.
+  it('lands a retired ?botsTab=advisor link on the Bots default', () => {
+    seat('/app/?workspace=5&view=activity&activityRepo=bots&botsTab=advisor');
+    applyUrlToStores({ fromPop: true });
+    expect(useFilters.getState().activityRepoId).toBe('bots');
+    expect(useFilters.getState().botsInnerTab).toBe('roi');
   });
 
   // ⚠ THE BOTS TWIN, AND `themes` IS THE MEMBER THAT NEEDS IT MOST. It is listed only when

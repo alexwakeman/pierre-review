@@ -258,8 +258,8 @@ export const users = sqliteTable('users', {
   // The GitHub App slug behind this actor's comments (`performed_via_github_app.slug`,
   // REST-only), captured by the app-attribution probe (sync/app-attribution.ts) which used
   // to receive and DISCARD it. A bot's App identity is a global fact about the actor, so it
-  // lives on the global `users` table — the advisor's discovery tier splits App-authored
-  // from Actions-authored comments on it. Nullable: null = never observed (a PAT/OAuth
+  // lives on the global `users` table. (Its one reader, the removed Bot Tuning Advisor's
+  // discovery tier, is gone; the column is still written.) Nullable: null = never observed (a PAT/OAuth
   // poster has no app), and an observed slug is never cleared by a later app-less comment.
   appSlug: text('app_slug'),
 });
@@ -2378,7 +2378,7 @@ export const workspaceReviewers = sqliteTable(
       t.workspaceId,
       t.authorUserId,
     ),
-    // Listing one workspace's reviewers (Feed → Bot classification).
+    // Listing one workspace's reviewers (Bots Monitoring → Classification).
     accountWorkspaceIdx: index('workspace_reviewers_account_workspace_idx').on(
       t.accountId,
       t.workspaceId,

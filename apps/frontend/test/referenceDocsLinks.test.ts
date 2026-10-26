@@ -13,6 +13,8 @@ import type { ReferenceDocSectionEntry } from '@pierre-review/shared';
 import {
   citationLabel,
   docStageLabel,
+  docTreeBranchKeys,
+  docTreeNodes,
   docTreeRows,
   headingAnchor,
   headingAnchors,
@@ -157,6 +159,21 @@ describe('docTreeRows (the same shape as CONTENTS.md)', () => {
 
   it('is empty for a document with no sections', () => {
     expect(docTreeRows([])).toEqual([]);
+  });
+
+  it('nests the rows into a tree whose top level is the chapters, and lists every branch for Expand all', () => {
+    const nodes = docTreeNodes(
+      docTreeRows([
+        entry({ summary: 'What it is.', headings: [{ title: 'Scope', depth: 2, anchor: 'scope' }] }),
+        entry({ path: 'guide/sections/02-a.md', title: 'A', depth: 2, trail: ['Part one'], headings: [{ title: 'Detail', depth: 3, anchor: 'detail' }] }),
+        entry({ path: 'guide/sections/03-b.md', title: 'B', depth: 2, trail: ['Part one'] }),
+        entry({ path: 'guide/sections/04-c.md', title: 'C', depth: 1 }),
+      ]),
+    );
+    const shape = (ns: typeof nodes): unknown[] => ns.map((n) => (n.children.length ? [n.row.title, shape(n.children)] : n.row.title));
+    expect(shape(nodes)).toEqual([['Intro', ['Scope']], ['Part one', [['A', ['Detail']], 'B']], 'C']);
+    expect(docTreeBranchKeys(nodes)).toEqual(['s:guide/sections/01-intro.md', 'g:Part one', 's:guide/sections/02-a.md']);
+    expect(docTreeNodes([])).toEqual([]);
   });
 });
 

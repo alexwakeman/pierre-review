@@ -1073,7 +1073,7 @@ export function PrDetail({
    * the server's automated-reviewer set, so none here means none there — and the fetch is
    * deliberately never made), and a SETTLED `prBotBehaviour`. Until one of them lands the tab
    * stands, and the store keeps the reader's raw choice either way — the same rule
-   * `feedInnerTab` / `botsInnerTab` follow.
+   * `botsInnerTab` / `insightsInnerTab` follow.
    */
   const botTabResolved = pr != null && (!hasBots || prBotBehaviour !== undefined);
   const effectiveTab: Tab =

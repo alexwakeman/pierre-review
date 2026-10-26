@@ -104,8 +104,7 @@ frontend (`/app`) + backend + shared, copies compiled JS + the core migration fo
 `public/`, vendors shared at `dist/shared`, copies the platform's `migrations` and `data`
 (the bundled peer-benchmark corpus) to `dist/platform/` beside the compiled modules that read
 them, and generates `package.json` (curated deps: `@fastify/cors`, `@fastify/static`,
-`@octokit/graphql`, `better-sqlite3`, `drizzle-orm`, `fastify`, `node-cron`, `yaml` (the
-advisor's config emitters) …; **no AI SDK** (`@anthropic-ai/*`, `@modelcontextprotocol/sdk`,
+`@octokit/graphql`, `better-sqlite3`, `drizzle-orm`, `fastify`, `node-cron` …; **no AI SDK** (`@anthropic-ai/*`, `@modelcontextprotocol/sdk`,
 `zod`) and no model runtime). Sanity asserts fail on a missing key file (including
 `dist/platform/index.js`, its first migration and `benchmark-fit.json` — ⚠ a missing `data`
 copy fails ONLY in the release: dev reads it from `src/` and looks perfect, while the package

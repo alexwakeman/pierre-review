@@ -19,7 +19,7 @@ import { ACTIVITY_WINDOW_MS, walkBudgetFor } from './place.js';
 // `apiVersion` is 21 and four literals across two repositories must agree; a half-applied bump
 // degrades the ENTIRE plugin to OSS mode with nothing thrown. A premium fold that core has no use
 // for does not earn that risk, and the plugin already reaches core tables this way in
-// `insights/pr-refs.ts` and `advisor/store.ts`.
+// `insights/pr-refs.ts`.
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 

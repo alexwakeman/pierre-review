@@ -47,7 +47,7 @@ export const COURT_SHORT: Record<PrCourt, string> = {
  * The only degradation it handles is a value outside the union — a hand-edited `?insightsTab=`, or
  * a member removed in a later build whose literal still sits in a history entry a browser Back
  * replays. It normalises FOR THE RENDER only: a `set…()` here would permanently forget the
- * reader's choice, which is the bug `botsInnerTab` / `feedInnerTab` carry the same comment against.
+ * reader's choice, which is the bug `botsInnerTab` / `insightsInnerTab` carry the same comment against.
  *
  * ⚠ Keep it pure: a `?insightsTab=bottlenecks` — which ships in bookmarks and in history entries
  * Back replays — must land on the tab the URL named, and an impure derive would break the

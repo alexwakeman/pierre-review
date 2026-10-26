@@ -9,7 +9,6 @@ import {
   DEFAULT_PR_STATUSES,
   DEFAULT_REVIEW_STATES,
   BOTS_INNER_TABS,
-  FEED_INNER_TABS,
   INSIGHTS_INNER_TABS,
   sprintStoryFromUrl,
   sprintTabFromUrl,
@@ -22,7 +21,6 @@ import {
   sanitizePersistedScope,
   useFilters,
   type BotsInnerTab,
-  type FeedInnerTab,
   type FilterState,
   type InsightsInnerTab,
   type PrDetailTab,
@@ -119,6 +117,8 @@ const NAV_KEYS = [
   // The People / Automation lens — a different list with its own totals, so Back must leave it.
   'attnBy',
   'feedPr',
+  // RETIRED BUT STILL LISTED, like `attnPersonal`: the Feed has no sub-tabs now, and a legacy
+  // `?feedTab=classification` is parsed onto Bots Monitoring → Classification, never emitted.
   'feedTab',
   'botsTab',
   // The Reports pane's Overview | Bottlenecks strip. A sub-tab switch is a navigation for the
@@ -431,23 +431,25 @@ export function readFromUrl(): Partial<FilterState> {
     const n = Number.parseInt(feedPr, 10);
     if (Number.isFinite(n)) out.feedIsolatedPrId = n;
   }
-  // The two Activity sub-tab strips. ⚠ THE RAW CHOICE IS SEATED HERE, never a corrected one:
-  // both consumers DERIVE a visible tab (BotsView's `effectiveTab`, ActivityView's
-  // `effectiveFeedTab`), and writing a correction back would permanently forget a choice.
-  const feedTab = p.get('feedTab');
-  if ((FEED_INNER_TABS as readonly string[]).includes(feedTab ?? '')) {
-    out.feedInnerTab = feedTab as FeedInnerTab;
-  }
+  // The Bots sub-tab strip. ⚠ THE RAW CHOICE IS SEATED HERE, never a corrected one: BotsView
+  // DERIVES a visible tab (`effectiveBotsTab`), and writing a correction back would permanently
+  // forget a choice. A retired `?botsTab=advisor` (the Bot Tuning Advisor, removed) is not a member,
+  // so it seats nothing and the rail opens on its default.
   const botsTab = p.get('botsTab');
   if ((BOTS_INNER_TABS as readonly string[]).includes(botsTab ?? '')) {
     out.botsInnerTab = botsTab as BotsInnerTab;
   }
   // ⚠ LEGACY: `?activityRepo=bots&botsTab=settings` was Bots Monitoring → Settings, the bot
-  // classification screen. Classification lives on the Feed now, so that bookmark (and the history
-  // entries Back replays) lands on Feed → Bot classification.
+  // classification screen, and `?activityRepo=feed&feedTab=classification` was the Feed's "Bot
+  // classification" sub-tab after that. Classification is a Bots Monitoring tab now, so both
+  // bookmarks (and the history entries Back replays) land on Bots Monitoring → Classification.
+  // (Any other `feedTab` value is ignored: the Feed has no sub-tabs.)
   else if (botsTab === 'settings' && activityRepo === 'bots') {
-    out.activityRepoId = 'feed';
-    out.feedInnerTab = 'classification';
+    out.botsInnerTab = 'classification';
+  }
+  if (p.get('feedTab') === 'classification' && activityRepo === 'feed') {
+    out.activityRepoId = 'bots';
+    out.botsInnerTab = 'classification';
   }
   // The Reports pane's strip. Same raw-seat rule: InsightsView derives what it renders (a value
   // outside the union normalises to 'overview' FOR THE RENDER), so an unknown literal here would
@@ -679,9 +681,6 @@ export function writeToUrl(s: FilterState): void {
       (s.activityRepoId === 'feed' || typeof s.activityRepoId === 'number')
     ) {
       p.set('feedPr', String(s.feedIsolatedPrId));
-    }
-    if (s.activityRepoId === 'feed' && s.feedInnerTab !== 'feed') {
-      p.set('feedTab', s.feedInnerTab);
     }
     if (s.activityRepoId === 'bots' && s.botsInnerTab !== 'roi') {
       p.set('botsTab', s.botsInnerTab);

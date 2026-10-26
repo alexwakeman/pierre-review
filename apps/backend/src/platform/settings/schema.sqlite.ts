@@ -160,7 +160,7 @@ export const proSettings = sqliteTable(
 // Tenancy is STRUCTURAL: the named composite FK `pro_workspace_settings_workspace_account_fk`
 // lives in the MIGRATION SQL only (0029, both dialects) — drizzle cannot declare an FK onto a core
 // table it has no object for across the open-core boundary, and index/FK metadata here is inert
-// anyway. Same arrangement as advisor_bot_profiles.
+// anyway. Same arrangement as the dormant advisor_bot_profiles.
 export const proWorkspaceSettings = sqliteTable(
   'pro_workspace_settings',
   {

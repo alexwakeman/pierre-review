@@ -132,7 +132,7 @@ export function ungroundedNumerals(text: string, allowed: ReadonlySet<string>): 
  * The deterministic templated summary — what gets stored when the model's narrative fails the
  * check (D4: "a failed check falls back to the templated summary"). Every figure here is
  * computed, so it is grounded by construction; the reading is plain but the numbers are true,
- * which is the trade this feature makes everywhere. Mirrors the Advisor's templating discipline.
+ * which is the trade this feature makes everywhere.
  */
 export function templatedNarrative(report: PeriodReport): string {
   const lines: string[] = [];

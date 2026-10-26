@@ -21,7 +21,7 @@ import { resolveRequestScope } from '../insights/workspace-request.js';
 //  3. Cloud per-account entitlement — the host's automatic /api/pro/* 402 gate
 //     (api/plugins/auth.ts `registerAuthGate`/`isProPath`): an authenticated free-plan cloud
 //     account gets 402 before this handler runs. Staying under /api/pro/ is what keeps that
-//     automatic (the advisor-routes rule).
+//     automatic (the platform-routes rule).
 //
 // SCOPE: `?workspace=` resolves via `resolveRequestScope` (absent/unparseable/foreign → the
 // account's DEFAULT workspace, never a 404 — host §5.1), and `?repoIds=` survives as DATA

@@ -55,7 +55,7 @@ import type { SettingsFocus } from '../../store/settingsModal.js';
 // auth line, so a form here could only offer a third, worse one. The routes are gone too.
 //
 // "Review bots (account-wide)" — an explainer plus one toggle. The explainer pointed at
-// Activity → Feed → Bot classification, which is where a bot's judgement, identity and price actually live
+// Activity → Bots Monitoring → Classification, which is where a bot's judgement, identity and price actually live
 // (one CORE/free `workspace_reviewers` row each), and the toggle — the Slack bot digest — became a
 // property of the DELIVERY in plugin migration 0033 and is now a checkbox inside the Slack section
 // under the schedule it modifies. An empty section pointing elsewhere is a signpost, not a setting.
