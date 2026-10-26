@@ -161,7 +161,7 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
   // ⚠ 'workspaces' (NOT the long-dead 'teams') plus the flow-metric + Reports keys: deleting a
   // repo changes a workspace's membership without changing its ID, so ['workspace-metrics', id],
   // ['workspace-metrics-detail', id] and the two period-report keys would not refetch on their
-  // own — and the report GET's "By workspace" axis spans every workspace besides. Same set
+  // own. Same set
   // useWorkspaceMutations invalidates — spelled out here because that list is module-private to
   // useWorkspaces.ts.
   const removeRepo = useMutation({

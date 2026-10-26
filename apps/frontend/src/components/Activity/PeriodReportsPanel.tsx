@@ -1383,8 +1383,7 @@ export function PeriodReportsPanel(): JSX.Element | null {
             </div>
           ) : current ? (
             // Keyed by the period so switching periods remounts the body — every derived map
-            // belongs to ONE period and must not carry over (including the
-            // by-workspace expansions, which are per-period readings too).
+            // belongs to ONE period and must not carry over.
             <div key={current.periodKey}>
               <ReportBody report={current} />
             </div>
