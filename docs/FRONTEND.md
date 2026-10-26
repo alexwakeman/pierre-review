@@ -2918,9 +2918,10 @@ commits / your PR's new activity the PR's Activity (`tab: 'activity'` = Overview
 section open and scrolled to), a mention / comment-after-yours card THE
 COMMENT when it carries `comment` (`board.openComment`: a comment on a line of code → Changes via
 `openPrChangesAt` with `threadId` + `line`, which PrDetail runs through `openInChangesFor` — the
-thread → Changes ladder that opens its inline pill — falling back to Threads when the file left the
-diff; a PR comment or review body → the Comments tab via `showPrComment(prId, id, kind)`, keyed
-`comment:<id>` / `review:<id>` in `PrCommentsList`; without `comment`, Activity), a Claude card the
+thread → Changes ladder that opens its inline pill — falling back to the Threads only view when the
+file left the diff; a comment with no file — a PR comment or review body — → the Comments tab via
+`showPrComment(prId, id, kind)`, keyed `comment:<id>` / `review:<id>` in `PrCommentsList`; without
+`comment`, the Comments tab too), a Claude card the
 review, a red trunk its checks page on GitHub (the "at <sha>" link is the commit itself); the title
 always opens Overview (it seats `prDetailTab` explicitly). A red build on YOUR PR (`ci_failing`'s
 `your_pr` arm, no `InsightPrRef`) still prints "on <title> · repo#N" from its own fields.

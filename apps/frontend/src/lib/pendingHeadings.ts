@@ -928,9 +928,9 @@ export function factDropsNoReviews(card: InsightCard): boolean {
 export type PendingCardEvent =
   | { kind: 'thread'; threadId: number }
   // A mention / comment-after-yours card that knows WHICH comment: land on it — a comment on a
-  // line of code in Changes (its thread opened), a conversation comment on Overview.
+  // line of code in Changes (its thread opened), a conversation comment on the Comments tab.
   | { kind: 'comment'; comment: MyTurnCommentRef }
-  | { kind: 'pr'; tab: 'overview' | 'activity' }
+  | { kind: 'pr'; tab: 'overview' | 'activity' | 'comments' }
   | { kind: 'claude_review' }
   | { kind: 'external' }
   | { kind: 'landing_pr' }
@@ -950,10 +950,12 @@ export function pendingCardEvent(card: InsightCard): PendingCardEvent {
       if ((card.reason === 'mention' || card.reason === 'comment_reply') && card.comment != null) {
         return { kind: 'comment', comment: card.comment };
       }
+      // A mention / reply that does not name its comment: the conversation, on the Comments tab.
+      if (card.reason === 'comment_reply' || card.reason === 'mention') {
+        return { kind: 'pr', tab: 'comments' };
+      }
       if (
         card.reason === 'pushed_since' ||
-        card.reason === 'comment_reply' ||
-        card.reason === 'mention' ||
         // The heading announces new comments, reviews and commits — they live on Activity.
         card.reason === 'your_pr'
       ) {

@@ -310,8 +310,8 @@ describe('My turn — people events', () => {
       pendingCardEvent(myTurn({ reason: 'mention', comment: { kind: 'review', id: 5 } })),
     ).toEqual({ kind: 'comment', comment: { kind: 'review', id: 5 } });
     // Not known: the PR's Activity tab, as before.
-    expect(pendingCardEvent(myTurn({ reason: 'mention' }))).toEqual({ kind: 'pr', tab: 'activity' });
-    expect(pendingCardEvent(myTurn({ reason: 'comment_reply' }))).toEqual({ kind: 'pr', tab: 'activity' });
+    expect(pendingCardEvent(myTurn({ reason: 'mention' }))).toEqual({ kind: 'pr', tab: 'comments' });
+    expect(pendingCardEvent(myTurn({ reason: 'comment_reply' }))).toEqual({ kind: 'pr', tab: 'comments' });
   });
 
   it('a review request: the author on line two, and how many others were asked', () => {
