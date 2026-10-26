@@ -1,3 +1,6 @@
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { defineConfig } from 'vitest/config';
 
 // Backend test config.
@@ -56,5 +59,14 @@ const HOOK_TIMEOUT_MS = 30_000;
 const TEST_TIMEOUT_MS = 90_000;
 
 export default defineConfig({
-  test: { hookTimeout: HOOK_TIMEOUT_MS, testTimeout: TEST_TIMEOUT_MS },
+  test: {
+    hookTimeout: HOOK_TIMEOUT_MS,
+    testTimeout: TEST_TIMEOUT_MS,
+    // ⚠ NEVER THE READER'S ~/.limn. Modules resolve the data directory at IMPORT time (the AI runtime,
+    // the Codex home), before a test's own beforeEach can set LIMN_DATA_DIR — so a machine with Codex
+    // installed and signed in under ~/.limn saw it in "not installed" tests, and a sign-in test could
+    // spawn the real binary against the real home. One empty directory per run; a test that sets its
+    // own LIMN_DATA_DIR still wins.
+    env: { LIMN_DATA_DIR: process.env.LIMN_TEST_DATA_DIR ?? mkdtempSync(join(tmpdir(), 'limn-test-data-')) },
+  },
 });
