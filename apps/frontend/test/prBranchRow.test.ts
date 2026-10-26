@@ -1,6 +1,6 @@
-// The Overview's Branch row: head branch (monospace), "→ base" muted, and a copy button that copies
+// The Overview's branch: head branch (monospace), "→ base" muted, and a copy button that copies
 // the HEAD name only. Omitted when the head branch is not synced yet (never shown empty), and it
-// sits just above the Ticket row.
+// sits on the Ticket row, after the ticket chips.
 //
 //   ./apps/backend/node_modules/.bin/vitest run --root apps/frontend
 import { readFileSync } from 'node:fs';
@@ -30,15 +30,14 @@ describe('PrBranchLine', () => {
     expect(textOf(html)).not.toContain('→');
   });
 
-  it('the row guards on a null head branch and sits above Ticket', () => {
+  it('shares one row with the ticket, the branch after the ticket chips', () => {
     const src = readFileSync(
       fileURLToPath(new URL('../src/components/ChecksTab.tsx', import.meta.url)),
       'utf8',
     );
-    const branch = src.indexOf('<Row label="Branch">');
-    const ticket = src.indexOf('<Row label="Ticket">');
-    expect(branch).toBeGreaterThan(0);
-    expect(branch).toBeLessThan(ticket);
-    expect(src.slice(branch - 60, branch)).toContain('pr.headRefName != null &&');
+    const fn = src.slice(src.indexOf('export function PrTicketBranchLine'));
+    expect(fn.indexOf('<PrTicketChip')).toBeGreaterThan(0);
+    expect(fn.indexOf('<PrTicketChip')).toBeLessThan(fn.indexOf('<PrBranchLine'));
+    expect(fn).toContain('pr.headRefName != null &&');
   });
 });

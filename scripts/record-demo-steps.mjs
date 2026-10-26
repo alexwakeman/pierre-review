@@ -8,7 +8,8 @@
 // recording is a row the seeder wrote.
 
 const PENDING_TABS = ['my_turn', 'claude', 'fixing', 'review', 'threads', 'land', 'deps'];
-const PR_TABS = ['overview', 'threads', 'activity', 'changes', 'bot_activity', 'claude_review', 'ai_fix'];
+// Activity is a collapsed section of Overview now (opened below); Comments is its own tab.
+const PR_TABS = ['overview', 'comments', 'threads', 'changes', 'bot_activity', 'claude_review', 'ai_fix'];
 const ROOT = 'https://acme.atlassian.net';
 const ident = (key) => `jira:${ROOT}#${key}`;
 const enc = encodeURIComponent;
@@ -220,6 +221,9 @@ export const STEPS = [
         await h.go(`?view=pr-detail:${id}&prTab=${t}`);
         if (t === 'overview') {
           await h.clickRole('button', /^Show actions$/);
+          // Checks and Activity arrive collapsed: open both so the per-check logs get recorded.
+          await h.clickAll(h.page.locator('[data-testid="pr-checks-summary"] > button'), { max: 1 });
+          await h.clickAll(h.page.locator('[data-testid="pr-activity-section"] > button'), { max: 1 });
           await h.clickAll(h.page.getByRole('button', { name: /View log|Show log/ }), { max: 2 });
           await h.clickAll(h.page.getByRole('button', { name: /^(Merge|Merge when ready)$/ }), { max: 1, after: () => h.escape() });
         }

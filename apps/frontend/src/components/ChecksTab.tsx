@@ -44,6 +44,7 @@ import { usePrBotBehaviour } from '../hooks/useBotTriage.js';
 import {
   BotIcon,
   CheckIcon,
+  ChevronIcon,
   CloseIcon,
   ExternalLinkIcon,
   MergeIcon,
@@ -86,6 +87,120 @@ export function PrBranchLine({
         )}
       </span>
       <CopyButton text={headRefName} what="branch name" />
+    </div>
+  );
+}
+
+/** The Overview's Ticket row body: the ticket chips, then — on the SAME line — the branch. When
+ *  the PR has no tracker (`tickets == null`) the row is labelled "Branch" and this is the branch
+ *  alone; the inline "Branch" caption appears only when a ticket sits before it. */
+export function PrTicketBranchLine({
+  pr,
+}: {
+  pr: Pick<PrDetailT, 'id' | 'tickets' | 'headRefName' | 'baseRefName'>;
+}): JSX.Element {
+  const tickets = pr.tickets;
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1" data-testid="pr-ticket-branch">
+      {tickets != null &&
+        (tickets.length === 0 ? (
+          <span className="text-xs text-gray-500 dark:text-gray-400">No ticket found</span>
+        ) : (
+          <span className="flex flex-wrap gap-1.5">
+            {tickets.map((t) => (
+              <PrTicketChip key={t.key} prId={pr.id} ticket={t} />
+            ))}
+          </span>
+        ))}
+      {pr.headRefName != null && (
+        <span className="flex min-w-0 items-center gap-1.5">
+          {tickets != null && (
+            <span className="shrink-0 text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
+              Branch
+            </span>
+          )}
+          <PrBranchLine headRefName={pr.headRefName} baseRefName={pr.baseRefName} />
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** The collapsed Checks line's pills, one per state that EXISTS (never a "0 running") — the
+ *  Default branches strip's vocabulary: passed / failing / running, and a total on the right.
+ *  `failing` folds `failure` + `error`; neutral / skipped / unknown get no pill but count in the
+ *  total, exactly as an `unknown` trunk counts in that strip's repo count. */
+export function checksSummaryCounts(checks: readonly { state: string }[]): {
+  passed: number;
+  failing: number;
+  running: number;
+  total: number;
+} {
+  let passed = 0;
+  let failing = 0;
+  let running = 0;
+  for (const c of checks) {
+    if (c.state === 'success') passed++;
+    else if (c.state === 'failure' || c.state === 'error') failing++;
+    else if (c.state === 'pending') running++;
+  }
+  return { passed, failing, running, total: checks.length };
+}
+
+/** The Checks row: ONE summary line (chevron + pills + "N checks"), the whole line the toggle,
+ *  COLLAPSED on every mount — the Default branches strip's pattern, red or not. Expanding shows
+ *  the per-check list (children). Per-mount state on purpose: a "let me look" toggle, never a
+ *  remembered preference. */
+export function ChecksSummary({
+  checks,
+  children,
+  defaultOpen = false,
+}: {
+  checks: readonly { state: string }[];
+  children?: React.ReactNode;
+  defaultOpen?: boolean;
+}): JSX.Element {
+  const [open, setOpen] = useState(defaultOpen);
+  const { passed, failing, running, total } = checksSummaryCounts(checks);
+  const allPassed = passed === total;
+  return (
+    <div data-testid="pr-checks-summary">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        aria-expanded={open}
+        className="flex w-full items-center gap-2 rounded px-1 py-0.5 text-left hover:bg-gray-50 dark:hover:bg-gray-800/40"
+      >
+        <ChevronIcon dir={open ? 'down' : 'right'} size={10} className="shrink-0 text-gray-400" />
+        {passed > 0 && (
+          <span
+            className="rounded bg-green-500/15 px-1 text-[11px] font-semibold text-green-700 dark:text-green-400"
+            title="Checks that passed"
+          >
+            {allPassed && passed > 1 ? `all ${passed} passed` : `${passed} passed`}
+          </span>
+        )}
+        {failing > 0 && (
+          <span
+            className="rounded bg-red-500/15 px-1 text-[11px] font-semibold text-red-600 dark:text-red-400"
+            title="Checks that failed"
+          >
+            {failing} failing
+          </span>
+        )}
+        {running > 0 && (
+          <span
+            className="rounded bg-amber-500/15 px-1 text-[11px] font-semibold text-amber-700 dark:text-amber-400"
+            title="Checks still running"
+          >
+            {running} running
+          </span>
+        )}
+        <span className="ml-auto text-[11px] text-gray-500 dark:text-gray-400">
+          {total} check{total === 1 ? '' : 's'}
+        </span>
+      </button>
+      {open && <div className="mt-1">{children}</div>}
     </div>
   );
 }
@@ -911,39 +1026,26 @@ export function ChecksTab({
         </Row>
       )}
 
-      {/* The head branch (what you would `git checkout`) and its base. Bare name, no fork owner.
-          Null = not synced yet, so the row is omitted rather than shown empty. Sits above
-          Ticket because the ticket key is usually read off the branch name. */}
-      {pr.headRefName != null && (
-        <Row label="Branch">
-          <PrBranchLine headRefName={pr.headRefName} baseRefName={pr.baseRefName} />
-        </Row>
-      )}
-
-      {/* Jira/Linear ticket links (core tracker, compute-on-read). tri-state: null → hidden; [] → a muted
-          "No ticket found"; non-empty → one link chip per detected ticket. */}
-      {pr.tickets != null && (
-        <Row label="Ticket">
-          {pr.tickets.length === 0 ? (
-            <span className="text-xs text-gray-400">No ticket found</span>
-          ) : (
-            <div className="flex flex-wrap gap-1.5">
-              {pr.tickets.map((t) => (
-                <PrTicketChip key={t.key} prId={pr.id} ticket={t} />
-              ))}
-            </div>
-          )}
+      {/* Ticket and branch on ONE row (the ticket key is usually read off the branch name).
+          Tickets (core tracker, compute-on-read) are tri-state: null → no tracker, omitted;
+          [] → a muted "No ticket found"; non-empty → one chip per ticket. The head branch (what you
+          would `git checkout`) and its base: a null head is not synced yet and is omitted. */}
+      {(pr.tickets != null || pr.headRefName != null) && (
+        <Row label={pr.tickets != null ? 'Ticket' : 'Branch'}>
+          <PrTicketBranchLine pr={pr} />
         </Row>
       )}
 
       {pr.body != null && pr.body.trim() !== '' && <PrSummary body={pr.body} />}
 
       {/* Why CI failed is Claude Review's job now (its "CI failures" section); this row only
-          lists the checks. */}
+          lists the checks — COLLAPSED to one summary line until the reader opens it. */}
       {checks.length > 0 && (
         <Row label="Checks">
-          <ChecksList prId={pr.id} prGithubUrl={pr.githubUrl} checks={checks} />
-          <CiRerunControl prId={pr.id} checks={checks} viewerCanPush={pr.viewerCanPush} />
+          <ChecksSummary checks={checks}>
+            <ChecksList prId={pr.id} prGithubUrl={pr.githubUrl} checks={checks} />
+            <CiRerunControl prId={pr.id} checks={checks} viewerCanPush={pr.viewerCanPush} />
+          </ChecksSummary>
         </Row>
       )}
 

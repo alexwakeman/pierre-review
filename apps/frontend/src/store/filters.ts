@@ -121,8 +121,14 @@ export const FEED_INNER_TABS: readonly FeedInnerTab[] = ['feed', 'classification
 // move between "the PR's diff" and "the PR's threads" like every other view. Which member is
 // VISIBLE is still derived per PR (bot_activity / claude_review / ai_fix are capability- or
 // data-gated) — the store holds the CHOICE, never a computed effective tab.
+//
+// ⚠ `'activity'` IS NO LONGER A TAB IN THE STRIP. The Activity list is a collapsible section at the
+// foot of Overview; the member survives so an old `?prTab=activity` link (and the timeline's
+// commit-popover deep link, which seats it) still means something: Overview, with that section
+// OPEN. PrDetail derives both from it; nothing writes it back to `'overview'`.
 export type PrDetailTab =
   | 'overview'
+  | 'comments'
   | 'threads'
   | 'activity'
   | 'changes'
@@ -131,6 +137,7 @@ export type PrDetailTab =
   | 'ai_fix';
 export const PR_DETAIL_TABS: readonly PrDetailTab[] = [
   'overview',
+  'comments',
   'threads',
   'activity',
   'changes',
