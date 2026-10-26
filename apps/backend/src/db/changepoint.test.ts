@@ -1,5 +1,5 @@
 // detectChangepoints — pure series cases, no DB (the bot-behaviour-anomaly.test.ts precedent).
-// The advisor's unattributed verification mode leans on exactly these properties: a clean step
+// Its callers lean on exactly these properties: a clean step
 // is found at the right index, noise and thin data produce NO claim, nulls (no-data weeks) are
 // skipped rather than imputed, and anchors evaluate only the asked-about splits.
 import { describe, expect, it } from 'vitest';

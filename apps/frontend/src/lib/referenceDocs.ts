@@ -166,6 +166,46 @@ export function docTreeRows(sections: readonly ReferenceDocSectionEntry[]): DocT
   return rows;
 }
 
+/** One row of the collapsible contents tree: the row, and the rows nested under it. */
+export interface DocTreeNode {
+  row: DocTreeRow;
+  children: DocTreeNode[];
+}
+
+/**
+ * Nest `docTreeRows` into a tree: a row is the child of the nearest earlier row with a smaller
+ * depth. Rows with no such parent are the top level — the chapters the library shows first.
+ * Pure; reading order is kept at every level.
+ */
+export function docTreeNodes(rows: readonly DocTreeRow[]): DocTreeNode[] {
+  const roots: DocTreeNode[] = [];
+  const stack: DocTreeNode[] = [];
+  for (const row of rows) {
+    const node: DocTreeNode = { row, children: [] };
+    while (stack.length > 0 && stack[stack.length - 1]!.row.depth >= row.depth) stack.pop();
+    const parent = stack[stack.length - 1];
+    if (parent) parent.children.push(node);
+    else roots.push(node);
+    stack.push(node);
+  }
+  return roots;
+}
+
+/** Every key in the tree that has children — the set "Expand all" opens. */
+export function docTreeBranchKeys(nodes: readonly DocTreeNode[]): string[] {
+  const out: string[] = [];
+  const walk = (ns: readonly DocTreeNode[]): void => {
+    for (const n of ns) {
+      if (n.children.length > 0) {
+        out.push(n.row.key);
+        walk(n.children);
+      }
+    }
+  };
+  walk(nodes);
+  return out;
+}
+
 /** A chat citation's words: the document, then the section when there is one. */
 export function citationLabel(c: ReferenceDocCitation): string {
   return c.sectionTitle != null && c.sectionTitle !== '' ? `${c.docTitle} › ${c.sectionTitle}` : c.docTitle;

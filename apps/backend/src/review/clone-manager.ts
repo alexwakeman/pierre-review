@@ -345,42 +345,6 @@ export async function localPrDiff(
   });
 }
 
-/**
- * Prepare a worktree checked out at the tip of an arbitrary REF (e.g. the trunk
- * branch), under the per-repo lock. Fetches `ref` via an explicit tokenized URL (never
- * the token-less origin), resolves FETCH_HEAD, and adds a detached worktree there.
- * Used by the Bot Tuning Advisor's config-PR primitive (coding/git-ops.ts
- * commitFilesAndOpenPr), which needs a checkout at the default branch rather than the
- * PR head. Returns the resolved sha too. Throws if the ref can't be fetched.
- */
-export async function prepWorktreeAtRef(
-  owner: string,
-  name: string,
-  ref: string,
-  token: string = getGithubToken(),
-): Promise<{ repoCloneDir: string; worktreePath: string; sha: string }> {
-  return withRepoLock(`${owner}/${name}`, async () => {
-    const dir = await ensureClone(owner, name, token);
-    await git([
-      '-C',
-      dir,
-      'fetch',
-      '--no-tags',
-      '--force',
-      tokenizedUrl(owner, name, token),
-      ref,
-    ]);
-    const { stdout } = await execFileAsync(
-      'git',
-      ['-C', dir, 'rev-parse', 'FETCH_HEAD'],
-      { timeout: 10_000, maxBuffer: 1024 * 1024 },
-    );
-    const sha = stdout.trim();
-    const worktreePath = await addWorktree(dir, sha);
-    return { repoCloneDir: dir, worktreePath, sha };
-  });
-}
-
 /** Tear down a per-run worktree under the per-repo lock (matches prepWorktree). */
 export async function removeWorktreeLocked(
   owner: string,

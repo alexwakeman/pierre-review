@@ -1,7 +1,7 @@
-// Plugin-owned SQLite schema (local mode) for the Bot Tuning Advisor. Structural twin:
-// `schema.pg.ts` (same table + column names + nullability). Migrated by the host via
-// ctx.registerMigrations (the .sql under ../../migrations); this module is ONLY the typed
-// query surface.
+// ⚠ DORMANT. The Bot Tuning Advisor is REMOVED (2026-10-26, UI and backend); nothing reads or
+// writes these three tables any more. They stay — never dropped (plugin migration 0021 created
+// them) — and this module stays ONLY so retention.ts can still ERASE them for an account and the
+// platform isolation test can still seed them. Do not add a reader.
 //
 // Three tables, all account-scoped (⇒ listed in retention.ts eraseProByAccountId and seeded
 // in test/isolation.test.ts). None is PR-keyed: a recommendation references its created PR by

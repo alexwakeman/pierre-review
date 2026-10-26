@@ -72,11 +72,10 @@ export const STEPS = [
       await h.clickRole('button', /^People$/);
     },
   },
-  { name: 'feed:classification', run: async (h) => { await h.go('?view=activity&activityRepo=feed&feedTab=classification'); await explore(h, { max: 10, scope: 'main' }); } },
   { name: 'feed:isolated', run: (h) => h.go('?view=activity&activityRepo=feed&feedPr=113') },
 
   // ── Bots Monitoring ──
-  ...['roi', 'themes', 'advisor', 'benchmark'].map((t) => ({
+  ...['roi', 'themes', 'benchmark', 'classification'].map((t) => ({
     name: `bots:${t}`,
     run: async (h) => {
       await h.go(`?view=activity&activityRepo=bots&botsTab=${t}`);

@@ -191,8 +191,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(dailyBriefRoutes);
   // Dependency auto-merge: Pending → Dependencies' "Merge or arm all" + the per-workspace setting.
   await app.register(dependencyMergeRoutes);
-  // Chronology (no AI, no GitHub): the Bot Tuning Advisor's evidence-
-  // cell machinery aimed at the HUMAN lane — where review time goes, with sample floors and a
+  // Chronology (no AI, no GitHub): evidence cells over the HUMAN lane — where review time goes, with sample floors and a
   // NAMED refusal for anything that cannot clear one. Every sentence it returns is templated in
   // db/pr-intervals.ts.
   await app.register(flowRoutes);

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type DragEvent } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent } from 'react';
 import {
   REFERENCE_DOC_CRAWL_MAX_DEPTH,
   REFERENCE_DOC_CRAWL_MAX_PAGES,
@@ -24,14 +24,17 @@ import {
   DOC_UPLOAD_ACCEPT,
   LIBRARY_INDEX_PATH,
   docStageLabel,
+  docTreeBranchKeys,
+  docTreeNodes,
   docTreeRows,
   isDocBuilding,
+  type DocTreeNode,
   uploadRefusal,
 } from '../../lib/referenceDocs.js';
 import { useDocsView, type DocsOpen } from '../../store/docsView.js';
 import { useFilters } from '../../store/filters.js';
 import { AiRunGate } from '../AiSetup.js';
-import { BookIcon, ChevronIcon, UploadIcon } from '../Icons.js';
+import { BookIcon, ChevronIcon, CollapseAllIcon, ExpandAllIcon, UploadIcon } from '../Icons.js';
 import { InfoButton } from '../InfoModal.js';
 import { DocsChat } from './DocsChat.js';
 import { DocsViewer } from './DocsViewer.js';
@@ -98,42 +101,130 @@ function BuildProgress({ doc }: { doc: ReferenceDoc }): JSX.Element {
   );
 }
 
+// One document's contents, as a COLLAPSED TREE: only the top-level chapters show at first, each
+// row with rows under it carries its own disclosure button (`aria-expanded`), and "Expand all" /
+// "Collapse all" sit above. The open set is local to this mount — closing the document forgets it.
 function DocTree({ workspaceId, doc, open, onOpen }: { workspaceId: number; doc: ReferenceDoc; open: DocsOpen; onOpen: (path: string, anchor: string | null) => void }): JSX.Element {
   const tree = useReferenceDocTree(workspaceId, doc.id, true, doc.builtAt);
+  const nodes = useMemo(() => (tree.data ? docTreeNodes(docTreeRows(tree.data.sections)) : []), [tree.data]);
+  const branchKeys = useMemo(() => docTreeBranchKeys(nodes), [nodes]);
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
   if (tree.isPending) return <p className={`py-1 pl-6 text-[11px] ${MUTED}`}>Loading…</p>;
   if (tree.isError) return <p className="py-1 pl-6 text-[11px] text-rose-700 dark:text-rose-400">{tree.error.message}</p>;
-  const rows = docTreeRows(tree.data.sections);
-  if (rows.length === 0) return <p className={`py-1 pl-6 text-[11px] ${MUTED}`}>No sections.</p>;
+  if (nodes.length === 0) return <p className={`py-1 pl-6 text-[11px] ${MUTED}`}>No sections.</p>;
+  const toggle = (key: string): void =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  const allOpen = branchKeys.every((k) => expanded.has(k));
   return (
-    <ul className="space-y-px py-1" aria-label={`Contents of ${doc.title}`}>
-      {rows.map((r) => {
-        const indent = { paddingLeft: `${0.75 + r.depth * 0.75}rem` };
-        if (r.kind === 'group') {
-          return (
-            <li key={r.key} style={indent} className="py-0.5 text-[11px] font-medium text-gray-700 dark:text-gray-200">
-              {r.title}
-            </li>
-          );
-        }
-        const anchor = r.kind === 'heading' ? r.anchor : null;
-        const on = open.path === r.path && open.anchor === anchor;
-        return (
-          <li key={r.key} style={indent}>
-            <button
-              type="button"
-              onClick={() => onOpen(r.path, anchor)}
-              aria-current={on ? 'true' : undefined}
-              title={r.kind === 'section' && r.summary !== '' ? r.summary : undefined}
-              className={`block w-full rounded px-1 py-0.5 text-left text-xs ${
-                on ? 'bg-sky-50 font-medium text-sky-800 dark:bg-sky-950/40 dark:text-sky-200' : 'text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800/50'
-              } ${r.kind === 'heading' ? 'text-[11px] text-gray-600 dark:text-gray-300' : ''}`}
-            >
+    <div className="py-1">
+      {branchKeys.length > 0 && (
+        <div className="flex justify-end gap-0.5 px-1.5 pb-0.5" data-testid="doc-tree-controls">
+          <button
+            type="button"
+            onClick={() => setExpanded(new Set(branchKeys))}
+            disabled={allOpen}
+            aria-label={`Expand all of ${doc.title}`}
+            title="Expand all"
+            className={`${COLLAPSE_BUTTON} disabled:opacity-40`}
+          >
+            <ExpandAllIcon size={13} />
+          </button>
+          <button
+            type="button"
+            onClick={() => setExpanded(new Set())}
+            disabled={expanded.size === 0}
+            aria-label={`Collapse all of ${doc.title}`}
+            title="Collapse all"
+            className={`${COLLAPSE_BUTTON} disabled:opacity-40`}
+          >
+            <CollapseAllIcon size={13} />
+          </button>
+        </div>
+      )}
+      <ul className="space-y-px" aria-label={`Contents of ${doc.title}`} data-testid="doc-tree">
+        {nodes.map((n) => (
+          <DocTreeItem key={n.row.key} node={n} level={0} expanded={expanded} onToggle={toggle} open={open} onOpen={onOpen} />
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function DocTreeItem({
+  node,
+  level,
+  expanded,
+  onToggle,
+  open,
+  onOpen,
+}: {
+  node: DocTreeNode;
+  level: number;
+  expanded: ReadonlySet<string>;
+  onToggle: (key: string) => void;
+  open: DocsOpen;
+  onOpen: (path: string, anchor: string | null) => void;
+}): JSX.Element {
+  const r = node.row;
+  const hasChildren = node.children.length > 0;
+  const isOpen = hasChildren && expanded.has(r.key);
+  const indent = { paddingLeft: `${0.25 + level * 0.75}rem` };
+  const anchor = r.kind === 'heading' ? r.anchor : null;
+  const on = r.kind !== 'group' && open.path === r.path && open.anchor === anchor;
+  const titleClass = 'block min-w-0 flex-1 py-0.5 text-left text-[11px] font-medium text-gray-700 dark:text-gray-200';
+  return (
+    <li>
+      <div style={indent} className="flex items-start gap-0.5">
+        {hasChildren ? (
+          <button
+            type="button"
+            onClick={() => onToggle(r.key)}
+            aria-expanded={isOpen}
+            aria-label={`${isOpen ? 'Collapse' : 'Expand'} ${r.title}`}
+            className="mt-0.5 shrink-0 rounded p-0.5 text-gray-500 hover:bg-gray-100 hover:text-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100"
+          >
+            <ChevronIcon dir={isOpen ? 'down' : 'right'} size={10} />
+          </button>
+        ) : (
+          <span className="w-[18px] shrink-0" aria-hidden="true" />
+        )}
+        {r.kind === 'group' ? (
+          hasChildren ? (
+            // A heading with no text of its own: its title opens and closes it as well (the chevron
+            // beside it is the keyboard control, so this one stays out of the tab order).
+            <button type="button" onClick={() => onToggle(r.key)} tabIndex={-1} className={titleClass}>
               {r.title}
             </button>
-          </li>
-        );
-      })}
-    </ul>
+          ) : (
+            <span className={titleClass}>{r.title}</span>
+          )
+        ) : (
+          <button
+            type="button"
+            onClick={() => onOpen(r.path, anchor)}
+            aria-current={on ? 'true' : undefined}
+            title={r.kind === 'section' && r.summary !== '' ? r.summary : undefined}
+            className={`block min-w-0 flex-1 rounded px-1 py-0.5 text-left text-xs ${
+              on ? 'bg-sky-50 font-medium text-sky-800 dark:bg-sky-950/40 dark:text-sky-200' : 'text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800/50'
+            } ${r.kind === 'heading' ? 'text-[11px] text-gray-600 dark:text-gray-300' : ''}`}
+          >
+            {r.title}
+          </button>
+        )}
+      </div>
+      {isOpen && (
+        <ul className="space-y-px">
+          {node.children.map((c) => (
+            <DocTreeItem key={c.row.key} node={c} level={level + 1} expanded={expanded} onToggle={onToggle} open={open} onOpen={onOpen} />
+          ))}
+        </ul>
+      )}
+    </li>
   );
 }
 

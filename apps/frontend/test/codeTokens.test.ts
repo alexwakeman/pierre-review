@@ -17,7 +17,7 @@ import { readFileSync } from 'node:fs';
 // washes still are — they encode a merge state and nothing else paints them. The seven syntax
 // colours are not: they moved to `.code-hl` and now paint on the Changes tab's diff rows, thread
 // code anchors, the timeline marker popover, Claude Review's finding hunks and suggestions, the
-// addressed-check evidence patch and the advisor's generated config. Every one of those is a
+// addressed-check evidence patch. Every one of those is a
 // GROUND, and `CODE_GROUNDS` below lists them all — a surface added without a ground here is a
 // surface nobody measured.
 //
@@ -297,8 +297,6 @@ const CODE_GROUNDS: { name: string; light: RGB; dark: RGB }[] = [
   // ClaudeReviewTab: FindingHunk, then the suggestion block.
   { name: 'finding hunk', light: tw('gray-50'), dark: over(tw('gray-900'), 0.6, DARK_BG) },
   { name: 'suggestion block', light: tw('gray-100'), dark: tw('gray-800') },
-  // BotAdvisorPanel's generated config file.
-  { name: 'generated config', light: tw('gray-50'), dark: over(tw('gray-900'), 0.4, DARK_BG) },
   // BasePopover (the resolver's compare-base view) sits on the popover card, not on a wash.
   { name: 'popover card', light: tw('white'), dark: tw('gray-900') },
 ];

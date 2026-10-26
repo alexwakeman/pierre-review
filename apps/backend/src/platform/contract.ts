@@ -160,11 +160,10 @@ export interface ApplyAndPushResult {
   prUrl?: string;
 }
 
-// The coding seams (applyAndPush, commitFilesAndOpenPr) and core's own update-from-trunk throw
-// an Error carrying `.code` on the expected failures, so the plugin's routes can map them to HTTP
-// status without importing a host class. Every member stays even where no seam throws it any
-// more: core's `updatePrBranchFromTrunk` throws the trunk ones, `coding/git.ts`'s `codedError` is
-// typed by this union, and the Bot Tuning Advisor's routes match TRUNK_FETCH_FAILED.
+// The coding paths (applyAndPush) and core's own update-from-trunk throw an Error carrying `.code`
+// on the expected failures, so routes can map them to HTTP status without importing a host class.
+// Every member stays even where nothing throws it any more: core's `updatePrBranchFromTrunk`
+// throws the trunk ones, and `coding/git.ts`'s `codedError` is typed by this union.
 //   'HEAD_MOVED'           — existing-branch push and the live head !== baseSha (→ 409)
 //   'PUSH_DENIED'          — the account lacks write / an un-pushable fork (→ 422)
 //   'APPLY_FAILED'         — a stored patch didn't apply cleanly (→ 422)
@@ -172,7 +171,7 @@ export interface ApplyAndPushResult {
 //   'MERGE_FAILED'         — the merge failed for a non-conflict reason (→ 422)
 //   'REBASE_FAILED'        — the rebase failed for a non-conflict reason (→ 422)
 //   'TRUNK_FETCH_FAILED'   — the trunk ref couldn't be fetched (→ 422)
-//   'BRANCH_EXISTS'        — commitFilesAndOpenPr's target branch already exists (→ 409)
+//   'BRANCH_EXISTS'        — a NEW push target branch already exists (→ 409)
 export type CodingErrorCode =
   | 'HEAD_MOVED'
   | 'PUSH_DENIED'
@@ -206,40 +205,6 @@ export interface GithubSeam {
     jobId: number,
     tail?: number,
   ): Promise<CheckLogsResponse>;
-  openPullRequest(
-    accountId: number,
-    args: {
-      owner: string;
-      name: string;
-      head: string;
-      base: string;
-      title: string;
-      body: string;
-    },
-  ): Promise<{ number: number; url: string }>;
-  // Repo-file read primitives (advisor discovery + adapter config reads). Status-returning,
-  // never throwing — a 404 is the ordinary "no config file yet" outcome. `ref` defaults to
-  // the repo's default branch (the config that governs FUTURE reviews); file bytes come back
-  // raw via the GitHub raw media type. ⚠ Whatever comes back is REPO-AUTHORED, i.e.
-  // attacker-authored in cloud: callers must size-cap before parsing and never execute.
-  readRepoFile(
-    accountId: number,
-    args: { owner: string; name: string; path: string; ref?: string },
-  ): Promise<{ status: number; ok: boolean; text: string }>;
-  listRepoDir(
-    accountId: number,
-    args: { owner: string; name: string; path: string; ref?: string },
-  ): Promise<{
-    status: number;
-    ok: boolean;
-    entries: { name: string; path: string; type: 'file' | 'dir'; size: number }[];
-  }>;
-  // File an issue (the advisor's "send the brief to the bot's own repo" output). Issues are
-  // NOT synced — the caller stores the returned URL itself.
-  openIssue(
-    accountId: number,
-    args: { owner: string; name: string; title: string; body: string },
-  ): Promise<{ number: number; url: string }>;
   // TWO-SHA COMPARE (apiVersion 16) — the per-file unified patches between two commits, the
   // grounding evidence behind the `addressed` judgement ("what actually changed since the
   // comment"). ONE REST call covers every path in `paths`, so callers coalesce by
@@ -277,48 +242,6 @@ export interface GithubSeam {
   ): Promise<PrReviewCommentHunks>;
 }
 
-export interface CommitFilesAndOpenPrArgs {
-  accountId: number;
-  owner: string;
-  name: string;
-  // LITERAL file contents — the adapter merged them against the fetched originals upstream;
-  // this seam writes bytes, it never merges. Paths are repo-relative; anything under
-  // .github/workflows/ is refused outright (no `workflow` OAuth scope — the push would be
-  // rejected AFTER the branch was created), as is any absolute or dot-dot path.
-  files: { path: string; content: string }[];
-  branch: string; // NEW branch name; an existing branch is a refusal (BRANCH_EXISTS), never a force-push
-  title: string;
-  body: string;
-}
-
-export interface CommitFilesAndOpenPrResult {
-  prNumber: number;
-  url: string;
-  // The resync-after-write contract: false = the PR EXISTS on GitHub but the confirming sync
-  // didn't land locally yet — the caller's copy must say "it'll show up shortly", never offer
-  // a retry (a retry double-opens PRs).
-  visible: boolean;
-}
-
-// apiVersion 22: `generateFix` and `applyAndPush` LEFT this seam with the agentic fixer (core,
-// coding/ai-fix/, reached through review/agent-context.ts). Their arg/result types stay below as
-// host-internal types — coding/agent.ts and coding/git-ops.ts still speak them.
-export interface CodingSeam {
-  // The advisor's config-PR primitive: worktree at the DEFAULT branch → write files →
-  // commit → push a NEW branch (never force) → open the PR → syncOnePr visibility tail.
-  commitFilesAndOpenPr(args: CommitFilesAndOpenPrArgs): Promise<CommitFilesAndOpenPrResult>;
-  // ⚠ FOUR MEMBERS WERE DELETED OUTRIGHT HERE — the AI Fix trunk-reconciliation seams
-  // (`mergePreview`, `rebaseResolve`, `mergeResolveAndPush`, `pushResolved`), with their arg /
-  // result types and the rebase/merge/push `CodingProgress` phases. A fix now pushes as-is
-  // through `applyAndPush`. That FAILS the "narrow additive" test (a removed member is not a
-  // trailing optional field), and apiVersion deliberately STAYS 21 anyway — the `setLocalKey`
-  // precedent on ReviewSeam below: bumping would turn "a few dead routes throw against a lagging
-  // submodule" into "the ENTIRE plugin goes dark, silently".
-  // ⚠ THE PRICE IS A LANDING REQUIREMENT: this host is NOT runtime-compatible with a plugin
-  // commit that still registers the merge-preview / rebase / merge-push routes — the version gate
-  // passes and those routes throw `ctx.coding.X is not a function`. Host commit, plugin commit
-  // and GITLINK MOVE land together. The new SPA calls none of them.
-}
 
 // ---- Claude Review seam (agentic PR review) -----------------------------------
 // Like ctx.coding, the security-sensitive review INFRA lives in CORE: the Agent-SDK run
@@ -826,26 +749,6 @@ export interface ProHostQueries {
     window: BotWindowKind,
     scope: BotScopeWire,
   ): Promise<unknown>;
-  // Bot Tuning Advisor evidence cells (CORE, deterministic — per-(bot × path-bucket) /
-  // (bot × category) / (bot × partner) aggregation over threads + ml_comment_labels, with
-  // cell-emission floors + the path-coverage disclosure). Returns AdvisorFindingsPayload;
-  // the plugin casts it and derives intents. Nothing here ever feeds botVerdict.
-  getAdvisorFindings(
-    accountId: number,
-    window: BotWindowKind,
-    scope: BotScopeWire,
-  ): Promise<unknown>;
-  // The advisor's verification loop (CORE math): five weekly series over the 12-week span,
-  // split before/after `anchorMs` — or unattributed changepoint detection when null. The
-  // PLUGIN resolves anchors (config events ∪ merged advisor PRs) and passes a timestamp;
-  // this query never sees a recommendation, which keeps measurement independent of emission.
-  // Returns AdvisorEffectPanel (cast by the plugin).
-  getBotEffectPanel(
-    accountId: number,
-    scope: BotScopeWire,
-    botUserId: number,
-    anchorMs: number | null,
-  ): Promise<unknown>;
   // ---- Period-over-period reporting (apiVersion 20) ----
   // The closed, ordered 12-metric vector for ONE window, plus the fingerprint the plugin stores
   // to decide whether a saved report has gone `stale`. Returns PeriodMetricsResult (cast by the
@@ -1087,15 +990,13 @@ export interface ProHostQueries {
   // thread opened, no review comment left, no review submitted (a body-only "nothing to flag" pass
   // counts as work). The same evidence union the Bots ROI table calls a reviewer `dormant` on.
   //
-  // ⚠ IT EXISTS SO TWO PAID SURFACES CANNOT DISAGREE ABOUT WHETHER A BOT IS RUNNING. The Advisor
-  // already hides dormant reviewers (the filter sits at the END of `getAdvisorFindings`, over
-  // complete evidence); the Benchmark's placement route hides them through this seam. A second
-  // dormancy rule computed plugin-side would be a different sentence about the same reviewer.
+  // ⚠ ONE DORMANCY RULE. The Benchmark's placement route hides dormant reviewers through this seam;
+  // a second rule computed plugin-side would be a different sentence about the same reviewer.
   //
   // ⚠ THE WINDOW IS FIXED AND MUST STAY FIXED — it is NOT the ROI table's user-flipped chip. A
   // workspace's peer placement may not vanish because somebody changed a window selector on
-  // another tab. The grain is the WORKSPACE (membership, never a `repoIds` narrowing), because the
-  // Advisor cannot narrow by repository at all and a narrowed benchmark request builds no rollup.
+  // another tab. The grain is the WORKSPACE (membership, never a `repoIds` narrowing), because a
+  // narrowed benchmark request builds no rollup.
   //
   // ⚠ CANDIDATES ARE THE CALLER'S — this seam never re-decides who is a bot, and the result is
   // always a subset of what was passed in.
@@ -1274,9 +1175,8 @@ export interface ProContext {
   // (apiVersion 23: `registerPrDetailEnricher` and `registerRepoSyncedHook` LEFT. Both existed only
   // for the plugin's Jira/Linear ticket links and its ticket worker; core's tracker computes
   // PrDetail.tickets itself (tracker/enricher.ts) and registers its own post-walk kick.)
-  // GitHub reads/writes + the advisor's config-PR primitive (per-account). Inert in OSS.
+  // GitHub reads (per-account).
   github: GithubSeam;
-  coding: CodingSeam;
   // The merge-conflict resolver's per-hunk suggestion seam (`conflict/seam.ts`). The plugin runs
   // the model; the HOST owns the hunk, the validators and the suggestion store.
   //

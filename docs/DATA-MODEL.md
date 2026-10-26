@@ -129,8 +129,8 @@ isolation as above (`accountId` denormalized onto the anchor tables;
   `avatarUrl` — selected for `... on Bot` too, so an App bot carries its vendor logo (Feed → Bot
   classification's card logo; coalesced, never cleared), `githubType` — the GraphQL author `__typename`, fed to the bot classifier;
   `appSlug` — the `performed_via_github_app.slug` the app-attribution probe persists,
-  fill-or-update and never cleared by a later app-less comment; feeds the advisor's
-  discovery tier); **global**.
+  fill-or-update and never cleared by a later app-less comment; no reader since the Bot Tuning
+  Advisor was removed); **global**.
 - **`pullRequests`** — PR metadata, state, draft, timestamps, CI/mergeable, etc.; carries
   `accountId`, unique `(accountId, githubNodeId)`. `reviewDecision` (`approved` |
   `changes_requested` | `review_required` | null) is GitHub's OVERALL review verdict — the
@@ -836,7 +836,7 @@ Three vocabularies describe an automated actor, and they are **orthogonal axes, 
 | Price | `monthlyCents` + `costModel` | what does it cost | (no provenance; one writer) |
 
 All three live in ONE `workspace_reviewers` row — see **`workspaceReviewers`** above. Judgement and identity are edited
-on Feed → Bot classification; price through the separate `PUT …/cost`.
+on Bots Monitoring → Classification; price through the separate `PUT …/cost`.
 
 ### `ReviewerRole` has SIX members, and EXACTLY ONE is the reviewer cohort
 

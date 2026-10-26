@@ -56,8 +56,8 @@ Three layers, deliberately separated:
      two boards AND the four self-describing tab kinds, spelled as the `Tab.key` VERBATIM
      (`pr-detail:123`, `pr-focus:123`, `user-activity:45`, `bot-detail:45` — one vocabulary, not a
      URL dialect); the narrowings a reader navigates TO are keys of their own (`attn=<InsightKind>`
-     for the attention board, `feedPr=<id>` for the Feed, `feedTab`/`botsTab` for the two Activity
-     sub-tab strips, `prTab` for PrDetail's inner tab, which is a `{prId, tab}` PAIR in the store
+     for the attention board, `feedPr=<id>` for the Feed, `botsTab` for the Bots sub-tab strip (a
+     legacy `feedTab` is parsed, never emitted), `prTab` for PrDetail's inner tab, which is a `{prId, tab}` PAIR in the store
      so one PR's tab can't be read on another's screen).
    - ⚠ **NAVIGATIONS PUSH, REFINEMENTS REPLACE — decided by DIFFING `NAV_KEYS`**, never by a
      `push:true` argument threaded through call sites (the 15th caller forgets) and never per
@@ -872,7 +872,7 @@ Review finding deep-link. Do not add a third.
   an ANSWER — a LOADED PR whose client gate found nothing (`hasBots` is a superset of the server's
   set, and the fetch is deliberately never made) or a SETTLED `prBotBehaviour`; the strip also lists
   the tab while that answer is in flight, so a reader who arrived on it never sees a strip with
-  nothing highlighted. Same rule as `feedInnerTab` / `botsInnerTab`, one layer down.
+  nothing highlighted. Same rule as `botsInnerTab` / `insightsInnerTab`, one layer down.
 - `FileDiffView` matches the target to **at most ONE block**, and a **renamed file is addressable
   under either name** (blocks are keyed on the NEW path; a caller may hold the old one).
 - Inside the block: **an explicit reveal always wins over the collapse heuristic** — including
@@ -1584,12 +1584,14 @@ but broken deep links).
   legacy login-string classification PrDetail's bot chips still use; and every figure comes from
   the SAME folds the Threads tab uses (`rollupCounts`/`threadSeverities`/
   `resolvableBotThreadIds`) restricted to the bot subset, so card and tab cannot disagree.
-- **Bots view is `ROI ('roi' = Measure) | Themes | Advisor | Benchmark`** (`'settings'` LEFT the
-  union: bot classification is the Feed → Bot classification tab, bullet below)
+- **Bots view is `ROI ('roi' = Measure) | Themes | Benchmark | Classification`** (`'settings'` LEFT
+  the union long ago; `'advisor'` LEFT 2026-10-26 with the Bot Tuning Advisor; `'classification'`
+  JOINED 2026-10-26 from the Feed, bullet below)
   (`botsInnerTab` lost `'behaviour'` — transient + URL-silent, so member removal is safe — gained
   `'benchmark'`, and has since REGAINED `'themes'`; see "The Bots Themes panel" below). `'themes'`
-  is LISTED only while `me.ai.enabled` and `'advisor'` only on the rail (`repoId == null`); both
-  degrade to `'roi'` in `effectiveBotsTab` (render-only, never written back). Inside `BotRoiPanel`:
+  is LISTED only while `me.ai.enabled` and `'classification'` only on the rail (`repoId == null`);
+  both degrade to `'roi'` in `effectiveBotsTab` (render-only, never written back), and so does any
+  value outside `BOTS_INNER_TABS` (a stale `'advisor'`). Inside `BotRoiPanel`:
   the vendor table, its keep / tune / rarely used verdicts (the label for the `noisy` verdict id),
   the **Inflation column** (the weekly sparkline stays separately conditional on
   `mlInflation.weekly`, an extra scan width — as does `InflationHistoryChart`, the enlarged twin of
@@ -1611,11 +1613,13 @@ but broken deep links).
   `<th>`, the `<td>` and the "set a monthly price" clause, and gets a REPLACEMENT sentence naming
   the reason and pointing at the rail — an elision alone reads as a bug or a permissions glitch,
   and invites the next reader to "restore" the column. ⚠ **Do NOT simplify `showCost` to `true`.**
-- **Bot classification is a FEED sub-tab** — the Feed strip is `Feed | Bot
-  classification` (`feedInnerTab` ∈ `FEED_INNER_TABS`, `?feedTab=classification`; the "Discussion
-  themes" tab is REMOVED 2026-10-18 and a legacy `?feedTab=themes` lands on the Feed, because the
-  URL reader seats only listed values; the visible tab is DERIVED by `effectiveFeedTab` in
-  `Activity/feedTabsModel.ts`, never written back). It mounts `BotSettingsPanel` →
+- **Bot classification is a BOTS MONITORING tab** (`?activityRepo=bots&botsTab=classification`,
+  rail only). It was the Feed's "Bot classification" sub-tab until 2026-10-26; the Feed has no
+  sub-tabs now (`feedInnerTab`, `FEED_INNER_TABS` and `Activity/feedTabsModel.ts` are deleted). ⚠
+  Two legacy URLs land here, both mapped by `readFromUrl`: `?activityRepo=feed&feedTab=classification`
+  (→ `activityRepo='bots'` + `botsInnerTab='classification'`) and `?activityRepo=bots&botsTab=settings`.
+  `feedTab` stays in `NAV_KEYS` (parsed, never emitted), like `attnPersonal`. It mounts
+  `BotSettingsPanel` →
   `DetectedReviewersTable`: one CARD per bot in a responsive grid (1 column on a phone, 2 from `md`,
   3 at `2xl`) — the account's own GitHub avatar (an App bot's avatar IS its vendor logo; `... on Bot
   { avatarUrl }` is selected by the sync queries for this), else a monogram tile on the vendor colour
@@ -1623,9 +1627,8 @@ but broken deep links).
   the vendor colour as a thin LEFT accent (non-text use only); a person-judged row drawn muted. Then
   the controls: Counts as Bot | Person, Role + the explicit **Apply role** button, Vendor + label +
   Save name, the two resets. The PRICE editor ("Price for this Workspace") and the workspace total
-  sit on the card too. ⚠ A legacy `?activityRepo=bots&botsTab=settings` is mapped
-  by `readFromUrl` to `activityRepo=feed` + `feedInnerTab='classification'`. Tests:
-  `test/feedInnerTab.test.ts`, `test/botAvatar.test.ts`, `test/urlHistory.test.ts`.
+  sit on the card too. Tests: `test/botsBenchmark.test.ts` (the derive), `test/botAvatar.test.ts`,
+  `test/urlHistory.test.ts` (both legacy URLs).
 
 ### Bots → Benchmark (the peer-cohort placement)
 
@@ -1658,15 +1661,15 @@ in a per-vendor activity band and ranked against the fitted cell. Tests:
     `benchmark-no-live-reviewers` (`rollup === []` — the fold RAN and no reviewer has commented
     yet). ⚠ A `?? []` collapsing the last two told a reader whose bots simply had not commented that
     their BUILD was deficient — the ordinary state right after classifying a reviewer in
-    Feed → Bot classification.
+    Bots Monitoring → Classification.
   - The truncation note's remedy clause ("open a repository's own Bots tab", plus the sentence
     saying money is withheld while counters and spread still render) is **rail-only**; on the
     repository tab that advice is a no-op, and it shipped unconditional.
 - It is the only place in the product that answers "is this bot NORMAL?" — the tab is always
   listed (`benchmark-panel`).
 - ⚠ **THE VISIBLE TAB IS DERIVED AND `'benchmark'` IS NEVER CORRECTED.** `effectiveBotsTab()`
-  (in `benchmarkModel.ts`, so it can be tested without a renderer) degrades only `'advisor'` (off
-  the rail) and `'themes'` (AI off); `?botsTab=benchmark` is parsed off `BOTS_INNER_TABS` itself.
+  (in `benchmarkModel.ts`, so it can be tested without a renderer) degrades only `'classification'`
+  (off the rail), `'themes'` (AI off) and a value outside the union; `?botsTab=benchmark` is parsed off `BOTS_INNER_TABS` itself.
 - ⚠ **THE ANOMALY LIST IS THE HEADLINE; the distributions are evidence beneath it.** A percentile
   alone is trivia — the server's four templated `action` sentences are the product. Each finding
   renders BOTH gates separately (`share` and `magnitude`), never their conjunction, so a reader can
@@ -1971,7 +1974,7 @@ sub-tab shares one — never duplicate the field. The body's old `max-h-[32rem] 
 wrapper is gone with the move: it existed so a long report could not push the deterministic
 Measure surface off screen, and nothing sits beneath the panel on its own tab.
 
-⚠ **IT WORKS ON THE PER-REPO BOTS CONSOLE TOO**, unlike `'advisor'`. `BotsView` passes `repoScope`
+⚠ **IT WORKS ON THE PER-REPO BOTS CONSOLE TOO**, unlike `'classification'`. `BotsView` passes `repoScope`
 (`[repoId]` on the console, `null` on the rail), the client gives the narrowed report its own
 cache slot via `repoKeySlot`, and the platform's `scope_key` carries the matching `|r:` suffix — so a
 repo's Bots tab gets its own real report rather than the workspace's. `showThemes` is therefore
@@ -2026,7 +2029,7 @@ sprint. The API route keeps its old name (`GET /api/sprint-graph`); only the SPA
   so far. The store's `sprintInnerTab` (`'paths' | 'themes' | 'people' | 'merged'`) is mirrored to
   `?sprintTab=paths|people|merged` (the `'themes'` default omitted, the key emitted ONLY beside
   `view=sprint`); the render reads `effectiveSprintTab` (`Activity/sprintRailModel.ts`), the
-  `feedInnerTab` / `insightsTab` rule. URL only, so no `FILTER_STORAGE_VERSION` bump.
+  `botsInnerTab` / `insightsTab` rule. URL only, so no `FILTER_STORAGE_VERSION` bump.
 - ⚠ **Legacy links still land ON THE TAB** (`landingTabFromUrl`, test/landingTab.test.ts +
   test/urlHistory.test.ts): the rail line's `?activityRepo=sprint` (with `view=activity` or no view;
   its `sprintTab` kept), and the older Reports tabs' `?insightsTab=sprint|merged` (only when the link
@@ -2238,7 +2241,7 @@ per-head count — and the server sends no actor ids, which makes that structura
 convention this file has to remember.
 
 - ⚠ **The visible tab is DERIVED, never written back** — `effectiveTab` normalises an unknown
-  `?insightsTab=` FOR THE RENDER ONLY. Exactly the `feedInnerTab` / `botsInnerTab` rule: a
+  `?insightsTab=` FOR THE RENDER ONLY. Exactly the `botsInnerTab` / `sprintInnerTab` rule: a
   corrective `set…()` permanently forgets the reader's choice.
 - ⚠ **`effectiveInsightsTab` keeps exactly one job** — normalising a value outside the union. If a
   member ever becomes conditional, the condition lives in the PANE, never in the tab resolution: a
@@ -3592,7 +3595,7 @@ the source.
   `useClaudeReview` key hooks went with it) and `BotSection` (an explainer pointing at
   Activity → Bots → Settings plus one toggle, which became a per-delivery field inside
   `SlackSection`). ⚠ `data-testid="bot-settings-section"` died with the latter — `pnpm shots`' 7d
-  targets `bot-settings-panel` on Feed → Bot classification instead.
+  targets `bot-settings-panel` on Bots Monitoring → Classification instead.
 
 ## The AI-surface palette (`ai-*` tokens) — and the purple that STAYS
 
@@ -3698,7 +3701,6 @@ and the `.code-hl` palette above — with exactly one deliberate exception, `Mar
 | Thread code anchor (collapsed line and expanded hunk) | `ThreadView/CodeAnchor.tsx` → `DiffHunk.tsx` | `thread.path` |
 | Timeline marker popover's anchor line | `Timeline/MarkerPopover.tsx` | `thread.path` |
 | Claude Review finding hunk + its suggestion | `ClaudeReviewTab.tsx` | `finding.path` |
-| Bot Advisor's generated config file | `Activity/BotAdvisorPanel.tsx` | `f.path` |
 | Conflict resolver's three panes, compare-base popover | `conflicts/CodeCell.tsx`, `BasePopover.tsx` | the session's file |
 
 - ⚠ **A DIFF IS NOT SOURCE, SO IT GOES THROUGH `highlightDiffRows` (`lib/diff.ts`), NEVER
@@ -3738,7 +3740,7 @@ and the `.code-hl` palette above — with exactly one deliberate exception, `Mar
   every gate they cannot clear; the null branch is React's ordinary text rendering. Nothing else
   goes through that door, on any surface.
 - **Not code, and deliberately left plain:** the AI-Fix agent's `recentActivity` log, `CheckList`'s
-  CI logs and `BotAdvisorPanel`'s brief markdown. None of them has a file path, so none of them has a language.
+  CI logs. Neither has a file path, so neither has a language.
 
 ⚠ **A hex a component DERIVES a wash from cannot become a var.** `FeedView`'s `itemGlyph`
 returns `{color}` and the chip paints `background: glyph.color + '1a'`. A theme-flipping glyph would
@@ -4534,6 +4536,13 @@ conversation on screen, the narrow-width Read / Ask tab) per WORKSPACE in the mo
 - The left tree is built from the structured `sections` (`docTreeRows`, the shape of CONTENTS.md),
   never by parsing CONTENTS.md; it is fetched only while that document is expanded, keyed on
   `builtAt` so a finished rebuild shows its new tree.
+- **The left tree is COLLAPSED by default** (2026-10-26): `docTreeNodes` nests the flat rows (a row is
+  the child of the nearest earlier row with a smaller depth), only the top level renders at first,
+  and each row with children carries its own chevron button (`aria-expanded`, keyboard reachable; a
+  group heading's title toggles too but stays out of the tab order). "Expand all" / "Collapse all"
+  (`ExpandAllIcon` / `CollapseAllIcon`, `aria-label` + `title`) sit above it, open every
+  `docTreeBranchKeys` key or none, and disable themselves when there is nothing left to do. The open
+  set is `useState` in `DocTree` — closing the document forgets it; nothing reaches the store or URL.
 - **Build progress**: an SSE stream per document the server is WORKING ON (`GET /api/docs/:id/stream`)
   patches its row in the list cache; `done` patches the status and invalidates the list, trees and
   sections. ⚠ **A `queued` row is NEVER streamed and at most `MAX_DOC_STREAMS` (2) are open**: each
@@ -4633,8 +4642,8 @@ shorter form of each rule; this is the full wording.
 ### The Feed
 
 - **The Feed is a STREAM (`FeedView`) and nothing else** — no survey panels. It has no My Turn /
-  Needs review / Claude / CI-failure items (Pending owns them). Bot CLASSIFICATION is the Feed's
-  "Bot classification" sub-tab. The "PR events" pill's `Kind` chip row is a PARTITION (empty =
+  Needs review / Claude / CI-failure items (Pending owns them). It has no sub-tabs: bot CLASSIFICATION is
+  Bots Monitoring → Classification (since 2026-10-26). The "PR events" pill's `Kind` chip row is a PARTITION (empty =
   all four), client-side, NOT cleared when the parent goes off. A default flip on a persisted key
   needs a `FILTER_STORAGE_VERSION` bump (now v5; `migratePersistedFilters` steps CHAIN).
 

@@ -265,8 +265,8 @@ IndexedDB-persisted), **filter/selection** in Zustand `store/filters.ts` (`works
 scope), **tabs** in `store/pinnedTabs.ts` (one board mounts at a time), **URL** mirrored by
 `useUrlState.ts`. App lands on **Activity → Open PRs** (headed by the trunk strip). Fixed tabs:
 Activity · This Sprint · Timeline. Pending is `?activityRepo=attention`; the Insights rail entry is
-labelled **"Reports"** (store/URL value stays `'insights'`). Every surface is available; the only
-gates are `me.ai.enabled` (agentic) and `me.mlSeverity` (ML queries).
+labelled **"Reports"** (store/URL value stays `'insights'`). The only gates are
+`me.ai.enabled` (agentic) and `me.mlSeverity` (ML queries).
 Read [docs/FRONTEND.md](docs/FRONTEND.md) before touching any of:
 
 - **Bots are HIDDEN by default on the Timeline; the Feed is People OR Bots, never mixed**, both by
@@ -280,9 +280,8 @@ Read [docs/FRONTEND.md](docs/FRONTEND.md) before touching any of:
   ONLY), tracking the previous id in a ref. **`workspaceId` must NOT live in `FilterDefaults`**.
   Legacy `?team=<int>` with no `?workspace` IS the workspace id.
 - **The repo picker is Timeline-ONLY.** Activity, Feed, Bots and Reports cover the whole workspace.
-- **The Feed is a STREAM (`FeedView`) and nothing else** — no survey panels and no Pending items
-  (My Turn, Needs review, Claude, CI failures); bot CLASSIFICATION is its own sub-tab. A default
-  flip on a persisted key needs a `FILTER_STORAGE_VERSION` bump (now v5; `migratePersistedFilters`
+- **The Feed is a STREAM (`FeedView`) and nothing else** — no survey panels, Pending items or
+  sub-tabs (bot classification is a Bots Monitoring tab). A default flip on a persisted key needs a `FILTER_STORAGE_VERSION` bump (now v5; `migratePersistedFilters`
   steps CHAIN).
 - **REPORTS IS TIED TO ONE REPORTING WINDOW** — resolved ONCE per request by core
   `db/reporting-window.ts` `getReportingWindow` (the platform registers `resolveComparisonWindow`;
@@ -465,7 +464,7 @@ history: [docs/CODEX-PLAN.md](docs/CODEX-PLAN.md). Non-negotiables:
 ## Platform features (formerly Pro)
 
 The old `@pierre/pro` plugin is core code at **`apps/backend/src/platform/`** — reporting, Bots
-Monitoring, the work-plan wording, the impact note, Slack. Free, always on.
+Monitoring, the work-plan wording, the impact note, Slack.
 [docs/PLATFORM.md](docs/PLATFORM.md).
 
 - **Bound statically at boot**: `platform/context.ts` `bindPlatform` builds ONE `ProContext`
@@ -480,16 +479,14 @@ Monitoring, the work-plan wording, the impact note, Slack. Free, always on.
   never hash a HYDRATED or derived value, or every judgement reads `stale` forever); a per-account
   in-flight slot claimed SYNCHRONOUSLY.
 - ⚠ **The D4 digit gate rejects UNICODE numerals** (`/^[^\p{Nd}\p{No}\p{Nl}]*$/u`). A
-  model-derived figure and a code-derived figure are LABELLED APART. Advisor recommendation text is
-  TEMPLATED; nothing it computes feeds `botVerdict`.
+  model-derived figure and a code-derived figure are LABELLED APART.
 - **The work plan: THE CODE RANKS, THE MODEL NARRATES** — the scorer is core (`db/work-plan.ts`);
   the model adds a headline, a `parked` line and one `why` per row, and may name ONLY a listed
   card. ⚠ `ageHours`/`stallRisk`/`score` stay OUT of the payload hash; ONE PR IS ONE JOB.
-- **The peer benchmark** reads the BUNDLED `platform/data/benchmark/benchmark-fit.json` (copied by
-  `build-release.mjs`; a miss is production-only and silent). ⚠ **Refusals are the product** —
-  never normalise one into a distribution shape. ⚠ **Money lives at WORKSPACE grain only** (a
-  `?repoIds=`-NARROWED request builds no rollup). ⚠ `$ per acted-on thread` divides by
-  `COST_WINDOW_DAYS` = `DAYS_PER_MONTH` (30.44) and REFUSES rather than falling back.
+- **The peer benchmark** reads the BUNDLED `platform/data/benchmark/benchmark-fit.json`. ⚠
+  **Refusals are the product** — never normalise one into a distribution shape. ⚠ **Money lives
+  at WORKSPACE grain only** (a `?repoIds=`-NARROWED request builds no rollup); `$ per acted-on
+  thread` REFUSES rather than falling back.
 - **Slack** (`platform/slack/`): a TEAM digest — never a card about or naming the configuring
   account. Event signals (Claude Review ran, PR merged) are OFF by default, CLAIMED before the post,
   never retried; a merge is announced only when SEEN LIVE (`sync/merge-notice.ts`).

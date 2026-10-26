@@ -61,9 +61,8 @@ export type RepoConsoleTab = 'activity' | 'bots';
 // and it has to land on the tab the URL named; making the derive impure would break the round-trip
 // urlHistory.test.ts pins.
 //
-// ⚠ This is the OPPOSITE of `BotsView`'s `effectiveTab`, which does correct `'advisor'` away. That
-// one predates the visible-but-locked posture; do not copy it here, and note that BotsView's own
-// `'roi'` member is now handled this way too (selectable, body locks).
+// ⚠ This is the OPPOSITE of `BotsView`'s `effectiveTab`, which does correct `'classification'`
+// away on the per-repo console. Do not copy it here.
 // `'stories'` is the "Stories" tab (`?insightsTab=stories`): every tracker ticket with a PR merged in
 // the reporting window and how well it was written. Same
 // one Reports gate.
@@ -99,23 +98,19 @@ export function sprintTabFromUrl(raw: string | null | undefined): SprintInnerTab
   if (raw === 'graph') return 'themes';
   return (SPRINT_INNER_TABS as readonly string[]).includes(raw ?? '') ? (raw as SprintInnerTab) : null;
 }
-// The Bots rail's sub-tab strip. `'advisor'` is workspace-grain and LISTED only on the cross-repo
-// rail; BotsView's `effectiveBotsTab` degrades it to `'roi'` on the per-repo console. Every other
-// member shows on both mounts. (`'settings'` LEFT this union: bot classification is the Feed rail's
-// "Bot classification" sub-tab now — `FeedInnerTab` below. A legacy `?botsTab=settings` is mapped
-// there by useUrlState's read.)
+// The Bots rail's sub-tab strip. `'classification'` ("Classification": who counts as a bot in this
+// Workspace, its role, vendor and price) is workspace-grain and LISTED only on the cross-repo rail;
+// BotsView's `effectiveBotsTab` degrades it to `'roi'` on the per-repo console. Every other member
+// shows on both mounts.
+// ⚠ LEGACY URLS, mapped by useUrlState's read: `?botsTab=settings` (the old Bots → Settings) and
+// `?activityRepo=feed&feedTab=classification` (the Feed's old "Bot classification" sub-tab) both
+// land on `'classification'`; `?botsTab=advisor` (the Bot Tuning Advisor, REMOVED 2026-10-26) is no
+// longer a member, so it lands on the default.
 // The visible member is DERIVED per render (`effectiveBotsTab` in `Activity/benchmarkModel.ts`);
 // a corrective `setBotsInnerTab()` permanently forgets the reader's choice for the OTHER mount
 // that shares this one scalar (the per-repo console's Bots tab).
-export type BotsInnerTab = 'roi' | 'themes' | 'advisor' | 'benchmark';
-export const BOTS_INNER_TABS: readonly BotsInnerTab[] = ['roi', 'themes', 'advisor', 'benchmark'];
-// The Feed rail's sub-tab strip: 'feed' (the stream, the default) and 'classification' — "Bot
-// classification": who counts as a bot in this Workspace, its role, vendor and price. The visible
-// member is DERIVED per render (`effectiveFeedTab` in `Activity/feedTabsModel.ts`), never written
-// back. ('themes' — the "Discussion themes" — is
-// REMOVED; a legacy `?feedTab=themes` is not a member, so the URL reader leaves the Feed default.)
-export type FeedInnerTab = 'feed' | 'classification';
-export const FEED_INNER_TABS: readonly FeedInnerTab[] = ['feed', 'classification'];
+export type BotsInnerTab = 'roi' | 'themes' | 'benchmark' | 'classification';
+export const BOTS_INNER_TABS: readonly BotsInnerTab[] = ['roi', 'themes', 'benchmark', 'classification'];
 // PrDetail's inner tab strip. It lives HERE, not in PrDetail's local state, because it is
 // URL-ADDRESSABLE: `?view=pr:<id>&prTab=changes` names one screen, so browser Back/Forward can
 // move between "the PR's diff" and "the PR's threads" like every other view. Which member is
@@ -503,48 +498,23 @@ export interface FilterState {
   // (like feedAuthors) — owned by the Bot-ROI panel; drives the useBotAnalytics query key.
   botAnalyticsWindow: BotWindowKind;
   // Which inner sub-tab the Bots view shows: 'roi' (the Measure surface — the ROI panel),
-  // 'themes' (the "What they're flagging" AI report), 'advisor' (the Bot Tuning Advisor — findings → config-PR/brief/issue outputs), 'benchmark' (the peer-cohort
-  // placement). (The classification tab, once 'settings' here, is the Feed's 'classification'.)
-  // ('behaviour' was REMOVED in plan P1.1/C1: per-bot depth is the bot-detail drill-down tab and
-  // the workspace charts a collapsed section under ROI. ⚠ 'themes' WAS ALSO REMOVED THEN — folded
-  // into a synthesis-seam card on Measure — AND HAS SINCE COME BACK as a real member: the themes
-  // PANEL was revived first, mounted at the top of the `roi` branch, and then moved onto its own
-  // tab so the Bots console mirrors the Feed's `Feed | Themes` strip. The field is transient and
-  // URL-silent, so both the drop and the return are safe: no persisted blob can hold or resurrect
-  // a member.) A single scalar (both the cross-repo rail Bots view and the per-repo console Bots tab
-  // share one BotsView). BotsView's
-  // effectiveTab fallback still owns any degradation ('advisor' is rail-only — the
-  // derived-effective-tab rule). Transient (never persisted) — but NOT URL-silent, unlike
-  // its neighbours here; see the next paragraph.
+  // 'themes' (the "What they're flagging" AI report), 'benchmark' (the peer-cohort placement) and
+  // 'classification' (who counts as a bot in this Workspace, its role, vendor and price — moved
+  // here from the Feed, which is now a stream only). ('advisor' — the Bot Tuning Advisor — is
+  // REMOVED; 'behaviour' went in plan P1.1/C1.) A single scalar shared by the cross-repo rail Bots
+  // view and the per-repo console Bots tab (one BotsView). BotsView DERIVES the visible tab
+  // ('classification' is rail-only). Transient (never persisted), so dropping a member needs no
+  // migration — but NOT URL-silent; see the next paragraph.
   //
-  // ⚠ URL-SERIALIZED (`?botsTab=themes|advisor|benchmark`, the 'roi' default omitted) and a
+  // ⚠ URL-SERIALIZED (`?botsTab=themes|benchmark|classification`, the 'roi' default omitted) and a
   // NAVIGATION key, but ONLY alongside `activityRepo=bots` — the cross-repo Bots rail, where the
   // strip is on screen. The per-repo console's Bots tab shares this scalar and does NOT emit it; a
   // sub-tab that is not visible is not a view. Still transient: URL-visible ≠ persisted.
   botsInnerTab: BotsInnerTab;
-  // The Advisor tab's one-shot focus, set by the Tune/Drop pills on the Bots table: which
-  // bot the advisor should open on, and with what intent ('tune' = its tuning findings,
-  // 'drop' = the drop-shaped evidence: overlap + suppressions + cost). The PANEL treats it
-  // as its selected-bot filter (overwritten by clicking pills or the panel's own picker);
-  // it is never written back as a "correction". Transient, URL-silent.
-  advisorFocus: { botKey: string; intent: 'tune' | 'drop' } | null;
   // (There is no `botSettingsTeamId` / per-repo judgement picker. The judgement is keyed by the
   // active WORKSPACE, so the panel just reads `workspaceId` like every other Bots panel.)
-  //
-  // Which inner sub-tab the cross-repo Feed rail shows: 'feed' (the consolidated feed) or
-  // 'classification' (Bot classification).
-  //
-  // 'compare' is NOT a member: cross-workspace comparison is the Reports "By workspace" axis
-  // (inside PeriodReportsPanel), no longer a surface of its own anywhere.
-  //
-  // The consumer DERIVES an effective tab from the visible tab list rather than writing a
-  // correction back into the store. Transient (freshDefaults only, never persisted), so removing a
-  // member ('compare', then 'themes') needs no migration.
-  //
-  // ⚠ URL-SERIALIZED (`?feedTab=classification`, the 'feed' default omitted) and a NAVIGATION key,
-  // but ONLY alongside the cross-repo Feed rail entry, where the strip is on screen. The READ seats
-  // only a listed value, so the retired `?feedTab=themes` lands on the Feed.
-  feedInnerTab: FeedInnerTab;
+  // (No `feedInnerTab`: the Feed is a stream and has no sub-tabs. A legacy
+  // `?feedTab=classification` lands on Bots Monitoring → Classification.)
   // Which inner sub-tab the Reports pane shows: 'overview' (Flow metrics + Period reports) or
   // 'bottlenecks' — labelled "Chronology" on screen, the court ledger. See InsightsInnerTab for why
   // the literal and the label differ.
@@ -959,13 +929,8 @@ export interface FilterState {
   markFeedNewCohortsSeen: (scopeKey: string) => void;
   // Set the Bot-ROI analytics window (the Insights Bot-ROI panel's window picker).
   setBotAnalyticsWindow: (v: BotWindowKind) => void;
-  // Switch the Bots view's inner sub-tab (ROI / Themes / Advisor / Benchmark).
+  // Switch the Bots view's inner sub-tab (ROI / Themes / Benchmark / Classification).
   setBotsInnerTab: (v: BotsInnerTab) => void;
-  // The Tune/Drop pills' entry point: focus the advisor on one bot AND switch the Bots view
-  // to the Advisor tab in one action.
-  focusAdvisor: (botKey: string, intent: 'tune' | 'drop') => void;
-  clearAdvisorFocus: () => void;
-  setFeedInnerTab: (v: FeedInnerTab) => void;
   // Switch the Reports pane's inner sub-tab (Overview / Bottlenecks). Seats the CHOICE; the pane
   // derives what it renders from it.
   setInsightsInnerTab: (v: InsightsInnerTab) => void;
@@ -1376,8 +1341,6 @@ function freshDefaults(): FilterData {
     feedNewCohorts: { scopeKey: null, cohorts: [] },
     botAnalyticsWindow: 'rolling_14',
     botsInnerTab: 'roi',
-    advisorFocus: null,
-    feedInnerTab: 'feed',
     // The Reports pane opens on Overview — the free flow metrics + the period-report half. A
     // `?report=` deep link therefore lands where the report actually renders, without the tab
     // needing to know anything about the report key.
@@ -1465,7 +1428,6 @@ export type UrlOwnedState = Pick<
   | 'attentionTab'
   | 'feedIsolatedPrId'
   | 'prDetailTab'
-  | 'feedInnerTab'
   | 'botsInnerTab'
   | 'insightsInnerTab'
   | 'sprintInnerTab'
@@ -1487,7 +1449,6 @@ export function freshUrlOwnedDefaults(): UrlOwnedState {
     attentionTab: d.attentionTab,
     feedIsolatedPrId: d.feedIsolatedPrId,
     prDetailTab: d.prDetailTab,
-    feedInnerTab: d.feedInnerTab,
     botsInnerTab: d.botsInnerTab,
     insightsInnerTab: d.insightsInnerTab,
     sprintInnerTab: d.sprintInnerTab,
@@ -1634,10 +1595,6 @@ export const useFilters = create<FilterState>((set, get) => ({
     }),
   setBotAnalyticsWindow: (v) => set({ botAnalyticsWindow: v }),
   setBotsInnerTab: (v) => set({ botsInnerTab: v }),
-  focusAdvisor: (botKey, intent) =>
-    set({ advisorFocus: { botKey, intent }, botsInnerTab: 'advisor' }),
-  clearAdvisorFocus: () => set({ advisorFocus: null }),
-  setFeedInnerTab: (v) => set({ feedInnerTab: v }),
   setInsightsInnerTab: (v) => set({ insightsInnerTab: v }),
   setSprintInnerTab: (v) => set({ sprintInnerTab: v }),
   setSprintStory: (ident) => set((s) => (s.sprintStoryIdent === ident ? {} : { sprintStoryIdent: ident })),

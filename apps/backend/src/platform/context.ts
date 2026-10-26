@@ -37,17 +37,10 @@ import { registerScheduledJob } from '../sync/scheduled-jobs.js';
 import { cheapComplete } from '../review/llm.js';
 import { detectClaudeAuth } from '../review/auth.js';
 import { getAccessToken } from '../auth/account.js';
-import {
-  createIssue,
-  createPullRequest,
-  fetchPrHeadInfo,
-  fetchPrUnifiedDiff,
-} from '../github/mutations.js';
-import { ghRestGetContentDir, ghRestGetContentRaw } from '../github/client.js';
+import { fetchPrHeadInfo, fetchPrUnifiedDiff } from '../github/mutations.js';
 import { fetchCompareDiff } from '../github/compare.js';
 import { fetchReviewCommentHunks } from '../sync/hydrate-detail.js';
 import { fetchActionsJobLog } from '../github/actions-logs.js';
-import { commitFilesAndOpenPr } from '../coding/git-ops.js';
 import { registerRetentionHandler } from '../db/retention.js';
 import { registerAccountErasureHandler } from '../db/erase-account.js';
 import { registerReportingWindowResolver } from '../db/reporting-window.js';
@@ -132,10 +125,6 @@ export async function bindPlatform(app: FastifyInstance): Promise<void> {
         hostQueries.getBotReviewComments(accountId, window, scope),
       getHumanReviewComments: (accountId, window, scope) =>
         hostQueries.getHumanReviewComments(accountId, window, scope),
-      getAdvisorFindings: (accountId, window, scope) =>
-        hostQueries.getAdvisorFindings(accountId, window, scope),
-      getBotEffectPanel: (accountId, scope, botUserId, anchorMs) =>
-        hostQueries.getBotEffectPanel(accountId, scope, botUserId, anchorMs),
       // Period reporting (apiVersion 20). The scope passes straight through, exactly like the
       // getters above: `workspaceId` decides who counts as an automated reviewer, `repoIds`
       // narrows what is measured — and the plugin only ever holds a host-produced scope.
@@ -200,8 +189,7 @@ export async function bindPlatform(app: FastifyInstance): Promise<void> {
         hostQueries.workspaceHumanSeatCount(accountId, workspaceId),
       // Which of the plugin's OWN candidate reviewers said nothing anywhere in this workspace over
       // the fixed 30-day dormancy window (core db/bot-dormancy.ts). The Benchmark hides those cards
-      // through this; the Advisor hides them inside `getAdvisorFindings`, off the same predicate,
-      // so the two paid surfaces cannot disagree about whether a bot is running. Takes a
+      // through this. Takes a
       // workspaceId and NOT a scope on purpose: dormancy keys on workspace MEMBERSHIP, never on a
       // repoIds narrowing. The seam member is OPTIONAL (see contract.ts); THIS host implements it.
       dormantBotUserIds: (accountId, workspaceId, candidateUserIds) =>
@@ -232,24 +220,6 @@ export async function bindPlatform(app: FastifyInstance): Promise<void> {
           jobId,
           tail,
         ),
-      openPullRequest: async (accountId, prArgs) =>
-        createPullRequest(await getAccessToken(accountId), prArgs),
-      // Advisor repo-file reads: status-returning, never throwing (a 404 is the ordinary
-      // "no config yet"). `ref` rides the contents-API query string.
-      readRepoFile: async (accountId, a) =>
-        ghRestGetContentRaw(
-          await getAccessToken(accountId),
-          `/repos/${a.owner}/${a.name}/contents/${a.path}`,
-          a.ref,
-        ),
-      listRepoDir: async (accountId, a) =>
-        ghRestGetContentDir(
-          await getAccessToken(accountId),
-          `/repos/${a.owner}/${a.name}/contents/${a.path}`,
-          a.ref,
-        ),
-      openIssue: async (accountId, a) =>
-        createIssue(await getAccessToken(accountId), a.owner, a.name, a.title, a.body),
       // Two-sha compare (apiVersion 16). `accountId` is passed THROUGH so a rate-limited
       // compare feeds that account's budget — the same discipline sync/commit-files.ts uses.
       // Never throws; see github/compare.ts.
@@ -266,11 +236,8 @@ export async function bindPlatform(app: FastifyInstance): Promise<void> {
           maxHunkChars: a.maxHunkChars,
         }),
     },
-    coding: {
-      // The advisor's config-PR primitive. (generateFix / applyAndPush left with the agentic
-      // fixer at apiVersion 22 — core reaches them through review/agent-context.ts.)
-      commitFilesAndOpenPr: (prArgs) => commitFilesAndOpenPr(prArgs),
-    },
+    // (No `coding` seam: its last member, the removed Bot Tuning Advisor's config-PR primitive,
+    // went with it. generateFix / applyAndPush left at apiVersion 22 — review/agent-context.ts.)
     // (No `review` seam since apiVersion 22: Claude Review is core — review/agent-context.ts.)
     // The merge-conflict resolver's per-hunk seam. (The plugin's per-hunk conflict suggestion that
     // read this seam is REMOVED; the optional seam stays on the contract, unread.)

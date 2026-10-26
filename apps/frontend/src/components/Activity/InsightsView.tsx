@@ -20,7 +20,7 @@ import { WorkspaceFlowMetrics } from './WorkspaceFlowMetrics.js';
 // Sprint/SprintTabView; a legacy `?insightsTab=sprint|merged` lands there.)
 //
 // ⚠ THE VISIBLE TAB IS DERIVED, NEVER WRITTEN BACK (`effectiveInsightsTab`) — the rule
-// `botsInnerTab` / `feedInnerTab` are commented against. A corrective `setInsightsInnerTab()`
+// `botsInnerTab` / `sprintInnerTab` are commented against. A corrective `setInsightsInnerTab()`
 // would permanently forget the reader's choice, and would break the round-trip urlHistory.test.ts
 // pins.
 

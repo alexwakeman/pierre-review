@@ -98,7 +98,7 @@ export function HelpModal({ onClose }: { onClose: () => void }): JSX.Element {
             you can <strong>bulk-resolve</strong> the ones a later commit likely addressed —
             always a confirm-gated, one-click action that resolves the threads on GitHub, never
             automatic. Who counts as a bot <em>in this Workspace</em> is set on{' '}
-            <strong>Feed → Bot classification</strong>: it is exactly what the Feed and the
+            <strong>Bots Monitoring → Classification</strong>: it is exactly what the Feed and the
             Timeline hide by default. A bot is <em>one card per Workspace</em>, merged by GitHub
             handle however many repos it runs in: bot or person, its role (a{' '}
             <strong>quality&nbsp;check</strong> such as SonarCloud is kept out of the review-bot

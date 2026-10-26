@@ -6,7 +6,7 @@ import hljs from 'highlight.js';
 // SPLIT BY LINE. There is exactly one honest way to get that. It was written for the resolver
 // and is now the app's only highlighter outside `Markdown.tsx`: the Changes tab, a thread's code
 // anchor, the timeline marker popover, Claude Review's finding hunks and suggestions, the
-// addressed-check evidence patch and the advisor's generated config all come through here.
+// addressed-check evidence patch all come through here.
 //
 // ⚠ A UNIFIED DIFF IS NOT VALID SOURCE, so a diff does not call `highlightLines` directly — it
 // calls `highlightDiffRows` in `lib/diff.ts`, which reconstructs the two sides and highlights each
@@ -197,8 +197,8 @@ export function highlightLines(
 /**
  * One highlighted HTML string for a WHOLE blob, or null when a gate says render it plain.
  *
- * For the two surfaces that render code as one element rather than a list of rows — Claude
- * Review's `suggestion` block and the Bot Advisor's generated config file. They have no per-line
+ * For the surface that renders code as one element rather than a list of rows — Claude
+ * Review's `suggestion` block. It has no per-line
  * wrappers to zip against, so cutting the HTML up and joining it again would be work done only to
  * undo it. Same three gates, same escaping, and it lives HERE so the
  * `dangerouslySetInnerHTML` contract stated in this file's header keeps covering every caller.

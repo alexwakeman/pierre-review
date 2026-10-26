@@ -322,8 +322,6 @@ const manifest = {
     'drizzle-orm': backendPkg.dependencies['drizzle-orm'],
     fastify: backendPkg.dependencies['fastify'],
     'node-cron': backendPkg.dependencies['node-cron'],
-    // The advisor's config emitters (platform/advisor/emitters) parse and write YAML.
-    yaml: backendPkg.dependencies['yaml'],
   },
   keywords: [
     'github',

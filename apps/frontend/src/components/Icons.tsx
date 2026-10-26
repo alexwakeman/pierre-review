@@ -316,6 +316,29 @@ export function UnfoldIcon({ size = 14, ...rest }: IconProps): JSX.Element {
   );
 }
 
+/** Expand all — two chevrons pointing apart: open every branch of a collapsible tree (the Docs
+ *  library's contents list). Not {@link UnfoldIcon}: there is no hidden code here, only folded
+ *  rows. The companion of {@link CollapseAllIcon}. */
+export function ExpandAllIcon({ size = 14, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} strokeWidth={2.2} {...rest}>
+      <polyline points="7 15 12 20 17 15" />
+      <polyline points="7 9 12 4 17 9" />
+    </IconShell>
+  );
+}
+
+/** Collapse all — two chevrons pointing together: fold every branch of a collapsible tree back to
+ *  its top level. The companion of {@link ExpandAllIcon}. */
+export function CollapseAllIcon({ size = 14, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} strokeWidth={2.2} {...rest}>
+      <polyline points="7 20 12 15 17 20" />
+      <polyline points="7 4 12 9 17 4" />
+    </IconShell>
+  );
+}
+
 // Add — a "+" beside an "Add …" label (Claude Review's "Add story" tab).
 export function PlusIcon({ size = 12, ...rest }: IconProps): JSX.Element {
   return (

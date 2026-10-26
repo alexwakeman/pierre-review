@@ -262,14 +262,16 @@ backfill.
 - Written by `persistAppSlugs` (fill-or-update: a null fills, a DIFFERENT slug updates — apps get
   renamed — but a later app-less comment never clears an observed slug; most of a bot's comments
   carry no attribution object).
-- Read by the Bot Tuning Advisor's discovery tier (App-authored vs Actions-authored split). The
+- Was read by the Bot Tuning Advisor's discovery tier (App-authored vs Actions-authored split),
+  REMOVED 2026-10-26 — nothing reads it now. The
   probe itself still has no caller ANYWHERE — and the `bots.deepDetect` setting that was meant to
   trigger it has since been DELETED (it lived in the plugin's `pro_settings`, which CORE's
   `classifyReviewer` cannot read, so it was never wired to anything). The column fills only when
   something invokes the probe; wiring it in now needs a CORE-side gate, never a plugin setting.
 
-## Platform `0021` — Bot Tuning Advisor tables
+## Platform `0021` — Bot Tuning Advisor tables (DORMANT since 2026-10-26)
 
+The Advisor is removed; these tables are kept, never dropped, and still erased.
 Three account-scoped platform tables (filename-sorted, NO journal, no
 `--> statement-breakpoint`): `advisor_recommendations` (unique
 `(account_id, workspace_id, dedupe_key)`), `advisor_bot_profiles` (unique

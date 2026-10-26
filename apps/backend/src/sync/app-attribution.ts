@@ -28,8 +28,7 @@ export interface AppAttribution {
   // signal the classifier promotes an otherwise human-looking App-backed reviewer on.
   viaApp: boolean;
   // Per-author App slugs observed on this PR — the fact this probe used to receive and
-  // DISCARD. The advisor's discovery tier splits App-authored from Actions-authored
-  // comments on the persisted `users.app_slug`.
+  // DISCARD. Persisted on `users.app_slug`.
   slugByLogin: Record<string, string>;
 }
 

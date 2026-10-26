@@ -754,7 +754,7 @@ export interface GqlActor {
   id?: string; // present only for User/Bot (via inline fragment)
   name?: string | null;
   // Selected on BOTH `... on User` and `... on Bot` (a scalar: free in GraphQL points). A GitHub
-  // App bot's avatar IS its vendor logo — Feed → Bot classification shows it on each card.
+  // App bot's avatar IS its vendor logo — Bots Monitoring → Classification shows it on each card.
   avatarUrl?: string | null;
   // GraphQL __typename ('User' | 'Bot' | 'Organization' | 'Mannequin' | …) — captured
   // for the bot-triage classifier (stored on users.githubType). Absent when the actor

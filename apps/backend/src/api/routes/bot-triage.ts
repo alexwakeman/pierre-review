@@ -573,7 +573,7 @@ const scopeResolveSchema = {
 export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
   // One row per (workspace, actor), each carrying its judgement, identity, price and the evidence
   // behind them — including `repoFootprints[]`, the real blast radius of an edit that is
-  // workspace-wide by design. Powers Feed → Bot classification.
+  // workspace-wide by design. Powers Bots Monitoring → Classification.
   //
   // This is the identity and colour backbone for the whole SPA (the feed's vendor tags, ThreadList,
   // BotTriageCard, the People picker, every drill-down header).

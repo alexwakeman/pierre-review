@@ -642,7 +642,7 @@ function MlTotalsStrip({
  * apply, and showing a greyed-out verdict column would invite reading one anyway. The counts are
  * NOT in `totals` either, so the summary line above stays a review-bot number.
  *
- * A bot re-roled to `quality_check` drops out of `vendors`; Feed → Bot classification also lists
+ * A bot re-roled to `quality_check` drops out of `vendors`; Bots Monitoring → Classification also lists
  * it under "Other automation", so the re-role stays visible from where it was made.
  *
  * `<details>` rather than React state: it is a disclosure with no other behaviour, and the browser
@@ -947,8 +947,6 @@ function VendorTable({
   onOpenVolume,
   onOpenInflation,
   onOpenDepth,
-  onTune,
-  onDrop,
 }: {
   vendors: CostedVendor[];
   botColor: BotColor;
@@ -991,10 +989,6 @@ function VendorTable({
   // Nothing in here may reintroduce a cost figure behind a caveat: the caveat was tried and the
   // grain moved instead.
   showCost: boolean;
-  // The Bot Tuning Advisor entry point: per-row Tune/Drop pills that open the Advisor tab focused
-  // on this bot. BOTH null (the per-repo mount) → the Actions column does not render at all.
-  onTune?: ((key: string) => void) | null;
-  onDrop?: ((key: string) => void) | null;
 }): JSX.Element {
   // ⚠ THE HEADER IS TWO ROWS WHEN `showMl`, ONE WHEN NOT — because the four "not addressed by
   // severity" columns sit under a shared group cell, and a group cell only makes sense with a
@@ -1002,7 +996,6 @@ function VendorTable({
   // sub-headers shove the ordinary columns out of alignment with their own data. Add a column
   // here and it needs `rowSpan={headSpan}` too.
   const headSpan = showMl ? 2 : 1;
-  const showActions = Boolean(onTune ?? onDrop);
   // ⚠ A BOT WITH NO COMMENTS IN THE WINDOW IS ABSENT FROM THE VOLUME RESPONSE (it has no trend to
   // keep such a row meaningful, unlike this table's dormant rows) — so a miss means "said nothing
   // on anything merged here" and renders a DASH, never a 0.
@@ -1011,15 +1004,7 @@ function VendorTable({
   return (
     <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-800">
       <table
-        className={`w-full border-collapse text-[11px] ${
-          showActions
-            ? showMl
-              ? 'min-w-[1680px]'
-              : 'min-w-[1200px]'
-            : showMl
-              ? 'min-w-[1560px]'
-              : 'min-w-[1080px]'
-        }`}
+        className={`w-full border-collapse text-[11px] ${showMl ? 'min-w-[1560px]' : 'min-w-[1080px]'}`}
       >
         <thead>
           <tr className={`text-left text-gray-500 dark:text-gray-400${showMl ? '' : ' border-b border-gray-200 dark:border-gray-800'}`}>
@@ -1161,7 +1146,7 @@ function VendorTable({
                 // the two figures differ only by the stretch each was measured over — which both
                 // surfaces state. Benchmark measures the reviewer's whole observed span; this
                 // measures the window in the picker, so a bot busier lately reads cheaper here.
-                title="Monthly cost ÷ used threads a month, both over this whole Workspace — the used count is scaled from the selected window to a month, so the price and the work are on the same time base. Bots Monitoring → Benchmark measures the same fraction over each reviewer's whole observed span instead, so the two answer different questions and need not match. The price is this bot's price FOR THIS WORKSPACE — set it on the bot's card in Feed → Bot classification. Another Workspace may hold a different figure for the same bot; the two are never added together."
+                title="Monthly cost ÷ used threads a month, both over this whole Workspace — the used count is scaled from the selected window to a month, so the price and the work are on the same time base. Bots Monitoring → Benchmark measures the same fraction over each reviewer's whole observed span instead, so the two answer different questions and need not match. The price is this bot's price FOR THIS WORKSPACE — set it on the bot's card in Bots Monitoring → Classification. Another Workspace may hold a different figure for the same bot; the two are never added together."
               >
                 $ per used thread
               </th>
@@ -1174,15 +1159,6 @@ function VendorTable({
                 title="Open this bot's depth tab — its latency, cadence, coverage and consistency charts, plus its severity-over-time and category mix"
               >
                 Depth
-              </th>
-            )}
-            {showActions && (
-              <th
-                rowSpan={headSpan}
-                className="px-2 py-1.5 text-center font-medium"
-                title="Open the Bot Tuning Advisor focused on this bot — Tune shows its evidence-backed configuration changes; Drop assembles the case for removing it."
-              >
-                Actions
               </th>
             )}
           </tr>
@@ -1427,8 +1403,8 @@ function VendorTable({
                           // holds $X for this login, but nothing reads it any more — including
                           // when the user deliberately CLEARED the price, which is indistinguishable
                           // from "never migrated" on this row. So it is offered, not charged.
-                          `No price set for this bot in this Workspace. The old account-wide list still has $${formatCostInput(v.legacyOnlyUsd)}/mo for it — re-enter it in Feed → Bot classification to use it.`
-                        : 'No price set for this bot in this Workspace — set one in Feed → Bot classification.'
+                          `No price set for this bot in this Workspace. The old account-wide list still has $${formatCostInput(v.legacyOnlyUsd)}/mo for it — re-enter it in Bots Monitoring → Classification to use it.`
+                        : 'No price set for this bot in this Workspace — set one in Bots Monitoring → Classification.'
                       : // `costMonthlyUsd` arrives EFFECTIVE (the server already multiplied a
                         // per-seat unit by the Workspace's derived seat count on read), so the
                         // per-seat case only ANNOTATES the figure — nothing here multiplies.
@@ -1486,32 +1462,6 @@ function VendorTable({
                         </button>
                       );
                     })()}
-                  </td>
-                )}
-                {showActions && (
-                  <td className="px-2 py-1.5 text-center">
-                    <span className="inline-flex gap-1">
-                      {onTune && (
-                        <button
-                          type="button"
-                          onClick={() => onTune(v.key)}
-                          title="Open the Advisor on this bot's tuning findings — evidence-backed config changes, retro-checked before any PR"
-                          className="rounded border border-amber-400 px-1.5 py-0.5 text-[11px] font-medium text-amber-700 hover:bg-amber-50 dark:border-amber-600/70 dark:text-amber-300 dark:hover:bg-amber-950/40"
-                        >
-                          Tune
-                        </button>
-                      )}
-                      {onDrop && (
-                        <button
-                          type="button"
-                          onClick={() => onDrop(v.key)}
-                          title="Open the Advisor with the case for dropping this bot — its acted-on rate, overlap and suppression evidence in one brief"
-                          className="rounded border border-red-400 px-1.5 py-0.5 text-[11px] font-medium text-red-700 hover:bg-red-50 dark:border-red-600/70 dark:text-red-300 dark:hover:bg-red-950/40"
-                        >
-                          Drop
-                        </button>
-                      )}
-                    </span>
                   </td>
                 )}
               </tr>
@@ -1578,12 +1528,6 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
   const openBotOnlyDetail = useFilters((s) => s.openBotOnlyDetail);
   // The "what the bots are flagging" tiles/chips → the flagging drill-down tab.
   const openBotFlaggingDetail = useFilters((s) => s.openBotFlaggingDetail);
-  // The Tune/Drop pills → the Advisor tab, focused on the clicked bot. Cross-repo-rail only: the
-  // Advisor tab itself
-  // doesn't render in the per-repo console (it is workspace-grain, like Themes), so a pill
-  // there would navigate nowhere.
-  const focusAdvisor = useFilters((s) => s.focusAdvisor);
-  const advisorPillsOn = repoId == null;
   // ⚠ MONEY IS WORKSPACE-GRAINED, SO IT RENDERS ONLY ON THE WORKSPACE-GRAINED MOUNT.
   // `costPerActedOnUsd` is this bot's whole MONTHLY WORKSPACE price divided by the acted-on
   // threads in the measured scope. On the bare rail mount both halves describe the same
@@ -1656,7 +1600,7 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
   // for doing exactly its job.
   //
   // ⚠ THEY MUST STILL BE SHOWN SOMEWHERE. Without this section, marking a bot as a quality check
-  // in Feed → Bot classification makes it silently VANISH from the only screen that lists review bots —
+  // in Bots Monitoring → Classification makes it silently VANISH from the only screen that lists review bots —
   // indistinguishable from "we stopped detecting it", and there is no way to notice a MIS-role.
   // Volume only: no verdict, no noise ratio, no $/acted-on, because those are the ROI judgements
   // that were deliberately withheld.
@@ -1856,8 +1800,6 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
             };
             openBotDetailTab(b.userId, meta);
           }}
-          onTune={advisorPillsOn ? (key) => focusAdvisor(key, 'tune') : null}
-          onDrop={advisorPillsOn ? (key) => focusAdvisor(key, 'drop') : null}
         />
         {/* "What you could stop paying" — one templated sentence per priced, rarely-used review
             bot (lib/botSavings.ts). Gated on `showCost`, the SAME predicate as the $ column:
@@ -1924,7 +1866,7 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
         <div className="text-[11px] text-gray-500 dark:text-gray-400">
           {showCost ? (
             <>
-              Set a bot’s monthly price in <span className="font-medium">Feed → Bot classification</span> to
+              Set a bot’s monthly price in <span className="font-medium">Bots Monitoring → Classification</span> to
               see $ per used thread.
             </>
           ) : (

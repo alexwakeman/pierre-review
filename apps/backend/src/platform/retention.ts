@@ -112,8 +112,9 @@ export async function eraseProByAccountId(
     // pr_id grain, so erasure is its only delete path. It holds prose about the account's own
     // pull requests, which is what an erasure promises to remove.
     pro.proFlowPointers,
-    // The Bot Tuning Advisor's three tables (recommendations / profiles / config-event
-    // anchors) — none PR-keyed, so they appear ONLY here, never in pruneProByPrIds.
+    // The REMOVED Bot Tuning Advisor's three DORMANT tables (recommendations / profiles /
+    // config-event anchors) — nothing writes them now, but old installs hold rows, so erasure
+    // still covers them. None PR-keyed, so they appear ONLY here, never in pruneProByPrIds.
     pro.advisorRecommendations,
     pro.advisorBotProfiles,
     pro.advisorConfigEvents,

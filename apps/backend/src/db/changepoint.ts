@@ -1,5 +1,5 @@
-// Pure changepoint detection over a weekly series — the unattributed half of the advisor's
-// verification loop ("something changed around the 3rd, cause unknown"). Same robust idiom as
+// Pure changepoint detection over a weekly series ("something changed around the 3rd, cause
+// unknown") — read by db/flow-trend.ts. Same robust idiom as
 // weeklyAnomalies (queries.ts): medians + MAD, never means — a bot's weekly volume is bursty
 // and a single spike must not manufacture a "change". No DB, no I/O, CI-tested directly.
 //

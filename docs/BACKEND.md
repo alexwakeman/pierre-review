@@ -21,7 +21,7 @@ no session and no hosted mode.
 ### One-shot model calls (`review/llm.ts` `cheapComplete`)
 
 Every tool-less, one-shot model call (the platform's report narration, syntheses, bot themes,
-Chronology pointers, impact note, work-plan wording, advisor refine and Slack report via
+Chronology pointers, impact note, work-plan wording and Slack report via
 `ctx.llm.complete`; core's sprint briefs, themes and Ask, story labels, docs ranking and the
 docs-check shortlist) goes through `cheapComplete`, and every one takes THE ONE CREDENTIAL LADDER
 (`ai/credentials.ts`), the same as the agent runs:

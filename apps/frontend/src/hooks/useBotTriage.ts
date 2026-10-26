@@ -140,7 +140,7 @@ export function useBotOnlyPrs(
 
 // The bot-reviewer listing: ONE `WorkspaceReviewer` row per actor in the workspace, each carrying
 // its judgement (automated / role), its identity (kind / label), its price, and the evidence
-// behind them (`footprint` + `repoFootprints`). Feeds the Feed's "Bot classification" list, the feed's vendor
+// behind them (`footprint` + `repoFootprints`). Feeds the Bots Monitoring "Classification" list, the feed's vendor
 // tag, ThreadList's resolve count and the bot colour map. There is no rows/reviewers split any
 // more — one grain, one row.
 //

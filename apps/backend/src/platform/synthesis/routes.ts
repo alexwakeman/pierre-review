@@ -9,7 +9,7 @@
 //  2. Self-gate — DIGEST_ENABLED (the activityDigest AI-summary tier, exactly like bot-themes):
 //     a flag-less local run answers `enabled:false`, never an error.
 //  3. Cloud per-account entitlement — the host's automatic /api/pro/* 402 gate. Staying under
-//     /api/pro/ is what keeps that automatic (the advisor-routes rule).
+//     /api/pro/ is what keeps that automatic (the platform-routes rule).
 //
 // SCOPE: `?workspace=` resolves via resolveRequestScope (absent/unparseable/foreign → the
 // account's DEFAULT workspace — host §5.1) and `?repoIds=` survives as DATA NARROWING ONLY,

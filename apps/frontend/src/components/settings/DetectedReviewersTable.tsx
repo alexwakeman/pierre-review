@@ -89,7 +89,7 @@ type ReviewerPatch = Omit<WorkspaceReviewerPatchBody, 'workspaceId'>;
 
 type BotColorFn = (bot: { login?: string | null; kind: AutomatedReviewerKind }) => string;
 
-// The bot classification surface — Feed → Bot classification: classifying a reviewer, naming its
+// The bot classification surface — Bots Monitoring → Classification: classifying a reviewer, naming its
 // vendor, setting its role and its PRICE (the editor on each card and the workspace total).
 //
 // ── ONE CARD PER BOT, IN A GRID ─────────────────────────────────────────────────────────────

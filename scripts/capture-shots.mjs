@@ -117,7 +117,7 @@ async function proShots() {
   await shot('feed.png', async () => {
     const c = await ctx({ height: 1150 });
     const p = await c.newPage();
-    await console_(p, 'feed', '&feedTab=feed', '[data-testid="feed-view"]');
+    await console_(p, 'feed', '', '[data-testid="feed-view"]');
     await p.waitForTimeout(2500);
     await crop(p, p.getByTestId('feed-view'), 'feed.png', { maxHeight: 1250 });
     await c.close();
@@ -186,7 +186,7 @@ async function proShots() {
   await shot('bot-settings.png', async () => {
     const c = await ctx({ height: 1050 });
     const p = await c.newPage();
-    await console_(p, 'feed', '&feedTab=classification');
+    await console_(p, 'bots', '&botsTab=classification');
     await p.getByTestId('bot-settings-panel').waitFor({ timeout: 15_000 });
     await p.waitForTimeout(2200);
     await crop(p, p.getByTestId('bot-settings-panel'), 'bot-settings.png', { maxHeight: 1050 });
