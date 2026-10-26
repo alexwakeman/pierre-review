@@ -506,10 +506,11 @@ Monitoring, the work-plan wording, the impact note, Slack.
 - **This Sprint** (fixed tab, `?view=sprint`; [docs/FRONTEND.md](docs/FRONTEND.md) § This Sprint):
   `GET /api/sprint-graph` is DB only, ONE fold (`db/sprint-graph-fold.ts`). Briefs, themes, "needs
   code" judgements and critical paths are made after a read, never on a view. ONE `LaneBoard`, rows by
-  PR count; the story view opens only through `useOpenStory()`. Nothing writes to a tracker.
-- **Trackers** ([docs/TRACKERS.md](docs/TRACKERS.md)): ONE per workspace; a tracker is read when a
-  PR is RECEIVED, never when VIEWED (exception: the demand-gated sprint list read). Every
-  customer-typed host goes through `tracker/jira/fetch.ts`. Idents only via
+  PR count; the story view opens only through `useOpenStory()`. Never bring the force-graph canvas back.
+- **Trackers** ([docs/TRACKERS.md](docs/TRACKERS.md)): ONE per workspace; read when a PR is
+  RECEIVED, never when VIEWED (exception: the sprint list read). ⚠ **The ONE tracker write is the
+  Jira status transition the reader picks** in the story view (`tracker/status-change.ts`); nothing
+  else writes. Customer-typed hosts go through `tracker/jira/fetch.ts`. Idents only via
   `trackerTicketIdent`/`trackerTicketRow`.
 - Still gone: the story report, story-health charts, "Ask about this period", the People report,
   1:1 prep (tables dormant, still erased).
@@ -523,7 +524,7 @@ categories. [docs/ML-SEVERITY.md](docs/ML-SEVERITY.md) · [docs/ML-NODE-PORT.md]
   PROCESS; first use downloads ~240 MB: "Set up" / `limn ml install`, imported ONLY by
   `ml/runtime.ts`) or the HTTP `severity-api` (`SEVERITY_API_URL`). ⚠ Availability changes at run
   time — ask `isMlScoringAvailable()`. ⚠ The Node port matches the Python BYTE FOR BYTE
-  (`packages/ml/data/parity`; regexes in Python source via `pyRe`). ⚠ **It must never slow the
+  (`packages/ml/data/parity`). ⚠ **It must never slow the
   machine**: one comment per run, 1 thread, background priority, a duty cycle, paused on battery.
 - **Enrichment is a PULL worker (`sync/ml-enrichment.ts`), never a sync step**. Batch budget is
   CHARACTERS; results zipped POSITIONALLY (a length mismatch throws). `ml_comment_labels` is keyed
@@ -561,8 +562,6 @@ AI route. `api/plugins/security.ts` (CSP, loopback-only CORS, cross-origin guard
   `isNonCodeFile`, `BLAST_SURFACES` + `isTestFile` (`db/code-loc.ts` names all four).
 - **`apps/backend/src/db/queries.ts` CONTAINS LITERAL NUL BYTES** — search it with `grep -a` /
   `rg -a` (and `git diff -a`), or a missing match is a false negative.
-- **Schema changes**: edit `schema.sqlite.ts` (or the platform module's), then hand-write an
-  additive migration (or `pnpm db:generate`) and register it in `meta/_journal.json`.
 - **THE SCOPE IS ONE INTEGER** — no scope vocabulary, sentinels or parsers. **`BotScope {
   workspaceId, repoIds }`** is only ever built by `resolveWorkspaceScope`.
 - **A fact lives at exactly ONE grain** — never denormalise it. Every read of the bot table takes
@@ -593,8 +592,7 @@ AI route. `api/plugins/security.ts` (CSP, loopback-only CORS, cross-origin guard
 ## Verifying changes
 
 `pnpm test` + `pnpm typecheck` for backend/heuristic logic. For UI work `pnpm dev` is usually
-running; the SQLite DB holds real synced data to pick cases from (`sqlite3`), and state deep-links
-via URL params (`?pr=<id>`, `?repos=<ids>`) against `/app/`. New id-routes: run
+running (pick cases from the real DB with `sqlite3`); state deep-links via URL params (`?pr=<id>`, `?repos=<ids>`) against `/app/`. New id-routes: run
 `verify:isolation`.
 
 ⚠ **`apps/frontend/test/` does not run in CI** (the frontend's `test` script is a no-op) and is
@@ -646,7 +644,6 @@ Read [docs/MIGRATIONS.md](docs/MIGRATIONS.md) before writing ANY migration.
 
 - **The journal is hand-maintained** (`db/migrations/meta/_journal.json`, entries `"version":
   "6"`). An unregistered file **SILENTLY SKIPS** — the boot looks fine and queries fail on a
-  missing relation. Prefer hand-written additive migrations.
-- Platform migrations: `platform/migrations/`, filename-sorted, no journal (see above).
+  missing relation. Edit `schema.sqlite.ts` first; prefer hand-written additive migrations.
 - Dormant tables (Pro/cloud/story-report era) are kept and still erased — never drop or
   re-declare them casually.

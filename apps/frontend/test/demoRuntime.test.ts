@@ -322,6 +322,29 @@ describe('the write overlay', () => {
     expect(await again.json()).toMatchObject({ error: 'NotMergeable' });
   });
 
+  it('a Jira status picked in the story view is read back by the story view and the sprint graph', async () => {
+    const ident = 'jira:https://acme.atlassian.net#PLAT-1';
+    const q = `ident=${encodeURIComponent(ident)}&workspace=1`;
+    const ticket = { key: 'PLAT-1', title: 'Login', url: null, provider: 'jira', status: { name: 'To Do', category: 'new' } };
+    const srv = new DemoServer(
+      recording([
+        { method: 'GET', path: `/api/ticket-prs?${q}`, status: 200, body: { workspaceId: 1, ident, found: true, ticket } },
+        { method: 'GET', path: '/api/sprint-graph?workspace=1', status: 200, body: { nodes: [{ ident, status: ticket.status }, { ident: 'other', status: null }] } },
+      ]),
+      { now: () => CAPTURED_MS },
+    );
+    const list = await json(srv, 'GET', `/api/ticket-status/transitions?${q}`);
+    const done = list.transitions.find((t: { to: { name: string } }) => t.to.name === 'Done');
+    expect(done).toBeDefined();
+    expect(await json(srv, 'POST', '/api/ticket-status?workspace=1', { ident, transitionId: done.id })).toMatchObject({
+      ident,
+      status: { name: 'Done', category: 'done' },
+    });
+    expect((await json(srv, 'GET', `/api/ticket-prs?${q}`)).ticket.status).toEqual({ name: 'Done', category: 'done' });
+    const nodes = (await json(srv, 'GET', '/api/sprint-graph?workspace=1')).nodes;
+    expect(nodes.map((n: { status: { name: string } | null }) => n.status?.name ?? null)).toEqual(['Done', null]);
+  });
+
   it('the demo never offers the conflict resolver it cannot run', async () => {
     expect((await json(base(), 'GET', '/api/me')).conflictResolver).toBe(false);
   });

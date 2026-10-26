@@ -8,12 +8,14 @@ import { BlockList, isIP } from 'node:net';
 // ⚠ THE ONE OUTBOUND HELPER FOR EVERY JIRA CALL. The Jira base URL is TYPED BY THE CUSTOMER, so a
 // request to it is a server-side request to wherever they point it — the Slack webhook taught this
 // codebase that the hard way (SECURITY.md § Slack webhook SSRF). Everything that reaches Jira goes
-// through `jiraGetJson`, and nothing else in core talks to a customer-named host (the Slack webhook has its own guard).
+// through `jiraGetJson` / `jiraPostJson`, and nothing else in core talks to a customer-named host
+// (the Slack webhook has its own guard).
 //
 // What it enforces, in BOTH modes:
-//   • GET only (the one exception: the Linear GraphQL POST to its FIXED host — linear/client.ts —
-//     through the same transport and guard). Nothing in core WRITES to a tracker; a hard TIMEOUT (10s
-//     for the whole exchange) and a RESPONSE SIZE CAP;
+//   • GET, with two exceptions through the same transport and guard: the Linear GraphQL POST to its
+//     FIXED host (linear/client.ts, a read), and THE ONE TRACKER WRITE — the Jira status transition
+//     the reader picks (`jiraPostJson`, ../status-change.ts). Nothing else writes to a tracker;
+//   • a hard TIMEOUT (10s for the whole exchange) and a RESPONSE SIZE CAP;
 //   • NO REDIRECTS. Node's http client never follows one, and any 3xx is an error — following it
 //     would forward the Authorization header to a host nobody chose;
 //   • JSON ONLY: a non-JSON body (an SSO login page, a proxy's HTML) is an error, never parsed.
@@ -319,6 +321,43 @@ export async function jiraGetJson(
   if (res.status === 403) throw new JiraFetchError('forbidden', 403);
   if (res.status === 404) throw new JiraFetchError('not_found', 404);
   if (res.status < 200 || res.status >= 300) throw new JiraFetchError('http', res.status);
+  if (!/\bjson\b/i.test(res.contentType)) throw new JiraFetchError('not_json', res.status);
+  try {
+    return JSON.parse(res.body) as unknown;
+  } catch {
+    throw new JiraFetchError('not_json', res.status);
+  }
+}
+
+/**
+ * POST JSON to a Jira URL — used ONLY by the status transition the reader picks
+ * (../status-change.ts). Same guard, timeout, size cap and no-redirect rule as `jiraGetJson`. A 2xx
+ * with no body (Jira's 204 for a transition) answers null; a 2xx body must be JSON.
+ */
+export async function jiraPostJson(
+  rawUrl: string,
+  headers: Record<string, string>,
+  body: unknown,
+  policy: JiraFetchPolicy,
+  transport: JiraTransport = nodeTransport,
+): Promise<unknown> {
+  const url = checkJiraUrl(rawUrl, policy);
+  const res = await transport(
+    url,
+    { accept: 'application/json', 'content-type': 'application/json', 'user-agent': 'Limn', ...headers },
+    {
+      lookup: policy.cloud ? guardedLookup() : undefined,
+      timeoutMs: JIRA_TIMEOUT_MS,
+      maxBytes: JIRA_MAX_BYTES,
+    },
+    { method: 'POST', body: JSON.stringify(body) },
+  );
+  if (res.status >= 300 && res.status < 400) throw new JiraFetchError('redirect', res.status);
+  if (res.status === 401) throw new JiraFetchError('unauthorized', 401);
+  if (res.status === 403) throw new JiraFetchError('forbidden', 403);
+  if (res.status === 404) throw new JiraFetchError('not_found', 404);
+  if (res.status < 200 || res.status >= 300) throw new JiraFetchError('http', res.status);
+  if (res.body.trim() === '') return null;
   if (!/\bjson\b/i.test(res.contentType)) throw new JiraFetchError('not_json', res.status);
   try {
     return JSON.parse(res.body) as unknown;

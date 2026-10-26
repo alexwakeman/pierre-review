@@ -177,6 +177,9 @@ import type {
   SprintStatusesResponse,
   TicketPrsResponse,
   TicketStoryResponse,
+  TicketStatusChangeBody,
+  TicketStatusChangeResponse,
+  TicketTransitionsResponse,
   PostCommentResult,
   FollowUpReplyResult,
   PostReviewPreview,
@@ -980,6 +983,16 @@ export const api = {
   ticketStory: (workspaceId: number, ident: string) =>
     get<TicketStoryResponse>(
       withQuery('/api/ticket-story', workspaceParam(workspaceId), `ident=${encodeURIComponent(ident)}`),
+    ),
+  // The story view's status picker (Jira only) — THE ONE TRACKER WRITE. The GET is made when the
+  // picker opens (one Jira call); the POST makes the transition the reader picked and settles it.
+  ticketTransitions: (workspaceId: number, ident: string) =>
+    get<TicketTransitionsResponse>(
+      withQuery('/api/ticket-status/transitions', workspaceParam(workspaceId), `ident=${encodeURIComponent(ident)}`),
+    ),
+  setTicketStatus: (workspaceId: number, body: TicketStatusChangeBody) =>
+    fetch(withQuery('/api/ticket-status', workspaceParam(workspaceId)), jsonBody('POST', body)).then((r) =>
+      handle<TicketStatusChangeResponse>(r),
     ),
   // The story label run (core, agentic, LOCAL-ONLY; one in flight per account; the path keeps the
   // retired Story health prefix). No screen starts it since Story health was removed. The POST is the

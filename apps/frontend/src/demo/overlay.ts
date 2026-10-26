@@ -24,6 +24,8 @@ export class DemoOverlay {
   readonly dismissed = new Set<string>();
   /** Chat turns added here, keyed by conversation (`review:<id>:<findingId|general>`). */
   readonly chats = new Map<string, unknown[]>();
+  /** Ticket statuses the reader set from the story view's picker, by ticket ident. */
+  readonly ticketStatuses = new Map<string, { name: string; category: string | null }>();
 
   patchPr(prId: number, fields: Record<string, unknown>): void {
     this.prFields.set(prId, { ...(this.prFields.get(prId) ?? {}), ...fields });

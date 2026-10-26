@@ -70,6 +70,7 @@ import { ThreadStateBar } from './ThreadStateBar.js';
 import { ClaudeReviewPanel, TicketPillsRow } from './ClaudeReviewCell.js';
 import { BlastRadiusChip } from './BlastRadiusChip.js';
 import { LargePrFlag } from './LargePrFlag.js';
+import { TicketStatusPicker } from '../Ticket/TicketStatusPicker.js';
 import {
   CARD_CHIP,
   CARD_NEUTRAL_CHIP,
@@ -843,10 +844,21 @@ function TicketStack({
             )}
           </h3>
           <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-600 dark:text-gray-300">
-            {t != null && cat != null && (
-              <span className={`${CHIP} border-transparent ${STATUS_PILL[cat]}`}>{t.status ?? STATUS_WORD[cat]}</span>
+            {single && t?.ident != null && t.provider === 'jira' && (cat != null || t.status != null) ? (
+              // The story view's Jira ticket: the chip is the status picker (the one tracker write).
+              <TicketStatusPicker
+                ident={t.ident}
+                status={t.status ?? STATUS_WORD[cat ?? 'new']}
+                chipClassName={cat != null ? `${CHIP} border-transparent ${STATUS_PILL[cat]}` : NEUTRAL_CHIP}
+              />
+            ) : (
+              <>
+                {t != null && cat != null && (
+                  <span className={`${CHIP} border-transparent ${STATUS_PILL[cat]}`}>{t.status ?? STATUS_WORD[cat]}</span>
+                )}
+                {t != null && cat == null && t.status != null && <span className={NEUTRAL_CHIP}>{t.status}</span>}
+              </>
             )}
-            {t != null && cat == null && t.status != null && <span className={NEUTRAL_CHIP}>{t.status}</span>}
             {t?.issueType != null && <span className="text-[11px] text-gray-500 dark:text-gray-400">{t.issueType}</span>}
             {t?.assignee != null && (
               <span className="inline-flex items-center gap-1.5">

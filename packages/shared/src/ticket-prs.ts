@@ -93,3 +93,50 @@ export interface TicketStoryResponse {
   /** The ticket's text as the sprint read stored it ('' when empty); null when not found. */
   story: { description: string; acceptanceCriteria: string } | null;
 }
+
+// ── The story view's status picker — THE ONE TRACKER WRITE (Jira only) ───────────────────────────
+//
+//   GET  /api/ticket-status/transitions?workspace=<id>&ident=…  →  TicketTransitionsResponse
+//   POST /api/ticket-status?workspace=<id>  { ident, transitionId }  →  TicketStatusChangeResponse
+//
+// docs/TRACKERS.md § The status change. The GET is made when the picker OPENS, never on mount: one
+// Jira call (`/rest/api/2/issue/{key}/transitions`), plus a permission check only when Jira offers
+// nothing. The POST makes the transition the reader picked, re-reads the ticket's status and writes
+// it to every stored row of that ticket. Both refuse a ticket Limn holds no row for (not a proxy),
+// a workspace whose tracker is not Jira, and an ident on another site. Every failure answers a
+// sentence Limn wrote, never Jira's.
+
+export interface TicketTransition {
+  /** Jira's transition id — what the POST sends back. */
+  id: string;
+  /** The transition's own name ("Start progress"). */
+  name: string;
+  /** The status it leads to. */
+  to: { name: string; category: JiraStatusCategory | null };
+}
+
+export interface TicketTransitionsResponse {
+  workspaceId: number;
+  ident: string;
+  /** Only the transitions Jira allows from the current status, in Jira's order. Transitions that
+   *  need fields only Jira's own form asks for are left out. */
+  transitions: TicketTransition[];
+  /** false = the saved Jira token may not change this issue (asked only when `transitions` is
+   *  empty); null = not asked, or Jira did not say. */
+  canTransition: boolean | null;
+}
+
+export interface TicketStatusChangeBody {
+  ident: string;
+  transitionId: string;
+}
+
+export interface TicketStatusChangeResponse {
+  workspaceId: number;
+  ident: string;
+  /** The status Jira reports after the change; null when the re-read failed (the change was made). */
+  status: { name: string; category: JiraStatusCategory | null } | null;
+}
+
+/** The one-line refusal when the saved token may not change an issue. */
+export const TICKET_STATUS_NO_PERMISSION = 'Your Jira token cannot change this issue.';

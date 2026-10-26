@@ -12,6 +12,14 @@ import { activeProvider, aiState, DEMO_CODEX_PLAN, ranOnNow, setAiState } from '
 
 const OK = (body: unknown): DemoReply => ({ status: 200, body });
 
+/** The demo's Jira workflow for the story view's status picker (`TicketTransition[]`). */
+const DEMO_TRANSITIONS: Array<{ id: string; name: string; to: { name: string; category: 'new' | 'indeterminate' | 'done' } }> = [
+  { id: '11', name: 'Back to To Do', to: { name: 'To Do', category: 'new' } },
+  { id: '21', name: 'Start progress', to: { name: 'In Progress', category: 'indeterminate' } },
+  { id: '31', name: 'Send to review', to: { name: 'In Review', category: 'indeterminate' } },
+  { id: '41', name: 'Done', to: { name: 'Done', category: 'done' } },
+];
+
 /** The demo's reader, used when the recording has no account of its own. */
 export const DEMO_USER = {
   login: 'morgan-diaz',
@@ -428,6 +436,31 @@ export const ROUTES: DemoRoute[] = [
     method: 'POST',
     re: /^\/api\/ticket-links$/,
     run: (req, _m, srv) => OK({ prs: byPr(recordedRows(srv, req.pathname, 'prs'), numberList(bodyRecord(req).prIds)), titlesComplete: true }),
+  },
+  // The story view's Jira status picker: a fixed workflow, and the pick kept in the overlay (the
+  // story view, the sprint boards and the stacks fold it back in `patchRecordedGet`).
+  {
+    method: 'GET',
+    re: /^\/api\/ticket-status\/transitions$/,
+    run: (req) =>
+      OK({
+        workspaceId: Number(req.query.get('workspace') ?? 0),
+        ident: req.query.get('ident') ?? '',
+        transitions: DEMO_TRANSITIONS,
+        canTransition: null,
+      }),
+  },
+  {
+    method: 'POST',
+    re: /^\/api\/ticket-status$/,
+    run: (req, _m, srv) => {
+      const b = bodyRecord(req);
+      const ident = typeof b.ident === 'string' ? b.ident : '';
+      const t = DEMO_TRANSITIONS.find((x) => x.id === b.transitionId);
+      if (ident === '' || t == null) return { status: 502, body: { error: 'JiraError', message: 'Jira refused this change.' } };
+      srv.overlay.ticketStatuses.set(ident, t.to);
+      return OK({ workspaceId: Number(req.query.get('workspace') ?? 0), ident, status: t.to });
+    },
   },
   {
     method: 'POST',
@@ -1089,6 +1122,21 @@ export function patchRecordedGet(req: DemoRequest, body: unknown, srv: DemoServe
     const kept = requests.filter((r) => !(typeof r.prId === 'number' && o.armed.has(r.prId)));
     const added = [...o.armed.values()].filter(isRecord);
     return { ...body, requests: [...kept, ...added] };
+  }
+
+  // A status the reader set from the story view's picker: the story view's two reads and the sprint boards.
+  if (o.ticketStatuses.size > 0 && (p === '/api/ticket-prs' || p === '/api/ticket-story') && isRecord(body) && isRecord(body.ticket)) {
+    const s = o.ticketStatuses.get(req.query.get('ident') ?? '');
+    if (s != null) return { ...body, ticket: { ...body.ticket, status: s } };
+  }
+  if (o.ticketStatuses.size > 0 && p === '/api/sprint-graph' && isRecord(body) && Array.isArray(body.nodes)) {
+    return {
+      ...body,
+      nodes: body.nodes.map((n) => {
+        const s = isRecord(n) && typeof n.ident === 'string' ? o.ticketStatuses.get(n.ident) : undefined;
+        return s != null && isRecord(n) ? { ...n, status: s } : n;
+      }),
+    };
   }
 
   if (p === '/api/bot-reviewers' && isRecord(body) && Array.isArray(body.reviewers)) {

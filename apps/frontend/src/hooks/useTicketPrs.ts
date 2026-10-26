@@ -1,5 +1,11 @@
-import { skipToken, useQuery } from '@tanstack/react-query';
-import { SPRINT_READ_INTERVAL_MS, type TicketPrsResponse, type TicketStoryResponse } from '@pierre-review/shared';
+import { skipToken, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  SPRINT_READ_INTERVAL_MS,
+  type TicketPrsResponse,
+  type TicketStatusChangeResponse,
+  type TicketStoryResponse,
+  type TicketTransitionsResponse,
+} from '@pierre-review/shared';
 import { api } from '../api/client.js';
 import { workspaceKey } from './useActivity.js';
 
@@ -34,5 +40,55 @@ export function useTicketStory(workspaceId: number | null, ident: string | null)
     },
     refetchIntervalInBackground: false,
     staleTime: 60_000,
+  });
+}
+
+// ── The story view's status picker (Jira only) — THE ONE TRACKER WRITE ─────────────────────────────
+
+/** The transitions Jira allows now. ⚠ CLICK-GATED: enabled only while the picker is OPEN, never on
+ *  mount, and never cached past the menu (the allowed set moves with the status). */
+export function useTicketTransitions(workspaceId: number | null, ident: string | null, open: boolean) {
+  return useQuery<TicketTransitionsResponse>({
+    queryKey: ['ticket-transitions', workspaceKey(workspaceId), ident],
+    queryFn: workspaceId == null || ident == null ? skipToken : () => api.ticketTransitions(workspaceId, ident),
+    enabled: open,
+    staleTime: 0,
+    gcTime: 0,
+    retry: false,
+  });
+}
+
+/**
+ * Make the transition the reader picked. On success the story view shows the status Jira reports at
+ * once, and every read that shows a ticket's status refetches: the story view's two reads, the sprint
+ * boards, the Open PRs ticket row and the PR pane's stored ticket.
+ */
+export function useSetTicketStatus(workspaceId: number | null, ident: string) {
+  const qc = useQueryClient();
+  return useMutation<TicketStatusChangeResponse, Error, string>({
+    mutationKey: ['ticket-status', workspaceKey(workspaceId), ident],
+    mutationFn: (transitionId) => {
+      if (workspaceId == null) throw new Error('No workspace yet.');
+      return api.setTicketStatus(workspaceId, { ident, transitionId });
+    },
+    onSuccess: (res) => {
+      const status = res.status;
+      if (status != null) {
+        qc.setQueryData<TicketPrsResponse>(['ticket-prs', `ws:${workspaceId}`, ident], (d) =>
+          d?.ticket != null ? { ...d, ticket: { ...d.ticket, status } } : d,
+        );
+        qc.setQueryData<TicketStoryResponse>(['ticket-story', workspaceKey(workspaceId), ident], (d) =>
+          d?.ticket != null ? { ...d, ticket: { ...d.ticket, status } } : d,
+        );
+      }
+      return Promise.all([
+        qc.invalidateQueries({ queryKey: ['ticket-prs'] }),
+        qc.invalidateQueries({ queryKey: ['ticket-story'] }),
+        qc.invalidateQueries({ queryKey: ['sprint-graph', workspaceKey(workspaceId)] }),
+        qc.invalidateQueries({ queryKey: ['sprint-graph-token', workspaceKey(workspaceId)] }),
+        qc.invalidateQueries({ queryKey: ['ticket-links'] }),
+        qc.invalidateQueries({ queryKey: ['jira-ticket'] }),
+      ]);
+    },
   });
 }
