@@ -17,7 +17,8 @@ import {
   type ClaudeFollowUpStatus,
   type ClaudeTicketCriterionStatus,
 } from '@pierre-review/shared';
-import { PINNED_EFFORT, sdkModelOptions } from './model-options.js';
+import { sdkModelOptions } from './model-options.js';
+import { agenticRunEffort } from '../ai/effort.js';
 
 describe('checkClaudeReviewTicket', () => {
   const L = CLAUDE_REVIEW_TICKET_LIMITS;
@@ -187,12 +188,13 @@ describe('the model list', () => {
     expect(CLAUDE_REVIEW_MODEL_LABELS['claude-opus-5-5']).toBe('Claude Opus 5.5 (most thorough)');
   });
 
-  it('AI Fix opens on Opus 5.5, on effort medium', () => {
+  it('AI Fix opens on Opus 5.5, on effort medium by Default', () => {
     // ONE spelling, read by the fixer picker, the CI card's "Fix it" and the plugin's start route.
     expect(DEFAULT_AI_FIX_MODEL).toBe('claude-opus-5-5');
     expect(CLAUDE_REVIEW_MODELS).toContain(DEFAULT_AI_FIX_MODEL);
-    // "On medium" is not a field of the default — it is the pin every agentic path reads.
-    expect(PINNED_EFFORT[DEFAULT_AI_FIX_MODEL]).toBe('medium');
+    // "On medium" is not a field of the default — it is Settings → AI → Effort's Default (no level
+    // chosen, no REVIEW_EFFORT), which the fixer reads through agenticRunEffort. There is no pin.
+    expect(agenticRunEffort('claude', { role: 'deep' }, 'worktree', {})).toBe('medium');
     expect(sdkModelOptions(DEFAULT_AI_FIX_MODEL, 'worktree')).toEqual({
       effort: 'medium',
       thinking: { type: 'adaptive' },

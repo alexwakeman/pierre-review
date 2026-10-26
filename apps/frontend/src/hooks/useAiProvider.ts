@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { AiProviderSetting, CodexLoginMethod, CodexLoginResponse } from '@pierre-review/shared';
+import type { AiEffort, AiProviderSetting, CodexLoginMethod, CodexLoginResponse } from '@pierre-review/shared';
 import { api } from '../api/client.js';
 import { AI_BUDGET_QUERY_KEY } from './useAiBudget.js';
 
@@ -15,6 +15,17 @@ export function useSetAiProvider() {
     onSettled: () => {
       void qc.invalidateQueries({ queryKey: ['me'] });
       void qc.invalidateQueries({ queryKey: AI_BUDGET_QUERY_KEY });
+    },
+  });
+}
+
+/** The Effort level (Settings → AI → Effort). `null` ⇒ Default. Read back from `/api/me`. */
+export function useSetAiEffort() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (value: AiEffort | null) => api.setAiEffort(value),
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: ['me'] });
     },
   });
 }

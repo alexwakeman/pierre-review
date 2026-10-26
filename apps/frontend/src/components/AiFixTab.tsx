@@ -124,8 +124,8 @@ function FixerSection({
   const setPrDetailTab = useFilters((s) => s.setPrDetailTab);
 
   // THE PER-RUN MODEL MENU (lib/modelPick.ts): every signed-in provider that can run a fix, opening on
-  // the DEFAULT provider's model at the shared default's depth (Opus 5.5, effort pinned to medium
-  // server-side) — the same constant the start route falls back to.
+  // the DEFAULT provider's model at the shared default's depth (Opus 5.5, at Settings → AI → Effort,
+  // read server-side) — the same constant the start route falls back to.
   const modelPick = useModelPick('fix', DEFAULT_AI_FIX_MODEL);
   // The info text names the provider the menu PICKED (the run about to start), not the default.
   const pickedName = aiProviderName(modelPick.chosen.provider);
@@ -443,8 +443,8 @@ function AutoFixChip(): JSX.Element {
 }
 
 /** Who built the fix: the provider and the model that ran (packages/shared `aiRunLabel`). */
-function runLabelOf(run: Pick<AiFix, 'provider' | 'model'>): string {
-  return aiRunLabel(run.provider, run.model);
+function runLabelOf(run: Pick<AiFix, 'provider' | 'model' | 'effort'>): string {
+  return aiRunLabel(run.provider, run.model, run.effort);
 }
 
 function FixResult({

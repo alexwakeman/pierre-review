@@ -31,9 +31,12 @@ export interface AiFixRow {
   model: string;
   // 0128: who ran the build; NULL on older rows (read through `aiRunProvider`).
   provider?: string | null;
+  // 0130: the effort the build used; NULL on older rows and before it starts.
+  effort?: string | null;
   // 0128: what the latest planning pass ran on. NULL = never planned, or an older row.
   planProvider?: string | null;
   planModel?: string | null;
+  planEffort?: string | null;
   seed: AiFixStoredSeed;
   prompt: string | null;
   summary: string | null;
@@ -128,13 +131,21 @@ export async function insertQueuedFix(
 /** Stamp what the BUILD runs on (provider + model id), as it starts. */
 export async function markFixRanOn(ctx: AgentContext, id: number, ran: AiRanOn): Promise<void> {
   const t = ctx.schema.aiFixes;
-  await ctx.db.update(t).set({ provider: ran.provider, model: ran.model }).where(eq(t.id, id)).execute();
+  await ctx.db
+    .update(t)
+    .set({ provider: ran.provider, model: ran.model, ...(ran.effort ? { effort: ran.effort } : {}) })
+    .where(eq(t.id, id))
+    .execute();
 }
 
 /** Stamp what a PLANNING pass runs on (provider + model id), as it starts. */
 export async function markPlanRanOn(ctx: AgentContext, id: number, ran: AiRanOn): Promise<void> {
   const t = ctx.schema.aiFixes;
-  await ctx.db.update(t).set({ planProvider: ran.provider, planModel: ran.model }).where(eq(t.id, id)).execute();
+  await ctx.db
+    .update(t)
+    .set({ planProvider: ran.provider, planModel: ran.model, ...(ran.effort ? { planEffort: ran.effort } : {}) })
+    .where(eq(t.id, id))
+    .execute();
 }
 
 export async function markFixRunning(ctx: AgentContext, id: number): Promise<void> {

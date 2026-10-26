@@ -40,17 +40,6 @@ function floatFromEnv(key: string, fallback: number): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
-// The Claude Agent SDK `effort` levels (guides thinking depth + overall token
-// spend). Lower effort → fewer/cheaper thinking tokens + terser output. Only the
-// models in review/model-options.ts EFFORT_CAPABLE_MODELS get it on an agentic run.
-const REVIEW_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
-export type ReviewEffort = (typeof REVIEW_EFFORTS)[number];
-function effortFromEnv(key: string, fallback: ReviewEffort): ReviewEffort {
-  const raw = process.env[key];
-  return (REVIEW_EFFORTS as readonly string[]).includes(raw ?? '')
-    ? (raw as ReviewEffort)
-    : fallback;
-}
 
 // Local: move a pre-rename ~/.pierre-review to ~/.limn, once, BEFORE anything below resolves a path
 // inside the data directory (data-dir.ts). Here, not in index.ts's start(): `pnpm dev` imports this
@@ -375,11 +364,14 @@ export const config = {
   // Per-run caps (cost/disk/time runaway guards). The diff is inlined in full, so
   // reviews need far fewer turns than the old default; 30 is still generous.
   reviewMaxTurns: intFromEnv('REVIEW_MAX_TURNS', 30),
+  // Set explicitly ⇒ the cap above holds at every effort; unset ⇒ High / Extra high / Max raise it
+  // (ai/effort.ts `effortTurnCap`: 45 / 60 / 75).
+  reviewMaxTurnsPinned: (process.env.REVIEW_MAX_TURNS ?? '') !== '',
   // Hard USD ceiling per run. When the SDK trips this it returns an
   // `error_max_budget_usd` result BEFORE the agent calls submit_review — so a run
   // that hits the cap is recorded FAILED and still bills (you pay for no review).
   // The cap must therefore sit ABOVE the cost of a normal completed review, not at
-  // it; `reviewEffort` below is the real cost lever (a large diff at default-high
+  // it; the effort (ai/effort.ts) is the real cost lever (a large diff at default-high
   // effort is what blew the old $1 cap). Lower REVIEW_BUDGET_USD only if you'd
   // rather a borderline review fail than complete. It is the WHOLE limit for one run,
   // deep-review specialists included (up to CLAUDE_REVIEW_MAX_SPECIALISTS, each on the review's
@@ -474,13 +466,9 @@ export const config = {
   // baseline run and comparing the recorded cost.
   reviewDiffCapEnabled: process.env.REVIEW_DIFF_CAP_ENABLED !== 'false',
   reviewDiffCapChars: intFromEnv('REVIEW_DIFF_CAP_CHARS', 60000),
-  // Agent `effort` per mode — the dominant cost knob (unset ⇒ the SDK default
-  // `high`, which over-thinks bounded reviews). A diff-only run just hunts bugs in a
-  // small inlined diff, so `low` is plenty; a worktree run reasons across files, so
-  // `medium` keeps that while trimming the over-exploration that ran up the bill.
-  // Applied only to effort-capable models (Sonnet/Opus); Haiku ignores it.
-  reviewEffort: effortFromEnv('REVIEW_EFFORT', 'medium'),
-  reviewDiffOnlyEffort: effortFromEnv('REVIEW_DIFF_ONLY_EFFORT', 'low'),
+  // Agent `effort` — the dominant cost knob — is NOT read here: REVIEW_EFFORT (the level; it wins over
+  // Settings → AI → Effort) and REVIEW_DIFF_ONLY_EFFORT (every diff-only run) are read at run time by
+  // ai/effort.ts, the one resolver.
   // (Review concurrency + queue caps + the routing thresholds moved to the plugin's
   // PRO_REVIEW_* env — the plugin owns the queue/manager + the mode-routing decision.)
 

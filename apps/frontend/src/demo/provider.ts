@@ -7,12 +7,18 @@
 //
 // The one rule for "who runs next" mirrors the server's (ai/provider-setting.ts): an explicit choice
 // wins; Auto is Claude while Claude is signed in (it always is here).
+//
+// Settings → AI → Effort (PUT /api/ai/effort) is simulated here too: a review or AI Fix started after
+// a pick stores that level ("Claude Opus 5.5 · high"); Default stores each provider's own depth, as the
+// server's ai/effort.ts does (Claude medium; Codex high on its deepest model, medium on the standard).
 
 import {
   AI_MODEL_FOR_ROLE,
   aiRunProvider,
   claudeModelRole,
+  isAiEffort,
   isAiProviderSetting,
+  type AiEffort,
   type AiModelRole,
   type AiProviderId,
   type AiProviderSetting,
@@ -28,9 +34,11 @@ export const DEMO_CODEX_PLAN = 'plus';
 export interface DemoAiState {
   setting: AiProviderSetting;
   codexSignedIn: boolean;
+  /** Settings → AI → Effort; null = Default. */
+  effort: AiEffort | null;
 }
 
-const INITIAL: DemoAiState = { setting: 'auto', codexSignedIn: true };
+const INITIAL: DemoAiState = { setting: 'auto', codexSignedIn: true, effort: null };
 
 export function aiState(srv: DemoServer): DemoAiState {
   const s = srv.overlay.stored.get(KEY);
@@ -38,6 +46,7 @@ export function aiState(srv: DemoServer): DemoAiState {
   return {
     setting: isAiProviderSetting(s.setting) ? s.setting : INITIAL.setting,
     codexSignedIn: typeof s.codexSignedIn === 'boolean' ? s.codexSignedIn : INITIAL.codexSignedIn,
+    effort: isAiEffort(s.effort) ? s.effort : null,
   };
 }
 
@@ -78,4 +87,16 @@ export function ranOnNow(
   const asked = pickedModel ?? model;
   const role = typeof asked === 'string' && asked !== '' ? roleOf(asked) : 'standard';
   return { provider, model: AI_MODEL_FOR_ROLE[provider][role] };
+}
+
+/**
+ * The effort a review or AI Fix started NOW stores: the chosen level, else the provider's Default for the
+ * model's depth (server: ai/effort.ts `agenticRunEffort` on a worktree run).
+ */
+export function demoRunEffort(srv: DemoServer, ran: { provider: AiProviderId; model: string }): AiEffort {
+  const chosen = aiState(srv).effort;
+  if (chosen) return chosen;
+  if (ran.provider !== 'codex') return 'medium';
+  const role = roleOf(ran.model);
+  return role === 'deep' ? 'high' : role === 'standard' ? 'medium' : 'low';
 }

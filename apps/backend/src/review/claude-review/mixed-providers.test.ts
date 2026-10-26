@@ -145,7 +145,8 @@ describe('a Claude review and a Codex review of the same head', () => {
     claudeRun = await persist.insertQueuedReview(ctx, prId, HEAD, 'claude-opus-5-5', 1);
     let row = (await db.select().from(schema.claudeReviews).where(eq(schema.claudeReviews.id, claudeRun)).execute())[0];
     expect(row).toMatchObject({ provider: 'claude', model: 'claude-opus-5-5' });
-    await persist.markReviewRanOn(ctx, claudeRun, { provider: 'claude', model: 'claude-opus-5-5' });
+    // Both at Settings → AI → Effort = High: the run stores the effort it sent.
+    await persist.markReviewRanOn(ctx, claudeRun, { provider: 'claude', model: 'claude-opus-5-5', effort: 'high' });
     await succeed(claudeRun, [assessment(1, { addressed: 'not_addressed' }), assessment(2)], 'claude finding');
 
     // Settings → AI switched to Codex: the next run of the SAME head is allowed and labelled Codex
@@ -154,7 +155,7 @@ describe('a Claude review and a Codex review of the same head', () => {
     codexRun = await persist.insertQueuedReview(ctx, prId, HEAD, 'claude-opus-5-5', 1);
     row = (await db.select().from(schema.claudeReviews).where(eq(schema.claudeReviews.id, codexRun)).execute())[0];
     expect(row).toMatchObject({ provider: 'codex', model: 'gpt-6-astra' });
-    await persist.markReviewRanOn(ctx, codexRun, { provider: 'codex', model: 'gpt-6-astra' });
+    await persist.markReviewRanOn(ctx, codexRun, { provider: 'codex', model: 'gpt-6-astra', effort: 'high' });
     await succeed(codexRun, [assessment(1, { addressed: 'addressed' })], 'codex finding');
     setting.setStoredAiProviderSetting(null);
   });
@@ -166,10 +167,15 @@ describe('a Claude review and a Codex review of the same head', () => {
     expect(byId.get(codexRun)).toMatchObject({ provider: 'codex', model: 'gpt-6-astra', status: 'succeeded' });
     expect(aiRunLabel(byId.get(claudeRun)!.provider, byId.get(claudeRun)!.model)).toBe('Claude Opus 5.5');
     expect(aiRunLabel(byId.get(codexRun)!.provider, byId.get(codexRun)!.model)).toBe('Codex · GPT-6 Astra');
+    // The effort each stored, in the history row and the label.
+    expect(byId.get(claudeRun)!.effort).toBe('high');
+    expect(aiRunLabel(byId.get(claudeRun)!.provider, byId.get(claudeRun)!.model, byId.get(claudeRun)!.effort)).toBe('Claude Opus 5.5 · high');
+    expect(aiRunLabel(byId.get(codexRun)!.provider, byId.get(codexRun)!.model, byId.get(codexRun)!.effort)).toBe('Codex · GPT-6 Astra · high');
 
     const claude = await persist.getClaudeReviewById(ctx, claudeRun, 1);
     const codex = await persist.getClaudeReviewById(ctx, codexRun, 1);
     expect(claude?.provider).toBe('claude');
+    expect(claude?.effort).toBe('high');
     expect(claude?.findings.map((f) => f.title)).toEqual(['claude finding']);
     expect(codex?.provider).toBe('codex');
     expect(codex?.findings.map((f) => f.title)).toEqual(['codex finding']);

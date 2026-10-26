@@ -258,6 +258,24 @@ describe('Claude Review on Codex', () => {
     expect(cfg(call.argv, 'model_reasoning_effort')).toBe('"high"');
     // The MCP server is given the worktree (mocked prepWorktree) as a read root.
     expect(call.argv.join(' ')).toContain(`${T.root}/wt-`);
+    // Default effort is stored on the run for its label.
+    expect(res.ranOn).toEqual({ provider: 'codex', model: 'gpt-6-astra', effort: 'high' });
+  });
+
+  it('Settings → AI → Effort reaches Codex: the chosen level on a worktree run, one step lower diff-only, stored on the run', async () => {
+    const { setStoredAiEffort } = await import('../ai/effort.js');
+    setStoredAiEffort('xhigh');
+    try {
+      const deep = await runReview(reviewArgs('REVIEWOK', { mode: 'worktree', model: 'claude-opus-5-5', systemPrompt: 'Explore the worktree.' }));
+      expect(cfg(calls()[0].argv, 'model_reasoning_effort')).toBe('"xhigh"');
+      expect(deep.ranOn).toEqual({ provider: 'codex', model: 'gpt-6-astra', effort: 'xhigh' });
+      unlinkSync(T.log);
+      const small = await runReview(reviewArgs('REVIEWOK'));
+      expect(cfg(calls()[0].argv, 'model_reasoning_effort')).toBe('"high"');
+      expect(small.ranOn?.effort).toBe('high');
+    } finally {
+      setStoredAiEffort(null);
+    }
   });
 
   it('SCHEMA FAILURE: corrected once on the same thread, the retry’s delta billed once', async () => {

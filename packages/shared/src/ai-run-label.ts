@@ -10,6 +10,7 @@
 // Shared because both halves read it: the server resolves `provider` for the wire, the SPA labels.
 import type { AiProviderId, ClaudeReviewModel } from './types.js';
 import { CLAUDE_REVIEW_MODEL_LABELS, CLAUDE_REVIEW_MODELS } from './types.js';
+import { aiEffortWord } from './ai-effort.js';
 
 /**
  * The DEFAULT provider (Settings → AI, or `LIMN_AI_PROVIDER`): it runs every AUTOMATIC run and every
@@ -82,9 +83,21 @@ export function aiModelName(model: string): string {
 /**
  * THE RUN LABEL: "Claude Opus 5.5", "Claude Sonnet 5", "Codex · GPT-6 Astra". `provider` is the stored
  * value (NULL/absent on older rows, read through `aiRunProvider`). A model id Limn does not know is
- * shown as stored, still named by its provider ("Codex · some-model").
+ * shown as stored, still named by its provider ("Codex · some-model"). `effort` (a run that stored the
+ * effort it used: Claude Review runs, AI Fix builds and plans) is added last: "Claude Opus 5.5 · high",
+ * "Codex · GPT-6 Astra · extra high"; absent, NULL or unknown adds nothing.
  */
-export function aiRunLabel(provider: string | null | undefined, model: string | null | undefined): string {
+export function aiRunLabel(
+  provider: string | null | undefined,
+  model: string | null | undefined,
+  effort?: string | null,
+): string {
+  const word = aiEffortWord(effort);
+  const base = aiRunBaseLabel(provider, model);
+  return word ? `${base} · ${word}` : base;
+}
+
+function aiRunBaseLabel(provider: string | null | undefined, model: string | null | undefined): string {
   const p = aiRunProvider(provider, model);
   if (model == null || model.trim() === '') return aiProviderName(p);
   const name = aiModelName(model);

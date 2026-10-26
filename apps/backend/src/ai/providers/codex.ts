@@ -49,6 +49,7 @@ import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { AI_MODEL_FOR_ROLE } from '@pierre-review/shared';
 import { promisify } from 'node:util';
 import { config } from '../../config.js';
+import { CODEX_DEFAULT_EFFORT_FOR_ROLE } from '../effort.js';
 // db/usage.js is imported LAZILY (in `record`): db/client opens the database at import time, and the
 // provider registry is imported by every runner and test that never writes a ledger row.
 import { buildExecArgs, codexChildEnv, toResumeArgs } from '../codex/config.js';
@@ -121,12 +122,12 @@ const execFileP = promisify(execFile);
  */
 export const CODEX_MODEL_FOR_ROLE: Readonly<Record<ModelRole, string>> = AI_MODEL_FOR_ROLE.codex;
 
-/** Reasoning effort per role (spike § 8). Never the `fast` service tier: it costs more of the plan. */
-export const CODEX_EFFORT_FOR_ROLE: Readonly<Record<ModelRole, string>> = {
-  deep: 'high',
-  standard: 'medium',
-  fast: 'low',
-};
+/**
+ * Reasoning effort per role (spike § 8) — Codex's DEFAULT depth, the one table in ai/effort.ts. A run
+ * that reads Settings → AI → Effort (the review, AI Fix, Plan first) sends its own `spec.codex.effort`.
+ * Never the `fast` service tier: it costs more of the plan.
+ */
+export const CODEX_EFFORT_FOR_ROLE: Readonly<Record<ModelRole, string>> = CODEX_DEFAULT_EFFORT_FOR_ROLE;
 
 /**
  * A role (or an explicit id) → a Codex model. ⚠ An explicit CLAUDE id (every call site passes one

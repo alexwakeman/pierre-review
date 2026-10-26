@@ -1,6 +1,10 @@
 import {
+  AI_EFFORT_LABELS,
+  AI_EFFORTS,
   AI_PROVIDER_SETTINGS,
   aiProviderName,
+  isAiEffort,
+  type AiEffortSettingStatus,
   type AiClaudeProviderStatus,
   type AiCodexProviderStatus,
   type AiProviderSetting,
@@ -8,7 +12,7 @@ import {
 } from '@pierre-review/shared';
 import { useMe } from '../../hooks/useTriage.js';
 import { useAiRuntimeInstall } from '../../hooks/useAiCapabilities.js';
-import { useCodexLogin, useCodexLoginActions, useSetAiProvider } from '../../hooks/useAiProvider.js';
+import { useCodexLogin, useCodexLoginActions, useSetAiEffort, useSetAiProvider } from '../../hooks/useAiProvider.js';
 import { safeExternalUrl } from '../../lib/ui.js';
 import { chatGptPlanLabel } from '../../lib/aiBudget.js';
 import { InfoButton } from '../InfoModal.js';
@@ -22,6 +26,10 @@ import { SectionShell } from './ui.js';
 // (`ai.provider`, `ai.providerSetting`, `ai.providers`). An explicitly set LIMN_AI_PROVIDER wins: the
 // control then shows its value, disabled. A switch reaches the NEXT run; a run already going finishes
 // where it started. Codex signs in to Limn's OWN Codex folder (~/.limn/codex), with ChatGPT only.
+//
+// EFFORT (PUT /api/ai/effort, read back as `ai.effortSetting`): one level for AI Review and AI Fix on
+// both providers (packages/shared ai-effort.ts). "Default" (null) is each provider's own depth; an
+// explicitly set REVIEW_EFFORT wins and the control shows it, disabled.
 
 const BTN =
   'rounded border border-gray-300 px-2 py-1 text-xs hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500';
@@ -105,6 +113,8 @@ export function AiProviderSection(): JSX.Element | null {
       {fromEnv && <p className={`text-xs ${MUTED}`}>Set by LIMN_AI_PROVIDER.</p>}
       {set.isError && <p className="text-xs text-red-600 dark:text-red-400">{set.error.message}</p>}
 
+      <EffortControl setting={ai.effortSetting ?? { value: null, source: 'settings' }} />
+
       <dl className="space-y-1.5 text-xs">
         <div className="flex flex-wrap items-baseline gap-x-2">
           <dt className="w-14 shrink-0 font-medium text-gray-700 dark:text-gray-200">Claude</dt>
@@ -142,6 +152,49 @@ export function AiProviderSection(): JSX.Element | null {
       )}
       <p className={`text-xs ${MUTED}`}>Codex signs in with ChatGPT only. An OPENAI_API_KEY is not used.</p>
     </SectionShell>
+  );
+}
+
+/** Settings → AI → Effort: Default, then the five levels both providers accept. */
+function EffortControl({ setting }: { setting: AiEffortSettingStatus }): JSX.Element {
+  const set = useSetAiEffort();
+  const fromEnv = setting.source === 'env';
+  const chosen = set.isPending && set.variables !== undefined ? set.variables : setting.value;
+  return (
+    <div className="space-y-1">
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <label htmlFor="ai-effort" className="text-gray-700 dark:text-gray-200">
+          Effort for AI Review and AI Fix:
+        </label>
+        <select
+          id="ai-effort"
+          value={chosen ?? 'default'}
+          disabled={fromEnv || set.isPending}
+          onChange={(e) => set.mutate(isAiEffort(e.target.value) ? e.target.value : null)}
+          className="rounded border border-gray-300 bg-white px-1.5 py-0.5 text-xs disabled:opacity-60 dark:border-gray-700 dark:bg-gray-900"
+        >
+          <option value="default">Default</option>
+          {AI_EFFORTS.map((e) => (
+            <option key={e} value={e}>
+              {AI_EFFORT_LABELS[e]}
+            </option>
+          ))}
+        </select>
+        <InfoButton title="Effort">
+          <p>Higher effort reads more and finds more, and uses more of your plan or costs more.</p>
+          <p className="mt-2">
+            It applies to AI Review and AI Fix on Claude and Codex. Default runs Claude at medium and Codex at high on its
+            most thorough model. A review of a small change from its diff alone runs one level lower.
+          </p>
+          <p className="mt-2">
+            At High, Extra high and Max a review may also take more steps: 45, 60 or 75 instead of 30, unless
+            REVIEW_MAX_TURNS is set. Each run shows the effort it used beside its model.
+          </p>
+        </InfoButton>
+      </div>
+      {fromEnv && <p className={`text-xs ${MUTED}`}>Set by REVIEW_EFFORT.</p>}
+      {set.isError && <p className="text-xs text-red-600 dark:text-red-400">{set.error.message}</p>}
+    </div>
   );
 }
 

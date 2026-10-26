@@ -873,6 +873,8 @@ describe('the AI runtime download', () => {
   it('keeps the AI provider choice on read (one UPDATE, no model, no GitHub)', () => {
     expect(tiers('PUT', '/api/ai/provider')).toEqual(['read']);
     expect(tiers('PUT', '/api/ai/provider')).not.toContain('ai');
+    expect(tiers('PUT', '/api/ai/effort')).toEqual(['read']);
+    expect(tiers('PUT', '/api/ai/effort')).not.toContain('ai');
   });
 
   it('puts POST /api/ai/runtime/install on the sync tier', () => {

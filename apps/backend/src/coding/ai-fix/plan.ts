@@ -57,6 +57,8 @@ export interface GeneratePlanArgs {
   prId?: number;
   /** The provider the prompt was worded for (ai/prompt-tools.ts). Absent ⇒ the active one. */
   provider?: 'claude' | 'codex';
+  /** The pass's effort (ai/effort.ts `agenticRunEffort`, decided by the manager). Absent ⇒ Default. */
+  effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
   /** Codex-only run knobs (the opt-in live test's effort). */
   codex?: { effort?: string; timeoutMs?: number };
 }
@@ -268,6 +270,7 @@ export function planStateOf(row: {
   planCostUsd?: number | null;
   planModel?: string | null;
   planProvider?: string | null;
+  planEffort?: string | null;
 }): AiFixPlanState | null {
   const status = parsePlanStatus(row.planStatus);
   if (status == null) return null;
@@ -279,5 +282,7 @@ export function planStateOf(row: {
     costUsd: row.planCostUsd ?? null,
     // What the latest planning pass ran on (0128); absent before the first pass and on older rows.
     ...(row.planModel ? { model: row.planModel, provider: aiRunProvider(row.planProvider, row.planModel) } : {}),
+    // The effort that pass used (0130); absent on older rows.
+    ...(row.planEffort ? { effort: row.planEffort } : {}),
   };
 }

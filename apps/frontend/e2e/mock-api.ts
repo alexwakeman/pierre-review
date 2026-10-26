@@ -289,6 +289,7 @@ const ME_RESPONSE: MeResponse = {
     kinds: aiKindsAll({ auth: 'ok', message: null }),
     provider: 'claude',
     providerSetting: { value: 'auto', source: 'settings' },
+    effortSetting: { value: null, source: 'settings' },
     providers: {
       claude: { auth: 'ok', route: 'login', message: null, runtime: 'ready' },
       codex: {

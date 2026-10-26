@@ -31,6 +31,7 @@ import { getAiRuntimeStatus } from '../../ai/runtime.js';
 import { codexKindStatus, detectClaudeAuth, NO_CLAUDE_AUTH_MESSAGE } from '../../review/auth.js';
 import { resolveAiCredential } from '../../ai/credentials.js';
 import { codexDetailCached } from '../../ai/codex/detect.js';
+import { aiEffortSettingStatus } from '../../ai/effort.js';
 import {
   aiProviderSettingStatus,
   ALL_RUN_KINDS,
@@ -182,6 +183,7 @@ function agenticAiStatus(): MeResponse['ai'] {
       kinds: kindsStatus(() => ({ auth: 'none', message: null })),
       provider,
       providerSetting: aiProviderSettingStatus(),
+      effortSetting: aiEffortSettingStatus(),
       providers: {
         claude: { auth: 'none', route: 'none', message: null, runtime: 'absent' },
         codex: {
@@ -218,6 +220,7 @@ function agenticAiStatus(): MeResponse['ai'] {
     }),
     provider,
     providerSetting: aiProviderSettingStatus(),
+    effortSetting: aiEffortSettingStatus(),
     providers: {
       claude: {
         auth: claudeRoute === 'none' ? 'none' : 'ok',

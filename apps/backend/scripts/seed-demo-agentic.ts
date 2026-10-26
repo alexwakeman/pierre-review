@@ -33,6 +33,8 @@ const HOUR = 3_600_000;
 /** What a Codex run ran on (the deep and standard models; packages/shared AI_MODEL_FOR_ROLE). */
 const CODEX_DEEP = { provider: 'codex' as const, model: 'gpt-6-astra' };
 const CODEX_STANDARD = { provider: 'codex' as const, model: 'gpt-6.1-sol' };
+/** The same, with the effort a review / AI Fix run stores (Settings → AI → Effort; Default = high on Astra). */
+const CODEX_DEEP_HIGH = { ...CODEX_DEEP, effort: 'high' };
 
 interface DiffFile {
   path: string;
@@ -240,8 +242,8 @@ interface ReviewScript {
   inputTokens: number;
   outputTokens: number;
   numTurns: number;
-  /** What ran, when not Claude Opus (the model asked for). */
-  ranOn?: { provider: 'claude' | 'codex'; model: string };
+  /** What ran, when not Claude Opus at medium (the model asked for, at the Default effort). */
+  ranOn?: { provider: 'claude' | 'codex'; model: string; effort?: string };
 }
 
 async function runClaudeReview(
@@ -284,7 +286,7 @@ async function runClaudeReview(
         return {
           submitted: true,
           ...mapped,
-          ranOn: s.ranOn ?? { provider: 'claude', model: 'claude-opus-5-5' },
+          ranOn: s.ranOn ?? { provider: 'claude', model: 'claude-opus-5-5', effort: 'medium' },
           costUsd: s.costUsd,
           inputTokens: s.inputTokens,
           outputTokens: s.outputTokens,
@@ -474,6 +476,8 @@ export async function seedDemoAgentic(c: AgenticSeedCtx): Promise<Record<string,
     inputTokens: 30_200,
     outputTokens: 2_300,
     numTurns: 7,
+    // Run at Effort = High, beside Astra at high: the comparison the effort label names.
+    ranOn: { provider: 'claude', model: 'claude-opus-5-5', effort: 'high' },
   });
   await db.update(schema.claudeReviews).set({ createdAt: at(20), finishedAt: at(19.8) }).where(eq(schema.claudeReviews.id, run105)).execute();
 
@@ -495,7 +499,7 @@ export async function seedDemoAgentic(c: AgenticSeedCtx): Promise<Record<string,
     inputTokens: 33_900,
     outputTokens: 2_900,
     numTurns: 8,
-    ranOn: CODEX_DEEP,
+    ranOn: CODEX_DEEP_HIGH,
   });
   await db.update(schema.claudeReviews).set({ createdAt: at(18), finishedAt: at(17.7) }).where(eq(schema.claudeReviews.id, run105Codex)).execute();
   out.reviews = { run114, run116, run105, run105Codex };
@@ -849,8 +853,8 @@ async function seedAiFix(base: any, c: AgenticSeedCtx, runs: { run114: number; r
   // The plan ran on Codex GPT-6 Astra (the fix on #114 above is Claude Opus's); its build, once
   // approved, is labelled Codex from the start.
   const { markPlanRanOn, markFixRanOn } = await import('../src/coding/ai-fix/persist.js');
-  await markPlanRanOn(ctx, planId, CODEX_DEEP);
-  await markFixRanOn(ctx, planId, CODEX_DEEP);
+  await markPlanRanOn(ctx, planId, CODEX_DEEP_HIGH);
+  await markFixRanOn(ctx, planId, CODEX_DEEP_HIGH);
   void shownRefs;
   return { fixId, planId };
 }
