@@ -271,7 +271,7 @@ describe('the wiring', () => {
   it('the PR review Run button no longer takes or gates on a story', () => {
     const tab = src('components/ClaudeReviewTab.tsx');
     expect(tab).not.toMatch(/ticketCheck|ClaudeReviewTicketPanel/);
-    expect(tab).toMatch(/generate\.mutate\(\{ model \}\)/);
+    expect(tab).toMatch(/generate\.mutate\(\{ model: modelPick\.chosen\.model, provider: modelPick\.chosen\.provider \}\)/);
     expect(tab).toMatch(/<TicketCoverageSection /);
   });
 

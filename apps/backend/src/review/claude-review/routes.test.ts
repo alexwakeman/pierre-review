@@ -10,6 +10,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import type { AgentContext as ProContext } from '../agent-context.js';
 
+// The DEFAULT provider is pinned (the machine's own sign-ins must not decide it).
+process.env.LIMN_AI_PROVIDER = 'claude';
+
 const startReview = vi.fn(async () => ({ ok: true as const, reviewId: 123, queued: false }));
 
 vi.mock('./manager.js', () => ({
@@ -22,11 +25,22 @@ vi.mock('./manager.js', () => ({
   subscribeReviewStream: vi.fn(() => () => {}),
 }));
 
-async function build(): Promise<{ app: FastifyInstance }> {
+async function build(
+  signedIn: { claude: boolean; codex: boolean } = { claude: true, codex: true },
+): Promise<{ app: FastifyInstance }> {
   /* eslint-disable @typescript-eslint/no-explicit-any */
   const ctx = {
     accountIdOf: () => 1,
-    llm: { detectAuth: () => ({ status: 'ok' }) },
+    llm: {
+      detectAuth: () => ({ status: 'ok' }),
+      detectProviderAuth: (p: 'claude' | 'codex') =>
+        signedIn[p]
+          ? { status: 'ok' }
+          : {
+              status: 'none',
+              message: p === 'codex' ? 'Sign in to Codex in Settings → AI.' : 'Sign in to Claude Code or set ANTHROPIC_API_KEY',
+            },
+    },
     review: {},
   } as any as ProContext;
   const { default: Fastify } = await import('fastify');
@@ -66,7 +80,7 @@ describe('the model', () => {
       expect(res.statusCode).toBe(202);
       const call = startReview.mock.calls[0] as unknown[];
       expect(call[3]).toBe(model);
-      expect(call).toHaveLength(4);
+      expect(call).toHaveLength(5);
     }
   });
 
@@ -83,7 +97,7 @@ describe('the model', () => {
     const res = await post(app, { mode: 'worktree' });
     expect(res.statusCode).toBe(202);
     const call = startReview.mock.calls[0] as unknown[];
-    expect(call).toHaveLength(4);
+    expect(call).toHaveLength(5);
   });
 });
 
@@ -100,7 +114,7 @@ describe('a legacy user story on the PR review route', () => {
       startReview.mockClear();
       const res = await post(app, payload);
       expect(res.statusCode).toBe(202);
-      expect(startReview.mock.calls[0] as unknown[]).toHaveLength(4);
+      expect(startReview.mock.calls[0] as unknown[]).toHaveLength(5);
     }
   });
 });
@@ -133,5 +147,71 @@ describe('the retired ticket post route', () => {
     const res = await app.inject({ method: 'POST', url: '/api/claude-reviews/5/tickets/0/post' });
     expect(res.statusCode).toBe(404);
     expect(app.printRoutes()).not.toContain('tickets');
+  });
+});
+
+// THE PER-RUN CHOICE (docs/CODEX-PLAN.md § 6, revised): a manual run names its provider and model.
+describe('the per-run provider', () => {
+  const call = (): unknown[] => startReview.mock.calls[0] as unknown[];
+
+  it('no provider ⇒ the default provider (Settings → AI), the model as sent', async () => {
+    const { app } = await build();
+    expect((await post(app, { model: 'claude-sonnet-5' })).statusCode).toBe(202);
+    expect(call().slice(3)).toEqual(['claude-sonnet-5', 'claude']);
+  });
+
+  it('Codex named with its model ⇒ runs on Codex, asked at the same depth', async () => {
+    const { app } = await build();
+    expect((await post(app, { provider: 'codex', model: 'gpt-6-astra' })).statusCode).toBe(202);
+    expect(call().slice(3)).toEqual(['claude-opus-5-5', 'codex']);
+    startReview.mockClear();
+    expect((await post(app, { provider: 'codex', model: 'gpt-6.1-sol' })).statusCode).toBe(202);
+    expect(call().slice(3)).toEqual(['claude-sonnet-5', 'codex']);
+  });
+
+  it('a Codex model with no provider ⇒ Codex (the model names it)', async () => {
+    const { app } = await build();
+    expect((await post(app, { model: 'gpt-6-astra' })).statusCode).toBe(202);
+    expect(call()[4]).toBe('codex');
+  });
+
+  it('Codex named with no model ⇒ Codex at the default depth', async () => {
+    const { app } = await build();
+    expect((await post(app, { provider: 'codex' })).statusCode).toBe(202);
+    expect(call().slice(3)).toEqual(['claude-opus-5-5', 'codex']);
+  });
+
+  it('a model of the other provider ⇒ 400 in one sentence, no run', async () => {
+    const { app } = await build();
+    let res = await post(app, { provider: 'claude', model: 'gpt-6-astra' });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: 'ModelNotOnProvider', message: 'GPT-6 Astra runs on Codex, not Claude.' });
+    res = await post(app, { provider: 'codex', model: 'claude-opus-5-5' });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toBe('Opus 5.5 runs on Claude, not Codex.');
+    expect(startReview).not.toHaveBeenCalled();
+  });
+
+  it('the named provider not signed in ⇒ 400 with its own sentence, no run', async () => {
+    const { app } = await build({ claude: true, codex: false });
+    const res = await post(app, { provider: 'codex', model: 'gpt-6-astra' });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: 'NoClaudeAuth', message: 'Sign in to Codex in Settings → AI.' });
+    expect(startReview).not.toHaveBeenCalled();
+    // …while Claude still runs.
+    expect((await post(app, { provider: 'claude' })).statusCode).toBe(202);
+  });
+
+  it('an unknown provider, or a Codex model no picker offers ⇒ 400, no run', async () => {
+    const { app } = await build();
+    expect((await post(app, { provider: 'gemini' })).statusCode).toBe(400);
+    expect((await post(app, { provider: 'codex', model: 'gpt-6-luna' })).statusCode).toBe(400);
+    expect(startReview).not.toHaveBeenCalled();
+  });
+
+  it('only Codex signed in: a Codex run starts, a Claude one is refused', async () => {
+    const { app } = await build({ claude: false, codex: true });
+    expect((await post(app, { provider: 'codex' })).statusCode).toBe(202);
+    expect((await post(app, { provider: 'claude' })).statusCode).toBe(400);
   });
 });

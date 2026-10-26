@@ -209,7 +209,15 @@ export class RunSimulator {
 
   // ── starting ───────────────────────────────────────────────────────────────────────────────
 
-  start(kind: RunKind, key: string, prId: number | null, ident: string | null, finalStatus?: string): SimulatedRun | null {
+  start(
+    kind: RunKind,
+    key: string,
+    prId: number | null,
+    ident: string | null,
+    finalStatus?: string,
+    // A manual start's model menu pick (`{ provider, model }` in the body): the run goes THERE.
+    pick?: { provider?: unknown; model?: unknown },
+  ): SimulatedRun | null {
     const existing = this.latestFor(kind, key);
     if (existing && this.isActive(existing)) return existing;
     const template = this.findTemplate(kind, prId, ident);
@@ -224,7 +232,7 @@ export class RunSimulator {
       durationMs: DURATION_MS[kind],
       template,
       finalStatus: finalStatus ?? (typeof template.status === 'string' && template.status !== 'running' ? template.status : 'succeeded'),
-      ranOn: ranOnNow(this.srv, template.model),
+      ranOn: ranOnNow(this.srv, template.model, pick),
     };
     this.latest.set(`${kind}|${key}`, run);
     this.byId.set(`${kind}#${run.id}`, run);
@@ -324,7 +332,7 @@ export class RunSimulator {
       const sub = m[2] ?? '';
       const run = this.latestFor('claude-review', prId);
       if (post && sub === '') {
-        const r = this.start('claude-review', String(prId), prId, null);
+        const r = this.start('claude-review', String(prId), prId, null, undefined, isRecord(req.body) ? req.body : undefined);
         return r ? { status: 200, body: { reviewId: r.id, status: 'queued' } } : notInDemo();
       }
       if (!run) return null;
@@ -380,7 +388,14 @@ export class RunSimulator {
       const prId = Number(m[1]);
       const sub = m[2] ?? '';
       if (post && (sub === '' || sub === '/plan')) {
-        const r = this.start('ai-fix', String(prId), prId, null, sub === '/plan' ? 'planned' : 'succeeded');
+        const r = this.start(
+          'ai-fix',
+          String(prId),
+          prId,
+          null,
+          sub === '/plan' ? 'planned' : 'succeeded',
+          isRecord(req.body) ? req.body : undefined,
+        );
         return r ? { status: 200, body: { fixId: r.id, status: 'queued' } } : notInDemo();
       }
       const run = this.latestFor('ai-fix', prId);
@@ -603,5 +618,7 @@ function summaryOf(run: Record<string, unknown>, history: unknown): Record<strin
   if (!sample) return { ...run };
   const out: Record<string, unknown> = {};
   for (const k of Object.keys(sample)) out[k] = k in run ? run[k] : sample[k];
+  // The history row's finding count is THIS run's, never the sample row's.
+  if (Array.isArray(run.findings)) out.findingCount = run.findings.length;
   return out;
 }

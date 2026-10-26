@@ -282,7 +282,7 @@ export function reviewedAgoLabel(iso: string): string {
   return isRelative(rel) ? `reviewed ${rel}` : `reviewed on ${rel}`;
 }
 
-/** A run in the Claude Review tab's "Showing" list: its date and time of day, plus how long ago
+/** A run in the AI Review tab's run list (ReviewHistoryList): its date and time of day, plus how long ago
  *  while that is still a relative phrase. */
 export function reviewRunWhen(iso: string): string {
   const rel = relativeTime(iso);

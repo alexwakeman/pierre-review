@@ -62,7 +62,8 @@ import type {
   GenerateReviewBody,
   ClaudeReview,
   ClaudeReviewListResponse,
-  ClaudeReviewModel,
+  AiPickerModel,
+  AiProviderId,
   ClaudeReviewResponse,
   ClaudeReviewStatesBody,
   ClaudeThreadJudgementsBody,
@@ -918,7 +919,9 @@ export const api = {
   // `runWeekShareText` on a subscription (null ⇒ API key: show US$; unknown subscription: nothing).
   // The SAME route and the SAME query key serve the header, the meter, the toast and Settings.
   // `setAiBudget({ fiveHourSharePct: null })` returns the 5-hour share to "same as weekly".
-  aiBudget: () => get<AiBudgetResponse>('/api/ai/budget'),
+  // `provider`: that provider's reading (a per-run pick that is not the default). Absent ⇒ the default's.
+  aiBudget: (provider?: AiProviderId) =>
+    get<AiBudgetResponse>(provider ? `/api/ai/budget?provider=${provider}` : '/api/ai/budget'),
   setAiBudget: (body: AiBudgetBody) =>
     fetch('/api/ai/budget', jsonBody('PUT', body)).then((r) => handle<AiBudgetResponse>(r)),
   // THE AI PROVIDER CHOICE (Settings → AI; backend api/routes/ai-provider.ts). 409 while
@@ -1356,10 +1359,11 @@ export const api = {
     get<ClaudeReview>(`/api/claude-reviews/${reviewId}`),
   // No user story and no depth: the router decides the depth, and stories are the ticket review's
   // (`startTicketReview`), a separate run.
-  generateClaudeReview: (prId: number, model: ClaudeReviewModel) =>
+  // `provider`: the per-run picker's choice. Absent ⇒ the server's default provider (Settings → AI).
+  generateClaudeReview: (prId: number, model: AiPickerModel, provider?: AiProviderId) =>
     fetch(
       `/api/prs/${prId}/claude-review`,
-      jsonBody('POST', { model } satisfies GenerateReviewBody),
+      jsonBody('POST', (provider ? { model, provider } : { model }) satisfies GenerateReviewBody),
     ).then((r) => handle<{ reviewId: number; status: string }>(r)),
   // The Open PRs table's "Claude review" column: the LATEST run for each listed PR, ONE request
   // for the whole table. DB-only; at most CLAUDE_REVIEW_STATES_MAX_IDS ids (the route 400s over).

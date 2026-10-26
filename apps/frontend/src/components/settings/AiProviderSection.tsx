@@ -14,7 +14,10 @@ import { chatGptPlanLabel } from '../../lib/aiBudget.js';
 import { InfoButton } from '../InfoModal.js';
 import { SectionShell } from './ui.js';
 
-// SETTINGS → AI: which provider runs every AI feature (ONE for all of them), and each provider's sign-in.
+// SETTINGS → AI: the DEFAULT provider and each provider's sign-in. The default runs every AUTOMATIC run
+// (auto review, auto fix, the CI/ticket auto runs, scheduled summaries) and every surface without a model
+// picker, and is a picker's opening choice; a MANUAL run with a picker (AI Review, AI Fix) may pick any
+// signed-in provider's model (docs/CODEX-PLAN.md § 6, revised 2026-10-26).
 // The choice is stored per machine (PUT /api/ai/provider) and read back from `/api/me`
 // (`ai.provider`, `ai.providerSetting`, `ai.providers`). An explicitly set LIMN_AI_PROVIDER wins: the
 // control then shows its value, disabled. A switch reaches the NEXT run; a run already going finishes
@@ -54,7 +57,14 @@ export function AiProviderSection(): JSX.Element | null {
 
   const info = (
     <InfoButton title="AI provider">
-      <p>Limn runs every AI feature on one provider: reviews, chats, AI Fix, ticket and CI reviews, diagrams and the summaries.</p>
+      <p>
+        This provider runs every automatic run (auto review, auto fix, ticket and CI reviews, diagrams and the
+        summaries) and every AI feature without a model menu.
+      </p>
+      <p className="mt-2">
+        AI Review and AI Fix have a model menu. When both Claude and Codex are signed in, it lists both, starting on
+        this provider.
+      </p>
       <p className="mt-2">Auto uses Claude when Claude is signed in, and Codex when only Codex is.</p>
       <p className="mt-2">
         A change applies to the next run. A run already going finishes on the provider it started on, and every run
@@ -73,9 +83,12 @@ export function AiProviderSection(): JSX.Element | null {
   const chosen = set.isPending && set.variables != null ? set.variables : setting.value;
 
   return (
-    <SectionShell title="AI" info={info} desc={`Runs on ${aiProviderName(ai.provider)}.`}>
+    <SectionShell title="AI" info={info} desc={`Default: ${aiProviderName(ai.provider)}.`}>
       <fieldset disabled={fromEnv || set.isPending} className="flex flex-wrap items-center gap-3 text-xs">
-        <legend className="sr-only">AI provider</legend>
+        <legend className="sr-only">Automatic runs and default</legend>
+        <span aria-hidden="true" className="text-gray-700 dark:text-gray-200">
+          Automatic runs and default:
+        </span>
         {AI_PROVIDER_SETTINGS.map((v) => (
           <label key={v} className={`flex items-center gap-1.5 ${fromEnv ? 'opacity-60' : ''}`}>
             <input

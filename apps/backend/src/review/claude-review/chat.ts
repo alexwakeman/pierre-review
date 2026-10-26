@@ -41,6 +41,7 @@ import {
   type ResolvedPin,
 } from './chat-explain.js';
 import { providerName } from '../../ai/prompt-tools.js';
+import { followUpProvider, preflightFor } from '../../ai/run-choice.js';
 
 // CLAUDE REVIEW CHAT (CORE, free, local-only like the rest of Claude Review). Questions about ONE
 // succeeded review: a general thread (findingId null) and one thread per finding. The answer comes
@@ -599,6 +600,9 @@ export async function answerReviewChat(
     const nonce = pickReviewNonce(chatUntrustedTexts(base));
     const prompt = buildChatPrompt({ ...base, nonce });
     const model = chatModelFor(review.model);
+    // THE CHAT RUNS ON ITS REVIEW'S PROVIDER when that one is signed in and can answer; else on the
+    // default provider (Settings → AI). A Codex review is asked about on Codex, a Claude one on Claude.
+    const provider = followUpProvider(aiRunProvider(review.provider, review.model), 'review_chat', preflightFor(ctx));
 
     const abortController = new AbortController();
     const timer = setTimeout(() => abortController.abort(), CHAT_TIMEOUT_MS);
@@ -610,6 +614,7 @@ export async function answerReviewChat(
         prNumber: pr.number,
         headSha: review.headSha,
         model,
+        provider,
         mode,
         systemPrompt: chatSystemPrompt(mode) + (explain ? EXPLAIN_SYSTEM_ADDENDUM : ''),
         prompt,
@@ -644,7 +649,7 @@ export async function answerReviewChat(
         ok: false,
         status: 502,
         error: result.aborted ? 'Timeout' : 'NoAnswer',
-        message: result.aborted ? `${providerName()} took too long to answer.` : `${providerName()} did not answer. Try again.`,
+        message: result.aborted ? `${providerName(provider)} took too long to answer.` : `${providerName(provider)} did not answer. Try again.`,
       };
     }
 
@@ -654,7 +659,7 @@ export async function answerReviewChat(
     if (explain) {
       explanations = validateExplanations(result.submitted, pins);
       if (explanations.length === 0) {
-        return { ok: false, status: 502, error: 'NoAnswer', message: `${providerName()} did not answer. Try again.` };
+        return { ok: false, status: 502, error: 'NoAnswer', message: `${providerName(provider)} did not answer. Try again.` };
       }
       answerText = explanationsMarkdown(explanations, storedPins);
     }

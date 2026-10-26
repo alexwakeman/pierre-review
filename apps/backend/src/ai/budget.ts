@@ -329,6 +329,12 @@ export interface AiBudgetStatusOptions {
    */
   probe?: 'always' | 'when_on' | false;
   nowMs?: number;
+  /**
+   * Whose budget: a NAMED provider (a manual run's per-run choice, read by the SPA's over-budget
+   * confirm before it starts a run there). Absent ⇒ the DEFAULT provider, which every AUTOMATIC run
+   * uses — the gate never passes one.
+   */
+  provider?: AgentProviderId;
 }
 
 const OFF_STATUS = (route: AiBudgetStatus['route']): AiBudgetStatus => ({
@@ -364,9 +370,9 @@ export interface AiBudgetSnapshot {
  */
 export async function aiBudgetSnapshot(accountId: number, opts: AiBudgetStatusOptions = {}): Promise<AiBudgetSnapshot> {
   const nowMs = opts.nowMs ?? Date.now();
-  // THE ACTIVE PROVIDER's budget (docs/CODEX-PLAN.md § 8.1): its credential route, its reading,
-  // its rows of the ledger. Only Claude in Phase 1.
-  const provider = getActiveProvider();
+  // THE PROVIDER's budget (docs/CODEX-PLAN.md § 8.1): its credential route, its reading, its rows of
+  // the ledger — the named one (a manual run's per-run choice), else the default (active) one.
+  const provider = opts.provider ? getProvider(opts.provider) : getActiveProvider();
   const route = provider.credentialRoute();
   const { settings, isDefault } = await readAiBudgetSettings(accountId);
   const probe = opts.probe ?? 'when_on';

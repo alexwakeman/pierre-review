@@ -12,7 +12,7 @@ import type { AgentContext } from '../../review/agent-context.js';
 import { normalizeChangeReport } from './review-seed.js';
 import type { AiFixPlan, AiFixPlanMessage } from '@pierre-review/shared';
 import type { FixSeed } from './prompts.js';
-import { claudeModelChoice, expectedRanOn, type AiRanOn } from '../../ai/provider.js';
+import { claudeModelChoice, queuedRanOn, type AiRanOn } from '../../ai/provider.js';
 import { parsePlan, parseTranscript } from './plan.js';
 
 // DB access for the ai_fixes table (plugin-owned). Writes go through ctx.db with the
@@ -85,6 +85,8 @@ export async function insertQueuedFix(
     reviewItems?: AiFixReviewItem[] | null;
     // PLAN MODE: the row opens as an open plan ('planned' / 'planning') holding its frozen seed.
     planSeed?: FixSeed | null;
+    // The provider the job goes to (the manager's, picked once). Absent ⇒ the default provider.
+    provider?: 'claude' | 'codex';
   },
 ): Promise<number> {
   const t = ctx.schema.aiFixes;
@@ -100,7 +102,7 @@ export async function insertQueuedFix(
       status: planSeed ? 'planned' : 'queued',
       // Labelled by the provider it is expected to run on; each pass stamps its own (`markFixRanOn`,
       // `markPlanRanOn`). `input.model` is the Claude model ASKED for; `requestModelOf` maps back.
-      ...expectedRanOn(claudeModelChoice(input.model)),
+      ...queuedRanOn(claudeModelChoice(input.model), input.provider),
       seed: input.seed,
       sourceReviewId: input.sourceReviewId,
       prompt: input.prompt,

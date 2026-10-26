@@ -24,8 +24,8 @@ import { AiRunGate } from '../AiSetup.js';
 import { InfoButton } from '../InfoModal.js';
 import { ChevronIcon } from '../Icons.js';
 import { RegenProgressBar } from '../Activity/RegenProgressBar.js';
-import { aiRunProviderName } from '@pierre-review/shared';
-import { useAiProviderName } from '../../hooks/useAiCapabilities.js';
+import { aiProviderName, aiRunProvider, aiRunProviderName } from '@pierre-review/shared';
+import { useFollowUpProvider } from '../../hooks/useModelPick.js';
 
 // PLAN MODE (manual AI Fix only; docs/CLAUDE-REVIEW.md § AI Fix "Plan mode"). Claude reads the code
 // and writes a plan; it edits nothing. The reader steers it by chat — each message runs a fresh
@@ -126,9 +126,13 @@ export function PlanPanel({
   auth: ClaudeAuthStatus | undefined;
 }): JSX.Element | null {
   const state = fix.plan;
-  // The provider that runs the next message (the active one), and the one that wrote this plan.
-  const name = useAiProviderName();
+  // The one that wrote this plan, and the providers that run the next pass and the build: the plan's
+  // own while it can run them, else the default (the server's rule, ai/run-choice.ts).
   const plannedBy = aiRunProviderName(fix.plan ?? fix);
+  const planProvider = aiRunProvider((fix.plan ?? fix).provider, (fix.plan ?? fix).model);
+  const passProvider = useFollowUpProvider(planProvider, 'plan');
+  const buildProvider = useFollowUpProvider(planProvider, 'fix');
+  const name = aiProviderName(passProvider);
   const message = usePlanMessage(pr.id);
   const approve = useApprovePlan(pr.id);
   const discard = useDiscardPlan(pr.id);
@@ -238,7 +242,7 @@ export function PlanPanel({
           so it is never gated: a plan must always be clearable, or it blocks the PR's auto fixes. */}
       {ready && plan && (
         <div className="mt-3">
-          <AiRunGate kind="plan" auth={auth} meter={false}>
+          <AiRunGate kind="plan" auth={auth} meter={false} anyProvider provider={passProvider}>
             <textarea
               aria-label="Change the plan"
               className="w-full rounded border border-gray-300 bg-transparent px-2 py-1 text-xs dark:border-gray-700"
@@ -266,7 +270,7 @@ export function PlanPanel({
             </div>
           </AiRunGate>
           <div className="mt-2 flex flex-wrap items-center gap-2">
-            <AiRunGate kind="fix" auth={auth}>
+            <AiRunGate kind="fix" auth={auth} anyProvider provider={buildProvider}>
               <button type="button" data-ai-run className={BTN_PRIMARY} disabled={busy} onClick={doApprove}>
                 Approve and build
               </button>

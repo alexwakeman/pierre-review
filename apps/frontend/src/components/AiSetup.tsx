@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { aiSignInLine, type AiRunKind } from '@pierre-review/shared';
+import { aiSignInLine, type AiProviderId, type AiRunKind } from '@pierre-review/shared';
 import {
   aiSetupLabel,
   aiAuthFor,
@@ -8,6 +8,8 @@ import {
   useAiRuntimePoll,
 } from '../hooks/useAiCapabilities.js';
 import { AiBudgetMeter, OverBudgetConfirm } from './AiBudget.js';
+import { useMe } from '../hooks/useTriage.js';
+import { aiRunnableProviders } from '../lib/aiCapabilities.js';
 
 /**
  * What sits in place of a Run button for an agentic AI surface (Claude Review, the review chat,
@@ -25,28 +27,42 @@ import { AiBudgetMeter, OverBudgetConfirm } from './AiBudget.js';
  * THE AI SPEND BUDGET rides here, so every AI surface gets it: the compact meter after the
  * button while the budget is on, and — over budget — the button takes two presses (the run is the
  * reader's choice, never refused). `meter={false}` drops the meter where a surface has no room.
+ *
+ * A PER-RUN PICKER SURFACE (`anyProvider`, with its `kind`): the run may go to ANY provider that can
+ * run the kind (the menu lists them, lib/modelPick.ts), so the gate is ready when ANY of them is —
+ * the default's setup or sign-in line shows only when none is. `provider` is the provider the run
+ * goes to (the menu's pick), whose budget the meter and the over-budget confirm read; absent ⇒ the
+ * default's.
  */
 export function AiRunGate({
   children,
   auth,
   kind,
   meter = true,
+  anyProvider = false,
+  provider,
 }: {
   children: ReactNode;
   auth?: 'ok' | 'none';
   kind?: AiRunKind;
   meter?: boolean;
+  anyProvider?: boolean;
+  provider?: AiProviderId | null;
 }): JSX.Element | null {
   const ai = useAiCapabilities();
+  const me = useMe().data;
   if (!ai.enabled) return null;
-  if (ai.runtime !== 'ready') return <AiRuntimeSetup />;
-  if (aiAuthFor(ai, kind).auth === 'none' || auth === 'none') return <AiAuthLine kind={kind} />;
+  const anyReady = anyProvider && kind != null && aiRunnableProviders(me, kind).length > 0;
+  if (!anyReady) {
+    if (ai.runtime !== 'ready') return <AiRuntimeSetup />;
+    if (aiAuthFor(ai, kind).auth === 'none' || auth === 'none') return <AiAuthLine kind={kind} />;
+  }
   // A gate with nothing inside (a surface that only wants the setup/auth line) gets no budget UI.
   if (children == null) return null;
   return (
     <>
-      <OverBudgetConfirm>{children}</OverBudgetConfirm>
-      {meter && <AiBudgetMeter />}
+      <OverBudgetConfirm provider={provider}>{children}</OverBudgetConfirm>
+      {meter && <AiBudgetMeter provider={provider} />}
     </>
   );
 }

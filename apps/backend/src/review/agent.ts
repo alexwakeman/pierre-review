@@ -4,7 +4,6 @@ import { join } from 'node:path';
 import { TICKET_REVIEW_PEER_MAX_FOR_PR_REVIEW, type ClaudeFindingLens } from '@pierre-review/shared';
 import {
   claudeModelChoice,
-  getActiveProvider,
   ranOn,
   type AgentOutcome,
   type AgentRunSpec,
@@ -24,6 +23,7 @@ import {
 } from './clone-manager.js';
 import { relatedCheckoutsSection } from './claude-review/prompts.js';
 import { estimateCostUsd } from './pricing.js';
+import { runProvider } from './run-provider.js';
 import { mapSubmittedReview } from './submit-map.js';
 import {
   DISPATCH_TOOL_NAMES,
@@ -158,10 +158,10 @@ const ACTIVITY_LOG_CAP = 25;
 
 export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
   const { model, mode, onProgress, abortController } = args;
-  // THE PROVIDER, asked ONCE per run (LIMN_AI_PROVIDER). Everything below that says `onCodex` is the
-  // Codex port (docs/CODEX-PLAN.md Phase 3, stream a); with Claude active, none of it runs and the
-  // run is exactly what it was.
-  const provider = getActiveProvider();
+  // THE PROVIDER, resolved ONCE per run: the one the manager decided for the job (a manual run's
+  // per-run choice, else the default). Everything below that says `onCodex` is the Codex port
+  // (docs/CODEX-PLAN.md Phase 3, stream a); on Claude none of it runs and the run is exactly what it was.
+  const provider = runProvider(args.provider);
   const onCodex = provider.id === 'codex';
   // Codex only: the specialists' tokens (Limn runs them as separate runs; on Claude they are part of
   // the one run's usage already).

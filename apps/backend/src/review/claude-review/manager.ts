@@ -43,6 +43,7 @@ import {
 import { planThreadReview, reconcileThreads, type ThreadPlan } from './threads.js';
 import { currentThreadAssessmentsForPrs, priorAssessmentsForProvider } from './thread-judgements.js';
 import { activeProviderId } from '../../ai/provider-setting.js';
+import type { AgentProviderId } from '../../ai/provider.js';
 import { dropSettledReraises, similarTitles } from './settled-by-reply.js';
 import { attachFindingThreads } from './finding-replies.js';
 import {
@@ -97,6 +98,10 @@ interface QueueItem {
   reviewId: number;
   prId: number;
   model: ClaudeReviewModel;
+  // THE RUN'S PROVIDER, decided ONCE at queue time: a manual run's per-run choice, or the default
+  // provider (Settings → AI) for an automatic one. Every provider-dependent step of the job — the
+  // queued row's label, the follow-up chain, the thread carry, the run itself — reads THIS.
+  provider: AgentProviderId;
   headSha: string;
   prCtx: ReviewPrContext;
   trigger: ClaudeReviewTrigger;
@@ -242,6 +247,8 @@ export async function startReview(
   accountId: number,
   prId: number,
   model: ClaudeReviewModel,
+  // The per-run choice (ai/run-choice.ts, validated by the route). Absent ⇒ the default provider.
+  provider: AgentProviderId = activeProviderId(),
 ): Promise<StartReviewResult> {
   // ⚠ NO STORIES. A PR review judges code, tests and threads; a story is checked by the ticket
   // review (review/ticket-review/), a separate run with its own row, claim and lane.
@@ -266,7 +273,7 @@ export async function startReview(
       claimed.delete(prId);
       return { ok: false, reason: 'no_head' };
     }
-    reviewId = await insertQueuedReview(ctx, prId, prCtx.headSha, model, accountId, [], 'manual');
+    reviewId = await insertQueuedReview(ctx, prId, prCtx.headSha, model, accountId, [], 'manual', provider);
   } catch (err) {
     claimed.delete(prId);
     throw err;
@@ -278,6 +285,7 @@ export async function startReview(
     reviewId,
     prId,
     model,
+    provider,
     headSha: prCtx.headSha,
     prCtx,
     trigger: 'manual',
@@ -369,8 +377,10 @@ async function startAutoItem(a: AutoItem): Promise<void> {
     // re-review, seen those comments) while the item waited.
     if (await isAutoReReviewSettled(ctx, prId, accountId, prCtx.headSha, a.commentsAtMs ?? null)) return;
     const model = DEFAULT_CLAUDE_REVIEW_MODEL;
+    // An AUTOMATIC run goes to the DEFAULT provider (Settings → AI), read now.
+    const provider = activeProviderId();
     // No stories: the PR's tickets are checked by the ticket review's own sweep, never here.
-    const reviewId = await insertQueuedReview(ctx, prId, prCtx.headSha, model, accountId, [], 'auto');
+    const reviewId = await insertQueuedReview(ctx, prId, prCtx.headSha, model, accountId, [], 'auto', provider);
     reviewIdByPr.set(prId, reviewId);
     startingAuto.delete(prId);
     launched = true;
@@ -380,6 +390,7 @@ async function startAutoItem(a: AutoItem): Promise<void> {
       reviewId,
       prId,
       model,
+      provider,
       headSha: prCtx.headSha,
       prCtx,
       trigger: 'auto',
@@ -559,7 +570,7 @@ async function runPipeline(
     item.accountId,
     reviewId,
     settledIds,
-    activeProviderId(),
+    item.provider,
   );
   // BACKWARD COMPATIBILITY: findings the RETIRED settle-on-sight rule took out of the chain were
   // never judged. Load them as carried items; only the ones whose thread is resolved WITH a
@@ -625,7 +636,7 @@ async function runPipeline(
       // over it), so a check's newer judgement carries and locks exactly like a review's.
       // ⚠ Only judgements THIS run's provider made carry or lock: a Codex run after a Claude one
       // (or the reverse) judges every thread afresh, so it never wears the other's verdicts.
-      const provider = activeProviderId();
+      const provider = item.provider;
       const current = (
         await currentThreadAssessmentsForPrs(ctx, item.accountId, [item.prId], { beforeReviewId: reviewId })
       ).get(item.prId);
@@ -694,6 +705,8 @@ async function runPipeline(
     prNumber: prCtx.number,
     headSha: item.headSha,
     model,
+    // The job's provider (QueueItem.provider), so the run, its prompts' words and its label agree.
+    provider: item.provider,
     mode,
     systemPrompt,
     prompt,

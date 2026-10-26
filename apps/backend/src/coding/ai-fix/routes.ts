@@ -4,12 +4,12 @@ import {
   AI_FIX_PLAN_MAX_MESSAGE_CHARS,
   AI_FIX_PLAN_MAX_REVISIONS,
   aiRunProvider,
-  CLAUDE_REVIEW_MODELS,
   DEFAULT_AI_FIX_MODEL,
 } from '@pierre-review/shared';
 import type {
   AiFix,
   AiFixModel,
+  AiProviderId,
   AiFixPickerPreview,
   AiFixPlanMessageBody,
   AiFixPushBody,
@@ -23,6 +23,7 @@ import type {
   PrHeadInfo,
 } from '@pierre-review/shared';
 import type { AgentContext } from '../../review/agent-context.js';
+import { anyProviderPreflight, preflightFor, resolveManualRunChoice, type ManualRunChoiceOptions } from '../../ai/run-choice.js';
 import { config } from '../../config.js';
 import { getFixPrContext, getViewerCanPush } from './pr-context.js';
 import {
@@ -69,20 +70,15 @@ function tsToIso(v: Date | number | null | undefined): string | null {
   return d.toISOString();
 }
 
-// The model a fix run uses. Validated HERE, in the handler, and not by an ajv body schema:
-// Fastify's ajv runs with `removeAdditional`, so a schema that did not declare every key would
-// silently strip `seed` / `instruction` / `sourceReviewId` (the contact-form honeypot landmine).
-// The body has no schema at all, so `model` may be any JSON value — hence the `typeof`.
-//   absent / null            → DEFAULT_AI_FIX_MODEL
-//   a string on the offered list → that model
-//   anything else (a retired id such as the old Opus, a typo, a number) → null ⇒ 400
-function resolveFixModel(raw: unknown): AiFixModel | null {
-  if (raw == null) return DEFAULT_AI_FIX_MODEL;
-  if (typeof raw !== 'string') return null;
-  return (CLAUDE_REVIEW_MODELS as readonly string[]).includes(raw)
-    ? (raw as AiFixModel)
-    : null;
-}
+// The model and provider a fix run uses — THE PER-RUN CHOICE (ai/run-choice.ts). Validated HERE, in
+// the handler, and not by an ajv body schema: Fastify's ajv runs with `removeAdditional`, so a schema
+// that did not declare every key would silently strip `seed` / `instruction` / `sourceReviewId` (the
+// contact-form honeypot landmine). The body has no schema at all, so `model` may be any JSON value.
+//   model absent / null      → DEFAULT_AI_FIX_MODEL's depth
+//   a picker model (either provider's) → that depth, on the provider that offers it
+//   anything else (a retired id such as the old Opus, a typo, a number) ⇒ 400 ModelNotOffered
+//   provider absent          → the model's own provider when it is Codex's, else the default
+//   a model of the other provider, or a provider not signed in ⇒ 400 with one sentence
 
 function rowToAiFix(row: AiFixRow): AiFix {
   return {
@@ -143,6 +139,7 @@ function suggestBranch(headRef: string): string {
 type ParsedStartBody =
   | {
       model: AiFixModel;
+      provider: AiProviderId;
       seed: AiFixSeed;
       instruction: string | undefined;
       sourceReviewId: number | null;
@@ -152,10 +149,19 @@ type ParsedStartBody =
 
 // The start body, validated in the handler (no ajv schema — see resolveFixModel). Shared by the
 // fix start and the "Plan first" start, which take the same body.
-function parseStartBody(rawBody: GenerateFixBody | undefined): ParsedStartBody {
+function parseStartBody(
+  rawBody: GenerateFixBody | undefined,
+  kind: 'fix' | 'plan',
+  detect: ManualRunChoiceOptions['detect'],
+): ParsedStartBody {
   const body = rawBody ?? ({} as GenerateFixBody);
-  const model = resolveFixModel((body as { model?: unknown }).model);
-  if (model == null) return { error: 'ModelNotOffered', message: 'That model is no longer offered.' };
+  const choice = resolveManualRunChoice(
+    { model: (body as { model?: unknown }).model, provider: (body as { provider?: unknown }).provider },
+    kind,
+    { defaultModel: DEFAULT_AI_FIX_MODEL, detect },
+  );
+  if (!choice.ok) return { error: choice.error, message: choice.message };
+  const { model, provider } = choice;
   // Two entry points. The removed ones get a sentence a stale tab can show, not a run.
   const rawSeed = (body as { seed?: unknown }).seed ?? 'plain';
   if (rawSeed === 'comments' || rawSeed === 'ci_analysis') {
@@ -174,7 +180,7 @@ function parseStartBody(rawBody: GenerateFixBody | undefined): ParsedStartBody {
         message: `Keep the instruction under ${AI_FIX_MAX_INSTRUCTION_CHARS.toLocaleString('en-US')} characters.`,
       };
     }
-    return { model, seed, instruction, sourceReviewId: null, include: null };
+    return { model, provider, seed, instruction, sourceReviewId: null, include: null };
   }
   const raw = (body as { sourceReviewId?: unknown }).sourceReviewId;
   if (typeof raw !== 'number' || !Number.isInteger(raw) || raw <= 0) {
@@ -194,7 +200,7 @@ function parseStartBody(rawBody: GenerateFixBody | undefined): ParsedStartBody {
     }
     include = inc as string[];
   }
-  return { model, seed, instruction: undefined, sourceReviewId: raw, include };
+  return { model, provider, seed, instruction: undefined, sourceReviewId: raw, include };
 }
 
 function sendPlanResult(reply: FastifyReply, res: PlanActionResult) {
@@ -257,7 +263,8 @@ export function registerAiFixRoutes(app: FastifyInstance, ctx: AgentContext): vo
         return reply.send(resp);
       }
 
-      const auth = ctx.llm.detectAuth('fix');
+      // A picker surface: ready when ANY provider can run a fix (the start names its own provider).
+      const auth = anyProviderPreflight(preflightFor(ctx), 'fix', ctx.llm.detectAuth('fix'));
       const viewerCanPush = await getViewerCanPush(ctx, accountId, pr.repoId);
       const latest = await getLatestFix(ctx, accountId, prId);
       const history = await listFixHistory(ctx, accountId, prId);
@@ -305,13 +312,14 @@ export function registerAiFixRoutes(app: FastifyInstance, ctx: AgentContext): vo
         if (prId == null) return reply.code(404).send({ error: 'not found' });
         if (!AIFIX_ENABLED) return reply.code(404).send({ error: 'AiFixDisabled' });
 
-        const parsed = parseStartBody(req.body);
+        const parsed = parseStartBody(req.body, mode, preflightFor(ctx));
         if ('error' in parsed) return reply.code(400).send(parsed);
 
         const input = {
           accountId,
           prId,
           model: parsed.model,
+          provider: parsed.provider,
           seed: parsed.seed,
           instruction: parsed.instruction,
           // The SERVER builds the review seed from the stored run (manager.ts `loadReviewSeed`,

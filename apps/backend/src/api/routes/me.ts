@@ -27,6 +27,7 @@ import { getAuthNotices } from '../../sync/auth-notices.js';
 import { isMlScoringAvailable } from '../../ml/scorer.js';
 import { getMlStatus } from '../../ml/runtime.js';
 import { activeRuntimeStatus } from '../../ai/active-runtime.js';
+import { getAiRuntimeStatus } from '../../ai/runtime.js';
 import { codexKindStatus, detectClaudeAuth, NO_CLAUDE_AUTH_MESSAGE } from '../../review/auth.js';
 import { resolveAiCredential } from '../../ai/credentials.js';
 import { codexDetailCached } from '../../ai/codex/detect.js';
@@ -182,7 +183,7 @@ function agenticAiStatus(): MeResponse['ai'] {
       provider,
       providerSetting: aiProviderSettingStatus(),
       providers: {
-        claude: { auth: 'none', route: 'none', message: null },
+        claude: { auth: 'none', route: 'none', message: null, runtime: 'absent' },
         codex: {
           runtime: 'absent',
           runtimeMessage: null,
@@ -222,6 +223,9 @@ function agenticAiStatus(): MeResponse['ai'] {
         auth: claudeRoute === 'none' ? 'none' : 'ok',
         route: claudeRoute,
         message: claudeRoute === 'none' ? NO_CLAUDE_AUTH_MESSAGE : null,
+        // Claude's OWN download, whichever provider is active: a model picker offers Claude's
+        // models only when it is ready and signed in (the per-run choice, ai/run-choice.ts).
+        runtime: getAiRuntimeStatus().runtime,
       },
       codex: {
         runtime: codex.runtime,

@@ -163,9 +163,17 @@ describe('the wiring', () => {
   });
 
   it('every agentic start button sits behind the one gate, naming its run kind', () => {
-    expect(read(join(root, 'components', 'ClaudeReviewTab.tsx'))).toMatch(/<AiRunGate kind="review" auth=\{data\?\.auth\}>/);
-    expect(read(join(root, 'components', 'AiFixTab.tsx'))).toMatch(/<AiRunGate kind="fix" auth=\{data\?\.auth\}>/);
-    expect(read(join(root, 'components', 'ClaudeReviewChat.tsx'))).toMatch(/<AiRunGate kind="review_chat">/);
+    // The picker surfaces and the chat may run on ANY ready provider (the per-run choice), so their
+    // gates say `anyProvider` and name the provider the run goes to (its budget is the one read).
+    expect(read(join(root, 'components', 'ClaudeReviewTab.tsx'))).toMatch(
+      /<AiRunGate kind="review" auth=\{data\?\.auth\} anyProvider provider=\{modelPick\.chosen\.provider\}>/,
+    );
+    expect(read(join(root, 'components', 'AiFixTab.tsx'))).toMatch(
+      /<AiRunGate kind="fix" auth=\{data\?\.auth\} anyProvider provider=\{modelPick\.chosen\.provider\}>/,
+    );
+    expect(read(join(root, 'components', 'ClaudeReviewChat.tsx'))).toMatch(
+      /<AiRunGate kind="review_chat" anyProvider provider=\{chatProvider\}>/,
+    );
   });
 
   it('no board button starts a run off the top-level `ready`: each asks its own kind', () => {
@@ -188,9 +196,9 @@ describe('the wiring', () => {
     expect(fixGate.slice(0, fixGate.indexOf('</AiRunGate>'))).toMatch(/Approve and build/);
     // Discard sits after every gate has closed.
     expect(src.lastIndexOf('</AiRunGate>')).toBeLessThan(src.lastIndexOf('Discard plan'));
-    // AI Fix offers "Plan first" only when the provider can run a plan.
+    // AI Fix offers "Plan first" only when the PICKED provider can run a plan.
     const tab = read(join(root, 'components', 'AiFixTab.tsx'));
-    expect(tab).toMatch(/const canPlan = aiAuthFor\(ai, 'plan'\)\.auth !== 'none'/);
+    expect(tab).toMatch(/const canPlan = aiProviderReadyFor\(me, modelPick\.chosen\.provider, 'plan'\)/);
     expect(tab).toMatch(/const planFirst = planFirstPicked && canPlan/);
     expect(tab).toMatch(/\{canPlan && \(\s*<label/);
   });

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode, type SyntheticEvent } from 'react';
-import { aiProviderName } from '@pierre-review/shared';
+import { aiProviderName, type AiProviderId } from '@pierre-review/shared';
 import { useAiBudget } from '../hooks/useAiBudget.js';
 import { useSettingsModal } from '../store/settingsModal.js';
 import { meterText, pausedSentence, reviewsPerDayText, runButtonsIn } from '../lib/aiBudget.js';
@@ -21,8 +21,8 @@ import { CoinIcon } from './Icons.js';
 // without editing the surface.
 
 /** The compact meter beside a Run button. Null while the budget is off or not loaded. */
-export function AiBudgetMeter(): JSX.Element | null {
-  const { data } = useAiBudget();
+export function AiBudgetMeter({ provider }: { provider?: AiProviderId | null } = {}): JSX.Element | null {
+  const { data } = useAiBudget(provider);
   const openSettings = useSettingsModal((s) => s.openSettings);
   if (data == null) return null;
   const text = meterText(data.status);
@@ -52,8 +52,15 @@ const ARM_MS = 15_000;
  * `display: contents`, so the wrapper adds no box and the surface's flex layout is unchanged; the
  * capture-phase handlers still see every event from inside it.
  */
-export function OverBudgetConfirm({ children }: { children: ReactNode }): JSX.Element {
-  const { data } = useAiBudget();
+export function OverBudgetConfirm({
+  children,
+  provider,
+}: {
+  children: ReactNode;
+  /** The provider the run goes to (a per-run pick). Absent ⇒ the default provider's budget. */
+  provider?: AiProviderId | null;
+}): JSX.Element {
+  const { data } = useAiBudget(provider);
   const openSettings = useSettingsModal((s) => s.openSettings);
   const over = data?.status.overBudget === true;
   const [armed, setArmed] = useState(false);

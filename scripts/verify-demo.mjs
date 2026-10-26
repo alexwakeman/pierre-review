@@ -60,12 +60,28 @@ const VIEWS = [
       `pr:${id}:${t}`,
       `?view=pr-detail:${id}&prTab=${t}`,
       id === 113 ? `pr-113-${t}` : id === 114 && (t === 'ai_fix' || t === 'claude_review') ? `pr-114-${t}` : id === 105 && t === 'claude_review' ? 'pr-105-claude_review' : null,
-      // #105 holds a Claude Opus review and a Codex GPT-6 Astra review of the same head, each labelled.
-      id === 105 && t === 'claude_review' ? { expect: ['Codex · GPT-6 Astra', 'Claude Opus 5.5'] } : undefined,
+      // #105 holds a Claude Opus review and a Codex GPT-6 Astra review of the same head, each labelled,
+      // both in the always-visible run list. The model menu lists BOTH providers (both signed in):
+      // picking Codex's model leaves every run listed.
+      id === 105 && t === 'claude_review'
+        ? {
+            act: async (page) => {
+              await page.getByLabel('Model').first().selectOption('codex:gpt-6-astra');
+              await page.getByText('All reviews of this PR').first().waitFor({ timeout: 10_000 });
+            },
+            expect: ['All reviews of this PR (2)', 'Codex · GPT-6 Astra', 'Claude Opus 5.5', 'Shown'],
+          }
+        : undefined,
     ]),
   ),
-  // Settings → AI: Claude runs by default; picking Codex says so, and the usage item follows.
-  ['settings:ai', '?view=activity', 'settings-ai', { act: openSettings, expect: ['Runs on Claude.', 'Signed in with ChatGPT Plus.'] }],
+  // Settings → AI: Claude is the default (automatic runs, surfaces without a model menu); picking
+  // Codex says so, and the usage item follows.
+  [
+    'settings:ai',
+    '?view=activity',
+    'settings-ai',
+    { act: openSettings, expect: ['Default: Claude.', 'Automatic runs and default:', 'Signed in with ChatGPT Plus.'] },
+  ],
   [
     'settings:ai-codex',
     '?view=activity',
@@ -74,9 +90,9 @@ const VIEWS = [
       act: async (page) => {
         await openSettings(page);
         await page.locator('input[name="ai-provider"][value="codex"]').click();
-        await page.getByText('Runs on Codex.').waitFor({ timeout: 10_000 });
+        await page.getByText('Default: Codex.').waitFor({ timeout: 10_000 });
       },
-      expect: ['Runs on Codex.'],
+      expect: ['Default: Codex.'],
     },
   ],
   ['user-activity:2', '?view=user-activity:2', null],

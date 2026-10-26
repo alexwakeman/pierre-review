@@ -1412,11 +1412,11 @@ reappears.
   "reviewed on <date>"), the exact `dateTime()` on hover. Mounted beside the currency pill on the
   Open PRs panel and the Claude's review header (the shown run's `finishedAt`), and at the end of
   a Pending card's one-line Claude summary on a finished run (`ClaudeReviewPrState.finishedAt`,
-  falling back to a `claude_review` My Turn card's `since`). The "Showing" list prints each run's
+  falling back to a `claude_review` My Turn card's `since`). The run list ("All reviews of this PR", `ReviewHistoryList`; docs/CLAUDE-REVIEW.md § The review tab's history) prints each run's
   date AND time of day via `reviewRunWhen()` (`finishedAt ?? createdAt`), plus the age while recent.
 - **Is the review on the PR's current commit? ONE helper, `reviewCurrency()`
   (`lib/claudeReviewColumn.ts`)**, read by the Claude's review header (second pill, after the verdict; also for a past
-  run picked in "Showing" — always against the PR's CURRENT head) and the Open PRs card's verdict
+  run picked in the run list — always against the PR's CURRENT head) and the Open PRs card's verdict
   row (finished runs only): green "On latest commit" (the pane adds the short sha), amber "N newer
   commits" / "1 newer commit", amber "Branch changed" when the count is 0/null (rewritten history,
   reviewed commit not synced). Either head unknown ⇒ null, no pill. The card reads

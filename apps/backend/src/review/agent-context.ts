@@ -18,7 +18,7 @@ import {
 import { fetchReviewCommentHunks } from '../sync/hydrate-detail.js';
 import { applyAndPush } from '../coding/git-ops.js';
 import { registerScheduledJob } from '../sync/scheduled-jobs.js';
-import { detectClaudeAuth } from './auth.js';
+import { detectClaudeAuth, detectProviderAuth } from './auth.js';
 import {
   loadReviewThreadsForReview,
   type ReviewThreadsForReview,
@@ -64,7 +64,12 @@ export interface AgentContext {
   runTransaction: typeof runTransaction;
   // The pre-flight PER RUN KIND (review/auth.ts `detectClaudeAuth`): pass the kind about to run —
   // an agent kind, or 'complete' for a one-shot feature. No kind ⇒ "any agent" (the strictest answer).
-  llm: { detectAuth(kind?: AiRunKind): DetectAuthResult };
+  llm: {
+    detectAuth(kind?: AiRunKind): DetectAuthResult;
+    // The same pre-flight for a NAMED provider (a manual run's per-run choice, a follow-up on a stored
+    // run's provider). Optional so a test's fake ctx may omit it (`preflightFor` then asks detectAuth).
+    detectProviderAuth?(provider: 'claude' | 'codex', kind: AiRunKind): DetectAuthResult;
+  };
   recordAiUsage(row: AiUsageRecord): Promise<void>;
   github: Pick<
     GithubSeam,
@@ -146,6 +151,10 @@ export function buildAgentContext(log: FastifyBaseLogger): AgentContext {
     llm: {
       detectAuth: (kind) => {
         const r = detectClaudeAuth(kind);
+        return r.status === 'ok' ? { status: 'ok' } : { status: 'none', message: r.message };
+      },
+      detectProviderAuth: (provider, kind) => {
+        const r = detectProviderAuth(provider, kind);
         return r.status === 'ok' ? { status: 'ok' } : { status: 'none', message: r.message };
       },
     },

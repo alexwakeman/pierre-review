@@ -48,7 +48,7 @@ import {
   type SettledFinding,
 } from './settled-by-reply.js';
 import type { AgentContext } from '../agent-context.js';
-import { claudeModelChoice, expectedRanOn } from '../../ai/provider.js';
+import { claudeModelChoice, queuedRanOn } from '../../ai/provider.js';
 import {
   isFollowUpEligible,
   resolveFindingBody,
@@ -782,7 +782,7 @@ export async function listClaudeReviewHistory(
   prId: number,
   accountId: number,
 ): Promise<ClaudeReviewSummary[]> {
-  const { cr, prs, repos } = tables(ctx);
+  const { cr, crf, prs, repos } = tables(ctx);
   const rows = (await ctx.db
     .select({ review: cr })
     .from(cr)
@@ -791,7 +791,19 @@ export async function listClaudeReviewHistory(
     .where(and(eq(cr.prId, prId), eq(repos.accountId, accountId)))
     .orderBy(desc(cr.id))
     .execute()) as Array<{ review: ReviewRow }>;
-  return rows.map(({ review }) => summaryOf(review));
+  // Each run's finding count, for the history list — ONE grouped read over the runs just listed.
+  const ids = rows.map(({ review }) => review.id);
+  const counts = new Map<number, number>();
+  if (ids.length > 0) {
+    const tally = (await ctx.db
+      .select({ reviewId: crf.reviewId, n: sql<number>`count(*)` })
+      .from(crf)
+      .where(inArray(crf.reviewId, ids))
+      .groupBy(crf.reviewId)
+      .execute()) as Array<{ reviewId: number; n: number }>;
+    for (const t of tally) counts.set(t.reviewId, Number(t.n));
+  }
+  return rows.map(({ review }) => ({ ...summaryOf(review), findingCount: counts.get(review.id) ?? 0 }));
 }
 
 // The window that scopes the cross-PR list (mirrors the core backfill default of 90d).
@@ -1659,11 +1671,13 @@ export async function insertQueuedReview(
   // TRAILING: who started it. 'auto' = the per-workspace sweeper (auto.ts). A label only: core's
   // My Turn read keeps an auto run exactly like a manual one, and the chip says "Auto review".
   trigger: ClaudeReviewTrigger = 'manual',
+  // TRAILING: the provider the run goes to (a manual run's per-run choice). Absent ⇒ the default.
+  provider?: 'claude' | 'codex' | null,
 ): Promise<number> {
   const { cr } = tables(ctx);
   // Labelled by the provider it is expected to run on from the start (a queued Codex run never shows
   // as Claude); the run stamps what actually ran when it ends (`markReviewRanOn`).
-  const expected = expectedRanOn(claudeModelChoice(model));
+  const expected = queuedRanOn(claudeModelChoice(model), provider);
   const rows = (await ctx.db
     .insert(cr)
     .values({

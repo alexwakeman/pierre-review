@@ -11,7 +11,7 @@ import type {
 import type { FlowBudgetMeasure, FlowSettings, ResolvedFlowSettings } from './flow-settings.js';
 import type { MyTurnSettings } from './my-turn-settings.js';
 import type { SonarIssue } from './sonar.js';
-import type { AiProviderSetting } from './ai-run-label.js';
+import type { AiPickerModel, AiProviderSetting } from './ai-run-label.js';
 import type { ReferenceDocCitation, ReviewDocReference } from './reference-docs.js';
 
 export type DerivedState =
@@ -4172,6 +4172,12 @@ export interface AiClaudeProviderStatus {
   route: 'login' | 'api_key' | 'none';
   /** One sentence when `auth` is 'none'. */
   message: string | null;
+  /**
+   * Claude's own download (the SDKs), whichever provider is active — a model picker offers Claude
+   * only when it is 'ready' and signed in. Optional: an older server omits it (then `ai.runtime`
+   * stands for it while Claude is the active provider).
+   */
+  runtime?: 'ready' | 'absent' | 'installing' | 'failed';
 }
 
 /** `MeResponse.ai.providers.codex` — the Codex install and Limn's own Codex sign-in. */
@@ -7477,6 +7483,9 @@ export interface ClaudeReviewSummary {
   finishedAt: string | null;
   // Who started the run. Absent on older servers = 'manual'.
   trigger?: ClaudeReviewTrigger;
+  // How many findings the run stored (the history list's count; meaningful once it succeeded).
+  // Optional: an older server omits it and the list shows no count.
+  findingCount?: number;
 }
 
 // One entry in the cross-PR "prior Claude reviews" list (GET /api/claude-reviews):
@@ -7684,9 +7693,14 @@ export interface PostCommentResult {
 // ---- request payloads (Claude review) ----
 
 export interface GenerateReviewBody {
-  // One of CLAUDE_REVIEW_MODELS (the offered list). Omitted ⇒ DEFAULT_CLAUDE_REVIEW_MODEL.
-  // A model that is not offered (e.g. a retired id) is a 400.
-  model?: ClaudeReviewModel;
+  // A picker model (`AI_PICKER_MODELS`: Claude's offered tiers, Codex's of the same depths).
+  // Omitted ⇒ DEFAULT_CLAUDE_REVIEW_MODEL's depth on the chosen provider. A model that is not
+  // offered (e.g. a retired id) is a 400, and so is one that does not run on `provider`.
+  model?: AiPickerModel;
+  // Which provider runs it (the per-run picker). Omitted ⇒ the model's own provider when it names a
+  // Codex model, else the DEFAULT provider (Settings → AI). Not signed in, or unable to run the
+  // kind ⇒ 400 with one sentence.
+  provider?: AiProviderId;
   // (No depth: the router always decides. A stale `mode` key is stripped by the route schema.)
   // (No stories either: a PR review checks none — the ticket review does, StartTicketReviewBody.
   // A stale `ticket`/`tickets` key is stripped by the route schema.)
@@ -8866,9 +8880,11 @@ export type AiFixStreamEvent =
 // undeclared keys); every field is validated in the handler. `POST …/ai-fix/plan` ("Plan first")
 // takes the SAME body and starts a read-only planning pass instead of the build.
 export interface GenerateFixBody {
-  // One of CLAUDE_REVIEW_MODELS. Omitted ⇒ DEFAULT_AI_FIX_MODEL. Anything else (a retired id
-  // such as the old Opus, or a non-string) is a 400 { error: 'ModelNotOffered' }.
-  model?: AiFixModel;
+  // A picker model (`AI_PICKER_MODELS`). Omitted ⇒ DEFAULT_AI_FIX_MODEL's depth. Anything else (a
+  // retired id such as the old Opus, or a non-string) is a 400 { error: 'ModelNotOffered' }.
+  model?: AiFixModel | AiPickerModel;
+  // Which provider runs it — the same rule and the same 400s as GenerateReviewBody.provider.
+  provider?: AiProviderId;
   // Omitted ⇒ 'plain'. 'comments' / 'ci_analysis' ⇒ 400 SeedRemoved; anything else ⇒ 400 UnknownSeed.
   seed?: AiFixSeed;
   // seed === 'review' (required): the Claude review to fix from. The SERVER builds the whole seed

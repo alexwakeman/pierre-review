@@ -290,7 +290,7 @@ const ME_RESPONSE: MeResponse = {
     provider: 'claude',
     providerSetting: { value: 'auto', source: 'settings' },
     providers: {
-      claude: { auth: 'ok', route: 'login', message: null },
+      claude: { auth: 'ok', route: 'login', message: null, runtime: 'ready' },
       codex: {
         runtime: 'absent',
         runtimeMessage: null,

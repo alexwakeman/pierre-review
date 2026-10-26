@@ -28,7 +28,8 @@ const tab = code(read('components/AiFixTab.tsx'));
 
 describe('the AI Fix pane starts fixes on the shared default', () => {
   it('the fixer picker opens on DEFAULT_AI_FIX_MODEL', () => {
-    expect(tab).toMatch(/useState<AiFixModel>\(DEFAULT_AI_FIX_MODEL\)/);
+    // The per-run menu (lib/modelPick.ts) opens on the default provider's model at this depth.
+    expect(tab).toMatch(/useModelPick\('fix', DEFAULT_AI_FIX_MODEL\)/);
   });
 
   it('imports it from the shared package', () => {

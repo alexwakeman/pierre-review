@@ -8,7 +8,6 @@ import type {
   ClaudeFindingSeverity,
   ClaudeFindingSide,
   ClaudeReview,
-  ClaudeReviewModel,
   ClaudeReviewStatusResponse,
   ClaudeReviewVerdict,
   PostReviewPreview,
@@ -20,17 +19,16 @@ import type {
   User,
 } from '@pierre-review/shared';
 import {
-  aiModelChoiceLabel,
   aiRunLabel,
   aiRunProvider,
   CLAUDE_FINDING_LENS_LABELS,
-  CLAUDE_REVIEW_MODELS,
   DEFAULT_CLAUDE_REVIEW_MODEL,
   followUpSentence,
 } from '@pierre-review/shared';
 import { formatDate, relativeTime, safeExternalUrl } from '../lib/ui.js';
 import { useRunCostText } from '../hooks/useAiBudget.js';
-import { useMe } from '../hooks/useTriage.js';
+import { useModelPick } from '../hooks/useModelPick.js';
+import { nextShownReviewId } from '../lib/reviewHistory.js';
 import {
   autoLiftLine,
   autoPostFailureLine,
@@ -46,6 +44,8 @@ import { unlockReviewSound } from '../lib/sound.js';
 import { useAiCapabilities, useAiProviderName } from '../hooks/useAiCapabilities.js';
 import { aiCredentialWords, aiRunProviderName } from '@pierre-review/shared';
 import { AiRunGate } from './AiSetup.js';
+import { ModelPicker } from './ModelPicker.js';
+import { ReviewHistoryList } from './ReviewHistoryList.js';
 import { useFilters } from '../store/filters.js';
 import { PrActionControls, usePrActionsVisible } from './pr/PrActionsRow.js';
 import { ReviewsChips, reviewsRowVisible } from './pr/ReviewsRow.js';
@@ -102,7 +102,7 @@ import { useTicketReviews } from '../hooks/useTicketReview.js';
 import { useCiReview } from '../hooks/useCiReview.js';
 import { useClaudeReviewChat } from '../hooks/useClaudeReviewChat.js';
 import { legacyOnlyEntries } from '../lib/ticketStory.js';
-import { reviewCurrency, reviewRunWhen, visibleReviewBody, type ReviewCurrency } from '../lib/claudeReviewColumn.js';
+import { reviewCurrency, visibleReviewBody, type ReviewCurrency } from '../lib/claudeReviewColumn.js';
 import {
   ALREADY_POSTED_CHIP,
   RERAISED_CHIP,
@@ -1450,7 +1450,13 @@ function ClaudesReview({
       />
       {/* The chat sits UNDER Story check and CI check and opens expanded, so a question about the
           review or the story is one click from both. */}
-      {chatReviewId != null && <ReviewChatSection reviewId={chatReviewId} prId={review.prId} />}
+      {chatReviewId != null && (
+        <ReviewChatSection
+          reviewId={chatReviewId}
+          prId={review.prId}
+          reviewProvider={aiRunProvider(storedReview.provider, storedReview.model)}
+        />
+      )}
     </>
   );
 }
@@ -1642,11 +1648,11 @@ export function ClaudeReviewTab({
     return set;
   }, [pr.files, pr.id, qc]);
 
-  // Model picker. ALWAYS opens on the default (Claude Opus 5.5) — never seeded from the stored
-  // run, or every already-reviewed PR would keep reopening on its old model, and a run stored
-  // under a retired id (the old Opus 4.8) would become a select value with no option. A pick
-  // stays until remount.
-  const [model, setModel] = useState<ClaudeReviewModel>(DEFAULT_CLAUDE_REVIEW_MODEL);
+  // THE PER-RUN MODEL MENU (lib/modelPick.ts): every signed-in provider's models, opening on the
+  // DEFAULT provider's (Settings → AI) most thorough one — never seeded from the stored run, or every
+  // already-reviewed PR would keep reopening on its old model, and a run stored under a retired id
+  // (the old Opus 4.8) would become a select value with no option. A pick stays until remount.
+  const modelPick = useModelPick('review', DEFAULT_CLAUDE_REVIEW_MODEL);
 
   // Same-SHA re-run confirmation (warn-but-allow).
   const [confirmRerun, setConfirmRerun] = useState(false);
@@ -1655,8 +1661,11 @@ export function ClaudeReviewTab({
   const [userBody, setUserBody] = useState('');
   const [userVerdict, setUserVerdict] = useState<ClaudeReviewVerdict>('COMMENT');
 
-  // History selector — defaults to the latest run.
+  // THE SHOWN RUN (lib/reviewHistory.ts `nextShownReviewId`): the reader's pick from the history list.
+  // It never moves on its own — a run starting or finishing, a provider switch or the model menu leave
+  // it — except to a run the reader just started.
   const [selectedReviewId, setSelectedReviewId] = useState<number | null>(null);
+  const previousLatestId = useRef<number | null>(null);
 
   // Post actions: dry-run preview + confirm-then-post + result/skip surfacing.
   const [preview, setPreview] = useState<PostReviewPreview | null>(null);
@@ -1695,11 +1704,20 @@ export function ClaudeReviewTab({
     seededReviewId.current = review.id;
     setUserBody(review.userBody ?? '');
     setUserVerdict(review.userVerdict ?? 'COMMENT');
-    setSelectedReviewId(review.id);
     setPreview(null);
     setPostResult(null);
     setConfirmPost(false);
   }, [review]);
+
+  // Re-pick the shown run on every read of the latest run and the history (see `nextShownReviewId`).
+  const history = data?.history;
+  useEffect(() => {
+    const latest = review != null ? { id: review.id, status: review.status, trigger: review.trigger } : null;
+    setSelectedReviewId((shown) =>
+      nextShownReviewId({ shown, latest, previousLatestId: previousLatestId.current, history: history ?? [] }),
+    );
+    if (latest != null) previousLatestId.current = latest.id;
+  }, [review?.id, review?.status, review?.trigger, history]);
 
   const isRunning = review?.status === 'running' || review?.status === 'queued';
   // An AUTO review holds this PR (waiting in its lane, or running): the manual start is locked
@@ -1711,8 +1729,6 @@ export function ClaudeReviewTab({
   // result loads without a poll).
   const { status } = useClaudeReviewStream(pr.id, isRunning);
   const costText = useRunCostText();
-  // The provider a new run will use: the model picker names what will actually run.
-  const activeProvider: AiProviderId | undefined = useMe().data?.ai.provider;
 
   // Which run is shown in Section A: the latest unless the user picked an older
   // one from history. Both are hooks, so they MUST run unconditionally — before
@@ -1747,7 +1763,8 @@ export function ClaudeReviewTab({
     setPreview(null);
     setPostResult(null);
     // No story: the PR review looks at the code. Stories are the Story check section below.
-    generate.mutate({ model });
+    // The run goes to the provider the menu picked (the server validates the pair).
+    generate.mutate({ model: modelPick.chosen.model, provider: modelPick.chosen.provider });
   };
 
   const onRunClick = (): void => {
@@ -1821,20 +1838,8 @@ export function ClaudeReviewTab({
       <ReviewSection title="Run a review">
         <div>
           <div className="flex flex-wrap items-center gap-2">
-            <select
-              value={model}
-              onChange={(e) => setModel(e.target.value as ClaudeReviewModel)}
-              disabled={isRunning || starting}
-              aria-label="Model"
-              className="rounded border border-gray-300 bg-white px-2 py-1 text-sm dark:border-gray-700 dark:bg-gray-900"
-            >
-              {CLAUDE_REVIEW_MODELS.map((m) => (
-                <option key={m} value={m}>
-                  {aiModelChoiceLabel(m, activeProvider)}
-                </option>
-              ))}
-            </select>
-            <AiRunGate kind="review" auth={data?.auth}>
+            <ModelPicker state={modelPick} onPick={modelPick.pick} disabled={isRunning || starting} />
+            <AiRunGate kind="review" auth={data?.auth} anyProvider provider={modelPick.chosen.provider}>
             <button
               type="button"
               onClick={onRunClick}
@@ -1997,31 +2002,18 @@ export function ClaudeReviewTab({
         <div className="text-sm text-gray-500 dark:text-gray-400">Review cancelled.</div>
       )}
 
-      {/* History selector. */}
-      {data != null && data.history.length > 1 && (
-        <label className="flex flex-wrap items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
-          Showing
-          <select
-            value={selectedReviewId ?? review?.id ?? ''}
-            onChange={(e) => {
-              setSelectedReviewId(Number(e.target.value));
-              setPreview(null);
-              setPostResult(null);
-            }}
-            className="rounded border border-gray-300 bg-white px-2 py-1 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
-          >
-            {data.history.map((h) => (
-              <option key={h.id} value={h.id}>
-                {shortSha(h.headSha)} ·{' '}
-                {h.reviewMode !== 'skip' ? `${aiRunLabel(h.provider, h.model)} · ` : ''}
-                {h.status} ·{' '}
-                {reviewRunWhen(h.finishedAt ?? h.createdAt)}
-                {h.trigger === 'auto' ? ` · ${AUTO_REVIEW_LABEL}` : ''}
-                {h.id === review?.id ? ' (latest)' : ''}
-              </option>
-            ))}
-          </select>
-        </label>
+      {/* EVERY run on the PR, always listed (all providers, all heads, newest first). */}
+      {data != null && data.history.length > 0 && (
+        <ReviewHistoryList
+          history={data.history}
+          shownId={selectedReviewId ?? review?.id ?? null}
+          latestId={review?.id ?? null}
+          onShow={(id) => {
+            setSelectedReviewId(id);
+            setPreview(null);
+            setPostResult(null);
+          }}
+        />
       )}
       </ReviewSection>
 

@@ -109,7 +109,7 @@ a re-record **in the same commit**:
 Then: `pnpm demo:record` → `pnpm --filter @pierre-review/frontend build:demo` → `pnpm demo:verify` and
 `node scripts/verify-demo.mjs --later=40` → commit `apps/frontend/src/demo/data/recording.json`.
 A `VIEWS` row may carry `{ act, expect }`: a click the view hides behind (Settings has no URL) and
-text the page must then show (the run labels on #105, "Runs on Codex." after the switch).
+text the page must then show (the run list and both providers' labels on #105 after picking Codex's model, "Default: Codex." after the switch).
 
 **What guards it.** PR CI (`ci.yml`) and the site deploy (`deploy-site.yml`, which will not push the image
 on a failure) both run `verify-demo`: every listed view must load with no page error, no blank page and no

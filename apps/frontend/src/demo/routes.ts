@@ -3,7 +3,7 @@
 // make, answered with a plausible success shaped by the shared types and folded into the
 // in-memory overlay so later reads show it.
 
-import { aiKindsAll, aiProviderName, isAiProviderSetting, LARGE_PR_CODE_LOC_DEFAULT } from '@pierre-review/shared';
+import { aiKindsAll, aiProviderName, aiRunProvider, isAiProviderSetting, LARGE_PR_CODE_LOC_DEFAULT } from '@pierre-review/shared';
 import { normalisePath } from './recording.js';
 import type { DemoReply, DemoRequest, DemoRoute, DemoServer } from './server.js';
 import { fakeSha, isRecord, notInDemo } from './util.js';
@@ -92,7 +92,7 @@ function demoAi(srv: DemoServer): Record<string, unknown> {
     provider,
     providerSetting: { value: st.setting, source: 'settings' },
     providers: {
-      claude: { auth: 'ok', route: 'login', message: null },
+      claude: { auth: 'ok', route: 'login', message: null, runtime: 'ready' },
       codex: {
         runtime: 'ready',
         runtimeMessage: null,
@@ -112,6 +112,14 @@ function demoAi(srv: DemoServer): Record<string, unknown> {
 function codexLogin(srv: DemoServer): Record<string, unknown> {
   const st = aiState(srv);
   return { login: { state: 'idle' }, signedIn: st.codexSignedIn, plan: st.codexSignedIn ? DEMO_CODEX_PLAN : null };
+}
+
+/** The provider that ran a review: a run started in this session, else the recorded review's. */
+function reviewProviderOf(srv: DemoServer, reviewId: number): 'claude' | 'codex' | null {
+  const run = srv.runs.byRunId('claude-review', reviewId);
+  if (run) return run.ranOn.provider;
+  const rec = srv.recorded('GET', `/api/claude-reviews/${reviewId}`);
+  return isRecord(rec) ? aiRunProvider(typeof rec.provider === 'string' ? rec.provider : null, typeof rec.model === 'string' ? rec.model : null) : null;
 }
 
 function storeMe(srv: DemoServer, fields: Record<string, unknown>): void {
@@ -765,7 +773,8 @@ export const ROUTES: DemoRoute[] = [
       const now = srv.nowIso();
       const turns = [
         { id: srv.nextId(), findingId, role: 'user', content: String(b.question ?? ''), createdAt: now, pins: null, explanations: null },
-        { id: srv.nextId(), findingId, role: 'assistant', content: demoAnswer(srv), createdAt: now, pins: null, explanations: null, ...ranOnNow(srv, 'claude-sonnet-5') },
+        // The chat answers on its REVIEW's provider (both are signed in here), as on the server.
+        { id: srv.nextId(), findingId, role: 'assistant', content: demoAnswer(srv), createdAt: now, pins: null, explanations: null, ...ranOnNow(srv, 'claude-sonnet-5', { provider: reviewProviderOf(srv, reviewId) }) },
       ];
       srv.overlay.chats.set(key, [...(srv.overlay.chats.get(key) ?? []), ...turns]);
       const rec = srv.recorded('GET', `/api/claude-reviews/${reviewId}/chat${findingId != null ? `?findingId=${findingId}` : ''}`);

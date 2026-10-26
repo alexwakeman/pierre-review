@@ -11,11 +11,19 @@ import { runCostText } from '../lib/aiBudget.js';
 
 export const AI_BUDGET_QUERY_KEY = ['ai-budget'] as const;
 
-export function useAiBudget() {
-  const enabled = useAiCapabilities().enabled;
+/**
+ * `provider`: whose reading — a manual run's per-run choice. The DEFAULT provider's (absent, or the
+ * same as Settings → AI) is the ONE shared query above; the other provider's is its own key
+ * (`['ai-budget', provider]`, `GET /api/ai/budget?provider=`), read only by a Run gate whose menu
+ * picked it.
+ */
+export function useAiBudget(provider?: AiProviderId | null) {
+  const caps = useAiCapabilities();
+  const enabled = caps.enabled;
+  const other = provider != null && provider !== caps.provider ? provider : null;
   return useQuery<AiBudgetResponse>({
-    queryKey: AI_BUDGET_QUERY_KEY,
-    queryFn: api.aiBudget,
+    queryKey: other ? [...AI_BUDGET_QUERY_KEY, other] : AI_BUDGET_QUERY_KEY,
+    queryFn: other ? () => api.aiBudget(other) : () => api.aiBudget(),
     enabled,
     retry: false,
     staleTime: 60_000,
@@ -40,6 +48,10 @@ export function useSetAiBudget() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: AiBudgetBody) => api.setAiBudget(body),
-    onSuccess: (data) => qc.setQueryData(AI_BUDGET_QUERY_KEY, data),
+    onSuccess: (data) => {
+      qc.setQueryData(AI_BUDGET_QUERY_KEY, data);
+      // The settings are per machine: the other provider's reading (a picker's) re-reads them.
+      void qc.invalidateQueries({ queryKey: AI_BUDGET_QUERY_KEY, exact: false, predicate: (q) => q.queryKey.length > 1 });
+    },
   });
 }

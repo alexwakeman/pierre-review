@@ -23,7 +23,7 @@ process.env.PRO_REVIEW_CONCURRENCY = '1';
 process.env.PRO_REVIEW_MAX_QUEUED = '2';
 process.env.PRO_REVIEW_AUTO_MAX_QUEUED = '2';
 
-const inserted: Array<{ prId: number; model: string; trigger: string; id: number; ticket: unknown }> = [];
+const inserted: Array<{ prId: number; model: string; trigger: string; id: number; ticket: unknown; provider?: string | null }> = [];
 let nextId = 1;
 vi.mock('./persist.js', () => ({
   getReviewPrContext: async (_ctx: unknown, prId: number) => ({
@@ -44,9 +44,10 @@ vi.mock('./persist.js', () => ({
     _account: number,
     ticket: unknown,
     trigger = 'manual',
+    provider: string | null = null,
   ) => {
     const id = nextId++;
-    inserted.push({ prId, model, trigger, id, ticket });
+    inserted.push({ prId, model, trigger, id, ticket, provider });
     return id;
   },
   getLatestClaudeReview: async () => null,
@@ -279,5 +280,31 @@ describe('the auto-fix hook', () => {
     expect(m.enqueueAutoReview(ctx, 1, 82)).toBe('queued');
     await flush();
     expect(autoFixCalls.map((c) => c.prId)).toEqual([81]);
+  });
+});
+
+// THE PROVIDER OF A RUN (docs/CODEX-PLAN.md § 6, revised 2026-10-26): an AUTOMATIC run goes to the
+// DEFAULT provider (Settings → AI / LIMN_AI_PROVIDER), read when its row is written; a MANUAL run goes
+// to the provider its picker named, whatever the default.
+describe('the provider of a run', () => {
+  it('an auto run is queued on the default provider; a manual run on the one it names', async () => {
+    const before = process.env.LIMN_AI_PROVIDER;
+    process.env.LIMN_AI_PROVIDER = 'codex';
+    try {
+      expect(m.enqueueAutoReview(ctx, 1, 90)).toBe('queued');
+      await flush();
+      expect(inserted.find((r) => r.prId === 90)).toMatchObject({ trigger: 'auto', provider: 'codex' });
+      // The slot is held by the auto run: the manual one waits, but its row names ITS provider now.
+      const started = await m.startReview(ctx, 1, 91, 'claude-opus-5-5', 'claude');
+      expect(started.ok).toBe(true);
+      expect(inserted.find((r) => r.prId === 91)).toMatchObject({ trigger: 'manual', provider: 'claude' });
+      // No provider named ⇒ the default.
+      await m.startReview(ctx, 1, 92, 'claude-opus-5-5');
+      expect(inserted.find((r) => r.prId === 92)).toMatchObject({ provider: 'codex' });
+    } finally {
+      if (before === undefined) delete process.env.LIMN_AI_PROVIDER;
+      else process.env.LIMN_AI_PROVIDER = before;
+      while (runs.length > 0) await releaseFirst();
+    }
   });
 });

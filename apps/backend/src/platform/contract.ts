@@ -477,6 +477,9 @@ export interface RunReviewArgs {
   prNumber: number;
   headSha: string;
   model: ClaudeReviewModel;
+  // WHICH PROVIDER RUNS IT — the job's own (a manual run's per-run choice, or the default for an
+  // automatic run), decided once by the manager. Absent ⇒ the default provider (Settings → AI).
+  provider?: 'claude' | 'codex';
   mode: 'diff_only' | 'worktree'; // resolved by the plugin ('skip' never reaches here)
   systemPrompt: string; // plugin-built reviewer "skill"
   prompt: string; // plugin-built user prompt (diff already inlined)
@@ -639,6 +642,9 @@ export interface ReviewChatArgs {
   // The REVIEWED head — the worktree is checked out here even when the PR has moved on.
   headSha: string;
   model: ClaudeReviewModel;
+  // Which provider answers (chat.ts: the review's own when it is signed in, else the default).
+  // Absent ⇒ the default provider.
+  provider?: 'claude' | 'codex';
   mode: 'diff_only' | 'worktree';
   systemPrompt: string;
   prompt: string;

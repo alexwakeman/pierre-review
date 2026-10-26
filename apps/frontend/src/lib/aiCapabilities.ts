@@ -75,6 +75,35 @@ export function aiReadyFor(ai: AiCapabilities, kind: AiRunKind): boolean {
 }
 
 /**
+ * Can THIS provider run this kind right now — its own download ready and its own pre-flight 'ok'
+ * (`me.ai.providers.*`), whichever provider is the default? The per-run model picker lists a provider
+ * only when this says yes. An older server without `providers.claude.runtime` reads the top-level
+ * `runtime` for Claude while Claude is the default.
+ */
+export function aiProviderReadyFor(me: MeResponse | undefined, provider: AiProviderId, kind: AiRunKind): boolean {
+  const ai = me?.ai;
+  if (ai?.enabled !== true) return false;
+  if (provider === 'codex') {
+    const c = ai.providers?.codex;
+    return c != null && c.runtime === 'ready' && (c.kinds?.[kind]?.auth ?? c.auth) === 'ok';
+  }
+  const c = ai.providers?.claude;
+  if (c == null) return ai.provider !== 'codex' && ai.runtime === 'ready' && ai.auth === 'ok';
+  const runtime = c.runtime ?? (ai.provider !== 'codex' ? ai.runtime : 'absent');
+  return runtime === 'ready' && c.auth === 'ok';
+}
+
+/**
+ * THE PROVIDERS A MODEL PICKER OFFERS for a kind: every provider that can run it now, the DEFAULT
+ * (`me.ai.provider`, Settings → AI) first. Empty ⇒ none can (the gate shows the default's line).
+ */
+export function aiRunnableProviders(me: MeResponse | undefined, kind: AiRunKind): AiProviderId[] {
+  const first: AiProviderId = me?.ai?.provider === 'codex' ? 'codex' : 'claude';
+  const order: AiProviderId[] = first === 'codex' ? ['codex', 'claude'] : ['claude', 'codex'];
+  return order.filter((p) => aiProviderReadyFor(me, p, kind));
+}
+
+/**
  * The pre-flight for ONE run kind: its own entry when the server sent one, else the top-level
  * answer. The sentence is the kind's own, else the top-level one.
  */

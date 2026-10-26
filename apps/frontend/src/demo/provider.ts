@@ -10,6 +10,7 @@
 
 import {
   AI_MODEL_FOR_ROLE,
+  aiRunProvider,
   claudeModelRole,
   isAiProviderSetting,
   type AiModelRole,
@@ -60,11 +61,21 @@ function roleOf(model: string): AiModelRole {
 }
 
 /**
- * What a run started NOW runs on: the active provider and its model of the same depth as `model` (the
- * template's, or the one asked for). Null model ⇒ the standard one.
+ * What a run started NOW runs on: the provider the request's model menu picked (the per-run choice,
+ * docs/CODEX-PLAN.md § 6 revised) or else the active one, and its model of the same depth as the one
+ * asked for (else the template's). Null model ⇒ the standard one.
  */
-export function ranOnNow(srv: DemoServer, model: unknown): { provider: AiProviderId; model: string } {
-  const provider = activeProvider(srv);
-  const role = typeof model === 'string' && model !== '' ? roleOf(model) : 'standard';
+export function ranOnNow(
+  srv: DemoServer,
+  model: unknown,
+  pick?: { provider?: unknown; model?: unknown },
+): { provider: AiProviderId; model: string } {
+  const named = pick?.provider === 'claude' || pick?.provider === 'codex' ? pick.provider : null;
+  const pickedModel = typeof pick?.model === 'string' && pick.model !== '' ? pick.model : null;
+  // A Codex model with no provider named runs on Codex, as on the server (ai/run-choice.ts).
+  const provider: AiProviderId =
+    named ?? (pickedModel != null && aiRunProvider(null, pickedModel) === 'codex' ? 'codex' : activeProvider(srv));
+  const asked = pickedModel ?? model;
+  const role = typeof asked === 'string' && asked !== '' ? roleOf(asked) : 'standard';
   return { provider, model: AI_MODEL_FOR_ROLE[provider][role] };
 }

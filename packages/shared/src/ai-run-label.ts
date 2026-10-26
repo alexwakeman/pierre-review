@@ -9,11 +9,13 @@
 //
 // Shared because both halves read it: the server resolves `provider` for the wire, the SPA labels.
 import type { AiProviderId, ClaudeReviewModel } from './types.js';
-import { CLAUDE_REVIEW_MODEL_LABELS } from './types.js';
+import { CLAUDE_REVIEW_MODEL_LABELS, CLAUDE_REVIEW_MODELS } from './types.js';
 
 /**
- * The provider CHOICE (Settings → AI, or `LIMN_AI_PROVIDER`): one provider for every AI feature, or
- * `auto` — Claude when both are signed in, Codex only when it alone is (docs/CODEX-PLAN.md § 6).
+ * The DEFAULT provider (Settings → AI, or `LIMN_AI_PROVIDER`): it runs every AUTOMATIC run and every
+ * surface without a model picker, and is a picker's opening choice; `auto` — Claude when both are
+ * signed in, Codex only when it alone is (docs/CODEX-PLAN.md § 6). A MANUAL run with a model picker
+ * may run on any signed-in provider that can run its kind (`aiModelPicks`).
  */
 export type AiProviderSetting = 'claude' | 'codex' | 'auto';
 
@@ -122,4 +124,99 @@ export function aiModelChoiceLabel(model: ClaudeReviewModel, provider: AiProvide
   const name = aiRunLabel('codex', AI_MODEL_FOR_ROLE.codex[claudeModelRole(model)]);
   const why = /\(([^)]*)\)\s*$/.exec(claudeLabel)?.[1];
   return why ? `${name} (${why})` : name;
+}
+
+// ---- THE PER-RUN MODEL PICKER (docs/CODEX-PLAN.md § 6, revised 2026-10-26) ----------------------
+//
+// A MANUAL run with a model picker (Claude Review run + follow-up, AI Fix + Plan first) may run on ANY
+// provider that is signed in and can run that kind. The picker lists each such provider's models at
+// the depths the surface offers — Claude's offered tiers (`CLAUDE_REVIEW_MODELS`: Opus = deep, Sonnet
+// = standard) and Codex's models of the SAME depths — and the request carries `{ provider, model }`.
+// The server validates the pair and runs it on THAT provider; automatic runs keep the default.
+
+/** Codex's models a picker offers: the depths Claude's picker offers (deep, standard). */
+export type CodexPickerModel = 'gpt-6-astra' | 'gpt-6.1-sol';
+export const CODEX_PICKER_MODELS: readonly CodexPickerModel[] = ['gpt-6-astra', 'gpt-6.1-sol'];
+
+/** Any model a picker offers, on either provider. */
+export type AiPickerModel = ClaudeReviewModel | CodexPickerModel;
+
+/** Every model some picker offers (a route schema's enum). */
+export const AI_PICKER_MODELS: readonly AiPickerModel[] = [...CLAUDE_REVIEW_MODELS, ...CODEX_PICKER_MODELS];
+
+/** The models a picker offers for one provider, in picker order (most thorough first). */
+export function aiPickerModels(provider: AiProviderId): readonly AiPickerModel[] {
+  return provider === 'codex' ? CODEX_PICKER_MODELS : CLAUDE_REVIEW_MODELS;
+}
+
+/** Which provider offers this picker model, or null when no picker offers it (retired, unknown). */
+export function aiPickerModelProvider(model: unknown): AiProviderId | null {
+  if (typeof model !== 'string') return null;
+  if ((CLAUDE_REVIEW_MODELS as readonly string[]).includes(model)) return 'claude';
+  if ((CODEX_PICKER_MODELS as readonly string[]).includes(model)) return 'codex';
+  return null;
+}
+
+/**
+ * A picker model → the Claude model of the SAME depth (what a run row is queued with and what every
+ * run entry point takes; each provider then resolves the depth to its own model). A Claude model is
+ * returned as it is.
+ */
+export function aiPickerRequestModel(model: AiPickerModel): ClaudeReviewModel {
+  if (model === 'gpt-6-astra') return 'claude-opus-5-5';
+  if (model === 'gpt-6.1-sol') return 'claude-sonnet-5';
+  return model;
+}
+
+/** The picker model of the same depth as a Claude model, on a provider. */
+export function aiPickerModelFor(provider: AiProviderId, model: ClaudeReviewModel): AiPickerModel {
+  if (provider !== 'codex') return model;
+  return AI_MODEL_FOR_ROLE.codex[claudeModelRole(model)] as CodexPickerModel;
+}
+
+/** One picker option: who runs it, the model sent, its label and the `<option>` value. */
+export interface AiModelPick {
+  provider: AiProviderId;
+  model: AiPickerModel;
+  label: string;
+  value: string;
+}
+
+/** The `<option>` value of a pick ("codex:gpt-6-astra"). */
+export function aiModelPickValue(provider: AiProviderId, model: AiPickerModel): string {
+  return `${provider}:${model}`;
+}
+
+/** Read an `<option>` value back; null when it is not a pick some provider offers. */
+export function parseAiModelPickValue(value: string): { provider: AiProviderId; model: AiPickerModel } | null {
+  const at = value.indexOf(':');
+  if (at < 0) return null;
+  const provider = value.slice(0, at);
+  const model = value.slice(at + 1);
+  if (provider !== 'claude' && provider !== 'codex') return null;
+  return aiPickerModelProvider(model) === provider ? { provider, model: model as AiPickerModel } : null;
+}
+
+/**
+ * THE PICKER'S OPTIONS for the providers that can run the surface's kind, in the order given (the
+ * caller puts the default provider first). Labels name what will run ("Claude Opus 5.5 (most
+ * thorough)", "Codex · GPT-6 Astra (most thorough)"), so with one provider the picker reads as it
+ * always did.
+ */
+export function aiModelPicks(providers: readonly AiProviderId[]): AiModelPick[] {
+  const seen = new Set<AiProviderId>();
+  const out: AiModelPick[] = [];
+  for (const provider of providers) {
+    if (seen.has(provider)) continue;
+    seen.add(provider);
+    for (const model of aiPickerModels(provider)) {
+      out.push({
+        provider,
+        model,
+        label: aiModelChoiceLabel(aiPickerRequestModel(model), provider),
+        value: aiModelPickValue(provider, model),
+      });
+    }
+  }
+  return out;
 }

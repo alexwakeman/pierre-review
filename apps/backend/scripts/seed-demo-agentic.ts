@@ -300,7 +300,8 @@ async function runClaudeReview(
       fetchCompareDiff: async () => ({ ok: false, reason: 'not_found' }),
     },
   });
-  const res = await startReview(ctx, 1, s.prId, 'claude-opus-5-5' as never);
+  // The run's provider, as a reader's model pick would name it (the per-run choice).
+  const res = await startReview(ctx, 1, s.prId, 'claude-opus-5-5' as never, s.ranOn?.provider ?? 'claude');
   if (!res.ok) throw new Error(`claude review #${s.prId}: ${res.reason}`);
   const { eq } = await import('drizzle-orm');
   const status = await settle(async () => {

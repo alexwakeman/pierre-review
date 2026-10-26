@@ -16,6 +16,9 @@ import type { FastifyInstance } from 'fastify';
 import { CLAUDE_REVIEW_MODELS, DEFAULT_AI_FIX_MODEL } from '@pierre-review/shared';
 import type { AgentContext as ProContext } from '../../review/agent-context.js';
 
+// The DEFAULT provider is pinned (the machine's own sign-ins must not decide it).
+process.env.LIMN_AI_PROVIDER = 'claude';
+
 
 const startFix = vi.fn(async (..._args: unknown[]) => ({ status: 'queued' as const, fixId: 55 }));
 
@@ -120,12 +123,16 @@ const applyAndPush = vi.fn(async (args: { target: { kind: string } }) => ({
   ...(args.target.kind === 'new' ? { prNumber: 13, prUrl: 'https://github.com/acme/app/pull/13' } : {}),
 }));
 
-async function build(): Promise<FastifyInstance> {
+async function build(signedIn: { claude: boolean; codex: boolean } = { claude: true, codex: true }): Promise<FastifyInstance> {
   /* eslint-disable @typescript-eslint/no-explicit-any */
   const ctx = {
     accountIdOf: () => 1,
     log: { warn: vi.fn(), info: vi.fn() },
-    llm: { detectAuth: () => ({ status: 'ok' }) },
+    llm: {
+      detectAuth: () => ({ status: 'ok' }),
+      detectProviderAuth: (p: 'claude' | 'codex') =>
+        signedIn[p] ? { status: 'ok' } : { status: 'none', message: p === 'codex' ? 'Sign in to Codex.' : 'Sign in to Claude.' },
+    },
     github: {
       fetchPrHeadInfo: vi.fn(async () => ({
         headSha: 'base123',
@@ -514,6 +521,44 @@ describe('plan mode routes', () => {
     expect(no.statusCode).toBe(409);
     const yes = await app.inject({ method: 'POST', url: '/api/pro/ai-fixes/56/plan/discard' });
     expect(yes.json()).toEqual({ status: 'discarded' });
+    await app.close();
+  });
+});
+
+// THE PER-RUN CHOICE (ai/run-choice.ts): the picker names a provider and one of its models.
+describe('POST /api/pro/prs/:id/ai-fix — the provider', () => {
+  it('no provider ⇒ the default provider', async () => {
+    const app = await build();
+    expect((await start(app, { instruction: 'Fix it.' })).statusCode).toBe(202);
+    expect(startArg()).toMatchObject({ provider: 'claude', model: DEFAULT_AI_FIX_MODEL });
+    await app.close();
+  });
+
+  it('Codex and its model ⇒ Codex, asked at the same depth (fix and Plan first alike)', async () => {
+    const app = await build();
+    expect((await start(app, { provider: 'codex', model: 'gpt-6.1-sol', instruction: 'Fix it.' })).statusCode).toBe(202);
+    expect(startArg()).toMatchObject({ provider: 'codex', model: 'claude-sonnet-5' });
+    const plan = await app.inject({
+      method: 'POST',
+      url: '/api/pro/prs/7/ai-fix/plan',
+      payload: { provider: 'codex', model: 'gpt-6-astra', instruction: 'Fix it.' },
+    });
+    expect(plan.statusCode).toBe(202);
+    expect((startPlan.mock.calls.at(-1) as unknown[])[1]).toMatchObject({ provider: 'codex', model: 'claude-opus-5-5' });
+    await app.close();
+  });
+
+  it('a model of the other provider, or a provider not signed in ⇒ 400 in one sentence, no run', async () => {
+    let app = await build();
+    let res = await start(app, { provider: 'claude', model: 'gpt-6-astra', instruction: 'Fix it.' });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: 'ModelNotOnProvider', message: 'GPT-6 Astra runs on Codex, not Claude.' });
+    await app.close();
+    app = await build({ claude: true, codex: false });
+    res = await start(app, { provider: 'codex', instruction: 'Fix it.' });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: 'NoClaudeAuth', message: 'Sign in to Codex.' });
+    expect(startFix).not.toHaveBeenCalled();
     await app.close();
   });
 });

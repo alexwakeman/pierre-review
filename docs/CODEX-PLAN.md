@@ -226,6 +226,31 @@ reports `providers.codex.available` = the ChatGPT sign-in (`message: null` once 
   it (25,348 / 8,576 / 234) and the "already done" plan (25,428 / 16,128 / 237, one step "Confirm zero
   guard", no change). Each named `src/math.ts`, left the worktree clean and wrote one `ai_fix_plan` row.
 
+**Phase 4b: the per-run choice and the full review history (2026-10-26, branch `codex/p4b-per-run-model`)**.
+THE USER CHANGED § 6's "one provider for every feature" for MANUAL runs: "for manual runs, I should
+ideally be able to pick from any of the models available if I'm signed into both Claude and Codex. I
+would pick a preference for auto-review in settings." and "I should always see a full history of
+reviews to look at if I switch models." Built (docs/CLAUDE-REVIEW.md § The per-run choice, § The review
+tab's history):
+- Settings → AI is now the DEFAULT provider ("Automatic runs and default"): it runs every AUTOMATIC run
+  (auto review, auto fix, the CI/ticket auto runs, scheduled one-shots) and every surface without a
+  model menu, and opens the menus. `LIMN_AI_PROVIDER` still wins; `auto` = Claude when both are signed in.
+- The Claude Review run (+ re-review) and AI Fix (+ Plan first) menus list every set-up, signed-in
+  provider that can run the kind, the default first (`lib/modelPick.ts`); Codex offers astra and sol, the
+  depths Claude's menu offers. The request carries `{ provider, model }`, validated by
+  `ai/run-choice.ts resolveManualRunChoice` (400 `UnknownProvider` / `ModelNotOffered` /
+  `ModelNotOnProvider` / `NoClaudeAuth`). The job resolves its provider ONCE (`QueueItem.provider`,
+  `StartFixInput.provider`) and hands it to the run (`RunReviewArgs.provider` → `runProvider`), the queued
+  label (`queuedRanOn`), the follow-up chain and thread carry; the ledger and cost text follow the
+  provider that ran. `AiRunGate anyProvider` is ready when any provider can run the kind and reads the
+  pick's budget (`GET /api/ai/budget?provider=`). `/api/me` adds `providers.claude.runtime`.
+- Follow-ups on a stored run (the review chat, another plan pass, the build of a plan) run on that run's
+  provider while it is signed in, else the default (`followUpProvider`, `useFollowUpProvider`).
+- The review tab's `<select>` (shown only with two runs or more) became an always-visible list of EVERY
+  run (`components/ReviewHistoryList.tsx`, `findingCount` on `ClaudeReviewSummary`); the shown run never
+  moves on its own except to a run the reader just started (`lib/reviewHistory.ts`). AI Fix has no run
+  selector to convert (only "Earlier fixes pushed").
+
 **Phase 4 status (integrated 2026-10-26, branch `codex/p4-integrated`)**: streams A1 (provider choice +
 run labels, below), A2 (copy names the provider; "Claude spend" → "AI spend"; neutral feature names such
 as "AI Review") and C (docs; CLAUDE.md under 48k) are merged. Reconciled at integration: ONE provider
@@ -531,7 +556,9 @@ cost per specialist in Limn's hands, and does not depend on undocumented subagen
   pinned in `limnAiRuntime`, exactly like the Claude SDK; `ai/runtime.ts` stays the only module
   that loads either. "Set up AI" / `limn ai install` gain a provider choice.
 - Provider choice: `LIMN_AI_PROVIDER = claude | codex | auto` plus a Settings → AI control.
-  `auto` = whichever is signed in, Claude first when both are (a decision for § 6).
+  `auto` = whichever is signed in, Claude first when both are (a decision for § 6). REVISED 2026-10-26:
+  that choice is the DEFAULT (automatic runs, surfaces without a model menu); a manual run with a
+  model menu may pick any signed-in provider's model (Phase 4b above).
 - `MeResponse.ai` gains `provider` and per-provider `auth`; `AiRunGate` names the provider in
   its one line. Every user-facing "Claude" that means "the AI" names the provider in use
   (the agentic surfaces, HelpModal, landing).
@@ -578,7 +605,10 @@ finding is checked by a second agent, then fixed in the same phase.
   window (`account/usage/read`) × the window's `usedPercent` (`account/rateLimits/read`). Whole-percent
   readings, so the share is coarse; copy says so behind the ⓘ.
 - **Default when both are signed in:** Claude. Codex is chosen in Settings until Phase 5.
-- **Scope:** ONE provider for every AI feature in v1.
+- **Scope:** ONE provider for every AI feature in v1. ⚠ CHANGED 2026-10-26 by the user: MANUAL runs
+  with a model menu (Claude Review, AI Fix + Plan first) may pick any signed-in provider's model per
+  run; the Settings → AI choice is the DEFAULT, deciding every AUTOMATIC run and every surface without
+  a menu. Every run on a PR stays listed in the review history (Phase 4b above).
 - Still open: decision 5 (the Phase 5 PRs and quota), asked at Phase 5.
 
 Original questions:

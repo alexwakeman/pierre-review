@@ -382,23 +382,22 @@ Full detail: [docs/MERGE-CI-TRUNK.md](docs/MERGE-CI-TRUNK.md). The invariants:
 
 Claude Review (+ follow-up, auto review, chat, the per-ticket TICKET review, the CI review,
 design diagrams, Check threads), AI Fix (+ Plan first), Resolve with Claude, the reference-docs
-library, sprint briefs/paths and every one-shot completion — all on ONE provider at a time, Claude
-or Codex. Details: [docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md) (§ Codex, the second provider) ·
+library, sprint briefs/paths and every one-shot completion, on Claude or Codex. Details: [docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md) (§ Codex, the second provider) ·
 history: [docs/CODEX-PLAN.md](docs/CODEX-PLAN.md). Non-negotiables:
 
 - **ONE switch, `config.aiEnabled` = `LIMN_AI_DISABLED !== 'true'`.** `registerAgenticRoutes`
   registers NOTHING when off. `MeResponse.ai` carries `enabled` / `runtime` / `auth` / `provider` /
   `providerSetting` / `providers` / `kinds` (the pre-flight per run kind); no credential swaps the Run button for ONE
   line, never hides the feature.
-- ⚠ **EVERY MODEL CALL GOES THROUGH `ai/provider.ts`**: runners call `getActiveProvider().runAgent`,
+- ⚠ **EVERY MODEL CALL GOES THROUGH `ai/provider.ts`**: runners call a provider's `runAgent`,
   `cheapComplete` calls `.complete`. ONLY `ai/providers/claude.ts` (+ `ai/runtime.ts`) calls
   `query`/loads an SDK, adding the path guard, own-tools hook and isolation (`provider-seam.test.ts`).
-  The active provider is ONE question, `ai/provider-setting.ts` `activeProviderId`
-  (`LIMN_AI_PROVIDER` = `claude` | `codex` | `auto`, or Settings → AI): `auto` = Claude when both
-  are signed in, Codex only when it alone is. A job asks ONCE and hands that provider to its run.
-  Budget folds filter `ai_usage.provider` (`0127`); every run row stores the `provider` + `model`
-  that RAN (`0128`), shown ONLY via `aiRunLabel`; ⚠ a stored model fed to a new run goes through
-  `requestModelOf`.
+  The DEFAULT provider is `activeProviderId` (`LIMN_AI_PROVIDER` = `claude`|`codex`|`auto`, else
+  Settings → AI; `auto` = Claude when both are signed in): it runs every AUTOMATIC run and every
+  surface without a model menu. A MANUAL picker run (AI Review, AI Fix) names `{provider, model}`
+  (`ai/run-choice.ts`). A job resolves its provider ONCE; row label, follow-up chain, ledger and
+  budget use the RUN's. Every run row stores the `provider` + `model` that RAN, shown ONLY via
+  `aiRunLabel`; ⚠ a stored model fed to a new run goes through `requestModelOf`.
 - **CLAUDE: ONE CREDENTIAL LADDER** (`ai/credentials.ts` `resolveAiCredential`): the reader's
   Claude Code login first (a `claude` session on disk or `CLAUDE_CODE_OAUTH_TOKEN`), else the
   environment's `ANTHROPIC_API_KEY`; `LIMN_AI_USE_API_KEY=true` puts the key first. Agent runs pass
@@ -421,7 +420,7 @@ history: [docs/CODEX-PLAN.md](docs/CODEX-PLAN.md). Non-negotiables:
 - **No AI SDK in the npm manifest** — downloaded on first use ("Set up AI" / `limn ai install
   [codex]`) and value-imported ONLY by `ai/runtime.ts` (`loadAgentSdk`/`loadAnthropicSdk`/`loadZod`);
   `build-release.mjs` asserts it.
-- **THE SPEND BUDGET** (optional, per machine, `ai/budget.ts`; it judges the ACTIVE provider): ⚠
+- **THE SPEND BUDGET** (optional, per machine, `ai/budget.ts`; read per provider): ⚠
   **every AUTOMATIC model run asks the ONE gate first** (`review/budget-gate.ts`
   `automaticRunAllowed` / `ctx.aiBudget`) and is SKIPPED, never queued, when over; a reader's click
   is never refused (the SPA asks). On a subscription it is a share of the week and of the 5-hour

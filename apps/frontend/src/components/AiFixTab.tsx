@@ -1,13 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useIsMutating } from '@tanstack/react-query';
 import {
+  aiPickerRequestModel,
   aiRunProviderName,
-  CLAUDE_REVIEW_MODELS,
-  aiModelChoiceLabel,
   aiRunLabel,
   DEFAULT_AI_FIX_MODEL,
   type AiFix,
-  type AiFixModel,
   type AiFixStatus,
   type AiFixSummary,
   type PrDetail,
@@ -17,9 +15,12 @@ import { relativeTime, safeExternalUrl } from '../lib/ui.js';
 // The fix run's phase ladder lives in lib/ so this tab and the bottom-right AiFixBanner cannot
 // print two different percentages for one run.
 import { PHASE_LABEL, fixProgressPct } from '../lib/aiFixProgress.js';
-import { aiAuthFor, useAiCapabilities } from '../hooks/useAiCapabilities.js';
+import { useAiCapabilities } from '../hooks/useAiCapabilities.js';
 import { AiRunGate } from './AiSetup.js';
 import { useMe } from '../hooks/useTriage.js';
+import { aiProviderReadyFor } from '../lib/aiCapabilities.js';
+import { useModelPick } from '../hooks/useModelPick.js';
+import { ModelPicker } from './ModelPicker.js';
 import { useFilters } from '../store/filters.js';
 import {
   aiFixStartMutationKey,
@@ -121,19 +122,19 @@ function FixerSection({
   const olderNote = olderSourceNote(handoffReviewId, reviewId, latest);
   const setPrDetailTab = useFilters((s) => s.setPrDetailTab);
 
-  // Opens on the shared default (Opus 5.5, effort pinned to medium server-side) — the same
-  // constant the start route falls back to.
-  const [model, setModel] = useState<AiFixModel>(DEFAULT_AI_FIX_MODEL);
-  // The provider a new run will use: the model picker names what will actually run.
-  const activeProvider = useMe().data?.ai.provider;
+  // THE PER-RUN MODEL MENU (lib/modelPick.ts): every signed-in provider that can run a fix, opening on
+  // the DEFAULT provider's model at the shared default's depth (Opus 5.5, effort pinned to medium
+  // server-side) — the same constant the start route falls back to.
+  const modelPick = useModelPick('fix', DEFAULT_AI_FIX_MODEL);
+  const me = useMe().data;
   const startFix = useStartFix(pr.id);
   const startPlan = useStartPlan(pr.id);
   const cancelFix = useCancelFix(pr.id);
   // "Plan first" (plan mode, manual only): a read-only planning pass the reader steers and approves
-  // before anything is built. Off by default. A provider that cannot run a PLAN (Codex, until it is
-  // ported) gets no checkbox and never sends one — "Make a plan" would only fail.
+  // before anything is built. Off by default. When the PICKED provider cannot run a plan, there is no
+  // checkbox and none is sent — "Make a plan" would only fail.
   const ai = useAiCapabilities();
-  const canPlan = aiAuthFor(ai, 'plan').auth !== 'none';
+  const canPlan = aiProviderReadyFor(me, modelPick.chosen.provider, 'plan');
   const [planFirstPicked, setPlanFirst] = useState(false);
   const planFirst = planFirstPicked && canPlan;
 
@@ -188,7 +189,14 @@ function FixerSection({
 
   const startFromReview = (): void => {
     if (reviewId == null || !preview.data || picked.length === 0) return;
-    const body = { model, seed: 'review' as const, sourceReviewId: reviewId, include: picked };
+    // The run goes to the provider the menu picked (the server validates the pair).
+    const body = {
+      model: modelPick.chosen.model,
+      provider: modelPick.chosen.provider,
+      seed: 'review' as const,
+      sourceReviewId: reviewId,
+      include: picked,
+    };
     if (planFirst) {
       // A plan is read in this tab; the banner follows the BUILD, from "Approve and build".
       startPlan.mutate(body, { onSuccess: () => setPickerOpen(false) });
@@ -205,7 +213,12 @@ function FixerSection({
     // The merge half: its own run, opening the resolver when Claude's answer is ready. Started on
     // the PRESS, not in a mutate()-scoped callback (lost if this tab unmounts before the fix POST
     // answers) — it does not depend on the fix's result.
-    if (alsoResolve && conflictsResolvable) startConflictAiRun(resolverTargetOf(pr), { model, providerName: ai.providerName });
+    // The resolver has no model menu: it runs on the DEFAULT provider, at the picked depth.
+    if (alsoResolve && conflictsResolvable)
+      startConflictAiRun(resolverTargetOf(pr), {
+        model: aiPickerRequestModel(modelPick.chosen.model),
+        providerName: ai.providerName,
+      });
   };
 
   return (
@@ -306,18 +319,7 @@ function FixerSection({
                 )}
                 {preview.data && preview.data.items.length > 0 && (
                   <div className="mt-3 flex flex-wrap items-center gap-2">
-                    <select
-                      aria-label="Model"
-                      className="rounded border border-gray-300 bg-transparent px-2 py-1 text-xs dark:border-gray-700"
-                      value={model}
-                      onChange={(e) => setModel(e.target.value as AiFixModel)}
-                    >
-                      {CLAUDE_REVIEW_MODELS.map((m) => (
-                        <option key={m} value={m}>
-                          {aiModelChoiceLabel(m, activeProvider)}
-                        </option>
-                      ))}
-                    </select>
+                    <ModelPicker state={modelPick} onPick={modelPick.pick} disabled={fixStarting} />
                     {canPlan && (
                       <label className="flex cursor-pointer items-center gap-1.5 text-xs text-gray-800 dark:text-gray-100">
                         <input
@@ -331,7 +333,9 @@ function FixerSection({
                     )}
                     {/* No AI runtime or no Claude credential: one line (or the one-time setup) in
                         place of the start button. */}
-                    <AiRunGate kind="fix" auth={data?.auth}>
+                    {/* Any provider that can fix may run it (the menu lists those); "Plan first" shows
+                        only when the PICKED one can also plan (canPlan). */}
+                    <AiRunGate kind="fix" auth={data?.auth} anyProvider provider={modelPick.chosen.provider}>
                       <button
                         type="button"
                         className={BTN_PRIMARY}

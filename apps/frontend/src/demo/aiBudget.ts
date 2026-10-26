@@ -108,7 +108,7 @@ function codexAccountTokensAt(nowMs: number, reading: AiUsageReading): AiAccount
   };
 }
 
-function response(srv: DemoServer): AiBudgetResponse {
+function response(srv: DemoServer, provider: 'claude' | 'codex' = activeProvider(srv)): AiBudgetResponse {
   const settings = settingsOf(srv);
   const nowMs = srv.now();
   const midnight = new Date(nowMs);
@@ -116,7 +116,7 @@ function response(srv: DemoServer): AiBudgetResponse {
   const todayFromMs = midnight.getTime();
   // The demo's workspaces draw diagrams automatically, with no recorded runs: the typical cycle.
   const costs = { reviewMeanUsd: null, diagramMeanUsd: null, autoDiagrams: true };
-  if (activeProvider(srv) === 'codex') {
+  if (provider === 'codex') {
     // Signed out of Codex: no credential, so nothing to judge (the server's 'none' route).
     const route = aiState(srv).codexSignedIn ? ('login' as const) : ('none' as const);
     const reading = route === 'login' ? codexReadingAt(nowMs) : null;
@@ -139,8 +139,10 @@ function response(srv: DemoServer): AiBudgetResponse {
   };
 }
 
-export function getAiBudget(_req: DemoRequest, srv: DemoServer): DemoReply {
-  return { status: 200, body: response(srv) };
+// `?provider=`: that provider's reading (a per-run model pick that is not the default), as on the server.
+export function getAiBudget(req: DemoRequest, srv: DemoServer): DemoReply {
+  const named = req.query.get('provider');
+  return { status: 200, body: response(srv, named === 'claude' || named === 'codex' ? named : undefined) };
 }
 
 export function putAiBudget(req: DemoRequest, srv: DemoServer): DemoReply {

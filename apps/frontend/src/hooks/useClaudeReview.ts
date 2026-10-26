@@ -10,7 +10,8 @@ import type {
   ActiveReviewsResponse,
   ClaudeReview,
   ClaudeReviewListResponse,
-  ClaudeReviewModel,
+  AiPickerModel,
+  AiProviderId,
   ClaudeReviewResponse,
   ClaudeReviewStatesResponse,
   ClaudeReviewStatusResponse,
@@ -220,7 +221,9 @@ export function useGenerateReview(prId: number) {
     mutationKey: claudeReviewStartKey(prId),
     // No user story: the PR review looks at the code. Stories are the ticket review's
     // (hooks/useTicketReview.ts), a separate run.
-    mutationFn: (vars: { model: ClaudeReviewModel }) => api.generateClaudeReview(prId, vars.model),
+    // `provider`: the per-run picker's choice (absent ⇒ the server's default provider).
+    mutationFn: (vars: { model: AiPickerModel; provider?: AiProviderId }) =>
+      api.generateClaudeReview(prId, vars.model, vars.provider),
     onSuccess: () => afterReviewStarted(qc, prId),
     // 409 AutoReviewInProgress: the pane's reading was stale (it polls only while it already
     // knows of a queued hold). Re-read it, so the hold shows and its 5s poll starts — otherwise

@@ -26,7 +26,8 @@ import {
 import { Markdown } from './Markdown.js';
 import { CheckIcon, ChevronIcon, CloseIcon, CommentIcon } from './Icons.js';
 import { AiRunGate } from './AiSetup.js';
-import { useAiProviderName } from '../hooks/useAiCapabilities.js';
+import { aiProviderName, type AiProviderId } from '@pierre-review/shared';
+import { useFollowUpProvider } from '../hooks/useModelPick.js';
 import { RegenProgressBar } from './Activity/RegenProgressBar.js';
 import { REVIEW_ANCHOR_MUTED, REVIEW_ITEM_CARD, REVIEW_SUBHEAD } from '../lib/reviewStyles.js';
 
@@ -221,18 +222,28 @@ function ChatMessages({ messages }: { messages: readonly ClaudeReviewChatMessage
 }
 
 /** One open thread: its stored turns, the question being answered, the pins and the composer. */
+/** WHO ANSWERS THE CHAT (the server's rule, review/claude-review/chat.ts): the review's own provider
+ *  when it can answer, else the default provider (Settings → AI). Absent ⇒ the default. */
+export function useChatProvider(reviewProvider: AiProviderId | null | undefined): AiProviderId {
+  return useFollowUpProvider(reviewProvider, 'review_chat');
+}
+
 export function ReviewChatThread({
   reviewId,
   findingId,
   prId = null,
+  reviewProvider,
 }: {
   reviewId: number;
   findingId: number | null;
   // The review's PR: the pins live per PR. null ⇒ no pins (a finding thread).
   prId?: number | null;
+  // The provider that ran the review: the chat answers on it when it can (`useChatProvider`).
+  reviewProvider?: AiProviderId | null;
 }): JSX.Element {
   const thread = useClaudeReviewChat(reviewId, findingId, true);
-  const providerName = useAiProviderName();
+  const chatProvider = useChatProvider(reviewProvider);
+  const providerName = aiProviderName(chatProvider);
   const ask = useAskClaudeReviewChat(reviewId);
   const busy = useClaudeReviewChatBusy(reviewId);
   const pendingHere = useClaudeReviewChatPendingQuestion(reviewId, findingId);
@@ -352,7 +363,7 @@ export function ReviewChatThread({
           className="w-full resize-y rounded border border-gray-300 bg-white px-2.5 py-1.5 text-[15px] leading-normal dark:border-gray-700 dark:bg-gray-950"
         />
         <div className="flex flex-wrap items-center gap-3">
-          <AiRunGate kind="review_chat">
+          <AiRunGate kind="review_chat" anyProvider provider={chatProvider}>
             <button type="button" onClick={send} disabled={!canSend} className={BTN_ASK}>
               {busy ? 'Answering…' : 'Ask'}
             </button>
@@ -442,14 +453,22 @@ function EarlierChats({ prId, reviewId }: { prId: number; reviewId: number }): J
 }
 
 /** The whole review's thread, open by default. Pinning an item opens it and scrolls to it. */
-export function ReviewChatSection({ reviewId, prId }: { reviewId: number; prId: number }): JSX.Element {
+export function ReviewChatSection({
+  reviewId,
+  prId,
+  reviewProvider,
+}: {
+  reviewId: number;
+  prId: number;
+  reviewProvider?: AiProviderId | null;
+}): JSX.Element {
   const [open, setOpen] = useState(true);
   const ref = useRef<HTMLDivElement | null>(null);
   const registerChat = useReviewChatPins((s) => s.registerChat);
   const unregisterChat = useReviewChatPins((s) => s.unregisterChat);
   const focusTick = useReviewChatPins((s) => (s.focus?.prId === prId ? s.focus.tick : null));
   const lastTick = useRef<number | null>(focusTick);
-  const providerName = useAiProviderName();
+  const providerName = aiProviderName(useChatProvider(reviewProvider));
 
   useEffect(() => {
     registerChat(prId, reviewId);
@@ -483,7 +502,7 @@ export function ReviewChatSection({ reviewId, prId }: { reviewId: number; prId: 
       >
         {open && (
           <>
-            <ReviewChatThread reviewId={reviewId} findingId={null} prId={prId} />
+            <ReviewChatThread reviewId={reviewId} findingId={null} prId={prId} reviewProvider={reviewProvider} />
             <EarlierChats prId={prId} reviewId={reviewId} />
           </>
         )}

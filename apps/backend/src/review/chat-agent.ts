@@ -3,7 +3,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   claudeModelChoice,
-  getActiveProvider,
   ranOn,
   type AgentToolServer,
   type AgentOutcome,
@@ -14,6 +13,7 @@ import { config } from '../config.js';
 import { applyClaudeReviewAuth } from './auth.js';
 import { cleanupCloneCache, prepWorktree, removeWorktreeLocked } from './clone-manager.js';
 import { estimateCostUsd } from './pricing.js';
+import { runProvider } from './run-provider.js';
 import { emptyUsage, type UsageTokens } from './usage.js';
 import { submitExplanationsShape } from './claude-review/chat-explain.js';
 import { codexReviewEffort, codexReviewModelOverride } from './codex-review.js';
@@ -70,9 +70,10 @@ export function chatToolsFor(
 
 export async function runReviewChat(args: ReviewChatArgs): Promise<ReviewChatResult> {
   const { model, mode, abortController } = args;
-  // THE PROVIDER, asked once (LIMN_AI_PROVIDER). `onCodex` is the Codex port (docs/CODEX-PLAN.md Phase
-  // 3, stream a); with Claude active none of it runs and the turn is exactly what it was.
-  const provider = getActiveProvider();
+  // THE PROVIDER, resolved once: the one chat.ts picked (the review's own provider when it is signed
+  // in, else the default). `onCodex` is the Codex port (docs/CODEX-PLAN.md Phase 3, stream a); on
+  // Claude none of it runs and the turn is exactly what it was.
+  const provider = runProvider(args.provider);
   const onCodex = provider.id === 'codex';
   // Codex writes its own ledger row when told who to bill; chat.ts must then not write one too.
   const usageRecorded = onCodex && args.usage != null;

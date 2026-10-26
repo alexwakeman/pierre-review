@@ -366,6 +366,14 @@ export function expectedRanOn(choice: ModelChoice, env: NodeJS.ProcessEnv = proc
 }
 
 /**
+ * What a run queued now on a NAMED provider will run on — a manual run's per-run choice
+ * (ai/run-choice.ts). Absent ⇒ the default provider (`expectedRanOn`).
+ */
+export function queuedRanOn(choice: ModelChoice, provider?: AgentProviderId | null): AiRanOn {
+  return provider ? ranOn(getProvider(provider), choice) : expectedRanOn(choice);
+}
+
+/**
  * A stored run's model → the CLAUDE model id to ask for again (the next plan pass, the build after a
  * plan, a chat on a review). A row stores what RAN, so a Codex run holds a Codex id; it maps back by
  * ROLE (gpt-6-astra → Opus, gpt-6.1-sol → Sonnet, gpt-6-luna → Haiku), so either provider then resolves

@@ -1,5 +1,5 @@
 import { and, desc, eq } from 'drizzle-orm';
-import { AI_FIX_PLAN_MAX_REVISIONS } from '@pierre-review/shared';
+import { AI_FIX_PLAN_MAX_REVISIONS, aiRunProvider } from '@pierre-review/shared';
 import type {
   AiFixPlanMessage,
   AiFixPickerPreview,
@@ -72,6 +72,7 @@ import { config } from '../../config.js';
 import { activeProviderId } from '../../ai/provider-setting.js';
 import { claudeModelChoice, getProvider, requestModelOf, type AgentProviderId, type AiRanOn } from '../../ai/provider.js';
 import { providerName } from '../../ai/prompt-tools.js';
+import { followUpProvider, preflightFor } from '../../ai/run-choice.js';
 
 // In-memory job manager for AI Fix's agentic fixer (CORE, free, local-only — it left the plugin
 // with Claude Review; the PR summary and the CI-failure analysis stayed Pro). A SINGLE global slot (concurrency 1) carries every
@@ -189,6 +190,9 @@ export interface StartFixInput {
   trigger?: AiFixTrigger;
   // seed === 'review': which items. Absent ⇒ the section defaults (every section but style bots).
   selection?: SeedSelection;
+  // THE PER-RUN CHOICE (a manual start's picker, validated by the route). Absent ⇒ the default
+  // provider (Settings → AI) — always so for an automatic fix.
+  provider?: AgentProviderId;
 }
 
 /** The stored review a seed names, checked to be THIS PR's succeeded run. null otherwise. */
@@ -357,7 +361,11 @@ async function startRun(
 ): Promise<StartFixResult> {
   const { accountId, prId } = input;
 
-  const auth = ctx.llm.detectAuth(mode);
+  // THE PROVIDER IS PICKED ONCE, HERE: the request's per-run choice, else the default. The prompt is
+  // worded for it (ai/prompt-tools.ts) and the queued run is handed the same one, so a prompt never
+  // reaches a provider it was not written for.
+  const provider: AgentProviderId = input.provider ?? activeProviderId();
+  const auth = preflightFor(ctx)(provider, mode);
   if (auth.status !== 'ok') return { status: 'no_auth', message: auth.message };
 
   // Hard agentic cap: refuse a run once the account's monthly agent credit allowance is spent
@@ -430,10 +438,6 @@ async function startRun(
 
     const trigger: AiFixTrigger = input.trigger ?? 'manual';
 
-    // THE PROVIDER IS PICKED ONCE, HERE: the prompt is worded for it (ai/prompt-tools.ts) and the
-    // queued run is handed the same one, so a prompt never reaches a provider it was not written for.
-    const provider = activeProviderId();
-
     if (mode === 'plan') {
       const systemPrompt = buildPlanSystemPrompt(provider);
       const nonce = pickReviewNonce([seed.text, pr.title, pr.body ?? '']);
@@ -451,6 +455,7 @@ async function startRun(
         trigger,
         reviewItems,
         planSeed: seed,
+        provider,
       });
       fixIdByPr.set(prId, fixId);
       queuePlanPass(ctx, {
@@ -487,6 +492,7 @@ async function startRun(
       prompt,
       trigger,
       reviewItems,
+      provider,
     });
     fixIdByPr.set(prId, fixId);
 
@@ -512,6 +518,21 @@ async function startRun(
     ctx.log.warn({ err }, 'ai-fix startFix failed');
     return { status: 'not_found' };
   }
+}
+
+/**
+ * A follow-up on an open plan (another pass, the build): the provider the plan was made on (its last
+ * pass's, else the row's) when that one is signed in and can run the kind, else the default.
+ */
+function planFollowUpProvider(
+  ctx: AgentContext,
+  row: { provider?: string | null; model: string; planProvider?: string | null; planModel?: string | null },
+  kind: 'plan' | 'fix',
+): AgentProviderId {
+  const stored = row.planModel != null || row.planProvider != null
+    ? aiRunProvider(row.planProvider, row.planModel)
+    : aiRunProvider(row.provider, row.model);
+  return followUpProvider(stored, kind, preflightFor(ctx));
 }
 
 /** What a job runs on: the provider it was worded for and that provider's id for the asked model. */
@@ -789,7 +810,9 @@ export async function sendPlanMessage(
   const left = config.aiFixBudgetUsd - (row.planCostUsd ?? 0);
   if (left < MIN_PLAN_PASS_BUDGET_USD) return { status: 'budget_spent' };
 
-  const auth = ctx.llm.detectAuth('plan');
+  // Another pass of a plan runs on the PLAN's provider when it is signed in, else the default.
+  const provider = planFollowUpProvider(ctx, row, 'plan');
+  const auth = preflightFor(ctx)(provider, 'plan');
   if (auth.status !== 'ok') return { status: 'no_auth', message: auth.message };
 
   const prId = row.prId;
@@ -837,7 +860,6 @@ export async function sendPlanMessage(
       renderPlanText(plan),
       ...transcript.map((m) => m.text),
     ]);
-    const provider = activeProviderId();
     const prompt = buildPlanUserPrompt({ pr, diff, seed, previous: plan, transcript, nonce, provider });
     queuePlanPass(ctx, {
       fixId: row.id,
@@ -887,7 +909,9 @@ export async function approvePlan(
   if (row.status !== 'planned' || parsePlanStatus(row.planStatus) !== 'plan_ready' || !plan || !seed)
     return { status: 'not_ready' };
 
-  const auth = ctx.llm.detectAuth('fix');
+  // The build of a plan runs on the PLAN's provider when it is signed in, else the default.
+  const provider = planFollowUpProvider(ctx, row, 'fix');
+  const auth = preflightFor(ctx)(provider, 'fix');
   if (auth.status !== 'ok') return { status: 'no_auth', message: auth.message };
 
   const prId = row.prId;
@@ -917,7 +941,6 @@ export async function approvePlan(
     const diff = await ctx.github.fetchPrDiff(input.accountId, pr.owner, pr.name, pr.number).catch(() => '');
     const planText = renderPlanText(plan);
     const nonce = pickReviewNonce([seed.text, pr.title, pr.body ?? '', planText]);
-    const provider = activeProviderId();
     const prompt = buildFixUserPrompt({ pr, diff, seed, plan: { plan, nonce }, provider });
     if (!(await markPlanApproved(ctx, row.id, { prompt, baseSha }))) {
       release();

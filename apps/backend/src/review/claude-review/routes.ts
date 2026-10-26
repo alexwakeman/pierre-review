@@ -18,7 +18,7 @@ import type {
   UpdateReviewBody,
 } from '@pierre-review/shared';
 import {
-  CLAUDE_REVIEW_MODELS,
+  AI_PICKER_MODELS,
   CLAUDE_REVIEW_STATES_MAX_IDS,
   DEFAULT_CLAUDE_REVIEW_MODEL,
   storyCommentLead,
@@ -26,6 +26,7 @@ import {
   threadAssessmentCounts,
 } from '@pierre-review/shared';
 import type { AgentContext } from '../agent-context.js';
+import { anyProviderPreflight, preflightFor, resolveManualRunChoice } from '../../ai/run-choice.js';
 import { autoReviewWaiting } from './auto.js';
 import { isAutoPostingNow } from './auto-post.js';
 import { autoFixOutcomeFor } from '../../coding/ai-fix/auto-fix.js';
@@ -88,15 +89,18 @@ const postFindingSchema = {
     ],
   },
 };
-// ⚠ `model` is the OFFERED list (shared CLAUDE_REVIEW_MODELS), so a retired id (the old Opus 4.8)
-// is a 400 here while its old runs still render, their id printed raw. Omitted ⇒ the default.
+// ⚠ `model` is the OFFERED list (shared AI_PICKER_MODELS: Claude's tiers and Codex's of the same
+// depths), so a retired id (the old Opus 4.8) is a 400 here while its old runs still render, their id
+// printed raw. Omitted ⇒ the default. `provider` is the per-run choice (ai/run-choice.ts validates
+// the pair and the sign-in in the handler).
 const generateSchema = {
   ...idParam,
   body: {
     type: 'object',
     additionalProperties: false,
     properties: {
-      model: { type: 'string', enum: [...CLAUDE_REVIEW_MODELS] },
+      model: { type: 'string', enum: [...AI_PICKER_MODELS] },
+      provider: { type: 'string', enum: ['claude', 'codex'] },
       // No `ticket`/`tickets`: a PR review checks no story (the ticket review does, `POST
       // /api/ticket-reviews`). Fastify's ajv runs with `removeAdditional`, so a stale key from an
       // older SPA is stripped, exactly like the retired `mode`.
@@ -200,7 +204,9 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
       };
     }
     const accountId = ctx.accountIdOf(req);
-    const auth = ctx.llm.detectAuth('review');
+    // A picker surface: ready when ANY provider can run a review (the run names its own; the start
+    // route checks THAT one).
+    const auth = anyProviderPreflight(preflightFor(ctx), 'review', ctx.llm.detectAuth('review'));
     const review = await getLatestClaudeReview(ctx, id, accountId);
     const autoReview = autoReviewHold(id, accountId);
     // The judgements as they stand now: the latest review's, with later Check threads runs over it.
@@ -240,17 +246,20 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
   app.post('/api/prs/:id/claude-review', { schema: generateSchema }, async (req, reply) => {
     const { id } = req.params as { id: number };
     const body = (req.body ?? {}) as GenerateReviewBody;
-    const model = body.model ?? DEFAULT_CLAUDE_REVIEW_MODEL;
     if (!AGENTIC_AI_ENABLED) return featureOff(reply);
 
-    const auth = ctx.llm.detectAuth('review');
-    if (auth.status === 'none') {
+    // THE PER-RUN CHOICE: the provider named (or the default), the model on it, and its sign-in.
+    const choice = resolveManualRunChoice(body, 'review', {
+      defaultModel: DEFAULT_CLAUDE_REVIEW_MODEL,
+      detect: preflightFor(ctx),
+    });
+    if (!choice.ok) {
       reply.status(400);
-      return { error: 'NoClaudeAuth', message: auth.message };
+      return { error: choice.error, message: choice.message };
     }
 
     const accountId = ctx.accountIdOf(req);
-    const result = await startReview(ctx, accountId, id, model);
+    const result = await startReview(ctx, accountId, id, choice.model, choice.provider);
     if (!result.ok) {
       if (result.reason === 'not_found') {
         reply.status(404);

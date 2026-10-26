@@ -248,6 +248,8 @@ export const STEPS = [
     name: 'pr:105:review-history',
     run: async (h) => {
       await h.go('?view=pr-detail:105&prTab=claude_review');
+      // Every run in the always-visible list, so showing any of them answers.
+      await h.clickAll(h.page.locator('main [data-review-run]'), { max: 8 });
       await explore(h, { max: 30, scope: 'main' });
     },
   },

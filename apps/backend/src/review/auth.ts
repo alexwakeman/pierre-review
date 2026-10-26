@@ -44,7 +44,15 @@ export const NO_CLAUDE_AUTH_MESSAGE = 'Sign in to Claude Code or set ANTHROPIC_A
  * Cached reads only: nothing here waits on a process.
  */
 export function detectClaudeAuth(kind?: AiRunKind): ClaudeAuthResult {
-  if (activeProviderId() === 'codex') return detectCodexAuth(kind);
+  return detectProviderAuth(activeProviderId(), kind);
+}
+
+/**
+ * The same pre-flight for a NAMED provider (a manual run's per-run choice, the review chat on its
+ * review's provider): Claude's credential ladder, or Codex's per-kind answer.
+ */
+export function detectProviderAuth(provider: 'claude' | 'codex', kind?: AiRunKind): ClaudeAuthResult {
+  if (provider === 'codex') return detectCodexAuth(kind);
   const c = resolveAiCredential();
   if (c.route !== 'none') return { status: 'ok', method: c.method };
   // ⚠ THIS SENTENCE IS RENDERED IN THE SPA, NOT JUST LOGGED — it is the ONE line that replaces

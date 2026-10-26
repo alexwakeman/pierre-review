@@ -600,8 +600,8 @@ describe('source guards', () => {
 
   it('opens the model picker on the default and never re-seeds it from a stored run', () => {
     const tab = code(read('components/ClaudeReviewTab.tsx'));
-    expect(tab).toMatch(/useState<ClaudeReviewModel>\(DEFAULT_CLAUDE_REVIEW_MODEL\)/);
-    expect(tab).not.toMatch(/setModel\(\s*review/);
+    expect(tab).toMatch(/useModelPick\('review', DEFAULT_CLAUDE_REVIEW_MODEL\)/);
+    expect(tab).not.toMatch(/\.pick\(\s*review/);
   });
 
   it('no "Claude: " lead on generated text — it is all Claude\'s', () => {

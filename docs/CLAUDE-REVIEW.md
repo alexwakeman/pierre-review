@@ -323,8 +323,10 @@ or other button beside it. A new automatic caller must go through the gate.
 
 ## Codex, the second provider
 
-Every AI feature can run on Codex (OpenAI) instead of Claude. ONE provider runs every feature at a
-time; there is no per-feature choice. Build history and the measurements behind each rule:
+Every AI feature can run on Codex (OpenAI) instead of Claude. The DEFAULT provider (Settings → AI)
+runs every AUTOMATIC run and every surface without a model menu; a MANUAL run with a model menu (AI
+Review run + follow-up, AI Fix + Plan first) may pick any signed-in provider's model (§ The per-run
+choice). Build history and the measurements behind each rule:
 [CODEX-PLAN.md](CODEX-PLAN.md) and [CODEX-SPIKE.md](CODEX-SPIKE.md) (its "Plan changes" overrule
 the plan). Phase 3 is complete: every agent kind runs on Codex and `codexRunnable()` is true.
 
@@ -345,9 +347,9 @@ the plan). Phase 3 is complete: every agent kind runs on Codex and `codexRunnabl
   `codex` ⇒ Codex, `claude` ⇒ Claude, `auto` ⇒ `pickAutoProvider` — Claude when both are signed in
   and when neither is; Codex only when it ALONE is signed in (with ChatGPT) and can run every kind.
   An OpenAI API key alone never makes `auto` pick Codex.
-- **ONE PROVIDER PER JOB.** A manager asks once (`activeProviderId()` or `getActiveProvider()`),
-  words its prompts for that provider and hands the SAME provider to the run, so a setting changed
-  mid-job cannot split it.
+- **ONE PROVIDER PER JOB.** A manager resolves the provider once (the run's own choice, else
+  `activeProviderId()`), words its prompts for that provider and hands the SAME provider to the run,
+  so a setting changed mid-job cannot split it.
 - **The neutral run stream.** Both providers report a run the same way through `spec.onProgress`
   and `AgentRunResult.outcome`: a `step` per model step (worded activity lines, the step's text,
   the live token tally) and an `outcome` (subtype, final text, US$, turns, tokens). Runners read
@@ -387,6 +389,56 @@ the plan). Phase 3 is complete: every agent kind runs on Codex and `codexRunnabl
   - Run cost follows the RUN's provider (`runCostText(…, provider)`): a Codex run on ChatGPT shows
     no figure, never US$. Period reports still store the model ASKED for (it is part of the row's
     identity); the core one-shot tables (sprint briefs/themes, story labels) store a constant id.
+
+### The per-run choice (decided 2026-10-26)
+
+The user changed § 6's "one provider for every feature" for MANUAL runs: "for manual runs, I should
+ideally be able to pick from any of the models available if I'm signed into both Claude and Codex.
+I would pick a preference for auto-review in settings."
+
+- **Settings → AI is the DEFAULT** ("Automatic runs and default: Auto / Claude / Codex";
+  `LIMN_AI_PROVIDER` still wins, `auto` = Claude when both are signed in). It decides auto review,
+  auto fix, the CI and ticket auto runs, every scheduled one-shot, and every surface without a model
+  menu (Check threads, ticket and CI reviews, diagrams, the docs library, Resolve with Claude, the
+  Open PRs table's one-click review), and it is the menu's opening choice.
+- **The menus** (`components/ModelPicker.tsx`, `lib/modelPick.ts`): the Claude Review run (and its
+  re-review, the follow-up) and AI Fix (+ Plan first) list the models of EVERY provider that is set
+  up, signed in and can run the kind (`aiRunnableProviders`: `me.ai.providers.claude.runtime/auth`,
+  `me.ai.providers.codex.runtime/kinds`), the default's first, each labelled by `aiModelChoiceLabel`
+  ("Claude Opus 5.5 (most thorough)", "Codex · GPT-6 Astra (most thorough)"). Codex offers the depths
+  Claude's menu offers (`CODEX_PICKER_MODELS`: astra = deep, sol = standard; luna is not offered on
+  these surfaces). One provider ready ⇒ the menu reads as it did. `AiRunGate anyProvider` is ready
+  when ANY provider can run the kind; its `provider` is the pick, whose budget the meter and the
+  over-budget confirm read (`GET /api/ai/budget?provider=`). A click is never refused by the budget.
+- **The request** carries `{ provider, model }`; `ai/run-choice.ts resolveManualRunChoice` validates
+  it in the route: an unknown provider or a model no menu offers ⇒ 400; a NAMED provider with the
+  other's model ⇒ 400 `ModelNotOnProvider` ("GPT-6 Astra runs on Codex, not Claude."); the provider
+  not signed in or unable to run the kind ⇒ 400 `NoClaudeAuth` with its own sentence. No provider ⇒
+  a Codex model's own provider, else the default (an older SPA's Claude model is a DEPTH, run on the
+  default as before). The answer is the provider and the Claude model of the same depth, which every
+  entry point takes.
+- **The run's provider, everywhere.** The review manager stores it on the job (`QueueItem.provider`,
+  decided at queue time; auto runs read the default then) and hands it to `RunReviewArgs.provider`
+  (`review/agent.ts` `runProvider(args.provider)`); AI Fix passes `StartFixInput.provider` to its
+  prompts and `GenerateFixArgs.provider`. The queued row's label (`queuedRanOn`), `ranOn`, the ledger
+  (`ai_usage.provider`, written by the provider that ran), the run's cost text, the follow-up chain
+  (`loadPriorReviewForFollowUp(…, provider)`) and the thread carry (`priorAssessmentsForProvider`) all
+  read the RUN's provider. `AgentRunSpec` needs no provider field: a spec is handed to the provider
+  that runs it.
+- **Follow-ups on a stored run** run on that run's provider while it is signed in, else the default
+  (`followUpProvider`): the review chat on its review, another Plan-first pass and the build of a plan
+  on the plan's provider. The SPA's gates and wording follow the same rule (`useFollowUpProvider`).
+
+### The review tab's history
+
+Every run on the PR is listed, always (`components/ReviewHistoryList.tsx`): all providers, all
+heads, newest first (`listClaudeReviewHistory` is uncapped and now carries `findingCount`). A row
+shows the head, what ran (`aiRunLabel`), status, verdict, findings, when and the Auto marker;
+pressing it shows that run, and the shown run is marked. Which run is shown is the reader's
+(`lib/reviewHistory.ts nextShownReviewId`): a run starting or finishing, a provider switch or the
+model menu never moves it, except to a run the reader just started (a MANUAL run that became the
+latest). Opening while an auto run is in flight shows the newest finished run. Editing and posting
+stay on the latest run only. AI Fix keeps no per-PR run selector (only "Earlier fixes pushed").
 
 ### The Codex runner
 
