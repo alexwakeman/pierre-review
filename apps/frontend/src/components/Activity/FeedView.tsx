@@ -1189,8 +1189,8 @@ export function FeedView({
 
   // Open an item → the full-height PR DETAIL tab (its Show/Focus drive the timeline).
   // `fromActivity` arms Back-to-Activity + stashes this row's id so Back scrolls it back into
-  // view. We also drive the right in-detail deep link: a thread → that thread's Threads-tab card; a PR comment → scroll to + highlight the
-  // comment; else the PR. Stable (store actions are stable) so memoised rows don't churn.
+  // view. We also drive the right in-detail deep link: a thread → that thread in the Changes tab; a PR comment → the Comments tab,
+  // scrolled to + highlighting the comment; else the PR. Stable (store actions are stable) so memoised rows don't churn.
   const open = useCallback(
     (item: ConsolidatedFeedItem): void => {
       const prId = item.prId;
@@ -1204,8 +1204,8 @@ export function FeedView({
     [openPrDetailTab, selectThread, showPrComment, selectPr],
   );
 
-  // Open a specific affected thread inline on a commit item — jump straight to that thread's
-  // Threads-tab card.
+  // Open a specific affected thread inline on a commit item — jump straight to that thread in
+  // the Changes tab.
   const openThread = useCallback(
     (item: ConsolidatedFeedItem, threadId: number): void => {
       const prId = item.prId;

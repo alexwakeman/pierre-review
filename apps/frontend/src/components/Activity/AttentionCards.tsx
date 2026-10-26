@@ -2710,8 +2710,8 @@ function PendingCard({ card, board }: { card: InsightCard; board: PendingBoardAp
       if (card.reason === 'trunk_red') break;
       const threadOpen =
         card.threadId != null ? () => board.openThreadOn(card, card.threadId as number) : undefined;
-      // A mention / comment-after-yours card that names its comment lands ON it; without one,
-      // the PR's Activity tab as before.
+      // A mention / comment-after-yours card that names its comment lands ON it (a comment on a
+      // line → Changes; a PR comment or review body → Comments); without one, the Comments tab.
       const commentOpen =
         card.comment != null ? () => board.openComment(card, card.comment as MyTurnCommentRef) : undefined;
       if (card.reply != null && replyBlockShown(heading, card.reply)) {
@@ -2745,10 +2745,10 @@ function PendingCard({ card, board }: { card: InsightCard; board: PendingBoardAp
           resolveButton(card.threadId);
           break;
         case 'comment_reply':
-          primary('Answer', commentOpen ?? (() => board.openPr(card, 'activity')));
+          primary('Answer', commentOpen ?? (() => board.openPr(card, 'comments')));
           break;
         case 'mention':
-          primary('Read it', commentOpen ?? (() => board.openPr(card, 'activity')));
+          primary('Read it', commentOpen ?? (() => board.openPr(card, 'comments')));
           break;
         case 'review_request':
           primary('Start review', () => board.openPr(card, 'changes'));
@@ -3115,8 +3115,8 @@ export function AttentionCards({
   const showPrComment = useFilters((s) => s.showPrComment);
   const openComment = (card: PrCardRef & { id: string }, comment: MyTurnCommentRef): void => {
     if (comment.kind === 'review_comment') {
-      // PrDetail resolves the thread → Changes jump (and falls back to Threads when the file has
-      // left the diff).
+      // PrDetail resolves the thread → Changes jump (and falls back to the Threads only view when
+      // the file has left the diff).
       openPrChangesAt(metaFor(card, usersById), comment.path, {
         fromActivity: true,
         returnItemId: card.id,
@@ -3125,8 +3125,9 @@ export function AttentionCards({
       });
       return;
     }
+    // A comment with no file (a PR comment, a review body) lives on the Comments tab.
     open(metaFor(card, usersById), card.id);
-    setPrDetailTab(card.prId, 'overview');
+    setPrDetailTab(card.prId, 'comments');
     showPrComment(card.prId, comment.id, comment.kind === 'review' ? 'review' : 'comment');
   };
 

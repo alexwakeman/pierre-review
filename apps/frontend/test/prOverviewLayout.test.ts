@@ -26,7 +26,7 @@ describe('PR detail tabs', () => {
     const strip = s.slice(s.indexOf("'overview',\n            'comments',"));
     expect(strip.length).toBeGreaterThan(0);
     const list = strip.slice(0, strip.indexOf(']'));
-    expect(list).toMatch(/'overview',\s*'comments',\s*'threads',\s*'changes'/);
+    expect(list).toMatch(/'overview',\s*'comments',\s*'changes'/);
     expect(list).not.toContain("'activity'");
   });
 
