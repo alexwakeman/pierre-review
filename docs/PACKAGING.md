@@ -72,12 +72,15 @@ pre-rename `~/.pierre-review` to `~/.limn` (below), then defaults the DB to
 move carries it and its WAL files untouched) + pre-checks `gh auth token`. Prints the banner + URL, boots via `start()` (guarded run-as-main), opens the
 browser (built-in, no dep) unless `--no-open`. **`limn ai install` / `limn ai status`** run the
 same AI-runtime download as the app's "Set up AI" button (below); refused under
-`LIMN_AI_DISABLED=true`. **`limn ml install`** downloads the bot-comment severity model
+`LIMN_AI_DISABLED=true`. `limn ai install codex` adds the Codex CLI; **`limn ai login codex`**
+(`--device-auth` on a headless machine) / **`limn ai logout codex`** sign Limn's own Codex home in and
+out (§ The Codex CLI). **`limn ml install`** downloads the bot-comment severity model
 ([ML-SEVERITY.md](ML-SEVERITY.md)).
 
 **The data directory is `~/.limn`** (`data-dir.ts`; `LIMN_DATA_DIR` overrides; `config.dataDir`).
 It holds the CLI's DB, the clone cache (`CLONE_DIR` overrides), `config.json` (the per-review
-budget) and `ai-runtime/`. ⚠ **The move from `~/.pierre-review` is ONE `renameSync`, and it NEVER
+budget), `ai-runtime/` and `codex/` (Limn's own Codex home: its sign-in, `config.toml` and run
+records; never the reader's `~/.codex`). ⚠ **The move from `~/.pierre-review` is ONE `renameSync`, and it NEVER
 CLOBBERS**: run by the CLI before it picks the DB path and again (a no-op by then) at the top of
 `start()` for `pnpm dev`. An existing `~/.limn` means nothing moves and the old directory is left
 as it is; an explicit `LIMN_DATA_DIR` is never migrated into. No copy-then-delete exists, on
@@ -165,3 +168,42 @@ missing from one source falls through to the other (the `<dataDir>/ai-runtime` i
   `ai/runtime.ts` (`loadMammoth` / `loadTurndown` / `loadTurndownGfm` — the dist grep covers them). ⚠ A
   runtime installed BEFORE them is **stale, not absent** (`AI_RUNTIME_LATER_PACKAGES`): every agent
   still loads, the status says "Set up AI again", and only a Word or web-page build refuses until then.
+
+### The Codex CLI (installed on request)
+
+Codex is the second AI provider ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Codex, the second
+provider). Limn runs the Codex CLI's native program; it never imports a Codex package.
+
+- **The pin**: `@openai/codex` **0.164.0**, DECLARED exact in `apps/backend/package.json`'s own
+  `limnAiRuntime` field. The CLI is not a workspace dependency (its native program is about 360 MB
+  unpacked per platform), so `build-release.mjs` COPIES the declared pin into the release manifest
+  rather than reading `node_modules`, and `ai/runtime.ts` reads the same field in dev. The models
+  (`CODEX_MODEL_FOR_ROLE`) are pinned for this version: re-check them, and the spike's checks, on
+  every bump.
+- **Installed only when asked for**, into the same `~/.limn/ai-runtime`: "Set up AI" with Codex
+  (`POST /api/ai/runtime/install {provider: 'codex'}`) or `limn ai install codex`. npm brings the
+  platform package (`@openai/codex-<platform>`); `codexBinaryIn` finds the native program the way
+  the package's own `bin/codex.js` does. ⚠ Codex is STAGED APART from Claude's packages: a Codex
+  failure is recorded as Codex's alone and never fails Claude's install, and a Claude-only "Set up
+  AI" carries an existing Codex over (moved, not downloaded again) and never removes it.
+- **Status** (`getCodexRuntimeStatus()` → `MeResponse.ai.providers.codex.runtime`): `ready` |
+  `absent` | `installing` | `failed`. A Codex at another version (an upgrade moved the pin) reads
+  `absent` with "Set up Codex again", but still runs until replaced. `LIMN_CODEX_PATH` points at a `codex` program of the reader's own and counts as
+  ready.
+- **Sign-in** lives in `~/.limn/codex` (`CODEX_HOME` for every Codex process Limn starts). From the
+  app it goes through `codex app-server` (`/api/ai/codex/login`, [API.md](API.md)); from the
+  terminal, `limn ai login codex` runs `codex login` with the terminal attached. Only a ChatGPT
+  sign-in runs; an OpenAI API key is refused until Limn can price it.
+- **What `build-release.mjs` checks for Codex**:
+  - the declared pin is an exact version, and `limnAiRuntime` declares nothing else (the other pins
+    come from the workspace install);
+  - the written manifest carries the same pin;
+  - no `@openai/codex*` package (or `@openai/codex-sdk`) in `dependencies`,
+    `optionalDependencies` or `peerDependencies`;
+  - no emitted file imports a Codex package at all, `dist/ai/runtime.js` included (it only locates
+    the program on disk);
+  - Codex's two helper processes exist — `dist/ai/codex/workspace-mcp-main.js` and
+    `dist/ai/codex/path-guard-hook-main.js` — and import only `node:` built-ins and relative files
+    (Codex starts them by file path, from an install that may carry no AI package);
+  - both actually run from the release tree: the MCP server lists `read_file`, `list_files` and
+    `search`, and the hook denies a call to a foreign MCP server with exit 2.

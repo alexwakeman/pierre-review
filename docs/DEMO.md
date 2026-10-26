@@ -126,3 +126,18 @@ SHAPE is stale but still renders. The re-record is the author's job.
 - **Anything it cannot fake** (adding a repository, syncing, …) answers "Not available in the
   demo." in the SPA's own error shape; an unrecorded GET is `404 NotInDemo`, an unrecorded write
   `409`, a DELETE `204`.
+
+## Moved from CLAUDE.md (2026-10-26)
+
+Verbatim text taken out of CLAUDE.md to keep it under its size budget. CLAUDE.md keeps a
+shorter form of each rule; this is the full wording.
+
+### The static demo
+
+- **The static demo** (`apps/frontend/src/demo/`, `build:demo` → `dist-demo/`, base `/demo/`) is
+  the real SPA with `window.fetch` wrapped: every `/api/*` answered in the browser from a
+  RECORDING (Acme data, timestamps rebased to now), writes simulated in an in-memory overlay,
+  agentic runs replayed from a recorded finished run of the same kind. ⚠ A normal `vite build`
+  must stay byte-for-byte free of it (separate entry, `--mode demo` only), and it must hold the
+  site's CSP (no inline script, no eval). `data/recording.json` replaces the sample when present.
+  Format and matching rules: [apps/frontend/src/demo/README.md](../apps/frontend/src/demo/README.md).

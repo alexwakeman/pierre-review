@@ -1179,3 +1179,42 @@ Pending board's red-trunk cards:
 - **A miss is ordinary, not an error** — a direct push has no PR, `pr_number` is null until the
   association is observed, and the two logs trim on different schedules (`branch_commits` =
   newest-100 ∪ 90d vs `trunk_ci_status_events` = newest-200 ∪ 14 days).
+
+## Moved from CLAUDE.md (2026-10-26)
+
+Verbatim text taken out of CLAUDE.md to keep it under its size budget. CLAUDE.md keeps a
+shorter form of each rule; this is the full wording.
+
+### Conflicts are resolved in the app
+
+- **Conflicts are resolved in the app** (`src/conflict/`, `components/conflicts/`). ⚠ The commit
+  body carries only indexes, ids and enum members — an edited region travels as an opaque
+  `editId` validated server-side (`POST …/conflicts/edit`); inline `custom` lines are forbidden.
+  Edits inherit the region's line ending and BOM; a superseded `editId` is never evicted. ⚠ The
+  wand NEVER picks a side. ⚠ Nothing is applied before the reader presses something
+  (`autoApply: false`), except a "Resolve with Claude" run the reader started (undecided regions
+  only, undoable). ⚠ Sessions are pinned to `(headSha, baseSha, modelHash)` — **bump
+  `CONFLICT_MODEL_VERSION` with any fold change**. ⚠ The commit is HARD BLOCKED until every
+  decidable region is decided (`CommitPlan.canCommit`, one `commitBlockedReason`). No worktree, no
+  DB rows; a blobless clone cache under `config.cloneDir`. Read the doc's § Resolving conflicts
+  before touching paint, gutter arrows or "Next".
+
+### Withdraw approval
+
+- **Withdraw approval** dismisses the viewer's own latest APPROVED review (read live), stamps,
+  settles, signals. PR action buttons hide behind one "Show actions" reveal; facts never hide.
+
+### Dependency auto-merge
+
+- **Dependency auto-merge** (`merge/dependency-policy.ts`): OFF by default; a policy intent merges
+  like a click; a person's cancel is never overridden; red CI backs off after ONE live-proven
+  failure (`checks_failed`).
+
+### Auto-merge
+
+- **Auto-merge (`merge/auto-merge-runner.ts`) is consent-anchored** — never GitHub's
+  `enablePullRequestAutoMerge`. Arming pins `expectedHeadOid`; a head move disarms unless proven
+  our own update-merge; compare-and-set + permission re-check at LAND time. ⚠ **`behindBy > 0` is
+  normal** — only `mergeStateStatus === 'behind'` blocks. Every arm goes through `armIntentLive`
+  (`merge/arm-intent.ts`). Queue repos enqueue head-pinned; freshen BEFORE the first enqueue,
+  never while queued; disarm with `enqueuedAt` also dequeues.

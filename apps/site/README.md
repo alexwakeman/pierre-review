@@ -72,3 +72,17 @@ pnpm --filter @pierre-review/site precompress <dir>...   # write .br/.gz sidecar
 ```
 
 Deployed by `.github/workflows/deploy-site.yml` from the root `Dockerfile`.
+
+## Moved from CLAUDE.md (2026-10-26)
+
+Verbatim text taken out of CLAUDE.md to keep it under its size budget. CLAUDE.md keeps a
+shorter form of each rule; this is the full wording.
+
+### `apps/site`
+
+- **`apps/site`** serves limn-review.com: the prerendered landing, `/demo/`, `/api/health` and
+  the contact form (`/api/contact`, Slack webhook; honeypot + signed fill time + 5/hour per IP).
+  Deployed by the root `Dockerfile` / `railway.json` via `.github/workflows/deploy-site.yml`. ⚠ Its
+  rate limit reads `X-Forwarded-For` from the RIGHT (`TRUST_PROXY_HOPS`). The contact form is the
+  commercial-licence path. GA is consent-gated and lives in the landing only, never the SPA.
+  [apps/site/README.md](README.md).

@@ -453,3 +453,14 @@ field on the repo walk's query — the walk is shared by every workspace, and th
 charge Jira and tracker-less workspaces for a GitHub-only fact. The tracker worker reads it instead,
 kicked after each completed walk, for that workspace's PRs only (`nodes(ids:)`, ≤ 50 PRs and 1 point
 per batch, budget-pre-empted). See [TRACKERS.md](TRACKERS.md) § GitHub Issues.
+
+## Moved from CLAUDE.md (2026-10-26)
+
+Verbatim text taken out of CLAUDE.md to keep it under its size budget. CLAUDE.md keeps a
+shorter form of each rule; this is the full wording.
+
+### The CI-history backfill
+
+- **A completed FULL walk tail-runs the one-time CI-history backfill**
+  (`CI_HISTORY_BACKFILL=false` disables). ⚠ A PR's CI log is touched ONLY when provably its
+  first-observation snapshot.

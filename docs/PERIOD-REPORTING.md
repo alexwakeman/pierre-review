@@ -1018,3 +1018,21 @@ exactly one period. Pinned by `db/bot-analytics-window-bounds.test.ts`.
 - [DATA-MODEL.md](DATA-MODEL.md) — `repos.createdAt`, `workspaceReviewers` (the bot object),
   `ReviewerRole`.
 - [FRONTEND.md](FRONTEND.md) — `PeriodReportsPanel`.
+
+## Moved from CLAUDE.md (2026-10-26)
+
+Verbatim text taken out of CLAUDE.md to keep it under its size budget. CLAUDE.md keeps a
+shorter form of each rule; this is the full wording.
+
+### Period reporting
+
+- **Period reporting** ([docs/PERIOD-REPORTING.md](PERIOD-REPORTING.md)): metrics are core
+  (`db/period-metrics.ts`, `db/forecast.ts`, `db/actor-lanes.ts`); storage and narration are the
+  platform's. Every metric is **WINDOW-PURE** (two-sided `[fromMs, toMs)` on every column).
+  History is **COVERAGE-BIASED** (check contributing repos). **One row never mixes headline and
+  subset populations** (`rowFigures()`). `PERIOD_METRICS_SCHEMA_VERSION` is folded into the hash
+  (three spellings in lockstep); a metric is RENAMED, never redefined. A `_pct` metric joins
+  `PCT_METRIC_KEYS`. Grain (sprint vs calendar month) is a READING choice, never stored; refusals
+  key on grain first; the forecast refuses at month grain; month-to-date is live, un-stored,
+  un-billed. Every reading setting is PER WORKSPACE (`pro_workspace_settings`), no inheritance.
+  An explicit `toMs` reaches every fold of a windowed getter (half-open `lt`).

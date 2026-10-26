@@ -2307,3 +2307,42 @@ GET's `search` bucket running the identical fold.
 
 `ctx.queries.getWorkPlan` is optional on `ProHostQueries` — called `?.()`, absent ⇒
 `{enabled: false}`.
+
+## Moved from CLAUDE.md (2026-10-26)
+
+Verbatim text taken out of CLAUDE.md to keep it under its size budget. CLAUDE.md keeps a
+shorter form of each rule; this is the full wording.
+
+### Bound statically at boot
+
+- **Bound statically at boot**: `platform/context.ts` `bindPlatform` builds ONE context
+  (`platform/contract.ts` `ProContext`: db, host queries, GitHub helpers, `cheapComplete`,
+  scheduled jobs, retention/erasure/reporting-window registrars) and calls
+  `platform/index.ts` `registerPlatform`. Platform modules read the host ONLY through that ctx —
+  inject a new host dependency there, never import it directly. Tests pass a fake ctx.
+
+### The peer benchmark
+
+- **The peer benchmark** (`GET /api/pro/bot-benchmark[/placement]`) reads the BUNDLED fit at
+  `platform/data/benchmark/benchmark-fit.json` (copied by `build-release.mjs` — a miss is
+  production-only and silent). ⚠ **Refusals are the product** — never normalise one into a
+  distribution shape; staleness is recomputed per request; `?cells=` 400s over 24. ⚠ **Money lives
+  at WORKSPACE grain only**: a `?repoIds=`-NARROWED request builds no rollup, the rollup carries no
+  percentile of its own, `BotRoiPanel` shows cost only when `repoId == null`. ⚠ `$ per acted-on
+  thread` divides by `COST_WINDOW_DAYS` = `DAYS_PER_MONTH` (30.44, pinned by
+  `benchmark-roi-agreement.test.ts`) and REFUSES rather than falling back; `workspace_truncated`
+  outranks every other cost refusal; a cohort median of `0` is NO median.
+
+### Its own migrations
+
+- **Its own migrations**: `platform/migrations/*.sql`, run by `platform/migrate.ts` after core's,
+  filename-sorted, each once by NAME in `pro_migrations` (existing installs re-run nothing). NO
+  journal, NO `--> statement-breakpoint`. A failure now FAILS THE BOOT. Its tables keep their
+  `pro_*` names; typed access via `proSchemaFor()` (`platform/db.ts`).
+
+### Generation is cost-gated
+
+- **Generation is cost-gated**: the payload-hash cache (⚠ **zero `Date.now()`-derived fields** and
+  never hash a HYDRATED or derived value, or every judgement reads `stale` forever); a per-account
+  in-flight slot claimed SYNCHRONOUSLY; min-intervals armed on billed runs only. Two mounts of one
+  generation card share the MUTATION key.

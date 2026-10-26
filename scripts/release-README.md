@@ -41,8 +41,8 @@ Claude Review (a code review of any PR, follow-ups, a check against a user
 story you paste, and a chat about the review) and AI Fix are free. By default
 they use your local Claude Code login: if you are signed in to Claude Code,
 there is nothing to set up. An Anthropic API key is the alternative: set
-`ANTHROPIC_API_KEY`. Limn stores no key and charges nothing for it. Codex
-support is coming soon.
+`ANTHROPIC_API_KEY`. Limn stores no key and charges nothing for it. They can
+run on Codex instead (below).
 
 - **First use downloads the AI runtime, once (about 110 MB).** Press
   **Set up AI** in the app, or run `limn ai install`. It goes to
@@ -56,6 +56,27 @@ support is coming soon.
 - `LIMN_AI_USE_API_KEY=true` uses `ANTHROPIC_API_KEY` even when you are signed
   in to Claude Code.
 - `LIMN_AI_DISABLED=true` turns every AI feature off.
+
+### Codex instead of Claude
+
+Every AI feature can run on Codex, on your own ChatGPT plan. One provider runs
+everything at a time.
+
+```bash
+limn ai install codex   # adds the Codex CLI to the AI download
+limn ai login codex     # sign in with ChatGPT (add --device-auth on a headless machine)
+```
+
+Or press **Set up AI** and sign in from **Settings → AI**. Limn keeps its own
+Codex sign-in in `~/.limn/codex`; your `~/.codex` is not read or changed. Codex
+with an OpenAI API key is not available yet.
+
+- Pick the provider in **Settings → AI**, or set `LIMN_AI_PROVIDER` to
+  `claude`, `codex` or `auto` (the default: Claude when both are signed in,
+  Codex when only Codex is).
+- Each run is labelled with the provider and model that ran it.
+- `limn ai status` shows whether Codex is set up and signed in.
+- `limn ai logout codex` signs Limn's Codex out.
 
 ## Prerequisites
 
