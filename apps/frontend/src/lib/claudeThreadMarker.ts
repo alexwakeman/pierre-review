@@ -232,7 +232,7 @@ export function threadPillFor(
 }
 
 /**
- * The Threads tab's state chips count and filter by what the card SHOWS: an UNRESOLVED thread
+ * The Threads only view's state chips count and filter by what the card SHOWS: an UNRESOLVED thread
  * wearing Claude pills sits under "Claude judged", never under the derived state its card no longer
  * displays. A resolved thread stays under "Resolved" — its state pill still says so.
  */

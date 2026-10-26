@@ -381,7 +381,7 @@ export function useScopeResolveBotThreads() {
       threadIds: number[];
       workspaceId: number;
       // The PRs the selected threads belong to (the caller has the grouped list) — each gets
-      // its cached PR detail invalidated so the Threads tab reflects the resolves.
+      // its cached PR detail invalidated so the Changes tab reflects the resolves.
       prIds?: number[];
       onProgress?: (done: number, total: number, resolved: number, failed: number) => void;
       // Checked before each chunk — returning true halts the run cleanly between chunks.

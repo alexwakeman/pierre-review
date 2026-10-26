@@ -8,7 +8,7 @@
 // recording is a row the seeder wrote.
 
 const PENDING_TABS = ['my_turn', 'claude', 'fixing', 'review', 'threads', 'land', 'deps'];
-const PR_TABS = ['overview', 'threads', 'activity', 'changes', 'bot_activity', 'claude_review', 'ai_fix'];
+const PR_TABS = ['overview', 'activity', 'changes', 'bot_activity', 'claude_review', 'ai_fix'];
 const ROOT = 'https://acme.atlassian.net';
 const ident = (key) => `jira:${ROOT}#${key}`;
 const enc = encodeURIComponent;
@@ -226,8 +226,18 @@ export const STEPS = [
       },
     })),
   ),
+  // The Changes tab's "Threads only" view (the old Threads tab): its list reads the bot-dedup
+  // rollup, which the code view never asks for.
+  ...[...DEEP_PRS, ...MORE_PRS].map((id) => ({
+    name: `pr:${id}:changes-threads`,
+    run: async (h) => {
+      await h.go(`?view=pr-detail:${id}&prTab=changes`);
+      await h.clickRole('button', /^Threads only/);
+      await explore(h, { max: 10, scope: 'main' });
+    },
+  })),
   ...MORE_PRS.flatMap((id) =>
-    ['overview', 'threads', 'changes', 'claude_review'].map((t) => ({
+    ['overview', 'changes', 'claude_review'].map((t) => ({
       name: `pr:${id}:${t}`,
       run: (h) => h.go(`?view=pr-detail:${id}&prTab=${t}`),
     })),
@@ -314,7 +324,7 @@ export const STEPS = [
   { name: 'ws2:sprint', run: (h) => h.go('?view=sprint&workspace=2') },
   { name: 'ws2:chronology', run: (h) => h.go('?view=activity&workspace=2&activityRepo=insights&insightsTab=bottlenecks') },
   ...WEB_PRS.flatMap((id) =>
-    ['overview', 'threads', 'claude_review'].map((t) => ({
+    ['overview', 'changes', 'claude_review'].map((t) => ({
       name: `pr:${id}:${t}`,
       run: (h) => h.go(`?view=pr-detail:${id}&prTab=${t}&workspace=2`),
     })),

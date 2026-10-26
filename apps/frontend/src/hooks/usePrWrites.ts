@@ -35,7 +35,7 @@ export function useReplyToThread() {
   });
 }
 
-/** Shared by every resolve/unresolve, so the Threads tab can collapse a thread the moment ANY
+/** Shared by every resolve/unresolve, so the Threads only view can collapse a thread the moment ANY
  *  surface resolves it (lib/threadCollapse.ts), before the refetch lands. */
 export const RESOLVE_THREAD_MUTATION_KEY = ['resolve-thread'] as const;
 

@@ -23,7 +23,6 @@ export function ThreadCard({
   highlightCommentId,
   onOpenInPr,
   openInChanges,
-  onOpenInThreads,
 }: {
   thread: ThreadDetail;
   usersById: Map<number, User>;
@@ -33,7 +32,7 @@ export function ThreadCard({
   viewedSince?: string | null;
   // When set, ONLY this comment is marked "new" (the Activity feed highlights the
   // specific comment a card represents). When null/undefined, fall back to the
-  // viewedSince heuristic (the PR-detail Threads tab).
+  // viewedSince heuristic (the Changes tab's Threads only view).
   highlightCommentId?: number | null;
   // When provided, the whole card HEADER becomes a clickable region that deep-links this thread
   // inside its PR (search results + theme drill-downs) — a large, discoverable target. The
@@ -41,12 +40,11 @@ export function ThreadCard({
   // via a closest() guard. Inert (a plain header) when omitted.
   onOpenInPr?: () => void;
   /**
-   * "Show this thread's code in the Changes tab." Optional because only ONE of ThreadCard's seven
-   * mounts can honour it: `ChangesTab` has a single mount (PrDetail), so only the Threads-tab
-   * mount sits beside a Changes tab without BEING one. The single mount inside FileDiffView (the
-   * InlineThread pill's expansion — both the table and binary branches route through it) is
-   * already in the diff, and the Feed / search / attention / themes mounts have no Changes tab at
-   * all — they navigate INTO a PR instead (`onOpenInPr`).
+   * "Show in context" — this thread's code in the Changes tab. Optional because only ONE of
+   * ThreadCard's mounts can honour it: the Changes tab's Threads only view (`ThreadList`), which
+   * sits in the Changes tab without showing the code. The mount inside FileDiffView (the
+   * InlineThread pill's expansion) is already in the code, and the Feed / search / attention /
+   * themes mounts have no Changes tab at all — they navigate INTO a PR instead (`onOpenInPr`).
    *
    * `approximate` drives the wording, and the honesty matters: for a thread whose live `line` is
    * gone, the target is reconstructed from the anchor hunk and is the line in the commit the
@@ -55,13 +53,6 @@ export function ThreadCard({
    * when the file has left the changeset, so the control is absent rather than dead.
    */
   openInChanges?: { run: () => void; approximate: boolean; line: number | null } | null;
-  /**
-   * "Show this thread in the Threads tab" — the RETURN leg, supplied only by the inline mount
-   * inside the diff. Threads render inline in Changes already, so this is not about finding the
-   * conversation; it is about getting to the tab that has the filters, the resolve controls and
-   * the whole file's other threads.
-   */
-  onOpenInThreads?: () => void;
 }): JSX.Element {
   const anchorHunk = thread.comments[0]?.diffHunk ?? null;
   const lineLabel = thread.line != null ? `line ${thread.line}` : 'file-level';
@@ -158,9 +149,10 @@ export function ThreadCard({
           {lineLabel}
         </span>
         {thread.isOutdated && <span>· outdated</span>}
-        {/* THE JUMP INTO THE DIFF. A real <button> so ThreadCard's header-click guard
-            (`closest('a,button,…')`) swallows it — a <span onClick> here would ALSO fire
-            `onOpenInPr` and navigate away from the PR the reader is already in. */}
+        {/* "SHOW IN CONTEXT" — from the Changes tab's Threads only view back to the code: it
+            turns that view off, opens the file and scrolls to this thread's pill. A real <button>
+            so ThreadCard's header-click guard (`closest('a,button,…')`) swallows it — a
+            <span onClick> here would ALSO fire `onOpenInPr` and navigate away. */}
         {openInChanges != null && (
           <button
             type="button"
@@ -168,35 +160,21 @@ export function ThreadCard({
               e.stopPropagation();
               openInChanges.run();
             }}
-            className="shrink-0 rounded px-1 py-0.5 text-[10px] font-medium text-blue-500 hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-950/40"
+            className="shrink-0 rounded px-1 py-0.5 text-[11px] font-medium text-blue-600 hover:bg-blue-50 hover:text-blue-700 dark:text-blue-400 dark:hover:bg-blue-950/40"
             title={
               openInChanges.line == null
-                ? 'Show this file in the Changes tab — this thread’s line is no longer in the diff'
+                ? 'Show this file’s code. This thread’s line is no longer in the diff.'
                 : openInChanges.approximate
-                  ? `Show line ~${openInChanges.line} in the Changes tab (approximate: this thread’s anchor is outdated, so the line is reconstructed from the code it was written against)`
-                  : `Show line ${openInChanges.line} in the Changes tab`
+                  ? `Show line ~${openInChanges.line} in the code. The thread is outdated, so the line is worked out from the code it was written on.`
+                  : `Show line ${openInChanges.line} in the code`
             }
           >
             <ArrowIcon size={10} className="mr-0.5 inline-block align-[-0.1em]" />
             {openInChanges.line == null
-              ? 'File in Changes'
+              ? 'Show file'
               : openInChanges.approximate
-                ? 'In Changes ~'
-                : 'In Changes'}
-          </button>
-        )}
-        {onOpenInThreads != null && (
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              onOpenInThreads();
-            }}
-            className="shrink-0 rounded px-1 py-0.5 text-[10px] font-medium text-blue-500 hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-950/40"
-            title="Open this thread in the Threads tab"
-          >
-            <ArrowIcon size={10} className="mr-0.5 inline-block align-[-0.1em]" />
-            In Threads
+                ? 'Show in context ~'
+                : 'Show in context'}
           </button>
         )}
         <span className="ml-auto flex items-center">

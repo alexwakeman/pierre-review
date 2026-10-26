@@ -1261,7 +1261,7 @@ export async function persistPr(
           searchRows.push({
             kind: 'review_comment',
             refId: rcRow.id,
-            // Deep-link target: a review-comment hit opens the PR's Threads tab on this thread.
+            // Deep-link target: a review-comment hit opens the PR's Changes tab on this thread.
             threadId: threadRow.id,
             authorId: commenterId,
             body: rcBody,

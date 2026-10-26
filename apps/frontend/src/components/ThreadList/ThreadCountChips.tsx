@@ -21,7 +21,7 @@ export function rollupCounts(threads: ThreadDetail[]): Record<DerivedState, numb
 }
 
 /**
- * Every non-summary ML severity present in a thread — the ONE fold behind both the Threads tab's
+ * Every non-summary ML severity present in a thread — the ONE fold behind both the Threads only view's
  * severity pills and the per-PR BotTriageCard's nit split, so the two can never disagree. A
  * thread matches a severity when it CONTAINS a comment of it, not when its worst equals it
  * (filtering to "major" must surface the thread with one major among five nits).

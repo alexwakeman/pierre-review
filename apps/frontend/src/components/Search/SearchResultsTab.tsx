@@ -266,7 +266,7 @@ function SearchResultCard({
 }
 
 // A review-comment hit: the FULL thread (code anchor + every reply + reply/resolve controls). The
-// thread header title deep-links to the thread on the PR's Threads tab (resolved threads too, since
+// thread header title deep-links to the thread on the PR's Changes tab (resolved threads too, since
 // openSearchHit → selectThread clears the state-pill filter). Lazily fetches the thread by id.
 function ThreadHitCard({
   hit,

@@ -8,7 +8,7 @@ import { InfoButton } from './InfoModal.js';
 import { PendingClaudeReviewIcon } from './Icons.js';
 
 // "Check threads": a light Claude pass over ONLY the review threads that changed since their last
-// judgement. On the PR's Threads tab and beside the Claude Review tab's Review threads section;
+// judgement. On the PR's Changes tab and beside the Claude Review tab's Review threads section;
 // both read the ONE status query (hooks/useThreadCheck.ts). Gated like Claude Review: visible on
 // `me.ai.enabled`, and AiRunGate swaps the button for the setup/credential line when needed.
 

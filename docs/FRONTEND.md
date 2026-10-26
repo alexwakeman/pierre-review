@@ -429,7 +429,7 @@ expired SAML authorisation shows the reconnect banner, which now says `gh auth r
   on-click + the ⧉ button were removed; **feed isolation is reached from PrDetail's "Show in
   Activity feed" header button** (`FeedIcon`: `setRepoConsoleTab(repoId,'activity')`→`setActivityRepo`
   →`setFeedIsolatedPrId`→`showActivity`, order load-bearing). `bot-threads` rows open the PR's
-  Threads tab with the `likely_addressed` pill preset. **Repo-scoped chips show the repo name**
+  Changes tab, Threads only view, with the `likely_addressed` pill preset. **Repo-scoped chips show the repo name**
   (`PinnedTabsBar` `TabChip` reads the seed + `useRepos`). Each drill-down = a `TabKind` + key
   const + opener in `pinnedTabs.ts`, a transient read-not-consumed seed + `openXDetail()` action in
   `store/filters.ts` (`{fromActivity:true}` stamps the feed card to flash on a Back — the entry
@@ -621,7 +621,7 @@ Overview later does not jump. It adds no fetch of its own: it stays fresh throug
 `usePrLiveRefresh`'s `['pr', prId]` invalidation, and `useDetailCacheReconciler` now also
 invalidates `['pr', id]` (never its threads) when the most recently fetched timeline/open-PRs feed
 carries a different `ciStatus` and was fetched after the detail (`ciDetailOutdated`) — CI finishing
-never bumps `updatedAt`. Tabs (Overview / Threads /
+never bumps `updatedAt`. Tabs (Overview /
 Activity / Changes, + a presence-gated **Bot activity** + Claude Review / AI Fix, listed whenever
 `me.ai.enabled` — see **The agentic AI surfaces** below):
 - **Overview** — `ChecksTab.tsx`: CI/checks (each Actions check expands into the inline log
@@ -653,7 +653,7 @@ Activity / Changes, + a presence-gated **Bot activity** + Claude Review / AI Fix
   `blocked` PR only (the ranked candidate causes from `deriveMergeBlockers`, ordered by a computed
   certainty — proven first — that is deliberately NOT narrated: the PROVEN/INFERRED chip and the
   note under each row were removed, and only the ordering survives; the `unresolved_threads` row is
-  clickable through to the Threads tab via `onOpenThreads`; ⚠ its thread count is `!isResolved` and therefore INCLUDES
+  clickable through to the Changes tab's Threads only view via `onOpenThreads`; ⚠ its thread count is `!isResolved` and therefore INCLUDES
   `likely_addressed`, which is why the Bots chips inches away say "N need a look" rather than "N
   unresolved" — the full three-count table and the never-assert-a-cause rules are in
   **docs/MERGE-CI-TRUNK.md § Why a blocked PR is blocked**), **Reviewers** (all who
@@ -692,7 +692,10 @@ Activity / Changes, + a presence-gated **Bot activity** + Claude Review / AI Fix
   row** lists the checks + re-run control and opens only when there are checks to list
   (`checksRowVisible` is DELETED with the old `CiAnalysisCard`: why CI failed is the CI review's
   job now — docs/CLAUDE-REVIEW.md § CI review).
-- **Threads** — `ThreadList`/`ThreadView`: review threads grouped by file, **newest first**
+- **There is NO Threads tab** (removed 2026-10-26; a legacy `?prTab=threads` reads as `changes`).
+  What it held is the Changes tab's **Threads only** view (see *The sticky bar and the Threads
+  only view* under Changes); this bullet describes that list. `ThreadList`/`ThreadView`: review
+  threads grouped by file, **newest first**
   (files by most-recent thread; within a file by `createdAt` desc), with code anchors +
   new-comment highlights; each has a "Show" link. **Collapse is per THREAD, never per file**: a
   resolved thread is one line (line, author, first words, "Resolved") until clicked; every other
@@ -748,6 +751,38 @@ Activity / Changes, + a presence-gated **Bot activity** + Claude Review / AI Fix
   Inline review threads start OPEN unless resolved, and the reader's toggle is remembered per
   thread — see *Inline thread indicators* below.
   A **navigation rail** (`diff/FileTree.tsx`) sits to its left — see below.
+
+  **The sticky bar and the Threads only view.** The bar above the rail and the code (`Header` in
+  `ChangesTab.tsx`, `data-testid="changes-bar"`) is `sticky top-0 z-30` inside PrDetail's scroll
+  pane. Everything else that sticks in the tab pins BELOW it: ChangesTab measures the bar (a
+  callback ref + `ResizeObserver`, because each render branch mounts its own bar) and sets
+  `--diff-sticky-top` on its root; the rail takes it as an inline `top` (and subtracts it from its
+  measured max-height), each `FileDiffView` file header is `top-[var(--diff-sticky-top,0px)]`
+  with a matching `scroll-mt` on the block, and `ThreadList`'s filter header does the same. Unset
+  (the AI Fix tab) it is 0. ⚠ **The bar carries NO file delta** (no file count, no +/− lines):
+  the PR header above every tab states it. It holds the **Threads only** toggle (`aria-pressed`,
+  with the PR's thread count, absent on a PR with no threads) and the 4-state mix, then Wrap (code
+  view only) and the GitHub link.
+  - **Threads only** swaps the code for `ThreadList` (built by PrDetail's `renderThreads`, so the
+    guarded `threadStateFilter` / severity / vendor filters, the full `BotTriageCard`, Check
+    threads, reply, resolve and Claude's judgements all come with it). The state lives in
+    PrDetail (`changesThreadsOnly`, LOCAL per PR pane) because deep links switch it: the
+    Overview's Bots chip and Blocked row, a Bots-pane state-pill preset, and a selected thread
+    whose file has left the diff. **The rail stays**: there a click lists that file's threads
+    (`visibleThreadIds`, rename-aware through the same `threadsByPath`; a second click or "All
+    files" lists every file) instead of scrolling the code. Resolved threads stay one line.
+  - ⚠ **THE CODE STAYS MOUNTED, hidden, under the Threads only view.** Unmounting it dropped every
+    file's expand state and each block's `consumedFocus`, so switching the view off by hand
+    re-ran the LAST reveal (the focus target is sticky) and teleported the reader to an old line.
+  - **"Show in context"** on each card (ThreadCard's `openInChanges`, from `openInChangesFor`)
+    calls `openInChanges`, which switches the view OFF and arms a NEW focus in one go: the code
+    shows, the file opens, the pill scrolls into view, opens and rings. An outdated thread whose
+    live line is gone gets "Show in context ~" (the reconstructed line); a thread whose file left
+    the diff has no control, and stays listed. Review comments with no file are not threads (PR
+    comments live on the PR's comments list).
+  - ⚠ **A RESOLVE COLLAPSES THE THREAD IN BOTH VIEWS, once GitHub said yes**: ThreadList through
+    `lib/threadCollapse.ts`, the inline pills through ChangesTab's `resolveBus` (*Inline thread
+    indicators* below). Both read the one `useResolveEvents` hook.
 - **Bot activity** (`PrBotBehaviourTab.tsx`, EXPERIMENTAL, CORE) — shown only when a bot touched
   the PR (`hasBots`: `reviews.automatedKind` or a bot thread-opener/commenter). Per bot: its on-PR
   touch timeline + TTFR/follow-ups vs the bot's OWN typical (`/api/prs/:id/bot-behaviour`). A ⚠
@@ -986,11 +1021,11 @@ bounded by resolved staying shut, a one-click Hide remembered per thread, the fi
 lock files, which start collapsed whatever they hold. There is deliberately NO count cap (an
 invisible threshold is the rail's lesson). MEASURED on the dev DB's open PRs (2026-09-24): 2,777
 of 4,127 threads are unresolved; of 581 PRs with threads, 361 carry 1–5, 23 carry more than 20,
-and the most is 532 (29 files, one bot comment each). The Threads tab already mounts a full card
+and the most is 532 (29 files, one bot comment each). The Threads only view already mounts a full card
 for every one of those (`FileGroup` opens any file holding an unresolved thread), so this default
 is bounded by a screen that already exists. An open pill fetches nothing of its own: ThreadCard's
 ML and annotation queries are one per PR, and its reaction bars batch per tick (`useReactions`, 60
-targets a request, a cache shared with the Threads tab — 532 threads is 9 lookups).
+targets a request, a cache shared with the Threads only view — 532 threads is 9 lookups).
 
 - ⚠ **THE OPEN STATE IS THE READER'S, REMEMBERED PER THREAD ID — AND ONLY THEIR DECISIONS ARE.**
   - How it works: every open/close (the pill click, a thread reveal, the posted-comment
@@ -1000,12 +1035,20 @@ targets a request, a cache shared with the Threads tab — 532 threads is 9 look
     thread's CURRENT state.
   - A pill REMOUNTS far more often than it looks: collapsing and re-expanding its file; the Wrap
     toggle (`DiffTable`/`FullWidthCell` change the tree's shape); a push moving the anchor row or
-    dropping the thread to file grain; and the Changes → Threads → Changes round trip, which
-    remounts ChangesTab. Without the memory, each of those undid the reader's choice.
+    dropping the thread to file grain; and a tab switch, which remounts ChangesTab. Without the
+    memory, each of those undid the reader's choice. (The Threads only view does NOT remount the
+    code: it stays mounted, hidden — see *The Threads only view* below.)
   - A MOUNTED pill never moves on its own (`useState` latches), so the ~5s poll resolving a
     thread under the reader does not snap it shut.
-  - The default is never recorded, so a thread resolved elsewhere (a bulk resolve in Threads)
-    comes back SHUT.
+  - The default is never recorded, so a thread resolved elsewhere (a bulk resolve) comes back
+    SHUT.
+  - ⚠ **A RESOLVE IS A DECISION TOO, made by GitHub's yes.** ChangesTab holds ONE
+    `useResolveEvents` subscription (`hooks/useResolveEvents.ts`, the successful writes under
+    `RESOLVE_THREAD_MUTATION_KEY`, the same hook `ThreadList` uses): each event writes
+    `openMemory.set(id, !resolved)` FIRST, so a pill that is not mounted comes back shut, then
+    fans out on `DiffThreadContext.resolveBus` (a per-thread listener map created once per mount,
+    stable for the memo) to the one mounted pill, which calls `decide(!resolved)`. An unresolve
+    re-opens. Never a context value that changes per resolve: that would repaint every row.
   - ⚠ It lives in PrDetail, not ChangesTab (the round trip), and not the store: the store is not
     keyed by PR (the `threadStateFilter` landmine), and persistence and reset share one list. Both
     PrDetail mounts are keyed by `prId`, so it lives exactly as long as this PR's pane — no store
@@ -1018,15 +1061,14 @@ targets a request, a cache shared with the Threads tab — 532 threads is 9 look
   unresolved threads started open, every open ThreadCard. A new unstable prop from ChangesTab
   switches the guard off silently. Cost accepted: a shut pill's "3h ago" refreshes on the next
   data change, not on the poll tick.
-  - ⚠ **A caller's callback must not reach `threadCtx` by identity.** PrDetail's
-    `openThreadInThreads` closed over the whole `pr`, and every `['pr', prId]` refetch that changes
-    ANY field (a CI check finishing, a merge-state move) returns a new `pr` even when `pr.threads`
-    keeps its identity. So the memo missed on exactly the ticks that carry data: MEASURED
-    1.3–1.5s of long tasks on a 532-thread PR, for a change that touched nothing in the diff. Two
-    fixes, each enough alone: the callback keys on `prId`, and ChangesTab reads `onOpenThread`
-    through a ref (only whether one EXISTS is a dependency). `test/inlineThreadOpen.test.ts` pins
-    `threadCtx`'s dependencies as an ALLOW-list from source, so a new one fails a test instead of
-    getting slow.
+  - ⚠ **A caller's callback must not reach `threadCtx` by identity.** The old "In Threads"
+    callback closed over the whole `pr`, and every `['pr', prId]` refetch that changes ANY field
+    (a CI check finishing, a merge-state move) returns a new `pr` even when `pr.threads` keeps its
+    identity. So the memo missed on exactly the ticks that carry data: MEASURED 1.3–1.5s of long
+    tasks on a 532-thread PR, for a change that touched nothing in the diff. That callback is gone
+    with the Threads tab, and no caller callback reaches `threadCtx` now.
+    `test/inlineThreadOpen.test.ts` pins `threadCtx`'s dependencies as an ALLOW-list from source,
+    so a new one fails a test instead of getting slow.
 
 - **ONE rename-aware fold, built once per PR.** `indexThreadsByPath` (`lib/diff.ts`, pinned by
   `test/threadsByPath.test.ts`) buckets threads by the **RENDERED** file path and re-homes a
@@ -1036,7 +1078,7 @@ targets a request, a cache shared with the Threads tab — 532 threads is 9 look
   COPY, both paths are in the diff and the thread belongs to the file that literally has it). It
   is a memoized `Map`, never a per-row `.filter()`.
 - **Anchoring is a three-rung ladder** (`anchorRowFor`, shared with `PrDetail.openInChangesFor`
-  so the pill's position and the "In Changes ~" scroll target agree): a live `thread.line` → the
+  so the pill's position and the "Show in context ~" scroll target agree): a live `thread.line` → the
   last matching row, RIGHT side preferred; else the anchor hunk reconstructed
   (`anchorLineFromHunk` + `lineRowIndex`, matched honestly on its own side) and marked
   **approximate**; else `null`, and the pill renders at FILE grain above the diff with an
@@ -1089,16 +1131,26 @@ targets a request, a cache shared with the Threads tab — 532 threads is 9 look
   chips + counts are pinned as ONE `ml-auto` group so narrow widths are absorbed by name
   truncation rather than column drift.
 
-#### Thread ↔ Changes navigation (both directions)
+#### Every thread link lands on Changes (`showThread`), and the thread → code ladder
 
-**Thread → Changes.** `PrDetail.openInChangesFor(thread)` resolves the jump and hands `ThreadCard`
-an `openInChanges` object; the control is a real `<button>` in the card header. Four rungs, in
-order:
+**ONE landing for a thread, `PrDetail.showThread(threadId)`.** A Pending card, My Turn, a Pending
+comment card (`prChangesFocus.threadId`), the Feed, a timeline marker, a search hit, a `?thread=`
+link and the Claude Review tab's Review threads rows all end there: the Changes tab with the code,
+scrolled to the thread's pill, opened and ringed — never a Threads tab (there is none). Most of
+them arrive as `selectThread(prId, id)`; PrDetail's selected-thread effect waits for the PR to
+load and shows each selection ONCE (`handledThreadRef`, so a refetch never yanks the reader back).
+When the ladder below returns null (the file has left the diff) or the pane does not hold the
+thread, it lands on the **Threads only** view with the thread selected, and `ThreadList` scrolls to
+it (`block: 'center'`, clear of the two sticky headers).
+
+**Thread → code.** `PrDetail.openInChangesFor(thread)` resolves the jump and hands `ThreadCard` an
+`openInChanges` object ("Show in context"); the control is a real `<button>` in the card header.
+Four rungs, in order:
 
 1. `thread.line` is live → jump to it on the RIGHT side. Always available for a non-outdated
    thread (measured: 8,844/8,844 have one).
 2. the live line is gone → reconstruct it with **`anchorLineFromHunk`** (`lib/diff.ts`) and label
-   the jump **approximate** (`⤷ In Changes ~`). `review_threads` stores exactly ONE positional
+   the jump **approximate** ("Show in context ~"). `review_threads` stores exactly ONE positional
    column — no `original_line`, no `start_line`, no `diff_side`, and the sync never asks GitHub for
    them — so for the 5,572 of 6,195 outdated threads with a NULL line this is the only line data
    that exists. It works because GitHub's `diffHunk` convention ends at the commented line (which
@@ -1116,7 +1168,7 @@ order:
 `goToTab('changes')` + `setChangesFocus` — `goToTab` CLEARS the focus, and `openInChanges` is the
 one deliberate exception that orders the two correctly.
 
-**Changes → Threads.** `ChangesTab` now passes **every** thread into `DiffThreadContext`, not
+**Every thread is in the code.** `ChangesTab` passes **every** thread into `DiffThreadContext`, not
 `.filter((t) => !t.isResolved)`. That filter hid 40.3% of threads: a diff line carrying a settled
 discussion looked undiscussed, and the round trip was one-way for exactly those. Resolved threads
 start as a **shut pill** (`✓`, dimmed) so the diff isn't buried under closed conversations — the
@@ -1129,26 +1181,21 @@ threads joined the array: the amber `N 💬` header badge still counts UNRESOLVE
 separate grey `✓N`), and the auto-expand heuristic still keys on unresolved, so a file whose
 conversations are all settled no longer forces itself open.
 
-The return leg is `ThreadCard.onOpenInThreads`, supplied only by the inline mount. ⚠ It calls
-`goToTab('threads')` **itself** rather than relying on the `selectedThreadId` effect: that effect
-keys on the VALUE, so re-selecting an already-selected thread — precisely what happens when the
-reader arrived in Changes FROM that thread — would not re-fire. It still calls `selectThread`,
-which also clears the state/severity pill presets that could otherwise filter the target out.
+The old return leg ("In Threads", `ThreadCard.onOpenInThreads`) is DELETED with the tab.
 
-⚠ Both new props are **optional**, because only ONE of `ThreadCard`'s **seven** mounts can honour
-each. `ChangesTab` has a single mount (PrDetail), so only the Threads-tab mount sits beside a
-Changes tab without BEING one; the single mount inside `FileDiffView` (the `InlineThread` pill's
-expansion — both the table and binary branches route through it) is already in the diff, and
-the Feed / search / attention / themes mounts have no Changes tab at all (they use `onOpenInPr`).
-Both controls are real `<button>`s so `ThreadCard`'s header-click guard
-(`closest('a,button,…')`) swallows them — a `<span onClick>` would ALSO fire `onOpenInPr` and
-navigate away from the PR the reader is already in.
+⚠ `openInChanges` is **optional**, because only ONE of `ThreadCard`'s mounts can honour it: the
+Threads only view's `ThreadList`, which sits in the Changes tab without showing the code. The
+mount inside `FileDiffView` (the `InlineThread` pill's expansion — both the table and binary
+branches route through it) is already in the code, and the Feed / search / attention / themes
+mounts have no Changes tab at all (they use `onOpenInPr`). The control is a real `<button>` so
+`ThreadCard`'s header-click guard (`closest('a,button,…')`) swallows it — a `<span onClick>` would
+ALSO fire `onOpenInPr` and navigate away from the PR the reader is already in.
 
 #### Emoji reactions (`ReactionBar` + `hooks/useReactions.ts`)
 
 CORE, and **nothing is stored or synced** — no column, no migration, no sync step; state is
 read live from GitHub. Exactly **two mounts**: `ThreadView/CommentBlock` (which reaches all seven
-`ThreadCard` mount sites at once — Threads tab, Feed, search results, attention cards, the
+`ThreadCard` mount sites at once — the Threads only view, Feed, search results, attention cards, the
 themes drill-down, the diff's inline pill) and PrDetail's conversation list (PR comments + review bodies,
 the kind riding the same `isComment` discriminator as the ML badge). There is deliberately **no
 thread-level bar** (`PullRequestReviewThread` is not in GitHub's `Reactable` interface) and no
@@ -1463,8 +1510,8 @@ reappears.
   `threadAssessmentCounts` (zeros dropped). Order and colours are pure helpers in
   `lib/claudeReviewFollowUp.ts` (`partitionThreads`, `THREAD_*_CLASS`): shared `isThreadToFix`
   first, then other open ones, then not checked; addressed / not-valid rows (`isThreadSettled`)
-  behind "Show N more" — a to-fix row is never hidden. A not-valid comment's addressed pill is grey (`threadAddressedClass`), never red. path:line opens the thread in the Threads tab
-  (PrDetail's `openThreadInThreads`); the GitHub link goes through `safeExternalUrl`; every comment
+  behind "Show N more" — a to-fix row is never hidden. A not-valid comment's addressed pill is grey (`threadAddressedClass`), never red. path:line opens the thread in the Changes tab, scrolled to it
+  (PrDetail's `showThread`: the Changes tab, scrolled to the thread); the GitHub link goes through `safeExternalUrl`; every comment
   and Claude string is plain text. `draftReply` offers Copy only — no route posts it.
 
 ### The AI spend budget on screen (`components/AiBudget.tsx`, `lib/aiBudget.ts`)
@@ -1575,14 +1622,14 @@ but broken deep links).
   issues" segment reads the latest Claude review's STORED thread judgements
   (`useClaudeThreadJudgements`; the card never runs one) — without them it renders
   "X awaiting a look" from the derived-state rollup in that slot instead. Mounted
-  TWICE (full atop the Threads tab, compact in the Overview attention area); renders ONLY at
+  TWICE (full atop the Changes tab's Threads only view, compact in the Overview attention area); renders ONLY at
   ≥5 union-bot review comments and issues NO extra query below the threshold (the
   ThreadAssessment 60-empty-boxes lesson) — everything it reads is already shared (the
   workspace-reviewer listing, the per-PR ML label index, the batched thread-judgement read — the
   card can never bill). ⚠ Bot membership is the CLIENT MIRROR of the server's
   UNION set (workspace judgement wins both ways, the wire `User.isBot` fallback) — deliberately NOT the
   legacy login-string classification PrDetail's bot chips still use; and every figure comes from
-  the SAME folds the Threads tab uses (`rollupCounts`/`threadSeverities`/
+  the SAME folds the Threads only view uses (`rollupCounts`/`threadSeverities`/
   `resolvableBotThreadIds`) restricted to the bot subset, so card and tab cannot disagree.
 - **Bots view is `ROI ('roi' = Measure) | Themes | Benchmark | Classification`** (`'settings'` LEFT
   the union long ago; `'advisor'` LEFT 2026-10-26 with the Bot Tuning Advisor; `'classification'`
@@ -3780,7 +3827,7 @@ need a className branch, not a var in the hex table.
 
 ## ML severity badges + the Bots severity rollup
 
-Bot comments carry a severity/category badge, threads a worst-severity rollup, the Threads tab a
+Bot comments carry a severity/category badge, threads a worst-severity rollup, the Threads only view a
 severity filter, and the Bots ROI tab a "What the bots are flagging" block. All of it reads ONE
 per-PR query (`['ml-labels', prId]`, `staleTime: Infinity`) — the badge never fetches, and a
 target with no label renders nothing. Gated on `MeResponse.mlSeverity` (a TOP-LEVEL field). `threadSeverityFilter` is a global store field and carries the same
@@ -3790,7 +3837,9 @@ target with no label renders nothing. Gated on `MeResponse.mlSeverity` (a TOP-LE
 
 - **ONE FEED, TWO SIDES, NEVER MIXED.** A segmented `Humans | Bots` control (`feedAuthors`,
   transient, URL-silent, default `'humans'`) sends `?authors=humans|bots`. The server splits per
-  ITEM by actor against `hiddenBotUserIds` (a manual "human" winning both ways), before the page
+  ITEM by actor against `hiddenBotUserIds` — the UNION `users.isBot` ∪ `github_type='Bot'` ∪
+  vendor logins ∪ the workspace's automated reviewers (a manual "human" winning both ways; the
+  Timeline's default bot hiding reads the same union) — before the page
   cap — so a thread a person and a bot both replied on shows on BOTH sides, and an actor-less row
   is a person's. The old Bots-rail bot feed (`botsMode`, `botsOnly`, `botWindowDays`, vendor
   pills) is DELETED; Bot-only-PRs "Show in feed" now opens the Feed's Bots side with the PR

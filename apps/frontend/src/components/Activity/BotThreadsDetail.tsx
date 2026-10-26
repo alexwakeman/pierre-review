@@ -33,7 +33,7 @@ import { SynthesisCard } from './SynthesisCard.js';
 // the TOP. PRs are DESELECTED by default; per-PR checkboxes + "Select all" (across all pages) /
 // "Clear" drive the batch. Selecting all resolves the ENTIRE backlog (uncapped) — chunked into
 // sequential POSTs with a Stop control. The server RE-DERIVES eligibility (the heuristic only
-// LOOKS addressed — a later commit touched the file). Clicking a row opens that PR's Threads tab
+// LOOKS addressed — a later commit touched the file). Clicking a row opens that PR's Changes tab (Threads only)
 // with the 'likely_addressed' pill preselected — inspect before resolving.
 //
 // ⚠ THE LISTING AND THE RESOLVE SEND THE SAME `workspaceId`, and that is the whole design. Its
@@ -523,7 +523,8 @@ export function BotThreadsDetail(): JSX.Element {
           )}
 
           {/* Sortable per-PR table — a checkbox to include, then a clickable body opening the PR's
-              Threads tab (likely-addressed pill preset). No per-thread enumeration. */}
+              threads (the Changes tab's Threads only view, likely-addressed pill preset). No
+              per-thread enumeration. */}
           {filtered.length > 0 && (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[940px] border-collapse text-sm">
@@ -558,7 +559,7 @@ export function BotThreadsDetail(): JSX.Element {
                     <tr
                       key={g.prId}
                       onClick={() => openPr(g)}
-                      title="Open this PR's Threads tab (likely-addressed threads)"
+                      title="Open this PR's likely-addressed threads"
                       className={`cursor-pointer border-t border-gray-100 align-top hover:bg-gray-50/70 dark:border-gray-800/60 dark:hover:bg-gray-900/40 ${
                         isSel ? 'bg-sky-50/60 dark:bg-sky-950/20' : ''
                       }`}

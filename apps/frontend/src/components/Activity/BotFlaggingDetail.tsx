@@ -474,7 +474,7 @@ export function BotFlaggingDetail(): JSX.Element {
     (ref: BotFlaggedPrRef, threadId: number): void => {
       openPrDetailTab(metaOf(ref), { fromActivity: true });
       // Deep-link the thread inside the PR: `selectThread` clears any state-pill preset (so a
-      // resolved thread is still reachable) and PrDetail forces its Threads tab and scrolls to it.
+      // resolved thread is still reachable) and PrDetail forces its Changes tab and scrolls to it.
       selectThread(ref.prId, threadId);
     },
     [metaOf, openPrDetailTab, selectThread],

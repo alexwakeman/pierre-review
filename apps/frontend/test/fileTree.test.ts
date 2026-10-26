@@ -179,6 +179,7 @@ describe('the Changes tab rail has no file-count threshold', () => {
     // Not a nicety: it is the one absence the reader can explain to themselves, and removing it
     // would put a 224px rail beside a diff on a phone. If this ever goes, it is a decision, not
     // a tidy-up — so it is pinned rather than left to the class string.
-    expect(SRC).toMatch(/className="sticky top-0 z-20 hidden shrink-0 self-start md:flex"/);
+    // `top` is inline (the measured height of the sticky bar the rail pins under).
+    expect(SRC).toMatch(/className="sticky z-20 hidden shrink-0 self-start md:flex"/);
   });
 });

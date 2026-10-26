@@ -3,7 +3,7 @@
 // A resolved thread shows as one line until the reader opens it; every other state stays open.
 // Resolving used to leave the thread wide open: the refetch had not landed yet, and the thread
 // you just resolved is usually the SELECTED one, which was forced open for ever. Now a successful
-// resolve (from ANY surface — the Threads tab, the Claude Review tab, a Pending card; they share
+// resolve (from ANY surface — the Threads only view, the Claude Review tab, a Pending card; they share
 // `RESOLVE_THREAD_MUTATION_KEY`) collapses it at once:
 //   - the thread counts as resolved locally until the refetch agrees (`overrides`),
 //   - it leaves the reader's opened set,

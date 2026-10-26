@@ -320,7 +320,7 @@ attaches stored labels to a handful of capped comment rows — same coercions, o
   and the better one (Accuracy above). It is a display of the vendor's claim, never a correction
   of ours.
 - **`CommentBlock`** — the per-comment badge on a review-thread comment. Covers **all eight
-  `ThreadCard` mount sites** for free (Threads tab, feed inline threads, attention cards, theme
+  `ThreadCard` mount sites** for free (the Changes tab, feed inline threads, attention cards, theme
   drill-down, search results, both diff-view mounts).
 - **`ThreadCard` header** — the thread's **worst non-summary severity**, so a conversation can
   be triaged collapsed. Summaries are excluded: a vendor walkthrough scored `major` would
@@ -328,7 +328,7 @@ attaches stored labels to a handful of capped comment rows — same coercions, o
 - **`PrDetail` conversation** — PR comments (`pr_comment`) and review bodies (`review`) in one
   list. The lookup **must** key on `it.kind`: those are separate id spaces on separate tables,
   and a badge that assumed one kind would find a different row's label and be confidently wrong.
-- **`ThreadList` severity pills** — filter the Threads tab. A thread matches when **any** of its
+- **`ThreadList` severity pills** — filter the Changes tab's Threads only view. A thread matches when **any** of its
   non-summary comments carries a selected severity (not when its *worst* equals it — filtering
   to "major" should surface the thread with one major among five nits). The row hides itself
   entirely when nothing on the PR is labelled.

@@ -269,8 +269,7 @@ labelled **"Reports"** (store/URL value stays `'insights'`). The only gates are
 Read [docs/FRONTEND.md](docs/FRONTEND.md) before touching any of:
 
 - **Bots are HIDDEN by default on the Timeline; the Feed is People OR Bots, never mixed**, both by
-  the UNION `hiddenBotUserIds` (`users.isBot` ∪ `github_type='Bot'` ∪ vendor logins ∪ the
-  workspace's automated reviewers; a manual "human" judgement wins BOTH directions). ⚠
+  the UNION `hiddenBotUserIds` (a manual "human" judgement wins BOTH directions). ⚠
   `useSearchTimeline` / `rosterTimelineSearch` always send `excludeBots=false`. A PR Focus tab
   filters CLIENT-SIDE (`Timeline/isolateFilter.ts`); ⚠ no filter in `buildTimelineSearch`'s `prIds`
   branch, and never idle the board's `useTimeline()` in Focus.
@@ -314,13 +313,14 @@ Read [docs/FRONTEND.md](docs/FRONTEND.md) before touching any of:
 - **Visible sub-tabs are DERIVED, never written back** (`effectiveTab`s) — a corrective `set…`
   permanently forgets the choice.
 - **BLAST RADIUS is ONE resolver, `blastRadius()`** (shared `blast-radius.ts`); the wire carries
-  SIGNALS, never a level. ⚠ `truncated` forbids "low" AND "medium"; `hubDegree: null` is "no
-  reading", NEVER 0; comments-/formatting-only is CAPPED at Medium; `contentKind: null` never
-  demotes. Do not move the level onto sync. ([docs/BLAST-RADIUS.md](docs/BLAST-RADIUS.md))
+  SIGNALS, never a level, and the level never moves onto sync. Its unknown-is-not-zero rules:
+  [docs/BLAST-RADIUS.md](docs/BLAST-RADIUS.md).
 - **Timeline vertical scroll is GATED** — every programmatic scroll goes through
   `setVisScrollTop` and claims the gate; copy `centerShowTarget`.
-- `threadStateFilter` is global — PrDetail applies it only when `selectedPrId === prId`.
-  `UserName`'s tree SHAPE must not depend on popover-open state.
+- **THERE IS NO THREADS TAB.** Threads live in Changes: inline pills, or the sticky bar's
+  "Threads only" view; every thread link lands through PrDetail `showThread`. The fold is
+  RENAME-AWARE (`indexThreadsByPath`); `threadStateFilter` is global — applied only when
+  `selectedPrId === prId`. `UserName`'s tree SHAPE must not depend on popover-open state.
 - **EVERY ICON IS A COMPONENT IN `components/Icons.tsx`** (exception: `FileTypeIcons.tsx`); no
   icon emoji/library. `CaretIcon` = menu trigger, `ChevronIcon` = expand/collapse.
 - **The AI surface has EIGHT `--ai-*` tokens** with SPACE-separated channels; surviving
@@ -329,13 +329,9 @@ Read [docs/FRONTEND.md](docs/FRONTEND.md) before touching any of:
   `AiRunGate kind=…`** (`components/AiSetup.tsx`), agentic and one-shot alike. Never credits: on an
   API key a run shows US$; on a subscription its share of the week, never US$ — always through ONE
   formatter, `useRunCostText()` (`lib/aiBudget.ts` `runCostText`).
-- **The Changes tab's thread fold is RENAME-AWARE** (`indexThreadsByPath`, built once per PR).
-- **Sync-round state** (`syncRound` + `managerOpen`) has ONE driver, `SyncStatus`; the signal
-  mailbox is an ARRAY; an open round's empty `scopeIds` is the all-repos sentinel.
-- **ONE header toast strip** (`components/HeaderToasts.tsx`) — never a second strip or a `fixed`
-  toast; cards expand over the page, never grow the header.
-- **Reactions are fetched ON DEMAND, NEVER STORED**, batched into one `POST
-  /api/reactions/lookup`; `undefined` renders nothing.
+- **Sync-round state has ONE driver, `SyncStatus`; there is ONE header toast strip,
+  `HeaderToasts`** (never a second strip or a `fixed` toast). Both: docs/FRONTEND.md.
+- **Reactions are fetched ON DEMAND (one batched lookup), NEVER STORED.**
 
 ---
 

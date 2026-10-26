@@ -1518,7 +1518,7 @@ export function FeedView({
 // tab, which fetches its own ~90-day window, so there's no "not on the timeline" dead-end.)
 
 // The full threaded conversation for a review-thread feed card, rendered inline
-// (expand-in-place) exactly as the PR-detail Threads tab renders it — code anchor,
+// (expand-in-place) exactly as the Changes tab's Threads only view renders it — code anchor,
 // every reply, and the inline Reply composer + Resolve button (ThreadCard). Fetched
 // on demand by thread id; comment authors resolve from the global roster so every
 // avatar/name renders even when the author isn't on the current feed page.
@@ -2172,7 +2172,7 @@ function FeedRowImpl({
         )}
 
         {/* A review-thread card shows the full conversation inline (reply + resolve,
-            exactly like the Threads tab), with the comment this card represents
+            exactly like the Changes tab's threads), with the comment this card represents
             highlighted new. Stop propagation so interacting never opens the tab, and
             reset the cursor so the thread body doesn't inherit the card's pointer. */}
         {isThreadCard && (

@@ -117,28 +117,17 @@ describe('FileDiffView memo guard', () => {
 
   it("ChangesTab's threadCtx depends only on data and stable-by-construction values", () => {
     // Deliberately an ALLOW-list: a new dependency must be argued stable, then added here.
-    // `onOpenThread` (the caller's callback) is read through a ref precisely so it is NOT here.
+    // No caller callback reaches it at all now (the old "In Threads" return leg is gone with the
+    // Threads tab); `resolveBus` is created once per mount (`useState`), stable by construction.
     expect(depsOf(read('ChangesTab.tsx'), 'threadCtx').sort()).toEqual(
-      [
-        'canOpenThread',
-        'openThread',
-        'pr.githubUrl',
-        'threadOpenMemory',
-        'threadsByPath',
-        'usersById',
-      ].sort(),
+      ['pr.githubUrl', 'resolveBus', 'threadOpenMemory', 'threadsByPath', 'usersById'].sort(),
     );
   });
 
   it("ChangesTab's other memo'd props key on stable values", () => {
     const src = read('ChangesTab.tsx');
     expect(depsOf(src, 'commenting')).toEqual(['pr.id']);
-    expect(depsOf(src, 'openThread')).toEqual([]);
-  });
-
-  it("PrDetail's openThreadInThreads keys on the id, never the whole `pr` object", () => {
-    const deps = depsOf(read('PrDetail.tsx'), 'openThreadInThreads');
-    expect(deps).not.toContain('pr');
-    expect(deps).toContain('prId');
+    // The resolve bus is a lazy `useState` initialiser, never rebuilt on a render.
+    expect(src).toMatch(/const \[resolveBus\] = useState\(createThreadResolveBus\);/);
   });
 });

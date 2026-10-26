@@ -204,7 +204,7 @@ shared at runtime so `sync/bot-detection.ts` keeps a **LOCAL copy** (folded into
 kept in lockstep by `bot-detection.test.ts`. Verified logins (2026-07); coding agents (`sweep-ai`,
 `copilot-swe-agent`) + dependency bots (`dependabot`/`renovate`/`snyk`) are deliberately EXCLUDED —
 still `isBot`, just not *review* bots. **Surfaces:** a PrDetail "Bots" chip ("CodeRabbit · 12 · 3
-unresolved", `ChecksTab`) that filters the Threads tab to that vendor (`store.threadBotFilter`); a
+unresolved", `ChecksTab`) that opens the Changes tab's Threads only view filtered to that vendor (`store.threadBotFilter`); a
 Feed **Humans | Bots** toggle (`store.feedAuthors`, default humans, never mixed; server-side via
 the feed route's `authors`, union bot definition) + per-row vendor tag (`FeedView`); a **core
 per-repo acted-on stat** (`ActivityRepoStats.botThreads/botThreadsActedOn` computed in `getActivity`

@@ -397,7 +397,7 @@ export default function App(): JSX.Element {
               key={prDetailId}
               prId={prDetailId}
               // A feed thread click opens this tab AND selects the thread — deep-link the
-              // Threads tab to it (only when the selection is for THIS PR).
+              // Changes tab's threads to it (only when the selection is for THIS PR).
               selectedThreadId={selectedPrId === prDetailId ? selectedThreadId : null}
               placement="fullscreen"
             />

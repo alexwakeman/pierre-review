@@ -1116,7 +1116,7 @@ CODE, not by prompt:
 
 ### The judgement on the thread cards
 
-Wherever a thread wears a state pill — the PR's Threads tab and every `ThreadCard` (Feed, Pending
+Wherever a thread wears a state pill — the Changes tab's Threads only view and every `ThreadCard` (Feed, Pending
 expansions), the Timeline marker popover, the inline thread in the Changes diff — the LATEST judged
 run's verdict REPLACES the derived-state pill AND the "Likely addressed" confidence marker with ONE
 `--ai-*` marker: "Claude: addressed" / "partly addressed" / "not addressed" / "not valid" / "unsure"
@@ -1134,7 +1134,7 @@ non-skip run with `thread_assessments`, with any later Check threads run folded 
 FOLD above; the response adds `checkId`, and `reviewId` is null for a check-only PR); a run in
 flight, failed or skipped leaves the previous judgements standing. Each judgement now carries
 `reason` (one line) and `resolved`; the SPA's two pills (validity + state) read them. The removed Haiku "addressed" check panel was an explicit, separate output and is
-NOT replaced. ⚠ **The Threads tab's State chips count and filter what the CARDS show**
+NOT replaced. ⚠ **The Threads only view's State chips count and filter what the CARDS show**
 (`threadStateBucket` / `threadStateBucketCounts`, same module): a thread wearing a Claude marker sits
 under its own "Claude judged" chip (shown only when one exists), never under the derived state its
 card no longer displays — a "Likely addressed" chip listing cards that read "Claude: not addressed"

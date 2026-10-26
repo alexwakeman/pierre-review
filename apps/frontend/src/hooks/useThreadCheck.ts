@@ -5,7 +5,7 @@ import { api } from '../api/client.js';
 import { useAiCapabilities } from './useAiCapabilities.js';
 
 // CHECK THREADS — the light, threads-only Claude pass (docs/CLAUDE-REVIEW.md § Check threads).
-// ONE status read per PR, shared by the Threads tab's button and the Claude Review tab's (React
+// ONE status read per PR, shared by the Threads only view's button and the Claude Review tab's (React
 // Query dedupes the key). It polls every 3s while a run is queued or running (30s otherwise, for an
 // automatic run started server-side); a finished run
 // refreshes the PR's Claude review read, which carries the thread judgements beneath it

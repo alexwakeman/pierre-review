@@ -64,6 +64,7 @@ import { ThreadCard } from '../ThreadView/index.js';
 import { ThreadCountChips, rollupCounts } from '../ThreadList/ThreadCountChips.js';
 import { SELECTED_BORDER, SELECTED_FILL, STATUS_META, UNSELECTED_BORDER } from './status.js';
 import { FileTypeIcon } from '../FileTypeIcons.js';
+import type { ThreadResolveBus } from '../../hooks/useResolveEvents.js';
 
 // The shared per-file diff renderer used by BOTH the Changes tab (with inline
 // commenting) and the AI Fix tab (read-only, pre-push). Per-file collapsible blocks
@@ -134,17 +135,20 @@ export interface DiffThreadContext {
   prUrl: string;
   focusThreadId?: number | null;
   onThreadShown?: () => void;
-  /** The return leg — open a thread in the Threads tab. Absent outside PrDetail's Changes tab. */
-  onOpenThread?: (threadId: number) => void;
   /**
    * The reader's open/shut DECISIONS for the inline pills, keyed by thread id — a plain Map owned
    * by PrDetail (`threadOpenMemory`), written by every open/close (click, reveal, posted
-   * self-focus) and read ONCE, when a pill mounts. Only decisions are recorded, never the default
-   * (`inlineThreadStartsOpen`). Mutated in place, never replaced: a click must re-render one pill,
-   * not the diff. It outlives the pill because a pill remounts on a file collapse, the Wrap toggle,
-   * an anchor move and the Changes → Threads → Changes round trip.
+   * self-focus, the reader's own resolve) and read ONCE, when a pill mounts. Only decisions are
+   * recorded, never the default (`inlineThreadStartsOpen`). Mutated in place, never replaced: a
+   * click must re-render one pill, not the diff. It outlives the pill because a pill remounts on a
+   * file collapse, the Wrap toggle, an anchor move, the Threads only round trip and a tab switch.
    */
   openMemory: Map<number, boolean>;
+  /**
+   * A SUCCESSFUL resolve collapses its pill; an unresolve opens it (ChangesTab's one
+   * `useResolveEvents` subscription, fanned out per thread). Absent outside the Changes tab.
+   */
+  resolveBus?: ThreadResolveBus;
 }
 
 // THE outside-in "reveal this file/line" signal. There are exactly TWO focus grains in this
@@ -162,7 +166,7 @@ export interface DiffFocusTarget {
   line?: number | null;
   // Which side of the diff the line number belongs to. Defaults to RIGHT (the new file).
   side?: 'LEFT' | 'RIGHT';
-  // The review thread this reveal came FROM (a thread card's "In Changes"): the matching
+  // The review thread this reveal came FROM (a thread card's "Show in context"): the matching
   // inline pill opens + flashes as part of the same reveal — a resolved thread starts shut, and
   // the reader may have shut any other; a jump that lands beside a shut pill reads as a broken
   // link. Consumed per `nonce`, never persistently: the focus target is STICKY in ChangesTab,
@@ -386,7 +390,15 @@ function InlineThread({
     },
     [memory, thread.id],
   );
-  // The deep-link flash (thread card → "In Changes"): timed like the diff-row flash, never
+  // The reader resolved this thread (here, in the Threads only view, anywhere): shut it, after
+  // GitHub said yes. ChangesTab has already written the decision to `openMemory`, so a pill that
+  // is not mounted right now comes back shut too.
+  const bus = ctx.resolveBus;
+  useEffect(() => {
+    if (bus == null) return;
+    return bus.subscribe(thread.id, (resolved) => decide(!resolved));
+  }, [bus, thread.id, decide]);
+  // The deep-link flash (thread card → "Show in context"): timed like the diff-row flash, never
   // persistent — the focus target is sticky in ChangesTab, and a persistent thread focus
   // would yank the view back here after every later posted-comment fade.
   const [flash, setFlash] = useState(false);
@@ -556,9 +568,6 @@ function InlineThread({
             usersById={ctx.usersById}
             prUrl={ctx.prUrl}
             selected={ringed}
-            onOpenInThreads={
-              ctx.onOpenThread != null ? () => ctx.onOpenThread?.(thread.id) : undefined
-            }
           />
         </div>
       )}
@@ -1335,7 +1344,7 @@ function FileDiffBlock({
   // thread — the same pill unit as the table path, in a <div> instead of a row. A thread never
   // disappears, and `revealScrollsFileHeader` relies on it: it hands the scroll to the target's
   // pill whenever the thread belongs to this block, so a branch that dropped the pills would turn
-  // an "In Changes" jump into no scroll at all.
+  // a "Show in context" jump into no scroll at all.
   const fileGrainPills =
     threadCtx && threads.length > 0 ? (
       <div className="mt-2 space-y-1 text-left">
@@ -1359,13 +1368,16 @@ function FileDiffBlock({
     // the colour changes, so no block moves when the selection does.
     <div
       ref={blockRef}
-      className={`border-l-2 ${focus != null ? SELECTED_BORDER : UNSELECTED_BORDER}`}
+      // `--diff-sticky-top` is the Changes tab's own sticky bar (ChangesTab measures it); unset
+      // (the AI Fix tab) it is 0. The scroll margin keeps a 'start' reveal out from under it.
+      className={`scroll-mt-[var(--diff-sticky-top,0px)] border-l-2 ${focus != null ? SELECTED_BORDER : UNSELECTED_BORDER}`}
     >
       {/* Sticky per-file header (mirrors the Changes-tab behaviour): the name stays
           pinned as you scroll and is pushed up by the next file's header. Needs an
-          opaque background + a z-index above the diff table. */}
+          opaque background + a z-index above the diff table. It pins BELOW the Changes tab's
+          sticky bar. */}
       <div
-        className={`sticky top-0 z-10 flex items-center gap-2 border-b px-3 py-1.5 text-xs ${
+        className={`sticky top-[var(--diff-sticky-top,0px)] z-10 flex items-center gap-2 border-b px-3 py-1.5 text-xs ${
           focus != null
             ? `${SELECTED_FILL} border-cyan-300 dark:border-cyan-600`
             : 'border-gray-100 bg-white hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-950 dark:hover:bg-gray-900'

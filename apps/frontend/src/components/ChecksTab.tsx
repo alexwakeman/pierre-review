@@ -360,7 +360,7 @@ export function ChecksTab({
   // Set (by PrDetail) only when this PR has automated-reviewer activity — enables the per-PR
   // bot-behaviour fetch + the "slower than typical" Overview badge that opens the Bot activity tab.
   onShowBotActivity?: () => void;
-  // Jump to the Threads tab — offered on the "N threads aren't resolved on GitHub" blocker so
+  // Jump to the Changes tab's threads — offered on the "N threads aren't resolved on GitHub" blocker so
   // the reader can go and resolve them. Optional for the same reason onShowBotActivity is: the
   // owner of the tab state is PrDetail, and a caller that has no tabs renders plain text.
   onOpenThreads?: () => void;
@@ -473,7 +473,7 @@ export function ChecksTab({
   // Review-BOT thread rollup — "the calm layer above your review bot." Group this PR's
   // threads by the vendor that opened them (originalCommenter → reviewBotKind), counting
   // total + still-unresolved (untouched | replied_unresolved). Drives the "CodeRabbit · 12 ·
-  // 3 unresolved" chips; clicking one filters the Threads tab to that vendor's threads.
+  // 3 unresolved" chips; clicking one filters the Changes tab's threads to that vendor's threads.
   //
   // ⚠ KNOWN GAP, recorded rather than closed here: this classifies CLIENT-SIDE BY LOGIN
   // (`botVendorMeta`), so the stored per-WORKSPACE judgement never reaches these chips — a login
@@ -827,7 +827,7 @@ export function ChecksTab({
                   g.unresolved > 0
                     ? ` · ${g.unresolved} still need a look (no reply and no follow-up commit, or replied but still open). Threads that LOOK addressed are excluded here — the Blocked row counts those, because GitHub still wants the resolve click`
                     : ' · all acted on'
-                } — click to filter the Threads tab`}
+                } — click to see its threads`}
               >
                 <BotIcon size={12} />
                 {g.label}

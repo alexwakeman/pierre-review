@@ -559,7 +559,7 @@ function anchorIndexFor(rows: DiffRow[], line: number | null): number | null {
 
 /**
  * Where a review thread anchors inside a file's parsed diff — the SAME ladder PrDetail's
- * `openInChangesFor` jump uses, so the inline pill's rendered position and the "In Changes ~"
+ * `openInChangesFor` jump uses, so the inline pill's rendered position and the "Show in context ~"
  * scroll target agree instead of the jump landing on a bare line while the thread sits
  * elsewhere. One known asymmetry on rung 1: the jump has no side and no parsed rows, so it
  * assumes RIGHT for any live line — a live line matching only a LEFT (del) row anchors the
@@ -595,7 +595,8 @@ export function anchorRowFor(
  * before a rename and is re-homed under the current path (previously it was invisible in
  * Changes: the fold keyed on `t.path` while blocks looked up `f.path`). A thread matching
  * neither stays out of the map — a file not loaded yet (past the pages shown) renders only in the
- * Threads tab, and the tab-header count reads `pr.threads` so the aggregate never lies.
+ * Changes tab's Threads only view, and the bar's count reads `pr.threads` so the aggregate never
+ * lies.
  */
 export function indexThreadsByPath<T extends { path: string }>(
   threads: readonly T[],
