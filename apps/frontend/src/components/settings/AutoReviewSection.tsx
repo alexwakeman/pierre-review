@@ -250,6 +250,158 @@ export function AutoReviewSection(): JSX.Element {
           </span>
         </span>
       </label>
+      <div className={`space-y-1.5 pl-5 text-xs ${on ? '' : 'opacity-60'}`}>
+        <div className="flex items-start gap-1">
+          <fieldset className="space-y-1">
+            <legend className="font-medium text-gray-700 dark:text-gray-200">When an auto review finishes</legend>
+            <label className="flex items-start gap-2 text-gray-700 dark:text-gray-200">
+              <input
+                type="radio"
+                name="auto-review-outcome"
+                className="mt-0.5"
+                checked={!postOn}
+                onChange={() => setPostOn(false)}
+              />
+              <span>
+                Keep it in Limn
+                <span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">
+                  Read it in the AI Review tab and post it yourself if you want.
+                </span>
+              </span>
+            </label>
+            <label className="flex items-start gap-2 text-gray-700 dark:text-gray-200">
+              <input
+                type="radio"
+                name="auto-review-outcome"
+                className="mt-0.5"
+                checked={postOn}
+                onChange={() => setPostOn(true)}
+              />
+              <span>
+                Post to GitHub
+                <span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">
+                  As soon as it finishes. Reviews you start yourself keep the Post button.
+                </span>
+              </span>
+            </label>
+          </fieldset>
+          <InfoButton title="Posting automatically">
+            <p>
+              Limn posts as you, with your GitHub account. Findings go in one review, with
+              questions on the lines they ask about. The review only comments unless you turn on
+              Approve or request changes. On GitHub it counts as your review.
+            </p>
+            <p>
+              Nothing is posted twice: a comment already on the PR, from any earlier review, is
+              left out, and so is anything you ignored. Merged, closed and draft PRs, and PRs opened
+              by bots, are never posted on. A review request to a team does not make a PR yours:
+              Limn does not know which teams you are in.
+            </p>
+            <p>If a post fails, the AI Review tab says so and the Post button stays.</p>
+          </InfoButton>
+        </div>
+        {postOn && (
+        <div className="space-y-1.5 pl-5">
+          <fieldset className="space-y-1">
+            <legend className="font-medium text-gray-700 dark:text-gray-200">Which PRs</legend>
+            <label className="flex items-start gap-2 text-gray-700 dark:text-gray-200">
+              <input
+                type="radio"
+                name="auto-post-scope"
+                className="mt-0.5"
+                checked={scope === 'mine'}
+                onChange={() => setScope('mine')}
+              />
+              <span>Your own PRs, and PRs you are asked to review or have reviewed or commented on</span>
+            </label>
+            <label className="flex items-start gap-2 text-gray-700 dark:text-gray-200">
+              <input
+                type="radio"
+                name="auto-post-scope"
+                className="mt-0.5"
+                checked={scope === 'all'}
+                onChange={() => setScope('all')}
+              />
+              <span>Every PR auto review covers</span>
+            </label>
+          </fieldset>
+          <fieldset className="space-y-1">
+            <legend className="font-medium text-gray-700 dark:text-gray-200">What to post</legend>
+            {KIND_ROWS.map(({ key, label }) => (
+              <label key={key} className="flex items-start gap-2 text-gray-700 dark:text-gray-200">
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={kinds[key]}
+                  onChange={(e) => setKinds((k) => ({ ...k, [key]: e.target.checked }))}
+                />
+                <span>{label}</span>
+              </label>
+            ))}
+          </fieldset>
+          <label className="flex items-start gap-2">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={verdict}
+              onChange={(e) => setVerdict(e.target.checked)}
+            />
+            <span>
+              <span className="font-medium text-gray-700 dark:text-gray-200">
+                Approve or request changes for me
+              </span>
+              <span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">
+                Approves only with no blockers or warnings. Only when your last review was a
+                comment, never on your own PRs.
+              </span>
+            </span>
+          </label>
+          <fieldset className={`space-y-1 pl-5 ${verdict ? '' : 'opacity-60'}`}>
+            <legend className="flex items-center gap-1 font-medium text-gray-700 dark:text-gray-200">
+              Approve
+              <InfoButton title="Approve by impact">
+                <p>
+                  Impact is the High, Medium or Low chip on a PR: how far the change can reach. It
+                  follows your Blast radius settings.
+                </p>
+                <p>
+                  A PR at an impact you untick gets a comment-only review instead of an approval.
+                  Requesting changes is not affected.
+                </p>
+                <p>A PR whose impact Limn could not measure counts as High.</p>
+              </InfoButton>
+            </legend>
+            {IMPACT_ROWS.map(({ key, label }) => (
+              <label key={key} className="flex items-start gap-2 text-gray-700 dark:text-gray-200">
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={impact[key]}
+                  onChange={(e) => setImpact((v) => ({ ...v, [key]: e.target.checked }))}
+                />
+                <span>{label}</span>
+              </label>
+            ))}
+          </fieldset>
+          <label className="flex items-start gap-2">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={resolve}
+              onChange={(e) => setResolve(e.target.checked)}
+            />
+            <span>
+              <span className="font-medium text-gray-700 dark:text-gray-200">
+                Resolve Limn’s threads once fixed
+              </span>
+              <span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">
+                When a later review finds a posted comment fixed, Limn replies and resolves it.
+              </span>
+            </span>
+          </label>
+        </div>
+        )}
+      </div>
       <div className={`pl-5 text-xs ${on ? '' : 'opacity-60'}`}>
         <label className="flex flex-wrap items-center gap-1.5 text-gray-700 dark:text-gray-200">
           <span>Up to</span>
@@ -363,141 +515,6 @@ export function AutoReviewSection(): JSX.Element {
             third of {ai.providerName}’s review usage.
           </p>
         </InfoButton>
-      </div>
-      <div className={`space-y-1.5 border-t border-gray-200 pt-2 text-xs dark:border-gray-700 ${on ? '' : 'opacity-60'}`}>
-        <div className="flex items-start gap-1">
-          <label className="flex items-start gap-2">
-            <input
-              type="checkbox"
-              className="mt-0.5"
-              checked={postOn}
-              onChange={(e) => setPostOn(e.target.checked)}
-            />
-            <span>
-              <span className="font-medium text-gray-700 dark:text-gray-200">
-                Post AI reviews to GitHub automatically
-              </span>
-              <span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">
-                {on
-                  ? 'Auto reviews only, as soon as they finish. Reviews you start yourself keep the Post button.'
-                  : 'Auto reviews only, so nothing is posted while auto review is off.'}
-              </span>
-            </span>
-          </label>
-          <InfoButton title="Posting automatically">
-            <p>
-              Limn posts as you, with your GitHub account. Findings go in one review, with
-              questions on the lines they ask about. The review only comments unless you turn on
-              Approve or request changes. On GitHub it counts as your review.
-            </p>
-            <p>
-              Nothing is posted twice: a comment already on the PR, from any earlier review, is
-              left out, and so is anything you ignored. Merged, closed and draft PRs, and PRs opened
-              by bots, are never posted on. A review request to a team does not make a PR yours:
-              Limn does not know which teams you are in.
-            </p>
-            <p>If a post fails, the AI Review tab says so and the Post button stays.</p>
-          </InfoButton>
-        </div>
-        <div className={`space-y-1.5 pl-5 ${postOn ? '' : 'opacity-60'}`}>
-          <fieldset className="space-y-1">
-            <legend className="font-medium text-gray-700 dark:text-gray-200">Which PRs</legend>
-            <label className="flex items-start gap-2 text-gray-700 dark:text-gray-200">
-              <input
-                type="radio"
-                name="auto-post-scope"
-                className="mt-0.5"
-                checked={scope === 'mine'}
-                onChange={() => setScope('mine')}
-              />
-              <span>Your own PRs, and PRs you are asked to review or have reviewed or commented on</span>
-            </label>
-            <label className="flex items-start gap-2 text-gray-700 dark:text-gray-200">
-              <input
-                type="radio"
-                name="auto-post-scope"
-                className="mt-0.5"
-                checked={scope === 'all'}
-                onChange={() => setScope('all')}
-              />
-              <span>Every PR auto review covers</span>
-            </label>
-          </fieldset>
-          <fieldset className="space-y-1">
-            <legend className="font-medium text-gray-700 dark:text-gray-200">What to post</legend>
-            {KIND_ROWS.map(({ key, label }) => (
-              <label key={key} className="flex items-start gap-2 text-gray-700 dark:text-gray-200">
-                <input
-                  type="checkbox"
-                  className="mt-0.5"
-                  checked={kinds[key]}
-                  onChange={(e) => setKinds((k) => ({ ...k, [key]: e.target.checked }))}
-                />
-                <span>{label}</span>
-              </label>
-            ))}
-          </fieldset>
-          <label className="flex items-start gap-2">
-            <input
-              type="checkbox"
-              className="mt-0.5"
-              checked={verdict}
-              onChange={(e) => setVerdict(e.target.checked)}
-            />
-            <span>
-              <span className="font-medium text-gray-700 dark:text-gray-200">
-                Approve or request changes for me
-              </span>
-              <span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">
-                Approves only with no blockers or warnings. Only when your last review was a
-                comment, never on your own PRs.
-              </span>
-            </span>
-          </label>
-          <fieldset className={`space-y-1 pl-5 ${verdict ? '' : 'opacity-60'}`}>
-            <legend className="flex items-center gap-1 font-medium text-gray-700 dark:text-gray-200">
-              Approve
-              <InfoButton title="Approve by impact">
-                <p>
-                  Impact is the High, Medium or Low chip on a PR: how far the change can reach. It
-                  follows your Blast radius settings.
-                </p>
-                <p>
-                  A PR at an impact you untick gets a comment-only review instead of an approval.
-                  Requesting changes is not affected.
-                </p>
-                <p>A PR whose impact Limn could not measure counts as High.</p>
-              </InfoButton>
-            </legend>
-            {IMPACT_ROWS.map(({ key, label }) => (
-              <label key={key} className="flex items-start gap-2 text-gray-700 dark:text-gray-200">
-                <input
-                  type="checkbox"
-                  className="mt-0.5"
-                  checked={impact[key]}
-                  onChange={(e) => setImpact((v) => ({ ...v, [key]: e.target.checked }))}
-                />
-                <span>{label}</span>
-              </label>
-            ))}
-          </fieldset>
-          <label className="flex items-start gap-2">
-            <input
-              type="checkbox"
-              className="mt-0.5"
-              checked={resolve}
-              onChange={(e) => setResolve(e.target.checked)}
-            />
-            <span>
-              <span className="font-medium text-gray-700 dark:text-gray-200">
-                Resolve Limn’s threads once fixed
-              </span>
-              <span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">
-                When a later review finds a posted comment fixed, Limn replies and resolves it.
-              </span>
-            </span>
-          </label>
-        </div>
       </div>
       <SaveButton
         dirty={

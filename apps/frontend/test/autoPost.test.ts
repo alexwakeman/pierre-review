@@ -150,7 +150,12 @@ describe('"Not asked for" postings', () => {
 describe('the mounts', () => {
   it('Settings carries the master switch, the scope and every kind', () => {
     const s = src('components/settings/AutoReviewSection.tsx');
-    expect(s).toContain('Post AI reviews to GitHub automatically');
+    expect(s).toContain('When an auto review finishes');
+    expect(s).toContain('Keep it in Limn');
+    expect(s).toContain('Post to GitHub');
+    // The choice sits right under the auto review switch, above Auto AI Fix and diagrams.
+    expect(s.indexOf('Keep it in Limn')).toBeGreaterThan(s.indexOf('Review new PRs automatically'));
+    expect(s.indexOf('Keep it in Limn')).toBeLessThan(s.indexOf('Auto AI Fix on your own PRs'));
     expect(s).toContain('Your own PRs, and PRs you are asked to review or have reviewed or commented on');
     expect(s).toContain('Approve or request changes for me');
     expect(s).toContain('Resolve Limn’s threads once fixed');
@@ -159,8 +164,8 @@ describe('the mounts', () => {
     for (const k of ['blockers', 'warnings', 'nits', 'questions', 'storyGaps', 'notAskedFor']) {
       expect(s).toContain(`key: '${k}'`);
     }
-    // Dimmed, never disabled, while the master switch is off.
-    expect(s).toMatch(/postOn \? '' : 'opacity-60'/);
+    // The posting options show only under "Post to GitHub".
+    expect(s).toMatch(/\{postOn && \(/);
   });
 
   it('the Claude Review tab and Story check render the chip and the failure line', () => {
