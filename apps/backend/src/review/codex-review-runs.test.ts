@@ -103,7 +103,14 @@ vi.mock('./clone-manager.js', async () => {
     },
     removeWorktreeLocked: async () => {},
     cleanupCloneCache: () => {},
-    prepPeerWorktrees: async () => ({ peers: [], cleanup: async () => {} }),
+    prepPeerWorktrees: async (peers: Array<{ owner: string; name: string; number: number; headSha: string }>) => ({
+      peers: peers.map((p) => ({ ...p, path: fs.mkdtempSync(join(T.root, `peer-${p.name}-`)), repoCloneDir: T.root, error: null })),
+      cleanup: async () => {},
+    }),
+    prepDefaultBranchCheckouts: async (repos: Array<{ owner: string; name: string; branch: string | null }>) => ({
+      checkouts: repos.map((r) => ({ ...r, path: fs.mkdtempSync(join(T.root, `branch-${r.name}-`)), repoCloneDir: T.root, sha: 'f'.repeat(40), error: null })),
+      cleanup: async () => {},
+    }),
   };
 });
 
@@ -121,6 +128,7 @@ const ri = argv.indexOf('resume');
 const resumeId = ri >= 0 ? argv[ri + 1] : null;
 appendFileSync(${JSON.stringify(T.log)}, JSON.stringify({
   argv, stdin, schema: schemaFile ? JSON.parse(readFileSync(schemaFile, 'utf8')) : null,
+  guard: process.env.LIMN_CODEX_GUARD ?? null,
 }) + '\\n');
 const out = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
 const msg = (text) => out({ type: 'item.completed', item: { id: 'm', type: 'agent_message', text } });
@@ -276,6 +284,37 @@ describe('Claude Review on Codex', () => {
     } finally {
       setStoredAiEffort(null);
     }
+  });
+
+  it('related repos: a PR peer and a branch peer are READ roots of the workspace MCP server and the guard, never write roots', async () => {
+    const res = await runReview(
+      reviewArgs('REVIEWOK', {
+        mode: 'worktree',
+        model: 'claude-opus-5-5',
+        systemPrompt: 'Explore the worktree.',
+        peers: [
+          { ref: 'X1', owner: 'acme', name: 'web', prNumber: 9, headSha: 'b'.repeat(40) },
+          { ref: 'X2', owner: 'acme', name: 'infra', kind: 'branch', branch: 'eng-12-reset' },
+        ],
+      }),
+    );
+    expect(res.submitted).toBe(true);
+    expect(res.peersCheckedOut).toEqual(['X1', 'X2']);
+    const [call] = calls();
+    const argv = call.argv.join(' ');
+    // The MCP server's read roots (mocked workspaceMcpConfig puts them in its args) carry both.
+    expect(argv).toContain(`${T.root}/peer-web-`);
+    expect(argv).toContain(`${T.root}/branch-infra-`);
+    // Read-only: the sandbox stays read-only and the guard's write roots are empty.
+    expect(cfg(call.argv, 'sandbox_mode')).toBe('"read-only"');
+    // The PreToolUse guard's roots (the hook's env): both readable, nothing writable.
+    const roots = JSON.parse(call.guard) as { read: string[]; write: string[] };
+    expect(roots.read.some((r) => r.startsWith(`${T.root}/peer-web-`))).toBe(true);
+    expect(roots.read.some((r) => r.startsWith(`${T.root}/branch-infra-`))).toBe(true);
+    expect(roots.write).toEqual([]);
+    // The prompt says where each one is.
+    expect(call.stdin).toContain('## Related checkouts');
+    expect(call.stdin).toMatch(/- X2: .*branch-infra-/);
   });
 
   it('SCHEMA FAILURE: corrected once on the same thread, the retry’s delta billed once', async () => {

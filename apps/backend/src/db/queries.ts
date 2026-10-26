@@ -213,6 +213,7 @@ const REASON_PRIORITY: ReasonTag[] = [
   'in_progress',
 ];
 import { db, schema } from './client.js';
+import { dropRepoRelations } from './related-repos.js';
 import { runTransaction } from './client.js';
 import { enrichMyTurn } from '../feed/my-turn.js';
 import { resolvePrTickets } from '../pr/detail-enricher.js';
@@ -777,6 +778,14 @@ export async function deleteWorkspace(
         and(eq(workspaceReviewers.accountId, accountId), eq(workspaceReviewers.workspaceId, id)),
       )
       .execute();
+    // 2b. Related repos (db/related-repos.ts) are a WORKSPACE's pairing: they do not follow the repos
+    //     to Default. The workspace FK cascades too; explicit for the same dialect reason as below.
+    await dropRepoRelations(
+      tx,
+      accountId,
+      memberRows.map((m) => m.repoId),
+      defaultId,
+    );
     // 3. Belt-and-braces: step 1 already emptied this, and the FK cascades — but the explicit
     //    delete keeps the ordering dialect-agnostic (Postgres enforces FKs immediately; SQLite
     //    only with foreign_keys=ON).
@@ -876,6 +885,8 @@ export async function assignReposToWorkspace(
         })
         .execute();
     }
+    // A repo that LEFT another workspace leaves its related repos there (db/related-repos.ts).
+    await dropRepoRelations(tx, accountId, validIds, workspaceId);
   });
 }
 
@@ -894,6 +905,13 @@ export async function rehomeReposToDefault(
     .where(and(eq(repos.accountId, accountId), inArray(repos.id, repoIds)))
     .execute();
   if (ownedRepos.length === 0) return;
+  // A repo leaving its workspace leaves its related repos there (db/related-repos.ts).
+  await dropRepoRelations(
+    db,
+    accountId,
+    ownedRepos.map((r) => r.id),
+    defaultId,
+  );
   await db
     .update(workspaceRepos)
     .set({ workspaceId: defaultId })
@@ -9607,6 +9625,8 @@ export async function deleteRepo(id: number, accountId: number): Promise<boolean
       .delete(pendingMutedRepos)
       .where(and(eq(pendingMutedRepos.accountId, accountId), eq(pendingMutedRepos.repoId, id)))
       .execute();
+    // Related repos (migration 0131), both directions: a re-added repository arrives unrelated.
+    await dropRepoRelations(tx, accountId, [id]);
     // Activity → This Sprint: the repos accepted for a sprint ticket (migration 0100 / pg 0087). Keyed
     // on the REPO through a composite FK, deleted explicitly for the same dialect reason as above, so
     // a re-added repository never arrives already accepted on a ticket.

@@ -620,6 +620,17 @@ Core since migration `0088`; the contract is [TRACKERS.md](TRACKERS.md).
 - ⚠ The plugin-era copies (`pro_workspace_settings.issue_*`/`jira_*`, `pro_pr_jira_tickets`) are
   MOVED and cleared at boot, never read again; the columns are dormant.
 
+## `repo_relations` — related repos (CORE; migration `0131`)
+
+Repos of ONE workspace the reader reviews together; a deep review of a PR in one reads the matching
+change in the other ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Related repos). Keyed `(account_id,
+workspace_id, repo_id, related_repo_id)`, three NAMED composite FKs against `workspaces` / `repos (id,
+account_id)`. ⚠ **SYMMETRIC, STORED BOTH WAYS**, written and deleted together (`db/related-repos.ts`).
+⚠ **Both repos must be members of `workspace_id` now**: every membership writer and `deleteRepo` drop a
+moved repo's rows (`dropRepoRelations`) and every reader joins membership. Off by default (no rows).
+`claude_reviews.peers_read` (same migration) records what a run read beside the PR (`ReviewPeerRead[]`;
+NULL = nothing or an older row).
+
 ## `workspace_setting_events` — when a workspace setting changed (CORE; migration `0096`)
 
 APPEND-ONLY history read by Chronology's "Over time" markers (docs/BOTTLENECKS.md § Over time). One

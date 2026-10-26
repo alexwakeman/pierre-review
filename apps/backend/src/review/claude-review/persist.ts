@@ -29,6 +29,7 @@ import type {
   ClaudeThreadAssessment,
   ClaudeTicketAssessment,
   ReviewMode,
+  ReviewPeerRead,
   ReviewRouteReason,
   StoredPrFile,
 } from '@pierre-review/shared';
@@ -172,6 +173,8 @@ interface ReviewRow {
   // The reference-library passages the run used, server-checked (migration 0117 / pg 0104). NULL =
   // the run did not read the library.
   docReferences?: unknown;
+  // What it read beside the PR (migration 0130). NULL = nothing.
+  peersRead?: unknown;
 }
 
 /** The stored auto-post record → the wire (ids dropped). null for anything malformed. */
@@ -367,6 +370,7 @@ function mapReview(
     ...ciWireOf(r.ciFailures),
     autoPost: autoPostWireOf(r.autoPost),
     docReferences: reviewDocReferencesFromStored(r.docReferences),
+    alsoRead: peersReadFromStored(r.peersRead),
   };
 }
 
@@ -1715,6 +1719,32 @@ export async function markReviewRanOn(
     .set({ provider: ran.provider, model: ran.model, ...(ran.effort ? { effort: ran.effort } : {}) })
     .where(eq(cr.id, id))
     .execute();
+}
+
+/** What a run read beside the PR (ticket peers, related repos) — `claude_reviews.peers_read`. */
+export async function markReviewPeersRead(ctx: AgentContext, id: number, read: ReviewPeerRead[]): Promise<void> {
+  const { cr } = tables(ctx);
+  await ctx.db.update(cr).set({ peersRead: read }).where(eq(cr.id, id)).execute();
+}
+
+/** The stored `peers_read` → the wire; anything malformed is dropped. null when none. */
+export function peersReadFromStored(v: unknown): ReviewPeerRead[] | null {
+  if (!Array.isArray(v)) return null;
+  const out: ReviewPeerRead[] = [];
+  for (const x of v) {
+    if (x == null || typeof x !== 'object') continue;
+    const r = x as Record<string, unknown>;
+    if (typeof r.repoFullName !== 'string') continue;
+    const kind = r.kind === 'branch' || r.kind === 'default_branch' ? r.kind : 'pr';
+    out.push({
+      repoFullName: r.repoFullName,
+      kind,
+      source: r.source === 'related_repo' ? 'related_repo' : 'ticket',
+      number: typeof r.number === 'number' ? r.number : null,
+      branch: typeof r.branch === 'string' ? r.branch : null,
+    });
+  }
+  return out.length > 0 ? out : null;
 }
 
 export async function markReviewRunning(ctx: AgentContext, id: number): Promise<void> {

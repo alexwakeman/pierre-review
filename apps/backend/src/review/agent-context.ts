@@ -7,7 +7,7 @@ import * as hostQueries from '../db/queries.js';
 import { recordAiUsage, type AiUsageRecord } from '../db/usage.js';
 import { buildAiBudgetGate, type AiBudgetGate } from '../ai/budget.js';
 import { getAccessToken } from '../auth/account.js';
-import { fetchPrHeadInfo, fetchPrUnifiedDiff } from '../github/mutations.js';
+import { fetchBranchHeadSha, fetchPrHeadInfo, fetchPrUnifiedDiff } from '../github/mutations.js';
 import { fetchCompareDiff } from '../github/compare.js';
 import { fetchActionsJobLog } from '../github/actions-logs.js';
 import {
@@ -74,7 +74,11 @@ export interface AgentContext {
   github: Pick<
     GithubSeam,
     'fetchPrDiff' | 'fetchPrHeadInfo' | 'fetchCompareDiff' | 'fetchReviewCommentHunks'
-  >;
+  > & {
+    // A branch's tip sha, or null when it does not exist (github/mutations.ts `fetchBranchHeadSha`).
+    // Optional so a test's fake ctx may omit it (related-repo rule 3 is then skipped).
+    fetchBranchHeadSha?(accountId: number, a: { owner: string; name: string; branch: string }): Promise<string | null>;
+  };
   coding: {
     generateFix(args: GenerateFixArgs): Promise<GenerateFixResult>;
     // PLAN MODE: the read-only planning pass (coding/agent.ts runPlanAgent).
@@ -164,6 +168,8 @@ export function buildAgentContext(log: FastifyBaseLogger): AgentContext {
         fetchPrUnifiedDiff(await getAccessToken(accountId), owner, name, number),
       fetchPrHeadInfo: async (accountId, owner, name, number) =>
         fetchPrHeadInfo(await getAccessToken(accountId), owner, name, number),
+      fetchBranchHeadSha: async (accountId, a) =>
+        fetchBranchHeadSha(await getAccessToken(accountId), a.owner, a.name, a.branch),
       // `accountId` passed THROUGH so a rate-limited compare feeds that account's budget. Never
       // throws (github/compare.ts).
       fetchCompareDiff: async (accountId, a) =>

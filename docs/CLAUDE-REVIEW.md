@@ -576,6 +576,51 @@ stay on the latest run only. AI Fix keeps no per-PR run selector (only "Earlier 
   with Codex, or `limn ai install codex`); `LIMN_CODEX_PATH` points at a codex program of your own.
   See [PACKAGING.md](PACKAGING.md).
 
+## Related repos (2026-10-26)
+
+Repos of ONE workspace the reader reviews together — a frontend and its backend. A DEEP review of a PR
+in one reads the matching change in each related repo, read-only, beside the ticket peers. Asked for
+after a review of `bng-metric-frontend#418` missed a bug only the backend branch of the same name
+showed.
+
+- **The setting** (Settings → Workspace → Related repos, `RelatedReposSection`; shown on
+  `me.ai.enabled`). `GET /api/workspaces/:id/related-repos` → `{workspaceId, pairs}`; `PUT
+  /api/workspaces/:id/related-repos/:repoId {relatedRepoIds}` REPLACES that repo's relations. Table
+  `repo_relations` (migration `0131`), keyed `(account_id, workspace_id, repo_id, related_repo_id)`,
+  three composite FKs. ⚠ **SYMMETRIC, STORED BOTH WAYS** (two rows per pair, written and deleted
+  together). ⚠ **Both repos must be members of the row's workspace NOW**: a move out (`assignReposToWorkspace`,
+  `rehomeReposToDefault`, `deleteWorkspace`) or `deleteRepo` drops the repo's rows
+  (`dropRepoRelations`), and every reader joins membership anyway. At most
+  `RELATED_REPOS_MAX_PER_REPO` (8) per repo. Off by default (no rows). In the export and the erasure.
+- **The match** (`review/claude-review/related-repos.ts` `relatedRepoPeersFor`), per related repo, the
+  FIRST that holds: (1) an OPEN PR whose head branch has the same name → "Companion PR: same branch
+  name"; (2) an OPEN PR whose title or branch carries one of this PR's ticket keys → "Companion PR:
+  same ticket" (`ticketKeysOf`: the tracker's `extractTicketKeys` over the UPPER-CASED title and
+  branch, so `bmd-1048-…` counts — looser than ticket linking, safe because both sides must carry the
+  key in a repo the reader related by hand); (3) a BRANCH of the same name with no PR (one REST read,
+  `fetchBranchHeadSha`, only when 1 and 2 found nothing; never the default branch) → "Companion
+  branch"; (4) the DEFAULT BRANCH → "Reference: default branch". Closed PRs and other accounts' rows
+  never match. DB only apart from rule 3. Never throws.
+- **The peers** (`manager.ts` `reviewPeersFor`): related CHANGES (1–3) lead, then the ticket peers as
+  before, then default-branch REFERENCES; ONE cap, `TICKET_REVIEW_PEER_MAX_FOR_PR_REVIEW` (still 4: each
+  peer is a full checkout plus prompt bytes, and a related repo is one peer at most). A related repo
+  that already has a ticket peer is skipped — that PR is its companion change. Refs `X1…` in that order.
+- **The checkout** (`agent.ts` `checkOutPeers`): a PR peer at its head (`prepPeerWorktrees`), a branch
+  or default-branch peer at the branch tip (`prepDefaultBranchCheckouts`, `RunReviewArgs.peers[].kind`).
+  All are READ roots: Claude's path guard and `additionalDirectories`, Codex's workspace MCP server and
+  its PreToolUse guard (`roots`, never write roots; pinned in `codex-review-runs.test.ts`).
+- **The prompt.** Ticket peers alone keep "## Related PRs on the same ticket" BYTE-IDENTICAL (golden
+  `worktreeTicketPeers`, generated from the old builder). Any related-repo peer switches to "## Related
+  code in other repositories" (golden `worktreeRelated`): one heading per peer naming its kind, the
+  title / branch / ticket / files FENCED (`RELATED PR Xn` or `RELATED CODE Xn`) — ⚠ a branch name is
+  other people's text and never sits in a heading — and one added rule: a default branch is the
+  repository as it stands, read only to see what this PR calls or is called by.
+- **What was read** (`claude_reviews.peers_read`, `RunReviewResult.peersCheckedOut`): only the peers
+  that checked out; served as `ClaudeReview.alsoRead` and shown under the run's meta line, "Also read:
+  acme/api#21, acme/infra @ bmd-1048-…" (`reviewPeerReadLabel`).
+- **Not the ticket review.** It reads every PR on its ticket already (and the default branch of the
+  merged members' repos); it does not use `reviewPeersFor` and is unchanged.
+
 ## Reference docs in a review
 
 When the PR's workspace has "Use reference docs in Claude Review" on and its library has a built
@@ -1483,7 +1528,8 @@ route strips a stale `ticket`/`tickets` key. Wire contract: [API.md](API.md) § 
   path guard, rooted at its worktree (`coding/agent.ts`; § AI Fix).
 - **Peers in a deep PR review.** A worktree PR review may read up to
   `TICKET_REVIEW_PEER_MAX_FOR_PR_REVIEW` (4) peers on the same ticket, read-only behind the same path
-  guard, to catch cross-repo breakage — it never judges the ticket or reports criteria.
+  guard, to catch cross-repo breakage — it never judges the ticket or reports criteria. The same cap
+  covers the related repos' companion changes (§ Related repos).
 
 ## User stories — LEGACY (runs before the ticket review split)
 

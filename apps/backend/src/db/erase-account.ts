@@ -55,6 +55,7 @@ const {
   pendingMutedRepos,
   myTurnDismissals,
   repoFileCoupling,
+  repoRelations,
 } = schema;
 
 /**
@@ -139,6 +140,9 @@ export async function eraseAccountData(accountId: number): Promise<EraseResult> 
       .delete(pendingMutedRepos)
       .where(eq(pendingMutedRepos.accountId, accountId))
       .execute();
+    // Related repos (migration 0131). Every composite FK cascades; explicit for the same
+    // dialect-agnostic reason, and BEFORE `workspaces`.
+    await tx.delete(repoRelations).where(eq(repoRelations.accountId, accountId)).execute();
     // My Turn dismissals (migration 0069 / pg 0056). Both composite FKs cascade and the repo loop
     // has normally taken every row; explicit for the same dialect-agnostic reason.
     await tx
@@ -451,6 +455,8 @@ export function accountScopedTables(): {
     // COLUMN on `workspaces`, already on this checklist, so there is nothing separate to count
     // for it — the row it lives on is deleted.
     { name: 'pendingMutedRepos', col: pendingMutedRepos.accountId, table: pendingMutedRepos },
+    // Related repos (migration 0131) — the pairs the user chose.
+    { name: 'repoRelations', col: repoRelations.accountId, table: repoRelations },
     // My Turn dismissals (migration 0069 / pg 0056) — one timestamp per dismissed PR or red branch.
     { name: 'myTurnDismissals', col: myTurnDismissals.accountId, table: myTurnDismissals },
     // The blast-radius co-change index (migration 0063 / pg 0050). Purely DERIVED — erasing it

@@ -8,6 +8,8 @@ import type {
   ReferenceDocsConversationsResponse,
   ReferenceDocsResponse,
   ReferenceDocsSettings,
+  RelatedReposResponse,
+  SetRelatedReposBody,
   AddReferenceDocUrlBody,
   SetReferenceDocsSettingsBody,
   StartStoryDocsAlignmentBody,
@@ -1583,6 +1585,15 @@ export const api = {
       `/api/workspaces/${workspaceId}/docs-settings`,
       jsonBody('PUT', { docsInReview } satisfies SetReferenceDocsSettingsBody),
     ).then((r) => handle<ReferenceDocsSettings>(r)),
+
+  // ---- Related repos (Settings → Workspace). PATH ids ⇒ another tenant's workspace is a 404. ----
+  relatedRepos: (workspaceId: number) =>
+    get<RelatedReposResponse>(`/api/workspaces/${workspaceId}/related-repos`),
+  setRelatedRepos: (workspaceId: number, repoId: number, relatedRepoIds: number[]) =>
+    fetch(
+      `/api/workspaces/${workspaceId}/related-repos/${repoId}`,
+      jsonBody('PUT', { relatedRepoIds } satisfies SetRelatedReposBody),
+    ).then((r) => handle<RelatedReposResponse>(r)),
 
   // ---- AI Fix ----
   aiFix: (prId: number) => get<AiFixResponse>(`/api/pro/prs/${prId}/ai-fix`),

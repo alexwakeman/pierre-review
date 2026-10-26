@@ -263,6 +263,9 @@ export const STEPS = [
       await h.openSettings();
       await h.scrollModal();
       await h.escape();
+      // Related repos (Settings → Workspace), both workspaces.
+      await h.fetchGet('/api/workspaces/1/related-repos');
+      await h.fetchGet('/api/workspaces/2/related-repos');
     },
   },
 

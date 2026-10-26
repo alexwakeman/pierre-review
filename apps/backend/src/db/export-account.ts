@@ -112,6 +112,11 @@ export interface AccountExport {
   referenceDocs: Record<string, unknown>[];
   /** The docs chat: the questions the user typed and the answers (`reference_doc_chat_messages`). */
   referenceDocChatMessages: Record<string, unknown>[];
+  /**
+   * Related repos (core `repo_relations`, migration 0131): the pairs the user chose, both directions,
+   * per workspace.
+   */
+  repoRelations: Record<string, unknown>[];
 }
 
 /** Build the full export document for one account. Returns null if the account is gone. */
@@ -233,6 +238,18 @@ export async function exportAccountData(accountId: number): Promise<AccountExpor
     })
     .from(schema.referenceDocChatMessages)
     .where(eq(schema.referenceDocChatMessages.accountId, accountId))
+    .execute();
+
+  // Related repos — the pairs the user chose (both directions as stored).
+  const repoRelationRows = await db
+    .select({
+      workspaceId: schema.repoRelations.workspaceId,
+      repoId: schema.repoRelations.repoId,
+      relatedRepoId: schema.repoRelations.relatedRepoId,
+      createdAt: schema.repoRelations.createdAt,
+    })
+    .from(schema.repoRelations)
+    .where(eq(schema.repoRelations.accountId, accountId))
     .execute();
 
   const [
@@ -371,6 +388,7 @@ export async function exportAccountData(accountId: number): Promise<AccountExpor
     workspaceTrackers: trackerRows.map((t) => ({ ...t, hasToken: t.hasToken != null && t.hasToken !== '' })),
     workspaceSonar: sonarRows.map((t) => ({ ...t, hasToken: t.hasToken != null && t.hasToken !== '' })),
     referenceDocs: referenceDocRows,
+    repoRelations: repoRelationRows,
     referenceDocChatMessages: capped('referenceDocChatMessages', docChatRows),
   };
 }

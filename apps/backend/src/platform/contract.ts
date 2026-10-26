@@ -501,7 +501,9 @@ export interface RunReviewArgs {
   // when `mode === 'worktree'`; at most TICKET_REVIEW_PEER_MAX_FOR_PR_REVIEW. `ref` ('X1'…) is the
   // name the prompt's "Related PRs" block gives it; core appends where each one sits on disk (or
   // that it could not be checked out). Core-only, so no apiVersion question.
-  peers?: Array<{ ref: string; owner: string; name: string; prNumber: number; headSha: string }>;
+  // A RELATED REPO's peer (docs/CLAUDE-REVIEW.md § Related repos) may also be a BRANCH with no PR or
+  // the repo's DEFAULT BRANCH (`kind`), checked out at the branch's tip.
+  peers?: ReviewRunPeer[];
   // The workspace's REFERENCE LIBRARY folder when the review should read it (docs/REFERENCE-DOCS.md
   // § Use in reviews): a READ-ONLY root of the run's path guard, and the tool gains `docReferences` /
   // a finding's `docRefs`. Absent/null ⇒ the run is exactly as before. Core-only (Claude Review left
@@ -516,6 +518,18 @@ export interface RunReviewArgs {
   // review). Claude's specialists are sub-agents of the one run and never ask it. Core-only.
   allowSpecialistStart?: (lens: string) => boolean | Promise<boolean>;
 }
+
+/** One peer a deep review checks out read-only (RunReviewArgs.peers). */
+export type ReviewRunPeer =
+  | { ref: string; owner: string; name: string; kind?: 'pr'; prNumber: number; headSha: string }
+  | {
+      ref: string;
+      owner: string;
+      name: string;
+      kind: 'branch' | 'default_branch';
+      // The branch to check out; null = the remote's HEAD (a default branch whose name is not known).
+      branch: string | null;
+    };
 
 export interface RunReviewResult {
   submitted: boolean; // false ⇒ the agent never called submit_review → plugin marks failed
@@ -544,7 +558,11 @@ export interface RunReviewResult {
   ciFailures?: ReviewCiFailureReport[];
   // A docs run only (RunReviewArgs.docsDir): the model's `docReferences`, RAW — the manager checks each
   // against the library before anything is stored.
-  docReferences?: unknown;  // True when the PROVIDER already wrote this run's ledger row (Codex, given `usage`): the manager
+  docReferences?: unknown;
+  // The refs of the peers that WERE checked out (a deep run handed peers); absent otherwise. The
+  // manager stores what was read (`claude_reviews.peers_read`).
+  peersCheckedOut?: string[];
+  // True when the PROVIDER already wrote this run's ledger row (Codex, given `usage`): the manager
   // must not record it again. Absent ⇒ the manager records it as it always did (Claude).
   usageRecorded?: boolean;
 }

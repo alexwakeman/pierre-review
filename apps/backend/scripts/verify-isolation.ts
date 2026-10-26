@@ -2626,6 +2626,49 @@ check(
   );
 }
 
+// ── RELATED REPOS (db/related-repos.ts, review/claude-review/related-repos.ts) ───────────────
+// A workspace id in the PATH and repo ids in the PATH and BODY; and the review-time read that turns a
+// relation into peers. Positive direction first, so a writer that refused everything fails.
+{
+  const rr = await import('../src/db/related-repos.js');
+  const picker = await import('../src/review/claude-review/related-repos.js');
+  const wsA = await q.resolveWorkspaceScope(1, null);
+  // B's repo may have been MOVED by an earlier block: use the workspace it is in now.
+  const wsB = {
+    workspaceId: (
+      await db.select().from(schema.workspaceRepos).where(eq(schema.workspaceRepos.repoId, B.repoId)).execute()
+    )[0]!.workspaceId as number,
+  };
+  const [a2] = await db
+    .insert(repos)
+    .values({ accountId: 1, owner: 'orgA', name: 'repoA-related', githubNodeId: 'R_A_related', defaultBranch: 'main' })
+    .returning()
+    .execute();
+  await q.assignReposToWorkspace(wsA.workspaceId, 1, [a2!.id]);
+  check('setRelatedRepos(A, A’s workspace, A’s two repos) accepts', (await rr.setRelatedRepos(1, wsA.workspaceId, A.repoId, [a2!.id])) === true);
+  check('getRelatedRepoPairs(A) lists the pair', (await rr.getRelatedRepoPairs(1, wsA.workspaceId))?.length === 1);
+  check('setRelatedRepos(B, A’s workspace) refuses (IDOR blocked)', (await rr.setRelatedRepos(2, wsA.workspaceId, A.repoId, [])) === false);
+  check('getRelatedRepoPairs(B, A’s workspace) is null (IDOR blocked)', (await rr.getRelatedRepoPairs(2, wsA.workspaceId)) === null);
+  check(
+    'setRelatedRepos(B, B’s workspace, B’s repo, [A’s repo]) stores no relation to A’s repo',
+    (await rr.setRelatedRepos(2, wsB.workspaceId, B.repoId, [A.repoId])) === true &&
+      (await rr.getRelatedRepoPairs(2, wsB.workspaceId))?.length === 0,
+  );
+  let fkRefused = false;
+  try {
+    await db.insert(schema.repoRelations).values({ accountId: 2, workspaceId: wsB.workspaceId, repoId: B.repoId, relatedRepoId: A.repoId }).execute();
+  } catch {
+    fkRefused = true;
+  }
+  check('a relation naming A’s repo under account B is refused by the composite FK', fkRefused);
+  const pctx = { db, schema, log: { warn() {}, info() {}, error() {} }, github: {} } as any;
+  const mine = await picker.relatedRepoPeersFor(pctx, 1, A.prId);
+  check('relatedRepoPeersFor(A, A’s PR) reads A’s related repo (mutation check)', mine.length === 1 && mine[0]!.repoId === a2!.id);
+  check('relatedRepoPeersFor(B, A’s PR) reads nothing (IDOR blocked)', (await picker.relatedRepoPeersFor(pctx, 2, A.prId)).length === 0);
+  await rr.setRelatedRepos(1, wsA.workspaceId, A.repoId, []);
+  await q.deleteRepo(a2!.id, 1);
+}
+
 // ── MY TURN DISMISSALS (db/my-turn-dismissals.ts) ──────────────────────────────
 // Two id-addressed writes whose ids arrive in a request PATH, and a read every My Turn fold makes.
 // Checked non-vacuously: the positive direction first, so a writer that refused EVERYTHING would
