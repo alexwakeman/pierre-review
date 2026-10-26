@@ -85,9 +85,11 @@ For each behaviour the change adds or alters, find the tests that exercise it (G
   impact: {
     lens: 'impact',
     description:
-      'Side effects outside the diff: other packages, apps or services that import, call, configure or deploy what changed.',
+      'Side effects outside the diff: other packages, apps or services that import, call, configure or deploy what changed, and the readers of any data it writes.',
     focus: `You review the IMPACT of a pull request on code it does not change.
-Find every consumer of what changed: other packages or apps in this repository (workspace manifests, path imports), callers of changed exported functions and types, readers of changed config keys, schemas, routes, events, environment variables, migrations and build or deploy files. Report consumers that break or behave differently, and contracts that changed without their other side being updated. Name the consumer's file in each item.`,
+Find every consumer of what changed: other packages or apps in this repository (workspace manifests, path imports), callers of changed exported functions and types, readers of changed config keys, schemas, routes, events, environment variables, migrations and build or deploy files. Report consumers that break or behave differently, and contracts that changed without their other side being updated.
+Follow the DATA as well as the code: for each value the change writes or sends, find every place that reads it back (the other side of an API, list and detail views, totals, reports, exports) and check it handles every value that can now be written. Check data already stored too: a legacy or out-of-list value must survive an edit that does not touch it, and "no value" must stay distinct from zero or an empty string.
+Name the consumer's file in each item.`,
   },
   accessibility: {
     lens: 'accessibility',

@@ -380,14 +380,14 @@ the plan). Phase 3 is complete: every agent kind runs on Codex and `codexRunnabl
     or build, auto fix): a Codex id maps back to the Claude model of the same depth, so a provider
     switch between passes never sends a gpt id to Claude.
   - **One spelling on screen**: `packages/shared/src/ai-run-label.ts` `aiRunLabel` ("Claude Opus
-    5.5", "Codex · GPT-6 Astra"; `components/AiRunLabel.tsx`); sentences about a stored run name
+    5.5", "Codex · GPT-6.1 Sol"; `components/AiRunLabel.tsx`); sentences about a stored run name
     `aiRunProviderName(run)` (`ai-provider-words.ts`, the same rule); sentences about the run about
     to start name the provider it WILL run on: on a surface with a model menu, the pick
     (`aiProviderName(modelPick.chosen.provider)`), and while it runs, the running row's provider
     (`aiRunProvider(row.provider, row.model)`, stamped at queue time) — "Running Codex review" for a
     Codex pick while Claude is the default; only a surface WITHOUT a menu names the default
     (`useAiProviderName`). The model pickers name what will run
-    (`aiModelChoiceLabel`: "Codex · GPT-6 Astra (most thorough)"). Never word a provider by hand.
+    (`aiModelChoiceLabel`: "Codex · GPT-6.1 Sol (most thorough)"). Never word a provider by hand.
   - **In-situ comparison**: a Codex review of a head Claude already reviewed runs, and both stay in
     history, each labelled (`mixed-providers.test.ts`). Auto review's one-run-per-head counts either
     provider. ⚠ A second review still gets the earlier one as its "Previous review" follow-up, so
@@ -415,7 +415,7 @@ I would pick a preference for auto-review in settings."
   re-review, the follow-up) and AI Fix (+ Plan first) list the models of EVERY provider that is set
   up, signed in and can run the kind (`aiRunnableProviders`: `me.ai.providers.claude.runtime/auth`,
   `me.ai.providers.codex.runtime/kinds`), the default's first, each labelled by `aiModelChoiceLabel`
-  ("Claude Opus 5.5 (most thorough)", "Codex · GPT-6 Astra (most thorough)"). Codex offers the depths
+  ("Claude Opus 5.5 (most thorough)", "Codex · GPT-6.1 Sol (most thorough)"). Codex offers the depths
   Claude's menu offers (`CODEX_PICKER_MODELS`: astra = deep, sol = standard; luna is not offered on
   these surfaces). One provider ready ⇒ the menu reads as it did. `AiRunGate anyProvider` is ready
   when ANY provider can run the kind; its `provider` is the pick, whose budget the meter and the
@@ -426,7 +426,7 @@ I would pick a preference for auto-review in settings."
   signed-in Codex shows the default's sign-in line on a Claude review's chat, not an Ask that fails.
 - **The request** carries `{ provider, model }`; `ai/run-choice.ts resolveManualRunChoice` validates
   it in the route: an unknown provider or a model no menu offers ⇒ 400; a NAMED provider with the
-  other's model ⇒ 400 `ModelNotOnProvider` ("GPT-6 Astra runs on Codex, not Claude."); the provider
+  other's model ⇒ 400 `ModelNotOnProvider` ("GPT-6.1 Sol runs on Codex, not Claude."); the provider
   not signed in or unable to run the kind ⇒ 400 `NoClaudeAuth` with its own sentence. No provider ⇒
   a Codex model's own provider, else the default (an older SPA's Claude model is a DEPTH, run on the
   default as before). The answer is the provider and the Claude model of the same depth, which every
@@ -453,7 +453,7 @@ Default, Low, Medium, High, Extra high, Max.
 - **The map is the identity** (`packages/shared/src/ai-effort.ts`). Claude's Agent SDK `effort` and
   Codex's `model_reasoning_effort` both take `low | medium | high | xhigh | max`: Opus 5.5 and Sonnet 5
   accept all five with adaptive thinking; the Codex CLI 0.164.0 enum is `none | minimal | low | medium
-  | high | xhigh | max | ultra` (read from the binary), with Astra and Sol taking low … ultra and Luna
+  | high | xhigh | max | ultra` (read from the binary), with Sol and Terra taking low … ultra and Luna
   low … max. `none`, `minimal` and `ultra` have no Claude counterpart and are not offered. So "High"
   is `high` on both, which is the fair comparison the user asked for.
 - **Default (NULL) is today's behaviour, exactly**, because today's defaults are not one level:
@@ -486,7 +486,7 @@ Default, Low, Medium, High, Extra high, Max.
   scaled by effort.
 - **Stored and labelled**: the run stamps the effort it SENT with its provider and model
   (`AiRanOn.effort` → `claude_reviews.effort`, `ai_fixes.effort` / `plan_effort`), and
-  `aiRunLabel(provider, model, effort)` adds it: "Claude Opus 5.5 · high", "Codex · GPT-6 Astra ·
+  `aiRunLabel(provider, model, effort)` adds it: "Claude Opus 5.5 · high", "Codex · GPT-6.1 Sol ·
   extra high". A NULL (older row, queued run) reads as before.
 
 ### The review tab's history
@@ -564,7 +564,10 @@ stay on the latest run only. AI Fix keeps no per-PR run selector (only "Earlier 
   (`forced_login_method="chatgpt"`), and Limn checks the sign-in KIND before every run; a sign-in
   whose kind is not yet confirmed does not run.
 - **Models per role** (`CODEX_MODEL_FOR_ROLE`, pinned for `@openai/codex` 0.164.0): deep =
-  `gpt-6-astra`, standard = `gpt-6.1-sol`, fast = `gpt-6-luna`. A review on Opus runs deep, on
+  `gpt-6.1-sol` (the default), standard = `gpt-6.1-terra`, fast = `gpt-6-luna`. ⚠ `gpt-6-astra` was
+  deep until 2026-10-26: at High it spent a ChatGPT Plus 5-hour window in about two reviews, so the
+  owner moved Codex to Sol and Terra. Stored Astra rows still label, and `requestModelOf` maps them
+  to deep. A review on Opus runs deep, on
   Sonnet standard. A Claude model id passed through is never sent to Codex. Re-check the table on
   every CLI bump (`codex debug models`).
 - **Usage and cost.** Codex reports tokens, never US$. On a ChatGPT sign-in a run costs US$ 0 and
@@ -658,6 +661,24 @@ with a "Post SonarCloud findings" button: ONE separate GitHub review per (PR, he
 changed lines, everything else in its summary body (docs/SONARCLOUD.md § Posting) — claimed before the write, never
 retried; an auto review posts it under auto-posting's `sonar` kind. AI Fix seeds the same items as
 `Q<n>`. Contract: [SONARCLOUD.md](SONARCLOUD.md).
+
+## Data, not only code (2026-10-26)
+
+An Opus-vs-Astra comparison on five BNG PRs found that every bug BOTH models missed was a DATA-lifecycle
+bug: a value one side writes that the other side cannot read back ("30+" vs ">30"), stored values outside
+a filtered list wiped on Save, 0 stored where "no value" was meant. The prompts pointed reviewers at CODE
+contracts only. So (both providers — Codex renders the same text):
+
+- The full-checkout system prompt's "Why you're here" has a "Follow the DATA" bullet: for each value
+  written, stored or sent, find its readers and check they handle every value the writer can now
+  produce; existing stored values must survive an edit that does not touch them; "no value" stays
+  distinct from zero or "".
+- The `impact` specialist carries the same rule (no seventh lens: a new lens is a schema/UI change).
+- `FINDINGS_AND_FINISHING` (both modes) asks the lead to re-check every finding, its own and the
+  specialists', before submitting, and to drop or turn into a 'question' any it cannot confirm (Opus
+  had submitted one wrong finding).
+
+`prompt-golden.json` pins the USER message only, so it did not change.
 
 ## No praise findings
 
