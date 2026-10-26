@@ -38,6 +38,7 @@ import {
   validateExplanations,
   type ResolvedPin,
 } from './chat-explain.js';
+import { providerName } from '../../ai/prompt-tools.js';
 
 // CLAUDE REVIEW CHAT (CORE, free, local-only like the rest of Claude Review). Questions about ONE
 // succeeded review: a general thread (findingId null) and one thread per finding. The answer comes
@@ -541,10 +542,10 @@ export async function answerReviewChat(
   // ⚠ CLAIM THE SLOT SYNCHRONOUSLY — before ANY await — so a double-submit (two mounts, a retry)
   // cannot slip past the credit check and bill twice. Released in the finally.
   if (inFlight.has(accountId)) {
-    return { ok: false, status: 409, error: 'Busy', message: 'Claude is still answering.' };
+    return { ok: false, status: 409, error: 'Busy', message: `${providerName()} is still answering.` };
   }
   if (inFlight.size >= CHAT_PROCESS_CAP) {
-    return { ok: false, status: 409, error: 'Busy', message: 'Claude is busy. Try again in a moment.' };
+    return { ok: false, status: 409, error: 'Busy', message: `${providerName()} is busy. Try again in a moment.` };
   }
   inFlight.set(accountId, reviewId);
   try {
@@ -631,7 +632,7 @@ export async function answerReviewChat(
         ok: false,
         status: 502,
         error: result.aborted ? 'Timeout' : 'NoAnswer',
-        message: result.aborted ? 'Claude took too long to answer.' : 'Claude did not answer. Try again.',
+        message: result.aborted ? `${providerName()} took too long to answer.` : `${providerName()} did not answer. Try again.`,
       };
     }
 
@@ -641,7 +642,7 @@ export async function answerReviewChat(
     if (explain) {
       explanations = validateExplanations(result.submitted, pins);
       if (explanations.length === 0) {
-        return { ok: false, status: 502, error: 'NoAnswer', message: 'Claude did not answer. Try again.' };
+        return { ok: false, status: 502, error: 'NoAnswer', message: `${providerName()} did not answer. Try again.` };
       }
       answerText = explanationsMarkdown(explanations, storedPins);
     }

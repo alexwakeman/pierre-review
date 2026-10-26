@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState, type ReactNode, type SyntheticEvent } from 'react';
+import { aiProviderName } from '@pierre-review/shared';
 import { useAiBudget } from '../hooks/useAiBudget.js';
 import { useSettingsModal } from '../store/settingsModal.js';
 import { meterText, pausedSentence, reviewsPerDayText, runButtonsIn } from '../lib/aiBudget.js';
 import { HeaderToast, ToastLineButton } from './HeaderToasts.js';
 import { CoinIcon } from './Icons.js';
 
-// THE CLAUDE SPEND BUDGET'S THREE SMALL SURFACES. All read the ONE query (`useAiBudget`), so the
+// THE AI SPEND BUDGET'S THREE SMALL SURFACES. All read the ONE query (`useAiBudget`), so the
 // header toast, every meter and every confirm share one request. The DECISION is the server's.
 //
 //  • `AiBudgetMeter` — one compact line beside a Run button ("Limn: 2% of your week · limit 5%" on a
@@ -32,7 +33,7 @@ export function AiBudgetMeter(): JSX.Element | null {
       type="button"
       data-ai-budget-meter
       onClick={() => openSettings('claude-spend')}
-      title={`${perDay != null ? `Limn's share pays for ${perDay}.\n` : ''}Claude spend: open Settings`}
+      title={`${perDay != null ? `Limn's share pays for ${perDay}.\n` : ''}AI spend: open Settings`}
       className="whitespace-nowrap rounded text-[11px] text-gray-600 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-gray-300"
     >
       {text}
@@ -109,7 +110,7 @@ export function OverBudgetConfirm({ children }: { children: ReactNode }): JSX.El
           type="button"
           onClick={() => openSettings('claude-spend')}
           className="rounded font-medium hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-          title="Over your Claude spend budget: open Settings"
+          title="Over your AI spend budget: open Settings"
         >
           Over budget
         </button>
@@ -128,16 +129,17 @@ export function AiBudgetToast(): JSX.Element | null {
   const key = data.status.resumesAt ?? 'paused';
   if (dismissedFor === key) return null;
   const sentence = pausedSentence(data.status);
+  const name = aiProviderName(data.status.provider);
   return (
     <HeaderToast
       testId="ai-budget-toast"
       tone="ai"
       icon={<CoinIcon size={13} />}
-      label="Automatic Claude runs paused"
+      label={`Automatic ${name} runs paused`}
       summary={sentence}
       action={<ToastLineButton onClick={() => openSettings('claude-spend')}>Settings</ToastLineButton>}
       onDismiss={() => setDismissedFor(key)}
-      footer={<span>Your own use of Claude is not limited. Runs you start still run after you confirm.</span>}
+      footer={<span>Your own use of {name} is not limited. Runs you start still run after you confirm.</span>}
     />
   );
 }

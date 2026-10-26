@@ -85,6 +85,7 @@ import {
   markReviewPosted,
 } from './persist.js';
 import { resolveFindingBody } from './follow-up.js';
+import { aiRunProviderName, type AiProviderName } from '@pierre-review/shared';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 const s = (ctx: AgentContext): any => ctx.schema as any;
@@ -298,23 +299,28 @@ export function ownLatestReview(reviews: readonly LiveReview[], login: string | 
   return ownStandingReview(reviews, login).state;
 }
 
-/** GitHub's timeline message when Limn dismisses its own automatic request for changes. */
-export const LIFT_BLOCK_MESSAGE = "Claude's blocking findings are fixed.";
+/** GitHub's timeline message when Limn dismisses its own automatic request for changes, naming the
+ *  provider that ran the lifting review (Claude's words are the constant below). */
+export function liftBlockMessage(by: AiProviderName = 'Claude'): string {
+  return `${by}'s blocking findings are fixed.`;
+}
+export const LIFT_BLOCK_MESSAGE = liftBlockMessage('Claude');
 
-/** The review body's lead: the summary's first plain sentence, else a count. */
-export function autoReviewBodyLead(summary: string | null, commentCount: number): string {
+/** The review body's lead: the summary's first plain sentence, else a count. `by` names the provider
+ *  that ran the review (default Claude — its text is unchanged). */
+export function autoReviewBodyLead(summary: string | null, commentCount: number, by: AiProviderName = 'Claude'): string {
   for (const raw of (summary ?? '').split('\n')) {
     const line = raw.trim();
     if (line === '' || /^([-*+]|\d+[.)])\s/.test(line) || line.startsWith('#')) continue;
     return line.length > 400 ? `${line.slice(0, 399)}…` : line;
   }
-  if (commentCount === 0) return 'Reviewed by Claude.';
-  return commentCount === 1 ? 'One comment from Claude.' : `${commentCount} comments from Claude.`;
+  if (commentCount === 0) return `Reviewed by ${by}.`;
+  return commentCount === 1 ? `One comment from ${by}.` : `${commentCount} comments from ${by}.`;
 }
 
 /** The posted body of an auto review: the lead, then the footer (the seam appends the marker). */
-export function autoReviewBody(summary: string | null, commentCount: number): string {
-  return `${autoReviewBodyLead(summary, commentCount)}\n\n${AUTO_POST_FOOTER}`;
+export function autoReviewBody(summary: string | null, commentCount: number, by: AiProviderName = 'Claude'): string {
+  return `${autoReviewBodyLead(summary, commentCount, by)}\n\n${AUTO_POST_FOOTER}`;
 }
 
 // ---- I/O ----
@@ -840,7 +846,7 @@ async function autoPostReview(
       name: pctx.name,
       prNumber: pctx.prNumber,
       reviewHeadSha: pctx.reviewHeadSha,
-      body: autoReviewBody(review.summary, picked.toPost.length),
+      body: autoReviewBody(review.summary, picked.toPost.length, aiRunProviderName(review)),
       // COMMENT unless auto verdict is on AND its gate let the verdict through.
       verdict: ev,
       // Questions ride the same review: the seam anchors each inline, else falls back.
@@ -904,7 +910,7 @@ async function autoPostReview(
       let res: { ok: true } | { ok: false; message: string };
       try {
         res = deps.dismissReview
-          ? await deps.dismissReview(accountId, pctx.owner, pctx.name, pctx.prNumber, liftId, LIFT_BLOCK_MESSAGE)
+          ? await deps.dismissReview(accountId, pctx.owner, pctx.name, pctx.prNumber, liftId, liftBlockMessage(aiRunProviderName(review)))
           : { ok: false, message: 'Dismissing is not available.' };
       } catch (err) {
         res = { ok: false, message: errText(err) };

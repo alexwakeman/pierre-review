@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import type { AiRuntimeInstallEvent, MeResponse } from '@pierre-review/shared';
+import type { AiProviderId, AiProviderName, AiRuntimeInstallEvent, MeResponse } from '@pierre-review/shared';
 import { api } from '../api/client.js';
 import { sseStream } from '../api/sse.js';
 import { useMe } from './useTriage.js';
@@ -20,6 +20,19 @@ export {
 
 export function useAiCapabilities(): AiCapabilities {
   return aiCapabilitiesOf(useMe().data);
+}
+
+/**
+ * THE ONE SOURCE FOR THE ACTIVE PROVIDER'S NAME in copy: 'Claude' or 'Codex' (`/api/me` ai.provider).
+ * Every sentence that means "the AI that will run now" reads it. A STORED run names its own provider.
+ */
+export function useAiProviderName(): AiProviderName {
+  return aiCapabilitiesOf(useMe().data).providerName;
+}
+
+/** The active provider's id ('claude' | 'codex'). */
+export function useAiProvider(): AiProviderId {
+  return aiCapabilitiesOf(useMe().data).provider;
 }
 
 // ---- The one-time runtime install (POST /api/ai/runtime/install, SSE) ----------------------------

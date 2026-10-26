@@ -2,7 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type R
 import type { ClaudeReviewPrState, TicketMergedPr, TicketReviewState, TimelinePr, User } from '@pierre-review/shared';
 import { useRepos, useUsers } from '../../hooks/useTimeline.js';
 import { useMaintainersByRepo } from '../../hooks/useMaintainers.js';
-import { aiReadyFor, useAiCapabilities } from '../../hooks/useAiCapabilities.js';
+import { aiReadyFor, useAiCapabilities, useAiProviderName } from '../../hooks/useAiCapabilities.js';
 import { useClaudeReviewStarting, useClaudeReviewStates } from '../../hooks/useClaudeReview.js';
 import { useWorkspaceAutoReview } from '../../hooks/useWorkspaceAutoReview.js';
 import { reviewWorkInProgress } from '../../lib/claudeReviewColumn.js';
@@ -997,12 +997,13 @@ function ClaudeWorkChip({
   ticketRunning: boolean;
 }): JSX.Element | null {
   const starting = useClaudeReviewStarting(prId);
+  const aiName = useAiProviderName();
   const work = reviewWorkInProgress({ review: state, starting, ciRunning, ticketRunning });
   if (work.length === 0) return null;
   return (
     <span
       className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded bg-ai-signal/10 px-1.5 py-px text-[11px] font-medium text-ai-signal"
-      title="Claude is working on this PR"
+      title={`${aiName} is working on this PR`}
     >
       <span aria-hidden className="h-1.5 w-1.5 animate-pulse rounded-full bg-ai-signal-fill" />
       {work.join(' · ')}

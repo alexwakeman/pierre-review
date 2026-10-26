@@ -238,7 +238,7 @@ describe('the Claude reviews tab', () => {
     expect(pendingTabHolds(def('my_turn'), reply)).toBe(true);
     expect(pendingTabOfCard(claude)).toBe('claude');
     expect(pendingTabOfCard(reply)).toBe('my_turn');
-    expect(TAB_LABEL.claude).toBe('Claude reviews');
+    expect(TAB_LABEL.claude).toBe('AI reviews');
   });
 });
 

@@ -54,6 +54,6 @@ const DEFAULT_MODEL = 'claude-haiku-5-5';
 export async function cheapComplete(
   opts: CheapCompleteOpts,
 ): Promise<CheapCompleteResult> {
-  if (!config.aiEnabled) throw new Error('Claude is switched off here.');
+  if (!config.aiEnabled) throw new Error('AI is switched off here.');
   return getActiveProvider().complete({ ...opts, model: opts.model ?? DEFAULT_MODEL, role: 'fast' });
 }

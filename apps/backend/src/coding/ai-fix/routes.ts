@@ -175,7 +175,7 @@ function parseStartBody(rawBody: GenerateFixBody | undefined): ParsedStartBody {
   }
   const raw = (body as { sourceReviewId?: unknown }).sourceReviewId;
   if (typeof raw !== 'number' || !Number.isInteger(raw) || raw <= 0) {
-    return { error: 'ReviewRequired', message: 'Pick a Claude review to fix from.' };
+    return { error: 'ReviewRequired', message: 'Pick an AI review to fix from.' };
   }
   // The fix picker's selection: picker keys. Absent ⇒ the server's defaults. Anything but an
   // array of short strings is a 400; an unknown key is ignored (it selects nothing).
@@ -335,7 +335,7 @@ export function registerAiFixRoutes(app: FastifyInstance, ctx: AgentContext): vo
           case 'review_unavailable':
             return reply.code(409).send({
               error: 'ReviewUnavailable',
-              message: 'That review is not available. Run a Claude review on this PR first.',
+              message: 'That review is not available. Run an AI review on this PR first.',
             });
           case 'nothing_to_fix':
             return reply.code(409).send({
@@ -409,20 +409,20 @@ export function registerAiFixRoutes(app: FastifyInstance, ctx: AgentContext): vo
       const given = raw != null && raw !== '';
       const picked = given ? parseId(raw) : null;
       if (given && (picked == null || picked <= 0))
-        return reply.code(400).send({ error: 'ReviewRequired', message: 'Pick a Claude review to fix from.' });
+        return reply.code(400).send({ error: 'ReviewRequired', message: 'Pick an AI review to fix from.' });
       const pr = await getFixPrContext(ctx, accountId, prId);
       if (!pr) return reply.code(404).send({ error: 'not found' });
       const reviewId = picked ?? (await getLatestSucceededReviewId(ctx, prId, accountId));
       if (reviewId == null)
         return reply.code(409).send({
           error: 'ReviewUnavailable',
-          message: 'Run a Claude review on this PR first.',
+          message: 'Run an AI review on this PR first.',
         });
       const preview = await loadFixPreview(ctx, { accountId, prId, reviewId });
       if (!preview)
         return reply.code(409).send({
           error: 'ReviewUnavailable',
-          message: 'That review is not available. Run a Claude review on this PR first.',
+          message: 'That review is not available. Run an AI review on this PR first.',
         });
       const resp: AiFixPickerPreview = preview;
       return reply.send(resp);

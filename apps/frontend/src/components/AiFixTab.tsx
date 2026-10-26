@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useIsMutating } from '@tanstack/react-query';
 import {
+  aiPickerModelLabel,
+  aiRunProviderName,
   CLAUDE_REVIEW_MODELS,
   CLAUDE_REVIEW_MODEL_LABELS,
   DEFAULT_AI_FIX_MODEL,
@@ -200,7 +202,7 @@ function FixerSection({
     // The merge half: its own run, opening the resolver when Claude's answer is ready. Started on
     // the PRESS, not in a mutate()-scoped callback (lost if this tab unmounts before the fix POST
     // answers) — it does not depend on the fix's result.
-    if (alsoResolve && conflictsResolvable) startConflictAiRun(resolverTargetOf(pr), { model });
+    if (alsoResolve && conflictsResolvable) startConflictAiRun(resolverTargetOf(pr), { model, providerName: ai.providerName });
   };
 
   return (
@@ -209,18 +211,18 @@ function FixerSection({
         info={
           <InfoButton title="AI Fix">
             <p>
-              Claude reads the PR's code and edits files in a private copy. It has no shell, so it
+              {ai.providerName} reads the PR's code and edits files in a private copy. It has no shell, so it
               installs, builds and tests nothing.
             </p>
             <p>
-              A fix starts from a Claude review. Pick what it should work on: Claude's findings,
-              earlier findings still open, threads Claude says need a fix, unanswered threads, CI
+              A fix starts from an AI review. Pick what it should work on: the review's findings,
+              earlier findings still open, threads the review says need a fix, unanswered threads, CI
               failures and ticket gaps are ticked; style bot comments are not.
             </p>
             <p>
-              Tick Plan first to read Claude's plan, steer it and approve it before anything changes.
+              Tick Plan first to read {ai.providerName}'s plan, steer it and approve it before anything changes.
             </p>
-            <p>Claude reports what it changed in each file and what it left alone, and why.</p>
+            <p>{ai.providerName} reports what it changed in each file and what it left alone, and why.</p>
             <p>
               Nothing is pushed until you press Push. An automatic fix on your own PR is pushed for
               you only when Push automatically is on in Settings.
@@ -242,15 +244,15 @@ function FixerSection({
               <div className="flex flex-wrap items-center gap-2">
                 <p className="text-xs text-gray-600 dark:text-gray-300">
                   {latest?.status === 'running' || latest?.status === 'queued'
-                    ? 'A fix starts from a Claude review. One is running.'
-                    : 'A fix starts from a finished Claude review.'}
+                    ? 'A fix starts from an AI review. One is running.'
+                    : 'A fix starts from a finished AI review.'}
                 </p>
                 <button
                   type="button"
                   className={BTN_PRIMARY}
                   onClick={() => setPrDetailTab(pr.id, 'claude_review')}
                 >
-                  Open Claude Review
+                  Open AI Review
                 </button>
               </div>
             )}
@@ -309,7 +311,7 @@ function FixerSection({
                     >
                       {CLAUDE_REVIEW_MODELS.map((m) => (
                         <option key={m} value={m}>
-                          {CLAUDE_REVIEW_MODEL_LABELS[m]}
+                          {aiPickerModelLabel(ai.provider, m, CLAUDE_REVIEW_MODEL_LABELS[m])}
                         </option>
                       ))}
                     </select>
@@ -450,7 +452,7 @@ function FixResult({
   if (fix.status === 'failed' && fix.plan?.status === 'failed') {
     return (
       <div className="mt-3 rounded border border-red-200 bg-red-50 p-2 text-xs text-red-700 dark:border-red-800 dark:bg-red-950/30 dark:text-red-300">
-        Claude could not make a plan: {fix.error ?? 'unknown error'}
+        {aiRunProviderName(fix)} could not make a plan: {fix.error ?? 'unknown error'}
       </div>
     );
   }

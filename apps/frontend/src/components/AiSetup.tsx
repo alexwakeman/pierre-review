@@ -1,7 +1,6 @@
 import type { ReactNode } from 'react';
-import type { AiRunKind } from '@pierre-review/shared';
+import { aiSignInLine, type AiRunKind } from '@pierre-review/shared';
 import {
-  AI_AUTH_LINE,
   AI_SETUP_LABEL,
   aiAuthFor,
   useAiCapabilities,
@@ -13,7 +12,7 @@ import { AiBudgetMeter, OverBudgetConfirm } from './AiBudget.js';
 /**
  * What sits in place of a Run button for an agentic AI surface (Claude Review, the review chat,
  * AI Fix). In order: nothing when AI is off; the one-time runtime download when the SDKs are not
- * installed yet; ONE plain line when no Claude credential was detected; otherwise the children
+ * installed yet; ONE plain line when the active provider has no credential; otherwise the children
  * (the real button).
  *
  * `auth` lets a surface pass a fresher answer than `/api/me` (the Claude Review route reports its
@@ -23,7 +22,7 @@ import { AiBudgetMeter, OverBudgetConfirm } from './AiBudget.js';
  * reads `/api/me`'s answer FOR THAT KIND (`ai.kinds`): a provider may run some kinds and not others
  * (Codex, while its agents are being ported). Without it, the top-level answer ("any agent").
  *
- * THE CLAUDE SPEND BUDGET rides here, so every AI surface gets it: the compact meter after the
+ * THE AI SPEND BUDGET rides here, so every AI surface gets it: the compact meter after the
  * button while the budget is on, and — over budget — the button takes two presses (the run is the
  * reader's choice, never refused). `meter={false}` drops the meter where a surface has no room.
  */
@@ -54,9 +53,12 @@ export function AiRunGate({
 
 export function AiAuthLine({ kind }: { kind?: AiRunKind } = {}): JSX.Element {
   // The server's own sentence when it sent one (e.g. "Codex cannot run … yet" under
-  // LIMN_AI_PROVIDER=codex — the kind's own when the gate named one), else the default sign-in line.
+  // LIMN_AI_PROVIDER=codex — the kind's own when the gate named one), else the ACTIVE provider's
+  // sign-in line.
   const ai = useAiCapabilities();
-  return <span className="text-xs text-gray-600 dark:text-gray-300">{aiAuthFor(ai, kind).message ?? AI_AUTH_LINE}</span>;
+  return (
+    <span className="text-xs text-gray-600 dark:text-gray-300">{aiAuthFor(ai, kind).message ?? aiSignInLine(ai.provider)}</span>
+  );
 }
 
 /** The "Set up AI" button, its progress line, and a failure with Retry. */

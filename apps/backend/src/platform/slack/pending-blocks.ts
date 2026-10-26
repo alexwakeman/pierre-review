@@ -71,7 +71,7 @@ export const MY_TURN_REASON_TEXT: Record<MyTurnCardReason, string> = {
   own_ready: 'Ready to land',
   your_pr: 'Your PR',
   own_thread: 'Unanswered thread',
-  claude_review: 'Claude review',
+  claude_review: 'AI review',
   watched_repo_pr: 'New PR',
 };
 

@@ -27,8 +27,8 @@ function notifyReviewsComplete(done: CompletedCoord[]): void {
   }
   const title =
     done.length === 1
-      ? 'Claude review ready'
-      : `${done.length} Claude reviews ready`;
+      ? 'AI review ready'
+      : `${done.length} AI reviews ready`;
   const body =
     done.length === 1
       ? `${done[0]!.repoFullName} #${done[0]!.prNumber}`
@@ -204,11 +204,11 @@ export function ClaudeReviewBanner(): JSX.Element | null {
     <HeaderToast
       testId="claude-review-toast"
       tone="ai"
-      label="Claude reviews"
+      label="AI reviews"
       icon={<ReviewIcon size={13} />}
       summary={running.length > 0 ? `${running.length} running` : `${ready} ready`}
       onDismiss={allDone ? dismissAll : undefined}
-      dismissLabel="Dismiss the Claude reviews card"
+      dismissLabel="Dismiss the AI reviews card"
     >
       <ToastList>
         {visible.map((e) => (

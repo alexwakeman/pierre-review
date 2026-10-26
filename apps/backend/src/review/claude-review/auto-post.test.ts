@@ -218,6 +218,14 @@ describe('the pure rules', () => {
     expect(ap.autoReviewBody('One sentence.\n\n- a\n- b', 2)).toBe(`One sentence.\n\n${AUTO_POST_FOOTER}`);
     expect(ap.autoReviewBody('- only bullets', 3)).toBe(`3 comments from Claude.\n\n${AUTO_POST_FOOTER}`);
   });
+  it('a run Codex made names Codex in the posted body and the lift; Claude’s words are unchanged', () => {
+    expect(ap.autoReviewBodyLead('- only bullets', 0)).toBe('Reviewed by Claude.');
+    expect(ap.autoReviewBodyLead('- only bullets', 0, 'Codex')).toBe('Reviewed by Codex.');
+    expect(ap.autoReviewBodyLead('- only bullets', 1, 'Codex')).toBe('One comment from Codex.');
+    expect(ap.autoReviewBody('- only bullets', 3, 'Codex')).toBe(`3 comments from Codex.\n\n${AUTO_POST_FOOTER}`);
+    expect(ap.liftBlockMessage()).toBe(ap.LIFT_BLOCK_MESSAGE);
+    expect(ap.liftBlockMessage('Codex')).toBe("Codex's blocking findings are fixed.");
+  });
 });
 
 describe('off, manual, and which PRs', () => {

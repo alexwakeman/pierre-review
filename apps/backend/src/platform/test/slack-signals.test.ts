@@ -71,6 +71,7 @@ const core = {
     verdict: text('verdict'),
     summary: text('summary'),
     reviewMode: text('review_mode'),
+    model: text('model'),
   }),
 };
 
@@ -92,7 +93,7 @@ describe('Slack event signals', () => {
       CREATE TABLE repos (id integer PRIMARY KEY, owner text, name text);
       CREATE TABLE users (id integer PRIMARY KEY, github_login text);
       CREATE TABLE pull_requests (id integer PRIMARY KEY, account_id integer, repo_id integer, number integer, title text, author_id integer, merged_by_id integer);
-      CREATE TABLE claude_reviews (id integer PRIMARY KEY, account_id integer, pr_id integer, status text, verdict text, summary text, review_mode text);
+      CREATE TABLE claude_reviews (id integer PRIMARY KEY, account_id integer, pr_id integer, status text, verdict text, summary text, review_mode text, model text);
       CREATE TABLE pro_settings (id integer PRIMARY KEY, account_id integer, slack_webhook_url text, slack_cadence text, slack_hour1 integer, slack_hour2 integer, slack_timezone text, slack_last_sent_at integer, slack_last_sent_slot text, bot_slack_digest integer);
       INSERT INTO workspaces VALUES (1, 1, 'Default', 1), (9, 2, 'Other', 1);
       INSERT INTO workspace_repos VALUES (1, 1, 1, 10), (2, 2, 9, 20);
@@ -100,9 +101,10 @@ describe('Slack event signals', () => {
       INSERT INTO users VALUES (1, 'alice'), (2, 'bob');
       INSERT INTO pull_requests VALUES (100, 1, 10, 12, 'Fix <!channel> login', 1, 2), (200, 2, 20, 3, 'Theirs', 1, 2);
       INSERT INTO claude_reviews VALUES
-        (5, 1, 100, 'succeeded', 'REQUEST_CHANGES', 'Two bugs in the token refresh.', 'worktree'),
-        (6, 1, 100, 'succeeded', 'COMMENT', 'Nothing to review.', 'skip'),
-        (7, 1, 100, 'failed', NULL, NULL, 'worktree');
+        (5, 1, 100, 'succeeded', 'REQUEST_CHANGES', 'Two bugs in the token refresh.', 'worktree', 'claude-opus-5-5'),
+        (6, 1, 100, 'succeeded', 'COMMENT', 'Nothing to review.', 'skip', 'claude-opus-5-5'),
+        (7, 1, 100, 'failed', NULL, NULL, 'worktree', 'claude-opus-5-5'),
+        (8, 1, 100, 'succeeded', 'COMMENT', 'One nit.', 'worktree', 'gpt-6-astra');
     `);
     sqlite.exec(migrationSql('0030_workspace_slack_targets.sql'));
     sqlite.exec(migrationSql('0033_slack_target_bot_digest.sql'));
@@ -132,6 +134,16 @@ describe('Slack event signals', () => {
     expect(posted[0]!.body).toContain('by @alice');
     expect(posted[0]!.body).not.toContain('<!channel>');
     expect(posted[0]!.body).toContain(`${BASE}/app/?workspace=1`);
+    expect(posted[0]!.text).toBe('Claude Review ran on acme/api#12');
+  });
+
+  it('review: a run Codex made names Codex', async () => {
+    await writeTarget(ctx, 1, 1, { webhookUrl: WEBHOOK, notifyReviews: true });
+    await onClaudeReviewCompleted(ctx, { accountId: 1, prId: 100, reviewId: 8 });
+    expect(posted).toHaveLength(1);
+    expect(posted[0]!.text).toBe('Codex Review ran on acme/api#12');
+    expect(posted[0]!.body).toContain('Codex Review ran');
+    expect(posted[0]!.body).not.toContain('Claude');
   });
 
   it('review: a skip-routed or failed run sends nothing', async () => {

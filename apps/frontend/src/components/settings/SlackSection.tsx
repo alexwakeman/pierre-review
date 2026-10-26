@@ -192,7 +192,7 @@ export function SlackSection(): JSX.Element {
   return (
     <SectionShell
       title="Slack"
-      desc="Sends this workspace’s Pending board, merges and Claude reviews to a Slack channel."
+      desc="Sends this workspace’s Pending board, merges and AI reviews to a Slack channel."
       info={
         <InfoButton title="Slack">
           <p>
@@ -331,7 +331,7 @@ export function SlackSection(): JSX.Element {
           />
           <span>
             <span className="font-medium text-gray-700 dark:text-gray-200">
-              Post when a Claude review runs
+              Post when an AI review runs
             </span>
             <span className="block text-[12px] text-gray-400">
               The pull request, its verdict and the review’s summary. Not the comments.

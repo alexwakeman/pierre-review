@@ -417,7 +417,7 @@ describe('the fix picker — preview and selection', () => {
     getLatestSucceededReviewId.mockResolvedValueOnce(null);
     const none = await app.inject({ method: 'GET', url: '/api/pro/prs/7/ai-fix/preview' });
     expect(none.statusCode).toBe(409);
-    expect(none.json()).toMatchObject({ error: 'ReviewUnavailable', message: 'Run a Claude review on this PR first.' });
+    expect(none.json()).toMatchObject({ error: 'ReviewUnavailable', message: 'Run an AI review on this PR first.' });
     await app.close();
   });
 

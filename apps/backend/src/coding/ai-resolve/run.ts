@@ -16,6 +16,7 @@ import {
 import { acceptAiChoices, AI_CHOICE_REFUSAL_TEXT, type AiChoiceInput } from './validate.js';
 import { buildAiResolvePrompt } from './prompt.js';
 import { partialSpendOf } from '../partial-spend.js';
+import { providerName } from '../../ai/prompt-tools.js';
 
 /**
  * "RESOLVE WITH CLAUDE" — the agentic half of the merge-conflict resolver (CORE, free, LOCAL ONLY:
@@ -185,6 +186,8 @@ async function runJob(
   // is kept as it is — the regions it still gets wrong stay undecided for the reader, exactly as
   // on Claude when the model stops calling. Claude's replies are today's, byte for byte.
   let codexRetryAsked = false;
+  // The provider the run used, for its failure sentence (null until picked).
+  let runProvider: AgentProviderId | null = null;
   try {
     if (created) await input.runOpen(rec, input.log);
     else await waitForBuild(rec);
@@ -207,6 +210,7 @@ async function runJob(
 
     // THE PROVIDER IS PICKED ONCE: the prompt is worded for it (ai/prompt-tools.ts) and the run uses it.
     const provider: AgentProviderId = activeProviderId();
+    runProvider = provider;
     const built = buildAiResolvePrompt(model, undefined, provider);
     if (rec.ai) {
       rec.ai.view = {
@@ -340,7 +344,7 @@ async function runJob(
       });
     } else {
       input.log.warn({ err, prId: rec.prId }, 'ai-resolve run failed');
-      settle(rec, { status: 'failed', error: 'Claude couldn’t finish resolving these conflicts.' });
+      settle(rec, { status: 'failed', error: `${providerName(runProvider ?? undefined)} couldn’t finish resolving these conflicts.` });
     }
   } finally {
     rec.aiRunning = false;

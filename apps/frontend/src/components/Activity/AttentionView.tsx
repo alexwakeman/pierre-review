@@ -182,7 +182,7 @@ export const LENS_COPY: Record<
 
 const TAB_EMPTY: Record<PendingTabKey, string> = {
   my_turn: 'Nothing is your turn right now.',
-  claude: 'No finished Claude reviews are waiting on you.',
+  claude: 'No finished AI reviews are waiting on you.',
   fixing: 'No failing builds or merge conflicts are yours to fix.',
   review: 'No reviews are waiting.',
   threads: 'No review threads are waiting for an answer.',

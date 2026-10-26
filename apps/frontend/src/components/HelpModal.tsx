@@ -3,6 +3,8 @@ import { Wordmark } from './Wordmark';
 import { CloseIcon, WorkspaceIcon } from './Icons.js';
 import { closeActivePopover } from '../lib/activePopover.js';
 import { weightPhrase } from './settings/myTurnSettingsForm.js';
+import { aiCredentialWords } from '@pierre-review/shared';
+import { useAiProvider } from '../hooks/useAiCapabilities.js';
 
 // Compact, scrollable help overlay opened from the header "?" button. A very brief
 // tour of the core flows — tracking repos, the timeline, focus mode, navigation.
@@ -10,6 +12,7 @@ import { weightPhrase } from './settings/myTurnSettingsForm.js';
 // capture phase and stops propagation so a stray dismiss doesn't also reach the
 // global keyboard hook (which would exit focus / clear the selection).
 export function HelpModal({ onClose }: { onClose: () => void }): JSX.Element {
+  const provider = useAiProvider();
   // A board popover opened from the keyboard would otherwise stay open over this dialog, and take
   // its first Escape (lib/activePopover.ts).
   useEffect(() => {
@@ -142,10 +145,10 @@ export function HelpModal({ onClose }: { onClose: () => void }): JSX.Element {
             <strong>Activity</strong> and <strong>Timeline</strong> plus any PR tabs you open.
           </Section>
 
-          <Section title="Claude Review and AI Fix (on your machine)">
-            The <strong>Claude Review</strong> tab reviews a PR into findings; you pick which to
+          <Section title="AI Review and AI Fix (on your machine)">
+            The <strong>AI Review</strong> tab reviews a PR into findings; you pick which to
             post as one GitHub review. <strong>AI Fix</strong> edits the branch for you to push.
-            Both run on your own Claude Code login or Anthropic API key — Limn stores no key and charges
+            Both run on {aiCredentialWords(provider)} — Limn stores no key and charges
             nothing. The reviewer reads code; it cannot edit files, run commands or reach the web.
             The fixer edits files but has no shell, and builds and tests nothing. Nothing is posted
             or pushed until you press the button.

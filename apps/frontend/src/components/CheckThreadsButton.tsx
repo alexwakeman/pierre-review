@@ -1,6 +1,7 @@
 import type { ThreadCheckProgress, ThreadCheckRefusal, ThreadCheckRun } from '@pierre-review/shared';
 import { ApiError } from '../api/client.js';
 import { useThreadCheck } from '../hooks/useThreadCheck.js';
+import { useAiProviderName } from '../hooks/useAiCapabilities.js';
 import { AiRunGate } from './AiSetup.js';
 import { AiStatusLine } from './AiStatusLine.js';
 import { InfoButton } from './InfoModal.js';
@@ -14,7 +15,7 @@ import { PendingClaudeReviewIcon } from './Icons.js';
 const REFUSAL_WORDS: Record<ThreadCheckRefusal, string> = {
   no_threads: 'This pull request has no review threads to check.',
   nothing_changed: 'Every thread already has a current judgement.',
-  own_findings_only: 'Every thread here is one of Claude’s own comments. A Claude review follows those up.',
+  own_findings_only: 'Every thread here is one of Limn’s own review comments. An AI review follows those up.',
 };
 
 /** The status line's stage words for a running check. Exported for tests. */
@@ -38,6 +39,7 @@ export function threadCheckStage(
 
 export function CheckThreadsButton({ prId }: { prId: number }): JSX.Element | null {
   const { enabled, data, active, start, cancel } = useThreadCheck(prId);
+  const name = useAiProviderName();
   if (!enabled) return null;
   const check = data?.check ?? null;
 
@@ -87,7 +89,7 @@ export function CheckThreadsButton({ prId }: { prId: number }): JSX.Element | nu
       </AiRunGate>
       <InfoButton title="Check threads">
         <p>
-          Claude reads only the review threads that changed since it last judged them: new threads,
+          {name} reads only the review threads that changed since it last judged them: new threads,
           new replies, resolved or reopened threads, and threads whose code has new commits.
         </p>
         <p>Each thread then shows whether the comment holds up and where the code stands.</p>

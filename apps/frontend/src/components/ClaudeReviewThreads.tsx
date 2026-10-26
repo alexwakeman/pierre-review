@@ -31,6 +31,7 @@ import { InfoButton } from './InfoModal.js';
 import { ReviewSection } from './ReviewSection.js';
 import { PrRefText } from './ReviewPrRefs.js';
 import { REVIEW_CHIP, REVIEW_PROSE } from '../lib/reviewStyles.js';
+import { useAiProviderName } from '../hooks/useAiCapabilities.js';
 
 const CHIP = REVIEW_CHIP;
 const MUTED = 'text-gray-500 dark:text-gray-400';
@@ -247,6 +248,7 @@ export function ClaudeReviewThreadsSection({
   actions?: ReactNode;
 }): JSX.Element | null {
   const [moreOpen, setMoreOpen] = useState(false);
+  const providerName = useAiProviderName();
   const parts = useMemo(() => partitionThreads(items ?? []), [items]);
   if (items == null) return null;
   const pills = threadCountPills(counts ?? threadAssessmentCounts(items));
@@ -262,7 +264,7 @@ export function ClaudeReviewThreadsSection({
       info={
         <InfoButton title="Review threads">
           <p>
-            Comments from people and other review bots. Claude checks each one against the code:
+            Comments from people and other review bots. {providerName} checks each one against the code:
             does the comment hold up, and where does the code stand. Each carries a one-line reason;
             More opens the longer one.
           </p>

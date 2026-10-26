@@ -180,13 +180,13 @@ describe('buildPendingBlocks', () => {
     expect(Object.keys(MY_TURN_REASON_TEXT).sort()).toEqual([...reasons].sort());
   });
 
-  it('labels an auto-started Claude review "Auto review"', () => {
-    const detail = 'Claude review ready · COMMENT';
+  it('labels an auto-started AI review "Auto review"', () => {
+    const detail = 'AI review ready · COMMENT';
     expect(pendingCardText(pr('a', 'my_turn', 1, { reason: 'claude_review', trigger: 'auto', detail }))).toBe(
       `Auto review: ${detail}`,
     );
     expect(pendingCardText(pr('m', 'my_turn', 1, { reason: 'claude_review', trigger: 'manual', detail }))).toBe(
-      `Claude review: ${detail}`,
+      `AI review: ${detail}`,
     );
   });
 });

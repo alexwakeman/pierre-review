@@ -73,7 +73,7 @@ describe('aiCapabilitiesOf', () => {
 
   it("the auth line prints the server's own sentence when it sent one (e.g. Codex not available yet)", () => {
     const src = readFileSync(new URL('../src/components/AiSetup.tsx', import.meta.url), 'utf8');
-    expect(src).toMatch(/aiAuthFor\(ai, kind\)\.message \?\? AI_AUTH_LINE/);
+    expect(src).toMatch(/aiAuthFor\(ai, kind\)\.message \?\? aiSignInLine\(ai\.provider\)/);
   });
 });
 

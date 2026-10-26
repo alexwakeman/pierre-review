@@ -33,6 +33,7 @@ import {
 import { editShapeFor, validateConflictEdit } from '../../conflict/suggestion.js';
 import { getPrWriteContext, WRITE_PERMISSIONS } from '../../db/queries.js';
 import { accountIdOf } from '../plugins/auth.js';
+import { providerName } from '../../ai/prompt-tools.js';
 
 /**
  * THE MERGE-CONFLICT RESOLVER'S SEVEN ROUTES (CORE / free, BOTH MODES).
@@ -855,7 +856,7 @@ function preflightDecisions(
             reply,
             400,
             'UnknownSuggestion',
-            'That suggestion has expired. Ask Claude again.',
+            `That suggestion has expired. Ask ${providerName()} again.`,
           );
         }
       }

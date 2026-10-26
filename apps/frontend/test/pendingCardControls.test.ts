@@ -764,14 +764,14 @@ describe('the type chip names what you are being asked to do', () => {
     ).toBe('New PR');
   });
 
-  it('says "Auto review" on a Claude review the workspace started, "Claude review" on a clicked one', () => {
+  it('says "Auto review" on an AI review the workspace started, "AI review" on a clicked one', () => {
     expect(myTurnReasonLabel(myTurnCard({ reason: 'claude_review', trigger: 'auto' }))).toBe(
       'Auto review',
     );
     expect(myTurnReasonLabel(myTurnCard({ reason: 'claude_review', trigger: 'manual' }))).toBe(
-      'Claude review',
+      'AI review',
     );
-    expect(myTurnReasonLabel(myTurnCard({ reason: 'claude_review' }))).toBe('Claude review');
+    expect(myTurnReasonLabel(myTurnCard({ reason: 'claude_review' }))).toBe('AI review');
   });
 
   it('says which kind of ready a promoted PR is — the words its home tab uses', () => {

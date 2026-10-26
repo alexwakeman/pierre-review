@@ -115,6 +115,7 @@ function ResolveConflictsMenu({
   const active = conflictAiRunActive(run);
   const ai = useAiCapabilities();
   const aiReady = aiReadyFor(ai, 'resolve');
+  const name = ai.providerName;
   useClickOutside(rootRef, () => setOpen(false), open);
   useEffect(() => {
     if (!open) return;
@@ -133,7 +134,7 @@ function ResolveConflictsMenu({
       <div className="inline-flex min-w-[14rem] flex-col gap-1">
         <div className="flex items-center gap-2 text-xs text-gray-700 dark:text-gray-200">
           <SparkleIcon size={12} className="text-ai-signal" />
-          <span>{conflictAiPhaseLabel(run.phase)}</span>
+          <span>{conflictAiPhaseLabel(run.phase, name)}</span>
           <button
             type="button"
             onClick={() => cancelConflictAiRun(target.prId)}
@@ -142,7 +143,7 @@ function ResolveConflictsMenu({
             Cancel
           </button>
         </div>
-        <RegenProgressBar active label="Resolving conflicts with Claude" timeConstantSec={60} />
+        <RegenProgressBar active label={`Resolving conflicts with ${name}`} timeConstantSec={60} />
       </div>
     );
   }
@@ -193,11 +194,11 @@ function ResolveConflictsMenu({
               className={item}
               onClick={() => {
                 setOpen(false);
-                startConflictAiRun(target);
+                startConflictAiRun(target, { providerName: name });
               }}
             >
               <SparkleIcon size={13} />
-              Resolve with Claude
+              Resolve with {name}
             </button>
           ) : (
             <div className="px-3 py-1.5">
@@ -207,7 +208,7 @@ function ResolveConflictsMenu({
             </div>
           )}
           <p className="px-3 pb-1 pt-0.5 text-[11px] text-gray-600 dark:text-gray-300">
-            You check Claude’s choices before anything is pushed.
+            You check {name}’s choices before anything is pushed.
           </p>
         </div>
       )}

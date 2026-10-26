@@ -69,6 +69,7 @@ import {
 import { config } from '../../config.js';
 import { activeProviderId } from '../../ai/provider-setting.js';
 import type { AgentProviderId } from '../../ai/provider.js';
+import { providerName } from '../../ai/prompt-tools.js';
 
 // In-memory job manager for AI Fix's agentic fixer (CORE, free, local-only — it left the plugin
 // with Claude Review; the PR summary and the CI-failure analysis stayed Pro). A SINGLE global slot (concurrency 1) carries every
@@ -708,7 +709,7 @@ async function launchPlanPass(ctx: AgentContext, job: PlanJob): Promise<void> {
       await markPlanPassEnded(
         ctx,
         job.fixId,
-        { kind: 'failed', message: 'Claude did not hand in a plan. Try again.' },
+        { kind: 'failed', message: `${providerName(job.provider)} did not hand in a plan. Try again.` },
         pass,
       );
       finalStatus = job.hadPlan ? 'planned' : 'failed';

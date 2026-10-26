@@ -39,7 +39,8 @@ import {
   reminderChipLabel,
 } from '../lib/autoPost.js';
 import { unlockReviewSound } from '../lib/sound.js';
-import { useAiCapabilities } from '../hooks/useAiCapabilities.js';
+import { useAiCapabilities, useAiProviderName } from '../hooks/useAiCapabilities.js';
+import { aiCredentialWords, aiPickerModelLabel, aiRunProviderName } from '@pierre-review/shared';
 import { AiRunGate } from './AiSetup.js';
 import { useFilters } from '../store/filters.js';
 import { PrActionControls, usePrActionsVisible } from './pr/PrActionsRow.js';
@@ -614,9 +615,12 @@ export function FindingRow({
   actions = true,
   selection = null,
   docReferences = null,
+  authorName = 'Claude',
 }: {
   prId: number;
   finding: ClaudeFinding;
+  /** Who wrote the finding: the provider that ran its review ('Claude' | 'Codex'). */
+  authorName?: string;
   editable: boolean;
   prUrl: string;
   // "owner/name" — for building a blob permalink to the finding's line.
@@ -1086,7 +1090,7 @@ export function FindingRow({
                     onClick={clearReword}
                     className={`${BTN_SECONDARY} text-gray-500 dark:text-gray-400`}
                   >
-                    Use Claude&apos;s text
+                    Use {authorName}&apos;s text
                   </button>
                 )}
               </div>
@@ -1290,6 +1294,7 @@ function ClaudesReview({
   // is the chip naming the story item (null for an ordinary finding).
   const findingCard = (f: ClaudeFinding, storyLabel: string | null): JSX.Element => (
     <FindingRow
+      authorName={aiRunProviderName(storedReview)}
       key={f.id}
       prId={review.prId}
       finding={f}
@@ -1319,7 +1324,7 @@ function ClaudesReview({
   return (
     <>
       <ReviewSection
-        title="Claude's review"
+        title={`${aiRunProviderName(storedReview)}'s review`}
         pills={
           <>
             {/* The outcome leads; everything after it is about the run. */}
@@ -1422,7 +1427,7 @@ function ClaudesReview({
       />
       {/* The reference-library passages this run used (docs/REFERENCE-DOCS.md § Use in reviews).
           Absent when the run did not read the library. */}
-      <DocReferencesSection references={review.docReferences} />
+      <DocReferencesSection references={review.docReferences} by={aiRunProviderName(storedReview)} />
       {/* How this change is built (+ the whole story's, on a multi-PR ticket) — a separate Sonnet run
           after each review (docs/CLAUDE-REVIEW.md § Design diagrams). Absent without agentic AI. */}
       <ClaudeReviewDiagramsSection
@@ -1513,6 +1518,7 @@ function GenerateFixButton({
   review: ClaudeReview;
 }): JSX.Element {
   const openAiFixFromReview = useFilters((s) => s.openAiFixFromReview);
+  const name = useAiProviderName();
   return (
     <div className="flex flex-wrap items-center gap-2">
       <button
@@ -1525,7 +1531,7 @@ function GenerateFixButton({
       </button>
       <InfoButton title="Generate a fix">
         <p>
-          Opens AI Fix with this review picked. Claude edits the code to address the findings and
+          Opens AI Fix with this review picked. {name} edits the code to address the findings and
           threads still to fix. Nothing is pushed until you press the button there.
         </p>
       </InfoButton>
@@ -1804,7 +1810,7 @@ export function ClaudeReviewTab({
             >
               {CLAUDE_REVIEW_MODELS.map((m) => (
                 <option key={m} value={m}>
-                  {CLAUDE_REVIEW_MODEL_LABELS[m]}
+                  {aiPickerModelLabel(ai.provider, m, CLAUDE_REVIEW_MODEL_LABELS[m])}
                 </option>
               ))}
             </select>
@@ -1878,7 +1884,7 @@ export function ClaudeReviewTab({
       <div className="empty:hidden">
         <RegenProgressBar
           active={isRunning}
-          label="Running Claude review"
+          label={`Running ${ai.providerName} review`}
           value={reviewProgressPct(status)}
           timeConstantSec={30}
         />
@@ -1948,7 +1954,7 @@ export function ClaudeReviewTab({
               </span>
               <span
                 className="font-semibold text-gray-600 dark:text-gray-300"
-                title="Estimated so far, on your own Claude Code login or Anthropic API key. Limn charges nothing. The figure recorded when the run finishes is authoritative."
+                title={`Estimated so far, on ${aiCredentialWords(ai.provider)}. Limn charges nothing. The figure recorded when the run finishes is authoritative.`}
               >
                 {liveCost != null && `~${liveCost}`}
               </span>
@@ -2092,10 +2098,10 @@ export function ClaudeReviewTab({
           {autoPostSkipLine(review.autoPost) != null && (
             <p className="text-xs text-gray-600 dark:text-gray-300">{autoPostSkipLine(review.autoPost)}</p>
           )}
-          {autoVerdictLine(review.autoPost) != null && (
-            <p className="text-xs text-gray-600 dark:text-gray-300">{autoVerdictLine(review.autoPost)}</p>
+          {autoVerdictLine(review.autoPost, aiRunProviderName(review)) != null && (
+            <p className="text-xs text-gray-600 dark:text-gray-300">{autoVerdictLine(review.autoPost, aiRunProviderName(review))}</p>
           )}
-          {autoLiftLine(review.autoPost) != null && (
+          {autoLiftLine(review.autoPost, aiRunProviderName(review)) != null && (
             <p
               className={
                 review.autoPost?.liftedBlock?.how === 'dismiss_failed'
@@ -2103,7 +2109,7 @@ export function ClaudeReviewTab({
                   : 'text-xs text-gray-600 dark:text-gray-300'
               }
             >
-              {autoLiftLine(review.autoPost)}
+              {autoLiftLine(review.autoPost, aiRunProviderName(review))}
             </p>
           )}
           <MentionTextarea

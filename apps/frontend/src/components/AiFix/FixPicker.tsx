@@ -1,12 +1,13 @@
 import { useMemo } from 'react';
-import type {
-  AiFixPickerItem,
-  AiFixPickerPreview,
-  AiFixPickerSection,
-  ClaudeFindingSeverity,
-  ClaudeReview,
-  PrDetail,
-  TicketReview,
+import {
+  aiRunProviderName,
+  type AiFixPickerItem,
+  type AiFixPickerPreview,
+  type AiFixPickerSection,
+  type ClaudeFindingSeverity,
+  type ClaudeReview,
+  type PrDetail,
+  type TicketReview,
 } from '@pierre-review/shared';
 import { useTicketReviews, useTicketReviewsByIds } from '../../hooks/useTicketReview.js';
 import {
@@ -25,6 +26,7 @@ import {
   PICKER_SECTION_ORDER,
   budgetCutKeys,
   isPicked,
+  pickerSectionLabel,
   type PickerOverrides,
 } from './fixPickerModel.js';
 
@@ -184,6 +186,8 @@ export function FixPicker({
   // The source review, as the Claude Review tab shows it: praise hidden, and the two re-raise chips
   // worked out by the same helpers.
   const source = review != null && review.id === preview.sourceReviewId ? review : null;
+  // Who wrote the source review: the provider its model belongs to.
+  const by = aiRunProviderName(review);
   const shown = useMemo(() => (source != null ? withoutPraise(source) : null), [source]);
   const findingsById = useMemo(() => new Map((shown?.findings ?? []).map((f) => [f.id, f])), [shown]);
   const followUpById = useMemo(
@@ -239,6 +243,7 @@ export function FixPicker({
         if (f == null) break;
         return (
           <FindingRow
+            authorName={by}
             key={item.key}
             prId={pr.id}
             finding={f}
@@ -281,7 +286,7 @@ export function FixPicker({
             muted={false}
             actions={false}
             selection={selection}
-            notCheckedNote={card.inReview ? undefined : 'Claude didn’t check this one.'}
+            notCheckedNote={card.inReview ? undefined : `${by} didn’t check this one.`}
           />
         );
       case 'ci':
@@ -328,10 +333,10 @@ export function FixPicker({
         const on = items.filter((i) => isPicked(i, overrides)).length;
         const all = on === items.length;
         return (
-          <section key={section} aria-label={PICKER_SECTION_LABEL[section]}>
+          <section key={section} aria-label={pickerSectionLabel(section, by)}>
             <div className="mb-1 flex items-center gap-2">
               <h4 className="text-xs font-semibold text-gray-700 dark:text-gray-200">
-                {PICKER_SECTION_LABEL[section]}
+                {pickerSectionLabel(section, by)}
               </h4>
               <span className="text-[11px] text-gray-500 dark:text-gray-400">
                 {on} of {items.length}

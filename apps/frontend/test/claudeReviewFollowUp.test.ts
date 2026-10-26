@@ -555,7 +555,6 @@ describe('source guards', () => {
     expect(titles.sort()).toEqual(
       [
         'CI check',
-        "Claude's review",
         'Findings',
         'Post to GitHub',
         'Previous review',
@@ -564,6 +563,10 @@ describe('source guards', () => {
         'Reviews and actions',
         'Run a review',
       ].sort(),
+    );
+    // The run's own section names the provider that made it ("Claude's review" / "Codex's review").
+    expect(code(read('components/ClaudeReviewTab.tsx'))).toMatch(
+      /<ReviewSection\s+title=\{`\$\{aiRunProviderName\(storedReview\)\}'s review`\}/,
     );
     // ONE story section: Story check (TicketCoverage.tsx). The old "User stories" one is gone.
     expect(code(read('components/ClaudeReviewTab.tsx'))).not.toMatch(/'User stor(y|ies)'/);

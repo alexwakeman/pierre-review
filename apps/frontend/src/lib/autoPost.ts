@@ -85,6 +85,8 @@ export function autoPostSkipLine(
 /** What the automatic verdict did, when it wanted more than a comment; else null. */
 export function autoVerdictLine(
   a: { status: AutoPostStatus; verdict?: ClaudeAutoVerdictRecord | null } | null | undefined,
+  /** The provider that ran the review ('Claude' | 'Codex'; default Claude). */
+  by = 'Claude',
 ): string | null {
   const v = a?.verdict;
   if (a == null || v == null || v.wanted === 'COMMENT') return null;
@@ -100,7 +102,7 @@ export function autoVerdictLine(
       // Only a PERSON's standing review holds it (Limn's own automatic one never does).
       return `${verb}: your own review on GitHub still stands.`;
     case 'already_requested':
-      return 'Changes already requested by Claude’s earlier review.';
+      return `Changes already requested by ${by}’s earlier review.`;
     case 'reviews_unreadable':
       return `${verb}: couldn’t read your earlier reviews on GitHub.`;
     case 'impact':
@@ -119,12 +121,16 @@ export function autoVerdictLine(
 
 /** What happened to Claude's earlier automatic request for changes, when this run lifted it; else
  *  null. A superseding APPROVE says nothing more than "Approved automatically." */
-export function autoLiftLine(a: { liftedBlock?: ClaudeAutoLiftRecord | null } | null | undefined): string | null {
+export function autoLiftLine(
+  a: { liftedBlock?: ClaudeAutoLiftRecord | null } | null | undefined,
+  /** The provider that ran the review ('Claude' | 'Codex'; default Claude). */
+  by = 'Claude',
+): string | null {
   const l = a?.liftedBlock;
   if (l == null || l.how === 'superseded') return null;
-  if (l.how === 'dismissed') return 'Lifted Claude’s earlier request for changes.';
+  if (l.how === 'dismissed') return `Lifted ${by}’s earlier request for changes.`;
   const why = l.error != null && l.error.trim() !== '' ? l.error.trim() : 'GitHub did not accept it.';
-  return `Couldn’t lift Claude’s earlier request for changes: ${why}`;
+  return `Couldn’t lift ${by}’s earlier request for changes: ${why}`;
 }
 
 /** A finding's auto-resolve, in words: resolved, or why not. null when it was never tried. */

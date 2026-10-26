@@ -8,6 +8,7 @@ import type { AgentContext } from '../../review/agent-context.js';
 import { getPrWriteContext, WRITE_PERMISSIONS } from '../../db/queries.js';
 import { gitSupportsMergeTree } from '../../conflict/git.js';
 import { cancelAiResolve, getAiResolution, startAiResolve } from './run.js';
+import { providerName } from '../../ai/prompt-tools.js';
 
 /**
  * "RESOLVE WITH CLAUDE" — three routes (CORE, free, LOCAL ONLY).
@@ -103,13 +104,13 @@ export function registerAiResolveRoutes(
         case 'no_conflicts':
           return refuse(reply, 409, 'NoConflicts', `This pull request no longer conflicts with ${res.baseRef}.`);
         case 'busy_account':
-          return refuse(reply, 409, 'Busy', 'Claude is already resolving another pull request for you. Wait for it to finish.');
+          return refuse(reply, 409, 'Busy', `${providerName()} is already resolving another pull request for you. Wait for it to finish.`);
         case 'busy_pr':
           return refuse(reply, 409, 'Busy', 'This pull request is already being worked on. Give it a moment.');
         case 'busy_service':
           return refuse(reply, 503, 'Busy', 'The service is busy. Try again in a moment.');
         case 'no_auth':
-          return refuse(reply, 400, 'NoClaudeAuth', res.message ?? 'No Claude credential was found.');
+          return refuse(reply, 400, 'NoClaudeAuth', res.message ?? `No ${providerName()} credential was found.`);
       }
     },
   );

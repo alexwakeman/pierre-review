@@ -26,7 +26,7 @@ import type { AttentionRelevanceLens } from '../../store/filters.js';
 
 export const TAB_LABEL: Record<PendingTabKey, string> = {
   my_turn: 'My turn',
-  claude: 'Claude reviews',
+  claude: 'AI reviews',
   fixing: 'Needs fixing',
   review: 'Waiting on review',
   threads: 'Unanswered threads',

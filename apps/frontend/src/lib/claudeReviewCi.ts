@@ -66,17 +66,18 @@ export function ciCountPills(items: readonly ClaudeCiFailure[]): CiCountPill[] {
   return pills.filter((p) => p.n > 0).map(({ key, label, cls }) => ({ key, label, cls }));
 }
 
-/** Why a failing check carries no diagnosis. One sentence per reason. */
-export function ciNotCheckedSentence(reason: ClaudeCiNotCheckedReason | null): string {
+/** Why a failing check carries no diagnosis. One sentence per reason. `by`: the provider that ran the
+ *  check ('Claude' | 'Codex'; default Claude). */
+export function ciNotCheckedSentence(reason: ClaudeCiNotCheckedReason | null, by = 'Claude'): string {
   switch (reason) {
     case 'no_log':
       return 'No log available: this check does not run on GitHub Actions.';
     case 'log_unavailable':
       return "Its log couldn't be read.";
     case 'over_cap':
-      return 'Not sent to Claude: too many failing checks.';
+      return `Not sent to ${by}: too many failing checks.`;
     case 'not_reported':
-      return "Claude didn't report on this one.";
+      return `${by} didn't report on this one.`;
     default:
       return 'Not checked.';
   }

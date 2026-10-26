@@ -445,14 +445,16 @@ describe('My turn — your own PR', () => {
     ).toBe('CodeRabbit’s comment on app/x.ts has no reply');
   });
 
-  it('claude_review: the verdict in words, never the raw enum', () => {
-    expect(lead(myTurn({ reason: 'claude_review', detail: 'Claude review ready · REQUEST_CHANGES' }))).toBe(
-      'Claude reviewed: Request changes',
+  it('claude_review: the verdict in words, never the raw enum; the feature, never a provider it cannot know', () => {
+    expect(lead(myTurn({ reason: 'claude_review', detail: 'AI review ready · REQUEST_CHANGES' }))).toBe(
+      'AI review: Request changes',
     );
-    expect(lead(myTurn({ reason: 'claude_review', trigger: 'auto', detail: 'Claude review ready · COMMENT' }))).toBe(
-      'Claude’s auto review: Comment',
+    expect(lead(myTurn({ reason: 'claude_review', trigger: 'auto', detail: 'AI review ready · COMMENT' }))).toBe(
+      'Auto review: Comment',
     );
-    expect(lead(myTurn({ reason: 'claude_review', detail: 'Claude review ready' }))).toBe('Claude finished a review');
+    expect(lead(myTurn({ reason: 'claude_review', detail: 'AI review ready' }))).toBe('AI review finished');
+    // An older server's detail still reads the verdict.
+    expect(lead(myTurn({ reason: 'claude_review', detail: 'Claude review ready · APPROVE' }))).toBe('AI review: Approve');
     expect(
       pendingActionLine(myTurn({ reason: 'claude_review', detail: 'Claude review ready · COMMENT · head moved since' }), ctx())
         .where,

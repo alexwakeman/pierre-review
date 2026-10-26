@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { ConflictDecision, ConflictRegion } from '@pierre-review/shared';
 import { useClaudeMark } from '../../store/conflictClaude.js';
+import { useAiProviderName } from '../../hooks/useAiCapabilities.js';
 import type { SlotDecision, SlotRole } from '../../lib/mergeResolver.js';
 import {
   AcceptBothIcon,
@@ -97,6 +98,8 @@ export function SlotStrip({
   const labels = actionLabels(baseRef);
   const tab = active ? 0 : -1;
   const claude = useClaudeMark(fileIndex, region.id);
+  // The provider that ran "Resolve with …" (this session's, the active one).
+  const aiName = useAiProviderName();
   const [whyOpen, setWhyOpen] = useState(false);
   const allows = (d: ConflictDecision): boolean => region.allowed.includes(d);
   const wandOffered = region.wand?.reason === 'disjoint_words' && allows('disjoint_merge');
@@ -140,7 +143,7 @@ export function SlotStrip({
     >
       <span className={`mr-1 text-[11px] font-medium ${role == null ? '' : INK_CLASS[role]}`}>
         {/* An edited region Claude wrote is not "Your text". */}
-        {claude?.decision === 'edited' ? 'Claude’s text' : stateWord(region, slot)}
+        {claude?.decision === 'edited' ? `${aiName}’s text` : stateWord(region, slot)}
       </span>
       {/* ⚠ "Resolve with Claude"'s mark, shown only while the decision is still Claude's
           (`useClaudeMark` checks the live decision). The reason is one click away and never
@@ -150,7 +153,7 @@ export function SlotStrip({
           type="button"
           tabIndex={tab}
           aria-expanded={whyOpen}
-          title={claude.rationale || 'Decided by Claude'}
+          title={claude.rationale || `Decided by ${aiName}`}
           onClick={() => {
             onActivate();
             setWhyOpen((o) => !o);
@@ -158,7 +161,7 @@ export function SlotStrip({
           className="inline-flex items-center gap-1 rounded bg-ai-signal-fill/10 px-1 py-0.5 text-[11px] font-medium leading-none text-ai-signal"
         >
           <SparkleIcon size={11} />
-          Claude
+          {aiName}
           {claude.confidence === 'low' && <span className="font-normal">· not sure</span>}
         </button>
       )}
@@ -221,7 +224,7 @@ export function SlotStrip({
         button('undo', false, labels.undo, <UndoIcon size={13} />, null)}
       {claude != null && whyOpen && (
         <span className="basis-full text-[12px] text-gray-700 dark:text-gray-200">
-          {claude.rationale || 'Claude gave no reason.'}
+          {claude.rationale || `${aiName} gave no reason.`}
         </span>
       )}
     </div>

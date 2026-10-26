@@ -45,6 +45,7 @@ import {
 } from './store.js';
 import { UrlFetchError, checkPageUrl } from './url-fetch.js';
 import { config } from '../config.js';
+import { providerName } from '../ai/prompt-tools.js';
 
 // THE REFERENCE DOCS API (CORE, free, LOCAL ONLY — docs/API.md § Reference docs). Registered by
 // `registerAgenticRoutes` (review/agentic.ts), so absent in cloud and under LIMN_AI_DISABLED; the
@@ -102,7 +103,7 @@ async function workspaceOf(accountId: number, raw: unknown): Promise<number> {
 
 async function preflight(ctx: AgentContext, accountId: number, reply: FastifyReply): Promise<ErrorBody | null> {
   const auth = ctx.llm.detectAuth('docs_build');
-  if (auth.status === 'none') return fail(reply, 400, 'NoClaudeAuth', auth.message ?? 'No Claude credential found.');
+  if (auth.status === 'none') return fail(reply, 400, 'NoClaudeAuth', auth.message ?? `No ${providerName()} credential found.`);
   return null;
 }
 

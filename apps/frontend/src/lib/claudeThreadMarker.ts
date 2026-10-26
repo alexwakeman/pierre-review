@@ -1,9 +1,11 @@
-import type {
-  ClaudeThreadAddressed,
-  ClaudeThreadFindingOutcome,
-  ClaudeThreadJudgementsForPr,
-  ClaudeThreadValidity,
-  DerivedState,
+import {
+  aiProviderName,
+  type AiProviderId,
+  type ClaudeThreadAddressed,
+  type ClaudeThreadFindingOutcome,
+  type ClaudeThreadJudgementsForPr,
+  type ClaudeThreadValidity,
+  type DerivedState,
 } from '@pierre-review/shared';
 
 // WHICH PILLS A THREAD WEARS: its own derived state ("Likely addressed" + the confidence marker),
@@ -89,12 +91,20 @@ export function claudeFindingPill(f: Pick<ClaudeThreadFindingOutcome, 'status' |
   }
 }
 
-/** The one line under a finding's pills: a templated fact (Claude's own words sit under "More"). */
-export function claudeFindingReason(f: Pick<ClaudeThreadFindingOutcome, 'status' | 'replyAuthor'>): string {
+/**
+ * The one line under a finding's pills: a templated fact (the model's own words sit under "More").
+ * `provider` is the one that ran the review behind the judgement (default Claude — the words every
+ * stored judgement before Codex carried).
+ */
+export function claudeFindingReason(
+  f: Pick<ClaudeThreadFindingOutcome, 'status' | 'replyAuthor'>,
+  provider: AiProviderId = 'claude',
+): string {
+  const name = aiProviderName(provider);
   const who = f.replyAuthor ? `@${f.replyAuthor}’s reply` : 'the reply';
-  if (f.status === 'reply_accepted') return `Claude’s comment. Claude accepted ${who}.`;
-  if (f.status === 'reply_disputed') return `Claude’s comment. Claude disagreed with ${who}.`;
-  return 'Claude’s comment, checked again by a later review.';
+  if (f.status === 'reply_accepted') return `${name}’s comment. ${name} accepted ${who}.`;
+  if (f.status === 'reply_disputed') return `${name}’s comment. ${name} disagreed with ${who}.`;
+  return `${name}’s comment, checked again by a later review.`;
 }
 
 /** The validity pill, or null when Claude did not judge the comment itself. */
@@ -147,6 +157,8 @@ export interface ClaudeThreadMarker {
   checkId: number | null;
   finishedAt: string | null;
   assessedAtHead: string;
+  /** The provider whose run made the judgement (`threadPillFor`'s `provider`; default Claude). */
+  provider: AiProviderId;
 }
 
 export type ThreadPill = { kind: 'derived' } | { kind: 'claude'; marker: ClaudeThreadMarker };
@@ -166,6 +178,8 @@ export function claudeMarkerLabel(
 export function threadPillFor(
   thread: { id: number; derivedState: DerivedState },
   pr: ClaudeThreadJudgementsForPr | null | undefined,
+  /** The provider that ran the judging review (default Claude). */
+  provider: AiProviderId = 'claude',
 ): ThreadPill {
   if (pr == null) return { kind: 'derived' };
   const j = pr.judgements.find((x) => x.threadId === thread.id);
@@ -183,12 +197,13 @@ export function threadPillFor(
         state,
         label: claudeMarkerLabel({ finding, validity: null, state }),
         stale,
-        reason: claudeFindingReason(j.finding),
+        reason: claudeFindingReason(j.finding, provider),
         explanation: j.explanation,
         reviewId: j.finding.reviewId,
         checkId: null,
         finishedAt: pr.finishedAt,
         assessedAtHead: j.assessedAtHead,
+        provider,
       },
     };
   }
@@ -209,6 +224,7 @@ export function threadPillFor(
       checkId: pr.checkId,
       finishedAt: pr.finishedAt,
       assessedAtHead: j.assessedAtHead,
+      provider,
     },
   };
 }

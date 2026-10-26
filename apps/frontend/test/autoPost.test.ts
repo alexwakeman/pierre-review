@@ -112,7 +112,9 @@ describe('skips, verdicts and resolves', () => {
     expect(autoLiftLine({})).toBeNull();
     // A lift-only run that failed prints the lift line, not a second "Couldn't post" line.
     expect(autoPostFailureLine({ status: 'failed', error: 'Restricted.', liftedBlock: l('dismiss_failed', 'Restricted.') })).toBeNull();
-    expect(src('components/ClaudeReviewTab.tsx')).toContain('autoLiftLine(review.autoPost)');
+    expect(src('components/ClaudeReviewTab.tsx')).toContain('autoLiftLine(review.autoPost, aiRunProviderName(review))');
+    // A run Codex made names Codex.
+    expect(autoLiftLine({ liftedBlock: l('dismissed') }, 'Codex')).toBe('Lifted Codex’s earlier request for changes.');
   });
 
   it('auto resolve: resolved, or the error', () => {
@@ -148,7 +150,7 @@ describe('"Not asked for" postings', () => {
 describe('the mounts', () => {
   it('Settings carries the master switch, the scope and every kind', () => {
     const s = src('components/settings/AutoReviewSection.tsx');
-    expect(s).toContain('Post Claude reviews to GitHub automatically');
+    expect(s).toContain('Post AI reviews to GitHub automatically');
     expect(s).toContain('Your own PRs, and PRs you are asked to review or have reviewed or commented on');
     expect(s).toContain('Approve or request changes for me');
     expect(s).toContain('Resolve Limn’s threads once fixed');
@@ -166,7 +168,7 @@ describe('the mounts', () => {
     expect(tab).toContain('postedChipLabel(post!)');
     expect(tab).toContain('autoPostFailureLine(review.autoPost)');
     expect(tab).toContain('autoPostSkipLine(review.autoPost)');
-    expect(tab).toContain('autoVerdictLine(review.autoPost)');
+    expect(tab).toContain('autoVerdictLine(review.autoPost, aiRunProviderName(review))');
     expect(tab).toContain('autoResolveLabel(finding.autoResolve)');
     const parts = src('components/TicketReviewParts.tsx');
     expect(parts).toContain('autoPostFailureLine(review.autoPost)');

@@ -22,6 +22,7 @@ import {
   toDiagramView,
 } from './persist.js';
 import { MAX_TICKETS, toDiagramMembers } from './trigger.js';
+import { providerName } from '../../ai/prompt-tools.js';
 
 // THE DESIGN-DIAGRAM API (CORE, free, LOCAL ONLY; paths keep "sequence-diagrams") — docs/API.md § Design diagrams. Registered by
 // `registerAgenticRoutes` (review/agentic.ts), so absent in cloud and under LIMN_AI_DISABLED; the
@@ -103,7 +104,7 @@ async function preflight(
   const auth = ctx.llm.detectAuth('diagram');
   if (auth.status === 'none') {
     reply.status(400);
-    return { error: 'NoClaudeAuth', message: auth.message ?? 'No Claude credential found.' };
+    return { error: 'NoClaudeAuth', message: auth.message ?? `No ${providerName()} credential found.` };
   }
   return null;
 }

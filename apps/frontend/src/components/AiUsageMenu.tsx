@@ -6,9 +6,10 @@ import { useSettingsModal } from '../store/settingsModal.js';
 import { headerUsageOf, usageDetailOf } from '../lib/aiBudget.js';
 import { SparkleIcon } from './Icons.js';
 
-// THE HEADER'S CLAUDE USAGE ITEM, beside the light/dark button: ONE figure of budget used so far
+// THE HEADER'S AI USAGE ITEM, beside the light/dark button: ONE figure of budget used so far
 // (lib/aiBudget.ts `headerUsageOf` says which), and on click a popover with what is known — Limn's
-// share of the week and of this 5-hour session, Claude's own account windows with their reset times,
+// share of the week and of this 5-hour session, the active provider's own account windows (Claude's, or
+// Codex's 5-hour and weekly windows on a ChatGPT sign-in) with their reset times,
 // Limn's runs and tokens this week; on an API key the US$ figures. Unknown pieces are left out.
 //
 // It reads the ONE budget query (`useAiBudget`, ['ai-budget']) that the toast, the meters and
@@ -112,7 +113,7 @@ export function AiUsageMenu(): JSX.Element | null {
               }}
               className="rounded text-xs text-sky-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-sky-300"
             >
-              Claude spend settings
+              AI spend settings
             </button>
           </div>
         </div>

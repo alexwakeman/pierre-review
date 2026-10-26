@@ -105,11 +105,12 @@ export function docReferenceCounts(references: readonly ReviewDocReference[]): s
   return parts.join(' · ');
 }
 
-export function DocReferencesInfo(): JSX.Element {
+/** `by`: the provider that ran the review these references came from (default Claude). */
+export function DocReferencesInfo({ by = 'Claude' }: { by?: string } = {}): JSX.Element {
   return (
     <InfoButton title="Reference docs">
       <p>
-        Claude read the workspace's reference library (Activity → Docs) and checked the work against it. Each entry is a
+        {by} read the workspace's reference library (Activity → Docs) and checked the work against it. Each entry is a
         passage it relied on.
       </p>
       <p>
@@ -126,14 +127,21 @@ export function DocReferencesInfo(): JSX.Element {
  * The Claude Review tab's "Reference docs" section. Absent when the run did not read the library
  * (`null`); a run that read it and used nothing says so in one line.
  */
-export function DocReferencesSection({ references }: { references: readonly ReviewDocReference[] | null | undefined }): JSX.Element | null {
+export function DocReferencesSection({
+  references,
+  by,
+}: {
+  references: readonly ReviewDocReference[] | null | undefined;
+  /** The provider that ran the review ('Claude' | 'Codex'); default Claude. */
+  by?: string;
+}): JSX.Element | null {
   if (references == null) return null;
   const counts = docReferenceCounts(references);
   return (
     <ReviewSection
       title="Reference docs"
       pills={counts !== '' ? <SectionCount>{counts}</SectionCount> : undefined}
-      info={<DocReferencesInfo />}
+      info={<DocReferencesInfo by={by} />}
     >
       {references.length > 0 ? (
         <DocReferenceList references={references} />
