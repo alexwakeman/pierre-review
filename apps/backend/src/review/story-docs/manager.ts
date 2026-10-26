@@ -39,7 +39,7 @@ import {
 import { buildStoryDocsPrompt, storyDocsRoots, storyDocsSystemPrompt, storyDocsUntrustedTexts } from './prompts.js';
 import { activeProviderId } from '../../ai/provider-setting.js';
 import { claudeModelChoice, getProvider } from '../../ai/provider.js';
-import { promptTools } from '../../ai/prompt-tools.js';
+import { promptTools, providerName } from '../../ai/prompt-tools.js';
 import { runShortlist, type ShortlistDoc } from './shortlist.js';
 import { validateAlignment } from './validate.js';
 
@@ -60,7 +60,8 @@ const LANE_MAX = 10;
 /** Wall-clock cap on one check: a wedged read must not hold the claim and a shared review slot until
  *  a restart. Nothing else aborts a run (there is no cancel), so an abort always means this. */
 export const STORY_DOCS_TIMEOUT_MS = 10 * 60_000;
-const TIMED_OUT = 'Claude took too long. Run it again.';
+/** The line when a run times out, naming the provider that ran it (default: the active one). */
+const timedOut = (name: string = providerName()): string => `${name} took too long. Run it again.`;
 
 export interface StoryDocsJob {
   ctx: AgentContext;
@@ -250,11 +251,11 @@ async function runPipeline(job: StoryDocsJob, controller: AbortController): Prom
   });
   const slTel = { costUsd: sl.costUsd, inputTokens: sl.inputTokens, outputTokens: sl.outputTokens };
   if (controller.signal.aborted) {
-    await markStoryDocsFailed(ctx, accountId, runId, TIMED_OUT, slTel);
+    await markStoryDocsFailed(ctx, accountId, runId, timedOut(), slTel);
     return;
   }
   if (sl.entries == null) {
-    await markStoryDocsFailed(ctx, accountId, runId, 'Claude could not pick the sections to read.', slTel);
+    await markStoryDocsFailed(ctx, accountId, runId, `${providerName()} could not pick the sections to read.`, slTel);
     return;
   }
   if (sl.entries.length === 0) {
@@ -323,12 +324,12 @@ async function runPipeline(job: StoryDocsJob, controller: AbortController): Prom
       numTurns: res.numTurns,
     };
     if (res.aborted) {
-      await markStoryDocsFailed(ctx, accountId, runId, TIMED_OUT, total);
+      await markStoryDocsFailed(ctx, accountId, runId, timedOut(), total);
       return;
     }
     if (res.payload == null) {
       if (res.failureReason) ctx.log.warn(`story docs check ${runId}: ${res.failureReason}`);
-      await markStoryDocsFailed(ctx, accountId, runId, 'Claude did not finish the check. Run it again.', total);
+      await markStoryDocsFailed(ctx, accountId, runId, `${providerName(providerId)} did not finish the check. Run it again.`, total);
       return;
     }
     // ⚠ Validated AGAIN here, against the shortlisted documents only: the tool's acceptance is not the
@@ -336,7 +337,7 @@ async function runPipeline(job: StoryDocsJob, controller: AbortController): Prom
     const v = validateAlignment(res.payload, lib, alignment, sl.entries);
     if (!v.ok) {
       ctx.log.warn(`story docs check ${runId}: ${v.problems.join(' ')}`);
-      await markStoryDocsFailed(ctx, accountId, runId, "Claude's answer could not be used. Run it again.", total);
+      await markStoryDocsFailed(ctx, accountId, runId, `${providerName(providerId)}'s answer could not be used. Run it again.`, total);
       return;
     }
     await saveStoryDocsSuccess(

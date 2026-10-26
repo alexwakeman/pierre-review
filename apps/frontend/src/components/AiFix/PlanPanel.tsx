@@ -24,6 +24,8 @@ import { AiRunGate } from '../AiSetup.js';
 import { InfoButton } from '../InfoModal.js';
 import { ChevronIcon } from '../Icons.js';
 import { RegenProgressBar } from '../Activity/RegenProgressBar.js';
+import { aiRunProviderName } from '@pierre-review/shared';
+import { useAiProviderName } from '../../hooks/useAiCapabilities.js';
 
 // PLAN MODE (manual AI Fix only; docs/CLAUDE-REVIEW.md § AI Fix "Plan mode"). Claude reads the code
 // and writes a plan; it edits nothing. The reader steers it by chat — each message runs a fresh
@@ -124,6 +126,9 @@ export function PlanPanel({
   auth: ClaudeAuthStatus | undefined;
 }): JSX.Element | null {
   const state = fix.plan;
+  // The provider that runs the next message (the active one), and the one that wrote this plan.
+  const name = useAiProviderName();
+  const plannedBy = aiRunProviderName(fix);
   const message = usePlanMessage(pr.id);
   const approve = useApprovePlan(pr.id);
   const discard = useDiscardPlan(pr.id);
@@ -161,12 +166,12 @@ export function PlanPanel({
           <span className="font-normal text-gray-500 dark:text-gray-400">· {aiRunLabel(state.provider, state.model)}</span>
         )}
         <InfoButton title="Plan first">
-          <p>Claude reads the code and writes a plan. It changes nothing.</p>
+          <p>{name} reads the code and writes a plan. It changes nothing.</p>
           <p>
-            Tell Claude what to change and it rewrites the plan, taking the whole conversation into account. Each
-            message runs Claude again.
+            Tell {name} what to change and it rewrites the plan, taking the whole conversation into account. Each
+            message runs {name} again.
           </p>
-          <p>When you approve, Claude builds the fix from this plan. You still review the diff and press Push.</p>
+          <p>When you approve, {name} builds the fix from this plan. You still review the diff and press Push.</p>
         </InfoButton>
       </div>
 
@@ -199,7 +204,7 @@ export function PlanPanel({
         <ul className="mt-3 space-y-1.5 border-t border-gray-200 pt-2 text-xs dark:border-gray-800">
           {state.transcript.map((m, i) => (
             <li key={i} className="whitespace-pre-wrap text-gray-700 dark:text-gray-200">
-              <span className="font-semibold">{m.role === 'reader' ? 'You' : 'Claude'}: </span>
+              <span className="font-semibold">{m.role === 'reader' ? 'You' : plannedBy}: </span>
               {m.text}
             </li>
           ))}
@@ -238,7 +243,7 @@ export function PlanPanel({
               aria-label="Change the plan"
               className="w-full rounded border border-gray-300 bg-transparent px-2 py-1 text-xs dark:border-gray-700"
               rows={2}
-              placeholder="Tell Claude what to change in the plan"
+              placeholder={`Tell ${name} what to change in the plan`}
               value={draft}
               disabled={busy}
               onChange={(e) => setDraft(e.target.value)}

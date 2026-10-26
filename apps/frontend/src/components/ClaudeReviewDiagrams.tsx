@@ -9,13 +9,15 @@
 //  - Only the reads poll, and only while a run is queued or running (or just after a review).
 //  - A card's click-through: THIS PR's file → `onOpenInChanges` (same pane); another PR's (a story
 //    card) → `openPrChangesAt`, which opens that PR's pane on its Changes tab at the file.
-import type {
-  DesignCell,
-  SequenceDiagramMember,
-  SequenceDiagramSlot,
-  StorySequenceDiagramSlot,
+import {
+  aiModelWords,
+  aiProviderName,
+  type DesignCell,
+  type SequenceDiagramMember,
+  type SequenceDiagramSlot,
+  type StorySequenceDiagramSlot,
 } from '@pierre-review/shared';
-import { useAiCapabilities } from '../hooks/useAiCapabilities.js';
+import { useAiCapabilities, useAiProvider } from '../hooks/useAiCapabilities.js';
 import { redrawRefusalText, slotDrawing, slotStatusLine } from '../lib/sequenceDiagrams.js';
 import { memberForRef } from '../lib/designGrid.js';
 import {
@@ -41,10 +43,11 @@ type OpenInChanges = (path: string, line: number | null, side: 'LEFT' | 'RIGHT')
 
 /** How the grid reads — the ONE legend, behind the ⓘ of every Design heading. */
 export function DesignLegend({ story }: { story: boolean }): JSX.Element {
+  const provider = useAiProvider();
   return (
     <div className="space-y-2">
       <p>
-        Claude Sonnet reads the change and the code around it, then lays out how it is built: the stages across, the
+        {aiModelWords(provider, 'Sonnet')} reads the change and the code around it, then lays out how it is built: the stages across, the
         layers down, one card per job, with the pattern it uses.
       </p>
       <p>
@@ -57,7 +60,7 @@ export function DesignLegend({ story }: { story: boolean }): JSX.Element {
         It is drawn again after a review of a new commit, unless that is turned off in Settings. Pull requests that
         change no code get none.
       </p>
-      <p>Claude works the design out from the code, so check it before relying on it.</p>
+      <p>{aiProviderName(provider)} works the design out from the code, so check it before relying on it.</p>
     </div>
   );
 }

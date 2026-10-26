@@ -28,7 +28,7 @@ import {
   type SprintCardData,
   type SprintLaneData,
 } from '../../lib/laneBoard.js';
-import { aiAuthFor, useAiCapabilities } from '../../hooks/useAiCapabilities.js';
+import { aiAuthFor, useAiCapabilities, useAiProviderName } from '../../hooks/useAiCapabilities.js';
 import { AiRunGate } from '../AiSetup.js';
 import { InfoButton } from '../InfoModal.js';
 import { HoverPopover } from '../HoverPopover.js';
@@ -319,7 +319,7 @@ export function SprintPathsView({ data, actions }: { data: SprintGraphResponse; 
               {view.text}
             </span>
           )}
-          {view.kind === 'off' && <span className={`text-xs ${MUTED}`}>Claude is off here, so there are no critical paths.</span>}
+          {view.kind === 'off' && <span className={`text-xs ${MUTED}`}>AI is off here, so there are no critical paths.</span>}
           {view.kind === 'none' && <AiRunGate kind="sprint_paths">{null}</AiRunGate>}
         </div>
       )}
@@ -362,13 +362,14 @@ function PaceStrip({ pace, productReview }: { pace: SprintPace; productReview: b
 const GAP_MINUTES = Math.round(SPRINT_VISIT_GAP_MS / 60_000);
 
 function PathsInfo({ aiEnabled }: { aiEnabled: boolean }): JSX.Element {
+  const name = useAiProviderName();
   return (
     <div className="space-y-2 text-sm">
       {aiEnabled && (
         <p>
-          Claude picks up to five <strong>critical paths</strong> &mdash; the chains of tickets that most put the sprint at risk, riskiest
+          {name} picks up to five <strong>critical paths</strong> &mdash; the chains of tickets that most put the sprint at risk, riskiest
           first, each in the order the work must happen &mdash; and up to three call-outs, after a sprint read that changed something.
-          Limn builds the map Claude reads and counts every number; Claude&rsquo;s words carry none.
+          Limn builds the map {name} reads and counts every number; {name}&rsquo;s words carry none.
         </p>
       )}
       <p>
@@ -499,6 +500,7 @@ function CountTableView({ data }: { data: SprintGraphResponse }): JSX.Element | 
 // ── Theme ────────────────────────────────────────────────────────────────────────────────────────
 
 export function SprintThemesView({ data, actions }: { data: SprintGraphResponse; actions: SprintCardActions }): JSX.Element {
+  const aiName = useAiProviderName();
   const columns = data.statusLayout?.columns ?? null;
   const board = useMemo(
     () => themesBoard({ nodes: data.nodes, edges: data.edges, paths: data.paths, columns, themes: data.themes }),
@@ -509,7 +511,7 @@ export function SprintThemesView({ data, actions }: { data: SprintGraphResponse;
     <section aria-label="By theme" className="space-y-2" data-testid="sprint-themes">
       {!themesOn && (
         <p className={`text-xs ${MUTED}`}>
-          {data.aiEnabled ? 'Themes appear after Claude reads the sprint.' : 'Claude is off here, so the sprint has no themes.'}
+          {data.aiEnabled ? `Themes appear after ${aiName} reads the sprint.` : 'AI is off here, so the sprint has no themes.'}
         </p>
       )}
       <SprintLaneBoard board={board} label="Tickets by theme" laneWidth="minmax(8rem, 12rem)" show="person" people={data.people} actions={actions} />

@@ -1251,6 +1251,6 @@ function myTurnReason(reason: ClassicMyTurnReason): string {
     case 'watched_repo_pr':
       return 'New PR you have not reviewed or commented on';
     case 'claude_review':
-      return 'A Claude review has finished and needs actioning';
+      return 'An AI review has finished and needs actioning';
   }
 }

@@ -6,6 +6,7 @@ import { escapeSlack, prLink, slackLink } from './links.js';
 import type { SlackMessage } from './report.js';
 import { postToSlack } from './send.js';
 import { readTargetRow, type SlackTargetRow } from './targets.js';
+import { aiRunProviderName } from '@pierre-review/shared';
 
 // ── THE TWO SLACK EVENT SIGNALS (Pro, `slackDigest`; plugin migration 0040) ──────────────────
 //
@@ -135,23 +136,25 @@ const trimSummary = (s: string): string => {
   return flat.length > SUMMARY_MAX ? `${flat.slice(0, SUMMARY_MAX - 1).trimEnd()}…` : flat;
 };
 
-/** Pure builder for the "Claude Review ran" message. Exported for its test. */
+/** Pure builder for the "Claude Review ran" message ("Codex Review ran" when Codex ran it). Exported
+ *  for its test. */
 export function reviewMessage(
   ctx: ProContext,
   workspaceId: number,
   f: PrFacts,
   verdict: ClaudeReviewVerdict | null,
   summary: string | null,
+  ranBy: 'Claude' | 'Codex' = 'Claude',
 ): SlackMessage {
   const by = f.authorLogin ? ` by @${escapeSlack(f.authorLogin)}` : '';
-  const head = `*Claude Review ran* on ${prLine(ctx, workspaceId, f)}${by}`;
+  const head = `*${ranBy} Review ran* on ${prLine(ctx, workspaceId, f)}${by}`;
   const lines = [head];
   if (verdict != null) lines.push(`Verdict: *${VERDICT_TEXT[verdict] ?? verdict}*`);
   const body = summary == null ? '' : trimSummary(summary);
   if (body !== '') lines.push(body.split('\n').map((l) => `> ${escapeSlack(l)}`).join('\n'));
   return {
     blocks: [{ type: 'section', text: mrkdwn(lines.join('\n')) }],
-    text: `Claude Review ran on ${escapeSlack(`${f.owner}/${f.name}#${f.number}`)}`,
+    text: `${ranBy} Review ran on ${escapeSlack(`${f.owner}/${f.name}#${f.number}`)}`,
   };
 }
 
@@ -199,6 +202,8 @@ export async function onClaudeReviewCompleted(
       verdict: cr.verdict,
       summary: cr.summary,
       reviewMode: cr.reviewMode,
+      // The model names the provider that ran it (a schema without the column reads as Claude).
+      ...(cr.model != null ? { model: cr.model } : {}),
     })
     .from(cr)
     .where(and(eq(cr.id, e.reviewId), eq(cr.accountId, e.accountId), eq(cr.prId, e.prId)))
@@ -208,6 +213,7 @@ export async function onClaudeReviewCompleted(
     verdict: ClaudeReviewVerdict | null;
     summary: string | null;
     reviewMode: string | null;
+    model?: string | null;
   }>;
   const run = runs[0];
   // Succeeded runs only, and not a `skip` (no code to review — a message would be noise).
@@ -216,7 +222,7 @@ export async function onClaudeReviewCompleted(
   try {
     await postToSlack(
       target.row.webhookUrl,
-      reviewMessage(ctx, target.workspaceId, facts, run.verdict, run.summary),
+      reviewMessage(ctx, target.workspaceId, facts, run.verdict, run.summary, aiRunProviderName(run)),
     );
   } catch (err) {
     ctx.log.warn(

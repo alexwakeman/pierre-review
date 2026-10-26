@@ -111,15 +111,16 @@ function pinnedMetaOf(pr: PrDetailT, usersById: Map<number, User>): PinnedPr {
   };
 }
 
-// The tab button uses `capitalize`, which can't produce "Claude Review" from a
-// key, so labels are mapped explicitly.
+// The tab button uses `capitalize`, which can't produce "AI Review" from a
+// key, so labels are mapped explicitly. "AI Review" names the feature: one tab holds every run,
+// whichever provider made it (each run names its own).
 const TAB_LABELS: Record<Tab, string> = {
   overview: 'Overview',
   threads: 'Threads',
   activity: 'Activity',
   changes: 'Changes',
   bot_activity: 'Bot activity',
-  claude_review: 'Claude Review',
+  claude_review: 'AI Review',
   ai_fix: 'AI Fix',
 };
 

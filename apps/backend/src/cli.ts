@@ -70,7 +70,7 @@ Usage:
 Commands:
   status           Your cross-repo "my turn" queue in the terminal, with
                    clickable links (see \`limn status --help\`)
-  ai install       Download the AI runtime Claude Review and AI Fix run on
+  ai install       Download the AI runtime AI Review and AI Fix run on
                    (one time, about 110 MB). The app offers the same button.
   ai status        Say whether the AI runtime is set up
   ml install       Download the model that scores bot review comments
@@ -269,7 +269,7 @@ async function runAiCommand(argv: string[]): Promise<void> {
     : sub === 'login' || sub === 'logout' ? target === 'codex'
     : true;
   if (!known || !targetOk) {
-    console.log(`limn ai — the AI runtime Claude Review and AI Fix run on
+    console.log(`limn ai — the AI runtime AI Review and AI Fix run on (Claude or Codex)
 
 Usage:
   limn ai install          Download it (one time, about 110 MB) into ~/.limn/ai-runtime
@@ -278,14 +278,17 @@ Usage:
   limn ai login codex      Sign Limn's own Codex in (add --device-auth on a headless machine)
   limn ai logout codex     Sign it out
 
-Claude Review and AI Fix are free. They run on your own Claude Code login or
-Anthropic API key: sign in to Claude Code, or set ANTHROPIC_API_KEY.
-Set LIMN_AI_USE_API_KEY=true to use the key even when you are signed in.
-Set LIMN_CLAUDE_PATH to use your installed \`claude\` and skip its bundled copy.
+AI Review and AI Fix are free. One AI runs every feature: Claude, unless only
+Codex is signed in. Set LIMN_AI_PROVIDER=claude or codex to choose.
 
-Codex keeps its own ChatGPT sign-in in ~/.limn/codex (your ~/.codex is not used).
-Codex with an OpenAI API key is not available yet. Set LIMN_CODEX_PATH to use your
-installed codex program.
+Claude runs on your own Claude Code login or Anthropic API key: sign in to
+Claude Code, or set ANTHROPIC_API_KEY. Set LIMN_AI_USE_API_KEY=true to use the
+key even when you are signed in. Set LIMN_CLAUDE_PATH to use your installed
+\`claude\` and skip its bundled copy.
+
+Codex runs on your ChatGPT sign-in, kept in ~/.limn/codex (your ~/.codex is not
+used). Codex with an OpenAI API key is not available yet. Set LIMN_CODEX_PATH to
+use your installed codex program.
 `);
     process.exit(sub === undefined || sub === '--help' || sub === '-h' ? 0 : 1);
   }

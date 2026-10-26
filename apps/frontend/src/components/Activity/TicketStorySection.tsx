@@ -36,7 +36,7 @@ import {
   type TicketRef,
   type TicketReviewState,
 } from '@pierre-review/shared';
-import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
+import { useAiCapabilities, useAiProvider, useAiProviderName } from '../../hooks/useAiCapabilities.js';
 import { useStartStoryDocsAlignment, useStoryDocsAlignment, useStoryDocsStarting } from '../../hooks/useStoryDocsAlignment.js';
 import { useTicketReviewById } from '../../hooks/useTicketReview.js';
 import { criteriaMatch, shownRun, type StorySummaryKind } from '../../lib/storyDocsAlignment.js';
@@ -52,6 +52,7 @@ import { CurrencyPill, MemberCards, TicketResults } from '../TicketReviewParts.j
 import { StoryDisclosure } from '../TicketStory.js';
 import { StoryDesignButton, StoryDesignSection, useStoryDesign, type StoryDesign } from './StoryDesignSection.js';
 import { StoryDocsAlignmentBlock, StoryDocsButton, StoryDocsCriterionDetail } from './StoryDocsAlignment.js';
+import { aiModelWords } from '@pierre-review/shared';
 
 const MUTED = 'text-gray-500 dark:text-gray-400';
 /** Criteria listed before "Show all" (real stories itemise up to ~35). */
@@ -203,6 +204,8 @@ function BriefSummary({
   docsItems?: ReadonlyMap<number, StoryDocsCriterionItem>;
 }): JSX.Element {
   const [all, setAll] = useState(false);
+  const aiProvider = useAiProvider();
+  const aiName = useAiProviderName();
   // Collapsed, a row past CRITERIA_SHOWN still shows when it carries a docs note — the note is drawn
   // only under its row here (the block's own list is empty when attached), so hiding the row hides it.
   const shown = all ? brief.criteria : brief.criteria.filter((c, i) => i < CRITERIA_SHOWN || docsItems.has(c.n));
@@ -216,11 +219,11 @@ function BriefSummary({
         )}
         <InfoButton title="Summary and criteria">
           <p>
-            Claude Haiku reads the ticket and writes a short summary and its acceptance criteria, one sentence each. When the
+            {aiModelWords(aiProvider, 'Haiku')} reads the ticket and writes a short summary and its acceptance criteria, one sentence each. When the
             ticket lists no criteria of its own, they are worked out from the description.
           </p>
           <p>It reads the ticket again whenever its text changes.</p>
-          <p>Once Claude has checked the ticket against its pull requests, that check shows here instead.</p>
+          <p>Once {aiName} has checked the ticket against its pull requests, that check shows here instead.</p>
         </InfoButton>
       </div>
       {brief.criteria.length > 0 ? (

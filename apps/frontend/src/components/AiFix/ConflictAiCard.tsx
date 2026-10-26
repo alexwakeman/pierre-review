@@ -12,6 +12,7 @@ import {
   useConflictAiRun,
 } from '../../hooks/useConflictAiResolve.js';
 import { AiRunGate } from '../AiSetup.js';
+import { useAiProviderName } from '../../hooks/useAiCapabilities.js';
 import { RegenProgressBar } from '../Activity/RegenProgressBar.js';
 import { SparkleIcon } from '../Icons.js';
 
@@ -51,6 +52,7 @@ export function usePrConflictsResolvable(pr: PrDetail): boolean {
  */
 export function ConflictAiCard({ pr }: { pr: PrDetail }): JSX.Element {
   const run = useConflictAiRun(pr.id);
+  const name = useAiProviderName();
   const active = conflictAiRunActive(run);
   const base = pr.baseRefName ?? 'the base branch';
   useEffect(() => {
@@ -66,14 +68,14 @@ export function ConflictAiCard({ pr }: { pr: PrDetail }): JSX.Element {
         This branch conflicts with {base}
       </div>
       <p className="mt-1 text-[12px] text-gray-600 dark:text-gray-300">
-        Claude reads the code and picks a result for each conflict. You check its choices in the
+        {name} reads the code and picks a result for each conflict. You check its choices in the
         resolver before anything is pushed.
       </p>
       {active && run != null ? (
         <div className="mt-2">
-          <RegenProgressBar active label="Resolving conflicts with Claude" timeConstantSec={60} />
+          <RegenProgressBar active label={`Resolving conflicts with ${name}`} timeConstantSec={60} />
           <div className="mt-1 flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
-            {conflictAiPhaseLabel(run.phase)}
+            {conflictAiPhaseLabel(run.phase, name)}
             <button type="button" className={BTN_SECONDARY} onClick={() => cancelConflictAiRun(pr.id)}>
               Cancel
             </button>
@@ -82,8 +84,8 @@ export function ConflictAiCard({ pr }: { pr: PrDetail }): JSX.Element {
       ) : (
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <AiRunGate kind="resolve">
-            <button type="button" className={BTN} onClick={() => startConflictAiRun(target)}>
-              {done != null ? 'Run again' : 'Resolve merge conflicts with Claude'}
+            <button type="button" className={BTN} onClick={() => startConflictAiRun(target, { providerName: name })}>
+              {done != null ? 'Run again' : `Resolve merge conflicts with ${name}`}
             </button>
           </AiRunGate>
           {done != null && (
@@ -92,7 +94,7 @@ export function ConflictAiCard({ pr }: { pr: PrDetail }): JSX.Element {
                 Open the resolver
               </button>
               <span className="text-xs text-gray-600 dark:text-gray-300">
-                Claude decided {done.choices.length} of {done.decidableTotal} change
+                {name} decided {done.choices.length} of {done.decidableTotal} change
                 {done.decidableTotal === 1 ? '' : 's'}.
               </span>
             </>

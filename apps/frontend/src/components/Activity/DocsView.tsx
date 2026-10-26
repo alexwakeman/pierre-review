@@ -5,7 +5,7 @@ import {
   REFERENCE_DOC_MAX_BYTES,
   type ReferenceDoc,
 } from '@pierre-review/shared';
-import { aiReadyFor, useAiCapabilities } from '../../hooks/useAiCapabilities.js';
+import { aiReadyFor, useAiCapabilities, useAiProvider, useAiProviderName } from '../../hooks/useAiCapabilities.js';
 import {
   useAddReferenceDocUrl,
   useCancelReferenceDoc,
@@ -35,6 +35,7 @@ import { BookIcon, ChevronIcon, UploadIcon } from '../Icons.js';
 import { InfoButton } from '../InfoModal.js';
 import { DocsChat } from './DocsChat.js';
 import { DocsViewer } from './DocsViewer.js';
+import { aiCredentialWords, aiModelWords } from '@pierre-review/shared';
 
 // THE DOCS RAIL LINE (Activity → Docs, `?activityRepo=docs`; docs/REFERENCE-DOCS.md § The SPA).
 // The workspace's reference library: CORE, free, LOCAL ONLY. The rail entry renders only on
@@ -256,6 +257,7 @@ function AddDocs({ workspaceId, maxBytes }: { workspaceId: number; maxBytes: num
   const onCodex = useMe().data?.ai.provider === 'codex';
   const upload = useUploadReferenceDoc(workspaceId);
   const addUrl = useAddReferenceDocUrl(workspaceId);
+  const aiProvider = useAiProvider();
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [dragging, setDragging] = useState(false);
   const [sending, setSending] = useState<string | null>(null);
@@ -380,7 +382,7 @@ function AddDocs({ workspaceId, maxBytes }: { workspaceId: number; maxBytes: num
           </select>
           <InfoButton title="Follow links">
             <p>
-              Limn reads the page, then asks Claude Haiku which of its links lead to more about the same topic, and reads
+              Limn reads the page, then asks {aiModelWords(aiProvider, 'Haiku')} which of its links lead to more about the same topic, and reads
               only those. Each level follows links from the pages read at the level before.
             </p>
             <p>
@@ -407,6 +409,8 @@ function AddDocs({ workspaceId, maxBytes }: { workspaceId: number; maxBytes: num
 
 function DocsPane({ workspaceId }: { workspaceId: number }): JSX.Element {
   const library = useReferenceDocs(workspaceId);
+  const aiProvider = useAiProvider();
+  const aiName = useAiProviderName();
   const open = useDocsView((s) => s.open[workspaceId]) ?? DEFAULT_OPEN;
   const openPath = useDocsView((s) => s.openPath);
   const narrowPane = useDocsView((s) => s.narrowPane);
@@ -522,14 +526,14 @@ function DocsPane({ workspaceId }: { workspaceId: number }): JSX.Element {
             <InfoButton title="Docs">
               <p>Reference material for this workspace: PDF, Word, text and markdown files, and web pages.</p>
               <p>
-                Claude Sonnet turns each one into markdown sections with a contents list, and the library keeps one contents
-                page across every document. Claude reads only the sections a question needs.
+                {aiModelWords(aiProvider, 'Sonnet')} turns each one into markdown sections with a contents list, and the library keeps one contents
+                page across every document. {aiName} reads only the sections a question needs.
               </p>
               <p>
-                Ask about the docs in the chat. To have Claude Review check stories against them, switch it on in Settings →
+                Ask about the docs in the chat. To have AI Review check stories against them, switch it on in Settings →
                 Workspace.
               </p>
-              <p>Everything stays on this machine. Building a document runs on your own Claude Code login or Anthropic API key.</p>
+              <p>Everything stays on this machine. Building a document runs on {aiCredentialWords(aiProvider)}.</p>
               <p>Drag the bars between the columns to resize them (or focus one and use the arrow keys). Double-click a bar to reset it.</p>
             </InfoButton>
             {wide && (
@@ -634,7 +638,7 @@ export function DocsView(): JSX.Element | null {
   if (!ai.enabled) {
     return (
       <p className={`px-6 py-10 text-center text-sm ${MUTED}`}>
-        Reference docs need Claude, which is switched off here.
+        Reference docs need AI, which is switched off here.
       </p>
     );
   }

@@ -157,13 +157,13 @@ export function CiCheckSection({
       info={
         <InfoButton title="CI check">
           <p>
-            Claude reads each failing GitHub Actions job’s log, picks out the error lines, reads the
+            {ai.providerName} reads each failing GitHub Actions job’s log, picks out the error lines, reads the
             code, and says why it failed, how sure it is, and whether this PR can fix it.
           </p>
           <p className="mt-2">Checks outside GitHub Actions have no log to read, so they are listed only.</p>
           <p className="mt-2">When auto review is on, a check that fails is looked at on its own.</p>
           <p className="mt-2">
-            When auto-posting is on, the causes Claude is more than 50% sure of are posted to the PR
+            When auto-posting is on, the causes {ai.providerName} is more than 50% sure of are posted to the PR
             as one comment, once for each set of failing checks.
           </p>
         </InfoButton>
@@ -201,7 +201,7 @@ export function CiCheckSection({
       {refused != null && <p className={`text-xs ${MUTED}`}>{ciRefusalSentence(refused)}</p>}
       {failed != null && <p className={`text-xs ${ERROR_TEXT}`}>{failed}</p>}
       {show === 'legacy' && (
-        <p className={REVIEW_META}>From an earlier Claude review of this commit.</p>
+        <p className={REVIEW_META}>From an earlier AI review of this commit.</p>
       )}
       {show === 'ci' && shown?.summary != null && shown.summary !== '' && <Markdown prRefs>{shown.summary}</Markdown>}
       {show === 'ci' && shown?.autoPost?.status === 'posted' && (

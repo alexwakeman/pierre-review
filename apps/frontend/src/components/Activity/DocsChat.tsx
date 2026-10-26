@@ -16,6 +16,8 @@ import { BookIcon, SparkleIcon } from '../Icons.js';
 import { InfoButton } from '../InfoModal.js';
 import { Markdown } from '../Markdown.js';
 import { useDocLinkRenderer } from './DocsViewer.js';
+import { useAiProvider } from '../../hooks/useAiCapabilities.js';
+import { aiCredentialWords, aiModelWords } from '@pierre-review/shared';
 
 // Activity → Docs, the chat: ad hoc questions about this workspace's library, answered by Sonnet 5
 // reading the library's files (POST /api/docs/chat). Multi-turn; the server rebuilds the transcript
@@ -93,6 +95,7 @@ export function DocsChat({
   const [question, setQuestion] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(false);
   const listRef = useRef<HTMLDivElement | null>(null);
+  const aiProvider = useAiProvider();
 
   const messages = active != null ? (conversation.data?.messages ?? []) : [];
   const list = conversations.data?.conversations ?? [];
@@ -121,12 +124,12 @@ export function DocsChat({
         <h3 className="text-xs font-semibold text-gray-800 dark:text-gray-100">Ask about these docs</h3>
         <InfoButton title="Ask about these docs">
           <p>
-            Claude Sonnet answers from this workspace&rsquo;s documents only. It starts at the library&rsquo;s contents, opens the
+            {aiModelWords(aiProvider, 'Sonnet')} answers from this workspace&rsquo;s documents only. It starts at the library&rsquo;s contents, opens the
             documents that matter, and reads only the sections it needs.
           </p>
           <p>Each point links to the section it came from. When two documents disagree, it cites both.</p>
           <p>It remembers the earlier questions in a conversation, up to a limit. It changes nothing.</p>
-          <p>Each answer runs on your own Claude Code login or Anthropic API key; what it used is shown under it.</p>
+          <p>Each answer runs on {aiCredentialWords(aiProvider)}; what it used is shown under it.</p>
         </InfoButton>
         <span className="ml-auto" />
         {list.length > 0 && (

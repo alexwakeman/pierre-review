@@ -29,7 +29,7 @@ import {
   type StoryDocsOverallVerdict,
   type StoryDocsRef,
 } from '@pierre-review/shared';
-import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
+import { useAiCapabilities, useAiProvider, useAiProviderName } from '../../hooks/useAiCapabilities.js';
 import { TICKET_CRITERION_STATUS_CLASS, OUTDATED_CLASS } from '../../lib/claudeReviewFollowUp.js';
 import { citationLabel } from '../../lib/referenceDocs.js';
 import { REVIEW_CHIP, REVIEW_PROSE } from '../../lib/reviewStyles.js';
@@ -40,6 +40,7 @@ import { CheckCircleIcon, PartialCircleIcon, WarningIcon } from '../Icons.js';
 import { InfoButton } from '../InfoModal.js';
 import { AiStatusLine } from '../AiStatusLine.js';
 import { AiRunLabel } from '../AiRunLabel.js';
+import { aiModelWords } from '@pierre-review/shared';
 
 const MUTED = 'text-gray-500 dark:text-gray-400';
 const BTN =
@@ -96,14 +97,16 @@ export function StoryDocsCriterionDetail({ item }: { item: StoryDocsCriterionIte
 }
 
 function StoryDocsInfo(): JSX.Element {
+  const provider = useAiProvider();
+  const name = useAiProviderName();
   return (
     <InfoButton title="Check against the docs">
       <p>
-        Claude reads this story — its description and acceptance criteria — against the workspace's reference docs
+        {name} reads this story — its description and acceptance criteria — against the workspace's reference docs
         (Activity → Docs).
       </p>
       <p>
-        First Claude Haiku picks up to 8 sections that could matter. Then Claude Sonnet reads only those documents and says
+        First {aiModelWords(provider, 'Haiku')} picks up to 8 sections that could matter. Then {aiModelWords(provider, 'Sonnet')} reads only those documents and says
         where the story matches the docs and where it does not.
       </p>
       <p>
@@ -111,11 +114,11 @@ function StoryDocsInfo(): JSX.Element {
         could not back with an exact quote is left out.
       </p>
       <p>
-        The criteria are the ones shown here: from Claude's check against the pull requests, else from the sprint summary,
+        The criteria are the ones shown here: from the AI check against the pull requests, else from the sprint summary,
         else worked out from the description.
       </p>
       <p>
-        It runs only when you press the button, on your own Claude. Out of date means the story, its criteria or the docs
+        It runs only when you press the button, on your own {name}. Out of date means the story, its criteria or the docs
         changed since.
       </p>
     </InfoButton>
@@ -198,13 +201,14 @@ export function StoryDocsAlignmentBlock({
 }
 
 function StoryDocsResultView({ run, attached }: { run: StoryDocsAlignmentRun; attached: boolean }): JSX.Element | null {
+  const name = useAiProviderName();
   const result = run.result;
   if (result == null) return null;
   if (result.outcome === 'no_relevant_docs') {
     return <p className={`text-xs ${MUTED}`}>Nothing in the reference docs bears on this story.</p>;
   }
   if (result.outcome === 'nothing_grounded' || result.overall == null) {
-    return <p className={`text-xs ${MUTED}`}>Claude found nothing it could back with a quote from the docs.</p>;
+    return <p className={`text-xs ${MUTED}`}>{name} found nothing it could back with a quote from the docs.</p>;
   }
   const overall = result.overall;
   const tone = OVERALL_TONE[overall.verdict];

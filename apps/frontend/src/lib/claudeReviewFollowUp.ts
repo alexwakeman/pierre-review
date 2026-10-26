@@ -227,11 +227,10 @@ export function anchorLabel(path: string, line: number | null): string {
   return line != null ? `${path}:${line}` : path;
 }
 
-/** Why an earlier comment carries no verdict. Two different facts, so two sentences. */
-export function notCheckedReason(item: Pick<ClaudeFollowUpItem, 'sent'>): string {
-  return item.sent
-    ? "Claude didn't report on this one."
-    : 'Not sent to Claude: too many earlier comments.';
+/** Why an earlier comment carries no verdict. Two different facts, so two sentences. `by`: the
+ *  provider that ran the review ('Claude' | 'Codex'; default Claude). */
+export function notCheckedReason(item: Pick<ClaudeFollowUpItem, 'sent'>, by = 'Claude'): string {
+  return item.sent ? `${by} didn't report on this one.` : `Not sent to ${by}: too many earlier comments.`;
 }
 
 // ---- other reviewers' threads ----
@@ -318,9 +317,9 @@ export function threadCountPills(c: ClaudeThreadAssessmentCounts): ThreadCountPi
   return pills.filter((p) => n[p.key] > 0);
 }
 
-/** Why a thread carries no verdict. */
-export function threadNotCheckedReason(t: Pick<ClaudeThreadAssessment, 'sent'>): string {
-  return t.sent ? "Claude didn't report on this one." : 'Not sent to Claude: too many open threads.';
+/** Why a thread carries no verdict. `by`: the provider that judged it (default Claude). */
+export function threadNotCheckedReason(t: Pick<ClaudeThreadAssessment, 'sent'>, by = 'Claude'): string {
+  return t.sent ? `${by} didn't report on this one.` : `Not sent to ${by}: too many open threads.`;
 }
 
 export type ReraisedStatus = 'not_addressed' | 'partly_addressed' | 'reply_disputed';

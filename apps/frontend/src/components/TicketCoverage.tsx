@@ -484,7 +484,7 @@ export function TicketCoverageSection({
       info={
         <InfoButton title="Story check">
           <p>
-            Claude checks each ticket’s acceptance criteria against every open or merged PR that
+            {ai.providerName} checks each ticket’s acceptance criteria against every open or merged PR that
             names it, together. A criterion done in another PR counts as met.
           </p>
           <p className="mt-2">

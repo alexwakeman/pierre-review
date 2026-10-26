@@ -5144,7 +5144,7 @@ export async function getWorkspaceInsights(
         refId: i.reviewId,
         threadId: null,
         severity: MY_TURN_SEVERITY.claude_review,
-        detail: `Claude review ready${i.verdict ? ` · ${i.verdict}` : ''}${i.headStale ? ' · head moved since' : ''}`,
+        detail: `AI review ready${i.verdict ? ` · ${i.verdict}` : ''}${i.headStale ? ' · head moved since' : ''}`,
         // finishedAt is nullable on the wire; null falls back to the PR row's openedAt.
         since: i.finishedAt != null ? new Date(Date.parse(i.finishedAt)) : null,
         prId: i.prId,

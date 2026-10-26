@@ -1,5 +1,6 @@
 import {
   AI_FIX_REVIEW_ITEM_LABELS,
+  aiRunProviderName,
   type AiFix,
   type AiFixReviewItem,
   type PrDetail,
@@ -72,7 +73,7 @@ function RefChip({
       <button
         type="button"
         onClick={() => onJump(anchor)}
-        aria-label={`${label}: ${item?.title ?? ''}. Show in Claude Review`}
+        aria-label={`${label}: ${item?.title ?? ''}. Show in AI Review`}
         className={`${CHIP} max-w-[22rem] hover:bg-gray-500/20`}
       >
         {body}
@@ -89,7 +90,7 @@ export function fixSourceLine(fix: AiFix): string {
   switch (fix.seed) {
     case 'review': {
       const n = fix.reviewItems?.length ?? 0;
-      return `Fix from the Claude review${n > 0 ? ` (${n} item${n === 1 ? '' : 's'})` : ''}.`;
+      return `Fix from the AI review${n > 0 ? ` (${n} item${n === 1 ? '' : 's'})` : ''}.`;
     }
     case 'plain':
       return 'Fix from your instruction.';
@@ -103,6 +104,8 @@ export function fixSourceLine(fix: AiFix): string {
 }
 
 export function FixReport({ pr, fix }: { pr: PrDetail; fix: AiFix }): JSX.Element | null {
+  // The provider that ran THIS fix (its stored model).
+  const by = aiRunProviderName(fix);
   const jump = useJumpToFinding(pr);
   const report = fix.changeReport;
   const items = new Map((fix.reviewItems ?? []).map((i) => [i.ref, i]));
@@ -120,10 +123,10 @@ export function FixReport({ pr, fix }: { pr: PrDetail; fix: AiFix }): JSX.Elemen
           <div className={HEADING}>
             Changes
             <InfoButton title="Changes">
-              <p>What Claude says it changed in each file, and why.</p>
+              <p>What {by} says it changed in each file, and why.</p>
               {hasRefs && (
                 <p>
-                  Each tag is a review item the change answers. A finding tag opens it in the Claude
+                  Each tag is a review item the change answers. A finding tag opens it in the AI
                   Review tab.
                 </p>
               )}
@@ -184,7 +187,7 @@ export function FixReport({ pr, fix }: { pr: PrDetail; fix: AiFix }): JSX.Elemen
           <div className={HEADING}>
             Left out
             <InfoButton title="Left out">
-              <p>These review items did not fit in what Claude was sent, so it never saw them.</p>
+              <p>These review items did not fit in what {by} was sent, so it never saw them.</p>
             </InfoButton>
           </div>
           <div className="flex flex-wrap gap-1">

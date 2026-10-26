@@ -23,6 +23,7 @@ import { pathsWriting, sprintDatesLine, sprintProgress } from './sprintPathsMode
 import { SprintStatusSettings } from './SprintStatusSettings.js';
 import { SprintTrackerSetup } from '../Sprint/SprintTrackerSetup.js';
 import { SprintStoryTray } from '../Sprint/SprintStoryTray.js';
+import { useAiProviderName } from '../../hooks/useAiCapabilities.js';
 
 // This Sprint (a fixed tab, FREE) — THE SPRINT (GET /api/sprint-graph; the route keeps its name):
 // the toolbar (title + ⓘ, dates, Ask Claude, the status buckets behind the gear, Refresh), the page's
@@ -72,6 +73,7 @@ export function SprintView({ view }: { view: SprintBoardView }): JSX.Element {
   const workspaceId = useFilters((s) => s.workspaceId);
   const { data, isLoading, isError, isFetching, refetch, dataUpdatedAt } = useSprintGraph(workspaceId);
   const refresh = useSprintRefresh(workspaceId);
+  const aiName = useAiProviderName();
   const { changed, tokenUpdatedAt } = useSprintChangeToken(
     workspaceId,
     data != null && data.trackerOn ? { changeToken: data.changeToken, updatedAt: dataUpdatedAt, fetching: isFetching } : null,
@@ -80,7 +82,7 @@ export function SprintView({ view }: { view: SprintBoardView }): JSX.Element {
   const [checksNote, setChecksNote] = useState<string | null>(null);
   useEffect(() => {
     if (!refresh.isSuccess) return;
-    const note = ticketChecksNote(refresh.data.ticketChecks);
+    const note = ticketChecksNote(refresh.data.ticketChecks, aiName);
     setChecksNote(note);
     if (note == null) return;
     const t = window.setTimeout(() => setChecksNote(null), CHECKS_NOTE_MS);
@@ -167,7 +169,7 @@ export function SprintView({ view }: { view: SprintBoardView }): JSX.Element {
         <h3 className="flex items-center gap-1.5 text-sm font-semibold text-gray-800 dark:text-gray-100">
           {title}
           <InfoButton title="Reading this sprint">
-            <BoardInfo />
+            <BoardInfo name={aiName} />
           </InfoButton>
         </h3>
         {datesLine != null && (
@@ -186,7 +188,7 @@ export function SprintView({ view }: { view: SprintBoardView }): JSX.Element {
             className="inline-flex items-center gap-1 rounded border border-ai-border px-2 py-0.5 text-xs font-medium text-ai-ink hover:bg-ai-surface-2"
           >
             <SparkleIcon size={12} className="text-ai-signal" />
-            Ask Claude
+            Ask {aiName}
           </button>
         )}
         <button type="button" onClick={() => setSettingsOpen((o) => !o)} aria-expanded={settingsOpen} className={TOOL_BUTTON}>
@@ -245,7 +247,7 @@ export function SprintView({ view }: { view: SprintBoardView }): JSX.Element {
   );
 }
 
-function BoardInfo(): JSX.Element {
+function BoardInfo({ name }: { name: string }): JSX.Element {
   return (
     <>
       <p>
@@ -258,8 +260,8 @@ function BoardInfo(): JSX.Element {
           and a count of every ticket below.
         </li>
         <li>
-          <strong>Theme</strong>: one row per theme Claude named from the tickets; tickets in none sit in No theme. Under each name,
-          Claude says in a sentence what the work involves. The counts under it are Limn&rsquo;s.
+          <strong>Theme</strong>: one row per theme {name} named from the tickets; tickets in none sit in No theme. Under each name,
+          {name} says in a sentence what the work involves. The counts under it are Limn&rsquo;s.
         </li>
         <li>
           <strong>People</strong>: one row per person the tickets are assigned to, in alphabetical order, Unassigned last. Reviews
@@ -286,15 +288,15 @@ function BoardInfo(): JSX.Element {
           instead.
         </li>
         <li>
-          <strong>Under the title</strong>: Claude&rsquo;s one-line summary of the ticket, then its acceptance criteria.
+          <strong>Under the title</strong>: {name}&rsquo;s one-line summary of the ticket, then its acceptance criteria.
           &ldquo;3 of 4 criteria met&rdquo; comes from the latest ticket check, which reads the ticket&rsquo;s pull requests against its
           criteria and lists them itself, so its count can differ from the summary&rsquo;s. Without a check the card shows how many
-          criteria the ticket has; when it names none, Claude works them out from the description. Italics mean the check was made
+          criteria the ticket has; when it names none, {name} works them out from the description. Italics mean the check was made
           before the pull requests last changed.
         </li>
         <li>
           <strong>Refresh</strong> reads the sprint from your tracker now. It also checks up to three tickets that have pull
-          requests and no current check, on your own Claude. The board also updates itself within a minute when the sprint
+          requests and no current check, on your own {name}. The board also updates itself within a minute when the sprint
           changes, while it is open.
         </li>
         <li>
@@ -327,9 +329,9 @@ export function sprintAiPass(
 
 /** The line said briefly after a Refresh about the ticket checks it started; null = say nothing (none
  *  needed one, or the server does not run them — cloud, AI off). Exported for tests. */
-export function ticketChecksNote(c: SprintRefreshTicketChecks | undefined): string | null {
+export function ticketChecksNote(c: SprintRefreshTicketChecks | undefined, name = 'Claude'): string | null {
   if (c == null) return null;
-  if (c.skipped === 'no_credential') return 'Ticket checks need Claude set up first.';
+  if (c.skipped === 'no_credential') return `Ticket checks need ${name} set up first.`;
   if (c.started <= 0) return null;
   return c.started === 1 ? 'Checking 1 ticket against its pull requests.' : `Checking ${c.started} tickets against their pull requests.`;
 }

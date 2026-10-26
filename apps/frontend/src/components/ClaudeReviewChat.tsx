@@ -26,6 +26,7 @@ import {
 import { Markdown } from './Markdown.js';
 import { CheckIcon, ChevronIcon, CloseIcon, CommentIcon } from './Icons.js';
 import { AiRunGate } from './AiSetup.js';
+import { useAiProviderName } from '../hooks/useAiCapabilities.js';
 import { RegenProgressBar } from './Activity/RegenProgressBar.js';
 import { REVIEW_ANCHOR_MUTED, REVIEW_ITEM_CARD, REVIEW_SUBHEAD } from '../lib/reviewStyles.js';
 
@@ -42,7 +43,8 @@ import { REVIEW_ANCHOR_MUTED, REVIEW_ITEM_CARD, REVIEW_SUBHEAD } from '../lib/re
 // fetched only once opened.
 
 export const CHAT_HEAD_MOVED_LINE = 'Answers are about the reviewed commit; the PR has moved on.';
-const ANSWERING_LINE = 'Claude is reading the code…';
+/** The line while an answer is being written, naming the provider that writes it. */
+export const answeringLine = (name: string): string => `${name} is reading the code…`;
 
 const BTN_SMALL =
   'inline-flex items-center gap-1 whitespace-nowrap rounded border border-blue-400 px-2 py-0.5 text-xs text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:border-blue-600 dark:text-blue-400 dark:hover:bg-blue-900/30';
@@ -230,6 +232,7 @@ export function ReviewChatThread({
   prId?: number | null;
 }): JSX.Element {
   const thread = useClaudeReviewChat(reviewId, findingId, true);
+  const providerName = useAiProviderName();
   const ask = useAskClaudeReviewChat(reviewId);
   const busy = useClaudeReviewChatBusy(reviewId);
   const pendingHere = useClaudeReviewChatPendingQuestion(reviewId, findingId);
@@ -310,8 +313,8 @@ export function ReviewChatThread({
       )}
       {answering && (
         <div className="space-y-1">
-          <div className="text-xs text-ai-signal">{ANSWERING_LINE}</div>
-          <RegenProgressBar active label={ANSWERING_LINE} timeConstantSec={explaining ? 40 : 20} />
+          <div className="text-xs text-ai-signal">{answeringLine(providerName)}</div>
+          <RegenProgressBar active label={answeringLine(providerName)} timeConstantSec={explaining ? 40 : 20} />
         </div>
       )}
       <div className="space-y-2">
@@ -446,6 +449,7 @@ export function ReviewChatSection({ reviewId, prId }: { reviewId: number; prId: 
   const unregisterChat = useReviewChatPins((s) => s.unregisterChat);
   const focusTick = useReviewChatPins((s) => (s.focus?.prId === prId ? s.focus.tick : null));
   const lastTick = useRef<number | null>(focusTick);
+  const providerName = useAiProviderName();
 
   useEffect(() => {
     registerChat(prId, reviewId);
@@ -472,7 +476,7 @@ export function ReviewChatSection({ reviewId, prId }: { reviewId: number; prId: 
             className="inline-flex items-center gap-1.5 text-sm font-medium text-blue-600 hover:underline dark:text-blue-400"
           >
             <CommentIcon size={13} />
-            {open ? 'Hide' : 'Ask Claude about this review'}
+            {open ? 'Hide' : `Ask ${providerName} about this review`}
             <ChevronIcon dir={open ? 'down' : 'right'} size={12} />
           </button>
         }

@@ -267,16 +267,16 @@ export function ClaudeReviewPanel({
       // keyboard route. Inner controls stop propagation, so they never also land here.
       onClick={open}
       role="group"
-      aria-label="Claude review"
+      aria-label="AI review"
     >
       <button
         type="button"
         onClick={open}
-        title="Open the Claude review"
+        title="Open the AI review"
         className="inline-flex shrink-0 items-center gap-1 rounded text-[11px] font-semibold text-ai-ink hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
       >
         <SparkleIcon size={12} className="text-ai-signal" />
-        Claude
+        AI review
       </button>
       <Group>{outcome}</Group>
 
@@ -304,7 +304,7 @@ export function ClaudeReviewPanel({
             {toFix != null && (
               <span
                 className={`${PILL} ${OUTDATED_CLASS}`}
-                title="Other reviewers' threads Claude judged right and not yet dealt with"
+                title="Other reviewers' threads the review judged right and not yet dealt with"
               >
                 {toFix}
               </span>
@@ -319,7 +319,7 @@ export function ClaudeReviewPanel({
           <Group>
             <span
               className={ciPill.running ? GREY_PILL : `${PILL} ${OUTDATED_CLASS}`}
-              title="Claude's check of the failing CI on the PR's latest commit"
+              title="The AI check of the failing CI on the PR's latest commit"
             >
               {ciPill.running && (
                 <span aria-hidden className="h-1.5 w-1.5 animate-pulse rounded-full bg-ai-signal-fill" />

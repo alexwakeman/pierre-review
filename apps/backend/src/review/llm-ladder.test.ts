@@ -115,9 +115,9 @@ describe('cheapComplete — the ladder', () => {
     const was = c.aiEnabled;
     c.aiEnabled = false;
     try {
-      await expect(cheapComplete({ prompt: 'hi' })).rejects.toThrow('Claude is switched off here.');
+      await expect(cheapComplete({ prompt: 'hi' })).rejects.toThrow('AI is switched off here.');
       process.env.LIMN_AI_USE_API_KEY = 'true';
-      await expect(cheapComplete({ prompt: 'hi' })).rejects.toThrow('Claude is switched off here.');
+      await expect(cheapComplete({ prompt: 'hi' })).rejects.toThrow('AI is switched off here.');
       expect(query).not.toHaveBeenCalled();
       expect(messagesCreate).not.toHaveBeenCalled();
     } finally {

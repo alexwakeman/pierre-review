@@ -29,6 +29,13 @@ export const PICKER_SECTION_LABEL: Record<AiFixPickerSection, string> = {
   story: 'Ticket gaps',
 };
 
+/** A section's heading, naming the provider that ran the source review ('Claude' | 'Codex'). */
+export function pickerSectionLabel(section: AiFixPickerSection, by = 'Claude'): string {
+  if (section === 'findings') return `${by}’s findings`;
+  if (section === 'judged_threads') return `Threads ${by} says need a fix`;
+  return PICKER_SECTION_LABEL[section];
+}
+
 /** The reader's ticks: an override per key over the server's default. */
 export type PickerOverrides = Record<string, boolean>;
 

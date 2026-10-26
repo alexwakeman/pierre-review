@@ -79,7 +79,7 @@ function SonarForm({ workspaceId, saved }: { workspaceId: number; saved: Workspa
   return (
     <SectionShell
       title="SonarCloud"
-      desc="Feed SonarCloud’s findings into Claude Review and AI Fix."
+      desc="Feed SonarCloud’s findings into AI Review and AI Fix."
       info={
         <InfoButton title="SonarCloud">
           <div className="space-y-2">

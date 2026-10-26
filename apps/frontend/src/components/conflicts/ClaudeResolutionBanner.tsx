@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { undoAllClaudeChoices, useClaudeLiveCount } from '../../store/conflictClaude.js';
 import { ChevronIcon, SparkleIcon, UndoIcon } from '../Icons.js';
+import { useAiProviderName } from '../../hooks/useAiCapabilities.js';
 
 /**
  * One line above the panes when the resolver was pre-filled by "Resolve with Claude": how many of
@@ -11,16 +12,17 @@ import { ChevronIcon, SparkleIcon, UndoIcon } from '../Icons.js';
  */
 export function ClaudeResolutionBanner(): JSX.Element | null {
   const { live, run } = useClaudeLiveCount();
+  const name = useAiProviderName();
   const [notesOpen, setNotesOpen] = useState(false);
   if (run == null) return null;
   const total = Object.keys(run.marks).length;
 
   const sentence =
     total === 0
-      ? 'Claude left every change for you.'
+      ? `${name} left every change for you.`
       : live === 0
-        ? 'None of Claude’s choices are left.'
-        : `Claude decided ${live} of ${run.decidableTotal} change${run.decidableTotal === 1 ? '' : 's'}. Check each one before you commit.`;
+        ? `None of ${name}’s choices are left.`
+        : `${name} decided ${live} of ${run.decidableTotal} change${run.decidableTotal === 1 ? '' : 's'}. Check each one before you commit.`;
 
   return (
     <div className="shrink-0 border-b border-gray-200 px-4 py-1.5 text-[12px] text-gray-700 dark:border-gray-800 dark:text-gray-200">
@@ -36,7 +38,7 @@ export function ClaudeResolutionBanner(): JSX.Element | null {
             className="inline-flex items-center gap-1 rounded border border-gray-300 px-1.5 py-0.5 text-[11px] hover:border-gray-400 dark:border-gray-700 dark:hover:border-gray-500"
           >
             <UndoIcon size={12} />
-            Undo all Claude’s choices
+            Undo all {name}’s choices
           </button>
         )}
         {run.summary != null && run.summary !== '' && (
@@ -47,7 +49,7 @@ export function ClaudeResolutionBanner(): JSX.Element | null {
             className="inline-flex items-center gap-1 text-[11px] text-gray-600 underline-offset-2 hover:underline dark:text-gray-300"
           >
             <ChevronIcon dir={notesOpen ? 'down' : 'right'} size={11} />
-            Claude’s notes
+            {name}’s notes
           </button>
         )}
       </div>

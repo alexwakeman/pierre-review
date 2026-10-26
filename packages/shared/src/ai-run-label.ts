@@ -25,14 +25,16 @@ export function isAiProviderSetting(v: unknown): v is AiProviderSetting {
   return v === 'claude' || v === 'codex' || v === 'auto';
 }
 
-/** The provider's display name. */
-export function aiProviderName(provider: AiProviderId): 'Claude' | 'Codex' {
+export type AiProviderName = 'Claude' | 'Codex';
+
+/** The provider's display name. Absent (an older server or row) ⇒ Claude. */
+export function aiProviderName(provider: AiProviderId | null | undefined): AiProviderName {
   return provider === 'codex' ? 'Codex' : 'Claude';
 }
 
 /** A Codex model id (OpenAI's names). Everything else Limn has ever stored is Claude's. */
 function isCodexModelId(model: string): boolean {
-  return /^(gpt-|o\d|codex-)/i.test(model.trim());
+  return /^(gpt-|o\d|codex)/i.test(model.trim());
 }
 
 /**
@@ -111,10 +113,13 @@ export function claudeModelRole(model: string): AiModelRole {
 
 /**
  * A model PICKER's option, for the provider that will run it: the Claude label as it always was on
- * Claude ("Claude Opus 5.5 (most thorough)"), and on Codex the Codex model of the same depth
- * ("Codex · GPT-6 Astra") — so the picker names what the run will actually be.
+ * Claude ("Claude Opus 5.5 (most thorough)"), and on Codex the Codex model of the same depth, with
+ * the same reason ("Codex · GPT-6 Astra (most thorough)") — so the picker names what will run.
  */
 export function aiModelChoiceLabel(model: ClaudeReviewModel, provider: AiProviderId | null | undefined): string {
-  if (provider !== 'codex') return CLAUDE_REVIEW_MODEL_LABELS[model];
-  return aiRunLabel('codex', AI_MODEL_FOR_ROLE.codex[claudeModelRole(model)]);
+  const claudeLabel = CLAUDE_REVIEW_MODEL_LABELS[model];
+  if (provider !== 'codex') return claudeLabel;
+  const name = aiRunLabel('codex', AI_MODEL_FOR_ROLE.codex[claudeModelRole(model)]);
+  const why = /\(([^)]*)\)\s*$/.exec(claudeLabel)?.[1];
+  return why ? `${name} (${why})` : name;
 }

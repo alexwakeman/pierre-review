@@ -23,7 +23,7 @@ import {
 } from '../../lib/claudeReviewFollowUp.js';
 import { fixPillLabel } from '../../lib/claudeAutoReview.js';
 import { unlockReviewSound } from '../../lib/sound.js';
-import { aiReadyFor, useAiCapabilities } from '../../hooks/useAiCapabilities.js';
+import { aiReadyFor, useAiCapabilities, useAiProviderName } from '../../hooks/useAiCapabilities.js';
 import { CheckIcon, SparkleIcon } from '../Icons.js';
 import { VerdictIcon } from '../VerdictIcon.js';
 import { AutoMark, GREY_PILL, MUTED, PILL } from './ClaudeReviewCell.js';
@@ -133,11 +133,11 @@ export function ClaudeReviewLine({
       className="mt-1.5 flex min-w-0 cursor-default flex-wrap items-center gap-1.5 text-[12px]"
       onClick={(e) => e.stopPropagation()}
       role="group"
-      aria-label="Claude review"
+      aria-label="AI review"
     >
       <span className="inline-flex shrink-0 items-center gap-1 font-semibold text-ai-ink">
         <SparkleIcon size={12} className="text-ai-signal" />
-        Claude
+        AI review
       </span>
       {lead}
       {ciPill != null ? (
@@ -202,6 +202,7 @@ export function ClaudeReviewActions({
   const start = useStartReviewFromList(prId);
   const starting = useClaudeReviewStarting(prId);
   const ready = aiReadyFor(useAiCapabilities(), 'review');
+  const aiName = useAiProviderName();
   const cell = reviewCellFor(state, starting);
   const held = heldByAutoReview(state);
   const showError = start.isError && !starting && (held || !isAutoReviewHoldError(start.error));
@@ -239,7 +240,7 @@ export function ClaudeReviewActions({
   } else if (cell.kind === 'start' && (offerStart || cell.failed)) {
     parts.push(
       <button key="run" type="button" onClick={run} className={PENDING_AI_BUTTON}>
-        {cell.failed ? 'Review again' : 'Review with Claude'}
+        {cell.failed ? 'Review again' : `Review with ${aiName}`}
       </button>,
     );
   }
@@ -316,7 +317,7 @@ export function ClaudeReviewExtras({
     <div className="flex flex-wrap items-center gap-1.5 text-[12px]">
       <span className="inline-flex items-center gap-1 font-semibold text-ai-ink">
         <SparkleIcon size={12} className="text-ai-signal" />
-        Claude
+        AI review
       </span>
       {currency != null && (
         <span className={`${PILL} ${currency.className}`} title={currency.title}>

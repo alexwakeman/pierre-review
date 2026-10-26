@@ -1,5 +1,6 @@
 import {
   AI_SUBSCRIPTION_LABELS,
+  aiProviderName,
   formatSharePct as formatFineSharePct,
   runWeekShareText,
   type AiBudgetResponse,
@@ -10,7 +11,7 @@ import {
 } from '@pierre-review/shared';
 import { formatUsd as formatRunUsd } from './ui.js';
 
-// The pure half of the Claude spend budget's UI (the meter's words, the toast's sentence), so tests
+// The pure half of the AI spend budget's UI (the meter's words, the toast's sentence), so tests
 // can import it without React Query. The DECISION is the server's (`ai/budget.ts` `decideAiBudget`);
 // nothing here re-derives whether a run is over budget — it only words what the server said.
 // ⚠ A subscription is worded in percentages only; US$ is the API key's alone.
@@ -53,7 +54,11 @@ export function meterText(status: AiBudgetStatus): string | null {
   }
   const s = status.subscription;
   if (s == null) return null;
-  if (s.subscription == null || s.usedSharePct == null) return 'Limn: pick your subscription';
+  // Codex reports its plan and its own windows: nothing to pick, only a reading still to come.
+  if (status.provider === 'codex') {
+    if (s.usedSharePct == null) return 'Limn: usage not read yet';
+  } else if (s.subscription == null || s.usedSharePct == null) return 'Limn: pick your subscription';
+  if (s.usedSharePct == null) return null;
   return `Limn: ${formatSharePct(s.usedSharePct)} of your week · limit ${s.sharePct}%`;
 }
 
@@ -176,7 +181,7 @@ export function headerUsageOf(data: AiBudgetResponse): HeaderUsage | null {
         label: 'Limn AI, last 7 days:',
         figure: formatRunUsd(usage.apiKey.weekUsd),
         tone: 'normal',
-        title: `Limn’s Claude runs over the last 7 days: ${formatRunUsd(usage.apiKey.weekUsd)}`,
+        title: `Limn’s ${aiProviderName(usage.provider)} runs over the last 7 days: ${formatRunUsd(usage.apiKey.weekUsd)}`,
       };
     }
     return { label: 'AI usage', figure: null, tone: 'normal', title: 'AI usage' };
@@ -201,11 +206,12 @@ export function headerUsageOf(data: AiBudgetResponse): HeaderUsage | null {
   }
   const acct = usage.account?.week?.usedPct;
   if (acct != null) {
+    const name = aiProviderName(usage.provider);
     return {
-      label: 'Claude this week:',
+      label: `${name} this week:`,
       figure: ratioPct(acct),
       tone: acct >= 80 ? 'near' : 'normal',
-      title: `Your Claude account has used ${ratioPct(acct)} of this week`,
+      title: `Your ${name} account has used ${ratioPct(acct)} of this week`,
     };
   }
   return { label: 'AI usage', figure: null, tone: 'normal', title: 'AI usage' };
@@ -232,7 +238,7 @@ export interface UsageDetail {
   /** The paused sentence, while automatic runs are paused. */
   paused: string | null;
   sections: UsageSection[];
-  /** "Updated 4 min ago" for Claude's reading; null when nothing was read. */
+  /** "Updated 4 min ago" for the provider's own reading; null when nothing was read. */
   updated: string | null;
 }
 
@@ -300,7 +306,7 @@ export function usageDetailOf(data: AiBudgetResponse, now: number = Date.now()):
       rows.push({ label: 'Today', value: formatRunUsd(k.todayUsd) });
     }
     return {
-      heading: 'Anthropic API key',
+      heading: usage.provider === 'codex' ? 'OpenAI API key' : 'Anthropic API key',
       paused,
       sections: [{ title: 'Limn’s runs', rows: [...rows, ...runsRows] }],
       updated: null,
@@ -310,8 +316,18 @@ export function usageDetailOf(data: AiBudgetResponse, now: number = Date.now()):
   const acct = usage.account;
   const kind = acct?.subscription ?? null;
   const reported = acct?.reportedSubscription ?? null;
+  const name = aiProviderName(usage.provider);
+  // Codex runs on a ChatGPT plan ("Codex · ChatGPT Plus"); Claude names its own subscription.
   const heading =
-    kind != null ? `Claude ${AI_SUBSCRIPTION_LABELS[kind]}` : reported != null && reported.trim() !== '' ? `Claude ${capitalise(reported)}` : 'Claude';
+    usage.provider === 'codex'
+      ? reported != null && reported.trim() !== ''
+        ? `Codex · ChatGPT ${capitalise(reported)}`
+        : 'Codex'
+      : kind != null
+        ? `Claude ${AI_SUBSCRIPTION_LABELS[kind]}`
+        : reported != null && reported.trim() !== ''
+          ? `Claude ${capitalise(reported)}`
+          : 'Claude';
 
   const sub = status.mode === 'subscription' ? status.subscription : null;
   const limnRows: UsageRow[] = [];
@@ -340,7 +356,7 @@ export function usageDetailOf(data: AiBudgetResponse, now: number = Date.now()):
   push('5-hour session', acct?.fiveHour);
   push('Week', acct?.week);
   for (const m of acct?.models ?? []) push(`${m.label ?? m.key}, week`, m);
-  if (acctRows.length > 0) sections.push({ title: 'Your Claude account', rows: acctRows });
+  if (acctRows.length > 0) sections.push({ title: `Your ${name} account`, rows: acctRows });
 
   return {
     heading,
@@ -348,4 +364,22 @@ export function usageDetailOf(data: AiBudgetResponse, now: number = Date.now()):
     sections,
     updated: acct?.observedAt != null && acctRows.length > 0 ? ago(acct.observedAt, now) : null,
   };
+}
+
+/**
+ * Codex on a ChatGPT sign-in: its OWN two windows for Settings → AI spend, in percent only —
+ * "Codex, 5-hour session: 12% used · 88% left · resets 14:30". Empty on Claude (its windows stay in
+ * the header popover, unchanged), on an API key, or before a reading.
+ */
+export function codexWindowLines(usage: AiUsageView, now: number = Date.now()): string[] {
+  if (usage.provider !== 'codex' || usage.route !== 'login' || usage.account == null) return [];
+  const out: string[] = [];
+  const one = (label: string, w: AiUsageWindowView | null): void => {
+    if (w == null) return;
+    const v = windowValue(w, now);
+    if (v != null) out.push(`${label}: ${v}`);
+  };
+  one('Codex, 5-hour session', usage.account.fiveHour);
+  one('Codex, week', usage.account.week);
+  return out;
 }

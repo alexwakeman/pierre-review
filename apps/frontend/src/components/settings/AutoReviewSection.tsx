@@ -11,6 +11,7 @@ import {
   type AutoPostScope,
 } from '@pierre-review/shared';
 import { aiReadyFor, useAiCapabilities } from '../../hooks/useAiCapabilities.js';
+import { aiCredentialWords } from '@pierre-review/shared';
 import { AiAuthLine, AiRuntimeSetup } from '../AiSetup.js';
 import { InfoButton } from '../InfoModal.js';
 import {
@@ -95,14 +96,15 @@ const KIND_ROWS: Array<{ key: keyof AutoPostKinds; label: string }> = [
 const sameKinds = (a: AutoPostKinds, b: AutoPostKinds): boolean =>
   KIND_ROWS.every(({ key }) => a[key] === b[key]);
 
-const FIX_ROWS: Array<{ key: keyof AutoFixInclude; label: string }> = [
-  { key: 'findings', label: 'Claude’s findings' },
-  { key: 'earlierFindings', label: 'Earlier findings not fixed yet' },
-  { key: 'judgedThreads', label: 'Threads Claude says to fix' },
-  { key: 'untouchedThreads', label: 'Threads nobody has answered' },
-  { key: 'ciFailures', label: 'CI failure reasons' },
-  { key: 'sonar', label: 'SonarCloud issues' },
-  { key: 'styleBots', label: 'Style bot comments (SonarCloud, Codecov…)' },
+// `label` takes the active provider's name: an automatic fix starts from that provider's review.
+const FIX_ROWS: Array<{ key: keyof AutoFixInclude; label: (name: string) => string }> = [
+  { key: 'findings', label: (name) => `${name}’s findings` },
+  { key: 'earlierFindings', label: () => 'Earlier findings not fixed yet' },
+  { key: 'judgedThreads', label: (name) => `Threads ${name} says to fix` },
+  { key: 'untouchedThreads', label: () => 'Threads nobody has answered' },
+  { key: 'ciFailures', label: () => 'CI failure reasons' },
+  { key: 'sonar', label: () => 'SonarCloud issues' },
+  { key: 'styleBots', label: () => 'Style bot comments (SonarCloud, Codecov…)' },
 ];
 const sameInclude = (a: AutoFixInclude, b: AutoFixInclude): boolean =>
   FIX_ROWS.every(({ key }) => a[key] === b[key]);
@@ -195,7 +197,7 @@ export function AutoReviewSection(): JSX.Element {
   }, [workspaceId, storedPush]);
 
   if (workspaceId == null || settings.data == null) {
-    return <ScopePendingSection title="Auto Claude review" failed={settings.isError} />;
+    return <ScopePendingSection title="Auto review" failed={settings.isError} />;
   }
   const cap = parseCap(capText);
   const capDirty = cap != null && cap !== storedCap;
@@ -210,10 +212,10 @@ export function AutoReviewSection(): JSX.Element {
 
   return (
     <SectionShell
-      title="Auto Claude review"
-      desc="Claude reviews each new PR a person opens in this workspace, with the same model and budget as the Review button. It runs on your own Claude Code login or Anthropic API key."
+      title="Auto review"
+      desc={`${ai.providerName} reviews each new PR a person opens in this workspace, with the same model and budget as the Review button. It runs on ${aiCredentialWords(ai.provider)}.`}
       info={
-        <InfoButton title="Auto Claude review">
+        <InfoButton title="Auto review">
           <p>
             Only PRs a person opens after you turn this on are reviewed. Drafts wait until they are
             marked ready. PRs opened by bots are skipped.
@@ -313,7 +315,7 @@ export function AutoReviewSection(): JSX.Element {
                 checked={include[key]}
                 onChange={(e) => setInclude((v) => ({ ...v, [key]: e.target.checked }))}
               />
-              <span>{label}</span>
+              <span>{label(ai.providerName)}</span>
             </label>
           ))}
         </fieldset>
@@ -357,8 +359,8 @@ export function AutoReviewSection(): JSX.Element {
         </label>
         <InfoButton title="Design diagrams">
           <p>
-            Claude draws a design diagram after every review, and turning this off saves about a
-            third of Claude’s review usage.
+            {ai.providerName} draws a design diagram after every review, and turning this off saves about a
+            third of {ai.providerName}’s review usage.
           </p>
         </InfoButton>
       </div>
@@ -373,7 +375,7 @@ export function AutoReviewSection(): JSX.Element {
             />
             <span>
               <span className="font-medium text-gray-700 dark:text-gray-200">
-                Post Claude reviews to GitHub automatically
+                Post AI reviews to GitHub automatically
               </span>
               <span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">
                 {on
@@ -394,7 +396,7 @@ export function AutoReviewSection(): JSX.Element {
               by bots, are never posted on. A review request to a team does not make a PR yours:
               Limn does not know which teams you are in.
             </p>
-            <p>If a post fails, the Claude Review tab says so and the Post button stays.</p>
+            <p>If a post fails, the AI Review tab says so and the Post button stays.</p>
           </InfoButton>
         </div>
         <div className={`space-y-1.5 pl-5 ${postOn ? '' : 'opacity-60'}`}>

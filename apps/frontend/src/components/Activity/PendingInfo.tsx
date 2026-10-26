@@ -337,7 +337,7 @@ function Dot({ severity }: { severity: InsightSeverity }): JSX.Element {
 /** One line per tab for the guide — what the reader will find in it. */
 const TAB_BLURB: Record<(typeof PENDING_TABS)[number]['key'], string> = {
   my_turn: 'Things you owe an action on — see “When it is your turn” below.',
-  claude: 'Claude reviews that finished with findings you have not posted. Same rules as My turn.',
+  claude: 'AI reviews that finished with findings you have not posted. Same rules as My turn.',
   fixing: 'Failing builds you are on the hook for, and PRs with merge conflicts in repos you can push to.',
   review:
     'PRs whose requested review has not come, and PRs nobody has been asked to review. People with reviews waiting are listed above them.',
@@ -399,7 +399,7 @@ const MY_TURN_GUIDE: Record<MyTurnCardReason, { appears: string; goes: string }>
     goes: 'Someone replies or pushes to its file.',
   },
   claude_review: {
-    appears: 'A Claude review finished with findings you have not posted. Local installs only.',
+    appears: 'An AI review finished with findings you have not posted. Local installs only.',
     goes: 'You post them.',
   },
   watched_repo_pr: {
@@ -723,7 +723,7 @@ export function PendingGuideModal({
           <GuideSection title="When it is your turn">
             <p>
               A My turn card means you owe an action. These put one on the board, in the order My
-              turn groups them. A finished Claude review follows the same rules but is listed in{' '}
+              turn groups them. A finished AI review follows the same rules but is listed in{' '}
               {TAB_LABEL.claude}.
             </p>
             <table className="w-full border-collapse text-sm">

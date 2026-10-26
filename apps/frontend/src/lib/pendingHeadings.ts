@@ -621,10 +621,10 @@ function myTurnHeading(card: MyTurnCard, ctx: HeadingContext): PendingHeading {
       const auto = card.trigger === 'auto';
       const lead =
         verdict != null
-          ? `${auto ? 'Claude’s auto review' : 'Claude reviewed'}: ${verdict}`
+          ? `${auto ? 'Auto review' : 'AI review'}: ${verdict}`
           : auto
-            ? 'Claude’s auto review finished'
-            : 'Claude finished a review';
+            ? 'Auto review finished'
+            : 'AI review finished';
       return plain(lead, card.since);
     }
     default: {

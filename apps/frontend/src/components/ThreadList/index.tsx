@@ -373,7 +373,7 @@ export function ThreadList({
                 data-testid="thread-state-claude"
               >
                 <PendingClaudeReviewIcon size={12} className="shrink-0 text-ai-signal" />
-                Claude judged
+                AI judged
                 {stateCounts.claude > 0 && <span className="tabular-nums opacity-70">{stateCounts.claude}</span>}
               </button>
             )}

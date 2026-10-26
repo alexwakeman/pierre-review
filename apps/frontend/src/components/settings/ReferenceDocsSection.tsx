@@ -3,6 +3,8 @@ import { useReferenceDocsSettings, useSetReferenceDocsSettings } from '../../hoo
 import { InfoButton } from '../InfoModal.js';
 import { SaveButton, SectionShell } from './ui.js';
 import { ScopePendingSection, useSettingsWorkspace } from './workspaceScope.js';
+import { aiCredentialWords } from '@pierre-review/shared';
+import { useAiProvider } from '../../hooks/useAiCapabilities.js';
 
 // "Use reference docs in Claude Review" for THIS workspace (CORE, free, LOCAL ONLY — mounted only on
 // `me.ai.enabled`, beside Auto review; `GET`/`PUT /api/workspaces/:id/docs-settings`,
@@ -13,6 +15,7 @@ export function ReferenceDocsSection(): JSX.Element {
   const { workspaceId } = useSettingsWorkspace();
   const setting = useReferenceDocsSettings(workspaceId);
   const save = useSetReferenceDocsSettings(workspaceId);
+  const aiProvider = useAiProvider();
 
   // `?.` on the field too: an unexpected body must render the pending shell, never throw.
   const stored = setting.data?.docsInReview;
@@ -32,22 +35,22 @@ export function ReferenceDocsSection(): JSX.Element {
     <SectionShell
       title="Reference docs"
       info={
-        <InfoButton title="Reference docs in Claude Review">
+        <InfoButton title="Reference docs in AI Review">
           <p>
-            When this is on, Claude Review reads this workspace&rsquo;s Docs (Activity → Docs) while it checks a pull request
+            When this is on, AI Review reads this workspace&rsquo;s Docs (Activity → Docs) while it checks a pull request
             and its story.
           </p>
           <p>
             It starts at the library&rsquo;s contents and reads only the sections that matter to the change, then says where
             the work or the story disagrees with them, citing each section.
           </p>
-          <p>It is off by default. It runs on your machine, on your own Claude Code login or Anthropic API key.</p>
+          <p>It is off by default. It runs on your machine, on {aiCredentialWords(aiProvider)}.</p>
         </InfoButton>
       }
     >
       <label className="flex items-start gap-2 text-xs">
         <input type="checkbox" className="mt-0.5" checked={draft} onChange={(e) => setDraft(e.target.checked)} />
-        <span className="font-medium text-gray-700 dark:text-gray-200">Use reference docs in Claude Review</span>
+        <span className="font-medium text-gray-700 dark:text-gray-200">Use reference docs in AI Review</span>
       </label>
 
       <SaveButton dirty={dirty} saving={save.isPending} onClick={() => save.mutate(draft)} />

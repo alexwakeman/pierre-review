@@ -235,7 +235,7 @@ export function ClaudeReviewSonarSection({
             </p>
             <p>Only an analysis of this exact commit is used. Until SonarCloud has analysed it, nothing shows.</p>
             <p>
-              The 50 most severe are kept. Claude Review sees them as evidence and AI Fix can take them on.
+              The 50 most severe are kept. AI Review sees them as evidence and AI Fix can take them on.
             </p>
             <p>
               “Post SonarCloud findings” adds one review to the PR, once per commit: a comment on each issue

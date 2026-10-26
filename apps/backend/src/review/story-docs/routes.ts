@@ -13,6 +13,7 @@ import { AGENTIC_AI_ENABLED } from '../claude-review/manager.js';
 import { utcDayStartMs } from '../diagrams/trigger.js';
 import { liveStoryDocs, startStoryDocs, storyDocsClaim } from './manager.js';
 import { countStoryDocsRunsSince, latestStoryDocsRun, latestSucceededStoryDocsRun, toStoryDocsRun } from './persist.js';
+import { providerName } from '../../ai/prompt-tools.js';
 
 // CHECK A STORY AGAINST THE DOCS (CORE, free, LOCAL ONLY) — docs/API.md § Check a story against the
 // docs. Registered by `registerAgenticRoutes` (review/agentic.ts), so absent in cloud and under
@@ -109,7 +110,7 @@ export function registerStoryDocsRoutes(app: FastifyInstance, ctx: AgentContext)
       if (live.docCount === 0) return { outcome: 'refused', runId: null, refusal: 'no_docs' };
       if (live.inputs == null || live.inputs.empty) return { outcome: 'refused', runId: null, refusal: 'no_story' };
       const auth = ctx.llm.detectAuth('story_docs');
-      if (auth.status === 'none') return fail(reply, 400, 'NoClaudeAuth', auth.message ?? 'No Claude credential found.');
+      if (auth.status === 'none') return fail(reply, 400, 'NoClaudeAuth', auth.message ?? `No ${providerName()} credential found.`);
       if ((await countStoryDocsRunsSince(ctx, accountId, utcDayStartMs(Date.now()))) >= config.storyDocsDailyCap) {
         return { outcome: 'refused', runId: null, refusal: 'daily_cap' };
       }

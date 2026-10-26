@@ -108,12 +108,13 @@ async function poll(prId: number, target: ResolverTarget | null, open: boolean):
 }
 
 /**
- * Start Claude on this PR's conflicts. `open` (default true) opens the resolver when the answer is
- * ready. Re-attaches to a run already in flight rather than starting a second.
+ * Start the active AI provider on this PR's conflicts. `open` (default true) opens the resolver when the
+ * answer is ready. Re-attaches to a run already in flight rather than starting a second.
+ * `providerName` words a failure to start ('Claude' | 'Codex'; default Claude).
  */
 export function startConflictAiRun(
   target: ResolverTarget,
-  opts: { open?: boolean; model?: string } = {},
+  opts: { open?: boolean; model?: string; providerName?: string } = {},
 ): void {
   const prId = target.prId;
   if (conflictAiRunActive(runs.get(prId))) return;
@@ -125,7 +126,7 @@ export function startConflictAiRun(
       set(prId, { phase: r?.status ?? 'preparing', error: r?.error ?? null, resolution: r });
       void poll(prId, target, opts.open !== false);
     } catch (e) {
-      set(prId, { phase: 'failed', error: message(e, 'Couldn’t start Claude.'), resolution: null });
+      set(prId, { phase: 'failed', error: message(e, `Couldn’t start ${opts.providerName ?? 'Claude'}.`), resolution: null });
     }
   })();
 }
@@ -153,19 +154,19 @@ export function clearConflictAiRun(prId: number): void {
   if (runs.delete(prId)) for (const l of listeners) l();
 }
 
-/** A sentence for the progress line. */
-export function conflictAiPhaseLabel(phase: ConflictAiRunPhase): string {
+/** A sentence for the progress line. `name`: the provider running it (default Claude). */
+export function conflictAiPhaseLabel(phase: ConflictAiRunPhase, name = 'Claude'): string {
   switch (phase) {
     case 'starting':
     case 'preparing':
       return 'Reading the conflicts…';
     case 'running':
-      return 'Claude is resolving the conflicts…';
+      return `${name} is resolving the conflicts…`;
     case 'succeeded':
-      return 'Claude’s answer is ready.';
+      return `${name}’s answer is ready.`;
     case 'cancelled':
       return 'Cancelled.';
     case 'failed':
-      return 'Claude couldn’t resolve these conflicts.';
+      return `${name} couldn’t resolve these conflicts.`;
   }
 }

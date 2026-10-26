@@ -9,6 +9,8 @@ import { InfoButton } from '../InfoModal.js';
 import { AiStatusLine } from '../AiStatusLine.js';
 import { Markdown, type RehypePlugins } from '../Markdown.js';
 import { sprintTicketSite } from './sprintModel.js';
+import { useAiProvider, useAiProviderName } from '../../hooks/useAiCapabilities.js';
+import { aiCredentialWords, aiModelWords } from '@pierre-review/shared';
 
 // "Ask Claude about this sprint" (Activity → This Sprint): a compact chat under the page's toolbar,
 // above the board. LOCAL ONLY and free (gated on me.ai), like the route (the caller mounts it only where agentic AI
@@ -33,6 +35,8 @@ export function SprintAskPanel({
   const turns = useSprintAskTranscript((s) => s.turns[workspaceId] ?? EMPTY);
   // US$ on an API key, the share of the week on a Claude subscription (lib/aiBudget.ts `runCostText`).
   const costText = useRunCostText();
+  const aiProvider = useAiProvider();
+  const aiName = useAiProviderName();
   const clear = useSprintAskTranscript((s) => s.clear);
   const ask = useSprintAsk(workspaceId);
   const asking = useSprintAsking(workspaceId);
@@ -70,20 +74,20 @@ export function SprintAskPanel({
 
   return (
     <section
-      aria-label="Ask Claude about this sprint"
+      aria-label={`Ask ${aiName} about this sprint`}
       className="flex max-h-[28rem] w-full max-w-2xl flex-col rounded-lg border border-ai-border bg-white shadow-sm dark:bg-gray-950"
       data-testid="sprint-ask"
     >
       <div className="flex items-center gap-1.5 border-b border-gray-200 px-3 py-2 dark:border-gray-800">
         <SparkleIcon size={12} className="text-ai-signal" />
-        <h3 className="text-xs font-semibold text-gray-800 dark:text-gray-100">Ask Claude about this sprint</h3>
-        <InfoButton title="Ask Claude about this sprint">
+        <h3 className="text-xs font-semibold text-gray-800 dark:text-gray-100">Ask {aiName} about this sprint</h3>
+        <InfoButton title={`Ask ${aiName} about this sprint`}>
           <p>
-            Claude Haiku answers from what this page holds: the tickets, their statuses, summaries and links, and their pull
+            {aiModelWords(aiProvider, 'Haiku')} answers from what this page holds: the tickets, their statuses, summaries and links, and their pull
             requests. It reads nothing else and changes nothing.
           </p>
           <p>It remembers this conversation&rsquo;s earlier questions, up to a limit. The conversation is gone when you leave the page.</p>
-          <p>Each answer runs on your own Claude Code login or Anthropic API key; what it used is shown under it.</p>
+          <p>Each answer runs on {aiCredentialWords(aiProvider)}; what it used is shown under it.</p>
         </InfoButton>
         <span className="ml-auto" />
         {turns.length > 0 && (

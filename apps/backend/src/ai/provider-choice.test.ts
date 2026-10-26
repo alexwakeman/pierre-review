@@ -145,8 +145,8 @@ describe('the run label (packages/shared)', () => {
 
   it('a model picker names what will run on the chosen provider', () => {
     expect(shared.aiModelChoiceLabel('claude-opus-5-5', 'claude')).toBe(shared.CLAUDE_REVIEW_MODEL_LABELS['claude-opus-5-5']);
-    expect(shared.aiModelChoiceLabel('claude-opus-5-5', 'codex')).toBe('Codex · GPT-6 Astra');
-    expect(shared.aiModelChoiceLabel('claude-sonnet-5', 'codex')).toBe('Codex · GPT-6.1 Sol');
+    expect(shared.aiModelChoiceLabel('claude-opus-5-5', 'codex')).toBe('Codex · GPT-6 Astra (most thorough)');
+    expect(shared.aiModelChoiceLabel('claude-sonnet-5', 'codex')).toBe('Codex · GPT-6.1 Sol (best value)');
     expect(shared.aiModelChoiceLabel('claude-sonnet-5', undefined)).toBe(shared.CLAUDE_REVIEW_MODEL_LABELS['claude-sonnet-5']);
   });
 

@@ -1,4 +1,12 @@
-import type { AiKindStatus, AiRunKind, MeResponse } from '@pierre-review/shared';
+import {
+  aiProviderName,
+  aiSignInLine,
+  type AiKindStatus,
+  type AiProviderId,
+  type AiProviderName,
+  type AiRunKind,
+  type MeResponse,
+} from '@pierre-review/shared';
 
 /**
  * THE ONE GATE for the agentic AI surfaces — Claude Review (run, follow-up, ticket check, auto
@@ -26,9 +34,14 @@ export interface AiCapabilities {
   kinds: Partial<Record<AiRunKind, AiKindStatus>>;
   /** Enabled, runtime installed, and a credential detected — a Run button may show. */
   ready: boolean;
+  /** The ACTIVE provider (`MeResponse.ai.provider`); absent from an older server ⇒ Claude. */
+  provider: AiProviderId;
+  /** Its name for copy: 'Claude' | 'Codex' — the one source for "the AI that will run now". */
+  providerName: AiProviderName;
 }
 
-export const AI_AUTH_LINE = 'Sign in to Claude Code or set ANTHROPIC_API_KEY';
+/** Claude's sign-in line (the default provider). Per provider: `aiSignInLine` (shared). */
+export const AI_AUTH_LINE = aiSignInLine('claude');
 export const AI_SETUP_LABEL = 'Set up AI (one-time ~110 MB download)';
 
 export function aiCapabilitiesOf(me: MeResponse | undefined): AiCapabilities {
@@ -36,6 +49,7 @@ export function aiCapabilitiesOf(me: MeResponse | undefined): AiCapabilities {
   const enabled = ai?.enabled === true;
   const runtime = ai?.runtime ?? 'absent';
   const auth = ai?.auth ?? 'none';
+  const provider: AiProviderId = ai?.provider === 'codex' ? 'codex' : 'claude';
   return {
     enabled,
     runtime,
@@ -44,6 +58,8 @@ export function aiCapabilitiesOf(me: MeResponse | undefined): AiCapabilities {
     authMessage: ai?.authMessage ?? null,
     kinds: ai?.kinds ?? {},
     ready: enabled && runtime === 'ready' && auth === 'ok',
+    provider,
+    providerName: aiProviderName(provider),
   };
 }
 

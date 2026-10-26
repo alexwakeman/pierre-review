@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { ThreadDetail } from '@pierre-review/shared';
+import { aiProviderName, type ThreadDetail } from '@pierre-review/shared';
 import {
   CLAUDE_FINDING_LABEL,
   CLAUDE_STATE_LABEL,
@@ -54,6 +54,7 @@ export function ClaudeThreadPills({
   /** Leave out the ⓘ — for a pill drawn INSIDE another button (a button may not hold a button). */
   noInfo?: boolean;
 }): JSX.Element {
+  const by = aiProviderName(marker.provider);
   return (
     <span className="inline-flex shrink-0 items-center gap-1" data-noactivate>
       {marker.finding != null && (
@@ -93,17 +94,17 @@ export function ClaudeThreadPills({
         </span>
       )}
       {!noInfo && (
-        <InfoButton title="Claude’s judgement">
+        <InfoButton title={`${by}’s judgement`}>
           {/* No run kind or date: a Check threads run re-judges only the threads that changed, so
               a judgement carried from the review would be credited to the wrong run. The commit is
               the judgement's own. */}
           <p>
-            From Claude, at commit <code className="font-mono">{marker.assessedAtHead.slice(0, 7)}</code>.
+            From {by}, at commit <code className="font-mono">{marker.assessedAtHead.slice(0, 7)}</code>.
           </p>
           {marker.stale && <p>The pull request has new commits since.</p>}
           {marker.finding != null ? (
             <p>
-              Claude posted this comment. The pill says what the latest review that checked it
+              {by} posted this comment. The pill says what the latest review that checked it
               found: in the code, or in a reply on the thread. Resolved is GitHub’s own state.
             </p>
           ) : marker.state != null ? (
@@ -111,11 +112,11 @@ export function ClaudeThreadPills({
               {marker.validity != null
                 ? 'The first pill says whether the comment holds up. The second says where the code stands: '
                 : 'The pill says where the code stands: '}
-              Resolved is GitHub’s own state; Addressed, Partly addressed and Open are Claude’s
+              Resolved is GitHub’s own state; Addressed, Partly addressed and Open are {by}’s
               reading of the code.
             </p>
           ) : (
-            <p>The pill says whether the comment holds up. Claude did not check the code for this one.</p>
+            <p>The pill says whether the comment holds up. {by} did not check the code for this one.</p>
           )}
           <p className="text-gray-500 dark:text-gray-400">
             Shown instead of “Likely addressed”, which only checks whether a later commit touched
@@ -179,7 +180,7 @@ export function ClaudeThreadReason({
       data-testid="claude-thread-reason"
     >
       <div className="flex items-start gap-1">
-        <span className="min-w-0 flex-1">{reason ?? 'Claude’s explanation'}</span>
+        <span className="min-w-0 flex-1">{reason ?? `${aiProviderName(pill.marker.provider)}’s explanation`}</span>
         {more && (
           <button
             type="button"

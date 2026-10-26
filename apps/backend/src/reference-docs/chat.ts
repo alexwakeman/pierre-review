@@ -78,7 +78,7 @@ export async function askDocs(ctx: AgentContext, a: AskArgs): Promise<ReferenceD
   inFlight.add(a.accountId); // claimed before the first await
   try {
     const auth = ctx.llm.detectAuth('docs_chat');
-    if (auth.status === 'none') throw new DocsChatError(400, 'NoClaudeAuth', auth.message ?? 'No Claude credential found.');
+    if (auth.status === 'none') throw new DocsChatError(400, 'NoClaudeAuth', auth.message ?? `No ${providerName()} credential found.`);
     const library = await docsContextFor(a.accountId, a.workspaceId);
     if (!library.hasDocs) throw new DocsChatError(409, 'EmptyLibrary', 'There are no documents to ask about yet.');
     const conversationId = a.conversationId ?? randomBytes(12).toString('hex');

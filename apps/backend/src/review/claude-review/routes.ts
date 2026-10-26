@@ -136,7 +136,7 @@ function featureOff(reply: FastifyReply): { error: string; message: string } {
   reply.status(404);
   return {
     error: 'NotFound',
-    message: 'Claude Review is off here. It runs on your machine: npx limn-review',
+    message: 'AI Review is off here. It runs on your machine: npx limn-review',
   };
 }
 
