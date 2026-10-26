@@ -558,7 +558,7 @@ describe('stream replay', () => {
 
 describe('the AI provider (Settings → AI)', () => {
   const opusRun = { id: 70, prId: 2, headSha: 'a'.repeat(40), status: 'succeeded', verdict: 'COMMENT', summary: 'ok', findings: [], model: 'claude-opus-5-5', provider: 'claude', createdAt: CAPTURED, finishedAt: CAPTURED };
-  const astraRun = { ...opusRun, id: 71, prId: 3, model: 'gpt-6-astra', provider: 'codex' };
+  const astraRun = { ...opusRun, id: 71, prId: 3, model: 'gpt-6.1-sol', provider: 'codex' };
   const make = (now: () => number = () => CAPTURED_MS): DemoServer =>
     new DemoServer(
       recording([
@@ -599,7 +599,7 @@ describe('the AI provider (Settings → AI)', () => {
     await json(srv, 'PUT', '/api/ai/provider', { value: 'codex' });
     await json(srv, 'POST', '/api/prs/9/claude-review', {});
     now += 60_000;
-    expect((await json(srv, 'GET', '/api/prs/9/claude-review')).review).toMatchObject({ provider: 'codex', model: 'gpt-6-astra' });
+    expect((await json(srv, 'GET', '/api/prs/9/claude-review')).review).toMatchObject({ provider: 'codex', model: 'gpt-6.1-sol' });
     // Back on Claude: a run whose template is the Codex one says Claude Opus.
     await json(srv, 'PUT', '/api/ai/provider', { value: 'claude' });
     await json(srv, 'POST', '/api/prs/3/claude-review', {});
@@ -611,7 +611,7 @@ describe('the AI provider (Settings → AI)', () => {
     const srv = make();
     await json(srv, 'PUT', '/api/ai/provider', { value: 'codex' });
     const chat = await json(srv, 'POST', '/api/claude-reviews/70/chat', { question: 'Why?' });
-    expect(chat.messages.at(-1)).toMatchObject({ role: 'assistant', provider: 'codex', model: 'gpt-6.1-sol' });
+    expect(chat.messages.at(-1)).toMatchObject({ role: 'assistant', provider: 'codex', model: 'gpt-6.1-terra' });
     expect(chat.messages.at(-1).content).toContain('Codex is not connected');
   });
 

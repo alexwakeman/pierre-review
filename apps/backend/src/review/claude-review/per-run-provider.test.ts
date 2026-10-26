@@ -40,7 +40,7 @@ const chatArgs: ReviewChatArgs[] = [];
 // Which providers the fake pre-flight calls signed in.
 const signedIn = { claude: true, codex: true };
 
-const CODEX_MODEL: Record<string, string> = { 'claude-opus-5-5': 'gpt-6-astra', 'claude-sonnet-5': 'gpt-6.1-sol' };
+const CODEX_MODEL: Record<string, string> = { 'claude-opus-5-5': 'gpt-6.1-sol', 'claude-sonnet-5': 'gpt-6.1-terra' };
 
 beforeAll(async () => {
   for (const s of ['', '-shm', '-wal']) rmSync(DB_PATH + s, { force: true });
@@ -167,7 +167,7 @@ describe('a manual run on the provider it names', () => {
   it('runs on Codex while the default is Claude: the run, its label and its stamp say Codex', async () => {
     codexFirst = await runToEnd('codex');
     expect(runArgs[0]!.provider).toBe('codex');
-    expect(codexFirst).toMatchObject({ status: 'succeeded', provider: 'codex', model: 'gpt-6-astra' });
+    expect(codexFirst).toMatchObject({ status: 'succeeded', provider: 'codex', model: 'gpt-6.1-sol' });
     await postAll(codexFirst.id);
   });
 
@@ -191,7 +191,7 @@ describe('a manual run on the provider it names', () => {
   it('a queued row is labelled by the provider it was asked to run on, not the default', async () => {
     const id = await persist.insertQueuedReview(ctx, prId, HEAD, 'claude-sonnet-5', 1, [], 'manual', 'codex');
     const row = (await db.select().from(schema.claudeReviews).where(eq(schema.claudeReviews.id, id)).execute())[0];
-    expect(row).toMatchObject({ provider: 'codex', model: 'gpt-6.1-sol' });
+    expect(row).toMatchObject({ provider: 'codex', model: 'gpt-6.1-terra' });
     await persist.markReviewCancelled(ctx, id);
   });
 });

@@ -25,7 +25,7 @@ describe('resolveManualRunChoice', () => {
   });
 
   it('a named provider wins over the default; a Codex model maps to the Claude model of its depth', () => {
-    expect(resolveManualRunChoice({ provider: 'codex', model: 'gpt-6.1-sol' }, 'fix', opts(both))).toEqual({
+    expect(resolveManualRunChoice({ provider: 'codex', model: 'gpt-6.1-terra' }, 'fix', opts(both))).toEqual({
       ok: true,
       provider: 'codex',
       model: 'claude-sonnet-5',
@@ -38,7 +38,7 @@ describe('resolveManualRunChoice', () => {
   });
 
   it('a Codex model with no provider runs on Codex; a Claude model with none runs on the default', () => {
-    expect(resolveManualRunChoice({ model: 'gpt-6-astra' }, 'review', opts(both))).toMatchObject({ provider: 'codex' });
+    expect(resolveManualRunChoice({ model: 'gpt-6.1-sol' }, 'review', opts(both))).toMatchObject({ provider: 'codex' });
     // The Open PRs table sends Claude's default model and no provider: the DEFAULT provider runs it.
     expect(resolveManualRunChoice({ model: 'claude-opus-5-5' }, 'review', opts(both, 'codex'))).toMatchObject({
       provider: 'codex',
@@ -58,10 +58,10 @@ describe('resolveManualRunChoice', () => {
       message: 'That model is no longer offered.',
     });
     expect(resolveManualRunChoice({ model: 42 }, 'review', opts(both))).toMatchObject({ error: 'ModelNotOffered' });
-    expect(resolveManualRunChoice({ provider: 'claude', model: 'gpt-6-astra' }, 'review', opts(both))).toEqual({
+    expect(resolveManualRunChoice({ provider: 'claude', model: 'gpt-6.1-sol' }, 'review', opts(both))).toEqual({
       ok: false,
       error: 'ModelNotOnProvider',
-      message: 'GPT-6 Astra runs on Codex, not Claude.',
+      message: 'GPT-6.1 Sol runs on Codex, not Claude.',
     });
     expect(resolveManualRunChoice({ provider: 'codex' }, 'plan', opts({ claude: true }))).toEqual({
       ok: false,

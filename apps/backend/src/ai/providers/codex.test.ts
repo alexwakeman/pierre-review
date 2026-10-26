@@ -525,7 +525,7 @@ describe('runAgentUnchecked() — one read-only run', () => {
     ]);
     expect(out.usage).toEqual({ inputTokens: 100, cachedInputTokens: 0, outputTokens: 10, reasoningOutputTokens: 0 });
     // deep role (a Claude Opus id) → Codex's deep model, high effort
-    expect(call.argv[call.argv.indexOf('-m') + 1]).toBe('gpt-6-astra');
+    expect(call.argv[call.argv.indexOf('-m') + 1]).toBe('gpt-6.1-sol');
     const c = cfg(call.argv);
     expect(c.get('model_reasoning_effort')).toBe('"high"');
     expect(c.get('sandbox_mode')).toBe('"read-only"');
@@ -536,7 +536,7 @@ describe('runAgentUnchecked() — one read-only run', () => {
     expect(call.argv.join(' ')).not.toContain('LIMN_CODEX_GUARD');
     // Its trust entry was written into Limn's home BEFORE the run.
     expect(T.trustWrites).toEqual([expect.objectContaining({ trustedHash: 'sha256:test' })]);
-    expect(T.recorded).toEqual([expect.objectContaining({ accountId: 9, prId: 4, provider: 'codex', model: 'gpt-6-astra', inputTokens: 100, outputTokens: 10 })]);
+    expect(T.recorded).toEqual([expect.objectContaining({ accountId: 9, prId: 4, provider: 'codex', model: 'gpt-6.1-sol', inputTokens: 100, outputTokens: 10 })]);
     expect(progress.length).toBeGreaterThan(0);
   });
 
@@ -691,8 +691,8 @@ describe('runAgentUnchecked() — a write run', () => {
 
 describe('models and prices', () => {
   it('maps roles to the pinned models, and ignores a Claude id', () => {
-    expect(C.CODEX_MODEL_FOR_ROLE).toEqual({ deep: 'gpt-6-astra', standard: 'gpt-6.1-sol', fast: 'gpt-6-luna' });
-    expect(C.resolveCodexModel({ role: 'standard', id: 'claude-sonnet-5' })).toBe('gpt-6.1-sol');
+    expect(C.CODEX_MODEL_FOR_ROLE).toEqual({ deep: 'gpt-6.1-sol', standard: 'gpt-6.1-terra', fast: 'gpt-6-luna' });
+    expect(C.resolveCodexModel({ role: 'standard', id: 'claude-sonnet-5' })).toBe('gpt-6.1-terra');
     expect(C.resolveCodexModel({ role: 'standard', id: 'gpt-6-sol' })).toBe('gpt-6-sol');
   });
   it('a login is never priced; an API key is priced from the table, US$ 0 while a price is unknown', () => {

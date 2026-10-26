@@ -410,8 +410,8 @@ history: [docs/CODEX-PLAN.md](docs/CODEX-PLAN.md). Non-negotiables:
   an untrusted hook SILENTLY, so every run refuses unless `verifyHookTrusted` proves the PreToolUse
   ALLOW-list hook runs. Results are strict JSON Schemas (`ai/result-schemas.ts`) fed to the SAME
   handlers, one retry via `exec resume`; Limn runs the specialists; writes are read from git; a
-  run's thread is deleted once its usage is recorded. Models: deep `gpt-6-astra`, standard
-  `gpt-6.1-sol`, fast `gpt-6-luna`. ⚠ A Codex change leaves Claude's prompts byte-identical
+  run's thread is deleted once its usage is recorded. Models: deep `gpt-6.1-sol`, standard
+  `gpt-6.1-terra`, fast `gpt-6-luna`. ⚠ A Codex change leaves Claude's prompts byte-identical
   (`prompt-golden.json`); Codex wording goes through `ai/prompt-tools.ts`.
 - **No AI SDK in the npm manifest** — downloaded on first use ("Set up AI" / `limn ai install
   [codex]`) and value-imported ONLY by `ai/runtime.ts` (`loadAgentSdk`/`loadAnthropicSdk`/`loadZod`);

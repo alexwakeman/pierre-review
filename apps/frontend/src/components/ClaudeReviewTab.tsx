@@ -168,7 +168,7 @@ const SEVERITY_ORDER: ClaudeFindingSeverity[] = [
 // list so an earlier comment's severity paints the same pill as a current finding's.
 
 // "abc1234 · Claude Opus 5.5 · US$0.42" on an API key, "… · 0.3% of your week" on a Claude
-// subscription, "abc1234 · Codex · GPT-6 Astra" for a Codex run (`aiRunLabel`, the ONE run label;
+// subscription, "abc1234 · Codex · GPT-6.1 Sol" for a Codex run (`aiRunLabel`, the ONE run label;
 // `costText`, the ONE run-cost wording — judged by the run's own provider).
 function metaLine(
   review: ClaudeReview,

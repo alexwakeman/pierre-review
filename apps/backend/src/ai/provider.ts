@@ -387,13 +387,16 @@ export function queuedRanOn(choice: ModelChoice, provider?: AgentProviderId | nu
 /**
  * A stored run's model → the CLAUDE model id to ask for again (the next plan pass, the build after a
  * plan, a chat on a review). A row stores what RAN, so a Codex run holds a Codex id; it maps back by
- * ROLE (gpt-6-astra → Opus, gpt-6.1-sol → Sonnet, gpt-6-luna → Haiku), so either provider then resolves
+ * ROLE (gpt-6.1-sol → Opus, gpt-6.1-terra → Sonnet, gpt-6-luna → Haiku; a retired gpt-6-astra → Opus), so either provider then resolves
  * the same depth. A Claude id (or any id Limn does not know) is returned as it is.
  */
+// Codex models a stored row may name that the role table no longer uses (2026-10-26: Astra → Sol).
+const RETIRED_CODEX_ROLE: Readonly<Record<string, ModelRole>> = { 'gpt-6-astra': 'deep' };
+
 export function requestModelOf(stored: string): string {
   if (stored.startsWith('claude-')) return stored;
   const roles = Object.keys(CODEX_MODEL_FOR_ROLE_SRC) as ModelRole[];
-  const role = roles.find((r) => CODEX_MODEL_FOR_ROLE_SRC[r] === stored);
+  const role = roles.find((r) => CODEX_MODEL_FOR_ROLE_SRC[r] === stored) ?? RETIRED_CODEX_ROLE[stored];
   return role ? CLAUDE_MODEL_FOR_ROLE[role] : stored;
 }
 

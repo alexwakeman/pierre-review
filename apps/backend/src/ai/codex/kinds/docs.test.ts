@@ -228,7 +228,7 @@ describe('design diagrams on Codex (kind: diagram)', () => {
 
     const [call] = calls();
     expect(call.schema).toEqual((await resultJsonSchemas('submit_design')).strict);
-    expect(model(call.argv)).toBe('gpt-6.1-sol');
+    expect(model(call.argv)).toBe('gpt-6.1-terra');
     expect(cfg(call.argv).get('model_reasoning_effort')).toBe('"medium"');
     expect(cfg(call.argv).get('sandbox_mode')).toBe('"read-only"');
     const dev = JSON.parse(cfg(call.argv).get('developer_instructions')!);
@@ -240,7 +240,7 @@ describe('design diagrams on Codex (kind: diagram)', () => {
     expect(guardRoots()).toEqual({ read: [resolve(work), resolve(checkout)], write: [] });
     // ONE ledger row, written by the provider AS CODEX.
     expect(T.recorded).toEqual([
-      expect.objectContaining({ accountId: 7, feature: 'sequence_diagram', prId: 3, provider: 'codex', model: 'gpt-6.1-sol', costUsd: 0, inputTokens: 41000, outputTokens: 900 }),
+      expect.objectContaining({ accountId: 7, feature: 'sequence_diagram', prId: 3, provider: 'codex', model: 'gpt-6.1-terra', costUsd: 0, inputTokens: 41000, outputTokens: 900 }),
     ]);
     // The read steps become activity lines; the JSON answer reads as "Submitting the design…".
     expect(activity.at(-1)).toContain('Submitting the design…');
@@ -347,7 +347,7 @@ describe('sprint critical paths on Codex (kind: sprint_paths)', () => {
     expect(roots.read).toHaveLength(1);
     expect(roots.read[0]).toMatch(/limn-sprint-paths-/);
     expect(existsSync(roots.read[0]!)).toBe(false);
-    expect(T.recorded).toEqual([expect.objectContaining({ feature: 'sprint_paths', provider: 'codex', model: 'gpt-6.1-sol', costUsd: 0 })]);
+    expect(T.recorded).toEqual([expect.objectContaining({ feature: 'sprint_paths', provider: 'codex', model: 'gpt-6.1-terra', costUsd: 0 })]);
   });
 
   it('the DIGIT GATE refuses a numeral; the one retry fixes it', async () => {
@@ -464,7 +464,7 @@ describe('the docs build on Codex (kind: docs_build)', () => {
     expect(dev).not.toMatch(/record_sections|finish_document|progress and/);
     expect(dev).toMatch(/You may use read_file, list_files and search\. You have NO write tools\./);
     expect(guardRoots()).toEqual({ read: [resolve(s.staging)], write: [] });
-    expect(T.recorded).toEqual([expect.objectContaining({ feature: 'reference_docs_build', provider: 'codex', model: 'gpt-6.1-sol', costUsd: 0 })]);
+    expect(T.recorded).toEqual([expect.objectContaining({ feature: 'reference_docs_build', provider: 'codex', model: 'gpt-6.1-terra', costUsd: 0 })]);
   });
 
   it('a section left out: the finish refuses in Codex’s words, the ONE retry is the last attempt and completes it', async () => {

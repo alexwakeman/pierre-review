@@ -86,10 +86,10 @@ describe('what a run ran on', () => {
   it('ranOn names the provider and ITS model for the asked Claude model', () => {
     const opus = P.claudeModelChoice('claude-opus-5-5');
     expect(P.ranOn(P.getProvider('claude'), opus)).toEqual({ provider: 'claude', model: 'claude-opus-5-5' });
-    expect(P.ranOn(P.getProvider('codex'), opus)).toEqual({ provider: 'codex', model: 'gpt-6-astra' });
+    expect(P.ranOn(P.getProvider('codex'), opus)).toEqual({ provider: 'codex', model: 'gpt-6.1-sol' });
     expect(P.ranOn(P.getProvider('codex'), P.claudeModelChoice('claude-sonnet-5'))).toEqual({
       provider: 'codex',
-      model: 'gpt-6.1-sol',
+      model: 'gpt-6.1-terra',
     });
   });
 
@@ -97,12 +97,12 @@ describe('what a run ran on', () => {
     const opus = P.claudeModelChoice('claude-opus-5-5');
     expect(P.expectedRanOn(opus, {})).toEqual({ provider: 'claude', model: 'claude-opus-5-5' });
     P.setStoredAiProviderSetting('codex');
-    expect(P.expectedRanOn(opus, {})).toEqual({ provider: 'codex', model: 'gpt-6-astra' });
+    expect(P.expectedRanOn(opus, {})).toEqual({ provider: 'codex', model: 'gpt-6.1-sol' });
   });
 
   it('requestModelOf maps a stored Codex id back to the same depth, and keeps every other id', () => {
-    expect(P.requestModelOf('gpt-6-astra')).toBe('claude-opus-5-5');
-    expect(P.requestModelOf('gpt-6.1-sol')).toBe('claude-sonnet-5');
+    expect(P.requestModelOf('gpt-6.1-sol')).toBe('claude-opus-5-5');
+    expect(P.requestModelOf('gpt-6.1-terra')).toBe('claude-sonnet-5');
     expect(P.requestModelOf('gpt-6-luna')).toBe('claude-haiku-5-5');
     expect(P.requestModelOf('claude-opus-5-5')).toBe('claude-opus-5-5');
     expect(P.requestModelOf('claude-opus-4-8')).toBe('claude-opus-4-8');
@@ -121,19 +121,19 @@ describe('the run label (packages/shared)', () => {
     expect(shared.aiRunLabel('claude', 'claude-opus-5-5')).toBe('Claude Opus 5.5');
     expect(shared.aiRunLabel('claude', 'claude-sonnet-5')).toBe('Claude Sonnet 5');
     expect(shared.aiRunLabel('claude', 'claude-haiku-4-5-20251001')).toBe('Claude Haiku 4.5');
-    expect(shared.aiRunLabel('codex', 'gpt-6-astra')).toBe('Codex · GPT-6 Astra');
     expect(shared.aiRunLabel('codex', 'gpt-6.1-sol')).toBe('Codex · GPT-6.1 Sol');
+    expect(shared.aiRunLabel('codex', 'gpt-6.1-terra')).toBe('Codex · GPT-6.1 Terra');
     expect(shared.aiRunLabel('codex', 'gpt-6-luna')).toBe('Codex · GPT-6 Luna');
   });
 
   it('an older row (NULL provider) is Claude, unless its model is a Codex id', () => {
     expect(shared.aiRunProvider(null, 'claude-opus-5-5')).toBe('claude');
     expect(shared.aiRunProvider(null, 'opus')).toBe('claude');
-    expect(shared.aiRunProvider(undefined, 'gpt-6-astra')).toBe('codex');
-    expect(shared.aiRunLabel(null, 'gpt-6-astra')).toBe('Codex · GPT-6 Astra');
+    expect(shared.aiRunProvider(undefined, 'gpt-6.1-sol')).toBe('codex');
+    expect(shared.aiRunLabel(null, 'gpt-6.1-sol')).toBe('Codex · GPT-6.1 Sol');
     expect(shared.aiRunLabel(null, 'opus')).toBe('Claude Opus');
     // The stored provider beats the model id.
-    expect(shared.aiRunProvider('claude', 'gpt-6-astra')).toBe('claude');
+    expect(shared.aiRunProvider('claude', 'gpt-6.1-sol')).toBe('claude');
   });
 
   it('a retired or unknown id still names itself, never twice "Claude"', () => {
@@ -145,8 +145,8 @@ describe('the run label (packages/shared)', () => {
 
   it('a model picker names what will run on the chosen provider', () => {
     expect(shared.aiModelChoiceLabel('claude-opus-5-5', 'claude')).toBe(shared.CLAUDE_REVIEW_MODEL_LABELS['claude-opus-5-5']);
-    expect(shared.aiModelChoiceLabel('claude-opus-5-5', 'codex')).toBe('Codex · GPT-6 Astra (most thorough)');
-    expect(shared.aiModelChoiceLabel('claude-sonnet-5', 'codex')).toBe('Codex · GPT-6.1 Sol (best value)');
+    expect(shared.aiModelChoiceLabel('claude-opus-5-5', 'codex')).toBe('Codex · GPT-6.1 Sol (most thorough)');
+    expect(shared.aiModelChoiceLabel('claude-sonnet-5', 'codex')).toBe('Codex · GPT-6.1 Terra (best value)');
     expect(shared.aiModelChoiceLabel('claude-sonnet-5', undefined)).toBe(shared.CLAUDE_REVIEW_MODEL_LABELS['claude-sonnet-5']);
   });
 

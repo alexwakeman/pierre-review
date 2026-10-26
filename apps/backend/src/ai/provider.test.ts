@@ -231,9 +231,9 @@ describe('the auto rule (decided: Claude when both are signed in)', () => {
 describe('Codex models are roles (docs/CODEX-SPIKE.md § 8)', () => {
   it('deep / standard / fast resolve to the pinned Codex models; a Claude id never reaches Codex', () => {
     const codex = P.getProvider('codex');
-    expect(P.CODEX_MODEL_FOR_ROLE).toEqual({ deep: 'gpt-6-astra', standard: 'gpt-6.1-sol', fast: 'gpt-6-luna' });
+    expect(P.CODEX_MODEL_FOR_ROLE).toEqual({ deep: 'gpt-6.1-sol', standard: 'gpt-6.1-terra', fast: 'gpt-6-luna' });
     expect(codex.resolveModel({ role: 'fast' })).toBe('gpt-6-luna');
-    expect(codex.resolveModel(P.claudeModelChoice('claude-opus-5-5'))).toBe('gpt-6-astra');
+    expect(codex.resolveModel(P.claudeModelChoice('claude-opus-5-5'))).toBe('gpt-6.1-sol');
     expect(codex.resolveModel({ role: 'standard', id: 'gpt-6-sol' })).toBe('gpt-6-sol');
   });
 });

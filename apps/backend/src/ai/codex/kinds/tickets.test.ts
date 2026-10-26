@@ -294,7 +294,7 @@ describe('ticket_review on Codex', () => {
     expect(res.payload).toMatchObject({ alignment: 'partly_aligned', criteria: [{ deliveredBy: ['PR1'] }], cards: [{ pr: 'PR1' }] });
     // A strict `null` for an optional key is ABSENT for the handler (as from Claude's tool).
     expect((res.payload as any).missing).toBeUndefined();
-    expect(res).toMatchObject({ aborted: false, costUsd: 0, model: 'gpt-6-astra', ledgerByProvider: true, inputTokens: 100, outputTokens: 10 });
+    expect(res).toMatchObject({ aborted: false, costUsd: 0, model: 'gpt-6.1-sol', ledgerByProvider: true, inputTokens: 100, outputTokens: 10 });
     const [call] = calls();
     expect(call.stdin).toBe('PROMPT');
     expect(cfg(call.argv, 'developer_instructions')).toContain('SYS');
@@ -306,7 +306,7 @@ describe('ticket_review on Codex', () => {
     expect(call.schema.properties.docReferences).toBeTruthy();
     // The provider wrote the ledger row: Codex, its model, its tokens, the run's identity.
     expect(T.recorded).toEqual([
-      expect.objectContaining({ provider: 'codex', model: 'gpt-6-astra', feature: 'ticket_review', accountId: 7, prId: 3, costUsd: 0, inputTokens: 100, outputTokens: 10 }),
+      expect.objectContaining({ provider: 'codex', model: 'gpt-6.1-sol', feature: 'ticket_review', accountId: 7, prId: 3, costUsd: 0, inputTokens: 100, outputTokens: 10 }),
     ]);
     // The neutral progress reached the status line, priced at US$ 0 (never a Claude price on Codex tokens).
     expect(progress.some((p) => p.recentActivity.length > 0)).toBe(true);
@@ -360,7 +360,7 @@ describe('pr_card on Codex', () => {
       usageRecord: { accountId: 7, seam: 'agent', feature: 'ticket_review', prId: 3 },
     });
     expect(out).toEqual([
-      expect.objectContaining({ prId: 5, failure: null, costUsd: 0, model: 'gpt-6.1-sol', ledgerByProvider: true }),
+      expect.objectContaining({ prId: 5, failure: null, costUsd: 0, model: 'gpt-6.1-terra', ledgerByProvider: true }),
     ]);
     expect(out[0]!.card).toMatchObject({ summary: 'Adds GET /api/export returning CSV.' });
     const [call] = calls();
@@ -371,7 +371,7 @@ describe('pr_card on Codex', () => {
     expect(guard.read).toHaveLength(1);
     expect(guard.read[0]).toMatch(/pierre-ticket-card-/);
     expect(guard.write).toEqual([]);
-    expect(T.recorded).toEqual([expect.objectContaining({ provider: 'codex', model: 'gpt-6.1-sol', feature: 'ticket_review' })]);
+    expect(T.recorded).toEqual([expect.objectContaining({ provider: 'codex', model: 'gpt-6.1-terra', feature: 'ticket_review' })]);
   });
 
   it('a schema failure is retried once; a cancelled card is no card', async () => {
@@ -416,7 +416,7 @@ describe('ci_review on Codex', () => {
     expect(res.submitted).toBe(true);
     expect(res.payload!.failures[0]).toMatchObject({ ref: 'F1', category: 'code', path: 'src/a.ts', line: 3 });
     expect(res.payload!.failures[0]!.suggestion).toBeNull(); // nullable: a strict null is kept, as Claude could send it
-    expect(res).toMatchObject({ costUsd: 0, ledgerByProvider: true, model: 'gpt-6-astra' });
+    expect(res).toMatchObject({ costUsd: 0, ledgerByProvider: true, model: 'gpt-6.1-sol' });
     const guard = JSON.parse(calls()[0].guard);
     expect(new Set(guard.read)).toEqual(new Set([cwd, wt]));
     expect(guard.write).toEqual([]);
@@ -462,7 +462,7 @@ describe('story_docs on Codex', () => {
     scenario({ first: answerFor(buildSubmitAlignmentShape(z), ALIGN_ARGS) });
     const { res, cwd, doc } = await run();
     expect(res.payload).toMatchObject({ overall: { verdict: 'mixed' }, criteria: [{ n: 1 }] });
-    expect(res).toMatchObject({ lastRefusal: null, aborted: false, costUsd: 0, ledgerByProvider: true, model: 'gpt-6.1-sol' });
+    expect(res).toMatchObject({ lastRefusal: null, aborted: false, costUsd: 0, ledgerByProvider: true, model: 'gpt-6.1-terra' });
     const guard = JSON.parse(calls()[0].guard);
     expect(new Set(guard.read)).toEqual(new Set([cwd, doc]));
     expect(guard.write).toEqual([]);

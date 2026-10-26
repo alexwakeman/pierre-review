@@ -154,8 +154,8 @@ describe('a Claude review and a Codex review of the same head', () => {
     setting.setStoredAiProviderSetting('codex');
     codexRun = await persist.insertQueuedReview(ctx, prId, HEAD, 'claude-opus-5-5', 1);
     row = (await db.select().from(schema.claudeReviews).where(eq(schema.claudeReviews.id, codexRun)).execute())[0];
-    expect(row).toMatchObject({ provider: 'codex', model: 'gpt-6-astra' });
-    await persist.markReviewRanOn(ctx, codexRun, { provider: 'codex', model: 'gpt-6-astra', effort: 'high' });
+    expect(row).toMatchObject({ provider: 'codex', model: 'gpt-6.1-sol' });
+    await persist.markReviewRanOn(ctx, codexRun, { provider: 'codex', model: 'gpt-6.1-sol', effort: 'high' });
     await succeed(codexRun, [assessment(1, { addressed: 'addressed' })], 'codex finding');
     setting.setStoredAiProviderSetting(null);
   });
@@ -164,13 +164,13 @@ describe('a Claude review and a Codex review of the same head', () => {
     const history = await persist.listClaudeReviewHistory(ctx, prId, 1);
     const byId = new Map(history.map((h) => [h.id, h]));
     expect(byId.get(claudeRun)).toMatchObject({ provider: 'claude', model: 'claude-opus-5-5', status: 'succeeded' });
-    expect(byId.get(codexRun)).toMatchObject({ provider: 'codex', model: 'gpt-6-astra', status: 'succeeded' });
+    expect(byId.get(codexRun)).toMatchObject({ provider: 'codex', model: 'gpt-6.1-sol', status: 'succeeded' });
     expect(aiRunLabel(byId.get(claudeRun)!.provider, byId.get(claudeRun)!.model)).toBe('Claude Opus 5.5');
-    expect(aiRunLabel(byId.get(codexRun)!.provider, byId.get(codexRun)!.model)).toBe('Codex · GPT-6 Astra');
+    expect(aiRunLabel(byId.get(codexRun)!.provider, byId.get(codexRun)!.model)).toBe('Codex · GPT-6.1 Sol');
     // The effort each stored, in the history row and the label.
     expect(byId.get(claudeRun)!.effort).toBe('high');
     expect(aiRunLabel(byId.get(claudeRun)!.provider, byId.get(claudeRun)!.model, byId.get(claudeRun)!.effort)).toBe('Claude Opus 5.5 · high');
-    expect(aiRunLabel(byId.get(codexRun)!.provider, byId.get(codexRun)!.model, byId.get(codexRun)!.effort)).toBe('Codex · GPT-6 Astra · high');
+    expect(aiRunLabel(byId.get(codexRun)!.provider, byId.get(codexRun)!.model, byId.get(codexRun)!.effort)).toBe('Codex · GPT-6.1 Sol · high');
 
     const claude = await persist.getClaudeReviewById(ctx, claudeRun, 1);
     const codex = await persist.getClaudeReviewById(ctx, codexRun, 1);
@@ -287,7 +287,7 @@ describe('a run never carries the other provider’s thread judgements', () => {
       ],
     } as any;
     const codex = judgements.findingJudgementsFromFollowUps([
-      { id: 2, headSha: HEAD, followUp: fu, provider: 'codex', model: 'gpt-6-astra' },
+      { id: 2, headSha: HEAD, followUp: fu, provider: 'codex', model: 'gpt-6.1-sol' },
     ]);
     expect(codex.get(9)!.provider).toBe('codex');
     const claude = judgements.findingJudgementsFromFollowUps([

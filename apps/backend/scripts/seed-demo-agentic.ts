@@ -15,7 +15,7 @@
 // The code the runs talk about is scripts/lib/demo-diffs.mjs, shared with the recorder.
 //
 // TWO PROVIDERS. The reader switched Settings → AI to Codex for a while and back, so the stored runs
-// are a mix, each labelled by what ran: #105 holds a Claude Opus review AND a Codex GPT-6 Astra review
+// are a mix, each labelled by what ran: #105 holds a Claude Opus review AND a Codex GPT-6.1 Sol review
 // of the SAME head (the in-situ comparison), with a chat on each. Codex also ran the Check threads pass,
 // the CI review, the AI Fix plan, two ticket reviews, #105's design, a library document, a docs-chat
 // answer and the story's docs check. A Codex run records what ran through the product's own stamp
@@ -31,8 +31,8 @@ import { ticketIdent } from './seed-demo-tracker.js';
 const HOUR = 3_600_000;
 
 /** What a Codex run ran on (the deep and standard models; packages/shared AI_MODEL_FOR_ROLE). */
-const CODEX_DEEP = { provider: 'codex' as const, model: 'gpt-6-astra' };
-const CODEX_STANDARD = { provider: 'codex' as const, model: 'gpt-6.1-sol' };
+const CODEX_DEEP = { provider: 'codex' as const, model: 'gpt-6.1-sol' };
+const CODEX_STANDARD = { provider: 'codex' as const, model: 'gpt-6.1-terra' };
 /** The same, with the effort a review / AI Fix run stores (Settings → AI → Effort; Default = high on Astra). */
 const CODEX_DEEP_HIGH = { ...CODEX_DEEP, effort: 'high' };
 
@@ -504,7 +504,7 @@ export async function seedDemoAgentic(c: AgenticSeedCtx): Promise<Record<string,
   });
   await db.update(schema.claudeReviews).set({ createdAt: at(20), finishedAt: at(19.8) }).where(eq(schema.claudeReviews.id, run105)).execute();
 
-  // ---- #105 again, SAME head, on Codex GPT-6 Astra: the in-situ comparison with the Opus run ----
+  // ---- #105 again, SAME head, on Codex GPT-6.1 Sol: the in-situ comparison with the Opus run ----
   // Both keep their own labels in the run history. Astra agrees on the two blockers and adds the
   // delivery-id map and a question; Opus's run is the one above.
   const run105Codex = await runClaudeReview(base, c, {
@@ -762,7 +762,7 @@ async function seedCiReview(base: any, c: AgenticSeedCtx): Promise<number> {
     })),
   };
   const { summary, items } = reconcileCiReview(inputs.plan, payload as never, inputs.carriedExtras);
-  // Run on Codex GPT-6 Astra.
+  // Run on Codex GPT-6.1 Sol.
   const { markCiReviewRanOn } = await import('../src/review/ci-review/persist.js');
   await markCiReviewRanOn(ctx, 1, id, CODEX_DEEP);
   await saveCiReviewSuccess(ctx, 1, id, { summary, costUsd: 0, inputTokens: 16_900, outputTokens: 900, numTurns: 4, items });
@@ -873,7 +873,7 @@ async function seedAiFix(base: any, c: AgenticSeedCtx, runs: { run114: number; r
     // 'planned' with a plan stored (planStatus leaves 'planning').
     return r && r.status === 'planned' && r.planStatus === 'plan_ready' ? 'done' : 'running';
   }, 'ai plan');
-  // The plan ran on Codex GPT-6 Astra (the fix on #114 above is Claude Opus's); its build, once
+  // The plan ran on Codex GPT-6.1 Sol (the fix on #114 above is Claude Opus's); its build, once
   // approved, is labelled Codex from the start.
   const { markPlanRanOn, markFixRanOn } = await import('../src/coding/ai-fix/persist.js');
   await markPlanRanOn(ctx, planId, CODEX_DEEP_HIGH);
@@ -886,7 +886,7 @@ async function seedAiFix(base: any, c: AgenticSeedCtx, runs: { run114: number; r
 
 interface TicketScript {
   key: string;
-  /** Ran on Codex GPT-6 Astra (else Claude Opus). */
+  /** Ran on Codex GPT-6.1 Sol (else Claude Opus). */
   codex?: boolean;
   alignment: 'aligned' | 'partly_aligned' | 'not_aligned' | 'unclear';
   summary: string;

@@ -66,10 +66,10 @@ describe('the per-run model menu', () => {
 
     const codexOnly = resolveModelPick(me({ def: 'codex', codex: true }), 'review', 'claude-opus-5-5', null);
     expect(codexOnly.picks.map((p) => p.label)).toEqual([
-      'Codex · GPT-6 Astra (most thorough)',
-      'Codex · GPT-6.1 Sol (best value)',
+      'Codex · GPT-6.1 Sol (most thorough)',
+      'Codex · GPT-6.1 Terra (best value)',
     ]);
-    expect(codexOnly.chosen).toMatchObject({ provider: 'codex', model: 'gpt-6-astra' });
+    expect(codexOnly.chosen).toMatchObject({ provider: 'codex', model: 'gpt-6.1-sol' });
   });
 
   it('both signed in ⇒ both providers listed, the default first, opening on its model', () => {
@@ -78,21 +78,21 @@ describe('the per-run model menu', () => {
     expect(both.picks.map((p) => p.value)).toEqual([
       'claude:claude-opus-5-5',
       'claude:claude-sonnet-5',
-      'codex:gpt-6-astra',
       'codex:gpt-6.1-sol',
+      'codex:gpt-6.1-terra',
     ]);
     expect(both.chosen.value).toBe('claude:claude-opus-5-5');
     // The default is Codex: Codex leads and opens.
     const codexFirst = resolveModelPick(me({ def: 'codex', claude: true, codex: true }), 'fix', 'claude-opus-5-5', null);
     expect(codexFirst.picks[0]!.provider).toBe('codex');
-    expect(codexFirst.chosen.value).toBe('codex:gpt-6-astra');
+    expect(codexFirst.chosen.value).toBe('codex:gpt-6.1-sol');
   });
 
   it('a pick sticks while its provider is ready, and falls back to the opening choice when it is not', () => {
-    const picked = 'codex:gpt-6.1-sol';
+    const picked = 'codex:gpt-6.1-terra';
     expect(resolveModelPick(me({ claude: true, codex: true }), 'review', 'claude-opus-5-5', picked).chosen).toMatchObject({
       provider: 'codex',
-      model: 'gpt-6.1-sol',
+      model: 'gpt-6.1-terra',
     });
     expect(resolveModelPick(me({ claude: true }), 'review', 'claude-opus-5-5', picked).chosen.value).toBe(
       'claude:claude-opus-5-5',
@@ -168,7 +168,7 @@ const run = (id: number, over: Partial<ClaudeReviewSummary> = {}): ClaudeReviewS
 });
 
 describe('which run the AI Review tab shows', () => {
-  const history = [run(3, { provider: 'codex', model: 'gpt-6-astra' }), run(2), run(1)];
+  const history = [run(3, { provider: 'codex', model: 'gpt-6.1-sol' }), run(2), run(1)];
 
   it('opens on the latest run', () => {
     expect(nextShownReviewId({ shown: null, latest: { id: 3, status: 'succeeded' }, previousLatestId: null, history })).toBe(3);
@@ -189,7 +189,7 @@ describe('which run the AI Review tab shows', () => {
   });
 
   it('a run the reader starts becomes the shown run', () => {
-    const started = [run(4, { status: 'queued', provider: 'codex', model: 'gpt-6-astra' }), ...history];
+    const started = [run(4, { status: 'queued', provider: 'codex', model: 'gpt-6.1-sol' }), ...history];
     expect(
       nextShownReviewId({ shown: 1, latest: { id: 4, status: 'queued', trigger: 'manual' }, previousLatestId: 3, history: started }),
     ).toBe(4);
@@ -206,7 +206,7 @@ describe('which run the AI Review tab shows', () => {
 describe('the history list', () => {
   const textOf = (html: string): string => html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ');
   const history = [
-    run(3, { provider: 'codex', model: 'gpt-6-astra', trigger: 'auto', findingCount: 1, verdict: 'REQUEST_CHANGES' }),
+    run(3, { provider: 'codex', model: 'gpt-6.1-sol', trigger: 'auto', findingCount: 1, verdict: 'REQUEST_CHANGES' }),
     run(2, { status: 'failed', verdict: null, findingCount: 0 }),
     run(1, { model: 'claude-sonnet-5', findingCount: 0, headSha: 'abcdef1234'.padEnd(40, '0') }),
   ];
@@ -219,7 +219,7 @@ describe('the history list', () => {
     expect(t).toContain('All reviews of this PR (3)');
     expect(html.match(/data-review-run="/g)).toHaveLength(3);
     expect(html.indexOf('data-review-run="3"')).toBeLessThan(html.indexOf('data-review-run="1"'));
-    expect(t).toContain('Codex · GPT-6 Astra');
+    expect(t).toContain('Codex · GPT-6.1 Sol');
     expect(t).toContain('Request changes');
     expect(t).toContain('1 finding ');
     expect(t).toContain('Auto review');

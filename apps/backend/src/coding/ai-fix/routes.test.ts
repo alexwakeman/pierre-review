@@ -536,12 +536,12 @@ describe('POST /api/pro/prs/:id/ai-fix — the provider', () => {
 
   it('Codex and its model ⇒ Codex, asked at the same depth (fix and Plan first alike)', async () => {
     const app = await build();
-    expect((await start(app, { provider: 'codex', model: 'gpt-6.1-sol', instruction: 'Fix it.' })).statusCode).toBe(202);
+    expect((await start(app, { provider: 'codex', model: 'gpt-6.1-terra', instruction: 'Fix it.' })).statusCode).toBe(202);
     expect(startArg()).toMatchObject({ provider: 'codex', model: 'claude-sonnet-5' });
     const plan = await app.inject({
       method: 'POST',
       url: '/api/pro/prs/7/ai-fix/plan',
-      payload: { provider: 'codex', model: 'gpt-6-astra', instruction: 'Fix it.' },
+      payload: { provider: 'codex', model: 'gpt-6.1-sol', instruction: 'Fix it.' },
     });
     expect(plan.statusCode).toBe(202);
     expect((startPlan.mock.calls.at(-1) as unknown[])[1]).toMatchObject({ provider: 'codex', model: 'claude-opus-5-5' });
@@ -550,9 +550,9 @@ describe('POST /api/pro/prs/:id/ai-fix — the provider', () => {
 
   it('a model of the other provider, or a provider not signed in ⇒ 400 in one sentence, no run', async () => {
     let app = await build();
-    let res = await start(app, { provider: 'claude', model: 'gpt-6-astra', instruction: 'Fix it.' });
+    let res = await start(app, { provider: 'claude', model: 'gpt-6.1-sol', instruction: 'Fix it.' });
     expect(res.statusCode).toBe(400);
-    expect(res.json()).toEqual({ error: 'ModelNotOnProvider', message: 'GPT-6 Astra runs on Codex, not Claude.' });
+    expect(res.json()).toEqual({ error: 'ModelNotOnProvider', message: 'GPT-6.1 Sol runs on Codex, not Claude.' });
     await app.close();
     app = await build({ claude: true, codex: false });
     res = await start(app, { provider: 'codex', instruction: 'Fix it.' });

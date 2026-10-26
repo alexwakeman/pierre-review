@@ -162,16 +162,16 @@ describe('the per-run provider', () => {
 
   it('Codex named with its model ⇒ runs on Codex, asked at the same depth', async () => {
     const { app } = await build();
-    expect((await post(app, { provider: 'codex', model: 'gpt-6-astra' })).statusCode).toBe(202);
+    expect((await post(app, { provider: 'codex', model: 'gpt-6.1-sol' })).statusCode).toBe(202);
     expect(call().slice(3)).toEqual(['claude-opus-5-5', 'codex']);
     startReview.mockClear();
-    expect((await post(app, { provider: 'codex', model: 'gpt-6.1-sol' })).statusCode).toBe(202);
+    expect((await post(app, { provider: 'codex', model: 'gpt-6.1-terra' })).statusCode).toBe(202);
     expect(call().slice(3)).toEqual(['claude-sonnet-5', 'codex']);
   });
 
   it('a Codex model with no provider ⇒ Codex (the model names it)', async () => {
     const { app } = await build();
-    expect((await post(app, { model: 'gpt-6-astra' })).statusCode).toBe(202);
+    expect((await post(app, { model: 'gpt-6.1-sol' })).statusCode).toBe(202);
     expect(call()[4]).toBe('codex');
   });
 
@@ -183,9 +183,9 @@ describe('the per-run provider', () => {
 
   it('a model of the other provider ⇒ 400 in one sentence, no run', async () => {
     const { app } = await build();
-    let res = await post(app, { provider: 'claude', model: 'gpt-6-astra' });
+    let res = await post(app, { provider: 'claude', model: 'gpt-6.1-sol' });
     expect(res.statusCode).toBe(400);
-    expect(res.json()).toEqual({ error: 'ModelNotOnProvider', message: 'GPT-6 Astra runs on Codex, not Claude.' });
+    expect(res.json()).toEqual({ error: 'ModelNotOnProvider', message: 'GPT-6.1 Sol runs on Codex, not Claude.' });
     res = await post(app, { provider: 'codex', model: 'claude-opus-5-5' });
     expect(res.statusCode).toBe(400);
     expect(res.json().message).toBe('Opus 5.5 runs on Claude, not Codex.');
@@ -194,7 +194,7 @@ describe('the per-run provider', () => {
 
   it('the named provider not signed in ⇒ 400 with its own sentence, no run', async () => {
     const { app } = await build({ claude: true, codex: false });
-    const res = await post(app, { provider: 'codex', model: 'gpt-6-astra' });
+    const res = await post(app, { provider: 'codex', model: 'gpt-6.1-sol' });
     expect(res.statusCode).toBe(400);
     expect(res.json()).toEqual({ error: 'NoClaudeAuth', message: 'Sign in to Codex in Settings → AI.' });
     expect(startReview).not.toHaveBeenCalled();

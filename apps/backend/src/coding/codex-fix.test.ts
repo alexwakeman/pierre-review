@@ -314,7 +314,7 @@ describe('AI Fix on Codex', () => {
     expect(res.usage).toMatchObject({ inputTokens: 120, outputTokens: 30 });
     expect(res.usageRecorded).toBe(true);
     expect(T.recorded).toEqual([
-      expect.objectContaining({ accountId: 1, prId: 7, feature: 'ai_fix', seam: 'agent', provider: 'codex', model: 'gpt-6-astra', costUsd: 0, inputTokens: 120, outputTokens: 30 }),
+      expect.objectContaining({ accountId: 1, prId: 7, feature: 'ai_fix', seam: 'agent', provider: 'codex', model: 'gpt-6.1-sol', costUsd: 0, inputTokens: 120, outputTokens: 30 }),
     ]);
 
     const [call] = calls();

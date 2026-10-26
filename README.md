@@ -134,7 +134,7 @@ OpenAI API key is not available yet.
 Pick the provider in **Settings → AI**, or set `LIMN_AI_PROVIDER` to `claude`, `codex`
 or `auto` (the default: Claude when both are signed in, Codex when only Codex is).
 Each run is labelled with the provider and model that ran it. On Codex the models are
-`gpt-6-astra` (deep reviews), `gpt-6.1-sol` and `gpt-6-luna`. The rules are the same:
+`gpt-6.1-sol` (deep reviews), `gpt-6.1-terra` and `gpt-6-luna`. The rules are the same:
 no shell, no web, and nothing posted or pushed until you press the button. The spend
 budget counts Limn's share of your ChatGPT plan's 5-hour and weekly limits.
 

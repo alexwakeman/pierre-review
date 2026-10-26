@@ -144,7 +144,7 @@ which is Claude. `PUT /api/ai/provider` and the Codex sign-in routes keep their 
 with Limn's token-weighted share, percentages only) and every run started afterwards follow it — a
 replayed run is labelled with the provider that was active when it started and that provider's model
 of the template's depth, never the template's own label. The stored runs keep theirs: the seeder
-writes a mix (`seed-demo-agentic.ts`), and #105 holds a Claude Opus review and a Codex GPT-6 Astra
+writes a mix (`seed-demo-agentic.ts`), and #105 holds a Claude Opus review and a Codex GPT-6.1 Sol
 review of the same head.
 
 **The in-app conflict resolver is not in the demo.** The demo's `/api/me` answers

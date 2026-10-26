@@ -152,6 +152,7 @@ export const CODEX_PRICES_PER_MTOK: Readonly<
 > = {
   'gpt-6-astra': null,
   'gpt-6.1-sol': null,
+  'gpt-6.1-terra': null,
   'gpt-6-sol': null,
   'gpt-6-luna': null,
 };

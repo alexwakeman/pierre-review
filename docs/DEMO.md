@@ -128,7 +128,7 @@ SHAPE is stale but still renders. The re-record is the author's job.
 - **Settings → AI** (Auto / Claude / Codex) and the Codex sign-in are simulated (`provider.ts`),
   starting at Auto = Claude; the AI spend reading (`aiBudget.ts`) and every run started afterwards
   follow the choice. The stored runs are a seeded mix of Claude and Codex, each labelled by what ran;
-  #105 holds a Claude Opus and a Codex GPT-6 Astra review of the same head, both at effort High.
+  #105 holds a Claude Opus and a Codex GPT-6.1 Sol review of the same head, both at effort High.
 - **Settings → AI → Effort** is simulated too (`provider.ts`, PUT `/api/ai/effort`): a review or AI
   Fix started afterwards stores the level (Default: Claude medium, Codex by depth), and its label
   says it ("Claude Opus 5.5 · high"). Seeded runs carry the effort they were seeded with.

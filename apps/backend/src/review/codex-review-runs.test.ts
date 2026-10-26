@@ -238,8 +238,8 @@ describe('Claude Review on Codex', () => {
     const [call] = calls();
     expect(call.schema.required).toEqual(expect.arrayContaining(['summary', 'verdict', 'scopeUsed', 'findings']));
     expect(call.schema.additionalProperties).toBe(false);
-    // Sonnet → standard → gpt-6.1-sol; a diff-only run one step below the role's medium.
-    expect(model(call.argv)).toBe('gpt-6.1-sol');
+    // Sonnet → standard → gpt-6.1-terra; a diff-only run one step below the role's medium.
+    expect(model(call.argv)).toBe('gpt-6.1-terra');
     expect(cfg(call.argv, 'model_reasoning_effort')).toBe('"low"');
     expect(cfg(call.argv, 'sandbox_mode')).toBe('"read-only"');
     // The prompts in Codex's words: no Claude tool anywhere.
@@ -254,7 +254,7 @@ describe('Claude Review on Codex', () => {
     expect(lastActivity.some((l) => l.startsWith('{'))).toBe(false);
     expect(progress.every((p) => p.usage == null || p.usage.estCostUsd === 0)).toBe(true);
     expect(T.recorded).toEqual([
-      expect.objectContaining({ accountId: 3, seam: 'agent', feature: 'claude_review', prId: 11, provider: 'codex', model: 'gpt-6.1-sol', costUsd: 0, inputTokens: 1000, outputTokens: 100 }),
+      expect.objectContaining({ accountId: 3, seam: 'agent', feature: 'claude_review', prId: 11, provider: 'codex', model: 'gpt-6.1-terra', costUsd: 0, inputTokens: 1000, outputTokens: 100 }),
     ]);
   });
 
@@ -262,12 +262,12 @@ describe('Claude Review on Codex', () => {
     const res = await runReview(reviewArgs('REVIEWOK', { mode: 'worktree', model: 'claude-opus-5-5', systemPrompt: 'Explore the worktree.' }));
     expect(res.submitted).toBe(true);
     const [call] = calls();
-    expect(model(call.argv)).toBe('gpt-6-astra');
+    expect(model(call.argv)).toBe('gpt-6.1-sol');
     expect(cfg(call.argv, 'model_reasoning_effort')).toBe('"high"');
     // The MCP server is given the worktree (mocked prepWorktree) as a read root.
     expect(call.argv.join(' ')).toContain(`${T.root}/wt-`);
     // Default effort is stored on the run for its label.
-    expect(res.ranOn).toEqual({ provider: 'codex', model: 'gpt-6-astra', effort: 'high' });
+    expect(res.ranOn).toEqual({ provider: 'codex', model: 'gpt-6.1-sol', effort: 'high' });
   });
 
   it('Settings → AI → Effort reaches Codex: the chosen level on a worktree run, one step lower diff-only, stored on the run', async () => {
@@ -276,7 +276,7 @@ describe('Claude Review on Codex', () => {
     try {
       const deep = await runReview(reviewArgs('REVIEWOK', { mode: 'worktree', model: 'claude-opus-5-5', systemPrompt: 'Explore the worktree.' }));
       expect(cfg(calls()[0].argv, 'model_reasoning_effort')).toBe('"xhigh"');
-      expect(deep.ranOn).toEqual({ provider: 'codex', model: 'gpt-6-astra', effort: 'xhigh' });
+      expect(deep.ranOn).toEqual({ provider: 'codex', model: 'gpt-6.1-sol', effort: 'xhigh' });
       unlinkSync(T.log);
       const small = await runReview(reviewArgs('REVIEWOK'));
       expect(cfg(calls()[0].argv, 'model_reasoning_effort')).toBe('"high"');

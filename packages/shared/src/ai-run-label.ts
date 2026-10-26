@@ -116,7 +116,9 @@ export type AiModelRole = 'deep' | 'standard' | 'fast';
  */
 export const AI_MODEL_FOR_ROLE: Readonly<Record<AiProviderId, Readonly<Record<AiModelRole, string>>>> = {
   claude: { deep: 'claude-opus-5-5', standard: 'claude-sonnet-5', fast: 'claude-haiku-5-5' },
-  codex: { deep: 'gpt-6-astra', standard: 'gpt-6.1-sol', fast: 'gpt-6-luna' },
+  // Owner's choice 2026-10-26: Sol is the default (deep) and Terra the standard; Astra is no longer
+  // offered (it spent a ChatGPT Plus 5-hour window in about two reviews). Old Astra rows still label.
+  codex: { deep: 'gpt-6.1-sol', standard: 'gpt-6.1-terra', fast: 'gpt-6-luna' },
 };
 
 /** A Claude model id's role (the backend's `claudeModelChoice` rule: Opus deep, Haiku fast, else standard). */
@@ -148,8 +150,8 @@ export function aiModelChoiceLabel(model: ClaudeReviewModel, provider: AiProvide
 // The server validates the pair and runs it on THAT provider; automatic runs keep the default.
 
 /** Codex's models a picker offers: the depths Claude's picker offers (deep, standard). */
-export type CodexPickerModel = 'gpt-6-astra' | 'gpt-6.1-sol';
-export const CODEX_PICKER_MODELS: readonly CodexPickerModel[] = ['gpt-6-astra', 'gpt-6.1-sol'];
+export type CodexPickerModel = 'gpt-6.1-sol' | 'gpt-6.1-terra';
+export const CODEX_PICKER_MODELS: readonly CodexPickerModel[] = ['gpt-6.1-sol', 'gpt-6.1-terra'];
 
 /** Any model a picker offers, on either provider. */
 export type AiPickerModel = ClaudeReviewModel | CodexPickerModel;
@@ -176,8 +178,8 @@ export function aiPickerModelProvider(model: unknown): AiProviderId | null {
  * returned as it is.
  */
 export function aiPickerRequestModel(model: AiPickerModel): ClaudeReviewModel {
-  if (model === 'gpt-6-astra') return 'claude-opus-5-5';
-  if (model === 'gpt-6.1-sol') return 'claude-sonnet-5';
+  if (model === 'gpt-6.1-sol') return 'claude-opus-5-5';
+  if (model === 'gpt-6.1-terra') return 'claude-sonnet-5';
   return model;
 }
 
@@ -195,7 +197,7 @@ export interface AiModelPick {
   value: string;
 }
 
-/** The `<option>` value of a pick ("codex:gpt-6-astra"). */
+/** The `<option>` value of a pick ("codex:gpt-6.1-sol"). */
 export function aiModelPickValue(provider: AiProviderId, model: AiPickerModel): string {
   return `${provider}:${model}`;
 }

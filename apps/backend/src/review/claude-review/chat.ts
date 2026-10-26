@@ -207,7 +207,7 @@ export function chatModeFor(review: Pick<ClaudeReview, 'reviewMode'>): ChatMode 
 
 /**
  * The review's own model, or the default when that model has been retired. A review Codex ran stored
- * its Codex id: the chat keeps its DEPTH (`requestModelOf`: gpt-6-astra → Opus, gpt-6.1-sol → Sonnet).
+ * its Codex id: the chat keeps its DEPTH (`requestModelOf`: gpt-6.1-sol → Opus, gpt-6.1-terra → Sonnet).
  */
 export function chatModelFor(stored: string): ClaudeReviewModel {
   const asked = requestModelOf(stored);

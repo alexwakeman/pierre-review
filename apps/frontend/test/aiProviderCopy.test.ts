@@ -63,18 +63,18 @@ describe('the active provider’s name', () => {
     const opus = 'claude-opus-5-5' as const;
     const sonnet = 'claude-sonnet-5' as const;
     expect(aiModelChoiceLabel(opus, 'claude')).toBe(CLAUDE_REVIEW_MODEL_LABELS[opus]);
-    expect(aiModelChoiceLabel(opus, 'codex')).toBe('Codex · GPT-6 Astra (most thorough)');
-    expect(aiModelChoiceLabel(sonnet, 'codex')).toBe('Codex · GPT-6.1 Sol (best value)');
+    expect(aiModelChoiceLabel(opus, 'codex')).toBe('Codex · GPT-6.1 Sol (most thorough)');
+    expect(aiModelChoiceLabel(sonnet, 'codex')).toBe('Codex · GPT-6.1 Terra (best value)');
   });
 });
 
 describe('a stored run names the provider it ran on', () => {
   it('from its provider when the row has one, else from its model id', () => {
-    expect(aiProviderOfModel('gpt-6-astra')).toBe('codex');
+    expect(aiProviderOfModel('gpt-6.1-sol')).toBe('codex');
     expect(aiProviderOfModel('claude-opus-5-5')).toBe('claude');
     expect(aiProviderOfModel('opus')).toBe('claude');
     expect(aiProviderOfModel(null)).toBe('claude');
-    expect(aiRunProviderName({ model: 'gpt-6.1-sol' })).toBe('Codex');
+    expect(aiRunProviderName({ model: 'gpt-6.1-terra' })).toBe('Codex');
     expect(aiRunProviderName({ model: 'claude-opus-5-5' })).toBe('Claude');
     // A row that carries its provider wins over the model it names.
     expect(aiRunProviderName({ model: 'claude-opus-5-5', provider: 'codex' })).toBe('Codex');

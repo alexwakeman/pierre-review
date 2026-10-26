@@ -1,7 +1,7 @@
 import type { ModelPickState } from '../lib/modelPick.js';
 
 // THE PER-RUN MODEL MENU (lib/modelPick.ts): every ready provider's models, each labelled by what will
-// run ("Claude Opus 5.5 (most thorough)", "Codex · GPT-6 Astra (most thorough)"). With one provider
+// run ("Claude Opus 5.5 (most thorough)", "Codex · GPT-6.1 Sol (most thorough)"). With one provider
 // ready it is the menu it always was.
 export function ModelPicker({
   state,

@@ -59,17 +59,17 @@ const VIEWS = [
       `pr:${id}:${t}`,
       `?view=pr-detail:${id}&prTab=${t}`,
       id === 113 ? `pr-113-${t}` : id === 114 && (t === 'ai_fix' || t === 'claude_review') ? `pr-114-${t}` : id === 105 && t === 'claude_review' ? 'pr-105-claude_review' : null,
-      // #105 holds a Claude Opus review and a Codex GPT-6 Astra review of the same head, each labelled,
+      // #105 holds a Claude Opus review and a Codex GPT-6.1 Sol review of the same head, each labelled,
       // both in the always-visible run list. The model menu lists BOTH providers (both signed in):
       // picking Codex's model leaves every run listed.
       id === 105 && t === 'claude_review'
         ? {
             act: async (page) => {
-              await page.getByLabel('Model').first().selectOption('codex:gpt-6-astra');
+              await page.getByLabel('Model').first().selectOption('codex:gpt-6.1-sol');
               await page.getByText('All reviews of this PR').first().waitFor({ timeout: 10_000 });
             },
             // Both ran at Effort = High, and each label says so.
-            expect: ['All reviews of this PR (2)', 'Codex · GPT-6 Astra · high', 'Claude Opus 5.5 · high', 'Shown'],
+            expect: ['All reviews of this PR (2)', 'Codex · GPT-6.1 Sol · high', 'Claude Opus 5.5 · high', 'Shown'],
           }
         : // #113's latest run read acme/infrastructure's branch of the same name (a related repo).
           id === 113 && t === 'claude_review'

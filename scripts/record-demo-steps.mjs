@@ -256,7 +256,7 @@ export const STEPS = [
     },
   })),
 
-  // ── #105's run history: the Claude Opus and Codex GPT-6 Astra reviews of the same head ──
+  // ── #105's run history: the Claude Opus and Codex GPT-6.1 Sol reviews of the same head ──
   {
     name: 'pr:105:review-history',
     run: async (h) => {
