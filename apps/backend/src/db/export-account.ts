@@ -117,6 +117,11 @@ export interface AccountExport {
    * per workspace.
    */
   repoRelations: Record<string, unknown>[];
+  /**
+   * This Sprint's "needs code" judgements (core `sprint_code_judgements`, migration 0132): a model's
+   * yes/no and one short reason per not-started ticket, per workspace.
+   */
+  sprintCodeJudgements: Record<string, unknown>[];
 }
 
 /** Build the full export document for one account. Returns null if the account is gone. */
@@ -250,6 +255,21 @@ export async function exportAccountData(accountId: number): Promise<AccountExpor
     })
     .from(schema.repoRelations)
     .where(eq(schema.repoRelations.accountId, accountId))
+    .execute();
+
+  // This Sprint's "needs code" judgements — model answers about the account's tickets.
+  const codeJudgementRows = await db
+    .select({
+      workspaceId: schema.sprintCodeJudgements.workspaceId,
+      ident: schema.sprintCodeJudgements.ident,
+      needsCode: schema.sprintCodeJudgements.needsCode,
+      reason: schema.sprintCodeJudgements.reason,
+      model: schema.sprintCodeJudgements.model,
+      provider: schema.sprintCodeJudgements.provider,
+      createdAt: schema.sprintCodeJudgements.createdAt,
+    })
+    .from(schema.sprintCodeJudgements)
+    .where(eq(schema.sprintCodeJudgements.accountId, accountId))
     .execute();
 
   const [
@@ -389,6 +409,7 @@ export async function exportAccountData(accountId: number): Promise<AccountExpor
     workspaceSonar: sonarRows.map((t) => ({ ...t, hasToken: t.hasToken != null && t.hasToken !== '' })),
     referenceDocs: referenceDocRows,
     repoRelations: repoRelationRows,
+    sprintCodeJudgements: capped('sprintCodeJudgements', codeJudgementRows),
     referenceDocChatMessages: capped('referenceDocChatMessages', docChatRows),
   };
 }

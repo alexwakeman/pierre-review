@@ -2,6 +2,7 @@ import { markSprintPathsQueued } from '../../db/sprint-paths.js';
 import { setAfterSprintRead } from '../../tracker/sprint/hooks.js';
 import type { AgentContext } from '../agent-context.js';
 import { automaticRunAllowed } from '../budget-gate.js';
+import { runSprintCodePass } from '../sprint-code/manager.js';
 import { runSprintPathsPass } from '../sprint-paths/manager.js';
 import { runSprintThemePass } from '../sprint-themes/manager.js';
 import { registerSprintTicketChecks } from '../ticket-review/sprint-checks.js';
@@ -12,7 +13,9 @@ import { runSprintBriefPass } from './manager.js';
 //   1. the BRIEF pass (./manager.ts, Haiku) — every sprint ticket and ghost gets its summary;
 //   2. the sprint-wide THEME pass (../sprint-themes/, Haiku), which runs only when the keys + summaries
 //      changed;
-//   3. the SPRINT BUILDER (../sprint-paths/, Sonnet 5, agentic), which reads the themes and runs only when
+//   3. the "NEEDS CODE" pass (../sprint-code/, the brief model, batched), which judges only not-started
+//      tickets with no pull request whose text changed since their last judgement;
+//   4. the SPRINT BUILDER (../sprint-paths/, Sonnet 5, agentic), which reads the themes and runs only when
 //      the map it is sent changed.
 // A brief pass that did not finish ('busy', or stopped by a missing runtime) starts nothing after it: the
 // running one re-runs and its own caller continues the chain. (The Haiku sprint STORY pass that used to
@@ -23,12 +26,14 @@ type PassCtx = Pick<AgentContext, 'log' | 'llm' | 'recordAiUsage' | 'aiBudget'>;
 export interface SprintAfterReadSteps {
   briefs: (ctx: PassCtx, a: number, w: number) => Promise<{ state: string; stoppedBy?: string | null }>;
   themes: (ctx: PassCtx, a: number, w: number) => Promise<unknown>;
+  code: (ctx: PassCtx, a: number, w: number, manual: boolean) => Promise<unknown>;
   paths: (ctx: PassCtx, a: number, w: number) => Promise<unknown>;
 }
 
 const STEPS: SprintAfterReadSteps = {
   briefs: (ctx, a, w) => runSprintBriefPass(ctx, a, w),
   themes: (ctx, a, w) => runSprintThemePass(ctx, a, w),
+  code: (ctx, a, w, manual) => runSprintCodePass(ctx, a, w, { manual }),
   paths: (ctx, a, w) => runSprintPathsPass(ctx, a, w),
 };
 
@@ -50,6 +55,8 @@ export async function runSprintAfterRead(
     const briefs = await steps.briefs(ctx, accountId, workspaceId);
     if (briefs.state !== 'done' || briefs.stoppedBy === 'runtime') return;
     await steps.themes(ctx, accountId, workspaceId);
+    // "Needs code" asks the budget gate again itself (it may be reached long after the chain began).
+    await steps.code(ctx, accountId, workspaceId, manual);
     // The PATHS read the themes, so they follow them (whatever the theme pass answered).
     await steps.paths(ctx, accountId, workspaceId);
   } catch (err) {

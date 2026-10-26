@@ -24,6 +24,7 @@ import {
 import { globalAutomationUserIds } from './automation-ids.js';
 import { db, schema } from './client.js';
 import { currentSprintBriefs, sprintBriefInput, type SprintBriefInput } from './sprint-briefs.js';
+import { currentSprintCodeJudgements, sprintCodeJudgeInput, type SprintCodeJudgeInput } from './sprint-code-judgements.js';
 import {
   SPRINT_EMPTY_CHANGE_TOKEN,
   foldSprintGraph,
@@ -326,6 +327,12 @@ async function foldStoredSprint(
   // THE TICKET CHECKS ("n of m met", db/sprint-ticket-checks.ts): sprint tickets only, batched; the
   // ticket review is agentic, so AI off reads none.
   const checks = aiEnabled ? await sprintTicketChecksFor(accountId, t.sprint.map((x) => x.ident), prs) : undefined;
+  // "NEEDS CODE" (db/sprint-code-judgements.ts): CURRENT judgements only; the fold asks only about a
+  // sprint ticket in Not started with no pull request. AI off → 'off'; not judged for today's text → 'pending'.
+  const judgeInputs = sprintCodeJudgeInputsOf(t);
+  const judged = aiEnabled
+    ? await currentSprintCodeJudgements(accountId, workspaceId, [...judgeInputs].map(([ident, input]) => ({ ident, input })))
+    : null;
   const g = foldSprintGraph({
     provider: site.provider,
     apiRoot: site.apiRoot,
@@ -335,8 +342,35 @@ async function foldStoredSprint(
     prs,
     ...(themes != null ? { themes: themes.byIdent } : {}),
     ...(checks != null ? { checks } : {}),
+    codeJudgementOf: (ident) => (judged == null ? { state: 'off', reason: null } : (judged.get(ident) ?? { state: 'pending', reason: null })),
   });
   return { t, statusLayout, themes, g };
+}
+
+/** Every sprint ticket's "needs code" input, by ident. */
+function sprintCodeJudgeInputsOf(t: Pick<GraphTickets, 'sprintRows' | 'provider'>): Map<string, SprintCodeJudgeInput> {
+  return new Map(t.sprintRows.map((r) => [r.ident, sprintCodeJudgeInput(r, t.provider)] as const));
+}
+
+/** The "needs code" pass's to-do list (review/sprint-code/): the sprint tickets the fold ASKS about
+ *  (Not started, no pull request) with no current judgement, in the board's order, ≤ `cap`, with their
+ *  key and input. Folded exactly as the graph GET folds it, WITHOUT stamping the view or kicking a read.
+ *  [] with no tracker. */
+export async function sprintCodeJudgeTodo(
+  accountId: number,
+  workspaceId: number,
+  cap: number,
+): Promise<Array<{ ident: string; key: string; input: SprintCodeJudgeInput }>> {
+  const { workspaceSite } = await import('./stories.js');
+  const site = await workspaceSite(accountId, workspaceId);
+  if (site == null) return [];
+  const readRow = await readSprintRead(accountId, workspaceId);
+  const { t, g } = await foldStoredSprint(accountId, workspaceId, site, true, readRow);
+  const inputs = sprintCodeJudgeInputsOf(t);
+  return g.nodes
+    .filter((n) => n.codeJudgement?.state === 'pending' && inputs.has(n.ident))
+    .slice(0, cap)
+    .map((n) => ({ ident: n.ident, key: n.key, input: inputs.get(n.ident)! }));
 }
 
 /** GET /api/sprint-graph/token — the change token alone. DB ONLY and SIDE-EFFECT FREE: no view stamp

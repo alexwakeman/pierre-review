@@ -1177,6 +1177,15 @@ review-time read. [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Related repos. Journal
 `1792137618016`. (Written as `0130` on its own branch beside `0130_ai_effort`; renumbered to `0131`
 when the two merged, before either shipped.)
 
+### `0132_sprint_code_judgements` — This Sprint's "Needs code" judgements
+`CREATE TABLE sprint_code_judgements (account_id, workspace_id, ident, text_hash, judge_version,
+needs_code, reason, model, provider, cost_usd, input_tokens, output_tokens, created_at)` with the
+unique `sprint_code_judgements_account_ws_ident` (the ONLY `onConflictDoUpdate` target) and the named
+composite FK `sprint_code_judgements_workspace_account_fk` onto `workspaces(id, account_id)` (cascade).
+Additive. Joins `accountScopedTables()`, the erasure and the export. [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md)
+§ Sprint code judgements. Journal `when` sqlite `1792137619016`. (Parallel branches may also have taken
+`0132`; renumber on merge like `0131`.)
+
 ### No migration — "Check against code" removed (2026-10-18): `sprint_ticket_repos` + `sprint_assessments` DORMANT
 
 The sprint drawer, its repo picker and "Check against code" (`review/sprint-assess/`) were removed with

@@ -16,6 +16,9 @@ import {
   sprintColumns,
   themesBoard,
   hasLivePr,
+  lanePrCount,
+  sprintCardFilter,
+  ticketCodeNote,
   ticketCardBorder,
   ticketCardCriteria,
   ticketCardTags,
@@ -112,7 +115,7 @@ describe('the ghost column is the Critical path view only', () => {
     const b = pathsBoard({ nodes, edges: [dep('A-2', 'OUT-1')], paths, columns: COLUMNS });
     expect(b.columns[0]!.id).toBe(OUTSIDE_COLUMN_ID);
     expect(b.cards.find((c) => c.data.node.key === 'OUT-1')!.column).toBe(OUTSIDE_COLUMN_ID);
-    expect(b.lanes).toEqual([{ id: 'path:0', label: 'Writer first', data: { kind: 'path', risk: 'high', advice: 'Unblock the writer.' } }]);
+    expect(b.lanes).toEqual([{ id: 'path:0', label: 'Writer first', data: { kind: 'path', risk: 'high', advice: 'Unblock the writer.', prs: 0 } }]);
   });
   it('themes and people draw sprint tickets only, and never the column', () => {
     const t = themesBoard({ nodes, edges: [], paths, columns: COLUMNS, themes: null });
@@ -184,7 +187,7 @@ describe('lanes per view', () => {
     ]);
     expect(b.lanes[0]!.data).toMatchObject({ progress: '1 Doing', code: 'Has a pull request' });
   });
-  it('People: ALPHABETICAL, Unassigned last — never by load; reviews waiting null stays null', () => {
+  it('People: with no pull requests, alphabetical, Unassigned last; reviews waiting null stays null', () => {
     const people: SprintPerson[] = [
       { name: 'Sinan Goktas', names: ['Sinan Goktas'], reviewsWaiting: 4 },
       { name: 'Colin Ames', names: ['colin.ames'], reviewsWaiting: null },
@@ -207,6 +210,91 @@ describe('lanes per view', () => {
     ]);
     // CODE's row line and bar: what the data shows, nothing about the person.
     expect(b.lanes[2]!.data).toMatchObject({ progress: '3 Doing', code: 'None has a pull request', segments: [{ column: 'doing', count: 3 }] });
+  });
+});
+
+describe('rows are sorted by their pull request count (every view)', () => {
+  const two = [pr({ prId: 1 }), pr({ prId: 2, state: 'closed' })];
+  it('Theme: most PRs first, ties in the stored order, "No theme" last whatever it holds', () => {
+    const nodes = [
+      node('A-1', { theme: 'Import' }),
+      node('A-2', { theme: 'Search', prs: [pr({ prId: 9 })] }),
+      node('A-3', { theme: 'Export', prs: two }),
+      node('A-4', { prs: [pr({ prId: 3 }), pr({ prId: 4 }), pr({ prId: 5 })] }),
+    ];
+    const themes = ['Import', 'Search', 'Export'].map((name) => ({ name, summary: null }));
+    const b = themesBoard({ nodes, edges: [], paths: null, columns: COLUMNS, themes });
+    expect(b.lanes.map((l) => [l.label, (l.data as { prs: number }).prs])).toEqual([
+      ['Export', 2],
+      ['Search', 1],
+      ['Import', 0],
+      ['No theme', 3],
+    ]);
+    // The cards follow their lanes.
+    expect(b.cards.map((c) => c.data.node.key)).toEqual(['A-3', 'A-2', 'A-1', 'A-4']);
+  });
+  it('a PR on two tickets of one row counts once', () => {
+    const shared = pr({ prId: 7 });
+    const b = themesBoard({ nodes: [node('A-1', { prs: [shared] }), node('A-2', { prs: [shared] })], edges: [], paths: null, columns: COLUMNS, themes: null });
+    expect(lanePrCount(b.cards)).toBe(1);
+  });
+  it('People: most PRs first, ties alphabetical, Unassigned last', () => {
+    const nodes = [
+      node('A-1', { assignee: { name: 'Bea', avatarUrl: null } }),
+      node('A-2', { assignee: { name: 'Zed', avatarUrl: null }, prs: two }),
+      node('A-3', { assignee: { name: 'Amy', avatarUrl: null } }),
+      node('A-4', { assignee: null, prs: [pr({ prId: 3 }), pr({ prId: 4 }), pr({ prId: 5 })] }),
+    ];
+    const b = peopleBoard({ nodes, edges: [], paths: null, columns: COLUMNS, people: [] });
+    expect(b.lanes.map((l) => l.label)).toEqual(['Zed', 'Amy', 'Bea', 'Unassigned']);
+  });
+  it('Critical path: most PRs first, ties riskiest first as stored', () => {
+    const nodes = [node('A-1'), node('A-2', { prs: [pr({ prId: 1 })] }), node('A-3')];
+    const paths: SprintPaths = {
+      paths: [
+        { title: 'First', risk: 'high', advice: 'a', idents: [id('A-1')] },
+        { title: 'Second', risk: 'medium', advice: 'b', idents: [id('A-3')] },
+        { title: 'Third', risk: 'low', advice: 'c', idents: [id('A-2')] },
+      ],
+    } as unknown as SprintPaths;
+    const b = pathsBoard({ nodes, edges: [], paths, columns: COLUMNS });
+    expect(b.lanes.map((l) => l.label)).toEqual(['Third', 'First', 'Second']);
+  });
+});
+
+describe('the board filters', () => {
+  const judged = (state: 'code' | 'no_code' | 'pending' | 'off') => ({ codeJudgement: { state, reason: null } });
+  const nodes = [
+    node('A-1', { prs: [pr({ state: 'closed' })] }),
+    node('A-2', { stage: 'not_started', column: 'todo', ...judged('code') }),
+    node('A-3', { stage: 'not_started', column: 'todo', ...judged('no_code') }),
+    node('A-4', { stage: 'not_started', column: 'todo', ...judged('pending') }),
+    node('A-5'),
+  ];
+  const keys = (f: { hasPrs: boolean; needsCode: boolean }) => nodes.filter(sprintCardFilter(f)).map((n) => n.key);
+  it('Has PRs keeps any pull request, closed included; Needs code adds the judged and the not-yet-judged', () => {
+    expect(keys({ hasPrs: false, needsCode: false })).toEqual(['A-1', 'A-2', 'A-3', 'A-4', 'A-5']);
+    expect(keys({ hasPrs: true, needsCode: false })).toEqual(['A-1']);
+    expect(keys({ hasPrs: false, needsCode: true })).toEqual(['A-1', 'A-2', 'A-4']);
+    expect(keys({ hasPrs: true, needsCode: true })).toEqual(['A-1']);
+  });
+  it('AI off: Needs code keeps only tickets with a pull request', () => {
+    const off = [node('A-1', { prs: [pr()] }), node('A-2', { stage: 'not_started', ...judged('off') })];
+    expect(off.filter(sprintCardFilter({ hasPrs: false, needsCode: true })).map((n) => n.key)).toEqual(['A-1']);
+  });
+  it('the boards drop what the filter rejects; a row left empty is not drawn', () => {
+    const keep = sprintCardFilter({ hasPrs: true, needsCode: false });
+    const b = themesBoard({ nodes: [node('A-1', { theme: 'X', prs: [pr()] }), node('A-2', { theme: 'Y' })], edges: [], paths: null, columns: COLUMNS, themes: [{ name: 'X', summary: null }, { name: 'Y', summary: null }], keep });
+    expect(b.cards.map((c) => c.data.node.key)).toEqual(['A-1']);
+    expect(b.lanes.filter((l) => b.cards.some((c) => c.lane === l.id)).map((l) => l.label)).toEqual(['X']);
+  });
+  it('the card note: the reason as a tooltip; "Not judged yet" only while pending; nothing when not asked or off', () => {
+    expect(ticketCodeNote({ codeJudgement: { state: 'code', reason: 'Adds a field.' } })).toEqual({ marker: null, tooltip: 'Likely needs code: Adds a field.' });
+    expect(ticketCodeNote({ codeJudgement: { state: 'no_code', reason: null } })).toEqual({ marker: null, tooltip: 'Likely no code' });
+    expect(ticketCodeNote({ codeJudgement: { state: 'pending', reason: null } })?.marker).toBe('Not judged yet');
+    expect(ticketCodeNote({ codeJudgement: { state: 'off', reason: null } })).toBeNull();
+    expect(ticketCodeNote({ codeJudgement: null })).toBeNull();
+    expect(ticketCodeNote({})).toBeNull();
   });
 });
 

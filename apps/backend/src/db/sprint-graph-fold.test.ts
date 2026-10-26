@@ -195,6 +195,28 @@ describe('foldSprintGraph', () => {
     expect([n('G-1').ghost, n('G-1').check, n('G-1').checkRunning]).toEqual([true, null, false]);
   });
 
+  it('"needs code" is asked only of a Not started sprint ticket with no pull request; the token follows it', () => {
+    const pr = { prId: 1, number: 1, repoFullName: 'o/r', title: 'x', state: 'closed' as const, draft: false, ciState: null, url: '', author: null };
+    const status = { name: 'To Do', category: 'new' as const };
+    const sprint = [t('A-1', { status, links: [link('G-1')] }), t('A-2', { status }), t('A-3', { status: { name: 'Doing', category: 'indeterminate' } })];
+    const placeOf = (s: GraphTicketInput['status']) =>
+      s == null ? null : { stage: s.category === 'new' ? ('not_started' as const) : ('in_progress' as const), bucketId: 'b' };
+    const judge = (state: 'pending' | 'code') => () => ({ state, reason: null });
+    const run = (state: 'pending' | 'code') =>
+      foldSprintGraph({ provider: 'jira', apiRoot: ROOT, sprint, ghosts: [t('G-1', { status })], stageOf: () => null, placeOf, prs: new Map([[id('A-2'), [pr]]]), codeJudgementOf: judge(state) });
+    const r = run('pending');
+    expect(r.nodes.map((n) => [n.key, n.codeJudgement?.state ?? null])).toEqual([
+      ['A-1', 'pending'],
+      // A closed pull request is still a pull request: no guess needed.
+      ['A-2', null],
+      ['A-3', null],
+      ['G-1', null],
+    ]);
+    expect(sprintChangeTokenOf(run('code'))).not.toBe(sprintChangeTokenOf(r));
+    // Not given (the brief pass, the ghost lookup): the field is left off.
+    expect('codeJudgement' in fold(sprint, []).nodes[0]!).toBe(false);
+  });
+
   it('the change token moves with what the cards show, never with order or the clock', () => {
     const base = () => fold([t('A-1', { links: [link('B-1')] }), t('B-1')], []);
     const a = sprintChangeTokenOf(base());

@@ -225,6 +225,23 @@ export const DEMO_TICKETS: DemoTicket[] = [
     prs: [],
   },
   {
+    // Not started and not code: the "Needs code" filter's judgement leaves it out.
+    key: 'PLAT-320',
+    summary: 'Write the on-call runbook for a stuck sync queue',
+    type: 'Task',
+    status: 'todo',
+    assignee: 'lena',
+    description:
+      'On-call has no written steps for a sync queue that stops draining. Write a runbook page: how to tell, who to page, and how to replay the dead-letter queue by hand.',
+    ac: '* The runbook says how to spot a stuck queue on the dashboard.\n* It names who to page.\n* It lists the replay steps.',
+    epic: 'INFRA-200',
+    components: ['Ops'],
+    createdDaysAgo: 5,
+    updatedDaysAgo: 4,
+    inSprint: true,
+    prs: [],
+  },
+  {
     key: 'INFRA-231',
     summary: 'Right-size the EKS worker node group',
     type: 'Story',
@@ -425,6 +442,11 @@ const BRIEFS: Record<string, DemoBrief> = {
     references: [
       { ticketKey: 'PLAT-305', relation: 'depends_on', quote: 'It needs the progress events from PLAT-305', why: 'Only the progress events say which syncs are still running.' },
     ],
+  },
+  'PLAT-320': {
+    summary: 'A runbook page for on-call: how to spot a stuck sync queue, who to page, and how to replay the dead-letter queue by hand.',
+    oneLiner: 'On-call runbook for a stuck sync queue',
+    references: [],
   },
   'PLAT-318': {
     summary: 'Delete the cron sync loop, its flags and its tests once the queue replaces it, keeping the one-off sync command.',
@@ -704,7 +726,7 @@ export async function seedDemoTracker(c: TrackerSeedCtx): Promise<{ sprintTicket
   ];
   const THEME_OF: Record<string, number> = {
     'PLAT-292': 1, 'PLAT-301': 1, 'PLAT-296': 1, 'PLAT-297': 1, 'PLAT-315': 1,
-    'PLAT-288': 2, 'PLAT-318': 2, 'INFRA-244': 2,
+    'PLAT-288': 2, 'PLAT-318': 2, 'PLAT-320': 2, 'INFRA-244': 2,
     'PLAT-305': 3, 'PLAT-312': 3, 'PLAT-310': 3,
     'INFRA-231': 4, 'INFRA-260': 4, 'INFRA-248': 4, 'INFRA-252': 4,
   };
@@ -718,6 +740,30 @@ export async function seedDemoTracker(c: TrackerSeedCtx): Promise<{ sprintTicket
     complete: async () => ({ text: themeAnswer, usage: { inputTokens: 3100, outputTokens: 420 } }),
   });
   if (themes.state !== 'done') throw new Error(`demo themes: ${themes.state}`);
+
+  // 6b. "Needs code" (one cheap batched answer in the product, here a written one through the real pass):
+  //     the sprint's Not started tickets with no pull request.
+  const { runSprintCodePass } = await import('../src/review/sprint-code/manager.js');
+  const CODE: Record<string, { code: boolean; reason: string }> = {
+    'PLAT-310': { code: true, reason: 'Changes how the sync client retries GitHub calls.' },
+    'PLAT-312': { code: true, reason: 'Adds fields to the health endpoint.' },
+    'PLAT-318': { code: true, reason: 'Removes the cron loop, its flags and its tests.' },
+    'PLAT-320': { code: false, reason: 'A runbook page for on-call, with no build work.' },
+  };
+  const code = await runSprintCodePass(fakeAgentCtx as never, 1, workspaceId, { manual: true }, {
+    aiEnabled: true,
+    complete: async (a: { prompt: string }) => ({
+      text: JSON.stringify({
+        tickets: [...a.prompt.matchAll(/^### (\S+)$/gm)].map((m) => {
+          const c = CODE[m[1]!];
+          if (c == null) throw new Error(`no demo code judgement for ${m[1]}`);
+          return { key: m[1], code: c.code, reason: c.reason };
+        }),
+      }),
+      usage: { inputTokens: 1900, outputTokens: 160 },
+    }),
+  });
+  if (code.state !== 'done' || code.judged !== Object.keys(CODE).length) throw new Error(`demo code judgements: ${code.state}, ${code.judged} judged`);
 
   // 7. Critical paths + call-outs (the Sonnet sprint builder's one tool call, written here).
   const { runSprintPathsPass } = await import('../src/review/sprint-paths/manager.js');

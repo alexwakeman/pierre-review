@@ -7,10 +7,12 @@ import {
   canonicalTicketKey,
   isBlockingRelation,
   isSprintEdgeRelation,
+  sprintCodeAsked,
   trackerTicketIdent,
   type JiraStatusCategory,
   type SprintBrief,
   type SprintBriefState,
+  type SprintCodeJudgement,
   type SprintEdgeKind,
   type SprintGraphEdge,
   type SprintGraphNode,
@@ -73,6 +75,10 @@ export interface GraphFoldInput {
   themes?: ReadonlyMap<string, string>;
   /** Sprint ticket ident → its ticket check (db/sprint-ticket-checks.ts); ghosts never carry one. */
   checks?: ReadonlyMap<string, { check: SprintTicketCheck | null; running: boolean }>;
+  /** The "needs code" judgement of a ticket the judgement is ASKED about (`sprintCodeAsked`: a sprint
+   *  ticket in Not started with no pull request). Given → every node carries `codeJudgement` (null when
+   *  not asked); absent → the field is left off. */
+  codeJudgementOf?: (ident: string) => SprintCodeJudgement;
   ghostMax?: number;
   depthMax?: number;
 }
@@ -214,6 +220,8 @@ export function foldSprintGraph(input: GraphFoldInput): GraphFoldResult {
   const node = (t: GraphTicketInput, ghost: boolean): SprintGraphNode => {
     const place = input.placeOf?.(t.status) ?? null;
     const prs = input.prs?.get(t.ident) ?? [];
+    const stage = input.placeOf != null ? (place?.stage ?? null) : input.stageOf(t.status);
+    const judge = input.codeJudgementOf;
     return {
     ident: t.ident,
     key: t.key,
@@ -223,7 +231,7 @@ export function foldSprintGraph(input: GraphFoldInput): GraphFoldResult {
     ghost,
     depth: depth.get(t.ident) ?? 0,
     status: t.status,
-    stage: input.placeOf != null ? (place?.stage ?? null) : input.stageOf(t.status),
+    stage,
     bucketId: place?.bucketId ?? null,
     column: sprintColumnOf(place, prs, input.productReviewId ?? null),
     issueType: t.issueType,
@@ -241,6 +249,7 @@ export function foldSprintGraph(input: GraphFoldInput): GraphFoldResult {
     prs,
     degree: degree.get(t.ident) ?? 0,
     theme: ghost ? null : (input.themes?.get(t.ident) ?? null),
+    ...(judge != null ? { codeJudgement: sprintCodeAsked({ ghost, stage, prs }) ? judge(t.ident) : null } : {}),
     };
   };
   const sprintNodes = input.sprint
@@ -256,7 +265,8 @@ export function foldSprintGraph(input: GraphFoldInput): GraphFoldResult {
 /**
  * THE CHANGE TOKEN (`SprintGraphResponse.changeToken`, `GET /api/sprint-graph/token`): 16 hex of a sha256
  * over what the CARDS show — per node (sorted by ident): its column, bucket, status, assignee, theme,
- * brief state + one-liner + criteria count, ticket check counts / staleness / running, and each PR's
+ * brief state + one-liner + criteria count, ticket check counts / staleness / running, the "needs code"
+ * judgement's state, and each PR's
  * id, state, draft flag and CI; plus every edge. ⚠ CLOCK-FREE: nothing derived from `Date.now()` (pace,
  * signals, dates) and not the read's time either — a sprint read that changed nothing must not suggest a
  * refresh. Pure.
@@ -278,6 +288,7 @@ export function sprintChangeTokenOf(g: Pick<GraphFoldResult, 'nodes' | 'edges'>)
       n.brief.criteriaCount,
       n.check == null ? null : [n.check.met, n.check.partlyMet, n.check.notMet, n.check.total, n.check.stale, n.check.checkedAt],
       n.checkRunning,
+      n.codeJudgement?.state ?? null,
       n.prs.map((p) => [p.prId, p.state, p.draft, p.ciState]),
     ]);
   const edges = g.edges.map((e) => [e.from, e.to, e.kind, e.source]).sort((a, b) => (a.join('\u0000') < b.join('\u0000') ? -1 : 1));

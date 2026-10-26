@@ -17,7 +17,7 @@ import { GearIcon, RefreshIcon, SparkleIcon } from '../Icons.js';
 import { InfoButton } from '../InfoModal.js';
 import { AiStatusLine } from '../AiStatusLine.js';
 import { SprintAskPanel } from './SprintAskPanel.js';
-import { SprintPathsView, SprintPeopleView, SprintThemesView, type SprintCardActions } from './SprintBoards.js';
+import { SprintBoardFilters, SprintPathsView, SprintPeopleView, SprintThemesView, type SprintCardActions } from './SprintBoards.js';
 import { SprintProgressBar } from './SprintProgressBar.js';
 import { pathsWriting, sprintDatesLine, sprintProgress } from './sprintPathsModel.js';
 import { SprintStatusSettings } from './SprintStatusSettings.js';
@@ -32,7 +32,7 @@ import { useAiProviderName } from '../../hooks/useAiCapabilities.js';
 // ticket key in an Ask Claude answer — `StoryOpenOverride`) shows its story in the STORY TRAY on the
 // right (Sprint/SprintStoryTray.tsx: the story tab's own body); a card's corner arrow and the tray's
 // "Open story tab" open the TAB (`useOpenStory`). Every state of the page is one short sentence.
-// ⚠ Nothing here ranks tickets or people.
+// Above the board, the "Has PRs" / "Needs code" filter chips (`SprintBoardFilters`) apply to every view.
 //
 //   AUTO-REFRESH  the cards' change token is polled (`useSprintChangeToken`, every minute, only while
 //            this tab is mounted and the page visible — DB only) and when it differs the board is
@@ -223,6 +223,7 @@ export function SprintView({ view }: { view: SprintBoardView }): JSX.Element {
       {aiPass != null && <AiStatusLine stage={aiPass.stage} count={aiPass.count} />}
       {showAsk && askOpen && <SprintAskPanel workspaceId={data.workspaceId} nodes={data.nodes} onClose={() => setAskOpen(false)} />}
 
+      {sprintCount > 0 && <SprintBoardFilters data={data} />}
       {sprintCount === 0 ? (
         !reading && <p className={`text-sm ${MUTED}`}>No tickets in this sprint.</p>
       ) : view === 'themes' ? (
@@ -264,9 +265,13 @@ function BoardInfo({ name }: { name: string }): JSX.Element {
           {name} says in a sentence what the work involves. The counts under it are Limn&rsquo;s.
         </li>
         <li>
-          <strong>People</strong>: one row per person the tickets are assigned to, in alphabetical order, Unassigned last. Reviews
+          <strong>People</strong>: one row per person the tickets are assigned to, Unassigned last. Reviews
           waiting counts open pull requests in this workspace waiting on their review, where Limn knows their GitHub account. An
           arrow between two rows is a hand-off.
+        </li>
+        <li>
+          <strong>Row order</strong>: on every view, the rows with the most pull requests (open, merged or closed) come first; each
+          row says its count. Ties keep the usual order: riskiest path, largest theme, then name. No theme and Unassigned stay last.
         </li>
         <li>
           <strong>Row lines</strong> (Theme and People): the row&rsquo;s tickets by column, then how many have an open or merged pull

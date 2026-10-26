@@ -623,6 +623,8 @@ const SPRINT_GRAPH: SprintGraphResponse = {
       prs: [],
       degree: 1,
       theme: null,
+      // Not started, no pull request: the "needs code" judgement is asked about it.
+      codeJudgement: { state: 'code', reason: 'Adds a CSV writer to the reports endpoint.' },
     },
     {
       ident: 'jira:https://acme.atlassian.net#ACME-2',
@@ -657,6 +659,7 @@ const SPRINT_GRAPH: SprintGraphResponse = {
       ],
       degree: 2,
       theme: null,
+      codeJudgement: null,
     },
     {
       ident: 'jira:https://acme.atlassian.net#ACME-9',
@@ -679,6 +682,7 @@ const SPRINT_GRAPH: SprintGraphResponse = {
       prs: [],
       degree: 1,
       theme: null,
+      codeJudgement: null,
     },
   ],
   edges: [
