@@ -163,6 +163,11 @@ import type {
   MyTurnSettingsResponse,
   AiBudgetBody,
   AiBudgetResponse,
+  AiProviderSetting,
+  AiProviderSettingResponse,
+  CodexLoginMethod,
+  CodexLoginResponse,
+  CodexLogoutResponse,
   RepoAnalytics,
   RepoClaudeReviewsResponse,
   OpenPrsResponse,
@@ -916,6 +921,20 @@ export const api = {
   aiBudget: () => get<AiBudgetResponse>('/api/ai/budget'),
   setAiBudget: (body: AiBudgetBody) =>
     fetch('/api/ai/budget', jsonBody('PUT', body)).then((r) => handle<AiBudgetResponse>(r)),
+  // THE AI PROVIDER CHOICE (Settings → AI; backend api/routes/ai-provider.ts). 409 while
+  // LIMN_AI_PROVIDER is set (the environment decides). The read side is `/api/me` (`ai.provider`,
+  // `ai.providerSetting`): invalidate `['me']` after a write.
+  setAiProvider: (value: AiProviderSetting) =>
+    fetch('/api/ai/provider', jsonBody('PUT', { value })).then((r) => handle<AiProviderSettingResponse>(r)),
+  // THE CODEX SIGN-IN for Limn's own Codex home (backend api/routes/ai-codex.ts). POST starts (or
+  // joins) one; poll the GET while `login.state === 'waiting'`.
+  codexLogin: () => get<CodexLoginResponse>('/api/ai/codex/login'),
+  startCodexLogin: (method: CodexLoginMethod = 'browser') =>
+    fetch('/api/ai/codex/login', jsonBody('POST', { method })).then((r) => handle<CodexLoginResponse>(r)),
+  cancelCodexLogin: () =>
+    fetch('/api/ai/codex/login/cancel', jsonBody('POST')).then((r) => handle<CodexLoginResponse>(r)),
+  codexLogout: () =>
+    fetch('/api/ai/codex/logout', jsonBody('POST')).then((r) => handle<CodexLogoutResponse>(r)),
   // Workspace review-intelligence "Insights" — the attention CARDS (+ the sprint report). The
   // flow-metric HEADER moved OUT to
   // /api/workspace-metrics, the Retro panel was deleted, and cross-workspace comparison is the

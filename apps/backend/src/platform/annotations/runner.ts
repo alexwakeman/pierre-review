@@ -145,6 +145,8 @@ export interface UpsertArgs {
   body: string;
   payloadHash: string;
   model: string;
+  // Who answered (Phase 4). Absent ⇒ Claude.
+  provider?: 'claude' | 'codex';
   costUsd?: number;
   inputTokens?: number;
   outputTokens?: number;
@@ -162,6 +164,7 @@ export async function upsertAnnotation(ctx: ProContext, a: UpsertArgs): Promise<
     body: a.body,
     payloadHash: a.payloadHash,
     model: a.model,
+    provider: a.provider ?? 'claude',
     // Always cleared: only the removed `addressed` kind ever wrote a grounding diff here.
     evidence: null,
     costUsd: a.costUsd,
@@ -314,7 +317,9 @@ export async function runAnnotations(
         confidence: p.confidence,
         body: p.body,
         payloadHash: target.payloadHash,
-        model: MODEL,
+        // What answered (Phase 4): the model that RAN and its provider.
+        model: out.model ?? MODEL,
+        provider: out.provider ?? 'claude',
         costUsd: out.costUsd,
         inputTokens: out.inputTokens,
         outputTokens: out.outputTokens,

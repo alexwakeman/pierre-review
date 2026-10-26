@@ -34,6 +34,7 @@ import {
   getDiagramPrContext,
   markDiagramCancelled,
   markDiagramFailed,
+  markDiagramRanOn,
   markDiagramRefused,
   markDiagramRunning,
   reconcileOrphanedDiagrams,
@@ -226,6 +227,8 @@ async function finishWithAgent(
       // Codex records its own ledger row from this (its model, US$ 0 on a ChatGPT login, its tokens).
       usageRecord: { accountId, seam: 'agent', feature: 'sequence_diagram', prId: args.prId },
     });
+    // What ran (provider + model id), whatever the outcome.
+    await markDiagramRanOn(ctx, accountId, diagramId, { provider: res.provider, model: res.model });
     const telemetry: Telemetry = {
       costUsd: res.costUsd,
       inputTokens: res.inputTokens,

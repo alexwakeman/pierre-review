@@ -10,6 +10,7 @@ import {
 import { useBlastConfig } from '../../hooks/useBlastRadius.js';
 import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
 import { AiRunGate } from '../AiSetup.js';
+import { aiRunLabel } from '@pierre-review/shared';
 
 // ── THE IMPACT NOTE — blast radius's AI half ────────────────────────────────────────────────
 //
@@ -174,7 +175,7 @@ export function BlastImpactNote({
           <div className="flex items-center gap-2 text-[11px] text-gray-400 dark:text-gray-500">
             {/* Says who wrote it. Two sentences of prose beside a computed chip must not be
                 mistaken for another computed fact. */}
-            <span>Written by {note.model}</span>
+            <span>Written by {aiRunLabel(null, note.model)}</span>
             {/* ⚠ NO "hide for good" LINK HERE ANY MORE. It wrote the server preference, which made
                 one click a one-way trip that could only be undone in Settings. The caret above is
                 the reversible control; Settings keeps the permanent switch. */}

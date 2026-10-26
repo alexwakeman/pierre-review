@@ -38,6 +38,7 @@ import {
 } from './persist.js';
 import { buildStoryDocsPrompt, storyDocsRoots, storyDocsSystemPrompt, storyDocsUntrustedTexts } from './prompts.js';
 import { activeProviderId } from '../../ai/provider-setting.js';
+import { claudeModelChoice, getProvider } from '../../ai/provider.js';
 import { promptTools } from '../../ai/prompt-tools.js';
 import { runShortlist, type ShortlistDoc } from './shortlist.js';
 import { validateAlignment } from './validate.js';
@@ -268,7 +269,18 @@ async function runPipeline(job: StoryDocsJob, controller: AbortController): Prom
   }
 
   const model = STORY_DOCS_ALIGNMENT_MODEL as ClaudeReviewModel;
-  await markReading(ctx, accountId, runId, sl.entries, model, slTel);
+  // The provider, resolved ONCE: the prompts are worded for it and the same provider runs them
+  // (review/run-provider.ts). A provider that records its own usage (Codex) bills `usageRecord`. The
+  // row names what runs the read (provider + its model id) from here on.
+  const providerId = activeProviderId();
+  await markReading(
+    ctx,
+    accountId,
+    runId,
+    sl.entries,
+    { provider: providerId, model: getProvider(providerId).resolveModel(claudeModelChoice(model)) },
+    slTel,
+  );
   const dir = libraryDir(accountId, workspaceId);
   const alignment = { criteriaSource: inputs.criteriaSource, criteria: inputs.criteria };
   let scratch: string | null = null;
@@ -276,9 +288,6 @@ async function runPipeline(job: StoryDocsJob, controller: AbortController): Prom
     scratch = mkdtempSync(join(tmpdir(), 'pierre-storydocs-'));
     const promptInput = { story: inputs.story, criteriaSource: inputs.criteriaSource, criteria: inputs.criteria, shortlist: sl.entries, libraryDir: dir };
     const nonce = pickReviewNonce(storyDocsUntrustedTexts(promptInput));
-    // The provider, resolved ONCE: the prompts are worded for it and the same provider runs them
-    // (review/run-provider.ts). A provider that records its own usage (Codex) bills `usageRecord`.
-    const providerId = activeProviderId();
     const words = promptTools(providerId);
     const run = seams.runAgent ?? (await import('./agent.js')).runStoryDocsAgent;
     const res = await run({

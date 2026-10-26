@@ -41,8 +41,8 @@ import type { SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sd
 import type { AiAgentKind, AiUsageReading } from '@pierre-review/shared';
 import type { CodexProgress, TokenUsage } from './codex/events.js';
 import type { UsageTokens } from '../review/usage.js';
-import { claudeProvider } from './providers/claude.js';
-import { codexProvider } from './providers/codex.js';
+import { CLAUDE_MODEL_FOR_ROLE, claudeProvider } from './providers/claude.js';
+import { CODEX_MODEL_FOR_ROLE as CODEX_MODEL_FOR_ROLE_SRC, codexProvider } from './providers/codex.js';
 import { activeProviderId, codexRunnable } from './provider-setting.js';
 
 export type AgentProviderId = 'claude' | 'codex';
@@ -301,7 +301,11 @@ export interface AgentProvider {
 
 export {
   AI_PROVIDER_ENV,
+  aiProviderEnvSetting,
   aiProviderSetting,
+  aiProviderSettingStatus,
+  setStoredAiProviderSetting,
+  storedAiProviderSetting,
   CODEX_AGENT_KINDS,
   CODEX_NOT_AVAILABLE_MESSAGE,
   codexKindNotAvailableMessage,
@@ -337,6 +341,42 @@ export const CODEX_RUNNABLE: boolean = codexRunnable();
  */
 export function getActiveProvider(env: NodeJS.ProcessEnv = process.env): AgentProvider {
   return getProvider(activeProviderId(env));
+}
+
+/**
+ * WHAT A RUN RAN ON — the provider and the model id it resolved for this choice: what every AI run row
+ * stores (`provider` + `model`), so a Codex run is labelled "Codex · GPT-6 Astra", never the Claude
+ * model it was asked for (docs/CODEX-PLAN.md Phase 4; packages/shared `aiRunLabel`).
+ */
+export interface AiRanOn {
+  provider: AgentProviderId;
+  model: string;
+}
+
+export function ranOn(provider: AgentProvider, choice: ModelChoice): AiRanOn {
+  return { provider: provider.id, model: provider.resolveModel(choice) };
+}
+
+/**
+ * What a run QUEUED now is expected to run on (the active provider, read now). A row written at queue
+ * time stores this, so a queued or running run is labelled by its provider from the start; the run
+ * then stamps what actually ran (`ranOn`) — the provider may have been switched in between.
+ */
+export function expectedRanOn(choice: ModelChoice, env: NodeJS.ProcessEnv = process.env): AiRanOn {
+  return ranOn(getActiveProvider(env), choice);
+}
+
+/**
+ * A stored run's model → the CLAUDE model id to ask for again (the next plan pass, the build after a
+ * plan, a chat on a review). A row stores what RAN, so a Codex run holds a Codex id; it maps back by
+ * ROLE (gpt-6-astra → Opus, gpt-6.1-sol → Sonnet, gpt-6-luna → Haiku), so either provider then resolves
+ * the same depth. A Claude id (or any id Limn does not know) is returned as it is.
+ */
+export function requestModelOf(stored: string): string {
+  if (stored.startsWith('claude-')) return stored;
+  const roles = Object.keys(CODEX_MODEL_FOR_ROLE_SRC) as ModelRole[];
+  const role = roles.find((r) => CODEX_MODEL_FOR_ROLE_SRC[r] === stored);
+  return role ? CLAUDE_MODEL_FOR_ROLE[role] : stored;
 }
 
 /**

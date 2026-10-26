@@ -9,7 +9,9 @@ import type {
   SequenceDiagramView,
   StoredPrFile,
 } from '@pierre-review/shared';
+import { aiRunProvider } from '@pierre-review/shared';
 import type { AgentContext } from '../agent-context.js';
+import { claudeModelChoice, expectedRanOn } from '../../ai/provider.js';
 
 // THE DESIGN DIAGRAMS' STORAGE (`sequence_diagrams`, migrations 0115+0118+0119 / pg 0102+0105+0106).
 // Every read and write is scoped by accountId; an id from another account reads as null and writes
@@ -42,6 +44,8 @@ export interface DiagramRow {
   trigger: SequenceDiagramTrigger;
   status: SequenceDiagramStatus;
   model: string;
+  // 0128: who ran it; NULL on older rows (read through `aiRunProvider`).
+  provider?: string | null;
   title: string | null;
   caption: string | null;
   diagramType: string | null;
@@ -184,7 +188,8 @@ export async function insertQueuedDiagram(ctx: Ctx, a: QueueDiagramArgs): Promis
       trigger: a.trigger,
       diagramType: DESIGN_DIAGRAM_TYPE,
       status: 'queued',
-      model: a.model,
+      // Labelled by the provider it is expected to run on; the run stamps its own (`markDiagramRanOn`).
+      ...expectedRanOn(claudeModelChoice(a.model)),
       createdAt: new Date(),
     })
     .returning({ id: d.id })
@@ -207,6 +212,16 @@ const tel = (x: Telemetry = {}) => ({
   outputTokens: x.outputTokens ?? null,
   numTurns: x.numTurns ?? null,
 });
+
+/** Stamp what the run ACTUALLY ran on (provider + model id), whatever its outcome. */
+export async function markDiagramRanOn(
+  ctx: Ctx,
+  accountId: number,
+  id: number,
+  ran: { provider: 'claude' | 'codex'; model: string },
+): Promise<void> {
+  await update(ctx, accountId, id, { provider: ran.provider, model: ran.model });
+}
 
 export async function markDiagramRunning(
   ctx: Ctx,
@@ -437,5 +452,7 @@ export function toDiagramView(row: DiagramRow, current: boolean): SequenceDiagra
     createdAt: iso(row.createdAt)!,
     completedAt: iso(row.completedAt),
     costUsd: row.costUsd,
+    model: row.model,
+    provider: aiRunProvider(row.provider, row.model),
   };
 }

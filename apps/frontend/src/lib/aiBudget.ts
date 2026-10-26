@@ -3,6 +3,7 @@ import {
   formatSharePct as formatFineSharePct,
   runWeekShareText,
   type AiBudgetResponse,
+  type AiProviderId,
   type AiBudgetStatus,
   type AiUsageView,
   type AiUsageWindowView,
@@ -107,10 +108,21 @@ export function fiveHourUsedSentence(status: AiBudgetStatus): string | null {
  * THE ONE WORDING OF A RUN'S COST. API key: US$ ("US$0.42"). Claude subscription: the share of the
  * week it used ("0.3% of your week", "<0.1% of your week"), from the server's rate — never US$. Null
  * (show nothing) while the budget query has not answered, when the subscription is not known, or
- * when there is no credential to judge by.
+ * when there is no credential to judge by, and for a run of the OTHER provider (`runProvider`).
  */
-export function runCostText(costUsd: number | null | undefined, usage: AiUsageView | null | undefined): string | null {
+export function runCostText(
+  costUsd: number | null | undefined,
+  usage: AiUsageView | null | undefined,
+  // Who RAN the run (its stored provider). The reading is the ACTIVE provider's: a run by the other
+  // provider is not judged by it (nothing shown rather than a figure for the wrong account). Absent ⇒
+  // judged by the reading, as before.
+  runProvider?: AiProviderId | null,
+): string | null {
   if (costUsd == null || !Number.isFinite(costUsd) || usage == null) return null;
+  if (runProvider != null && runProvider !== (usage.provider ?? 'claude')) return null;
+  // A Codex run on a ChatGPT sign-in has no price (US$ 0) and no per-run share Limn can state (the
+  // windows read in whole percent): never US$, nothing at all.
+  if (runProvider === 'codex' && usage.route === 'login') return null;
   if (usage.route === 'api_key') return formatRunUsd(costUsd);
   if (usage.route === 'login') return runWeekShareText(costUsd, usage.weekPctPerUsd);
   return null;

@@ -363,6 +363,9 @@ export function registerWorkPlanRoutes(
       const output: StoredOutput = validated ?? EMPTY_OUTPUT;
       const outputJson = JSON.stringify(output);
       const now = new Date();
+      // What answered (Phase 4): the stored row names the model that RAN and its provider.
+      const ranModel = out.model ?? DIGEST_MODEL;
+      const ranProvider = out.provider ?? 'claude';
       const pro = proSchemaFor();
       await ctx.runTransaction(async (tx) => {
         await tx
@@ -372,7 +375,8 @@ export function registerWorkPlanRoutes(
             scopeKey: rs.scopeKey,
             payloadHash: hash,
             output: outputJson,
-            model: DIGEST_MODEL,
+            model: ranModel,
+            provider: ranProvider,
             // The items the plan was generated AGAINST (the capped evidence list), NOT the number
             // of steps the model chose to write — that is what "narrated N of M" discloses.
             itemCount: evidence.items.length,
@@ -387,7 +391,8 @@ export function registerWorkPlanRoutes(
             set: {
               payloadHash: hash,
               output: outputJson,
-              model: DIGEST_MODEL,
+              model: ranModel,
+              provider: ranProvider,
               itemCount: evidence.items.length,
               generatedAt: now,
             },
@@ -405,7 +410,7 @@ export function registerWorkPlanRoutes(
                 headline: validated.headline,
                 steps: validated.steps,
                 parked: validated.parked,
-                model: DIGEST_MODEL,
+                model: ranModel,
                 generatedAt: now.toISOString(),
                 droppedIds: validated.droppedIds,
               },

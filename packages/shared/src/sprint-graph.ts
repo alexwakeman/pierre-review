@@ -1,4 +1,4 @@
-import type { CiStatus, JiraStatusCategory, TrackerProvider } from './types.js';
+import type { AiProviderId, CiStatus, JiraStatusCategory, TrackerProvider } from './types.js';
 import type { StoryReferenceRelation } from './story-health.js';
 import type {
   SprintReadState,
@@ -481,6 +481,10 @@ export interface SprintPaths {
   callouts: SprintCallout[];
   /** ISO-8601 of the pass that wrote them. */
   createdAt: string;
+  // What ran it (docs/CODEX-PLAN.md Phase 4): the model id and its provider. Optional: an older
+  // server or row omits them — read through `aiRunLabel(provider, model)`.
+  model?: string | null;
+  provider?: AiProviderId;
 }
 
 /** Why the last builder pass stored nothing. */

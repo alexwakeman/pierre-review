@@ -1,4 +1,5 @@
 import {
+  aiRunProvider,
   AI_FIX_PLAN_BULLET_MAX_CHARS,
   AI_FIX_PLAN_MAX_BULLETS,
   type AiFixPlan,
@@ -265,6 +266,8 @@ export function planStateOf(row: {
   plan?: string | null;
   planTranscript?: string | null;
   planCostUsd?: number | null;
+  planModel?: string | null;
+  planProvider?: string | null;
 }): AiFixPlanState | null {
   const status = parsePlanStatus(row.planStatus);
   if (status == null) return null;
@@ -274,5 +277,7 @@ export function planStateOf(row: {
     plan: parsePlan(row.plan),
     transcript: parseTranscript(row.planTranscript),
     costUsd: row.planCostUsd ?? null,
+    // What the latest planning pass ran on (0128); absent before the first pass and on older rows.
+    ...(row.planModel ? { model: row.planModel, provider: aiRunProvider(row.planProvider, row.planModel) } : {}),
   };
 }

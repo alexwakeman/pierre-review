@@ -27,6 +27,7 @@ import {
   insertQueuedThreadCheck,
   markThreadCheckCancelled,
   markThreadCheckFailed,
+  markThreadCheckRanOn,
   markThreadCheckRefused,
   markThreadCheckRunning,
   reconcileOrphanedThreadChecks,
@@ -412,6 +413,8 @@ async function runPipeline(
       usage: { accountId, prId, repoId: pr.repoId ?? null },
     });
     progress({ phase: 'saving' });
+    // What ran (provider + model id), whatever the outcome.
+    if (res.ranOn) await markThreadCheckRanOn(ctx, accountId, checkId, res.ranOn);
     const telemetry = {
       costUsd: res.costUsd,
       inputTokens: res.inputTokens,

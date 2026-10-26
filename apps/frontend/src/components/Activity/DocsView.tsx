@@ -252,6 +252,8 @@ function DocRow({
 }
 
 function AddDocs({ workspaceId, maxBytes }: { workspaceId: number; maxBytes: number }): JSX.Element {
+  // Codex cannot read PDF pages (the build refuses one on Codex): say so BEFORE the upload.
+  const onCodex = useMe().data?.ai.provider === 'codex';
   const upload = useUploadReferenceDoc(workspaceId);
   const addUrl = useAddReferenceDocUrl(workspaceId);
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -327,7 +329,11 @@ function AddDocs({ workspaceId, maxBytes }: { workspaceId: number; maxBytes: num
               <UploadIcon size={12} />
               Choose files
             </button>
-            <p className={`mt-1 text-[11px] ${MUTED}`}>or drop PDF, Word, text or markdown files here</p>
+            <p className={`mt-1 text-[11px] ${MUTED}`}>
+              {onCodex
+                ? 'or drop Word, text or markdown files here. Codex cannot read PDFs.'
+                : 'or drop PDF, Word, text or markdown files here'}
+            </p>
           </>
         )}
       </div>

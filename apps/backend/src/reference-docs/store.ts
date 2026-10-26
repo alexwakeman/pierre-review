@@ -1,5 +1,5 @@
 import { and, asc, desc, eq, inArray, isNotNull, sql } from 'drizzle-orm';
-import { chatCitationsFromStored } from '@pierre-review/shared';
+import { aiRunProvider, chatCitationsFromStored } from '@pierre-review/shared';
 import type {
   ReferenceDoc,
   ReferenceDocCitation,
@@ -206,9 +206,14 @@ export interface Telemetry {
   inputTokens?: number | null;
   outputTokens?: number | null;
   numTurns?: number | null;
+  // What ran (0128): the provider and its model id. Absent ⇒ left as stored.
+  provider?: 'claude' | 'codex';
+  model?: string;
 }
 
 const telemetrySet = (t: Telemetry): Record<string, unknown> => ({
+  ...(t.provider !== undefined ? { provider: t.provider } : {}),
+  ...(t.model !== undefined ? { model: t.model } : {}),
   ...(t.costUsd !== undefined ? { costUsd: t.costUsd } : {}),
   ...(t.inputTokens !== undefined ? { inputTokens: t.inputTokens } : {}),
   ...(t.outputTokens !== undefined ? { outputTokens: t.outputTokens } : {}),
@@ -345,6 +350,7 @@ export function toChatMessage(r: ChatRow): ReferenceDocsChatMessage {
     citations: chatCitationsFromStored(r.citations),
     createdAt: iso(r.createdAt)!,
     costUsd: r.costUsd ?? null,
+    ...(r.role === 'assistant' && r.model ? { model: r.model, provider: aiRunProvider(r.provider, r.model) } : {}),
   };
 }
 
@@ -381,6 +387,8 @@ export async function insertChatTurn(
       role: 'assistant',
       content: answer.text,
       citations: answer.citations,
+      provider: answer.provider ?? null,
+      model: answer.model ?? null,
       costUsd: answer.costUsd ?? null,
       inputTokens: answer.inputTokens ?? null,
       outputTokens: answer.outputTokens ?? null,

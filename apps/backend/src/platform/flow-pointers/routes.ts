@@ -294,6 +294,9 @@ export function registerFlowPointerRoutes(
             };
       const outputJson = JSON.stringify(output);
       const now = new Date();
+      // What answered (Phase 4): the stored row names the model that RAN and its provider.
+      const ranModel = out.model ?? DIGEST_MODEL;
+      const ranProvider = out.provider ?? 'claude';
       const pro = proSchemaFor();
       await ctx.runTransaction(async (tx) => {
         await tx
@@ -303,7 +306,8 @@ export function registerFlowPointerRoutes(
             scopeKey,
             payloadHash: hash,
             output: outputJson,
-            model: DIGEST_MODEL,
+            model: ranModel,
+            provider: ranProvider,
             prCount: evidence.measuredPrs,
             generatedAt: now,
           })
@@ -313,7 +317,8 @@ export function registerFlowPointerRoutes(
             set: {
               payloadHash: hash,
               output: outputJson,
-              model: DIGEST_MODEL,
+              model: ranModel,
+              provider: ranProvider,
               prCount: evidence.measuredPrs,
               generatedAt: now,
             },
@@ -326,7 +331,7 @@ export function registerFlowPointerRoutes(
           ? null
           : {
               pointers: validated.pointers,
-              model: DIGEST_MODEL,
+              model: ranModel,
               generatedAt: now.toISOString(),
               droppedIds: validated.droppedIds,
               droppedPointers: validated.droppedPointers,

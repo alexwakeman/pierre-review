@@ -4,7 +4,14 @@ import type { ConflictAiChoice, ConflictAiResolution } from '@pierre-review/shar
 import { config } from '../../config.js';
 import { getAccessToken } from '../../auth/account.js';
 import type { AgentContext } from '../../review/agent-context.js';
-import type { AgentProviderId, AgentToolServer, CodexRunOptions } from '../../ai/provider.js';
+import {
+  claudeModelChoice,
+  expectedRanOn,
+  getProvider,
+  type AgentProviderId,
+  type AgentToolServer,
+  type CodexRunOptions,
+} from '../../ai/provider.js';
 import { activeProviderId } from '../../ai/provider-setting.js';
 import {
   claimSession,
@@ -78,7 +85,8 @@ function freshView(rec: ConflictSessionRecord, model: string): ConflictAiResolut
     baseRef: rec.model?.baseRef ?? '',
     status: rec.status === 'preparing' ? 'preparing' : 'running',
     error: null,
-    model,
+    // Labelled by the provider it is expected to run on; the run stamps its own when it starts.
+    ...expectedRanOn(claudeModelChoice(model)),
     startedAt: new Date().toISOString(),
     finishedAt: null,
     choices: [],
@@ -218,6 +226,9 @@ async function runJob(
         baseRef: model.baseRef,
         sessionId: rec.sessionId,
         decidableTotal: built.decidableTotal,
+        // What runs it: the provider the prompt was worded for, and its model id.
+        provider,
+        model: getProvider(provider).resolveModel(claudeModelChoice(input.model)),
       };
     }
     if (built.offered.size === 0) {

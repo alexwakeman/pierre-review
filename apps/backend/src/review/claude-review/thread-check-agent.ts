@@ -3,6 +3,8 @@ import { loadZod } from '../../ai/runtime.js';
 import {
   claudeModelChoice,
   getActiveProvider,
+  ranOn,
+  type AiRanOn,
   type AgentToolServer,
   type AgentOutcome,
   type ModelChoice,
@@ -60,6 +62,8 @@ export interface RunThreadCheckArgs {
 
 export interface RunThreadCheckResult {
   submitted: boolean;
+  // What RAN (ai/provider.ts `ranOn`): stored on the run row. Optional for fakes in tests.
+  ranOn?: AiRanOn;
   threads: ReviewThreadReport[] | null;
   failureReason?: string;
   aborted: boolean;
@@ -92,8 +96,15 @@ export async function runThreadCheckAgent(args: RunThreadCheckArgs): Promise<Run
       numTurns: outcome?.numTurns ?? null,
     };
   };
+  // The model choice, resolved before anything can fail, so every result names what RAN (`ranOn`).
+  const override = onCodex ? codexReviewModelOverride() : null;
+  const modelChoice: ModelChoice = override
+    ? { role: claudeModelChoice(model).role, id: override.model }
+    : claudeModelChoice(model);
+  const ran = ranOn(provider, modelChoice);
   const fail = (failureReason: string | undefined, aborted: boolean): RunThreadCheckResult => ({
     submitted: false,
+    ranOn: ran,
     threads: null,
     failureReason,
     aborted,
@@ -125,10 +136,6 @@ export async function runThreadCheckAgent(args: RunThreadCheckArgs): Promise<Run
     const effort = args.worktrees.length > 0 ? 'worktree' : 'diff_only';
     // Codex: the prompts in Codex's words (codex-wording.ts), the role's effort (one step lower with no
     // checkout), its own ledger row.
-    const override = onCodex ? codexReviewModelOverride() : null;
-    const modelChoice: ModelChoice = override
-      ? { role: claudeModelChoice(model).role, id: override.model }
-      : claudeModelChoice(model);
     ({ outcome } = await provider.runAgent({
       kind: 'thread_check',
       model: modelChoice,
@@ -184,7 +191,7 @@ export async function runThreadCheckAgent(args: RunThreadCheckArgs): Promise<Run
           : 'agent finished without calling submit_threads';
       return fail(reason, false);
     }
-    return { submitted: true, threads: captured, aborted: false, ...telemetry(), ...(usageRecorded ? { usageRecorded: true } : {}) };
+    return { submitted: true, ranOn: ran, threads: captured, aborted: false, ...telemetry(), ...(usageRecorded ? { usageRecorded: true } : {}) };
   } catch (err) {
     if (abortController.signal.aborted) return fail(undefined, true);
     return fail(err instanceof Error ? err.message : String(err), false);

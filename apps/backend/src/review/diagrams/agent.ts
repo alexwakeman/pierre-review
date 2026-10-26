@@ -71,6 +71,8 @@ export interface RunDiagramAgentResult {
   numTurns: number | null;
   /** Which provider ran it. 'codex' ⇒ its ledger row is already written. */
   provider: AgentProviderId;
+  /** The model id that ran (the provider's for the requested model) — what the row stores. */
+  model: string;
 }
 
 /** The tool policy for a diagram run. Pure, so the no-shell, no-dispatch rule is testable. */
@@ -112,7 +114,8 @@ export async function runDiagramAgent(args: RunDiagramAgentArgs): Promise<RunDia
   let liveUsage: UsageTokens = emptyUsage();
   let accepted: AcceptedDesign | null = null;
   let lastRefusal: string | null = null;
-  const telemetry = (): Pick<RunDiagramAgentResult, 'costUsd' | 'inputTokens' | 'outputTokens' | 'numTurns' | 'provider'> => {
+  const ranModel = provider.resolveModel(claudeModelChoice(model));
+  const telemetry = (): Pick<RunDiagramAgentResult, 'costUsd' | 'inputTokens' | 'outputTokens' | 'numTurns' | 'provider' | 'model'> => {
     const usage = outcome?.usage ?? liveUsage;
     const hasUsage = usage.inputTokens + usage.outputTokens + usage.cacheReadTokens > 0;
     return {
@@ -121,6 +124,7 @@ export async function runDiagramAgent(args: RunDiagramAgentArgs): Promise<RunDia
       outputTokens: usage.outputTokens,
       numTurns: outcome?.numTurns ?? null,
       provider: provider.id,
+      model: ranModel,
     };
   };
   const fail = (failureReason: string | undefined, aborted: boolean): RunDiagramAgentResult => ({

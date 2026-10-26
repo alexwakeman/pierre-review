@@ -133,6 +133,8 @@ export async function askDocs(ctx: AgentContext, a: AskArgs): Promise<ReferenceD
     const saved = await insertChatTurn(a.accountId, a.workspaceId, conversationId, a.question, {
       text,
       citations,
+      provider: res.provider,
+      model: res.model,
       costUsd: res.costUsd,
       inputTokens: res.inputTokens,
       outputTokens: res.outputTokens,

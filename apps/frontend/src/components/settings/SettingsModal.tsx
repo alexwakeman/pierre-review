@@ -10,6 +10,7 @@ import { BlastRadiusSection } from './BlastRadiusSection.js';
 import { MyTurnSection, MY_TURN_SECTION_HEADING_ID } from './MyTurnSection.js';
 import { BotScoringSection } from './BotScoringSection.js';
 import { ClaudeSpendSection, CLAUDE_SPEND_SECTION_HEADING_ID } from './ClaudeSpendSection.js';
+import { AiProviderSection } from './AiProviderSection.js';
 import { PendingMuteSection } from './PendingMuteSection.js';
 import { DependencyAutoMergeSection } from './DependencyAutoMergeSection.js';
 import { SonarSection } from './SonarSection.js';
@@ -197,6 +198,9 @@ export function SettingsModal({
           <BotScoringSection />
           {/* The Claude spend budget — account-grained (it guards this machine's Claude login or
               API key), read from its own `/api/ai/budget`. Only where AI runs at all. */}
+          {/* AI — which provider runs every AI feature, and each provider's sign-in. Account-grained
+              (one per machine), from /api/me. Only where AI runs at all. */}
+          {aiEnabled && <AiProviderSection />}
           {aiEnabled && <ClaudeSpendSection />}
 
           {/* ── WORKSPACE. One team — the one selected in the rail — named ONCE, here. ────── */}

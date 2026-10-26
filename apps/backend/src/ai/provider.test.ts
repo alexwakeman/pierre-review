@@ -112,7 +112,7 @@ describe('the registry (LIMN_AI_PROVIDER)', () => {
       await expect(codex.runAgent({ kind } as Parameters<typeof codex.runAgent>[0])).rejects.toThrow('Codex is not signed in');
     }
     expect(P.codexKindNotAvailableMessage('review')).toBe(
-      'Codex cannot run pull request reviews in this version of Limn yet. Unset LIMN_AI_PROVIDER (or set it to claude) to use Claude.',
+      'Codex cannot run pull request reviews in this version of Limn yet. Choose Claude in Settings → AI.',
     );
     // The allow-list is the mechanism Phase 3 fills.
     expect(P.codexKindReady('review', new Set())).toBe(false);

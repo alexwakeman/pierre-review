@@ -47,7 +47,9 @@ import {
   insertQueuedFix,
   markFixCancelled,
   markFixFailed,
+  markFixRanOn,
   markFixRunning,
+  markPlanRanOn,
   markPlanApproved,
   markPlanDiscarded,
   markPlanPassEnded,
@@ -68,7 +70,7 @@ import {
 } from './plan.js';
 import { config } from '../../config.js';
 import { activeProviderId } from '../../ai/provider-setting.js';
-import type { AgentProviderId } from '../../ai/provider.js';
+import { claudeModelChoice, getProvider, requestModelOf, type AgentProviderId, type AiRanOn } from '../../ai/provider.js';
 
 // In-memory job manager for AI Fix's agentic fixer (CORE, free, local-only — it left the plugin
 // with Claude Review; the PR summary and the CI-failure analysis stayed Pro). A SINGLE global slot (concurrency 1) carries every
@@ -511,6 +513,11 @@ async function startRun(
   }
 }
 
+/** What a job runs on: the provider it was worded for and that provider's id for the asked model. */
+function ranOnFor(provider: AgentProviderId, model: string): AiRanOn {
+  return { provider, model: getProvider(provider).resolveModel(claudeModelChoice(model)) };
+}
+
 function queueFixJob(ctx: AgentContext, job: FixJob): void {
   const immediate = enqueue(job.prId, () => launchFix(ctx, job));
   if (!immediate) {
@@ -568,6 +575,8 @@ async function launchFix(ctx: AgentContext, job: FixJob): Promise<void> {
   let finalStatus: AiFixStatus = 'failed';
   try {
     await markFixRunning(ctx, job.fixId);
+    // What the build runs on (the provider the prompt was worded for, and its model id).
+    await markFixRanOn(ctx, job.fixId, ranOnFor(job.provider, job.model));
     const result = await ctx.coding.generateFix({
       accountId: job.accountId,
       owner: job.owner,
@@ -684,6 +693,8 @@ async function launchPlanPass(ctx: AgentContext, job: PlanJob): Promise<void> {
   // What the row reads after the pass: a plan to look at, or a run that ended.
   let finalStatus: AiFixStatus = job.hadPlan ? 'planned' : 'failed';
   try {
+    // What this planning pass runs on (the provider the prompt was worded for, and its model id).
+    await markPlanRanOn(ctx, job.fixId, ranOnFor(job.provider, job.model));
     const result = await ctx.coding.generatePlan({
       accountId: job.accountId,
       owner: job.owner,
@@ -836,7 +847,8 @@ export async function sendPlanMessage(
       prNumber: pr.number,
       // The pass reads the commit the plan was made at.
       baseSha: row.baseSha,
-      model: row.model,
+      // The row stores what RAN (a Codex id on Codex): ask again for the same depth.
+      model: requestModelOf(row.model),
       systemPrompt: buildPlanSystemPrompt(provider),
       prompt,
       shownRefs: shownRefsOf(parseReviewItems(row.reviewItems)),
@@ -918,7 +930,8 @@ export async function approvePlan(
       name: pr.name,
       prNumber: pr.number,
       baseSha,
-      model: row.model,
+      // The row stores what RAN (a Codex id on Codex): ask again for the same depth.
+      model: requestModelOf(row.model),
       systemPrompt: buildFixSystemPrompt(provider),
       prompt,
       sentRefs: shownRefsOf(parseReviewItems(row.reviewItems)),

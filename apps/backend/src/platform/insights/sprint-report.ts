@@ -500,6 +500,9 @@ async function generateReport(
   });
   const summary = out.text.trim();
   const now = new Date();
+  // What answered (Phase 4): the stored row names the model that RAN and its provider.
+  const ranModel = out.model ?? DIGEST_MODEL;
+  const ranProvider = out.provider ?? 'claude';
   // Record the spend on the shared AI-usage ledger (summary seam). Best-effort.
   await ctx
     .recordAiUsage({
@@ -521,7 +524,8 @@ async function generateReport(
         accountId,
         scopeKey,
         insightsHash: built.hash,
-        model: DIGEST_MODEL,
+        model: ranModel,
+        provider: ranProvider,
         summary,
         costUsd: out.costUsd,
         inputTokens: out.inputTokens,
@@ -534,7 +538,8 @@ async function generateReport(
         target: [pro.sprintReports.accountId, pro.sprintReports.scopeKey],
         set: {
           insightsHash: built.hash,
-          model: DIGEST_MODEL,
+          model: ranModel,
+          provider: ranProvider,
           summary,
           costUsd: out.costUsd,
           inputTokens: out.inputTokens,
@@ -549,7 +554,7 @@ async function generateReport(
   return {
     summary,
     prRefs: await enrichedPrRefs(ctx, accountId, summary, built.prRefs),
-    model: DIGEST_MODEL,
+    model: ranModel,
     generatedAt: now.toISOString(),
     costUsd: out.costUsd,
     stale: false,

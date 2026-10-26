@@ -30,6 +30,7 @@ import { REVIEW_ITEM_TITLE, REVIEW_META, REVIEW_PROSE } from '../lib/reviewStyle
 import { DesignGrid, type OpenDesignFile } from './DesignGrid.js';
 import { InfoButton } from './InfoModal.js';
 import { ReviewSection } from './ReviewSection.js';
+import { aiRunLabel } from '@pierre-review/shared';
 
 export { redrawRefusalText };
 
@@ -83,6 +84,7 @@ export function DiagramSlotView({
           {d.title != null && <p className={REVIEW_ITEM_TITLE}>{d.title}</p>}
           {d.caption != null && <p className={REVIEW_PROSE}>{d.caption}</p>}
           {!d.current && <p className={REVIEW_META}>Drawn for an earlier commit.</p>}
+          {d.model && <p className={REVIEW_META}>{aiRunLabel(d.provider, d.model)}</p>}
           <DesignGrid
             design={d.design}
             members={d.kind === 'story' ? d.members : []}

@@ -67,7 +67,12 @@ const WORKSPACES_STUB =
   'CREATE TABLE workspaces (id integer PRIMARY KEY, account_id integer NOT NULL, name text, ' +
   // auto_review_*: core 0074's columns, which plugin 0037 copies the retired switch into.
   'is_default integer NOT NULL DEFAULT 0, auto_review_enabled integer, auto_review_enabled_at integer);' +
-  'CREATE UNIQUE INDEX workspaces_id_account ON workspaces (id, account_id);';
+  'CREATE UNIQUE INDEX workspaces_id_account ON workspaces (id, account_id);' +
+  // The write-up tables plugin 0042 adds `provider` to that are created BEFORE 0025 (so not replayed
+  // here); the others (synthesis, work plan, flow pointers) are created by the replayed files.
+  ['sprint_reports', 'bot_theme_reports', 'pr_comment_annotations']
+    .map((t) => `CREATE TABLE ${t} (id integer PRIMARY KEY, model text);`)
+    .join('');
 
 const DAY = 86_400_000;
 const START = Date.parse('2026-01-01T00:00:00.000Z');

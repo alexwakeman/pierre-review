@@ -11,6 +11,7 @@ import type {
 import type { FlowBudgetMeasure, FlowSettings, ResolvedFlowSettings } from './flow-settings.js';
 import type { MyTurnSettings } from './my-turn-settings.js';
 import type { SonarIssue } from './sonar.js';
+import type { AiProviderSetting } from './ai-run-label.js';
 import type { ReferenceDocCitation, ReviewDocReference } from './reference-docs.js';
 
 export type DerivedState =
@@ -4200,6 +4201,26 @@ export interface AiCodexProviderStatus {
   kinds: Record<AiRunKind, AiKindStatus>;
 }
 
+/**
+ * `MeResponse.ai.providerSetting` — the provider choice. `source: 'env'` ⇒ `LIMN_AI_PROVIDER` is set
+ * and wins (Settings shows it, disabled); `'settings'` ⇒ the stored choice (default `auto`).
+ */
+export interface AiProviderSettingStatus {
+  value: AiProviderSetting;
+  source: 'env' | 'settings';
+}
+
+/** PUT /api/ai/provider body. */
+export interface AiProviderSettingBody {
+  value: AiProviderSetting;
+}
+
+/** PUT /api/ai/provider → the choice as now resolved, and the provider it makes active. */
+export interface AiProviderSettingResponse {
+  setting: AiProviderSettingStatus;
+  provider: AiProviderId;
+}
+
 // THE CODEX SIGN-IN (routes in apps/backend/src/api/routes/ai-codex.ts; Limn's OWN Codex home,
 // `~/.limn/codex` — the reader's `~/.codex` is never touched). Local only, like every AI route.
 //   GET  /api/ai/codex/login         → CodexLoginResponse (poll while `waiting`)
@@ -4273,9 +4294,9 @@ export interface MeResponse {
   //    ⇒ the SPA offers "Set up AI"; 'failed' carries `runtimeMessage`.
   //  - `auth`: whether a Claude credential was detected (a heuristic — the run itself is the real
   //    check). 'none' ⇒ one line in place of every Run button; `authMessage` is that line.
-  //  - `provider`: the ACTIVE provider (LIMN_AI_PROVIDER; `auto` = Claude when both are signed in).
-  //    `runtime` / `auth` above describe IT. Codex answers auth 'none' with "not available yet"
-  //    until its agents are ported.
+  //  - `provider`: the ACTIVE provider (LIMN_AI_PROVIDER when set, else Settings → AI; `auto` =
+  //    Claude when both are signed in). `runtime` / `auth` above describe IT (under Codex, `runtime`
+  //    is the Codex program's download). `providerSetting` is the choice behind it.
   //  - `providers`: each provider's own facts, whichever is active (for Settings → AI, Phase 4).
   //  - `kinds`: the SAME pre-flight per run kind (`AiRunKind`). Under Claude every kind repeats
   //    `auth`/`authMessage`; under Codex a kind it can run says 'ok' while `auth` above stays 'none'
@@ -4289,6 +4310,8 @@ export interface MeResponse {
     authMessage: string | null;
     kinds?: Record<AiRunKind, AiKindStatus>;
     provider: AiProviderId;
+    /** The provider CHOICE behind `provider` (Settings → AI): what is chosen and who chose it. */
+    providerSetting: AiProviderSettingStatus;
     providers: {
       claude: AiClaudeProviderStatus;
       codex: AiCodexProviderStatus;
@@ -7341,6 +7364,10 @@ export interface ClaudeReview {
   // The model id the run was STORED with. `string`, not ClaudeReviewModel: a run from a model
   // that has since been retired keeps its id, and the SPA prints it raw.
   model: string;
+  // Who ran it (docs/CODEX-PLAN.md Phase 4). The server resolves an older row's NULL (Claude, unless
+  // `model` is a Codex id). Optional: a cached or older response omits it — read it through
+  // `aiRunLabel(provider, model)`, which then reads the model id.
+  provider?: AiProviderId;
   scope: ClaudeReviewScope | null;
   // The deterministic routing decision: the mode this run actually used, and the
   // metrics behind it. Null on pre-routing rows (older runs / not yet decided).
@@ -7436,6 +7463,10 @@ export interface ClaudeReviewSummary {
   status: ClaudeReviewStatus;
   // Stored id, possibly a retired model — see ClaudeReview.model.
   model: string;
+  // Who ran it (docs/CODEX-PLAN.md Phase 4). The server resolves an older row's NULL (Claude, unless
+  // `model` is a Codex id). Optional: a cached or older response omits it — read it through
+  // `aiRunLabel(provider, model)`, which then reads the model id.
+  provider?: AiProviderId;
   scope: ClaudeReviewScope | null;
   reviewMode: ReviewMode | null;
   verdict: ClaudeReviewVerdict | null;
@@ -7798,6 +7829,10 @@ export interface ClaudeThreadJudgement {
   assessedAtHead: string;
   /** Copied from an earlier run unchanged (no new commits, no new comments since). */
   carried: boolean;
+  /** Who made this judgement as it stands (Phase 4): the provider of the run whose judgement won the
+   *  fold (a later Check threads run, else the review). Absent on a finding outcome and from an older
+   *  server. Mixed providers fold like any two runs: the newer wins. */
+  provider?: AiProviderId;
   /** Set when the thread is rooted on one of Claude's OWN posted findings (the follow-up's, never a
    *  thread judgement): what the newest review that followed it up found. `validity`/`addressed`
    *  then MIRROR it for readers that know only those two fields. Absent ⇒ an ordinary judgement. */
@@ -7865,6 +7900,9 @@ export interface ThreadCheckRun {
   headSha: string;
   trigger: ThreadCheckTrigger;
   status: ThreadCheckStatus;
+  // What ran it (Phase 4): the model id and its provider. Optional: an older server omits both.
+  model?: string;
+  provider?: AiProviderId;
   refused: ThreadCheckRefusal | null;
   error: string | null;
   threadsSent: number | null;
@@ -8157,6 +8195,10 @@ export interface TicketReview {
   status: TicketReviewStatus;
   // Stored model id (display only).
   model: string;
+  // Who ran it (docs/CODEX-PLAN.md Phase 4). The server resolves an older row's NULL (Claude, unless
+  // `model` is a Codex id). Optional: a cached or older response omits it — read it through
+  // `aiRunLabel(provider, model)`, which then reads the model id.
+  provider?: AiProviderId;
   costUsd: number | null;
   error: string | null;
   refused: { reason: TicketReviewRefusal; prCount: number | null } | null;
@@ -8317,6 +8359,10 @@ export interface CiReview {
   status: CiReviewStatus;
   // Stored model id (display only).
   model: string;
+  // Who ran it (docs/CODEX-PLAN.md Phase 4). The server resolves an older row's NULL (Claude, unless
+  // `model` is a Codex id). Optional: a cached or older response omits it — read it through
+  // `aiRunLabel(provider, model)`, which then reads the model id.
+  provider?: AiProviderId;
   costUsd: number | null;
   error: string | null;
   refused: CiReviewRefusal | null;
@@ -8462,6 +8508,10 @@ export interface ClaudeReviewChatMessage {
   pins?: ClaudeReviewChatPin[] | null;
   // The answer to such a turn, one card per pin (null/absent = a plain answer).
   explanations?: ClaudeReviewChatExplanation[] | null;
+  // An ASSISTANT turn: what answered (Phase 4) — the model id and its provider. Absent on a user turn,
+  // on older rows that stored no model, and from an older server.
+  model?: string | null;
+  provider?: AiProviderId;
 }
 
 export interface ClaudeReviewChatResponse {
@@ -8678,6 +8728,10 @@ export interface AiFixPlanState {
   transcript: AiFixPlanMessage[];
   // The planning passes' spend so far (the build's is AiFix.costUsd).
   costUsd: number | null;
+  // What the latest planning pass ran on (Phase 4): its model id and provider. Absent before the
+  // first pass, on older rows and from an older server.
+  model?: string;
+  provider?: AiProviderId;
 }
 
 // POST /api/pro/ai-fixes/:fixId/plan/message
@@ -8720,6 +8774,10 @@ export interface AiFix {
   prId: number;
   status: AiFixStatus;
   model: string;
+  // Who ran it (docs/CODEX-PLAN.md Phase 4). The server resolves an older row's NULL (Claude, unless
+  // `model` is a Codex id). Optional: a cached or older response omits it — read it through
+  // `aiRunLabel(provider, model)`, which then reads the model id.
+  provider?: AiProviderId;
   seed: AiFixStoredSeed;
   // Set once the run succeeds:
   summary: string | null;
@@ -8760,6 +8818,10 @@ export interface AiFixSummary {
   id: number;
   status: AiFixStatus;
   model: string;
+  // Who ran it (docs/CODEX-PLAN.md Phase 4). The server resolves an older row's NULL (Claude, unless
+  // `model` is a Codex id). Optional: a cached or older response omits it — read it through
+  // `aiRunLabel(provider, model)`, which then reads the model id.
+  provider?: AiProviderId;
   seed: AiFixStoredSeed;
   commitMessage: string | null;
   filesChanged: string[];

@@ -26,11 +26,17 @@ import { accountIdOf } from '../plugins/auth.js';
 import { getAuthNotices } from '../../sync/auth-notices.js';
 import { isMlScoringAvailable } from '../../ml/scorer.js';
 import { getMlStatus } from '../../ml/runtime.js';
-import { getAiRuntimeStatus } from '../../ai/runtime.js';
+import { activeRuntimeStatus } from '../../ai/active-runtime.js';
 import { codexKindStatus, detectClaudeAuth, NO_CLAUDE_AUTH_MESSAGE } from '../../review/auth.js';
 import { resolveAiCredential } from '../../ai/credentials.js';
 import { codexDetailCached } from '../../ai/codex/detect.js';
-import { ALL_RUN_KINDS, CODEX_NOT_AVAILABLE_MESSAGE, CODEX_RUNNABLE, getActiveProvider } from '../../ai/provider.js';
+import {
+  aiProviderSettingStatus,
+  ALL_RUN_KINDS,
+  CODEX_NOT_AVAILABLE_MESSAGE,
+  CODEX_RUNNABLE,
+  getActiveProvider,
+} from '../../ai/provider.js';
 import { getMyTurn } from '../../db/queries.js';
 import { clearDailyBriefCountsFor } from '../../db/daily-brief.js';
 import { dismissMyTurn, restoreMyTurn } from '../../db/my-turn-dismissals.js';
@@ -151,11 +157,13 @@ const myTurnSettingsSchema = {
 
 /**
  * `MeResponse.ai`. `enabled` is the ONE agentic switch (config.aiEnabled: not LIMN_AI_DISABLED) — the same value that decides whether `registerAgenticRoutes` registers
- * anything. `runtime` is the one-time SDK download (ai/runtime.ts). `auth` is `detectClaudeAuth`'s
+ * anything. `runtime` is the ACTIVE provider's one-time download (ai/active-runtime.ts: Claude's SDKs, or
+ * the Codex program under Codex). `providerSetting` is the Settings → AI choice and who made it
+ * (LIMN_AI_PROVIDER wins). `auth` is `detectClaudeAuth`'s
  * disk check (a credentials file or a signed-in `oauthAccount`, never a bare `~/.claude`): it decides only whether a Run button or the one
  * "Sign in to Claude Code or set ANTHROPIC_API_KEY" line shows, never whether the feature is
- * visible — the run itself is the authoritative check. Under LIMN_AI_PROVIDER=codex it answers
- * none with the "Codex is not available" sentence (review/auth.ts). Disabled ⇒ the other fields are inert.
+ * visible — the run itself is the authoritative check. Under Codex it answers for Codex's own install
+ * and sign-in (review/auth.ts). Disabled ⇒ the other fields are inert.
  *
  * `kinds` is the SAME pre-flight asked PER RUN KIND (every agent kind, and 'complete' for the one-shot
  * features): under Claude every entry repeats `auth`; under Codex a kind it can run reads 'ok' while
@@ -172,6 +180,7 @@ function agenticAiStatus(): MeResponse['ai'] {
       authMessage: null,
       kinds: kindsStatus(() => ({ auth: 'none', message: null })),
       provider,
+      providerSetting: aiProviderSettingStatus(),
       providers: {
         claude: { auth: 'none', route: 'none', message: null },
         codex: {
@@ -188,7 +197,9 @@ function agenticAiStatus(): MeResponse['ai'] {
       },
     };
   }
-  const rt = getAiRuntimeStatus();
+  // The ACTIVE provider's download (ai/active-runtime.ts): under Codex, the Codex program — never
+  // Claude's — so "Set up AI" and every Run gate ask about what the next run needs.
+  const rt = activeRuntimeStatus();
   const auth = detectClaudeAuth();
   // Each provider's OWN facts, whichever is active. Codex's are read from the CACHED `account/read`
   // (a stale cache kicks the background probe; this request never waits on a process).
@@ -196,8 +207,6 @@ function agenticAiStatus(): MeResponse['ai'] {
   const codex = codexDetailCached();
   return {
     enabled: true,
-    // Still Claude's download: "Set up AI" installs it, and Codex runs no agent here until every kind is ported (Phase 4 moves the
-    // gate onto the active provider's own runtime, `providers.codex.runtime`).
     runtime: rt.runtime,
     runtimeMessage: rt.runtimeMessage,
     auth: auth.status === 'ok' ? 'ok' : 'none',
@@ -207,6 +216,7 @@ function agenticAiStatus(): MeResponse['ai'] {
       return r.status === 'ok' ? { auth: 'ok', message: null } : { auth: 'none', message: r.message };
     }),
     provider,
+    providerSetting: aiProviderSettingStatus(),
     providers: {
       claude: {
         auth: claudeRoute === 'none' ? 'none' : 'ok',

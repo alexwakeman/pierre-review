@@ -68,6 +68,10 @@ import { PALETTE, fmtDuration } from '../charts/common.js';
 export { rowFigures } from './periodReportMarkdown.js';
 import { PeriodMetricSpark } from './PeriodMetricSpark.js';
 import { SummaryMarkdown } from './prRefTable.js';
+import { aiRunLabel } from '@pierre-review/shared';
+
+/** A stored model id as its run label ("Claude Haiku 5.5", "Codex · GPT-6 Luna"); null stays null. */
+const runModelName = (model: string | null | undefined): string | null => (model ? aiRunLabel(null, model) : null);
 
 // The Insights "Reports" sub-tab — one completed period as a forwardable artifact: what happened,
 // how it compares like-for-like to the period before it, what that implies for the next one, and
@@ -1212,7 +1216,7 @@ function GenerateControls({
         <div className="text-[11px] text-gray-400">
           {result.generated === false
             ? 'Already had this one — served from cache.'
-            : `Generated with ${result.spend?.model ?? result.report?.model ?? effectiveModel ?? 'the default model'}.`}
+            : `Generated with ${runModelName(result.spend?.model ?? result.report?.model ?? effectiveModel) ?? 'the default model'}.`}
         </div>
       )}
     </div>
@@ -1464,7 +1468,7 @@ export function PeriodReportsPanel(): JSX.Element | null {
                   }`}
                   title={
                     p.hasNarrative
-                      ? `${p.periodKey} · written up${p.model ? ` with ${p.model}` : ''}`
+                      ? `${p.periodKey} · written up${p.model ? ` with ${aiRunLabel(null, p.model)}` : ''}`
                       : `${p.periodKey} · figures only, not written up`
                   }
                 >
@@ -1536,7 +1540,7 @@ export function PeriodReportsPanel(): JSX.Element | null {
               </span>
               {current && !current.inProgress && (
                 <span className="text-[11px] text-gray-400" title={current.periodKey}>
-                  {current.model ? `${current.model} · ` : ''}
+                  {current.model ? `${aiRunLabel(null, current.model)} · ` : ''}
                   generated {new Date(current.generatedAt).toLocaleString()}
                 </span>
               )}

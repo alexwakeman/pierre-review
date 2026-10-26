@@ -8,7 +8,9 @@ import type {
   ClaudeThreadJudgement,
   ClaudeThreadJudgementsForPr,
   ClaudeThreadValidity,
+  AiProviderId,
 } from '@pierre-review/shared';
+import { aiRunProvider } from '@pierre-review/shared';
 import type { AgentContext } from '../agent-context.js';
 
 // What the latest Claude review said about each review thread, for the THREAD CARDS
@@ -92,6 +94,12 @@ export interface CurrentThreadAssessments {
   checkHeadSha: string | null;
   checkFinishedAt: Date | null;
   assessments: ClaudeThreadAssessment[];
+  /**
+   * Who made each thread's judgement as it stands (Phase 4): the Check threads run's provider for a
+   * thread the overlay judged, else the review's. Mixed providers fold like any two runs — the newer
+   * wins — and each judgement keeps the label of the run that made it.
+   */
+  providerByThread: Map<number, AiProviderId>;
 }
 
 const ms = (d: unknown): number =>
@@ -138,7 +146,14 @@ export async function currentThreadAssessmentsForPrs(
   for (const r of idRows) if (!latestReview.has(r.prId)) latestReview.set(r.prId, r.id);
   const reviews = new Map<
     number,
-    { id: number; headSha: string; finishedAt: Date | null; threadAssessments: ClaudeThreadAssessment[] | null }
+    {
+      id: number;
+      headSha: string;
+      finishedAt: Date | null;
+      threadAssessments: ClaudeThreadAssessment[] | null;
+      provider: string | null;
+      model: string;
+    }
   >();
   if (latestReview.size > 0) {
     const rows = (await ctx.db
@@ -148,6 +163,8 @@ export async function currentThreadAssessmentsForPrs(
         headSha: cr.headSha,
         finishedAt: cr.finishedAt,
         threadAssessments: cr.threadAssessments,
+        provider: cr.provider,
+        model: cr.model,
       })
       .from(cr)
       .where(and(inArray(cr.id, [...latestReview.values()]), eq(cr.accountId, accountId)))
@@ -157,6 +174,8 @@ export async function currentThreadAssessmentsForPrs(
       headSha: string;
       finishedAt: Date | null;
       threadAssessments: ClaudeThreadAssessment[] | null;
+      provider: string | null;
+      model: string;
     }>;
     for (const r of rows) reviews.set(r.prId, r);
   }
@@ -191,7 +210,14 @@ export async function currentThreadAssessmentsForPrs(
   const wanted = [...latestCheck.values()].filter((id) => id > 0);
   const checks = new Map<
     number,
-    { id: number; headSha: string; completedAt: Date | null; threadAssessments: ClaudeThreadAssessment[] | null }
+    {
+      id: number;
+      headSha: string;
+      completedAt: Date | null;
+      threadAssessments: ClaudeThreadAssessment[] | null;
+      provider: string | null;
+      model: string;
+    }
   >();
   if (wanted.length > 0) {
     const rows = (await ctx.db
@@ -201,6 +227,8 @@ export async function currentThreadAssessmentsForPrs(
         headSha: ct.headSha,
         completedAt: ct.completedAt,
         threadAssessments: ct.threadAssessments,
+        provider: ct.provider,
+        model: ct.model,
       })
       .from(ct)
       .where(and(inArray(ct.id, wanted), eq(ct.accountId, accountId)))
@@ -210,6 +238,8 @@ export async function currentThreadAssessmentsForPrs(
       headSha: string;
       completedAt: Date | null;
       threadAssessments: ClaudeThreadAssessment[] | null;
+      provider: string | null;
+      model: string;
     }>;
     for (const r of rows) checks.set(r.prId, r);
   }
@@ -221,6 +251,16 @@ export async function currentThreadAssessmentsForPrs(
     const over = ck && Array.isArray(ck.threadAssessments) ? ck.threadAssessments : null;
     const merged = overlayThreadAssessments(base, over);
     if (!merged) continue;
+    // Each thread is labelled by the run whose judgement won the fold (the overlay's, else the base's).
+    const providerByThread = new Map<number, AiProviderId>();
+    if (rv && base) {
+      const p = aiRunProvider(rv.provider, rv.model);
+      for (const a of base) if (a != null && typeof a.threadId === 'number') providerByThread.set(a.threadId, p);
+    }
+    if (ck && over) {
+      const p = aiRunProvider(ck.provider, ck.model);
+      for (const a of over) if (a != null && typeof a.threadId === 'number') providerByThread.set(a.threadId, p);
+    }
     out.set(prId, {
       prId,
       reviewId: rv?.id ?? null,
@@ -230,6 +270,7 @@ export async function currentThreadAssessmentsForPrs(
       checkHeadSha: over ? ck!.headSha : null,
       checkFinishedAt: over ? ck!.completedAt : null,
       assessments: merged,
+      providerByThread,
     });
   }
   return out;
@@ -366,7 +407,12 @@ export async function getThreadJudgements(
   for (const prId of wanted) {
     if (!headOf.has(prId)) continue;
     const c = current.get(prId);
-    const judgements = c ? judgementsFromAssessments(c.assessments) : [];
+    const judgements = c
+      ? judgementsFromAssessments(c.assessments).map((j) => {
+          const provider = c.providerByThread.get(j.threadId);
+          return provider ? { ...j, provider } : j;
+        })
+      : [];
     // An ordinary thread judgement wins on a thread both somehow name (the two sets are disjoint).
     const judged = new Set(judgements.map((j) => j.threadId));
     for (const j of findings.get(prId)?.values() ?? []) if (!judged.has(j.threadId)) judgements.push(j);

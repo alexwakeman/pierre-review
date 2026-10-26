@@ -48,6 +48,7 @@ import {
   getReviewPeerContexts,
   getReviewPrContext,
   insertQueuedReview,
+  markReviewRanOn,
   isAutoReReviewSettled,
   loadPriorReviewForFollowUp,
   loadSettledByReplyFindings,
@@ -710,6 +711,8 @@ async function runPipeline(
   });
 
   emit({ phase: 'persisting' });
+  // What ran (provider + model id), whatever the outcome — before the row's status moves.
+  if (res.ranOn) await markReviewRanOn(ctx, reviewId, res.ranOn);
   const telemetry = {
     costUsd: res.costUsd,
     inputTokens: res.inputTokens,

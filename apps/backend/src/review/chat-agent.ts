@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import {
   claudeModelChoice,
   getActiveProvider,
+  ranOn,
   type AgentToolServer,
   type AgentOutcome,
   type ModelChoice,
@@ -99,8 +100,15 @@ export async function runReviewChat(args: ReviewChatArgs): Promise<ReviewChatRes
       numTurns: outcome?.numTurns ?? null,
     };
   };
+  // The model choice, resolved before anything can fail, so every answer names what RAN (`ranOn`).
+  const override = onCodex ? codexReviewModelOverride() : null;
+  const modelChoice: ModelChoice = override
+    ? { role: claudeModelChoice(model).role, id: override.model }
+    : claudeModelChoice(model);
+  const ran = ranOn(provider, modelChoice);
   const fail = (failureReason: string | undefined, aborted: boolean): ReviewChatResult => ({
     ok: false,
+    ranOn: ran,
     text: '',
     failureReason,
     ...telemetry(),
@@ -153,10 +161,6 @@ export async function runReviewChat(args: ReviewChatArgs): Promise<ReviewChatRes
     }
     // Codex: the same prompts in Codex's words (codex-wording.ts), the review's own depth (the role,
     // one effort step lower on a diff-only review), its own ledger row.
-    const override = onCodex ? codexReviewModelOverride() : null;
-    const modelChoice: ModelChoice = override
-      ? { role: claudeModelChoice(model).role, id: override.model }
-      : claudeModelChoice(model);
     ({ outcome } = await provider.runAgent({
       kind: 'review_chat',
       model: modelChoice,
@@ -211,7 +215,7 @@ export async function runReviewChat(args: ReviewChatArgs): Promise<ReviewChatRes
       }
       // Codex: the step text IS the final JSON answer, not prose; the cards carry the answer.
       const text = onCodex ? '' : lastText.trim();
-      return { ok: true, text, submitted, ...telemetry(), aborted: false, ...(usageRecorded ? { usageRecorded: true } : {}) };
+      return { ok: true, ranOn: ran, text, submitted, ...telemetry(), aborted: false, ...(usageRecorded ? { usageRecorded: true } : {}) };
     }
     const finalText =
       outcome?.text?.trim()
@@ -224,7 +228,7 @@ export async function runReviewChat(args: ReviewChatArgs): Promise<ReviewChatRes
           : 'agent finished without answering';
       return fail(reason, false);
     }
-    return { ok: true, text: finalText, ...telemetry(), aborted: false, ...(usageRecorded ? { usageRecorded: true } : {}) };
+    return { ok: true, ranOn: ran, text: finalText, ...telemetry(), aborted: false, ...(usageRecorded ? { usageRecorded: true } : {}) };
   } catch (err) {
     if (abortController.signal.aborted) return fail(undefined, true);
     return fail(err instanceof Error ? err.message : String(err), false);

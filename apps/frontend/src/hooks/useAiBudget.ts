@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { AiBudgetBody, AiBudgetResponse } from '@pierre-review/shared';
+import type { AiBudgetBody, AiBudgetResponse, AiProviderId } from '@pierre-review/shared';
 import { api } from '../api/client.js';
 import { useAiCapabilities } from './useAiCapabilities.js';
 import { runCostText } from '../lib/aiBudget.js';
@@ -28,11 +28,12 @@ export function useAiBudget() {
 
 /**
  * A run's cost, worded for the credential: US$ on an API key, the share of the week on a Claude
- * subscription, nothing when unknown (lib/aiBudget.ts `runCostText`). Shares the ONE budget query.
+ * subscription, nothing when unknown (lib/aiBudget.ts `runCostText`). Pass the run's provider so a
+ * run by the other provider is never judged by this one's reading. Shares the ONE budget query.
  */
-export function useRunCostText(): (costUsd: number | null | undefined) => string | null {
+export function useRunCostText(): (costUsd: number | null | undefined, runProvider?: AiProviderId | null) => string | null {
   const usage = useAiBudget().data?.usage;
-  return (costUsd) => runCostText(costUsd, usage);
+  return (costUsd, runProvider) => runCostText(costUsd, usage, runProvider);
 }
 
 export function useSetAiBudget() {

@@ -335,7 +335,7 @@ export function AutoReviewSection(): JSX.Element {
       {!aiReady && (
         <div className="flex flex-wrap items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
           <span>Nothing is reviewed until AI is set up.</span>
-          {ai.runtime !== 'ready' ? <AiRuntimeSetup /> : <AiAuthLine />}
+          {ai.runtime !== 'ready' ? <AiRuntimeSetup /> : <AiAuthLine kind="review" />}
         </div>
       )}
       {storedOn && stored?.enabledAt != null && (

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ReviewSection } from './ReviewSection.js';
 import {
+  aiRunLabel,
   CLAUDE_REVIEW_CHAT_EXPLAIN_DEFAULT_QUESTION,
   CLAUDE_REVIEW_CHAT_MAX_PINS,
   CLAUDE_REVIEW_CHAT_MAX_QUESTION_CHARS,
@@ -203,7 +204,8 @@ function ChatMessages({ messages }: { messages: readonly ClaudeReviewChatMessage
         const question = messages[i - 1];
         return (
           <li key={m.id} className="text-sm">
-            <div className={`text-xs font-medium ${MUTED}`}>Claude</div>
+            {/* Who answered (the provider and the model that ran); an older answer stored no model. */}
+            <div className={`text-xs font-medium ${MUTED}`}>{m.model ? aiRunLabel(m.provider, m.model) : 'Claude'}</div>
             {m.explanations != null ? (
               <ExplanationCards cards={m.explanations} pins={question?.role === 'user' ? (question.pins ?? []) : []} />
             ) : (

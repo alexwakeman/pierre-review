@@ -33,6 +33,9 @@ export const proFlowPointers = sqliteTable(
     // The validated pointers as JSON TEXT in both dialects (one serializer owns the blob).
     output: text('output').notNull(),
     model: text('model').notNull(),
+    // Who answered ('claude' | 'codex'; platform migration 0042). NULL on older rows reads as Claude
+    // unless `model` is a Codex id (packages/shared `aiRunProvider`). `model` is what RAN.
+    provider: text('provider'),
     // How many measured pull requests the pointers were written over — disclosed on screen.
     prCount: integer('pr_count').notNull(),
     generatedAt: integer('generated_at', { mode: 'timestamp' })

@@ -149,6 +149,9 @@ export const accounts = sqliteTable('accounts', {
   // window, and feeds the header's account figures — never blocks. Persisted so a restart keeps it;
   // any older shape is normalised on read. Machine state.
   aiBudgetReading: text('ai_budget_reading', { mode: 'json' }).$type<AiUsageReading>(),
+  // 0128. THE AI PROVIDER CHOICE (Settings → AI): 'claude' | 'codex' | 'auto'. NULL = never chosen
+  // (reads as 'auto'). An explicitly set LIMN_AI_PROVIDER wins over it (ai/provider-setting.ts).
+  aiProvider: text('ai_provider'),
 });
 
 export const repos = sqliteTable(
@@ -1183,6 +1186,9 @@ export const claudeReviews = sqliteTable(
     // offered list lives once, in packages/shared `CLAUDE_REVIEW_MODELS`, which the generate route
     // validates against; retiring a model no longer edits the schema.
     model: text('model').notNull(),
+    // Which AI provider ran it ('claude' | 'codex'; migration 0128). NULL on older rows reads as
+    // Claude unless `model` is a Codex id (packages/shared `aiRunProvider`). `model` is what RAN.
+    provider: text('provider'),
     // Null until the agent decides whether it explored the worktree.
     scope: text('scope', { enum: ['diff_only', 'worktree'] }),
     // The deterministic router's decision (skip/diff_only/worktree) + its inputs,
@@ -1392,6 +1398,9 @@ export const claudeReviewChatMessages = sqliteTable(
     content: text('content').notNull(),
     // Assistant rows only: the model that answered, what the turn cost, its tokens.
     model: text('model'),
+    // Which AI provider ran it ('claude' | 'codex'; migration 0128). NULL on older rows reads as
+    // Claude unless `model` is a Codex id (packages/shared `aiRunProvider`). `model` is what RAN.
+    provider: text('provider'),
     costUsd: real('cost_usd'),
     inputTokens: integer('input_tokens'),
     outputTokens: integer('output_tokens'),
@@ -1470,6 +1479,9 @@ export const ticketReviews = sqliteTable(
     }).notNull(),
     // Stored model id. No drizzle `enum:` for the same reason as claude_reviews.model.
     model: text('model').notNull(),
+    // Which AI provider ran it ('claude' | 'codex'; migration 0128). NULL on older rows reads as
+    // Claude unless `model` is a Codex id (packages/shared `aiRunProvider`). `model` is what RAN.
+    provider: text('provider'),
     costUsd: real('cost_usd'),
     inputTokens: integer('input_tokens'),
     outputTokens: integer('output_tokens'),
@@ -1598,6 +1610,9 @@ export const ticketReviewPrCards = sqliteTable(
     source: text('source', { enum: ['story_check', 'prepass'] }).notNull(),
     // Stored model id (no drizzle `enum:`, like ticket_reviews.model).
     model: text('model').notNull(),
+    // Which AI provider ran it ('claude' | 'codex'; migration 0128). NULL on older rows reads as
+    // Claude unless `model` is a Codex id (packages/shared `aiRunProvider`). `model` is what RAN.
+    provider: text('provider'),
     // A pre-pass card's own spend; null for a card written inside a ticket review's run (that run's
     // cost holds it).
     costUsd: real('cost_usd'),
@@ -1658,6 +1673,9 @@ export const ciReviews = sqliteTable(
     }).notNull(),
     // Stored model id. No drizzle `enum:` for the same reason as claude_reviews.model.
     model: text('model').notNull(),
+    // Which AI provider ran it ('claude' | 'codex'; migration 0128). NULL on older rows reads as
+    // Claude unless `model` is a Codex id (packages/shared `aiRunProvider`). `model` is what RAN.
+    provider: text('provider'),
     costUsd: real('cost_usd'),
     inputTokens: integer('input_tokens'),
     outputTokens: integer('output_tokens'),
@@ -1760,6 +1778,9 @@ export const claudeThreadChecks = sqliteTable(
     }).notNull(),
     // Stored model id. No drizzle `enum:` for the same reason as claude_reviews.model.
     model: text('model').notNull(),
+    // Which AI provider ran it ('claude' | 'codex'; migration 0128). NULL on older rows reads as
+    // Claude unless `model` is a Codex id (packages/shared `aiRunProvider`). `model` is what RAN.
+    provider: text('provider'),
     // How many threads were shown to Claude (the changed set, within the cap).
     threadsSent: integer('threads_sent'),
     // ClaudeThreadAssessment[] — the WHOLE reconciled set. Set on success only.
@@ -1816,6 +1837,9 @@ export const aiFixes = sqliteTable(
     // 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'planned' (a plan open, no build yet)
     status: text('status').notNull(),
     model: text('model').notNull(),
+    // Which AI provider ran it ('claude' | 'codex'; migration 0128). NULL on older rows reads as
+    // Claude unless `model` is a Codex id (packages/shared `aiRunProvider`). `model` is what RAN.
+    provider: text('provider'),
     // AiFixSeed: 'ci_analysis' | 'review' | 'plain' | 'comments'
     seed: text('seed').notNull(),
     prompt: text('prompt'),
@@ -1863,6 +1887,10 @@ export const aiFixes = sqliteTable(
     planSeed: text('plan_seed'),
     // The planning passes' spend, summed (the build's own spend stays in cost_usd).
     planCostUsd: real('plan_cost_usd'),
+    // 0128. What the LATEST planning pass ran on (a plan and its build may run on different
+    // providers when the choice changed between them). NULL = never planned, or an older row.
+    planProvider: text('plan_provider'),
+    planModel: text('plan_model'),
   },
   (t) => ({
     prCreatedIdx: index('af_account_pr_created').on(t.accountId, t.prId, t.createdAt),
@@ -3249,6 +3277,9 @@ export const sprintPaths = sqliteTable(
     pathsVersion: integer('paths_version'),
     pathsJson: text('paths_json', { mode: 'json' }).$type<{ paths: unknown[]; callouts: unknown[] }>(),
     model: text('model'),
+    // Which AI provider ran it ('claude' | 'codex'; migration 0128). NULL on older rows reads as
+    // Claude unless `model` is a Codex id (packages/shared `aiRunProvider`). `model` is what RAN.
+    provider: text('provider'),
     costUsd: real('cost_usd'),
     inputTokens: integer('input_tokens'),
     outputTokens: integer('output_tokens'),
@@ -3489,6 +3520,9 @@ export const sequenceDiagrams = sqliteTable(
     // SequenceDiagramStatus.
     status: text('status').notNull(),
     model: text('model').notNull(),
+    // Which AI provider ran it ('claude' | 'codex'; migration 0128). NULL on older rows reads as
+    // Claude unless `model` is a Codex id (packages/shared `aiRunProvider`). `model` is what RAN.
+    provider: text('provider'),
     title: text('title'),
     caption: text('caption'),
     // 'design' on every design-era row (stamped at queue time); a Mermaid type on retired rows.
@@ -3554,6 +3588,9 @@ export const referenceDocs = sqliteTable(
     costUsd: real('cost_usd'),
     inputTokens: integer('input_tokens'),
     outputTokens: integer('output_tokens'),
+    // 0128. What the last build ran on (provider + the model id that ran). NULL on older rows (Claude).
+    provider: text('provider'),
+    model: text('model'),
     numTurns: integer('num_turns'),
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
     updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
@@ -3584,6 +3621,9 @@ export const referenceDocChatMessages = sqliteTable(
     // 'user' | 'assistant'.
     role: text('role').notNull(),
     content: text('content').notNull(),
+    // 0128. Assistant rows: what answered (provider + model id). NULL on user rows and older rows.
+    provider: text('provider'),
+    model: text('model'),
     citations: text('citations', { mode: 'json' }).$type<ReferenceDocCitation[]>(),
     costUsd: real('cost_usd'),
     inputTokens: integer('input_tokens'),
@@ -3636,6 +3676,9 @@ export const storyDocsAlignments = sqliteTable(
     error: text('error'),
     shortlistModel: text('shortlist_model'),
     model: text('model'),
+    // Which AI provider ran it ('claude' | 'codex'; migration 0128). NULL on older rows reads as
+    // Claude unless `model` is a Codex id (packages/shared `aiRunProvider`). `model` is what RAN.
+    provider: text('provider'),
     // Both model calls, US$.
     costUsd: real('cost_usd'),
     inputTokens: integer('input_tokens'),

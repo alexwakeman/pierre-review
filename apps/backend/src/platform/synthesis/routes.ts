@@ -334,6 +334,9 @@ export function registerSynthesisRoutes(
       };
       const outputJson = JSON.stringify(output);
       const now = new Date();
+      // What answered (Phase 4): the stored row names the model that RAN and its provider.
+      const ranModel = out.model ?? DIGEST_MODEL;
+      const ranProvider = out.provider ?? 'claude';
       const pro = proSchemaFor();
       await ctx.runTransaction(async (tx) => {
         await tx
@@ -344,7 +347,8 @@ export function registerSynthesisRoutes(
             kind: rs.scope.kind,
             payloadHash: hash,
             output: outputJson,
-            model: DIGEST_MODEL,
+            model: ranModel,
+            provider: ranProvider,
             inputCount: input.totalCount,
             analyzedCount: input.analyzedCount,
             generatedAt: now,
@@ -358,7 +362,8 @@ export function registerSynthesisRoutes(
               kind: rs.scope.kind,
               payloadHash: hash,
               output: outputJson,
-              model: DIGEST_MODEL,
+              model: ranModel,
+              provider: ranProvider,
               inputCount: input.totalCount,
               analyzedCount: input.analyzedCount,
               generatedAt: now,
@@ -378,7 +383,7 @@ export function registerSynthesisRoutes(
           analyzedCount: input.analyzedCount,
           totalCount: input.totalCount,
           truncated: input.truncated,
-          model: DIGEST_MODEL,
+          model: ranModel,
           generatedAt: now.toISOString(),
         },
         stale: false,

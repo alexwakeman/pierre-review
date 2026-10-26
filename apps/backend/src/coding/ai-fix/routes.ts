@@ -3,6 +3,7 @@ import {
   AI_FIX_MAX_INSTRUCTION_CHARS,
   AI_FIX_PLAN_MAX_MESSAGE_CHARS,
   AI_FIX_PLAN_MAX_REVISIONS,
+  aiRunProvider,
   CLAUDE_REVIEW_MODELS,
   DEFAULT_AI_FIX_MODEL,
 } from '@pierre-review/shared';
@@ -89,6 +90,7 @@ function rowToAiFix(row: AiFixRow): AiFix {
     prId: row.prId,
     status: row.status,
     model: row.model,
+    provider: aiRunProvider(row.provider, row.model),
     seed: row.seed,
     summary: row.summary,
     commitMessage: row.commitMessage,
@@ -119,6 +121,7 @@ function rowToSummary(row: AiFixRow): AiFixSummary {
     id: row.id,
     status: row.status,
     model: row.model,
+    provider: aiRunProvider(row.provider, row.model),
     seed: row.seed,
     commitMessage: row.commitMessage,
     filesChanged: parseFilesChanged(row.filesChanged),

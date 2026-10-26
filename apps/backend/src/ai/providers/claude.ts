@@ -38,15 +38,15 @@ import type {
   ModelRole,
   ProviderStatus,
 } from '../provider.js';
+import { AI_MODEL_FOR_ROLE } from '@pierre-review/shared';
 import { foldRateLimitEvent, parseUsageProbe } from './claude-usage.js';
 import { assistantText, describeFixBlocks, describeReviewBlocks } from './claude-activity.js';
 
-/** Claude's model per role. A call site that must keep an exact id passes it (`ModelChoice.id`). */
-export const CLAUDE_MODEL_FOR_ROLE: Readonly<Record<ModelRole, string>> = {
-  deep: 'claude-opus-5-5',
-  standard: 'claude-sonnet-5',
-  fast: 'claude-haiku-5-5',
-};
+/**
+ * Claude's model per role — the shared table's (packages/shared `AI_MODEL_FOR_ROLE`, which the SPA's
+ * labels read too). A call site that must keep an exact id passes it (`ModelChoice.id`).
+ */
+export const CLAUDE_MODEL_FOR_ROLE: Readonly<Record<ModelRole, string>> = AI_MODEL_FOR_ROLE.claude;
 
 function resolveModel(choice: ModelChoice): string {
   return choice.id ?? CLAUDE_MODEL_FOR_ROLE[choice.role];

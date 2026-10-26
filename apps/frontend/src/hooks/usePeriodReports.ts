@@ -19,6 +19,7 @@ import type {
 } from '@pierre-review/shared';
 import { api } from '../api/client.js';
 import { ACTIVITY_GC_TIME, workspaceKey } from './useActivity.js';
+import { aiRunLabel } from '@pierre-review/shared';
 
 // ⚠ THE GRAIN IS PART OF THE LIST KEY. Sprint and month are two different lists of two different
 // periods from one route; sharing a cache slot would serve fortnights under the Month toggle for
@@ -189,7 +190,9 @@ const MODEL_LABELS: Record<string, { label: string; hint: string }> = {
 // that actually answered). Raw id fallback for the same reason as the picker: a model added
 // server-side names itself without a frontend release.
 export function reportModelLabel(model: string): string {
-  return MODEL_LABELS[model]?.label ?? model;
+  // An id this table does not know (a Codex model, a newer Claude) names itself through the ONE run
+  // label (packages/shared `aiRunLabel`).
+  return MODEL_LABELS[model]?.label ?? aiRunLabel(null, model);
 }
 
 export interface PeriodReportModelChoice {

@@ -1,5 +1,6 @@
 import { and, desc, eq, gte, inArray } from 'drizzle-orm';
 import {
+  aiRunProvider,
   storyDocsResultFromStored,
   type StoryDocsAlignmentResult,
   type StoryDocsAlignmentRun,
@@ -40,6 +41,8 @@ export interface StoryDocsRow {
   error: string | null;
   shortlistModel: string | null;
   model: string | null;
+  // 0128: who ran the read; NULL on older rows (read through `aiRunProvider`).
+  provider?: string | null;
   costUsd: number | null;
   inputTokens: number | null;
   outputTokens: number | null;
@@ -132,10 +135,11 @@ export async function markReading(
   accountId: number,
   id: number,
   shortlist: StoryDocsShortlistEntry[],
-  model: string,
+  // What runs the read: the provider and its model id (never the Claude id it was asked for).
+  ran: { provider: 'claude' | 'codex'; model: string },
   t0: Telemetry,
 ): Promise<void> {
-  await update(ctx, accountId, id, { status: 'reading', shortlistJson: shortlist, model, ...tel(t0) });
+  await update(ctx, accountId, id, { status: 'reading', shortlistJson: shortlist, model: ran.model, provider: ran.provider, ...tel(t0) });
 }
 
 export async function saveStoryDocsSuccess(
@@ -257,6 +261,7 @@ export function toStoryDocsRun(row: StoryDocsRow, live: StoryDocsHashes | null):
     criteria: Array.isArray(row.criteriaJson) ? row.criteriaJson : [],
     result,
     costUsd: row.costUsd,
+    ...(row.model ? { model: row.model, provider: aiRunProvider(row.provider, row.model) } : {}),
     createdAt: iso(row.createdAt)!,
     finishedAt: iso(row.completedAt),
   };

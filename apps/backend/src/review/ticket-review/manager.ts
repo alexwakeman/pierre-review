@@ -35,7 +35,7 @@ import {
   type StoredCardRow,
 } from './cards.js';
 import { fingerprint, staleReasons } from './fingerprint.js';
-import { TICKET_CARD_MODEL, prepassCost, runCardPrepass, type PrepassResult } from './prepass.js';
+import { SERVER_CARD_MODEL, TICKET_CARD_MODEL, prepassCost, runCardPrepass, type PrepassResult } from './prepass.js';
 import {
   getTicketReviewById,
   getTicketReviewRow,
@@ -43,6 +43,7 @@ import {
   insertQueuedTicketReview,
   markTicketReviewCancelled,
   markTicketReviewFailed,
+  markTicketReviewRanOn,
   markTicketReviewRefused,
   markTicketReviewRunning,
   reconcileOrphanedTicketReviews,
@@ -69,6 +70,7 @@ import {
 } from './prompts.js';
 import { reconcileTicketReview, type TicketReport } from './reconcile.js';
 import { activeProviderId } from '../../ai/provider-setting.js';
+import { claudeModelChoice, getProvider } from '../../ai/provider.js';
 import { promptTools } from '../../ai/prompt-tools.js';
 
 // THE TICKET REVIEW QUEUE — one run per TICKET (never per PR), beside the PR review's own queue
@@ -335,6 +337,11 @@ async function runPipeline(
   const providerId = activeProviderId();
   const words = promptTools(providerId);
   const usageRecord = { accountId, seam: 'agent' as const, feature: 'ticket_review', prId: job.originPrId };
+  // The run row names what runs it from here on (the provider and its model id), whatever the outcome.
+  await markTicketReviewRanOn(ctx, accountId, runId, {
+    provider: providerId,
+    model: getProvider(providerId).resolveModel(claudeModelChoice(job.model)),
+  });
 
   // ---- who is on the ticket, and what it says (refusals are stored, never sampled) ----
   const inputs = await resolveTicketInputs(ctx, accountId, job.ident, {
@@ -454,6 +461,7 @@ async function runPipeline(
           changedFiles: diffs.get(r.prId)?.changedFiles ?? [],
           source: 'prepass' as const,
           model: r.model ?? TICKET_CARD_MODEL,
+          provider: r.model === SERVER_CARD_MODEL ? null : providerId,
           costUsd: r.costUsd,
         })),
     ).catch((err) => ctx.log.warn({ err }, `ticket review ${runId}: could not store pre-pass cards`));
@@ -608,6 +616,7 @@ async function runPipeline(
         changedFiles: diffs.get(prId)?.changedFiles ?? [],
         source: 'story_check' as const,
         model: res.model ?? job.model,
+        provider: providerId,
         costUsd: null,
       })),
     ).catch((err) => ctx.log.warn({ err }, `ticket review ${runId}: could not store its cards`));

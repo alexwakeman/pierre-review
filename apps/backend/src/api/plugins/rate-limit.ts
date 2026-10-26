@@ -114,6 +114,9 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // which is single-flight and at most once per 5 minutes inside ai/budget.ts — a loop cannot
   // multiply it. `read`, decided rather than inherited; EXACT `===`. No other usage route exists.
   if (path === '/api/ai/budget') return [TIERS.read];
+  // THE AI PROVIDER CHOICE: PUT /api/ai/provider (api/routes/ai-provider.ts). One validated UPDATE of
+  // one column, held in memory — no model, no GitHub, no process. `read`, decided; EXACT `===`.
+  if (path === '/api/ai/provider') return [TIERS.read];
 
   // ---- Workspace CRUD: `read`, RECORDED rather than inherited ----
   //

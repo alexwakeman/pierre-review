@@ -39,6 +39,7 @@ import { DocLink } from '../DocReferences.js';
 import { CheckCircleIcon, PartialCircleIcon, WarningIcon } from '../Icons.js';
 import { InfoButton } from '../InfoModal.js';
 import { AiStatusLine } from '../AiStatusLine.js';
+import { AiRunLabel } from '../AiRunLabel.js';
 
 const MUTED = 'text-gray-500 dark:text-gray-400';
 const BTN =
@@ -174,6 +175,7 @@ export function StoryDocsAlignmentBlock({
       <div className="flex flex-wrap items-center gap-1.5">
         <h4 className="text-xs font-semibold text-gray-700 dark:text-gray-200">Docs check</h4>
         <StoryDocsInfo />
+        {shown != null && <AiRunLabel provider={shown.provider} model={shown.model} />}
         {shown != null && !shown.current && !checking && (
           <span className={`${REVIEW_CHIP} ${OUTDATED_CLASS}`}>
             <WarningIcon size={11} aria-hidden />

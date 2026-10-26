@@ -44,6 +44,8 @@ vi.mock('./persist.js', async (importOriginal) => {
     markFixCancelled: vi.fn(async () => {}),
     markFixFailed: vi.fn(async () => {}),
     markFixRunning: vi.fn(async () => {}),
+    markFixRanOn: vi.fn(async () => {}),
+    markPlanRanOn: vi.fn(async () => {}),
     saveFixSuccess: vi.fn(async () => {}),
     reconcileOrphanedFixes: vi.fn(async () => 0),
     parseReviewItems: real.parseReviewItems,

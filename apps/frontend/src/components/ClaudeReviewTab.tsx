@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import type {
+  AiProviderId,
   ClaudeFinding,
   ClaudeThreadAssessment,
   ClaudeThreadAssessmentCounts,
@@ -19,14 +20,17 @@ import type {
   User,
 } from '@pierre-review/shared';
 import {
+  aiModelChoiceLabel,
+  aiRunLabel,
+  aiRunProvider,
   CLAUDE_FINDING_LENS_LABELS,
   CLAUDE_REVIEW_MODELS,
-  CLAUDE_REVIEW_MODEL_LABELS,
   DEFAULT_CLAUDE_REVIEW_MODEL,
   followUpSentence,
 } from '@pierre-review/shared';
 import { formatDate, relativeTime, safeExternalUrl } from '../lib/ui.js';
 import { useRunCostText } from '../hooks/useAiBudget.js';
+import { useMe } from '../hooks/useTriage.js';
 import {
   autoLiftLine,
   autoPostFailureLine,
@@ -162,11 +166,16 @@ const SEVERITY_ORDER: ClaudeFindingSeverity[] = [
 // list so an earlier comment's severity paints the same pill as a current finding's.
 
 // "abc1234 · Claude Opus 5.5 · US$0.42" on an API key, "… · 0.3% of your week" on a Claude
-// subscription (`costText`, the ONE run-cost wording). A retired model id prints raw.
-function metaLine(review: ClaudeReview, costText: (usd: number | null | undefined) => string | null): string {
-  const label = (CLAUDE_REVIEW_MODEL_LABELS as Record<string, string>)[review.model] ?? review.model;
-  const parts: string[] = [shortSha(review.headSha), label];
-  const cost = costText(review.costUsd);
+// subscription, "abc1234 · Codex · GPT-6 Astra" for a Codex run (`aiRunLabel`, the ONE run label;
+// `costText`, the ONE run-cost wording — judged by the run's own provider).
+function metaLine(
+  review: ClaudeReview,
+  costText: (usd: number | null | undefined, provider?: AiProviderId | null) => string | null,
+): string {
+  // A skipped run (nothing substantive to review) ran no model: it names none.
+  const parts: string[] = [shortSha(review.headSha)];
+  if (review.reviewMode !== 'skip') parts.push(aiRunLabel(review.provider, review.model));
+  const cost = costText(review.costUsd, aiRunProvider(review.provider, review.model));
   if (cost != null) parts.push(cost);
   return parts.join(' · ');
 }
@@ -1692,6 +1701,8 @@ export function ClaudeReviewTab({
   // result loads without a poll).
   const { status } = useClaudeReviewStream(pr.id, isRunning);
   const costText = useRunCostText();
+  // The provider a new run will use: the model picker names what will actually run.
+  const activeProvider: AiProviderId | undefined = useMe().data?.ai.provider;
 
   // Which run is shown in Section A: the latest unless the user picked an older
   // one from history. Both are hooks, so they MUST run unconditionally — before
@@ -1804,7 +1815,7 @@ export function ClaudeReviewTab({
             >
               {CLAUDE_REVIEW_MODELS.map((m) => (
                 <option key={m} value={m}>
-                  {CLAUDE_REVIEW_MODEL_LABELS[m]}
+                  {aiModelChoiceLabel(m, activeProvider)}
                 </option>
               ))}
             </select>
@@ -1987,7 +1998,7 @@ export function ClaudeReviewTab({
             {data.history.map((h) => (
               <option key={h.id} value={h.id}>
                 {shortSha(h.headSha)} ·{' '}
-                {(CLAUDE_REVIEW_MODEL_LABELS as Record<string, string>)[h.model] ?? h.model} ·{' '}
+                {h.reviewMode !== 'skip' ? `${aiRunLabel(h.provider, h.model)} · ` : ''}
                 {h.status} ·{' '}
                 {reviewRunWhen(h.finishedAt ?? h.createdAt)}
                 {h.trigger === 'auto' ? ` · ${AUTO_REVIEW_LABEL}` : ''}

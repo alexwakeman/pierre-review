@@ -23,6 +23,7 @@
 //
 // Every cap is spelled ONCE here and read by the prompt, the validator and the renderer.
 
+import type { AiProviderId } from './types.js';
 import type { ReferenceDocCitation } from './reference-docs.js';
 
 // ---- models + version ----
@@ -195,6 +196,10 @@ export interface StoryDocsAlignmentRun {
   result: StoryDocsAlignmentResult | null;
   /** Both model calls, US$; null until known. */
   costUsd: number | null;
+  // What ran it (docs/CODEX-PLAN.md Phase 4): the model id and its provider. Optional: an older
+  // server or row omits them — read through `aiRunLabel(provider, model)`.
+  model?: string | null;
+  provider?: AiProviderId;
   createdAt: string; // ISO-8601
   finishedAt: string | null; // ISO-8601
 }

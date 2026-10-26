@@ -31,7 +31,7 @@ import type {
   ReviewRouteReason,
   StoredPrFile,
 } from '@pierre-review/shared';
-import { CLAUDE_FINDING_LENSES, threadAssessmentCounts } from '@pierre-review/shared';
+import { aiRunProvider, CLAUDE_FINDING_LENSES, threadAssessmentCounts } from '@pierre-review/shared';
 import { storedList, stripStoredStoryLead } from '@pierre-review/shared';
 import { referenceDocCitationsFromStored, reviewDocReferencesFromStored } from '@pierre-review/shared';
 import type { ReferenceDocCitation, ReviewDocReference } from '@pierre-review/shared';
@@ -47,6 +47,7 @@ import {
   type SettledFinding,
 } from './settled-by-reply.js';
 import type { AgentContext } from '../agent-context.js';
+import { claudeModelChoice, expectedRanOn } from '../../ai/provider.js';
 import {
   isFollowUpEligible,
   resolveFindingBody,
@@ -127,7 +128,10 @@ interface ReviewRow {
   prId: number;
   headSha: string;
   status: ClaudeReview['status'];
-  model: ClaudeReviewModel;
+  // The model that ran — a Codex id on a Codex run, a retired Claude id on an old row: any string.
+  model: string;
+  // 0128: who ran it; NULL on older rows (read through `aiRunProvider`).
+  provider?: string | null;
   scope: ClaudeReviewScope | null;
   reviewMode: ReviewMode | null;
   routeReason: ReviewRouteReason | null;
@@ -321,6 +325,7 @@ function mapReview(
     headSha: r.headSha,
     status: r.status,
     model: r.model,
+    provider: aiRunProvider(r.provider, r.model),
     scope: r.scope,
     reviewMode: r.reviewMode,
     routeReason: r.routeReason,
@@ -373,6 +378,7 @@ const summaryOf = (r: ReviewRow): ClaudeReviewSummary => ({
   headSha: r.headSha,
   status: r.status,
   model: r.model,
+  provider: aiRunProvider(r.provider, r.model),
   scope: r.scope,
   reviewMode: r.reviewMode,
   verdict: r.verdict,
@@ -1647,6 +1653,9 @@ export async function insertQueuedReview(
   trigger: ClaudeReviewTrigger = 'manual',
 ): Promise<number> {
   const { cr } = tables(ctx);
+  // Labelled by the provider it is expected to run on from the start (a queued Codex run never shows
+  // as Claude); the run stamps what actually ran when it ends (`markReviewRanOn`).
+  const expected = expectedRanOn(claudeModelChoice(model));
   const rows = (await ctx.db
     .insert(cr)
     .values({
@@ -1654,13 +1663,28 @@ export async function insertQueuedReview(
       prId,
       headSha,
       status: 'queued',
-      model,
+      model: expected.model,
+      provider: expected.provider,
       ticket: tickets.length > 0 ? [...tickets] : null,
       trigger,
     })
     .returning({ id: cr.id })
     .execute()) as Array<{ id: number }>;
   return rows[0]!.id;
+}
+
+/**
+ * Stamp what the run ACTUALLY ran on (RunReviewResult.ranOn): the provider and its model id. Called as
+ * soon as the run returns, whatever its outcome, so a Codex run is never stored as the Claude model it
+ * was asked for (a switch between queue and start is corrected here too).
+ */
+export async function markReviewRanOn(
+  ctx: AgentContext,
+  id: number,
+  ran: { provider: 'claude' | 'codex'; model: string },
+): Promise<void> {
+  const { cr } = tables(ctx);
+  await ctx.db.update(cr).set({ provider: ran.provider, model: ran.model }).where(eq(cr.id, id)).execute();
 }
 
 export async function markReviewRunning(ctx: AgentContext, id: number): Promise<void> {

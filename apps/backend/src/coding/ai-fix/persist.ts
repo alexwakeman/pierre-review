@@ -12,6 +12,7 @@ import type { AgentContext } from '../../review/agent-context.js';
 import { normalizeChangeReport } from './review-seed.js';
 import type { AiFixPlan, AiFixPlanMessage } from '@pierre-review/shared';
 import type { FixSeed } from './prompts.js';
+import { claudeModelChoice, expectedRanOn, type AiRanOn } from '../../ai/provider.js';
 import { parsePlan, parseTranscript } from './plan.js';
 
 // DB access for the ai_fixes table (plugin-owned). Writes go through ctx.db with the
@@ -26,7 +27,13 @@ export interface AiFixRow {
   sourceReviewId: number | null;
   baseSha: string;
   status: AiFixStatus;
+  // What the BUILD ran (or is expected to run, before it starts): a Codex id on a Codex run.
   model: string;
+  // 0128: who ran the build; NULL on older rows (read through `aiRunProvider`).
+  provider?: string | null;
+  // 0128: what the latest planning pass ran on. NULL = never planned, or an older row.
+  planProvider?: string | null;
+  planModel?: string | null;
   seed: AiFixStoredSeed;
   prompt: string | null;
   summary: string | null;
@@ -91,7 +98,9 @@ export async function insertQueuedFix(
       prId: input.prId,
       baseSha: input.baseSha,
       status: planSeed ? 'planned' : 'queued',
-      model: input.model,
+      // Labelled by the provider it is expected to run on; each pass stamps its own (`markFixRanOn`,
+      // `markPlanRanOn`). `input.model` is the Claude model ASKED for; `requestModelOf` maps back.
+      ...expectedRanOn(claudeModelChoice(input.model)),
       seed: input.seed,
       sourceReviewId: input.sourceReviewId,
       prompt: input.prompt,
@@ -112,6 +121,18 @@ export async function insertQueuedFix(
   const id = rows[0]?.id;
   if (id == null) throw new Error('insertQueuedFix: no id returned');
   return id;
+}
+
+/** Stamp what the BUILD runs on (provider + model id), as it starts. */
+export async function markFixRanOn(ctx: AgentContext, id: number, ran: AiRanOn): Promise<void> {
+  const t = ctx.schema.aiFixes;
+  await ctx.db.update(t).set({ provider: ran.provider, model: ran.model }).where(eq(t.id, id)).execute();
+}
+
+/** Stamp what a PLANNING pass runs on (provider + model id), as it starts. */
+export async function markPlanRanOn(ctx: AgentContext, id: number, ran: AiRanOn): Promise<void> {
+  const t = ctx.schema.aiFixes;
+  await ctx.db.update(t).set({ planProvider: ran.provider, planModel: ran.model }).where(eq(t.id, id)).execute();
 }
 
 export async function markFixRunning(ctx: AgentContext, id: number): Promise<void> {
@@ -297,12 +318,15 @@ async function readPlanColumns(
       accountId: t.accountId,
       prId: t.prId,
       model: t.model,
+      planModel: t.planModel,
     })
     .from(t)
     .where(eq(t.id, id))
     .limit(1)
-    .execute()) as Array<{ plan: string | null; planTranscript: string | null; planCostUsd: number | null; accountId: number; prId: number; model: string }>;
-  return rows[0] ?? null;
+    .execute()) as Array<{ plan: string | null; planTranscript: string | null; planCostUsd: number | null; accountId: number; prId: number; model: string; planModel: string | null }>;
+  const r = rows[0];
+  // The pass's ledger row names the model the PASS ran (a plan and its build may differ).
+  return r ? { ...r, model: r.planModel ?? r.model } : null;
 }
 
 function addCost(prev: number | null, cost: number | null): number | null {

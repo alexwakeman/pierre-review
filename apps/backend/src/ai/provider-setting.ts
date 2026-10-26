@@ -4,7 +4,7 @@
 // reason: WHICH provider is active (`activeProviderId`, the `auto` rule) and which agent kinds Codex
 // may run (`CODEX_AGENT_KINDS`, the union of the four Phase 3 streams' own files).
 
-import type { AiRunKind } from '@pierre-review/shared';
+import { isAiProviderSetting, type AiProviderSetting, type AiRunKind } from '@pierre-review/shared';
 import { codexCredentialRunnable, resolveAiCredential, resolveCodexCredential } from './credentials.js';
 import { CODEX_DOCS_KINDS } from './codex/kinds/docs.js';
 import { CODEX_FIX_KINDS } from './codex/kinds/fix.js';
@@ -14,16 +14,51 @@ import type { AgentKind } from './provider.js';
 
 export const AI_PROVIDER_ENV = 'LIMN_AI_PROVIDER';
 
-export type AiProviderSetting = 'claude' | 'codex' | 'auto';
+export type { AiProviderSetting };
 
+/**
+ * Codex cannot run every agent kind in this build (`codexRunnable()` false). Unreachable while every
+ * kind is ported (Phase 3 complete); kept for a build that ships a kind Codex cannot run yet.
+ */
 export const CODEX_NOT_AVAILABLE_MESSAGE =
-  'Codex is not available in this version of Limn yet. Unset LIMN_AI_PROVIDER (or set it to claude) to use Claude.';
+  'Codex cannot run every AI feature in this version of Limn. Choose Claude in Settings → AI.';
 
-/** The reader's `LIMN_AI_PROVIDER`, read at call time. Unset, empty or unknown ⇒ 'auto'. */
-export function aiProviderSetting(env: NodeJS.ProcessEnv = process.env): AiProviderSetting {
+// ---- the choice: LIMN_AI_PROVIDER, else Settings → AI (docs/CODEX-PLAN.md Phase 4) ---------------
+//
+// ONE resolver, `aiProviderSetting()`: an explicitly set `LIMN_AI_PROVIDER` (claude | codex | auto) WINS;
+// otherwise the choice stored per machine (`accounts.ai_provider`, written by PUT /api/ai/provider),
+// default `auto`. The stored value is held HERE, in memory, so every run asks synchronously: the boot
+// loads it (ai/provider-store.ts `loadStoredAiProvider`) and the route updates it on write. A switch
+// therefore reaches the NEXT run without a restart; a run already going keeps the provider it picked.
+// (No DB import here: the pre-flight reads this module, and the DB client opens the file at import.)
+
+let storedSetting: AiProviderSetting | null = null;
+
+/** The stored choice (Settings → AI), or null when none is stored. Memory only; see the header. */
+export function storedAiProviderSetting(): AiProviderSetting | null {
+  return storedSetting;
+}
+
+/** Hold the stored choice in memory (the boot's load, the route's write, tests). null ⇒ none stored. */
+export function setStoredAiProviderSetting(value: AiProviderSetting | null): void {
+  storedSetting = value;
+}
+
+/** `LIMN_AI_PROVIDER` when it is set to a known value; null when unset, empty or unknown. */
+export function aiProviderEnvSetting(env: NodeJS.ProcessEnv = process.env): AiProviderSetting | null {
   const raw = env[AI_PROVIDER_ENV]?.trim().toLowerCase();
-  if (raw === 'claude' || raw === 'codex' || raw === 'auto') return raw;
-  return 'auto';
+  return isAiProviderSetting(raw) ? raw : null;
+}
+
+/** THE provider choice, read at call time: `LIMN_AI_PROVIDER` when set, else the stored one, else 'auto'. */
+export function aiProviderSetting(env: NodeJS.ProcessEnv = process.env): AiProviderSetting {
+  return aiProviderEnvSetting(env) ?? storedSetting ?? 'auto';
+}
+
+/** The choice and who made it (`MeResponse.ai.providerSetting`). */
+export function aiProviderSettingStatus(env: NodeJS.ProcessEnv = process.env): { value: AiProviderSetting; source: 'env' | 'settings' } {
+  const fromEnv = aiProviderEnvSetting(env);
+  return fromEnv ? { value: fromEnv, source: 'env' } : { value: storedSetting ?? 'auto', source: 'settings' };
 }
 
 // ---- which agents Codex may run (docs/CODEX-PLAN.md Phase 3) ------------------------------------
@@ -76,9 +111,17 @@ export function codexRunnable(allow: ReadonlySet<AgentKind> = CODEX_AGENT_KINDS)
   return ALL_AGENT_KINDS.every((k) => allow.has(k));
 }
 
+/**
+ * The remedy when Codex cannot run something: pick Claude where the choice was made — Settings → AI,
+ * or `LIMN_AI_PROVIDER` when that is what chose Codex. Read at call time.
+ */
+function chooseClaudeSentence(): string {
+  return aiProviderEnvSetting() ? 'Set LIMN_AI_PROVIDER to claude to use Claude.' : 'Choose Claude in Settings → AI.';
+}
+
 /** The one sentence a not-yet-ported agent kind answers on Codex. */
 export function codexKindNotAvailableMessage(kind: AgentKind): string {
-  return `Codex cannot run ${KIND_WORDS[kind] ?? 'this'} in this version of Limn yet. Unset LIMN_AI_PROVIDER (or set it to claude) to use Claude.`;
+  return `Codex cannot run ${KIND_WORDS[kind] ?? 'this'} in this version of Limn yet. ${chooseClaudeSentence()}`;
 }
 
 /** Every run kind a pre-flight answers for: every agent kind, then the one-shot `complete`. */

@@ -15,6 +15,7 @@
 //
 // ⚠ THE LAYER VOCABULARY IS PROVISIONAL — the user is trialling it. Every cap below is spelled ONCE
 // here and read by the validator, the prompt and the renderer.
+import type { AiProviderId } from './types.js';
 
 /** The fixed layer vocabulary, id → display label. */
 export const DESIGN_LAYERS = {
@@ -147,6 +148,10 @@ export interface SequenceDiagramView {
   createdAt: string;
   completedAt: string | null;
   costUsd: number | null;
+  // What ran it (docs/CODEX-PLAN.md Phase 4): the model id and its provider. Optional: an older
+  // server or row omits them — read through `aiRunLabel(provider, model)`.
+  model?: string | null;
+  provider?: AiProviderId;
 }
 
 /**
