@@ -435,20 +435,22 @@ describe('runSprintPathsPass', () => {
 
 describe('the after-read chain', () => {
   const ctx = { log: { warn: vi.fn() } as never, llm: { detectAuth: () => ({ status: 'ok' as const }) }, recordAiUsage: async () => undefined };
-  it('briefs, then themes, then paths', async () => {
+  it('briefs, then themes, then needs code, then paths', async () => {
     const order: string[] = [];
     await runSprintAfterRead(ctx, 1, 2, {
       briefs: async () => (order.push('briefs'), { state: 'done', stoppedBy: null }),
       themes: async () => order.push('themes'),
+      code: async (_c: unknown, _a: number, _w: number, manual: boolean) => order.push(manual ? 'code:manual' : 'code'),
       paths: async () => order.push('paths'),
     });
-    expect(order).toEqual(['briefs', 'themes', 'paths']);
+    expect(order).toEqual(['briefs', 'themes', 'code', 'paths']);
   });
   it('over the Claude spend budget: a scheduled read runs nothing; the reader’s Refresh still runs', async () => {
     const order: string[] = [];
     const steps = {
       briefs: async () => (order.push('briefs'), { state: 'done', stoppedBy: null }),
       themes: async () => order.push('themes'),
+      code: async (_c: unknown, _a: number, _w: number, manual: boolean) => order.push(manual ? 'code:manual' : 'code'),
       paths: async () => order.push('paths'),
     };
     const allow = vi.fn(async () => false);
@@ -457,7 +459,7 @@ describe('the after-read chain', () => {
     expect(order).toEqual([]);
     allow.mockClear();
     await runSprintAfterRead(over, 1, 2, steps, true);
-    expect(order).toEqual(['briefs', 'themes', 'paths']);
+    expect(order).toEqual(['briefs', 'themes', 'code:manual', 'paths']);
     expect(allow).not.toHaveBeenCalled();
   });
   it('a brief pass that did not finish starts nothing after it; a throw is contained', async () => {
@@ -465,11 +467,13 @@ describe('the after-read chain', () => {
     await runSprintAfterRead(ctx, 1, 2, {
       briefs: async () => (order.push('briefs'), { state: 'busy' }),
       themes: async () => order.push('themes'),
+      code: async (_c: unknown, _a: number, _w: number, manual: boolean) => order.push(manual ? 'code:manual' : 'code'),
       paths: async () => order.push('paths'),
     });
     await runSprintAfterRead(ctx, 1, 2, {
       briefs: async () => ({ state: 'done', stoppedBy: 'runtime' }),
       themes: async () => order.push('themes'),
+      code: async (_c: unknown, _a: number, _w: number, manual: boolean) => order.push(manual ? 'code:manual' : 'code'),
       paths: async () => order.push('paths'),
     });
     expect(order).toEqual(['briefs']);
@@ -479,6 +483,7 @@ describe('the after-read chain', () => {
         themes: async () => {
           throw new Error('boom');
         },
+        code: async () => order.push('code'),
         paths: async () => order.push('paths'),
       }),
     ).resolves.toBeUndefined();

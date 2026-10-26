@@ -20,11 +20,14 @@
 //            the sprint is FAINT: a light dashed border on a tinted ground (its text stays at full
 //            contrast). The state is also in the accessible name. The board's key (`BorderKey`,
 //            components/LaneBoard.tsx) names each style.
+//   CODE     "needs code" (lib/laneBoard.ts `ticketCodeNote`): the judgement and its reason are the card
+//            button's tooltip and in its accessible name; under the board's Needs code filter a ticket
+//            not judged yet wears a muted "Not judged yet" beside its key (`codeMarker`).
 //   CLICK    the card opens the STORY TRAY beside the board (Sprint/SprintStoryTray.tsx — the story
 //            view's own body; `onSelect`). The open card wears a ring (never the border, which carries
 //            meaning). The small arrow in the corner opens the story TAB (`onOpen` — `useOpenStory`).
 import type { SprintGraphNode } from '@pierre-review/shared';
-import { hasLivePr, ticketCardBorder, ticketCardCriteria, ticketCardTags } from '../lib/laneBoard.js';
+import { hasLivePr, ticketCardBorder, ticketCardCriteria, ticketCardTags, ticketCodeNote } from '../lib/laneBoard.js';
 import { ArrowIcon, RefreshIcon, WarningIcon } from './Icons.js';
 
 export function TicketCard({
@@ -38,6 +41,7 @@ export function TicketCard({
   onSelect,
   onOpen,
   cardRef,
+  codeMarker = false,
 }: {
   node: SprintGraphNode;
   critical: boolean;
@@ -55,6 +59,8 @@ export function TicketCard({
   /** Open the ticket's story tab. */
   onOpen: (node: SprintGraphNode) => void;
   cardRef?: (el: HTMLElement | null) => void;
+  /** The board's Needs code filter is on: a ticket not judged yet says so beside its key. */
+  codeMarker?: boolean;
 }): JSX.Element {
   // "No owner" and "Unassigned" would say one thing twice on the person line's views.
   const tags = ticketCardTags(node).filter((t) => !(show === 'person' && t === 'No owner'));
@@ -62,6 +68,8 @@ export function TicketCard({
   const withPr = !node.ghost && hasLivePr(node);
   const oneLiner = node.brief.oneLiner != null && node.brief.oneLiner.trim() !== '' ? node.brief.oneLiner : null;
   const title = node.title !== '' ? node.title : 'Not read';
+  const code = ticketCodeNote(node);
+  const marker = codeMarker ? (code?.marker ?? null) : null;
 
   const name = [
     `${node.key}: ${title}`,
@@ -76,6 +84,7 @@ export function TicketCard({
     withPr ? 'has a pull request' : null,
     critical ? 'on a critical path' : null,
     waiting ? 'waiting on another ticket' : null,
+    code?.tooltip ?? null,
     'shows its story beside the board',
   ]
     .filter(Boolean)
@@ -100,6 +109,7 @@ export function TicketCard({
         aria-label={name}
         aria-pressed={selected}
         aria-controls={selected ? trayId : undefined}
+        title={code?.tooltip}
         data-card-button
         onClick={() => onSelect(node)}
         // A 2px (critical) border takes 1px of the padding back, so every card is the same size.
@@ -109,6 +119,11 @@ export function TicketCard({
           {/* Has an open or merged pull request: a violet dot (the merge family), top left. */}
           {withPr && <span aria-hidden data-testid="ticket-pr-dot" className="h-2 w-2 shrink-0 rounded-full bg-violet-500 dark:bg-violet-400" />}
           <span className="truncate font-mono text-[11px] font-semibold leading-snug text-gray-700 dark:text-gray-200">{node.key}</span>
+          {marker != null && (
+            <span aria-hidden data-testid="ticket-code-marker" className="ml-auto shrink-0 text-[11px] italic leading-snug text-gray-600 dark:text-gray-300">
+              {marker}
+            </span>
+          )}
         </span>
         {/* Two lines held open (12px × leading-snug), so a one-line title is as tall as a two-line one. */}
         <span aria-hidden className="mt-0.5 line-clamp-2 min-h-[2.75em] break-words text-[12px] leading-snug text-gray-900 dark:text-gray-50">

@@ -3248,6 +3248,45 @@ export const sprintBriefs = sqliteTable(
   }),
 );
 
+// sprint_code_judgements — "WILL THIS TICKET NEED CODE?" (migration 0132; docs/CLAUDE-REVIEW.md § Sprint
+// code judgements). One row per (account, workspace, ticket ident): a cheap one-shot's yes/no + one short
+// reason for a NOT-STARTED sprint ticket with no pull request. CURRENT while `text_hash` = today's hash of
+// the ticket's text AND `judge_version` = SPRINT_CODE_JUDGE_VERSION, so it re-runs only when the text
+// changes. Written ONLY by review/sprint-code/manager.ts; read by the sprint graph fold. Tenancy via the
+// named composite FK onto `workspaces (id, account_id)`.
+// ⚠ Every `onConflictDoUpdate` on this table targets exactly [accountId, workspaceId, ident].
+export const sprintCodeJudgements = sqliteTable(
+  'sprint_code_judgements',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    workspaceId: integer('workspace_id').notNull(),
+    ident: text('ident').notNull(),
+    textHash: text('text_hash').notNull(),
+    judgeVersion: integer('judge_version').notNull(),
+    needsCode: integer('needs_code', { mode: 'boolean' }).notNull(),
+    reason: text('reason'),
+    model: text('model').notNull(),
+    provider: text('provider'),
+    costUsd: real('cost_usd'),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    accountWsIdentUx: uniqueIndex('sprint_code_judgements_account_ws_ident').on(t.accountId, t.workspaceId, t.ident),
+    workspaceAccountFk: foreignKey({
+      name: 'sprint_code_judgements_workspace_account_fk',
+      columns: [t.workspaceId, t.accountId],
+      foreignColumns: [workspaces.id, workspaces.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
 // sprint_themes — THE SPRINT GRAPH's THEMES (migration 0108 / pg 0095): ONE sprint-wide Haiku call after
 // the brief pass names 3–8 short themes and puts each sprint ticket in exactly one. ONE row per
 // (account, workspace), replaced by each new pass; CURRENT while `input_hash` = today's hash of the sprint

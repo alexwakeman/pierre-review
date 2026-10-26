@@ -211,6 +211,42 @@ export interface SprintGraphNode {
   /** The sprint THEME this ticket was put in (`SprintGraphResponse.themes`); null for a ghost, and
    *  when no current theme pass covers it. */
   theme: string | null;
+  /** "Will this ticket need code?" — asked ONLY of a sprint ticket in a Not started bucket with no pull
+   *  request of any state (`sprintCodeAsked`); null / absent for every other ticket (a ticket with a
+   *  pull request needs no guess). The SPA's "Needs code" filter reads it. */
+  codeJudgement?: SprintCodeJudgement | null;
+}
+
+// ── "Needs code": the judgement on not-started tickets ──────────────────────────────────────────
+//
+// A cheap one-shot (the brief model) judges, after a sprint read, whether each NOT-STARTED sprint ticket
+// with no pull request will most likely need code changes. Cached per ticket by a hash of its text
+// (`sprint_code_judgements`), so it re-runs only when the text changes or this version moves.
+
+/** Bumped when the judgement's prompt or shape changes: every stored judgement turns `pending`. */
+export const SPRINT_CODE_JUDGE_VERSION = 1;
+/** Tickets one call judges at most. */
+export const SPRINT_CODE_JUDGE_BATCH = 12;
+/** Tickets one pass judges at most. */
+export const SPRINT_CODE_JUDGE_RUN_CAP = 60;
+/** The reason's characters at most; longer → no reason (never cut). */
+export const SPRINT_CODE_JUDGE_REASON_MAX = 120;
+
+/** 'code' = likely needs code; 'no_code' = likely not (design, analysis, content, configuration…);
+ *  'pending' = not judged for today's text yet; 'off' = AI is off here. */
+export type SprintCodeJudgementState = 'code' | 'no_code' | 'pending' | 'off';
+
+export interface SprintCodeJudgement {
+  state: SprintCodeJudgementState;
+  /** One short plain sentence (≤ SPRINT_CODE_JUDGE_REASON_MAX, no numerals); null when none. */
+  reason: string | null;
+}
+
+/** Is this ticket one the judgement is asked about? A sprint ticket (never a ghost) whose bucket means
+ *  Not started and that has no pull request of any state. Pure — the server's to-do list and the fold
+ *  share it. */
+export function sprintCodeAsked(n: { ghost: boolean; stage: SprintStage | null; prs: ReadonlyArray<unknown> }): boolean {
+  return !n.ghost && n.stage === 'not_started' && n.prs.length === 0;
 }
 
 /** A ticket check's criteria verdicts (shared fold `criteriaCounts` over its stored assessment). Its

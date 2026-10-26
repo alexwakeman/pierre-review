@@ -2126,8 +2126,8 @@ sprint. The API route keeps its old name (`GET /api/sprint-graph`); only the SPA
   1. **The pace strip** — CODE's `pace` (`paceItems`), every figure with its denominator: "Day 4 of 14"
      with a time bar, "Code merged 21 of 55", "Product review 15 of 55" (`pace.productReview`; only when
      a Product review bucket exists), "Complete 17 of 55", "Open dependencies 6 in 3 chains".
-  2. **"Critical paths"** (ⓘ beside it) — one lane per STORED path (`pathsBoard`; riskiest first as
-     stored), its header the risk as a WORD chip ("High risk" / "Medium risk" / "Low risk"), the title and
+  2. **"Critical paths"** (ⓘ beside it) — one lane per STORED path (`pathsBoard`; by PR count, ties
+     riskiest first as stored), its header the risk as a WORD chip ("High risk" / "Medium risk" / "Low risk"), the title and
      the one sentence of advice; its tickets on their columns, every arrow on it critical. A ticket
      outside the sprint sits faint in "Outside the sprint". The state line (`sprintPathsView`, the server's
      `pathsStatus`): "Working out the critical paths…" with a small bar while `writing`; when they will
@@ -2145,8 +2145,8 @@ sprint. The API route keeps its old name (`GET /api/sprint-graph`); only the SPA
   4. **The count table** (`countTable`) — every sprint ticket once, by theme (+ No theme) and column,
      with totals; rows key on the lane id.
   With no paths stored the pace strip, call-outs and table still show.
-- **THEME** (`SprintThemesView`, `themesBoard`) — one lane per stored theme (the theme pass's order,
-  largest first), then "No theme" for tickets no theme holds (⚠ never "Other": the theme prompt invites a
+- **THEME** (`SprintThemesView`, `themesBoard`) — one lane per stored theme (by PR count, ties in the
+  theme pass's order, largest first), then "No theme" for tickets no theme holds (⚠ never "Other": the theme prompt invites a
   catch-all theme of that name); no themes at all → one "All tickets" lane and
   one line saying why ("Themes appear after Claude reads the sprint." / Claude is off). Header: the
   theme's ONE-OR-TWO-SENTENCE SUMMARY (`SprintTheme.summary`, written by the themes pass — Claude, no
@@ -2157,12 +2157,31 @@ sprint. The API route keeps its old name (`GET /api/sprint-graph`); only the SPA
   line of prose on the row and the code's counts sit apart from it. Sprint tickets only.
   An arrow is critical when its two tickets sit next to each other on a stored path; its key is the
   brief's `why`.
-- **PEOPLE** (`SprintPeopleView`, `peopleBoard`) — one lane per assignee, ⚠ **ALPHABETICAL, Unassigned
-  last, never sorted by load** (prep, not scoring — the People report's guardrail). A person is
+- **PEOPLE** (`SprintPeopleView`, `peopleBoard`) — one lane per assignee, by PR count (ties
+  alphabetical), Unassigned last. ⚠ It was alphabetical only ("prep, not scoring"); the OWNER reversed
+  that on 2026-10-26 ("sort … by number of PRs … same for the other rows on the other tabs"). A person is
   `SprintGraphResponse.people`'s (shared `sprintMembers`), matched on the tracker spelling. Header: "n
   tickets" and, ONLY when `reviewsWaiting` is a number, "n reviews waiting" — null prints nothing, never
   0; then the same colour bar as Theme, whose popover carries the same CODE row lines (no model; nothing
   about the person the data does not show). Cards carry their theme.
+- **ROW ORDER, EVERY VIEW** (owner decision 2026-10-26): lanes sort by their PULL REQUEST count — distinct
+  PR ids of ANY state on the lane's DRAWN cards (`lanePrCount`, after the filters) — most first; ties keep
+  the view's own order (risk / theme size / name); "No theme", "All tickets" and "Unassigned" stay LAST
+  (`byPrCount`, lib/laneBoard.ts). Each lane header says its count ("n PRs"), so the order is checkable.
+  The count table under Critical path follows the Theme order.
+- **THE FILTERS** (`SprintBoardFilters` in `Activity/SprintBoards.tsx`, mounted by SprintView above
+  every view; ⓘ beside them): two toggle chips (`aria-pressed`), "Has PRs" (≥ 1 PR of any state, closed
+  included) and "Needs code" (a PR, or `codeJudgement.state` `code` or `pending` — the "needs code"
+  judgement on Not started tickets, docs/CLAUDE-REVIEW.md § Sprint code judgements). Both on = both must
+  hold. Pure rule `sprintCardFilter`; the boards take it as `keep` and drop the cards BEFORE layout
+  (borders and "waiting" still read the whole sprint; a lane left empty is not drawn; a board left empty
+  says "No tickets match these filters."). With one on, "n of m tickets" (sprint tickets). A PENDING
+  ticket stays under Needs code with a muted "Not judged yet" beside its key (`TicketCard codeMarker`); a
+  judged one's reason is the card button's tooltip (`ticketCodeNote`). AI off → every asked ticket reads
+  `off`, so Needs code keeps PR tickets only, and the ⓘ says so. STATE: `store/sprintBoardFilter.ts`,
+  localStorage ONLY (key `pierre:sprintBoardFilter`) like the Open PRs
+  view choice — never the URL or `FilterDefaults`, so no `FILTER_STORAGE_VERSION` bump. The pace strip and
+  the count table are NOT filtered (they count the whole sprint).
 - **THE COLOUR BAR** (Theme and People headers; `SegmentBar`): a lane's tickets per column. Hovering or
   focusing it opens a HOVER-ONLY popover (`components/HoverPopover.tsx` — anchored, never following the
   mouse, `pointer-events-none`, closes when the pointer leaves) with CODE's two row lines (tickets by

@@ -18,8 +18,13 @@
 //             work). Only between two DRAWN cards — a card in a collapsed column draws no arrow. A
 //             labelled arrow carries a number; arrows with the same words share one.
 //
-// ⚠ NOTHING HERE RANKS PEOPLE. The People view's lanes are alphabetical, Unassigned last — never by
-// load, tickets or reviews (the People report's guardrail: prep, not scoring).
+//   ORDER     every view's lanes are sorted by their PULL REQUEST count (distinct PRs of any state on the
+//             lane's drawn cards), most first; ties keep the view's own order (a path's risk, a theme's
+//             size, a person's name). The catch-all lanes ("No theme", "Unassigned") stay last. (Owner
+//             decision 2026-10-26: People used to be alphabetical only; the owner asked for PR order on
+//             every view.)
+//   FILTERS   `keep` (the board's "Has PRs" / "Needs code" chips, `sprintCardFilter`) drops cards before
+//             layout; borders and "waiting" still read the whole sprint.
 import {
   SPRINT_STAGE_LABEL,
   personNameKey,
@@ -310,6 +315,59 @@ export function hasLivePr(n: Pick<SprintGraphNode, 'prs'>): boolean {
   return n.prs.some((p) => p.state !== 'closed');
 }
 
+// ── The board's filters ──────────────────────────────────────────────────────────────────────────
+
+/** The board's two filter chips (store/sprintBoardFilter.ts). Both off = every ticket. */
+export interface SprintCardFilter {
+  /** Only tickets with at least one pull request (any state, closed included). */
+  hasPrs: boolean;
+  /** Only tickets likely to need code: with a pull request, or Not started and judged likely to need
+   *  code — a ticket not judged yet stays (the card says so). */
+  needsCode: boolean;
+}
+
+export const NO_CARD_FILTER: SprintCardFilter = { hasPrs: false, needsCode: false };
+
+/** Is any chip on? */
+export const cardFilterOn = (f: SprintCardFilter): boolean => f.hasPrs || f.needsCode;
+
+/** Does a ticket pass the board's filters? Both chips on = both must hold. With AI off every judgement
+ *  reads 'off', so "Needs code" keeps only tickets with a pull request. Pure. */
+export function sprintCardFilter(f: SprintCardFilter): (n: Pick<SprintGraphNode, 'prs' | 'codeJudgement'>) => boolean {
+  return (n) => {
+    const hasPr = n.prs.length > 0;
+    if (f.hasPrs && !hasPr) return false;
+    if (f.needsCode && !hasPr) {
+      const s = n.codeJudgement?.state;
+      if (s !== 'code' && s !== 'pending') return false;
+    }
+    return true;
+  };
+}
+
+/** The card's "needs code" note: the reason as a tooltip, and a muted "Not judged yet" marker (shown
+ *  only under the Needs code filter). null = nothing to say. Pure. */
+export function ticketCodeNote(n: Pick<SprintGraphNode, 'codeJudgement'>): { marker: string | null; tooltip: string } | null {
+  const j = n.codeJudgement;
+  if (j == null || j.state === 'off') return null;
+  if (j.state === 'pending') return { marker: 'Not judged yet', tooltip: 'Not judged yet: will it need code?' };
+  const head = j.state === 'code' ? 'Likely needs code' : 'Likely no code';
+  return { marker: null, tooltip: j.reason != null ? `${head}: ${j.reason}` : head };
+}
+
+/** Distinct pull requests (any state) on a lane's cards — what every view's lanes are sorted by. */
+export function lanePrCount(cards: ReadonlyArray<BoardCardDef<SprintCardData>>): number {
+  return new Set(cards.flatMap((c) => c.data.node.prs.map((p) => p.prId))).size;
+}
+
+/** Lanes by PR count, most first; ties (and the catch-all lanes, kept last) in the given order. Stable. */
+function byPrCount<T extends { id: string; last?: boolean }>(order: readonly T[], prsOf: (id: string) => number): T[] {
+  return order
+    .map((l, i) => ({ l, i, n: prsOf(l.id) }))
+    .sort((a, b) => Number(a.l.last === true) - Number(b.l.last === true) || b.n - a.n || a.i - b.i)
+    .map((x) => x.l);
+}
+
 /** A TicketCard's acceptance-criteria line, or null when there is nothing to say.
  *   - a ticket CHECK (the ticket review) succeeded: "3 of 4 criteria met", from its own criteria list
  *     (`stale` when its pull requests moved since — the card dims it and says so aloud);
@@ -395,9 +453,11 @@ export interface SprintCardData {
 }
 
 export type SprintLaneData =
-  | { kind: 'path'; risk: SprintPathRisk; advice: string }
+  | { kind: 'path'; risk: SprintPathRisk; advice: string; prs: number }
   | {
       kind: 'theme';
+      /** Distinct pull requests (any state) on the lane's cards — the lanes' order. */
+      prs: number;
       other: boolean;
       live: number;
       merged: number;
@@ -411,6 +471,8 @@ export type SprintLaneData =
     }
   | {
       kind: 'person';
+      /** Distinct pull requests (any state) on the lane's cards — the lanes' order. */
+      prs: number;
       unassigned: boolean;
       tickets: number;
       reviewsWaiting: number | null;
@@ -468,6 +530,8 @@ interface BoardInput {
   paths: SprintPaths | null | undefined;
   /** `statusLayout.columns`. */
   columns: ReadonlyArray<SprintColumn> | null | undefined;
+  /** The board's filters (`sprintCardFilter`): a ticket it rejects draws no card. Absent = every ticket. */
+  keep?: (n: SprintGraphNode) => boolean;
 }
 
 function cardsFor(nodes: ReadonlyArray<SprintGraphNode>, lane: string, view: SprintBoardView, critical: Set<string>, waiting: Set<string>): Array<BoardCardDef<SprintCardData>> {
@@ -489,10 +553,12 @@ function needs(cards: ReadonlyArray<BoardCardDef<SprintCardData>>): { outside: b
   };
 }
 
-/** CRITICAL PATH: one lane per stored path (riskiest first, as stored), its tickets in the path's
- *  order; a ticket outside the sprint sits in "Outside the sprint". Every arrow on it is critical. */
+/** CRITICAL PATH: one lane per stored path (by PR count, then riskiest first as stored), its tickets in
+ *  the path's order; a ticket outside the sprint sits in "Outside the sprint". Every arrow on it is
+ *  critical. */
 export function pathsBoard(i: BoardInput): SprintBoard {
   const byIdent = new Map(i.nodes.map((n) => [n.ident, n]));
+  const keep = i.keep ?? (() => true);
   const critical = criticalIdents(i.paths);
   const waiting = waitingIdents(i.nodes, i.edges);
   const lanes: SprintBoard['lanes'] = [];
@@ -500,11 +566,13 @@ export function pathsBoard(i: BoardInput): SprintBoard {
   const arrows: BoardArrowDef[] = [];
   (i.paths?.paths ?? []).forEach((p, idx) => {
     const id = `path:${idx}`;
-    const mine = [...new Set(p.idents)].map((x) => byIdent.get(x)).filter((n): n is SprintGraphNode => n != null);
-    // A path none of whose tickets is on today's map draws no lane (never a header-only board).
+    const mine = [...new Set(p.idents)].map((x) => byIdent.get(x)).filter((n): n is SprintGraphNode => n != null && keep(n));
+    // A path none of whose tickets is on today's map (or passes the filters) draws no lane (never a
+    // header-only board).
     if (mine.length === 0) return;
-    lanes.push({ id, label: p.title, data: { kind: 'path', risk: p.risk, advice: p.advice } });
-    cards.push(...cardsFor(mine, id, 'paths', critical, waiting));
+    const laneCards = cardsFor(mine, id, 'paths', critical, waiting);
+    lanes.push({ id, label: p.title, data: { kind: 'path', risk: p.risk, advice: p.advice, prs: lanePrCount(laneCards) } });
+    cards.push(...laneCards);
     const here = new Set(mine.map((n) => n.ident));
     for (const e of i.edges) {
       if (e.kind !== 'depends_on' || !here.has(e.from) || !here.has(e.to)) continue;
@@ -518,7 +586,8 @@ export function pathsBoard(i: BoardInput): SprintBoard {
       });
     }
   });
-  return { columns: sprintColumns(i.columns, needs(cards)), lanes, cards, arrows };
+  const prsOf = new Map(lanes.map((l) => [l.id, l.data.kind === 'path' ? l.data.prs : 0]));
+  return { columns: sprintColumns(i.columns, needs(cards)), lanes: byPrCount(lanes, (id) => prsOf.get(id) ?? 0), cards, arrows };
 }
 
 /** The `depends_on` arrows between two sprint tickets (Theme and People): critical when the two sit
@@ -561,10 +630,10 @@ export const ALL_TICKETS_LABEL = 'All tickets';
 export const codeMerged = (n: Pick<SprintGraphNode, 'prs'>): boolean =>
   n.prs.some((p) => p.state === 'merged') && !n.prs.some((p) => p.state === 'open');
 
-/** THEME: one lane per theme in the stored order (largest first), then "Other" for tickets no theme
- *  holds. With no themes, one "All tickets" lane. Sprint tickets only. */
+/** THEME: one lane per theme, by PR count (ties in the stored order, largest first), then "No theme"
+ *  for tickets no theme holds. With no themes, one "All tickets" lane. Sprint tickets only. */
 export function themesBoard(i: BoardInput & { themes: ReadonlyArray<SprintTheme> | null | undefined }): SprintBoard {
-  const nodes = sprintOnly(i.nodes);
+  const nodes = sprintOnly(i.nodes).filter(i.keep ?? (() => true));
   const critical = criticalIdents(i.paths);
   const waiting = waitingIdents(i.nodes, i.edges);
   const themes = i.themes ?? [];
@@ -572,15 +641,17 @@ export function themesBoard(i: BoardInput & { themes: ReadonlyArray<SprintTheme>
   const summaryOf = new Map(themes.map((t) => [t.name, t.summary ?? null]));
   const laneIdOf = (n: SprintGraphNode): string =>
     themes.length === 0 ? 'all' : n.theme != null && names.has(n.theme) ? `theme:${n.theme}` : 'other';
-  const order: Array<{ id: string; label: string; other: boolean; summary: string | null }> =
+  const stored: Array<{ id: string; label: string; other: boolean; last: boolean; summary: string | null }> =
     themes.length === 0
-      ? [{ id: 'all', label: ALL_TICKETS_LABEL, other: true, summary: null }]
+      ? [{ id: 'all', label: ALL_TICKETS_LABEL, other: true, last: true, summary: null }]
       : [
-          ...themes.map((t) => ({ id: `theme:${t.name}`, label: t.name, other: false, summary: summaryOf.get(t.name) ?? null })),
-          { id: 'other', label: OTHER_THEME_LABEL, other: true, summary: null },
+          ...themes.map((t) => ({ id: `theme:${t.name}`, label: t.name, other: false, last: false, summary: summaryOf.get(t.name) ?? null })),
+          { id: 'other', label: OTHER_THEME_LABEL, other: true, last: true, summary: null },
         ];
   const laneOf = new Map(nodes.map((n) => [n.ident, laneIdOf(n)]));
-  const cards = order.flatMap((l) => cardsFor(nodes.filter((n) => laneOf.get(n.ident) === l.id), l.id, 'themes', critical, waiting));
+  const cardsOf = new Map(stored.map((l) => [l.id, cardsFor(nodes.filter((n) => laneOf.get(n.ident) === l.id), l.id, 'themes', critical, waiting)]));
+  const order = byPrCount(stored, (id) => lanePrCount(cardsOf.get(id) ?? []));
+  const cards = order.flatMap((l) => cardsOf.get(l.id) ?? []);
   const columns = sprintColumns(i.columns, needs(cards));
   const lanes: SprintBoard['lanes'] = order.map((l) => {
     const mine = cards.filter((c) => c.lane === l.id);
@@ -589,6 +660,7 @@ export function themesBoard(i: BoardInput & { themes: ReadonlyArray<SprintTheme>
       label: l.label,
       data: {
         kind: 'theme',
+        prs: lanePrCount(mine),
         other: l.other,
         live: mine.filter((c) => c.data.node.stage !== 'done').length,
         merged: mine.filter((c) => codeMerged(c.data.node)).length,
@@ -621,12 +693,12 @@ export function assigneeLabel(node: Pick<SprintGraphNode, 'assignee'>, personOfN
   return p != null && p.name.trim() !== '' ? p.name : raw.trim();
 }
 
-/** PEOPLE: one lane per assignee, ALPHABETICAL, Unassigned last — ⚠ never ordered by load. A person is
+/** PEOPLE: one lane per assignee, by PR count (ties alphabetical), Unassigned last. A person is
  *  `SprintGraphResponse.people`'s (the shared Members identity), matched on the tracker spelling; an
  *  assignee it does not list gets a lane under the tracker's name. An arrow between two people's lanes
  *  is a hand-off, keyed "<person> waits on <person>"; one inside a lane keys the brief's why. */
 export function peopleBoard(i: BoardInput & { people: ReadonlyArray<SprintPerson> }): SprintBoard {
-  const nodes = sprintOnly(i.nodes);
+  const nodes = sprintOnly(i.nodes).filter(i.keep ?? (() => true));
   const critical = criticalIdents(i.paths);
   const waiting = waitingIdents(i.nodes, i.edges);
   const personOfName = personIndex(i.people);
@@ -645,11 +717,13 @@ export function peopleBoard(i: BoardInput & { people: ReadonlyArray<SprintPerson
     if (!lanesById.has(lane.id)) lanesById.set(lane.id, lane);
     laneOf.set(n.ident, lane.id);
   }
-  // Alphabetical, Unassigned last. Nothing about a person's tickets or reviews decides the order.
-  const order = [...lanesById.values()].sort(
-    (a, b) => Number(a.unassigned) - Number(b.unassigned) || a.label.localeCompare(b.label) || a.id.localeCompare(b.id),
-  );
-  const cards = order.flatMap((l) => cardsFor(nodes.filter((n) => laneOf.get(n.ident) === l.id), l.id, 'people', critical, waiting));
+  // By PR count (the owner's rule for every view), ties alphabetical, Unassigned last.
+  const alpha = [...lanesById.values()]
+    .sort((a, b) => Number(a.unassigned) - Number(b.unassigned) || a.label.localeCompare(b.label) || a.id.localeCompare(b.id))
+    .map((l) => ({ ...l, last: l.unassigned }));
+  const cardsOf = new Map(alpha.map((l) => [l.id, cardsFor(nodes.filter((n) => laneOf.get(n.ident) === l.id), l.id, 'people', critical, waiting)]));
+  const order = byPrCount(alpha, (id) => lanePrCount(cardsOf.get(id) ?? []));
+  const cards = order.flatMap((l) => cardsOf.get(l.id) ?? []);
   const columns = sprintColumns(i.columns, needs(cards));
   const lanes: SprintBoard['lanes'] = order.map((l) => {
     const mine = cards.filter((c) => c.lane === l.id);
@@ -658,6 +732,7 @@ export function peopleBoard(i: BoardInput & { people: ReadonlyArray<SprintPerson
       label: l.label,
       data: {
         kind: 'person',
+        prs: lanePrCount(mine),
         unassigned: l.unassigned,
         tickets: mine.length,
         reviewsWaiting: l.person?.reviewsWaiting ?? null,

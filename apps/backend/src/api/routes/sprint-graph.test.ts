@@ -634,3 +634,30 @@ describe('ticket checks and the change token', () => {
     expect(out.nodes.every((n) => n.check == null && n.checkRunning === false)).toBe(true);
   });
 });
+
+describe('"needs code" on the graph', () => {
+  it('asked only of a Not started sprint ticket with no PR; current by text hash; off with AI off; to-do lists the pending ones', async () => {
+    const judgements = await import('../../db/sprint-code-judgements.js');
+    const nodeOf = (out: any, k: string) => out.nodes.find((x: any) => x.key === k);
+    const before = await graph.getSprintGraph(1, ownWs, { aiEnabled: true, now: Date.now() });
+    // ENG-3: Not started, no PR → asked. ENG-1 has PRs, ENG-2 is in progress, ghosts are never asked.
+    expect(nodeOf(before, 'ENG-3').codeJudgement).toEqual({ state: 'pending', reason: null });
+    for (const k of ['ENG-1', 'ENG-2', 'ENG-4', 'ENG-8']) expect(nodeOf(before, k).codeJudgement).toBeNull();
+    const todo = await graph.sprintCodeJudgeTodo(1, ownWs, 10);
+    expect(todo.map((t) => t.key)).toEqual(['ENG-3']);
+    // A judgement of an older text stays pending…
+    const row = { needsCode: true, reason: 'Adds a basket store.', costUsd: 0, inputTokens: 0, outputTokens: 0 };
+    await judgements.storeSprintCodeJudgement(1, ownWs, id('ENG-3'), 'old-hash', row);
+    expect(nodeOf(await graph.getSprintGraph(1, ownWs, { aiEnabled: true, now: Date.now() }), 'ENG-3').codeJudgement.state).toBe('pending');
+    // …today's text's is current, and moves the change token.
+    await judgements.storeSprintCodeJudgement(1, ownWs, id('ENG-3'), todo[0]!.input.textHash, row);
+    const after = await graph.getSprintGraph(1, ownWs, { aiEnabled: true, now: Date.now() });
+    expect(nodeOf(after, 'ENG-3').codeJudgement).toEqual({ state: 'code', reason: 'Adds a basket store.' });
+    expect(after.changeToken).not.toBe(before.changeToken);
+    expect(await graph.sprintCodeJudgeTodo(1, ownWs, 10)).toEqual([]);
+    // Another tenant never reads it.
+    expect((await judgements.storedSprintCodeJudgements(2, foreignWs, [id('ENG-3')])).size).toBe(0);
+    const off = await graph.getSprintGraph(1, ownWs, { aiEnabled: false, now: Date.now() });
+    expect(nodeOf(off, 'ENG-3').codeJudgement).toEqual({ state: 'off', reason: null });
+  });
+});

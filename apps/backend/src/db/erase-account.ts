@@ -235,6 +235,8 @@ export async function eraseAccountData(accountId: number): Promise<EraseResult> 
     // 0107 / pg 0094). All cascade from workspaces too, and are explicit anyway. Order is free.
     await tx.delete(schema.sprintBriefs).where(eq(schema.sprintBriefs.accountId, accountId)).execute();
     await tx.delete(schema.sprintThemes).where(eq(schema.sprintThemes.accountId, accountId)).execute();
+    // The "needs code" judgements (migration 0132) — model answers about the tickets.
+    await tx.delete(schema.sprintCodeJudgements).where(eq(schema.sprintCodeJudgements.accountId, accountId)).execute();
     await tx.delete(schema.sprintStory).where(eq(schema.sprintStory.accountId, accountId)).execute();
     // The sprint builder's critical paths (migration 0120 / pg 0107) — model prose about the tickets.
     await tx.delete(schema.sprintPaths).where(eq(schema.sprintPaths.accountId, accountId)).execute();
@@ -403,6 +405,7 @@ export function accountScopedTables(): {
     { name: 'sprintAssessments', col: schema.sprintAssessments.accountId, table: schema.sprintAssessments },
     { name: 'sprintBriefs', col: schema.sprintBriefs.accountId, table: schema.sprintBriefs },
     { name: 'sprintThemes', col: schema.sprintThemes.accountId, table: schema.sprintThemes },
+    { name: 'sprintCodeJudgements', col: schema.sprintCodeJudgements.accountId, table: schema.sprintCodeJudgements },
     { name: 'sprintStory', col: schema.sprintStory.accountId, table: schema.sprintStory },
     { name: 'sprintPaths', col: schema.sprintPaths.accountId, table: schema.sprintPaths },
     { name: 'sprintViewSnapshots', col: schema.sprintViewSnapshots.accountId, table: schema.sprintViewSnapshots },

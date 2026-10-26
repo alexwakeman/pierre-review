@@ -313,7 +313,7 @@ on the platform). Over budget the run is SKIPPED, never queued: auto review's sw
 re-reviews, Check threads — the settle clocks are kept) and its lane start (manager.ts, before the
 row exists), auto fix (`over_budget` skip reason), the CI and ticket review sweepers (their cursors
 are left alone, so nothing is missed), the design diagrams after an AUTO review, the sprint after-read chain
-(briefs → themes → paths) after a SCHEDULED read, and the Slack digest's sprint summary (the send
+(briefs → themes → needs code → paths) after a SCHEDULED read, and the Slack digest's sprint summary (the send
 still goes, with the stored summary). Logged once per pause. A run the reader STARTS is never
 refused, nor what follows from it: the diagrams after a MANUAL review and the chain after the
 reader's sprint Refresh (`noteManualSprintRead`, tracker/sprint/hooks.ts) skip the gate. In the SPA,
@@ -2599,6 +2599,41 @@ lane per theme, "Other" last; the Critical path view's count table rows too).
   summary reads `null`, `sprintThemesOf`) and each node's `theme` only while the stored row is
   CURRENT for today's hash and version — otherwise null, and the SPA disables "Theme" with "Themes
   appear after Claude reads the sprint".
+
+## Sprint code judgements (This Sprint → "Needs code")
+
+A cheap batched yes/no per NOT-STARTED sprint ticket: will it most likely need code changes (work that
+ends in a pull request)? It feeds the board's "Needs code" filter (docs/FRONTEND.md § This Sprint), which
+keeps tickets with a pull request plus the Not started ones judged "code".
+
+- **Where**: `src/review/sprint-code/` — `prompt.ts`, `validate.ts`, `manager.ts`; the input and store
+  are core `db/sprint-code-judgements.ts`, the to-do is `db/sprint-graph.ts` `sprintCodeJudgeTodo`.
+  Table `sprint_code_judgements` (migration `0132`): one row per (account, workspace, ident).
+- **WHO IS ASKED**: shared `sprintCodeAsked` — a sprint ticket (never a ghost) whose bucket MEANS Not
+  started and that has no pull request of ANY state. The graph fold sets `node.codeJudgement` only for
+  those (`{state: 'code' | 'no_code' | 'pending' | 'off', reason}`); every other node carries `null`.
+- **WHEN**: step 3 of the AFTER-READ CHAIN (`review/sprint-briefs/index.ts`: briefs → themes → needs code
+  → paths), never on a view. ⚠ It CALLS THE MODEL ONLY FOR A TICKET WHOSE TEXT CHANGED: a row is current
+  while its `text_hash` (title, issue type, description clipped to 1,500 characters, ≤ 12 criteria) and
+  `judge_version` (`SPRINT_CODE_JUDGE_VERSION`) match. A status move or a new assignee costs nothing.
+- **BUDGET**: an AUTOMATIC run asks `automaticRunAllowed` itself (besides the chain's own gate — it may
+  run long after the chain began) and is SKIPPED (`over_budget`), never queued; after the reader's Refresh
+  (`manual`) it is never refused.
+- **THE CALL**: ≤ `SPRINT_CODE_JUDGE_BATCH` (12) tickets per `cheapComplete` on the ACTIVE provider (the
+  brief model), ≤ `SPRINT_CODE_JUDGE_RUN_CAP` (60) per pass; each ticket inside ONE per-call nonce fence
+  (the text is attacker-authorable; the system prompt says it is data). Answer
+  `{"tickets":[{"key","code","reason"}]}`. ⚠ Changing one word of `SPRINT_CODE_SYSTEM` is a new
+  `SPRINT_CODE_JUDGE_VERSION`.
+- **VALIDATION** (`validateSprintCode`): per ticket, never repaired — an unknown key or a non-boolean
+  `code` drops that entry; a key answered twice two ways drops it; the REASON never drops the entry
+  (missing, over `SPRINT_CODE_JUDGE_REASON_MAX` (120) or carrying any numeral → `null`). Keys left
+  unanswered are retried ONCE in a second call; still missing, they wait for the next read.
+- **COST**: every call is recorded (`recordAiUsage`, feature `sprint_code`, the provider and model that
+  ran); each stored row carries its share. AI off (`config.aiEnabled` false) → no pass, and every asked
+  node reads `off`, so the filter keeps only tickets with a pull request.
+- **SPA**: the card's button `title` and accessible name carry "Likely needs code: <reason>" / "Likely no
+  code"; under the Needs code filter a pending ticket stays on the board with a muted "Not judged yet"
+  beside its key (lib/laneBoard.ts `ticketCodeNote`).
 
 ## Sprint paths (This Sprint, the sprint builder)
 

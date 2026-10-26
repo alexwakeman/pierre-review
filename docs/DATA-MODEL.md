@@ -725,6 +725,12 @@ fact per account. Every read predicates on `account_id` (`currentLabelRowsFor`);
   ticket once), model, cost — CURRENT while `input_hash` (sprint keys + brief summaries) and
   `theme_version` match today's (`db/sprint-themes.ts`). Written only by `review/sprint-themes/`;
   replaced by each pass.
+- **`sprint_code_judgements`** (migration `0132`) — one per (account, workspace, `ident`): the cheap
+  "will this not-started ticket need code?" answer — `needs_code`, `reason` (≤ 120, no numerals, or
+  NULL), model, provider, the row's share of the call's cost — CURRENT while `text_hash` (title, type,
+  clipped description, criteria) and `judge_version` match today's (`db/sprint-code-judgements.ts`).
+  Written only by `review/sprint-code/`; read by the sprint graph fold. Named composite FK
+  `sprint_code_judgements_workspace_account_fk`; in `accountScopedTables()`, the erasure and the export.
 - **`sprint_story`** (migration `0109`) — ⚠ DORMANT since migration `0120`: the retired
   Haiku sprint STORY (`story_json` `{headline, focus, storylines}`). Nothing writes or reads it; the rows
   stay and are still erased. `sprint_reads.story_attempt_*` is dormant with it.

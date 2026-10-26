@@ -402,6 +402,7 @@ describe('sprint critical paths on Codex (kind: sprint_paths)', () => {
       {
         briefs: async () => (order.push('briefs'), { state: 'done', stoppedBy: null }) as any,
         themes: async () => order.push('themes') as any,
+        code: async () => order.push('code') as any,
         paths: async () => order.push('paths') as any,
       },
     );

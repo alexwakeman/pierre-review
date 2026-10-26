@@ -10,8 +10,10 @@ import {
   type SprintStage,
 } from '@pierre-review/shared';
 import {
+  cardFilterOn,
   cellKey,
   collapsedColumns,
+  sprintCardFilter,
   countTable,
   layoutBoard,
   paceItems,
@@ -26,8 +28,10 @@ import {
   type LaneSegment,
   type SprintBoard,
   type SprintCardData,
+  type SprintCardFilter,
   type SprintLaneData,
 } from '../../lib/laneBoard.js';
+import { useSprintBoardFilter } from '../../store/sprintBoardFilter.js';
 import { aiAuthFor, useAiCapabilities, useAiProviderName } from '../../hooks/useAiCapabilities.js';
 import { AiRunGate } from '../AiSetup.js';
 import { InfoButton } from '../InfoModal.js';
@@ -46,17 +50,78 @@ import { AiRunLabel } from '../AiRunLabel.js';
 //     advice), the call-outs (Claude's, then Limn's own), and a theme × column count of every ticket.
 //   • THEME — one lane per theme, "No theme" last; each header carries Claude's sentence on what the
 //     work involves (the themes pass), then CODE's line: tickets by column and pull-request presence.
-//   • PEOPLE — one lane per assignee, alphabetical, Unassigned last; each header carries CODE's line.
+//   • PEOPLE — one lane per assignee, Unassigned last; each header carries CODE's line.
 // Theme and People lanes draw a colour bar of their tickets by column; hovering (or focusing) it shows
 // the key. Under each board, a key to the card borders (the shared `BorderKey`). Every card is a
 // TicketCard: a click shows its story in the TRAY beside the board (`actions.onSelect`, as does a
 // call-out's ticket key); its corner arrow opens the ticket's story tab (`actions.onOpen`). A Complete column's
 // "n tickets" opens that lane's cell only.
 //
-// ⚠ PREP, NOT SCORING. The People view lists people ALPHABETICALLY — never by tickets, load or reviews
-// waiting — and shows no comparison between them (the People report's guardrail, db/person-period.ts).
+// ROW ORDER: every view's rows are sorted by their pull request count, most first (lib/laneBoard.ts
+// `byPrCount`; the owner's rule, 2026-10-26); each row header says its count. "No theme" and
+// "Unassigned" stay last. FILTERS: the "Has PRs" / "Needs code" chips above the board
+// (`SprintBoardFilters`, store/sprintBoardFilter.ts) drop cards on every view.
 
 const MUTED = 'text-gray-600 dark:text-gray-300';
+
+const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
+
+/** The board's filters as a card test, and whether any is on. */
+function useCardFilter(): { filter: SprintCardFilter; keep: ((n: SprintGraphNode) => boolean) | undefined } {
+  const filter = useSprintBoardFilter((s) => s.filter);
+  const keep = useMemo(() => (cardFilterOn(filter) ? sprintCardFilter(filter) : undefined), [filter]);
+  return { filter, keep };
+}
+
+const CHIP = 'rounded-full border px-2 py-0.5 text-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500';
+const CHIP_ON = 'border-sky-600 bg-sky-50 font-medium text-sky-800 dark:border-sky-400 dark:bg-sky-950 dark:text-sky-200';
+const CHIP_OFF = 'border-gray-300 text-gray-700 hover:border-gray-400 dark:border-gray-700 dark:text-gray-200 dark:hover:border-gray-500';
+
+/** The board's two filter chips, above every view: "Has PRs" and "Needs code". With one on, how many
+ *  sprint tickets show, of how many. */
+export function SprintBoardFilters({ data }: { data: SprintGraphResponse }): JSX.Element {
+  const name = useAiProviderName();
+  const filter = useSprintBoardFilter((s) => s.filter);
+  const toggle = useSprintBoardFilter((s) => s.toggle);
+  const sprint = data.nodes.filter((n) => !n.ghost);
+  const keep = sprintCardFilter(filter);
+  const shown = sprint.filter(keep).length;
+  const chip = (which: keyof SprintCardFilter, label: string) => (
+    <button type="button" aria-pressed={filter[which]} onClick={() => toggle(which)} className={`${CHIP} ${filter[which] ? CHIP_ON : CHIP_OFF}`}>
+      {label}
+    </button>
+  );
+  return (
+    <div role="group" aria-label="Filter tickets" data-testid="sprint-board-filters" className="flex flex-wrap items-center gap-1.5">
+      {chip('hasPrs', 'Has PRs')}
+      {chip('needsCode', 'Needs code')}
+      <InfoButton title="Filters">
+        <div className="space-y-2 text-sm">
+          <p>
+            <strong>Has PRs</strong>: tickets with at least one pull request, open, merged or closed.
+          </p>
+          <p>
+            <strong>Needs code</strong>: tickets with a pull request, plus Not started tickets that will most likely need code.
+            {data.aiEnabled
+              ? ` ${name} judges each of those from its text once, after the sprint is read, and again only when the text changes. A ticket not judged yet still shows, marked "Not judged yet". Hover a card to see why.`
+              : ' AI is off here, so it shows only tickets with a pull request.'}
+          </p>
+          <p>With both on, a ticket must pass both. Every view uses them.</p>
+        </div>
+      </InfoButton>
+      {cardFilterOn(filter) && (
+        <span data-testid="sprint-filter-count" className={`text-xs ${MUTED}`}>
+          {shown} of {plural(sprint.length, 'ticket')}
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** One line when the filters leave a board empty. */
+function NoMatch(): JSX.Element {
+  return <p className={`text-xs ${MUTED}`}>No tickets match these filters.</p>;
+}
 
 type OpenTicket = (node: SprintGraphNode) => void;
 
@@ -93,6 +158,7 @@ function SprintLaneBoard({
   show,
   people,
   actions,
+  codeMarker,
 }: {
   board: SprintBoard;
   label: string;
@@ -100,6 +166,8 @@ function SprintLaneBoard({
   show: 'person' | 'theme';
   people: SprintGraphResponse['people'];
   actions: SprintCardActions;
+  /** The Needs code filter is on: a card not judged yet says so. */
+  codeMarker: boolean;
 }): JSX.Element {
   // ONE spelling per person on the page: the People lane's (lib/laneBoard.ts `assigneeLabel`).
   const personOfName = useMemo(() => personIndex(people ?? []), [people]);
@@ -142,6 +210,7 @@ function SprintLaneBoard({
           onSelect={actions.onSelect}
           onOpen={actions.onOpen}
           cardRef={ref}
+          codeMarker={codeMarker}
         />
       )}
     />
@@ -157,11 +226,18 @@ const RISK_CHIP: Record<SprintPathRisk, string> = {
 function LaneHeader({ lane }: { lane: BoardLayout<SprintLaneData, SprintCardData>['lanes'][number] }): JSX.Element {
   const d = lane.data;
   const name = <h4 className="text-[12px] font-semibold leading-snug text-gray-900 dark:text-gray-50">{lane.label}</h4>;
+  // The rows are sorted by this count, so each row says it.
+  const prs = (
+    <p data-testid="lane-prs" className={`text-[11px] ${MUTED}`}>
+      {plural(d.prs, 'PR')}
+    </p>
+  );
   if (d.kind === 'path') {
     return (
       <div className="space-y-0.5">
         <span className={`inline-block rounded border px-1 text-[11px] font-medium ${RISK_CHIP[d.risk]}`}>{SPRINT_PATH_RISK_LABEL[d.risk]}</span>
         {name}
+        {prs}
         <p className={`text-[12px] leading-snug ${MUTED}`}>{d.advice}</p>
       </div>
     );
@@ -170,6 +246,7 @@ function LaneHeader({ lane }: { lane: BoardLayout<SprintLaneData, SprintCardData
     return (
       <div className="space-y-1">
         {name}
+        {prs}
         {d.summary != null && <p className="text-[12px] leading-snug text-gray-700 dark:text-gray-200">{d.summary}</p>}
         <SegmentBar segments={d.segments} lane={lane.label} progress={d.progress} code={d.code} />
       </div>
@@ -179,7 +256,7 @@ function LaneHeader({ lane }: { lane: BoardLayout<SprintLaneData, SprintCardData
     <div className="space-y-1">
       {name}
       <p className={`text-[11px] ${MUTED}`}>
-        {d.tickets} {d.tickets === 1 ? 'ticket' : 'tickets'}
+        {d.tickets} {d.tickets === 1 ? 'ticket' : 'tickets'} · {plural(d.prs, 'PR')}
         {/* null = no GitHub account mapped: say nothing, never 0. */}
         {d.reviewsWaiting != null && ` · ${d.reviewsWaiting} ${d.reviewsWaiting === 1 ? 'review' : 'reviews'} waiting`}
       </p>
@@ -296,7 +373,10 @@ export function SprintPathsView({ data, actions }: { data: SprintGraphResponse; 
   const heading = view.kind !== 'none' || gateLine;
   const paths = view.kind === 'paths' ? view.paths : null;
   const columns = data.statusLayout?.columns ?? null;
-  const board = useMemo(() => pathsBoard({ nodes: data.nodes, edges: data.edges, paths, columns }), [data.nodes, data.edges, paths, columns]);
+  const { filter, keep } = useCardFilter();
+  const board = useMemo(() => pathsBoard({ nodes: data.nodes, edges: data.edges, paths, columns, keep }), [data.nodes, data.edges, paths, columns, keep]);
+  // Paths are stored but the filters hide every ticket on them.
+  const filteredOut = keep != null && board.cards.length === 0 && (paths?.paths.length ?? 0) > 0;
   const productReview = (columns ?? []).some((c) => c.meaning === 'product_review');
   const calm = paths != null && paths.paths.length === 0;
   return (
@@ -327,7 +407,10 @@ export function SprintPathsView({ data, actions }: { data: SprintGraphResponse; 
         </div>
       )}
       {view.kind === 'paths' && view.note?.kind === 'failed' && <p className={`text-xs ${MUTED}`}>{view.note.text}</p>}
-      {board.cards.length > 0 && <SprintLaneBoard board={board} label="Critical paths" laneWidth="minmax(9rem, 13rem)" show="person" people={data.people} actions={actions} />}
+      {board.cards.length > 0 && (
+        <SprintLaneBoard board={board} label="Critical paths" laneWidth="minmax(9rem, 13rem)" show="person" people={data.people} actions={actions} codeMarker={filter.needsCode} />
+      )}
+      {filteredOut && <NoMatch />}
       <Callouts data={data} onOpen={actions.onSelect} />
       <CountTableView data={data} />
     </section>
@@ -505,9 +588,10 @@ function CountTableView({ data }: { data: SprintGraphResponse }): JSX.Element | 
 export function SprintThemesView({ data, actions }: { data: SprintGraphResponse; actions: SprintCardActions }): JSX.Element {
   const aiName = useAiProviderName();
   const columns = data.statusLayout?.columns ?? null;
+  const { filter, keep } = useCardFilter();
   const board = useMemo(
-    () => themesBoard({ nodes: data.nodes, edges: data.edges, paths: data.paths, columns, themes: data.themes }),
-    [data.nodes, data.edges, data.paths, columns, data.themes],
+    () => themesBoard({ nodes: data.nodes, edges: data.edges, paths: data.paths, columns, themes: data.themes, keep }),
+    [data.nodes, data.edges, data.paths, columns, data.themes, keep],
   );
   const themesOn = data.themes != null && data.themes.length > 0;
   return (
@@ -517,7 +601,11 @@ export function SprintThemesView({ data, actions }: { data: SprintGraphResponse;
           {data.aiEnabled ? `Themes appear after ${aiName} reads the sprint.` : 'AI is off here, so the sprint has no themes.'}
         </p>
       )}
-      <SprintLaneBoard board={board} label="Tickets by theme" laneWidth="minmax(8rem, 12rem)" show="person" people={data.people} actions={actions} />
+      {board.cards.length === 0 && keep != null ? (
+        <NoMatch />
+      ) : (
+        <SprintLaneBoard board={board} label="Tickets by theme" laneWidth="minmax(8rem, 12rem)" show="person" people={data.people} actions={actions} codeMarker={filter.needsCode} />
+      )}
     </section>
   );
 }
@@ -526,14 +614,19 @@ export function SprintThemesView({ data, actions }: { data: SprintGraphResponse;
 
 export function SprintPeopleView({ data, actions }: { data: SprintGraphResponse; actions: SprintCardActions }): JSX.Element {
   const columns = data.statusLayout?.columns ?? null;
-  // ⚠ Alphabetical, Unassigned last (lib/laneBoard.ts `peopleBoard`) — never sorted by load.
+  // By PR count, ties alphabetical, Unassigned last (lib/laneBoard.ts `peopleBoard`).
+  const { filter, keep } = useCardFilter();
   const board = useMemo(
-    () => peopleBoard({ nodes: data.nodes, edges: data.edges, paths: data.paths, columns, people: data.people }),
-    [data.nodes, data.edges, data.paths, columns, data.people],
+    () => peopleBoard({ nodes: data.nodes, edges: data.edges, paths: data.paths, columns, people: data.people, keep }),
+    [data.nodes, data.edges, data.paths, columns, data.people, keep],
   );
   return (
     <section aria-label="By person" className="space-y-2" data-testid="sprint-people">
-      <SprintLaneBoard board={board} label="Tickets by person" laneWidth="minmax(8rem, 11rem)" show="theme" people={data.people} actions={actions} />
+      {board.cards.length === 0 && keep != null ? (
+        <NoMatch />
+      ) : (
+        <SprintLaneBoard board={board} label="Tickets by person" laneWidth="minmax(8rem, 11rem)" show="theme" people={data.people} actions={actions} codeMarker={filter.needsCode} />
+      )}
     </section>
   );
 }
