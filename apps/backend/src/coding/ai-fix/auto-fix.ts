@@ -58,6 +58,7 @@ import { parseChangeReport, parseReviewItems } from './persist.js';
 import { getFixPrContext } from './pr-context.js';
 import { readWorkspaceAutoFixSettingsForPr } from '../../review/claude-review/auto-settings.js';
 import { automaticRunAllowed } from '../../review/budget-gate.js';
+import { requestModelOf } from '../../ai/provider.js';
 
 // At most AUTO_FIX_DAILY_CAP (shared) AUTO fixes per PR in any rolling AUTO_FIX_WINDOW_MS.
 export { AUTO_FIX_DAILY_CAP };
@@ -275,8 +276,10 @@ export async function maybeStartAutoFix(
       if (now.length > 0 && now.every((k) => refused.has(k))) return skip('already_tried');
     }
 
-    const model: AiFixModel = (CLAUDE_REVIEW_MODELS as readonly string[]).includes(loaded.review.model)
-      ? (loaded.review.model as AiFixModel)
+    // The review stores what RAN (a Codex id on Codex): ask for the same depth again.
+    const asked = requestModelOf(loaded.review.model);
+    const model: AiFixModel = (CLAUDE_REVIEW_MODELS as readonly string[]).includes(asked)
+      ? (asked as AiFixModel)
       : DEFAULT_AI_FIX_MODEL;
     const r = await deps.startReviewFix(ctx, { accountId, prId, reviewId, model, trigger: 'auto', include });
     if (r.status === 'queued') {

@@ -13,6 +13,7 @@
    migration. Its cost is recorded on the usage ledger like every agent run.
    ═══════════════════════════════════════════════════════════════════════════════════════ */
 
+import type { AiProviderId } from './types.js';
 import type { ConflictDecision } from './conflicts.js';
 
 /** `preparing` — the conflict session is being built (clone, fetch, merge-tree).
@@ -52,6 +53,8 @@ export interface ConflictAiResolution {
   /** Server-authored, one sentence, rendered verbatim. Null unless failed. */
   error: string | null;
   model: string;
+  // Who ran it (Phase 4). Optional: an older server omits it — `aiRunLabel(provider, model)`.
+  provider?: AiProviderId;
   startedAt: string;
   finishedAt: string | null;
   /** Every region Claude settled that passed validation. */

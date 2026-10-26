@@ -6,7 +6,9 @@ import type {
   ThreadCheckStatus,
   ThreadCheckTrigger,
 } from '@pierre-review/shared';
+import { aiRunProvider } from '@pierre-review/shared';
 import type { AgentContext } from '../agent-context.js';
+import { claudeModelChoice, expectedRanOn } from '../../ai/provider.js';
 
 // CHECK THREADS — the persistence half: `claude_thread_checks` (migration 0122 / pg 0109) through
 // ctx.db + ctx.schema, like ci-review/persist.ts. Every read predicates on accountId; an id-addressed
@@ -30,6 +32,8 @@ export interface ThreadCheckRow {
   trigger: ThreadCheckTrigger;
   status: ThreadCheckStatus;
   model: string;
+  // 0128: who ran it; NULL on older rows (read through `aiRunProvider`).
+  provider?: string | null;
   threadsSent: number | null;
   threadAssessments: ClaudeThreadAssessment[] | null;
   commentsThrough: Date | null;
@@ -60,6 +64,8 @@ export function threadCheckWire(r: ThreadCheckRow): ThreadCheckRun {
     headSha: r.headSha,
     trigger: r.trigger,
     status: r.status,
+    model: r.model,
+    provider: aiRunProvider(r.provider, r.model),
     refused: (r.refused as ThreadCheckRefusal | null) ?? null,
     error: r.error ?? null,
     threadsSent: r.threadsSent ?? null,
@@ -94,12 +100,28 @@ export async function insertQueuedThreadCheck(ctx: AgentContext, a: QueueThreadC
       headSha: a.headSha,
       trigger: a.trigger,
       status: 'queued',
-      model: a.model,
+      // Labelled by the provider it is expected to run on; the run stamps what ran (`markThreadCheckRanOn`).
+      ...expectedRanOn(claudeModelChoice(a.model)),
       commentsThrough: a.commentsThrough,
     })
     .returning({ id: ct.id })
     .execute()) as Array<{ id: number }>;
   return rows[0]!.id;
+}
+
+/** Stamp what the run ACTUALLY ran on (provider + model id), whatever its outcome. */
+export async function markThreadCheckRanOn(
+  ctx: AgentContext,
+  accountId: number,
+  id: number,
+  ran: { provider: 'claude' | 'codex'; model: string },
+): Promise<void> {
+  const ct = t(ctx);
+  await ctx.db
+    .update(ct)
+    .set({ provider: ran.provider, model: ran.model })
+    .where(and(eq(ct.id, id), eq(ct.accountId, accountId)))
+    .execute();
 }
 
 export async function markThreadCheckRunning(

@@ -12,7 +12,9 @@ import type {
   CiReviewStatus,
   CiReviewTrigger,
 } from '@pierre-review/shared';
+import { aiRunProvider } from '@pierre-review/shared';
 import type { AgentContext } from '../agent-context.js';
+import { claudeModelChoice, expectedRanOn } from '../../ai/provider.js';
 import {
   asRefusal,
   countItems,
@@ -63,6 +65,8 @@ export interface CiReviewRow {
   trigger: CiReviewTrigger;
   status: CiReviewStatus;
   model: string;
+  // 0128: who ran it; NULL on older rows (read through `aiRunProvider`).
+  provider?: string | null;
   costUsd: number | null;
   inputTokens: number | null;
   outputTokens: number | null;
@@ -188,11 +192,27 @@ export async function insertQueuedCiReview(ctx: AgentContext, a: QueueCiReviewAr
       triggerKey: a.triggerKey,
       trigger: a.trigger,
       status: 'queued',
-      model: a.model,
+      // Labelled by the provider it is expected to run on; the run stamps its own (`markCiReviewRanOn`).
+      ...expectedRanOn(claudeModelChoice(a.model)),
     })
     .returning({ id: cr.id })
     .execute()) as Array<{ id: number }>;
   return rows[0]!.id;
+}
+
+/** Stamp what the run runs on (the provider the pipeline resolved and its model id). */
+export async function markCiReviewRanOn(
+  ctx: AgentContext,
+  accountId: number,
+  id: number,
+  ran: { provider: 'claude' | 'codex'; model: string },
+): Promise<void> {
+  const { cr } = tables(ctx);
+  await ctx.db
+    .update(cr)
+    .set({ provider: ran.provider, model: ran.model })
+    .where(and(eq(cr.id, id), eq(cr.accountId, accountId)))
+    .execute();
 }
 
 /** The run read the head's checks: store the head, the failing set it judges and the CI state. */
@@ -482,6 +502,7 @@ function toWire(r: CiReviewRow, items: readonly CiItemRow[]): CiReview {
     trigger: r.trigger,
     status: r.status,
     model: r.model,
+    provider: aiRunProvider(r.provider, r.model),
     costUsd: r.costUsd,
     error: r.error,
     refused: asRefusal(r.refused),

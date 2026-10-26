@@ -36,6 +36,7 @@ import { BorderKey, LaneBoard, useBoardObstacles, type BorderKeyItem } from '../
 import { TicketCard } from '../TicketCard.js';
 import { SprintProgressBar } from './SprintProgressBar.js';
 import { sprintPathsView } from './sprintPathsModel.js';
+import { AiRunLabel } from '../AiRunLabel.js';
 
 // ACTIVITY → THIS SPRINT: THE THREE VIEWS (docs/FRONTEND.md § Activity → This Sprint). Three independent
 // angles on the same sprint, each a LANE BOARD (components/LaneBoard.tsx; layout lib/laneBoard.ts) over
@@ -304,6 +305,7 @@ export function SprintPathsView({ data, actions }: { data: SprintGraphResponse; 
           <InfoButton title="Critical paths">
             <PathsInfo aiEnabled={data.aiEnabled} />
           </InfoButton>
+          {view.kind === 'paths' && data.paths != null && <AiRunLabel provider={data.paths.provider} model={data.paths.model} />}
           {view.kind === 'paths' && view.note?.kind === 'updating' && <span className={`text-xs ${MUTED}`}>Updating</span>}
           {view.kind === 'message' && (
             <span className={`inline-flex items-center gap-2 text-xs ${MUTED}`}>

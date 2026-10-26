@@ -29,6 +29,7 @@ import {
   markCiReviewCancelled,
   markCiReviewFailed,
   markCiReviewRefused,
+  markCiReviewRanOn,
   markCiReviewRunning,
   reconcileOrphanedCiReviews,
   saveCiReviewSuccess,
@@ -36,6 +37,7 @@ import {
 import { readCiInputs } from './prepare.js';
 import { buildCiReviewPrompt, ciReviewSystemPrompt, ciReviewUntrustedTexts } from './prompts.js';
 import { activeProviderId } from '../../ai/provider-setting.js';
+import { claudeModelChoice, getProvider } from '../../ai/provider.js';
 import { promptTools } from '../../ai/prompt-tools.js';
 import { reconcileCiReview, reconcileWithoutModel } from './reconcile.js';
 import type { SubmitCiReviewPayload } from './schema.js';
@@ -350,6 +352,11 @@ async function runPipeline(
     // (review/run-provider.ts). A provider that records its own usage (Codex) bills `usageRecord`.
     const providerId = activeProviderId();
     const words = promptTools(providerId);
+    // The run row names what runs it from here on (the provider and its model id), whatever the outcome.
+    await markCiReviewRanOn(ctx, accountId, runId, {
+      provider: providerId,
+      model: getProvider(providerId).resolveModel(claudeModelChoice(job.model)),
+    });
     const prompt = buildCiReviewPrompt({ pr: promptPr, plan, nonce }, words);
     scratch = mkdtempSync(join(tmpdir(), 'pierre-ci-review-'));
 

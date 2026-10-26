@@ -72,6 +72,7 @@ export function meBody(srv: DemoServer): Record<string, unknown> {
       // Claude answers every run kind alike (the demo runs Claude).
       kinds: aiKindsAll({ auth: 'ok', message: null }),
       provider: 'claude',
+      providerSetting: { value: 'auto', source: 'settings' },
       providers: {
         claude: { auth: 'ok', route: 'login', message: null },
         codex: {

@@ -6,6 +6,7 @@ import {
   claudeModelChoice,
   getActiveProvider,
   type AgentOutcome,
+  type AgentProvider,
   type AgentProviderId,
   type AgentToolReply,
   type AgentToolServer,
@@ -130,11 +131,13 @@ export interface AgentTelemetry {
   numTurns: number | null;
   /** Which provider ran it. 'codex' ⇒ its ledger row is already written. */
   provider: AgentProviderId;
+  /** The model id that ran (the provider's for the requested one) — what the stored row names. */
+  model: string;
 }
 
 /** Why a PDF never builds on Codex (see the header). Shown on the document. */
 export const CODEX_PDF_MESSAGE =
-  'Codex cannot read PDF files. Upload the document as Word, text or markdown, or use Claude for PDFs.';
+  'Codex cannot read PDF files. Upload it as Word, text or markdown, or choose Claude in Settings → AI.';
 
 /** Codex's words for a judge's refusal: it answers again, it never calls a tool. */
 export function codexRefusalWords(reply: string): string {
@@ -147,7 +150,7 @@ function telemetryOf(
   model: ClaudeReviewModel,
   outcome: AgentOutcome | null,
   liveUsage: UsageTokens,
-  provider: AgentProviderId,
+  provider: AgentProvider,
 ): AgentTelemetry {
   const usage = outcome?.usage ?? liveUsage;
   const hasUsage = usage.inputTokens + usage.outputTokens + usage.cacheReadTokens > 0;
@@ -156,7 +159,8 @@ function telemetryOf(
     inputTokens: usage.inputTokens + usage.cacheReadTokens + usage.cacheCreationTokens,
     outputTokens: usage.outputTokens,
     numTurns: outcome?.numTurns ?? null,
-    provider,
+    provider: provider.id,
+    model: provider.resolveModel(claudeModelChoice(model)),
   };
 }
 
@@ -243,7 +247,7 @@ export async function runBuildAgent(args: RunBuildArgs): Promise<RunBuildResult>
     finish,
     failureReason,
     aborted,
-    ...telemetryOf(model, outcome, liveUsage, provider.id),
+    ...telemetryOf(model, outcome, liveUsage, provider),
   });
 
   // A PDF build never runs on Codex (see the header): refused before anything starts.
@@ -424,7 +428,7 @@ export async function runDocsChatAgent(args: RunChatArgs): Promise<RunChatResult
     text: '',
     failureReason,
     aborted,
-    ...telemetryOf(model, outcome, liveUsage, provider.id),
+    ...telemetryOf(model, outcome, liveUsage, provider),
   });
   try {
     restoreEnv = applyClaudeReviewAuth(args.applyAuthEnv);
@@ -465,7 +469,7 @@ export async function runDocsChatAgent(args: RunChatArgs): Promise<RunChatResult
       const who = providerName(provider.id);
       return fail(outcome && outcome.subtype !== 'success' ? `${who} stopped (${outcome.subtype}) without answering.` : `${who} did not answer.`, false);
     }
-    return { ok: true, text: finalText, aborted: false, ...telemetryOf(model, outcome, liveUsage, provider.id) };
+    return { ok: true, text: finalText, aborted: false, ...telemetryOf(model, outcome, liveUsage, provider) };
   } catch (err) {
     if (args.abortController.signal.aborted) return fail(undefined, true);
     return fail(err instanceof Error ? err.message : String(err), false);

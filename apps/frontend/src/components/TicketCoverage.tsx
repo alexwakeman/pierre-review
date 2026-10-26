@@ -86,6 +86,7 @@ import { ReviewSection, SectionCount } from './ReviewSection.js';
 import { REVIEW_CHIP } from '../lib/reviewStyles.js';
 import { RegenProgressBar } from './Activity/RegenProgressBar.js';
 import { ReviewedAgo } from './ReviewedAgo.js';
+import { AiRunLabel } from './AiRunLabel.js';
 import {
   CriterionRow,
   CurrencyPill,
@@ -245,6 +246,7 @@ function TicketBlock({
         {!slim && counts != null && <span className={`text-xs ${MUTED}`}>{counts}</span>}
         {currency != null && <CurrencyPill currency={currency} />}
         {shown != null && <ReviewedAgo at={shown.completedAt} />}
+        {shown != null && <AiRunLabel provider={shown.provider} model={shown.model} />}
         <span className="ml-auto">
           {!running && (
             <AiRunGate kind="ticket_review">

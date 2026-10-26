@@ -67,6 +67,9 @@ export const proWorkPlans = sqliteTable(
     // blob. Model-authored prose only: headline, steps[{id, why}], parked, droppedIds.
     output: text('output').notNull(),
     model: text('model').notNull(),
+    // Who answered ('claude' | 'codex'; platform migration 0042). NULL on older rows reads as Claude
+    // unless `model` is a Codex id (packages/shared `aiRunProvider`). `model` is what RAN.
+    provider: text('provider'),
     itemCount: integer('item_count').notNull(),
     generatedAt: integer('generated_at', { mode: 'timestamp' })
       .notNull()

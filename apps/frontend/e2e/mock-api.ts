@@ -288,6 +288,7 @@ const ME_RESPONSE: MeResponse = {
     // Claude answers every run kind alike.
     kinds: aiKindsAll({ auth: 'ok', message: null }),
     provider: 'claude',
+    providerSetting: { value: 'auto', source: 'settings' },
     providers: {
       claude: { auth: 'ok', route: 'login', message: null },
       codex: {

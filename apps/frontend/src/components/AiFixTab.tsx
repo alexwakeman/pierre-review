@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useIsMutating } from '@tanstack/react-query';
 import {
   CLAUDE_REVIEW_MODELS,
-  CLAUDE_REVIEW_MODEL_LABELS,
+  aiModelChoiceLabel,
+  aiRunLabel,
   DEFAULT_AI_FIX_MODEL,
   type AiFix,
   type AiFixModel,
@@ -17,6 +18,7 @@ import { relativeTime, safeExternalUrl } from '../lib/ui.js';
 import { PHASE_LABEL, fixProgressPct } from '../lib/aiFixProgress.js';
 import { aiAuthFor, useAiCapabilities } from '../hooks/useAiCapabilities.js';
 import { AiRunGate } from './AiSetup.js';
+import { useMe } from '../hooks/useTriage.js';
 import { useFilters } from '../store/filters.js';
 import {
   aiFixStartMutationKey,
@@ -121,6 +123,8 @@ function FixerSection({
   // Opens on the shared default (Opus 5.5, effort pinned to medium server-side) — the same
   // constant the start route falls back to.
   const [model, setModel] = useState<AiFixModel>(DEFAULT_AI_FIX_MODEL);
+  // The provider a new run will use: the model picker names what will actually run.
+  const activeProvider = useMe().data?.ai.provider;
   const startFix = useStartFix(pr.id);
   const startPlan = useStartPlan(pr.id);
   const cancelFix = useCancelFix(pr.id);
@@ -309,7 +313,7 @@ function FixerSection({
                     >
                       {CLAUDE_REVIEW_MODELS.map((m) => (
                         <option key={m} value={m}>
-                          {CLAUDE_REVIEW_MODEL_LABELS[m]}
+                          {aiModelChoiceLabel(m, activeProvider)}
                         </option>
                       ))}
                     </select>
@@ -430,6 +434,11 @@ function AutoFixChip(): JSX.Element {
   );
 }
 
+/** Who built the fix: the provider and the model that ran (packages/shared `aiRunLabel`). */
+function runLabelOf(run: Pick<AiFix, 'provider' | 'model'>): string {
+  return aiRunLabel(run.provider, run.model);
+}
+
 function FixResult({
   pr,
   fix,
@@ -482,6 +491,8 @@ function FixResult({
           </>
         )}
         {fixSourceLine(fix)}
+        {' · '}
+        {runLabelOf(fix)}
         {fix.finishedAt && <> · {relativeTime(fix.finishedAt)}</>}
       </p>
       {/* An AUTOMATIC push that failed (auto-push.ts): recorded on the succeeded row's `error`,

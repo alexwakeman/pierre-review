@@ -13,7 +13,9 @@ import type {
   TicketReviewStatus,
   TicketReviewTrigger,
 } from '@pierre-review/shared';
+import { aiRunProvider } from '@pierre-review/shared';
 import type { AgentContext } from '../agent-context.js';
+import { claudeModelChoice, expectedRanOn } from '../../ai/provider.js';
 import { storyMatchKey } from '../claude-review/ticket.js';
 import { readCardsAt, toWireCard } from './cards.js';
 import type { FingerprintMember } from './fingerprint.js';
@@ -71,6 +73,8 @@ export interface TicketReviewRow {
   trigger: TicketReviewTrigger;
   status: TicketReviewStatus;
   model: string;
+  // 0128: who ran it; NULL on older rows (read through `aiRunProvider`).
+  provider?: string | null;
   costUsd: number | null;
   inputTokens: number | null;
   outputTokens: number | null;
@@ -169,11 +173,27 @@ export async function insertQueuedTicketReview(
       originPrId: a.originPrId,
       trigger: a.trigger,
       status: 'queued',
-      model: a.model,
+      // Labelled by the provider it is expected to run on; the run stamps its own (`markTicketReviewRanOn`).
+      ...expectedRanOn(claudeModelChoice(a.model)),
     })
     .returning({ id: tr.id })
     .execute()) as Array<{ id: number }>;
   return rows[0]!.id;
+}
+
+/** Stamp what the run runs on (the provider the pipeline resolved and its model id). */
+export async function markTicketReviewRanOn(
+  ctx: AgentContext,
+  accountId: number,
+  id: number,
+  ran: { provider: 'claude' | 'codex'; model: string },
+): Promise<void> {
+  const { tr } = tables(ctx);
+  await ctx.db
+    .update(tr)
+    .set({ provider: ran.provider, model: ran.model })
+    .where(and(eq(tr.id, id), eq(tr.accountId, accountId)))
+    .execute();
 }
 
 export interface PreparedMember extends FingerprintMember {
@@ -670,6 +690,7 @@ function toWire(
     trigger: r.trigger,
     status: r.status,
     model: r.model,
+    provider: aiRunProvider(r.provider, r.model),
     costUsd: r.costUsd,
     error: r.error,
     refused:

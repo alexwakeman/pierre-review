@@ -14,6 +14,7 @@
 // Sonnet 5 does the content building (reads a PDF natively and transcribes it; writes the summaries
 // and topics for every kind). The server converts Word and HTML, splits, validates and writes every
 // file a link can point at, so a link in the tree always resolves.
+import type { AiProviderId } from './types.js';
 
 export type ReferenceDocSourceKind = 'pdf' | 'docx' | 'text' | 'markdown' | 'html' | 'url';
 
@@ -212,6 +213,10 @@ export interface ReferenceDocsChatMessage {
   citations: ReferenceDocCitation[];
   createdAt: string;
   costUsd: number | null;
+  // What ran it (docs/CODEX-PLAN.md Phase 4): the model id and its provider. Optional: an older
+  // server or row omits them — read through `aiRunLabel(provider, model)`.
+  model?: string | null;
+  provider?: AiProviderId;
 }
 
 export interface ReferenceDocsChatBody {

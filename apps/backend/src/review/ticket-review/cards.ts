@@ -284,6 +284,8 @@ export interface CardWrite {
   changedFiles: readonly string[];
   source: TicketPrCardSource;
   model: string;
+  // Who wrote it (0128): the provider, or null for a card the server wrote itself (no model ran).
+  provider?: 'claude' | 'codex' | null;
   costUsd: number | null;
 }
 
@@ -305,11 +307,12 @@ export async function saveCards(ctx: AgentContext, accountId: number, writes: re
         card,
         source: w.source,
         model: w.model,
+        provider: w.provider ?? null,
         costUsd: w.costUsd,
       })
       .onConflictDoUpdate({
         target: [t.accountId, t.prId, t.headSha],
-        set: { card, source: w.source, model: w.model, costUsd: w.costUsd, createdAt: new Date() },
+        set: { card, source: w.source, model: w.model, provider: w.provider ?? null, costUsd: w.costUsd, createdAt: new Date() },
       })
       .execute();
   }

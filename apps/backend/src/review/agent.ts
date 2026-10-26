@@ -5,6 +5,7 @@ import { TICKET_REVIEW_PEER_MAX_FOR_PR_REVIEW, type ClaudeFindingLens } from '@p
 import {
   claudeModelChoice,
   getActiveProvider,
+  ranOn,
   type AgentOutcome,
   type AgentRunSpec,
   type ModelChoice,
@@ -195,8 +196,18 @@ export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
       numTurns: outcome?.numTurns ?? null,
     };
   };
+  // THE MODEL CHOICE, resolved before anything can fail, so every result names what RAN (`ranOn`:
+  // the provider and its model id — a Codex run is never stored as the Claude model it was asked for).
+  // Codex: the role keeps the router's depth (Opus → deep, Sonnet → standard); the effort is the role's
+  // on a worktree run and one step lower on a diff-only one (codex-review.ts). The live test may pin both.
+  const override = onCodex ? codexReviewModelOverride() : null;
+  const modelChoice: ModelChoice = override
+    ? { role: claudeModelChoice(model).role, id: override.model }
+    : claudeModelChoice(model);
+  const ran = ranOn(provider, modelChoice);
   const fail = (failureReason: string | undefined, aborted: boolean): RunReviewResult => ({
     submitted: false,
+    ranOn: ran,
     failureReason,
     scope: null,
     summary: '',
@@ -288,12 +299,7 @@ export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
     onProgress({ phase: 'reviewing', reviewMode: mode });
 
     // ---- Codex only: the model, its effort, the prompts in Codex words, and the specialists ----
-    // The role keeps the router's depth (Opus → deep, Sonnet → standard); the effort is the role's on a
-    // worktree run and one step lower on a diff-only one (codex-review.ts). The live test may pin both.
-    const override = onCodex ? codexReviewModelOverride() : null;
-    const modelChoice: ModelChoice = override
-      ? { role: claudeModelChoice(model).role, id: override.model }
-      : claudeModelChoice(model);
+    // (The model choice itself is resolved above the `try`, so even a run that fails early is labelled.)
     const codexEffort = override?.effort ?? codexReviewEffort(modelChoice.role, mode);
     const codexUsage = args.usage
       ? { accountId: args.usage.accountId, seam: 'agent' as const, feature: 'claude_review', prId: args.usage.prId, repoId: args.usage.repoId ?? null }
@@ -425,6 +431,7 @@ export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
 
     return {
       submitted: true,
+      ranOn: ran,
       ...mapped,
       ...telemetry(),
       aborted: false,

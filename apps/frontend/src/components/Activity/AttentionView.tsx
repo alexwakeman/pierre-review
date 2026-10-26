@@ -39,6 +39,7 @@ import { DependencyMergeAll } from './DependencyMergeAll.js';
 import { MyTurnDismissedList } from './MyTurnDismissedList.js';
 import { PendingGuideModal, PendingOrderInfo } from './PendingInfo.js';
 import { capSentence } from './pendingExplain.js';
+import { aiRunLabel } from '@pierre-review/shared';
 
 // The **Pending** rail entry — the attention cards (your turn / stalled reviews / untouched
 // threads / reviewer load / needs-a-reviewer) that used to sit under the Insights AI panels, now a
@@ -477,7 +478,7 @@ export function AttentionView(): JSX.Element {
               </span>
             )}
             {plan != null && (
-              <span className="shrink-0 text-[11px] text-gray-500 dark:text-gray-400" title={plan.model}>
+              <span className="shrink-0 text-[11px] text-gray-500 dark:text-gray-400" title={aiRunLabel(null, plan.model)}>
                 written {relativeTime(plan.generatedAt)}
               </span>
             )}

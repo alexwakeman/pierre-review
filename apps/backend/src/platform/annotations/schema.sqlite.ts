@@ -39,6 +39,9 @@ export const prCommentAnnotations = sqliteTable(
     body: text('body').notNull(), // Markdown rationale
     payloadHash: text('payload_hash').notNull(),
     model: text('model').notNull(),
+    // Who answered ('claude' | 'codex'; platform migration 0042). NULL on older rows reads as Claude
+    // unless `model` is a Codex id (packages/shared `aiRunProvider`). `model` is what RAN.
+    provider: text('provider'),
     costUsd: real('cost_usd'),
     inputTokens: integer('input_tokens'),
     outputTokens: integer('output_tokens'),

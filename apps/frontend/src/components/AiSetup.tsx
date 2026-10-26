@@ -87,7 +87,7 @@ export function AiRuntimeSetup(): JSX.Element | null {
       {failure != null && <span className="text-xs text-red-600 dark:text-red-400">{failure}</span>}
       <button
         type="button"
-        onClick={start}
+        onClick={() => start()}
         className="rounded border border-gray-300 px-2 py-1 text-xs hover:border-gray-400 dark:border-gray-700 dark:hover:border-gray-500"
       >
         {failure != null ? 'Retry' : AI_SETUP_LABEL}

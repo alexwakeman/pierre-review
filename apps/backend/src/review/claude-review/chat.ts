@@ -4,6 +4,7 @@ import {
   CLAUDE_REVIEW_CHAT_EXPLAIN_DEFAULT_QUESTION,
   CLAUDE_REVIEW_CHAT_MAX_QUESTION_CHARS,
   CLAUDE_REVIEW_MODELS,
+  aiRunProvider,
   DEFAULT_CLAUDE_REVIEW_MODEL,
   type ClaudeFinding,
   type ClaudeReview,
@@ -20,6 +21,7 @@ import {
   type ClaudeReviewModel,
 } from '@pierre-review/shared';
 import type { PreparedReview } from '../../platform/contract.js';
+import { requestModelOf } from '../../ai/provider.js';
 import type { AgentContext } from '../agent-context.js';
 import { AGENTIC_AI_ENABLED, chatMayApplyAuthEnv } from './manager.js';
 import { getClaudeReviewById, getReviewPrContext, type ReviewPrContext } from './persist.js';
@@ -102,6 +104,8 @@ interface MessageRow {
   createdAt: Date;
   pins?: ClaudeReviewChatPin[] | null;
   explanations?: ClaudeReviewChatExplanation[] | null;
+  model?: string | null;
+  provider?: string | null;
 }
 
 const toWire = (r: MessageRow): ClaudeReviewChatMessage => ({
@@ -112,6 +116,8 @@ const toWire = (r: MessageRow): ClaudeReviewChatMessage => ({
   createdAt: isoReq(r.createdAt),
   ...(Array.isArray(r.pins) && r.pins.length > 0 ? { pins: r.pins } : {}),
   ...(Array.isArray(r.explanations) ? { explanations: r.explanations } : {}),
+  // An answer names what answered (Phase 4); older answers stored no provider (read from the model).
+  ...(r.role === 'assistant' && r.model ? { model: r.model, provider: aiRunProvider(r.provider, r.model) } : {}),
 });
 
 // The columns every message read selects (the wire form's fields).
@@ -123,6 +129,8 @@ const messageCols = (msg: any) => ({
   createdAt: msg.createdAt,
   pins: msg.pins,
   explanations: msg.explanations,
+  model: msg.model,
+  provider: msg.provider,
 });
 
 /** One thread's stored messages, oldest first. Callers have already proved the review is theirs. */
@@ -195,10 +203,14 @@ export function chatModeFor(review: Pick<ClaudeReview, 'reviewMode'>): ChatMode 
   return review.reviewMode === 'diff_only' ? 'diff_only' : 'worktree';
 }
 
-/** The review's own model, or the default when that model has been retired. */
+/**
+ * The review's own model, or the default when that model has been retired. A review Codex ran stored
+ * its Codex id: the chat keeps its DEPTH (`requestModelOf`: gpt-6-astra → Opus, gpt-6.1-sol → Sonnet).
+ */
 export function chatModelFor(stored: string): ClaudeReviewModel {
-  return (CLAUDE_REVIEW_MODELS as readonly string[]).includes(stored)
-    ? (stored as ClaudeReviewModel)
+  const asked = requestModelOf(stored);
+  return (CLAUDE_REVIEW_MODELS as readonly string[]).includes(asked)
+    ? (asked as ClaudeReviewModel)
     : DEFAULT_CLAUDE_REVIEW_MODEL;
 }
 
@@ -667,7 +679,9 @@ export async function answerReviewChat(
           role: 'assistant',
           content: clip(answerText, STORED_ANSWER_CHARS),
           explanations,
-          model,
+          // What ANSWERED (the provider and its model id), never the Claude model it was asked for.
+          model: result.ranOn?.model ?? model,
+          provider: result.ranOn?.provider ?? null,
           costUsd: result.costUsd,
           inputTokens: result.inputTokens,
           outputTokens: result.outputTokens,

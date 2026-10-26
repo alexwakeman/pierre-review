@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { and, eq, inArray } from 'drizzle-orm';
 import {
+  aiRunProvider,
   SPRINT_EDGE_LABEL,
   SPRINT_PATHS_CAPS,
   SPRINT_PATHS_MODEL,
@@ -384,6 +385,9 @@ export interface SprintPathsRow {
   attemptError: string | null;
   runsDay: string | null;
   runsToday: number;
+  // What wrote the stored paths (0128). Optional: a stand-in row in a test omits them.
+  model?: string | null;
+  provider?: string | null;
 }
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v != null && !Array.isArray(v);
@@ -396,7 +400,7 @@ export function isPathsCurrent(row: Pick<SprintPathsRow, 'inputHash' | 'pathsVer
 /** A stored row → the wire paths, idents resolved through `identOf` (a key it cannot resolve is
  *  dropped from that list; a path or call-out left empty is dropped). Tolerant. Pure. */
 export function sprintPathsOf(
-  row: Pick<SprintPathsRow, 'pathsJson' | 'writtenAt'>,
+  row: Pick<SprintPathsRow, 'pathsJson' | 'writtenAt' | 'model' | 'provider'>,
   identOf: (key: string) => string | null,
 ): SprintPaths | null {
   const j = row.pathsJson;
@@ -426,7 +430,12 @@ export function sprintPathsOf(
     if (r.tickets.length === 0) continue;
     callouts.push({ title: c.title, ...r });
   }
-  return { paths, callouts, createdAt: row.writtenAt.toISOString() };
+  return {
+    paths,
+    callouts,
+    createdAt: row.writtenAt.toISOString(),
+    ...(row.model ? { model: row.model, provider: aiRunProvider(row.provider, row.model) } : {}),
+  };
 }
 
 /** The stored row (any currency), this account + workspace only. */
@@ -444,6 +453,8 @@ export async function storedSprintPaths(accountId: number, workspaceId: number):
       attemptError: t.attemptError,
       runsDay: t.runsDay,
       runsToday: t.runsToday,
+      model: t.model,
+      provider: t.provider,
     })
     .from(t)
     .where(and(eq(t.accountId, accountId), eq(t.workspaceId, workspaceId)))
@@ -453,6 +464,9 @@ export async function storedSprintPaths(accountId: number, workspaceId: number):
 }
 
 export interface StoredSprintPaths extends StoredPathsJson {
+  // What ran (0128). Absent ⇒ Claude's SPRINT_PATHS_MODEL (a stand-in in a test).
+  model?: string;
+  provider?: 'claude' | 'codex';
   costUsd: number;
   inputTokens: number;
   outputTokens: number;
@@ -466,7 +480,8 @@ export async function storeSprintPaths(accountId: number, workspaceId: number, i
     inputHash,
     pathsVersion: SPRINT_PATHS_VERSION,
     pathsJson: { paths: v.paths, callouts: v.callouts } satisfies StoredPathsJson,
-    model: SPRINT_PATHS_MODEL,
+    model: v.model ?? SPRINT_PATHS_MODEL,
+    provider: v.provider ?? 'claude',
     costUsd: v.costUsd,
     inputTokens: v.inputTokens,
     outputTokens: v.outputTokens,

@@ -392,6 +392,9 @@ async function runBuild(job: Job, controller: AbortController): Promise<void> {
       inputTokens: res.inputTokens,
       outputTokens: res.outputTokens,
       numTurns: res.numTurns,
+      // What ran the build (provider + model id).
+      provider: res.provider,
+      model: res.model,
     };
     // A Codex run's row is already written (by its provider, as Codex): never a second, Claude-named one.
     if (res.provider !== 'codex' && res.costUsd != null && res.costUsd > 0) {

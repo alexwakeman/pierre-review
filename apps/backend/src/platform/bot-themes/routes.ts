@@ -242,6 +242,9 @@ async function generateReport(
     commentCount: themeCommentCount(parsed.themes[i]?.memberIds ?? [], build.countIndex),
   }));
   const now = new Date();
+  // What answered (Phase 4): the stored row names the model that RAN and its provider.
+  const ranModel = model ?? DIGEST_MODEL;
+  const ranProvider = provider ?? 'claude';
   const result: BotThemesResult = {
     narrative: parsed.narrative,
     themes,
@@ -251,7 +254,7 @@ async function generateReport(
     byArea: build.byArea,
     coverage: build.coverage,
     generatedAt: now.toISOString(),
-    model: DIGEST_MODEL,
+    model: ranModel,
   };
   const resultJson = JSON.stringify(result);
 
@@ -264,7 +267,8 @@ async function generateReport(
         windowKind: window,
         payloadHash: build.hash,
         resultJson,
-        model: DIGEST_MODEL,
+        model: ranModel,
+        provider: ranProvider,
         costUsd,
         inputTokens,
         outputTokens,
@@ -282,7 +286,8 @@ async function generateReport(
         set: {
           payloadHash: build.hash,
           resultJson,
-          model: DIGEST_MODEL,
+          model: ranModel,
+          provider: ranProvider,
           costUsd,
           inputTokens,
           outputTokens,

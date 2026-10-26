@@ -24,6 +24,7 @@ const READY: MeResponse['ai'] = {
   auth: 'ok',
   authMessage: null,
   provider: 'claude',
+  providerSetting: { value: 'auto', source: 'settings' },
   providers: {
     claude: { auth: 'ok', route: 'login', message: null },
     codex: {

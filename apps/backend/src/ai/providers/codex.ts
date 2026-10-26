@@ -46,6 +46,7 @@ import { realpathSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { AI_MODEL_FOR_ROLE } from '@pierre-review/shared';
 import { promisify } from 'node:util';
 import { config } from '../../config.js';
 // db/usage.js is imported LAZILY (in `record`): db/client opens the database at import time, and the
@@ -114,12 +115,11 @@ const execFileP = promisify(execFile);
 
 // ---- models ------------------------------------------------------------------------------------
 
-/** Codex's model per role (CODEX-SPIKE.md § 8, pinned for @openai/codex 0.164.0). */
-export const CODEX_MODEL_FOR_ROLE: Readonly<Record<ModelRole, string>> = {
-  deep: 'gpt-6-astra',
-  standard: 'gpt-6.1-sol',
-  fast: 'gpt-6-luna',
-};
+/**
+ * Codex's model per role (CODEX-SPIKE.md § 8, pinned for @openai/codex 0.164.0) — the shared table's
+ * (packages/shared `AI_MODEL_FOR_ROLE`, which the SPA's run labels and model pickers read too).
+ */
+export const CODEX_MODEL_FOR_ROLE: Readonly<Record<ModelRole, string>> = AI_MODEL_FOR_ROLE.codex;
 
 /** Reasoning effort per role (spike § 8). Never the `fast` service tier: it costs more of the plan. */
 export const CODEX_EFFORT_FOR_ROLE: Readonly<Record<ModelRole, string>> = {

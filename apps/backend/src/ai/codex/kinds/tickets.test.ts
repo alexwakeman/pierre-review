@@ -87,10 +87,16 @@ vi.mock('../../../db/usage.js', () => ({
   },
 }));
 vi.mock('../threads.js', () => ({ armCodexThreadSweeps: () => {}, queueCodexThreadCleanup: () => {} }));
-// The sweeps' "is the AI runtime installed?" (ai-ready.ts): yes, unless a test says not.
+// The sweeps' "is the AI runtime installed?" (ai-ready.ts — the ACTIVE provider's download, so under
+// Codex the Codex program's): yes, unless a test says not.
 vi.mock('../../runtime.js', async (importOriginal) => {
   const real = await importOriginal<typeof import('../../runtime.js')>();
-  return { ...real, getAiRuntimeStatus: () => ({ ...real.getAiRuntimeStatus(), runtime: T.runtimeReady.value ? 'ready' : 'missing' }) };
+  const status = (s: { runtimeMessage: string | null }) => ({ ...s, runtime: T.runtimeReady.value ? 'ready' : 'missing' });
+  return {
+    ...real,
+    getAiRuntimeStatus: () => status(real.getAiRuntimeStatus()),
+    getCodexRuntimeStatus: () => status(real.getCodexRuntimeStatus()),
+  };
 });
 
 const { promptTools } = await import('../../prompt-tools.js');

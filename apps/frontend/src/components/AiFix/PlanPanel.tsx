@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useIsMutating } from '@tanstack/react-query';
 import {
   AI_FIX_PLAN_MAX_MESSAGE_CHARS,
+  aiRunLabel,
   type AiFix,
   type AiFixPlan,
   type AiFixReviewItem,
@@ -155,6 +156,9 @@ export function PlanPanel({
         Plan
         {plan && state.revision > 1 && (
           <span className="font-normal text-gray-500 dark:text-gray-400">· version {state.revision}</span>
+        )}
+        {state.model && (
+          <span className="font-normal text-gray-500 dark:text-gray-400">· {aiRunLabel(state.provider, state.model)}</span>
         )}
         <InfoButton title="Plan first">
           <p>Claude reads the code and writes a plan. It changes nothing.</p>

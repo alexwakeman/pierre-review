@@ -164,6 +164,17 @@ describe('a run’s cost (US$ on an API key, the share of the week on a subscrip
     expect(runCostText(0.42, usage({ route: 'none', account: null }))).toBeNull();
     expect(runCostText(null, usage())).toBeNull();
   });
+  it('a run is judged by its OWN provider: the other provider’s reading says nothing about it', () => {
+    // A Claude run on the Claude reading (absent provider = Claude) reads as before.
+    expect(runCostText(4.95, usage(), 'claude')).toBe('0.3% of your week');
+    // A Codex run is never judged by Claude's week, and a Claude run never by Codex's.
+    expect(runCostText(0, usage(), 'codex')).toBeNull();
+    expect(runCostText(4.95, usage({ provider: 'codex', weekPctPerUsd: null }), 'claude')).toBeNull();
+  });
+  it('a Codex run on a ChatGPT sign-in: never US$, nothing at all (no price, no per-run share)', () => {
+    expect(runCostText(0, usage({ provider: 'codex', weekPctPerUsd: null }), 'codex')).toBeNull();
+    expect(runCostText(0, usage({ provider: 'codex', weekPctPerUsd: 0.5 }), 'codex')).toBeNull();
+  });
 });
 
 describe('the 5-hour share', () => {

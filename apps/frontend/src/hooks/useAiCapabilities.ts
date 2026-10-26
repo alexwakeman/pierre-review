@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import type { AiRuntimeInstallEvent, MeResponse } from '@pierre-review/shared';
+import type { AiProviderId, AiRuntimeInstallBody, AiRuntimeInstallEvent, MeResponse } from '@pierre-review/shared';
 import { api } from '../api/client.js';
 import { sseStream } from '../api/sse.js';
 import { useMe } from './useTriage.js';
@@ -45,15 +45,21 @@ function subscribe(l: () => void): () => void {
   return () => listeners.delete(l);
 }
 
-export function useAiRuntimeInstall(): { state: AiInstallState; start: () => void } {
+export function useAiRuntimeInstall(): { state: AiInstallState; start: (forProvider?: AiProviderId) => void } {
   const qc = useQueryClient();
   const state = useSyncExternalStore(subscribe, () => installState);
-  const start = (): void => {
+  const start = (forProvider?: AiProviderId): void => {
     if (installState.phase === 'running') return;
     setInstallState({ phase: 'running', message: null });
     let failed: string | null = null;
+    // The ACTIVE provider's download (or the one Settings → AI names): with Codex, `me.ai.runtime` is
+    // the Codex program's, so "Set up AI" adds Codex (Claude's SDKs always come with it). Absent body ⇒
+    // Claude only.
+    const provider = forProvider ?? qc.getQueryData<MeResponse>(['me'])?.ai.provider;
+    const body: AiRuntimeInstallBody | undefined = provider === 'codex' ? { provider: 'codex' } : undefined;
     void sseStream<AiRuntimeInstallEvent>('/api/ai/runtime/install', {
       method: 'POST',
+      ...(body ? { body } : {}),
       onEvent: (e) => {
         if (e.type === 'error') {
           failed = e.message || 'The download failed.';

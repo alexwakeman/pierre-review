@@ -240,6 +240,8 @@ describe('POST /api/claude-review/thread-judgements', () => {
         resolved: false,
         assessedAtHead: HEAD,
         carried: false,
+        // Labelled by the run that made it (Phase 4).
+        provider: 'claude',
       },
       {
         threadId: 3,
@@ -250,6 +252,7 @@ describe('POST /api/claude-review/thread-judgements', () => {
         resolved: false,
         assessedAtHead: OLD,
         carried: true,
+        provider: 'claude',
       },
     ]);
   });

@@ -42,6 +42,7 @@ import { InfoButton } from './InfoModal.js';
 import { Markdown } from './Markdown.js';
 import { ReviewSection } from './ReviewSection.js';
 import { ReviewedAgo } from './ReviewedAgo.js';
+import { AiRunLabel } from './AiRunLabel.js';
 import { RegenProgressBar } from './Activity/RegenProgressBar.js';
 import { AUTO_REVIEW_LABEL } from './Activity/pendingLabels.js';
 
@@ -139,6 +140,7 @@ export function CiCheckSection({
         <>
           {currency != null && <CurrencyPill currency={currency} />}
           {shown != null && <ReviewedAgo at={shown.completedAt} />}
+          {shown != null && <AiRunLabel provider={shown.provider} model={shown.model} />}
           {shown?.trigger === 'auto' && (
             <span className="rounded bg-gray-500/10 px-1.5 py-0.5 text-xs text-gray-600 dark:text-gray-300">
               {AUTO_REVIEW_LABEL}

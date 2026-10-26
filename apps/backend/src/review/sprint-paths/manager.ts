@@ -140,6 +140,9 @@ export async function runSprintPathsPass(
     if (v != null && v.ok) {
       await (seams.store ?? storeSprintPaths)(accountId, workspaceId, input.inputHash, {
         ...v.value,
+        // What ran (provider + model id), never the Claude id it was asked for.
+        model: out.model ?? SPRINT_PATHS_MODEL,
+        provider: out.provider ?? 'claude',
         costUsd,
         inputTokens: out.inputTokens ?? 0,
         outputTokens: out.outputTokens ?? 0,

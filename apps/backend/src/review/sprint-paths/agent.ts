@@ -104,6 +104,8 @@ export interface SprintPathsAgentResult {
   error: string | null;
   /** Which provider ran it. 'codex' ⇒ its ledger row is already written. Absent ⇒ Claude. */
   provider?: AgentProviderId;
+  /** The model id that ran (the provider's for the requested one). Absent ⇒ the requested model. */
+  model?: string;
 }
 
 export type SprintPathsAgentRunner = (args: SprintPathsAgentArgs) => Promise<SprintPathsAgentResult>;
@@ -131,6 +133,7 @@ export const runSprintPathsAgent: SprintPathsAgentRunner = async (args) => {
       runtimeMissing: false,
       error: null,
       provider: provider.id,
+      model: provider.resolveModel(claudeModelChoice(args.model)),
       ...extra,
     };
   };

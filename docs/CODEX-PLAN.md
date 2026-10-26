@@ -226,6 +226,33 @@ reports `providers.codex.available` = the ChatGPT sign-in (`message: null` once 
   it (25,348 / 8,576 / 234) and the "already done" plan (25,428 / 16,128 / 237, one step "Confirm zero
   guard", no change). Each named `src/math.ts`, left the worktree clean and wrote one `ai_fix_plan` row.
 
+**Phase 4 stream A1 built 2026-10-26** (branch `codex/p4-provider-labels`): the provider choice and run
+labelling.
+- THE CHOICE: Settings → AI (Auto / Claude / Codex), stored per machine on `accounts.ai_provider`
+  (sqlite `0128`), written by `PUT /api/ai/provider` (`read` tier; 409 while LIMN_AI_PROVIDER is set).
+  `ai/provider-setting.ts aiProviderSetting()` is the ONE resolver: an explicitly set LIMN_AI_PROVIDER
+  wins, else the stored choice (held in memory: loaded at boot by `ai/provider-store.ts`, updated on
+  write), else `auto`. A switch reaches the NEXT run; a run already going keeps its provider.
+  `/api/me` adds `ai.providerSetting {value, source}`; `ai.runtime` is now the ACTIVE provider's
+  download (`ai/active-runtime.ts`), and the sweepers' `agenticRunReady` asks the same, so a Codex
+  machine never waits on Claude's program. The same Settings section shows each provider's sign-in,
+  "Set up Codex", and the Codex sign-in (browser or a one-time code).
+- RUN LABELS: every agentic run table that stores a model gained a nullable `provider` (sqlite `0128`;
+  `ai_fixes` also `plan_provider` / `plan_model`; the docs library rows `provider` + `model`), and the
+  platform write-ups with a live writer (platform `0042`). `model` now stores what RAN: a queued row
+  is stamped from the active provider (`expectedRanOn`), the run stamps its own (`ranOn`, e.g.
+  `markReviewRanOn`). NULL reads as Claude unless `model` is a Codex id (shared `aiRunProvider`). A
+  stored Codex id is asked for again by depth (`requestModelOf`: astra → Opus, sol → Sonnet). ONE label,
+  shared `aiRunLabel(provider, model)` ("Claude Opus 5.5", "Codex · GPT-6 Astra"); model pickers name
+  what will run (`aiModelChoiceLabel`). `runCostText` judges a run by its OWN provider (a Codex run on
+  ChatGPT shows no cost, never US$). The role tables live once in shared `AI_MODEL_FOR_ROLE`.
+- IN-SITU COMPARISON: a second review of a head another provider reviewed runs, both stay in the
+  history, each labelled; auto review's one-run-per-head rule counts either (unchanged); the thread
+  fold labels each judgement by the run that won (`ClaudeThreadJudgement.provider`). ⚠ The second run
+  still reads the first as its "Previous review" (the follow-up chain is provider-blind).
+- Not done here: the period report keeps the asked-for model (it is part of the row's identity and the
+  price table); the copy sweep is stream A2's.
+
 **Phase 3 status (integrated 2026-10-25, branch `codex/p3-integrated`; SUPERSEDED by Phase 3 COMPLETE above)**: the four stream branches
 below are merged. `CODEX_AGENT_KINDS` holds 13 of the 14 agent kinds; ⚠ the ONE missing kind is `plan`
 (Plan first — ported in code, passing offline, but its live run on gpt-6-luna at low effort answered

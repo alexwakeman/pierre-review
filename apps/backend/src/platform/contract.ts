@@ -514,6 +514,10 @@ export interface RunReviewArgs {
 
 export interface RunReviewResult {
   submitted: boolean; // false ⇒ the agent never called submit_review → plugin marks failed
+  // What RAN: the provider and the model id it resolved (ai/provider.ts `ranOn`). The manager stores
+  // both on the run row, so a Codex run reads "Codex · GPT-6 Astra", never the Claude id it was asked
+  // for. Optional: a fake runner in a test may omit it (the row then keeps its queued model).
+  ranOn?: { provider: 'claude' | 'codex'; model: string };
   failureReason?: string;
   scope: 'diff_only' | 'worktree' | null; // the agent's self-report
   summary: string;
@@ -650,6 +654,8 @@ export interface ReviewChatArgs {
 
 export interface ReviewChatResult {
   ok: boolean; // false ⇒ no usable answer (failureReason says why); the turn may still have cost
+  // What RAN (RunReviewResult.ranOn): the answer row stores both. Optional for fakes in tests.
+  ranOn?: { provider: 'claude' | 'codex'; model: string };
   text: string;
   // An explain turn: the raw `submit_explanations` payload, UNVALIDATED (chat.ts validates it).
   submitted?: unknown;
