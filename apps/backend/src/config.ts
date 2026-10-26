@@ -364,8 +364,8 @@ export const config = {
   // Per-run caps (cost/disk/time runaway guards). The diff is inlined in full, so
   // reviews need far fewer turns than the old default; 30 is still generous.
   reviewMaxTurns: intFromEnv('REVIEW_MAX_TURNS', 30),
-  // Set explicitly ⇒ the cap above holds at every effort; unset ⇒ High / Extra high / Max raise it
-  // (ai/effort.ts `effortTurnCap`: 45 / 60 / 75).
+  // ⚠ A WORKTREE review has NO turn limit unless REVIEW_MAX_TURNS is set explicitly (then this cap
+  // holds); the default 30 still bounds the docs-library diff-only walk (review/agent.ts).
   reviewMaxTurnsPinned: (process.env.REVIEW_MAX_TURNS ?? '') !== '',
   // Hard USD ceiling per run. When the SDK trips this it returns an
   // `error_max_budget_usd` result BEFORE the agent calls submit_review — so a run

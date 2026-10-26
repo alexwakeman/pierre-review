@@ -209,23 +209,23 @@ describe('runReview — ticket peers on a deep run', () => {
 });
 
 describe('runReview — the effort (Settings → AI → Effort)', () => {
-  it('Default: Opus at medium, the base turn cap, the specialists left as they were; the run stores its effort', async () => {
+  it('Default: Opus at medium, no turn limit, the specialists left as they were; the run stores its effort', async () => {
     const r = await runReview(args({ specialists: ['security'] }));
     expect(captured!.options.effort).toBe('medium');
     expect(captured!.options.thinking).toEqual({ type: 'adaptive' });
-    expect(captured!.options.maxTurns).toBe(30);
+    expect(captured!.options.maxTurns).toBeUndefined(); // no turn limit on a worktree review
     expect(captured!.options.agents.security).not.toHaveProperty('effort');
     expect(r.ranOn).toEqual({ provider: 'claude', model: 'claude-opus-5-5', effort: 'medium' });
   });
 
-  it('a chosen level reaches the lead and its specialists, raises the turn cap, and is stored', async () => {
+  it('a chosen level reaches the lead and its specialists, has no turn limit, and is stored', async () => {
     const { setStoredAiEffort } = await import('../ai/effort.js');
     setStoredAiEffort('high');
     try {
       const r = await runReview(args({ specialists: ['security'] }));
       expect(captured!.options.effort).toBe('high');
       expect(captured!.options.thinking).toEqual({ type: 'adaptive' });
-      expect(captured!.options.maxTurns).toBe(45);
+      expect(captured!.options.maxTurns).toBeUndefined();
       expect(captured!.options.agents.security.effort).toBe('high');
       expect(r.ranOn?.effort).toBe('high');
       // A diff-only run: one step lower, and its own (tool-less) cap is not raised.

@@ -188,8 +188,7 @@ function EffortControl({ setting }: { setting: AiEffortSettingStatus }): JSX.Ele
             never below Default unless you pick a lower level.
           </p>
           <p className="mt-2">
-            At High, Extra high and Max a review may also take more steps: 45, 60 or 75 instead of 30, unless
-            REVIEW_MAX_TURNS is set. Each run shows the effort it used beside its model.
+            A review has no step limit unless REVIEW_MAX_TURNS is set. Each run shows the effort it used beside its model.
           </p>
         </InfoButton>
       </div>

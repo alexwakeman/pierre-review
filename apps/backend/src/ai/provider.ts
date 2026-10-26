@@ -176,7 +176,8 @@ export interface AgentRunSpec {
   writeRoots: string[];
   /** The result tools. Absent ⇒ the run has none (a chat answering in text). */
   tools?: AgentToolServer;
-  budget: { usd: number | undefined; turns: number };
+  // `turns` undefined = no turn limit (a worktree review unless REVIEW_MAX_TURNS is set).
+  budget: { usd: number | undefined; turns: number | undefined };
   abortController: AbortController;
   /**
    * Which words the activity lines use: 'review' (the read tools, Claude Review's specialists) or

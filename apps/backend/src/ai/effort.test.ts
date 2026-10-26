@@ -5,7 +5,7 @@
 //   2. Default (nothing chosen) is today's behaviour: Claude medium (diff-only medium on Opus, low on
 //      Sonnet), Codex by depth (deep high, standard medium, fast low), one step lower diff-only;
 //   3. precedence: REVIEW_EFFORT beats the stored level, and the status says who chose;
-//   4. turn caps: High / Extra high / Max raise the review cap (30 → 45 / 60 / 75) unless it is pinned;
+//   4. (turn caps: removed — a worktree review has no turn limit unless REVIEW_MAX_TURNS is set);
 //   5. the run label adds the effort the run stored.
 import { afterEach, describe, expect, it } from 'vitest';
 import {
@@ -22,7 +22,6 @@ import {
   chosenAiEffort,
   defaultRunEffort,
   diffOnlyEffortAt,
-  effortTurnCap,
   setStoredAiEffort,
 } from './effort.js';
 
@@ -157,21 +156,6 @@ describe('the environment reaches only what the control reaches', () => {
       if (saved.d === undefined) delete process.env.REVIEW_DIFF_ONLY_EFFORT;
       else process.env.REVIEW_DIFF_ONLY_EFFORT = saved.d;
     }
-  });
-});
-
-describe('turn caps', () => {
-  it('High / Extra high / Max raise the review cap; Default, Low and Medium keep it', () => {
-    expect(effortTurnCap(30, null, false)).toBe(30);
-    expect(effortTurnCap(30, 'low', false)).toBe(30);
-    expect(effortTurnCap(30, 'medium', false)).toBe(30);
-    expect(effortTurnCap(30, 'high', false)).toBe(45);
-    expect(effortTurnCap(30, 'xhigh', false)).toBe(60);
-    expect(effortTurnCap(30, 'max', false)).toBe(75);
-  });
-
-  it('a cap set in the environment (REVIEW_MAX_TURNS) always wins', () => {
-    expect(effortTurnCap(30, 'max', true)).toBe(30);
   });
 });
 

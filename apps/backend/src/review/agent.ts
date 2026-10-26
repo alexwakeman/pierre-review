@@ -10,7 +10,7 @@ import {
   type ModelChoice,
 } from '../ai/provider.js';
 import { runCodexSpecialists } from '../ai/codex/specialists.js';
-import { agenticRunEffort, chosenAiEffort, effortTurnCap } from '../ai/effort.js';
+import { agenticRunEffort, chosenAiEffort } from '../ai/effort.js';
 import { loadZod } from '../ai/runtime.js';
 import type { RunReviewArgs, RunReviewResult } from '../platform/contract.js';
 import { config } from '../config.js';
@@ -276,7 +276,7 @@ export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
     // head and gets the read-only file tools; a diff-only review is TOOL-LESS with a
     // throwaway cwd and NO clone (the dominant per-run cost) — the whole change is in its prompt.
     let cwd: string;
-    let maxTurns: number;
+    let maxTurns: number | undefined;
     let prompt = args.prompt;
     // The ticket peers' checkouts, readable beside cwd (empty unless a deep run was handed peers).
     const peerDirs: string[] = [];
@@ -295,9 +295,10 @@ export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
         args.headSha,
       ));
       cwd = worktreePath;
-      // A higher level gets more room (High 45, Extra high 60, Max 75 by default) unless
-      // REVIEW_MAX_TURNS is set; Default, Low and Medium keep the cap.
-      maxTurns = effortTurnCap(reviewMaxTurnsFor(mode, docsDir != null), level != null ? levelEffort : null, config.reviewMaxTurnsPinned);
+      // NO TURN LIMIT on a worktree review (Codex has none either; the owner removed Claude's on
+      // 2026-10-26 so the two compare fairly) unless REVIEW_MAX_TURNS is set explicitly. The US$
+      // budget still stops a run on an API key.
+      maxTurns = config.reviewMaxTurnsPinned ? reviewMaxTurnsFor(mode, docsDir != null) : undefined;
       // OTHER PRs ON THE SAME TICKET and RELATED REPOS' companion changes, read-only, for
       // cross-repo interactions (claude-review/prompts.ts "Related PRs"). A PR peer is checked out at
       // its head; a related repo's branch or default branch at that branch's tip. A peer that fails to

@@ -119,20 +119,3 @@ export function agenticRunEffort(
   return level == null ? atDefault : diffOnlyEffortAt(level, atDefault);
 }
 
-/** How much more room a review gets at a higher level: High ×1.5, Extra high ×2, Max ×2.5. */
-export const EFFORT_TURN_FACTOR: Readonly<Record<AiEffort, number>> = {
-  low: 1,
-  medium: 1,
-  high: 1.5,
-  xhigh: 2,
-  max: 2.5,
-};
-
-/**
- * A review's turn cap at the chosen level: the base cap times `EFFORT_TURN_FACTOR`, unless the cap was
- * set explicitly in the environment (`pinned`), which always wins. Default and Low/Medium keep the base.
- */
-export function effortTurnCap(base: number, level: AiEffort | null, pinned: boolean): number {
-  if (pinned || level == null) return base;
-  return Math.round(base * EFFORT_TURN_FACTOR[level]);
-}

@@ -479,10 +479,11 @@ Default, Low, Medium, High, Extra high, Max.
 - ⚠ **The Opus 5.5 pin (`PINNED_EFFORT`) is GONE.** What stays fixed is real: Opus 5.5 always gets
   `thinking: {type: 'adaptive'}` and is never sent disabled thinking, a thinking budget or a forced
   tool choice.
-- **Turn caps**: at High / Extra high / Max a WORKTREE review's cap is 1.5× / 2× / 2.5× (30 → 45 / 60
-  / 75; `effortTurnCap`) unless `REVIEW_MAX_TURNS` is set (`config.reviewMaxTurnsPinned`). The
-  tool-less diff-only cap (6) and AI Fix's caps are unchanged. The ⓘ says so. ⚠ `REVIEW_BUDGET_USD`
-  ($6.75) is NOT scaled: a Max run on an API key can hit it.
+- **No turn limit**: a WORKTREE review has no turn limit on either provider (Codex never had one; the
+  owner removed Claude's on 2026-10-26 so the two compare fairly) unless `REVIEW_MAX_TURNS` is set
+  (`config.reviewMaxTurnsPinned`), which caps it at that number. The tool-less diff-only cap (6) and AI
+  Fix's caps are unchanged. ⚠ `REVIEW_BUDGET_USD` ($6.75) still stops a run on an API key, and is not
+  scaled by effort.
 - **Stored and labelled**: the run stamps the effort it SENT with its provider and model
   (`AiRanOn.effort` → `claude_reviews.effort`, `ai_fixes.effort` / `plan_effort`), and
   `aiRunLabel(provider, model, effort)` adds it: "Claude Opus 5.5 · high", "Codex · GPT-6 Astra ·
