@@ -26,7 +26,8 @@
 // ("Couldn't post automatically: …") with the Post button still there. Never throws.
 import { and, eq, inArray, isNull, lt } from 'drizzle-orm';
 import {
-  AUTO_POST_FOOTER,
+  aiRunProviderName,
+  autoPostFooter,
   type AutoPostSkipReason,
   type TicketAutoPostNotRequested,
   type TicketAutoPostRecord,
@@ -280,7 +281,8 @@ async function autoPostTicket(
       itemIds: liveItems.filter((id) => ownerOf.get(id) === prId),
       notAsked: nrHere.map((n) => ({ title: n.title, body: n.body, path: n.path || null, line: n.line })),
       auto: true,
-      footer: AUTO_POST_FOOTER,
+      // Names the provider that ran the ticket review (Claude's text unchanged).
+      footer: autoPostFooter(aiRunProviderName(run)),
     });
     if (out.kind === 'posted') {
       posted.push(...out.postedItemIds);

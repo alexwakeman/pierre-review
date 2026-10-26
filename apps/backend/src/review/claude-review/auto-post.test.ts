@@ -24,7 +24,7 @@
 //   pnpm --filter @pierre-review/backend test claude-review/auto-post
 import { rmSync } from 'node:fs';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { AUTO_POST_DEFAULT_KINDS, AUTO_POST_FOOTER, type ClaudeFindingSeverity } from '@pierre-review/shared';
+import { AUTO_POST_DEFAULT_KINDS, AUTO_POST_FOOTER, autoPostFooter, hasAutoPostFooter, type ClaudeFindingSeverity } from '@pierre-review/shared';
 import type { AgentContext } from '../agent-context.js';
 
 const DB_PATH = '/tmp/pierre-claude-auto-post.sqlite';
@@ -222,7 +222,15 @@ describe('the pure rules', () => {
     expect(ap.autoReviewBodyLead('- only bullets', 0)).toBe('Reviewed by Claude.');
     expect(ap.autoReviewBodyLead('- only bullets', 0, 'Codex')).toBe('Reviewed by Codex.');
     expect(ap.autoReviewBodyLead('- only bullets', 1, 'Codex')).toBe('One comment from Codex.');
-    expect(ap.autoReviewBody('- only bullets', 3, 'Codex')).toBe(`3 comments from Codex.\n\n${AUTO_POST_FOOTER}`);
+    expect(ap.autoReviewBody('- only bullets', 3, 'Codex')).toBe(
+      '3 comments from Codex.\n\n_Posted automatically by Limn’s Codex review._',
+    );
+    expect(autoPostFooter('Claude')).toBe(AUTO_POST_FOOTER);
+    expect(autoPostFooter()).toBe(AUTO_POST_FOOTER);
+    // Either provider's footer reads as an automatic post.
+    expect(hasAutoPostFooter(ap.autoReviewBody('x', 1, 'Codex'))).toBe(true);
+    expect(hasAutoPostFooter(ap.autoReviewBody('x', 1))).toBe(true);
+    expect(hasAutoPostFooter('a person wrote this')).toBe(false);
     expect(ap.liftBlockMessage()).toBe(ap.LIFT_BLOCK_MESSAGE);
     expect(ap.liftBlockMessage('Codex')).toBe("Codex's blocking findings are fixed.");
   });

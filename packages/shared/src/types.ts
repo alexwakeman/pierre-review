@@ -11036,7 +11036,12 @@ export interface PeriodReport {
   movements: PeriodMovement[];
   suggested: PeriodSuggestedQuestion[];
   narrative: string | null;     // markdown; null on a backfilled (un-narrated) period
+  // The REQUESTED Claude model — the row's identity and cache key, not necessarily what wrote it.
   model: string | null;
+  // What WROTE the narrative (Phase 4): the model that ran and its provider. Absent/null on an
+  // older row — label it from `model`. Label with `aiRunLabel(provider, ranModel ?? model)`.
+  ranModel?: string | null;
+  provider?: AiProviderId | null;
   metricsSchemaVersion: number;
   generatedAt: string;          // ISO-8601
   // The stored `data_fingerprint` no longer matches a recompute — the past moved underneath a
@@ -11096,6 +11101,8 @@ export interface PeriodArchivedReport {
 export interface PeriodReportListItem {
   periodKey: string; periodStart: string; periodEnd: string;
   cadenceDays: number; hasNarrative: boolean; model: string | null;
+  // What wrote the narrative (see PeriodReport.ranModel / provider). Absent ⇒ `model` on Claude.
+  ranModel?: string | null; provider?: AiProviderId | null;
   coverageComplete: boolean;
   // ⚠ WHICH GRID THIS PERIOD IS ON. Optional/additive (absent ⇒ `'sprint'`), but the SPA must
   // read it rather than infer one: two grains write the single `insightsReportKey` store field,

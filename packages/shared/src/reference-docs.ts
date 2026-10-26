@@ -76,6 +76,10 @@ export interface ReferenceDoc {
   pageCount: number | null;
   /** What the latest build cost (US$), when known. */
   costUsd: number | null;
+  /** What the latest build ran on (Phase 4): the model id and its provider. Absent on an older row —
+   *  read through `aiRunLabel(provider, model)`. */
+  model?: string | null;
+  provider?: AiProviderId;
   /** A web page added with "Follow links": the crawl's settings and what the last build read. Null
    *  for a single page or a file. */
   crawl: ReferenceDocCrawl | null;

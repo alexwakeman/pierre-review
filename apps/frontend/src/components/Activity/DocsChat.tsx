@@ -17,7 +17,7 @@ import { InfoButton } from '../InfoModal.js';
 import { Markdown } from '../Markdown.js';
 import { useDocLinkRenderer } from './DocsViewer.js';
 import { useAiProvider } from '../../hooks/useAiCapabilities.js';
-import { aiCredentialWords, aiModelWords } from '@pierre-review/shared';
+import { aiCredentialWords, aiModelWords, aiProviderOfRun, aiRunLabel } from '@pierre-review/shared';
 
 // Activity → Docs, the chat: ad hoc questions about this workspace's library, answered by Sonnet 5
 // reading the library's files (POST /api/docs/chat). Multi-turn; the server rebuilds the transcript
@@ -44,7 +44,12 @@ function Answer({
   );
   const renderLink = useDocLinkRenderer(LIBRARY_INDEX_PATH, onOpen, undefined, quoteFor);
   // US$ on an API key, the share of the week on a Claude subscription (lib/aiBudget.ts `runCostText`).
-  const cost = useRunCostText()(message.costUsd) ?? (message.costUsd == null ? 'Cost not reported' : null);
+  // Judged by the provider that ANSWERED: a Codex answer is never priced by the Claude reading.
+  const runProvider = message.model || message.provider ? aiProviderOfRun(message) : null;
+  const cost = useRunCostText()(message.costUsd, runProvider) ?? (message.costUsd == null ? 'Cost not reported' : null);
+  // Who answered ("Claude Sonnet 5", "Codex · GPT-6.1 Sol"), as the ⓘ promises.
+  const ranOn = message.model ? aiRunLabel(message.provider ?? null, message.model) : null;
+  const usedLine = [ranOn, cost].filter((x): x is string => x != null).join(' · ');
   return (
     <div className="space-y-1.5">
       <div className="text-[13px] text-gray-800 dark:text-gray-100">
@@ -69,7 +74,7 @@ function Answer({
           </ul>
         </div>
       )}
-      {cost != null && <p className={`text-[11px] ${MUTED}`}>{cost}</p>}
+      {usedLine !== '' && <p className={`text-[11px] ${MUTED}`}>{usedLine}</p>}
     </div>
   );
 }

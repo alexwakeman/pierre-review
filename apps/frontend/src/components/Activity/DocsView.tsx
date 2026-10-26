@@ -35,7 +35,7 @@ import { BookIcon, ChevronIcon, UploadIcon } from '../Icons.js';
 import { InfoButton } from '../InfoModal.js';
 import { DocsChat } from './DocsChat.js';
 import { DocsViewer } from './DocsViewer.js';
-import { aiCredentialWords, aiModelWords } from '@pierre-review/shared';
+import { aiCredentialWords, aiModelWords, aiRunLabel } from '@pierre-review/shared';
 
 // THE DOCS RAIL LINE (Activity → Docs, `?activityRepo=docs`; docs/REFERENCE-DOCS.md § The SPA).
 // The workspace's reference library: CORE, free, LOCAL ONLY. The rail entry renders only on
@@ -196,6 +196,7 @@ function DocRow({
               {KIND_LABEL[doc.sourceKind]}
               {doc.crawl?.pages != null && ` · ${doc.crawl.pages.length} page${doc.crawl.pages.length === 1 ? '' : 's'}`}
               {doc.available && ` · ${doc.sectionCount} section${doc.sectionCount === 1 ? '' : 's'}`}
+              {doc.available && doc.model ? ` · ${aiRunLabel(doc.provider ?? null, doc.model)}` : ''}
             </p>
           </div>
         </div>

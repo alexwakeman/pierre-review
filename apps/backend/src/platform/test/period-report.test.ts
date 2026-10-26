@@ -681,6 +681,33 @@ describe('generatePeriodReport — persistence', () => {
     expect(llmCalls).toBe(1); // ONE metered call per user-visible turn.
   });
 
+  it('a write-up Codex wrote keeps the requested key and names what ran (Phase 4)', async () => {
+    const codexLlm: LlmClient = {
+      async complete() {
+        llmCalls += 1;
+        return {
+          text: '**Sprint report.**',
+          inputTokens: 3000,
+          outputTokens: 400,
+          costUsd: 0,
+          model: 'gpt-6-luna',
+          provider: 'codex',
+        };
+      },
+    };
+    const out = await generatePeriodReport(ctx, codexLlm, 1, SCOPE, grid, target, 'claude-haiku-5-5');
+    expect(out.report).toMatchObject({ model: 'claude-haiku-5-5', ranModel: 'gpt-6-luna', provider: 'codex' });
+    expect(out.spend?.model).toBe('gpt-6-luna');
+    const row = sqlite
+      .prepare("SELECT model, ran_model, provider FROM workspace_period_reports WHERE narrative_md IS NOT NULL")
+      .get() as { model: string; ran_model: string; provider: string };
+    expect(row).toEqual({ model: 'claude-haiku-5-5', ran_model: 'gpt-6-luna', provider: 'codex' });
+    // The cached re-read still names what ran.
+    const again = await generatePeriodReport(ctx, codexLlm, 1, SCOPE, grid, target, 'claude-haiku-5-5');
+    expect(again.generated).toBe(false);
+    expect(again.report).toMatchObject({ ranModel: 'gpt-6-luna', provider: 'codex' });
+  });
+
   it('is $0 and row-stable on an unchanged re-run (the payload-hash cache)', async () => {
     await run();
     const before = rowCount();

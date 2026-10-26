@@ -18,7 +18,7 @@
 // ⚠ Only a STAMP writes. `earlierPost` stays derived, so the follow-up chain, auto resolve and
 // pushback keep reading the row that really posted (stamping a re-raise would hand two rows one
 // GitHub thread).
-import { AUTO_POST_FOOTER, type ClaudeFindingEarlierPost } from '@pierre-review/shared';
+import { hasAutoPostFooter, type ClaudeFindingEarlierPost } from '@pierre-review/shared';
 import { findFindingThread, type ThreadComment } from './finding-thread.js';
 import { resolveFindingBody } from './follow-up.js';
 
@@ -117,7 +117,7 @@ export function findOwnComment(
     const t = findFindingThread({ ...f, githubCommentId: null }, input.threads, input.threadComments, login, taken);
     const root = t ? roots.get(t.id) : undefined;
     if (root?.databaseId != null) {
-      return { commentId: root.databaseId, kind: 'inline', createdAt: root.createdAt, auto: (root.body ?? '').includes(AUTO_POST_FOOTER) };
+      return { commentId: root.databaseId, kind: 'inline', createdAt: root.createdAt, auto: hasAutoPostFooter(root.body) };
     }
   }
   for (const c of input.prComments) {
@@ -127,7 +127,7 @@ export function findOwnComment(
     // The file AND line reference `prLevelFindingBody` opens with: the same words about another line
     // are another finding.
     if (f.path !== '' && !body.includes(f.line != null ? `\`${f.path}:${f.line}\`` : `\`${f.path}\``)) continue;
-    return { commentId: c.databaseId, kind: 'pr_comment', createdAt: c.createdAt, auto: body.includes(AUTO_POST_FOOTER) };
+    return { commentId: c.databaseId, kind: 'pr_comment', createdAt: c.createdAt, auto: hasAutoPostFooter(body) };
   }
   return null;
 }

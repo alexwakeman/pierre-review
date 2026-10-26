@@ -61,6 +61,8 @@ export function toReferenceDoc(r: DocRow): ReferenceDoc {
     topics: Array.isArray(r.topics) ? r.topics : [],
     pageCount: r.pageCount ?? null,
     costUsd: r.costUsd ?? null,
+    // What the latest build ran on (0128), when the row recorded it.
+    ...(r.model ? { model: r.model, provider: aiRunProvider(r.provider, r.model) } : {}),
     crawl: crawlOf(r.crawl),
     createdAt: iso(r.createdAt)!,
     updatedAt: iso(r.updatedAt)!,

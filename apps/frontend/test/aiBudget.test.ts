@@ -268,3 +268,16 @@ describe('the usage popover', () => {
     expect(flat).toContain('Today: US$2.00');
   });
 });
+
+describe('the ChatGPT plan and the setup button name the right thing', () => {
+  it('capitalises the plan the same way everywhere', async () => {
+    const { chatGptPlanLabel } = await import('../src/lib/aiBudget.js');
+    expect(chatGptPlanLabel('plus')).toBe('ChatGPT Plus');
+  });
+  it('the Codex setup button states Codex’s size; Claude’s stays as it was', async () => {
+    const { aiSetupLabel, AI_SETUP_LABEL } = await import('../src/lib/aiCapabilities.js');
+    expect(aiSetupLabel('claude')).toBe(AI_SETUP_LABEL);
+    expect(aiSetupLabel(null)).toBe(AI_SETUP_LABEL);
+    expect(aiSetupLabel('codex')).toContain('360 MB');
+  });
+});

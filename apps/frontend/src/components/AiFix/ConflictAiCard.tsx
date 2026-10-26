@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import type { PrDetail } from '@pierre-review/shared';
+import { aiRunProviderName, type PrDetail } from '@pierre-review/shared';
 import { mergeVerdict } from '../../lib/ui.js';
 import { useConflictResolverEntry } from '../conflicts/ResolveConflictsButton.js';
 import { openConflictResolver, type ResolverTarget } from '../../store/conflictResolver.js';
@@ -94,7 +94,7 @@ export function ConflictAiCard({ pr }: { pr: PrDetail }): JSX.Element {
                 Open the resolver
               </button>
               <span className="text-xs text-gray-600 dark:text-gray-300">
-                {name} decided {done.choices.length} of {done.decidableTotal} change
+                {aiRunProviderName(done)} decided {done.choices.length} of {done.decidableTotal} change
                 {done.decidableTotal === 1 ? '' : 's'}.
               </span>
             </>

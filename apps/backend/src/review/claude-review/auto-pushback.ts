@@ -19,7 +19,7 @@
 //      retried. A later run may still ACCEPT a newer reply on the same thread.
 // ⚠ Never throws.
 import { and, eq, isNull } from 'drizzle-orm';
-import { AUTO_POST_FOOTER, type FindingPushbackRecord } from '@pierre-review/shared';
+import { aiRunProviderName, autoPostFooter, type AiProviderName, type FindingPushbackRecord } from '@pierre-review/shared';
 import type { AgentContext } from '../agent-context.js';
 import { readWorkspaceAutoPostForPr } from './auto-settings.js';
 import { autoPostEligibility, defaultAutoPostDeps, readAutoPostPrFacts, type AutoPostDeps } from './auto-post.js';
@@ -43,8 +43,8 @@ const nowIso = (): string => new Date().toISOString();
 const errText = (err: unknown): string => (err instanceof Error ? err.message : String(err)).slice(0, 300);
 
 /** The posted pushback: Claude's text, the footer, the marker. */
-export function pushbackReplyBody(text: string): string {
-  return `${text.trim()}\n\n${AUTO_POST_FOOTER}\n\n${PUSHBACK_MARKER}`;
+export function pushbackReplyBody(text: string, by: AiProviderName = 'Claude'): string {
+  return `${text.trim()}\n\n${autoPostFooter(by)}\n\n${PUSHBACK_MARKER}`;
 }
 
 export interface AutoPushbackResult {
@@ -125,7 +125,7 @@ async function autoPushback(
     if (claimed.length === 0) continue;
     let final: FindingPushbackRecord;
     try {
-      const { commentId } = await deps.reply(accountId, thread.githubNodeId, pushbackReplyBody(target.get(f.id)!));
+      const { commentId } = await deps.reply(accountId, thread.githubNodeId, pushbackReplyBody(target.get(f.id)!, aiRunProviderName(review)));
       wroteAny = true;
       final = { ...rec, status: 'posted', at: nowIso(), commentId };
       result.posted.push(f.id);

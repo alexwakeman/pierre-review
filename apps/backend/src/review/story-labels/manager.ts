@@ -193,6 +193,9 @@ export interface StoredLabel {
   costUsd: number;
   inputTokens: number;
   outputTokens: number;
+  /** What answered (Phase 4): the model that RAN and its provider. Absent ⇒ the Claude constant. */
+  model?: string;
+  provider?: 'claude' | 'codex';
 }
 
 async function storeLabel(
@@ -212,7 +215,8 @@ async function storeLabel(
       criteriaJson: v.criteria,
       storyJson: v.story,
       criteriaCount: v.criteria.length,
-      model: STORY_LABEL_MODEL,
+      model: v.model ?? STORY_LABEL_MODEL,
+      provider: v.provider ?? null,
       costUsd: v.costUsd,
       inputTokens: v.inputTokens,
       outputTokens: v.outputTokens,
@@ -276,7 +280,15 @@ async function runLabels(
             if (v.quotes.given > v.quotes.verified) {
               ctx.log.info({ accountId: a.accountId, quotes: v.quotes }, 'story labels: quotes that did not verify were dropped');
             }
-            await store(s, { criteria: v.criteria, story: v.story, costUsd, inputTokens, outputTokens });
+            await store(s, {
+              criteria: v.criteria,
+              story: v.story,
+              costUsd,
+              inputTokens,
+              outputTokens,
+              model: u.model,
+              provider: u.provider,
+            });
             status.labelled += 1;
             return;
           }

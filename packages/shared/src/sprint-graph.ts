@@ -511,19 +511,19 @@ export interface SprintPathsStatus {
   failure: SprintPathsFailure | null;
 }
 
-/** The plain-English reason for a failed builder pass. */
-export function sprintPathsFailureText(f: SprintPathsFailure): string {
+/** The plain-English reason for a failed builder pass. `by`: the provider that ran it (default Claude). */
+export function sprintPathsFailureText(f: SprintPathsFailure, by: 'Claude' | 'Codex' = 'Claude'): string {
   switch (f) {
     case 'refused':
-      return 'Claude’s answer did not pass Limn’s checks.';
+      return `${by}’s answer did not pass Limn’s checks.`;
     case 'no_submit':
-      return 'Claude finished without an answer.';
+      return `${by} finished without an answer.`;
     case 'stopped':
-      return 'Claude ran out of turns or budget.';
+      return `${by} ran out of turns or budget.`;
     case 'daily_cap':
       return 'Today’s limit is used up.';
     case 'error':
-      return 'The call to Claude failed.';
+      return `The call to ${by} failed.`;
   }
 }
 

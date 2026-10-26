@@ -30,8 +30,8 @@ export type SprintPathsView =
   | { kind: 'message'; writing: boolean; text: string };
 
 /** The failure line: the reason, then when it is tried again. */
-export function pathsFailureLine(status: SprintPathsStatus): string {
-  const why = status.failure != null ? ` ${sprintPathsFailureText(status.failure)}` : '';
+export function pathsFailureLine(status: SprintPathsStatus, by: 'Claude' | 'Codex' = 'Claude'): string {
+  const why = status.failure != null ? ` ${sprintPathsFailureText(status.failure, by)}` : '';
   const when = status.failure === 'daily_cap' ? 'Limn tries again tomorrow.' : 'Limn tries again when the sprint changes.';
   return `Couldn’t find the critical paths.${why} ${when}`;
 }
@@ -42,6 +42,8 @@ export function sprintPathsView(p: {
   status: SprintPathsStatus;
   /** Tickets IN the sprint (ghosts not counted); absent = not known. */
   sprintTickets?: number;
+  /** The provider the passes run on (the active one); a failure names it. Absent ⇒ Claude. */
+  providerName?: 'Claude' | 'Codex';
 }): SprintPathsView {
   if (!p.aiEnabled) return { kind: 'off' };
   const s = p.status;
@@ -49,7 +51,7 @@ export function sprintPathsView(p: {
   if (p.paths != null) {
     let note: SprintPathsNote = null;
     if (s.stale && (s.state === 'writing' || s.state === 'queued')) note = { kind: 'updating' };
-    else if (s.state === 'failed') note = { kind: 'failed', text: pathsFailureLine(s) };
+    else if (s.state === 'failed') note = { kind: 'failed', text: pathsFailureLine(s, p.providerName) };
     return { kind: 'paths', paths: p.paths, note };
   }
   switch (s.state) {
@@ -60,7 +62,7 @@ export function sprintPathsView(p: {
     case 'waiting':
       return { kind: 'message', writing: false, text: 'Critical paths come after the next sprint read.' };
     case 'failed':
-      return { kind: 'message', writing: false, text: pathsFailureLine(s) };
+      return { kind: 'message', writing: false, text: pathsFailureLine(s, p.providerName) };
     default:
       if (p.sprintTickets != null && p.sprintTickets < SPRINT_PATHS_CAPS.minTickets) {
         return { kind: 'message', writing: false, text: `Critical paths need at least ${SPRINT_PATHS_CAPS.minTickets} tickets in the sprint.` };

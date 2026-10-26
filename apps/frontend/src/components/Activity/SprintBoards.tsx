@@ -281,7 +281,10 @@ function sprintBorderKeyItems(present: ReadonlySet<string>): BorderKeyItem[] {
 // ── Critical path ────────────────────────────────────────────────────────────────────────────────
 
 export function SprintPathsView({ data, actions }: { data: SprintGraphResponse; actions: SprintCardActions }): JSX.Element {
+  // A failed pass ran on the active provider: its line names that provider, never always Claude.
+  const providerName = useAiProviderName();
   const view = sprintPathsView({
+    providerName,
     aiEnabled: data.aiEnabled,
     paths: data.paths,
     status: data.pathsStatus,

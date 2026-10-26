@@ -2945,6 +2945,8 @@ export const storyLabels = sqliteTable(
     storyJson: text('story_json', { mode: 'json' }).$type<StoryLevelLabels>().notNull(),
     criteriaCount: integer('criteria_count').notNull(),
     model: text('model').notNull(),
+    // Which provider answered (migration 0129); `model` is the model that RAN. NULL on older rows.
+    provider: text('provider'),
     costUsd: real('cost_usd'),
     inputTokens: integer('input_tokens'),
     outputTokens: integer('output_tokens'),
@@ -3166,6 +3168,8 @@ export const sprintBriefs = sqliteTable(
     criteriaDerived: integer('criteria_derived', { mode: 'boolean' }).notNull().default(false),
     referencesJson: text('references_json', { mode: 'json' }).$type<SprintBriefStoredReference[]>().notNull(),
     model: text('model').notNull(),
+    // Which provider answered (migration 0129); `model` is the model that RAN. NULL on older rows.
+    provider: text('provider'),
     costUsd: real('cost_usd'),
     inputTokens: integer('input_tokens'),
     outputTokens: integer('output_tokens'),
@@ -3203,6 +3207,8 @@ export const sprintThemes = sqliteTable(
     themesJson: text('themes_json', { mode: 'json' }).$type<SprintTheme[]>().notNull(),
     assignmentsJson: text('assignments_json', { mode: 'json' }).$type<Array<{ ident: string; theme: string }>>().notNull(),
     model: text('model').notNull(),
+    // Which provider answered (migration 0129); `model` is the model that RAN. NULL on older rows.
+    provider: text('provider'),
     costUsd: real('cost_usd'),
     inputTokens: integer('input_tokens'),
     outputTokens: integer('output_tokens'),

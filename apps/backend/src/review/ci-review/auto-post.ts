@@ -29,7 +29,9 @@
 // ⚠ Never throws: posting failing must never touch the CI review.
 import { and, desc, eq, isNull, lt } from 'drizzle-orm';
 import {
-  AUTO_POST_FOOTER,
+  aiRunProviderName,
+  autoPostFooter,
+  type AiProviderName,
   type AutoPostSkipReason,
   type CiAutoPostRecord,
   type CiReviewItem,
@@ -86,7 +88,7 @@ const clip = (t: string, max: number): string => (t.length > max ? `${t.slice(0,
 const codeSpan = (t: string): string => `\`${safeCommentText(t, true).replace(/`/g, "'")}\``;
 
 /** The comment body: a lead line, one block per item, the footer, then the hidden marker. */
-export function ciCommentBody(items: readonly CiReviewItem[], headSha: string): string {
+export function ciCommentBody(items: readonly CiReviewItem[], headSha: string, by: AiProviderName = 'Claude'): string {
   const lines: string[] = [];
   const n = items.length;
   lines.push(`**Why CI failed** on ${headSha.slice(0, 7)} (${n === 1 ? 'one check' : `${n} checks`}):`);
@@ -102,7 +104,7 @@ export function ciCommentBody(items: readonly CiReviewItem[], headSha: string): 
     if (typeof it.confidence === 'number') lines.push(`  Confidence: ${it.confidence}%`);
   }
   lines.push('');
-  lines.push(AUTO_POST_FOOTER);
+  lines.push(autoPostFooter(by));
   lines.push('');
   lines.push(CI_COMMENT_MARKER);
   return lines.join('\n');
@@ -254,7 +256,7 @@ async function autoPostCiReview(
 
   let final: CiAutoPostRecord;
   try {
-    const { commentId } = await deps.postComment(pr.owner, pr.name, pr.number, ciCommentBody(picked, row.headSha));
+    const { commentId } = await deps.postComment(pr.owner, pr.name, pr.number, ciCommentBody(picked, row.headSha, aiRunProviderName(run)));
     // GitHub has 201'd: from here nothing may throw or retry.
     final = { ...record, status: 'posted', at: nowIso(), commentId };
   } catch (err) {

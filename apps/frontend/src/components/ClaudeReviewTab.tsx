@@ -1768,7 +1768,12 @@ export function ClaudeReviewTab({
   const phase = status?.progress?.phase ?? null;
   // The live estimate, worded like every run cost: US$ on an API key, the share of the week on a
   // Claude subscription, nothing when unknown.
-  const liveCost = costText(status?.progress?.usage?.estCostUsd);
+  // Judged by the provider the RUNNING row runs on (stamped at queue time), never the other one's.
+  const liveRow = review != null && (review.status === 'running' || review.status === 'queued') ? review : null;
+  const liveCost = costText(
+    status?.progress?.usage?.estCostUsd,
+    liveRow ? aiRunProvider(liveRow.provider, liveRow.model) : null,
+  );
   const phaseLabel = phase != null ? (PHASE_LABEL[phase] ?? phase) : 'Starting…';
 
   // ⚠ The server posts the STORED draft body. Clicking Preview blurs the summary box, whose save

@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import type { ConflictAiResolution, ConflictSession } from '@pierre-review/shared';
+import { aiRunProviderName, type ConflictAiResolution, type ConflictSession } from '@pierre-review/shared';
 import { api } from '../api/client.js';
 import { useAiCapabilities } from './useAiCapabilities.js';
 import { conflictAiRunActive, peekConflictAiRun, useConflictAiRun } from './useConflictAiResolve.js';
@@ -70,6 +70,8 @@ export function useClaudePrefill(prId: number, session: ConflictSession | null, 
         marks: plan.marks,
         decidableTotal: res.decidableTotal,
         summary: res.summary,
+        // Who made these choices: the run's own provider, so a later Settings switch never re-credits them.
+        providerName: aiRunProviderName(res),
       });
     };
     const heldRun = peekConflictAiRun(prId);

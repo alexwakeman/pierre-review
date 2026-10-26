@@ -10,6 +10,7 @@ import { useMe } from '../../hooks/useTriage.js';
 import { useAiRuntimeInstall } from '../../hooks/useAiCapabilities.js';
 import { useCodexLogin, useCodexLoginActions, useSetAiProvider } from '../../hooks/useAiProvider.js';
 import { safeExternalUrl } from '../../lib/ui.js';
+import { chatGptPlanLabel } from '../../lib/aiBudget.js';
 import { InfoButton } from '../InfoModal.js';
 import { SectionShell } from './ui.js';
 
@@ -38,7 +39,7 @@ function claudeLine(c: AiClaudeProviderStatus): string {
 function codexLine(c: AiCodexProviderStatus): string {
   if (c.runtime === 'installing') return 'Setting up Codex…';
   if (c.runtime !== 'ready') return c.runtimeMessage ?? 'Not set up.';
-  if (c.auth === 'ok') return c.plan ? `Signed in with ChatGPT (${c.plan}).` : 'Signed in with ChatGPT.';
+  if (c.auth === 'ok') return c.plan ? `Signed in with ${chatGptPlanLabel(c.plan)}.` : 'Signed in with ChatGPT.';
   return c.message ?? 'Not signed in.';
 }
 

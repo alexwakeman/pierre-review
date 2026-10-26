@@ -1,6 +1,8 @@
 import {
   AUTO_POST_FOOTER,
+  autoPostFooter,
   SONAR_SEVERITY_LABEL,
+  type AiProviderName,
   sonarConditionSentence,
   sonarFailingConditions,
   sonarGateItems,
@@ -182,7 +184,7 @@ const INLINE_GUIDANCE_MAX = 8_000;
 
 /** One issue's INLINE thread body: what, the rule, SonarCloud's message and how to fix it. The line
  *  it sits on is the location. Footer (auto) + the hidden marker, like every Limn body. */
-export function sonarInlineBody(it: SonarIssue, opts: { auto: boolean }): string {
+export function sonarInlineBody(it: SonarIssue, opts: { auto: boolean; by?: AiProviderName }): string {
   const lines: string[] = [];
   const type = it.type ? TYPE_LABEL[it.type] ?? it.type : null;
   const head = [SONAR_SEVERITY_LABEL[it.severity], type].filter(Boolean).join(' · ');
@@ -210,7 +212,7 @@ export function sonarInlineBody(it: SonarIssue, opts: { auto: boolean }): string
   }
   lines.push('');
   if (opts.auto) {
-    lines.push(AUTO_POST_FOOTER);
+    lines.push(opts.by ? autoPostFooter(opts.by) : AUTO_POST_FOOTER);
     lines.push('');
   }
   lines.push(SONAR_COMMENT_MARKER);
@@ -231,7 +233,8 @@ function issueOneLine(it: SonarIssue): string {
  */
 export function sonarCommentBody(
   s: SonarSnapshot,
-  opts: { auto: boolean; budget?: number; split?: SonarSplit; marker?: string },
+  // `by`: the provider that ran the auto review behind an auto post (its footer); absent ⇒ Claude's.
+  opts: { auto: boolean; budget?: number; split?: SonarSplit; marker?: string; by?: AiProviderName },
 ): SonarCommentBody {
   const budget = opts.budget ?? COMMENT_BUDGET;
   const split = opts.split ?? { inline: [], already: [], summary: s.issues };
@@ -250,7 +253,7 @@ export function sonarCommentBody(
     );
   }
   const tail: string[] = [];
-  if (opts.auto) tail.push(AUTO_POST_FOOTER);
+  if (opts.auto) tail.push(opts.by ? autoPostFooter(opts.by) : AUTO_POST_FOOTER);
   tail.push(opts.marker ?? SONAR_COMMENT_MARKER);
 
   const blocks: string[] = [];

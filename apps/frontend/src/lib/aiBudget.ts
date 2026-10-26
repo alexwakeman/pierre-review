@@ -278,6 +278,11 @@ function capitalise(s: string): string {
   return t === '' ? t : t.charAt(0).toUpperCase() + t.slice(1);
 }
 
+/** A ChatGPT plan as every surface names it: 'plus' → "ChatGPT Plus". */
+export function chatGptPlanLabel(plan: string): string {
+  return `ChatGPT ${capitalise(plan)}`;
+}
+
 /** The popover's contents. Pure; unknown pieces are left out, never shown as 0. */
 export function usageDetailOf(data: AiBudgetResponse, now: number = Date.now()): UsageDetail {
   const { status, usage } = data;

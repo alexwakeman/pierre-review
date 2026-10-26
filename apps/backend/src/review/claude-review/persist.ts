@@ -2157,6 +2157,8 @@ export async function loadPriorRunForCarry(
   headSha: string;
   threadAssessments: ClaudeThreadAssessment[] | null;
   ciFailures: ClaudeCiFailure[] | null;
+  provider: string | null;
+  model: string | null;
 } | null> {
   const { cr } = tables(ctx);
   const rows = (await ctx.db
@@ -2164,6 +2166,8 @@ export async function loadPriorRunForCarry(
       headSha: cr.headSha,
       threadAssessments: cr.threadAssessments,
       ciFailures: cr.ciFailures,
+      provider: cr.provider,
+      model: cr.model,
     })
     .from(cr)
     .where(
@@ -2181,6 +2185,8 @@ export async function loadPriorRunForCarry(
     headSha: string;
     threadAssessments: ClaudeThreadAssessment[] | null;
     ciFailures: ClaudeCiFailuresRecord | null;
+    provider: string | null;
+    model: string | null;
   }>;
   const r = rows[0];
   if (!r) return null;
@@ -2188,5 +2194,7 @@ export async function loadPriorRunForCarry(
     headSha: r.headSha,
     threadAssessments: Array.isArray(r.threadAssessments) ? r.threadAssessments : null,
     ciFailures: ciRecordOf(r.ciFailures)?.failures ?? null,
+    provider: r.provider ?? null,
+    model: r.model ?? null,
   };
 }

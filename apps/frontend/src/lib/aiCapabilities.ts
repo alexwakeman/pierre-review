@@ -43,6 +43,12 @@ export interface AiCapabilities {
 /** Claude's sign-in line (the default provider). Per provider: `aiSignInLine` (shared). */
 export const AI_AUTH_LINE = aiSignInLine('claude');
 export const AI_SETUP_LABEL = 'Set up AI (one-time ~110 MB download)';
+/** The setup button for the ACTIVE provider. Codex's native program is ~360 MB unpacked per platform
+ *  (docs/PACKAGING.md § The Codex CLI), on top of Claude's SDKs — never Claude's ~110 MB figure. */
+export const AI_SETUP_LABEL_CODEX = 'Set up AI (one-time download; Codex takes ~360 MB)';
+export function aiSetupLabel(provider: AiProviderId | null | undefined): string {
+  return provider === 'codex' ? AI_SETUP_LABEL_CODEX : AI_SETUP_LABEL;
+}
 
 export function aiCapabilitiesOf(me: MeResponse | undefined): AiCapabilities {
   const ai = me?.ai;

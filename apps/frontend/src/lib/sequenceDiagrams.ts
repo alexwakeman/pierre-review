@@ -1,7 +1,9 @@
 // DESIGN DIAGRAMS — the SPA's pure folds (test/sequenceDiagram.test.ts): when to poll, and the one
 // status line under a slot. docs/FRONTEND.md § Design diagrams.
 import {
-  SEQUENCE_DIAGRAM_REFUSAL_TEXT,
+  aiRunProviderName,
+  sequenceDiagramRefusalText,
+  type AiProviderName,
   type PrSequenceDiagramsResponse,
   type RedrawSequenceDiagramResponse,
   type SequenceDiagramSlot,
@@ -41,15 +43,18 @@ export function slotStatusLine(slot: SequenceDiagramSlot, redrawing: boolean): s
   if (redrawing || slotDrawing(slot)) return 'Drawing…';
   const l = slot.latest;
   if (l == null) return slot.diagram == null ? 'No design yet.' : null;
-  if (l.status === 'refused' && l.refusal != null) return SEQUENCE_DIAGRAM_REFUSAL_TEXT[l.refusal];
+  // A refusal names the provider that RAN this drawing (its row's), never the active one.
+  const by = aiRunProviderName(l);
+  if (l.status === 'refused' && l.refusal != null) return sequenceDiagramRefusalText(l.refusal, by);
   if (l.status === 'failed') {
-    return l.refusal != null ? SEQUENCE_DIAGRAM_REFUSAL_TEXT[l.refusal] : 'Drawing failed.';
+    return l.refusal != null ? sequenceDiagramRefusalText(l.refusal, by) : 'Drawing failed.';
   }
   if (l.status === 'cancelled') return 'Drawing was cancelled.';
   return null;
 }
 
-export function redrawRefusalText(r: RedrawSequenceDiagramResponse | undefined): string | null {
-  return r?.outcome === 'refused' && r.refusal != null ? SEQUENCE_DIAGRAM_REFUSAL_TEXT[r.refusal] : null;
+/** A redraw refused now: `by` is the provider it would have run on (the active one). */
+export function redrawRefusalText(r: RedrawSequenceDiagramResponse | undefined, by: AiProviderName = 'Claude'): string | null {
+  return r?.outcome === 'refused' && r.refusal != null ? sequenceDiagramRefusalText(r.refusal, by) : null;
 }
 

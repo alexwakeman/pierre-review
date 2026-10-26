@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type {
+  AiProviderId,
   ClaudeReviewModel,
   ThreadCheckProgress,
   ThreadCheckRefusal,
@@ -33,7 +34,8 @@ import {
   reconcileOrphanedThreadChecks,
   saveThreadCheckSuccess,
 } from './thread-check-persist.js';
-import { currentThreadAssessmentsForPrs } from './thread-judgements.js';
+import { currentThreadAssessmentsForPrs, priorAssessmentsForProvider } from './thread-judgements.js';
+import { activeProviderId } from '../../ai/provider-setting.js';
 import {
   planThreadReview,
   pushReviewThreadsSection,
@@ -105,6 +107,8 @@ export async function planThreadCheck(
   accountId: number,
   prId: number,
   headSha: string,
+  // The provider the check runs on: only ITS earlier judgements carry (`priorAssessmentsForProvider`).
+  provider: AiProviderId = activeProviderId(),
 ): Promise<{ plan: ThreadPlan; threadCount: number; ownThreadCount: number; newestCommentAt: Date | null } | null> {
   const load = ctx.queries.loadReviewThreads?.bind(ctx.queries);
   if (!load) return null;
@@ -112,7 +116,7 @@ export async function planThreadCheck(
     load(accountId, prId),
     currentThreadAssessmentsForPrs(ctx, accountId, [prId]),
   ]);
-  const prior = current.get(prId)?.assessments ?? null;
+  const prior = priorAssessmentsForProvider(current.get(prId), provider);
   return {
     plan: planThreadReview(loaded.threads, headSha, prior),
     threadCount: loaded.threads.length,

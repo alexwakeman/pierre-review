@@ -73,4 +73,18 @@ describe('sprint themes store', () => {
     expect((await store.storedSprintThemes(1, wsA))?.inputHash).toBe('h2');
     await expect(store.storeSprintThemes(2, wsA, 'x', v(['X', 'Y', 'Z'], ['i1']))).rejects.toThrow();
   });
+
+  it('stores the model that RAN and its provider; an unlabelled pass reads as the Claude constant', async () => {
+    await store.storeSprintThemes(1, wsA, 'h3', {
+      ...v(['Alpha', 'Beta', 'Gamma'], ['i1']),
+      model: 'gpt-6-luna',
+      provider: 'codex',
+    });
+    let row = (await db.select().from(schema.sprintThemes).execute()).find((r: any) => r.accountId === 1);
+    expect(row).toMatchObject({ model: 'gpt-6-luna', provider: 'codex' });
+    await store.storeSprintThemes(1, wsA, 'h4', v(['Alpha', 'Beta', 'Gamma'], ['i1']));
+    row = (await db.select().from(schema.sprintThemes).execute()).find((r: any) => r.accountId === 1);
+    expect(row.provider).toBeNull();
+    expect(row.model).toMatch(/^claude-/);
+  });
 });

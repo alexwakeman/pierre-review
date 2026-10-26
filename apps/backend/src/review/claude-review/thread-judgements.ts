@@ -102,6 +102,22 @@ export interface CurrentThreadAssessments {
   providerByThread: Map<number, AiProviderId>;
 }
 
+/**
+ * The prior judgements a NEW run on `provider` may carry or lock (`planThreadReview`): only those
+ * the SAME provider made. A run on the other provider judges every thread afresh, so its verdicts
+ * are its own — never the other provider's copied under its label (the in-situ comparison).
+ * Pure (exported for the test).
+ */
+export function priorAssessmentsForProvider(
+  current: Pick<CurrentThreadAssessments, 'assessments' | 'providerByThread'> | null | undefined,
+  provider: AiProviderId,
+): ClaudeThreadAssessment[] | null {
+  if (!current) return null;
+  return current.assessments.filter(
+    (a) => a != null && typeof a.threadId === 'number' && current.providerByThread.get(a.threadId) === provider,
+  );
+}
+
 const ms = (d: unknown): number =>
   d instanceof Date ? d.getTime() : d == null ? 0 : new Date(d as string | number).getTime();
 
@@ -305,7 +321,13 @@ export function findingMirror(
  * `reviews` NEWEST FIRST. Pure (exported for the test).
  */
 export function findingJudgementsFromFollowUps(
-  reviews: ReadonlyArray<{ id: number; headSha: string; followUp: ClaudeReviewFollowUpRecord | null }>,
+  reviews: ReadonlyArray<{
+    id: number;
+    headSha: string;
+    followUp: ClaudeReviewFollowUpRecord | null;
+    provider?: string | null;
+    model?: string | null;
+  }>,
 ): Map<number, ClaudeThreadJudgement> {
   const out = new Map<number, ClaudeThreadJudgement>();
   for (const r of reviews) {
@@ -331,6 +353,8 @@ export function findingJudgementsFromFollowUps(
         assessedAtHead: r.headSha,
         carried: it.statusCarried === true,
         finding,
+        // The review whose follow-up made this judgement — never the reader's active provider.
+        provider: aiRunProvider(r.provider, r.model),
       });
     }
   }
@@ -343,16 +367,24 @@ async function followUpsForPrs(
   accountId: number,
   prIds: readonly number[],
 ): Promise<
-  Map<number, Array<{ id: number; headSha: string; finishedAt: Date | null; followUp: ClaudeReviewFollowUpRecord | null }>>
+  Map<number, Array<{ id: number; headSha: string; finishedAt: Date | null; followUp: ClaudeReviewFollowUpRecord | null; provider: string | null; model: string | null }>>
 > {
   const out = new Map<
     number,
-    Array<{ id: number; headSha: string; finishedAt: Date | null; followUp: ClaudeReviewFollowUpRecord | null }>
+    Array<{ id: number; headSha: string; finishedAt: Date | null; followUp: ClaudeReviewFollowUpRecord | null; provider: string | null; model: string | null }>
   >();
   if (prIds.length === 0) return out;
   const cr = (ctx.schema as any).claudeReviews;
   const rows = (await ctx.db
-    .select({ id: cr.id, prId: cr.prId, headSha: cr.headSha, finishedAt: cr.finishedAt, followUp: cr.followUp })
+    .select({
+      id: cr.id,
+      prId: cr.prId,
+      headSha: cr.headSha,
+      finishedAt: cr.finishedAt,
+      followUp: cr.followUp,
+      provider: cr.provider,
+      model: cr.model,
+    })
     .from(cr)
     .where(
       and(
@@ -369,6 +401,8 @@ async function followUpsForPrs(
     headSha: string;
     finishedAt: Date | null;
     followUp: ClaudeReviewFollowUpRecord | null;
+    provider: string | null;
+    model: string | null;
   }>;
   for (const r of rows) {
     const list = out.get(r.prId) ?? [];

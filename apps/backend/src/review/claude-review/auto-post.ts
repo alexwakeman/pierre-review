@@ -59,7 +59,6 @@
 // ⚠ Never throws: auto-posting failing must never touch the review.
 import { and, desc, eq, inArray, isNull, lt } from 'drizzle-orm';
 import {
-  AUTO_POST_FOOTER,
   type AutoApproveImpact,
   type AutoPostKinds,
   type AutoPostScope,
@@ -85,7 +84,7 @@ import {
   markReviewPosted,
 } from './persist.js';
 import { resolveFindingBody } from './follow-up.js';
-import { aiRunProviderName, type AiProviderName } from '@pierre-review/shared';
+import { aiRunProviderName, autoPostFooter, type AiProviderName } from '@pierre-review/shared';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 const s = (ctx: AgentContext): any => ctx.schema as any;
@@ -320,7 +319,7 @@ export function autoReviewBodyLead(summary: string | null, commentCount: number,
 
 /** The posted body of an auto review: the lead, then the footer (the seam appends the marker). */
 export function autoReviewBody(summary: string | null, commentCount: number, by: AiProviderName = 'Claude'): string {
-  return `${autoReviewBodyLead(summary, commentCount, by)}\n\n${AUTO_POST_FOOTER}`;
+  return `${autoReviewBodyLead(summary, commentCount, by)}\n\n${autoPostFooter(by)}`;
 }
 
 // ---- I/O ----
@@ -645,7 +644,7 @@ async function writeRecord(ctx: AgentContext, reviewId: number, rec: ClaudeAutoP
   await ctx.db.update(cr).set({ autoPost: rec }).where(eq(cr.id, reviewId)).execute();
 }
 
-const toPostFinding = (f: ClaudeFinding): PostReviewFinding => ({
+const toPostFinding = (f: ClaudeFinding, by: AiProviderName): PostReviewFinding => ({
   id: f.id,
   path: f.path,
   line: f.line,
@@ -655,7 +654,8 @@ const toPostFinding = (f: ClaudeFinding): PostReviewFinding => ({
   body: resolveFindingBody(f),
   suggestion: f.suggestion,
   storyLead: null,
-  footer: AUTO_POST_FOOTER,
+  // The footer names the provider that ran the review (Claude's text unchanged).
+  footer: autoPostFooter(by),
 });
 
 /** What happened, for the caller and the tests. */
@@ -850,7 +850,7 @@ async function autoPostReview(
       // COMMENT unless auto verdict is on AND its gate let the verdict through.
       verdict: ev,
       // Questions ride the same review: the seam anchors each inline, else falls back.
-      includedFindings: picked.toPost.map(toPostFinding),
+      includedFindings: picked.toPost.map((f) => toPostFinding(f, aiRunProviderName(review))),
       dryRun: false,
     });
 

@@ -626,6 +626,9 @@ interface ReportRow {
   suggestedJson: string | null;
   narrativeMd: string | null;
   model: string | null;
+  // What wrote the narrative (platform migration 0043); NULL on older and un-narrated rows.
+  ranModel?: string | null;
+  provider?: string | null;
   payloadHash: string;
   dataFingerprint: string;
   creditsSpent: number | null;
@@ -804,6 +807,9 @@ interface PersistInput {
   window: PeriodWindow;
   model: string;
   report: PeriodReport;
+  // What wrote the narrative (Phase 4). Omitted ⇒ NULL (an un-narrated row).
+  ranModel?: string | null;
+  provider?: string | null;
   repoIds: number[];
   payloadHash: string;
   dataFingerprint: string;
@@ -852,6 +858,8 @@ async function persistReport(ctx: ProContext, input: PersistInput): Promise<void
     // either dialect, so NULL-modelled rows do not collide in the unique index and a re-run of
     // the backfill would insert a fresh duplicate set every time.
     model: input.model,
+    ranModel: input.ranModel ?? null,
+    provider: input.provider ?? null,
     payloadHash: input.payloadHash,
     dataFingerprint: input.dataFingerprint,
     creditsSpent: input.creditsSpent,
@@ -1598,6 +1606,14 @@ export async function buildMonthToDate(
 
 /** A stored row → the wire shape. The only computed field is `stale`, which the caller supplies
  *  from a fresh fingerprint. */
+/** What wrote a stored narrative (Phase 4) — present only when the row recorded it. */
+function ranOnOf(row: Pick<ReportRow, 'ranModel' | 'provider'>): Pick<PeriodReport, 'ranModel' | 'provider'> {
+  const out: Pick<PeriodReport, 'ranModel' | 'provider'> = {};
+  if (row.ranModel) out.ranModel = row.ranModel;
+  if (row.provider === 'claude' || row.provider === 'codex') out.provider = row.provider;
+  return out;
+}
+
 function rowToReport(row: ReportRow, stale: boolean): PeriodReport {
   return {
     periodKey: row.periodKey,
@@ -1631,6 +1647,7 @@ function rowToReport(row: ReportRow, stale: boolean): PeriodReport {
     narrative: row.narrativeMd,
     // '' is the stored "un-narrated" sentinel; the wire says null.
     model: row.model != null && row.model !== '' ? row.model : null,
+    ...ranOnOf(row),
     metricsSchemaVersion: row.metricsSchemaVersion,
     generatedAt: tsToIso(row.generatedAt),
     stale,
@@ -1841,6 +1858,7 @@ export async function listPeriods(
         cadenceDays: rep.cadenceDays,
         hasNarrative: narrated != null,
         model: narrated?.model != null && narrated.model !== '' ? narrated.model : null,
+        ...(narrated ? ranOnOf(narrated) : {}),
         coverageComplete: parseJson<PeriodCoverage>(rep.coverageJson, {
           trackedRepos: 0,
           totalRepos: 0,
@@ -1882,6 +1900,7 @@ export async function listPeriods(
       cadenceDays: rep.cadenceDays,
       hasNarrative: narrated != null,
       model: narrated?.model != null && narrated.model !== '' ? narrated.model : null,
+      ...(narrated ? ranOnOf(narrated) : {}),
       coverageComplete: parseJson<PeriodCoverage>(rep.coverageJson, {
         trackedRepos: 0,
         totalRepos: 0,
@@ -2127,6 +2146,9 @@ export async function generatePeriodReport(
     }
     const generatedAt = new Date();
     const spend = estimateReportCost(model, out.inputTokens, out.outputTokens);
+    // What answered (Phase 4). `model` stays the requested id — the row identity and cache key.
+    const ranModel = out.model ?? model;
+    const ranProvider = out.provider ?? 'claude';
 
     // The shared AI-usage ledger (summary seam). Best-effort: a failed ledger write must never
     // lose the report the user just paid for. `recordAiUsage` DROPS any row with costUsd <= 0, so
@@ -2148,6 +2170,8 @@ export async function generatePeriodReport(
       ...built.report,
       narrative,
       model,
+      ranModel,
+      provider: ranProvider,
       generatedAt: generatedAt.toISOString(),
       stale: false,
     };
@@ -2156,6 +2180,8 @@ export async function generatePeriodReport(
       workspaceId: scope.workspaceId,
       window,
       model,
+      ranModel,
+      provider: ranProvider,
       report,
       repoIds: built.repoIds,
       payloadHash: built.payloadHash,
@@ -2169,7 +2195,8 @@ export async function generatePeriodReport(
       report,
       generated: true,
       spend: {
-        model,
+        // The run's spend names what RAN (the label beside it), not the requested id.
+        model: ranModel,
         credits: spend.estimatedCredits,
         usd: spend.estimatedUsd,
         inputTokens: out.inputTokens,

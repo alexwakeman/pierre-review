@@ -175,6 +175,7 @@ export function useSprintAsk(workspaceId: number | null) {
         answer: data.answer,
         costUsd: data.costUsd,
         trimmedTurns: data.trimmedTurns,
+        model: data.model,
       });
     },
   });
@@ -185,6 +186,8 @@ export interface SprintAskShownTurn extends SprintAskTurn {
   costUsd: number | null;
   /** Earlier turns the server did not read for this answer. */
   trimmedTurns: number;
+  /** The model that answered (its provider is read from the id). Absent on an older server. */
+  model?: string;
 }
 
 /** The conversation per workspace, for the visit only (memory, never storage or the URL). */

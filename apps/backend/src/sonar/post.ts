@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
-import type { SonarInlinePost, SonarPostRecord, SonarSnapshot } from '@pierre-review/shared';
+import { aiProviderName, type SonarInlinePost, type SonarPostRecord, type SonarSnapshot } from '@pierre-review/shared';
+import { activeProviderId } from '../ai/provider-setting.js';
 import type { AgentContext } from '../review/agent-context.js';
 import type { SonarDb } from './settings.js';
 import { readSonarAccessForPr } from './settings.js';
@@ -159,8 +160,11 @@ export async function postSonarSnapshot(
   }
 
   const auto = trigger === 'auto';
+  // An auto post follows an auto review, run on the active provider: its footer names that provider.
+  const by = auto ? aiProviderName(activeProviderId()) : undefined;
   const { body, issueCount, truncated } = sonarCommentBody(snap, {
     auto,
+    by,
     split,
     marker: sonarReviewMarker(randomBytes(6).toString('hex')),
   });
@@ -168,7 +172,7 @@ export async function postSonarSnapshot(
     path: it.path!,
     line: it.line!,
     side: 'RIGHT',
-    body: sonarInlineBody(it, { auto }),
+    body: sonarInlineBody(it, { auto, by }),
   }));
   const inline: SonarInlinePost[] = split.inline.map((it) => ({ key: it.key, path: it.path!, line: it.line!, commentId: null }));
   const base: SonarPostRecord = {

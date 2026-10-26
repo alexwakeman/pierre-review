@@ -12,7 +12,9 @@ import { useAiProviderName } from '../../hooks/useAiCapabilities.js';
  */
 export function ClaudeResolutionBanner(): JSX.Element | null {
   const { live, run } = useClaudeLiveCount();
-  const name = useAiProviderName();
+  // The provider that RAN this resolution (its own), else the active one (an older run record).
+  const active = useAiProviderName();
+  const name = run?.providerName ?? active;
   const [notesOpen, setNotesOpen] = useState(false);
   if (run == null) return null;
   const total = Object.keys(run.marks).length;

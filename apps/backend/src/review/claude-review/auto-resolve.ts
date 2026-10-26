@@ -28,7 +28,9 @@
 // ⚠ Never throws.
 import { and, eq, isNull } from 'drizzle-orm';
 import {
-  AUTO_POST_FOOTER,
+  aiRunProviderName,
+  autoPostFooter,
+  type AiProviderName,
   type ClaudeFollowUpStatus,
   type ClaudeReplyAcceptKind,
   type FindingAutoResolveRecord,
@@ -59,7 +61,12 @@ export function resolvableStatus(status: ClaudeFollowUpStatus): AutoResolveOutco
 
 /** The reply posted on the thread before it is resolved. An accepted reply gets Claude's
  *  acknowledgement (`response`) instead of the templated lead. */
-export function autoResolveReplyBody(outcome: AutoResolveOutcome, headSha: string, response: string | null = null): string {
+export function autoResolveReplyBody(
+  outcome: AutoResolveOutcome,
+  headSha: string,
+  response: string | null = null,
+  by: AiProviderName = 'Claude',
+): string {
   const short = headSha.slice(0, 7);
   const lead =
     outcome === 'reply_accepted' && response && response.trim()
@@ -69,7 +76,7 @@ export function autoResolveReplyBody(outcome: AutoResolveOutcome, headSha: strin
         : outcome === 'reply_accepted'
           ? 'Thanks, that settles it.'
           : `No longer applies as of ${short}.`;
-  return `${lead}\n\n${AUTO_POST_FOOTER}\n\n${FINDING_MARKER}`;
+  return `${lead}\n\n${autoPostFooter(by)}\n\n${FINDING_MARKER}`;
 }
 
 // The thread matcher is shared with the review read (`ClaudeFinding.threadId`).
@@ -211,7 +218,7 @@ async function autoResolve(
       const { commentId } = await deps.reply(
         accountId,
         thread.githubNodeId,
-        autoResolveReplyBody(outcome, review.headSha, want.response),
+        autoResolveReplyBody(outcome, review.headSha, want.response, aiRunProviderName(review)),
       );
       wroteAny = true;
       final = { ...final, replyCommentId: commentId };

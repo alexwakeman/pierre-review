@@ -213,3 +213,80 @@ describe('a Claude review and a Codex review of the same head', () => {
     expect(j.provider).toBe('claude');
   });
 });
+
+describe('a run never carries the other provider’s thread judgements', () => {
+  const thread = (id: number) => ({
+    threadId: id,
+    path: 'a.ts',
+    line: 1,
+    isOutdated: false,
+    derivedState: 'untouched' as const,
+    isResolved: false,
+    url: null,
+    // Older than the judgement: nothing new on the thread, so a same-provider run would carry it.
+    comments: [{ authorLogin: 'alice', authorIsBot: false, createdAt: new Date(0), body: 'b' }],
+    commitsAfterFirstComment: 0,
+    commitsAfterLastComment: 0,
+  });
+
+  it('only the same provider’s judgements carry or lock; the other provider judges afresh', async () => {
+    const { planThreadReview } = await import('./threads.js');
+    const current = {
+      assessments: [
+        assessment(1, { lastCommentAt: new Date(1000).toISOString() }),
+        assessment(2, { lastCommentAt: new Date(1000).toISOString() }),
+      ],
+      providerByThread: new Map<number, 'claude' | 'codex'>([
+        [1, 'claude'],
+        [2, 'codex'],
+      ]),
+    };
+    expect(judgements.priorAssessmentsForProvider(current, 'claude')!.map((a) => a.threadId)).toEqual([1]);
+    expect(judgements.priorAssessmentsForProvider(current, 'codex')!.map((a) => a.threadId)).toEqual([2]);
+    expect(judgements.priorAssessmentsForProvider(null, 'codex')).toBeNull();
+
+    // A Codex run after Claude's at the same head: thread 1 is SENT (no lock), thread 2 carries.
+    const plan = planThreadReview(
+      [thread(1) as any, thread(2) as any],
+      HEAD,
+      judgements.priorAssessmentsForProvider(current, 'codex'),
+    );
+    expect(plan.carried.map((a) => a.threadId)).toEqual([2]);
+    expect(plan.sent.map((s) => [s.thread.threadId, s.prior, s.addressedLocked])).toEqual([[1, null, null]]);
+  });
+
+  it('a judgement on one of Limn’s own findings is labelled by the review that made it', () => {
+    const fu = {
+      priorReviewId: 1,
+      priorHeadSha: HEAD,
+      headMoved: false,
+      changesSinceShown: false,
+      items: [
+        {
+          ref: 'P1',
+          priorFindingId: 1,
+          sent: true,
+          carried: false,
+          explanation: 'Checked.',
+          path: 'a.ts',
+          line: 1,
+          side: 'RIGHT',
+          severity: 'warning',
+          title: 't',
+          threadId: 9,
+          status: 'reply_accepted',
+          acceptKind: 'not_valid',
+          reply: { author: 'dev', excerpt: 'x' },
+        },
+      ],
+    } as any;
+    const codex = judgements.findingJudgementsFromFollowUps([
+      { id: 2, headSha: HEAD, followUp: fu, provider: 'codex', model: 'gpt-6-astra' },
+    ]);
+    expect(codex.get(9)!.provider).toBe('codex');
+    const claude = judgements.findingJudgementsFromFollowUps([
+      { id: 1, headSha: HEAD, followUp: fu, provider: null, model: 'claude-opus-5-5' },
+    ]);
+    expect(claude.get(9)!.provider).toBe('claude');
+  });
+});

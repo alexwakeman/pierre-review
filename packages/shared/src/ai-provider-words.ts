@@ -1,5 +1,23 @@
-import type { AiProviderId } from './types.js';
+import { AUTO_POST_FOOTER, type AiProviderId } from './types.js';
 import { aiProviderName, aiRunProvider, type AiProviderName } from './ai-run-label.js';
+
+/**
+ * The visible last line of an auto-posted body, naming the provider that RAN the run. Claude's is
+ * `AUTO_POST_FOOTER`, unchanged; a Codex run says Codex (a public "Reviewed by Codex." above a
+ * Claude footer contradicted itself).
+ */
+export function autoPostFooter(by: AiProviderName | null | undefined = 'Claude'): string {
+  return by === 'Codex' ? '_Posted automatically by Limn’s Codex review._' : AUTO_POST_FOOTER;
+}
+
+/** Every footer a Limn auto post may carry — what "was this posted automatically?" looks for. */
+export const AUTO_POST_FOOTERS: readonly string[] = [AUTO_POST_FOOTER, autoPostFooter('Codex')];
+
+/** Whether a posted body carries one of Limn's auto-post footers (either provider's). */
+export function hasAutoPostFooter(body: string | null | undefined): boolean {
+  const b = body ?? '';
+  return AUTO_POST_FOOTERS.some((f) => b.includes(f));
+}
 
 // THE PROVIDER'S NAME IN PRODUCT COPY (docs/CODEX-PLAN.md § 3.7). ONE AI provider runs every feature
 // at a time (`MeResponse.ai.provider`); every sentence that means "the AI that will run now" names it

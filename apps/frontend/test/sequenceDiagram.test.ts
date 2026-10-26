@@ -83,4 +83,11 @@ describe('the status line', () => {
     );
     expect(redrawRefusalText({ outcome: 'queued', diagramId: 3 })).toBeNull();
   });
+
+  it('a refused design names the provider that RAN the drawing', () => {
+    const refused = (o: Record<string, unknown>) =>
+      slotStatusLine({ diagram: null, latest: view({ status: 'refused', refusal: 'invalid_diagram', design: null, ...o }) }, false);
+    expect(refused({ provider: 'codex', model: 'gpt-6.1-sol' })).toBe('Codex did not return a usable design.');
+    expect(refused({ provider: 'claude', model: 'claude-sonnet-5' })).toBe('Claude did not return a usable design.');
+  });
 });

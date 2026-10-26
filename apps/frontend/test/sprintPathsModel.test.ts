@@ -38,6 +38,10 @@ describe('sprintPathsView', () => {
       writing: false,
       text: 'Couldn’t find the critical paths. Claude’s answer did not pass Limn’s checks. Limn tries again when the sprint changes.',
     });
+    // On Codex, a failed pass names Codex, never Claude.
+    expect(
+      sprintPathsView({ aiEnabled: true, paths: null, status: st('failed', { failure: 'error' }), providerName: 'Codex' }),
+    ).toMatchObject({ text: expect.stringContaining('The call to Codex failed.') });
     expect(sprintPathsView({ aiEnabled: true, paths: null, status: st('failed', { failure: 'daily_cap' }) })).toMatchObject({
       text: expect.stringContaining('Limn tries again tomorrow.'),
     });

@@ -904,6 +904,13 @@
       "when": 1792137615016,
       "tag": "0128_ai_provider_labels",
       "breakpoints": true
+    },
+    {
+      "idx": 129,
+      "version": "6",
+      "when": 1792137616016,
+      "tag": "0129_cheap_run_provider",
+      "breakpoints": true
     }
   ]
 }

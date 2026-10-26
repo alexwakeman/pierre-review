@@ -214,6 +214,9 @@ export interface StoredSprintBrief {
   costUsd: number;
   inputTokens: number;
   outputTokens: number;
+  /** What answered (Phase 4): the model that RAN and its provider. Absent ⇒ the Claude constant. */
+  model?: string;
+  provider?: 'claude' | 'codex';
 }
 
 /** Upsert ONE brief (replaces the ticket's previous one). */
@@ -238,7 +241,8 @@ export async function storeSprintBrief(
       ...b.references.map((r) => ({ ticketKey: r.ticketKey, relation: r.relation, quote: r.quote, why: r.why ?? null })),
       ...(b.linkReasons ?? []).map((l) => ({ ticketKey: l.ticketKey, why: l.why, link: true as const })),
     ] satisfies SprintBriefStoredReference[],
-    model: SPRINT_BRIEF_MODEL,
+    model: b.model ?? SPRINT_BRIEF_MODEL,
+    provider: b.provider ?? null,
     costUsd: b.costUsd,
     inputTokens: b.inputTokens,
     outputTokens: b.outputTokens,

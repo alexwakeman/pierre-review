@@ -136,6 +136,9 @@ export interface StoredSprintThemes {
   costUsd: number;
   inputTokens: number;
   outputTokens: number;
+  /** What answered (Phase 4): the model that RAN and its provider. Absent ⇒ the Claude constant. */
+  model?: string;
+  provider?: 'claude' | 'codex';
 }
 
 /** Upsert the workspace's ONE themes row. */
@@ -153,7 +156,8 @@ export async function storeSprintThemes(
     themeVersion: SPRINT_THEME_VERSION,
     themesJson: v.themes,
     assignmentsJson: v.assignments,
-    model: SPRINT_BRIEF_MODEL,
+    model: v.model ?? SPRINT_BRIEF_MODEL,
+    provider: v.provider ?? null,
     costUsd: v.costUsd,
     inputTokens: v.inputTokens,
     outputTokens: v.outputTokens,

@@ -16,6 +16,7 @@
 // ⚠ THE LAYER VOCABULARY IS PROVISIONAL — the user is trialling it. Every cap below is spelled ONCE
 // here and read by the validator, the prompt and the renderer.
 import type { AiProviderId } from './types.js';
+import type { AiProviderName } from './ai-run-label.js';
 
 /** The fixed layer vocabulary, id → display label. */
 export const DESIGN_LAYERS = {
@@ -108,6 +109,11 @@ export const SEQUENCE_DIAGRAM_REFUSAL_TEXT: Record<SequenceDiagramRefusal, strin
   too_many_prs: 'The story has too many pull requests to draw.',
   invalid_diagram: 'Claude did not return a usable design.',
 };
+
+/** A refusal in words, naming the provider that RAN the drawing (Claude's text is the table above). */
+export function sequenceDiagramRefusalText(r: SequenceDiagramRefusal, by: AiProviderName = 'Claude'): string {
+  return r === 'invalid_diagram' ? `${by} did not return a usable design.` : SEQUENCE_DIAGRAM_REFUSAL_TEXT[r];
+}
 
 /** A story design is drawn over at most this many open or merged pull requests. */
 export const SEQUENCE_DIAGRAM_STORY_MAX_PRS = 12;

@@ -40,7 +40,7 @@ import { CheckCircleIcon, PartialCircleIcon, WarningIcon } from '../Icons.js';
 import { InfoButton } from '../InfoModal.js';
 import { AiStatusLine } from '../AiStatusLine.js';
 import { AiRunLabel } from '../AiRunLabel.js';
-import { aiModelWords } from '@pierre-review/shared';
+import { aiModelWords, aiRunProviderName } from '@pierre-review/shared';
 
 const MUTED = 'text-gray-500 dark:text-gray-400';
 const BTN =
@@ -201,7 +201,8 @@ export function StoryDocsAlignmentBlock({
 }
 
 function StoryDocsResultView({ run, attached }: { run: StoryDocsAlignmentRun; attached: boolean }): JSX.Element | null {
-  const name = useAiProviderName();
+  // A finished check names the provider that RAN it, never the active one.
+  const name = aiRunProviderName(run);
   const result = run.result;
   if (result == null) return null;
   if (result.outcome === 'no_relevant_docs') {

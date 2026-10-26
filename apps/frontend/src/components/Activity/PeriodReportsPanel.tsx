@@ -1216,7 +1216,7 @@ function GenerateControls({
         <div className="text-[11px] text-gray-400">
           {result.generated === false
             ? 'Already had this one — served from cache.'
-            : `Generated with ${runModelName(result.spend?.model ?? result.report?.model ?? effectiveModel) ?? 'the default model'}.`}
+            : `Generated with ${runModelName(result.spend?.model ?? result.report?.ranModel ?? result.report?.model ?? effectiveModel) ?? 'the default model'}.`}
         </div>
       )}
     </div>
@@ -1468,7 +1468,7 @@ export function PeriodReportsPanel(): JSX.Element | null {
                   }`}
                   title={
                     p.hasNarrative
-                      ? `${p.periodKey} · written up${p.model ? ` with ${aiRunLabel(null, p.model)}` : ''}`
+                      ? `${p.periodKey} · written up${p.model ? ` with ${aiRunLabel(p.provider ?? null, p.ranModel ?? p.model)}` : ''}`
                       : `${p.periodKey} · figures only, not written up`
                   }
                 >
@@ -1540,7 +1540,7 @@ export function PeriodReportsPanel(): JSX.Element | null {
               </span>
               {current && !current.inProgress && (
                 <span className="text-[11px] text-gray-400" title={current.periodKey}>
-                  {current.model ? `${aiRunLabel(null, current.model)} · ` : ''}
+                  {current.model ? `${aiRunLabel(current.provider ?? null, current.ranModel ?? current.model)} · ` : ''}
                   generated {new Date(current.generatedAt).toLocaleString()}
                 </span>
               )}

@@ -273,7 +273,7 @@ async function runAiCommand(argv: string[]): Promise<void> {
 
 Usage:
   limn ai install          Download it (one time, about 110 MB) into ~/.limn/ai-runtime
-  limn ai install codex    The same, plus the Codex CLI
+  limn ai install codex    The same, plus the Codex CLI (about 360 MB unpacked)
   limn ai status           Say whether it is set up
   limn ai login codex      Sign Limn's own Codex in (add --device-auth on a headless machine)
   limn ai logout codex     Sign it out

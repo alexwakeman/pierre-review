@@ -1,4 +1,5 @@
 import {
+  aiRunProvider,
   CLAUDE_REVIEW_MAX_TICKETS,
   DEFAULT_CLAUDE_REVIEW_MODEL,
   TICKET_REVIEW_PEER_MAX_FOR_PR_REVIEW,
@@ -40,7 +41,8 @@ import {
   type FollowUpPlan,
 } from './follow-up.js';
 import { planThreadReview, reconcileThreads, type ThreadPlan } from './threads.js';
-import { currentThreadAssessmentsForPrs } from './thread-judgements.js';
+import { currentThreadAssessmentsForPrs, priorAssessmentsForProvider } from './thread-judgements.js';
+import { activeProviderId } from '../../ai/provider-setting.js';
 import { dropSettledReraises, similarTitles } from './settled-by-reply.js';
 import { attachFindingThreads } from './finding-replies.js';
 import {
@@ -614,13 +616,18 @@ async function runPipeline(
       await markReviewCommentsSeen(ctx, reviewId, loaded.newestCommentAt);
       // The prior judgements are THE ONE FOLD (the previous review with any later Check threads run
       // over it), so a check's newer judgement carries and locks exactly like a review's.
+      // ⚠ Only judgements THIS run's provider made carry or lock: a Codex run after a Claude one
+      // (or the reverse) judges every thread afresh, so it never wears the other's verdicts.
+      const provider = activeProviderId();
       const current = (
         await currentThreadAssessmentsForPrs(ctx, item.accountId, [item.prId], { beforeReviewId: reviewId })
       ).get(item.prId);
+      const priorRunSame =
+        priorRun && aiRunProvider(priorRun.provider, priorRun.model) === provider ? priorRun.threadAssessments : null;
       threadPlan = planThreadReview(
         loaded.threads,
         item.headSha,
-        current?.assessments ?? priorRun?.threadAssessments ?? null,
+        current ? priorAssessmentsForProvider(current, provider) : priorRunSame,
       );
     } catch (err) {
       ctx.log.warn(

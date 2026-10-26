@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { ConflictDecision, ConflictRegion } from '@pierre-review/shared';
-import { useClaudeMark } from '../../store/conflictClaude.js';
+import { useClaudeMark, useClaudeRunProviderName } from '../../store/conflictClaude.js';
 import { useAiProviderName } from '../../hooks/useAiCapabilities.js';
 import type { SlotDecision, SlotRole } from '../../lib/mergeResolver.js';
 import {
@@ -98,8 +98,9 @@ export function SlotStrip({
   const labels = actionLabels(baseRef);
   const tab = active ? 0 : -1;
   const claude = useClaudeMark(fileIndex, region.id);
-  // The provider that ran "Resolve with …" (this session's, the active one).
-  const aiName = useAiProviderName();
+  // The provider that RAN "Resolve with …" (the run's own), else the active one.
+  const activeName = useAiProviderName();
+  const aiName = useClaudeRunProviderName() ?? activeName;
   const [whyOpen, setWhyOpen] = useState(false);
   const allows = (d: ConflictDecision): boolean => region.allowed.includes(d);
   const wandOffered = region.wand?.reason === 'disjoint_words' && allows('disjoint_merge');

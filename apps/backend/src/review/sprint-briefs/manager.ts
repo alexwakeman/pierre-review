@@ -186,6 +186,8 @@ async function onePass(
               costUsd,
               inputTokens,
               outputTokens,
+              model: u.model,
+              provider: u.provider,
             });
             res.briefed += 1;
             return;

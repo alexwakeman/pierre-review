@@ -10,7 +10,7 @@ import { AiStatusLine } from '../AiStatusLine.js';
 import { Markdown, type RehypePlugins } from '../Markdown.js';
 import { sprintTicketSite } from './sprintModel.js';
 import { useAiProvider, useAiProviderName } from '../../hooks/useAiCapabilities.js';
-import { aiCredentialWords, aiModelWords } from '@pierre-review/shared';
+import { aiCredentialWords, aiModelWords, aiProviderOfModel, aiRunLabel } from '@pierre-review/shared';
 
 // "Ask Claude about this sprint" (Activity → This Sprint): a compact chat under the page's toolbar,
 // above the board. LOCAL ONLY and free (gated on me.ai), like the route (the caller mounts it only where agentic AI
@@ -118,7 +118,10 @@ export function SprintAskPanel({
             </div>
             <p className={`text-[11px] ${MUTED}`}>
               {[
-                costText(t.costUsd) ?? (t.costUsd == null ? 'Cost not reported' : null),
+                // Who answered, and its cost judged by THAT provider (never the other one's reading).
+                t.model ? aiRunLabel(null, t.model) : null,
+                costText(t.costUsd, t.model ? aiProviderOfModel(t.model) : null) ??
+                  (t.costUsd == null ? 'Cost not reported' : null),
                 t.trimmedTurns > 0
                   ? `the oldest ${t.trimmedTurns === 1 ? 'question was' : `${t.trimmedTurns} questions were`} not read`
                   : null,

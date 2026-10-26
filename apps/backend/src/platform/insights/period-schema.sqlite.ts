@@ -103,6 +103,11 @@ export const workspacePeriodReports = sqliteTable(
     generatedAt: integer('generated_at', { mode: 'timestamp' })
       .notNull()
       .default(sql`(unixepoch())`),
+    // What WROTE the narrative (platform migration 0043): the model that ran and its provider.
+    // `model` above stays the requested Claude id — it is the row identity and the cache key — so
+    // a Codex write-up keeps its key and names gpt-6-luna here. NULL on older and un-narrated rows.
+    ranModel: text('ran_model'),
+    provider: text('provider'),
   },
   (t) => ({
     accountWsPeriodModelCadenceUx: uniqueIndex('wpr_account_ws_period_model_cadence').on(

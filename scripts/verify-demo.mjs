@@ -65,7 +65,7 @@ const VIEWS = [
     ]),
   ),
   // Settings → AI: Claude runs by default; picking Codex says so, and the usage item follows.
-  ['settings:ai', '?view=activity', 'settings-ai', { act: openSettings, expect: ['Runs on Claude.', 'Signed in with ChatGPT (plus).'] }],
+  ['settings:ai', '?view=activity', 'settings-ai', { act: openSettings, expect: ['Runs on Claude.', 'Signed in with ChatGPT Plus.'] }],
   [
     'settings:ai-codex',
     '?view=activity',

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { ConflictAiConfidence, ConflictAiResolution, ConflictDecision } from '@pierre-review/shared';
+import type { AiProviderName, ConflictAiConfidence, ConflictAiResolution, ConflictDecision } from '@pierre-review/shared';
 import { regionKey, useConflictResolverStore } from './conflictResolver.js';
 
 // ── WHICH DECISIONS ARE CLAUDE'S ─────────────────────────────────────────────────────────────
@@ -35,6 +35,8 @@ export interface ClaudeRunMarks {
   /** Decidable regions in the files the resolver supports, from the run. */
   decidableTotal: number;
   summary: string | null;
+  /** Who RAN the run ('Claude' | 'Codex'), from its resolution — never the active provider. */
+  providerName?: AiProviderName;
 }
 
 /** What applying one answer does to the reader's decisions. Pure, so the mapping is testable. */
@@ -125,6 +127,11 @@ export function useClaudeMark(fileIndex: number, regionId: number): ClaudeMark |
 }
 
 /** How many of Claude's choices are still the live decision, for the banner. */
+/** The provider that made the active run's choices, or null when no run pre-filled the resolver. */
+export function useClaudeRunProviderName(): AiProviderName | null {
+  return useConflictClaudeStore((s) => (s.activeKey == null ? null : (s.runs[s.activeKey]?.providerName ?? null)));
+}
+
 export function useClaudeLiveCount(): { live: number; run: ClaudeRunMarks | null } {
   const key = useConflictClaudeStore((s) => s.activeKey);
   const run = useConflictClaudeStore((s) => (key == null ? null : (s.runs[key] ?? null)));

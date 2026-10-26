@@ -418,7 +418,8 @@ export function renderPeriodReportMarkdown(
     genHeader.push(
       `IN PROGRESS — ${report.elapsedDays ?? 0} day${report.elapsedDays === 1 ? '' : 's'} elapsed, not written up`,
     );
-  if (report.model) genHeader.push(`written up with ${report.model}`);
+  // What WROTE it (Phase 4): the model that ran, else the requested one (an older row).
+  if (report.model) genHeader.push(`written up with ${report.ranModel ?? report.model}`);
   genHeader.push(`generated ${report.generatedAt}`);
   if (report.stale)
     genHeader.push('STALE — the underlying data changed after this report was written');

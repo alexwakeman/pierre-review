@@ -110,6 +110,8 @@ export async function runSprintThemePass(
           costUsd: res.costUsd,
           inputTokens,
           outputTokens,
+          model: u.model,
+          provider: u.provider,
         });
         ctx.log.info({ accountId, workspaceId, themes: v.themes.length, costUsd: res.costUsd }, 'sprint themes: stored');
         return { ...res, themes: v.themes.length };
