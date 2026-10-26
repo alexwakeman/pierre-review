@@ -12,6 +12,7 @@ import type { FlowBudgetMeasure, FlowSettings, ResolvedFlowSettings } from './fl
 import type { MyTurnSettings } from './my-turn-settings.js';
 import type { SonarIssue } from './sonar.js';
 import type { AiPickerModel, AiProviderSetting } from './ai-run-label.js';
+import type { AiEffortSettingStatus } from './ai-effort.js';
 import type { ReferenceDocCitation, ReviewDocReference } from './reference-docs.js';
 
 export type DerivedState =
@@ -4318,6 +4319,11 @@ export interface MeResponse {
     provider: AiProviderId;
     /** The provider CHOICE behind `provider` (Settings → AI): what is chosen and who chose it. */
     providerSetting: AiProviderSettingStatus;
+    /**
+     * The EFFORT for agentic runs (Settings → AI → Effort; ai-effort.ts): the chosen level (null =
+     * Default) and who chose it (REVIEW_EFFORT wins). Optional: an older server omits it (Default).
+     */
+    effortSetting?: AiEffortSettingStatus;
     providers: {
       claude: AiClaudeProviderStatus;
       codex: AiCodexProviderStatus;
@@ -7374,6 +7380,9 @@ export interface ClaudeReview {
   // `model` is a Codex id). Optional: a cached or older response omits it — read it through
   // `aiRunLabel(provider, model)`, which then reads the model id.
   provider?: AiProviderId;
+  // The reasoning effort the run used ('low' … 'max'; migration 0130). Absent/null on older rows and
+  // before the run starts. The label adds it: aiRunLabel(provider, model, effort).
+  effort?: string | null;
   scope: ClaudeReviewScope | null;
   // The deterministic routing decision: the mode this run actually used, and the
   // metrics behind it. Null on pre-routing rows (older runs / not yet decided).
@@ -7473,6 +7482,8 @@ export interface ClaudeReviewSummary {
   // `model` is a Codex id). Optional: a cached or older response omits it — read it through
   // `aiRunLabel(provider, model)`, which then reads the model id.
   provider?: AiProviderId;
+  // The effort the run used (see ClaudeReview.effort).
+  effort?: string | null;
   scope: ClaudeReviewScope | null;
   reviewMode: ReviewMode | null;
   verdict: ClaudeReviewVerdict | null;
@@ -8586,9 +8597,9 @@ export interface PostReviewBody {
 export type AiFixModel = ClaudeReviewModel;
 
 // The model an AI Fix run uses when the request names none, and the fixer picker's opening
-// value — ONE spelling, read by the picker (AiFixTab) and the core start route. Opus 5.5 runs at effort MEDIUM with adaptive thinking on every
-// agentic path, pinned in apps/backend/src/review/model-options.ts (PINNED_EFFORT) — so this
-// constant is "Opus 5.5 on medium" with no effort field of its own. Only the FIXER reads it: the
+// value — ONE spelling, read by the picker (AiFixTab) and the core start route. The constant carries
+// no effort of its own: the fixer runs at Settings → AI → Effort (Default = Claude medium, Codex by
+// depth; ai-effort.ts), always with adaptive thinking on Opus 5.5. Only the FIXER reads it: the
 // pane's summary is a separate, cheap Haiku call.
 export const DEFAULT_AI_FIX_MODEL: AiFixModel = 'claude-opus-5-5';
 
@@ -8746,6 +8757,8 @@ export interface AiFixPlanState {
   // first pass, on older rows and from an older server.
   model?: string;
   provider?: AiProviderId;
+  // The effort the latest planning pass used (migration 0130). Absent/null on older rows.
+  effort?: string | null;
 }
 
 // POST /api/pro/ai-fixes/:fixId/plan/message
@@ -8792,6 +8805,8 @@ export interface AiFix {
   // `model` is a Codex id). Optional: a cached or older response omits it — read it through
   // `aiRunLabel(provider, model)`, which then reads the model id.
   provider?: AiProviderId;
+  // The effort the build used (migration 0130). Absent/null on older rows and before it starts.
+  effort?: string | null;
   seed: AiFixStoredSeed;
   // Set once the run succeeds:
   summary: string | null;
@@ -8836,6 +8851,8 @@ export interface AiFixSummary {
   // `model` is a Codex id). Optional: a cached or older response omits it — read it through
   // `aiRunLabel(provider, model)`, which then reads the model id.
   provider?: AiProviderId;
+  // The effort the build used (see AiFix.effort).
+  effort?: string | null;
   seed: AiFixStoredSeed;
   commitMessage: string | null;
   filesChanged: string[];

@@ -1156,6 +1156,15 @@ filters on `provider` = the active provider. Column only — `ai_usage` is alrea
 `accountScopedTables()`, erasure and the export. Pinned fresh + upgraded by
 `db/ai-usage-provider-migration.test.ts`. Journal `when` sqlite `1792137614016`.
 
+### `0130_ai_effort` — the Effort setting and the effort each run used
+`ALTER TABLE accounts ADD ai_effort text` (Settings → AI → Effort; NULL = Default; written by
+`PUT /api/ai/effort`, loaded at boot by `ai/provider-store.ts`), `claude_reviews ADD effort text`,
+`ai_fixes ADD effort text` + `ADD plan_effort text` (the effort the run SENT, stamped with its provider
+and model; NULL on every older row). Additive, nullable, columns only — every table is already in
+`accountScopedTables()`, erasure and the export; no `verify:isolation` change. Pinned by
+`api/routes/ai-provider.test.ts` and `review/claude-review/mixed-providers.test.ts`.
+[CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § The effort setting. Journal `when` sqlite `1792137617016`.
+
 ### No migration — "Check against code" removed (2026-10-18): `sprint_ticket_repos` + `sprint_assessments` DORMANT
 
 The sprint drawer, its repo picker and "Check against code" (`review/sprint-assess/`) were removed with

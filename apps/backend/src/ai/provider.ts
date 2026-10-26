@@ -37,7 +37,7 @@
 // KIND: a one-shot ('complete') or a ported kind is runnable once Codex is installed and signed in with
 // ChatGPT; every other kind answers its own "Codex cannot run … yet" sentence. Nothing crashes.
 import type { SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
-import type { AiAgentKind, AiUsageReading } from '@pierre-review/shared';
+import type { AiAgentKind, AiEffort, AiUsageReading } from '@pierre-review/shared';
 import type { CodexProgress, TokenUsage } from './codex/events.js';
 import type { UsageTokens } from '../review/usage.js';
 import { CLAUDE_MODEL_FOR_ROLE, claudeProvider } from './providers/claude.js';
@@ -106,6 +106,11 @@ export interface ClaudeRunOptions {
   /** SDK sub-agents (Claude Review's specialists). Absent ⇒ not sent. */
   agents?: Record<string, unknown>;
   /**
+   * The run's effort, decided by the caller (the review and AI Fix: ai/effort.ts `agenticRunEffort`).
+   * Absent ⇒ `defaultRunEffort` for `spec.effort`'s mode (review/model-options.ts).
+   */
+  effort?: AiEffort;
+  /**
    * ⚠ THE CLAUDE-ONLY ESCAPE HATCH: every raw Agent SDK message, in order, BEFORE the neutral
    * `onProgress` events derived from it. Only for a fact no neutral event carries. A throw here ends
    * the run like a throw in the loop body. Users (keep this list current):
@@ -153,7 +158,10 @@ export interface AgentStep {
 export interface AgentRunSpec {
   kind: AgentKind;
   model: ModelChoice;
-  /** Effort profile: a diff-only run vs a worktree run (Claude: `sdkModelOptions(model, effort)`). */
+  /**
+   * Effort profile: a diff-only run vs a worktree run. The level itself is `claude.effort` /
+   * `codex.effort` when the caller decides it (ai/effort.ts), else each provider's Default.
+   */
   effort: 'diff_only' | 'worktree';
   prompt: string;
   /** The system prompt. Absent ⇒ not sent. */
@@ -350,6 +358,8 @@ export function getActiveProvider(env: NodeJS.ProcessEnv = process.env): AgentPr
 export interface AiRanOn {
   provider: AgentProviderId;
   model: string;
+  /** The effort the run sent (ai/effort.ts), when the runner stores it (the review, AI Fix). */
+  effort?: string;
 }
 
 export function ranOn(provider: AgentProvider, choice: ModelChoice): AiRanOn {

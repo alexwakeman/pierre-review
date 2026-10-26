@@ -10,7 +10,7 @@
 import type { RecordedStreamFrame } from './recording.js';
 import type { DemoReply, DemoRequest, DemoServer } from './server.js';
 import { isRecord, notInDemo } from './util.js';
-import { ranOnNow } from './provider.js';
+import { demoRunEffort, ranOnNow } from './provider.js';
 
 export type RunKind = 'claude-review' | 'ai-fix' | 'ticket-review' | 'ci-review' | 'thread-check' | 'docs-alignment';
 
@@ -31,7 +31,16 @@ export interface SimulatedRun {
   pushed?: { pushedBranch: string; pushedAt: string };
   /** What the run runs on: the provider active when it STARTED and its model of the template's depth
    *  (a switch afterwards leaves it alone, as on the server). */
-  ranOn: { provider: 'claude' | 'codex'; model: string };
+  ranOn: { provider: 'claude' | 'codex'; model: string; effort?: string };
+}
+
+/** A review or AI Fix stores the effort it ran at (Settings → AI → Effort); other kinds store none. */
+function ranOnWithEffort(
+  srv: DemoServer,
+  kind: RunKind,
+  ran: { provider: 'claude' | 'codex'; model: string },
+): SimulatedRun['ranOn'] {
+  return kind === 'claude-review' || kind === 'ai-fix' ? { ...ran, effort: demoRunEffort(srv, ran) } : ran;
 }
 
 const DURATION_MS: Record<RunKind, number> = {
@@ -232,7 +241,7 @@ export class RunSimulator {
       durationMs: DURATION_MS[kind],
       template,
       finalStatus: finalStatus ?? (typeof template.status === 'string' && template.status !== 'running' ? template.status : 'succeeded'),
-      ranOn: ranOnNow(this.srv, template.model, pick),
+      ranOn: ranOnWithEffort(this.srv, kind, ranOnNow(this.srv, template.model, pick)),
     };
     this.latest.set(`${kind}|${key}`, run);
     this.byId.set(`${kind}#${run.id}`, run);

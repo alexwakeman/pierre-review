@@ -70,6 +70,7 @@ import {
 } from './plan.js';
 import { config } from '../../config.js';
 import { activeProviderId } from '../../ai/provider-setting.js';
+import { agenticRunEffort } from '../../ai/effort.js';
 import { claudeModelChoice, getProvider, requestModelOf, type AgentProviderId, type AiRanOn } from '../../ai/provider.js';
 import { providerName } from '../../ai/prompt-tools.js';
 import { followUpProvider, preflightFor } from '../../ai/run-choice.js';
@@ -536,8 +537,8 @@ function planFollowUpProvider(
 }
 
 /** What a job runs on: the provider it was worded for and that provider's id for the asked model. */
-function ranOnFor(provider: AgentProviderId, model: string): AiRanOn {
-  return { provider, model: getProvider(provider).resolveModel(claudeModelChoice(model)) };
+function ranOnFor(provider: AgentProviderId, model: string, effort?: string): AiRanOn {
+  return { provider, model: getProvider(provider).resolveModel(claudeModelChoice(model)), ...(effort ? { effort } : {}) };
 }
 
 function queueFixJob(ctx: AgentContext, job: FixJob): void {
@@ -598,7 +599,10 @@ async function launchFix(ctx: AgentContext, job: FixJob): Promise<void> {
   try {
     await markFixRunning(ctx, job.fixId);
     // What the build runs on (the provider the prompt was worded for, and its model id).
-    await markFixRanOn(ctx, job.fixId, ranOnFor(job.provider, job.model));
+    // ... and at which effort (Settings → AI → Effort, read once here; the run sends this and the
+    // row stores it for the label).
+    const effort = agenticRunEffort(job.provider, claudeModelChoice(job.model), 'worktree');
+    await markFixRanOn(ctx, job.fixId, ranOnFor(job.provider, job.model, effort));
     const result = await ctx.coding.generateFix({
       accountId: job.accountId,
       owner: job.owner,
@@ -612,6 +616,7 @@ async function launchFix(ctx: AgentContext, job: FixJob): Promise<void> {
       onProgress,
       prId: job.prId,
       provider: job.provider,
+      effort,
     });
 
     if (result.aborted || controller.signal.aborted) {
@@ -716,7 +721,8 @@ async function launchPlanPass(ctx: AgentContext, job: PlanJob): Promise<void> {
   let finalStatus: AiFixStatus = job.hadPlan ? 'planned' : 'failed';
   try {
     // What this planning pass runs on (the provider the prompt was worded for, and its model id).
-    await markPlanRanOn(ctx, job.fixId, ranOnFor(job.provider, job.model));
+    const effort = agenticRunEffort(job.provider, claudeModelChoice(job.model), 'worktree');
+    await markPlanRanOn(ctx, job.fixId, ranOnFor(job.provider, job.model, effort));
     const result = await ctx.coding.generatePlan({
       accountId: job.accountId,
       owner: job.owner,
@@ -732,6 +738,7 @@ async function launchPlanPass(ctx: AgentContext, job: PlanJob): Promise<void> {
       onProgress,
       prId: job.prId,
       provider: job.provider,
+      effort,
     });
     const pass = { costUsd: result.costUsd, usage: result.usage, ...(result.usageRecorded ? { usageRecorded: true } : {}) };
     if (result.aborted || controller.signal.aborted) {

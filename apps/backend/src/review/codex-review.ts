@@ -16,7 +16,7 @@
 import { CLAUDE_REVIEW_MAX_SPECIALISTS, type ClaudeFindingLens } from '@pierre-review/shared';
 import type { ModelRole } from '../ai/provider.js';
 import type { CodexSpecialistAnswer, CodexSpecialistSpec } from '../ai/codex/specialists.js';
-import { CODEX_EFFORT_FOR_ROLE } from '../ai/providers/codex.js';
+import { defaultRunEffort } from '../ai/effort.js';
 import type { loadZod } from '../ai/runtime.js';
 import { pickReviewNonce } from './claude-review/prompts.js';
 import { specialistPrompt } from './claude-review/specialists.js';
@@ -24,15 +24,13 @@ import { codexSpecialistInstructions } from './codex-wording.js';
 
 type ZodNs = Awaited<ReturnType<typeof loadZod>>;
 
-const EFFORT_STEPS = ['minimal', 'low', 'medium', 'high', 'xhigh'] as const;
-
-/** Codex's reasoning effort for one review run: the role's, one step lower on a diff-only run. Pure. */
+/**
+ * Codex's DEFAULT reasoning effort for one review-shaped run (the chat, Check threads): the role's, one
+ * step lower on a diff-only run, never below 'low' (the catalog lists no 'minimal' for every model;
+ * spike § 8). The review itself reads Settings → AI → Effort (ai/effort.ts `agenticRunEffort`). Pure.
+ */
 export function codexReviewEffort(role: ModelRole, mode: 'diff_only' | 'worktree'): string {
-  const base = CODEX_EFFORT_FOR_ROLE[role];
-  if (mode === 'worktree') return base;
-  const i = EFFORT_STEPS.indexOf(base as (typeof EFFORT_STEPS)[number]);
-  // Never below 'low' (the catalog lists no 'minimal' for every model; spike § 8).
-  return i > 1 ? EFFORT_STEPS[i - 1]! : 'low';
+  return defaultRunEffort('codex', role, mode);
 }
 
 /**

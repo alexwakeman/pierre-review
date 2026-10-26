@@ -152,6 +152,10 @@ export const accounts = sqliteTable('accounts', {
   // 0128. THE AI PROVIDER CHOICE (Settings → AI): 'claude' | 'codex' | 'auto'. NULL = never chosen
   // (reads as 'auto'). An explicitly set LIMN_AI_PROVIDER wins over it (ai/provider-setting.ts).
   aiProvider: text('ai_provider'),
+  // 0130. THE EFFORT for agentic runs (Settings → AI): 'low' | 'medium' | 'high' | 'xhigh' | 'max'.
+  // NULL = never chosen (Default: each provider's own depth). An explicitly set REVIEW_EFFORT wins
+  // over it (ai/effort.ts).
+  aiEffort: text('ai_effort'),
 });
 
 export const repos = sqliteTable(
@@ -1189,6 +1193,9 @@ export const claudeReviews = sqliteTable(
     // Which AI provider ran it ('claude' | 'codex'; migration 0128). NULL on older rows reads as
     // Claude unless `model` is a Codex id (packages/shared `aiRunProvider`). `model` is what RAN.
     provider: text('provider'),
+    // The reasoning effort the run used ('low' … 'max', the provider's own word; migration 0130).
+    // NULL on older rows and until the run starts.
+    effort: text('effort'),
     // Null until the agent decides whether it explored the worktree.
     scope: text('scope', { enum: ['diff_only', 'worktree'] }),
     // The deterministic router's decision (skip/diff_only/worktree) + its inputs,
@@ -1891,6 +1898,9 @@ export const aiFixes = sqliteTable(
     // providers when the choice changed between them). NULL = never planned, or an older row.
     planProvider: text('plan_provider'),
     planModel: text('plan_model'),
+    // 0130. The reasoning effort the build and the latest planning pass used. NULL = older row.
+    effort: text('effort'),
+    planEffort: text('plan_effort'),
   },
   (t) => ({
     prCreatedIdx: index('af_account_pr_created').on(t.accountId, t.prId, t.createdAt),

@@ -1,4 +1,4 @@
-import type { ClaudeFindingLens } from '@pierre-review/shared';
+import type { AiEffort, ClaudeFindingLens } from '@pierre-review/shared';
 import { CLAUDE_FINDING_LENSES, CLAUDE_REVIEW_MAX_SPECIALISTS } from '@pierre-review/shared';
 
 // DEEP-REVIEW SPECIALISTS. When the router sends a pull request to the worktree route, the lead
@@ -138,6 +138,8 @@ export interface SpecialistDefinition {
   disallowedTools: string[];
   model: 'inherit';
   maxTurns: number;
+  /** The Agent SDK's per-agent effort: sent only when the reader chose a level. */
+  effort?: AiEffort;
 }
 
 /** The specialist's full system prompt. */
@@ -148,6 +150,8 @@ export function specialistPrompt(lens: ClaudeFindingLens): string {
 /** The `agents` option for one deep review: one read-only definition per offered lens. */
 export function specialistAgents(
   lenses: readonly ClaudeFindingLens[],
+  // The review's chosen effort (Settings → AI → Effort). Absent (Default) ⇒ not sent, as before.
+  effort?: AiEffort,
 ): Record<string, SpecialistDefinition> {
   const out: Record<string, SpecialistDefinition> = {};
   for (const lens of lenses) {
@@ -159,6 +163,7 @@ export function specialistAgents(
       // The review's own model (Opus 5.5 or Sonnet 5): a specialist never runs on a cheaper one.
       model: 'inherit',
       maxTurns: SPECIALIST_MAX_TURNS,
+      ...(effort ? { effort } : {}),
     };
   }
   return out;

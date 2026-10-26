@@ -84,7 +84,7 @@ async function runAgent(spec: AgentRunSpec): Promise<AgentRunResult> {
     prompt: spec.prompt,
     options: {
       model,
-      ...sdkModelOptions(model, spec.effort),
+      ...sdkModelOptions(model, spec.effort, spec.claude.effort),
       ...(spec.system !== undefined ? { systemPrompt: spec.system } : {}),
       cwd: spec.cwd,
       ...(extraDirs.length > 0 ? { additionalDirectories: extraDirs } : {}),

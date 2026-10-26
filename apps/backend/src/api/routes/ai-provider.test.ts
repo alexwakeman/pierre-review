@@ -3,7 +3,9 @@
 //   1. an unknown value is a 400; a good one is STORED (accounts.ai_provider), held in memory at once,
 //      and /api/me reports it (`ai.providerSetting`, `ai.provider`) on the very next request;
 //   2. the boot's load reads the stored value back into memory (a restart keeps the choice);
-//   3. an explicitly set LIMN_AI_PROVIDER wins: /api/me says `source: 'env'` and the PUT is a 409.
+//   3. an explicitly set LIMN_AI_PROVIDER wins: /api/me says `source: 'env'` and the PUT is a 409;
+//   4. the Effort level (PUT /api/ai/effort) follows the same three rules: stored + held + reported,
+//      read back at boot, and REVIEW_EFFORT wins (409); null goes back to Default.
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -17,12 +19,14 @@ process.env.LIMN_DATA_DIR = join(root, 'data');
 delete process.env.OPENAI_API_KEY;
 delete process.env.LIMN_AI_PROVIDER;
 delete process.env.LIMN_AI_DISABLED;
+delete process.env.REVIEW_EFFORT;
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 let app: any;
 let closeDb: (() => Promise<void> | void) | undefined;
 let setting: typeof import('../../ai/provider-setting.js');
 let store: typeof import('../../ai/provider-store.js');
+let effort: typeof import('../../ai/effort.js');
 
 beforeAll(async () => {
   for (const s of ['', '-shm', '-wal']) rmSync(DB_PATH + s, { force: true });
@@ -32,6 +36,7 @@ beforeAll(async () => {
   await runMigrations();
   setting = await import('../../ai/provider-setting.js');
   store = await import('../../ai/provider-store.js');
+  effort = await import('../../ai/effort.js');
   const { getAccountById } = await import('../../auth/account.js');
   const { meRoutes } = await import('./me.js');
   const { aiProviderRoutes } = await import('./ai-provider.js');
@@ -47,6 +52,8 @@ beforeAll(async () => {
 
 afterAll(async () => {
   setting?.setStoredAiProviderSetting(null);
+  effort?.setStoredAiEffort(null);
+  delete process.env.REVIEW_EFFORT;
   delete process.env.LIMN_AI_PROVIDER;
   await app?.close();
   await closeDb?.();
@@ -104,5 +111,50 @@ describe('the provider choice', () => {
     expect((await me()).providerSetting).toEqual({ value: 'codex', source: 'settings' });
     await put('auto');
     expect((await me()).providerSetting).toEqual({ value: 'auto', source: 'settings' });
+  });
+});
+
+const putEffort = (payload: unknown) => app.inject({ method: 'PUT', url: '/api/ai/effort', payload: payload as object });
+
+describe('the effort level', () => {
+  it('starts at Default, chosen in Settings', async () => {
+    expect((await me()).effortSetting).toEqual({ value: null, source: 'settings' });
+  });
+
+  it('refuses an unknown level, a Codex-only word and a missing value', async () => {
+    for (const bad of [{ value: 'ultra' }, { value: 'minimal' }, { value: 3 }, {}]) {
+      expect((await putEffort(bad)).statusCode).toBe(400);
+    }
+    expect((await me()).effortSetting.value).toBeNull();
+  });
+
+  it('stores a level, holds it for the next run and reports it; a restart reads it back', async () => {
+    const res = await putEffort({ value: 'high' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ setting: { value: 'high', source: 'settings' } });
+    expect((await me()).effortSetting).toEqual({ value: 'high', source: 'settings' });
+    expect(effort.agenticRunEffort('claude', { role: 'deep' }, 'worktree')).toBe('high');
+    effort.setStoredAiEffort(null);
+    expect(await store.loadStoredAiEffort(1)).toBe('high');
+    expect(effort.chosenAiEffort()).toBe('high');
+  });
+
+  it('REVIEW_EFFORT wins: /api/me says so and the PUT is refused', async () => {
+    process.env.REVIEW_EFFORT = 'max';
+    try {
+      expect((await me()).effortSetting).toEqual({ value: 'max', source: 'env' });
+      expect((await putEffort({ value: 'low' })).statusCode).toBe(409);
+    } finally {
+      delete process.env.REVIEW_EFFORT;
+    }
+    expect((await me()).effortSetting).toEqual({ value: 'high', source: 'settings' });
+  });
+
+  it('null goes back to Default', async () => {
+    expect((await putEffort({ value: null })).statusCode).toBe(200);
+    expect((await me()).effortSetting).toEqual({ value: null, source: 'settings' });
+    const { db, schema } = await import('../../db/client.js');
+    const rows = await db.select({ v: schema.accounts.aiEffort }).from(schema.accounts).execute();
+    expect(rows.every((r) => r.v == null)).toBe(true);
   });
 });

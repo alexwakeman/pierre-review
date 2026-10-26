@@ -117,6 +117,9 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // THE AI PROVIDER CHOICE: PUT /api/ai/provider (api/routes/ai-provider.ts). One validated UPDATE of
   // one column, held in memory — no model, no GitHub, no process. `read`, decided; EXACT `===`.
   if (path === '/api/ai/provider') return [TIERS.read];
+  // THE EFFORT LEVEL: PUT /api/ai/effort (same file, same shape: one validated UPDATE of one column,
+  // held in memory — no model, no GitHub, no process). `read`, decided; EXACT `===`.
+  if (path === '/api/ai/effort') return [TIERS.read];
 
   // ---- Workspace CRUD: `read`, RECORDED rather than inherited ----
   //

@@ -176,7 +176,7 @@ function metaLine(
 ): string {
   // A skipped run (nothing substantive to review) ran no model: it names none.
   const parts: string[] = [shortSha(review.headSha)];
-  if (review.reviewMode !== 'skip') parts.push(aiRunLabel(review.provider, review.model));
+  if (review.reviewMode !== 'skip') parts.push(aiRunLabel(review.provider, review.model, review.effort));
   const cost = costText(review.costUsd, aiRunProvider(review.provider, review.model));
   if (cost != null) parts.push(cost);
   return parts.join(' · ');

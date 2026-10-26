@@ -133,6 +133,8 @@ interface ReviewRow {
   model: string;
   // 0128: who ran it; NULL on older rows (read through `aiRunProvider`).
   provider?: string | null;
+  // 0130: the effort the run used; NULL on older rows and before the run starts.
+  effort?: string | null;
   scope: ClaudeReviewScope | null;
   reviewMode: ReviewMode | null;
   routeReason: ReviewRouteReason | null;
@@ -327,6 +329,7 @@ function mapReview(
     status: r.status,
     model: r.model,
     provider: aiRunProvider(r.provider, r.model),
+    effort: r.effort ?? null,
     scope: r.scope,
     reviewMode: r.reviewMode,
     routeReason: r.routeReason,
@@ -380,6 +383,7 @@ const summaryOf = (r: ReviewRow): ClaudeReviewSummary => ({
   status: r.status,
   model: r.model,
   provider: aiRunProvider(r.provider, r.model),
+  effort: r.effort ?? null,
   scope: r.scope,
   reviewMode: r.reviewMode,
   verdict: r.verdict,
@@ -1703,10 +1707,14 @@ export async function insertQueuedReview(
 export async function markReviewRanOn(
   ctx: AgentContext,
   id: number,
-  ran: { provider: 'claude' | 'codex'; model: string },
+  ran: { provider: 'claude' | 'codex'; model: string; effort?: string },
 ): Promise<void> {
   const { cr } = tables(ctx);
-  await ctx.db.update(cr).set({ provider: ran.provider, model: ran.model }).where(eq(cr.id, id)).execute();
+  await ctx.db
+    .update(cr)
+    .set({ provider: ran.provider, model: ran.model, ...(ran.effort ? { effort: ran.effort } : {}) })
+    .where(eq(cr.id, id))
+    .execute();
 }
 
 export async function markReviewRunning(ctx: AgentContext, id: number): Promise<void> {

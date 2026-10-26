@@ -226,6 +226,13 @@ reports `providers.codex.available` = the ChatGPT sign-in (`message: null` once 
   it (25,348 / 8,576 / 234) and the "already done" plan (25,428 / 16,128 / 237, one step "Confirm zero
   guard", no change). Each named `src/math.ts`, left the worktree clean and wrote one `ai_fix_plan` row.
 
+**Effort as a setting (2026-10-26, branch `effort-setting`)**: after comparing Opus 5.5 (pinned
+medium) with Astra (high) on one PR, the user asked to "make effort a setting". Settings → AI →
+Effort is ONE level for the review, AI Fix and Plan first on BOTH providers; the map is the identity
+(both take low … max; Codex's `none` / `minimal` / `ultra` are not offered); Default keeps each
+provider's own depth; the Opus pin is gone; runs store and label the effort they sent.
+[CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § The effort setting.
+
 **Phase 4b: the per-run choice and the full review history (2026-10-26, branch `codex/p4b-per-run-model`)**.
 THE USER CHANGED § 6's "one provider for every feature" for MANUAL runs: "for manual runs, I should
 ideally be able to pick from any of the models available if I'm signed into both Claude and Codex. I

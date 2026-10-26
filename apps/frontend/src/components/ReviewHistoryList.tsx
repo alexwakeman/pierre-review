@@ -46,7 +46,7 @@ export function ReviewHistoryList({
                 }`}
               >
                 <span className="font-mono">{shortSha(h.headSha)}</span>
-                <span className="font-medium">{h.reviewMode === 'skip' ? 'Skipped (nothing to review)' : aiRunLabel(h.provider, h.model)}</span>
+                <span className="font-medium">{h.reviewMode === 'skip' ? 'Skipped (nothing to review)' : aiRunLabel(h.provider, h.model, h.effort)}</span>
                 <span>{reviewStatusWord(h.status)}</span>
                 {h.status === 'succeeded' && h.verdict != null && h.reviewMode !== 'skip' && <span>{CLAUDE_VERDICT_LABEL[h.verdict]}</span>}
                 {findings != null && h.reviewMode !== 'skip' && <span>{findings}</span>}

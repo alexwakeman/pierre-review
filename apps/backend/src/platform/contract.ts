@@ -100,6 +100,8 @@ export interface GenerateFixArgs {
   provider?: 'claude' | 'codex';
   /** Codex-only run knobs (the opt-in live test's effort). */
   codex?: { effort?: string; timeoutMs?: number };
+  /** The run's effort (ai/effort.ts `agenticRunEffort`, decided by the manager). Absent ⇒ Default. */
+  effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 }
 
 // The fix agent's self-report, as the `submit_fix` tool received it (UNVALIDATED — the AI Fix
@@ -520,7 +522,7 @@ export interface RunReviewResult {
   // What RAN: the provider and the model id it resolved (ai/provider.ts `ranOn`). The manager stores
   // both on the run row, so a Codex run reads "Codex · GPT-6 Astra", never the Claude id it was asked
   // for. Optional: a fake runner in a test may omit it (the row then keeps its queued model).
-  ranOn?: { provider: 'claude' | 'codex'; model: string };
+  ranOn?: { provider: 'claude' | 'codex'; model: string; effort?: string };
   failureReason?: string;
   scope: 'diff_only' | 'worktree' | null; // the agent's self-report
   summary: string;

@@ -167,7 +167,7 @@ export function PlanPanel({
           <span className="font-normal text-gray-500 dark:text-gray-400">· version {state.revision}</span>
         )}
         {state.model && (
-          <span className="font-normal text-gray-500 dark:text-gray-400">· {aiRunLabel(state.provider, state.model)}</span>
+          <span className="font-normal text-gray-500 dark:text-gray-400">· {aiRunLabel(state.provider, state.model, state.effort)}</span>
         )}
         <InfoButton title="Plan first">
           <p>{name} reads the code and writes a plan. It changes nothing.</p>

@@ -52,8 +52,10 @@ export async function start(): Promise<{ app: FastifyInstance; port: number }> {
     else console.warn('local user unknown (gh api user failed) — "my turn" disabled');
     // The Settings → AI provider choice, into memory before any run can start (LIMN_AI_PROVIDER, when
     // set, still wins). Never fails the boot: a read error means "not chosen" (auto).
-    const { loadStoredAiProvider } = await import('./ai/provider-store.js');
+    // The Effort level beside it (REVIEW_EFFORT, when set, wins); a read error means Default.
+    const { loadStoredAiEffort, loadStoredAiProvider } = await import('./ai/provider-store.js');
     await loadStoredAiProvider(me?.id);
+    await loadStoredAiEffort(me?.id);
   }
 
   const app = await buildApp();

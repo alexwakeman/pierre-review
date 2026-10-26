@@ -3,7 +3,7 @@
 // make, answered with a plausible success shaped by the shared types and folded into the
 // in-memory overlay so later reads show it.
 
-import { aiKindsAll, aiProviderName, aiRunProvider, isAiProviderSetting, LARGE_PR_CODE_LOC_DEFAULT } from '@pierre-review/shared';
+import { aiKindsAll, aiProviderName, aiRunProvider, isAiEffort, isAiProviderSetting, LARGE_PR_CODE_LOC_DEFAULT } from '@pierre-review/shared';
 import { normalisePath } from './recording.js';
 import type { DemoReply, DemoRequest, DemoRoute, DemoServer } from './server.js';
 import { fakeSha, isRecord, notInDemo } from './util.js';
@@ -91,6 +91,7 @@ function demoAi(srv: DemoServer): Record<string, unknown> {
     kinds: aiKindsAll({ auth, message }),
     provider,
     providerSetting: { value: st.setting, source: 'settings' },
+    effortSetting: { value: st.effort, source: 'settings' },
     providers: {
       claude: { auth: 'ok', route: 'login', message: null, runtime: 'ready' },
       codex: {
@@ -269,6 +270,20 @@ export const ROUTES: DemoRoute[] = [
       if (!isAiProviderSetting(value)) return { status: 400, body: { error: 'BadRequest', message: 'value must be claude, codex or auto.' } };
       setAiState(srv, { setting: value });
       return OK({ setting: { value, source: 'settings' }, provider: activeProvider(srv) });
+    },
+  },
+  // Settings → AI → Effort: simulated (provider.ts); a later review or fix stores the level.
+  {
+    method: 'PUT',
+    re: /^\/api\/ai\/effort$/,
+    run: (req, _m, srv) => {
+      const body = bodyRecord(req);
+      const value = body.value;
+      if (!('value' in body) || (value !== null && !isAiEffort(value))) {
+        return { status: 400, body: { error: 'BadRequest', message: 'value must be low, medium, high, xhigh, max or null.' } };
+      }
+      setAiState(srv, { effort: value ?? null });
+      return OK({ setting: { value: value ?? null, source: 'settings' } });
     },
   },
   { method: 'GET', re: /^\/api\/ai\/codex\/login$/, run: (_r, _m, srv) => OK(codexLogin(srv)) },

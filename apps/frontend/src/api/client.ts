@@ -166,6 +166,8 @@ import type {
   AiBudgetResponse,
   AiProviderSetting,
   AiProviderSettingResponse,
+  AiEffort,
+  AiEffortSettingResponse,
   CodexLoginMethod,
   CodexLoginResponse,
   CodexLogoutResponse,
@@ -929,6 +931,10 @@ export const api = {
   // `ai.providerSetting`): invalidate `['me']` after a write.
   setAiProvider: (value: AiProviderSetting) =>
     fetch('/api/ai/provider', jsonBody('PUT', { value })).then((r) => handle<AiProviderSettingResponse>(r)),
+  // THE EFFORT LEVEL (Settings → AI → Effort; same file). `null` ⇒ Default. 409 while REVIEW_EFFORT is
+  // set. The read side is `/api/me` (`ai.effortSetting`): invalidate `['me']` after a write.
+  setAiEffort: (value: AiEffort | null) =>
+    fetch('/api/ai/effort', jsonBody('PUT', { value })).then((r) => handle<AiEffortSettingResponse>(r)),
   // THE CODEX SIGN-IN for Limn's own Codex home (backend api/routes/ai-codex.ts). POST starts (or
   // joins) one; poll the GET while `login.state === 'waiting'`.
   codexLogin: () => get<CodexLoginResponse>('/api/ai/codex/login'),

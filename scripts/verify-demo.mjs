@@ -69,7 +69,8 @@ const VIEWS = [
               await page.getByLabel('Model').first().selectOption('codex:gpt-6-astra');
               await page.getByText('All reviews of this PR').first().waitFor({ timeout: 10_000 });
             },
-            expect: ['All reviews of this PR (2)', 'Codex · GPT-6 Astra', 'Claude Opus 5.5', 'Shown'],
+            // Both ran at Effort = High, and each label says so.
+            expect: ['All reviews of this PR (2)', 'Codex · GPT-6 Astra · high', 'Claude Opus 5.5 · high', 'Shown'],
           }
         : undefined,
     ]),
@@ -80,7 +81,21 @@ const VIEWS = [
     'settings:ai',
     '?view=activity',
     'settings-ai',
-    { act: openSettings, expect: ['Default: Claude.', 'Automatic runs and default:', 'Signed in with ChatGPT Plus.'] },
+    { act: openSettings, expect: ['Default: Claude.', 'Automatic runs and default:', 'Signed in with ChatGPT Plus.', 'Effort for AI Review and AI Fix:'] },
+  ],
+  // Settings → AI → Effort: a level is picked (simulated, provider.ts) and the control keeps it.
+  [
+    'settings:ai-effort',
+    '?view=activity',
+    'settings-ai-effort',
+    {
+      act: async (page) => {
+        await openSettings(page);
+        await page.locator('#ai-effort').selectOption('high');
+        await page.waitForFunction(() => document.querySelector('#ai-effort')?.value === 'high', null, { timeout: 10_000 });
+      },
+      expect: ['Effort for AI Review and AI Fix:'],
+    },
   ],
   [
     'settings:ai-codex',

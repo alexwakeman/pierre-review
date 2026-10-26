@@ -10,6 +10,7 @@ import {
   type ModelChoice,
 } from '../ai/provider.js';
 import { runCodexSpecialists } from '../ai/codex/specialists.js';
+import { agenticRunEffort, chosenAiEffort, effortTurnCap } from '../ai/effort.js';
 import { loadZod } from '../ai/runtime.js';
 import type { RunReviewArgs, RunReviewResult } from '../platform/contract.js';
 import { config } from '../config.js';
@@ -33,7 +34,6 @@ import {
   type DispatchGuard,
 } from './claude-review/specialists.js';
 import {
-  codexReviewEffort,
   codexReviewModelOverride,
   codexSpecialistSpecs,
   pickCodexSpecialists,
@@ -204,7 +204,13 @@ export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
   const modelChoice: ModelChoice = override
     ? { role: claudeModelChoice(model).role, id: override.model }
     : claudeModelChoice(model);
-  const ran = ranOn(provider, modelChoice);
+  // THE EFFORT (Settings → AI → Effort, ai/effort.ts): the chosen level on a worktree run, one step
+  // lower diff-only; Default = each provider's own depth (Claude medium, Codex by role). Read once, at
+  // the start, and stored on the run (`ranOn.effort`) so its label says what it used.
+  const level = chosenAiEffort();
+  const levelEffort = agenticRunEffort(provider.id, modelChoice, mode);
+  const effort: string = override?.effort ?? levelEffort;
+  const ran = { ...ranOn(provider, modelChoice), effort };
   const fail = (failureReason: string | undefined, aborted: boolean): RunReviewResult => ({
     submitted: false,
     ranOn: ran,
@@ -245,7 +251,9 @@ export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
         args.headSha,
       ));
       cwd = worktreePath;
-      maxTurns = reviewMaxTurnsFor(mode, docsDir != null);
+      // A higher level gets more room (High 45, Extra high 60, Max 75 by default) unless
+      // REVIEW_MAX_TURNS is set; Default, Low and Medium keep the cap.
+      maxTurns = effortTurnCap(reviewMaxTurnsFor(mode, docsDir != null), level != null ? levelEffort : null, config.reviewMaxTurnsPinned);
       // OTHER PRs ON THE SAME TICKET, read-only, for cross-repo interactions (claude-review/
       // prompts.ts "Related PRs"). A peer that fails to check out is said so in the prompt and the
       // review goes on: peer context is optional, the review of THIS PR is not.
@@ -300,7 +308,7 @@ export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
 
     // ---- Codex only: the model, its effort, the prompts in Codex words, and the specialists ----
     // (The model choice itself is resolved above the `try`, so even a run that fails early is labelled.)
-    const codexEffort = override?.effort ?? codexReviewEffort(modelChoice.role, mode);
+    const codexEffort = effort;
     const codexUsage = args.usage
       ? { accountId: args.usage.accountId, seam: 'agent' as const, feature: 'claude_review', prId: args.usage.prId, repoId: args.usage.repoId ?? null }
       : undefined;
@@ -383,7 +391,9 @@ export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
       claude: {
         allowedTools: policy.allowedTools,
         disallowedTools: policy.disallowedTools,
-        ...(guard ? { agents: specialistAgents(policy.specialists) } : {}),
+        // A chosen level reaches the specialists too; Default leaves them as they always were.
+        ...(guard ? { agents: specialistAgents(policy.specialists, level != null ? levelEffort : undefined) } : {}),
+        effort: levelEffort,
         // ⚠ THE SPECIALIST CAP LIVES HERE, not in the prompt.
         extraPreToolUse: guard
           ? [

@@ -19,7 +19,7 @@ import {
 } from '../review/clone-manager.js';
 import { estimateCostUsd } from '../review/pricing.js';
 import type { UsageTokens } from '../review/usage.js';
-import type { ClaudeReviewModel } from '@pierre-review/shared';
+import type { AiEffort, ClaudeReviewModel } from '@pierre-review/shared';
 import type {
   GenerateFixArgs,
   GenerateFixResult,
@@ -150,6 +150,11 @@ interface AgentRunOptions {
   usageRecord?: AgentUsageRecord;
   /** Codex-only knobs (an explicit reasoning effort for the opt-in live test). Claude ignores them. */
   codex?: CodexRunOptions;
+  /**
+   * The run's effort on either provider (Settings → AI → Effort; ai/effort.ts). Absent ⇒ each
+   * provider's Default. A Codex `codex.effort` (the live test) beats it.
+   */
+  effort?: AiEffort;
 }
 
 interface AgentRunOutcome {
@@ -236,9 +241,13 @@ export async function runAgentInWorktree(
     tools: opts.tools,
     budget: { usd: opts.maxBudgetUsd, turns: opts.maxTurns },
     abortController: opts.abortController,
-    claude: { allowedTools: opts.allowedTools, disallowedTools: opts.disallowedTools },
+    claude: {
+      allowedTools: opts.allowedTools,
+      disallowedTools: opts.disallowedTools,
+      ...(opts.effort ? { effort: opts.effort } : {}),
+    },
     ...(opts.usageRecord ? { usageRecord: opts.usageRecord } : {}),
-    ...(opts.codex ? { codex: opts.codex } : {}),
+    ...(opts.codex || opts.effort ? { codex: { ...opts.codex, effort: opts.codex?.effort ?? opts.effort } } : {}),
     // The fixer's words for its steps (the write tools too).
     activity: 'fix',
     onProgress: (p) => {
@@ -369,6 +378,7 @@ export async function runCodingAgent(
       ...(args.provider ? { provider: args.provider } : {}),
       usageRecord: { accountId: args.accountId, seam: 'agent', feature: 'ai_fix', prId: args.prId ?? null },
       ...(args.codex ? { codex: args.codex } : {}),
+      ...(args.effort ? { effort: args.effort } : {}),
     });
 
     // A user cancel aborts the SDK iterator; surface a clean aborted result (the
@@ -509,6 +519,7 @@ export async function runPlanAgent(args: GeneratePlanArgs): Promise<GeneratePlan
       provider: planProvider,
       usageRecord: { accountId: args.accountId, seam: 'agent', feature: 'ai_fix_plan', prId: args.prId ?? null },
       ...(args.codex ? { codex: args.codex } : {}),
+      ...(args.effort ? { effort: args.effort } : {}),
     });
 
     // A cancelled pass still hands back what it spent, so the manager records it and counts it

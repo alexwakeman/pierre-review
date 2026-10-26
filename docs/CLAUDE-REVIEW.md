@@ -443,6 +443,45 @@ I would pick a preference for auto-review in settings."
   (`followUpProvider`): the review chat on its review, another Plan-first pass and the build of a plan
   on the plan's provider. The SPA's gates and wording follow the same rule (`useFollowUpProvider`).
 
+### The effort setting (decided 2026-10-26)
+
+The user compared Opus 5.5 (pinned at medium, 30 turns) with Codex GPT-6 Astra (high) on one PR and
+asked to "make effort a setting". Settings → AI → **Effort** (`AiProviderSection.tsx` `EffortControl`,
+`PUT /api/ai/effort`, `accounts.ai_effort`, sqlite `0130`) holds ONE level for both providers:
+Default, Low, Medium, High, Extra high, Max.
+
+- **The map is the identity** (`packages/shared/src/ai-effort.ts`). Claude's Agent SDK `effort` and
+  Codex's `model_reasoning_effort` both take `low | medium | high | xhigh | max`: Opus 5.5 and Sonnet 5
+  accept all five with adaptive thinking; the Codex CLI 0.164.0 enum is `none | minimal | low | medium
+  | high | xhigh | max | ultra` (read from the binary), with Astra and Sol taking low … ultra and Luna
+  low … max. `none`, `minimal` and `ultra` have no Claude counterpart and are not offered. So "High"
+  is `high` on both, which is the fair comparison the user asked for.
+- **Default (NULL) is today's behaviour, exactly**, because today's defaults are not one level:
+  Claude medium (diff-only medium on Opus, low on Sonnet), Codex by depth (deep high, standard medium,
+  fast low; diff-only one step lower). A chosen level runs at that level on a worktree run and one
+  step lower diff-only (never below low).
+- **Who it reaches** (`ai/effort.ts` `agenticRunEffort`, read ONCE at the run's start): the PR review
+  (`review/agent.ts`: the lead, Claude's specialists through the SDK's per-agent `effort` — sent only
+  when a level is chosen — and Codex's Limn-run specialists), its follow-up re-reviews (same runner),
+  AI Fix and Plan first (`coding/ai-fix/manager.ts` decides it, `GenerateFixArgs.effort` /
+  `GeneratePlanArgs.effort` carry it). Claude gets it as `spec.claude.effort`
+  (`sdkModelOptions(model, mode, effort)`), Codex as `spec.codex.effort`. Every other kind keeps
+  `defaultRunEffort`. A provider switch never changes the level, only who reads it.
+- **Precedence**: an explicitly set `REVIEW_EFFORT` (one of the five) WINS and locks the control
+  ("Set by REVIEW_EFFORT"; the PUT answers 409); it also moves every Claude run's worktree effort, as
+  it always did for Sonnet. `REVIEW_DIFF_ONLY_EFFORT`, when set, decides every diff-only run.
+- ⚠ **The Opus 5.5 pin (`PINNED_EFFORT`) is GONE.** What stays fixed is real: Opus 5.5 always gets
+  `thinking: {type: 'adaptive'}` and is never sent disabled thinking, a thinking budget or a forced
+  tool choice.
+- **Turn caps**: at High / Extra high / Max a WORKTREE review's cap is 1.5× / 2× / 2.5× (30 → 45 / 60
+  / 75; `effortTurnCap`) unless `REVIEW_MAX_TURNS` is set (`config.reviewMaxTurnsPinned`). The
+  tool-less diff-only cap (6) and AI Fix's caps are unchanged. The ⓘ says so. ⚠ `REVIEW_BUDGET_USD`
+  ($6.75) is NOT scaled: a Max run on an API key can hit it.
+- **Stored and labelled**: the run stamps the effort it SENT with its provider and model
+  (`AiRanOn.effort` → `claude_reviews.effort`, `ai_fixes.effort` / `plan_effort`), and
+  `aiRunLabel(provider, model, effort)` adds it: "Claude Opus 5.5 · high", "Codex · GPT-6 Astra ·
+  extra high". A NULL (older row, queued run) reads as before.
+
 ### The review tab's history
 
 Every run on the PR is listed, always (`components/ReviewHistoryList.tsx`): all providers, all
@@ -493,8 +532,11 @@ stay on the latest run only. AI Fix keeps no per-PR run selector (only "Earlier 
   review asks the spend gate before each.
 - **Writes are read from git**, never from the event stream (a refused patch emits nothing): the
   changed files are what `git status` shows in the write roots; a change outside them fails the run.
-- **Effort**: deep = high, standard = medium, fast = low; a diff-only review runs one step lower
-  (`codexReviewEffort`). Default agent timeout 45 minutes; a stop signals the whole process group.
+- **Effort**: Settings → AI → Effort when the reader chose a level (the review, its specialists,
+  AI Fix and Plan first; § The effort setting); otherwise the Default by depth: deep = high,
+  standard = medium, fast = low, and a diff-only review one step lower (`ai/effort.ts`
+  `defaultRunEffort`; `codexReviewEffort` for the chat and Check threads). Default agent timeout 45
+  minutes; a stop signals the whole process group.
 - **Clean-up.** Codex keeps every run twice in Limn's home (the rollout file and its own sqlite
   rows), and both hold PR text. Once a run's usage is recorded, its thread is queued
   (`ai/codex/threads.ts`): one app-server per drain calls `thread/delete`, the rollout file is
@@ -580,10 +622,10 @@ praise comment already on GitHub is still Limn's own comment. The ticket review 
   offered list). Nothing re-prices a stored run; an id outside `RATES` falls back to Sonnet 5 rates
   in the live estimate. Both generate routes (Claude Review and AI Fix) answer 400 for it.
   Retiring a model is now a shared-types + pricing + model-options edit, never a schema edit.
-- **Opus 5.5's effort is PINNED to `medium` on every path** (`PINNED_EFFORT` in
-  `review/model-options.ts`) — a product decision. `REVIEW_DIFF_ONLY_EFFORT` (default low) and
-  `REVIEW_EFFORT` (default medium) still drive the other effort-capable models, never this one.
-  It is passed explicitly rather than left to the API default. It also always gets
+- **Opus 5.5's effort is no longer pinned** (2026-10-26, § The effort setting): every run is sent
+  an explicit effort (never the API default) — Settings → AI → Effort for the review and AI Fix,
+  else the Default (medium; diff-only medium on Opus, low on Sonnet), and `REVIEW_EFFORT` /
+  `REVIEW_DIFF_ONLY_EFFORT` move every effort-capable model alike. It always gets
   `thinking: { type: 'adaptive' }`, which overrides any `MAX_THINKING_TOKENS=0` the environment
   might carry. ⚠ **Opus 5.5 400s on `thinking: {type:'disabled'}`, on a thinking budget
   (`budget_tokens` / `maxThinkingTokens`) and on a forced `tool_choice`** — nothing in the review,
@@ -597,9 +639,9 @@ praise comment already on GitHub is still Limn's own comment. The ticket review 
   matching SDK bump (regenerate `pnpm-lock.yaml` under the pinned pnpm) and a restart of the
   backend — a running `tsx watch` keeps the old SDK loaded.
 - **AI Fix inherits the offered list and opens on `DEFAULT_AI_FIX_MODEL` = `claude-opus-5-5`**
-  (`packages/shared`, ONE spelling), read by the fixer picker (`AiFixTab`) and the core start route (`coding/ai-fix/routes.ts`). "On medium" is the `PINNED_EFFORT` pin above,
-  reached through `coding/agent.ts` → `sdkModelOptions(model, 'worktree')`; the constant carries no
-  effort of its own. `POST /api/pro/prs/:id/ai-fix` checks `model` IN THE HANDLER — there is no ajv
+  (`packages/shared`, ONE spelling), read by the fixer picker (`AiFixTab`) and the core start route (`coding/ai-fix/routes.ts`). Its
+  effort is Settings → AI → Effort (Default medium), decided by the fix manager and carried to
+  `coding/agent.ts`; the constant carries no effort of its own. `POST /api/pro/prs/:id/ai-fix` checks `model` IN THE HANDLER — there is no ajv
   body schema, because `removeAdditional` would strip `seed`/`reviewText`/`commentTargets`: absent or
   null → the default; a string in `CLAUDE_REVIEW_MODELS` → that model; anything else →
   `400 {error:'ModelNotOffered'}`. No stored fix row's model is ever re-run. Only the FIXER moved:

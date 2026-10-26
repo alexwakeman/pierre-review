@@ -30,6 +30,8 @@ const calls = {
   ended: vi.fn(async (..._a: unknown[]) => {}),
   append: vi.fn(async (..._a: unknown[]) => true),
   approved: vi.fn(async (..._a: unknown[]) => true),
+  fixRanOn: vi.fn(async (..._a: unknown[]) => {}),
+  planRanOn: vi.fn(async (..._a: unknown[]) => {}),
 };
 vi.mock('./persist.js', async (importOriginal) => {
   const real = await importOriginal<typeof import('./persist.js')>();
@@ -44,8 +46,8 @@ vi.mock('./persist.js', async (importOriginal) => {
     markFixCancelled: vi.fn(async () => {}),
     markFixFailed: vi.fn(async () => {}),
     markFixRunning: vi.fn(async () => {}),
-    markFixRanOn: vi.fn(async () => {}),
-    markPlanRanOn: vi.fn(async () => {}),
+    markFixRanOn: (...a: unknown[]) => calls.fixRanOn(...a),
+    markPlanRanOn: (...a: unknown[]) => calls.planRanOn(...a),
     saveFixSuccess: vi.fn(async () => {}),
     reconcileOrphanedFixes: vi.fn(async () => 0),
     parseReviewItems: real.parseReviewItems,
@@ -117,6 +119,9 @@ describe('startPlan — "Plan first"', () => {
     expect(gp.shownRefs).toEqual([]);
     expect(gp.model).toBe('claude-opus-5-5');
     expect(gp.maxBudgetUsd).toBe(config.aiFixBudgetUsd);
+    // Default effort (nothing chosen): Opus at medium, sent and stamped on the plan pass.
+    expect(gp.effort).toBe('medium');
+    expect((calls.planRanOn.mock.calls.at(-1) as Any)[2]).toMatchObject({ model: 'claude-opus-5-5', effort: 'medium' });
     expect(ctx.coding.generateFix).not.toHaveBeenCalled();
     // Revision 1, and the first pass answers no message.
     const saved = calls.savePlan.mock.calls[0]?.[2] as Any;
@@ -297,6 +302,9 @@ describe('approvePlan — "Approve and build"', () => {
     const { approvePlan } = await import('./manager.js');
     row = readyRow(31);
     const ctx = fakeCtx();
+    // The build reads Settings → AI → Effort when it starts.
+    const { setStoredAiEffort } = await import('../../ai/effort.js');
+    setStoredAiEffort('xhigh');
     const r = await approvePlan(ctx, { accountId: 1, fixId: row.id });
     expect(r).toEqual({ status: 'queued', fixId: row.id });
     const [, id, args] = calls.approved.mock.calls[0] as Any;
@@ -310,6 +318,9 @@ describe('approvePlan — "Approve and build"', () => {
     expect(gf.prompt).toBe(args.prompt);
     expect(gf.systemPrompt).toContain('You have NO shell here');
     expect(gf.baseSha).toBe('head2');
+    expect(gf.effort).toBe('xhigh');
+    expect((calls.fixRanOn.mock.calls.at(-1) as Any)[2]).toMatchObject({ effort: 'xhigh' });
+    setStoredAiEffort(null);
     expect(ctx.coding.generatePlan).not.toHaveBeenCalled();
   });
 

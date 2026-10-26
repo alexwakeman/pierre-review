@@ -5,7 +5,9 @@
 //   2. a DEEP run checks out its ticket peers (capped), hands the checkouts to the SDK as
 //      `additionalDirectories`, appends where each sits (or that it could not be checked out) to the
 //      prompt, and removes them afterwards;
-//   3. a diff-only run checks out no peer, whatever it is handed.
+//   3. a diff-only run checks out no peer, whatever it is handed;
+//   4. the effort (Settings → AI → Effort) reaches the lead and its specialists, raises the turn cap
+//      at High, and comes back on `ranOn` for the run row.
 //
 //   pnpm --filter @pierre-review/backend test agent-run
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -145,5 +147,36 @@ describe('runReview — ticket peers on a deep run', () => {
     expect(await decide('Read', { file_path: join(extra[0]!, 'src/b.ts') })).toBe('allow');
     expect(await decide('Glob', { pattern: `${root}/**` })).toBe('deny');
     expect(peerCleanups).toBe(1);
+  });
+});
+
+describe('runReview — the effort (Settings → AI → Effort)', () => {
+  it('Default: Opus at medium, the base turn cap, the specialists left as they were; the run stores its effort', async () => {
+    const r = await runReview(args({ specialists: ['security'] }));
+    expect(captured!.options.effort).toBe('medium');
+    expect(captured!.options.thinking).toEqual({ type: 'adaptive' });
+    expect(captured!.options.maxTurns).toBe(30);
+    expect(captured!.options.agents.security).not.toHaveProperty('effort');
+    expect(r.ranOn).toEqual({ provider: 'claude', model: 'claude-opus-5-5', effort: 'medium' });
+  });
+
+  it('a chosen level reaches the lead and its specialists, raises the turn cap, and is stored', async () => {
+    const { setStoredAiEffort } = await import('../ai/effort.js');
+    setStoredAiEffort('high');
+    try {
+      const r = await runReview(args({ specialists: ['security'] }));
+      expect(captured!.options.effort).toBe('high');
+      expect(captured!.options.thinking).toEqual({ type: 'adaptive' });
+      expect(captured!.options.maxTurns).toBe(45);
+      expect(captured!.options.agents.security.effort).toBe('high');
+      expect(r.ranOn?.effort).toBe('high');
+      // A diff-only run: one step lower, and its own (tool-less) cap is not raised.
+      const small = await runReview(args({ mode: 'diff_only' }));
+      expect(captured!.options.effort).toBe('medium');
+      expect(captured!.options.maxTurns).toBe(6);
+      expect(small.ranOn?.effort).toBe('medium');
+    } finally {
+      setStoredAiEffort(null);
+    }
   });
 });
