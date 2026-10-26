@@ -108,6 +108,8 @@ a re-record **in the same commit**:
 
 Then: `pnpm demo:record` → `pnpm --filter @pierre-review/frontend build:demo` → `pnpm demo:verify` and
 `node scripts/verify-demo.mjs --later=40` → commit `apps/frontend/src/demo/data/recording.json`.
+A `VIEWS` row may carry `{ act, expect }`: a click the view hides behind (Settings has no URL) and
+text the page must then show (the run labels on #105, "Runs on Codex." after the switch).
 
 **What guards it.** PR CI (`ci.yml`) and the site deploy (`deploy-site.yml`, which will not push the image
 on a failure) both run `verify-demo`: every listed view must load with no page error, no blank page and no
@@ -121,8 +123,12 @@ SHAPE is stale but still renders. The re-record is the author's job.
   (`overlay.ts`) and are read back for the rest of the session.
 - **Agentic runs** play a recorded finished run of the same kind over a few seconds with a
   simulated progress stream (`runs.ts`, `sse.ts`).
-- **Questions to Claude** (the review chat, the docs chat, This Sprint's "Ask Claude") answer with
-  one plain line saying Claude is not connected in the demo.
+- **Questions** (the review chat, the docs chat, This Sprint's "Ask") answer with one plain line
+  saying the active provider is not connected in the demo.
+- **Settings → AI** (Auto / Claude / Codex) and the Codex sign-in are simulated (`provider.ts`),
+  starting at Auto = Claude; the AI spend reading (`aiBudget.ts`) and every run started afterwards
+  follow the choice. The stored runs are a seeded mix of Claude and Codex, each labelled by what ran;
+  #105 holds a Claude Opus and a Codex GPT-6 Astra review of the same head.
 - **Anything it cannot fake** (adding a repository, syncing, …) answers "Not available in the
   demo." in the SPA's own error shape; an unrecorded GET is `404 NotInDemo`, an unrecorded write
   `409`, a DELETE `204`.

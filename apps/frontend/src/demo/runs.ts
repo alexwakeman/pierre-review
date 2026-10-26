@@ -10,6 +10,7 @@
 import type { RecordedStreamFrame } from './recording.js';
 import type { DemoReply, DemoRequest, DemoServer } from './server.js';
 import { isRecord, notInDemo } from './util.js';
+import { ranOnNow } from './provider.js';
 
 export type RunKind = 'claude-review' | 'ai-fix' | 'ticket-review' | 'ci-review' | 'thread-check' | 'docs-alignment';
 
@@ -28,6 +29,9 @@ export interface SimulatedRun {
   /** An AI Fix pushed in THIS session. Kept apart from the template, whose recorded push state
    *  belongs to another run and is cleared on every read. */
   pushed?: { pushedBranch: string; pushedAt: string };
+  /** What the run runs on: the provider active when it STARTED and its model of the template's depth
+   *  (a switch afterwards leaves it alone, as on the server). */
+  ranOn: { provider: 'claude' | 'codex'; model: string };
 }
 
 const DURATION_MS: Record<RunKind, number> = {
@@ -123,6 +127,9 @@ export class RunSimulator {
       if (k in o) o[k] = null;
     }
     if (run.pushed) Object.assign(o, run.pushed);
+    // Labelled by what THIS run ran on, never the template's provider (it may be the other one).
+    if ('model' in o) Object.assign(o, run.ranOn);
+    if (isRecord(o.plan) && 'model' in o.plan) o.plan = { ...o.plan, ...run.ranOn };
     if (run.kind === 'claude-review' || run.kind === 'ai-fix' || run.kind === 'thread-check') {
       const head = this.prHeadSha(run.prId);
       if (head && 'headSha' in o) o.headSha = head;
@@ -217,6 +224,7 @@ export class RunSimulator {
       durationMs: DURATION_MS[kind],
       template,
       finalStatus: finalStatus ?? (typeof template.status === 'string' && template.status !== 'running' ? template.status : 'succeeded'),
+      ranOn: ranOnNow(this.srv, template.model),
     };
     this.latest.set(`${kind}|${key}`, run);
     this.byId.set(`${kind}#${run.id}`, run);

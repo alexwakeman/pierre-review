@@ -297,7 +297,9 @@ export async function seedPeriodReports(ctx: PeriodCtx): Promise<number> {
         JSON.stringify(suggested),
         c.lanes ? JSON.stringify(c.lanes) : null,
         narrative,
-        narrative ? 'claude-haiku-5-5' : '',
+        // The month's write-up ran on Codex (the reader had switched providers), the sprint's on Claude:
+        // each report names the model that wrote it.
+        narrative ? (c.win.grain === 'month' ? 'gpt-6-luna' : 'claude-haiku-5-5') : '',
         hash,
         c.fingerprint,
         narrative ? 11 : null,

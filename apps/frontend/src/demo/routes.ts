@@ -3,11 +3,12 @@
 // make, answered with a plausible success shaped by the shared types and folded into the
 // in-memory overlay so later reads show it.
 
-import { aiKindsAll, LARGE_PR_CODE_LOC_DEFAULT } from '@pierre-review/shared';
+import { aiKindsAll, aiProviderName, isAiProviderSetting, LARGE_PR_CODE_LOC_DEFAULT } from '@pierre-review/shared';
 import { normalisePath } from './recording.js';
 import type { DemoReply, DemoRequest, DemoRoute, DemoServer } from './server.js';
 import { fakeSha, isRecord, notInDemo } from './util.js';
 import { getAiBudget, putAiBudget } from './aiBudget.js';
+import { activeProvider, aiState, DEMO_CODEX_PLAN, ranOnNow, setAiState } from './provider.js';
 
 const OK = (body: unknown): DemoReply => ({ status: 200, body });
 
@@ -19,9 +20,11 @@ export const DEMO_USER = {
   displayName: 'Morgan Diaz',
 };
 
-const DEMO_ANSWER =
-  'This is the demo, so Claude is not connected here. On your own machine Limn answers this with ' +
-  'Claude, reading the code and the review.';
+/** The canned answer, naming the provider the demo runs on now. */
+function demoAnswer(srv: DemoServer): string {
+  const name = aiProviderName(activeProvider(srv));
+  return `This is the demo, so ${name} is not connected here. On your own machine Limn answers this with ${name}, reading the code and the review.`;
+}
 
 function bodyRecord(req: DemoRequest): Record<string, unknown> {
   return isRecord(req.body) ? req.body : {};
@@ -63,33 +66,52 @@ export function meBody(srv: DemoServer): Record<string, unknown> {
     // The in-app conflict resolver has no simulation here (its routes would answer "Not available
     // in the demo."), so the demo hides every door to it.
     conflictResolver: false,
-    ai: {
-      enabled: true,
-      runtime: 'ready',
-      runtimeMessage: null,
-      auth: 'ok',
-      authMessage: null,
-      // Claude answers every run kind alike (the demo runs Claude).
-      kinds: aiKindsAll({ auth: 'ok', message: null }),
-      provider: 'claude',
-      providerSetting: { value: 'auto', source: 'settings' },
-      providers: {
-        claude: { auth: 'ok', route: 'login', message: null },
-        codex: {
-          runtime: 'absent',
-          runtimeMessage: null,
-          auth: 'none',
-          route: 'none',
-          signedIn: false,
-          plan: null,
-          available: false,
-          message: null,
-          kinds: aiKindsAll({ auth: 'none', message: null }),
-        },
-      },
-    },
+    ai: demoAi(srv),
     authNotices: [],
   };
+}
+
+/**
+ * `/api/me`'s AI block: AI on, both providers signed in (Claude Code; Codex with ChatGPT), the choice
+ * this session made (provider.ts). Every run kind is ready on either provider.
+ */
+function demoAi(srv: DemoServer): Record<string, unknown> {
+  const st = aiState(srv);
+  const provider = activeProvider(srv);
+  const codexAuth = st.codexSignedIn ? ('ok' as const) : ('none' as const);
+  const codexMessage = st.codexSignedIn ? null : 'Sign in to Codex with ChatGPT.';
+  const auth = provider === 'codex' ? codexAuth : ('ok' as const);
+  const message = provider === 'codex' ? codexMessage : null;
+  return {
+    enabled: true,
+    runtime: 'ready',
+    runtimeMessage: null,
+    auth,
+    authMessage: message,
+    kinds: aiKindsAll({ auth, message }),
+    provider,
+    providerSetting: { value: st.setting, source: 'settings' },
+    providers: {
+      claude: { auth: 'ok', route: 'login', message: null },
+      codex: {
+        runtime: 'ready',
+        runtimeMessage: null,
+        auth: codexAuth,
+        route: st.codexSignedIn ? 'login' : 'none',
+        signedIn: st.codexSignedIn,
+        plan: st.codexSignedIn ? DEMO_CODEX_PLAN : null,
+        available: true,
+        message: codexMessage,
+        kinds: aiKindsAll({ auth: codexAuth, message: codexMessage }),
+      },
+    },
+  };
+}
+
+/** The Codex sign-in's state: never waiting (the demo's sign-in finishes at once). */
+function codexLogin(srv: DemoServer): Record<string, unknown> {
+  const st = aiState(srv);
+  return { login: { state: 'idle' }, signedIn: st.codexSignedIn, plan: st.codexSignedIn ? DEMO_CODEX_PLAN : null };
 }
 
 function storeMe(srv: DemoServer, fields: Record<string, unknown>): void {
@@ -229,6 +251,36 @@ export const ROUTES: DemoRoute[] = [
   // The Claude spend budget: simulated, never recorded (aiBudget.ts says why).
   { method: 'GET', re: /^\/api\/ai\/budget$/, run: (req, _m, srv) => getAiBudget(req, srv) },
   { method: 'PUT', re: /^\/api\/ai\/budget$/, run: (req, _m, srv) => putAiBudget(req, srv) },
+  // The AI provider choice and the Codex sign-in: simulated (provider.ts). A ChatGPT sign-in in the
+  // demo completes at once, with no page to open.
+  {
+    method: 'PUT',
+    re: /^\/api\/ai\/provider$/,
+    run: (req, _m, srv) => {
+      const value = bodyRecord(req).value;
+      if (!isAiProviderSetting(value)) return { status: 400, body: { error: 'BadRequest', message: 'value must be claude, codex or auto.' } };
+      setAiState(srv, { setting: value });
+      return OK({ setting: { value, source: 'settings' }, provider: activeProvider(srv) });
+    },
+  },
+  { method: 'GET', re: /^\/api\/ai\/codex\/login$/, run: (_r, _m, srv) => OK(codexLogin(srv)) },
+  {
+    method: 'POST',
+    re: /^\/api\/ai\/codex\/login$/,
+    run: (_r, _m, srv) => {
+      setAiState(srv, { codexSignedIn: true });
+      return OK({ ...codexLogin(srv), login: { state: 'done' } });
+    },
+  },
+  { method: 'POST', re: /^\/api\/ai\/codex\/login\/cancel$/, run: (_r, _m, srv) => OK(codexLogin(srv)) },
+  {
+    method: 'POST',
+    re: /^\/api\/ai\/codex\/logout$/,
+    run: (_r, _m, srv) => {
+      setAiState(srv, { codexSignedIn: false });
+      return OK({ ok: true, message: null });
+    },
+  },
   {
     method: 'POST',
     re: /^\/api\/me\/large-pr-threshold$/,
@@ -713,7 +765,7 @@ export const ROUTES: DemoRoute[] = [
       const now = srv.nowIso();
       const turns = [
         { id: srv.nextId(), findingId, role: 'user', content: String(b.question ?? ''), createdAt: now, pins: null, explanations: null },
-        { id: srv.nextId(), findingId, role: 'assistant', content: DEMO_ANSWER, createdAt: now, pins: null, explanations: null },
+        { id: srv.nextId(), findingId, role: 'assistant', content: demoAnswer(srv), createdAt: now, pins: null, explanations: null, ...ranOnNow(srv, 'claude-sonnet-5') },
       ];
       srv.overlay.chats.set(key, [...(srv.overlay.chats.get(key) ?? []), ...turns]);
       const rec = srv.recorded('GET', `/api/claude-reviews/${reviewId}/chat${findingId != null ? `?findingId=${findingId}` : ''}`);
@@ -729,7 +781,7 @@ export const ROUTES: DemoRoute[] = [
   {
     method: 'POST',
     re: /^\/api\/sprint-graph\/ask$/,
-    run: (req) => OK({ workspaceId: Number(bodyRecord(req).workspaceId) || 1, answer: DEMO_ANSWER, trimmedTurns: 0, model: 'demo', costUsd: null }),
+    run: (req, _m, srv) => OK({ workspaceId: Number(bodyRecord(req).workspaceId) || 1, answer: demoAnswer(srv), trimmedTurns: 0, model: 'demo', costUsd: null }),
   },
   {
     method: 'POST',
@@ -741,7 +793,7 @@ export const ROUTES: DemoRoute[] = [
         workspaceId: Number(b.workspaceId) || 1,
         conversationId: typeof b.conversationId === 'string' ? b.conversationId : `demo-${srv.nextId()}`,
         question: { id: srv.nextId(), role: 'user', text: String(b.question ?? ''), citations: [], createdAt: now, costUsd: null },
-        answer: { id: srv.nextId(), role: 'assistant', text: DEMO_ANSWER, citations: [], createdAt: now, costUsd: null },
+        answer: { id: srv.nextId(), role: 'assistant', text: demoAnswer(srv), citations: [], createdAt: now, costUsd: null, ...ranOnNow(srv, 'claude-sonnet-5') },
       });
     },
   },

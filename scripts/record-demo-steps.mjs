@@ -243,7 +243,17 @@ export const STEPS = [
     },
   })),
 
-  // ── Settings (both halves) ──
+  // ── #105's run history: the Claude Opus and Codex GPT-6 Astra reviews of the same head ──
+  {
+    name: 'pr:105:review-history',
+    run: async (h) => {
+      await h.go('?view=pr-detail:105&prTab=claude_review');
+      await explore(h, { max: 30, scope: 'main' });
+    },
+  },
+
+  // ── Settings (both halves; Settings → AI's provider choice and the Codex sign-in are simulated in
+  //    the demo, apps/frontend/src/demo/provider.ts, so nothing there is recorded) ──
   {
     name: 'settings',
     run: async (h) => {
@@ -266,7 +276,12 @@ export const STEPS = [
       await h.clickAll(h.page.locator('main button[aria-expanded="false"]'), { max: 6 });
       for (const repoId of [2, 3, 6, 7, 8, 1, 4, 5]) await h.fetchGet(`/api/branch-trends?repoId=${repoId}`);
       for (const userId of [1, 2, 3, 4, 5, 6, 11, 12, 13, 14, 15, 16]) await h.fetchGet(`/api/users/${userId}/stats`);
-      for (let id = 1; id <= 8; id++) await h.fetchGet(`/api/claude-reviews/${id}`);
+      // Every stored review run and its chat — Claude's and Codex's (#105 holds one of each on the
+      // same head), so picking any run in a PR's history answers.
+      for (let id = 1; id <= 14; id++) {
+        await h.fetchGet(`/api/claude-reviews/${id}`);
+        await h.fetchGet(`/api/claude-reviews/${id}/chat`);
+      }
       for (let id = 1; id <= 3; id++) await h.fetchGet(`/api/ci-reviews/${id}`);
       for (let id = 1; id <= 8; id++) await h.fetchGet(`/api/ticket-reviews/${id}`);
       await h.fetchGet('/api/sprint-graph/token?workspace=1');

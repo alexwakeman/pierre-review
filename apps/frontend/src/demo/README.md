@@ -133,9 +133,19 @@ The Pending reads (`/api/attention`, `/api/my-turn`, `/api/daily-brief`, `/api/p
 drop every card of a PR merged or closed here and every My Turn entry dismissed here (listed
 under "Dismissed" until it is brought back), take the removed cards off each tab's, kind's and
 lens's count, and carry the overlay's PR fields (merge state, queue) on the cards that stay.
-Questions to Claude (the review chat, the docs chat, This Sprint's "Ask Claude") answer with one
-plain line saying Claude is not connected in the demo. Repository adds, syncs and other writes it
+Questions (the review chat, the docs chat, This Sprint's "Ask") answer with one plain line saying
+the active provider is not connected in the demo. Repository adds, syncs and other writes it
 cannot fake answer "Not available in the demo." in the SPA's error shape.
+
+**The AI provider (Settings → AI) is simulated, never recorded** (`provider.ts`). The reader is
+signed in to both providers (Claude Code; Codex with ChatGPT Plus) and the choice starts at Auto,
+which is Claude. `PUT /api/ai/provider` and the Codex sign-in routes keep their effect in memory;
+`/api/me`'s `ai` block, `/api/ai/budget` (`aiBudget.ts`: Claude's windows, or Codex's own windows
+with Limn's token-weighted share, percentages only) and every run started afterwards follow it — a
+replayed run is labelled with the provider that was active when it started and that provider's model
+of the template's depth, never the template's own label. The stored runs keep theirs: the seeder
+writes a mix (`seed-demo-agentic.ts`), and #105 holds a Claude Opus review and a Codex GPT-6 Astra
+review of the same head.
 
 **The in-app conflict resolver is not in the demo.** The demo's `/api/me` answers
 `conflictResolver: false`, so no surface offers "Resolve conflicts"; a conflicts card still shows

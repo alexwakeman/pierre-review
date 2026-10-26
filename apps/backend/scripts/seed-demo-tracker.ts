@@ -765,7 +765,10 @@ export async function seedDemoTracker(c: TrackerSeedCtx): Promise<{ sprintTicket
       subtype: 'success',
       runtimeMissing: false,
       error: null,
-      costUsd: 0.38,
+      // Written on Codex (its standard model): the Critical path view names it. US$ 0 on ChatGPT.
+      provider: 'codex',
+      model: 'gpt-6.1-sol',
+      costUsd: 0,
       inputTokens: 14_200,
       outputTokens: 1_650,
     })) as never,

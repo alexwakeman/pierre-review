@@ -13,6 +13,14 @@
 // persist), in the same order. Nothing leaves the process: no GitHub, no model.
 //
 // The code the runs talk about is scripts/lib/demo-diffs.mjs, shared with the recorder.
+//
+// TWO PROVIDERS. The reader switched Settings → AI to Codex for a while and back, so the stored runs
+// are a mix, each labelled by what ran: #105 holds a Claude Opus review AND a Codex GPT-6 Astra review
+// of the SAME head (the in-situ comparison), with a chat on each. Codex also ran the Check threads pass,
+// the CI review, the AI Fix plan, two ticket reviews, #105's design, a library document, a docs-chat
+// answer and the story's docs check. A Codex run records what ran through the product's own stamp
+// (`ranOn` from the fake agent, or the persist module's `mark…RanOn`), and costs US$ 0 (a ChatGPT
+// sign-in has no per-run price).
 import { createHash } from 'node:crypto';
 import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -21,6 +29,10 @@ import { DEMO_DIFFS, TERRAFORM_PLAN_JOB_ID, TERRAFORM_PLAN_LOG, addedLines, file
 import { ticketIdent } from './seed-demo-tracker.js';
 
 const HOUR = 3_600_000;
+
+/** What a Codex run ran on (the deep and standard models; packages/shared AI_MODEL_FOR_ROLE). */
+const CODEX_DEEP = { provider: 'codex' as const, model: 'gpt-6-astra' };
+const CODEX_STANDARD = { provider: 'codex' as const, model: 'gpt-6.1-sol' };
 
 interface DiffFile {
   path: string;
@@ -228,6 +240,8 @@ interface ReviewScript {
   inputTokens: number;
   outputTokens: number;
   numTurns: number;
+  /** What ran, when not Claude Opus (the model asked for). */
+  ranOn?: { provider: 'claude' | 'codex'; model: string };
 }
 
 async function runClaudeReview(
@@ -270,6 +284,7 @@ async function runClaudeReview(
         return {
           submitted: true,
           ...mapped,
+          ranOn: s.ranOn ?? { provider: 'claude', model: 'claude-opus-5-5' },
           costUsd: s.costUsd,
           inputTokens: s.inputTokens,
           outputTokens: s.outputTokens,
@@ -460,7 +475,29 @@ export async function seedDemoAgentic(c: AgenticSeedCtx): Promise<Record<string,
     numTurns: 7,
   });
   await db.update(schema.claudeReviews).set({ createdAt: at(20), finishedAt: at(19.8) }).where(eq(schema.claudeReviews.id, run105)).execute();
-  out.reviews = { run114, run116, run105 };
+
+  // ---- #105 again, SAME head, on Codex GPT-6 Astra: the in-situ comparison with the Opus run ----
+  // Both keep their own labels in the run history. Astra agrees on the two blockers and adds the
+  // delivery-id map and a question; Opus's run is the one above.
+  const run105Codex = await runClaudeReview(base, c, {
+    prId: 105,
+    summary:
+      'Not ready to merge. The signature is checked against re-serialised JSON instead of the raw body GitHub signed, the webhook secret is logged, and the delivery-id map is never pruned and is lost on restart, so a delivery replayed after a deploy is accepted.',
+    verdict: 'REQUEST_CHANGES',
+    findings: [
+      { path: 'src/api/routes/webhooks.ts', line: 13, side: 'RIGHT', severity: 'blocker', lens: 'security', title: 'Signature checked on re-serialised JSON', body: '`JSON.stringify(body)` is not the byte sequence GitHub signed, so key order or whitespace differences reject valid deliveries. Verify against the raw body (`rawBody: true` is already set on the route).', suggestion: "    if (!verifySignature(req.rawBody, req.headers['x-hub-signature-256'])) {" },
+      { path: 'src/api/routes/webhooks.ts', line: 25, side: 'RIGHT', severity: 'blocker', lens: 'security', title: 'Secret written to the log', body: 'The log line for an untracked repository includes `process.env.WEBHOOK_SECRET`. Log the delivery id instead.' },
+      { path: 'src/api/routes/webhooks.ts', line: 6, side: 'RIGHT', severity: 'warning', title: 'Delivery ids live only in memory', body: '`seenDeliveries` grows for the life of the process and is empty after a restart, so a replayed delivery is accepted after every deploy. Store delivery ids in the database with an expiry.' },
+      { path: 'src/api/routes/webhooks.ts', line: 20, side: 'RIGHT', severity: 'question', title: 'Does a removed request delete the row?', body: '`review_request_removed` goes through the same upsert as `review_requested`. Does the upsert remove the reviewer, or does the old request stay?' },
+    ],
+    costUsd: 0,
+    inputTokens: 33_900,
+    outputTokens: 2_900,
+    numTurns: 8,
+    ranOn: CODEX_DEEP,
+  });
+  await db.update(schema.claudeReviews).set({ createdAt: at(18), finishedAt: at(17.7) }).where(eq(schema.claudeReviews.id, run105Codex)).execute();
+  out.reviews = { run114, run116, run105, run105Codex };
 
   // ---- the review chat on #113's latest run ----
   const bFindings = (await db.select({ id: schema.claudeReviewFindings.id, title: schema.claudeReviewFindings.title }).from(schema.claudeReviewFindings).where(eq(schema.claudeReviewFindings.reviewId, runB)).execute()) as Array<{ id: number; title: string }>;
@@ -480,7 +517,27 @@ export async function seedDemoAgentic(c: AgenticSeedCtx): Promise<Record<string,
         findingId: m.findingId,
         role: m.role,
         content: m.content,
-        ...(m.role === 'assistant' ? { model: 'claude-sonnet-5', costUsd: 0.012, inputTokens: 9_100, outputTokens: 240 } : {}),
+        ...(m.role === 'assistant' ? { provider: 'claude', model: 'claude-sonnet-5', costUsd: 0.012, inputTokens: 9_100, outputTokens: 240 } : {}),
+        createdAt: at(m.at),
+      })
+      .execute();
+  }
+
+  // ---- a chat on #105's Codex run, answered by Codex ----
+  const codexChat = [
+    { role: 'user', content: 'Is the delivery-id map a blocker on its own?', at: 17.5 },
+    { role: 'assistant', content: 'Not on its own. A replay is only accepted after a restart, and GitHub does not resend deliveries by itself. It matters more once the signature check is fixed, because then a captured delivery is the easiest way in. Keep it here if the database change is small; otherwise open a ticket and land the two blockers first.', at: 17.48 },
+  ];
+  for (const m of codexChat) {
+    await db
+      .insert(schema.claudeReviewChatMessages)
+      .values({
+        accountId: 1,
+        reviewId: run105Codex,
+        findingId: null,
+        role: m.role,
+        content: m.content,
+        ...(m.role === 'assistant' ? { ...CODEX_STANDARD, costUsd: 0, inputTokens: 8_700, outputTokens: 260 } : {}),
         createdAt: at(m.at),
       })
       .execute();
@@ -621,7 +678,10 @@ async function seedThreadCheck(base: any, c: AgenticSeedCtx, _reviewId: number):
     const j = THREAD_JUDGEMENTS.find((x) => first.startsWith(x.match) || first.includes(x.match));
     return { ref: s.ref, validity: j?.validity ?? 'valid', addressed: j?.addressed ?? 'unclear', explanation: j?.explanation ?? 'No change since the last judgement.', reason: j?.reason ?? 'No change since the last judgement.' };
   });
-  await saveThreadCheckSuccess(ctx, 1, id, { costUsd: 0.07, inputTokens: 8_400, outputTokens: 520, numTurns: 2, assessments: reconcileThreads(planned.plan, reports as never) });
+  // Run on Codex (its standard model): this thread's pill names Codex, the review's pills Claude.
+  const { markThreadCheckRanOn } = await import('../src/review/claude-review/thread-check-persist.js');
+  await markThreadCheckRanOn(ctx, 1, id, CODEX_STANDARD);
+  await saveThreadCheckSuccess(ctx, 1, id, { costUsd: 0, inputTokens: 8_400, outputTokens: 520, numTurns: 2, assessments: reconcileThreads(planned.plan, reports as never) });
   await db.update(schema.claudeThreadChecks).set({ createdAt: new Date(now.getTime() - 41 * 60_000), completedAt: new Date(now.getTime() - 39 * 60_000) }).where(eq(schema.claudeThreadChecks.id, id)).execute();
   return id;
 }
@@ -674,7 +734,10 @@ async function seedCiReview(base: any, c: AgenticSeedCtx): Promise<number> {
     })),
   };
   const { summary, items } = reconcileCiReview(inputs.plan, payload as never, inputs.carriedExtras);
-  await saveCiReviewSuccess(ctx, 1, id, { summary, costUsd: 0.18, inputTokens: 16_900, outputTokens: 900, numTurns: 4, items });
+  // Run on Codex GPT-6 Astra.
+  const { markCiReviewRanOn } = await import('../src/review/ci-review/persist.js');
+  await markCiReviewRanOn(ctx, 1, id, CODEX_DEEP);
+  await saveCiReviewSuccess(ctx, 1, id, { summary, costUsd: 0, inputTokens: 16_900, outputTokens: 900, numTurns: 4, items });
   await db.update(schema.ciReviews).set({ createdAt: new Date(now.getTime() - 4.4 * HOUR), completedAt: new Date(now.getTime() - 4.3 * HOUR) }).where(eq(schema.ciReviews.id, id)).execute();
   return id;
 }
@@ -756,7 +819,7 @@ async function seedAiFix(base: any, c: AgenticSeedCtx, runs: { run114: number; r
             notAddressed: r('T').slice(0, 1).map((ref) => ({ ref, reason: 'The author deferred it to PLAT-319; doing it here would collide with that work.' })),
           },
           usage: { inputTokens: 24_100, outputTokens: 1_480, cacheReadTokens: 40_200, cacheCreationTokens: 6_100 },
-          costUsd: 0.27,
+          costUsd: 0, // ran on Codex (a ChatGPT sign-in has no per-run price)
           numTurns: 6,
           aborted: false,
         };
@@ -782,6 +845,11 @@ async function seedAiFix(base: any, c: AgenticSeedCtx, runs: { run114: number; r
     // 'planned' with a plan stored (planStatus leaves 'planning').
     return r && r.status === 'planned' && r.planStatus === 'plan_ready' ? 'done' : 'running';
   }, 'ai plan');
+  // The plan ran on Codex GPT-6 Astra (the fix on #114 above is Claude Opus's); its build, once
+  // approved, is labelled Codex from the start.
+  const { markPlanRanOn, markFixRanOn } = await import('../src/coding/ai-fix/persist.js');
+  await markPlanRanOn(ctx, planId, CODEX_DEEP);
+  await markFixRanOn(ctx, planId, CODEX_DEEP);
   void shownRefs;
   return { fixId, planId };
 }
@@ -790,6 +858,8 @@ async function seedAiFix(base: any, c: AgenticSeedCtx, runs: { run114: number; r
 
 interface TicketScript {
   key: string;
+  /** Ran on Codex GPT-6 Astra (else Claude Opus). */
+  codex?: boolean;
   alignment: 'aligned' | 'partly_aligned' | 'not_aligned' | 'unclear';
   summary: string;
   criteria: Array<{ status: 'met' | 'partly_met' | 'not_met' | 'unclear'; explanation: string; pr?: string; path?: string; line?: number }>;
@@ -813,6 +883,7 @@ const TICKET_SCRIPTS: TicketScript[] = [
   },
   {
     key: 'PLAT-301',
+    codex: true,
     alignment: 'partly_aligned',
     summary: 'PR1 updates requested reviewers from the webhook, but removal and the untracked-repository case are not right yet.\n- A removed request is handled by the same upsert, which does not delete the old request.\n- The untracked-repository log line runs on every delivery, not once.',
     criteria: [
@@ -836,6 +907,7 @@ const TICKET_SCRIPTS: TicketScript[] = [
   },
   {
     key: 'INFRA-244',
+    codex: true,
     alignment: 'aligned',
     summary: 'PR1 adds both alarms with the thresholds the ticket names, routed to the on-call topic.',
     criteria: [
@@ -875,7 +947,7 @@ async function seedTicketReviews(base: any, c: AgenticSeedCtx): Promise<number> 
   const ctx = agentCtx(base, {});
   const { resolveTicketInputs, memberRepos } = await import('../src/review/ticket-review/prepare.js');
   const { fingerprint } = await import('../src/review/ticket-review/fingerprint.js');
-  const { insertQueuedTicketReview, markTicketReviewRunning, setTicketMemberCheckouts, saveTicketReviewSuccess } = await import('../src/review/ticket-review/persist.js');
+  const { insertQueuedTicketReview, markTicketReviewRunning, setTicketMemberCheckouts, saveTicketReviewSuccess, markTicketReviewRanOn } = await import('../src/review/ticket-review/persist.js');
   const { reconcileTicketReview } = await import('../src/review/ticket-review/reconcile.js');
   let n = 0;
   for (const s of TICKET_SCRIPTS) {
@@ -920,11 +992,12 @@ async function seedTicketReviews(base: any, c: AgenticSeedCtx): Promise<number> 
       notRequested: (s.notRequested ?? []).map((m) => ({ title: m.title, explanation: m.explanation, pr: m.pr ?? null })),
     };
     const { assessment, items } = reconcileTicketReview(ticket, promptMembers, report as never);
+    if (s.codex) await markTicketReviewRanOn(ctx, 1, id, CODEX_DEEP);
     await saveTicketReviewSuccess(ctx, 1, id, {
       alignment: assessment.alignment,
       summary: assessment.summary,
       assessment,
-      costUsd: 0.6 + members.length * 0.21,
+      costUsd: s.codex ? 0 : 0.6 + members.length * 0.21,
       inputTokens: 38_000 + members.length * 9_000,
       outputTokens: 2_400,
       numTurns: 8,
@@ -947,20 +1020,23 @@ async function seedDesigns(base: any, c: AgenticSeedCtx): Promise<number> {
   const { db, schema, now } = c;
   const { eq } = await import('drizzle-orm');
   const ctx = agentCtx(base, {});
-  const { insertQueuedDiagram, markDiagramRunning, saveDiagramSuccess } = await import('../src/review/diagrams/persist.js');
+  const { insertQueuedDiagram, markDiagramRunning, saveDiagramSuccess, markDiagramRanOn } = await import('../src/review/diagrams/persist.js');
   const { validateDesign } = await import('../src/review/diagrams/validate.js');
   const { prDiagramFingerprint, storyDiagramFingerprint } = await import('../src/review/diagrams/fingerprint.js');
   const { liveStoryMembers, designContextFor } = await import('../src/review/diagrams/manager.js');
   let n = 0;
 
+  // #105's design was drawn after its Codex review, on Codex.
   const prDesign = async (prId: number, title: string, caption: string, design: Record<string, unknown>, hoursAgo: number) => {
+    const codex = prId === 105;
     const pr = ((await db.select().from(schema.pullRequests).where(eq(schema.pullRequests.id, prId)).execute()) as Array<Record<string, unknown>>)[0]!;
     const files = (DIFFS[prId] ?? []).map((f) => f.path);
     const v = validateDesign({ ...design, title, caption } as never, designContextFor('pr', [{ ref: 'PR1', changedFiles: files } as never]));
     if (!v.ok) throw new Error(`design #${prId}: ${JSON.stringify(v)}`);
     const id = await insertQueuedDiagram(ctx, { accountId: 1, kind: 'pr', subject: String(prId), prId, ticketKey: null, fingerprint: prDiagramFingerprint(prId, pr.headSha as string), trigger: 'review', headSha: pr.headSha, model: 'claude-sonnet-5' } as never);
     await markDiagramRunning(ctx, 1, id, { headSha: pr.headSha as string });
-    await saveDiagramSuccess(ctx, 1, id, { title: v.value.title, caption: v.value.caption, design: v.value.design }, { costUsd: 0.14, inputTokens: 18_000, outputTokens: 1_300, numTurns: 4 });
+    if (codex) await markDiagramRanOn(ctx, 1, id, CODEX_STANDARD);
+    await saveDiagramSuccess(ctx, 1, id, { title: v.value.title, caption: v.value.caption, design: v.value.design }, { costUsd: codex ? 0 : 0.14, inputTokens: 18_000, outputTokens: 1_300, numTurns: 4 });
     await db.update(schema.sequenceDiagrams).set({ createdAt: new Date(now.getTime() - hoursAgo * HOUR), completedAt: new Date(now.getTime() - (hoursAgo - 0.05) * HOUR) }).where(eq(schema.sequenceDiagrams.id, id)).execute();
     n++;
   };
@@ -1135,7 +1211,7 @@ async function seedReferenceDocs(c: AgenticSeedCtx): Promise<number> {
   const { parseLibraryPath } = await import('../src/reference-docs/paths.js');
   const { config } = await import('../src/config.js');
   rmSync(join(config.docsDir, '1'), { recursive: true, force: true });
-  for (const d of LIBRARY) {
+  for (const [di, d] of LIBRARY.entries()) {
     const md = `# ${d.title}\n\n${d.sections.map((s) => `## ${s.title}\n\n${s.body}`).join('\n\n')}\n`;
     const row = await insertDocRow({
       accountId: 1,
@@ -1165,7 +1241,9 @@ async function seedReferenceDocs(c: AgenticSeedCtx): Promise<number> {
     const v = validateDocFolder(out);
     if (!v.ok) throw new Error(`docs ${d.slug}: ${v.problems.join(' | ')}`);
     installDocFolder(1, ws, d.slug, out);
-    await saveDocBuilt(1, row.id, { title: d.title, summary: d.summary, topics: d.topics, sections: entries }, { costUsd: 0.31, inputTokens: 22_000, outputTokens: 2_800, numTurns: 6 } as never);
+    // The first document was built on Claude, the second on Codex.
+    const builtOn = di === 1 ? { ...CODEX_STANDARD, costUsd: 0 } : { provider: 'claude' as const, model: 'claude-sonnet-5', costUsd: 0.31 };
+    await saveDocBuilt(1, row.id, { title: d.title, summary: d.summary, topics: d.topics, sections: entries }, { ...builtOn, inputTokens: 22_000, outputTokens: 2_800, numTurns: 6 } as never);
     rmSync(join(stagingRoot(1, ws), `${d.slug}-seed`), { recursive: true, force: true });
   }
   await writeIndex(1, ws);
@@ -1189,10 +1267,12 @@ async function seedReferenceDocs(c: AgenticSeedCtx): Promise<number> {
     },
   ];
   const conversationId = createHash('sha1').update('acme-demo:docs-chat').digest('hex').slice(0, 24);
-  for (const t of turns) {
+  for (const [ti, t] of turns.entries()) {
     const citations = extractCitations(t.a, docs, read);
     if (!citations.some((x) => x.quote)) throw new Error(`docs chat: no checked quote in "${t.a.slice(0, 40)}" — ${JSON.stringify(citations)}`);
-    await insertChatTurn(1, ws, conversationId, t.q, { text: t.a, citations, costUsd: 0.05, inputTokens: 12_000, outputTokens: 310 } as never);
+    // The first answer came from Claude, the second from Codex.
+    const answeredBy = ti === 1 ? { ...CODEX_STANDARD, costUsd: 0 } : { provider: 'claude' as const, model: 'claude-sonnet-5', costUsd: 0.05 };
+    await insertChatTurn(1, ws, conversationId, t.q, { text: t.a, citations, ...answeredBy, inputTokens: 12_000, outputTokens: 310 } as never);
   }
   void now;
   return docs.length;
@@ -1255,6 +1335,9 @@ async function seedStoryDocs(base: any, c: AgenticSeedCtx): Promise<string> {
       const r = await db.select().from(schema.storyDocsAlignments).where(eq(schema.storyDocsAlignments.id, res.runId)).execute();
       throw new Error(`story docs ${status}: ${JSON.stringify(r[0]).slice(0, 600)}`);
     }
+    // The check ran on Codex. The manager stamps the ACTIVE provider (Claude, in this process) as the
+    // read starts; the seed writes what the demo's story says ran, as that stamp would have.
+    await db.update(schema.storyDocsAlignments).set({ ...CODEX_STANDARD, costUsd: 0 }).where(eq(schema.storyDocsAlignments.id, res.runId)).execute();
     return ident;
   } finally {
     mgr._setStoryDocsSeamsForTest(null);

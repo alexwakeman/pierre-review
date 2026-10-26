@@ -532,3 +532,73 @@ describe('stream replay', () => {
     expect(await read()).toMatchObject({ pushedBranch: 'feature/nine', pushedAt: new Date(now).toISOString() });
   });
 });
+
+describe('the AI provider (Settings → AI)', () => {
+  const opusRun = { id: 70, prId: 2, headSha: 'a'.repeat(40), status: 'succeeded', verdict: 'COMMENT', summary: 'ok', findings: [], model: 'claude-opus-5-5', provider: 'claude', createdAt: CAPTURED, finishedAt: CAPTURED };
+  const astraRun = { ...opusRun, id: 71, prId: 3, model: 'gpt-6-astra', provider: 'codex' };
+  const make = (now: () => number = () => CAPTURED_MS): DemoServer =>
+    new DemoServer(
+      recording([
+        { method: 'GET', path: '/api/prs/2/claude-review', status: 200, body: { enabled: true, auth: 'ok', review: opusRun, history: [] } },
+        { method: 'GET', path: '/api/prs/3/claude-review', status: 200, body: { enabled: true, auth: 'ok', review: astraRun, history: [] } },
+        { method: 'GET', path: '/api/prs/3', status: 200, body: { id: 3, headSha: 'c'.repeat(40) } },
+      ]),
+      { now },
+    );
+  const json = async (srv: DemoServer, method: string, url: string, body?: unknown): Promise<any> =>
+    (await srv.handle(method, url, body === undefined ? null : JSON.stringify(body), null)).json();
+
+  it('starts at Auto, which is Claude, with both providers signed in', async () => {
+    const ai = (await json(make(), 'GET', '/api/me')).ai;
+    expect(ai).toMatchObject({ provider: 'claude', providerSetting: { value: 'auto', source: 'settings' }, auth: 'ok' });
+    expect(ai.providers.codex).toMatchObject({ runtime: 'ready', auth: 'ok', signedIn: true, plan: 'plus', available: true });
+  });
+
+  it('a switch to Codex is read back by /api/me, and the spend reading reads Codex windows in percent only', async () => {
+    const srv = make();
+    expect(await json(srv, 'PUT', '/api/ai/provider', { value: 'codex' })).toEqual({ setting: { value: 'codex', source: 'settings' }, provider: 'codex' });
+    expect((await json(srv, 'GET', '/api/me')).ai).toMatchObject({ provider: 'codex', providerSetting: { value: 'codex' } });
+    const budget = await json(srv, 'GET', '/api/ai/budget');
+    expect(budget.status).toMatchObject({ provider: 'codex', mode: 'subscription', overBudget: false });
+    expect(budget.usage).toMatchObject({ provider: 'codex', route: 'login' });
+    expect(budget.usage.account).toMatchObject({ reportedSubscription: 'plus', subscription: null, models: [] });
+    // Token-weighted: Limn's tokens ÷ the account's × the window's figure (about 3% of the week).
+    expect(budget.usage.limn.weekSharePct).toBeGreaterThan(2);
+    expect(budget.usage.limn.weekSharePct).toBeLessThan(4);
+    expect(budget.status.subscription.usedSharePct).toBe(budget.usage.limn.weekSharePct);
+    expect(budget.settings.weeklyUsd).toBeNull();
+    expect(await json(srv, 'PUT', '/api/ai/provider', { value: 'nope' })).toMatchObject({ error: 'BadRequest' });
+  });
+
+  it('a run started on Codex is labelled Codex at the same depth, whatever its template ran on', async () => {
+    let now = CAPTURED_MS;
+    const srv = make(() => now);
+    await json(srv, 'PUT', '/api/ai/provider', { value: 'codex' });
+    await json(srv, 'POST', '/api/prs/9/claude-review', {});
+    now += 60_000;
+    expect((await json(srv, 'GET', '/api/prs/9/claude-review')).review).toMatchObject({ provider: 'codex', model: 'gpt-6-astra' });
+    // Back on Claude: a run whose template is the Codex one says Claude Opus.
+    await json(srv, 'PUT', '/api/ai/provider', { value: 'claude' });
+    await json(srv, 'POST', '/api/prs/3/claude-review', {});
+    now += 60_000;
+    expect((await json(srv, 'GET', '/api/prs/3/claude-review')).review).toMatchObject({ provider: 'claude', model: 'claude-opus-5-5' });
+  });
+
+  it('the canned chat answer names the active provider and is labelled by it', async () => {
+    const srv = make();
+    await json(srv, 'PUT', '/api/ai/provider', { value: 'codex' });
+    const chat = await json(srv, 'POST', '/api/claude-reviews/70/chat', { question: 'Why?' });
+    expect(chat.messages.at(-1)).toMatchObject({ role: 'assistant', provider: 'codex', model: 'gpt-6.1-sol' });
+    expect(chat.messages.at(-1).content).toContain('Codex is not connected');
+  });
+
+  it('signing out of Codex leaves Codex chosen but without a credential', async () => {
+    const srv = make();
+    await json(srv, 'PUT', '/api/ai/provider', { value: 'codex' });
+    expect(await json(srv, 'POST', '/api/ai/codex/logout')).toEqual({ ok: true, message: null });
+    expect((await json(srv, 'GET', '/api/me')).ai).toMatchObject({ provider: 'codex', auth: 'none', providers: { codex: { signedIn: false } } });
+    expect((await json(srv, 'GET', '/api/ai/budget')).status.route).toBe('none');
+    expect(await json(srv, 'POST', '/api/ai/codex/login', { method: 'browser' })).toMatchObject({ login: { state: 'done' }, signedIn: true });
+    expect((await json(srv, 'GET', '/api/ai/codex/login')).login).toEqual({ state: 'idle' });
+  });
+});

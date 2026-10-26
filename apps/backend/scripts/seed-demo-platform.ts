@@ -382,8 +382,8 @@ export async function seedDemoPlatform(c: PlatformSeedCtx): Promise<Record<strin
         confidence: p.confidence,
         body: p.body,
         payloadHash: target.payloadHash,
-        model: 'claude-haiku-5-5',
-        costUsd: 0.0007,
+        // #105's note was written on Codex (its fast model), the rest on Claude Haiku.
+        ...(Number(prId) === 105 ? { provider: 'codex' as const, model: 'gpt-6-luna', costUsd: 0 } : { provider: 'claude' as const, model: 'claude-haiku-5-5', costUsd: 0.0007 }),
         inputTokens: 2_400,
         outputTokens: 90,
         createdAt: new Date(nowMs - 3 * 3_600_000),

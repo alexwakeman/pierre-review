@@ -3,7 +3,8 @@
 // (apps/site), opens every view of the demo in Chromium and checks, per view:
 //   • no uncaught page error;
 //   • the page is not blank (the SPA has no error boundary: a render throw unmounts everything);
-//   • `window.__limnDemo.log` has no 'missing' entry — a request the recording could not answer.
+//   • `window.__limnDemo.log` has no 'missing' entry — a request the recording could not answer;
+//   • where the row lists `expect`, that text is on the page (after the row's `act`, if any).
 // Screenshots of the key views land in /tmp/limn-demo-shots/.
 //
 //   node scripts/verify-demo.mjs                 every view, as if opened now
@@ -27,7 +28,17 @@ mkdirSync(SHOTS, { recursive: true });
 const ident = (k) => encodeURIComponent(`ticket:jira:https://acme.atlassian.net#${k}`);
 const story = (k) => encodeURIComponent(`jira:https://acme.atlassian.net#${k}`);
 
-/** [name, query, screenshot?] */
+/** Open Settings from the account menu (the modal has no URL of its own). */
+async function openSettings(page) {
+  await page.locator('button[title^="Signed in as"]').first().click();
+  await page.getByRole('menuitem', { name: 'Settings' }).click();
+  await page.getByRole('dialog', { name: 'Settings' }).or(page.locator('[aria-label="Settings"]')).first().waitFor({ timeout: 10_000 });
+}
+
+/**
+ * [name, query, screenshot?, { act?, expect? }] — `act(page)` runs after the view settles (a click
+ * the view hides behind, never a URL); `expect` lists text the page must then show.
+ */
 const VIEWS = [
   ['open-prs', '?view=activity', 'open-prs'],
   ...['my_turn', 'claude', 'fixing', 'review', 'threads', 'land', 'deps'].map((t) => [`pending:${t}`, `?view=activity&activityRepo=attention&attnTab=${t}`, t === 'my_turn' ? 'pending' : t === 'deps' ? 'pending-deps' : null]),
@@ -48,9 +59,26 @@ const VIEWS = [
     ['overview', 'threads', 'changes', 'claude_review', 'ai_fix'].map((t) => [
       `pr:${id}:${t}`,
       `?view=pr-detail:${id}&prTab=${t}`,
-      id === 113 ? `pr-113-${t}` : id === 114 && (t === 'ai_fix' || t === 'claude_review') ? `pr-114-${t}` : null,
+      id === 113 ? `pr-113-${t}` : id === 114 && (t === 'ai_fix' || t === 'claude_review') ? `pr-114-${t}` : id === 105 && t === 'claude_review' ? 'pr-105-claude_review' : null,
+      // #105 holds a Claude Opus review and a Codex GPT-6 Astra review of the same head, each labelled.
+      id === 105 && t === 'claude_review' ? { expect: ['Codex · GPT-6 Astra', 'Claude Opus 5.5'] } : undefined,
     ]),
   ),
+  // Settings → AI: Claude runs by default; picking Codex says so, and the usage item follows.
+  ['settings:ai', '?view=activity', 'settings-ai', { act: openSettings, expect: ['Runs on Claude.', 'Signed in with ChatGPT (plus).'] }],
+  [
+    'settings:ai-codex',
+    '?view=activity',
+    'settings-ai-codex',
+    {
+      act: async (page) => {
+        await openSettings(page);
+        await page.locator('input[name="ai-provider"][value="codex"]').click();
+        await page.getByText('Runs on Codex.').waitFor({ timeout: 10_000 });
+      },
+      expect: ['Runs on Codex.'],
+    },
+  ],
   ['user-activity:2', '?view=user-activity:2', null],
   ['ws2:open-prs', '?view=activity&workspace=2', null],
   ['ws2:chronology', '?view=activity&workspace=2&activityRepo=insights&insightsTab=bottlenecks', null],
@@ -89,7 +117,7 @@ async function main() {
   let pageErrors = [];
   page.on('pageerror', (e) => pageErrors.push(e.message));
 
-  for (const [name, query, shot] of VIEWS) {
+  for (const [name, query, shot, opts] of VIEWS) {
     if (ONLY && !name.includes(ONLY)) continue;
     pageErrors = [];
     await page.goto(`${BASE}${query}`, { waitUntil: 'load' });
@@ -97,12 +125,25 @@ async function main() {
     // settle (recorded streams replay over a few seconds).
     await page.waitForFunction(() => document.body.innerText.trim().length > 300, null, { timeout: 20_000 }).catch(() => {});
     await page.waitForTimeout(1800);
+    const problems = [];
+    if (opts?.act) {
+      try {
+        await opts.act(page);
+        await page.waitForTimeout(800);
+      } catch (e) {
+        problems.push(`action failed: ${String(e?.message ?? e).split('\n')[0].slice(0, 200)}`);
+      }
+    }
     const text = await page.evaluate(() => document.body.innerText.trim().length);
     const missing = await page.evaluate(() => {
       const d = window.__limnDemo;
       return d ? d.log.filter((e) => e.stage === 'missing').map((e) => `${e.method} ${e.url}`) : ['(no demo server)'];
     });
-    const problems = [];
+    if (opts?.expect) {
+      const body = await page.evaluate(() => document.body.innerText);
+      const absent = opts.expect.filter((t) => !body.includes(t));
+      if (absent.length) problems.push(`text not shown: ${absent.map((t) => JSON.stringify(t)).join(', ')}`);
+    }
     if (pageErrors.length) problems.push(`page errors: ${[...new Set(pageErrors)].join(' | ').slice(0, 300)}`);
     if (text < 200) problems.push(`nearly blank (${text} chars)`);
     if (missing.length) problems.push(`missing: ${[...new Set(missing)].join(', ').slice(0, 600)}`);
