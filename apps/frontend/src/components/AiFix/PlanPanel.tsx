@@ -128,7 +128,7 @@ export function PlanPanel({
   const state = fix.plan;
   // The provider that runs the next message (the active one), and the one that wrote this plan.
   const name = useAiProviderName();
-  const plannedBy = aiRunProviderName(fix);
+  const plannedBy = aiRunProviderName(fix.plan ?? fix);
   const message = usePlanMessage(pr.id);
   const approve = useApprovePlan(pr.id);
   const discard = useDiscardPlan(pr.id);

@@ -9,8 +9,8 @@
 //                   as an agent run, with EMPTY read and write roots — every tool call but `update_plan`
 //                   is denied — and refuses (fails closed) unless `verifyHookTrusted` says Codex will
 //                   run that hook.
-//   runAgent(spec)  ⚠ ONLY for kinds in CODEX_AGENT_KINDS (EMPTY in Phase 2 — every kind answers
-//                   `codexKindNotAvailableMessage`). The run reads through Limn's workspace MCP server
+//   runAgent(spec)  ⚠ ONLY for kinds in CODEX_AGENT_KINDS (every kind since Phase 3; anything else
+//                   answers `codexKindNotAvailableMessage`). The run reads through Limn's workspace MCP server
 //                   (its only way to see files), writes (if any) through `apply_patch` inside a
 //                   `workspace-write` sandbox confined to the write roots, guarded by the PreToolUse
 //                   hook. Its RESULT TOOL becomes a strict JSON Schema (ai/result-schemas.ts); the final

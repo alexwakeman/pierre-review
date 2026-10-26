@@ -1,5 +1,5 @@
 import { and, eq } from 'drizzle-orm';
-import type { ClaudeReviewVerdict } from '@pierre-review/shared';
+import type { AiProviderId, ClaudeReviewVerdict } from '@pierre-review/shared';
 import type { ProContext } from '../contract.js';
 import { proSchemaFor } from '../db.js';
 import { escapeSlack, prLink, slackLink } from './links.js';
@@ -202,8 +202,10 @@ export async function onClaudeReviewCompleted(
       verdict: cr.verdict,
       summary: cr.summary,
       reviewMode: cr.reviewMode,
-      // The model names the provider that ran it (a schema without the column reads as Claude).
+      // The provider that ran it: the stored `provider` (Phase 4, sqlite 0128), else read from the
+      // model id (aiRunProvider). A schema without the columns reads as Claude.
       ...(cr.model != null ? { model: cr.model } : {}),
+      ...(cr.provider != null ? { provider: cr.provider } : {}),
     })
     .from(cr)
     .where(and(eq(cr.id, e.reviewId), eq(cr.accountId, e.accountId), eq(cr.prId, e.prId)))
@@ -214,6 +216,7 @@ export async function onClaudeReviewCompleted(
     summary: string | null;
     reviewMode: string | null;
     model?: string | null;
+    provider?: AiProviderId | null;
   }>;
   const run = runs[0];
   // Succeeded runs only, and not a `skip` (no code to review — a message would be noise).

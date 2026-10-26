@@ -275,6 +275,7 @@ export function FixPicker({
             changedPaths={NO_PATHS}
             actions={false}
             selection={selection}
+            by={by}
           />
         );
       }
@@ -287,6 +288,7 @@ export function FixPicker({
             actions={false}
             selection={selection}
             notCheckedNote={card.inReview ? undefined : `${by} didn’t check this one.`}
+            by={by}
           />
         );
       case 'ci':

@@ -388,7 +388,7 @@ history: [docs/CODEX-PLAN.md](docs/CODEX-PLAN.md). Non-negotiables:
 
 - **ONE switch, `config.aiEnabled` = `LIMN_AI_DISABLED !== 'true'`.** `registerAgenticRoutes`
   registers NOTHING when off. `MeResponse.ai` carries `enabled` / `runtime` / `auth` / `provider` /
-  `providers` / `kinds` (the pre-flight per run kind); no credential swaps the Run button for ONE
+  `providerSetting` / `providers` / `kinds` (the pre-flight per run kind); no credential swaps the Run button for ONE
   line, never hides the feature.
 - ⚠ **EVERY MODEL CALL GOES THROUGH `ai/provider.ts`**: runners call `getActiveProvider().runAgent`,
   `cheapComplete` calls `.complete`. ONLY `ai/providers/claude.ts` (+ `ai/runtime.ts`) calls
@@ -396,8 +396,9 @@ history: [docs/CODEX-PLAN.md](docs/CODEX-PLAN.md). Non-negotiables:
   The active provider is ONE question, `ai/provider-setting.ts` `activeProviderId`
   (`LIMN_AI_PROVIDER` = `claude` | `codex` | `auto`, or Settings → AI): `auto` = Claude when both
   are signed in, Codex only when it alone is. A job asks ONCE and hands that provider to its run.
-  Budget folds filter `ai_usage.provider` (sqlite `0127`); a run is labelled with the provider and
-  model that RAN, never the one asked for.
+  Budget folds filter `ai_usage.provider` (`0127`); every run row stores the `provider` + `model`
+  that RAN (`0128`), shown ONLY via `aiRunLabel`; ⚠ a stored model fed to a new run goes through
+  `requestModelOf`.
 - **CLAUDE: ONE CREDENTIAL LADDER** (`ai/credentials.ts` `resolveAiCredential`): the reader's
   Claude Code login first (a `claude` session on disk or `CLAUDE_CODE_OAUTH_TOKEN`), else the
   environment's `ANTHROPIC_API_KEY`; `LIMN_AI_USE_API_KEY=true` puts the key first. Agent runs pass

@@ -112,6 +112,10 @@ describe('a stored run names the provider it ran on', () => {
     const codex = threadPillFor({ id: 9, derivedState: 'untouched' }, pr, 'codex');
     expect(claude.kind === 'claude' && claude.marker.provider).toBe('claude');
     expect(codex.kind === 'claude' && codex.marker.provider).toBe('codex');
+    // The judgement's own provider (on the wire since Phase 4) beats the caller's fallback.
+    const own = { ...pr, judgements: pr.judgements.map((j) => ({ ...j, provider: 'codex' as const })) };
+    const judged = threadPillFor({ id: 9, derivedState: 'untouched' }, own);
+    expect(judged.kind === 'claude' && judged.marker.provider).toBe('codex');
   });
 
   it('the "not checked" lines and the auto-post lines', () => {

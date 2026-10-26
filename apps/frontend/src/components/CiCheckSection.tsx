@@ -14,6 +14,7 @@
 // check's details page — the signed log URL never reaches the client. Pure half: lib/ciReview.ts.
 import { useMemo } from 'react';
 import type { ClaudeFindingSide, ClaudeReview, PrDetail } from '@pierre-review/shared';
+import { aiRunProviderName } from '@pierre-review/shared';
 import { useAiCapabilities } from '../hooks/useAiCapabilities.js';
 import {
   useCiReview,
@@ -230,6 +231,7 @@ export function CiCheckSection({
                   suggestion={f.suggestion}
                   changedPaths={changedPaths}
                   onOpenInChanges={onOpenInChanges}
+                  by={aiRunProviderName(shown)}
                 />
               ))}
         </ul>

@@ -1467,7 +1467,7 @@ reappears.
   (PrDetail's `openThreadInThreads`); the GitHub link goes through `safeExternalUrl`; every comment
   and Claude string is plain text. `draftReply` offers Copy only — no route posts it.
 
-### The Claude spend budget on screen (`components/AiBudget.tsx`, `lib/aiBudget.ts`)
+### The AI spend budget on screen (`components/AiBudget.tsx`, `lib/aiBudget.ts`)
 
 ONE query, `useAiBudget` (`['ai-budget']`, account-grained, no `ws:` segment, polled every 2 minutes
 while the tab is visible), feeds every surface below; the decision is the server's (`ai/budget.ts`),
@@ -1483,7 +1483,7 @@ while the tab is visible), feeds every surface below; the decision is the server
   screen-reader only (and in the title): the item SHOWS just the icon and the figure, at every width. Click → a `role="dialog"` popover (Escape / outside click close it)
   built by `usageDetailOf`: Limn's week and 5-hour shares with limits, runs and tokens this week,
   Claude's account windows (5-hour, week, per-model) as used / left / resets, "Updated N min ago", and
-  a link to Settings → Claude spend. Each share or window row has a bar under its text (`UsageRow.barPct`):
+  a link to Settings → AI spend. Each share or window row has a bar under its text (`UsageRow.barPct`):
   Limn's rows fill against their LIMIT, the account rows show Claude's own % used; amber from 80%, red at
   100%; counts (runs, tokens) have none. ⚠ Unknown pieces are LEFT OUT, never shown as 0.
 - **A run's cost** (Claude Review's meta line and live estimate, Docs chat, Ask Claude about this
@@ -1501,7 +1501,7 @@ while the tab is visible), feeds every surface below; the decision is the server
   session…"; API key: "…its weekly budget…").
 - **The second press** (`OverBudgetConfirm`): over budget, only the gate's RUN control (`data-ai-run`,
   else the only button) is held once and armed for 15 s; an ⓘ / Discard beside it works as usual.
-- **Settings → Claude spend** (`ClaudeSpendSection`): subscription = the share (1–50 %), the
+- **Settings → AI spend** (`ClaudeSpendSection`): subscription = the share (1–50 %), the
   subscription (shown when Claude's report settles it; else a picker of `status.subscription.pickFrom`
   — the Max pair for a reported "max"), "Limn has used X% of your week" and "about N automatic
   reviews a working day" (the SAVED share's figure; hidden while the share is edited). The 5-hour

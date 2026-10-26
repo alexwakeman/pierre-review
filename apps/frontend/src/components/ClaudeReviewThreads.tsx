@@ -9,7 +9,7 @@
 //  - `draftReply` is a suggestion only. There is no route that posts it, so it offers Copy.
 import { useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { THREAD_VALIDITY_LABEL, isThreadToFix, threadAssessmentCounts } from '@pierre-review/shared';
-import type { ClaudeThreadAssessment, ClaudeThreadAssessmentCounts } from '@pierre-review/shared';
+import type { AiProviderName, ClaudeThreadAssessment, ClaudeThreadAssessmentCounts } from '@pierre-review/shared';
 import {
   THREAD_VALIDITY_CLASS,
   anchorLabel,
@@ -45,6 +45,7 @@ export function ThreadRow({
   actions = true,
   selection = null,
   notCheckedNote,
+  by,
 }: {
   t: ClaudeThreadAssessment;
   muted: boolean;
@@ -55,6 +56,8 @@ export function ThreadRow({
   selection?: ReactNode;
   // Replaces the not-checked sentence (a thread the review never looked at has its own reason).
   notCheckedNote?: string;
+  // The provider that ran the review (absent ⇒ Claude).
+  by?: AiProviderName;
 }): JSX.Element {
   const [expanded, setExpanded] = useState(false);
   const [replyOpen, setReplyOpen] = useState(false);
@@ -199,7 +202,7 @@ export function ThreadRow({
           <PrRefText text={explanation} />
         </p>
       ) : !judged ? (
-        <p className={`mt-1 text-xs ${MUTED}`}>{notCheckedNote ?? threadNotCheckedReason(t)}</p>
+        <p className={`mt-1 text-xs ${MUTED}`}>{notCheckedNote ?? threadNotCheckedReason(t, by)}</p>
       ) : null}
       {t.draftReply != null && t.draftReply !== '' && (
         <div className="mt-1">
@@ -239,6 +242,7 @@ export function ClaudeReviewThreadsSection({
   counts,
   onOpenThread,
   actions,
+  by,
 }: {
   items: readonly ClaudeThreadAssessment[] | null | undefined;
   counts: ClaudeThreadAssessmentCounts | null | undefined;
@@ -246,9 +250,12 @@ export function ClaudeReviewThreadsSection({
   onOpenThread?: (threadId: number) => void;
   // Right-aligned header controls ("Check threads").
   actions?: ReactNode;
+  // The provider that ran this review (`aiRunProviderName(review)`); absent ⇒ the active one.
+  by?: AiProviderName;
 }): JSX.Element | null {
   const [moreOpen, setMoreOpen] = useState(false);
-  const providerName = useAiProviderName();
+  const activeName = useAiProviderName();
+  const providerName = by ?? activeName;
   const parts = useMemo(() => partitionThreads(items ?? []), [items]);
   if (items == null) return null;
   const pills = threadCountPills(counts ?? threadAssessmentCounts(items));
@@ -281,7 +288,7 @@ export function ClaudeReviewThreadsSection({
           {parts.shown.length > 0 && (
             <ul className="space-y-1.5">
               {parts.shown.map((t) => (
-                <ThreadRow key={t.threadId} t={t} muted={false} onOpenThread={onOpenThread} />
+                <ThreadRow key={t.threadId} t={t} muted={false} onOpenThread={onOpenThread} by={by} />
               ))}
             </ul>
           )}
@@ -299,7 +306,7 @@ export function ClaudeReviewThreadsSection({
               {moreOpen && (
                 <ul className="mt-1.5 space-y-1.5">
                   {parts.more.map((t) => (
-                    <ThreadRow key={t.threadId} t={t} muted onOpenThread={onOpenThread} />
+                    <ThreadRow key={t.threadId} t={t} muted onOpenThread={onOpenThread} by={by} />
                   ))}
                 </ul>
               )}

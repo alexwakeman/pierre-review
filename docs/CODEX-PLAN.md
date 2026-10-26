@@ -226,6 +226,16 @@ reports `providers.codex.available` = the ChatGPT sign-in (`message: null` once 
   it (25,348 / 8,576 / 234) and the "already done" plan (25,428 / 16,128 / 237, one step "Confirm zero
   guard", no change). Each named `src/math.ts`, left the worktree clean and wrote one `ai_fix_plan` row.
 
+**Phase 4 status (integrated 2026-10-26, branch `codex/p4-integrated`)**: streams A1 (provider choice +
+run labels, below), A2 (copy names the provider; "Claude spend" → "AI spend"; neutral feature names such
+as "AI Review") and C (docs; CLAUDE.md under 48k) are merged. Reconciled at integration: ONE provider
+rule — A2's `ai-provider-words.ts` (`aiProviderOfRun`, `aiRunProviderName`, `aiProviderName`) delegates
+to A1's `aiRunProvider`, so a sentence and a label can never disagree; A2's `aiPickerModelLabel` /
+`CODEX_MODEL_NAMES` were dropped for A1's `aiModelChoiceLabel`, which keeps Claude's reason ("Codex ·
+GPT-6 Astra (most thorough)"); thread pills take the judgement's own `provider`; the "not sent / didn't
+report" rows, the plan author and the Slack "… Review ran" line name the stored run's provider (the
+plan's own `plan_provider`). Open: the Demo phase (simulate `PUT /api/ai/provider`, record Codex runs).
+
 **Phase 4 stream A1 built 2026-10-26** (branch `codex/p4-provider-labels`): the provider choice and run
 labelling.
 - THE CHOICE: Settings → AI (Auto / Claude / Codex), stored per machine on `accounts.ai_provider`
@@ -298,8 +308,8 @@ signed in (decided, `pickAutoProvider`). Claude's behaviour is unchanged: `promp
   manager's cost-gated row is skipped. Codex tokens are never priced as Claude's (US$ from the outcome).
 - Live (`review/codex-review-live.test.ts`, 2 runs, gpt-6-luna low): a diff-only review with the real
   prompts passed the strict `submit_review` schema; Check threads read through MCP and judged R1.
-- Open: the stored `claude_reviews.model` (and the chat row's) still names the Claude model the run
-  was ASKED for; the product copy says "Claude" (Phase 4).
+- Open (closed by Phase 4): the stored `claude_reviews.model` (and the chat row's) named the Claude
+  model the run was ASKED for; the product copy said "Claude".
 
 **Phase 3 stream (b) built 2026-10-25** (branch `codex/p3-fix`): AI Fix, Plan first, Resolve with Claude.
 - `CODEX_FIX_KINDS` = `fix`, `resolve` at this stream; `plan` joined at Phase 3 complete (above), after

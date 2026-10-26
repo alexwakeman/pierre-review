@@ -30,9 +30,8 @@
 //
 // THE CHOICE: `LIMN_AI_PROVIDER` = `claude` | `auto` (default: `auto`, which is Claude — the one the
 // rules were tuned on, docs/CODEX-PLAN.md § 6). `codex` is ACCEPTED and, since Phase 2, resolves to
-// the real Codex provider (`ai/providers/codex.ts`) — but ONLY its one-shot `complete()` runs. Its
-// `runAgent` answers "not available yet" for every kind outside `CODEX_AGENT_KINDS` (the union of
-// the four Phase 3 streams' files, ai/codex/kinds/*.ts — all empty until each ports its agents). The
+// the real Codex provider (`ai/providers/codex.ts`). Its `runAgent` answers "not available yet" for
+// any kind outside `CODEX_AGENT_KINDS` (the union of ai/codex/kinds/*.ts — every kind since Phase 3). The
 // pre-flight every Run gate and background sweeper asks (`review/auth.ts` `detectClaudeAuth(kind)`,
 // which feeds `MeResponse.ai` + its per-kind `kinds` map and `ctx.llm.detectAuth(kind)`) answers PER
 // KIND: a one-shot ('complete') or a ported kind is runnable once Codex is installed and signed in with

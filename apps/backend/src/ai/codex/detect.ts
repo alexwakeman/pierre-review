@@ -2,9 +2,8 @@
 // `usage` answer for Codex (docs/CODEX-PLAN.md § 3.1, § 8.1). Installed (the first-use download, or
 // LIMN_CODEX_PATH)? Signed in (Limn's own home, by `account/read`)? Which plan? Which credential rung?
 //
-// ⚠ Codex can still RUN NOTHING in this version (the agents are ported in Phase 3): every answer here
-// is a fact about the install and the sign-in, never "available". The provider's `available` stays
-// false and its message stays CODEX_NOT_AVAILABLE_MESSAGE until the runners land.
+// Every answer here is a fact about the install and the sign-in. Whether Codex can RUN is decided
+// above this (`codexRunnable()`, true since Phase 3 completed, plus a ChatGPT sign-in).
 import type { AiUsageReading } from '@pierre-review/shared';
 import { config } from '../../config.js';
 import { codexCredentialRunnable, resolveCodexCredential } from '../credentials.js';

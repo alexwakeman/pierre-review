@@ -460,7 +460,7 @@ function FixResult({
   if (fix.status === 'failed' && fix.plan?.status === 'failed') {
     return (
       <div className="mt-3 rounded border border-red-200 bg-red-50 p-2 text-xs text-red-700 dark:border-red-800 dark:bg-red-950/30 dark:text-red-300">
-        {aiRunProviderName(fix)} could not make a plan: {fix.error ?? 'unknown error'}
+        {aiRunProviderName(fix.plan ?? fix)} could not make a plan: {fix.error ?? 'unknown error'}
       </div>
     );
   }

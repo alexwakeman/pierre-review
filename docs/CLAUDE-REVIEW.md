@@ -237,14 +237,14 @@ stored; the ladder is read at call time, so an env change takes effect on the ne
   `apps/backend/src/ai/runtime.ts`, value-imports them. [PACKAGING.md](PACKAGING.md) owns the
   details and the guardrail. The product modules import no SDK themselves.
 
-### The Claude spend budget (optional, one per machine)
+### The AI spend budget (optional, one per machine)
 
 An optional limit that PAUSES Limn's AUTOMATIC model runs before they use up the reader's Claude
 allowance or API bill. OFF until switched on (Settings suggests the defaults). ONE per account =
 per machine (the login / key it guards is the machine's), never per workspace. Types, defaults and
 the estimate table: `packages/shared/src/ai-budget.ts`; the decision, the reading and the gate:
 `ai/budget.ts`; stored on `accounts.ai_budget_settings` + `accounts.ai_budget_reading` (migration
-`0125`). Routes: `GET`/`PUT /api/ai/budget` ([API.md](API.md) § Claude spend budget).
+`0125`). Routes: `GET`/`PUT /api/ai/budget` ([API.md](API.md) § AI spend budget).
 
 The credential route picks the mode (`decideAiBudget`, pure):
 
@@ -337,7 +337,11 @@ the plan). Phase 3 is complete: every agent kind runs on Codex and `codexRunnabl
   optional exact id; each provider resolves it.
 - **`ai/provider-setting.ts`** answers "which provider?" for the registry and the pre-flight alike
   (it sits apart to avoid an import cycle). `LIMN_AI_PROVIDER` = `claude` | `codex` | `auto`
-  (unset or unknown ⇒ `auto`), and Settings → AI sets the same choice. `activeProviderId()`:
+  (unset or unknown ⇒ `auto`). Without it, Settings → AI (`components/settings/AiProviderSection.tsx`,
+  `PUT /api/ai/provider`) stores the choice in `accounts.ai_provider` (sqlite `0128`; read and written
+  by `ai/provider-store.ts`, loaded at boot) and `aiProviderSetting()` holds it in memory, so a switch
+  reaches the next run with no restart. ⚠ The environment WINS: the route answers `409` and the
+  Settings control is disabled while `LIMN_AI_PROVIDER` is set. `activeProviderId()`:
   `codex` ⇒ Codex, `claude` ⇒ Claude, `auto` ⇒ `pickAutoProvider` — Claude when both are signed in
   and when neither is; Codex only when it ALONE is signed in (with ChatGPT) and can run every kind.
   An OpenAI API key alone never makes `auto` pick Codex.
@@ -359,9 +363,30 @@ the plan). Phase 3 is complete: every agent kind runs on Codex and `codexRunnabl
   (Codex gets `read_file`, `list_files`, `search`, `apply_patch`, "your final JSON answer"), and
   whole-sentence swaps in the finished prompt (`review/codex-wording.ts`, tested so no Claude-only
   word survives).
-- **Labels.** Every run records the provider and the model that actually ran: an `ai_usage` row
-  carries `provider` (sqlite `0127`), and a review run row stores the Codex model, not the Claude
-  model the picker asked for.
+- **Labels: every run names what ACTUALLY ran.** An `ai_usage` row carries `provider` (sqlite
+  `0127`). Every stored run row carries `provider` + the `model` that ran (sqlite `0128`:
+  claude_reviews, claude_review_chat_messages, ticket_reviews, ticket_review_pr_cards, ci_reviews,
+  claude_thread_checks, ai_fixes (+ `plan_provider`/`plan_model` for the latest planning pass),
+  sprint_paths, sequence_diagrams, story_docs_alignments, reference_docs,
+  reference_doc_chat_messages; platform `0042_ai_provider_labels.sql` for the six platform write-ups
+  with a live writer). A queued row is labelled from the active provider; the run then stamps what
+  ran (`markReviewRanOn`, `markFixRanOn`, … via `ai/provider.ts` `ranOn`). A NULL provider is an
+  older row: Claude's unless its model is a Codex id (`aiRunProvider`).
+  - ⚠ **A stored model fed into a NEW run goes through `requestModelOf`** (chat, the next plan pass
+    or build, auto fix): a Codex id maps back to the Claude model of the same depth, so a provider
+    switch between passes never sends a gpt id to Claude.
+  - **One spelling on screen**: `packages/shared/src/ai-run-label.ts` `aiRunLabel` ("Claude Opus
+    5.5", "Codex · GPT-6 Astra"; `components/AiRunLabel.tsx`); sentences about a stored run name
+    `aiRunProviderName(run)` (`ai-provider-words.ts`, the same rule); sentences about the run about
+    to start name the ACTIVE provider (`useAiProviderName`). The model pickers name what will run
+    (`aiModelChoiceLabel`: "Codex · GPT-6 Astra (most thorough)"). Never word a provider by hand.
+  - **In-situ comparison**: a Codex review of a head Claude already reviewed runs, and both stay in
+    history, each labelled (`mixed-providers.test.ts`). Auto review's one-run-per-head counts either
+    provider. ⚠ A second review still gets the earlier one as its "Previous review" follow-up, so
+    the two are NOT independent. The thread fold lets the newer run win and carries its provider.
+  - Run cost follows the RUN's provider (`runCostText(…, provider)`): a Codex run on ChatGPT shows
+    no figure, never US$. Period reports still store the model ASKED for (it is part of the row's
+    identity); the core one-shot tables (sprint briefs/themes, story labels) store a constant id.
 
 ### The Codex runner
 

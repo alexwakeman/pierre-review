@@ -178,12 +178,14 @@ export function claudeMarkerLabel(
 export function threadPillFor(
   thread: { id: number; derivedState: DerivedState },
   pr: ClaudeThreadJudgementsForPr | null | undefined,
-  /** The provider that ran the judging review (default Claude). */
-  provider: AiProviderId = 'claude',
+  /** The provider that ran the judging review, when the judgement does not carry its own
+   *  (`ClaudeThreadJudgement.provider`, Phase 4 — that one wins). Default Claude. */
+  fallbackProvider: AiProviderId = 'claude',
 ): ThreadPill {
   if (pr == null) return { kind: 'derived' };
   const j = pr.judgements.find((x) => x.threadId === thread.id);
   if (j == null) return { kind: 'derived' };
+  const provider: AiProviderId = j.provider ?? fallbackProvider;
   // An unknown head is never "moved" (the Open PRs column's rule).
   const stale = pr.currentHeadSha != null && j.assessedAtHead !== pr.currentHeadSha;
   if (j.finding != null) {

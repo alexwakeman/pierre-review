@@ -30,6 +30,7 @@ import {
   ticketCriteriaSentence,
 } from '@pierre-review/shared';
 import type {
+  AiProviderName,
   ClaudeFinding,
   ClaudeFindingSeverity,
   ClaudeFindingSide,
@@ -1263,6 +1264,7 @@ export function FollowUpRow({
   reviewId,
   actions = true,
   selection = null,
+  by,
 }: {
   item: ClaudeFollowUpItem;
   muted: boolean;
@@ -1274,6 +1276,8 @@ export function FollowUpRow({
   reviewId?: number;
   // false ⇒ no buttons. Default true.
   actions?: boolean;
+  // The provider that ran the review (absent ⇒ Claude).
+  by?: AiProviderName;
   // A leading control in the card's header (the fix picker's tick box).
   selection?: ReactNode;
 }): JSX.Element {
@@ -1321,7 +1325,7 @@ export function FollowUpRow({
           <PrRefText text={item.explanation} />
         </p>
       ) : item.status === 'not_checked' ? (
-        <p className={`mt-1 text-xs ${MUTED}`}>{notCheckedReason(item)}</p>
+        <p className={`mt-1 text-xs ${MUTED}`}>{notCheckedReason(item, by)}</p>
       ) : null}
       {/* Without actions the block keeps its text and drops its buttons (they need prId + reviewId). */}
       <ReplyBlock item={item} prId={actions ? prId : undefined} reviewId={actions ? reviewId : undefined} />
@@ -1401,6 +1405,7 @@ export function ClaudeReviewFollowUpSection({
   onOpenInChanges,
   prId,
   reviewId,
+  by,
 }: {
   // null when this run followed nothing up (then only `settledEarlier` can show).
   followUp: ClaudeReviewFollowUp | null;
@@ -1413,6 +1418,8 @@ export function ClaudeReviewFollowUpSection({
   // The PR and the review, for "Post reply" / "Resolve" on a reply status (absent ⇒ no buttons).
   prId?: number;
   reviewId?: number;
+  // The provider that ran this review (`aiRunProviderName(review)`); absent ⇒ Claude.
+  by?: AiProviderName;
 }): JSX.Element | null {
   const [closedOpen, setClosedOpen] = useState(false);
   const findingsById = useMemo(() => new Map(findings.map((f) => [f.id, f])), [findings]);
@@ -1420,6 +1427,7 @@ export function ClaudeReviewFollowUpSection({
   const { open, closed } = useMemo(() => partitionFollowUp(items), [items]);
   if (items.length === 0 && settledEarlier.length === 0) return null;
   const rowProps = {
+    by,
     findingsById,
     headMoved: followUp?.headMoved ?? false,
     changedPaths,

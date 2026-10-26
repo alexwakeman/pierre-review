@@ -326,7 +326,8 @@ Which AI provider runs, whether it is set up, and Limn's own Codex sign-in
 | Field | Meaning |
 |---|---|
 | `enabled` | `!LIMN_AI_DISABLED`. False ⇒ no AI surface renders. |
-| `provider` | `'claude' \| 'codex'` — the ACTIVE provider (`ai/provider-setting.ts` `activeProviderId`: `LIMN_AI_PROVIDER` or the Settings choice; `auto` = Claude when both are signed in, Codex only when it alone is signed in with ChatGPT). `runtime` / `runtimeMessage` / `auth` / `authMessage` describe IT. |
+| `provider` | `'claude' \| 'codex'` — the ACTIVE provider (`ai/provider-setting.ts` `activeProviderId`: `LIMN_AI_PROVIDER` or the Settings choice; `auto` = Claude when both are signed in, Codex only when it alone is signed in with ChatGPT). `runtime` / `runtimeMessage` / `auth` / `authMessage` describe IT — under Codex, `runtime` is the Codex program's install (`ai/active-runtime.ts`). |
+| `providerSetting` | `AiProviderSettingStatus {value: 'auto'\|'claude'\|'codex', source: 'env'\|'settings'}` — the choice behind `provider`. `source: 'env'` ⇒ `LIMN_AI_PROVIDER` is set and wins (Settings → AI shows it, disabled). |
 | `kinds` | `Record<AiRunKind, AiKindStatus {auth: 'ok'\|'none', message}>` — the pre-flight per run kind (the 14 agent kinds + `complete` for the one-shots). `AiRunGate kind=…` reads its entry. Optional: an older server omits it and every gate falls back to `auth`. |
 | `providers.claude` | `{auth, route: 'login'\|'api_key'\|'none', message}` — Claude's own credential, whichever provider is active. |
 | `providers.codex` | `{runtime, runtimeMessage, auth, route, signedIn, plan, available, message, kinds}` — the Codex program (`runtime`: `ready`\|`absent`\|`installing`\|`failed`), Limn's own sign-in in `~/.limn/codex` (`signedIn`, `plan` = the ChatGPT plan), `available` = Codex can run here (a ChatGPT sign-in; ⚠ `route: 'api_key'` reads `auth: 'none'` — an OpenAI API key is refused until Limn can price it), and Codex's OWN per-kind answers whichever provider is active. |
@@ -339,13 +340,24 @@ Which AI provider runs, whether it is set up, and Limn's own Codex sign-in
 | `POST /api/ai/codex/login/cancel` | Stops the running sign-in. → `CodexLoginResponse`. Tier `sync`. |
 | `POST /api/ai/codex/logout` | Signs Limn's Codex home out. → `CodexLogoutResponse {ok, message}` (`message` when it failed). Tier `sync`. Nothing in these four routes touches the database; the sign-in lives in Codex's own `auth.json` in `~/.limn/codex`. |
 
-> TODO (Phase 4 stream A): document the Settings → AI provider route here — its path, body
-> (`claude` \| `codex` \| `auto`), response, rate tier, and how it combines with `LIMN_AI_PROVIDER`.
+| Route | Contract |
+|---|---|
+| `PUT /api/ai/provider` | Settings → AI's one writer (`api/routes/ai-provider.ts`). Body `AiProviderSettingBody {value: 'auto'\|'claude'\|'codex'}`; anything else → `400 BadRequest`. While `LIMN_AI_PROVIDER` is set → `409 SetByEnvironment` (the environment wins; nothing is stored). Stores `accounts.ai_provider` (sqlite `0128`; one per machine) and the in-memory copy `ai/provider-setting.ts` reads, so the NEXT run uses it with no restart; a run already going keeps its provider. → `AiProviderSettingResponse {setting: AiProviderSettingStatus, provider}` (the active provider after the change). Tier `read` (one UPDATE, no GitHub, no model; pinned in `rate-limit.test.ts`). |
 
-### Claude spend budget
+**Run labels on the wire.** Every stored AI run carries an optional `provider` (`'claude'\|'codex'`)
+beside the `model` that ACTUALLY ran (`claude-opus-5-5`, `gpt-6-astra`, …): `ClaudeReview`,
+`ClaudeReviewSummary`, `ClaudeReviewChatMessage`, `ThreadCheckRun`, `TicketReview`, `CiReview`, `AiFix`,
+`AiFixSummary`, `AiFixPlanState` (the latest planning pass, apart from the build), `ConflictAiResolution`,
+`SequenceDiagramView`, `SprintPaths`, `StoryDocsAlignmentRun`, `ReferenceDocsChatMessage`, and each
+`ClaudeThreadJudgement` (the run whose judgement won the fold). The server resolves it with
+`aiRunProvider(provider, model)` (a NULL column is an older row: Claude's unless its model is a Codex id);
+the SPA labels it with `aiRunLabel` ("Claude Opus 5.5", "Codex · GPT-6 Astra") and words sentences with
+`aiRunProviderName` — never by hand. Optional, so an older server or a cached response still parses.
+
+### AI spend budget
 
 The optional per-machine budget that pauses automatic model runs ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md)
-§ The Claude spend budget). It judges the ACTIVE provider; the Codex fields are below the table. Types: `packages/shared/src/ai-budget.ts`. Registered only when AI is on
+§ The AI spend budget). It judges the ACTIVE provider; the Codex fields are below the table. Types: `packages/shared/src/ai-budget.ts`. Registered only when AI is on
 (`config.aiEnabled`; absent ⇒ 404). Account-grained, no `?workspace=`. Tier `read` both ways.
 
 | Route | Contract |

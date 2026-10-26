@@ -1383,6 +1383,7 @@ function ClaudesReview({
           onOpenInChanges={onOpenInChanges}
           prId={review.prId}
           reviewId={review.id}
+          by={aiRunProviderName(storedReview)}
         />
       )}
       <ClaudeReviewThreadsSection
@@ -1390,6 +1391,9 @@ function ClaudesReview({
         counts={currentThreads != null ? currentThreads.counts : review.threadAssessmentCounts}
         onOpenThread={onOpenThread}
         actions={checkThreadsPrId != null ? <CheckThreadsButton prId={checkThreadsPrId} /> : undefined}
+        // A later Check threads run may have judged them (its own provider): name this run's only
+        // when its own assessments show.
+        by={currentThreads == null ? aiRunProviderName(storedReview) : undefined}
       />
       <ReviewSection
         title="Findings"
