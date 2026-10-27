@@ -26,7 +26,7 @@ export type SettingsFocus = 'my-turn' | 'issue-tracker' | 'claude-spend';
 interface SettingsModalState {
   open: boolean;
   focus: SettingsFocus | null;
-  /** The tab last shown, so a reopen lands where the reader left off. */
+  /** The tab last shown — clicked, arrowed to or opened by a focus — so a reopen lands there. */
   lastTab: SettingsTabId | null;
   openSettings: (focus?: SettingsFocus) => void;
   closeSettings: () => void;

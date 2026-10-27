@@ -129,13 +129,20 @@ export function SettingsModal({
   const select = useCallback(
     (id: SettingsTabId, moveFocus: boolean): void => {
       setTab(id);
-      setLastTab(id);
       // One scroller serves every panel, so a new tab starts at its top, not at the old one's depth.
       if (scrollerRef.current) scrollerRef.current.scrollTop = 0;
       if (moveFocus) tabRefs.current.get(id)?.focus();
     },
-    [setLastTab],
+    [],
   );
+
+  // ⚠ `lastTab` MIRRORS THE TAB ON SCREEN, however it got there — a click, an arrow key, a
+  // deep link's focus tab (`openSettings('claude-spend')` opens AI) or the AI-off fallback. Written
+  // only on a click, a deep-linked open left it on an older tab and the next plain reopen landed
+  // there rather than on the tab last shown.
+  useEffect(() => {
+    setLastTab(activeTab);
+  }, [activeTab, setLastTab]);
 
   const onTabKey = (e: ReactKeyboardEvent<HTMLButtonElement>): void => {
     const next = tabForKey(e.key, activeTab, tabs);
@@ -330,17 +337,21 @@ function SettingsTabPanel({
       id={settingsPanelDomId(def.id)}
       aria-labelledby={settingsTabDomId(def.id)}
       hidden={hidden}
-      className="space-y-4"
     >
       {/* ── GLOBAL. One account, every workspace. ─────────────────────────────────────── */}
-      {def.global.length > 0 && <div className="space-y-4">{renderSections(def.global)}</div>}
+      {/* ⚠ `peer` + `:empty`, NOT `def.global.length`: a listed section may render nothing
+          (BotScoringSection where ML is off), and the rule below must then go with it, or the tab
+          opens on a divider with nothing above it. */}
+      {def.global.length > 0 && <div className="peer space-y-4">{renderSections(def.global)}</div>}
 
       {/* ── WORKSPACE. One team — the one selected in the rail — named ONCE per tab, here. ── */}
       {/* The heading is gated on the scope resolving, below, and on nothing else. */}
       {def.workspace.length > 0 && (
         <section
           className={
-            def.global.length > 0 ? 'border-t border-gray-100 pt-4 dark:border-gray-800' : undefined
+            def.global.length > 0
+              ? 'mt-4 border-t border-gray-100 pt-4 peer-empty:mt-0 peer-empty:border-t-0 peer-empty:pt-0 dark:border-gray-800'
+              : undefined
           }
         >
           <div className="mb-3">

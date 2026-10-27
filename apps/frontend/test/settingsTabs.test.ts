@@ -82,3 +82,19 @@ describe('the modal wires the tab roles', () => {
     expect(modal).toContain('aria-labelledby={settingsTabDomId(def.id)}');
   });
 });
+
+describe('the modal remembers the tab on screen', () => {
+  it('lastTab follows the shown tab however it was reached, not only a click', () => {
+    // A deep-linked open (the budget meter → AI) must update lastTab too, so the next plain
+    // reopen lands on AI rather than on the tab last CLICKED.
+    expect(modal).toMatch(/useEffect\(\(\) => \{\s*setLastTab\(activeTab\);\s*\}, \[activeTab, setLastTab\]\);/);
+    const select = modal.slice(modal.indexOf('const select = useCallback'), modal.indexOf('const onTabKey'));
+    expect(select).not.toContain('setLastTab(id)');
+  });
+  it('the workspace rule hides when every global section rendered nothing', () => {
+    // BotScoringSection renders null where ML is off; a rule keyed on def.global.length alone
+    // would open the Bots tab on a bare divider.
+    expect(modal).toContain('<div className="peer space-y-4">{renderSections(def.global)}</div>');
+    expect(modal).toContain('peer-empty:mt-0 peer-empty:border-t-0 peer-empty:pt-0');
+  });
+});
