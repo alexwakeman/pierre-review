@@ -25,6 +25,7 @@ import {
 } from '@pierre-review/shared';
 import type { AgentContext } from '../agent-context.js';
 import { dropAutoReviews } from './manager.js';
+import { resolveAutoReviewProviders } from './pair.js';
 import { onOff, writeSettingEvent } from '../../db/setting-event-write.js';
 
 // AUTO CLAUDE REVIEW — THE PER-WORKSPACE SWITCH (CORE since migration 0074 / pg 0061; it lived on
@@ -173,6 +174,8 @@ const toMs = (v: Date | number | null | undefined): number | null =>
   v == null ? null : v instanceof Date ? v.getTime() : Number(v);
 
 interface AutoRow {
+  // Who runs auto reviews (migration 0135): NULL = the default provider, 'both' = a pair.
+  providers?: string | null;
   enabled: boolean | null;
   enabledAt: Date | number | null;
   autoFixEnabled: boolean | null;
@@ -196,6 +199,7 @@ export function autoReviewOf(row: AutoRow | null): WorkspaceAutoReviewSettings {
     autoFixEnabled: row?.autoFixEnabled === true,
     // ON unless explicitly switched off (0126).
     autoDiagramsEnabled: row?.autoDiagramsEnabled !== false,
+    autoReviewProviders: resolveAutoReviewProviders(row?.providers),
     autoPost: resolveAutoPostSettings(row?.autoPostEnabled, row?.autoPostSettings),
     autoFix: resolveAutoFixSettings(row?.autoFixSettings),
     // OFF unless explicitly switched on (0134).
@@ -271,6 +275,7 @@ export async function readWorkspaceAutoFixSettingsForPr(
 }
 
 const autoCols = (w: AgentContext['schema'][string]) => ({
+  providers: w.autoReviewProviders,
   enabled: w.autoReviewEnabled,
   enabledAt: w.autoReviewEnabledAt,
   autoFixEnabled: w.autoFixEnabled,
@@ -323,7 +328,7 @@ export async function setWorkspaceAutoReview(
     .execute()) as AutoRow[];
   const existing = rows[0];
   if (!existing) return null;
-  const { enabled, autoFixEnabled, autoDiagramsEnabled, teamClaimsEnabled, dailyCap, autoPost, autoFix } = change;
+  const { enabled, autoFixEnabled, autoDiagramsEnabled, teamClaimsEnabled, dailyCap, autoPost, autoFix, autoReviewProviders } = change;
   const wasOn = existing.enabled === true && toMs(existing.enabledAt) != null;
   let review: Pick<AutoRow, 'enabled' | 'enabledAt'>;
   if (enabled === undefined || (enabled && wasOn)) review = existing;
@@ -379,7 +384,11 @@ export async function setWorkspaceAutoReview(
     if (typeof v === 'boolean') fixAfter.include[k] = v;
   }
   const fixOverrides = autoFixOverrides(fixAfter);
+  // Who runs auto reviews: stored 'both' or NULL (the default) — overrides only.
+  const providersWas = resolveAutoReviewProviders(existing.providers);
+  const providers = autoReviewProviders ?? providersWas;
   const next: AutoRow = {
+    providers: providers === 'both' ? 'both' : null,
     enabled: review.enabled,
     enabledAt: review.enabledAt,
     autoFixEnabled: fix,
@@ -406,6 +415,9 @@ export async function setWorkspaceAutoReview(
   }
   if (dailyCap !== undefined && capOverride !== existing.dailyCap) {
     set.autoReviewDailyCap = capOverride;
+  }
+  if (autoReviewProviders !== undefined && providers !== providersWas) {
+    set.autoReviewProviders = providers === 'both' ? 'both' : null;
   }
   if (autoPost !== undefined) {
     if (postAfter.enabled !== (existing.autoPostEnabled === true)) set.autoPostEnabled = postAfter.enabled;
@@ -444,6 +456,9 @@ function settingChanges(
   const isOn = next.enabled === true && toMs(next.enabledAt) != null;
   if ('autoReviewEnabled' in set && wasOn !== isOn) out.push(['auto_review', `Auto review ${onOff(isOn)}`]);
   if ('autoReviewDailyCap' in set) out.push(['auto_review', 'Auto review daily limit changed']);
+  if ('autoReviewProviders' in set) {
+    out.push(['auto_review', next.providers === 'both' ? 'Auto reviews use Claude + Codex' : 'Auto reviews use the default provider']);
+  }
   if ('autoDiagramsEnabled' in set) {
     out.push(['auto_review', `Design diagrams after each review ${onOff(next.autoDiagramsEnabled !== false)}`]);
   }
@@ -632,6 +647,7 @@ export function registerAutoReviewSettingsRoutes(app: FastifyInstance, ctx: Agen
             autoFixEnabled: { type: 'boolean' },
             autoDiagramsEnabled: { type: 'boolean' },
             teamClaimsEnabled: { type: 'boolean' },
+            autoReviewProviders: { type: 'string', enum: ['default', 'both'] },
             // An integer 1..500; anything else (a fraction, a string, out of range) is a 400.
             dailyCap: {
               type: 'integer',

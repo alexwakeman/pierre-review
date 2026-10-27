@@ -92,6 +92,7 @@ describe('the switch and its floor', () => {
       // Automatic design diagrams are ON by default (0126).
       autoDiagramsEnabled: true,
       teamClaimsEnabled: false,
+      autoReviewProviders: 'default',
       autoPost: { enabled: false, scope: 'mine', kinds: AUTO_POST_DEFAULT_KINDS, autoVerdict: false, autoResolve: false, approveImpact: AUTO_POST_DEFAULT_APPROVE_IMPACT },
       autoFix: { include: AUTO_FIX_DEFAULT_INCLUDE, autoPush: false },
     });

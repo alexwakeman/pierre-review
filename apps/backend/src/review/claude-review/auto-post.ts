@@ -84,7 +84,8 @@ import {
   markReviewPosted,
 } from './persist.js';
 import { resolveFindingBody } from './follow-up.js';
-import { aiRunProviderName, autoPostFooter, type AiProviderName } from '@pierre-review/shared';
+import { aiRunProviderName, autoPostFooter, PAIR_AUTO_POST_FOOTER, type AiProviderName } from '@pierre-review/shared';
+import { pairRaisedByLead, pairReviewBody, pairVerdict } from './pair.js';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 const s = (ctx: AgentContext): any => ctx.schema as any;
@@ -644,7 +645,9 @@ async function writeRecord(ctx: AgentContext, reviewId: number, rec: ClaudeAutoP
   await ctx.db.update(cr).set({ autoPost: rec }).where(eq(cr.id, reviewId)).execute();
 }
 
-const toPostFinding = (f: ClaudeFinding, by: AiProviderName): PostReviewFinding => ({
+// `inPair`: the comment rides a Claude + Codex pair's one review, so it opens by naming who raised it
+// (story findings are never auto-posted, so the lead slot is free).
+const toPostFinding = (f: ClaudeFinding, by: AiProviderName, inPair = false): PostReviewFinding => ({
   id: f.id,
   path: f.path,
   line: f.line,
@@ -653,7 +656,7 @@ const toPostFinding = (f: ClaudeFinding, by: AiProviderName): PostReviewFinding 
   fileInDiff: f.fileInDiff,
   body: resolveFindingBody(f),
   suggestion: f.suggestion,
-  storyLead: null,
+  storyLead: inPair ? pairRaisedByLead(by) : null,
   // The footer names the provider that ran the review (Claude's text unchanged).
   footer: autoPostFooter(by),
 });
@@ -667,12 +670,15 @@ export type AutoPostOutcome =
   | { kind: 'done'; record: ClaudeAutoPostRecord };
 
 /**
- * Auto-post ONE succeeded auto run. Called by the manager on success of an auto run only. Never
- * throws.
+ * Auto-post ONE succeeded auto run — or, with `pairFirstReviewId`, a CLAUDE + CODEX PAIR whose two
+ * halves both succeeded: ONE GitHub review holding both runs' findings (each comment names who raised
+ * it), one body naming both providers, one verdict over the union, claimed on the SECOND run's record
+ * (`reviewId`) with the first marked `viaPairReviewId`. Called by the manager when an auto run (or an
+ * auto pair) ends. Never throws.
  */
 export async function maybeAutoPostReview(
   ctx: AgentContext,
-  a: { accountId: number; prId: number; reviewId: number },
+  a: { accountId: number; prId: number; reviewId: number; pairFirstReviewId?: number | null },
   deps: AutoPostDeps = defaultAutoPostDeps,
   resolveDeps?: AutoResolveDeps,
 ): Promise<AutoPostOutcome> {
@@ -683,28 +689,39 @@ export async function maybeAutoPostReview(
     ctx.log.warn(`auto post review ${a.reviewId}: ${errText(err)}`);
     out = { kind: 'not_found' };
   }
-  // AUTO RESOLVE rides the same switch-board and runs whatever the post did (a run with nothing new
-  // to post is exactly the one whose follow-up found the earlier comments fixed). Never throws.
-  try {
-    const { maybeAutoResolveFindings } = await import('./auto-resolve.js');
-    await maybeAutoResolveFindings(ctx, a, deps, resolveDeps);
-  } catch (err) {
-    ctx.log.warn(`auto resolve review ${a.reviewId}: ${errText(err)}`);
-  }
-  // AUTO PUSHBACK (./auto-pushback.ts): one reply per thread, ever, where this run disagreed with a
-  // person's reply on Limn's own finding. Rides the auto-post switch alone. Never throws.
-  try {
-    const { maybeAutoPushback } = await import('./auto-pushback.js');
-    await maybeAutoPushback(ctx, a, deps, resolveDeps);
-  } catch (err) {
-    ctx.log.warn(`auto pushback review ${a.reviewId}: ${errText(err)}`);
+  // A pair: each half's own follow-up judged its own provider's earlier findings, so resolve and
+  // pushback run for both halves, first then second (each claims per thread, so nothing doubles).
+  const runs = a.pairFirstReviewId != null ? [a.pairFirstReviewId, a.reviewId] : [a.reviewId];
+  for (const reviewId of runs) {
+    const one = { accountId: a.accountId, prId: a.prId, reviewId };
+    // AUTO RESOLVE rides the same switch-board and runs whatever the post did (a run with nothing new
+    // to post is exactly the one whose follow-up found the earlier comments fixed). Never throws.
+    try {
+      const { maybeAutoResolveFindings } = await import('./auto-resolve.js');
+      await maybeAutoResolveFindings(ctx, one, deps, resolveDeps);
+    } catch (err) {
+      ctx.log.warn(`auto resolve review ${reviewId}: ${errText(err)}`);
+    }
+    // AUTO PUSHBACK (./auto-pushback.ts): one reply per thread, ever, where this run disagreed with a
+    // person's reply on Limn's own finding. Rides the auto-post switch alone. Never throws.
+    try {
+      const { maybeAutoPushback } = await import('./auto-pushback.js');
+      await maybeAutoPushback(ctx, one, deps, resolveDeps);
+    } catch (err) {
+      ctx.log.warn(`auto pushback review ${reviewId}: ${errText(err)}`);
+    }
   }
   return out;
 }
 
 async function autoPostReview(
   ctx: AgentContext,
-  { accountId, prId, reviewId }: { accountId: number; prId: number; reviewId: number },
+  {
+    accountId,
+    prId,
+    reviewId,
+    pairFirstReviewId,
+  }: { accountId: number; prId: number; reviewId: number; pairFirstReviewId?: number | null },
   deps: AutoPostDeps,
 ): Promise<AutoPostOutcome> {
   const ws = await readWorkspaceAutoPostForPr(ctx, accountId, prId);
@@ -714,6 +731,32 @@ async function autoPostReview(
   // AUTO runs only — a review a person started keeps the Post button.
   if (review.trigger !== 'auto') return { kind: 'off' };
   if (review.autoPost != null) return { kind: 'already_claimed' };
+  // THE PAIR'S FIRST HALF, when it is usable: the same PR and head, an auto run that succeeded and
+  // that nothing has claimed. Otherwise this run posts alone.
+  let first: ClaudeReview | null = null;
+  if (pairFirstReviewId != null && pairFirstReviewId !== reviewId) {
+    const f = await getClaudeReviewById(ctx, pairFirstReviewId, accountId);
+    if (
+      f != null &&
+      f.prId === prId &&
+      f.headSha === review.headSha &&
+      f.status === 'succeeded' &&
+      f.trigger === 'auto' &&
+      f.autoPost == null
+    ) {
+      first = f;
+    }
+  }
+  const runs: ClaudeReview[] = first ? [first, review] : [review];
+  const byOf = new Map<number, AiProviderName>();
+  for (const r of runs) for (const f of r.findings) byOf.set(f.id, aiRunProviderName(r));
+  const allFindings = runs.flatMap((r) => r.findings);
+  // The run's verdict as `autoVerdictFor` reads it: a pair's is both runs' together.
+  const runVerdict = first ? pairVerdict(first.verdict, review.verdict) : review.verdict;
+  // Claim the FIRST half as posted in this pair's review (compare-and-set from NULL): false ⇒ some
+  // other writer has it, and its findings leave this post.
+  const claimFirst = async (rec: ClaudeAutoPostRecord): Promise<boolean> =>
+    first != null && (await claimRun(ctx, first.id, { ...rec, viaPairReviewId: reviewId }));
 
   let verdict: ClaudeAutoVerdictRecord | null = null;
   const withVerdict = (): Partial<ClaudeAutoPostRecord> => (verdict != null ? { verdict } : {});
@@ -729,7 +772,9 @@ async function autoPostReview(
       ...(alreadyPostedFindingIds != null ? { alreadyPostedFindingIds } : {}),
       ...withVerdict(),
     };
-    return (await claimRun(ctx, reviewId, rec)) ? { kind: 'skipped', reason } : { kind: 'already_claimed' };
+    if (!(await claimRun(ctx, reviewId, rec))) return { kind: 'already_claimed' };
+    await claimFirst(rec);
+    return { kind: 'skipped', reason };
   };
 
   const facts = await readAutoPostPrFacts(ctx, deps, accountId, ws.workspaceId, prId);
@@ -737,19 +782,22 @@ async function autoPostReview(
   const notEligible = autoPostEligibility(facts, ws.settings.scope);
   if (notEligible) return skip(notEligible);
 
-  const earlier = await loadEarlierFindings(ctx, accountId, prId, reviewId);
-  const picked = selectFindingsToPost(review.findings, ws.settings.kinds, earlier);
+  // A pair's earlier findings are those before its FIRST half (the second's repeats of the first were
+  // dropped when it ran, and the first's findings are not on GitHub yet).
+  const earlier = await loadEarlierFindings(ctx, accountId, prId, runs[0]!.id);
+  const picked = selectFindingsToPost(allFindings, ws.settings.kinds, earlier);
   const nothingReason = (): [AutoPostSkipReason, number[] | undefined] =>
     picked.alreadyPosted.length > 0 ? ['already_posted', picked.alreadyPosted.map((f) => f.id)] : ['nothing_new', undefined];
-  const wanted: AutoVerdictEvent | null = ws.settings.autoVerdict ? autoVerdictFor(review.verdict, review.findings) : null;
+  const wanted: AutoVerdictEvent | null = ws.settings.autoVerdict ? autoVerdictFor(runVerdict, allFindings) : null;
   if (wanted != null && wanted === 'COMMENT') verdict = verdictGate('COMMENT', { authorIsMe: facts.authorIsMe, ownLatest: 'none' });
   // LIFTING LIMN'S OWN BLOCK: a run with NO blocker (whatever the auto-verdict switch says now) may
   // withdraw an earlier AUTOMATIC request for changes of Limn's that still stands. A DB pre-check
   // first, so an ordinary run costs no extra GitHub read.
-  const noBlocker = autoVerdictFor(review.verdict, review.findings) !== 'REQUEST_CHANGES';
+  const noBlocker = autoVerdictFor(runVerdict, allFindings) !== 'REQUEST_CHANGES';
   // ⚠ "No blocker" from this run's OWN findings is not enough to lift: an earlier blocker the run
-  // did not judge (a 'not_checked' follow-up) is still open as far as anyone knows.
-  const unjudgedBlockers = unsettledEarlierBlockers(review);
+  // did not judge (a 'not_checked' follow-up) is still open as far as anyone knows. (A pair: either
+  // half's.)
+  const unjudgedBlockers = runs.flatMap((r) => unsettledEarlierBlockers(r));
   // (Read for a REQUEST_CHANGES too: the gate must tell Limn's own standing block from a person's.)
   const limnBlockIds = !facts.authorIsMe ? await loadLimnAutoBlockIds(ctx, accountId, prId, reviewId) : new Set<string>();
   const mayLift = noBlocker && unjudgedBlockers.length === 0 && limnBlockIds.size > 0;
@@ -832,10 +880,20 @@ async function autoPostReview(
   };
   if (live.headSha !== pctx.reviewHeadSha) {
     const rec = { ...record, status: 'failed' as const, findingIds: [], error: 'The PR changed since this review.' };
-    return (await claimRun(ctx, reviewId, rec)) ? { kind: 'done', record: rec } : { kind: 'already_claimed' };
+    if (!(await claimRun(ctx, reviewId, rec))) return { kind: 'already_claimed' };
+    await claimFirst(rec);
+    return { kind: 'done', record: rec };
   }
-  // ⚠ THE CLAIM, BEFORE ANY WRITE.
+  // ⚠ THE CLAIM, BEFORE ANY WRITE — on THIS run, then (a pair) on its first half. A first half
+  // someone else claimed meanwhile keeps its findings out of this post.
   if (!(await claimRun(ctx, reviewId, record))) return { kind: 'already_claimed' };
+  if (first != null && !(await claimFirst(record))) {
+    const firstIds = new Set(first.findings.map((f) => f.id));
+    picked.toPost = picked.toPost.filter((f) => !firstIds.has(f.id));
+    record.findingIds = picked.toPost.map((f) => f.id);
+    first = null;
+  }
+  const pairFirst: ClaudeReview | null = first;
 
   const posted = new Set<number>();
   const errors: string[] = [];
@@ -846,11 +904,24 @@ async function autoPostReview(
       name: pctx.name,
       prNumber: pctx.prNumber,
       reviewHeadSha: pctx.reviewHeadSha,
-      body: autoReviewBody(review.summary, picked.toPost.length, aiRunProviderName(review)),
+      body:
+        pairFirst != null
+          ? pairReviewBody(
+              [pairFirst, review].map((r) => {
+                const mine = new Set(r.findings.map((x) => x.id));
+                const n = picked.toPost.filter((f) => mine.has(f.id)).length;
+                return { by: aiRunProviderName(r), text: autoReviewBodyLead(r.summary, n, aiRunProviderName(r)) };
+              }),
+              PAIR_AUTO_POST_FOOTER,
+            )
+          : autoReviewBody(review.summary, picked.toPost.length, aiRunProviderName(review)),
       // COMMENT unless auto verdict is on AND its gate let the verdict through.
       verdict: ev,
-      // Questions ride the same review: the seam anchors each inline, else falls back.
-      includedFindings: picked.toPost.map((f) => toPostFinding(f, aiRunProviderName(review))),
+      // Questions ride the same review: the seam anchors each inline, else falls back. In a pair each
+      // comment carries its own provider's footer and names who raised it.
+      includedFindings: picked.toPost.map((f) =>
+        toPostFinding(f, byOf.get(f.id) ?? aiRunProviderName(review), pairFirst != null),
+      ),
       dryRun: false,
     });
 
@@ -887,10 +958,19 @@ async function autoPostReview(
         record.githubReviewId = outcome.postedReviewId;
         for (const id of outcome.inlineFindingIds) posted.add(id);
         for (const pc of outcome.prComments) posted.add(pc.findingId);
-        await markReviewPosted(ctx, reviewId, outcome.postedReviewId, outcome.inlineFindingIds, outcome.prComments, {
-          auto: true,
-          inlineComments: outcome.inlineComments,
-        }).catch((err) => ctx.log.warn(`auto post review ${reviewId}: could not record the post: ${errText(err)}`));
+        // Each run stamps its own findings (a pair: both halves, one GitHub review).
+        for (const r of pairFirst != null ? [pairFirst, review] : [review]) {
+          const mine = new Set(r.findings.map((f) => f.id));
+          const postedId = outcome.postedReviewId;
+          await markReviewPosted(
+            ctx,
+            r.id,
+            postedId,
+            outcome.inlineFindingIds.filter((id) => mine.has(id)),
+            outcome.prComments.filter((pc) => mine.has(pc.findingId)),
+            { auto: true, inlineComments: (outcome.inlineComments ?? []).filter((c) => mine.has(c.findingId)) },
+          ).catch((err) => ctx.log.warn(`auto post review ${r.id}: could not record the post: ${errText(err)}`));
+        }
         if (picked.toPost.some((f) => !posted.has(f.id))) errors.push('Some comments could not be posted.');
       }
     } catch (err) {
@@ -947,6 +1027,11 @@ async function autoPostReview(
   await writeRecord(ctx, reviewId, final).catch((err) =>
     ctx.log.warn(`auto post review ${reviewId}: could not record the result: ${errText(err)}`),
   );
+  if (pairFirst != null) {
+    await writeRecord(ctx, pairFirst.id, { ...final, viaPairReviewId: reviewId }).catch((err) =>
+      ctx.log.warn(`auto post review ${pairFirst.id}: could not record the result: ${errText(err)}`),
+    );
+  }
   if (landed || dismissed) {
     await deps.settle({ accountId, prId, log: ctx.log }).catch(() => ({ visible: false }));
   }

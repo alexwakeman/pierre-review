@@ -15,6 +15,7 @@ import type {
   ClaudeReviewHeadState,
   ClaudeReviewListItem,
   ClaudeReviewModel,
+  ClaudeReviewPairInfo,
   ClaudeReviewPrState,
   ClaudeReviewScope,
   ClaudeReviewStateSummary,
@@ -183,6 +184,38 @@ interface ReviewRow {
   peersRead?: unknown;
   // What the team claim did (migration 0134). NULL = no claim attempted.
   teamClaim?: unknown;
+  // A Claude + Codex pair (migration 0135). NULL on every ordinary run.
+  pairId?: number | null;
+  pairRole?: string | null;
+  pairDropped?: number | null;
+}
+
+/** The stored pair columns → the wire, given the other half's id (null when not started). */
+export function pairInfoOf(
+  r: Pick<ReviewRow, 'id' | 'pairId' | 'pairRole' | 'pairDropped'>,
+  otherReviewId: number | null,
+): ClaudeReviewPairInfo | null {
+  if (r.pairId == null || (r.pairRole !== 'first' && r.pairRole !== 'second')) return null;
+  return {
+    pairId: r.pairId,
+    role: r.pairRole,
+    otherReviewId,
+    ...(r.pairRole === 'second' ? { dropped: r.pairDropped ?? null } : {}),
+  };
+}
+
+/** The other half of each paired row among `rows` (all of one PR), by row id. */
+function pairPartners(rows: ReadonlyArray<Pick<ReviewRow, 'id' | 'pairId' | 'pairRole'>>): Map<number, number> {
+  const second = new Map<number, number>();
+  for (const r of rows) if (r.pairRole === 'second' && r.pairId != null) second.set(r.pairId, r.id);
+  const out = new Map<number, number>();
+  for (const r of rows) {
+    if (r.pairRole === 'first') {
+      const other = second.get(r.id);
+      if (other != null) out.set(r.id, other);
+    } else if (r.pairRole === 'second' && r.pairId != null) out.set(r.id, r.pairId);
+  }
+  return out;
 }
 
 /** The stored auto-post record → the wire (ids dropped). null for anything malformed. */
@@ -201,6 +234,7 @@ export function autoPostWireOf(v: unknown): ClaudeAutoPostWire | null {
       : {}),
     ...(r.verdict != null && typeof r.verdict === 'object' ? { verdict: r.verdict } : {}),
     ...(r.liftedBlock != null && typeof r.liftedBlock === 'object' ? { liftedBlock: r.liftedBlock } : {}),
+    ...(typeof r.viaPairReviewId === 'number' ? { viaPairReviewId: r.viaPairReviewId } : {}),
   };
 }
 
@@ -331,6 +365,7 @@ function mapReview(
   head: ClaudeReviewHeadState | null = null,
   threadIds?: ReadonlyMap<number, number>,
   earlier?: ReadonlyMap<number, ClaudeFindingEarlierPost>,
+  pairOther: number | null = null,
 ): ClaudeReview {
   const tickets = ticketEntriesOf(r.ticket, r.ticketAssessment);
   return {
@@ -380,6 +415,7 @@ function mapReview(
     autoPost: autoPostWireOf(r.autoPost),
     docReferences: reviewDocReferencesFromStored(r.docReferences),
     alsoRead: peersReadFromStored(r.peersRead),
+    ...(r.pairId != null ? { pair: pairInfoOf(r, pairOther) } : {}),
     teamClaim: teamClaimRecordOf(r.teamClaim),
   };
 }
@@ -460,10 +496,23 @@ export async function getClaudeReviewById(
     return new Map<number, ClaudeFindingEarlierPost>();
   });
   const threadIds = await postedFindingThreadIds(ctx, row.prId, accountId, findings);
-  const review = mapReview(row, findings, head, threadIds, earlier);
+  const review = mapReview(row, findings, head, threadIds, earlier, row.pairId != null ? await pairOtherOf(ctx, row) : null);
   if (review.followUp) review.followUp = await withThreadState(ctx, row.prId, review.followUp);
   if (row.status === 'succeeded') review.settledEarlier = await settledEarlierFor(ctx, row.prId, accountId, row.id, review.followUp ?? null);
   return review;
+}
+
+/** The other half of a paired run (same PR), or null when it has not started. */
+async function pairOtherOf(ctx: AgentContext, row: Pick<ReviewRow, 'id' | 'prId' | 'pairId' | 'pairRole'>): Promise<number | null> {
+  if (row.pairRole === 'second') return row.pairId ?? null;
+  const { cr } = tables(ctx);
+  const rows = (await ctx.db
+    .select({ id: cr.id })
+    .from(cr)
+    .where(and(eq(cr.prId, row.prId), eq(cr.pairId, row.id), eq(cr.pairRole, 'second')))
+    .limit(1)
+    .execute()) as Array<{ id: number }>;
+  return rows[0]?.id ?? null;
 }
 
 /**
@@ -841,7 +890,12 @@ export async function listClaudeReviewHistory(
       .execute()) as Array<{ reviewId: number; n: number }>;
     for (const t of tally) counts.set(t.reviewId, Number(t.n));
   }
-  return rows.map(({ review }) => ({ ...summaryOf(review), findingCount: counts.get(review.id) ?? 0 }));
+  const partners = pairPartners(rows.map((r) => r.review));
+  return rows.map(({ review }) => ({
+    ...summaryOf(review),
+    findingCount: counts.get(review.id) ?? 0,
+    ...(review.pairId != null ? { pair: pairInfoOf(review, partners.get(review.id) ?? null) } : {}),
+  }));
 }
 
 // The window that scopes the cross-PR list (mirrors the core backfill default of 90d).
@@ -1759,6 +1813,9 @@ export async function insertQueuedReview(
   provider?: 'claude' | 'codex' | null,
   // TRAILING: a FROM-SCRATCH run (manager.ts QueueItem.fresh). Stored true; otherwise NULL.
   fresh = false,
+  // TRAILING: one half of a Claude + Codex pair. The FIRST half's `pair_id` is its own id (written
+  // right after the insert); the second names the first.
+  pair: { role: 'first' } | { role: 'second'; pairId: number } | null = null,
 ): Promise<number> {
   const { cr } = tables(ctx);
   // Labelled by the provider it is expected to run on from the start (a queued Codex run never shows
@@ -1776,10 +1833,13 @@ export async function insertQueuedReview(
       ticket: tickets.length > 0 ? [...tickets] : null,
       trigger,
       ...(fresh ? { fresh: true } : {}),
+      ...(pair ? { pairRole: pair.role, pairId: pair.role === 'second' ? pair.pairId : null } : {}),
     })
     .returning({ id: cr.id })
     .execute()) as Array<{ id: number }>;
-  return rows[0]!.id;
+  const id = rows[0]!.id;
+  if (pair?.role === 'first') await ctx.db.update(cr).set({ pairId: id }).where(eq(cr.id, id)).execute();
+  return id;
 }
 
 /**
@@ -1868,6 +1928,8 @@ export interface ReviewSuccessData {
   // story_* columns stay NULL on every new run. Old rows keep theirs as read-only history.)
   // Other reviewers' open threads, judged. null/absent ⇒ none assessed (stored NULL).
   threadAssessments?: ClaudeThreadAssessment[] | null;
+  // The SECOND half of a pair: how many of its findings repeated the first's and were dropped.
+  pairDropped?: number | null;
   // The head's CI and each failing check, diagnosed. null/absent ⇒ CI not looked at (stored NULL).
   ciFailures?: ClaudeCiFailuresRecord | null;
 }
@@ -1899,6 +1961,7 @@ export async function saveReviewSuccess(
         threadAssessments: data.threadAssessments ?? null,
         ciFailures: data.ciFailures ?? null,
         docReferences: data.docReferences ?? null,
+        ...(data.pairDropped != null ? { pairDropped: data.pairDropped } : {}),
         finishedAt: new Date(),
       })
       .where(eq(cr.id, id))

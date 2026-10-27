@@ -4340,6 +4340,8 @@ export interface SetWorkspaceAutoReviewBody {
   autoFixEnabled?: boolean;
   // The automatic design-diagram switch (`WorkspaceAutoReviewSettings.autoDiagramsEnabled`).
   autoDiagramsEnabled?: boolean;
+  // Who runs auto reviews (`WorkspaceAutoReviewSettings.autoReviewProviders`).
+  autoReviewProviders?: AutoReviewProviders;
   // The daily cap (`WorkspaceAutoReviewSettings.dailyCap`): an integer 1..500, else a 400.
   dailyCap?: number;
   // "Mark auto reviews on GitHub" (`WorkspaceAutoReviewSettings.teamClaimsEnabled`).
@@ -4388,6 +4390,10 @@ export interface WorkspaceAutoReviewSettings {
   // diagrams). ON by default (anything but a stored false reads ON); independent of `enabled`. Off
   // stops only the automatic draw — the Draw / Redraw button still works.
   autoDiagramsEnabled: boolean;
+  // WHO RUNS AUTO REVIEWS (`workspaces.auto_review_providers`, migration 0135): 'default' = the
+  // default provider (Settings → AI); 'both' = Claude, then Codex, as one PAIR (docs/CLAUDE-REVIEW.md
+  // § Claude + Codex). With 'both' and only one provider signed in when a run starts, that one runs.
+  autoReviewProviders: AutoReviewProviders;
   // What an auto fix always includes, and whether a succeeded one is pushed
   // (`workspaces.auto_fix_settings`, migration 0091 / pg 0078, OVERRIDES ONLY). Always a full
   // resolved value — `resolveAutoFixSettings` (auto-settings.ts) is the ONE fold.
@@ -4402,6 +4408,9 @@ export interface WorkspaceAutoReviewSettings {
   // default (only a stored true is on). Needs write access to the repo. Absent on older servers.
   teamClaimsEnabled?: boolean;
 }
+
+// Who runs a workspace's auto reviews: the default provider, or Claude then Codex as one pair.
+export type AutoReviewProviders = 'default' | 'both';
 
 // WHICH PRs auto-posting may post on:
 //   'mine' (default)  PRs you opened, and PRs where you are (or were) asked to review — a review
@@ -4591,6 +4600,9 @@ export interface ClaudeAutoPostRecord {
   verdict?: ClaudeAutoVerdictRecord | null;
   // Set when this run lifted Limn's OWN earlier automatic REQUEST_CHANGES (absent otherwise).
   liftedBlock?: ClaudeAutoLiftRecord | null;
+  // A CLAUDE + CODEX PAIR posts ONE review for both runs, claimed on the SECOND run's record. The
+  // first run's record names the second here (its findings went out in that review); absent otherwise.
+  viaPairReviewId?: number | null;
 }
 // Limn lifting its own earlier AUTOMATIC request for changes (matched by an earlier run's
 // `githubReviewId`, never by marker) on a run with no blocker: 'superseded' (this run's APPROVE
@@ -4623,6 +4635,8 @@ export interface ClaudeAutoPostWire {
   alreadyPostedCount?: number;
   verdict?: ClaudeAutoVerdictRecord | null;
   liftedBlock?: ClaudeAutoLiftRecord | null;
+  // Posted in the pair's one review, recorded on this run (see ClaudeAutoPostRecord.viaPairReviewId).
+  viaPairReviewId?: number | null;
 }
 
 // What CI auto-posting did with ONE auto CI review run (`ci_reviews.auto_post`, migration 0091 /
@@ -7117,6 +7131,20 @@ export interface ClaudeReview {
   // What the TEAM CLAIM did for this run (an auto run with "Mark auto reviews on GitHub" on).
   // null/absent = no claim was attempted.
   teamClaim?: ClaudeTeamClaimRecord | null;
+  // A CLAUDE + CODEX PAIR (migration 0135): this run is one half. Absent on an ordinary run.
+  pair?: ClaudeReviewPairInfo | null;
+}
+
+// One half of a Claude + Codex pair (docs/CLAUDE-REVIEW.md § Claude + Codex). The first run (Claude)
+// runs, then the second (Codex) with the first's findings as "already raised"; findings the second
+// repeated anyway are dropped in code (`dropped`, second run only, null until it succeeds).
+export interface ClaudeReviewPairInfo {
+  // The FIRST run's id, on both halves.
+  pairId: number;
+  role: 'first' | 'second';
+  // The other half's run id; null while the second has not started (or never will).
+  otherReviewId: number | null;
+  dropped?: number | null;
 }
 
 // The reviewed commit against the PR's current head (the SYNCED head — DB-only, no GitHub call).
@@ -7163,6 +7191,8 @@ export interface ClaudeReviewSummary {
   // How many findings the run stored (the history list's count; meaningful once it succeeded).
   // Optional: an older server omits it and the list shows no count.
   findingCount?: number;
+  // One half of a Claude + Codex pair (see ClaudeReview.pair). Absent on an ordinary run.
+  pair?: ClaudeReviewPairInfo | null;
 }
 
 // One entry in the cross-PR "prior Claude reviews" list (GET /api/claude-reviews):
@@ -7372,6 +7402,8 @@ export interface ClaudeReviewStatusResponse {
   progress: ClaudeReviewProgress | null;
   // Who started the in-flight run (running / queued only). Absent on older servers.
   trigger?: ClaudeReviewTrigger;
+  // The in-flight run is one half of a Claude + Codex pair: which one, and who runs it.
+  pair?: { role: 'first' | 'second'; provider: AiProviderId } | null;
 }
 
 // Server-Sent-Events payload streamed by GET /api/prs/:id/claude-review/stream.
@@ -7448,6 +7480,10 @@ export interface GenerateReviewBody {
   // threads are still shown and judged afresh). Stored on the run (`ClaudeReview.fresh`). Boolean
   // only; anything else is a 400. Omitted / false ⇒ an ordinary run. Auto review never sets it.
   fresh?: boolean;
+  // true ⇒ a CLAUDE + CODEX PAIR: Claude (its default review model) first, then Codex (its model of
+  // the same depth) with Claude's findings as already raised. Both must be signed in and able to
+  // review, else a 400. `model` and `provider` are ignored. Boolean only.
+  pair?: boolean;
   // (No depth: the router always decides. A stale `mode` key is stripped by the route schema.)
   // (No stories either: a PR review checks none — the ticket review does, StartTicketReviewBody.
   // A stale `ticket`/`tickets` key is stripped by the route schema.)

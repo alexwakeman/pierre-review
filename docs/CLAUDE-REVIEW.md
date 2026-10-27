@@ -443,6 +443,74 @@ I would pick a preference for auto-review in settings."
   (`followUpProvider`): the review chat on its review, another Plan-first pass and the build of a plan
   on the plan's provider. The SPA's gates and wording follow the same rule (`useFollowUpProvider`).
 
+### Claude + Codex (decided 2026-10-27)
+
+The user asked: "allow me to run reviews with BOTH codex and Claude if they're both available … they
+must not duplicate. They can run sequentially with … Claude running first so one can feed into the next
+to dedupe results." Code: `review/claude-review/pair.ts` (the pure half), `manager.ts` (the sequence),
+`auto-post.ts` (the one post); migration `0135`.
+
+- **Where it is offered.** MANUAL: the AI Review menu lists "Claude + Codex" last, only while BOTH
+  providers can review (`lib/modelPick.ts` `resolveReviewModelPick`); the request is
+  `GenerateReviewBody.pair: true` (`model` / `provider` ignored; `400 PairUnavailable` unless both can
+  review). AUTO: Settings → Workspace → Auto review → **Auto reviews use: <default> / Claude + Codex**
+  (`workspaces.auto_review_providers`, `WorkspaceAutoReviewSettings.autoReviewProviders`, the one
+  writer `setWorkspaceAutoReview`); the option is disabled with "Claude + Codex needs both signed in."
+  while one is not. With `'both'` and only one provider able to review when a run STARTS, that one runs
+  alone (an ordinary run, no pair).
+- **TWO ORDINARY RUNS, LINKED.** Each half is its own `claude_reviews` row with its own label
+  (`aiRunLabel`), its own provider's follow-up chain and thread carry, its own ledger row and its own
+  budget reading — nothing about a run changes because it is half of a pair. They are linked by
+  `pair_id` (the first half's id, on both) and `pair_role`; the wire carries `pair: {pairId, role,
+  otherReviewId, dropped?}`. The providers are resolved ONCE, when the pair starts (`pairProvidersReady`):
+  Claude first (`DEFAULT_CLAUDE_REVIEW_MODEL`), Codex second (the same depth: Sol).
+- **SEQUENTIAL.** The second half starts only after the first ENDS — succeeded, failed or stopped
+  (`startPairSecond`, from the first's `finally`). Between the halves the PR's claim and the slot are
+  held (`startingPair`), so nothing slips in, and the status stays `running`. A first half that failed
+  or was stopped still hands over (the second runs without pair input); a second half that fails leaves
+  the first's results standing. To stop the whole pair, stop each half (a queued pair is cancelled
+  whole). An AUTO pair asks the spend budget again before its second half (`automaticRunAllowed`; a
+  reader's press is not asked) and ends on the first half when over.
+- **THE SECOND HALF IS SHOWN THE FIRST'S FINDINGS** — title, `path:line`, severity, a short body
+  (`PAIR_SHOWN_MAX` 40, `PAIR_BODY_CHARS` 400), each in a nonce fence as untrusted data, under "Already
+  raised by Claude in this review": do not repeat them; confirm or dispute one only with evidence Claude
+  missed; spend the effort on what Claude did not cover (`prompts.ts` `pushPairSection`, added through
+  the prompt seam — with no pair input the prompt is byte-identical, so `prompt-golden.json` is
+  unchanged; the block names no tool, so Codex needs no wording swap).
+- ⚠ **DEDUPED IN CODE TOO.** After the second half, any finding that repeats a first-half finding —
+  same file, lines within `PAIR_LINE_SLACK` (5) or either one file-level, and `similarTitles` (the
+  settled-by-reply identity) — is dropped (`dropPairRepeats`); the count is stored on the second half
+  (`pair_dropped`).
+- **ONE GITHUB POST FOR AN AUTO PAIR.** Nothing posts after the first half. When the pair ends:
+  both succeeded ⇒ `maybeAutoPostReview({reviewId: second, pairFirstReviewId: first})` sends ONE review
+  holding both halves' findings (each comment opens `_Raised by Claude._` / `_Raised by Codex._` and
+  carries its own provider's footer), ONE body (`**Claude:** <lead>` / `**Codex:** <lead>` and
+  `PAIR_AUTO_POST_FOOTER`, listed in `AUTO_POST_FOOTERS`), ONE verdict over the UNION
+  (`autoVerdictFor(pairVerdict(a, b), both runs' findings)`: APPROVE only when both approved and
+  neither left a blocker or warning). ⚠ THE CLAIM covers the pair: compare-and-set on the SECOND half's
+  `auto_post`, then on the first's (its record names the second, `viaPairReviewId`) — both BEFORE any
+  write; a first half someone else claimed keeps its findings out; a failure is recorded on both and
+  never retried. Only one half succeeded ⇒ that half posts alone, as any auto run. Auto resolve and
+  pushback run for both halves (each claims per thread). The Slack signal, Sonar post, auto fix and
+  design diagrams run ONCE, at the pair's end, on the second half when it succeeded, else the first.
+  (Auto fix is seeded by that one half's findings.)
+- **MANUAL: "Post both".** The Post to GitHub section of the latest run (the second half) offers "Post
+  both" beside Post when both halves succeeded (`lib/reviewHistory.ts` `canPostBoth`) →
+  `POST /api/claude-reviews/:reviewId/post-pair`: the same one-review shape, the body from each half's
+  draft (a half nobody drafted reads as its summary's first sentence), the reader's verdict. Posting
+  one half alone stays possible: Post on the second, and the first half's findings one by one (shown
+  from the history, it is editable as the latest's partner).
+- **On screen.** The history groups the pair under one "Claude + Codex" header, first then second, the
+  second marked "after Claude" (`groupReviewHistory`); every run is still listed. The progress line
+  says which half runs ("Running Claude review, then Codex" / "Running Codex review, after Claude";
+  `ClaudeReviewStatusResponse.pair`).
+- **Auto review's rules hold, per head.** A pair is one unit: any succeeded half settles the head
+  ("re-reviews once per new HEAD"), the lane holds the PR from the first half's start to the second's
+  end. Retries keep the existing rules unchanged and per row: the latest row at the head is the second
+  half, so only when BOTH halves failed is the pair retried (as a pair again, by the workspace setting);
+  each half's row counts towards `AUTO_RETRY_MAX_ATTEMPTS` (3), so a failed pair leaves one retry; the
+  "default provider changed" and usage-reset tests read the second half's provider and error.
+
 ### The effort setting (decided 2026-10-26)
 
 The user compared Opus 5.5 (pinned at medium, 30 turns) with Codex GPT-6 Astra (high) on one PR and
@@ -2017,7 +2085,7 @@ auto-review switch, with an ⓘ). Code: `review/claude-review/team-claim.ts` (th
 
 ## The Slack "Claude Review ran" signal
 
-When a run SUCCEEDS — manual or auto — `manager.ts`'s `launch` calls core
+(A Claude + Codex pair announces ONCE, at its end — § Claude + Codex.) When a run SUCCEEDS — manual or auto — `manager.ts`'s `launch` calls core
 `emitClaudeReviewCompleted({ accountId, prId, reviewId, trigger })` (`platform/event-hooks.ts`):
 fire-and-forget, after the run is stored, never thrown into the review. Failed and cancelled runs
 emit nothing. The platform decides the rest: ⚠ **AUTO runs only** — a manual run (event or stored

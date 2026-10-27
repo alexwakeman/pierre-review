@@ -20,6 +20,7 @@ import type {
   UpdateReviewBody,
 } from '@pierre-review/shared';
 import {
+  aiRunProviderName,
   AI_PICKER_MODELS,
   CLAUDE_REVIEW_STATES_MAX_IDS,
   DEFAULT_CLAUDE_REVIEW_MODEL,
@@ -30,7 +31,7 @@ import {
 import type { AgentContext } from '../agent-context.js';
 import { anyProviderPreflight, preflightFor, resolveManualRunChoice } from '../../ai/run-choice.js';
 import { autoReviewWaiting } from './auto.js';
-import { isAutoPostingNow } from './auto-post.js';
+import { autoReviewBodyLead, isAutoPostingNow } from './auto-post.js';
 import { autoFixOutcomeFor } from '../../coding/ai-fix/auto-fix.js';
 import { isFixRunning } from '../../coding/ai-fix/manager.js';
 import {
@@ -63,6 +64,7 @@ import { currentThreadAssessmentsForPrs, getThreadJudgements } from './thread-ju
 import { getLatestThreadCheck, threadCheckWire } from './thread-check-persist.js';
 import { findingCommentUrl, reminderLead } from './posted-state.js';
 import { clearTeamClaim, teamClaimPendingFor, teamClaimSkipFor, teamClaimSkipsFor } from './team-claim.js';
+import { pairProvidersReady, pairRaisedByLead, pairReviewBody } from './pair.js';
 
 // The Claude Review product API (CORE, free, LOCAL ONLY). The paths are the historical ones
 // (/api/prs/:id/claude-review*, /api/claude-reviews/*, /api/claude-findings/*,
@@ -108,6 +110,8 @@ const generateSchema = {
       // A from-scratch run. Checked on the RAW body in `preValidation` (the validator coerces
       // `"true"` / 1 to a boolean, and only a real JSON boolean is accepted).
       fresh: { type: 'boolean' },
+      // A Claude + Codex pair (pair.ts). Raw-checked the same way.
+      pair: { type: 'boolean' },
       // No `ticket`/`tickets`: a PR review checks no story (the ticket review does, `POST
       // /api/ticket-reviews`). Fastify's ajv runs with `removeAdditional`, so a stale key from an
       // older SPA is stripped, exactly like the retired `mode`.
@@ -320,6 +324,10 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
           reply.status(400);
           return reply.send({ error: 'BadRequest', message: '`fresh` must be true or false.' });
         }
+        if (raw != null && typeof raw === 'object' && 'pair' in raw && typeof raw.pair !== 'boolean') {
+          reply.status(400);
+          return reply.send({ error: 'BadRequest', message: '`pair` must be true or false.' });
+        }
       },
     },
     async (req, reply) => {
@@ -327,11 +335,20 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
       const body = (req.body ?? {}) as GenerateReviewBody;
       if (!AGENTIC_AI_ENABLED) return featureOff(reply);
 
+      // CLAUDE + CODEX (pair.ts): both must be able to review now; `model` / `provider` are ignored —
+      // Claude's default review model first, then Codex's of the same depth.
+      const pair = body.pair === true;
+      if (pair && pairProvidersReady(preflightFor(ctx)).length < 2) {
+        reply.status(400);
+        return { error: 'PairUnavailable', message: 'Claude + Codex needs both signed in.' };
+      }
       // THE PER-RUN CHOICE: the provider named (or the default), the model on it, and its sign-in.
-      const choice = resolveManualRunChoice(body, 'review', {
-        defaultModel: DEFAULT_CLAUDE_REVIEW_MODEL,
-        detect: preflightFor(ctx),
-      });
+      const choice = pair
+        ? ({ ok: true, provider: 'claude', model: DEFAULT_CLAUDE_REVIEW_MODEL } as const)
+        : resolveManualRunChoice(body, 'review', {
+            defaultModel: DEFAULT_CLAUDE_REVIEW_MODEL,
+            detect: preflightFor(ctx),
+          });
       if (!choice.ok) {
         reply.status(400);
         return { error: choice.error, message: choice.message };
@@ -341,6 +358,7 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
       // A FROM-SCRATCH run reads no earlier review (manager.ts QueueItem.fresh).
       const result = await startReview(ctx, accountId, id, choice.model, choice.provider, {
         fresh: body.fresh === true,
+        ...(pair ? { pair: true } : {}),
       });
       if (!result.ok) {
         if (result.reason === 'not_found') {
@@ -775,6 +793,107 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
       await markReviewPosted(ctx, reviewId, outcome.postedReviewId, outcome.inlineFindingIds, outcome.prComments, {
         inlineComments: outcome.inlineComments,
       });
+      const result: PostReviewResult = {
+        postedReviewId: outcome.postedReviewId,
+        postedAt: new Date().toISOString(),
+        postedCommentCount: outcome.commentCount,
+        prCommentCount: outcome.prCommentCount,
+      };
+      return result;
+    } catch (err) {
+      reply.status(502);
+      return { error: 'GitHubError', message: err instanceof Error ? err.message : String(err) };
+    }
+  });
+
+  // POST BOTH — a Claude + Codex pair's two runs as ONE GitHub review (pair.ts): one body naming both
+  // providers (each run's draft), the reader's verdict, and every included, unposted finding of both,
+  // each comment naming who raised it. `:reviewId` is either half; both must have succeeded at the
+  // same head. ?dryRun=true answers the payload without posting. Posting one run alone stays the
+  // ordinary Post route. Rate limit: the Claude Review family's catch-all (`ai`), like Post review.
+  app.post('/api/claude-reviews/:reviewId/post-pair', { schema: postSchema }, async (req, reply) => {
+    if (!AGENTIC_AI_ENABLED) return featureOff(reply);
+    const { reviewId } = req.params as { reviewId: number };
+    const { userVerdict } = req.body as PostReviewBody;
+    const dryRun = (req.query as { dryRun?: string }).dryRun === 'true';
+    const accountId = ctx.accountIdOf(req);
+
+    const one = await getClaudeReviewById(ctx, reviewId, accountId);
+    const otherId = one?.pair?.otherReviewId ?? null;
+    const other = otherId != null ? await getClaudeReviewById(ctx, otherId, accountId) : null;
+    if (!one || !one.pair || !other || other.prId !== one.prId) {
+      reply.status(404);
+      return { error: 'NotFound', message: `Review ${reviewId} is not one half of a pair` };
+    }
+    const [first, second] = one.pair.role === 'first' ? [one, other] : [other, one];
+    if (first.status !== 'succeeded' || second.status !== 'succeeded' || first.headSha !== second.headSha) {
+      reply.status(409);
+      return { error: 'PairIncomplete', message: 'Both reviews must finish before posting both.' };
+    }
+    const pctx = await getReviewPostContext(ctx, second.id, accountId);
+    if (!pctx) {
+      reply.status(404);
+      return { error: 'NotFound', message: `Review ${reviewId} not found` };
+    }
+    if (!dryRun && ((await isAutoPostingNow(ctx, first.id)) || (await isAutoPostingNow(ctx, second.id)))) {
+      reply.status(409);
+      return { error: 'AutoPostInProgress', message: 'Posting automatically. Try again in a moment.' };
+    }
+    try {
+      for (const r of [first, second]) await updateReviewDraft(ctx, r.id, { userVerdict });
+      const included = [first, second].flatMap((r) =>
+        r.findings
+          .filter((f) => f.included && f.postedAt == null && f.earlierPost == null)
+          .map((f) => ({
+            id: f.id,
+            path: f.path,
+            line: f.line,
+            side: f.side,
+            anchored: f.anchored,
+            fileInDiff: f.fileInDiff,
+            body: resolvedBody(f, f.story),
+            suggestion: f.suggestion,
+            storyLead: pairRaisedByLead(aiRunProviderName(r)),
+          })),
+      );
+      const outcome = await ctx.review.postReview({
+        owner: pctx.owner,
+        name: pctx.name,
+        prNumber: pctx.prNumber,
+        reviewHeadSha: pctx.reviewHeadSha,
+        body: pairReviewBody(
+          // Each run's draft; a half nobody drafted (the first, whose summary box is never shown) reads
+          // as its summary's first sentence.
+          [first, second].map((r) => ({
+            by: aiRunProviderName(r),
+            text: r.userBody ?? autoReviewBodyLead(r.summary, r.findings.length, aiRunProviderName(r)),
+          })),
+          null,
+        ),
+        verdict: userVerdict,
+        includedFindings: included,
+        dryRun,
+      });
+      if (outcome.headMoved) {
+        reply.status(409);
+        return {
+          error: 'HeadMoved',
+          message: 'The PR head has moved since this review. Re-review before posting.',
+        };
+      }
+      if ('preview' in outcome) return outcome.preview;
+      // Each run stamps its own findings; both carry the one GitHub review.
+      for (const r of [first, second]) {
+        const mine = new Set(r.findings.map((f) => f.id));
+        await markReviewPosted(
+          ctx,
+          r.id,
+          outcome.postedReviewId,
+          outcome.inlineFindingIds.filter((fid) => mine.has(fid)),
+          outcome.prComments.filter((pc) => mine.has(pc.findingId)),
+          { inlineComments: (outcome.inlineComments ?? []).filter((c) => mine.has(c.findingId)) },
+        );
+      }
       const result: PostReviewResult = {
         postedReviewId: outcome.postedReviewId,
         postedAt: new Date().toISOString(),

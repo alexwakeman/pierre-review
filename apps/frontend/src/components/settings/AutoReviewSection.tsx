@@ -9,7 +9,11 @@ import {
   type AutoFixInclude,
   type AutoPostKinds,
   type AutoPostScope,
+  type AutoReviewProviders,
 } from '@pierre-review/shared';
+import { useMe } from '../../hooks/useTriage.js';
+import { aiRunnableProviders } from '../../lib/aiCapabilities.js';
+import { PAIR_PICK_LABEL } from '../../lib/modelPick.js';
 import { aiReadyFor, useAiCapabilities } from '../../hooks/useAiCapabilities.js';
 import { aiCredentialWords } from '@pierre-review/shared';
 import { AiAuthLine, AiRuntimeSetup } from '../AiSetup.js';
@@ -134,6 +138,11 @@ export function AutoReviewSection(): JSX.Element {
   // TEAM CLAIMS ("Mark auto reviews on GitHub"): OFF unless a stored true says otherwise.
   const storedClaims = stored?.teamClaimsEnabled === true;
   const [claimsOn, setClaimsOn] = useState(storedClaims);
+  // Who runs auto reviews: the default provider, or Claude + Codex (a pair; migration 0135).
+  const storedProviders: AutoReviewProviders = stored?.autoReviewProviders === 'both' ? 'both' : 'default';
+  const [providers, setProviders] = useState<AutoReviewProviders>(storedProviders);
+  const ready = aiRunnableProviders(useMe().data, 'review');
+  const pairReady = ready.includes('claude') && ready.includes('codex');
   const storedCap = stored?.dailyCap ?? 20;
   const [capText, setCapText] = useState(String(storedCap));
   const storedPost = stored?.autoPost ?? null;
@@ -173,6 +182,9 @@ export function AutoReviewSection(): JSX.Element {
   useEffect(() => {
     setCapText(String(storedCap));
   }, [workspaceId, storedCap]);
+  useEffect(() => {
+    setProviders(storedProviders);
+  }, [workspaceId, storedProviders]);
   useEffect(() => {
     setPostOn(storedPostOn);
   }, [workspaceId, storedPostOn]);
@@ -281,6 +293,35 @@ export function AutoReviewSection(): JSX.Element {
         </InfoButton>
       </div>
       <div className={`space-y-1.5 pl-5 text-xs ${on ? '' : 'opacity-60'}`}>
+        <div className="flex items-start gap-1">
+          <label className="flex flex-wrap items-center gap-2 text-gray-700 dark:text-gray-200">
+            <span className="font-medium">Auto reviews use</span>
+            <select
+              aria-label="Auto reviews use"
+              value={providers}
+              onChange={(e) => setProviders(e.target.value === 'both' ? 'both' : 'default')}
+              className="rounded border border-gray-300 bg-white px-1.5 py-0.5 text-xs dark:border-gray-700 dark:bg-gray-900"
+            >
+              <option value="default">{ai.providerName} (the default)</option>
+              <option value="both" disabled={!pairReady && providers !== 'both'}>
+                {PAIR_PICK_LABEL}
+              </option>
+            </select>
+            {!pairReady && (
+              <span className="text-xs text-gray-500 dark:text-gray-400">Claude + Codex needs both signed in.</span>
+            )}
+          </label>
+          <InfoButton title="Claude + Codex">
+            <p>
+              Claude reviews first. Codex then reviews the same commit, is told what Claude found, and
+              looks for what Claude missed. Anything Codex repeats is dropped.
+            </p>
+            <p>
+              Both runs count towards each provider’s usage. If only one is signed in when a review
+              starts, that one runs alone. When posting automatically, both go out as one review.
+            </p>
+          </InfoButton>
+        </div>
         <div className="flex items-start gap-1">
           <fieldset className="space-y-1">
             <legend className="font-medium text-gray-700 dark:text-gray-200">When an auto review finishes</legend>
@@ -553,6 +594,7 @@ export function AutoReviewSection(): JSX.Element {
             fixOn !== storedFix ||
             diagramsOn !== storedDiagrams ||
             claimsOn !== storedClaims ||
+            providers !== storedProviders ||
             capDirty ||
             postDirty ||
             fixSettingsDirty)
@@ -564,6 +606,7 @@ export function AutoReviewSection(): JSX.Element {
             autoFixEnabled: fixOn,
             ...(diagramsOn !== storedDiagrams ? { autoDiagramsEnabled: diagramsOn } : {}),
             ...(claimsOn !== storedClaims ? { teamClaimsEnabled: claimsOn } : {}),
+            ...(providers !== storedProviders ? { autoReviewProviders: providers } : {}),
             ...(capDirty && cap != null ? { dailyCap: cap } : {}),
             ...(postDirty
               ? {

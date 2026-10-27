@@ -600,7 +600,8 @@ describe('source guards', () => {
 
   it('opens the model picker on the default and never re-seeds it from a stored run', () => {
     const tab = code(read('components/ClaudeReviewTab.tsx'));
-    expect(tab).toMatch(/useModelPick\('review', DEFAULT_CLAUDE_REVIEW_MODEL\)/);
+    // The AI Review menu (it also offers "Claude + Codex" while both can review).
+    expect(tab).toMatch(/useReviewModelPick\(DEFAULT_CLAUDE_REVIEW_MODEL\)/);
     expect(tab).not.toMatch(/\.pick\(\s*review/);
   });
 
