@@ -41,7 +41,7 @@ const isSdkCaller = (src: string): boolean => SDK_CALL.test(code(src));
 
 const ALLOWED = new Set(['ai/providers/claude.ts', 'ai/runtime.ts']);
 
-// The 12 runners + the one-shot seam the provider must cover (docs/CODEX-PLAN.md § 3.1).
+// The 13 runners + the one-shot seam the provider must cover (docs/CODEX-PLAN.md § 3.1).
 const RUNNERS = [
   'review/agent.ts',
   'coding/agent.ts',
@@ -49,6 +49,7 @@ const RUNNERS = [
   'review/chat-agent.ts',
   'review/ci-review/agent.ts',
   'review/claude-review/thread-check-agent.ts',
+  'review/claude-review/replies-check-agent.ts',
   'review/diagrams/agent.ts',
   'review/sprint-paths/agent.ts',
   'review/story-docs/agent.ts',

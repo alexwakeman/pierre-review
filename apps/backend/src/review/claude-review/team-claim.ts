@@ -37,7 +37,7 @@ import type {
   ClaudeTeamClaimSkip,
 } from '@pierre-review/shared';
 import { aiProviderName } from '@pierre-review/shared';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, isNotNull, isNull } from 'drizzle-orm';
 import type { AgentContext } from '../agent-context.js';
 
 /** How long a pending line holds the head after its claimant's NEWEST line. */
@@ -522,17 +522,11 @@ export async function teamClaimPendingFor(
   const skip = teamClaimSkipFor(accountId, prId, headSha);
   if (skip?.kind === 'reviewing') return { provider: skip.provider, login: skip.login, mine: false };
   if (running) return null;
-  const cr = ctx.schema.claudeReviews;
-  const rows = (await ctx.db
-    .select({ teamClaim: cr.teamClaim, provider: cr.provider })
-    .from(cr)
-    .where(and(eq(cr.prId, prId), eq(cr.accountId, accountId), eq(cr.headSha, headSha), eq(cr.trigger, 'auto')))
-    .orderBy(desc(cr.id))
-    .limit(1)
-    .execute()) as Array<{ teamClaim: ClaudeTeamClaimRecord | null; provider: string | null }>;
-  const rec = rows[0]?.teamClaim;
-  if (!rec || rec.state !== 'marked') return null;
-  if (rec.lastLine !== 'unfinished' && rec.lastLine !== 'reviewing') return null;
+  // The newest record PER CONTEXT: a Claude + Codex pair holds one line per provider.
+  const rec = (await latestClaimRecordsAtHead(ctx, accountId, prId, headSha)).find(
+    (r) => r.teamClaim.state === 'marked' && (r.teamClaim.lastLine === 'unfinished' || r.teamClaim.lastLine === 'reviewing'),
+  )?.teamClaim;
+  if (!rec) return null;
   const provider: AiProviderId = rec.context === 'limn/review-codex' ? 'codex' : 'claude';
   const login = (await defaultTeamClaimGithub.login(accountId).catch(() => null)) ?? 'you';
   return { provider, login, mine: true };
@@ -563,17 +557,48 @@ export async function clearTeamClaim(
   }
   const mem = skips.get(`${accountId}:${prId}`);
   if (mem && mem.skip.provider === provider) forgetSkip(accountId, prId);
+  const row = (await latestClaimRecordsAtHead(ctx, accountId, prId, headSha)).find(
+    (r) => r.teamClaim.context === teamClaimContext(provider),
+  );
+  if (row) {
+    await saveTeamClaimRecord(ctx, row.id, { ...row.teamClaim, lastLine: 'cleared', at: new Date().toISOString() });
+  }
+  return { ok: true };
+}
+
+/**
+ * This machine's newest team-claim record PER CONTEXT among the auto runs at `headSha`, newest
+ * first. Full reviews only: a replies pass (`kind = 'replies'`) never claims.
+ */
+async function latestClaimRecordsAtHead(
+  ctx: AgentContext,
+  accountId: number,
+  prId: number,
+  headSha: string,
+): Promise<Array<{ id: number; teamClaim: ClaudeTeamClaimRecord }>> {
   const cr = ctx.schema.claudeReviews;
   const rows = (await ctx.db
     .select({ id: cr.id, teamClaim: cr.teamClaim })
     .from(cr)
-    .where(and(eq(cr.prId, prId), eq(cr.accountId, accountId), eq(cr.headSha, headSha), eq(cr.trigger, 'auto')))
+    .where(
+      and(
+        eq(cr.prId, prId),
+        eq(cr.accountId, accountId),
+        eq(cr.headSha, headSha),
+        eq(cr.trigger, 'auto'),
+        isNull(cr.kind),
+        isNotNull(cr.teamClaim),
+      ),
+    )
     .orderBy(desc(cr.id))
-    .limit(1)
+    .limit(8)
     .execute()) as Array<{ id: number; teamClaim: ClaudeTeamClaimRecord | null }>;
-  const row = rows[0];
-  if (row?.teamClaim && row.teamClaim.context === teamClaimContext(provider)) {
-    await saveTeamClaimRecord(ctx, row.id, { ...row.teamClaim, lastLine: 'cleared', at: new Date().toISOString() });
+  const seen = new Set<string>();
+  const out: Array<{ id: number; teamClaim: ClaudeTeamClaimRecord }> = [];
+  for (const r of rows) {
+    if (!r.teamClaim || seen.has(r.teamClaim.context)) continue;
+    seen.add(r.teamClaim.context);
+    out.push({ id: r.id, teamClaim: r.teamClaim });
   }
-  return { ok: true };
+  return out;
 }

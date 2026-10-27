@@ -1193,8 +1193,8 @@ Additive. Joins `accountScopedTables()`, the erasure and the export. [CLAUDE-REV
 is on) and `ALTER TABLE claude_reviews ADD team_claim text` (JSON `ClaudeTeamClaimRecord`: what the
 team claim did for one AUTO run; NULL = no claim attempted). Additive; both ride existing tables, so
 the erasure and the export already cover them. [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Team claims.
-Journal `when` sqlite `1792137621016`. (Reserved for this batch; renumber on merge if a sibling branch
-took `0134` too.)
+Journal `when` sqlite `1792137621016`.
+
 ### `0135_review_pairs` — Claude + Codex pairs
 `ALTER TABLE claude_reviews ADD pair_id integer` (the FIRST half's run id, on both halves), `ADD
 pair_role text` (`'first'` \| `'second'`), `ADD pair_dropped integer` (the second half's findings
@@ -1203,8 +1203,15 @@ dropped in code as repeats of the first's), and `ALTER TABLE workspaces ADD auto
 older row is an ordinary run, every workspace keeps the default. No FK on `pair_id` (a soft link like
 `prior_finding_id`; both halves are the same account's rows of the same PR). Both tables are already in
 `accountScopedTables()`, the erasure and the export. [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Claude +
-Codex. Journal `when` sqlite `1792137622016`. (`0134` was reserved for a parallel branch; the journal
-skips it here and the two land together.)
+Codex. Journal `when` sqlite `1792137622016`.
+
+### `0136_review_kind` — the replies pass
+`ALTER TABLE claude_reviews ADD kind text`: `'replies'` on a REPLIES PASS (a run that judged only
+people's replies on Limn's own posted findings), NULL on every full review, older rows included.
+Additive, nullable, no backfill. ⚠ Every "latest review" / "run at this head" reader now filters
+`kind IS NULL` (the list is in [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § The replies pass); the table is
+already in `accountScopedTables()`, erasure and the export. Journal `idx` 136, `when` sqlite
+`1792137623016`. `0134`, `0135` and `0136` were built in parallel and landed together, in order.
 
 ### No migration — "Check against code" removed (2026-10-18): `sprint_ticket_repos` + `sprint_assessments` DORMANT
 

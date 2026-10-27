@@ -42,9 +42,33 @@ export function useClaudeReview(prId: number | null) {
     // over). Idle otherwise.
     // While the sweeper only HOLDS it (waiting for activity to settle), a slower re-read
     // is enough: that wait is minutes long.
+    // A replies pass in flight has no SSE stream: re-read until it ends.
     refetchInterval: (q) =>
-      q.state.data?.autoReview === 'queued' ? 5000 : q.state.data?.autoReviewWaiting != null ? 30_000 : false,
+      q.state.data?.autoReview === 'queued' || q.state.data?.repliesCheck?.live != null
+        ? 5000
+        : q.state.data?.autoReviewWaiting != null
+          ? 30_000
+          : false,
   });
+}
+
+/** Start ("Check replies") or cancel a replies pass; the tab's query re-reads after either. */
+export function useRepliesCheck(prId: number) {
+  const qc = useQueryClient();
+  const refresh = () => {
+    void qc.invalidateQueries({ queryKey: ['claude-review', prId] });
+  };
+  const start = useMutation({
+    mutationKey: ['replies-check-start', prId],
+    mutationFn: () => api.startRepliesCheck(prId),
+    onSettled: refresh,
+  });
+  const cancel = useMutation({
+    mutationKey: ['replies-check-cancel', prId],
+    mutationFn: () => api.cancelRepliesCheck(prId),
+    onSettled: refresh,
+  });
+  return { start, cancel };
 }
 
 /**

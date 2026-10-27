@@ -89,6 +89,8 @@ import { ReviewedAgo } from './ReviewedAgo.js';
 import { ClaudeReviewFollowUpSection } from './ClaudeReviewFollowUp.js';
 import { ClaudeReviewThreadsSection } from './ClaudeReviewThreads.js';
 import { CheckThreadsButton } from './CheckThreadsButton.js';
+import { RepliesCheckLine } from './RepliesCheckLine.js';
+import { REPLIES_CHECK_LABEL } from '../lib/repliesCheck.js';
 import { AiStatusLine } from './AiStatusLine.js';
 import { AUTO_REVIEW_WAITING_LABEL, autoFixOutcomeLine, autoSweepResultLine, failedAutoReviewLine } from '../lib/claudeAutoReview.js';
 import { useRepos } from '../hooks/useTimeline.js';
@@ -1355,6 +1357,11 @@ function ClaudesReview({
                 {FRESH_REVIEW_LABEL}
               </span>
             )}
+            {review.kind === 'replies' && (
+              <span className="rounded bg-gray-500/10 px-1.5 py-0.5 text-xs text-gray-600 dark:text-gray-300">
+                {REPLIES_CHECK_LABEL}
+              </span>
+            )}
             {review.reviewMode != null && (
               <span className="rounded bg-gray-500/10 px-1.5 py-0.5 text-xs text-gray-600 dark:text-gray-300">
                 {REVIEW_MODE_LABEL[review.reviewMode]} review
@@ -2052,6 +2059,20 @@ export function ClaudeReviewTab({
       )}
       {!isRunning && review?.status === 'cancelled' && (
         <div className="text-sm text-gray-500 dark:text-gray-400">Review cancelled.</div>
+      )}
+
+      {/* The replies pass: "Check replies" while people's replies on Limn's findings wait, and the
+          newest pass (a run in the list below). */}
+      {data != null && (
+        <RepliesCheckLine
+          prId={pr.id}
+          state={data.repliesCheck}
+          onShow={(id) => {
+            setSelectedReviewId(id);
+            setPreview(null);
+            setPostResult(null);
+          }}
+        />
       )}
 
       {/* EVERY run on the PR, always listed (all providers, all heads, newest first). */}

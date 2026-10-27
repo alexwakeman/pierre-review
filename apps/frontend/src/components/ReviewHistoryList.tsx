@@ -4,6 +4,7 @@ import { CLAUDE_VERDICT_LABEL, reviewRunWhen } from '../lib/claudeReviewColumn.j
 import { PAIR_PICK_LABEL } from '../lib/modelPick.js';
 import { findingCountText, groupReviewHistory, reviewStatusWord } from '../lib/reviewHistory.js';
 import { AUTO_REVIEW_LABEL, FRESH_REVIEW_LABEL } from './Activity/pendingLabels.js';
+import { REPLIES_CHECK_LABEL } from '../lib/repliesCheck.js';
 
 const shortSha = (sha: string | null): string => (sha ? sha.slice(0, 7) : '—');
 
@@ -46,13 +47,16 @@ export function ReviewHistoryList({
         {after != null && <span className="text-gray-600 dark:text-gray-400">{after}</span>}
         <span>{reviewStatusWord(h.status)}</span>
         {h.status === 'succeeded' && h.verdict != null && h.reviewMode !== 'skip' && <span>{CLAUDE_VERDICT_LABEL[h.verdict]}</span>}
-        {findings != null && h.reviewMode !== 'skip' && <span>{findings}</span>}
+        {findings != null && h.reviewMode !== 'skip' && h.kind !== 'replies' && <span>{findings}</span>}
         <span className="text-gray-600 dark:text-gray-400">{reviewRunWhen(h.finishedAt ?? h.createdAt)}</span>
         {h.trigger === 'auto' && (
           <span className="rounded bg-gray-500/10 px-1.5 text-[11px] text-gray-600 dark:text-gray-300">{AUTO_REVIEW_LABEL}</span>
         )}
         {h.fresh === true && (
           <span className="rounded bg-gray-500/10 px-1.5 text-[11px] text-gray-600 dark:text-gray-300">{FRESH_REVIEW_LABEL}</span>
+        )}
+        {h.kind === 'replies' && (
+          <span className="rounded bg-gray-500/10 px-1.5 text-[11px] text-gray-600 dark:text-gray-300">{REPLIES_CHECK_LABEL}</span>
         )}
         {h.id === latestId && <span className="text-gray-600 dark:text-gray-400">Latest</span>}
         {shown && <span className="ml-auto font-medium text-blue-700 dark:text-blue-300">Shown</span>}

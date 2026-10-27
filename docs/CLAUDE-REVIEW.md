@@ -1121,6 +1121,82 @@ which replies count), `follow-up.ts` (`judgeReplyReport`, the gate), `auto-resol
 - Open PRs cards: "Earlier: N fixed · N settled · N still open" — accepted is settled, disputed is
   open.
 
+### The replies pass (judge just the replies, 2026-10-27)
+
+A reply on one of Limn's posted findings used to wait for the next full review. A REPLIES PASS judges
+JUST the replies, cheaply, at the current head. Pure half `claude-review/replies-pass.ts`; I/O
+`replies-check.ts` (+ `-agent`, `-prompt`, `-schema`, `-routes`); the outcome `replies-outcome.ts`.
+
+- **What it judges.** The findings the NEXT full review would follow up (`loadPriorReviewForFollowUp`
+  over the latest full review: own + carried, minus the settled), with their threads
+  (`attachFindingThreads`), whose newest JUDGEABLE reply (`judgeableReplies`: a person, not
+  automation, not Limn-marked) is newer than the finding's latest judgement (`judgedThroughFor`: the
+  full review's start or `comments_through`, else a later pass that gave it a REPLY status —
+  `not_checked` is not a judgement). Nothing to judge ⇒ refused `nothing_to_check`, no row, no model.
+- **Who starts it.** AUTO: the sweeper (auto.ts `commentBurstRoute` → `'replies'`) when a same-head
+  reply on a Limn finding is newer than what the full reviews AND the replies passes at that head
+  covered (the candidate read's `repliesCoveredMs`), on a workspace with auto review on, after the
+  usual 5-quiet-minutes settle (one pass covers a burst on several threads). ⚠ The other half of the
+  burst (any other thread) goes to Check threads as before (`newestOtherCommentAtMs`); a same-head
+  burst no longer starts a FULL review. At most `REPLIES_PASS_AUTO_DAILY_CAP` (5) AUTOMATIC passes
+  per PR per rolling 24 h, counted in the DB (rows); the ONE automatic budget gate is asked first
+  (skipped, never queued). A refusal or the cap settles that half IN MEMORY (`repliesSettled`) so it
+  is not asked every minute. MANUAL: "Check replies" on the AI Review tab (`RepliesCheckLine`, behind
+  `AiRunGate kind="thread_check"`), `POST /api/prs/:id/claude-review/replies`. ⚠ Never while a FULL
+  review of the PR is queued or running (`reviewHeldForPr` — it judges the replies itself; refused
+  `review_in_progress`, re-checked at launch), never on a closed PR.
+- **The run.** Per thread, the PROVIDER of the run that OWNS it (the first inline-posted finding up
+  the chain; `followUpProvider`: the owner's when it can still run, else the default); one agent run
+  per provider group, Claude first, one after the other in the ONE shared review slot. STANDARD depth
+  (`claude-sonnet-5`; Codex resolves the role to Terra), the Effort setting (`agenticRunEffort`),
+  read-only: Read/Glob/Grep in the PR's read-only worktree behind the path guard (no checkout ⇒ the
+  finding's hunk), Bash denied (`repliesCheckToolPolicy`), connectors isolated. Per thread the prompt
+  carries the finding (severity, title, body, path:line), the code around that line AT THE CURRENT
+  HEAD (±15 lines, read from the checkout, never outside it), the conversation (the loader's rules:
+  last 5 replies, 1,500 characters each, Limn's own marked as context) and whether Limn already
+  pushed back — every block NONCE-FENCED as data. Result tool `submit_replies` (Codex: its strict
+  schema in `ai/result-schemas.ts`): `reply_accepted` (+ `acceptKind`) / `reply_disputed` /
+  `not_checked`, each through THE SAME GATE, `judgeReplyReport` (a deferred blocker is disputed…).
+- **Stored as a run row**: `claude_reviews.kind = 'replies'` (migration 0136), `trigger` auto/manual,
+  no findings, its `follow_up` items shaped EXACTLY like a review's (`priorReviewId` = the full
+  review), labelled by `aiRunLabel` like any run ("Replies checked" in the history). So
+  `acceptedReplyFindings` / `loadSettledByReplyFindings`, the thread cards' finding outcome, auto
+  resolve, auto pushback and the manual "Post reply" read it with no special case. ⚠ It is NOT a
+  review: every "latest review" / "run at this head" reader filters `kind IS NULL` —
+  `getLatestClaudeReview` (the tab's `review`), `getLatestSucceededReviewId` (AI Fix),
+  `listAllClaudeReviews`, `getUnactionedClaudeReviews` (My Turn), `hasReviewAtHead` /
+  `isAutoReReviewSettled` / `isAutoRetryStillDue` / `getFailedAutoAtHead`, `loadPriorRunForCarry`,
+  the candidate read (first review, re-review, retry, in flight, the daily cap). The Open PRs column
+  shows the latest FULL review with later passes' items folded over its "Earlier:" counts
+  (`overlayFollowUpItems`, newer wins, `not_checked` never overrides).
+- ⚠ **THE CHAIN ANCHORS ON THE LATEST FULL REVIEW.** `loadPriorReviewForFollowUp` skips passes (a
+  pass has no findings: following up on it would drop the review's), folds the passes after the
+  anchor over its items for the carry bookkeeping, and the accepted ones leave through the settled
+  list as before.
+- **Writes — AUTO only, the existing switches and records:** accepted + `autoResolve` ⇒ auto resolve;
+  disputed + auto-posting ⇒ auto pushback (AT MOST ONE PER THREAD, EVER). A MANUAL pass writes
+  nothing: drafts and "Post reply" as today.
+- **THE OUTCOME, BOTH WAYS** (`computeRepliesOutcome` + `repliesVerdict`, pure): open = the latest full
+  review's counted findings minus the settled ones (own id or any ancestor), plus the earlier
+  blockers it left unjudged. A blocker this pass DISPUTED ⇒ REQUEST_CHANGES; this pass ACCEPTED one
+  and no blocker or warning is left ⇒ APPROVE; anything else ⇒ nothing (never a COMMENT review that
+  says nothing changed). The newest row's `verdict` stores it (a manual pass: "Would approve." /
+  "Would request changes."). AUTO with auto-posting on: `maybePostRepliesOutcome` runs it through the
+  auto-post gates exactly (the `autoVerdict` switch, `autoPostEligibility`, the LIVE PR, the impact
+  gate, the reader's standing review read live — a person's holds it, Limn's own block is superseded
+  by an APPROVE and a second request is held `already_requested` — and the lift: no blocker left ⇒
+  Limn's own block is dismissed when no APPROVE lands). ONE short review, no comments ("Replies
+  checked: the remaining points are settled." / "Replies checked: “<title>” is still a blocker.") +
+  the auto footer + the marker, CLAIMED on the pass row's `auto_post` (compare-and-set from NULL)
+  before any write, never retried; a held verdict is recorded `skipped` with why, nothing posts. Its
+  `githubReviewId` + REQUEST_CHANGES make it Limn's own block for later lifts
+  (`loadLimnAutoBlockIds`).
+- **The tab**: `ClaudeReviewResponse.repliesCheck {unjudged, live, latest}` (DB-only + the in-memory
+  phase): "Check replies (N)", the status line + Cancel while it runs (the tab re-reads every 5 s),
+  one line about the newest pass ("Replies checked 2 hours ago: 1 accepted, 1 still open.") with
+  Show (it is a run in the history). Pinned by `replies-pass.test.ts`, `replies-check-pipeline.test.ts`,
+  `auto-sweep.test.ts` and `threads-db.test.ts`.
+
 ## Other reviewers' threads (people and review bots)
 
 Every run that reads code (diff-only or deep) also judges **every review thread on the PR —
@@ -1246,9 +1322,9 @@ CODE, not by prompt:
   `review.threadAssessments` for "what Claude says now".
 - **AUTO** (when the workspace's auto review is on): a SAME-HEAD comment burst — the code has not
   moved — now starts a CHECK, not a full re-review (`commentBurstRoute`, auto.ts), under the same
-  settle rule. ⚠ ONE exception keeps the full review: a reply on one of Limn's OWN posted findings
-  newer than what the reviews at this head saw (`newestOwnThreadCommentAt` vs the candidate's
-  `coveredMs`) — finding replies and the one pushback live in the review. A check row at the head
+  settle rule. ⚠ A reply on one of Limn's OWN posted findings newer than what the reviews (and the
+  replies passes) at this head saw starts a REPLIES PASS instead (§ The replies pass; it used to keep
+  the full review); the burst's other comments still come here. A check row at the head
   whose `comments_through` reaches the burst covers it (any status, one attempt per burst). A moved
   head still gets a full review.
 

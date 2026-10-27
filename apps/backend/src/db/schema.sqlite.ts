@@ -1299,6 +1299,10 @@ export const claudeReviews = sqliteTable(
     pairId: integer('pair_id'),
     pairRole: text('pair_role', { enum: ['first', 'second'] }),
     pairDropped: integer('pair_dropped'),
+    // A REPLIES PASS (review/claude-review/replies-check.ts): 'replies' on a run that judged only
+    // people's replies on Limn's own posted findings; NULL on every full review (migration 0136).
+    // ⚠ Every "the latest review" / "a run at this head" reader filters `kind IS NULL`.
+    kind: text('kind', { enum: ['replies'] }),
   },
   (t) => ({
     prIdx: index('cr_pr_idx').on(t.prId),
