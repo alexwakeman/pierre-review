@@ -171,7 +171,7 @@ export default function Reporting(): JSX.Element {
             <p>No forecast for calendar months: they aren't the same length. Where the data can't support a number, it says so.</p>
           </div>
           <div className="tile r-sumtxt rise">
-            <p>A short written summary, on your own Claude Code login or Anthropic API key.</p>
+            <p>A short written summary, by your own AI agent.</p>
           </div>
           <Shot
             className="r-sum"
@@ -320,7 +320,7 @@ export default function Reporting(): JSX.Element {
             The sprint by theme, critical path or person, on your tracker's own status columns. Jira, Linear or GitHub
             Issues. Limn writes nothing back.
           </p>
-          <p className="muted">Themes and critical paths are written by Claude, on your own Claude Code login or Anthropic API key.</p>
+          <p className="muted">Themes and critical paths are written by your own AI agent.</p>
         </div>
         <div className="board">
           <Shot

@@ -25,7 +25,7 @@ export function Act() {
           </div>
           <div className="cap">
             <b>Review on autopilot</b>
-            <span>No more pasting diffs into Claude. Limn runs the review and posts it to the pull request.</span>
+            <span>No more pasting diffs into a chat window. Limn runs the review and posts it to the pull request.</span>
           </div>
         </div>
         <div className="tile gold a-fix rise" data-ui>

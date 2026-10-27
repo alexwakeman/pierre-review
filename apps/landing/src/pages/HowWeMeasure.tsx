@@ -308,7 +308,7 @@ export default function HowWeMeasure(): JSX.Element {
           <p>
             There is a third place {SITE_NAME} uses AI, and it is separate from both models on this
             page: writing. Short notes — what a change could break, the reason beside an item in
-            your queue — and, on your own machine, Claude&rsquo;s review of a pull request and its
+            your queue — and, on your own machine, your AI agent&rsquo;s review of a pull request and its
             fix for the comments you pick. Those are language, not measurement, and they are clearly
             marked wherever they appear.
           </p>
@@ -332,8 +332,8 @@ export default function HowWeMeasure(): JSX.Element {
           </p>
           <p>
             Nothing is sent to us. We run no server for the app, and it has no tracking. Your code
-            and pull requests go only between your machine and GitHub — and to Anthropic, on your
-            own account, when you ask Claude to review or fix something.
+            and pull requests go only between your machine and GitHub — and to your AI provider, on
+            your own account, when a review or fix runs.
           </p>
           <code className="hwm-cmd">{INSTALL_COMMAND}</code>
           <p className="btns">
@@ -353,7 +353,7 @@ export default function HowWeMeasure(): JSX.Element {
               <>
                 Available only from npm: <code>{INSTALL_COMMAND}</code>. Needs Node 20 or later.
               </>,
-              'Built for Claude users. Reviews and fixes run on your Claude Code login or an Anthropic API key. Codex support is coming soon.',
+              'Runs on your own AI agent tooling. Reviews and fixes use your Claude Code login, an Anthropic API key or Codex on your ChatGPT plan.',
               <>
                 Free for individuals, and for organisations where no more than {FREE_TEAM_SIZE}{' '}
                 people use it. More users than that need a licence —{' '}

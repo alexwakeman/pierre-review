@@ -6,7 +6,7 @@
 
 const ITEMS: { chore: string; now: string }[] = [
   {
-    chore: 'Pasting diffs into Claude',
+    chore: 'Pasting diffs into a chat window',
     now: 'Limn reviews each new push on its own, and can post the findings to the pull request for you.',
   },
   {

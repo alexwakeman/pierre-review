@@ -62,16 +62,16 @@ export function Gather() {
       <div className="board lg">
         <div className="tile l lapis wide rise">
           <p style={{ fontSize: 20, lineHeight: 1.3, maxWidth: '26ch' }}>
-            Keep the review bots you already pay for. Limn reads all 17 and ranks them beside Claude.
+            Keep the review bots you already pay for. Limn reads all 17 and ranks them beside your own AI agent.
           </p>
         </div>
         <LogoTile src={github} name="GitHub" note="Code, CI, issues" />
-        <LogoTile src={claude} name="Claude" note="Your own login" />
+        <LogoTile src={claude} name="Claude" note="Your Claude Code login" />
         <LogoTile src={jira} name="Jira" note="Stories" />
         <LogoTile src={linear} name="Linear" note="Stories" />
         <LogoTile src={sonar} name="SonarCloud" note="Quality gate" />
         <WordmarkTile word="Slack" note="Team digest" />
-        <WordmarkTile word="Codex" note="Coming soon" />
+        <WordmarkTile word="Codex" note="Your ChatGPT plan" />
         <LogoTile src={coderabbit} name="CodeRabbit" note="Review bot" />
         <LogoTile src={copilot} name="GitHub Copilot" note="Review bot" />
         <LogoTile src={cursor} name="Cursor" note="And 14 more bots" />

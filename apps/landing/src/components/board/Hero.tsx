@@ -5,8 +5,9 @@ import { copyText } from './copyText';
 import { DEMO_PATH } from '../../lib/site';
 
 // ---------------------------------------------------------------------------
-// The hero board: the name, Hilliard's miniature, the statement, the dots and
-// the gold "Free. Local. No extra seat." tile with its copy button.
+// The hero board: the name and Hilliard's line on limning, his miniature, the
+// statement, the dots and the gold "Free. Local. No extra seat." tile with its
+// copy button.
 // ---------------------------------------------------------------------------
 
 const COMMAND = 'npx limn-review';
@@ -40,6 +41,17 @@ export function Hero() {
         <h1>
           Limn<span className="vh"> — automated, local code review</span>
         </h1>
+        <figure className="motto">
+          <blockquote>
+            <p>
+              “The line without shadow showeth all to good judgment; but the shadow without line
+              showeth nothing.”
+            </p>
+          </blockquote>
+          <figcaption>
+            Nicholas Hilliard, <cite>The Arte of Limning</cite>, c.1600
+          </figcaption>
+        </figure>
       </div>
       <div className="tile ph p1">
         <img src={hilliard} width={1280} height={1283} alt="Nicholas Hilliard's self-portrait miniature, 1577" />

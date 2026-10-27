@@ -13,7 +13,7 @@ export function Check() {
           <span className="tag" style={{ background: 'var(--verdigris)' }} />
           Check
         </h2>
-        <p>Claude reads each pull request against its story and your own docs, and says which one it broke.</p>
+        <p>Your AI agent reads each pull request against its story and your own docs, and says which one it broke.</p>
       </div>
       <div className="board ex">
         <div className="tile verdigris ex-story rise" data-ui="">
@@ -101,7 +101,7 @@ export function Check() {
         </div>
         <div className="tile t-txt rise">
           <h3>See what it changes</h3>
-          <p>Claude draws the parts a pull request touches. For a story, one drawing across all its pull requests.</p>
+          <p>It draws the parts a pull request touches. For a story, one drawing across all its pull requests.</p>
           <p>Limn draws one for every review, made for that change. Each part cites the files behind it, so you can follow the key ideas straight to the code.</p>
         </div>
       </div>

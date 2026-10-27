@@ -29,6 +29,8 @@ import './getting-started.css';
 // ---------------------------------------------------------------------------
 
 const AI_INSTALL = `${INSTALL_COMMAND} ai install`;
+const CODEX_INSTALL = `${INSTALL_COMMAND} ai install codex`;
+const CODEX_LOGIN = `${INSTALL_COMMAND} ai login codex`;
 const ML_INSTALL = `${INSTALL_COMMAND} ml install`;
 
 /** A command with a copy button beside it. The command stays readable if copying fails. */
@@ -221,7 +223,7 @@ export default function GettingStarted(): JSX.Element {
         <Step
           n={2}
           id="ai"
-          title="Turn on Claude"
+          title="Connect your AI agent"
           pigment="verdigris"
           wide
           aside={
@@ -233,30 +235,44 @@ export default function GettingStarted(): JSX.Element {
                   height: 226,
                   label: 'Before',
                   phoneHide: true,
-                  alt: "A pull request's Claude tab with the button 'Set up AI (one-time ~110 MB download)'",
+                  alt: "A pull request's AI Review tab with the button 'Set up AI (one-time ~110 MB download)'",
                 },
                 {
                   src: aiReady,
                   width: 1424,
                   height: 227,
                   label: 'After',
-                  alt: "The same tab once AI is set up: a model picker, a Re-review button and Claude's review",
+                  alt: "The same tab once AI is set up: a model picker, a Re-review button and the review",
                 },
               ]}
             />
           }
         >
           <p>
-            Claude Review, AI Fix and the chats run on your own Claude Code login or Anthropic API key. Limn stores no
-            key and charges nothing.
+            AI Review, AI Fix and the chats run on your own AI agent tooling: Claude Code or Codex. Limn stores no key
+            and charges nothing.
           </p>
           <p>
             The first time, press <b>Set up AI (one-time ~110 MB download)</b>, shown where the Run button will be, or run:
           </p>
           <Command text={AI_INSTALL} />
+          <p>
+            <b>Claude Code.</b> Sign in once with <code>claude</code>, or set <code>ANTHROPIC_API_KEY</code>.
+          </p>
+          <p>
+            <b>Codex.</b> Add Codex and sign in with your ChatGPT account, or do both from <b>Settings → AI</b>:
+          </p>
+          <Command text={CODEX_INSTALL} />
+          <Command text={CODEX_LOGIN} />
           <p className="gs-note">
-            If you use Claude Code, sign in once with <code>claude</code>. Otherwise set <code>ANTHROPIC_API_KEY</code>.
-            By default, nothing is posted or pushed until you press the button. Codex: coming soon.
+            On a machine without a browser, add <code>--device-auth</code> to the sign-in. Limn keeps its own Codex
+            sign-in in <code>~/.limn/codex</code> and never touches <code>~/.codex</code>. An OpenAI API key is not
+            supported yet.
+          </p>
+          <p className="gs-note">
+            With both signed in, choose one in <b>Settings → AI</b> (Claude Code by default), or set{' '}
+            <code>LIMN_AI_PROVIDER</code> to <code>claude</code> or <code>codex</code>. By default, nothing is posted or
+            pushed until you press the button.
           </p>
         </Step>
 
@@ -268,7 +284,7 @@ export default function GettingStarted(): JSX.Element {
           aside={
             <div className="gs-modes" aria-label="The two kinds of budget">
               <div className="gs-mode">
-                <b>On a Claude subscription</b>
+                <b>On a subscription</b>
                 <dl>
                   <div>
                     <dt>Limn's share of your week</dt>
@@ -293,24 +309,24 @@ export default function GettingStarted(): JSX.Element {
           }
         >
           <p>
-            In <b>Settings</b>, under <b>Claude spend</b>.
+            In <b>Settings</b>, under <b>AI spend</b>.
           </p>
           <ul className="gs-list">
             <li>
-              On a Claude subscription, Claude keeps track of how much of your weekly allowance you have used. You
-              choose what share of that week Limn may use: 5% unless you change it, up to 50%. Limn adds up what its own
-              Claude runs use and compares that with your subscription's usual weekly allowance. Anthropic doesn't publish
-              exact allowances, so this is an estimate. If you have Max, Limn asks whether it's Max 5x or Max 20x.
+              On a Claude or ChatGPT subscription, you choose what share of your weekly allowance Limn may use: 5%
+              unless you change it, up to 50%. Limn adds up what its own runs use and compares that with the
+              allowance. Allowances aren't published exactly, so this is an estimate. On Claude Max, Limn asks whether
+              it's Max 5x or Max 20x.
             </li>
             <li>
               Each 5-hour session gets the same share as your week, unless you set it separately.
             </li>
             <li>
-              When Limn has used its share, it stops starting automatic Claude runs until your week or session resets.
-              Your own use of Claude is never limited, and runs you start yourself still run after you confirm.
+              When Limn has used its share, it stops starting automatic runs until your week or session resets. Your
+              own use of your AI agent is never limited, and runs you start yourself still run after you confirm.
             </li>
             <li>
-              The header shows Limn's AI quota: how much of its budget is used, or with no budget, how much of your Claude week. Click it to see when your week and session reset. On a
+              The header shows Limn's AI quota: how much of its budget is used, or with no budget, how much of your week. Click it to see when your week and session reset. On a
               subscription, each run's cost shows as a share of your week, not in dollars.
             </li>
             <li>On an API key, set a weekly budget in US dollars.</li>
@@ -462,7 +478,7 @@ export default function GettingStarted(): JSX.Element {
           </p>
           <p>
             The digest lists the team's Pending tabs, the top 5 of each. The digest never names the person who set it
-            up. Posts when a Claude review runs or a pull request merges stay off until you tick them.
+            up. Posts when an automatic review runs or a pull request merges stay off until you tick them.
           </p>
           <p className="gs-note">Each workspace has its own channel, or none (up to 12 workspaces).</p>
         </Step>

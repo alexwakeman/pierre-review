@@ -3,11 +3,11 @@ import { useState } from 'react';
 const QUESTIONS: ReadonlyArray<{ q: string; a: string }> = [
   {
     q: 'What does it cost?',
-    a: 'Nothing from us. Reviews run on your own Claude Code login or API key, and Limn shows what each run used.',
+    a: 'Nothing from us. Reviews run on your own AI agent — Claude Code or Codex — and Limn shows what each run used.',
   },
   {
     q: 'Does my code leave my machine?',
-    a: 'No. Everything lives in SQLite on your disk. Claude sees code only when you start a review.',
+    a: 'No. Everything lives in SQLite on your disk. Your AI agent sees code only when a review runs.',
   },
   {
     q: 'Will it post to GitHub for me?',
@@ -15,7 +15,7 @@ const QUESTIONS: ReadonlyArray<{ q: string; a: string }> = [
   },
   {
     q: 'Can I keep my review bots?',
-    a: "Yes. Limn reads their comments and ranks them beside Claude's.",
+    a: "Yes. Limn reads their comments and ranks them beside your own AI agent's.",
   },
   {
     q: 'GitHub Enterprise?',

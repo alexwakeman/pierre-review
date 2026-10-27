@@ -24,7 +24,7 @@
      button     .btn (on .gold tiles it inverts)
      motion     .rise (revealed by useReveal) · .hl (fade-in, e.g. hero labels)
      hero       section.board.hero > .tile.name (h1) · .tile.ph.p1 · .tile.lapis.say
-                · .tile.anim (svg) · .tile.gold.free (p, .btn, code)
+                (+ figure.motto > blockquote + figcaption) · .tile.anim (svg) · .tile.gold.free (p, .btn, code)
      G/C/A      section.section.gca > h2 · .board > div.tile×3 (b + p) · p.lead
      chapter    .chap > h2 (span.tag) + p
      gather     .board.lg > .tile.l (.wide) · .mk (mask logo, style --src:url())
@@ -339,7 +339,10 @@ body:has(.lb) {
 .lb .hero .name {
   grid-column: 1 / 7;
   display: flex;
-  align-items: flex-end;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: flex-start;
+  gap: 22px;
   padding: 24px;
 }
 .lb .hero .name h1 {
@@ -347,6 +350,31 @@ body:has(.lb) {
   font-weight: 500;
   letter-spacing: -0.05em;
   line-height: 0.8;
+}
+/* Hilliard's line on limning, under the name and beside his portrait. */
+.lb .hero .motto {
+  margin: 0;
+  max-width: 34em;
+}
+.lb .hero .motto blockquote {
+  margin: 0;
+  font-size: 17px;
+  line-height: 1.4;
+  letter-spacing: -0.005em;
+}
+.lb .hero .motto blockquote p {
+  margin: 0;
+}
+.lb .hero .motto figcaption {
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.lb .hero .motto figcaption::before {
+  content: '— ';
+}
+.lb .hero .motto cite {
+  font-style: italic;
 }
 .lb .hero .p1 {
   grid-column: 7 / 10;
@@ -1257,7 +1285,7 @@ body:has(.lb) {
   }
   .lb .hero .name {
     grid-column: 1 / -1;
-    height: 26svh;
+    min-height: 26svh;
   }
   .lb .hero .name h1 {
     font-size: 22vw;

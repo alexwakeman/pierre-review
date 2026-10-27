@@ -25,8 +25,8 @@ export function Licence(): JSX.Element {
           </tr>
           <tr>
             <th scope="row">Model usage</th>
-            <td className="rec">Your Claude login</td>
-            <td>Your Claude login</td>
+            <td className="rec">Your own AI agent</td>
+            <td>Your own AI agent</td>
           </tr>
           <tr>
             <th scope="row">Runs on</th>
