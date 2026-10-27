@@ -12,7 +12,7 @@ import { RefreshIcon } from '../Icons.js';
 import { MetricRepoFilter } from './MetricRepoFilter.js';
 import { FirstRunOnboarding } from './FirstRunOnboarding.js';
 import { DefaultBranchesSlot } from './DefaultBranchesSlot.js';
-import { AutoReviewUsageLine, OpenPrsCards, OpenPrsSortMenu, OpenPrsViewToggle } from './OpenPrsCards.js';
+import { AutoReviewUsageLine, OpenPrsCards, OpenPrsSortMenu, OpenPrsViewToggle, RunAutoReviewsButton } from './OpenPrsCards.js';
 import type { OpenPrsSort } from '../../lib/openPrsSort.js';
 
 // Activity → Open PRs — the FIRST rail line and the app's default (a URL with no `view=`), so it
@@ -117,6 +117,8 @@ export function OpenPrsDetail(): JSX.Element {
         </span>
         {/* Today's auto code reviews against the workspace's daily cap — only while auto review is on. */}
         <AutoReviewUsageLine />
+        {/* Run one auto-review sweep now (failed runs included) — only while auto review is on. */}
+        <RunAutoReviewsButton />
         <div className="ml-auto flex flex-wrap items-center gap-2">
           {ticketsOn && <OpenPrsViewToggle />}
           <OpenPrsSortMenu sort={sort} onChange={setSort} />

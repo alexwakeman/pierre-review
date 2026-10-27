@@ -241,6 +241,14 @@ describe('tierFor — the issue tracker', () => {
     expect(tiers('PUT', '/api/workspaces/3/trackers')).toEqual(['read']);
   });
 
+  it('"Run auto reviews now" spends model runs: ai + aiHourly; the auto-review GET/PUT stay reads', () => {
+    expect(tiers('POST', '/api/workspaces/3/auto-review/sweep')).toEqual(['ai', 'ai_hourly']);
+    expect(tiers('GET', '/api/workspaces/3/auto-review/sweep')).toEqual(['read']);
+    expect(tiers('POST', '/api/workspaces/3/auto-review/sweeps')).toEqual(['read']);
+    expect(tiers('GET', '/api/workspaces/3/auto-review')).toEqual(['read']);
+    expect(tiers('PUT', '/api/workspaces/3/auto-review')).toEqual(['read']);
+  });
+
   it('the ticket review family keeps its own tiers (the segment is not a prefix match)', () => {
     expect(tiers('GET', '/api/prs/42/ticket-reviews')).toEqual(['read']);
   });

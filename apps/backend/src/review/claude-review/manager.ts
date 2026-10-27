@@ -56,6 +56,7 @@ import {
   markReviewRanOn,
   markReviewPeersRead,
   isAutoReReviewSettled,
+  isAutoRetryStillDue,
   loadPriorReviewForFollowUp,
   loadSettledByReplyFindings,
   loadUnjudgedReplyFindings,
@@ -126,6 +127,12 @@ interface AutoItem {
   // time. The settle re-check (`isAutoReReviewSettled`) needs it; null/absent for a first review or
   // a moved head.
   commentsAtMs?: number | null;
+  // A RETRY of this failed AUTO run at the PR's current head (auto.ts, the start rule's retry
+  // branch). The lane re-checks it is still the latest row at the head (`isAutoRetryStillDue`).
+  retryOfReviewId?: number | null;
+  // Queued by the READER's press ("Run auto reviews now" / "Retry"): the spend budget is not asked
+  // again at start — the press was the reader's choice (the SPA's over-budget confirm already ran).
+  pressed?: boolean;
 }
 
 const claimed = new Set<number>(); // prIds running OR pending — the re-trigger guard
@@ -323,11 +330,21 @@ export function enqueueAutoReview(
   workspaceId?: number,
   // TRAILING: set for a re-review triggered by new review comments (see AutoItem).
   commentsAtMs: number | null = null,
+  // TRAILING: a retry of a failed auto run, and/or a reader's press (see AutoItem).
+  opts: { retryOfReviewId?: number | null; pressed?: boolean } = {},
 ): EnqueueAutoResult {
   if (!AGENTIC_AI_ENABLED) return 'disabled';
   if (claimed.has(prId) || autoPending.some((a) => a.prId === prId)) return 'already';
   if (autoPending.length >= REVIEW_AUTO_MAX_QUEUED) return 'full';
-  autoPending.push({ ctx, accountId, prId, workspaceId, commentsAtMs });
+  autoPending.push({
+    ctx,
+    accountId,
+    prId,
+    workspaceId,
+    commentsAtMs,
+    ...(opts.retryOfReviewId != null ? { retryOfReviewId: opts.retryOfReviewId } : {}),
+    ...(opts.pressed ? { pressed: true } : {}),
+  });
   pump();
   return 'queued';
 }
@@ -380,12 +397,16 @@ async function startAutoItem(a: AutoItem): Promise<void> {
     if (!agenticRunReady(ctx, 'review')) return;
     // THE CLAUDE SPEND BUDGET (ai/budget.ts): over it, drop the item before its row exists — the
     // sweeper re-derives it once the budget is under its limit again.
-    if (!(await automaticRunAllowed(ctx, accountId, 'auto review'))) return;
+    // A READER'S PRESS is not asked again: they chose it (the SPA's over-budget confirm ran).
+    if (!a.pressed && !(await automaticRunAllowed(ctx, accountId, 'auto review'))) return;
     const prCtx = await getReviewPrContext(ctx, prId, accountId);
     if (!prCtx?.headSha) return;
     // ONE RUN PER KEY: a person may have reviewed this head (and, for a comment-triggered
-    // re-review, seen those comments) while the item waited.
-    if (await isAutoReReviewSettled(ctx, prId, accountId, prCtx.headSha, a.commentsAtMs ?? null)) return;
+    // re-review, seen those comments) while the item waited. A RETRY goes ahead only while the
+    // failed run it retries is still the latest row at this head.
+    if (a.retryOfReviewId != null) {
+      if (!(await isAutoRetryStillDue(ctx, prId, accountId, prCtx.headSha, a.retryOfReviewId))) return;
+    } else if (await isAutoReReviewSettled(ctx, prId, accountId, prCtx.headSha, a.commentsAtMs ?? null)) return;
     const model = DEFAULT_CLAUDE_REVIEW_MODEL;
     // An AUTOMATIC run goes to the DEFAULT provider (Settings → AI), read now.
     const provider = activeProviderId();

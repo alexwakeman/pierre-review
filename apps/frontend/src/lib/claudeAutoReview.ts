@@ -3,6 +3,7 @@ import {
   type ClaudeAutoFixOutcome,
   type ClaudeAutoFixSkipReason,
   type ClaudeAutoReviewWaiting,
+  type AutoReviewSweepResponse,
   type ClaudeReviewPrState,
 } from '@pierre-review/shared';
 
@@ -46,4 +47,30 @@ export function fixPillLabel(fix: ClaudeReviewPrState['fix']): string | null {
 /** Is a fix running on any listed PR? The column polls while one is, so "Fix ready" appears. */
 export function anyFixRunning(states: readonly ClaudeReviewPrState[] | undefined): boolean {
   return (states ?? []).some((s) => s.fix === 'running');
+}
+
+const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
+
+/**
+ * The one plain line after "Run auto reviews now" (or "Retry" on one PR): what the sweep queued, or
+ * why it queued nothing. `single` words it for the one-PR Retry.
+ */
+export function autoSweepResultLine(res: AutoReviewSweepResponse, single = false): string {
+  if (res.busy) return 'Auto reviews are already being checked. Try again in a moment.';
+  if (res.off) return 'Auto review is off for this workspace.';
+  if (res.aiNotReady) return 'AI is not set up here, so nothing was queued.';
+  const total = res.queued + res.checksQueued;
+  if (total === 0) {
+    if (res.capped) return 'Daily limit reached — 0 queued.';
+    if (res.laneFull) return 'The auto review queue is full — 0 queued.';
+    return single ? 'Nothing to retry: the PR has moved on or is already being reviewed.' : 'Nothing to review.';
+  }
+  if (single && res.queued === 1 && res.checksQueued === 0) return 'Retry queued.';
+  const parts: string[] = [];
+  if (res.queued > 0) parts.push(plural(res.queued, 'review', 'reviews'));
+  if (res.checksQueued > 0) parts.push(plural(res.checksQueued, 'thread check', 'thread checks'));
+  let line = `Queued ${parts.join(' and ')}.`;
+  if (res.capped) line += ' Daily limit reached for the rest.';
+  else if (res.laneFull) line += ' The queue is full; the rest follow on their own.';
+  return line;
 }

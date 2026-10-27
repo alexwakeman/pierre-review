@@ -464,3 +464,85 @@ describe('getAutoReviewCandidates — re-review of a moved head', () => {
     expect(res.prIds).not.toContain(r.moved);
   });
 });
+
+describe('getAutoReviewCandidates — retry of a failed auto run at the current head', () => {
+  const FLOOR = OPENED + 25 * DAY;
+  const late = FLOOR + HOUR;
+  const r: Record<string, number> = {};
+  const run = async (
+    prId: number,
+    headSha: string,
+    status: string,
+    o: { trigger?: 'auto' | 'manual'; error?: string; provider?: string; finishedAtMs?: number } = {},
+  ) =>
+    db
+      .insert(schema.claudeReviews)
+      .values({
+        accountId: 1,
+        prId,
+        headSha,
+        status,
+        model: 'm',
+        trigger: o.trigger ?? 'auto',
+        error: o.error ?? null,
+        provider: o.provider ?? null,
+        ...(o.finishedAtMs != null ? { finishedAt: new Date(o.finishedAtMs) } : {}),
+      })
+      .execute();
+
+  beforeAll(async () => {
+    // A FIRST auto review that failed (the live case: Codex's usage limit).
+    r.firstFailed = await seedPr('rt-first-failed', { openedAt: late });
+    await run(r.firstFailed, 'head_rt-first-failed', 'failed', {
+      error: 'Codex could not finish: You’ve hit your usage limit.',
+      provider: 'codex',
+      finishedAtMs: late + HOUR,
+    });
+    // Two failed auto attempts at the head: attempts = 2.
+    r.twice = await seedPr('rt-twice', { openedAt: late });
+    await run(r.twice, 'head_rt-twice', 'failed', { error: 'overloaded' });
+    await run(r.twice, 'head_rt-twice', 'failed', { error: 'overloaded' });
+    // A re-review at a moved head that failed (a succeeded run on the old head).
+    r.reFailed = await seedPr('rt-re-failed', { openedAt: late });
+    await run(r.reFailed, 'old_sha', 'succeeded');
+    await run(r.reFailed, 'head_rt-re-failed', 'failed', { error: 'interrupted by restart' });
+    // Not retries: a succeeded run at the head is final; a MANUAL failure; a reader's Stop; a
+    // failure at an OLD head; a run in flight; a failure on a PR opened before the floor.
+    r.succeededAfter = await seedPr('rt-succeeded', { openedAt: late });
+    await run(r.succeededAfter, 'head_rt-succeeded', 'failed', { error: 'overloaded' });
+    await run(r.succeededAfter, 'head_rt-succeeded', 'succeeded');
+    r.manual = await seedPr('rt-manual', { openedAt: late });
+    await run(r.manual, 'head_rt-manual', 'failed', { trigger: 'manual', error: 'overloaded' });
+    r.stopped = await seedPr('rt-stopped', { openedAt: late });
+    await run(r.stopped, 'head_rt-stopped', 'cancelled');
+    r.oldHead = await seedPr('rt-old-head', { openedAt: late });
+    await run(r.oldHead, 'old_sha', 'failed', { error: 'overloaded' });
+    r.inFlight = await seedPr('rt-in-flight', { openedAt: late });
+    await run(r.inFlight, 'head_rt-in-flight', 'failed', { error: 'overloaded' });
+    await run(r.inFlight, 'head_rt-in-flight', 'running');
+    r.beforeFloor = await seedPr('rt-before-floor', { openedAt: FLOOR - HOUR });
+    await run(r.beforeFloor, 'head_rt-before-floor', 'failed', { error: 'overloaded' });
+  });
+
+  it('lists only a failed AUTO run that is still the latest at the head, with the attempt count', async () => {
+    const res = await q.getAutoReviewCandidates(1, scope.workspaceId, {
+      openedSinceMs: FLOOR,
+      dayStartMs: now - DAY,
+      limit: 50,
+    });
+    const byPr = new Map(res.retry.map((x: any) => [x.prId, x]));
+    expect(byPr.get(r.firstFailed)).toMatchObject({
+      headSha: 'head_rt-first-failed',
+      attempts: 1,
+      provider: 'codex',
+      error: 'Codex could not finish: You’ve hit your usage limit.',
+      failedAtMs: late + HOUR,
+    });
+    expect(byPr.get(r.twice)).toMatchObject({ attempts: 2, provider: 'claude', error: 'overloaded' });
+    expect(byPr.get(r.reFailed)).toMatchObject({ headSha: 'head_rt-re-failed', attempts: 1 });
+    for (const k of ['succeededAfter', 'manual', 'stopped', 'oldHead', 'inFlight', 'beforeFloor'])
+      expect([k, byPr.has(r[k])]).toEqual([k, false]);
+    // A failed PR is still never a FIRST-review candidate (it has a row).
+    expect(res.prIds).not.toContain(r.firstFailed);
+  });
+});

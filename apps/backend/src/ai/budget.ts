@@ -74,6 +74,7 @@ import {
   parseUsageProbe,
 } from './providers/claude-usage.js';
 import { setAgentMessageObserver } from './runtime.js';
+import { usageResetFromReading } from '../review/claude-review/auto-retry.js';
 import { codexAccountTokens, codexRateLimitsCached, kickCodexProbe } from './codex/app-server.js';
 
 export const DAY_MS = AI_BUDGET_DAY_MS;
@@ -450,8 +451,21 @@ export async function allowAutomaticRun(
 /** The seam AgentContext and ProContext carry. */
 export interface AiBudgetGate {
   allowAutomaticRun(accountId: number, what: string): Promise<boolean>;
+  /** The reset the provider's usage reading names for a limit hit at `failedAtMs` (the auto-review
+   *  retry rule, review/claude-review/auto-retry.ts `usageResetFromReading`); null when not known.
+   *  Never throws. Optional: a context without it falls back to the retry backoff. */
+  usageResetAfter?(provider: AgentProviderId, failedAtMs: number): Promise<number | null>;
 }
 
 export function buildAiBudgetGate(log?: AiBudgetLog): AiBudgetGate {
-  return { allowAutomaticRun: (accountId, what) => allowAutomaticRun(accountId, what, log) };
+  return {
+    allowAutomaticRun: (accountId, what) => allowAutomaticRun(accountId, what, log),
+    usageResetAfter: async (provider, failedAtMs) => {
+      try {
+        return usageResetFromReading(await readingFor(getProvider(provider)), failedAtMs);
+      } catch {
+        return null;
+      }
+    },
+  };
 }

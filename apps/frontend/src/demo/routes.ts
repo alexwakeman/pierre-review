@@ -406,6 +406,24 @@ export const ROUTES: DemoRoute[] = [
       return OK({ workspaceId: Number(req.query.get('workspace')) || 1, checked: ids.length, mergeStateChecked: 0, changed: 0, leftOpenSet: 0, paused: null });
     },
   },
+  // "Run auto reviews now" / Retry on a failed auto run: the demo starts no run, so the sweep finds
+  // nothing due ("Nothing to review.").
+  {
+    method: 'POST',
+    re: /^\/api\/workspaces\/(\d+)\/auto-review\/sweep$/,
+    run: (_req, m) =>
+      OK({
+        workspaceId: Number(m[1]),
+        queued: 0,
+        retried: 0,
+        checksQueued: 0,
+        capped: false,
+        laneFull: false,
+        aiNotReady: false,
+        busy: false,
+        off: false,
+      }),
+  },
   { method: 'POST', re: /^\/api\/repos\/(\d+)\/(sync|cancel)$/, run: () => notInDemo() },
   { method: 'POST', re: /^\/api\/repos$/, run: () => notInDemo() },
   { method: 'DELETE', re: /^\/api\/repos\/\d+$/, run: () => notInDemo() },

@@ -160,6 +160,10 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // for the organization + one per repo, ≤ 20) — a THIRD-PARTY quota, so `search`. GET/PUT
   // `…/sonar` are DB-only and fall to `read` on the next line, decided rather than inherited.
   if (method === 'POST' && /^\/api\/workspaces\/\d+\/sonar\/check$/.test(path)) return [TIERS.search, TIERS.read];
+  // RUN AUTO REVIEWS NOW / RETRY (review/claude-review/auto-settings.ts): one press can queue up to a
+  // day's cap of agentic model runs on the reader's own Claude or Codex — `ai` + `aiHourly`, decided
+  // ABOVE the family's `read` line, by exact shape. The GET/PUT `…/auto-review` stay `read`.
+  if (method === 'POST' && /^\/api\/workspaces\/\d+\/auto-review\/sweep$/.test(path)) return [TIERS.ai, TIERS.aiHourly];
   if (path === '/api/workspaces' || path.startsWith('/api/workspaces/')) return [TIERS.read];
 
   // ---- Per-account settings writes: `read`, RECORDED rather than inherited ----

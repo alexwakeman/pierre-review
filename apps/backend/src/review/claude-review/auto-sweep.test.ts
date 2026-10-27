@@ -20,6 +20,8 @@ import type { AgentContext as ProContext } from '../agent-context.js';
 const enqueued: Array<[number, number]> = [];
 // The comment time each queued re-review carried (manager.ts settle re-check), in queue order.
 const enqueuedCommentsAt: Array<number | null | undefined> = [];
+// The trailing options each queued item carried (a retry's failed run id, a reader's press).
+const enqueuedOpts: Array<{ retryOfReviewId?: number | null; pressed?: boolean } | undefined> = [];
 let laneRoom = 20;
 let waiting = new Set<number>();
 let enqueueAnswer: (prId: number) => string = () => 'queued';
@@ -38,11 +40,13 @@ vi.mock('./manager.js', () => ({
     prId: number,
     _workspaceId?: number,
     commentsAtMs?: number | null,
+    opts?: { retryOfReviewId?: number | null; pressed?: boolean },
   ) => {
     const r = enqueueAnswer(prId);
     if (r === 'queued') {
       enqueued.push([accountId, prId]);
       enqueuedCommentsAt.push(commentsAtMs);
+      enqueuedOpts.push(opts);
       laneRoom -= 1;
     }
     return r;
@@ -50,6 +54,7 @@ vi.mock('./manager.js', () => ({
 }));
 
 let aiReady = true;
+let providerNow: 'claude' | 'codex' = 'claude';
 vi.mock('./ai-ready.js', () => ({ agenticRunReady: () => aiReady }));
 
 let roster: Array<{ accountId: number; workspaceId: number; enabledAtMs: number; dailyCap: number }> = [];
@@ -65,6 +70,7 @@ const {
   autoReviewDue,
   autoReviewWaiting,
   _resetAutoReReviewForTest,
+  _setAutoProviderForTest,
 } = await import('./auto.js');
 
 const NOW = Date.UTC(2026, 8, 30, 15, 30);
@@ -79,6 +85,7 @@ let answers: Map<
     autoToday: number;
     reReview?: Array<{ prId: number; headSha: string; commentsAtMs?: number | null; lastRunAtMs?: number | null }>;
     inFlightMoved?: Array<{ prId: number; headSha: string }>;
+    retry?: Array<{ prId: number; headSha: string; failedReviewId: number; failedAtMs: number; error: string | null; provider: 'claude' | 'codex'; attempts: number }>;
   }
 >;
 let blocked: Set<number>;
@@ -99,6 +106,9 @@ const makeCtx = (over: Record<string, unknown> = {}): ProContext =>
 beforeEach(() => {
   enqueued.length = 0;
   enqueuedCommentsAt.length = 0;
+  enqueuedOpts.length = 0;
+  _setAutoProviderForTest(() => providerNow);
+  providerNow = 'claude';
   laneRoom = 20;
   waiting = new Set();
   enqueueAnswer = () => 'queued';
@@ -594,5 +604,188 @@ describe('the Claude spend budget gate (ai/budget.ts)', () => {
     answers.set(7, { prIds: [11], autoToday: 0 });
     await runAutoReviewSweep(makeCtx(), NOW);
     expect(enqueued.map(([, p]) => p)).toEqual([11]);
+  });
+});
+
+describe('runAutoReviewSweep — retrying a failed auto run', () => {
+  const HOUR = 3_600_000;
+  const failed = (prId: number, over: Record<string, unknown> = {}) => ({
+    prId,
+    headSha: `h${prId}`,
+    failedReviewId: 500 + prId,
+    failedAtMs: NOW - 2 * HOUR,
+    error: 'API Error: 529 overloaded',
+    provider: 'claude' as const,
+    attempts: 1,
+    ...over,
+  });
+
+  it('queues a due retry, carrying the failed run it retries', async () => {
+    answers.set(7, { prIds: [], autoToday: 0, retry: [failed(31)] });
+    const r = await runAutoReviewSweep(makeCtx(), NOW);
+    expect(enqueued).toEqual([[1, 31]]);
+    expect(enqueuedOpts[0]).toEqual({ retryOfReviewId: 531, pressed: false });
+    expect(r).toMatchObject({ queued: 1, retried: 1, reQueued: 0 });
+  });
+
+  it('waits out the backoff, and never retries a final failure or past the cap', async () => {
+    answers.set(7, {
+      prIds: [],
+      autoToday: 0,
+      retry: [
+        failed(32, { failedAtMs: NOW - HOUR / 2 }),
+        failed(33, { error: 'Reached maximum number of turns (30)' }),
+        failed(34, { attempts: 3 }),
+      ],
+    });
+    const r = await runAutoReviewSweep(makeCtx(), NOW);
+    expect(enqueued).toEqual([]);
+    expect(r.queued).toBe(0);
+    // A retry hold is not a settle wait: the Claude Review header says nothing.
+    expect(autoReviewWaiting(32, 1)).toBeNull();
+  });
+
+  it('a usage limit waits for the reset its error names; the usage reading fills in when it names none', async () => {
+    const asked: Array<[string, number]> = [];
+    const ctx = makeCtx({
+      aiBudget: {
+        allowAutomaticRun: async () => true,
+        usageResetAfter: async (provider: string, at: number) => {
+          asked.push([provider, at]);
+          return NOW - 60_000; // the reading says it reset a minute ago
+        },
+      },
+    });
+    answers.set(7, {
+      prIds: [],
+      autoToday: 0,
+      retry: [
+        failed(35, { error: 'You’ve hit your usage limit.', failedAtMs: NOW - HOUR / 2 }),
+        failed(36, { error: 'Claude AI usage limit reached|' + Math.floor((NOW + HOUR) / 1000), failedAtMs: NOW - HOUR / 2 }),
+      ],
+    });
+    await runAutoReviewSweep(ctx, NOW);
+    expect(enqueued.map(([, p]) => p)).toEqual([35]);
+    expect(asked).toEqual([['claude', NOW - HOUR / 2]]); // 36's error named its own time
+  });
+
+  it('a change of default provider retries at once', async () => {
+    providerNow = 'claude';
+    answers.set(7, {
+      prIds: [],
+      autoToday: 0,
+      retry: [failed(37, { provider: 'codex', error: 'You’ve hit your usage limit. Try again at 11:59 PM.', failedAtMs: NOW - 60_000 })],
+    });
+    await runAutoReviewSweep(makeCtx(), NOW);
+    expect(enqueued.map(([, p]) => p)).toEqual([37]);
+  });
+
+  it('the daily cap holds for retries, and says so', async () => {
+    answers.set(7, { prIds: [], autoToday: 20, retry: [failed(38)] });
+    const r = await runAutoReviewSweep(makeCtx(), NOW);
+    expect(enqueued).toEqual([]);
+    expect(r).toMatchObject({ queued: 0, capped: true });
+  });
+
+  it('a PR queued as a retry is not queued again as a comment re-review in the same tick', async () => {
+    answers.set(7, {
+      prIds: [],
+      autoToday: 0,
+      retry: [failed(39)],
+      reReview: [{ prId: 39, headSha: 'h39', commentsAtMs: NOW - 10 * 60_000, lastRunAtMs: null }],
+    });
+    await runAutoReviewSweep(makeCtx(), NOW);
+    expect(enqueued.map(([, p]) => p)).toEqual([39]);
+  });
+});
+
+describe('runAutoReviewSweep — a reader’s press ("Run auto reviews now" / Retry)', () => {
+  const HOUR = 3_600_000;
+  const failed = (prId: number, over: Record<string, unknown> = {}) => ({
+    prId,
+    headSha: `h${prId}`,
+    failedReviewId: 500 + prId,
+    failedAtMs: NOW - 60_000,
+    error: 'Reached maximum budget ($1.5)',
+    provider: 'claude' as const,
+    attempts: 5,
+    ...over,
+  });
+  const press = { accountId: 1, workspaceId: 7 };
+
+  beforeEach(() => {
+    roster = [
+      { accountId: 1, workspaceId: 7, enabledAtMs: NOW - HOUR, dailyCap: 20 },
+      { accountId: 1, workspaceId: 8, enabledAtMs: NOW - HOUR, dailyCap: 20 },
+    ];
+  });
+
+  it('covers ONE workspace and waives the backoff, the cap on attempts and the settle wait', async () => {
+    answers.set(7, {
+      prIds: [41],
+      autoToday: 0,
+      retry: [failed(42)],
+      reReview: [{ prId: 43, headSha: 'h43', commentsAtMs: null, lastRunAtMs: NOW - 60_000 }],
+    });
+    answers.set(8, { prIds: [81], autoToday: 0 });
+    const r = await runAutoReviewSweep(makeCtx(), NOW, press);
+    expect(enqueued.map(([, p]) => p)).toEqual([41, 42, 43]);
+    expect(enqueuedOpts[1]).toEqual({ retryOfReviewId: 542, pressed: true });
+    expect(enqueuedOpts[2]).toEqual({ pressed: true });
+    expect(calls.map((c) => c.workspaceId)).toEqual([7]);
+    expect(r).toMatchObject({ queued: 3, retried: 1, reQueued: 1 });
+  });
+
+  it('does not ask the spend budget (the SPA’s two-press confirm is the reader’s choice)', async () => {
+    answers.set(7, { prIds: [], autoToday: 0, retry: [failed(44)] });
+    const ctx = makeCtx({ aiBudget: { allowAutomaticRun: async () => false } });
+    const r = await runAutoReviewSweep(ctx, NOW, press);
+    expect(enqueued.map(([, p]) => p)).toEqual([44]);
+    expect(r.overBudget).toBeUndefined();
+  });
+
+  it('never waives the daily cap', async () => {
+    answers.set(7, { prIds: [45], autoToday: 20, retry: [failed(46)] });
+    const r = await runAutoReviewSweep(makeCtx(), NOW, press);
+    expect(enqueued).toEqual([]);
+    expect(r).toMatchObject({ queued: 0, capped: true });
+  });
+
+  it('Retry names one PR: only it is queued', async () => {
+    answers.set(7, { prIds: [47], autoToday: 0, retry: [failed(48), failed(49)] });
+    await runAutoReviewSweep(makeCtx(), NOW, { ...press, prId: 49 });
+    expect(enqueued.map(([, p]) => p)).toEqual([49]);
+  });
+
+  it('a workspace with auto review off answers `off` and queues nothing', async () => {
+    answers.set(9, { prIds: [91], autoToday: 0 });
+    const r = await runAutoReviewSweep(makeCtx(), NOW, { accountId: 1, workspaceId: 9 });
+    expect(r.off).toBe(true);
+    expect(enqueued).toEqual([]);
+  });
+
+  it('⚠ never two sweeps at once: a press during a tick answers `busy`', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((res) => (release = res));
+    const ctx = makeCtx({
+      queries: {
+        getAutoReviewCandidates: async () => {
+          await gate;
+          return { prIds: [], autoToday: 0 };
+        },
+      },
+    });
+    const tick = runAutoReviewSweep(ctx, NOW);
+    const pressed = await runAutoReviewSweep(ctx, NOW, press);
+    expect(pressed.busy).toBe(true);
+    release();
+    await tick;
+  });
+
+  it('nothing due answers zero, with no flag set', async () => {
+    answers.set(7, { prIds: [], autoToday: 0 });
+    const r = await runAutoReviewSweep(makeCtx(), NOW, press);
+    expect(r).toMatchObject({ queued: 0, stopped: null });
+    expect(r.capped).toBeUndefined();
   });
 });

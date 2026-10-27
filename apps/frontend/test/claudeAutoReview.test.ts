@@ -6,8 +6,42 @@ import {
   AUTO_REVIEW_WAITING_LABEL,
   anyFixRunning,
   autoFixOutcomeLine,
+  autoSweepResultLine,
   fixPillLabel,
 } from '../src/lib/claudeAutoReview.js';
+
+describe('"Run auto reviews now" / Retry — the one result line', () => {
+  const base = {
+    workspaceId: 1,
+    queued: 0,
+    retried: 0,
+    checksQueued: 0,
+    capped: false,
+    laneFull: false,
+    aiNotReady: false,
+    busy: false,
+    off: false,
+  };
+  it('says what was queued', () => {
+    expect(autoSweepResultLine({ ...base, queued: 3, retried: 1 })).toBe('Queued 3 reviews.');
+    expect(autoSweepResultLine({ ...base, queued: 1 })).toBe('Queued 1 review.');
+    expect(autoSweepResultLine({ ...base, queued: 2, checksQueued: 1 })).toBe('Queued 2 reviews and 1 thread check.');
+    expect(autoSweepResultLine({ ...base, queued: 2, capped: true })).toBe(
+      'Queued 2 reviews. Daily limit reached for the rest.',
+    );
+  });
+  it('says why nothing was queued', () => {
+    expect(autoSweepResultLine(base)).toBe('Nothing to review.');
+    expect(autoSweepResultLine({ ...base, capped: true })).toBe('Daily limit reached — 0 queued.');
+    expect(autoSweepResultLine({ ...base, busy: true })).toMatch(/already being checked/);
+    expect(autoSweepResultLine({ ...base, off: true })).toBe('Auto review is off for this workspace.');
+    expect(autoSweepResultLine({ ...base, aiNotReady: true })).toMatch(/not set up/);
+  });
+  it('words the one-PR Retry', () => {
+    expect(autoSweepResultLine({ ...base, queued: 1, retried: 1 }, true)).toBe('Retry queued.');
+    expect(autoSweepResultLine(base, true)).toMatch(/^Nothing to retry/);
+  });
+});
 
 describe('auto review waiting', () => {
   it('names what it waits for', () => {

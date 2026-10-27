@@ -4,7 +4,9 @@ import { useRepos, useUsers } from '../../hooks/useTimeline.js';
 import { useMaintainersByRepo } from '../../hooks/useMaintainers.js';
 import { aiReadyFor, useAiCapabilities, useAiProviderName } from '../../hooks/useAiCapabilities.js';
 import { useClaudeReviewStarting, useClaudeReviewStates } from '../../hooks/useClaudeReview.js';
-import { useWorkspaceAutoReview } from '../../hooks/useWorkspaceAutoReview.js';
+import { useRunAutoReviewSweep, useWorkspaceAutoReview } from '../../hooks/useWorkspaceAutoReview.js';
+import { autoSweepResultLine } from '../../lib/claudeAutoReview.js';
+import { AiRunGate } from '../AiSetup.js';
 import { reviewWorkInProgress } from '../../lib/claudeReviewColumn.js';
 import { useCiReviewStates } from '../../hooks/useCiReview.js';
 import { useOpenPrsTicketGate } from '../../hooks/useOpenPrsTicketGate.js';
@@ -1062,6 +1064,59 @@ export function AutoReviewUsageLine(): JSX.Element | null {
       title="Auto code reviews started today in this Workspace (the day is counted in UTC)"
     >
       {usage.used} of {usage.cap} auto reviews today · resets in {resetsInLabel(usage.resetsAt, now)}
+    </span>
+  );
+}
+
+/**
+ * "Run auto reviews now" — ONE auto-review sweep of this workspace now (POST …/auto-review/sweep):
+ * every open PR auto review covers that is due, failed auto runs at the current head (whatever the
+ * retry wait), and new commits or comments not yet reviewed. Queued as auto runs on the default
+ * provider, under the daily cap. Shown only while auto review is on here and AI runs here; behind
+ * the AI gate (an over-budget press takes two presses). One plain line answers the press.
+ */
+export function RunAutoReviewsButton(): JSX.Element | null {
+  const aiOn = useAiCapabilities().enabled;
+  const workspaceId = useFilters((s) => s.workspaceId);
+  const { data } = useWorkspaceAutoReview(aiOn, workspaceId);
+  const sweep = useRunAutoReviewSweep(workspaceId);
+  const [line, setLine] = useState<string | null>(null);
+  useEffect(() => {
+    if (line == null) return;
+    const t = window.setTimeout(() => setLine(null), 15_000);
+    return () => window.clearTimeout(t);
+  }, [line]);
+  // A workspace switch forgets the last answer.
+  useEffect(() => setLine(null), [workspaceId]);
+  if (!aiOn || workspaceId == null || data?.workspaceId !== workspaceId || !data.autoReview.enabled) return null;
+  const run = (): void => {
+    setLine(null);
+    sweep.mutate(
+      {},
+      {
+        onSuccess: (res) => setLine(autoSweepResultLine(res)),
+        onError: (err) => setLine((err as Error)?.message ?? 'Could not run auto reviews.'),
+      },
+    );
+  };
+  return (
+    <span className="inline-flex flex-wrap items-center gap-2">
+      <AiRunGate kind="review" meter={false}>
+        <button
+          type="button"
+          onClick={run}
+          disabled={sweep.isPending}
+          title="Review every PR that is due now: new PRs, new commits or comments, and failed auto reviews. The daily limit still applies."
+          className="rounded border border-gray-300 px-1.5 py-0.5 text-[11px] font-medium hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
+        >
+          {sweep.isPending ? 'Checking…' : 'Run auto reviews now'}
+        </button>
+      </AiRunGate>
+      {line != null && (
+        <span role="status" className="text-[11px] text-gray-600 dark:text-gray-300">
+          {line}
+        </span>
+      )}
     </span>
   );
 }

@@ -2247,6 +2247,29 @@ export async function isAutoReReviewSettled(
   return rows.some((r) => (r.commentsThrough ?? r.createdAt).getTime() >= commentsAtMs);
 }
 
+/**
+ * Is an auto RETRY of the failed run `failedReviewId` still wanted? Only while that run is still the
+ * LATEST row of this PR at `headSha` (a person, or another retry, may have run it while the item
+ * waited — any newer row at the head settles it) and it is still a failure.
+ */
+export async function isAutoRetryStillDue(
+  ctx: AgentContext,
+  prId: number,
+  accountId: number,
+  headSha: string,
+  failedReviewId: number,
+): Promise<boolean> {
+  const { cr } = tables(ctx);
+  const rows = (await ctx.db
+    .select({ id: cr.id, status: cr.status })
+    .from(cr)
+    .where(and(eq(cr.prId, prId), eq(cr.accountId, accountId), eq(cr.headSha, headSha)))
+    .execute()) as Array<{ id: number; status: string }>;
+  if (rows.length === 0) return false;
+  const latest = rows.reduce((a, b) => (b.id > a.id ? b : a));
+  return latest.id === failedReviewId && latest.status === 'failed';
+}
+
 /** Record the newest qualifying review comment the run saw (the comment half of the re-review key). */
 export async function markReviewCommentsSeen(
   ctx: AgentContext,

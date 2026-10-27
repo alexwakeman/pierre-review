@@ -89,7 +89,9 @@ import { ClaudeReviewFollowUpSection } from './ClaudeReviewFollowUp.js';
 import { ClaudeReviewThreadsSection } from './ClaudeReviewThreads.js';
 import { CheckThreadsButton } from './CheckThreadsButton.js';
 import { AiStatusLine } from './AiStatusLine.js';
-import { AUTO_REVIEW_WAITING_LABEL, autoFixOutcomeLine } from '../lib/claudeAutoReview.js';
+import { AUTO_REVIEW_WAITING_LABEL, autoFixOutcomeLine, autoSweepResultLine } from '../lib/claudeAutoReview.js';
+import { useRepos } from '../hooks/useTimeline.js';
+import { useRunAutoReviewSweep, useWorkspaceAutoReview } from '../hooks/useWorkspaceAutoReview.js';
 import { CiCheckSection } from './CiCheckSection.js';
 import { ReviewSection, SectionCount } from './ReviewSection.js';
 import { ClaudeReviewSonarSection } from './ClaudeReviewSonar.js';
@@ -2004,8 +2006,13 @@ export function ClaudeReviewTab({
         </div>
       )}
 
-      {/* Failed / cancelled. */}
-      {!isRunning && review?.status === 'failed' && (
+      {/* Failed / cancelled. A failed AUTO run whose head has not moved: one plain line + Retry
+          (the same sweep as "Run auto reviews now", for this PR). Once the head moves, the normal
+          auto flow reviews the new head. */}
+      {!isRunning && review?.status === 'failed' && review.trigger === 'auto' && review.head?.outdated === false && (
+        <FailedAutoReviewLine repoId={pr.repoId} prId={pr.id} error={review.error} held={autoHold != null} />
+      )}
+      {!isRunning && review?.status === 'failed' && !(review.trigger === 'auto' && review.head?.outdated === false) && (
         <div>
           <div className="rounded border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-700/60 dark:bg-red-900/20 dark:text-red-400">
             {review.error ?? 'The review failed.'}
@@ -2254,5 +2261,65 @@ export function ClaudeReviewTab({
 
     </div>
     </ReviewTabPrRefs>
+  );
+}
+
+/**
+ * A FAILED AUTO run at the PR's current head: its error in one plain line, and "Retry" — the same
+ * sweep as Open PRs' "Run auto reviews now", for this PR only (POST …/auto-review/sweep with
+ * `prId`): queued as an auto run on the default provider, under the daily cap. Retry shows only
+ * while auto review is on for the PR's workspace and no auto run holds the PR.
+ */
+function FailedAutoReviewLine({
+  repoId,
+  prId,
+  error,
+  held,
+}: {
+  repoId: number;
+  prId: number;
+  error: string | null;
+  held: boolean;
+}): JSX.Element {
+  const ai = useAiCapabilities();
+  const { data: repos } = useRepos();
+  const workspaceId = repos?.find((r) => r.id === repoId)?.workspaceId ?? null;
+  const { data: autoReview } = useWorkspaceAutoReview(ai.enabled, workspaceId);
+  const sweep = useRunAutoReviewSweep(workspaceId);
+  const [line, setLine] = useState<string | null>(null);
+  const message = (error ?? 'no reason was given').replace(/\s+/g, ' ').trim();
+  const canRetry = ai.enabled && !held && autoReview?.workspaceId === workspaceId && autoReview?.autoReview.enabled === true;
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-sm">
+      <span className="min-w-0 flex-1 truncate text-red-700 dark:text-red-400" title={message}>
+        Auto review failed: {message}
+      </span>
+      {canRetry && (
+        <AiRunGate kind="review" meter={false}>
+          <button
+            type="button"
+            onClick={() => {
+              setLine(null);
+              sweep.mutate(
+                { prId },
+                {
+                  onSuccess: (res) => setLine(autoSweepResultLine(res, true)),
+                  onError: (err) => setLine((err as Error)?.message ?? 'Could not retry.'),
+                },
+              );
+            }}
+            disabled={sweep.isPending}
+            className="rounded border border-gray-300 px-2 py-0.5 text-xs hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
+          >
+            {sweep.isPending ? 'Retrying…' : 'Retry'}
+          </button>
+        </AiRunGate>
+      )}
+      {line != null && (
+        <span role="status" className="text-xs text-gray-600 dark:text-gray-300">
+          {line}
+        </span>
+      )}
+    </div>
   );
 }

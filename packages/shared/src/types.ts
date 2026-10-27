@@ -4292,6 +4292,33 @@ export interface WorkspaceAutoReviewResponse {
   usage?: AutoReviewUsage | null;
 }
 
+// POST /api/workspaces/:id/auto-review/sweep — ONE auto-review sweep NOW for this workspace (the
+// Open PRs header's "Run auto reviews now"), or for one PR (`prId`: the AI Review tab's "Retry" on a
+// failed auto run). The press waives the settle waits, the retry backoff and the attempt cap; the
+// daily cap still holds. Runs are queued as trigger 'auto' on the DEFAULT provider.
+export interface AutoReviewSweepBody {
+  prId?: number;
+}
+
+export interface AutoReviewSweepResponse {
+  workspaceId: number;
+  // Reviews queued (first reviews, re-reviews and retries), and of them the retries of a failed run.
+  queued: number;
+  retried: number;
+  // Check threads passes started instead of a review (a same-head comment burst).
+  checksQueued: number;
+  // A due PR was left for tomorrow by the daily cap.
+  capped: boolean;
+  // The auto lane was full: the rest wait for the next tick.
+  laneFull: boolean;
+  // AI is not set up (no runtime / no sign-in): nothing was queued.
+  aiNotReady: boolean;
+  // Another sweep was running at that moment: nothing was done (never two at once).
+  busy: boolean;
+  // Auto review is not on for this workspace: nothing was done.
+  off: boolean;
+}
+
 // The daily auto-review cap in use: `used` auto code-review runs created since 00:00 UTC in this
 // workspace's repos (the same count the sweeper budgets with), `cap` the cap in force
 // (`WorkspaceAutoReviewSettings.dailyCap`), and `resetsAt` the next 00:00 UTC (ISO-8601). `used`

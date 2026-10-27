@@ -1808,7 +1808,7 @@ repeated on, and cleared on off, so nothing opened while it was off is picked up
   `getAutoReviewCandidates` (db/queries.ts): open, not draft,
   `opened_at >= enabled_at`, the author a PERSON under the workspace's own judgement
   (`hiddenBotUserIds`, the resolver behind `InsightPrRef.authorIsBot`; an unmapped author is
-  skipped), and **no `claude_reviews` row of any kind** (manual, auto, failed). The DB is the queue:
+  skipped), and **no `claude_reviews` row of any kind** (manual, auto, failed — a failed AUTO run comes back through § Retries below). The DB is the queue:
   a waiting auto item has no row, so a restart loses nothing.
 - **THE LANE** (`manager.ts`). Auto items wait in their own FIFO, capped by
   `PRO_REVIEW_AUTO_MAX_QUEUED` (default 20), and launch only when no manual item waits. The ONE
@@ -1876,6 +1876,48 @@ repeated on, and cleared on off, so nothing opened while it was off is picked up
   commits newer (by commit time) than the reviewed one; null when the reviewed commit is not among
   them (a force-push can drop it) — never a guess; `0` with `outdated` = a rewrite added no commit.
   `head` is null when the PR's head is unknown.
+- ⚠ **RETRIES — A FAILED AUTO RUN IS NOT "DONE"** (2026-10-27; before, the once-per-head rule
+  counted it and the PR was never reviewed until it got new commits — real: run 584, Codex's usage
+  limit). The candidate read also returns `retry: [{prId, headSha, failedReviewId, failedAtMs,
+  error, provider, attempts}]` (`AutoRetryCandidate`): the latest run at the PR's CURRENT head is an
+  AUTO run that FAILED, nothing at that head succeeded (a succeeded run is final), nothing is in
+  flight, and the PR is in the usual population (after the floor, or followed since it). `attempts`
+  = the AUTO rows at that (PR, head), so the cap holds across restarts. A reader's Stop
+  (`cancelled`) and a MANUAL failure are never listed. Whether it is due is THE ONE START RULE,
+  `autoReviewDue`'s retry branch (pure, `auto.ts`; its inputs in `auto-retry.ts`):
+  1. the error must be TRANSIENT (`classifyAutoReviewFailure`): a usage or rate limit, an overload,
+     a 5xx, a network or timeout failure, a sign-in / OAuth / runtime problem, "interrupted by
+     restart". Anything else — the per-review budget or turn cap, a 406 diff, a schema failure, a
+     refusal, an error it does not recognise — is FINAL and never retried by itself;
+  2. fewer than `AUTO_RETRY_MAX_ATTEMPTS` (3) auto rows at the head;
+  3. then due when the DEFAULT provider changed since that run (at once); else, for a usage limit,
+     when the reset the error names has passed (`parseRetryAtMs`: Codex's "try again at 5:04 PM",
+     read as the next such local time; Claude's `…|<epoch>`; "try again in 2 hours"), or failing
+     that the reset the provider's usage reading names (`ctx.aiBudget.usageResetAfter` →
+     `usageResetFromReading`: the latest reset of the windows it shows exhausted, or a reading
+     taken after the failure that shows none exhausted). ⚠ When a reset time is known the backoff
+     does NOT apply — an earlier retry would fail the same way and use up an attempt. Otherwise the
+     backoff: 1 h after the first failure, 4 h after later ones.
+  A retry is an ordinary auto run (same lane, daily cap, spend-budget gate, default provider,
+  auto-post / auto fix rules); the lane re-checks `isAutoRetryStillDue` (the failed run is still the
+  LATEST row at the head) before writing its row. A retry hold is not a settle wait: the header
+  shows no "waiting" line for it. `AutoSweepResult.retried` counts them.
+- **RUN AUTO REVIEWS NOW / RETRY (a reader's press).** Activity → Open PRs' header carries "Run auto
+  reviews now" beside the day's counter (`RunAutoReviewsButton`, `OpenPrsCards.tsx`; shown only while
+  auto review is on for the workspace and `me.ai.enabled`, behind `AiRunGate kind="review"`), and the
+  AI Review tab shows a FAILED AUTO run whose head has not moved as ONE plain line ("Auto review
+  failed: …") with **Retry** (`FailedAutoReviewLine`, `ClaudeReviewTab.tsx`; once the head moves the
+  normal flow reviews the new head). Both call `POST /api/workspaces/:id/auto-review/sweep {prId?}`,
+  which runs `runAutoReviewSweep(ctx, now, press)` for ONE workspace (and one PR): `autoReviewDue`
+  with `pressed` waives the settle waits, the retry backoff, the attempt cap and the transient test;
+  a run in flight still waits; the DAILY CAP and lane cap are never waived; the spend budget is not
+  asked (the press is the reader's choice: `OverBudgetConfirm` takes two presses when over, and the
+  queued items carry `pressed`, so `startAutoItem` skips its budget check). Runs are `trigger:'auto'`
+  on the default provider. ⚠ NEVER TWO SWEEPS AT ONCE: the sweeper's own `sweeping` guard answers a
+  press during a tick `busy`. A press never prunes the in-memory settle clocks (it is not a full
+  pass). The answer is one plain line (`autoSweepResultLine`): "Queued 3 reviews." / "Nothing to
+  review." / "Daily limit reached — 0 queued." / "Retry queued.". The demo answers the route with
+  nothing due.
 - **THE COST GUARD**: a daily cap of auto runs per workspace per **UTC** day, counting
   today's auto rows plus items still waiting in the lane. The cap is SET PER WORKSPACE in Settings
   ("Up to N auto reviews a day", `workspaces.auto_review_daily_cap`, migration 0085):

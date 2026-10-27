@@ -13,6 +13,8 @@ import {
   type AutoFixSettings,
   type AutoPostKinds,
   type AutoPostScope,
+  type AutoReviewSweepBody,
+  type AutoReviewSweepResponse,
   type AutoReviewUsage,
   type SetWorkspaceAutoReviewBody,
   type StoredAutoFixSettings,
@@ -533,6 +535,68 @@ export function registerAutoReviewSettingsRoutes(app: FastifyInstance, ctx: Agen
     const resp: WorkspaceAutoReviewResponse = { workspaceId: id, autoReview, ...(usage ? { usage } : {}) };
     return resp;
   });
+
+  // RUN AUTO REVIEWS NOW (the Open PRs header) / RETRY ONE PR (the AI Review tab): ONE sweep of this
+  // workspace through the sweeper itself (auto.ts `runAutoReviewSweep` with a press), so every auto
+  // rule still holds — trigger 'auto', the default provider, auto-post settings, the daily cap, the
+  // lane cap — and never two sweeps at once (its in-flight guard answers `busy`). The press waives
+  // the settle waits, the retry backoff and the attempt cap; the spend budget's over-limit confirm is
+  // the SPA's two-press (`OverBudgetConfirm`). Rate limit: `ai` + `aiHourly` (it starts model runs).
+  // 404 for another account's workspace. `prId` outside the workspace queues nothing.
+  app.post(
+    '/api/workspaces/:id/auto-review/sweep',
+    {
+      schema: {
+        ...idParam,
+        body: {
+          type: 'object',
+          additionalProperties: false,
+          properties: { prId: { type: 'integer', minimum: 1 } },
+        },
+      },
+    },
+    async (req, reply) => {
+      const { id } = req.params as { id: number };
+      const accountId = ctx.accountIdOf(req);
+      const body = (req.body ?? {}) as AutoReviewSweepBody;
+      const autoReview = await readWorkspaceAutoReview(ctx, accountId, id);
+      if (!autoReview) {
+        reply.status(404);
+        return { error: 'NotFound', message: `Workspace ${id} not found` };
+      }
+      const base: AutoReviewSweepResponse = {
+        workspaceId: id,
+        queued: 0,
+        retried: 0,
+        checksQueued: 0,
+        capped: false,
+        laneFull: false,
+        aiNotReady: false,
+        busy: false,
+        off: false,
+      };
+      if (!autoReview.enabled) return { ...base, off: true };
+      // Lazy: auto.ts imports this module.
+      const { runAutoReviewSweep } = await import('./auto.js');
+      const r = await runAutoReviewSweep(ctx, Date.now(), {
+        accountId,
+        workspaceId: id,
+        ...(body.prId != null ? { prId: body.prId } : {}),
+      });
+      const resp: AutoReviewSweepResponse = {
+        ...base,
+        queued: r.queued,
+        retried: r.retried ?? 0,
+        checksQueued: r.checksQueued ?? 0,
+        capped: r.capped === true,
+        laneFull: r.stopped === 'lane_full',
+        aiNotReady: r.stopped === 'ai_not_ready',
+        busy: r.busy === true,
+        off: r.off === true,
+      };
+      return resp;
+    },
+  );
 
   app.put(
     '/api/workspaces/:id/auto-review',

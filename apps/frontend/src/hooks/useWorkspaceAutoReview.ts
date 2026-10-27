@@ -1,7 +1,8 @@
 import { skipToken, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { SetWorkspaceAutoReviewBody, WorkspaceAutoReviewResponse } from '@pierre-review/shared';
+import type { AutoReviewSweepBody, SetWorkspaceAutoReviewBody, WorkspaceAutoReviewResponse } from '@pierre-review/shared';
 import { api } from '../api/client.js';
 import { workspaceKey } from './useActivity.js';
+import { CLAUDE_REVIEW_STATES_KEY } from './useClaudeReview.js';
 
 // Auto Claude review for ONE workspace — CORE (`workspaces.auto_review_enabled[_at]`, migration
 // 0074 / pg 0061), read and written on `/api/workspaces/:id/auto-review`. It moved out of the
@@ -20,6 +21,29 @@ export function useWorkspaceAutoReview(enabled: boolean, workspaceId: number | n
     queryFn:
       enabled && workspaceId != null ? () => api.workspaceAutoReview(workspaceId) : skipToken,
     staleTime: 60_000,
+  });
+}
+
+/**
+ * "Run auto reviews now" (Open PRs) and "Retry" on one PR's failed auto run (the AI Review tab): ONE
+ * auto-review sweep of the workspace now. On an answer it refreshes the day's counter, the Open PRs
+ * Claude column and (for a Retry) that PR's review pane, so the queued runs show at once.
+ * The mutation key is per workspace, so two mounts share the in-flight state.
+ */
+export function useRunAutoReviewSweep(workspaceId: number | null) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationKey: ['auto-review-sweep', workspaceKey(workspaceId)],
+    mutationFn: (body: AutoReviewSweepBody = {}) => {
+      if (workspaceId == null) throw new Error('Workspace not resolved yet.');
+      return api.runAutoReviewSweep(workspaceId, body);
+    },
+    onSuccess: (_res, body) => {
+      void qc.invalidateQueries({ queryKey: workspaceAutoReviewKey(workspaceId) });
+      void qc.invalidateQueries({ queryKey: CLAUDE_REVIEW_STATES_KEY });
+      void qc.invalidateQueries({ queryKey: ['claude-reviews-active'] });
+      if (body?.prId != null) void qc.invalidateQueries({ queryKey: ['claude-review', body.prId] });
+    },
   });
 }
 

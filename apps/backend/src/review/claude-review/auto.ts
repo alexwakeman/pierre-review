@@ -62,6 +62,20 @@
 //                        OR burst ≥ AUTO_REREVIEW_MAX_WAIT_MS (20 min since the FIRST trigger of
 //                        this burst — a key change resets the 5 min, never the 20)
 //
+//     A FAILED AUTO RUN → the latest run at the current head is an AUTO run that FAILED (nothing at
+//                        that head succeeded): due again only when the error is TRANSIENT (usage or
+//                        rate limit, overload, network/timeout, sign-in/runtime, a restart), fewer
+//                        than 3 auto rows exist at the head (counted in the DB, so the cap holds across
+//                        restarts), and the default provider changed, OR the usage reset the error or
+//                        the usage reading names has passed, OR (no reset known) 1 h / then 4 h passed.
+//                        A reader's Stop (cancelled) and a manual failure are never retried by
+//                        themselves. The lane re-checks the failed run is still the latest at the head.
+//     A READER'S PRESS   → "Run auto reviews now" / "Retry" (POST …/auto-review/sweep): one sweep of
+//                        one workspace (or one PR) through THIS rule with `pressed` — the settle waits,
+//                        the retry backoff, the attempt cap and the transient test are waived; the
+//                        daily cap and a run in flight are not; the spend budget is not asked (the
+//                        SPA's over-budget confirm is the reader's choice).
+//
 // ⚠ IT DOES NOT WAIT FOR CI. The old hold (CI running on a head younger than 30 min) is gone: a
 // failing check is diagnosed by its own process, not by holding the code review back.
 //
@@ -82,6 +96,13 @@ import type { ClaudeAutoReviewWaiting } from '@pierre-review/shared';
 import { config } from '../../config.js';
 import type { AgentContext } from '../agent-context.js';
 import { agenticRunReady } from './ai-ready.js';
+import {
+  AUTO_RETRY_BACKOFF_FIRST_MS,
+  AUTO_RETRY_BACKOFF_LATER_MS,
+  AUTO_RETRY_MAX_ATTEMPTS,
+  classifyAutoReviewFailure,
+  parseRetryAtMs,
+} from './auto-retry.js';
 import { automaticRunAllowed } from '../budget-gate.js';
 import { listAutoReviewWorkspaces } from './auto-settings.js';
 import {
@@ -117,23 +138,69 @@ export function autoReviewWaiting(prId: number, accountId: number): ClaudeAutoRe
   return waitingNow.get(`${accountId}:${prId}`) ?? null;
 }
 
+/** What `autoReviewDue` says while a PR is not due: a settle wait (shown in the Claude Review
+ *  header), or one of the RETRY holds (a failed auto run at this head; not shown as a wait). */
+export type AutoReviewHold = ClaudeAutoReviewWaiting | 'retry_wait' | 'not_retryable' | 'attempts_used';
+
+/** The latest AUTO run at the PR's current head FAILED: what the retry branch of the rule reads. */
+export interface AutoRetryInput {
+  /** AUTO rows at this (PR, head), the failed one included — the attempt cap's count. */
+  attempts: number;
+  failedAtMs: number;
+  error: string | null;
+  /** Who ran the failed run, and the DEFAULT provider now (an automatic run goes to it). */
+  failedProvider: 'claude' | 'codex';
+  currentProvider: 'claude' | 'codex';
+  /** The failed provider's usage reading's reset for this failure (`usageResetFromReading`), if any. */
+  usageResetAtMs?: number | null;
+}
+
 /**
  * THE START RULE (see the header). Pure. `settle` is null for a FIRST review (no settle wait);
  * otherwise the quiet / burst clocks and which kind of trigger it is, for the wait reason.
  * `inFlight`: a run of this PR is queued or running (never cancelled — the head waits).
  * `lastRunAtMs`: the latest start or finish of any run of this PR (null = none), compared with
  * when this burst's first push was seen.
+ * `retry`: the latest AUTO run at the current head FAILED (the RETRY branch, below).
+ * `pressed`: the reader pressed "Run auto reviews now" / "Retry" — the settle wait, the retry
+ * backoff, the attempt cap and the transient test are waived (a run in flight still waits; the
+ * daily cap is the sweeper's and is never waived).
+ *
+ * THE RETRY BRANCH. A failed auto run is retried automatically only when its error is TRANSIENT
+ * (`classifyAutoReviewFailure`), fewer than AUTO_RETRY_MAX_ATTEMPTS auto rows exist at this head,
+ * and one of: the DEFAULT provider changed since that run; for a usage limit, the reset time the
+ * error or the usage reading names has passed (when one is known the backoff does not apply — an
+ * earlier retry would fail the same way and use up an attempt); otherwise the backoff has passed
+ * (1 h after the first failure, 4 h after later ones). A succeeded run at the head never reaches
+ * here: it is final. A run the reader STOPPED (cancelled) is never retried by itself.
  */
 export function autoReviewDue(input: {
   nowMs: number;
   settle: { quietSinceMs: number; burstStartMs: number; reason: 'head' | 'comments' } | null;
   inFlight?: boolean;
   lastRunAtMs?: number | null;
-}): { due: true } | { due: false; reason: ClaudeAutoReviewWaiting } {
-  const { nowMs, settle } = input;
+  retry?: AutoRetryInput | null;
+  pressed?: boolean;
+}): { due: true } | { due: false; reason: AutoReviewHold; retryAtMs?: number } {
+  const { nowMs, settle, retry } = input;
+  if (retry) {
+    if (input.inFlight) return { due: false, reason: 'retry_wait' };
+    if (input.pressed) return { due: true };
+    const kind = classifyAutoReviewFailure(retry.error);
+    if (kind === 'final') return { due: false, reason: 'not_retryable' };
+    if (retry.attempts >= AUTO_RETRY_MAX_ATTEMPTS) return { due: false, reason: 'attempts_used' };
+    if (retry.failedProvider !== retry.currentProvider) return { due: true };
+    const resetAtMs =
+      kind === 'usage_limit' ? (parseRetryAtMs(retry.error, retry.failedAtMs) ?? retry.usageResetAtMs ?? null) : null;
+    const retryAtMs =
+      resetAtMs ??
+      retry.failedAtMs + (retry.attempts <= 1 ? AUTO_RETRY_BACKOFF_FIRST_MS : AUTO_RETRY_BACKOFF_LATER_MS);
+    return nowMs >= retryAtMs ? { due: true } : { due: false, reason: 'retry_wait', retryAtMs };
+  }
   if (!settle) return { due: true };
   const reason: ClaudeAutoReviewWaiting = settle.reason === 'comments' ? 'comments' : 'commits';
   if (input.inFlight) return { due: false, reason };
+  if (input.pressed) return { due: true };
   // A new head after a quiet spell — the burst's first push came ≥ 5 min after the last run
   // started or finished: on receipt. (A push during a run, or within 5 min of one, settles.)
   if (
@@ -220,21 +287,55 @@ export interface AutoSweepResult {
   stopped: 'lane_full' | 'ai_not_ready' | null;
   // True when the Claude spend budget paused at least one account's automatic runs this tick.
   overBudget?: boolean;
+  // Of `queued`, how many were RETRIES of a failed auto run at the PR's current head.
+  retried?: number;
+  // True when at least one due PR was left for tomorrow by the workspace's daily cap.
+  capped?: boolean;
+  // A press only: another sweep was running, so this one did nothing (never two at once).
+  busy?: boolean;
+  // A press only: auto review is not on for that workspace (or it is not the account's).
+  off?: boolean;
+}
+
+/** A READER'S PRESS ("Run auto reviews now", or "Retry" on one PR): ONE workspace (and, for
+ *  Retry, one PR). It waives the settle wait, the retry backoff, the attempt cap and the transient
+ *  test (`autoReviewDue`'s `pressed`), and does not ask the spend budget (the SPA's over-budget
+ *  confirm is the reader's choice). The daily cap, the lane cap and AI readiness still hold. */
+export interface AutoSweepPress {
+  accountId: number;
+  workspaceId: number;
+  prId?: number;
 }
 
 let sweeping = false;
 
+// The DEFAULT provider now (Settings → AI): an automatic run goes to it. Lazy, so this module's
+// import stays light; a test may pin it.
+const defaultProviderOf = async (): Promise<'claude' | 'codex'> =>
+  (await import('../../ai/provider-setting.js')).activeProviderId();
+let currentProviderOf: () => Promise<'claude' | 'codex'> = defaultProviderOf;
+/** Test hook. */
+export function _setAutoProviderForTest(p: (() => 'claude' | 'codex') | null): void {
+  currentProviderOf = p ? async () => p() : defaultProviderOf;
+}
+
 /**
- * One tick. Exported for tests; the host scheduler calls it through `registerAutoReview`.
+ * One tick, or one reader's press (`press`). Exported for tests; the host scheduler calls it
+ * through `registerAutoReview`, the sweep route (auto-settings.ts) with `press`.
  */
 export async function runAutoReviewSweep(
   ctx: AgentContext,
   nowMs: number = Date.now(),
+  press: AutoSweepPress | null = null,
 ): Promise<AutoSweepResult> {
   const result: AutoSweepResult = { queued: 0, reQueued: 0, stopped: null };
-  const candidatesOf = ctx.queries.getAutoReviewCandidates?.bind(ctx.queries);
+  const candidatesOf = ctx.queries?.getAutoReviewCandidates?.bind(ctx.queries);
   if (!autoReviewAvailable(ctx) || !candidatesOf) return result;
-  if (sweeping) return result; // re-entrancy: a slow tick must not double-enqueue
+  if (sweeping) {
+    // re-entrancy: a slow tick must not double-enqueue (and a press waits for the tick)
+    if (press) result.busy = true;
+    return result;
+  }
   // AI not set up yet (no runtime, or no Claude credential): queue nothing, so no PR gets a failed
   // row that would use up its one automatic review. The PRs still qualify on a later tick.
   if (!agenticRunReady(ctx, 'review')) {
@@ -246,16 +347,27 @@ export async function runAutoReviewSweep(
     const dayStartMs = utcDayStartMs(nowMs);
     const liveHeads = new Set<string>();
     const livePrs = new Set<string>();
-    const roster = await listAutoReviewWorkspaces(ctx);
+    const fullRoster = await listAutoReviewWorkspaces(ctx);
     // A workspace switched off since its items were queued: they wait no longer (the settings
     // PUT drops them at once; this catches any other way the switch went off).
-    const on = new Set(roster.map((w) => `${w.accountId}:${w.workspaceId}`));
+    const on = new Set(fullRoster.map((w) => `${w.accountId}:${w.workspaceId}`));
     dropAutoReviews((accountId, workspaceId) => on.has(`${accountId}:${workspaceId}`));
+    // A press covers its ONE workspace, and only while auto review is on there.
+    const roster = press
+      ? fullRoster.filter((w) => w.accountId === press.accountId && w.workspaceId === press.workspaceId)
+      : fullRoster;
+    if (press && roster.length === 0) {
+      result.off = true;
+      return result;
+    }
+    const only = (prId: number): boolean => press?.prId == null || press.prId === prId;
+    const pressed = press != null;
     // THE CLAUDE SPEND BUDGET (ai/budget.ts): asked once per account per tick. Over it, the account's
     // workspaces queue nothing (first reviews, re-reviews and Check threads alike) and keep their
     // settle clocks; the next tick under the limit picks them up.
+    // A PRESS does not ask: the reader chose the run (the SPA's two-press confirm ran when over).
     const budgetOk = new Map<number, boolean>();
-    for (const accountId of new Set(roster.map((w) => w.accountId))) {
+    for (const accountId of pressed ? [] : new Set(roster.map((w) => w.accountId))) {
       const ok = await automaticRunAllowed(ctx, accountId, 'auto review');
       budgetOk.set(accountId, ok);
       if (!ok) result.overBudget = true;
@@ -274,13 +386,21 @@ export async function runAutoReviewSweep(
         limit: ws.dailyCap + waiting.size,
       });
       if (!res) continue; // the workspace is gone
-      const waitingHere = [...new Set([...res.prIds, ...(res.reReview ?? []).map((r) => r.prId)])].filter(
-        (id) => waiting.has(id),
-      ).length;
+      const waitingHere = [
+        ...new Set([
+          ...res.prIds,
+          ...(res.reReview ?? []).map((r) => r.prId),
+          ...(res.retry ?? []).map((r) => r.prId),
+        ]),
+      ].filter((id) => waiting.has(id)).length;
       let budget = ws.dailyCap - res.autoToday - waitingHere;
       for (const prId of res.prIds) {
-        if (budget <= 0) break;
+        if (!only(prId)) continue;
         if (waiting.has(prId)) continue;
+        if (budget <= 0) {
+          result.capped = true;
+          break;
+        }
         const k = `${ws.accountId}:${prId}`;
         livePrs.add(k);
         waitingNow.delete(k); // a first review is always due: queued, or waits on the cap / lane
@@ -295,6 +415,63 @@ export async function runAutoReviewSweep(
           return result;
         }
         // 'already': a person started it meanwhile — it no longer counts against auto.
+      }
+      if (result.stopped) break;
+
+      // ---- retries: the latest AUTO run at the current head FAILED ----
+      // THE ONE START RULE decides (`autoReviewDue`'s retry branch); a press waives its waits.
+      const retried = new Set<number>();
+      let providerNow: 'claude' | 'codex' | null = null;
+      for (const cand of res.retry ?? []) {
+        if (!only(cand.prId) || waiting.has(cand.prId)) continue;
+        providerNow ??= await currentProviderOf().catch(() => cand.provider);
+        // The usage reading's reset, read only when the rule could need it (a usage limit whose
+        // error names no time, on the same provider).
+        let usageResetAtMs: number | null = null;
+        if (
+          !pressed &&
+          cand.provider === providerNow &&
+          classifyAutoReviewFailure(cand.error) === 'usage_limit' &&
+          parseRetryAtMs(cand.error, cand.failedAtMs) == null &&
+          ctx.aiBudget?.usageResetAfter
+        ) {
+          usageResetAtMs = await ctx.aiBudget.usageResetAfter(cand.provider, cand.failedAtMs).catch(() => null);
+        }
+        const due = autoReviewDue({
+          nowMs,
+          settle: null,
+          retry: {
+            attempts: cand.attempts,
+            failedAtMs: cand.failedAtMs,
+            error: cand.error,
+            failedProvider: cand.provider,
+            currentProvider: providerNow,
+            usageResetAtMs,
+          },
+          pressed,
+        });
+        if (!due.due) continue;
+        if (budget <= 0) {
+          result.capped = true;
+          continue;
+        }
+        const r = enqueueAutoReview(ctx, ws.accountId, cand.prId, ws.workspaceId, null, {
+          retryOfReviewId: cand.failedReviewId,
+          pressed,
+        });
+        if (r === 'queued' || r === 'already') retried.add(cand.prId);
+        if (r === 'queued') {
+          headSeen.delete(`${ws.accountId}:${cand.prId}`);
+          waitingNow.delete(`${ws.accountId}:${cand.prId}`);
+          result.queued += 1;
+          result.retried = (result.retried ?? 0) + 1;
+          budget -= 1;
+        } else if (r === 'full') {
+          result.stopped = 'lane_full';
+          break;
+        } else if (r === 'disabled') {
+          return result;
+        }
       }
       if (result.stopped) break;
 
@@ -314,6 +491,7 @@ export async function runAutoReviewSweep(
 
       // ---- a run is in flight and the head moved past it: never cancel, start the clock ----
       for (const { prId, headSha } of res.inFlightMoved ?? []) {
+        if (!only(prId)) continue;
         const k = `${ws.accountId}:${prId}`;
         liveHeads.add(k);
         livePrs.add(k);
@@ -325,10 +503,11 @@ export async function runAutoReviewSweep(
       let checkBudget: number | null = null;
       for (const cand of res.reReview ?? []) {
         const { prId, headSha, commentsAtMs, lastRunAtMs, coveredMs } = cand;
+        if (!only(prId)) continue;
         const k = `${ws.accountId}:${prId}`;
         liveHeads.add(k);
         livePrs.add(k);
-        if (waiting.has(prId)) continue;
+        if (waiting.has(prId) || retried.has(prId)) continue;
         // A same-head comment burst: a light Check threads pass, unless a Limn finding got a reply.
         // The candidate read already carries the check's coverage and the own-finding reply time
         // (both filtered like the trigger); an older host without them falls back to the DB read.
@@ -354,9 +533,10 @@ export async function runAutoReviewSweep(
             nowMs,
             settle: { quietSinceMs: seen.firstSeenMs, burstStartMs: seen.burstStartMs, reason: 'comments' },
             lastRunAtMs: null,
+            pressed,
           });
           if (!due.due) {
-            waitingNow.set(k, due.reason);
+            if (isSettleWait(due.reason)) waitingNow.set(k, due.reason);
             continue;
           }
           waitingNow.delete(k);
@@ -394,14 +574,18 @@ export async function runAutoReviewSweep(
             reason: commentsAtMs != null ? 'comments' : 'head',
           },
           lastRunAtMs: lastRunAtMs ?? null,
+          pressed,
         });
         if (!due.due) {
-          waitingNow.set(k, due.reason);
+          if (isSettleWait(due.reason)) waitingNow.set(k, due.reason);
           continue;
         }
         waitingNow.delete(k); // due: from here it is queued, or waits on the daily cap / lane
-        if (budget <= 0) continue;
-        const r = enqueueAutoReview(ctx, ws.accountId, prId, ws.workspaceId, commentsAtMs ?? null);
+        if (budget <= 0) {
+          result.capped = true;
+          continue;
+        }
+        const r = enqueueAutoReview(ctx, ws.accountId, prId, ws.workspaceId, commentsAtMs ?? null, { pressed });
         // Queued (or a person already started it): this burst is covered. Forget its clocks NOW —
         // the PR can be a candidate again before any full pass prunes it (a comment landing while
         // the run is in flight), and an inherited burst start would hit the 20-minute ceiling at
@@ -421,8 +605,8 @@ export async function runAutoReviewSweep(
       if (result.stopped) break;
     }
     // Forget heads that are no longer candidates (reviewed, closed, switched off) — only after a
-    // FULL pass, or a skipped workspace would restart its wait.
-    if (!result.stopped && !result.overBudget) {
+    // FULL pass, or a skipped workspace would restart its wait (a press covers one workspace).
+    if (!result.stopped && !result.overBudget && !pressed) {
       for (const k of headSeen.keys()) if (!liveHeads.has(k)) headSeen.delete(k);
       for (const k of waitingNow.keys()) if (!livePrs.has(k)) waitingNow.delete(k);
     }
@@ -436,6 +620,10 @@ export async function runAutoReviewSweep(
   } finally {
     sweeping = false;
   }
+}
+
+function isSettleWait(r: AutoReviewHold): r is ClaudeAutoReviewWaiting {
+  return r === 'comments' || r === 'commits' || r === 'ci';
 }
 
 /** Register the sweeper — only where it can run, so a cloud host never even schedules it. */

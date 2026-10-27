@@ -179,6 +179,7 @@ import type {
 // from `shared` (not typed here) because the board's info popovers print the same values; a local
 // literal would let the app explain an order it no longer produces. See pending-rules.ts.
 import {
+  aiRunProvider,
   automationVendorFor,
   MY_TURN_REPLY_MAX_CHARS,
   MY_TURN_SEVERITY,
@@ -9866,7 +9867,9 @@ export async function getUnactionedClaudeReviews(
 // Each re-review carries `lastRunAtMs` (the latest start or finish of any run of the PR) for the
 // sweeper's "start a new head on receipt unless a run was within 5 minutes" test, and
 // `inFlightMoved` lists PRs whose run is queued or running while their head moved past it (never
-// cancelled; the sweeper only starts that head's settle clock). There is NO CI reading: auto review
+// cancelled; the sweeper only starts that head's settle clock). `retry` lists PRs whose latest run at
+// the current head is a FAILED AUTO run (the sweeper's start rule decides if it is due again; the
+// attempt count is the auto rows at that head, so the cap survives a restart). There is NO CI reading: auto review
 // does not wait for CI (review/claude-review/auto.ts).
 // `autoToday` counts this workspace's AUTO runs created at or after `dayStartMs`, for the daily cap.
 // Returns null when the workspace is not this account's - never another workspace's answer (the
@@ -9880,6 +9883,7 @@ export async function getAutoReviewCandidates(
   autoToday: number;
   reReview: AutoReReviewCandidate[];
   inFlightMoved: Array<{ prId: number; headSha: string }>;
+  retry: AutoRetryCandidate[];
 } | null> {
   const owned = (
     await db
@@ -9891,7 +9895,7 @@ export async function getAutoReviewCandidates(
   )[0];
   if (!owned) return null;
   const repoIds = await getWorkspaceRepoIds(workspaceId, accountId);
-  if (repoIds.length === 0) return { prIds: [], autoToday: 0, reReview: [], inFlightMoved: [] };
+  if (repoIds.length === 0) return { prIds: [], autoToday: 0, reReview: [], inFlightMoved: [], retry: [] };
 
   const autoRows = await db
     .select({ id: claudeReviews.id })
@@ -9907,7 +9911,7 @@ export async function getAutoReviewCandidates(
     )
     .execute();
   const autoToday = autoRows.length;
-  if (opts.limit <= 0) return { prIds: [], autoToday, reReview: [], inFlightMoved: [] };
+  if (opts.limit <= 0) return { prIds: [], autoToday, reReview: [], inFlightMoved: [], retry: [] };
 
   const open = await db
     .select({
@@ -9927,7 +9931,7 @@ export async function getAutoReviewCandidates(
     )
     .orderBy(asc(pullRequests.openedAt), asc(pullRequests.id))
     .execute();
-  if (open.length === 0) return { prIds: [], autoToday, reReview: [], inFlightMoved: [] };
+  if (open.length === 0) return { prIds: [], autoToday, reReview: [], inFlightMoved: [], retry: [] };
 
   const [bots, reviewed, reviewerBots] = await Promise.all([
     hiddenBotUserIds(accountId, workspaceId),
@@ -9940,6 +9944,10 @@ export async function getAutoReviewCandidates(
         createdAt: claudeReviews.createdAt,
         finishedAt: claudeReviews.finishedAt,
         commentsThrough: claudeReviews.commentsThrough,
+        trigger: claudeReviews.trigger,
+        error: claudeReviews.error,
+        provider: claudeReviews.provider,
+        model: claudeReviews.model,
       })
       .from(claudeReviews)
       .where(
@@ -9979,6 +9987,7 @@ export async function getAutoReviewCandidates(
   }
   const reReview: AutoReReviewCandidate[] = [];
   const inFlightMoved: Array<{ prId: number; headSha: string }> = [];
+  const retry: AutoRetryCandidate[] = [];
   // Same head, but maybe NEW REVIEW COMMENTS: the PR's runs at its head and how far they saw.
   const sameHead: Array<{ prId: number; headSha: string; coveredMs: number }> = [];
   for (const pr of human) {
@@ -9991,6 +10000,33 @@ export async function getAutoReviewCandidates(
     ) {
       inFlightMoved.push({ prId: pr.id, headSha: pr.headSha });
       continue;
+    }
+    // RETRY: the latest run at the current head is a FAILED AUTO run and nothing at this head
+    // succeeded (a succeeded run is final). Same population as everything else here: after the
+    // floor, or followed since the floor. WHETHER it is due — transient error, backoff, usage reset,
+    // provider change, attempt cap — is the sweeper's ONE start rule (`autoReviewDue`), not this read.
+    // It falls through: a comment burst on the same head is still offered below as before.
+    if (newest.status !== 'queued' && newest.status !== 'running' && retry.length < opts.limit) {
+      const here = runs.filter((r) => r.headSha === pr.headSha);
+      const last = here.length > 0 ? here.reduce((a, b) => (b.id > a.id ? b : a)) : null;
+      if (
+        last &&
+        last.trigger === 'auto' &&
+        last.status === 'failed' &&
+        !here.some((r) => r.status === 'succeeded') &&
+        (afterFloor(pr) ||
+          runs.some((r) => r.status === 'succeeded' && r.createdAt.getTime() >= opts.openedSinceMs))
+      ) {
+        retry.push({
+          prId: pr.id,
+          headSha: pr.headSha,
+          failedReviewId: last.id,
+          attempts: here.filter((r) => r.trigger === 'auto').length,
+          failedAtMs: (last.finishedAt ?? last.createdAt).getTime(),
+          error: last.error ?? null,
+          provider: aiRunProvider(last.provider, last.model),
+        });
+      }
     }
     if (!runs.some((r) => r.status === 'succeeded')) continue;
     if (
@@ -10084,7 +10120,7 @@ export async function getAutoReviewCandidates(
       if (reReview.length >= opts.limit) break;
     }
   }
-  return { prIds, autoToday, reReview, inFlightMoved };
+  return { prIds, autoToday, reReview, inFlightMoved, retry };
 }
 
 // WHO MAY RE-TRIGGER AN AUTO REVIEW BY COMMENTING (the comment half of the re-review key). A
@@ -10139,6 +10175,22 @@ export interface AutoReReviewCandidate {
   // both present the sweeper routes the burst without reading the PR's threads again.
   checkCoveredMs?: number | null;
   newestOwnThreadCommentAtMs?: number | null;
+}
+
+/** A PR whose latest run at its CURRENT head is a FAILED AUTO run (nothing at that head succeeded).
+ *  The sweeper's start rule decides whether it is due again (review/claude-review/auto.ts). */
+export interface AutoRetryCandidate {
+  prId: number;
+  headSha: string;
+  // The failed run: its id (the lane re-checks nothing newer was written), when it ended, its error
+  // and who ran it.
+  failedReviewId: number;
+  failedAtMs: number;
+  error: string | null;
+  provider: 'claude' | 'codex';
+  // AUTO rows at this (PR, head), the failed one included — the attempt cap's count, kept in the DB
+  // so it holds across restarts.
+  attempts: number;
 }
 
 // ---- PR write-action contexts (reply / resolve / comment / approve / inline) ----

@@ -422,6 +422,37 @@ describe('GET / PUT /api/workspaces/:id/auto-review', () => {
       ).statusCode,
     ).toBe(404);
   });
+
+  it('POST …/auto-review/sweep: 404 for a foreign id, `off` while switched off, a counted answer when on', async () => {
+    const app = await build();
+    const sweep = (ws: number, payload: object = {}) =>
+      app.inject({ method: 'POST', url: `/api/workspaces/${ws}/auto-review/sweep`, payload });
+    expect((await sweep(wsB)).statusCode).toBe(404);
+    // A fresh workspace is off: nothing is done.
+    const [fresh] = await (ctx.db as any)
+      .insert((ctx.schema as any).workspaces)
+      .values({ accountId: 1, name: 'Sweep off', isDefault: false })
+      .returning()
+      .execute();
+    const off = await sweep(fresh.id);
+    expect(off.statusCode).toBe(200);
+    expect(off.json()).toMatchObject({ workspaceId: fresh.id, off: true, queued: 0 });
+    // wsA2 was switched on above. This fake context has no candidate read, so nothing is due.
+    const on = await sweep(wsA2, { prId: 5 });
+    expect(on.statusCode).toBe(200);
+    expect(on.json()).toEqual({
+      workspaceId: wsA2,
+      queued: 0,
+      retried: 0,
+      checksQueued: 0,
+      capped: false,
+      laneFull: false,
+      aiNotReady: false,
+      busy: false,
+      off: false,
+    });
+    expect((await sweep(wsA2, { prId: 'x' })).statusCode).toBe(400);
+  });
 });
 
 describe('auto-posting — off by default, overrides only', () => {

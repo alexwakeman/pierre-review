@@ -240,6 +240,8 @@ import type {
   WorkPlanResponse,
   SetWorkspaceAutoReviewBody,
   WorkspaceAutoReviewResponse,
+  AutoReviewSweepBody,
+  AutoReviewSweepResponse,
   PostStoryGapsBody,
   PostStoryGapsResponse,
   PrTicketReviewsResponse,
@@ -550,6 +552,12 @@ export const api = {
   setWorkspaceAutoReview: (id: number, body: SetWorkspaceAutoReviewBody) =>
     fetch(`/api/workspaces/${id}/auto-review`, jsonBody('PUT', body)).then((r) =>
       handle<WorkspaceAutoReviewResponse>(r),
+    ),
+  // "Run auto reviews now" (Open PRs) / "Retry" a failed auto run (`prId`, the AI Review tab): ONE
+  // auto-review sweep of this workspace now. Always sends a JSON body (`{}` when none).
+  runAutoReviewSweep: (id: number, body: AutoReviewSweepBody = {}) =>
+    fetch(`/api/workspaces/${id}/auto-review/sweep`, jsonBody('POST', body)).then((r) =>
+      handle<AutoReviewSweepResponse>(r),
     ),
   // Chronology's working hours and wait budgets for this workspace. ⚠ THE BODY IS THE WHOLE
   // OVERRIDE SET: a field left out goes back to its product default, and `{}` resets everything.

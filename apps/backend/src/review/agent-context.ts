@@ -115,6 +115,17 @@ export interface AgentContext {
       // PRs whose run is queued or running while their synced head has moved past it: never
       // cancelled — the sweeper only starts the new head's settle clock. Absent ⇒ none.
       inFlightMoved?: Array<{ prId: number; headSha: string }>;
+      // PRs whose latest run at the current head is a FAILED AUTO run (db/queries.ts
+      // `AutoRetryCandidate`); the sweeper's start rule decides whether each is due. Absent ⇒ none.
+      retry?: Array<{
+        prId: number;
+        headSha: string;
+        failedReviewId: number;
+        failedAtMs: number;
+        error: string | null;
+        provider: 'claude' | 'codex';
+        attempts: number;
+      }>;
     } | null>;
     // The OTHER reviewers' open threads on a PR + the newest qualifying comment
     // (db/review-threads-for-review.ts). Absent ⇒ the review assesses no threads.
