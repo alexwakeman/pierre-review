@@ -507,6 +507,10 @@ export interface PostReviewFinding {
   // A visible last line (shared `AUTO_POST_FOOTER`), set only by auto-posting; it sits just above
   // the hidden marker. OPTIONAL, so no apiVersion bump.
   footer?: string | null;
+  // The finding's severity: the comment LEADS with its bold word (shared `limnSeverityLead`, read
+  // through `severityForPostedFinding`). Absent / praise ⇒ no lead (a ticket review's story-gaps
+  // comment). OPTIONAL, so no apiVersion bump.
+  severity?: ClaudeFindingSeverity | null;
 }
 
 export interface PostReviewArgs {

@@ -58,6 +58,7 @@ import {
 import { useClaudeThreadJudgements } from '../../hooks/useClaudeThreadJudgements.js';
 import { threadPillFor } from '../../lib/claudeThreadMarker.js';
 import { ClaudeThreadPills } from '../ThreadView/ClaudeThreadBadge.js';
+import { LimnSeverityChip } from '../LimnSeverityChip.js';
 import { CopyButton } from '../CopyButton.js';
 import { MentionTextarea } from '../MentionTextarea.js';
 import { ThreadCard } from '../ThreadView/index.js';
@@ -518,6 +519,8 @@ function InlineThread({
             the thread a reader gets while scrolling the diff, and a bare state dot describes
             nothing. */}
         {!open && claude != null && <ClaudeThreadPills marker={claude} noInfo />}
+        {/* Limn's own posted finding: its severity. Open, the ThreadCard header shows it. */}
+        {!open && <LimnSeverityChip severity={thread.limnSeverity} />}
         {!open && (
           <>
             <span className="shrink-0 font-medium">{author}</span>

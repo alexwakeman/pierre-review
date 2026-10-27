@@ -2183,6 +2183,37 @@ auto-posting: claim before any GitHub write, never retried.
   clears the reader's outstanding review request on that PR, and the reader's own comments count as
   the reader acting for My Turn's ball rule.
 
+## Severity labels on posted findings (2026-10-27)
+
+Every comment Limn posts for a finding LEADS with the finding's severity as a bold word:
+`**Blocker**`, `**Warning**`, `**Nit**`, `**Question**` (praise is never posted, so it has none).
+
+- **Inline comment:** the word on its own line, then the body (`**Warning**\n\n<body>…`).
+- **PR-level comment:** the word, then ` · ` and the file reference that comment always named
+  (`**Warning** · \`src/x.ts:42\``), replacing the old bare bold reference. A finding with no file
+  gets the bare word. A comment with no severity (the ticket review's story-gaps comment) keeps the
+  old shape.
+- **Order:** severity lead, then any reminder / story lead, then the body; the footer and the hidden
+  `FINDING_COMMENT_MARKER` stay last and unchanged, so `isLimnPostedComment` still holds.
+- **One owner each** (`packages/shared/src/limn-severity.ts`): `limnSeverityLabel` (the word),
+  `limnSeverityLead(severity, {tag?, ref?})` (the line; `tag` is an extra part such as a provider
+  name on a paired post: `**Warning** · Codex`), and **`severityForPostedFinding(finding)` — THE
+  GRADER SEAM**. Today it returns the review's own severity; a later bot-comment grader replaces
+  that function's body and nothing else. The builders (`post-review.ts` `findingCommentBody` /
+  `prLevelFindingBody`) take `severity` on the finding (`PostReviewFinding.severity`, optional) and
+  call the seam. Replies (accept, pushback, resolve, manual reply) get no label.
+- ⚠ **Matching comments posted before and after the label.** `finding-thread.ts` compares a thread
+  root's START with the finding's text; it accepts the start with or without a leading severity line
+  (`stripLimnSeverityLead`). `posted-state.ts`'s PR-level match needs the backticked `path:line`,
+  which both shapes carry. Everything else matches on the marker or the stored comment id.
+- **In Limn:** the PR details pane shows the same word as a chip (`LimnSeverityChip`, the ML badge's
+  shape, `vendorInk` colours) on a thread that is one of Limn's posted findings (the Changes tab's
+  collapsed pill, every `ThreadCard` header incl. the Threads only view) and on such a PR-level
+  comment (Comments tab). It reads `ThreadDetail.limnSeverity` / `PrCommentDetail.limnSeverity` from
+  GET `/api/prs/:id` (`db/limn-finding-severity.ts`: the finding's stored comment id = the thread's
+  ROOT comment or the PR comment, its latest reminder's comment, else `findFindingThread`; severity
+  through the same seam). No request of its own, no migration.
+
 ## Chat about a review
 
 After a review **succeeds**, the reader can ask Claude about it: ONE **thread** per review

@@ -890,6 +890,8 @@ const THREAD_5001: ThreadDetail = {
     },
   ],
   url: null,
+  // Not a finding Limn posted (only GET /api/prs/:id ever sets it).
+  limnSeverity: null,
 };
 
 // A complete-but-empty PR detail so opening a PR never crashes the (error-boundary-less)

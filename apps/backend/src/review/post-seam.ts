@@ -51,7 +51,7 @@ export async function postReview(args: PostReviewArgs): Promise<PostReviewOutcom
   const prComments: PostReviewPrComment[] = [];
   const inlineFindingIds: number[] = [];
   for (const f of args.includedFindings) {
-    const shape = { body: f.body, editedBody: null, suggestion: f.suggestion, storyLead: f.storyLead };
+    const shape = { body: f.body, editedBody: null, suggestion: f.suggestion, storyLead: f.storyLead, severity: f.severity };
     const footer = f.footer ?? null;
     // Anchorable on its own line → inline comment there.
     if (f.line != null && isFindingAnchored(index, f.path, f.line, f.side)) {
@@ -82,6 +82,7 @@ export async function postReview(args: PostReviewArgs): Promise<PostReviewOutcom
             editedBody: null,
             suggestion: f.suggestion,
             storyLead: f.storyLead,
+            severity: f.severity,
           },
           { footer },
         ),
@@ -215,7 +216,7 @@ export async function postFinding(args: PostFindingArgs): Promise<PostFindingOut
   const { owner, name, prNumber, reviewHeadSha, finding: f } = args;
   const currentHead = await fetchCurrentHeadSha(owner, name, prNumber);
   if (currentHead !== reviewHeadSha) return { headMoved: true };
-  const shape = { body: f.body, editedBody: null, suggestion: f.suggestion, storyLead: f.storyLead };
+  const shape = { body: f.body, editedBody: null, suggestion: f.suggestion, storyLead: f.storyLead, severity: f.severity };
   const footer = f.footer ?? null;
   const prLevelBody = (outsideDiffNote: boolean): string =>
     prLevelFindingBody(
@@ -226,6 +227,7 @@ export async function postFinding(args: PostFindingArgs): Promise<PostFindingOut
         editedBody: null,
         suggestion: f.suggestion,
         storyLead: f.storyLead,
+        severity: f.severity,
       },
       { outsideDiffNote, footer },
     );

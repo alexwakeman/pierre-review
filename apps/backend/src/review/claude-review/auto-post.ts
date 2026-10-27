@@ -653,6 +653,7 @@ const toPostFinding = (f: ClaudeFinding, by: AiProviderName): PostReviewFinding 
   fileInDiff: f.fileInDiff,
   body: resolveFindingBody(f),
   suggestion: f.suggestion,
+  severity: f.severity,
   storyLead: null,
   // The footer names the provider that ran the review (Claude's text unchanged).
   footer: autoPostFooter(by),

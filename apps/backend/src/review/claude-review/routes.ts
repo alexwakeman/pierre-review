@@ -568,6 +568,7 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
           fileInDiff: f.fileInDiff,
           body: resolvedBody(f, story),
           suggestion: f.suggestion,
+          severity: f.severity,
           storyLead:
             [lead, story ? storyCommentLead({ title: f.title, story }, storyReview?.tickets ?? []) : null]
               .filter((p): p is string => p != null)
@@ -686,6 +687,7 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
             fileInDiff: f.fileInDiff,
             body: resolvedBody(f, f.story),
             suggestion: f.suggestion,
+            severity: f.severity,
             storyLead: f.story ? storyCommentLead({ title: f.title, story: f.story }, review.tickets ?? []) : null,
           })),
         dryRun,

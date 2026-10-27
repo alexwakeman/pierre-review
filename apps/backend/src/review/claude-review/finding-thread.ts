@@ -6,6 +6,7 @@
 // comments were read back), else by the thread's ROOT comment: same file, Limn's provenance (the
 // account's own login AND the hidden `<!-- pierre:claude-review` marker) and the finding's text at
 // its start. Pure: callers load the rows.
+import { stripLimnSeverityLead } from '@pierre-review/shared';
 import { resolveFindingBody } from './follow-up.js';
 
 const norm = (t: string): string => t.replace(/\r\n?/g, '\n').trim();
@@ -62,7 +63,10 @@ export function findFindingThread<T extends Pick<ThreadRow, 'id' | 'path'> & { l
     if (!root || root.authorLogin == null || root.authorLogin.toLowerCase() !== accountLogin.toLowerCase()) continue;
     const body = root.body ?? '';
     if (!LIMN_MARKER.test(body)) continue;
-    if (!norm(body).startsWith(text)) continue;
+    // A comment posted since severity labels LEADS with its bold word (shared `limnSeverityLead`);
+    // one posted before has none. Either start matches.
+    const start = norm(body);
+    if (!start.startsWith(text) && !norm(stripLimnSeverityLead(start)).startsWith(text)) continue;
     // ⚠ THE ANCHOR, when both sides carry one: the same words on another line of the same file are
     // ANOTHER finding ("Unused import." twice). Skipped when GitHub reports no current line (outdated)
     // or the comment sat on the file's first change because its own line was not in the diff.

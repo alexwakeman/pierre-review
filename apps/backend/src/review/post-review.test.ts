@@ -399,7 +399,7 @@ describe('buildReview', () => {
       includedFindings: [noSuggestion],
       diff: FOO_DIFF,
     });
-    expect(result.preview.comments[0]?.body).toBe(`Plain body, no suggestion.${M}`);
+    expect(result.preview.comments[0]?.body).toBe(`**Warning**\n\nPlain body, no suggestion.${M}`);
     expect(result.preview.comments[0]?.body).not.toContain('```suggestion');
   });
 
@@ -420,7 +420,7 @@ describe('buildReview', () => {
       includedFindings: [reworded],
       diff: FOO_DIFF,
     });
-    expect(result.preview.comments[0]?.body).toBe(`My reworded comment.${M}`);
+    expect(result.preview.comments[0]?.body).toBe(`**Warning**\n\nMy reworded comment.${M}`);
     expect(result.preview.comments[0]?.body).not.toContain('original wording');
   });
 
@@ -441,7 +441,7 @@ describe('buildReview', () => {
       includedFindings: [blank],
       diff: FOO_DIFF,
     });
-    expect(result.preview.comments[0]?.body).toBe(`Claude body.${M}`);
+    expect(result.preview.comments[0]?.body).toBe(`**Warning**\n\nClaude body.${M}`);
   });
 });
 
@@ -483,6 +483,52 @@ describe('findingCommentBody', () => {
     );
     expect(out.startsWith('B')).toBe(true);
     expect(out).toContain('first change');
+  });
+});
+
+describe('severity labels on posted findings', () => {
+  const base = { body: 'B', editedBody: null, suggestion: null };
+  const words = { blocker: 'Blocker', warning: 'Warning', nit: 'Nit', question: 'Question' } as const;
+
+  it('leads an inline comment with the bold severity word on its own line, for every severity', () => {
+    for (const [sev, word] of Object.entries(words)) {
+      expect(findingCommentBody({ ...base, severity: sev as keyof typeof words })).toBe(`**${word}**\n\nB${M}`);
+    }
+  });
+
+  it('puts the tag on the lead line, and the lead before a story or reminder lead', () => {
+    expect(findingCommentBody({ ...base, severity: 'nit' }, { tag: 'Codex' })).toBe(`**Nit** · Codex\n\nB${M}`);
+    expect(findingCommentBody({ ...base, severity: 'blocker', storyLead: '**Reminder:** first raised earlier.' })).toBe(
+      `**Blocker**\n\n**Reminder:** first raised earlier.\n\nB${M}`,
+    );
+  });
+
+  it('adds no lead without a severity, or for praise (never posted)', () => {
+    expect(findingCommentBody(base)).toBe(`B${M}`);
+    expect(findingCommentBody({ ...base, severity: 'praise' })).toBe(`B${M}`);
+  });
+
+  it('a PR-level comment carries the file reference on the lead line', () => {
+    const f = { ...base, path: 'src/x.ts', line: 42 };
+    for (const [sev, word] of Object.entries(words)) {
+      const out = prLevelFindingBody({ ...f, severity: sev as keyof typeof words }, { outsideDiffNote: false });
+      expect(out).toBe(`**${word}** · \`src/x.ts:42\`\n\nB${M}`);
+    }
+    expect(prLevelFindingBody({ ...f, line: null, severity: 'warning' }, { outsideDiffNote: false })).toBe(`**Warning** · \`src/x.ts\`\n\nB${M}`);
+    expect(prLevelFindingBody({ ...f, severity: 'question' }, { outsideDiffNote: false, tag: 'Codex' })).toBe(
+      `**Question** · Codex · \`src/x.ts:42\`\n\nB${M}`,
+    );
+  });
+
+  it('a PR-level comment with no file has the bare word; with no severity it keeps the old bold reference', () => {
+    expect(prLevelFindingBody({ ...base, path: '', line: null, severity: 'warning' })).toBe(`**Warning**\n\nB${M}`);
+    expect(prLevelFindingBody({ ...base, path: 'src/x.ts', line: 42 }, { outsideDiffNote: false })).toBe(`**\`src/x.ts:42\`**\n\nB${M}`);
+  });
+
+  it('keeps the footer and the hidden marker last', () => {
+    const out = findingCommentBody({ ...base, severity: 'warning' }, { footer: 'Posted automatically' });
+    expect(out).toBe(`**Warning**\n\nB\n\nPosted automatically${M}`);
+    expect(out.endsWith(FINDING_COMMENT_MARKER)).toBe(true);
   });
 });
 

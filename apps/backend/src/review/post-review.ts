@@ -1,7 +1,9 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { limnSeverityLead, severityForPostedFinding } from '@pierre-review/shared';
 import type {
   ClaudeFinding,
+  ClaudeFindingSeverity,
   ClaudeReviewVerdict,
   PostReviewComment,
   PostReviewPrComment,
@@ -179,17 +181,23 @@ export const FINDING_COMMENT_MARKER = '<!-- pierre:claude-review-finding v=1 -->
 // shared `storyCommentLead`). It is not stored in the body — on screen the card sits under its
 // story — so it is added HERE, the one place every story comment is built (single post and Submit
 // review alike), and GitHub still names the story.
+//
+// `severity` LEADS the comment as a bold word on its own line ("**Warning**", shared
+// `limnSeverityLead`, read through the grader seam `severityForPostedFinding`); absent / praise ⇒
+// no lead. `opts.tag` rides that line after a " · " (a provider name on a paired post).
 export function findingCommentBody(
   f: {
     body: string;
     editedBody: string | null;
     suggestion: string | null;
     storyLead?: string | null;
+    severity?: ClaudeFindingSeverity | null;
   },
-  opts?: { fallbackNote?: boolean; footer?: string | null },
+  opts?: { fallbackNote?: boolean; footer?: string | null; tag?: string | null },
 ): string {
   const body = f.editedBody && f.editedBody.trim() ? f.editedBody : f.body;
-  const parts = [f.storyLead, body].filter((p): p is string => p != null && p.trim() !== '');
+  const lead = limnSeverityLead(severityForPostedFinding(f), { tag: opts?.tag });
+  const parts = [lead, f.storyLead, body].filter((p): p is string => p != null && p.trim() !== '');
   if (f.suggestion && f.suggestion.trim()) {
     parts.push(
       opts?.fallbackNote
@@ -216,6 +224,10 @@ export const OUTSIDE_DIFF_NOTE =
 // A finding with NO file (`path` blank — a LEGACY user-story finding about the whole change, made
 // by PR reviews before the ticket review split off) is about the PR, not about a file outside it: it
 // carries neither the file line nor the outside-the-diff note.
+//
+// With a labelled `severity` the first line is the severity lead carrying the file reference
+// ("**Warning** · `src/x.ts:42`", shared `limnSeverityLead`); without one it is the bare bold
+// reference as before. `posted-state.ts` matches on the backticked `path:line`, which both carry.
 export function prLevelFindingBody(f: {
   path: string;
   line: number | null;
@@ -223,12 +235,16 @@ export function prLevelFindingBody(f: {
   editedBody: string | null;
   suggestion: string | null;
   storyLead?: string | null;
-}, opts?: { outsideDiffNote?: boolean; footer?: string | null }): string {
+  severity?: ClaudeFindingSeverity | null;
+}, opts?: { outsideDiffNote?: boolean; footer?: string | null; tag?: string | null }): string {
   const body = f.editedBody && f.editedBody.trim() ? f.editedBody : f.body;
   const hasPath = f.path.trim() !== '';
   const ref = f.line != null ? `${f.path}:${f.line}` : f.path;
-  // A story finding's lead comes FIRST, so the comment opens on the story it is about.
-  const parts = [f.storyLead, hasPath ? `**\`${ref}\`**` : null, body].filter(
+  const lead = limnSeverityLead(severityForPostedFinding(f), { tag: opts?.tag, ref: hasPath ? `\`${ref}\`` : null });
+  // The severity lead comes FIRST; then a story finding's lead, so the comment names the story.
+  const parts = (
+    lead != null ? [lead, f.storyLead, body] : [f.storyLead, hasPath ? `**\`${ref}\`**` : null, body]
+  ).filter(
     (p): p is string => p != null && p.trim() !== '',
   );
   if (f.suggestion && f.suggestion.trim()) {
