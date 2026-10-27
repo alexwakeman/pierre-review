@@ -31,8 +31,11 @@ import {
   sonarHasContent,
   systemPromptForMode,
   untrustedTexts,
+  type PromptPairInput,
   type PromptPeer,
 } from './prompts.js';
+import { dropPairRepeats, pairInputOf, pairProvidersReady, readAutoReviewProvidersForPr } from './pair.js';
+import { preflightFor } from '../../ai/run-choice.js';
 import {
   linkReraisedFindings,
   reconcileFollowUp,
@@ -49,6 +52,7 @@ import type { AgentProviderId } from '../../ai/provider.js';
 import { dropSettledReraises, similarTitles } from './settled-by-reply.js';
 import { attachFindingThreads } from './finding-replies.js';
 import {
+  getClaudeReviewById,
   getLatestClaudeReview,
   getReviewPeerContexts,
   getReviewPrContext,
@@ -112,7 +116,31 @@ interface QueueItem {
   // A FROM-SCRATCH run (`GenerateReviewBody.fresh`, manual only): it reads NO earlier review — no
   // follow-up chain, no settled list, no carried thread judgements. Never set on an auto run.
   fresh?: boolean;
+  // ONE HALF OF A CLAUDE + CODEX PAIR (pair.ts; docs/CLAUDE-REVIEW.md § Claude + Codex). Absent on an
+  // ordinary run.
+  pair?: PairState;
+  // Set when the run ends: did it succeed? (The pair's second half reads the first's.)
+  succeeded?: boolean;
 }
+
+// The pair as one half carries it. The providers are resolved ONCE, when the pair starts.
+interface PairState {
+  role: 'first' | 'second';
+  // The FIRST half's run id (`claude_reviews.pair_id`).
+  pairId: number;
+  // First half: who runs the second (decided at the pair's start).
+  secondProvider?: AgentProviderId;
+  // Second half: did the first succeed, and what it raised (the prompt input + the code dedupe).
+  firstSucceeded?: boolean;
+  input?: PromptPairInput | null;
+  firstFindings?: ReadonlyArray<{ path: string; line: number | null; title: string }>;
+  // Queued by a reader's press (auto): the spend budget is not asked again before the second half.
+  pressed?: boolean;
+}
+
+/** Does this run hand over to a second half when it ends? */
+const pairContinues = (item: QueueItem): boolean =>
+  item.pair?.role === 'first' && item.pair.secondProvider != null;
 
 // An AUTO request waiting for a slot. Deliberately NOT a QueueItem: it has no row yet, so nothing
 // about it is stored until it launches (see REVIEW_AUTO_MAX_QUEUED).
@@ -146,8 +174,11 @@ const autoPending: AutoItem[] = [];
 // against the ONE shared REVIEW_CONCURRENCY so the lane cannot overshoot it while its row is being
 // written. Still "queued" as far as the lock is concerned.
 const startingAuto = new Map<number, AutoItem>();
+// A pair between its halves: the first ended, the second's row is being written. Holds the slot and
+// the PR's claim, so nothing slips in between the two.
+const startingPair = new Map<number, QueueItem>();
 const inFlight = (): number =>
-  runningItems.size + startingAuto.size + slotPeers.reduce((n, p) => n + p.inFlight(), 0);
+  runningItems.size + startingAuto.size + startingPair.size + slotPeers.reduce((n, p) => n + p.inFlight(), 0);
 
 // ---- THE ONE CONCURRENCY BUDGET, shared with the TICKET review (ticket-review/manager.ts) and the
 // CI review (ci-review/manager.ts) ----
@@ -249,7 +280,7 @@ export type StartReviewResult =
  *  tenant's PR id answers null. */
 export type AutoReviewHold = 'queued' | 'running';
 export function autoReviewHold(prId: number, accountId: number): AutoReviewHold | null {
-  const run = runningItems.get(prId);
+  const run = runningItems.get(prId) ?? startingPair.get(prId);
   if (run) return run.trigger === 'auto' && run.accountId === accountId ? 'running' : null;
   if (startingAuto.get(prId)?.accountId === accountId) return 'queued';
   if (autoPending.some((a) => a.prId === prId && a.accountId === accountId)) return 'queued';
@@ -263,8 +294,10 @@ export async function startReview(
   model: ClaudeReviewModel,
   // The per-run choice (ai/run-choice.ts, validated by the route). Absent ⇒ the default provider.
   provider: AgentProviderId = activeProviderId(),
-  // TRAILING: `fresh` ⇒ a from-scratch run (QueueItem.fresh). Absent ⇒ an ordinary run.
-  opts: { fresh?: boolean } = {},
+  // TRAILING: `fresh` ⇒ a from-scratch run (QueueItem.fresh). `pair` ⇒ a CLAUDE + CODEX PAIR: Claude
+  // first, then Codex (`provider` is ignored); with only one of them able to review, just that one
+  // runs (the route refuses a pair it cannot run). Absent ⇒ an ordinary run.
+  opts: { fresh?: boolean; pair?: boolean } = {},
 ): Promise<StartReviewResult> {
   // ⚠ NO STORIES. A PR review judges code, tests and threads; a story is checked by the ticket
   // review (review/ticket-review/), a separate run with its own row, claim and lane.
@@ -278,6 +311,14 @@ export async function startReview(
   if (pending.length >= REVIEW_MAX_QUEUED) return { ok: false, reason: 'busy' };
   claimed.add(prId); // reserve synchronously before any await
 
+  // THE PAIR'S PROVIDERS, resolved ONCE (pair.ts): both ⇒ a pair; one ⇒ that one alone.
+  let pair: PairState | undefined;
+  if (opts.pair) {
+    const ready = pairProvidersReady(preflightFor(ctx));
+    if (ready.length > 0) provider = ready[0]!;
+    if (ready.length === 2) pair = { role: 'first', pairId: 0, secondProvider: ready[1]! };
+  }
+
   let reviewId: number;
   let prCtx: ReviewPrContext | null;
   try {
@@ -290,7 +331,19 @@ export async function startReview(
       claimed.delete(prId);
       return { ok: false, reason: 'no_head' };
     }
-    reviewId = await insertQueuedReview(ctx, prId, prCtx.headSha, model, accountId, [], 'manual', provider, fresh);
+    reviewId = await insertQueuedReview(
+      ctx,
+      prId,
+      prCtx.headSha,
+      model,
+      accountId,
+      [],
+      'manual',
+      provider,
+      fresh,
+      pair ? { role: 'first' } : null,
+    );
+    if (pair) pair.pairId = reviewId;
   } catch (err) {
     claimed.delete(prId);
     throw err;
@@ -307,6 +360,7 @@ export async function startReview(
     prCtx,
     trigger: 'manual',
     ...(fresh ? { fresh: true } : {}),
+    ...(pair ? { pair } : {}),
   };
   reviewIdByPr.set(prId, reviewId);
   if (inFlight() < REVIEW_CONCURRENCY) {
@@ -409,10 +463,32 @@ async function startAutoItem(a: AutoItem): Promise<void> {
       if (!(await isAutoRetryStillDue(ctx, prId, accountId, prCtx.headSha, a.retryOfReviewId, a.pressed === true))) return;
     } else if (await isAutoReReviewSettled(ctx, prId, accountId, prCtx.headSha, a.commentsAtMs ?? null)) return;
     const model = DEFAULT_CLAUDE_REVIEW_MODEL;
-    // An AUTOMATIC run goes to the DEFAULT provider (Settings → AI), read now.
-    const provider = activeProviderId();
+    // An AUTOMATIC run goes to the DEFAULT provider (Settings → AI), read now — unless the workspace
+    // asks for Claude + Codex (`auto_review_providers = 'both'`): then a PAIR when both can review,
+    // else the one that can.
+    let provider: AgentProviderId = activeProviderId();
+    let pair: PairState | undefined;
+    if ((await readAutoReviewProvidersForPr(ctx, accountId, prId)) === 'both') {
+      const ready = pairProvidersReady(preflightFor(ctx));
+      if (ready.length > 0) provider = ready[0]!;
+      if (ready.length === 2) {
+        pair = { role: 'first', pairId: 0, secondProvider: ready[1]!, ...(a.pressed ? { pressed: true } : {}) };
+      }
+    }
     // No stories: the PR's tickets are checked by the ticket review's own sweep, never here.
-    const reviewId = await insertQueuedReview(ctx, prId, prCtx.headSha, model, accountId, [], 'auto', provider);
+    const reviewId = await insertQueuedReview(
+      ctx,
+      prId,
+      prCtx.headSha,
+      model,
+      accountId,
+      [],
+      'auto',
+      provider,
+      false,
+      pair ? { role: 'first' } : null,
+    );
+    if (pair) pair.pairId = reviewId;
     reviewIdByPr.set(prId, reviewId);
     startingAuto.delete(prId);
     launched = true;
@@ -426,6 +502,7 @@ async function startAutoItem(a: AutoItem): Promise<void> {
       headSha: prCtx.headSha,
       prCtx,
       trigger: 'auto',
+      ...(pair ? { pair } : {}),
     });
     try {
       autoLaunchHook?.(ctx, accountId, prId);
@@ -462,56 +539,10 @@ function launch(item: QueueItem): void {
 
   void runPipeline(item, controller, emit)
     .then((succeeded) => {
-      // EVENT HOOK (the Slack "Claude Review ran" signal). Announced for every SUCCEEDED run with
-      // its trigger; the listener posts for AUTO runs only (platform/slack/signals.ts) — a run the
-      // reader started never reaches Slack. Fire-and-forget, never thrown into the review.
-      if (succeeded) {
-        emitClaudeReviewCompleted({
-          accountId: item.accountId,
-          prId,
-          reviewId,
-          trigger: item.trigger,
-        });
-      }
-      // SEQUENCE DIAGRAMS (review/diagrams/): every SUCCEEDED run, manual OR auto, may queue the PR's
-      // diagram and its stories' — a SEPARATE process in the shared slot pool. Fire-and-forget; the
-      // trigger never throws and only queues, so it can neither block nor fail this review.
-      if (succeeded) {
-        void import('../diagrams/trigger.js')
-          .then((m) =>
-            m.maybeDrawDiagramsAfterReview(ctx, { accountId: item.accountId, prId, reviewTrigger: item.trigger }),
-          )
-          .catch((err) =>
-            ctx.log.warn(`sequence diagrams pr ${prId}: ${err instanceof Error ? err.message : String(err)}`),
-          );
-      }
-      // AUTO FIX: a SUCCEEDED auto run may start a review-seeded fix on the reader's OWN PR
-      // (coding/ai-fix/auto-fix.ts decides; nothing is pushed). Fire-and-forget, never awaited and
-      // never thrown into the review: a fix that fails to start costs the fix only.
-      if (succeeded && item.trigger === 'auto') {
-        // AUTO-POSTING: post the run's findings to GitHub when the workspace switched it on
-        // (./auto-post.ts decides; it never throws and never retries). Independent of the fix.
-        void import('./auto-post.js')
-          .then((m) => m.maybeAutoPostReview(ctx, { accountId: item.accountId, prId, reviewId }))
-          .catch((err) =>
-            ctx.log.warn(`auto post pr ${prId}: ${err instanceof Error ? err.message : String(err)}`),
-          );
-        // The head's SonarCloud issues as ONE PR comment, under the same switch (its own kind).
-        void import('../../sonar/post.js')
-          .then((m) => m.maybeAutoPostSonar(ctx, { accountId: item.accountId, prId, headSha: item.headSha }))
-          .catch((err) =>
-            ctx.log.warn(`sonar auto post pr ${prId}: ${err instanceof Error ? err.message : String(err)}`),
-          );
-        void import('../../coding/ai-fix/auto-fix.js')
-          .then((m) =>
-            m.maybeStartAutoFix(ctx, { accountId: item.accountId, prId, reviewId }),
-          )
-          .catch((err) =>
-            ctx.log.warn(
-              `auto fix pr ${prId}: ${err instanceof Error ? err.message : String(err)}`,
-            ),
-          );
-      }
+      item.succeeded = succeeded;
+      // A pair's FIRST half hands over to its second; everything after a run waits for the pair's end.
+      if (pairContinues(item)) return;
+      runEnded(item, endOf(item, succeeded));
     })
     .catch(async (err) => {
       // Unexpected error in prepare/persist (runReview itself never throws). Record it.
@@ -522,21 +553,186 @@ function launch(item: QueueItem): void {
       await markReviewFailed(ctx, reviewId, err instanceof Error ? err.message : String(err)).catch(
         () => {},
       );
+      // A pair's second half failing this way still ends the pair: the first half's results stand.
+      if (item.pair?.role === 'second') runEnded(item, endOf(item, false));
     })
     .finally(() => {
+      // ⚠ A pair's first half keeps the PR's claim and its slot (`startingPair`, taken BEFORE the
+      // pump) until the second half's row is written: nothing slips in between the two.
+      const continues = pairContinues(item);
       runningItems.delete(prId);
       reviewIdByPr.delete(prId);
       controllers.delete(reviewId);
       progressByReview.delete(reviewId);
-      claimed.delete(prId);
-      void getLatestClaudeReview(ctx, prId, item.accountId)
-        .then((latest) =>
-          emitReviewStream(prId, { type: 'done', status: latest?.status ?? 'failed', reviewId }),
-        )
-        .catch(() => emitReviewStream(prId, { type: 'done', status: 'failed', reviewId }));
+      if (continues) startingPair.set(prId, item);
+      else {
+        claimed.delete(prId);
+        emitDone(ctx, prId, item.accountId, reviewId);
+      }
       pump();
       pumpPeers();
+      if (continues) void startPairSecond(item);
     });
+}
+
+function emitDone(ctx: AgentContext, prId: number, accountId: number, reviewId: number): void {
+  void getLatestClaudeReview(ctx, prId, accountId)
+    .then((latest) => emitReviewStream(prId, { type: 'done', status: latest?.status ?? 'failed', reviewId }))
+    .catch(() => emitReviewStream(prId, { type: 'done', status: 'failed', reviewId }));
+}
+
+/** What a run's end announces: the run the hooks act on, whether it succeeded, and (a pair whose two
+ *  halves succeeded) the first half, so auto-posting sends ONE review for both. */
+interface RunEnd {
+  reviewId: number;
+  succeeded: boolean;
+  pairFirstReviewId?: number | null;
+}
+
+/**
+ * The end of an ordinary run, or of a whole pair (called on the second half, or on a first half whose
+ * second never started). A pair's end acts on the SECOND half when it succeeded (with the first
+ * riding the one post), else on the first when that succeeded.
+ */
+function endOf(item: QueueItem, succeeded: boolean): RunEnd {
+  const p = item.pair;
+  if (p?.role !== 'second') return { reviewId: item.reviewId, succeeded };
+  if (succeeded) return { reviewId: item.reviewId, succeeded, ...(p.firstSucceeded ? { pairFirstReviewId: p.pairId } : {}) };
+  return p.firstSucceeded ? { reviewId: p.pairId, succeeded: true } : { reviewId: item.reviewId, succeeded: false };
+}
+
+/** After a run (or a whole pair): the Slack signal, diagrams and the auto hooks — ONCE per pair. */
+function runEnded(item: QueueItem, end: RunEnd): void {
+  const { ctx, prId } = item;
+  const { reviewId, succeeded } = end;
+  // EVENT HOOK (the Slack "Claude Review ran" signal). Announced for every SUCCEEDED run with
+  // its trigger; the listener posts for AUTO runs only (platform/slack/signals.ts) — a run the
+  // reader started never reaches Slack. Fire-and-forget, never thrown into the review. A pair
+  // announces ONCE, at its end.
+  if (succeeded) {
+    emitClaudeReviewCompleted({
+      accountId: item.accountId,
+      prId,
+      reviewId,
+      trigger: item.trigger,
+    });
+  }
+  // SEQUENCE DIAGRAMS (review/diagrams/): every SUCCEEDED run, manual OR auto, may queue the PR's
+  // diagram and its stories' — a SEPARATE process in the shared slot pool. Fire-and-forget; the
+  // trigger never throws and only queues, so it can neither block nor fail this review.
+  if (succeeded) {
+    void import('../diagrams/trigger.js')
+      .then((m) =>
+        m.maybeDrawDiagramsAfterReview(ctx, { accountId: item.accountId, prId, reviewTrigger: item.trigger }),
+      )
+      .catch((err) =>
+        ctx.log.warn(`sequence diagrams pr ${prId}: ${err instanceof Error ? err.message : String(err)}`),
+      );
+  }
+  // AUTO FIX: a SUCCEEDED auto run may start a review-seeded fix on the reader's OWN PR
+  // (coding/ai-fix/auto-fix.ts decides; nothing is pushed). Fire-and-forget, never awaited and
+  // never thrown into the review: a fix that fails to start costs the fix only.
+  if (succeeded && item.trigger === 'auto') {
+    // AUTO-POSTING: post the run's findings to GitHub when the workspace switched it on
+    // (./auto-post.ts decides; it never throws and never retries). Independent of the fix. A pair
+    // whose halves both succeeded posts ONE review for both (`pairFirstReviewId`).
+    void import('./auto-post.js')
+      .then((m) =>
+        m.maybeAutoPostReview(ctx, {
+          accountId: item.accountId,
+          prId,
+          reviewId,
+          ...(end.pairFirstReviewId != null ? { pairFirstReviewId: end.pairFirstReviewId } : {}),
+        }),
+      )
+      .catch((err) =>
+        ctx.log.warn(`auto post pr ${prId}: ${err instanceof Error ? err.message : String(err)}`),
+      );
+    // The head's SonarCloud issues as ONE PR comment, under the same switch (its own kind).
+    void import('../../sonar/post.js')
+      .then((m) => m.maybeAutoPostSonar(ctx, { accountId: item.accountId, prId, headSha: item.headSha }))
+      .catch((err) =>
+        ctx.log.warn(`sonar auto post pr ${prId}: ${err instanceof Error ? err.message : String(err)}`),
+      );
+    void import('../../coding/ai-fix/auto-fix.js')
+      .then((m) =>
+        m.maybeStartAutoFix(ctx, { accountId: item.accountId, prId, reviewId }),
+      )
+      .catch((err) =>
+        ctx.log.warn(
+          `auto fix pr ${prId}: ${err instanceof Error ? err.message : String(err)}`,
+        ),
+      );
+  }
+}
+
+/**
+ * THE PAIR'S SECOND HALF, after its first ended (succeeded, failed or stopped): its own row (same
+ * head, model depth and trigger; the provider the pair resolved at its start), the first half's
+ * findings as its prompt input (only when the first succeeded with findings), then an ordinary
+ * launch. An AUTO pair asks the spend budget again first (unless a reader's press queued it). If it
+ * cannot start, the pair ends on its first half.
+ */
+async function startPairSecond(first: QueueItem): Promise<void> {
+  const { ctx, accountId, prId } = first;
+  const pair = first.pair!;
+  const provider = pair.secondProvider!;
+  let launched = false;
+  try {
+    if (first.trigger === 'auto' && !pair.pressed && !(await automaticRunAllowed(ctx, accountId, 'auto review (second half)'))) {
+      return;
+    }
+    const firstReview = first.succeeded ? await getClaudeReviewById(ctx, first.reviewId, accountId) : null;
+    const firstFindings = firstReview?.findings ?? [];
+    const reviewId = await insertQueuedReview(
+      ctx,
+      prId,
+      first.headSha,
+      first.model,
+      accountId,
+      [],
+      first.trigger,
+      provider,
+      first.fresh === true,
+      { role: 'second', pairId: pair.pairId },
+    );
+    startingPair.delete(prId);
+    launched = true;
+    launch({
+      ctx,
+      accountId,
+      reviewId,
+      prId,
+      model: first.model,
+      provider,
+      headSha: first.headSha,
+      prCtx: first.prCtx,
+      trigger: first.trigger,
+      ...(first.fresh ? { fresh: true } : {}),
+      pair: {
+        role: 'second',
+        pairId: pair.pairId,
+        firstSucceeded: first.succeeded === true,
+        input: firstFindings.length > 0 ? pairInputOf(first.provider, firstFindings) : null,
+        firstFindings: firstFindings.map((f) => ({ path: f.path, line: f.line, title: f.title })),
+      },
+    });
+  } catch (err) {
+    ctx.log.error(
+      { err },
+      `claude review pr ${prId}: the pair's second review could not start: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  } finally {
+    if (!launched) {
+      // The pair ends on its first half.
+      startingPair.delete(prId);
+      claimed.delete(prId);
+      emitDone(ctx, prId, accountId, first.reviewId);
+      runEnded(first, { reviewId: first.reviewId, succeeded: first.succeeded === true });
+      pump();
+      pumpPeers();
+    }
+  }
 }
 
 async function runPipeline(
@@ -577,7 +773,7 @@ async function runPipeline(
     // block; a person who pressed Review expects the open threads judged, so Check threads (its own
     // process, claim and caps — it judges only what changed and refuses with no model when nothing
     // did) starts in its place. Auto runs are unchanged: their comment bursts already route there.
-    if (item.trigger === 'manual') {
+    if (item.trigger === 'manual' && item.pair?.role !== 'second') {
       void import('./thread-check.js')
         .then((m) => m.startThreadCheckBesideManualReview(ctx, item.accountId, item.prId, item.provider))
         .catch((err) =>
@@ -704,7 +900,9 @@ async function runPipeline(
   // Issues, or a gate that did not pass (its conditions and their files are evidence too).
   const sonar = sonarSnap?.state === 'ok' && sonarHasContent(sonarSnap) ? sonarSnap : null;
 
-  const nonce = pickReviewNonce(untrustedTexts(plan, since, threadPlan, peers, settled, sonar));
+  // THE PAIR'S SECOND HALF is shown what the first raised (pair.ts), never the first half.
+  const pairInput = item.pair?.role === 'second' ? (item.pair.input ?? null) : null;
+  const nonce = pickReviewNonce(untrustedTexts(plan, since, threadPlan, peers, settled, sonar, pairInput));
 
   // ---- the workspace's reference library (docs/REFERENCE-DOCS.md § Use in reviews) ----
   // Only when its switch is on and something is built; null ⇒ prompt, tools and output unchanged.
@@ -730,6 +928,7 @@ async function runPipeline(
     peers,
     settled,
     sonar,
+    ...(pairInput != null ? { pair: pairInput } : {}),
     nonce,
   });
 
@@ -805,7 +1004,16 @@ async function runPipeline(
     const { kept: notAccepted, dropped: droppedAccepted } = items
       ? dropAcceptedReraises(linked, items, similarTitles)
       : { kept: linked, dropped: [] };
-    const { kept: findings, dropped: droppedSettled } = dropSettledReraises(notAccepted, settled);
+    const { kept: notSettled, dropped: droppedSettled } = dropSettledReraises(notAccepted, settled);
+    // ⚠ THE PAIR'S CODE DEDUPE (pair.ts): a second-half finding repeating one the first half raised
+    // is dropped, whatever the prompt asked; the count is stored on this run (`pair_dropped`).
+    const pairFirst = item.pair?.role === 'second' ? (item.pair.firstFindings ?? []) : null;
+    const { kept: findings, dropped: droppedPair } = pairFirst
+      ? dropPairRepeats(notSettled, pairFirst)
+      : { kept: notSettled, dropped: [] };
+    if (droppedPair.length > 0) {
+      ctx.log.info(`claude review pr ${item.prId}: dropped ${droppedPair.length} finding(s) the pair's first review raised`);
+    }
     const dropped = [...droppedAccepted, ...droppedSettled];
     if (dropped.length > 0) {
       ctx.log.info(
@@ -838,6 +1046,7 @@ async function runPipeline(
             }
           : null,
       threadAssessments,
+      ...(pairFirst ? { pairDropped: droppedPair.length } : {}),
     });
     return true;
   }
@@ -1102,10 +1311,30 @@ export async function getReviewStatus(
       reviewId,
       progress: progressByReview.get(reviewId) ?? null,
       trigger: runningItem.trigger,
+      ...(runningItem.pair ? { pair: { role: runningItem.pair.role, provider: runningItem.provider } } : {}),
+    };
+  }
+  // A pair between its halves: still running (the second half's row is being written).
+  const between = startingPair.get(prId);
+  if (between?.accountId === accountId) {
+    return {
+      status: 'running',
+      reviewId: between.reviewId,
+      progress: null,
+      trigger: between.trigger,
+      ...(between.pair?.secondProvider ? { pair: { role: 'second' as const, provider: between.pair.secondProvider } } : {}),
     };
   }
   const queued = pending.find((p) => p.prId === prId && p.accountId === accountId);
-  if (queued) return { status: 'queued', reviewId: queued.reviewId, progress: null, trigger: 'manual' };
+  if (queued) {
+    return {
+      status: 'queued',
+      reviewId: queued.reviewId,
+      progress: null,
+      trigger: 'manual',
+      ...(queued.pair ? { pair: { role: queued.pair.role, provider: queued.provider } } : {}),
+    };
+  }
   // Waiting in the AUTO lane: no row yet, so no reviewId.
   if (autoReviewHold(prId, accountId) === 'queued') {
     return { status: 'queued', reviewId: null, progress: null, trigger: 'auto' };

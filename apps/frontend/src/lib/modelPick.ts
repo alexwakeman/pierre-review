@@ -23,7 +23,16 @@ export interface ModelPickState {
   chosen: AiModelPick;
   /** More than one provider is listed (the menu then names both). */
   mixed: boolean;
+  /** "Claude + Codex" is listed (the AI Review menu, only while BOTH can review). */
+  pairOffered?: boolean;
+  /** "Claude + Codex" is the chosen option (`chosen` then holds Claude's default model). */
+  pair?: boolean;
 }
+
+/** The `<option>` value of "Claude + Codex" (docs/CLAUDE-REVIEW.md § Claude + Codex). */
+export const PAIR_PICK_VALUE = 'pair';
+/** Its label. */
+export const PAIR_PICK_LABEL = 'Claude + Codex';
 
 /**
  * Resolve the menu for a kind: `picked` is the reader's last choice (an option value) or null. The
@@ -47,6 +56,32 @@ export function resolveModelPick(
   return { picks, chosen, mixed: new Set(picks.map((p) => p.provider)).size > 1 };
 }
 
+/**
+ * THE AI REVIEW MENU: `resolveModelPick`, plus "Claude + Codex" (last) while BOTH providers can
+ * review. Picked, it runs Claude's default review model first, then Codex's of the same depth; it
+ * falls back to the opening choice when one of them stops being ready.
+ */
+export function resolveReviewModelPick(
+  me: MeResponse | undefined,
+  usualModel: ClaudeReviewModel,
+  picked: string | null,
+): ModelPickState {
+  const base = resolveModelPick(me, 'review', usualModel, picked === PAIR_PICK_VALUE ? null : picked);
+  const ready = aiRunnableProviders(me, 'review');
+  const pairOffered = ready.includes('claude') && ready.includes('codex');
+  if (!pairOffered) return { ...base, pairOffered: false, pair: false };
+  const pairPick: AiModelPick = {
+    provider: 'claude',
+    model: usualModel,
+    label: PAIR_PICK_LABEL,
+    value: PAIR_PICK_VALUE,
+  };
+  const picks = [...base.picks, pairPick];
+  return picked === PAIR_PICK_VALUE
+    ? { picks, chosen: pairPick, mixed: true, pairOffered: true, pair: true }
+    : { ...base, picks, pairOffered: true, pair: false };
+}
+
 /** The follow-up rule (see hooks/useModelPick.ts `useFollowUpProvider`), pure. */
 export function followUpProviderOf(
   me: MeResponse | undefined,
@@ -55,4 +90,14 @@ export function followUpProviderOf(
 ): AiProviderId {
   const fallback: AiProviderId = me?.ai?.provider === 'codex' ? 'codex' : 'claude';
   return stored != null && aiProviderReadyFor(me, stored, kind) ? stored : fallback;
+}
+
+/**
+ * The progress line of a running review: "Running Claude review" — and for a pair's halves, which
+ * half ("Running Claude review, then Codex" / "Running Codex review, after Claude").
+ */
+export function pairRunningLabel(running: string, role: 'first' | 'second' | null): string {
+  if (role == null) return `Running ${running} review`;
+  const other = running === 'Codex' ? 'Claude' : 'Codex';
+  return role === 'first' ? `Running ${running} review, then ${other}` : `Running ${running} review, after ${other}`;
 }

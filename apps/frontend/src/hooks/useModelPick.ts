@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { AiProviderId, AiRunKind, ClaudeReviewModel } from '@pierre-review/shared';
 import { useMe } from './useTriage.js';
-import { followUpProviderOf, resolveModelPick, type ModelPickState } from '../lib/modelPick.js';
+import { followUpProviderOf, resolveModelPick, resolveReviewModelPick, type ModelPickState } from '../lib/modelPick.js';
 
 /**
  * The per-run model menu of a manual surface (lib/modelPick.ts): its options across every ready
@@ -14,6 +14,13 @@ export function useModelPick(
   const me = useMe().data;
   const [picked, setPicked] = useState<string | null>(null);
   return { ...resolveModelPick(me, kind, usualModel, picked), pick: setPicked };
+}
+
+/** The AI Review menu (lib/modelPick.ts `resolveReviewModelPick`): the models, plus "Claude + Codex". */
+export function useReviewModelPick(usualModel: ClaudeReviewModel): ModelPickState & { pick: (value: string) => void } {
+  const me = useMe().data;
+  const [picked, setPicked] = useState<string | null>(null);
+  return { ...resolveReviewModelPick(me, usualModel, picked), pick: setPicked };
 }
 
 /**

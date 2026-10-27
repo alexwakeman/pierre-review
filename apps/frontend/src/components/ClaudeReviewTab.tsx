@@ -28,8 +28,9 @@ import {
 } from '@pierre-review/shared';
 import { formatDate, relativeTime, safeExternalUrl } from '../lib/ui.js';
 import { useRunCostText } from '../hooks/useAiBudget.js';
-import { useModelPick } from '../hooks/useModelPick.js';
-import { nextShownReviewId } from '../lib/reviewHistory.js';
+import { useReviewModelPick } from '../hooks/useModelPick.js';
+import { canPostBoth, nextShownReviewId } from '../lib/reviewHistory.js';
+import { pairRunningLabel } from '../lib/modelPick.js';
 import {
   autoLiftLine,
   autoPostFailureLine,
@@ -1665,7 +1666,8 @@ export function ClaudeReviewTab({
   // DEFAULT provider's (Settings → AI) most thorough one — never seeded from the stored run, or every
   // already-reviewed PR would keep reopening on its old model, and a run stored under a retired id
   // (the old Opus 4.8) would become a select value with no option. A pick stays until remount.
-  const modelPick = useModelPick('review', DEFAULT_CLAUDE_REVIEW_MODEL);
+  // While BOTH providers can review, it also lists "Claude + Codex" (a pair: Claude, then Codex).
+  const modelPick = useReviewModelPick(DEFAULT_CLAUDE_REVIEW_MODEL);
 
   // Same-SHA re-run confirmation (warn-but-allow).
   const [confirmRerun, setConfirmRerun] = useState(false);
@@ -1684,6 +1686,8 @@ export function ClaudeReviewTab({
   const [preview, setPreview] = useState<PostReviewPreview | null>(null);
   const [postResult, setPostResult] = useState<PostReviewResult | null>(null);
   const [confirmPost, setConfirmPost] = useState(false);
+  // The confirm is for "Post both" (a Claude + Codex pair's two runs as ONE review), not Post.
+  const [postBoth, setPostBoth] = useState(false);
 
   const generate = useGenerateReview(pr.id);
   // A start in flight from ANY surface (this tab or the Open PRs table) — one shared mutation key.
@@ -1778,8 +1782,13 @@ export function ClaudeReviewTab({
     setPreview(null);
     setPostResult(null);
     // No story: the PR review looks at the code. Stories are the Story check section below.
-    // The run goes to the provider the menu picked (the server validates the pair).
-    generate.mutate({ model: modelPick.chosen.model, provider: modelPick.chosen.provider });
+    // The run goes to the provider the menu picked (the server validates the pair). "Claude + Codex"
+    // starts a pair: Claude first, then Codex.
+    generate.mutate(
+      modelPick.pair
+        ? { model: modelPick.chosen.model, pair: true }
+        : { model: modelPick.chosen.model, provider: modelPick.chosen.provider },
+    );
   };
 
   const onRunClick = (): void => {
@@ -1794,8 +1803,11 @@ export function ClaudeReviewTab({
     ? review
     : historicReview ?? null;
 
-  // Editing + posting are only enabled for the latest run.
+  // Editing + posting are only enabled for the latest run — and, for a Claude + Codex pair, its
+  // first half's findings may be posted one by one too (the summary and Post review stay the latest's).
   const canEdit = viewingLatest && review != null;
+  const shownIsPairPartner =
+    !viewingLatest && selectedReviewId != null && review?.pair?.otherReviewId === selectedReviewId;
 
   const phase = status?.progress?.phase ?? null;
   // The live estimate, worded like every run cost: US$ on an API key, the share of the week on a
@@ -1805,9 +1817,8 @@ export function ClaudeReviewTab({
   // WHO IS RUNNING: the running row's provider (stamped at queue time with the reader's pick), never
   // the default's — a Codex run picked while Claude is the default reads "Running Codex review".
   // Before the row loads, the pick that started it.
-  const liveProvider: AiProviderId = liveRow
-    ? aiRunProvider(liveRow.provider, liveRow.model)
-    : modelPick.chosen.provider;
+  const liveProvider: AiProviderId =
+    status?.pair?.provider ?? (liveRow ? aiRunProvider(liveRow.provider, liveRow.model) : modelPick.chosen.provider);
   const liveCost = costText(status?.progress?.usage?.estCostUsd, liveProvider);
   const phaseLabel = phase != null ? (PHASE_LABEL[phase] ?? phase) : 'Starting…';
 
@@ -1835,13 +1846,17 @@ export function ClaudeReviewTab({
   const runPost = (): void => {
     if (review == null) return;
     setConfirmPost(false);
+    const pair = postBoth;
+    setPostBoth(false);
     saveDraftThen(() =>
       postReview.mutate(
-        { reviewId: review.id, userVerdict },
+        { reviewId: review.id, userVerdict, ...(pair ? { pair: true } : {}) },
         { onSuccess: (res) => setPostResult(res as PostReviewResult) },
       ),
     );
   };
+  // "Post both": the latest run is a pair's second half and both halves finished.
+  const offerPostBoth = canPostBoth(review, data?.history ?? []);
 
   return (
     <ReviewTabPrRefs pr={pr} review={shownReview}>
@@ -1927,7 +1942,7 @@ export function ClaudeReviewTab({
       <div className="empty:hidden">
         <RegenProgressBar
           active={isRunning}
-          label={`Running ${aiProviderName(liveProvider)} review`}
+          label={pairRunningLabel(aiProviderName(liveProvider), status?.pair?.role ?? null)}
           value={reviewProgressPct(status)}
           timeConstantSec={30}
         />
@@ -2054,7 +2069,7 @@ export function ClaudeReviewTab({
       {shownReview != null && shownReview.status === 'succeeded' && (
         <ClaudesReview
           review={shownReview}
-          editable={canEdit}
+          editable={canEdit || shownIsPairPartner}
           // The thread judgements AS THEY STAND (later Check threads runs folded over the latest
           // review) — only for the latest run; a past run shows what it said then.
           currentThreads={
@@ -2207,18 +2222,37 @@ export function ClaudeReviewTab({
               Preview
             </button>
             {!confirmPost ? (
-              <button
-                type="button"
-                onClick={() => setConfirmPost(true)}
-                disabled={postReview.isPending}
-                className="rounded border border-blue-400 px-2 py-0.5 text-sm text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:border-blue-600 dark:text-blue-400 dark:hover:bg-blue-900/30"
-              >
-                Post to GitHub
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPostBoth(false);
+                    setConfirmPost(true);
+                  }}
+                  disabled={postReview.isPending}
+                  className="rounded border border-blue-400 px-2 py-0.5 text-sm text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:border-blue-600 dark:text-blue-400 dark:hover:bg-blue-900/30"
+                >
+                  Post to GitHub
+                </button>
+                {offerPostBoth && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPostBoth(true);
+                      setConfirmPost(true);
+                    }}
+                    disabled={postReview.isPending}
+                    title="One review with both runs' findings"
+                    className="rounded border border-blue-400 px-2 py-0.5 text-sm text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:border-blue-600 dark:text-blue-400 dark:hover:bg-blue-900/30"
+                  >
+                    Post both
+                  </button>
+                )}
+              </>
             ) : (
               <span className="inline-flex items-center gap-2">
                 <span className="text-xs text-gray-500 dark:text-gray-400">
-                  Post as <strong>{VERDICT_LABEL[userVerdict]}</strong>?
+                  {postBoth ? 'Post both' : 'Post'} as <strong>{VERDICT_LABEL[userVerdict]}</strong>?
                 </span>
                 <button
                   type="button"
@@ -2230,7 +2264,10 @@ export function ClaudeReviewTab({
                 </button>
                 <button
                   type="button"
-                  onClick={() => setConfirmPost(false)}
+                  onClick={() => {
+                    setConfirmPost(false);
+                    setPostBoth(false);
+                  }}
                   className="rounded border border-gray-300 px-2 py-0.5 text-xs hover:border-gray-400 dark:border-gray-700 dark:hover:border-gray-500"
                 >
                   Cancel

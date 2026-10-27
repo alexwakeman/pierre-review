@@ -10,8 +10,11 @@ export function autoPostFooter(by: AiProviderName | null | undefined = 'Claude')
   return by === 'Codex' ? '_Posted automatically by Limn’s Codex review._' : AUTO_POST_FOOTER;
 }
 
+/** The body footer of a Claude + Codex pair's ONE automatic review (docs/CLAUDE-REVIEW.md § Claude + Codex). */
+export const PAIR_AUTO_POST_FOOTER = '_Posted automatically by Limn’s Claude and Codex reviews._';
+
 /** Every footer a Limn auto post may carry — what "was this posted automatically?" looks for. */
-export const AUTO_POST_FOOTERS: readonly string[] = [AUTO_POST_FOOTER, autoPostFooter('Codex')];
+export const AUTO_POST_FOOTERS: readonly string[] = [AUTO_POST_FOOTER, autoPostFooter('Codex'), PAIR_AUTO_POST_FOOTER];
 
 /** Whether a posted body carries one of Limn's auto-post footers (either provider's). */
 export function hasAutoPostFooter(body: string | null | undefined): boolean {

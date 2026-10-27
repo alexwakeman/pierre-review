@@ -631,6 +631,18 @@ moved repo's rows (`dropRepoRelations`) and every reader joins membership. Off b
 `claude_reviews.peers_read` (same migration) records what a run read beside the PR (`ReviewPeerRead[]`;
 NULL = nothing or an older row).
 
+## Claude + Codex pairs (CORE; migration `0135`)
+
+A pair is TWO ordinary `claude_reviews` rows ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Claude + Codex):
+`pair_id` = the FIRST half's id on both, `pair_role` `'first'` \| `'second'`, `pair_dropped` (second
+half only) = its findings dropped as repeats of the first's. NULL on every ordinary run. Read as
+`ClaudeReview.pair` / `ClaudeReviewSummary.pair` (`{pairId, role, otherReviewId, dropped?}`; the other
+half is found by `pair_id`, so it is null until the second half's row exists). A pair's ONE automatic
+post is recorded on the second half's `auto_post`, the first's carrying `viaPairReviewId`.
+`workspaces.auto_review_providers` (same migration): NULL = auto reviews on the default provider,
+`'both'` = a pair (`resolveAutoReviewProviders`, `review/claude-review/pair.ts`; one writer,
+`setWorkspaceAutoReview`).
+
 ## `workspace_setting_events` — when a workspace setting changed (CORE; migration `0096`)
 
 APPEND-ONLY history read by Chronology's "Over time" markers (docs/BOTTLENECKS.md § Over time). One

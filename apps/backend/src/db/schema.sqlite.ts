@@ -1288,6 +1288,12 @@ export const claudeReviews = sqliteTable(
     // A FROM-SCRATCH run (`GenerateReviewBody.fresh`): it read no earlier review — no follow-up, no
     // settled list, no carried thread judgements. true on such a run; NULL otherwise (migration 0133).
     fresh: integer('fresh', { mode: 'boolean' }),
+    // A CLAUDE + CODEX PAIR (migration 0135; docs/CLAUDE-REVIEW.md § Claude + Codex): `pairId` = the
+    // FIRST run's id, on both halves; `pairRole` 'first' | 'second'; `pairDropped` = the second run's
+    // findings dropped in code as repeats of the first's. NULL on every ordinary run.
+    pairId: integer('pair_id'),
+    pairRole: text('pair_role', { enum: ['first', 'second'] }),
+    pairDropped: integer('pair_dropped'),
   },
   (t) => ({
     prIdx: index('cr_pr_idx').on(t.prId),
@@ -2008,6 +2014,10 @@ export const workspaces = sqliteTable(
     // is off. Off stops only the automatic draw; Draw / Redraw still works. The ONE writer is
     // `setWorkspaceAutoReview` (review/claude-review/auto-settings.ts).
     autoDiagramsEnabled: integer('auto_diagrams_enabled', { mode: 'boolean' }).notNull().default(true),
+    // WHO RUNS AUTO REVIEWS (migration 0135): NULL = the default provider (Settings → AI); 'both' =
+    // Claude then Codex as one pair (docs/CLAUDE-REVIEW.md § Claude + Codex). The ONE writer is
+    // `setWorkspaceAutoReview` (review/claude-review/auto-settings.ts).
+    autoReviewProviders: text('auto_review_providers'),
     // DEPENDENCY AUTO-MERGE (migration 0093 / pg 0080): may the server arm "merge when ready" on
     // every open dependency-automation PR in this workspace's repos (merge/dependency-policy.ts)?
     // NULL/false = OFF, the default for every workspace; nullable with no default, so no insert

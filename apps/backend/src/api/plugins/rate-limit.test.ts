@@ -32,6 +32,8 @@ describe('tierFor — AI generation', () => {
   it('catches the Claude Review routes despite them not being under /api/pro/', () => {
     expect(tiers('POST', '/api/prs/42/claude-review')).toEqual(['ai', 'ai_hourly']);
     expect(tiers('POST', '/api/claude-reviews/7/post')).toEqual(['ai', 'ai_hourly']);
+    // Post both (a Claude + Codex pair's one review): the same family, the same tier as Post review.
+    expect(tiers('POST', '/api/claude-reviews/7/post-pair')).toEqual(['ai', 'ai_hourly']);
     expect(tiers('PATCH', '/api/claude-findings/3')).toEqual(['ai', 'ai_hourly']);
   });
 

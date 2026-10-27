@@ -222,8 +222,9 @@ export function useGenerateReview(prId: number) {
     // No user story: the PR review looks at the code. Stories are the ticket review's
     // (hooks/useTicketReview.ts), a separate run.
     // `provider`: the per-run picker's choice (absent ⇒ the server's default provider).
-    mutationFn: (vars: { model: AiPickerModel; provider?: AiProviderId }) =>
-      api.generateClaudeReview(prId, vars.model, vars.provider),
+    // `pair`: Claude + Codex (lib/modelPick.ts `PAIR_PICK_VALUE`).
+    mutationFn: (vars: { model: AiPickerModel; provider?: AiProviderId; pair?: boolean }) =>
+      api.generateClaudeReview(prId, vars.model, vars.provider, vars.pair),
     onSuccess: () => afterReviewStarted(qc, prId),
     // 409 AutoReviewInProgress: the pane's reading was stale (it polls only while it already
     // knows of a queued hold). Re-read it, so the hold shows and its 5s poll starts — otherwise
@@ -403,11 +404,16 @@ export function useAllClaudeReviews(enabled: boolean) {
 export function usePostReview(prId: number) {
   const qc = useQueryClient();
   return useMutation({
+    // `pair`: "Post both" — the pair's two runs as ONE GitHub review (`reviewId` = either half).
     mutationFn: (vars: {
       reviewId: number;
       userVerdict: ClaudeReviewVerdict;
       dryRun?: boolean;
-    }) => api.postClaudeReview(vars.reviewId, vars.userVerdict, vars.dryRun ?? false),
+      pair?: boolean;
+    }) =>
+      vars.pair
+        ? api.postClaudeReviewPair(vars.reviewId, vars.userVerdict, vars.dryRun ?? false)
+        : api.postClaudeReview(vars.reviewId, vars.userVerdict, vars.dryRun ?? false),
     onSuccess: (_data, vars) => {
       if (!vars.dryRun) {
         void qc.invalidateQueries({ queryKey: ['claude-review', prId] });
