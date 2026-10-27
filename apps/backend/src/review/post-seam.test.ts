@@ -79,6 +79,31 @@ describe('questions in the one auto review', () => {
   });
 });
 
+describe('a Claude + Codex pair’s comments', () => {
+  it('name who raised them on the ONE severity lead, inline and PR-level alike', async () => {
+    submitGithubReview.mockClear();
+    submitGithubIssueComment.mockClear();
+    const { postReview } = await import('./post-seam.js');
+    await postReview({
+      owner: 'acme',
+      name: 'api',
+      prNumber: 1,
+      reviewHeadSha: 'HEAD',
+      body: 'Lead.',
+      verdict: 'COMMENT',
+      includedFindings: [
+        { ...q(1, 'src/foo.ts', 11), severity: 'warning', severityTag: 'Codex' },
+        { ...q(3, 'src/other.ts', 5), severity: 'nit', severityTag: 'Claude' },
+      ],
+      dryRun: false,
+    });
+    const sent = submitGithubReview.mock.calls[0]![0] as { comments: Array<{ body: string }> };
+    expect(sent.comments[0]!.body.split('\n')[0]).toBe('**Warning** · Codex');
+    const pc = submitGithubIssueComment.mock.calls[0]![0] as { body: string };
+    expect(pc.body.split('\n')[0]).toBe('**Nit** · Claude · `src/other.ts:5`');
+  });
+});
+
 describe('the review’s inline comment ids are read back', () => {
   const args = (ids: number[]) => ({
     owner: 'acme',

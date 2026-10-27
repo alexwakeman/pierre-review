@@ -483,8 +483,10 @@ to dedupe results." Code: `review/claude-review/pair.ts` (the pure half), `manag
   (`pair_dropped`).
 - **ONE GITHUB POST FOR AN AUTO PAIR.** Nothing posts after the first half. When the pair ends:
   both succeeded ⇒ `maybeAutoPostReview({reviewId: second, pairFirstReviewId: first})` sends ONE review
-  holding both halves' findings (each comment opens `_Raised by Claude._` / `_Raised by Codex._` and
-  carries its own provider's footer), ONE body (`**Claude:** <lead>` / `**Codex:** <lead>` and
+  holding both halves' findings (each comment names who raised it ON the one severity lead —
+  "**Warning** · Codex", `PostReviewFinding.severityTag` → `limnSeverityLead`'s `tag`, § Severity labels;
+  a finding with no label word falls back to a `_Raised by Codex._` line — and carries its own
+  provider's footer), ONE body (`**Claude:** <lead>` / `**Codex:** <lead>` and
   `PAIR_AUTO_POST_FOOTER`, listed in `AUTO_POST_FOOTERS`), ONE verdict over the UNION
   (`autoVerdictFor(pairVerdict(a, b), both runs' findings)`: APPROVE only when both approved and
   neither left a blocker or warning). ⚠ THE CLAIM covers the pair: compare-and-set on the SECOND half's
@@ -510,6 +512,15 @@ to dedupe results." Code: `review/claude-review/pair.ts` (the pure half), `manag
   half, so only when BOTH halves failed is the pair retried (as a pair again, by the workspace setting);
   each half's row counts towards `AUTO_RETRY_MAX_ATTEMPTS` (3), so a failed pair leaves one retry; the
   "default provider changed" and usage-reset tests read the second half's provider and error.
+- **With team claims** (§ Team claims): each half of an AUTO pair claims ITS OWN provider's context
+  (`limn/review-claude`, `limn/review-codex`) when that half starts. A half a teammate's Limn holds is a
+  half that never started — no row: a held first half ⇒ Codex runs ALONE (an ordinary run, which
+  claims its own context); a held second half ⇒ the pair ends on its first half. The combined post uses
+  what ran. The first half's line is renewed until the PAIR ends, then each half's final line counts
+  only its own findings in the one post (`finishAutoRunClaim`).
+- **With the replies pass** (§ The replies pass): a pair is ONE review in two runs — the pass plans
+  replies on BOTH halves' posted findings (each provider's chain), judges each thread on its owner's
+  provider, and the outcome re-check counts the open findings of BOTH succeeded halves.
 
 ### The effort setting (decided 2026-10-26)
 
@@ -2111,7 +2122,10 @@ auto-review switch, with an ⓘ). Code: `review/claude-review/team-claim.ts` (th
 `manager.ts` `startAutoItem` / `launch` and `auto.ts` (the sweeper's hold).
 
 - **AUTO REVIEWS ONLY** — the minute tick AND the reader's "Run auto reviews now" / Retry. A manual run
-  never claims and never checks claims.
+  never claims and never checks claims. ⚠ A REPLIES PASS never claims either (it is not a review of a
+  head; § The replies pass), and the Clear button's reads skip its rows (`kind IS NULL`).
+- **A Claude + Codex pair claims per half**, each on its own provider's context, when that half starts
+  (§ Claude + Codex → With team claims); a held half never starts, the other still runs.
 - **ONE CONTEXT PER PROVIDER FAMILY**, keyed by the RUN's provider: `limn/review-claude`,
   `limn/review-codex`. A teammate reviewing with Claude never holds the head for a Codex run.
 - **THE LINES** (≤ 140 characters, plain English, naming the GitHub login):

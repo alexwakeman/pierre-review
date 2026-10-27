@@ -158,10 +158,14 @@ describe('one review for both halves', () => {
     const sent = postReview.mock.calls[0]![0];
     expect(sent.body).toBe(`**Claude:** claude found things.\n\n**Codex:** codex found things.\n\n${PAIR_AUTO_POST_FOOTER}`);
     expect(sent.verdict).toBe('COMMENT');
-    expect(sent.includedFindings.map((f: any) => [f.storyLead, f.footer])).toEqual([
-      ['_Raised by Claude._', autoPostFooter('Claude')],
-      ['_Raised by Codex._', autoPostFooter('Codex')],
+    // Who raised it rides the ONE severity lead ("**Warning** · Claude"), not a line of its own.
+    expect(sent.includedFindings.map((f: any) => [f.severity, f.severityTag, f.storyLead, f.footer])).toEqual([
+      ['warning', 'Claude', null, autoPostFooter('Claude')],
+      ['blocker', 'Codex', null, autoPostFooter('Codex')],
     ]);
+    const { findingCommentBody } = await import('../post-review.js');
+    const f0 = sent.includedFindings[0];
+    expect(findingCommentBody({ ...f0, editedBody: null }, { tag: f0.severityTag }).split('\n')[0]).toBe('**Warning** · Claude');
     // Claimed on the second; the first rides it.
     const recSecond = await recordOf(second);
     const recFirst = await recordOf(first);
@@ -275,7 +279,10 @@ describe('the routes: Claude + Codex start, Post both', () => {
     expect(postReview).toHaveBeenCalledTimes(1);
     const sent = postReview.mock.calls[0]![0];
     expect(sent.body).toBe('**Claude:** claude found things.\n\n**Codex:** My summary.');
-    expect(sent.includedFindings.map((f: any) => f.storyLead)).toEqual(['_Raised by Claude._', '_Raised by Codex._']);
+    expect(sent.includedFindings.map((f: any) => [f.severityTag, f.storyLead])).toEqual([
+      ['Claude', null],
+      ['Codex', null],
+    ]);
     for (const id of [first, second]) {
       const rev = await persist.getClaudeReviewById(ctx, id, 1);
       expect(rev?.postedReviewId).toBe('R77');

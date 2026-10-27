@@ -127,13 +127,15 @@ interface FullReviewMeta {
   headSha: string;
   createdAt: Date;
   commentsThrough: Date | null;
+  // A Claude + Codex pair half: the FIRST half's id. NULL on an ordinary run.
+  pairId: number | null;
 }
 
 /** The latest succeeded FULL review that read code (the one the follow-up chain anchors on). */
 async function latestFullReview(ctx: AgentContext, accountId: number, prId: number): Promise<FullReviewMeta | null> {
   const cr = sch(ctx).claudeReviews;
   const rows = (await ctx.db
-    .select({ id: cr.id, headSha: cr.headSha, createdAt: cr.createdAt, commentsThrough: cr.commentsThrough })
+    .select({ id: cr.id, headSha: cr.headSha, createdAt: cr.createdAt, commentsThrough: cr.commentsThrough, pairId: cr.pairId })
     .from(cr)
     .where(
       and(
@@ -206,9 +208,22 @@ export async function planRepliesCheck(
   const full = await latestFullReview(ctx, accountId, prId);
   if (!full) return { refused: 'no_review' };
   const settled = await loadSettledByReplyFindings(ctx, prId, accountId, ALL_RUNS);
-  const prior = await loadPriorReviewForFollowUp(ctx, prId, accountId, ALL_RUNS, new Set(settled.map((f) => f.id)));
-  if (!prior || prior.findings.length === 0) return { refused: 'nothing_to_check' };
-  const attached = await attachFindingThreads(ctx, accountId, prId, prior.findings);
+  const settledIds = new Set(settled.map((f) => f.id));
+  // A CLAUDE + CODEX PAIR is ONE review in two runs: each half's posted findings (and their replies)
+  // are this pass's to judge, so read each provider's chain — the pair's two halves are the latest
+  // run of each. An ordinary review reads the latest run alone.
+  const priors =
+    full.pairId != null
+      ? await Promise.all(
+          (['claude', 'codex'] as const).map((p) => loadPriorReviewForFollowUp(ctx, prId, accountId, ALL_RUNS, settledIds, p)),
+        )
+      : [await loadPriorReviewForFollowUp(ctx, prId, accountId, ALL_RUNS, settledIds)];
+  const seen = new Set<number>();
+  const priorFindings = priors
+    .flatMap((p) => p?.findings ?? [])
+    .filter((f) => (seen.has(f.id) ? false : (seen.add(f.id), true)));
+  if (priorFindings.length === 0) return { refused: 'nothing_to_check' };
+  const attached = await attachFindingThreads(ctx, accountId, prId, priorFindings);
   const passes = (await passesAfter(ctx, accountId, prId, full.id)).filter((p) => p.status === 'succeeded');
   const judged = judgedThroughFor(
     { createdAtMs: full.createdAt.getTime(), commentsThroughMs: full.commentsThrough?.getTime() ?? null },

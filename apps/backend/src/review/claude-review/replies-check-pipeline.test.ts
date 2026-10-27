@@ -137,9 +137,25 @@ async function makePr(state: 'open' | 'closed' = 'open'): Promise<number> {
 async function reviewed(
   pr: number,
   rows: Array<{ title: string; severity: 'blocker' | 'warning' | 'nit'; replies: Array<{ by: string; body: string; at?: number }> }>,
-  opts: { trigger?: 'auto' | 'manual'; provider?: 'claude' | 'codex'; verdict?: 'COMMENT' | 'APPROVE' | 'REQUEST_CHANGES' } = {},
+  opts: {
+    trigger?: 'auto' | 'manual';
+    provider?: 'claude' | 'codex';
+    verdict?: 'COMMENT' | 'APPROVE' | 'REQUEST_CHANGES';
+    pair?: { role: 'first' } | { role: 'second'; pairId: number };
+  } = {},
 ): Promise<{ reviewId: number; ids: Map<string, number> }> {
-  const reviewId = await persist.insertQueuedReview(ctx, pr, HEAD, 'claude-opus-5-5', 1, [], opts.trigger ?? 'auto', opts.provider ?? 'claude');
+  const reviewId = await persist.insertQueuedReview(
+    ctx,
+    pr,
+    HEAD,
+    'claude-opus-5-5',
+    1,
+    [],
+    opts.trigger ?? 'auto',
+    opts.provider ?? 'claude',
+    false,
+    opts.pair ?? null,
+  );
   await persist.saveReviewSuccess(ctx, reviewId, {
     scope: 'diff_only', summary: 's', verdict: opts.verdict ?? 'COMMENT', costUsd: null, inputTokens: null, outputTokens: null,
     numTurns: 1, excludedFiles: [],
@@ -480,6 +496,42 @@ describe('the provider of the run that owns each thread', () => {
     ]);
     // Codex cannot run here ⇒ its threads go to the default.
     expect(rc.groupByProvider([f(1), f(2)], owners, () => 'claude')).toEqual([{ provider: 'claude', findingIds: [1, 2] }]);
+  });
+
+  it('a Claude + Codex pair: both halves’ threads are judged, each by its own provider, and the outcome counts both', async () => {
+    await settings.setWorkspaceAutoReview(ctx, 1, wsId, { autoPost: { enabled: false } as any });
+    const pr = await makePr();
+    // Claude's half: a warning nobody replied to (still open). Codex's half: a warning whose reply
+    // is accepted. Only Codex's half settled ⇒ the PR still has an open warning ⇒ no APPROVE.
+    const first = await reviewed(
+      pr,
+      [{ title: 'Slow loop', severity: 'warning', replies: [{ by: 'alice', body: DEFER }] }],
+      { provider: 'claude', trigger: 'manual', pair: { role: 'first' } },
+    );
+    await reviewed(
+      pr,
+      [{ title: 'Unchecked input', severity: 'warning', replies: [{ by: 'alice', body: EXPLAIN }] }],
+      { provider: 'codex', trigger: 'manual', pair: { role: 'second', pairId: first.reviewId } },
+    );
+    const planned = await rc.planRepliesCheck(ctx, 1, pr);
+    expect('refused' in planned).toBe(false);
+    if ('refused' in planned) return;
+    expect(planned.findings.map((f) => f.title).sort()).toEqual(['Slow loop', 'Unchecked input']);
+    agentCalls.length = 0;
+    script = (call: any) =>
+      call.provider === 'codex'
+        ? { replies: [{ ref: 'T1', status: 'reply_accepted', acceptKind: 'not_valid', reply: 'Fair.' }] }
+        : { replies: [{ ref: 'T1', status: 'reply_disputed', reply: 'The loop is still quadratic on line 2.' }] };
+    await rc.startRepliesCheck(ctx, { accountId: 1, prId: pr, trigger: 'manual' });
+    await settleFor(pr);
+    expect(agentCalls.map((a) => a.provider)).toEqual(['claude', 'codex']);
+    const rows = await passRows(pr);
+    expect(rows.map((r) => r.provider).sort()).toEqual(['claude', 'codex']);
+    const { computeRepliesOutcome } = await import('./replies-outcome.js');
+    const codexPass = (await persist.getClaudeReviewById(ctx, rows.find((r) => r.provider === 'codex')!.id, 1))!;
+    // The outcome rests on BOTH halves: Claude's open warning keeps it from approving.
+    const outcome = await computeRepliesOutcome(ctx, 1, pr, codexPass.followUp!.items);
+    expect(outcome.wanted).not.toBe('APPROVE');
   });
 
   it('a thread a Codex review posted is judged by Codex', async () => {
