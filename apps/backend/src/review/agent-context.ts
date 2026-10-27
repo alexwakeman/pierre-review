@@ -111,6 +111,10 @@ export interface AgentContext {
         // on one of Limn's own findings (null: none). Absent ⇒ the sweeper reads them itself.
         checkCoveredMs?: number | null;
         newestOwnThreadCommentAtMs?: number | null;
+        // How far the replies passes at this head reached (null: none), and the newest qualifying
+        // comment in a thread NOT rooted on Limn's own finding (null: none). Absent ⇒ not split.
+        repliesCoveredMs?: number | null;
+        newestOtherCommentAtMs?: number | null;
       }>;
       // PRs whose run is queued or running while their synced head has moved past it: never
       // cancelled — the sweeper only starts the new head's settle clock. Absent ⇒ none.

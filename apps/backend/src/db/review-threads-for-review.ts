@@ -134,15 +134,16 @@ export async function newestReviewCommentAt(
 /**
  * `newestReviewCommentAt`, plus `newestOwn`: the newest of those comments inside a thread ROOTED on
  * one of Limn's own posted findings (the loader's `newestOwnThreadCommentAt`, same filter) — the
- * sweeper's "a reply on a Limn finding needs a full review" test, read in the same scan.
+ * sweeper's "a reply on a Limn finding goes to a replies pass" test, read in the same scan — and
+ * `newestOther`: the newest one in any OTHER thread (Check threads' half).
  */
 export async function newestReviewCommentTimes(
   accountId: number,
   prIds: readonly number[],
   since: Date,
   countsAuthor?: CountsAuthor,
-): Promise<Map<number, { newest: Date; newestOwn: Date | null }>> {
-  const out = new Map<number, { newest: Date; newestOwn: Date | null }>();
+): Promise<Map<number, { newest: Date; newestOwn: Date | null; newestOther?: Date | null }>> {
+  const out = new Map<number, { newest: Date; newestOwn: Date | null; newestOther?: Date | null }>();
   if (prIds.length === 0) return out;
   const { reviewComments: rc, reviewThreads: rt, pullRequests: prs, users } = schema;
   const rows = await db
@@ -214,11 +215,12 @@ export async function newestReviewCommentTimes(
     const prev = out.get(r.prId);
     const isOwn = r.threadId != null && ownRooted.has(r.threadId);
     if (!prev) {
-      out.set(r.prId, { newest: r.createdAt, newestOwn: isOwn ? r.createdAt : null });
+      out.set(r.prId, { newest: r.createdAt, newestOwn: isOwn ? r.createdAt : null, newestOther: isOwn ? null : r.createdAt });
       continue;
     }
     if (r.createdAt.getTime() > prev.newest.getTime()) prev.newest = r.createdAt;
     if (isOwn && (!prev.newestOwn || r.createdAt.getTime() > prev.newestOwn.getTime())) prev.newestOwn = r.createdAt;
+    if (!isOwn && (!prev.newestOther || r.createdAt.getTime() > prev.newestOther.getTime())) prev.newestOther = r.createdAt;
   }
   return out;
 }

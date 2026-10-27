@@ -1188,6 +1188,15 @@ Additive. Joins `accountScopedTables()`, the erasure and the export. [CLAUDE-REV
 § Sprint code judgements. Journal `when` sqlite `1792137619016`. (Parallel branches may also have taken
 `0132`; renumber on merge like `0131`.)
 
+### `0136_review_kind` — the replies pass
+`ALTER TABLE claude_reviews ADD kind text`: `'replies'` on a REPLIES PASS (a run that judged only
+people's replies on Limn's own posted findings), NULL on every full review, older rows included.
+Additive, nullable, no backfill. ⚠ Every "latest review" / "run at this head" reader now filters
+`kind IS NULL` (the list is in [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § The replies pass); the table is
+already in `accountScopedTables()`, erasure and the export. Journal `idx` 136, `when` sqlite
+`1792137623016` (`0134` / `0135` were reserved for parallel branches of the same batch; the journal
+needs no contiguous `idx`, only a `when` later than the last applied).
+
 ### No migration — "Check against code" removed (2026-10-18): `sprint_ticket_repos` + `sprint_assessments` DORMANT
 
 The sprint drawer, its repo picker and "Check against code" (`review/sprint-assess/`) were removed with

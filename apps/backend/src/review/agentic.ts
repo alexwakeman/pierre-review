@@ -7,6 +7,7 @@ import { registerAutoReviewSettingsRoutes } from './claude-review/auto-settings.
 import { registerAutoReview } from './claude-review/auto.js';
 import { reconcileReviewsOnStartup } from './claude-review/manager.js';
 import { registerThreadCheckRoutes } from './claude-review/thread-check-routes.js';
+import { registerRepliesCheckRoutes } from './claude-review/replies-check-routes.js';
 import { reconcileThreadChecksOnStartup } from './claude-review/thread-check.js';
 import { registerTicketReviewRoutes } from './ticket-review/routes.js';
 import { reconcileTicketReviewsOnStartup } from './ticket-review/manager.js';
@@ -52,6 +53,7 @@ export function registerAgenticRoutes(app: FastifyInstance): AgentContext | null
   // CHECK THREADS: a light, threads-only pass over the review threads changed since their last
   // judgement (claude-review/thread-check.ts) — a click, or the auto-review sweeper on a comment burst.
   registerThreadCheckRoutes(app, ctx);
+  registerRepliesCheckRoutes(app, ctx);
   registerTicketReviewRoutes(app, ctx);
   registerCiReviewRoutes(app, ctx);
   // SEQUENCE DIAGRAMS: a separate Sonnet process queued after every finished review (and by Redraw).

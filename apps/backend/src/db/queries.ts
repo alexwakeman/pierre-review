@@ -9776,6 +9776,8 @@ export async function getUnactionedClaudeReviews(
         repoIds == null ? undefined : inArray(pullRequests.repoId, repoIds),
         eq(claudeReviews.status, 'succeeded'),
         eq(pullRequests.state, 'open'),
+        // A REPLIES PASS (kind 'replies') is not a review to action: the card follows the full one.
+        isNull(claudeReviews.kind),
       ),
     )
     .orderBy(desc(claudeReviews.finishedAt), desc(claudeReviews.createdAt))
@@ -9913,6 +9915,8 @@ export async function getAutoReviewCandidates(
         eq(claudeReviews.trigger, 'auto'),
         gte(claudeReviews.createdAt, new Date(opts.dayStartMs)),
         inArray(pullRequests.repoId, repoIds),
+        // Replies passes have their own per-PR cap (review/claude-review/replies-check.ts).
+        isNull(claudeReviews.kind),
       ),
     )
     .execute();
@@ -9939,7 +9943,7 @@ export async function getAutoReviewCandidates(
     .execute();
   if (open.length === 0) return { prIds: [], autoToday, reReview: [], inFlightMoved: [], retry: [] };
 
-  const [bots, reviewed, reviewerBots] = await Promise.all([
+  const [bots, allRuns, reviewerBots] = await Promise.all([
     hiddenBotUserIds(accountId, workspaceId),
     db
       .select({
@@ -9954,6 +9958,7 @@ export async function getAutoReviewCandidates(
         error: claudeReviews.error,
         provider: claudeReviews.provider,
         model: claudeReviews.model,
+        kind: claudeReviews.kind,
       })
       .from(claudeReviews)
       .where(
@@ -9969,6 +9974,11 @@ export async function getAutoReviewCandidates(
     automatedReviewerUserIds(accountId, workspaceId, 'review'),
   ]);
   const botSet = new Set(bots);
+  // ⚠ A REPLIES PASS (kind 'replies') is NOT a review: it neither settles a head nor counts as a
+  // first review, a retry or a run in flight. Only its coverage of the own-finding replies is read
+  // (`repliesCoveredMs`, below). Every rule from here on reads full reviews alone.
+  const repliesRows = allRuns.filter((r) => r.kind === 'replies');
+  const reviewed = allRuns.filter((r) => r.kind == null);
   const hasRun = new Set(reviewed.map((r) => r.prId));
   const human = open.filter((r) => r.authorId != null && !botSet.has(r.authorId));
   // ⚠ THE ONBOARDING FLOOR GATES FIRST REVIEWS ONLY. A PR opened before the switch is never
@@ -9995,7 +10005,7 @@ export async function getAutoReviewCandidates(
   const inFlightMoved: Array<{ prId: number; headSha: string }> = [];
   const retry: AutoRetryCandidate[] = [];
   // Same head, but maybe NEW REVIEW COMMENTS: the PR's runs at its head and how far they saw.
-  const sameHead: Array<{ prId: number; headSha: string; coveredMs: number }> = [];
+  const sameHead: Array<{ prId: number; headSha: string; coveredMs: number; repliesCoveredMs: number | null }> = [];
   for (const pr of human) {
     const runs = runsByPr.get(pr.id);
     if (!runs || !pr.headSha) continue;
@@ -10083,7 +10093,11 @@ export async function getAutoReviewCandidates(
     const coveredMs = Math.max(
       ...atHead.map((r) => (r.commentsThrough ?? r.createdAt).getTime()),
     );
-    sameHead.push({ prId: pr.id, headSha: pr.headSha, coveredMs });
+    // How far the replies passes AT THIS HEAD reached (any status: one attempt per burst).
+    const passes = repliesRows.filter((r) => r.prId === pr.id && r.headSha === pr.headSha);
+    const repliesCoveredMs =
+      passes.length > 0 ? Math.max(...passes.map((r) => (r.commentsThrough ?? r.createdAt).getTime())) : null;
+    sameHead.push({ prId: pr.id, headSha: pr.headSha, coveredMs, repliesCoveredMs });
   }
   // RE-REVIEW ON NEW COMMENTS: a qualifying review-thread comment (a person's or a bot's, in an
   // unresolved thread, never one Limn posted — db/review-threads-for-review.ts) newer than what
@@ -10137,8 +10151,13 @@ export async function getAutoReviewCandidates(
       const ck = latestCheck.get(p.prId);
       const checkCoveredMs = ck && ck.headSha === p.headSha ? (ck.commentsThrough ?? ck.createdAt).getTime() : null;
       const ownMs = t.newestOwn?.getTime() ?? null;
-      const ownNeedsReview = ownMs != null && ownMs > p.coveredMs;
-      if (at <= Math.max(p.coveredMs, checkCoveredMs ?? 0) && !ownNeedsReview) continue;
+      // A reply on Limn's own finding goes to a REPLIES PASS (review/claude-review/auto.ts
+      // `commentBurstRoute`), which covers it once a pass at this head reached it.
+      const ownNeedsPass = ownMs != null && ownMs > Math.max(p.coveredMs, p.repliesCoveredMs ?? 0);
+      // Everything else goes to Check threads, as before.
+      const otherMs = t.newestOther?.getTime() ?? null;
+      const otherNeedsCheck = otherMs != null && otherMs > Math.max(p.coveredMs, checkCoveredMs ?? 0);
+      if (!ownNeedsPass && !otherNeedsCheck) continue;
       reReview.push({
         prId: p.prId,
         headSha: p.headSha,
@@ -10148,6 +10167,8 @@ export async function getAutoReviewCandidates(
         coveredMs: p.coveredMs,
         checkCoveredMs,
         newestOwnThreadCommentAtMs: ownMs,
+        repliesCoveredMs: p.repliesCoveredMs,
+        newestOtherCommentAtMs: otherMs,
       });
       if (reReview.length >= opts.limit) break;
     }
@@ -10207,6 +10228,11 @@ export interface AutoReReviewCandidate {
   // both present the sweeper routes the burst without reading the PR's threads again.
   checkCoveredMs?: number | null;
   newestOwnThreadCommentAtMs?: number | null;
+  // Comment re-reviews only: how far the replies passes AT THIS HEAD reached (null: none), and the
+  // newest qualifying comment in a thread NOT rooted on Limn's own finding (null: none). A reply on
+  // Limn's own finding is answered by a replies pass; the rest by Check threads.
+  repliesCoveredMs?: number | null;
+  newestOtherCommentAtMs?: number | null;
 }
 
 /** A PR whose latest run at its CURRENT head is a FAILED AUTO run (nothing at that head succeeded).

@@ -291,6 +291,32 @@ beforeAll(async () => {
     ]);
     await check(pr['check-own-reply']!, 'head_check-own-reply', AFTER + 60_000);
   }
+  // THE REPLIES PASS (kind 'replies'): a pass at the head that reached the reply covers it; a pass is
+  // never a review of its head (a moved head with only a pass at it is still a re-review).
+  const pass = (prId: number, headSha: string, through: number) =>
+    db
+      .insert(schema.claudeReviews)
+      .values({ accountId: 1, prId, headSha, status: 'succeeded', model: 'claude-sonnet-5', trigger: 'auto', kind: 'replies', createdAt: new Date(through), commentsThrough: new Date(through) })
+      .execute();
+  {
+    const id = await run(await seedPr('replies-covered'), 'head_replies-covered');
+    await postedFinding(id, 'Swallowed error.');
+    await threadWith(pr['replies-covered']!, [
+      { authorId: viewerId, at: AFTER, body: 'Swallowed error.' },
+      { authorId: aliceId, at: AFTER + 60_000, body: 'It is logged upstream.' },
+    ]);
+    await pass(pr['replies-covered']!, 'head_replies-covered', AFTER + 60_000);
+    const id2 = await run(await seedPr('replies-then-other'), 'head_replies-then-other');
+    await postedFinding(id2, 'Leaky handle.');
+    await threadWith(pr['replies-then-other']!, [
+      { authorId: viewerId, at: AFTER, body: 'Leaky handle.' },
+      { authorId: aliceId, at: AFTER + 60_000, body: 'Closed in finally.' },
+    ]);
+    await pass(pr['replies-then-other']!, 'head_replies-then-other', AFTER + 60_000);
+    await threadWith(pr['replies-then-other']!, [{ authorId: bobId, at: AFTER + 120_000, body: 'Rename this?' }]);
+    await run(await seedPr('pass-at-new-head'), 'head_old');
+    await pass(pr['pass-at-new-head']!, 'head_pass-at-new-head', AFTER);
+  }
 
   // ONLY REAL REVIEWERS RE-TRIGGER: a CI bot and a coverage bot commented after the run.
   const ciBot = await user('github-actions[bot]', true);
@@ -374,6 +400,29 @@ describe('getAutoReviewCandidates — re-review on new review comments', () => {
     });
     expect(offered.get(pr['reply-to-own']!)?.newestOwnThreadCommentAtMs).toBe(AFTER + 60_000);
     expect(offered.get(pr.human!)?.newestOwnThreadCommentAtMs).toBeNull();
+  });
+});
+
+describe('getAutoReviewCandidates — the replies pass', () => {
+  it('a pass at the head covers the own-finding reply; another comment still routes to a check; a pass is never a review', async () => {
+    const res = (await q.getAutoReviewCandidates(1, workspaceId, {
+      openedSinceMs: FLOOR,
+      dayStartMs: now - 24 * HOUR,
+      limit: 50,
+    }))!;
+    const offered = new Map(res.reReview.map((r) => [r.prId, r]));
+    expect(offered.has(pr['replies-covered']!)).toBe(false);
+    expect(offered.get(pr['replies-then-other']!)).toMatchObject({
+      repliesCoveredMs: AFTER + 60_000,
+      newestOwnThreadCommentAtMs: AFTER + 60_000,
+      newestOtherCommentAtMs: AFTER + 120_000,
+    });
+    // An uncovered own reply carries no pass coverage.
+    expect(offered.get(pr['reply-to-own']!)).toMatchObject({ repliesCoveredMs: null, newestOtherCommentAtMs: null });
+    // Only a pass at the new head: still a moved head to review, and never counted as today's review.
+    expect(offered.get(pr['pass-at-new-head']!)).toMatchObject({ reason: 'head', headSha: 'head_pass-at-new-head' });
+    expect(await persist.hasReviewAtHead(ctx, pr['pass-at-new-head']!, 1, 'head_pass-at-new-head')).toBe(false);
+    expect(await persist.isAutoReReviewSettled(ctx, pr['pass-at-new-head']!, 1, 'head_pass-at-new-head', null)).toBe(false);
   });
 });
 

@@ -504,8 +504,20 @@ describe('runAutoReviewSweep — the 20-minute ceiling', () => {
 });
 
 // A SAME-HEAD COMMENT BURST IS A LIGHT CHECK THREADS PASS (2026-10-18), unless a Limn finding got a
-// reply (that needs the full review), and a check that already reached the burst covers it.
+// reply (a REPLIES PASS since 2026-10-27), and a check that already reached the burst covers it.
 const checkStarts: any[] = [];
+const repliesStarts: any[] = [];
+let repliesUsed = 0;
+let repliesAnswer: any = { outcome: 'queued', reviewId: 900, threads: 1 };
+vi.mock('./replies-check.js', () => ({
+  repliesCheckHeld: () => false,
+  repliesCheckAutoRoom: () => 20,
+  countAutoRepliesPassesSince: async () => repliesUsed,
+  startRepliesCheck: async (_ctx: unknown, a: any) => {
+    repliesStarts.push(a);
+    return repliesAnswer;
+  },
+}));
 let latestCheck: any = null;
 vi.mock('./thread-check.js', () => ({
   threadCheckHeld: () => false,
@@ -523,11 +535,26 @@ vi.mock('../ci-review/persist.js', () => ({ getCiPrContext: async () => ({ repoI
 
 const { commentBurstRoute } = await import('./auto.js');
 describe('comment bursts → Check threads', () => {
-  it('routes: own-finding reply ⇒ review; covered ⇒ nothing; otherwise a check', () => {
-    expect(commentBurstRoute({ commentsAtMs: 10, reviewCoveredMs: 5, newestOwnThreadCommentAtMs: 8, checkCoveredMs: 10 })).toBe('review');
+  it('routes: own-finding reply ⇒ replies pass; covered ⇒ nothing; otherwise a check', () => {
+    expect(commentBurstRoute({ commentsAtMs: 10, reviewCoveredMs: 5, newestOwnThreadCommentAtMs: 8, checkCoveredMs: 10 })).toBe('replies');
     expect(commentBurstRoute({ commentsAtMs: 10, reviewCoveredMs: 9, newestOwnThreadCommentAtMs: 8, checkCoveredMs: 10 })).toBe('covered');
     expect(commentBurstRoute({ commentsAtMs: 10, reviewCoveredMs: 5, newestOwnThreadCommentAtMs: null, checkCoveredMs: 9 })).toBe('check');
     expect(commentBurstRoute({ commentsAtMs: 10, reviewCoveredMs: null, newestOwnThreadCommentAtMs: null, checkCoveredMs: null })).toBe('check');
+  });
+
+  it('routes: a replies pass at the head covers its half; the other half still goes to a check', () => {
+    // The own reply (8) was reached by a replies pass (8); the newest OTHER comment (10) is new.
+    expect(
+      commentBurstRoute({ commentsAtMs: 10, reviewCoveredMs: 5, newestOwnThreadCommentAtMs: 8, checkCoveredMs: null, repliesCoveredMs: 8, newestOtherCommentAtMs: 10 }),
+    ).toBe('check');
+    // Only own replies, all covered by the pass ⇒ nothing to do (no Check threads row for nothing).
+    expect(
+      commentBurstRoute({ commentsAtMs: 8, reviewCoveredMs: 5, newestOwnThreadCommentAtMs: 8, checkCoveredMs: null, repliesCoveredMs: 8, newestOtherCommentAtMs: null }),
+    ).toBe('covered');
+    // A newer own reply beats an older pass.
+    expect(
+      commentBurstRoute({ commentsAtMs: 12, reviewCoveredMs: 5, newestOwnThreadCommentAtMs: 12, checkCoveredMs: null, repliesCoveredMs: 8, newestOtherCommentAtMs: null }),
+    ).toBe('replies');
   });
 
   const ctxWithThreads = (ownAt: number | null) =>
@@ -556,14 +583,20 @@ describe('comment bursts → Check threads', () => {
     expect(checkStarts[0]).toMatchObject({ prId: 40, trigger: 'auto', repoId: 3, commentsThrough: new Date(NOW - 1000) });
   });
 
-  it('a reply on a Limn finding keeps the full review; a covering check does nothing', async () => {
+  it('a reply on a Limn finding starts a REPLIES PASS (not a review) once settled; a covering check does nothing', async () => {
     checkStarts.length = 0;
+    repliesStarts.length = 0;
+    repliesUsed = 0;
+    repliesAnswer = { outcome: 'queued', reviewId: 900, threads: 1 };
     latestCheck = null;
     answers.set(7, { prIds: [], autoToday: 0, reReview: [{ prId: 41, headSha: 'h', commentsAtMs: NOW - 1000, coveredMs: NOW - 5000 } as any] });
     await runAutoReviewSweep(ctxWithThreads(NOW - 2000), NOW);
-    await runAutoReviewSweep(ctxWithThreads(NOW - 2000), NOW + AUTO_REREVIEW_SETTLE_MS);
-    expect(enqueued).toEqual([[1, 41]]);
+    expect(repliesStarts).toHaveLength(0); // ⚠ debounced: the thread must be quiet first
+    const r = await runAutoReviewSweep(ctxWithThreads(NOW - 2000), NOW + AUTO_REREVIEW_SETTLE_MS);
+    expect(enqueued).toEqual([]);
     expect(checkStarts).toHaveLength(0);
+    expect(r.repliesQueued).toBe(1);
+    expect(repliesStarts[0]).toMatchObject({ accountId: 1, prId: 41, trigger: 'auto', commentsThroughMs: NOW - 1000 });
 
     _resetAutoReReviewForTest();
     latestCheck = { headSha: 'h', commentsThrough: new Date(NOW - 1000), createdAt: new Date(NOW - 900) };
@@ -571,6 +604,80 @@ describe('comment bursts → Check threads', () => {
     await runAutoReviewSweep(ctxWithThreads(null), NOW + AUTO_REREVIEW_MAX_WAIT_MS);
     expect(checkStarts).toHaveLength(0);
     expect(autoReviewWaiting(42, 1)).toBeNull();
+  });
+});
+
+describe('comment bursts → the replies pass', () => {
+  const cand = (prId: number, over: Record<string, unknown> = {}) => ({
+    prId,
+    headSha: 'h',
+    commentsAtMs: NOW - 1000,
+    coveredMs: NOW - 5000,
+    checkCoveredMs: null,
+    newestOwnThreadCommentAtMs: NOW - 1000,
+    repliesCoveredMs: null,
+    newestOtherCommentAtMs: null,
+    ...over,
+  });
+  beforeEach(() => {
+    checkStarts.length = 0;
+    repliesStarts.length = 0;
+    repliesUsed = 0;
+    repliesAnswer = { outcome: 'queued', reviewId: 900, threads: 1 };
+  });
+
+  it('⚠ the per-PR cap (counted in the DB): past it, no pass — and the burst’s other half still gets its check', async () => {
+    repliesUsed = 5;
+    answers.set(7, { prIds: [], autoToday: 0, reReview: [cand(70, { newestOtherCommentAtMs: NOW - 1500, commentsAtMs: NOW - 1000 }) as any] });
+    await runAutoReviewSweep(makeCtx(), NOW);
+    await runAutoReviewSweep(makeCtx(), NOW + AUTO_REREVIEW_SETTLE_MS);
+    expect(repliesStarts).toHaveLength(0);
+    // Settled in memory, so the next tick routes the other comment to Check threads.
+    await runAutoReviewSweep(makeCtx(), NOW + 2 * AUTO_REREVIEW_SETTLE_MS);
+    await runAutoReviewSweep(makeCtx(), NOW + 3 * AUTO_REREVIEW_SETTLE_MS);
+    expect(checkStarts.map((c) => c.prId)).toEqual([70]);
+  });
+
+  it('nothing to judge ⇒ settled in memory: the sweeper does not ask again every tick', async () => {
+    repliesAnswer = { outcome: 'refused', reason: 'nothing_to_check' };
+    answers.set(7, { prIds: [], autoToday: 0, reReview: [cand(71) as any] });
+    await runAutoReviewSweep(makeCtx(), NOW);
+    await runAutoReviewSweep(makeCtx(), NOW + AUTO_REREVIEW_SETTLE_MS);
+    expect(repliesStarts).toHaveLength(1);
+    await runAutoReviewSweep(makeCtx(), NOW + 2 * AUTO_REREVIEW_SETTLE_MS);
+    await runAutoReviewSweep(makeCtx(), NOW + 3 * AUTO_REREVIEW_SETTLE_MS);
+    expect(repliesStarts).toHaveLength(1);
+    expect(checkStarts).toHaveLength(0);
+    // A NEWER reply opens a new burst.
+    answers.set(7, { prIds: [], autoToday: 0, reReview: [cand(71, { newestOwnThreadCommentAtMs: NOW + 60_000, commentsAtMs: NOW + 60_000 }) as any] });
+    await runAutoReviewSweep(makeCtx(), NOW + 4 * AUTO_REREVIEW_SETTLE_MS);
+    await runAutoReviewSweep(makeCtx(), NOW + 5 * AUTO_REREVIEW_SETTLE_MS);
+    expect(repliesStarts).toHaveLength(2);
+  });
+
+  it('⚠ a full review in flight: refused, NOT settled — the review covers the replies itself', async () => {
+    repliesAnswer = { outcome: 'refused', reason: 'review_in_progress' };
+    answers.set(7, { prIds: [], autoToday: 0, reReview: [cand(72) as any] });
+    await runAutoReviewSweep(makeCtx(), NOW);
+    await runAutoReviewSweep(makeCtx(), NOW + AUTO_REREVIEW_SETTLE_MS);
+    await runAutoReviewSweep(makeCtx(), NOW + 2 * AUTO_REREVIEW_SETTLE_MS);
+    expect(repliesStarts.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('⚠ auto review off ⇒ no replies pass', async () => {
+    answers.set(7, { prIds: [], autoToday: 0, reReview: [cand(73) as any] });
+    await runAutoReviewSweep(makeCtx(), NOW);
+    roster = [];
+    await runAutoReviewSweep(makeCtx(), NOW + 2 * AUTO_REREVIEW_SETTLE_MS);
+    expect(repliesStarts).toHaveLength(0);
+  });
+
+  it('⚠ over the spend budget ⇒ skipped, never queued', async () => {
+    answers.set(7, { prIds: [], autoToday: 0, reReview: [cand(74) as any] });
+    const ctx = makeCtx({ aiBudget: { allowAutomaticRun: async () => false } });
+    await runAutoReviewSweep(ctx, NOW);
+    await runAutoReviewSweep(ctx, NOW + 2 * AUTO_REREVIEW_SETTLE_MS);
+    expect(repliesStarts).toHaveLength(0);
   });
 });
 

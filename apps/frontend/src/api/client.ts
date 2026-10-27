@@ -42,6 +42,7 @@ import type {
   ApprovePrResult,
   WithdrawApprovalResult,
   StartThreadCheckResponse,
+  StartRepliesCheckResponse,
   ThreadCheckStatusResponse,
   RequestChangesBody,
   RequestChangesResult,
@@ -1404,6 +1405,16 @@ export const api = {
     get<ThreadCheckStatusResponse>(`/api/prs/${prId}/claude-review/thread-check`),
   cancelThreadCheck: (prId: number) =>
     fetch(`/api/prs/${prId}/claude-review/thread-check/cancel`, jsonBody('POST', {})).then((r) =>
+      handle<{ cancelled: boolean }>(r),
+    ),
+  // The replies pass: judge only people's replies on Limn's own findings (local only). Its state
+  // rides `GET /api/prs/:id/claude-review` (`repliesCheck`). A pass started here never posts.
+  startRepliesCheck: (prId: number) =>
+    fetch(`/api/prs/${prId}/claude-review/replies`, jsonBody('POST', {})).then((r) =>
+      handle<StartRepliesCheckResponse>(r),
+    ),
+  cancelRepliesCheck: (prId: number) =>
+    fetch(`/api/prs/${prId}/claude-review/replies/cancel`, jsonBody('POST', {})).then((r) =>
       handle<{ cancelled: boolean }>(r),
     ),
   claudeReviewStatus: (prId: number) =>

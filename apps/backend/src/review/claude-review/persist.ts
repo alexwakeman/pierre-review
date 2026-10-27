@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { and, asc, desc, eq, gte, inArray, isNull, lt, ne, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, gte, inArray, isNull, lt, ne, or, sql } from 'drizzle-orm';
 import type {
   AiProviderId,
   ClaudeFinding,
@@ -12,6 +12,7 @@ import type {
   ClaudeReview,
   ClaudeReviewFollowUp,
   ClaudeReviewFollowUpRecord,
+  ClaudeFollowUpItemRecord,
   ClaudeReviewHeadState,
   ClaudeReviewListItem,
   ClaudeReviewModel,
@@ -41,6 +42,7 @@ import type { ClaudeFollowUpLeftOutRecord, ClaudeSettledFinding, FindingAutoReso
 import type { ReviewFinding } from '../../platform/contract.js';
 import { automaticRetryTarget, pressRetryTarget } from '../../db/auto-retry-at-head.js';
 import { ticketEntriesOf } from './ticket.js';
+import { overlayFollowUpItems } from './replies-pass.js';
 import { findFindingThread, type ThreadComment } from './finding-thread.js';
 import { earlierPostsFor, landedAutoPosts, stampsFor, type PostedStateInput } from './posted-state.js';
 import {
@@ -168,6 +170,8 @@ interface ReviewRow {
   trigger?: string | null;
   // A from-scratch run (migration 0133). NULL on every other row.
   fresh?: boolean | null;
+  // 'replies' on a replies pass (migration 0136). NULL on every full review.
+  kind?: string | null;
   // Other reviewers' open threads, judged (migration 0076 / pg 0063). null on older rows.
   threadAssessments?: ClaudeThreadAssessment[] | null;
   commentsThrough?: Date | null;
@@ -367,6 +371,7 @@ function mapReview(
     followUp: mapFollowUp(r.followUp, findings),
     trigger: r.trigger === 'auto' ? 'auto' : 'manual',
     ...(r.fresh === true ? { fresh: true } : {}),
+    ...(r.kind === 'replies' ? { kind: 'replies' as const } : {}),
     // null = this run did not assess threads (older row, skip, not succeeded) — never [].
     threadAssessments: Array.isArray(r.threadAssessments) ? r.threadAssessments : null,
     threadAssessmentCounts: Array.isArray(r.threadAssessments)
@@ -404,6 +409,7 @@ const summaryOf = (r: ReviewRow): ClaudeReviewSummary => ({
   finishedAt: iso(r.finishedAt),
   trigger: r.trigger === 'auto' ? 'auto' : 'manual',
   ...(r.fresh === true ? { fresh: true } : {}),
+  ...(r.kind === 'replies' ? { kind: 'replies' as const } : {}),
 });
 
 // ---- Reads (account-scoped via the join up to repos.accountId — IDOR guard) ----
@@ -761,7 +767,8 @@ export async function getLatestClaudeReview(
     .from(cr)
     .innerJoin(prs, eq(prs.id, cr.prId))
     .innerJoin(repos, eq(repos.id, prs.repoId))
-    .where(and(eq(cr.prId, prId), eq(repos.accountId, accountId)))
+    // ⚠ The latest FULL review: a replies pass (kind 'replies') is listed in the history only.
+    .where(and(eq(cr.prId, prId), eq(repos.accountId, accountId), isNull(cr.kind)))
     .orderBy(desc(cr.id))
     .limit(1)
     .execute()) as Array<{ id: number }>;
@@ -785,7 +792,7 @@ export async function getLatestSucceededReviewId(
     .from(cr)
     .innerJoin(prs, eq(prs.id, cr.prId))
     .innerJoin(repos, eq(repos.id, prs.repoId))
-    .where(and(eq(cr.prId, prId), eq(repos.accountId, accountId), eq(cr.status, 'succeeded')))
+    .where(and(eq(cr.prId, prId), eq(repos.accountId, accountId), eq(cr.status, 'succeeded'), isNull(cr.kind)))
     .orderBy(desc(cr.id))
     .limit(1)
     .execute()) as Array<{ id: number }>;
@@ -855,6 +862,8 @@ export async function listAllClaudeReviews(
       and(
         eq(repos.accountId, accountId),
         eq(cr.status, 'succeeded'),
+        // Full reviews only: a replies pass is not "the PR's review".
+        isNull(cr.kind),
         or(
           eq(prs.state, 'open'),
           gte(sql`coalesce(${prs.mergedAt}, ${prs.closedAt}, ${prs.openedAt})`, tsBound),
@@ -928,6 +937,7 @@ export async function getLatestReviewStates(
       ticket: cr.ticket,
       prHeadSha: prs.headSha,
       trigger: cr.trigger,
+      kind: cr.kind,
     })
     .from(cr)
     .innerJoin(prs, eq(prs.id, cr.prId))
@@ -944,10 +954,22 @@ export async function getLatestReviewStates(
     ticket: ClaudeReviewTicket | ClaudeReviewTicket[] | null;
     prHeadSha: string | null;
     trigger: string | null;
+    kind: string | null;
   }>;
   const out: ClaudeReviewPrState[] = [];
   const latestByPr = new Map<number, (typeof rows)[number]>();
+  // REPLIES PASSES newer than a PR's latest full review (succeeded): the column shows the full
+  // review, with the passes' newer judgements folded over its "Earlier:" counts.
+  const repliesAfter = new Map<number, number[]>();
   for (const r of rows) {
+    if (r.kind === 'replies') {
+      if (!latestByPr.has(r.prId) && r.status === 'succeeded') {
+        const list = repliesAfter.get(r.prId) ?? [];
+        list.unshift(r.reviewId); // oldest first
+        repliesAfter.set(r.prId, list);
+      }
+      continue;
+    }
     if (latestByPr.has(r.prId)) continue; // newest first — the first row per PR is its latest run
     latestByPr.set(r.prId, r);
     out.push({
@@ -964,7 +986,7 @@ export async function getLatestReviewStates(
       trigger: r.trigger === 'auto' ? 'auto' : 'manual',
     });
   }
-  await foldStateSummaries(ctx, out, latestByPr);
+  await foldStateSummaries(ctx, out, latestByPr, repliesAfter);
   if (fixRunning) await foldFixStates(ctx, out, latestByPr, accountId, fixRunning);
   return out;
 }
@@ -1027,10 +1049,13 @@ async function foldStateSummaries(
   ctx: AgentContext,
   states: ClaudeReviewPrState[],
   latestByPr: Map<number, { reviewId: number; prHeadSha: string | null; headSha: string; ticket: unknown }>,
+  // Replies passes after each PR's latest full review, oldest first (their follow-ups fold over it).
+  repliesAfter: ReadonlyMap<number, readonly number[]> = new Map(),
 ): Promise<void> {
   const { cr, crf } = tables(ctx);
   const done = states.filter((s) => s.status === 'succeeded' && s.reviewId != null);
   const doneIds = done.map((s) => s.reviewId as number);
+  const repliesIds = done.flatMap((s) => [...(repliesAfter.get(s.prId) ?? [])]);
 
   // 1. Every finding of the finished runs — the columns the fold needs, nothing else.
   const findings = doneIds.length
@@ -1067,7 +1092,7 @@ async function foldStateSummaries(
           ciFailures: cr.ciFailures,
         })
         .from(cr)
-        .where(inArray(cr.id, doneIds))
+        .where(inArray(cr.id, [...doneIds, ...repliesIds]))
         .execute()) as Array<{
         id: number;
         ticketAssessment: ClaudeTicketAssessment | ClaudeTicketAssessment[] | null;
@@ -1119,8 +1144,10 @@ async function foldStateSummaries(
       alignment: e.assessment?.alignment ?? null,
     }));
     let followUp: ClaudeReviewStateSummary['followUp'] = null;
-    // Praise is hidden everywhere, so an earlier praise item never counts in "Earlier: …".
-    const items = extra?.followUp?.items?.filter((it) => it.severity !== 'praise');
+    // Praise is hidden everywhere, so an earlier praise item never counts in "Earlier: …". A later
+    // replies pass's judgements are newer than the review's own (replies-pass.ts).
+    const passItems = (repliesAfter.get(s.prId) ?? []).flatMap((rid) => extrasById.get(rid)?.followUp?.items ?? []);
+    const items = overlayFollowUpItems(extra?.followUp?.items ?? [], passItems).filter((it) => it.severity !== 'praise');
     if (Array.isArray(items) && items.length > 0) {
       followUp = {
         addressed: 0,
@@ -1452,6 +1479,10 @@ export async function loadPriorReviewForFollowUp(
         eq(cr.status, 'succeeded'),
         lt(cr.id, beforeReviewId),
         or(isNull(cr.reviewMode), ne(cr.reviewMode, 'skip')),
+        // ⚠ THE CHAIN ANCHORS ON THE LATEST FULL REVIEW: a replies pass has no findings of its own,
+        // so following up on it would drop every finding of the review before it. Its judgements
+        // are folded in below (`overlayFollowUpItems`) and settle through `loadSettledByReplyFindings`.
+        isNull(cr.kind),
       ),
     )
     .orderBy(desc(cr.id))
@@ -1527,7 +1558,10 @@ export async function loadPriorReviewForFollowUp(
   );
   const notChecked = new Set<number>();
   const openNotReraised = new Map<number, NonNullable<PriorFindingForFollowUp['priorStatus']>>();
-  for (const it of row.followUp?.items ?? []) {
+  // A replies pass AFTER that review judged some of its threads again: its answer is the newer one
+  // (replies-pass.ts `overlayFollowUpItems`), so a carried item keeps the pass's status.
+  const laterReplies = await loadRepliesPassItems(ctx, prId, accountId, row.id, beforeReviewId);
+  for (const it of overlayFollowUpItems(row.followUp?.items ?? [], laterReplies)) {
     if (!Number.isInteger(it.priorFindingId) || seen.has(it.priorFindingId)) continue;
     if (it.status === 'not_checked') notChecked.add(it.priorFindingId);
     else if (
@@ -1581,6 +1615,36 @@ export async function loadPriorReviewForFollowUp(
     findings: settledIds.size > 0 ? findings.filter((f) => !settledIds.has(f.id)) : findings,
     leftOut,
   };
+}
+
+/**
+ * The follow-up items of every SUCCEEDED replies pass of this PR with an id in (afterId, beforeId),
+ * oldest first (account-scoped). What `loadPriorReviewForFollowUp` folds over the full review's own.
+ */
+export async function loadRepliesPassItems(
+  ctx: AgentContext,
+  prId: number,
+  accountId: number,
+  afterId: number,
+  beforeId: number,
+): Promise<ClaudeFollowUpItemRecord[]> {
+  const { cr } = tables(ctx);
+  const rows = (await ctx.db
+    .select({ followUp: cr.followUp })
+    .from(cr)
+    .where(
+      and(
+        eq(cr.prId, prId),
+        eq(cr.accountId, accountId),
+        eq(cr.status, 'succeeded'),
+        eq(cr.kind, 'replies'),
+        gt(cr.id, afterId),
+        lt(cr.id, beforeId),
+      ),
+    )
+    .orderBy(asc(cr.id))
+    .execute()) as Array<{ followUp: ClaudeReviewFollowUpRecord | null }>;
+  return rows.flatMap((r) => r.followUp?.items ?? []);
 }
 
 // ---- Earlier findings settled by a reply (settled-by-reply.ts) ----
@@ -1736,6 +1800,8 @@ export async function insertQueuedReview(
   provider?: 'claude' | 'codex' | null,
   // TRAILING: a FROM-SCRATCH run (manager.ts QueueItem.fresh). Stored true; otherwise NULL.
   fresh = false,
+  // TRAILING: a REPLIES PASS (replies-check.ts). Stored 'replies'; otherwise NULL (a full review).
+  kind: 'replies' | null = null,
 ): Promise<number> {
   const { cr } = tables(ctx);
   // Labelled by the provider it is expected to run on from the start (a queued Codex run never shows
@@ -1753,6 +1819,7 @@ export async function insertQueuedReview(
       ticket: tickets.length > 0 ? [...tickets] : null,
       trigger,
       ...(fresh ? { fresh: true } : {}),
+      ...(kind ? { kind } : {}),
     })
     .returning({ id: cr.id })
     .execute()) as Array<{ id: number }>;
@@ -2125,17 +2192,17 @@ async function recordReviewUsage(
   const { cr } = tables(ctx);
   const row = (
     (await ctx.db
-      .select({ accountId: cr.accountId, model: cr.model, prId: cr.prId })
+      .select({ accountId: cr.accountId, model: cr.model, prId: cr.prId, kind: cr.kind })
       .from(cr)
       .where(eq(cr.id, id))
       .limit(1)
-      .execute()) as Array<{ accountId: number; model: string; prId: number }>
+      .execute()) as Array<{ accountId: number; model: string; prId: number; kind: string | null }>
   )[0];
   if (!row) return;
   await ctx.recordAiUsage({
     accountId: row.accountId,
     seam: 'agent',
-    feature: 'claude_review',
+    feature: row.kind === 'replies' ? 'replies_check' : 'claude_review',
     model: row.model,
     costUsd,
     inputTokens: inputTokens ?? null,
@@ -2216,7 +2283,8 @@ export async function hasReviewAtHead(
   const rows = (await ctx.db
     .select({ id: cr.id })
     .from(cr)
-    .where(and(eq(cr.prId, prId), eq(cr.accountId, accountId), eq(cr.headSha, headSha)))
+    // A replies pass at the head is not a review of it (kind IS NULL: full reviews only).
+    .where(and(eq(cr.prId, prId), eq(cr.accountId, accountId), eq(cr.headSha, headSha), isNull(cr.kind)))
     .limit(1)
     .execute()) as Array<{ id: number }>;
   return rows.length > 0;
@@ -2241,7 +2309,7 @@ export async function isAutoReReviewSettled(
   const rows = (await ctx.db
     .select({ createdAt: cr.createdAt, commentsThrough: cr.commentsThrough })
     .from(cr)
-    .where(and(eq(cr.prId, prId), eq(cr.accountId, accountId), eq(cr.headSha, headSha)))
+    .where(and(eq(cr.prId, prId), eq(cr.accountId, accountId), eq(cr.headSha, headSha), isNull(cr.kind)))
     .execute()) as Array<{ createdAt: Date; commentsThrough: Date | null }>;
   if (rows.length === 0) return false;
   if (commentsAtMs == null) return true;
@@ -2270,7 +2338,7 @@ export async function isAutoRetryStillDue(
   const rows = (await ctx.db
     .select({ id: cr.id, status: cr.status, trigger: cr.trigger })
     .from(cr)
-    .where(and(eq(cr.prId, prId), eq(cr.accountId, accountId), eq(cr.headSha, headSha)))
+    .where(and(eq(cr.prId, prId), eq(cr.accountId, accountId), eq(cr.headSha, headSha), isNull(cr.kind)))
     .execute()) as Array<{ id: number; status: string; trigger: string | null }>;
   const target = pressed ? pressRetryTarget(rows) : automaticRetryTarget(rows);
   return target?.id === failedReviewId;
@@ -2298,7 +2366,7 @@ export async function getFailedAutoAtHead(
   const rows = (await ctx.db
     .select({ id: cr.id, status: cr.status, trigger: cr.trigger, error: cr.error })
     .from(cr)
-    .where(and(eq(cr.prId, prId), eq(cr.accountId, accountId), eq(cr.headSha, headSha)))
+    .where(and(eq(cr.prId, prId), eq(cr.accountId, accountId), eq(cr.headSha, headSha), isNull(cr.kind)))
     .execute()) as Array<{ id: number; status: string; trigger: string | null; error: string | null }>;
   const target = pressRetryTarget(rows);
   return target ? { reviewId: target.id, error: target.error ?? null } : null;
@@ -2349,6 +2417,8 @@ export async function loadPriorRunForCarry(
         eq(cr.status, 'succeeded'),
         lt(cr.id, beforeReviewId),
         or(isNull(cr.reviewMode), ne(cr.reviewMode, 'skip')),
+        // A replies pass judged no thread and read no CI: never what a same-head run carries.
+        isNull(cr.kind),
       ),
     )
     .orderBy(desc(cr.id))

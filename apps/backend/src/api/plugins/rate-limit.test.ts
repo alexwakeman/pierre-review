@@ -65,6 +65,9 @@ describe('tierFor — AI generation', () => {
     expect(tiers('POST', '/api/prs/42/claude-review/thread-check')).toEqual(['ai', 'ai_hourly']);
     expect(tiers('GET', '/api/prs/42/claude-review/thread-check')).toEqual(['read']);
     expect(tiers('POST', '/api/prs/42/claude-review/thread-check/cancel')).toEqual(['read']);
+    // The replies pass (review/claude-review/replies-check-routes.ts): the start spends AI, the cancel is a read.
+    expect(tiers('POST', '/api/prs/42/claude-review/replies')).toEqual(['ai', 'ai_hourly']);
+    expect(tiers('POST', '/api/prs/42/claude-review/replies/cancel')).toEqual(['read']);
     expect(tiers('PUT', '/api/pro/settings')).toEqual(['read']);
     // ⚠ AND EVERY SETTINGS WRITE BENEATH IT. The per-workspace sprint cadence is one DB upsert —
     // no model, no GitHub quota — but its path does not END in `/settings`, so the catch-all's

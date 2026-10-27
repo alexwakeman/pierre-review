@@ -441,6 +441,9 @@ history: [docs/CODEX-PLAN.md](docs/CODEX-PLAN.md). Non-negotiables:
   (≤ 3 auto rows per head, counted in the DB); "Run auto reviews now" / Retry (`POST
   …/auto-review/sweep`) waives the waits and that cap, never the daily cap. A succeeded auto run on the reader's own PR may start an AUTO FIX (≤ 3 per PR
   per 24h, `workspaces.auto_fix_enabled` OFF by default).
+- ⚠ **A replies pass (`claude_reviews.kind = 'replies'`) is a run row, NOT a review**: every "latest
+  review" / "run at this head" reader filters `kind IS NULL`; the follow-up chain anchors on the
+  latest FULL review (docs/CLAUDE-REVIEW.md § The replies pass).
 - **Thread judgements**: "what Claude says now" is ONE fold, `currentThreadAssessmentsForPrs`
   (latest review + later Check threads, newer wins); words only from `lib/claudeThreadMarker.ts`.
 - **Separate processes, never inside a PR review**: the CI review (`review/ci-review/`; the signed

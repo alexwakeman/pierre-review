@@ -35,6 +35,8 @@ export const RESULT_TOOL_NAMES = [
   'submit_pr_card',
   'submit_ci_review',
   'submit_threads',
+  // The replies pass (review/claude-review/replies-check.ts): judgements of replies on Limn's findings.
+  'submit_replies',
   'submit_design',
   'submit_paths',
   'submit_alignment',
@@ -65,6 +67,7 @@ const BUILDERS: Record<ResultToolName, ShapeBuilder> = {
   submit_pr_card: async (z) => (await import('../review/ticket-review/schema.js')).buildSubmitPrCardShape(z),
   submit_ci_review: async (z) => (await import('../review/ci-review/schema.js')).buildSubmitCiReviewShape(z),
   submit_threads: async (z) => (await import('../review/claude-review/thread-check-schema.js')).buildSubmitThreadsShape(z),
+  submit_replies: async (z) => (await import('../review/claude-review/replies-check-schema.js')).buildSubmitRepliesShape(z),
   submit_design: async (z) => (await import('../review/diagrams/schema.js')).buildSubmitDesignShape(z),
   submit_paths: async (z) => (await import('../review/sprint-paths/schema.js')).buildSubmitPathsShape(z),
   submit_alignment: async (z) => (await import('../review/story-docs/schema.js')).buildSubmitAlignmentShape(z),

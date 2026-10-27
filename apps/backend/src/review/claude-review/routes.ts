@@ -231,6 +231,11 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
       currentThreadAssessmentCounts: current ? threadAssessmentCounts(current) : null,
       // The stored row only (live progress is the thread-check GET's — this route stays DB-only).
       threadCheck: await getLatestThreadCheck(ctx, accountId, id).then((r) => (r ? threadCheckWire(r) : null)),
+      // The replies pass: unjudged replies on Limn's own findings and the newest pass (DB-only).
+      // (Lazy: replies-check.ts registers a slot peer with the manager at import.)
+      repliesCheck: await import('./replies-check.js')
+        .then((m) => m.repliesCheckState(ctx, accountId, id))
+        .catch(() => null),
     };
   });
 

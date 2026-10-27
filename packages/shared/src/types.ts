@@ -7081,6 +7081,10 @@ export interface ClaudeReview {
   trigger?: ClaudeReviewTrigger;
   // true ⇒ a FROM-SCRATCH run (`GenerateReviewBody.fresh`): it read no earlier review. Absent otherwise.
   fresh?: boolean;
+  // 'replies' ⇒ a REPLIES PASS (migration 0136): it judged only people's replies on Limn's own posted
+  // findings (docs/CLAUDE-REVIEW.md § The replies pass) — no findings, its `followUp` holds the
+  // judgements, its `verdict` is the outcome the replies point to. Absent ⇒ a full review.
+  kind?: ClaudeReviewKind;
   // Every other open review thread on the PR (people and other review bots) and what this run
   // found about it. null = the run did not assess threads (an older run, a skip, or not succeeded);
   // [] = it looked and there were none.
@@ -7121,6 +7125,47 @@ export interface ClaudeReviewHeadState {
 // sweeper (Settings -> Workspace) for a newly opened human PR. `claude_reviews.trigger`.
 export type ClaudeReviewTrigger = 'manual' | 'auto';
 
+// What kind of run a `claude_reviews` row is beyond a full review: 'replies' = a REPLIES PASS, which
+// judged only people's replies on Limn's own posted findings (`claude_reviews.kind`, migration 0136).
+export type ClaudeReviewKind = 'replies';
+
+// THE REPLIES PASS on the AI Review tab (`ClaudeReviewResponse.repliesCheck`). DB-only + in memory.
+export interface ClaudeRepliesCheckState {
+  // How many of Limn's posted findings have a person's reply that no run has judged yet — what
+  // "Check replies" would send. 0 ⇒ nothing to check.
+  unjudged: number;
+  // A pass of this PR is queued or running in this process. null ⇒ none.
+  live: 'queued' | 'running' | null;
+  // The newest replies pass AFTER the latest full review (any status), or null.
+  latest: ClaudeRepliesCheckRun | null;
+}
+
+export interface ClaudeRepliesCheckRun {
+  reviewId: number;
+  status: ClaudeReviewStatus;
+  trigger: ClaudeReviewTrigger;
+  createdAt: string;
+  finishedAt: string | null;
+  error: string | null;
+  // Counts over its judgements: accepted (settled), disputed (still open), not judged.
+  accepted: number;
+  disputed: number;
+  notChecked: number;
+  // The outcome the replies point to (the run's verdict), and what auto-posting did with it.
+  verdict: ClaudeReviewVerdict | null;
+  autoPost: ClaudeAutoPostWire | null;
+}
+
+// `POST /api/prs/:id/claude-review/replies` — start a replies pass by hand.
+export type StartRepliesCheckResponse =
+  | { outcome: 'queued'; reviewId: number; threads: number }
+  | { outcome: 'already_running'; reviewId: number | null }
+  | { outcome: 'refused'; reason: RepliesCheckRefusal };
+
+// Why a replies pass did not start: no reply waits for a judgement, or a full review of the PR is
+// queued or running (it judges the replies itself), or there is no review to follow.
+export type RepliesCheckRefusal = 'nothing_to_check' | 'review_in_progress' | 'no_review';
+
 // A lighter run row for the history selector (no findings).
 export interface ClaudeReviewSummary {
   id: number;
@@ -7146,6 +7191,8 @@ export interface ClaudeReviewSummary {
   trigger?: ClaudeReviewTrigger;
   // true ⇒ a from-scratch run (see ClaudeReview.fresh). Absent otherwise.
   fresh?: boolean;
+  // 'replies' ⇒ a replies pass (see ClaudeReview.kind). Absent ⇒ a full review.
+  kind?: ClaudeReviewKind;
   // How many findings the run stored (the history list's count; meaningful once it succeeded).
   // Optional: an older server omits it and the list shows no count.
   findingCount?: number;
@@ -7214,6 +7261,10 @@ export interface ClaudeReviewResponse {
   currentThreadAssessmentCounts?: ClaudeThreadAssessmentCounts | null;
   // The PR's newest Check threads run (any status). null/absent = never run.
   threadCheck?: ThreadCheckRun | null;
+  // THE REPLIES PASS: unjudged replies on Limn's own findings and the newest pass. ⚠ `review` above
+  // is the latest FULL review; a replies pass is listed in `history` (kind 'replies'). Absent = an
+  // older server.
+  repliesCheck?: ClaudeRepliesCheckState | null;
 }
 
 /** Why an auto review is waiting: the head's CI is still running, or new comments / new pushes are

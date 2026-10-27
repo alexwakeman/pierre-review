@@ -631,6 +631,12 @@ moved repo's rows (`dropRepoRelations`) and every reader joins membership. Off b
 `claude_reviews.peers_read` (same migration) records what a run read beside the PR (`ReviewPeerRead[]`;
 NULL = nothing or an older row).
 
+`claude_reviews.kind` (migration `0136`): `'replies'` on a REPLIES PASS — a run that judged only
+people's replies on Limn's own posted findings ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § The replies
+pass): no findings, its `follow_up` items shaped like a review's, its `verdict` the outcome the
+replies point to, its `auto_post` the record of that outcome's ONE review. NULL = a full review. ⚠ A
+pass is NOT a review: every "latest review" / "run at this head" reader filters `kind IS NULL`.
+
 ## `workspace_setting_events` — when a workspace setting changed (CORE; migration `0096`)
 
 APPEND-ONLY history read by Chronology's "Over time" markers (docs/BOTTLENECKS.md § Over time). One

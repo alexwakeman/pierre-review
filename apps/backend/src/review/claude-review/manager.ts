@@ -317,6 +317,14 @@ export async function startReview(
   return { ok: true, reviewId, queued: true };
 }
 
+/**
+ * Is a FULL review of this PR queued, starting or running in this process (manual or auto)? The
+ * replies pass (replies-check.ts) does not run beside one: the review judges the replies itself.
+ */
+export function reviewHeldForPr(prId: number): boolean {
+  return claimed.has(prId) || startingAuto.has(prId) || autoPending.some((a) => a.prId === prId);
+}
+
 export type EnqueueAutoResult = 'queued' | 'already' | 'full' | 'disabled';
 
 /**

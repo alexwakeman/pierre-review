@@ -1288,6 +1288,10 @@ export const claudeReviews = sqliteTable(
     // A FROM-SCRATCH run (`GenerateReviewBody.fresh`): it read no earlier review — no follow-up, no
     // settled list, no carried thread judgements. true on such a run; NULL otherwise (migration 0133).
     fresh: integer('fresh', { mode: 'boolean' }),
+    // A REPLIES PASS (review/claude-review/replies-check.ts): 'replies' on a run that judged only
+    // people's replies on Limn's own posted findings; NULL on every full review (migration 0136).
+    // ⚠ Every "the latest review" / "a run at this head" reader filters `kind IS NULL`.
+    kind: text('kind', { enum: ['replies'] }),
   },
   (t) => ({
     prIdx: index('cr_pr_idx').on(t.prId),
