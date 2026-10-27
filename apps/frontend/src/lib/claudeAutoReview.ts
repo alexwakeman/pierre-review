@@ -63,7 +63,7 @@ export function autoSweepResultLine(res: AutoReviewSweepResponse, single = false
   if (total === 0) {
     if (res.capped) return 'Daily limit reached — 0 queued.';
     if (res.laneFull) return 'The auto review queue is full — 0 queued.';
-    return single ? 'Nothing to retry: the PR has moved on or is already being reviewed.' : 'Nothing to review.';
+    return single ? 'Nothing to retry: the PR is already being reviewed, or is no longer open.' : 'Nothing to review.';
   }
   if (single && res.queued === 1 && res.checksQueued === 0) return 'Retry queued.';
   const parts: string[] = [];

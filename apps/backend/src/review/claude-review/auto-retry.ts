@@ -22,8 +22,11 @@ export const AUTO_RETRY_MAX_ATTEMPTS = 3;
 export const AUTO_RETRY_BACKOFF_FIRST_MS = 60 * 60 * 1000;
 export const AUTO_RETRY_BACKOFF_LATER_MS = 4 * 60 * 60 * 1000;
 
+// ⚠ Claude Code words a rejected limit by its NAME: "You've hit your session limit · resets 3pm
+// (Europe/London)" (also "weekly limit", "Opus limit", "Sonnet limit", …) and "You're out of usage
+// credits · resets …" — hence the bounded name slot (no nested quantifier, so still linear).
 const USAGE_LIMIT =
-  /usage limit|rate[ _-]?limit|limit reached|hit your (?:usage )?limit|too many requests|\b429\b|quota exceeded|out of credits/i;
+  /usage limit|rate[ _-]?limit|limit reached|hit your [\w' ]{0,30}limit|too many requests|\b429\b|quota exceeded|out of (?:usage )?credits/i;
 const TRANSIENT = new RegExp(
   [
     'overloaded',
@@ -43,6 +46,9 @@ const TRANSIENT = new RegExp(
     'temporarily unavailable',
     'interrupted by restart',
     'not signed in',
+    'not logged in',
+    'please run /login',
+    'sign in to (?:codex|claude)',
     'signed out',
     'failed to authenticate',
     'authentication',

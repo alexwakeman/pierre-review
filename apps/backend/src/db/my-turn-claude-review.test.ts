@@ -456,9 +456,12 @@ describe('getAutoReviewCandidates — re-review of a moved head', () => {
     const offered = new Map(res.reReview.map((x: any) => [x.prId, x.headSha]));
     expect(offered.get(r.moved)).toBe('head_rr-moved');
     expect(offered.get(r.beforeFloorReviewedSince)).toBe('head_rr-before-floor-since');
+    // A PR whose only run is a FAILED AUTO run at an older head: the new head is offered (it used
+    // to be never reviewed again — not a first review, not a retry, never succeeded).
+    expect(offered.get(r.onlyFailed)).toBe('head_rr-only-failed');
     // Still never a FIRST review: the floor gates those.
     expect(res.prIds).not.toContain(r.beforeFloorReviewedSince);
-    for (const k of ['same', 'onlyFailed', 'headHasRun', 'inFlight', 'beforeFloor', 'bot'])
+    for (const k of ['same', 'headHasRun', 'inFlight', 'beforeFloor', 'bot'])
       expect([k, offered.has(r[k])]).toEqual([k, false]);
     // A reviewed PR is never a FIRST-review candidate.
     expect(res.prIds).not.toContain(r.moved);
@@ -522,6 +525,19 @@ describe('getAutoReviewCandidates — retry of a failed auto run at the current 
     await run(r.inFlight, 'head_rt-in-flight', 'running');
     r.beforeFloor = await seedPr('rt-before-floor', { openedAt: FLOOR - HOUR });
     await run(r.beforeFloor, 'head_rt-before-floor', 'failed', { error: 'overloaded' });
+    // A failed first auto review at an OLDER head (the author pushed since) — and its neighbours
+    // that must not be followed: a manual failure, a reader's Stop, a PR opened before the floor.
+    r.oldManual = await seedPr('rt-old-manual', { openedAt: late });
+    await run(r.oldManual, 'old_sha', 'failed', { trigger: 'manual', error: 'overloaded' });
+    r.oldStopped = await seedPr('rt-old-stopped', { openedAt: late });
+    await run(r.oldStopped, 'old_sha', 'cancelled');
+    r.oldBeforeFloor = await seedPr('rt-old-before-floor', { openedAt: FLOOR - HOUR });
+    await run(r.oldBeforeFloor, 'old_sha', 'failed', { error: 'overloaded' });
+    // A review SUCCEEDED at the head, then a comment-triggered auto re-review at the same head
+    // failed: never retried by itself (a success at the head is final), but a press retries it.
+    r.sameHeadAfterSuccess = await seedPr('rt-same-after-success', { openedAt: late });
+    await run(r.sameHeadAfterSuccess, 'head_rt-same-after-success', 'succeeded', { trigger: 'manual' });
+    await run(r.sameHeadAfterSuccess, 'head_rt-same-after-success', 'failed', { error: 'overloaded' });
   });
 
   it('lists only a failed AUTO run that is still the latest at the head, with the attempt count', async () => {
@@ -544,5 +560,54 @@ describe('getAutoReviewCandidates — retry of a failed auto run at the current 
       expect([k, byPr.has(r[k])]).toEqual([k, false]);
     // A failed PR is still never a FIRST-review candidate (it has a row).
     expect(res.prIds).not.toContain(r.firstFailed);
+  });
+
+  // A FAILED FIRST auto review, then the author pushed: nothing at the new head, nothing ever
+  // succeeded. It is not a first review (it has a row), not a retry (nothing at this head) — it is
+  // offered as a MOVED HEAD (the sweeper's settle wait applies), in the first-review population.
+  it('a failed first auto review followed by new commits is offered as a moved head', async () => {
+    const res = await q.getAutoReviewCandidates(1, scope.workspaceId, {
+      openedSinceMs: FLOOR,
+      dayStartMs: now - DAY,
+      limit: 50,
+    });
+    const head = res.reReview.find((x: any) => x.prId === r.oldHead);
+    expect(head).toMatchObject({ headSha: 'head_rt-old-head', reason: 'head', commentsAtMs: null });
+    expect(typeof head?.lastRunAtMs).toBe('number');
+    const reIds = res.reReview.map((x: any) => x.prId);
+    // Not followed: a MANUAL failure or a reader's Stop at an older head, an auto failure on a PR
+    // opened before the floor, and a run still in flight.
+    for (const k of ['oldManual', 'oldStopped', 'oldBeforeFloor', 'inFlight'])
+      expect([k, reIds.includes(r[k])]).toEqual([k, false]);
+    expect(res.prIds).not.toContain(r.oldHead);
+  });
+
+  // RETRY ON ONE PR (`pressPrId`): what the AI Review tab shows Retry on, the read lists.
+  it('a press on one PR lists its failed auto run whatever the floor or an earlier success at the head', async () => {
+    const opts = { openedSinceMs: FLOOR, dayStartMs: now - DAY, limit: 50 };
+    const base = await q.getAutoReviewCandidates(1, scope.workspaceId, opts);
+    const baseRetry = base.retry.map((x: any) => x.prId);
+    expect(baseRetry).not.toContain(r.sameHeadAfterSuccess);
+    expect(baseRetry).not.toContain(r.beforeFloor);
+    const afterSuccess = await q.getAutoReviewCandidates(1, scope.workspaceId, { ...opts, pressPrId: r.sameHeadAfterSuccess });
+    expect(afterSuccess.retry.find((x: any) => x.prId === r.sameHeadAfterSuccess)).toMatchObject({
+      headSha: 'head_rt-same-after-success',
+      error: 'overloaded',
+      attempts: 1,
+    });
+    const before = await q.getAutoReviewCandidates(1, scope.workspaceId, { ...opts, pressPrId: r.beforeFloor });
+    expect(before.retry.map((x: any) => x.prId)).toContain(r.beforeFloor);
+    // An older head, before the floor: the press offers the new head.
+    const oldBefore = await q.getAutoReviewCandidates(1, scope.workspaceId, { ...opts, pressPrId: r.oldBeforeFloor });
+    expect(oldBefore.reReview.map((x: any) => x.prId)).toContain(r.oldBeforeFloor);
+    // The press waives nothing for a PR whose latest run is not a failed AUTO run.
+    for (const k of ['manual', 'stopped', 'succeededAfter', 'oldManual']) {
+      const res = await q.getAutoReviewCandidates(1, scope.workspaceId, { ...opts, pressPrId: r[k] });
+      expect([k, res.retry.some((x: any) => x.prId === r[k]), res.reReview.some((x: any) => x.prId === r[k])]).toEqual([
+        k,
+        false,
+        false,
+      ]);
+    }
   });
 });

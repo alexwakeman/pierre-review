@@ -384,6 +384,8 @@ export async function runAutoReviewSweep(
         dayStartMs,
         // Enough to see every waiting item of ours plus a full day's worth of new ones.
         limit: ws.dailyCap + waiting.size,
+        // "Retry" on one PR: the read lists that PR's failed auto run whatever the population.
+        ...(press?.prId != null ? { pressPrId: press.prId } : {}),
       });
       if (!res) continue; // the workspace is gone
       const waitingHere = [

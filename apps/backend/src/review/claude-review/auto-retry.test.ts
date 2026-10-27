@@ -48,6 +48,14 @@ describe('classifyAutoReviewFailure', () => {
     ['request timed out', 'transient'],
     ['fetch failed: ECONNRESET', 'transient'],
     ['Codex is not signed in.', 'transient'],
+    // The bundled Claude Code CLI's own wording (2.1.x): the limit is named, then "· resets <time>".
+    ["Claude Code returned an error result: You've hit your session limit · resets 3pm (Europe/London)", 'usage_limit'],
+    ["Claude Code returned an error result: You've hit your weekly limit · resets Oct 30, 9am (Europe/London)", 'usage_limit'],
+    ["Claude Code returned an error result: You've hit your Opus limit · resets 3pm (Europe/London)", 'usage_limit'],
+    ["Claude Code returned an error result: You've hit your Sonnet limit · resets 3pm (Europe/London)", 'usage_limit'],
+    ["Claude Code returned an error result: You're out of usage credits · resets 3pm (Europe/London)", 'usage_limit'],
+    ['Claude Code returned an error result: Not logged in · Please run /login', 'transient'],
+    ['Sign in to Codex with ChatGPT to run reviews.', 'transient'],
     ['Claude Code returned an error result: Reached maximum budget ($1.5)', 'final'],
     ['Claude Code returned an error result: Reached maximum number of turns (30)', 'final'],
     ['Command failed: gh pr diff 131\ncould not find pull request diff: HTTP 406: Sorry, the diff exceeded the maximum', 'final'],
@@ -80,6 +88,15 @@ describe('parseRetryAtMs', () => {
   it('reads "resets 3pm" and "resets at 17:30"', () => {
     expect(parseRetryAtMs('5-hour limit reached · resets 3pm', FAILED)).toBe(new Date(2026, 9, 28, 15, 0).getTime());
     expect(parseRetryAtMs('limit reached, resets at 17:30', FAILED)).toBe(new Date(2026, 9, 27, 17, 30).getTime());
+  });
+  it('reads the reset in Claude Code’s current limit wording', () => {
+    const at = new Date(2026, 9, 28, 15, 0).getTime(); // 3pm has passed on the failure’s day (4pm)
+    expect(
+      parseRetryAtMs("Claude Code returned an error result: You've hit your session limit · resets 3pm (Europe/London)", FAILED),
+    ).toBe(at);
+    expect(
+      parseRetryAtMs("Claude Code returned an error result: You're out of usage credits · resets 5pm (Europe/London)", FAILED),
+    ).toBe(new Date(2026, 9, 27, 17, 0).getTime());
   });
   it('reads a relative wait', () => {
     expect(parseRetryAtMs('rate limited, try again in 2 hours 5 minutes', FAILED)).toBe(FAILED + 2 * HOUR + 5 * 60_000);

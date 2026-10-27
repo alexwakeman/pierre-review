@@ -9863,7 +9863,10 @@ export async function getUnactionedClaudeReviews(
 //     ways - never the global set alone. An unmapped author (`author_id` NULL) is not a proven
 //     person and is skipped;
 //   - with NO `claude_reviews` row at all, whatever its head, status or trigger: ONE review per PR,
-//     ever, from auto. A manual run (or a failed auto one) settles it too.
+//     ever, from auto. A manual run (or a failed auto one) settles it too - a failed AUTO run
+//     comes back as a `retry` (same head) or, after new commits, as a moved-head `reReview`.
+// `opts.pressPrId` (a reader's "Retry" on that PR): while its latest run is a failed AUTO run, the
+// population gates are waived for THAT PR only, so the button never answers "nothing to retry".
 // Each re-review carries `lastRunAtMs` (the latest start or finish of any run of the PR) for the
 // sweeper's "start a new head on receipt unless a run was within 5 minutes" test, and
 // `inFlightMoved` lists PRs whose run is queued or running while their head moved past it (never
@@ -9877,7 +9880,7 @@ export async function getUnactionedClaudeReviews(
 export async function getAutoReviewCandidates(
   accountId: number,
   workspaceId: number,
-  opts: { openedSinceMs: number; dayStartMs: number; limit: number },
+  opts: { openedSinceMs: number; dayStartMs: number; limit: number; pressPrId?: number },
 ): Promise<{
   prIds: number[];
   autoToday: number;
@@ -10001,6 +10004,16 @@ export async function getAutoReviewCandidates(
       inFlightMoved.push({ prId: pr.id, headSha: pr.headSha });
       continue;
     }
+    const succeededSinceFloor = runs.some(
+      (r) => r.status === 'succeeded' && r.createdAt.getTime() >= opts.openedSinceMs,
+    );
+    // ⚠ A READER'S RETRY on THIS PR ("Retry" on the AI Review tab, `pressPrId`) whose latest run
+    // is a FAILED AUTO run: the reader asked for exactly this PR, so the population gate (the floor,
+    // which moves when auto review is switched off and on) and the "something at this head
+    // succeeded" gate are waived for it - the button is shown for every failed auto run, and a press
+    // must never answer "nothing to retry" for one. Nothing else is waived.
+    const pressedRetry =
+      opts.pressPrId === pr.id && newest.trigger === 'auto' && newest.status === 'failed';
     // RETRY: the latest run at the current head is a FAILED AUTO run and nothing at this head
     // succeeded (a succeeded run is final). Same population as everything else here: after the
     // floor, or followed since the floor. WHETHER it is due — transient error, backoff, usage reset,
@@ -10013,9 +10026,8 @@ export async function getAutoReviewCandidates(
         last &&
         last.trigger === 'auto' &&
         last.status === 'failed' &&
-        !here.some((r) => r.status === 'succeeded') &&
-        (afterFloor(pr) ||
-          runs.some((r) => r.status === 'succeeded' && r.createdAt.getTime() >= opts.openedSinceMs))
+        (pressedRetry ||
+          (!here.some((r) => r.status === 'succeeded') && (afterFloor(pr) || succeededSinceFloor)))
       ) {
         retry.push({
           prId: pr.id,
@@ -10028,12 +10040,29 @@ export async function getAutoReviewCandidates(
         });
       }
     }
-    if (!runs.some((r) => r.status === 'succeeded')) continue;
-    if (
-      !afterFloor(pr) &&
-      !runs.some((r) => r.status === 'succeeded' && r.createdAt.getTime() >= opts.openedSinceMs)
-    )
+    if (!runs.some((r) => r.status === 'succeeded')) {
+      // NEVER REVIEWED, BUT TRIED: no run ever succeeded, none is at the current head, and the
+      // latest run is a FAILED AUTO run at an older head (e.g. the first auto review hit a usage
+      // limit, then the author pushed). It is no longer a first review (it has a row) and not a
+      // retry (nothing at this head), so without this it would never be reviewed again. Offered as
+      // a MOVED HEAD - the same settle wait as any new push - in the first-review population (after
+      // the floor). A MANUAL failure or a reader's Stop at the older head is not followed.
+      if (
+        newest.trigger === 'auto' &&
+        newest.status === 'failed' &&
+        !runs.some((r) => r.headSha === pr.headSha) &&
+        (afterFloor(pr) || pressedRetry) &&
+        reReview.length < opts.limit
+      ) {
+        const lastRunAtMs = Math.max(
+          ...runs.map((r) => Math.max(r.createdAt.getTime(), r.finishedAt?.getTime() ?? 0)),
+        );
+        reReview.push({ prId: pr.id, headSha: pr.headSha, commentsAtMs: null, reason: 'head', lastRunAtMs });
+        if (reReview.length >= opts.limit) break;
+      }
       continue;
+    }
+    if (!afterFloor(pr) && !succeededSinceFloor && !pressedRetry) continue;
     const latest = runs.reduce((a, b) => (b.id > a.id ? b : a));
     if (latest.status === 'queued' || latest.status === 'running') continue;
     const atHead = runs.filter((r) => r.headSha === pr.headSha);

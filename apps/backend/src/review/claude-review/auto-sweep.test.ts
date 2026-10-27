@@ -757,6 +757,18 @@ describe('runAutoReviewSweep — a reader’s press ("Run auto reviews now" / Re
     expect(enqueued.map(([, p]) => p)).toEqual([49]);
   });
 
+  it('Retry asks the candidate read for THAT PR (`pressPrId`), so its population gates are waived', async () => {
+    answers.set(7, { prIds: [], autoToday: 0, retry: [failed(50)] });
+    await runAutoReviewSweep(makeCtx(), NOW, { ...press, prId: 50 });
+    expect(calls[0]).toMatchObject({ pressPrId: 50 });
+    calls = [];
+    await runAutoReviewSweep(makeCtx(), NOW, press);
+    expect(calls[0]).not.toHaveProperty('pressPrId');
+    calls = [];
+    await runAutoReviewSweep(makeCtx(), NOW);
+    expect(calls[0]).not.toHaveProperty('pressPrId');
+  });
+
   it('a workspace with auto review off answers `off` and queues nothing', async () => {
     answers.set(9, { prIds: [91], autoToday: 0 });
     const r = await runAutoReviewSweep(makeCtx(), NOW, { accountId: 1, workspaceId: 9 });

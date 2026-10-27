@@ -1839,7 +1839,11 @@ repeated on, and cleared on off, so nothing opened while it was off is picked up
 - ⚠ **RE-REVIEW ON NEW COMMITS.** The same candidate read returns `reReview: [{prId, headSha}]`:
   a PR of the same population (opened at/after the floor, human, open, not draft) that has a
   SUCCEEDED run (manual or auto), whose synced head matches NO run of any status (new commits or a
-  rewritten history), and whose latest run is not queued/running. ONE RUN PER HEAD: any row at the
+  rewritten history), and whose latest run is not queued/running. ⚠ ALSO a PR that NEVER
+  succeeded but whose latest run is a FAILED AUTO run at an older head (the first auto review
+  failed, then the author pushed), opened at/after the floor: it is neither a first review (it has
+  a row) nor a retry (nothing at the new head), and without this it was never reviewed again. A
+  manual failure or a reader's Stop at the older head is not followed. ONE RUN PER HEAD: any row at the
   new head settles it, and `startAutoItem` re-checks `hasReviewAtHead` before writing the row (a
   person may have reviewed it while it waited). ⚠ **DEBOUNCED IN THE SWEEPER**: a moved head must
   hold still for `AUTO_REREVIEW_SETTLE_MS` (5 min, first-seen time in memory) before it is queued,
@@ -1877,8 +1881,8 @@ repeated on, and cleared on off, so nothing opened while it was off is picked up
   them (a force-push can drop it) — never a guess; `0` with `outdated` = a rewrite added no commit.
   `head` is null when the PR's head is unknown.
 - ⚠ **RETRIES — A FAILED AUTO RUN IS NOT "DONE"** (2026-10-27; before, the once-per-head rule
-  counted it and the PR was never reviewed until it got new commits — real: run 584, Codex's usage
-  limit). The candidate read also returns `retry: [{prId, headSha, failedReviewId, failedAtMs,
+  counted it and the PR was never reviewed again — not even after new commits, when the failed run
+  was its first — real: run 584, Codex's usage limit). The candidate read also returns `retry: [{prId, headSha, failedReviewId, failedAtMs,
   error, provider, attempts}]` (`AutoRetryCandidate`): the latest run at the PR's CURRENT head is an
   AUTO run that FAILED, nothing at that head succeeded (a succeeded run is final), nothing is in
   flight, and the PR is in the usual population (after the floor, or followed since it). `attempts`
@@ -1886,13 +1890,15 @@ repeated on, and cleared on off, so nothing opened while it was off is picked up
   (`cancelled`) and a MANUAL failure are never listed. Whether it is due is THE ONE START RULE,
   `autoReviewDue`'s retry branch (pure, `auto.ts`; its inputs in `auto-retry.ts`):
   1. the error must be TRANSIENT (`classifyAutoReviewFailure`): a usage or rate limit, an overload,
-     a 5xx, a network or timeout failure, a sign-in / OAuth / runtime problem, "interrupted by
-     restart". Anything else — the per-review budget or turn cap, a 406 diff, a schema failure, a
+     a 5xx, a network or timeout failure, a sign-in / OAuth / runtime problem ("Not logged in ·
+     Please run /login", "Sign in to Codex…"), "interrupted by restart". Anything else — the per-review budget or turn cap, a 406 diff, a schema failure, a
      refusal, an error it does not recognise — is FINAL and never retried by itself;
   2. fewer than `AUTO_RETRY_MAX_ATTEMPTS` (3) auto rows at the head;
   3. then due when the DEFAULT provider changed since that run (at once); else, for a usage limit,
      when the reset the error names has passed (`parseRetryAtMs`: Codex's "try again at 5:04 PM",
-     read as the next such local time; Claude's `…|<epoch>`; "try again in 2 hours"), or failing
+     read as the next such local time; Claude Code's "You've hit your session limit · resets 3pm
+     (Europe/London)" — also weekly / Opus / Sonnet limits and "out of usage credits" — and its
+     older `…|<epoch>`; "try again in 2 hours"), or failing
      that the reset the provider's usage reading names (`ctx.aiBudget.usageResetAfter` →
      `usageResetFromReading`: the latest reset of the windows it shows exhausted, or a reading
      taken after the failure that shows none exhausted). ⚠ When a reset time is known the backoff
@@ -1905,9 +1911,14 @@ repeated on, and cleared on off, so nothing opened while it was off is picked up
 - **RUN AUTO REVIEWS NOW / RETRY (a reader's press).** Activity → Open PRs' header carries "Run auto
   reviews now" beside the day's counter (`RunAutoReviewsButton`, `OpenPrsCards.tsx`; shown only while
   auto review is on for the workspace and `me.ai.enabled`, behind `AiRunGate kind="review"`), and the
-  AI Review tab shows a FAILED AUTO run whose head has not moved as ONE plain line ("Auto review
-  failed: …") with **Retry** (`FailedAutoReviewLine`, `ClaudeReviewTab.tsx`; once the head moves the
-  normal flow reviews the new head). Both call `POST /api/workspaces/:id/auto-review/sweep {prId?}`,
+  AI Review tab shows a PR whose LATEST run is a FAILED AUTO run as ONE plain line ("Auto review
+  failed: …") with **Retry** (`FailedAutoReviewLine`, `ClaudeReviewTab.tsx`): at the same head it
+  retries the run, after new commits it reviews the new head (the sweeper also does that by itself
+  after the settle wait). ⚠ WHAT THE BUTTON SHOWS ON, THE BACKEND LISTS: Retry sends `prId`, the
+  sweeper passes it to the candidate read as `pressPrId`, and for that PR — while its latest run is
+  a failed auto run — the read waives the population floor (which moves when auto review is
+  switched off and on) and the "nothing at this head succeeded" gate (a success at the head, then a
+  failed comment-triggered auto re-review). Nothing else is waived, and only for that PR. Both call `POST /api/workspaces/:id/auto-review/sweep {prId?}`,
   which runs `runAutoReviewSweep(ctx, now, press)` for ONE workspace (and one PR): `autoReviewDue`
   with `pressed` waives the settle waits, the retry backoff, the attempt cap and the transient test;
   a run in flight still waits; the DAILY CAP and lane cap are never waived; the spend budget is not

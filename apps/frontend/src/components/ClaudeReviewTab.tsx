@@ -2006,13 +2006,16 @@ export function ClaudeReviewTab({
         </div>
       )}
 
-      {/* Failed / cancelled. A failed AUTO run whose head has not moved: one plain line + Retry
-          (the same sweep as "Run auto reviews now", for this PR). Once the head moves, the normal
-          auto flow reviews the new head. */}
-      {!isRunning && review?.status === 'failed' && review.trigger === 'auto' && review.head?.outdated === false && (
+      {/* Failed / cancelled. The latest run is a failed AUTO run: one plain line + Retry (the same
+          sweep as "Run auto reviews now", for this PR). The backend lists THIS PR for a press
+          whatever its head, floor or earlier successes (`pressPrId`), so the button never answers
+          "nothing to retry" for a run it is shown on: at the same head it retries the run, after
+          new commits it reviews the new head (which the auto flow also does by itself, after the
+          usual settle wait). */}
+      {!isRunning && review?.status === 'failed' && review.trigger === 'auto' && (
         <FailedAutoReviewLine repoId={pr.repoId} prId={pr.id} error={review.error} held={autoHold != null} />
       )}
-      {!isRunning && review?.status === 'failed' && !(review.trigger === 'auto' && review.head?.outdated === false) && (
+      {!isRunning && review?.status === 'failed' && review.trigger !== 'auto' && (
         <div>
           <div className="rounded border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-700/60 dark:bg-red-900/20 dark:text-red-400">
             {review.error ?? 'The review failed.'}
@@ -2265,10 +2268,12 @@ export function ClaudeReviewTab({
 }
 
 /**
- * A FAILED AUTO run at the PR's current head: its error in one plain line, and "Retry" — the same
- * sweep as Open PRs' "Run auto reviews now", for this PR only (POST …/auto-review/sweep with
- * `prId`): queued as an auto run on the default provider, under the daily cap. Retry shows only
- * while auto review is on for the PR's workspace and no auto run holds the PR.
+ * The PR's latest run is a FAILED AUTO run (at its current head or an older one): its error in one
+ * plain line, and "Retry" — the same sweep as Open PRs' "Run auto reviews now", for this PR only
+ * (POST …/auto-review/sweep with `prId`): queued as an auto run on the default provider, under the
+ * daily cap. The press makes the candidate read list this PR whatever its population
+ * (`pressPrId`), so what the button shows on, the backend retries. Retry shows only while auto
+ * review is on for the PR's workspace and no auto run holds the PR.
  */
 function FailedAutoReviewLine({
   repoId,
