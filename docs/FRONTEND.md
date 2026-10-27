@@ -2081,7 +2081,7 @@ sprint. The API route keeps its old name (`GET /api/sprint-graph`); only the SPA
 - **No tracker ⇒ the three boards show ONE line** — "Connect Jira, Linear or GitHub Issues to see this
   sprint." with a **Set up in Settings** button (`Sprint/SprintTrackerSetup.tsx`), drawn by SprintView on
   the graph's own `trackerOn: false`. The button calls `openSettings('issue-tracker')`
-  (`store/settingsModal.ts`), and the modal scrolls to and focuses the Issue tracker heading
+  (`store/settingsModal.ts`), and the modal opens on its Integrations tab, then scrolls to and focuses the Issue tracker heading
   (`ISSUE_TRACKER_SECTION_HEADING_ID`). The section renders a pending shell until its own GET answers,
   which on a cold cache can take seconds, so the modal WAITS for the heading (a `MutationObserver`, for
   as long as it is open) and gives up the moment the reader scrolls, clicks or types — a late jump must
@@ -2759,7 +2759,7 @@ Dependencies (plus My turn for a direct summons); the server contract is [BACKEN
   fallback for a response predating `rules`. ⚠ **There is deliberately no "resolved settings" hook
   for the board**: between a Settings save and the board's refetch the two differ, and an
   explanation must describe the list on screen.
-- **"Customise"** (My turn's Cards view only) opens Settings on its My Turn section
+- **"Customise"** (My turn's Cards view only) opens Settings on its Pending tab, at the My Turn section
   (`useSettingsModal().openSettings('my-turn')`, `store/settingsModal.ts`). It sits at the right end
   of the controls row, after the People / Automation pills, inside ONE right-aligned wrapper — two
   `ml-auto` siblings would split the free space between them. The row always renders on My turn's
@@ -3567,35 +3567,49 @@ close-and-reopen. The close is now **refcounted per PR and DEFERRED** in
 `CLOSE_GRACE_MS` (400ms) cancels it. The grace only has to outlive a synchronous remount, and the
 server's 30-minute TTL is still the backstop.
 
-## The Settings modal is TWO HALVES, split by GRAIN, and the split IS the layout
+## The Settings modal is TABS, one per area, and the GRAIN split lives inside each tab
 
-`components/settings/SettingsModal.tsx`. Every GLOBAL section first, then ONE `Workspace · <name>`
-heading and every workspace-scoped section beneath it. Before this the two grains were interleaved
-— an account key, account sections, a per-workspace cadence, an account-wide bot toggle, two
-more per-workspace sections — and the only thing announcing a section's grain was each
-workspace-scoped one appending `— acme-web` to its own title, which said nothing about the ones
-that carried no suffix.
+`components/settings/SettingsModal.tsx`. A wide dialog (`w-[60rem]`, fixed `h-[85vh]` so a tab
+switch never resizes it) with a vertical tab list on the left and one area on the right; below the
+`sm` breakpoint the list becomes a scrolling top row. Which section lives in which tab is DATA,
+`settingsTabs.ts` `SETTINGS_TABS` (global names first, then workspace names), pinned by
+`test/settingsTabs.test.ts` — every `*Section.tsx` file is listed in exactly one tab, and the modal's
+`SECTIONS` map names each one.
 
-| # | Section | Grain | Gate |
+Inside a tab the old two-halves rule still holds: global sections first, then ONE
+`Workspace · <name>` heading and the tab's workspace-scoped sections beneath it. Every tab with
+workspace sections draws that heading. Before the halves, the two grains were interleaved and the
+only thing announcing a section's grain was a `— acme-web` suffix on its own title.
+
+| Tab | Global sections | Workspace sections | Gate |
 |---|---|---|---|
-| 1 | `LargePrThresholdSection` | global | none |
-| 2 | `BlastRadiusSection` | global | none |
-| 3 | `MyTurnSection` (Settings → My Turn) | global (per ACCOUNT) | none |
-| 4 | `BotScoringSection` (the local scorer's one-time download) | global | renders nothing under `LIMN_ML_DISABLED` |
-| — | **`Workspace · <name>`** | — | none — the scope resolving is the only gate |
-| 5 | `PendingMuteSection` | workspace | none |
-| 6 | `FlowSettingsSection` (working hours and budgets) | workspace | none |
-| 7 | `IssueLinksSection` (the issue tracker + Jira API access) | workspace | none. The Jira API access block shows whenever the SAVED tracker is Jira with a base URL — not behind `me.ai.enabled` (the token feeds non-AI surfaces) |
-| 8 | `SonarSection` | workspace | none |
-| 9 | `DependencyAutoMergeSection` | workspace | none |
-| 10 | `SprintSection` (cadence + comparison window) | workspace | none |
-| 11 | `SlackSection` (schedule, the bot block, the two event switches) | workspace | none. The "Claude review ran" switch shows only with `me.ai.enabled` |
-| 12 | `AutoReviewSection` | workspace | `me.ai.enabled` |
-| 13 | `ReferenceDocsSection` | workspace | `me.ai.enabled` |
+| Pull requests | `LargePrThresholdSection`, `BlastRadiusSection` | — | none |
+| Pending | `MyTurnSection` (per ACCOUNT) | `PendingMuteSection` | none |
+| AI | `AiProviderSection`, `ClaudeSpendSection` | — | tab shown only with `me.ai.enabled` |
+| AI review | — | `AutoReviewSection` (auto review, auto-post, auto fix, diagrams), `ReferenceDocsSection`, `RelatedReposSection` | tab shown only with `me.ai.enabled` |
+| Reports and sprint | — | `FlowSettingsSection` (working hours and budgets), `SprintSection` (cadence + comparison window) | none |
+| Integrations | — | `IssueLinksSection` (tracker + Jira API access, shown whenever the SAVED tracker is Jira with a base URL — not behind `me.ai.enabled`), `SonarSection`, `SlackSection` (the "Claude review ran" switch only with `me.ai.enabled`) | none |
+| Bots | `BotScoringSection` (renders nothing under `LIMN_ML_DISABLED`) | `DependencyAutoMergeSection` | none |
 
 (`GithubAppInstallSection`, `BenchmarkConsentSection` and `YourDataSection` were removed
 2026-10-22 with the hosted mode; so was every `caps.*` / `proReady` gate — the modal opens with no
 `/api/pro/settings` wait.)
+
+- ⚠ **EVERY PANEL STAYS MOUNTED; only the selected one is shown (`hidden`).** A half-typed form
+  must survive a look at another tab (each section re-seeds only when its STORED value changes), and
+  every section's GET still fires on open, as the single panel did — so the demo recording answers
+  every tab. One scroller serves all panels and resets to the top on a tab switch.
+- **Tabs are a real tablist**: `role=tablist/tab/tabpanel`, `aria-selected`, `aria-controls` /
+  `aria-labelledby`, roving `tabIndex`, automatic activation. Arrow keys move in BOTH orientations
+  (Up/Left back, Down/Right forward, wrapping), Home/End jump (`tabForKey`). With no section to land
+  on, opening focuses the selected tab. Escape still closes the modal (capture phase, as before).
+- **Which tab opens**: a `SettingsFocus` opens its tab (`SETTINGS_FOCUS_TAB`: `my-turn` → Pending,
+  `issue-tracker` → Integrations, `claude-spend` → AI), else the tab last shown in this page load
+  (`lastTab` in `store/settingsModal.ts`, memory only), else Pull requests — never a tab that is
+  not on screen (`initialSettingsTab`). Not in the URL.
+- **The demo scripts click tabs**: `verify-demo.mjs`'s `openSettingsTab(name)` and
+  `record-demo.mjs`'s `scrollModal` (visits every tab). A hidden panel's text is not in
+  `innerText`, so an `expect` on Settings text must open the right tab first.
 
 - ⚠ **THE HEADING IS THE NAMING RULE NOW, AND IT IS STILL LOAD-BEARING.** There is no workspace
   picker in Settings — the rail's selection is the scope — so a screen that does not say which team
@@ -3603,12 +3617,12 @@ that carried no suffix.
   stated ONCE, as a BOUNDARY rather than a suffix, which also marks which settings are *not* a
   team's. Sections below it name a workspace only in a sentence that names a DIFFERENT one
   (`SlackSection`'s cap disclosure). A workspace-scoped control mounted anywhere but under that
-  heading names its workspace itself.
+  heading (in its tab) names its workspace itself.
 - ⚠ **A CONTROL AT THE ACCOUNT GRAIN GOES ABOVE THE HEADING, WITH ITS OWN SAVE.** One Save spanning
   two grains is how an edit meant for one team travels to every team. The comparison-window mode was
   the last such control and it is gone from the account grain (platform 0032) — so `SprintSection` has
   one Save because it has one grain, not because mixing became safe.
-- ⚠ **`workspaceId === null` HOLDS BACK THE WHOLE HALF, IN ONE PLACE.** Three sections each
+- ⚠ **`workspaceId === null` HOLDS BACK EACH TAB'S WHOLE WORKSPACE PART, IN ONE PLACE.** Three sections each
   rendering their own `ScopePendingSection` under a heading that cannot yet name anybody reads as
   three broken sections rather than one unfinished request. Each section KEEPS its own guard — that
   one sits at the point of the WRITE, where a PUT with no `?workspace=` would be answered by the
@@ -3651,8 +3665,8 @@ two neighbours. One Save for the section. The server contract is [BACKEND.md](BA
   counting only the rows on screen.
 - **Opening straight to it**: `store/settingsModal.ts` (zustand, not persisted, not in the URL)
   holds the modal's open state and a `focus`, so Pending's "Customise" can open it from deep in the
-  Activity console. With `focus: 'my-turn'` the modal scrolls the section's heading into view and
-  focuses it, one frame after mount. ⚠ `closeSettings` is a store action, so it is referentially
+  Activity console. With `focus: 'my-turn'` the modal opens on the Pending tab, scrolls the
+  section's heading into view and focuses it, one frame after mount. ⚠ `closeSettings` is a store action, so it is referentially
   stable and SettingsModal's capture-phase Escape handler registers once — never pass an inline
   arrow.
 - **One save moves five reads, together** (`useSetMyTurnSettings`): `['me']` (seeded at once from

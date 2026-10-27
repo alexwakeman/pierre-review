@@ -35,6 +35,12 @@ async function openSettings(page) {
   await page.getByRole('dialog', { name: 'Settings' }).or(page.locator('[aria-label="Settings"]')).first().waitFor({ timeout: 10_000 });
 }
 
+/** Open Settings at one of its tabs (one area shows at a time; the rest are hidden). */
+const openSettingsTab = (tab) => async (page) => {
+  await openSettings(page);
+  await page.getByRole('dialog', { name: 'Settings' }).getByRole('tab', { name: tab, exact: true }).click();
+};
+
 /**
  * [name, query, screenshot?, { act?, expect? }] — `act(page)` runs after the view settles (a click
  * the view hides behind, never a URL); `expect` lists text the page must then show.
@@ -97,7 +103,7 @@ const VIEWS = [
     'settings:ai',
     '?view=activity',
     'settings-ai',
-    { act: openSettings, expect: ['Default: Claude.', 'Automatic runs and default:', 'Signed in with ChatGPT Plus.', 'Effort for AI Review and AI Fix:'] },
+    { act: openSettingsTab('AI'), expect: ['Default: Claude.', 'Automatic runs and default:', 'Signed in with ChatGPT Plus.', 'Effort for AI Review and AI Fix:'] },
   ],
   // Settings → AI → Effort: a level is picked (simulated, provider.ts) and the control keeps it.
   [
@@ -106,7 +112,7 @@ const VIEWS = [
     'settings-ai-effort',
     {
       act: async (page) => {
-        await openSettings(page);
+        await openSettingsTab('AI')(page);
         await page.locator('#ai-effort').selectOption('high');
         await page.waitForFunction(() => document.querySelector('#ai-effort')?.value === 'high', null, { timeout: 10_000 });
       },
@@ -119,19 +125,19 @@ const VIEWS = [
     'settings-ai-codex',
     {
       act: async (page) => {
-        await openSettings(page);
+        await openSettingsTab('AI')(page);
         await page.locator('input[name="ai-provider"][value="codex"]').click();
         await page.getByText('Default: Codex.').waitFor({ timeout: 10_000 });
       },
       expect: ['Default: Codex.'],
     },
   ],
-  // Settings → Workspace → Related repos: the seeded pair (acme/api with acme/infrastructure).
+  // Settings → AI review → Related repos: the seeded pair (acme/api with acme/infrastructure).
   [
     'settings:related-repos',
     '?view=activity',
     null,
-    { act: openSettings, expect: ['Related repos', 'Reviewed together with', 'acme/api and acme/infrastructure'] },
+    { act: openSettingsTab('AI review'), expect: ['Related repos', 'Reviewed together with', 'acme/api and acme/infrastructure'] },
   ],
   ['user-activity:2', '?view=user-activity:2', null],
   ['ws2:open-prs', '?view=activity&workspace=2', null],
