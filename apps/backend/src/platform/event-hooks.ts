@@ -5,7 +5,8 @@ import type { ProEventHooks } from './contract.js';
 //
 // Core announces two committed facts to the platform's listeners (today: the Slack event
 // signals, platform/slack/signals.ts):
-//   • a Claude Review run SUCCEEDED   — review/claude-review/manager.ts, after the run is stored;
+//   • a Claude Review run SUCCEEDED   — review/claude-review/manager.ts, after the run is stored,
+//     with its trigger (the Slack listener drops every 'manual' run);
 //   • a PR was SEEN merging live      — sync/upsert.ts `persistPr`, AFTER its transaction commits.
 //
 // ⚠ FIRE-AND-FORGET, ALWAYS. Each emit returns void, never awaits the hook, and logs a failure: a

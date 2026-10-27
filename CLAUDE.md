@@ -481,8 +481,8 @@ Monitoring, the work-plan wording, the impact note, Slack.
   at WORKSPACE grain only** (a `?repoIds=`-NARROWED request builds no rollup); `$ per acted-on
   thread` REFUSES rather than falling back.
 - **Slack** (`platform/slack/`): a TEAM digest — never a card about or naming the configuring
-  account. Event signals (Claude Review ran, PR merged) are OFF by default, CLAIMED before the post,
-  never retried; a merge is announced only when SEEN LIVE (`sync/merge-notice.ts`).
+  account. Event signals (AUTO review ran — ⚠ never a manual run, PR merged) are OFF by default,
+  CLAIMED before the post, never retried; a merge is announced only when SEEN LIVE (`sync/merge-notice.ts`).
 - **The severity INFLATION index** counts only BADGED findings; a bot that badges nothing is
   OMITTED and NAMED, never a zero. Major+critical bucket as "high".
 

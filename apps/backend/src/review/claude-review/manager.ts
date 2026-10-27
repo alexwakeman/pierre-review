@@ -440,8 +440,9 @@ function launch(item: QueueItem): void {
 
   void runPipeline(item, controller, emit)
     .then((succeeded) => {
-      // EVENT HOOK (Pro: the Slack "Claude Review ran" signal). Every SUCCEEDED run, manual or
-      // auto; fire-and-forget, never thrown into the review (pro/event-hooks.ts).
+      // EVENT HOOK (the Slack "Claude Review ran" signal). Announced for every SUCCEEDED run with
+      // its trigger; the listener posts for AUTO runs only (platform/slack/signals.ts) — a run the
+      // reader started never reaches Slack. Fire-and-forget, never thrown into the review.
       if (succeeded) {
         emitClaudeReviewCompleted({
           accountId: item.accountId,

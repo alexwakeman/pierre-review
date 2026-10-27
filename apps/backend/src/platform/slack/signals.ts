@@ -12,8 +12,12 @@ import { aiRunProviderName } from '@pierre-review/shared';
 //
 // Per workspace, each its own switch on the delivery row, both OFF by default:
 //   • "Claude Review ran"   — `notify_reviews`: PR, author, verdict and the run's OWN summary,
-//     trimmed. Never the findings. Failed / cancelled runs never reach here (the host fires only
-//     on success), and a `skip`-routed run (nothing to review) posts nothing.
+//     trimmed. Never the findings. ⚠ AUTO REVIEWS ONLY: a run a person started (trigger 'manual')
+//     never reaches Slack — the host announces every succeeded run, and BOTH the event's trigger
+//     and the STORED `claude_reviews.trigger` must say 'auto' (checked before the claim, so a
+//     manual run leaves no notice row). Failed / cancelled runs never reach here (the host fires
+//     only on success), and a `skip`-routed run (nothing to review) posts nothing. Ticket, CI and
+//     thread-check runs have no Slack signal at all.
 //   • "Pull request merged" — `notify_merges`: PR, repo and WHO merged it. The host fires only for
 //     a merge SEEN live (core sync/merge-notice.ts), never for history.
 //
@@ -189,8 +193,10 @@ async function targetFor(
 
 export async function onClaudeReviewCompleted(
   ctx: ProContext,
-  e: { accountId: number; prId: number; reviewId: number },
+  e: { accountId: number; prId: number; reviewId: number; trigger: 'manual' | 'auto' },
 ): Promise<void> {
+  // AUTO REVIEWS ONLY — a review the reader started is theirs; nothing about it reaches Slack.
+  if (e.trigger !== 'auto') return;
   const facts = await prFacts(ctx, e.accountId, e.prId);
   if (facts == null) return;
   const target = await targetFor(ctx, e.accountId, facts.repoId, 'notifyReviews');
@@ -202,6 +208,7 @@ export async function onClaudeReviewCompleted(
       verdict: cr.verdict,
       summary: cr.summary,
       reviewMode: cr.reviewMode,
+      trigger: cr.trigger,
       // The provider that ran it: the stored `provider` (Phase 4, sqlite 0128), else read from the
       // model id (aiRunProvider). A schema without the columns reads as Claude.
       ...(cr.model != null ? { model: cr.model } : {}),
@@ -215,12 +222,15 @@ export async function onClaudeReviewCompleted(
     verdict: ClaudeReviewVerdict | null;
     summary: string | null;
     reviewMode: string | null;
+    trigger: string | null;
     model?: string | null;
     provider?: AiProviderId | null;
   }>;
   const run = runs[0];
   // Succeeded runs only, and not a `skip` (no code to review — a message would be noise).
   if (run == null || run.status !== 'succeeded' || run.reviewMode === 'skip') return;
+  // The STORED trigger agrees, or nothing is sent (no claim either).
+  if (run.trigger !== 'auto') return;
   if (!(await claimNotice(ctx, e.accountId, 'review', e.reviewId))) return;
   try {
     await postToSlack(

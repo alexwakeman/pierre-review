@@ -1040,7 +1040,12 @@ Two per-workspace switches on the delivery row, **both OFF by default**, sent to
 (`slack/signals.ts`); `cadence: 'off'` pauses the digest, not these.
 - **"Claude Review ran"** (`notify_reviews`) — PR link (Limn + GitHub), author, verdict and the run's
   own `summary`, trimmed to 700 characters. Never the findings. Only a SUCCEEDED run, never a
-  `skip`-routed one. The Settings switch shows only where Claude Review can run (`me.ai.enabled`).
+  `skip`-routed one. ⚠ **AUTO REVIEWS ONLY** (since 2026-10-27): a run the reader started is never
+  posted — the event's `trigger` AND the stored `claude_reviews.trigger` must both be `'auto'`,
+  checked BEFORE the claim, so a manual run leaves no `slack_signal_notices` row. Settings labels
+  it "Post when an auto review finishes" / "Reviews you start yourself are never posted." Ticket,
+  CI and thread-check runs have no Slack signal. The Settings switch shows only where Claude Review
+  can run (`me.ai.enabled`).
 - **"Pull request merged"** (`notify_merges`) — PR, repo and who merged it (`pull_requests.merged_by_id`,
   already synced). Only for a merge SEEN LIVE: core's `sync/merge-notice.ts` requires the row was
   known OPEN (persistPr's pre-upsert row, or the liveness sweep's open → merged flip, which writes no

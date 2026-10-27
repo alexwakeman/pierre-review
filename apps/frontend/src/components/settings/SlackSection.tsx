@@ -192,7 +192,7 @@ export function SlackSection(): JSX.Element {
   return (
     <SectionShell
       title="Slack"
-      desc="Sends this workspace’s Pending board, merges and AI reviews to a Slack channel."
+      desc="Sends this workspace’s Pending board, sprint summary, merges and auto reviews to a Slack channel."
       info={
         <InfoButton title="Slack">
           <p>
@@ -200,9 +200,10 @@ export function SlackSection(): JSX.Element {
             left out. A short sprint summary follows. Links open the app.
           </p>
           <p>
-            The two event messages are off until you switch them on. A merge message names who
-            merged the pull request and is sent once per pull request, only for merges seen as
-            they happen.
+            The two event messages are off until you switch them on. A review message is sent once
+            when an auto review finishes. Reviews you start yourself are never posted to Slack. A
+            merge message names who merged the pull request and is sent once per pull request, only
+            for merges seen as they happen.
           </p>
           <p>
             Every workspace with a digest writes its own sprint summary on every send, so at most{' '}
@@ -331,10 +332,11 @@ export function SlackSection(): JSX.Element {
           />
           <span>
             <span className="font-medium text-gray-700 dark:text-gray-200">
-              Post when an AI review runs
+              Post when an auto review finishes
             </span>
             <span className="block text-[12px] text-gray-400">
-              The pull request, its verdict and the review’s summary. Not the comments.
+              Reviews you start yourself are never posted. The pull request, its verdict and the
+              review’s summary. Not the comments.
             </span>
           </span>
         </label>

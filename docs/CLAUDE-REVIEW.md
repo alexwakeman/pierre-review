@@ -1901,8 +1901,18 @@ repeated on, and cleared on off, so nothing opened while it was off is picked up
 When a run SUCCEEDS — manual or auto — `manager.ts`'s `launch` calls core
 `emitClaudeReviewCompleted({ accountId, prId, reviewId, trigger })` (`platform/event-hooks.ts`):
 fire-and-forget, after the run is stored, never thrown into the review. Failed and cancelled runs
-emit nothing. The platform decides the rest (the workspace's `notify_reviews` switch, a `skip`-routed run is
-silent, once per run): [PLATFORM.md](PLATFORM.md) § The Slack EVENT signals. Ticket reviews do not emit.
+emit nothing. The platform decides the rest: ⚠ **AUTO runs only** — a manual run (event or stored
+trigger `'manual'`) never reaches Slack and is never claimed; then the workspace's `notify_reviews`
+switch, a `skip`-routed run is silent, once per run: [PLATFORM.md](PLATFORM.md) § The Slack EVENT
+signals. Ticket, CI and thread-check reviews do not emit.
+
+**Nothing a MANUAL run does is posted or sent without a click.** Every automatic write re-reads the
+stored run's trigger: PR auto-post, auto-resolve and auto-pushback (`review.trigger !== 'auto'`),
+the CI review's auto-post (`'auto'` only), the ticket review's (`'auto'`/`'cascade'`, both sweeper
+starts, never a click), the Slack review signal, and the auto fix (`maybeStartAutoFix` returns
+`not_auto` for a manual review; auto-push needs `ai_fixes.trigger = 'auto'`). The SonarCloud
+auto-post is called only from the manager's auto branch. Design diagrams follow a manual review
+too, but post nothing.
 
 ## Auto-posting (per workspace)
 

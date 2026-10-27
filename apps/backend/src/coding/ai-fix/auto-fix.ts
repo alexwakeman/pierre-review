@@ -165,7 +165,10 @@ async function liveHeadSha(ctx: AgentContext, accountId: number, prId: number): 
 
 const defaultDeps: AutoFixDeps = { startReviewFix, loadReviewSeed, isFixRunning, liveHeadSha };
 
-export type AutoFixDecision = { status: 'not_own' } | ClaudeAutoFixOutcome;
+// `not_auto`: the review was one a person started — an auto fix (which may then be pushed
+// automatically) follows AUTO reviews only. The manager already calls this for auto runs alone;
+// this re-reads the stored run so no other caller can start one off a manual review. Not recorded.
+export type AutoFixDecision = { status: 'not_own' } | { status: 'not_auto' } | ClaudeAutoFixOutcome;
 
 /**
  * Called once per SUCCEEDED auto review (manager.ts). Returns what it did; never throws.
@@ -199,6 +202,7 @@ export async function maybeStartAutoFix(
       selection: { kind: 'sections', include },
     });
     if (!loaded) return skip('not_started');
+    if (loaded.review.trigger !== 'auto') return { status: 'not_auto' };
     if (loaded.seed.sentRefs.length === 0) return skip('nothing_to_fix');
 
     const { pullRequests: prs, aiFixes: af } = ctx.schema;

@@ -4936,8 +4936,8 @@ export interface SlackTarget {
   // Two EVENT signals posted to the same webhook, each its own switch, both OFF by default (plugin
   // migration 0040). They ride the delivery row because they need its channel; the digest's
   // cadence does not gate them (`cadence: 'off'` pauses the digest, not these).
-  //   • notifyReviews — one message when a Claude Review run succeeds: PR, author, verdict and the
-  //     run's own summary. Never the findings.
+  //   • notifyReviews — one message when an AUTO review succeeds (never a run a person started):
+  //     PR, author, verdict and the run's own summary. Never the findings.
   //   • notifyMerges — one message when a PR is SEEN merging live, naming who merged it. Never for
   //     a merge first met by a backfill; once per PR, ever.
   notifyReviews: boolean;

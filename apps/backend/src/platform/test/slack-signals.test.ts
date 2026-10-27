@@ -1,7 +1,7 @@
 // ── THE TWO SLACK EVENT SIGNALS (plugin migration 0040) ─────────────────────────────────────
 //
 // "Claude Review ran" and "Pull request merged": per-workspace switches on the delivery row, OFF by
-// default, strictly Pro, claimed once and never retried.
+// default, claimed once and never retried. The review signal posts for AUTO reviews only.
 //
 //   pnpm --filter @pierre-review/backend exec vitest run src/platform/test/slack-signals.test.ts
 import { readFileSync } from 'node:fs';
@@ -72,6 +72,7 @@ const core = {
     summary: text('summary'),
     reviewMode: text('review_mode'),
     model: text('model'),
+    trigger: text('trigger'),
   }),
 };
 
@@ -93,7 +94,7 @@ describe('Slack event signals', () => {
       CREATE TABLE repos (id integer PRIMARY KEY, owner text, name text);
       CREATE TABLE users (id integer PRIMARY KEY, github_login text);
       CREATE TABLE pull_requests (id integer PRIMARY KEY, account_id integer, repo_id integer, number integer, title text, author_id integer, merged_by_id integer);
-      CREATE TABLE claude_reviews (id integer PRIMARY KEY, account_id integer, pr_id integer, status text, verdict text, summary text, review_mode text, model text);
+      CREATE TABLE claude_reviews (id integer PRIMARY KEY, account_id integer, pr_id integer, status text, verdict text, summary text, review_mode text, model text, trigger text NOT NULL DEFAULT 'manual');
       CREATE TABLE pro_settings (id integer PRIMARY KEY, account_id integer, slack_webhook_url text, slack_cadence text, slack_hour1 integer, slack_hour2 integer, slack_timezone text, slack_last_sent_at integer, slack_last_sent_slot text, bot_slack_digest integer);
       INSERT INTO workspaces VALUES (1, 1, 'Default', 1), (9, 2, 'Other', 1);
       INSERT INTO workspace_repos VALUES (1, 1, 1, 10), (2, 2, 9, 20);
@@ -101,10 +102,11 @@ describe('Slack event signals', () => {
       INSERT INTO users VALUES (1, 'alice'), (2, 'bob');
       INSERT INTO pull_requests VALUES (100, 1, 10, 12, 'Fix <!channel> login', 1, 2), (200, 2, 20, 3, 'Theirs', 1, 2);
       INSERT INTO claude_reviews VALUES
-        (5, 1, 100, 'succeeded', 'REQUEST_CHANGES', 'Two bugs in the token refresh.', 'worktree', 'claude-opus-5-5'),
-        (6, 1, 100, 'succeeded', 'COMMENT', 'Nothing to review.', 'skip', 'claude-opus-5-5'),
-        (7, 1, 100, 'failed', NULL, NULL, 'worktree', 'claude-opus-5-5'),
-        (8, 1, 100, 'succeeded', 'COMMENT', 'One nit.', 'worktree', 'gpt-6-astra');
+        (5, 1, 100, 'succeeded', 'REQUEST_CHANGES', 'Two bugs in the token refresh.', 'worktree', 'claude-opus-5-5', 'auto'),
+        (6, 1, 100, 'succeeded', 'COMMENT', 'Nothing to review.', 'skip', 'claude-opus-5-5', 'auto'),
+        (7, 1, 100, 'failed', NULL, NULL, 'worktree', 'claude-opus-5-5', 'auto'),
+        (8, 1, 100, 'succeeded', 'COMMENT', 'One nit.', 'worktree', 'gpt-6-astra', 'auto'),
+        (9, 1, 100, 'succeeded', 'APPROVE', 'Looks fine.', 'worktree', 'claude-opus-5-5', 'manual');
     `);
     sqlite.exec(migrationSql('0030_workspace_slack_targets.sql'));
     sqlite.exec(migrationSql('0033_slack_target_bot_digest.sql'));
@@ -119,15 +121,15 @@ describe('Slack event signals', () => {
 
   it('both signals are OFF by default — a configured webhook alone sends nothing', async () => {
     await writeTarget(ctx, 1, 1, { webhookUrl: WEBHOOK });
-    await onClaudeReviewCompleted(ctx, { accountId: 1, prId: 100, reviewId: 5 });
+    await onClaudeReviewCompleted(ctx, { accountId: 1, prId: 100, reviewId: 5, trigger: 'auto' });
     await onPullRequestMerged(ctx, { accountId: 1, repoId: 10, prId: 100 });
     expect(posted).toHaveLength(0);
   });
 
   it('review: verdict + summary, escaped, no findings; once per run', async () => {
     await writeTarget(ctx, 1, 1, { webhookUrl: WEBHOOK, notifyReviews: true });
-    await onClaudeReviewCompleted(ctx, { accountId: 1, prId: 100, reviewId: 5 });
-    await onClaudeReviewCompleted(ctx, { accountId: 1, prId: 100, reviewId: 5 });
+    await onClaudeReviewCompleted(ctx, { accountId: 1, prId: 100, reviewId: 5, trigger: 'auto' });
+    await onClaudeReviewCompleted(ctx, { accountId: 1, prId: 100, reviewId: 5, trigger: 'auto' });
     expect(posted).toHaveLength(1);
     expect(posted[0]!.body).toContain('Request changes');
     expect(posted[0]!.body).toContain('Two bugs in the token refresh.');
@@ -139,7 +141,7 @@ describe('Slack event signals', () => {
 
   it('review: a run Codex made names Codex', async () => {
     await writeTarget(ctx, 1, 1, { webhookUrl: WEBHOOK, notifyReviews: true });
-    await onClaudeReviewCompleted(ctx, { accountId: 1, prId: 100, reviewId: 8 });
+    await onClaudeReviewCompleted(ctx, { accountId: 1, prId: 100, reviewId: 8, trigger: 'auto' });
     expect(posted).toHaveLength(1);
     expect(posted[0]!.text).toBe('Codex Review ran on acme/api#12');
     expect(posted[0]!.body).toContain('Codex Review ran');
@@ -148,9 +150,27 @@ describe('Slack event signals', () => {
 
   it('review: a skip-routed or failed run sends nothing', async () => {
     await writeTarget(ctx, 1, 1, { webhookUrl: WEBHOOK, notifyReviews: true });
-    await onClaudeReviewCompleted(ctx, { accountId: 1, prId: 100, reviewId: 6 });
-    await onClaudeReviewCompleted(ctx, { accountId: 1, prId: 100, reviewId: 7 });
+    await onClaudeReviewCompleted(ctx, { accountId: 1, prId: 100, reviewId: 6, trigger: 'auto' });
+    await onClaudeReviewCompleted(ctx, { accountId: 1, prId: 100, reviewId: 7, trigger: 'auto' });
     expect(posted).toHaveLength(0);
+  });
+
+  it('⚠ AUTO REVIEWS ONLY: a run a person started posts nothing and leaves no notice row', async () => {
+    await writeTarget(ctx, 1, 1, { webhookUrl: WEBHOOK, notifyReviews: true });
+    const notices = () =>
+      (sqlite.prepare("SELECT COUNT(*) AS n FROM slack_signal_notices WHERE kind = 'review'").get() as { n: number }).n;
+    // A manual run, announced as manual.
+    await onClaudeReviewCompleted(ctx, { accountId: 1, prId: 100, reviewId: 9, trigger: 'manual' });
+    // The stored row decides too: a manual row announced as auto still sends nothing…
+    await onClaudeReviewCompleted(ctx, { accountId: 1, prId: 100, reviewId: 9, trigger: 'auto' });
+    // …and an auto row announced as manual sends nothing either.
+    await onClaudeReviewCompleted(ctx, { accountId: 1, prId: 100, reviewId: 5, trigger: 'manual' });
+    expect(posted).toHaveLength(0);
+    expect(notices()).toBe(0);
+    // The auto run, announced as auto: exactly one post, one claim.
+    await onClaudeReviewCompleted(ctx, { accountId: 1, prId: 100, reviewId: 5, trigger: 'auto' });
+    expect(posted).toHaveLength(1);
+    expect(notices()).toBe(1);
   });
 
   it('merge: names who merged it; once per PR forever, even after a failed post', async () => {

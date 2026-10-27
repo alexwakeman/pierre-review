@@ -109,7 +109,7 @@ async function fix(
 }
 
 // The fakes: what the review would seed, and what the fixer was asked to do.
-let seed: { headSha: string; model: string; items: AiFixReviewItem[] } | null;
+let seed: { headSha: string; model: string; items: AiFixReviewItem[]; trigger?: 'manual' | 'auto' } | null;
 let running = false;
 let started: any[];
 let startAnswer: any;
@@ -119,7 +119,7 @@ const deps = () => ({
     loadInputs.push(input);
     return seed
       ? {
-          review: { headSha: seed.headSha, model: seed.model } as any,
+          review: { headSha: seed.headSha, model: seed.model, trigger: seed.trigger ?? 'auto' } as any,
           seed: { items: seed.items, sentRefs: seed.items.filter((i) => i.included).map((i) => i.ref), text: 'x' },
         }
       : null;
@@ -340,6 +340,14 @@ describe('maybeStartAutoFix — the workspace’s "Always include" sections', ()
 });
 
 describe('maybeStartAutoFix — the skips', () => {
+  it('⚠ a review a person started never starts an auto fix (nothing recorded, nothing pushed later)', async () => {
+    seed!.trigger = 'manual';
+    const prId = await seedPr(viewerId);
+    expect(await go(prId, 509)).toEqual({ status: 'not_auto' });
+    expect(started).toEqual([]);
+    expect(mod.autoFixOutcomeFor(509, 1)).toBeNull();
+  });
+
   it('nothing to fix', async () => {
     seed!.items = [];
     const prId = await seedPr(viewerId);
