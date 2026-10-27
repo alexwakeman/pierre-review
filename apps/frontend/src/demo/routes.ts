@@ -417,6 +417,7 @@ export const ROUTES: DemoRoute[] = [
         queued: 0,
         retried: 0,
         checksQueued: 0,
+        repliesQueued: 0,
         capped: false,
         laneFull: false,
         aiNotReady: false,

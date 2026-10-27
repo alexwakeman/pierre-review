@@ -107,6 +107,9 @@ export interface AgentContext {
         commentsAtMs?: number | null;
         lastRunAtMs?: number | null;
         coveredMs?: number | null;
+        // How far the reviews covered replies on Limn's OWN findings (a pair: its earlier-reaching
+        // half). Absent ⇒ `coveredMs`.
+        ownCoveredMs?: number | null;
         // How far the latest Check threads row at this head reached, and the newest qualifying reply
         // on one of Limn's own findings (null: none). Absent ⇒ the sweeper reads them itself.
         checkCoveredMs?: number | null;

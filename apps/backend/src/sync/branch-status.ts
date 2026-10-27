@@ -29,6 +29,7 @@ import {
 // `checkContextState` + `parseActionsIds` are shared for the same reason one level down: a
 // failing check on trunk must be the same object as a failing check on a PR.
 import { checkContextState, ciStatusFrom, parseActionsIds } from './upsert.js';
+import { fetchRollupsWithoutLimn, needsLimnRecompute } from './limn-ci.js';
 import { isLimnStatusContext, type BranchCheckRun, type CiStatus } from '@pierre-review/shared';
 
 const { repos, users, branchCommits, trunkCiStatusEvents } = schema;
@@ -212,6 +213,44 @@ export function pickAssociatedPrNumber(
     if (d < 0 || (d === 0 && p.number < best.number)) best = p;
   }
   return best.number;
+}
+
+/**
+ * The page's commits with LIMN'S OWN STATUS LINES taken out of their rollup state (sync/limn-ci.ts):
+ * a commit carrying a `limn/review-*` line in a state the line could have shaped gets the state
+ * recomputed from its contexts (null rollup when Limn's lines are its only checks — "no CI"). At most
+ * COMMIT_CHECKS_ALIAS_CAP commits per page, newest first; past it, or on a failed read, GitHub's
+ * state stands. A page with no Limn line issues no query. NEVER THROWS.
+ */
+export async function withoutLimnStates(
+  client: GraphqlClient,
+  owner: string,
+  name: string,
+  nodes: GqlBranchCommit[],
+  log?: BranchSyncLogger,
+): Promise<{ nodes: GqlBranchCommit[]; cost: number }> {
+  const targets = nodes
+    .filter((n) => needsLimnRecompute(n.statusCheckRollup?.state, n))
+    .slice(0, COMMIT_CHECKS_ALIAS_CAP)
+    .map((n) => n.oid);
+  if (targets.length === 0) return { nodes, cost: 0 };
+  try {
+    const r = await fetchRollupsWithoutLimn(client, owner, name, targets, (errors) =>
+      log?.warn(`branch-status ${owner}/${name}: partial GraphQL on Limn-marked commits`, errors),
+    );
+    return {
+      nodes: nodes.map((n) =>
+        r.bySha.has(n.oid) ? { ...n, statusCheckRollup: r.bySha.get(n.oid) != null ? { state: r.bySha.get(n.oid)! } : null } : n,
+      ),
+      cost: r.cost,
+    };
+  } catch (err) {
+    log?.warn(
+      `branch-status ${owner}/${name}: Limn-line recompute failed (non-fatal): ` +
+        `${err instanceof Error ? err.message.slice(0, 200) : String(err)}`,
+    );
+    return { nodes, cost: 0 };
+  }
 }
 
 /**
@@ -623,9 +662,19 @@ export async function syncBranchStatus(
   // every field below is optional even when `target` itself is present.
   const target = ref?.target ?? null;
   const headSha = target?.oid ?? null;
-  const headCi = ciStatusFrom(target?.statusCheckRollup?.state);
-  const nodes: GqlBranchCommit[] = (target?.history?.nodes ?? []).filter(
-    (n): n is GqlBranchCommit => n != null && typeof n.oid === 'string',
+  const limn = await withoutLimnStates(
+    client,
+    owner,
+    name,
+    (target?.history?.nodes ?? []).filter((n): n is GqlBranchCommit => n != null && typeof n.oid === 'string'),
+    opts.log,
+  );
+  const nodes = limn.nodes;
+  // The head's CI from its (Limn-corrected) history node when present — the head is history's
+  // first node — else the target's own rollup.
+  const headNodeForCi = headSha != null ? nodes.find((n) => n.oid === headSha) : undefined;
+  const headCi = ciStatusFrom(
+    headNodeForCi ? headNodeForCi.statusCheckRollup?.state : target?.statusCheckRollup?.state,
   );
 
   // Resolve the commit authors we already know, in ONE query. GraphQL gives a login only when
@@ -717,7 +766,7 @@ export async function syncBranchStatus(
     );
   }
 
-  const rateLimitCost = (resp.rateLimit?.cost ?? 0) + detailCost;
+  const rateLimitCost = (resp.rateLimit?.cost ?? 0) + detailCost + limn.cost;
   if (detailTargets.length > 0) {
     // The one place the two-phase cost claim is observable. Logged only when phase 2 actually
     // ran, so a healthy repo stays silent.
@@ -808,9 +857,15 @@ export async function backfillBranchHistory(
 
     const ref = resp.repository?.defaultBranchRef ?? null;
     const history = ref?.target?.history ?? null;
-    const nodes: GqlBranchCommit[] = (history?.nodes ?? []).filter(
-      (n): n is GqlBranchCommit => n != null && typeof n.oid === 'string',
+    const limn = await withoutLimnStates(
+      client,
+      owner,
+      name,
+      (history?.nodes ?? []).filter((n): n is GqlBranchCommit => n != null && typeof n.oid === 'string'),
+      opts.log,
     );
+    rateLimitCost += limn.cost;
+    const nodes = limn.nodes;
     if (nodes.length > 0) {
       const userIdByLogin = await resolveKnownLogins(nodes);
       const branchName = ref?.name ?? null;

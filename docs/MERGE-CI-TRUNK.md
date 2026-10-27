@@ -31,6 +31,9 @@ answer; absent (the lean timeline PR doesn't carry it) the reason stays generic,
   CI" as stricter than that. `behind` is `canMerge: false` because GitHub itself 405s the merge
   when the repo requires up-to-date branches. `queued`/`armed` are checked FIRST (the truest
   answer to "what happens next"), then conflicts, then draft.
+- ⚠ **An `unstable` only Limn's own `limn/review-*` status lines caused is stored `clean`** (shared
+  `mergeStateWithoutLimn`, applied where the column is written and on the live merge options;
+  docs/CLAUDE-REVIEW.md § Team claims) — a teammate's pending review line is not "checks failing".
 - `db/triage.ts` had the identical blindness: `approved_ready` tested `mergeable === 'mergeable'`
   alone and tagged PRs "approved & ready" with red required checks. It now also requires
   `mergeStateStatus ∈ READY_MERGE_STATES {clean, has_hooks, unstable}` — **that set and

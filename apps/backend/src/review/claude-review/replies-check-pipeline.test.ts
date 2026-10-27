@@ -546,3 +546,106 @@ describe('the provider of the run that owns each thread', () => {
     expect(rows[0]).toMatchObject({ provider: 'codex', model: 'gpt-6.1-terra' });
   });
 });
+
+describe('review fixes: pair coverage, the outcome anchor, the daily cap', () => {
+  const MIN = 60_000;
+  let eq: typeof import('drizzle-orm').eq;
+  const setTimes = async (reviewId: number, createdAtMs: number, commentsThroughMs: number | null) =>
+    db
+      .update(schema.claudeReviews)
+      .set({ createdAt: new Date(createdAtMs), commentsThrough: commentsThroughMs == null ? null : new Date(commentsThroughMs) })
+      .where(eq(schema.claudeReviews.id, reviewId))
+      .execute();
+  beforeAll(async () => {
+    ({ eq } = await import('drizzle-orm'));
+  });
+  beforeEach(async () => {
+    await settings.setWorkspaceAutoReview(ctx, 1, wsId, { autoPost: { enabled: true, scope: 'all', autoVerdict: true } as any });
+  });
+
+  it('⚠ a pair: a reply on a CLAUDE finding that landed while the Claude half ran is still judged (the Codex half’s later start does not cover it)', async () => {
+    const pr = await makePr();
+    const now = Date.now();
+    const first = await reviewed(
+      pr,
+      [{ title: 'Leaks the handle', severity: 'warning', replies: [{ by: 'alice', body: EXPLAIN, at: now - 30 * MIN }] }],
+      { provider: 'claude', pair: { role: 'first' } },
+    );
+    const second = await reviewed(pr, [], { provider: 'codex', pair: { role: 'second', pairId: first.reviewId } });
+    // The Claude half started 2 h ago; the Codex half started 10 min ago and saw comments through 20 min ago.
+    await setTimes(first.reviewId, now - 2 * HOUR, null);
+    await setTimes(second.reviewId, now - 10 * MIN, now - 20 * MIN);
+    const planned = await rc.planRepliesCheck(ctx, 1, pr);
+    expect('refused' in planned).toBe(false);
+    if ('refused' in planned) return;
+    expect(planned.findings.map((f) => f.title)).toEqual(['Leaks the handle']);
+  });
+
+  it('the outcome anchors on the latest SUCCEEDED full review: a cancelled run after it does not hide it', async () => {
+    const pr = await makePr();
+    await reviewed(pr, [{ title: 'Unchecked input', severity: 'warning', replies: [{ by: 'alice', body: EXPLAIN }] }]);
+    // The reader pressed Review and stopped it: a newer cancelled full row at the same head.
+    const stopped = await persist.insertQueuedReview(ctx, pr, HEAD, 'claude-opus-5-5', 1, [], 'manual', 'claude');
+    await persist.markReviewCancelled(ctx, stopped);
+    script = () => ({ replies: [{ ref: 'T1', status: 'reply_accepted', acceptKind: 'not_valid', reply: 'Fair.' }] });
+    expect((await rc.startRepliesCheck(ctx, { accountId: 1, prId: pr, trigger: 'auto' })).outcome).toBe('queued');
+    await settleFor(pr);
+    expect(postReview).toHaveBeenCalledTimes(1);
+    expect(postReview.mock.calls[0]![0].verdict).toBe('APPROVE');
+  });
+
+  it('⚠ an automatic outcome never rests on a MANUAL review, nor on a review of another head', async () => {
+    const pr = await makePr();
+    const auto = await reviewed(pr, [{ title: 'Unchecked input', severity: 'warning', replies: [] }]);
+    const items = [
+      { priorFindingId: auto.ids.get('Unchecked input')!, status: 'reply_accepted', severity: 'warning', title: 'Unchecked input' },
+    ] as any;
+    const { computeRepliesOutcome, maybePostRepliesOutcome } = await import('./replies-outcome.js');
+    const onAuto = await computeRepliesOutcome(ctx, 1, pr, items, HEAD);
+    expect(onAuto.restsOnAuto).toBe(true);
+    // A pass at a newer head: the review is of older commits ⇒ no outcome at all.
+    const moved = await computeRepliesOutcome(ctx, 1, pr, items, 'b'.repeat(40));
+    expect(moved).toMatchObject({ wanted: null, noBlocker: false, full: null });
+    // The reader then ran a MANUAL review at the head and kept it local (no findings).
+    await reviewed(pr, [], { trigger: 'manual' });
+    const onManual = await computeRepliesOutcome(ctx, 1, pr, items, HEAD);
+    expect(onManual.restsOnAuto).toBe(false);
+    // An AUTO replies pass row at the head (as the pass stores it).
+    const passId = await persist.insertQueuedReview(ctx, pr, HEAD, 'claude-sonnet-5', 1, [], 'auto', 'claude');
+    await db
+      .update(schema.claudeReviews)
+      .set({ kind: 'replies', status: 'succeeded', finishedAt: new Date() })
+      .where(eq(schema.claudeReviews.id, passId))
+      .execute();
+    // Even handed a wanted APPROVE, the automatic writer does nothing over a manual run…
+    const held = await maybePostRepliesOutcome(
+      ctx,
+      { accountId: 1, prId: pr, reviewId: passId, outcome: { ...onManual, wanted: 'APPROVE', noBlocker: true } },
+      postDeps() as any,
+    );
+    expect(held.kind).toBe('nothing');
+    expect(postReview).not.toHaveBeenCalled();
+    // …while the same outcome resting on auto runs posts.
+    const posted = await maybePostRepliesOutcome(
+      ctx,
+      { accountId: 1, prId: pr, reviewId: passId, outcome: { ...onManual, restsOnAuto: true, wanted: 'APPROVE', noBlocker: true } },
+      postDeps() as any,
+    );
+    expect(posted.kind).toBe('done');
+    expect(postReview).toHaveBeenCalledTimes(1);
+  });
+
+  it('a Claude + Codex pair counts ONCE toward the daily auto-review cap', async () => {
+    const q = await import('../../db/queries.js');
+    const read = async () =>
+      (await q.getAutoReviewCandidates(1, wsId, { openedSinceMs: 0, dayStartMs: Date.now() - HOUR, limit: 0 }))!.autoToday;
+    const before = await read();
+    const pr = await makePr();
+    const first = await persist.insertQueuedReview(ctx, pr, HEAD, 'claude-opus-5-5', 1, [], 'auto', 'claude', false, { role: 'first' });
+    await persist.insertQueuedReview(ctx, pr, HEAD, 'claude-opus-5-5', 1, [], 'auto', 'codex', false, { role: 'second', pairId: first });
+    expect(await read()).toBe(before + 1);
+    // An ordinary auto run still counts.
+    await persist.insertQueuedReview(ctx, pr, HEAD, 'claude-opus-5-5', 1, [], 'auto', 'claude');
+    expect(await read()).toBe(before + 2);
+  });
+});

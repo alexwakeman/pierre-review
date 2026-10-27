@@ -15,7 +15,7 @@
 // ⚠ NEVER A COMMENT-ONLY REVIEW: a held verdict is recorded (`skipped` + why), nothing posts.
 // ⚠ A MANUAL pass never writes: its row's `verdict` shows what the outcome WOULD be.
 // ⚠ Never throws.
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, desc, eq, isNull, ne, or } from 'drizzle-orm';
 import {
   aiRunProviderName,
   autoPostFooter,
@@ -47,7 +47,6 @@ import {
 import { readWorkspaceAutoPostForPr } from './auto-settings.js';
 import {
   getClaudeReviewById,
-  getLatestClaudeReview,
   getReviewPostContext,
   isReaderIgnoredFinding,
   loadSettledByReplyFindings,
@@ -74,6 +73,9 @@ export interface RepliesOutcome {
   noBlocker: boolean;
   blockerTitle: string | null;
   full: ClaudeReview | null;
+  // Every half the outcome rests on is an AUTO run. Only then may an automatic pass ACT on it: a
+  // manual run is the reader's, kept local or posted by hand, and auto-post never acts on it.
+  restsOnAuto: boolean;
 }
 
 /**
@@ -85,11 +87,14 @@ export async function computeRepliesOutcome(
   accountId: number,
   prId: number,
   items: readonly ClaudeFollowUpItemRecord[],
+  // The pass's head. ⚠ An outcome rests only on a full review AT this head: a review of older
+  // commits never yields an APPROVE (or a lifted block) over commits nobody reviewed. Absent ⇒ unchecked.
+  headSha?: string,
 ): Promise<RepliesOutcome> {
   const halves = await latestFullReviewHalves(ctx, prId, accountId);
   const full = halves[0];
-  if (!full) {
-    return { wanted: null, noBlocker: false, blockerTitle: null, full: null };
+  if (!full || (headSha != null && halves.some((h) => h.headSha !== headSha))) {
+    return { wanted: null, noBlocker: false, blockerTitle: null, full: null, restsOnAuto: false };
   }
   const [settled, earlier] = await Promise.all([
     loadSettledByReplyFindings(ctx, prId, accountId, ALL_RUNS),
@@ -119,6 +124,7 @@ export async function computeRepliesOutcome(
     noBlocker: !disputedBlocker && unjudged.length === 0 && !open.some((f) => f.severity === 'blocker'),
     blockerTitle: disputedBlockerTitle(items),
     full,
+    restsOnAuto: halves.every((h) => h.trigger === 'auto'),
   };
 }
 
@@ -126,10 +132,31 @@ export async function computeRepliesOutcome(
  * The latest FULL review the outcome rests on, as its succeeded halves: one run, or both halves of a
  * Claude + Codex pair (newest first). A pair whose newest half failed still counts the half that
  * succeeded. Empty when nothing usable succeeded.
+ * ⚠ THE SAME ANCHOR AS THE PASS (replies-check.ts `latestFullReview`): the latest SUCCEEDED,
+ * non-skip full review — a cancelled or failed run after it must not hide the review the pass judged.
  */
 async function latestFullReviewHalves(ctx: AgentContext, prId: number, accountId: number): Promise<ClaudeReview[]> {
-  const latest = await getLatestClaudeReview(ctx, prId, accountId);
-  if (!latest) return [];
+  const cr = s(ctx).claudeReviews;
+  const anchor = (
+    (await ctx.db
+      .select({ id: cr.id })
+      .from(cr)
+      .where(
+        and(
+          eq(cr.prId, prId),
+          eq(cr.accountId, accountId),
+          eq(cr.status, 'succeeded'),
+          isNull(cr.kind),
+          or(isNull(cr.reviewMode), ne(cr.reviewMode, 'skip')),
+        ),
+      )
+      .orderBy(desc(cr.id))
+      .limit(1)
+      .execute()) as Array<{ id: number }>
+  )[0];
+  if (!anchor) return [];
+  const latest = await getClaudeReviewById(ctx, anchor.id, accountId);
+  if (!latest || latest.prId !== prId) return [];
   const halves = [latest];
   const otherId = latest.pair?.otherReviewId ?? null;
   if (otherId != null) {
@@ -201,6 +228,8 @@ async function postOutcome(
   if (row.trigger !== 'auto') return { kind: 'off' };
   if (row.autoPost != null) return { kind: 'already_claimed' };
 
+  // ⚠ An automatic write rests only on AUTO runs (`restsOnAuto`): never on a run the reader started.
+  if (!outcome.restsOnAuto) return { kind: 'nothing' };
   const wanted = ws.settings.autoVerdict ? outcome.wanted : null;
   const facts = await readAutoPostPrFacts(ctx, deps, accountId, ws.workspaceId, prId);
   if (!facts) return { kind: 'not_found' };

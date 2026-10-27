@@ -32,6 +32,9 @@ export const COMMIT_CHECKS_QUERY = /* GraphQL */ `
           statusCheckRollup {
             state
             contexts(first: 100) {
+              pageInfo {
+                hasNextPage
+              }
               nodes {
                 __typename
                 ... on CheckRun {
@@ -61,7 +64,10 @@ interface CommitChecksResponse {
       oid?: string;
       statusCheckRollup?: {
         state?: string | null;
-        contexts?: { nodes?: Array<GqlCheckContext | null> | null } | null;
+        contexts?: {
+          nodes?: Array<GqlCheckContext | null> | null;
+          pageInfo?: { hasNextPage?: boolean | null } | null;
+        } | null;
       } | null;
     } | null;
   } | null;
@@ -109,7 +115,11 @@ export async function fetchCommitChecks(
     // ⚠ LIMN'S OWN STATUS LINES ARE NOT CI (shared limn-status.ts): the CI review and every other
     // reader of this read see neither the lines nor their effect on the rollup.
     const checks = all.filter((c) => !c.limnOwned);
-    return { ok: true, rollupState: rollupStateWithoutLimn(rollup.state, all), checks };
+    return {
+      ok: true,
+      rollupState: rollupStateWithoutLimn(rollup.state, all, rollup.contexts?.pageInfo?.hasNextPage !== true),
+      checks,
+    };
   } catch (err) {
     const rl = isRateLimitError(err);
     if (rl.limited) {

@@ -57,6 +57,7 @@ import {
   repliesSummary,
   unjudgedReplyFindings,
   type CodeAround,
+  type JudgingRun,
 } from './replies-pass.js';
 import { buildRepliesPrompt, repliesSystemPrompt } from './replies-check-prompt.js';
 
@@ -232,6 +233,7 @@ export async function planRepliesCheck(
       commentsThroughMs: p.commentsThrough?.getTime() ?? null,
       items: p.followUp?.items ?? [],
     })),
+    full.pairId != null ? await pairBaseRuns(ctx, accountId, prId, priors) : undefined,
   );
   const findings = unjudgedReplyFindings(attached, judged);
   if (findings.length === 0) return { refused: 'nothing_to_check' };
@@ -241,6 +243,42 @@ export async function planRepliesCheck(
     if (t != null && (newest == null || t > newest)) newest = t;
   }
   return { full, findings, newestReplyMs: newest };
+}
+
+/**
+ * A PAIR's per-finding judged-through base: the run (half) whose follow-up chain listed the finding.
+ * The Codex half follows up only Codex's findings, so its later start must not stand for a reply on
+ * a Claude thread that arrived while the Claude half ran. A finding listed by both chains takes the
+ * EARLIER-reaching run (a reply is judged again rather than never).
+ */
+async function pairBaseRuns(
+  ctx: AgentContext,
+  accountId: number,
+  prId: number,
+  priors: ReadonlyArray<{ reviewId: number; findings: ReadonlyArray<{ id: number }> } | null>,
+): Promise<Map<number, JudgingRun>> {
+  const out = new Map<number, JudgingRun>();
+  const ids = [...new Set(priors.flatMap((p) => (p ? [p.reviewId] : [])))];
+  if (ids.length === 0) return out;
+  const cr = sch(ctx).claudeReviews;
+  const rows = (await ctx.db
+    .select({ id: cr.id, createdAt: cr.createdAt, commentsThrough: cr.commentsThrough })
+    .from(cr)
+    .where(and(inArray(cr.id, ids), eq(cr.prId, prId), eq(cr.accountId, accountId)))
+    .execute()) as Array<{ id: number; createdAt: Date; commentsThrough: Date | null }>;
+  const runOf = new Map<number, JudgingRun>(
+    rows.map((r) => [r.id, { createdAtMs: r.createdAt.getTime(), commentsThroughMs: r.commentsThrough?.getTime() ?? null }]),
+  );
+  const reach = (r: JudgingRun): number => Math.max(r.createdAtMs, r.commentsThroughMs ?? 0);
+  for (const p of priors) {
+    const run = p ? runOf.get(p.reviewId) : undefined;
+    if (!p || !run) continue;
+    for (const f of p.findings) {
+      const prev = out.get(f.id);
+      if (!prev || reach(run) < reach(prev)) out.set(f.id, run);
+    }
+  }
+  return out;
 }
 
 /** Each finding's thread OWNER's provider (the run that posted the comment), by finding id. */
@@ -530,6 +568,10 @@ async function runJob(job: Job, controller: AbortController): Promise<void> {
   let cleanupWorktree: (() => Promise<void>) | null = null;
   let scratch: string | null = null;
   const succeeded: Array<{ reviewId: number; items: ClaudeFollowUpItemRecord[] }> = [];
+  // Coverage stamps, written once every group ran (`passCoverageMs`): a thread left out over the cap
+  // in ANY group must not be covered by another group's row.
+  const stamps: Array<{ reviewId: number; newestSentMs: number }> = [];
+  const omittedReplyMs: number[] = [];
   try {
     let worktreePath: string | null = null;
     try {
@@ -601,10 +643,16 @@ async function runJob(job: Job, controller: AbortController): Promise<void> {
         continue;
       }
       const items = reconcileReplies(plan, res.replies ?? []);
-      // Coverage for the sweeper: the newest reply this run judged (and the burst it was started for).
-      const newestSent = Math.max(0, ...plan.sent.map((s) => newestJudgeableReplyMs(s.finding) ?? 0));
-      const through = Math.max(newestSent, job.commentsThroughMs ?? 0);
-      if (through > 0) await markReviewCommentsSeen(ctx, g.reviewId, new Date(through));
+      // Coverage for the sweeper: the newest reply this run judged (and the burst it was started for),
+      // held below any reply left out over the cap (stamped after the loop).
+      stamps.push({
+        reviewId: g.reviewId,
+        newestSentMs: Math.max(0, ...plan.sent.map((s) => newestJudgeableReplyMs(s.finding) ?? 0)),
+      });
+      for (const f of plan.omitted) {
+        const t = newestJudgeableReplyMs(f);
+        if (t != null) omittedReplyMs.push(t);
+      }
       await saveReviewSuccess(ctx, g.reviewId, {
         scope: worktreePath ? 'worktree' : 'diff_only',
         summary: repliesSummary(items),
@@ -624,6 +672,10 @@ async function runJob(job: Job, controller: AbortController): Promise<void> {
       });
       succeeded.push({ reviewId: g.reviewId, items });
     }
+    for (const st of stamps) {
+      const through = passCoverageMs(st.newestSentMs, job.commentsThroughMs, omittedReplyMs);
+      if (through > 0) await markReviewCommentsSeen(ctx, st.reviewId, new Date(through));
+    }
   } finally {
     await cleanupWorktree?.().catch(() => {});
     if (scratch) {
@@ -642,7 +694,24 @@ async function runJob(job: Job, controller: AbortController): Promise<void> {
     });
   }
   if (succeeded.length === 0) return;
-  await afterPass(ctx, job, succeeded);
+  await afterPass(ctx, job, succeeded, headSha);
+}
+
+/**
+ * How far a pass row says it covered (its `comments_through`, read by the sweeper): the newest reply
+ * it judged, or the burst it was started for (a reply it could not judge — a settled thread, Limn's
+ * own — must not re-route the burst on every tick). ⚠ A reply LEFT OUT over the thread / character
+ * cap was never judged: coverage stays just below the oldest such reply, so the next tick routes
+ * another pass for it (the per-PR daily cap still bounds them). Pure; exported for the tests.
+ */
+export function passCoverageMs(
+  newestSentMs: number,
+  burstMs: number | null | undefined,
+  omittedReplyMs: readonly number[],
+): number {
+  const through = Math.max(newestSentMs, burstMs ?? 0);
+  if (omittedReplyMs.length === 0) return through;
+  return Math.max(0, Math.min(through, Math.min(...omittedReplyMs) - 1));
 }
 
 /**
@@ -653,6 +722,7 @@ async function afterPass(
   ctx: AgentContext,
   job: Job,
   succeeded: Array<{ reviewId: number; items: ClaudeFollowUpItemRecord[] }>,
+  headSha: string,
 ): Promise<void> {
   const { accountId, prId } = job;
   const last = succeeded[succeeded.length - 1]!;
@@ -673,6 +743,7 @@ async function afterPass(
       accountId,
       prId,
       succeeded.flatMap((r) => r.items),
+      headSha,
     );
     if (outcome.wanted != null && outcome.wanted !== 'COMMENT') {
       const cr = sch(ctx).claudeReviews;

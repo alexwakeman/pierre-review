@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { ClaudeReviewResponse } from '@pierre-review/shared';
 import { aiProviderName } from '@pierre-review/shared';
 import { useClearTeamClaim } from '../hooks/useClaudeReview.js';
@@ -8,8 +9,12 @@ import { teamClaimRecordLine, teamClaimSkipLine } from '../lib/claudeAutoReview.
 // auto run's GitHub line did, and — when a pending Limn line sits on the PR's head — a Clear button
 // that replaces it with "Cleared by <you>" so any Limn can review the commit. Renders nothing when
 // none of it applies.
+// ⚠ A TEAMMATE'S LIVE CLAIM (`mine: false`: their Limn is reviewing this commit now) is cleared only
+// after a confirm that names them — clearing it frees the commit, so this Limn may review it a second
+// time while theirs still runs. This machine's own unfinished line clears in one press.
 export function TeamClaimLine({ prId, data }: { prId: number; data: ClaudeReviewResponse | undefined }): JSX.Element | null {
   const clear = useClearTeamClaim(prId);
+  const [confirming, setConfirming] = useState(false);
   const skipLine = teamClaimSkipLine(data?.teamClaimSkip);
   const recordLine = data?.review?.trigger === 'auto' ? teamClaimRecordLine(data.review.teamClaim) : null;
   const pending = data?.teamClaimPending ?? null;
@@ -24,15 +29,39 @@ export function TeamClaimLine({ prId, data }: { prId: number; data: ClaudeReview
       {pendingLine != null && <div>{pendingLine}</div>}
       {pending != null && (
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => clear.mutate(pending.provider)}
-            disabled={clear.isPending}
-            title={`Replace the pending ${aiProviderName(pending.provider)} line with “Cleared by you”, so any Limn can review this commit.`}
-            className="rounded border border-gray-300 px-2 py-0.5 text-xs hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
-          >
-            {clear.isPending ? 'Clearing…' : 'Clear'}
-          </button>
+          {confirming && !pending.mine ? (
+            <>
+              <span>@{pending.login} is reviewing this now. Clear anyway?</span>
+              <button
+                type="button"
+                onClick={() => {
+                  setConfirming(false);
+                  clear.mutate(pending.provider);
+                }}
+                disabled={clear.isPending}
+                className="rounded border border-gray-300 px-2 py-0.5 text-xs hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
+              >
+                Clear anyway
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirming(false)}
+                className="rounded border border-gray-300 px-2 py-0.5 text-xs hover:border-gray-400 dark:border-gray-700 dark:hover:border-gray-500"
+              >
+                Cancel
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={() => (pending.mine ? clear.mutate(pending.provider) : setConfirming(true))}
+              disabled={clear.isPending}
+              title={`Replace the pending ${aiProviderName(pending.provider)} line with “Cleared by you”, so any Limn can review this commit.`}
+              className="rounded border border-gray-300 px-2 py-0.5 text-xs hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
+            >
+              {clear.isPending ? 'Clearing…' : 'Clear'}
+            </button>
+          )}
           {(refused != null || clear.isError) && (
             <span className="text-red-600 dark:text-red-400">
               {refused ?? (clear.error as Error)?.message ?? 'Couldn’t clear it.'}

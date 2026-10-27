@@ -234,6 +234,9 @@ const PR_NODE_FIELDS = /* GraphQL */ `
         statusCheckRollup {
           state
           contexts(first: 100) {
+            pageInfo {
+              hasNextPage
+            }
             nodes {
               __typename
               ... on CheckRun {
@@ -462,6 +465,9 @@ export const PR_DETAIL_QUERY = /* GraphQL */ `
               statusCheckRollup {
                 state
                 contexts(first: 100) {
+                  pageInfo {
+                    hasNextPage
+                  }
                   nodes {
                     __typename
                     ... on CheckRun {
@@ -858,7 +864,9 @@ export interface GqlHeadCommit {
     oid: string;
     statusCheckRollup: {
       state: string;
-      contexts?: { nodes: GqlCheckContext[] };
+      // `pageInfo.hasNextPage`: more than the 100 contexts read — a recompute without Limn's lines
+      // keeps GitHub's state then (shared limn-status.ts). Absent on older fixtures ⇒ complete.
+      contexts?: { nodes: GqlCheckContext[]; pageInfo?: { hasNextPage?: boolean | null } | null };
     } | null;
   };
 }

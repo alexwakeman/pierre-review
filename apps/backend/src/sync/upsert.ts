@@ -26,7 +26,7 @@ import type {
   GqlPullRequest,
   GqlReviewRequestEvent,
 } from '../github/queries.js';
-import { isLimnStatusContext, rollupStateWithoutLimn, type CheckRun } from '@pierre-review/shared';
+import { isLimnStatusContext, mergeStateWithoutLimn, rollupStateWithoutLimn, type CheckRun } from '@pierre-review/shared';
 import { checkContextState } from '../github/check-context-state.js';
 
 const {
@@ -323,7 +323,25 @@ export function ciStatusFromHead(head: GqlHeadCommit['commit'] | null | undefine
         .filter((c): c is GqlCheckContext => c != null)
         .map((c) => ({ name: c.__typename === 'CheckRun' ? c.name : c.context, state: checkContextState(c) }))
     : null;
-  return ciStatusFrom(rollupStateWithoutLimn(rollup?.state, contexts));
+  return ciStatusFrom(rollupStateWithoutLimn(rollup?.state, contexts, rollup?.contexts?.pageInfo?.hasNextPage !== true));
+}
+
+/**
+ * The head's CI WITHOUT Limn's lines, as `mergeStateWithoutLimn` reads it: 'none' when the only
+ * contexts on a complete page are Limn's own (the commit has no other CI), else `ciStatusFromHead`.
+ */
+export function ciWithoutLimnForMergeState(head: GqlHeadCommit['commit'] | null | undefined): CiStatus | 'none' {
+  const rollup = head?.statusCheckRollup ?? null;
+  const nodes = (rollup?.contexts?.nodes ?? []).filter((c): c is GqlCheckContext => c != null);
+  const complete = rollup?.contexts?.pageInfo?.hasNextPage !== true;
+  if (
+    complete &&
+    nodes.length > 0 &&
+    nodes.every((c) => isLimnStatusContext(c.__typename === 'CheckRun' ? c.name : c.context))
+  ) {
+    return 'none';
+  }
+  return ciStatusFromHead(head);
 }
 
 function mergeableFrom(
@@ -751,7 +769,12 @@ export async function persistPr(
     // the contexts without them (shared limn-status.ts). Unchanged when no Limn line is there.
     const ciStatus = ciStatusFromHead(head);
     const mergeable = mergeableFrom(pr.mergeable);
-    const mergeStateStatus = mergeStateStatusFrom(pr.mergeStateStatus);
+    // ⚠ …and GitHub's UNSTABLE that only Limn's own lines caused reads CLEAN (shared limn-status.ts
+    // `mergeStateWithoutLimn`): a pending or unfinished review line is not "checks failing".
+    const mergeStateStatus = mergeStateWithoutLimn(
+      mergeStateStatusFrom(pr.mergeStateStatus),
+      ciWithoutLimnForMergeState(head),
+    );
     const reviewDecision = reviewDecisionFrom(pr.reviewDecision);
     // ---- merge queue: the THREE-STATE partial-response write --------------------------------
     //

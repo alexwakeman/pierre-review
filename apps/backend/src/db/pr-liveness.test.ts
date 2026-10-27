@@ -140,6 +140,10 @@ beforeAll(async () => {
   await insertPr('merged', repoId, { state: 'merged', mergeStateStatus: 'clean' });
   // Another workspace's repo — the scope predicate's target.
   await insertPr('outside', otherRepoId, { mergeStateStatus: 'clean' });
+  // Limn's own status lines: green CI (stored without them) beside an UNSTABLE GitHub reports.
+  await insertPr('limn-green', repoId, { mergeStateStatus: 'clean', mergeable: 'mergeable', ciStatus: 'success' });
+  await insertPr('red-optional', repoId, { mergeStateStatus: 'clean', mergeable: 'mergeable', ciStatus: 'failure' });
+  await insertPr('limn-no-ci', repoId, { mergeStateStatus: 'clean', mergeable: 'mergeable', ciStatus: 'unknown' });
 });
 
 afterAll(async () => {
@@ -340,6 +344,25 @@ describe('applyPrLiveness', () => {
       }),
     );
     expect(same).toBeNull();
+  });
+});
+
+describe('applyPrLiveness — Limn’s own status lines are not CI', () => {
+  it('an UNSTABLE over green stored CI is Limn’s line alone: written CLEAN (no flip, no refetch)', async () => {
+    const t = (await targetsFor(['limn-green']))[0]!;
+    expect(t.ciStatus).toBe('success');
+    expect(await mod.applyPrLiveness(1, t, obs({ nodeId: t.githubNodeId, mergeStateStatus: 'unstable' }))).toBeNull();
+    expect((await targetsFor(['limn-green']))[0]!.mergeStateStatus).toBe('clean');
+  });
+  it('sync’s "only Limn’s lines, no other CI" CLEAN is not flipped back by the probe', async () => {
+    const t = (await targetsFor(['limn-no-ci']))[0]!;
+    expect(await mod.applyPrLiveness(1, t, obs({ nodeId: t.githubNodeId, mergeStateStatus: 'unstable' }))).toBeNull();
+  });
+  it('an UNSTABLE over red CI is real: written as GitHub said it', async () => {
+    const t = (await targetsFor(['red-optional']))[0]!;
+    const diff = await mod.applyPrLiveness(1, t, obs({ nodeId: t.githubNodeId, mergeStateStatus: 'unstable' }));
+    expect(diff?.movedOnBoard).toBe(true);
+    expect((await targetsFor(['red-optional']))[0]!.mergeStateStatus).toBe('unstable');
   });
 });
 

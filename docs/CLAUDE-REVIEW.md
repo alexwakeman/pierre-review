@@ -1144,6 +1144,11 @@ JUST the replies, cheaply, at the current head. Pure half `claude-review/replies
   automation, not Limn-marked) is newer than the finding's latest judgement (`judgedThroughFor`: the
   full review's start or `comments_through`, else a later pass that gave it a REPLY status —
   `not_checked` is not a judgement). Nothing to judge ⇒ refused `nothing_to_check`, no row, no model.
+  ⚠ **A CLAUDE + CODEX PAIR judged each finding in ONE half**: a finding's base is the half whose
+  provider chain listed it (`pairBaseRuns`), never the later half's start — the Codex half follows up
+  only Codex's findings, so a reply on a Claude thread that landed while the Claude half ran is still
+  judged. The sweeper's candidate read applies the same rule to a pair's coverage of own-finding
+  replies (`pairOwnCoveredMs`: the pair's EARLIER-reaching half).
 - **Who starts it.** AUTO: the sweeper (auto.ts `commentBurstRoute` → `'replies'`) when a same-head
   reply on a Limn finding is newer than what the full reviews AND the replies passes at that head
   covered (the candidate read's `repliesCoveredMs`), on a workspace with auto review on, after the
@@ -1152,7 +1157,9 @@ JUST the replies, cheaply, at the current head. Pure half `claude-review/replies
   burst no longer starts a FULL review. At most `REPLIES_PASS_AUTO_DAILY_CAP` (5) AUTOMATIC passes
   per PR per rolling 24 h, counted in the DB (rows); the ONE automatic budget gate is asked first
   (skipped, never queued). A refusal or the cap settles that half IN MEMORY (`repliesSettled`) so it
-  is not asked every minute. MANUAL: "Check replies" on the AI Review tab (`RepliesCheckLine`, behind
+  is not asked every minute. ⚠ A pass's coverage (`comments_through`, `passCoverageMs`) stays just
+  below the oldest reply it LEFT OUT over the 20-thread / 48k cap, so the next tick routes another
+  pass for those (the per-PR cap still bounds them). MANUAL: "Check replies" on the AI Review tab (`RepliesCheckLine`, behind
   `AiRunGate kind="thread_check"`), `POST /api/prs/:id/claude-review/replies`. ⚠ Never while a FULL
   review of the PR is queued or running (`reviewHeldForPr` — it judges the replies itself; refused
   `review_in_progress`, re-checked at launch), never on a closed PR.
@@ -1187,7 +1194,11 @@ JUST the replies, cheaply, at the current head. Pure half `claude-review/replies
 - **Writes — AUTO only, the existing switches and records:** accepted + `autoResolve` ⇒ auto resolve;
   disputed + auto-posting ⇒ auto pushback (AT MOST ONE PER THREAD, EVER). A MANUAL pass writes
   nothing: drafts and "Post reply" as today.
-- **THE OUTCOME, BOTH WAYS** (`computeRepliesOutcome` + `repliesVerdict`, pure): open = the latest full
+- **THE OUTCOME, BOTH WAYS** (`computeRepliesOutcome` + `repliesVerdict`, pure): ⚠ anchored like the
+  pass — the latest SUCCEEDED non-skip full review (+ its pair partner), so a cancelled or failed run
+  after it never hides it — and only AT THE PASS'S HEAD (a review of older commits yields no outcome).
+  ⚠ An AUTOMATIC write rests only on AUTO runs (`restsOnAuto`): over a manual review, which auto-post
+  never acts on, nothing posts and no block is lifted. Open = the latest full
   review's counted findings minus the settled ones (own id or any ancestor), plus the earlier
   blockers it left unjudged. A blocker this pass DISPUTED ⇒ REQUEST_CHANGES; this pass ACCEPTED one
   and no blocker or warning is left ⇒ APPROVE; anything else ⇒ nothing (never a COMMENT review that
@@ -2099,7 +2110,8 @@ repeated on, and cleared on off, so nothing opened while it was off is picked up
   ("Up to N auto reviews a day", `workspaces.auto_review_daily_cap`, migration 0085):
   OVERRIDES ONLY — NULL is the default `AUTO_REVIEW_DAILY_CAP` = 20, folded by
   `resolveAutoReviewDailyCap` for both the wire and the sweeper's roster; the PUT bounds it 1..500.
-  First reviews and re-reviews share it (one busy PR's pushes can use most of it). Past it, PRs wait for the next day.
+  First reviews and re-reviews share it (one busy PR's pushes can use most of it). A Claude + Codex
+  PAIR counts ONCE (its second half's row, `pair_role = 'second'`, is not counted). Past it, PRs wait for the next day.
 - ⚠ **IT NEVER RUNS WHERE CLAUDE REVIEW IS OFF.** `autoReviewAvailable` = `config.aiEnabled`; under
   LIMN_AI_DISABLED neither the job nor the auto-review routes are registered.
 - **Who hears about it.** ⚠ **OWNERSHIP IS PRIMARY**: an auto run raises the My Turn "Claude
@@ -2152,14 +2164,18 @@ auto-review switch, with an ⓘ). Code: `review/claude-review/team-claim.ts` (th
   reader's press reads GitHub afresh. A restart forgets it and re-reads once.
 - ⚠ **NEVER BLOCKS A RUN ON GITHUB.** History unreadable ⇒ run without a line (logged). A write GitHub
   refuses (403/404, no write access) ⇒ run without a line (`teamClaim.state 'unmarked'`, reason
-  `no_access`); others' lines read in step 1 are still honoured. A status write is NEVER retried (a
+  `no_access`); ⚠ a RATE LIMIT (GitHub answers primary and secondary limits with 403 too) is asked
+  first (`claimErrorKind` → `isRateLimitError`): reason `error`, the account's rate budget told
+  (`noteLimited`), and Clear answers 429 "GitHub rate limit reached"; others' lines read in step 1 are still honoured. A status write is NEVER retried (a
   renew is a new line). The renew timer is cleared on every exit path (`launch`'s `finally`), and a
   claim posted before the row could be written is released ("free to claim").
 - **THE RECORD** on the run row (`claude_reviews.team_claim`): "Marked on GitHub" / "Not marked on
   GitHub: no write access" on the tab.
 - **CLEAR** (`POST /api/prs/:id/claude-review/team-claim/clear {provider}`, tier `github_write`): shown
   when a pending Limn line sits on the PR's head — a teammate's live claim, or this machine's unfinished
-  run. Posts "Cleared by <login>" at the current synced head. A new commit also frees the PR (claims are
+  run. Posts "Cleared by <login>" at the current synced head. ⚠ A teammate's LIVE claim clears only after
+  a confirm naming them ("@bob is reviewing this now. Clear anyway?") — clearing it frees the commit for
+  a second review while theirs runs; this machine's own unfinished line clears in one press. A new commit also frees the PR (claims are
   per commit).
 - ⚠ **LIMN'S LINES ARE NEVER CI** (always on, no setting): shared `isLimnStatusContext` (`limn/` prefix)
   and `rollupStateWithoutLimn`. The PR head's stored `ci_status` (`ciStatusFromHead` in sync/upsert.ts —
@@ -2167,9 +2183,22 @@ auto-review switch, with an ⓘ). Code: `review/claude-review/team-claim.ts` (th
   verdict), the `ci_status_events` failing set, the auto-merge runner's live rollup
   (`fetchPrHeadCheckRollup`, now selecting contexts), the CI review's checks (`fetchCommitChecks`) and
   trunk's failing set (`failingChecksFrom`) all leave them out. The PR details pane still LISTS them
-  (`CheckRun.limnOwned`, a small "Limn" label) and never counts them. ⚠ Known gap: trunk's commit-level
-  rollup state and the one-time CI-history backfill read GitHub's rollup WITHOUT contexts, so a Limn
-  line on a fast-forwarded trunk commit is still counted there.
+  (`CheckRun.limnOwned`, a small "Limn" label) and never counts them.
+  - ⚠ **NEVER GUESS GREEN**: every contexts read selects `pageInfo { hasNextPage }`; on an incomplete
+    page (> 100 checks) `rollupStateWithoutLimn` keeps GitHub's state.
+  - **MERGEABILITY**: GitHub reports `mergeStateStatus` UNSTABLE for ANY non-required non-passing
+    status, Limn's included. Shared `mergeStateWithoutLimn` takes an UNSTABLE back to CLEAN when the CI
+    without Limn's lines is green (or there is no other CI) — where the column is WRITTEN (`persistPr`,
+    `applyPrLiveness` from the stored `ci_status`; a stored CLEAN over 'unknown' CI is not flipped back)
+    and on the live merge options — so the merge verdict, the Pending headings and the merge caveat
+    never say "checks failing" for a Limn line.
+  - **COMMIT HISTORY** (`sync/limn-ci.ts`): the trunk snapshot, its history backfill and the one-time
+    PR CI-history backfill read a rollup STATE only, so each also selects the commit's legacy status
+    NAMES (`LIMN_MARK_FIELDS`, a plain list: zero cost). A commit carrying a Limn line in SUCCESS or
+    PENDING (Limn posts nothing else) has its state recomputed from its contexts
+    (`fetchRollupsWithoutLimn`, ≤ 10 commits a call); a commit with only Limn's lines has no CI. Trunk:
+    ≤ 10 such commits per page, else GitHub's state stands; the PR backfill: under `MAX_DETAIL_SHAS`,
+    else nothing is synthesized for the commit.
 - If a team marks `limn/review-*` as REQUIRED in branch protection, a lapsed or unfinished line blocks
   merges — don't.
 

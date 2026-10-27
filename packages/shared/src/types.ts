@@ -4312,6 +4312,9 @@ export interface AutoReviewSweepResponse {
   retried: number;
   // Check threads passes started instead of a review (a same-head comment burst).
   checksQueued: number;
+  // Replies passes started (a same-head reply on one of Limn's own posted findings). Absent on an
+  // older server ⇒ 0.
+  repliesQueued?: number;
   // A due PR was left for tomorrow by the daily cap.
   capped: boolean;
   // The auto lane was full: the rest wait for the next tick.
@@ -7373,8 +7376,9 @@ export interface ClearTeamClaimBody {
 }
 export interface ClearTeamClaimResponse {
   ok: boolean;
-  // 'no_access' — GitHub refused the write (no write access to the repo); 'error' — anything else.
-  error?: 'no_access' | 'no_head' | 'error';
+  // 'no_access' — GitHub refused the write (no write access to the repo); 'rate_limited' — GitHub's
+  // rate limit (HTTP 429); 'error' — anything else.
+  error?: 'no_access' | 'no_head' | 'rate_limited' | 'error';
   message?: string;
 }
 

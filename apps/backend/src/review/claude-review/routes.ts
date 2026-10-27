@@ -297,7 +297,7 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
         provider: body.provider,
       });
       if (!res.ok) {
-        reply.status(res.error === 'no_access' ? 403 : 502);
+        reply.status(res.error === 'no_access' ? 403 : res.error === 'rate_limited' ? 429 : 502);
         return { ok: false, error: res.error, message: res.message };
       }
       return { ok: true };

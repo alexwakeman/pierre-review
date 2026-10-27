@@ -246,8 +246,11 @@ describe('buildCommitStatesQuery (the cost shape)', () => {
     expect(q).toContain('$s1: GitObjectID!');
     expect(q).toContain('c0: object(oid: $s0)');
     expect(q).toContain('c1: object(oid: $s1)');
-    // State-only is the whole point: a contexts selection would multiply the node budget ~100×.
-    expect(q).not.toContain('contexts');
+    // State-only is the whole point: a contexts CONNECTION would multiply the node budget ~100×.
+    expect(q).not.toMatch(/contexts\s*\(/);
+    // The legacy status NAMES (a plain list, no connection, zero cost) say whether a Limn line is
+    // folded into the state (sync/limn-ci.ts).
+    expect(q).toMatch(/status\s*\{\s*contexts\s*\{\s*context\s*\}\s*\}/);
   });
 });
 

@@ -694,7 +694,10 @@ interface GqlPrCheckRollup {
           commit?: {
             statusCheckRollup?: {
               state?: string | null;
-              contexts?: { nodes?: Array<GqlCheckContext | null> | null } | null;
+              contexts?: {
+                nodes?: Array<GqlCheckContext | null> | null;
+                pageInfo?: { hasNextPage?: boolean | null } | null;
+              } | null;
             } | null;
           };
         }>;
@@ -713,6 +716,9 @@ const PR_CHECK_ROLLUP_QUERY = /* GraphQL */ `
               statusCheckRollup {
                 state
                 contexts(first: 100) {
+                  pageInfo {
+                    hasNextPage
+                  }
                   nodes {
                     __typename
                     ... on CheckRun {
@@ -771,7 +777,7 @@ export async function fetchPrHeadCheckRollup(
           .filter((c): c is GqlCheckContext => c != null)
           .map((c) => ({ name: c.__typename === 'CheckRun' ? c.name : c.context, state: checkContextState(c) }))
       : null;
-    return rollupStateWithoutLimn(rollup.state, contexts);
+    return rollupStateWithoutLimn(rollup.state, contexts, rollup.contexts?.pageInfo?.hasNextPage !== true);
   } catch {
     return null;
   }

@@ -90,8 +90,19 @@ const isJudgement = (s: string): boolean => s === 'reply_accepted' || s === 'rep
  * followed up (its start, or the newest comment it recorded); a later pass covers the findings it
  * JUDGED (a reply status — `not_checked` is not a judgement). Pure.
  */
-export function judgedThroughFor(full: JudgingRun, passes: readonly JudgingRun[]): (findingId: number) => number {
-  const base = seenThrough(full);
+export function judgedThroughFor(
+  full: JudgingRun,
+  passes: readonly JudgingRun[],
+  // A CLAUDE + CODEX PAIR: each half followed up ONLY its own provider's findings, so a finding's
+  // base is the half whose chain listed it (`baseRuns`, by finding id), never the later half's.
+  // A finding absent from the map takes `full`.
+  baseRuns?: ReadonlyMap<number, JudgingRun>,
+): (findingId: number) => number {
+  const fullBase = seenThrough(full);
+  const baseOf = (id: number): number => {
+    const r = baseRuns?.get(id);
+    return r ? seenThrough(r) : fullBase;
+  };
   const byId = new Map<number, number>();
   for (const p of passes) {
     const t = seenThrough(p);
@@ -100,7 +111,7 @@ export function judgedThroughFor(full: JudgingRun, passes: readonly JudgingRun[]
       byId.set(it.priorFindingId, Math.max(byId.get(it.priorFindingId) ?? 0, t));
     }
   }
-  return (id) => Math.max(base, byId.get(id) ?? 0);
+  return (id) => Math.max(baseOf(id), byId.get(id) ?? 0);
 }
 
 /** The newest judgeable reply's time on a finding's thread (ms), or null. */

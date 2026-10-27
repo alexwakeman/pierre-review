@@ -40,6 +40,22 @@
 
 import type { GqlCheckContext } from './queries.js';
 
+// LIMN'S OWN STATUS LINES ARE NOT CI (shared limn-status.ts). The commit's legacy STATUS names — a
+// plain list, NOT a connection, so it costs ZERO rate-limit points at any alias count — say whether
+// one of Limn's `limn/review-*` lines is folded into the rollup state beside it. Only then is the
+// state recomputed from the commit's contexts (sync/limn-ci.ts), so a commit without one costs
+// exactly what it did.
+export const LIMN_MARK_FIELDS = /* GraphQL */ `status {
+                  contexts {
+                    context
+                  }
+                }`;
+
+/** The `LIMN_MARK_FIELDS` selection's shape. Null / absent = not received (never "no line"). */
+export interface GqlLimnMark {
+  status?: { contexts?: Array<{ context?: string | null } | null> | null } | null;
+}
+
 // One trunk-commit node, shared VERBATIM between the live snapshot query and the history
 // backfill below — the two walks must store identical rows, so the selection is written once.
 //
@@ -57,6 +73,7 @@ const BRANCH_COMMIT_FIELDS = /* GraphQL */ `
                 statusCheckRollup {
                   state
                 }
+                ${LIMN_MARK_FIELDS}
                 author {
                   name
                   avatarUrl
@@ -153,7 +170,7 @@ export interface GqlAssociatedPr {
   repository?: { nameWithOwner?: string | null } | null;
 }
 
-export interface GqlBranchCommit {
+export interface GqlBranchCommit extends GqlLimnMark {
   oid: string;
   messageHeadline: string;
   committedDate: string;
@@ -239,6 +256,9 @@ const COMMIT_CHECKS_SELECTION = /* GraphQL */ `
   statusCheckRollup {
     state
     contexts(first: 100) {
+      pageInfo {
+        hasNextPage
+      }
       nodes {
         __typename
         ... on CheckRun {
@@ -304,7 +324,10 @@ export interface GqlCommitChecks {
     // Null here is the load-bearing distinction: it means the contexts selection was NOT
     // received (a token that can read the rollup state but not the individual checks), which is
     // NOT the same as a received-but-empty list. The persist layer must not treat the two alike.
-    contexts?: { nodes?: (GqlBranchCheckContext | null)[] | null } | null;
+    contexts?: {
+      nodes?: (GqlBranchCheckContext | null)[] | null;
+      pageInfo?: { hasNextPage?: boolean | null } | null;
+    } | null;
   } | null;
 }
 
@@ -331,7 +354,7 @@ export function buildCommitStatesQuery(count: number): string {
   const aliases = Array.from(
     { length: count },
     (_, i) =>
-      `      c${i}: object(oid: $s${i}) { ... on Commit { oid statusCheckRollup { state } } }`,
+      `      c${i}: object(oid: $s${i}) { ... on Commit { oid statusCheckRollup { state } ${LIMN_MARK_FIELDS} } }`,
   ).join('\n');
   return `query CommitStates($owner: String!, $name: String!, ${vars}) {
     rateLimit {
@@ -344,7 +367,7 @@ ${aliases}
   }`;
 }
 
-export interface GqlCommitState {
+export interface GqlCommitState extends GqlLimnMark {
   oid?: string;
   // Null rollup is "CI never ran on this commit" OR "the selection was not received" — the
   // backfill treats both as unknowable and synthesizes nothing for the sha.

@@ -14,7 +14,7 @@
 // in this batch: queries.ts is already 9k lines and carries literal NUL bytes that make `rg`/
 // `grep` under-report against it, so new folds go in a file a search can actually find.
 import { and, eq, inArray } from 'drizzle-orm';
-import type { MergeQueueEntryState, MergeStateStatus } from '@pierre-review/shared';
+import { mergeStateWithoutLimn, type MergeQueueEntryState, type MergeStateStatus } from '@pierre-review/shared';
 import { db, schema } from './client.js';
 import { READY_MERGE_STATES } from './triage.js';
 import type { PrLivenessObservation } from '../github/pr-liveness.js';
@@ -36,6 +36,9 @@ export interface PrLivenessTarget {
   inMergeQueue: boolean | null;
   mergeQueueEntryState: MergeQueueEntryState | null;
   updatedAt: Date;
+  // The STORED head CI (already without Limn's own lines — sync/upsert.ts). Read only to take an
+  // UNSTABLE that Limn's lines alone caused back to CLEAN (`mergeStateWithoutLimn`). Absent ⇒ unread.
+  ciStatus?: string | null;
 }
 
 /**
@@ -67,6 +70,7 @@ export async function getPrLivenessTargets(
       inMergeQueue: pullRequests.inMergeQueue,
       mergeQueueEntryState: pullRequests.mergeQueueEntryState,
       updatedAt: pullRequests.updatedAt,
+      ciStatus: pullRequests.ciStatus,
     })
     .from(pullRequests)
     .where(
@@ -89,6 +93,7 @@ export async function getPrLivenessTargets(
     inMergeQueue: r.inMergeQueue ?? null,
     mergeQueueEntryState: (r.mergeQueueEntryState as MergeQueueEntryState | null) ?? null,
     updatedAt: r.updatedAt,
+    ciStatus: r.ciStatus ?? null,
   }));
 }
 
@@ -286,8 +291,15 @@ export async function applyPrLiveness(
   // every card had before this route existed, on a narrow slice of PRs, for a couple of minutes.
   const authoritative = <T>(next: T | undefined, stored: T | null, unknown: T): boolean =>
     next !== undefined && next !== stored && !(next === unknown && stored != null);
-  if (authoritative(obs.mergeStateStatus, target.mergeStateStatus, 'unknown')) {
-    set.mergeStateStatus = obs.mergeStateStatus;
+  // ⚠ LIMN'S OWN LINES ARE NOT CI: an UNSTABLE that only they caused (the stored CI, which never
+  // counts them, is green) is written CLEAN — exactly as `persistPr` writes it. A stored CLEAN over
+  // a stored 'unknown' CI is `persistPr`'s "only Limn's lines, no other CI" answer (it read the
+  // contexts; this probe does not), so an UNSTABLE here does not flip it back.
+  const ciForMergeState =
+    target.ciStatus === 'unknown' && target.mergeStateStatus === 'clean' ? 'none' : target.ciStatus;
+  const observedMergeState = mergeStateWithoutLimn(obs.mergeStateStatus, ciForMergeState);
+  if (authoritative(observedMergeState, target.mergeStateStatus, 'unknown')) {
+    set.mergeStateStatus = observedMergeState;
     change(true);
   }
   if (authoritative(obs.mergeable, target.mergeable, 'unknown')) {

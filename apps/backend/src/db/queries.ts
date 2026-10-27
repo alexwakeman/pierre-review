@@ -9927,6 +9927,9 @@ export async function getAutoReviewCandidates(
         inArray(pullRequests.repoId, repoIds),
         // Replies passes have their own per-PR cap (review/claude-review/replies-check.ts).
         isNull(claudeReviews.kind),
+        // A CLAUDE + CODEX PAIR is ONE review of the PR: it counts once toward the daily cap (its
+        // first half's row), never twice.
+        or(isNull(claudeReviews.pairRole), ne(claudeReviews.pairRole, 'second')),
       ),
     )
     .execute();
@@ -9969,6 +9972,7 @@ export async function getAutoReviewCandidates(
         provider: claudeReviews.provider,
         model: claudeReviews.model,
         kind: claudeReviews.kind,
+        pairId: claudeReviews.pairId,
       })
       .from(claudeReviews)
       .where(
@@ -10015,7 +10019,13 @@ export async function getAutoReviewCandidates(
   const inFlightMoved: Array<{ prId: number; headSha: string }> = [];
   const retry: AutoRetryCandidate[] = [];
   // Same head, but maybe NEW REVIEW COMMENTS: the PR's runs at its head and how far they saw.
-  const sameHead: Array<{ prId: number; headSha: string; coveredMs: number; repliesCoveredMs: number | null }> = [];
+  const sameHead: Array<{
+    prId: number;
+    headSha: string;
+    coveredMs: number;
+    ownCoveredMs: number;
+    repliesCoveredMs: number | null;
+  }> = [];
   for (const pr of human) {
     const runs = runsByPr.get(pr.id);
     if (!runs || !pr.headSha) continue;
@@ -10107,7 +10117,12 @@ export async function getAutoReviewCandidates(
     const passes = repliesRows.filter((r) => r.prId === pr.id && r.headSha === pr.headSha);
     const repliesCoveredMs =
       passes.length > 0 ? Math.max(...passes.map((r) => (r.commentsThrough ?? r.createdAt).getTime())) : null;
-    sameHead.push({ prId: pr.id, headSha: pr.headSha, coveredMs, repliesCoveredMs });
+    // ⚠ OWN-FINDING REPLIES and a CLAUDE + CODEX PAIR: each half follows up ONLY its own provider's
+    // findings, so a reply on a Claude finding that landed while the Claude half ran is NOT judged by
+    // the Codex half, though that half's coverage reaches past it. A pair therefore covers own-thread
+    // replies only as far as its EARLIER-reaching half (`pairOwnCoveredMs`); an ordinary run as above.
+    const ownCoveredMs = pairOwnCoveredMs(atHead);
+    sameHead.push({ prId: pr.id, headSha: pr.headSha, coveredMs, ownCoveredMs, repliesCoveredMs });
   }
   // RE-REVIEW ON NEW COMMENTS: a qualifying review-thread comment (a person's or a bot's, in an
   // unresolved thread, never one Limn posted — db/review-threads-for-review.ts) newer than what
@@ -10163,7 +10178,7 @@ export async function getAutoReviewCandidates(
       const ownMs = t.newestOwn?.getTime() ?? null;
       // A reply on Limn's own finding goes to a REPLIES PASS (review/claude-review/auto.ts
       // `commentBurstRoute`), which covers it once a pass at this head reached it.
-      const ownNeedsPass = ownMs != null && ownMs > Math.max(p.coveredMs, p.repliesCoveredMs ?? 0);
+      const ownNeedsPass = ownMs != null && ownMs > Math.max(p.ownCoveredMs, p.repliesCoveredMs ?? 0);
       // Everything else goes to Check threads, as before.
       const otherMs = t.newestOther?.getTime() ?? null;
       const otherNeedsCheck = otherMs != null && otherMs > Math.max(p.coveredMs, checkCoveredMs ?? 0);
@@ -10175,6 +10190,7 @@ export async function getAutoReviewCandidates(
         reason: 'comments',
         lastRunAtMs: null,
         coveredMs: p.coveredMs,
+        ownCoveredMs: p.ownCoveredMs,
         checkCoveredMs,
         newestOwnThreadCommentAtMs: ownMs,
         repliesCoveredMs: p.repliesCoveredMs,
@@ -10184,6 +10200,29 @@ export async function getAutoReviewCandidates(
     }
   }
   return { prIds, autoToday, reReview, inFlightMoved, retry };
+}
+
+/**
+ * How far the full reviews at one head covered replies on Limn's OWN findings: the max over runs of
+ * (comments_through ?? created_at), except that the two halves of a Claude + Codex pair (same
+ * `pairId`) count as their EARLIER-reaching half — each half follows up only its own provider's
+ * findings, so the later half's coverage says nothing about the other half's threads. Pure.
+ */
+export function pairOwnCoveredMs(
+  runs: ReadonlyArray<{ createdAt: Date; commentsThrough: Date | null; pairId?: number | null }>,
+): number {
+  const byPair = new Map<number, number>();
+  let best = 0;
+  for (const r of runs) {
+    const t = (r.commentsThrough ?? r.createdAt).getTime();
+    if (r.pairId == null) {
+      best = Math.max(best, t);
+      continue;
+    }
+    byPair.set(r.pairId, Math.min(byPair.get(r.pairId) ?? Number.POSITIVE_INFINITY, t));
+  }
+  for (const t of byPair.values()) best = Math.max(best, t);
+  return best;
 }
 
 // WHO MAY RE-TRIGGER AN AUTO REVIEW BY COMMENTING (the comment half of the re-review key). A
@@ -10233,6 +10272,10 @@ export interface AutoReReviewCandidate {
   // sweeper compares a reply on one of Limn's own findings against it (such a reply needs a full
   // review; anything else a light Check threads pass). Absent for a moved head.
   coveredMs?: number;
+  // Comment re-reviews only: how far the reviews at this head covered replies on Limn's OWN findings
+  // — `coveredMs`, except that a Claude + Codex pair counts its earlier-reaching half (each half
+  // judges only its own provider's threads; `pairOwnCoveredMs`). Absent ⇒ `coveredMs`.
+  ownCoveredMs?: number;
   // Comment re-reviews only: how far the latest Check threads row AT THIS HEAD reached (null: none),
   // and the newest qualifying reply inside a thread rooted on Limn's own finding (null: none). With
   // both present the sweeper routes the burst without reading the PR's threads again.
@@ -10655,6 +10698,9 @@ export interface PrWriteContext {
   // withdraw-approval route to decide whether a settle ladder has anything to wait for.
   mergeStateStatus?: string | null;
   reviewDecision?: string | null;
+  // The stored head CI, WITHOUT Limn's own status lines (sync/upsert.ts). The live merge options
+  // read it to take an UNSTABLE only Limn's lines caused back to CLEAN (shared `mergeStateWithoutLimn`).
+  ciStatus?: string | null;
 }
 
 // Resolve a PR to the coordinates the write actions need: GitHub node id, repo
@@ -10678,6 +10724,7 @@ export async function getPrWriteContext(
       viewerPermission: repos.viewerPermission,
       mergeStateStatus: pullRequests.mergeStateStatus,
       reviewDecision: pullRequests.reviewDecision,
+      ciStatus: pullRequests.ciStatus,
     })
     .from(pullRequests)
     .innerJoin(repos, eq(repos.id, pullRequests.repoId))
@@ -10699,6 +10746,7 @@ export async function getPrWriteContext(
     prUrl: `https://github.com/${row.owner}/${row.name}/pull/${row.number}`,
     mergeStateStatus: row.mergeStateStatus ?? null,
     reviewDecision: row.reviewDecision ?? null,
+    ciStatus: row.ciStatus ?? null,
   };
 }
 

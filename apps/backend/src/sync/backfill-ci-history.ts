@@ -42,6 +42,7 @@ import {
   type CommitStatesResponse,
 } from '../github/branch-queries.js';
 import { ciStatusFrom } from './upsert.js';
+import { fetchRollupsWithoutLimn, needsLimnRecompute } from './limn-ci.js';
 import {
   backfillBranchHistory,
   fetchFailingChecks,
@@ -212,7 +213,7 @@ export async function fetchCommitStates(
   name: string,
   shas: string[],
   log?: BranchSyncLogger,
-): Promise<{ bySha: Map<string, CiStatus>; cost: number }> {
+): Promise<{ bySha: Map<string, CiStatus>; cost: number; limnShas: string[] }> {
   const variables: Record<string, unknown> = { owner, name };
   shas.forEach((sha, i) => {
     variables[`s${i}`] = sha;
@@ -231,12 +232,20 @@ export async function fetchCommitStates(
     ),
   );
   const bySha = new Map<string, CiStatus>();
+  // ⚠ LIMN'S OWN LINES ARE NOT CI (sync/limn-ci.ts): a state a Limn line could have shaped is held
+  // back here and recomputed from the commit's contexts by the caller — never synthesized raw.
+  const limnShas: string[] = [];
   shas.forEach((sha, i) => {
-    const state = resp.repository?.[`c${i}`]?.statusCheckRollup?.state;
+    const node = resp.repository?.[`c${i}`];
+    const state = node?.statusCheckRollup?.state;
     if (state == null) return;
+    if (needsLimnRecompute(state, node)) {
+      limnShas.push(sha);
+      return;
+    }
     bySha.set(sha, ciStatusFrom(state));
   });
-  return { bySha, cost: resp.rateLimit?.cost ?? 0 };
+  return { bySha, cost: resp.rateLimit?.cost ?? 0, limnShas };
 }
 
 /**
@@ -330,6 +339,7 @@ export async function backfillPrCiHistory(
 
   const client = getGraphqlClientFor(opts.token);
   const statusBySha = new Map<string, CiStatus>();
+  const limnShas: string[] = [];
   let cost = 0;
   for (let i = 0; i < uniqueShas.length; i += COMMIT_STATES_ALIAS_CAP) {
     if (opts.shouldCancel?.()) return { ...none, rateLimitCost: cost, cancelled: true };
@@ -341,6 +351,29 @@ export async function backfillPrCiHistory(
     const chunk = uniqueShas.slice(i, i + COMMIT_STATES_ALIAS_CAP);
     const r = await fetchCommitStates(client, owner, name, chunk, opts.log);
     for (const [sha, status] of r.bySha) statusBySha.set(sha, status);
+    limnShas.push(...r.limnShas);
+    cost += r.cost;
+  }
+
+  // Commits carrying a teammate's Limn line: their state recomputed without it, newest first under
+  // the detail cap. Past the cap, or a commit whose only checks are Limn's: nothing is synthesized
+  // (unknowable / no CI), never GitHub's Limn-shaped state.
+  const limnTargets = limnShas
+    .sort((a, b) => (newestAtBySha.get(b) ?? 0) - (newestAtBySha.get(a) ?? 0))
+    .slice(0, MAX_DETAIL_SHAS);
+  for (let i = 0; i < limnTargets.length; i += COMMIT_CHECKS_ALIAS_CAP) {
+    if (opts.shouldCancel?.()) return { ...none, rateLimitCost: cost, cancelled: true };
+    if ((await gateBudget(accountId, { shouldCancel: opts.shouldCancel })) === 'cancelled') {
+      return { ...none, rateLimitCost: cost, cancelled: true };
+    }
+    const chunk = limnTargets.slice(i, i + COMMIT_CHECKS_ALIAS_CAP);
+    const r = await fetchRollupsWithoutLimn(client, owner, name, chunk, (errors) =>
+      opts.log?.warn(
+        `ci-backfill ${owner}/${name}: partial GraphQL on Limn-marked commits — synthesizing nothing for them`,
+        errors,
+      ),
+    );
+    for (const [sha, state] of r.bySha) if (state != null) statusBySha.set(sha, ciStatusFrom(state));
     cost += r.cost;
   }
 

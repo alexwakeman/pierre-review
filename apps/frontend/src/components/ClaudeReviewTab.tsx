@@ -1839,13 +1839,14 @@ export function ClaudeReviewTab({
     });
   };
 
-  const runPreview = (): void => {
+  // `pair`: preview exactly what "Post both" sends (both halves, one combined body).
+  const runPreview = (pair = false): void => {
     if (review == null) return;
     setPostResult(null);
     setPreview(null);
     saveDraftThen(() =>
       postReview.mutate(
-        { reviewId: review.id, userVerdict, dryRun: true },
+        { reviewId: review.id, userVerdict, dryRun: true, ...(pair ? { pair: true } : {}) },
         { onSuccess: (res) => setPreview(res as PostReviewPreview) },
       ),
     );
@@ -2240,12 +2241,23 @@ export function ClaudeReviewTab({
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
-              onClick={runPreview}
+              onClick={() => runPreview()}
               disabled={postReview.isPending}
               className="rounded border border-gray-300 px-2 py-0.5 text-sm hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
             >
               Preview
             </button>
+            {offerPostBoth && (
+              <button
+                type="button"
+                onClick={() => runPreview(true)}
+                disabled={postReview.isPending}
+                title="What Post both sends"
+                className="rounded border border-gray-300 px-2 py-0.5 text-sm hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
+              >
+                Preview both
+              </button>
+            )}
             {!confirmPost ? (
               <>
                 <button

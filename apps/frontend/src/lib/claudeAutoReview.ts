@@ -62,17 +62,19 @@ export function autoSweepResultLine(res: AutoReviewSweepResponse, single = false
   if (res.busy) return 'Auto reviews are already being checked. Try again in a moment.';
   if (res.off) return 'Auto review is off for this workspace.';
   if (res.aiNotReady) return 'AI is not set up here, so nothing was queued.';
-  const total = res.queued + res.checksQueued;
+  const replies = res.repliesQueued ?? 0;
+  const total = res.queued + res.checksQueued + replies;
   if (total === 0) {
     if (res.capped) return 'Daily limit reached — 0 queued.';
     if (res.laneFull) return 'The auto review queue is full — 0 queued.';
     return single ? 'Nothing to retry: the PR is already being reviewed, or is no longer open.' : 'Nothing to review.';
   }
-  if (single && res.queued === 1 && res.checksQueued === 0) return 'Retry queued.';
+  if (single && res.queued === 1 && res.checksQueued === 0 && replies === 0) return 'Retry queued.';
   const parts: string[] = [];
   if (res.queued > 0) parts.push(plural(res.queued, 'review', 'reviews'));
   if (res.checksQueued > 0) parts.push(plural(res.checksQueued, 'thread check', 'thread checks'));
-  let line = `Queued ${parts.join(' and ')}.`;
+  if (replies > 0) parts.push(plural(replies, 'reply check', 'reply checks'));
+  let line = `Queued ${parts.length > 2 ? `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}` : parts.join(' and ')}.`;
   if (res.capped) line += ' Daily limit reached for the rest.';
   else if (res.laneFull) line += ' The queue is full; the rest follow on their own.';
   return line;

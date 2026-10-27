@@ -118,6 +118,7 @@ function toTarget(r: {
   inMergeQueue: boolean | null;
   mergeQueueEntryState: string | null;
   updatedAt: Date;
+  ciStatus?: string | null;
 }): PrLivenessTarget {
   return {
     prId: r.prId,
@@ -131,6 +132,7 @@ function toTarget(r: {
     inMergeQueue: r.inMergeQueue ?? null,
     mergeQueueEntryState: (r.mergeQueueEntryState as MergeQueueEntryState | null) ?? null,
     updatedAt: r.updatedAt,
+    ciStatus: r.ciStatus ?? null,
   };
 }
 
@@ -188,6 +190,7 @@ export async function getRepoMergeStateTargets(
       inMergeQueue: pullRequests.inMergeQueue,
       mergeQueueEntryState: pullRequests.mergeQueueEntryState,
       updatedAt: pullRequests.updatedAt,
+      ciStatus: pullRequests.ciStatus,
     })
     .from(pullRequests)
     .where(where)

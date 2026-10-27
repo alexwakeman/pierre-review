@@ -37,6 +37,8 @@ import type {
   ClaudeTeamClaimSkip,
 } from '@pierre-review/shared';
 import { aiProviderName } from '@pierre-review/shared';
+import { isRateLimitError } from '../../github/client.js';
+import { noteLimited } from '../../github/rate-budget.js';
 import { and, desc, eq, isNotNull, isNull } from 'drizzle-orm';
 import type { AgentContext } from '../agent-context.js';
 
@@ -209,11 +211,34 @@ export const defaultTeamClaimGithub: TeamClaimGithub = {
 
 const enc = (s: string): string => encodeURIComponent(s);
 
-/** A write GitHub refused for lack of access (403 / 404): run without a line, never retry. */
+/**
+ * A write GitHub refused for lack of access (403 / 404): run without a line, never retry.
+ * ⚠ A RATE LIMIT is NOT lack of access, though GitHub answers both primary and secondary limits
+ * with a 403: `isRateLimitError` is asked first, so a limited call never reads "no write access".
+ */
 export function isNoAccessError(err: unknown): boolean {
+  if (isRateLimitError(err).limited) return false;
   const status = (err as { status?: unknown } | null)?.status;
   return status === 403 || status === 404;
 }
+
+/**
+ * Why a status call failed, as the run record and the Clear route word it. A rate limit is ALSO
+ * told to the account's rate budget (`noteLimited`), so later GitHub calls wait instead of hitting
+ * it again.
+ */
+export function claimErrorKind(err: unknown, accountId: number): 'rate_limited' | 'no_access' | 'error' {
+  const rl = isRateLimitError(err);
+  if (rl.limited) {
+    noteLimited(accountId, rl.resumeAt);
+    return 'rate_limited';
+  }
+  return isNoAccessError(err) ? 'no_access' : 'error';
+}
+
+/** The run record's reason for a failed status call (a rate limit is an 'error', not 'no_access'). */
+const unmarkedReason = (err: unknown, accountId: number): 'no_access' | 'error' =>
+  claimErrorKind(err, accountId) === 'no_access' ? 'no_access' : 'error';
 
 const errText = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
@@ -379,7 +404,7 @@ export async function claimBeforeAutoRun(
     lines = await gh.listLines(accountId, owner, name, headSha, context);
   } catch (err) {
     ctx.log.warn(`team claim pr ${prId}: statuses unreadable (${errText(err)}); reviewing without a line`);
-    return unmarked(login, isNoAccessError(err) ? 'no_access' : 'error');
+    return unmarked(login, unmarkedReason(err, accountId));
   }
   const first = decideTeamClaim(lines, login, now());
   const skipOf = (d: Extract<TeamClaimDecision, { kind: 'reviewed' | 'reviewing' }>): TeamClaimStart => {
@@ -407,7 +432,7 @@ export async function claimBeforeAutoRun(
     await gh.postLine(accountId, owner, name, headSha, context, { state: 'pending', description });
   } catch (err) {
     ctx.log.warn(`team claim pr ${prId}: status not written (${errText(err)}); reviewing without a line`);
-    return unmarked(login, isNoAccessError(err) ? 'no_access' : 'error');
+    return unmarked(login, unmarkedReason(err, accountId));
   }
   const marked = (): TeamClaimStart => ({
     kind: 'run',
@@ -541,7 +566,7 @@ export async function clearTeamClaim(
   ctx: AgentContext,
   target: TeamClaimTarget,
   gh: TeamClaimGithub = defaultTeamClaimGithub,
-): Promise<{ ok: true } | { ok: false; error: 'no_access' | 'error'; message: string }> {
+): Promise<{ ok: true } | { ok: false; error: 'no_access' | 'rate_limited' | 'error'; message: string }> {
   const { accountId, prId, owner, name, headSha, provider } = target;
   const login = (await gh.login(accountId).catch(() => null)) ?? null;
   if (!login) return { ok: false, error: 'error', message: 'Your GitHub login is not known yet.' };
@@ -551,7 +576,11 @@ export async function clearTeamClaim(
       description: clearedLine(login),
     });
   } catch (err) {
-    return isNoAccessError(err)
+    const kind = claimErrorKind(err, accountId);
+    if (kind === 'rate_limited') {
+      return { ok: false, error: 'rate_limited', message: 'GitHub rate limit reached. Try again in a few minutes.' };
+    }
+    return kind === 'no_access'
       ? { ok: false, error: 'no_access', message: 'GitHub refused: you need write access to this repo.' }
       : { ok: false, error: 'error', message: errText(err).slice(0, 200) };
   }

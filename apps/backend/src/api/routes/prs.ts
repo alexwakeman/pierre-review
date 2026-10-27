@@ -37,7 +37,7 @@ import type {
   UpdateBranchResult,
   WithdrawApprovalResult,
 } from '@pierre-review/shared';
-import { REQUEST_CHANGES_DEFAULT_BODY, WITHDRAW_APPROVAL_MESSAGE } from '@pierre-review/shared';
+import { REQUEST_CHANGES_DEFAULT_BODY, WITHDRAW_APPROVAL_MESSAGE, mergeStateWithoutLimn } from '@pierre-review/shared';
 import { accountGithubLogin } from '../../db/review-threads-for-review.js';
 import { config } from '../../config.js';
 import { stampPrMergeQueueStateNonFatal } from '../../db/pr-merge-queue-stamp.js';
@@ -920,7 +920,8 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
         allowedMethods: [...allowedMethods],
         defaultMethod: allowedMethods[0] ?? 'merge',
         mergeable: m.mergeable,
-        mergeStateStatus: m.mergeableState,
+        // ⚠ An UNSTABLE only Limn's own status lines caused reads CLEAN (shared limn-status.ts).
+        mergeStateStatus: mergeStateWithoutLimn(m.mergeableState, ctx.ciStatus),
         conflicts,
         behind,
         blocked: m.mergeableState === 'blocked',

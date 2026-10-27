@@ -27,6 +27,14 @@ describe('"Run auto reviews now" / Retry — the one result line', () => {
     expect(autoSweepResultLine({ ...base, queued: 3, retried: 1 })).toBe('Queued 3 reviews.');
     expect(autoSweepResultLine({ ...base, queued: 1 })).toBe('Queued 1 review.');
     expect(autoSweepResultLine({ ...base, queued: 2, checksQueued: 1 })).toBe('Queued 2 reviews and 1 thread check.');
+    // A press that queued only a replies pass is not "Nothing to review".
+    expect(autoSweepResultLine({ ...base, repliesQueued: 1 })).toBe('Queued 1 reply check.');
+    expect(autoSweepResultLine({ ...base, queued: 1, checksQueued: 2, repliesQueued: 2 })).toBe(
+      'Queued 1 review, 2 thread checks and 2 reply checks.',
+    );
+    expect(autoSweepResultLine({ ...base, queued: 1, retried: 1, repliesQueued: 1 }, true)).toBe(
+      'Queued 1 review and 1 reply check.',
+    );
     expect(autoSweepResultLine({ ...base, queued: 2, capped: true })).toBe(
       'Queued 2 reviews. Daily limit reached for the rest.',
     );

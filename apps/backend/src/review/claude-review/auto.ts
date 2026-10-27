@@ -252,10 +252,14 @@ export function commentBurstRoute(input: {
   checkCoveredMs: number | null;
   repliesCoveredMs?: number | null;
   newestOtherCommentAtMs?: number | null;
+  // How far the reviews covered replies on Limn's OWN findings (a Claude + Codex pair counts its
+  // earlier-reaching half: db/queries.ts `pairOwnCoveredMs`). Absent ⇒ `reviewCoveredMs`.
+  ownReviewCoveredMs?: number | null;
 }): 'replies' | 'check' | 'covered' {
   const reviewCovered = input.reviewCoveredMs ?? 0;
+  const ownCovered = input.ownReviewCoveredMs !== undefined ? (input.ownReviewCoveredMs ?? 0) : reviewCovered;
   const own = input.newestOwnThreadCommentAtMs;
-  if (own != null && own > Math.max(reviewCovered, input.repliesCoveredMs ?? 0)) return 'replies';
+  if (own != null && own > Math.max(ownCovered, input.repliesCoveredMs ?? 0)) return 'replies';
   const other = input.newestOtherCommentAtMs !== undefined ? input.newestOtherCommentAtMs : input.commentsAtMs;
   if (other == null || other <= reviewCovered) return 'covered';
   if (input.checkCoveredMs != null && input.checkCoveredMs >= other) return 'covered';
@@ -583,6 +587,7 @@ export async function runAutoReviewSweep(
                   newestOwnThreadCommentAtMs: cand.newestOwnThreadCommentAtMs,
                   checkCoveredMs: cand.checkCoveredMs,
                   repliesCoveredMs,
+                  ...(cand.ownCoveredMs !== undefined ? { ownReviewCoveredMs: cand.ownCoveredMs } : {}),
                   ...(cand.newestOtherCommentAtMs !== undefined ? { newestOtherCommentAtMs: cand.newestOtherCommentAtMs } : {}),
                 })
               : await routeCommentBurst(ctx, ws.accountId, prId, headSha, commentsAtMs, coveredMs ?? null, repliesCoveredMs);
