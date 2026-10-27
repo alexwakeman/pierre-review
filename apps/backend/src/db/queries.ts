@@ -267,6 +267,7 @@ import { hubReadingFor, loadRepoCoupling, type RepoCoupling } from './file-coupl
 import { DAYS_PER_MONTH, botWindowMs } from './bot-window.js';
 import { dormantBotUserIds } from './bot-dormancy.js';
 import { newestReviewCommentTimes, type CountsAuthor } from './review-threads-for-review.js';
+import { loadLimnSeverityTargets } from './limn-finding-severity.js';
 import {
   automationVendorUserIds,
   exactAutomationVendorUsers,
@@ -9007,6 +9008,13 @@ export async function getPrDetail(
     commentsByThread.set(c.threadId, arr);
   }
 
+  // Limn's own posted findings: the severity chip on their threads and PR-level comments.
+  const limnSeverity = await loadLimnSeverityTargets(accountId, id, {
+    threads: threadRows,
+    threadComments: commentRows,
+    prComments: prCommentRows,
+  });
+
   const threads: ThreadDetail[] = threadRows.map((t) => {
     const tComments = commentsByThread.get(t.id) ?? [];
     return {
@@ -9035,6 +9043,7 @@ export async function getPrDetail(
       url: tComments[0]?.databaseId
         ? `${prUrl}#discussion_r${tComments[0].databaseId}`
         : null,
+      limnSeverity: limnSeverity.byThreadId.get(t.id) ?? null,
     };
   });
 
@@ -9080,6 +9089,7 @@ export async function getPrDetail(
     body: c.body ?? '',
     createdAt: c.createdAt.toISOString(),
     url: c.databaseId ? `${prUrl}#issuecomment-${c.databaseId}` : null,
+    limnSeverity: limnSeverity.byPrCommentId.get(c.id) ?? null,
   }));
 
   const commitsOut: CommitDetail[] = commitRows.map((c) => ({

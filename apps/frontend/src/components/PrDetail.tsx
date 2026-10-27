@@ -61,8 +61,9 @@ import { LargePrFlag } from './Activity/LargePrFlag.js';
 import { BlastRadiusChip } from './Activity/BlastRadiusChip.js';
 import { BlastImpactNote } from './Activity/BlastImpactNote.js';
 import { ChecksTab } from './ChecksTab.js';
-import type { MlSeverity } from '@pierre-review/shared';
+import type { LimnSeverity, MlSeverity } from '@pierre-review/shared';
 import { MlSeverityBadge } from './MlSeverityBadge.js';
+import { LimnSeverityChip } from './LimnSeverityChip.js';
 import { ReactionBar } from './ReactionBar.js';
 import { mlLabelKey, useMlLabelIndex, useMlSeverityEnabled } from '../hooks/useMlLabels.js';
 import { ChangesTab } from './ChangesTab.js';
@@ -470,6 +471,8 @@ type ConversationItem = {
   at: string;
   url: string | null;
   state?: ReviewState;
+  // A PR-level comment Limn posted as a finding: its severity (PrCommentDetail.limnSeverity).
+  limnSeverity?: LimnSeverity | null;
 };
 
 // The PR conversation: issue-level comments PLUS reviews that carry a body (a review
@@ -540,6 +543,7 @@ function PrCommentsList({
         body: c.body,
         at: c.createdAt,
         url: c.url,
+        limnSeverity: c.limnSeverity ?? null,
       }),
     ),
     ...pr.reviews
@@ -617,6 +621,8 @@ function PrCommentsList({
                 {relativeTime(it.at)}
               </span>
               {isNew && <NewTag />}
+              {/* A PR-level comment Limn posted as a finding: its severity. */}
+              <LimnSeverityChip severity={it.limnSeverity} />
               <MlSeverityBadge
                 label={mlIndex?.get(
                   mlLabelKey(isComment ? 'pr_comment' : 'review', it.id),

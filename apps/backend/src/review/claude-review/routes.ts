@@ -25,6 +25,7 @@ import {
   CLAUDE_REVIEW_STATES_MAX_IDS,
   DEFAULT_CLAUDE_REVIEW_MODEL,
   storyCommentLead,
+  limnSeverityLabel,
   stripStoredStoryLead,
   threadAssessmentCounts,
 } from '@pierre-review/shared';
@@ -658,6 +659,7 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
           fileInDiff: f.fileInDiff,
           body: resolvedBody(f, story),
           suggestion: f.suggestion,
+          severity: f.severity,
           storyLead:
             [lead, story ? storyCommentLead({ title: f.title, story }, storyReview?.tickets ?? []) : null]
               .filter((p): p is string => p != null)
@@ -776,6 +778,7 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
             fileInDiff: f.fileInDiff,
             body: resolvedBody(f, f.story),
             suggestion: f.suggestion,
+            severity: f.severity,
             storyLead: f.story ? storyCommentLead({ title: f.title, story: f.story }, review.tickets ?? []) : null,
           })),
         dryRun,
@@ -853,7 +856,15 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
             fileInDiff: f.fileInDiff,
             body: resolvedBody(f, f.story),
             suggestion: f.suggestion,
-            storyLead: pairRaisedByLead(aiRunProviderName(r)),
+            // Who raised it rides the ONE severity lead ("**Warning** · Codex"); the story line stays
+            // as on the single Post. A finding with no label word keeps a "Raised by" line instead.
+            severity: f.severity,
+            severityTag: aiRunProviderName(r),
+            storyLead: f.story
+              ? storyCommentLead({ title: f.title, story: f.story }, r.tickets ?? [])
+              : limnSeverityLabel(f.severity) == null
+                ? pairRaisedByLead(aiRunProviderName(r))
+                : null,
           })),
       );
       const outcome = await ctx.review.postReview({

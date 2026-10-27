@@ -516,6 +516,42 @@ describe('the pure rules', () => {
     expect(ps.earlierPostsFor(input, 10).size).toBe(0);
   });
 
+  it('severity labels: a comment posted with the lead and one posted before it both match', async () => {
+    const ps = await import('./posted-state.js');
+    const { findingCommentBody, prLevelFindingBody } = await import('../post-review.js');
+    const shape = { body: 'Fix the race.', editedBody: null, suggestion: null };
+    const labelled = findingCommentBody({ ...shape, severity: 'warning' });
+    expect(labelled.startsWith('**Warning**\n\nFix the race.')).toBe(true);
+    for (const body of [labelled, `Fix the race.\n\n${MARKER}`]) {
+      const input = {
+        findings: [base({ id: 1, reviewId: 10, line: 3 })],
+        runStartedAt: new Map([[10, 0]]),
+        threads: [{ id: 70, path: 'a.ts', line: 3 }],
+        threadComments: [comment('70', body, 100)],
+        prComments: [],
+        accountLogin: 'me',
+      };
+      expect(ps.stampsFor(input, 10)).toEqual([
+        { findingId: 1, githubCommentId: '70', postedCommentKind: 'inline', postedAt: new Date(100), postedAuto: false },
+      ]);
+    }
+    const prBody = prLevelFindingBody({ ...shape, path: 'docs/x.md', line: 12, severity: 'nit' });
+    expect(prBody.startsWith('**Nit** · `docs/x.md:12`')).toBe(true);
+    for (const body of [prBody, `**\`docs/x.md:12\`**\n\nFix the race.\n\n${MARKER}`]) {
+      const input = {
+        findings: [base({ id: 1, reviewId: 10, path: 'docs/x.md', line: 12 })],
+        runStartedAt: new Map([[10, 0]]),
+        threads: [],
+        threadComments: [],
+        prComments: [{ databaseId: '93', body, authorLogin: 'me', createdAt: 100 }],
+        accountLogin: 'me',
+      };
+      expect(ps.stampsFor(input, 10)).toEqual([
+        { findingId: 1, githubCommentId: '93', postedCommentKind: 'pr_comment', postedAt: new Date(100), postedAuto: false },
+      ]);
+    }
+  });
+
   it('isVerdictRefusal: a 422 "internal error" is ambiguous, never a refusal', async () => {
     expect(ap.isVerdictRefusal(Object.assign(new Error('-> 422: An internal error occurred, please try again.'), { status: 422 }))).toBe(false);
     expect(ap.isVerdictRefusal(Object.assign(new Error('-> 422: Can not approve your own pull request'), { status: 422 }))).toBe(true);

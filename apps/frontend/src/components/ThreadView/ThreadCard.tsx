@@ -1,5 +1,6 @@
 import type { ThreadDetail, User } from '@pierre-review/shared';
 import { MlSeverityBadge, worstSeverity } from '../MlSeverityBadge.js';
+import { LimnSeverityChip } from '../LimnSeverityChip.js';
 import { mlLabelKey, useMlLabelIndex, useMlSeverityEnabled } from '../../hooks/useMlLabels.js';
 import { ShowOnTimeline } from '../ShowOnTimeline.js';
 import { CommentBlock } from './CommentBlock.js';
@@ -128,6 +129,8 @@ export function ThreadCard({
             read uniformly. The freshest Claude judgement REPLACES the state pill and the confidence
             marker with TWO pills when there is one (lib/claudeThreadMarker.ts). */}
         <ThreadStatePill thread={thread} withConfidence />
+        {/* A thread Limn posted as a finding: the severity it was posted with (PR detail only). */}
+        <LimnSeverityChip severity={thread.limnSeverity} />
         {/* The worst ML severity anywhere in this conversation (summaries excluded). Renders
             nothing when no comment in the thread is labelled — which is also the state of every
             thread on a deployment with no model. */}

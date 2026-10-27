@@ -14,6 +14,7 @@ import type { SonarIssue } from './sonar.js';
 import type { AiPickerModel, AiProviderSetting } from './ai-run-label.js';
 import type { AiEffortSettingStatus } from './ai-effort.js';
 import type { ReferenceDocCitation, ReviewDocReference } from './reference-docs.js';
+import type { LimnSeverity } from './limn-severity.js';
 
 export type DerivedState =
   | 'resolved'
@@ -5400,6 +5401,10 @@ export interface ThreadDetail {
   // Deep link to the thread on GitHub (its first comment's #discussion_r anchor);
   // null until synced.
   url: string | null;
+  // Set only when this thread is a finding LIMN POSTED (its root comment is the finding's): the
+  // severity it was posted with (shared `severityForPostedFinding`). Absent/null on every other
+  // thread, and on every surface but GET /api/prs/:id. OPTIONAL, so no apiVersion bump.
+  limnSeverity?: LimnSeverity | null;
 }
 
 export interface ReviewDetail {
@@ -5425,6 +5430,8 @@ export interface PrCommentDetail {
   createdAt: string;
   // Deep link to the comment on GitHub (#issuecomment-<id>); null until synced.
   url: string | null;
+  // Set only when this PR-level comment is a finding LIMN POSTED: its severity (as on ThreadDetail).
+  limnSeverity?: LimnSeverity | null;
 }
 
 export interface CommitDetail {

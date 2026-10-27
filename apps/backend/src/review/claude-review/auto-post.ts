@@ -84,7 +84,7 @@ import {
   markReviewPosted,
 } from './persist.js';
 import { resolveFindingBody } from './follow-up.js';
-import { aiRunProviderName, autoPostFooter, PAIR_AUTO_POST_FOOTER, type AiProviderName } from '@pierre-review/shared';
+import { aiRunProviderName, autoPostFooter, limnSeverityLabel, PAIR_AUTO_POST_FOOTER, type AiProviderName } from '@pierre-review/shared';
 import { pairRaisedByLead, pairReviewBody, pairVerdict } from './pair.js';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -656,7 +656,11 @@ const toPostFinding = (f: ClaudeFinding, by: AiProviderName, inPair = false): Po
   fileInDiff: f.fileInDiff,
   body: resolveFindingBody(f),
   suggestion: f.suggestion,
-  storyLead: inPair ? pairRaisedByLead(by) : null,
+  severity: f.severity,
+  // A pair's comment names who raised it ON the ONE severity lead ("**Warning** · Codex"); a finding
+  // with no label word (none posted today) falls back to its own "Raised by" line.
+  severityTag: inPair ? by : null,
+  storyLead: inPair && limnSeverityLabel(f.severity) == null ? pairRaisedByLead(by) : null,
   // The footer names the provider that ran the review (Claude's text unchanged).
   footer: autoPostFooter(by),
 });

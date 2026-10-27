@@ -51,11 +51,12 @@ export async function postReview(args: PostReviewArgs): Promise<PostReviewOutcom
   const prComments: PostReviewPrComment[] = [];
   const inlineFindingIds: number[] = [];
   for (const f of args.includedFindings) {
-    const shape = { body: f.body, editedBody: null, suggestion: f.suggestion, storyLead: f.storyLead };
+    const shape = { body: f.body, editedBody: null, suggestion: f.suggestion, storyLead: f.storyLead, severity: f.severity };
     const footer = f.footer ?? null;
+    const tag = f.severityTag ?? null;
     // Anchorable on its own line → inline comment there.
     if (f.line != null && isFindingAnchored(index, f.path, f.line, f.side)) {
-      comments.push({ path: f.path, line: f.line, side: f.side, body: findingCommentBody(shape, { footer }) });
+      comments.push({ path: f.path, line: f.line, side: f.side, body: findingCommentBody(shape, { footer, tag }) });
       inlineFindingIds.push(f.id);
       continue;
     }
@@ -67,7 +68,7 @@ export async function postReview(args: PostReviewArgs): Promise<PostReviewOutcom
         path: f.path,
         line: fb.line,
         side: fb.side,
-        body: findingCommentBody(shape, { fallbackNote: true, footer }),
+        body: findingCommentBody(shape, { fallbackNote: true, footer, tag }),
       });
       inlineFindingIds.push(f.id);
     } else {
@@ -82,8 +83,9 @@ export async function postReview(args: PostReviewArgs): Promise<PostReviewOutcom
             editedBody: null,
             suggestion: f.suggestion,
             storyLead: f.storyLead,
+            severity: f.severity,
           },
-          { footer },
+          { footer, tag },
         ),
       });
     }
@@ -215,8 +217,9 @@ export async function postFinding(args: PostFindingArgs): Promise<PostFindingOut
   const { owner, name, prNumber, reviewHeadSha, finding: f } = args;
   const currentHead = await fetchCurrentHeadSha(owner, name, prNumber);
   if (currentHead !== reviewHeadSha) return { headMoved: true };
-  const shape = { body: f.body, editedBody: null, suggestion: f.suggestion, storyLead: f.storyLead };
+  const shape = { body: f.body, editedBody: null, suggestion: f.suggestion, storyLead: f.storyLead, severity: f.severity };
   const footer = f.footer ?? null;
+  const tag = f.severityTag ?? null;
   const prLevelBody = (outsideDiffNote: boolean): string =>
     prLevelFindingBody(
       {
@@ -226,8 +229,9 @@ export async function postFinding(args: PostFindingArgs): Promise<PostFindingOut
         editedBody: null,
         suggestion: f.suggestion,
         storyLead: f.storyLead,
+        severity: f.severity,
       },
-      { outsideDiffNote, footer },
+      { outsideDiffNote, footer, tag },
     );
 
   // A forced PR-level comment (auto-posting's questions): never inline, and the file it names IS
@@ -246,7 +250,7 @@ export async function postFinding(args: PostFindingArgs): Promise<PostFindingOut
       path: f.path,
       line: f.line,
       side: f.side,
-      body: findingCommentBody(shape, { footer }),
+      body: findingCommentBody(shape, { footer, tag }),
     });
     return { commentId, postedCommentKind: 'inline' };
   }
@@ -262,7 +266,7 @@ export async function postFinding(args: PostFindingArgs): Promise<PostFindingOut
       path: f.path,
       line: fb.line,
       side: fb.side,
-      body: findingCommentBody(shape, { fallbackNote: true, footer }),
+      body: findingCommentBody(shape, { fallbackNote: true, footer, tag }),
     });
     return { commentId, postedCommentKind: 'inline' };
   }
