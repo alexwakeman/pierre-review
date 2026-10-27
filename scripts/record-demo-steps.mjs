@@ -267,7 +267,7 @@ export const STEPS = [
     },
   },
 
-  // ── Settings (both halves; Settings → AI's provider choice and the Codex sign-in are simulated in
+  // ── Settings (every tab, scrollModal clicks each; Settings → AI's provider choice and the Codex sign-in are simulated in
   //    the demo, apps/frontend/src/demo/provider.ts, so nothing there is recorded) ──
   {
     name: 'settings',

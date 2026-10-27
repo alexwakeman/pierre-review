@@ -453,13 +453,19 @@ function stepHelpers(page) {
       if (ok) await h.click(page.getByRole('menuitem', { name: 'Settings' }));
     },
     async scrollModal() {
-      for (let i = 0; i < 8; i++) {
-        await page.evaluate(() => {
-          const d = document.querySelector('[aria-label="Settings"]');
-          const scroller = d ? [d, ...d.querySelectorAll('*')].find((el) => el.scrollHeight > el.clientHeight + 20) : null;
-          if (scroller) scroller.scrollTop += 700;
-        });
-        await settle(page, { quietMs: 400 });
+      // Settings is a tab list (one area shown at a time): visit every tab, scrolling each to its end.
+      const tabs = page.locator('[aria-label="Settings"] [role="tab"]');
+      const n = await tabs.count();
+      for (let t = 0; t < Math.max(n, 1); t++) {
+        if (n > 0) await h.click(tabs.nth(t));
+        for (let i = 0; i < 4; i++) {
+          await page.evaluate(() => {
+            const d = document.querySelector('[aria-label="Settings"]');
+            const scroller = d ? [d, ...d.querySelectorAll('*')].find((el) => el.scrollHeight > el.clientHeight + 20) : null;
+            if (scroller) scroller.scrollTop += 700;
+          });
+          await settle(page, { quietMs: 400 });
+        }
       }
     },
     /** A GET the SPA would make from a surface the recorder cannot reach by clicking. */

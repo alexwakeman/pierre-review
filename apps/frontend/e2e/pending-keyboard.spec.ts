@@ -38,6 +38,21 @@ test.describe('Pending → Settings from the keyboard', () => {
     await expect(customise).toBeFocused();
   });
 
+  test('Customise opens Settings on the Pending tab; arrow keys move between tabs', async ({ page }) => {
+    await gotoPending(page);
+    await page.getByRole('button', { name: 'Customise' }).click();
+    const pendingTab = settings(page).getByRole('tab', { name: 'Pending', exact: true });
+    await expect(pendingTab).toHaveAttribute('aria-selected', 'true');
+    await expect(settings(page).getByRole('radiogroup', { name: 'Ranking preset' })).toBeVisible();
+
+    await pendingTab.focus();
+    await page.keyboard.press('ArrowUp');
+    const prTab = settings(page).getByRole('tab', { name: 'Pull requests', exact: true });
+    await expect(prTab).toHaveAttribute('aria-selected', 'true');
+    await expect(prTab).toBeFocused();
+    await expect(settings(page).getByRole('radiogroup', { name: 'Ranking preset' })).toBeHidden();
+  });
+
   test('the ranking preset is one Tab stop, and an arrow key applies the next preset', async ({
     page,
   }) => {
