@@ -1906,19 +1906,29 @@ repeated on, and cleared on off, so nothing opened while it was off is picked up
      backoff: 1 h after the first failure, 4 h after later ones.
   A retry is an ordinary auto run (same lane, daily cap, spend-budget gate, default provider,
   auto-post / auto fix rules); the lane re-checks `isAutoRetryStillDue` (the failed run is still the
-  LATEST row at the head) before writing its row. A retry hold is not a settle wait: the header
+  LATEST row at the head; for a press, the latest AUTO row with no AUTO success there — below) before
+  writing its row. ⚠ **TWO RULES FOR "THIS HEAD IS DONE", ONE FOLD** (`db/auto-retry-at-head.ts`,
+  2026-10-27): the sweeper's own tick (`automaticRetryTarget`) treats ANY success at the head as
+  final, so background quota never re-reviews a head the reader already reviewed by hand; a READER'S
+  PRESS (`pressRetryTarget`) treats the head as done only when an AUTO run succeeded there and
+  IGNORES manual rows — a failed auto run is re-run even when manual runs (succeeded or failed) came
+  after it. Real: PR 183039 at `2411e5a7` had 583 auto failed → 588 manual succeeded → 593 manual
+  failed, and "Run auto reviews now" queued nothing. A row in flight at the head blocks both. A retry hold is not a settle wait: the header
   shows no "waiting" line for it. `AutoSweepResult.retried` counts them.
 - **RUN AUTO REVIEWS NOW / RETRY (a reader's press).** Activity → Open PRs' header carries "Run auto
   reviews now" beside the day's counter (`RunAutoReviewsButton`, `OpenPrsCards.tsx`; shown only while
   auto review is on for the workspace and `me.ai.enabled`, behind `AiRunGate kind="review"`), and the
-  AI Review tab shows a PR whose LATEST run is a FAILED AUTO run as ONE plain line ("Auto review
-  failed: …") with **Retry** (`FailedAutoReviewLine`, `ClaudeReviewTab.tsx`): at the same head it
-  retries the run, after new commits it reviews the new head (the sweeper also does that by itself
-  after the settle wait). ⚠ WHAT THE BUTTON SHOWS ON, THE BACKEND LISTS: Retry sends `prId`, the
-  sweeper passes it to the candidate read as `pressPrId`, and for that PR — while its latest run is
-  a failed auto run — the read waives the population floor (which moves when auto review is
-  switched off and on) and the "nothing at this head succeeded" gate (a success at the head, then a
-  failed comment-triggered auto re-review). Nothing else is waived, and only for that PR. Both call `POST /api/workspaces/:id/auto-review/sweep {prId?}`,
+  AI Review tab shows a failed auto run as ONE plain line ("Auto review failed: …") with **Retry**
+  (`FailedAutoReviewLine`, `ClaudeReviewTab.tsx`; which line and whether Retry is
+  `lib/claudeAutoReview.ts` `failedAutoReviewLine`): when the LATEST run is a failed auto run at an
+  older head, Retry reviews the new head (the sweeper also does that by itself after the settle
+  wait); when the latest AUTO run at the CURRENT head failed and no AUTO run there succeeded —
+  `ClaudeReviewResponse.failedAutoAtHead`, even with later manual rows — Retry re-runs it. A failed
+  auto run at a head an AUTO run already reviewed shows its error without Retry. ⚠ WHAT THE BUTTON
+  SHOWS ON, THE BACKEND LISTS: every press passes `pressed` to the candidate read (the press rule:
+  manual rows at the head ignored); Retry also sends `prId`, passed as `pressPrId`, which waives the
+  population floor (it moves when auto review is switched off and on) for that PR only. Nothing else
+  is waived. Both call `POST /api/workspaces/:id/auto-review/sweep {prId?}`,
   which runs `runAutoReviewSweep(ctx, now, press)` for ONE workspace (and one PR): `autoReviewDue`
   with `pressed` waives the settle waits, the retry backoff, the attempt cap and the transient test;
   a run in flight still waits; the DAILY CAP and lane cap are never waived; the spend budget is not

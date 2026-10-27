@@ -211,6 +211,7 @@ import { runTransaction } from './client.js';
 import { enrichMyTurn } from '../feed/my-turn.js';
 import { resolvePrTickets } from '../pr/detail-enricher.js';
 import { config } from '../config.js';
+import { automaticRetryTarget, pressRetryTarget } from './auto-retry-at-head.js';
 import { createHash } from 'node:crypto';
 import {
   approvalInfoFromStandings,
@@ -9865,8 +9866,10 @@ export async function getUnactionedClaudeReviews(
 //   - with NO `claude_reviews` row at all, whatever its head, status or trigger: ONE review per PR,
 //     ever, from auto. A manual run (or a failed auto one) settles it too - a failed AUTO run
 //     comes back as a `retry` (same head) or, after new commits, as a moved-head `reReview`.
-// `opts.pressPrId` (a reader's "Retry" on that PR): while its latest run is a failed AUTO run, the
-// population gates are waived for THAT PR only, so the button never answers "nothing to retry".
+// `opts.pressed` (a READER'S PRESS: "Run auto reviews now", or "Retry" on one PR) switches the retry
+// rule to the press's (db/auto-retry-at-head.ts): the head is done only when an AUTO run succeeded at
+// it, and manual rows there are ignored. `opts.pressPrId` (that "Retry"; a press on that PR only)
+// also waives the population floor for THAT PR, so the button never answers "nothing to retry".
 // Each re-review carries `lastRunAtMs` (the latest start or finish of any run of the PR) for the
 // sweeper's "start a new head on receipt unless a run was within 5 minutes" test, and
 // `inFlightMoved` lists PRs whose run is queued or running while their head moved past it (never
@@ -9880,7 +9883,7 @@ export async function getUnactionedClaudeReviews(
 export async function getAutoReviewCandidates(
   accountId: number,
   workspaceId: number,
-  opts: { openedSinceMs: number; dayStartMs: number; limit: number; pressPrId?: number },
+  opts: { openedSinceMs: number; dayStartMs: number; limit: number; pressPrId?: number; pressed?: boolean },
 ): Promise<{
   prIds: number[];
   autoToday: number;
@@ -10008,27 +10011,27 @@ export async function getAutoReviewCandidates(
       (r) => r.status === 'succeeded' && r.createdAt.getTime() >= opts.openedSinceMs,
     );
     // ⚠ A READER'S RETRY on THIS PR ("Retry" on the AI Review tab, `pressPrId`) whose latest run
-    // is a FAILED AUTO run: the reader asked for exactly this PR, so the population gate (the floor,
-    // which moves when auto review is switched off and on) and the "something at this head
-    // succeeded" gate are waived for it - the button is shown for every failed auto run, and a press
-    // must never answer "nothing to retry" for one. Nothing else is waived.
+    // is a FAILED AUTO run (at an older head: the moved-head branches below): the reader asked for
+    // exactly this PR, so the population gate (the floor, which moves when auto review is switched
+    // off and on) is waived for it.
     const pressedRetry =
       opts.pressPrId === pr.id && newest.trigger === 'auto' && newest.status === 'failed';
-    // RETRY: the latest run at the current head is a FAILED AUTO run and nothing at this head
-    // succeeded (a succeeded run is final). Same population as everything else here: after the
-    // floor, or followed since the floor. WHETHER it is due — transient error, backoff, usage reset,
+    // A READER'S PRESS covering this PR (the sweep button covers every PR; "Retry" only its own).
+    const pressedHere = opts.pressPrId != null ? opts.pressPrId === pr.id : opts.pressed === true;
+    // RETRY of a FAILED AUTO run at the current head (db/auto-retry-at-head.ts, the ONE fold):
+    //   • the sweeper's own tick: the latest row at the head is that failure and nothing at the head
+    //     succeeded — a manual success makes the head final, so background quota never re-reviews it;
+    //   • a READER'S PRESS: the head is done only when an AUTO run succeeded there; manual rows at the
+    //     head (succeeded or failed, before or after the failure) are ignored. Live: 583 auto failed,
+    //     588 manual succeeded, 593 manual failed — a press retries 583, a tick does not.
+    // Same population as everything else here: after the floor, or followed since the floor ("Retry"
+    // on one PR waives the floor for it). WHETHER it is due — transient error, backoff, usage reset,
     // provider change, attempt cap — is the sweeper's ONE start rule (`autoReviewDue`), not this read.
     // It falls through: a comment burst on the same head is still offered below as before.
     if (newest.status !== 'queued' && newest.status !== 'running' && retry.length < opts.limit) {
       const here = runs.filter((r) => r.headSha === pr.headSha);
-      const last = here.length > 0 ? here.reduce((a, b) => (b.id > a.id ? b : a)) : null;
-      if (
-        last &&
-        last.trigger === 'auto' &&
-        last.status === 'failed' &&
-        (pressedRetry ||
-          (!here.some((r) => r.status === 'succeeded') && (afterFloor(pr) || succeededSinceFloor)))
-      ) {
+      const last = pressedHere ? pressRetryTarget(here) : automaticRetryTarget(here);
+      if (last && (opts.pressPrId === pr.id || afterFloor(pr) || succeededSinceFloor)) {
         retry.push({
           prId: pr.id,
           headSha: pr.headSha,

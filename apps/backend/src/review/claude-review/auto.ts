@@ -74,7 +74,10 @@
 //                        one workspace (or one PR) through THIS rule with `pressed` — the settle waits,
 //                        the retry backoff, the attempt cap and the transient test are waived; the
 //                        daily cap and a run in flight are not; the spend budget is not asked (the
-//                        SPA's over-budget confirm is the reader's choice).
+//                        SPA's over-budget confirm is the reader's choice). For a press the head is
+//                        done only when an AUTO run succeeded at it: a failed auto run there is re-run
+//                        even when manual runs came after it (db/auto-retry-at-head.ts); the tick keeps
+//                        "a manual success at the head is final".
 //
 // ⚠ IT DOES NOT WAIT FOR CI. The old hold (CI running on a head younger than 30 min) is gone: a
 // failing check is diagnosed by its own process, not by holding the code review back.
@@ -384,6 +387,10 @@ export async function runAutoReviewSweep(
         dayStartMs,
         // Enough to see every waiting item of ours plus a full day's worth of new ones.
         limit: ws.dailyCap + waiting.size,
+        // A PRESS reads the press's retry rule (db/auto-retry-at-head.ts): a head is done only when
+        // an AUTO run succeeded there; manual rows are ignored. The sweeper's own tick keeps the
+        // automatic rule (a manual success makes the head final).
+        ...(pressed ? { pressed: true } : {}),
         // "Retry" on one PR: the read lists that PR's failed auto run whatever the population.
         ...(press?.prId != null ? { pressPrId: press.prId } : {}),
       });

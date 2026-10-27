@@ -49,6 +49,7 @@ import {
   getReviewPostContext,
   listAllClaudeReviews,
   listClaudeReviewHistory,
+  getFailedAutoAtHead,
   markFindingPosted,
   markFindingReminder,
   markReviewPosted,
@@ -224,6 +225,8 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
       // A hold in the lane outranks the sweeper's wait (it is already past it).
       autoReviewWaiting: autoReview ? null : autoReviewWaiting(id, accountId),
       autoFix: review ? autoFixOutcomeFor(review.id, accountId) : null,
+      // The failed auto run at the current head a reader's Retry would re-run (manual rows ignored).
+      failedAutoAtHead: await getFailedAutoAtHead(ctx, id, accountId),
       currentThreadAssessments: current,
       currentThreadAssessmentCounts: current ? threadAssessmentCounts(current) : null,
       // The stored row only (live progress is the thread-check GET's — this route stays DB-only).

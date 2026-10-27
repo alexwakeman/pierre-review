@@ -39,6 +39,7 @@ import { referenceDocCitationsFromStored, reviewDocReferencesFromStored } from '
 import type { ReferenceDocCitation, ReviewDocReference } from '@pierre-review/shared';
 import type { ClaudeFollowUpLeftOutRecord, ClaudeSettledFinding, FindingAutoResolveRecord, FindingPushbackRecord } from '@pierre-review/shared';
 import type { ReviewFinding } from '../../platform/contract.js';
+import { automaticRetryTarget, pressRetryTarget } from '../../db/auto-retry-at-head.js';
 import { ticketEntriesOf } from './ticket.js';
 import { findFindingThread, type ThreadComment } from './finding-thread.js';
 import { earlierPostsFor, landedAutoPosts, stampsFor, type PostedStateInput } from './posted-state.js';
@@ -2248,9 +2249,14 @@ export async function isAutoReReviewSettled(
 }
 
 /**
- * Is an auto RETRY of the failed run `failedReviewId` still wanted? Only while that run is still the
- * LATEST row of this PR at `headSha` (a person, or another retry, may have run it while the item
- * waited — any newer row at the head settles it) and it is still a failure.
+ * Is an auto RETRY of the failed run `failedReviewId` still wanted? The same fold as the candidate
+ * read (db/auto-retry-at-head.ts):
+ *   • AUTOMATIC: only while that run is still the LATEST row of this PR at `headSha` and nothing there
+ *     succeeded (a person, or another retry, may have run it while the item waited — any newer row
+ *     at the head settles it);
+ *   • `pressed` (the reader's press queued it): while it is still the latest AUTO row at the head, no
+ *     AUTO run there succeeded and nothing there is in flight — manual rows, before or after, are
+ *     ignored.
  */
 export async function isAutoRetryStillDue(
   ctx: AgentContext,
@@ -2258,16 +2264,44 @@ export async function isAutoRetryStillDue(
   accountId: number,
   headSha: string,
   failedReviewId: number,
+  pressed = false,
 ): Promise<boolean> {
   const { cr } = tables(ctx);
   const rows = (await ctx.db
-    .select({ id: cr.id, status: cr.status })
+    .select({ id: cr.id, status: cr.status, trigger: cr.trigger })
     .from(cr)
     .where(and(eq(cr.prId, prId), eq(cr.accountId, accountId), eq(cr.headSha, headSha)))
-    .execute()) as Array<{ id: number; status: string }>;
-  if (rows.length === 0) return false;
-  const latest = rows.reduce((a, b) => (b.id > a.id ? b : a));
-  return latest.id === failedReviewId && latest.status === 'failed';
+    .execute()) as Array<{ id: number; status: string; trigger: string | null }>;
+  const target = pressed ? pressRetryTarget(rows) : automaticRetryTarget(rows);
+  return target?.id === failedReviewId;
+}
+
+/**
+ * The AI Review tab's Retry line: the failed AUTO run at the PR's CURRENT synced head that a reader's
+ * press would retry (the press rule, db/auto-retry-at-head.ts — manual rows at the head ignored), or
+ * null. DB-only.
+ */
+export async function getFailedAutoAtHead(
+  ctx: AgentContext,
+  prId: number,
+  accountId: number,
+): Promise<{ reviewId: number; error: string | null } | null> {
+  const { cr, prs } = tables(ctx);
+  const pr = (await ctx.db
+    .select({ headSha: prs.headSha })
+    .from(prs)
+    .where(and(eq(prs.id, prId), eq(prs.accountId, accountId)))
+    .limit(1)
+    .execute()) as Array<{ headSha: string | null }>;
+  const headSha = pr[0]?.headSha;
+  if (!headSha) return null;
+  const rows = (await ctx.db
+    .select({ id: cr.id, status: cr.status, trigger: cr.trigger, error: cr.error })
+    .from(cr)
+    .where(and(eq(cr.prId, prId), eq(cr.accountId, accountId), eq(cr.headSha, headSha)))
+    .execute()) as Array<{ id: number; status: string; trigger: string | null; error: string | null }>;
+  const target = pressRetryTarget(rows);
+  return target ? { reviewId: target.id, error: target.error ?? null } : null;
 }
 
 /** Record the newest qualifying review comment the run saw (the comment half of the re-review key). */

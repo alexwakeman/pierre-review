@@ -7,6 +7,7 @@ import {
   anyFixRunning,
   autoFixOutcomeLine,
   autoSweepResultLine,
+  failedAutoReviewLine,
   fixPillLabel,
 } from '../src/lib/claudeAutoReview.js';
 
@@ -88,5 +89,62 @@ describe('the AI Fix pill', () => {
     expect(anyFixRunning([s('ready'), s()])).toBe(false);
     expect(anyFixRunning([s('ready'), s('running')])).toBe(true);
     expect(anyFixRunning(undefined)).toBe(false);
+  });
+});
+
+describe('the AI Review tab’s failed-auto line (`failedAutoReviewLine`)', () => {
+  const USAGE = 'Codex could not finish: You’ve hit your usage limit.';
+  /* eslint-disable @typescript-eslint/no-explicit-any */
+  const run = (o: { status: string; trigger: 'auto' | 'manual'; error?: string | null; outdated?: boolean | null }) =>
+    ({
+      status: o.status,
+      trigger: o.trigger,
+      error: o.error ?? null,
+      head: o.outdated == null ? null : { currentHeadSha: 'h', outdated: o.outdated, commitsSince: 0 },
+    }) as any;
+
+  it('the live PRs (auto failed → manual succeeded → manual failed): the auto failure, with Retry', () => {
+    // Latest run 593 is a MANUAL failure; the server names 583 as the failed auto run at the head.
+    expect(
+      failedAutoReviewLine({
+        review: run({ status: 'failed', trigger: 'manual', error: USAGE, outdated: false }),
+        failedAutoAtHead: { reviewId: 583, error: USAGE },
+      }),
+    ).toEqual({ error: USAGE, retry: true });
+    // Same while the latest manual run SUCCEEDED (588, before 593 existed).
+    expect(
+      failedAutoReviewLine({
+        review: run({ status: 'succeeded', trigger: 'manual', outdated: false }),
+        failedAutoAtHead: { reviewId: 583, error: USAGE },
+      }),
+    ).toEqual({ error: USAGE, retry: true });
+  });
+
+  it('a failed auto run at an older head: Retry (it reviews the new head)', () => {
+    expect(
+      failedAutoReviewLine({ review: run({ status: 'failed', trigger: 'auto', error: 'x', outdated: true }), failedAutoAtHead: null }),
+    ).toEqual({ error: 'x', retry: true });
+  });
+
+  it('a failed auto run at a head an AUTO run already reviewed: the error, no Retry', () => {
+    expect(
+      failedAutoReviewLine({ review: run({ status: 'failed', trigger: 'auto', error: 'x', outdated: false }), failedAutoAtHead: null }),
+    ).toEqual({ error: 'x', retry: false });
+  });
+
+  it('an older server (no `failedAutoAtHead`) keeps the old rule: the latest run is a failed auto run', () => {
+    expect(failedAutoReviewLine({ review: run({ status: 'failed', trigger: 'auto', error: 'x', outdated: false }) })).toEqual({
+      error: 'x',
+      retry: true,
+    });
+    expect(failedAutoReviewLine({ review: run({ status: 'failed', trigger: 'manual', error: 'x', outdated: false }) })).toBeNull();
+  });
+
+  it('nothing failed automatically: no line', () => {
+    expect(
+      failedAutoReviewLine({ review: run({ status: 'succeeded', trigger: 'auto', outdated: false }), failedAutoAtHead: null }),
+    ).toBeNull();
+    expect(failedAutoReviewLine({ review: null, failedAutoAtHead: null })).toBeNull();
+    expect(failedAutoReviewLine(undefined)).toBeNull();
   });
 });

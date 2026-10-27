@@ -5,6 +5,7 @@ import {
   type ClaudeAutoReviewWaiting,
   type AutoReviewSweepResponse,
   type ClaudeReviewPrState,
+  type ClaudeReviewResponse,
 } from '@pierre-review/shared';
 
 // The words for auto review's quiet states: why the next auto review is waiting (the Claude Review
@@ -73,4 +74,31 @@ export function autoSweepResultLine(res: AutoReviewSweepResponse, single = false
   if (res.capped) line += ' Daily limit reached for the rest.';
   else if (res.laneFull) line += ' The queue is full; the rest follow on their own.';
   return line;
+}
+
+/**
+ * The AI Review tab's failed-auto line: which error to show and whether "Retry" goes with it, or null.
+ * Retry shows where the backend's press acts (docs/CLAUDE-REVIEW.md § Retries):
+ *   • the latest run is a FAILED AUTO run at an OLDER head (or the head is unknown): Retry reviews
+ *     the new head;
+ *   • `failedAutoAtHead`: the latest AUTO run at the CURRENT head failed and no AUTO run there
+ *     succeeded, even when manual runs came after it (a press ignores them);
+ *   • an older server that sends no `failedAutoAtHead` (undefined): the latest run being a failed
+ *     auto run is enough, as before.
+ * A failed auto run at the current head where an AUTO run also succeeded still shows its error, with
+ * no Retry (that head is done).
+ */
+export function failedAutoReviewLine(
+  data: Pick<ClaudeReviewResponse, 'review' | 'failedAutoAtHead'> | null | undefined,
+): { error: string | null; retry: boolean } | null {
+  const review = data?.review ?? null;
+  const latestFailedAuto = review != null && review.status === 'failed' && review.trigger === 'auto';
+  if (review != null && latestFailedAuto && (review.head == null || review.head.outdated)) {
+    return { error: review.error ?? null, retry: true };
+  }
+  if (data?.failedAutoAtHead) return { error: data.failedAutoAtHead.error, retry: true };
+  if (review != null && latestFailedAuto) {
+    return { error: review.error ?? null, retry: data?.failedAutoAtHead === undefined };
+  }
+  return null;
 }

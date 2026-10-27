@@ -128,7 +128,8 @@ interface AutoItem {
   // a moved head.
   commentsAtMs?: number | null;
   // A RETRY of this failed AUTO run at the PR's current head (auto.ts, the start rule's retry
-  // branch). The lane re-checks it is still the latest row at the head (`isAutoRetryStillDue`).
+  // branch). The lane re-checks it is still the latest row at the head (`isAutoRetryStillDue`) — for
+  // a `pressed` item, the latest AUTO row there, with no AUTO success (manual rows ignored).
   retryOfReviewId?: number | null;
   // Queued by the READER's press ("Run auto reviews now" / "Retry"): the spend budget is not asked
   // again at start — the press was the reader's choice (the SPA's over-budget confirm already ran).
@@ -405,7 +406,7 @@ async function startAutoItem(a: AutoItem): Promise<void> {
     // re-review, seen those comments) while the item waited. A RETRY goes ahead only while the
     // failed run it retries is still the latest row at this head.
     if (a.retryOfReviewId != null) {
-      if (!(await isAutoRetryStillDue(ctx, prId, accountId, prCtx.headSha, a.retryOfReviewId))) return;
+      if (!(await isAutoRetryStillDue(ctx, prId, accountId, prCtx.headSha, a.retryOfReviewId, a.pressed === true))) return;
     } else if (await isAutoReReviewSettled(ctx, prId, accountId, prCtx.headSha, a.commentsAtMs ?? null)) return;
     const model = DEFAULT_CLAUDE_REVIEW_MODEL;
     // An AUTOMATIC run goes to the DEFAULT provider (Settings → AI), read now.

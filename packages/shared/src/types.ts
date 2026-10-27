@@ -7201,6 +7201,11 @@ export interface ClaudeReviewResponse {
   // What happened after the LATEST review if it was an auto review on the reader's own PR: an auto
   // fix was started, or skipped and why. In memory (a restart forgets it). null/absent = nothing.
   autoFix?: ClaudeAutoFixOutcome | null;
+  // The FAILED AUTO run at the PR's current synced head that a reader's Retry would re-run: the latest
+  // AUTO row at that head failed and no AUTO run there succeeded — MANUAL rows at the head (even
+  // later ones) are ignored (docs/CLAUDE-REVIEW.md § Retries). null = none; ABSENT = an older server
+  // (the tab then falls back to "the latest run is a failed auto run").
+  failedAutoAtHead?: { reviewId: number; error: string | null } | null;
   // THE THREAD JUDGEMENTS AS THEY STAND NOW: the latest review's `threadAssessments` with every
   // later Check threads run folded over it (the newer judgement wins, per thread). Render the tab's
   // Review threads section from this, not from `review.threadAssessments`. null/absent = none.

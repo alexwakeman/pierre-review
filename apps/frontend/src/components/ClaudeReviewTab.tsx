@@ -89,7 +89,7 @@ import { ClaudeReviewFollowUpSection } from './ClaudeReviewFollowUp.js';
 import { ClaudeReviewThreadsSection } from './ClaudeReviewThreads.js';
 import { CheckThreadsButton } from './CheckThreadsButton.js';
 import { AiStatusLine } from './AiStatusLine.js';
-import { AUTO_REVIEW_WAITING_LABEL, autoFixOutcomeLine, autoSweepResultLine } from '../lib/claudeAutoReview.js';
+import { AUTO_REVIEW_WAITING_LABEL, autoFixOutcomeLine, autoSweepResultLine, failedAutoReviewLine } from '../lib/claudeAutoReview.js';
 import { useRepos } from '../hooks/useTimeline.js';
 import { useRunAutoReviewSweep, useWorkspaceAutoReview } from '../hooks/useWorkspaceAutoReview.js';
 import { CiCheckSection } from './CiCheckSection.js';
@@ -1737,6 +1737,8 @@ export function ClaudeReviewTab({
   // until it ends — the server answers 409 AutoReviewInProgress otherwise.
   const autoHold: 'queued' | 'running' | null =
     data?.autoReview ?? (isRunning && review?.trigger === 'auto' ? 'running' : null);
+  // A failed AUTO run to show (and maybe Retry) — the latest run, or the latest auto run at the head.
+  const failedAuto = failedAutoReviewLine(data);
   // Live progress over SSE — pushes each phase/activity/usage change in real time
   // and self-invalidates the full review on the terminal `done` (so the finished
   // result loads without a poll).
@@ -2006,14 +2008,21 @@ export function ClaudeReviewTab({
         </div>
       )}
 
-      {/* Failed / cancelled. The latest run is a failed AUTO run: one plain line + Retry (the same
-          sweep as "Run auto reviews now", for this PR). The backend lists THIS PR for a press
-          whatever its head, floor or earlier successes (`pressPrId`), so the button never answers
-          "nothing to retry" for a run it is shown on: at the same head it retries the run, after
-          new commits it reviews the new head (which the auto flow also does by itself, after the
-          usual settle wait). */}
-      {!isRunning && review?.status === 'failed' && review.trigger === 'auto' && (
-        <FailedAutoReviewLine repoId={pr.repoId} prId={pr.id} error={review.error} held={autoHold != null} />
+      {/* Failed / cancelled. A failed AUTO run: one plain line + Retry (the same sweep as "Run auto
+          reviews now", for this PR) — `failedAutoReviewLine` (lib/claudeAutoReview.ts) decides. It
+          shows when the latest run is a failed auto run, AND when the latest AUTO run at the current
+          head failed with later manual runs there (`failedAutoAtHead`: a press ignores manual rows).
+          Retry shows only where the press acts: at the same head it retries the run, after new
+          commits it reviews the new head (which the auto flow also does by itself, after the usual
+          settle wait); a head an AUTO run already reviewed is done. */}
+      {!isRunning && failedAuto != null && (
+        <FailedAutoReviewLine
+          repoId={pr.repoId}
+          prId={pr.id}
+          error={failedAuto.error}
+          held={autoHold != null}
+          retry={failedAuto.retry}
+        />
       )}
       {!isRunning && review?.status === 'failed' && review.trigger !== 'auto' && (
         <div>
@@ -2268,23 +2277,25 @@ export function ClaudeReviewTab({
 }
 
 /**
- * The PR's latest run is a FAILED AUTO run (at its current head or an older one): its error in one
- * plain line, and "Retry" — the same sweep as Open PRs' "Run auto reviews now", for this PR only
- * (POST …/auto-review/sweep with `prId`): queued as an auto run on the default provider, under the
- * daily cap. The press makes the candidate read list this PR whatever its population
- * (`pressPrId`), so what the button shows on, the backend retries. Retry shows only while auto
- * review is on for the PR's workspace and no auto run holds the PR.
+ * A FAILED AUTO run (`failedAutoReviewLine`): its error in one plain line, and "Retry" — the same
+ * sweep as Open PRs' "Run auto reviews now", for this PR only (POST …/auto-review/sweep with
+ * `prId`): queued as an auto run on the default provider, under the daily cap. The press makes the
+ * candidate read list this PR whatever its population (`pressPrId`) and ignore manual runs at the
+ * head, so what the button shows on, the backend retries. Retry shows only where the press acts
+ * (`retry`), while auto review is on for the PR's workspace and no auto run holds the PR.
  */
 function FailedAutoReviewLine({
   repoId,
   prId,
   error,
   held,
+  retry,
 }: {
   repoId: number;
   prId: number;
   error: string | null;
   held: boolean;
+  retry: boolean;
 }): JSX.Element {
   const ai = useAiCapabilities();
   const { data: repos } = useRepos();
@@ -2293,7 +2304,7 @@ function FailedAutoReviewLine({
   const sweep = useRunAutoReviewSweep(workspaceId);
   const [line, setLine] = useState<string | null>(null);
   const message = (error ?? 'no reason was given').replace(/\s+/g, ' ').trim();
-  const canRetry = ai.enabled && !held && autoReview?.workspaceId === workspaceId && autoReview?.autoReview.enabled === true;
+  const canRetry = retry && ai.enabled && !held && autoReview?.workspaceId === workspaceId && autoReview?.autoReview.enabled === true;
   return (
     <div className="flex flex-wrap items-center gap-2 text-sm">
       <span className="min-w-0 flex-1 truncate text-red-700 dark:text-red-400" title={message}>

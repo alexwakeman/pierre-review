@@ -760,13 +760,17 @@ describe('runAutoReviewSweep — a reader’s press ("Run auto reviews now" / Re
   it('Retry asks the candidate read for THAT PR (`pressPrId`), so its population gates are waived', async () => {
     answers.set(7, { prIds: [], autoToday: 0, retry: [failed(50)] });
     await runAutoReviewSweep(makeCtx(), NOW, { ...press, prId: 50 });
-    expect(calls[0]).toMatchObject({ pressPrId: 50 });
+    expect(calls[0]).toMatchObject({ pressPrId: 50, pressed: true });
     calls = [];
+    // "Run auto reviews now": the press's retry rule (manual rows at the head ignored), no one PR.
     await runAutoReviewSweep(makeCtx(), NOW, press);
     expect(calls[0]).not.toHaveProperty('pressPrId');
+    expect(calls[0]).toMatchObject({ pressed: true });
     calls = [];
+    // The sweeper's own tick keeps the automatic rule.
     await runAutoReviewSweep(makeCtx(), NOW);
     expect(calls[0]).not.toHaveProperty('pressPrId');
+    expect(calls[0]).not.toHaveProperty('pressed');
   });
 
   it('a workspace with auto review off answers `off` and queues nothing', async () => {

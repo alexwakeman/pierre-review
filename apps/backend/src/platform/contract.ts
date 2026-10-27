@@ -1008,7 +1008,7 @@ export interface ProHostQueries {
   getAutoReviewCandidates?(
     accountId: number,
     workspaceId: number,
-    opts: { openedSinceMs: number; dayStartMs: number; limit: number; pressPrId?: number },
+    opts: { openedSinceMs: number; dayStartMs: number; limit: number; pressPrId?: number; pressed?: boolean },
   ): Promise<{
     prIds: number[];
     autoToday: number;
