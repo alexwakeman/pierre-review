@@ -6826,6 +6826,26 @@ export interface ClaudeReviewFollowUpRecord {
   changesSinceShown: boolean;
   // Sent items first (in P order), then the ones over the cap.
   items: ClaudeFollowUpItemRecord[];
+  // The previous review's OWN findings that were NOT followed up, each with why (so none drops out
+  // silently). Absent on records stored before 2026-10-27, and when nothing was left out. Praise is
+  // never listed (it is not a shown finding).
+  leftOut?: ClaudeFollowUpLeftOutRecord[];
+}
+
+// Why a previous review's finding was left out of the follow-up:
+//   'ignored'        — the reader ignored it before it was posted (never said to the author);
+//   'already_posted' — the server's own left-out re-raise of a comment already on that commit; the
+//                      earlier, posted comment is followed up instead;
+//   'settled'        — an earlier review accepted a person's reply on its thread;
+//   'story'          — a legacy story finding (the ticket review judges those).
+export type ClaudeFollowUpLeftOutReason = 'ignored' | 'already_posted' | 'settled' | 'story';
+
+export interface ClaudeFollowUpLeftOutRecord {
+  priorFindingId: number;
+  reason: ClaudeFollowUpLeftOutReason;
+  path: string;
+  severity: ClaudeFindingSeverity;
+  title: string;
 }
 
 export type ClaudeReviewFollowUp = Omit<ClaudeReviewFollowUpRecord, 'items'> & {
@@ -7032,6 +7052,8 @@ export interface ClaudeReview {
   settledEarlier?: ClaudeSettledFinding[] | null;
   // Who started the run. Absent on older servers = 'manual'.
   trigger?: ClaudeReviewTrigger;
+  // true ⇒ a FROM-SCRATCH run (`GenerateReviewBody.fresh`): it read no earlier review. Absent otherwise.
+  fresh?: boolean;
   // Every other open review thread on the PR (people and other review bots) and what this run
   // found about it. null = the run did not assess threads (an older run, a skip, or not succeeded);
   // [] = it looked and there were none.
@@ -7095,6 +7117,8 @@ export interface ClaudeReviewSummary {
   finishedAt: string | null;
   // Who started the run. Absent on older servers = 'manual'.
   trigger?: ClaudeReviewTrigger;
+  // true ⇒ a from-scratch run (see ClaudeReview.fresh). Absent otherwise.
+  fresh?: boolean;
   // How many findings the run stored (the history list's count; meaningful once it succeeded).
   // Optional: an older server omits it and the list shows no count.
   findingCount?: number;
@@ -7313,6 +7337,11 @@ export interface GenerateReviewBody {
   // Codex model, else the DEFAULT provider (Settings → AI). Not signed in, or unable to run the
   // kind ⇒ 400 with one sentence.
   provider?: AiProviderId;
+  // true ⇒ a FROM-SCRATCH review: the run uses NO earlier review — no follow-up on the previous
+  // one's findings, no settled-by-reply list, no carried thread judgements (other reviewers'
+  // threads are still shown and judged afresh). Stored on the run (`ClaudeReview.fresh`). Boolean
+  // only; anything else is a 400. Omitted / false ⇒ an ordinary run. Auto review never sets it.
+  fresh?: boolean;
   // (No depth: the router always decides. A stale `mode` key is stripped by the route schema.)
   // (No stories either: a PR review checks none — the ticket review does, StartTicketReviewBody.
   // A stale `ticket`/`tickets` key is stripped by the route schema.)

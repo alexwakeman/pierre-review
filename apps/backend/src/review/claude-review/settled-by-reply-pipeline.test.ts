@@ -253,7 +253,8 @@ describe('a resolved thread with a reply goes through the reply judgement', () =
     const r = await runToEnd();
     expect(r.status).toBe('succeeded');
     const titles = r.followUp!.items.map((it) => it.title).sort();
-    expect(titles).toEqual(['Missing await on save', 'Unchecked input in sendMail']);
+    // 'A new problem' was never posted but is still included (waiting to be posted), so it is followed up too.
+    expect(titles).toEqual(['A new problem', 'Missing await on save', 'Unchecked input in sendMail']);
     expect(lastArgs!.prompt).toContain('## Settled in an earlier review');
     expect(lastArgs!.prompt).toContain(LEGACY_REPLY);
     expect(r.findings.map((f) => f.title)).not.toContain('Possibly leaks the file handle');

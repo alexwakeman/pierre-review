@@ -201,7 +201,8 @@ describe('a re-review reads the replies on its own findings', () => {
     expect(settled.map((s) => [s.title, s.acceptKind])).toEqual([['Unchecked input in sendMail', 'not_valid']]);
     script = () => ({ findings: [finding('Unchecked input in sendMail')] });
     const r = await runToEnd();
-    expect(r.followUp!.items.map((it) => it.title)).toEqual(['Drops the error']);
+    // 'A new problem' was never posted but is still included (waiting to be posted), so it is followed up too.
+    expect(r.followUp!.items.map((it) => it.title).sort()).toEqual(['A new problem', 'Drops the error']);
     expect(lastArgs!.prompt).toContain('## Settled in an earlier review');
     expect(lastArgs!.prompt).toContain('(Accepted: the finding did not apply.)');
     expect(r.findings.map((f) => f.title)).not.toContain('Unchecked input in sendMail');

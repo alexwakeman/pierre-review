@@ -62,7 +62,7 @@ function priorFinding(over: Partial<PriorFindingForFollowUp> = {}): PriorFinding
     diffHunk: '@@ -10 +10 @@\n+const token = random();',
     anchored: true,
     fileInDiff: true,
-    posted: false,
+    posted: true,
     carried: false,
     ...over,
   };
@@ -142,6 +142,24 @@ describe('buildUserPrompt — previous review', () => {
     // Only findings that reached GitHub are followed up, and the prompt says so.
     expect(p).toContain(`posted the findings below as comments on it.`);
     expect(p.indexOf('## Previous review')).toBeGreaterThan(p.indexOf('## Diff'));
+  });
+
+  it('a finding still waiting to be posted is marked, and the lead sentence says some were not posted', () => {
+    const plan = selectPriorFindings(
+      {
+        reviewId: 1,
+        headSha: PRIOR_HEAD,
+        findings: [priorFinding(), priorFinding({ id: 2, title: 'Pending one', posted: false })],
+      },
+      HEAD,
+    );
+    const p = buildUserPrompt({ ...base, followUp: { plan, since: null }, nonce: NONCE });
+    expect(p).toContain('made the findings below. Those marked "Not posted to GitHub yet" are still waiting to be posted');
+    expect(p).not.toContain('posted the findings below as comments on it.');
+    const p1 = between(p, `---BEGIN PREVIOUS FINDING P1 ${NONCE}---`, `---END PREVIOUS FINDING P1 ${NONCE}---`);
+    const p2 = between(p, `---BEGIN PREVIOUS FINDING P2 ${NONCE}---`, `---END PREVIOUS FINDING P2 ${NONCE}---`);
+    expect(p1).not.toContain('Not posted to GitHub yet');
+    expect(p2).toContain('(Not posted to GitHub yet.)');
   });
 
   it('says whether the head moved', () => {

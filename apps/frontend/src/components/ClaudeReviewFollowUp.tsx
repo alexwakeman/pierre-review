@@ -26,6 +26,7 @@ import {
   CLAUDE_REVIEW_MAX_TICKETS,
   FOLLOW_UP_STATUS_LABEL,
   TICKET_ALIGNMENT_LABEL,
+  followUpLeftOutSentence,
   TICKET_CRITERION_STATUS_LABEL,
   ticketCriteriaSentence,
 } from '@pierre-review/shared';
@@ -1436,6 +1437,8 @@ export function ClaudeReviewFollowUpSection({
     reviewId,
   };
   const closedCount = closed.length + settledEarlier.length;
+  // The previous review's findings this run did not check, by reason (never dropped silently).
+  const leftOutLine = followUpLeftOutSentence(followUp?.leftOut);
   return (
     <ReviewSection
       title="Previous review"
@@ -1468,6 +1471,11 @@ export function ClaudeReviewFollowUpSection({
             <FollowUpRow key={it.priorFindingId} item={it} muted={false} {...rowProps} />
           ))}
         </ul>
+      )}
+      {leftOutLine != null && (
+        <p className={`text-xs ${MUTED}`} title={(followUp?.leftOut ?? []).map((l) => l.title).join('\n')}>
+          {leftOutLine}
+        </p>
       )}
       {closedCount > 0 && (
         <div>

@@ -12,6 +12,7 @@ import {
   checkClaudeReviewTickets,
   storedList,
   followUpCounts,
+  followUpLeftOutSentence,
   followUpSentence,
   ticketCriteriaSentence,
   type ClaudeFollowUpStatus,
@@ -90,6 +91,21 @@ describe('checkClaudeReviewTicket', () => {
 
 describe('templated sentences', () => {
   const items = (...s: ClaudeFollowUpStatus[]) => ({ items: s.map((status) => ({ status })) });
+
+  it('followUpLeftOutSentence — by reason, singular and plural; null for none', () => {
+    expect(followUpLeftOutSentence(undefined)).toBeNull();
+    expect(followUpLeftOutSentence([])).toBeNull();
+    expect(
+      followUpLeftOutSentence([
+        { reason: 'already_posted' },
+        { reason: 'ignored' },
+        { reason: 'already_posted' },
+        { reason: 'settled' },
+        { reason: 'story' },
+      ]),
+    ).toBe('Left out: 1 ignored, 2 repeated posted comments, 1 settled by a reply, 1 story check.');
+    expect(followUpLeftOutSentence([{ reason: 'already_posted' }])).toBe('Left out: 1 repeated a posted comment.');
+  });
 
   it('followUpSentence — the example, "0 addressed", singular and the other parts', () => {
     expect(

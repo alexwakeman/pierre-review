@@ -82,7 +82,7 @@ import {
 } from './Icons.js';
 import { VerdictIcon } from './VerdictIcon.js';
 import { RegenProgressBar } from './Activity/RegenProgressBar.js';
-import { AUTO_REVIEW_LABEL } from './Activity/pendingLabels.js';
+import { AUTO_REVIEW_LABEL, FRESH_REVIEW_LABEL } from './Activity/pendingLabels.js';
 import { VERDICT_PILL } from './Activity/ClaudeReviewCell.js';
 import { ReviewedAgo } from './ReviewedAgo.js';
 import { ClaudeReviewFollowUpSection } from './ClaudeReviewFollowUp.js';
@@ -1344,6 +1344,11 @@ function ClaudesReview({
             {review.trigger === 'auto' && (
               <span className="rounded bg-gray-500/10 px-1.5 py-0.5 text-xs text-gray-600 dark:text-gray-300">
                 {AUTO_REVIEW_LABEL}
+              </span>
+            )}
+            {review.fresh === true && (
+              <span className="rounded bg-gray-500/10 px-1.5 py-0.5 text-xs text-gray-600 dark:text-gray-300">
+                {FRESH_REVIEW_LABEL}
               </span>
             )}
             {review.reviewMode != null && (

@@ -101,6 +101,9 @@ const generateSchema = {
     properties: {
       model: { type: 'string', enum: [...AI_PICKER_MODELS] },
       provider: { type: 'string', enum: ['claude', 'codex'] },
+      // A from-scratch run. Checked on the RAW body in `preValidation` (the validator coerces
+      // `"true"` / 1 to a boolean, and only a real JSON boolean is accepted).
+      fresh: { type: 'boolean' },
       // No `ticket`/`tickets`: a PR review checks no story (the ticket review does, `POST
       // /api/ticket-reviews`). Fastify's ajv runs with `removeAdditional`, so a stale key from an
       // older SPA is stripped, exactly like the retired `mode`.
@@ -243,64 +246,81 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
   // `REVIEW_BUDGET_USD` alone (default $6.75, covering a deep run's specialists) — not a setting.
 
   // Kick off a run.
-  app.post('/api/prs/:id/claude-review', { schema: generateSchema }, async (req, reply) => {
-    const { id } = req.params as { id: number };
-    const body = (req.body ?? {}) as GenerateReviewBody;
-    if (!AGENTIC_AI_ENABLED) return featureOff(reply);
+  app.post(
+    '/api/prs/:id/claude-review',
+    {
+      schema: generateSchema,
+      // Fastify's validator COERCES types, so `"true"` or 1 would read as a fresh run. Raw check.
+      preValidation: async (req, reply) => {
+        const raw = (req.body ?? {}) as Record<string, unknown>;
+        if (raw != null && typeof raw === 'object' && 'fresh' in raw && typeof raw.fresh !== 'boolean') {
+          reply.status(400);
+          return reply.send({ error: 'BadRequest', message: '`fresh` must be true or false.' });
+        }
+      },
+    },
+    async (req, reply) => {
+      const { id } = req.params as { id: number };
+      const body = (req.body ?? {}) as GenerateReviewBody;
+      if (!AGENTIC_AI_ENABLED) return featureOff(reply);
 
-    // THE PER-RUN CHOICE: the provider named (or the default), the model on it, and its sign-in.
-    const choice = resolveManualRunChoice(body, 'review', {
-      defaultModel: DEFAULT_CLAUDE_REVIEW_MODEL,
-      detect: preflightFor(ctx),
-    });
-    if (!choice.ok) {
-      reply.status(400);
-      return { error: choice.error, message: choice.message };
-    }
-
-    const accountId = ctx.accountIdOf(req);
-    const result = await startReview(ctx, accountId, id, choice.model, choice.provider);
-    if (!result.ok) {
-      if (result.reason === 'not_found') {
-        reply.status(404);
-        return { error: 'NotFound', message: `PR ${id} not found` };
-      }
-      if (result.reason === 'no_head') {
+      // THE PER-RUN CHOICE: the provider named (or the default), the model on it, and its sign-in.
+      const choice = resolveManualRunChoice(body, 'review', {
+        defaultModel: DEFAULT_CLAUDE_REVIEW_MODEL,
+        detect: preflightFor(ctx),
+      });
+      if (!choice.ok) {
         reply.status(400);
-        return { error: 'NoHead', message: 'PR has no head commit to review yet.' };
+        return { error: choice.error, message: choice.message };
       }
-      if (result.reason === 'disabled') return featureOff(reply);
-      // An auto review is queued or running on this PR: manual start is locked until it ends.
-      if (result.reason === 'auto_in_progress') {
+
+      const accountId = ctx.accountIdOf(req);
+      // A FROM-SCRATCH run reads no earlier review (manager.ts QueueItem.fresh).
+      const result = await startReview(ctx, accountId, id, choice.model, choice.provider, {
+        fresh: body.fresh === true,
+      });
+      if (!result.ok) {
+        if (result.reason === 'not_found') {
+          reply.status(404);
+          return { error: 'NotFound', message: `PR ${id} not found` };
+        }
+        if (result.reason === 'no_head') {
+          reply.status(400);
+          return { error: 'NoHead', message: 'PR has no head commit to review yet.' };
+        }
+        if (result.reason === 'disabled') return featureOff(reply);
+        // An auto review is queued or running on this PR: manual start is locked until it ends.
+        if (result.reason === 'auto_in_progress') {
+          reply.status(409);
+          return {
+            error: 'AutoReviewInProgress',
+            auto: result.auto,
+            message: result.auto === 'running' ? 'Auto review running.' : 'Auto review queued.',
+          };
+        }
         reply.status(409);
         return {
-          error: 'AutoReviewInProgress',
-          auto: result.auto,
-          message: result.auto === 'running' ? 'Auto review running.' : 'Auto review queued.',
+          error: 'Conflict',
+          message:
+            result.reason === 'already_running'
+              ? 'A review is already running or queued for this PR.'
+              : 'The review queue is full; try again once some finish.',
         };
       }
-      reply.status(409);
-      return {
-        error: 'Conflict',
-        message:
-          result.reason === 'already_running'
-            ? 'A review is already running or queued for this PR.'
-            : 'The review queue is full; try again once some finish.',
-      };
-    }
-    // A manual review also explains failing CI: the CI review — its own process, door and caps —
-    // starts beside it when this head's failing set has no CI review yet (ci-review/with-review.ts).
-    // AWAITED (a few DB reads; the run itself is queued, never awaited) so the SPA's refetch after
-    // this reply already sees the CI run; it never throws and never fails the review start. (Lazy:
-    // ci-review imports the review manager, so a static import would tie every route test to it.)
-    await import('../ci-review/with-review.js')
-      .then((m) => m.startCiReviewBesideManualReview(ctx, accountId, id))
-      .catch(() => {});
-    reply.status(202);
-    return { reviewId: result.reviewId, status: 'queued' };
-  });
+      // A manual review also explains failing CI: the CI review — its own process, door and caps —
+      // starts beside it when this head's failing set has no CI review yet (ci-review/with-review.ts).
+      // AWAITED (a few DB reads; the run itself is queued, never awaited) so the SPA's refetch after
+      // this reply already sees the CI run; it never throws and never fails the review start. (Lazy:
+      // ci-review imports the review manager, so a static import would tie every route test to it.)
+      await import('../ci-review/with-review.js')
+        .then((m) => m.startCiReviewBesideManualReview(ctx, accountId, id))
+        .catch(() => {});
+      reply.status(202);
+      return { reviewId: result.reviewId, status: 'queued' };
+    },
+  );
 
-  app.get('/api/prs/:id/claude-review/status', { schema: idParam }, async (req): Promise<ClaudeReviewStatusResponse> => {
+  app.get('/api/prs/:id/claude-review/status',{ schema: idParam }, async (req): Promise<ClaudeReviewStatusResponse> => {
     const { id } = req.params as { id: number };
     if (!AGENTIC_AI_ENABLED) return { status: 'idle', reviewId: null, progress: null };
     return getReviewStatus(ctx, ctx.accountIdOf(req), id);

@@ -108,6 +108,9 @@ interface QueueItem {
   headSha: string;
   prCtx: ReviewPrContext;
   trigger: ClaudeReviewTrigger;
+  // A FROM-SCRATCH run (`GenerateReviewBody.fresh`, manual only): it reads NO earlier review — no
+  // follow-up chain, no settled list, no carried thread judgements. Never set on an auto run.
+  fresh?: boolean;
 }
 
 // An AUTO request waiting for a slot. Deliberately NOT a QueueItem: it has no row yet, so nothing
@@ -252,10 +255,13 @@ export async function startReview(
   model: ClaudeReviewModel,
   // The per-run choice (ai/run-choice.ts, validated by the route). Absent ⇒ the default provider.
   provider: AgentProviderId = activeProviderId(),
+  // TRAILING: `fresh` ⇒ a from-scratch run (QueueItem.fresh). Absent ⇒ an ordinary run.
+  opts: { fresh?: boolean } = {},
 ): Promise<StartReviewResult> {
   // ⚠ NO STORIES. A PR review judges code, tests and threads; a story is checked by the ticket
   // review (review/ticket-review/), a separate run with its own row, claim and lane.
   if (!AGENTIC_AI_ENABLED) return { ok: false, reason: 'disabled' };
+  const fresh = opts.fresh === true;
   // ⚠ Checked BEFORE `claimed`: a running auto run is also in
   // `claimed`, and must answer the auto lock, not 'already_running'.
   const hold = autoReviewHold(prId, accountId);
@@ -276,7 +282,7 @@ export async function startReview(
       claimed.delete(prId);
       return { ok: false, reason: 'no_head' };
     }
-    reviewId = await insertQueuedReview(ctx, prId, prCtx.headSha, model, accountId, [], 'manual', provider);
+    reviewId = await insertQueuedReview(ctx, prId, prCtx.headSha, model, accountId, [], 'manual', provider, fresh);
   } catch (err) {
     claimed.delete(prId);
     throw err;
@@ -292,6 +298,7 @@ export async function startReview(
     headSha: prCtx.headSha,
     prCtx,
     trigger: 'manual',
+    ...(fresh ? { fresh: true } : {}),
   };
   reviewIdByPr.set(prId, reviewId);
   if (inFlight() < REVIEW_CONCURRENCY) {
@@ -565,16 +572,14 @@ async function runPipeline(
   // person's reply on the thread. They leave the follow-up, the prompt tells the model not to raise
   // them again, and a new finding repeating one is dropped below. ⚠ A thread merely RESOLVED after a
   // reply is no longer settled on sight: it is judged like an open one (follow-up.ts).
-  const settled = await loadSettledByReplyFindings(ctx, item.prId, item.accountId, reviewId);
+  // ⚠ A FROM-SCRATCH run (`item.fresh`) reads NONE of it: no settled list, no previous review, no
+  // carried findings — it reviews as if it were the first run on the PR.
+  const fresh = item.fresh === true;
+  const settled = fresh ? [] : await loadSettledByReplyFindings(ctx, item.prId, item.accountId, reviewId);
   const settledIds = new Set(settled.map((f) => f.id));
-  const prior = await loadPriorReviewForFollowUp(
-    ctx,
-    item.prId,
-    item.accountId,
-    reviewId,
-    settledIds,
-    item.provider,
-  );
+  const prior = fresh
+    ? null
+    : await loadPriorReviewForFollowUp(ctx, item.prId, item.accountId, reviewId, settledIds, item.provider);
   // BACKWARD COMPATIBILITY: findings the RETIRED settle-on-sight rule took out of the chain were
   // never judged. Load them as carried items; only the ones whose thread is resolved WITH a
   // person's reply are kept (below), so they are judged once like any other.
@@ -624,7 +629,8 @@ async function runPipeline(
   }
 
   // ---- what an earlier run already decided (threads; only new commits change them) ----
-  const priorRun = await loadPriorRunForCarry(ctx, item.prId, item.accountId, reviewId);
+  // A from-scratch run judges every thread afresh: nothing carries or locks.
+  const priorRun = fresh ? null : await loadPriorRunForCarry(ctx, item.prId, item.accountId, reviewId);
 
   // ---- the OTHER reviewers' open threads (people and review bots; never Limn's own) ----
   // A failure here costs the thread block only, never the review.
@@ -640,9 +646,11 @@ async function runPipeline(
       // ⚠ Only judgements THIS run's provider made carry or lock: a Codex run after a Claude one
       // (or the reverse) judges every thread afresh, so it never wears the other's verdicts.
       const provider = item.provider;
-      const current = (
-        await currentThreadAssessmentsForPrs(ctx, item.accountId, [item.prId], { beforeReviewId: reviewId })
-      ).get(item.prId);
+      const current = fresh
+        ? undefined
+        : (
+            await currentThreadAssessmentsForPrs(ctx, item.accountId, [item.prId], { beforeReviewId: reviewId })
+          ).get(item.prId);
       const priorRunSame =
         priorRun && aiRunProvider(priorRun.provider, priorRun.model) === provider ? priorRun.threadAssessments : null;
       threadPlan = planThreadReview(
@@ -802,6 +810,8 @@ async function runPipeline(
               headMoved: plan.headMoved,
               changesSinceShown: !!since?.ok && since.files.length > 0,
               items,
+              // The previous review's own findings NOT followed up, each named with why.
+              ...(prior?.leftOut && prior.leftOut.length > 0 ? { leftOut: prior.leftOut } : {}),
             }
           : null,
       threadAssessments,

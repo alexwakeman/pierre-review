@@ -205,6 +205,8 @@ export const SECURITY_ALERT_SOURCE_LABEL: Record<Exclude<SecurityAlertSource, 'r
 /** The label for a Claude review run the workspace's auto review started (`trigger: 'auto'`) —
  *  the Pending chip and the Claude Review tab both print it. */
 export const AUTO_REVIEW_LABEL = 'Auto review';
+/** The label for a FROM-SCRATCH review run (`fresh`: it read no earlier review). */
+export const FRESH_REVIEW_LABEL = 'From scratch';
 
 export const MY_TURN_REASON_LABEL: Record<MyTurnCardReason, string> = {
   review_request: 'Review requested',

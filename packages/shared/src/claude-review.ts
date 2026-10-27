@@ -19,6 +19,7 @@
 import type {
   ClaudeFindingSeverity,
   ClaudeFindingStory,
+  ClaudeFollowUpLeftOutReason,
   ClaudeFollowUpStatus,
   ClaudeThreadAddressed,
   ClaudeThreadAssessmentCounts,
@@ -376,6 +377,27 @@ export function followUpSentence(
         ? `${older} older ${noun(older)}`
         : `Last review's ${own} ${noun(own)} and ${older} older ${older === 1 ? 'one' : 'ones'}`;
   return `${subject}: ${parts.join(', ')}.`;
+}
+
+/**
+ * "Left out: 1 ignored, 4 repeated posted comments." — the previous review's findings a follow-up
+ * did NOT check, by reason (`ClaudeReviewFollowUpRecord.leftOut`). null for none.
+ */
+export function followUpLeftOutSentence(
+  leftOut: ReadonlyArray<{ reason: ClaudeFollowUpLeftOutReason }> | null | undefined,
+): string | null {
+  if (!leftOut || leftOut.length === 0) return null;
+  const n = (r: ClaudeFollowUpLeftOutReason): number => leftOut.filter((l) => l.reason === r).length;
+  const parts: string[] = [];
+  const ignored = n('ignored');
+  if (ignored > 0) parts.push(`${ignored} ignored`);
+  const repeats = n('already_posted');
+  if (repeats > 0) parts.push(`${repeats} repeated ${repeats === 1 ? 'a posted comment' : 'posted comments'}`);
+  const settled = n('settled');
+  if (settled > 0) parts.push(`${settled} settled by a reply`);
+  const story = n('story');
+  if (story > 0) parts.push(`${story} story ${story === 1 ? 'check' : 'checks'}`);
+  return `Left out: ${parts.join(', ')}.`;
 }
 
 /** "4 of 6 criteria met." / "1 of 1 criterion met." — null when there are no criteria. */

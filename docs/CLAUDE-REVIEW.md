@@ -797,28 +797,54 @@ and decides which are worth consulting for THIS change:
 ## Follow-up on the previous review
 
 When a run starts for a PR that has an earlier succeeded review, the new run checks that review's
-comments **that were posted to GitHub** and says, for each one, whether the current code deals
-with it. If none of them was posted, there is nothing to follow up: the run is an ordinary fresh
-review, with no "Previous review" prompt section, no `follow_up` record and no follow-up sentence.
+findings **that were posted to GitHub, or are still waiting to be posted** (not posted, not
+ignored) and says, for each one, whether the current code deals with it. If there is none, there is
+nothing to follow up: the run is an ordinary review, with no "Previous review" prompt section, no
+`follow_up` record and no follow-up sentence. A FROM-SCRATCH run (§ From-scratch review) skips all
+of this.
 
 - **Which review.** The newest `claude_reviews` row for the same PR and account with
   `status='succeeded'`, an id below the current run's, and `review_mode IS NULL OR review_mode <>
   'skip'` (a skip run read no code). ⚠ The NULL arm is load-bearing: pre-routing rows have no
   mode, and `ne()` alone drops them. `persist.ts` `loadPriorReviewForFollowUp`, account-scoped
   through the repos join.
-- **Which comments — POSTED ONLY.** `postedAt != null && severity !== 'praise'`
-  (`isFollowUpEligible`, the ONE selection point: the previous review's own findings and every
-  carried one go through it, so the prompt, the stored `follow_up` items, the counts in the
-  templated sentence and the SPA's "Previous review" list all agree). A finding the reader ignored,
-  left unposted or only copied was never said to the author, so it is not asked about. ⚠ The signal
-  is `postedAt`, NOT `githubCommentId`: Post review (`markReviewPosted`) stamps `postedAt` on its
-  inline findings but stores no per-comment id (they ride the GitHub review), while the
-  single-comment route (`markFindingPosted`) stamps both. ⚠ The `included` tick is not part of the
-  rule either way: it is what the reader meant to send, and an ignored-after-posting comment is
-  still on the PR. The prompt says the findings were "posted … as comments" and uses the body the
-  user saw: `editedBody` when non-blank, else `body` (the routes' `resolvedBody` rule). Follow-up
-  records stored before this rule may still name unposted findings; they are not rewritten, and
-  the next run's carry-forward re-checks every id through the same rule.
+- **Which findings — POSTED, OR STILL WAITING TO BE POSTED** (`isFollowUpEligible`, the ONE
+  selection point: the previous review's own findings and every carried one go through it, so the
+  prompt, the stored `follow_up` items, the counts in the templated sentence and the SPA's
+  "Previous review" list all agree). Never praise, never a legacy story finding. A finding is in when:
+  - it was **POSTED** (`postedAt != null`, `isPostedForFollowUp`), whatever its `included` tick
+    says now: an ignored-after-posting comment is still on the PR. ⚠ The signal is `postedAt`, NOT
+    `githubCommentId`: Post review (`markReviewPosted`) stamps `postedAt` on its inline findings
+    but stores no per-comment id (they ride the GitHub review), while the single-comment route
+    (`markFindingPosted`) stamps both; or
+  - it is **NOT POSTED YET and still INCLUDED** (`included === true`: the reader has not ignored
+    it) and does NOT repeat a posted comment (`repeatsPosted`: its `priorFindingId` names a posted
+    finding — that comment is followed up instead, carried, so a same-commit re-run never re-raises
+    it as a new, included finding to post twice). ⚠ **Why (2026-10-27, PR 182520):** the rule used
+    to be POSTED ONLY. A same-head re-run of a review whose five findings were all unposted — four
+    the server's own left-out re-raises of posted comments (followed up through those comments), one
+    NEW and still included — dropped the new one silently: not sent, not named, and the model did
+    not happen to find it again, so it vanished from the newest run, the one the pane shows and Post
+    review sends. Now it is sent (its fence says "Not posted to GitHub yet", and the lead sentence
+    says some were not posted — the wording is unchanged when every sent finding was posted, so
+    `prompt-golden.json` holds), locked `not_addressed` on the same head, and raised again
+    INCLUDED (`isAlreadyOnThisCommit` needs a POSTED earlier finding). A carried, never-posted
+    finding whose re-raise the reader IGNORED is not carried back: the ignore is the reader's latest
+    word on it.
+  ⚠ **NOTHING DROPS OUT SILENTLY: `follow_up.leftOut`.** Every OWN finding of the previous review
+  that is not followed up is named on the stored record with its reason
+  (`followUpLeftOutReason`): `ignored` (the reader ignored it before posting), `already_posted` (an
+  unposted repeat of a comment on GitHub — the server's own left-out re-raise, or one the reader
+  ticked; the posted one is followed up), `settled` (an earlier review accepted a reply on it, see
+  below), `story`. Praise is not listed (not a shown finding). The pane prints one muted line
+  (`followUpLeftOutSentence`, "Left out: 1 ignored, 4 repeated posted comments."), titles on hover.
+  When NOTHING is followed up no record is stored, so nothing is named: every finding left out then
+  was the reader's ignore, a settled or a story one. ⚠ The settled list and the backward-compatible
+  unjudged-reply load stay POSTED ONLY (`isPostedForFollowUp`): both are about a reply on the
+  finding's GitHub thread. The prompt uses the body the user saw: `editedBody` when non-blank, else
+  `body` (the routes' `resolvedBody` rule). Follow-up records stored before 2026-10-27 have no
+  `leftOut`; they are not rewritten, and the next run's carry-forward re-checks every id through
+  the same rule.
 - ⚠ **SETTLED BY A REPLY ⇒ OUT OF THE FOLLOW-UP, AND NEVER RAISED AGAIN** (`settled-by-reply.ts`,
   pure; loader `persist.ts` `loadSettledByReplyFindings`, over EVERY earlier succeeded review of the
   PR, account-scoped). A posted finding is settled ONLY when an earlier review ACCEPTED a person's
@@ -918,6 +944,28 @@ review, with no "Previous review" prompt section, no `follow_up` record and no f
   code-derived figure; Claude's explanations are shown separately, as Claude's text. On the wire,
   each follow-up item carries a DERIVED `reraisedFindingId` (the finding whose `priorFindingId`
   matches), and findings carry `priorFindingId`.
+
+### From-scratch review (`fresh`)
+
+`POST /api/prs/:id/claude-review {fresh: true}` starts a run that uses NO earlier review: it
+reviews as if it were the first run on the PR (manager.ts `QueueItem.fresh`).
+
+- **What it skips:** the follow-up (`loadPriorReviewForFollowUp` — no "Previous review" section, no
+  `follow_up` record, no re-raise, no `priorFindingId` link), the settled-by-reply list and its
+  repeat-dropping (`loadSettledByReplyFindings`), the backward-compatible unjudged-reply load, and
+  every carried thread judgement (`loadPriorRunForCarry` and `currentThreadAssessmentsForPrs` →
+  `planThreadReview(…, null)`). Other reviewers' open threads are still SHOWN and judged afresh.
+- **What it keeps:** everything else — routing, specialists, peers, SonarCloud, the reference
+  library, the CI review beside a manual run. A `skip`-routed fresh run is an ordinary skip (it
+  reads no code); the Check threads run it starts carries its own judgements as usual.
+- **Stored** on the run: `claude_reviews.fresh` (migration 0133; true, else NULL), served as
+  `ClaudeReview.fresh` / `ClaudeReviewSummary.fresh`; the tab's run pills and the history list say
+  "From scratch". There is no SPA control yet: the route takes it.
+- ⚠ **The NEXT ordinary run follows up the fresh run** (the newest succeeded one), so comments
+  posted from runs BEFORE the fresh one leave the follow-up chain — that is the point of starting
+  over. Auto review never sets it.
+- `fresh` is validated on the RAW body: only a JSON boolean (`"true"`, `1`, `null` → 400), because
+  Fastify's validator coerces types.
 
 ### Replies to Limn's findings (accept, or push back once)
 

@@ -253,8 +253,14 @@ function pushPreviousReviewSection(
 ): void {
   lines.push('## Previous review');
   lines.push('');
+  // A finding still waiting to be posted (included, never ignored — follow-up.ts
+  // `isFollowUpEligible`) is followed up too. The wording changes only when one is present, so a
+  // run over posted findings alone reads exactly as before.
+  const unposted = plan.sent.some((s) => !s.finding.posted);
   lines.push(
-    `An earlier review of this pull request (at head ${shortSha(plan.priorHeadSha)}) posted the findings below as comments on it. For EACH one, decide whether the current code deals with it and report it once in \`followUp\` by its ref (P1, P2, …):`,
+    unposted
+      ? `An earlier review of this pull request (at head ${shortSha(plan.priorHeadSha)}) made the findings below. Those marked "Not posted to GitHub yet" are still waiting to be posted; the rest were posted as comments on it. For EACH one, decide whether the current code deals with it and report it once in \`followUp\` by its ref (P1, P2, …):`
+      : `An earlier review of this pull request (at head ${shortSha(plan.priorHeadSha)}) posted the findings below as comments on it. For EACH one, decide whether the current code deals with it and report it once in \`followUp\` by its ref (P1, P2, …):`,
   );
   lines.push('- addressed: the code now deals with it');
   lines.push('- partly_addressed: some of it is dealt with');
@@ -313,6 +319,7 @@ function pushPreviousReviewSection(
     const where = f.line != null ? `${f.path}:${f.line} (${f.side})` : `${f.path} (whole file)`;
     const body: string[] = [`Where: ${where}`];
     if (f.carried) body.push(`(from an earlier review, at head ${shortSha(f.headSha)})`);
+    if (!f.posted) body.push('(Not posted to GitHub yet.)');
     body.push(`Severity: ${f.severity}`);
     body.push(`Title: ${clipBlock(f.title, PRIOR_TITLE_CHARS)}`);
     body.push(clipBlock(f.body, PRIOR_BODY_CHARS));

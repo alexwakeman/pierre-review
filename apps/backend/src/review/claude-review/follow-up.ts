@@ -1,8 +1,10 @@
 // FOLLOW-UP ON THE PREVIOUS REVIEW (Pro) — the pure half: which earlier findings are sent to the
 // model, how its report is reconciled, and how a still-open finding is raised again.
 //
-// ⚠ ONLY POSTED FINDINGS ENTER IT (`isFollowUpEligible`). A previous review none of whose findings
-// reached GitHub yields no plan, and the run is an ordinary fresh review with no follow-up section.
+// ⚠ WHICH FINDINGS ENTER IT: `isFollowUpEligible` — every POSTED one, and every one NOT POSTED YET
+// that the reader has not ignored (still waiting to be posted). A previous review with none yields
+// no plan, and the run is an ordinary review with no follow-up section. Every other finding of the
+// previous review is NAMED on the stored record with a reason (`leftOut`), never silently dropped.
 //
 // ⚠ NEVER INVENT "ADDRESSED". Every earlier finding we sent gets EXACTLY ONE status: the model's
 // first report for its ref, or 'not_checked' when it said nothing. A finding over the cap was never
@@ -41,6 +43,8 @@ import type {
   ClaudeFindingSeverity,
   ClaudeFindingSide,
   ClaudeFollowUpItemRecord,
+  ClaudeFollowUpLeftOutReason,
+  ClaudeFollowUpLeftOutRecord,
   ClaudeFollowUpStatus,
 } from '@pierre-review/shared';
 import type { ReviewFinding, ReviewFollowUpReport } from '../../platform/contract.js';
@@ -77,8 +81,9 @@ export interface PriorFindingForFollowUp {
   diffHunk: string | null;
   anchored: boolean;
   fileInDiff: boolean;
-  // It was posted to GitHub (postedAt set). Always true for a loaded finding now that only posted
-  // ones are eligible; kept on the record (`priorPosted`) and for `isAlreadyOnThisCommit`.
+  // It was posted to GitHub (postedAt set). false ⇒ a finding still waiting to be posted (included,
+  // never ignored). Kept on the record (`priorPosted`), marked in the prompt, and read by
+  // `isAlreadyOnThisCommit` (an unposted one is never "already on this commit").
   posted: boolean;
   // true ⇒ from an OLDER review: it was 'not_checked' last time, or it is still open and posted
   // but its reminder was left out of the review (see persist.ts), and is carried forward.
@@ -120,6 +125,9 @@ export interface PriorReviewForFollowUp {
   reviewId: number;
   headSha: string;
   findings: PriorFindingForFollowUp[];
+  // The previous review's OWN findings NOT followed up, each with why (persist.ts). Stored on the
+  // record as `leftOut` so nothing drops out silently. Absent ⇒ none.
+  leftOut?: ClaudeFollowUpLeftOutRecord[];
 }
 
 export interface FollowUpPlan {
@@ -143,25 +151,20 @@ export interface FollowUpPlan {
 export const UNCHANGED_HEAD_EXPLANATION = 'The code has not changed since this was raised.';
 
 /**
- * The follow-up's eligibility rule — THE ONE selection point every consumer goes through (the
- * previous review's own findings AND every carried one, persist.ts `loadPriorReviewForFollowUp`).
+ * A finding that was POSTED to GitHub (and is not praise, not a legacy story finding). The rule for
+ * everything that needs a comment ON the pull request — its thread, a reply to judge, a settlement
+ * (settled-by-reply.ts, persist.ts `loadSettledByReplyFindings` / `loadUnjudgedReplyFindings`).
+ * `postedAt` is the signal because it is the one column BOTH posting paths stamp: the
+ * single-comment route (`markFindingPosted`, which also stores a `githubCommentId`) and Post review
+ * (`markReviewPosted`, whose inline comments ride the GitHub review and get their id only from a
+ * best-effort read-back, so it may be NULL).
  *
- * ⚠ ONLY A FINDING THAT WAS POSTED TO GITHUB IS FOLLOWED UP. "Is this still open?" is a question
- * about a comment on the pull request; a finding the reader ignored, left unposted or only copied
- * was never said to the author, so asking whether the author dealt with it is asking about
- * something nobody told them. `postedAt` is the signal because it is the one column BOTH posting
- * paths stamp: the single-comment route (`markFindingPosted`, which also stores a
- * `githubCommentId`) and Post review (`markReviewPosted`, whose inline comments ride the GitHub
- * review and get their id only from a best-effort read-back, so it may be NULL). The `included` tick is not consulted at all: it says what the
- * reader meant to send, never what was sent, and an ignored-after-posting comment is still on the
- * pull request. Praise is never followed up: there is nothing to address.
- *
- * ⚠ A LEGACY STORY FINDING IS NEVER FOLLOWED UP EITHER. "Is this acceptance criterion met?" left the
- * PR review for the ticket review (review/ticket-review/), which judges it across every PR on the
+ * ⚠ A LEGACY STORY FINDING IS NEVER FOLLOWED UP. "Is this acceptance criterion met?" left the PR
+ * review for the ticket review (review/ticket-review/), which judges it across every PR on the
  * ticket; asking the PR review again would put a single-PR story verdict back on a new run. The
  * posted comment stays on GitHub, and the ticket review is told about it.
  */
-export function isFollowUpEligible(f: {
+export function isPostedForFollowUp(f: {
   postedAt: unknown;
   severity: ClaudeFindingSeverity;
   // A legacy STORY finding's origin columns (migration 0079 / pg 0066). Optional so a caller with
@@ -169,6 +172,58 @@ export function isFollowUpEligible(f: {
   storyRef?: string | null;
 }): boolean {
   return f.postedAt != null && f.severity !== 'praise' && !f.storyRef;
+}
+
+/**
+ * The follow-up's eligibility rule — THE ONE selection point every consumer goes through (the
+ * previous review's own findings AND every carried one, persist.ts `loadPriorReviewForFollowUp`).
+ *
+ * A finding is followed up while it is still part of what Limn says about the pull request:
+ *   - it was POSTED (`isPostedForFollowUp`), whatever the `included` tick says now: an
+ *     ignored-after-posting comment is still on the pull request; or
+ *   - it is NOT POSTED YET, still INCLUDED (`included === true`: the reader has not ignored it, so
+ *     it is still waiting to be posted) and does NOT repeat an earlier comment that IS on GitHub
+ *     (`repeatsPosted`: its `priorFindingId` names a posted finding — that comment is followed up
+ *     instead, carried, exactly as before, so a same-commit re-run never re-raises it as a new,
+ *     included finding and posts it twice). ⚠ Leaving it out LOST it (2026-10-27): a same-head re-run
+ *     that did not happen to find the point again dropped it from the newest run — the one the pane
+ *     shows and Post review sends — with nothing saying so. Followed up, it is locked
+ *     'not_addressed' on the same head and raised again, INCLUDED (it was never posted, so
+ *     `isAlreadyOnThisCommit` does not apply).
+ * Left out, and NAMED on the stored record with a reason (`followUpLeftOutReason`): a finding the
+ * reader IGNORED before it was posted, an unposted repeat of a comment already on GitHub (the
+ * server's own left-out re-raise, or one the reader ticked — followed up through that comment
+ * instead), a legacy story finding. Praise is never
+ * followed up (nothing to address) and is not named either: it is no longer a shown finding.
+ * ⚠ `included` must be SELECTED by the caller: absent reads as "not included", so a row without the
+ * column falls back to the posted-only rule.
+ */
+export function isFollowUpEligible(f: {
+  postedAt: unknown;
+  severity: ClaudeFindingSeverity;
+  storyRef?: string | null;
+  included?: boolean | null;
+  // Its `priorFindingId` names a finding that WAS posted (the caller looks it up). Absent ⇒ no.
+  repeatsPosted?: boolean;
+}): boolean {
+  if (isPostedForFollowUp(f)) return true;
+  return f.postedAt == null && f.included === true && !f.repeatsPosted && f.severity !== 'praise' && !f.storyRef;
+}
+
+/** Why a previous review's finding was NOT sent to the follow-up. null ⇒ it is eligible, or praise. */
+export function followUpLeftOutReason(f: {
+  postedAt: unknown;
+  severity: ClaudeFindingSeverity;
+  storyRef?: string | null;
+  included?: boolean | null;
+  repeatsPosted?: boolean;
+}): ClaudeFollowUpLeftOutReason | null {
+  if (f.severity === 'praise' || isFollowUpEligible(f)) return null;
+  if (f.storyRef) return 'story';
+  // Never posted: a repeat of a comment that IS on GitHub (the server's own left-out re-raise —
+  // persist.ts `isAlreadyPostedReraise` — or one the reader ticked or ignored), else the reader's
+  // ignore.
+  return f.repeatsPosted ? 'already_posted' : 'ignored';
 }
 
 /** The body the user saw and would have posted — the same rule as routes.ts `resolvedBody`. */

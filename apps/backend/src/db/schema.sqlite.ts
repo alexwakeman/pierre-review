@@ -1285,6 +1285,9 @@ export const claudeReviews = sqliteTable(
     // related repos' companion changes, only those that were checked out. NULL = none (or an older
     // row). Migration 0131.
     peersRead: text('peers_read', { mode: 'json' }).$type<ReviewPeerRead[]>(),
+    // A FROM-SCRATCH run (`GenerateReviewBody.fresh`): it read no earlier review — no follow-up, no
+    // settled list, no carried thread judgements. true on such a run; NULL otherwise (migration 0133).
+    fresh: integer('fresh', { mode: 'boolean' }),
   },
   (t) => ({
     prIdx: index('cr_pr_idx').on(t.prId),

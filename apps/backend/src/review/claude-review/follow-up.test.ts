@@ -13,6 +13,7 @@ import {
   PRIOR_FINDINGS_MAX,
   findingHeadMoved,
   isAlreadyOnThisCommit,
+  followUpLeftOutReason,
   isFollowUpEligible,
   linkReraisedFindings,
   reconcileFollowUp,
@@ -74,11 +75,31 @@ describe('eligibility', () => {
     expect(isFollowUpEligible({ postedAt: null, severity: sev('praise') })).toBe(false);
     expect(isFollowUpEligible({ postedAt: new Date(), severity: 'praise' })).toBe(false);
   });
-  it('an unposted finding is out, whatever its tick says (ignored, left unposted, only copied)', () => {
+  it('an unposted finding the reader IGNORED is out, and named as such', () => {
+    const ignored = { included: false, postedAt: null, severity: 'blocker' as const };
+    expect(isFollowUpEligible(ignored)).toBe(false);
+    expect(followUpLeftOutReason(ignored)).toBe('ignored');
+    // A row without the column (`included` not selected) falls back to the posted-only rule.
     expect(isFollowUpEligible({ postedAt: null, severity: 'blocker' })).toBe(false);
-    // The included tick is not part of the rule: a row carrying it is still judged on postedAt.
-    const included = { included: true, postedAt: null, severity: 'question' as const };
-    expect(isFollowUpEligible(included)).toBe(false);
+  });
+  it('an unposted finding still INCLUDED (waiting to be posted) is in', () => {
+    const pending = { included: true, postedAt: null, severity: 'question' as const };
+    expect(isFollowUpEligible(pending)).toBe(true);
+    expect(followUpLeftOutReason(pending)).toBeNull();
+  });
+  it('an unposted REPEAT of a comment already on GitHub is out: that comment is followed up instead', () => {
+    for (const included of [true, false]) {
+      const repeat = { included, postedAt: null, severity: 'warning' as const, repeatsPosted: true };
+      expect(isFollowUpEligible(repeat)).toBe(false);
+      expect(followUpLeftOutReason(repeat)).toBe('already_posted');
+    }
+  });
+  it('praise and legacy story findings are never followed up', () => {
+    expect(isFollowUpEligible({ included: true, postedAt: null, severity: 'praise' })).toBe(false);
+    expect(followUpLeftOutReason({ included: true, postedAt: null, severity: 'praise' })).toBeNull();
+    const story = { included: true, postedAt: new Date(), severity: 'warning' as const, storyRef: 'T1' };
+    expect(isFollowUpEligible(story)).toBe(false);
+    expect(followUpLeftOutReason(story)).toBe('story');
   });
   it('a POSTED finding is in, even if the reader ignored it afterwards (it is on the pull request)', () => {
     expect(isFollowUpEligible({ postedAt: new Date(), severity: 'nit' })).toBe(true);

@@ -223,26 +223,32 @@ describe('ticket + follow-up persistence', () => {
     const prior = await persist.loadPriorReviewForFollowUp(ctx, prId, 1, current);
     expect(prior?.reviewId).toBe(second);
     expect(prior?.headSha).toBe('b'.repeat(40));
-    // Its own POSTED finding ('ordinary' was never posted, so it is out), then the CARRIED
-    // not_checked one from the first review (ignored but posted, so still eligible — with the
-    // user's wording). `kept` is followed up THROUGH its posted re-raise, never twice.
+    // Its own findings: 'ordinary' was never posted but is still included (waiting to be posted),
+    // and the POSTED re-raise; then the CARRIED not_checked one from the first review (ignored but
+    // posted, so still eligible — with the user's wording). `kept` is followed up THROUGH its
+    // posted re-raise, never twice.
     expect(prior?.findings.map((f) => [f.title, f.carried])).toEqual([
+      ['ordinary', false],
       ['re-raise', false],
       ['ignored but posted', true],
     ]);
-    expect(prior?.findings[1]!.body).toBe('My wording.');
+    expect(prior?.findings[2]!.body).toBe('My wording.');
     // Each finding carries the head of the review that RAISED it — the carried one keeps the
     // first review's, older head — and whether it was posted.
     expect(prior?.findings.map((f) => [f.title, f.headSha, f.posted])).toEqual([
+      ['ordinary', 'b'.repeat(40), false],
       ['re-raise', 'b'.repeat(40), true],
       ['ignored but posted', 'a'.repeat(40), true],
     ]);
+    expect(prior?.leftOut).toEqual([]);
 
     // The run's own id is excluded: asking "before `second`" lands on `first`, whose eligible set
     // is its two POSTED findings — praise and the ignored-unposted one drop out.
     const beforeSecond = await persist.loadPriorReviewForFollowUp(ctx, prId, 1, second);
     expect(beforeSecond?.reviewId).toBe(first);
     expect(beforeSecond?.findings.map((f) => f.title)).toEqual(['kept', 'ignored but posted']);
+    // …and the one left out is NAMED, with why (praise is not a shown finding, so it is not listed).
+    expect(beforeSecond?.leftOut?.map((l) => [l.title, l.reason])).toEqual([['to ignore', 'ignored']]);
     expect(beforeSecond?.findings[1]!.body).toBe('My wording.');
     expect(third).toBeLessThan(current);
   });
@@ -379,10 +385,10 @@ describe('ticket + follow-up persistence', () => {
   });
 });
 
-// ⚠ ONLY POSTED FINDINGS ARE FOLLOWED UP. A finding the reader ignored, left unposted or only
-// copied was never said to the author, so it must not reach the prompt, the stored follow-up record
-// or its counts. `postedAt` is the signal — the one column both posting paths stamp.
-describe('only findings posted to GitHub are followed up', () => {
+// WHICH FINDINGS ARE FOLLOWED UP (follow-up.ts `isFollowUpEligible`): every POSTED one, and every
+// one NOT POSTED YET that is still included (waiting to be posted). One the reader IGNORED before
+// posting is left out — and named on the record (`leftOut`), never dropped silently.
+describe('posted findings, and unposted ones still waiting to be posted, are followed up', () => {
   let n = 0;
   const freshPr = async (): Promise<number> => {
     const { repos, pullRequests } = schema;
@@ -402,7 +408,7 @@ describe('only findings posted to GitHub are followed up', () => {
     )[0].id as number;
   };
 
-  it('mixed: posted (in a review, or one by one) are in; included-unposted and ignored-unposted are out', async () => {
+  it('mixed: posted (in a review, or one by one) and included-unposted are in; ignored-unposted is out and named', async () => {
     const pr = await freshPr();
     const r1 = await persist.insertQueuedReview(ctx, pr, 'a'.repeat(40), 'claude-opus-5-5', 1);
     await persist.saveReviewSuccess(
@@ -426,18 +432,23 @@ describe('only findings posted to GitHub are followed up', () => {
     expect(prior.findings.map((f) => [f.title, f.posted])).toEqual([
       ['in posted review', true],
       ['posted alone', true],
+      ['included, never posted', false],
     ]);
+    expect(prior.leftOut?.map((l) => [l.priorFindingId, l.reason])).toEqual([[ignored!.id, 'ignored']]);
 
     // Everything downstream is built from this list, so the stored record and its counts agree.
     const { selectPriorFindings, reconcileFollowUp } = await import('./follow-up.js');
     const plan = selectPriorFindings(prior, 'b'.repeat(40));
-    expect(plan.sent.map((s) => s.finding.id)).toEqual([inReview!.id, alone!.id]);
+    expect(plan.sent.map((s) => s.finding.id)).toEqual([inReview!.id, alone!.id, unposted!.id]);
     const items = reconcileFollowUp(plan, []);
-    expect(items.map((i) => i.priorFindingId)).toEqual([inReview!.id, alone!.id]);
-    expect(items.every((i) => i.priorPosted)).toBe(true);
+    expect(items.map((i) => [i.priorFindingId, i.priorPosted])).toEqual([
+      [inReview!.id, true],
+      [alone!.id, true],
+      [unposted!.id, false],
+    ]);
   });
 
-  it('an unposted not_checked finding from an older review is not carried', async () => {
+  it('an unposted not_checked finding from an older review is carried while included, not once ignored', async () => {
     const pr = await freshPr();
     const r1 = await persist.insertQueuedReview(ctx, pr, 'a'.repeat(40), 'claude-opus-5-5', 1);
     await persist.saveReviewSuccess(ctx, r1, success([finding({ title: 'posted' }), finding({ title: 'copied only' })]));
@@ -461,15 +472,24 @@ describe('only findings posted to GitHub are followed up', () => {
     );
     const r3 = await persist.insertQueuedReview(ctx, pr, 'c'.repeat(40), 'claude-opus-5-5', 1);
     const prior = await persist.loadPriorReviewForFollowUp(ctx, pr, 1, r3);
-    expect(prior?.findings.map((f) => [f.id, f.carried])).toEqual([[posted!.id, true]]);
+    // 'copied only' was never posted but is still included: it is still waiting to be posted.
+    expect(prior?.findings.map((f) => [f.id, f.carried, f.posted])).toEqual([
+      [posted!.id, true, true],
+      [copied!.id, true, false],
+    ]);
+    // Once the reader ignores it, it drops out.
+    await persist.updateFinding(ctx, copied!.id, { included: false });
+    const after = await persist.loadPriorReviewForFollowUp(ctx, pr, 1, r3);
+    expect(after?.findings.map((f) => [f.id, f.carried])).toEqual([[posted!.id, true]]);
   });
 
-  it('none posted: the previous review yields no findings, so the run is a fresh review', async () => {
+  it('none posted and every one ignored: the previous review yields no findings, so the run is an ordinary review', async () => {
     const pr = await freshPr();
     const r1 = await persist.insertQueuedReview(ctx, pr, 'a'.repeat(40), 'claude-opus-5-5', 1);
     await persist.saveReviewSuccess(ctx, r1, success([finding({ title: 'never posted' }), finding({ title: 'ignored' })]));
-    const ignored = (await persist.getClaudeReviewById(ctx, r1, 1))!.findings[1]!;
-    await persist.updateFinding(ctx, ignored.id, { included: false });
+    for (const f of (await persist.getClaudeReviewById(ctx, r1, 1))!.findings) {
+      await persist.updateFinding(ctx, f.id, { included: false });
+    }
     const r2 = await persist.insertQueuedReview(ctx, pr, 'b'.repeat(40), 'claude-opus-5-5', 1);
     const prior = await persist.loadPriorReviewForFollowUp(ctx, pr, 1, r2);
     expect(prior?.reviewId).toBe(r1);

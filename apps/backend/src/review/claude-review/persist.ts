@@ -37,7 +37,7 @@ import { aiRunProvider, CLAUDE_FINDING_LENSES, threadAssessmentCounts } from '@p
 import { storedList, stripStoredStoryLead } from '@pierre-review/shared';
 import { referenceDocCitationsFromStored, reviewDocReferencesFromStored } from '@pierre-review/shared';
 import type { ReferenceDocCitation, ReviewDocReference } from '@pierre-review/shared';
-import type { ClaudeSettledFinding, FindingAutoResolveRecord, FindingPushbackRecord } from '@pierre-review/shared';
+import type { ClaudeFollowUpLeftOutRecord, ClaudeSettledFinding, FindingAutoResolveRecord, FindingPushbackRecord } from '@pierre-review/shared';
 import type { ReviewFinding } from '../../platform/contract.js';
 import { ticketEntriesOf } from './ticket.js';
 import { findFindingThread, type ThreadComment } from './finding-thread.js';
@@ -51,7 +51,9 @@ import {
 import type { AgentContext } from '../agent-context.js';
 import { claudeModelChoice, queuedRanOn } from '../../ai/provider.js';
 import {
+  followUpLeftOutReason,
   isFollowUpEligible,
+  isPostedForFollowUp,
   resolveFindingBody,
   type PriorFindingForFollowUp,
   type PriorReviewForFollowUp,
@@ -163,6 +165,8 @@ interface ReviewRow {
   followUp?: ClaudeReviewFollowUpRecord | null;
   // Absent on a host older than core migration 0071 — reads as 'manual'.
   trigger?: string | null;
+  // A from-scratch run (migration 0133). NULL on every other row.
+  fresh?: boolean | null;
   // Other reviewers' open threads, judged (migration 0076 / pg 0063). null on older rows.
   threadAssessments?: ClaudeThreadAssessment[] | null;
   commentsThrough?: Date | null;
@@ -361,6 +365,7 @@ function mapReview(
     head,
     followUp: mapFollowUp(r.followUp, findings),
     trigger: r.trigger === 'auto' ? 'auto' : 'manual',
+    ...(r.fresh === true ? { fresh: true } : {}),
     // null = this run did not assess threads (older row, skip, not succeeded) — never [].
     threadAssessments: Array.isArray(r.threadAssessments) ? r.threadAssessments : null,
     threadAssessmentCounts: Array.isArray(r.threadAssessments)
@@ -397,6 +402,7 @@ const summaryOf = (r: ReviewRow): ClaudeReviewSummary => ({
   createdAt: isoReq(r.createdAt),
   finishedAt: iso(r.finishedAt),
   trigger: r.trigger === 'auto' ? 'auto' : 'manual',
+  ...(r.fresh === true ? { fresh: true } : {}),
 });
 
 // ---- Reads (account-scoped via the join up to repos.accountId — IDOR guard) ----
@@ -1400,11 +1406,13 @@ export async function getReviewPeerContexts(
  * actually READ code: `review_mode IS NULL OR review_mode <> 'skip'`. ⚠ The NULL arm is
  * load-bearing — pre-routing rows have no mode, and a bare `<>` drops NULL rows in SQL.
  *
- * Its findings are kept when eligible (`isFollowUpEligible`: POSTED to GitHub and not praise),
- * and not SETTLED BY A REPLY (`settledIds`, settled-by-reply.ts — an earlier review accepted a
- * person's reply on its thread),
- * with the body the user saw. A finding that was ignored, left unposted or only copied never enters
- * the follow-up — not the prompt, not the stored record, not the counts. CARRY-FORWARD re-loads two kinds of OLDER finding named by
+ * Its findings are kept when eligible (`isFollowUpEligible`: POSTED to GitHub, or NOT POSTED YET
+ * and still included — the reader has not ignored it; never praise), and not SETTLED BY A REPLY
+ * (`settledIds`, settled-by-reply.ts — an earlier review accepted a person's reply on its thread),
+ * with the body the user saw. Every other own finding (praise aside) is returned in `leftOut` with
+ * its reason, so the stored record names it instead of dropping it silently: the reader's ignore
+ * before posting, the server's own left-out re-raise of a comment already on that commit, a settled
+ * one, a legacy story finding. CARRY-FORWARD re-loads two kinds of OLDER finding named by
  * that run's follow-up items — the ids come only from our own stored JSON and are re-scoped to this
  * PR + account by the query — and marks them `carried`, so nothing drops out of the chain:
  *   - every 'not_checked' item (never shown to the model, or not reported on), when eligible;
@@ -1475,12 +1483,38 @@ export async function loadPriorReviewForFollowUp(
     carried,
   });
 
-  const own = (await ctx.db
+  const ownRows = (await ctx.db
     .select()
     .from(crf)
     .where(eq(crf.reviewId, row.id))
     .orderBy(asc(crf.id))
     .execute()) as FindingRow[];
+  // An UNPOSTED finding that repeats an earlier, POSTED comment (`priorFindingId`) is followed up
+  // through that comment, never as itself (follow-up.ts `isFollowUpEligible`, `repeatsPosted`).
+  // One read, re-scoped to this PR + account like the carry below.
+  const repeatIds = [
+    ...new Set(
+      ownRows
+        .filter((f) => f.postedAt == null && f.priorFindingId != null)
+        .map((f) => f.priorFindingId as number),
+    ),
+  ];
+  const postedEarlier = new Set<number>();
+  if (repeatIds.length > 0) {
+    const earlier = (await ctx.db
+      .select({ id: crf.id, postedAt: crf.postedAt })
+      .from(crf)
+      .innerJoin(cr, eq(cr.id, crf.reviewId))
+      .innerJoin(prs, eq(prs.id, cr.prId))
+      .innerJoin(repos, eq(repos.id, prs.repoId))
+      .where(and(inArray(crf.id, repeatIds), eq(cr.prId, prId), eq(repos.accountId, accountId)))
+      .execute()) as Array<{ id: number; postedAt: Date | null }>;
+    for (const e of earlier) if (e.postedAt != null) postedEarlier.add(e.id);
+  }
+  const own = ownRows.map((f) => ({
+    ...f,
+    repeatsPosted: f.postedAt == null && f.priorFindingId != null && postedEarlier.has(f.priorFindingId),
+  }));
   const eligibleOwn = own.filter(isFollowUpEligible);
   const findings: PriorFindingForFollowUp[] = eligibleOwn.map((f) => toPrior(f, row.headSha, false));
 
@@ -1516,19 +1550,35 @@ export async function loadPriorReviewForFollowUp(
       )
       .orderBy(asc(crf.id))
       .execute()) as Array<{ finding: FindingRow; headSha: string }>;
+    // The reader IGNORED a re-raise of these in the previous review: for one never posted that is
+    // the reader's latest word on the issue, so it is not carried back. (A POSTED one is still on
+    // the pull request and is carried, as before.)
+    const ignoredReraiseOf = new Set(
+      own
+        .filter((f) => f.priorFindingId != null && followUpLeftOutReason(f) === 'ignored')
+        .map((f) => f.priorFindingId as number),
+    );
     for (const { finding, headSha } of carriedRows) {
-      // The ONE rule (posted, not praise) applies to carried findings exactly as to own ones.
+      // The ONE rule (`isFollowUpEligible`) applies to carried findings exactly as to own ones.
       if (seen.has(finding.id) || !isFollowUpEligible(finding)) continue;
+      if (finding.postedAt == null && ignoredReraiseOf.has(finding.id)) continue;
       seen.add(finding.id);
       findings.push({ ...toPrior(finding, headSha, true), priorStatus: openNotReraised.get(finding.id) ?? null });
     }
   }
   // ⚠ Filtered AFTER the carry bookkeeping above, so a settled finding still counts as "seen" and
   // a re-raise of it still marks it followed-through — it is simply never asked about.
+  // The previous review's OWN findings that are not followed up, each named with why.
+  const leftOut: ClaudeFollowUpLeftOutRecord[] = [];
+  for (const f of own) {
+    const reason = settledIds.has(f.id) && isFollowUpEligible(f) ? 'settled' : followUpLeftOutReason(f);
+    if (reason) leftOut.push({ priorFindingId: f.id, reason, path: f.path, severity: f.severity, title: f.title });
+  }
   return {
     reviewId: row.id,
     headSha: row.headSha,
     findings: settledIds.size > 0 ? findings.filter((f) => !settledIds.has(f.id)) : findings,
+    leftOut,
   };
 }
 
@@ -1607,7 +1657,8 @@ export async function loadSettledByReplyFindings(
   beforeReviewId: number,
 ): Promise<SettledFinding[]> {
   const { findings, items } = await loadEarlierRuns(ctx, prId, accountId, beforeReviewId);
-  const eligible = new Set(findings.filter(isFollowUpEligible).map((f) => f.id));
+  // POSTED only: a settlement is about a reply on the finding's GitHub thread.
+  const eligible = new Set(findings.filter(isPostedForFollowUp).map((f) => f.id));
   if (eligible.size === 0) return [];
   return acceptedReplyFindings(items, eligible);
 }
@@ -1630,7 +1681,8 @@ export async function loadUnjudgedReplyFindings(
   const { cr, crf, prs, repos } = tables(ctx);
   const { findings, items } = await loadEarlierRuns(ctx, prId, accountId, beforeReviewId);
   const ids = unjudgedReplyCandidateIds(
-    findings.map((f) => ({ id: f.id, priorFindingId: f.priorFindingId ?? null, eligible: isFollowUpEligible(f) })),
+    // POSTED only: these are judged on a resolved thread's reply, which needs a comment on GitHub.
+    findings.map((f) => ({ id: f.id, priorFindingId: f.priorFindingId ?? null, eligible: isPostedForFollowUp(f) })),
     items,
     exclude,
   );
@@ -1681,6 +1733,8 @@ export async function insertQueuedReview(
   trigger: ClaudeReviewTrigger = 'manual',
   // TRAILING: the provider the run goes to (a manual run's per-run choice). Absent ⇒ the default.
   provider?: 'claude' | 'codex' | null,
+  // TRAILING: a FROM-SCRATCH run (manager.ts QueueItem.fresh). Stored true; otherwise NULL.
+  fresh = false,
 ): Promise<number> {
   const { cr } = tables(ctx);
   // Labelled by the provider it is expected to run on from the start (a queued Codex run never shows
@@ -1697,6 +1751,7 @@ export async function insertQueuedReview(
       provider: expected.provider,
       ticket: tickets.length > 0 ? [...tickets] : null,
       trigger,
+      ...(fresh ? { fresh: true } : {}),
     })
     .returning({ id: cr.id })
     .execute()) as Array<{ id: number }>;

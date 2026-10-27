@@ -80,7 +80,7 @@ describe('the model', () => {
       expect(res.statusCode).toBe(202);
       const call = startReview.mock.calls[0] as unknown[];
       expect(call[3]).toBe(model);
-      expect(call).toHaveLength(5);
+      expect(call).toHaveLength(6);
     }
   });
 
@@ -97,7 +97,7 @@ describe('the model', () => {
     const res = await post(app, { mode: 'worktree' });
     expect(res.statusCode).toBe(202);
     const call = startReview.mock.calls[0] as unknown[];
-    expect(call).toHaveLength(5);
+    expect(call).toHaveLength(6);
   });
 });
 
@@ -114,8 +114,39 @@ describe('a legacy user story on the PR review route', () => {
       startReview.mockClear();
       const res = await post(app, payload);
       expect(res.statusCode).toBe(202);
-      expect(startReview.mock.calls[0] as unknown[]).toHaveLength(5);
+      expect(startReview.mock.calls[0] as unknown[]).toHaveLength(6);
     }
+  });
+});
+
+// A FROM-SCRATCH run (`fresh: true`): passed to the manager as its own option. Only a real JSON
+// boolean is accepted — the validator would otherwise coerce "true" / 1 into a fresh run.
+describe('a from-scratch review (`fresh`)', () => {
+  const opts = (): unknown => (startReview.mock.calls[0] as unknown[])[5];
+
+  it('fresh: true ⇒ 202 and the manager is asked for a fresh run', async () => {
+    const { app } = await build();
+    expect((await post(app, { fresh: true })).statusCode).toBe(202);
+    expect(opts()).toEqual({ fresh: true });
+  });
+
+  it('fresh: false or absent ⇒ an ordinary run', async () => {
+    const { app } = await build();
+    expect((await post(app, { fresh: false })).statusCode).toBe(202);
+    expect(opts()).toEqual({ fresh: false });
+    startReview.mockClear();
+    expect((await post(app, { model: 'claude-sonnet-5' })).statusCode).toBe(202);
+    expect(opts()).toEqual({ fresh: false });
+  });
+
+  it('anything but a boolean ⇒ 400, no run', async () => {
+    const { app } = await build();
+    for (const fresh of ['true', 1, 0, 'yes', null, {}, []]) {
+      const res = await post(app, { fresh });
+      expect(res.statusCode).toBe(400);
+      expect(res.json()).toEqual({ error: 'BadRequest', message: '`fresh` must be true or false.' });
+    }
+    expect(startReview).not.toHaveBeenCalled();
   });
 });
 
@@ -157,16 +188,16 @@ describe('the per-run provider', () => {
   it('no provider ⇒ the default provider (Settings → AI), the model as sent', async () => {
     const { app } = await build();
     expect((await post(app, { model: 'claude-sonnet-5' })).statusCode).toBe(202);
-    expect(call().slice(3)).toEqual(['claude-sonnet-5', 'claude']);
+    expect(call().slice(3, 5)).toEqual(['claude-sonnet-5', 'claude']);
   });
 
   it('Codex named with its model ⇒ runs on Codex, asked at the same depth', async () => {
     const { app } = await build();
     expect((await post(app, { provider: 'codex', model: 'gpt-6.1-sol' })).statusCode).toBe(202);
-    expect(call().slice(3)).toEqual(['claude-opus-5-5', 'codex']);
+    expect(call().slice(3, 5)).toEqual(['claude-opus-5-5', 'codex']);
     startReview.mockClear();
     expect((await post(app, { provider: 'codex', model: 'gpt-6.1-terra' })).statusCode).toBe(202);
-    expect(call().slice(3)).toEqual(['claude-sonnet-5', 'codex']);
+    expect(call().slice(3, 5)).toEqual(['claude-sonnet-5', 'codex']);
   });
 
   it('a Codex model with no provider ⇒ Codex (the model names it)', async () => {
@@ -178,7 +209,7 @@ describe('the per-run provider', () => {
   it('Codex named with no model ⇒ Codex at the default depth', async () => {
     const { app } = await build();
     expect((await post(app, { provider: 'codex' })).statusCode).toBe(202);
-    expect(call().slice(3)).toEqual(['claude-opus-5-5', 'codex']);
+    expect(call().slice(3, 5)).toEqual(['claude-opus-5-5', 'codex']);
   });
 
   it('a model of the other provider ⇒ 400 in one sentence, no run', async () => {
