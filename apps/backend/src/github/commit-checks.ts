@@ -15,6 +15,7 @@
 // CI as not checked rather than spend a request GitHub will refuse.
 import type { CheckRun } from '@pierre-review/shared';
 import { checkRunsFrom } from '../sync/upsert.js';
+import { rollupStateWithoutLimn } from '@pierre-review/shared';
 import type { GqlCheckContext } from './queries.js';
 import { getGraphqlClientFor, ghRestGetFor, graphqlTolerant, isRateLimitError } from './client.js';
 import { isLimited, noteLimited } from './rate-budget.js';
@@ -101,11 +102,14 @@ export async function fetchCommitChecks(
     if (rollup == null) return partial ? { ok: false, reason: 'no_check_access' } : { ok: true, rollupState: null, checks: [] };
     if (rollup.contexts == null && partial) return { ok: false, reason: 'no_check_access' };
     const nodes = (rollup.contexts?.nodes ?? []).filter((n): n is GqlCheckContext => n != null);
-    const checks = checkRunsFrom({
+    const all = checkRunsFrom({
       oid: obj.oid ?? args.sha,
       statusCheckRollup: { state: rollup.state ?? '', contexts: { nodes } },
     });
-    return { ok: true, rollupState: rollup.state ?? null, checks };
+    // ⚠ LIMN'S OWN STATUS LINES ARE NOT CI (shared limn-status.ts): the CI review and every other
+    // reader of this read see neither the lines nor their effect on the rollup.
+    const checks = all.filter((c) => !c.limnOwned);
+    return { ok: true, rollupState: rollupStateWithoutLimn(rollup.state, all), checks };
   } catch (err) {
     const rl = isRateLimitError(err);
     if (rl.limited) {

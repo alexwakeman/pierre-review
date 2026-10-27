@@ -26,7 +26,8 @@ import type {
   GqlPullRequest,
   GqlReviewRequestEvent,
 } from '../github/queries.js';
-import type { CheckRun, CheckRunState } from '@pierre-review/shared';
+import { isLimnStatusContext, rollupStateWithoutLimn, type CheckRun } from '@pierre-review/shared';
+import { checkContextState } from '../github/check-context-state.js';
 
 const {
   repos,
@@ -309,6 +310,22 @@ export function ciStatusFrom(state: string | null | undefined): CiStatus {
   }
 }
 
+/**
+ * A head commit's CI status with LIMN'S OWN status lines taken out (shared `rollupStateWithoutLimn`):
+ * GitHub's rollup when no `limn/` line is among the contexts (or none were received), else recomputed
+ * from the rest. Used wherever Limn stores or reads a PR head's CI from a contexts-bearing response.
+ */
+export function ciStatusFromHead(head: GqlHeadCommit['commit'] | null | undefined): CiStatus {
+  const rollup = head?.statusCheckRollup ?? null;
+  const nodes = rollup?.contexts?.nodes ?? null;
+  const contexts = nodes
+    ? nodes
+        .filter((c): c is GqlCheckContext => c != null)
+        .map((c) => ({ name: c.__typename === 'CheckRun' ? c.name : c.context, state: checkContextState(c) }))
+    : null;
+  return ciStatusFrom(rollupStateWithoutLimn(rollup?.state, contexts));
+}
+
 function mergeableFrom(
   state: string | null | undefined,
 ): 'mergeable' | 'conflicting' | 'unknown' {
@@ -421,46 +438,10 @@ export function mergeQueueEntryStateFrom(
   }
 }
 
-// Exported because sync/branch-status.ts maps the SAME contexts union for default-branch
-// commits. The CheckRun status/conclusion → CheckRunState table must not exist twice: if trunk
-// and PR surfaces disagreed about what "failing" means, the same check would render differently
-// depending on where you looked at it.
-export function checkContextState(c: GqlCheckContext): CheckRunState {
-  if (c.__typename === 'StatusContext') {
-    switch ((c.state ?? '').toUpperCase()) {
-      case 'SUCCESS':
-        return 'success';
-      case 'FAILURE':
-        return 'failure';
-      case 'ERROR':
-        return 'error';
-      case 'PENDING':
-      case 'EXPECTED':
-        return 'pending';
-      default:
-        return 'unknown';
-    }
-  }
-  // CheckRun: outcome is meaningful only once completed.
-  if ((c.status ?? '').toUpperCase() !== 'COMPLETED') return 'pending';
-  switch ((c.conclusion ?? '').toUpperCase()) {
-    case 'SUCCESS':
-      return 'success';
-    case 'FAILURE':
-    case 'TIMED_OUT':
-    case 'STARTUP_FAILURE':
-    case 'ACTION_REQUIRED':
-      return 'failure';
-    case 'CANCELLED':
-    case 'STALE':
-    case 'NEUTRAL':
-      return 'neutral';
-    case 'SKIPPED':
-      return 'skipped';
-    default:
-      return 'unknown';
-  }
-}
+// THE ONE status/conclusion → CheckRunState table lives in github/check-context-state.ts (DB-free,
+// so github/mutations.ts can read it without opening the database); re-exported here for the
+// callers that always imported it from this module.
+export { checkContextState };
 
 // A GitHub Actions check's detailsUrl is .../actions/runs/<runId>/job/<jobId> — parse
 // the two ids so the frontend can fetch that job's logs on demand. Third-party CI
@@ -483,12 +464,15 @@ export function checkRunsFrom(head: GqlHeadCommit['commit'] | null | undefined):
     const url = c.__typename === 'CheckRun' ? c.detailsUrl : c.targetUrl;
     const { runId, jobId } =
       c.__typename === 'CheckRun' ? parseActionsIds(url) : { runId: null, jobId: null };
+    const name = c.__typename === 'CheckRun' ? c.name : c.context;
     return {
-      name: c.__typename === 'CheckRun' ? c.name : c.context,
+      name,
       state: checkContextState(c),
       url,
       runId,
       jobId,
+      // Limn's own team-claim line: listed, never counted as CI (shared limn-status.ts).
+      ...(isLimnStatusContext(name) ? { limnOwned: true as const } : {}),
     };
   });
 
@@ -763,7 +747,9 @@ export async function persistPr(
 
     const head = pr.headCommit?.nodes[0]?.commit;
     const headSha = head?.oid ?? null;
-    const ciStatus = ciStatusFrom(head?.statusCheckRollup?.state);
+    // ⚠ LIMN'S OWN STATUS LINES ARE NOT CI: GitHub's rollup counts them, so it is recomputed from
+    // the contexts without them (shared limn-status.ts). Unchanged when no Limn line is there.
+    const ciStatus = ciStatusFromHead(head);
     const mergeable = mergeableFrom(pr.mergeable);
     const mergeStateStatus = mergeStateStatusFrom(pr.mergeStateStatus);
     const reviewDecision = reviewDecisionFrom(pr.reviewDecision);
@@ -962,7 +948,7 @@ export async function persistPr(
       const failing = [
         ...new Set(
           checkRuns
-            .filter((c) => c.state === 'failure' || c.state === 'error')
+            .filter((c) => !c.limnOwned && (c.state === 'failure' || c.state === 'error'))
             .map((c) => c.name),
         ),
       ].sort();

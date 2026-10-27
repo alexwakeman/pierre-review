@@ -21,7 +21,9 @@ import {
   ghRestPostNoContent,
   ghRestPutStatus,
 } from './client.js';
-import type { GqlReactionGroup } from './queries.js';
+import type { GqlCheckContext, GqlReactionGroup } from './queries.js';
+import { checkContextState } from './check-context-state.js';
+import { rollupStateWithoutLimn } from '@pierre-review/shared';
 import { summariseReactionGroups, toGithubReactionContent } from './reactions.js';
 
 // ---- Review-thread reply (GraphQL) ----
@@ -688,7 +690,14 @@ interface GqlPrCheckRollup {
   repository?: {
     pullRequest?: {
       commits?: {
-        nodes?: Array<{ commit?: { statusCheckRollup?: { state?: string | null } | null } }>;
+        nodes?: Array<{
+          commit?: {
+            statusCheckRollup?: {
+              state?: string | null;
+              contexts?: { nodes?: Array<GqlCheckContext | null> | null } | null;
+            } | null;
+          };
+        }>;
       } | null;
     } | null;
   } | null;
@@ -703,6 +712,22 @@ const PR_CHECK_ROLLUP_QUERY = /* GraphQL */ `
             commit {
               statusCheckRollup {
                 state
+                contexts(first: 100) {
+                  nodes {
+                    __typename
+                    ... on CheckRun {
+                      name
+                      status
+                      conclusion
+                      detailsUrl
+                    }
+                    ... on StatusContext {
+                      context
+                      state
+                      targetUrl
+                    }
+                  }
+                }
               }
             }
           }
@@ -737,7 +762,16 @@ export async function fetchPrHeadCheckRollup(
     const gql = getGraphqlClientFor(token);
     const res = await gql<GqlPrCheckRollup>(PR_CHECK_ROLLUP_QUERY, { owner, name, number });
     const nodes = res.repository?.pullRequest?.commits?.nodes ?? [];
-    return nodes[0]?.commit?.statusCheckRollup?.state ?? null;
+    const rollup = nodes[0]?.commit?.statusCheckRollup ?? null;
+    if (!rollup) return null;
+    // ⚠ LIMN'S OWN STATUS LINES ARE NOT CI (shared limn-status.ts): recomputed without them, so a
+    // teammate's pending or unfinished review line never reads as running or failing checks.
+    const contexts = rollup.contexts?.nodes
+      ? rollup.contexts.nodes
+          .filter((c): c is GqlCheckContext => c != null)
+          .map((c) => ({ name: c.__typename === 'CheckRun' ? c.name : c.context, state: checkContextState(c) }))
+      : null;
+    return rollupStateWithoutLimn(rollup.state, contexts);
   } catch {
     return null;
   }

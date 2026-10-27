@@ -131,6 +131,9 @@ export function AutoReviewSection(): JSX.Element {
   // ON unless a stored false says otherwise (an older server sends nothing).
   const storedDiagrams = stored?.autoDiagramsEnabled !== false;
   const [diagramsOn, setDiagramsOn] = useState(storedDiagrams);
+  // TEAM CLAIMS ("Mark auto reviews on GitHub"): OFF unless a stored true says otherwise.
+  const storedClaims = stored?.teamClaimsEnabled === true;
+  const [claimsOn, setClaimsOn] = useState(storedClaims);
   const storedCap = stored?.dailyCap ?? 20;
   const [capText, setCapText] = useState(String(storedCap));
   const storedPost = stored?.autoPost ?? null;
@@ -164,6 +167,9 @@ export function AutoReviewSection(): JSX.Element {
   useEffect(() => {
     setDiagramsOn(storedDiagrams);
   }, [workspaceId, storedDiagrams]);
+  useEffect(() => {
+    setClaimsOn(storedClaims);
+  }, [workspaceId, storedClaims]);
   useEffect(() => {
     setCapText(String(storedCap));
   }, [workspaceId, storedCap]);
@@ -250,6 +256,30 @@ export function AutoReviewSection(): JSX.Element {
           </span>
         </span>
       </label>
+      <div className={`flex items-start gap-1 pl-5 text-xs ${on ? '' : 'opacity-60'}`}>
+        <label className="flex items-start gap-2 text-gray-700 dark:text-gray-200">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={claimsOn}
+            onChange={(e) => setClaimsOn(e.target.checked)}
+          />
+          <span className="font-medium">Mark auto reviews on GitHub</span>
+        </label>
+        <InfoButton title="Mark auto reviews on GitHub">
+          <p>For teams where more than one person runs Limn.</p>
+          <p>
+            Each auto review posts a status line on the PR’s latest commit: limn/review-claude or
+            limn/review-codex. A teammate’s Limn then skips a commit someone is already reviewing
+            with the same provider. A different provider still reviews it.
+          </p>
+          <p>
+            If a review doesn’t finish, its line stays pending and says it’s free to claim. Clear it
+            from the AI Review tab, or push a new commit.
+          </p>
+          <p>Needs write access to the repo. Without it, Limn reviews without a line.</p>
+        </InfoButton>
+      </div>
       <div className={`space-y-1.5 pl-5 text-xs ${on ? '' : 'opacity-60'}`}>
         <div className="flex items-start gap-1">
           <fieldset className="space-y-1">
@@ -522,6 +552,7 @@ export function AutoReviewSection(): JSX.Element {
           (on !== storedOn ||
             fixOn !== storedFix ||
             diagramsOn !== storedDiagrams ||
+            claimsOn !== storedClaims ||
             capDirty ||
             postDirty ||
             fixSettingsDirty)
@@ -532,6 +563,7 @@ export function AutoReviewSection(): JSX.Element {
             enabled: on,
             autoFixEnabled: fixOn,
             ...(diagramsOn !== storedDiagrams ? { autoDiagramsEnabled: diagramsOn } : {}),
+            ...(claimsOn !== storedClaims ? { teamClaimsEnabled: claimsOn } : {}),
             ...(capDirty && cap != null ? { dailyCap: cap } : {}),
             ...(postDirty
               ? {

@@ -29,7 +29,7 @@ import {
 // `checkContextState` + `parseActionsIds` are shared for the same reason one level down: a
 // failing check on trunk must be the same object as a failing check on a PR.
 import { checkContextState, ciStatusFrom, parseActionsIds } from './upsert.js';
-import type { BranchCheckRun, CiStatus } from '@pierre-review/shared';
+import { isLimnStatusContext, type BranchCheckRun, type CiStatus } from '@pierre-review/shared';
 
 const { repos, users, branchCommits, trunkCiStatusEvents } = schema;
 
@@ -144,6 +144,8 @@ export function failingChecksFrom(
   const byName = new Map<string, BranchCheckRun>();
   for (const c of nodes) {
     if (c == null) continue;
+    // Limn's own team-claim lines are never CI (shared limn-status.ts).
+    if (isLimnStatusContext(c.__typename === 'CheckRun' ? c.name : c.context)) continue;
     const state = checkContextState(c);
     if (state !== 'failure' && state !== 'error') continue;
     const url = c.__typename === 'CheckRun' ? c.detailsUrl : c.targetUrl;

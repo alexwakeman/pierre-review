@@ -418,3 +418,15 @@ export function usePostReview(prId: number) {
     },
   });
 }
+
+/** TEAM CLAIMS "Clear": post "Cleared by <you>" over the pending Limn line at the PR's head. */
+export function useClearTeamClaim(prId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (provider: AiProviderId) => api.clearTeamClaim(prId, provider),
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: ['claude-review', prId] });
+      void qc.invalidateQueries({ queryKey: CLAUDE_REVIEW_STATES_KEY });
+    },
+  });
+}

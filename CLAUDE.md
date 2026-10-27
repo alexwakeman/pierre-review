@@ -367,6 +367,8 @@ Full detail: [docs/MERGE-CI-TRUNK.md](docs/MERGE-CI-TRUNK.md). The invariants:
   decidable region is decided (`CommitPlan.canCommit`).
 - CI logs are live ranged reads of the signed Actions blob URL — **NEVER returned to a client**.
 - Trunk status (`/api/branch-status`) is **informational only** — no counts, badges or My Turn.
+- ⚠ **`limn/` commit statuses (team claims) are NEVER CI** — every CI read filters them via shared
+  `isLimnStatusContext` / `rollupStateWithoutLimn` (docs/CLAUDE-REVIEW.md § Team claims).
 
 ---
 

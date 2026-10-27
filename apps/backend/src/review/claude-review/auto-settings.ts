@@ -66,6 +66,10 @@ import { onOff, writeSettingEvent } from '../../db/setting-event-write.js';
 // `autoResolve` switches (both OFF by default) ride the same overrides JSON (no column), and so
 // does `approveImpact` (which blast-radius levels an auto verdict may APPROVE; all by default).
 //
+// TEAM CLAIMS ("Mark auto reviews on GitHub") ride the same route as one more column,
+// `team_claims_enabled` (migration 0134): may an AUTO review post a status line on the PR's head so
+// teammates' Limn skips it (team-claim.ts)? OFF by default — only a stored true is on.
+//
 // AUTOMATIC DESIGN DIAGRAMS ride the same route as one more column, `auto_diagrams_enabled`
 // (migration 0126): may a succeeded review (MANUAL OR AUTO) queue its design diagrams
 // (review/diagrams/trigger.ts)? ⚠ ON BY DEFAULT — only a stored false is off, in every reader and
@@ -173,6 +177,8 @@ interface AutoRow {
   enabledAt: Date | number | null;
   autoFixEnabled: boolean | null;
   autoDiagramsEnabled: boolean | null;
+  // "Mark auto reviews on GitHub" (migration 0134). Only a stored true is on.
+  teamClaimsEnabled?: boolean | null;
   dailyCap: number | null;
   autoPostEnabled: boolean | null;
   autoPostSettings: StoredAutoPostSettings | null;
@@ -192,6 +198,8 @@ export function autoReviewOf(row: AutoRow | null): WorkspaceAutoReviewSettings {
     autoDiagramsEnabled: row?.autoDiagramsEnabled !== false,
     autoPost: resolveAutoPostSettings(row?.autoPostEnabled, row?.autoPostSettings),
     autoFix: resolveAutoFixSettings(row?.autoFixSettings),
+    // OFF unless explicitly switched on (0134).
+    teamClaimsEnabled: row?.teamClaimsEnabled === true,
   };
 }
 
@@ -267,6 +275,7 @@ const autoCols = (w: AgentContext['schema'][string]) => ({
   enabledAt: w.autoReviewEnabledAt,
   autoFixEnabled: w.autoFixEnabled,
   autoDiagramsEnabled: w.autoDiagramsEnabled,
+  ...(w.teamClaimsEnabled ? { teamClaimsEnabled: w.teamClaimsEnabled } : {}),
   dailyCap: w.autoReviewDailyCap,
   autoPostEnabled: w.autoPostEnabled,
   autoPostSettings: w.autoPostSettings,
@@ -314,7 +323,7 @@ export async function setWorkspaceAutoReview(
     .execute()) as AutoRow[];
   const existing = rows[0];
   if (!existing) return null;
-  const { enabled, autoFixEnabled, autoDiagramsEnabled, dailyCap, autoPost, autoFix } = change;
+  const { enabled, autoFixEnabled, autoDiagramsEnabled, teamClaimsEnabled, dailyCap, autoPost, autoFix } = change;
   const wasOn = existing.enabled === true && toMs(existing.enabledAt) != null;
   let review: Pick<AutoRow, 'enabled' | 'enabledAt'>;
   if (enabled === undefined || (enabled && wasOn)) review = existing;
@@ -335,6 +344,9 @@ export async function setWorkspaceAutoReview(
   // Only a stored false is off (ON by default, 0126).
   const diagramsWas = existing.autoDiagramsEnabled !== false;
   const diagrams = autoDiagramsEnabled ?? diagramsWas;
+  // Only a stored true is on (OFF by default, 0134).
+  const claimsWas = existing.teamClaimsEnabled === true;
+  const claims = teamClaimsEnabled ?? claimsWas;
   const capOverride =
     dailyCap === undefined ? existing.dailyCap : dailyCap === AUTO_REVIEW_DAILY_CAP ? null : dailyCap;
   // Auto-posting: each field optional; a kind left out keeps its stored value.
@@ -372,6 +384,7 @@ export async function setWorkspaceAutoReview(
     enabledAt: review.enabledAt,
     autoFixEnabled: fix,
     autoDiagramsEnabled: diagrams,
+    teamClaimsEnabled: claims,
     dailyCap: capOverride,
     autoPostEnabled: postAfter.enabled,
     autoPostSettings: postOverrides,
@@ -387,6 +400,9 @@ export async function setWorkspaceAutoReview(
   }
   if (autoDiagramsEnabled !== undefined && autoDiagramsEnabled !== diagramsWas) {
     set.autoDiagramsEnabled = autoDiagramsEnabled;
+  }
+  if (teamClaimsEnabled !== undefined && teamClaimsEnabled !== claimsWas) {
+    set.teamClaimsEnabled = teamClaimsEnabled;
   }
   if (dailyCap !== undefined && capOverride !== existing.dailyCap) {
     set.autoReviewDailyCap = capOverride;
@@ -430,6 +446,9 @@ function settingChanges(
   if ('autoReviewDailyCap' in set) out.push(['auto_review', 'Auto review daily limit changed']);
   if ('autoDiagramsEnabled' in set) {
     out.push(['auto_review', `Design diagrams after each review ${onOff(next.autoDiagramsEnabled !== false)}`]);
+  }
+  if ('teamClaimsEnabled' in set) {
+    out.push(['auto_review', `Mark auto reviews on GitHub ${onOff(next.teamClaimsEnabled === true)}`]);
   }
   if ('autoFixEnabled' in set) out.push(['auto_fix', `Auto fix ${onOff(next.autoFixEnabled === true)}`]);
   if ('autoFixSettings' in set) {
@@ -612,6 +631,7 @@ export function registerAutoReviewSettingsRoutes(app: FastifyInstance, ctx: Agen
             enabled: { type: 'boolean' },
             autoFixEnabled: { type: 'boolean' },
             autoDiagramsEnabled: { type: 'boolean' },
+            teamClaimsEnabled: { type: 'boolean' },
             // An integer 1..500; anything else (a fraction, a string, out of range) is a 400.
             dailyCap: {
               type: 'integer',

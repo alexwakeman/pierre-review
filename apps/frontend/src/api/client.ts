@@ -59,6 +59,8 @@ import type {
   ClaudeThreadJudgementsBody,
   ClaudeThreadJudgementsResponse,
   ClaudeReviewStatesResponse,
+  ClearTeamClaimBody,
+  ClearTeamClaimResponse,
   ClaudeReviewChatAnswer,
   ClaudeReviewChatBody,
   ClaudeReviewChatHistoryResponse,
@@ -1408,6 +1410,13 @@ export const api = {
     ),
   claudeReviewStatus: (prId: number) =>
     get<ClaudeReviewStatusResponse>(`/api/prs/${prId}/claude-review/status`),
+  // TEAM CLAIMS "Clear": replace the pending Limn line at the PR's head with "Cleared by <you>".
+  // ONE GitHub status write; never retried.
+  clearTeamClaim: (prId: number, provider: AiProviderId) =>
+    fetch(
+      `/api/prs/${prId}/claude-review/team-claim/clear`,
+      jsonBody('POST', { provider } satisfies ClearTeamClaimBody),
+    ).then((r) => handle<ClearTeamClaimResponse>(r)),
   cancelClaudeReview: (prId: number) =>
     fetch(`/api/prs/${prId}/claude-review/cancel`, jsonBody('POST')).then((r) =>
       handle<{ status: string }>(r),

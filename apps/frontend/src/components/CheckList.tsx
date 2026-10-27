@@ -173,6 +173,15 @@ export function CheckRow({
         >
           {dot}
           <span className="min-w-0 truncate">{check.name}</span>
+          {/* Limn's own team-claim line (a status Limn posted): listed, never counted as CI. */}
+          {check.limnOwned && (
+            <span
+              className="shrink-0 rounded bg-gray-100 px-1 text-[11px] font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-300"
+              title="Posted by Limn to mark an auto review. Not CI."
+            >
+              Limn
+            </span>
+          )}
           <span className="ml-auto shrink-0 text-xs text-gray-400">{m.label}</span>
         </a>
       </li>

@@ -399,6 +399,11 @@ export function OpenPrsCards({
     () => new Map((claudeData?.states ?? []).map((st) => [st.prId, st])),
     [claudeData],
   );
+  // TEAM CLAIMS: PRs whose auto review was skipped because a teammate's Limn holds the head.
+  const teamClaimSkips = useMemo(
+    () => new Map((claudeData?.teamClaimSkips ?? []).map((sk) => [sk.prId, sk])),
+    [claudeData],
+  );
   // The CI review (its own run): ONE batched request for every listed PR, like the states above.
   const { data: ciData } = useCiReviewStates(prIds, claudeOn);
   const ciStates = useMemo(() => new Map((ciData?.states ?? []).map((st) => [st.prId, st])), [ciData]);
@@ -561,6 +566,7 @@ export function OpenPrsCards({
             prId={pr.id}
             state={claudeStates.get(pr.id)}
             ciState={ciStates.get(pr.id)}
+            teamClaimSkip={teamClaimSkips.get(pr.id) ?? null}
             onOpenReview={() => openClaudeReview(metaOf(pr), { fromActivity: true })}
             onOpenFix={() => openAiFix(metaOf(pr))}
             // The ticket review's reading of this PR's tickets — not the stack's own (its header

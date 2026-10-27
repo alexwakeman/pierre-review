@@ -25,6 +25,7 @@ import type {
   ClaudeCiFailure,
   ClaudeCiFailuresRecord,
   ClaudeAutoPostRecord,
+  ClaudeTeamClaimRecord,
   ClaudeAutoPostWire,
   ClaudeThreadAssessment,
   ClaudeTicketAssessment,
@@ -180,6 +181,8 @@ interface ReviewRow {
   docReferences?: unknown;
   // What it read beside the PR (migration 0131). NULL = nothing.
   peersRead?: unknown;
+  // What the team claim did (migration 0134). NULL = no claim attempted.
+  teamClaim?: unknown;
 }
 
 /** The stored auto-post record → the wire (ids dropped). null for anything malformed. */
@@ -377,6 +380,26 @@ function mapReview(
     autoPost: autoPostWireOf(r.autoPost),
     docReferences: reviewDocReferencesFromStored(r.docReferences),
     alsoRead: peersReadFromStored(r.peersRead),
+    teamClaim: teamClaimRecordOf(r.teamClaim),
+  };
+}
+
+/** The stored team-claim record → the wire. null for anything malformed (or none). */
+export function teamClaimRecordOf(v: unknown): ClaudeTeamClaimRecord | null {
+  if (v == null || typeof v !== 'object') return null;
+  const r = v as Partial<ClaudeTeamClaimRecord>;
+  if (typeof r.context !== 'string' || (r.state !== 'marked' && r.state !== 'unmarked') || typeof r.at !== 'string') {
+    return null;
+  }
+  return {
+    context: r.context,
+    state: r.state,
+    reason: r.reason === 'no_access' || r.reason === 'error' ? r.reason : null,
+    lastLine:
+      r.lastLine === 'reviewing' || r.lastLine === 'reviewed' || r.lastLine === 'unfinished' || r.lastLine === 'cleared'
+        ? r.lastLine
+        : null,
+    at: r.at,
   };
 }
 

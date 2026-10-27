@@ -6,6 +6,8 @@ import {
   type AutoReviewSweepResponse,
   type ClaudeReviewPrState,
   type ClaudeReviewResponse,
+  type ClaudeTeamClaimRecord,
+  type ClaudeTeamClaimSkip,
 } from '@pierre-review/shared';
 
 // The words for auto review's quiet states: why the next auto review is waiting (the Claude Review
@@ -101,4 +103,23 @@ export function failedAutoReviewLine(
     return { error: review.error ?? null, retry: data?.failedAutoAtHead === undefined };
   }
   return null;
+}
+
+// ---- TEAM CLAIMS ("Mark auto reviews on GitHub") ----
+
+/** Why the auto review at this commit was skipped: a teammate's Limn holds it. */
+export function teamClaimSkipLine(skip: Pick<ClaudeTeamClaimSkip, 'kind' | 'login'> | null | undefined): string | null {
+  if (!skip) return null;
+  return skip.kind === 'reviewed'
+    ? `Auto review skipped: already reviewed by @${skip.login}`
+    : `Auto review skipped: being reviewed by @${skip.login}`;
+}
+
+/** What the team claim did for one auto run, or null when none was attempted. */
+export function teamClaimRecordLine(rec: ClaudeTeamClaimRecord | null | undefined): string | null {
+  if (!rec) return null;
+  if (rec.state === 'unmarked') {
+    return rec.reason === 'no_access' ? 'Not marked on GitHub: no write access' : 'Not marked on GitHub';
+  }
+  return rec.lastLine === 'cleared' ? 'Marked on GitHub, then cleared' : 'Marked on GitHub';
 }

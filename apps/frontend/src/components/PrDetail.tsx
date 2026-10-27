@@ -1506,7 +1506,7 @@ export function PrDetail({
           ] as Tab[]
         ).map((t) => {
           const failing = pr.checkRuns.filter(
-            (c) => c.state === 'failure' || c.state === 'error',
+            (c) => !c.limnOwned && (c.state === 'failure' || c.state === 'error'),
           ).length;
           return (
             <button
