@@ -132,8 +132,8 @@ export default function Contact(): JSX.Element {
           </p>
           <p>
             Nothing is sent to us. We run no server for the app, and it has no tracking. Your
-            code and pull requests go only between your machine and GitHub — and to Anthropic,
-            on your own account, when you ask Claude to review or fix something.
+            code and pull requests go only between your machine and GitHub — and to your AI
+            provider, on your own account, when a review or fix runs.
           </p>
           <p>
             <code>{INSTALL_COMMAND}</code>
@@ -156,8 +156,8 @@ export default function Contact(): JSX.Element {
               Needs Node 20 or later.
             </li>
             <li>
-              Built for Claude users. Reviews and fixes run on your Claude Code login or an
-              Anthropic API key. Codex support is coming soon.
+              Runs on your own AI agent tooling. Reviews and fixes use your Claude Code login,
+              an Anthropic API key or Codex on your ChatGPT plan.
             </li>
             <li>
               Free for individuals, and for organisations where no more than {FREE_TEAM_SIZE}{' '}

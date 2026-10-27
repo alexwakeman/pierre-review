@@ -9,7 +9,7 @@ export function GatherCheckAct() {
         </div>
         <div className="tile verdigris rise">
           <b>Check</b>
-          <p>Claude reviews the change against all three, on your machine.</p>
+          <p>Your own AI agent reviews the change against all three, on your machine.</p>
         </div>
         <div className="tile madder rise">
           <b>Act</b>
@@ -17,7 +17,7 @@ export function GatherCheckAct() {
         </div>
       </div>
       <p className="lead rise">
-        Limn is an advanced harness for code review: your tools, Claude and one clear screen, working
+        Limn is an advanced harness for code review: your tools, your AI agent and one clear screen, working
         as one. It does the checking, so your team ships faster, for no extra cost.
       </p>
     </section>

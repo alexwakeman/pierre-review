@@ -24,8 +24,8 @@ import {
 //
 // §3 still says plainly what the app does on the reader's own machine (it copies
 // other people's GitHub activity into a local file, and the AI features send content
-// to Anthropic on the reader's own credentials), because that is true and a reader
-// deploying it for a team needs to know.
+// to the reader's AI provider — Anthropic or OpenAI — on their own credentials),
+// because that is true and a reader deploying it for a team needs to know.
 
 const LINK = LEGAL_LINK;
 
@@ -125,10 +125,11 @@ export default function Privacy(): JSX.Element {
             only reads what your own GitHub login can already read.
           </li>
           <li>
-            <T>AI features send content to Anthropic</T> — diffs, comments and ticket text for
-            the pull request being reviewed or fixed. They use your own Claude Code login or
-            Anthropic API key, so the content goes from your machine to Anthropic under your
-            agreement with them. We never see it.
+            <T>AI features send content to your AI provider</T> — diffs, comments and ticket
+            text for the pull request being reviewed or fixed. They use your own AI agent: a
+            Claude Code login or Anthropic API key (Anthropic), or Codex on a ChatGPT plan
+            (OpenAI). The content goes from your machine to that provider under your agreement
+            with them. We never see it.
           </li>
           <li>
             <T>Optional integrations</T> you set up yourself — a Slack webhook, an issue

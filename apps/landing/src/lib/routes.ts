@@ -53,11 +53,11 @@ export type RouteSeo = {
 export const ROUTE_SEO: Record<string, RouteSeo> = {
   '/': {
     title: `${SITE_NAME} — automated code review, story and docs alignment, on your machine`,
-    description: `${SITE_NAME} reviews each pull request against its story and your docs on your own Claude Code login, posts the review to GitHub automatically, and AI Fix fixes the findings and failing CI. Free for up to ${FREE_TEAM_SIZE} people, it runs on your machine: npx ${NPM_PACKAGE}.`,
+    description: `${SITE_NAME} reviews each pull request against its story and your docs on your own AI agent (Claude Code or Codex), posts the review to GitHub automatically, and AI Fix fixes the findings and failing CI. Free for up to ${FREE_TEAM_SIZE} people, it runs on your machine: npx ${NPM_PACKAGE}.`,
   },
   '/getting-started': {
     title: `Getting started — install, run and connect · ${SITE_NAME}`,
-    description: `Run ${SITE_NAME} with one command: npx ${NPM_PACKAGE}. Then turn on Claude, give Limn a share of your weekly Claude usage, add the scoring model for review-bot comments, add your repositories, and connect Jira or Linear and Slack. It runs on your machine and uses your logged-in gh.`,
+    description: `Run ${SITE_NAME} with one command: npx ${NPM_PACKAGE}. Then connect Claude Code or Codex, give Limn a share of your weekly AI usage, add the scoring model for review-bot comments, add your repositories, and connect Jira or Linear and Slack. It runs on your machine and uses your logged-in gh.`,
   },
   '/reporting': {
     title: `Reporting and metrics — where the work is and where it waits · ${SITE_NAME}`,
