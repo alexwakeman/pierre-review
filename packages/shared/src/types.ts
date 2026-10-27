@@ -2838,6 +2838,10 @@ export interface CheckRun {
   // the check isn't an Actions job (or the detailsUrl isn't in that shape).
   runId: number | null;
   jobId: number | null;
+  // true ⇒ one of LIMN'S OWN status lines (`limn/review-claude` / `limn/review-codex`, the team
+  // claim — limn-status.ts). Listed in the PR's checks with a "Limn" label, NEVER counted as CI
+  // (no failing / running count, no verdict). Absent on every other check.
+  limnOwned?: true;
 }
 
 // On-demand failed-check log WINDOW (GET /api/prs/:id/checks/:jobId/logs). Logs are
@@ -4338,6 +4342,8 @@ export interface SetWorkspaceAutoReviewBody {
   autoDiagramsEnabled?: boolean;
   // The daily cap (`WorkspaceAutoReviewSettings.dailyCap`): an integer 1..500, else a 400.
   dailyCap?: number;
+  // "Mark auto reviews on GitHub" (`WorkspaceAutoReviewSettings.teamClaimsEnabled`).
+  teamClaimsEnabled?: boolean;
   // Auto-posting (`WorkspaceAutoReviewSettings.autoPost`). Each field optional; a kind left out
   // keeps its stored value.
   autoPost?: {
@@ -4390,6 +4396,11 @@ export interface WorkspaceAutoReviewSettings {
   // may a SUCCEEDED AUTO review post to GitHub without a click? OFF for every workspace until
   // switched on. AUTO runs only — a review you start yourself keeps the Post button.
   autoPost: WorkspaceAutoPostSettings;
+  // TEAM CLAIMS — "Mark auto reviews on GitHub" (`workspaces.team_claims_enabled`, migration 0134).
+  // Each AUTO review posts a status line on the PR's head (limn/review-claude | limn/review-codex)
+  // so teammates' Limn skips a commit someone is already reviewing with the same provider. OFF by
+  // default (only a stored true is on). Needs write access to the repo. Absent on older servers.
+  teamClaimsEnabled?: boolean;
 }
 
 // WHICH PRs auto-posting may post on:
@@ -7103,6 +7114,9 @@ export interface ClaudeReview {
   // The other code this run read, read-only: ticket peers and related repos' companion changes
   // (docs/CLAUDE-REVIEW.md § Related repos). Only what was checked out. null/absent = none.
   alsoRead?: ReviewPeerRead[] | null;
+  // What the TEAM CLAIM did for this run (an auto run with "Mark auto reviews on GitHub" on).
+  // null/absent = no claim was attempted.
+  teamClaim?: ClaudeTeamClaimRecord | null;
 }
 
 // The reviewed commit against the PR's current head (the SYNCED head — DB-only, no GitHub call).
@@ -7214,6 +7228,66 @@ export interface ClaudeReviewResponse {
   currentThreadAssessmentCounts?: ClaudeThreadAssessmentCounts | null;
   // The PR's newest Check threads run (any status). null/absent = never run.
   threadCheck?: ThreadCheckRun | null;
+  // TEAM CLAIMS: the auto review at the PR's current head was SKIPPED because a teammate's Limn
+  // holds it (in memory; a restart forgets it). null/absent = not skipped.
+  teamClaimSkip?: ClaudeTeamClaimSkip | null;
+  // The pending Limn line at the current head a "Clear" would replace with "Cleared by <you>"
+  // (a teammate's live claim, or this machine's unfinished run). null/absent = nothing to clear.
+  teamClaimPending?: ClaudeTeamClaimPending | null;
+}
+
+// ---- TEAM CLAIMS (docs/CLAUDE-REVIEW.md § Team claims; review/claude-review/team-claim.ts) ----
+// "Mark auto reviews on GitHub" (per workspace, OFF by default): an AUTO review posts a commit
+// status on the PR's head (`limn/review-claude` / `limn/review-codex`, one per provider) so a
+// teammate's Limn skips a commit someone is already reviewing with the same provider.
+
+/** Why an auto review was skipped: a teammate already REVIEWED this head with this provider, or
+ *  is REVIEWING it now (a pending line inside its lease). */
+export type ClaudeTeamClaimSkipKind = 'reviewed' | 'reviewing';
+
+export interface ClaudeTeamClaimSkip {
+  provider: AiProviderId;
+  kind: ClaudeTeamClaimSkipKind;
+  // The teammate's GitHub login, as their line names it.
+  login: string;
+  headSha: string;
+  // When their line was posted (ISO-8601).
+  at: string;
+}
+
+export interface ClaudeTeamClaimPending {
+  provider: AiProviderId;
+  // Whose line it is: the GitHub login, and whether it is the reader's own (an unfinished run).
+  login: string;
+  mine: boolean;
+}
+
+/** What the team claim did for ONE auto run (`claude_reviews.team_claim`, migration 0134).
+ *  null on the row = no claim was attempted (a manual run, or the switch off). */
+export interface ClaudeTeamClaimRecord {
+  // The status context (`limn/review-claude` | `limn/review-codex`).
+  context: string;
+  // 'marked'   our pending line was posted and won the claim;
+  // 'unmarked' the run went ahead WITHOUT a line: no write access (`reason: 'no_access'`) or a
+  //            GitHub error (`reason: 'error'`). Others' claims were still honoured when readable.
+  state: 'marked' | 'unmarked';
+  reason?: 'no_access' | 'error' | null;
+  // The LAST line Limn posted for this run: reviewing (pending), reviewed (success), unfinished
+  // (pending, marked free to claim) or cleared (success, by the reader's Clear). null = none.
+  lastLine: 'reviewing' | 'reviewed' | 'unfinished' | 'cleared' | null;
+  at: string; // ISO-8601, when lastLine was posted (or the claim was decided)
+}
+
+// POST /api/prs/:id/claude-review/team-claim/clear — replace the pending Limn line at the PR's
+// current head with "Cleared by <login>" (a success line, which reads as free to every Limn).
+export interface ClearTeamClaimBody {
+  provider: AiProviderId;
+}
+export interface ClearTeamClaimResponse {
+  ok: boolean;
+  // 'no_access' — GitHub refused the write (no write access to the repo); 'error' — anything else.
+  error?: 'no_access' | 'no_head' | 'error';
+  message?: string;
 }
 
 /** Why an auto review is waiting: the head's CI is still running, or new comments / new pushes are
@@ -7488,6 +7562,9 @@ export interface ClaudeReviewStateSummary {
 
 export interface ClaudeReviewStatesResponse {
   states: ClaudeReviewPrState[];
+  // TEAM CLAIMS: listed PRs whose auto review at the current head was SKIPPED because a teammate's
+  // Limn holds it (in memory; a restart forgets it). Absent/empty = none.
+  teamClaimSkips?: Array<ClaudeTeamClaimSkip & { prId: number }>;
 }
 
 // ---- Thread cards: what the latest Claude review said about each review thread ----

@@ -1232,6 +1232,7 @@ export async function installMockApi(page: Page): Promise<void> {
             dailyCap: 20,
             autoFixEnabled: false,
             autoDiagramsEnabled: true,
+            teamClaimsEnabled: false,
             autoFix: {
               include: {
                 findings: true,

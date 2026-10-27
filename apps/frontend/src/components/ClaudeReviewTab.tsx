@@ -91,6 +91,7 @@ import { CheckThreadsButton } from './CheckThreadsButton.js';
 import { AiStatusLine } from './AiStatusLine.js';
 import { AUTO_REVIEW_WAITING_LABEL, autoFixOutcomeLine, autoSweepResultLine, failedAutoReviewLine } from '../lib/claudeAutoReview.js';
 import { useRepos } from '../hooks/useTimeline.js';
+import { TeamClaimLine } from './TeamClaimLine.js';
 import { useRunAutoReviewSweep, useWorkspaceAutoReview } from '../hooks/useWorkspaceAutoReview.js';
 import { CiCheckSection } from './CiCheckSection.js';
 import { ReviewSection, SectionCount } from './ReviewSection.js';
@@ -1911,6 +1912,9 @@ export function ClaudeReviewTab({
               {autoFixOutcomeLine(data?.autoFix)}
             </div>
           )}
+
+          {/* Team claims: skipped for a teammate, marked on GitHub, or a pending line to clear. */}
+          <TeamClaimLine prId={pr.id} data={data} />
 
           {/* An auto-review refusal is shown by the "Auto review queued/running" note instead,
               and is history once the hold ends. */}

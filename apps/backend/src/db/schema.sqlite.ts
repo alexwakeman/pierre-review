@@ -28,6 +28,7 @@ import type {
   CheckRun,
   ClaudeReviewFollowUpRecord,
   ClaudeAutoPostRecord,
+  ClaudeTeamClaimRecord,
   ClaudeCiFailuresRecord,
   CiAutoPostRecord,
   SonarIssue,
@@ -1288,6 +1289,10 @@ export const claudeReviews = sqliteTable(
     // A FROM-SCRATCH run (`GenerateReviewBody.fresh`): it read no earlier review — no follow-up, no
     // settled list, no carried thread judgements. true on such a run; NULL otherwise (migration 0133).
     fresh: integer('fresh', { mode: 'boolean' }),
+    // WHAT THE TEAM CLAIM DID FOR THIS RUN (migration 0134; review/claude-review/team-claim.ts): the
+    // GitHub status line it posted ("Marked on GitHub"), or why it ran without one. NULL = no claim
+    // was attempted (a manual run, or "Mark auto reviews on GitHub" off).
+    teamClaim: text('team_claim', { mode: 'json' }).$type<ClaudeTeamClaimRecord>(),
   },
   (t) => ({
     prIdx: index('cr_pr_idx').on(t.prId),
@@ -2008,6 +2013,11 @@ export const workspaces = sqliteTable(
     // is off. Off stops only the automatic draw; Draw / Redraw still works. The ONE writer is
     // `setWorkspaceAutoReview` (review/claude-review/auto-settings.ts).
     autoDiagramsEnabled: integer('auto_diagrams_enabled', { mode: 'boolean' }).notNull().default(true),
+    // TEAM CLAIMS (migration 0134; docs/CLAUDE-REVIEW.md § Team claims): "Mark auto reviews on
+    // GitHub". An auto review posts a commit status (limn/review-claude | limn/review-codex) on the
+    // PR's head so teammates' Limn skips a commit someone is already reviewing with the same
+    // provider. NULL/false = OFF, the default. The ONE writer is `setWorkspaceAutoReview`.
+    teamClaimsEnabled: integer('team_claims_enabled', { mode: 'boolean' }),
     // DEPENDENCY AUTO-MERGE (migration 0093 / pg 0080): may the server arm "merge when ready" on
     // every open dependency-automation PR in this workspace's repos (merge/dependency-policy.ts)?
     // NULL/false = OFF, the default for every workspace; nullable with no default, so no insert

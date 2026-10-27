@@ -88,6 +88,11 @@ describe('tierFor — ticket review', () => {
     expect(tiers('POST', '/api/ticket-reviews/7/post')).toEqual(['github_write']);    // "Post reply" on a follow-up reply status: one thread reply, no model.
     expect(tiers('POST', '/api/claude-reviews/7/follow-up/12/reply')).toEqual(['github_write']);
   });
+  it('puts the team-claim Clear (one commit-status write) on the GitHub-write bucket', () => {
+    expect(tiers('POST', '/api/prs/7/claude-review/team-claim/clear')).toEqual(['github_write']);
+    // …and only that exact path: a start is still AI generation.
+    expect(tiers('POST', '/api/prs/7/claude-review')).toEqual(['ai', 'ai_hourly']);
+  });
   it('keeps the PR-reference resolver on read (DB-only batch)', () => {
     expect(tiers('POST', '/api/prs/resolve')).toEqual(['read']);
   });

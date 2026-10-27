@@ -537,6 +537,10 @@ function tierFor(method: string, path: string): readonly Tier[] {
   if (path.startsWith('/api/ci-reviews')) return [TIERS.read];
   // "Post reply" on a follow-up reply status: ONE GitHub thread reply (+ a resolve), no model.
   if (mutating && /^\/api\/claude-reviews\/\d+\/follow-up\/\d+\/reply$/.test(path)) return [TIERS.githubWrite];
+  // TEAM CLAIMS "Clear" (review/claude-review/routes.ts): ONE commit-status write, no model. Spelled
+  // EXACTLY here, before the Claude Review family below would park it on the AI bucket (the
+  // `hitsGithub` alternation further down is never reached by a `/claude-review` path).
+  if (mutating && /^\/api\/prs\/\d+\/claude-review\/team-claim\/clear$/.test(path)) return [TIERS.githubWrite];
   // AI Fix PLAN MODE (coding/ai-fix/routes.ts, LOCAL ONLY). Spelled out so the family cannot drift
   // with the /api/pro/ catch-all below, which would also have parked the DB-only discard on `ai`:
   //   POST /api/pro/prs/:id/ai-fix/plan             starts a planning agent pass  → ai + ai_hourly

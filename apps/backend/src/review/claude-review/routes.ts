@@ -10,6 +10,8 @@ import type {
   ClaudeReviewStatusResponse,
   ClaudeThreadJudgementsBody,
   ClaudeThreadJudgementsResponse,
+  ClearTeamClaimBody,
+  ClearTeamClaimResponse,
   GenerateReviewBody,
   PostCommentResult,
   PostReviewBody,
@@ -60,6 +62,7 @@ import {
 import { currentThreadAssessmentsForPrs, getThreadJudgements } from './thread-judgements.js';
 import { getLatestThreadCheck, threadCheckWire } from './thread-check-persist.js';
 import { findingCommentUrl, reminderLead } from './posted-state.js';
+import { clearTeamClaim, teamClaimPendingFor, teamClaimSkipFor, teamClaimSkipsFor } from './team-claim.js';
 
 // The Claude Review product API (CORE, free, LOCAL ONLY). The paths are the historical ones
 // (/api/prs/:id/claude-review*, /api/claude-reviews/*, /api/claude-findings/*,
@@ -215,6 +218,11 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
     const autoReview = autoReviewHold(id, accountId);
     // The judgements as they stand now: the latest review's, with later Check threads runs over it.
     const current = (await currentThreadAssessmentsForPrs(ctx, accountId, [id])).get(id)?.assessments ?? null;
+    // TEAM CLAIMS (team-claim.ts): a skip in memory at the synced head, and the pending Limn line a
+    // Clear would replace. DB + memory only.
+    const syncedHead = review?.head?.currentHeadSha ?? (await getReviewPrContext(ctx, id, accountId))?.headSha ?? null;
+    const teamClaimSkip = teamClaimSkipFor(accountId, id, syncedHead);
+    const teamClaimPending = await teamClaimPendingFor(ctx, accountId, id, syncedHead, autoReview != null).catch(() => null);
     return {
       enabled: true,
       auth: auth.status,
@@ -231,8 +239,60 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
       currentThreadAssessmentCounts: current ? threadAssessmentCounts(current) : null,
       // The stored row only (live progress is the thread-check GET's — this route stays DB-only).
       threadCheck: await getLatestThreadCheck(ctx, accountId, id).then((r) => (r ? threadCheckWire(r) : null)),
+      teamClaimSkip,
+      teamClaimPending,
     };
   });
+
+  // CLEAR a pending Limn line (team claims): post "Cleared by <login>" — a success line every Limn
+  // reads as free — on the PR's CURRENT synced head for one provider's context. A GitHub write:
+  // rate tier `github_write`; never retried. The tab refetches its own query afterwards.
+  app.post(
+    '/api/prs/:id/claude-review/team-claim/clear',
+    {
+      schema: {
+        ...idParam,
+        body: {
+          type: 'object',
+          required: ['provider'],
+          additionalProperties: false,
+          properties: { provider: { type: 'string', enum: ['claude', 'codex'] } },
+        },
+      },
+    },
+    async (req, reply): Promise<ClearTeamClaimResponse> => {
+      const { id } = req.params as { id: number };
+      const body = req.body as ClearTeamClaimBody;
+      if (!AGENTIC_AI_ENABLED) {
+        reply.status(404);
+        return { ok: false, error: 'error', message: 'AI features are off.' };
+      }
+      const accountId = ctx.accountIdOf(req);
+      const prCtx = await getReviewPrContext(ctx, id, accountId);
+      if (!prCtx) {
+        reply.status(404);
+        return { ok: false, error: 'error', message: `PR ${id} not found` };
+      }
+      if (!prCtx.headSha) {
+        reply.status(400);
+        return { ok: false, error: 'no_head', message: 'PR has no head commit yet.' };
+      }
+      const res = await clearTeamClaim(ctx, {
+        accountId,
+        prId: id,
+        owner: prCtx.owner,
+        name: prCtx.name,
+        number: prCtx.number,
+        headSha: prCtx.headSha,
+        provider: body.provider,
+      });
+      if (!res.ok) {
+        reply.status(res.error === 'no_access' ? 403 : 502);
+        return { ok: false, error: res.error, message: res.message };
+      }
+      return { ok: true };
+    },
+  );
 
   // ⚠ `GET`/`PUT /api/claude-review/key` ARE DELETED, AND MUST NOT COME BACK. The BYO Anthropic
   // key that lived in `~/.pierre-review/config.json` is RETIRED: local Claude Review resolves
@@ -433,7 +493,19 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
       if (!AGENTIC_AI_ENABLED) return { states: [] };
       const accountId = ctx.accountIdOf(req);
       const stored = await getLatestReviewStates(ctx, unique, accountId, isFixRunning);
-      return { states: withAutoHolds(stored, unique, accountId) };
+      const states = withAutoHolds(stored, unique, accountId);
+      // TEAM CLAIMS: PRs skipped because a teammate's Limn holds the synced head (memory; the head
+      // is read only for PRs with a remembered skip).
+      const remembered = unique.filter((prId) => teamClaimSkipFor(accountId, prId, null) != null);
+      if (remembered.length === 0) return { states };
+      const heads = await Promise.all(
+        remembered.map(async (prId) => ({
+          prId,
+          headSha: (await getReviewPrContext(ctx, prId, accountId).catch(() => null))?.headSha ?? null,
+        })),
+      );
+      const teamClaimSkips = teamClaimSkipsFor(accountId, heads);
+      return teamClaimSkips.length > 0 ? { states, teamClaimSkips } : { states };
     },
   );
 

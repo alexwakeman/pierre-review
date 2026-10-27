@@ -130,7 +130,7 @@ export function PrTicketBranchLine({
  *  Default branches strip's vocabulary: passed / failing / running, and a total on the right.
  *  `failing` folds `failure` + `error`; neutral / skipped / unknown get no pill but count in the
  *  total, exactly as an `unknown` trunk counts in that strip's repo count. */
-export function checksSummaryCounts(checks: readonly { state: string }[]): {
+export function checksSummaryCounts(checks: readonly { state: string; limnOwned?: true }[]): {
   passed: number;
   failing: number;
   running: number;
@@ -139,12 +139,16 @@ export function checksSummaryCounts(checks: readonly { state: string }[]): {
   let passed = 0;
   let failing = 0;
   let running = 0;
+  let total = 0;
   for (const c of checks) {
+    // Limn's own team-claim lines are listed, never counted as CI (shared limn-status.ts).
+    if (c.limnOwned) continue;
+    total++;
     if (c.state === 'success') passed++;
     else if (c.state === 'failure' || c.state === 'error') failing++;
     else if (c.state === 'pending') running++;
   }
-  return { passed, failing, running, total: checks.length };
+  return { passed, failing, running, total };
 }
 
 /** The Checks row: ONE summary line (chevron + pills + "N checks"), the whole line the toggle,
@@ -156,7 +160,7 @@ export function ChecksSummary({
   children,
   defaultOpen = false,
 }: {
-  checks: readonly { state: string }[];
+  checks: readonly { state: string; limnOwned?: true }[];
   children?: React.ReactNode;
   defaultOpen?: boolean;
 }): JSX.Element {
@@ -577,7 +581,9 @@ export function ChecksTab({
   // what the one-fact-one-place rule is for.
   const queue = showVerdict ? pendingQueueBadge(pr) : null;
   const checks = pr.checkRuns;
+  // Limn's own team-claim lines are LISTED (with a "Limn" label) but never counted as CI.
   const counts = checks.reduce<Record<string, number>>((acc, c) => {
+    if (c.limnOwned) return acc;
     acc[c.state] = (acc[c.state] ?? 0) + 1;
     return acc;
   }, {});

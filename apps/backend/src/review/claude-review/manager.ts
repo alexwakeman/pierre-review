@@ -70,6 +70,16 @@ import {
   type ReviewPrContext,
 } from './persist.js';
 import { emitClaudeReviewCompleted } from '../../platform/event-hooks.js';
+import type { AutoPostOutcome } from './auto-post.js';
+import {
+  claimBeforeAutoRun,
+  finishTeamClaim,
+  postedReviewUrl,
+  saveTeamClaimRecord,
+  startTeamClaimRenew,
+  stopTeamClaimRenew,
+  type TeamClaimHandle,
+} from './team-claim.js';
 import { ensureSonarSnapshot } from '../../sonar/snapshot.js';
 
 // The Claude Review queue/concurrency/SSE manager (CORE, free, local-only) — the analog of the
@@ -112,6 +122,9 @@ interface QueueItem {
   // A FROM-SCRATCH run (`GenerateReviewBody.fresh`, manual only): it reads NO earlier review — no
   // follow-up chain, no settled list, no carried thread judgements. Never set on an auto run.
   fresh?: boolean;
+  // TEAM CLAIMS (team-claim.ts): the GitHub status line this AUTO run holds (or why it has none).
+  // Renewed while the run goes; its final line is posted when the run ends. Never on a manual run.
+  teamClaim?: TeamClaimHandle;
 }
 
 // An AUTO request waiting for a slot. Deliberately NOT a QueueItem: it has no row yet, so nothing
@@ -392,6 +405,8 @@ async function startAutoItem(a: AutoItem): Promise<void> {
   const { ctx, accountId, prId } = a;
   claimed.add(prId);
   let launched = false;
+  // A claim posted before the row could be written is released ("free to claim") below.
+  let teamClaim: TeamClaimHandle | null = null;
   try {
     // AI went away since the sweep (runtime removed, signed out): drop the item BEFORE its row
     // exists, or the PR's one automatic review is spent on a failure (ai-ready.ts).
@@ -411,8 +426,19 @@ async function startAutoItem(a: AutoItem): Promise<void> {
     const model = DEFAULT_CLAUDE_REVIEW_MODEL;
     // An AUTOMATIC run goes to the DEFAULT provider (Settings → AI), read now.
     const provider = activeProviderId();
+    // TEAM CLAIMS ("Mark auto reviews on GitHub", team-claim.ts): a teammate's Limn already holds
+    // this head for this provider ⇒ drop the item with NO row (a skip is not a failure: no retry
+    // count, no daily-cap use; the tab shows it from memory). Otherwise claim it. Never throws.
+    const claim = await claimBeforeAutoRun(
+      ctx,
+      { accountId, prId, owner: prCtx.owner, name: prCtx.name, number: prCtx.number, headSha: prCtx.headSha, provider },
+      { pressed: a.pressed === true },
+    );
+    if (claim.kind === 'skip') return;
+    teamClaim = claim.kind === 'run' ? claim.handle : null;
     // No stories: the PR's tickets are checked by the ticket review's own sweep, never here.
     const reviewId = await insertQueuedReview(ctx, prId, prCtx.headSha, model, accountId, [], 'auto', provider);
+    if (teamClaim) await saveTeamClaimRecord(ctx, reviewId, teamClaim.record).catch(() => {});
     reviewIdByPr.set(prId, reviewId);
     startingAuto.delete(prId);
     launched = true;
@@ -426,6 +452,7 @@ async function startAutoItem(a: AutoItem): Promise<void> {
       headSha: prCtx.headSha,
       prCtx,
       trigger: 'auto',
+      ...(teamClaim ? { teamClaim } : {}),
     });
     try {
       autoLaunchHook?.(ctx, accountId, prId);
@@ -439,6 +466,7 @@ async function startAutoItem(a: AutoItem): Promise<void> {
     );
   } finally {
     if (!launched) {
+      if (teamClaim) void finishTeamClaim(ctx, teamClaim, null, { kind: 'unfinished' });
       startingAuto.delete(prId);
       claimed.delete(prId);
       pump();
@@ -459,9 +487,16 @@ function launch(item: QueueItem): void {
     emitReviewStream(prId, { type: 'progress', status: 'running', reviewId, progress });
   };
   emit({ phase: 'fetching_diff' });
+  // TEAM CLAIMS: renew the pending line while the run goes; the final line is posted in `finally`.
+  if (item.teamClaim) startTeamClaimRenew(ctx, item.teamClaim);
+  let runSucceeded = false;
+  // The auto-post of a succeeded auto run: the team claim's final line waits for it (the comment
+  // count and the posted review's link).
+  let autoPosted: Promise<AutoPostOutcome | null> = Promise.resolve(null);
 
   void runPipeline(item, controller, emit)
     .then((succeeded) => {
+      runSucceeded = succeeded;
       // EVENT HOOK (the Slack "Claude Review ran" signal). Announced for every SUCCEEDED run with
       // its trigger; the listener posts for AUTO runs only (platform/slack/signals.ts) — a run the
       // reader started never reaches Slack. Fire-and-forget, never thrown into the review.
@@ -491,11 +526,12 @@ function launch(item: QueueItem): void {
       if (succeeded && item.trigger === 'auto') {
         // AUTO-POSTING: post the run's findings to GitHub when the workspace switched it on
         // (./auto-post.ts decides; it never throws and never retries). Independent of the fix.
-        void import('./auto-post.js')
+        autoPosted = import('./auto-post.js')
           .then((m) => m.maybeAutoPostReview(ctx, { accountId: item.accountId, prId, reviewId }))
-          .catch((err) =>
-            ctx.log.warn(`auto post pr ${prId}: ${err instanceof Error ? err.message : String(err)}`),
-          );
+          .catch((err) => {
+            ctx.log.warn(`auto post pr ${prId}: ${err instanceof Error ? err.message : String(err)}`);
+            return null;
+          });
         // The head's SonarCloud issues as ONE PR comment, under the same switch (its own kind).
         void import('../../sonar/post.js')
           .then((m) => m.maybeAutoPostSonar(ctx, { accountId: item.accountId, prId, headSha: item.headSha }))
@@ -524,6 +560,11 @@ function launch(item: QueueItem): void {
       );
     })
     .finally(() => {
+      if (item.teamClaim) {
+        const handle = item.teamClaim;
+        stopTeamClaimRenew(handle);
+        void finishAutoRunClaim(ctx, item, handle, runSucceeded, autoPosted);
+      }
       runningItems.delete(prId);
       reviewIdByPr.delete(prId);
       controllers.delete(reviewId);
@@ -537,6 +578,37 @@ function launch(item: QueueItem): void {
       pump();
       pumpPeers();
     });
+}
+
+/** The team claim's final line for an ended auto run (team-claim.ts steps 4-5). Never throws. */
+async function finishAutoRunClaim(
+  ctx: AgentContext,
+  item: QueueItem,
+  handle: TeamClaimHandle,
+  succeeded: boolean,
+  autoPosted: Promise<AutoPostOutcome | null>,
+): Promise<void> {
+  try {
+    if (!succeeded) {
+      await finishTeamClaim(ctx, handle, item.reviewId, { kind: 'unfinished' });
+      return;
+    }
+    const out = await autoPosted;
+    let comments: number | null = null;
+    let reviewUrl: string | null = null;
+    if (out?.kind === 'done' && out.record.postedFindingIds.length > 0) {
+      comments = out.record.postedFindingIds.length;
+      reviewUrl = postedReviewUrl(item.prCtx.owner, item.prCtx.name, item.prCtx.number, out.record.githubReviewId);
+    } else {
+      const { getClaudeReviewById } = await import('./persist.js');
+      const review = await getClaudeReviewById(ctx, item.reviewId, item.accountId);
+      // Nothing to say at all reads "no comments"; anything kept local reads "kept in Limn".
+      if (review && review.findings.filter((f) => f.severity !== 'praise').length === 0) comments = 0;
+    }
+    await finishTeamClaim(ctx, handle, item.reviewId, { kind: 'succeeded', comments, reviewUrl });
+  } catch (err) {
+    ctx.log.warn(`team claim pr ${item.prId}: ${err instanceof Error ? err.message : String(err)}`);
+  }
 }
 
 async function runPipeline(

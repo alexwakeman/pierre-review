@@ -1,5 +1,5 @@
 import type { MouseEvent, ReactNode } from 'react';
-import type { CiReviewState, ClaudeReviewPrState } from '@pierre-review/shared';
+import type { CiReviewState, ClaudeReviewPrState, ClaudeTeamClaimSkip } from '@pierre-review/shared';
 import {
   isAutoReviewHoldError,
   useClaudeReviewStarting,
@@ -105,9 +105,12 @@ export function ClaudeReviewPanel({
   onOpenFix,
   ticketPills = [],
   ciState,
+  teamClaimSkip,
 }: {
   prId: number;
   state: ClaudeReviewPrState | undefined;
+  // TEAM CLAIMS: a teammate's Limn holds this PR's head, so the auto review here was skipped.
+  teamClaimSkip?: Pick<ClaudeTeamClaimSkip, 'kind' | 'login'> | null;
   // The CI review's state for this PR: "2 CI failures explained" while current, "Checking CI…".
   ciState?: CiReviewState;
   onOpenReview: () => void;
@@ -156,6 +159,12 @@ export function ClaudeReviewPanel({
         <button type="button" onClick={open} className={`${VERDICT_PILL} ${SEVERITY_CLASS.blocker} ${OUTCOME_LINK}`}>
           Review failed
         </button>
+      ) : teamClaimSkip ? (
+        <span className="text-xs text-ai-muted">
+          {teamClaimSkip.kind === 'reviewed'
+            ? `Reviewed by @${teamClaimSkip.login}`
+            : `Being reviewed by @${teamClaimSkip.login}`}
+        </span>
       ) : (
         <span className="text-xs text-ai-muted">Not reviewed</span>
       );

@@ -88,6 +88,11 @@
 // header. ⚠ WHO counts as a trigger is decided in the candidate read: only a person or a REVIEW
 // bot's comment (db/queries.ts `reReviewCommentAuthorFilter`).
 //
+// TEAM CLAIMS ("Mark auto reviews on GitHub", team-claim.ts). When on, the lane checks the head's
+// `limn/review-<provider>` status before a run's row is written: a teammate's Limn holding it drops
+// the item with NO row (not a failure). The sweeper then holds that PR (`teamClaimHeldHead`) until
+// the remembered skip's recheck time, unless the synced head moved; a press reads GitHub afresh.
+//
 // AUTO FIX. When an auto run succeeds on the reader's OWN PR, manager.ts hands it to
 // coding/ai-fix/auto-fix.ts, which may start a review-seeded fix (never pushed).
 //
@@ -108,6 +113,7 @@ import {
 } from './auto-retry.js';
 import { automaticRunAllowed } from '../budget-gate.js';
 import { listAutoReviewWorkspaces } from './auto-settings.js';
+import { teamClaimHeldHead } from './team-claim.js';
 import {
   autoLaneRoom,
   autoPendingPrIds,
@@ -275,6 +281,11 @@ async function routeCommentBurst(
   }
 }
 
+async function syncedHeadOf(ctx: AgentContext, accountId: number, prId: number): Promise<string | null> {
+  const { getReviewPrContext } = await import('./persist.js');
+  return (await getReviewPrContext(ctx, prId, accountId).catch(() => null))?.headSha ?? null;
+}
+
 async function repoOfPr(ctx: AgentContext, accountId: number, prId: number): Promise<number> {
   const { getCiPrContext } = await import('../ci-review/persist.js');
   return (await getCiPrContext(ctx, accountId, prId))?.repoId ?? 0;
@@ -403,9 +414,19 @@ export async function runAutoReviewSweep(
         ]),
       ].filter((id) => waiting.has(id)).length;
       let budget = ws.dailyCap - res.autoToday - waitingHere;
+      // TEAM CLAIMS: a PR a teammate's Limn holds at its synced head waits for its recheck time
+      // without taking a lane place (team-claim.ts). A press reads GitHub afresh.
+      const heldByTeammate = async (prId: number, headSha?: string | null): Promise<boolean> => {
+        if (pressed) return false;
+        const held = teamClaimHeldHead(ws.accountId, prId, nowMs);
+        if (held == null) return false;
+        const head = headSha ?? (await syncedHeadOf(ctx, ws.accountId, prId));
+        return head === held;
+      };
       for (const prId of res.prIds) {
         if (!only(prId)) continue;
         if (waiting.has(prId)) continue;
+        if (await heldByTeammate(prId)) continue;
         if (budget <= 0) {
           result.capped = true;
           break;
@@ -433,6 +454,7 @@ export async function runAutoReviewSweep(
       let providerNow: 'claude' | 'codex' | null = null;
       for (const cand of res.retry ?? []) {
         if (!only(cand.prId) || waiting.has(cand.prId)) continue;
+        if (await heldByTeammate(cand.prId, cand.headSha)) continue;
         providerNow ??= await currentProviderOf().catch(() => cand.provider);
         // The usage reading's reset, read only when the rule could need it (a usage limit whose
         // error names no time, on the same provider).
@@ -590,6 +612,7 @@ export async function runAutoReviewSweep(
           continue;
         }
         waitingNow.delete(k); // due: from here it is queued, or waits on the daily cap / lane
+        if (await heldByTeammate(prId, headSha)) continue;
         if (budget <= 0) {
           result.capped = true;
           continue;

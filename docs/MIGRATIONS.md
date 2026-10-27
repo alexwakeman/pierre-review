@@ -1188,6 +1188,14 @@ Additive. Joins `accountScopedTables()`, the erasure and the export. [CLAUDE-REV
 § Sprint code judgements. Journal `when` sqlite `1792137619016`. (Parallel branches may also have taken
 `0132`; renumber on merge like `0131`.)
 
+### `0134_team_claims` — "Mark auto reviews on GitHub"
+`ALTER TABLE workspaces ADD team_claims_enabled integer` (NULL/0 = OFF, the default; only a stored true
+is on) and `ALTER TABLE claude_reviews ADD team_claim text` (JSON `ClaudeTeamClaimRecord`: what the
+team claim did for one AUTO run; NULL = no claim attempted). Additive; both ride existing tables, so
+the erasure and the export already cover them. [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Team claims.
+Journal `when` sqlite `1792137621016`. (Reserved for this batch; renumber on merge if a sibling branch
+took `0134` too.)
+
 ### No migration — "Check against code" removed (2026-10-18): `sprint_ticket_repos` + `sprint_assessments` DORMANT
 
 The sprint drawer, its repo picker and "Check against code" (`review/sprint-assess/`) were removed with

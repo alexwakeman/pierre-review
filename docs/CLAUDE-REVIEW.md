@@ -1959,6 +1959,62 @@ repeated on, and cleared on off, so nothing opened while it was off is picked up
   Claude Review tab's header, running row and History options
   (`ClaudeReview`/`ClaudeReviewSummary.trigger`). The Feed's Claude item is not labelled.
 
+## Team claims ("Mark auto reviews on GitHub", 2026-10-27)
+
+For teams where more than one person runs Limn with auto review on the same repos. Per workspace, OFF
+by default (`workspaces.team_claims_enabled`, migration 0134; Settings → Auto review, under the
+auto-review switch, with an ⓘ). Code: `review/claude-review/team-claim.ts` (the one module), wired in
+`manager.ts` `startAutoItem` / `launch` and `auto.ts` (the sweeper's hold).
+
+- **AUTO REVIEWS ONLY** — the minute tick AND the reader's "Run auto reviews now" / Retry. A manual run
+  never claims and never checks claims.
+- **ONE CONTEXT PER PROVIDER FAMILY**, keyed by the RUN's provider: `limn/review-claude`,
+  `limn/review-codex`. A teammate reviewing with Claude never holds the head for a Codex run.
+- **THE LINES** (≤ 140 characters, plain English, naming the GitHub login):
+  pending "alex is reviewing with Claude" (the claim, re-posted every 8 min while the run goes) →
+  success "alex reviewed · 4 comments" (`target_url` = the auto-posted GitHub review, built from our
+  own stored ids and validated) or "alex reviewed · kept in Limn" (nothing posted) / "· no comments" →
+  on a failure or a Stop, pending "alex's review didn't finish · free to claim" (the reader chose
+  PENDING on failure, not red: a red line would read as broken CI). "Cleared by alex" (success) is the
+  reader's Clear.
+- **THE ONE FOLD** (`decideTeamClaim`, pure, unit-tested) over the context's history. WHO and WHEN come
+  from GitHub (`creator.login`, `created_at`), never from the description; only the two free phrases
+  ("free to claim", "Cleared by") are read back. The newest line settles it: a success by someone else
+  ⇒ skip "already reviewed by @x" (mine, or a Clear, is free); failure/error ⇒ free. Under a pending
+  line, the claimants since the last settling line race: those whose NEWEST line is inside the
+  25-minute lease are live, and the one whose FIRST line is earliest (created_at, then id) holds the
+  head ⇒ skip "being reviewed by @x" (or mine ⇒ free to re-claim).
+- **CLAIM, THEN RE-READ.** Free ⇒ post the pending line, re-read, fold again. A loser stands down and
+  re-posts the winner's description, so GitHub's displayed latest line names the winner.
+- ⚠ **A SKIP IS NOT A FAILURE AND WRITES NO ROW** — no retry count, no failure, no daily-cap use. It is
+  remembered IN MEMORY per PR (`teamClaimSkipFor`), shown on the AI Review tab ("Auto review skipped:
+  being reviewed by @bob") and the Open PRs panel ("Being reviewed by @bob",
+  `ClaudeReviewStatesResponse.teamClaimSkips`). The sweeper holds such a PR (no lane place) until the
+  holder's lease ends + 30 s ("reviewing") or 30 min ("reviewed"), unless the synced head moved; a
+  reader's press reads GitHub afresh. A restart forgets it and re-reads once.
+- ⚠ **NEVER BLOCKS A RUN ON GITHUB.** History unreadable ⇒ run without a line (logged). A write GitHub
+  refuses (403/404, no write access) ⇒ run without a line (`teamClaim.state 'unmarked'`, reason
+  `no_access`); others' lines read in step 1 are still honoured. A status write is NEVER retried (a
+  renew is a new line). The renew timer is cleared on every exit path (`launch`'s `finally`), and a
+  claim posted before the row could be written is released ("free to claim").
+- **THE RECORD** on the run row (`claude_reviews.team_claim`): "Marked on GitHub" / "Not marked on
+  GitHub: no write access" on the tab.
+- **CLEAR** (`POST /api/prs/:id/claude-review/team-claim/clear {provider}`, tier `github_write`): shown
+  when a pending Limn line sits on the PR's head — a teammate's live claim, or this machine's unfinished
+  run. Posts "Cleared by <login>" at the current synced head. A new commit also frees the PR (claims are
+  per commit).
+- ⚠ **LIMN'S LINES ARE NEVER CI** (always on, no setting): shared `isLimnStatusContext` (`limn/` prefix)
+  and `rollupStateWithoutLimn`. The PR head's stored `ci_status` (`ciStatusFromHead` in sync/upsert.ts —
+  My Turn's ci_failing card, the CI-failure feed, dependency auto-merge's red-CI gate, the merge
+  verdict), the `ci_status_events` failing set, the auto-merge runner's live rollup
+  (`fetchPrHeadCheckRollup`, now selecting contexts), the CI review's checks (`fetchCommitChecks`) and
+  trunk's failing set (`failingChecksFrom`) all leave them out. The PR details pane still LISTS them
+  (`CheckRun.limnOwned`, a small "Limn" label) and never counts them. ⚠ Known gap: trunk's commit-level
+  rollup state and the one-time CI-history backfill read GitHub's rollup WITHOUT contexts, so a Limn
+  line on a fast-forwarded trunk commit is still counted there.
+- If a team marks `limn/review-*` as REQUIRED in branch protection, a lapsed or unfinished line blocks
+  merges — don't.
+
 ## The Slack "Claude Review ran" signal
 
 When a run SUCCEEDS — manual or auto — `manager.ts`'s `launch` calls core
