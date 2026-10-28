@@ -4,7 +4,7 @@
 // say they are?" It exists because the Pending board is built entirely from synced rows — which
 // is the whole reason it can render fifty cards without fifty fetches — and a PR merged, closed
 // or unblocked by SOMEBODY ELSE therefore keeps its card until the adaptive walk comes round to
-// that repo (hot 120s / warm 300s / cold 900s, plus the cron tick).
+// that repo (on change, after a free probe every 20s-5 min — sync/adaptive.ts).
 //
 // Modelled on github/reactions.ts, which is the precedent for a batched on-demand `nodes(ids:)`
 // read that spends the tenant's quota on a hot surface: `isLimited` before asking, `noteBudget`

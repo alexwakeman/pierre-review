@@ -166,11 +166,12 @@ export const config = {
   // pool), so a modest pool safely cuts the dominant sync stage.
   commitFileConcurrency: intFromEnv('COMMIT_FILE_CONCURRENCY', 10),
   // The scheduler TICK, not the per-repo cadence. Under adaptive polling the tick must be
-  // faster than the hot bucket (syncHotIntervalSec, 120s) or the due-check can never grant
-  // it — a */5 tick would pin every repo to 5 min and throw away the freshness half of
-  // Phase 2 — so adaptive defaults the tick to every minute and lets isDue() decide what
-  // actually syncs. Non-adaptive keeps the classic fixed */5 re-walk. SYNC_CRON overrides.
-  syncCron: process.env.SYNC_CRON ?? (syncAdaptive ? '*/1 * * * *' : '*/5 * * * *'),
+  // faster than the hot bucket (syncHotIntervalSec, 20s) or the due-check can never grant
+  // it, so adaptive defaults the tick to every TEN SECONDS (node-cron's six-field form) and
+  // lets isDue() decide what actually syncs. A tick that 304s costs no rate limit, and a tick
+  // never starts while the previous one is still running (sync-manager.ts). Non-adaptive keeps
+  // the classic fixed */5 re-walk. An explicit SYNC_CRON always wins.
+  syncCron: process.env.SYNC_CRON ?? (syncAdaptive ? '*/10 * * * * *' : '*/5 * * * *'),
   syncOverlapMinutes: intFromEnv('SYNC_OVERLAP_MINUTES', 20),
   // The time zone Chronology counts working hours in for a workspace that never set one
   // (packages/shared/src/flow-settings.ts). See resolveDefaultWorkTimezone.
@@ -182,20 +183,33 @@ export const config = {
   webhookDebounceMs: intFromEnv('WEBHOOK_DEBOUNCE_MS', 4000),
 
   // Resolved above (default ON). When on, the scheduler's per-repo pass
-  // becomes adaptive: the tick runs every minute but a repo only syncs when it's DUE for
+  // becomes adaptive: the tick runs every ten seconds but a repo only syncs when it's DUE for
   // its activity bucket, and — for incremental syncs — a cheap conditional REST probe runs
   // first, skipping the fat GraphQL walk when nothing changed (a 304 costs no rate limit).
   syncAdaptive,
-  // Per-bucket minimum seconds between sync attempts. A repo is "hot" when a PR changed
-  // within the last hour, "warm" within 6h, else "cold" (windows are constants in
-  // sync/adaptive.ts). Fresher where activity is; backs off when quiet.
-  syncHotIntervalSec: intFromEnv('SYNC_HOT_INTERVAL_SEC', 120),
-  syncWarmIntervalSec: intFromEnv('SYNC_WARM_INTERVAL_SEC', 300),
-  syncColdIntervalSec: intFromEnv('SYNC_COLD_INTERVAL_SEC', 900),
-  // The conditional probe can't see CI-finish / thread-resolve (they don't bump a PR's
-  // updatedAt), so force a full re-walk at least this often even when the probe says
-  // "unchanged" — the floor that keeps those signals fresh. SYNC_FLOOR_INTERVAL_SEC.
-  syncFloorIntervalSec: intFromEnv('SYNC_FLOOR_INTERVAL_SEC', 1800),
+  // Per-bucket minimum seconds between sync attempts (a free 304 probe unless something
+  // changed). A repo is "hot" when a PR changed within the last hour, "warm" within 6h, else
+  // "cold" (windows are constants in sync/adaptive.ts). Fresher where activity is.
+  syncHotIntervalSec: intFromEnv('SYNC_HOT_INTERVAL_SEC', 20),
+  syncWarmIntervalSec: intFromEnv('SYNC_WARM_INTERVAL_SEC', 60),
+  syncColdIntervalSec: intFromEnv('SYNC_COLD_INTERVAL_SEC', 300),
+  // THE WALK CAP: a probe's 200 marks a repo dirty, and the scheduler walks a dirty repo at most
+  // once per this many seconds (as soon as the cap allows — the change is never lost). Manual
+  // sync, the first-sync two-phase, backfills and the viewed-PR refresh are not capped.
+  syncMinWalkIntervalSec: intFromEnv('SYNC_MIN_WALK_INTERVAL_SEC', 60),
+  // THE INSURANCE WALK: force a full incremental walk at least this often even when the probe
+  // says "unchanged" (default 3h). It uses the same `since` window, so it does NOT catch
+  // updatedAt-silent changes — the settle sweep below does. SYNC_FLOOR_INTERVAL_SEC (the name is
+  // historical; it was the 30-minute re-walk floor).
+  syncFloorIntervalSec: intFromEnv('SYNC_FLOOR_INTERVAL_SEC', 3 * 60 * 60),
+  // THE SETTLE SWEEP (sync/settle-sweep.ts): one aliased ~1-point-per-repo GraphQL read of every
+  // open PR's head, CI rollup and unresolved-thread count, compared with the stored rows; only
+  // PRs that differ are re-synced. Every SYNC_SETTLE_INTERVAL_SEC for hot and warm repos,
+  // SYNC_SETTLE_COLD_INTERVAL_SEC for cold ones; at most SYNC_SETTLE_MAX_PR_SYNCS single-PR
+  // syncs per sweep (the rest wait for the next one).
+  syncSettleIntervalSec: intFromEnv('SYNC_SETTLE_INTERVAL_SEC', 5 * 60),
+  syncSettleColdIntervalSec: intFromEnv('SYNC_SETTLE_COLD_INTERVAL_SEC', 15 * 60),
+  syncSettleMaxPrSyncs: intFromEnv('SYNC_SETTLE_MAX_PR_SYNCS', 20),
   stallThresholdDays: intFromEnv('STALL_THRESHOLD_DAYS', 3),
   // ---- Retention / TTL ----
   // Per-account server data doesn't grow forever: a periodic sweep prunes PRs (and their

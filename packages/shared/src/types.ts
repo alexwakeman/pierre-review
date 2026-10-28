@@ -2454,6 +2454,10 @@ export interface Repo {
   workspaceId: number;
   // Server-side time (ISO) any board-visible PR column in this repo last changed; in-memory, so absent after a restart.
   lastPrChangeAt?: string;
+  // Server-side time (ISO) GitHub last answered for this repo — a free change probe, a scheduled
+  // walk or a settle read. Walks run only on change, so this, not lastIncrementalSyncAt, says
+  // how fresh a quiet repo is. In-memory, so absent after a restart (and in the static demo).
+  lastCheckedAt?: string;
 }
 
 // ---- Workspaces (CORE) ----

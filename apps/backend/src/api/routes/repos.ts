@@ -48,6 +48,7 @@ import {
 } from '../../db/queries.js';
 import { getBranchStatus, getBranchTrends } from '../../db/branch-queries.js';
 import { withPrChangeSignal } from '../../sync/pr-change-signal.js';
+import { withLastChecked } from '../../sync/adaptive.js';
 import { accountIdOf } from '../plugins/auth.js';
 
 // Local copy of the shared MAX_REPOS_PER_ACCOUNT value. `@pierre-review/shared` is
@@ -111,10 +112,12 @@ function parseIntList(raw: string | undefined): number[] | null {
 export async function repoRoutes(app: FastifyInstance): Promise<void> {
   // `lastPrChangeAt` rides the listing so the SPA's existing 30s `['repos']` poll learns about a
   // PR change made OUTSIDE a walk (a webhook, a post-write settle, a backstop re-read) — see
-  // sync/pr-change-signal.ts. In-memory, account-keyed, optional on the wire.
+  // sync/pr-change-signal.ts. In-memory, account-keyed, optional on the wire. `lastCheckedAt`
+  // likewise (sync/adaptive.ts): when GitHub last answered for the repo — the header's
+  // "Last checked", since a quiet repo is now walked only on change.
   app.get('/api/repos', async (req) => {
     const accountId = accountIdOf(req);
-    return withPrChangeSignal(accountId, await listRepos(accountId));
+    return withLastChecked(withPrChangeSignal(accountId, await listRepos(accountId)));
   });
 
   // Default-branch status ("is trunk green?") for every repo in the active WORKSPACE: the head

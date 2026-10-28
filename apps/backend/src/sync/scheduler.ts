@@ -24,8 +24,9 @@ let trackerTask: ScheduledTask | null = null;
 // node-cron handles for plugin-registered background jobs (Slack digest cron, AI update policy).
 let proJobTasks: ScheduledTask[] = [];
 
-// node-cron incremental sync loop. Idempotent upserts make overlapping windows
-// safe; syncAllRepos skips any repo already mid-sync.
+// node-cron incremental sync loop — every 10s by default under adaptive polling (six-field cron).
+// Idempotent upserts make overlapping windows safe; syncAllRepos skips any repo already
+// mid-sync, and a tick that finds the previous tick still running returns at once (no pile-up).
 export function startScheduler(log: FastifyBaseLogger): void {
   if (task) return;
   if (!cron.validate(config.syncCron)) {

@@ -22,6 +22,10 @@ vi.mock('../config.js', () => ({
     syncWarmIntervalSec: 300,
     syncColdIntervalSec: 900,
     syncFloorIntervalSec: 1800,
+    syncMinWalkIntervalSec: 60,
+    syncSettleIntervalSec: 300,
+    syncSettleColdIntervalSec: 900,
+    syncSettleMaxPrSyncs: 20,
   },
 }));
 vi.mock('../auth/account.js', () => ({

@@ -10,6 +10,7 @@ import {
   isDue,
   noteAttempt,
   noteWalkFailure,
+  noteWalkStart,
   noteWalkSuccess,
   recordFullWalk,
 } from './adaptive.js';
@@ -23,6 +24,21 @@ const { repos, syncState, accounts } = schema;
 // In-memory record of which repos are mid-sync (status isn't persisted as
 // "running" — it lives only for the lifetime of the process).
 const running = new Set<number>();
+
+// Repos the SCHEDULER is probing right now (the free conditional REST probe, before it has
+// decided to walk). Deliberately NOT `running`: at a 10-second tick a repo is probed every 20s,
+// and a probe that read as `running` would (a) flash "syncing" on every status poll and (b)
+// refuse a person's "Sync now" with a 409 for the probe's few hundred milliseconds. A probe that
+// decides to walk moves the repo into `running` synchronously (re-checking it first), so a
+// manual sync that started during the probe wins and the probe stands down.
+// `isSyncRunning` still counts it: the delete route must not remove a repo a probe is about to
+// walk (the walk's upsertRepo would resurrect it).
+const probing = new Set<number>();
+
+// True while a scheduled tick (syncAllRepos) is in progress. A tick never starts while the
+// previous one is still running — at a 10-second cron that would pile loops up behind one slow
+// walk. Claimed synchronously, released in a `finally`.
+let tickInFlight = false;
 
 // Repos currently undergoing a user-initiated FULL ("deep") sync. The deep button
 // fires a forced full sync on every repo at once; they finish at different times.
@@ -171,7 +187,7 @@ function clearSyncProgress(repoId: number): void {
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export function isSyncRunning(repoId: number): boolean {
-  return running.has(repoId);
+  return running.has(repoId) || probing.has(repoId);
 }
 
 export async function getSyncStatus(repoId: number): Promise<SyncStatus | null> {
@@ -678,8 +694,29 @@ export async function enqueueSyncForRepo(
   return true;
 }
 
-/** Incrementally sync every configured repo (used by the scheduler). */
+/**
+ * Incrementally sync every configured repo (used by the scheduler, every 10s by default).
+ *
+ * ⚠ ONE TICK AT A TIME. A tick that finds the previous one still running returns at once: the
+ * loop is sequential, so a slow walk delays the next tick instead of piling a second loop on top
+ * of it (which would also double every repo's probe).
+ */
 export async function syncAllRepos(log: Logger): Promise<void> {
+  if (tickInFlight) return;
+  tickInFlight = true;
+  try {
+    await runScheduledTick(log);
+  } finally {
+    tickInFlight = false;
+  }
+}
+
+/** Test-only: is a scheduled tick in progress? */
+export function __isScheduledTickInFlight(): boolean {
+  return tickInFlight;
+}
+
+async function runScheduledTick(log: Logger): Promise<void> {
   // Stand down entirely while a deep (forced-full) sync is in progress. Resuming
   // a repo incrementally the instant its deep sync finishes would reset its
   // progress bar mid-session; idempotent upserts + the overlap window mean the
@@ -690,20 +727,35 @@ export async function syncAllRepos(log: Logger): Promise<void> {
     );
     return;
   }
+  // THE SETTLE SWEEP (sync/settle-sweep.ts) — the updatedAt-SILENT half of freshness (CI
+  // finishing, a thread resolved, the trunk moving under open PRs). FIRE-AND-FORGET with its own
+  // one-at-a-time claim, so a ~1-point-per-repo read and its few single-PR syncs never hold up
+  // the probes below. It reads only repos whose settle interval is due; free otherwise.
+  if (config.syncAdaptive) {
+    try {
+      const { runSettleSweep } = await import('./settle-sweep.js');
+      void runSettleSweep({ log, isBusy: (id) => running.has(id) || queuedRepos.has(id) });
+    } catch (err) {
+      log.warn(
+        `settle sweep failed to start (non-fatal): ${err instanceof Error ? err.message : err}`,
+      );
+    }
+  }
   // Every repo, every tick (the adaptive due-check below decides which actually walk).
   const all = await db.select({ id: repos.id }).from(repos).execute();
   for (const r of all) {
     // Skip repos mid-sync AND repos waiting in the API queue — the queue will run them,
     // and a scheduler-started incremental would reset their honest 'queued' row.
-    if (running.has(r.id) || queuedRepos.has(r.id)) continue;
-    // Adaptive (config.syncAdaptive, ON BY DEFAULT — the tick is every
-    // MINUTE, so this due-check is the only thing between a repo and 60 walks an hour):
-    // skip repos not yet due for their activity bucket, widened by the health backoff after
-    // consecutive failures. Cheap, no I/O — before reserving the slot or fetching a token.
+    if (running.has(r.id) || queuedRepos.has(r.id) || probing.has(r.id)) continue;
+    // Adaptive (config.syncAdaptive, ON BY DEFAULT — the tick is every TEN SECONDS, so this
+    // due-check is the only thing between a repo and 360 attempts an hour): skip repos not yet
+    // due for their activity bucket, widened by the health backoff after consecutive failures.
+    // Cheap, no I/O — before reserving anything or fetching a token.
     if (config.syncAdaptive && !isDue(r.id, Date.now())) continue;
-    // Reserve the slot synchronously before the now-async getRepoRow/planSync
-    // awaits below so a concurrent tick doesn't double-start this repo.
-    running.add(r.id);
+    // Reserve the PROBE slot synchronously before the now-async getRepoRow/planSync awaits
+    // below, so a concurrent caller sees the repo as busy (isSyncRunning) — but NOT as a running
+    // sync (see `probing`). Moved into `running` only once a walk is decided.
+    probing.add(r.id);
     // ⚠ STAMP THE ATTEMPT FOR EVERY SCHEDULED SYNC, WHATEVER THE MODE, BEFORE ANY AWAIT.
     // decideIncrementalWalk stamps the incremental branch, and for a long time that was the
     // ONLY writer — so a repo pinned in FULL mode (which is exactly what a repo whose first
@@ -711,13 +763,17 @@ export async function syncAllRepos(log: Logger): Promise<void> {
     // forever. This is the floor that makes that structurally impossible; the backoff below
     // is what makes the interval sane.
     noteAttempt(r.id, Date.now());
+    // Did THIS iteration take the `running` slot? Only then may the `finally` release it — a
+    // manual sync that started while we probed owns its own slot.
+    let walking = false;
     try {
       const repo = (await getRepoRow(r.id))!;
       const token = await getAccessToken(repo.accountId);
       const plan = await planSync(r.id);
       // Adaptive: for an INCREMENTAL sync, probe a cheap conditional request first and skip
-      // the fat GraphQL walk when nothing changed (304, free) and the re-walk floor isn't
-      // due. First backfills (mode 'full') always walk. The `finally` releases the slot.
+      // the fat GraphQL walk when nothing changed (304, free) and the insurance walk isn't
+      // due; a change is walked at most once per walk cap (adaptive.ts). First backfills
+      // (mode 'full') always walk. The `finally` releases the slot.
       if (config.syncAdaptive && plan.mode === 'incremental') {
         const decision = await decideIncrementalWalk(
           r.id,
@@ -730,13 +786,19 @@ export async function syncAllRepos(log: Logger): Promise<void> {
           // into MORE walks — the opposite of what a limited token needs).
           repo.accountId,
         );
-        if (!decision.walk) {
-          log.info(
-            `scheduled sync ${repo.owner}/${repo.name} skipped (${decision.reason})`,
-          );
-          continue;
-        }
+        // No log line for a skip: at a 10-second tick an idle workspace would print one per
+        // probe. A walk logs itself.
+        if (!decision.walk) continue;
       }
+      // The walk decision is made; a manual sync (or a queued one) may have started while we
+      // probed. It wins — this tick stands down for the repo. Checked and claimed with no await
+      // in between, so exactly one of the two walks.
+      if (running.has(r.id) || queuedRepos.has(r.id)) continue;
+      running.add(r.id);
+      walking = true;
+      probing.delete(r.id);
+      const walkStartedAt = Date.now();
+      if (config.syncAdaptive) noteWalkStart(r.id, walkStartedAt);
       setSyncProgress(r.id, {
         percent: 0,
         prsProcessed: 0,
@@ -761,8 +823,8 @@ export async function syncAllRepos(log: Logger): Promise<void> {
           setSyncProgress(r.id, { ...p, mode: plan.mode, sinceMs: plan.since.getTime() }),
         shouldCancel: () => cancelRequested.has(r.id),
       });
-      // Adaptive: reset the re-walk floor now that a full walk has completed.
-      if (config.syncAdaptive) recordFullWalk(r.id, Date.now());
+      // Adaptive: reset the insurance clock, and clear the dirty flag the walk covered.
+      if (config.syncAdaptive) recordFullWalk(r.id, Date.now(), walkStartedAt);
       // ...and clear any health backoff: this repo is readable again.
       noteWalkSuccess(r.id, Date.now());
       // Chronology's review-request history for merged PRs the walk never revisits. The
@@ -799,7 +861,7 @@ export async function syncAllRepos(log: Logger): Promise<void> {
         );
       }
       // The unsettled-PR backstop, as on the manual tail: merge state stored unknown and CI stuck
-      // `pending` are updatedAt-silent, so the 30-min floor walk's `since` window cannot see them.
+      // `pending` are updatedAt-silent, so no walk's `since` window can see them.
       // FIRE-AND-FORGET — this loop is sequential per tick, and a ~5s merge-state read must not
       // delay every other repo's walk. Never throws; free when there is nothing to re-read.
       if (!cancelRequested.has(r.id)) {
@@ -815,7 +877,7 @@ export async function syncAllRepos(log: Logger): Promise<void> {
     } catch (err) {
       // Health backoff: a repo we cannot read must not be retried at the cadence of a
       // healthy one. The count is the ONLY thing that widens the interval past its activity
-      // bucket (a first-sighted repo reads HOT, i.e. 120s), so this line is load-bearing —
+      // bucket (a first-sighted repo reads HOT, i.e. 20s), so this line is load-bearing —
       // and the error itself is already on sync_state via knownRepoId, so the UI can say so.
       const failures = noteWalkFailure(r.id, Date.now());
       log.error(
@@ -824,9 +886,12 @@ export async function syncAllRepos(log: Logger): Promise<void> {
           `${err instanceof Error ? err.message : err}`,
       );
     } finally {
-      running.delete(r.id);
-      cancelRequested.delete(r.id);
-      clearSyncProgress(r.id);
+      probing.delete(r.id);
+      if (walking) {
+        running.delete(r.id);
+        cancelRequested.delete(r.id);
+        clearSyncProgress(r.id);
+      }
     }
   }
 }

@@ -36,7 +36,7 @@ overlapping runs and re-walks never create duplicates.
 
 | Trigger | Entry point | Notes |
 |---|---|---|
-| **Scheduled** | `scheduler.ts` → `syncAllRepos()` | `node-cron` at `config.syncCron` (default `*/5 * * * *`). Disabled by `DISABLE_SCHEDULER=true`. |
+| **Scheduled** | `scheduler.ts` → `syncAllRepos()` | `node-cron` at `config.syncCron` (default `*/10 * * * * *` — every ten seconds — under adaptive polling, `*/5 * * * *` without). One tick at a time: a tick that finds the previous one running returns at once. Each due repo gets a free conditional probe; a walk only on change (≤ once/60s per repo) or the 3h insurance walk. Each tick also kicks the settle sweep ([REALTIME-SYNC.md § The settle sweep](REALTIME-SYNC.md#settle-sweep)). Disabled by `DISABLE_SCHEDULER=true`. |
 | **Repo added** | `POST /api/repos` → `runSyncForRepo(…, {background:true})` | The repo has no `syncState` yet → a first **full backfill**. |
 | **Manual / deep sync** | `POST /api/repos/:id/sync?full=true` → `runSyncForRepo` | `?full=true` forces a full re-sync (`forceFull`). |
 
@@ -163,10 +163,12 @@ aren't missed; idempotent upserts make the re-fetch duplicate-free.
 > does **not** bump a PR's `updatedAt` for every signal we care about (a CI run finishing,
 > GitHub finishing its mergeability computation, a review thread being resolved). The walk
 > stops at the first PR with `updatedAt < since`, so a PR whose only change is one of those
-> is never re-read by a walk — the 30-min re-walk floor included, since it uses the same
-> window. Those signals arrive another way: the unsettled-PR backstop after every walk
-> (merge state and stale CI, below), the post-write settle ladder, and the open PR pane's live refresh
-> ([REALTIME-SYNC.md § Post-write settle](REALTIME-SYNC.md#post-write-settle)).
+> is never re-read by a walk — the 3h insurance walk included, since it uses the same
+> window. Those signals arrive another way: the SETTLE SWEEP (every 5-15 min, ~1 point per repo:
+> head, CI and unresolved threads compared for every open PR, plus the trunk head —
+> [REALTIME-SYNC.md § The settle sweep](REALTIME-SYNC.md#settle-sweep)), the unsettled-PR backstop
+> after every walk (merge state and stale CI, below), the post-write settle ladder, and the open PR
+> pane's live refresh ([REALTIME-SYNC.md § Post-write settle](REALTIME-SYNC.md#post-write-settle)).
 
 ---
 
@@ -353,10 +355,13 @@ All via env (see `config.ts`); defaults in parentheses.
 | `BACKFILL_DAYS` | `90` | How far back the first full sync reaches. |
 | `FOREGROUND_SYNC_DAYS` | `14` | Two-phase phase-1 window (must be `< BACKFILL_DAYS` to two-phase). |
 | `SYNC_OVERLAP_MINUTES` | `20` | Trailing re-fetch window on incremental syncs. |
-| `SYNC_CRON` | `*/1` (`*/5` if adaptive is off) | Scheduler **tick**. Under adaptive polling this is not the per-repo cadence — it's how often the due-check runs; the bucket intervals decide what actually syncs. Setting it explicitly overrides the adaptive default, which keeps the old cadence. |
+| `SYNC_CRON` | `*/10 * * * * *` (`*/5 * * * *` if adaptive is off) | Scheduler **tick** (six-field = with seconds). Under adaptive polling this is not the per-repo cadence — it's how often the due-check runs; the bucket intervals decide what actually syncs. Setting it explicitly overrides the adaptive default, which keeps the old cadence. |
 | `SYNC_ADAPTIVE` | `true` | Adaptive cadence + conditional probe ([REALTIME-SYNC.md](REALTIME-SYNC.md) Phase 2) — the primary sync strategy. `false` restores the fixed-clock re-walk. |
-| `SYNC_HOT/WARM/COLD_INTERVAL_SEC` | `120` / `300` / `900` | Min seconds between attempts per activity bucket (adaptive only). |
-| `SYNC_FLOOR_INTERVAL_SEC` | `1800` | Force a re-walk this often even when the probe says unchanged — bounds how long a quiet repo goes unwalked. ⚠ It uses the same `since` window, so it does NOT catch changes that leave `updatedAt` alone (CI finishing, mergeability computed); the unsettled-PR backstop ([REALTIME-SYNC.md § Post-write settle](REALTIME-SYNC.md#post-write-settle)) does. |
+| `SYNC_HOT/WARM/COLD_INTERVAL_SEC` | `20` / `60` / `300` | Min seconds between free probes per activity bucket (adaptive only). |
+| `SYNC_MIN_WALK_INTERVAL_SEC` | `60` | The walk cap: a probe's 200 marks the repo dirty, and the scheduler walks it at most this often (as soon as the cap allows). Manual sync, first-sync, backfills and the PR-pane refresh are not capped. |
+| `SYNC_FLOOR_INTERVAL_SEC` | `10800` (3h) | The INSURANCE walk: force a walk this often even when the probe says unchanged (it was the 30-min floor). ⚠ Same `since` window, so it does NOT catch changes that leave `updatedAt` alone; the settle sweep does. |
+| `SYNC_SETTLE_INTERVAL_SEC` / `SYNC_SETTLE_COLD_INTERVAL_SEC` | `300` / `900` | Settle sweep cadence for hot+warm / cold repos. |
+| `SYNC_SETTLE_MAX_PR_SYNCS` | `20` | Single-PR syncs per settle sweep; the rest wait for the next one. |
 | `COMMIT_FILE_CONCURRENCY` | `10` | Concurrent commit-file REST fetches per page. |
 | `CI_HISTORY_BACKFILL` | `true` | The one-time post-full-sync CI-history backfill (trunk trend window + synthesized PR CI events). `false` disables both halves. |
 | `DISABLE_SCHEDULER` | `false` | Turn the cron loop off (scripts/tests). |
