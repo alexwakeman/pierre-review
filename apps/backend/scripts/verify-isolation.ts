@@ -4318,6 +4318,38 @@ check(
   }
   check("a docs-chat row naming B's workspace under account A is refused by the composite FK", chatFkRefused);
 
+  // WIKI SOURCES (migration 0140): both accounts' documents get a page row under the SAME page id, and
+  // both workspaces a Confluence credential for the SAME site, so a dropped predicate has something to leak.
+  const wp = await import('../src/reference-docs/wiki/pages.js');
+  const wc = await import('../src/reference-docs/wiki/credentials.js');
+  for (const acct of [1, 2] as const) {
+    await wp.commitWikiPages(acct, acct === 1 ? defaultA : defaultB, 'handbook', ids[acct]!, [
+      { pageId: '1001', parentPageId: null, depth: 0, position: 0, title: `Page ${acct}`, version: acct, lastEditedAt: null, contentHash: `h${acct}`, lastFetchedAt: null, lastError: null, markdown: `text ${acct}` },
+    ]);
+    await wc.writeWikiCredentials(acct, acct === 1 ? defaultA : defaultB, 'confluence', { siteUrl: 'https://acme.atlassian.net', email: `me${acct}@acme.test`, token: `tok-${acct}` }, {});
+  }
+  check("listWikiPages(A, B's doc id) is empty", (await wp.listWikiPages(1, bId)).length === 0);
+  check("listWikiPages(B, B's doc id) is B's (mutation check)", (await wp.listWikiPages(2, bId))[0]?.title === 'Page 2');
+  check("deleteWikiPages(A, B's doc id) deletes nothing", (await wp.deleteWikiPages(1, bId)) === 0);
+  await wp.commitWikiPages(1, defaultA, 'handbook', bId, []);
+  check("commitWikiPages(A, B's doc id, []) leaves B's pages", (await wp.listWikiPages(2, bId)).length === 1);
+  let wikiFkRefused = false;
+  try {
+    await wp.commitWikiPages(1, defaultA, 'handbook', bId, [
+      { pageId: '666', parentPageId: null, depth: 0, position: 0, title: 'evil', version: 1, lastEditedAt: null, contentHash: null, lastFetchedAt: null, lastError: null },
+    ]);
+  } catch {
+    wikiFkRefused = true;
+  }
+  check("a wiki page row naming B's document under account A is refused by the composite FK", wikiFkRefused);
+  const credA = await wc.resolveWikiCredential(1, defaultA, { provider: 'confluence', host: 'acme.atlassian.net' }, {});
+  check("resolveWikiCredential(A, A's workspace) opens A's token only", credA.state === 'ok' && credA.credential.token === 'tok-1');
+  check("resolveWikiCredential(A, B's workspace) finds nothing", (await wc.resolveWikiCredential(1, defaultB, { provider: 'confluence', host: 'acme.atlassian.net' }, {})).state === 'none');
+  check("readWikiCredentialsSettings(A, B's workspace) shows no saved token", (await wc.readWikiCredentialsSettings(1, defaultB)).confluence.hasToken === false);
+  await wc.writeWikiCredentials(1, defaultB, 'confluence', { token: 'evil' }, {}).catch(() => {});
+  const credB = await wc.resolveWikiCredential(2, defaultB, { provider: 'confluence', host: 'acme.atlassian.net' }, {});
+  check("B's Confluence token survives A's write naming B's workspace", credB.state === 'ok' && credB.credential.token === 'tok-2');
+
   const Fastify = (await import('fastify')).default;
   const rapp = Fastify({ logger: false });
   registerReferenceDocsRoutes(rapp, {
@@ -4337,8 +4369,14 @@ check(
     ['GET', `/api/workspaces/${defaultB}/docs-settings`],
     ['PUT', `/api/workspaces/${defaultB}/docs-settings`],
     ['GET', `/api/docs/chats/${CONV}?workspace=${defaultB}`],
+    ['POST', `/api/docs/${bId}/refresh`],
+    ['GET', `/api/workspaces/${defaultB}/wiki-credentials`],
+    ['PUT', `/api/workspaces/${defaultB}/wiki-credentials`],
+    ['POST', `/api/workspaces/${defaultB}/wiki-credentials/check`],
   ] as const) {
-    const res = await rapp.inject({ method, url, ...(method === 'PUT' ? { payload: { docsInReview: false } } : {}) });
+    const payload =
+      method === 'PUT' ? (url.endsWith('/wiki-credentials') ? { confluence: { token: 'evil' } } : { docsInReview: false }) : undefined;
+    const res = await rapp.inject({ method, url, ...(payload ? { payload } : {}) });
     // The conversation lookup falls back to A's default workspace, where A has its own turn: 200 with A's.
     if (url.startsWith('/api/docs/chats/')) {
       check(`${method} ${url} as A → A's own conversation, never B's`, res.statusCode === 200 && !res.body.includes('"q2"'));
