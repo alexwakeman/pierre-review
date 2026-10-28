@@ -3,6 +3,7 @@ import type { FastifyBaseLogger } from 'fastify';
 import { db, runTransaction, schema } from './client.js';
 import { config } from '../config.js';
 import { pruneTicketReviewsForPrs } from './ticket-review-prune.js';
+import { pruneOrphanTicketComments } from './ticket-comments-prune.js';
 import { pruneCiReviewsForPrs } from './ci-review-prune.js';
 import { pruneSequenceDiagramsForPrs } from './sequence-diagram-prune.js';
 import { deleteSettledClaimLinesForPrs } from './team-claim-lines-delete.js';
@@ -126,6 +127,8 @@ async function deletePrSubtree(
   // Stored tracker tickets (core since migration 0088 / pg 0075; the plugin's `pruneProByPrIds`
   // used to take them). No FKs — explicit, pr-keyed.
   await tx.delete(schema.trackerTickets).where(inArray(schema.trackerTickets.prId, prIds)).execute();
+  // Their tickets' comments (migration 0142), once no PR names the ticket (db/ticket-comments-prune.ts).
+  await pruneOrphanTicketComments(tx, null);
   // SonarCloud snapshots (migration 0114 / pg 0101). No FKs — explicit, pr-keyed.
   await tx.delete(schema.sonarSnapshots).where(inArray(schema.sonarSnapshots.prId, prIds)).execute();
   // The team-claim ledger (migration 0138). No FKs — explicit, pr-keyed. This machine's OPEN rows

@@ -3,7 +3,8 @@
 //   StoryDisclosure  — the collapsible "Story" in each Story check block (TicketCoverage.tsx) and the
 //                      "As written in Jira" of the Story section (Activity/TicketStorySection.tsx):
 //                      the key linked to Jira, the title, description and acceptance criteria, and
-//                      for a Jira ticket the field the criteria come from, with the picker.
+//                      for a Jira ticket the field the criteria come from, with the picker, and the
+//                      people's comments, collapsed (TicketComments.tsx).
 //   (The Open PRs ticket-key modal is GONE, 2026-10-18: the key opens the story view instead,
 //    whose Story section carries this disclosure.)
 //
@@ -22,6 +23,7 @@ import { useSetJiraAcField, useStoredJiraTicket } from '../hooks/useJiraTicket.j
 import { AcFieldPicker } from './ClaudeReviewFollowUp.js';
 import { JiraStoryView, StoryText } from './ClaudeReviewTickets.js';
 import { ChevronIcon, ExternalLinkIcon } from './Icons.js';
+import { TicketComments } from './TicketComments.js';
 
 const MUTED = 'text-gray-500 dark:text-gray-400';
 const ERROR_TEXT = 'text-red-600 dark:text-red-400';
@@ -59,56 +61,60 @@ function JiraStory({
   const chosen = pulledAcField(data);
   const draft = jiraStoryFromDetails(jiraRef, data, chosen);
   return (
-    <JiraStoryView
-      capHeight={false}
-      draft={draft}
-      fieldControl={
-        <div className="space-y-1">
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
-            <span className={MUTED}>Criteria from:</span>
-            <span className="font-medium text-gray-800 dark:text-gray-200">{acFieldText(draft)}</span>
-            {!fixedSource && (
-            <button
-              type="button"
-              onClick={() => setPicking((p) => !p)}
-              disabled={setField.isPending}
-              aria-expanded={picking}
-              className={LINK_BTN}
-            >
-              Change
-            </button>
-            )}
-            {setField.isPending && <span className={MUTED}>Saving…</span>}
-          </div>
-          {picking && (
-            <div className="rounded border border-gray-200 p-2 dark:border-gray-800">
-              <AcFieldPicker
-                fetched={{ details: data, site: jiraSiteOf(jiraRef.url), chosen }}
-                allowNone={false}
+    <div className="space-y-2">
+      <JiraStoryView
+        capHeight={false}
+        draft={draft}
+        fieldControl={
+          <div className="space-y-1">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+              <span className={MUTED}>Criteria from:</span>
+              <span className="font-medium text-gray-800 dark:text-gray-200">{acFieldText(draft)}</span>
+              {!fixedSource && (
+              <button
+                type="button"
+                onClick={() => setPicking((p) => !p)}
                 disabled={setField.isPending}
-                onChoose={(id) => {
-                  if (id === '' || id === chosen) return;
-                  setField.mutate(id, { onSuccess: () => setPicking(false) });
-                }}
-              />
-              {data.acFieldSource === 'setting' && (
-                <button
-                  type="button"
-                  onClick={() => setField.mutate(null, { onSuccess: () => setPicking(false) })}
-                  disabled={setField.isPending}
-                  className={`mt-1.5 ${BTN}`}
-                >
-                  Reset to default
-                </button>
+                aria-expanded={picking}
+                className={LINK_BTN}
+              >
+                Change
+              </button>
               )}
+              {setField.isPending && <span className={MUTED}>Saving…</span>}
             </div>
-          )}
-          {setField.isError && (
-            <p className={`text-xs ${ERROR_TEXT}`}>{setField.error.message || 'Could not save the field.'}</p>
-          )}
-        </div>
-      }
-    />
+            {picking && (
+              <div className="rounded border border-gray-200 p-2 dark:border-gray-800">
+                <AcFieldPicker
+                  fetched={{ details: data, site: jiraSiteOf(jiraRef.url), chosen }}
+                  allowNone={false}
+                  disabled={setField.isPending}
+                  onChoose={(id) => {
+                    if (id === '' || id === chosen) return;
+                    setField.mutate(id, { onSuccess: () => setPicking(false) });
+                  }}
+                />
+                {data.acFieldSource === 'setting' && (
+                  <button
+                    type="button"
+                    onClick={() => setField.mutate(null, { onSuccess: () => setPicking(false) })}
+                    disabled={setField.isPending}
+                    className={`mt-1.5 ${BTN}`}
+                  >
+                    Reset to default
+                  </button>
+                )}
+              </div>
+            )}
+            {setField.isError && (
+              <p className={`text-xs ${ERROR_TEXT}`}>{setField.error.message || 'Could not save the field.'}</p>
+            )}
+          </div>
+        }
+      />
+      {/* The people's comments, from the same stored read (docs/TRACKERS.md § Ticket comments). */}
+      <TicketComments comments={data.comments} />
+    </div>
   );
 }
 

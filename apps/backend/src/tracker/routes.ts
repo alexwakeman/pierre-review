@@ -36,6 +36,7 @@ import {
   writeAcFieldSetting,
   type StoredTicketRow,
 } from './store.js';
+import { peopleComments, readTicketComments, toWireComment } from './comments.js';
 import { accessFingerprint, backoffCode, kickTrackerSync, syncOnePrNow } from './worker.js';
 import { registerTicketLinksRoute } from './links.js';
 import { registerTicketMergedPrsRoute } from './merged.js';
@@ -438,15 +439,22 @@ async function storedRow(
   return rows.find((r) => r.issueKey === key && r.apiRoot === apiRoot) ?? null;
 }
 
-/** A stored row → the ticket, or the refusal it remembers as a 502 with our own sentence. */
-function answerRow(
+/** A stored row → the ticket (with its people's comments, DB only), or the refusal it remembers as a
+ *  502 with our own sentence. */
+async function answerRow(
   ctx: TrackerContext,
   reply: FastifyReply,
   accountId: number,
   gate: Gate,
   row: StoredTicketRow | null,
-): JiraTicketDetails | FastifyReply {
-  if (row != null && hasContent(row)) return toDetails(gate.prId, row);
+): Promise<JiraTicketDetails | FastifyReply> {
+  if (row != null && hasContent(row)) {
+    // Comments never fail the ticket: an unreadable store answers the ticket without them.
+    const comments = await readTicketComments(ctx, accountId, row)
+      .then((rows) => peopleComments(rows).map(toWireComment))
+      .catch(() => []);
+    return { ...toDetails(gate.prId, row), comments };
+  }
   // Nothing readable: the remembered refusal, or the error that put the workspace in backoff (no
   // row is written for a workspace-wide refusal).
   const code = (row?.errorCode ??

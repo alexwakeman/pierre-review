@@ -342,6 +342,8 @@ describe('3. the ticket route is not a Jira proxy', () => {
       statusCategory: null,
       assignee: null,
       fetchedAt: expect.any(String),
+      // The people's comments (none stored here; docs/TRACKERS.md § Ticket comments).
+      comments: [],
     });
     expect(calls).toHaveLength(1);
     // ⚠ READ ONCE, THEN STORED: the second view makes no Jira call.

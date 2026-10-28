@@ -1264,6 +1264,20 @@ pages before their documents) and the export (the credential WITHOUT its token);
 removes the page rows explicitly too. No backfill. Journal `idx` 140, `when` sqlite `1792137627016`
 (0139 is left for a parallel branch; renumber at integration if needed).
 
+### `0142_tracker_ticket_comments` + `0143_ticket_review_comments_seen` — ticket comments
+`0142` creates the CORE table `tracker_ticket_comments`: one row per `(account_id, provider, api_root,
+issue_key, comment_id)` — per TICKET, never per PR — with author name + id, `is_bot`, markdown `body`,
+`created_at` / `updated_at` / `fetched_at`, and the unique index every upsert targets
+(`tracker_ticket_comments_ticket_comment`). No FKs (the `tracker_tickets` precedent): the worker's key
+prune and BOTH PR delete paths remove comments of tickets no `tracker_tickets` row names
+(`db/ticket-comments-prune.ts`); the erasure and `accountScopedTables()` take it explicitly. `0143` adds
+the nullable `ticket_reviews.comments_seen` (JSON `{ids, count, hash}`), kept OUT of the fingerprint.
+Split in two so a test schema can build the tracker table without `ticket_reviews`. Additive, no
+backfill: comments arrive on each ticket's next read. ⚠ Numbered 0142/0143 because parallel branches held
+0139–0141; renumber (file, tag, journal `idx`) at integration if those land differently.
+[TRACKERS.md](TRACKERS.md) § Ticket comments. Journal `idx` 142 / 143, `when` sqlite `1792137629016` /
+`1792137630016`.
+
 ### No migration — "Check against code" removed (2026-10-18): `sprint_ticket_repos` + `sprint_assessments` DORMANT
 
 The sprint drawer, its repo picker and "Check against code" (`review/sprint-assess/`) were removed with

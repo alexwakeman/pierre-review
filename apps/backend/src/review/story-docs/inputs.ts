@@ -6,6 +6,7 @@ import {
   type ClaudeReviewTicket,
   type StoryDocsCriteriaSource,
   type StoryDocsCriterion,
+  type TicketComment,
   type TicketStoryResponse,
 } from '@pierre-review/shared';
 import type { AgentContext } from '../agent-context.js';
@@ -20,6 +21,8 @@ import type { AgentContext } from '../agent-context.js';
 //     3. else none: Claude works them out from the description (stored with the run).
 //   STORY TEXT (the "As written" block's order): the tracker's stored story (`jiraStoryFor`), else the
 //   latest succeeded ticket review's ticket snapshot, else the sprint read's stored text.
+//   COMMENTS: the people's comments on the ticket (docs/TRACKERS.md § Ticket comments), given to the
+//   read in their own fence. ⚠ NOT in `storyHash`: a new comment never makes a docs check stale.
 //
 // DB + disk only — no tracker call, no model. Every source is a SEAM so the fold is tested on a fake.
 
@@ -35,6 +38,8 @@ export interface StoryDocsInputs {
   story: StoryText;
   criteriaSource: StoryDocsCriteriaSource;
   criteria: StoryDocsCriterion[];
+  /** The people's comments on the ticket, oldest first ([] when none stored). Not hashed. */
+  comments: TicketComment[];
   storyHash: string;
   criteriaHash: string;
   /** No story text and no criteria: the POST refuses `no_story`. */
@@ -51,6 +56,8 @@ export interface StoryDocsInputSeams {
   ticketReviewTicket(ctx: AgentContext, accountId: number, id: number): Promise<ClaudeReviewTicket | null>;
   trackerStory(accountId: number, ident: string): Promise<ClaudeReviewTicket | null>;
   sprintStory(accountId: number, workspaceId: number, ident: string): Promise<TicketStoryResponse | null>;
+  /** The people's comments on the ticket, oldest first. Optional so a test seam may leave it out. */
+  trackerComments?(accountId: number, ident: string): Promise<TicketComment[]>;
 }
 
 export const defaultInputSeams: StoryDocsInputSeams = {
@@ -67,6 +74,10 @@ export const defaultInputSeams: StoryDocsInputSeams = {
   async trackerStory(accountId, ident) {
     const { jiraStoryFor } = await import('../ticket-review/prepare.js');
     return jiraStoryFor(accountId, ident);
+  },
+  async trackerComments(accountId, ident) {
+    const { ticketCommentsFor } = await import('../ticket-review/prepare.js');
+    return ticketCommentsFor(accountId, ident);
   },
   async sprintStory(accountId, workspaceId, ident) {
     const { getTicketStory } = await import('../../db/sprint-graph.js');
@@ -150,12 +161,14 @@ export async function resolveStoryDocsInputs(
     }
   }
   const text: StoryText = story ?? { title: null, description: '', acceptanceCriteria: '' };
+  const comments = (await seams.trackerComments?.(accountId, ident).catch(() => [])) ?? [];
   return {
     ident,
     ticketKey: parsed.key,
     story: text,
     criteriaSource,
     criteria,
+    comments,
     storyHash: storyHashOf(text),
     criteriaHash: criteriaHashOf(criteriaSource, criteria),
     // A title alone is not enough to check against anything when there are no criteria either.

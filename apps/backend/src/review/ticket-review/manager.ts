@@ -57,7 +57,9 @@ import {
   memberRepos,
   prepareMemberWorktrees,
   resolveTicketInputs,
+  ticketCommentsFor,
 } from './prepare.js';
+import { commentsSeenOf } from '../../tracker/comments.js';
 import {
   ticketReviewSystemPrompt,
   buildTicketReviewPrompt,
@@ -373,6 +375,10 @@ async function runPipeline(
   }
   const { ticket, ticketHash: hash, members } = inputs;
   const fp = fingerprint(hash, members);
+  // The people's comments on the ticket (docs/TRACKERS.md § Ticket comments) — a tracker ticket only.
+  // ⚠ NOT in the hash or the fingerprint: the run stores what it saw (`commentsSeen`) so the SPA can
+  // say "n new comments since this check" without a comment ever re-billing an automatic run.
+  const comments = await ticketCommentsFor(accountId, job.ident);
   const repos = await memberRepos(ctx, accountId, members);
   await markTicketReviewRunning(ctx, accountId, runId, {
     ticket,
@@ -380,6 +386,7 @@ async function runPipeline(
     fingerprint: fp,
     prCount: members.length,
     members: members.map((m) => ({ ...m, checkedOut: false })),
+    commentsSeen: isTrackerIdent(parseTicketIdent(job.ident)) ? commentsSeenOf(comments) : null,
   });
 
   const located = members
@@ -562,7 +569,7 @@ async function runPipeline(
             };
           })()
         : null;
-    const nonce = pickReviewNonce(ticketReviewUntrustedTexts(ticket, promptMembers, promptPrior, legacy));
+    const nonce = pickReviewNonce(ticketReviewUntrustedTexts(ticket, promptMembers, promptPrior, legacy, comments));
     const prompt = buildTicketReviewPrompt({
       ticket,
       members: promptMembers,
@@ -570,6 +577,7 @@ async function runPipeline(
       legacy,
       nonce,
       defaultBranches,
+      comments,
     }, words);
     scratch = mkdtempSync(join(tmpdir(), 'pierre-ticket-review-'));
     writeFileSync(join(scratch, 'MEMBERS.md'), membersIndex(promptMembers), 'utf8');

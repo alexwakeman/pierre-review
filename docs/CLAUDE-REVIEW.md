@@ -1770,6 +1770,11 @@ does the SET of PRs naming one ticket deliver its acceptance criteria. New PR-re
 `ticket`, `ticket_assessment` or story findings; `submit_review` has no `tickets` field; the start
 route strips a stale `ticket`/`tickets` key. Wire contract: [API.md](API.md) § Ticket review.
 
+- **Ticket comments** ([TRACKERS.md](TRACKERS.md) § Ticket comments): a tracker ticket's people
+  comments ride the prompt in their own `TICKET COMMENTS` fence (oldest first, ≤ 6000 chars, newest
+  kept), with a system-prompt rule (discussion, may change scope, cite author + date, never a
+  requirement alone). Outside the fingerprint: a run stores `comments_seen` and the state's
+  `newComments` says "n new comments since this check" — a comment never re-bills an automatic run.
 - **Keyed per TICKET, not per PR.** Ident `<provider>:<root>#<KEY>` — `jira:<apiRoot>#<KEY>` today,
   unchanged since the plugin era (members from core's stored tickets, `ticketMembers` — any workspace
   of the account on the same site; [TRACKERS.md](TRACKERS.md) § Peers) or

@@ -10,6 +10,7 @@ import {
 import type { TrackerContext } from './context.js';
 import { inChunks } from './context.js';
 import type { DetectedFrom } from './types.js';
+import { pruneOrphanComments } from './comments.js';
 
 // THE STORED TICKETS (core `tracker_tickets`, migration 0088 / pg 0075 — the plugin's
 // `pro_pr_jira_tickets` until apiVersion 23) — reads, writes and the two derivations every consumer
@@ -317,6 +318,17 @@ export async function deleteStaleKeys(
         and(eq(t.accountId, accountId), eq(t.provider, r.provider), eq(t.apiRoot, r.apiRoot), eq(t.issueKey, r.issueKey)),
       )
       .execute();
+  }
+  // A ticket no PR names any more takes its comments with it (docs/TRACKERS.md § Ticket comments).
+  // Comments never fail a ticket path: a failure here is logged and the rows wait for the next prune.
+  try {
+    await pruneOrphanComments(
+      ctx,
+      accountId,
+      goneRows.map((r) => ({ provider: r.provider, apiRoot: r.apiRoot, issueKey: r.issueKey })),
+    );
+  } catch {
+    ctx.log.warn({ accountId, code: 'comments_prune' }, 'ticket comments not pruned');
   }
   return gone.length;
 }

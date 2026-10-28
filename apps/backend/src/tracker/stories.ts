@@ -16,6 +16,7 @@ import { trackerBaseUrl } from './settings.js';
 import type { JiraTransport } from './jira/fetch.js';
 import { hasContent, readStoredTickets, type StoredTicketRow } from './store.js';
 import { syncOnePrNow } from './worker.js';
+import { clipTicketField } from './clip.js';
 
 // A PR's tickets AS REVIEW STORIES — the stored rows (./store.ts) turned into the clipped, validated
 // `ClaudeReviewTicket` the ticket review judges. Moved from the plugin (jira/resolve-ticket.ts) at
@@ -31,19 +32,7 @@ import { syncOnePrNow } from './worker.js';
 // ⚠ IT NEVER THROWS. Any failure is `null` / an empty list. Logs carry account + workspace + the
 // error CODE only: never the tracker's body, the URL or the token.
 
-const CONTROL_CHARS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g;
-const LONE_SURROGATES = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
-
-/** Trim, drop unstorable characters, then cut to `cap` without splitting a surrogate pair. */
-export function clipTicketField(value: string, cap: number): string {
-  let s = value.replace(CONTROL_CHARS, '').replace(LONE_SURROGATES, '').trim();
-  if (s.length > cap) {
-    s = s.slice(0, cap);
-    if (/[\uD800-\uDBFF]$/.test(s)) s = s.slice(0, -1);
-    s = s.trimEnd();
-  }
-  return s;
-}
+export { clipTicketField };
 
 /** One readable detected ticket of a PR, with the site it was read from. */
 export interface ResolvedPrTicket {

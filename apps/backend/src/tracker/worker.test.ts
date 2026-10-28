@@ -29,11 +29,11 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
-import { jiraAcFields, trackerTickets, workspaceTrackers } from '../db/schema.sqlite.js';
+import { jiraAcFields, trackerTicketComments, trackerTickets, workspaceTrackers } from '../db/schema.sqlite.js';
 import { registerTrackerRoutes } from './routes.js';
 import { resolvePrTickets } from './stories.js';
 import { readStoredTickets } from './store.js';
-import { listChangedTicketIdents, ticketMembers, ticketsForPr, ticketStory } from './peers.js';
+import { listChangedTicketIdents, ticketComments, ticketMembers, ticketsForPr, ticketStory } from './peers.js';
 import {
   enableTrackerWorker,
   FAILED_TTL_MS,
@@ -119,7 +119,10 @@ const now = () => clock;
 const calls: string[] = [];
 
 // Jira's answers, per key. `status` / `assignee` / the criteria fields move between tests.
-const jira = new Map<string, { status?: number; summary?: string; statusName?: string; category?: string; type?: string; created?: string }>();
+const jira = new Map<
+  string,
+  { status?: number; summary?: string; statusName?: string; category?: string; type?: string; created?: string; comment?: unknown }
+>();
 const issueJson = (key: string): string => {
   const j = jira.get(key) ?? {};
   return JSON.stringify({
@@ -135,6 +138,7 @@ const issueJson = (key: string): string => {
       customfield_2: `DoD of ${key}`,
       customfield_3: `Notes of ${key}`,
       ...(j.created != null ? { created: j.created, resolutiondate: null } : {}),
+      ...(j.comment !== undefined ? { comment: j.comment } : {}),
     },
   });
 };
@@ -195,6 +199,7 @@ beforeAll(async () => {
   // The core tracker tables (migration 0088), exactly as a real install has them.
   sqlite.exec(migration('0088_issue_tracker.sql'));
   sqlite.exec(migration('0098_tracker_ticket_dates.sql'));
+  sqlite.exec(migration('0142_tracker_ticket_comments.sql'));
   // The blocking links + status id (migration 0103's tracker_tickets half).
   sqlite.exec('ALTER TABLE tracker_tickets ADD blocked_by_json text; ALTER TABLE tracker_tickets ADD status_id text;');
   // The PR columns the GitHub Issues linker reads (migration 0089).
@@ -212,7 +217,7 @@ beforeAll(async () => {
     accountIdOf: () => accountOfRequest,
     defaultWorkspaceId: async () => 1,
     log: { warn: () => {}, info: () => {}, error: () => {} },
-    schema: { workspaces: coreWorkspaces, workspaceRepos: coreWorkspaceRepos, pullRequests: corePullRequests , trackerTickets, jiraAcFields, workspaceTrackers },
+    schema: { workspaces: coreWorkspaces, workspaceRepos: coreWorkspaceRepos, pullRequests: corePullRequests , trackerTickets, trackerTicketComments, jiraAcFields, workspaceTrackers },
   } as unknown as TrackerContext;
 
   const { default: Fastify } = await import('fastify');
@@ -250,7 +255,7 @@ beforeEach(() => {
   enableTrackerWorker(true);
   accountOfRequest = A;
   clock = Date.UTC(2026, 9, 3, 9, 0);
-  sqlite.exec('DELETE FROM tracker_tickets; DELETE FROM pro_jira_ac_fields;');
+  sqlite.exec('DELETE FROM tracker_tickets; DELETE FROM pro_jira_ac_fields; DELETE FROM tracker_ticket_comments;');
   setPr(10, 'ENG-7 reset password', 'feature/ENG-8-extra');
   setPr(11, 'No ticket', null);
   setPr(12, 'No ticket', null);
@@ -826,5 +831,124 @@ describe('8. merged pull requests', () => {
     expect(keysRead()).toEqual(['ENG-47']);
     expect((await rows(A, [20]))[0]?.state).toBe('ok');
     expect((await rows(A, [21]))[0]?.state).toBe('not_found');
+  });
+});
+
+// ── 9. TICKET COMMENTS (migration 0142; docs/TRACKERS.md § Ticket comments) ───────────────────────
+describe('9. ticket comments', () => {
+  const page = (...cs: Array<{ id: string; who: string; at: string; body: unknown; app?: boolean }>) => ({
+    total: cs.length,
+    maxResults: 50,
+    startAt: 0,
+    comments: cs.map((c) => ({
+      id: c.id,
+      author: { displayName: c.who, accountId: `acc-${c.id}`, ...(c.app ? { accountType: 'app' } : { accountType: 'atlassian' }) },
+      body: c.body,
+      created: c.at,
+      updated: c.at,
+    })),
+  });
+  const ident = 'jira:https://acme.atlassian.net#ENG-7';
+  const stored = () =>
+    sqlite.prepare('SELECT comment_id, is_bot, author_name, body FROM tracker_ticket_comments WHERE account_id = ? ORDER BY created_at').all(A) as Array<{
+      comment_id: string;
+      is_bot: number;
+      author_name: string;
+      body: string;
+    }>;
+
+  it('stored once per TICKET from the same read, bots flagged and left out of what people read', async () => {
+    jira.set('ENG-7', {
+      comment: page(
+        { id: '1', who: 'Dana Lee', at: '2026-09-01T10:00:00.000+0000', body: 'h3. Scope\r\nDrop *PDF*.' },
+        { id: '2', who: 'Automation for Jira', at: '2026-09-02T10:00:00.000+0000', body: 'Moved to In Review', app: true },
+      ),
+    });
+    // Two PRs name ENG-7: one comment set.
+    setPr(11, 'ENG-7 second half', null);
+    await pass();
+    expect(calls.filter((u) => u.includes('ENG-7'))).toHaveLength(1);
+    expect(stored().map((r) => [r.comment_id, r.is_bot, r.author_name])).toEqual([
+      ['1', 0, 'Dana Lee'],
+      ['2', 1, 'Automation for Jira'],
+    ]);
+    expect(stored()[0]!.body).toBe('### Scope\nDrop **PDF**.');
+    const people = await ticketComments(ctx, A, ident);
+    expect(people.map((c) => [c.id, c.author, c.createdAt])).toEqual([['1', 'Dana Lee', '2026-09-01T10:00:00.000Z']]);
+    // Another account sees none of them.
+    expect(await ticketComments(ctx, B, ident)).toEqual([]);
+  });
+
+  it('a new comment is NOT a story change: changed_at stays and the story text is the same', async () => {
+    jira.set('ENG-7', { comment: page({ id: '1', who: 'Dana Lee', at: '2026-09-01T10:00:00.000+0000', body: 'one' }) });
+    await pass();
+    const before = (await rows(A, [10])).find((r) => r.issueKey === 'ENG-7')!;
+    const storyBefore = await ticketStory(ctx, A, ident);
+    jira.set('ENG-7', {
+      comment: page(
+        { id: '1', who: 'Dana Lee', at: '2026-09-01T10:00:00.000+0000', body: 'one' },
+        { id: '3', who: 'Sam Ito', at: '2026-09-03T10:00:00.000+0000', body: 'and the CSV must be UTF-8' },
+      ),
+    });
+    clock += OK_TTL_MS + 1;
+    await pass();
+    const after = (await rows(A, [10])).find((r) => r.issueKey === 'ENG-7')!;
+    expect(after.changedAt).toEqual(before.changedAt);
+    const { fetchedAt: _a, ...textBefore } = storyBefore!;
+    const { fetchedAt: _b, ...textAfter } = (await ticketStory(ctx, A, ident))!;
+    expect(textAfter).toEqual(textBefore);
+    expect((await ticketComments(ctx, A, ident)).map((c) => c.id)).toEqual(['1', '3']);
+  });
+
+  it('a FAILED read keeps the stored comments; an answer without the field keeps them; [] clears them', async () => {
+    jira.set('ENG-7', { comment: page({ id: '1', who: 'Dana Lee', at: '2026-09-01T10:00:00.000+0000', body: 'one' }) });
+    await pass();
+    clock += OK_TTL_MS + 1;
+    jira.set('ENG-7', { status: 500 });
+    await pass();
+    expect(stored().map((r) => r.comment_id)).toEqual(['1']);
+    clock += OK_TTL_MS + 1;
+    jira.set('ENG-7', {});
+    await pass();
+    expect(stored().map((r) => r.comment_id)).toEqual(['1']);
+    clock += OK_TTL_MS + 1;
+    jira.set('ENG-7', { comment: page() });
+    await pass();
+    expect(stored()).toEqual([]);
+  });
+
+  it('keeps the newest 20; a cut-short field reads the newest page once', async () => {
+    const many = Array.from({ length: 25 }, (_, i) => ({
+      id: String(100 + i),
+      who: 'Dana Lee',
+      at: `2026-09-${String(i + 1).padStart(2, '0')}T10:00:00.000+0000`,
+      body: `c${i}`,
+    }));
+    jira.set('ENG-7', { comment: page(...many) });
+    await pass();
+    const ids = stored().map((r) => r.comment_id);
+    expect(ids).toHaveLength(20);
+    expect(ids[0]).toBe('105');
+    expect(ids[19]).toBe('124');
+    // The field cut short (total 30, 25 shown): ONE read of /comment?startAt=10 for the newest page.
+    clock += OK_TTL_MS + 1;
+    calls.length = 0;
+    jira.set('ENG-7', { comment: { ...page(...many), total: 30 } });
+    await pass();
+    expect(calls.filter((u) => u.includes('ENG-7/comment?startAt=10&maxResults=20'))).toHaveLength(1);
+    // That read answered no comment page (the fixture answers the issue): nothing is pruned on a part.
+    expect(stored().map((r) => r.comment_id)).toHaveLength(20);
+  });
+
+  it('the last PR leaving a ticket takes its comments; a ticket still on a PR keeps them', async () => {
+    jira.set('ENG-7', { comment: page({ id: '1', who: 'Dana Lee', at: '2026-09-01T10:00:00.000+0000', body: 'one' }) });
+    setPr(11, 'ENG-7 second half', null);
+    await pass();
+    setPr(10, 'No ticket', null);
+    await pass();
+    expect(stored().map((r) => r.comment_id)).toEqual(['1']);
+    setPr(11, 'No ticket', null);
+    await pass();
+    expect(stored()).toEqual([]);
   });
 });

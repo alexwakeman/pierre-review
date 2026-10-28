@@ -38,6 +38,7 @@ const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const BACKEND = join(ROOT, 'apps', 'backend');
 const FRONTEND = join(ROOT, 'apps', 'frontend');
 const OUT = join(FRONTEND, 'src', 'demo', 'data', 'recording.json');
+// Overridable so two worktrees can record side by side without sharing a database.
 const DB = process.env.RECORD_DB ?? '/tmp/limn-record.sqlite';
 const SCRATCH = process.env.RECORD_SCRATCH ?? '/tmp/limn-record-home';
 const DATA_DIR = join(SCRATCH, 'data');

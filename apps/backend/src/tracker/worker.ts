@@ -16,6 +16,7 @@ import { refreshGithubIssuesUsage } from './github/issues-usage.js';
 import { JiraFetchError, type JiraTransport } from './jira/fetch.js';
 import type { DetectInput, DetectedTicket, LinkerPr, TrackerCall } from './types.js';
 import { ticketDateFields } from './dates.js';
+import { writeTicketComments } from './comments.js';
 import { runSprintReadTick } from './sprint/read.js';
 import { datesOwedFor, noteDatesTried, reopenDatesBackfill, resetDatesBackfill, DATES_BACKFILL_BATCH } from './dates-backfill.js';
 import {
@@ -544,6 +545,14 @@ export async function syncPrTickets(
           checkedAt: at,
           nextCheckAt: new Date(at.getTime() + OK_TTL_MS),
         });
+      }
+      // The ticket's comments, once per TICKET (not per PR), from the same read (docs/TRACKERS.md §
+      // Ticket comments). Not story text: `changedAt` is untouched. A write failure keeps the stored
+      // comments and never fails the ticket.
+      try {
+        await writeTicketComments(ctx, accountId, { provider, apiRoot: wc.apiRoot, issueKey: w.key }, issue.comments, at);
+      } catch (err) {
+        ctx.log.warn({ accountId, workspaceId: w.workspaceId, code: errorCodeOf(err).code, route: 'tracker-worker' }, 'ticket comments not stored');
       }
       stats.fetched += 1;
     } catch (err) {

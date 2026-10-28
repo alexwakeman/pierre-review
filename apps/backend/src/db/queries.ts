@@ -292,6 +292,7 @@ import {
 } from './dependency-cards.js';
 import { deriveSecurityAlerts } from './security-alerts.js';
 import { pruneTicketReviewsForPrs } from './ticket-review-prune.js';
+import { pruneOrphanTicketComments } from './ticket-comments-prune.js';
 import { pruneCiReviewsForPrs } from './ci-review-prune.js';
 import { pruneSequenceDiagramsForPrs } from './sequence-diagram-prune.js';
 import {
@@ -9601,6 +9602,8 @@ export async function deleteRepo(id: number, accountId: number): Promise<boolean
       // Stored tracker tickets (core since migration 0088 / pg 0075; the plugin used to prune them
       // per PR). No FKs, so nothing would cascade.
       await tx.delete(schema.trackerTickets).where(inArray(schema.trackerTickets.prId, prIds)).execute();
+      // Their tickets' comments (migration 0142), once no PR of this account names the ticket.
+      await pruneOrphanTicketComments(tx, [accountId]);
       // SonarCloud snapshots (migration 0114 / pg 0101). No FKs, so nothing would cascade.
       await tx.delete(schema.sonarSnapshots).where(inArray(schema.sonarSnapshots.prId, prIds)).execute();
       // The team-claim ledger (migration 0138). No FKs, so nothing would cascade. This machine's OPEN

@@ -630,6 +630,17 @@ Core since migration `0088`; the contract is [TRACKERS.md](TRACKERS.md).
   `api_root = 'https://github.com'`, `issue_key = 'owner/repo#12'`, and its ident names the repo in
   the root (`github:https://github.com/owner/repo#12`) — convert ONLY through shared
   `trackerTicketIdent` / `trackerTicketRow`.
+- **`tracker_ticket_comments`** (migration `0142`) — ONE row per `(account_id, provider, api_root,
+  issue_key, comment_id)`: a ticket's comment, per TICKET (never per PR): author name + id, `is_bot`,
+  markdown `body` (≤ 4000), `created_at` / `updated_at`, `fetched_at`. The newest 20 per ticket; the
+  worker's ONE writer `writeTicketComments` (`tracker/comments.ts`) upserts on that composite target and
+  deletes the ticket's others — only on a read that carried comments (`[]` clears; a failed read keeps).
+  No FKs: rows of a ticket no `tracker_tickets` row names are pruned by the worker's key prune and BOTH
+  delete paths (`db/ticket-comments-prune.ts`); in `accountScopedTables()`. ⚠ NOT story text — never
+  moves `changed_at` or any hash ([TRACKERS.md](TRACKERS.md) § Ticket comments).
+- **`ticket_reviews.comments_seen`** (migration `0143`) — `{ids, count, hash}` of the people comments a
+  run was given. Outside the `fingerprint`; feeds `TicketReviewState.newComments`. NULL on older runs
+  and pasted stories.
 - **`pull_requests.closing_issues` / `closing_issues_checked_at`** (migration `0089`) — the
   issues a PR closes, as GitHub states them (`owner/repo#12` keys), read only for GitHub Issues
   workspaces by the tracker worker. ⚠ NULL = never read, `[]` = closes nothing.
@@ -1065,6 +1076,7 @@ and check every hit against its table's declared unique.**
 | `pr_mentions` | `(account_id, pr_id)` (`prm_account_pr`), `onConflictDoUpdate` (restamps `login`, `repo_id`, `mentioned_at`, `mentioned_by_user_id`) | `db/pr-mentions.ts` `syncAccountMentions` (the mention scanner's ONLY writer) |
 | `workspace_trackers` | `[accountId, workspaceId]` (`workspace_trackers_account_workspace`) | `tracker/settings.ts` `writeWorkspaceTracker` (the ONLY writer; seeds every column from the stored row, never deletes) + the boot-time move (`tracker/legacy-import.ts`, raw `ON CONFLICT DO NOTHING`) |
 | `tracker_tickets` | `[accountId, prId, issueKey]` (`tracker_tickets_account_pr_key`) | `tracker/store.ts` `upsertTicketRow` (the worker's ONLY write; owns `changed_at`) + the boot-time move |
+| `tracker_ticket_comments` | `[accountId, provider, apiRoot, issueKey, commentId]` (`tracker_ticket_comments_ticket_comment`) | `tracker/comments.ts` `writeTicketComments` (the worker, once per ticket per read) |
 | `pro_jira_ac_fields` | `[accountId, workspaceId, apiRoot, issueTypeId]` (`pro_jira_ac_fields_account_ws_site_type`) | `tracker/store.ts` `writeAcFieldSetting` |
 | `ticket_review_pr_cards` | `[accountId, prId, headSha]` (`trpc_account_pr_head_ux`), `onConflictDoUpdate` (replaces `card`, `source`, `model`, `cost_usd`, `created_at`) | `review/ticket-review/cards.ts` `saveCards` (the ONLY writer: pre-pass + story-check cards) |
 | `accounts` | the account uniques | `auth/account.ts` (`ensureLocalAccount`) |

@@ -68,10 +68,16 @@ export function ticketsPrompts(t: PromptTools): Record<string, string> {
   const alignment = { criteriaSource: 'derived', criteria: [] } as unknown as Parameters<typeof sda.judgeSubmission>[2];
   const j = sda.judgeSubmission({}, 1, alignment, t);
   const jLast = sda.judgeSubmission({}, sda.MAX_SUBMIT_ATTEMPTS, alignment, t);
+  // Ticket comments (docs/TRACKERS.md § Ticket comments), oldest first, in their own fence.
+  const comments = [
+    { id: 'c1', author: 'Dana Lee', createdAt: '2026-03-04T10:00:00.000Z', updatedAt: null, body: 'Drop the PDF export; CSV only.' },
+    { id: 'c2', author: 'Sam Ito', createdAt: '2026-03-05T09:30:00.000Z', updatedAt: null, body: 'Agreed.' },
+  ];
   return {
     ticketSystem: tr.ticketReviewSystemPrompt(null, t),
     ticketSystemDocs: tr.ticketReviewSystemPrompt('/lib/ws', t),
     ticketUser: tr.buildTicketReviewPrompt(args, t),
+    ticketUserComments: tr.buildTicketReviewPrompt({ ...args, comments }, t),
     cardSystem: pp.ticketCardSystemPrompt(t),
     cardUser: pp.buildPrepassPrompt(prep, ticket, 'zz', t),
     ciSystem: ci.ciReviewSystemPrompt(t),
@@ -79,6 +85,7 @@ export function ticketsPrompts(t: PromptTools): Record<string, string> {
     storySystem: sd.storyDocsSystemPrompt(t),
     storyUser: sd.buildStoryDocsPrompt(story, t),
     storyUserCut: sd.buildStoryDocsPrompt(storyCut, t),
+    storyUserComments: sd.buildStoryDocsPrompt({ ...story, comments }, t),
     storyRefusal: 'reply' in j ? j.reply : '',
     storyRefusalLast: 'reply' in jLast ? jLast.reply : '',
   };

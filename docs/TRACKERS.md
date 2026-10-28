@@ -21,7 +21,7 @@ ONE tracker per workspace (`workspace_trackers`), ONE adapter per provider
 |---|---|---|---|---|
 | IDENTITY | `siteRoot(baseUrl)`, `isKey(key)`, `normalizeKey(raw)` | shared `jiraApiRoot` (the ONE fold) | fixed `https://github.com`; key `owner/repo#12` | shared `linearSiteRoot`: `https://linear.app/<urlKey>`; key `ENG-123` |
 | LINKING | `detect(cfg, pr)`, `browseUrl(base, key)`, optional `linker` | `PREFIX-123` in title (+ branch with an allowlist) → `{base}/browse/KEY` | the issues the PR CLOSES (`linker` reads them; `required`) → `…/owner/repo/issues/12` | the issues the PR is ATTACHED to (`linker`, not `required`) ∪ Jira-style detection → `{root}/issue/KEY` (stored rows keep Linear's own URL) |
-| FETCH | `reader.fetchTicket(call, key)` | REST v2 `issue/KEY?fields=*all&expand=names,schema` | one GraphQL call per issue | one GraphQL POST per issue to the fixed `api.linear.app` |
+| FETCH | `reader.fetchTicket(call, key)` | REST v2 `issue/KEY?fields=*all&expand=names,schema` (+ its comments, § Ticket comments) | one GraphQL call per issue (+ `comments(last: 20)`) | one GraphQL POST per issue to the fixed `api.linear.app` (+ `comments(last: 20)`) |
 | PEERS | not per-adapter | stored rows sharing `(provider, api_root, issue_key)` | same | same |
 | CREDENTIAL | `reader.credential` | `'token'` (sealed, per workspace) | `'none'` — the account's GitHub token | `'token'` — a personal API key, the same sealed slot |
 
@@ -139,6 +139,56 @@ detected ticket in `tracker_tickets`; every consumer reads the row. The ONE exce
   the re-derivation. "None of these" stays a per-tab choice, never stored.
 - `changed_at` moves ONLY when membership or story text moves (`storyOrMembershipMoved`); a status
   or assignee change is not a change (the ticket review would re-bill for nothing).
+
+## Ticket comments — read in the same issue read (`tracker/comments.ts`, `tracker_ticket_comments`)
+
+The discussion under a ticket: people clarify a criterion, drop one, add one. The worker reads it in the
+SAME issue read it already makes, stores it per TICKET, and the ticket review and the story docs check
+are given it as discussion — never as the story.
+
+- **READ, NO NEW CALL** (`FetchedTicket.comments`, `FetchedTicketComment`): **Jira** — `fields.comment`
+  from the `fields=*all` answer (wiki markup / ADF bodies → markdown through `jira/text.ts`). Only when
+  Jira cut the field short (`total` > the comments sent) does the reader make ONE more call,
+  `/issue/KEY/comment?startAt=<total-20>&maxResults=20`, for the newest page; an answer with no comment
+  field, or that extra call failing, leaves the comments UNKNOWN (never the oldest page, which would
+  prune newer stored ones). **GitHub Issues** — `comments(last: 20)` in the one issue query (still 1
+  point). **Linear** — `comments(last: 20)` on `issue(id:)` (≈ 40 complexity points). Bodies are markdown.
+- **STORED PER TICKET** (`tracker_ticket_comments`, migration `0142`): `(account_id, provider,
+  api_root, issue_key, comment_id)` — a ticket on five PRs has its comments once. The worker writes once
+  per ticket per read (`writeTicketComments`): the newest `TICKET_COMMENTS_KEPT` (20) are upserted, each
+  body cut to `TICKET_COMMENT_BODY_MAX` (4000), and the ticket's other rows deleted. A merged PR's copy
+  from a stored sibling makes no read and writes no comments (they are already the ticket's).
+- ⚠ **POSITIVE-ANSWER RULE.** `comments: undefined` (not in the answer) writes nothing; `[]` (the
+  tracker's "none") clears; a FAILED read — transient or refused — never touches them. A comment write
+  failure is logged and never fails the ticket. When the last PR stops naming a ticket (the worker's key
+  prune) or its PRs are deleted (BOTH delete paths, `db/ticket-comments-prune.ts`), comments of tickets
+  no `tracker_tickets` row names are deleted. Erased with the account.
+- **BOTS** are STORED with `is_bot` and left out of every prompt and every list a person reads: Jira
+  `author.accountType === 'app'` (Automation for Jira, Connect / Forge apps) or an automation NAME (shared
+  `isAutomationCommentName`, for Server / Data Center); GitHub `author.__typename === 'Bot'`, a `[bot]`
+  login, or a login the automation or review-bot vocabulary claims (`isAutomationCommentLogin`); Linear
+  a comment with no `user` (an integration's).
+- **WHERE THEY GO.** `ticketComments(account, ident)` (peers.ts, the ticket source) → the ticket review
+  (`review/ticket-review/prompts.ts`) and the story docs check (`review/story-docs/`) get a nonce-fenced
+  `TICKET COMMENTS` block, oldest first, `Author, YYYY-MM-DD:` per comment, at most
+  `TICKET_COMMENTS_PROMPT_CHARS` (6000) — the NEWEST kept when cut, the lead line saying how many older
+  were left out — and in the untrusted-text collision scan. The system prompts say: discussion, not the
+  ticket; a comment may clarify or change scope when it says so plainly; a later one outweighs an earlier
+  one; cite author and date when a verdict relies on one; never a requirement on its own. The sprint
+  ticket checks start the same ticket review, so they get them too. The sprint briefs do NOT (their text
+  hash is the sprint read's; comments would re-bill them).
+- ⚠ **NOT STORY TEXT. A COMMENT NEVER RE-BILLS.** Comments are outside `storyOrMembershipMoved`
+  (`changed_at`), the story hash, the ticket review's fingerprint and the docs check's `storyHash`. A run
+  stores what it was given instead (`ticket_reviews.comments_seen {ids, count, hash}`, migration `0143`),
+  and `TicketReviewState.newComments` counts the people comments since — "2 new comments since this
+  check" beside the result, so the reader decides whether to Re-check.
+- **SHOWN** under the ticket as written (`components/TicketComments.tsx`, in `StoryDisclosure`):
+  "Comments (n)", collapsed, author · date · body. They ride `GET /api/prs/:id/tracker-ticket`
+  (`JiraTicketDetails.comments`), already click-gated — no request of their own.
+- **A NEW ADAPTER** (Notion, …) plugs in by returning `FetchedTicket.comments` from its
+  `reader.fetchTicket` — `{id, authorName, authorId, isBot, body (markdown), createdAt, updatedAt}`,
+  `isBot` by its own rule, `undefined` when its answer did not carry them. Nothing else changes: the
+  worker stores them under the ticket's `(provider, api_root, issue_key)`.
 
 ## The sprint list read — the ONE read not triggered by a received PR (`tracker/sprint/`)
 
@@ -524,8 +574,8 @@ Linear OAuth is NOT built; pasting a personal key is the only route.
   `updatedAt` passed the last read, or every 30 min while open (a link made in Linear does not move the
   PR); a merged PR is read once. Steady state, a workspace with 100 open PRs costs ≈ 8 link requests an
   hour plus one issue read per ticket per 30 min — far inside Linear's per-key budget.
-- **FETCH** (`linear/client.ts`): one `issue(id: "ENG-123")` query per ticket (≈ 200 complexity
-  points with 50 children and 20 relations): identifier, title, description (markdown), url, state
+- **FETCH** (`linear/client.ts`): one `issue(id: "ENG-123")` query per ticket (≈ 240 complexity
+  points with 50 children, 20 relations and 20 comments): identifier, title, description (markdown), url, state
   `{id, name, type}`, assignee, project name, ≤ 50 children (+ `hasNextPage`), ≤ 20 inverse relations
   (§ Blocking links). Status category from the state TYPE:
   backlog/unstarted/triage → `new`, started → `indeterminate`, completed/canceled → `done`. Linear has

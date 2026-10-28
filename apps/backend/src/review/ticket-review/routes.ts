@@ -31,7 +31,8 @@ import {
   getTicketReviewRow,
   getTicketStateInputs,
 } from './persist.js';
-import { jiraMemberIds, jiraStoryFor, workspaceOfPr } from './prepare.js';
+import { jiraMemberIds, jiraStoryFor, ticketCommentsFor, workspaceOfPr } from './prepare.js';
+import { newCommentsSince } from '../../tracker/comments.js';
 import { getTicketRunStatus, startTicketReview, subscribeTicketReviewStream } from './manager.js';
 
 // THE TICKET REVIEW API (CORE, free, LOCAL ONLY) — docs/API.md § Ticket review. Registered by
@@ -155,6 +156,12 @@ async function statesFor(
       runningRunId: inp?.runningRunId ?? null,
       live,
     });
+    // People's comments the latest check did not see — never a staleness reason, only a note the reader
+    // may act on (docs/TRACKERS.md § Ticket comments). A run from before comments were read says nothing.
+    if (inp?.latest?.commentsSeen != null && isTrackerIdent(parsed)) {
+      const n = newCommentsSince(inp.latest.commentsSeen, await ticketCommentsFor(accountId, ident));
+      if (n > 0) state.newComments = n;
+    }
     // Why the auto sweeper is holding a stale ticket back (sweep.ts rule 7) — only while it is stale.
     if (state.status === 'stale') state.waiting = ticketSweepWait(accountId, ident);
     out.set(ident, state);

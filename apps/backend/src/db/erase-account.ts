@@ -200,6 +200,11 @@ export async function eraseAccountData(accountId: number): Promise<EraseResult> 
     // hostname AND the sealed API token. No FKs on the first two, so the explicit deletes are the
     // whole guarantee; workspace_trackers cascades from workspaces too, and is explicit anyway.
     await tx.delete(schema.trackerTickets).where(eq(schema.trackerTickets.accountId, accountId)).execute();
+    // The tickets' comments (migration 0142): people's words from the tracker. No FKs.
+    await tx
+      .delete(schema.trackerTicketComments)
+      .where(eq(schema.trackerTicketComments.accountId, accountId))
+      .execute();
     await tx.delete(schema.jiraAcFields).where(eq(schema.jiraAcFields.accountId, accountId)).execute();
     await tx.delete(schema.workspaceTrackers).where(eq(schema.workspaceTrackers.accountId, accountId)).execute();
     // SonarCloud (migration 0114 / pg 0101): the workspace rows hold the SEALED token; the snapshots
@@ -377,6 +382,8 @@ export function accountScopedTables(): {
     // The issue tracker (migration 0088 / pg 0075). All three carry their own accountId and are
     // erased explicitly above; `workspaceTrackers` holds a credential.
     { name: 'trackerTickets', col: schema.trackerTickets.accountId, table: schema.trackerTickets },
+    // Ticket comments (migration 0142), erased explicitly above.
+    { name: 'trackerTicketComments', col: schema.trackerTicketComments.accountId, table: schema.trackerTicketComments },
     { name: 'jiraAcFields', col: schema.jiraAcFields.accountId, table: schema.jiraAcFields },
     { name: 'workspaceTrackers', col: schema.workspaceTrackers.accountId, table: schema.workspaceTrackers },
     // SonarCloud (migration 0114 / pg 0101), erased explicitly above; `workspaceSonar` holds a credential.

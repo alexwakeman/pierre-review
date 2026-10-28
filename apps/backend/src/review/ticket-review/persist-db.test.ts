@@ -86,6 +86,7 @@ async function runOnce(trigger: 'manual' | 'auto' | 'cascade', status: 'met' | '
     fingerprint: fp.fingerprint(h, live),
     prCount: live.length,
     members: live.map((m) => ({ ...m, checkedOut: true })),
+    commentsSeen: { ids: ['c1'], count: 1, hash: 'hc' },
   });
   await persist.saveTicketReviewSuccess(ctx, 1, id, {
     alignment: assessment(status).alignment,
@@ -219,6 +220,8 @@ describe('ticket review persistence', () => {
     const inputs = (await persist.getTicketStateInputs(ctx, 1, [IDENT, 'jira:x#NOPE-1'])).get(IDENT)!;
     expect(inputs.latest?.id).toBe(second);
     expect(inputs.runningRunId).toBeNull();
+    // The comments the run was given are stored beside the fingerprint, never inside it.
+    expect(inputs.latest?.commentsSeen).toEqual({ ids: ['c1'], count: 1, hash: 'hc' });
     const live = await fp.readLiveMembers(ctx, 1, [pr.api!, pr.web!]);
     const h = fp.ticketHash(story);
     expect(fp.deriveTicketReviewState({ ident: IDENT, latest: inputs.latest, runningRunId: null, live: { ticketHash: h, members: live } }).status).toBe('current');

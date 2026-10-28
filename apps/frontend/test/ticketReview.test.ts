@@ -26,6 +26,7 @@ import {
   jiraApiRootOf,
   memberLabel,
   memberPrIdsOf,
+  newCommentsWords,
   planStoryStart,
   postGapsButtonLabel,
   storyGapGroups,
@@ -102,6 +103,17 @@ describe('idents', () => {
 
   it('the states request is de-duplicated, sorted and blank-free', () => {
     expect(statesRequestIdents(['b', 'a', null, 'b', undefined, ''])).toEqual(['a', 'b']);
+  });
+});
+
+describe('new comments since the check (docs/TRACKERS.md § Ticket comments)', () => {
+  it('counts people comments the check did not see; never while running or before a check', () => {
+    expect(newCommentsWords(state({ newComments: 2 }))?.label).toBe('2 new comments since this check');
+    expect(newCommentsWords(state({ status: 'stale', newComments: 1 }))?.label).toBe('1 new comment since this check');
+    expect(newCommentsWords(state({ newComments: 0 }))).toBeNull();
+    expect(newCommentsWords(state())).toBeNull();
+    expect(newCommentsWords(state({ status: 'running', newComments: 3 }))).toBeNull();
+    expect(newCommentsWords(state({ status: 'none', newComments: 3 }))).toBeNull();
   });
 });
 

@@ -1,4 +1,4 @@
-import type { ClaudeReviewTicket } from '@pierre-review/shared';
+import type { ClaudeReviewTicket, TicketComment } from '@pierre-review/shared';
 
 // ⚠ LAZY on purpose: ./runtime.ts opens the database client at import time, and this module sits in
 // the import graph of review modules that tests load STATICALLY before they point DATABASE_URL at a
@@ -27,6 +27,9 @@ export interface TicketSource {
   ticketMembers(accountId: number, ident: string): Promise<Array<{ prId: number; workspaceId: number }>>;
   //   ticketStory — THE story of a ticket: the freshest stored row across every PR on it.
   ticketStory(accountId: number, ident: string): Promise<ClaudeReviewTicket | null>;
+  //   ticketComments — the PEOPLE's comments on the ticket (bots out), oldest first. Never part of
+  //     the story or its hash: a comment does not make a review stale.
+  ticketComments(accountId: number, ident: string): Promise<TicketComment[]>;
   //   listChangedTicketIdents — tickets whose membership or story text changed at or after
   //     `sinceMs`. Feeds the sweeper cheaply.
   listChangedTicketIdents(accountId: number, sinceMs: number): Promise<string[]>;
@@ -44,6 +47,10 @@ const core: TicketSource = {
   ticketStory: async (a, i) => {
     const { peers, ctx } = await load();
     return peers.ticketStory(ctx, a, i);
+  },
+  ticketComments: async (a, i) => {
+    const { peers, ctx } = await load();
+    return peers.ticketComments(ctx, a, i);
   },
   listChangedTicketIdents: async (a, s) => {
     const { peers, ctx } = await load();

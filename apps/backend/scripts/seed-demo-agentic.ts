@@ -973,7 +973,8 @@ async function seedTicketReviews(base: any, c: AgenticSeedCtx): Promise<number> 
   const { db, schema, now } = c;
   const { eq } = await import('drizzle-orm');
   const ctx = agentCtx(base, {});
-  const { resolveTicketInputs, memberRepos } = await import('../src/review/ticket-review/prepare.js');
+  const { resolveTicketInputs, memberRepos, ticketCommentsFor } = await import('../src/review/ticket-review/prepare.js');
+  const { commentsSeenOf } = await import('../src/tracker/comments.js');
   const { fingerprint } = await import('../src/review/ticket-review/fingerprint.js');
   const { insertQueuedTicketReview, markTicketReviewRunning, setTicketMemberCheckouts, saveTicketReviewSuccess, markTicketReviewRanOn } = await import('../src/review/ticket-review/persist.js');
   const { reconcileTicketReview } = await import('../src/review/ticket-review/reconcile.js');
@@ -995,7 +996,18 @@ async function seedTicketReviews(base: any, c: AgenticSeedCtx): Promise<number> 
       trigger: 'manual',
       model: 'claude-opus-5-5',
     } as never);
-    await markTicketReviewRunning(ctx, 1, id, { ticket, ticketHash, fingerprint: fingerprint(ticketHash, members), prCount: members.length, members: members.map((m) => ({ ...m, checkedOut: false })) });
+    // The comments the run saw: those written before it ran (a later one reads "1 new comment since
+    // this check" — PLAT-292). docs/TRACKERS.md § Ticket comments.
+    const ranAt = now.getTime() - s.hoursAgo * HOUR;
+    const seen = (await ticketCommentsFor(1, ident)).filter((cm) => Date.parse(cm.createdAt) < ranAt);
+    await markTicketReviewRunning(ctx, 1, id, {
+      ticket,
+      ticketHash,
+      fingerprint: fingerprint(ticketHash, members),
+      prCount: members.length,
+      members: members.map((m) => ({ ...m, checkedOut: false })),
+      commentsSeen: commentsSeenOf(seen),
+    });
     await setTicketMemberCheckouts(ctx, 1, id, new Map(members.map((m) => [m.prId, true])));
     const promptMembers = members.map((m, i) => {
       const r = repos.get(m.prId)!;

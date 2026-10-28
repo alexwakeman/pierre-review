@@ -321,6 +321,7 @@ async function runPipeline(job: StoryDocsJob, controller: AbortController): Prom
       shortlist: sl.entries,
       sections,
       libraryDir: dir,
+      comments: inputs.comments,
     };
     const nonce = pickReviewNonce(storyDocsUntrustedTexts(promptInput));
     const words = promptTools(providerId);
