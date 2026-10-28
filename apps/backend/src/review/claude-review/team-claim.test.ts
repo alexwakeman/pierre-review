@@ -11,7 +11,9 @@ import {
   clearedLine,
   decideTeamClaim,
   postedReviewUrl,
+  releasedLine,
   reviewedLine,
+  staleTeammateLine,
   reviewingLine,
   teamClaimContext,
   unfinishedLine,
@@ -47,6 +49,7 @@ describe('wording', () => {
     expect(reviewedLine('alex', null)).toBe('alex reviewed · kept in Limn');
     expect(unfinishedLine('alex')).toBe("alex's review didn't finish · free to claim");
     expect(clearedLine('alex')).toBe('Cleared by alex');
+    expect(releasedLine('bob')).toBe("Released: bob's claim expired");
     expect(reviewingLine('x'.repeat(300), 'claude').length).toBe(TEAM_CLAIM_DESCRIPTION_MAX);
   });
   it('builds the posted review link only from well-formed values', () => {
@@ -97,6 +100,22 @@ describe('decideTeamClaim (the one fold)', () => {
     ];
     expect(decideTeamClaim(lines, 'me', NOW).kind).toBe('mine');
   });
+  it('a SUCCESS "free to claim" line (the release, since 2026-10-28) is free, not "already reviewed"', () => {
+    expect(decideTeamClaim([line('bob', 'pending', NOW - 9 * MIN), line('bob', 'success', NOW - MIN, unfinishedLine('bob'))], 'me', NOW).kind).toBe('free');
+    expect(decideTeamClaim([line('bob', 'pending', NOW - 40 * MIN), line('me', 'success', NOW - MIN, releasedLine('bob'))], 'carol', NOW).kind).toBe(
+      'free',
+    );
+    // A plain success by someone else still reads "already reviewed".
+    expect(decideTeamClaim([line('bob', 'success', NOW - MIN, 'bob reviewed · no comments')], 'me', NOW).kind).toBe('reviewed');
+  });
+  it("staleTeammateLine: a teammate's expired or pending-free newest line; never a live one, a settled one or mine", () => {
+    expect(staleTeammateLine([line('bob', 'pending', NOW - TEAM_CLAIM_LEASE_MS - MIN)], 'me', NOW)).toEqual({ login: 'bob' });
+    expect(staleTeammateLine([line('bob', 'pending', NOW - MIN, "bob's review didn't finish · free to claim")], 'me', NOW)).toEqual({ login: 'bob' });
+    expect(staleTeammateLine([line('bob', 'pending', NOW - MIN)], 'me', NOW)).toBeNull();
+    expect(staleTeammateLine([line('me', 'pending', NOW - TEAM_CLAIM_LEASE_MS - MIN)], 'me', NOW)).toBeNull();
+    expect(staleTeammateLine([line('bob', 'pending', NOW - 40 * MIN), line('bob', 'success', NOW - 30 * MIN, 'bob reviewed')], 'me', NOW)).toBeNull();
+    expect(staleTeammateLine([], 'me', NOW)).toBeNull();
+  });
   it('a failure or error line (never Limn’s own) is free', () => {
     expect(decideTeamClaim([line('bob', 'error', NOW - MIN)], 'me', NOW).kind).toBe('free');
   });
@@ -143,6 +162,13 @@ function fakeGh(opts: { readFails?: unknown; postFails?: unknown; login?: string
       clock += ms;
     },
   };
+}
+
+/** One ledger row (`team_claim_lines`). */
+async function ledgerRow(id: number): Promise<any> {
+  const { eq } = await import('drizzle-orm');
+  const [row] = await db.select().from(schema.teamClaimLines).where(eq(schema.teamClaimLines.id, id)).execute();
+  return row ?? null;
 }
 
 const target = () => ({ accountId: 1, prId, owner: 'acme', name: 'api', number: 7, headSha: 'head1', provider: 'claude' as const });
@@ -203,8 +229,9 @@ afterAll(async () => {
   rmSync(DIR, { recursive: true, force: true });
 });
 
-beforeEach(() => {
+beforeEach(async () => {
   tc._resetTeamClaimsForTest();
+  await db.delete(schema.teamClaimLines).execute();
 });
 
 describe('the workspace switch', () => {
@@ -326,19 +353,30 @@ describe('finish and clear', () => {
     expect(row.teamClaim).toMatchObject({ state: 'marked', lastLine: 'reviewed' });
   });
 
-  it('failure ⇒ stays PENDING, marked free to claim; Clear offers itself and posts "Cleared by me"', async () => {
+  it('failure ⇒ a SUCCESS release line "didn\'t finish · free to claim" (never pending, never red); nothing left to Clear', async () => {
     const f = fakeGh();
     const r = await tc.claimBeforeAutoRun(ctx, target(), { nowMs: () => NOW }, f.gh);
     if (r.kind !== 'run') throw new Error('expected a run');
     await tc.finishTeamClaim(ctx, r.handle, reviewId, { kind: 'unfinished' }, f.gh);
-    expect(f.posts.at(-1)).toMatchObject({ state: 'pending', description: "me's review didn't finish · free to claim" });
-    // Another Limn reads that line as free.
+    expect(f.posts.at(-1)).toEqual({ context: 'limn/review-claude', state: 'success', description: "me's review didn't finish · free to claim" });
+    // Another Limn reads that success line as FREE (not "already reviewed").
     expect(decideTeamClaim(await f.gh.listLines(1, 'acme', 'api', 'head1', 'limn/review-claude'), 'bob', NOW + MIN).kind).toBe('free');
+    const row = await ledgerRow(r.handle.ledgerId!);
+    expect(row).toMatchObject({ state: 'released', reviewId, login: 'me', provider: 'claude', headSha: 'head1' });
+    expect(await tc.teamClaimPendingFor(ctx, 1, prId, 'head1', false)).toBeNull();
+  });
+
+  it('a run that never finished (a restart) ⇒ Clear offers itself, posts "Cleared by me" and closes the ledger row', async () => {
+    const f = fakeGh();
+    const r = await tc.claimBeforeAutoRun(ctx, target(), { nowMs: () => NOW }, f.gh);
+    if (r.kind !== 'run') throw new Error('expected a run');
+    expect((await ledgerRow(r.handle.ledgerId!))?.state).toBe('pending');
     expect(await tc.teamClaimPendingFor(ctx, 1, prId, 'head1', false)).toEqual({ provider: 'claude', login: 'me', mine: true });
     expect(await tc.teamClaimPendingFor(ctx, 1, prId, 'head1', true)).toBeNull();
     const res = await tc.clearTeamClaim(ctx, target(), f.gh);
     expect(res).toEqual({ ok: true });
     expect(f.posts.at(-1)).toMatchObject({ state: 'success', description: 'Cleared by me' });
+    expect(await ledgerRow(r.handle.ledgerId!)).toMatchObject({ state: 'released', lastError: 'cleared' });
     expect(await tc.teamClaimPendingFor(ctx, 1, prId, 'head1', false)).toBeNull();
   });
 

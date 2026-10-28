@@ -20,7 +20,7 @@ export function TeamClaimLine({ prId, data }: { prId: number; data: ClaudeReview
   const pending = data?.teamClaimPending ?? null;
   if (skipLine == null && recordLine == null && pending == null) return null;
   const pendingLine =
-    pending?.mine && skipLine == null ? 'Your auto review didn’t finish. Its GitHub line is still pending.' : null;
+    pending?.mine && skipLine == null ? 'Your auto review didn’t finish. Limn releases its pending GitHub line on its own.' : null;
   const refused = clear.data && !clear.data.ok ? (clear.data.message ?? 'Couldn’t clear it.') : null;
   return (
     <div className="mt-2 space-y-1 text-xs text-gray-600 dark:text-gray-400">

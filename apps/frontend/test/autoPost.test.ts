@@ -112,7 +112,7 @@ describe('skips, verdicts and resolves', () => {
     expect(autoLiftLine({})).toBeNull();
     // A lift-only run that failed prints the lift line, not a second "Couldn't post" line.
     expect(autoPostFailureLine({ status: 'failed', error: 'Restricted.', liftedBlock: l('dismiss_failed', 'Restricted.') })).toBeNull();
-    expect(src('components/ClaudeReviewTab.tsx')).toContain('autoLiftLine(review.autoPost, aiRunProviderName(review))');
+    expect(src('components/ClaudeReviewTab.tsx')).toContain('autoLiftLine(review.autoPost, reviewByName(review))');
     // A run Codex made names Codex.
     expect(autoLiftLine({ liftedBlock: l('dismissed') }, 'Codex')).toBe('Lifted Codex’s earlier request for changes.');
   });
@@ -173,7 +173,7 @@ describe('the mounts', () => {
     expect(tab).toContain('postedChipLabel(post!)');
     expect(tab).toContain('autoPostFailureLine(review.autoPost)');
     expect(tab).toContain('autoPostSkipLine(review.autoPost)');
-    expect(tab).toContain('autoVerdictLine(review.autoPost, aiRunProviderName(review))');
+    expect(tab).toContain('autoVerdictLine(review.autoPost, reviewByName(review))');
     expect(tab).toContain('autoResolveLabel(finding.autoResolve)');
     const parts = src('components/TicketReviewParts.tsx');
     expect(parts).toContain('autoPostFailureLine(review.autoPost)');

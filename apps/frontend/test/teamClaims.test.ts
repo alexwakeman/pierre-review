@@ -14,6 +14,7 @@ describe('team claim words', () => {
     const base = { context: 'limn/review-claude', at: '2026-10-27T00:00:00Z' };
     expect(teamClaimRecordLine({ ...base, state: 'marked', lastLine: 'reviewed' })).toBe('Marked on GitHub');
     expect(teamClaimRecordLine({ ...base, state: 'marked', lastLine: 'cleared' })).toBe('Marked on GitHub, then cleared');
+    expect(teamClaimRecordLine({ ...base, state: 'marked', lastLine: 'unfinished' })).toBe('Marked on GitHub, then released');
     expect(teamClaimRecordLine({ ...base, state: 'unmarked', reason: 'no_access', lastLine: null })).toBe(
       'Not marked on GitHub: no write access',
     );

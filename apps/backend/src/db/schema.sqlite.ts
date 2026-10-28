@@ -3846,3 +3846,49 @@ export const storyDocsAlignments = sqliteTable(
     }).onDelete('cascade'),
   }),
 );
+
+// team_claim_lines — THE TEAM-CLAIM LEDGER (migration 0138; docs/CLAUDE-REVIEW.md § Team claims →
+// Releasing stale lines). ONE row per GitHub status line Limn holds or has released on a PR head, so a
+// line this machine posted is never left pending by a restart, a dropped run or a failed final write:
+//   whose 'mine'     a claim this machine made. Written as 'claiming' BEFORE the pending line is posted,
+//                    'pending' once it is up, 'finished' when the success line ("reviewed") is up,
+//                    'released' when the release line ("didn't finish · free to claim"), a Clear, a
+//                    newer claim at the same head, or GitHub's refusal ended it.
+//   whose 'teammate' a teammate's expired line this machine released ("Released: bob's claim
+//                    expired"), recorded so it is posted ONCE. Always 'released'.
+// The reconciler (review/claude-review/team-claim-release.ts) releases every 'claiming' / 'pending'
+// row whose run is not queued or running in this process. No FK on pr_id (the sonar_snapshots
+// precedent): BOTH delete paths (deleteRepo, retention's deletePrSubtree) and the erasure delete it.
+export const teamClaimLines = sqliteTable(
+  'team_claim_lines',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id').notNull(),
+    prId: integer('pr_id').notNull(),
+    repoId: integer('repo_id'),
+    headSha: text('head_sha').notNull(),
+    // 'claude' | 'codex' — the status context (`limn/review-<provider>`).
+    provider: text('provider').notNull(),
+    // The run the claim was for (NULL until its row is written, and on a teammate's line).
+    reviewId: integer('review_id'),
+    whose: text('whose', { enum: ['mine', 'teammate'] }).notNull().default('mine'),
+    state: text('state', { enum: ['claiming', 'pending', 'finished', 'released'] }).notNull(),
+    // The GitHub login the line names (NULL on a row backfilled from before the ledger: the
+    // account's login is used).
+    login: text('login'),
+    // A success line that could not be written when the run finished: the reconciler posts IT
+    // instead of the release line.
+    finalDescription: text('final_description'),
+    finalTargetUrl: text('final_target_url'),
+    releaseAttempts: integer('release_attempts').notNull().default(0),
+    lastError: text('last_error'),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    // The reconciler's read (open rows).
+    stateIdx: index('team_claim_lines_state').on(t.state),
+    // One head's rows (supersede, Clear, the tab's "Clear" offer).
+    prHeadIdx: index('team_claim_lines_account_pr_head').on(t.accountId, t.prId, t.headSha),
+  }),
+);

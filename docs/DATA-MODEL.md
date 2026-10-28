@@ -198,6 +198,14 @@ isolation as above (`accountId` denormalized onto the anchor tables;
   line an AUTO run posted, or why it ran without one; NULL = no claim attempted — a manual run, or the
   switch off). A SKIPPED auto run (a teammate's Limn holds the head) writes NO row: skips live in
   memory only (team-claim.ts).
+- **THE TEAM-CLAIM LEDGER** (`teamClaimLines`, `team_claim_lines`, migration `0138`; docs/CLAUDE-REVIEW.md
+  § Team claims → Releasing stale lines): one row per status line this machine holds or released —
+  `(accountId, prId, repoId, headSha, provider, reviewId?, whose 'mine'|'teammate', state
+  'claiming'|'pending'|'finished'|'released', login, finalDescription, finalTargetUrl, releaseAttempts,
+  lastError, createdAt, updatedAt)`. ⚠ Written 'claiming' BEFORE the pending line is posted; the
+  reconciler releases every OPEN ('claiming' / 'pending') row of ours whose run is not in this
+  process. A teammate row is always 'released' (posted once). Not a log of every line (renewals write
+  nothing). No FK on `pr_id`: both delete paths and the erasure take it; in `accountScopedTables()`.
 - **AUTO-POSTING columns** (migration `0087`, all nullable, no defaults, no new table —
   docs/CLAUDE-REVIEW.md § Auto-posting): `workspaces.autoPostEnabled` (NULL/false = OFF, for every
   workspace until switched on) + `workspaces.autoPostSettings` (JSON `StoredAutoPostSettings`,

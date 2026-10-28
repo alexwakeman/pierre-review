@@ -17,7 +17,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { AiKindStatus, AiRunKind, ClaudeReviewSummary, MeResponse } from '@pierre-review/shared';
 import { aiGateReadyFor, aiRunnableProviders, aiProviderReadyFor } from '../src/lib/aiCapabilities.js';
-import { followUpProviderOf, resolveModelPick } from '../src/lib/modelPick.js';
+import { chatPreferredProviderOf, followUpProviderOf, resolveModelPick } from '../src/lib/modelPick.js';
 import { nextShownReviewId } from '../src/lib/reviewHistory.js';
 import { ReviewHistoryList } from '../src/components/ReviewHistoryList.js';
 
@@ -227,5 +227,26 @@ describe('the history select', () => {
   it('selects the shown run, and only it', () => {
     expect(html.match(/selected=""/g)).toHaveLength(1);
     expect(html).toMatch(/<option value="1"[^>]*selected=""/);
+  });
+});
+
+// A CLAUDE + CODEX PAIR'S CHAT (the server's rule, review/claude-review/chat.ts `chatPreferredProvider`):
+// the default provider when its half succeeded, else the half that did; the header names it.
+describe('chatPreferredProviderOf', () => {
+  const pair = (halves: Array<['claude' | 'codex', 'succeeded' | 'failed']>) =>
+    ({ provider: 'codex', model: 'gpt-6.1-sol', pair: { halves: halves.map(([provider, status]) => ({ provider, status })) } }) as never;
+  it('a pair: the default provider when its half succeeded, else the half that did', () => {
+    const both = me({ def: 'claude', claude: true, codex: true });
+    expect(chatPreferredProviderOf(both, pair([['claude', 'succeeded'], ['codex', 'succeeded']]))).toBe('claude');
+    expect(chatPreferredProviderOf(me({ def: 'codex', claude: true, codex: true }), pair([['claude', 'succeeded'], ['codex', 'succeeded']]))).toBe('codex');
+    expect(chatPreferredProviderOf(both, pair([['claude', 'failed'], ['codex', 'succeeded']]))).toBe('codex');
+    // Then the follow-up rule checks it can answer (Codex signed out ⇒ the default answers).
+    const claudeOnly = me({ def: 'claude', claude: true });
+    expect(followUpProviderOf(claudeOnly, chatPreferredProviderOf(claudeOnly, pair([['claude', 'failed'], ['codex', 'succeeded']])), 'review_chat')).toBe(
+      'claude',
+    );
+  });
+  it('an ordinary run: its own provider', () => {
+    expect(chatPreferredProviderOf(me({ def: 'claude', claude: true }), { provider: 'codex', model: 'gpt-6.1-sol', pair: null } as never)).toBe('codex');
   });
 });

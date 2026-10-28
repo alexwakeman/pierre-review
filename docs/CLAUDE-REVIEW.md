@@ -544,7 +544,20 @@ paramount … we should still get a review outcome if at least one agent ran ok.
   `viaPairReviewId` — the first half when the second did not finish), and the GET's `autoFix` looks
   up every half's id: a failed second half must not hide the first half's auto-post or auto-fix line.
   Thread judgements come from ONE half, so the threads section names THAT half's provider, never
-  "Claude + Codex".
+  "Claude + Codex". The tab's auto-verdict and lifted-block lines (`autoVerdictLine` /
+  `autoLiftLine`) name the REVIEW's author through `reviewByName`: "Claude + Codex" for a pair, never
+  its latest half's provider.
+- **THE CHAT** (2026-10-28, chat.ts): a pair has ONE chat, keyed to the pair's FIRST row id
+  (`chatStoreId` = `pair.pairId`, which always exists) whichever half's id it is asked through; reads
+  take every id it may sit under (`chatThreadIds`: the first row, then each half — a chat stored under
+  the latest half before 2026-10-28 still reads; nothing was moved). Its context is the CONSOLIDATED
+  view: the merged summary and verdict, one line saying it is one review by both, and each finding's
+  "Raised by: Claude | Codex | Claude + Codex" (an ordinary run's prompt is unchanged). It runs on the
+  DEFAULT provider when that provider's half succeeded, else on the half that did (shared
+  `pairChatProvider`; server `chatPreferredProvider`, SPA `chatPreferredProviderOf`), then the usual
+  follow-up rule (signed out ⇒ the default). The header ("Ask Codex about this review") and each answer
+  name the provider that answers. A per-finding chat works for either half's findings. The chat
+  history lists a pair ONCE, under its view id.
 - **ONE GITHUB POST FOR AN AUTO PAIR.** Nothing posts after the first half. When the pair ends (after
   the consolidation): both succeeded ⇒ `maybeAutoPostReview({reviewId: second, pairFirstReviewId:
   first})` sends ONE review holding the CONSOLIDATED findings (each comment names who raised it ON the
@@ -2212,7 +2225,8 @@ repeated on, and cleared on off, so nothing opened while it was off is picked up
 For teams where more than one person runs Limn with auto review on the same repos. Per workspace, OFF
 by default (`workspaces.team_claims_enabled`, migration 0134; Settings → Auto review, under the
 auto-review switch, with an ⓘ). Code: `review/claude-review/team-claim.ts` (the one module), wired in
-`manager.ts` `startAutoItem` / `launch` and `auto.ts` (the sweeper's hold).
+`manager.ts` `startAutoItem` / `launch` and `auto.ts` (the sweeper's hold); the ledger
+`team-claim-ledger.ts` and the reconciler `team-claim-release.ts` (§ Releasing stale lines).
 
 - **AUTO REVIEWS ONLY** — the minute tick AND the reader's "Run auto reviews now" / Retry. A manual run
   never claims and never checks claims. ⚠ A REPLIES PASS never claims either (it is not a review of a
@@ -2225,13 +2239,16 @@ auto-review switch, with an ⓘ). Code: `review/claude-review/team-claim.ts` (th
   pending "alex is reviewing with Claude" (the claim, re-posted every 8 min while the run goes) →
   success "alex reviewed · 4 comments" (`target_url` = the auto-posted GitHub review, built from our
   own stored ids and validated) or "alex reviewed · kept in Limn" (nothing posted) / "· no comments" →
-  on a failure or a Stop, pending "alex's review didn't finish · free to claim" (the reader chose
-  PENDING on failure, not red: a red line would read as broken CI). "Cleared by alex" (success) is the
-  reader's Clear.
+  on a failure, a Stop or a dropped run, SUCCESS "alex's review didn't finish · free to claim" (the
+  RELEASE line; ⚠ never 'error'/'failure' — red reads as broken CI — and, since 2026-10-28, never
+  pending either: the owner chose pending-on-failure on 2026-10-27, and a pending line held every PR
+  whose run died, so it was superseded). "Cleared by alex" (success) is the reader's Clear; "Released:
+  bob's claim expired" (success) is a teammate's stale line this machine released.
 - **THE ONE FOLD** (`decideTeamClaim`, pure, unit-tested) over the context's history. WHO and WHEN come
-  from GitHub (`creator.login`, `created_at`), never from the description; only the two free phrases
-  ("free to claim", "Cleared by") are read back. The newest line settles it: a success by someone else
-  ⇒ skip "already reviewed by @x" (mine, or a Clear, is free); failure/error ⇒ free. Under a pending
+  from GitHub (`creator.login`, `created_at`), never from the description; only the FREE phrases
+  ("free to claim" — a success, or an older Limn's pending — "Cleared by", "Released:") are read back.
+  The newest line settles it: a success by someone else ⇒ skip "already reviewed by @x" (mine, or a
+  free line, is free); failure/error ⇒ free. Under a pending
   line, the claimants since the last settling line race: those whose NEWEST line is inside the
   25-minute lease are live, and the one whose FIRST line is earliest (created_at, then id) holds the
   head ⇒ skip "being reviewed by @x" (or mine ⇒ free to re-claim).
@@ -2247,17 +2264,52 @@ auto-review switch, with an ⓘ). Code: `review/claude-review/team-claim.ts` (th
   refuses (403/404, no write access) ⇒ run without a line (`teamClaim.state 'unmarked'`, reason
   `no_access`); ⚠ a RATE LIMIT (GitHub answers primary and secondary limits with 403 too) is asked
   first (`claimErrorKind` → `isRateLimitError`): reason `error`, the account's rate budget told
-  (`noteLimited`), and Clear answers 429 "GitHub rate limit reached"; others' lines read in step 1 are still honoured. A status write is NEVER retried (a
-  renew is a new line). The renew timer is cleared on every exit path (`launch`'s `finally`), and a
+  (`noteLimited`), and Clear answers 429 "GitHub rate limit reached"; others' lines read in step 1 are
+  still honoured. A CLAIM's write is never retried (a renew is a new line); only the RELEASE of a line
+  we posted is (below). The renew timer is cleared on every exit path (`launch`'s `finally`), and a
   claim posted before the row could be written is released ("free to claim").
-- **THE RECORD** on the run row (`claude_reviews.team_claim`): "Marked on GitHub" / "Not marked on
-  GitHub: no write access" on the tab.
+- **THE RECORD** on the run row (`claude_reviews.team_claim`): "Marked on GitHub" / "Marked on GitHub,
+  then released" (`lastLine 'unfinished'`) / "Not marked on GitHub: no write access" on the tab.
 - **CLEAR** (`POST /api/prs/:id/claude-review/team-claim/clear {provider}`, tier `github_write`): shown
-  when a pending Limn line sits on the PR's head — a teammate's live claim, or this machine's unfinished
-  run. Posts "Cleared by <login>" at the current synced head. ⚠ A teammate's LIVE claim clears only after
+  when a pending Limn line sits on the PR's head — a teammate's live claim, or this machine's OPEN
+  ledger row there while no run is going ("Your auto review didn't finish. Limn releases its pending
+  GitHub line on its own."; the reconciler does it within a tick, Clear does it now). Posts "Cleared by
+  <login>" at the current synced head and closes every open ledger row there for that provider. ⚠ A teammate's LIVE claim clears only after
   a confirm naming them ("@bob is reviewing this now. Clear anyway?") — clearing it frees the commit for
   a second review while theirs runs; this machine's own unfinished line clears in one press. A new commit also frees the PR (claims are
   per commit).
+- **RELEASING STALE LINES** (2026-10-28; the owner: "clear the pending line if a review for the PR is
+  not running … Limn restarts and a review is dropped, or the agent could not finish … keep the manual
+  button too, but Limn must do it itself"):
+  - **THE LEDGER** (`team_claim_lines`, migration 0138, `team-claim-ledger.ts`): one row per line this
+    machine holds. ⚠ Written as 'claiming' BEFORE the pending line is posted (no row ⇒ no line: the run
+    goes ahead unmarked), 'pending' once it is up, then 'finished' (the success line) or 'released' (the
+    release line, a Clear, a newer claim at the same head — 'superseded' —, a lost race, or GitHub's
+    403/404). A claim POST refused (403/404) or rate-limited wrote nothing ⇒ released at once; any other
+    failure may have landed ⇒ the row stays 'claiming' for the reconciler. A final line GitHub did not
+    take keeps the row open, with the success line it meant (`final_description` / `final_target_url`)
+    so the reconciler posts THAT, not "didn't finish". Migration 0138 backfilled, from the last 14 days,
+    every (PR, head, context) whose newest auto run's record still read pending (`reviewing` /
+    `unfinished`), so older Limn's pending lines are released at the first boot. `whose 'teammate'`
+    rows record a teammate's line this machine released, so it is posted ONCE.
+  - **THE RECONCILER** (`team-claim-release.ts releaseStaleTeamClaims`): once at boot (background,
+    after the startup reconcile; never fails or delays the boot) and after every auto-review tick.
+    Every OPEN row of ours whose run is not queued, starting or running in THIS process
+    (`manager.ts reviewClaimBusy(account, pr, provider, head)`: a mid-start auto item, a pair between
+    its halves at that head, a run holding that provider's line — its own or its first half's) and whose
+    final line is not being written right now (`claimLineFinishing`: marked by `stopTeamClaimRenew`,
+    cleared by `finishTeamClaim`, 30 min at most) gets the release line at ITS OWN head, and is closed.
+    `busy` is asked again right before the write. A failure is retried with backoff (1, 2, 4, 8 min),
+    at most 5 times (`RELEASE_MAX_ATTEMPTS`), then logged and left — Clear still works. 403/404 ⇒
+    closed with `no_access`. A rate limit ⇒ the row waits and the pass stops (`noteLimited` told the
+    budget). ⚠ It never reads the team-claims switch: a workspace switched OFF after claiming still has
+    its lines released. One pass at a time (a module flag).
+  - **TEAMMATES' STALE LINES** (`releaseExpiredTeammateLines`): a remembered "being reviewed by @bob"
+    skip whose lease has ended, on a PR the sweeper did not take back (`reviewHeldForPr`), in a
+    workspace with team claims on: re-read the head; if its newest line is still bob's PENDING one
+    (past the lease, or an older Limn's pending "free to claim" — `staleTeammateLine`), post success
+    "Released: bob's claim expired" once and record it (a refusal is recorded too, never retried). A
+    Limn about to claim the head itself needs none of this: its own pending line replaces bob's.
 - ⚠ **LIMN'S LINES ARE NEVER CI** (always on, no setting): shared `isLimnStatusContext` (`limn/` prefix)
   and `rollupStateWithoutLimn`. The PR head's stored `ci_status` (`ciStatusFromHead` in sync/upsert.ts —
   My Turn's ci_failing card, the CI-failure feed, dependency auto-merge's red-CI gate, the merge

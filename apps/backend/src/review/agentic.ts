@@ -104,6 +104,11 @@ export async function startAgenticBackground(app: FastifyInstance): Promise<void
   } catch (err) {
     app.log.warn({ err }, 'claude review: startup reconcile failed');
   }
+  // TEAM CLAIMS: a run this process lost (a restart mid-review) left its limn/review-* line pending on
+  // GitHub; release every such line now, in the BACKGROUND (GitHub calls; never fails or delays the boot).
+  void import('./claude-review/team-claim-release.js')
+    .then((m) => m.releaseStaleTeamClaims(ctx))
+    .catch((err) => app.log.warn({ err }, 'team claim release at boot failed'));
   try {
     await reconcileThreadChecksOnStartup(ctx);
   } catch (err) {

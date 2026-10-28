@@ -9602,6 +9602,8 @@ export async function deleteRepo(id: number, accountId: number): Promise<boolean
       await tx.delete(schema.trackerTickets).where(inArray(schema.trackerTickets.prId, prIds)).execute();
       // SonarCloud snapshots (migration 0114 / pg 0101). No FKs, so nothing would cascade.
       await tx.delete(schema.sonarSnapshots).where(inArray(schema.sonarSnapshots.prId, prIds)).execute();
+      // The team-claim ledger (migration 0138). No FKs, so nothing would cascade.
+      await tx.delete(schema.teamClaimLines).where(inArray(schema.teamClaimLines.prId, prIds)).execute();
       // Sequence diagrams of these PRs, and the story diagrams naming any of them (migration 0115 /
       // pg 0102). No FKs, so nothing would cascade. Before the PRs go: it reads their accounts.
       await pruneSequenceDiagramsForPrs(tx, prIds);

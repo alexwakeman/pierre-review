@@ -400,6 +400,21 @@ export function reviewHeldForPr(prId: number): boolean {
   return claimed.has(prId) || startingAuto.has(prId) || autoPending.some((a) => a.prId === prId);
 }
 
+/**
+ * TEAM CLAIMS — may a GitHub line for `provider` at `headSha` on this PR still be held by a run of
+ * THIS process? (team-claim-release.ts asks before releasing a ledger row.) True while an auto item is
+ * mid-start (its provider is not known yet), while a pair is between its halves at that head, and while
+ * a run at that head holds that provider's line — its own, or (a pair's second half) its first half's.
+ */
+export function reviewClaimBusy(accountId: number, prId: number, provider: AgentProviderId, headSha: string): boolean {
+  if (startingAuto.get(prId)?.accountId === accountId) return true;
+  const between = startingPair.get(prId);
+  if (between && between.accountId === accountId && between.headSha === headSha) return true;
+  const run = runningItems.get(prId);
+  if (!run || run.accountId !== accountId || run.headSha !== headSha) return false;
+  return run.provider === provider || run.pair?.first?.provider === provider;
+}
+
 export type EnqueueAutoResult = 'queued' | 'already' | 'full' | 'disabled';
 
 /**
@@ -540,7 +555,7 @@ async function startAutoItem(a: AutoItem): Promise<void> {
       pair ? { role: 'first' } : null,
     );
     if (pair) pair.pairId = reviewId;
-    if (teamClaim) await saveTeamClaimRecord(ctx, reviewId, teamClaim.record).catch(() => {});
+    if (teamClaim) await saveTeamClaimRecord(ctx, reviewId, teamClaim.record, teamClaim).catch(() => {});
     reviewIdByPr.set(prId, reviewId);
     startingAuto.delete(prId);
     launched = true;
@@ -870,7 +885,7 @@ async function startPairSecond(first: QueueItem): Promise<void> {
       first.fresh === true,
       { role: 'second', pairId: pair.pairId },
     );
-    if (teamClaim) await saveTeamClaimRecord(ctx, reviewId, teamClaim.record).catch(() => {});
+    if (teamClaim) await saveTeamClaimRecord(ctx, reviewId, teamClaim.record, teamClaim).catch(() => {});
     startingPair.delete(prId);
     launched = true;
     // The second half's row is running now; the end (consolidateAtPairEnd) marks the merge itself.

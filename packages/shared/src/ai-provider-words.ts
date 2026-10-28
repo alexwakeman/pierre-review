@@ -36,6 +36,16 @@ export function pairHalfFailedLine(failed: { provider: AiProviderId; reason: str
   return `${aiProviderName(failed.provider)} didn't finish: ${failed.reason}`;
 }
 
+/**
+ * WHO ANSWERS A PAIR'S CHAT (docs/CLAUDE-REVIEW.md § Claude + Codex → The chat): the DEFAULT provider
+ * when its half succeeded, else the half that did. `succeeded` lists the providers of the pair's
+ * succeeded halves; empty ⇒ the default. The server and the SPA ask this same rule.
+ */
+export function pairChatProvider(defaultProvider: AiProviderId, succeeded: readonly AiProviderId[]): AiProviderId {
+  if (succeeded.length === 0 || succeeded.includes(defaultProvider)) return defaultProvider;
+  return succeeded[0]!;
+}
+
 /** Every footer a Limn auto post may carry — what "was this posted automatically?" looks for. */
 export const AUTO_POST_FOOTERS: readonly string[] = [AUTO_POST_FOOTER, autoPostFooter('Codex'), PAIR_AUTO_POST_FOOTER];
 

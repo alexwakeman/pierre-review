@@ -15,7 +15,7 @@ import {
   type MeResponse,
 } from '@pierre-review/shared';
 import { aiProviderReadyFor, aiRunnableProviders } from './aiCapabilities.js';
-import { PAIR_RUN_LABEL } from '@pierre-review/shared';
+import { PAIR_RUN_LABEL, aiRunProvider, pairChatProvider, type ClaudeReview } from '@pierre-review/shared';
 
 export interface ModelPickState {
   /** The options, the default provider's first. Never empty. */
@@ -102,4 +102,19 @@ export function pairRunningLabel(running: string, role: 'first' | 'second' | nul
   if (role == null) return `Running ${running} review`;
   if (phase === 'merging') return 'Merging the two reviews…';
   return `${running} reviewing…`;
+}
+
+/**
+ * WHO A REVIEW'S CHAT PREFERS (the server's rule, review/claude-review/chat.ts `chatPreferredProvider`),
+ * before the follow-up rule checks it can answer: an ordinary run's own provider; a Claude + Codex
+ * pair's, the default provider when its half succeeded, else the half that did.
+ */
+export function chatPreferredProviderOf(
+  me: MeResponse | undefined,
+  review: Pick<ClaudeReview, 'provider' | 'model' | 'pair'>,
+): AiProviderId {
+  if (review.pair == null) return aiRunProvider(review.provider, review.model);
+  const fallback: AiProviderId = me?.ai?.provider === 'codex' ? 'codex' : 'claude';
+  const ok = (review.pair.halves ?? []).filter((h) => h.status === 'succeeded').map((h) => h.provider);
+  return pairChatProvider(fallback, ok);
 }

@@ -7419,7 +7419,7 @@ export interface ClaudeTeamClaimRecord {
   state: 'marked' | 'unmarked';
   reason?: 'no_access' | 'error' | null;
   // The LAST line Limn posted for this run: reviewing (pending), reviewed (success), unfinished
-  // (pending, marked free to claim) or cleared (success, by the reader's Clear). null = none.
+  // (success "didn't finish · free to claim": released) or cleared (success, by the reader's Clear). null = none.
   lastLine: 'reviewing' | 'reviewed' | 'unfinished' | 'cleared' | null;
   at: string; // ISO-8601, when lastLine was posted (or the claim was decided)
 }

@@ -123,5 +123,8 @@ export function teamClaimRecordLine(rec: ClaudeTeamClaimRecord | null | undefine
   if (rec.state === 'unmarked') {
     return rec.reason === 'no_access' ? 'Not marked on GitHub: no write access' : 'Not marked on GitHub';
   }
-  return rec.lastLine === 'cleared' ? 'Marked on GitHub, then cleared' : 'Marked on GitHub';
+  if (rec.lastLine === 'cleared') return 'Marked on GitHub, then cleared';
+  // A run that did not finish: its line was released ("didn't finish · free to claim").
+  if (rec.lastLine === 'unfinished') return 'Marked on GitHub, then released';
+  return 'Marked on GitHub';
 }

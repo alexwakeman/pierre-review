@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import type { AiProviderId, AiRunKind, ClaudeReviewModel } from '@pierre-review/shared';
+import type { AiProviderId, AiRunKind, ClaudeReview, ClaudeReviewModel } from '@pierre-review/shared';
 import { useMe } from './useTriage.js';
-import { followUpProviderOf, resolveModelPick, resolveReviewModelPick, type ModelPickState } from '../lib/modelPick.js';
+import { chatPreferredProviderOf, followUpProviderOf, resolveModelPick, resolveReviewModelPick, type ModelPickState } from '../lib/modelPick.js';
 
 /**
  * The per-run model menu of a manual surface (lib/modelPick.ts): its options across every ready
@@ -30,4 +30,9 @@ export function useReviewModelPick(usualModel: ClaudeReviewModel): ModelPickStat
  */
 export function useFollowUpProvider(stored: AiProviderId | null | undefined, kind: AiRunKind): AiProviderId {
   return followUpProviderOf(useMe().data, stored, kind);
+}
+
+/** The provider a review's chat prefers (lib/modelPick.ts `chatPreferredProviderOf`). */
+export function useChatPreferredProvider(review: Pick<ClaudeReview, 'provider' | 'model' | 'pair'>): AiProviderId {
+  return chatPreferredProviderOf(useMe().data, review);
 }

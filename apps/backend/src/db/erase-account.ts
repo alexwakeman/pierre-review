@@ -206,6 +206,8 @@ export async function eraseAccountData(accountId: number): Promise<EraseResult> 
     // hold third-party analysis of the account's code. No FK on the snapshots, so this is the whole
     // guarantee; workspace_sonar cascades from workspaces too, and is explicit anyway.
     await tx.delete(schema.sonarSnapshots).where(eq(schema.sonarSnapshots.accountId, accountId)).execute();
+    // The team-claim ledger (migration 0138): GitHub logins and heads. No FK, so this is the whole guarantee.
+    await tx.delete(schema.teamClaimLines).where(eq(schema.teamClaimLines.accountId, accountId)).execute();
     await tx.delete(schema.workspaceSonar).where(eq(schema.workspaceSonar.accountId, accountId)).execute();
     // Sequence diagrams (migration 0115 / pg 0102): no FKs, so this is the whole guarantee (story rows
     // carry no pr_id and are reached ONLY here).
@@ -375,6 +377,8 @@ export function accountScopedTables(): {
     { name: 'workspaceTrackers', col: schema.workspaceTrackers.accountId, table: schema.workspaceTrackers },
     // SonarCloud (migration 0114 / pg 0101), erased explicitly above; `workspaceSonar` holds a credential.
     { name: 'sonarSnapshots', col: schema.sonarSnapshots.accountId, table: schema.sonarSnapshots },
+    // The team-claim ledger (migration 0138), erased explicitly above.
+    { name: 'teamClaimLines', col: schema.teamClaimLines.accountId, table: schema.teamClaimLines },
     { name: 'workspaceSonar', col: schema.workspaceSonar.accountId, table: schema.workspaceSonar },
     // Sequence diagrams (migration 0115 / pg 0102), erased explicitly above.
     { name: 'sequenceDiagrams', col: schema.sequenceDiagrams.accountId, table: schema.sequenceDiagrams },

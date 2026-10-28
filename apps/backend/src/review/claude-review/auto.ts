@@ -745,6 +745,11 @@ export function registerAutoReview(ctx: AgentContext): void {
     AUTO_REVIEW_CRON,
     async () => {
       await runAutoReviewSweep(ctx);
+      // TEAM CLAIMS: release every limn/review-* line of ours no run holds any more, and teammates'
+      // expired ones (team-claim-release.ts). Never throws; never blocks the sweep.
+      await import('./team-claim-release.js')
+        .then((m) => m.releaseStaleTeamClaims(ctx))
+        .catch((err) => ctx.log.warn(`team claim release: ${err instanceof Error ? err.message : String(err)}`));
     },
     'claude-auto-review',
   );

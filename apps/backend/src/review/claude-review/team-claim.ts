@@ -9,14 +9,20 @@
 //                                                         a different provider still reviews)
 //     pending  "alex is reviewing with Claude"          (the claim; renewed every TEAM_CLAIM_RENEW_MS)
 //     success  "alex reviewed · 4 comments"             (target_url = the posted GitHub review, if any)
-//     pending  "alex's review didn't finish · free to claim"   (a failure or a Stop; the phrase frees it)
+//     success  "alex's review didn't finish · free to claim"   (a failure, a Stop, a dropped run; the
+//                                                         phrase frees it — never red, never pending)
 //     success  "Cleared by alex"                        (the reader's Clear; reads as free)
+//     success  "Released: bob's claim expired"          (a teammate's stale line, released once)
 //
 // ⚠ AUTO REVIEWS ONLY (the tick AND the reader's "Run auto reviews now" / Retry). A manual run never
 //   claims and never checks claims.
 // ⚠ WHO and WHEN come from GitHub, never from the description: the line's `creator.login` and its
 //   `created_at` (the lease runs TEAM_CLAIM_LEASE_MS from the claimant's NEWEST line). Descriptions
-//   are for people; only the two FREE phrases ("free to claim", "Cleared by") are read back.
+//   are for people; only the FREE phrases ("free to claim", "Cleared by", "Released:") are read back.
+// ⚠ NEVER LEFT PENDING (2026-10-28): every claim is written to the LEDGER (`team_claim_lines`,
+//   team-claim-ledger.ts) BEFORE its pending line is posted, and moved on after every write. The
+//   reconciler (team-claim-release.ts, at boot and on every auto-review tick) releases any open row
+//   whose run is not queued or running in this process — a restart, a dropped run, a failed final write.
 // ⚠ ONE PURE FOLD decides (`decideTeamClaim`): the newest line settles it — a success by someone else
 //   is "already reviewed" (a Clear is free), a failure/error is free; under a pending line, the
 //   claimants since the last settling line race: among those whose newest line is inside the lease,
@@ -29,7 +35,8 @@
 //   A restart forgets it and re-reads GitHub once.
 // ⚠ NEVER BLOCKS A RUN ON GITHUB: an unreadable history runs WITHOUT a line (logged); a write GitHub
 //   refuses (403/404: no write access) runs without a line too — others' lines read in step 1 are
-//   still honoured. A status write is NEVER retried (a renew is a new line, not a retry).
+//   still honoured. A claim's write is never retried; only the RELEASE of a line we posted is, by the
+//   reconciler (idempotent: the same success line again).
 import type {
   AiProviderId,
   ClaudeTeamClaimPending,
@@ -41,6 +48,12 @@ import { isRateLimitError } from '../../github/client.js';
 import { noteLimited } from '../../github/rate-budget.js';
 import { and, desc, eq, isNotNull, isNull } from 'drizzle-orm';
 import type { AgentContext } from '../agent-context.js';
+import {
+  openClaimLinesAtHead,
+  recordClaimIntent,
+  releaseClaimLinesAtHead,
+  setClaimLine,
+} from './team-claim-ledger.js';
 
 /** How long a pending line holds the head after its claimant's NEWEST line. */
 export const TEAM_CLAIM_LEASE_MS = 25 * 60 * 1000;
@@ -53,6 +66,7 @@ export const TEAM_CLAIM_DESCRIPTION_MAX = 140;
 
 const FREE_PHRASE = 'free to claim';
 const CLEARED_PREFIX = 'Cleared by ';
+const RELEASED_PREFIX = 'Released: ';
 
 /** The status context for a provider family. */
 export function teamClaimContext(provider: AiProviderId): string {
@@ -76,6 +90,10 @@ export function unfinishedLine(login: string): string {
 export function clearedLine(login: string): string {
   return clamp(`${CLEARED_PREFIX}${login}`);
 }
+/** A teammate's expired (or older Limn's pending "free to claim") line, released by this machine. */
+export function releasedLine(login: string): string {
+  return clamp(`${RELEASED_PREFIX}${login}'s claim expired`);
+}
 
 /** One status line of ONE context, as GitHub lists it. */
 export interface TeamClaimLine {
@@ -86,9 +104,14 @@ export interface TeamClaimLine {
   login: string | null; // the line's creator
 }
 
-const isFreeLine = (l: TeamClaimLine): boolean =>
-  (l.state === 'pending' && (l.description ?? '').includes(FREE_PHRASE)) ||
-  (l.state === 'success' && (l.description ?? '').startsWith(CLEARED_PREFIX));
+// A FREE line: "free to claim" (a success since 2026-10-28; a pending one from older Limn versions),
+// a Clear, or a release of a teammate's expired line.
+const isFreeLine = (l: TeamClaimLine): boolean => {
+  const d = l.description ?? '';
+  if (l.state === 'pending') return d.includes(FREE_PHRASE);
+  if (l.state !== 'success') return false;
+  return d.includes(FREE_PHRASE) || d.startsWith(CLEARED_PREFIX) || d.startsWith(RELEASED_PREFIX);
+};
 const settles = (l: TeamClaimLine): boolean => l.state !== 'pending' || isFreeLine(l);
 const sameLogin = (a: string | null, b: string | null): boolean =>
   a != null && b != null && a.toLowerCase() === b.toLowerCase();
@@ -151,6 +174,19 @@ export function decideTeamClaim(lines: readonly TeamClaimLine[], me: string | nu
     leaseEndsAtMs: holder.newest.createdAtMs + TEAM_CLAIM_LEASE_MS,
     description: holder.first.description,
   };
+}
+
+/**
+ * A TEAMMATE'S STALE LINE (pure): the newest line is a teammate's PENDING one that no longer holds the
+ * head — past its lease, or an older Limn's pending "free to claim". Its claimant's login, else null
+ * (settled, live, or the reader's own).
+ */
+export function staleTeammateLine(lines: readonly TeamClaimLine[], me: string | null, nowMs: number): { login: string } | null {
+  if (lines.length === 0) return null;
+  const last = [...lines].sort(order)[lines.length - 1]!;
+  if (last.state !== 'pending' || last.login == null || sameLogin(last.login, me)) return null;
+  if (isFreeLine(last)) return { login: last.login };
+  return decideTeamClaim(lines, me, nowMs).kind === 'free' ? { login: last.login } : null;
 }
 
 // ---- GitHub ----
@@ -262,6 +298,7 @@ const skips = new Map<string, SkipEntry>(); // `${accountId}:${prId}`
 /** Test hook. */
 export function _resetTeamClaimsForTest(): void {
   skips.clear();
+  finishing.clear();
 }
 
 /** The remembered skip for this PR at `headSha` (any provider when `headSha` is null). */
@@ -293,6 +330,22 @@ export function teamClaimSkipsFor(
 export function teamClaimHeldHead(accountId: number, prId: number, nowMs: number): string | null {
   const e = skips.get(`${accountId}:${prId}`);
   return e && nowMs < e.recheckAtMs ? e.skip.headSha : null;
+}
+
+/** Remembered "being reviewed" skips whose holder's lease has ended (the reconciler's teammate pass). */
+export function expiredReviewingSkips(nowMs: number): Array<{ accountId: number; prId: number; skip: ClaudeTeamClaimSkip }> {
+  const out: Array<{ accountId: number; prId: number; skip: ClaudeTeamClaimSkip }> = [];
+  for (const [key, e] of skips) {
+    if (e.skip.kind !== 'reviewing' || nowMs < e.recheckAtMs) continue;
+    const [a, p] = key.split(':');
+    out.push({ accountId: Number(a), prId: Number(p), skip: e.skip });
+  }
+  return out;
+}
+
+/** Forget a remembered skip (the reconciler, once the teammate's line is settled). */
+export function forgetTeamClaimSkip(accountId: number, prId: number): void {
+  forgetSkip(accountId, prId);
 }
 
 function rememberSkip(accountId: number, prId: number, skip: ClaudeTeamClaimSkip, recheckAtMs: number): void {
@@ -339,6 +392,21 @@ export interface TeamClaimHandle {
   /** Only a 'marked' claim posts more lines. */
   marked: boolean;
   timer: ReturnType<typeof setInterval> | null;
+  /** The ledger row (`team_claim_lines`) written before the pending line; null when none was. */
+  ledgerId?: number | null;
+}
+
+// ---- lines being finished in this process (the reconciler leaves them alone) ----
+
+// ledger id → when its run ended (its final line is being written: the auto-post it waits for may take
+// a while). Bounded: after FINISHING_MAX_MS the reconciler no longer waits for it.
+const finishing = new Map<number, number>();
+const FINISHING_MAX_MS = 30 * 60 * 1000;
+
+/** Is this ledger row's final line being written by this process right now? */
+export function claimLineFinishing(ledgerId: number, nowMs: number = Date.now()): boolean {
+  const since = finishing.get(ledgerId);
+  return since != null && nowMs - since < FINISHING_MAX_MS;
 }
 
 export type TeamClaimStart =
@@ -427,13 +495,36 @@ export async function claimBeforeAutoRun(
   forgetSkip(accountId, prId);
 
   // STEP 2 — claim, then re-read: the earliest live claimant wins.
+  // ⚠ THE LEDGER FIRST: the intent is written BEFORE the pending line is posted, so a line that reaches
+  // GitHub always has a row the reconciler can release. No row ⇒ no line (the run goes ahead unmarked).
+  let ledgerId: number;
+  try {
+    ledgerId = await recordClaimIntent(ctx, { accountId, prId, headSha, provider, login });
+  } catch (err) {
+    ctx.log.warn(`team claim pr ${prId}: ledger not written (${errText(err)}); reviewing without a line`);
+    return unmarked(login, 'error');
+  }
   const description = reviewingLine(login, provider);
   try {
     await gh.postLine(accountId, owner, name, headSha, context, { state: 'pending', description });
   } catch (err) {
     ctx.log.warn(`team claim pr ${prId}: status not written (${errText(err)}); reviewing without a line`);
-    return unmarked(login, unmarkedReason(err, accountId));
+    const kind = claimErrorKind(err, accountId);
+    // Refused (no access) or rate-limited: GitHub wrote nothing, so there is nothing to release. Any
+    // other failure may have landed: the row stays 'claiming' and the reconciler releases it once the
+    // run is over.
+    await setClaimLine(
+      ctx,
+      ledgerId,
+      kind === 'error' ? { lastError: errText(err) } : { state: 'released', lastError: kind },
+    ).catch(() => {});
+    const out = unmarked(login, kind === 'no_access' ? 'no_access' : 'error');
+    if (out.kind === 'run' && kind === 'error') out.handle.ledgerId = ledgerId;
+    return out;
   }
+  await setClaimLine(ctx, ledgerId, { state: 'pending' }).catch((err) =>
+    ctx.log.warn(`team claim pr ${prId}: ledger not moved on: ${errText(err)}`),
+  );
   const marked = (): TeamClaimStart => ({
     kind: 'run',
     handle: {
@@ -441,6 +532,7 @@ export async function claimBeforeAutoRun(
       login,
       marked: true,
       timer: null,
+      ledgerId,
       record: { context, state: 'marked', reason: null, lastLine: 'reviewing', at: nowIso(now()) },
     },
   });
@@ -453,7 +545,9 @@ export async function claimBeforeAutoRun(
   const second = decideTeamClaim(after, login, now());
   if (second.kind !== 'reviewing' && second.kind !== 'reviewed') return marked();
   // We lost: stand down. Under a pending race, re-post the winner's line so GitHub's displayed
-  // latest line names them (a success that landed after ours is already the latest line).
+  // latest line names them (a success that landed after ours is already the latest line). Our row is
+  // closed: the line is the winner's to finish now.
+  await setClaimLine(ctx, ledgerId, { state: 'released', lastError: 'stood down' }).catch(() => {});
   if (second.kind === 'reviewing') {
     try {
       await gh.postLine(accountId, owner, name, headSha, context, {
@@ -482,10 +576,15 @@ export function startTeamClaimRenew(ctx: AgentContext, handle: TeamClaimHandle, 
   handle.timer.unref?.();
 }
 
-/** Stop the renew timer (every exit path). */
+/**
+ * Stop the renew timer (every exit path). The run is over: its final line is being written by this
+ * process (`finishTeamClaim`, possibly after the auto-post), so the reconciler leaves its row alone
+ * until then.
+ */
 export function stopTeamClaimRenew(handle: TeamClaimHandle): void {
   if (handle.timer) clearInterval(handle.timer);
   handle.timer = null;
+  if (handle.ledgerId != null && !finishing.has(handle.ledgerId)) finishing.set(handle.ledgerId, Date.now());
 }
 
 export type TeamClaimFinish =
@@ -493,8 +592,11 @@ export type TeamClaimFinish =
   | { kind: 'unfinished' };
 
 /**
- * Steps 4-5: the final line (success, or "didn't finish · free to claim"), and the run row's
- * record. Never throws. A handle that is not marked posts nothing.
+ * Steps 4-5: the final line, and the run row's record. Never throws. A handle that is not marked
+ * posts nothing. A finished review ⇒ success "<login> reviewed · …" (ledger 'finished'); anything
+ * else (a failure, a Stop, a run that never started) ⇒ the RELEASE line, success "<login>'s review
+ * didn't finish · free to claim" (ledger 'released') — never pending, never red. A final line GitHub
+ * did not take leaves the ledger row open, and the reconciler (team-claim-release.ts) retries it.
  */
 export async function finishTeamClaim(
   ctx: AgentContext,
@@ -504,37 +606,73 @@ export async function finishTeamClaim(
   gh: TeamClaimGithub = defaultTeamClaimGithub,
 ): Promise<void> {
   stopTeamClaimRenew(handle);
-  if (!handle.marked) return;
-  const { accountId, prId, owner, name, headSha, provider } = handle.target;
-  const post: TeamClaimPost =
-    outcome.kind === 'succeeded'
-      ? { state: 'success', description: reviewedLine(handle.login, outcome.comments), targetUrl: outcome.reviewUrl }
-      : { state: 'pending', description: unfinishedLine(handle.login) };
+  const ledgerId = handle.ledgerId ?? null;
   try {
-    await gh.postLine(accountId, owner, name, headSha, teamClaimContext(provider), post);
-    handle.record = {
-      ...handle.record,
-      lastLine: outcome.kind === 'succeeded' ? 'reviewed' : 'unfinished',
-      at: new Date().toISOString(),
-    };
-  } catch (err) {
-    ctx.log.warn(`team claim pr ${prId}: final line not written: ${errText(err)}`);
+    if (ledgerId != null && reviewId != null) await setClaimLine(ctx, ledgerId, { reviewId }).catch(() => {});
+    if (!handle.marked) return;
+    const { accountId, prId, owner, name, headSha, provider } = handle.target;
+    const post: TeamClaimPost =
+      outcome.kind === 'succeeded'
+        ? { state: 'success', description: reviewedLine(handle.login, outcome.comments), targetUrl: outcome.reviewUrl }
+        : { state: 'success', description: unfinishedLine(handle.login) };
+    try {
+      await gh.postLine(accountId, owner, name, headSha, teamClaimContext(provider), post);
+      handle.record = {
+        ...handle.record,
+        lastLine: outcome.kind === 'succeeded' ? 'reviewed' : 'unfinished',
+        at: new Date().toISOString(),
+      };
+      if (ledgerId != null) {
+        await setClaimLine(ctx, ledgerId, { state: outcome.kind === 'succeeded' ? 'finished' : 'released', lastError: null }).catch(
+          () => {},
+        );
+      }
+    } catch (err) {
+      ctx.log.warn(`team claim pr ${prId}: final line not written: ${errText(err)}`);
+      if (ledgerId != null) {
+        const kind = claimErrorKind(err, accountId);
+        await setClaimLine(
+          ctx,
+          ledgerId,
+          kind === 'no_access'
+            ? // Our write access went away: nothing more we can post.
+              { state: 'released', lastError: 'no_access' }
+            : {
+                lastError: errText(err),
+                // The reconciler posts THIS success line rather than "didn't finish".
+                ...(outcome.kind === 'succeeded' ? { finalDescription: post.description, finalTargetUrl: post.targetUrl ?? null } : {}),
+              },
+        ).catch(() => {});
+      }
+    }
+    if (reviewId != null) await saveTeamClaimRecord(ctx, reviewId, handle.record).catch(() => {});
+  } finally {
+    if (ledgerId != null) finishing.delete(ledgerId);
   }
-  if (reviewId != null) await saveTeamClaimRecord(ctx, reviewId, handle.record).catch(() => {});
 }
 
-/** Write a run's record (`claude_reviews.team_claim`). */
-export async function saveTeamClaimRecord(ctx: AgentContext, reviewId: number, record: ClaudeTeamClaimRecord): Promise<void> {
+/**
+ * Write a run's record (`claude_reviews.team_claim`), and tie the claim's ledger row to the run when
+ * a handle is given.
+ */
+export async function saveTeamClaimRecord(
+  ctx: AgentContext,
+  reviewId: number,
+  record: ClaudeTeamClaimRecord,
+  handle?: Pick<TeamClaimHandle, 'ledgerId'> | null,
+): Promise<void> {
   const cr = ctx.schema.claudeReviews;
   await ctx.db.update(cr).set({ teamClaim: record }).where(eq(cr.id, reviewId)).execute();
+  if (handle?.ledgerId != null) await setClaimLine(ctx, handle.ledgerId, { reviewId });
 }
 
 // ---- the pending line a Clear would replace ----
 
 /**
  * The pending Limn line at the PR's current head that "Clear" would replace (DB + memory only): a
- * teammate's live claim this Limn skipped for, else this machine's latest run at the head whose
- * last line is pending (unfinished, or a crash mid-run) and that is not running now.
+ * teammate's live claim this Limn skipped for, else this machine's own OPEN ledger row at the head
+ * (a run that died, or a final line GitHub did not take yet) when no run is going — the reconciler
+ * releases it on its own too; Clear just does it now.
  */
 export async function teamClaimPendingFor(
   ctx: AgentContext,
@@ -547,14 +685,10 @@ export async function teamClaimPendingFor(
   const skip = teamClaimSkipFor(accountId, prId, headSha);
   if (skip?.kind === 'reviewing') return { provider: skip.provider, login: skip.login, mine: false };
   if (running) return null;
-  // The newest record PER CONTEXT: a Claude + Codex pair holds one line per provider.
-  const rec = (await latestClaimRecordsAtHead(ctx, accountId, prId, headSha)).find(
-    (r) => r.teamClaim.state === 'marked' && (r.teamClaim.lastLine === 'unfinished' || r.teamClaim.lastLine === 'reviewing'),
-  )?.teamClaim;
-  if (!rec) return null;
-  const provider: AiProviderId = rec.context === 'limn/review-codex' ? 'codex' : 'claude';
-  const login = (await defaultTeamClaimGithub.login(accountId).catch(() => null)) ?? 'you';
-  return { provider, login, mine: true };
+  const row = (await openClaimLinesAtHead(ctx, accountId, prId, headSha)).find((r) => !claimLineFinishing(r.id));
+  if (!row) return null;
+  const login = row.login ?? (await defaultTeamClaimGithub.login(accountId).catch(() => null)) ?? 'you';
+  return { provider: row.provider === 'codex' ? 'codex' : 'claude', login, mine: true };
 }
 
 /**
@@ -586,6 +720,10 @@ export async function clearTeamClaim(
   }
   const mem = skips.get(`${accountId}:${prId}`);
   if (mem && mem.skip.provider === provider) forgetSkip(accountId, prId);
+  // The ledger: every open row at this head and provider is settled by the Clear.
+  await releaseClaimLinesAtHead(ctx, accountId, prId, headSha, provider, 'cleared').catch((err) =>
+    ctx.log.warn(`team claim pr ${prId}: ledger not cleared: ${errText(err)}`),
+  );
   const row = (await latestClaimRecordsAtHead(ctx, accountId, prId, headSha)).find(
     (r) => r.teamClaim.context === teamClaimContext(provider),
   );

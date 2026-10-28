@@ -31,7 +31,7 @@ import {
 } from '@pierre-review/shared';
 import { formatDate, relativeTime, safeExternalUrl } from '../lib/ui.js';
 import { useRunCostText } from '../hooks/useAiBudget.js';
-import { useReviewModelPick } from '../hooks/useModelPick.js';
+import { useChatPreferredProvider, useReviewModelPick } from '../hooks/useModelPick.js';
 import { historyOptionIdFor, nextShownReviewId, reviewHistoryOptions } from '../lib/reviewHistory.js';
 import { findingAuthorName, reviewByName, threadsByName } from '../lib/reviewAuthor.js';
 import { pairRunningLabel } from '../lib/modelPick.js';
@@ -48,7 +48,7 @@ import {
 } from '../lib/autoPost.js';
 import { unlockReviewSound } from '../lib/sound.js';
 import { useAiCapabilities, useAiProviderName } from '../hooks/useAiCapabilities.js';
-import { aiCredentialWords, aiRunProviderName, reviewPeerReadLabel } from '@pierre-review/shared';
+import { aiCredentialWords, reviewPeerReadLabel } from '@pierre-review/shared';
 import { AiRunGate } from './AiSetup.js';
 import { ModelPicker } from './ModelPicker.js';
 import { ReviewHistoryList } from './ReviewHistoryList.js';
@@ -1340,6 +1340,9 @@ export function ClaudesReview({
   // Only a finished review that actually read code can be asked about.
   const chatReviewId =
     review.status === 'succeeded' && review.reviewMode !== 'skip' ? review.id : null;
+  // A Claude + Codex pair's ONE chat answers on the default provider when its half succeeded, else on
+  // the half that did; an ordinary run's on its own provider (the header names whichever answers).
+  const chatProvider = useChatPreferredProvider(storedReview);
   const currency = currencyOf(review, prHeadSha);
   const storyIds = placement.ids;
 
@@ -1521,7 +1524,7 @@ export function ClaudesReview({
         <ReviewChatSection
           reviewId={chatReviewId}
           prId={review.prId}
-          reviewProvider={aiRunProvider(storedReview.provider, storedReview.model)}
+          reviewProvider={chatProvider}
         />
       )}
     </>
@@ -2225,10 +2228,10 @@ export function ClaudeReviewTab({
           {autoPostSkipLine(review.autoPost) != null && (
             <p className="text-xs text-gray-600 dark:text-gray-300">{autoPostSkipLine(review.autoPost)}</p>
           )}
-          {autoVerdictLine(review.autoPost, aiRunProviderName(review)) != null && (
-            <p className="text-xs text-gray-600 dark:text-gray-300">{autoVerdictLine(review.autoPost, aiRunProviderName(review))}</p>
+          {autoVerdictLine(review.autoPost, reviewByName(review)) != null && (
+            <p className="text-xs text-gray-600 dark:text-gray-300">{autoVerdictLine(review.autoPost, reviewByName(review))}</p>
           )}
-          {autoLiftLine(review.autoPost, aiRunProviderName(review)) != null && (
+          {autoLiftLine(review.autoPost, reviewByName(review)) != null && (
             <p
               className={
                 review.autoPost?.liftedBlock?.how === 'dismiss_failed'
@@ -2236,7 +2239,7 @@ export function ClaudeReviewTab({
                   : 'text-xs text-gray-600 dark:text-gray-300'
               }
             >
-              {autoLiftLine(review.autoPost, aiRunProviderName(review))}
+              {autoLiftLine(review.autoPost, reviewByName(review))}
             </p>
           )}
           <MentionTextarea

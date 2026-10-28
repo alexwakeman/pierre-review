@@ -5,6 +5,9 @@ import {
   CLAUDE_REVIEW_CHAT_MAX_QUESTION_CHARS,
   CLAUDE_REVIEW_MODELS,
   aiRunProvider,
+  findingSourceLabel,
+  pairChatProvider,
+  type AiProviderId,
   DEFAULT_CLAUDE_REVIEW_MODEL,
   type ClaudeFinding,
   type ClaudeReview,
@@ -42,6 +45,7 @@ import {
 } from './chat-explain.js';
 import { providerName } from '../../ai/prompt-tools.js';
 import { followUpProvider, preflightFor } from '../../ai/run-choice.js';
+import { activeProviderId } from '../../ai/provider-setting.js';
 
 // CLAUDE REVIEW CHAT (CORE, free, local-only like the rest of Claude Review). Questions about ONE
 // succeeded review: a general thread (findingId null) and one thread per finding. The answer comes
@@ -139,23 +143,60 @@ const messageCols = (msg: any) => ({
 export async function listChatMessages(
   ctx: AgentContext,
   accountId: number,
-  reviewId: number,
+  // One run's id, or a pair's thread ids (`chatThreadIds`).
+  reviewId: number | readonly number[],
   findingId: number | null,
 ): Promise<ClaudeReviewChatMessage[]> {
   const { msg } = tables(ctx);
+  const ids = typeof reviewId === 'number' ? [reviewId] : [...reviewId];
   const rows = (await ctx.db
     .select(messageCols(msg))
     .from(msg)
     .where(
       and(
         eq(msg.accountId, accountId),
-        eq(msg.reviewId, reviewId),
+        ids.length === 1 ? eq(msg.reviewId, ids[0]!) : inArray(msg.reviewId, ids),
         findingId == null ? isNull(msg.findingId) : eq(msg.findingId, findingId),
       ),
     )
     .orderBy(asc(msg.id))
     .execute()) as MessageRow[];
   return rows.map(toWire);
+}
+
+// ---- a pair's ONE chat ---------------------------------------------------------
+
+/**
+ * Where a review's chat is STORED: a Claude + Codex pair's chat (general and per finding) is keyed to
+ * the pair's FIRST row id (`pair.pairId`, which always exists), whichever half is latest; an ordinary
+ * run's is its own id.
+ */
+export function chatStoreId(review: Pick<ClaudeReview, 'id' | 'pair'>): number {
+  return review.pair?.pairId ?? review.id;
+}
+
+/**
+ * Every id a review's chat may be READ from: a pair's first row id, then each half's (a pair's chat was
+ * stored under its latest half's id before 2026-10-28, so both are read; nothing is moved).
+ */
+export function chatThreadIds(review: Pick<ClaudeReview, 'id' | 'pair'>): number[] {
+  const ids = new Set<number>([chatStoreId(review), review.id]);
+  for (const h of review.pair?.halves ?? []) ids.add(h.reviewId);
+  return [...ids];
+}
+
+/**
+ * WHO ANSWERS: an ordinary run's own provider; a pair's, the DEFAULT provider when its half succeeded,
+ * else the half that did (`pairChatProvider`). Either way only when it can answer now; else the
+ * default (`followUpProvider`).
+ */
+export function chatPreferredProvider(
+  review: Pick<ClaudeReview, 'provider' | 'model' | 'pair'>,
+  defaultProvider: () => AiProviderId = activeProviderId,
+): AiProviderId {
+  if (review.pair == null) return aiRunProvider(review.provider, review.model);
+  const ok = (review.pair.halves ?? []).filter((h) => h.status === 'succeeded').map((h) => h.provider);
+  return pairChatProvider(defaultProvider(), ok);
 }
 
 // ---- transcript ---------------------------------------------------------------
@@ -254,6 +295,9 @@ const findingRef = (findings: ReadonlyArray<ClaudeFinding>, id: number): string 
 function findingText(f: ClaudeFinding, ref: string): string {
   const where = f.line != null ? `${f.path}:${f.line}` : f.path;
   const parts = [`${ref} [${f.severity}] ${where}`, `Title: ${f.title}`, clip(f.body, FINDING_BODY_CHARS)];
+  // A Claude + Codex pair's finding names who raised it (absent on an ordinary run: its prompt is
+  // unchanged).
+  if (f.source != null) parts.splice(2, 0, `Raised by: ${findingSourceLabel(f.source)}`);
   if (f.editedBody && f.editedBody.trim() && f.editedBody !== f.body) {
     parts.push(`The developer reworded it as:\n${clip(f.editedBody, FINDING_BODY_CHARS)}`);
   }
@@ -325,6 +369,10 @@ export function buildChatPrompt(input: ChatPromptInput): string {
   lines.push('');
 
   lines.push('## Your review');
+  // A Claude + Codex pair is asked about as its ONE consolidated review.
+  if (review.pair != null) {
+    lines.push('This is one review by Claude and Codex together: the summary and verdict are the merged ones, and each finding says who raised it.');
+  }
   fence(
     lines,
     'REVIEW',
@@ -597,15 +645,18 @@ export async function answerReviewChat(
     // files at the reviewed commit) are what the answer reads.
     const prepared = headMoved ? null : await preparedFor(ctx, reviewId, pr);
 
-    const stored = await listChatMessages(ctx, accountId, reviewId, findingId);
+    // A pair's ONE chat: stored under its first row id, read from every id it may sit under.
+    const storeId = chatStoreId(review);
+    const stored = await listChatMessages(ctx, accountId, chatThreadIds(review), findingId);
     const fit = fitTranscript(pairTurns(stored));
     const base = { review, pr, mode, headMoved, prepared, findingId, turns: fit.turns, question, pins };
     const nonce = pickReviewNonce(chatUntrustedTexts(base));
     const prompt = buildChatPrompt({ ...base, nonce });
     const model = chatModelFor(review.model);
     // THE CHAT RUNS ON ITS REVIEW'S PROVIDER when that one is signed in and can answer; else on the
-    // default provider (Settings → AI). A Codex review is asked about on Codex, a Claude one on Claude.
-    const provider = followUpProvider(aiRunProvider(review.provider, review.model), 'review_chat', preflightFor(ctx));
+    // default provider (Settings → AI). A Codex review is asked about on Codex, a Claude one on Claude;
+    // a Claude + Codex pair on the default provider when its half succeeded, else on the half that did.
+    const provider = followUpProvider(chatPreferredProvider(review), 'review_chat', preflightFor(ctx));
 
     const abortController = new AbortController();
     const timer = setTimeout(() => abortController.abort(), CHAT_TIMEOUT_MS);
@@ -674,7 +725,7 @@ export async function answerReviewChat(
       .values([
         {
           accountId,
-          reviewId,
+          reviewId: storeId,
           findingId,
           role: 'user',
           content: question,
@@ -683,7 +734,7 @@ export async function answerReviewChat(
         },
         {
           accountId,
-          reviewId,
+          reviewId: storeId,
           findingId,
           role: 'assistant',
           content: clip(answerText, STORED_ANSWER_CHARS),
@@ -731,6 +782,7 @@ export async function listChatHistoryForPr(
       reviewMode: cr.reviewMode,
       finishedAt: cr.finishedAt,
       createdAt: cr.createdAt,
+      pairId: cr.pairId,
     })
     .from(cr)
     .where(and(eq(cr.accountId, accountId), eq(cr.prId, prId)))
@@ -741,8 +793,20 @@ export async function listChatHistoryForPr(
     reviewMode: ClaudeReviewChatHistoryRun['reviewMode'];
     finishedAt: Date | null;
     createdAt: Date;
+    pairId?: number | null;
   }>;
   if (runs.length === 0) return { prId, runs: [] };
+  // A Claude + Codex pair is ONE review with ONE chat: every half's messages are listed under the
+  // pair's view id (its LATEST half, the id the tab shows), so the current pair's chat never reappears
+  // as an "earlier review".
+  const viewIdOf = new Map<number, number>();
+  const latestOfPair = new Map<number, number>();
+  for (const r of runs) {
+    const key = r.pairId ?? null;
+    if (key == null) continue;
+    latestOfPair.set(key, Math.max(latestOfPair.get(key) ?? 0, r.id));
+  }
+  for (const r of runs) viewIdOf.set(r.id, r.pairId != null ? (latestOfPair.get(r.pairId) ?? r.id) : r.id);
   const rows = (await ctx.db
     .select({ ...messageCols(msg), reviewId: msg.reviewId })
     .from(msg)
@@ -760,9 +824,10 @@ export async function listChatHistoryForPr(
     .execute()) as Array<MessageRow & { reviewId: number }>;
   const byRun = new Map<number, ClaudeReviewChatMessage[]>();
   for (const r of rows) {
-    const list = byRun.get(r.reviewId) ?? [];
+    const key = viewIdOf.get(r.reviewId) ?? r.reviewId;
+    const list = byRun.get(key) ?? [];
     list.push(toWire(r));
-    byRun.set(r.reviewId, list);
+    byRun.set(key, list);
   }
   return {
     prId,
@@ -817,7 +882,7 @@ export function registerClaudeReviewChatRoutes(app: FastifyInstance, ctx: AgentC
       const findingId = (req.query as { findingId?: number }).findingId ?? null;
       const accountId = ctx.accountIdOf(req);
       // A Claude + Codex pair is asked about as its ONE review (both halves' findings).
-    const review = await getReviewView(ctx, reviewId, accountId);
+      const review = await getReviewView(ctx, reviewId, accountId);
       if (!review) return notFound(reply, `Review ${reviewId}`);
       if (findingId != null && !review.findings.some((f) => f.id === findingId)) {
         return notFound(reply, `Finding ${findingId}`);
@@ -826,7 +891,7 @@ export function registerClaudeReviewChatRoutes(app: FastifyInstance, ctx: AgentC
       return {
         reviewId,
         findingId,
-        messages: await listChatMessages(ctx, accountId, reviewId, findingId),
+        messages: await listChatMessages(ctx, accountId, chatThreadIds(review), findingId),
         headMoved: pr?.headSha != null && pr.headSha !== review.headSha,
         answering: inFlight.get(accountId) === reviewId,
       };

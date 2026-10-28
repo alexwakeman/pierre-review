@@ -6,6 +6,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ClaudeReview } from '@pierre-review/shared';
 import { findingAuthorName, reviewByName, threadsByName } from '../src/lib/reviewAuthor.js';
+import { autoLiftLine, autoVerdictLine } from '../src/lib/autoPost.js';
 
 type Who = Pick<ClaudeReview, 'provider' | 'model' | 'pair'>;
 const half = (reviewId: number, provider: 'claude' | 'codex') => ({
@@ -40,5 +41,16 @@ describe('reviewAuthor', () => {
   it('the threads name the one half that judged them, never the pair', () => {
     expect(threadsByName(pair)).toBe('Codex');
     expect(threadsByName(single)).toBe('Claude');
+  });
+  // The AI Review tab's auto-verdict and lifted-block lines name the REVIEW's author (reviewByName):
+  // "Claude + Codex" for a pair, never the latest half's provider.
+  it('the auto-verdict and lifted-block lines name the pair, not its latest half', () => {
+    const held = { status: 'skipped' as const, verdict: { wanted: 'REQUEST_CHANGES' as const, submitted: null, heldReason: 'already_requested' as const } };
+    expect(autoVerdictLine(held as never, reviewByName(pair))).toBe('Changes already requested by Claude + Codex’s earlier review.');
+    expect(autoVerdictLine(held as never, reviewByName(single))).toBe('Changes already requested by Claude’s earlier review.');
+    const lifted = { liftedBlock: { how: 'dismissed' as const } };
+    expect(autoLiftLine(lifted as never, reviewByName(pair))).toBe('Lifted Claude + Codex’s earlier request for changes.');
+    const failed = { liftedBlock: { how: 'dismiss_failed' as const, error: 'nope' } };
+    expect(autoLiftLine(failed as never, reviewByName(pair))).toBe('Couldn’t lift Claude + Codex’s earlier request for changes: nope');
   });
 });
