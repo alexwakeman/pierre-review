@@ -109,6 +109,9 @@ export function registerStoryDocsRoutes(app: FastifyInstance, ctx: AgentContext)
       const live = await liveStoryDocs(ctx, accountId, workspaceId, body.ident);
       if (live.docCount === 0) return { outcome: 'refused', runId: null, refusal: 'no_docs' };
       if (live.inputs == null || live.inputs.empty) return { outcome: 'refused', runId: null, refusal: 'no_story' };
+      // The library is about to be read: check its wiki documents in the background (never waits —
+      // this run reads the current version; docs/REFERENCE-DOCS.md § Wiki sources → Refresh).
+      void import('../../reference-docs/wiki/refresh.js').then((m) => m.kickWikiRefresh(accountId, workspaceId)).catch(() => {});
       const auth = ctx.llm.detectAuth('story_docs');
       if (auth.status === 'none') return fail(reply, 400, 'NoClaudeAuth', auth.message ?? `No ${providerName()} credential found.`);
       if ((await countStoryDocsRunsSince(ctx, accountId, utcDayStartMs(Date.now()))) >= config.storyDocsDailyCap) {

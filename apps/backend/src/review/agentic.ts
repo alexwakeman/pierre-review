@@ -132,6 +132,9 @@ export async function startAgenticBackground(app: FastifyInstance): Promise<void
   await reconcileFixesOnStartup(ctx);
   try {
     await reconcileReferenceDocsOnStartup(ctx);
+    // Wiki documents (Confluence): the hourly cheap check + the pre-review kick's context.
+    const { bindWikiRefresh } = await import('../reference-docs/wiki/refresh.js');
+    bindWikiRefresh(ctx);
   } catch (err) {
     app.log.warn({ err }, 'reference docs: startup reconcile failed');
   }

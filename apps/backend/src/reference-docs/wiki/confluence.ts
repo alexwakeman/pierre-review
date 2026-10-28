@@ -268,6 +268,9 @@ export function confluenceSource(deps: ConfluenceDeps = {}): WikiSource {
       return out;
     },
     toMarkdown: (page) => storageToMarkdown(page.body),
+    async checkAccess(site, opts) {
+      await get(`${site.origin}/wiki/api/v2/spaces?limit=1`, opts);
+    },
     pageUrl: (site, pageId) => `${site.origin}/wiki/pages/viewpage.action?pageId=${encodeURIComponent(pageId)}`,
   };
 }

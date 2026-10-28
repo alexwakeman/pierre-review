@@ -76,6 +76,8 @@ export interface WikiSource {
   changedSince(site: WikiPageRef, rootId: string, since: Date, opts: WikiCallOptions): Promise<WikiPageMeta[]>;
   /** A page's body → markdown (the library's text). Hook: diagrams carry `[Diagram: name]` today. */
   toMarkdown(page: WikiPage): Promise<string>;
+  /** Settings' "Test connection": one cheap authenticated read of the site. Throws on failure. */
+  checkAccess(site: Pick<WikiPageRef, 'provider' | 'origin' | 'host'>, opts: WikiCallOptions): Promise<void>;
   /** A page's address in the wiki (the chapter's "Source:" line). Pure. */
   pageUrl(site: WikiPageRef, pageId: string): string;
 }

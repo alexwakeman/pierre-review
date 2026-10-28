@@ -216,6 +216,10 @@ export async function eraseAccountData(accountId: number): Promise<EraseResult> 
     // person typed, answers they paid for). Both cascade from workspaces too, and are explicit anyway.
     // The FILES (the markdown tree and the stored uploads) are removed after the transaction below.
     await tx.delete(schema.referenceDocChatMessages).where(eq(schema.referenceDocChatMessages.accountId, accountId)).execute();
+    // Wiki sources (migration 0140): the page rows (before their documents — composite FK) and the
+    // sealed wiki credential. Both cascade too, and are explicit anyway.
+    await tx.delete(schema.referenceDocWikiPages).where(eq(schema.referenceDocWikiPages.accountId, accountId)).execute();
+    await tx.delete(schema.workspaceWikiCredentials).where(eq(schema.workspaceWikiCredentials.accountId, accountId)).execute();
     await tx.delete(schema.referenceDocs).where(eq(schema.referenceDocs.accountId, accountId)).execute();
     // Story docs checks (migration 0121 / pg 0108): cascade from workspaces too, and are explicit anyway.
     await tx.delete(schema.storyDocsAlignments).where(eq(schema.storyDocsAlignments.accountId, accountId)).execute();
@@ -388,6 +392,13 @@ export function accountScopedTables(): {
       name: 'referenceDocChatMessages',
       col: schema.referenceDocChatMessages.accountId,
       table: schema.referenceDocChatMessages,
+    },
+    // Wiki sources (migration 0140), erased explicitly above; `workspaceWikiCredentials` holds a credential.
+    { name: 'referenceDocWikiPages', col: schema.referenceDocWikiPages.accountId, table: schema.referenceDocWikiPages },
+    {
+      name: 'workspaceWikiCredentials',
+      col: schema.workspaceWikiCredentials.accountId,
+      table: schema.workspaceWikiCredentials,
     },
     // Story docs checks (migration 0121 / pg 0108), erased explicitly above.
     { name: 'storyDocsAlignments', col: schema.storyDocsAlignments.accountId, table: schema.storyDocsAlignments },
