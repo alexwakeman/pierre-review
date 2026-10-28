@@ -11,6 +11,10 @@ import type {
   RelatedReposResponse,
   SetRelatedReposBody,
   AddReferenceDocUrlBody,
+  AddReferenceDocWikiBody,
+  WikiCredentialsCheckResponse,
+  WikiCredentialsSettings,
+  WikiCredentialsUpdate,
   SetReferenceDocsSettingsBody,
   StartStoryDocsAlignmentBody,
   StartStoryDocsAlignmentResponse,
@@ -1583,6 +1587,21 @@ export const api = {
     ).then((r) =>
       handle<ReferenceDocMutationResponse>(r),
     ),
+  // A Confluence page (+ child pages, `childDepth` 1-3) as ONE document (docs/REFERENCE-DOCS.md § Wiki sources).
+  addReferenceDocWiki: (workspaceId: number, url: string, childDepth?: number | null) =>
+    fetch(
+      '/api/docs/wiki',
+      jsonBody('POST', { workspaceId, url, ...(childDepth ? { childDepth } : {}) } satisfies AddReferenceDocWikiBody),
+    ).then((r) => handle<ReferenceDocMutationResponse>(r)),
+  // A wiki document: check the wiki now; only changed pages are read and only changed sections summarised.
+  refreshReferenceDoc: (docId: number) =>
+    fetch(`/api/docs/${docId}/refresh`, jsonBody('POST')).then((r) => handle<ReferenceDocMutationResponse>(r)),
+  // PATH id ⇒ another tenant's workspace is a 404. The token is write-only: never in an answer.
+  wikiCredentials: (workspaceId: number) => get<WikiCredentialsSettings>(`/api/workspaces/${workspaceId}/wiki-credentials`),
+  setWikiCredentials: (workspaceId: number, body: WikiCredentialsUpdate) =>
+    fetch(`/api/workspaces/${workspaceId}/wiki-credentials`, jsonBody('PUT', body)).then((r) => handle<WikiCredentialsSettings>(r)),
+  checkWikiCredentials: (workspaceId: number) =>
+    fetch(`/api/workspaces/${workspaceId}/wiki-credentials/check`, jsonBody('POST')).then((r) => handle<WikiCredentialsCheckResponse>(r)),
   rebuildReferenceDoc: (docId: number) =>
     fetch(`/api/docs/${docId}/rebuild`, jsonBody('POST')).then((r) => handle<ReferenceDocMutationResponse>(r)),
   cancelReferenceDoc: (docId: number) =>

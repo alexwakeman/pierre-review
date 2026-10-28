@@ -17,6 +17,9 @@ import type {
   ReferenceDocsConversationResponse,
   ReferenceDocsResponse,
   ReferenceDocsSettings,
+  WikiCredentialsCheckResponse,
+  WikiCredentialsSettings,
+  WikiCredentialsUpdate,
 } from '@pierre-review/shared';
 import { api } from '../api/client.js';
 import { sseStream } from '../api/sse.js';
@@ -193,6 +196,38 @@ export function useAddReferenceDocUrl(workspaceId: number | null) {
     api.addReferenceDocUrl(workspaceId!, v.url, v.crawlDepth),
   );
 }
+export function useAddReferenceDocWiki(workspaceId: number | null) {
+  return useLibraryMutation(workspaceId, (v: { url: string; childDepth: number | null }) =>
+    api.addReferenceDocWiki(workspaceId!, v.url, v.childDepth),
+  );
+}
+export function useRefreshReferenceDoc(workspaceId: number | null) {
+  return useLibraryMutation(workspaceId, (docId: number) => api.refreshReferenceDoc(docId));
+}
+
+// ---- the workspace's wiki credential (Settings → Workspace → Reference docs) ----
+const wikiCredentialsKey = (workspaceId: number | null) => ['wiki-credentials', workspaceId] as const;
+
+export function useWikiCredentials(workspaceId: number | null) {
+  return useQuery<WikiCredentialsSettings>({
+    queryKey: wikiCredentialsKey(workspaceId),
+    queryFn: workspaceId != null ? () => api.wikiCredentials(workspaceId) : skipToken,
+    staleTime: 60_000,
+  });
+}
+export function useSetWikiCredentials(workspaceId: number | null) {
+  const qc = useQueryClient();
+  return useMutation<WikiCredentialsSettings, Error, WikiCredentialsUpdate>({
+    mutationFn: (body) => api.setWikiCredentials(workspaceId!, body),
+    onSuccess: (data) => {
+      if (workspaceId != null) qc.setQueryData(wikiCredentialsKey(workspaceId), data);
+    },
+  });
+}
+export function useCheckWikiCredentials(workspaceId: number | null) {
+  return useMutation<WikiCredentialsCheckResponse, Error, void>({ mutationFn: () => api.checkWikiCredentials(workspaceId!) });
+}
+
 export function useRebuildReferenceDoc(workspaceId: number | null) {
   return useLibraryMutation(workspaceId, (docId: number) => api.rebuildReferenceDoc(docId));
 }

@@ -1117,6 +1117,17 @@ export function BookIcon({ size = 14, ...rest }: IconProps): JSX.Element {
   );
 }
 
+// Two swept bands crossing — Confluence, a wiki-sourced document in the Docs library (drawn in the
+// current ink, never the brand blue: a brand hex may not be text colour). Purpose-built, not BookIcon.
+export function ConfluenceIcon({ size = 14, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} strokeWidth={2} {...rest}>
+      <path d="M3.5 17.5c3.2-5 7.4-6.4 12.6-3.9l3.4 1.6" />
+      <path d="M20.5 6.5c-3.2 5-7.4 6.4-12.6 3.9L4.5 8.8" />
+    </IconShell>
+  );
+}
+
 // An arrow up out of a tray — adding a file (the Docs drop zone).
 export function UploadIcon({ size = 14, ...rest }: IconProps): JSX.Element {
   return (

@@ -56,7 +56,7 @@ export const SETTINGS_TABS: readonly SettingsTabDef[] = [
     label: 'AI review',
     aiOnly: true,
     global: [],
-    workspace: ['AutoReviewSection', 'ReferenceDocsSection', 'RelatedReposSection'],
+    workspace: ['AutoReviewSection', 'ReferenceDocsSection', 'ConfluenceSection', 'RelatedReposSection'],
   },
   {
     id: 'reports',
