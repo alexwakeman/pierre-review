@@ -74,7 +74,7 @@ import {
   nextLimit,
   openPrsWindowKey,
   settleMemo,
-  stacksWithin,
+  stackRowsWithin,
   type OpenPrsWindowMemo,
   type OpenPrsWindowScope,
 } from '../../lib/openPrsWindow.js';
@@ -539,13 +539,20 @@ export function OpenPrsCards({
     [showStacks, stacked],
   );
   const totalCards = showStacks ? stackSizes.reduce((n, s) => n + s, 0) : rows.length;
-  const stackCount = !windowed ? stackSizes.length : stacksWithin(stackSizes, win.limit);
+  // Cards drawn per stack: small stacks whole, a big one (the "No ticket" stack) cut at the limit.
+  const stackRows = useMemo(
+    () => (!windowed ? stackSizes : stackRowsWithin(stackSizes, win.limit)),
+    [windowed, stackSizes, win.limit],
+  );
+  const stackCount = stackRows.length;
   const drawnCards = !windowed
     ? totalCards
     : showStacks
-      ? stackSizes.slice(0, stackCount).reduce((n, s) => n + s, 0)
+      ? stackRows.reduce((n, s) => n + s, 0)
       : Math.min(win.limit, rows.length);
-  const showMore = (): void => win.setLimit(nextLimit(win.limit, totalCards));
+  // Grow from what is DRAWN (a whole small stack can run past the limit), so every press or scroll
+  // draws new cards.
+  const showMore = (): void => win.setLimit(nextLimit(Math.max(win.limit, drawnCards), totalCards));
   // An "Also in" jump to a stack beyond the window grows the window to include it first.
   const revealStack = (stackId: string): void => {
     if (!windowed || stacked == null) return;
@@ -556,10 +563,12 @@ export function OpenPrsCards({
   const moreLabel = useMemo(() => {
     if (!windowed || drawnCards >= totalCards) return null;
     if (!showStacks || stacked == null) return { shown: drawnCards, total: rows.length };
-    const shownIds = new Set(stacked.stacks.slice(0, stackCount).flatMap((st) => st.rows.map((r) => r.pr.id)));
+    const shownIds = new Set(
+      stacked.stacks.slice(0, stackCount).flatMap((st, i) => st.rows.slice(0, stackRows[i]).map((r) => r.pr.id)),
+    );
     const allIds = new Set(stacked.stacks.flatMap((st) => st.rows.map((r) => r.pr.id)));
     return { shown: shownIds.size, total: allIds.size };
-  }, [windowed, drawnCards, totalCards, showStacks, stacked, stackCount, rows.length]);
+  }, [windowed, drawnCards, totalCards, showStacks, stacked, stackCount, stackRows, rows.length]);
   const listRef = useRef<HTMLDivElement>(null);
 
   if (isLoading || ticketGate.waiting) {
@@ -654,7 +663,7 @@ export function OpenPrsCards({
   if (showStacks && stacked != null) {
     return (
       <div ref={listRef} className="space-y-5">
-        {stacked.stacks.slice(0, stackCount).map((stack) => (
+        {stacked.stacks.slice(0, stackCount).map((stack, stackIndex) => (
           <TicketStack
             key={stack.id}
             stack={stack}
@@ -675,7 +684,7 @@ export function OpenPrsCards({
             }
             storyState={stack.ticket?.ident != null && ticketReviewOn ? ticketStates.get(stack.ticket.ident) : undefined}
           >
-            {stack.rows.map((r) =>
+            {stack.rows.slice(0, stackRows[stackIndex]).map((r) =>
               renderCard(r.pr, {
                 inStack: { alsoIn: r.alsoIn, key: stack.ticket?.key ?? null },
                 keyPrefix: `${stack.id}:`,

@@ -1,5 +1,5 @@
 // THE OPEN PRs WINDOW — the pure half (lib/openPrsWindow.ts): how many cards are drawn, how the
-// ticket stacks are cut (whole stacks only), how a jump grows the window, and WHEN it resets.
+// ticket stacks are cut (small stacks whole, big ones at the limit), how a jump grows the window, and WHEN it resets.
 //
 //   ./apps/backend/node_modules/.bin/vitest run --root apps/frontend test/openPrsWindow.test.ts
 
@@ -11,7 +11,7 @@ import {
   nextLimit,
   openPrsWindowKey,
   settleMemo,
-  stacksWithin,
+  stackRowsWithin,
 } from '../src/lib/openPrsWindow.js';
 
 describe('the page', () => {
@@ -31,23 +31,43 @@ describe('the page', () => {
   });
 });
 
-describe('ticket stacks are cut whole', () => {
-  it('draws whole stacks until the cards reach the limit', () => {
-    // 3 + 4 = 7 < 10, so the third stack is drawn too (12 cards): a stack never shows part of its list.
-    expect(stacksWithin([3, 4, 5, 6], 10)).toBe(3);
-    expect(stacksWithin([3, 4, 5, 6], 20)).toBe(4);
+describe('ticket stacks: small ones whole, big ones cut', () => {
+  const sum = (a: number[]): number => a.reduce((n, x) => n + x, 0);
+  it('draws small stacks whole until the cards reach the limit', () => {
+    // 3 + 4 = 7 < 10, so the third stack is drawn whole too (12 cards): a small stack is never split.
+    expect(stackRowsWithin([3, 4, 5, 6], 10)).toEqual([3, 4, 5]);
+    expect(stackRowsWithin([3, 4, 5, 6], 20)).toEqual([3, 4, 5, 6]);
   });
 
   it('stops as soon as the limit is reached', () => {
-    expect(stacksWithin([5, 5, 5], 10)).toBe(2);
+    expect(stackRowsWithin([5, 5, 5], 10)).toEqual([5, 5]);
   });
 
-  it('always draws the first stack, however large', () => {
-    expect(stacksWithin([40, 1], 10)).toBe(1);
+  it('cuts a stack bigger than a page at the limit (the one "No ticket" stack)', () => {
+    // 739 open PRs, 5 with a ticket: the first page draws 10 cards, not 739.
+    expect(stackRowsWithin([3, 2, 734], 10)).toEqual([3, 2, 5]);
+    expect(sum(stackRowsWithin([3, 2, 734], 20))).toBe(20);
+    expect(stackRowsWithin([40, 1], 10)).toEqual([10]);
   });
 
   it('draws nothing when there are no stacks', () => {
-    expect(stacksWithin([], 10)).toBe(0);
+    expect(stackRowsWithin([], 10)).toEqual([]);
+  });
+
+  it('growing from what is drawn always draws more (Show more never stalls)', () => {
+    // A whole small stack can run past the limit; the next limit is taken from the drawn count.
+    for (const sizes of [[9, 4, 4, 4], [25, 4, 4], [3, 2, 734], [7, 7, 7, 7, 7]]) {
+      const total = sum(sizes);
+      let limit = 10;
+      let drawn = sum(stackRowsWithin(sizes, limit));
+      while (drawn < total) {
+        limit = nextLimit(Math.max(limit, drawn), total);
+        const after = sum(stackRowsWithin(sizes, limit));
+        expect(after).toBeGreaterThan(drawn);
+        expect(after - limit).toBeLessThan(OPEN_PRS_PAGE);
+        drawn = after;
+      }
+    }
   });
 });
 
@@ -63,7 +83,7 @@ describe('a jump past the window grows it', () => {
     const sizes = [3, 4, 5, 6];
     const limit = limitToInclude(3, 10, sizes);
     expect(limit).toBe(20);
-    expect(stacksWithin(sizes, limit)).toBeGreaterThanOrEqual(4);
+    expect(stackRowsWithin(sizes, limit).length).toBeGreaterThanOrEqual(4);
   });
 
   it('never shrinks the window, and a missing target changes nothing', () => {

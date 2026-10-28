@@ -403,7 +403,10 @@ expired SAML authorisation shows the reconnect banner, which now says `gh auth r
   Show more, distinct PRs like the header) is also the trigger: an `IntersectionObserver` rooted at
   the nearest scrolling ancestor with a 600px margin draws the next ten, rebuilt after each page so a
   tall screen keeps filling. The button is the keyboard / no-IO path and moves focus to the first new
-  card. **In the stacks the window takes WHOLE stacks** (a stack never shows part of its list).
+  card. **In the stacks** (`stackRowsWithin`) a stack of up to ten is drawn WHOLE, and a bigger one —
+  above all the ONE "No ticket" stack, which can hold hundreds — is CUT at the limit (its header still
+  counts every PR). Show more and the trigger grow from what is DRAWN (`max(limit, drawn) + 10`), so
+  each always draws new cards and the observer (rebuilt on `drawnCards`) never stalls.
   **Reset rules**: the window's identity is workspace + repo filter (`windowScope`, passed by
   `OpenPrsDetail` only — Merged so far and the story view draw everything) + sort + layout; a change
   starts again at ten and forgets the old identity; a DATA refresh never resets. The window is held

@@ -1,6 +1,7 @@
 import {
   AI_SUBSCRIPTION_LABELS,
   aiProviderName,
+  aiProviderWorthShowing,
   formatSharePct as formatFineSharePct,
   limnShareScale,
   runWeekShareText,
@@ -192,7 +193,18 @@ function ratioPct(n: number): string {
  *  • Subscription otherwise: Claude's own whole-account weekly figure, when read.
  *  • API key, budget on: % of the weekly US$ budget. Off: this week's spend in US$.
  */
-export function headerUsageOf(data: AiBudgetResponse): HeaderUsage | null {
+export function headerUsageOf(data: Pick<AiBudgetResponse, 'status' | 'usage' | 'others'>): HeaderUsage | null {
+  if (data.usage.route !== 'none') return headerUsageOfOne(data);
+  // The default holds no credential: the first other provider that does carries the figure, so a
+  // signed-in Codex still shows while Claude is signed out. No credential anywhere: nothing.
+  for (const o of data.others ?? []) {
+    if (o.usage.route !== 'none') return headerUsageOfOne(o);
+  }
+  return null;
+}
+
+/** One provider's header figure (see headerUsageOf). Its route is not 'none'. */
+function headerUsageOfOne(data: Pick<AiBudgetResponse, 'status' | 'usage'>): HeaderUsage | null {
   const { status, usage } = data;
   if (usage.route === 'none') return null;
   const over = status.overBudget;
@@ -276,6 +288,8 @@ export interface UsageDetail {
   sections: UsageSection[];
   /** "Updated 4 min ago" for the provider's own reading; null when nothing was read. */
   updated: string | null;
+  /** True when the block shows a Limn share row (the rows its ⓘ explains). */
+  hasLimnShare: boolean;
 }
 
 /** Compact token count: 1234 → "1.2k", 1_200_000 → "1.2M". */
@@ -352,6 +366,9 @@ export function usageDetailsOf(data: AiBudgetResponse, now: number = Date.now())
   const rest = (data.others ?? [])
     .filter((o) => o.provider !== first.provider)
     .map((o) => usageDetailOf(o, now));
+  // A default with no credential and no runs this week has nothing to say: leave its block out
+  // when another provider has one.
+  if (rest.length > 0 && !aiProviderWorthShowing(data.usage)) return rest;
   return [first, ...rest];
 }
 
@@ -392,6 +409,7 @@ export function usageDetailOf(
       paused,
       sections: [{ title: 'Limn’s runs', rows: [...rows, ...runsRows] }],
       updated: null,
+      hasLimnShare: false,
     };
   }
 
@@ -442,6 +460,7 @@ export function usageDetailOf(
     paused,
     sections,
     updated: acct?.observedAt != null && acctRows.length > 0 ? ago(acct.observedAt, now) : null,
+    hasLimnShare: limnRows.length > 0,
   };
 }
 

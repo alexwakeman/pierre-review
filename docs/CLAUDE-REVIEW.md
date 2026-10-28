@@ -298,6 +298,10 @@ The credential route picks the mode (`decideAiBudget`, pure):
   reading, its ledger rows, the machine's one set of settings. Still the ONE `['ai-budget']` query;
   the header popover draws a block per provider. The probe runs for each signed-in provider under the
   same 5-minute floor. ⚠ The gate is unchanged: automatic runs ask the DEFAULT provider's budget.
+  A signed-out default (route `none`) hands the header's figure to the first signed-in other and drops
+  its own block when it has no runs this week (`headerUsageOf` / `usageDetailsOf`); no credential
+  anywhere = no item. The ⓘ sits on the first block that shows a Limn share row (`hasLimnShare`),
+  never on an API key block.
 - **A bar with no limit set.** The popover's Limn share bars run to the reader's limit, or with the
   budget off to `AI_BUDGET_SHARE_MAX` (50%, the most Limn can be given; shared `limnShareScale`).
   There is no enforced 50% cap: with the budget off nothing pauses, and the ⓘ says so. An API key

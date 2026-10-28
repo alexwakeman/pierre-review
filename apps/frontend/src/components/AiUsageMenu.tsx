@@ -17,8 +17,9 @@ import { SparkleIcon } from './Icons.js';
 // left out.
 //
 // It reads the ONE budget query (`useAiBudget`, ['ai-budget']) that the toast, the meters and
-// Settings share, polled every 2 minutes while the tab is visible. Shown only while AI is on and a
-// Claude login or API key is found. The label ("AI quota for Limn:") is screen-reader only: the item shows the icon and the figure.
+// Settings share, polled every 2 minutes while the tab is visible. Shown only while AI is on and some
+// provider holds a credential or ran this week; a signed-out default hands the figure to the first
+// other provider that is signed in. The label ("AI quota for Limn:") is screen-reader only: the item shows the icon and the figure.
 
 const TONE: Record<'normal' | 'near' | 'over', string> = {
   normal: 'border-gray-300 text-gray-700 dark:border-gray-700 dark:text-gray-200',
@@ -61,6 +62,8 @@ export function AiUsageMenu(): JSX.Element | null {
   if (head == null) return null;
 
   const details = open ? usageDetailsOf(data) : null;
+  // The ⓘ explains Limn's share and its bars: it sits on the first block that shows them.
+  const infoAt = details?.findIndex((d) => d.hasLimnShare) ?? -1;
 
   return (
     <div ref={rootRef} className="relative">
@@ -99,7 +102,7 @@ export function AiUsageMenu(): JSX.Element | null {
             >
               <div className="flex items-center gap-1">
                 <p className="text-[13px] font-semibold text-gray-900 dark:text-gray-50">{detail.heading}</p>
-                {i === 0 && <LimnShareInfo />}
+                {i === infoAt && <LimnShareInfo />}
               </div>
               {detail.paused != null && (
                 <p className="mt-1 font-medium text-amber-700 dark:text-amber-300">{detail.paused}</p>

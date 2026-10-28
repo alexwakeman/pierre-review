@@ -330,6 +330,40 @@ describe('the usage popover', () => {
     // An older server sends no `others`: just the default.
     expect(usageDetailsOf(resp({}), now)).toHaveLength(1);
   });
+  it('a signed-out default hands the header and the popover to a signed-in other provider', async () => {
+    const { usageDetailsOf } = await import('../src/lib/aiBudget.js');
+    const codexUsage = usage({ provider: 'codex', weekPctPerUsd: null });
+    codexUsage.account = { ...codexUsage.account!, reportedSubscription: 'plus', subscription: null, models: [] };
+    const codexStatus = status({ provider: 'codex', enabled: false, mode: 'off', subscription: null });
+    const claudeNone = usage({ route: 'none', account: null });
+    claudeNone.limn = { ...claudeNone.limn, runs: 0, weekSharePct: null, fiveHourSharePct: null };
+    const data = {
+      ...resp({ route: 'none', enabled: false, mode: 'off', subscription: null }, claudeNone),
+      others: [{ provider: 'codex' as const, status: codexStatus, usage: codexUsage }],
+    };
+    expect(headerUsageOf(data)).not.toBeNull();
+    const all = usageDetailsOf(data, now);
+    expect(all.map((d) => d.heading)).toEqual(['Codex · ChatGPT Plus']);
+    expect(all[0]!.hasLimnShare).toBe(true);
+    // Nobody signed in, nothing run: nothing shows.
+    expect(headerUsageOf({ ...data, others: [] })).toBeNull();
+  });
+  it('the ⓘ sits on the first block with Limn’s share, not on an API key block', async () => {
+    const { usageDetailsOf } = await import('../src/lib/aiBudget.js');
+    const codexUsage = usage({ provider: 'codex', weekPctPerUsd: null });
+    const codexStatus = status({ provider: 'codex', enabled: false, mode: 'off', subscription: null });
+    const all = usageDetailsOf(
+      {
+        ...resp(
+          { mode: 'off', enabled: false, route: 'api_key', subscription: null },
+          { route: 'api_key', account: null, weekPctPerUsd: null, apiKey: { weekUsd: 4.1, fiveHourUsd: 1, todayUsd: 2 } },
+        ),
+        others: [{ provider: 'codex', status: codexStatus, usage: codexUsage }],
+      },
+      now,
+    );
+    expect(all.map((d) => d.hasLimnShare)).toEqual([false, true]);
+  });
   it('API key: US$ this week against the budget, last 5 hours, today', () => {
     const d = usageDetailOf(
       resp(

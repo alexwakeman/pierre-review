@@ -8,9 +8,11 @@
 // OPEN_PRS_PAGE each time the reader nears the bottom (or presses "Show more").
 //
 // Pure functions; the hook in OpenPrsCards.tsx owns the state. The rules:
-//   - the window counts CARDS. In the ticket stacks it takes WHOLE stacks (a stack never shows
-//     part of its PR list — its header's "n PRs" would then disagree with what is under it), so
-//     the drawn count can run past the limit by the rest of the last stack;
+//   - the window counts CARDS. In the ticket stacks it takes a stack of up to a page WHOLE (so a small
+//     stack is never split), and CUTS a bigger one — above all the one "No ticket" stack, which can
+//     hold hundreds — at the limit; its header still counts every PR in it. So the drawn count runs
+//     past the limit by less than a page;
+//   - Show more and the scroll trigger grow from what is DRAWN, so each always draws new cards;
 //   - the window RESETS to one page when the list's identity changes (workspace, repo filter, sort,
 //     layout) — never when the data refreshes under the same identity (a new PR arriving must not
 //     snap the reader back to the top);
@@ -25,20 +27,30 @@ export function nextLimit(limit: number, total: number, page: number = OPEN_PRS_
 }
 
 /**
- * How many STACKS to draw so their cards fill `limit`: whole stacks, in order, until the cards drawn
- * reach the limit. At least one stack whenever there is one.
+ * How many cards to draw of each stack so they fill `limit`, in order: one entry per drawn stack.
+ * A stack of at most `page` cards is drawn whole; a bigger one is cut where the limit falls (at
+ * least one card). Stops once the limit is reached; at least one stack whenever there is one.
  */
-export function stacksWithin(sizes: readonly number[], limit: number): number {
+export function stackRowsWithin(
+  sizes: readonly number[],
+  limit: number,
+  page: number = OPEN_PRS_PAGE,
+): number[] {
+  const out: number[] = [];
   let cards = 0;
   for (let i = 0; i < sizes.length; i++) {
-    if (i > 0 && cards >= limit) return i;
-    cards += sizes[i] ?? 0;
+    if (i > 0 && cards >= limit) break;
+    const size = sizes[i] ?? 0;
+    const take = size > page ? Math.min(size, Math.max(1, limit - cards)) : size;
+    out.push(take);
+    cards += take;
   }
-  return sizes.length;
+  return out;
 }
 
 /** The smallest window (a whole number of pages) that draws the item at `index` (list rows) or
- *  the stack at `index` (stack sizes given). Never smaller than `limit`. */
+ *  the stack at `index` (stack sizes given — every card before it, so it draws at least its first
+ *  card). Never smaller than `limit`. */
 export function limitToInclude(
   index: number,
   limit: number,
