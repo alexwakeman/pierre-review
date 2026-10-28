@@ -24,6 +24,8 @@ import type { OpenPrsSort } from '../../lib/openPrsSort.js';
 // With a tracker configured for the workspace (core, free) the header adds "Group by ticket / List" — grouped is the
 // default, remembered per viewer (store/openPrsView.ts); without it the toggle is absent and the
 // page is the list. The header's count is distinct PRs: a PR shown in two ticket stacks is one PR.
+// The cards are DRAWN ten at a time (the next ten when the reader nears the bottom); the data, the
+// counts, the sort and the repo filter are always the whole list.
 
 export function OpenPrsDetail(): JSX.Element {
   // ALWAYS the workspace-wide key: byte-identical to `useWorkspaceOpenPrs` (the tab chip's count,
@@ -91,6 +93,7 @@ export function OpenPrsDetail(): JSX.Element {
       : repoSel.length === 1
         ? repoNameById.get(repoSel[0] as number) ?? `repo ${repoSel[0]}`
         : `${repoSel.length} repos`;
+  const windowScope = useMemo(() => ({ workspaceId, repoIds: repoSel }), [workspaceId, repoSel]);
   const draftCount = rows.reduce((n, p) => n + (p.isDraft ? 1 : 0), 0);
 
   // This pane is where the app OPENS, so it owns the two empty-workspace states Activity used to:
@@ -146,6 +149,9 @@ export function OpenPrsDetail(): JSX.Element {
         sort={sort}
         grouped={view === 'grouped'}
         onOpenPr={openTab}
+        // Ten cards, then ten more near the bottom (lib/openPrsWindow.ts). The workspace and the
+        // repo filter are this list's identity: either changing starts again at ten.
+        windowScope={windowScope}
         emptyLabel={
           emptyWorkspace
             ? 'No repos in this workspace yet. Open "Manage repos & workspaces" in the header to move some in.'

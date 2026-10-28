@@ -392,7 +392,24 @@ expired SAML authorisation shows the reconnect banner, which now says `gh auth r
   trigger always names the order on screen ("Opened, oldest first"). The Claude keys are offered —
   and honoured (`effectiveSort`) — only with Claude Review on. Cards are `<li tabIndex=0>` in
   `<ul aria-label="Open pull requests">`: click or Enter/Space (only when the CARD is the target)
-  opens the PR; a click on any `a`/`button` inside does not. One batched
+  opens the PR; a click on any `a`/`button` inside does not. ⚠ **THE CARDS ARE DRAWN TEN AT A TIME**
+  (2026-10-28, `lib/openPrsWindow.ts`, pinned in `test/openPrsWindow.test.ts`). Measured on the dev
+  DB: `GET /api/open-prs` for a 739-PR workspace answers in ~130 ms (840 KB) and the batched state
+  reads in 10–20 ms, but drawing every card cost 760 cards, ~46k DOM nodes and ~5–7 s of main-thread
+  long tasks (one ~2 s); ten cards: ~5k nodes, ~1 s. So ONLY THE DRAWING is paged — the endpoint is
+  not, and the header's counts, the rail's N, the sort, the repo filter, the ticket stacks and every
+  batched request (`ticket-links`, Claude/CI states) still cover the WHOLE list; paging is over the
+  already sorted, filtered `rows` / stacks. Under the drawn cards a `ShowMoreRow` ("10 of 238 PRs" ·
+  Show more, distinct PRs like the header) is also the trigger: an `IntersectionObserver` rooted at
+  the nearest scrolling ancestor with a 600px margin draws the next ten, rebuilt after each page so a
+  tall screen keeps filling. The button is the keyboard / no-IO path and moves focus to the first new
+  card. **In the stacks the window takes WHOLE stacks** (a stack never shows part of its list).
+  **Reset rules**: the window's identity is workspace + repo filter (`windowScope`, passed by
+  `OpenPrsDetail` only — Merged so far and the story view draw everything) + sort + layout; a change
+  starts again at ten and forgets the old identity; a DATA refresh never resets. The window is held
+  in a module memo, so coming back from a PR tab (Activity unmounts while one is open) finds the same
+  cards drawn. An "Also in" jump to a stack beyond the window grows it to include that stack first
+  (`limitToInclude`). One batched
   `POST /api/claude-review/states` covers every listed card, click-gated starts share the tab's
   mutation key, every panel control `stopPropagation` ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) §
   Starting from the Open PRs tab). Every opener just REVEALS it (`openOpenPrsDetail(repoId?)` →

@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import type { ClaudeReviewPrState, TicketMergedPr, TicketReviewState, TimelinePr, User } from '@pierre-review/shared';
 import { useRepos, useUsers } from '../../hooks/useTimeline.js';
 import { useMaintainersByRepo } from '../../hooks/useMaintainers.js';
@@ -68,6 +68,16 @@ import {
   type StoryStackInput,
 } from '../../lib/openPrsStacks.js';
 import { useOpenPrsView } from '../../store/openPrsView.js';
+import {
+  limitFor,
+  limitToInclude,
+  nextLimit,
+  openPrsWindowKey,
+  settleMemo,
+  stacksWithin,
+  type OpenPrsWindowMemo,
+  type OpenPrsWindowScope,
+} from '../../lib/openPrsWindow.js';
 import { ReviewedAgo } from '../ReviewedAgo.js';
 import { TicketStorySection } from './TicketStorySection.js';
 import { ThreadStateBar } from './ThreadStateBar.js';
@@ -115,6 +125,10 @@ import {
 //
 // The card is WHOLE-CARD clickable and keyboard-focusable (Enter / Space opens the PR); every
 // control inside it stops propagation, so a click there never opens the PR.
+//
+// DRAWN A PAGE AT A TIME where the caller passes `windowScope` (Open PRs): ten cards, then ten more
+// when the reader nears the bottom or presses Show more (`ShowMoreRow`, lib/openPrsWindow.ts). Only
+// the drawing is windowed — sorting, grouping and every batched request still cover the whole list.
 //
 // GROUPED BY TICKET (the default where the workspace has a tracker — core, free): the same cards, in
 // one STACK per ticket (`lib/openPrsStacks.ts` decides membership and order). A stack NEVER collapses:
@@ -351,6 +365,7 @@ export function OpenPrsCards({
     </>
   ),
   story,
+  windowScope,
 }: {
   prs: TimelinePr[];
   isLoading: boolean;
@@ -377,6 +392,10 @@ export function OpenPrsCards({
   emptyLabel?: ReactNode;
   /** The STORY VIEW: one ticket's stack, drawn even with no PR (see the header). */
   story?: StoryStackInput;
+  /** Draw the list a page at a time (lib/openPrsWindow.ts) — the list's place from OUTSIDE this
+   *  component (workspace + repo filter); the sort and the layout are added here, and a change to
+   *  any of them resets the window to one page. Absent = draw every card. */
+  windowScope?: OpenPrsWindowScope;
 }): JSX.Element {
   const { data: users } = useUsers();
   const { data: repos } = useRepos();
@@ -509,6 +528,40 @@ export function OpenPrsCards({
       { fromActivity: true },
     );
 
+  // THE WINDOW (lib/openPrsWindow.ts): only the first page of cards is drawn, the next page each
+  // time the reader nears the bottom. Paging is over `rows` / the stacks — already sorted and
+  // filtered — so every count stays the full population. Never in the story view (one stack).
+  const windowed = windowScope != null && story == null;
+  const fullKey = windowed ? openPrsWindowKey(windowScope, shownSort, showStacks) : null;
+  const win = useOpenPrsWindow(fullKey);
+  const stackSizes = useMemo(
+    () => (showStacks && stacked != null ? stacked.stacks.map((st) => st.rows.length) : []),
+    [showStacks, stacked],
+  );
+  const totalCards = showStacks ? stackSizes.reduce((n, s) => n + s, 0) : rows.length;
+  const stackCount = !windowed ? stackSizes.length : stacksWithin(stackSizes, win.limit);
+  const drawnCards = !windowed
+    ? totalCards
+    : showStacks
+      ? stackSizes.slice(0, stackCount).reduce((n, s) => n + s, 0)
+      : Math.min(win.limit, rows.length);
+  const showMore = (): void => win.setLimit(nextLimit(win.limit, totalCards));
+  // An "Also in" jump to a stack beyond the window grows the window to include it first.
+  const revealStack = (stackId: string): void => {
+    if (!windowed || stacked == null) return;
+    const i = stacked.stacks.findIndex((st) => st.id === stackId);
+    if (i >= stackCount) win.setLimit(limitToInclude(i, win.limit, stackSizes));
+  };
+  // The "n of m" beside Show more counts distinct PRs (a PR in two stacks is one PR), like the header.
+  const moreLabel = useMemo(() => {
+    if (!windowed || drawnCards >= totalCards) return null;
+    if (!showStacks || stacked == null) return { shown: drawnCards, total: rows.length };
+    const shownIds = new Set(stacked.stacks.slice(0, stackCount).flatMap((st) => st.rows.map((r) => r.pr.id)));
+    const allIds = new Set(stacked.stacks.flatMap((st) => st.rows.map((r) => r.pr.id)));
+    return { shown: shownIds.size, total: allIds.size };
+  }, [windowed, drawnCards, totalCards, showStacks, stacked, stackCount, rows.length]);
+  const listRef = useRef<HTMLDivElement>(null);
+
   if (isLoading || ticketGate.waiting) {
     return (
       <div className="space-y-2" aria-busy="true" aria-label={merged ? 'Loading merged pull requests' : 'Loading open pull requests'}>
@@ -543,6 +596,10 @@ export function OpenPrsCards({
       onOpen={() => onOpenPr(pr)}
       tickets={opts.inStack == null ? ticketsOf(pr) : []}
       alsoIn={opts.inStack?.alsoIn ?? []}
+      onJumpToStack={(stackId) => {
+        revealStack(stackId);
+        jumpToStack(stackId);
+      }}
       headingLevel={opts.inStack != null ? 4 : 3}
       variant={variant}
       working={
@@ -582,10 +639,22 @@ export function OpenPrsCards({
     />
   );
 
+  // Under the drawn cards while more remain: the scroll trigger and its keyboard fallback.
+  const more =
+    moreLabel != null ? (
+      <ShowMoreRow
+        shown={moreLabel.shown}
+        total={moreLabel.total}
+        drawnCards={drawnCards}
+        onMore={showMore}
+        listRef={listRef}
+      />
+    ) : null;
+
   if (showStacks && stacked != null) {
     return (
-      <div className="space-y-5">
-        {stacked.stacks.map((stack) => (
+      <div ref={listRef} className="space-y-5">
+        {stacked.stacks.slice(0, stackCount).map((stack) => (
           <TicketStack
             key={stack.id}
             stack={stack}
@@ -614,6 +683,7 @@ export function OpenPrsCards({
             )}
           </TicketStack>
         ))}
+        {more}
       </div>
     );
   }
@@ -636,9 +706,12 @@ export function OpenPrsCards({
           </button>
         </div>
       )}
-      <ul aria-label={merged ? 'Merged pull requests' : 'Open pull requests'} className="space-y-2">
-        {rows.map((pr) => renderCard(pr))}
-      </ul>
+      <div ref={listRef}>
+        <ul aria-label={merged ? 'Merged pull requests' : 'Open pull requests'} className="space-y-2">
+          {(windowed ? rows.slice(0, drawnCards) : rows).map((pr) => renderCard(pr))}
+        </ul>
+        {more}
+      </div>
     </>
   );
 }
@@ -689,13 +762,123 @@ const STATUS_WORD: Record<'new' | 'indeterminate' | 'done', string> = {
   done: 'Complete',
 };
 /** Move to another stack on the page — the "Also in" link. */
-function jumpToStack(stackId: string): void {
+function jumpToStack(stackId: string, tries = 2): void {
   requestAnimationFrame(() => {
     const el = document.getElementById(stackDomId(stackId));
-    if (el == null) return;
+    // A stack the window has just grown to draw may land a frame later.
+    if (el == null) {
+      if (tries > 0) jumpToStack(stackId, tries - 1);
+      return;
+    }
     el.scrollIntoView({ block: 'start', behavior: 'smooth' });
     el.focus({ preventScroll: true });
   });
+}
+
+// ---- the window: draw a page of cards at a time (lib/openPrsWindow.ts) ----
+
+// How far the reader had opened the list, kept for the session so that coming back from a PR tab
+// (Activity unmounts while one is open) finds the same cards drawn. ONE memo: a different list
+// identity replaces it, so the window starts at one page again.
+let windowMemo: OpenPrsWindowMemo | null = null;
+
+/** The window for a list identity (`key`; null = not windowed, everything drawn). */
+function useOpenPrsWindow(key: string | null): { limit: number; setLimit: (limit: number) => void } {
+  const [memo, setMemo] = useState<OpenPrsWindowMemo | null>(() => windowMemo);
+  const limit = key == null ? Number.POSITIVE_INFINITY : limitFor(memo, key);
+  // A new identity (workspace, repo filter, sort, layout) starts at one page and FORGETS the old
+  // one — going back to a previous sort does not restore its window.
+  useEffect(() => {
+    if (key == null) return;
+    const next = settleMemo(memo, key);
+    if (next === memo) return;
+    windowMemo = next;
+    setMemo(next);
+  }, [key, memo]);
+  const setLimit = useCallback(
+    (next: number): void => {
+      if (key == null) return;
+      const m = { key, limit: next };
+      windowMemo = m;
+      setMemo(m);
+    },
+    [key],
+  );
+  return { limit, setLimit };
+}
+
+/** The nearest scrolling ancestor, so the trigger's margin is measured against what scrolls. */
+function scrollParentOf(el: HTMLElement): HTMLElement | null {
+  for (let p = el.parentElement; p != null && p !== document.body; p = p.parentElement) {
+    const oy = getComputedStyle(p).overflowY;
+    if (oy === 'auto' || oy === 'scroll') return p;
+  }
+  return null;
+}
+
+/**
+ * Under the drawn cards while more remain: "10 of 739" and a Show more button. The row is also the
+ * scroll trigger — when it comes within 600px of the visible area the next page is drawn. The
+ * observer is rebuilt after every page, so a tall screen keeps filling until the row is out of
+ * reach. Pressing the button (the keyboard path) moves focus to the first new card.
+ */
+function ShowMoreRow({
+  shown,
+  total,
+  drawnCards,
+  onMore,
+  listRef,
+}: {
+  shown: number;
+  total: number;
+  drawnCards: number;
+  onMore: () => void;
+  listRef: RefObject<HTMLDivElement>;
+}): JSX.Element {
+  const ref = useRef<HTMLDivElement>(null);
+  const onMoreRef = useRef(onMore);
+  onMoreRef.current = onMore;
+  useEffect(() => {
+    const el = ref.current;
+    if (el == null || typeof IntersectionObserver === 'undefined') return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) onMoreRef.current();
+      },
+      { root: scrollParentOf(el), rootMargin: '600px 0px' },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [drawnCards]);
+  // After a button press: focus the first card the press drew.
+  const focusFrom = useRef<number | null>(null);
+  useEffect(() => {
+    const from = focusFrom.current;
+    if (from == null || drawnCards <= from) return;
+    focusFrom.current = null;
+    listRef.current?.querySelectorAll<HTMLElement>('li[aria-labelledby]')[from]?.focus();
+  }, [drawnCards, listRef]);
+  return (
+    <div
+      ref={ref}
+      data-testid="open-prs-more"
+      className="mt-3 flex items-center justify-center gap-3 text-xs text-gray-600 dark:text-gray-300"
+    >
+      <span className="tabular-nums">
+        {shown} of {total} PRs
+      </span>
+      <button
+        type="button"
+        onClick={() => {
+          focusFrom.current = drawnCards;
+          onMore();
+        }}
+        className="rounded border border-gray-300 px-2 py-0.5 font-medium hover:border-gray-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-gray-700 dark:hover:border-gray-500"
+      >
+        Show more
+      </button>
+    </div>
+  );
 }
 
 const COVERAGE_TONE: Record<CoverageTone, string> = {
@@ -1295,6 +1478,7 @@ function OpenPrCard({
   onOpen,
   tickets,
   alsoIn,
+  onJumpToStack = jumpToStack,
   headingLevel,
   variant = 'open',
   working,
@@ -1310,6 +1494,8 @@ function OpenPrCard({
   tickets: CardTicket[];
   /** Inside a stack: the PR's OTHER tickets, each a stack of its own. */
   alsoIn: CardTicket[];
+  /** "Also in" → that ticket's stack (the list grows to draw it first). */
+  onJumpToStack?: (stackId: string) => void;
   headingLevel: 3 | 4;
   /** The header's "Claude is working on this" chip (ClaudeWorkChip); null where AI is off. */
   working?: ReactNode;
@@ -1420,7 +1606,7 @@ function OpenPrCard({
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
-                jumpToStack(stackIdFor(t.key));
+                onJumpToStack(stackIdFor(t.key));
               }}
               title={`Go to ${cardTicketLabel(t)}`}
               className="rounded font-mono font-medium text-sky-700 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-sky-300"
