@@ -63,7 +63,7 @@ export function Gather() {
       <div className="board lg">
         <div className="tile l lapis wide rise">
           <p style={{ fontSize: 20, lineHeight: 1.3, maxWidth: '26ch' }}>
-            Keep the review bots you already pay for. Limn reads all 17 and ranks them beside your own AI agent.
+            Bring together the tools you already use: your code host, AI agent, tracker, quality gate and review bots.
           </p>
         </div>
         <LogoTile src={github} name="GitHub" note="Code, CI, issues" />
