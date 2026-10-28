@@ -188,11 +188,13 @@ describe('AI spend with Codex active', () => {
     const d = usageDetailOf(response(codexStatus(), codexUsage()), 0);
     expect(d.heading).toBe('Codex · ChatGPT Plus');
     const titles = d.sections.map((s) => s.title);
-    expect(titles).toEqual(['Limn’s runs', 'Your Codex account']);
+    expect(titles).toEqual(['Limn’s share', 'Your Codex account']);
     const acct = d.sections[1]!.rows.map((r) => `${r.label}: ${r.value}`);
     expect(acct).toEqual(['5-hour session: 12% used · 88% left', 'Week: 31% used · 69% left']);
     const limn = d.sections[0]!.rows.map((r) => `${r.label}: ${r.value}`);
-    expect(limn[0]).toBe('This week: 2.4% of your week');
+    // The 5-hour session first, then the week; no limit set ⇒ a bar against the 50% most Limn can be given.
+    expect(limn.slice(0, 2)).toEqual(['This 5-hour session: 1% · max 50%', 'This week: 2.4% · max 50%']);
+    expect(d.sections[0]!.rows[1]!.barPct).toBeCloseTo(4.8, 5);
     expect(JSON.stringify(d)).not.toMatch(/\$|Claude/);
   });
 
@@ -240,7 +242,7 @@ describe('AI spend with Codex active', () => {
       0,
     );
     expect(claude.heading).toBe('Claude Pro');
-    expect(claude.sections.map((s) => s.title)).toEqual(['Limn’s runs', 'Your Claude account']);
+    expect(claude.sections.map((s) => s.title)).toEqual(['Limn’s share', 'Your Claude account']);
   });
 });
 

@@ -7,16 +7,16 @@ import { useEffect, useRef, type RefObject } from 'react';
 // condition as `enabled` so the listener is only live while the panel is shown.
 export function useClickOutside(
   ref: RefObject<HTMLElement | null>,
-  onOutside: () => void,
+  onOutside: (e?: Event) => void,
   enabled = true,
 ): void {
-  const cb = useRef(onOutside);
+  const cb = useRef<(e?: Event) => void>(onOutside);
   cb.current = onOutside;
   useEffect(() => {
     if (!enabled) return;
     function handle(e: Event): void {
       const el = ref.current;
-      if (el && !el.contains(e.target as Node)) cb.current();
+      if (el && !el.contains(e.target as Node)) cb.current(e);
     }
     // Listen on `pointerdown` in the CAPTURE phase. vis-timeline (Hammer.js) drives
     // the canvas with Pointer events and preventDefault()s pointerdown, which

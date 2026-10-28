@@ -288,6 +288,20 @@ The credential route picks the mode (`decideAiBudget`, pure):
   windows (a window whose reset has passed is dropped; unknown is absent, never 0), Limn's runs and
   tokens in the budget's week, Limn's week / 5-hour shares on a known subscription (budget on or
   off), and on an API key the US$ for the week, the last 5 hours and today (since local midnight).
+  `usage.limn` names each window it counted (`weekFrom`/`fiveHourFrom`, `window`/`fiveHourWindow`,
+  `weekResetsAt`/`fiveHourResetsAt`): the PROVIDER's own week and session when its reset is known
+  (Claude: the `rate_limit_event` tap and the usage probe; Codex: `account/rateLimits/read`, its
+  300- and 10080-minute windows), else the rolling last 7 days / 5 hours — never a calendar week.
+- **EVERY PROVIDER IN USE IS SHOWN** (2026-10-28). The plain `GET /api/ai/budget` (and the PUT) adds
+  `others`: each provider other than the default that holds a credential or that Limn ran on in its
+  week (`aiBudgetOthers`, shared `aiProviderWorthShowing`), with its OWN status and usage view — its
+  reading, its ledger rows, the machine's one set of settings. Still the ONE `['ai-budget']` query;
+  the header popover draws a block per provider. The probe runs for each signed-in provider under the
+  same 5-minute floor. ⚠ The gate is unchanged: automatic runs ask the DEFAULT provider's budget.
+- **A bar with no limit set.** The popover's Limn share bars run to the reader's limit, or with the
+  budget off to `AI_BUDGET_SHARE_MAX` (50%, the most Limn can be given; shared `limnShareScale`).
+  There is no enforced 50% cap: with the budget off nothing pauses, and the ⓘ says so. An API key
+  has no allowance, so its rows draw a bar only against a set weekly US$ budget.
 - **A run's cost on a subscription is a share of the week, never US$.** Run payloads still carry
   their recorded `costUsd`; on the login route with a known subscription `usage.weekPctPerUsd` (a
   RATE, the one US$-named field a subscription carries) turns it into "0.3% of your week" /

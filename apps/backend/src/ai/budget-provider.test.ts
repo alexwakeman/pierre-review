@@ -85,6 +85,28 @@ describe('the ledger is read per provider', () => {
     expect(snap.usage.limn.runs).toBe(1);
   });
 
+  it('aiBudgetOthers: every non-default provider in use, each with its own figures', async () => {
+    // Claude is the default; Codex has no credential here but Limn ran on it this week ⇒ listed.
+    delete process.env.LIMN_AI_PROVIDER;
+    const others = await B.aiBudgetOthers(7, { probe: false });
+    expect(others.map((o) => o.provider)).toEqual(['codex']);
+    expect(others[0]!.usage.provider).toBe('codex');
+    expect(others[0]!.status.provider).toBe('codex');
+    expect(others[0]!.usage.limn.runs).toBeGreaterThanOrEqual(1);
+    // Codex is the default: Claude is the other one, and Limn ran it this week ⇒ listed.
+    process.env.LIMN_AI_PROVIDER = 'codex';
+    const flipped = await B.aiBudgetOthers(7, { probe: false });
+    expect(flipped.map((o) => o.provider)).toEqual(['claude']);
+    expect(flipped[0]!.usage.limn.runs).toBe(1);
+  });
+
+  it('aiBudgetOthers leaves out a provider with no credential and no runs this week', async () => {
+    delete process.env.LIMN_AI_PROVIDER;
+    // Account 8 has no ledger rows at all; Codex holds no credential in this test environment.
+    await db.insert(schema.accounts).values({ id: 8, githubUserId: 'U8', githubLogin: 'me8', isLocal: false }).onConflictDoNothing().execute();
+    expect(await B.aiBudgetOthers(8, { probe: false })).toEqual([]);
+  });
+
   it('the cycle cost averages only the asked provider’s runs', async () => {
     const now = Date.now();
     expect((await B.readCycleCosts(7, now)).reviewMeanUsd).toBe(2);
@@ -165,6 +187,15 @@ describe('the ledger is read per provider', () => {
       expect(snap.usage.account?.week?.usedPct).toBe(10);
       expect(snap.usage.account?.fiveHour?.usedPct).toBe(4);
       expect(snap.usage.limn.weekSharePct).toBe(5);
+      // Limn's week and session are CODEX'S OWN windows: they start at its resets minus their length.
+      expect(snap.usage.limn).toMatchObject({
+        window: 'reset',
+        weekFrom: new Date(weekFrom).toISOString(),
+        weekResetsAt: new Date(weekReset).toISOString(),
+        fiveHourWindow: 'reset',
+        fiveHourFrom: new Date(fiveReset - 5 * 3600_000).toISOString(),
+        fiveHourResetsAt: new Date(fiveReset).toISOString(),
+      });
       expect(snap.usage.apiKey).toBeNull();
       expect(snap.usage.weekPctPerUsd).toBeNull();
       expect(await B.allowAutomaticRun(7, 'test', undefined, async () => snap.status)).toBe(false);

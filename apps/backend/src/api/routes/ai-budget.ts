@@ -7,7 +7,7 @@ import {
 } from '@pierre-review/shared';
 import { config } from '../../config.js';
 import { accountIdOf } from '../plugins/auth.js';
-import { aiBudgetSnapshot, installAiBudgetObserver, writeAiBudgetSettings } from '../../ai/budget.js';
+import { aiBudgetOthers, aiBudgetSnapshot, installAiBudgetObserver, writeAiBudgetSettings } from '../../ai/budget.js';
 
 // THE CLAUDE SPEND BUDGET (ai/budget.ts; types in packages/shared ai-budget.ts).
 //
@@ -17,7 +17,9 @@ import { aiBudgetSnapshot, installAiBudgetObserver, writeAiBudgetSettings } from
 //                          (`status`) and the header's usage view (`usage`). Serves the CACHED usage
 //                          reading and, on the login route, starts the usage probe IN THE BACKGROUND
 //                          (at most every 5 minutes, 20s timeout, no model call) — it never waits.
-//                          The header polls it every ~2 minutes while the tab is visible.
+//                          The header polls it every ~2 minutes while the tab is visible. The plain
+//                          read (no `?provider=`) adds `others`: every OTHER provider that holds a
+//                          credential or that Limn ran on this week, each with its own status + usage.
 //   PUT /api/ai/budget   AiBudgetBody (any subset; validated) → AiBudgetResponse.
 //
 // Registered only when `config.aiEnabled`. Registering it also installs the message observer every
@@ -27,12 +29,19 @@ export async function aiBudgetRoutes(app: FastifyInstance): Promise<void> {
   installAiBudgetObserver();
 
   const respond = async (accountId: number, provider?: 'claude' | 'codex'): Promise<AiBudgetResponse> => {
-    const { settings, isDefault, status, usage } = await aiBudgetSnapshot(accountId, {
-      probe: 'always',
-      ...(provider ? { provider } : {}),
-    });
+    const [{ settings, isDefault, status, usage }, others] = await Promise.all([
+      aiBudgetSnapshot(accountId, { probe: 'always', ...(provider ? { provider } : {}) }),
+      // The header's popover shows EVERY provider in use: the others ride the plain read only.
+      provider ? Promise.resolve(null) : aiBudgetOthers(accountId, { probe: 'always' }),
+    ]);
     // A subscription carries no US$ on the wire: the API key's weekly figure is sent only on that route.
-    return { settings: aiBudgetSettingsView(settings, status.route), isDefault, status, usage };
+    return {
+      settings: aiBudgetSettingsView(settings, status.route),
+      isDefault,
+      status,
+      usage,
+      ...(others ? { others } : {}),
+    };
   };
 
   // `?provider=claude|codex`: that provider's reading (the per-run picker's over-budget confirm, for a

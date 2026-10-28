@@ -2,6 +2,7 @@ import {
   AI_SUBSCRIPTION_LABELS,
   aiProviderName,
   formatSharePct as formatFineSharePct,
+  limnShareScale,
   runWeekShareText,
   type AiBudgetResponse,
   type AiProviderId,
@@ -253,6 +254,8 @@ export interface UsageRow {
   value: string;
   /** How full the row's bar is, 0–100 (a limit's share used, or Claude's own window used); none = no bar. */
   barPct?: number;
+  /** One short line under the bar: the window ("Resets Thu 09:00", "Last 7 days"). */
+  note?: string;
 }
 
 /** A bar's fill, clamped to 0–100; undefined for a figure that isn't a number. */
@@ -265,6 +268,8 @@ export interface UsageSection {
   rows: UsageRow[];
 }
 export interface UsageDetail {
+  /** Whose figures these are. */
+  provider: AiProviderId;
   heading: string;
   /** The paused sentence, while automatic runs are paused. */
   paused: string | null;
@@ -314,9 +319,49 @@ export function chatGptPlanLabel(plan: string): string {
   return `ChatGPT ${capitalise(plan)}`;
 }
 
-/** The popover's contents. Pure; unknown pieces are left out, never shown as 0. */
-export function usageDetailOf(data: AiBudgetResponse, now: number = Date.now()): UsageDetail {
+/** "Resets Thu 09:00" when the provider told us the window's reset, else the rolling span it counts. */
+export function windowNote(resetsAt: string | null | undefined, rolling: string, now: number = Date.now()): string {
+  const when = formatResume(resetsAt ?? null, now);
+  return when === '' ? rolling : `Resets ${when}`;
+}
+
+/**
+ * One Limn share row: "0.4% · limit 5%" with a bar against the limit, or — no limit set — "0.4% · max
+ * 50%" with a bar against the most Limn can be given (`limnShareScale`). Null while the share is unknown.
+ */
+function limnShareRow(
+  label: string,
+  sharePct: number | null,
+  status: AiBudgetStatus,
+  which: 'week' | 'five_hour',
+  note: string,
+): UsageRow | null {
+  if (sharePct == null || !Number.isFinite(sharePct)) return null;
+  const { maxPct, limitSet } = limnShareScale(status, which);
+  return {
+    label,
+    value: `${formatFineSharePct(sharePct)} · ${limitSet ? 'limit' : 'max'} ${maxPct}%`,
+    barPct: barOf((sharePct / maxPct) * 100),
+    note,
+  };
+}
+
+/** Every provider's popover block, the default first, then each other one in use (`others`). Pure. */
+export function usageDetailsOf(data: AiBudgetResponse, now: number = Date.now()): UsageDetail[] {
+  const first = usageDetailOf(data, now);
+  const rest = (data.others ?? [])
+    .filter((o) => o.provider !== first.provider)
+    .map((o) => usageDetailOf(o, now));
+  return [first, ...rest];
+}
+
+/** One provider's popover block. Pure; unknown pieces are left out, never shown as 0. */
+export function usageDetailOf(
+  data: Pick<AiBudgetResponse, 'status' | 'usage'>,
+  now: number = Date.now(),
+): UsageDetail {
   const { status, usage } = data;
+  const provider: AiProviderId = usage.provider ?? status.provider ?? 'claude';
   const paused = status.overBudget ? pausedSentence(status, now) : null;
   const limn = usage.limn;
   const tokens: string[] = [];
@@ -342,6 +387,7 @@ export function usageDetailOf(data: AiBudgetResponse, now: number = Date.now()):
       rows.push({ label: 'Today', value: formatRunUsd(k.todayUsd) });
     }
     return {
+      provider,
       heading: usage.provider === 'codex' ? 'OpenAI API key' : 'Anthropic API key',
       paused,
       sections: [{ title: 'Limn’s runs', rows: [...rows, ...runsRows] }],
@@ -365,23 +411,19 @@ export function usageDetailOf(data: AiBudgetResponse, now: number = Date.now()):
           ? `Claude ${capitalise(reported)}`
           : 'Claude';
 
-  const sub = status.mode === 'subscription' ? status.subscription : null;
-  const limnRows: UsageRow[] = [];
-  if (limn.weekSharePct != null) {
-    limnRows.push({
-      label: 'This week',
-      value: `${formatFineSharePct(limn.weekSharePct)} of your week${sub != null ? ` · limit ${sub.sharePct}%` : ''}`,
-      barPct: sub != null && sub.sharePct > 0 ? barOf((limn.weekSharePct / sub.sharePct) * 100) : undefined,
-    });
-  }
-  if (limn.fiveHourSharePct != null) {
-    limnRows.push({
-      label: 'This 5-hour session',
-      value: `${formatFineSharePct(limn.fiveHourSharePct)} of the session${sub != null ? ` · limit ${sub.fiveHourSharePct}%` : ''}`,
-      barPct: sub != null && sub.fiveHourSharePct > 0 ? barOf((limn.fiveHourSharePct / sub.fiveHourSharePct) * 100) : undefined,
-    });
-  }
-  const sections: UsageSection[] = [{ title: 'Limn’s runs', rows: [...limnRows, ...runsRows] }];
+  // Limn's share of each window, the 5-hour session first (the account section's order). The windows
+  // are the provider's own when it told us their reset (an older server sends no reset: rolling).
+  const limnRows = [
+    limnShareRow(
+      'This 5-hour session',
+      limn.fiveHourSharePct,
+      status,
+      'five_hour',
+      windowNote(limn.fiveHourResetsAt, 'Last 5 hours', now),
+    ),
+    limnShareRow('This week', limn.weekSharePct, status, 'week', windowNote(limn.weekResetsAt, 'Last 7 days', now)),
+  ].filter((r): r is UsageRow => r != null);
+  const sections: UsageSection[] = [{ title: 'Limn’s share', rows: [...limnRows, ...runsRows] }];
 
   const acctRows: UsageRow[] = [];
   const push = (label: string, w: AiUsageWindowView | null | undefined): void => {
@@ -395,6 +437,7 @@ export function usageDetailOf(data: AiBudgetResponse, now: number = Date.now()):
   if (acctRows.length > 0) sections.push({ title: `Your ${name} account`, rows: acctRows });
 
   return {
+    provider,
     heading,
     paused,
     sections,

@@ -19,6 +19,7 @@
 
 import {
   aiBudgetSettingsView,
+  aiProviderWorthShowing,
   aiUsageView,
   decideAiBudget,
   resolveAiBudgetSettings,
@@ -139,10 +140,24 @@ function response(srv: DemoServer, provider: 'claude' | 'codex' = activeProvider
   };
 }
 
+/** The plain read's `others`: every non-default provider signed in or run this week, as on the server. */
+function withOthers(srv: DemoServer): AiBudgetResponse {
+  const main = response(srv);
+  const others = (['claude', 'codex'] as const)
+    .filter((p) => p !== activeProvider(srv))
+    .map((p) => {
+      const r = response(srv, p);
+      return { provider: p, status: r.status, usage: r.usage };
+    })
+    .filter((o) => aiProviderWorthShowing(o.usage));
+  return { ...main, others };
+}
+
 // `?provider=`: that provider's reading (a per-run model pick that is not the default), as on the server.
 export function getAiBudget(req: DemoRequest, srv: DemoServer): DemoReply {
   const named = req.query.get('provider');
-  return { status: 200, body: response(srv, named === 'claude' || named === 'codex' ? named : undefined) };
+  if (named === 'claude' || named === 'codex') return { status: 200, body: response(srv, named) };
+  return { status: 200, body: withOthers(srv) };
 }
 
 export function putAiBudget(req: DemoRequest, srv: DemoServer): DemoReply {
@@ -150,5 +165,5 @@ export function putAiBudget(req: DemoRequest, srv: DemoServer): DemoReply {
   if (problem != null) return { status: 400, body: { error: 'InvalidAiBudget', message: problem } };
   const next = resolveAiBudgetSettings({ ...settingsOf(srv), ...(req.body as Partial<AiBudgetSettings>) });
   srv.overlay.stored.set(KEY, next);
-  return { status: 200, body: response(srv) };
+  return { status: 200, body: withOthers(srv) };
 }

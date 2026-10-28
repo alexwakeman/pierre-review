@@ -132,6 +132,10 @@ const usage = (over: Partial<AiUsageView> = {}): AiUsageView => ({
   limn: {
     weekFrom: '2026-10-21T00:00:00.000Z',
     window: 'reset',
+    weekResetsAt: '2026-10-28T00:00:00.000Z',
+    fiveHourFrom: '2026-10-24T07:00:00.000Z',
+    fiveHourWindow: 'reset',
+    fiveHourResetsAt: '2026-10-24T12:00:00.000Z',
     runs: 24,
     inputTokens: 1_008_000,
     outputTokens: 74_400,
@@ -256,8 +260,12 @@ describe('the usage popover', () => {
     const d = usageDetailOf(resp({}), now);
     expect(d.heading).toBe('Claude Max 20x');
     const flat = d.sections.flatMap((s) => s.rows.map((r) => `${r.label}: ${r.value}`));
-    expect(flat).toContain('This week: 2% of your week · limit 5%');
-    expect(flat).toContain('This 5-hour session: 0.4% of the session · limit 5%');
+    expect(flat).toContain('This week: 2% · limit 5%');
+    expect(flat).toContain('This 5-hour session: 0.4% · limit 5%');
+    // The provider's own resets, plainly.
+    const rows = d.sections.flatMap((s) => s.rows);
+    expect(rows.find((r) => r.label === 'This week')?.note).toMatch(/^Resets \w{3} \d{2}:\d{2}$/);
+    expect(rows.find((r) => r.label === 'This 5-hour session')?.note).toMatch(/^Resets \d{2}:\d{2}$/);
     expect(flat).toContain('Runs this week: 24');
     expect(flat).toContain('Tokens this week: 1.0M in · 74.4k out');
     expect(flat.some((r) => r.startsWith('5-hour session: 12% used · 88% left · resets'))).toBe(true);
@@ -269,6 +277,7 @@ describe('the usage popover', () => {
     const rows = usageDetailOf(resp({}), now).sections.flatMap((s) => s.rows);
     const bar = (label: string) => rows.find((r) => r.label === label)?.barPct;
     expect(bar('This week')).toBe(40);
+    expect(bar('This 5-hour session')).toBe(8);
     expect(bar('5-hour session')).toBe(12);
     expect(bar('Runs this week')).toBeUndefined();
     expect(rows.every((r) => r.barPct == null || (r.barPct >= 0 && r.barPct <= 100))).toBe(true);
@@ -279,9 +288,47 @@ describe('the usage popover', () => {
     u.limn = { ...u.limn, inputTokens: null, outputTokens: null, weekSharePct: null, fiveHourSharePct: null };
     const d = usageDetailOf({ ...resp({ enabled: false, mode: 'off', subscription: null }), usage: u }, now);
     expect(d.heading).toBe('Claude');
-    expect(d.sections.map((s) => s.title)).toEqual(['Limn’s runs']);
+    expect(d.sections.map((s) => s.title)).toEqual(['Limn’s share']);
     expect(d.sections[0]!.rows.map((r) => r.label)).toEqual(['Runs this week']);
     expect(d.updated).toBeNull();
+  });
+  it('no limit set: a bar anyway, against the 50% most Limn can be given', () => {
+    const d = usageDetailOf(resp({ enabled: false, mode: 'off', subscription: null }), now);
+    const rows = d.sections.flatMap((s) => s.rows);
+    const week = rows.find((r) => r.label === 'This week')!;
+    expect(week.value).toBe('2% · max 50%');
+    expect(week.barPct).toBe(4);
+    const five = rows.find((r) => r.label === 'This 5-hour session')!;
+    expect(five.value).toBe('0.4% · max 50%');
+    expect(five.barPct).toBeCloseTo(0.8, 5);
+    expect(JSON.stringify(d)).not.toMatch(/\$/);
+  });
+  it('no reset known (or an older server): the rolling window, named', () => {
+    const u = usage();
+    u.limn = { ...u.limn, window: 'rolling', weekResetsAt: null, fiveHourWindow: 'rolling', fiveHourResetsAt: null };
+    const rows = usageDetailOf({ ...resp({}), usage: u }, now).sections.flatMap((s) => s.rows);
+    expect(rows.find((r) => r.label === 'This week')?.note).toBe('Last 7 days');
+    expect(rows.find((r) => r.label === 'This 5-hour session')?.note).toBe('Last 5 hours');
+  });
+  it('every provider in use gets its own block, the default first', async () => {
+    const { usageDetailsOf } = await import('../src/lib/aiBudget.js');
+    const codexUsage = usage({ provider: 'codex', weekPctPerUsd: null });
+    codexUsage.account = { ...codexUsage.account!, reportedSubscription: 'plus', subscription: null, models: [] };
+    const codexStatus = status({ provider: 'codex', enabled: false, mode: 'off', subscription: null });
+    const all = usageDetailsOf({ ...resp({}), others: [{ provider: 'codex', status: codexStatus, usage: codexUsage }] }, now);
+    expect(all.map((d) => [d.provider, d.heading])).toEqual([
+      ['claude', 'Claude Max 20x'],
+      ['codex', 'Codex · ChatGPT Plus'],
+    ]);
+    // Both draw Limn's bars: Claude's against its limit, Codex's (no limit) against 50%.
+    const bars = all.map((d) => d.sections[0]!.rows.filter((r) => r.barPct != null).map((r) => r.label));
+    expect(bars).toEqual([
+      ['This 5-hour session', 'This week'],
+      ['This 5-hour session', 'This week'],
+    ]);
+    expect(JSON.stringify(all)).not.toMatch(/\$/);
+    // An older server sends no `others`: just the default.
+    expect(usageDetailsOf(resp({}), now)).toHaveLength(1);
   });
   it('API key: US$ this week against the budget, last 5 hours, today', () => {
     const d = usageDetailOf(

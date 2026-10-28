@@ -1551,12 +1551,22 @@ while the tab is visible), feeds every surface below; the decision is the server
   weekly figure; API key: % of the weekly US$ budget, or this week's US$ with none set. Each figure has
   its own label ("AI quota for Limn:" for a budget, "Claude this week:" for the account figure, "Limn AI,
   last 7 days:" for unbudgeted API spend) — never a bare "Claude", which read as Claude's own quota. The label is
-  screen-reader only (and in the title): the item SHOWS just the icon and the figure, at every width. Click → a `role="dialog"` popover (Escape / outside click close it)
-  built by `usageDetailOf`: Limn's week and 5-hour shares with limits, runs and tokens this week,
-  Claude's account windows (5-hour, week, per-model) as used / left / resets, "Updated N min ago", and
-  a link to Settings → AI spend. Each share or window row has a bar under its text (`UsageRow.barPct`):
-  Limn's rows fill against their LIMIT, the account rows show Claude's own % used; amber from 80%, red at
-  100%; counts (runs, tokens) have none. ⚠ Unknown pieces are LEFT OUT, never shown as 0.
+  screen-reader only (and in the title): the item SHOWS just the icon and the figure, at every width. Click → a `role="dialog"` popover (Escape / outside click close it;
+  a click inside the ⓘ's portalled popover does not)
+  built by `usageDetailsOf`: ONE BLOCK PER PROVIDER IN USE — the default's (`status` + `usage`), then
+  each of the response's `others` (every other provider signed in or run this week), each from
+  `usageDetailOf` and laid out the same: the heading ("Claude Max 20x", "Codex · ChatGPT Plus"), Limn's
+  share of this 5-hour session and of this week, runs and tokens this week, the provider's own account
+  windows as used / left / resets, "Updated N min ago"; one link to Settings → AI spend at the foot.
+  Each share or window row has a bar under its text (`UsageRow.barPct`): Limn's rows fill against the
+  reader's LIMIT, or — no limit set — against 50% (`limnShareScale`; `AI_BUDGET_SHARE_MAX`, the most
+  Limn can be given; the value reads "· max 50%", the ⓘ beside the first heading says nothing pauses
+  until a limit is set); the account rows show the provider's own % used; amber from 80%, red at 100%;
+  counts (runs, tokens) have none. Limn's rows carry one note under the bar (`UsageRow.note`,
+  `windowNote`): "Resets Thu 09:00" when the provider told us the reset, else "Last 7 days" / "Last 5
+  hours". The popover scrolls past the viewport height. ⚠ Unknown pieces are LEFT OUT, never shown as
+  0; a subscription block carries no US$ (an API-key block keeps its US$ rows and draws a bar only
+  against a set weekly budget — an API key has no allowance to scale against).
 - **A run's cost** (Claude Review's meta line and live estimate, Docs chat, Ask Claude about this
   sprint): ONE wording, `useRunCostText()` → `runCostText(costUsd, usage, runProvider)` — a run of the
   non-default provider is judged by that provider's own reading (`usageForRun`). API key: US$. Claude

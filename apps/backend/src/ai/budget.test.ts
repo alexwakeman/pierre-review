@@ -4,14 +4,19 @@
 // and the persisted reading.
 //
 //   pnpm --filter @pierre-review/backend test ai/budget
-import { rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   AI_CYCLE_COST_FALLBACKS,
   SUBSCRIPTION_ESTIMATES,
+  AI_BUDGET_SHARE_MAX,
   aiBudgetSettingsView,
+  aiProviderWorthShowing,
   aiUsageView,
+  limnShareScale,
   formatSharePct,
   runWeekShareText,
   cycleCostUsd,
@@ -27,6 +32,10 @@ import {
 const DB_PATH = `${process.env.DATABASE_URL ?? '/tmp/pierre-ai-budget'}.ai-budget.sqlite`;
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
+// Limn's Codex home sits under the data directory: an empty temp one, never ~/.limn (the route lists
+// every provider in use, so a real Codex sign-in on this machine must not leak in). No key either.
+process.env.LIMN_DATA_DIR = mkdtempSync(join(tmpdir(), 'limn-budget-'));
+delete process.env.OPENAI_API_KEY;
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 let B: typeof import('./budget.js');
@@ -348,6 +357,39 @@ describe('aiUsageView — the header item and its popover', () => {
     expect(u.apiKey).toEqual({ weekUsd: 118.5, fiveHourUsd: 2, todayUsd: 2 });
   });
 
+  it('the windows follow the provider’s OWN resets: Limn’s week and session start at reset − length', () => {
+    const u = view();
+    expect(u.limn).toMatchObject({
+      window: 'reset',
+      weekFrom: new Date(NOW + 3 * D - 7 * D).toISOString(),
+      weekResetsAt: new Date(NOW + 3 * D).toISOString(),
+      fiveHourWindow: 'reset',
+      fiveHourFrom: new Date(NOW + 2 * H - 5 * H).toISOString(),
+      fiveHourResetsAt: new Date(NOW + 2 * H).toISOString(),
+    });
+    // A run 4 h ago is BEFORE this session (it began 3 h ago), so the session share counts only the
+    // run an hour ago — not a rolling 5 hours.
+    const u2 = view({ ledger: [{ atMs: NOW - 4 * H, usd: 10 }, { atMs: NOW - H, usd: 2 }] });
+    expect(u2.limn.fiveHourSharePct).toBeCloseTo((2 / SUBSCRIPTION_ESTIMATES.max20x.fiveHour) * 100, 2);
+  });
+
+  it('no reset known: a ROLLING 7 days and 5 hours (never a calendar week), labelled rolling', () => {
+    const u = view({ reading: { subscriptionType: 'max' } });
+    expect(u.limn).toMatchObject({
+      window: 'rolling',
+      weekFrom: new Date(NOW - 7 * D).toISOString(),
+      weekResetsAt: null,
+      fiveHourWindow: 'rolling',
+      fiveHourFrom: new Date(NOW - 5 * H).toISOString(),
+      fiveHourResetsAt: null,
+    });
+    // The run 5 days ago is inside the rolling week (the reset-anchored one began 4 days ago).
+    expect(u.limn.runs).toBe(3);
+    // A reset that has already passed is not believed: rolling again.
+    const stale = view({ reading: { subscriptionType: 'max', week: { utilization: 5, resetsAtMs: NOW - H, observedAtMs: NOW - D } } });
+    expect(stale.limn).toMatchObject({ window: 'rolling', weekResetsAt: null });
+  });
+
   it('⚠ NO US$ AMOUNT ON THE SUBSCRIPTION WIRE: status, settings and usage together', () => {
     const settings = on({ subscription: 'max20x' });
     const status = decide({ settings, reading: full, ledger });
@@ -361,6 +403,38 @@ describe('aiUsageView — the header item and its popover', () => {
         : [];
     // The one exception is the documented RATE (% of the week per recorded US$), not an amount.
     expect(moneyKeysWithValues(body)).toEqual(['weekPctPerUsd']);
+  });
+});
+
+describe('limnShareScale — the bar’s scale, with and without a limit', () => {
+  it('budget on: the reader’s week and 5-hour shares', () => {
+    const st = decide({ settings: on({ weekSharePct: 8, fiveHourSharePct: 3, subscription: 'pro' }) });
+    expect(limnShareScale(st, 'week')).toEqual({ maxPct: 8, limitSet: true });
+    expect(limnShareScale(st, 'five_hour')).toEqual({ maxPct: 3, limitSet: true });
+  });
+  it('the 5-hour share follows the week when not set separately', () => {
+    const st = decide({ settings: on({ weekSharePct: 12, subscription: 'pro' }) });
+    expect(limnShareScale(st, 'five_hour')).toEqual({ maxPct: 12, limitSet: true });
+  });
+  it('no limit set (budget off, or an API key): the 50% most Limn can be given', () => {
+    const off = decide({ settings: resolveAiBudgetSettings({ enabled: false, weekSharePct: 8 }) });
+    expect(AI_BUDGET_SHARE_MAX).toBe(50);
+    expect(limnShareScale(off, 'week')).toEqual({ maxPct: 50, limitSet: false });
+    expect(limnShareScale(off, 'five_hour')).toEqual({ maxPct: 50, limitSet: false });
+    const key = decide({ route: 'api_key' });
+    expect(limnShareScale(key, 'week')).toEqual({ maxPct: 50, limitSet: false });
+  });
+});
+
+describe('aiProviderWorthShowing — which other providers the popover lists', () => {
+  const base = aiUsageView({ settings: on(), route: 'none', reading: null, ledger: [], nowMs: NOW, todayFromMs: NOW - H });
+  it('signed in (login or key): shown, even with no runs', () => {
+    expect(aiProviderWorthShowing({ ...base, route: 'login' })).toBe(true);
+    expect(aiProviderWorthShowing({ ...base, route: 'api_key' })).toBe(true);
+  });
+  it('no credential: shown only when Limn ran on it this week', () => {
+    expect(aiProviderWorthShowing(base)).toBe(false);
+    expect(aiProviderWorthShowing({ ...base, limn: { ...base.limn, runs: 2 } })).toBe(true);
   });
 });
 
@@ -783,7 +857,9 @@ describe('on the database', () => {
       const put = await app.inject({ method: 'PUT', url: '/api/ai/budget', payload: { enabled: true, subscription: 'pro', fiveHourSharePct: 9 } });
       expect(put.statusCode).toBe(200);
       const body = put.json();
-      expect(Object.keys(body).sort()).toEqual(['isDefault', 'settings', 'status', 'usage']);
+      expect(Object.keys(body).sort()).toEqual(['isDefault', 'others', 'settings', 'status', 'usage']);
+      // No Codex credential and no Codex runs: no other provider to list.
+      expect(body.others).toEqual([]);
       expect(body.settings).toMatchObject({ fiveHourSharePct: 9, weeklyUsd: null });
       expect(body.status.subscription).toMatchObject({ fiveHourSharePct: 9, fiveHourFollowsWeek: false });
       expect(body.usage.route).toBe('login');
@@ -799,6 +875,10 @@ describe('on the database', () => {
       const get = await app.inject({ method: 'GET', url: '/api/ai/budget' });
       expect(get.statusCode).toBe(200);
       expect(get.json().settings.fiveHourSharePct).toBeNull();
+      expect(Array.isArray(get.json().others)).toBe(true);
+      // A named provider's read (a per-run pick) carries no `others`.
+      const named = await app.inject({ method: 'GET', url: '/api/ai/budget?provider=claude' });
+      expect('others' in named.json()).toBe(false);
     } finally {
       await app.close();
       B._setUsageProbeForTest(null);

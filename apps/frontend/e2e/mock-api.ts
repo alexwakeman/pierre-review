@@ -1016,6 +1016,10 @@ const AI_BUDGET: AiBudgetResponse = {
     limn: {
       weekFrom: '2026-10-18T00:00:00.000Z',
       window: 'rolling',
+      weekResetsAt: null,
+      fiveHourFrom: '2026-10-25T07:00:00.000Z',
+      fiveHourWindow: 'rolling',
+      fiveHourResetsAt: null,
       runs: 0,
       inputTokens: null,
       outputTokens: null,
@@ -1025,6 +1029,8 @@ const AI_BUDGET: AiBudgetResponse = {
     apiKey: null,
     weekPctPerUsd: null,
   },
+  // No other provider signed in or run this week.
+  others: [],
 };
 
 export async function installMockApi(page: Page): Promise<void> {

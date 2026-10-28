@@ -335,6 +335,13 @@ export function aiBudgetSettingsView(
   return { ...settings, weeklyUsd: route === 'api_key' ? settings.weeklyUsd : null };
 }
 
+/** One provider's decision and usage view — the default's is the response's own `status` + `usage`. */
+export interface AiProviderBudget {
+  provider: AiBudgetProvider;
+  status: AiBudgetStatus;
+  usage: AiUsageView;
+}
+
 /** GET /api/ai/budget and PUT /api/ai/budget's answer. */
 export interface AiBudgetResponse {
   /** ⚠ `weeklyUsd` is null unless the route is the API key. */
@@ -344,6 +351,31 @@ export interface AiBudgetResponse {
   status: AiBudgetStatus;
   /** What the header's usage item and its popover show — filled whether or not the budget is on. */
   usage: AiUsageView;
+  /**
+   * Every OTHER provider (not the default) that holds a credential OR has Limn runs in its current
+   * week, so the header's popover shows each one. Only on the plain GET and the PUT — a
+   * `?provider=` read leaves it out. Absent from an older server ⇒ none.
+   */
+  others?: AiProviderBudget[];
+}
+
+/** Whether a non-default provider belongs in the header's popover: signed in, or Limn used it this week. Pure. */
+export function aiProviderWorthShowing(usage: AiUsageView): boolean {
+  return usage.route !== 'none' || usage.limn.runs > 0;
+}
+
+/**
+ * The scale a Limn share's bar is drawn against, in % of the allowance: the reader's limit while the
+ * budget is on, else AI_BUDGET_SHARE_MAX (50%) — the most Limn can be given, so the bar still says how
+ * far along it is with no limit set. `limitSet` says which. Pure.
+ */
+export function limnShareScale(
+  status: AiBudgetStatus,
+  which: AiBudgetWindow,
+): { maxPct: number; limitSet: boolean } {
+  const sub = status.enabled && status.mode === 'subscription' ? status.subscription : null;
+  const set = sub == null ? null : which === 'week' ? sub.sharePct : sub.fiveHourSharePct;
+  return set != null && set > 0 ? { maxPct: set, limitSet: true } : { maxPct: AI_BUDGET_SHARE_MAX, limitSet: false };
 }
 
 /** PUT /api/ai/budget body: any subset of the settings. */
@@ -405,9 +437,17 @@ export interface AiUsageAccountView {
 
 /** Limn's own recorded runs (ai_usage) in the week the budget counts. */
 export interface AiUsageLimnView {
-  /** ISO-8601 start of that week ([reset − 7 days] when Claude's reset was read, else 7 days ago). */
+  /** ISO-8601 start of that week ([reset − 7 days] when the provider's weekly reset was read and is
+   *  ahead, else the rolling 7 days ago — never a calendar week). */
   weekFrom: string;
   window: 'reset' | 'rolling';
+  /** ISO-8601: the week's reset when read (window 'reset'), else null. */
+  weekResetsAt: string | null;
+  /** ISO-8601 start of the 5-hour session the share counts ([reset − 5 h], else 5 hours ago). */
+  fiveHourFrom: string;
+  fiveHourWindow: 'reset' | 'rolling';
+  /** ISO-8601: the session's reset when read (fiveHourWindow 'reset'), else null. */
+  fiveHourResetsAt: string | null;
   /** Recorded model runs (ai_usage rows) this week. */
   runs: number;
   /** Summed token counts; null when no run this week reported them. */
@@ -837,6 +877,8 @@ export function aiUsageView(input: AiUsageViewInput): AiUsageView {
   const login = route === 'login';
   const weekReset = login ? liveWeekReset(reading, nowMs) : null;
   const weekFromMs = weekReset != null ? weekReset - AI_BUDGET_WEEK_MS : nowMs - AI_BUDGET_WEEK_MS;
+  const fiveReset = login ? liveFiveHourReset(reading, nowMs) : null;
+  const fiveFromMs = fiveReset != null ? fiveReset - AI_BUDGET_FIVE_HOUR_MS : nowMs - AI_BUDGET_FIVE_HOUR_MS;
   const inWeek = ledger.filter((r) => (weekReset != null ? r.atMs >= weekFromMs : r.atMs > weekFromMs) && r.atMs <= nowMs);
   const sumTokens = (pick: (r: AiLedgerRow) => number | null | undefined): number | null => {
     const xs = inWeek.map(pick).filter((n): n is number => typeof n === 'number' && Number.isFinite(n));
@@ -885,8 +927,7 @@ export function aiUsageView(input: AiUsageViewInput): AiUsageView {
     };
     if (kind != null) {
       const est = SUBSCRIPTION_ESTIMATES[kind];
-      const fiveReset = liveFiveHourReset(reading, nowMs);
-      const fiveUsd = fiveReset != null ? spend(fiveReset - AI_BUDGET_FIVE_HOUR_MS, true) : spend(nowMs - AI_BUDGET_FIVE_HOUR_MS, false);
+      const fiveUsd = spend(fiveFromMs, fiveReset != null);
       weekSharePct = round2((inWeek.reduce((s, r) => s + r.usd, 0) / est.week) * 100);
       fiveHourSharePct = round2((fiveUsd / est.fiveHour) * 100);
       weekPctPerUsd = 100 / est.week;
@@ -899,6 +940,10 @@ export function aiUsageView(input: AiUsageViewInput): AiUsageView {
     limn: {
       weekFrom: new Date(weekFromMs).toISOString(),
       window: weekReset != null ? 'reset' : 'rolling',
+      weekResetsAt: isoOf(weekReset),
+      fiveHourFrom: new Date(fiveFromMs).toISOString(),
+      fiveHourWindow: fiveReset != null ? 'reset' : 'rolling',
+      fiveHourResetsAt: isoOf(fiveReset),
       runs: inWeek.length,
       inputTokens: sumTokens((r) => r.inputTokens),
       outputTokens: sumTokens((r) => r.outputTokens),

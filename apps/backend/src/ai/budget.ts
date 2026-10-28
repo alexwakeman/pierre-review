@@ -48,6 +48,7 @@ import { and, eq, gte, inArray } from 'drizzle-orm';
 import {
   AI_BUDGET_DAY_MS,
   AI_BUDGET_WEEK_MS,
+  aiProviderWorthShowing,
   aiUsageView,
   budgetWindowStart,
   decideAiBudget,
@@ -59,6 +60,7 @@ import {
   rollingSpend,
   type AiBudgetSettings,
   type AiBudgetStatus,
+  type AiProviderBudget,
   type AiCycleCostInput,
   type AiLedgerRow,
   type AiUsageReading,
@@ -406,6 +408,30 @@ export async function aiBudgetSnapshot(accountId: number, opts: AiBudgetStatusOp
       accountTokens,
     }),
   };
+}
+
+/** Every provider id the budget knows, the default first. */
+const PROVIDER_IDS: readonly AgentProviderId[] = ['claude', 'codex'];
+
+/**
+ * The OTHER providers' figures for the header's popover (every provider but the default): each one
+ * that holds a credential, or that Limn ran on in its current week (`aiProviderWorthShowing`), with
+ * its own decision and usage view — its own windows, its own ledger rows. Never throws: a provider
+ * whose read fails is left out.
+ */
+export async function aiBudgetOthers(accountId: number, opts: Omit<AiBudgetStatusOptions, 'provider'> = {}): Promise<AiProviderBudget[]> {
+  const defaultId = getActiveProvider().id;
+  const out: AiProviderBudget[] = [];
+  for (const id of PROVIDER_IDS) {
+    if (id === defaultId) continue;
+    try {
+      const snap = await aiBudgetSnapshot(accountId, { ...opts, provider: id });
+      if (aiProviderWorthShowing(snap.usage)) out.push({ provider: id, status: snap.status, usage: snap.usage });
+    } catch {
+      /* left out */
+    }
+  }
+  return out;
 }
 
 /** The budget's status for an account. Never throws: a failed read is "off" (never blocks). */
