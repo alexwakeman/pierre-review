@@ -3,6 +3,7 @@
 // The app talks to `db` through the async surface only (`await builder` / `.execute()` /
 // `.returning().execute()` / runTransaction). Postgres support is gone; the query layer keeps
 // that style because nothing gains from rewriting it.
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { chmodSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import Database from 'better-sqlite3';
@@ -48,20 +49,48 @@ export async function closeDb(): Promise<void> {
 
 // The one transaction entry. better-sqlite3 rejects async transaction callbacks ("Transaction
 // function cannot return a promise"), so this wraps a manual BEGIN/COMMIT around the awaited
-// (synchronously-resolving) drizzle ops — no other macrotask interleaves between BEGIN and
-// COMMIT because the callback only awaits in-process sqlite work (no real I/O).
+// (synchronously-resolving) drizzle ops. The callback only awaits in-process sqlite work, so no
+// MACROtask interleaves — but MICROtasks do: two runTransaction calls started by separate async
+// chains in the same tick both reached BEGIN, and the second threw "cannot start a transaction
+// within a transaction" (two ticket runs started in the same second, 2026-10-28). So callers queue
+// on ONE in-process lock, in call order.
+// ⚠ A NESTED call (runTransaction inside a runTransaction callback) would wait on itself for ever;
+// it throws instead, as the bare BEGIN always did. Detected by the holder's token in async context,
+// so work the callback merely STARTED (fire-and-forget) that runs a transaction after the commit
+// waits its turn rather than throwing.
+let txTail: Promise<void> = Promise.resolve();
+let txHolder: symbol | null = null;
+const txContext = new AsyncLocalStorage<symbol>();
+
 export async function runTransaction<T>(fn: (tx: Executor) => Promise<T>): Promise<T> {
-  sqliteConn.exec('BEGIN');
+  const outer = txContext.getStore();
+  if (outer != null && outer === txHolder) {
+    throw new Error('runTransaction: a nested transaction is not supported');
+  }
+  const prev = txTail;
+  let release!: () => void;
+  txTail = new Promise<void>((resolve) => (release = resolve));
+  await prev;
+  const token = Symbol('tx');
+  txHolder = token;
   try {
-    const result = await fn(db);
-    sqliteConn.exec('COMMIT');
-    return result;
-  } catch (err) {
-    try {
-      sqliteConn.exec('ROLLBACK');
-    } catch {
-      /* rollback best-effort */
-    }
-    throw err;
+    return await txContext.run(token, async () => {
+      sqliteConn.exec('BEGIN');
+      try {
+        const result = await fn(db);
+        sqliteConn.exec('COMMIT');
+        return result;
+      } catch (err) {
+        try {
+          sqliteConn.exec('ROLLBACK');
+        } catch {
+          /* rollback best-effort */
+        }
+        throw err;
+      }
+    });
+  } finally {
+    txHolder = null;
+    release();
   }
 }
