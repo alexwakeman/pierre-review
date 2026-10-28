@@ -1,6 +1,7 @@
 import type { CSSProperties } from 'react';
 import github from '../../assets/board/logos/github.svg';
 import claude from '../../assets/board/logos/claude.svg';
+import openai from '../../assets/board/logos/openai.svg';
 import jira from '../../assets/board/logos/jira.svg';
 import linear from '../../assets/board/logos/linear.svg';
 import sonar from '../../assets/board/logos/sonarqubecloud.svg';
@@ -67,11 +68,11 @@ export function Gather() {
         </div>
         <LogoTile src={github} name="GitHub" note="Code, CI, issues" />
         <LogoTile src={claude} name="Claude" note="Your Claude Code login" />
+        <LogoTile src={openai} name="Codex" note="Your ChatGPT plan" />
         <LogoTile src={jira} name="Jira" note="Stories" />
         <LogoTile src={linear} name="Linear" note="Stories" />
         <LogoTile src={sonar} name="SonarCloud" note="Quality gate" />
         <WordmarkTile word="Slack" note="Team digest" />
-        <WordmarkTile word="Codex" note="Your ChatGPT plan" />
         <LogoTile src={coderabbit} name="CodeRabbit" note="Review bot" />
         <LogoTile src={copilot} name="GitHub Copilot" note="Review bot" />
         <LogoTile src={cursor} name="Cursor" note="And 14 more bots" />
