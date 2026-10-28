@@ -23,6 +23,9 @@
 //   • The trunk head moved (or was first seen) → the existing trunk-moved recheck
 //     (sync/unsettled-prs.ts): merge state for ≤25 open PRs per request, twice. Mergeability is
 //     NEVER asked for in the sweep itself — see the 502 rule in docs/REALTIME-SYNC.md.
+//   • Every repo read then gets the unsettled-PR backstop (sync/unsettled-prs.ts): merge state
+//     stored unknown and CI stuck pending, re-read in ≤25-PR batches. It used to ride only a
+//     walk's tail; with a quiet repo walked every 3 hours, it rides the sweep too.
 //
 // ⚠ NOTHING HERE WRITES A COLUMN. Every write goes through `syncOnePr` → `persistPr` or the
 // recheck's `applyPrLiveness`, whose "cleared only on a positive statement" guards stay exactly
@@ -31,10 +34,15 @@
 // ⚠ LIMN'S OWN `limn/…` LINES ARE NOT CI. A head carrying one has its rollup recomputed without
 // them (sync/limn-ci.ts `fetchRollupsWithoutLimn`, ~1 point per 10 heads) only when the raw state
 // could hide a real change: PENDING (a pending Limn line masks CI finishing), or SUCCESS while the
-// stored CI is neither success nor unknown.
+// stored CI is not success (a stored `unknown` included: a green Limn line over "no checks yet"
+// cannot be told from CI that registered and passed without the recompute).
 // ⚠ LOOP-PROOF. A PR is re-synced at most once per distinct GitHub observation (`actedOn`): if
 // the stored row still differs after the single-PR read (a field persistPr reads differently),
 // the sweep waits for GitHub to say something new rather than paying a point every five minutes.
+// Only a re-sync that LANDED (`syncOnePr` → true) is remembered: a failed read or a stand-down is
+// retried on the next sweep (the change is updatedAt-silent — nothing else will ever re-read it),
+// up to SETTLE_MAX_ATTEMPTS per observation, so a PR GitHub will not answer for cannot cost a
+// point every sweep forever.
 // ⚠ RATE LIMITS ARE PRE-EMPTED, never errors: a limited account is skipped (its repos are not
 // stamped, so they are read as soon as the window lifts); a limit discovered by the query notes
 // the shared budget and ends the account's sweep quietly. Any other failure is a warn line and the
@@ -63,7 +71,7 @@ import {
 import { isSettleDue, markDirty, noteSettle } from './adaptive.js';
 import { fetchRollupsWithoutLimn } from './limn-ci.js';
 import { syncOnePr } from './sync-one-pr.js';
-import { scheduleTrunkMovedRecheck } from './unsettled-prs.js';
+import { runUnsettledPrBackstop, scheduleTrunkMovedRecheck } from './unsettled-prs.js';
 import { ciStatusFrom, reviewDecisionFrom } from './upsert.js';
 import type { Logger } from './sync-repo.js';
 
@@ -75,6 +83,8 @@ const errMsg = (err: unknown): string => (err instanceof Error ? err.message : S
 const SETTLE_MAX_PAGES = 4;
 /** Bounded memory for the per-PR "already acted on this observation" map and the trunk heads. */
 const ACTED_MAX = 5_000;
+/** Re-syncs of one PR on one observation that may fail before the sweep gives that answer up. */
+export const SETTLE_MAX_ATTEMPTS = 3;
 const TRUNK_MAX = 2_000;
 
 type CiStatus = ReturnType<typeof ciStatusFrom>;
@@ -168,15 +178,17 @@ const LIMN_MASKABLE = new Set(['SUCCESS', 'PENDING']);
  * Must this PR's CI be recomputed without Limn's lines before it can be judged? Only when the
  * head carries a Limn line, the head is the one we stored (a new head is re-synced anyway), and
  * the raw state could hide a real change: PENDING always (a pending Limn line masks CI
- * finishing), SUCCESS only when the stored CI is neither success nor unknown (an all-green rollup
- * means the Limn-free answer is success, or "no other CI", which persistPr stores as unknown).
+ * finishing), SUCCESS whenever the stored CI is not success. An all-green rollup means the
+ * Limn-free answer is success or "no other CI" (stored as unknown) — so over a stored `unknown`
+ * it is EITHER no change OR CI that registered and passed since the walk (a fresh head persisted
+ * before any check registered), and only the recompute can tell which.
  */
 export function needsCiRecompute(stored: SettleStoredPr, obs: SettleObservedPr): boolean {
   if (!obs.hasLimnLine || obs.rawCi == null || obs.headOid !== stored.headSha) return false;
   const raw = obs.rawCi.toUpperCase();
   if (!LIMN_MASKABLE.has(raw)) return false;
   if (raw === 'PENDING') return true;
-  return stored.ciStatus !== 'success' && stored.ciStatus !== 'unknown';
+  return stored.ciStatus !== 'success';
 }
 
 /**
@@ -191,13 +203,9 @@ function observedCi(
   if (obs.rawCi === undefined) return undefined;
   if (obs.hasLimnLine && obs.rawCi != null && LIMN_MASKABLE.has(obs.rawCi.toUpperCase())) {
     if (ciWithoutLimn !== undefined) return ciWithoutLimn;
-    // An all-green rollup agrees with a stored success / "no other CI" (see needsCiRecompute).
-    if (
-      obs.rawCi.toUpperCase() === 'SUCCESS' &&
-      (stored.ciStatus === 'success' || stored.ciStatus === 'unknown')
-    ) {
-      return stored.ciStatus as CiStatus;
-    }
+    // An all-green rollup agrees with a stored success (see needsCiRecompute). Anything else
+    // without its recompute is unjudged, never guessed.
+    if (obs.rawCi.toUpperCase() === 'SUCCESS' && stored.ciStatus === 'success') return 'success';
     return undefined;
   }
   return ciStatusFrom(obs.rawCi);
@@ -257,6 +265,21 @@ function rememberActed(key: string, sig: string): void {
     if (oldest !== undefined) actedOn.delete(oldest);
   }
   actedOn.set(key, sig);
+}
+
+// `account:pr` → { sig, n }: failed re-syncs of this PR on observation `sig`. Bounded FIFO. A new
+// observation restarts the count; a landed re-sync (or the give-up) moves the PR to `actedOn`.
+const failedAttempts = new Map<string, { sig: string; n: number }>();
+function noteFailedAttempt(key: string, sig: string): number {
+  const prev = failedAttempts.get(key);
+  const n = prev && prev.sig === sig ? prev.n + 1 : 1;
+  if (prev) failedAttempts.delete(key);
+  else if (failedAttempts.size >= ACTED_MAX) {
+    const oldest = failedAttempts.keys().next().value;
+    if (oldest !== undefined) failedAttempts.delete(oldest);
+  }
+  failedAttempts.set(key, { sig, n });
+  return n;
 }
 
 // `account:repo` → the default branch head the sweep last saw. Bounded FIFO.
@@ -587,6 +610,8 @@ export async function runSettleSweep(args: {
     for (const r of due) byAccount.set(r.accountId, [...(byAccount.get(r.accountId) ?? []), r]);
 
     const planned: PlannedSync[] = [];
+    // Repos GitHub answered for this sweep — each gets the unsettled-PR backstop at the end.
+    const answered: SweepRepo[] = [];
     for (const [accountId, accountRepos] of byAccount) {
       if (isLimited(accountId)) {
         result.paused = true;
@@ -612,6 +637,7 @@ export async function runSettleSweep(args: {
         if (outcome.kind === 'failed') continue;
         result.repos += outcome.reads.length;
         for (const read of outcome.reads) {
+          answered.push(read.repo);
           try {
             planned.push(...(await judgeRepo(client, read, now, log, result)));
           } catch (err) {
@@ -632,10 +658,30 @@ export async function runSettleSweep(args: {
         continue;
       }
       result.prSyncs += 1;
-      await syncOnePr(p.repoId, p.number, log);
-      // Remembered whatever syncOnePr returned: a stand-down means another sync is reading it now,
-      // and a failure must not cost a point every five minutes until GitHub says something new.
-      rememberActed(`${p.accountId}:${p.prId ?? `${p.repoId}#${p.number}`}`, p.sig);
+      const key = `${p.accountId}:${p.prId ?? `${p.repoId}#${p.number}`}`;
+      const landed = await syncOnePr(p.repoId, p.number, log);
+      // Remembered only when the re-sync LANDED. A failure (a 502, a limit met inside the
+      // single-PR read) or a stand-down (another sync of the PR was in flight, possibly reading
+      // from before the change) is retried next sweep — but at most SETTLE_MAX_ATTEMPTS times on
+      // one observation, so a PR GitHub will not answer for stops costing a point every sweep.
+      if (landed) {
+        failedAttempts.delete(key);
+        rememberActed(key, p.sig);
+      } else if (noteFailedAttempt(key, p.sig) >= SETTLE_MAX_ATTEMPTS) {
+        failedAttempts.delete(key);
+        rememberActed(key, p.sig);
+      }
+    }
+
+    // THE UNSETTLED-PR BACKSTOP (sync/unsettled-prs.ts) for every repo the sweep read: merge state
+    // stored unknown (a single-PR re-sync above can store one — GitHub answers UNKNOWN on a first
+    // ask) and CI stuck `pending`. It used to ride only a walk's tail, and walks of a quiet repo
+    // are now three hours apart — so it rides the sweep too. FIRE-AND-FORGET, never throws; no
+    // GitHub call at all on a repo with no such PRs, ≤25 merge states per request (the 502 rule),
+    // its own cooldowns (stuck-unknown 30 min, CI nudges 20 min) unchanged.
+    for (const repo of answered) {
+      if (isLimited(repo.accountId)) break;
+      void runUnsettledPrBackstop({ accountId: repo.accountId, repoId: repo.id, log });
     }
 
     if (result.prSyncs > 0 || result.walksMarked > 0 || result.trunkMoves > 0 || result.deferred > 0) {
@@ -657,6 +703,7 @@ export async function runSettleSweep(args: {
 /** Test-only: clear the loop guard, the trunk heads and the in-flight claim. */
 export function __resetSettleSweep(): void {
   actedOn.clear();
+  failedAttempts.clear();
   trunkHeads.clear();
   sweepInFlight = false;
 }

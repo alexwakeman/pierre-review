@@ -43,7 +43,8 @@ vi.mock('../auth/account.js', async (importOriginal) => ({
 const syncOnePr = vi.fn(async () => true);
 vi.mock('./sync-one-pr.js', () => ({ syncOnePr }));
 const scheduleTrunkMovedRecheck = vi.fn();
-vi.mock('./unsettled-prs.js', () => ({ scheduleTrunkMovedRecheck }));
+const runUnsettledPrBackstop = vi.fn(async () => {});
+vi.mock('./unsettled-prs.js', () => ({ scheduleTrunkMovedRecheck, runUnsettledPrBackstop }));
 const fetchRollupsWithoutLimn = vi.fn(
   async (_c: unknown, _o: string, _n: string, shas: readonly string[]) => ({
     bySha: new Map<string, string | null>(shas.map((s) => [s, 'SUCCESS'])),
@@ -218,6 +219,7 @@ beforeEach(async () => {
   syncOnePr.mockClear();
   syncOnePr.mockImplementation(async () => true);
   scheduleTrunkMovedRecheck.mockClear();
+  runUnsettledPrBackstop.mockClear();
   fetchRollupsWithoutLimn.mockClear();
   getAccessToken.mockClear();
   log.warn.mockClear();
@@ -284,6 +286,68 @@ describe('only PRs that differ are re-synced', () => {
     answerRepos({ web: repoNode([{ number: 1, ci: 'FAILURE' }]) });
     await sweep.runSettleSweep({ log, now: NOW + 10 * 60_000 });
     expect(syncOnePr).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('a re-sync that did not land is retried, boundedly', () => {
+  it('a failed or stood-down syncOnePr is retried next sweep, up to three times per answer', async () => {
+    const repoId = await seedRepo('web');
+    await seedPr(repoId, { number: 1, ci: 'failure' });
+    // CI re-ran green on the same head: updatedAt-silent, so nothing but the sweep will see it.
+    answerRepos({ web: repoNode([{ number: 1, ci: 'SUCCESS' }]) });
+    syncOnePr.mockImplementation(async () => false); // a 502 / a stand-down
+    await run();
+    await sweep.runSettleSweep({ log, now: NOW + 5 * 60_000 });
+    expect(syncOnePr).toHaveBeenCalledTimes(2); // NOT remembered as done
+    await sweep.runSettleSweep({ log, now: NOW + 10 * 60_000 });
+    expect(syncOnePr).toHaveBeenCalledTimes(3);
+    // Three failures on the same answer: given up until GitHub says something new.
+    await sweep.runSettleSweep({ log, now: NOW + 15 * 60_000 });
+    expect(syncOnePr).toHaveBeenCalledTimes(3);
+    answerRepos({ web: repoNode([{ number: 1, ci: 'FAILURE', head: 'sha1' }]) });
+    await sweep.runSettleSweep({ log, now: NOW + 20 * 60_000 });
+    expect(syncOnePr).toHaveBeenCalledTimes(3); // FAILURE agrees with the stored failure
+    answerRepos({ web: repoNode([{ number: 1, ci: 'PENDING' }]) });
+    await sweep.runSettleSweep({ log, now: NOW + 25 * 60_000 });
+    expect(syncOnePr).toHaveBeenCalledTimes(4); // a new answer: tried again
+  });
+
+  it('a failure then a success is remembered once landed', async () => {
+    const repoId = await seedRepo('web');
+    await seedPr(repoId, { number: 1, ci: 'pending' });
+    answerRepos({ web: repoNode([{ number: 1, ci: 'SUCCESS' }]) });
+    syncOnePr.mockImplementationOnce(async () => false);
+    await run();
+    await sweep.runSettleSweep({ log, now: NOW + 5 * 60_000 }); // lands
+    await sweep.runSettleSweep({ log, now: NOW + 10 * 60_000 }); // remembered: not re-paid
+    expect(syncOnePr).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('the unsettled-PR backstop rides the sweep', () => {
+  it('runs for every repo GitHub answered for, after the re-syncs; not for an unread repo', async () => {
+    const a = await seedRepo('web');
+    const b = await seedRepo('api');
+    await seedRepo('gone');
+    await seedPr(a, { number: 1, ci: 'pending' });
+    answerRepos({ web: repoNode([{ number: 1, ci: 'SUCCESS' }]), api: repoNode([]) });
+    let syncedBeforeBackstop = false;
+    runUnsettledPrBackstop.mockImplementationOnce(async () => {
+      syncedBeforeBackstop = syncOnePr.mock.calls.length === 1;
+    });
+    await run();
+    const ids = runUnsettledPrBackstop.mock.calls
+      .map((c) => (c as unknown as [{ repoId: number }])[0].repoId)
+      .sort((x, y) => x - y);
+    expect(ids).toEqual([a, b].sort((x, y) => x - y));
+    expect(syncedBeforeBackstop).toBe(true);
+  });
+
+  it('not while the account is limited', async () => {
+    await seedRepo('web');
+    budget.noteLimited(1, new Date(Date.now() + 60 * 60_000));
+    await run();
+    expect(runUnsettledPrBackstop).not.toHaveBeenCalled();
   });
 });
 
@@ -385,7 +449,25 @@ describe("Limn's own status lines are not CI", () => {
   it('a raw SUCCESS with a limn/ line over a stored success costs no recompute', async () => {
     const repoId = await seedRepo('web');
     await seedPr(repoId, { number: 1, ci: 'success' });
-    await seedPr(repoId, { number: 2, ci: 'unknown' }); // only Limn's line: "no CI"
+    answerRepos({ web: repoNode([{ number: 1, ci: 'SUCCESS', limn: true }]) });
+    await run();
+    expect(fetchRollupsWithoutLimn).not.toHaveBeenCalled();
+    expect(syncOnePr).not.toHaveBeenCalled();
+  });
+
+  // A walk persisted a fresh head before any check registered (stored `unknown`); CI then ran and
+  // passed, and Limn's own line went green too. The raw SUCCESS cannot say which — recompute.
+  it('a raw SUCCESS with a limn/ line over a stored unknown is recomputed, not assumed equal', async () => {
+    const repoId = await seedRepo('web');
+    await seedPr(repoId, { number: 1, ci: 'unknown' }); // CI registered and passed since
+    await seedPr(repoId, { number: 2, ci: 'unknown' }); // only Limn's line: still "no CI"
+    fetchRollupsWithoutLimn.mockImplementationOnce(async () => ({
+      bySha: new Map<string, string | null>([
+        ['sha1', 'SUCCESS'],
+        ['sha2', null],
+      ]),
+      cost: 1,
+    }));
     answerRepos({
       web: repoNode([
         { number: 1, ci: 'SUCCESS', limn: true },
@@ -393,7 +475,16 @@ describe("Limn's own status lines are not CI", () => {
       ]),
     });
     await run();
-    expect(fetchRollupsWithoutLimn).not.toHaveBeenCalled();
+    expect(fetchRollupsWithoutLimn).toHaveBeenCalledTimes(1);
+    expect(syncedNumbers()).toEqual([1]);
+  });
+
+  it('…and with the recompute unavailable, the stored unknown is left unjudged', async () => {
+    const repoId = await seedRepo('web');
+    await seedPr(repoId, { number: 1, ci: 'unknown' });
+    fetchRollupsWithoutLimn.mockRejectedValueOnce(new Error('502 Bad Gateway'));
+    answerRepos({ web: repoNode([{ number: 1, ci: 'SUCCESS', limn: true }]) });
+    await run();
     expect(syncOnePr).not.toHaveBeenCalled();
   });
 

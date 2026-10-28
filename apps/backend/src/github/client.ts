@@ -260,15 +260,23 @@ export function ghRestGetFor<T>(token: string, path: string): Promise<T> {
 // Conditional REST GET for the adaptive-sync change probe (Phase 2 — see
 // docs/REALTIME-SYNC.md). Sends `If-None-Match: <etag>` when a prior ETag is known and
 // returns the status + fresh ETag WITHOUT throwing — a 304 (Not Modified) means nothing
-// changed and, crucially, does NOT count against GitHub's primary rate limit. The body is
+// changed and, crucially, does NOT count against GitHub's primary rate limit. A 2xx body is
 // drained and discarded (we only care about changed-or-not + the new ETag). A non-2xx /
-// non-304 (403/404/network) is reported as `notModified: false` so the caller falls back
-// to a full walk rather than silently skipping.
+// non-304 (403/404/5xx) is reported, NOT thrown: `notModified: false` with its `status`, so
+// the CALLER must tell a real 200 from a failure by the status. `rateLimited` is set when the
+// failure is GitHub's limiter (429, or a 403 carrying the rate-limit/abuse wording or an
+// exhausted `x-ratelimit-remaining`), classified by the ONE `isRateLimitError`, with the
+// resume estimate its headers carried.
 export async function ghRestGetConditional(
   token: string,
   path: string,
   etag: string | null,
-): Promise<{ status: number; notModified: boolean; etag: string | null }> {
+): Promise<{
+  status: number;
+  notModified: boolean;
+  etag: string | null;
+  rateLimited?: { resumeAt: Date | null };
+}> {
   const res = await fetch(`https://api.github.com${path}`, {
     method: 'GET',
     headers: {
@@ -278,12 +286,37 @@ export async function ghRestGetConditional(
       ...(etag ? { 'if-none-match': etag } : {}),
     },
   });
-  // Drain the body so the socket is freed (we never read it).
-  await res.arrayBuffer().catch(() => {});
+  let rateLimited: { resumeAt: Date | null } | undefined;
+  if (res.status === 403 || res.status === 429) {
+    // The limiter's verdict is in the body's message (secondary limit) or the headers
+    // (primary exhaustion) — read the (small) error body only on these two statuses.
+    const text = await res.text().catch(() => '');
+    let message = text;
+    try {
+      const parsed = JSON.parse(text) as { message?: unknown };
+      if (typeof parsed.message === 'string') message = parsed.message;
+    } catch {
+      // Not JSON — classify on the raw text.
+    }
+    const headers: Record<string, string> = {};
+    for (const h of ['retry-after', 'x-ratelimit-reset', 'x-ratelimit-remaining']) {
+      const v = res.headers.get(h);
+      if (v != null) headers[h] = v;
+    }
+    if (res.status === 403 && headers['x-ratelimit-remaining'] === '0') {
+      message = `${message} (rate limit exhausted)`;
+    }
+    const rl = isRateLimitError({ status: res.status, message, headers });
+    if (rl.limited) rateLimited = { resumeAt: rl.resumeAt };
+  } else {
+    // Drain the body so the socket is freed (we never read it).
+    await res.arrayBuffer().catch(() => {});
+  }
   return {
     status: res.status,
     notModified: res.status === 304,
     etag: res.headers.get('etag'),
+    ...(rateLimited ? { rateLimited } : {}),
   };
 }
 

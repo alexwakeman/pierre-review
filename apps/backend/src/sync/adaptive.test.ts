@@ -136,11 +136,89 @@ describe('decideIncrementalWalk (conditional probe)', () => {
     expect(d).toEqual({ walk: true, reason: 'floor' });
   });
 
-  it('walks on a probe error (never skips on uncertainty)', async () => {
+  it('a thrown probe error is not a change: no dirty flag, and a walk only once 15 min have passed', async () => {
     recordFullWalk(1, T0); // insurance not due, so the reason must be the error
     mockProbe.mockRejectedValue(new Error('network'));
-    const d = await decideIncrementalWalk(1, 'o', 'n', 'tok', T0 + 5 * MIN);
-    expect(d).toEqual({ walk: true, reason: 'probe_error' });
+    expect(await decideIncrementalWalk(1, 'o', 'n', 'tok', T0 + 5 * MIN)).toEqual({
+      walk: false,
+      reason: 'probe_error',
+    });
+    expect(isDirty(1)).toBe(false);
+    expect(await decideIncrementalWalk(1, 'o', 'n', 'tok', T0 + 16 * MIN)).toEqual({
+      walk: true,
+      reason: 'probe_error',
+    });
+  });
+
+  // THE REGRESSION: ghRestGetConditional REPORTS a non-2xx, it never throws on one. Reading
+  // `!notModified` as "changed" made a repo whose REST probe kept failing dirty and hot forever —
+  // a full walk every 60s (the cap), ~15 points each, on every such repo.
+  it.each([401, 403, 404, 500, 502])(
+    'a %i probe is not a change: no dirty flag, no bucket refresh, not "checked"',
+    async (status) => {
+      // A repo that last changed 7h ago (cold), walked an hour ago.
+      mockProbe.mockResolvedValueOnce(changed('e1'));
+      await decideIncrementalWalk(1, 'o', 'n', 'tok', T0);
+      walked(1, T0 + 6 * HOUR);
+      expect(bucketFor(1, T0 + 7 * HOUR)).toBe('cold');
+      const checkedBefore = lastCheckedAtFor(1)?.getTime();
+
+      mockProbe.mockResolvedValue({ status, notModified: false, etag: 'err-etag' });
+      const at = T0 + 7 * HOUR;
+      const d = await decideIncrementalWalk(1, 'o', 'n', 'tok', at);
+      // An hour since the last walk ≥ the first error's 15-min gap: one walk is allowed...
+      expect(d).toEqual({ walk: true, reason: 'probe_error' });
+      expect(isDirty(1)).toBe(false);
+      expect(bucketFor(1, at)).toBe('cold'); // not refreshed to hot
+      expect(lastCheckedAtFor(1)?.getTime()).toBe(checkedBefore); // GitHub did not answer
+      walked(1, at);
+      // ...and the next failures are spaced: not every probe, and widening (30 min, then 1h).
+      expect(isDue(1, at + 59 * SEC)).toBe(false); // the cold bucket, no dirty fast path
+      expect((await decideIncrementalWalk(1, 'o', 'n', 'tok', at + 5 * MIN)).walk).toBe(false);
+      expect((await decideIncrementalWalk(1, 'o', 'n', 'tok', at + 29 * MIN)).walk).toBe(false);
+      expect((await decideIncrementalWalk(1, 'o', 'n', 'tok', at + 31 * MIN)).walk).toBe(true);
+      walked(1, at + 31 * MIN);
+      expect((await decideIncrementalWalk(1, 'o', 'n', 'tok', at + 61 * MIN)).walk).toBe(false);
+      expect((await decideIncrementalWalk(1, 'o', 'n', 'tok', at + 92 * MIN)).walk).toBe(true);
+      // The error's ETag is not the list's: the next probe still sends the last real one.
+      expect(mockProbe).toHaveBeenLastCalledWith('tok', expect.any(String), 'e1');
+    },
+  );
+
+  it('a real answer after errors resets the spacing', async () => {
+    recordFullWalk(1, T0);
+    mockProbe.mockResolvedValue({ status: 500, notModified: false, etag: null });
+    await decideIncrementalWalk(1, 'o', 'n', 'tok', T0 + MIN);
+    await decideIncrementalWalk(1, 'o', 'n', 'tok', T0 + 2 * MIN);
+    expect((await decideIncrementalWalk(1, 'o', 'n', 'tok', T0 + 16 * MIN)).walk).toBe(true);
+    walked(1, T0 + 16 * MIN); // the next error walk would need 30 min
+    expect((await decideIncrementalWalk(1, 'o', 'n', 'tok', T0 + 32 * MIN)).walk).toBe(false);
+    mockProbe.mockResolvedValueOnce(unchanged(null));
+    await decideIncrementalWalk(1, 'o', 'n', 'tok', T0 + 33 * MIN);
+    // First error walk again: back to the 15-min gap.
+    expect(await decideIncrementalWalk(1, 'o', 'n', 'tok', T0 + 34 * MIN)).toEqual({
+      walk: true,
+      reason: 'probe_error',
+    });
+  });
+
+  it('a rate-limited probe (403/429) notes the shared budget and walks nothing', async () => {
+    const { isLimited, __resetRateBudget } = await import('../github/rate-budget.js');
+    __resetRateBudget();
+    recordFullWalk(1, T0 - 4 * HOUR); // even with the insurance walk due
+    const resumeAt = new Date(Date.now() + 10 * MIN);
+    mockProbe.mockResolvedValue({
+      status: 403,
+      notModified: false,
+      etag: null,
+      rateLimited: { resumeAt },
+    });
+    const d = await decideIncrementalWalk(1, 'o', 'n', 'tok', T0, 77);
+    expect(d).toEqual({ walk: false, reason: 'rate_limited' });
+    expect(isLimited(77)).toBe(true);
+    expect(isDirty(1)).toBe(false);
+    expect(lastCheckedAtFor(1)?.getTime()).toBe(T0 - 4 * HOUR); // the walk's, not the refusal's
+    __resetRateBudget();
   });
 
   it('threads the stored ETag into the next If-None-Match probe', async () => {

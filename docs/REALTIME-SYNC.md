@@ -159,8 +159,16 @@ from the cold interval, so cheaper probes never mean an unreadable repo is retri
 does a REST **conditional** GET (`/repos/{o}/{n}/pulls?state=all&sort=updated&per_page=1`
 with the stored `ETag`) before the fat GraphQL walk. A `304` costs **zero** rate limit (confirmed
 live: `X-RateLimit-Used` does not move), so a genuinely-idle repo is skipped for free; a `200` also
-refreshes `lastChangeAt` (so an active repo climbs to a faster cadence and a quiet one decays). A
-probe error → walk anyway (never skip on uncertainty). First backfills (`mode:'full'`) always walk.
+refreshes `lastChangeAt` (so an active repo climbs to a faster cadence and a quiet one decays).
+⚠ **Only a `2xx` is a change.** `ghRestGetConditional` REPORTS a non-2xx rather than throwing, and
+reading "not 304" as "changed" once made a repo whose REST probe kept failing (a 403, a 5xx) dirty
+and hot forever — a full walk every 60s. Now: a rate-limited probe (429, or a 403 with the limiter's
+wording / an exhausted `x-ratelimit-remaining`, classified by `isRateLimitError`) calls
+`noteLimited` and walks nothing (`rate_limited`); any other failure (a non-2xx status or a network
+error) marks nothing dirty, leaves the bucket alone, is not "checked", and justifies a walk only
+once 15 min have passed since the last walk, doubling per such walk (30m, 1h, 2h, capped at the
+insurance interval) until GitHub answers again (`probe_error`). The settle sweep's own `updatedAt`
+comparison still marks the repo dirty on real activity. First backfills (`mode:'full'`) always walk.
 Skips print nothing (an idle workspace would log a line per probe).
 
 **The probe is not a sync.** The scheduler holds a repo in a separate `probing` set while it
@@ -171,13 +179,15 @@ sync that started during the probe wins and the tick stands down. `isSyncRunning
 probing repo, so the delete route cannot remove a repo a probe is about to walk (the walk's
 `upsertRepo` would resurrect it).
 
-**The walk cap.** A `200` (or a probe error) marks the repo DIRTY; the scheduler walks a dirty repo
+**The walk cap.** A `2xx` probe marks the repo DIRTY; the scheduler walks a dirty repo
 at most once per `SYNC_MIN_WALK_INTERVAL_SEC` (60s), counted from the previous scheduled walk's
 START. Inside the cap the decision is `capped` and the flag stays set; `isDue` grants a dirty repo
 the moment the cap allows (whatever its bucket interval says), and that walk runs without a second
 probe. A walk clears the flag only when it STARTED at or after the change was seen — the settle
 sweep runs alongside, and a change it notices mid-walk may sit past the pages already read. Manual
-sync, the first-sync two-phase, backfills and the viewed-PR refresh are NOT capped.
+sync, the first-sync two-phase, backfills and the viewed-PR refresh are NOT capped. A completed
+manual or queued walk (`runSyncForRepo`) still calls `recordFullWalk` with its own start time, so it
+clears a dirty flag it covered and resets the insurance clock — without stamping the cap.
 
 **The insurance walk.** `SYNC_FLOOR_INTERVAL_SEC` (now 3h, was the 30-min "re-walk floor") forces a
 walk even on a `304`. ⚠ It uses the SAME `since = lastIncrementalSyncAt − SYNC_OVERLAP_MINUTES`
@@ -185,7 +195,7 @@ window, so it never refreshed updatedAt-silent signals; it only bounds how long 
 unwalked. Reproduced on real data (2026-09): open PRs stored `unknown` merge state, and CI stored
 `pending` for more than two hours, while GitHub reported a known value with the same `updatedAt`.
 Those are now the [settle sweep](#settle-sweep)'s job (plus the unsettled-PR backstop after every
-walk, [§ Post-write settle](#post-write-settle)).
+walk AND every sweep, [§ Post-write settle](#post-write-settle)).
 
 <a id="max-age-caveat"></a>
 
@@ -211,7 +221,8 @@ PR leave `updatedAt` alone, so neither the probe nor any walk sees them. The old
 re-walked the same `since` window — ~15+ points a repo, re-reading exactly the PRs that had NOT
 changed (~270 points/hour for a 9-repo workspace sitting idle).
 
-**What.** Kicked fire-and-forget from every scheduler tick, with its own one-at-a-time claim. It
+**What.** Kicked fire-and-forget from every scheduler tick, with its own one-at-a-time claim —
+BEFORE the tick's own one-at-a-time check, so a long walk holding the tick does not starve it. It
 reads only repos that are incrementally synced, not walking/queued, and DUE: every
 `SYNC_SETTLE_INTERVAL_SEC` (300s) for hot and warm repos, `SYNC_SETTLE_COLD_INTERVAL_SEC` (900s)
 for cold ones; a repo never read is due at once (the first sweep after a boot). Per account, ONE
@@ -230,6 +241,7 @@ nodes { isResolved } }`, plus the default branch's head oid. **Measured 2026-10-
 | head oid, CI, unresolved-thread count, draft or review decision differ | `syncOnePr` for that PR only |
 | a stored OPEN PR absent from a COMPLETE open list | `syncOnePr` by number (absence from GitHub's full open list is a positive statement) |
 | the default-branch head moved (or first sight) | `scheduleTrunkMovedRecheck` — merge state for ≤25 PRs per request, twice |
+| (every repo the sweep read, after its re-syncs) | `runUnsettledPrBackstop` — merge state stored unknown, CI stuck `pending`; free when there are none |
 
 - **At most `SYNC_SETTLE_MAX_PR_SYNCS` (20) single-PR syncs per sweep** (~1 point each), in list
   order; the rest still differ next sweep and go then.
@@ -243,11 +255,15 @@ nodes { isResolved } }`, plus the default branch's head oid. **Measured 2026-10-
   `applyPrLiveness` keep their "cleared only on a positive statement" guards.
 - ⚠ **LIMN'S OWN `limn/…` LINES ARE NOT CI.** A head carrying one (seen in the free legacy status
   list) is judged on `fetchRollupsWithoutLimn` (~1 point per 10 heads) only when the raw state
-  could hide a change: PENDING always (a pending Limn line masks CI finishing), SUCCESS only when
-  the stored CI is neither `success` nor `unknown`. A failed recompute leaves that CI unjudged.
-- ⚠ **LOOP-PROOF.** Each re-sync remembers the observation it acted on (`actedOn`, bounded); the
-  same answer is never paid for twice, so a field `persistPr` reads differently cannot cost a point
-  every five minutes.
+  could hide a change: PENDING always (a pending Limn line masks CI finishing), SUCCESS whenever
+  the stored CI is not `success` — a stored `unknown` included (a head persisted before any check
+  registered: green-Limn-over-nothing and CI-that-passed look the same raw). A failed recompute
+  leaves that CI unjudged.
+- ⚠ **LOOP-PROOF.** Each re-sync that LANDED (`syncOnePr` → true) remembers the observation it
+  acted on (`actedOn`, bounded); the same answer is never paid for twice, so a field `persistPr`
+  reads differently cannot cost a point every five minutes. A failed re-sync or a stand-down is
+  retried on the next sweep (nothing else will re-read an updatedAt-silent change), at most
+  `SETTLE_MAX_ATTEMPTS` (3) times per observation, then given up until GitHub's answer changes.
 - ⚠ **RATE LIMITS PRE-EMPTED.** A limited account is not asked and its repos are NOT stamped (read
   as soon as the window lifts); a limit found by the read calls `noteLimited` and ends the
   account's sweep quietly; `noteBudget` from the query's `rateLimit`. Any other failure is one warn
@@ -257,8 +273,8 @@ nodes { isResolved } }`, plus the default branch's head oid. **Measured 2026-10-
 
 **"Last checked".** Because walks now happen only on change, a quiet repo's
 `lastIncrementalSyncAt` can be hours old while it was checked seconds ago. `GET /api/repos` carries
-an optional in-memory `lastCheckedAt` (a probe answered, a scheduled walk completed, or a settle
-read succeeded), and the header tooltip says "Last checked HH:MM" above "Last synced HH:MM" (no
+an optional in-memory `lastCheckedAt` (a probe answered `304`/`2xx` — never an error status — a
+walk completed, or a settle read succeeded), and the header tooltip says "Last checked HH:MM" above "Last synced HH:MM" (no
 more "every 5 minutes / next sync" countdown — every repo has its own cadence).
 
 <a id="free-cadence-cost"></a>
@@ -469,7 +485,9 @@ re-reads stay in the background.
 ### The unsettled-PR backstop (`runUnsettledPrBackstop`)
 
 Fire-and-forget after every successful walk — the scheduled loop AND the manual `runSyncForRepo`
-tail, never after a cancel:
+tail, never after a cancel — and after every [settle sweep](#settle-sweep) for each repo it read
+(a quiet repo is walked only every 3h now, and a sweep's single-PR re-sync can itself store an
+UNKNOWN merge state):
 
 - Up to 25 of up to 100 open non-draft PRs whose `mergeable` or `merge_state_status` is unknown or
   NULL, most recently updated first. PRs in their cooldown are excluded in the SQL, so they cannot

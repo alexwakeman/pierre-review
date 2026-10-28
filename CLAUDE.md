@@ -162,8 +162,8 @@ Mechanics: [docs/BACKEND.md](docs/BACKEND.md) · [docs/SYNC.md](docs/SYNC.md) ·
 [docs/REALTIME-SYNC.md](docs/REALTIME-SYNC.md). The rules:
 
 - **Adaptive polling is THE strategy** (`syncAdaptive` defaults `true`): a 10s *tick*, one at a
-  time; `isDue()` gates free 304 probes by bucket; a probe's 200 walks ≤ once/60s per repo (dirty
-  flag). updatedAt-SILENT changes (CI, threads, trunk) are found by the ~1-point/repo SETTLE SWEEP
+  time; `isDue()` gates free 304 probes by bucket; a probe's 2xx (never an error status) walks
+  ≤ once/60s per repo (dirty flag). updatedAt-SILENT changes (CI, threads, trunk) are found by the ~1-point/repo SETTLE SWEEP
   (`sync/settle-sweep.ts`), never a walk. ⚠ **An explicitly-set `SYNC_CRON` wins** — pinning
   `*/5` silently negates the hot bucket.
 - **A VIEWED PR gets its own live cadence** — the SPA polls `POST /api/prs/:id/refresh` every ~5s

@@ -10,8 +10,8 @@
 //  2. A conditional REST probe before the fat GraphQL walk on incremental syncs — a 304
 //     (nothing changed by updatedAt) costs no rate limit and lets us skip the walk, UNLESS
 //     the slow INSURANCE walk is due (`syncFloorIntervalSec`, default 3h).
-//  3. THE WALK CAP — a probe's 200 (or a probe error) marks the repo DIRTY, and the scheduler
-//     walks a dirty repo at most once per `syncMinWalkIntervalSec` (60s). A dirty repo inside
+//  3. THE WALK CAP — a probe's 2xx (never a probe error: that proves nothing) marks the repo
+//     DIRTY, and the scheduler walks a dirty repo at most once per `syncMinWalkIntervalSec` (60s). A dirty repo inside
 //     the cap is NOT forgotten: `isDue` grants it the moment the cap allows, without waiting
 //     out its bucket, and a walk clears the flag only when it STARTED after the change was seen.
 //     The settle sweep's cadence (`isSettleDue`, sync/settle-sweep.ts) lives here too, on the
@@ -28,7 +28,7 @@
 // cadence re-learns from there.
 import { config } from '../config.js';
 import { ghRestGetConditional } from '../github/client.js';
-import { isLimited } from '../github/rate-budget.js';
+import { isLimited, noteLimited } from '../github/rate-budget.js';
 
 // Activity windows that define the buckets (constants, not env — the tunable knobs are the
 // per-bucket intervals in config). "Changed" = the probe saw a PR's updatedAt advance.
@@ -61,7 +61,7 @@ interface RepoCadence {
   lastFullWalkAt: number;
   // When the scheduler last STARTED a walk of this repo — drives the walk cap.
   lastWalkStartAt: number;
-  // When a change was first seen that no walk has covered yet (a probe 200, a probe error, or
+  // When a change was first seen that no walk has covered yet (a probe 2xx, or
   // the settle sweep finding a PR the DB lacks or one newer than stored). Null = clean.
   dirtyAt: number | null;
   // When the settle sweep last read this repo — drives isSettleDue.
@@ -74,6 +74,10 @@ interface RepoCadence {
   etag: string | null;
   // Consecutive FAILED scheduled walks (reset by any success) — drives the health backoff.
   consecutiveFailures: number;
+  // Walks justified by a probe GitHub did not ANSWER (a non-2xx/304 status, or a thrown network
+  // error) since its last real answer — spaces the next such walk (probeErrorGapMs). Reset by any
+  // 304/2xx.
+  probeErrorWalks: number;
 }
 
 const cadence = new Map<number, RepoCadence>();
@@ -91,6 +95,7 @@ function ensure(repoId: number, now: number): RepoCadence {
       lastCheckedAt: 0,
       etag: null,
       consecutiveFailures: 0,
+      probeErrorWalks: 0,
     };
     cadence.set(repoId, c);
   }
@@ -131,6 +136,20 @@ function backoffMs(failures: number): number {
   if (failures <= 0) return 0;
   const shift = Math.min(failures, MAX_BACKOFF_SHIFT);
   return Math.min(BACKOFF_BASE_MS * 2 ** shift, MAX_BACKOFF_MS);
+}
+
+/**
+ * How long after the last completed walk a FAILING probe may justify a walk, given how many walks
+ * failing probes have already justified since GitHub last answered: 15 min for the first, doubling
+ * per walk (30 min, 1h, 2h), never longer than the insurance walk.
+ * ⚠ A probe GitHub did not answer PROVED NOTHING — it is not a change. Treating it as one (as this
+ * module once did) walked a repo whose REST probe kept getting a 403/5xx about once a minute,
+ * ~15 GraphQL points each, forever. The settle sweep (a separate GraphQL read) still marks the
+ * repo dirty on any newer PR, so uncertainty is covered without paying a walk per probe.
+ */
+function probeErrorGapMs(priorWalks: number): number {
+  const shift = Math.min(Math.max(priorWalks, 0), MAX_BACKOFF_SHIFT);
+  return Math.min(BACKOFF_BASE_MS * 2 ** shift, config.syncFloorIntervalSec * 1000);
 }
 
 /** The current health backoff for a repo, in ms (0 when it has no recorded failures). */
@@ -212,8 +231,10 @@ export type WalkDecisionReason =
  *
  *   • A repo already DIRTY whose walk cap has elapsed walks at once, without a probe (the probe
  *     that dirtied it already spent its answer, and its ETag is stored).
- *   • Otherwise probe. A 200 refreshes the bucket (lastChangeAt) and marks the repo dirty; a
- *     probe error marks it dirty too (never skip on uncertainty).
+ *   • Otherwise probe. A 2xx refreshes the bucket (lastChangeAt) and marks the repo dirty. A
+ *     rate-limited probe notes the shared budget and walks nothing (`rate_limited`). Any other
+ *     failure (a non-2xx status or a network error) is NOT a change: it marks nothing and walks
+ *     only once `probeErrorGapMs` has passed since the last walk (`probe_error`).
  *   • Dirty → walk when the cap allows, else `capped` (the flag stays set, and `isDue`
  *     re-grants the repo the moment the cap allows).
  *   • Clean → walk only when the insurance walk is due (`floor`), else `unchanged`.
@@ -242,7 +263,10 @@ export async function decideIncrementalWalk(
   const capOk = now - c.lastWalkStartAt >= walkCapMs();
   if (c.dirtyAt != null && capOk) return { walk: true, reason: 'dirty' };
 
-  let probeErrored = false;
+  // What the probe proved: 'unchanged' (a real 304), 'changed' (a real 2xx), or 'error' — a
+  // non-2xx status (ghRestGetConditional reports those, it never throws on them) or a network
+  // failure. ⚠ Only a 2xx is a change: a 401/403/404/5xx is GitHub NOT answering.
+  let outcome: 'unchanged' | 'changed' | 'error' = 'error';
   try {
     const res = await ghRestGetConditional(
       token,
@@ -253,21 +277,43 @@ export async function decideIncrementalWalk(
       `/repos/${owner}/${name}/pulls?state=all&sort=updated&direction=desc&per_page=1`,
       c.etag,
     );
-    if (res.etag) c.etag = res.etag;
-    c.lastCheckedAt = now;
-    if (!res.notModified) {
-      c.lastChangeAt = now;
-      c.dirtyAt ??= now;
+    if (res.rateLimited) {
+      // GitHub's limiter answered the probe — PRE-EMPTED, never an error: note the shared budget
+      // (every walk and probe on this token then stands down until it lifts) and walk nothing. A
+      // dirty flag simply waits it out.
+      if (accountId != null) noteLimited(accountId, res.rateLimited.resumeAt);
+      return { walk: false, reason: 'rate_limited' };
     }
+    if (res.notModified) outcome = 'unchanged';
+    else if (res.status >= 200 && res.status < 300) outcome = 'changed';
+    // An error response's ETag is not the list's — keep the last real one.
+    if (outcome !== 'error' && res.etag) c.etag = res.etag;
   } catch {
-    // Network/permission failure → don't lose data; fall back to walking (capped like a 200).
-    probeErrored = true;
-    c.dirtyAt ??= now;
+    // Network failure — 'error'.
   }
 
+  if (outcome === 'error') {
+    // Not a change: no dirty flag, no bucket refresh, not "checked". Walk only when it has been
+    // long enough since the last walk (probeErrorGapMs), so a probe that keeps failing costs a
+    // spaced-out walk rather than one per probe.
+    // (The gap never exceeds the insurance interval, so the insurance walk is covered here too.)
+    if (c.dirtyAt != null && !capOk) return { walk: false, reason: 'capped' };
+    if (capOk && now - c.lastFullWalkAt >= probeErrorGapMs(c.probeErrorWalks)) {
+      c.probeErrorWalks += 1;
+      return { walk: true, reason: 'probe_error' };
+    }
+    return { walk: false, reason: 'probe_error' };
+  }
+
+  c.probeErrorWalks = 0;
+  c.lastCheckedAt = now;
+  if (outcome === 'changed') {
+    c.lastChangeAt = now;
+    c.dirtyAt ??= now;
+  }
   if (c.dirtyAt != null) {
     if (!capOk) return { walk: false, reason: 'capped' };
-    return { walk: true, reason: probeErrored ? 'probe_error' : 'changed' };
+    return { walk: true, reason: 'changed' };
   }
   if (now - c.lastFullWalkAt >= config.syncFloorIntervalSec * 1000) {
     return { walk: true, reason: 'floor' };

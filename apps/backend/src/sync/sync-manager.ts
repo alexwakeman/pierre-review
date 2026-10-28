@@ -412,6 +412,8 @@ export async function runSyncForRepo(
     return { cancelled: p2.cancelled };
   };
 
+  // When this (uncapped) walk began — a dirty flag raised before it is covered by it.
+  const walkStartedAt = Date.now();
   const task = runWalk()
     .then(async (walk) => {
       // A user-initiated walk that came back clean is proof the repo is readable again:
@@ -419,6 +421,13 @@ export async function runSyncForRepo(
       // of after the (up to 6h) window. Failures are deliberately NOT recorded here — the
       // backoff paces the SCHEDULER's unattended attempts, not a person pressing Refresh.
       if (!walk.cancelled) noteWalkSuccess(repoId, Date.now());
+      // Adaptive: a completed manual / queued walk covers what the scheduler's dirty flag was
+      // waiting to walk, and resets the insurance clock — otherwise the scheduler re-walks the
+      // same window once the cap allows. It does NOT stamp `noteWalkStart`: the walk cap paces
+      // the scheduler, never a person's Sync.
+      if (!walk.cancelled && config.syncAdaptive) {
+        recordFullWalk(repoId, Date.now(), walkStartedAt);
+      }
       // Deep re-sync is the user's explicit "re-fetch and re-derive everything" gesture:
       // purge this repo's ML labels so the enrichment worker re-scores the whole corpus
       // against the CURRENTLY served model (labels are model_version-stamped; a deep sync
@@ -702,6 +711,10 @@ export async function enqueueSyncForRepo(
  * of it (which would also double every repo's probe).
  */
 export async function syncAllRepos(log: Logger): Promise<void> {
+  // The settle sweep is kicked BEFORE the one-tick claim: it has its own one-at-a-time claim, and
+  // a long walk holding the tick (a resumed backfill, a budget-paced walk) must not also starve
+  // every other repo's updatedAt-silent freshness for its whole length.
+  if (config.syncAdaptive && deepSyncing.size === 0) kickSettleSweep(log);
   if (tickInFlight) return;
   tickInFlight = true;
   try {
@@ -716,6 +729,24 @@ export function __isScheduledTickInFlight(): boolean {
   return tickInFlight;
 }
 
+/**
+ * THE SETTLE SWEEP (sync/settle-sweep.ts) — the updatedAt-SILENT half of freshness (CI finishing,
+ * a thread resolved, the trunk moving under open PRs). FIRE-AND-FORGET with its own one-at-a-time
+ * claim, so a ~1-point-per-repo read and its few single-PR syncs never hold up the probes. It
+ * reads only repos whose settle interval is due; free otherwise. Never throws.
+ */
+function kickSettleSweep(log: Logger): void {
+  void import('./settle-sweep.js')
+    .then(({ runSettleSweep }) =>
+      runSettleSweep({ log, isBusy: (id) => running.has(id) || queuedRepos.has(id) }),
+    )
+    .catch((err: unknown) => {
+      log.warn(
+        `settle sweep failed to start (non-fatal): ${err instanceof Error ? err.message : err}`,
+      );
+    });
+}
+
 async function runScheduledTick(log: Logger): Promise<void> {
   // Stand down entirely while a deep (forced-full) sync is in progress. Resuming
   // a repo incrementally the instant its deep sync finishes would reset its
@@ -726,20 +757,6 @@ async function runScheduledTick(log: Logger): Promise<void> {
       `scheduled sync skipped: deep sync in progress (${deepSyncing.size} repo(s))`,
     );
     return;
-  }
-  // THE SETTLE SWEEP (sync/settle-sweep.ts) — the updatedAt-SILENT half of freshness (CI
-  // finishing, a thread resolved, the trunk moving under open PRs). FIRE-AND-FORGET with its own
-  // one-at-a-time claim, so a ~1-point-per-repo read and its few single-PR syncs never hold up
-  // the probes below. It reads only repos whose settle interval is due; free otherwise.
-  if (config.syncAdaptive) {
-    try {
-      const { runSettleSweep } = await import('./settle-sweep.js');
-      void runSettleSweep({ log, isBusy: (id) => running.has(id) || queuedRepos.has(id) });
-    } catch (err) {
-      log.warn(
-        `settle sweep failed to start (non-fatal): ${err instanceof Error ? err.message : err}`,
-      );
-    }
   }
   // Every repo, every tick (the adaptive due-check below decides which actually walk).
   const all = await db.select({ id: repos.id }).from(repos).execute();

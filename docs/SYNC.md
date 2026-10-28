@@ -36,7 +36,7 @@ overlapping runs and re-walks never create duplicates.
 
 | Trigger | Entry point | Notes |
 |---|---|---|
-| **Scheduled** | `scheduler.ts` → `syncAllRepos()` | `node-cron` at `config.syncCron` (default `*/10 * * * * *` — every ten seconds — under adaptive polling, `*/5 * * * *` without). One tick at a time: a tick that finds the previous one running returns at once. Each due repo gets a free conditional probe; a walk only on change (≤ once/60s per repo) or the 3h insurance walk. Each tick also kicks the settle sweep ([REALTIME-SYNC.md § The settle sweep](REALTIME-SYNC.md#settle-sweep)). Disabled by `DISABLE_SCHEDULER=true`. |
+| **Scheduled** | `scheduler.ts` → `syncAllRepos()` | `node-cron` at `config.syncCron` (default `*/10 * * * * *` — every ten seconds — under adaptive polling, `*/5 * * * *` without). One tick at a time: a tick that finds the previous one running returns at once (the settle sweep is kicked first, so it is never blocked by a long walk). Each due repo gets a free conditional probe; a walk only on change (≤ once/60s per repo) or the 3h insurance walk. Each tick also kicks the settle sweep ([REALTIME-SYNC.md § The settle sweep](REALTIME-SYNC.md#settle-sweep)). Disabled by `DISABLE_SCHEDULER=true`. |
 | **Repo added** | `POST /api/repos` → `runSyncForRepo(…, {background:true})` | The repo has no `syncState` yet → a first **full backfill**. |
 | **Manual / deep sync** | `POST /api/repos/:id/sync?full=true` → `runSyncForRepo` | `?full=true` forces a full re-sync (`forceFull`). |
 
@@ -141,10 +141,11 @@ nothing and stays on the worklist — retried on a later walk, bounded by the pe
 loop. It writes through the same `securityColumnsFor` as `persistPr`, and fills `head_ref_name`
 only where the walk never stored one.
 
-### Unsettled-PR backstop (after EVERY walk, user or scheduled)
+### Unsettled-PR backstop (after EVERY walk, user or scheduled, and every settle sweep)
 
 `sync/unsettled-prs.ts` `runUnsettledPrBackstop`, fire-and-forget (it never holds the repo's
-slot and never delays the next repo on the scheduled loop), skipped after a cancel. It re-reads
+slot and never delays the next repo on the scheduled loop), skipped after a cancel. The settle
+sweep also runs it for every repo it read, so a quiet repo (walked every 3h) is still covered. It re-reads
 up to 25 open non-draft PRs whose `mergeable` or `merge_state_status` is stored unknown/NULL
 through the Pending board's batched liveness path (1 point), with one second read ~10s later for
 any still UNKNOWN, and hands at most 5 PRs whose CI has sat `pending` for over 20 minutes to the
@@ -167,7 +168,7 @@ aren't missed; idempotent upserts make the re-fetch duplicate-free.
 > window. Those signals arrive another way: the SETTLE SWEEP (every 5-15 min, ~1 point per repo:
 > head, CI and unresolved threads compared for every open PR, plus the trunk head —
 > [REALTIME-SYNC.md § The settle sweep](REALTIME-SYNC.md#settle-sweep)), the unsettled-PR backstop
-> after every walk (merge state and stale CI, below), the post-write settle ladder, and the open PR
+> after every walk and every sweep (merge state and stale CI, below), the post-write settle ladder, and the open PR
 > pane's live refresh ([REALTIME-SYNC.md § Post-write settle](REALTIME-SYNC.md#post-write-settle)).
 
 ---

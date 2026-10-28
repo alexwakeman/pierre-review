@@ -207,6 +207,21 @@ describe('the walk cap, wired', () => {
     expect(mockSyncRepo).toHaveBeenCalledTimes(2);
   });
 
+  it('a manual sync covers the dirty flag: the scheduler does not re-walk what it just read', async () => {
+    mockProbe.mockResolvedValueOnce(changed('e1'));
+    await syncAllRepos(makeLog()); // walk 1 (scheduled)
+    vi.setSystemTime(T0 + 20_000);
+    mockProbe.mockResolvedValueOnce(changed('e2'));
+    await syncAllRepos(makeLog()); // capped → dirty
+    vi.setSystemTime(T0 + 30_000);
+    expect(await runSyncForRepo(1, makeLog(), { background: false })).toBe(true); // walk 2
+    expect(mockSyncRepo).toHaveBeenCalledTimes(2);
+    vi.setSystemTime(T0 + 60_000);
+    mockProbe.mockResolvedValueOnce(unchanged('e2'));
+    await syncAllRepos(makeLog()); // the cap allows, but nothing is dirty any more
+    expect(mockSyncRepo).toHaveBeenCalledTimes(2);
+  });
+
   it('no insurance walk on an unchanged repo for three hours; then one', async () => {
     mockProbe.mockResolvedValueOnce(changed('e1'));
     await syncAllRepos(makeLog());
@@ -231,13 +246,15 @@ describe('ticks never overlap', () => {
     await vi.waitFor(() => expect(mockSyncRepo).toHaveBeenCalledTimes(1));
     expect(__isScheduledTickInFlight()).toBe(true);
 
-    // Three ten-second ticks fire while the walk is still going: none does anything.
+    // Three ten-second ticks fire while the walk is still going: none probes or walks...
     for (let i = 1; i <= 3; i += 1) {
       vi.setSystemTime(T0 + i * 10_000);
       await syncAllRepos(makeLog());
     }
     expect(mockProbe).toHaveBeenCalledTimes(1);
-    expect(sweep.run).toHaveBeenCalledTimes(1);
+    // ...but each still kicks the settle sweep (its own claim), so one long walk cannot starve
+    // every other repo's updatedAt-silent freshness.
+    await vi.waitFor(() => expect(sweep.run).toHaveBeenCalledTimes(4));
 
     finish({ cancelled: false, prCount: 0, pages: 1, endCursor: null });
     await slow;

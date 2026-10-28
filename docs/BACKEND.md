@@ -68,7 +68,10 @@ incremental, fetch loop, cancel, rate limits). In brief:
   aliased ~1-point-per-repo read of every open PR's head, CI rollup and unresolved-thread
   count; only the PRs that differ are re-synced (≤20 per sweep), and a trunk move schedules
   the ≤25 merge-state recheck (docs/REALTIME-SYNC.md § The settle sweep). The unsettled-PR
-  backstop (`sync/unsettled-prs.ts`) still runs after every walk.
+  backstop (`sync/unsettled-prs.ts`) runs after every walk AND every sweep. ⚠ Only a `2xx` probe
+  is a change: a failing probe (non-2xx status, which `ghRestGetConditional` reports rather than
+  throws) marks nothing dirty and walks at most every 15 min+ (doubling); a limiter's 403/429
+  calls `noteLimited`.
   **`syncCron`'s default keys off `syncAdaptive`: `*/10 * * * * *` adaptive, `*/5` not** — a
   slow tick would pin every repo to it and negate the hot bucket, so the two MUST move
   together. A tick never starts while the previous one runs (`syncAllRepos`' claim), and a
@@ -143,7 +146,7 @@ is attached to its PR asynchronously, mergeability and CI settle later, and none
   `notePrChangedForPr(s)`, which write routes AWAIT before replying. Its front door for a push is
   `settlePrAfterWrite` in `sync/resync-after-write.ts` (resync, verify the head inside ~7s, hand
   off the rest).
-- `sync/unsettled-prs.ts` — the backstop after every walk (merge state stored unknown, CI stuck
+- `sync/unsettled-prs.ts` — the backstop after every walk and settle sweep (merge state stored unknown, CI stuck
   `pending`) and `noteMergeLanded`'s trunk-moved recheck of a repo's other open PRs.
 - `sync/pr-change-signal.ts` — `notePrChanged`, surfaced as `Repo.lastPrChangeAt` on
   `GET /api/repos`. Never a `sync_state` cursor.
