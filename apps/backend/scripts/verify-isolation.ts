@@ -3852,6 +3852,29 @@ check(
   check("createdDatesFor(A) reads A's created date, never B's", dA?.ms === Date.parse('2026-01-01T00:00:00Z'));
 }
 
+// ── TICKET COMMENTS (tracker_ticket_comments, migration 0142; docs/TRACKERS.md § Ticket comments) ──
+// BOTH accounts hold comments on the SAME site + key. MUTATION CHECK: drop the accountId predicate from
+// `readTicketComments` or from `writeTicketComments`' delete (tracker/comments.ts) and a check goes red.
+{
+  console.log('\ntracker_ticket_comments');
+  const SITE = 'https://acme.atlassian.net';
+  const T = { provider: 'jira', apiRoot: SITE, issueKey: 'CMT-1' };
+  const { buildTrackerContext } = await import('../src/tracker/runtime.js');
+  const tc = await import('../src/tracker/comments.js');
+  const { ticketComments } = await import('../src/tracker/peers.js');
+  const tctx = buildTrackerContext({ info() {}, warn() {}, error() {} });
+  const c = (id: string) => ({ id, authorName: `author ${id}`, authorId: id, isBot: false, body: `body ${id}`, createdAt: now, updatedAt: null });
+  await tc.writeTicketComments(tctx, 1, T, [c('a1')], now);
+  await tc.writeTicketComments(tctx, 2, T, [c('b1')], now);
+  const ident = `jira:${SITE}#CMT-1`;
+  check("ticketComments(A) reads A's comments, never B's", JSON.stringify((await ticketComments(tctx, 1, ident)).map((x) => x.id)) === '["a1"]');
+  check("ticketComments(B) reads B's comments", JSON.stringify((await ticketComments(tctx, 2, ident)).map((x) => x.id)) === '["b1"]');
+  // B's tracker says "none": only B's rows go.
+  await tc.writeTicketComments(tctx, 2, T, [], now);
+  check("B's [] leaves A's comments", (await tc.readTicketComments(tctx, 1, T)).length === 1);
+  check("B's [] clears B's comments", (await tc.readTicketComments(tctx, 2, T)).length === 0);
+}
+
 // ── REPORTS → THIS SPRINT (sprint_reads / sprint_tickets / sprint_ref_tickets / sprint_briefs / sprint_themes / sprint_paths /
 // sprint_ticket_repos / sprint_assessments; migration 0100 / pg 0087, 0107 / pg 0094, 0120 / pg 0107). BOTH accounts
 // hold the SAME ticket ident on the SAME Jira

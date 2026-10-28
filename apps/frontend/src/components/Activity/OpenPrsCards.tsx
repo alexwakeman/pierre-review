@@ -47,6 +47,7 @@ import {
   refusalSentence,
   ticketCoverage,
   prLabelOf,
+  newCommentsWords,
   ticketCurrency,
   ticketWaitWords,
   type CoverageTone,
@@ -1085,8 +1086,14 @@ function StoryCurrencyLine({
   const refused = start.data?.runs.find((r) => r.ident === ident)?.refused ?? null;
   const stale =cov != null && cov.stale && currency != null;
   const why = stale ? ticketWaitWords(state?.waiting) : null;
+  const comments = newCommentsWords(state);
   return (
     <div className="flex flex-wrap items-center gap-x-2 gap-y-1 sm:ml-auto">
+      {comments != null && (
+        <span className="text-xs text-gray-600 dark:text-gray-300" title={comments.title} data-testid="ticket-new-comments">
+          {comments.label}
+        </span>
+      )}
       {(stale || state?.checkedAt != null) && (
         <span className="text-xs text-gray-600 dark:text-gray-300">
           {stale && (

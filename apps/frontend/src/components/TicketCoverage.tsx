@@ -69,6 +69,7 @@ import {
   planStoryStart,
   recheckBody,
   refusalSentence,
+  newCommentsWords,
   ticketCurrency,
   ticketProgressPct,
 } from '../lib/ticketReview.js';
@@ -204,6 +205,7 @@ function TicketBlock({
     return m != null ? memberLabel(m) : null;
   };
   const currency = ticketCurrency(state, labelOf);
+  const comments = newCommentsWords(state);
   const counts = coverageLabel(state.counts);
   // A refusal from the start answer (no row written) or from the latest run.
   const startRefusal = start.data?.runs.find((r) => r.ident === ident)?.refused ?? null;
@@ -245,6 +247,11 @@ function TicketBlock({
         )}
         {!slim && counts != null && <span className={`text-xs ${MUTED}`}>{counts}</span>}
         {currency != null && <CurrencyPill currency={currency} />}
+        {comments != null && (
+          <span className={`text-xs ${MUTED}`} title={comments.title} data-testid="ticket-new-comments">
+            {comments.label}
+          </span>
+        )}
         {shown != null && <ReviewedAgo at={shown.completedAt} />}
         {shown != null && <AiRunLabel provider={shown.provider} model={shown.model} />}
         <span className="ml-auto">

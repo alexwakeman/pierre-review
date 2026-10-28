@@ -57,6 +57,20 @@ const VIEWS = [
   ...['themes', 'paths', 'people', 'merged'].map((t) => [`sprint:${t}`, `?view=sprint&sprintTab=${t}`, t === 'themes' ? 'sprint-themes' : t === 'paths' ? 'sprint-paths' : null]),
   ['sprint:tray', `?view=sprint&sprintTab=themes&sprintStory=${story('PLAT-292')}`, 'sprint-tray'],
   ['ticket:PLAT-292', `?view=${ident('PLAT-292')}`, 'story-view'],
+  // The ticket's comments (docs/TRACKERS.md § Ticket comments): a person's comment after the check is
+  // counted in the story header; under "As written in Jira" the comments open, the Automation app's hidden.
+  [
+    'ticket:PLAT-292:comments',
+    `?view=${ident('PLAT-292')}`,
+    null,
+    {
+      act: async (page) => {
+        await page.getByRole('button', { name: /^As written in Jira/ }).first().click();
+        await page.getByRole('button', { name: /^Comments \(2\)/ }).first().click();
+      },
+      expect: ['1 new comment since this check', 'Comments (2)', 'Lena Fischer', 'log its number'],
+    },
+  ],
   ['ticket:PLAT-301', `?view=${ident('PLAT-301')}`, null],
   ['ticket:INFRA-260', `?view=${ident('INFRA-260')}`, null],
   ['timeline', '?view=timeline&preset=30d', 'timeline'],

@@ -58,6 +58,57 @@ interface DemoTicket {
   prs: Array<{ id: number; branch: string }>;
 }
 
+/** A ticket's comments (docs/TRACKERS.md § Ticket comments), Jira wiki markup, `hoursAgo` from now.
+ *  `bot` = Jira's Automation app (stored, never shown). Every other ticket answers an empty page. */
+const COMMENTS: Record<string, Array<{ id: string; who: keyof typeof PEOPLE | 'automation'; hoursAgo: number; body: string }>> = {
+  'PLAT-292': [
+    {
+      id: '40211',
+      who: 'lena',
+      hoursAgo: 70,
+      body: 'For the timing check, use the staging copy of *acme/web* (412 open PRs). No new fixture needed.',
+    },
+    { id: '40230', who: 'automation', hoursAgo: 26, body: 'Status changed from In Progress to In Review.' },
+    {
+      id: '40244',
+      who: 'tom',
+      hoursAgo: 0.9,
+      body: 'When a pull request rolls back twice in a row, log its number so we can find it. Not blocking.',
+    },
+  ],
+  'PLAT-301': [
+    {
+      id: '40102',
+      who: 'sam',
+      hoursAgo: 40,
+      body: 'Agreed with Priya: dropping the "logged once" part of the third criterion. A webhook for an untracked repo is ignored, and the normal request log is enough.',
+    },
+  ],
+};
+
+function commentPage(key: string, now: number): Record<string, unknown> {
+  const list = COMMENTS[key] ?? [];
+  const iso = (hoursAgo: number) => new Date(now - hoursAgo * 3_600_000).toISOString().replace('Z', '+0000');
+  return {
+    startAt: 0,
+    maxResults: 5000,
+    total: list.length,
+    comments: list.map((c) => {
+      const person = c.who === 'automation' ? null : PEOPLE[c.who]!;
+      return {
+        id: c.id,
+        author:
+          person != null
+            ? { accountId: person.id, displayName: person.name, accountType: 'atlassian' }
+            : { accountId: 'acct-automation', displayName: 'Automation for Jira', accountType: 'app' },
+        body: c.body,
+        created: iso(c.hoursAgo),
+        updated: iso(c.hoursAgo),
+      };
+    }),
+  };
+}
+
 const EPICS = {
   'PLAT-280': 'Sync engine reliability',
   'INFRA-200': 'Queue-backed sync infrastructure',
@@ -545,6 +596,7 @@ function issueJson(t: DemoTicket, now: number, sprint: { startsAt: number; endsA
       created: iso(t.createdDaysAgo),
       updated: iso(t.updatedDaysAgo),
       resolutiondate: t.resolvedDaysAgo != null ? iso(t.resolvedDaysAgo) : null,
+      comment: commentPage(t.key, now),
       issuelinks: (t.blockedBy ?? []).map((k) => {
         const o = BY_KEY.get(k)!;
         const ost = STATUSES[o.status];

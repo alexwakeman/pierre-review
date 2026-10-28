@@ -174,6 +174,22 @@ export function ticketCurrency(
   }
 }
 
+/**
+ * "2 new comments since this check" — people commented on the ticket after the latest check
+ * (docs/TRACKERS.md § Ticket comments). A comment never makes a check stale; this only tells the reader
+ * a Re-check would see them. null when there are none (or while a check runs).
+ */
+export function newCommentsWords(
+  state: Pick<TicketReviewState, 'status' | 'newComments'> | null | undefined,
+): { label: string; title: string } | null {
+  const n = state?.newComments ?? 0;
+  if (state == null || n <= 0 || state.status === 'running' || state.status === 'none') return null;
+  return {
+    label: `${plural(n, 'new comment')} since this check`,
+    title: 'People commented on the ticket after this check. Re-check to include them.',
+  };
+}
+
 /** Why a stale ticket has not been checked again yet — the auto sweeper's hold, in a few words. */
 export function ticketWaitWords(
   w: TicketReviewWait | null | undefined,
