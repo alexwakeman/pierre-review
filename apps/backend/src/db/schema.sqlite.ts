@@ -3898,3 +3898,11 @@ export const teamClaimLines = sqliteTable(
     prHeadIdx: index('team_claim_lines_account_pr_head').on(t.accountId, t.prId, t.headSha),
   }),
 );
+
+// 0139. THIS DATABASE'S OWN FACTS (key → value) — never an account's, so not account-scoped and not
+// erased with one. `instance_id`: a random id written once (db/instance-id.ts) that names this
+// database file wherever it is moved; the reference-docs janitor's ownership marker.
+export const instanceMeta = sqliteTable('instance_meta', {
+  key: text('key').primaryKey(),
+  value: text('value').notNull(),
+});

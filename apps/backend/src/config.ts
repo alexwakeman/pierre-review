@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
-import { migrateLegacyDataDir, resolveDataDir } from './data-dir.js';
+import { defaultDocsDir, migrateLegacyDataDir, resolveDataDir } from './data-dir.js';
 import {
   SPRINT_PATHS_BUDGET_USD_DEFAULT,
   SPRINT_PATHS_DAILY_CAP_DEFAULT,
@@ -61,6 +61,7 @@ if (!process.env.VITEST) {
 // GitHub rate limit and contend on the SQLite write lock. DATABASE_URL / --db
 // override this; a relative override resolves under apps/backend.
 const rawDbUrl = process.env.DATABASE_URL ?? './data/pierre-review.sqlite';
+const dbPath = isAbsolute(rawDbUrl) ? rawDbUrl : resolve(backendRoot, rawDbUrl);
 
 // ---- Phase 2 real-time sync: adaptive polling (see docs/REALTIME-SYNC.md) ----
 // DEFAULT ON. This is the PRIMARY sync strategy: cadence by activity bucket, plus a
@@ -146,7 +147,7 @@ export const config = {
   persistBodies: process.env.PERSIST_BODIES === 'true',
   port: intFromEnv('PORT', 4000),
   host: process.env.HOST ?? '127.0.0.1',
-  dbPath: isAbsolute(rawDbUrl) ? rawDbUrl : resolve(backendRoot, rawDbUrl),
+  dbPath,
   backfillDays: intFromEnv('BACKFILL_DAYS', 90),
   // First sync runs in two phases: a fast "foreground" window (matching the
   // default timeline range) so the board is usable in seconds, then the rest of
@@ -426,8 +427,13 @@ export const config = {
   sequenceDiagramDailyCap: intFromEnv('SEQUENCE_DIAGRAM_DAILY_CAP', 30),
   // ---- Reference docs (the per-workspace library — reference-docs/, docs/REFERENCE-DOCS.md) ----
   // Where the markdown tree lives: `<docsDir>/<accountId>/<workspaceId>/library/` (+ `sources/`).
-  // LIMN_DOCS_DIR overrides; default `<dataDir>/docs`.
-  docsDir: process.env.LIMN_DOCS_DIR ?? join(resolveDataDir(), 'docs'),
+  // LIMN_DOCS_DIR overrides. Default: ONE ROOT PER DATABASE (data-dir.ts `defaultDocsDir`) —
+  // `<dataDir>/docs` for the data directory's own DB, `<dataDir>/docs/db-<hash>` for any other.
+  docsDir: process.env.LIMN_DOCS_DIR?.trim() || defaultDocsDir(dbPath, resolveDataDir()),
+  // The root every database shared before the split: a DB with another root moves its own
+  // workspace folders out of it ONCE (reference-docs/owner.ts `migrateLegacyDocs`). Never when
+  // LIMN_DOCS_DIR is set — the user chose where the library lives.
+  legacyDocsDir: process.env.LIMN_DOCS_DIR?.trim() ? null : join(resolveDataDir(), 'docs'),
   // One Sonnet 5 build per document: its OWN spend and turn caps (a long PDF is read in 20-page
   // slices and written out section by section). Env only — no route sets them.
   docsBuildBudgetUsd: floatFromEnv('DOCS_BUILD_BUDGET_USD', 6),

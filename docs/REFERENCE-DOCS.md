@@ -32,11 +32,41 @@ the agent's own Read/Glob/Grep, guided by one prompt block (`docsNavigationPromp
                                       "# Title", a trail (Document › Parent › …), Previous · Contents · Next
   sources/<slug>/source.<ext>      the original upload (or the last fetched page), for Rebuild
   staging/<slug>-<id>-<t>/         one build's working folder; always removed when the build ends
+  .owner                           this database's id — the janitor's proof the folder is its own
 ```
 
-`docsDir` = `config.docsDir` (`~/.limn/docs`; `LIMN_DOCS_DIR` overrides). ⚠ **Under vitest the root is
-a temp folder** unless a suite sets one (`setDocsRootForTest`): `erase-account.test.ts` erases account
-1 of a scratch DB, and without that guard it would delete the developer's own `~/.limn/docs/1`.
+`docsDir` = `config.docsDir`, **ONE ROOT PER DATABASE** (`data-dir.ts` `defaultDocsDir`;
+`LIMN_DOCS_DIR` overrides): the data directory's own database (`~/.limn/pierre-review.sqlite`, the
+installed CLI) keeps `~/.limn/docs`; any other database (`pnpm dev`'s `apps/backend/data/…`, a
+worktree's dev server, a `--db`) gets `~/.limn/docs/db-<12 hex of sha256(absolute DB path)>`. The
+`db-` prefix is non-numeric, so the default root's janitor — which walks only `<accountId>` folders, in
+every version — never enters it. ⚠ **Under vitest the root is a temp folder** unless a suite sets one
+(`setDocsRootForTest`): `erase-account.test.ts` erases account 1 of a scratch DB, and without that
+guard it would delete the developer's own `~/.limn/docs/1`.
+
+### Ownership (`owner.ts`) — why two databases cannot wipe each other's library
+
+Until 2026-10-28 every database on the machine shared `~/.limn/docs`, and account/workspace ids are
+small integers every database reuses. The boot janitor deletes what ITS rows do not account for, so a
+second backend on another DB (a worktree's `pnpm dev`, the installed CLI) deleted the first one's
+library folders; the rows survived and INDEX.md (rendered from rows) still listed documents that no
+longer opened. Two layers stop it:
+
+1. **The per-database root** above.
+2. **The `.owner` marker.** `instance_meta.instance_id` (migration `0139`, `db/instance-id.ts`) is a
+   random id written once per database FILE (it survives moving the file). `claimWorkspaceDir`
+   writes it into a workspace folder when it is created — ⚠ only while the folder holds no document
+   folders, so an unmarked folder with documents (maybe another database's) is never claimed. The
+   janitor (`sweepDocsRoot`) ⚠ **never enters a folder whose `.owner` names another id, and never
+   deletes anything from a folder with no `.owner`** (it logs one with documents and leaves it).
+   `removeDocFiles`, `removeWorkspaceDocs` and `removeAccountDocs` skip a foreign-marked folder too.
+
+**The one-time move** (`migrateLegacyDocs`, at boot before the janitor): a database whose root is not
+the shared `~/.limn/docs` moves each of ITS workspace folders out of it with ONE `renameSync`, when the
+target does not exist yet (never clobbers) and the folder is provably its own — `.owner` is its id,
+or it is unmarked, holds at least one document folder and EVERY document folder is a slug this
+database has a row for in that workspace. Anything else stays where it is and is logged
+(`foreign_owner` / `unproven` / `rename_failed`). Never under `LIMN_DOCS_DIR` or a test root.
 
 ⚠ **EVERY FILE A LINK CAN POINT AT IS WRITTEN BY THE SERVER** (`render.ts`), from data it holds:
 INDEX.md from the stored rows (`renderIndex`, deterministic, title order — never a model), CONTENTS.md
@@ -212,9 +242,11 @@ Claude credential.
 **Failure keeps the old version.** `built_at` non-null = a built version is on disk (`available` on the
 wire) and listed in INDEX.md; a rebuild that fails or is cancelled leaves it there. A build of a
 document deleted mid-run puts nothing on disk. Boot (`startup.ts`): interrupted builds → `failed`
-("Interrupted by a restart. Press Rebuild."), then the janitor removes every staging folder and any
-library/source folder no row accounts for. A deleted workspace's folder is removed by the delete route
-(its rows go with the workspace cascade); erasure removes `<docsDir>/<accountId>/` after the rows.
+("Interrupted by a restart. Press Rebuild."), then the one-time move out of the old shared root, then
+the janitor removes every staging folder and any library/source folder no row accounts for — in the
+workspace folders whose `.owner` is this database only (§ Ownership). A deleted workspace's folder is
+removed by the delete route (its rows go with the workspace cascade); erasure removes
+`<docsDir>/<accountId>/` after the rows, skipping a workspace folder another database owns.
 
 **On Codex** (`LIMN_AI_PROVIDER=codex`, kind `docs_build`; docs/CODEX-PLAN.md § Phase 3 stream (d)).
 A `'sections'` build runs through the same `runAgent`, reading the staging folder through Limn's
@@ -323,7 +355,8 @@ conversation_id)`; same FK), plus `workspaces.docs_in_review`. Both tables are i
 `accountScopedTables()`, erased (files too), exported (metadata + chat; the text is the user's own
 upload), and checked by `verify:isolation`. `reference_docs.crawl_json` (migration `0124`,
 nullable JSON) is a column on the same row, so it needed no new erasure or isolation entry.
-[MIGRATIONS.md](MIGRATIONS.md).
+`instance_meta` (migration `0139`, key → value, NOT account-scoped, never erased) holds the
+database's `instance_id`, the `.owner` marker's value. [MIGRATIONS.md](MIGRATIONS.md).
 
 ## Use in reviews (`review-refs.ts`; migration `0117`)
 

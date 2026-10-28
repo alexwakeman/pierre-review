@@ -5,12 +5,22 @@ import {
   assertSlug,
   docsRoot,
   isInside,
+  legacyDocsRoot,
   libraryDir,
   sourcesDir,
   stagingRoot,
   workspaceDocsDir,
   type LibraryPath,
 } from './paths.js';
+import {
+  claimWorkspaceDir,
+  docFolderNames,
+  isForeignDir,
+  loadDocsOwner,
+  migrateLegacyDocs,
+  readOwnerMarker,
+  type LegacyDocsMove,
+} from './owner.js';
 import { renderIndex } from './render.js';
 import { indexEntries, workspacesWithDocs } from './store.js';
 
@@ -38,6 +48,8 @@ export function writeIndex(accountId: number, workspaceId: number): Promise<void
     .catch(() => {})
     .then(async () => {
       const entries = await indexEntries(accountId, workspaceId);
+      await loadDocsOwner().catch(() => null);
+      claimWorkspaceDir(workspaceDocsDir(accountId, workspaceId));
       const dir = libraryDir(accountId, workspaceId);
       mkdirSync(dir, { recursive: true });
       atomicWrite(join(dir, 'INDEX.md'), renderIndex(entries));
@@ -51,6 +63,7 @@ export function writeIndex(accountId: number, workspaceId: number): Promise<void
 
 /** Move a rendered document folder into the library, replacing the previous version. */
 export function installDocFolder(accountId: number, workspaceId: number, slug: string, renderedDir: string): void {
+  claimWorkspaceDir(workspaceDocsDir(accountId, workspaceId));
   const lib = libraryDir(accountId, workspaceId);
   mkdirSync(lib, { recursive: true });
   const target = join(lib, assertSlug(slug));
@@ -66,25 +79,39 @@ export function installDocFolder(accountId: number, workspaceId: number, slug: s
   rmSync(old, { recursive: true, force: true });
 }
 
-/** Remove a document's files (its library folder and its stored source). */
+/** Remove a document's files (its library folder and its stored source). Never in another DB's folder. */
 export function removeDocFiles(accountId: number, workspaceId: number, slug: string): void {
+  if (isForeignDir(workspaceDocsDir(accountId, workspaceId))) return;
   rmSync(join(libraryDir(accountId, workspaceId), assertSlug(slug)), { recursive: true, force: true });
   rmSync(sourcesDir(accountId, workspaceId, slug), { recursive: true, force: true });
 }
 
-/** Erasure: every library of the account, on disk. */
+/**
+ * Erasure: every library of the account, on disk — except a workspace folder another database owns
+ * (`.owner`, reference-docs/owner.ts). The account folder goes once nothing is left in it.
+ */
 export function removeAccountDocs(accountId: number): void {
-  rmSync(accountDocsDir(accountId), { recursive: true, force: true });
+  const dir = accountDocsDir(accountId);
+  if (!existsSync(dir)) return;
+  for (const ws of readdirSync(dir)) {
+    const wsDir = join(dir, ws);
+    if (isForeignDir(wsDir)) continue;
+    rmSync(wsDir, { recursive: true, force: true });
+  }
+  if (readdirSync(dir).length === 0) rmSync(dir, { recursive: true, force: true });
 }
 
-/** A deleted workspace: its library, sources and staging. */
+/** A deleted workspace: its library, sources and staging — unless another database owns the folder. */
 export function removeWorkspaceDocs(accountId: number, workspaceId: number): void {
-  rmSync(workspaceDocsDir(accountId, workspaceId), { recursive: true, force: true });
+  const wsDir = workspaceDocsDir(accountId, workspaceId);
+  if (isForeignDir(wsDir)) return;
+  rmSync(wsDir, { recursive: true, force: true });
 }
 
 // ---- sources (for Rebuild) ----
 
 export function saveSource(accountId: number, workspaceId: number, slug: string, body: Buffer, ext: string): void {
+  claimWorkspaceDir(workspaceDocsDir(accountId, workspaceId));
   const dir = sourcesDir(accountId, workspaceId, slug);
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });
@@ -125,28 +152,53 @@ export async function readIndex(accountId: number, workspaceId: number): Promise
 
 // ---- the janitor ----
 
+export interface DocsSweepResult {
+  /** Library / source folders removed (a whole unwanted workspace folder counts its documents). */
+  removed: number;
+  /** `<acct>/<ws>` folders with no `.owner` that hold documents: left as they are, never deleted. */
+  leftUnowned: string[];
+  /** `<acct>/<ws>` folders another database's `.owner` names: never entered. */
+  leftForeign: string[];
+}
+
 /**
- * Boot: remove what no row accounts for — a library folder or source of a deleted document or
- * workspace, and every leftover staging folder (a build that died with the process).
+ * Remove what no row accounts for — a library folder or source of a deleted document or workspace,
+ * and every leftover staging folder (a build that died with the process) — in the workspace folders
+ * THIS database owns. ⚠ A folder whose `.owner` names another database is never entered; a folder
+ * with no `.owner` is never deleted from (reference-docs/owner.ts). Pure over its arguments.
  */
-export async function sweepDocsOnStartup(): Promise<number> {
-  const root = docsRoot();
-  if (!existsSync(root)) return 0;
-  const rows = await workspacesWithDocs();
+export function sweepDocsRoot(
+  root: string,
+  rows: ReadonlyArray<{ accountId: number; workspaceId: number; slug: string }>,
+  me: string | null,
+): DocsSweepResult {
+  const out: DocsSweepResult = { removed: 0, leftUnowned: [], leftForeign: [] };
+  if (!existsSync(root)) return out;
   const wanted = new Map<string, Set<string>>();
   for (const r of rows) {
     const k = `${r.accountId}/${r.workspaceId}`;
     if (!wanted.has(k)) wanted.set(k, new Set());
     wanted.get(k)!.add(r.slug);
   }
-  let removed = 0;
   for (const acct of readdirSync(root)) {
     if (!/^\d+$/.test(acct)) continue;
     for (const ws of readdirSync(join(root, acct))) {
       if (!/^\d+$/.test(ws)) continue;
+      const key = `${acct}/${ws}`;
       const wsDir = join(root, acct, ws);
+      const marker = readOwnerMarker(wsDir);
+      if (marker == null || me == null) {
+        // Not provably ours: leave all of it. Report it only when it holds something to lose.
+        const { library, sources } = docFolderNames(wsDir);
+        if (library.length > 0 || sources.length > 0) out.leftUnowned.push(key);
+        continue;
+      }
+      if (marker !== me) {
+        out.leftForeign.push(key);
+        continue;
+      }
       rmSync(join(wsDir, 'staging'), { recursive: true, force: true });
-      const slugs = wanted.get(`${acct}/${ws}`);
+      const slugs = wanted.get(key);
       for (const sub of ['library', 'sources']) {
         const d = join(wsDir, sub);
         if (!existsSync(d)) continue;
@@ -154,14 +206,24 @@ export async function sweepDocsOnStartup(): Promise<number> {
           if (sub === 'library' && name === 'INDEX.md') continue;
           if (slugs?.has(name)) continue;
           rmSync(join(d, name), { recursive: true, force: true });
-          removed += 1;
+          out.removed += 1;
         }
       }
-      // A workspace with nothing left: its INDEX.md is regenerated on the next read.
-      if (!slugs) {
-        rmSync(wsDir, { recursive: true, force: true });
-      }
+      // Our workspace with no document left: INDEX.md is regenerated from the rows on the next read.
+      if (!slugs) rmSync(wsDir, { recursive: true, force: true });
     }
   }
-  return removed;
+  return out;
+}
+
+/**
+ * Boot, as THIS database: first the one-time move of its own folders out of the root every database
+ * used to share (owner.ts `migrateLegacyDocs`), then the janitor over its own root.
+ */
+export async function sweepDocsOnStartup(): Promise<DocsSweepResult & { migration: LegacyDocsMove }> {
+  const me = await loadDocsOwner();
+  const rows = await workspacesWithDocs();
+  const root = docsRoot();
+  const migration = migrateLegacyDocs({ legacyRoot: legacyDocsRoot(), root, rows, me });
+  return { ...sweepDocsRoot(root, rows, me), migration };
 }

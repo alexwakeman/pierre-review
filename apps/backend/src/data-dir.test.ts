@@ -3,7 +3,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, wr
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { migrateLegacyDataDir, resolveDataDir } from './data-dir.js';
+import { defaultDocsDir, migrateLegacyDataDir, resolveDataDir } from './data-dir.js';
 
 let home: string;
 beforeEach(() => {
@@ -117,5 +117,21 @@ describe('migrateLegacyDataDir', () => {
   it('is a no-op on a fresh machine', () => {
     expect(migrateLegacyDataDir({ env: {}, home })).toEqual({ moved: false, reason: 'no_legacy_dir' });
     expect(existsSync(join(home, '.limn'))).toBe(false);
+  });
+});
+
+describe('defaultDocsDir — one reference-docs root per database', () => {
+  it("keeps <dataDir>/docs for the data directory's own database (the installed CLI)", () => {
+    expect(defaultDocsDir('/h/.limn/pierre-review.sqlite', '/h/.limn')).toBe('/h/.limn/docs');
+  });
+
+  it('gives any other database its own non-numeric folder under <dataDir>/docs', () => {
+    const dev = defaultDocsDir('/repo/apps/backend/data/pierre-review.sqlite', '/h/.limn');
+    const worktree = defaultDocsDir('/repo/.claude/worktrees/x/apps/backend/data/pierre-review.sqlite', '/h/.limn');
+    const other = defaultDocsDir('/h/.limn/other.sqlite', '/h/.limn');
+    for (const d of [dev, worktree, other]) expect(d).toMatch(/^\/h\/\.limn\/docs\/db-[0-9a-f]{12}$/);
+    expect(new Set([dev, worktree, other]).size).toBe(3);
+    // Stable: the same database always lands in the same folder.
+    expect(defaultDocsDir('/repo/apps/backend/data/pierre-review.sqlite', '/h/.limn')).toBe(dev);
   });
 });

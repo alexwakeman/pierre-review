@@ -26,7 +26,8 @@ import { ConverterMissingError, convertToMarkdown, htmlToMarkdown, pdfPageCount,
 import { CrawlRefusal, bundleCrawlMarkdown, crawlSite, type BundlePage } from './crawl.js';
 import { makeLinkRanker } from './crawl-rank.js';
 import { installDocFolder, readSource, saveSource, writeIndex } from './library.js';
-import { stagingRoot } from './paths.js';
+import { claimWorkspaceDir, loadDocsOwner } from './owner.js';
+import { stagingRoot, workspaceDocsDir } from './paths.js';
 import { BUILD_PDF_SYSTEM_PROMPT, buildPdfPrompt, buildSectionsPrompt, buildSectionsSystemPrompt } from './prompts.js';
 import { draftsFromWritten, renderDocFolder, trimTitle } from './assemble.js';
 import { sectionFileNames, validateDocFolder } from './render.js';
@@ -296,6 +297,8 @@ async function runBuild(job: Job, controller: AbortController): Promise<void> {
   await patchDoc(accountId, docId, { buildStartedAt: new Date(), error: null });
   report('converting', 3, row.sourceKind === 'url' ? 'Reading the page' : 'Reading the file', true);
 
+  await loadDocsOwner().catch(() => null);
+  claimWorkspaceDir(workspaceDocsDir(accountId, row.workspaceId));
   const staging = join(stagingRoot(accountId, row.workspaceId), `${row.slug}-${docId}-${Date.now().toString(36)}`);
   const sectionsDir = join(staging, 'sections');
   try {

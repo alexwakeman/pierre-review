@@ -1241,6 +1241,14 @@ columns were added to 0138 in place before it shipped.)
 [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Team claims → Releasing stale lines. Journal `idx` 138, `when`
 sqlite `1792137625016`.
 
+### `0139_instance_meta` — this database's own id
+A new CORE table, `instance_meta (key text PK, value text)`: facts about the database FILE, never an
+account's — so NOT in `accountScopedTables()`, not erased, not exported. One key so far, `instance_id`,
+a random UUID written on first read (`db/instance-id.ts`, insert-or-ignore then re-read). It is the
+reference-docs `.owner` marker that stops one database's janitor deleting another's library
+([REFERENCE-DOCS.md](REFERENCE-DOCS.md) § Ownership). No backfill. Journal `idx` 139, `when`
+sqlite `1792137626016`.
+
 ### No migration — "Check against code" removed (2026-10-18): `sprint_ticket_repos` + `sprint_assessments` DORMANT
 
 The sprint drawer, its repo picker and "Check against code" (`review/sprint-assess/`) were removed with
