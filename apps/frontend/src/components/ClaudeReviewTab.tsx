@@ -26,7 +26,6 @@ import {
   DEFAULT_CLAUDE_REVIEW_MODEL,
   findingSourceLabel,
   followUpSentence,
-  PAIR_RUN_LABEL,
   pairHalfFailedLine,
   pairModelsLabel,
 } from '@pierre-review/shared';
@@ -34,6 +33,7 @@ import { formatDate, relativeTime, safeExternalUrl } from '../lib/ui.js';
 import { useRunCostText } from '../hooks/useAiBudget.js';
 import { useReviewModelPick } from '../hooks/useModelPick.js';
 import { historyOptionIdFor, nextShownReviewId, reviewHistoryOptions } from '../lib/reviewHistory.js';
+import { findingAuthorName, reviewByName, threadsByName } from '../lib/reviewAuthor.js';
 import { pairRunningLabel } from '../lib/modelPick.js';
 import {
   autoLiftLine,
@@ -180,10 +180,6 @@ const SEVERITY_ORDER: ClaudeFindingSeverity[] = [
 // "abc1234 · Claude Opus 5.5 · US$0.42" on an API key, "… · 0.3% of your week" on a Claude
 // subscription, "abc1234 · Codex · GPT-6.1 Sol" for a Codex run (`aiRunLabel`, the ONE run label;
 // `costText`, the ONE run-cost wording — judged by the run's own provider).
-/** Who wrote a review: its provider ("Claude" / "Codex"), or "Claude + Codex" for a pair's ONE review. */
-function reviewByName(review: Pick<ClaudeReview, 'provider' | 'model' | 'pair'>): string {
-  return review.pair != null ? PAIR_RUN_LABEL : aiRunProviderName(review);
-}
 
 // How a Claude + Codex pair became one review — behind the header's ⓘ only, never narrated.
 const PAIR_HOW_TEXT: Record<NonNullable<NonNullable<ClaudeReview['pair']>['how']>, string> = {
@@ -1306,10 +1302,6 @@ export function ClaudesReview({
   // WHO WROTE IT: the provider that ran the run — or, for a Claude + Codex pair (the server's ONE
   // consolidated review), "Claude + Codex", each finding naming its own source.
   const by = reviewByName(storedReview);
-  const halfProvider = useMemo(
-    () => new Map((storedReview.pair?.halves ?? []).map((h) => [h.reviewId, h.provider] as const)),
-    [storedReview.pair?.halves],
-  );
   // Praise is not a finding: an older run's stored praise is hidden everywhere below (counts,
   // list, follow-up), nothing deleted. The summary carries the one praise line now.
   const review = useMemo(() => withoutPraise(storedReview), [storedReview]);
@@ -1356,7 +1348,7 @@ export function ClaudesReview({
   const findingCard = (f: ClaudeFinding, storyLabel: string | null): JSX.Element => (
     <FindingRow
       // A pair's finding: its own text is the half's that raised it.
-      authorName={halfProvider.has(f.reviewId) ? aiProviderName(halfProvider.get(f.reviewId)) : aiRunProviderName(storedReview)}
+      authorName={findingAuthorName(storedReview, f)}
       key={f.id}
       prId={review.prId}
       finding={f}
@@ -1467,8 +1459,8 @@ export function ClaudesReview({
         onOpenThread={onOpenThread}
         actions={checkThreadsPrId != null ? <CheckThreadsButton prId={checkThreadsPrId} /> : undefined}
         // A later Check threads run may have judged them (its own provider): name this run's only
-        // when its own assessments show.
-        by={currentThreads == null ? by : undefined}
+        // when its own assessments show. A pair's come from ONE half: that half's provider.
+        by={currentThreads == null ? threadsByName(storedReview) : undefined}
       />
       <ReviewSection
         title="Findings"

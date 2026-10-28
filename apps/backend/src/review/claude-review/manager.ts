@@ -989,7 +989,7 @@ async function runPipeline(
   const settledIds = new Set(settled.map((f) => f.id));
   const prior = fresh
     ? null
-    : await loadPriorReviewForFollowUp(ctx, item.prId, item.accountId, reviewId, settledIds, item.provider);
+    : await loadPriorReviewForFollowUp(ctx, item.prId, item.accountId, reviewId, settledIds, item.provider, item.pair != null);
   // BACKWARD COMPATIBILITY: findings the RETIRED settle-on-sight rule took out of the chain were
   // never judged. Load them as carried items; only the ones whose thread is resolved WITH a
   // person's reply are kept (below), so they are judged once like any other.

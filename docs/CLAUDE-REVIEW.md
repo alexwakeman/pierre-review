@@ -518,11 +518,19 @@ paramount … we should still get a review outcome if at least one agent ran ok.
   - ⚠ **A MERGED-AWAY DUPLICATE** (`claude_review_findings.merged_into` = the kept id) stays stored
     but every read of a run's findings leaves it out (`getClaudeReviewById`, `isMergedAway`): it is
     never shown, posted (the single-finding route answers `409 MergedDuplicate`), counted in a verdict
-    (auto-post, the replies-pass outcome, My Turn, the Open PRs column) or sent to AI Fix. ⚠ **THE
-    NEXT FOLLOW-UP** of its provider follows up the KEPT finding instead (`loadPriorReviewForFollowUp`
-    carries it into that provider's chain), so a still-open point is re-raised against the kept
-    finding (`priorFindingId` = the kept id), never as new; the next pair's second half drops a
-    re-raise of the SAME earlier finding (`isPairRepeat`), and the next consolidation catches the rest.
+    (auto-post, the replies-pass outcome, My Turn, the Open PRs column, the "unposted blockers of
+    Limn's block" check that gates a lift) or sent to AI Fix. ⚠ **THE NEXT FOLLOW-UP**: a SINGLE run
+    of its provider follows up the KEPT finding instead (`loadPriorReviewForFollowUp` carries it into
+    that provider's chain), so a still-open point is re-raised against the kept finding
+    (`priorFindingId` = the kept id), never as new. ⚠ **A PAIR HALF does NOT carry it** (`inPair`):
+    the kept finding's own provider — the other half — judges it, so a pair has ONE judge per thread
+    (two halves could otherwise auto-resolve and push back on one comment, or resolve it and re-raise
+    it as a blocker). The next pair's second half drops a re-raise of the SAME earlier finding
+    (`isPairRepeat`), and the next consolidation catches the rest.
+  - ⚠ A group whose POSTED member is milder than an unposted one is LEFT ALONE (both kept): the
+    posted one can never be withdrawn and a blocker is never merged into something milder.
+  - The merge pass's usage is recorded when the completion SETTLES — also after the 90 s timeout
+    stopped waiting for it.
 - **ONE VIEW** (`pair-view.ts buildPairView`, served by `getReviewView` for `GET
   /api/prs/:id/claude-review`, `GET /api/claude-reviews/:id`, AI Fix's seed, the review chat and the
   follow-up reply route): either half's id answers the pair as ONE `ClaudeReview` addressed by its
@@ -532,7 +540,11 @@ paramount … we should still get a review outcome if at least one agent ran ok.
   both halves' follow-up items once each; thread judgements, CI and stories from the latest succeeded
   half; cost and tokens summed; `pair.halves` (each half's provider, model, effort, status, cost),
   `pair.failedHalf`, `pair.how`, `pair.verdict`. Draft, verdict and posted state are the latest
-  half's.
+  half's. ⚠ `autoPost` is the record of the half that OWNS it (`autoPostOfPair`: no
+  `viaPairReviewId` — the first half when the second did not finish), and the GET's `autoFix` looks
+  up every half's id: a failed second half must not hide the first half's auto-post or auto-fix line.
+  Thread judgements come from ONE half, so the threads section names THAT half's provider, never
+  "Claude + Codex".
 - **ONE GITHUB POST FOR AN AUTO PAIR.** Nothing posts after the first half. When the pair ends (after
   the consolidation): both succeeded ⇒ `maybeAutoPostReview({reviewId: second, pairFirstReviewId:
   first})` sends ONE review holding the CONSOLIDATED findings (each comment names who raised it ON the
@@ -546,7 +558,8 @@ paramount … we should still get a review outcome if at least one agent ran ok.
   `auto_post`, then on the first's (its record names the second, `viaPairReviewId`) — both BEFORE any
   write; a first half someone else claimed keeps its findings out; a failure is recorded on both and
   never retried. Only one half succeeded ⇒ that half posts alone, as any auto run. Auto resolve and
-  pushback run for both halves (each claims per thread). The Slack signal, Sonar post, auto fix and
+  pushback run for both halves (each claims per thread; a kept finding of a merge is judged by one
+  half only — see THE NEXT FOLLOW-UP above). The Slack signal, Sonar post, auto fix and
   design diagrams run ONCE, at the pair's end, on the second half when it succeeded, else the first.
   The Slack signal names "Claude + Codex" with the pair's one summary and verdict; auto fix is seeded
   from the CONSOLIDATED set (AI Fix reads the review through `getReviewView`).

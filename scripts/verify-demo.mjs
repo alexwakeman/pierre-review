@@ -66,16 +66,24 @@ const VIEWS = [
       `?view=pr-detail:${id}&prTab=${t}`,
       id === 113 ? `pr-113-${t}` : id === 114 && (t === 'ai_fix' || t === 'claude_review') ? `pr-114-${t}` : id === 105 && t === 'claude_review' ? 'pr-105-claude_review' : null,
       // #105 holds a Claude Opus review and a Codex GPT-6.1 Sol review of the same head, each labelled,
-      // both in the always-visible run list. The model menu lists BOTH providers (both signed in):
-      // picking Codex's model leaves every run listed.
+      // both options of the history select ("Showing"). The model menu lists BOTH providers (both
+      // signed in): picking Codex's model leaves every run listed.
       id === 105 && t === 'claude_review'
         ? {
             act: async (page) => {
               await page.getByLabel('Model').first().selectOption('codex:gpt-6.1-sol');
-              await page.getByText('All reviews of this PR').first().waitFor({ timeout: 10_000 });
+              const history = page.getByLabel('Showing').first();
+              await history.waitFor({ timeout: 10_000 });
+              // A closed select's options are not page text: read their labels. Both ran at
+              // Effort = High, and each label says so.
+              const labels = await history.locator('option').allTextContents();
+              const want = ['Codex · GPT-6.1 Sol · high', 'Claude Opus 5.5 · high'];
+              const absent = want.filter((w) => !labels.some((l) => l.includes(w)));
+              if (labels.length !== 2 || absent.length > 0) {
+                throw new Error(`history select: ${JSON.stringify(labels)} (want 2 options with ${JSON.stringify(want)})`);
+              }
             },
-            // Both ran at Effort = High, and each label says so.
-            expect: ['All reviews of this PR (2)', 'Codex · GPT-6.1 Sol · high', 'Claude Opus 5.5 · high', 'Shown'],
+            expect: ['Showing'],
           }
         : // #113's latest run read acme/infrastructure's branch of the same name (a related repo).
           id === 113 && t === 'claude_review'

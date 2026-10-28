@@ -1,6 +1,5 @@
 import { useMemo } from 'react';
 import {
-  aiRunProviderName,
   type AiFixPickerItem,
   type AiFixPickerPreview,
   type AiFixPickerSection,
@@ -15,6 +14,7 @@ import {
   reraisedStatusByFindingId,
   withoutPraise,
 } from '../../lib/claudeReviewFollowUp.js';
+import { findingAuthorName, reviewByName, threadsByName } from '../../lib/reviewAuthor.js';
 import { FindingRow } from '../ClaudeReviewTab.js';
 import { FollowUpRow } from '../ClaudeReviewFollowUp.js';
 import { ThreadRow } from '../ClaudeReviewThreads.js';
@@ -186,8 +186,10 @@ export function FixPicker({
   // The source review, as the Claude Review tab shows it: praise hidden, and the two re-raise chips
   // worked out by the same helpers.
   const source = review != null && review.id === preview.sourceReviewId ? review : null;
-  // Who wrote the source review: the provider its model belongs to.
-  const by = aiRunProviderName(review);
+  // Who wrote the source review: its provider, or "Claude + Codex" for a pair (each finding names
+  // the half that raised it; the threads, the one half that judged them) — lib/reviewAuthor.ts.
+  const by = reviewByName(review);
+  const threadsBy = threadsByName(review);
   const shown = useMemo(() => (source != null ? withoutPraise(source) : null), [source]);
   const findingsById = useMemo(() => new Map((shown?.findings ?? []).map((f) => [f.id, f])), [shown]);
   const followUpById = useMemo(
@@ -243,7 +245,7 @@ export function FixPicker({
         if (f == null) break;
         return (
           <FindingRow
-            authorName={by}
+            authorName={findingAuthorName(review, f)}
             key={item.key}
             prId={pr.id}
             finding={f}
@@ -287,8 +289,8 @@ export function FixPicker({
             muted={false}
             actions={false}
             selection={selection}
-            notCheckedNote={card.inReview ? undefined : `${by} didn’t check this one.`}
-            by={by}
+            notCheckedNote={card.inReview ? undefined : `${threadsBy} didn’t check this one.`}
+            by={threadsBy}
           />
         );
       case 'ci':

@@ -474,9 +474,13 @@ export async function loadUnpostedBlockersOfBlock(
     .from(cr)
     .where(and(eq(cr.prId, prId), eq(cr.accountId, accountId)))
     .execute()) as Array<{ id: number; autoPost: ClaudeAutoPostRecord | null }>;
-  const blockRun = runs.find((r) => r.autoPost?.githubReviewId != null && String(r.autoPost.githubReviewId) === githubReviewId);
+  // Every run whose record carries this GitHub review: a pair's combined post is recorded on BOTH
+  // halves, and either half may hold the blocker that was posted (or merged away).
+  const blockRunIds = runs
+    .filter((r) => r.autoPost?.githubReviewId != null && String(r.autoPost.githubReviewId) === githubReviewId)
+    .map((r) => r.id);
   // No such run: the caller only passes ids `loadLimnAutoBlockIds` read, so this is a race — hold.
-  if (!blockRun) return [-1];
+  if (blockRunIds.length === 0) return [-1];
   const rows = (await ctx.db
     .select({
       id: crf.id,
@@ -489,7 +493,9 @@ export async function loadUnpostedBlockersOfBlock(
       storyRef: crf.storyRef,
     })
     .from(crf)
-    .where(eq(crf.reviewId, blockRun.id))
+    // A pair's merged-away duplicate is never posted and never read as a finding: its kept finding
+    // stands for it.
+    .where(and(inArray(crf.reviewId, blockRunIds), isNull(crf.mergedInto)))
     .execute()) as Array<{
     id: number;
     path: string;

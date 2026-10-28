@@ -169,6 +169,16 @@ function mergedFollowUp(halves: readonly ClaudeReview[]): ClaudeReviewFollowUp |
   return { ...base, items, ...(leftOut.length > 0 ? { leftOut } : {}) };
 }
 
+/** The auto-post record a pair shows: the owning half's (latest first), else any half's. */
+export function autoPostOfPair(halves: readonly ClaudeReview[]): ClaudeReview['autoPost'] {
+  const rev = [...halves].reverse();
+  return (
+    rev.find((h) => h.autoPost != null && h.autoPost.viaPairReviewId == null)?.autoPost ??
+    rev.find((h) => h.autoPost != null)?.autoPost ??
+    null
+  );
+}
+
 /**
  * THE CONSOLIDATED VIEW of a pair: ONE `ClaudeReview` from its two stored halves (either may be
  * absent — a second that never started) and the stored record (null on a pair still running, or one
@@ -249,7 +259,9 @@ export function buildPairView(
     userVerdict: latest.userVerdict,
     postedReviewId: latest.postedReviewId ?? first?.postedReviewId ?? null,
     postedAt: latest.postedAt ?? first?.postedAt ?? null,
-    autoPost: latest.autoPost ?? null,
+    // The pair's auto-post record: the half that OWNS it (no `viaPairReviewId`) — the second after a
+    // combined post, the first when the second did not finish — else whichever half carries one.
+    autoPost: autoPostOfPair(halves),
     costUsd: sum((h) => h.costUsd),
     inputTokens: sum((h) => h.inputTokens),
     outputTokens: sum((h) => h.outputTokens),

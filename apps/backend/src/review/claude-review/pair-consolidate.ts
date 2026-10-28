@@ -193,7 +193,8 @@ export function parseConsolidation(
 
 /**
  * APPLY THE GROUPS, with code choosing what is kept: a finding already on GitHub is kept (a group
- * with two posted findings is left alone — neither can be withdrawn); otherwise the model's pick,
+ * with two posted findings, or with an unposted member more severe than its posted one, is left
+ * alone — a posted finding can never be withdrawn); otherwise the model's pick,
  * unless another member is more severe — then the most severe (Claude's on a tie), so a blocker is
  * never merged into something milder. `sourceOf` names every kept finding's source ('both' when the
  * group spans the two providers); `mergedFrom` maps each dropped id to the kept one.
@@ -211,10 +212,14 @@ export function applyDuplicateGroups(
     if (members.length < 2) continue;
     const posted = members.filter((f) => f.posted);
     if (posted.length > 1) continue;
+    const best = Math.min(...members.map((f) => SEVERITY_RANK[f.severity]));
     let keep: MergeFinding;
-    if (posted.length === 1) keep = posted[0]!;
-    else {
-      const best = Math.min(...members.map((f) => SEVERITY_RANK[f.severity]));
+    if (posted.length === 1) {
+      // The posted one can never be withdrawn, and a more severe unposted member may never be merged
+      // into it (it would never be posted nor counted): leave such a group alone.
+      if (SEVERITY_RANK[posted[0]!.severity] !== best) continue;
+      keep = posted[0]!;
+    } else {
       const picked = byId.get(g.keep);
       keep =
         picked != null && SEVERITY_RANK[picked.severity] === best
@@ -294,17 +299,27 @@ async function runMergePass(
   const complete: CompleteFn | undefined = deps.complete ?? ctx.llm.complete?.bind(ctx.llm);
   if (complete == null) return null;
   if (deps.complete == null && ctx.llm.detectAuth('complete').status !== 'ok') return null;
-  try {
-    const out = await withTimeout(
-      complete({ model: PAIR_MERGE_CLAUDE_MODEL, role: 'standard', system: PAIR_MERGE_SYSTEM, prompt, maxTokens: 2_000 }),
-      deps.timeoutMs ?? PAIR_MERGE_TIMEOUT_MS,
-    );
+  // Usage is recorded whenever the completion SETTLES — also after the timeout stopped waiting for it
+  // (the call still ran and spent; the budget must see it).
+  const recordUsage = (out: CheapCompleteResult): Promise<void> => {
     const u = cheapUsage(out, PAIR_MERGE_CLAUDE_MODEL, (inputTokens, outputTokens) =>
       estimateCostUsd(PAIR_MERGE_CLAUDE_MODEL, { inputTokens, outputTokens, cacheReadTokens: 0, cacheCreationTokens: 0 }),
     );
-    await ctx
+    return ctx
       .recordAiUsage({ accountId, prId, seam: 'summary', feature: PAIR_MERGE_FEATURE, ...u })
       .catch((err) => ctx.log.warn(`claude review pr ${prId}: the merge's usage was not recorded: ${String(err)}`));
+  };
+  let call: Promise<CheapCompleteResult>;
+  try {
+    call = complete({ model: PAIR_MERGE_CLAUDE_MODEL, role: 'standard', system: PAIR_MERGE_SYSTEM, prompt, maxTokens: 2_000 });
+  } catch (err) {
+    ctx.log.warn(`claude review pr ${prId}: the pair's merge pass failed; joined in code: ${err instanceof Error ? err.message : String(err)}`);
+    return null;
+  }
+  const recorded = call.then(recordUsage, () => {});
+  try {
+    const out = await withTimeout(call, deps.timeoutMs ?? PAIR_MERGE_TIMEOUT_MS);
+    await recorded;
     const parsed = parseConsolidation(out.text, new Set(findings.map((f) => f.id)));
     if (parsed == null) ctx.log.info(`claude review pr ${prId}: the pair's merge answer was invalid; joined in code`);
     return parsed;

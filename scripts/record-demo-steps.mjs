@@ -261,8 +261,18 @@ export const STEPS = [
     name: 'pr:105:review-history',
     run: async (h) => {
       await h.go('?view=pr-detail:105&prTab=claude_review');
-      // Every run in the always-visible list, so showing any of them answers.
-      await h.clickAll(h.page.locator('main [data-review-run]'), { max: 8 });
+      // Every run in the history select ("Showing"), so showing any of them answers. Options of a
+      // closed select are never "visible": pick each by value instead of clicking it.
+      const history = h.page.locator('main').getByLabel('Showing').first();
+      const values = (await history.count()) > 0 ? await history.locator('option').evaluateAll((os) => os.map((o) => o.value)) : [];
+      for (const v of values.slice(0, 8)) {
+        try {
+          await history.selectOption(v, { timeout: 2000 });
+          await h.settle({ quietMs: 600 });
+        } catch {
+          /* gone after a re-render */
+        }
+      }
       await explore(h, { max: 30, scope: 'main' });
     },
   },

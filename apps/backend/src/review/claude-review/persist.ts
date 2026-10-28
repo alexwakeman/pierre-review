@@ -1647,6 +1647,10 @@ export async function loadPriorReviewForFollowUp(
   // Claude one (or the reverse) reviews afresh instead of grading the other's findings — the two
   // stay comparable side by side. Absent ⇒ the latest run, whichever provider ran it.
   provider?: AiProviderId,
+  // TRAILING: this run is a HALF OF A CLAUDE + CODEX PAIR. A merged-away duplicate's kept finding is
+  // then NOT carried here: the other half (the kept finding's own provider) follows it up, so the
+  // pair has ONE judge per thread — never two halves resolving and disputing the same comment.
+  inPair = false,
 ): Promise<PriorReviewForFollowUp | null> {
   const { cr, crf, prs, repos } = tables(ctx);
   const candidates = (await ctx.db
@@ -1704,9 +1708,11 @@ export async function loadPriorReviewForFollowUp(
     .orderBy(asc(crf.id))
     .execute()) as FindingRow[];
   // ⚠ A CLAUDE + CODEX PAIR'S MERGED-AWAY DUPLICATE is followed up THROUGH THE FINDING KEPT IN ITS
-  // PLACE (the other half's): that one is carried into this provider's follow-up instead, so a
-  // still-open point is re-raised against it (`priorFindingId` = the kept id), never as new. The
-  // duplicate itself is neither followed up nor listed as left out.
+  // PLACE (the other half's): on a SINGLE run that one is carried into this provider's follow-up
+  // instead, so a still-open point is re-raised against it (`priorFindingId` = the kept id), never as
+  // new. ⚠ On a PAIR half (`inPair`) it is not carried: the kept finding's own provider, the other
+  // half, judges it — one verdict per thread. The duplicate itself is neither followed up nor listed
+  // as left out.
   const ownRows = allOwnRows.filter((f) => !isMergedAway(f));
   const keptForMerged = [...new Set(allOwnRows.filter(isMergedAway).map((f) => f.mergedInto as number))];
   // An UNPOSTED finding that repeats an earlier, POSTED comment (`priorFindingId`) is followed up
@@ -1760,7 +1766,7 @@ export async function loadPriorReviewForFollowUp(
       openNotReraised.set(it.priorFindingId, { status: it.status, explanation: it.explanation ?? null });
     }
   }
-  const mergedKept = new Set(keptForMerged.filter((id) => !seen.has(id) && !reraisedByEligible.has(id)));
+  const mergedKept = new Set(inPair ? [] : keptForMerged.filter((id) => !seen.has(id) && !reraisedByEligible.has(id)));
   const carriedIds = [...new Set([...notChecked, ...openNotReraised.keys(), ...mergedKept])];
   if (carriedIds.length > 0) {
     const carriedRows = (await ctx.db

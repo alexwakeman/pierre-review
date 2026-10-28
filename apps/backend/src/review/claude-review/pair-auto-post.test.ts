@@ -261,6 +261,29 @@ describe('the consolidated review is what posts', () => {
   });
 });
 
+describe('lifting Limn\'s own block after a pair', () => {
+  it('a merged-away blocker never holds the block; every half carrying the post is scanned', async () => {
+    await settings.setWorkspaceAutoReview(ctx, 1, wsId, { autoPost: { autoVerdict: true } as any });
+    const prId = await makePr();
+    const { first, second } = await pairOf(prId, [{ severity: 'blocker', title: 'Race on the cache' }], [{ severity: 'blocker', title: 'Unsynchronised cache write' }]);
+    const [c1] = (await persist.getClaudeReviewById(ctx, first, 1))!.findings;
+    const [x1] = (await persist.getClaudeReviewById(ctx, second, 1))!.findings;
+    await persist.savePairConsolidation(ctx, first, [first, second], {
+      how: 'pass', summary: 'S.', verdict: 'REQUEST_CHANGES', sourceOf: { [String(x1!.id)]: 'both' },
+      mergedFrom: { [String(c1!.id)]: x1!.id }, failedHalf: null, at: '',
+    });
+    await ap.maybeAutoPostReview(ctx, { accountId: 1, prId, reviewId: second, pairFirstReviewId: first }, deps() as any);
+    expect(postReview.mock.calls[0]![0].verdict).toBe('REQUEST_CHANGES');
+    expect(await recordOf(first)).toMatchObject({ githubReviewId: 'R9' });
+    // The merged-away Claude blocker was never posted — its kept Codex finding was. Nothing unposted.
+    expect(await ap.loadUnpostedBlockersOfBlock(ctx, 1, prId, 'R9', [])).toEqual([]);
+    // A blocker of the SECOND half that did not reach GitHub is still found (both halves carry R9).
+    await db.update(schema.claudeReviewFindings).set({ postedAt: null }).where(eq(schema.claudeReviewFindings.id, x1!.id)).execute();
+    expect(await ap.loadUnpostedBlockersOfBlock(ctx, 1, prId, 'R9', [])).toEqual([x1!.id]);
+    await settings.setWorkspaceAutoReview(ctx, 1, wsId, { autoPost: { autoVerdict: false } as any });
+  });
+});
+
 describe('the verdict over the union', () => {
   beforeEach(async () => {
     await settings.setWorkspaceAutoReview(ctx, 1, wsId, { autoPost: { autoVerdict: true } as any });

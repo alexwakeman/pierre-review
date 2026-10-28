@@ -169,8 +169,14 @@ describe('what code keeps', () => {
     expect(tie.sourceOf).toEqual({ '6': 'both' });
   });
   it('a posted finding is kept; two posted findings are left alone', () => {
-    expect(pc.applyDuplicateGroups([f(1, 'claude', 'nit', true), f(2, 'codex', 'blocker')], [{ ids: [1, 2], keep: 2 }]).mergedFrom).toEqual({ '2': 1 });
+    expect(pc.applyDuplicateGroups([f(1, 'claude', 'blocker', true), f(2, 'codex', 'nit')], [{ ids: [1, 2], keep: 2 }]).mergedFrom).toEqual({ '2': 1 });
+    expect(pc.applyDuplicateGroups([f(1, 'claude', 'warning', true), f(2, 'codex', 'warning')], [{ ids: [1, 2], keep: 2 }]).mergedFrom).toEqual({ '2': 1 });
     expect(pc.applyDuplicateGroups([f(1, 'claude', 'nit', true), f(2, 'codex', 'nit', true)], [{ ids: [1, 2], keep: 2 }]).mergedFrom).toEqual({});
+  });
+  it('a posted warning and an unposted blocker are both left: a blocker is never merged into something milder', () => {
+    const out = pc.applyDuplicateGroups([f(1, 'claude', 'warning', true), f(2, 'codex', 'blocker')], [{ ids: [1, 2], keep: 1 }]);
+    expect(out.mergedFrom).toEqual({});
+    expect(out.sourceOf).toEqual({ '1': 'claude', '2': 'codex' });
   });
   it('the prompt is null over its cap', () => {
     const big = Array.from({ length: 200 }, (_, i) => f(i + 1, 'claude', 'warning'));
@@ -281,6 +287,22 @@ describe('consolidating a pair (DB)', () => {
     expect(await pc.consolidatePair(ctx, { accountId: 1, prId: none.prId, pairId: none.first, secondId: none.second })).toMatchObject({ how: 'code' });
   });
 
+  it('a pass that answers after the timeout is joined in code, and its usage is still recorded', async () => {
+    const p = await pairOf([{ severity: 'nit', title: 'A' }], [{ severity: 'nit', title: 'B' }]);
+    let release!: () => void;
+    const late = new Promise<void>((r) => (release = r));
+    const complete = vi.fn(async () => {
+      await late;
+      return { text: answer([]), usage: { inputTokens: 100, outputTokens: 50 } };
+    });
+    usage.length = 0;
+    const rec = await pc.consolidatePair(ctx, { accountId: 1, prId: p.prId, pairId: p.first, secondId: p.second }, { complete: complete as any, timeoutMs: 5 });
+    expect(rec).toMatchObject({ how: 'code' });
+    expect(usage).toHaveLength(0);
+    release();
+    await vi.waitFor(() => expect(usage).toEqual([expect.objectContaining({ feature: pc.PAIR_MERGE_FEATURE, prId: p.prId })]));
+  });
+
   it('one half failed ⇒ that half is the review, the other named; never started ⇒ why; both failed ⇒ nothing', async () => {
     const prId = await makePr();
     const first = await half(prId, 'claude', [{ severity: 'blocker', title: 'Race' }], { role: 'first' }, { verdict: 'REQUEST_CHANGES' });
@@ -298,6 +320,13 @@ describe('consolidating a pair (DB)', () => {
     expect(v).toMatchObject({ id: second, status: 'succeeded', summary: 'claude summary.', verdict: 'REQUEST_CHANGES' });
     expect(v.pair!.failedHalf).toEqual({ provider: 'codex', reason: 'You have hit your usage limit' });
     expect(v.findings).toHaveLength(1);
+    // The auto-post ran on the first half (the second failed): the view shows THAT record.
+    await db
+      .update(schema.claudeReviews)
+      .set({ autoPost: { status: 'failed', at: '2026-10-28T00:00:00.000Z', reason: null, error: 'The PR changed since this review.', findingIds: [], postedFindingIds: [], githubReviewId: null } })
+      .where(eq(schema.claudeReviews.id, first))
+      .execute();
+    expect((await persist.getReviewView(ctx, second, 1))!.autoPost).toMatchObject({ status: 'failed', error: 'The PR changed since this review.' });
 
     const prB = await makePr();
     const firstB = await half(prB, 'claude', [{ severity: 'nit', title: 'A' }], { role: 'first' });
@@ -338,6 +367,13 @@ describe('the next follow-up of a merged-away finding', () => {
     expect(prior?.reviewId).toBe(p.first);
     expect(prior!.findings.map((f) => [f.id, f.carried])).toEqual([[p.b[0], true]]);
     expect((prior!.leftOut ?? []).map((l) => l.priorFindingId)).not.toContain(p.a[0]);
+    // A PAIR half does not carry it: the kept finding's own provider (the other half) judges it, so
+    // the two halves never judge — resolve and dispute — one thread twice.
+    const inPair = await persist.loadPriorReviewForFollowUp(ctx, p.prId, 1, next, new Set(), 'claude', true);
+    expect(inPair?.reviewId).toBe(p.first);
+    expect(inPair!.findings).toEqual([]);
+    const codexNext = await persist.loadPriorReviewForFollowUp(ctx, p.prId, 1, next, new Set(), 'codex', true);
+    expect(codexNext!.findings.map((f) => [f.id, f.carried])).toEqual([[p.b[0], false]]);
   });
 
   it('the second half’s code dedupe drops a re-raise of the SAME earlier finding', async () => {

@@ -238,7 +238,12 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
       autoReview,
       // A hold in the lane outranks the sweeper's wait (it is already past it).
       autoReviewWaiting: autoReview ? null : autoReviewWaiting(id, accountId),
-      autoFix: review ? autoFixOutcomeFor(review.id, accountId) : null,
+      // A pair's auto fix ran from whichever half the hook named (the first when the second failed).
+      autoFix: review
+        ? ([review.id, ...(review.pair?.halves ?? []).map((h) => h.reviewId).filter((rid) => rid !== review.id).reverse()]
+            .map((rid) => autoFixOutcomeFor(rid, accountId))
+            .find((o) => o != null) ?? null)
+        : null,
       // The failed auto run at the current head a reader's Retry would re-run (manual rows ignored).
       failedAutoAtHead: await getFailedAutoAtHead(ctx, id, accountId),
       currentThreadAssessments: current,
