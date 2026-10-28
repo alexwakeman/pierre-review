@@ -27,7 +27,7 @@
                 (+ figure.motto > blockquote + figcaption) · .tile.anim (svg) · .tile.gold.free (p, .btn, code)
      G/C/A      section.section.gca > h2 · .board > div.tile×3 (b + p) · p.lead
      chapter    .chap > h2 (span.tag) + p
-     gather     .board.lg > .tile.l (.wide) · .mk (mask logo, style --src:url())
+     gather     .board.lg > .tile.l (.wide, .lead) · .mk (mask logo, style --src:url())
                 · .nm (> span) · svg.wm
      check      .board.ex > .tile[data-ui] · .ui-k · .fl · .ui-row · .sev(.mi|.ok)
                 · .ex-note · .crit · .dot(.no)
@@ -488,6 +488,10 @@ body:has(.lb) {
 }
 .lb .lg .wide {
   grid-column: span 6;
+}
+/* The lead line is two rows tall, so the logo tiles fill the last row. */
+.lb .lg .lead {
+  grid-row: span 2;
 }
 .lb .mk {
   display: block;
@@ -1320,6 +1324,9 @@ body:has(.lb) {
   }
   .lb .lg .wide {
     grid-column: 1 / -1;
+  }
+  .lb .lg .lead {
+    grid-row: auto;
   }
   .lb .mk {
     width: 40px;
