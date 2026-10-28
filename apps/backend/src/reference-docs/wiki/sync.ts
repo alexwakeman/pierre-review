@@ -194,7 +194,9 @@ export async function syncWikiTree(args: WikiSyncArgs): Promise<WikiSyncResult> 
         contentHash: hashMarkdown(page.title, markdown),
         fetched: true,
         lastError: null,
-        url: page.webUrl ?? url,
+        // ⚠ Always the adapter's own address form: a fetched and a cached page must bundle to the SAME
+        // text, or every refresh would miss the summary cache.
+        url,
       });
     } catch (err) {
       // The root must be read; a child that is gone leaves the tree; any other failure keeps the

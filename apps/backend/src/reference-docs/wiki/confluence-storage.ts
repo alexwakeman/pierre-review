@@ -187,8 +187,19 @@ const kids = (el: El, depth: number): string => el.children.map((c) => render(c,
 /** A diagram's placeholder. DIAGRAM_HOOK: an image-description pass may replace these later. */
 export function diagramPlaceholder(name: string | null): string {
   const n = (name ?? '').replace(/\s+/g, ' ').trim().slice(0, 120);
-  return `<p>[Diagram: ${escapeHtml(n || 'untitled')}]</p>`;
+  return `<p>${literal(`[Diagram: ${n || 'untitled'}]`)}</p>`;
 }
+
+// LITERALS: words the server writes in brackets ("[Diagram: x]", "[Jira: PAY-12]", "[x]") must reach
+// the markdown as written — turndown would escape the brackets. They travel through turndown as a
+// private-use sentinel and are put back after (`storageToMarkdown`); `storageToHtml` puts them back
+// as escaped text. Synchronous per call, so one module-level list is safe.
+let literals: string[] = [];
+const literal = (s: string): string => {
+  literals.push(s);
+  return `${literals.length - 1}`;
+};
+const SENTINEL = /(\d+)/g;
 
 function renderMacro(el: El, depth: number): string {
   const macro = (el.attrs['ac:name'] ?? '').toLowerCase();
@@ -214,15 +225,17 @@ function renderMacro(el: El, depth: number): string {
     const source = plain ? plainText(plain).trim() : '';
     const lang = TEXT_DIAGRAMS[macro];
     if (lang && source !== '') return `<pre><code class="language-${lang}">${escapeHtml(source)}</code></pre>`;
-    return diagramPlaceholder(param(el, 'diagramDisplayName') ?? param(el, 'diagramName') ?? param(el, 'name') ?? param(el, 'title') ?? macro);
+    return diagramPlaceholder(
+      param(el, 'diagramDisplayName') ?? param(el, 'diagramName') ?? param(el, 'name') ?? param(el, 'title') ?? param(el, 'filename') ?? macro,
+    );
   }
   if (macro === 'status') {
     const t = param(el, 'title') ?? param(el, 'colour') ?? '';
-    return t ? `<span>[${escapeHtml(t)}]</span>` : '';
+    return t ? literal(`[${t.slice(0, 60)}]`) : '';
   }
   if (macro === 'jira' || macro === 'jiraissues') {
     const key = param(el, 'key');
-    return key ? `<span>[Jira: ${escapeHtml(key)}]</span>` : '';
+    return key ? literal(`[Jira: ${key.slice(0, 40)}]`) : '';
   }
   if (DROP_MACROS.has(macro)) return '';
   if (body) return kids(body, depth);
@@ -299,7 +312,7 @@ function render(n: Node, depth: number): string {
       const status = child(n, 'ac:task-status');
       const done = status ? plainText(status).trim() === 'complete' : false;
       const body = child(n, 'ac:task-body');
-      return `<li>${done ? '[x]' : '[ ]'} ${body ? kids(body, depth) : ''}</li>`;
+      return `<li>${literal(done ? '[x]' : '[ ]')} ${body ? unwrapParagraphs(kids(body, depth)) : ''}</li>`;
     }
     case 'ac:task-status':
     case 'ac:task-id':
@@ -326,13 +339,27 @@ function render(n: Node, depth: number): string {
         .filter((k) => /^\d{1,3}$/.test(n.attrs[k] ?? ''))
         .map((k) => ` ${k}="${n.attrs[k]}"`)
         .join('');
-      return `<${name}${span}>${kids(n, depth)}</${name}>`;
+      return `<${name}${span}>${unwrapParagraphs(kids(n, depth))}</${name}>`;
     }
+    case 'li':
+      return `<li>${unwrapParagraphs(kids(n, depth))}</li>`;
     case 'code':
     case 'pre': {
       const cls = /^language-[a-z0-9+#-]{1,24}$/i.test(n.attrs['class'] ?? '') ? ` class="${n.attrs['class']}"` : '';
       return `<${name}${cls}>${kids(n, depth)}</${name}>`;
     }
+    case 'script':
+    case 'style':
+    case 'noscript':
+    case 'iframe':
+    case 'object':
+    case 'embed':
+    case 'template':
+    case 'svg':
+    case 'canvas':
+    case 'form':
+    case 'button':
+      return '';
     default:
       if (KEEP.has(name)) return VOID.has(name) ? `<${name}>` : `<${name}>${kids(n, depth)}</${name}>`;
       // ac:layout, ac:layout-section, ac:layout-cell, ac:rich-text-body … and unknown HTML: their children.
@@ -340,14 +367,34 @@ function render(n: Node, depth: number): string {
   }
 }
 
+/**
+ * Confluence wraps a table cell's or a list item's text in <p>: turndown would then break the cell
+ * (or space the list) across lines. The paragraphs WE rendered become plain runs, joined by a space.
+ */
+function unwrapParagraphs(html: string): string {
+  return html.replace(/<\/p>\s*<p>/g, ' ').replace(/^\s*<p>/, '').replace(/<\/p>\s*$/, '').replace(/<\/?p>/g, ' ');
+}
+
+function renderWithLiterals(storage: string): { html: string; lits: string[] } {
+  literals = [];
+  try {
+    const html = render(parseStorage(storage), 0);
+    return { html, lits: literals };
+  } finally {
+    literals = [];
+  }
+}
+
 /** Storage XHTML → plain HTML (pure). */
 export function storageToHtml(storage: string): string {
-  return render(parseStorage(storage), 0);
+  const { html, lits } = renderWithLiterals(storage);
+  return html.replace(SENTINEL, (_m, i: string) => escapeHtml(lits[Number(i)] ?? ''));
 }
 
 /** Storage XHTML → markdown, through the library's turndown pipeline. */
 export async function storageToMarkdown(storage: string): Promise<string> {
-  const html = storageToHtml(storage);
+  const { html, lits } = renderWithLiterals(storage);
   if (html.trim() === '') return '';
-  return htmlToMarkdown(`<article>${html}</article>`);
+  const md = await htmlToMarkdown(`<article>${html}</article>`);
+  return md.replace(SENTINEL, (_m, i: string) => lits[Number(i)] ?? '');
 }

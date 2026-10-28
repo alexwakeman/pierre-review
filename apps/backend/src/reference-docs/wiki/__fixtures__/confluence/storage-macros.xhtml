@@ -1,0 +1,27 @@
+<h1>Payments service</h1>
+<p>The payments service settles card payments. See <ac:link><ri:page ri:content-title="Refund policy" /><ac:plain-text-link-body><![CDATA[the refund policy]]></ac:plain-text-link-body></ac:link> and <a href="https://example.com/spec">the spec</a> or <a href="/wiki/spaces/ENG/pages/9">a wiki path</a>.</p>
+<ac:structured-macro ac:name="toc" ac:schema-version="1" ac:macro-id="1"><ac:parameter ac:name="maxLevel">3</ac:parameter></ac:structured-macro>
+<h2>Settlement</h2>
+<ac:structured-macro ac:name="info" ac:schema-version="1"><ac:parameter ac:name="title">Cut-off</ac:parameter><ac:rich-text-body><p>Payments after 17:00 UTC settle the next working day.</p></ac:rich-text-body></ac:structured-macro>
+<ac:structured-macro ac:name="warning" ac:schema-version="1"><ac:rich-text-body><p>Never retry a declined card more than twice.</p></ac:rich-text-body></ac:structured-macro>
+<ac:structured-macro ac:name="code" ac:schema-version="1"><ac:parameter ac:name="language">typescript</ac:parameter><ac:parameter ac:name="title">settle.ts</ac:parameter><ac:plain-text-body><![CDATA[if (amount < 0 && x > 1) {
+  throw new Error("<negative>");
+}]]></ac:plain-text-body></ac:structured-macro>
+<table><tbody><tr><th><p>Currency</p></th><th><p>Fee</p></th></tr><tr><td><p>GBP</p></td><td><p>1.2%</p></td></tr><tr><td colspan="1" style="color:red"><p>EUR</p></td><td><p>1.4%</p></td></tr></tbody></table>
+<ac:structured-macro ac:name="expand" ac:schema-version="1"><ac:parameter ac:name="title">Edge cases</ac:parameter><ac:rich-text-body><ul><li><p>Chargebacks reverse the settlement.</p></li><li><p>Partial captures settle once.</p></li></ul></ac:rich-text-body></ac:structured-macro>
+<h2>Diagrams</h2>
+<ac:structured-macro ac:name="drawio" ac:schema-version="1"><ac:parameter ac:name="diagramName">settlement-flow</ac:parameter><ac:parameter ac:name="width">600</ac:parameter></ac:structured-macro>
+<ac:structured-macro ac:name="gliffy" ac:schema-version="1"><ac:parameter ac:name="name">Ledger states</ac:parameter></ac:structured-macro>
+<ac:structured-macro ac:name="mermaid-cloud" ac:schema-version="1"><ac:plain-text-body><![CDATA[graph TD
+  A[Authorised] --> B[Captured]
+  B --> C[Settled]]]></ac:plain-text-body></ac:structured-macro>
+<ac:structured-macro ac:name="mermaid-cloud" ac:schema-version="1"><ac:parameter ac:name="filename">old-flow</ac:parameter></ac:structured-macro>
+<p><ac:image ac:alt="Settlement timeline"><ri:attachment ri:filename="timeline.png" /></ac:image> <ac:image><ri:attachment ri:filename="fees.png" /></ac:image></p>
+<ac:task-list><ac:task><ac:task-id>1</ac:task-id><ac:task-status>complete</ac:task-status><ac:task-body>Add GBP</ac:task-body></ac:task><ac:task><ac:task-id>2</ac:task-id><ac:task-status>incomplete</ac:task-status><ac:task-body>Add JPY</ac:task-body></ac:task></ac:task-list>
+<p>Status: <ac:structured-macro ac:name="status" ac:schema-version="1"><ac:parameter ac:name="title">In progress</ac:parameter><ac:parameter ac:name="colour">Yellow</ac:parameter></ac:structured-macro> Ticket: <ac:structured-macro ac:name="jira" ac:schema-version="1"><ac:parameter ac:name="key">PAY-12</ac:parameter></ac:structured-macro></p>
+<ac:layout><ac:layout-section ac:type="two_equal"><ac:layout-cell><p>Left cell text.</p></ac:layout-cell><ac:layout-cell><p>Right cell text.</p></ac:layout-cell></ac:layout-section></ac:layout>
+<ac:adf-extension><ac:adf-node type="panel"><ac:adf-attribute key="panel-type">note</ac:adf-attribute><ac:adf-content><p>New-editor panel body.</p></ac:adf-content></ac:adf-node><ac:adf-fallback><div><p>Fallback should not appear.</p></div></ac:adf-fallback></ac:adf-extension>
+<p>Owner: <ac:link><ri:user ri:account-id="abc123" /></ac:link> <ac:emoticon ac:name="tick" ac:emoji-fallback="✅" /> &amp; done&nbsp;today.</p>
+<ac:structured-macro ac:name="unknown-thing"><ac:rich-text-body><p>Kept body of an unknown macro.</p></ac:rich-text-body></ac:structured-macro>
+<ac:structured-macro ac:name="children" />
+<script>alert(1)</script>

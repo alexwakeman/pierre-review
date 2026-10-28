@@ -1,0 +1,15 @@
+{
+  "results": [
+    {
+      "id": "1003",
+      "type": "page",
+      "status": "current",
+      "title": "Refunds",
+      "version": { "by": { "type": "known", "accountId": "557058:bbbb" }, "when": "2026-10-27T08:00:00.000Z", "number": 7, "minorEdit": false }
+    }
+  ],
+  "start": 0,
+  "limit": 100,
+  "size": 1,
+  "_links": { "base": "https://acme.atlassian.net/wiki", "context": "/wiki" }
+}
