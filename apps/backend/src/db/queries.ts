@@ -9776,6 +9776,7 @@ export async function getUnactionedClaudeReviews(
       reviewHead: claudeReviews.headSha,
       prHead: pullRequests.headSha,
       trigger: claudeReviews.trigger,
+      pairId: claudeReviews.pairId,
     })
     .from(claudeReviews)
     .innerJoin(pullRequests, eq(pullRequests.id, claudeReviews.prId))
@@ -9795,13 +9796,37 @@ export async function getUnactionedClaudeReviews(
 
   const seen = new Set<number>(); // most-recent succeeded run per PR only
   const candidates: typeof rows = [];
+  // A CLAUDE + CODEX PAIR is ONE review (review/claude-review/pair-view.ts): its succeeded halves
+  // are read together — posted when either was posted as a review, its findings both halves' (a
+  // merged-away duplicate never counts), its verdict the pair's one verdict.
+  const halvesOf = new Map<number, typeof rows>();
+  for (const r of rows) {
+    if (r.pairId == null) continue;
+    const list = halvesOf.get(r.pairId) ?? [];
+    list.push(r);
+    halvesOf.set(r.pairId, list);
+  }
   for (const r of rows) {
     if (seen.has(r.prId)) continue;
     seen.add(r.prId);
-    if (r.postedAt != null) continue; // the run itself was posted → actioned, no findings needed
+    const halves = r.pairId != null ? (halvesOf.get(r.pairId) ?? [r]) : [r];
+    if (halves.some((h) => h.postedAt != null)) continue; // the run itself was posted → actioned, no findings needed
     candidates.push(r);
   }
   if (candidates.length === 0) return [];
+  const runIdsOf = (c: (typeof rows)[number]): number[] =>
+    c.pairId != null ? (halvesOf.get(c.pairId) ?? [c]).map((h) => h.reviewId) : [c.reviewId];
+  // The pairs' one verdicts (on each pair's FIRST row), in ONE read.
+  const pairIds = [...new Set(candidates.map((c) => c.pairId).filter((id): id is number => id != null))];
+  const pairVerdicts = new Map<number, (typeof rows)[number]['verdict']>();
+  if (pairIds.length > 0) {
+    const recs = await db
+      .select({ id: claudeReviews.id, rec: claudeReviews.pairConsolidation })
+      .from(claudeReviews)
+      .where(inArray(claudeReviews.id, pairIds))
+      .execute();
+    for (const p of recs) pairVerdicts.set(p.id, p.rec?.verdict ?? null);
+  }
 
   // ONE grouped read over the candidate runs — never one query per run, and never a per-run
   // EXISTS in the select above, which would run the sub-query for every historical run of every
@@ -9815,9 +9840,12 @@ export async function getUnactionedClaudeReviews(
     })
     .from(claudeReviewFindings)
     .where(
-      inArray(
-        claudeReviewFindings.reviewId,
-        candidates.map((c) => c.reviewId),
+      and(
+        inArray(
+          claudeReviewFindings.reviewId,
+          candidates.flatMap(runIdsOf),
+        ),
+        isNull(claudeReviewFindings.mergedInto),
       ),
     )
     .execute();
@@ -9830,7 +9858,7 @@ export async function getUnactionedClaudeReviews(
 
   const out: ClaudeReviewToAction[] = [];
   for (const r of candidates) {
-    const findings = findingsByRun.get(r.reviewId) ?? [];
+    const findings = runIdsOf(r).flatMap((id) => findingsByRun.get(id) ?? []);
     // STATE ONE: nothing from this run has reached GitHub. It was never worked, so it stays —
     // including a run with no findings at all, whose summary and verdict are still yours to post
     // or discard. ⚠ This branch is what keeps a fresh run visible: `included` defaults to false,
@@ -9852,7 +9880,7 @@ export async function getUnactionedClaudeReviews(
       repoFullName: `${r.owner}/${r.name}`,
       prNumber: r.prNumber,
       prTitle: r.prTitle,
-      verdict: r.verdict,
+      verdict: r.pairId != null ? (pairVerdicts.get(r.pairId) ?? r.verdict) : r.verdict,
       finishedAt: iso(r.finishedAt),
       headStale: r.reviewHead !== r.prHead,
       githubUrl: `https://github.com/${r.owner}/${r.name}/pull/${r.prNumber}`,

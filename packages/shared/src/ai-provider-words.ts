@@ -1,5 +1,5 @@
-import { AUTO_POST_FOOTER, type AiProviderId } from './types.js';
-import { aiProviderName, aiRunProvider, type AiProviderName } from './ai-run-label.js';
+import { AUTO_POST_FOOTER, type AiProviderId, type ClaudeFindingSource } from './types.js';
+import { aiProviderName, aiRunLabel, aiRunProvider, type AiProviderName } from './ai-run-label.js';
 
 /**
  * The visible last line of an auto-posted body, naming the provider that RAN the run. Claude's is
@@ -12,6 +12,29 @@ export function autoPostFooter(by: AiProviderName | null | undefined = 'Claude')
 
 /** The body footer of a Claude + Codex pair's ONE automatic review (docs/CLAUDE-REVIEW.md § Claude + Codex). */
 export const PAIR_AUTO_POST_FOOTER = '_Posted automatically by Limn’s Claude and Codex reviews._';
+
+// ---- CLAUDE + CODEX: ONE REVIEW BY BOTH (docs/CLAUDE-REVIEW.md § Claude + Codex) ----
+
+/** A Claude + Codex pair's name — the picker entry, the review's header, the history option. */
+export const PAIR_RUN_LABEL = 'Claude + Codex';
+
+/** Who raised a finding in a pair's one review: "Claude", "Codex" or "Claude + Codex". */
+export function findingSourceLabel(source: ClaudeFindingSource): string {
+  if (source === 'both') return PAIR_RUN_LABEL;
+  return aiProviderName(source);
+}
+
+/** The models that ran a pair, first half then second: "Claude Opus 5.5 + Codex · GPT-6.1 Sol". */
+export function pairModelsLabel(
+  halves: ReadonlyArray<{ provider?: string | null; model?: string | null; effort?: string | null }>,
+): string {
+  return halves.map((h) => aiRunLabel(h.provider, h.model, h.effort)).join(' + ');
+}
+
+/** The one line under a pair's header when a half did not finish: "Codex didn't finish: <reason>". */
+export function pairHalfFailedLine(failed: { provider: AiProviderId; reason: string }): string {
+  return `${aiProviderName(failed.provider)} didn't finish: ${failed.reason}`;
+}
 
 /** Every footer a Limn auto post may carry — what "was this posted automatically?" looks for. */
 export const AUTO_POST_FOOTERS: readonly string[] = [AUTO_POST_FOOTER, autoPostFooter('Codex'), PAIR_AUTO_POST_FOOTER];

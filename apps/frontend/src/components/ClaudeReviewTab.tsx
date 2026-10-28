@@ -24,12 +24,16 @@ import {
   aiRunProvider,
   CLAUDE_FINDING_LENS_LABELS,
   DEFAULT_CLAUDE_REVIEW_MODEL,
+  findingSourceLabel,
   followUpSentence,
+  PAIR_RUN_LABEL,
+  pairHalfFailedLine,
+  pairModelsLabel,
 } from '@pierre-review/shared';
 import { formatDate, relativeTime, safeExternalUrl } from '../lib/ui.js';
 import { useRunCostText } from '../hooks/useAiBudget.js';
 import { useReviewModelPick } from '../hooks/useModelPick.js';
-import { canPostBoth, nextShownReviewId } from '../lib/reviewHistory.js';
+import { historyOptionIdFor, nextShownReviewId, reviewHistoryOptions } from '../lib/reviewHistory.js';
 import { pairRunningLabel } from '../lib/modelPick.js';
 import {
   autoLiftLine,
@@ -109,7 +113,7 @@ import { useTicketReviews } from '../hooks/useTicketReview.js';
 import { useCiReview } from '../hooks/useCiReview.js';
 import { useClaudeReviewChat } from '../hooks/useClaudeReviewChat.js';
 import { legacyOnlyEntries } from '../lib/ticketStory.js';
-import { reviewCurrency, visibleReviewBody, type ReviewCurrency } from '../lib/claudeReviewColumn.js';
+import { reviewCurrency, reviewRunWhen, visibleReviewBody, type ReviewCurrency } from '../lib/claudeReviewColumn.js';
 import {
   ALREADY_POSTED_CHIP,
   RERAISED_CHIP,
@@ -176,12 +180,35 @@ const SEVERITY_ORDER: ClaudeFindingSeverity[] = [
 // "abc1234 · Claude Opus 5.5 · US$0.42" on an API key, "… · 0.3% of your week" on a Claude
 // subscription, "abc1234 · Codex · GPT-6.1 Sol" for a Codex run (`aiRunLabel`, the ONE run label;
 // `costText`, the ONE run-cost wording — judged by the run's own provider).
+/** Who wrote a review: its provider ("Claude" / "Codex"), or "Claude + Codex" for a pair's ONE review. */
+function reviewByName(review: Pick<ClaudeReview, 'provider' | 'model' | 'pair'>): string {
+  return review.pair != null ? PAIR_RUN_LABEL : aiRunProviderName(review);
+}
+
+// How a Claude + Codex pair became one review — behind the header's ⓘ only, never narrated.
+const PAIR_HOW_TEXT: Record<NonNullable<NonNullable<ClaudeReview['pair']>['how']>, string> = {
+  pass: 'Claude and Codex each reviewed this commit. A quick pass merged the two: findings making the same point were kept once, and the verdict was worked out from what is left.',
+  code: 'Claude and Codex each reviewed this commit. Their findings are listed together and their summaries joined.',
+  single: 'Only one of the two reviews finished, so this is that review.',
+};
+
 function metaLine(
   review: ClaudeReview,
   costText: (usd: number | null | undefined, provider?: AiProviderId | null) => string | null,
 ): string {
   // A skipped run (nothing substantive to review) ran no model: it names none.
   const parts: string[] = [shortSha(review.headSha)];
+  // A Claude + Codex pair: both models, and each half's cost in its own provider's terms (US$ on an
+  // API key, a share of the week on a subscription — never summed across the two).
+  const halves = review.pair?.halves;
+  if (halves != null && halves.length > 0) {
+    parts.push(pairModelsLabel(halves));
+    for (const h of halves) {
+      const c = costText(h.costUsd, h.provider);
+      if (c != null) parts.push(`${aiProviderName(h.provider)} ${c}`);
+    }
+    return parts.join(' · ');
+  }
   if (review.reviewMode !== 'skip') parts.push(aiRunLabel(review.provider, review.model, review.effort));
   const cost = costText(review.costUsd, aiRunProvider(review.provider, review.model));
   if (cost != null) parts.push(cost);
@@ -218,6 +245,8 @@ const PHASE_LABEL: Record<string, string> = {
   deciding: 'Deciding scope',
   reviewing: 'Reviewing',
   persisting: 'Saving findings',
+  // A Claude + Codex pair's end (docs/CLAUDE-REVIEW.md § Claude + Codex → One review).
+  merging: 'Merging the two reviews…',
 };
 
 // Map the live run status to a determinate 0–100 reading for the progress bar. The
@@ -869,6 +898,15 @@ export function FindingRow({
                 {CLAUDE_FINDING_LENS_LABELS[finding.lens]}
               </span>
             )}
+            {/* A Claude + Codex pair's finding: who raised it, quietly (one neutral chip). */}
+            {finding.source != null && (
+              <span
+                className="rounded bg-gray-500/10 px-1.5 py-0.5 text-[11px] text-gray-600 dark:text-gray-300"
+                data-finding-source={finding.source}
+              >
+                {findingSourceLabel(finding.source)}
+              </span>
+            )}
             {storyLabel != null && (
               <span className="rounded bg-sky-500/10 px-1.5 py-0.5 text-[11px] text-sky-700 dark:text-sky-300">
                 {storyLabel}
@@ -1214,7 +1252,7 @@ export function FindingRow({
 // Section A: Claude's read-only output (verdict, meta, summary, findings). Used
 // for both the latest run and a selected past run; `editable` gates the per-finding
 // actions — Reword / Ignore / post (only the latest run can be edited).
-function ClaudesReview({
+export function ClaudesReview({
   review: storedReview,
   editable,
   prUrl,
@@ -1265,6 +1303,13 @@ function ClaudesReview({
   ciCheck: ReactNode;
 }): JSX.Element {
   const costText = useRunCostText();
+  // WHO WROTE IT: the provider that ran the run — or, for a Claude + Codex pair (the server's ONE
+  // consolidated review), "Claude + Codex", each finding naming its own source.
+  const by = reviewByName(storedReview);
+  const halfProvider = useMemo(
+    () => new Map((storedReview.pair?.halves ?? []).map((h) => [h.reviewId, h.provider] as const)),
+    [storedReview.pair?.halves],
+  );
   // Praise is not a finding: an older run's stored praise is hidden everywhere below (counts,
   // list, follow-up), nothing deleted. The summary carries the one praise line now.
   const review = useMemo(() => withoutPraise(storedReview), [storedReview]);
@@ -1310,7 +1355,8 @@ function ClaudesReview({
   // is the chip naming the story item (null for an ordinary finding).
   const findingCard = (f: ClaudeFinding, storyLabel: string | null): JSX.Element => (
     <FindingRow
-      authorName={aiRunProviderName(storedReview)}
+      // A pair's finding: its own text is the half's that raised it.
+      authorName={halfProvider.has(f.reviewId) ? aiProviderName(halfProvider.get(f.reviewId)) : aiRunProviderName(storedReview)}
       key={f.id}
       prId={review.prId}
       finding={f}
@@ -1340,7 +1386,7 @@ function ClaudesReview({
   return (
     <>
       <ReviewSection
-        title={`${aiRunProviderName(storedReview)}'s review`}
+        title={storedReview.pair != null ? `${by} review` : `${by}'s review`}
         pills={
           <>
             {/* The outcome leads; everything after it is about the run. */}
@@ -1370,8 +1416,9 @@ function ClaudesReview({
           </>
         }
         info={
-          <InfoButton title="This run">
+          <InfoButton title={storedReview.pair != null ? 'This review' : 'This run'}>
             <div className="space-y-2">
+              {storedReview.pair?.how != null && <p>{PAIR_HOW_TEXT[storedReview.pair.how]}</p>}
               <UsageBreakdown review={review} />
               {review.numTurns != null && <p>{review.numTurns} turns.</p>}
               {review.diffCapped && (
@@ -1388,6 +1435,12 @@ function ClaudesReview({
         }
       >
         <div className="text-xs text-gray-500 dark:text-gray-400">{metaLine(review, costText)}</div>
+        {/* A pair whose other half did not finish: one plain line. */}
+        {review.pair?.failedHalf != null && (
+          <div className="text-xs text-gray-600 dark:text-gray-300" data-pair-failed-half>
+            {pairHalfFailedLine(review.pair.failedHalf)}
+          </div>
+        )}
         {review.alsoRead != null && review.alsoRead.length > 0 && (
           <div className="text-xs text-gray-500 dark:text-gray-400">
             Also read: {review.alsoRead.map(reviewPeerReadLabel).join(', ')}
@@ -1405,7 +1458,7 @@ function ClaudesReview({
           onOpenInChanges={onOpenInChanges}
           prId={review.prId}
           reviewId={review.id}
-          by={aiRunProviderName(storedReview)}
+          by={by}
         />
       )}
       <ClaudeReviewThreadsSection
@@ -1415,7 +1468,7 @@ function ClaudesReview({
         actions={checkThreadsPrId != null ? <CheckThreadsButton prId={checkThreadsPrId} /> : undefined}
         // A later Check threads run may have judged them (its own provider): name this run's only
         // when its own assessments show.
-        by={currentThreads == null ? aiRunProviderName(storedReview) : undefined}
+        by={currentThreads == null ? by : undefined}
       />
       <ReviewSection
         title="Findings"
@@ -1462,7 +1515,7 @@ function ClaudesReview({
       />
       {/* The reference-library passages this run used (docs/REFERENCE-DOCS.md § Use in reviews).
           Absent when the run did not read the library. */}
-      <DocReferencesSection references={review.docReferences} by={aiRunProviderName(storedReview)} />
+      <DocReferencesSection references={review.docReferences} by={by} />
       {/* How this change is built (+ the whole story's, on a multi-PR ticket) — a separate Sonnet run
           after each review (docs/CLAUDE-REVIEW.md § Design diagrams). Absent without agentic AI. */}
       <ClaudeReviewDiagramsSection
@@ -1694,8 +1747,6 @@ export function ClaudeReviewTab({
   const [preview, setPreview] = useState<PostReviewPreview | null>(null);
   const [postResult, setPostResult] = useState<PostReviewResult | null>(null);
   const [confirmPost, setConfirmPost] = useState(false);
-  // The confirm is for "Post both" (a Claude + Codex pair's two runs as ONE review), not Post.
-  const [postBoth, setPostBoth] = useState(false);
 
   const generate = useGenerateReview(pr.id);
   // A start in flight from ANY surface (this tab or the Open PRs table) — one shared mutation key.
@@ -1760,10 +1811,13 @@ export function ClaudeReviewTab({
   // Which run is shown in Section A: the latest unless the user picked an older
   // one from history. Both are hooks, so they MUST run unconditionally — before
   // any early return below (React's Rules of Hooks).
+  // A Claude + Codex pair is ONE review: either half's id is the pair's (the select's option).
+  const historyOptions = reviewHistoryOptions(data?.history ?? [], review?.id ?? null, reviewRunWhen);
+  const shownOptionId = historyOptionIdFor(historyOptions, selectedReviewId);
   const viewingLatest =
-    selectedReviewId == null || selectedReviewId === review?.id;
+    shownOptionId == null || shownOptionId === review?.id;
   const { data: historicReview } = useClaudeReviewById(
-    viewingLatest ? null : selectedReviewId,
+    viewingLatest ? null : shownOptionId,
   );
 
   if (isLoading) {
@@ -1811,11 +1865,9 @@ export function ClaudeReviewTab({
     ? review
     : historicReview ?? null;
 
-  // Editing + posting are only enabled for the latest run — and, for a Claude + Codex pair, its
-  // first half's findings may be posted one by one too (the summary and Post review stay the latest's).
+  // Editing + posting are only enabled for the latest review (a Claude + Codex pair is ONE review,
+  // addressed by its latest half — the server's consolidated view).
   const canEdit = viewingLatest && review != null;
-  const shownIsPairPartner =
-    !viewingLatest && selectedReviewId != null && review?.pair?.otherReviewId === selectedReviewId;
 
   const phase = status?.progress?.phase ?? null;
   // The live estimate, worded like every run cost: US$ on an API key, the share of the week on a
@@ -1839,14 +1891,14 @@ export function ClaudeReviewTab({
     });
   };
 
-  // `pair`: preview exactly what "Post both" sends (both halves, one combined body).
-  const runPreview = (pair = false): void => {
+  // A Claude + Codex pair is ONE review: Preview and Post send its consolidated findings.
+  const runPreview = (): void => {
     if (review == null) return;
     setPostResult(null);
     setPreview(null);
     saveDraftThen(() =>
       postReview.mutate(
-        { reviewId: review.id, userVerdict, dryRun: true, ...(pair ? { pair: true } : {}) },
+        { reviewId: review.id, userVerdict, dryRun: true },
         { onSuccess: (res) => setPreview(res as PostReviewPreview) },
       ),
     );
@@ -1855,17 +1907,13 @@ export function ClaudeReviewTab({
   const runPost = (): void => {
     if (review == null) return;
     setConfirmPost(false);
-    const pair = postBoth;
-    setPostBoth(false);
     saveDraftThen(() =>
       postReview.mutate(
-        { reviewId: review.id, userVerdict, ...(pair ? { pair: true } : {}) },
+        { reviewId: review.id, userVerdict },
         { onSuccess: (res) => setPostResult(res as PostReviewResult) },
       ),
     );
   };
-  // "Post both": the latest run is a pair's second half and both halves finished.
-  const offerPostBoth = canPostBoth(review, data?.history ?? []);
 
   return (
     <ReviewTabPrRefs pr={pr} review={shownReview}>
@@ -1954,7 +2002,7 @@ export function ClaudeReviewTab({
       <div className="empty:hidden">
         <RegenProgressBar
           active={isRunning}
-          label={pairRunningLabel(aiProviderName(liveProvider), status?.pair?.role ?? null)}
+          label={pairRunningLabel(aiProviderName(liveProvider), status?.pair?.role ?? null, phase)}
           value={reviewProgressPct(status)}
           timeConstantSec={30}
         />
@@ -2076,11 +2124,12 @@ export function ClaudeReviewTab({
         />
       )}
 
-      {/* EVERY run on the PR, always listed (all providers, all heads, newest first). */}
-      {data != null && data.history.length > 0 && (
+      {/* EVERY review of the PR, one option each, in a drop-down (all providers, all heads, newest
+          first; a Claude + Codex pair is one option). */}
+      {data != null && data.history.length > 1 && (
         <ReviewHistoryList
           history={data.history}
-          shownId={selectedReviewId ?? review?.id ?? null}
+          shownId={shownOptionId ?? review?.id ?? null}
           latestId={review?.id ?? null}
           onShow={(id) => {
             setSelectedReviewId(id);
@@ -2095,7 +2144,7 @@ export function ClaudeReviewTab({
       {shownReview != null && shownReview.status === 'succeeded' && (
         <ClaudesReview
           review={shownReview}
-          editable={canEdit || shownIsPairPartner}
+          editable={canEdit}
           // The thread judgements AS THEY STAND (later Check threads runs folded over the latest
           // review) — only for the latest run; a past run shows what it said then.
           currentThreads={
@@ -2241,55 +2290,25 @@ export function ClaudeReviewTab({
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
-              onClick={() => runPreview()}
+              onClick={runPreview}
               disabled={postReview.isPending}
               className="rounded border border-gray-300 px-2 py-0.5 text-sm hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
             >
               Preview
             </button>
-            {offerPostBoth && (
+            {!confirmPost ? (
               <button
                 type="button"
-                onClick={() => runPreview(true)}
+                onClick={() => setConfirmPost(true)}
                 disabled={postReview.isPending}
-                title="What Post both sends"
-                className="rounded border border-gray-300 px-2 py-0.5 text-sm hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
+                className="rounded border border-blue-400 px-2 py-0.5 text-sm text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:border-blue-600 dark:text-blue-400 dark:hover:bg-blue-900/30"
               >
-                Preview both
+                Post to GitHub
               </button>
-            )}
-            {!confirmPost ? (
-              <>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setPostBoth(false);
-                    setConfirmPost(true);
-                  }}
-                  disabled={postReview.isPending}
-                  className="rounded border border-blue-400 px-2 py-0.5 text-sm text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:border-blue-600 dark:text-blue-400 dark:hover:bg-blue-900/30"
-                >
-                  Post to GitHub
-                </button>
-                {offerPostBoth && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setPostBoth(true);
-                      setConfirmPost(true);
-                    }}
-                    disabled={postReview.isPending}
-                    title="One review with both runs' findings"
-                    className="rounded border border-blue-400 px-2 py-0.5 text-sm text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:border-blue-600 dark:text-blue-400 dark:hover:bg-blue-900/30"
-                  >
-                    Post both
-                  </button>
-                )}
-              </>
             ) : (
               <span className="inline-flex items-center gap-2">
                 <span className="text-xs text-gray-500 dark:text-gray-400">
-                  {postBoth ? 'Post both' : 'Post'} as <strong>{VERDICT_LABEL[userVerdict]}</strong>?
+                  Post as <strong>{VERDICT_LABEL[userVerdict]}</strong>?
                 </span>
                 <button
                   type="button"
@@ -2301,10 +2320,7 @@ export function ClaudeReviewTab({
                 </button>
                 <button
                   type="button"
-                  onClick={() => {
-                    setConfirmPost(false);
-                    setPostBoth(false);
-                  }}
+                  onClick={() => setConfirmPost(false)}
                   className="rounded border border-gray-300 px-2 py-0.5 text-xs hover:border-gray-400 dark:border-gray-700 dark:hover:border-gray-500"
                 >
                   Cancel

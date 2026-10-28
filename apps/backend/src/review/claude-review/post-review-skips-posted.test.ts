@@ -38,7 +38,8 @@ vi.mock('./persist.js', async (orig) => ({
     prNumber: 3,
     reviewHeadSha: 'abc',
   }),
-  getClaudeReviewById: async () => ({
+  // The post route reads the run as the reader sees it (`getReviewView`; an ordinary run as stored).
+  getReviewView: async () => ({
     id: 5,
     userBody: '',
     findings: [

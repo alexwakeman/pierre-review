@@ -5,6 +5,9 @@
 // exception, a run the reader just started (a MANUAL run that became the latest while the pane was
 // open), which becomes the shown run so its progress and result are what the pane is about.
 import type { ClaudeReviewStatus, ClaudeReviewSummary, ClaudeReviewTrigger } from '@pierre-review/shared';
+import { aiRunLabel, PAIR_RUN_LABEL } from '@pierre-review/shared';
+import { AUTO_REVIEW_LABEL as AUTO_WORD } from '../components/Activity/pendingLabels.js';
+import { REPLIES_CHECK_LABEL as REPLIES_WORD } from './repliesCheck.js';
 
 /** The latest run, as the selection rule reads it. */
 export interface LatestRun {
@@ -64,51 +67,74 @@ export function findingCountText(h: Pick<ClaudeReviewSummary, 'status' | 'findin
   return `${h.findingCount} finding${h.findingCount === 1 ? '' : 's'}`;
 }
 
-// ---- CLAUDE + CODEX PAIRS (docs/CLAUDE-REVIEW.md § Claude + Codex) ----
+// ---- THE HISTORY SELECT (docs/FRONTEND.md § The AI Review tab's history) ----
+//
+// ONE OPTION PER REVIEW, newest first, every review listed (all providers, all heads): a CLAUDE + CODEX
+// PAIR is ONE option ("Claude + Codex · abc1234 · <when>") addressed by its LATEST half's id (the id
+// the server's consolidated view answers with); a replies pass is "Replies checked · …"; an ordinary
+// run is its run label (`aiRunLabel`).
 
-/** One entry of the history list: a run on its own, or a pair's two halves under one header. */
-export type ReviewHistoryEntry<H> =
-  | { kind: 'run'; run: H }
-  | { kind: 'pair'; pairId: number; first: H | null; second: H | null };
+/** One option of the history select. `runIds`: the stored runs it stands for (a pair: both halves). */
+export interface ReviewHistoryOption {
+  id: number;
+  label: string;
+  runIds: number[];
+}
+
+const shortHead = (sha: string | null | undefined): string => (sha ? sha.slice(0, 7) : '—');
+
+/** A pair's halves as one status: in flight while either is; else succeeded when either did. */
+function pairStatus(halves: readonly Pick<ClaudeReviewSummary, 'status'>[]): ClaudeReviewStatus {
+  if (halves.some((h) => inFlight(h.status))) return halves.every((h) => h.status === 'queued') ? 'queued' : 'running';
+  if (halves.some((h) => h.status === 'succeeded')) return 'succeeded';
+  return halves[0]?.status ?? 'failed';
+}
 
 /**
- * Group the history (newest first) so a pair's two runs sit together, first half then second, at the
- * place of its newest half. Every run is still listed exactly once.
+ * The history select's options, newest first. `latestId` marks the latest review "(latest)"; `when`
+ * formats a time (`reviewRunWhen`).
  */
-export function groupReviewHistory<H extends Pick<ClaudeReviewSummary, 'id' | 'pair'>>(
-  history: readonly H[],
-): ReviewHistoryEntry<H>[] {
-  const out: ReviewHistoryEntry<H>[] = [];
-  const pairs = new Map<number, Extract<ReviewHistoryEntry<H>, { kind: 'pair' }>>();
+export function reviewHistoryOptions(
+  history: readonly ClaudeReviewSummary[],
+  latestId: number | null,
+  when: (iso: string) => string,
+): ReviewHistoryOption[] {
+  const out: ReviewHistoryOption[] = [];
+  const pairs = new Map<number, ClaudeReviewSummary[]>();
   for (const h of history) {
-    const p = h.pair;
-    if (p == null) {
-      out.push({ kind: 'run', run: h });
+    if (h.pair == null) continue;
+    const list = pairs.get(h.pair.pairId) ?? [];
+    list.push(h);
+    pairs.set(h.pair.pairId, list);
+  }
+  const done = new Set<number>();
+  for (const h of history) {
+    if (h.pair != null) {
+      if (done.has(h.pair.pairId)) continue;
+      done.add(h.pair.pairId);
+      // History is newest first: the first half seen is the latest, the option's id.
+      const halves = pairs.get(h.pair.pairId) ?? [h];
+      const latest = halves[0]!;
+      const status = pairStatus(halves);
+      const parts = [PAIR_RUN_LABEL, shortHead(latest.headSha), when(latest.finishedAt ?? latest.createdAt)];
+      if (status !== 'succeeded') parts.push(reviewStatusWord(status));
+      if (latest.trigger === 'auto') parts.push(AUTO_WORD);
+      const ids = halves.map((x) => x.id);
+      out.push({ id: latest.id, runIds: ids, label: parts.join(' · ') + (latestId != null && ids.includes(latestId) ? ' (latest)' : '') });
       continue;
     }
-    let entry = pairs.get(p.pairId);
-    if (!entry) {
-      entry = { kind: 'pair', pairId: p.pairId, first: null, second: null };
-      pairs.set(p.pairId, entry);
-      out.push(entry);
-    }
-    if (p.role === 'first') entry.first = h;
-    else entry.second = h;
+    const what =
+      h.kind === 'replies' ? REPLIES_WORD : h.reviewMode === 'skip' ? 'Skipped (nothing to review)' : aiRunLabel(h.provider, h.model, h.effort);
+    const parts = [what, shortHead(h.headSha), when(h.finishedAt ?? h.createdAt)];
+    if (h.status !== 'succeeded') parts.push(reviewStatusWord(h.status));
+    if (h.trigger === 'auto') parts.push(AUTO_WORD);
+    out.push({ id: h.id, runIds: [h.id], label: parts.join(' · ') + (h.id === latestId ? ' (latest)' : '') });
   }
   return out;
 }
 
-/**
- * "Post both" is offered on a pair's second half when both halves finished: the shown (latest) run is
- * the second, and its first half succeeded too.
- */
-export function canPostBoth(
-  review: Pick<ClaudeReviewSummary, 'status' | 'pair'> | null | undefined,
-  history: readonly Pick<ClaudeReviewSummary, 'id' | 'status'>[],
-): boolean {
-  const p = review?.pair;
-  if (review == null || p == null || p.role !== 'second' || review.status !== 'succeeded' || p.otherReviewId == null) {
-    return false;
-  }
-  return history.some((h) => h.id === p.otherReviewId && h.status === 'succeeded');
+/** The option standing for a run id (a pair's either half ⇒ the pair's option), or the id itself. */
+export function historyOptionIdFor(options: readonly ReviewHistoryOption[], id: number | null): number | null {
+  if (id == null) return null;
+  return options.find((o) => o.runIds.includes(id))?.id ?? id;
 }

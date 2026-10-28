@@ -15,6 +15,7 @@ import {
   type MeResponse,
 } from '@pierre-review/shared';
 import { aiProviderReadyFor, aiRunnableProviders } from './aiCapabilities.js';
+import { PAIR_RUN_LABEL } from '@pierre-review/shared';
 
 export interface ModelPickState {
   /** The options, the default provider's first. Never empty. */
@@ -31,8 +32,8 @@ export interface ModelPickState {
 
 /** The `<option>` value of "Claude + Codex" (docs/CLAUDE-REVIEW.md § Claude + Codex). */
 export const PAIR_PICK_VALUE = 'pair';
-/** Its label. */
-export const PAIR_PICK_LABEL = 'Claude + Codex';
+/** Its label — the pair's one name everywhere (shared `PAIR_RUN_LABEL`). */
+export const PAIR_PICK_LABEL = PAIR_RUN_LABEL;
 
 /**
  * Resolve the menu for a kind: `picked` is the reader's last choice (an option value) or null. The
@@ -93,11 +94,12 @@ export function followUpProviderOf(
 }
 
 /**
- * The progress line of a running review: "Running Claude review" — and for a pair's halves, which
- * half ("Running Claude review, then Codex" / "Running Codex review, after Claude").
+ * The progress line of a running review: "Running Claude review" — and for a Claude + Codex pair, the
+ * step it is on: "Claude reviewing…", then "Codex reviewing…", then "Merging the two reviews…" (the
+ * second half's `merging` phase, docs/CLAUDE-REVIEW.md § Claude + Codex → One review).
  */
-export function pairRunningLabel(running: string, role: 'first' | 'second' | null): string {
+export function pairRunningLabel(running: string, role: 'first' | 'second' | null, phase?: string | null): string {
   if (role == null) return `Running ${running} review`;
-  const other = running === 'Codex' ? 'Claude' : 'Codex';
-  return role === 'first' ? `Running ${running} review, then ${other}` : `Running ${running} review, after ${other}`;
+  if (phase === 'merging') return 'Merging the two reviews…';
+  return `${running} reviewing…`;
 }

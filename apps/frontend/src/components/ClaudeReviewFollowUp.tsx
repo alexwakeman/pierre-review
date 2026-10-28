@@ -31,7 +31,6 @@ import {
   ticketCriteriaSentence,
 } from '@pierre-review/shared';
 import type {
-  AiProviderName,
   ClaudeFinding,
   ClaudeFindingSeverity,
   ClaudeFindingSide,
@@ -1278,7 +1277,7 @@ export function FollowUpRow({
   // false ⇒ no buttons. Default true.
   actions?: boolean;
   // The provider that ran the review (absent ⇒ Claude).
-  by?: AiProviderName;
+  by?: string;
   // A leading control in the card's header (the fix picker's tick box).
   selection?: ReactNode;
 }): JSX.Element {
@@ -1420,7 +1419,7 @@ export function ClaudeReviewFollowUpSection({
   prId?: number;
   reviewId?: number;
   // The provider that ran this review (`aiRunProviderName(review)`); absent ⇒ Claude.
-  by?: AiProviderName;
+  by?: string;
 }): JSX.Element | null {
   const [closedOpen, setClosedOpen] = useState(false);
   const findingsById = useMemo(() => new Map(findings.map((f) => [f.id, f])), [findings]);

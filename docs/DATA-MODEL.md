@@ -650,6 +650,17 @@ post is recorded on the second half's `auto_post`, the first's carrying `viaPair
 `'both'` = a pair (`resolveAutoReviewProviders`, `review/claude-review/pair.ts`; one writer,
 `setWorkspaceAutoReview`).
 
+THE PAIR'S ONE REVIEW (migration `0137`; [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Claude + Codex → One
+review): `claude_reviews.pair_consolidation` on the pair's FIRST row only, written ONCE when the pair
+ends (`savePairConsolidation`, one transaction with the marks below) — `ClaudeReviewPairConsolidation
+{how ('pass'|'code'|'single'), summary, verdict (code-computed), sourceOf (kept finding id → 'claude' |
+'codex' | 'both'), mergedFrom (dropped id → kept id), failedHalf {provider, reason} | null, at}`. NULL
+on every other row, on a running pair and on a pair from before the column (read as the code fold).
+`claude_review_findings.merged_into` = the kept finding's id on a merged-away duplicate (a soft
+reference within the pair, no FK, like `prior_finding_id`; only an UNPOSTED finding is ever marked).
+⚠ Every read of a run's findings leaves a marked one out (`isMergedAway`): the run read, the history
+count, the Open PRs fold, My Turn's card; the follow-up follows up the kept one instead.
+
 `claude_reviews.kind` (migration `0136`): `'replies'` on a REPLIES PASS — a run that judged only
 people's replies on Limn's own posted findings ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § The replies
 pass): no findings, its `follow_up` items shaped like a review's, its `verdict` the outcome the

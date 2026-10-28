@@ -16,6 +16,7 @@ import type {
   ClaudeReviewHeadState,
   ClaudeReviewListItem,
   ClaudeReviewModel,
+  ClaudeReviewPairConsolidation,
   ClaudeReviewPairInfo,
   ClaudeReviewPrState,
   ClaudeReviewScope,
@@ -54,6 +55,8 @@ import {
   type SettledFinding,
 } from './settled-by-reply.js';
 import type { AgentContext } from '../agent-context.js';
+import { isAlreadyPostedReraise, isMergedAway, isReaderIgnoredFinding } from './finding-facts.js';
+import { buildPairView, isPairBusy, pairConsolidationOf } from './pair-view.js';
 import { claudeModelChoice, queuedRanOn } from '../../ai/provider.js';
 import {
   followUpLeftOutReason,
@@ -123,6 +126,8 @@ interface FindingRow {
   reminder?: ClaudeFindingReminder | null;
   // The reference-library sections it rests on, server-checked (migration 0117 / pg 0104).
   docCitations?: unknown;
+  // A Claude + Codex pair's merged-away duplicate: the finding kept in its place (migration 0137).
+  mergedInto?: number | null;
 }
 
 // A story finding's origin off its row; null unless BOTH columns hold a value.
@@ -192,6 +197,8 @@ interface ReviewRow {
   pairId?: number | null;
   pairRole?: string | null;
   pairDropped?: number | null;
+  // The pair's one review, on its FIRST row (migration 0137). NULL everywhere else.
+  pairConsolidation?: unknown;
 }
 
 /** The stored pair columns → the wire, given the other half's id (null when not started). */
@@ -264,24 +271,9 @@ export function isShownFinding(f: { severity: ClaudeFindingSeverity }): boolean 
   return f.severity !== 'praise';
 }
 
-type IncludedFacts = { included?: boolean | null; postedAt?: unknown; priorFindingId?: number | null };
-
-/**
- * The server's own left-out re-raise: `included: false` stored on a RE-RAISE (a `priorFindingId`)
- * of a comment already posted on this same commit (follow-up.ts `isAlreadyOnThisCommit`, written
- * below) — an issue still OPEN, just not posted twice.
- */
-export function isAlreadyPostedReraise(f: IncludedFacts): boolean {
-  return f.included === false && f.postedAt == null && f.priorFindingId != null;
-}
-
-/**
- * `included = false` is TWO facts, and only one is a READER'S IGNORE — every reader of the flag
- * meaning "the reader ignored it" goes through this, never a bare `included === false`.
- */
-export function isReaderIgnoredFinding(f: IncludedFacts): boolean {
-  return f.included === false && !isAlreadyPostedReraise(f);
-}
+// The two meanings of `included = false` (and the pair's merged-away duplicate) live in a pure module
+// (./finding-facts.ts) so the verdict rule can read them without this one.
+export { isAlreadyPostedReraise, isMergedAway, isReaderIgnoredFinding } from './finding-facts.js';
 
 function mapFinding(
   r: FindingRow,
@@ -494,7 +486,9 @@ export async function getClaudeReviewById(
     .from(crf)
     .where(eq(crf.reviewId, reviewId))
     .orderBy(asc(crf.id))
-    .execute()) as FindingRow[]).filter(isShownFinding);
+    // ⚠ A pair's MERGED-AWAY duplicate is never read as one of the run's findings: not shown, posted,
+    // counted in a verdict or sent to AI Fix (the finding kept in its place carries the point).
+    .execute()) as FindingRow[]).filter((f) => isShownFinding(f) && !isMergedAway(f));
   const head = await reviewHeadState(ctx, row.prId, row.headSha, rows[0]!.prHeadSha);
   // What is already on GitHub (posted-state.ts): stamps this run's lost posts, derives the rest.
   const earlier = await reconcilePostedState(ctx, row, accountId, findings).catch((err) => {
@@ -846,7 +840,66 @@ export async function getLatestClaudeReview(
     .execute()) as Array<{ id: number }>;
   const row = rows[0] ?? null;
   if (!row) return null;
-  return getClaudeReviewById(ctx, row.id, accountId);
+  // A Claude + Codex pair reads as ONE review (./pair-view.ts).
+  return getReviewView(ctx, row.id, accountId);
+}
+
+/**
+ * A run AS THE READER SEES IT: an ordinary run as stored (`getClaudeReviewById`); either half of a
+ * CLAUDE + CODEX PAIR as the pair's ONE consolidated review (./pair-view.ts `buildPairView`) — one
+ * summary, one verdict, both halves' findings with their source, addressed by the pair's latest half.
+ * What the AI Review tab, AI Fix's seed and the review chat read. Account-scoped like the raw read.
+ */
+export async function getReviewView(ctx: AgentContext, reviewId: number, accountId: number): Promise<ClaudeReview | null> {
+  const one = await getClaudeReviewById(ctx, reviewId, accountId);
+  if (!one?.pair) return one;
+  const otherId = one.pair.otherReviewId;
+  const other = otherId != null ? await getClaudeReviewById(ctx, otherId, accountId) : null;
+  const usable = other != null && other.prId === one.prId ? other : null;
+  const [first, second] = one.pair.role === 'first' ? [one, usable] : [usable, one];
+  const stored = await readPairConsolidation(ctx, one.pair.pairId, one.prId);
+  return buildPairView(first, second, stored, isPairBusy(one.pair.pairId));
+}
+
+/** The stored consolidation of a pair (on its FIRST row, same PR), or null. */
+export async function readPairConsolidation(
+  ctx: AgentContext,
+  pairId: number,
+  prId: number,
+): Promise<ClaudeReviewPairConsolidation | null> {
+  const { cr } = tables(ctx);
+  const rows = (await ctx.db
+    .select({ pairConsolidation: cr.pairConsolidation })
+    .from(cr)
+    .where(and(eq(cr.id, pairId), eq(cr.prId, prId)))
+    .limit(1)
+    .execute()) as Array<{ pairConsolidation: unknown }>;
+  return pairConsolidationOf(rows[0]?.pairConsolidation);
+}
+
+/**
+ * WRITE A PAIR'S CONSOLIDATION, once, when the pair ends: the record on its FIRST row and each
+ * merged-away duplicate's `merged_into` — in ONE transaction (DB only, no network inside). A
+ * duplicate is marked only while it is unposted and belongs to the pair's halves (`halfIds`).
+ */
+export async function savePairConsolidation(
+  ctx: AgentContext,
+  pairId: number,
+  halfIds: readonly number[],
+  record: ClaudeReviewPairConsolidation,
+): Promise<void> {
+  const { cr, crf } = tables(ctx);
+  const merged = Object.entries(record.mergedFrom).map(([id, keep]) => ({ id: Number(id), keep }));
+  await ctx.runTransaction(async (tx) => {
+    for (const m of merged) {
+      await tx
+        .update(crf)
+        .set({ mergedInto: m.keep })
+        .where(and(eq(crf.id, m.id), inArray(crf.reviewId, [...halfIds]), isNull(crf.postedAt)))
+        .execute();
+    }
+    await tx.update(cr).set({ pairConsolidation: record }).where(eq(cr.id, pairId)).execute();
+  });
 }
 
 /**
@@ -892,17 +945,26 @@ export async function listClaudeReviewHistory(
     const tally = (await ctx.db
       .select({ reviewId: crf.reviewId, n: sql<number>`count(*)` })
       .from(crf)
-      .where(inArray(crf.reviewId, ids))
+      // A pair's merged-away duplicates are not findings of the review (pair-view.ts).
+      .where(and(inArray(crf.reviewId, ids), isNull(crf.mergedInto)))
       .groupBy(crf.reviewId)
       .execute()) as Array<{ reviewId: number; n: number }>;
     for (const t of tally) counts.set(t.reviewId, Number(t.n));
   }
   const partners = pairPartners(rows.map((r) => r.review));
-  return rows.map(({ review }) => ({
-    ...summaryOf(review),
-    findingCount: counts.get(review.id) ?? 0,
-    ...(review.pairId != null ? { pair: pairInfoOf(review, partners.get(review.id) ?? null) } : {}),
-  }));
+  // A pair's ONE verdict, from its consolidation on the first row (listed here too).
+  const pairVerdictOf = new Map<number, ClaudeReviewVerdict | null>();
+  for (const { review } of rows) {
+    if (review.pairRole === 'first') pairVerdictOf.set(review.id, pairConsolidationOf(review.pairConsolidation)?.verdict ?? null);
+  }
+  return rows.map(({ review }) => {
+    const pair = review.pairId != null ? pairInfoOf(review, partners.get(review.id) ?? null) : null;
+    return {
+      ...summaryOf(review),
+      findingCount: counts.get(review.id) ?? 0,
+      ...(pair ? { pair: { ...pair, verdict: pairVerdictOf.get(pair.pairId) ?? null } } : {}),
+    };
+  });
 }
 
 // The window that scopes the cross-PR list (mirrors the core backfill default of 90d).
@@ -1015,6 +1077,8 @@ export async function getLatestReviewStates(
       prHeadSha: prs.headSha,
       trigger: cr.trigger,
       kind: cr.kind,
+      pairId: cr.pairId,
+      pairConsolidation: cr.pairConsolidation,
     })
     .from(cr)
     .innerJoin(prs, eq(prs.id, cr.prId))
@@ -1032,9 +1096,11 @@ export async function getLatestReviewStates(
     prHeadSha: string | null;
     trigger: string | null;
     kind: string | null;
+    pairId: number | null;
+    pairConsolidation: unknown;
   }>;
   const out: ClaudeReviewPrState[] = [];
-  const latestByPr = new Map<number, (typeof rows)[number]>();
+  const latestByPr = new Map<number, (typeof rows)[number] & { halfIds: number[] }>();
   // REPLIES PASSES newer than a PR's latest full review (succeeded): the column shows the full
   // review, with the passes' newer judgements folded over its "Earlier:" counts.
   const repliesAfter = new Map<number, number[]>();
@@ -1048,12 +1114,33 @@ export async function getLatestReviewStates(
       continue;
     }
     if (latestByPr.has(r.prId)) continue; // newest first — the first row per PR is its latest run
-    latestByPr.set(r.prId, r);
+    // A CLAUDE + CODEX PAIR is ONE review (pair-view.ts): its status and verdict are the pair's, and
+    // its figures fold both succeeded halves (`halfIds`), merged-away duplicates left out.
+    const halves = r.pairId != null ? rows.filter((x) => x.prId === r.prId && x.pairId === r.pairId) : [r];
+    const inFlightHalf = halves.some((h) => h.status === 'queued' || h.status === 'running');
+    const okHalves = halves.filter((h) => h.status === 'succeeded');
+    const pairRecord = r.pairId != null ? pairConsolidationOf(halves.find((h) => h.reviewId === r.pairId)?.pairConsolidation) : null;
+    const status: ClaudeReview['status'] =
+      r.pairId == null
+        ? r.status
+        : inFlightHalf || isPairBusy(r.pairId)
+          ? 'running'
+          : okHalves.length > 0
+            ? 'succeeded'
+            : r.status;
+    const verdict =
+      r.pairId == null
+        ? r.verdict
+        : status === 'succeeded'
+          ? (pairRecord?.verdict ?? okHalves[0]?.verdict ?? null)
+          : null;
+    // Oldest first, so the latest succeeded half is last.
+    latestByPr.set(r.prId, { ...r, halfIds: okHalves.map((h) => h.reviewId).sort((a, b) => a - b) });
     out.push({
       prId: r.prId,
       reviewId: r.reviewId,
-      status: r.status,
-      verdict: r.verdict,
+      status,
+      verdict,
       reviewedHeadSha: r.headSha,
       finishedAt: iso(r.finishedAt),
       ticket: storedList(r.ticket)[0] ?? null,
@@ -1125,13 +1212,18 @@ async function foldFixStates(
 async function foldStateSummaries(
   ctx: AgentContext,
   states: ClaudeReviewPrState[],
-  latestByPr: Map<number, { reviewId: number; prHeadSha: string | null; headSha: string; ticket: unknown }>,
+  latestByPr: Map<number, { reviewId: number; prHeadSha: string | null; headSha: string; ticket: unknown; halfIds?: number[] }>,
   // Replies passes after each PR's latest full review, oldest first (their follow-ups fold over it).
   repliesAfter: ReadonlyMap<number, readonly number[]> = new Map(),
 ): Promise<void> {
   const { cr, crf } = tables(ctx);
   const done = states.filter((s) => s.status === 'succeeded' && s.reviewId != null);
-  const doneIds = done.map((s) => s.reviewId as number);
+  // A pair's state reads BOTH succeeded halves (`halfIds`); an ordinary run, itself.
+  const runsOf = (s: ClaudeReviewPrState): number[] => {
+    const halves = latestByPr.get(s.prId)?.halfIds;
+    return halves != null && halves.length > 0 ? halves : [s.reviewId as number];
+  };
+  const doneIds = done.flatMap(runsOf);
   const repliesIds = done.flatMap((s) => [...(repliesAfter.get(s.prId) ?? [])]);
 
   // 1. Every finding of the finished runs — the columns the fold needs, nothing else.
@@ -1146,7 +1238,8 @@ async function foldStateSummaries(
           priorFindingId: crf.priorFindingId,
         })
         .from(crf)
-        .where(inArray(crf.reviewId, doneIds))
+        // A pair's merged-away duplicates are not findings of the review (pair-view.ts).
+        .where(and(inArray(crf.reviewId, doneIds), isNull(crf.mergedInto)))
         .execute()) as Array<{
         reviewId: number;
         severity: ClaudeFindingSeverity;
@@ -1189,12 +1282,14 @@ async function foldStateSummaries(
   }
 
   for (const s of done) {
-    const id = s.reviewId as number;
+    const runIds = runsOf(s);
+    // The run whose stored JSON (stories, threads, CI) the column reads: a pair's latest succeeded half.
+    const id = runIds[runIds.length - 1] as number;
     const counts: Record<ClaudeFindingSeverity, number> = { blocker: 0, warning: 0, nit: 0, question: 0, praise: 0 };
     const lenses: ClaudeReviewStateSummary['lenses'] = {};
     let postedFindings = 0;
     let ignoredCount = 0;
-    for (const f of findingsById.get(id) ?? []) {
+    for (const f of runIds.flatMap((rid) => findingsById.get(rid) ?? [])) {
       // Stored praise (older runs) is hidden: no count, no lens, no posted figure. `praise` stays 0.
       if (!isShownFinding(f)) continue;
       // A READER'S ignore leaves the pills and the posted total; the card says "N ignored"
@@ -1224,7 +1319,17 @@ async function foldStateSummaries(
     // Praise is hidden everywhere, so an earlier praise item never counts in "Earlier: …". A later
     // replies pass's judgements are newer than the review's own (replies-pass.ts).
     const passItems = (repliesAfter.get(s.prId) ?? []).flatMap((rid) => extrasById.get(rid)?.followUp?.items ?? []);
-    const items = overlayFollowUpItems(extra?.followUp?.items ?? [], passItems).filter((it) => it.severity !== 'praise');
+    // A pair: both halves' follow-up items, each earlier finding once.
+    const ownItems: ClaudeFollowUpItemRecord[] = [];
+    const itemSeen = new Set<number>();
+    for (const rid of runIds) {
+      for (const it of extrasById.get(rid)?.followUp?.items ?? []) {
+        if (runIds.length > 1 && itemSeen.has(it.priorFindingId)) continue;
+        itemSeen.add(it.priorFindingId);
+        ownItems.push(it);
+      }
+    }
+    const items = overlayFollowUpItems(ownItems, passItems).filter((it) => it.severity !== 'praise');
     if (Array.isArray(items) && items.length > 0) {
       followUp = {
         addressed: 0,
@@ -1242,7 +1347,7 @@ async function foldStateSummaries(
       lenses,
       postedFindings,
       ignoredCount,
-      reviewPosted: extra?.postedAt != null,
+      reviewPosted: runIds.some((rid) => extrasById.get(rid)?.postedAt != null),
       tickets,
       followUp,
     };
@@ -1592,12 +1697,18 @@ export async function loadPriorReviewForFollowUp(
     carried,
   });
 
-  const ownRows = (await ctx.db
+  const allOwnRows = (await ctx.db
     .select()
     .from(crf)
     .where(eq(crf.reviewId, row.id))
     .orderBy(asc(crf.id))
     .execute()) as FindingRow[];
+  // ⚠ A CLAUDE + CODEX PAIR'S MERGED-AWAY DUPLICATE is followed up THROUGH THE FINDING KEPT IN ITS
+  // PLACE (the other half's): that one is carried into this provider's follow-up instead, so a
+  // still-open point is re-raised against it (`priorFindingId` = the kept id), never as new. The
+  // duplicate itself is neither followed up nor listed as left out.
+  const ownRows = allOwnRows.filter((f) => !isMergedAway(f));
+  const keptForMerged = [...new Set(allOwnRows.filter(isMergedAway).map((f) => f.mergedInto as number))];
   // An UNPOSTED finding that repeats an earlier, POSTED comment (`priorFindingId`) is followed up
   // through that comment, never as itself (follow-up.ts `isFollowUpEligible`, `repeatsPosted`).
   // One read, re-scoped to this PR + account like the carry below.
@@ -1627,7 +1738,7 @@ export async function loadPriorReviewForFollowUp(
   const eligibleOwn = own.filter(isFollowUpEligible);
   const findings: PriorFindingForFollowUp[] = eligibleOwn.map((f) => toPrior(f, row.headSha, false));
 
-  const seen = new Set(own.map((f) => f.id));
+  const seen = new Set(allOwnRows.map((f) => f.id));
   // An earlier finding an eligible finding of that run already raises again is followed up
   // THROUGH that re-raise, never twice.
   const reraisedByEligible = new Set(
@@ -1649,7 +1760,8 @@ export async function loadPriorReviewForFollowUp(
       openNotReraised.set(it.priorFindingId, { status: it.status, explanation: it.explanation ?? null });
     }
   }
-  const carriedIds = [...new Set([...notChecked, ...openNotReraised.keys()])];
+  const mergedKept = new Set(keptForMerged.filter((id) => !seen.has(id) && !reraisedByEligible.has(id)));
+  const carriedIds = [...new Set([...notChecked, ...openNotReraised.keys(), ...mergedKept])];
   if (carriedIds.length > 0) {
     const carriedRows = (await ctx.db
       .select({ finding: crf, headSha: cr.headSha })

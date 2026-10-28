@@ -1,4 +1,4 @@
-import type { FastifyInstance, FastifyReply } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type {
   ActiveReviewsResponse,
   ClaudeFindingStory,
@@ -20,8 +20,8 @@ import type {
   UpdateReviewBody,
 } from '@pierre-review/shared';
 import {
-  aiRunProviderName,
   AI_PICKER_MODELS,
+  findingSourceLabel,
   CLAUDE_REVIEW_STATES_MAX_IDS,
   DEFAULT_CLAUDE_REVIEW_MODEL,
   storyCommentLead,
@@ -32,7 +32,7 @@ import {
 import type { AgentContext } from '../agent-context.js';
 import { anyProviderPreflight, preflightFor, resolveManualRunChoice } from '../../ai/run-choice.js';
 import { autoReviewWaiting } from './auto.js';
-import { autoReviewBodyLead, isAutoPostingNow } from './auto-post.js';
+import { isAutoPostingNow } from './auto-post.js';
 import { autoFixOutcomeFor } from '../../coding/ai-fix/auto-fix.js';
 import { isFixRunning } from '../../coding/ai-fix/manager.js';
 import {
@@ -51,6 +51,7 @@ import {
   getLatestClaudeReview,
   getLatestReviewStates,
   getReviewPostContext,
+  getReviewView,
   listAllClaudeReviews,
   listClaudeReviewHistory,
   getFailedAutoAtHead,
@@ -65,7 +66,7 @@ import { currentThreadAssessmentsForPrs, getThreadJudgements } from './thread-ju
 import { getLatestThreadCheck, threadCheckWire } from './thread-check-persist.js';
 import { findingCommentUrl, reminderLead } from './posted-state.js';
 import { clearTeamClaim, teamClaimPendingFor, teamClaimSkipFor, teamClaimSkipsFor } from './team-claim.js';
-import { pairProvidersReady, pairRaisedByLead, pairReviewBody } from './pair.js';
+import { pairProvidersReady, pairRaisedByLead } from './pair.js';
 
 // The Claude Review product API (CORE, free, LOCAL ONLY). The paths are the historical ones
 // (/api/prs/:id/claude-review*, /api/claude-reviews/*, /api/claude-findings/*,
@@ -572,7 +573,8 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
   app.get('/api/claude-reviews/:reviewId', { schema: reviewIdParam }, async (req, reply) => {
     if (!AGENTIC_AI_ENABLED) return featureOff(reply);
     const { reviewId } = req.params as { reviewId: number };
-    const review = await getClaudeReviewById(ctx, reviewId, ctx.accountIdOf(req));
+    // A Claude + Codex pair's half reads as the pair's ONE review (pair-view.ts).
+    const review = await getReviewView(ctx, reviewId, ctx.accountIdOf(req));
     if (!review) {
       reply.status(404);
       return { error: 'NotFound', message: `Review ${reviewId} not found` };
@@ -619,6 +621,11 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
       return { error: 'NotFound', message: `Finding ${findingId} not found` };
     }
     const f = fctx.finding;
+    // A Claude + Codex pair's merged-away duplicate is never posted: the finding kept in its place is.
+    if (f.mergedInto != null) {
+      reply.status(409);
+      return { error: 'MergedDuplicate', message: 'The same point is another finding of this review.' };
+    }
     if (await isAutoPostingNow(ctx, f.reviewId)) {
       reply.status(409);
       return { error: 'AutoPostInProgress', message: 'Posting automatically. Try again in a moment.' };
@@ -732,23 +739,37 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
     },
   );
 
-  // Post a single GitHub review (or, with ?dryRun=true, the exact payload without posting).
-  app.post('/api/claude-reviews/:reviewId/post', { schema: postSchema }, async (req, reply) => {
+  // Post a single GitHub review (or, with ?dryRun=true, the exact payload without posting). A CLAUDE +
+  // CODEX PAIR is ONE review: either half's id posts the pair's CONSOLIDATED findings (pair-view.ts —
+  // merged-away duplicates are never read), each comment naming who raised it on the severity lead
+  // ("**Warning** · Codex", "**Warning** · Claude + Codex"), with the reader's draft and verdict.
+  const postReviewHandler = async (req: FastifyRequest, reply: FastifyReply): Promise<unknown> => {
     if (!AGENTIC_AI_ENABLED) return featureOff(reply);
     const { reviewId } = req.params as { reviewId: number };
     const { userVerdict } = req.body as PostReviewBody;
     const dryRun = (req.query as { dryRun?: string }).dryRun === 'true';
     const accountId = ctx.accountIdOf(req);
 
-    const pctx = await getReviewPostContext(ctx, reviewId, accountId);
-    const review = await getClaudeReviewById(ctx, reviewId, accountId);
+    const review = await getReviewView(ctx, reviewId, accountId);
+    const pctx = review ? await getReviewPostContext(ctx, review.id, accountId) : null;
     if (!pctx || !review) {
       reply.status(404);
       return { error: 'NotFound', message: `Review ${reviewId} not found` };
     }
-    if (!dryRun && (await isAutoPostingNow(ctx, reviewId))) {
+    const pair = review.pair ?? null;
+    if (pair != null && review.status !== 'succeeded') {
       reply.status(409);
-      return { error: 'AutoPostInProgress', message: 'Posting automatically. Try again in a moment.' };
+      return { error: 'PairIncomplete', message: 'The review is still running.' };
+    }
+    // Every run this post stamps: the pair's halves, or the run itself.
+    const halfIds = pair?.halves?.map((h) => h.reviewId) ?? [review.id];
+    if (!dryRun) {
+      for (const hid of halfIds) {
+        if (await isAutoPostingNow(ctx, hid)) {
+          reply.status(409);
+          return { error: 'AutoPostInProgress', message: 'Posting automatically. Try again in a moment.' };
+        }
+      }
     }
 
     // (Provenance stamping is no longer read from settings. The hidden
@@ -760,7 +781,7 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
 
     try {
       // Persist the chosen verdict so the run records what was posted.
-      await updateReviewDraft(ctx, reviewId, { userVerdict });
+      await updateReviewDraft(ctx, review.id, { userVerdict });
 
       const outcome = await ctx.review.postReview({
         owner: pctx.owner,
@@ -774,18 +795,28 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
           // DONE: the SPA offers no "Post again", and a re-submitted review must not post it twice.
           // Nor is one whose point an earlier finding in its chain already put there (`earlierPost`).
           .filter((f) => f.included && f.postedAt == null && f.earlierPost == null)
-          .map((f) => ({
-            id: f.id,
-            path: f.path,
-            line: f.line,
-            side: f.side,
-            anchored: f.anchored,
-            fileInDiff: f.fileInDiff,
-            body: resolvedBody(f, f.story),
-            suggestion: f.suggestion,
-            severity: f.severity,
-            storyLead: f.story ? storyCommentLead({ title: f.title, story: f.story }, review.tickets ?? []) : null,
-          })),
+          .map((f) => {
+            // A pair's comment names who raised it ON the one severity lead; a finding with no label
+            // word keeps a "Raised by" line instead.
+            const tag = pair != null && f.source != null ? findingSourceLabel(f.source) : null;
+            return {
+              id: f.id,
+              path: f.path,
+              line: f.line,
+              side: f.side,
+              anchored: f.anchored,
+              fileInDiff: f.fileInDiff,
+              body: resolvedBody(f, f.story),
+              suggestion: f.suggestion,
+              severity: f.severity,
+              ...(tag != null ? { severityTag: tag } : {}),
+              storyLead: f.story
+                ? storyCommentLead({ title: f.title, story: f.story }, review.tickets ?? [])
+                : tag != null && limnSeverityLabel(f.severity) == null
+                  ? pairRaisedByLead(tag)
+                  : null,
+            };
+          }),
         dryRun,
       });
 
@@ -798,116 +829,17 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
       }
       if ('preview' in outcome) return outcome.preview;
 
-      await markReviewPosted(ctx, reviewId, outcome.postedReviewId, outcome.inlineFindingIds, outcome.prComments, {
-        inlineComments: outcome.inlineComments,
-      });
-      const result: PostReviewResult = {
-        postedReviewId: outcome.postedReviewId,
-        postedAt: new Date().toISOString(),
-        postedCommentCount: outcome.commentCount,
-        prCommentCount: outcome.prCommentCount,
-      };
-      return result;
-    } catch (err) {
-      reply.status(502);
-      return { error: 'GitHubError', message: err instanceof Error ? err.message : String(err) };
-    }
-  });
-
-  // POST BOTH — a Claude + Codex pair's two runs as ONE GitHub review (pair.ts): one body naming both
-  // providers (each run's draft), the reader's verdict, and every included, unposted finding of both,
-  // each comment naming who raised it. `:reviewId` is either half; both must have succeeded at the
-  // same head. ?dryRun=true answers the payload without posting. Posting one run alone stays the
-  // ordinary Post route. Rate limit: the Claude Review family's catch-all (`ai`), like Post review.
-  app.post('/api/claude-reviews/:reviewId/post-pair', { schema: postSchema }, async (req, reply) => {
-    if (!AGENTIC_AI_ENABLED) return featureOff(reply);
-    const { reviewId } = req.params as { reviewId: number };
-    const { userVerdict } = req.body as PostReviewBody;
-    const dryRun = (req.query as { dryRun?: string }).dryRun === 'true';
-    const accountId = ctx.accountIdOf(req);
-
-    const one = await getClaudeReviewById(ctx, reviewId, accountId);
-    const otherId = one?.pair?.otherReviewId ?? null;
-    const other = otherId != null ? await getClaudeReviewById(ctx, otherId, accountId) : null;
-    if (!one || !one.pair || !other || other.prId !== one.prId) {
-      reply.status(404);
-      return { error: 'NotFound', message: `Review ${reviewId} is not one half of a pair` };
-    }
-    const [first, second] = one.pair.role === 'first' ? [one, other] : [other, one];
-    if (first.status !== 'succeeded' || second.status !== 'succeeded' || first.headSha !== second.headSha) {
-      reply.status(409);
-      return { error: 'PairIncomplete', message: 'Both reviews must finish before posting both.' };
-    }
-    const pctx = await getReviewPostContext(ctx, second.id, accountId);
-    if (!pctx) {
-      reply.status(404);
-      return { error: 'NotFound', message: `Review ${reviewId} not found` };
-    }
-    if (!dryRun && ((await isAutoPostingNow(ctx, first.id)) || (await isAutoPostingNow(ctx, second.id)))) {
-      reply.status(409);
-      return { error: 'AutoPostInProgress', message: 'Posting automatically. Try again in a moment.' };
-    }
-    try {
-      for (const r of [first, second]) await updateReviewDraft(ctx, r.id, { userVerdict });
-      const included = [first, second].flatMap((r) =>
-        r.findings
-          .filter((f) => f.included && f.postedAt == null && f.earlierPost == null)
-          .map((f) => ({
-            id: f.id,
-            path: f.path,
-            line: f.line,
-            side: f.side,
-            anchored: f.anchored,
-            fileInDiff: f.fileInDiff,
-            body: resolvedBody(f, f.story),
-            suggestion: f.suggestion,
-            // Who raised it rides the ONE severity lead ("**Warning** · Codex"); the story line stays
-            // as on the single Post. A finding with no label word keeps a "Raised by" line instead.
-            severity: f.severity,
-            severityTag: aiRunProviderName(r),
-            storyLead: f.story
-              ? storyCommentLead({ title: f.title, story: f.story }, r.tickets ?? [])
-              : limnSeverityLabel(f.severity) == null
-                ? pairRaisedByLead(aiRunProviderName(r))
-                : null,
-          })),
-      );
-      const outcome = await ctx.review.postReview({
-        owner: pctx.owner,
-        name: pctx.name,
-        prNumber: pctx.prNumber,
-        reviewHeadSha: pctx.reviewHeadSha,
-        body: pairReviewBody(
-          // Each run's draft; a half nobody drafted (the first, whose summary box is never shown) reads
-          // as its summary's first sentence.
-          [first, second].map((r) => ({
-            by: aiRunProviderName(r),
-            text: r.userBody ?? autoReviewBodyLead(r.summary, r.findings.length, aiRunProviderName(r)),
-          })),
-          null,
-        ),
-        verdict: userVerdict,
-        includedFindings: included,
-        dryRun,
-      });
-      if (outcome.headMoved) {
-        reply.status(409);
-        return {
-          error: 'HeadMoved',
-          message: 'The PR head has moved since this review. Re-review before posting.',
-        };
-      }
-      if ('preview' in outcome) return outcome.preview;
-      // Each run stamps its own findings; both carry the one GitHub review.
-      for (const r of [first, second]) {
-        const mine = new Set(r.findings.map((f) => f.id));
+      // Each run stamps its own findings; a pair's halves both carry the one GitHub review.
+      const runOf = new Map(review.findings.map((f) => [f.id, f.reviewId]));
+      const mine = (hid: number) => (fid: number): boolean => (runOf.get(fid) ?? review.id) === hid;
+      for (const hid of halfIds) {
         await markReviewPosted(
           ctx,
-          r.id,
+          hid,
           outcome.postedReviewId,
-          outcome.inlineFindingIds.filter((fid) => mine.has(fid)),
-          outcome.prComments.filter((pc) => mine.has(pc.findingId)),
-          { inlineComments: (outcome.inlineComments ?? []).filter((c) => mine.has(c.findingId)) },
+          outcome.inlineFindingIds.filter(mine(hid)),
+          outcome.prComments.filter((pc) => mine(hid)(pc.findingId)),
+          { inlineComments: (outcome.inlineComments ?? []).filter((c) => mine(hid)(c.findingId)) },
         );
       }
       const result: PostReviewResult = {
@@ -921,5 +853,10 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
       reply.status(502);
       return { error: 'GitHubError', message: err instanceof Error ? err.message : String(err) };
     }
-  });
+  };
+  app.post('/api/claude-reviews/:reviewId/post', { schema: postSchema }, postReviewHandler);
+
+  // The older "Post both" path: a pair is one review now, so it is the same post (kept for a client
+  // that still calls it). Rate limit: the Claude Review family's catch-all (`ai`), like Post review.
+  app.post('/api/claude-reviews/:reviewId/post-pair', { schema: postSchema }, postReviewHandler);
 }

@@ -1480,12 +1480,6 @@ export const api = {
     ).then((r) =>
       handle<PostReviewPreview | PostReviewResult>(r),
     ),
-  // "Post both": a Claude + Codex pair's two runs as ONE GitHub review (`reviewId` = either half).
-  postClaudeReviewPair: (reviewId: number, userVerdict: ClaudeReviewVerdict, dryRun = false) =>
-    fetch(
-      `/api/claude-reviews/${reviewId}/post-pair${dryRun ? '?dryRun=true' : ''}`,
-      jsonBody('POST', { userVerdict }),
-    ).then((r) => handle<PostReviewPreview | PostReviewResult>(r)),
   // Claude Review chat: one thread per review (findingId null) and one per finding. The server
   // rebuilds the transcript from stored turns, so only the new question is sent.
   claudeReviewChat: (reviewId: number, findingId: number | null) =>

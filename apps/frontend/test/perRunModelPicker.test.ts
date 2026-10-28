@@ -203,8 +203,7 @@ describe('which run the AI Review tab shows', () => {
   });
 });
 
-describe('the history list', () => {
-  const textOf = (html: string): string => html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ');
+describe('the history select', () => {
   const history = [
     run(3, { provider: 'codex', model: 'gpt-6.1-sol', trigger: 'auto', findingCount: 1, verdict: 'REQUEST_CHANGES' }),
     run(2, { status: 'failed', verdict: null, findingCount: 0 }),
@@ -214,35 +213,19 @@ describe('the history list', () => {
     createElement(ReviewHistoryList, { history, shownId: 1, latestId: 3, onShow: () => {} }),
   );
 
-  it('lists every run, every provider, newest first, each with what ran, status, verdict, findings and Auto', () => {
-    const t = textOf(html);
-    expect(t).toContain('All reviews of this PR (3)');
-    expect(html.match(/data-review-run="/g)).toHaveLength(3);
-    expect(html.indexOf('data-review-run="3"')).toBeLessThan(html.indexOf('data-review-run="1"'));
-    expect(t).toContain('Codex · GPT-6.1 Sol');
-    expect(t).toContain('Request changes');
-    expect(t).toContain('1 finding ');
-    expect(t).toContain('Auto review');
-    expect(t).toContain('Failed');
-    expect(t).toContain('Claude Sonnet 5');
-    expect(t).toContain('No findings');
-    expect(t).toContain('abcdef1');
+  it('lists every run, every provider, newest first, each with what ran, its head, status and Auto', () => {
+    expect(html.match(/<option /g)).toHaveLength(3);
+    expect(html.indexOf('value="3"')).toBeLessThan(html.indexOf('value="1"'));
+    expect(html).toContain('Codex · GPT-6.1 Sol');
+    expect(html).toContain('Auto review');
+    expect(html).toContain('Failed');
+    expect(html).toContain('Claude Sonnet 5');
+    expect(html).toContain('abcdef1');
+    expect(html).toContain('(latest)');
   });
 
-  it('marks the shown run, and only it', () => {
-    expect(html.match(/aria-current="true"/g)).toHaveLength(1);
-    const shownRow = html.slice(html.indexOf('data-review-run="1"'));
-    expect(shownRow).toContain('Shown');
-  });
-
-  // The shown row sits on blue-50 (#eff6ff): gray-500 text measures 4.45:1 there, under the 4.5:1
-  // floor. Every text inside a row is gray-600 or darker in light mode.
-  it('no row text is gray-500 (it fails 4.5:1 on the shown row’s blue-50)', () => {
-    const latestShown = renderToStaticMarkup(
-      createElement(ReviewHistoryList, { history, shownId: 3, latestId: 3, onShow: () => {} }),
-    );
-    const rows = latestShown.slice(latestShown.indexOf('<ol'));
-    expect(rows).toContain('Latest');
-    expect(rows).not.toMatch(/(^|[\s"])text-gray-500(?=[\s"])/);
+  it('selects the shown run, and only it', () => {
+    expect(html.match(/selected=""/g)).toHaveLength(1);
+    expect(html).toMatch(/<option value="1"[^>]*selected=""/);
   });
 });

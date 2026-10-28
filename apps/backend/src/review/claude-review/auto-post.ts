@@ -82,10 +82,22 @@ import {
   isAlreadyPostedReraise,
   isReaderIgnoredFinding,
   markReviewPosted,
+  readPairConsolidation,
 } from './persist.js';
 import { resolveFindingBody } from './follow-up.js';
-import { aiRunProviderName, autoPostFooter, limnSeverityLabel, PAIR_AUTO_POST_FOOTER, type AiProviderName } from '@pierre-review/shared';
+import { autoVerdictFor } from './auto-verdict.js';
+import {
+  aiRunProviderName,
+  autoPostFooter,
+  findingSourceLabel,
+  limnSeverityLabel,
+  PAIR_AUTO_POST_FOOTER,
+  type AiProviderName,
+} from '@pierre-review/shared';
 import { pairRaisedByLead, pairReviewBody, pairVerdict } from './pair.js';
+
+// A pair's body names both when it falls back to a count ("3 comments from Claude and Codex.").
+const PAIR_BODY_BY = 'Claude and Codex';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 const s = (ctx: AgentContext): any => ctx.schema as any;
@@ -190,23 +202,8 @@ export function selectFindingsToPost(
   return { toPost, alreadyPosted };
 }
 
-/**
- * The verdict an auto post wants — Claude's, made STRICTER. Counts the run's non-story findings
- * a reader did not ignore (whatever the kind toggles say): any blocker ⇒ REQUEST_CHANGES; APPROVE only when
- * Claude approved and there is no warning either; everything else ⇒ COMMENT.
- */
-export function autoVerdictFor(
-  claudeVerdict: ClaudeReview['verdict'],
-  findings: readonly (Pick<ClaudeFinding, 'severity' | 'included' | 'story'> &
-    Partial<Pick<ClaudeFinding, 'postedAt' | 'priorFindingId'>>)[],
-): AutoVerdictEvent {
-  // ⚠ Everything except a READER'S ignore counts — a re-raise the server left out because its
-  // comment is already on this commit is still an open issue (persist.ts `isReaderIgnoredFinding`).
-  const counted = findings.filter((f) => f.story == null && !isReaderIgnoredFinding(f));
-  if (counted.some((f) => f.severity === 'blocker')) return 'REQUEST_CHANGES';
-  if (claudeVerdict === 'APPROVE' && !counted.some((f) => f.severity === 'warning')) return 'APPROVE';
-  return 'COMMENT';
-}
+// THE VERDICT RULE (./auto-verdict.ts), re-exported under its old name.
+export { autoVerdictFor } from './auto-verdict.js';
 
 /**
  * The reader's STANDING verdict on the PR, as read live: their latest DECISIVE review (a COMMENTED
@@ -308,7 +305,7 @@ export const LIFT_BLOCK_MESSAGE = liftBlockMessage('Claude');
 
 /** The review body's lead: the summary's first plain sentence, else a count. `by` names the provider
  *  that ran the review (default Claude — its text is unchanged). */
-export function autoReviewBodyLead(summary: string | null, commentCount: number, by: AiProviderName = 'Claude'): string {
+export function autoReviewBodyLead(summary: string | null, commentCount: number, by: string = 'Claude'): string {
   for (const raw of (summary ?? '').split('\n')) {
     const line = raw.trim();
     if (line === '' || /^([-*+]|\d+[.)])\s/.test(line) || line.startsWith('#')) continue;
@@ -645,9 +642,10 @@ async function writeRecord(ctx: AgentContext, reviewId: number, rec: ClaudeAutoP
   await ctx.db.update(cr).set({ autoPost: rec }).where(eq(cr.id, reviewId)).execute();
 }
 
-// `inPair`: the comment rides a Claude + Codex pair's one review, so it opens by naming who raised it
-// (story findings are never auto-posted, so the lead slot is free).
-const toPostFinding = (f: ClaudeFinding, by: AiProviderName, inPair = false): PostReviewFinding => ({
+// `tag`: the comment rides a Claude + Codex pair's one review, so it names who raised it — "Claude",
+// "Codex" or "Claude + Codex" (`findingSourceLabel`); null on an ordinary run. (Story findings are never
+// auto-posted, so the lead slot is free.) `by` is the provider whose run holds the finding (its footer).
+const toPostFinding = (f: ClaudeFinding, by: AiProviderName, tag: string | null = null): PostReviewFinding => ({
   id: f.id,
   path: f.path,
   line: f.line,
@@ -659,8 +657,8 @@ const toPostFinding = (f: ClaudeFinding, by: AiProviderName, inPair = false): Po
   severity: f.severity,
   // A pair's comment names who raised it ON the ONE severity lead ("**Warning** · Codex"); a finding
   // with no label word (none posted today) falls back to its own "Raised by" line.
-  severityTag: inPair ? by : null,
-  storyLead: inPair && limnSeverityLabel(f.severity) == null ? pairRaisedByLead(by) : null,
+  severityTag: tag,
+  storyLead: tag != null && limnSeverityLabel(f.severity) == null ? pairRaisedByLead(tag) : null,
   // The footer names the provider that ran the review (Claude's text unchanged).
   footer: autoPostFooter(by),
 });
@@ -898,6 +896,14 @@ async function autoPostReview(
     first = null;
   }
   const pairFirst: ClaudeReview | null = first;
+  // THE PAIR'S ONE REVIEW (pair-consolidate.ts): its summary, and who raised each kept finding. A pair
+  // from before the record reads as the two summaries joined and each half's own provider.
+  const consolidation = pairFirst != null ? await readPairConsolidation(ctx, pairFirst.id, prId).catch(() => null) : null;
+  const tagOf = (f: ClaudeFinding): string | null => {
+    if (pairFirst == null) return null;
+    const src = consolidation?.sourceOf[String(f.id)];
+    return src != null ? findingSourceLabel(src) : (byOf.get(f.id) ?? aiRunProviderName(review));
+  };
 
   const posted = new Set<number>();
   const errors: string[] = [];
@@ -910,22 +916,23 @@ async function autoPostReview(
       reviewHeadSha: pctx.reviewHeadSha,
       body:
         pairFirst != null
-          ? pairReviewBody(
-              [pairFirst, review].map((r) => {
-                const mine = new Set(r.findings.map((x) => x.id));
-                const n = picked.toPost.filter((f) => mine.has(f.id)).length;
-                return { by: aiRunProviderName(r), text: autoReviewBodyLead(r.summary, n, aiRunProviderName(r)) };
-              }),
-              PAIR_AUTO_POST_FOOTER,
-            )
+          ? consolidation?.how === 'pass'
+            ? `${autoReviewBodyLead(consolidation.summary, picked.toPost.length, PAIR_BODY_BY)}\n\n${PAIR_AUTO_POST_FOOTER}`
+            : // Joined in code (or an older pair): each half's lead, named.
+              pairReviewBody(
+                [pairFirst, review].map((r) => {
+                  const mine = new Set(r.findings.map((x) => x.id));
+                  const n = picked.toPost.filter((f) => mine.has(f.id)).length;
+                  return { by: aiRunProviderName(r), text: autoReviewBodyLead(r.summary, n, aiRunProviderName(r)) };
+                }),
+                PAIR_AUTO_POST_FOOTER,
+              )
           : autoReviewBody(review.summary, picked.toPost.length, aiRunProviderName(review)),
       // COMMENT unless auto verdict is on AND its gate let the verdict through.
       verdict: ev,
       // Questions ride the same review: the seam anchors each inline, else falls back. In a pair each
       // comment carries its own provider's footer and names who raised it.
-      includedFindings: picked.toPost.map((f) =>
-        toPostFinding(f, byOf.get(f.id) ?? aiRunProviderName(review), pairFirst != null),
-      ),
+      includedFindings: picked.toPost.map((f) => toPostFinding(f, byOf.get(f.id) ?? aiRunProviderName(review), tagOf(f))),
       dryRun: false,
     });
 

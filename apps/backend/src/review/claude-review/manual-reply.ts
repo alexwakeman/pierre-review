@@ -20,7 +20,7 @@ import {
   type FollowUpReplyResult,
 } from '@pierre-review/shared';
 import type { AgentContext } from '../agent-context.js';
-import { getClaudeReviewById } from './persist.js';
+import { getReviewView } from './persist.js';
 import { findFindingThread } from './finding-thread.js';
 import {
   PUSHBACK_MARKER,
@@ -111,7 +111,8 @@ export async function postFollowUpReply(
   { accountId, reviewId, priorFindingId }: { accountId: number; reviewId: number; priorFindingId: number },
   deps: ManualReplyDeps = defaultManualReplyDeps,
 ): Promise<ManualReplyOutcome> {
-  const review = await getClaudeReviewById(ctx, reviewId, accountId);
+  // A Claude + Codex pair is one review: its follow-up holds both halves' items (pair-view.ts).
+  const review = await getReviewView(ctx, reviewId, accountId);
   if (!review || review.status !== 'succeeded') return { kind: 'not_found' };
   const item = review.followUp?.items.find((it) => it.priorFindingId === priorFindingId);
   if (!item || (item.status !== 'reply_accepted' && item.status !== 'reply_disputed')) return { kind: 'not_found' };

@@ -29,6 +29,7 @@ import type {
   ClaudeReviewFollowUpRecord,
   ClaudeAutoPostRecord,
   ClaudeTeamClaimRecord,
+  ClaudeReviewPairConsolidation,
   ClaudeCiFailuresRecord,
   CiAutoPostRecord,
   SonarIssue,
@@ -1299,6 +1300,12 @@ export const claudeReviews = sqliteTable(
     pairId: integer('pair_id'),
     pairRole: text('pair_role', { enum: ['first', 'second'] }),
     pairDropped: integer('pair_dropped'),
+    // THE PAIR'S ONE REVIEW (migration 0137; review/claude-review/pair-consolidate.ts): on the pair's
+    // FIRST row only, written ONCE when the pair ends — the consolidated summary, the code verdict,
+    // each kept finding's source, the merged-away duplicates and the half that did not finish.
+    // NULL on every other row, on a pair still running, and on a pair from before the column (read as
+    // the two halves joined in code).
+    pairConsolidation: text('pair_consolidation', { mode: 'json' }).$type<ClaudeReviewPairConsolidation>(),
     // A REPLIES PASS (review/claude-review/replies-check.ts): 'replies' on a run that judged only
     // people's replies on Limn's own posted findings; NULL on every full review (migration 0136).
     // ⚠ Every "the latest review" / "a run at this head" reader filters `kind IS NULL`.
@@ -1398,6 +1405,12 @@ export const claudeReviewFindings = sqliteTable(
     // The reference-library sections this finding rests on, server-checked (migration 0117 / pg 0104).
     // NULL = none.
     docCitations: text('doc_citations', { mode: 'json' }).$type<ReferenceDocCitation[]>(),
+    // A CLAUDE + CODEX PAIR'S DUPLICATE (migration 0137): the id of the finding kept in this one's
+    // place when the pair was consolidated (the other half made the same point). A soft reference to
+    // a finding of the same pair (no FK, like `prior_finding_id`). A merged-away finding stays here
+    // but is NEVER shown, posted, counted in a verdict or sent to AI Fix; the next follow-up of its
+    // provider follows up the kept one instead. NULL on every other finding.
+    mergedInto: integer('merged_into'),
   },
   (t) => ({ reviewIdx: index('crf_review_idx').on(t.reviewId) }),
 );

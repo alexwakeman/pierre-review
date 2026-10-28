@@ -1213,6 +1213,15 @@ Additive, nullable, no backfill. ⚠ Every "latest review" / "run at this head" 
 already in `accountScopedTables()`, erasure and the export. Journal `idx` 136, `when` sqlite
 `1792137623016`. `0134`, `0135` and `0136` were built in parallel and landed together, in order.
 
+### `0137_review_pair_consolidation` — a Claude + Codex pair as ONE review
+`ALTER TABLE claude_reviews ADD pair_consolidation text` (JSON `ClaudeReviewPairConsolidation`, on a
+pair's FIRST row only: the one summary, the code verdict, each kept finding's source, the merged-away
+duplicates and the half that did not finish) and `ALTER TABLE claude_review_findings ADD merged_into
+integer` (a merged-away duplicate → the kept finding's id; no FK, a soft link like
+`prior_finding_id`). Additive, nullable, no backfill: an older pair reads as its two halves joined in
+code. Both tables are already in `accountScopedTables()`, the erasure and the export.
+[CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Claude + Codex. Journal `idx` 137, `when` sqlite `1792137624016`.
+
 ### No migration — "Check against code" removed (2026-10-18): `sprint_ticket_repos` + `sprint_assessments` DORMANT
 
 The sprint drawer, its repo picker and "Check against code" (`review/sprint-assess/`) were removed with

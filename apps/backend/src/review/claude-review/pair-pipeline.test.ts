@@ -7,7 +7,10 @@
 //   4. two ordinary rows, each labelled by its own provider, linked as a pair (wire + history);
 //   5. one provider signed in ⇒ just that one runs, no pair;
 //   6. an AUTO pair (workspace "Claude + Codex"): ONE auto-post call for both halves, and ONE Slack
-//      signal, at the pair's end.
+//      signal, at the pair's end;
+//   7. THE CONSOLIDATION runs at the pair's end, BEFORE the auto hooks: the merge pass (a fake
+//      completion on the context) when both succeeded — stored, and the latest review reads as ONE —
+//      and the code consolidation naming the failed half otherwise.
 //
 //   pnpm --filter @pierre-review/backend test claude-review/pair-pipeline
 import { rmSync } from 'node:fs';
@@ -62,6 +65,7 @@ const ended: Array<{ provider: string; endedAt: number }> = [];
 let clock = 0;
 let claudeGate: Promise<void> | null = null;
 let claudeFails = false;
+const mergeCalls: Array<{ prompt: string; autoPostsSoFar: number }> = [];
 
 const finding = (title: string, line: number) => ({
   path: 'src/a.ts', line, side: 'RIGHT', severity: 'warning', title, body: `${title}.`, suggestion: null, diffHunk: null,
@@ -83,6 +87,11 @@ beforeAll(async () => {
     log: { warn: () => {}, info: () => {}, error: () => {} },
     recordAiUsage: async () => {},
     llm: {
+      // The merge pass's one-shot (a fake: no model runs). Records when it ran, for the ordering check.
+      complete: async (o: { prompt: string }) => {
+        mergeCalls.push({ prompt: o.prompt, autoPostsSoFar: autoPostCalls.length });
+        return { text: JSON.stringify({ duplicateGroups: [], summary: 'Merged summary.' }) };
+      },
       detectAuth: () => ({ status: 'ok' }),
       detectProviderAuth: (p: 'claude' | 'codex') => (signedIn[p] ? { status: 'ok' } : { status: 'none', message: 'no' }),
     },
@@ -156,6 +165,7 @@ beforeEach(() => {
   signals.length = 0;
   claudeGate = null;
   claudeFails = false;
+  mergeCalls.length = 0;
   signedIn.claude = true;
   signedIn.codex = true;
 });
@@ -226,6 +236,15 @@ describe('a manual pair', () => {
     expect(history.map((h) => h.pair?.role)).toEqual(['second', 'first']);
     // A manual pair reaches no auto hook.
     expect(autoPostCalls).toEqual([]);
+    // THE CONSOLIDATION: one merge pass at the pair's end; the latest review reads as ONE.
+    expect(mergeCalls).toHaveLength(1);
+    const latest = await persist.getLatestClaudeReview(ctx, prId, 1);
+    expect(latest).toMatchObject({ id: second!.id, status: 'succeeded', summary: 'Merged summary.', pair: { how: 'pass' } });
+    expect(latest!.findings.map((f) => [f.title, f.source])).toEqual([
+      ['Null check missing on the user lookup', 'claude'],
+      ['Off-by-one in the page count', 'codex'],
+    ]);
+    expect((await manager.getReviewStatus(ctx, 1, prId)).status).toBe('succeeded');
   });
 
   it('a failed first half: the second still runs, without pair input', async () => {
@@ -238,6 +257,10 @@ describe('a manual pair', () => {
     expect(second).toMatchObject({ status: 'succeeded', provider: 'codex' });
     expect(calls[1]!.prompt).not.toContain('Already raised');
     expect(second!.findings).toHaveLength(2);
+    // One half ⇒ no pass; that half IS the review, the other named.
+    expect(mergeCalls).toHaveLength(0);
+    const latest = await persist.getLatestClaudeReview(ctx, prId, 1);
+    expect(latest).toMatchObject({ status: 'succeeded', summary: 'codex summary', pair: { how: 'single', failedHalf: { provider: 'claude', reason: 'usage limit' } } });
   });
 
   it('one provider signed in ⇒ that one alone, no pair', async () => {
@@ -264,6 +287,8 @@ describe('an auto pair', () => {
     expect(second).toMatchObject({ trigger: 'auto', provider: 'codex', pair: { role: 'second' } });
     expect(autoPostCalls).toEqual([{ accountId: 1, prId, reviewId: second!.id, pairFirstReviewId: first!.id }]);
     expect(signals.map((s) => s.reviewId)).toEqual([second!.id]);
+    // The merge ran BEFORE the auto post.
+    expect(mergeCalls.map((m) => m.autoPostsSoFar)).toEqual([0]);
     await settings.setWorkspaceAutoReview(ctx, 1, wsId, { autoReviewProviders: 'default' });
   });
 

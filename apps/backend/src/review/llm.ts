@@ -33,6 +33,9 @@ export { cheapRequestShape, cheapRoute } from '../ai/providers/claude.js';
 
 export interface CheapCompleteOpts {
   model?: string;
+  // The model ROLE on the active provider (ai/provider.ts `ModelRole`). Absent ⇒ 'fast'. A caller
+  // that names a Claude `model` passes its role too, so Codex resolves the same depth.
+  role?: 'deep' | 'standard' | 'fast';
   system?: string;
   prompt: string;
   maxTokens?: number;
@@ -55,5 +58,5 @@ export async function cheapComplete(
   opts: CheapCompleteOpts,
 ): Promise<CheapCompleteResult> {
   if (!config.aiEnabled) throw new Error('AI is switched off here.');
-  return getActiveProvider().complete({ ...opts, model: opts.model ?? DEFAULT_MODEL, role: 'fast' });
+  return getActiveProvider().complete({ ...opts, model: opts.model ?? DEFAULT_MODEL, role: opts.role ?? 'fast' });
 }

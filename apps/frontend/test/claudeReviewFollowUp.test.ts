@@ -564,9 +564,10 @@ describe('source guards', () => {
         'Run a review',
       ].sort(),
     );
-    // The run's own section names the provider that made it ("Claude's review" / "Codex's review").
+    // The run's own section names the provider that made it ("Claude's review" / "Codex's review"),
+    // or "Claude + Codex review" for a pair's one review (`reviewByName`).
     expect(code(read('components/ClaudeReviewTab.tsx'))).toMatch(
-      /<ReviewSection\s+title=\{`\$\{aiRunProviderName\(storedReview\)\}'s review`\}/,
+      /<ReviewSection\s+title=\{storedReview\.pair != null \? `\$\{by\} review` : `\$\{by\}'s review`\}/,
     );
     // ONE story section: Story check (TicketCoverage.tsx). The old "User stories" one is gone.
     expect(code(read('components/ClaudeReviewTab.tsx'))).not.toMatch(/'User stor(y|ies)'/);

@@ -5,6 +5,7 @@ import { accountIdOf } from '../api/plugins/auth.js';
 import { db, schema, runTransaction } from '../db/client.js';
 import * as hostQueries from '../db/queries.js';
 import { recordAiUsage, type AiUsageRecord } from '../db/usage.js';
+import type { CheapCompleteOpts, CheapCompleteResult } from './llm.js';
 import { buildAiBudgetGate, type AiBudgetGate } from '../ai/budget.js';
 import { getAccessToken } from '../auth/account.js';
 import { fetchBranchHeadSha, fetchPrHeadInfo, fetchPrUnifiedDiff } from '../github/mutations.js';
@@ -69,6 +70,9 @@ export interface AgentContext {
     // The same pre-flight for a NAMED provider (a manual run's per-run choice, a follow-up on a stored
     // run's provider). Optional so a test's fake ctx may omit it (`preflightFor` then asks detectAuth).
     detectProviderAuth?(provider: 'claude' | 'codex', kind: AiRunKind): DetectAuthResult;
+    // The one-shot completion (review/llm.ts `cheapComplete`, through the provider seam). Optional so
+    // a test's fake ctx may omit it — a caller then takes its no-model path (never a live call).
+    complete?(opts: CheapCompleteOpts): Promise<CheapCompleteResult>;
   };
   recordAiUsage(row: AiUsageRecord): Promise<void>;
   github: Pick<
@@ -179,6 +183,7 @@ export function buildAgentContext(log: FastifyBaseLogger): AgentContext {
         const r = detectProviderAuth(provider, kind);
         return r.status === 'ok' ? { status: 'ok' } : { status: 'none', message: r.message };
       },
+      complete: async (opts) => (await import('./llm.js')).cheapComplete(opts),
     },
     recordAiUsage: (row) => recordAiUsage(row),
     github: {

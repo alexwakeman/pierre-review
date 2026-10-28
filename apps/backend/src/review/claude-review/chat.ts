@@ -24,7 +24,7 @@ import type { PreparedReview } from '../../platform/contract.js';
 import { requestModelOf } from '../../ai/provider.js';
 import type { AgentContext } from '../agent-context.js';
 import { AGENTIC_AI_ENABLED, chatMayApplyAuthEnv } from './manager.js';
-import { getClaudeReviewById, getReviewPrContext, type ReviewPrContext } from './persist.js';
+import { getReviewPrContext, getReviewView, type ReviewPrContext } from './persist.js';
 import { pickReviewNonce } from './prompts.js';
 import {
   EXPLAIN_INSTRUCTION,
@@ -564,7 +564,8 @@ export async function answerReviewChat(
   }
   inFlight.set(accountId, reviewId);
   try {
-    const review = await getClaudeReviewById(ctx, reviewId, accountId);
+    // A Claude + Codex pair is asked about as its ONE review (both halves' findings).
+    const review = await getReviewView(ctx, reviewId, accountId);
     if (!review) {
       return { ok: false, status: 404, error: 'NotFound', message: `Review ${reviewId} not found` };
     }
@@ -815,7 +816,8 @@ export function registerClaudeReviewChatRoutes(app: FastifyInstance, ctx: AgentC
       const { reviewId } = req.params as { reviewId: number };
       const findingId = (req.query as { findingId?: number }).findingId ?? null;
       const accountId = ctx.accountIdOf(req);
-      const review = await getClaudeReviewById(ctx, reviewId, accountId);
+      // A Claude + Codex pair is asked about as its ONE review (both halves' findings).
+    const review = await getReviewView(ctx, reviewId, accountId);
       if (!review) return notFound(reply, `Review ${reviewId}`);
       if (findingId != null && !review.findings.some((f) => f.id === findingId)) {
         return notFound(reply, `Finding ${findingId}`);

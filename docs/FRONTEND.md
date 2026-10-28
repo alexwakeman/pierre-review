@@ -1480,8 +1480,11 @@ reappears.
   "reviewed on <date>"), the exact `dateTime()` on hover. Mounted beside the currency pill on the
   Open PRs panel and the Claude's review header (the shown run's `finishedAt`), and at the end of
   a Pending card's one-line Claude summary on a finished run (`ClaudeReviewPrState.finishedAt`,
-  falling back to a `claude_review` My Turn card's `since`). The run list ("All reviews of this PR", `ReviewHistoryList`; docs/CLAUDE-REVIEW.md § The review tab's history) prints each run's
-  date AND time of day via `reviewRunWhen()` (`finishedAt ?? createdAt`), plus the age while recent.
+  falling back to a `claude_review` My Turn card's `since`). The history select ("Showing …", `ReviewHistoryList` — a native `<select>`, one option per
+  review, a Claude + Codex pair ONE option; docs/CLAUDE-REVIEW.md § The review tab's history) prints
+  each review's date AND time of day via `reviewRunWhen()` (`finishedAt ?? createdAt`), plus the age
+  while recent. A pair is shown as ONE review (the server's consolidated view): one header, one
+  summary, one findings list with a quiet source chip per finding.
 - **Is the review on the PR's current commit? ONE helper, `reviewCurrency()`
   (`lib/claudeReviewColumn.ts`)**, read by the Claude's review header (second pill, after the verdict; also for a past
   run picked in the run list — always against the PR's CURRENT head) and the Open PRs card's verdict

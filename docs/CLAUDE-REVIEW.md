@@ -447,8 +447,11 @@ I would pick a preference for auto-review in settings."
 
 The user asked: "allow me to run reviews with BOTH codex and Claude if they're both available … they
 must not duplicate. They can run sequentially with … Claude running first so one can feed into the next
-to dedupe results." Code: `review/claude-review/pair.ts` (the pure half), `manager.ts` (the sequence),
-`auto-post.ts` (the one post); migration `0135`.
+to dedupe results." Then (2026-10-28): "a consolidated view in Limn so we don't have to switch between
+views to see both … the outcome should be always merged as a final step … avoiding duplicates is
+paramount … we should still get a review outcome if at least one agent ran ok." Code:
+`review/claude-review/pair.ts` (the pure half), `manager.ts` (the sequence), `pair-consolidate.ts`
+(the merge), `pair-view.ts` (the one view), `auto-post.ts` (the one post); migrations `0135`, `0137`.
 
 - **Where it is offered.** MANUAL: the AI Review menu lists "Claude + Codex" last, only while BOTH
   providers can review (`lib/modelPick.ts` `resolveReviewModelPick`); the request is
@@ -481,31 +484,87 @@ to dedupe results." Code: `review/claude-review/pair.ts` (the pure half), `manag
   same file, lines within `PAIR_LINE_SLACK` (5) or either one file-level, and `similarTitles` (the
   settled-by-reply identity) — is dropped (`dropPairRepeats`); the count is stored on the second half
   (`pair_dropped`).
-- **ONE GITHUB POST FOR AN AUTO PAIR.** Nothing posts after the first half. When the pair ends:
-  both succeeded ⇒ `maybeAutoPostReview({reviewId: second, pairFirstReviewId: first})` sends ONE review
-  holding both halves' findings (each comment names who raised it ON the one severity lead —
-  "**Warning** · Codex", `PostReviewFinding.severityTag` → `limnSeverityLead`'s `tag`, § Severity labels;
-  a finding with no label word falls back to a `_Raised by Codex._` line — and carries its own
-  provider's footer), ONE body (`**Claude:** <lead>` / `**Codex:** <lead>` and
-  `PAIR_AUTO_POST_FOOTER`, listed in `AUTO_POST_FOOTERS`), ONE verdict over the UNION
-  (`autoVerdictFor(pairVerdict(a, b), both runs' findings)`: APPROVE only when both approved and
+- **ONE REVIEW: THE CONSOLIDATION STEP** (decided 2026-10-28; `pair-consolidate.ts`). When the pair
+  ends — its second half succeeded, failed or was stopped, or never started — and BEFORE any hook
+  (auto-post, Slack, auto fix, diagrams), the two halves become ONE review, stored ONCE on the pair's
+  FIRST row (`claude_reviews.pair_consolidation`, migration 0137: `{how, summary, verdict, sourceOf,
+  mergedFrom, failedHalf, at}`). The second half's run is still in its slot meanwhile (phase
+  `merging`, "Merging the two reviews…"), and every read shows the pair as running (`isPairMerging`).
+  - **Both succeeded ⇒ ONE QUICK PASS**, chosen over "the last runner merges" so neither agent run
+    changes: one text-only one-shot through the provider seam (`ctx.llm.complete` = `cheapComplete`,
+    the STANDARD role on the DEFAULT provider: Sonnet 5 / Terra; no agent, no files). Shown both
+    halves' findings (id, provider, severity, `path:line`, title, a 300-character body) and both
+    summaries and model verdicts, each in a nonce fence as untrusted data; capped at
+    `PAIR_MERGE_INPUT_CAP` (24k characters — over it, no call); 90 s timeout. It answers strict JSON:
+    `duplicateGroups` (sets of ids making the SAME point, each with the one to keep) and one short
+    summary. ⚠ CODE VALIDATES IT (`parseConsolidation`): an unknown id, a finding in two groups, a kept
+    id outside its group, a group of one, no summary (or over 2,000 characters), bad JSON ⇒ the whole
+    answer is ignored. ⚠ CODE CHOOSES WHAT IS KEPT (`applyDuplicateGroups`): a finding already on
+    GitHub (two posted ⇒ the group is left alone), else the model's pick unless another member is more
+    severe — then the most severe, Claude's on a tie — so a blocker is never merged into a nit. The
+    kept finding's source is `'both'` when its group spans the providers. Usage is recorded
+    (`recordAiUsage`, feature `claude_review_merge`). An automatic pair's pass is part of the run the
+    budget gate already allowed: not asked again.
+  - **THE FALLBACK** (the pass threw, timed out, had no credential or no completion seam, was over
+    its cap, or answered something invalid) ⇒ in code (`pair-view.ts codeConsolidation`): every
+    finding kept (`dropPairRepeats` already ran), the summaries joined (`**Claude:** … / **Codex:**
+    …`). A consolidation failure never fails the pair.
+  - **One half succeeded ⇒ that half IS the review** (`how: 'single'`): its findings, summary and
+    verdict, and `failedHalf {provider, reason}` — the other's stored error's first sentence, "it was
+    stopped", or why it never started (`notStartedHalf`: "the spend budget is used up", "a teammate's
+    Limn is reviewing with Codex"). No pass. **Neither ⇒ nothing is written**: the pair failed.
+  - ⚠ **THE VERDICT IS CODE** (`pairCodeVerdict` = `autoVerdictFor(pairVerdict(a, b), the kept
+    findings)`), never the model's.
+  - ⚠ **A MERGED-AWAY DUPLICATE** (`claude_review_findings.merged_into` = the kept id) stays stored
+    but every read of a run's findings leaves it out (`getClaudeReviewById`, `isMergedAway`): it is
+    never shown, posted (the single-finding route answers `409 MergedDuplicate`), counted in a verdict
+    (auto-post, the replies-pass outcome, My Turn, the Open PRs column) or sent to AI Fix. ⚠ **THE
+    NEXT FOLLOW-UP** of its provider follows up the KEPT finding instead (`loadPriorReviewForFollowUp`
+    carries it into that provider's chain), so a still-open point is re-raised against the kept
+    finding (`priorFindingId` = the kept id), never as new; the next pair's second half drops a
+    re-raise of the SAME earlier finding (`isPairRepeat`), and the next consolidation catches the rest.
+- **ONE VIEW** (`pair-view.ts buildPairView`, served by `getReviewView` for `GET
+  /api/prs/:id/claude-review`, `GET /api/claude-reviews/:id`, AI Fix's seed, the review chat and the
+  follow-up reply route): either half's id answers the pair as ONE `ClaudeReview` addressed by its
+  LATEST half's id — status running while a half is or the pair is merging, else succeeded when either
+  half did; one summary and verdict (the record's; an older pair or one interrupted mid-merge reads as
+  the code fold); both succeeded halves' findings, each with `source` ('claude' | 'codex' | 'both');
+  both halves' follow-up items once each; thread judgements, CI and stories from the latest succeeded
+  half; cost and tokens summed; `pair.halves` (each half's provider, model, effort, status, cost),
+  `pair.failedHalf`, `pair.how`, `pair.verdict`. Draft, verdict and posted state are the latest
+  half's.
+- **ONE GITHUB POST FOR AN AUTO PAIR.** Nothing posts after the first half. When the pair ends (after
+  the consolidation): both succeeded ⇒ `maybeAutoPostReview({reviewId: second, pairFirstReviewId:
+  first})` sends ONE review holding the CONSOLIDATED findings (each comment names who raised it ON the
+  one severity lead — "**Warning** · Codex", "**Warning** · Claude + Codex" for a merged one
+  (`findingSourceLabel`), `PostReviewFinding.severityTag` → `limnSeverityLead`'s `tag`, § Severity
+  labels; a finding with no label word falls back to a `_Raised by Codex._` line — and carries its own
+  run's provider footer), ONE body (the pass's summary lead; joined in code, `**Claude:** <lead>` /
+  `**Codex:** <lead>`; then `PAIR_AUTO_POST_FOOTER`, listed in `AUTO_POST_FOOTERS`), ONE verdict over
+  the kept findings (`autoVerdictFor(pairVerdict(a, b), …)`: APPROVE only when both approved and
   neither left a blocker or warning). ⚠ THE CLAIM covers the pair: compare-and-set on the SECOND half's
   `auto_post`, then on the first's (its record names the second, `viaPairReviewId`) — both BEFORE any
   write; a first half someone else claimed keeps its findings out; a failure is recorded on both and
   never retried. Only one half succeeded ⇒ that half posts alone, as any auto run. Auto resolve and
   pushback run for both halves (each claims per thread). The Slack signal, Sonar post, auto fix and
   design diagrams run ONCE, at the pair's end, on the second half when it succeeded, else the first.
-  (Auto fix is seeded by that one half's findings.)
-- **MANUAL: "Post both".** The Post to GitHub section of the latest run (the second half) offers "Post
-  both" beside Post when both halves succeeded (`lib/reviewHistory.ts` `canPostBoth`) →
-  `POST /api/claude-reviews/:reviewId/post-pair`: the same one-review shape, the body from each half's
-  draft (a half nobody drafted reads as its summary's first sentence), the reader's verdict. Posting
-  one half alone stays possible: Post on the second, and the first half's findings one by one (shown
-  from the history, it is editable as the latest's partner).
-- **On screen.** The history groups the pair under one "Claude + Codex" header, first then second, the
-  second marked "after Claude" (`groupReviewHistory`); every run is still listed. The progress line
-  says which half runs ("Running Claude review, then Codex" / "Running Codex review, after Claude";
-  `ClaudeReviewStatusResponse.pair`).
+  The Slack signal names "Claude + Codex" with the pair's one summary and verdict; auto fix is seeded
+  from the CONSOLIDATED set (AI Fix reads the review through `getReviewView`).
+- **MANUAL: ONE Post / Preview.** A manual pair is consolidated the same way, and is one review with
+  one Post and one Preview: `POST /api/claude-reviews/:reviewId/post` with either half's id posts the
+  consolidated findings (source on the severity lead, as above), the reader's draft (on the latest
+  half) and verdict, and stamps each half's own findings; `409 PairIncomplete` while the pair runs.
+  "Post both" / "Preview both" are gone; `…/post-pair` is kept as the same post.
+- **On screen** (`ClaudeReviewTab.tsx` `ClaudesReview`): ONE review — the header "Claude + Codex
+  review" (`PAIR_RUN_LABEL`), its secondary line both models (`pairModelsLabel`) and each half's cost in
+  its own provider's terms (`useRunCostText`: US$ on a key, a share of the week on a subscription,
+  never summed); one summary and verdict; ONE findings list ordered as any review, each finding with a
+  quiet source chip ("Claude", "Codex", "Claude + Codex" — the lens chip's neutral 11px style, no
+  colour per provider); a half that did not finish is one line under the header ("Codex didn't
+  finish: usage limit reached", `pairHalfFailedLine`). How it was merged sits behind the header's ⓘ
+  only. The history select lists the pair as ONE option (§ The review tab's history). The progress
+  line names the step: "Claude reviewing…", "Codex reviewing…", "Merging the two reviews…"
+  (`pairRunningLabel`, the second half's `merging` phase).
 - **Auto review's rules hold, per head.** A pair is one unit: any succeeded half settles the head
   ("re-reviews once per new HEAD"), the lane holds the PR from the first half's start to the second's
   end. Retries keep the existing rules unchanged and per row: the latest row at the head is the second
@@ -520,7 +579,12 @@ to dedupe results." Code: `review/claude-review/pair.ts` (the pure half), `manag
   only its own findings in the one post (`finishAutoRunClaim`).
 - **With the replies pass** (§ The replies pass): a pair is ONE review in two runs — the pass plans
   replies on BOTH halves' posted findings (each provider's chain), judges each thread on its owner's
-  provider, and the outcome re-check counts the open findings of BOTH succeeded halves.
+  provider, and the outcome re-check counts the open findings of BOTH succeeded halves (the
+  consolidated set: merged-away duplicates are never read).
+- **Elsewhere the pair is one review too**: the Open PRs column (`getLatestReviewStates`: the pair's
+  status and verdict, both halves' counts and "Earlier: …" items), My Turn's "Claude review ready" card
+  (`getUnactionedClaudeReviews`: both halves' findings, posted when either was, the pair's verdict) and
+  the history's finding counts all leave merged-away duplicates out.
 
 ### The effort setting (decided 2026-10-26)
 
@@ -570,10 +634,14 @@ Default, Low, Medium, High, Extra high, Max.
 
 ### The review tab's history
 
-Every run on the PR is listed, always (`components/ReviewHistoryList.tsx`): all providers, all
-heads, newest first (`listClaudeReviewHistory` is uncapped and now carries `findingCount`). A row
-shows the head, what ran (`aiRunLabel`), status, verdict, findings, when and the Auto marker;
-pressing it shows that run, and the shown run is marked. Which run is shown is the reader's
+Every review of the PR is listed, always, in ONE native drop-down ("Showing …",
+`components/ReviewHistoryList.tsx`; back to a select on 2026-10-28 — the always-visible list grew too
+long): all providers, all heads, newest first (`listClaudeReviewHistory` is uncapped and carries
+`findingCount`). ONE OPTION PER REVIEW (`lib/reviewHistory.ts reviewHistoryOptions`): "<what ran> ·
+<short head> · <when>", the status when not finished, "Auto review", "(latest)". What ran is
+`aiRunLabel`; a Claude + Codex pair is ONE option "Claude + Codex · abc1234 · <when>", addressed by its
+latest half's id (either half's id selects it, `historyOptionIdFor`); a replies pass reads "Replies
+checked · …". Picking one shows that review. Which run is shown is the reader's
 (`lib/reviewHistory.ts nextShownReviewId`): a run starting or finishing, a provider switch or the
 model menu never moves it, except to a run the reader just started (a MANUAL run that became the
 latest). Opening while an auto run is in flight shows the newest finished run. Editing and posting

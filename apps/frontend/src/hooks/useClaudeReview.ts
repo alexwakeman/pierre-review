@@ -428,16 +428,9 @@ export function useAllClaudeReviews(enabled: boolean) {
 export function usePostReview(prId: number) {
   const qc = useQueryClient();
   return useMutation({
-    // `pair`: "Post both" — the pair's two runs as ONE GitHub review (`reviewId` = either half).
-    mutationFn: (vars: {
-      reviewId: number;
-      userVerdict: ClaudeReviewVerdict;
-      dryRun?: boolean;
-      pair?: boolean;
-    }) =>
-      vars.pair
-        ? api.postClaudeReviewPair(vars.reviewId, vars.userVerdict, vars.dryRun ?? false)
-        : api.postClaudeReview(vars.reviewId, vars.userVerdict, vars.dryRun ?? false),
+    // A Claude + Codex pair is ONE review: its id posts the pair's consolidated findings.
+    mutationFn: (vars: { reviewId: number; userVerdict: ClaudeReviewVerdict; dryRun?: boolean }) =>
+      api.postClaudeReview(vars.reviewId, vars.userVerdict, vars.dryRun ?? false),
     onSuccess: (_data, vars) => {
       if (!vars.dryRun) {
         void qc.invalidateQueries({ queryKey: ['claude-review', prId] });

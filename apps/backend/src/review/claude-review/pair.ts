@@ -37,13 +37,16 @@ export function pairProvidersReady(detect: ProviderPreflight): AiProviderId[] {
 // Two findings at most this many lines apart on the same file are "the same place" for the dedupe.
 export const PAIR_LINE_SLACK = 5;
 
-type Placed = { path: string; line: number | null; title: string };
+type Placed = { path: string; line: number | null; title: string; priorFindingId?: number | null };
 
 /**
- * Does `b` repeat `a`? Same file, the same place (lines within PAIR_LINE_SLACK, or either one about
- * the whole file) and a similar title (`similarTitles`, the settled-by-reply identity).
+ * Does `b` repeat `a`? Both re-raise the SAME earlier finding (a pair's merged-away duplicate is
+ * followed up through the finding kept in its place, so both halves may carry it), or: same file, the
+ * same place (lines within PAIR_LINE_SLACK, or either one about the whole file) and a similar title
+ * (`similarTitles`, the settled-by-reply identity).
  */
 export function isPairRepeat(a: Placed, b: Placed): boolean {
+  if (a.priorFindingId != null && a.priorFindingId === b.priorFindingId) return true;
   if (a.path !== b.path) return false;
   if (a.line != null && b.line != null && Math.abs(a.line - b.line) > PAIR_LINE_SLACK) return false;
   return similarTitles(a.title, b.title);
@@ -70,8 +73,8 @@ export function pairInputOf(
   };
 }
 
-/** The lead line of a posted comment in a pair's one review: which provider raised it. */
-export function pairRaisedByLead(by: AiProviderName): string {
+/** The lead line of a posted comment in a pair's one review: who raised it ("Codex", "Claude + Codex"). */
+export function pairRaisedByLead(by: string): string {
   return `_Raised by ${by}._`;
 }
 

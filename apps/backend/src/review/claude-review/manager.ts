@@ -35,6 +35,8 @@ import {
   type PromptPeer,
 } from './prompts.js';
 import { dropPairRepeats, pairInputOf, pairProvidersReady, readAutoReviewProvidersForPr } from './pair.js';
+import { consolidatePair, notStartedHalf } from './pair-consolidate.js';
+import { markPairBusy } from './pair-view.js';
 import { preflightFor } from '../../ai/run-choice.js';
 import {
   linkReraisedFindings,
@@ -149,7 +151,7 @@ interface PairState {
   // Second half: did the first succeed, and what it raised (the prompt input + the code dedupe).
   firstSucceeded?: boolean;
   input?: PromptPairInput | null;
-  firstFindings?: ReadonlyArray<{ path: string; line: number | null; title: string }>;
+  firstFindings?: ReadonlyArray<{ path: string; line: number | null; title: string; priorFindingId?: number | null }>;
   // Queued by a reader's press (auto): the spend budget is not asked again before the second half.
   pressed?: boolean;
   // Second half of an AUTO pair: the FIRST half's run, whose team-claim line (if any) is still held
@@ -592,10 +594,13 @@ function launch(item: QueueItem): void {
   if (item.teamClaim) startTeamClaimRenew(ctx, item.teamClaim);
 
   void runPipeline(item, controller, emit)
-    .then((succeeded) => {
+    .then(async (succeeded) => {
       item.succeeded = succeeded;
       // A pair's FIRST half hands over to its second; everything after a run waits for the pair's end.
       if (pairContinues(item)) return;
+      // ⚠ A PAIR'S END: the two halves become ONE review BEFORE anything is posted (pair-consolidate.ts).
+      // Still inside the run (slot, claim and stream held), so the tab shows "Merging the two reviews…".
+      if (item.pair?.role === 'second') await consolidateAtPairEnd(item, emit);
       item.autoPosted = runEnded(item, endOf(item, succeeded));
     })
     .catch(async (err) => {
@@ -608,8 +613,12 @@ function launch(item: QueueItem): void {
         () => {},
       );
       item.succeeded = false;
-      // A pair's second half failing this way still ends the pair: the first half's results stand.
-      if (item.pair?.role === 'second') item.autoPosted = runEnded(item, endOf(item, false));
+      // A pair's second half failing this way still ends the pair: the first half's results stand,
+      // consolidated as the pair's one review.
+      if (item.pair?.role === 'second') {
+        await consolidateAtPairEnd(item, emit);
+        item.autoPosted = runEnded(item, endOf(item, false));
+      }
     })
     .finally(() => {
       // ⚠ A pair's first half keeps the PR's claim and its slot (`startingPair`, taken BEFORE the
@@ -625,8 +634,11 @@ function launch(item: QueueItem): void {
       reviewIdByPr.delete(prId);
       controllers.delete(reviewId);
       progressByReview.delete(reviewId);
-      if (continues) startingPair.set(prId, item);
-      else {
+      if (continues) {
+        startingPair.set(prId, item);
+        // The pair reads as running until it ends (pair-view.ts), never as its first half alone.
+        markPairBusy(item.pair!.pairId, true);
+      } else {
         claimed.delete(prId);
         emitDone(ctx, prId, item.accountId, reviewId);
       }
@@ -634,6 +646,26 @@ function launch(item: QueueItem): void {
       pumpPeers();
       if (continues) void startPairSecond(item);
     });
+}
+
+/**
+ * A pair's end, on its second half (succeeded, failed or stopped): consolidate the two into ONE review
+ * and store it (pair-consolidate.ts) — with the quick pass when both succeeded ("Merging the two
+ * reviews…"), else in code. Marked "merging" meanwhile, so every read shows the pair as running.
+ * Never throws: a consolidation failure never fails the pair.
+ */
+async function consolidateAtPairEnd(item: QueueItem, emit: (p: ClaudeReviewProgress) => void): Promise<void> {
+  const p = item.pair;
+  if (p?.role !== 'second') return;
+  markPairBusy(p.pairId, true);
+  try {
+    if (p.firstSucceeded && item.succeeded) emit({ phase: 'merging' });
+    await consolidatePair(item.ctx, { accountId: item.accountId, prId: item.prId, pairId: p.pairId, secondId: item.reviewId });
+  } catch (err) {
+    item.ctx.log.warn(`claude review pr ${item.prId}: consolidating the pair failed: ${err instanceof Error ? err.message : String(err)}`);
+  } finally {
+    markPairBusy(p.pairId, false);
+  }
 }
 
 function emitDone(ctx: AgentContext, prId: number, accountId: number, reviewId: number): void {
@@ -795,8 +827,11 @@ async function startPairSecond(first: QueueItem): Promise<void> {
   const provider = pair.secondProvider!;
   let launched = false;
   let teamClaim: TeamClaimHandle | null = null;
+  // Why the second half did not start (the pair's one review names it).
+  let why: 'budget' | 'claimed' | 'error' = 'error';
   try {
     if (first.trigger === 'auto' && !pair.pressed && !(await automaticRunAllowed(ctx, accountId, 'auto review (second half)'))) {
+      why = 'budget';
       return;
     }
     // TEAM CLAIMS: an AUTO pair's second half claims its OWN provider's context. A teammate's Limn
@@ -815,7 +850,10 @@ async function startPairSecond(first: QueueItem): Promise<void> {
         },
         { pressed: pair.pressed === true },
       );
-      if (claim.kind === 'skip') return;
+      if (claim.kind === 'skip') {
+        why = 'claimed';
+        return;
+      }
       teamClaim = claim.kind === 'run' ? claim.handle : null;
     }
     const firstReview = first.succeeded ? await getClaudeReviewById(ctx, first.reviewId, accountId) : null;
@@ -835,6 +873,8 @@ async function startPairSecond(first: QueueItem): Promise<void> {
     if (teamClaim) await saveTeamClaimRecord(ctx, reviewId, teamClaim.record).catch(() => {});
     startingPair.delete(prId);
     launched = true;
+    // The second half's row is running now; the end (consolidateAtPairEnd) marks the merge itself.
+    markPairBusy(pair.pairId, false);
     launch({
       ctx,
       accountId,
@@ -853,7 +893,7 @@ async function startPairSecond(first: QueueItem): Promise<void> {
         first,
         firstSucceeded: first.succeeded === true,
         input: firstFindings.length > 0 ? pairInputOf(first.provider, firstFindings) : null,
-        firstFindings: firstFindings.map((f) => ({ path: f.path, line: f.line, title: f.title })),
+        firstFindings: firstFindings.map((f) => ({ path: f.path, line: f.line, title: f.title, priorFindingId: f.priorFindingId ?? null })),
       },
     });
   } catch (err) {
@@ -863,11 +903,19 @@ async function startPairSecond(first: QueueItem): Promise<void> {
     );
   } finally {
     if (!launched) {
-      // The pair ends on its first half.
+      // The pair ends on its first half: stored as the pair's one review (naming the half that did
+      // not start) BEFORE the end is announced and anything is posted.
       startingPair.delete(prId);
       claimed.delete(prId);
-      emitDone(ctx, prId, accountId, first.reviewId);
-      first.autoPosted = runEnded(first, { reviewId: first.reviewId, succeeded: first.succeeded === true });
+      const consolidated: Promise<unknown> =
+        first.succeeded === true
+          ? consolidatePair(ctx, { accountId, prId, pairId: pair.pairId, secondId: null, notStarted: notStartedHalf(provider, why) })
+          : Promise.resolve(null);
+      first.autoPosted = consolidated.then(() => {
+        markPairBusy(pair.pairId, false);
+        emitDone(ctx, prId, accountId, first.reviewId);
+        return runEnded(first, { reviewId: first.reviewId, succeeded: first.succeeded === true });
+      });
       // TEAM CLAIMS: a claim this half posted before its row could be written is released, and the
       // first half's held line gets its final one.
       if (teamClaim) void finishTeamClaim(ctx, teamClaim, null, { kind: 'unfinished' });

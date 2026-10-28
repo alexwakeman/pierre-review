@@ -6,7 +6,10 @@
 //   2. THE CLAIM covers the pair: claimed on the SECOND run's record, the first marked
 //      `viaPairReviewId`; a second call posts nothing (never twice), and a failure is recorded and
 //      never retried;
-//   3. THE VERDICT is computed over the UNION of both runs' findings.
+//   3. THE VERDICT is computed over the UNION of both runs' findings;
+//   4. THE CONSOLIDATION (pair-consolidate.ts) is what posts: its summary, each kept finding's source
+//      on the severity lead ("Claude + Codex" for a merged duplicate), and a merged-away duplicate
+//      never posted nor counted in the verdict.
 //
 //   pnpm --filter @pierre-review/backend test claude-review/pair-auto-post
 import { rmSync } from 'node:fs';
@@ -156,6 +159,7 @@ describe('one review for both halves', () => {
     expect(out.kind).toBe('done');
     expect(postReview).toHaveBeenCalledTimes(1);
     const sent = postReview.mock.calls[0]![0];
+    // No consolidation stored (an older pair, or the code fallback): each half's lead, named.
     expect(sent.body).toBe(`**Claude:** claude found things.\n\n**Codex:** codex found things.\n\n${PAIR_AUTO_POST_FOOTER}`);
     expect(sent.verdict).toBe('COMMENT');
     // Who raised it rides the ONE severity lead ("**Warning** · Claude"), not a line of its own.
@@ -205,6 +209,58 @@ describe('one review for both halves', () => {
   });
 });
 
+describe('the consolidated review is what posts', () => {
+  it('posts the pass summary; a merged duplicate is never posted and the kept one names both', async () => {
+    const prId = await makePr();
+    const { first, second } = await pairOf(
+      prId,
+      [{ severity: 'warning', title: 'Null check missing' }],
+      [{ severity: 'blocker', title: 'Missing null guard on input' }, { severity: 'warning', title: 'Slow loop' }],
+    );
+    const [c1] = (await persist.getClaudeReviewById(ctx, first, 1))!.findings;
+    const [x1, x2] = (await persist.getClaudeReviewById(ctx, second, 1))!.findings;
+    // The pass said c1 and x1 are the same point; code kept the blocker.
+    await persist.savePairConsolidation(ctx, first, [first, second], {
+      how: 'pass',
+      summary: 'One review of both.\nMore detail.',
+      verdict: 'REQUEST_CHANGES',
+      sourceOf: { [String(x1!.id)]: 'both', [String(x2!.id)]: 'codex' },
+      mergedFrom: { [String(c1!.id)]: x1!.id },
+      failedHalf: null,
+      at: '2026-10-28T00:00:00.000Z',
+    });
+    const out = await ap.maybeAutoPostReview(ctx, { accountId: 1, prId, reviewId: second, pairFirstReviewId: first }, deps() as any);
+    expect(out.kind).toBe('done');
+    const sent = postReview.mock.calls[0]![0];
+    expect(sent.body).toBe(`One review of both.\n\n${PAIR_AUTO_POST_FOOTER}`);
+    expect(sent.includedFindings.map((f: any) => [f.id, f.severityTag])).toEqual([
+      [x1!.id, 'Claude + Codex'],
+      [x2!.id, 'Codex'],
+    ]);
+    // The merged-away one is still stored, never posted.
+    const row = ((await db.select().from(schema.claudeReviewFindings).where(eq(schema.claudeReviewFindings.id, c1!.id)).execute()) as any[])[0];
+    expect(row.mergedInto).toBe(x1!.id);
+    expect(row.postedAt).toBeNull();
+  });
+
+  it('a merged-away blocker is not counted in the verdict', async () => {
+    await settings.setWorkspaceAutoReview(ctx, 1, wsId, { autoPost: { autoVerdict: true } as any });
+    const prId = await makePr();
+    const { first, second } = await pairOf(prId, [{ severity: 'blocker', title: 'Race' }], [{ severity: 'question', title: 'Why?' }], ['APPROVE', 'APPROVE']);
+    const [c1] = (await persist.getClaudeReviewById(ctx, first, 1))!.findings;
+    const [x1] = (await persist.getClaudeReviewById(ctx, second, 1))!.findings;
+    // (A merge the pass could never make — code keeps the most severe — written directly to pin the read.)
+    await persist.savePairConsolidation(ctx, first, [first, second], {
+      how: 'pass', summary: 'S.', verdict: 'APPROVE', sourceOf: { [String(x1!.id)]: 'both' },
+      mergedFrom: { [String(c1!.id)]: x1!.id }, failedHalf: null, at: '',
+    });
+    await ap.maybeAutoPostReview(ctx, { accountId: 1, prId, reviewId: second, pairFirstReviewId: first }, deps() as any);
+    expect(postReview.mock.calls[0]![0].verdict).toBe('APPROVE');
+    expect(postReview.mock.calls[0]![0].includedFindings.map((f: any) => f.id)).toEqual([x1!.id]);
+    await settings.setWorkspaceAutoReview(ctx, 1, wsId, { autoPost: { autoVerdict: false } as any });
+  });
+});
+
 describe('the verdict over the union', () => {
   beforeEach(async () => {
     await settings.setWorkspaceAutoReview(ctx, 1, wsId, { autoPost: { autoVerdict: true } as any });
@@ -236,7 +292,7 @@ describe('the verdict over the union', () => {
   });
 });
 
-describe('the routes: Claude + Codex start, Post both', () => {
+describe('the routes: Claude + Codex start, Post (one review)', () => {
   const app = async (signedIn: { claude: boolean; codex: boolean }) => {
     const { default: Fastify } = await import('fastify');
     const { registerClaudeReviewRoutes } = await import('./routes.js');
@@ -261,7 +317,7 @@ describe('the routes: Claude + Codex start, Post both', () => {
     expect(bad.statusCode).toBe(400);
   });
 
-  it('Post both sends ONE review with both runs’ findings and stamps each run', async () => {
+  it('Post on a pair sends ONE review with both runs’ findings and stamps each run (either half’s id, either path)', async () => {
     const prId = await makePr();
     const { first, second } = await pairOf(prId, [{ severity: 'warning', title: 'Null check missing' }], [{ severity: 'nit', title: 'Rename x' }]);
     await persist.updateReviewDraft(ctx, second, { userBody: 'My summary.' });
@@ -278,7 +334,8 @@ describe('the routes: Claude + Codex start, Post both', () => {
     expect(r.statusCode).toBe(200);
     expect(postReview).toHaveBeenCalledTimes(1);
     const sent = postReview.mock.calls[0]![0];
-    expect(sent.body).toBe('**Claude:** claude found things.\n\n**Codex:** My summary.');
+    // The reader's draft — the pair's one review has one draft (on its latest half).
+    expect(sent.body).toBe('My summary.');
     expect(sent.includedFindings.map((f: any) => [f.severityTag, f.storyLead])).toEqual([
       ['Claude', null],
       ['Codex', null],
@@ -290,11 +347,25 @@ describe('the routes: Claude + Codex start, Post both', () => {
     }
   });
 
-  it('a run that is not half of a pair answers 404', async () => {
+  it('a pair still running cannot be posted (409); a merged-away finding cannot be posted alone (409)', async () => {
     const prId = await makePr();
-    const id = await persist.insertQueuedReview(ctx, prId, 'HEAD', 'claude-opus-5-5' as any, 1, [], 'manual');
+    const first = await half(prId, 'claude', [{ severity: 'warning', title: 'A' }], { role: 'first' });
+    const second = await persist.insertQueuedReview(ctx, prId, 'HEAD', 'claude-opus-5-5' as any, 1, [], 'manual', 'codex', false, { role: 'second', pairId: first });
     const a = await app({ claude: true, codex: true });
-    const r = await a.inject({ method: 'POST', url: `/api/claude-reviews/${id}/post-pair`, payload: { userVerdict: 'COMMENT' } });
-    expect(r.statusCode).toBe(404);
+    const r = await a.inject({ method: 'POST', url: `/api/claude-reviews/${second}/post`, payload: { userVerdict: 'COMMENT' } });
+    expect(r.statusCode).toBe(409);
+    expect(r.json().error).toBe('PairIncomplete');
+
+    const prB = await makePr();
+    const p = await pairOf(prB, [{ severity: 'warning', title: 'Same point' }], [{ severity: 'warning', title: 'Same point again' }]);
+    const [c1] = (await persist.getClaudeReviewById(ctx, p.first, 1))!.findings;
+    const [x1] = (await persist.getClaudeReviewById(ctx, p.second, 1))!.findings;
+    await persist.savePairConsolidation(ctx, p.first, [p.first, p.second], {
+      how: 'pass', summary: 'S.', verdict: 'COMMENT', sourceOf: { [String(x1!.id)]: 'both' },
+      mergedFrom: { [String(c1!.id)]: x1!.id }, failedHalf: null, at: '',
+    });
+    const one = await a.inject({ method: 'POST', url: `/api/claude-findings/${c1!.id}/post`, payload: {} });
+    expect(one.statusCode).toBe(409);
+    expect(one.json().error).toBe('MergedDuplicate');
   });
 });

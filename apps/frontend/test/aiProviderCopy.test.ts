@@ -279,7 +279,7 @@ describe('the wiring', () => {
     // A RUNNING review names the provider it runs on (the row's, stamped with the reader's pick),
     // never the default's.
     // "Running Codex review" — and for a Claude + Codex pair, which half (lib/modelPick.ts).
-    expect(read('components', 'ClaudeReviewTab.tsx')).toMatch(/label=\{pairRunningLabel\(aiProviderName\(liveProvider\), status\?\.pair\?\.role \?\? null\)\}/);
+    expect(read('components', 'ClaudeReviewTab.tsx')).toMatch(/label=\{pairRunningLabel\(aiProviderName\(liveProvider\), status\?\.pair\?\.role \?\? null, phase\)\}/);
     expect(read('components', 'ClaudeReviewTab.tsx')).toMatch(/aiCredentialWords\(liveProvider\)/);
     // AI Fix's ⓘ names the PICKED provider.
     expect(read('components', 'AiFixTab.tsx')).toMatch(/\{pickedName\} reads the PR's code/);

@@ -6,7 +6,7 @@ import { escapeSlack, prLink, slackLink } from './links.js';
 import type { SlackMessage } from './report.js';
 import { postToSlack } from './send.js';
 import { readTargetRow, type SlackTargetRow } from './targets.js';
-import { aiRunProviderName } from '@pierre-review/shared';
+import { aiRunProviderName, PAIR_RUN_LABEL } from '@pierre-review/shared';
 
 // ── THE TWO SLACK EVENT SIGNALS (Pro, `slackDigest`; plugin migration 0040) ──────────────────
 //
@@ -148,7 +148,8 @@ export function reviewMessage(
   f: PrFacts,
   verdict: ClaudeReviewVerdict | null,
   summary: string | null,
-  ranBy: 'Claude' | 'Codex' = 'Claude',
+  // 'Claude + Codex' for a pair's one review.
+  ranBy: string = 'Claude',
 ): SlackMessage {
   const by = f.authorLogin ? ` by @${escapeSlack(f.authorLogin)}` : '';
   const head = `*${ranBy} Review ran* on ${prLine(ctx, workspaceId, f)}${by}`;
@@ -209,6 +210,8 @@ export async function onClaudeReviewCompleted(
       summary: cr.summary,
       reviewMode: cr.reviewMode,
       trigger: cr.trigger,
+      // A Claude + Codex pair announces its ONE review (pair-view.ts): the consolidation on its first row.
+      ...(cr.pairId != null ? { pairId: cr.pairId } : {}),
       // The provider that ran it: the stored `provider` (Phase 4, sqlite 0128), else read from the
       // model id (aiRunProvider). A schema without the columns reads as Claude.
       ...(cr.model != null ? { model: cr.model } : {}),
@@ -225,18 +228,35 @@ export async function onClaudeReviewCompleted(
     trigger: string | null;
     model?: string | null;
     provider?: AiProviderId | null;
+    pairId?: number | null;
   }>;
   const run = runs[0];
   // Succeeded runs only, and not a `skip` (no code to review — a message would be noise).
   if (run == null || run.status !== 'succeeded' || run.reviewMode === 'skip') return;
   // The STORED trigger agrees, or nothing is sent (no claim either).
   if (run.trigger !== 'auto') return;
+  // A PAIR: its one summary and verdict, named "Claude + Codex" (an older pair reads as this half).
+  let verdict = run.verdict;
+  let summary = run.summary;
+  let ranBy: string = aiRunProviderName(run);
+  if (run.pairId != null) {
+    const rec = (
+      (await ctx.db
+        .select({ pairConsolidation: cr.pairConsolidation })
+        .from(cr)
+        .where(and(eq(cr.id, run.pairId), eq(cr.accountId, e.accountId), eq(cr.prId, e.prId)))
+        .limit(1)
+        .execute()) as Array<{ pairConsolidation: { summary?: unknown; verdict?: unknown; how?: unknown } | null }>
+    )[0]?.pairConsolidation;
+    if (rec != null && typeof rec === 'object') {
+      if (typeof rec.summary === 'string') summary = rec.summary;
+      if (rec.verdict === 'APPROVE' || rec.verdict === 'REQUEST_CHANGES' || rec.verdict === 'COMMENT') verdict = rec.verdict;
+      if (rec.how !== 'single') ranBy = PAIR_RUN_LABEL;
+    }
+  }
   if (!(await claimNotice(ctx, e.accountId, 'review', e.reviewId))) return;
   try {
-    await postToSlack(
-      target.row.webhookUrl,
-      reviewMessage(ctx, target.workspaceId, facts, run.verdict, run.summary, aiRunProviderName(run)),
-    );
+    await postToSlack(target.row.webhookUrl, reviewMessage(ctx, target.workspaceId, facts, verdict, summary, ranBy));
   } catch (err) {
     ctx.log.warn(
       { err, accountId: e.accountId, workspaceId: target.workspaceId, reviewId: e.reviewId },

@@ -9,7 +9,7 @@
 //  - `draftReply` is a suggestion only. There is no route that posts it, so it offers Copy.
 import { useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { THREAD_VALIDITY_LABEL, isThreadToFix, threadAssessmentCounts } from '@pierre-review/shared';
-import type { AiProviderName, ClaudeThreadAssessment, ClaudeThreadAssessmentCounts } from '@pierre-review/shared';
+import type { ClaudeThreadAssessment, ClaudeThreadAssessmentCounts } from '@pierre-review/shared';
 import {
   THREAD_VALIDITY_CLASS,
   anchorLabel,
@@ -57,7 +57,7 @@ export function ThreadRow({
   // Replaces the not-checked sentence (a thread the review never looked at has its own reason).
   notCheckedNote?: string;
   // The provider that ran the review (absent ⇒ Claude).
-  by?: AiProviderName;
+  by?: string;
 }): JSX.Element {
   const [expanded, setExpanded] = useState(false);
   const [replyOpen, setReplyOpen] = useState(false);
@@ -251,7 +251,7 @@ export function ClaudeReviewThreadsSection({
   // Right-aligned header controls ("Check threads").
   actions?: ReactNode;
   // The provider that ran this review (`aiRunProviderName(review)`); absent ⇒ the active one.
-  by?: AiProviderName;
+  by?: string;
 }): JSX.Element | null {
   const [moreOpen, setMoreOpen] = useState(false);
   const activeName = useAiProviderName();

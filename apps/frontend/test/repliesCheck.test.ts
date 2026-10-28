@@ -58,7 +58,8 @@ describe('the replies pass, in words', () => {
   it('is mounted on the AI Review tab, and a pass is labelled in the history', () => {
     const src = (f: string) => readFileSync(join(import.meta.dirname, '../src/components', f), 'utf8');
     expect(src('ClaudeReviewTab.tsx')).toMatch(/<RepliesCheckLine\b/);
-    expect(src('ReviewHistoryList.tsx')).toMatch(/REPLIES_CHECK_LABEL/);
+    // The history select labels a pass (lib/reviewHistory.ts `reviewHistoryOptions`).
+    expect(readFileSync(join(import.meta.dirname, '../src/lib/reviewHistory.ts'), 'utf8')).toMatch(/REPLIES_CHECK_LABEL/);
     expect(src('RepliesCheckLine.tsx')).toMatch(/<AiRunGate kind="thread_check">/);
   });
 });

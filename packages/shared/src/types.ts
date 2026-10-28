@@ -6629,7 +6629,14 @@ export interface ClaudeFinding {
   // The reference-library sections this finding rests on (docs/REFERENCE-DOCS.md § Use in reviews),
   // server-checked to name a built section of the workspace's library. Absent/[] = none.
   docCitations?: ReferenceDocCitation[];
+  // A CLAUDE + CODEX PAIR's consolidated view only (docs/CLAUDE-REVIEW.md § Claude + Codex): who
+  // raised it — one provider, or 'both' when the two made the same point and were merged into this
+  // one. Absent on an ordinary run.
+  source?: ClaudeFindingSource;
 }
+
+// Who raised a finding in a Claude + Codex pair's one review.
+export type ClaudeFindingSource = 'claude' | 'codex' | 'both';
 
 // Which story item a story finding stands for. `index` is the ticket's 0-based position on the run
 // (`ClaudeReviewTicketEntry.index`); `ref` is the criterion's ref ('AC2') or a not-done item's
@@ -7151,7 +7158,8 @@ export interface ClaudeReview {
 
 // One half of a Claude + Codex pair (docs/CLAUDE-REVIEW.md § Claude + Codex). The first run (Claude)
 // runs, then the second (Codex) with the first's findings as "already raised"; findings the second
-// repeated anyway are dropped in code (`dropped`, second run only, null until it succeeds).
+// repeated anyway are dropped in code (`dropped`, second run only, null until it succeeds). When the
+// pair ends, the two are CONSOLIDATED into one review (`ClaudeReviewPairConsolidation`).
 export interface ClaudeReviewPairInfo {
   // The FIRST run's id, on both halves.
   pairId: number;
@@ -7159,6 +7167,53 @@ export interface ClaudeReviewPairInfo {
   // The other half's run id; null while the second has not started (or never will).
   otherReviewId: number | null;
   dropped?: number | null;
+  // The pair's ONE verdict, once consolidated (code-computed over the consolidated findings). Absent
+  // until then (and on an older pair).
+  verdict?: ClaudeReviewVerdict | null;
+  // THE CONSOLIDATED VIEW only (`GET /api/prs/:id/claude-review`, `GET /api/claude-reviews/:id`):
+  // each half as it ran, first then second, and the half that did not finish.
+  halves?: ClaudeReviewPairHalf[];
+  failedHalf?: ClaudeReviewPairFailedHalf | null;
+  // How the two were merged — behind the header's ⓘ only, never narrated.
+  how?: ClaudeReviewPairConsolidationHow | null;
+}
+
+// One half of a pair as the consolidated view lists it (the header's models and the run cost).
+export interface ClaudeReviewPairHalf {
+  reviewId: number;
+  provider: AiProviderId;
+  model: string;
+  effort: string | null;
+  status: ClaudeReviewStatus;
+  costUsd: number | null;
+  inputTokens: number | null;
+  outputTokens: number | null;
+}
+
+// The half of a pair that did not finish, and why, in a few plain words.
+export interface ClaudeReviewPairFailedHalf {
+  provider: AiProviderId;
+  reason: string;
+}
+
+// 'pass' = a quick model pass found the duplicates and wrote the summary; 'code' = its fallback (the
+// two halves joined in code); 'single' = only one half finished, so the review is that half.
+export type ClaudeReviewPairConsolidationHow = 'pass' | 'code' | 'single';
+
+// THE STORED CONSOLIDATION (`claude_reviews.pair_consolidation` on the pair's FIRST row, migration
+// 0137), written ONCE when the pair ends. Keys are finding ids as strings (JSON).
+export interface ClaudeReviewPairConsolidation {
+  how: ClaudeReviewPairConsolidationHow;
+  // The pair's one summary (plain English).
+  summary: string | null;
+  // The pair's one verdict, computed in CODE over the consolidated findings (never the model's).
+  verdict: ClaudeReviewVerdict | null;
+  // Every KEPT finding's source.
+  sourceOf: Record<string, ClaudeFindingSource>;
+  // Each merged-away duplicate → the finding kept in its place (`claude_review_findings.merged_into`).
+  mergedFrom: Record<string, number>;
+  failedHalf: ClaudeReviewPairFailedHalf | null;
+  at: string;
 }
 
 // The reviewed commit against the PR's current head (the SYNCED head — DB-only, no GitHub call).
@@ -7433,7 +7488,9 @@ export type ClaudeReviewPhase =
   | 'fetching_diff'
   | 'deciding'
   | 'reviewing'
-  | 'persisting';
+  | 'persisting'
+  // A Claude + Codex pair's end: the two reviews are being merged into one.
+  | 'merging';
 
 export interface ClaudeReviewProgress {
   phase: ClaudeReviewPhase;
