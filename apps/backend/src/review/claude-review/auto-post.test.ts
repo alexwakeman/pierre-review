@@ -218,6 +218,15 @@ describe('the pure rules', () => {
     expect(ap.autoReviewBody('One sentence.\n\n- a\n- b', 2)).toBe(`One sentence.\n\n${AUTO_POST_FOOTER}`);
     expect(ap.autoReviewBody('- only bullets', 3)).toBe(`3 comments from Claude.\n\n${AUTO_POST_FOOTER}`);
   });
+  it('a long first paragraph is posted whole, never cut mid-sentence', () => {
+    const para = `${'Switching the resync to join by parentFeatureId lines up with the template path. '.repeat(8)}However, the shared lookup now also applies to trees.`;
+    expect(para.length).toBeGreaterThan(400);
+    expect(ap.autoReviewBodyLead(para, 2)).toBe(para);
+    // Past the ceiling: cut at the last sentence end that fits.
+    expect(ap.clipAtSentence('One. Two words here. Three', 22)).toBe('One. Two words here.');
+    // No sentence end in range: cut at a space, marked.
+    expect(ap.clipAtSentence('alpha beta gamma delta', 12)).toBe('alpha beta…');
+  });
   it('a run Codex made names Codex in the posted body and the lift; Claude’s words are unchanged', () => {
     expect(ap.autoReviewBodyLead('- only bullets', 0)).toBe('Reviewed by Claude.');
     expect(ap.autoReviewBodyLead('- only bullets', 0, 'Codex')).toBe('Reviewed by Codex.');

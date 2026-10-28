@@ -2418,7 +2418,7 @@ auto-posting: claim before any GitHub write, never retried.
   story gaps ON (a ticket review's unmet / partly met criteria and missing pieces); "Not asked for"
   OFF. Praise never; a legacy story finding never (stories are the ticket review's).
 - **THE REVIEW.** Event `'COMMENT'` unless AUTO VERDICT (below) lets a verdict through. Body = the
-  summary's first plain sentence (else "N comments from Claude.") + `AUTO_POST_FOOTER` ("_Posted automatically
+  summary's first plain paragraph, whole up to 3,000 chars and then cut at a sentence end (else "N comments from Claude.") + `AUTO_POST_FOOTER` ("_Posted automatically
   by Limn’s Claude review._"); every comment ends with the same footer (`PostReviewFinding.footer`),
   then the hidden `<!-- pierre:claude-review` marker, so `isLimnPostedComment` classifies it as ours
   and an auto re-review is NOT triggered by it. It reuses `ctx.review.postReview` / `postFinding`

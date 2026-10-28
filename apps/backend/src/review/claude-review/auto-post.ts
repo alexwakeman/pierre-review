@@ -303,13 +303,30 @@ export function liftBlockMessage(by: AiProviderName = 'Claude'): string {
 }
 export const LIFT_BLOCK_MESSAGE = liftBlockMessage('Claude');
 
-/** The review body's lead: the summary's first plain sentence, else a count. `by` names the provider
- *  that ran the review (default Claude — its text is unchanged). */
+// The lead's ceiling. A summary's first paragraph is normally far shorter; past this it is cut at the
+// last sentence end that fits, never mid-sentence (GitHub allows 65,536 characters in a review body).
+const LEAD_MAX_CHARS = 3_000;
+
+/** Cut `text` to ≤ `max` characters at the last sentence end that fits; failing that, at the last space
+ *  (with "…"). Text that fits is returned whole. */
+export function clipAtSentence(text: string, max: number = LEAD_MAX_CHARS): string {
+  if (text.length <= max) return text;
+  const head = text.slice(0, max);
+  let cut = -1;
+  for (const m of head.matchAll(/[.!?](?=\s)/g)) cut = m.index;
+  if (cut > 0) return head.slice(0, cut + 1);
+  const space = head.slice(0, max - 1).lastIndexOf(' ');
+  return `${head.slice(0, space > 0 ? space : max - 1)}…`;
+}
+
+/** The review body's lead: the summary's first plain paragraph (whole, unless it passes
+ *  LEAD_MAX_CHARS), else a count. `by` names the provider that ran the review (default Claude — its
+ *  text is unchanged). */
 export function autoReviewBodyLead(summary: string | null, commentCount: number, by: string = 'Claude'): string {
   for (const raw of (summary ?? '').split('\n')) {
     const line = raw.trim();
     if (line === '' || /^([-*+]|\d+[.)])\s/.test(line) || line.startsWith('#')) continue;
-    return line.length > 400 ? `${line.slice(0, 399)}…` : line;
+    return clipAtSentence(line);
   }
   if (commentCount === 0) return `Reviewed by ${by}.`;
   return commentCount === 1 ? `One comment from ${by}.` : `${commentCount} comments from ${by}.`;
