@@ -5,6 +5,7 @@ import { config } from '../config.js';
 import { pruneTicketReviewsForPrs } from './ticket-review-prune.js';
 import { pruneCiReviewsForPrs } from './ci-review-prune.js';
 import { pruneSequenceDiagramsForPrs } from './sequence-diagram-prune.js';
+import { deleteSettledClaimLinesForPrs } from './team-claim-lines-delete.js';
 
 // Time-based retention sweep. Per-account server data (events, PRs + their whole subtree)
 // accumulates forever otherwise; this prunes anything past the retention window so the DB
@@ -127,8 +128,9 @@ async function deletePrSubtree(
   await tx.delete(schema.trackerTickets).where(inArray(schema.trackerTickets.prId, prIds)).execute();
   // SonarCloud snapshots (migration 0114 / pg 0101). No FKs — explicit, pr-keyed.
   await tx.delete(schema.sonarSnapshots).where(inArray(schema.sonarSnapshots.prId, prIds)).execute();
-  // The team-claim ledger (migration 0138). No FKs — explicit, pr-keyed.
-  await tx.delete(schema.teamClaimLines).where(inArray(schema.teamClaimLines.prId, prIds)).execute();
+  // The team-claim ledger (migration 0138). No FKs — explicit, pr-keyed. This machine's OPEN rows
+  // stay: their lines still need releasing on GitHub (db/team-claim-lines-delete.ts).
+  await deleteSettledClaimLinesForPrs(tx, prIds);
   // Sequence diagrams of these PRs, and the story diagrams naming any of them (migration 0115 / pg
   // 0102). No FKs. Before the PRs go: it reads their accounts.
   await pruneSequenceDiagramsForPrs(tx, prIds);

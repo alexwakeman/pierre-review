@@ -2239,14 +2239,18 @@ auto-review switch, with an ⓘ). Code: `review/claude-review/team-claim.ts` (th
   pending "alex is reviewing with Claude" (the claim, re-posted every 8 min while the run goes) →
   success "alex reviewed · 4 comments" (`target_url` = the auto-posted GitHub review, built from our
   own stored ids and validated) or "alex reviewed · kept in Limn" (nothing posted) / "· no comments" →
-  on a failure, a Stop or a dropped run, SUCCESS "alex's review didn't finish · free to claim" (the
-  RELEASE line; ⚠ never 'error'/'failure' — red reads as broken CI — and, since 2026-10-28, never
-  pending either: the owner chose pending-on-failure on 2026-10-27, and a pending line held every PR
-  whose run died, so it was superseded). "Cleared by alex" (success) is the reader's Clear; "Released:
-  bob's claim expired" (success) is a teammate's stale line this machine released.
+  on a failure, a Stop or a dropped run, SUCCESS "Cleared by alex: review didn't finish · free to
+  claim" (the RELEASE line; ⚠ never 'error'/'failure' — red reads as broken CI — and, since 2026-10-28,
+  never pending either: the owner chose pending-on-failure on 2026-10-27, and a pending line held every
+  PR whose run died, so it was superseded). "Cleared by alex" (success) is the reader's Clear; "Cleared
+  by alex: bob's claim expired" (success) is a teammate's stale line this machine released.
+  ⚠ **EVERY FREE SUCCESS LINE STARTS "Cleared by "**: a teammate still on an older Limn reads any other
+  success by someone else as "already reviewed", and would skip the commit for good. The fold also still
+  reads a success "… free to claim" or "Released: …" (an unreleased 2026-10-28 build's wording) as free.
 - **THE ONE FOLD** (`decideTeamClaim`, pure, unit-tested) over the context's history. WHO and WHEN come
   from GitHub (`creator.login`, `created_at`), never from the description; only the FREE phrases
-  ("free to claim" — a success, or an older Limn's pending — "Cleared by", "Released:") are read back.
+  ("Cleared by" — every free success line —, "free to claim" — a success, or an older Limn's pending —
+  and "Released:") are read back.
   The newest line settles it: a success by someone else ⇒ skip "already reviewed by @x" (mine, or a
   free line, is free); failure/error ⇒ free. Under a pending
   line, the claimants since the last settling line race: those whose NEWEST line is inside the
@@ -2298,17 +2302,33 @@ auto-review switch, with an ⓘ). Code: `review/claude-review/team-claim.ts` (th
     (`manager.ts reviewClaimBusy(account, pr, provider, head)`: a mid-start auto item, a pair between
     its halves at that head, a run holding that provider's line — its own or its first half's) and whose
     final line is not being written right now (`claimLineFinishing`: marked by `stopTeamClaimRenew`,
-    cleared by `finishTeamClaim`, 30 min at most) gets the release line at ITS OWN head, and is closed.
-    `busy` is asked again right before the write. A failure is retried with backoff (1, 2, 4, 8 min),
-    at most 5 times (`RELEASE_MAX_ATTEMPTS`), then logged and left — Clear still works. 403/404 ⇒
-    closed with `no_access`. A rate limit ⇒ the row waits and the pass stops (`noteLimited` told the
-    budget). ⚠ It never reads the team-claims switch: a workspace switched OFF after claiming still has
-    its lines released. One pass at a time (a module flag).
+    cleared by `finishTeamClaim`, 30 min at most) is checked against GitHub at ITS OWN head.
+    ⚠ **IT NEVER POSTS BLIND**: it reads the context's lines first and posts ONLY when the newest line
+    is still OUR pending one (`newestLine`, `sameGithubLogin` against the row's login). A newer line
+    by a teammate — they claimed or reviewed while this machine was down, during a backoff, or on a
+    backfilled row's head — ⇒ closed 'superseded', nothing posted; one of ours already settled ⇒
+    closed 'settled'; no line at all (the pending POST never landed) ⇒ closed 'no line'. `busy` is
+    asked again after the read. ⚠ **A RELEASE IN FLIGHT HOLDS ITS HEAD**: it is registered
+    synchronously after the last `busy` check (`trackClaimRelease`), and `claimBeforeAutoRun` waits
+    for it (`waitForClaimRelease`) before reading GitHub, so a release never lands after a new claim's
+    pending line. A failure (the read, the write, a repo lookup that THREW, an unknown login) is
+    retried with backoff (1, 2, 4, 8 min), at most 5 times (`RELEASE_MAX_ATTEMPTS`), then logged and
+    left — ⚠ OUT of the reconciler's read (`openClaimLines` filters on the count, so given-up rows can
+    never fill its 50-row window), still found by Clear. 403/404 ⇒ closed with `no_access`. A rate
+    limit ⇒ the row waits and the pass stops (`noteLimited` told the budget). ⚠ It never reads the
+    team-claims switch: a workspace switched OFF after claiming still has its lines released. The row
+    carries the repo's owner/name, and BOTH delete paths keep this machine's OPEN rows
+    (`db/team-claim-lines-delete.ts`), so a line is still released after its PR or repo left Limn. One
+    pass at a time (a module flag).
+  - **AN UNMARKED CLAIM WITH A ROW** (its pending POST failed in a way that may have landed): the run's
+    end posts nothing, but a review that SUCCEEDED stores its reviewed line on the row
+    (`final_description`), so if the pending line did land the reconciler replaces it with "reviewed",
+    never "didn't finish".
   - **TEAMMATES' STALE LINES** (`releaseExpiredTeammateLines`): a remembered "being reviewed by @bob"
     skip whose lease has ended, on a PR the sweeper did not take back (`reviewHeldForPr`), in a
     workspace with team claims on: re-read the head; if its newest line is still bob's PENDING one
     (past the lease, or an older Limn's pending "free to claim" — `staleTeammateLine`), post success
-    "Released: bob's claim expired" once and record it (a refusal is recorded too, never retried). A
+    "Cleared by alex: bob's claim expired" once and record it (a refusal is recorded too, never retried). A
     Limn about to claim the head itself needs none of this: its own pending line replaces bob's.
 - ⚠ **LIMN'S LINES ARE NEVER CI** (always on, no setting): shared `isLimnStatusContext` (`limn/` prefix)
   and `rollupStateWithoutLimn`. The PR head's stored `ci_status` (`ciStatusFromHead` in sync/upsert.ts —

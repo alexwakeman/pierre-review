@@ -4,17 +4,24 @@
 // restart, a dropped run or a failed final write leaves a row the reconciler (team-claim-release.ts)
 // can still find and release. DB only — no GitHub call ever runs in here.
 import type { AiProviderId } from '@pierre-review/shared';
-import { and, asc, eq, inArray } from 'drizzle-orm';
+import { and, asc, eq, inArray, lt } from 'drizzle-orm';
 import type { AgentContext } from '../agent-context.js';
 
 export type ClaimLineState = 'claiming' | 'pending' | 'finished' | 'released';
 export const OPEN_CLAIM_STATES: readonly ClaimLineState[] = ['claiming', 'pending'];
+/** After this many failed releases a row is left (logged) — and out of the reconciler's read; the tab's
+ *  Clear still finds it (`openClaimLinesAtHead`). */
+export const RELEASE_MAX_ATTEMPTS = 5;
 
 export interface ClaimLineRow {
   id: number;
   accountId: number;
   prId: number;
   repoId: number | null;
+  // The repo's owner/name when the row was written: a line can still be released after the PR or the
+  // repo is gone from Limn (NULL on a row backfilled where the repo was unknown).
+  owner: string | null;
+  name: string | null;
   headSha: string;
   provider: AiProviderId;
   reviewId: number | null;
@@ -40,7 +47,7 @@ const clipErr = (s: string | null | undefined): string | null => (s == null ? nu
  */
 export async function recordClaimIntent(
   ctx: AgentContext,
-  row: { accountId: number; prId: number; headSha: string; provider: AiProviderId; login: string },
+  row: { accountId: number; prId: number; headSha: string; provider: AiProviderId; login: string; owner?: string; name?: string },
 ): Promise<number> {
   const tl = t(ctx);
   const prs = ctx.schema.pullRequests;
@@ -72,6 +79,8 @@ export async function recordClaimIntent(
         accountId: row.accountId,
         prId: row.prId,
         repoId: repo[0]?.repoId ?? null,
+        owner: row.owner ?? null,
+        name: row.name ?? null,
         headSha: row.headSha,
         provider: row.provider,
         whose: 'mine',
@@ -100,13 +109,17 @@ export async function setClaimLine(
   await ctx.db.update(tl).set(set).where(eq(tl.id, id)).execute();
 }
 
-/** The open rows (ours: 'claiming' / 'pending'), oldest first, capped. */
+/**
+ * The open rows (ours: 'claiming' / 'pending') the reconciler may still try, oldest first, capped.
+ * ⚠ A row that used up its RELEASE_MAX_ATTEMPTS is left OUT here, so given-up rows can never fill the
+ * window and starve newer ones.
+ */
 export async function openClaimLines(ctx: AgentContext, limit = 50): Promise<ClaimLineRow[]> {
   const tl = t(ctx);
   return (await ctx.db
     .select()
     .from(tl)
-    .where(and(eq(tl.whose, 'mine'), inArray(tl.state, [...OPEN_CLAIM_STATES])))
+    .where(and(eq(tl.whose, 'mine'), inArray(tl.state, [...OPEN_CLAIM_STATES]), lt(tl.releaseAttempts, RELEASE_MAX_ATTEMPTS)))
     .orderBy(asc(tl.id))
     .limit(limit)
     .execute()) as ClaimLineRow[];

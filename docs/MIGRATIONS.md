@@ -1228,11 +1228,16 @@ A new CORE table, `team_claim_lines`: one row per GitHub status line (`limn/revi
 `pending` → `finished` | `released`; `whose 'teammate'`: a teammate's expired line released once). Written
 BEFORE the pending line is posted, so the reconciler (`team-claim-release.ts`, boot + every auto-review
 tick) can release a line a restart or a dropped run left pending. Two indexes (`state`; `account_id,
-pr_id, head_sha`). No FK on `pr_id` (the `sonar_snapshots` precedent): `deleteRepo`, retention's
-`deletePrSubtree`, the erasure and `accountScopedTables()` take it explicitly. ⚠ ONE BACKFILL: every
+pr_id, head_sha`). `owner` / `name` (the repo, at write time) let a line be released after its PR or
+repo left Limn. No FK on `pr_id` (the `sonar_snapshots` precedent): `deleteRepo` and retention's
+`deletePrSubtree` delete its rows EXCEPT this machine's OPEN ones; the erasure and
+`accountScopedTables()` take it explicitly. ⚠ ONE BACKFILL: every
 (account, PR, head, context) whose NEWEST auto run's `team_claim` record (from the last 14 days) still
 read pending (`state 'marked'`, `lastLine 'reviewing' | 'unfinished'`) gets a `pending` row with a NULL
-login (the account's login is used), so lines older Limn left pending are released at the first boot.
+login (the account's login is used) and the repo's owner/name, so lines older Limn left pending are
+released at the first boot — ⚠ only where the head's newest line is still this account's pending one (the
+reconciler reads GitHub first; a teammate's newer claim or review is left alone). (The `owner`/`name`
+columns were added to 0138 in place before it shipped.)
 [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Team claims → Releasing stale lines. Journal `idx` 138, `when`
 sqlite `1792137625016`.
 

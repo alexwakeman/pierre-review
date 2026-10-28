@@ -47,9 +47,9 @@ describe('wording', () => {
     expect(reviewedLine('alex', 1)).toBe('alex reviewed · 1 comment');
     expect(reviewedLine('alex', 0)).toBe('alex reviewed · no comments');
     expect(reviewedLine('alex', null)).toBe('alex reviewed · kept in Limn');
-    expect(unfinishedLine('alex')).toBe("alex's review didn't finish · free to claim");
+    expect(unfinishedLine('alex')).toBe("Cleared by alex: review didn't finish · free to claim");
     expect(clearedLine('alex')).toBe('Cleared by alex');
-    expect(releasedLine('bob')).toBe("Released: bob's claim expired");
+    expect(releasedLine('bob', 'alex')).toBe("Cleared by alex: bob's claim expired");
     expect(reviewingLine('x'.repeat(300), 'claude').length).toBe(TEAM_CLAIM_DESCRIPTION_MAX);
   });
   it('builds the posted review link only from well-formed values', () => {
@@ -102,11 +102,22 @@ describe('decideTeamClaim (the one fold)', () => {
   });
   it('a SUCCESS "free to claim" line (the release, since 2026-10-28) is free, not "already reviewed"', () => {
     expect(decideTeamClaim([line('bob', 'pending', NOW - 9 * MIN), line('bob', 'success', NOW - MIN, unfinishedLine('bob'))], 'me', NOW).kind).toBe('free');
-    expect(decideTeamClaim([line('bob', 'pending', NOW - 40 * MIN), line('me', 'success', NOW - MIN, releasedLine('bob'))], 'carol', NOW).kind).toBe(
+    expect(decideTeamClaim([line('bob', 'pending', NOW - 40 * MIN), line('me', 'success', NOW - MIN, releasedLine('bob', 'me'))], 'carol', NOW).kind).toBe(
       'free',
     );
+    // The 2026-10-28 build's wording still reads free.
+    expect(decideTeamClaim([line('bob', 'success', NOW - MIN, "bob's review didn't finish · free to claim")], 'me', NOW).kind).toBe('free');
+    expect(decideTeamClaim([line('bob', 'success', NOW - MIN, "Released: carol's claim expired")], 'me', NOW).kind).toBe('free');
     // A plain success by someone else still reads "already reviewed".
     expect(decideTeamClaim([line('bob', 'success', NOW - MIN, 'bob reviewed · no comments')], 'me', NOW).kind).toBe('reviewed');
+  });
+  it('a teammate on an OLDER Limn reads every free success line as free too (it reads only "Cleared by ")', () => {
+    // The fold every Limn up to 0.1.140 runs: a success is free only when it starts "Cleared by ".
+    const oldFoldFree = (description: string): boolean => description.startsWith('Cleared by ');
+    expect(oldFoldFree(unfinishedLine('alex'))).toBe(true);
+    expect(oldFoldFree(releasedLine('bob', 'alex'))).toBe(true);
+    expect(oldFoldFree(clearedLine('alex'))).toBe(true);
+    expect(oldFoldFree(unfinishedLine('x'.repeat(300)))).toBe(true);
   });
   it("staleTeammateLine: a teammate's expired or pending-free newest line; never a live one, a settled one or mine", () => {
     expect(staleTeammateLine([line('bob', 'pending', NOW - TEAM_CLAIM_LEASE_MS - MIN)], 'me', NOW)).toEqual({ login: 'bob' });
@@ -358,7 +369,7 @@ describe('finish and clear', () => {
     const r = await tc.claimBeforeAutoRun(ctx, target(), { nowMs: () => NOW }, f.gh);
     if (r.kind !== 'run') throw new Error('expected a run');
     await tc.finishTeamClaim(ctx, r.handle, reviewId, { kind: 'unfinished' }, f.gh);
-    expect(f.posts.at(-1)).toEqual({ context: 'limn/review-claude', state: 'success', description: "me's review didn't finish · free to claim" });
+    expect(f.posts.at(-1)).toEqual({ context: 'limn/review-claude', state: 'success', description: "Cleared by me: review didn't finish · free to claim" });
     // Another Limn reads that success line as FREE (not "already reviewed").
     expect(decideTeamClaim(await f.gh.listLines(1, 'acme', 'api', 'head1', 'limn/review-claude'), 'bob', NOW + MIN).kind).toBe('free');
     const row = await ledgerRow(r.handle.ledgerId!);

@@ -8,17 +8,23 @@
 //
 //   OUR LINES (`releaseStaleOwnClaims`): every OPEN ledger row ('claiming' / 'pending') whose run is
 //     not queued, starting or running in this process (`busy`) and whose final line is not being
-//     written right now gets the release line — success "<login>'s review didn't finish · free to
-//     claim" (or the success line the run's end could not write) — at the row's own head, then is
-//     closed. Status writes are idempotent, so a failure is retried on later ticks with backoff, at
-//     most RELEASE_MAX_ATTEMPTS times (then logged and left; Clear still works). 403/404 ⇒ closed with
-//     the error (no access: nothing we can do). A rate limit ⇒ left for a later tick, and the pass
-//     stops (`noteLimited` already told the budget). ⚠ It never reads the team-claims switch: a
-//     workspace switched OFF after claiming still gets its lines released.
+//     written right now is checked against GitHub. ⚠ ONLY when the head's NEWEST line for the context
+//     is still OUR pending one does it get the release line: success "Cleared by <login>: review
+//     didn't finish · free to claim" (or the success line the run's end could not write). A newer line
+//     by a teammate (they claimed or reviewed while we were down), one of ours already settled, or no
+//     line at all ⇒ the row is closed and NOTHING is posted, so a release never overwrites a
+//     teammate's claim or review. Status writes are idempotent, so a failure is retried on later ticks
+//     with backoff, at most RELEASE_MAX_ATTEMPTS times (then logged and left out of the read; Clear
+//     still works). 403/404 ⇒ closed with the error (no access: nothing we can do). A rate limit ⇒
+//     left for a later tick, and the pass stops (`noteLimited` already told the budget). A release is
+//     registered in flight (`trackClaimRelease`) and a claim at that head waits for it, so it never
+//     lands after the claim's own pending line. ⚠ It never reads the team-claims switch: a workspace
+//     switched OFF after claiming still gets its lines released. The row's own owner/name let it
+//     release a line after the PR or repo left Limn (the delete paths keep open rows).
 //   TEAMMATES' LINES (`releaseExpiredTeammateLines`): a "being reviewed by @bob" skip this Limn
 //     remembered, whose lease has ended and whose PR the sweeper did not take back: if the head's
 //     newest line is still bob's pending one (expired, or an older Limn's pending "free to claim"),
-//     post "Released: bob's claim expired" ONCE (recorded in the ledger) — only where the workspace
+//     post "Cleared by alex: bob's claim expired" ONCE (recorded in the ledger) — only where the workspace
 //     has team claims on. A Limn that claims the head itself needs none of this: its own pending line
 //     replaces bob's.
 //
@@ -33,14 +39,19 @@ import {
   defaultTeamClaimGithub,
   expiredReviewingSkips,
   forgetTeamClaimSkip,
+  newestLine,
   releasedLine,
+  sameGithubLogin,
   staleTeammateLine,
   teamClaimContext,
   teamClaimsOnForPr,
+  trackClaimRelease,
   unfinishedLine,
   type TeamClaimGithub,
+  type TeamClaimLine,
 } from './team-claim.js';
 import {
+  RELEASE_MAX_ATTEMPTS,
   openClaimLines,
   recordTeammateRelease,
   setClaimLine,
@@ -48,8 +59,7 @@ import {
   type ClaimLineRow,
 } from './team-claim-ledger.js';
 
-/** After this many failed releases a row is left (logged); the tab's Clear still works. */
-export const RELEASE_MAX_ATTEMPTS = 5;
+export { RELEASE_MAX_ATTEMPTS };
 /** The wait before retry n (1-based): 1, 2, 4, 8 minutes. */
 export function releaseBackoffMs(attempts: number): number {
   return attempts <= 0 ? 0 : 60_000 * 2 ** Math.min(attempts - 1, 6);
@@ -97,6 +107,64 @@ export function _resetTeamClaimReleaseForTest(): void {
   releasing = false;
 }
 
+type RowOutcome =
+  | { kind: 'released' }
+  | { kind: 'finished' }
+  | { kind: 'closed'; why: string; state: 'released' | 'finished' }
+  | { kind: 'busy' }
+  | { kind: 'limited' }
+  | { kind: 'no_access' }
+  | { kind: 'failed'; error: string };
+
+/**
+ * ONE row's release, decided from GitHub's own history (never blind): post only when the head's
+ * NEWEST line for the context is still OUR pending one. A newer line by someone else (a teammate
+ * claimed or reviewed meanwhile: a long restart, a backoff, a backfilled row) or one of ours already
+ * settled is left as it is, and the row is closed. No line at all ⇒ nothing reached GitHub: closed.
+ */
+async function releaseOne(
+  deps: ReleaseDeps,
+  gh: TeamClaimGithub,
+  row: ClaimLineRow,
+  where: { owner: string; name: string },
+  provider: AiProviderId,
+  me: string,
+): Promise<RowOutcome> {
+  const context = teamClaimContext(provider);
+  const failure = (err: unknown): RowOutcome => {
+    const kind = claimErrorKind(err, row.accountId);
+    if (kind === 'rate_limited') return { kind: 'limited' };
+    if (kind === 'no_access') return { kind: 'no_access' };
+    return { kind: 'failed', error: errText(err) };
+  };
+  let lines: TeamClaimLine[];
+  try {
+    lines = await gh.listLines(row.accountId, where.owner, where.name, row.headSha, context);
+  } catch (err) {
+    return failure(err);
+  }
+  const last = newestLine(lines);
+  if (!last) return { kind: 'closed', why: 'no line', state: 'released' };
+  if (!sameGithubLogin(last.login, me)) return { kind: 'closed', why: 'superseded', state: 'released' };
+  if (last.state !== 'pending') {
+    // Ours and settled already (e.g. a final write that landed though it read as failed).
+    return { kind: 'closed', why: 'settled', state: row.finalDescription != null ? 'finished' : 'released' };
+  }
+  // ⚠ Asked again after the read: a run may have started on this head meanwhile.
+  if (deps.busy(row.accountId, row.prId, provider, row.headSha)) return { kind: 'busy' };
+  const finalLine = row.finalDescription != null;
+  try {
+    await gh.postLine(row.accountId, where.owner, where.name, row.headSha, context, {
+      state: 'success',
+      description: finalLine ? row.finalDescription! : unfinishedLine(me),
+      ...(finalLine && row.finalTargetUrl ? { targetUrl: row.finalTargetUrl } : {}),
+    });
+  } catch (err) {
+    return failure(err);
+  }
+  return finalLine ? { kind: 'finished' } : { kind: 'released' };
+}
+
 /** OUR open lines whose run is over: release them (see the header). Never throws. */
 export async function releaseStaleOwnClaims(ctx: AgentContext, deps: ReleaseDeps): Promise<ReleaseResult> {
   const out: ReleaseResult = { released: 0, finished: 0, failed: 0, gaveUp: 0, limited: false };
@@ -113,6 +181,17 @@ export async function releaseStaleOwnClaims(ctx: AgentContext, deps: ReleaseDeps
       return out;
     }
     const logins = new Map<number, string | null>();
+    const fail = async (row: ClaimLineRow, provider: AiProviderId, error: string): Promise<void> => {
+      const attempts = row.releaseAttempts + 1;
+      await setClaimLine(ctx, row.id, { releaseAttempts: attempts, lastError: error }).catch(() => {});
+      out.failed += 1;
+      if (attempts >= RELEASE_MAX_ATTEMPTS) {
+        out.gaveUp += 1;
+        ctx.log.warn(
+          `team claim pr ${row.prId}: could not release the ${provider} line at ${row.headSha.slice(0, 7)} after ${attempts} tries (${error}); Clear it from the AI Review tab`,
+        );
+      }
+    };
     for (const row of rows) {
       const provider: AiProviderId = row.provider === 'codex' ? 'codex' : 'claude';
       if (row.releaseAttempts >= RELEASE_MAX_ATTEMPTS) continue;
@@ -120,53 +199,61 @@ export async function releaseStaleOwnClaims(ctx: AgentContext, deps: ReleaseDeps
       if (claimLineFinishing(row.id, nowMs)) continue;
       const lastAt = row.updatedAt instanceof Date ? row.updatedAt.getTime() : Number(row.updatedAt);
       if (row.releaseAttempts > 0 && nowMs < lastAt + releaseBackoffMs(row.releaseAttempts)) continue;
-      const where = await prRepo(ctx, row.accountId, row.prId).catch(() => null);
+      // Where: the row's own owner/name (kept even after the PR or repo left Limn), else the PR's repo.
+      let where: { owner: string; name: string } | null;
+      if (row.owner && row.name) where = { owner: row.owner, name: row.name };
+      else {
+        try {
+          where = await prRepo(ctx, row.accountId, row.prId);
+        } catch (err) {
+          // A lookup that THREW is not "gone": tried again later.
+          await fail(row, provider, errText(err));
+          continue;
+        }
+      }
       if (!where) {
         await setClaimLine(ctx, row.id, { state: 'released', lastError: 'pull request gone' }).catch(() => {});
         continue;
       }
-      let login = row.login;
-      if (login == null) {
+      let me = row.login;
+      if (me == null) {
         if (!logins.has(row.accountId)) logins.set(row.accountId, await gh.login(row.accountId).catch(() => null));
-        login = logins.get(row.accountId) ?? null;
+        me = logins.get(row.accountId) ?? null;
       }
-      const finalLine = row.finalDescription != null;
-      const description = finalLine ? row.finalDescription! : unfinishedLine(login ?? 'Limn');
-      // ⚠ Asked again right before the write: a run may have started on this head meanwhile.
-      if (deps.busy(row.accountId, row.prId, provider, row.headSha)) continue;
-      try {
-        await gh.postLine(row.accountId, where.owner, where.name, row.headSha, teamClaimContext(provider), {
-          state: 'success',
-          description,
-          ...(finalLine && row.finalTargetUrl ? { targetUrl: row.finalTargetUrl } : {}),
-        });
-      } catch (err) {
-        const kind = claimErrorKind(err, row.accountId);
-        if (kind === 'rate_limited') {
-          out.limited = true;
-          break; // the budget waits; so does every other row
-        }
-        if (kind === 'no_access') {
-          await setClaimLine(ctx, row.id, { state: 'released', lastError: 'no_access' }).catch(() => {});
-          continue;
-        }
-        const attempts = row.releaseAttempts + 1;
-        await setClaimLine(ctx, row.id, { releaseAttempts: attempts, lastError: errText(err) }).catch(() => {});
-        out.failed += 1;
-        if (attempts >= RELEASE_MAX_ATTEMPTS) {
-          out.gaveUp += 1;
-          ctx.log.warn(
-            `team claim pr ${row.prId}: could not release the ${provider} line at ${row.headSha.slice(0, 7)} after ${attempts} tries (${errText(err)}); Clear it from the AI Review tab`,
-          );
-        }
+      if (me == null) {
+        await fail(row, provider, 'GitHub login unknown');
         continue;
       }
-      await setClaimLine(ctx, row.id, { state: finalLine ? 'finished' : 'released', lastError: null }).catch(() => {});
-      if (finalLine) out.finished += 1;
+      // ⚠ Asked again right before the release, with NO await between this check and its registration
+      // (`trackClaimRelease`): a claim that starts at this head from here on waits for the release.
+      if (deps.busy(row.accountId, row.prId, provider, row.headSha)) continue;
+      const at = { accountId: row.accountId, prId: row.prId, headSha: row.headSha, provider };
+      const login = me;
+      const target = where;
+      const res = await trackClaimRelease(at, () => releaseOne(deps, gh, row, target, provider, login));
+      if (res.kind === 'busy') continue;
+      if (res.kind === 'limited') {
+        out.limited = true;
+        break; // the budget waits; so does every other row
+      }
+      if (res.kind === 'no_access') {
+        await setClaimLine(ctx, row.id, { state: 'released', lastError: 'no_access' }).catch(() => {});
+        continue;
+      }
+      if (res.kind === 'failed') {
+        await fail(row, provider, res.error);
+        continue;
+      }
+      if (res.kind === 'closed') {
+        await setClaimLine(ctx, row.id, { state: res.state, lastError: res.why }).catch(() => {});
+        continue;
+      }
+      await setClaimLine(ctx, row.id, { state: res.kind, lastError: null }).catch(() => {});
+      if (res.kind === 'finished') out.finished += 1;
       else out.released += 1;
       // The run row's record reads "Marked on GitHub" either way; a run that died mid-way says its line
       // was released.
-      if (!finalLine && row.reviewId != null) await markRecordUnfinished(ctx, row.reviewId).catch(() => {});
+      if (res.kind === 'released' && row.reviewId != null) await markRecordUnfinished(ctx, row.reviewId).catch(() => {});
     }
     return out;
   } catch (err) {
@@ -221,7 +308,7 @@ export async function releaseExpiredTeammateLines(ctx: AgentContext, deps: Relea
       try {
         await gh.postLine(accountId, where.owner, where.name, skip.headSha, context, {
           state: 'success',
-          description: releasedLine(stale.login),
+          description: releasedLine(stale.login, me),
         });
         out.released += 1;
       } catch (err) {

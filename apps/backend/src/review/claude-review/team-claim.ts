@@ -9,10 +9,13 @@
 //                                                         a different provider still reviews)
 //     pending  "alex is reviewing with Claude"          (the claim; renewed every TEAM_CLAIM_RENEW_MS)
 //     success  "alex reviewed · 4 comments"             (target_url = the posted GitHub review, if any)
-//     success  "alex's review didn't finish · free to claim"   (a failure, a Stop, a dropped run; the
-//                                                         phrase frees it — never red, never pending)
+//     success  "Cleared by alex: review didn't finish · free to claim"   (a failure, a Stop, a dropped
+//                                                         run — never red, never pending)
 //     success  "Cleared by alex"                        (the reader's Clear; reads as free)
-//     success  "Released: bob's claim expired"          (a teammate's stale line, released once)
+//     success  "Cleared by alex: bob's claim expired"   (a teammate's stale line, released once)
+//   ⚠ Every FREE success line starts "Cleared by ": a teammate still on an older Limn (whose fold reads
+//   any other success by someone else as "already reviewed") reads it as free too. The fold still
+//   reads "free to claim" and "Released:" (lines a 2026-10-28 build may have posted) as free.
 //
 // ⚠ AUTO REVIEWS ONLY (the tick AND the reader's "Run auto reviews now" / Retry). A manual run never
 //   claims and never checks claims.
@@ -84,15 +87,16 @@ export function reviewedLine(login: string, comments: number | null): string {
   if (comments == null) return clamp(`${login} reviewed · kept in Limn`);
   return clamp(`${login} reviewed · ${comments === 0 ? 'no' : comments} comment${comments === 1 ? '' : 's'}`);
 }
+/** The release line for a run of ours that did not finish (a failure, a Stop, a dropped run). */
 export function unfinishedLine(login: string): string {
-  return clamp(`${login}'s review didn't finish · ${FREE_PHRASE}`);
+  return clamp(`${CLEARED_PREFIX}${login}: review didn't finish · ${FREE_PHRASE}`);
 }
 export function clearedLine(login: string): string {
   return clamp(`${CLEARED_PREFIX}${login}`);
 }
-/** A teammate's expired (or older Limn's pending "free to claim") line, released by this machine. */
-export function releasedLine(login: string): string {
-  return clamp(`${RELEASED_PREFIX}${login}'s claim expired`);
+/** A teammate's expired (or older Limn's pending "free to claim") line, released by `by` (the reader). */
+export function releasedLine(login: string, by: string): string {
+  return clamp(`${CLEARED_PREFIX}${by}: ${login}'s claim expired`);
 }
 
 /** One status line of ONE context, as GitHub lists it. */
@@ -104,8 +108,9 @@ export interface TeamClaimLine {
   login: string | null; // the line's creator
 }
 
-// A FREE line: "free to claim" (a success since 2026-10-28; a pending one from older Limn versions),
-// a Clear, or a release of a teammate's expired line.
+// A FREE line: a success starting "Cleared by " (a Clear, a release of ours or of a teammate's expired
+// line), a success "free to claim" or "Released:" (a 2026-10-28 build's wording), or a pending "free to
+// claim" (older Limn versions).
 const isFreeLine = (l: TeamClaimLine): boolean => {
   const d = l.description ?? '';
   if (l.state === 'pending') return d.includes(FREE_PHRASE);
@@ -174,6 +179,16 @@ export function decideTeamClaim(lines: readonly TeamClaimLine[], me: string | nu
     leaseEndsAtMs: holder.newest.createdAtMs + TEAM_CLAIM_LEASE_MS,
     description: holder.first.description,
   };
+}
+
+/** The newest line of one context's history (any order), or null. */
+export function newestLine(lines: readonly TeamClaimLine[]): TeamClaimLine | null {
+  return lines.length === 0 ? null : [...lines].sort(order)[lines.length - 1]!;
+}
+
+/** Same GitHub login (case-insensitive; null never matches). */
+export function sameGithubLogin(a: string | null, b: string | null): boolean {
+  return sameLogin(a, b);
 }
 
 /**
@@ -409,6 +424,39 @@ export function claimLineFinishing(ledgerId: number, nowMs: number = Date.now())
   return since != null && nowMs - since < FINISHING_MAX_MS;
 }
 
+// ---- releases in flight (a claim at that head waits for them) ----
+
+// `${accountId}:${prId}:${headSha}:${provider}` → the reconciler's release of OUR line there, in flight.
+// A claim starting at that head waits for it before reading GitHub, so the release can never land
+// AFTER the claim's fresh pending line and free a head that is being reviewed.
+const releasesInFlight = new Map<string, Promise<unknown>>();
+const releaseKey = (accountId: number, prId: number, headSha: string, provider: AiProviderId): string =>
+  `${accountId}:${prId}:${headSha}:${provider}`;
+
+/**
+ * Run `release` registered as in flight for this head and provider. ⚠ Registered SYNCHRONOUSLY: the
+ * caller's last "is a run busy here?" check and this call must have no `await` between them.
+ */
+export function trackClaimRelease<T>(
+  where: { accountId: number; prId: number; headSha: string; provider: AiProviderId },
+  release: () => Promise<T>,
+): Promise<T> {
+  const key = releaseKey(where.accountId, where.prId, where.headSha, where.provider);
+  const p = release();
+  releasesInFlight.set(key, p);
+  const done = () => {
+    if (releasesInFlight.get(key) === p) releasesInFlight.delete(key);
+  };
+  p.then(done, done);
+  return p;
+}
+
+/** Wait for a release of our line at this head and provider, if one is in flight (never throws). */
+export async function waitForClaimRelease(accountId: number, prId: number, headSha: string, provider: AiProviderId): Promise<void> {
+  const p = releasesInFlight.get(releaseKey(accountId, prId, headSha, provider));
+  if (p) await p.catch(() => {});
+}
+
 export type TeamClaimStart =
   // The switch is off: run as before, no record.
   | { kind: 'off' }
@@ -466,6 +514,10 @@ export async function claimBeforeAutoRun(
     return unmarked('unknown', 'error');
   }
 
+  // A release of our own older line at this head is being written: let it land first, so this claim's
+  // pending line is the newer one.
+  await waitForClaimRelease(accountId, prId, headSha, provider);
+
   // STEP 1 — read and decide.
   let lines: TeamClaimLine[];
   try {
@@ -499,7 +551,7 @@ export async function claimBeforeAutoRun(
   // GitHub always has a row the reconciler can release. No row ⇒ no line (the run goes ahead unmarked).
   let ledgerId: number;
   try {
-    ledgerId = await recordClaimIntent(ctx, { accountId, prId, headSha, provider, login });
+    ledgerId = await recordClaimIntent(ctx, { accountId, prId, headSha, provider, login, owner, name });
   } catch (err) {
     ctx.log.warn(`team claim pr ${prId}: ledger not written (${errText(err)}); reviewing without a line`);
     return unmarked(login, 'error');
@@ -609,7 +661,19 @@ export async function finishTeamClaim(
   const ledgerId = handle.ledgerId ?? null;
   try {
     if (ledgerId != null && reviewId != null) await setClaimLine(ctx, ledgerId, { reviewId }).catch(() => {});
-    if (!handle.marked) return;
+    if (!handle.marked) {
+      // An UNMARKED claim that kept its ledger row: the pending POST failed in a way that may still
+      // have landed. Posting nothing here, the reconciler decides from GitHub: no line of ours ⇒
+      // nothing to release; our pending line ⇒ THIS outcome's line — the reviewed line for a review
+      // that succeeded, never "didn't finish".
+      if (ledgerId != null && outcome.kind === 'succeeded') {
+        await setClaimLine(ctx, ledgerId, {
+          finalDescription: reviewedLine(handle.login, outcome.comments),
+          finalTargetUrl: outcome.reviewUrl ?? null,
+        }).catch(() => {});
+      }
+      return;
+    }
     const { accountId, prId, owner, name, headSha, provider } = handle.target;
     const post: TeamClaimPost =
       outcome.kind === 'succeeded'

@@ -207,6 +207,7 @@ const REASON_PRIORITY: ReasonTag[] = [
 ];
 import { db, schema } from './client.js';
 import { dropRepoRelations } from './related-repos.js';
+import { deleteSettledClaimLinesForPrs } from './team-claim-lines-delete.js';
 import { runTransaction } from './client.js';
 import { enrichMyTurn } from '../feed/my-turn.js';
 import { resolvePrTickets } from '../pr/detail-enricher.js';
@@ -9602,8 +9603,9 @@ export async function deleteRepo(id: number, accountId: number): Promise<boolean
       await tx.delete(schema.trackerTickets).where(inArray(schema.trackerTickets.prId, prIds)).execute();
       // SonarCloud snapshots (migration 0114 / pg 0101). No FKs, so nothing would cascade.
       await tx.delete(schema.sonarSnapshots).where(inArray(schema.sonarSnapshots.prId, prIds)).execute();
-      // The team-claim ledger (migration 0138). No FKs, so nothing would cascade.
-      await tx.delete(schema.teamClaimLines).where(inArray(schema.teamClaimLines.prId, prIds)).execute();
+      // The team-claim ledger (migration 0138). No FKs, so nothing would cascade. This machine's OPEN
+      // rows stay: their lines still need releasing on GitHub (db/team-claim-lines-delete.ts).
+      await deleteSettledClaimLinesForPrs(tx, prIds);
       // Sequence diagrams of these PRs, and the story diagrams naming any of them (migration 0115 /
       // pg 0102). No FKs, so nothing would cascade. Before the PRs go: it reads their accounts.
       await pruneSequenceDiagramsForPrs(tx, prIds);

@@ -8,6 +8,8 @@ CREATE TABLE `team_claim_lines` (
 	`account_id` integer NOT NULL,
 	`pr_id` integer NOT NULL,
 	`repo_id` integer,
+	`owner` text,
+	`name` text,
 	`head_sha` text NOT NULL,
 	`provider` text NOT NULL,
 	`review_id` integer,
@@ -28,13 +30,15 @@ CREATE INDEX `team_claim_lines_account_pr_head` ON `team_claim_lines` (`account_
 --> statement-breakpoint
 -- Lines older Limn versions left PENDING (a failed run's "didn't finish · free to claim", or a run that
 -- died mid-way): the newest auto run's record per (PR, head, context), when it is still pending, from
--- the last 14 days. The reconciler replaces each with the success release line at boot.
-INSERT INTO `team_claim_lines` (`account_id`, `pr_id`, `repo_id`, `head_sha`, `provider`, `review_id`, `whose`, `state`)
-SELECT cr.`account_id`, cr.`pr_id`, pr.`repo_id`, cr.`head_sha`,
+-- the last 14 days. The reconciler replaces each with the success release line at boot — only where the
+-- head's newest line is still this account's pending one (it reads GitHub first).
+INSERT INTO `team_claim_lines` (`account_id`, `pr_id`, `repo_id`, `owner`, `name`, `head_sha`, `provider`, `review_id`, `whose`, `state`)
+SELECT cr.`account_id`, cr.`pr_id`, pr.`repo_id`, r.`owner`, r.`name`, cr.`head_sha`,
 	CASE json_extract(cr.`team_claim`, '$.context') WHEN 'limn/review-codex' THEN 'codex' ELSE 'claude' END,
 	cr.`id`, 'mine', 'pending'
 FROM `claude_reviews` cr
 JOIN `pull_requests` pr ON pr.`id` = cr.`pr_id`
+JOIN `repos` r ON r.`id` = pr.`repo_id`
 WHERE cr.`team_claim` IS NOT NULL
 	AND json_valid(cr.`team_claim`)
 	AND json_extract(cr.`team_claim`, '$.state') = 'marked'

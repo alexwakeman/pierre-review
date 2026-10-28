@@ -3858,7 +3858,9 @@ export const storyDocsAlignments = sqliteTable(
 //                    expired"), recorded so it is posted ONCE. Always 'released'.
 // The reconciler (review/claude-review/team-claim-release.ts) releases every 'claiming' / 'pending'
 // row whose run is not queued or running in this process. No FK on pr_id (the sonar_snapshots
-// precedent): BOTH delete paths (deleteRepo, retention's deletePrSubtree) and the erasure delete it.
+// precedent): BOTH delete paths (deleteRepo, retention's deletePrSubtree) delete its rows EXCEPT this
+// machine's OPEN ones (a pending line on GitHub still needs its release; the row carries owner/name);
+// the erasure deletes everything.
 export const teamClaimLines = sqliteTable(
   'team_claim_lines',
   {
@@ -3866,6 +3868,10 @@ export const teamClaimLines = sqliteTable(
     accountId: integer('account_id').notNull(),
     prId: integer('pr_id').notNull(),
     repoId: integer('repo_id'),
+    // The repo's owner/name when the row was written: an open line is still released after its PR or
+    // repo left Limn (the delete paths keep OPEN 'mine' rows for exactly that).
+    owner: text('owner'),
+    name: text('name'),
     headSha: text('head_sha').notNull(),
     // 'claude' | 'codex' — the status context (`limn/review-<provider>`).
     provider: text('provider').notNull(),

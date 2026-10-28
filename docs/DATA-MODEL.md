@@ -200,12 +200,15 @@ isolation as above (`accountId` denormalized onto the anchor tables;
   memory only (team-claim.ts).
 - **THE TEAM-CLAIM LEDGER** (`teamClaimLines`, `team_claim_lines`, migration `0138`; docs/CLAUDE-REVIEW.md
   § Team claims → Releasing stale lines): one row per status line this machine holds or released —
-  `(accountId, prId, repoId, headSha, provider, reviewId?, whose 'mine'|'teammate', state
+  `(accountId, prId, repoId, owner, name, headSha, provider, reviewId?, whose 'mine'|'teammate', state
   'claiming'|'pending'|'finished'|'released', login, finalDescription, finalTargetUrl, releaseAttempts,
   lastError, createdAt, updatedAt)`. ⚠ Written 'claiming' BEFORE the pending line is posted; the
   reconciler releases every OPEN ('claiming' / 'pending') row of ours whose run is not in this
   process. A teammate row is always 'released' (posted once). Not a log of every line (renewals write
-  nothing). No FK on `pr_id`: both delete paths and the erasure take it; in `accountScopedTables()`.
+  nothing). No FK on `pr_id`: both delete paths take its rows EXCEPT this machine's OPEN ones (their
+  lines still need releasing, from the row's own `owner`/`name`; `db/team-claim-lines-delete.ts`), the
+  erasure takes all; in `accountScopedTables()`. The reconciler reads only rows with `releaseAttempts`
+  under the cap.
 - **AUTO-POSTING columns** (migration `0087`, all nullable, no defaults, no new table —
   docs/CLAUDE-REVIEW.md § Auto-posting): `workspaces.autoPostEnabled` (NULL/false = OFF, for every
   workspace until switched on) + `workspaces.autoPostSettings` (JSON `StoredAutoPostSettings`,

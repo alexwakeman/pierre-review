@@ -286,8 +286,8 @@ export function AutoReviewSection(): JSX.Element {
             with the same provider. A different provider still reviews it.
           </p>
           <p>
-            If a review doesn’t finish, its line stays pending and says it’s free to claim. Clear it
-            from the AI Review tab, or push a new commit.
+            If a review doesn’t finish, Limn marks its line free to claim, so a teammate’s Limn can
+            review the commit. You can also Clear a line from the AI Review tab.
           </p>
           <p>Needs write access to the repo. Without it, Limn reviews without a line.</p>
         </InfoButton>
