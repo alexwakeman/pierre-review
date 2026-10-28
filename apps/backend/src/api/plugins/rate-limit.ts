@@ -160,6 +160,9 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // for the organization + one per repo, ≤ 20) — a THIRD-PARTY quota, so `search`. GET/PUT
   // `…/sonar` are DB-only and fall to `read` on the next line, decided rather than inherited.
   if (method === 'POST' && /^\/api\/workspaces\/\d+\/sonar\/check$/.test(path)) return [TIERS.search, TIERS.read];
+  // WIKI CREDENTIALS (reference-docs/wiki/routes.ts): "Test connection" is one read of the customer's
+  // Confluence with the saved token → `search`. GET/PUT `…/wiki-credentials` are DB-only → `read` below.
+  if (method === 'POST' && /^\/api\/workspaces\/\d+\/wiki-credentials\/check$/.test(path)) return [TIERS.search, TIERS.read];
   // RUN AUTO REVIEWS NOW / RETRY (review/claude-review/auto-settings.ts): one press can queue up to a
   // day's cap of agentic model runs on the reader's own Claude or Codex — `ai` + `aiHourly`, decided
   // ABOVE the family's `read` line, by exact shape. The GET/PUT `…/auto-review` stay `read`.
@@ -445,6 +448,12 @@ function tierFor(method: string, path: string): readonly Tier[] {
     return [TIERS.ai, TIERS.aiHourly];
   }
   if (method === 'POST' && /^\/api\/docs\/\d+\/rebuild$/.test(path)) return [TIERS.ai, TIERS.aiHourly];
+  // WIKI SOURCES (reference-docs/wiki/routes.ts): adding a Confluence page and "Refresh now" read the
+  // CUSTOMER'S Confluence quota with the saved token (a page, its tree, a CQL search) and may run the
+  // build's model → search + ai + ai_hourly. (The credentials routes sit with the workspace family above.)
+  if (method === 'POST' && (path === '/api/docs/wiki' || /^\/api\/docs\/\d+\/refresh$/.test(path))) {
+    return [TIERS.search, TIERS.ai, TIERS.aiHourly];
+  }
   if (path === '/api/docs' || path.startsWith('/api/docs/')) return [TIERS.read];
   if (/^\/api\/workspaces\/\d+\/docs-settings$/.test(path)) return [TIERS.read];
   if (!mutating && /^\/api\/prs\/\d+\/tracker-ticket$/.test(path)) return [TIERS.search, TIERS.read];

@@ -112,6 +112,10 @@ export interface AccountExport {
   referenceDocs: Record<string, unknown>[];
   /** The docs chat: the questions the user typed and the answers (`reference_doc_chat_messages`). */
   referenceDocChatMessages: Record<string, unknown>[];
+  /** Wiki documents' pages (core `reference_doc_wiki_pages`, migration 0140): ids, titles, versions. */
+  referenceDocWikiPages: Record<string, unknown>[];
+  /** Each workspace's wiki credential (migration 0140): site and email. ⚠ THE TOKEN IS WITHHELD. */
+  workspaceWikiCredentials: Record<string, unknown>[];
   /**
    * Related repos (core `repo_relations`, migration 0131): the pairs the user chose, both directions,
    * per workspace.
@@ -227,11 +231,37 @@ export async function exportAccountData(accountId: number): Promise<AccountExpor
       summary: schema.referenceDocs.summary,
       topics: schema.referenceDocs.topics,
       sections: schema.referenceDocs.sections,
+      wiki: schema.referenceDocs.wiki,
       createdAt: schema.referenceDocs.createdAt,
       builtAt: schema.referenceDocs.builtAt,
     })
     .from(schema.referenceDocs)
     .where(eq(schema.referenceDocs.accountId, accountId))
+    .execute();
+  // Wiki sources (migration 0140): the pages of each wiki document, and the wiki credential WITHOUT its token.
+  const wikiPageRows = await db
+    .select({
+      docId: schema.referenceDocWikiPages.docId,
+      pageId: schema.referenceDocWikiPages.pageId,
+      title: schema.referenceDocWikiPages.title,
+      version: schema.referenceDocWikiPages.version,
+      lastEditedAt: schema.referenceDocWikiPages.lastEditedAt,
+      lastFetchedAt: schema.referenceDocWikiPages.lastFetchedAt,
+    })
+    .from(schema.referenceDocWikiPages)
+    .where(eq(schema.referenceDocWikiPages.accountId, accountId))
+    .execute();
+  const wikiCredentialRows = await db
+    .select({
+      workspaceId: schema.workspaceWikiCredentials.workspaceId,
+      provider: schema.workspaceWikiCredentials.provider,
+      siteUrl: schema.workspaceWikiCredentials.siteUrl,
+      email: schema.workspaceWikiCredentials.authEmail,
+      hasToken: schema.workspaceWikiCredentials.authToken,
+      updatedAt: schema.workspaceWikiCredentials.updatedAt,
+    })
+    .from(schema.workspaceWikiCredentials)
+    .where(eq(schema.workspaceWikiCredentials.accountId, accountId))
     .execute();
   const docChatRows = await db
     .select({
@@ -408,6 +438,9 @@ export async function exportAccountData(accountId: number): Promise<AccountExpor
     workspaceTrackers: trackerRows.map((t) => ({ ...t, hasToken: t.hasToken != null && t.hasToken !== '' })),
     workspaceSonar: sonarRows.map((t) => ({ ...t, hasToken: t.hasToken != null && t.hasToken !== '' })),
     referenceDocs: referenceDocRows,
+    referenceDocWikiPages: wikiPageRows,
+    // ⚠ PRESENCE ONLY — never the stored token, in any form.
+    workspaceWikiCredentials: wikiCredentialRows.map((t) => ({ ...t, hasToken: t.hasToken != null && t.hasToken !== '' })),
     repoRelations: repoRelationRows,
     sprintCodeJudgements: capped('sprintCodeJudgements', codeJudgementRows),
     referenceDocChatMessages: capped('referenceDocChatMessages', docChatRows),

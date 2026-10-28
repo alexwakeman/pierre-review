@@ -1165,7 +1165,18 @@ interface DemoSection {
   body: string;
 }
 
-const LIBRARY: Array<{ slug: string; title: string; source: string; summary: string; topics: string[]; sections: DemoSection[] }> = [
+interface DemoWiki {
+  rootPageId: string;
+  depth: number;
+  checkedHoursAgo: number;
+  editedHoursAgo: number;
+  /** Page ids, root first — one per section, in order. */
+  pages: string[];
+  /** Set: the page has answered 403 since then. */
+  unreachableHoursAgo?: number;
+}
+
+const LIBRARY: Array<{ slug: string; title: string; source: string; summary: string; topics: string[]; sections: DemoSection[]; wiki?: DemoWiki }> = [
   {
     slug: 'sync-runbook',
     title: 'Sync service runbook',
@@ -1224,6 +1235,50 @@ const LIBRARY: Array<{ slug: string; title: string; source: string; summary: str
       },
     ],
   },
+  // A CONFLUENCE page tree (docs/REFERENCE-DOCS.md § Wiki sources): the root page and two child pages,
+  // one chapter each, on the same fictional site as the demo's Jira — so it reads with the Jira token.
+  {
+    slug: 'release-handbook',
+    title: 'Release handbook',
+    source: 'https://acme.atlassian.net/wiki/spaces/PLAT/pages/40001/Release+handbook',
+    summary: 'How Acme platform changes ship: the release train, the freeze, and rolling back.',
+    topics: ['releases', 'deploys', 'feature flags', 'rollback'],
+    wiki: { rootPageId: '40001', depth: 1, checkedHoursAgo: 2, editedHoursAgo: 30, pages: ['40001', '40002', '40003'] },
+    sections: [
+      {
+        title: 'Release handbook',
+        summary: 'The weekly release train and who drives it.',
+        body: 'Platform ships on a weekly train that leaves on Tuesday at 10:00 UTC. The release captain rotates weekly and owns the go / no-go call.\n\nA change rides the train only when it is merged by Monday 17:00 UTC and its migration, if any, has been run on staging.',
+      },
+      {
+        title: 'Freeze and feature flags',
+        summary: 'The freeze window, and why risky changes ship behind a flag.',
+        body: 'The last week of each quarter is a freeze: only fixes for incidents ship.\n\nA change that alters sync behaviour ships behind a feature flag that defaults to off, and is turned on for one workspace before all of them.',
+      },
+      {
+        title: 'Rolling back',
+        summary: 'Roll back by redeploying the previous build; never revert a migration.',
+        body: 'Roll back by redeploying the previous build. Never revert a migration that has run: write a new one that undoes it.\n\nA rollback is announced in #platform-releases with the build id and the reason.',
+      },
+    ],
+  },
+  // A second Confluence page that has stopped answering: the last built version stays readable, and the
+  // document line says since when it cannot be reached.
+  {
+    slug: 'incident-process',
+    title: 'Incident process',
+    source: 'https://acme.atlassian.net/wiki/spaces/OPS/pages/52001/Incident+process',
+    summary: 'Who declares an incident, the roles, and the review afterwards.',
+    topics: ['incidents', 'on-call', 'postmortems'],
+    wiki: { rootPageId: '52001', depth: 0, checkedHoursAgo: 75, editedHoursAgo: 400, pages: ['52001'], unreachableHoursAgo: 72 },
+    sections: [
+      {
+        title: 'Incident process',
+        summary: 'Anyone may declare an incident; the on-call engineer leads it; a review follows within five days.',
+        body: 'Anyone may declare an incident in #incidents. The on-call engineer is the incident lead until they hand it over.\n\nEvery incident gets a written review within five working days. The review names causes, never people.',
+      },
+    ],
+  },
 ];
 
 async function seedReferenceDocs(c: AgenticSeedCtx): Promise<number> {
@@ -1241,16 +1296,36 @@ async function seedReferenceDocs(c: AgenticSeedCtx): Promise<number> {
   rmSync(join(config.docsDir, '1'), { recursive: true, force: true });
   for (const [di, d] of LIBRARY.entries()) {
     const md = `# ${d.title}\n\n${d.sections.map((s) => `## ${s.title}\n\n${s.body}`).join('\n\n')}\n`;
+    const hoursAgoMs = (h: number) => now.getTime() - h * 3600_000;
     const row = await insertDocRow({
       accountId: 1,
       workspaceId: ws,
       slug: d.slug,
       title: d.title,
-      sourceKind: d.source.startsWith('https://') ? 'url' : 'markdown',
+      sourceKind: d.wiki ? 'wiki' : d.source.startsWith('https://') ? 'url' : 'markdown',
       sourceName: d.source,
       sourceUrl: d.source.startsWith('https://') ? d.source : null,
       byteSize: Buffer.byteLength(md),
       pageCount: null,
+      ...(d.wiki
+        ? {
+            wiki: {
+              provider: 'confluence',
+              origin: 'https://acme.atlassian.net',
+              rootPageId: d.wiki.rootPageId,
+              rootUrl: d.source,
+              depth: d.wiki.depth,
+              pageCount: d.wiki.pages.length,
+              pagesLeftOut: 0,
+              lastCheckedAt: hoursAgoMs(d.wiki.checkedHoursAgo),
+              lastListedAt: hoursAgoMs(d.wiki.checkedHoursAgo),
+              lastChangedAt: hoursAgoMs(d.wiki.editedHoursAgo),
+              unreachableSince: d.wiki.unreachableHoursAgo != null ? hoursAgoMs(d.wiki.unreachableHoursAgo) : null,
+              unreachableReason: d.wiki.unreachableHoursAgo != null ? 'forbidden' : null,
+              retryAfter: null,
+            },
+          }
+        : {}),
     } as never);
     saveSource(1, ws, d.slug, Buffer.from(md, 'utf8'), 'md');
     const out = join(stagingRoot(1, ws), `${d.slug}-seed`, 'out', d.slug);
@@ -1273,6 +1348,42 @@ async function seedReferenceDocs(c: AgenticSeedCtx): Promise<number> {
     const builtOn = di === 1 ? { ...CODEX_STANDARD, costUsd: 0 } : { provider: 'claude' as const, model: 'claude-sonnet-5', costUsd: 0.31 };
     await saveDocBuilt(1, row.id, { title: d.title, summary: d.summary, topics: d.topics, sections: entries }, { ...builtOn, inputTokens: 22_000, outputTokens: 2_800, numTurns: 6 } as never);
     rmSync(join(stagingRoot(1, ws), `${d.slug}-seed`), { recursive: true, force: true });
+    if (d.wiki) {
+      // One row per page (a chapter each), as a build commits them.
+      const { commitWikiPages } = await import('../src/reference-docs/wiki/pages.js');
+      const { hashMarkdown } = await import('../src/reference-docs/wiki/sync.js');
+      const w = d.wiki;
+      await commitWikiPages(
+        1,
+        ws,
+        d.slug,
+        row.id,
+        w.pages.map((pageId, i) => ({
+          pageId,
+          parentPageId: i === 0 ? null : w.rootPageId,
+          depth: i === 0 ? 0 : 1,
+          position: i,
+          title: d.sections[i]!.title,
+          version: 3 + i,
+          lastEditedAt: new Date(now.getTime() - (w.editedHoursAgo + i * 20) * 3600_000),
+          contentHash: hashMarkdown(d.sections[i]!.title, d.sections[i]!.body),
+          lastFetchedAt: new Date(now.getTime() - w.checkedHoursAgo * 3600_000),
+          lastError: w.unreachableHoursAgo != null && i === 0 ? 'forbidden' : null,
+          markdown: d.sections[i]!.body,
+        })),
+      );
+      // Built from the cache the next refresh would read.
+      const { sectionHash } = await import('../src/reference-docs/manager.js');
+      const sections = Object.fromEntries(drafts.map((dr) => [sectionHash(dr), dr.summary]));
+      const { patchDoc } = await import('../src/reference-docs/store.js');
+      await patchDoc(1, row.id, { summaryCache: { v: 1, sections, doc: { title: d.title, summary: d.summary, topics: d.topics } } });
+    }
+  }
+  // Settings → Confluence: the page site is the demo's Jira site, so the pages read with the Jira token
+  // (seed-demo-tracker.ts); a separate Confluence token is saved too (fictional, sealed or plain).
+  {
+    const { writeWikiCredentials } = await import('../src/reference-docs/wiki/credentials.js');
+    await writeWikiCredentials(1, ws, 'confluence', { siteUrl: 'https://acme.atlassian.net', email: 'morgan.diaz@acme.example', token: 'demo-not-a-real-token' });
   }
   await writeIndex(1, ws);
   // Reviews read the library (Settings → Docs → "Use in reviews").

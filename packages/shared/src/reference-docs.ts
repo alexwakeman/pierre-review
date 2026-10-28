@@ -15,8 +15,10 @@
 // and topics for every kind). The server converts Word and HTML, splits, validates and writes every
 // file a link can point at, so a link in the tree always resolves.
 import type { AiProviderId } from './types.js';
+import type { ReferenceDocWiki } from './reference-docs-wiki.js';
 
-export type ReferenceDocSourceKind = 'pdf' | 'docx' | 'text' | 'markdown' | 'html' | 'url';
+// `wiki`: a page tree from a team wiki (Confluence today; reference-docs-wiki.ts), one document.
+export type ReferenceDocSourceKind = 'pdf' | 'docx' | 'text' | 'markdown' | 'html' | 'url' | 'wiki';
 
 // The LATEST build's state. A document that built once stays readable (`available`) while a
 // rebuild runs or after a rebuild fails.
@@ -83,6 +85,9 @@ export interface ReferenceDoc {
   /** A web page added with "Follow links": the crawl's settings and what the last build read. Null
    *  for a single page or a file. */
   crawl: ReferenceDocCrawl | null;
+  /** A wiki page tree (Confluence): where it lives, how many pages, when it was last checked, and
+   *  whether the wiki can still be reached. Absent / null for every other source. */
+  wiki?: ReferenceDocWiki | null;
   createdAt: string;
   updatedAt: string;
   builtAt: string | null;

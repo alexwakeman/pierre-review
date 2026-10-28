@@ -1,0 +1,10 @@
+{
+  "results": [
+    { "id": "1005", "status": "current", "title": "Card outage", "type": "page", "parentId": "2001", "depth": 2, "childPosition": 0 },
+    { "id": "1006", "status": "archived", "title": "Old notes", "type": "page", "parentId": "1001", "depth": 1, "childPosition": 9 },
+    { "id": "3001", "status": "current", "title": "Flow board", "type": "whiteboard", "parentId": "1002", "depth": 2, "childPosition": 1 }
+  ],
+  "_links": {
+    "base": "https://acme.atlassian.net/wiki"
+  }
+}

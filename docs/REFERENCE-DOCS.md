@@ -1,6 +1,6 @@
 # Reference docs — the workspace library
 
-A workspace's reference material (PDF, Word, text, markdown, web pages), turned into a markdown tree
+A workspace's reference material (PDF, Word, text, markdown, web pages, Confluence pages), turned into a markdown tree
 that an agent navigates by REASONING over contents, not by embedding search. CORE and agentic
 (registered by `registerAgenticRoutes`, absent under `LIMN_AI_DISABLED`). Sonnet 5
 does the content building. Code: `apps/backend/src/reference-docs/`. Wire types:
@@ -202,6 +202,98 @@ long to split, in a sentence.
 
 Progress: the converting stage reads "Crawling 6 of 25" (the SPA's bar shows the server's stage
 words). Cancel aborts between requests and during the politeness wait.
+
+## Wiki sources — Confluence (`wiki/`; migration `0140`)
+
+A Confluence Cloud page — and, optionally, its child pages 1–3 levels down (the crawl's depth words,
+reused) — becomes ONE document (`sourceKind: 'wiki'`, `doc.wiki`), the root and each child a chapter.
+Pasting a Confluence page address into "Add web page" switches the form to it ("Add Confluence page",
+"With child pages, N levels"); `parseConfluencePageUrl` (shared) decides — `/wiki/spaces/<K>/pages/<id>`,
+`…/pages/edit-v2/<id>`, `viewpage.action?pageId=<id>`; https only; a short `/wiki/x/…` link names no id
+and is refused. ≤ `REFERENCE_DOC_WIKI_MAX_PAGES` (100) pages, root included; the rest are counted
+(`pagesLeftOut`).
+
+**The seam, for the next wiki (Notion).** `wiki/source.ts` `WikiSource` — `resolveRef(url)` (pure),
+`getPage(site, id, {body})` (title, parent, version / last-edit time, body in the provider's format),
+`listDescendants(site, root, depth, cap)` (ids, parents, depth, order; no bodies), `changedSince(site,
+root, since)` (may over-report, never under), `toMarkdown(page)`, `checkAccess(site)`, `pageUrl(site,
+id)`. Errors are `WikiSourceError` CODES (never the upstream body). Adapters register in
+`wiki/register.ts`; `sync.ts`, `build.ts`, `refresh.ts` and the routes never name a provider (except the
+credential ladder below and the provider union on the wire). `fake-wiki.ts` is the in-memory adapter the
+tests use.
+
+**Confluence** (`wiki/confluence.ts`): REST v2 `GET /wiki/api/v2/pages/{id}[?body-format=storage]`,
+`…/pages/{id}/descendants?depth=&limit=250` (folders are transparent, whiteboards / databases and
+non-`current` pages left out; a page's parent is its nearest PAGE ancestor), and the v1 CQL search
+`ancestor = <root> AND type = page AND lastmodified > "<since − 1 day>"` with `expand=version` (CQL reads
+the instant in the account's own zone, so it asks a day early and the VERSION compare decides). ⚠ Every
+request goes through the tracker's guarded transport (`tracker/jira/fetch.ts`): https and PUBLIC
+addresses only (the cloud policy, judged at connect time), NO redirects, 15 s, 8 MB, JSON only; a
+listing's `next` link is followed only on the same site and API path. 429 → Retry-After waited (≤ 60 s
+in all, cancellable), then `rate_limited` with the wait, stored as `retryAfter` (the background check
+waits for it).
+
+**Converting a page** (`wiki/confluence-storage.ts`): storage-format XHTML → plain HTML → the library's
+ONE turndown pipeline (`htmlToMarkdown`). code / noformat → a fenced block (language kept); info / note /
+tip / warning / panel (+ the new editor's `ac:adf-extension` panels) → a quote headed by its kind;
+expand → its title in bold then its body; mermaid / PlantUML with a text source → a fenced block of it;
+draw.io / Gliffy / Lucidchart (or a diagram with no text) → `[Diagram: name]` — ⚠ **DIAGRAM_HOOK**: the
+image-description pass (another branch) replaces exactly these placeholders (`diagramPlaceholder`);
+status / Jira → their words; toc / children / anchor and other navigation macros dropped; an unknown
+macro → its rich-text body; `ac:link` → its text; `ac:image` → `[Image: alt or file name]`; task lists →
+`[x]` / `[ ]`; table cells and list items unwrap their `<p>`. Bracketed words travel through turndown as
+private-use sentinels so they are not escaped. ⚠ The body is a stranger's: ONE forward tokenizer pass,
+quote-aware tag ends, an element stack capped at 256 (no quadratic close-tag matching), scripts dropped.
+
+**Credentials** (`wiki/credentials.ts`, `workspace_wiki_credentials`; Settings → AI review →
+**Confluence**): ONE ladder — the workspace's own Confluence credential when its site's host is the
+page's host; else the workspace's JIRA credential when Jira is its tracker, the hosts match and an email
++ token are saved (Atlassian Cloud shares one API token); else none (`400 NoWikiCredential`, "Add a
+Confluence API token in Settings"). HTTP Basic `email:apiToken`. ⚠ The token is SEALED exactly like a
+tracker token (`tracker/secret.ts`), WRITE-ONLY (`hasToken`), never logged; a changed site drops a token
+not re-sent; the export carries site + email only.
+
+**Per-page records** (`reference_doc_wiki_pages`, `wiki/pages.ts`): one row per page (version, last edit,
+sha256 of the converted markdown + title, last fetch, last error code), upserted on `(doc_id, page_id)`,
+and each page's markdown cached at `sources/<slug>/pages/<pageId>.md`. ⚠ **Written ONLY by
+`commitWikiPages`, after a successful build or a refresh that found nothing to rebuild** — a failed,
+cancelled or budget-skipped refresh never advances a version, so the next check finds the same change.
+
+**The incremental rebuild** (`manager.ts` + `sync.ts`):
+1. **Read only what changed** (`syncWikiTree`): the root's metadata, the CQL search, then the BODY of only
+   the pages whose version moved (or that are new, or have no cached file); the full id list only on the
+   first build, once a day, or when the search names a page the stored tree does not know. Every other
+   page comes from the cache. A child that is gone (404) leaves the tree; a child that fails otherwise
+   keeps its last text (`lastError`); the ROOT failing stops the read.
+2. **Stop if nothing moved**: every hash, title and place in the tree as stored ⇒ no rebuild and NO model
+   call — the check is stamped and the document goes back to `ready`.
+3. **Re-summarise only changed sections**: the bundle (`bundleWikiMarkdown`: a heading per page at its
+   depth, `Source: <url>`, the page's headings below it — ⚠ always the adapter's `pageUrl`, so a fetched
+   and a cached page bundle identically) is split as ever; each section's hash (title + trail + text,
+   `sectionHash`) is looked up in `summary_cache_json`. Cached sections keep their summary; the agent's
+   `expected` list is ONLY the new / changed files (`buildSectionsUpdatePrompt` lists the kept summaries,
+   fenced, as context), and it still writes the whole document's summary. All cached + a cached
+   document summary ⇒ no model at all. **Rebuild** (`full`) reads every page and summarises afresh.
+4. **Swap in one rename** as every build; the last good version stays readable throughout.
+
+**Refresh** (`wiki/refresh.ts`; ONE cheap check, `build.ts` `quickCheckWikiDoc`, reads no body):
+- **the cadence** — an hourly job (`WIKI_REFRESH_CRON`) checks wiki documents not checked for 3 h, in
+  workspaces whose library was USED in the last 7 days (`workspaces.docs_used_at`, stamped — throttled —
+  by the docs list, tree, chat and every run that reads the library), past any `retryAfter`, ≤ 10 per
+  tick, oldest first; "changed" queues a refresh build.
+- **before use** — `reviewDocsFor` (Claude Review, the ticket review) and the story check kick a check of
+  documents not checked in 15 min. It never waits: the run reads the current version.
+- **Refresh now** — the document's button (`POST /api/docs/:id/refresh`).
+- ⚠ The first two are AUTOMATIC: the build asks `automaticRunAllowed` (`review/budget-gate.ts`) right
+  before a model call and is SKIPPED (back to `ready`, nothing committed), never queued, when over.
+- ⚠ **Never delete on an error.** A root 404 / 403 / 401 / no credential / network / 429 is RECORDED on
+  the row (`unreachableSince` — the first failure since the last good check — and the reason); the built
+  version stays readable and the document line says "Can't reach this page in Confluence since <date>."
+  A first build that cannot read the wiki fails with the sentence.
+
+**On screen**: the document line reads "Confluence · N pages · M sections", then "Checked 2 hours ago ·
+last edited <date>" or the can't-reach line; "Refresh now" beside Rebuild. The form's ⓘ explains the
+import and the refresh.
 
 ## The build (`manager.ts`, `agent.ts`, `build-judge.ts`)
 
@@ -533,6 +625,15 @@ fake model, the bundle) · `convert.test.ts` (sniffing, HTML conversion) ·
 remove, erasure deletes files) · `chat-quotes.test.ts` (a chat citation's quote: candidates, the check,
 header and too-short quotes dropped, first verified wins, the stored re-read, the two folds agree) · `review-refs.test.ts` (the reference check — a quote not in its section,
 a link outside the library, header-only quotes, anchors; the OFF ⇒ unchanged pins) ·
+`wiki/confluence-storage.test.ts` (a recorded storage body with every macro shape; the tokenizer on
+100k unclosed tags) · `wiki/confluence.test.ts` (recorded REST answers through a fake transport: address
+parsing, page / tree / CQL reads, pagination on-site only, folder-transparent order, auth header, 429 +
+Retry-After, status codes, private / http refused) · `wiki/sync.test.ts` (the cheap check reads no body;
+child / root edits, the daily list; only changed pages read; a same-text bump changes nothing; child and
+root failures) · `wiki/wiki-db.test.ts` (end to end over a scratch DB with an in-memory wiki and a fake
+agent: credentials incl. Jira reuse and write-only token, import, refresh with nothing changed = no
+model call, one page changed = only its sections summarised, the budget skip commits nothing, a gone
+root keeps the last version, the cadence's 7-day gate, tenancy, delete and erasure) ·
 `review/path-guard.test.ts` (read-only roots) · `review/claude-review/docs-pipeline.test.ts` (on/off
 end to end) · `review/story-docs/` — `shortlist.test.ts` (bad / unbuilt / unlisted sections dropped, the
 retry, the CONTENTS budget), `validate.test.ts` (shape refused, ungrounded and out-of-range items dropped,

@@ -3,14 +3,22 @@ import {
   REFERENCE_DOC_CRAWL_MAX_DEPTH,
   REFERENCE_DOC_CRAWL_MAX_PAGES,
   REFERENCE_DOC_MAX_BYTES,
+  REFERENCE_DOC_WIKI_MAX_DEPTH,
+  REFERENCE_DOC_WIKI_MAX_PAGES,
+  WIKI_PROVIDER_NAMES,
+  parseConfluencePageUrl,
+  wikiUnreachableWords,
   type ReferenceDoc,
 } from '@pierre-review/shared';
+import { formatDate, relativeTime } from '../../lib/ui.js';
 import { aiReadyFor, useAiCapabilities, useAiProvider, useAiProviderName } from '../../hooks/useAiCapabilities.js';
 import {
   useAddReferenceDocUrl,
+  useAddReferenceDocWiki,
   useCancelReferenceDoc,
   useDeleteReferenceDoc,
   useRebuildReferenceDoc,
+  useRefreshReferenceDoc,
   useReferenceDocTree,
   useReferenceDocs,
   useUploadReferenceDoc,
@@ -34,7 +42,7 @@ import {
 import { useDocsView, type DocsOpen } from '../../store/docsView.js';
 import { useFilters } from '../../store/filters.js';
 import { AiRunGate } from '../AiSetup.js';
-import { BookIcon, ChevronIcon, CollapseAllIcon, ExpandAllIcon, UploadIcon } from '../Icons.js';
+import { BookIcon, ChevronIcon, CollapseAllIcon, ConfluenceIcon, ExpandAllIcon, UploadIcon } from '../Icons.js';
 import { InfoButton } from '../InfoModal.js';
 import { DocsChat } from './DocsChat.js';
 import { DocsViewer } from './DocsViewer.js';
@@ -75,7 +83,39 @@ const KIND_LABEL: Record<ReferenceDoc['sourceKind'], string> = {
   markdown: 'Markdown',
   html: 'Web page',
   url: 'Web page',
+  wiki: 'Wiki',
 };
+
+/** The source words on a document's line: the wiki's own name for a wiki tree. */
+const sourceLabel = (doc: ReferenceDoc): string => (doc.wiki ? WIKI_PROVIDER_NAMES[doc.wiki.provider] : KIND_LABEL[doc.sourceKind]);
+
+/**
+ * A wiki document's freshness line (docs/REFERENCE-DOCS.md § Wiki sources): when Limn last asked the
+ * wiki and when a page last changed, or — when the wiki cannot be reached — since when, and why. The
+ * last built version stays readable either way.
+ */
+function WikiStatus({ doc }: { doc: ReferenceDoc }): JSX.Element | null {
+  const w = doc.wiki;
+  if (!w) return null;
+  const name = WIKI_PROVIDER_NAMES[w.provider];
+  if (w.unreachableSince && w.unreachableReason) {
+    return (
+      <p className="text-[11px] text-rose-700 dark:text-rose-400" data-testid="wiki-unreachable">
+        Can&rsquo;t reach this page in {name} since {formatDate(w.unreachableSince)}. {wikiUnreachableWords(w.provider, w.unreachableReason)}
+      </p>
+    );
+  }
+  const parts = [
+    w.lastCheckedAt ? `Checked ${relativeTime(w.lastCheckedAt)}` : null,
+    w.lastChangedAt ? `last edited ${formatDate(w.lastChangedAt)}` : null,
+  ].filter(Boolean);
+  if (parts.length === 0) return null;
+  return (
+    <p className={`text-[11px] ${MUTED}`} title={w.rootUrl}>
+      {parts.join(' · ')}
+    </p>
+  );
+}
 
 function BuildProgress({ doc }: { doc: ReferenceDoc }): JSX.Element {
   const pct = Math.max(0, Math.min(100, Math.round(doc.progress)));
@@ -243,13 +283,14 @@ function DocRow({
   const expanded = useDocsView((s) => (s.expanded[workspaceId] ?? []).includes(doc.id));
   const toggle = useDocsView((s) => s.toggleExpanded);
   const rebuild = useRebuildReferenceDoc(workspaceId);
+  const refresh = useRefreshReferenceDoc(workspaceId);
   const cancel = useCancelReferenceDoc(workspaceId);
   const remove = useDeleteReferenceDoc(workspaceId);
   const [confirmRemove, setConfirmRemove] = useState(false);
   const building = isDocBuilding(doc.status);
   const contentsPath = `${doc.slug}/CONTENTS.md`;
   const onContents = open.path === contentsPath;
-  const error = rebuild.error ?? cancel.error ?? remove.error;
+  const error = rebuild.error ?? refresh.error ?? cancel.error ?? remove.error;
 
   return (
     <li className="rounded border border-gray-200 dark:border-gray-800">
@@ -267,7 +308,7 @@ function DocRow({
             </button>
           ) : (
             <span className="mt-0.5 shrink-0 p-0.5 text-gray-500 dark:text-gray-400">
-              <BookIcon size={11} />
+              {doc.wiki ? <ConfluenceIcon size={11} aria-hidden /> : <BookIcon size={11} />}
             </span>
           )}
           <div className="min-w-0 flex-1">
@@ -284,14 +325,19 @@ function DocRow({
               <span className="block text-xs font-semibold text-gray-800 dark:text-gray-100">{doc.title}</span>
             )}
             <p className={`truncate text-[11px] ${MUTED}`} title={doc.sourceName}>
-              {KIND_LABEL[doc.sourceKind]}
+              {doc.wiki && (
+                <ConfluenceIcon size={10} className="mr-0.5 inline-block align-[-1px]" aria-hidden />
+              )}
+              {sourceLabel(doc)}
               {doc.crawl?.pages != null && ` · ${doc.crawl.pages.length} page${doc.crawl.pages.length === 1 ? '' : 's'}`}
+              {doc.wiki?.pageCount != null && ` · ${doc.wiki.pageCount} page${doc.wiki.pageCount === 1 ? '' : 's'}`}
               {doc.available && ` · ${doc.sectionCount} section${doc.sectionCount === 1 ? '' : 's'}`}
               {doc.available && doc.model ? ` · ${aiRunLabel(doc.provider ?? null, doc.model)}` : ''}
             </p>
           </div>
         </div>
 
+        {!building && <WikiStatus doc={doc} />}
         {building && <BuildProgress doc={doc} />}
         {doc.status === 'failed' && (
           <p className="text-[11px] text-rose-700 dark:text-rose-400">
@@ -307,9 +353,16 @@ function DocRow({
             </button>
           ) : (
             aiReadyFor(ai, 'docs_build') && (
-              <button type="button" className={SMALL_BUTTON} disabled={rebuild.isPending} onClick={() => rebuild.mutate(doc.id)}>
-                {doc.status === 'failed' ? 'Try again' : 'Rebuild'}
-              </button>
+              <>
+                {doc.wiki && doc.available && (
+                  <button type="button" className={SMALL_BUTTON} disabled={refresh.isPending} onClick={() => refresh.mutate(doc.id)}>
+                    Refresh now
+                  </button>
+                )}
+                <button type="button" className={SMALL_BUTTON} disabled={rebuild.isPending} onClick={() => rebuild.mutate(doc.id)}>
+                  {doc.status === 'failed' ? 'Try again' : 'Rebuild'}
+                </button>
+              </>
             )
           )}
           {confirmRemove ? (
@@ -356,6 +409,11 @@ function AddDocs({ workspaceId, maxBytes }: { workspaceId: number; maxBytes: num
   const [problems, setProblems] = useState<Array<{ name: string; message: string }>>([]);
   const [url, setUrl] = useState('');
   const [crawlDepth, setCrawlDepth] = useState(0);
+  const addWiki = useAddReferenceDocWiki(workspaceId);
+  // A Confluence page address goes to the wiki import (child pages, not links, and a refresh that
+  // reads only what changed); any other address is a web page.
+  const onWiki = parseConfluencePageUrl(url) != null;
+  const adding = onWiki ? addWiki : addUrl;
 
   const send = async (files: File[]): Promise<void> => {
     const found: Array<{ name: string; message: string }> = [];
@@ -445,8 +503,10 @@ function AddDocs({ workspaceId, maxBytes }: { workspaceId: number; maxBytes: num
         onSubmit={(e) => {
           e.preventDefault();
           const u = url.trim();
-          if (u === '' || addUrl.isPending) return;
-          addUrl.mutate({ url: u, crawlDepth: crawlDepth > 0 ? crawlDepth : null }, { onSuccess: () => setUrl('') });
+          if (u === '' || adding.isPending) return;
+          const depth = crawlDepth > 0 ? crawlDepth : null;
+          if (onWiki) addWiki.mutate({ url: u, childDepth: depth }, { onSuccess: () => setUrl('') });
+          else addUrl.mutate({ url: u, crawlDepth: depth }, { onSuccess: () => setUrl('') });
         }}
       >
         <input
@@ -462,16 +522,32 @@ function AddDocs({ workspaceId, maxBytes }: { workspaceId: number; maxBytes: num
           <select
             value={crawlDepth}
             onChange={(e) => setCrawlDepth(Number(e.target.value))}
-            aria-label="Links to follow"
+            aria-label={onWiki ? 'Child pages to include' : 'Links to follow'}
             className="rounded border border-gray-300 bg-white px-1 py-1 text-xs text-gray-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
           >
             <option value={0}>This page only</option>
-            {Array.from({ length: REFERENCE_DOC_CRAWL_MAX_DEPTH }, (_, i) => i + 1).map((d) => (
+            {Array.from({ length: onWiki ? REFERENCE_DOC_WIKI_MAX_DEPTH : REFERENCE_DOC_CRAWL_MAX_DEPTH }, (_, i) => i + 1).map((d) => (
               <option key={d} value={d}>
-                Follow links, {d} level{d === 1 ? '' : 's'}
+                {onWiki ? `With child pages, ${d} level${d === 1 ? '' : 's'}` : `Follow links, ${d} level${d === 1 ? '' : 's'}`}
               </option>
             ))}
           </select>
+          {onWiki ? (
+            <InfoButton title="Confluence pages">
+              <p>
+                The page and the child pages you choose become one document, a chapter per page, up to{' '}
+                {REFERENCE_DOC_WIKI_MAX_PAGES} pages.
+              </p>
+              <p>
+                Limn reads Confluence with the API token in Settings → Workspace → Reference docs. A page on your Jira site
+                uses the Jira token.
+              </p>
+              <p>
+                Limn checks the pages every few hours while the library is in use, and before a review reads it. Only pages
+                that changed are read again, and only sections that changed are summarised again. Refresh now checks at once.
+              </p>
+            </InfoButton>
+          ) : (
           <InfoButton title="Follow links">
             <p>
               Limn reads the page, then asks {aiModelWords(aiProvider, 'Haiku')} which of its links lead to more about the same topic, and reads
@@ -484,17 +560,18 @@ function AddDocs({ workspaceId, maxBytes }: { workspaceId: number; maxBytes: num
             </p>
             <p>All the pages become one document, a chapter per page. Rebuild reads the site again.</p>
           </InfoButton>
+          )}
         </span>
         <button
           type="submit"
           data-ai-run
-          disabled={addUrl.isPending || url.trim() === ''}
+          disabled={adding.isPending || url.trim() === ''}
           className="shrink-0 rounded border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700 hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:text-gray-200 dark:hover:border-gray-500"
         >
-          Add web page
+          {onWiki ? 'Add Confluence page' : 'Add web page'}
         </button>
       </form>
-      {addUrl.isError && <p className="text-[11px] text-rose-700 dark:text-rose-400">{addUrl.error.message}</p>}
+      {adding.isError && <p className="text-[11px] text-rose-700 dark:text-rose-400">{adding.error.message}</p>}
     </div>
   );
 }

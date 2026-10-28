@@ -214,6 +214,20 @@ describe('tierFor — reference docs', () => {
     expect(tiers('POST', '/api/docsx/chat')).not.toEqual(['ai', 'ai_hourly']);
     expect(tiers('POST', '/api/docs/story-alignments')).not.toEqual(['ai', 'ai_hourly']);
   });
+  // Wiki sources (reference-docs/wiki/routes.ts): the customer's Confluence quota.
+  it('bills a wiki add and a refresh as a third-party read AND an AI run', () => {
+    expect(tiers('POST', '/api/docs/wiki')).toEqual(['search', 'ai', 'ai_hourly']);
+    expect(tiers('POST', '/api/docs/7/refresh')).toEqual(['search', 'ai', 'ai_hourly']);
+    expect(tiers('POST', '/api/workspaces/3/wiki-credentials/check')).toEqual(['search', 'read']);
+    expect(tiers('GET', '/api/workspaces/3/wiki-credentials')).toEqual(['read']);
+    expect(tiers('PUT', '/api/workspaces/3/wiki-credentials')).toEqual(['read']);
+  });
+  it('a wiki near-miss is not swept in', () => {
+    expect(tiers('GET', '/api/docs/wiki')).not.toContain('search');
+    expect(tiers('POST', '/api/docs/7/refreshes')).not.toContain('search');
+    expect(tiers('POST', '/api/docs/wikis')).not.toContain('search');
+    expect(tiers('GET', '/api/workspaces/3/wiki-credentials/check')).not.toContain('search');
+  });
 });
 
 // The issue tracker (CORE since apiVersion 23). The routes that can read the CUSTOMER'S tracker

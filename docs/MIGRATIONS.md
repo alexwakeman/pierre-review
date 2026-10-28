@@ -1249,6 +1249,21 @@ reference-docs `.owner` marker that stops one database's janitor deleting anothe
 ([REFERENCE-DOCS.md](REFERENCE-DOCS.md) § Ownership). No backfill. Journal `idx` 139, `when`
 sqlite `1792137626016`.
 
+### `0140_reference_doc_wiki` — Confluence (wiki) sources for the reference library
+Self-contained and additive ([REFERENCE-DOCS.md](REFERENCE-DOCS.md) § Wiki sources). Two new JSON columns
+on `reference_docs` — `wiki_json` (`ReferenceDocWikiState`: provider, site, root page, depth, last check,
+daily list, unreachable since / why, a 429's retry-after) and `summary_cache_json`
+(`ReferenceDocSummaryCache`: section content hash → summary + the document summary); a UNIQUE index
+`reference_docs (id, account_id)` (the target of the new composite FK); `workspaces.docs_used_at` (the
+refresh's 7-day demand gate). Two new tables: `reference_doc_wiki_pages` (one row per page: version,
+last edit, converted-markdown hash, last fetch, last error; unique `(doc_id, page_id)`, the upsert
+target; named composite FK `(doc_id, account_id)` → `reference_docs (id, account_id)` ON DELETE
+CASCADE) and `workspace_wiki_credentials` (a SEALED wiki token per `(account, workspace, provider)`;
+composite FK onto `workspaces`, cascade). Both join `accountScopedTables()`, the erasure (explicitly,
+pages before their documents) and the export (the credential WITHOUT its token); the docs DELETE route
+removes the page rows explicitly too. No backfill. Journal `idx` 140, `when` sqlite `1792137627016`
+(0139 is left for a parallel branch; renumber at integration if needed).
+
 ### No migration — "Check against code" removed (2026-10-18): `sprint_ticket_repos` + `sprint_assessments` DORMANT
 
 The sprint drawer, its repo picker and "Check against code" (`review/sprint-assess/`) were removed with

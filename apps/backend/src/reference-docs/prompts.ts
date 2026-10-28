@@ -130,6 +130,49 @@ export function buildSectionsPrompt(
   ].join('\n');
 }
 
+/**
+ * A REFRESH of a document whose earlier build is cached (docs/REFERENCE-DOCS.md § Wiki sources →
+ * Incremental rebuild): every section file is listed, but only the NEW OR CHANGED ones need a summary —
+ * the rest keep theirs, shown (fenced: they are model-written) so the document summary covers them too.
+ * The server's judge expects exactly the changed files.
+ */
+export function buildSectionsUpdatePrompt(
+  doc: BuildPromptDoc,
+  drafts: readonly DraftSection[],
+  files: readonly string[],
+  kept: ReadonlyMap<string, string>,
+  nonce: string,
+  provider?: AgentProviderId,
+): string {
+  const t = promptTools(provider);
+  const todo = files.filter((f) => !kept.has(f));
+  const changed = drafts
+    .map((d, i) => ({ d, f: files[i]! }))
+    .filter(({ f }) => !kept.has(f))
+    .map(({ d, f }) => `- sections/${f} — ${d.trail.length > 0 ? `${d.trail.join(' › ')} › ` : ''}${d.title} (${d.words} words)`)
+    .join('\n');
+  const unchanged = drafts
+    .map((d, i) => ({ d, f: files[i]! }))
+    .filter(({ f }) => kept.has(f))
+    .map(({ d, f }) => `- sections/${f} — ${d.title}: ${kept.get(f)!.replace(/\s+/g, ' ')}`)
+    .join('\n');
+  return [
+    `# The document (a ${doc.sourceKind} source, refreshed)`,
+    fence('DOCUMENT NAME', nonce, `${doc.title}\n${doc.sourceName}`),
+    '',
+    `# The ${todo.length} NEW OR CHANGED section files — summarise ONLY these`,
+    fence('SECTION LIST', nonce, changed),
+    '',
+    `# The ${drafts.length - todo.length} unchanged sections keep their summaries (context only; do not record them)`,
+    fence('UNCHANGED SECTIONS', nonce, unchanged || '(none)'),
+    '',
+    t.either(
+      'Read each new or changed file and record a summary for every one, then call finish_document with a summary and topics for the WHOLE document (unchanged sections included).',
+      'Read each new or changed file, then answer with a summary for every one of them and a summary and topics for the WHOLE document (unchanged sections included).',
+    ),
+  ].join('\n');
+}
+
 export function buildPdfPrompt(doc: BuildPromptDoc, pageCount: number | null, nonce: string): string {
   return [
     '# The document',

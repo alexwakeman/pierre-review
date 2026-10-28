@@ -1,9 +1,13 @@
-import { and, asc, desc, eq, inArray, isNotNull, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, isNotNull, sql } from 'drizzle-orm';
 import { aiRunProvider, chatCitationsFromStored } from '@pierre-review/shared';
+import { REFERENCE_DOC_WIKI_MAX_DEPTH } from '@pierre-review/shared';
 import type {
   ReferenceDoc,
   ReferenceDocCitation,
   ReferenceDocCrawl,
+  ReferenceDocSummaryCache,
+  ReferenceDocWiki,
+  ReferenceDocWikiState,
   ReferenceDocSectionEntry,
   ReferenceDocSourceKind,
   ReferenceDocStatus,
@@ -41,7 +45,68 @@ export function crawlOf(v: unknown): ReferenceDocCrawl | null {
   };
 }
 
+const isoMs = (ms: number | null | undefined): string | null => (typeof ms === 'number' && Number.isFinite(ms) ? new Date(ms).toISOString() : null);
+
+/** The stored wiki state, or null when the row has none (or a shape this build does not read). */
+export function wikiStateOf(v: unknown): ReferenceDocWikiState | null {
+  if (v == null || typeof v !== 'object') return null;
+  const w = v as Partial<ReferenceDocWikiState>;
+  if (w.provider !== 'confluence' || typeof w.origin !== 'string' || typeof w.rootPageId !== 'string') return null;
+  const n = (x: unknown): number | null => (typeof x === 'number' && Number.isFinite(x) ? x : null);
+  return {
+    provider: w.provider,
+    origin: w.origin,
+    rootPageId: w.rootPageId,
+    rootUrl: typeof w.rootUrl === 'string' ? w.rootUrl : w.origin,
+    depth: Math.max(0, Math.min(REFERENCE_DOC_WIKI_MAX_DEPTH, n(w.depth) ?? 0)),
+    pageCount: n(w.pageCount),
+    pagesLeftOut: n(w.pagesLeftOut) ?? 0,
+    lastCheckedAt: n(w.lastCheckedAt),
+    lastListedAt: n(w.lastListedAt),
+    lastChangedAt: n(w.lastChangedAt),
+    unreachableSince: n(w.unreachableSince),
+    unreachableReason: w.unreachableReason ?? null,
+    retryAfter: n(w.retryAfter),
+  };
+}
+
+/** The wire half of the stored wiki state. */
+export function toWikiWire(s: ReferenceDocWikiState): ReferenceDocWiki {
+  let site = s.origin;
+  try {
+    site = new URL(s.origin).host;
+  } catch {
+    /* keep */
+  }
+  return {
+    provider: s.provider,
+    site,
+    rootPageId: s.rootPageId,
+    rootUrl: s.rootUrl,
+    depth: s.depth,
+    pageCount: s.pageCount,
+    pagesLeftOut: s.pagesLeftOut,
+    lastCheckedAt: isoMs(s.lastCheckedAt),
+    lastChangedAt: isoMs(s.lastChangedAt),
+    unreachableSince: isoMs(s.unreachableSince),
+    unreachableReason: s.unreachableReason,
+  };
+}
+
+/** The stored summary cache, or null. */
+export function summaryCacheOf(v: unknown): ReferenceDocSummaryCache | null {
+  if (v == null || typeof v !== 'object') return null;
+  const c = v as Partial<ReferenceDocSummaryCache>;
+  if (c.v !== 1 || c.sections == null || typeof c.sections !== 'object') return null;
+  const doc =
+    c.doc && typeof c.doc.summary === 'string' && Array.isArray(c.doc.topics)
+      ? { title: String(c.doc.title ?? ''), summary: c.doc.summary, topics: c.doc.topics.map(String) }
+      : null;
+  return { v: 1, sections: c.sections as Record<string, string>, doc };
+}
+
 export function toReferenceDoc(r: DocRow): ReferenceDoc {
+  const wiki = wikiStateOf(r.wiki);
   return {
     id: r.id,
     workspaceId: r.workspaceId,
@@ -64,6 +129,7 @@ export function toReferenceDoc(r: DocRow): ReferenceDoc {
     // What the latest build ran on (0128), when the row recorded it.
     ...(r.model ? { model: r.model, provider: aiRunProvider(r.provider, r.model) } : {}),
     crawl: crawlOf(r.crawl),
+    ...(wiki ? { wiki: toWikiWire(wiki) } : {}),
     createdAt: iso(r.createdAt)!,
     updatedAt: iso(r.updatedAt)!,
     builtAt: iso(r.builtAt),
@@ -135,6 +201,8 @@ export interface NewDoc {
   pageCount: number | null;
   /** A web page added with "Follow links". Absent / null = one page or a file. */
   crawl?: ReferenceDocCrawl | null;
+  /** A wiki page tree (sourceKind 'wiki'). */
+  wiki?: ReferenceDocWikiState | null;
 }
 
 /** Insert a queued document. The composite FK refuses a workspace of another account. */
@@ -153,6 +221,7 @@ export async function insertDocRow(d: NewDoc): Promise<DocRow> {
       byteSize: d.byteSize,
       pageCount: d.pageCount,
       crawl: d.crawl ?? null,
+      wiki: d.wiki ?? null,
       status: 'queued',
       progress: 0,
       stage: 'Waiting to start',
@@ -175,6 +244,8 @@ export interface ProgressPatch {
   sourceName?: string;
   sourceUrl?: string | null;
   crawl?: ReferenceDocCrawl | null;
+  wiki?: ReferenceDocWikiState | null;
+  summaryCache?: ReferenceDocSummaryCache | null;
 }
 
 export async function patchDoc(accountId: number, id: number, patch: ProgressPatch): Promise<boolean> {
@@ -189,6 +260,48 @@ export async function patchDoc(accountId: number, id: number, patch: ProgressPat
     .returning({ id: t.id })
     .execute();
   return rows.length > 0;
+}
+
+/**
+ * A build that ended WITHOUT a new version (a wiki refresh that found nothing to rebuild, was skipped
+ * for the budget, or could not reach the wiki): back to `ready` when a built version exists, else
+ * `failed` with `message`.
+ */
+export async function markDocIdle(accountId: number, id: number, message: string): Promise<'ready' | 'failed'> {
+  const row = await getDocRow(accountId, id);
+  if (!row) return 'failed';
+  if (row.builtAt != null) {
+    await patchDoc(accountId, id, { status: 'ready', progress: 100, stage: null, error: null });
+    return 'ready';
+  }
+  await markDocFailed(accountId, id, message);
+  return 'failed';
+}
+
+/** Every wiki document of the account set (the refresh cadence's candidates, filtered by the caller). */
+export async function wikiDocRows(): Promise<DocRow[]> {
+  const t = docs();
+  return db.select().from(t).where(eq(t.sourceKind, 'wiki')).execute();
+}
+
+/** Stamp the library as USED (the wiki refresh's demand gate). */
+export async function stampDocsUsed(accountId: number, workspaceId: number, at = new Date()): Promise<void> {
+  const w = schema.workspaces;
+  await db
+    .update(w)
+    .set({ docsUsedAt: at })
+    .where(and(eq(w.id, workspaceId), eq(w.accountId, accountId)))
+    .execute();
+}
+
+/** Workspaces whose library was used since `since` — the refresh's population. */
+export async function workspacesUsedSince(since: Date): Promise<Array<{ accountId: number; workspaceId: number }>> {
+  const w = schema.workspaces;
+  return db
+    .select({ accountId: w.accountId, workspaceId: w.id })
+    .from(w)
+    .where(gte(w.docsUsedAt, since))
+    .execute();
 }
 
 /** Requeue a document for a rebuild — only when no build of it is running (compare-and-set). */

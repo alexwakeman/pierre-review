@@ -45,6 +45,9 @@ import {
   type NewDoc,
 } from './store.js';
 import { UrlFetchError, checkPageUrl } from './url-fetch.js';
+import { deleteWikiPages } from './wiki/pages.js';
+import { noteDocsUsed } from './wiki/refresh.js';
+import { registerWikiDocRoutes } from './wiki/routes.js';
 import { config } from '../config.js';
 import { providerName } from '../ai/prompt-tools.js';
 
@@ -67,6 +70,8 @@ import { providerName } from '../ai/prompt-tools.js';
 //   DELETE /api/docs/chats/:conversationId?workspace= delete it                                → read
 //   GET    /api/workspaces/:id/docs-settings          { docsInReview }                         → read
 //   PUT    /api/workspaces/:id/docs-settings          { docsInReview }                         → read
+//   + the wiki routes (wiki/routes.ts): POST /api/docs/wiki, POST /api/docs/:id/refresh, and
+//     GET / PUT / POST …/check /api/workspaces/:id/wiki-credentials
 //
 // TENANCY: `?workspace=` (and a body's `workspaceId`) resolves through `resolveWorkspaceScope` —
 // absent, unknown or another account's ⇒ this account's DEFAULT workspace, never a 404. A document id
@@ -161,10 +166,14 @@ export function registerReferenceDocsRoutes(app: FastifyInstance, ctx: AgentCont
     app.addContentTypeParser('application/octet-stream', { parseAs: 'buffer' }, (_req, body, done) => done(null, body));
   }
 
+  // Wiki sources (Confluence): add a page tree, refresh it, the workspace's wiki credential.
+  registerWikiDocRoutes(app, ctx, { fail, featureOff, workspaceOf, preflight, insertWithSlug, maxDocs: MAX_DOCS_PER_WORKSPACE });
+
   app.get('/api/docs', { schema: wsQuery }, async (req, reply): Promise<ReferenceDocsResponse | ErrorBody> => {
     if (!AGENTIC_AI_ENABLED) return featureOff(reply);
     const accountId = ctx.accountIdOf(req);
     const workspaceId = await workspaceOf(accountId, (req.query as { workspace?: string }).workspace);
+    noteDocsUsed(accountId, workspaceId);
     const [rows, docsInReview] = await Promise.all([listDocRows(accountId, workspaceId), readDocsInReview(accountId, workspaceId)]);
     return { workspaceId, docs: rows.map(toReferenceDoc), docsInReview, maxBytes: REFERENCE_DOC_MAX_BYTES };
   });
@@ -287,7 +296,8 @@ export function registerReferenceDocsRoutes(app: FastifyInstance, ctx: AgentCont
     const pre = await preflight(ctx, accountId, reply);
     if (pre) return pre;
     if (!(await requeueDoc(accountId, id))) return fail(reply, 409, 'Building', 'This document is already being built.');
-    enqueueBuild(ctx, accountId, row.workspaceId, id);
+    // Rebuild = from scratch: a wiki document reads every page again and summarises afresh.
+    enqueueBuild(ctx, accountId, row.workspaceId, id, { full: true });
     reply.status(202);
     return { doc: toReferenceDoc((await getDocRow(accountId, id))!) };
   });
@@ -309,6 +319,8 @@ export function registerReferenceDocsRoutes(app: FastifyInstance, ctx: AgentCont
     const row = await getDocRow(accountId, id);
     if (!row) return fail(reply, 404, 'NotFound', `Document ${id} not found`);
     await cancelBuild(accountId, id);
+    // A wiki document's page rows (the composite FK cascades too; explicit anyway).
+    await deleteWikiPages(accountId, id);
     const gone = await deleteDocRow(accountId, id);
     if (!gone) return fail(reply, 404, 'NotFound', `Document ${id} not found`);
     removeDocFiles(accountId, gone.workspaceId, gone.slug);
@@ -368,6 +380,7 @@ export function registerReferenceDocsRoutes(app: FastifyInstance, ctx: AgentCont
       const accountId = ctx.accountIdOf(req);
       const q = req.query as { workspace?: string; doc?: number };
       const workspaceId = await workspaceOf(accountId, q.workspace);
+      noteDocsUsed(accountId, workspaceId);
       const index = await readIndex(accountId, workspaceId);
       if (q.doc == null) return { workspaceId, index, doc: null, contents: null, sections: [] };
       const row = await getDocRow(accountId, q.doc);
@@ -445,6 +458,7 @@ export function registerReferenceDocsRoutes(app: FastifyInstance, ctx: AgentCont
       const question = b.question.trim();
       if (question === '') return fail(reply, 400, 'EmptyQuestion', 'Ask a question.');
       const workspaceId = await workspaceOf(accountId, b.workspaceId);
+      noteDocsUsed(accountId, workspaceId);
       // ⚠ A POST's REQUEST `close` fires once the body is read — watch the REPLY socket instead.
       const gone = new AbortController();
       const onClose = (): void => {

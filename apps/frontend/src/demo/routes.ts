@@ -873,6 +873,46 @@ export const ROUTES: DemoRoute[] = [
       });
     },
   },
+  // A Confluence document's "Refresh now" (docs/REFERENCE-DOCS.md § Wiki sources): the demo reads no
+  // wiki, so nothing changed — the document answers as recorded, checked now (a page that cannot be
+  // reached stays so).
+  {
+    method: 'POST',
+    re: /^\/api\/docs\/(\d+)\/refresh$/,
+    run: (_req, m, srv) => {
+      const rec = srv.recorded('GET', '/api/docs?workspace=1');
+      const docs = isRecord(rec) && Array.isArray(rec.docs) ? rec.docs : [];
+      const doc = docs.find((d) => isRecord(d) && d.id === Number(m[1]));
+      if (!isRecord(doc)) return notInDemo();
+      const wiki = isRecord(doc.wiki) ? doc.wiki : null;
+      return OK({ doc: wiki && wiki.unreachableSince == null ? { ...doc, wiki: { ...wiki, lastCheckedAt: srv.nowIso() } } : doc });
+    },
+  },
+  // Settings → Confluence: a save answers the saved settings (the token never comes back); the test
+  // reads the fictional site.
+  {
+    method: 'PUT',
+    re: /^\/api\/workspaces\/(\d+)\/wiki-credentials$/,
+    run: (req, m, srv) => {
+      const rec = srv.recorded('GET', `/api/workspaces/${m[1]}/wiki-credentials`);
+      const prev = isRecord(rec) && isRecord(rec.confluence) ? rec.confluence : {};
+      const patch = isRecord(bodyRecord(req).confluence) ? (bodyRecord(req).confluence as Record<string, unknown>) : {};
+      return OK({
+        workspaceId: Number(m[1]),
+        confluence: {
+          siteUrl: 'siteUrl' in patch ? patch.siteUrl ?? null : prev.siteUrl ?? null,
+          email: 'email' in patch ? patch.email ?? null : prev.email ?? null,
+          hasToken: 'token' in patch ? patch.token != null && patch.token !== '' : Boolean(prev.hasToken),
+          jiraSite: prev.jiraSite ?? null,
+        },
+      });
+    },
+  },
+  {
+    method: 'POST',
+    re: /^\/api\/workspaces\/\d+\/wiki-credentials\/check$/,
+    run: () => OK({ ok: true, message: 'Connected to acme.atlassian.net.' }),
+  },
   {
     method: 'POST',
     re: /^\/api\/(prs\/\d+\/sequence-diagrams|sequence-diagrams\/story)\/redraw$/,

@@ -1,0 +1,30 @@
+{
+  "id": "1001",
+  "status": "current",
+  "title": "Payments handbook",
+  "spaceId": "98304",
+  "parentId": "98305",
+  "parentType": "space",
+  "position": 0,
+  "authorId": "557058:aaaa",
+  "ownerId": "557058:aaaa",
+  "createdAt": "2026-03-01T09:00:00.000Z",
+  "version": {
+    "createdAt": "2026-10-20T14:05:11.000Z",
+    "message": "",
+    "number": 14,
+    "minorEdit": false,
+    "authorId": "557058:aaaa"
+  },
+  "body": {
+    "storage": {
+      "representation": "storage",
+      "value": "<p>How the payments team works.</p><h2>Who to ask</h2><p>The payments channel.</p>"
+    }
+  },
+  "_links": {
+    "editui": "/pages/resumedraft.action?draftId=1001",
+    "webui": "/spaces/PAY/pages/1001/Payments+handbook",
+    "tinyui": "/x/AQAB"
+  }
+}

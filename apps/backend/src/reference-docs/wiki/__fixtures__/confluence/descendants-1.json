@@ -1,0 +1,12 @@
+{
+  "results": [
+    { "id": "1003", "status": "current", "title": "Refunds", "type": "page", "parentId": "1001", "depth": 1, "childPosition": 2 },
+    { "id": "1002", "status": "current", "title": "Settlement", "type": "page", "parentId": "1001", "depth": 1, "childPosition": 1 },
+    { "id": "2001", "status": "current", "title": "Runbooks", "type": "folder", "parentId": "1001", "depth": 1, "childPosition": 3 },
+    { "id": "1004", "status": "current", "title": "Chargebacks", "type": "page", "parentId": "1003", "depth": 2, "childPosition": 0 }
+  ],
+  "_links": {
+    "next": "/wiki/api/v2/pages/1001/descendants?depth=2&limit=250&cursor=eyJpZCI6IjEwMDQifQ",
+    "base": "https://acme.atlassian.net/wiki"
+  }
+}

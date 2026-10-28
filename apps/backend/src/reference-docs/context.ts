@@ -65,7 +65,11 @@ export async function reviewDocsFor(accountId: number, workspaceId: number | nul
   if (workspaceId == null || !Number.isInteger(workspaceId) || workspaceId <= 0) return null;
   try {
     const c = await docsContextFor(accountId, workspaceId);
-    return c.usable ? { dir: c.dir } : null;
+    if (!c.usable) return null;
+    // The library is about to be read: check its wiki documents in the background. Never waits — this
+    // run reads the current version (docs/REFERENCE-DOCS.md § Wiki sources → Refresh).
+    void import('./wiki/refresh.js').then((m) => m.kickWikiRefresh(accountId, workspaceId)).catch(() => {});
+    return { dir: c.dir };
   } catch {
     return null;
   }

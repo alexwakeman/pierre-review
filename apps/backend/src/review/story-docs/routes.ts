@@ -113,6 +113,9 @@ export function registerStoryDocsRoutes(app: FastifyInstance, ctx: AgentContext)
       const live = await liveStoryDocs(ctx, accountId, workspaceId, body.ident);
       if (live.docCount === 0) return { outcome: 'refused', runId: null, refusal: 'no_docs' };
       if (live.inputs == null || live.inputs.empty) return { outcome: 'refused', runId: null, refusal: 'no_story' };
+      // The library is about to be read: check its wiki documents in the background (never waits —
+      // this run reads the current version; docs/REFERENCE-DOCS.md § Wiki sources → Refresh).
+      void import('../../reference-docs/wiki/refresh.js').then((m) => m.kickWikiRefresh(accountId, workspaceId)).catch(() => {});
       // NOTHING CHANGED: the newest succeeded run was made from these exact inputs, library, version,
       // models and provider — it IS the answer. No row, no model call, before the cap.
       if (body.force !== true) {
