@@ -112,7 +112,11 @@ export async function resolveStoryDocsInputs(
   const parsed = parseTicketIdent(ident);
   if (parsed == null || parsed.kind === 'manual') return null;
 
-  const review = await seams.latestTicketReview(ctx, accountId, ident).catch(() => null);
+  // The review and the tracker's stored story are independent reads: run them together.
+  const [review, tracked] = await Promise.all([
+    seams.latestTicketReview(ctx, accountId, ident).catch(() => null),
+    seams.trackerStory(accountId, ident).catch(() => null),
+  ]);
   // The sprint read is needed for the brief (no review) and maybe for the text: read it at most once.
   let sprint: TicketStoryResponse | null | undefined;
   const sprintStory = async (): Promise<TicketStoryResponse | null> => {
@@ -136,7 +140,7 @@ export async function resolveStoryDocsInputs(
     }
   }
 
-  let story = fromTicket(await seams.trackerStory(accountId, ident).catch(() => null));
+  let story = fromTicket(tracked);
   if (story == null && review != null) story = fromTicket(await seams.ticketReviewTicket(ctx, accountId, review.id).catch(() => null));
   if (story == null) {
     const s = await sprintStory();

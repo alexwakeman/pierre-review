@@ -423,17 +423,40 @@ automatic, never on view. `registerAgenticRoutes` registers the two routes (docs
   `derived` (Claude works up to 12 out of the description, stored with the run). Text = the tracker's stored
   story (`jiraStoryFor`), else the review's ticket snapshot, else the sprint read's text. No criteria and no
   description / acceptance-criteria text ⇒ `no_story`. DB + disk only.
-- **Step 1, the shortlist** (`shortlist.ts`, Haiku 5.5, one `cheapComplete`, one retry on an unparseable
-  answer — including a non-empty list of which no entry survives the check): the fenced story + INDEX.md + each built document's CONTENTS.md (≤ 60 000 chars in all; the rest
-  are listed by section title) → ≤ 8 section links. Every entry is checked (`citationOf` → strict grammar, a
-  section of a BUILT document, listed in its stored sections, on disk) or dropped. Only a genuinely EMPTY
-  `sections: []` ends the run `no_relevant_docs` with NO second call; a list that drops to nothing retries,
-  then fails ("Claude could not pick the sections to read.") — never a false "nothing bears on it".
-- **Step 2, the read** (`agent.ts`, Sonnet 5, ≤ `STORY_DOCS_ALIGNMENT_MAX_TURNS` 16 turns,
-  `STORY_DOCS_ALIGNMENT_BUDGET_USD` $1.50): Read/Glob/Grep + `submit_alignment`; Bash, every write tool, the
-  web and dispatch denied. ⚠ **The path guard's ONLY read-only roots are the SHORTLISTED documents' folders**
-  (`storyDocsRoots`, the same list the prompt names) — never the library folder, so INDEX.md and every other
-  document are unreachable. The working directory is an empty scratch dir.
+- **Step 1, the shortlist** (`shortlist.ts`). ⚠ **SKIPPED when the whole library fits**: when every built
+  section's text (the body, header left off) totals ≤ `STORY_DOCS_INLINE_CHARS` (48 000 chars),
+  `wholeLibraryShortlist` makes EVERY section the shortlist (reason `''`, each checked by `citationOf`; a
+  listed section missing from disk ⇒ shortlist instead) — no Haiku call, no `story_docs_shortlist` usage, the
+  row's `shortlist_model` NULL. Otherwise:
+  - **The prefilter** (`prefilterSections`, pure, deterministic): BM25 (k1 1.2, b 0.75) of the story's and
+    criteria's terms (lower-cased, ≥ 3 letters, stopwords out, a plural folded) against each section's title
+    (×2), trail, merged headings, one-line summary and document title (the stored `sections`, not
+    CONTENTS.md). Only sections sharing a term score; ties by path. The top `STORY_DOCS_PREFILTER_MAX` (30) are
+    the CANDIDATES.
+  - **Haiku 5.5** (one `cheapComplete`, one retry on an unparseable answer — including a non-empty list of
+    which no entry survives the check): the fenced story + the fenced candidate lines (`link — doc › section:
+    summary`) → ≤ 8 section links. ⚠ When NOTHING scores (no shared term), it falls back to the old prompt:
+    INDEX.md + each built document's CONTENTS.md (≤ 60 000 chars; the rest listed by section title) — never a
+    pick from a zero score. Every entry is checked (`citationOf` → strict grammar, a section of a BUILT
+    document, listed in its stored sections, on disk) or dropped. Only a genuinely EMPTY `sections: []` ends
+    the run `no_relevant_docs` with NO second call; a list that drops to nothing retries, then fails ("Claude
+    could not pick the sections to read.") — never a false "nothing bears on it". (A skipped shortlist cannot
+    end `no_relevant_docs`; a library where nothing bears ends `nothing_grounded` or with few points.)
+- **Step 2, the read** (`agent.ts`, Sonnet 5): ⚠ **THE SECTIONS' TEXT IS IN THE PROMPT**
+  (`prompts.ts` `inlineSections`): each shortlisted section's body in its own `SECTION <link>` nonce fence,
+  every body in the nonce-collision scan (`storyDocsUntrustedTexts`). ≤ `STORY_DOCS_INLINE_CHARS` in all: past
+  that, a FAIR SHARE (short sections whole, the long ones clipped to an equal share of what is left, each ending
+  `[…cut]`). So the read is ONE answer: ≤ 4 turns (`storyDocsTurnCap`: the submit, a refusal's retry, the
+  closing turn), ≤ 8 when a section was cut (the prompt then lists the shortlisted folders and says to Read a
+  cut file only when its missing part matters); never above `STORY_DOCS_ALIGNMENT_MAX_TURNS` (16);
+  `STORY_DOCS_ALIGNMENT_BUDGET_USD` $1.50. ⚠ **Effort**: Claude runs it at `low` (`STORY_DOCS_CLAUDE_EFFORT`,
+  `spec.claude.effort`) — reading comprehension over text it already has. Settings → AI → Effort does NOT reach
+  it (ai/effort.ts: that setting governs only the review, AI Fix and Plan first; every other kind runs a fixed
+  depth), so this is that fixed depth. Codex keeps its role default (standard = medium). Tools are unchanged:
+  Read/Glob/Grep + `submit_alignment`; Bash, every write tool, the web and dispatch denied. ⚠ **The path
+  guard's ONLY read-only roots are the SHORTLISTED documents' folders** (`storyDocsRoots`) — never the library
+  folder, so INDEX.md and every other document are unreachable. The working directory is an empty scratch dir.
+  The inlined text is NOT trusted for grounding: validate.ts re-reads every cited section from disk.
 - **Grounding = DROP** (`validate.ts`): every reference goes through `validateDocReferences` against the
   library snapshot FILTERED to the shortlisted documents; a criterion note, story point or action left with no
   checked reference is discarded. The tool refuses SHAPE only (verdicts, a 2-3 sentence summary, 2-6
@@ -442,8 +465,15 @@ automatic, never on view. `registerAgenticRoutes` registers the two routes (docs
   never sent back, so it cannot loop. At storage only an unusable overall fails the run; a malformed item is
   dropped. Nothing survives ⇒ `nothing_grounded` (no overall summary is stored or shown).
 - **Currency** (`fingerprint.ts`): `story_hash` / `criteria_hash` / `library_hash` (built docs'
-  slug:builtAt:sectionCount) / version. The GET recomputes the live ones per read and reports
-  `current` + `staleBecause`. A click re-resolves the inputs at start ("check what is there now").
+  slug:builtAt:sectionCount — a rebuild moves `builtAt`, so changed section text always moves it) / version.
+  The GET recomputes the live ones per read and reports `current` + `staleBecause`. A click re-resolves the
+  inputs at start ("check what is there now").
+- **Reuse** (`routes.ts`, `currentStoryDocsFingerprint`): the stored `fingerprint` hashes version + workspace +
+  ident + the three hashes + BOTH models (Haiku's id, the read's model on the provider) + the provider. A POST
+  without `force` whose fingerprint equals the newest SUCCEEDED run's (same `version`) answers
+  `{outcome:'reused', runId}` — no row, no model call, not counted against the cap; the SPA keeps drawing that
+  run and says "Nothing has changed since this check." with "Check again anyway" (`force: true`). A field that
+  changes the answer and is missing from the fingerprint would serve a stale answer as current — add it there.
 - **Storage**: `story_docs_alignments`, ONE ROW PER RUN — a re-run never rewrites the good row, and the GET
   returns `lastSucceeded` beside a newer failed or in-flight run. Composite FK onto `workspaces`; a deleted
   workspace takes its runs with it (their links name THAT library — never re-homed to Default). In
@@ -473,9 +503,12 @@ a link outside the library, header-only quotes, anchors; the OFF ⇒ unchanged p
 `review/path-guard.test.ts` (read-only roots) · `review/claude-review/docs-pipeline.test.ts` (on/off
 end to end) · `review/story-docs/` — `shortlist.test.ts` (bad / unbuilt / unlisted sections dropped, the
 retry, the CONTENTS budget), `validate.test.ts` (shape refused, ungrounded and out-of-range items dropped,
-`nothing_grounded`), `agent-policy.test.ts` (no shell or write tool; roots = the shortlisted documents only),
+`nothing_grounded`), `agent-policy.test.ts` (no shell or write tool; roots = the shortlisted documents only;
+the prompt's folders only when a section was cut; the turn cap), `inline.test.ts` (the skip-shortlist rule,
+the prefilter, the candidate prompt, the inlined text: fair-share clip, the SECTION fence, the nonce scan),
 `inputs.test.ts` (the criteria and text order), `routes-db.test.ts` (refusals, a run end to end with fake
-models, out of date, last good kept, tenancy, cap, restart), `routes-off.test.ts` (404 off). Not covered by a test: the ticket review's
+models — whole library inlined, no shortlist call — `reused` with no row or model call and `force`, out of
+date, last good kept, tenancy, cap, restart), `routes-off.test.ts` (404 off). Not covered by a test: the ticket review's
 pipeline with the library (no pipeline test exists for it; its builders are pinned), and a real Word file through mammoth, a real agent
 run (PDF or sections), the SSE stream's event order. The SPA's matcher and borrow rule are in
 `apps/frontend/test/docQuoteMatch.test.ts` (hand-run), the highlight colours in `textContrast.test.ts`, and

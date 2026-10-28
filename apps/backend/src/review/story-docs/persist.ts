@@ -115,7 +115,7 @@ export async function markShortlisting(
   ctx: Ctx,
   accountId: number,
   id: number,
-  live: StoryDocsHashes & { fingerprint: string; criteriaSource: StoryDocsCriteriaSource; criteria: StoryDocsCriterion[]; model: string },
+  live: StoryDocsHashes & { fingerprint: string; criteriaSource: StoryDocsCriteriaSource; criteria: StoryDocsCriterion[]; model: string | null },
 ): Promise<void> {
   await update(ctx, accountId, id, {
     status: 'shortlisting',
@@ -126,6 +126,7 @@ export async function markShortlisting(
     libraryHash: live.libraryHash,
     criteriaSource: live.criteriaSource,
     criteriaJson: live.criteria,
+    // null: the library fit the inline budget, so no shortlist call ran.
     shortlistModel: live.model,
   });
 }

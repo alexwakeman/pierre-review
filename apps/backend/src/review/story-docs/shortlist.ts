@@ -1,4 +1,6 @@
 import {
+  STORY_DOCS_INLINE_CHARS,
+  STORY_DOCS_PREFILTER_MAX,
   STORY_DOCS_SHORTLIST_MAX,
   STORY_DOCS_SHORTLIST_MODEL,
   STORY_DOCS_SHORTLIST_REASON_MAX,
@@ -7,16 +9,24 @@ import {
   type StoryDocsShortlistEntry,
 } from '@pierre-review/shared';
 import { fence } from '../../reference-docs/prompts.js';
-import { citationOf, type LibrarySnapshot } from '../../reference-docs/review-refs.js';
+import { citationOf, sectionBodyOf, type LibrarySnapshot } from '../../reference-docs/review-refs.js';
 import { pickReviewNonce } from '../claude-review/prompts.js';
 import { cheapUsage, type CheapUsage } from '../cheap-usage.js';
 import type { CompleteFn } from '../story-labels/manager.js';
 import type { StoryText } from './inputs.js';
 
-// STEP 1 OF A STORY DOCS CHECK — THE SHORTLIST (Haiku 5.5, one tool-less completion). The model sees
-// the fenced story, INDEX.md and the built documents' CONTENTS.md, and names at most
-// STORY_DOCS_SHORTLIST_MAX SECTION files that could bear on the story. This is what keeps the Sonnet
-// read small: it is handed only those sections and confined to only their documents.
+// STEP 1 OF A STORY DOCS CHECK — THE SHORTLIST. Only when the library is too big to send whole (the
+// manager skips this step when every section fits STORY_DOCS_INLINE_CHARS).
+//
+//   PREFILTER (`prefilterSections`, pure, no model): a BM25 score of the story's and criteria's terms
+//   against each section's title, trail, headings, one-line summary and document title. The top
+//   STORY_DOCS_PREFILTER_MAX scoring sections are the CANDIDATES.
+//   HAIKU 5.5 (one tool-less completion): the fenced story + the candidates (link, titles, summary) →
+//   at most STORY_DOCS_SHORTLIST_MAX section links. When NOTHING scores (no shared term at all), it is
+//   shown INDEX.md + every CONTENTS.md (≤ SHORTLIST_CONTENTS_BUDGET) as before — never a guess from a
+//   zero score.
+// This is what keeps the Sonnet read small: it is handed only those sections' text and confined to
+// only their documents.
 //
 // Every entry is SERVER-CHECKED (`validateShortlist`, pure): the link must name a section of a BUILT
 // document of this library under the strict grammar (`citationOf` → `parseLibraryPath`), be one of
@@ -50,8 +60,26 @@ export interface ShortlistDoc {
   title: string;
   /** CONTENTS.md, or null when it could not be read. */
   contents: string | null;
-  /** The stored section list (titles), for a document whose CONTENTS.md does not fit. */
-  sections: ReadonlyArray<{ path: string; title: string }>;
+  /** The stored section list, for a document whose CONTENTS.md does not fit and for the prefilter. */
+  sections: ReadonlyArray<ShortlistSection>;
+}
+
+export interface ShortlistSection {
+  path: string;
+  title: string;
+  /** The one-line summary CONTENTS.md shows ('' when none). */
+  summary?: string;
+  trail?: readonly string[];
+  headings?: ReadonlyArray<{ title: string }>;
+}
+
+/** One prefilter candidate: a section, its document's title and its score. */
+export interface ShortlistCandidate {
+  path: string;
+  docTitle: string;
+  title: string;
+  summary: string;
+  score: number;
 }
 
 export interface ShortlistPromptInput {
@@ -60,7 +88,89 @@ export interface ShortlistPromptInput {
   criteria: readonly StoryDocsCriterion[];
   index: string;
   docs: readonly ShortlistDoc[];
+  /** The prefilter's candidates. Non-empty ⇒ the prompt shows ONLY these (no INDEX / CONTENTS). */
+  candidates?: readonly ShortlistCandidate[];
 }
+
+// ---- the prefilter (pure) ----
+
+const STOPWORDS = new Set(
+  (
+    'the and for are but not you all any can had her was one our out has have him his how its may new now ' +
+    'old see two way who did get let put say she too use that with this from they will would there their ' +
+    'what about which when make like than then them these some into more other only also could should ' +
+    'each must been were being does done such very just over under after before where while your ' +
+    'able need needs given shall story ticket acceptance criteria criterion description none'
+  ).split(' '),
+);
+
+/** Lower-cased word terms (letters/digits, ≥ 3 chars, no stopwords), a trailing plural 's' dropped. */
+export function prefilterTerms(text: string): string[] {
+  const out: string[] = [];
+  for (const raw of text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []) {
+    if (raw.length < 3 || STOPWORDS.has(raw)) continue;
+    out.push(raw.length > 3 && raw.endsWith('s') && !raw.endsWith('ss') ? raw.slice(0, -1) : raw);
+  }
+  return out;
+}
+
+const BM25_K1 = 1.2;
+const BM25_B = 0.75;
+
+/**
+ * The sections most likely to bear on the story, by BM25 over each section's title (counted twice),
+ * trail, merged headings, one-line summary and document title, with the story's and criteria's terms as
+ * the query. Only sections that SHARE a term score; ties by path, so the order is deterministic.
+ */
+export function prefilterSections(
+  query: { story: StoryText; criteria: readonly StoryDocsCriterion[] },
+  docs: readonly Pick<ShortlistDoc, 'title' | 'sections'>[],
+  max: number = STORY_DOCS_PREFILTER_MAX,
+): ShortlistCandidate[] {
+  const qTerms = new Set(
+    prefilterTerms(
+      [query.story.title ?? '', query.story.description, query.story.acceptanceCriteria, ...query.criteria.map((c) => c.text)].join('\n'),
+    ),
+  );
+  if (qTerms.size === 0) return [];
+  const rows = docs.flatMap((d) =>
+    d.sections.map((sec) => {
+      const text = [
+        sec.title,
+        sec.title,
+        ...(sec.trail ?? []),
+        ...(sec.headings ?? []).map((h) => h.title),
+        sec.summary ?? '',
+        d.title,
+      ].join('\n');
+      const terms = prefilterTerms(text);
+      const tf = new Map<string, number>();
+      for (const term of terms) tf.set(term, (tf.get(term) ?? 0) + 1);
+      return { docTitle: d.title, sec, tf, len: terms.length };
+    }),
+  );
+  if (rows.length === 0) return [];
+  const df = new Map<string, number>();
+  for (const r of rows) for (const term of r.tf.keys()) if (qTerms.has(term)) df.set(term, (df.get(term) ?? 0) + 1);
+  const avgLen = rows.reduce((n, r) => n + r.len, 0) / rows.length || 1;
+  const n = rows.length;
+  const scored: ShortlistCandidate[] = [];
+  for (const r of rows) {
+    let score = 0;
+    for (const term of qTerms) {
+      const f = r.tf.get(term);
+      if (!f) continue;
+      const d = df.get(term) ?? 0;
+      const idf = Math.log(1 + (n - d + 0.5) / (d + 0.5));
+      score += (idf * f * (BM25_K1 + 1)) / (f + BM25_K1 * (1 - BM25_B + (BM25_B * r.len) / avgLen));
+    }
+    if (score > 0) scored.push({ path: r.sec.path, docTitle: r.docTitle, title: r.sec.title, summary: r.sec.summary ?? '', score });
+  }
+  scored.sort((a, b) => b.score - a.score || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  return scored.slice(0, Math.max(0, max));
+}
+
+const candidateLine = (c: ShortlistCandidate): string => `- ${c.path} — ${c.docTitle} › ${c.title}${c.summary ? `: ${c.summary}` : ''}`;
 
 const clip = (s: string, max: number): string => (s.length <= max ? s : `${s.slice(0, max)}\n[…cut]`);
 
@@ -97,6 +207,9 @@ export function splitContents(docs: readonly ShortlistDoc[], budget = SHORTLIST_
 }
 
 export function shortlistUntrustedTexts(input: ShortlistPromptInput): string[] {
+  if (input.candidates != null && input.candidates.length > 0) {
+    return [storyFenceBody(input.story), criteriaFenceBody(input.criteriaSource, input.criteria), ...input.candidates.map(candidateLine)];
+  }
   return [
     storyFenceBody(input.story),
     criteriaFenceBody(input.criteriaSource, input.criteria),
@@ -106,6 +219,15 @@ export function shortlistUntrustedTexts(input: ShortlistPromptInput): string[] {
 }
 
 export function buildShortlistPrompt(input: ShortlistPromptInput, nonce: string): string {
+  if (input.candidates != null && input.candidates.length > 0) {
+    return [
+      fence('STORY', nonce, storyFenceBody(input.story)),
+      fence('CRITERIA', nonce, criteriaFenceBody(input.criteriaSource, input.criteria)),
+      'The candidate sections (link from the library root — document › section: its one-line summary):',
+      fence('CANDIDATES', nonce, input.candidates.map(candidateLine).join('\n')),
+      `Choose at most ${STORY_DOCS_SHORTLIST_MAX} of these sections, by their link. Answer with the JSON object only.`,
+    ].join('\n\n');
+  }
   const { full, overflow } = splitContents(input.docs);
   const parts = [
     fence('STORY', nonce, storyFenceBody(input.story)),
@@ -130,6 +252,30 @@ export function buildShortlistPrompt(input: ShortlistPromptInput, nonce: string)
   }
   parts.push(`Choose at most ${STORY_DOCS_SHORTLIST_MAX} sections. Answer with the JSON object only.`);
   return parts.join('\n\n');
+}
+
+// ---- the skip rule (pure over lib.read) ----
+
+/**
+ * EVERY section of the library as the shortlist, when their text fits `budget` characters in all (the
+ * shortlist call is then skipped: the read sees everything). null ⇒ too big (or a section cannot be
+ * read): shortlist. Stops reading as soon as the budget is passed.
+ */
+export function wholeLibraryShortlist(lib: LibrarySnapshot, budget: number = STORY_DOCS_INLINE_CHARS): StoryDocsShortlistEntry[] | null {
+  const out: StoryDocsShortlistEntry[] = [];
+  let used = 0;
+  for (const d of lib.docs) {
+    for (const sec of d.sections ?? []) {
+      const raw = lib.read(sec.path);
+      if (raw == null) return null;
+      used += sectionBodyOf(raw).trim().length;
+      if (used > budget) return null;
+      const hit = citationOf(sec.path, lib);
+      if (hit == null) return null;
+      out.push({ ...hit.citation, workspaceId: lib.workspaceId, reason: '' });
+    }
+  }
+  return out;
 }
 
 // ---- validation (pure) ----

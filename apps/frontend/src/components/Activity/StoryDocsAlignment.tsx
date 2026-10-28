@@ -1,11 +1,11 @@
 // CHECK A STORY AGAINST THE DOCS — the Story section's docs block (TicketStorySection.tsx; docs/FRONTEND.md
-// § The story view). CORE, free, LOCAL ONLY (`me.ai.enabled`), and only on a CLICK: Claude Haiku picks the
-// sections of the workspace's reference library that could matter, then Claude Sonnet reads only those
-// documents and says where the story matches them and where it does not.
+// § The story view). CORE, free, LOCAL ONLY (`me.ai.enabled`), and only on a CLICK: Claude Sonnet reads the
+// workspace's reference library — all of it when it is short, else the sections Claude Haiku picks — and says where the story matches them and where it does not.
 //
 //   StoryDocsButton           "Check against docs" / "Check again" — one of the STORY'S ACTIONS, in the
 //                             Story section's heading row (TicketStorySection.tsx), not in the block
-//   StoryDocsAlignmentBlock   the heading, the ⓘ, progress, failure, refusal, and the whole-story
+//   StoryDocsAlignmentBlock   the heading, the ⓘ, progress, failure, refusal, "Nothing has changed since
+//                             this check." (a click the server answered `reused`, with a forced re-run), and the whole-story
 //                             result: verdict, 2-3 sentences, actionable bullets, points on other parts
 //                             of the story, and — when the notes cannot sit under the section's own
 //                             criteria — the run's own numbered list
@@ -30,6 +30,7 @@ import {
   type StoryDocsRef,
 } from '@pierre-review/shared';
 import { useAiCapabilities, useAiProvider, useAiProviderName } from '../../hooks/useAiCapabilities.js';
+import type { StartStoryDocsVars } from '../../hooks/useStoryDocsAlignment.js';
 import { TICKET_CRITERION_STATUS_CLASS, OUTDATED_CLASS } from '../../lib/claudeReviewFollowUp.js';
 import { citationLabel } from '../../lib/referenceDocs.js';
 import { REVIEW_CHIP, REVIEW_PROSE } from '../../lib/reviewStyles.js';
@@ -106,8 +107,9 @@ function StoryDocsInfo(): JSX.Element {
         (Activity → Docs).
       </p>
       <p>
-        First {aiModelWords(provider, 'Haiku')} picks up to 8 sections that could matter. Then {aiModelWords(provider, 'Sonnet')} reads only those documents and says
-        where the story matches the docs and where it does not.
+        When the docs are short, {aiModelWords(provider, 'Sonnet')} reads all of them. Otherwise {aiModelWords(provider, 'Haiku')} first
+        picks up to 8 sections that could matter, and {aiModelWords(provider, 'Sonnet')} reads those. It says where the story matches
+        the docs and where it does not.
       </p>
       <p>
         It only comments on criteria the docs say something about. Every point links to the passage it rests on; anything it
@@ -118,8 +120,8 @@ function StoryDocsInfo(): JSX.Element {
         else worked out from the description.
       </p>
       <p>
-        It runs only when you press the button, on your own {name}. Out of date means the story, its criteria or the docs
-        changed since.
+        It runs only when you press the button, on your own {name}. If nothing has changed since the last check, you get that
+        check back. Out of date means the story, its criteria or the docs changed since.
       </p>
     </InfoButton>
   );
@@ -133,7 +135,7 @@ export function StoryDocsButton({
   starting,
 }: {
   q: UseQueryResult<StoryDocsAlignmentResponse>;
-  start: UseMutationResult<StartStoryDocsAlignmentResponse, Error, void>;
+  start: UseMutationResult<StartStoryDocsAlignmentResponse, Error, StartStoryDocsVars>;
   starting: boolean;
 }): JSX.Element | null {
   const ai = useAiCapabilities();
@@ -155,7 +157,7 @@ export function StoryDocsAlignmentBlock({
   attached,
 }: {
   q: UseQueryResult<StoryDocsAlignmentResponse>;
-  start: UseMutationResult<StartStoryDocsAlignmentResponse, Error, void>;
+  start: UseMutationResult<StartStoryDocsAlignmentResponse, Error, StartStoryDocsVars>;
   /** A click for this ticket is in flight in any mount. */
   starting: boolean;
   /** The per-criterion notes sit under the section's own criteria rows (else they are drawn here). */
@@ -169,10 +171,13 @@ export function StoryDocsAlignmentBlock({
   const checking = docsChecking(data, starting);
   const progress = checking ? docsProgressText(data.run?.status, starting) : null;
   // While a click is pending the old run is still `data.run`: never show its failure under "Starting…".
-  const failed = !starting && data.run?.status === 'failed' ? data.run : null;
   // This mount's own click answer, hidden while a click is pending and once a newer run exists.
   const clickStale = starting || clickMessageStale(data.run, start.submittedAt);
+  // A click answered `reused` makes the good run the answer: an older failure no longer speaks for it.
+  const failed = !starting && data.run?.status === 'failed' && !(!clickStale && start.data?.outcome === 'reused') ? data.run : null;
   const refusal = !clickStale && start.data?.outcome === 'refused' ? STORY_DOCS_REFUSAL_TEXT[start.data.refusal] : null;
+  // The click was answered with the last good check (nothing changed since): say so, and offer a run.
+  const reused = !clickStale && start.data?.outcome === 'reused' && shown?.id === start.data.runId;
   return (
     <section aria-label="Docs check" className="space-y-2" data-testid="story-docs">
       <div className="flex flex-wrap items-center gap-1.5">
@@ -194,6 +199,16 @@ export function StoryDocsAlignmentBlock({
       )}
       {failed != null && <p className="text-xs text-red-600 dark:text-red-400">{failed.error ?? 'The docs check failed.'}</p>}
       {refusal != null && <p className={`text-xs ${MUTED}`}>{refusal}</p>}
+      {reused && (
+        <div className={`flex flex-wrap items-center gap-1.5 text-xs ${MUTED}`}>
+          <span>Nothing has changed since this check.</span>
+          <AiRunGate kind="story_docs">
+            <button type="button" className="underline hover:no-underline" onClick={() => start.mutate({ force: true })}>
+              Check again anyway
+            </button>
+          </AiRunGate>
+        </div>
+      )}
       {start.isError && !clickStale && <p className="text-xs text-red-600 dark:text-red-400">{start.error.message}</p>}
       {shown != null && <StoryDocsResultView run={shown} attached={attached} />}
     </section>

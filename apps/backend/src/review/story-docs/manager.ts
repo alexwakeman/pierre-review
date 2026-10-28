@@ -7,6 +7,7 @@ import {
   STORY_DOCS_REFUSAL_TEXT,
   STORY_DOCS_SHORTLIST_MODEL,
   type ClaudeReviewModel,
+  type StoryDocsShortlistEntry,
 } from '@pierre-review/shared';
 import { AiRuntimeMissingError } from '../../ai/runtime.js';
 import { loadLibrarySnapshot } from '../../reference-docs/context.js';
@@ -36,11 +37,12 @@ import {
   reconcileOrphanedStoryDocs,
   saveStoryDocsSuccess,
 } from './persist.js';
-import { buildStoryDocsPrompt, storyDocsRoots, storyDocsSystemPrompt, storyDocsUntrustedTexts } from './prompts.js';
+import { buildStoryDocsPrompt, inlineSections, storyDocsTurnCap, storyDocsRoots, storyDocsSystemPrompt, storyDocsUntrustedTexts } from './prompts.js';
 import { activeProviderId } from '../../ai/provider-setting.js';
+import type { AgentProviderId } from '../../ai/provider.js';
 import { claudeModelChoice, getProvider } from '../../ai/provider.js';
 import { promptTools, providerName } from '../../ai/prompt-tools.js';
-import { runShortlist, type ShortlistDoc } from './shortlist.js';
+import { prefilterSections, runShortlist, wholeLibraryShortlist, type ShortlistDoc } from './shortlist.js';
 import { validateAlignment } from './validate.js';
 
 // THE STORY DOCS CHECK QUEUE — a separate agentic process (docs/REFERENCE-DOCS.md § Check a story
@@ -51,9 +53,13 @@ import { validateAlignment } from './validate.js';
 //   LANE    one FIFO, at most LANE_MAX waiting (more ⇒ 409 Busy).
 //   SLOTS   the ONE shared REVIEW_CONCURRENCY as a registered PEER: a check starts only when a slot is
 //           free and no PR-review CLICK is waiting; when one ends it pumps its lane and the others.
-//   PIPELINE  re-resolve the inputs (a click checks what is there NOW) → Haiku shortlist (an empty list
-//           ends the run 'no_relevant_docs', no second call) → Sonnet read of ONLY the shortlisted
-//           documents → validate (shape refused, grounding dropped) → store.
+//   PIPELINE  re-resolve the inputs (a click checks what is there NOW) → the shortlist: EVERY section
+//           when the library fits STORY_DOCS_INLINE_CHARS (no model call), else the prefilter's top
+//           candidates → Haiku (an empty list ends the run 'no_relevant_docs', no second call) → ONE
+//           Sonnet answer over the shortlisted sections' INLINED text (low effort on Claude, few turns)
+//           → validate (shape refused, grounding dropped, quotes re-read from disk) → store.
+//   REUSE    the route answers a click whose fingerprint equals the newest succeeded run's with that
+//           run (`currentStoryDocsFingerprint`), no row, no model call — unless the body says `force`.
 //   RESTART  `reconcileStoryDocsOnStartup` fails every run a restart cut off — never stuck.
 
 const LANE_MAX = 10;
@@ -109,13 +115,30 @@ export async function liveStoryDocs(ctx: AgentContext, accountId: number, worksp
   return { inputs, docCount: built.length, libraryHash: libraryHashOf(built) };
 }
 
-export function fingerprintOf(workspaceId: number, inputs: StoryDocsInputs, libraryHash: string): string {
+/** The read's model id on `providerId` (what the row names, and part of the fingerprint). */
+function readModelOn(providerId: AgentProviderId): string {
+  return getProvider(providerId).resolveModel(claudeModelChoice(STORY_DOCS_ALIGNMENT_MODEL as ClaudeReviewModel));
+}
+
+/**
+ * The fingerprint a run started NOW would store: the inputs, the built library, the version, both
+ * models and the provider that runs the read (default: the active one). The route compares it with the
+ * newest succeeded run's to REUSE that run.
+ */
+export function currentStoryDocsFingerprint(
+  workspaceId: number,
+  inputs: StoryDocsInputs,
+  libraryHash: string,
+  providerId: AgentProviderId = activeProviderId(),
+): string {
   return storyDocsFingerprint({
     workspaceId,
     ident: inputs.ident,
     storyHash: inputs.storyHash,
     criteriaHash: inputs.criteriaHash,
     libraryHash,
+    models: [STORY_DOCS_SHORTLIST_MODEL, readModelOn(providerId)],
+    provider: providerId,
   });
 }
 
@@ -144,7 +167,7 @@ export async function startStoryDocs(
       workspaceId: a.workspaceId,
       ident: a.inputs.ident,
       ticketKey: a.inputs.ticketKey,
-      fingerprint: fingerprintOf(a.workspaceId, a.inputs, a.libraryHash),
+      fingerprint: currentStoryDocsFingerprint(a.workspaceId, a.inputs, a.libraryHash),
       storyHash: a.inputs.storyHash,
       criteriaHash: a.inputs.criteriaHash,
       libraryHash: a.libraryHash,
@@ -206,7 +229,7 @@ export function shortlistDocsOf(lib: LibrarySnapshot): ShortlistDoc[] {
     slug: d.slug,
     title: d.title,
     contents: lib.read(`${d.slug}/CONTENTS.md`),
-    sections: (d.sections ?? []).map((s) => ({ path: s.path, title: s.title })),
+    sections: (d.sections ?? []).map((s) => ({ path: s.path, title: s.title, summary: s.summary, trail: s.trail, headings: s.headings })),
   }));
 }
 
@@ -222,33 +245,44 @@ async function runPipeline(job: StoryDocsJob, controller: AbortController): Prom
     await markStoryDocsFailed(ctx, accountId, runId, STORY_DOCS_REFUSAL_TEXT.no_docs);
     return;
   }
+  // The provider, resolved ONCE: the fingerprint names it, the prompts are worded for it and the same
+  // provider runs them (review/run-provider.ts).
+  const providerId = activeProviderId();
+  const [index, lib] = await Promise.all([readIndex(accountId, workspaceId), loadLibrarySnapshot(accountId, workspaceId)]);
+  // A library small enough to send whole needs no shortlist call.
+  const whole = wholeLibraryShortlist(lib);
   // A click means "check what is there now": the row takes the inputs as they are at start.
   await markShortlisting(ctx, accountId, runId, {
-    fingerprint: fingerprintOf(workspaceId, inputs, live.libraryHash),
+    fingerprint: currentStoryDocsFingerprint(workspaceId, inputs, live.libraryHash, providerId),
     storyHash: inputs.storyHash,
     criteriaHash: inputs.criteriaHash,
     libraryHash: live.libraryHash,
     criteriaSource: inputs.criteriaSource,
     criteria: inputs.criteria,
-    model: STORY_DOCS_SHORTLIST_MODEL,
+    model: whole != null ? null : STORY_DOCS_SHORTLIST_MODEL,
   });
 
-  const index = await readIndex(accountId, workspaceId);
-  const lib = await loadLibrarySnapshot(accountId, workspaceId);
-  const sl = await runShortlist({
-    input: { story: inputs.story, criteriaSource: inputs.criteriaSource, criteria: inputs.criteria, index, docs: shortlistDocsOf(lib) },
-    lib,
-    ...(seams.complete ? { complete: seams.complete } : {}),
-    onUsage: (u) =>
-      ctx
-        .recordAiUsage({
-          accountId,
-          seam: 'summary',
-          feature: 'story_docs_shortlist',
-          ...u,
-        })
-        .catch((err) => ctx.log.warn({ err }, 'story docs: usage record failed')),
-  });
+  let sl: { entries: StoryDocsShortlistEntry[] | null; costUsd: number; inputTokens: number; outputTokens: number };
+  if (whole != null) {
+    sl = { entries: whole, costUsd: 0, inputTokens: 0, outputTokens: 0 };
+  } else {
+    const docs = shortlistDocsOf(lib);
+    const candidates = prefilterSections({ story: inputs.story, criteria: inputs.criteria }, docs);
+    sl = await runShortlist({
+      input: { story: inputs.story, criteriaSource: inputs.criteriaSource, criteria: inputs.criteria, index, docs, candidates },
+      lib,
+      ...(seams.complete ? { complete: seams.complete } : {}),
+      onUsage: (u) =>
+        ctx
+          .recordAiUsage({
+            accountId,
+            seam: 'summary',
+            feature: 'story_docs_shortlist',
+            ...u,
+          })
+          .catch((err) => ctx.log.warn({ err }, 'story docs: usage record failed')),
+    });
+  }
   const slTel = { costUsd: sl.costUsd, inputTokens: sl.inputTokens, outputTokens: sl.outputTokens };
   if (controller.signal.aborted) {
     await markStoryDocsFailed(ctx, accountId, runId, timedOut(), slTel);
@@ -270,24 +304,24 @@ async function runPipeline(job: StoryDocsJob, controller: AbortController): Prom
   }
 
   const model = STORY_DOCS_ALIGNMENT_MODEL as ClaudeReviewModel;
-  // The provider, resolved ONCE: the prompts are worded for it and the same provider runs them
-  // (review/run-provider.ts). A provider that records its own usage (Codex) bills `usageRecord`. The
-  // row names what runs the read (provider + its model id) from here on.
-  const providerId = activeProviderId();
-  await markReading(
-    ctx,
-    accountId,
-    runId,
-    sl.entries,
-    { provider: providerId, model: getProvider(providerId).resolveModel(claudeModelChoice(model)) },
-    slTel,
-  );
+  // A provider that records its own usage (Codex) bills `usageRecord`. The row names what runs the
+  // read (provider + its model id) from here on.
+  await markReading(ctx, accountId, runId, sl.entries, { provider: providerId, model: readModelOn(providerId) }, slTel);
   const dir = libraryDir(accountId, workspaceId);
   const alignment = { criteriaSource: inputs.criteriaSource, criteria: inputs.criteria };
   let scratch: string | null = null;
   try {
     scratch = mkdtempSync(join(tmpdir(), 'pierre-storydocs-'));
-    const promptInput = { story: inputs.story, criteriaSource: inputs.criteriaSource, criteria: inputs.criteria, shortlist: sl.entries, libraryDir: dir };
+    // The sections' TEXT goes in the prompt (≤ STORY_DOCS_INLINE_CHARS): the read is one answer.
+    const sections = inlineSections(sl.entries, lib);
+    const promptInput = {
+      story: inputs.story,
+      criteriaSource: inputs.criteriaSource,
+      criteria: inputs.criteria,
+      shortlist: sl.entries,
+      sections,
+      libraryDir: dir,
+    };
     const nonce = pickReviewNonce(storyDocsUntrustedTexts(promptInput));
     const words = promptTools(providerId);
     const run = seams.runAgent ?? (await import('./agent.js')).runStoryDocsAgent;
@@ -302,6 +336,7 @@ async function runPipeline(job: StoryDocsJob, controller: AbortController): Prom
       model,
       provider: providerId,
       usageRecord: { accountId, seam: 'agent', feature: 'story_docs_alignment' },
+      maxTurns: storyDocsTurnCap(sections.some((x) => x.cut)),
     });
     // The provider wrote the ledger row itself (Codex) ⇒ never a second one here.
     if (res.ledgerByProvider !== true && res.costUsd != null && Number.isFinite(res.costUsd) && res.costUsd > 0) {

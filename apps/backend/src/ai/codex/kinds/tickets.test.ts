@@ -253,7 +253,8 @@ describe('the prompts', () => {
     }
     expect(p.ticketSystemDocs).toContain('`docReferences` is a field of your final JSON answer');
     expect(p.cardSystem).toContain('ONE JSON object matching the given schema');
-    expect(p.storyUser).toContain('Then give your final JSON answer.');
+    expect(p.storyUser).toContain('Give your final JSON answer now.');
+    expect(p.storyUserCut).toContain('Then give your final JSON answer.');
     expect(p.storyRefusal).toContain('answer again with the whole answer');
     // The facts the prompts carry are the same: the fences and paths do not move.
     const c = ticketsPrompts(promptTools('claude'));

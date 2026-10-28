@@ -4,6 +4,8 @@
 //   2. POST 202 → the run is stored with only GROUNDED points; GET shows it current; a library change
 //      makes it "Out of date" ('library'); a later failed run keeps the last good result beside it.
 //   3. `no_story` when there is nothing to read; the daily cap refuses with no row.
+//   5. REUSE: a click with nothing changed answers `reused` with the good run — no row, no model call;
+//      `force` runs anyway. A library that fits the inline budget skips the shortlist call.
 //   4. Tenancy: another account's workspace id falls back to the caller's Default (no run seen); the
 //      composite FK refuses a cross-account row; a restart fails orphaned runs.
 //
@@ -38,6 +40,9 @@ let agentPayload: any;
 let withBrief = true;
 let gate: Promise<void> | null = null;
 const usage: any[] = [];
+let completeCalls = 0;
+let agentCalls = 0;
+let agentArgs: any = null;
 
 const as = (acct: number) => ({ 'x-acct': String(acct) });
 const good = { link: 'refunds/sections/01-refunds.md#refunds', quote: 'Refunds are paid within fourteen days' };
@@ -114,8 +119,8 @@ beforeAll(async () => {
         story: null,
       }) as any,
     },
-    complete: async () => ({ text: '{"sections":[{"link":"refunds/sections/01-refunds.md","reason":"Refund timing"}]}', usage: { inputTokens: 100, outputTokens: 10 } }),
-    runAgent: async () => (await gate, { payload: agentPayload, lastRefusal: null, aborted: false, costUsd: 0.2, inputTokens: 1000, outputTokens: 100, numTurns: 4 }),
+    complete: async () => (completeCalls++, { text: '{"sections":[{"link":"refunds/sections/01-refunds.md","reason":"Refund timing"}]}', usage: { inputTokens: 100, outputTokens: 10 } }),
+    runAgent: async (args: any) => (agentCalls++, (agentArgs = args), await gate, { payload: agentPayload, lastRefusal: null, aborted: false, costUsd: 0.2, inputTokens: 1000, outputTokens: 100, numTurns: 4 }),
   });
   ctx = {
     db,
@@ -188,9 +193,36 @@ describe('a check', () => {
     expect(result.criteria.map((c: any) => c.n)).toEqual([1]);
     expect(result.criteria[0].refs[0]).toMatchObject({ path: 'refunds/sections/01-refunds.md', anchor: 'refunds', workspaceId: wsA, docTitle: 'Refund policy' });
     expect(result.overall.actions).toHaveLength(1);
-    expect(result.shortlist).toEqual([expect.objectContaining({ path: 'refunds/sections/01-refunds.md', reason: 'Refund timing', workspaceId: wsA })]);
-    expect(body.run.costUsd).toBeGreaterThan(0.2);
-    expect(usage.map((u) => u.feature)).toEqual(expect.arrayContaining(['story_docs_shortlist', 'story_docs_alignment']));
+    // The whole library fits the inline budget: every section, no shortlist call, the text in the prompt.
+    expect(result.shortlist).toEqual([expect.objectContaining({ path: 'refunds/sections/01-refunds.md', reason: '', workspaceId: wsA })]);
+    expect(completeCalls).toBe(0);
+    expect(agentArgs.prompt).toMatch(/---BEGIN SECTION refunds\/sections\/01-refunds\.md [0-9a-f]+---\n# Refunds\n\nRefunds are paid within fourteen days of approval\./);
+    expect(agentArgs.maxTurns).toBe(4);
+    expect(body.run.costUsd).toBeCloseTo(0.2);
+    expect(usage.map((u) => u.feature)).toEqual(['story_docs_alignment']);
+  });
+
+  it('nothing changed ⇒ the POST reuses the good run: no row, no model call; force runs anyway', async () => {
+    const before = (await get()).json().run;
+    const calls = agentCalls;
+    const r = await post();
+    expect(r.statusCode).toBe(200);
+    expect(r.json()).toEqual({ outcome: 'reused', runId: before.id });
+    expect((await persist.latestStoryDocsRun(ctx, 1, wsA, IDENT))!.id).toBe(before.id);
+    expect(agentCalls).toBe(calls);
+    // A changed story is a new run.
+    story = { title: 'Refunds', description: 'Customers get refunds within 60 days.', acceptanceCriteria: '' };
+    expect((await post()).json()).toMatchObject({ outcome: 'queued' });
+    await manager._storyDocsIdleForTest();
+    expect(agentCalls).toBe(calls + 1);
+    story = { title: 'Refunds', description: 'Customers get refunds within 60 days.', acceptanceCriteria: '' };
+    expect((await post()).json()).toMatchObject({ outcome: 'reused' });
+    // Back to the first story (the next tests' default): force runs it even though run 1 matches.
+    story = { title: 'Refunds', description: 'Customers get refunds within 30 days.', acceptanceCriteria: '' };
+    const forced = await post(1, { ident: IDENT, force: true });
+    expect(forced.statusCode).toBe(202);
+    await manager._storyDocsIdleForTest();
+    expect(agentCalls).toBe(calls + 2);
   });
 
   it('a library change makes it out of date; a failed re-run keeps the good result beside it', async () => {
@@ -271,7 +303,7 @@ describe('tenancy, cap and restart', () => {
     const { config } = await import('../../config.js');
     let release!: () => void;
     gate = new Promise<void>((r) => (release = r));
-    const first = (await post()).json();
+    const first = (await post(1, { ident: IDENT, force: true })).json();
     expect(first).toMatchObject({ outcome: 'queued' });
     const have = await persist.countStoryDocsRunsSince(ctx, 1, 0);
     for (let i = have; i < config.storyDocsDailyCap; i += 1) {
@@ -294,7 +326,7 @@ describe('tenancy, cap and restart', () => {
     release();
     gate = null;
     await manager._storyDocsIdleForTest();
-    expect((await post()).json()).toEqual({ outcome: 'refused', runId: null, refusal: 'daily_cap' });
+    expect((await post(1, { ident: IDENT, force: true })).json()).toEqual({ outcome: 'refused', runId: null, refusal: 'daily_cap' });
     expect(await persist.countStoryDocsRunsSince(ctx, 1, 0)).toBe(n);
   });
 });
