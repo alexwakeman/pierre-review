@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createPathGuard } from '../path-guard.js';
-import { storyDocsRoots, storyDocsToolPolicy } from './agent.js';
+import { storyDocsRoots, storyDocsToolPolicy, storyDocsTurnCap } from './agent.js';
 import { buildStoryDocsPrompt } from './prompts.js';
 
 describe('the tool policy', () => {
@@ -54,18 +54,38 @@ describe('the roots', () => {
     expect(denied(guard.decide('Glob', { pattern: '../**', path: join(lib, 'refunds') }))).toBe(true);
   });
 
-  it('the prompt names the same folders and fences the shortlist', () => {
-    const p = buildStoryDocsPrompt({
+  const promptFor = (cut: boolean): string =>
+    buildStoryDocsPrompt({
       story: { title: 't', description: 'd', acceptanceCriteria: '' },
       criteriaSource: 'derived',
       criteria: [],
       shortlist: [{ path: 'refunds/sections/01-a.md', workspaceId: 1, anchor: null, docSlug: 'refunds', docTitle: 'Refunds', sectionTitle: 'A', reason: 'why' }],
+      sections: [{ path: 'refunds/sections/01-a.md', text: cut ? 'text\n[…cut]' : 'text', cut }],
       libraryDir: lib,
       nonce: 'abc123',
     });
+
+  it('the prompt carries the section text fenced; a whole read names no folder and says not to read', () => {
+    const p = promptFor(false);
+    expect(p).toContain('---BEGIN SHORTLIST abc123---');
+    expect(p).toContain('---BEGIN SECTION refunds/sections/01-a.md abc123---\ntext\n---END SECTION refunds/sections/01-a.md abc123---');
+    expect(p).toContain('do not read any file');
+    expect(p).not.toContain('Their document folders');
+    expect(p).toContain('derivedCriteria');
+  });
+
+  it('a cut section: the prompt names the same folders the guard allows, and nothing else', () => {
+    const p = promptFor(true);
     expect(p).toContain(`- ${join(lib, 'refunds')}`);
     expect(p).not.toContain(`- ${join(lib, 'billing')}`);
-    expect(p).toContain('---BEGIN SHORTLIST abc123---');
-    expect(p).toContain('derivedCriteria');
+    expect(p).toContain('Read a cut section');
+  });
+});
+
+describe('the turn cap', () => {
+  it('is low when every section is inline, a little higher when one was cut, never above the configured cap', () => {
+    expect(storyDocsTurnCap(false, 16)).toBe(4);
+    expect(storyDocsTurnCap(true, 16)).toBe(8);
+    expect(storyDocsTurnCap(true, 2)).toBe(2);
   });
 });

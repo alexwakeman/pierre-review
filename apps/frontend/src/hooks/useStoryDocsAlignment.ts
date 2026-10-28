@@ -15,7 +15,8 @@ import { useAiCapabilities } from './useAiCapabilities.js';
 // only while the newest run is queued, choosing sections or reading. ONE mutation key per (workspace,
 // ticket), so every story tab of the ticket shows the same "Checking…" while a click is in flight.
 
-const POLL_MS = 4000;
+// A check is one model answer now (the sections' text is in the prompt), so it finishes in seconds.
+const POLL_MS = 1500;
 
 export const storyDocsAlignmentKey = (workspaceId: number | null, ident: string): readonly unknown[] => [
   'story-docs-alignment',
@@ -42,11 +43,16 @@ export function useStoryDocsAlignment(workspaceId: number | null, ident: string)
   });
 }
 
+/** `{ force: true }` runs even when nothing changed since the last good check (else the server answers
+ *  `reused` with that check: no model call). */
+export type StartStoryDocsVars = { force?: boolean } | void;
+
 export function useStartStoryDocsAlignment(workspaceId: number | null, ident: string) {
   const qc = useQueryClient();
-  return useMutation<StartStoryDocsAlignmentResponse, Error, void>({
+  return useMutation<StartStoryDocsAlignmentResponse, Error, StartStoryDocsVars>({
     mutationKey: startKey(workspaceId, ident),
-    mutationFn: () => api.startStoryDocsAlignment({ ident, ...(workspaceId != null ? { workspaceId } : {}) }),
+    mutationFn: (vars) =>
+      api.startStoryDocsAlignment({ ident, ...(workspaceId != null ? { workspaceId } : {}), ...(vars?.force ? { force: true } : {}) }),
     onSettled: () => void qc.invalidateQueries({ queryKey: storyDocsAlignmentKey(workspaceId, ident) }),
   });
 }

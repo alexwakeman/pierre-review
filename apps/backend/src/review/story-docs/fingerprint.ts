@@ -30,9 +30,28 @@ export interface StoryDocsHashes {
   libraryHash: string;
 }
 
-export function storyDocsFingerprint(a: StoryDocsHashes & { workspaceId: number; ident: string; version?: number }): string {
+/**
+ * THE RUN'S FINGERPRINT — everything that changes the answer: the version (prompts, validator, result
+ * shape), the subject, the story text, the criteria list, the built library (every built document's
+ * slug, build time and section count: a rebuild moves `builtAt`, so changed section text always moves
+ * it), the models and the provider that runs the read. A click whose fingerprint equals the newest
+ * SUCCEEDED run's REUSES that run (routes.ts) — so a field that changes the answer and is missing here
+ * would serve a stale answer as current.
+ */
+export function storyDocsFingerprint(
+  a: StoryDocsHashes & { workspaceId: number; ident: string; version?: number; models?: readonly string[]; provider?: string },
+): string {
   return sha(
-    [`v${a.version ?? STORY_DOCS_ALIGNMENT_VERSION}`, String(a.workspaceId), a.ident, a.storyHash, a.criteriaHash, a.libraryHash].join('\n'),
+    [
+      `v${a.version ?? STORY_DOCS_ALIGNMENT_VERSION}`,
+      String(a.workspaceId),
+      a.ident,
+      a.storyHash,
+      a.criteriaHash,
+      a.libraryHash,
+      ...(a.models != null ? [`models:${a.models.join(',')}`] : []),
+      ...(a.provider != null ? [`provider:${a.provider}`] : []),
+    ].join('\n'),
   );
 }
 

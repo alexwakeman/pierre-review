@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import {
+  STORY_DOCS_ALIGNMENT_VERSION,
   STORY_DOCS_IDENT_MAX,
   parseTicketIdent,
   type StartStoryDocsAlignmentBody,
@@ -11,7 +12,7 @@ import { resolveWorkspaceScope } from '../../db/queries.js';
 import type { AgentContext } from '../agent-context.js';
 import { AGENTIC_AI_ENABLED } from '../claude-review/manager.js';
 import { utcDayStartMs } from '../diagrams/trigger.js';
-import { liveStoryDocs, startStoryDocs, storyDocsClaim } from './manager.js';
+import { currentStoryDocsFingerprint, liveStoryDocs, startStoryDocs, storyDocsClaim } from './manager.js';
 import { countStoryDocsRunsSince, latestStoryDocsRun, latestSucceededStoryDocsRun, toStoryDocsRun } from './persist.js';
 import { providerName } from '../../ai/prompt-tools.js';
 
@@ -20,7 +21,9 @@ import { providerName } from '../../ai/prompt-tools.js';
 // LIMN_AI_DISABLED; the AGENTIC_AI_ENABLED checks are the second guard.
 //
 //   GET  /api/docs/story-alignment?workspace=&ident=   the story's runs (DB + disk; no model)  → read
-//   POST /api/docs/story-alignment { workspaceId?, ident }  queue ONE check                → ai + ai_hourly
+//   POST /api/docs/story-alignment { workspaceId?, ident, force? }  queue ONE check        → ai + ai_hourly
+//        — or `reused`: nothing changed since the newest succeeded run (same fingerprint), so that run
+//        IS the answer: no row, no model call, no cap. `force` runs anyway.
 //
 // TENANCY: the workspace resolves through `resolveWorkspaceScope` (absent / unknown / another
 // account's ⇒ this account's Default, echoed); every read carries the account AND the workspace; the
@@ -48,6 +51,7 @@ const postBody = {
       ident: { type: 'string', minLength: 1, maxLength: STORY_DOCS_IDENT_MAX },
       // Any value: a non-integer falls back to Default through resolveWorkspaceScope, never a 400.
       workspaceId: {},
+      force: { type: 'boolean' },
     },
   },
 };
@@ -109,6 +113,18 @@ export function registerStoryDocsRoutes(app: FastifyInstance, ctx: AgentContext)
       const live = await liveStoryDocs(ctx, accountId, workspaceId, body.ident);
       if (live.docCount === 0) return { outcome: 'refused', runId: null, refusal: 'no_docs' };
       if (live.inputs == null || live.inputs.empty) return { outcome: 'refused', runId: null, refusal: 'no_story' };
+      // NOTHING CHANGED: the newest succeeded run was made from these exact inputs, library, version,
+      // models and provider — it IS the answer. No row, no model call, before the cap.
+      if (body.force !== true) {
+        const good = await latestSucceededStoryDocsRun(ctx, accountId, workspaceId, body.ident);
+        if (
+          good != null &&
+          good.version === STORY_DOCS_ALIGNMENT_VERSION &&
+          good.fingerprint === currentStoryDocsFingerprint(workspaceId, live.inputs, live.libraryHash)
+        ) {
+          return { outcome: 'reused', runId: good.id };
+        }
+      }
       const auth = ctx.llm.detectAuth('story_docs');
       if (auth.status === 'none') return fail(reply, 400, 'NoClaudeAuth', auth.message ?? `No ${providerName()} credential found.`);
       if ((await countStoryDocsRunsSince(ctx, accountId, utcDayStartMs(Date.now()))) >= config.storyDocsDailyCap) {

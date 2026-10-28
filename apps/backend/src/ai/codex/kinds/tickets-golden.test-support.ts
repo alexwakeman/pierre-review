@@ -50,9 +50,11 @@ export function ticketsPrompts(t: PromptTools): Record<string, string> {
     shortlist: [
       { path: 'refunds/sections/01-a.md', workspaceId: 1, anchor: null, docSlug: 'refunds', docTitle: 'Refunds', sectionTitle: 'A', reason: 'why' },
     ],
+    sections: [{ path: 'refunds/sections/01-a.md', text: 'Refunds are paid within 14 days.', cut: false }],
     libraryDir: '/lib',
     nonce: 'abc123',
   };
+  const storyCut = { ...story, sections: [{ path: 'refunds/sections/01-a.md', text: 'Refunds are paid within\n[…cut]', cut: true }] };
   const pr = {
     repoFullName: 'acme/api',
     number: 7,
@@ -76,6 +78,7 @@ export function ticketsPrompts(t: PromptTools): Record<string, string> {
     ciUser: ci.buildCiReviewPrompt({ pr, plan: ciPlan(), nonce: 'n0nce' }, t),
     storySystem: sd.storyDocsSystemPrompt(t),
     storyUser: sd.buildStoryDocsPrompt(story, t),
+    storyUserCut: sd.buildStoryDocsPrompt(storyCut, t),
     storyRefusal: 'reply' in j ? j.reply : '',
     storyRefusalLast: 'reply' in jLast ? jLast.reply : '',
   };

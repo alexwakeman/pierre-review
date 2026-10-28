@@ -141,7 +141,7 @@ describe.skipIf(!LIVE)('stream (c) on Codex, live (LIMN_CODEX_LIVE=1)', () => {
       roots: P.storyDocsRoots(lib, shortlist),
       systemPrompt: P.storyDocsSystemPrompt(t),
       prompt: P.buildStoryDocsPrompt(
-        { story: { title: 'Refunds', description: 'A customer asks for a refund; we pay it within 30 days.', acceptanceCriteria: '- Refunds are paid within 30 days' }, ...alignment, shortlist, libraryDir: lib, nonce: 'z9x1' },
+        { story: { title: 'Refunds', description: 'A customer asks for a refund; we pay it within 30 days.', acceptanceCriteria: '- Refunds are paid within 30 days' }, ...alignment, shortlist, sections: [{ path: shortlist[0]!.path, text: `# Refunds\n\n${section}`, cut: false }], libraryDir: lib, nonce: 'z9x1' },
         t,
       ),
       alignment,

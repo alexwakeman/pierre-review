@@ -3375,17 +3375,20 @@ docs" ([docs/REFERENCE-DOCS.md](REFERENCE-DOCS.md) § Check a story against the 
 
 - **Reads only in the story view.** `useStoryDocsAlignment` (`hooks/useStoryDocsAlignment.ts`, key
   `['story-docs-alignment','ws:<id>',ident]`, `enabled = ai.enabled && workspaceId != null`, staleTime
-  10 s) is called from `TicketStorySection`, which the board never mounts. It polls (4 s) ONLY while the
+  10 s) is called from `TicketStorySection`, which the board never mounts. It polls (1.5 s — a check is one model answer) ONLY while the
   newest run is `queued`/`shortlisting`/`reading`. The start mutation carries ONE key
   `['story-docs-alignment-start','ws:<id>',ident]` (`useStoryDocsStarting` reads it with
   `useIsMutating`), so every story tab of the ticket shows the same "Checking…"; `onSettled` invalidates the read.
 - **The block** renders nothing when `available` is false and nothing was ever run. Heading "Docs check" +
-  the ⓘ (Haiku shortlist, then Sonnet over only those documents; only linked points are kept; where the
-  criteria come from; manual only; what "Out of date" means). Its button sits in the Story heading row
+  the ⓘ (Sonnet over the whole library when it is short, else over the sections Haiku picks; only linked
+  points are kept; where the criteria come from; manual only; nothing changed ⇒ the same check back; what
+  "Out of date" means). Its button sits in the Story heading row
   (`StoryDocsButton`), inside `AiRunGate`, shown only when `available` ("Check against docs" /
   "Checking…" / "Check docs again", `docsButtonLabel`). Progress words
   are status-derived (`docsProgressText`: "Choosing sections…", "Reading the docs…"), a failed run's
-  `error` is a red line, a refusal prints `STORY_DOCS_REFUSAL_TEXT`. The drawn run is `shownRun`: the newest
+  `error` is a red line, a refusal prints `STORY_DOCS_REFUSAL_TEXT`. A click the server answered `reused`
+  (nothing changed since the shown run) prints "Nothing has changed since this check." with "Check again
+  anyway" (`start.mutate({force: true})`, inside `AiRunGate`) and hides an older failed run's red line. The drawn run is `shownRun`: the newest
   when it succeeded, else `lastSucceeded`, so a re-run in flight or a failure never hides the last good
   result; "Out of date" when its `current` is false. The result: a verdict chip (WORD + icon, never colour
   alone; the ticket review's measured met/partly/not-met chip classes), the 2-3 sentence summary, "What to

@@ -4,14 +4,20 @@
 // One story (a tracker ticket: its description and its acceptance criteria) is checked against the
 // workspace's reference library on a CLICK — never automatically, never on view. Two steps, one row:
 //
-//   1. SHORTLIST (Haiku 5.5, tool-less): the fenced story + INDEX.md + every built document's
-//      CONTENTS.md → at most STORY_DOCS_SHORTLIST_MAX section files that could bear on it. Every entry
-//      is server-checked (strict library grammar, a section of a BUILT document of THIS workspace, on
-//      disk). An empty shortlist ends the run as `no_relevant_docs` — no second model call.
-//   2. READ (Sonnet 5, agentic): Read/Glob/Grep confined, read-only, to ONLY the shortlisted documents'
-//      folders, starting from the shortlisted sections. It submits a verdict on the whole story, 2-3
-//      sentences, actionable bullets, an OPTIONAL note per acceptance criterion (only the ones the docs
-//      bear on) and up to a few points on other parts of the story.
+//   1. SHORTLIST: when every section of the library fits STORY_DOCS_INLINE_CHARS, ALL of them (no model
+//      call). Otherwise Haiku 5.5 (tool-less) picks at most STORY_DOCS_SHORTLIST_MAX section files from
+//      the top STORY_DOCS_PREFILTER_MAX candidates a deterministic term score ranks (or from every
+//      CONTENTS.md when nothing scores). Every entry is server-checked (strict library grammar, a
+//      section of a BUILT document of THIS workspace, on disk). An empty shortlist ends the run as
+//      `no_relevant_docs` — no second model call.
+//   2. READ (Sonnet 5, at low effort on Claude): the shortlisted sections' TEXT is in the prompt (fenced,
+//      ≤ STORY_DOCS_INLINE_CHARS), so it answers in one turn; Read/Glob/Grep stay, confined read-only
+//      to ONLY the shortlisted documents' folders, for a section the budget cut. It submits a verdict on
+//      the whole story, 2-3 sentences, actionable bullets, an OPTIONAL note per acceptance criterion
+//      (only the ones the docs bear on) and up to a few points on other parts of the story.
+//
+// A click whose fingerprint (story, criteria, built library, version, models, provider) equals the
+// newest SUCCEEDED run's is answered with that run (`reused`) — no model call — unless `force`.
 //
 // ⚠ GROUNDING IS DROP, NOT WARN: every criterion note, story point and action must carry at least one
 // reference that survives the library validator (a section link of a shortlisted document + a quote
@@ -32,12 +38,17 @@ export const STORY_DOCS_SHORTLIST_MODEL = 'claude-haiku-5-5';
 export const STORY_DOCS_ALIGNMENT_MODEL = 'claude-sonnet-5';
 /** Bump when the prompts, the validator or the result shape change what a run produces for the same
  *  inputs: every stored run then reads "Out of date" once. Folded into the fingerprint. */
-export const STORY_DOCS_ALIGNMENT_VERSION = 1;
+export const STORY_DOCS_ALIGNMENT_VERSION = 2;
 
 // ---- caps ----
 
 /** Section files the shortlist may name. */
 export const STORY_DOCS_SHORTLIST_MAX = 8;
+/** The section text the read's prompt carries, in characters, across every section. A library whose
+ *  sections all fit is sent whole and the shortlist call is skipped. */
+export const STORY_DOCS_INLINE_CHARS = 48_000;
+/** Candidates the deterministic prefilter hands the shortlist call (a library too big to send whole). */
+export const STORY_DOCS_PREFILTER_MAX = 30;
 /** One shortlist reason, in characters. */
 export const STORY_DOCS_SHORTLIST_REASON_MAX = 160;
 /** Actionable bullets on the whole story (the prompt asks for at least STORY_DOCS_ACTIONS_MIN). */
@@ -226,6 +237,8 @@ export interface StartStoryDocsAlignmentBody {
   /** Absent ⇒ the default workspace (resolveWorkspaceScope). */
   workspaceId?: number;
   ident: string;
+  /** Run even when nothing changed since the newest succeeded run (else that run is `reused`). */
+  force?: boolean;
 }
 
 export type StoryDocsAlignmentRefusal =
@@ -236,8 +249,15 @@ export type StoryDocsAlignmentRefusal =
   /** STORY_DOCS_ALIGNMENT_DAILY_CAP runs already started today (UTC). */
   | 'daily_cap';
 
+/**
+ *   queued           a new run was queued
+ *   already_running  a run of this story is queued or running (its id once inserted)
+ *   reused           nothing changed since the newest succeeded run (same fingerprint): that run IS the
+ *                    answer, no model call, no new row
+ */
 export type StartStoryDocsAlignmentResponse =
   | { outcome: 'queued' | 'already_running'; runId: number | null }
+  | { outcome: 'reused'; runId: number }
   | { outcome: 'refused'; runId: null; refusal: StoryDocsAlignmentRefusal };
 
 export const STORY_DOCS_REFUSAL_TEXT: Record<StoryDocsAlignmentRefusal, string> = {
