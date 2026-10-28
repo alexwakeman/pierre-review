@@ -24,7 +24,7 @@ import { cleanHeadingTitle, normalizeMarkdown, parseBlocks } from './split.js';
 // download (ai/runtime.ts), so a converter that is missing says "Set up AI again" and nothing else.
 
 export type SniffResult =
-  | { ok: true; kind: Exclude<ReferenceDocSourceKind, 'url'>; ext: string }
+  | { ok: true; kind: Exclude<ReferenceDocSourceKind, 'url' | 'wiki'>; ext: string }
   | { ok: false; message: string };
 
 export const UNSUPPORTED_MESSAGE =
@@ -174,7 +174,7 @@ export interface Converted {
 }
 
 /** A non-PDF source → markdown. Throws ConverterMissingError when a converter is not installed. */
-export async function convertToMarkdown(kind: Exclude<ReferenceDocSourceKind, 'pdf' | 'url'>, buf: Buffer): Promise<Converted> {
+export async function convertToMarkdown(kind: Exclude<ReferenceDocSourceKind, 'pdf' | 'url' | 'wiki'>, buf: Buffer): Promise<Converted> {
   switch (kind) {
     case 'text':
     case 'markdown': {

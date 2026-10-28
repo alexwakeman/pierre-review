@@ -1,6 +1,9 @@
+import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  WIKI_PROVIDER_NAMES,
+  type ReferenceDocSummaryCache,
   type ReferenceDocCrawl,
   type ReferenceDocSourceKind,
   type ReferenceDocStatus,
@@ -27,12 +30,25 @@ import { CrawlRefusal, bundleCrawlMarkdown, crawlSite, type BundlePage } from '.
 import { makeLinkRanker } from './crawl-rank.js';
 import { installDocFolder, readSource, saveSource, writeIndex } from './library.js';
 import { stagingRoot } from './paths.js';
-import { BUILD_PDF_SYSTEM_PROMPT, buildPdfPrompt, buildSectionsPrompt, buildSectionsSystemPrompt } from './prompts.js';
+import { BUILD_PDF_SYSTEM_PROMPT, buildPdfPrompt, buildSectionsPrompt, buildSectionsSystemPrompt, buildSectionsUpdatePrompt } from './prompts.js';
 import { draftsFromWritten, renderDocFolder, trimTitle } from './assemble.js';
 import { sectionFileNames, validateDocFolder } from './render.js';
 import { DocumentTooLongError, MAX_SECTIONS, splitMarkdown, type DraftSection } from './split.js';
-import { crawlOf, getDocRow, markDocFailed, patchDoc, saveDocBuilt, type DocRow, type Telemetry } from './store.js';
+import {
+  crawlOf,
+  getDocRow,
+  markDocFailed,
+  markDocIdle,
+  patchDoc,
+  saveDocBuilt,
+  summaryCacheOf,
+  wikiStateOf,
+  type DocRow,
+  type Telemetry,
+} from './store.js';
 import { UrlFetchError, fetchPage, type FetchedPage } from './url-fetch.js';
+import { WikiIdle, WikiRefusal, readWikiForBuild, type WikiRead } from './wiki/build.js';
+import { automaticRunAllowed } from '../review/budget-gate.js';
 
 // THE REFERENCE-DOCS BUILD QUEUE (docs/REFERENCE-DOCS.md § The build). One Sonnet 5 agent run per
 // document, and:
@@ -60,6 +76,16 @@ interface Job {
   accountId: number;
   workspaceId: number;
   docId: number;
+  /** Wiki documents: read every page again and summarise every section afresh (Rebuild). */
+  full: boolean;
+  /** Not a reader's click (the wiki refresh cadence, the pre-review kick): a model call asks the
+   *  spend budget first and the build is SKIPPED, never queued, when over (review/budget-gate.ts). */
+  automatic: boolean;
+}
+
+export interface EnqueueOptions {
+  full?: boolean;
+  automatic?: boolean;
 }
 
 const lane: Job[] = [];
@@ -98,9 +124,9 @@ export function buildHeld(docId: number): boolean {
 }
 
 /** Queue a document whose row is already `queued`. */
-export function enqueueBuild(ctx: AgentContext, accountId: number, workspaceId: number, docId: number): void {
+export function enqueueBuild(ctx: AgentContext, accountId: number, workspaceId: number, docId: number, opts: EnqueueOptions = {}): void {
   if (!AGENTIC_AI_ENABLED || buildHeld(docId)) return;
-  lane.push({ ctx, accountId, workspaceId, docId });
+  lane.push({ ctx, accountId, workspaceId, docId, full: opts.full === true, automatic: opts.automatic === true });
   publish({ type: 'progress', docId, status: 'queued', progress: 0, stage: 'Waiting to start' });
   pump();
 }
@@ -185,6 +211,26 @@ interface SourceRead {
   sniff: Extract<SniffResult, { ok: true }>;
   /** Set when the document is a crawl: what it read, to store once the build succeeds. */
   crawl?: { stored: ReferenceDocCrawl; costUsd: number };
+  /** Set when the document is a wiki tree: what it read, committed once the build succeeds. */
+  wiki?: WikiRead;
+}
+
+/** A wiki tree (docs/REFERENCE-DOCS.md § Wiki sources): only the changed pages are read again. */
+async function wikiSource(job: Job, row: DocRow, report: Report, signal: AbortSignal): Promise<SourceRead> {
+  const name = WIKI_PROVIDER_NAMES[wikiStateOf(row.wiki)?.provider ?? 'confluence'];
+  report('converting', 3, `Checking ${name}`, true);
+  const read = await readWikiForBuild({
+    row,
+    full: job.full,
+    signal,
+    onProgress: (done, total) => report('converting', 3 + (5 * done) / Math.max(1, total), `Reading ${name} pages (${done} of ${total})`),
+  });
+  return { body: Buffer.from(read.markdown, 'utf8'), sniff: { ok: true, kind: 'markdown', ext: 'md' }, wiki: read };
+}
+
+/** A section's identity for the summary cache: its title, its trail and its text. */
+export function sectionHash(d: Pick<DraftSection, 'title' | 'trail' | 'body'>): string {
+  return createHash('sha256').update(d.title).update('\n\u0000\n').update(d.trail.join('\u0001')).update('\n\u0000\n').update(d.body).digest('hex');
 }
 
 type Report = ReturnType<typeof progressReporter>;
@@ -265,6 +311,7 @@ async function crawlSource(job: Job, row: DocRow, crawl: ReferenceDocCrawl, repo
 
 /** The document's bytes and their kind. A URL is fetched again; anything else reads the stored source. */
 async function readSourceFor(job: Job, row: DocRow, report: Report, signal: AbortSignal): Promise<SourceRead> {
+  if (row.sourceKind === 'wiki') return wikiSource(job, row, report, signal);
   if (row.sourceKind === 'url') {
     if (!row.sourceUrl) throw new BuildRefusal('This document has no address to read.');
     const crawl = crawlOf(row.crawl);
@@ -294,14 +341,22 @@ async function runBuild(job: Job, controller: AbortController): Promise<void> {
     publish({ type: 'done', docId, status: 'failed', error: message });
   };
   await patchDoc(accountId, docId, { buildStartedAt: new Date(), error: null });
-  report('converting', 3, row.sourceKind === 'url' ? 'Reading the page' : 'Reading the file', true);
+  report('converting', 3, row.sourceKind === 'url' || row.sourceKind === 'wiki' ? 'Reading the page' : 'Reading the file', true);
 
   const staging = join(stagingRoot(accountId, row.workspaceId), `${row.slug}-${docId}-${Date.now().toString(36)}`);
   const sectionsDir = join(staging, 'sections');
   try {
     mkdirSync(sectionsDir, { recursive: true });
-    const { body, sniff, crawl: crawled } = await readSourceFor(job, row, report, controller.signal);
-    const effective: Exclude<ReferenceDocSourceKind, 'url'> = sniff.kind;
+    const { body, sniff, crawl: crawled, wiki } = await readSourceFor(job, row, report, controller.signal);
+    // A WIKI REFRESH THAT CHANGED NOTHING (every page hash, title and place as stored): no rebuild and
+    // no model — record the check and go back to ready.
+    if (wiki && !wiki.sync.contentChanged && row.builtAt != null && !job.full) {
+      await wiki.commit();
+      await markDocIdle(accountId, docId, 'Nothing to build.');
+      publish({ type: 'done', docId, status: 'ready', error: null });
+      return;
+    }
+    const effective: Exclude<ReferenceDocSourceKind, 'url' | 'wiki'> = sniff.kind;
     let mode: BuildMode;
     let drafts: DraftSection[] = [];
     let names: string[] = [];
@@ -354,18 +409,53 @@ async function runBuild(job: Job, controller: AbortController): Promise<void> {
     }
     if (controller.signal.aborted) throw new BuildRefusal('Cancelled.');
 
+    // ---- the summary cache (wiki documents; docs/REFERENCE-DOCS.md § Wiki sources → Incremental
+    // rebuild): a section whose title, trail and text hash to a cached summary keeps it and is never
+    // summarised again; with every section cached and a cached document summary, no model runs at all.
+    // Rebuild (`full`) summarises afresh.
+    const cache = row.sourceKind === 'wiki' && !job.full && mode === 'sections' ? summaryCacheOf(row.summaryCache) : null;
+    const hashes = mode === 'sections' ? drafts.map(sectionHash) : [];
+    const kept = new Map<string, string>();
+    if (cache) hashes.forEach((h, i) => {
+      const s = cache.sections[h];
+      if (typeof s === 'string' && s !== '') kept.set(names[i]!, s);
+    });
+    const todo = names.filter((n) => !kept.has(n));
+    const needsModel = !(cache?.doc != null && todo.length === 0);
+    // ⚠ AN AUTOMATIC RUN ASKS THE BUDGET FIRST, and is SKIPPED (never queued) when over: nothing is
+    // committed, so the next check finds the same change and tries again.
+    if (needsModel && job.automatic && !(await automaticRunAllowed(ctx, accountId, 'reference_docs_refresh'))) {
+      ctx.log.info(`reference doc ${docId}: refresh skipped (over the AI budget)`);
+      const status = await markDocIdle(accountId, docId, 'Skipped: over the AI budget.');
+      publish({ type: 'done', docId, status, error: status === 'failed' ? 'Skipped: over the AI budget.' : null });
+      return;
+    }
+
     // ---- the agent ----
     report('sectioning', mode === 'pdf' ? 12 : 20, mode === 'pdf' ? 'Reading the PDF' : 'Summarising sections', true);
     const promptDoc = { title: row.title, sourceName: row.sourceUrl ?? row.sourceName, sourceKind: effective };
-    const nonce = pickReviewNonce([row.title, row.sourceName, row.sourceUrl ?? '', ...drafts.map((d) => [...d.trail, d.title].join(' '))]);
+    const nonce = pickReviewNonce([
+      row.title,
+      row.sourceName,
+      row.sourceUrl ?? '',
+      ...drafts.map((d) => [...d.trail, d.title].join(' ')),
+      ...[...kept.values()],
+    ]);
     const { runBuildAgent } = await import('./agent.js');
-    const res = await runBuildAgent({
+    const res = !needsModel
+      ? null
+      : await runBuildAgent({
       mode,
       cwd: staging,
       sectionsDir,
-      expected: names,
+      expected: kept.size > 0 ? todo : names,
       systemPrompt: mode === 'pdf' ? BUILD_PDF_SYSTEM_PROMPT : buildSectionsSystemPrompt(),
-      prompt: mode === 'pdf' ? buildPdfPrompt(promptDoc, pageCount, nonce) : buildSectionsPrompt(promptDoc, drafts, names, nonce),
+      prompt:
+        mode === 'pdf'
+          ? buildPdfPrompt(promptDoc, pageCount, nonce)
+          : kept.size > 0
+            ? buildSectionsUpdatePrompt(promptDoc, drafts, names, kept, nonce)
+            : buildSectionsPrompt(promptDoc, drafts, names, nonce),
       applyAuthEnv: REVIEW_APPLY_AUTH_ENV,
       abortController: controller,
       // Codex records its own ledger row from this (its model, US$ 0 on a ChatGPT login, its tokens).
@@ -387,17 +477,20 @@ async function runBuild(job: Job, controller: AbortController): Promise<void> {
       },
     });
     const crawlCost = crawled?.costUsd ?? 0;
-    const telemetry: Telemetry = {
-      costUsd: res.costUsd != null || crawlCost > 0 ? (res.costUsd ?? 0) + crawlCost : null,
-      inputTokens: res.inputTokens,
-      outputTokens: res.outputTokens,
-      numTurns: res.numTurns,
-      // What ran the build (provider + model id).
-      provider: res.provider,
-      model: res.model,
-    };
+    // No model ran (every section cached): the row keeps what the last build ran on and cost.
+    const telemetry: Telemetry = res
+      ? {
+          costUsd: res.costUsd != null || crawlCost > 0 ? (res.costUsd ?? 0) + crawlCost : null,
+          inputTokens: res.inputTokens,
+          outputTokens: res.outputTokens,
+          numTurns: res.numTurns,
+          // What ran the build (provider + model id).
+          provider: res.provider,
+          model: res.model,
+        }
+      : {};
     // A Codex run's row is already written (by its provider, as Codex): never a second, Claude-named one.
-    if (res.provider !== 'codex' && res.costUsd != null && res.costUsd > 0) {
+    if (res && res.provider !== 'codex' && res.costUsd != null && res.costUsd > 0) {
       await ctx
         .recordAiUsage({
           accountId,
@@ -410,30 +503,32 @@ async function runBuild(job: Job, controller: AbortController): Promise<void> {
         })
         .catch(() => {});
     }
-    if (res.aborted) return await finishFailed('Cancelled.', telemetry);
-    if (res.finish == null) return await finishFailed(res.failureReason ?? `${providerName(res.provider)} did not finish the document.`, telemetry);
+    if (res?.aborted) return await finishFailed('Cancelled.', telemetry);
+    const finish = res ? res.finish : cache?.doc ? { title: cache.doc.title || null, summary: cache.doc.summary, topics: cache.doc.topics } : null;
+    if (finish == null) return await finishFailed(res?.failureReason ?? `${providerName(res?.provider)} did not finish the document.`, telemetry);
 
     // ---- indexing ----
     report('indexing', 90, 'Building the contents', true);
     let finalDrafts: Array<DraftSection & { summary: string }>;
     if (mode === 'sections') {
       finalDrafts = drafts.map((d, i) => {
-        const rec = res.state.recorded.get(names[i]!);
-        return { ...d, title: rec?.title ? trimTitle(rec.title) : d.title, summary: rec?.summary ?? '' };
+        const rec = res?.state.recorded.get(names[i]!);
+        return { ...d, title: rec?.title ? trimTitle(rec.title) : d.title, summary: rec?.summary ?? kept.get(names[i]!) ?? '' };
       });
     } else {
-      const order = [...res.state.order, ...outstanding(res.state, readdirMd(sectionsDir))];
-      finalDrafts = draftsFromWritten(order, res.state.recorded, (f) => readFileSync(join(sectionsDir, f), 'utf8'));
+      const state = res!.state;
+      const order = [...state.order, ...outstanding(state, readdirMd(sectionsDir))];
+      finalDrafts = draftsFromWritten(order, state.recorded, (f) => readFileSync(join(sectionsDir, f), 'utf8'));
     }
-    if (finalDrafts.length === 0) return await finishFailed(`${providerName(res.provider)} wrote no sections.`, telemetry);
+    if (finalDrafts.length === 0) return await finishFailed(`${providerName(res?.provider)} wrote no sections.`, telemetry);
     if (finalDrafts.length > MAX_SECTIONS) {
       return await finishFailed(`This document is too long: ${finalDrafts.length} sections, and the limit is ${MAX_SECTIONS}.`, telemetry);
     }
-    const title = trimTitle(res.finish.title ?? convertedTitle ?? row.title) || row.title;
+    const title = trimTitle(finish.title ?? convertedTitle ?? row.title) || row.title;
     const outDir = join(staging, 'out', row.slug);
     const entries = renderDocFolder(
       outDir,
-      { slug: row.slug, title, summary: res.finish.summary, sourceLabel: row.sourceUrl ?? row.sourceName },
+      { slug: row.slug, title, summary: finish.summary, sourceLabel: row.sourceUrl ?? row.sourceName },
       finalDrafts,
     );
     const v = validateDocFolder(outDir);
@@ -444,13 +539,30 @@ async function runBuild(job: Job, controller: AbortController): Promise<void> {
     // Removed while it built: put nothing on disk.
     if ((await getDocRow(accountId, docId)) == null) return;
     installDocFolder(accountId, row.workspaceId, row.slug, outDir);
-    await saveDocBuilt(accountId, docId, { title, summary: res.finish.summary, topics: res.finish.topics, sections: entries }, telemetry);
+    await saveDocBuilt(accountId, docId, { title, summary: finish.summary, topics: finish.topics, sections: entries }, telemetry);
     if (crawled) await patchDoc(accountId, docId, { crawl: crawled.stored });
+    if (wiki) {
+      // The cache the NEXT refresh reads, then the pages and the refresh state — only now, so a failed
+      // or skipped build never advances a version.
+      const sections: ReferenceDocSummaryCache['sections'] = {};
+      if (mode === 'sections') hashes.forEach((h, i) => {
+        const s = finalDrafts[i]?.summary;
+        if (s) sections[h] = s;
+      });
+      await patchDoc(accountId, docId, { summaryCache: { v: 1, sections, doc: { title, summary: finish.summary, topics: finish.topics } } });
+      await wiki.commit();
+    }
     await writeIndex(accountId, row.workspaceId);
     publish({ type: 'done', docId, status: 'ready', error: null });
   } catch (err) {
+    // A wiki that could not be read on a REFRESH: the last version stays, and the row says why.
+    if (err instanceof WikiIdle) {
+      const status = await markDocIdle(accountId, docId, err.message);
+      publish({ type: 'done', docId, status, error: status === 'failed' ? err.message : null });
+      return;
+    }
     const message =
-      err instanceof BuildRefusal || err instanceof ConverterMissingError || err instanceof DocumentTooLongError
+      err instanceof BuildRefusal || err instanceof WikiRefusal || err instanceof ConverterMissingError || err instanceof DocumentTooLongError
         ? err.message
         : null;
     if (message == null) throw err;

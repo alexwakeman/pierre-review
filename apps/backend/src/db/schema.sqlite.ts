@@ -37,6 +37,8 @@ import type {
   SequenceDiagramMember,
   DesignDiagram,
   ReferenceDocCrawl,
+  ReferenceDocWikiState,
+  ReferenceDocSummaryCache,
   ReferenceDocSectionEntry,
   ReviewDocReference,
   ReviewPeerRead,
@@ -2055,6 +2057,9 @@ export const workspaces = sqliteTable(
     // read this workspace's reference library? NULL/false = OFF, the default; nullable with no
     // default, so no insert has to name it. The ONE reader/writer is reference-docs/store.ts.
     docsInReview: integer('docs_in_review', { mode: 'boolean' }),
+    // 0140. When this workspace's reference library was last USED (listed, read, asked, or read by a
+    // review). The wiki refresh's demand gate: only libraries used in the last 7 days are re-checked.
+    docsUsedAt: integer('docs_used_at', { mode: 'timestamp' }),
     createdAt: integer('created_at', { mode: 'timestamp' })
       .notNull()
       .default(sql`(unixepoch())`),
@@ -3730,6 +3735,12 @@ export const referenceDocs = sqliteTable(
     topics: text('topics', { mode: 'json' }).$type<string[]>(),
     // A crawl's settings + what the last build read (ReferenceDocCrawl); NULL = one page or a file.
     crawl: text('crawl_json', { mode: 'json' }).$type<ReferenceDocCrawl>(),
+    // 0140. A wiki page tree (sourceKind 'wiki'): provider, site, root page, depth and the refresh
+    // state (last check, unreachable since). NULL for every other source.
+    wiki: text('wiki_json', { mode: 'json' }).$type<ReferenceDocWikiState>(),
+    // 0140. The incremental build's summary cache: section content hash → its one-line summary, plus
+    // the document summary and topics, from the last successful build (wiki documents).
+    summaryCache: text('summary_cache_json', { mode: 'json' }).$type<ReferenceDocSummaryCache>(),
     pageCount: integer('page_count'),
     costUsd: real('cost_usd'),
     inputTokens: integer('input_tokens'),
@@ -3745,8 +3756,85 @@ export const referenceDocs = sqliteTable(
   },
   (t) => ({
     workspaceSlugUx: uniqueIndex('reference_docs_workspace_slug').on(t.accountId, t.workspaceId, t.slug),
+    // 0140. The target of reference_doc_wiki_pages' composite FK.
+    idAccountUx: uniqueIndex('reference_docs_id_account').on(t.id, t.accountId),
     workspaceAccountFk: foreignKey({
       name: 'reference_docs_workspace_account_fk',
+      columns: [t.workspaceId, t.accountId],
+      foreignColumns: [workspaces.id, workspaces.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+// ---- WIKI SOURCES (migration 0140; docs/REFERENCE-DOCS.md § Wiki sources) ----
+// reference_doc_wiki_pages — ONE row per page of a wiki document's tree (the root included): where it
+// sits in the tree, the wiki's version / last-edit time, and a hash of its CONVERTED markdown, so a
+// refresh re-reads only the pages whose version moved and rebuilds only when a hash moved. The page's
+// markdown itself is cached on disk beside the document's source. Written ONLY after a successful
+// build (or a check that found nothing to rebuild), so a failed or skipped refresh never advances it.
+// Upserted on (doc_id, page_id); `doc_id` is guarded by the named COMPOSITE FK onto
+// `reference_docs (id, account_id)` and the rows go with their document.
+export const referenceDocWikiPages = sqliteTable(
+  'reference_doc_wiki_pages',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    docId: integer('doc_id').notNull(),
+    pageId: text('page_id').notNull(),
+    parentPageId: text('parent_page_id'),
+    // 0 = the root page.
+    depth: integer('depth').notNull().default(0),
+    // Reading order within the document (0 = the root).
+    position: integer('position').notNull().default(0),
+    title: text('title').notNull(),
+    // The wiki's own page version (Confluence); NULL where the wiki has none (it has a last-edit time).
+    version: integer('version'),
+    lastEditedAt: integer('last_edited_at', { mode: 'timestamp' }),
+    // sha256 of the page's converted markdown.
+    contentHash: text('content_hash'),
+    lastFetchedAt: integer('last_fetched_at', { mode: 'timestamp' }),
+    // The last read's failure CODE for this page (its last good text is kept); NULL = fine.
+    lastError: text('last_error'),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    docPageUx: uniqueIndex('reference_doc_wiki_pages_doc_page').on(t.docId, t.pageId),
+    accountDocIdx: index('reference_doc_wiki_pages_account_doc').on(t.accountId, t.docId),
+    docAccountFk: foreignKey({
+      name: 'reference_doc_wiki_pages_doc_account_fk',
+      columns: [t.docId, t.accountId],
+      foreignColumns: [referenceDocs.id, referenceDocs.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+// workspace_wiki_credentials — a wiki credential per (workspace, provider): Confluence's site, the
+// Atlassian account email and the API token, SEALED like a tracker token (tracker/secret.ts) and
+// never returned. A Confluence page on the workspace's JIRA host is read with the Jira credential
+// instead, so most workspaces need no row here. `workspace_id` arrives in a request PATH: named
+// COMPOSITE FK onto `workspaces (id, account_id)`.
+export const workspaceWikiCredentials = sqliteTable(
+  'workspace_wiki_credentials',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    workspaceId: integer('workspace_id').notNull(),
+    // WikiProviderId.
+    provider: text('provider').notNull(),
+    siteUrl: text('site_url'),
+    authEmail: text('auth_email'),
+    authToken: text('auth_token'),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    workspaceProviderUx: uniqueIndex('workspace_wiki_credentials_workspace_provider').on(t.accountId, t.workspaceId, t.provider),
+    workspaceAccountFk: foreignKey({
+      name: 'workspace_wiki_credentials_workspace_account_fk',
       columns: [t.workspaceId, t.accountId],
       foreignColumns: [workspaces.id, workspaces.accountId],
     }).onDelete('cascade'),
