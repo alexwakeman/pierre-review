@@ -3266,7 +3266,9 @@ board.
   currency as ONE quiet line ("2 PRs changed since · daily limit reached · reviewed 52 mins ago", the
   sweeper's `waiting` through `ticketWaitWords`, the reason as the title) with Re-check beside it
   (`StoryCurrencyLine`). ⚠ The currency is said ONLY here: the Story section no longer draws its
-  CurrencyPill. The board's stack header is unchanged.
+  CurrencyPill. One changed PR is NAMED ("api#88 pushed since"): the line passes `ticketCurrency` a
+  `labelOf` (`lib/ticketReview.ts` `prLabelOf`) over the stack's open rows and its merged PRs. The
+  board's stack header is unchanged.
 - ⚠ **TWO HOSTS, ONE BODY.** The ticket TAB (`Ticket/TicketTabView.tsx`, which parses the active tab's
   ident and meta) and This Sprint's story TRAY (`Sprint/SprintStoryTray.tsx`, ident from
   `?sprintStory=`) both mount `StoryViewBody({ident, meta})`. The body reads nothing about where it is

@@ -22,7 +22,7 @@ import type {
   ClaudeTicketGap,
   ClaudeFindingStory,
 } from '@pierre-review/shared';
-import { CLAUDE_REVIEW_TICKET_MAX_CRITERIA, storedList, ticketRef } from '@pierre-review/shared';
+import { CLAUDE_REVIEW_TICKET_MAX_CRITERIA, criterionTextForMatch, storedList, ticketRef } from '@pierre-review/shared';
 import type { ReviewTicketGapReport, ReviewTicketReport } from '../../platform/contract.js';
 
 export const TICKET_SUMMARY_CHARS = 1_000;
@@ -188,5 +188,8 @@ export function ticketEntriesOf(
 export function storyMatchKey(f: { title: string; story?: ClaudeFindingStory | null }): string | null {
   if (!f.story) return null;
   const kind = /^M\d+$/.test(f.story.ref) ? 'missing' : 'criterion';
-  return `${kind}\u0000${f.title.replace(/\s+/g, ' ').trim().toLowerCase()}`;
+  // A criterion's leading "AC2: " is not part of its identity: older runs stored it in the title,
+  // newer ones drop it (reconcile.ts), and the two must stay one item (its posted state carries over).
+  const text = kind === 'criterion' ? criterionTextForMatch(f.title) : f.title;
+  return `${kind}\u0000${text.replace(/\s+/g, ' ').trim().toLowerCase()}`;
 }

@@ -178,6 +178,43 @@ describe('ticket review persistence', () => {
     expect(await persist.markTicketItemPosted(ctx, 1, again.id, { prId: pr.web!, commentId: 'c3' })).toBe(false);
   });
 
+  it("⚠ an item an older run stored as 'AC2: …' is the same item once its ref is dropped (never posted twice)", async () => {
+    // Another ticket, no members, manual: nothing the later tests count.
+    const ident = 'jira:https://acme.atlassian.net/rest/api/3#BMD-77';
+    const run = async (title: string): Promise<number> => {
+      const id = await persist.insertQueuedTicketReview(ctx, {
+        accountId: 1,
+        workspaceId: ws,
+        ident,
+        ticketKey: 'BMD-77',
+        ticketTitle: 'x',
+        ticket: null,
+        originPrId: null,
+        trigger: 'manual',
+        model: 'm',
+      });
+      await persist.markTicketReviewRunning(ctx, 1, id, { ticket: story, ticketHash: 'h', fingerprint: `f${id}`, prCount: 0, members: [] });
+      await persist.saveTicketReviewSuccess(ctx, 1, id, {
+        alignment: 'partly_aligned',
+        summary: null,
+        assessment: assessment('not_met'),
+        costUsd: null,
+        inputTokens: null,
+        outputTokens: null,
+        numTurns: 1,
+        items: [{ ref: 'AC2', status: 'not_met', title, body: 'x', ownerPrId: null, path: null, line: null }],
+      });
+      return id;
+    };
+    const old = await run('AC2 - every new error code shows mapped copy');
+    const oldItem = (await persist.getTicketReviewById(ctx, 1, old))!.items[0]!;
+    expect(await persist.markTicketItemPosted(ctx, 1, oldItem.id, { prId: pr.web!, commentId: 'c-old' })).toBe(true);
+    const next = await run('Every new error code shows mapped copy');
+    const item = (await persist.getTicketReviewById(ctx, 1, next))!.items[0]!;
+    expect(item.priorItemId).toBe(oldItem.id);
+    expect(item.posted?.commentId).toBe('c-old');
+  });
+
   it('currency inputs: current until a member pushes', async () => {
     const inputs = (await persist.getTicketStateInputs(ctx, 1, [IDENT, 'jira:x#NOPE-1'])).get(IDENT)!;
     expect(inputs.latest?.id).toBe(second);

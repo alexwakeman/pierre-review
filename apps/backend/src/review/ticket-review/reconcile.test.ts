@@ -158,7 +158,26 @@ describe('reconcileTicketReview — the summary is two plain sentences', () => {
         { text: 'AC2 - every new error code shows mapped copy', status: 'not_met', explanation: 'x' },
       ],
     });
-    expect(assessment.criteria.map((c) => c.text)).toEqual(['CSV export works', 'Every new error code shows mapped copy']);
-    expect(items.map((i) => i.title)).toEqual(['Every new error code shows mapped copy']);
+    // Never re-cased: "npm test" stays "npm test".
+    expect(assessment.criteria.map((c) => c.text)).toEqual(['CSV export works', 'every new error code shows mapped copy']);
+    expect(items.map((i) => i.title)).toEqual(['every new error code shows mapped copy']);
+  });
+
+  it("the model's OTHER numbering stays visible: a combined ref, or one the row's position differs from", () => {
+    const { assessment } = reconcileTicketReview(ticket, members, {
+      alignment: 'partly_aligned',
+      criteria: [
+        { text: 'AC1/AC8 - links work', status: 'met', deliveredBy: ['PR1'] },
+        // An unknown status is skipped, so the next row is AC2 by position, not the model's AC3.
+        { text: 'AC2: skipped', status: 'bogus' },
+        { text: 'AC3: export works', status: 'not_met', explanation: 'x' },
+        { text: 'AC3: npm test runs as two jobs', status: 'not_met', explanation: 'x' },
+      ],
+    });
+    expect(assessment.criteria.map((c) => [c.ref, c.text])).toEqual([
+      ['AC1', 'AC1/AC8 - links work'],
+      ['AC2', 'AC3: export works'],
+      ['AC3', 'npm test runs as two jobs'],
+    ]);
   });
 });

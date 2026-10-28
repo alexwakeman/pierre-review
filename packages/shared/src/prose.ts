@@ -48,16 +48,34 @@ export function storySummaryProse(text: string | null | undefined, max: number =
   return clipAtSentence(prose, max);
 }
 
+// A leading criterion ref the model wrote ("AC3: ", "AC1/AC8 - "): group 1 the first number, group 2
+// any further refs joined to it.
+const LEADING_CRITERION_REFS = /^\s*AC\s?(\d+)((?:\s*[/,&]\s*AC\s?\d+)*)\s*[:.)\-–—]\s*/i;
+
 /**
- * A criterion's text without a leading copy of its own ref ("AC3: The export …" → "The export …"):
- * the row already prints the ref, so the model's own numbering would read "AC3 AC3: …".
+ * A criterion's text without a leading copy of ITS OWN ref ("AC3: The export …" on row AC3 → "The
+ * export …"): the row already prints the ref, so it would read "AC3 AC3: …". Only a SINGLE ref equal
+ * to `ownRef` is dropped: a combined one ("AC1/AC8 - …") or a number that differs from the row's
+ * (rows are numbered by position) is the model's own numbering and stays visible. The text is never
+ * re-cased ("npm test runs …" stays as written).
  */
-export function criterionTextOnly(text: string): string {
-  const t = text.replace(/^\s*AC\s?\d+(?:\s*[/,&]\s*AC\s?\d+)*\s*[:.)\-–—]\s*/i, '');
-  if (t === text) return text;
-  if (t.trim() === '') return text;
-  // "AC3: baseline pages …" → "Baseline pages …" — a plain lower-case word only (never `npmTest`).
-  return /^[a-z][a-z-]*[\s,]/.test(t) ? t.charAt(0).toUpperCase() + t.slice(1) : t;
+export function criterionTextOnly(text: string, ownRef: string | null): string {
+  if (ownRef == null) return text;
+  const m = LEADING_CRITERION_REFS.exec(text);
+  if (m == null || m[2] !== '') return text;
+  if (`AC${Number(m[1])}`.toLowerCase() !== ownRef.replace(/\s+/g, '').toLowerCase()) return text;
+  const t = text.slice(m[0].length);
+  return t.trim() === '' ? text : t;
+}
+
+/**
+ * A criterion's text with ANY leading ref dropped, single or combined — for MATCHING only (the
+ * cross-run item key), never for display: a row an older run stored as "AC2: x" and one stored as
+ * "x" are the same item.
+ */
+export function criterionTextForMatch(text: string): string {
+  const t = text.replace(LEADING_CRITERION_REFS, '');
+  return t.trim() === '' ? text : t;
 }
 
 /**

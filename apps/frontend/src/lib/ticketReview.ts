@@ -65,6 +65,18 @@ export function memberLabel(m: Pick<TicketReviewMember, 'repo' | 'number'>): str
   return `${name}#${m.number}`;
 }
 
+/**
+ * `ticketCurrency`'s `labelOf` over the PRs a view knows ("web#412"), so one changed PR is named
+ * ("web#412 pushed since") rather than "PR pushed since". An unknown id (or repo) names nothing.
+ */
+export function prLabelOf(
+  prs: ReadonlyArray<{ prId: number; repo: string | null | undefined; number: number }>,
+): (prId: number) => string | null {
+  const byId = new Map<number, string>();
+  for (const p of prs) if (p.repo) byId.set(p.prId, memberLabel({ repo: p.repo, number: p.number }));
+  return (prId) => byId.get(prId) ?? null;
+}
+
 /** "a", "a and b", "a, b and c". */
 function joinAnd(parts: readonly string[]): string {
   if (parts.length <= 1) return parts[0] ?? '';

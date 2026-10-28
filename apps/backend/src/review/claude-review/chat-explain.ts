@@ -1,6 +1,7 @@
 import type { z as Zod } from 'zod';
 import {
   CLAUDE_REVIEW_CHAT_MAX_PINS,
+  criterionTextOnly,
   type ClaudeFinding,
   type ClaudeReviewChatExplanation,
   type ClaudeReviewChatPin,
@@ -105,8 +106,11 @@ export function storyPinLabel(
   item: Pick<TicketReviewItem, 'ref' | 'status' | 'title'>,
   ticketKey: string | null,
 ): string {
-  const head = ticketKey ? `${ticketKey} ${item.ref}` : item.ref;
-  return `${head} · ${STORY_STATUS_WORD[item.status]} · ${oneLine(item.title, LABEL_TITLE_CHARS)}`;
+  // A missing item's 'M1'… ref is internal (the reader never sees it): it is named by its title only.
+  const missing = item.status === 'missing';
+  const head = [ticketKey, missing ? null : item.ref].filter((x): x is string => x != null && x !== '').join(' ');
+  const title = oneLine(missing ? item.title : criterionTextOnly(item.title, item.ref), LABEL_TITLE_CHARS);
+  return `${head !== '' ? `${head} · ` : ''}${STORY_STATUS_WORD[item.status]} · ${title}`;
 }
 
 /** One pin, resolved from stored rows: its label and the text the model reads (fenced by the caller). */

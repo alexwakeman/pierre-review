@@ -249,7 +249,7 @@ function ItemAction({ item, review, viewedPrId }: { item: TicketReviewItem; revi
           prId={viewedPrId}
           reviewId={null}
           pinRef={{ kind: 'story_item', ticketReviewId: review.id, itemId: item.id }}
-          label={`${review.ticketKey != null ? `${review.ticketKey} ` : ''}${item.status === 'missing' ? '' : `${item.ref} · `}${item.status === 'missing' ? item.title : criterionTextOnly(item.title)}`}
+          label={`${review.ticketKey != null ? `${review.ticketKey} ` : ''}${item.status === 'missing' ? '' : `${item.ref} · `}${item.status === 'missing' ? item.title : criterionTextOnly(item.title, item.ref)}`}
         />
         )}
       </div>
@@ -293,7 +293,7 @@ export function CriterionRow({
         </span>
         <span className={`shrink-0 font-mono text-xs ${MUTED}`}>{c.ref}</span>
         <span className="min-w-0 break-words">
-          {criterionTextOnly(c.text)}
+          {criterionTextOnly(c.text, c.ref)}
           {done != null && (
             <span className={`text-xs ${MUTED}`}>
               {' · '}
@@ -321,7 +321,7 @@ export function CriterionRow({
           {TICKET_CRITERION_STATUS_LABEL[c.status]}
         </span>
         <span className={`shrink-0 font-mono text-xs leading-5 ${MUTED}`}>{c.ref}</span>
-        <span className="min-w-0 flex-1 whitespace-pre-wrap break-words font-semibold">{criterionTextOnly(c.text)}</span>
+        <span className="min-w-0 flex-1 whitespace-pre-wrap break-words font-semibold">{criterionTextOnly(c.text, c.ref)}</span>
       </div>
       {(done != null || belongs != null) && (
         <div className={`mt-0.5 text-xs ${MUTED}`}>

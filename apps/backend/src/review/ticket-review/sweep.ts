@@ -265,6 +265,8 @@ export async function runTicketReviewSweep(
     for (const [k, w] of watching) if (!byAccount.has(w.accountId)) {
       watching.delete(k);
       settleSeen.delete(k);
+      // Nothing will re-check it automatically now, so no "daily limit reached" either.
+      setTicketSweepWait(w.accountId, w.ident, null);
     }
 
     for (const [accountId, enabled] of byAccount) {
@@ -448,7 +450,15 @@ export async function runTicketReviewSweep(
         }
 
         // ---- rule 6: a push-only re-check is limited per ticket, and never takes the last slots ----
-        const pushOnly = !first && st?.latest != null && pushOnlyChange(st.latest, liveHash, live);
+        // Against the last success, OR against a newer attempt that got as far as its members (one
+        // that failed after a PR joined): else every push after a failed join-check would read as
+        // "a PR joined" again and escape the per-ticket limit.
+        const tried = attempt != null && attempt.members != null && attempt.members.length > 0 ? attempt : null;
+        const pushOnly =
+          !first &&
+          st?.latest != null &&
+          (pushOnlyChange(st.latest, liveHash, live) ||
+            (tried != null && pushOnlyChange({ ticketHash: tried.ticketHash ?? null, members: tried.members! }, liveHash, live)));
         if (pushOnly) {
           const perTicket = deps.pushRechecksPerDay ?? config.ticketReviewPushRechecksPerDay;
           if ((await countCascadeTicketReviewsSince(ctx, accountId, ident, dayStartMs)) >= perTicket) {

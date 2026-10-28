@@ -1869,19 +1869,29 @@ route strips a stale `ticket`/`tickets` key. Wire contract: [API.md](API.md) § 
   succeeded run, only heads moved) is limited twice: at most `TICKET_REVIEW_PUSH_RECHECKS_PER_DAY`
   (3, env-overridable) `cascade` rows of THAT ticket per UTC day (`countCascadeTicketReviewsSince`),
   and never the workspace cap's last slots (shared `repeatRunLimit`: all but min(5, cap/4)). A
-  ticket's first check and a PR joining, leaving or merging are held only by the cap itself.
+  ticket's first check and a PR joining, leaving or merging are held only by the cap itself. ⚠
+  "Push-only" is judged against the last success OR a NEWER attempt that got as far as its members
+  (`latestAttempt.members`): else, once the check queued for a PR joining FAILS, every later push
+  reads as "a PR joined" again and escapes both limits.
 - **The wait is said.** The sweeper keeps WHY it holds a stale ticket (`sweep-waits.ts`: `settling` /
   `ticket_limit` / `daily_limit`, in memory) and the states route serves it as
   `TicketReviewState.waiting` while the ticket is stale; the story view's header prints it beside
   "N PRs changed since" ("daily limit reached", "next update tomorrow", "update due soon"; the
-  reason is the title). Re-check (a click) is never held by any of it.
+  reason is the title). Re-check (a click) is never held by any of it. When an account has no
+  auto-enabled workspace left, the sweeper drops its watches AND their wait reasons (nothing will
+  re-check them automatically, so nothing says "daily limit reached").
 - **The summary is TWO plain sentences** (2026-10-28): how far the PRs together deliver the ticket,
   then the most important thing still left (or that nothing is) — no bullets, no criteria list, no
   headings; the criteria and missing items below carry the detail. Enforced in `reconcile.ts` by the
   shared `storySummaryProse` (only the prose before the first list / heading line, cut at a sentence
   end under 600 characters, never mid-word) — the SAME fold the SPA runs on an OLDER stored summary
-  (one sentence, then a bullet per gap). A criterion's text drops a leading copy of its own ref
-  (shared `criterionTextOnly`: "AC3: …" → "…"). The prior summary fed back to a re-run goes through
+  (one sentence, then a bullet per gap). A criterion's text drops a leading copy of ITS OWN ref
+  (shared `criterionTextOnly(text, ownRef)`: "AC3: …" on row AC3 → "…"); a combined ref ("AC1/AC8 -
+  …") or one the row's positional ref differs from is the model's own numbering and stays visible,
+  and the text is never re-cased ("npm test …" stays). ⚠ The cross-run item key (`storyMatchKey`)
+  drops ANY leading criterion ref (`criterionTextForMatch`), so an item an older run stored as
+  "AC2: x" is the same item as "x" and inherits its posting (never posted twice). Chat pins
+  (`storyPinLabel`) name a missing item by its title, never its M-code. The prior summary fed back to a re-run goes through
   the same fold.
 - **Missing items** (`missing`, refs `M1`…) are what the ticket's title or description asks for that
   no acceptance criterion covers and no PR does. A reader never sees the M-code: the story view and

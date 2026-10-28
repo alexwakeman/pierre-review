@@ -398,7 +398,8 @@ describe('one collated comment per target PR', () => {
     expect(gaps.map((g) => g.ref)).toEqual(['AC2', 'M1']);
     const out = storyGapsCommentBody({ ticketName: 'BMD-1086', headSha: 'abcdef123', gaps, notAsked: [] });
     expect(out.gaps).toBe(2);
-    expect(out.body).toContain('**AC2 · Not met:** Every error shows mapped copy');
+    // Its own ref dropped, the text never re-cased.
+    expect(out.body).toContain('**AC2 · Not met:** every error shows mapped copy');
     expect(out.body).toContain(`#### ${STORY_MISSING_HEADING}\n\n**Upload guidance copy**\nNot switched.`);
     expect(out.body).not.toMatch(/\bM1\b/);
   });

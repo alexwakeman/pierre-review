@@ -125,7 +125,7 @@ export function storyGapsCommentBody(
     const missing = g.status === 'missing';
     const head = missing
       ? `**${noMarker(storyOneLine(g.title))}**`
-      : `**${noMarker(g.ref)} · ${statusWords(g.status)[0]!.toUpperCase()}${statusWords(g.status).slice(1)}:** ${noMarker(storyOneLine(criterionTextOnly(g.title)))}`;
+      : `**${noMarker(g.ref)} · ${statusWords(g.status)[0]!.toUpperCase()}${statusWords(g.status).slice(1)}:** ${noMarker(storyOneLine(criterionTextOnly(g.title, g.ref)))}`;
     const b = block(head, g.path, g.line, g.body);
     const heading = missing && !missingHeading ? `#### ${STORY_MISSING_HEADING}` : null;
     const extra = heading != null ? heading.length + 2 : 0;

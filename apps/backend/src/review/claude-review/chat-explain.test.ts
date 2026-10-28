@@ -2,7 +2,24 @@
 // submitted card survives only where it answers a pin.
 import { describe, expect, it } from 'vitest';
 import { CLAUDE_REVIEW_CHAT_MAX_PINS } from '@pierre-review/shared';
-import { explanationsMarkdown, parsePinRefs, validateExplanations, type ResolvedPin } from './chat-explain.js';
+import { explanationsMarkdown, parsePinRefs, storyPinLabel, validateExplanations, type ResolvedPin } from './chat-explain.js';
+
+describe('storyPinLabel', () => {
+  it("a missing item never shows its 'M1' ref; a criterion drops its own leading ref", () => {
+    expect(storyPinLabel({ ref: 'M1', status: 'missing', title: 'Upload guidance copy' }, 'BMD-1086')).toBe(
+      'BMD-1086 · Not done · Upload guidance copy',
+    );
+    expect(storyPinLabel({ ref: 'M2', status: 'missing', title: 'Upload guidance copy' }, null)).toBe(
+      'Not done · Upload guidance copy',
+    );
+    expect(storyPinLabel({ ref: 'AC1', status: 'not_met', title: 'AC1: Links work' }, 'BMD-1086')).toBe(
+      'BMD-1086 AC1 · Not done · Links work',
+    );
+    expect(storyPinLabel({ ref: 'AC1', status: 'partly_met', title: 'AC1/AC8: Links work' }, null)).toBe(
+      'AC1 · Partly done · AC1/AC8: Links work',
+    );
+  });
+});
 
 describe('parsePinRefs', () => {
   it('accepts ids only, drops extra keys and collapses duplicates', () => {

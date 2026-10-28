@@ -46,6 +46,7 @@ import {
   cardTicketPills,
   refusalSentence,
   ticketCoverage,
+  prLabelOf,
   ticketCurrency,
   ticketWaitWords,
   type CoverageTone,
@@ -814,6 +815,7 @@ function StoryViewHeader({
   rollup,
   prCount,
   review,
+  prs,
 }: {
   headingId: string;
   t: NonNullable<OpenPrsStack['ticket']>;
@@ -821,7 +823,16 @@ function StoryViewHeader({
   rollup: readonly { text: string; tone: 'bad' | 'good' }[];
   prCount: number;
   review: { ident: string; state: TicketReviewState | undefined; prId: number; canCheck?: boolean } | null;
+  /** Every PR the view knows (open and merged): one changed PR is named in the currency line. */
+  prs: ReadonlyArray<{ prId: number; repoId: number | null; repoFullName: string | null; number: number }>;
 }): JSX.Element {
+  const { data: repos } = useRepos();
+  const labelOf = useMemo(() => {
+    const repoName = new Map((repos ?? []).map((r) => [r.id, r.fullName]));
+    return prLabelOf(
+      prs.map((p) => ({ prId: p.prId, number: p.number, repo: p.repoFullName ?? (p.repoId != null ? repoName.get(p.repoId) : null) })),
+    );
+  }, [prs, repos]);
   const checked = review != null && review.canCheck !== false;
   const cov = checked ? ticketCoverage(review.state) : null;
   return (
@@ -855,7 +866,7 @@ function StoryViewHeader({
           ))}
           {prCount > 0 && <li className={NEUTRAL_CHIP}>{prCountLabel(prCount)}</li>}
         </ul>
-        {checked && <StoryCurrencyLine ident={review.ident} state={review.state} prId={review.prId} />}
+        {checked && <StoryCurrencyLine ident={review.ident} state={review.state} prId={review.prId} labelOf={labelOf} />}
       </div>
     </header>
   );
@@ -866,19 +877,21 @@ function StoryCurrencyLine({
   ident,
   state,
   prId,
+  labelOf,
 }: {
   ident: string;
   state: TicketReviewState | undefined;
   prId: number;
+  labelOf: (prId: number) => string | null;
 }): JSX.Element | null {
   const ready = aiReadyFor(useAiCapabilities(), 'ticket_review');
   const start = useStartTicketReview(ident);
   const starting = useTicketReviewStarting(ident);
   const cov = ticketCoverage(state);
-  const currency = state != null ? ticketCurrency(state) : null;
+  const currency = state != null ? ticketCurrency(state, labelOf) : null;
   const running = state?.status === 'running';
   const refused = start.data?.runs.find((r) => r.ident === ident)?.refused ?? null;
-  const stale = cov != null && cov.stale && currency != null;
+  const stale =cov != null && cov.stale && currency != null;
   const why = stale ? ticketWaitWords(state?.waiting) : null;
   return (
     <div className="flex flex-wrap items-center gap-x-2 gap-y-1 sm:ml-auto">
@@ -954,6 +967,13 @@ function TicketStack({
   const rollup = showRollup ? stackRollupParts(stackRollup(stack.rows)) : [];
   // Any PR on the ticket reads its stored row; only a Jira ticket (it has an ident) has one.
   const storyPrId = t?.ident != null ? (stack.rows[0]?.pr.id ?? merged[0]?.prId ?? null) : null;
+  const knownPrs = useMemo(
+    () => [
+      ...stack.rows.map((r) => ({ prId: r.pr.id, repoId: r.pr.repoId, repoFullName: null, number: r.pr.number })),
+      ...merged.map((m) => ({ prId: m.prId, repoId: m.repoId, repoFullName: m.repoFullName, number: m.number })),
+    ],
+    [stack.rows, merged],
+  );
 
   return (
     <section
@@ -965,7 +985,7 @@ function TicketStack({
       }`}
     >
       {single && t != null ? (
-        <StoryViewHeader headingId={headingId} t={t} cat={cat} rollup={rollup} prCount={stack.rows.length} review={review} />
+        <StoryViewHeader headingId={headingId} t={t} cat={cat} rollup={rollup} prCount={stack.rows.length} review={review} prs={knownPrs} />
       ) : (
       <div className="flex flex-wrap items-start gap-x-2 gap-y-1.5 px-3 py-3">
         <div className="min-w-0 flex-1 basis-[16rem]">

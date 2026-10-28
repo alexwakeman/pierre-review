@@ -462,6 +462,78 @@ describe('one busy ticket cannot spend the day (BMD-1086)', () => {
     dailyCap = 20;
   });
 
+  it('⚠ a FAILED join-check does not let every later push escape the per-ticket limit', async () => {
+    const { eq, and } = await import('drizzle-orm');
+    const FAILS = 'jira:https://acme.atlassian.net/rest/api/3#BMD-1090';
+    // What the real lane does with a queued run that then fails: it is prepared (members written),
+    // then fails without clearing its fingerprint.
+    const prepareAndFail = async (): Promise<number> => {
+      const rows = (await db
+        .select({ id: schema.ticketReviews.id })
+        .from(schema.ticketReviews)
+        .where(and(eq(schema.ticketReviews.status, 'queued'), eq(schema.ticketReviews.ticketIdent, FAILS)))
+        .execute()) as Array<{ id: number }>;
+      for (const r of rows) {
+        const live = await fp.readLiveMembers(ctx, 1, membership[FAILS]!.map((t) => pr[t]!));
+        const h = fp.ticketHash(story(keyOf(FAILS)));
+        await persist.markTicketReviewRunning(ctx, 1, r.id, {
+          ticket: story(keyOf(FAILS)),
+          ticketHash: h,
+          fingerprint: fp.fingerprint(h, live),
+          prCount: live.length,
+          members: live.map((m) => ({ ...m, checkedOut: true })),
+        });
+        await persist.markTicketReviewFailed(ctx, 1, r.id, 'turn limit');
+      }
+      return rows.length;
+    };
+    await endQueuedRuns();
+    const fresh = new Date(at(290));
+    await addPr('f1', repoIds[1]!, fresh);
+    await addPr('f2', repoIds[2]!, fresh);
+    membership[FAILS] = ['f1', 'f2'];
+    await seedCurrentRun(FAILS);
+    sweep._resetTicketSweepForTest();
+    await sweep.runTicketReviewSweep(ctx, at(300), deps());
+    await sweep.runTicketReviewSweep(ctx, at(307), deps());
+    await endQueuedRuns();
+    dailyCap = 200;
+    const limited = (): import('./sweep.js').TicketSweepDeps => ({ ...deps(), pushRechecksPerDay: 2 });
+
+    // Two PRs join; the check queued for that fails after it was prepared.
+    await addPr('f3', repoIds[0]!, new Date(at(310)));
+    await addPr('f4', repoIds[3]!, new Date(at(310)));
+    membership[FAILS] = ['f1', 'f2', 'f3', 'f4'];
+    await sweep.runTicketReviewSweep(ctx, at(310), limited());
+    await sweep.runTicketReviewSweep(ctx, at(316), limited());
+    expect(await prepareAndFail()).toBe(1);
+
+    // Every later push is push-only against that attempt's members: the limit (2 cascade rows of
+    // this ticket today, the failed join-check included) holds after one more.
+    let queued = 0;
+    let t = 320;
+    for (let i = 1; i <= 5; i += 1) {
+      await push('f1', `h_f1_${i}`);
+      await sweep.runTicketReviewSweep(ctx, at(t), limited());
+      const r = await sweep.runTicketReviewSweep(ctx, at(t + 6), limited());
+      queued += r.queued.filter((q) => q.ident === FAILS).length;
+      await prepareAndFail();
+      t += 7;
+    }
+    expect(queued).toBe(1);
+    const waits = await import('./sweep-waits.js');
+    expect(waits.ticketSweepWait(1, FAILS)).toBe('ticket_limit');
+    dailyCap = 20;
+  });
+
+  it('switching auto review off everywhere drops the wait reason with the watch', async () => {
+    const waits = await import('./sweep-waits.js');
+    const FAILS = 'jira:https://acme.atlassian.net/rest/api/3#BMD-1090';
+    expect(waits.ticketSweepWait(1, FAILS)).toBe('ticket_limit');
+    await sweep.runTicketReviewSweep(ctx, at(400), { ...deps(), roster: async () => [] });
+    expect(waits.ticketSweepWait(1, FAILS)).toBeNull();
+  });
+
   it('pushOnlyChange: only heads moved', () => {
     const m = (prId: number, state: 'open' | 'merged' = 'open', headSha = 'a') => ({ prId, headSha, state });
     const last = { ticketHash: 'h', members: [m(1), m(2)] };

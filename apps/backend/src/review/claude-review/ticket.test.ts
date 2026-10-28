@@ -217,5 +217,12 @@ describe('legacy story findings — reading and posting', () => {
       storyMatchKey({ title: 'x', story: { index: 0, ref: 'M1' } }),
     );
     expect(storyMatchKey({ title: 'x' })).toBeNull();
+    // A leading criterion ref is not part of the identity (older rows stored it in the title).
+    expect(storyMatchKey({ title: 'AC2 - every code is mapped', story: { index: 1, ref: 'AC2' } })).toBe(
+      storyMatchKey({ title: 'Every code is mapped', story: { index: 1, ref: 'AC2' } }),
+    );
+    expect(storyMatchKey({ title: 'AC1/AC8: links work', story: { index: 0, ref: 'AC1' } })).toBe(
+      storyMatchKey({ title: 'links work', story: { index: 0, ref: 'AC1' } }),
+    );
   });
 });

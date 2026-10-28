@@ -833,7 +833,16 @@ export interface TicketStateInputs {
   runningRunId: number | null;
   // The newest run of any status (a refused or failed attempt after the last success included):
   // the sweeper compares its fingerprint so it does not re-try identical inputs.
-  latestAttempt: { id: number; status: TicketReviewStatus; fingerprint: string | null; refused: string | null } | null;
+  // `ticketHash` + `members` are read only when the attempt is NEWER than the latest success (the
+  // sweeper's push-only rule compares against them); `members` is empty when it never got prepared.
+  latestAttempt: {
+    id: number;
+    status: TicketReviewStatus;
+    fingerprint: string | null;
+    refused: string | null;
+    ticketHash?: string | null;
+    members?: FingerprintMember[];
+  } | null;
 }
 
 /** Batched: the latest succeeded run (+ members), the in-flight run and the newest attempt, per ident. */
@@ -848,11 +857,22 @@ export async function getTicketStateInputs(
     latestRowsByIdent(ctx, accountId, idents, ['queued', 'running']),
     latestRowsByIdent(ctx, accountId, idents, null),
   ]);
-  const memberRows = await readMembers(ctx, accountId, [...succeeded.values()].map((r) => r.id));
+  // A newer attempt than the latest success (it failed, was refused or was cancelled) reads its own
+  // members too.
+  const newerAttempts = [...any.values()].filter((a) => a.id > (succeeded.get(a.ticketIdent)?.id ?? 0));
+  const memberRows = await readMembers(ctx, accountId, [
+    ...[...succeeded.values()].map((r) => r.id),
+    ...newerAttempts.map((r) => r.id),
+  ]);
+  const membersOf = (runId: number): FingerprintMember[] =>
+    memberRows
+      .filter((m) => m.ticketReviewId === runId)
+      .map((m) => ({ prId: m.prId, headSha: m.headSha, state: m.prState }));
   for (const ident of new Set(idents)) {
     const s = succeeded.get(ident);
     const run = live.get(ident);
     const a = any.get(ident);
+    const newer = a != null && a.id > (s?.id ?? 0);
     out.set(ident, {
       latest:
         s != null
@@ -863,14 +883,20 @@ export async function getTicketStateInputs(
               alignment: asAlignment(s.alignment),
               assessment: s.assessment ?? null,
               completedAt: asDate(s.completedAt),
-              members: memberRows
-                .filter((m) => m.ticketReviewId === s.id)
-                .map((m) => ({ prId: m.prId, headSha: m.headSha, state: m.prState })),
+              members: membersOf(s.id),
             }
           : null,
       runningRunId: run?.id ?? null,
       latestAttempt:
-        a != null ? { id: a.id, status: a.status, fingerprint: a.fingerprint, refused: a.refused } : null,
+        a != null
+          ? {
+              id: a.id,
+              status: a.status,
+              fingerprint: a.fingerprint,
+              refused: a.refused,
+              ...(newer ? { ticketHash: a.ticketHash, members: membersOf(a.id) } : {}),
+            }
+          : null,
     });
   }
   return out;

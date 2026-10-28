@@ -11,7 +11,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { STORY_MISSING_HEADING, criterionTextOnly, storySummaryProse } from '@pierre-review/shared';
-import { ticketWaitWords } from '../src/lib/ticketReview.js';
+import { prLabelOf, ticketCurrency, ticketWaitWords } from '../src/lib/ticketReview.js';
 import { autoSkippedLine } from '../src/lib/sequenceDiagrams.js';
 
 const src = (rel: string): string => readFileSync(join(import.meta.dirname, '../src', rel), 'utf8');
@@ -41,13 +41,16 @@ describe('the summary', () => {
   });
 
   it("drops a criterion's own leading ref", () => {
-    expect(criterionTextOnly('AC1: "View baseline details" links to the parent')).toBe('"View baseline details" links to the parent');
-    expect(criterionTextOnly('AC3: baseline pages render')).toBe('Baseline pages render');
-    expect(criterionTextOnly('AC1/AC8 - links work')).toBe('Links work');
-    expect(criterionTextOnly('AC7: degraded-habitat, watercourse refusals')).toBe('Degraded-habitat, watercourse refusals');
-    expect(criterionTextOnly('AC4: npmTest runs')).toBe('npmTest runs');
-    expect(criterionTextOnly('npmTest runs')).toBe('npmTest runs');
-    expect(criterionTextOnly('AC2:')).toBe('AC2:');
+    expect(criterionTextOnly('AC1: "View baseline details" links to the parent', 'AC1')).toBe('"View baseline details" links to the parent');
+    // Never re-cased.
+    expect(criterionTextOnly('AC3: baseline pages render', 'AC3')).toBe('baseline pages render');
+    expect(criterionTextOnly('AC10: npm test runs as two jobs', 'AC10')).toBe('npm test runs as two jobs');
+    // A combined ref, or one that is not the row's own, is the model's numbering: kept.
+    expect(criterionTextOnly('AC1/AC8 - links work', 'AC1')).toBe('AC1/AC8 - links work');
+    expect(criterionTextOnly('AC5: export works', 'AC4')).toBe('AC5: export works');
+    expect(criterionTextOnly('npmTest runs', 'AC4')).toBe('npmTest runs');
+    expect(criterionTextOnly('AC2:', 'AC2')).toBe('AC2:');
+    expect(criterionTextOnly('AC2: x', null)).toBe('AC2: x');
   });
 });
 
@@ -78,6 +81,19 @@ describe('the story view wiring', () => {
     expect(cards).toContain('<StoryViewHeader');
     const section = src('components/Activity/TicketStorySection.tsx');
     expect(section).not.toContain('<CurrencyPill');
+    // The header names the one PR that changed, as the Story card's pill did.
+    expect(cards).toContain('ticketCurrency(state, labelOf)');
+  });
+
+  it('one changed PR is named in the currency line', () => {
+    const labelOf = prLabelOf([
+      { prId: 1, repo: 'acme/api', number: 88 },
+      { prId: 2, repo: 'acme/web', number: 412 },
+      { prId: 3, repo: null, number: 5 },
+    ]);
+    const stale = { status: 'stale' as const, staleBecause: ['pr_pushed' as const], changedPrIds: [1], memberCount: 3 };
+    expect(ticketCurrency(stale, labelOf)?.label).toBe('api#88 pushed since');
+    expect(ticketCurrency({ ...stale, changedPrIds: [3] }, labelOf)?.label).toBe('PR pushed since');
   });
 
   it('missing items: a plain heading, a title per item, no M-code on screen', () => {

@@ -177,8 +177,13 @@ export function reconcileTicketReview(
     for (const c of reported.criteria ?? []) {
       if (criteria.length >= CLAUDE_REVIEW_TICKET_MAX_CRITERIA) break;
       if (!c || typeof c.status !== 'string' || !STATUSES.has(c.status)) continue;
-      // The row prints its own ref, so a copy the model led with ("AC3: …") is dropped.
-      const text = clip(typeof c.text === 'string' ? criterionTextOnly(c.text) : null, TICKET_CRITERION_TEXT_CHARS);
+      // The row prints its own ref, so a copy of THAT ref the model led with ("AC3: …" on row AC3) is
+      // dropped; any other numbering it wrote ("AC1/AC8 - …", or a number the row's position differs
+      // from) stays visible.
+      const text = clip(
+        typeof c.text === 'string' ? criterionTextOnly(c.text, criterionRef(criteria.length)) : null,
+        TICKET_CRITERION_TEXT_CHARS,
+      );
       if (!text) continue;
 
       const evidence: TicketEvidence[] = [];
