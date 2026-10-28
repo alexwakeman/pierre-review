@@ -13,9 +13,11 @@ import { config } from '../config.js';
 //       <slug>/sections/NN-<name>.md
 //     sources/<slug>/           the original upload (for Rebuild); never handed to the chat agent
 //     staging/<slug>-<n>/       one build's working directory, removed when the build ends
+//     .owner                    this database's id (owner.ts) — the janitor's proof of ownership
 //
-// `docsDir` is config.docsDir (`~/.limn/docs`, LIMN_DOCS_DIR overrides). Tests point it elsewhere
-// through `setDocsRootForTest` and never touch the real one.
+// `docsDir` is config.docsDir: ONE ROOT PER DATABASE (data-dir.ts `defaultDocsDir` — `~/.limn/docs`
+// for the installed CLI's database, `~/.limn/docs/db-<hash>` for any other), LIMN_DOCS_DIR overrides.
+// Tests point it elsewhere through `setDocsRootForTest` and never touch the real one.
 
 let rootOverride: string | null = null;
 
@@ -32,6 +34,16 @@ const vitestRoot = (): string | null =>
 
 export function docsRoot(): string {
   return resolve(rootOverride ?? vitestRoot() ?? config.docsDir);
+}
+
+/**
+ * The root every database shared before the per-database split, to move this database's own
+ * folders out of once (owner.ts `migrateLegacyDocs`). Null when LIMN_DOCS_DIR is set, and ALWAYS null
+ * under a test root — a suite never reaches the real one.
+ */
+export function legacyDocsRoot(): string | null {
+  if (rootOverride != null || vitestRoot() != null || !config.legacyDocsDir) return null;
+  return resolve(config.legacyDocsDir);
 }
 
 const positiveInt = (n: number): number => {

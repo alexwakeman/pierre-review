@@ -22,6 +22,7 @@ import { AGENTIC_AI_ENABLED } from '../review/claude-review/manager.js';
 import { CONVERSATION_ID, DocsChatError, askDocs } from './chat.js';
 import { pdfPageCount, sniffUpload } from './convert.js';
 import { readIndex, readLibraryFile, removeDocFiles, saveSource, writeIndex } from './library.js';
+import { loadDocsOwner } from './owner.js';
 import { cancelBuild, enqueueBuild, subscribeDocBuild } from './manager.js';
 import { parseLibraryPath, uniqueDocSlug } from './paths.js';
 import {
@@ -203,6 +204,8 @@ export function registerReferenceDocsRoutes(app: FastifyInstance, ctx: AgentCont
         byteSize: body.length,
         pageCount,
       });
+      // The `.owner` marker goes in with the first file (owner.ts): know this database's id first.
+      await loadDocsOwner().catch(() => null);
       try {
         saveSource(accountId, workspaceId, row.slug, body, sniff.ext);
       } catch (err) {

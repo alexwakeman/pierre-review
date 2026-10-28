@@ -80,7 +80,13 @@ out (§ The Codex CLI). **`limn ml install`** downloads the bot-comment severity
 **The data directory is `~/.limn`** (`data-dir.ts`; `LIMN_DATA_DIR` overrides; `config.dataDir`).
 It holds the CLI's DB, the clone cache (`CLONE_DIR` overrides), `config.json` (the per-review
 budget), `ai-runtime/` and `codex/` (Limn's own Codex home: its sign-in, `config.toml` and run
-records; never the reader's `~/.codex`). ⚠ **The move from `~/.pierre-review` is ONE `renameSync`, and it NEVER
+records; never the reader's `~/.codex`), and `docs/` — the reference-docs libraries, ONE ROOT PER
+DATABASE (`LIMN_DOCS_DIR` overrides): the CLI's own DB uses `docs/` itself, any other DB (`pnpm dev`,
+a worktree, `--db`) `docs/db-<hash of its path>/`, and every workspace folder carries an `.owner`
+marker the janitor checks ([REFERENCE-DOCS.md](REFERENCE-DOCS.md) § Ownership). ⚠ The clone cache
+is still SHARED by every backend on the machine (`pnpm dev` and the CLI both default to `clones/`);
+it holds no data a database owns, but a second process's boot sweep drops every
+`refs/pierre/conflict/*` and so breaks a resolver session open in the first. ⚠ **The move from `~/.pierre-review` is ONE `renameSync`, and it NEVER
 CLOBBERS**: run by the CLI before it picks the DB path and again (a no-op by then) at the top of
 `start()` for `pnpm dev`. An existing `~/.limn` means nothing moves and the old directory is left
 as it is; an explicit `LIMN_DATA_DIR` is never migrated into. No copy-then-delete exists, on

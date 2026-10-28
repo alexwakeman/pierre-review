@@ -9,9 +9,12 @@
 //      composite FK; its settings route is a 404.
 //   4. The chat: the answer's citations are only links to real files of the library.
 //   5. Remove: deletes the files and rewrites INDEX.md. Erasure deletes the account's files.
+//   6. Ownership (owner.ts): a workspace folder carries this database's id; two databases sharing
+//      one root never delete each other's folders; an unmarked folder is left alone; the one-time
+//      move out of the old shared root.
 //
 //   DATABASE_URL=<scratch> pnpm --filter @pierre-review/backend test reference-docs-db
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -297,5 +300,134 @@ describe('erasure', () => {
     await eraseAccountData(2);
     expect(existsSync(join(docsDir, '2'))).toBe(false);
     expect(existsSync(join(docsDir, '1'))).toBe(true);
+  });
+});
+
+describe('ownership — two databases never delete each other’s library', () => {
+  // A workspace folder with one built document (library + source), marked by `owner` (or unmarked).
+  const seed = (root: string, acct: number, ws: number, slugs: string[], owner: string | null): string => {
+    const wsDir = join(root, String(acct), String(ws));
+    for (const slug of slugs) {
+      mkdirSync(join(wsDir, 'library', slug, 'sections'), { recursive: true });
+      writeFileSync(join(wsDir, 'library', slug, 'CONTENTS.md'), `# ${slug}\n`);
+      mkdirSync(join(wsDir, 'sources', slug), { recursive: true });
+      writeFileSync(join(wsDir, 'sources', slug, 'source.md'), `# ${slug}\n`);
+    }
+    mkdirSync(join(wsDir, 'library'), { recursive: true });
+    writeFileSync(join(wsDir, 'library', 'INDEX.md'), '# Index\n');
+    if (owner) writeFileSync(join(wsDir, '.owner'), `${owner}\n`);
+    return wsDir;
+  };
+
+  it('marks a workspace folder with this database’s id when it is created', async () => {
+    const { getInstanceId } = await import('../db/instance-id.js');
+    const id = await getInstanceId();
+    expect(id).toMatch(/^[0-9a-f-]{36}$/);
+    expect(await getInstanceId()).toBe(id);
+    expect(readFileSync(join(docsDir, '1', String(wsA), '.owner'), 'utf8').trim()).toBe(id);
+  });
+
+  it('two database ids sharing one root: neither sweep deletes the other’s folders', async () => {
+    const { sweepDocsRoot } = await import('./library.js');
+    const root = mkdtempSync(join(tmpdir(), 'limn-shared-docs-'));
+    try {
+      // The SAME account/workspace numbers in both databases — the collision that wiped a library.
+      const a = seed(root, 1, 3, ['handbook'], 'db-A');
+      const b = seed(root, 1, 4, ['runbook'], 'db-B');
+      const rowsA = [{ accountId: 1, workspaceId: 3, slug: 'handbook' }];
+      const rowsB = [{ accountId: 1, workspaceId: 4, slug: 'runbook' }];
+      const ra = sweepDocsRoot(root, rowsA, 'db-A');
+      expect(ra).toMatchObject({ removed: 0, leftForeign: ['1/4'] });
+      const rb = sweepDocsRoot(root, rowsB, 'db-B');
+      expect(rb).toMatchObject({ removed: 0, leftForeign: ['1/3'] });
+      expect(existsSync(join(a, 'library', 'handbook', 'CONTENTS.md'))).toBe(true);
+      expect(existsSync(join(b, 'library', 'runbook', 'CONTENTS.md'))).toBe(true);
+      // A database with NO rows at all still leaves the other's folders alone.
+      expect(sweepDocsRoot(root, [], 'db-C')).toMatchObject({ removed: 0 });
+      expect(existsSync(join(a, 'sources', 'handbook', 'source.md'))).toBe(true);
+      expect(existsSync(join(b, 'sources', 'runbook', 'source.md'))).toBe(true);
+      // Its own folders are still cleaned: a deleted document's folder goes, a kept one stays.
+      seed(root, 1, 3, ['old-doc'], null);
+      expect(sweepDocsRoot(root, rowsA, 'db-A').removed).toBe(2);
+      expect(existsSync(join(a, 'library', 'old-doc'))).toBe(false);
+      expect(existsSync(join(a, 'library', 'handbook'))).toBe(true);
+      // And a workspace of its own with no rows left is removed whole.
+      expect(sweepDocsRoot(root, [], 'db-A').removed).toBe(2);
+      expect(existsSync(a)).toBe(false);
+      expect(existsSync(b)).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('an unmarked folder is left alone, documents and INDEX.md alike', async () => {
+    const { sweepDocsRoot } = await import('./library.js');
+    const root = mkdtempSync(join(tmpdir(), 'limn-unmarked-docs-'));
+    try {
+      const legacy = seed(root, 1, 3, ['handbook'], null);
+      const indexOnly = seed(root, 1, 5, [], null);
+      const r = sweepDocsRoot(root, [], 'db-A');
+      expect(r).toEqual({ removed: 0, leftUnowned: ['1/3'], leftForeign: [] });
+      expect(existsSync(join(legacy, 'library', 'handbook', 'CONTENTS.md'))).toBe(true);
+      expect(existsSync(join(legacy, 'sources', 'handbook', 'source.md'))).toBe(true);
+      expect(existsSync(join(indexOnly, 'library', 'INDEX.md'))).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('workspace delete and account erase skip a folder another database owns', async () => {
+    const { removeWorkspaceDocs, removeAccountDocs } = await import('./library.js');
+    const foreign = seed(docsDir, 7, 70, ['theirs'], 'someone-else');
+    removeWorkspaceDocs(7, 70);
+    expect(existsSync(join(foreign, 'library', 'theirs'))).toBe(true);
+    removeAccountDocs(7);
+    expect(existsSync(join(foreign, 'library', 'theirs'))).toBe(true);
+    rmSync(join(docsDir, '7'), { recursive: true, force: true });
+  });
+
+  it('the one-time move out of the shared root takes only what is provably this database’s', async () => {
+    const { migrateLegacyDocs } = await import('./owner.js');
+    const legacyRoot = mkdtempSync(join(tmpdir(), 'limn-legacy-docs-'));
+    const root = join(legacyRoot, 'db-0123456789ab');
+    try {
+      const rows = [
+        { accountId: 1, workspaceId: 3, slug: 'handbook' },
+        { accountId: 1, workspaceId: 3, slug: 'faq' },
+        { accountId: 1, workspaceId: 4, slug: 'runbook' },
+        { accountId: 1, workspaceId: 6, slug: 'guide' },
+        { accountId: 1, workspaceId: 8, slug: 'notes' },
+      ];
+      seed(legacyRoot, 1, 3, ['handbook', 'faq'], null); // unmarked, every folder ours → moves
+      seed(legacyRoot, 1, 4, ['runbook', 'not-ours'], null); // unmarked, a stranger in it → stays
+      seed(legacyRoot, 1, 6, ['guide'], 'other-db'); // another database's → stays
+      seed(legacyRoot, 1, 8, ['notes'], 'me'); // ours by marker → moves
+      seed(legacyRoot, 1, 9, ['unrelated'], null); // no row here at all → never looked at
+      const r = migrateLegacyDocs({ legacyRoot, root, rows, me: 'me' });
+      expect(r.moved.sort()).toEqual(['1/3', '1/8']);
+      expect(r.left).toEqual(
+        expect.arrayContaining([
+          { key: '1/4', reason: 'unproven' },
+          { key: '1/6', reason: 'foreign_owner' },
+        ]),
+      );
+      expect(existsSync(join(root, '1', '3', 'library', 'faq', 'CONTENTS.md'))).toBe(true);
+      expect(readFileSync(join(root, '1', '3', '.owner'), 'utf8').trim()).toBe('me');
+      expect(existsSync(join(legacyRoot, '1', '3'))).toBe(false);
+      expect(existsSync(join(root, '1', '8', 'sources', 'notes', 'source.md'))).toBe(true);
+      expect(existsSync(join(legacyRoot, '1', '4', 'library', 'runbook'))).toBe(true);
+      expect(existsSync(join(legacyRoot, '1', '6', 'library', 'guide'))).toBe(true);
+      expect(existsSync(join(legacyRoot, '1', '9', 'library', 'unrelated'))).toBe(true);
+      // Once: a second boot moves nothing, and never clobbers a folder already in the new root.
+      seed(legacyRoot, 1, 3, ['handbook'], null);
+      expect(migrateLegacyDocs({ legacyRoot, root, rows, me: 'me' }).moved).toEqual([]);
+      expect(existsSync(join(root, '1', '3', 'library', 'faq', 'CONTENTS.md'))).toBe(true);
+      // The old shared root's own janitor (the installed CLI's) never enters the db-<hash> folder.
+      const { sweepDocsRoot } = await import('./library.js');
+      sweepDocsRoot(legacyRoot, [], 'cli-db');
+      expect(existsSync(join(root, '1', '3', 'library', 'faq'))).toBe(true);
+    } finally {
+      rmSync(legacyRoot, { recursive: true, force: true });
+    }
   });
 });

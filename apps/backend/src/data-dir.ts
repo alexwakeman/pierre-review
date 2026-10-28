@@ -30,6 +30,7 @@
 // user's history stranded. Instead the next boot simply tries the move again.
 //
 // No imports outside `node:*`, so cli.ts can load it before config.ts reads the environment.
+import { createHash } from 'node:crypto';
 import { existsSync, renameSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { isAbsolute, join, relative, resolve } from 'node:path';
@@ -64,7 +65,27 @@ export type DataDirMigration =
     };
 
 /** The database file the CLI and the server open by default (the name predates the rename). */
-const DB_FILE = 'pierre-review.sqlite';
+export const DB_FILE = 'pierre-review.sqlite';
+
+/**
+ * THE REFERENCE-DOCS ROOT FOR ONE DATABASE (when LIMN_DOCS_DIR is not set). ⚠ Two databases never
+ * share one: each one's boot janitor deletes every docs folder its own rows do not account for, so a
+ * shared root let a second backend (a worktree's `pnpm dev`, the installed CLI) wipe the first one's
+ * library (docs/REFERENCE-DOCS.md § On disk).
+ *
+ *   - The data directory's own database (`<dataDir>/pierre-review.sqlite`, the installed CLI's
+ *     default) keeps `<dataDir>/docs` — where every installed library already is; nothing moves.
+ *   - Any other database (`pnpm dev`'s `apps/backend/data/pierre-review.sqlite`, a `--db`, a
+ *     DATABASE_URL) gets `<dataDir>/docs/db-<12 hex of sha256(absolute DB path)>`. The `db-` prefix
+ *     keeps it non-numeric, so the default root's janitor — which only walks `<accountId>` folders,
+ *     in this version and every earlier one — never enters it.
+ */
+export function defaultDocsDir(dbPath: string, dataDir: string): string {
+  const abs = resolve(dbPath);
+  const root = join(dataDir, 'docs');
+  if (abs === join(resolve(dataDir), DB_FILE)) return root;
+  return join(root, `db-${createHash('sha256').update(abs).digest('hex').slice(0, 12)}`);
+}
 
 function isInside(dir: string, path: string): boolean {
   const rel = relative(dir, path);
