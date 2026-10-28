@@ -1,9 +1,11 @@
 import { and, desc, eq, inArray, isNotNull } from 'drizzle-orm';
 import {
   TICKET_REVIEW_MAX_PRS,
+  isTrackerIdent,
   parseTicketIdent,
   storedList,
   type ClaudeReviewTicket,
+  type TicketComment,
   type TicketReviewRefusal,
 } from '@pierre-review/shared';
 import type { AgentContext } from '../agent-context.js';
@@ -55,6 +57,17 @@ export async function jiraStoryFor(
     return await getTicketSource().ticketStory(accountId, ident);
   } catch {
     return null;
+  }
+}
+
+/** The PEOPLE's comments on a tracker ticket, oldest first ([] for a pasted story, none stored, or any
+ *  failure). Never part of the story or its hash (docs/TRACKERS.md § Ticket comments). */
+export async function ticketCommentsFor(accountId: number, ident: string): Promise<TicketComment[]> {
+  if (!isTrackerIdent(parseTicketIdent(ident))) return [];
+  try {
+    return await getTicketSource().ticketComments(accountId, ident);
+  } catch {
+    return [];
   }
 }
 

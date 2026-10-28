@@ -89,6 +89,8 @@ export interface TicketReviewRow {
   assessment: TicketAssessment | null;
   // What auto-posting did with this run (migration 0087 / pg 0074). Absent on older reads.
   autoPost?: TicketAutoPostRecord | null;
+  // The people comments the run was given (migration 0143). Absent on older reads / test schemas.
+  commentsSeen?: { ids: string[]; count: number; hash: string } | null;
 }
 
 /** The stored auto-post record → the wire. null for anything malformed. */
@@ -216,6 +218,9 @@ export async function markTicketReviewRunning(
     fingerprint: string;
     prCount: number;
     members: readonly PreparedMember[];
+    /** The people comments the run is given (docs/TRACKERS.md § Ticket comments); null = not a
+     *  tracker ticket. Absent = leave the column as it is. Never part of the fingerprint. */
+    commentsSeen?: { ids: string[]; count: number; hash: string } | null;
   },
 ): Promise<void> {
   const { tr, trm } = tables(ctx);
@@ -230,6 +235,7 @@ export async function markTicketReviewRunning(
         ticketHash: p.ticketHash,
         fingerprint: p.fingerprint,
         prCount: p.prCount,
+        ...(p.commentsSeen !== undefined ? { commentsSeen: p.commentsSeen } : {}),
         startedAt: new Date(),
       })
       .where(and(eq(tr.id, id), eq(tr.accountId, accountId)))
@@ -829,6 +835,8 @@ export interface TicketStateInputs {
     assessment: TicketAssessment | null;
     completedAt: Date | null;
     members: FingerprintMember[];
+    /** The people comments the run was given (null = before comments were read). */
+    commentsSeen?: { ids: string[]; count: number; hash: string } | null;
   } | null;
   runningRunId: number | null;
   // The newest run of any status (a refused or failed attempt after the last success included):
@@ -884,6 +892,7 @@ export async function getTicketStateInputs(
               assessment: s.assessment ?? null,
               completedAt: asDate(s.completedAt),
               members: membersOf(s.id),
+              commentsSeen: s.commentsSeen ?? null,
             }
           : null,
       runningRunId: run?.id ?? null,

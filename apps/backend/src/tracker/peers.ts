@@ -12,6 +12,8 @@ import {
 import type { TrackerContext } from './context.js';
 import { resolvePrTickets, storyFromRow } from './stories.js';
 import { hasContent, type StoredTicketRow } from './store.js';
+import { peopleComments, readTicketComments, toWireComment } from './comments.js';
+import type { TicketComment } from '@pierre-review/shared';
 
 // TICKET PEERS — the tracker's half of core's TICKET REVIEW (one review per ticket, across every PR
 // that names it; review/ticket-review/). Moved from the plugin (jira/ticket-peers.ts) at apiVersion
@@ -30,6 +32,10 @@ import { hasContent, type StoredTicketRow } from './store.js';
 //   ticketMembers(account, ident)      every PR on that ticket: this account, the SAME site, ANY
 //                                      workspace, state 'ok'. Merged PRs stay; core decides open /
 //                                      merged / closed from `pull_requests`.
+//   ticketComments(account, ident)     the PEOPLE's comments on the ticket (bots out), oldest first —
+//                                      what the ticket review is given and the story view shows.
+//                                      ⚠ Never part of the story or its hash (docs/TRACKERS.md §
+//                                      Ticket comments).
 //   listChangedTicketIdents(account, since)
 //                                      tickets whose membership or story text moved since then
 //                                      (`changed_at`, kept by ./store.ts).
@@ -102,6 +108,22 @@ export async function ticketStory(
   } catch (err) {
     ctx.log.warn({ accountId, code: codeOf(err) }, 'ticket review: ticket story not read');
     return null;
+  }
+}
+
+export async function ticketComments(
+  ctx: TrackerContext,
+  accountId: number,
+  ident: string,
+): Promise<TicketComment[]> {
+  const parsed = parseTicketIdent(ident);
+  if (!isTrackerIdent(parsed)) return [];
+  try {
+    const row = trackerTicketRow(parsed);
+    return peopleComments(await readTicketComments(ctx, accountId, row)).map(toWireComment);
+  } catch (err) {
+    ctx.log.warn({ accountId, code: codeOf(err) }, 'ticket review: ticket comments not read');
+    return [];
   }
 }
 

@@ -1,5 +1,7 @@
 import {
+  isAutomationCommentName,
   isBlockingRelation,
+  TICKET_COMMENTS_KEPT,
   TICKET_LINK_BLOCKERS_MAX,
   TICKET_LINK_RELATION_MAX,
   TICKET_LINK_TITLE_MAX,
@@ -11,6 +13,7 @@ import { extractAcCandidates } from './candidates.js';
 import { JiraFetchError, jiraGetJson, type JiraFetchPolicy, type JiraTransport } from './fetch.js';
 import { fieldValueToText, jiraWikiToMarkdown } from './text.js';
 import { ticketDateFields, trackerDate } from '../dates.js';
+import type { FetchedTicketComment } from '../types.js';
 
 // The Jira REST v2 calls Limn makes — exactly two: the field list (the Settings connection check)
 // and one issue with every field (title, description, issue type, status, assignee and the
@@ -149,6 +152,9 @@ export interface JiraIssueText {
   // `created` / `resolutiondate` (../dates.ts: undefined = not in the answer, null = none).
   issueCreatedAt?: Date | null;
   issueResolvedAt?: Date | null;
+  // The comments (`fields.comment`, or the comment list read when that was cut short); undefined when
+  // neither answered (the stored comments stand).
+  comments?: FetchedTicketComment[];
 }
 
 const STATUS_CATEGORIES: readonly string[] = ['new', 'indeterminate', 'done'];
@@ -248,6 +254,70 @@ export function isTicketKey(key: string): boolean {
 const asRecord = (v: unknown): Record<string, unknown> | undefined =>
   typeof v === 'object' && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : undefined;
 
+// ---- comments ----
+
+/**
+ * One Jira comment → the provider-neutral comment, or null when it is unusable (no id or date). The
+ * body is wiki markup on v2 (rewritten to markdown) or an ADF document (flattened). An AUTOMATION is
+ * Jira Cloud's `accountType: 'app'` (Automation for Jira, every Connect / Forge app), or — on Server /
+ * Data Center, which has no account type — an author whose name says so (shared
+ * `isAutomationCommentName`).
+ */
+export function jiraCommentOf(raw: unknown): FetchedTicketComment | null {
+  const c = asRecord(raw);
+  if (c == null) return null;
+  const id = typeof c.id === 'string' ? c.id.trim() : typeof c.id === 'number' ? String(c.id) : '';
+  const createdAt = trackerDate(c, 'created');
+  if (id === '' || createdAt == null) return null;
+  const updated = trackerDate(c, 'updated');
+  const a = asRecord(c.author);
+  const name = typeof a?.displayName === 'string' ? a.displayName.trim() : '';
+  const authorId = [a?.accountId, a?.key, a?.name].find((v): v is string => typeof v === 'string' && v !== '') ?? null;
+  const isBot = a?.accountType === 'app' || isAutomationCommentName(name) || isAutomationCommentName(typeof a?.name === 'string' ? a.name : null);
+  const body = typeof c.body === 'string' ? jiraWikiToMarkdown(fieldValueToText(c.body)) : fieldValueToText(c.body);
+  return { id, authorName: name, authorId, isBot, body, createdAt, updatedAt: updated ?? null };
+}
+
+/**
+ * A comment page (`fields.comment` or the `/comment` list): `{comments, total}`. `complete` = every
+ * comment is in it (Jira may cut the field short on a long thread). undefined when not a page.
+ */
+export function jiraCommentPage(raw: unknown): { comments: FetchedTicketComment[]; total: number; complete: boolean } | undefined {
+  const o = asRecord(raw);
+  if (o == null || !Array.isArray(o.comments)) return undefined;
+  const comments = o.comments.map(jiraCommentOf).filter((c): c is FetchedTicketComment => c != null);
+  const total = typeof o.total === 'number' && Number.isFinite(o.total) ? o.total : o.comments.length;
+  return { comments, total, complete: total <= o.comments.length };
+}
+
+/**
+ * The ticket's comments: `fields.comment` from the issue read when it is whole (no extra call — `*all`
+ * carries it on Cloud and Server alike). When Jira cut the field short on a long thread, ONE read of the
+ * newest page (`/comment?startAt=<total-N>`). An answer with no comment field (a screen that hides it)
+ * leaves the comments unknown, as does that extra read failing — undefined: never a failed ticket,
+ * never a cleared list, and never a write of the OLDEST page (it would prune the newer stored ones).
+ */
+async function jiraComments(
+  call: JiraCall,
+  key: string,
+  field: unknown,
+): Promise<FetchedTicketComment[] | undefined> {
+  const page = jiraCommentPage(field);
+  if (page == null) return undefined;
+  if (page.complete) return page.comments;
+  try {
+    const raw = await jiraGetJson(
+      `${call.apiRoot}/rest/api/2/issue/${encodeURIComponent(key)}/comment?startAt=${Math.max(0, page.total - TICKET_COMMENTS_KEPT)}&maxResults=${TICKET_COMMENTS_KEPT}`,
+      { authorization: jiraAuthHeader(call.credentials) },
+      call.policy,
+      call.transport,
+    );
+    return jiraCommentPage(raw)?.comments;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * One issue with EVERY field and the id→name and id→schema maps
  * (`?fields=*all&expand=names,schema`), so the acceptance-criteria candidates can be read off the
@@ -284,9 +354,19 @@ export async function fetchJiraIssue(call: JiraCall, key: string): Promise<JiraI
     candidates,
     omittedCandidates: omitted,
     ...linksField(f, call.apiRoot),
+    ...(await commentsField(call, key, f)),
     // `*all` carries both; an unresolved ticket's `resolutiondate` is null.
     ...ticketDateFields({ issueCreatedAt: trackerDate(f, 'created'), issueResolvedAt: trackerDate(f, 'resolutiondate') }),
   };
+}
+
+async function commentsField(
+  call: JiraCall,
+  key: string,
+  fields: Record<string, unknown>,
+): Promise<{ comments?: FetchedTicketComment[] }> {
+  const comments = await jiraComments(call, key, fields.comment);
+  return comments === undefined ? {} : { comments };
 }
 
 // (`fetchJiraIssueTitle` — a `?fields=summary` read for the Open PRs ticket row — is gone: since

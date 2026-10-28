@@ -1,3 +1,4 @@
+import type { TicketComment } from './ticket-comments.js';
 // API types shared between frontend and backend.
 // All timestamps are ISO-8601 strings over the wire.
 
@@ -4858,6 +4859,9 @@ export interface JiraTicketDetails {
   assignee?: TicketAssignee | null;
   /** ISO time of the last successful read from Jira. */
   fetchedAt?: string | null;
+  /** The people's comments on the ticket (bots left out), OLDEST first, at most TICKET_COMMENTS_KEPT;
+   *  [] = none stored. Absent from an older server. docs/TRACKERS.md § Ticket comments. */
+  comments?: TicketComment[];
 }
 
 /** Jira's status category key — the part of a status that means the same on every site. */
@@ -8171,6 +8175,10 @@ export interface TicketReviewState {
   //   daily_limit   the workspace's automatic ticket checks for today are used (resets 00:00 UTC)
   // Absent / null: nothing is waiting (current, running, never checked, or auto review is off).
   waiting?: TicketReviewWait | null;
+  // People's comments on the ticket that the latest succeeded run did not see (docs/TRACKERS.md §
+  // Ticket comments). Comments never make a run stale; this only says the reader may re-run. Absent /
+  // 0 when none, or when that run predates comment reading.
+  newComments?: number;
 }
 
 export type TicketReviewWait = 'settling' | 'ticket_limit' | 'daily_limit';

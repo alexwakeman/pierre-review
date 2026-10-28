@@ -287,7 +287,14 @@ async function runPipeline(job: StoryDocsJob, controller: AbortController): Prom
   let scratch: string | null = null;
   try {
     scratch = mkdtempSync(join(tmpdir(), 'pierre-storydocs-'));
-    const promptInput = { story: inputs.story, criteriaSource: inputs.criteriaSource, criteria: inputs.criteria, shortlist: sl.entries, libraryDir: dir };
+    const promptInput = {
+      story: inputs.story,
+      criteriaSource: inputs.criteriaSource,
+      criteria: inputs.criteria,
+      shortlist: sl.entries,
+      libraryDir: dir,
+      comments: inputs.comments,
+    };
     const nonce = pickReviewNonce(storyDocsUntrustedTexts(promptInput));
     const words = promptTools(providerId);
     const run = seams.runAgent ?? (await import('./agent.js')).runStoryDocsAgent;

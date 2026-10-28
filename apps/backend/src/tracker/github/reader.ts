@@ -1,8 +1,8 @@
-import { parseGithubIssueKey, type SprintStatusAutoOrder } from '@pierre-review/shared';
+import { isAutomationCommentLogin, parseGithubIssueKey, TICKET_COMMENTS_KEPT, type SprintStatusAutoOrder } from '@pierre-review/shared';
 import { isRateLimitError } from '../../github/client.js';
 import { isBudgetLow, noteBudget, noteLimited } from '../../github/rate-budget.js';
 import { JiraFetchError } from '../jira/fetch.js';
-import type { FetchedTicket, GithubCallAccess, TrackerCall } from '../types.js';
+import type { FetchedTicket, FetchedTicketComment, GithubCallAccess, TrackerCall } from '../types.js';
 import { ticketDateFields, trackerDate } from '../dates.js';
 import { extractGithubAcceptanceCriteria, githubAcFieldId, type GithubSubIssue } from './ac.js';
 
@@ -11,8 +11,9 @@ import { extractGithubAcceptanceCriteria, githubAcFieldId, type GithubSubIssue }
 // tracker uses: read when a PR is RECEIVED, never when it is viewed.
 //
 // What is read: title, body (markdown), state + state reason, issue type, the first assignee, and
-// up to `SUB_ISSUE_CAP` sub-issues — the criteria's first source (./ac.ts). Labels are not read:
-// nothing shows them.
+// up to `SUB_ISSUE_CAP` sub-issues — the criteria's first source (./ac.ts) — and the newest
+// TICKET_COMMENTS_KEPT comments (docs/TRACKERS.md § Ticket comments; still 1 point). Labels are not
+// read: nothing shows them.
 //
 // ⚠ RATE LIMITS ARE PRE-EMPTED, NEVER SURFACED. A low budget (`isBudgetLow`) or a limit GitHub
 // reports is thrown as an HTTP 429, which the worker turns into a short workspace backoff with NO
@@ -41,6 +42,7 @@ export const GITHUB_ISSUE_QUERY = /* GraphQL */ `
         issueType { id name }
         assignees(first: 1) { nodes { login avatarUrl } }
         subIssues(first: ${SUB_ISSUE_CAP}) { totalCount nodes { number title state } }
+        comments(last: ${TICKET_COMMENTS_KEPT}) { nodes { id body createdAt updatedAt author { __typename login } } }
       }
     }
     rateLimit { cost remaining resetAt }
@@ -60,6 +62,42 @@ interface GqlIssue {
   issueType?: { id: string; name: string } | null;
   assignees?: { nodes?: Array<{ login: string; avatarUrl: string | null } | null> | null } | null;
   subIssues?: { totalCount?: number | null; nodes?: Array<GithubSubIssue | null> | null } | null;
+  /** Absent = not selected (an older fixture): the stored comments stand. */
+  comments?: { nodes?: Array<GqlIssueComment | null> | null } | null;
+}
+
+interface GqlIssueComment {
+  id?: string | null;
+  body?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+  // null = a deleted account ("ghost").
+  author?: { __typename?: string | null; login?: string | null } | null;
+}
+
+/** The issue's `comments` selection → provider-neutral comments. undefined when not selected. A bot is
+ *  GitHub's own `Bot` actor, or a login the automation vocabulary claims (shared
+ *  `isAutomationCommentLogin`: `[bot]` logins, CI and review apps). */
+export function githubComments(sel: GqlIssue['comments']): FetchedTicketComment[] | undefined {
+  if (sel === undefined) return undefined;
+  const out: FetchedTicketComment[] = [];
+  for (const n of sel?.nodes ?? []) {
+    const id = (n?.id ?? '').trim();
+    const created = n?.createdAt ? new Date(n.createdAt) : null;
+    if (id === '' || created == null || Number.isNaN(created.getTime())) continue;
+    const updated = n?.updatedAt ? new Date(n.updatedAt) : null;
+    const login = (n?.author?.login ?? '').trim();
+    out.push({
+      id,
+      authorName: login,
+      authorId: login !== '' ? login : null,
+      isBot: n?.author?.__typename === 'Bot' || isAutomationCommentLogin(login),
+      body: n?.body ?? '',
+      createdAt: created,
+      updatedAt: updated != null && !Number.isNaN(updated.getTime()) ? updated : null,
+    });
+  }
+  return out;
 }
 
 interface GqlIssueResponse {
@@ -176,11 +214,17 @@ export function toFetchedTicket(key: string, issue: GqlIssue): FetchedTicket {
     omittedCandidates: 0,
     // GitHub Issues has no blocking links Limn reads (docs/TRACKERS.md § Blocking links).
     blockedBy: null,
+    ...commentsOf(issue),
     ...ticketDateFields({
       issueCreatedAt: trackerDate(issue as unknown as Record<string, unknown>, 'createdAt'),
       issueResolvedAt: trackerDate(issue as unknown as Record<string, unknown>, 'closedAt'),
     }),
   };
+}
+
+function commentsOf(issue: GqlIssue): { comments?: FetchedTicketComment[] } {
+  const comments = githubComments(issue.comments);
+  return comments === undefined ? {} : { comments };
 }
 
 /** Read ONE issue (`owner/repo#12`). Throws `JiraFetchError` (the worker's transport-generic codes). */

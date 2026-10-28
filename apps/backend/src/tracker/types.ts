@@ -110,6 +110,24 @@ export interface FetchedTicket {
    *  relations. undefined = not in the answer (the stored value stands); null = the provider has no
    *  links (GitHub Issues); [] = read, none. */
   blockedBy?: TicketLinkBlocker[] | null;
+  /** The ticket's comments (docs/TRACKERS.md § Ticket comments), any order, bots INCLUDED and flagged.
+   *  undefined = not in the answer (the stored comments stand); [] = read, none (the stored ones are
+   *  cleared). The worker keeps the newest TICKET_COMMENTS_KEPT. */
+  comments?: FetchedTicketComment[];
+}
+
+/** One comment as a reader returns it. A future adapter (Notion, …) fills exactly this. */
+export interface FetchedTicketComment {
+  /** The tracker's own id, stable across reads (the upsert key with the ticket's identity). */
+  id: string;
+  authorName: string;
+  authorId: string | null;
+  /** An automation, not a person: stored, never shown, never given to a model. */
+  isBot: boolean;
+  /** MARKDOWN (the reader converts its tracker's markup). The store cuts it to TICKET_COMMENT_BODY_MAX. */
+  body: string;
+  createdAt: Date;
+  updatedAt: Date | null;
 }
 
 /** A GitHub GraphQL answer: the data (partial data included) and any errors GitHub reported. */

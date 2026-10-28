@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
 import {
+  isAutomationCommentName,
   linearSiteRoot,
+  TICKET_COMMENTS_KEPT,
   TICKET_LINK_BLOCKERS_MAX,
   TICKET_LINK_TITLE_MAX,
   type TicketLinkBlocker,
@@ -16,7 +18,7 @@ import {
   nodeTransport,
   type RawResponse,
 } from '../jira/fetch.js';
-import type { FetchedTicket, TrackerCall } from '../types.js';
+import type { FetchedTicket, FetchedTicketComment, TrackerCall } from '../types.js';
 import { ticketDateFields, trackerDate } from '../dates.js';
 
 // LINEAR — THE CLIENT (docs/TRACKERS.md § Linear). Every Linear call goes through `linearGraphql`.
@@ -178,7 +180,18 @@ export const linearRelationsSelection = (first: number): string => /* GraphQL */
   }
 `;
 
-// Complexity ≈ 200 points (50 children and 20 relations × their small objects), far under Linear's 10,000.
+/** The comments selection (docs/TRACKERS.md § Ticket comments): the newest TICKET_COMMENTS_KEPT, each
+ *  with its author. ≈ 40 complexity points. `user` is null on a comment an integration made (GitHub,
+ *  Slack, …) — that is how a bot is told apart; no other actor field is selected, so an older Linear
+ *  schema cannot refuse the read. */
+export const linearCommentsSelection = (last: number): string => /* GraphQL */ `
+  comments(last: ${last}) {
+    nodes { id body createdAt updatedAt user { id name displayName } }
+  }
+`;
+
+// Complexity ≈ 240 points (50 children, 20 relations and 20 comments × their small objects), far under
+// Linear's 10,000.
 export const LINEAR_ISSUE_QUERY = /* GraphQL */ `
   query LimnLinearIssue($id: String!) {
     issue(id: $id) {
@@ -196,6 +209,7 @@ export const LINEAR_ISSUE_QUERY = /* GraphQL */ `
         pageInfo { hasNextPage }
       }
       ${linearRelationsSelection(LINEAR_RELATIONS_CAP)}
+      ${linearCommentsSelection(TICKET_COMMENTS_KEPT)}
     }
   }
 `;
@@ -222,6 +236,40 @@ interface GqlIssue {
       issue?: { identifier?: string | null; title?: string | null; url?: string | null; state?: { name?: string | null; type?: string | null } | null } | null;
     } | null> | null;
   } | null;
+  /** Absent = not selected (the stored comments stand). */
+  comments?: {
+    nodes?: Array<{
+      id?: string | null;
+      body?: string | null;
+      createdAt?: string | null;
+      updatedAt?: string | null;
+      user?: { id?: string | null; name?: string | null; displayName?: string | null } | null;
+    } | null> | null;
+  } | null;
+}
+
+/** The `comments` selection → provider-neutral comments (markdown already). undefined when not
+ *  selected. A comment with no `user` was made by an integration — a bot. */
+export function linearComments(sel: GqlIssue['comments']): FetchedTicketComment[] | undefined {
+  if (sel === undefined) return undefined;
+  const out: FetchedTicketComment[] = [];
+  for (const n of sel?.nodes ?? []) {
+    const id = (n?.id ?? '').trim();
+    const created = n?.createdAt ? new Date(n.createdAt) : null;
+    if (id === '' || created == null || Number.isNaN(created.getTime())) continue;
+    const updated = n?.updatedAt ? new Date(n.updatedAt) : null;
+    const name = (n?.user?.displayName ?? '').trim() || (n?.user?.name ?? '').trim();
+    out.push({
+      id,
+      authorName: name,
+      authorId: n?.user?.id ?? null,
+      isBot: n?.user == null || isAutomationCommentName(name),
+      body: n?.body ?? '',
+      createdAt: created,
+      updatedAt: updated != null && !Number.isNaN(updated.getTime()) ? updated : null,
+    });
+  }
+  return out;
 }
 
 /** Linear's workflow-state TYPE → the stored status category (null for an unknown type). */
@@ -295,6 +343,7 @@ export function toLinearTicket(key: string, issue: GqlIssue): FetchedTicket {
   const who = issue.assignee;
   const whoName = (who?.displayName ?? '').trim() || (who?.name ?? '').trim();
   const blockedBy = linearBlockedBy(issue.inverseRelations);
+  const comments = linearComments(issue.comments);
   return {
     key,
     title: (issue.title ?? '').trim(),
@@ -310,6 +359,7 @@ export function toLinearTicket(key: string, issue: GqlIssue): FetchedTicket {
     omittedCandidates: 0,
     url: httpsOnly(issue.url),
     ...(blockedBy === undefined ? {} : { blockedBy }),
+    ...(comments === undefined ? {} : { comments }),
     ...ticketDateFields({
       issueCreatedAt: trackerDate(issue as unknown as Record<string, unknown>, 'createdAt'),
       issueResolvedAt: trackerDate(issue as unknown as Record<string, unknown>, 'completedAt'),

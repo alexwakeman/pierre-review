@@ -1544,6 +1544,11 @@ export const ticketReviews = sqliteTable(
     // What auto-posting did with this run (migration 0087 / pg 0074) — review/ticket-review/
     // auto-post.ts. Also holds the posted "Not asked for" entries, which have no item row.
     autoPost: text('auto_post', { mode: 'json' }).$type<TicketAutoPostRecord>(),
+    // The ticket's people comments this run was given (migration 0143; docs/TRACKERS.md § Ticket
+    // comments): their ids, how many and a hash. NOT in `fingerprint` — a new comment never makes a
+    // run stale; the state route counts the comments not in `ids` ("n new comments since this check").
+    // NULL on a run from before comments were read, or a pasted story.
+    commentsSeen: text('comments_seen', { mode: 'json' }).$type<{ ids: string[]; count: number; hash: string }>(),
   },
   (t) => ({
     accountIdentIdx: index('tr_account_ident_created_idx').on(t.accountId, t.ticketIdent, t.createdAt),
@@ -2894,6 +2899,57 @@ export const trackerTickets = sqliteTable(
     ),
     accountChangedIdx: index('tracker_tickets_account_changed').on(t.accountId, t.changedAt),
     prIdx: index('tracker_tickets_pr').on(t.prId),
+  }),
+);
+
+// ── tracker_ticket_comments: THE DISCUSSION UNDER A TICKET (migration 0142) ───────────────────────
+// ONE ROW PER (account, provider, api_root, issue_key, comment_id) — per TICKET, never per PR (a ticket
+// named by five PRs has its comments once). Written by the ticket worker from the SAME issue read
+// (tracker/comments.ts `writeTicketComments`; docs/TRACKERS.md § Ticket comments): the newest
+// TICKET_COMMENTS_KEPT (20) are upserted and the ticket's others deleted. A read that did not carry
+// comments (undefined) or FAILED leaves the stored ones alone; `[]` — the tracker's positive "none" —
+// clears them.
+//
+//   • `body` is markdown (Jira wiki markup / ADF converted), cut to TICKET_COMMENT_BODY_MAX (4000).
+//   • `is_bot` — an automation's comment (Jira app accounts and automation names, GitHub bots by
+//     `__typename` and the automation vocabulary, Linear integrations). STORED, never shown, never
+//     given to a model.
+//   • ⚠ NOT story text: nothing here moves `tracker_tickets.changed_at`, the story hash or a ticket
+//     review fingerprint.
+//
+// No FKs (like tracker_tickets). Rows whose ticket no longer has ANY `tracker_tickets` row are deleted
+// by the worker's key prune and by BOTH PR delete paths (db/ticket-comments-prune.ts); erased with the
+// account (`accountScopedTables()`).
+//
+// ⚠ Every `onConflictDoUpdate` on this table targets exactly [accountId, provider, apiRoot, issueKey,
+// commentId].
+export const trackerTicketComments = sqliteTable(
+  'tracker_ticket_comments',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id').notNull(),
+    provider: text('provider').notNull(),
+    apiRoot: text('api_root').notNull(),
+    issueKey: text('issue_key').notNull(),
+    // The tracker's own id (Jira comment id, GitHub / Linear node id).
+    commentId: text('comment_id').notNull(),
+    authorName: text('author_name').notNull().default(''),
+    authorId: text('author_id'),
+    isBot: integer('is_bot', { mode: 'boolean' }).notNull().default(false),
+    body: text('body').notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }),
+    // When Limn last read it.
+    fetchedAt: integer('fetched_at', { mode: 'timestamp' }).notNull(),
+  },
+  (t) => ({
+    ticketCommentUx: uniqueIndex('tracker_ticket_comments_ticket_comment').on(
+      t.accountId,
+      t.provider,
+      t.apiRoot,
+      t.issueKey,
+      t.commentId,
+    ),
   }),
 );
 
