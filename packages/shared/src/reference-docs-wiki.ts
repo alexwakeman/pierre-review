@@ -121,8 +121,20 @@ export interface ConfluencePageAddress {
  * link (`/wiki/x/…`) or a space's home names no page id and is not accepted. Pure: the SPA uses it to
  * route a pasted address to the wiki import, the server to resolve it.
  */
+// The WHATWG URL both runtimes have; this package carries no DOM or Node lib types (claude-review.ts precedent).
+interface ParsedUrl {
+  protocol: string;
+  username: string;
+  password: string;
+  hostname: string;
+  host: string;
+  pathname: string;
+  searchParams: { get(name: string): string | null };
+}
+declare const URL: new (input: string) => ParsedUrl;
+
 export function parseConfluencePageUrl(raw: string): ConfluencePageAddress | null {
-  let u: URL;
+  let u: ParsedUrl;
   try {
     u = new URL(raw.trim());
   } catch {
