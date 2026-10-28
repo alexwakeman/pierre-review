@@ -1,5 +1,11 @@
 import { and, desc, eq, inArray } from 'drizzle-orm';
-import { TICKET_REVIEW_MAX_PRS, isTrackerIdent, parseTicketIdent } from '@pierre-review/shared';
+import {
+  TICKET_REVIEW_MAX_PRS,
+  isTrackerIdent,
+  parseTicketIdent,
+  repeatRunLimit,
+  type TicketReviewWait,
+} from '@pierre-review/shared';
 import { config } from '../../config.js';
 import type { AgentContext } from '../agent-context.js';
 import { getTicketSource } from '../../tracker/ticket-source.js';
@@ -8,9 +14,15 @@ import { automaticRunAllowed } from '../budget-gate.js';
 import { autoReviewAvailable, autoReviewDue, utcDayStartMs } from '../claude-review/auto.js';
 import { listAutoReviewWorkspaces } from '../claude-review/auto-settings.js';
 import { onAutoReviewLaunched } from '../claude-review/manager.js';
-import { fingerprint, readLiveMembers, ticketHash } from './fingerprint.js';
-import { countAutoTicketReviewsSince, getTicketIdentsForPr, getTicketStateInputs } from './persist.js';
+import { fingerprint, readLiveMembers, ticketHash, type FingerprintMember } from './fingerprint.js';
+import {
+  countAutoTicketReviewsSince,
+  countCascadeTicketReviewsSince,
+  getTicketIdentsForPr,
+  getTicketStateInputs,
+} from './persist.js';
 import { jiraMemberIds, jiraStoryFor } from './prepare.js';
+import { _resetTicketSweepWaitsForTest, setTicketSweepWait } from './sweep-waits.js';
 import {
   startTicketReview,
   ticketAutoLaneRoom,
@@ -47,6 +59,15 @@ import {
 //   5. ITS OWN DAILY CAP, `TICKET_REVIEW_DAILY_CAP` automatic runs ('auto' and 'cascade') per
 //      workspace per UTC day — counted from rows, which an automatic run writes when it is QUEUED.
 //      Never shared with the PR review's cap.
+//   6. ⚠ ONE BUSY TICKET CANNOT SPEND THE DAY. A PUSH-ONLY re-check (the same members in the same
+//      states and the same story as the last succeeded run — only heads moved) is limited twice: at
+//      most `TICKET_REVIEW_PUSH_RECHECKS_PER_DAY` (3) 'cascade' rows of THAT ticket per UTC day, and
+//      never the workspace's last slots (shared `repeatRunLimit`: all but
+//      min(5, cap/4)). A ticket's first check and a PR joining, leaving or merging are held only by
+//      the cap itself. (2026-10-28: one ticket's 11 pushes took 11 of the day's 20 checks by 11:40,
+//      and a story whose two new PRs joined that afternoon waited until midnight.)
+//   7. WHY IT WAITS is kept per ticket (`ticketSweepWait`) and served on the ticket's state
+//      (`waiting`), so the story view can say "daily limit reached" instead of nothing.
 //
 // THE WORKSPACE. Members may span workspaces (same Jira site); the run counts against an
 // AUTO-ENABLED member workspace — the changed PR's when it is one. A ticket with no member in an
@@ -89,7 +110,25 @@ export function _resetTicketSweepForTest(): void {
   kicked.clear();
   watching.clear();
   settleSeen.clear();
+  _resetTicketSweepWaitsForTest();
   sweeping = false;
+}
+
+export { ticketSweepWait } from './sweep-waits.js';
+
+/**
+ * True when only heads moved since the last succeeded run: the same story, and the same members in
+ * the same states. Such a re-check is limited per ticket (rule 6); anything else is not.
+ */
+export function pushOnlyChange(
+  last: { ticketHash: string | null; members: readonly FingerprintMember[] },
+  liveHash: string,
+  live: readonly FingerprintMember[],
+): boolean {
+  if (last.ticketHash !== liveHash) return false;
+  if (last.members.length !== live.length) return false;
+  const state = new Map(last.members.map((m) => [m.prId, m.state]));
+  return live.every((m) => state.get(m.prId) === m.state);
 }
 
 export interface TicketSweepDeps {
@@ -98,6 +137,8 @@ export interface TicketSweepDeps {
   laneRoom(): number;
   held(accountId: number, ident: string): boolean;
   dailyCap: number;
+  // Rule 6's per-ticket limit (default config `ticketReviewPushRechecksPerDay`).
+  pushRechecksPerDay?: number;
 }
 
 const defaultDeps: TicketSweepDeps = {
@@ -106,6 +147,7 @@ const defaultDeps: TicketSweepDeps = {
   laneRoom: ticketAutoLaneRoom,
   held: ticketReviewHeld,
   dailyCap: config.ticketReviewDailyCap,
+  pushRechecksPerDay: config.ticketReviewPushRechecksPerDay,
 };
 
 export interface TicketSweepResult {
@@ -299,9 +341,11 @@ export async function runTicketReviewSweep(
         const forget = (): void => {
           watching.delete(key);
           settleSeen.delete(key);
+          setTicketSweepWait(accountId, ident, null);
         };
-        const wait = (): void => {
+        const wait = (why: TicketReviewWait | null = null): void => {
           watching.set(key, { accountId, ident, kicked: cand.kicked, viaPrId: cand.viaPrId });
+          setTicketSweepWait(accountId, ident, why);
         };
         // The lane is full: this candidate AND every one not reached yet keep waiting. The PR
         // snapshot below still advances, so a candidate dropped here would never come back.
@@ -356,7 +400,8 @@ export async function runTicketReviewSweep(
           forget();
           continue;
         }
-        const fp = fingerprint(ticketHash(ticket), live);
+        const liveHash = ticketHash(ticket);
+        const fp = fingerprint(liveHash, live);
         const st = (await getTicketStateInputs(ctx, accountId, [ident])).get(ident);
         if (st?.runningRunId != null) {
           holdSettle();
@@ -398,8 +443,18 @@ export async function runTicketReviewSweep(
           lastRunAtMs: first ? null : await lastTicketRunAtMs(ctx, accountId, ident),
         });
         if (!due.due) {
-          wait();
+          wait('settling');
           continue;
+        }
+
+        // ---- rule 6: a push-only re-check is limited per ticket, and never takes the last slots ----
+        const pushOnly = !first && st?.latest != null && pushOnlyChange(st.latest, liveHash, live);
+        if (pushOnly) {
+          const perTicket = deps.pushRechecksPerDay ?? config.ticketReviewPushRechecksPerDay;
+          if ((await countCascadeTicketReviewsSince(ctx, accountId, ident, dayStartMs)) >= perTicket) {
+            wait('ticket_limit');
+            continue;
+          }
         }
 
         // ---- the daily cap (rows: an automatic run's row exists from the moment it is queued) ----
@@ -408,8 +463,8 @@ export async function runTicketReviewSweep(
           used = await countAutoTicketReviewsSince(ctx, accountId, workspaceId, dayStartMs);
           capUsed.set(workspaceId, used);
         }
-        if (used >= deps.dailyCap) {
-          wait();
+        if (used >= (pushOnly ? repeatRunLimit(deps.dailyCap) : deps.dailyCap)) {
+          wait('daily_limit');
           continue;
         }
         if (deps.laneRoom() <= 0) {

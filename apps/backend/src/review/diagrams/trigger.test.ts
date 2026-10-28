@@ -104,7 +104,7 @@ const member = (prId: number, repo = 'api'): StoryMember => ({
 });
 
 function fakeDeps(over: Partial<TriggerDeps> & { files?: StoredPrFile[] | null; members?: StoryMember[] } = {}) {
-  const queued: Array<{ kind: string; subject: string; trigger: string; fingerprint: string }> = [];
+  const queued: Array<{ kind: string; subject: string; trigger: string; fingerprint: string; memberIds: number[] | null }> = [];
   const drawn = new Set<string>();
   const refused: Array<{ kind: string; subject: string }> = [];
   const deps: TriggerDeps = {
@@ -125,12 +125,23 @@ function fakeDeps(over: Partial<TriggerDeps> & { files?: StoredPrFile[] | null; 
     }),
     exists: async (_c, _a, kind, subject, fp) => drawn.has(`${kind}|${subject}|${fp}`),
     usedToday: async () => 0,
+    // Every draw in this fake is today's.
+    history: async (_c, _a, kind, subject) => {
+      const rows = queued.filter((q) => q.kind === kind && q.subject === subject);
+      return { drawsToday: rows.length, drawnBefore: rows.length > 0, lastMemberIds: rows.at(-1)?.memberIds ?? null };
+    },
     held: async () => false,
     ticketsForPr: async () => [{ ident: IDENT, key: 'ABC-1' }],
     storyMembers: async () => over.members ?? [member(7), member(8, 'web')],
     fileStats: async (_c, _a, ids) => new Map(ids.map((id) => [id, { files: code(), additions: 12, deletions: 0, changedFiles: 1 }])),
     enqueue: async (_c, a) => {
-      queued.push({ kind: a.kind, subject: a.subject, trigger: a.trigger, fingerprint: a.fingerprint });
+      queued.push({
+        kind: a.kind,
+        subject: a.subject,
+        trigger: a.trigger,
+        fingerprint: a.fingerprint,
+        memberIds: a.members?.map((m) => m.prId) ?? null,
+      });
       drawn.add(`${a.kind}|${a.subject}|${a.fingerprint}`);
       return { outcome: 'queued', diagramId: queued.length };
     },
@@ -139,6 +150,7 @@ function fakeDeps(over: Partial<TriggerDeps> & { files?: StoredPrFile[] | null; 
       drawn.add(`${a.kind}|${a.subject}|${a.fingerprint}`);
     },
     dailyCap: 30,
+    subjectCap: 2,
     enabled: true,
     ...over,
   };
@@ -261,6 +273,90 @@ describe('maybeDrawDiagramsAfterReview', () => {
       'disabled',
     );
     expect(off.queued).toHaveLength(0);
+  });
+});
+
+// ⚠ THE 2026-10-28 STOP. Every push to a busy ticket's PR redrew that PR's design and its story's
+// after the next review: one story was drawn 11 times and one PR 9 times, the cap of 30 was gone by
+// 14:52, and every later review drew nothing — silently. BMD-1086 never got a story design.
+describe('redraws are limited, first draws are not starved (BMD-1086)', () => {
+  const head = (n: number) => String(n).padStart(40, '0');
+  const BUSY = 'jira:https://acme.atlassian.net#BMD-1083';
+
+  it('a subject is drawn at most twice a day; a story whose PRs changed is a new picture', async () => {
+    let heads = [head(1), head(2)];
+    let members = [member(7), member(8, 'web')];
+    const { deps, queued } = fakeDeps({
+      prContext: async () => ({ prId: 7, repoId: 1, owner: 'acme', name: 'api', number: 7, title: 't', state: 'open', headSha: heads[0]!, files: code(), additions: 1, deletions: 0, changedFiles: 1 }),
+      storyMembers: async () => members.map((m, i) => ({ ...m, headSha: heads[i] ?? HEAD })),
+    });
+    const outcomes: Array<[string, string]> = [];
+    for (let push = 3; push <= 6; push += 1) {
+      const r = await maybeDrawDiagramsAfterReview(ctx, { accountId: 1, prId: 7, reviewTrigger: 'auto' }, deps);
+      outcomes.push([r.pr, r.stories[0]!.outcome]);
+      heads = [head(push), head(2)];
+    }
+    expect(outcomes).toEqual([
+      ['queued', 'queued'],
+      ['queued', 'queued'],
+      ['redraw_limit', 'redraw_limit'],
+      ['redraw_limit', 'redraw_limit'],
+    ]);
+    // A third PR joins: the story is drawn again (the PR's own design stays limited).
+    members = [member(7), member(8, 'web'), member(9, 'app')];
+    const joined = await maybeDrawDiagramsAfterReview(ctx, { accountId: 1, prId: 7, reviewTrigger: 'auto' }, deps);
+    expect([joined.pr, joined.stories[0]!.outcome]).toEqual(['redraw_limit', 'queued']);
+    expect(queued.filter((q) => q.kind === 'story')).toHaveLength(3);
+  });
+
+  it("the busy ticket's redraws leave the cap's last slots for BMD-1086's first story design", async () => {
+    // 25 of 30 used today (the busy ticket's redraws): a redraw may not take the last 5.
+    const tickets: Record<number, { ident: string; key: string }> = {
+      7: { ident: BUSY, key: 'BMD-1083' },
+      20: { ident: IDENT, key: 'BMD-1086' },
+    };
+    const { deps, queued } = fakeDeps({
+      usedToday: async () => 25 + queued.length,
+      history: async (_c, _a, kind, subject) =>
+        subject === BUSY || subject === '7'
+          ? { drawsToday: 1, drawnBefore: true, lastMemberIds: kind === 'story' ? [7, 8] : null }
+          : { drawsToday: 0, drawnBefore: false, lastMemberIds: null },
+      prContext: async (_c, _a, prId) => ({ prId, repoId: 1, owner: 'acme', name: 'api', number: prId, title: 't', state: 'open', headSha: head(prId), files: code(), additions: 1, deletions: 0, changedFiles: 1 }),
+      ticketsForPr: async (_a, prId) => [tickets[prId]!],
+      storyMembers: async (_c, _a, ident) => (ident === BUSY ? [member(7), member(8, 'web')] : [member(20), member(21, 'web')]),
+    });
+    const busy = await maybeDrawDiagramsAfterReview(ctx, { accountId: 1, prId: 7, reviewTrigger: 'auto' }, deps);
+    expect([busy.pr, busy.stories[0]!.outcome]).toEqual(['daily_cap', 'daily_cap']);
+    const story = await maybeDrawDiagramsAfterReview(ctx, { accountId: 1, prId: 20, reviewTrigger: 'auto' }, deps);
+    expect([story.pr, story.stories[0]!.outcome]).toEqual(['queued', 'queued']);
+    // The skip is said, not silent: the slot reads it while those inputs are live, and it is logged.
+    const { diagramAutoSkip, logTriggerLimits } = await import('./trigger.js');
+    expect(diagramAutoSkip(1, 'story', BUSY, storyDiagramFingerprint(BUSY, [member(7), member(8, 'web')]))).toBe('daily_limit');
+    expect(diagramAutoSkip(1, 'story', BUSY, 'another fingerprint')).toBeNull();
+    const info = vi.fn();
+    logTriggerLimits({ log: { info } } as unknown as AgentContext, 7, busy);
+    expect(info).toHaveBeenCalledWith(expect.stringContaining('daily_cap'));
+  });
+
+  it("a ticket review draws the story a PR review missed (the PR's ticket link landed after its review)", async () => {
+    const { maybeDrawStoryDiagramAfterTicketReview } = await import('./trigger.js');
+    // The PR review of the second PR saw a one-PR ticket.
+    const early = fakeDeps({ members: [member(7)] });
+    const r = await maybeDrawDiagramsAfterReview(ctx, { accountId: 1, prId: 7, reviewTrigger: 'auto' }, early.deps);
+    expect(r.stories[0]!.outcome).toBe('too_few_prs');
+    // The ticket review that the PR joining started: two PRs now.
+    const { deps, queued } = fakeDeps();
+    const after = await maybeDrawStoryDiagramAfterTicketReview(
+      ctx,
+      { accountId: 1, ident: IDENT, ticketKey: 'ABC-1', viaPrId: 7, reviewTrigger: 'auto' },
+      deps,
+    );
+    expect(after).toBe('queued');
+    expect(queued.map((q) => [q.kind, q.subject, q.trigger])).toEqual([['story', IDENT, 'review']]);
+    // A pasted story never draws; the workspace switch is honoured.
+    expect(await maybeDrawStoryDiagramAfterTicketReview(ctx, { accountId: 1, ident: 'manual:7:abcdef12', ticketKey: null, viaPrId: 7, reviewTrigger: 'auto' }, deps)).toBe('disabled');
+    const off = fakeDeps({ switchedOn: async () => false });
+    expect(await maybeDrawStoryDiagramAfterTicketReview(ctx, { accountId: 1, ident: IDENT, ticketKey: null, viaPrId: 7, reviewTrigger: 'auto' }, off.deps)).toBe('switched_off');
   });
 });
 

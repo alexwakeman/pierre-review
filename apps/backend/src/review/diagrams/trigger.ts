@@ -1,4 +1,10 @@
-import { parseTicketIdent, type SequenceDiagramKind, type SequenceDiagramMember } from '@pierre-review/shared';
+import {
+  SEQUENCE_DIAGRAM_SUBJECT_DAILY_DRAWS,
+  parseTicketIdent,
+  type SequenceDiagramAutoSkip,
+  type SequenceDiagramKind,
+  type SequenceDiagramMember,
+} from '@pierre-review/shared';
 import { config } from '../../config.js';
 import { getTicketSource } from '../../tracker/ticket-source.js';
 import type { AgentContext } from '../agent-context.js';
@@ -21,6 +27,7 @@ import {
   getPrFileStats,
   markDiagramRefused,
   insertQueuedDiagram,
+  subjectDrawHistory,
 } from './persist.js';
 
 // "A REVIEW JUST FINISHED — DRAW ITS DIAGRAMS?" The one hook between Claude Review and this process.
@@ -37,6 +44,15 @@ import {
 //                  at most MAX_TICKETS. A ticket with MORE THAN ONE open or merged PR queues ONE
 //                  'story' diagram under the same rules, its fingerprint over every member's head and
 //                  state — so a push to ANY member redraws it after that member's next review.
+// ⚠ A REDRAW IS LIMITED (2026-10-28: one story drawn 11 times and one PR 9 times spent the cap of 30
+//                  by 14:52, and every later review drew nothing, silently). A subject drawn before —
+//                  a story with the SAME pull requests — is drawn at most SEQUENCE_DIAGRAM_SUBJECT_DAILY_DRAWS
+//                  (2) times a UTC day, its first draw included, and never takes the cap's last slots
+//                  (shared `repeatRunLimit`). A first draw, or a story whose PRs changed, is held only
+//                  by the cap. A skip for a limit is LOGGED (`logTriggerLimits`) and kept in memory
+//                  for the slot (`diagramAutoSkip` → `autoSkipped`), so the pane can say why.
+// After a TICKET REVIEW succeeds (`maybeDrawStoryDiagramAfterTicketReview`), its story is asked again
+// under the same rules: a PR's ticket link can land after that PR's own review ended.
 //
 // ⚠ THE PER-WORKSPACE SWITCH (`workspaces.auto_diagrams_enabled`, migration 0126, ON by default):
 // switched off for the PR's workspace ⇒ 'switched_off' and nothing is queued or stored. It gates
@@ -56,6 +72,8 @@ export interface TriggerDeps {
   switchedOn: typeof diagramsSwitchedOnForPr;
   exists: typeof diagramExistsAt;
   usedToday: typeof countReviewDiagramsSince;
+  // The subject's draws today and its last drawn members (the REDRAW rule).
+  history: typeof subjectDrawHistory;
   held(accountId: number, kind: SequenceDiagramKind, subject: string): Promise<boolean>;
   ticketsForPr(accountId: number, prId: number): Promise<Array<{ ident: string; key: string | null }>>;
   storyMembers(ctx: AgentContext, accountId: number, ident: string): Promise<StoryMember[]>;
@@ -65,6 +83,8 @@ export interface TriggerDeps {
   // no diagram and the same head is never judged twice.
   refuseNoCode(ctx: AgentContext, a: StartDiagramArgs): Promise<void>;
   dailyCap: number;
+  // Automatic draws of one subject per UTC day, its first draw included (shared SEQUENCE_DIAGRAM_SUBJECT_DAILY_DRAWS).
+  subjectCap: number;
   enabled: boolean;
 }
 
@@ -79,6 +99,7 @@ const defaultDeps: TriggerDeps = {
   switchedOn: diagramsSwitchedOnForPr,
   exists: diagramExistsAt,
   usedToday: countReviewDiagramsSince,
+  history: subjectDrawHistory,
   held: async (accountId, kind, subject) => (await manager()).diagramHeld(accountId, kind, subject),
   ticketsForPr: async (accountId, prId) =>
     (await getTicketSource().ticketsForPr(accountId, prId)).map((t) => ({ ident: t.ident, key: t.ticket.key ?? null })),
@@ -90,6 +111,7 @@ const defaultDeps: TriggerDeps = {
     await markDiagramRefused(ctx, a.accountId, id, 'no_code');
   },
   dailyCap: config.sequenceDiagramDailyCap,
+  subjectCap: SEQUENCE_DIAGRAM_SUBJECT_DAILY_DRAWS,
   // The ONE agentic switch (config.aiEnabled); the routes and the manager check it too.
   enabled: config.aiEnabled,
 };
@@ -130,6 +152,106 @@ function fold(codes: readonly CodeAnswer[]): CodeAnswer {
   return 'no';
 }
 
+// ---- why a design was not redrawn (show the wait) ----
+// `${accountId}|${kind}|${subject}` → the skip and the fingerprint it was skipped at. The slot reads it
+// only while that fingerprint is still the live one (routes.ts `slotFor`), so a later draw or a new
+// head clears it by itself. In memory: a restart forgets it, and the next review asks again.
+const autoSkips = new Map<string, { skip: SequenceDiagramAutoSkip; fingerprint: string }>();
+
+const skipKey = (accountId: number, kind: SequenceDiagramKind, subject: string): string => `${accountId}|${kind}|${subject}`;
+
+function noteSkip(accountId: number, kind: SequenceDiagramKind, subject: string, fp: string, outcome: TriggerOutcome): void {
+  const k = skipKey(accountId, kind, subject);
+  if (outcome === 'daily_cap') autoSkips.set(k, { skip: 'daily_limit', fingerprint: fp });
+  else if (outcome === 'redraw_limit') autoSkips.set(k, { skip: 'redraw_limit', fingerprint: fp });
+  else if (outcome === 'queued' || outcome === 'drawn') autoSkips.delete(k);
+}
+
+/** Why the last finished review did not draw this subject at `liveFp`; null when it did, or nothing is known. */
+export function diagramAutoSkip(
+  accountId: number,
+  kind: SequenceDiagramKind,
+  subject: string,
+  liveFp: string | null,
+): SequenceDiagramAutoSkip | null {
+  const s = autoSkips.get(skipKey(accountId, kind, subject));
+  return s != null && liveFp != null && s.fingerprint === liveFp ? s.skip : null;
+}
+
+export function _resetDiagramSkipsForTest(): void {
+  autoSkips.clear();
+}
+
+/** The redraw rule's input for one subject: null for a FIRST draw (never drawn, or a story whose
+ *  pull requests changed since its last design). */
+async function redrawOf(
+  ctx: AgentContext,
+  deps: TriggerDeps,
+  accountId: number,
+  kind: SequenceDiagramKind,
+  subject: string,
+  dayStartMs: number,
+  memberIds: readonly number[] | null,
+): Promise<{ subjectDrawsToday: number; subjectCap: number } | null> {
+  const h = await deps.history(ctx, accountId, kind, subject, dayStartMs);
+  if (!h.drawnBefore) return null;
+  if (memberIds != null) {
+    const before = new Set(h.lastMemberIds ?? []);
+    const same = h.lastMemberIds != null && before.size === memberIds.length && memberIds.every((id) => before.has(id));
+    if (!same) return null;
+  }
+  return { subjectDrawsToday: h.drawsToday, subjectCap: deps.subjectCap };
+}
+
+/** One ticket's story design, after a review of one of its PRs or after its ticket review. */
+async function drawStory(
+  ctx: AgentContext,
+  deps: TriggerDeps,
+  accountId: number,
+  t: { ident: string; key: string | null },
+  used: { n: number },
+  dayStartMs: number,
+): Promise<TriggerOutcome> {
+  const members = await deps.storyMembers(ctx, accountId, t.ident);
+  const stats = await deps.fileStats(ctx, accountId, members.map((m) => m.prId));
+  const code = fold(members.map((m) => (stats.has(m.prId) ? storedCodeAnswer(stats.get(m.prId)!) : 'unknown')));
+  const fp = storyDiagramFingerprint(t.ident, members);
+  const drawn = members.length >= 2 && (await deps.exists(ctx, accountId, 'story', t.ident, fp));
+  const storyArgs: StartDiagramArgs = {
+    accountId,
+    kind: 'story',
+    subject: t.ident,
+    prId: null,
+    ticketKey: t.key,
+    fingerprint: fp,
+    headSha: null,
+    members: toDiagramMembers(members),
+    trigger: 'review',
+  };
+  const redraw =
+    members.length >= 2 && !drawn
+      ? await redrawOf(ctx, deps, accountId, 'story', t.ident, dayStartMs, members.map((m) => m.prId))
+      : null;
+  const skip = diagramSkipReason({
+    code,
+    drawnAtFingerprint: drawn,
+    inFlight: await deps.held(accountId, 'story', t.ident),
+    usedToday: used.n,
+    dailyCap: deps.dailyCap,
+    memberCount: members.length,
+    redraw,
+  });
+  if (skip != null) {
+    noteSkip(accountId, 'story', t.ident, fp, skip);
+    if (skip === 'no_code' && !drawn) await deps.refuseNoCode(ctx, storyArgs);
+    return skip;
+  }
+  const r = await deps.enqueue(ctx, storyArgs);
+  noteSkip(accountId, 'story', t.ident, fp, r.outcome);
+  if (r.outcome === 'queued') used.n += 1;
+  return r.outcome;
+}
+
 /** Never throws. Manual and auto reviews both draw; `reviewTrigger` decides only whether the Claude
  *  spend budget is asked (auto only). */
 export async function maybeDrawDiagramsAfterReview(
@@ -158,7 +280,8 @@ export async function maybeDrawDiagramsAfterReview(
       result.pr = 'no_head';
       return result;
     }
-    let used = await deps.usedToday(ctx, accountId, utcDayStartMs(nowMs));
+    const dayStartMs = utcDayStartMs(nowMs);
+    const used = { n: await deps.usedToday(ctx, accountId, dayStartMs) };
 
     // ---- the PR's own diagram ----
     const prSubject = String(prId);
@@ -179,16 +302,19 @@ export async function maybeDrawDiagramsAfterReview(
       code: storedCodeAnswer(pr),
       drawnAtFingerprint: prDrawn,
       inFlight: await deps.held(accountId, 'pr', prSubject),
-      usedToday: used,
+      usedToday: used.n,
       dailyCap: deps.dailyCap,
+      redraw: prDrawn ? null : await redrawOf(ctx, deps, accountId, 'pr', prSubject, dayStartMs, null),
     });
     if (prSkip != null) {
       result.pr = prSkip;
+      noteSkip(accountId, 'pr', prSubject, prFp, prSkip);
       if (prSkip === 'no_code' && !prDrawn) await deps.refuseNoCode(ctx, prArgs);
     } else {
       const r = await deps.enqueue(ctx, prArgs);
       result.pr = r.outcome;
-      if (r.outcome === 'queued') used += 1;
+      noteSkip(accountId, 'pr', prSubject, prFp, r.outcome);
+      if (r.outcome === 'queued') used.n += 1;
     }
 
     // ---- the story diagrams of its tickets ----
@@ -199,38 +325,7 @@ export async function maybeDrawDiagramsAfterReview(
       })
       .slice(0, MAX_TICKETS);
     for (const t of tickets) {
-      const members = await deps.storyMembers(ctx, accountId, t.ident);
-      const stats = await deps.fileStats(ctx, accountId, members.map((m) => m.prId));
-      const code = fold(members.map((m) => (stats.has(m.prId) ? storedCodeAnswer(stats.get(m.prId)!) : 'unknown')));
-      const fp = storyDiagramFingerprint(t.ident, members);
-      const drawn = members.length >= 2 && (await deps.exists(ctx, accountId, 'story', t.ident, fp));
-      const storyArgs: StartDiagramArgs = {
-        accountId,
-        kind: 'story',
-        subject: t.ident,
-        prId: null,
-        ticketKey: t.key,
-        fingerprint: fp,
-        headSha: null,
-        members: toDiagramMembers(members),
-        trigger: 'review',
-      };
-      const skip = diagramSkipReason({
-        code,
-        drawnAtFingerprint: drawn,
-        inFlight: await deps.held(accountId, 'story', t.ident),
-        usedToday: used,
-        dailyCap: deps.dailyCap,
-        memberCount: members.length,
-      });
-      if (skip != null) {
-        result.stories.push({ ident: t.ident, outcome: skip });
-        if (skip === 'no_code' && !drawn) await deps.refuseNoCode(ctx, storyArgs);
-        continue;
-      }
-      const r = await deps.enqueue(ctx, storyArgs);
-      result.stories.push({ ident: t.ident, outcome: r.outcome });
-      if (r.outcome === 'queued') used += 1;
+      result.stories.push({ ident: t.ident, outcome: await drawStory(ctx, deps, accountId, t, used, dayStartMs) });
     }
     return result;
   } catch (err) {
@@ -239,4 +334,41 @@ export async function maybeDrawDiagramsAfterReview(
     );
     return result;
   }
+}
+
+/**
+ * Never throws. A TICKET REVIEW of a tracker ticket just succeeded: draw its story design under the
+ * same rules. It closes a race the PR trigger cannot: a PR's ticket link is read when the PR is
+ * received, and can land AFTER that PR's review ended — then the PR review saw a one-PR ticket and
+ * drew no story. A ticket review runs once the link exists (a PR joining is what re-runs it).
+ * `viaPrId` is any member, for the workspace switch.
+ */
+export async function maybeDrawStoryDiagramAfterTicketReview(
+  ctx: AgentContext,
+  a: { accountId: number; ident: string; ticketKey: string | null; viaPrId: number; reviewTrigger: 'manual' | 'auto' },
+  deps: TriggerDeps = defaultDeps,
+  nowMs: number = Date.now(),
+): Promise<TriggerOutcome> {
+  if (!deps.enabled) return 'disabled';
+  const p = parseTicketIdent(a.ident);
+  if (p == null || p.kind === 'manual') return 'disabled';
+  try {
+    if (!(await deps.switchedOn(ctx, a.accountId, a.viaPrId))) return 'switched_off';
+    if (a.reviewTrigger === 'auto' && !(await automaticRunAllowed(ctx, a.accountId, 'diagrams'))) return 'over_budget';
+    const dayStartMs = utcDayStartMs(nowMs);
+    const used = { n: await deps.usedToday(ctx, a.accountId, dayStartMs) };
+    return await drawStory(ctx, deps, a.accountId, { ident: a.ident, key: a.ticketKey }, used, dayStartMs);
+  } catch (err) {
+    ctx.log.warn(`story design after the ticket review of ${a.ident}: ${err instanceof Error ? err.message : String(err)}`);
+    return 'disabled';
+  }
+}
+
+/** One log line when a finished review drew nothing because of a limit (silent otherwise). */
+export function logTriggerLimits(ctx: AgentContext, prId: number, r: TriggerResult): void {
+  const limited = [
+    r.pr === 'daily_cap' || r.pr === 'redraw_limit' ? `pr ${prId}: ${r.pr}` : null,
+    ...r.stories.filter((s) => s.outcome === 'daily_cap' || s.outcome === 'redraw_limit').map((s) => `${s.ident}: ${s.outcome}`),
+  ].filter((x): x is string => x != null);
+  if (limited.length > 0) ctx.log.info(`sequence diagrams not drawn (${limited.join(', ')})`);
 }

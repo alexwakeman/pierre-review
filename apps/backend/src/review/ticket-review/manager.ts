@@ -275,6 +275,25 @@ function launch(job: TicketJob): void {
 
   void runPipeline(job, controller, progress)
     .then(() => {
+      // THE STORY DESIGN (review/diagrams/trigger.ts): a SUCCEEDED run of a ticket with 2+ PRs asks
+      // for its story design under the trigger's own rules — a PR's ticket link can land after that
+      // PR's review ended, so the PR review alone can miss it. Fire-and-forget; it only queues.
+      void getTicketReviewById(ctx, job.accountId, runId)
+        .then(async (r) => {
+          const via = r?.members[0]?.prId;
+          if (r?.status !== 'succeeded' || r.members.length < 2 || via == null) return;
+          const m = await import('../diagrams/trigger.js');
+          await m.maybeDrawStoryDiagramAfterTicketReview(ctx, {
+            accountId: job.accountId,
+            ident: job.ident,
+            ticketKey: r.ticketKey,
+            viaPrId: via,
+            reviewTrigger: isAuto(job) ? 'auto' : 'manual',
+          });
+        })
+        .catch((err) =>
+          ctx.log.warn(`story design after ticket review ${runId}: ${err instanceof Error ? err.message : String(err)}`),
+        );
       // AUTO-POSTING: an AUTOMATIC run that succeeded may post its story gaps on their owner PRs
       // (./auto-post.ts decides, reads the run's status itself, never throws, never retries).
       if (!isAuto(job)) return;

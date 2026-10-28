@@ -41,6 +41,9 @@ export function prDiagramsPollMs(
 /** The line under a slot's diagram (or in its place). Null = nothing to say. */
 export function slotStatusLine(slot: SequenceDiagramSlot, redrawing: boolean): string | null {
   if (redrawing || slotDrawing(slot)) return 'Drawing…';
+  // The last finished review skipped it on a limit (the server says so only while that still holds).
+  const skipped = autoSkippedLine(slot);
+  if (skipped != null) return skipped;
   const l = slot.latest;
   if (l == null) return slot.diagram == null ? 'No design yet.' : null;
   // A refusal names the provider that RAN this drawing (its row's), never the active one.
@@ -58,3 +61,16 @@ export function redrawRefusalText(r: RedrawSequenceDiagramResponse | undefined, 
   return r?.outcome === 'refused' && r.refusal != null ? sequenceDiagramRefusalText(r.refusal, by) : null;
 }
 
+
+/** Why a finished review did not draw an out-of-date design: a limit, in one line. Null otherwise. */
+export function autoSkippedLine(slot: Pick<SequenceDiagramSlot, 'autoSkipped' | 'diagram'>): string | null {
+  const what = slot.diagram == null ? 'Not drawn yet' : 'Not redrawn';
+  switch (slot.autoSkipped) {
+    case 'daily_limit':
+      return `${what}: today’s automatic designs are used up. They start again at 00:00 UTC.`;
+    case 'redraw_limit':
+      return `${what}: it was already redrawn today.`;
+    default:
+      return null;
+  }
+}

@@ -21,7 +21,7 @@ import {
   latestSucceededDiagram,
   toDiagramView,
 } from './persist.js';
-import { MAX_TICKETS, toDiagramMembers } from './trigger.js';
+import { MAX_TICKETS, diagramAutoSkip, toDiagramMembers } from './trigger.js';
 import { providerName } from '../../ai/prompt-tools.js';
 
 // THE DESIGN-DIAGRAM API (CORE, free, LOCAL ONLY; paths keep "sequence-diagrams") — docs/API.md § Design diagrams. Registered by
@@ -70,12 +70,16 @@ export async function slotFor(
   liveFp: string | null,
 ): Promise<SequenceDiagramSlot> {
   const latest = await latestDiagram(ctx, accountId, kind, subject);
-  if (latest == null) return { diagram: null, latest: null };
+  // Why the last finished review did not draw it at the live inputs (a daily or redraw limit).
+  const skipped = diagramAutoSkip(accountId, kind, subject, liveFp);
+  const autoSkipped = skipped != null ? { autoSkipped: skipped } : {};
+  if (latest == null) return { diagram: null, latest: null, ...autoSkipped };
   const good = latest.status === 'succeeded' ? latest : await latestSucceededDiagram(ctx, accountId, kind, subject);
   const view = (r: typeof latest) => toDiagramView(r, liveFp != null && r.fingerprint === liveFp);
   return {
     diagram: good != null ? view(good) : null,
     latest: good != null && good.id === latest.id ? null : view(latest),
+    ...autoSkipped,
   };
 }
 

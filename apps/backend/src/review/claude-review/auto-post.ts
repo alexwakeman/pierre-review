@@ -58,6 +58,7 @@
 // ⚠ Manual runs are never auto-posted: a review you start yourself keeps the Post button.
 // ⚠ Never throws: auto-posting failing must never touch the review.
 import { and, desc, eq, inArray, isNull, lt } from 'drizzle-orm';
+import { clipAtSentence as clipAtSentenceShared } from '@pierre-review/shared';
 import {
   type AutoApproveImpact,
   type AutoPostKinds,
@@ -308,15 +309,9 @@ export const LIFT_BLOCK_MESSAGE = liftBlockMessage('Claude');
 const LEAD_MAX_CHARS = 3_000;
 
 /** Cut `text` to ≤ `max` characters at the last sentence end that fits; failing that, at the last space
- *  (with "…"). Text that fits is returned whole. */
+ *  (with "…"). Text that fits is returned whole. The fold is shared (`clipAtSentence`, shared prose.ts). */
 export function clipAtSentence(text: string, max: number = LEAD_MAX_CHARS): string {
-  if (text.length <= max) return text;
-  const head = text.slice(0, max);
-  let cut = -1;
-  for (const m of head.matchAll(/[.!?](?=\s)/g)) cut = m.index;
-  if (cut > 0) return head.slice(0, cut + 1);
-  const space = head.slice(0, max - 1).lastIndexOf(' ');
-  return `${head.slice(0, space > 0 ? space : max - 1)}…`;
+  return clipAtSentenceShared(text, max);
 }
 
 /** The review body's lead: the summary's first plain paragraph (whole, unless it passes

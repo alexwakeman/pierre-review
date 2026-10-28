@@ -159,7 +159,9 @@ describe('the Review tab wiring', () => {
   it('renders the ticket summary as markdown and draws Story check with the shared type scale', () => {
     // The result pieces are shared by the pane and the Open PRs stack (TicketReviewParts.tsx).
     const tc = src('components/TicketReviewParts.tsx');
-    expect(tc).toContain('<Markdown prRefs>{a.summary}</Markdown>');
+    // Only the summary's leading prose (shared storySummaryProse), as markdown.
+    expect(tc).toContain('storySummaryProse(a?.summary)');
+    expect(tc).toContain('<Markdown prRefs>{summary}</Markdown>');
     expect(tc).toContain('REVIEW_ITEM_CARD');
     expect(tc).toContain('REVIEW_PROSE');
     // The old 12px grey prose is gone from every section.

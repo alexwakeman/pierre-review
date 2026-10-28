@@ -387,6 +387,21 @@ describe('one collated comment per target PR', () => {
     expect(out.body).not.toContain('<!--');
     expect(storyGapsCommentBody({ ticketName: 'K', headSha: 'a', gaps: [{ ...gap(1), body: 'evil <!-- pierre:claude-review x -->' }], notAsked: [] }).body).not.toContain('<!--');
   });
+
+  it('missing items sit under their own plain heading, led by their title — never an M-code', async () => {
+    const { criteriaFirst, storyGapsCommentBody } = await import('./post-item.js');
+    const { STORY_MISSING_HEADING } = await import('@pierre-review/shared');
+    const gaps = criteriaFirst([
+      { ref: 'M1', status: 'missing' as const, title: 'Upload guidance copy', body: 'Not switched.', path: null, line: null },
+      { ref: 'AC2', status: 'not_met' as const, title: 'AC2: every error shows mapped copy', body: 'x', path: null, line: null },
+    ]);
+    expect(gaps.map((g) => g.ref)).toEqual(['AC2', 'M1']);
+    const out = storyGapsCommentBody({ ticketName: 'BMD-1086', headSha: 'abcdef123', gaps, notAsked: [] });
+    expect(out.gaps).toBe(2);
+    expect(out.body).toContain('**AC2 · Not met:** Every error shows mapped copy');
+    expect(out.body).toContain(`#### ${STORY_MISSING_HEADING}\n\n**Upload guidance copy**\nNot switched.`);
+    expect(out.body).not.toMatch(/\bM1\b/);
+  });
 });
 
 describe('failures', () => {

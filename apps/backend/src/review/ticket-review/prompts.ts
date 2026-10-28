@@ -22,6 +22,7 @@
 // boundary and the prompt names the omitted files — the worktree holds the rest.
 import {
   TICKET_CRITERION_STATUS_LABEL,
+  storySummaryProse,
   type ClaudeReviewTicket,
   type TicketAssessment,
   type TicketPrCardBody,
@@ -126,7 +127,7 @@ Parts of the user message are wrapped in \`---BEGIN … <tag>---\` / \`---END �
 For EVERY pull request shown to you as a DIFF, add one entry to \`cards\` (by its ref): a factual description of what its head does, for later checks of this ticket — summary (features and behaviour, a few sentences), interfaces (every API route, field, event, setting, export or schema change another PR might depend on, named exactly, with added/changed/removed), criteria (the story criteria it moves forward, how, and the files) and looseEnds (TODOs, stubs, code behind a flag that is off, judged against that PR's own aim). No verdicts in a card. In a card, name another pull request as repo#number (e.g. bng-library#78), never by its ref: a card is kept for later checks, where refs change. Never write a card for a pull request shown as a description or not read.
 
 # Finishing
-${t.either('When you are done, call submit_ticket_review EXACTLY ONCE with', 'When you are done, return ONE JSON object as your final message, with')} { alignment, summary, criteria, missing, notRequested, cards }. 'summary' is markdown: ONE plain sentence on how far the pull requests, together, deliver the ticket, then, only when something is unmet, partly met or missing, a short bullet list (one "- " line per gap, naming where it belongs). No headings, no tables. Each unmet or partly met criterion and each missing item may be posted as a comment on the PR you name in \`expectedIn\`, so give each a clear, short explanation. ${t.either('Do not write prose outside the tool call.', 'Write nothing outside that JSON object.')}`;
+${t.either('When you are done, call submit_ticket_review EXACTLY ONCE with', 'When you are done, return ONE JSON object as your final message, with')} { alignment, summary, criteria, missing, notRequested, cards }. 'summary' is TWO plain sentences: the first says how far the pull requests, together, deliver the ticket; the second names the most important thing still left, or says nothing is. No bullets, no list of criteria, no headings, no tables: the criteria and missing items carry the detail. Give each missing item a short descriptive \`title\` (a few words naming the thing, e.g. "Upload guidance copy"), never a code or number. Each unmet or partly met criterion and each missing item may be posted as a comment on the PR you name in \`expectedIn\`, so give each a clear, short explanation. ${t.either('Do not write prose outside the tool call.', 'Write nothing outside that JSON object.')}`;
 }
 
 /** The Claude base prompt (the one tests and older callers read). */
@@ -221,7 +222,9 @@ function priorText(prior: PromptPrior, refOf: ReadonlyMap<number, string>): stri
   const lines: string[] = [];
   const a = prior.assessment;
   lines.push(`Alignment: ${a.alignment}`);
-  if (a.summary) lines.push(`Summary: ${clip(a.summary, PRIOR_TEXT_CHARS)}`);
+  // An older stored summary also listed every gap as a bullet; the rows below already say that.
+  const summary = storySummaryProse(a.summary);
+  if (summary) lines.push(`Summary: ${clip(summary, PRIOR_TEXT_CHARS)}`);
   for (const c of a.criteria) {
     const by = c.deliveredBy.length > 0 ? ` — delivered by ${c.deliveredBy.map(name).join(', ')}` : '';
     lines.push(`${c.ref} [${c.status}] ${clip(c.text, PRIOR_TEXT_CHARS)}${by}`);

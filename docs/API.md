@@ -236,7 +236,9 @@ against one rebuilt from the synced `pull_requests` heads and the ticket source'
 `TicketReviewState.status`: `current` · `stale` (+ `staleBecause` in the order `story_edited`,
 `pr_added`, `pr_left`, `pr_pushed`, `pr_merged`, and `changedPrIds`) · `running` (a run is
 queued or running; the last succeeded run's counts still ride) · `none`. With no ticket-source answer
-the live half is unknown and the latest run reads `current`.
+the live half is unknown and the latest run reads `current`. A `stale` state may carry `waiting`
+(`TicketReviewWait`: `settling` · `ticket_limit` · `daily_limit`) — why the auto sweeper is holding it
+back (in memory, `sweep-waits.ts`; absent where auto review is off or nothing waits).
 
 | Route | Contract |
 |---|---|
@@ -255,7 +257,9 @@ Automatic runs (`trigger` `auto` / `cascade`) count against the starting workspa
 ### Design diagrams (the paths keep "sequence-diagrams")
 
 `review/diagrams/routes.ts`, registered by `registerAgenticRoutes` (absent under `LIMN_AI_DISABLED` → `404`). [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Design diagrams. Wire types:
-`packages/shared/src/sequence-diagrams.ts`. A **slot** is `SequenceDiagramSlot {diagram, latest}`:
+`packages/shared/src/sequence-diagrams.ts`. A **slot** is `SequenceDiagramSlot {diagram, latest, autoSkipped?}`
+(`autoSkipped`: `daily_limit` \| `redraw_limit` — the last finished review skipped drawing it at the
+live inputs on a limit; in memory):
 `diagram` = the newest SUCCEEDED `SequenceDiagramView` (what to draw), `latest` = the newest run of any
 status when it is a different one (drawing, refused, failed) — a failed redraw never hides the last
 good design. Each view carries `current` (its fingerprint is the live one), `design` (the validated

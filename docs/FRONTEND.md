@@ -3257,6 +3257,16 @@ the stack "Closed without merging (n)", collapsed. It works for a ticket with NO
 is drawn with no rows; "No pull requests for this ticket yet."). Stacks never collapse, here or on the
 board.
 
+- **THE HEADER IS ITS OWN COMPONENT** (`StoryViewHeader` in `OpenPrsCards.tsx`, `TicketStack` with
+  `single`; 2026-10-28 — the shared stack header squeezed the title into a narrow column beside seven
+  items). Two rows, never side by side: the key and "Open in <tracker>" (small), then the TITLE on the
+  full width; then ONE meta row that wraps as whole groups — status picker, type and assignee
+  (`TicketPeopleAndStatus`, shared with the board header); the facts as chips of one kind (coverage
+  "3 of 10 met", the roll-up "1 failing CI", "2 PRs"); and, `ml-auto` from `sm`, the ticket review's
+  currency as ONE quiet line ("2 PRs changed since · daily limit reached · reviewed 52 mins ago", the
+  sweeper's `waiting` through `ticketWaitWords`, the reason as the title) with Re-check beside it
+  (`StoryCurrencyLine`). ⚠ The currency is said ONLY here: the Story section no longer draws its
+  CurrencyPill. The board's stack header is unchanged.
 - ⚠ **TWO HOSTS, ONE BODY.** The ticket TAB (`Ticket/TicketTabView.tsx`, which parses the active tab's
   ident and meta) and This Sprint's story TRAY (`Sprint/SprintStoryTray.tsx`, ident from
   `?sprintStory=`) both mount `StoryViewBody({ident, meta})`. The body reads nothing about where it is
@@ -3307,8 +3317,13 @@ and refusals, and carry no button. In order, and NOTHING else (no dependency or 
 pills):
 
 1. **Claude's summary and criteria** — `storySummaryOf` (`lib/ticketStory.ts`, test/storyView.test.ts):
-   the ticket review's result when one exists (currency pill, `TicketResults`, `MemberCards`, read by
-   the states' `latestRunId`); else the CURRENT sprint brief's summary + numbered criteria ("Worked out
+   the ticket review's result when one exists (`TicketResults`, `MemberCards`, read by the states'
+   `latestRunId`; its currency is the header's). `TicketResults` shows ONLY the summary's leading prose
+   (shared `storySummaryProse` — two sentences now; an older stored summary's gap bullets are dropped,
+   the rows below say them), each criterion's text without a leading copy of its ref
+   (`criterionTextOnly`), and the missing items under "Asked for outside the criteria"
+   (`STORY_MISSING_HEADING`, ⓘ `STORY_MISSING_EXPLAINER`), each led by its title — the M-code is never
+   drawn; else the CURRENT sprint brief's summary + numbered criteria ("Worked out
    from the description" when derived; the ⓘ explains it; "Show all N criteria" past 10); else
    "Reading this ticket…" while the brief pass will still read it; else nothing. `GET /api/ticket-story`
    is asked only when there is no ticket review. A ticket that is not in a sprint read has no brief:
@@ -3318,7 +3333,8 @@ pills):
    sprint read's text (`storyFallbackTicket`, for a ticket with no PR).
 3. **The story's design** — drawn RIGHT UNDER 1's SUMMARY AND CRITERIA (`afterCriteria` on `TicketResults` / `BriefSummary`; before the missing / not-asked-for lists), listed here for its rules: `StoryDesignSection` (`Activity/StoryDesignSection.tsx`), only with `me.ai`
    and ≥ 1 PR (`storyDesignOffered`); it draws only when a design is stored or the ticket has 2+ PRs
-   (the server's `too_few_prs`).
+   (the server's `too_few_prs`). When the last finished review skipped drawing it on a limit, the
+   slot's `autoSkipped` is the status line (`autoSkippedLine`, `lib/sequenceDiagrams.ts`).
 
 Between 1 and 2 (after `MemberCards` on the review path, after the brief on the other), with `me.ai`
 only: **the docs check** — `Activity/StoryDocsAlignment.tsx`, the SPA half of "Check a story against the

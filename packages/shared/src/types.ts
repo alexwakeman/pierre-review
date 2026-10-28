@@ -7873,6 +7873,20 @@ export const TICKET_REVIEW_MAX_DIFFS = 4;
 // from `ticket_reviews` rows of the workspace that started them. Separate from the PR review's own
 // auto cap. The backend's `TICKET_REVIEW_DAILY_CAP` env var overrides it.
 export const TICKET_REVIEW_DAILY_CAP = 20;
+// A re-check that only follows PUSHES (no PR joined, left or merged; the story unchanged) is limited
+// TWICE, so one busy ticket cannot spend the whole day's cap: at most this many automatic re-checks
+// ('cascade' rows) per TICKET per UTC day (`TICKET_REVIEW_PUSH_RECHECKS_PER_DAY` overrides), and never
+// the workspace's last few slots (`repeatRunLimit`), kept for a ticket's first check and for a PR
+// joining, leaving or merging.
+export const TICKET_REVIEW_PUSH_RECHECKS_PER_DAY = 3;
+/**
+ * The share of a daily cap that REPEAT automatic runs may use — a ticket re-check after pushes only,
+ * a design redraw — all but min(5, cap/4): the last slots stay free for FIRST runs (a new ticket, a
+ * story's first design) and for a PR joining or leaving.
+ */
+export function repeatRunLimit(cap: number): number {
+  return cap - Math.min(5, Math.floor(cap / 4));
+}
 // The most peers a DEEP PR review may read, read-only: other PRs on the same tickets AND the companion
 // change in each RELATED REPO (Settings → Workspace → Related repos), together. Kept at 4 when related
 // repos joined: each peer is a full checkout plus prompt bytes, and a related repo is one peer at most.
@@ -8151,7 +8165,15 @@ export interface TicketReviewState {
   memberCount: number;
   // When the latest succeeded run finished.
   checkedAt: string | null; // ISO-8601
+  // A STALE ticket the auto sweeper has seen and is holding back (only where auto review is on):
+  //   settling      waiting for the PRs to go quiet (5 minutes; at most 20 from the first change)
+  //   ticket_limit  this ticket's push-only re-checks for today are used (TICKET_REVIEW_PUSH_RECHECKS_PER_DAY)
+  //   daily_limit   the workspace's automatic ticket checks for today are used (resets 00:00 UTC)
+  // Absent / null: nothing is waiting (current, running, never checked, or auto review is off).
+  waiting?: TicketReviewWait | null;
 }
+
+export type TicketReviewWait = 'settling' | 'ticket_limit' | 'daily_limit';
 
 // One run, in full.
 export interface TicketReview {

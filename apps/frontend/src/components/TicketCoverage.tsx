@@ -26,7 +26,7 @@
 //     story.
 //
 // Rules: every string from Claude renders as PLAIN TEXT (no href built from it), except the run's
-// summary, which is markdown (one lead sentence + a bullet per gap) through the sanitizing
+// summary (two plain sentences; only the leading prose of an older one), markdown through the sanitizing
 // <Markdown>; a PR reference in any of it ("api#12") is an in-app button via ReviewPrRefs.tsx. A
 // story's own text renders as markdown only inside the Story disclosure. Type scale:
 // lib/reviewStyles.ts (the Findings card is the reference); icons from Icons.tsx; the explanation

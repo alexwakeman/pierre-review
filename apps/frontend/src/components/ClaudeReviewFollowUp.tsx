@@ -27,6 +27,7 @@ import {
   FOLLOW_UP_STATUS_LABEL,
   TICKET_ALIGNMENT_LABEL,
   followUpLeftOutSentence,
+  STORY_MISSING_HEADING,
   TICKET_CRITERION_STATUS_LABEL,
   ticketCriteriaSentence,
 } from '@pierre-review/shared';
@@ -1120,7 +1121,7 @@ export function ClaudeReviewTicketResults({
           )}
           {assessment.missing.length > 0 && (
             <div className="space-y-1.5">
-              <StoryGroupHeading>{`Not done (${assessment.missing.length})`}</StoryGroupHeading>
+              <StoryGroupHeading>{`${STORY_MISSING_HEADING} (${assessment.missing.length})`}</StoryGroupHeading>
               <ul className="space-y-1.5">
                 {assessment.missing.map((g, i) => {
                   const f = cardFor(storyFindingIdFor(findingIds, entry.index, { missingIndex: i }));

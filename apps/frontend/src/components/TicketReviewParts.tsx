@@ -13,14 +13,19 @@
 // (no request of its own). A member with no card shows nothing.
 //
 // Rules (unchanged from the pane): every string from Claude renders as PLAIN TEXT, except the run's
-// summary, which is markdown through the sanitizing <Markdown>; a PR reference in any of it
+// summary — only its leading prose (shared `storySummaryProse`), markdown through the sanitizing
+// <Markdown>; a PR reference in any of it
 // ("api#12") is an in-app button via ReviewPrRefs.tsx. ⚠ Posting follows the post-write copy
 // contract: once GitHub answered with a comment id, the button never comes back (a retry
 // double-posts).
 import { DocReferencesBlock } from './DocReferences.js';
 import { useId, useMemo, useState, type ReactNode } from 'react';
 import {
+  STORY_MISSING_EXPLAINER,
+  STORY_MISSING_HEADING,
   TICKET_CRITERION_STATUS_LABEL,
+  criterionTextOnly,
+  storySummaryProse,
   type ClaudeFindingSide,
   type TicketCriterion,
   type TicketEvidence,
@@ -59,6 +64,7 @@ import {
   type TicketCurrency,
 } from '../lib/ticketReview.js';
 import { CheckIcon, ChevronIcon, WarningIcon } from './Icons.js';
+import { InfoButton } from './InfoModal.js';
 import { Markdown } from './Markdown.js';
 import { autoPostFailureLine } from '../lib/autoPost.js';
 import { MemberPrLink, PrRefText } from './ReviewPrRefs.js';
@@ -243,7 +249,7 @@ function ItemAction({ item, review, viewedPrId }: { item: TicketReviewItem; revi
           prId={viewedPrId}
           reviewId={null}
           pinRef={{ kind: 'story_item', ticketReviewId: review.id, itemId: item.id }}
-          label={`${review.ticketKey != null ? `${review.ticketKey} ` : ''}${item.ref} · ${item.title}`}
+          label={`${review.ticketKey != null ? `${review.ticketKey} ` : ''}${item.status === 'missing' ? '' : `${item.ref} · `}${item.status === 'missing' ? item.title : criterionTextOnly(item.title)}`}
         />
         )}
       </div>
@@ -287,7 +293,7 @@ export function CriterionRow({
         </span>
         <span className={`shrink-0 font-mono text-xs ${MUTED}`}>{c.ref}</span>
         <span className="min-w-0 break-words">
-          {c.text}
+          {criterionTextOnly(c.text)}
           {done != null && (
             <span className={`text-xs ${MUTED}`}>
               {' · '}
@@ -315,7 +321,7 @@ export function CriterionRow({
           {TICKET_CRITERION_STATUS_LABEL[c.status]}
         </span>
         <span className={`shrink-0 font-mono text-xs leading-5 ${MUTED}`}>{c.ref}</span>
-        <span className="min-w-0 flex-1 whitespace-pre-wrap break-words font-semibold">{c.text}</span>
+        <span className="min-w-0 flex-1 whitespace-pre-wrap break-words font-semibold">{criterionTextOnly(c.text)}</span>
       </div>
       {(done != null || belongs != null) && (
         <div className={`mt-0.5 text-xs ${MUTED}`}>
@@ -355,7 +361,7 @@ export function MissingRow({
       <div className="flex items-start gap-2">
         {selection}
         <span className={`${CHIP} ${TICKET_CRITERION_STATUS_CLASS.not_met}`}>Not done</span>
-        <span className={`shrink-0 font-mono text-xs leading-5 ${MUTED}`}>{item.ref}</span>
+        {/* The item's own title leads; its 'M1'… ref is internal (item refs, AI Fix) and never shown. */}
         <span className="min-w-0 flex-1 whitespace-pre-wrap break-words font-semibold">{item.title}</span>
       </div>
       {owner != null && (
@@ -388,7 +394,12 @@ export function MissingList({ items, ...ctx }: RowContext & { items: readonly Ti
   if (items.length === 0) return null;
   return (
     <div className="space-y-1.5">
-      <h5 className={REVIEW_SUBHEAD}>{`Not done (${items.length})`}</h5>
+      <div className="flex items-center gap-1">
+        <h5 className={REVIEW_SUBHEAD}>{`${STORY_MISSING_HEADING} (${items.length})`}</h5>
+        <InfoButton title={STORY_MISSING_HEADING}>
+          <p>{STORY_MISSING_EXPLAINER}</p>
+        </InfoButton>
+      </div>
       <ul className="space-y-1.5">
         {items.map((item) => (
           <MissingRow key={item.id} item={item} {...ctx} />
@@ -466,13 +477,16 @@ export function TicketResults({
   const a = review.assessment;
   const byRef = useMemo(() => itemsByRef(review.items), [review.items]);
   const missing = useMemo(() => missingItems(review.items), [review.items]);
+  const summary = useMemo(() => storySummaryProse(a?.summary), [a?.summary]);
   if (a == null) return <p className={`text-xs ${MUTED}`}>No result stored.</p>;
   const ctx = { review, viewedPrId, changedPaths, onOpenInChanges };
   const autoPostFailed = autoPostFailureLine(review.autoPost);
   return (
     <div className="space-y-3">
       {autoPostFailed != null && <p className="text-xs text-amber-700 dark:text-amber-300">{autoPostFailed}</p>}
-      {a.summary != null && a.summary !== '' && <Markdown prRefs>{a.summary}</Markdown>}
+      {/* Two plain sentences. An older run's stored summary also listed every gap as a bullet: only
+          its leading prose is shown (the rows below carry the detail). */}
+      {summary != null && <Markdown prRefs>{summary}</Markdown>}
       {viewedPrId != null && <StoryGapsPost review={review} viewedPrId={viewedPrId} />}
       {a.criteria.length > 0 && (
         <ul className="space-y-1.5">

@@ -47,6 +47,7 @@ import {
   refusalSentence,
   ticketCoverage,
   ticketCurrency,
+  ticketWaitWords,
   type CoverageTone,
 } from '../../lib/ticketReview.js';
 import {
@@ -756,6 +757,171 @@ function StackCoverage({
   );
 }
 
+/** The ticket's status (the story view's Jira status picker), type and assignee — a header's left facts. */
+function TicketPeopleAndStatus({
+  t,
+  cat,
+  single,
+}: {
+  t: NonNullable<OpenPrsStack['ticket']>;
+  cat: 'new' | 'indeterminate' | 'done' | null;
+  single: boolean;
+}): JSX.Element {
+  return (
+    <>
+      {single && t.ident != null && t.provider === 'jira' && (cat != null || t.status != null) ? (
+        // The story view's Jira ticket: the chip is the status picker (the one tracker write).
+        <TicketStatusPicker
+          ident={t.ident}
+          status={t.status ?? STATUS_WORD[cat ?? 'new']}
+          chipClassName={cat != null ? `${CHIP} border-transparent ${STATUS_PILL[cat]}` : NEUTRAL_CHIP}
+        />
+      ) : (
+        <>
+          {cat != null && <span className={`${CHIP} border-transparent ${STATUS_PILL[cat]}`}>{t.status ?? STATUS_WORD[cat]}</span>}
+          {cat == null && t.status != null && <span className={NEUTRAL_CHIP}>{t.status}</span>}
+        </>
+      )}
+      {t.issueType != null && <span className="text-[11px] text-gray-500 dark:text-gray-400">{t.issueType}</span>}
+      {t.assignee != null && (
+        <span className="inline-flex items-center gap-1.5">
+          <span
+            aria-hidden
+            className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-gray-200 text-[10px] font-semibold text-gray-700 dark:bg-gray-700 dark:text-gray-100"
+          >
+            {initialsOf(t.assignee.name)}
+          </span>
+          <span>{t.assignee.name}</span>
+        </span>
+      )}
+      {t.assignee == null && t.status != null && <span className="text-gray-500 dark:text-gray-400">Unassigned</span>}
+    </>
+  );
+}
+
+/**
+ * THE STORY VIEW'S HEADER (one ticket, `single`). Two rows, never squeezed side by side:
+ *   1. the key and the link out to the tracker (small), then the TITLE on the full width;
+ *   2. one meta row that wraps as whole groups — status, type and assignee; the facts as chips of one
+ *      kind ("3 of 10 met", "1 failing CI", "2 PRs"); and, pushed right, the ticket review's currency
+ *      as one quiet line ("2 PRs changed since · reviewed 52 mins ago") with Re-check beside it.
+ * The currency is said HERE only: the Story section below does not repeat it.
+ */
+function StoryViewHeader({
+  headingId,
+  t,
+  cat,
+  rollup,
+  prCount,
+  review,
+}: {
+  headingId: string;
+  t: NonNullable<OpenPrsStack['ticket']>;
+  cat: 'new' | 'indeterminate' | 'done' | null;
+  rollup: readonly { text: string; tone: 'bad' | 'good' }[];
+  prCount: number;
+  review: { ident: string; state: TicketReviewState | undefined; prId: number; canCheck?: boolean } | null;
+}): JSX.Element {
+  const checked = review != null && review.canCheck !== false;
+  const cov = checked ? ticketCoverage(review.state) : null;
+  return (
+    <header className="space-y-2 px-4 pb-3 pt-3.5" data-testid="story-header">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs">
+        <span className="inline-flex items-center gap-1 font-mono text-[13px] font-semibold text-gray-700 dark:text-gray-200">
+          <TicketIcon size={13} className="shrink-0" />
+          {t.key}
+        </span>
+        <TrackerLinkOut url={t.url} provider={t.provider} />
+      </div>
+      <h3 id={headingId} className="break-words text-lg font-semibold leading-snug text-gray-900 dark:text-gray-50">
+        <span className="sr-only">{t.key}: </span>
+        {t.title ?? t.key}
+      </h3>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-600 dark:text-gray-300">
+          <TicketPeopleAndStatus t={t} cat={cat} single />
+        </div>
+        <ul aria-label="Facts" className="flex flex-wrap items-center gap-1.5">
+          {cov != null && (
+            <li className={`${CHIP} border-transparent ${COVERAGE_TONE[cov.tone]}`} title={cov.title}>
+              {cov.running && <span aria-hidden className="h-1.5 w-1.5 animate-pulse rounded-full bg-sky-500" />}
+              {cov.label}
+            </li>
+          )}
+          {rollup.map((p) => (
+            <li key={p.text} className={`${CHIP} border-transparent ${p.tone === 'bad' ? COVERAGE_TONE.bad : COVERAGE_TONE.ok}`}>
+              {p.text}
+            </li>
+          ))}
+          {prCount > 0 && <li className={NEUTRAL_CHIP}>{prCountLabel(prCount)}</li>}
+        </ul>
+        {checked && <StoryCurrencyLine ident={review.ident} state={review.state} prId={review.prId} />}
+      </div>
+    </header>
+  );
+}
+
+/** The story header's quiet currency line and Re-check (or Check story): the ticket review's state. */
+function StoryCurrencyLine({
+  ident,
+  state,
+  prId,
+}: {
+  ident: string;
+  state: TicketReviewState | undefined;
+  prId: number;
+}): JSX.Element | null {
+  const ready = aiReadyFor(useAiCapabilities(), 'ticket_review');
+  const start = useStartTicketReview(ident);
+  const starting = useTicketReviewStarting(ident);
+  const cov = ticketCoverage(state);
+  const currency = state != null ? ticketCurrency(state) : null;
+  const running = state?.status === 'running';
+  const refused = start.data?.runs.find((r) => r.ident === ident)?.refused ?? null;
+  const stale = cov != null && cov.stale && currency != null;
+  const why = stale ? ticketWaitWords(state?.waiting) : null;
+  return (
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 sm:ml-auto">
+      {(stale || state?.checkedAt != null) && (
+        <span className="text-xs text-gray-600 dark:text-gray-300">
+          {stale && (
+            <span className="text-amber-800 dark:text-amber-300" title={currency.title}>
+              {currency.label}
+            </span>
+          )}
+          {why != null && (
+            <>
+              <span aria-hidden className="decorative-mark text-gray-400 dark:text-gray-500">
+                {' · '}
+              </span>
+              <span title={why.title}>{why.label}</span>
+            </>
+          )}
+          {stale && state?.checkedAt != null && (
+            <span aria-hidden className="decorative-mark text-gray-400 dark:text-gray-500">
+              {' · '}
+            </span>
+          )}
+          {state?.checkedAt != null && <ReviewedAgo at={state.checkedAt} className="text-xs" />}
+        </span>
+      )}
+      {ready && !running && (
+        <button
+          type="button"
+          disabled={starting}
+          onClick={() => start.mutate({ prId, ident })}
+          title="Check this ticket against all its PRs"
+          className="whitespace-nowrap rounded border border-ai-border bg-white/70 px-2 py-0.5 text-xs font-medium text-ai-signal hover:border-ai-signal/60 hover:bg-ai-surface-2 disabled:opacity-60 dark:bg-gray-900/50"
+        >
+          {starting ? 'Starting…' : cov == null ? 'Check story' : 'Re-check'}
+        </button>
+      )}
+      {refused != null && <span className="text-xs text-red-700 dark:text-red-400">{refusalSentence(refused)}</span>}
+      {start.isError && <span className="text-xs text-red-700 dark:text-red-400">Could not start the check.</span>}
+    </div>
+  );
+}
+
 function TicketStack({
   stack,
   review,
@@ -798,6 +964,9 @@ function TicketStack({
         t == null ? 'border-dashed border-gray-300 dark:border-gray-700' : 'border-gray-200 dark:border-gray-800'
       }`}
     >
+      {single && t != null ? (
+        <StoryViewHeader headingId={headingId} t={t} cat={cat} rollup={rollup} prCount={stack.rows.length} review={review} />
+      ) : (
       <div className="flex flex-wrap items-start gap-x-2 gap-y-1.5 px-3 py-3">
         <div className="min-w-0 flex-1 basis-[16rem]">
           <h3 id={headingId} className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
@@ -852,36 +1021,7 @@ function TicketStack({
             )}
           </h3>
           <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-600 dark:text-gray-300">
-            {single && t?.ident != null && t.provider === 'jira' && (cat != null || t.status != null) ? (
-              // The story view's Jira ticket: the chip is the status picker (the one tracker write).
-              <TicketStatusPicker
-                ident={t.ident}
-                status={t.status ?? STATUS_WORD[cat ?? 'new']}
-                chipClassName={cat != null ? `${CHIP} border-transparent ${STATUS_PILL[cat]}` : NEUTRAL_CHIP}
-              />
-            ) : (
-              <>
-                {t != null && cat != null && (
-                  <span className={`${CHIP} border-transparent ${STATUS_PILL[cat]}`}>{t.status ?? STATUS_WORD[cat]}</span>
-                )}
-                {t != null && cat == null && t.status != null && <span className={NEUTRAL_CHIP}>{t.status}</span>}
-              </>
-            )}
-            {t?.issueType != null && <span className="text-[11px] text-gray-500 dark:text-gray-400">{t.issueType}</span>}
-            {t?.assignee != null && (
-              <span className="inline-flex items-center gap-1.5">
-                <span
-                  aria-hidden
-                  className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-gray-200 text-[10px] font-semibold text-gray-700 dark:bg-gray-700 dark:text-gray-100"
-                >
-                  {initialsOf(t.assignee.name)}
-                </span>
-                <span>{t.assignee.name}</span>
-              </span>
-            )}
-            {t != null && t.assignee == null && t.status != null && (
-              <span className="text-gray-500 dark:text-gray-400">Unassigned</span>
-            )}
+            {t != null && <TicketPeopleAndStatus t={t} cat={cat} single={false} />}
           </div>
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 sm:mt-0.5">
@@ -910,6 +1050,7 @@ function TicketStack({
           )}
         </div>
       </div>
+      )}
       {/* The Story section is the story view's alone: on the board it would start every story read
           per stack on mount. */}
       {single && t?.ident != null && (

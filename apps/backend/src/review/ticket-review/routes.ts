@@ -23,6 +23,7 @@ import { getTicketSource } from '../../tracker/ticket-source.js';
 import { getReviewPrContext } from '../claude-review/persist.js';
 import { postStoryGapsComment } from './post-item.js';
 import { deriveTicketReviewState, manualTicketIdent, readLiveMembers, ticketHash } from './fingerprint.js';
+import { ticketSweepWait } from './sweep-waits.js';
 import {
   getLatestTicketReview,
   getTicketIdentsForPr,
@@ -148,15 +149,15 @@ async function statesFor(
       const story = await jiraStoryFor(accountId, ident, memberIds);
       if (story) live = { ticketHash: ticketHash(story), members: await readLiveMembers(ctx, accountId, memberIds) };
     }
-    out.set(
+    const state = deriveTicketReviewState({
       ident,
-      deriveTicketReviewState({
-        ident,
-        latest: inp?.latest ?? null,
-        runningRunId: inp?.runningRunId ?? null,
-        live,
-      }),
-    );
+      latest: inp?.latest ?? null,
+      runningRunId: inp?.runningRunId ?? null,
+      live,
+    });
+    // Why the auto sweeper is holding a stale ticket back (sweep.ts rule 7) — only while it is stale.
+    if (state.status === 'stale') state.waiting = ticketSweepWait(accountId, ident);
+    out.set(ident, state);
   }
   return out;
 }

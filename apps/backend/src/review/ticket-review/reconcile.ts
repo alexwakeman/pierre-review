@@ -15,13 +15,16 @@
 //     missing item becomes a postable item.
 //   • Unreported ⇒ `not_checked` (no report at all: alignment `not_checked` and the one row).
 //
-// Every string is clipped and trimmed here, because the SPA renders it as plain text. The items —
+// The summary keeps only its leading prose (shared `storySummaryProse`): no list, no heading, cut at
+// a sentence end, never mid-word. Every other string is clipped and trimmed here, because the SPA renders it as plain text. The items —
 // what can be posted — are derived from the reconciled assessment, deterministically: every
 // `not_met` / `partly_met` criterion and every missing item. `owner_pr_id` is the member Claude
 // named in `expectedIn`, else null (the reader's PR, at post time).
 import {
   CLAUDE_REVIEW_TICKET_MAX_CRITERIA,
+  criterionTextOnly,
   storyMissingRef,
+  storySummaryProse,
   type ClaudeReviewTicket,
   type ClaudeTicketAlignment,
   type ClaudeTicketCriterionStatus,
@@ -38,7 +41,6 @@ import {
   TICKET_GAP_LIST_MAX,
   TICKET_GAP_TITLE_CHARS,
   TICKET_PATH_CHARS,
-  TICKET_SUMMARY_CHARS,
   criterionRef,
 } from '../claude-review/ticket.js';
 import type { TicketItemWrite } from './persist.js';
@@ -175,7 +177,8 @@ export function reconcileTicketReview(
     for (const c of reported.criteria ?? []) {
       if (criteria.length >= CLAUDE_REVIEW_TICKET_MAX_CRITERIA) break;
       if (!c || typeof c.status !== 'string' || !STATUSES.has(c.status)) continue;
-      const text = clip(c.text, TICKET_CRITERION_TEXT_CHARS);
+      // The row prints its own ref, so a copy the model led with ("AC3: …") is dropped.
+      const text = clip(typeof c.text === 'string' ? criterionTextOnly(c.text) : null, TICKET_CRITERION_TEXT_CHARS);
       if (!text) continue;
 
       const evidence: TicketEvidence[] = [];
@@ -260,7 +263,9 @@ export function reconcileTicketReview(
       : 'not_checked';
   const assessment: TicketAssessment = {
     alignment,
-    summary: namePrRefs(clip(reported.summary, TICKET_SUMMARY_CHARS), members),
+    // TWO PLAIN SENTENCES: only the prose before any list or heading, cut at a sentence end (the
+    // criteria and missing items below carry the detail).
+    summary: namePrRefs(storySummaryProse(typeof reported.summary === 'string' ? reported.summary : null), members),
     criteria: criteria.length > 0 ? criteria : unchecked(),
     missing,
     notRequested,

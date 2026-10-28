@@ -129,7 +129,7 @@ stored; the ladder is read at call time, so an env change takes effect on the ne
   - **THE SUMMARY IS MARKDOWN, LED BY BULLETS** (`'summary'` in the system prompt, pinned by
     `prompts.test.ts`): ONE short plain-English sentence, then a "- " bullet per main issue, most
     serious first — and no list when there are no issues; no headings or tables. The ticket review's
-    `summary` follows the same shape (one sentence, then a bullet per gap naming where it belongs).
+    `summary` does NOT: it is two plain sentences, no list (§ Ticket review).
     Older plain-prose summaries render unchanged.
   - **PR references in every piece of model text link to that PR in Limn** — one batched, DB-only
     `POST /api/prs/resolve` (`read` tier, account-scoped, ≤ `PR_REF_RESOLVE_MAX` refs, 400 over)
@@ -1640,6 +1640,18 @@ table, the routes' paths, the queue and the `SEQUENCE_DIAGRAM_*` env names keep 
   `unreadable`, `too_few_prs`, `too_many_prs`; ⚠ `invalid_diagram` COUNTS, it was billed; a Redraw
   never counts). A no-code change is STORED as a `refused/no_code` row (no model, no cost)
   so the pane can say why and the same head is never judged twice.
+- ⚠ **A REDRAW IS LIMITED** (2026-10-28: one story drawn 11 times and one PR 9 times spent the cap of
+  30 by 14:52; every later review drew nothing, silently, and BMD-1086 never got a story design). A
+  subject drawn before — a story with the SAME pull requests (`persist.ts` `subjectDrawHistory`
+  compares the newest drawn row's members) — is a REDRAW: at most `SEQUENCE_DIAGRAM_SUBJECT_DAILY_DRAWS`
+  (2, its first draw included) counted review rows per subject per UTC day (`redraw_limit`), and never
+  the cap's last slots (shared `repeatRunLimit`). A first draw, and a story whose PRs changed (one
+  joined or left), are held only by the cap. A skip for a limit is LOGGED (`logTriggerLimits`) and
+  kept in memory per subject at that fingerprint (`diagramAutoSkip`), served as the slot's
+  `autoSkipped` (`daily_limit` / `redraw_limit`) while those inputs are live, so the pane says why
+  ("Not drawn yet: today's automatic designs are used up…"). A succeeded TICKET review also asks for
+  its story design (`maybeDrawStoryDiagramAfterTicketReview`): a PR's ticket link is read when the PR
+  is received and can land after that PR's review ended, so the PR trigger saw a one-PR ticket.
 - **Fingerprints** (clock-free): PR = sha256(version, prId, headSha) — only a push redraws it;
   story = sha256(version, ident, sorted `prId:headSha:state`) — a member pushed, merged, joined or
   left. ⚠ The ticket TEXT is deliberately NOT in it (rewording does not change the design). Both fold
@@ -1850,6 +1862,35 @@ route strips a stale `ticket`/`tickets` key. Wire contract: [API.md](API.md) § 
   without an answer (budget, turns) or a cancelled one on the same fingerprint is not retried; one
   that THREW or was cut off by a restart stores no fingerprint (`retryable`, the boot reconcile), so
   it is.
+- ⚠ **ONE BUSY TICKET CANNOT SPEND THE DAY** (2026-10-28: one ticket's PR was pushed 11 times, each
+  push re-checked it, the 20 checks were gone by 11:40, and BMD-1086 — whose two new PRs joined that
+  afternoon — never updated; the story view said only "2 PRs changed since"). A PUSH-ONLY re-check
+  (`sweep.ts` `pushOnlyChange`: the same story and the same members in the same states as the last
+  succeeded run, only heads moved) is limited twice: at most `TICKET_REVIEW_PUSH_RECHECKS_PER_DAY`
+  (3, env-overridable) `cascade` rows of THAT ticket per UTC day (`countCascadeTicketReviewsSince`),
+  and never the workspace cap's last slots (shared `repeatRunLimit`: all but min(5, cap/4)). A
+  ticket's first check and a PR joining, leaving or merging are held only by the cap itself.
+- **The wait is said.** The sweeper keeps WHY it holds a stale ticket (`sweep-waits.ts`: `settling` /
+  `ticket_limit` / `daily_limit`, in memory) and the states route serves it as
+  `TicketReviewState.waiting` while the ticket is stale; the story view's header prints it beside
+  "N PRs changed since" ("daily limit reached", "next update tomorrow", "update due soon"; the
+  reason is the title). Re-check (a click) is never held by any of it.
+- **The summary is TWO plain sentences** (2026-10-28): how far the PRs together deliver the ticket,
+  then the most important thing still left (or that nothing is) — no bullets, no criteria list, no
+  headings; the criteria and missing items below carry the detail. Enforced in `reconcile.ts` by the
+  shared `storySummaryProse` (only the prose before the first list / heading line, cut at a sentence
+  end under 600 characters, never mid-word) — the SAME fold the SPA runs on an OLDER stored summary
+  (one sentence, then a bullet per gap). A criterion's text drops a leading copy of its own ref
+  (shared `criterionTextOnly`: "AC3: …" → "…"). The prior summary fed back to a re-run goes through
+  the same fold.
+- **Missing items** (`missing`, refs `M1`…) are what the ticket's title or description asks for that
+  no acceptance criterion covers and no PR does. A reader never sees the M-code: the story view and
+  the posted comment head them "Asked for outside the criteria" (shared `STORY_MISSING_HEADING`, its
+  explanation behind the ⓘ) and lead each with its own short title (the prompt asks for a few
+  descriptive words). The refs stay internal (item refs, AI Fix's `S<t>-M<n>`).
+- **A succeeded ticket review asks for its story design** (`diagrams/trigger.ts`
+  `maybeDrawStoryDiagramAfterTicketReview`, fire-and-forget from `launch`), under the design trigger's
+  own rules (§ Design diagrams) — a PR's ticket link can land after that PR's review ended.
 - **Posted by a click, or by AUTO-POSTING when the owner PR's workspace switched it on** (§
   Auto-posting — automatic runs only, owner PR only). ⚠ **THE GAPS GO AS ONE PR-LEVEL COMMENT PER
   (run, target PR)** (`ticket-review/post-item.ts` `postStoryGapsComment`, `POST
@@ -1858,8 +1899,9 @@ route strips a stale `ticket`/`tickets` key. Wire contract: [API.md](API.md) § 
   ONE "Post N gaps to <PR>" button per target (`lib/ticketReview.ts` `storyGapGroups`, the server's
   own selection, so N is what goes in), and the per-item Post buttons are GONE. Pinned to the head
   the run judged (`HeadMoved` otherwise). The body (`storyGapsCommentBody`): "**BMD-7 story check**
-  on abc1234: 3 gaps." then one block per gap ("**AC2 · Not met:** <criterion>", the file line when it
-  belongs in that PR, the explanation), then — auto only, when that kind is on — "#### Not asked for"
+  on abc1234: 3 gaps." then one block per criterion gap ("**AC2 · Not met:** <criterion>", the file line when it
+  belongs in that PR, the explanation), then the missing items under "#### Asked for outside the
+  criteria", each "**<title>**" with no M-code (`criteriaFirst` orders them so), then — auto only, when that kind is on — "#### Not asked for"
   with its entries; built under 60,000 characters, what does not fit COUNTED and left unposted. ⚠
   "Never twice" stays PER ITEM: after the 201 EVERY item in the comment is stamped with the one comment
   id (the posted_* columns); a later check posts a NEW collated comment of only the gaps not yet posted

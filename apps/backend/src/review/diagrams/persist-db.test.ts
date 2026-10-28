@@ -173,6 +173,31 @@ describe('storage', () => {
     expect(await persist.countReviewDiagramsSince(ctx, 2, 0)).toBe(0);
   });
 
+  it("a subject's draw history: today's counted review rows, and the members of its newest drawn row", async () => {
+    // Same rows as the cap: fp1 review, fp3 review, fp4 invalid (counts), fp5 no_code (free); the
+    // manual click and the head_moved refusal are not review draws that count.
+    const h = await persist.subjectDrawHistory(ctx, 1, 'pr', String(prA), 0);
+    expect(h).toEqual({ drawsToday: 3, drawnBefore: true, lastMemberIds: null });
+    expect((await persist.subjectDrawHistory(ctx, 1, 'pr', String(prA), Date.now() + 60_000)).drawsToday).toBe(0);
+    expect(await persist.subjectDrawHistory(ctx, 2, 'pr', String(prA), 0)).toEqual({ drawsToday: 0, drawnBefore: false, lastMemberIds: null });
+    await persist.insertQueuedDiagram(ctx, {
+      accountId: 1,
+      kind: 'story',
+      subject: 'jira:x#S-1',
+      prId: null,
+      ticketKey: 'S-1',
+      fingerprint: 's1',
+      headSha: null,
+      members: [
+        { prId: prA, repo: 'acme/api', number: 1, title: 'a', state: 'open', headSha: HEAD },
+        { prId: 99, repo: 'acme/web', number: 2, title: 'b', state: 'merged', headSha: HEAD2 },
+      ],
+      trigger: 'review',
+      model: 'claude-sonnet-5',
+    });
+    expect(await persist.subjectDrawHistory(ctx, 1, 'story', 'jira:x#S-1', 0)).toEqual({ drawsToday: 1, drawnBefore: true, lastMemberIds: [prA, 99] });
+  });
+
   it('a Mermaid-era row (no design) is no diagram: the slot reads past it, both succeeded and failed', async () => {
     const { slotFor } = await import('./routes.js');
     // A PR with only a retired Mermaid diagram (and a later Mermaid-era failure) reads as nothing.

@@ -16,7 +16,13 @@
 // comment is stamped with the one comment id. From there nothing fails or retries: the stamps and
 // the settle are best-effort.
 import { and, eq } from 'drizzle-orm';
-import { storyOneLine, type TicketReview, type TicketReviewItem } from '@pierre-review/shared';
+import {
+  STORY_MISSING_HEADING,
+  criterionTextOnly,
+  storyOneLine,
+  type TicketReview,
+  type TicketReviewItem,
+} from '@pierre-review/shared';
 import type { AgentContext } from '../agent-context.js';
 import { getReviewPrContext } from '../claude-review/persist.js';
 import { settlePrAfterWrite } from '../../sync/resync-after-write.js';
@@ -110,13 +116,26 @@ export function storyGapsCommentBody(
   const lead = `**${noMarker(a.ticketName)} story check** on ${a.headSha.slice(0, 7)}: ${counts.join(', ')}.`;
   const out: string[] = [lead];
   let used = lead.length + 400;
+  // Criteria ("**AC3 · Not met:** …", the ticket's own numbering), then the missing items under their
+  // own heading, each led by its title (their 'M1'… ref is internal, never shown). The caller hands the
+  // gaps in that order (`criteriaFirst`), so the first `gaps` entries are exactly the ones posted.
   let gaps = 0;
+  let missingHeading = false;
   for (const g of a.gaps) {
-    const words = statusWords(g.status);
-    const b = block(`**${noMarker(g.ref)} · ${words[0]!.toUpperCase()}${words.slice(1)}:** ${noMarker(storyOneLine(g.title))}`, g.path, g.line, g.body);
-    if (gaps > 0 && used + b.length + 2 > budget) break;
+    const missing = g.status === 'missing';
+    const head = missing
+      ? `**${noMarker(storyOneLine(g.title))}**`
+      : `**${noMarker(g.ref)} · ${statusWords(g.status)[0]!.toUpperCase()}${statusWords(g.status).slice(1)}:** ${noMarker(storyOneLine(criterionTextOnly(g.title)))}`;
+    const b = block(head, g.path, g.line, g.body);
+    const heading = missing && !missingHeading ? `#### ${STORY_MISSING_HEADING}` : null;
+    const extra = heading != null ? heading.length + 2 : 0;
+    if (gaps > 0 && used + b.length + extra + 2 > budget) break;
+    if (heading != null) {
+      out.push(heading);
+      missingHeading = true;
+    }
     out.push(b);
-    used += b.length + 2;
+    used += b.length + extra + 2;
     gaps += 1;
   }
   let notAsked = 0;
@@ -135,6 +154,11 @@ export function storyGapsCommentBody(
   const left = a.gaps.length - gaps + (a.notAsked.length - notAsked);
   if (left > 0) out.push(`${left} more did not fit in this comment.`);
   return { body: out.join('\n\n'), gaps, notAsked };
+}
+
+/** Criteria gaps before missing items, each group in its own order (the comment's layout). */
+export function criteriaFirst<T extends { status: TicketReviewItem['status'] }>(gaps: readonly T[]): T[] {
+  return [...gaps.filter((g) => g.status !== 'missing'), ...gaps.filter((g) => g.status === 'missing')];
 }
 
 // ---- posting ----
@@ -248,7 +272,9 @@ async function postInsideClaim(
   const member = run.members.find((m) => m.prId === targetPrId);
   if (!member) return { kind: 'not_a_member' };
   // Claims each gap it selects (released by the caller on exit).
-  const gaps = await selectGaps(ctx, accountId, run, targetPrId, a.viewedPrId, a.itemIds ? new Set(a.itemIds) : null, held);
+  const gaps = criteriaFirst(
+    await selectGaps(ctx, accountId, run, targetPrId, a.viewedPrId, a.itemIds ? new Set(a.itemIds) : null, held),
+  );
   const notAsked = a.notAsked ?? [];
   if (gaps.length === 0 && notAsked.length === 0) return { kind: 'already_posted' };
   const pr = await getReviewPrContext(ctx, targetPrId, accountId);

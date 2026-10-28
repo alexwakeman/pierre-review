@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { StoredPrFile } from '@pierre-review/shared';
+import { repeatRunLimit, type StoredPrFile } from '@pierre-review/shared';
 import { codeLocFor, isNonCodeFile } from '../../db/code-loc.js';
 
 // "IS THIS DIAGRAM STILL TRUE?" and "SHOULD A FINISHED REVIEW DRAW ONE?" — PURE, clock-free.
@@ -69,7 +69,7 @@ export function diffHasCode(changedFiles: readonly string[]): boolean {
 
 // ---- the trigger rule ----
 
-export type DiagramSkip = 'no_code' | 'drawn' | 'in_flight' | 'daily_cap' | 'too_few_prs';
+export type DiagramSkip = 'no_code' | 'drawn' | 'in_flight' | 'daily_cap' | 'redraw_limit' | 'too_few_prs';
 
 /**
  * Should a finished review queue this diagram? Null = yes. Order matters only for the reason
@@ -84,11 +84,16 @@ export function diagramSkipReason(a: {
   dailyCap: number;
   // Story diagrams only: open + merged members right now.
   memberCount?: number;
+  // A REDRAW: the subject was drawn before and (a story) has the same pull requests — only heads or
+  // states moved. A redraw never takes the cap's last slots (`repeatRunLimit`) and is drawn at most
+  // `subjectCap` times a day counting the first draw (`subjectDrawsToday`). Absent = a first draw.
+  redraw?: { subjectDrawsToday: number; subjectCap: number } | null;
 }): DiagramSkip | null {
   if (a.memberCount != null && a.memberCount < 2) return 'too_few_prs';
   if (a.code === 'no') return 'no_code';
   if (a.drawnAtFingerprint) return 'drawn';
   if (a.inFlight) return 'in_flight';
-  if (a.usedToday >= a.dailyCap) return 'daily_cap';
+  if (a.usedToday >= (a.redraw != null ? repeatRunLimit(a.dailyCap) : a.dailyCap)) return 'daily_cap';
+  if (a.redraw != null && a.redraw.subjectDrawsToday >= a.redraw.subjectCap) return 'redraw_limit';
   return null;
 }

@@ -93,10 +93,15 @@ describe('ticketToolPolicy', () => {
 });
 
 describe('the summary instruction', () => {
-  it('asks for one sentence, then a bullet per gap only when there are gaps', () => {
-    expect(TICKET_REVIEW_SYSTEM_PROMPT).toContain("'summary' is markdown: ONE plain sentence");
-    expect(TICKET_REVIEW_SYSTEM_PROMPT).toContain('only when something is unmet, partly met or missing, a short bullet list');
-    expect(TICKET_REVIEW_SYSTEM_PROMPT).not.toContain('one or two plain sentences');
+  it('asks for TWO plain sentences: how far, then the most important thing left — no bullets, no criteria', () => {
+    expect(TICKET_REVIEW_SYSTEM_PROMPT).toContain("'summary' is TWO plain sentences");
+    expect(TICKET_REVIEW_SYSTEM_PROMPT).toContain('the second names the most important thing still left, or says nothing is');
+    expect(TICKET_REVIEW_SYSTEM_PROMPT).toContain('No bullets, no list of criteria, no headings, no tables');
+    expect(TICKET_REVIEW_SYSTEM_PROMPT).not.toContain('a short bullet list');
+  });
+
+  it('asks for a short descriptive title per missing item, never a code', () => {
+    expect(TICKET_REVIEW_SYSTEM_PROMPT).toContain('Give each missing item a short descriptive `title`');
   });
 });
 

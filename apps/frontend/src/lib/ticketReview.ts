@@ -20,6 +20,7 @@ import {
   type TicketReviewRefusal,
   type TicketReviewStaleReason,
   type TicketReviewState,
+  type TicketReviewWait,
 } from '@pierre-review/shared';
 import { ticketInputFromStored } from './claudeReviewFollowUp.js';
 import { relativeTime } from './ui.js';
@@ -158,6 +159,28 @@ export function ticketCurrency(
       const one = ids.length === 1 ? labelOf(ids[0]!) : null;
       return { tone: 'stale', label: `${one ?? 'PR'} ${CHANGE_VERB[first]}`, title };
     }
+  }
+}
+
+/** Why a stale ticket has not been checked again yet — the auto sweeper's hold, in a few words. */
+export function ticketWaitWords(
+  w: TicketReviewWait | null | undefined,
+): { label: string; title: string } | null {
+  switch (w) {
+    case 'settling':
+      return { label: 'update due soon', title: 'It checks again once the PRs have been quiet for 5 minutes, or 20 minutes after the first change.' };
+    case 'ticket_limit':
+      return {
+        label: 'next update tomorrow',
+        title: 'This ticket has had its automatic re-checks for pushes today. A PR joining, leaving or merging still updates it. Re-check runs one now.',
+      };
+    case 'daily_limit':
+      return {
+        label: 'daily limit reached',
+        title: 'This workspace has used its automatic ticket checks for today. They start again at 00:00 UTC. Re-check runs one now.',
+      };
+    default:
+      return null;
   }
 }
 

@@ -732,8 +732,12 @@ function runEnded(item: QueueItem, end: RunEnd): Promise<AutoPostOutcome | null>
   // trigger never throws and only queues, so it can neither block nor fail this review.
   if (succeeded) {
     void import('../diagrams/trigger.js')
-      .then((m) =>
-        m.maybeDrawDiagramsAfterReview(ctx, { accountId: item.accountId, prId, reviewTrigger: item.trigger }),
+      .then(async (m) =>
+        m.logTriggerLimits(
+          ctx,
+          prId,
+          await m.maybeDrawDiagramsAfterReview(ctx, { accountId: item.accountId, prId, reviewTrigger: item.trigger }),
+        ),
       )
       .catch((err) =>
         ctx.log.warn(`sequence diagrams pr ${prId}: ${err instanceof Error ? err.message : String(err)}`),

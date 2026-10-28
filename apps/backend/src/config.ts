@@ -399,6 +399,9 @@ export const config = {
   // AUTOMATIC ticket reviews (trigger 'auto' / 'cascade') per workspace per UTC day. Not shared with
   // the PR review's own auto cap. Manual runs never count. Default = shared TICKET_REVIEW_DAILY_CAP.
   ticketReviewDailyCap: intFromEnv('TICKET_REVIEW_DAILY_CAP', 20),
+  // Automatic re-checks of ONE ticket that only follow pushes, per UTC day (review/ticket-review/sweep.ts).
+  // A PR joining, leaving or merging, or the story changing, is not limited by it.
+  ticketReviewPushRechecksPerDay: intFromEnv('TICKET_REVIEW_PUSH_RECHECKS_PER_DAY', 3),
   // ---- CI review (one run per (PR, head, failing-check set) — review/ci-review/) ----
   // Its OWN spend cap and turn cap: a CI run reads log excerpts and the files they point at, nothing
   // more. Env only — no route sets it.

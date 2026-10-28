@@ -428,6 +428,49 @@ export async function countReviewDiagramsSince(ctx: Ctx, accountId: number, dayS
   return rows.length;
 }
 
+/**
+ * One subject's draw history for the trigger's REDRAW rule (trigger.ts): how many review-started rows
+ * of it count against the cap today, and the members of its newest drawn row (any trigger, any status,
+ * no server refusal) — null members when that row has none (a PR diagram); `drawnBefore` false when
+ * the subject was never drawn.
+ */
+export async function subjectDrawHistory(
+  ctx: Ctx,
+  accountId: number,
+  kind: SequenceDiagramKind,
+  subject: string,
+  dayStartMs: number,
+): Promise<{ drawsToday: number; drawnBefore: boolean; lastMemberIds: number[] | null }> {
+  const d = t(ctx);
+  const today = (await ctx.db
+    .select({ id: d.id })
+    .from(d)
+    .where(
+      and(
+        eq(d.accountId, accountId),
+        eq(d.kind, kind),
+        eq(d.subject, subject),
+        eq(d.trigger, 'review'),
+        or(isNull(d.refusal), notInArray(d.refusal, [...FREE_REFUSALS])),
+        gte(d.createdAt, new Date(dayStartMs)),
+      ),
+    )
+    .execute()) as Array<{ id: number }>;
+  const last = (await ctx.db
+    .select({ members: d.members })
+    .from(d)
+    .where(and(eq(d.accountId, accountId), eq(d.kind, kind), eq(d.subject, subject), isNull(d.refusal)))
+    .orderBy(desc(d.createdAt), desc(d.id))
+    .limit(1)
+    .execute()) as Array<{ members: SequenceDiagramMember[] | null }>;
+  const row = last[0];
+  return {
+    drawsToday: today.length,
+    drawnBefore: row != null,
+    lastMemberIds: row?.members != null ? row.members.map((m) => m.prId) : null,
+  };
+}
+
 // ---- the wire ----
 
 export function toDiagramView(row: DiagramRow, current: boolean): SequenceDiagramView {

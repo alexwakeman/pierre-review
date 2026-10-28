@@ -379,6 +379,99 @@ describe('ticket review sweep', () => {
   });
 });
 
+// ⚠ THE BMD-1086 SEQUENCE (2026-10-28). One busy ticket (BMD-1083: one PR pushed 11 times) took a
+// cascade re-check after every push and spent the workspace's 20 automatic checks by 11:40. A story
+// checked by hand (run 361, two PRs) then gained two more PRs that afternoon and never updated: the
+// sweeper parked it on the cap every tick, and the story view said only "2 PRs changed since".
+describe('one busy ticket cannot spend the day (BMD-1086)', () => {
+  const BUSY = 'jira:https://acme.atlassian.net/rest/api/3#BMD-1083';
+  const STORY = 'jira:https://acme.atlassian.net/rest/api/3#BMD-1086';
+  // Ticks on today's UTC day, clear of midnight (rows are stamped with the real clock).
+  const B = NOW - (NOW % 86_400_000) + 6 * 3_600_000;
+  const at = (min: number): number => B + min * 60_000;
+
+  it('push-only re-checks stop at the per-ticket limit; PRs joining the story still re-check it', async () => {
+    const { repeatRunLimit } = await import('@pierre-review/shared');
+    const waits = await import('./sweep-waits.js');
+    await endQueuedRuns();
+    const fresh = new Date(B - 3_600_000);
+    await addPr('busy', repoIds[0]!, fresh);
+    await addPr('s1', repoIds[1]!, fresh);
+    await addPr('s2', repoIds[2]!, fresh);
+    membership[BUSY] = ['busy'];
+    membership[STORY] = ['s1', 's2'];
+    await seedCurrentRun(BUSY);
+    // Run 361: a manual check of the story's first two PRs.
+    await seedCurrentRun(STORY);
+
+    sweep._resetTicketSweepForTest();
+    // Baseline ticks (everything reads "changed" after a reset, and what settles queues a tick
+    // later); whatever they queue is ended, so only this test's tickets move from here.
+    await sweep.runTicketReviewSweep(ctx, at(0), deps());
+    await sweep.runTicketReviewSweep(ctx, at(7), deps());
+    await endQueuedRuns();
+    const base = await persist.countAutoTicketReviewsSince(ctx, 1, ws, B);
+    // Room for 8 more automatic checks: the old rule let the busy ticket take all 8.
+    dailyCap = Math.max(base + 8, 20);
+    expect(repeatRunLimit(dailyCap) - base).toBeGreaterThanOrEqual(3);
+
+    let busyRuns = 0;
+    let t = 8;
+    for (let i = 1; i <= 10; i += 1) {
+      await push('busy', `h_busy_${i}`);
+      await sweep.runTicketReviewSweep(ctx, at(t), deps());
+      const settled = await sweep.runTicketReviewSweep(ctx, at(t + 6), deps());
+      busyRuns += settled.queued.filter((q) => q.ident === BUSY).length;
+      await endQueuedRuns();
+      t += 7;
+    }
+    expect(busyRuns).toBe(3);
+    expect(waits.ticketSweepWait(1, BUSY)).toBe('ticket_limit');
+
+    // The afternoon: two more PRs name the story.
+    await addPr('s3', repoIds[0]!, new Date(at(t)));
+    await addPr('s4', repoIds[3]!, new Date(at(t)));
+    membership[STORY] = ['s1', 's2', 's3', 's4'];
+    const joined = await sweep.runTicketReviewSweep(ctx, at(t), deps());
+    const later = await sweep.runTicketReviewSweep(ctx, at(t + 6), deps());
+    expect([...joined.queued, ...later.queued].filter((q) => q.ident === STORY).map((q) => q.trigger)).toEqual(['cascade']);
+    expect(waits.ticketSweepWait(1, STORY)).toBeNull();
+    dailyCap = 20;
+  });
+
+  it('a push-only re-check never takes the last slots; the wait says why', async () => {
+    const { repeatRunLimit } = await import('@pierre-review/shared');
+    const waits = await import('./sweep-waits.js');
+    const QUIET = 'jira:https://acme.atlassian.net/rest/api/3#BMD-1048';
+    await endQueuedRuns();
+    await addPr('c1', repoIds[1]!, new Date(at(190)));
+    membership[QUIET] = ['c1'];
+    await seedCurrentRun(QUIET);
+    await sweep.runTicketReviewSweep(ctx, at(195), deps());
+    await endQueuedRuns();
+    const used = await persist.countAutoTicketReviewsSince(ctx, 1, ws, B);
+    // One slot left: a push-only re-check may not take it (the reserve kept for first checks and
+    // PRs joining or leaving).
+    dailyCap = used + 1;
+    expect(repeatRunLimit(dailyCap)).toBeLessThanOrEqual(used);
+    await push('c1', 'h_c1_push');
+    await sweep.runTicketReviewSweep(ctx, at(200), deps());
+    const capped = await sweep.runTicketReviewSweep(ctx, at(207), deps());
+    expect(capped.queued).toEqual([]);
+    expect(waits.ticketSweepWait(1, QUIET)).toBe('daily_limit');
+    dailyCap = 20;
+  });
+
+  it('pushOnlyChange: only heads moved', () => {
+    const m = (prId: number, state: 'open' | 'merged' = 'open', headSha = 'a') => ({ prId, headSha, state });
+    const last = { ticketHash: 'h', members: [m(1), m(2)] };
+    expect(sweep.pushOnlyChange(last, 'h', [m(1, 'open', 'b'), m(2)])).toBe(true);
+    expect(sweep.pushOnlyChange(last, 'h', [m(1), m(2), m(3)])).toBe(false);
+    expect(sweep.pushOnlyChange(last, 'h', [m(1, 'merged'), m(2)])).toBe(false);
+    expect(sweep.pushOnlyChange(last, 'edited', [m(1), m(2)])).toBe(false);
+  });
+});
+
 describe('member refusal', () => {
   it(`⚠ refuses too_many_prs with the count`, async () => {
     const r = await prep.resolveTicketInputs(ctx, 1, BIG, { originPrId: pr.b1!, manualTicket: null });

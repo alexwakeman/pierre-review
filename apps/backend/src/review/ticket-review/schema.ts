@@ -87,7 +87,7 @@ function buildBaseTicketReviewShape(z: ZodNs) {
 
   return {
     alignment: z.enum(['aligned', 'partly_aligned', 'not_aligned', 'unclear']),
-    summary: z.string().describe('Markdown: one sentence on how far the pull requests, together, deliver the ticket, then a short "- " bullet per gap (only when there are gaps).'),
+    summary: z.string().describe('Two plain sentences: how far the pull requests, together, deliver the ticket, then the most important thing still left (or that nothing is). No bullets, no headings.'),
     criteria: z
       .array(
         z.object({
@@ -113,7 +113,7 @@ function buildBaseTicketReviewShape(z: ZodNs) {
     missing: z
       .array(
         z.object({
-          title: z.string().describe('A short name for what is missing.'),
+          title: z.string().describe('A short descriptive title naming what is missing, in a few words. Never a code or number.'),
           explanation: z.string(),
           expectedIn,
           ...where,

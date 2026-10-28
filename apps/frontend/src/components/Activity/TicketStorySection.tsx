@@ -10,7 +10,7 @@
 //
 // In order, and nothing else (no dependency or reference cards, ever):
 //   1. CLAUDE'S SUMMARY AND CRITERIA (`storySummaryOf`, lib/ticketStory.ts): the ticket review's result
-//      when one exists — the currency pill, the summary, every criterion with who delivers it, the
+//      when one exists — the summary (two sentences; its currency is in the header, not here), every criterion with who delivers it, the
 //      missing and not-asked-for items, and "What each PR adds"; otherwise the sprint brief's summary
 //      and numbered criteria ("Worked out from the description" when derived); otherwise nothing.
 //      THE STORY'S DESIGN (StoryDesignSection.tsx) sits RIGHT UNDER THE SUMMARY AND ITS CRITERIA
@@ -42,13 +42,12 @@ import { useTicketReviewById } from '../../hooks/useTicketReview.js';
 import { criteriaMatch, shownRun, type StorySummaryKind } from '../../lib/storyDocsAlignment.js';
 import { useTicketStory } from '../../hooks/useTicketPrs.js';
 import type { CardTicket } from '../../lib/cardTickets.js';
-import { memberLabel, ticketCurrency } from '../../lib/ticketReview.js';
 import { reviewTexts, type KnownPr } from '../../lib/reviewPrRefs.js';
 import { storyDesignOffered, storyFallbackTicket, storySummaryOf } from '../../lib/ticketStory.js';
 import { useFilters } from '../../store/filters.js';
 import { InfoButton } from '../InfoModal.js';
 import { ReviewPrRefsProvider } from '../ReviewPrRefs.js';
-import { CurrencyPill, MemberCards, TicketResults } from '../TicketReviewParts.js';
+import { MemberCards, TicketResults } from '../TicketReviewParts.js';
 import { StoryDisclosure } from '../TicketStory.js';
 import { StoryDesignButton, StoryDesignSection, useStoryDesign, type StoryDesign } from './StoryDesignSection.js';
 import { StoryDocsAlignmentBlock, StoryDocsButton, StoryDocsCriterionDetail } from './StoryDocsAlignment.js';
@@ -312,11 +311,6 @@ function ReviewSummary({
       </div>
     );
   }
-  const labelOf = (prId: number): string | null => {
-    const m = members.find((x) => x.prId === prId);
-    return m != null ? memberLabel(m) : null;
-  };
-  const currency = ticketCurrency(state, labelOf);
   // A bare "#12" in the text reads as the repo of the PR that started the run.
   const home = members.find((m) => m.prId === review.originPrId) ?? members[0];
   return (
@@ -328,11 +322,7 @@ function ReviewSummary({
       texts={texts}
     >
       <div className="space-y-2" data-testid="story-review">
-        {currency != null && (
-          <div>
-            <CurrencyPill currency={currency} />
-          </div>
-        )}
+        {/* The currency ("2 PRs changed since") is the header's (OpenPrsCards `StoryViewHeader`): said once. */}
         {review.status === 'succeeded' ? (
           <TicketResults review={review} viewedPrId={null} docsItems={docsNotes.items} afterCriteria={design} />
         ) : (

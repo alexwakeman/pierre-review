@@ -936,6 +936,32 @@ export async function getTicketItemPostContext(
 }
 
 /**
+ * The ticket's 'cascade' runs (automatic re-checks) since `dayStartMs` — the per-ticket limit on
+ * re-checks that only follow pushes (sweep.ts). Every workspace counts: it is the ticket's own budget.
+ */
+export async function countCascadeTicketReviewsSince(
+  ctx: AgentContext,
+  accountId: number,
+  ident: string,
+  dayStartMs: number,
+): Promise<number> {
+  const { tr } = tables(ctx);
+  const rows = (await ctx.db
+    .select({ id: tr.id })
+    .from(tr)
+    .where(
+      and(
+        eq(tr.accountId, accountId),
+        eq(tr.ticketIdent, ident),
+        eq(tr.trigger, 'cascade'),
+        gte(tr.createdAt, new Date(dayStartMs)),
+      ),
+    )
+    .execute()) as Array<{ id: number }>;
+  return rows.length;
+}
+
+/**
  * Automatic ticket reviews (trigger 'auto' or 'cascade') a workspace started since `dayStartMs` —
  * the TICKET_REVIEW_DAILY_CAP counter. Manual runs never count.
  */

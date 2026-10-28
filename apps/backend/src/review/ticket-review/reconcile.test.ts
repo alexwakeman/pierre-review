@@ -120,3 +120,45 @@ describe('namePrRefs', () => {
     expect(namePrRefs(null, ms)).toBeNull();
   });
 });
+
+describe('reconcileTicketReview — the summary is two plain sentences', () => {
+  // Run 361 (BMD-1086, 2026-10-28) stored one sentence, then a bullet per criterion, clipped mid-word
+  // at 1,000 characters ("AC10: CI still runs one `npm test` job, not o…").
+  const OLD_SHAPE = [
+    'Together the two PRs add the service-template flag and project fixtures. Most of the page-rendering work is not done.',
+    '- AC1/AC8: "View baseline details" still matches by ref (PR1).',
+    `- AC10: CI still runs one \`npm test\` job, not o${'x'.repeat(1_000)}`,
+  ].join('\n');
+
+  it('keeps only the prose before the first bullet, whole', () => {
+    const { assessment } = reconcileTicketReview(ticket, members, { alignment: 'partly_aligned', summary: OLD_SHAPE });
+    expect(assessment.summary).toBe(
+      'Together the two PRs add the service-template flag and project fixtures. Most of the page-rendering work is not done.',
+    );
+  });
+
+  it('a long summary is cut at a sentence end, never mid-word', () => {
+    const long = `${'The first sentence is here. '.repeat(30)}And a trailing clause with no end`;
+    const { assessment } = reconcileTicketReview(ticket, members, { alignment: 'aligned', summary: long });
+    expect(assessment.summary!.length).toBeLessThanOrEqual(600);
+    expect(assessment.summary!.endsWith('here.')).toBe(true);
+  });
+
+  it('a summary that is only a list stores nothing; PR refs are named', () => {
+    expect(reconcileTicketReview(ticket, members, { alignment: 'aligned', summary: '- a\n- b' }).assessment.summary).toBeNull();
+    const named = reconcileTicketReview(ticket, [{ ...members[0]!, number: 7 }], { alignment: 'aligned', summary: 'PR1 does it all.' });
+    expect(named.assessment.summary).toBe('api#7 does it all.');
+  });
+
+  it("a criterion's own leading ref is dropped (the row prints the ref)", () => {
+    const { assessment, items } = reconcileTicketReview(ticket, members, {
+      alignment: 'partly_aligned',
+      criteria: [
+        { text: 'AC1: CSV export works', status: 'met', deliveredBy: ['PR1'] },
+        { text: 'AC2 - every new error code shows mapped copy', status: 'not_met', explanation: 'x' },
+      ],
+    });
+    expect(assessment.criteria.map((c) => c.text)).toEqual(['CSV export works', 'Every new error code shows mapped copy']);
+    expect(items.map((i) => i.title)).toEqual(['Every new error code shows mapped copy']);
+  });
+});
