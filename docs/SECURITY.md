@@ -257,6 +257,15 @@ clone count. **The invariant: a GitHub token never reaches disk.**
   sockets) and `tracker/routes.test.ts`. Rate tiers: every route that can reach the customer's Jira
   (the ticket GET/refresh/ac-field, the connection check, the tracker PUT and `POST
   /api/ticket-links`, whose kicks spend it) is on `search`, by exact path in `tierFor`.
+- **Reference-docs Confluence pages (`reference-docs/wiki/confluence.ts`) — a site the reader typed,
+  read with a saved token.** Every request goes through the tracker's transport under the STRICT policy
+  (`{ cloud: true }`: https only, public addresses only, judged at connect time), no redirects (the
+  Basic credential is never forwarded), 15 s, 8 MB, JSON only; a listing's `next` link is followed only
+  on the same site and API path. The token is SEALED and write-only (`workspace_wiki_credentials`, like a
+  tracker token); a page on the workspace's Jira host reuses the Jira credential, never another host's.
+  Errors are codes turned into our own sentences. Tiers: `POST /api/docs/wiki` and `/api/docs/:id/refresh`
+  are `search` + `ai` + `ai_hourly`, the connection check `search` + `read`
+  ([REFERENCE-DOCS.md](REFERENCE-DOCS.md) § Wiki sources).
 - **Reference-docs web pages (`reference-docs/url-fetch.ts`) — a page address the
   reader typed, fetched by the docs build.** http/https only, no credentials in the URL,
   **never loopback, link-local, multicast, reserved or `localhost`** (Limn's own unauthenticated

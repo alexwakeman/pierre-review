@@ -53,7 +53,8 @@ const VIEWS = [
   ['bot-detail:8', '?view=bot-detail:8', null],
   ...['overview', 'bottlenecks', 'stories'].map((t) => [`reports:${t}`, `?view=activity&activityRepo=insights&insightsTab=${t}`, t === 'overview' ? 'reports' : t === 'bottlenecks' ? 'chronology' : null]),
   ['reports:month', '?view=activity&activityRepo=insights&reportGrain=month', 'reports-month'],
-  ['docs', '?view=activity&activityRepo=docs', 'docs'],
+  // Two Confluence page trees beside the files: one current, one Confluence has stopped answering.
+  ['docs', '?view=activity&activityRepo=docs', 'docs', { expect: ['Release handbook', 'Confluence · 3 pages', 'Refresh now', 'Can’t reach this page in Confluence since'] }],
   ...['themes', 'paths', 'people', 'merged'].map((t) => [`sprint:${t}`, `?view=sprint&sprintTab=${t}`, t === 'themes' ? 'sprint-themes' : t === 'paths' ? 'sprint-paths' : null]),
   ['sprint:tray', `?view=sprint&sprintTab=themes&sprintStory=${story('PLAT-292')}`, 'sprint-tray'],
   ['ticket:PLAT-292', `?view=${ident('PLAT-292')}`, 'story-view'],
@@ -146,6 +147,14 @@ const VIEWS = [
     '?view=activity',
     null,
     { act: openSettingsTab('AI review'), expect: ['Related repos', 'Reviewed together with', 'acme/api and acme/infrastructure'] },
+  ],
+  // Settings → AI review → Confluence: the site and email saved, the token never shown; pages on the
+  // demo's Jira site read with the Jira token.
+  [
+    'settings:confluence',
+    '?view=activity',
+    null,
+    { act: openSettingsTab('AI review'), expect: ['Confluence', 'Pages on acme.atlassian.net use your Jira token.', 'Test connection'] },
   ],
   ['user-activity:2', '?view=user-activity:2', null],
   ['ws2:open-prs', '?view=activity&workspace=2', null],

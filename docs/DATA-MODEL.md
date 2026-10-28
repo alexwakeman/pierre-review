@@ -796,6 +796,18 @@ fact per account. Every read predicates on `account_id` (`currentLabelRowsFor`);
   (`StoryDocsAlignmentResult`). No unique index. Same account FK, composite workspace FK (ON DELETE cascade —
   ⚠ NOT re-homed by `deleteWorkspace`: its links name that workspace's library), `accountScopedTables()`,
   erasure and `verify:isolation`. Written only by `review/story-docs/` (docs/REFERENCE-DOCS.md).
+- **`reference_doc_wiki_pages`** (migration `0140`) — one row per page of a WIKI document (Confluence):
+  version, last edit, converted-markdown hash, last fetch, last error. Unique `(doc_id, page_id)` (every
+  upsert targets exactly it); named composite FK `(doc_id, account_id)` → `reference_docs (id,
+  account_id)` ON DELETE cascade. ⚠ Written ONLY by `reference-docs/wiki/pages.ts` `commitWikiPages`,
+  after a successful build (a failed or skipped refresh never advances a version). `accountScopedTables()`,
+  erasure, export, `verify:isolation`.
+- **`workspace_wiki_credentials`** (migration `0140`) — a SEALED wiki token per (account, workspace,
+  provider), plus site + email; never returned (`hasToken`). Composite workspace FK, cascade. Read only
+  through `reference-docs/wiki/credentials.ts` `resolveWikiCredential` (own token on the same host, else the
+  Jira credential on the same host). `accountScopedTables()`, erasure, export without the token,
+  `verify:isolation`. Also new on core rows: `reference_docs.wiki_json` / `.summary_cache_json` and
+  `workspaces.docs_used_at` (docs/REFERENCE-DOCS.md § Wiki sources).
 - **`sprint_view_snapshots`** (migration `0112`) — ONE per (account, workspace): "Since you last
   looked" on This Sprint — `current_json` / `current_at` (the latest view's snapshot: ident → stage, merged
   PR ids on sprint tickets) and `baseline_json` / `baseline_at` (the previous visit's last view). Every GET
