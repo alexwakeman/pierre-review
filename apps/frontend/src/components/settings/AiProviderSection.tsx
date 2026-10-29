@@ -16,7 +16,13 @@ import { useCodexLogin, useCodexLoginActions, useSetAiEffort, useSetAiProvider }
 import { safeExternalUrl } from '../../lib/ui.js';
 import { chatGptPlanLabel } from '../../lib/aiBudget.js';
 import { InfoButton } from '../InfoModal.js';
-import { SectionShell } from './ui.js';
+import { SectionShell, RadioInput } from './ui.js';
+import { Select, type SelectOption } from '../ui/index.js';
+
+const EFFORT_OPTIONS: readonly SelectOption<string>[] = [
+  { value: 'default', label: 'Default' },
+  ...AI_EFFORTS.map((e) => ({ value: e, label: AI_EFFORT_LABELS[e] })),
+];
 
 // SETTINGS → AI: the DEFAULT provider and each provider's sign-in. The default runs every AUTOMATIC run
 // (auto review, auto fix, the CI/ticket auto runs, scheduled summaries) and every surface without a model
@@ -32,8 +38,8 @@ import { SectionShell } from './ui.js';
 // explicitly set REVIEW_EFFORT wins and the control shows it, disabled.
 
 const BTN =
-  'rounded border border-gray-300 px-2 py-1 text-xs hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500';
-const MUTED = 'text-gray-500 dark:text-gray-400';
+  'inline-flex h-7 items-center gap-1 rounded-ui bg-ui-raise px-2.5 text-body font-medium text-ui-ink hover:bg-ui-hover touch:h-10 outline-none focus-visible:ring-2 focus-visible:ring-ui-accent disabled:opacity-50';
+const MUTED = 'text-ui-mute';
 
 const CHOICE_LABEL: Record<AiProviderSetting, string> = {
   auto: 'Auto',
@@ -92,36 +98,35 @@ export function AiProviderSection(): JSX.Element | null {
 
   return (
     <SectionShell title="AI" info={info} desc={`Default: ${aiProviderName(ai.provider)}.`}>
-      <fieldset disabled={fromEnv || set.isPending} className="flex flex-wrap items-center gap-3 text-xs">
+      <fieldset disabled={fromEnv || set.isPending} className="flex flex-wrap items-center gap-3 text-body">
         <legend className="sr-only">Automatic runs and default</legend>
-        <span aria-hidden="true" className="text-gray-700 dark:text-gray-200">
+        <span aria-hidden="true" className="text-ui-ink">
           Automatic runs and default:
         </span>
         {AI_PROVIDER_SETTINGS.map((v) => (
           <label key={v} className={`flex items-center gap-1.5 ${fromEnv ? 'opacity-60' : ''}`}>
-            <input
-              type="radio"
+            <RadioInput
               name="ai-provider"
               value={v}
               checked={chosen === v}
               onChange={() => set.mutate(v)}
             />
-            <span className="font-medium text-gray-700 dark:text-gray-200">{CHOICE_LABEL[v]}</span>
+            <span className="font-medium text-ui-ink">{CHOICE_LABEL[v]}</span>
           </label>
         ))}
       </fieldset>
-      {fromEnv && <p className={`text-xs ${MUTED}`}>Set by LIMN_AI_PROVIDER.</p>}
-      {set.isError && <p className="text-xs text-red-600 dark:text-red-400">{set.error.message}</p>}
+      {fromEnv && <p className={`text-body ${MUTED}`}>Set by LIMN_AI_PROVIDER.</p>}
+      {set.isError && <p className="text-body text-ui-danger">{set.error.message}</p>}
 
       <EffortControl setting={ai.effortSetting ?? { value: null, source: 'settings' }} />
 
-      <dl className="space-y-1.5 text-xs">
+      <dl className="space-y-1.5 text-body">
         <div className="flex flex-wrap items-baseline gap-x-2">
-          <dt className="w-14 shrink-0 font-medium text-gray-700 dark:text-gray-200">Claude</dt>
+          <dt className="w-14 shrink-0 font-medium text-ui-ink">Claude</dt>
           <dd className={MUTED}>{claudeLine(ai.providers.claude)}</dd>
         </div>
         <div className="flex flex-wrap items-baseline gap-x-2">
-          <dt className="w-14 shrink-0 font-medium text-gray-700 dark:text-gray-200">Codex</dt>
+          <dt className="w-14 shrink-0 font-medium text-ui-ink">Codex</dt>
           <dd className="flex flex-wrap items-center gap-2">
             <span className={MUTED}>{codexLine(ai.providers.codex)}</span>
             {!codexReady && ai.providers.codex.runtime !== 'installing' && (
@@ -148,9 +153,9 @@ export function AiProviderSection(): JSX.Element | null {
         </div>
       </dl>
       {install.state.phase === 'failed' && install.state.message && (
-        <p className="text-xs text-red-600 dark:text-red-400">{install.state.message}</p>
+        <p className="text-body text-ui-danger">{install.state.message}</p>
       )}
-      <p className={`text-xs ${MUTED}`}>Codex signs in with ChatGPT only. An OPENAI_API_KEY is not used.</p>
+      <p className={`text-body ${MUTED}`}>Codex signs in with ChatGPT only. An OPENAI_API_KEY is not used.</p>
     </SectionShell>
   );
 }
@@ -162,24 +167,19 @@ function EffortControl({ setting }: { setting: AiEffortSettingStatus }): JSX.Ele
   const chosen = set.isPending && set.variables !== undefined ? set.variables : setting.value;
   return (
     <div className="space-y-1">
-      <div className="flex flex-wrap items-center gap-2 text-xs">
-        <label htmlFor="ai-effort" className="text-gray-700 dark:text-gray-200">
+      <div className="flex flex-wrap items-center gap-2 text-body">
+        <label htmlFor="ai-effort" className="text-ui-ink">
           Effort for AI Review and AI Fix:
         </label>
-        <select
+        <Select
           id="ai-effort"
+          name="ai-effort"
           value={chosen ?? 'default'}
           disabled={fromEnv || set.isPending}
-          onChange={(e) => set.mutate(isAiEffort(e.target.value) ? e.target.value : null)}
-          className="rounded border border-gray-300 bg-white px-1.5 py-0.5 text-xs disabled:opacity-60 dark:border-gray-700 dark:bg-gray-900"
-        >
-          <option value="default">Default</option>
-          {AI_EFFORTS.map((e) => (
-            <option key={e} value={e}>
-              {AI_EFFORT_LABELS[e]}
-            </option>
-          ))}
-        </select>
+          onChange={(v) => set.mutate(isAiEffort(v) ? v : null)}
+          options={EFFORT_OPTIONS}
+          size="sm"
+        />
         <InfoButton title="Effort">
           <p>Higher effort reads more and finds more, and uses more of your plan or costs more.</p>
           <p className="mt-2">
@@ -192,8 +192,8 @@ function EffortControl({ setting }: { setting: AiEffortSettingStatus }): JSX.Ele
           </p>
         </InfoButton>
       </div>
-      {fromEnv && <p className={`text-xs ${MUTED}`}>Set by REVIEW_EFFORT.</p>}
-      {set.isError && <p className="text-xs text-red-600 dark:text-red-400">{set.error.message}</p>}
+      {fromEnv && <p className={`text-body ${MUTED}`}>Set by REVIEW_EFFORT.</p>}
+      {set.isError && <p className="text-body text-ui-danger">{set.error.message}</p>}
     </div>
   );
 }
@@ -221,17 +221,17 @@ function CodexSignIn({
     return (
       <span className="flex flex-wrap items-center gap-2">
         {authUrl != null && (
-          <a href={authUrl} target="_blank" rel="noreferrer" className="text-sky-700 underline dark:text-sky-400">
+          <a href={authUrl} target="_blank" rel="noreferrer" className="text-ui-accent underline">
             Open the ChatGPT sign-in
           </a>
         )}
         {verificationUrl != null && (
           <span className={MUTED}>
             Go to{' '}
-            <a href={verificationUrl} target="_blank" rel="noreferrer" className="text-sky-700 underline dark:text-sky-400">
+            <a href={verificationUrl} target="_blank" rel="noreferrer" className="text-ui-accent underline">
               the sign-in page
             </a>{' '}
-            and enter <span className="font-mono font-semibold text-gray-800 dark:text-gray-100">{state.userCode}</span>
+            and enter <span className="font-mono font-semibold text-ui-ink">{state.userCode}</span>
           </span>
         )}
         <button type="button" className={BTN} disabled={busy} onClick={onCancel}>
@@ -255,7 +255,7 @@ function CodexSignIn({
       <button type="button" className={`${MUTED} underline`} disabled={busy} onClick={() => onStart('device')}>
         Use a code instead
       </button>
-      {state?.state === 'failed' && <span className="text-red-600 dark:text-red-400">{state.message}</span>}
+      {state?.state === 'failed' && <span className="text-ui-danger">{state.message}</span>}
     </span>
   );
 }

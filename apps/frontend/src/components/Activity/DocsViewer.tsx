@@ -30,8 +30,8 @@ import type { DocsOpen } from '../../store/docsView.js';
 // to, in THIS box. One line above the page says so and clears it; when the words are gone (the
 // document was rebuilt) the same line says that instead and the view lands on the anchor.
 
-const MUTED = 'text-gray-500 dark:text-gray-400';
-const LINK = 'cursor-pointer text-sky-700 underline underline-offset-2 hover:text-sky-900 dark:text-sky-300 dark:hover:text-sky-100';
+const MUTED = 'text-ui-mute';
+const LINK = 'cursor-pointer text-ui-accent underline underline-offset-2 hover:text-ui-ink';
 const HEADING_ANCHORS: RehypePlugins = [rehypeDocHeadingAnchors];
 
 /**
@@ -222,8 +222,8 @@ export function DocsViewer({
   const body = useMemo(() => data?.markdown ?? '', [data?.markdown]);
 
   return (
-    <section aria-label="Document viewer" className="flex min-h-0 min-w-0 flex-1 flex-col rounded-lg border border-gray-200 dark:border-gray-800">
-      <div className="flex flex-wrap items-center gap-x-1 gap-y-1 border-b border-gray-200 px-3 py-2 text-xs dark:border-gray-800">
+    <section aria-label="Document viewer" className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <div className="flex min-h-11 flex-wrap items-center gap-x-1 gap-y-1 px-4 py-2 text-body">
         <nav aria-label="Where you are" className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
           <button type="button" className={LINK} onClick={() => onOpen(LIBRARY_INDEX_PATH, null)}>
             Library
@@ -238,7 +238,7 @@ export function DocsViewer({
                   {data.docTitle}
                 </button>
               ) : (
-                <span className="truncate font-medium text-gray-700 dark:text-gray-200">{data.docTitle}</span>
+                <span className="truncate font-medium text-ui-ink">{data.docTitle}</span>
               )}
             </>
           )}
@@ -247,7 +247,7 @@ export function DocsViewer({
               <span className={MUTED} aria-hidden="true">
                 ›
               </span>
-              <span className="truncate font-medium text-gray-700 dark:text-gray-200">{data.title}</span>
+              <span className="truncate font-medium text-ui-ink">{data.title}</span>
             </>
           )}
         </nav>
@@ -257,13 +257,13 @@ export function DocsViewer({
               type="button"
               disabled={data.prev == null}
               onClick={() => data.prev != null && onOpen(data.prev, null)}
-              className="inline-flex items-center gap-0.5 text-sky-700 hover:underline disabled:cursor-default disabled:text-gray-500 disabled:no-underline dark:text-sky-300 dark:disabled:text-gray-400"
+              className="inline-flex items-center gap-0.5 text-ui-accent hover:underline disabled:cursor-default disabled:text-ui-faint disabled:no-underline"
             >
               <ArrowIcon dir="left" size={11} />
               Previous
             </button>
             {contentsPath != null && (
-              <button type="button" onClick={() => onOpen(contentsPath, null)} className="text-sky-700 hover:underline dark:text-sky-300">
+              <button type="button" onClick={() => onOpen(contentsPath, null)} className="text-ui-accent hover:underline">
                 Contents
               </button>
             )}
@@ -271,7 +271,7 @@ export function DocsViewer({
               type="button"
               disabled={data.next == null}
               onClick={() => data.next != null && onOpen(data.next, null)}
-              className="inline-flex items-center gap-0.5 text-sky-700 hover:underline disabled:cursor-default disabled:text-gray-500 disabled:no-underline dark:text-sky-300 dark:disabled:text-gray-400"
+              className="inline-flex items-center gap-0.5 text-ui-accent hover:underline disabled:cursor-default disabled:text-ui-faint disabled:no-underline"
             >
               Next
               <ArrowIcon dir="right" size={11} />
@@ -282,7 +282,7 @@ export function DocsViewer({
       {strip != null && (
         <div
           role="status"
-          className="flex items-center gap-2 border-b border-gray-200 px-3 py-1.5 text-xs text-gray-700 dark:border-gray-800 dark:text-gray-200"
+          className="mx-4 flex items-center gap-2 rounded-ui bg-ui-raise px-3 py-1.5 text-body text-ui-ink"
           data-testid="docs-quote-strip"
         >
           {strip === 'painted' && <span aria-hidden="true" className="doc-quote-swatch h-3 w-3 shrink-0 rounded-sm" />}
@@ -293,28 +293,28 @@ export function DocsViewer({
             type="button"
             onClick={clearQuote}
             aria-label={strip === 'painted' ? 'Clear the highlight' : 'Dismiss'}
-            className="shrink-0 rounded p-0.5 text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-gray-100"
+            className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-ui text-ui-mute hover:bg-ui-hover hover:text-ui-ink touch:h-10 touch:w-10"
           >
             <CloseIcon size={12} />
           </button>
         </div>
       )}
-      <div ref={box} className="min-h-0 flex-1 overflow-y-auto px-4 py-3" data-testid="docs-viewer">
+      <div ref={box} className="min-h-0 flex-1 overflow-y-auto px-4 pb-6 pt-3 md:px-6" data-testid="docs-viewer">
         {open.path === LIBRARY_INDEX_PATH && !hasDocs ? (
-          <p className={`text-xs ${MUTED}`}>No documents yet. Add a PDF, Word or text file, or a web page.</p>
+          <p className={`text-body ${MUTED}`}>No documents yet. Add a PDF, Word or text file, or a web page.</p>
         ) : section.isPending ? (
-          <p className={`text-xs ${MUTED}`}>Loading…</p>
+          <p className={`text-body ${MUTED}`}>Loading…</p>
         ) : notFound ? (
-          <div className="space-y-2 text-xs">
-            <p className="text-gray-700 dark:text-gray-200">This page is no longer in the library.</p>
+          <div className="space-y-2 text-body">
+            <p className="text-ui-ink">This page is no longer in the library.</p>
             <button type="button" className={LINK} onClick={() => onOpen(LIBRARY_INDEX_PATH, null)}>
               Open the library
             </button>
           </div>
         ) : section.isError ? (
-          <p className="text-xs text-rose-700 dark:text-rose-400">{section.error.message}</p>
+          <p className="text-body text-ui-danger">{section.error.message}</p>
         ) : (
-          <div ref={page} className="text-[13px] text-gray-800 dark:text-gray-100">
+          <div ref={page} className="text-body text-ui-ink">
             <Markdown rehypeExtra={HEADING_ANCHORS} renderLink={renderLink} wideTables>
               {body}
             </Markdown>

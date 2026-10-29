@@ -3,7 +3,7 @@ import type { WorkspacePendingMuteUpdate } from '@pierre-review/shared';
 import { useWorkspaces, useWorkspaceMutations } from '../../hooks/useWorkspaces.js';
 import { useRepos } from '../../hooks/useTimeline.js';
 import { InfoButton } from '../InfoModal.js';
-import { SaveButton, SectionShell } from './ui.js';
+import { SaveButton, SectionShell, CheckInput } from './ui.js';
 import { ScopePendingSection, useSettingsWorkspace } from './workspaceScope.js';
 
 /**
@@ -157,52 +157,50 @@ export function PendingMuteSection(): JSX.Element {
         </InfoButton>
       }
     >
-      <label className="flex items-start gap-2 text-xs">
-        <input
-          type="checkbox"
+      <label className="flex items-start gap-2 text-body">
+        <CheckInput
           className="mt-0.5"
           checked={muted}
           onChange={(e) => setMuted(e.target.checked)}
         />
         <span>
-          <span className="font-medium text-gray-700 dark:text-gray-200">
+          <span className="font-medium text-ui-ink">
             Mute this whole workspace
           </span>
-          <span className="mt-0.5 block text-[11px] text-gray-400">
+          <span className="mt-0.5 block text-meta text-ui-faint">
             Every repository in it, including ones added later.
           </span>
         </span>
       </label>
 
       <div className="space-y-1.5">
-        <div className="text-xs font-medium text-gray-600 dark:text-gray-300">
+        <div className="text-meta font-medium text-ui-mute">
           Mute individual repositories
         </div>
         {/* ⚠ The two switches are a UNION, not a chain — so this list stays live and keeps its own
             values while the workspace switch is on. Saying so is the difference between "these
             are already covered" and "these were cleared". */}
         {muted && (
-          <p className="text-[11px] text-gray-400">
+          <p className="text-meta text-ui-faint">
             The whole workspace is muted, so these are already covered. Their own settings are
             kept, and come back if you un-mute the workspace.
           </p>
         )}
         {repos.isLoading ? (
-          <p className="text-[11px] text-gray-400">Loading this workspace’s repositories…</p>
+          <p className="text-meta text-ui-faint">Loading this workspace’s repositories…</p>
         ) : memberRepos.length === 0 ? (
-          <p className="text-[11px] text-gray-400">
+          <p className="text-meta text-ui-faint">
             This workspace has no repositories yet.
           </p>
         ) : (
-          <div className="max-h-44 space-y-1 overflow-auto rounded border border-gray-200 p-2 dark:border-gray-700">
+          <div className="max-h-52 space-y-1 overflow-auto rounded-ui bg-ui-surface p-2.5">
             {memberRepos.map((r) => (
-              <label key={r.id} className="flex items-center gap-2 text-xs">
-                <input
-                  type="checkbox"
+              <label key={r.id} className="flex items-center gap-2 text-body">
+                <CheckInput
                   checked={repoIds.includes(r.id)}
                   onChange={() => toggleRepo(r.id)}
                 />
-                <span className="truncate text-gray-700 dark:text-gray-200">{r.fullName}</span>
+                <span className="truncate text-ui-ink">{r.fullName}</span>
               </label>
             ))}
           </div>
@@ -219,12 +217,12 @@ export function PendingMuteSection(): JSX.Element {
           })
         }
       />
-      <p className="text-[11px] text-gray-400">
+      <p className="text-meta text-ui-faint">
         Applies to this workspace only.
       </p>
 
       {setWorkspacePendingMute.isError && (
-        <div className="text-[11px] text-red-500">
+        <div className="text-meta text-ui-danger">
           {(setWorkspacePendingMute.error as Error)?.message ?? 'Couldn’t save the mute.'}
         </div>
       )}

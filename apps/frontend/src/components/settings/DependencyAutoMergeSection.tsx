@@ -3,7 +3,7 @@ import {
   useDependencyAutoMergeSetting,
   useSetDependencyAutoMerge,
 } from '../../hooks/useDependencyMergeAll.js';
-import { SaveButton, SectionShell } from './ui.js';
+import { SaveButton, SectionShell, CheckInput } from './ui.js';
 import { ScopePendingSection, useSettingsWorkspace } from './workspaceScope.js';
 
 // "Merge dependency updates automatically" for THIS workspace (CORE, free, both modes; migration
@@ -37,18 +37,17 @@ export function DependencyAutoMergeSection(): JSX.Element {
 
   return (
     <SectionShell title="Dependency updates">
-      <label className="flex items-start gap-2 text-xs">
-        <input
-          type="checkbox"
+      <label className="flex items-start gap-2 text-body">
+        <CheckInput
           className="mt-0.5"
           checked={draft}
           onChange={(e) => setDraft(e.target.checked)}
         />
         <span>
-          <span className="font-medium text-gray-700 dark:text-gray-200">
+          <span className="font-medium text-ui-ink">
             Merge dependency updates automatically
           </span>
-          <span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">
+          <span className="mt-0.5 block text-meta text-ui-mute">
             Dependency PRs in repos you can push to merge once their required checks pass.
             Drafts and conflicts are left alone, and a PR you cancel stays cancelled.
           </span>
@@ -56,10 +55,10 @@ export function DependencyAutoMergeSection(): JSX.Element {
       </label>
 
       <SaveButton dirty={dirty} saving={save.isPending} onClick={() => save.mutate(draft)} />
-      <p className="text-[11px] text-gray-400">Applies to this workspace only.</p>
+      <p className="text-meta text-ui-faint">Applies to this workspace only.</p>
 
       {save.isError && (
-        <div className="text-[11px] text-red-500">
+        <div className="text-meta text-ui-danger">
           {(save.error as Error)?.message ?? 'Couldn’t save this setting.'}
         </div>
       )}

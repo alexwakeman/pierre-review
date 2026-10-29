@@ -29,6 +29,8 @@ export type SettingsTabId =
 export interface SettingsTabDef {
   id: SettingsTabId;
   label: string;
+  /** What lives in it, in a few words — the phone's list of areas shows it under the label. */
+  summary: string;
   /** Shown only where agentic AI runs (`me.ai.enabled`). */
   aiOnly?: boolean;
   /** Section component names, global first, then workspace-scoped — the order they render in. */
@@ -39,40 +41,40 @@ export interface SettingsTabDef {
 export const SETTINGS_TABS: readonly SettingsTabDef[] = [
   {
     id: 'pull-requests',
-    label: 'Pull requests',
+    label: 'Pull requests', summary: 'Large pull requests, blast radius',
     global: ['LargePrThresholdSection', 'BlastRadiusSection'],
     workspace: [],
   },
-  { id: 'pending', label: 'Pending', global: ['MyTurnSection'], workspace: ['PendingMuteSection'] },
+  { id: 'pending', label: 'Pending', summary: 'My Turn, muted repositories', global: ['MyTurnSection'], workspace: ['PendingMuteSection'] },
   {
     id: 'ai',
-    label: 'AI',
+    label: 'AI', summary: 'Provider, sign-in, effort, AI spend',
     aiOnly: true,
     global: ['AiProviderSection', 'ClaudeSpendSection'],
     workspace: [],
   },
   {
     id: 'ai-review',
-    label: 'AI review',
+    label: 'AI review', summary: 'Auto review, reference docs, Confluence, Notion, related repos',
     aiOnly: true,
     global: [],
     workspace: ['AutoReviewSection', 'ReferenceDocsSection', 'ConfluenceSection', 'NotionSection', 'RelatedReposSection'],
   },
   {
     id: 'reports',
-    label: 'Reports and sprint',
+    label: 'Reports and sprint', summary: 'Working hours, budgets, sprint cadence',
     global: [],
     workspace: ['FlowSettingsSection', 'SprintSection'],
   },
   {
     id: 'integrations',
-    label: 'Integrations',
+    label: 'Integrations', summary: 'Issue tracker, SonarCloud, Slack',
     global: [],
     workspace: ['IssueLinksSection', 'SonarSection', 'SlackSection'],
   },
   {
     id: 'bots',
-    label: 'Bots',
+    label: 'Bots', summary: 'Bot comment scoring, dependency updates',
     global: ['BotScoringSection'],
     workspace: ['DependencyAutoMergeSection'],
   },

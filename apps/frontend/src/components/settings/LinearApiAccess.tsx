@@ -6,7 +6,7 @@ import { useUpdateWorkspaceTracker } from '../../hooks/useWorkspaceTracker.js';
 import { Field, SaveButton, inputCls } from './ui.js';
 
 const SECONDARY_BTN =
-  'rounded border border-gray-300 px-2 py-0.5 text-xs text-gray-700 hover:border-gray-400 disabled:cursor-not-allowed disabled:opacity-40 dark:border-gray-700 dark:text-gray-200 dark:hover:border-gray-500';
+  'inline-flex h-7 items-center gap-1 rounded-ui bg-ui-raise px-2.5 text-body font-medium text-ui-ink hover:bg-ui-hover touch:h-10 outline-none focus-visible:ring-2 focus-visible:ring-ui-accent disabled:cursor-not-allowed disabled:opacity-40';
 
 /**
  * "Linear API key" for ONE workspace — mounted by IssueLinksSection only when that workspace's SAVED
@@ -52,10 +52,10 @@ export function LinearApiAccess({
   const showInput = !jira.hasToken || replacing;
 
   return (
-    <div className="space-y-2.5 rounded border border-gray-200 p-2.5 dark:border-gray-800">
+    <div className="space-y-2.5 rounded-ui bg-ui-surface p-3.5">
       <div>
-        <h4 className="text-xs font-semibold text-gray-800 dark:text-gray-100">Linear API key</h4>
-        <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+        <h4 className="text-body font-semibold text-ui-ink">Linear API key</h4>
+        <p className="mt-0.5 text-meta text-ui-mute">
           Lets Limn read the Linear issues each PR is linked to: title, status, assignee, description
           and acceptance criteria. A saved key is never shown again.
         </p>
@@ -81,10 +81,10 @@ export function LinearApiAccess({
           />
         </Field>
       ) : (
-        <div className="flex flex-col gap-1 text-xs">
-          <span className="font-medium text-gray-600 dark:text-gray-300">Personal API key</span>
+        <div className="flex flex-col gap-1 text-body">
+          <span className="font-medium text-ui-mute">Personal API key</span>
           <div className="flex items-center gap-2">
-            <span className="text-gray-700 dark:text-gray-200">Saved</span>
+            <span className="text-ui-ink">Saved</span>
             <button type="button" className={SECONDARY_BTN} onClick={() => setReplacing(true)}>
               Replace
             </button>
@@ -108,26 +108,26 @@ export function LinearApiAccess({
         >
           {check.isPending ? 'Checking…' : 'Check connection'}
         </button>
-        {!jira.hasToken && <span className="text-[11px] text-gray-500 dark:text-gray-400">Save a key first.</span>}
+        {!jira.hasToken && <span className="text-meta text-ui-mute">Save a key first.</span>}
         {checked != null && checked.matchesBaseUrl && (
-          <span className="text-[11px] text-emerald-700 dark:text-emerald-400">
+          <span className="text-meta text-ui-success">
             Connected as {checked.viewerName} to {checked.organizationName}.
           </span>
         )}
       </div>
       {checked != null && !checked.matchesBaseUrl && (
-        <p className="text-xs text-red-600 dark:text-red-400">
+        <p className="text-body text-ui-danger">
           This key belongs to {checked.organizationName} ({checked.organizationUrl}), not {baseUrl}. Change the
           workspace URL above, or save a key from that workspace.
         </p>
       )}
-      {check.isError && <p className="text-xs text-red-600 dark:text-red-400">{check.error.message}</p>}
+      {check.isError && <p className="text-body text-ui-danger">{check.error.message}</p>}
       <SaveButton
         dirty={typed !== ''}
         saving={mutation.isPending}
         onClick={() => mutation.mutate({ jira: { token: typed } })}
       />
-      {mutation.isError && <p className="text-xs text-red-600 dark:text-red-400">{mutation.error.message}</p>}
+      {mutation.isError && <p className="text-body text-ui-danger">{mutation.error.message}</p>}
     </div>
   );
 }

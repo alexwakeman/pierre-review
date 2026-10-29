@@ -6,7 +6,7 @@ import { useUpdateWorkspaceTracker } from '../../hooks/useWorkspaceTracker.js';
 import { Field, SaveButton, inputCls } from './ui.js';
 
 const SECONDARY_BTN =
-  'rounded border border-gray-300 px-2 py-0.5 text-xs text-gray-700 hover:border-gray-400 disabled:cursor-not-allowed disabled:opacity-40 dark:border-gray-700 dark:text-gray-200 dark:hover:border-gray-500';
+  'inline-flex h-7 items-center gap-1 rounded-ui bg-ui-raise px-2.5 text-body font-medium text-ui-ink hover:bg-ui-hover touch:h-10 outline-none focus-visible:ring-2 focus-visible:ring-ui-accent disabled:cursor-not-allowed disabled:opacity-40';
 
 /**
  * "Jira API access (optional)" for ONE workspace — mounted by IssueLinksSection only when that
@@ -66,12 +66,12 @@ export function JiraApiAccess({
     });
 
   return (
-    <div className="space-y-2.5 rounded border border-gray-200 p-2.5 dark:border-gray-800">
+    <div className="space-y-2.5 rounded-ui bg-ui-surface p-3.5">
       <div>
-        <h4 className="text-xs font-semibold text-gray-800 dark:text-gray-100">
+        <h4 className="text-body font-semibold text-ui-ink">
           Jira API access (optional)
         </h4>
-        <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+        <p className="mt-0.5 text-meta text-ui-mute">
           Lets Limn read each ticket a PR names: its title, status and assignee, its description
           and acceptance criteria. A saved token is never shown again.
         </p>
@@ -111,10 +111,10 @@ export function JiraApiAccess({
           />
         </Field>
       ) : (
-        <div className="flex flex-col gap-1 text-xs">
-          <span className="font-medium text-gray-600 dark:text-gray-300">API token</span>
+        <div className="flex flex-col gap-1 text-body">
+          <span className="font-medium text-ui-mute">API token</span>
           <div className="flex items-center gap-2">
-            <span className="text-gray-700 dark:text-gray-200">Saved</span>
+            <span className="text-ui-ink">Saved</span>
             <button type="button" className={SECONDARY_BTN} onClick={() => setReplacing(true)}>
               Replace
             </button>
@@ -139,22 +139,22 @@ export function JiraApiAccess({
           {fields.isPending ? 'Checking…' : 'Check connection'}
         </button>
         {!jira.hasToken && (
-          <span className="text-[11px] text-gray-500 dark:text-gray-400">
+          <span className="text-meta text-ui-mute">
             Save a token first.
           </span>
         )}
         {loaded != null && (
-          <span className="text-[11px] text-emerald-700 dark:text-emerald-400">
+          <span className="text-meta text-ui-success">
             Connected. Jira accepted the saved token.
           </span>
         )}
       </div>
       {fields.isError && (
-        <p className="text-xs text-red-600 dark:text-red-400">{fields.error.message}</p>
+        <p className="text-body text-ui-danger">{fields.error.message}</p>
       )}
       <SaveButton dirty={dirty} saving={mutation.isPending} onClick={save} />
       {mutation.isError && (
-        <p className="text-xs text-red-600 dark:text-red-400">{mutation.error.message}</p>
+        <p className="text-body text-ui-danger">{mutation.error.message}</p>
       )}
     </div>
   );

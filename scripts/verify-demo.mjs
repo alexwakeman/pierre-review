@@ -59,7 +59,14 @@ const VIEWS = [
     'docs',
     '?view=activity&activityRepo=docs',
     'docs',
-    { expect: ['Release handbook', 'Confluence · 3 pages', 'Refresh now', 'Can’t reach this page in Confluence since', 'Checkout design notes', 'Notion · 2 pages', '1 figure described by AI'] },
+    {
+      // A document's facts and actions open with it (the row on show); a row that blocks says so regardless.
+      act: async (page) => {
+        await page.getByRole('button', { name: 'Checkout design notes', exact: true }).first().click();
+        await page.getByText('1 figure described by AI').first().waitFor({ timeout: 10_000 });
+      },
+      expect: ['Release handbook', 'Confluence · 3 pages', 'Refresh now', 'Can’t reach this page in Confluence since', 'Checkout design notes', 'Notion · 2 pages', '1 figure described by AI'],
+    },
   ],
   ...['themes', 'paths', 'people', 'merged'].map((t) => [`sprint:${t}`, `?view=sprint&sprintTab=${t}`, t === 'themes' ? 'sprint-themes' : t === 'paths' ? 'sprint-paths' : null]),
   ['sprint:tray', `?view=sprint&sprintTab=themes&sprintStory=${story('PLAT-292')}`, 'sprint-tray'],
@@ -163,8 +170,11 @@ const VIEWS = [
     {
       act: async (page) => {
         await openSettingsTab('AI')(page);
-        await page.locator('#ai-effort').selectOption('high');
-        await page.waitForFunction(() => document.querySelector('#ai-effort')?.value === 'high', null, { timeout: 10_000 });
+        // A custom Select (components/ui/Select.tsx), not a native one: open it, pick the option; its
+        // hidden input carries the value.
+        await page.locator('#ai-effort').click();
+        await page.getByRole('option', { name: 'High', exact: true }).click();
+        await page.waitForFunction(() => document.querySelector('input[name="ai-effort"]')?.value === 'high', null, { timeout: 10_000 });
       },
       expect: ['Effort for AI Review and AI Fix:'],
     },

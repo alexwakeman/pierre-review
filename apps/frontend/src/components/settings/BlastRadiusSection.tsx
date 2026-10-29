@@ -3,7 +3,7 @@ import { BLAST_HIGH_SURFACES, type BlastSensitivity, type BlastSurface } from '@
 import { useMe } from '../../hooks/useTriage.js';
 import { useBlastConfig, useSetBlastConfig } from '../../hooks/useBlastRadius.js';
 import { InfoButton } from '../InfoModal.js';
-import { Field, SaveButton, SectionShell } from './ui.js';
+import { Field, SaveButton, SectionShell, RadioInput, CheckInput } from './ui.js';
 
 // BLAST RADIUS — CORE / free, both deployment modes, every tier. The sibling of
 // LargePrThresholdSection above it, and deliberately shaped the same way: one account-grained
@@ -112,17 +112,16 @@ export function BlastRadiusSection(): JSX.Element {
       >
         <div id="blast-sensitivity" className="flex flex-col gap-1.5">
           {SENSITIVITY.map((s) => (
-            <label key={s.value} className="flex cursor-pointer items-start gap-2 text-[12px]">
-              <input
-                type="radio"
+            <label key={s.value} className="flex cursor-pointer items-start gap-2 text-body">
+              <RadioInput
                 name="blast-sensitivity"
                 className="mt-0.5"
                 checked={sensitivity === s.value}
                 onChange={() => setSensitivity(s.value)}
               />
               <span>
-                <span className="font-medium text-gray-700 dark:text-gray-200">{s.label}</span>
-                <span className="text-gray-500 dark:text-gray-400"> — {s.desc}</span>
+                <span className="font-medium text-ui-ink">{s.label}</span>
+                <span className="text-ui-mute"> — {s.desc}</span>
               </span>
             </label>
           ))}
@@ -136,9 +135,9 @@ export function BlastRadiusSection(): JSX.Element {
       >
         <div id="blast-surfaces" className="flex flex-col gap-1">
           {BLAST_HIGH_SURFACES.map((s) => (
-            <label key={s} className="flex cursor-pointer items-center gap-2 text-[12px]">
-              <input type="checkbox" checked={off.includes(s)} onChange={() => toggle(s)} />
-              <span className="text-gray-600 dark:text-gray-300">{SURFACE_LABEL[s]}</span>
+            <label key={s} className="flex cursor-pointer items-center gap-2 text-body">
+              <CheckInput checked={off.includes(s)} onChange={() => toggle(s)} />
+              <span className="text-ui-mute">{SURFACE_LABEL[s]}</span>
             </label>
           ))}
         </div>
@@ -151,14 +150,13 @@ export function BlastRadiusSection(): JSX.Element {
         htmlFor="blast-impact-note"
         hint="A short AI-written note on the pull request pane saying what a change could break. It is never generated until you ask for it, and turning this off removes the button too."
       >
-        <label className="flex cursor-pointer items-center gap-2 text-[12px]">
-          <input
+        <label className="flex cursor-pointer items-center gap-2 text-body">
+          <CheckInput
             id="blast-impact-note"
-            type="checkbox"
             checked={showNote}
             onChange={(e) => setShowNote(e.target.checked)}
           />
-          <span className="text-gray-600 dark:text-gray-300">
+          <span className="text-ui-mute">
             Offer the impact note on pull requests
           </span>
         </label>
@@ -183,7 +181,7 @@ export function BlastRadiusSection(): JSX.Element {
       />
 
       {save.isError && (
-        <div className="text-[11px] text-red-500">
+        <div className="text-meta text-ui-danger">
           {(save.error as Error)?.message ?? 'Couldn’t save your blast-radius settings.'}
         </div>
       )}

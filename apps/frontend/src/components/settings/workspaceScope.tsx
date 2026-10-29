@@ -50,7 +50,7 @@ export function ScopePendingSection({
 }): JSX.Element {
   return (
     <SectionShell title={title}>
-      <p className="text-xs text-gray-400">
+      <p className="text-meta text-ui-faint">
         {failed ? 'Unavailable right now.' : 'Loading this workspace’s settings…'}
       </p>
     </SectionShell>

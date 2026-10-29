@@ -18,7 +18,8 @@ import {
 } from '../../lib/aiBudget.js';
 import { claudeSpendBodyOf, claudeSpendDraftOf, type ClaudeSpendDraft } from './claudeSpendForm.js';
 import { InfoButton } from '../InfoModal.js';
-import { Field, SaveButton, SectionShell, inputCls } from './ui.js';
+import { Field, SaveButton, SectionShell, inputCls, CheckInput } from './ui.js';
+import { Select } from '../ui/index.js';
 
 // "AI spend" — the ONE budget that pauses Limn's AUTOMATIC AI runs before they eat
 // the reader's subscription allowance or API bill (GET/PUT /api/ai/budget; docs/CLAUDE-REVIEW.md
@@ -44,7 +45,7 @@ const draftOf = claudeSpendDraftOf;
 const bodyOf = claudeSpendBodyOf;
 
 const BTN =
-  'rounded border border-gray-300 px-2 py-1 text-xs hover:border-gray-400 dark:border-gray-700 dark:hover:border-gray-500';
+  'inline-flex h-7 items-center gap-1 rounded-ui bg-ui-raise px-2.5 text-body font-medium text-ui-ink hover:bg-ui-hover touch:h-10 outline-none focus-visible:ring-2 focus-visible:ring-ui-accent';
 const NUM = `${inputCls} w-20`;
 
 /** " (5%)" for a valid weekly share in the draft, else "". */
@@ -72,14 +73,14 @@ export function ClaudeSpendSection(): JSX.Element | null {
   if (q.isError) {
     return (
       <SectionShell title="AI spend" headingId={CLAUDE_SPEND_SECTION_HEADING_ID} info={info}>
-        <p className="text-xs text-red-600 dark:text-red-400">Couldn’t load the budget.</p>
+        <p className="text-body text-ui-danger">Couldn’t load the budget.</p>
       </SectionShell>
     );
   }
   if (data == null || draft == null) {
     return (
       <SectionShell title="AI spend" headingId={CLAUDE_SPEND_SECTION_HEADING_ID} info={info}>
-        <p className="text-xs text-gray-500 dark:text-gray-400">Loading…</p>
+        <p className="text-meta text-ui-mute">Loading…</p>
       </SectionShell>
     );
   }
@@ -159,9 +160,9 @@ export function ClaudeSpendSection(): JSX.Element | null {
           : `Your ${provider === 'codex' ? 'ChatGPT plan' : 'Claude subscription'}: pause automatic runs once Limn has used its share of your week.`
       }
     >
-      <label className="flex items-center gap-2 text-xs">
-        <input type="checkbox" checked={draft.enabled} onChange={(e) => set({ enabled: e.target.checked })} />
-        <span className="font-medium text-gray-700 dark:text-gray-200">Pause automatic runs over budget</span>
+      <label className="flex items-center gap-2 text-body">
+        <CheckInput checked={draft.enabled} onChange={(e) => set({ enabled: e.target.checked })} />
+        <span className="font-medium text-ui-ink">Pause automatic runs over budget</span>
       </label>
 
       <div className={`space-y-2.5 pl-5 ${draft.enabled ? '' : 'opacity-60'}`}>
@@ -196,7 +197,7 @@ export function ClaudeSpendSection(): JSX.Element | null {
             {/* THE 5-HOUR SHARE: follows the weekly one unless the reader sets their own. Collapsed
                 by default; open when a separate figure is stored. Clearing it = same as weekly. */}
             <details open={settings.fiveHourSharePct != null} data-testid="ai-budget-five-hour">
-              <summary className="cursor-pointer text-xs text-gray-600 dark:text-gray-300">
+              <summary className="cursor-pointer text-meta text-ui-mute">
                 Set a separate 5-hour limit
               </summary>
               <div className="mt-1.5 space-y-1.5">
@@ -230,36 +231,28 @@ export function ClaudeSpendSection(): JSX.Element | null {
                 read Claude's report, so there is nothing to offer (a picker with no choices). */}
             {sub == null ? null : provider === 'codex' ? (
               sub.reportedSubscription != null && sub.reportedSubscription.trim() !== '' ? (
-                <p className="text-xs text-gray-600 dark:text-gray-300" data-testid="ai-budget-subscription">
+                <p className="text-meta text-ui-mute" data-testid="ai-budget-subscription">
                   Plan: ChatGPT {capitalise(sub.reportedSubscription)}
                 </p>
               ) : null
             ) : pickFrom == null && sub.subscription != null ? (
-              <p className="text-xs text-gray-600 dark:text-gray-300" data-testid="ai-budget-subscription">
+              <p className="text-meta text-ui-mute" data-testid="ai-budget-subscription">
                 Subscription: {AI_SUBSCRIPTION_LABELS[sub.subscription]}
               </p>
             ) : (
-              <Field label="Your subscription" htmlFor="ai-budget-subscription">
-                <select
+              <Field group label="Your subscription">
+                <Select
                   id="ai-budget-subscription"
-                  className={`${inputCls} w-40`}
-                  value={draft.subscription != null && (pickFrom ?? []).includes(draft.subscription) ? draft.subscription : ''}
-                  onChange={(e) =>
-                    set({ subscription: e.target.value === '' ? null : (e.target.value as AiSubscriptionKind) })
-                  }
-                >
-                  <option value="">Pick one</option>
-                  {(pickFrom ?? []).map((k) => (
-                    <option key={k} value={k}>
-                      {AI_SUBSCRIPTION_LABELS[k]}
-                    </option>
-                  ))}
-                </select>
+                  label="Your subscription"
+                  value={draft.subscription != null && (pickFrom ?? []).includes(draft.subscription) ? draft.subscription : null}
+                  onChange={(v) => set({ subscription: v })}
+                  options={(pickFrom ?? []).map((k) => ({ value: k, label: AI_SUBSCRIPTION_LABELS[k] }))}
+                />
               </Field>
             )}
             {/* Claude reports "max" without saying which: ask, never guess (5x and 20x differ fourfold). */}
             {provider !== 'codex' && reportedMax && sub?.subscription == null && (
-              <p className="text-xs text-amber-700 dark:text-amber-300" data-testid="ai-budget-pick-max">
+              <p className="text-body text-ui-warn" data-testid="ai-budget-pick-max">
                 Claude says you’re on Max. Which one?
               </p>
             )}
@@ -267,17 +260,17 @@ export function ClaudeSpendSection(): JSX.Element | null {
         )}
       </div>
 
-      {error != null && draft.enabled && <p className="text-xs text-red-600 dark:text-red-400">{error}</p>}
+      {error != null && draft.enabled && <p className="text-body text-ui-danger">{error}</p>}
       {save.isError && (
-        <p className="text-xs text-red-600 dark:text-red-400">
+        <p className="text-body text-ui-danger">
           {(save.error as Error)?.message || 'Couldn’t save the budget.'}
         </p>
       )}
       <SaveButton dirty={dirty && error == null} saving={save.isPending} onClick={submit} />
 
       {status.enabled && (
-        <div className="space-y-0.5 text-xs text-gray-600 dark:text-gray-300" data-testid="ai-budget-status">
-          {status.overBudget && <p className="font-medium text-amber-700 dark:text-amber-300">{pausedSentence(status)}</p>}
+        <div className="space-y-0.5 text-meta text-ui-mute" data-testid="ai-budget-status">
+          {status.overBudget && <p className="font-medium text-ui-warn">{pausedSentence(status)}</p>}
           {status.mode === 'api_key' && status.apiKey != null && (
             <p>
               This week {formatUsd(status.apiKey.usedUsd)} of {formatUsd(status.apiKey.weeklyUsd)}
@@ -312,7 +305,7 @@ function CodexWindows({ data }: { data: AiBudgetResponse }): JSX.Element | null 
   const lines = codexWindowLines(data.usage);
   if (lines.length === 0) return null;
   return (
-    <div className="space-y-0.5 text-xs text-gray-600 dark:text-gray-300" data-testid="ai-budget-codex-windows">
+    <div className="space-y-0.5 text-meta text-ui-mute" data-testid="ai-budget-codex-windows">
       {lines.map((l) => (
         <p key={l}>{l}</p>
       ))}

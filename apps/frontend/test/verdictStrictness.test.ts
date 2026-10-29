@@ -137,7 +137,7 @@ describe('Settings → Auto review', () => {
     // The whole block is behind the gate, with its ⓘ.
     const gate = s.indexOf('{pairReady && (');
     expect(gate).toBeGreaterThan(-1);
-    expect(s.indexOf('dark:text-gray-200">When Claude and Codex disagree</legend>')).toBeGreaterThan(gate);
+    expect(s.indexOf('">When Claude and Codex disagree</legend>')).toBeGreaterThan(gate);
     expect(s).toContain('<InfoButton title="When Claude and Codex disagree">');
     expect(s).toContain('Strict: approve only if both approve');
     expect(s).toContain('Relaxed: approve if one approves and the other raises nothing that blocks');

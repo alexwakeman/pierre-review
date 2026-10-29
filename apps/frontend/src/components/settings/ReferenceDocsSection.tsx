@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useReferenceDocsSettings, useSetReferenceDocsSettings } from '../../hooks/useReferenceDocs.js';
 import { InfoButton } from '../InfoModal.js';
-import { SaveButton, SectionShell } from './ui.js';
+import { SaveButton, SectionShell, CheckInput } from './ui.js';
 import { ScopePendingSection, useSettingsWorkspace } from './workspaceScope.js';
 import { aiCredentialWords } from '@pierre-review/shared';
 import { useAiProvider } from '../../hooks/useAiCapabilities.js';
@@ -48,16 +48,16 @@ export function ReferenceDocsSection(): JSX.Element {
         </InfoButton>
       }
     >
-      <label className="flex items-start gap-2 text-xs">
-        <input type="checkbox" className="mt-0.5" checked={draft} onChange={(e) => setDraft(e.target.checked)} />
-        <span className="font-medium text-gray-700 dark:text-gray-200">Use reference docs in AI Review</span>
+      <label className="flex items-start gap-2 text-body">
+        <CheckInput className="mt-0.5" checked={draft} onChange={(e) => setDraft(e.target.checked)} />
+        <span className="font-medium text-ui-ink">Use reference docs in AI Review</span>
       </label>
 
       <SaveButton dirty={dirty} saving={save.isPending} onClick={() => save.mutate(draft)} />
-      <p className="text-[11px] text-gray-500 dark:text-gray-400">Applies to this workspace only.</p>
+      <p className="text-meta text-ui-mute">Applies to this workspace only.</p>
 
       {save.isError && (
-        <div className="text-[11px] text-red-500">{save.error?.message ?? 'Couldn’t save this setting.'}</div>
+        <div className="text-meta text-ui-danger">{save.error?.message ?? 'Couldn’t save this setting.'}</div>
       )}
     </SectionShell>
   );

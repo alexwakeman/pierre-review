@@ -25,12 +25,12 @@ interface DocsViewState {
   /** The conversation on screen; null = a new one. */
   conversation: Record<number, string | null | undefined>;
   /** Below the wide breakpoint the viewer and the chat share one column. */
-  narrowPane: 'viewer' | 'chat';
+  narrowPane: 'library' | 'viewer' | 'chat';
   openPath: (workspaceId: number, path: string, anchor?: string | null, quote?: string | null) => void;
   toggleExpanded: (workspaceId: number, docId: number) => void;
   setExpanded: (workspaceId: number, docId: number, on: boolean) => void;
   setConversation: (workspaceId: number, conversationId: string | null) => void;
-  setNarrowPane: (pane: 'viewer' | 'chat') => void;
+  setNarrowPane: (pane: 'library' | 'viewer' | 'chat') => void;
   /**
    * A DEEP LINK's target (`?activityRepo=docs&doc=…&section=…`, lib/docReferences.ts), seated by the
    * URL hydrate before the workspace resolves and consumed ONCE by the pane (which knows the
@@ -46,7 +46,7 @@ export const useDocsView = create<DocsViewState>((set) => ({
   open: {},
   expanded: {},
   conversation: {},
-  narrowPane: 'viewer',
+  narrowPane: 'library',
   openPath: (workspaceId, path, anchor = null, quote = null) =>
     set((s) => ({ open: { ...s.open, [workspaceId]: { path, anchor, quote, seq: ++seq } }, narrowPane: 'viewer' })),
   toggleExpanded: (workspaceId, docId) =>

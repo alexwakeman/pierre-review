@@ -13,6 +13,12 @@ import { NotionTrackerSetup } from './NotionTrackerSetup.js';
 import { InfoButton } from '../InfoModal.js';
 import { Field, SaveButton, SectionShell, inputCls } from './ui.js';
 import { ScopePendingSection, useSettingsWorkspace } from './workspaceScope.js';
+import { Select, type SelectOption } from '../ui/index.js';
+
+const MATCH_SCOPE_OPTIONS: readonly SelectOption<IssueMatchScope>[] = [
+  { value: 'title', label: 'PR title only' },
+  { value: 'title_branch', label: 'PR title and branch name (default)' },
+];
 
 const PLACEHOLDER: Record<TrackerProvider, string> = {
   jira: 'https://your-org.atlassian.net',
@@ -151,22 +157,23 @@ export function IssueLinksSection(): JSX.Element {
         </InfoButton>
       }
     >
-      <Field label="Provider">
-        <select
-          className={inputCls}
+      <Field group label="Provider">
+        <Select
+          label="Provider"
+          className="w-full sm:w-auto"
           value={provider}
-          onChange={(e) => setProvider(e.target.value as TrackerProvider | '')}
-        >
-          <option value="">None</option>
-          {TRACKER_PROVIDERS_AVAILABLE.map((p) => (
-            <option key={p} value={p}>
-              {p === 'github' && detected.length > 0 ? `${LABEL[p]} (detected)` : LABEL[p]}
-            </option>
-          ))}
-        </select>
+          onChange={(v) => setProvider(v)}
+          options={[
+            { value: '' as TrackerProvider | '', label: 'None' },
+            ...TRACKER_PROVIDERS_AVAILABLE.map((p) => ({
+              value: p as TrackerProvider | '',
+              label: p === 'github' && detected.length > 0 ? `${LABEL[p]} (detected)` : LABEL[p],
+            })),
+          ]}
+        />
       </Field>
       {provider === 'github' && (
-        <p className="text-xs text-gray-600 dark:text-gray-300">
+        <p className="text-meta text-ui-mute">
           Uses the issues each PR closes or links. Nothing to set up.
         </p>
       )}
@@ -174,7 +181,7 @@ export function IssueLinksSection(): JSX.Element {
           Issues when a repo here uses it (docs/TRACKERS.md § Automatic default); choosing None and
           saving stores None, which then wins. */}
       {autoPicked && provider === 'github' && (
-        <p className="text-xs text-gray-600 dark:text-gray-300">{autoReason}</p>
+        <p className="text-meta text-ui-mute">{autoReason}</p>
       )}
       {fields?.baseUrl === true && (
         <>
@@ -219,6 +226,7 @@ export function IssueLinksSection(): JSX.Element {
               from `node-18` or `release-2` — so this control would be one that does nothing, and
               the reader would blame the setting when detection missed a ticket. */}
           <Field
+            group
             label="Where to look"
             hint={
               hasKeys || provider === 'notion'
@@ -226,15 +234,14 @@ export function IssueLinksSection(): JSX.Element {
                 : `Set ${provider === 'linear' ? 'team' : 'project'} keys above first. Without them only the PR title is searched for keys.`
             }
           >
-            <select
-              className={inputCls}
+            <Select
+              label="Where to look"
+              className="w-full sm:w-auto"
               value={matchScope}
               disabled={!hasKeys && provider !== 'notion'}
-              onChange={(e) => setMatchScope(e.target.value as IssueMatchScope)}
-            >
-              <option value="title">PR title only</option>
-              <option value="title_branch">PR title and branch name (default)</option>
-            </select>
+              onChange={(v) => setMatchScope(v)}
+              options={MATCH_SCOPE_OPTIONS}
+            />
           </Field>
         </>
       )}
@@ -244,7 +251,7 @@ export function IssueLinksSection(): JSX.Element {
         onClick={() => mutation.mutate({ issue: patch })}
       />
       {mutation.isError && (
-        <p className="text-[11px] text-red-500">{(mutation.error as Error).message}</p>
+        <p className="text-meta text-ui-danger">{(mutation.error as Error).message}</p>
       )}
       {/* Offered once Jira is the SAVED tracker with a base URL — the field list and the ticket
           reads call the saved site, so an unsaved URL in the box above would be the wrong one.
