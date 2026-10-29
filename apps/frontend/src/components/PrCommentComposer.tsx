@@ -46,7 +46,7 @@ export function PrCommentComposer({
   };
 
   return (
-    <div className="space-y-1.5 px-3 pb-3">
+    <div className="mx-auto max-w-4xl space-y-1.5 px-3 pb-4 md:px-5">
       <MentionTextarea
         prId={prId}
         value={body}
@@ -54,14 +54,14 @@ export function PrCommentComposer({
         rows={3}
         autoFocus={autoFocus}
         placeholder="Add a comment to this PR (markdown, @ to mention)…"
-        className="w-full rounded border border-gray-300 bg-white px-2 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-900"
+        className="w-full rounded-ui bg-ui-raise px-2.5 py-2 text-body text-ui-ink ring-1 ring-inset ring-ui-line placeholder:text-ui-faint focus:outline-none focus:ring-2 focus:ring-ui-accent"
       />
       <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
           onClick={send}
           disabled={comment.isPending || body.trim().length === 0}
-          className="whitespace-nowrap rounded border border-blue-400 px-2 py-0.5 text-sm text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:border-blue-600 dark:text-blue-400 dark:hover:bg-blue-900/30"
+          className="inline-flex h-8 items-center whitespace-nowrap rounded-ui bg-ui-accent-fill px-3 text-body font-medium text-ui-on-accent hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50 touch:h-11 touch:px-4"
         >
           {comment.isPending ? 'Commenting…' : onCancel ? 'Reply' : 'Comment'}
         </button>
@@ -73,12 +73,12 @@ export function PrCommentComposer({
               onCancel();
             }}
             disabled={comment.isPending}
-            className="whitespace-nowrap rounded border border-gray-300 px-2 py-0.5 text-sm hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
+            className="inline-flex h-8 items-center whitespace-nowrap rounded-ui bg-ui-raise px-3 text-body text-ui-ink hover:bg-ui-hover disabled:cursor-not-allowed disabled:opacity-50 touch:h-11 touch:px-4"
           >
             Cancel
           </button>
         )}
-        {error && <span className="text-xs text-red-500">{error}</span>}
+        {error && <span className="text-meta text-ui-danger">{error}</span>}
       </div>
     </div>
   );

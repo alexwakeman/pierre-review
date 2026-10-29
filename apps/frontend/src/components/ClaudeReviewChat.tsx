@@ -48,7 +48,7 @@ export const CHAT_HEAD_MOVED_LINE = 'Answers are about the reviewed commit; the 
 export const answeringLine = (name: string): string => `${name} is reading the code…`;
 
 const BTN_SMALL =
-  'inline-flex items-center gap-1 whitespace-nowrap rounded border border-blue-400 px-2 py-0.5 text-xs text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:border-blue-600 dark:text-blue-400 dark:hover:bg-blue-900/30';
+  'inline-flex h-7 items-center whitespace-nowrap rounded-ui bg-ui-raise px-2.5 text-meta font-medium text-ui-ink hover:bg-ui-hover disabled:cursor-not-allowed disabled:opacity-50 touch:h-10 touch:px-3';
 const BTN_ASK =
   'whitespace-nowrap rounded-md bg-blue-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50 dark:bg-blue-500 dark:hover:bg-blue-400 dark:text-gray-950';
 const MUTED = 'text-gray-500 dark:text-gray-400';

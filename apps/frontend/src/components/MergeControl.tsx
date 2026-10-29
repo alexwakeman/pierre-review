@@ -16,6 +16,7 @@ import { dateTime, MERGE_TONE_CLASS, mergeVerdict, relativeTime, toMergeStateSta
 import { ApiError } from '../api/client.js';
 import { CaretIcon, ExternalLinkIcon, MergeIcon, WarningIcon } from './Icons.js';
 import { ResolveConflictsButton } from './conflicts/ResolveConflictsButton.js';
+import { Select } from './ui/index.js';
 import type { ResolverTarget } from '../store/conflictResolver.js';
 
 // Merge control for the Overview tab (CORE / free tier), rendered next to Approve when the
@@ -347,16 +348,17 @@ export function MergeControl({
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <span className="text-gray-500 dark:text-gray-400">{behindLabel}.</span>
           {options.canRebaseUpdate && (
-            <select
+            <Select<'rebase' | 'merge'>
+              label="How to bring in the base branch"
+              size="sm"
               value={updateStrategy}
-              onChange={(e) => setUpdateStrategy(e.target.value as 'rebase' | 'merge')}
+              onChange={setUpdateStrategy}
               disabled={update.isPending}
-              className="rounded border border-gray-300 bg-white px-1 py-0.5 text-xs dark:border-gray-700 dark:bg-gray-900"
-              title="How to bring in the base branch"
-            >
-              <option value="rebase">Rebase onto {options.baseRef}</option>
-              <option value="merge">Merge {options.baseRef} in</option>
-            </select>
+              options={[
+                { value: 'rebase', label: `Rebase onto ${options.baseRef}` },
+                { value: 'merge', label: `Merge ${options.baseRef} in` },
+              ]}
+            />
           )}
           <button
             type="button"
@@ -423,18 +425,13 @@ export function MergeControl({
         ) : (
           <>
             {options.allowedMethods.length > 1 && (
-              <select
+              <Select<MergeMethod>
+                label="Merge method"
                 value={effectiveMethod}
-                onChange={(e) => setMethod(e.target.value as MergeMethod)}
+                onChange={setMethod}
                 disabled={busy || !canMergeNow}
-                className="rounded border border-gray-300 bg-white px-1.5 py-0.5 text-sm dark:border-gray-700 dark:bg-gray-900"
-              >
-                {options.allowedMethods.map((m) => (
-                  <option key={m} value={m}>
-                    {METHOD_LABEL[m]}
-                  </option>
-                ))}
-              </select>
+                options={options.allowedMethods.map((m) => ({ value: m, label: METHOD_LABEL[m] }))}
+              />
             )}
             <button
               type="button"

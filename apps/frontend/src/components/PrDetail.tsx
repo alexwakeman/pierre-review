@@ -36,16 +36,35 @@ import {
 } from '../lib/ui.js';
 import { CiDot } from './Activity/BranchStatusChip.js';
 import { Avatar } from './CommentCard.js';
-import { CopyButton } from './CopyButton.js';
+import { CopyButton, writeClipboard } from './CopyButton.js';
+import {
+  cx,
+  FOCUS_RING,
+  IconButton,
+  Menu,
+  panelId,
+  StatusIcon,
+  tabId,
+  Tabs,
+  useRegisterCommands,
+  type Command,
+  type MenuEntry,
+  type TabItem,
+} from './ui/index.js';
 import { UserName } from './UserName.js';
 import { ShowOnTimeline, PrFocusMetaContext } from './ShowOnTimeline.js';
 import {
   ChevronIcon,
   DotIcon,
+  EllipsisIcon,
   ExternalLinkIcon,
   EyeIcon,
   FeedIcon,
   MagnifierIcon,
+  MergeIcon,
+  NewTabIcon,
+  PendingStalledIcon,
+  PullRequestIcon,
   LinkIcon,
   OctocatIcon,
   RefreshIcon,
@@ -401,20 +420,20 @@ export function ActivitySection({
   return (
     <section
       ref={ref}
-      className="border-t border-gray-200 dark:border-gray-800"
+      className="mt-2"
       data-testid="pr-activity-section"
     >
       <button
         type="button"
         onClick={onToggle}
         aria-expanded={open}
-        className="flex w-full items-center gap-2 px-4 py-1.5 text-left hover:bg-gray-50 dark:hover:bg-gray-800/40"
+        className={cx('flex h-9 w-full items-center gap-2 px-4 text-left hover:bg-ui-hover touch:h-11 md:px-5', FOCUS_RING)}
       >
-        <ChevronIcon dir={open ? 'down' : 'right'} size={10} className="shrink-0 text-gray-500 dark:text-gray-400" />
-        <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+        <ChevronIcon dir={open ? 'down' : 'right'} size={10} className="shrink-0 text-ui-faint" />
+        <span className="text-body font-medium text-ui-ink">
           Activity
         </span>
-        <span className="ml-auto text-[11px] tabular-nums text-gray-500 dark:text-gray-400">
+        <span className="ml-auto text-meta tabular-nums text-ui-faint">
           {count} event{count === 1 ? '' : 's'}
         </span>
       </button>
@@ -563,14 +582,14 @@ function PrCommentsList({
 
   if (items.length === 0) {
     return (
-      <div className="px-3 py-6 text-center text-sm text-gray-500 dark:text-gray-400">
+      <div className="px-4 py-6 text-center text-body text-ui-mute md:px-5">
         No PR comments on this PR.
       </div>
     );
   }
 
   return (
-    <div className="space-y-2 px-3 pb-3">
+    <div className="mx-auto max-w-4xl space-y-2 px-3 pb-3 md:px-5">
       {items.map((it) => {
         const user = it.authorId != null ? usersById.get(it.authorId) : undefined;
         const isNew = isNewComment(it.at, viewedSince);
@@ -587,13 +606,12 @@ function PrCommentsList({
               if (el) cardRefs.current.set(rowKey, el);
               else cardRefs.current.delete(rowKey);
             }}
-            className={`rounded-md border px-2.5 py-2 ${
-              selected
-                ? 'border-amber-400 bg-amber-400/5'
-                : 'border-gray-200 dark:border-gray-800'
+            // A tone, not a border; the selected comment keeps its permanent amber ring.
+            className={`rounded-ui bg-ui-surface px-3 py-2.5 ${
+              selected ? 'ring-1 ring-amber-400' : ''
             } ${isNew ? 'comment-new' : ''} ${flashing ? 'activity-flash' : ''}`}
           >
-            <div className="flex items-center gap-2 text-xs">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-meta text-ui-mute">
               <ShowOnTimeline
                 prId={pr.id}
                 at={it.at}
@@ -608,16 +626,15 @@ function PrCommentsList({
                     : 'Show this review on the timeline'
                 }
               />
-              <span className="decorative-mark text-gray-300 dark:text-gray-600">·</span>
               <Avatar user={user} size={18} />
               <UserName
                 user={user}
                 fallbackId={it.authorId}
                 repoId={pr.repoId}
-                className="font-semibold"
+                className="font-medium text-ui-ink"
               />
               {it.kind === 'review' && it.state != null && <ReviewStateTag state={it.state} />}
-              <span className="text-gray-400" title={dateTime(it.at)}>
+              <span className="whitespace-nowrap text-ui-faint" title={dateTime(it.at)}>
                 {relativeTime(it.at)}
               </span>
               {isNew && <NewTag />}
@@ -637,7 +654,7 @@ function PrCommentsList({
                 className="ml-auto"
               />
             </div>
-            <div className="mt-1 text-sm">
+            <div className="mt-1.5 text-body">
               <Markdown>{it.body}</Markdown>
             </div>
             {/* Emoji reactions on this conversation item. BOTH kinds are reactable on GitHub —
@@ -653,12 +670,12 @@ function PrCommentsList({
               id={it.id}
               className="mt-1.5 pl-2"
             />
-            <div className="mt-2 flex items-center gap-3 pl-2 text-[11px]">
+            <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-meta">
               {replyingTo !== rowKey && (
                 <button
                   type="button"
                   onClick={() => setReplyingTo(rowKey)}
-                  className="text-blue-500 hover:underline"
+                  className="text-ui-accent hover:underline touch:min-h-10"
                 >
                   Reply
                 </button>
@@ -668,9 +685,9 @@ function PrCommentsList({
                   href={safeExternalUrl(it.url)}
                   target="_blank"
                   rel="noreferrer noopener"
-                  className="text-blue-500 hover:underline"
+                  className="inline-flex items-center gap-1 text-ui-accent hover:underline touch:min-h-10"
                 >
-                  <ExternalLinkIcon size={11} className="inline-block align-[-0.1em]" />{' '}
+                  <ExternalLinkIcon size={11} />
                   {isComment ? 'View comment on GitHub' : 'View review on GitHub'}
                 </a>
               )}
@@ -702,28 +719,27 @@ function PrCommentsList({
 function PrDetailSkeleton(): JSX.Element {
   return (
     <div className="flex h-full flex-col" aria-hidden="true">
-      {/* Header: a state chip + title line, then the author/meta line. */}
-      <div className="border-b border-gray-200 px-4 py-2 dark:border-gray-800">
+      {/* Header: the title line, then the meta line (state, CI, repo, author). */}
+      <div className="px-4 pt-3 md:px-5">
         <div className="flex items-center gap-2">
-          <SkeletonLine className="h-4 w-12" />
-          {/* The header's CI readout (dot + word) — open PRs, the common case here. */}
-          <SkeletonLine className="h-3.5 w-20" />
-          <SkeletonLine className="h-4 w-2/5" />
+          <SkeletonLine className="h-4 w-1/2" />
         </div>
         <div className="mt-2 flex items-center gap-2">
-          <SkeletonLine className="h-3 w-24" />
+          <SkeletonLine className="h-3 w-12" />
+          {/* The header's CI readout (dot + word) — open PRs, the common case here. */}
+          <SkeletonLine className="h-3 w-20" />
           <SkeletonLine className="h-3 w-32" />
           <SkeletonLine className="h-3 w-20" />
         </div>
       </div>
       {/* Tab strip. */}
-      <div className="flex gap-3 border-b border-gray-200 px-3 py-2 dark:border-gray-800">
+      <div className="flex gap-3 px-4 py-3 md:px-5">
         {[16, 14, 14, 14].map((w, i) => (
           <SkeletonLine key={i} className="h-3.5" style={{ width: `${w * 4}px` }} />
         ))}
       </div>
       {/* Content blocks. */}
-      <div className="flex flex-1 flex-col gap-3 p-4">
+      <div className="flex flex-1 flex-col gap-3 px-4 md:px-5">
         <SkeletonBlock className="h-20" />
         <SkeletonBlock className="h-16" />
         <SkeletonBlock className="h-16" />
@@ -737,11 +753,13 @@ function PrDetailSkeleton(): JSX.Element {
 const EMPTY_THREAD_STATE_FILTER: Set<ThreadStateBucket> = new Set();
 const EMPTY_THREAD_SEVERITY_FILTER: Set<MlSeverity> = new Set();
 
-// Every icon button right of the title wears the TITLE's ink, per theme — one class, so the
-// cluster reads as one set. Refresh's amber stale state is the one exception (it means
-// something). DetailPane's close ✕ wears the same ink.
+// Every icon button in the header toolbar wears ONE class, so the cluster reads as one set: mute
+// ink, the one radius, 32px (40px on touch). Hidden below md, where the overflow menu says every
+// one of them in words. Refresh's warn-ink stale state is the one exception (it means something,
+// so it also stays on screen on a phone).
 export const PR_HEADER_ICON_BTN =
-  'shrink-0 rounded p-0.5 text-gray-900 hover:bg-gray-100 dark:text-gray-100 dark:hover:bg-gray-800';
+  'hidden h-8 w-8 shrink-0 items-center justify-center rounded-ui text-ui-mute hover:bg-ui-hover hover:text-ui-ink md:inline-flex touch:h-10 touch:w-10 motion-safe:transition-colors motion-safe:duration-ui-fast ' +
+  FOCUS_RING;
 
 export function PrDetail({
   prId,
@@ -1222,12 +1240,58 @@ export function PrDetail({
   // (hooks-order rule). Only `state === 'armed'` counts — the list carries resolved rows too.
   const armedIntent = usePrArmedIntent(prId);
 
+  // ⌘K: this PR's tabs and toolbar, registered only while THIS copy is the one on screen (the pane
+  // can stay mounted under another PR's overlay). The handlers are read through a ref so the list
+  // is rebuilt only when what it SAYS changes, never on every render.
+  const cmdLive = useRef<{ tab: (t: Tab) => void; act: (id: string) => void }>({ tab: () => {}, act: () => {} });
+  const cmdTabs = [
+    'overview',
+    'comments',
+    'changes',
+    ...(botTabVisible ? (['bot_activity'] as Tab[]) : []),
+    ...(claudeReviewEnabled ? (['claude_review'] as Tab[]) : []),
+    ...(aiFixTabEnabled ? (['ai_fix'] as Tab[]) : []),
+  ] as Tab[];
+  const cmdTabsKey = cmdTabs.join(',');
+  const prNumber = pr?.number ?? null;
+  const prCommands = useMemo((): Command[] | null => {
+    if (!liveVisible || prNumber == null) return null;
+    const where = `#${prNumber}`;
+    const tabs = cmdTabsKey.split(',') as Tab[];
+    return [
+      ...tabs.map(
+        (t, i): Command => ({
+          id: `pr-tab:${t}`,
+          title: `${TAB_LABELS[t]} (this pull request)`,
+          group: 'Go to',
+          hint: where,
+          shortcut: i < 9 ? String(i + 1) : undefined,
+          keywords: ['tab', 'pr', 'pull request'],
+          run: () => cmdLive.current.tab(t),
+        }),
+      ),
+      ...(placement === 'pane'
+        ? [{ id: 'pr:full', title: 'Open this pull request full-screen', group: 'Actions' as const, hint: where, run: () => cmdLive.current.act('full') }]
+        : []),
+      { id: 'pr:timeline', title: 'Show this pull request on the timeline', group: 'Actions', hint: where, run: () => cmdLive.current.act('timeline') },
+      { id: 'pr:focus', title: 'Focus this pull request in its own timeline tab', group: 'Actions', hint: where, run: () => cmdLive.current.act('focus') },
+      { id: 'pr:feed', title: 'Show this pull request in the Activity feed', group: 'Actions', hint: where, run: () => cmdLive.current.act('feed') },
+      { id: 'pr:refresh', title: 'Refresh this pull request from GitHub', group: 'Actions', hint: where, run: () => cmdLive.current.act('refresh') },
+      { id: 'pr:copy', title: 'Copy the GitHub link to this pull request', group: 'Actions', hint: where, run: () => cmdLive.current.act('copy') },
+      { id: 'pr:github', title: 'Open this pull request on GitHub', group: 'Actions', hint: where, run: () => cmdLive.current.act('github') },
+      { id: 'pr:ci', title: 'Show CI status (Overview)', group: 'Actions', hint: where, run: () => cmdLive.current.act('ci') },
+      { id: 'pr:threads', title: 'Show the review threads (Changes, threads only)', group: 'Actions', hint: where, keywords: ['comments', 'review'], run: () => cmdLive.current.act('threads-view') },
+      { id: 'pr:activity', title: 'Show this pull request’s activity (Overview)', group: 'Actions', hint: where, run: () => cmdLive.current.act('activity') },
+    ];
+  }, [liveVisible, prNumber, cmdTabsKey, placement]);
+  useRegisterCommands(`pr-detail:${placement}`, prCommands);
+
   if (isLoading) {
     return <PrDetailSkeleton />;
   }
   if (error || !pr) {
     return (
-      <div className="p-4 text-sm text-red-500">
+      <div className="p-5 text-body text-ui-danger">
         {error ? String(error) : 'PR not found'}
       </div>
     );
@@ -1238,51 +1302,139 @@ export function PrDetail({
   const author = pr.authorId != null ? usersById.get(pr.authorId) : undefined;
   const conversationCount = prConversationCount(pr);
 
+  // "Show in Activity feed" — see the ORDER note by setWorkspace above (isolate LAST).
+  const showInFeed = (): void => {
+    // Switch scope first when this PR's repo belongs to another workspace. `null` = every repo in
+    // the new workspace, which is the REPLACE semantics a scope change wants.
+    const prWorkspaceId = repos?.find((r) => r.id === pr.repoId)?.workspaceId ?? null;
+    if (prWorkspaceId != null && prWorkspaceId !== activeWorkspaceId) {
+      setWorkspace(prWorkspaceId, null);
+    }
+    setRepoConsoleTab(pr.repoId, 'activity');
+    setActivityRepo(pr.repoId);
+    setFeedIsolatedPrId(pr.id);
+    showActivity();
+  };
+  const showCiStatus = (): void => {
+    goToTab('overview');
+    setStatusFocus((n) => (n ?? 0) + 1);
+  };
+  const showNewActivity = (): void => {
+    // Overview, Activity section open and scrolled to, filtered to what's new.
+    goToTab('activity');
+    setActivitySince(pr.lastViewedAt);
+    setActivityScroll((n) => (n ?? 0) + 1);
+  };
+  const githubHref = safeExternalUrl(pr.githubUrl);
+  const newSince = newSummary(pr.newSinceLastViewed);
+  cmdLive.current = {
+    tab: goToTab,
+    act: (id) => {
+      if (id === 'full') openPrDetailTab(pinnedMetaOf(pr, usersById));
+      else if (id === 'timeline') openPrFocused(pr.id);
+      else if (id === 'focus') openPrFocusTab(pinnedMetaOf(pr, usersById));
+      else if (id === 'feed') showInFeed();
+      else if (id === 'refresh') refreshNow();
+      else if (id === 'copy' && githubHref != null) void writeClipboard(githubHref);
+      else if (id === 'github' && githubHref != null) window.open(githubHref, '_blank', 'noopener,noreferrer');
+      else if (id === 'ci') showCiStatus();
+      else if (id === 'threads-view') openThreadsView();
+      else if (id === 'activity') {
+        goToTab('activity');
+        setActivityScroll((n) => (n ?? 0) + 1);
+      }
+    },
+  };
+  const failingChecks = pr.checkRuns.filter(
+    (c) => !c.limnOwned && (c.state === 'failure' || c.state === 'error'),
+  ).length;
+  const stateLabel = pr.isDraft ? 'Draft' : stateMeta.label;
+  const tabIds: Tab[] = [
+    'overview',
+    'comments',
+    'changes',
+    // Also listed while the bot data is still in flight for a reader who ARRIVED on this
+    // tab (a deep link / a refresh), so the strip is never showing a screen with no
+    // highlighted tab. It disappears again if the answer comes back empty, and
+    // `effectiveTab` moves to Overview with it.
+    ...(botTabVisible || effectiveTab === 'bot_activity' ? (['bot_activity'] as Tab[]) : []),
+    ...(claudeReviewEnabled ? (['claude_review'] as Tab[]) : []),
+    ...(aiFixTabEnabled ? (['ai_fix'] as Tab[]) : []),
+  ];
+  const tabItems: TabItem<Tab>[] = tabIds.map((t) => ({
+    id: t,
+    label: (
+      <>
+        {TAB_LABELS[t]}
+        {t === 'overview' && failingChecks > 0 && (
+          <span className="ml-1 inline-flex text-ui-danger" title={`${failingChecks} failing`}>
+            <DotIcon size={7} aria-hidden />
+            <span className="sr-only">, {failingChecks} failing</span>
+          </span>
+        )}
+        {t === 'claude_review' && reviewPill != null && <ReviewTabOutcome pill={reviewPill} />}
+        {t === 'bot_activity' && botTtfrAnomalies > 0 && (
+          <span
+            className="ml-1 inline-flex text-ui-danger"
+            title={`${botTtfrAnomalies} bot slower than its typical on this PR`}
+          >
+            <WarningIcon size={12} aria-hidden />
+            <span className="sr-only">, a bot slower than typical</span>
+          </span>
+        )}
+      </>
+    ),
+    count:
+      t === 'comments'
+        ? conversationCount
+        : t === 'changes' && pr.changedFilesCount > 0
+          ? pr.changedFilesCount
+          : null,
+    title:
+      t === 'comments'
+        ? `${conversationCount} comments`
+        : t === 'changes' && pr.changedFilesCount > 0
+          ? `${pr.changedFilesCount} files changed`
+          : undefined,
+  }));
+  // Everything the toolbar does, in words — the overflow menu (every width) and, below md, the
+  // only way to the actions the icon row hides. Nothing here is unique to the menu.
+  const menuItems: MenuEntry[] = [
+    ...(placement === 'pane'
+      ? [{ id: 'full', label: 'Open full-screen in its own tab', icon: <NewTabIcon size={14} />, onSelect: () => openPrDetailTab(pinnedMetaOf(pr, usersById)) }]
+      : []),
+    { id: 'timeline', label: 'Show on the timeline', icon: <TimelineIcon size={14} />, onSelect: () => openPrFocused(pr.id) },
+    { id: 'focus', label: 'Focus in its own timeline tab', icon: <MagnifierIcon size={14} />, onSelect: () => openPrFocusTab(pinnedMetaOf(pr, usersById)) },
+    { id: 'feed', label: 'Show in the Activity feed', icon: <FeedIcon size={14} />, onSelect: showInFeed },
+    { id: 'sep', separator: true },
+    {
+      id: 'refresh',
+      label: isRefreshing ? 'Refreshing…' : 'Refresh from GitHub',
+      icon: <RefreshIcon size={14} />,
+      disabled: isRefreshing,
+      onSelect: refreshNow,
+    },
+    ...(githubHref != null
+      ? [
+          { id: 'copy', label: 'Copy the GitHub link', icon: <LinkIcon size={14} />, onSelect: () => void writeClipboard(githubHref) },
+          { id: 'gh', label: 'Open on GitHub', icon: <OctocatIcon size={14} />, onSelect: () => window.open(githubHref, '_blank', 'noopener,noreferrer') },
+        ]
+      : []),
+  ];
+
   return (
     <PrFocusMetaContext.Provider value={pinnedMetaOf(pr, usersById)}>
-    <div className="flex h-full flex-col">
-      {/* pr-28 leaves room for DetailPane's close ✕; the full-screen tab has none. */}
-      <div
-        className={`border-b border-gray-200 px-4 py-2 dark:border-gray-800 ${
-          placement === 'pane' ? 'pr-28' : ''
-        }`}
+    <div className="flex h-full flex-col bg-ui-bg max-md:overflow-y-auto max-md:overflow-x-clip">
+      {/* THE ONE SLIM HEADER: title + toolbar, then one meta line (state, CI, repo, author, age,
+          size, reach), then the tabs. pr-12 leaves room for DetailPane's close ✕ in the pane; the
+          full-screen tab has none. */}
+      <header
+        className={cx(
+          'shrink-0 px-4 pt-3 md:px-5',
+          placement === 'pane' && 'pr-12 md:pr-12',
+        )}
       >
-        <div className="flex items-center gap-2">
-          <span
-            className="rounded px-1.5 py-0.5 text-xs font-semibold text-white"
-            style={{ backgroundColor: stateMeta.color }}
-          >
-            {pr.isDraft ? 'Draft' : stateMeta.label}
-          </span>
-          {/* CI, visible from EVERY tab because it lives in the header. It reads `pr.ciStatus` —
-              the synced rollup the Status row, the Timeline bar and the Pending cards read, never
-              the live `checkRuns` — and stays fresh through usePrLiveRefresh's ['pr', prId]
-              invalidation (no fetch of its own). Open PRs only: see `prHeaderCi`. shrink-0, so
-              the title truncates and this never does. The word is an AA grey pair, never the CI
-              hex (yellow on white is 1.92:1); the dot's ring gives green/yellow an edge on white. */}
-          {headerCi != null && (
-            <button
-              type="button"
-              data-testid="pr-header-ci"
-              onClick={() => {
-                goToTab('overview');
-                setStatusFocus((n) => (n ?? 0) + 1);
-              }}
-              className="inline-flex shrink-0 items-center gap-1.5 rounded px-1 py-0.5 text-xs font-medium text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800"
-              title="Show CI status in Overview"
-              aria-label={`${headerCi.label} — show CI status`}
-            >
-              <CiDot
-                status={headerCi.status}
-                size={12}
-                title="Show CI status in Overview"
-                className={
-                  headerCi.status === 'unknown' ? '' : 'ring-1 ring-black/15 dark:ring-white/20'
-                }
-              />
-              {headerCi.label}
-            </button>
-          )}
+        <div className="flex items-start gap-2">
           {/* In the PANE, the title + the ↗ icon both open this PR full-screen as its own
               (focused) tab. Opening a tab IS pinning it, so there's no separate pin control.
               FULL-SCREEN already is that tab: the title is a plain heading and ↗ is absent. */}
@@ -1291,10 +1443,10 @@ export function PrDetail({
               <button
                 type="button"
                 onClick={() => openPrDetailTab(pinnedMetaOf(pr, usersById))}
-                className="min-w-0 truncate text-left text-sm font-semibold hover:underline"
+                className={cx('min-w-0 truncate rounded-ui text-left text-title text-ui-ink hover:underline', FOCUS_RING)}
                 title="Open full-screen in its own tab"
               >
-                <span className="text-gray-400">#{pr.number}</span> {pr.title}
+                <span className="font-normal text-ui-faint">#{pr.number}</span> {pr.title}
               </button>
               <button
                 type="button"
@@ -1307,156 +1459,163 @@ export function PrDetail({
               </button>
             </>
           ) : (
-            <h2 className="min-w-0 truncate text-sm font-semibold" title={pr.title}>
-              <span className="text-gray-400">#{pr.number}</span> {pr.title}
+            <h2 className="min-w-0 text-title text-ui-ink [overflow-wrap:anywhere] md:truncate" title={pr.title}>
+              <span className="font-normal text-ui-faint">#{pr.number}</span> {pr.title}
             </h2>
           )}
-          {/* Show on the shared timeline (centre + glow; distinct from Focus Mode). */}
-          <button
-            type="button"
-            onClick={() => openPrFocused(pr.id)}
-            className={PR_HEADER_ICON_BTN}
-            title="Show this PR on the timeline"
-            aria-label="Show this PR on the timeline"
-          >
-            <TimelineIcon size={15} />
-          </button>
-          {/* Focus — a magnifier that opens this PR's own isolated timeline tab. */}
-          <button
-            type="button"
-            onClick={() => openPrFocusTab(pinnedMetaOf(pr, usersById))}
-            className={PR_HEADER_ICON_BTN}
-            title="Focus — open this PR in its own isolated timeline tab (the close button on the tab closes it)"
-            aria-label="Focus this PR in its own timeline tab"
-          >
-            <MagnifierIcon size={15} />
-          </button>
-          {/* Show in the Activity feed — jump to this PR's repo console with the feed isolated
-              to just this PR (order load-bearing: isolate AFTER the rail move). */}
-          <button
-            type="button"
-            onClick={() => {
-              // Switch scope first when this PR's repo belongs to another workspace (see the
-              // note by setWorkspace above). `null` = every repo in the new workspace, which is
-              // the REPLACE semantics a scope change wants.
-              const prWorkspaceId =
-                repos?.find((r) => r.id === pr.repoId)?.workspaceId ?? null;
-              if (prWorkspaceId != null && prWorkspaceId !== activeWorkspaceId) {
-                setWorkspace(prWorkspaceId, null);
+          {/* THE TOOLBAR — labelled icon buttons (the label is the tooltip and the accessible
+              name). Below md only the overflow menu stays (plus Refresh while it is stale); the
+              menu says every one of them in words. */}
+          <div className="ml-auto flex shrink-0 items-center gap-0.5" role="toolbar" aria-label="This pull request">
+            {/* Show on the shared timeline (centre + glow; distinct from Focus Mode). */}
+            <button
+              type="button"
+              onClick={() => openPrFocused(pr.id)}
+              className={PR_HEADER_ICON_BTN}
+              title="Show this PR on the timeline"
+              aria-label="Show this PR on the timeline"
+            >
+              <TimelineIcon size={15} />
+            </button>
+            {/* Focus — a magnifier that opens this PR's own isolated timeline tab. */}
+            <button
+              type="button"
+              onClick={() => openPrFocusTab(pinnedMetaOf(pr, usersById))}
+              className={PR_HEADER_ICON_BTN}
+              title="Focus — open this PR in its own isolated timeline tab (the close button on the tab closes it)"
+              aria-label="Focus this PR in its own timeline tab"
+            >
+              <MagnifierIcon size={15} />
+            </button>
+            {/* Show in the Activity feed — this PR's repo console with the feed isolated to it. */}
+            <button
+              type="button"
+              onClick={showInFeed}
+              className={PR_HEADER_ICON_BTN}
+              title="Show this PR in its repo's Activity feed (filtered to this PR)"
+              aria-label="Show this PR in the Activity feed"
+            >
+              <FeedIcon size={15} />
+            </button>
+            {/* Copy the PR's GitHub link. */}
+            {githubHref != null && (
+              <span className="hidden md:inline-flex">
+                <CopyButton
+                  text={githubHref}
+                  what="PR link"
+                  title="Copy the GitHub link to this PR"
+                  icon={<LinkIcon size={14} />}
+                  className="h-8 w-8 justify-center"
+                  idleClassName="text-ui-mute hover:bg-ui-hover hover:text-ui-ink"
+                />
+              </span>
+            )}
+            {/* Refresh — re-read this PR from GitHub now. Shares in-flight state with the
+                ~5s live poll via the ['pr-refresh', prId] query key: one spinner, and a
+                click can never double a request the poll already has running. Copy stays
+                modest ("Refresh"): a targeted sync pages reviewThreads(first:50), so a
+                refresh can honestly change nothing. Amber = the last attempt couldn't
+                re-read GitHub (a stale note, never an error — the shown data is valid). */}
+            <button
+              type="button"
+              onClick={refreshNow}
+              disabled={isRefreshing}
+              className={
+                isStale
+                  ? `${PR_HEADER_ICON_BTN} !inline-flex !text-ui-warn disabled:opacity-60`
+                  : `${PR_HEADER_ICON_BTN} disabled:opacity-60`
               }
-              setRepoConsoleTab(pr.repoId, 'activity');
-              setActivityRepo(pr.repoId);
-              setFeedIsolatedPrId(pr.id);
-              showActivity();
-            }}
-            className={PR_HEADER_ICON_BTN}
-            title="Show this PR in its repo's Activity feed (filtered to this PR)"
-            aria-label="Show this PR in the Activity feed"
-          >
-            <FeedIcon size={15} />
-          </button>
-          {/* Refresh — re-read this PR from GitHub now. Shares in-flight state with the
-              ~5s live poll via the ['pr-refresh', prId] query key: one spinner, and a
-              click can never double a request the poll already has running. Copy stays
-              modest ("Refresh"): a targeted sync pages reviewThreads(first:50), so a
-              refresh can honestly change nothing. Amber = the last attempt couldn't
-              re-read GitHub (a stale note, never an error — the shown data is valid). */}
-          <button
-            type="button"
-            onClick={refreshNow}
-            disabled={isRefreshing}
-            className={
-              isStale
-                ? 'shrink-0 rounded p-0.5 text-amber-500 hover:text-amber-600 disabled:opacity-60'
-                : `${PR_HEADER_ICON_BTN} disabled:opacity-60`
-            }
-            title={
-              isStale
-                ? "Couldn't refresh from GitHub — showing the last synced state. Click to retry."
-                : 'Refresh — re-check GitHub for new activity on this PR'
-            }
-            aria-label="Refresh this PR from GitHub"
-          >
-            <RefreshIcon size={14} className={isRefreshing ? 'animate-spin' : undefined} />
-          </button>
-          {/* Copy the PR's GitHub link. */}
-          {safeExternalUrl(pr.githubUrl) != null && (
-            <CopyButton
-              text={safeExternalUrl(pr.githubUrl) ?? ''}
-              what="PR link"
-              title="Copy the GitHub link to this PR"
-              icon={<LinkIcon size={14} />}
-              idleClassName="text-gray-900 hover:bg-gray-100 dark:text-gray-100 dark:hover:bg-gray-800"
+              title={
+                isStale
+                  ? "Couldn't refresh from GitHub — showing the last synced state. Click to retry."
+                  : 'Refresh — re-check GitHub for new activity on this PR'
+              }
+              aria-label="Refresh this PR from GitHub"
+            >
+              <RefreshIcon size={14} className={isRefreshing ? 'motion-safe:animate-spin' : undefined} />
+            </button>
+            {/* Open on GitHub (Octocat). */}
+            <a
+              href={pr.githubUrl}
+              target="_blank"
+              rel="noreferrer noopener"
+              className={PR_HEADER_ICON_BTN}
+              title="Open this PR on GitHub"
+              aria-label="Open this PR on GitHub"
+            >
+              <OctocatIcon size={15} />
+            </a>
+            <Menu
+              label="More actions for this pull request"
+              align="end"
+              items={menuItems}
+              trigger={(p) => (
+                <IconButton {...p} label="More actions" icon={<EllipsisIcon size={15} />} className="!inline-flex" />
+              )}
             />
-          )}
-          {/* Open on GitHub (Octocat). */}
-          <a
-            href={pr.githubUrl}
-            target="_blank"
-            rel="noreferrer noopener"
-            className={PR_HEADER_ICON_BTN}
-            title="Open this PR on GitHub"
-            aria-label="Open this PR on GitHub"
-          >
-            <OctocatIcon size={15} />
-          </a>
-          {pr.isStalled && (
-            <span
-              className="rounded bg-orange-500/15 px-1.5 py-0.5 text-xs font-medium text-orange-500"
-              title="Open, no recent commits, and has open threads"
-            >
-              Stalled
-            </span>
-          )}
-          {/* Auto-merge armed — visible from EVERY tab, not just Overview. Display only (the
-              disarm affordance lives in the Actions row); honest about the mechanism. */}
-          {armedIntent != null && pr.state === 'open' && (
-            <span
-              className="shrink-0 rounded bg-violet-500/15 px-1.5 py-0.5 text-xs font-medium text-violet-600 dark:text-violet-300"
-              title="Auto-merge is armed — Limn updates it from trunk if needed and merges when checks pass, while the app is running. Cancel from Overview → Actions."
-            >
-              <TimerIcon size={12} className="mr-1 inline-block align-[-0.1em]" />
-              Auto-merge armed
-            </span>
-          )}
-          {(() => {
-            const summary = newSummary(pr.newSinceLastViewed);
-            return summary ? (
-              <button
-                type="button"
-                onClick={() => {
-                  // Overview, Activity section open and scrolled to, filtered to what's new.
-                  goToTab('activity');
-                  setActivitySince(pr.lastViewedAt);
-                  setActivityScroll((n) => (n ?? 0) + 1);
-                }}
-                className="ml-auto shrink-0 rounded bg-sky-500/15 px-1.5 py-0.5 text-xs font-medium text-sky-500 hover:bg-sky-500/25"
-                title="Filter activity to what's new since you last looked"
-              >
-                <EyeIcon size={12} className="inline-block align-[-0.1em]" /> {summary}
-              </button>
-            ) : null;
-          })()}
+          </div>
         </div>
-        {/* The meta line: REPO first, then the author — 14px (it was 12px and read as fine
-            print). gray-600/gray-300 clears AA on both themes. */}
+        {/* THE META LINE: state and CI, then the REPO, then the author, age, size and reach.
+            13px body ink in the mute tone (both themes clear AA). */}
         <div
-          className="mt-1 flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300"
+          className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-body text-ui-mute"
           data-testid="pr-header-meta"
         >
-          <span className="min-w-0 truncate">{pr.repoFullName}</span>
-          <span aria-hidden className="decorative-mark text-gray-400 dark:text-gray-500">·</span>
-          <Avatar user={author} size={18} />
-          <UserName user={author} fallbackId={pr.authorId} repoId={pr.repoId} />
-          <span aria-hidden className="decorative-mark text-gray-400 dark:text-gray-500">·</span>
-          <span className="shrink-0">opened {relativeTime(pr.openedAt)}</span>
+          <StatusIcon
+            tone={pr.state === 'open' && !pr.isDraft ? 'neutral' : 'quiet'}
+            icon={pr.state === 'merged' ? <MergeIcon size={14} /> : <PullRequestIcon size={14} />}
+            label={stateLabel}
+            className="font-medium text-ui-ink"
+          />
+          {/* CI, visible from EVERY tab because it lives in the header. It reads `pr.ciStatus` —
+              the synced rollup the Status row, the Timeline bar and the Pending cards read, never
+              the live `checkRuns` — and stays fresh through usePrLiveRefresh's ['pr', prId]
+              invalidation (no fetch of its own). Open PRs only: see `prHeaderCi`. The word is an
+              AA grey pair, never the CI hex; the dot carries the colour (and a ring for an edge). */}
+          {headerCi != null && (
+            <button
+              type="button"
+              data-testid="pr-header-ci"
+              onClick={showCiStatus}
+              className={cx(
+                'inline-flex shrink-0 items-center gap-1.5 rounded-ui px-1 hover:bg-ui-hover hover:text-ui-ink touch:min-h-10',
+                headerCi.status === 'failure' || headerCi.status === 'error' ? 'text-ui-danger' : '',
+                FOCUS_RING,
+              )}
+              title="Show CI status in Overview"
+              aria-label={`${headerCi.label} — show CI status`}
+            >
+              <CiDot
+                status={headerCi.status}
+                size={10}
+                title="Show CI status in Overview"
+                className={
+                  headerCi.status === 'unknown' ? '' : 'ring-1 ring-black/15 dark:ring-white/20'
+                }
+              />
+              {headerCi.label}
+            </button>
+          )}
+          {/* No separator dots: the gap groups the items, and a wrapped line (a phone wraps this
+              one twice) never starts or ends on a stray mark. */}
+          <span className="inline-flex min-w-0 items-center gap-2">
+            <span className="min-w-0 truncate">{pr.repoFullName}</span>
+          </span>
+          <span className="inline-flex min-w-0 items-center gap-2">
+            <span className="inline-flex min-w-0 items-center gap-1.5">
+              <Avatar user={author} size={16} />
+              <UserName user={author} fallbackId={pr.authorId} repoId={pr.repoId} />
+            </span>
+          </span>
+          <span className="inline-flex shrink-0 items-center gap-2">
+            <span title={dateTime(pr.openedAt)}>opened {relativeTime(pr.openedAt)}</span>
+          </span>
           {pr.changedFilesCount > 0 && (
-            <>
-              <span aria-hidden className="decorative-mark text-gray-400 dark:text-gray-500">·</span>
-              <button
+            <span className="inline-flex shrink-0 items-center gap-2">
+                <button
                 type="button"
                 onClick={() => goToTab('changes')}
-                className="inline-flex shrink-0 items-center gap-1 font-medium"
+                className={cx('inline-flex shrink-0 items-center gap-1 rounded-ui px-0.5 tabular-nums hover:text-ui-ink', FOCUS_RING)}
                 title="View the files changed by this PR"
               >
                 <span>
@@ -1469,101 +1628,80 @@ export function PrDetail({
                   −{pr.deletions.toLocaleString()}
                 </span>
               </button>
-            </>
+            </span>
           )}
           {/* Deliberately OUTSIDE the `changedFilesCount > 0` block: the flag's own resolver is
               the only gate it needs, and it renders nothing for an unmeasured or under-threshold
               PR. Placed right after the raw +/− delta so the two readings sit together — that
               total includes docs, config, lockfiles and generated files; this one does not. */}
-          <LargePrFlag pr={codeLocFields} className="ml-0.5" />
+          <LargePrFlag pr={codeLocFields} />
           {/* BLAST RADIUS, beside the two size readings. This is the ONE surface that gets the
               EXPANDABLE chip: there is room for the reason list here, and this is where a reader
-              who disagrees with a verdict needs to see what decided it (the known false positive
-              — a repo whose product IS a database schema — is only correctable by someone who
-              can see "a database schema" named, then switch that surface off in Settings).
-              ⚠ It reads the SAME `codeLoc` the flag beside it reads, so the two can never quote
-              different line counts for one pull request. */}
-          <BlastRadiusChip
-            pr={{ ...blastFields, ...codeLocFields }}
-            className="ml-0.5"
-            expandable
-          />
+              who disagrees with a verdict needs to see what decided it. ⚠ It reads the SAME
+              `codeLoc` the flag beside it reads, so the two can never quote different line counts
+              for one pull request. */}
+          <BlastRadiusChip pr={{ ...blastFields, ...codeLocFields }} expandable />
+          {pr.isStalled && (
+            <span
+              className="inline-flex items-center gap-1 text-ui-warn"
+              title="Open, no recent commits, and has open threads"
+            >
+              <PendingStalledIcon size={13} aria-hidden />
+              Stalled
+            </span>
+          )}
+          {/* Auto-merge armed — visible from EVERY tab, not just Overview. Display only (the
+              disarm affordance lives in the Actions row); honest about the mechanism. */}
+          {armedIntent != null && pr.state === 'open' && (
+            <span
+              className="inline-flex shrink-0 items-center gap-1 text-ui-ink"
+              title="Auto-merge is armed — Limn updates it from trunk if needed and merges when checks pass, while the app is running. Cancel from Overview → Actions."
+            >
+              <TimerIcon size={13} aria-hidden />
+              Auto-merge armed
+            </span>
+          )}
+          {newSince != null && (
+            <button
+              type="button"
+              onClick={showNewActivity}
+              className={cx(
+                'inline-flex shrink-0 items-center gap-1 rounded-ui px-1 text-ui-accent hover:bg-ui-hover touch:min-h-10',
+                FOCUS_RING,
+              )}
+              title="Filter activity to what's new since you last looked"
+            >
+              <EyeIcon size={13} aria-hidden /> {newSince}
+            </button>
+          )}
         </div>
         {/* The AI half of blast radius, on its own line under the metadata row — two sentences
             need the width, and a click-gated button does not belong inline among the counts.
             ⚠ `hasBlast` gates it on the CHIP having something to explain: with no measurement
             there is no chip and no button. */}
         <BlastImpactNote prId={prId} hasBlast={blastFields.blast != null} />
-      </div>
-
-      <div className="flex gap-1 border-b border-gray-200 px-3 dark:border-gray-800">
-        {(
-          [
-            'overview',
-            'comments',
-            'changes',
-            // Also listed while the bot data is still in flight for a reader who ARRIVED on this
-            // tab (a deep link / a refresh), so the strip is never showing a screen with no
-            // highlighted tab. It disappears again if the answer comes back empty, and
-            // `effectiveTab` moves to Overview with it.
-            ...(botTabVisible || effectiveTab === 'bot_activity' ? (['bot_activity'] as Tab[]) : []),
-            ...(claudeReviewEnabled ? (['claude_review'] as Tab[]) : []),
-            ...(aiFixTabEnabled ? (['ai_fix'] as Tab[]) : []),
-          ] as Tab[]
-        ).map((t) => {
-          const failing = pr.checkRuns.filter(
-            (c) => !c.limnOwned && (c.state === 'failure' || c.state === 'error'),
-          ).length;
-          return (
-            <button
-              key={t}
-              type="button"
-              // Picking a tab by hand drops any pending "show me this finding" target, so
-              // opening Changes to browse the diff doesn't re-jump to the last finding — which
-              // is `goToTab`'s whole job, so this is no longer a special case.
-              onClick={() => goToTab(t)}
-              className={`-mb-px border-b-2 px-3 py-1.5 text-xs ${
-                effectiveTab === t
-                  ? 'border-blue-500 text-blue-500'
-                  : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700'
-              }`}
-            >
-              {TAB_LABELS[t]}
-              {t === 'overview' && failing > 0 && (
-                <span className="ml-1 text-red-500" title={`${failing} failing`}>
-                  <DotIcon size={7} className="inline-block align-middle" />
-                </span>
-              )}
-              {t === 'comments' && conversationCount > 0 && (
-                <span className="ml-1 opacity-60" title={`${conversationCount} comments`}>
-                  {conversationCount}
-                </span>
-              )}
-              {t === 'changes' && pr.changedFilesCount > 0 && (
-                <span
-                  className="ml-1 opacity-60"
-                  title={`${pr.changedFilesCount} files changed`}
-                >
-                  {pr.changedFilesCount}
-                </span>
-              )}
-              {t === 'claude_review' && reviewPill != null && <ReviewTabOutcome pill={reviewPill} />}
-              {t === 'bot_activity' && botTtfrAnomalies > 0 && (
-                <span
-                  className="ml-1 text-red-500"
-                  title={`${botTtfrAnomalies} bot slower than its typical on this PR`}
-                >
-                  <WarningIcon size={11} className="inline-block align-[-0.1em]" />
-                </span>
-              )}
-            </button>
-          );
-        })}
-      </div>
-
-      <div className="min-h-0 flex-1 overflow-auto">
+        {/* THE TABS — counts as facts, 1–9 while this PR is the one on screen. Picking a tab by
+            hand drops any pending "show me this finding" target (`goToTab`'s whole job). */}
+        <Tabs
+          tabs={tabItems}
+          value={effectiveTab}
+          onChange={goToTab}
+          label={`Pull request #${pr.number} tabs`}
+          numberKeys={liveVisible}
+          idPrefix={`pr-${pr.id}`}
+          className="-mx-1 mt-2 pb-2"
+        />
+      </header>
+      <div
+        // On a phone the header scrolls away with the content (one scroller, the outer box): a
+        // fixed header would leave a third of the screen for the diff.
+        className="min-h-0 flex-1 overflow-auto max-md:flex-none max-md:overflow-visible"
+        role="tabpanel"
+        id={panelId(`pr-${pr.id}`, effectiveTab)}
+        aria-labelledby={tabId(`pr-${pr.id}`, effectiveTab)}
+      >
         <Suspense
-          fallback={<div className="px-4 py-6 text-sm text-gray-400">Loading…</div>}
+          fallback={<div className="px-5 py-6 text-body text-ui-faint">Loading…</div>}
         >
         {effectiveTab === 'overview' ? (
           <div>
@@ -1631,6 +1769,7 @@ export function PrDetail({
             threadOpenMemory={threadOpenMemory}
             threadsOnly={changesThreadsOnly}
             onThreadsOnlyChange={setChangesThreadsOnly}
+            keysEnabled={liveVisible}
             renderThreads={(visibleThreadIds) => (
               // THE THREADS ONLY VIEW — everything the old Changes tab's threads offered: the full bot
               // triage card, Check threads, the state / severity / vendor pills (guarded to this

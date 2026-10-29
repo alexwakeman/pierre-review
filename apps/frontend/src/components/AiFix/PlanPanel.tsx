@@ -34,9 +34,9 @@ import { useFollowUpProvider } from '../../hooks/useModelPick.js';
 // tab's own SSE stream (`liveStatus`).
 
 const BTN_PRIMARY =
-  'whitespace-nowrap rounded border border-blue-400 px-2.5 py-1 text-xs text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:border-blue-600 dark:text-blue-400 dark:hover:bg-blue-900/30';
+  'inline-flex h-7 items-center whitespace-nowrap rounded-ui bg-ui-raise px-2.5 text-meta font-medium text-ui-ink hover:bg-ui-hover disabled:cursor-not-allowed disabled:opacity-50 touch:h-10 touch:px-3';
 const BTN_SECONDARY =
-  'whitespace-nowrap rounded border border-gray-300 px-2.5 py-1 text-xs hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500';
+  'inline-flex h-7 items-center whitespace-nowrap rounded-ui bg-ui-raise px-2.5 text-meta font-medium text-ui-ink hover:bg-ui-hover disabled:cursor-not-allowed disabled:opacity-50 touch:h-10 touch:px-3';
 const REF_CHIP =
   'inline-flex items-center rounded bg-gray-500/10 px-1.5 py-px font-mono text-[11px] text-gray-700 dark:text-gray-200';
 
@@ -160,7 +160,7 @@ export function PlanPanel({
   const actionError = message.error ?? approve.error ?? discard.error;
 
   return (
-    <div className="mt-3 rounded border border-gray-200 p-3 dark:border-gray-800">
+    <div className="mt-3 rounded-ui bg-ui-surface p-3">
       <div className="mb-1 flex items-center gap-1 text-xs font-semibold text-gray-700 dark:text-gray-200">
         Plan
         {plan && state.revision > 1 && (
@@ -245,7 +245,7 @@ export function PlanPanel({
           <AiRunGate kind="plan" auth={auth} meter={false} followUp provider={passProvider}>
             <textarea
               aria-label="Change the plan"
-              className="w-full rounded border border-gray-300 bg-transparent px-2 py-1 text-xs dark:border-gray-700"
+              className="w-full rounded-ui bg-ui-raise px-2 py-1 text-body ring-1 ring-inset ring-ui-line focus:outline-none focus:ring-2 focus:ring-ui-accent"
               rows={2}
               placeholder={`Tell ${name} what to change in the plan`}
               value={draft}
@@ -291,7 +291,7 @@ export function ApprovedPlanNote({ fix }: { fix: AiFix }): JSX.Element | null {
   const plan = fix.plan?.status === 'approved' ? fix.plan.plan : null;
   if (!plan) return null;
   return (
-    <div className="mb-2 rounded border border-gray-200 p-2 dark:border-gray-800">
+    <div className="mb-2 rounded-ui bg-ui-surface p-2">
       <div className="mb-1 text-xs font-semibold text-gray-600 dark:text-gray-300">Built from your plan</div>
       <PlanBullets plan={plan} />
     </div>

@@ -242,7 +242,7 @@ export function BotTriageCard({
     return (
       <div
         data-testid="bot-triage-card"
-        className="mx-4 mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-gray-200 bg-gray-50/60 px-3 py-1.5 text-xs text-gray-600 dark:border-gray-800 dark:bg-gray-900/40 dark:text-gray-300"
+        className="mx-4 mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-ui bg-ui-surface px-3 py-1.5 text-meta text-ui-mute md:mx-5"
       >
         {headline}
         {onOpenThreads && (
@@ -270,7 +270,7 @@ export function BotTriageCard({
   return (
     <div
       data-testid="bot-triage-card"
-      className="mx-3 mt-2 rounded-md border border-gray-200 bg-gray-50/60 px-3 py-2 text-xs text-gray-600 dark:border-gray-800 dark:bg-gray-900/40 dark:text-gray-300"
+      className="mx-4 mt-2 rounded-ui bg-ui-surface px-3 py-2 text-meta text-ui-mute md:mx-5"
     >
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         {headline}

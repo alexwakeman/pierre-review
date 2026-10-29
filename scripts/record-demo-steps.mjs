@@ -286,13 +286,21 @@ export const STEPS = [
     name: 'pr:105:review-history',
     run: async (h) => {
       await h.go('?view=pr-detail:105&prTab=claude_review');
-      // Every run in the history select ("Showing"), so showing any of them answers. Options of a
-      // closed select are never "visible": pick each by value instead of clicking it.
+      // Every run in the history select ("Showing", the custom Select: its options exist only
+      // while it is open), so showing any of them answers. Open it, count, then pick each by index.
       const history = h.page.locator('main').getByLabel('Showing').first();
-      const values = (await history.count()) > 0 ? await history.locator('option').evaluateAll((os) => os.map((o) => o.value)) : [];
-      for (const v of values.slice(0, 8)) {
+      let count = 0;
+      if ((await history.count()) > 0) {
+        await history.click();
+        const listId = await history.getAttribute('aria-controls');
+        count = await h.page.locator(`[id="${listId}"] [role="option"]`).count();
+        await h.page.keyboard.press('Escape');
+      }
+      for (let i = 0; i < Math.min(count, 8); i++) {
         try {
-          await history.selectOption(v, { timeout: 2000 });
+          await history.click({ timeout: 2000 });
+          const listId = await history.getAttribute('aria-controls');
+          await h.page.locator(`[id="${listId}"] [role="option"]`).nth(i).click({ timeout: 2000 });
           await h.settle({ quietMs: 600 });
         } catch {
           /* gone after a re-render */

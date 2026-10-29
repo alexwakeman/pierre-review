@@ -89,6 +89,7 @@ function PickCheck({
     <span className="inline-flex shrink-0 items-center gap-1.5 pt-0.5">
       <input
         type="checkbox"
+        className="h-4 w-4 shrink-0 accent-ui-accent-fill"
         checked={picked}
         disabled={disabled}
         onChange={(e) => onToggle(e.target.checked)}
@@ -125,7 +126,7 @@ function PlainRow({
       >
         <input
           type="checkbox"
-          className="mt-0.5"
+          className="mt-0.5 h-4 w-4 shrink-0 accent-ui-accent-fill"
           checked={picked}
           disabled={disabled}
           onChange={(e) => onToggle(e.target.checked)}

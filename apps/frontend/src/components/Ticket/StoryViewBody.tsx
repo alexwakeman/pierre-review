@@ -107,9 +107,9 @@ export function StoryViewBody({
   return (
     <div data-testid="story-view-body" className="space-y-3">
       {prsQ.isError ? (
-        <p className="text-sm text-red-600 dark:text-red-400">Couldn’t load this story.</p>
+        <p className="text-body text-ui-danger">Couldn’t load this story.</p>
       ) : prsQ.isLoading || data == null ? (
-        <div aria-busy="true" aria-label="Loading the story" className="h-32 animate-pulse rounded-xl bg-gray-100 dark:bg-gray-900/40" />
+        <div aria-busy="true" aria-label="Loading the story" className="h-32 rounded-ui bg-ui-surface motion-safe:animate-pulse" />
       ) : !found ? (
         <p className={`text-sm ${MUTED}`}>This ticket isn’t on this workspace’s tracker.</p>
       ) : (
@@ -150,7 +150,7 @@ function ClosedList({
         aria-expanded={open}
         aria-controls={listId}
         onClick={() => setOpen((v) => !v)}
-        className="inline-flex items-center gap-1.5 rounded px-1 py-0.5 text-xs font-medium text-gray-600 hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-gray-300 dark:hover:text-gray-50"
+        className="inline-flex items-center gap-1.5 rounded-ui px-1 py-0.5 text-meta font-medium text-ui-mute hover:text-ui-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent touch:min-h-10"
       >
         <ChevronIcon dir={open ? 'down' : 'right'} size={12} />
         Closed without merging ({prs.length})
@@ -161,10 +161,10 @@ function ClosedList({
             <button
               type="button"
               onClick={() => onOpenPr(pr)}
-              className="block w-full rounded-md border border-gray-200 bg-white px-3 py-1.5 text-left hover:border-gray-300 hover:bg-gray-50/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-gray-800 dark:bg-gray-950 dark:hover:border-gray-700 dark:hover:bg-gray-900"
+              className="block w-full rounded-ui bg-ui-surface px-3 py-1.5 text-left hover:bg-ui-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent touch:min-h-11"
             >
-              <span className="block min-w-0 break-words text-[13px] font-medium text-gray-800 dark:text-gray-100">{pr.title}</span>
-              <span className="mt-0.5 block text-[11px] text-gray-600 dark:text-gray-300">
+              <span className="block min-w-0 break-words text-body font-medium text-ui-ink">{pr.title}</span>
+              <span className="mt-0.5 block text-meta text-ui-mute">
                 <span className="font-mono">
                   {repoNameById.get(pr.repoId) ?? ''}#{pr.number}
                 </span>

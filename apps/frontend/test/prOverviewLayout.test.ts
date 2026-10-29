@@ -23,7 +23,8 @@ const textOf = (html: string): string => html.replace(/<[^>]*>/g, '').replace(/&
 describe('PR detail tabs', () => {
   it('lists Comments right after Overview and no Activity tab', () => {
     const s = src('components/PrDetail.tsx');
-    const strip = s.slice(s.indexOf("'overview',\n            'comments',"));
+    // The redesign builds the strip from `tabIds` (fed to the Tabs primitive).
+    const strip = s.slice(s.indexOf('const tabIds: Tab[] = [') + 'const tabIds: Tab[] = ['.length);
     expect(strip.length).toBeGreaterThan(0);
     const list = strip.slice(0, strip.indexOf(']'));
     expect(list).toMatch(/'overview',\s*'comments',\s*'changes'/);
@@ -45,12 +46,14 @@ describe('PR detail tabs', () => {
     expect(s).toContain("seedTab('comments')");
   });
 
-  it('the header meta line is 14px and names the repo before the author', () => {
+  // The redesign's type scale (docs/redesign/DESIGN.md): the meta line is body text (13px), the
+  // old 14px `text-sm` is gone. It still names the repo before the author.
+  it('the header meta line is body text and names the repo before the author', () => {
     const s = src('components/PrDetail.tsx');
     const at = s.indexOf('data-testid="pr-header-meta"');
     expect(at).toBeGreaterThan(0);
-    const block = s.slice(at - 200, at + 900);
-    expect(block).toContain('text-sm');
+    const block = s.slice(at - 200, at + 2600);
+    expect(block).toContain('text-body');
     expect(block).not.toMatch(/className="mt-1 flex items-center gap-2 text-xs/);
     expect(block.indexOf('pr.repoFullName')).toBeLessThan(block.indexOf('<UserName'));
   });

@@ -1319,7 +1319,7 @@ Shots: `/tmp/limn-demo-shots/pr-113-*.png`, `pr-114-*.png`, `pr-105-claude_revie
 
 Cross-cutting:
 
-- [ ] URL/store keys survive: `?view=pr-detail:<id>`, `?prTab=overview|comments|changes|bot_activity|claude_review|ai_fix`
+- [x] URL/store keys survive (unchanged; checked on the redesign/pr-detail branch): `?view=pr-detail:<id>`, `?prTab=overview|comments|changes|bot_activity|claude_review|ai_fix`
   (legacy `activity` → Overview with Activity open; legacy `threads` → Changes), `?pr=<id>&thread=<id>`
   (bottom pane on the Timeline), `pr-focus:<id>`, `?view=ticket:<ident>`, `?sprintStory=<ident>`.
   Store fields: `prDetailTab {prId,tab}`, `selectedPrId`, `selectedThreadId`, `threadStateFilter`,
@@ -1327,20 +1327,22 @@ Cross-cutting:
   `claudeTabFocus`, `aiFixTabFocus`, `prChangesFocus`, `feedIsolatedPrId`. Local-only:
   `changesThreadsOnly`, `changesFocus`, `threadOpenMemory`, `activityOpenLocal`, `statusFocus`.
   localStorage: Changes rail width (`RAIL_W_KEY`), diff wrap (`useDiffWrap`), `limn.blastImpactNote.collapsed.v1`.
-- [ ] Every tab change goes through `goToTab` / `seedTab` / `openInChanges` / `showThread`; deep-link
+- [x] Every tab change goes through `goToTab` / `seedTab` / `openInChanges` / `showThread` (the Tabs primitive calls `goToTab`); deep-link
   effects use `markUrlCorrection` (replace, not push).
-- [ ] Gates: `me.ai.enabled` hides AI Review, AI Fix, Check threads, the impact note and the AI menu
+- [x] Gates (unchanged): `me.ai.enabled` hides AI Review, AI Fix, Check threads, the impact note and the AI menu
   items. AiRunGate kinds used here: review, fix, plan, resolve, thread_check, review_chat,
   ci_review, ticket_review, story_docs, complete. `me.mlSeverity` controls ML badges and Severity
   pills. `me.conflictResolver` controls the resolver entry. PR permissions: viewerCanPush,
   viewerCanApprove, viewerCanClose, viewerCanReopen. Demo writes/AI runs are simulated by `src/demo`.
-- [ ] Mobile debts: Changes file rail hidden below md (`hidden md:flex`) — mobile has no file
-  navigation today; resolver stacks panes when narrow (NARROW_PANES); rest is desktop-only (pr-28
-  gutter for the pane close button, 112px w-28 label columns in Overview, native selects/checkboxes).
+- [x] Mobile debts: Changes file rail hidden below md (`hidden md:flex`) → a "Files" menu below md;
+  Overview labels stack above values on a phone (w-28 from sm); the pane's pr-28 gutter is pr-12;
+  the Model / Showing / Verdict / AC-field / merge-method / update-strategy selects are the custom
+  Select; AI Fix's checkboxes and radios stay native inputs, themed. The resolver still stacks panes
+  when narrow (NARROW_PANES) — the resolver overlay itself was not redesigned here.
 - [x] Sub-12px text: text-[11px] on tab pills, Activity header, check pills, section counts
   (allowed at the floor); text-[10px] on ReviewStateTag and AutomatedReviewerBadge → raised to 11px.
 
-### [ ] PR detail shell: mounts, loading, error, live refresh, mark-viewed
+### [x] PR detail shell: mounts, loading, error, live refresh, mark-viewed → unchanged mounts/placement/poll/mark-viewed; skeleton and error on the --ui-* tokens; the pane's ✕ is a 32px (40px touch) icon button; on a phone the header scrolls away with the content (one scroller)
 - Entry: bottom DetailPane under the Timeline (click a bar, j/k on the board, `?pr=<id>[&thread=<id>]`),
   resizable, close button (Esc). Full-screen overlay (pinned tab `pr-detail:<id>`) opened by
   `openPrDetailTab` from Pending cards, Open PRs, Feed, Search, This Sprint, story view, Reports and
@@ -1372,7 +1374,7 @@ Cross-cutting:
   `e2e/activity-feed.spec.ts` (→ pinned-pr-overlay), verify-demo `pr:113|114|105|116:<tab>`,
   record-demo-steps PR_TABS
 
-### [ ] PR header: row 1 (status, CI, title, toolbar icons, chips)
+### [x] PR header: row 1 (status, CI, title, toolbar icons, chips) → row 1 is the title (15px; pane: the button + ↗) and the toolbar: Timeline · Focus · Feed · Copy link · Refresh · GitHub as labelled icon buttons (md+), then a "More actions" menu that says every one in words (the only toolbar below md; Refresh stays visible while stale, in warn ink). State, CI readout (same testid, same click), Stalled, Auto-merge armed and the "N new …" button moved onto the meta line; every toolbar action is also a ⌘K command
 - Entry: top of every PR detail, every tab
 - Files: `PrDetail.tsx`, `Activity/BranchStatusChip.tsx` (CiDot), `CopyButton.tsx`, `ShowOnTimeline.tsx`,
   `lib/ui.ts` (`PR_STATE_META`, `prHeaderCi`)
@@ -1401,7 +1403,7 @@ Cross-cutting:
   - [ ] Refresh disabled while refreshing; amber stale variant
 - Tests: `test/prHeaderCi.test.ts`, `test/prDetailPlacement.test.ts`, verify-demo `pr:113:overview`
 
-### [ ] PR header: meta line (repo, author, age, size, large-PR flag, blast radius)
+### [x] PR header: meta line (repo, author, age, size, large-PR flag, blast radius) → one wrapping 13px line: state · CI · repo · author · opened (full date in title) · N files +X −Y (→ Changes) · Large-PR flag · expandable blast chip · Stalled · Auto-merge armed · N new; no separator dots (a wrapped line never starts on one). `prOverviewLayout.test.ts` now pins `text-body` (was `text-sm`), deliberately
 - Entry: second header row, every tab
 - Files: `PrDetail.tsx`, `Activity/LargePrFlag.tsx`, `Activity/BlastRadiusChip.tsx`,
   `hooks/useLargePr.ts`, `hooks/useBlastRadius.ts`, `UserName.tsx`, `UserProfilePopover.tsx`
@@ -1424,7 +1426,7 @@ Cross-cutting:
   the author" — pins `text-sm`; conflicts with the 12/13/15/22 scale, update deliberately),
   `test/themeMetrics.test.ts`, `test/textContrast.test.ts`, `test/vendorInk.test.ts`
 
-### [ ] Impact note ("What could this break?")
+### [x] Impact note ("What could this break?") → unchanged component, under the meta line
 - Entry: under the header meta line, only when `me.ai.enabled`, a blast chip exists and Settings → showImpactNote is on
 - Files: `Activity/BlastImpactNote.tsx`, `AiSetup.tsx` (AiRunGate complete), `AiStatusLine.tsx`, `hooks/useAnnotations*.ts`
 - Essential info:
@@ -1443,7 +1445,7 @@ Cross-cutting:
   - [ ] No request of its own: reads the shared `['pr-annotations', prId]` index
 - Tests: `test/aiStatusAndPrActions.test.ts`, verify-demo `pr:113:overview`
 
-### [ ] PR tab strip
+### [x] PR tab strip → the `Tabs` primitive (role=tab, ← → Home End; 1–9 while this PR is the one on screen): Comments and Changes carry counts, Overview its failing dot (+ sr-only "N failing"), AI Review its outcome pill, Bot activity its warning; tabs scroll sideways on a phone; ⌘K lists every tab. `prOverviewLayout.test.ts` finds the order in `tabIds` now
 - Entry: below the header; `?prTab=` paired with the PR id
 - Files: `PrDetail.tsx` (`TAB_LABELS`, `ReviewTabOutcome`, `effectiveTab`), `store/filters.ts`,
   `hooks/useClaudeReview.ts` (`useClaudeReviewTabPill`), `lib/claudeReviewColumn.ts`
@@ -1465,7 +1467,7 @@ Cross-cutting:
   `test/claudeReviewTabPill.test.ts` (pill mounted on the strip: `t === 'claude_review' && reviewPill != null`),
   `test/urlHistory.test.ts`
 
-### [ ] Overview: SAML notice and compact bot-triage card
+### [x] Overview: SAML notice and compact bot-triage card → unchanged content; the triage card is a surface-toned box (no border)
 - Entry: top of Overview
 - Files: `ChecksTab.tsx` (authNotice), `BotTriageCard.tsx` (compact)
 - Essential info:
@@ -1481,7 +1483,7 @@ Cross-cutting:
   - [ ] SAML notice only when `pr.authNotice.kind === 'saml_sso'`
 - Tests: `test/resolvableBotThreads.test.ts`, verify-demo `pr:113:overview`
 
-### [ ] Overview: Status row (CI and merge verdict / merge queue)
+### [x] Overview: Status row (CI and merge verdict / merge queue) → unchanged; every Overview row's label is a quiet 12px word (no uppercase), above the value on a phone, beside it from sm; no dividers between rows
 - Entry: first Overview row; header CI readout scrolls to and focuses it
 - Files: `ChecksTab.tsx`, `lib/ui.ts` (`mergeVerdict`, `MERGE_TONE_CLASS`, `CI_META`), `Activity/pendingLabels.ts` (`pendingQueueBadge`)
 - Essential info:
@@ -1498,7 +1500,7 @@ Cross-cutting:
 - Tests: `test/mergeBlockers.test.ts`, `test/conflictsRow.test.ts`, `test/pendingCardControls.test.ts`,
   `test/verdictStrictness.test.ts`
 
-### [ ] Overview: Conflicts row and conflict-resolver entry
+### [x] Overview: Conflicts row and conflict-resolver entry → unchanged (same row component)
 - Entry: Overview, under Status, when `conflictsRowVisible(state, verdict)`. Other resolver entries:
   MergeControl's conflict box, the Pending conflicts card, AI Fix's ConflictAiCard and the "Also
   resolve merge conflicts with <base>" checkbox
@@ -1519,7 +1521,7 @@ Cross-cutting:
   - [ ] A queued conflicting PR gets no button; an armed one does
 - Tests: `test/conflictsRow.test.ts`, `test/conflictResolverEntry.test.ts`, `test/claudeConflictPrefill.test.ts`
 
-### [ ] Overview: Auto-merge stopped row and Blocked row
+### [x] Overview: Auto-merge stopped row and Blocked row → unchanged
 - Files: `ChecksTab.tsx`, `AutoMergeBanner.tsx` (`TERMINAL_LABEL`), `hooks/useAutoMerge.ts` (`usePrStoppedIntent`), `lib/ui.ts`
 - Essential info:
   - [ ] Auto-merge row (open PR, stopped intent): warning icon, terminal headline, the watcher's
@@ -1533,7 +1535,7 @@ Cross-cutting:
   - [ ] Blocked row only for the blocked verdict
 - Tests: `test/mergeBlockers.test.ts`
 
-### [ ] Reviews row (ReviewsChips), shared by Overview and AI Review
+### [x] Reviews row (ReviewsChips), shared by Overview and AI Review → unchanged
 - Files: `pr/ReviewsRow.tsx`, `lib/ui.ts` (`REVIEW_STATE_META`, `automatedReviewerMeta`, `vendorInk`)
 - Essential info:
   - [ ] One chip per reviewer with server-folded standing (approved, changes requested, commented,
@@ -1548,7 +1550,7 @@ Cross-cutting:
   - [ ] Uncapped (no "+N")
 - Tests: `test/pendingHeadings.test.ts`, `test/prCardShell.test.ts`, `test/vendorInk.test.ts`
 
-### [ ] Overview: Bots row and Bot activity caution row
+### [x] Overview: Bots row and Bot activity caution row → unchanged
 - Files: `ChecksTab.tsx`, `hooks/useBotTriage.ts` (`usePrBotBehaviour`)
 - Essential info:
   - [ ] One chip per review-bot vendor: bot icon, label, "· N" threads and "· M need a look"
@@ -1562,7 +1564,7 @@ Cross-cutting:
   - [ ] Caution row only with a ttfrAnomaly and a visible Bot activity tab
 - Tests: `test/botReviewerQueryKey.test.ts`
 
-### [ ] Actions row: "Show actions" reveal and ApproveControl
+### [x] Actions row: "Show actions" reveal and ApproveControl → unchanged (the NEW `a` key was NOT added on PR detail: an approve has no undo there; see the report)
 - Entry: Overview "Actions" row; AI Review "Reviews and actions" → Actions
 - Files: `pr/PrActionsRow.tsx`, `ApproveControl.tsx`, `MentionTextarea.tsx`, `hooks/usePrWrites.ts`
 - Essential info:
@@ -1586,7 +1588,7 @@ Cross-cutting:
 - Tests: `test/aiStatusAndPrActions.test.ts`, `test/prWriteCascadeGuard.test.ts`,
   `test/mergeControlQueued.test.ts`, record-demo-steps clicks "Show actions"
 
-### [ ] MergeControl (merge methods, merge queue, update branch, armed panel, conflict box)
+### [x] MergeControl (merge methods, merge queue, update branch, armed panel, conflict box) → the merge-method and update-strategy pickers are the custom Select ("Merge method", "How to bring in the base branch"); everything else unchanged
 - Entry: Actions row after "Show actions", when viewerCanPush, open and not draft
 - Files: `MergeControl.tsx`, `hooks/usePrWrites.ts`, `hooks/useMergeQueueStatus.ts`, `lib/ui.ts`
 - Essential info:
@@ -1614,7 +1616,7 @@ Cross-cutting:
 - Tests: `test/mergeControlQueued.test.ts`, `test/pendingCardControls.test.ts`,
   `test/prWriteCascadeGuard.test.ts`, record-demo-steps clicks `/^(Merge|Merge when ready)$/`
 
-### [ ] MergeWhenReadyControl (arm or cancel auto-merge)
+### [x] MergeWhenReadyControl (arm or cancel auto-merge) → unchanged
 - Files: `MergeWhenReadyControl.tsx`, `hooks/useAutoMerge.ts`
 - Essential info:
   - [ ] Armed: timer chip "Armed — merging when ready" / "Armed — queueing when ready" / "In the merge queue" (full explanation in title)
@@ -1631,7 +1633,7 @@ Cross-cutting:
   - [ ] "Arming…" / "Cancelling…"; errors "Failed to arm auto-merge." / "Failed to cancel auto-merge."
 - Tests: `test/mergeControlQueued.test.ts`
 
-### [ ] Close PR and Reopen PR
+### [x] Close PR and Reopen PR → unchanged
 - Files: `ClosePrControl.tsx`, `ReopenPrControl.tsx`
 - Essential info:
   - [ ] Close confirm: "Close PR" / Cancel (title says reversible on GitHub)
@@ -1643,7 +1645,7 @@ Cross-cutting:
   - [ ] Close hidden while auto-merge is armed
 - Tests: `test/prWriteCascadeGuard.test.ts`
 
-### [ ] Overview: Merged by, Ticket/Branch, Summary, Checks, Labels, Requested, Suggested reviewers, Meta
+### [x] Overview: Merged by, Ticket/Branch, Summary, Checks, Labels, Requested, Suggested reviewers, Meta → unchanged content; "Branch" / "Summary" captions are quiet 12px words
 - Files: `ChecksTab.tsx` (`PrTicketBranchLine`, `PrBranchLine`, `PrTicketChip`, `PrSummary`,
   `ChecksSummary`, `SuggestedReviewersRow`), `CheckList.tsx` (`ChecksList`, `CheckRow`,
   `CiRerunControl`), `hooks/usePr.ts`, `hooks/useTicketRefs.ts`, `lib/ticketTab.ts`
@@ -1679,7 +1681,7 @@ Cross-cutting:
 - Tests: `test/prBranchRow.test.ts`, `test/prOverviewLayout.test.ts`, `test/ciReview.test.ts`,
   `e2e/pending-assign-reviewer.spec.ts`, record-demo-steps clicks `pr-checks-summary` and "View log|Show log"
 
-### [ ] Overview: Activity section (collapsed event list)
+### [x] Overview: Activity section (collapsed event list) → unchanged behaviour; header is a 36px (44px touch) row "Activity · N events", no rule above; ⌘K "Show this pull request’s activity"
 - Entry: foot of Overview, collapsed by default; opened by its header, `?prTab=activity`, the
   timeline commit popover (`activityFocus`) or the header's "N new" chip
 - Files: `PrDetail.tsx` (`ActivitySection`, `ActivityList`, `buildActivity`)
@@ -1696,7 +1698,7 @@ Cross-cutting:
   - [ ] A deep link scrolls to the row and flashes it (activity-flash, 1.8s)
 - Tests: `test/prOverviewLayout.test.ts`, record-demo-steps clicks `pr-activity-section`
 
-### [ ] Comments tab (conversation and composer)
+### [x] Comments tab (conversation and composer) → each item a surface-toned card (no border; the selected comment keeps its amber ring), header wraps on a phone; Reply / View on GitHub ≥ 40px on touch; composer on tokens with Comment as the primary button
 - Entry: `?prTab=comments`; a timeline pr_comment popover ("Open in detail pane") or a Pending mention seeds `commentFocus`
 - Files: `PrDetail.tsx` (`PrCommentsList`, `ReviewStateTag`), `PrCommentComposer.tsx`,
   `ReactionBar.tsx`, `MlSeverityBadge.tsx`, `LimnSeverityChip.tsx`, `ThreadView/NewCommentHighlight.tsx`
@@ -1721,7 +1723,7 @@ Cross-cutting:
   - [ ] ML badge hidden when ML is off
 - Tests: `test/mlSeverityBadge.test.ts`, verify-demo `pr:<id>:comments`
 
-### [ ] Changes tab: sticky bar, file tree rail and diff
+### [x] Changes tab: sticky bar, file tree rail and diff → sticky bar on tokens (same `sticky top-0 z-30`, aria-pressed Threads only, no file delta); Wrap lines is a Switch (still ON by default, phones included); rail on `bg-ui-surface`; NEW: n / p next / previous file, ] / [ next / previous thread (shows it in the code), t Threads only — each also a ⌘K command and in the `?` sheet; below md a "Files N" menu (a bottom sheet on a phone) lists every file with +/− and thread count and does what a rail click does — the mobile debt is paid
 - Entry: `?prTab=changes`, header "N files", AI Review finding anchors ("Show in Changes"), a
   thread "Show in context", design-grid cards, `prChangesFocus` deep links
 - Files: `ChangesTab.tsx`, `diff/FileTree.tsx`, `diff/FileDiffView.tsx`, `diff/status.ts`,
@@ -1766,7 +1768,7 @@ Cross-cutting:
   `test/inlineThreadOpen.test.ts`, `test/threadsByPath.test.ts`, `test/anchorLineFromHunk.test.ts`,
   `test/lockFile.test.ts`, `test/codeTokens.test.ts`, verify-demo `pr:<id>:changes`
 
-### [ ] Changes → Threads only view (threads, filters, bulk resolve, Check threads)
+### [x] Changes → Threads only view (threads, filters, bulk resolve, Check threads) → unchanged (n / p step through files with threads while it is on)
 - Entry: "Threads only" toggle; Overview Bots chips (`threadBotFilter`); Blocked "unresolved
   threads"; bot-triage links; resolvable-bot-thread presets (`openPrThreadsFiltered`); a selected
   thread whose file left the diff; Pending/Feed/timeline thread links (`showThread`, the ONE landing)
@@ -1807,7 +1809,7 @@ Cross-cutting:
   `test/resolvableBotThreads.test.ts`, `test/claudeThreadMarker.test.ts`,
   `test/claudeReviewThreads.test.ts`, verify-demo `pr:113|105:changes-threads` (expects "Threads only", "Show in context")
 
-### [ ] Bot activity tab
+### [x] Bot activity tab → unchanged
 - Entry: "Bot activity" tab (only with confirmed automated reviewers); Overview "slower than typical — view"
 - Files: `PrBotBehaviourTab.tsx`, `hooks/useBotTriage.ts`
 - Essential info:
@@ -1823,7 +1825,7 @@ Cross-cutting:
   - [ ] Lazy-loaded (Suspense "Loading…")
 - Tests: record-demo-steps PR_TABS includes bot_activity
 
-### [ ] AI Review: "Reviews and actions" section
+### [x] AI Review: "Reviews and actions" section → a quiet section (15px title, no box); row labels above values on a phone
 - Entry: top of AI Review (`?prTab=claude_review`); also from ClaudeReviewBanner "Ready — open it"
   (`claudeTabFocus`), the Open PRs review column and AI Fix "Open AI Review"
 - Files: `ClaudeReviewTab.tsx` (`PrReviewActionsSection`, `TopRow`, `GenerateFixButton`),
@@ -1838,7 +1840,7 @@ Cross-cutting:
   - [ ] Renders nothing when no row has content
 - Tests: `test/mergeControlQueued.test.ts`, verify-demo `pr:113:claude_review`
 
-### [ ] AI Review: "Run a review" section
+### [x] AI Review: "Run a review" section → quiet; "Model" and "Showing" are the custom Select (same accessible names; verify-demo and record-demo-steps open them and click an option by its words); Run review / Re-review is the tab's one primary button when there is no review or it is behind the head, secondary otherwise; same `disabled={isRunning || starting …}`
 - Files: `ClaudeReviewTab.tsx`, `ModelPicker.tsx`, `AiSetup.tsx` (AiRunGate review), `AiStatusLine.tsx`,
   `TeamClaimLine.tsx`, `RepliesCheckLine.tsx`, `ReviewHistoryList.tsx`, `lib/aiBudget.ts`, `hooks/useClaudeReview.ts`
 - Essential info:
@@ -1872,7 +1874,7 @@ Cross-cutting:
   "Model"; "Showing" lists "Codex · GPT-6.1 Sol · high" and "Claude Opus 5.5 · high"),
   record-demo-steps `pr:105:review-history`
 
-### [ ] AI Review: "<Provider>'s review" section (verdict, currency, summary)
+### [x] AI Review: "<Provider>'s review" section (verdict, currency, summary) → quiet section, unchanged content
 - Files: `ClaudeReviewTab.tsx` (`ClaudesReview`, `VerdictBadge`, `CurrencyPill`, `metaLine`,
   `UsageBreakdown`), `ReviewedAgo.tsx`, `InfoModal.tsx`, `lib/claudeReviewFollowUp.ts`
 - Essential info:
@@ -1892,7 +1894,7 @@ Cross-cutting:
 - Tests: `test/claudeReviewFollowUp.test.ts`, `test/verdictStrictness.test.ts`, `test/autoPost.test.ts`,
   verify-demo `pr:113:claude_review` (expects "Also read: acme/infrastructure @ PLAT-292-upsert-transaction-boundaries")
 
-### [ ] AI Review: Previous review (follow-up) section
+### [x] AI Review: Previous review (follow-up) section → rows are surface-toned (an unaddressed row keeps a thin warn edge instead of an amber border); the AC-field picker is the custom Select
 - Files: `ClaudeReviewFollowUp.tsx` (`ClaudeReviewFollowUpSection`, `FollowUpRow`, `ReplyBlock`, `SettledEarlierRow`)
 - Essential info:
   - [ ] Prior head SHA; pills counting each status; "N settled earlier"
@@ -1909,7 +1911,7 @@ Cross-cutting:
   - [ ] Hidden when there is nothing to follow up
 - Tests: `test/claudeReviewFollowUp.test.ts`, `test/claudeReviewReplies.test.ts`
 
-### [ ] AI Review: Review threads section
+### [x] AI Review: Review threads section → rows surface-toned; "still to fix" keeps a thin warn edge
 - Files: `ClaudeReviewThreads.tsx`, `CheckThreadsButton.tsx`
 - Essential info:
   - [ ] Thread rows with Claude's current judgement (validity and code-state pills, reason), folded
@@ -1923,7 +1925,7 @@ Cross-cutting:
   - [ ] A historic run shows its own stored assessments
 - Tests: `test/claudeReviewThreads.test.ts`, `test/aiStatusAndPrActions.test.ts`
 
-### [ ] AI Review: Findings section (FindingRow)
+### [x] AI Review: Findings section (FindingRow) → each finding is one surface-toned row (`REVIEW_ITEM_CARD`), secondary buttons on tokens; content unchanged
 - Files: `ClaudeReviewTab.tsx` (`FindingRow`, `FindingHunk`, `SuggestionBlock`, `CopyAllFindingsButton`),
   `ClaudeReviewChat.tsx` (`SendToChatButton`), `DocReferences.tsx` (`DocCitationLinks`)
 - Essential info:
@@ -1945,7 +1947,7 @@ Cross-cutting:
 - Tests: `test/findingsMarkdown.test.ts`, `test/reviewPrRefs.test.ts`, `test/docQuoteMatch.test.ts`,
   `e2e/docs-quote-highlight.spec.ts`
 
-### [ ] AI Review: Story check section (TicketCoverageSection)
+### [x] AI Review: Story check section (TicketCoverageSection) → quiet section, unchanged content
 - Files: `TicketCoverage.tsx`, `TicketPasteBox.tsx`, `ClaudeReviewFollowUp.tsx` (`ClaudeReviewTicketPanel`,
   `AcFieldPicker`, `ClaudeReviewTicketResults`), `TicketReviewParts.tsx`, `hooks/useTicketReview.ts`
 - Essential info:
@@ -1967,7 +1969,7 @@ Cross-cutting:
   - [ ] Hidden without me.ai
 - Tests: `test/ticketShare.test.ts`, `test/ticketReview.test.ts`, `test/jiraTicket.test.ts`, `test/ticketStory.test.ts`
 
-### [ ] AI Review: CI check section
+### [x] AI Review: CI check section → quiet section, unchanged content
 - Files: `CiCheckSection.tsx`, `ClaudeReviewCiFailures.tsx`
 - Essential info:
   - [ ] Currency pill; per failing check: cause, "Fix: …", "Not from this change", "Not checked"
@@ -1981,7 +1983,7 @@ Cross-cutting:
   - [ ] Hidden without me.ai
 - Tests: `test/claudeReviewCi.test.ts`, `test/ciReview.test.ts`
 
-### [ ] AI Review: SonarCloud, Reference docs, Design diagrams
+### [x] AI Review: SonarCloud, Reference docs, Design diagrams → quiet sections, unchanged content
 - Files: `ClaudeReviewSonar.tsx`, `DocReferences.tsx`, `ClaudeReviewDiagrams.tsx`, `DesignGrid.tsx`
 - Essential info:
   - [ ] Sonar: quality gate pill, new-code measures, issue rows (Code smell / Vulnerability /
@@ -1999,7 +2001,7 @@ Cross-cutting:
   - [ ] Diagrams absent without me.ai
 - Tests: `test/docQuoteMatch.test.ts`, `e2e/mock-api.ts` (`/sonar`, `/sequence-diagrams`)
 
-### [ ] AI Review: Review chat
+### [x] AI Review: Review chat → quiet section, unchanged content
 - Files: `ClaudeReviewChat.tsx` (`ReviewChatSection`, `ReviewChatThread`, `EarlierChats`, `SendToChatButton`)
 - Essential info:
   - [ ] Pinned items ("In chat", "Items sent"); explanation cards (What it means, Why it matters, What would fix it)
@@ -2014,7 +2016,7 @@ Cross-cutting:
   - [ ] "Answering…", "Answering another question…", "Loading…", "Could not load this conversation.", "Could not load earlier chats."
 - Tests: `test/perRunModelPicker.test.ts`
 
-### [ ] AI Review: Post to GitHub
+### [x] AI Review: Post to GitHub → the Verdict picker is the custom Select ("Verdict"); preview on a surface tone
 - Files: `ClaudeReviewTab.tsx` (`PostReviewPreviewPanel`), `lib/claudeAutoReview.ts`
 - Essential info:
   - [ ] Pill "Posted automatically · <rel>" or "Posted <date>"
@@ -2032,7 +2034,7 @@ Cross-cutting:
   - [ ] "Failed to post review to GitHub."; posting spinner
 - Tests: `test/claudeReviewTabPill.test.ts`, `test/autoPost.test.ts`
 
-### [ ] AI Fix tab (picker, plan first, run, result, push, history)
+### [x] AI Fix tab (picker, plan first, run, result, push, history) → section titles 15px (no uppercase), panels surface-toned, buttons on tokens, checkboxes/radios themed (`accent-ui-accent-fill`; still native inputs — `{canPlan && (<label` stays pinned); Model is the custom Select
 - Entry: `?prTab=ai_fix`, "Generate fix from this review" (`aiFixTabFocus`), AiFixBanner rows
 - Files: `AiFixTab.tsx`, `AiFix/FixPicker.tsx`, `AiFix/fixPickerModel.ts`, `AiFix/PlanPanel.tsx`,
   `AiFix/FixReport.tsx`, `AiFix/ConflictAiCard.tsx`, `AiFixBanner.tsx`, `ModelPicker.tsx`
@@ -2101,7 +2103,7 @@ Cross-cutting:
 - Tests: `test/resolverControls.test.ts`, `test/mergeResolver.test.ts`,
   `test/conflictResolverEntry.test.ts`, `test/claudeConflictPrefill.test.ts`
 
-### [ ] Story view (ticket tab) and the sprint story tray
+### [x] Story view (ticket tab) and the sprint story tray → "Story" is a 15px h4 (actions still in the heading), its body surface-toned; Docs check, criteria and the closed list on tokens; padding for 390px. The outer story card (TicketStack in OpenPrsCards) belongs to the Open PRs screen and is unchanged here
 - Entry: ticket chip keys (Overview Ticket row, Pending and Open PRs cards, This Sprint) via
   `useOpenStory` → pinned tab `ticket:<ident>` (`?view=ticket:<ident>`). This Sprint's tray
   (`?sprintStory=<ident>`) draws the same StoryViewBody. Tab label "<KEY> · Story" with close

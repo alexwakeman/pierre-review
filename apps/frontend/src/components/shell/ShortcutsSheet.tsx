@@ -41,6 +41,15 @@ function sections(): ReadonlyArray<readonly [string, readonly Line[]]> {
       ],
     ],
     ['Timeline', [[['j', 'k'], 'Move through the board’s pull requests']]],
+    [
+      'A pull request',
+      [
+        [['1–9'], 'Its tabs: Overview, Comments, Changes, …'],
+        [['n', 'p'], 'Changes: next / previous file'],
+        [[']', '['], 'Changes: next / previous review thread'],
+        [['t'], 'Changes: threads only, or the code again'],
+      ],
+    ],
   ];
 }
 

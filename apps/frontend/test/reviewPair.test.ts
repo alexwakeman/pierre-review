@@ -122,15 +122,17 @@ describe('the history select', () => {
     expect(lone.map((o) => o.id)).toEqual([30]);
   });
 
-  it('renders a native select (labelled), one option per review, the shown one selected', () => {
+  // The redesign swapped the native <select> for the custom Select (its options exist only while
+  // open): the closed control is labelled "Showing" and shows the shown run's option — for the
+  // first half of a pair, the pair's ONE option.
+  it('renders the custom Select (labelled "Showing"), showing the shown run’s option', () => {
     const html = renderToStaticMarkup(
       createElement(ReviewHistoryList, { history, shownId: 10, latestId: 12, onShow: () => {} }),
     );
-    expect(html).toMatch(/^<label[^>]*>Showing<select/);
-    expect(html.match(/<option /g)?.length).toBe(4);
+    expect(html).toContain('role="combobox"');
+    expect(html).toContain('aria-label="Showing"');
     expect(html.match(/Claude \+ Codex/g)?.length).toBe(1);
-    // The first half's id shows the pair's option.
-    expect(html).toMatch(/<option value="11"[^>]*selected=""/);
+    expect(html).toContain('Claude + Codex · abcdef1');
   });
 
   it('no select for a single review', () => {

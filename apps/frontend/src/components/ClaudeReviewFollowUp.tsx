@@ -102,6 +102,7 @@ import { CheckIcon, ChevronIcon, CloseIcon, PlusIcon, RefreshIcon } from './Icon
 import { InfoButton } from './InfoModal.js';
 import { JiraStoryView } from './ClaudeReviewTickets.js';
 import { ReviewSection } from './ReviewSection.js';
+import { Select } from './ui/index.js';
 import { PrRefText } from './ReviewPrRefs.js';
 import { Markdown } from './Markdown.js';
 import { REVIEW_CHIP, REVIEW_ITEM_CARD, REVIEW_ITEM_TITLE, REVIEW_PROSE, REVIEW_SUBHEAD } from '../lib/reviewStyles.js';
@@ -131,9 +132,9 @@ const CHIP = REVIEW_CHIP;
 const MUTED = 'text-gray-500 dark:text-gray-400';
 const ERROR_TEXT = 'text-red-600 dark:text-red-400';
 const BTN =
-  'whitespace-nowrap rounded border border-gray-300 px-2 py-0.5 text-xs hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500';
+  'inline-flex h-7 items-center whitespace-nowrap rounded-ui bg-ui-raise px-2.5 text-meta font-medium text-ui-ink hover:bg-ui-hover disabled:cursor-not-allowed disabled:opacity-50 touch:h-10 touch:px-3';
 const INPUT =
-  'mt-0.5 w-full rounded border border-gray-300 bg-white px-2 py-1 text-sm dark:border-gray-700 dark:bg-gray-900';
+  'mt-0.5 w-full rounded-ui bg-ui-raise px-2 py-1 text-body text-ui-ink ring-1 ring-inset ring-ui-line focus:outline-none focus:ring-2 focus:ring-ui-accent';
 
 // A path (and line) that jumps into the Changes tab when the file is in the PR, else plain text.
 // A BUTTON, never an <a href="#…">: a hash navigation would write to the URL useUrlState owns.
@@ -296,7 +297,7 @@ const JIRA_TICKET_STALE_MS = 60_000;
 const TAB_ICON_BTN =
   'rounded p-0.5 text-gray-500 hover:bg-gray-200 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100';
 const PRIMARY_BTN =
-  'whitespace-nowrap rounded border border-blue-400 px-2 py-0.5 text-xs font-medium text-blue-700 hover:bg-blue-50 disabled:opacity-50 dark:border-blue-600 dark:text-blue-300 dark:hover:bg-blue-900/30';
+  'inline-flex h-7 items-center whitespace-nowrap rounded-ui bg-ui-raise px-2.5 text-meta font-medium text-ui-ink hover:bg-ui-hover disabled:cursor-not-allowed disabled:opacity-50 touch:h-10 touch:px-3';
 const LINK_BTN = 'text-xs text-blue-700 hover:underline disabled:opacity-50 dark:text-blue-300';
 const SPINNER =
   'inline-block h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-gray-300 border-t-blue-500 dark:border-gray-600 dark:border-t-blue-400';
@@ -682,7 +683,7 @@ export function ClaudeReviewTicketPanel({
   }
 
   return (
-    <div className="mt-2 rounded border border-gray-200 dark:border-gray-800">
+    <div className="mt-2 rounded-ui bg-ui-surface">
       <div className="flex flex-wrap items-center gap-2 px-2 py-1.5">
         <span className="text-xs font-medium text-gray-700 dark:text-gray-200">Stories to check</span>
         {hintText !== '' && <span className={`text-xs ${check.ok ? MUTED : ERROR_TEXT}`}>{hintText}</span>}
@@ -836,7 +837,7 @@ export function ClaudeReviewTicketPanel({
                       </div>
                       {fieldEditing != null && fieldEditing === current.key && (
                         fetched[current.key] != null ? (
-                          <div className="rounded border border-gray-200 p-2 dark:border-gray-800">
+                          <div className="rounded-ui bg-ui-raise p-2">
                             <AcFieldPicker
                               fetched={fetched[current.key]!}
                               onChoose={(id) => changeField(current.key as string, id)}
@@ -892,26 +893,23 @@ export function AcFieldPicker({
   }
   return (
     <div>
-      <label htmlFor={selectId} className="text-xs font-medium text-gray-700 dark:text-gray-200">
+      <label htmlFor={selectId} className="text-meta font-medium text-ui-mute">
         Take the criteria from
         {details.issueType != null && (
           <span className={`font-normal ${MUTED}`}> ({details.issueType.name})</span>
         )}
       </label>
-      <select
+      <Select
         id={selectId}
         value={chosen}
         disabled={disabled}
-        onChange={(e) => onChoose(e.target.value)}
-        className={INPUT}
-      >
-        {(allowNone || chosen === '') && <option value="">None of these</option>}
-        {details.candidates.map((c) => (
-          <option key={c.id} value={c.id}>
-            {acCandidateLabel(c)}
-          </option>
-        ))}
-      </select>
+        onChange={(v) => onChoose(v)}
+        className="mt-0.5 flex w-full"
+        options={[
+          ...(allowNone || chosen === '' ? [{ value: '', label: 'None of these' }] : []),
+          ...details.candidates.map((c) => ({ value: c.id, label: acCandidateLabel(c) })),
+        ]}
+      />
       {details.omittedCandidates > 0 && (
         <p className={`mt-0.5 text-xs ${MUTED}`}>
           {details.omittedCandidates} more {details.omittedCandidates === 1 ? 'field' : 'fields'} with
@@ -1286,14 +1284,14 @@ export function FollowUpRow({
   const anchor = followUpAnchor(item, findingsById, headMoved, changedPaths);
   const border =
     item.status === 'not_addressed' || item.status === 'partly_addressed' || item.status === 'reply_disputed'
-      ? 'border-amber-300 dark:border-amber-700/60'
-      : 'border-gray-100 dark:border-gray-800';
+      ? 'shadow-[inset_2px_0_0_rgb(var(--ui-warn))]'
+      : '';
   const reraised =
     item.reraisedFindingId != null && findingsById.has(item.reraisedFindingId)
       ? item.reraisedFindingId
       : null;
   return (
-    <li className={`rounded border px-3 py-2 text-sm ${border}`}>
+    <li className={`rounded-ui bg-ui-surface px-3 py-2.5 text-body ${border}`}>
       <div className="flex flex-wrap items-center gap-2">
         {selection}
         <span className={`${CHIP} ${FOLLOW_UP_STATUS_CLASS[item.status]}`}>

@@ -52,6 +52,7 @@ import { useAiCapabilities, useAiProviderName } from '../hooks/useAiCapabilities
 import { aiCredentialWords, reviewPeerReadLabel } from '@pierre-review/shared';
 import { AiRunGate } from './AiSetup.js';
 import { ModelPicker } from './ModelPicker.js';
+import { cx, FOCUS_RING, Select } from './ui/index.js';
 import { ReviewHistoryList } from './ReviewHistoryList.js';
 import { useFilters } from '../store/filters.js';
 import { PrActionControls, usePrActionsVisible } from './pr/PrActionsRow.js';
@@ -102,7 +103,7 @@ import { useRepos } from '../hooks/useTimeline.js';
 import { TeamClaimLine } from './TeamClaimLine.js';
 import { useRunAutoReviewSweep, useWorkspaceAutoReview } from '../hooks/useWorkspaceAutoReview.js';
 import { CiCheckSection } from './CiCheckSection.js';
-import { ReviewSection, SectionCount } from './ReviewSection.js';
+import { QuietReviewSections, ReviewSection, SectionCount } from './ReviewSection.js';
 import { ClaudeReviewSonarSection } from './ClaudeReviewSonar.js';
 import { ClaudeReviewDiagramsSection } from './ClaudeReviewDiagrams.js';
 import { DocCitationLinks, DocReferencesSection } from './DocReferences.js';
@@ -398,9 +399,9 @@ function hunkLineClass(line: string, highlighted = false): string {
 // Copy / Ignore line up consistently. Primary = blue (Post / Reword / Un-ignore);
 // secondary = neutral grey (Copy / Ignore / Show).
 const BTN_PRIMARY =
-  'whitespace-nowrap rounded border border-blue-400 px-2 py-0.5 text-xs text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:border-blue-600 dark:text-blue-400 dark:hover:bg-blue-900/30';
+  'inline-flex h-7 items-center whitespace-nowrap rounded-ui bg-ui-raise px-2.5 text-meta font-medium text-ui-ink hover:bg-ui-hover disabled:cursor-not-allowed disabled:opacity-50 touch:h-10 touch:px-3';
 const BTN_SECONDARY =
-  'whitespace-nowrap rounded border border-gray-300 px-2 py-0.5 text-xs hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500';
+  'inline-flex h-7 items-center whitespace-nowrap rounded-ui bg-ui-raise px-2.5 text-meta font-medium text-ui-ink hover:bg-ui-hover disabled:cursor-not-allowed disabled:opacity-50 touch:h-10 touch:px-3';
 
 // THE REVIEW PREVIEW (Preview, a dry run): exactly what Post will send — the verdict, the
 // top-level summary, each inline comment at its file and line, and any finding that goes as its own
@@ -409,7 +410,7 @@ function PostReviewPreviewPanel({ preview }: { preview: PostReviewPreview }): JS
   const body = visibleReviewBody(preview.body);
   const plural = (n: number, one: string): string => `${n} ${one}${n === 1 ? '' : 's'}`;
   return (
-    <div className="space-y-2 rounded border border-gray-200 bg-gray-50 px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-800/50">
+    <div className="space-y-2 rounded-ui bg-ui-surface px-3 py-2 text-body">
       <div className="flex flex-wrap items-center gap-2">
         <VerdictBadge verdict={preview.event} />
         <span className={REVIEW_META}>
@@ -1638,8 +1639,8 @@ function GenerateFixButton({
 // One labelled line of the top section — the Overview's label column, at this pane's sizes.
 function TopRow({ label, children }: { label: string; children: ReactNode }): JSX.Element {
   return (
-    <div className="flex gap-3">
-      <span className="w-16 shrink-0 pt-0.5 text-[11px] font-medium text-gray-500 dark:text-gray-400">
+    <div className="flex flex-col gap-1 sm:flex-row sm:gap-3">
+      <span className="shrink-0 text-meta text-ui-faint sm:w-20 sm:pt-1">
         {label}
       </span>
       <div className="min-w-0 flex-1">{children}</div>
@@ -1919,7 +1920,8 @@ export function ClaudeReviewTab({
 
   return (
     <ReviewTabPrRefs pr={pr} review={shownReview}>
-    <div className="space-y-3 px-4 py-3">
+    <QuietReviewSections>
+    <div className="mx-auto max-w-5xl space-y-7 px-4 py-4 md:px-5">
       {/* Reviews, Actions and the AI Fix hand-off (latest succeeded run only), above everything. */}
       <PrReviewActionsSection pr={pr} usersById={usersById} fixReview={canEdit ? review : null} />
       {/* The run controls are ALWAYS shown; a missing AI runtime or Claude credential replaces
@@ -1936,22 +1938,26 @@ export function ClaudeReviewTab({
               type="button"
               onClick={onRunClick}
               disabled={isRunning || starting || autoHold != null}
-              className={
-                latestOutdated != null
-                  ? 'rounded border border-blue-400 px-2 py-1 text-sm text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:border-blue-600 dark:text-blue-400 dark:hover:bg-blue-900/30'
-                  : 'rounded border border-gray-300 px-2 py-1 text-sm hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500'
-              }
+              // The tab's ONE primary action while there is no review or it is behind the head;
+              // a quiet secondary otherwise (a re-run of a current review is rarely the point).
+              className={cx(
+                'inline-flex h-8 items-center rounded-ui px-3 text-body font-medium touch:h-11 touch:px-4 disabled:cursor-not-allowed disabled:opacity-50',
+                review == null || latestOutdated != null
+                  ? 'bg-ui-accent-fill text-ui-on-accent hover:brightness-110'
+                  : 'bg-ui-raise text-ui-ink hover:bg-ui-hover',
+                FOCUS_RING,
+              )}
             >
               {review == null ? 'Run review' : 'Re-review'}
             </button>
             </AiRunGate>
             {autoHold != null && (
-              <span className="text-xs text-gray-500 dark:text-gray-400">
+              <span className="text-meta text-ui-mute">
                 {autoHold === 'running' ? 'Auto review running' : 'Auto review queued'}
               </span>
             )}
             {autoHold == null && data?.autoReviewWaiting != null && (
-              <span className="text-xs text-gray-500 dark:text-gray-400">
+              <span className="text-meta text-ui-mute">
                 {AUTO_REVIEW_WAITING_LABEL[data.autoReviewWaiting]}
               </span>
             )}
@@ -1959,20 +1965,20 @@ export function ClaudeReviewTab({
 
           {/* Same-SHA warn-but-allow confirmation. */}
           {confirmRerun && (
-            <div className="mt-2 flex flex-wrap items-center gap-2 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-700/60 dark:bg-amber-900/20 dark:text-amber-300">
+            <div className="mt-2 flex flex-wrap items-center gap-2 rounded-ui bg-ui-surface px-3 py-2 text-body text-ui-ink">
               <span>This commit is already reviewed.</span>
               <button
                 type="button"
                 onClick={runGenerate}
                 disabled={autoHold != null}
-                className="rounded border border-amber-400 px-2 py-0.5 text-xs hover:bg-amber-100 disabled:opacity-50 dark:border-amber-600 dark:hover:bg-amber-900/40"
+                className={cx('inline-flex h-7 items-center rounded-ui bg-ui-raise px-2 text-meta font-medium hover:bg-ui-hover disabled:opacity-50 touch:h-10', FOCUS_RING)}
               >
                 Run anyway
               </button>
               <button
                 type="button"
                 onClick={() => setConfirmRerun(false)}
-                className="rounded border border-gray-300 px-2 py-0.5 text-xs hover:border-gray-400 dark:border-gray-700 dark:hover:border-gray-500"
+                className={cx('inline-flex h-7 items-center rounded-ui px-2 text-meta text-ui-mute hover:bg-ui-hover hover:text-ui-ink touch:h-10', FOCUS_RING)}
               >
                 Cancel
               </button>
@@ -2043,7 +2049,7 @@ export function ClaudeReviewTab({
               type="button"
               onClick={() => cancel.mutate()}
               disabled={cancel.isPending}
-              className="ml-auto rounded border border-gray-300 px-2 py-0.5 text-xs hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
+              className="ml-auto inline-flex h-7 items-center whitespace-nowrap rounded-ui bg-ui-raise px-2.5 text-meta font-medium text-ui-ink hover:bg-ui-hover disabled:cursor-not-allowed disabled:opacity-50 touch:h-10 touch:px-3"
             >
               {cancel.isPending ? 'Stopping…' : 'Stop'}
             </button>
@@ -2269,32 +2275,31 @@ export function ClaudeReviewTab({
               }
               disabled={updateReview.isPending}
               title="Saves the draft. Nothing is posted yet."
-              className="rounded border border-gray-300 px-2 py-0.5 text-sm hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
+              className="inline-flex h-7 items-center whitespace-nowrap rounded-ui bg-ui-raise px-2.5 text-meta font-medium text-ui-ink hover:bg-ui-hover disabled:cursor-not-allowed disabled:opacity-50 touch:h-10 touch:px-3"
             >
               Save draft
             </button>
-            <select
-              aria-label="Verdict"
+            <Select<ClaudeReviewVerdict>
+              label="Verdict"
               value={userVerdict}
-              onChange={(e) => {
-                const v = e.target.value as ClaudeReviewVerdict;
+              onChange={(v) => {
                 setUserVerdict(v);
                 setPreview(null);
                 updateReview.mutate({ reviewId: review.id, userVerdict: v });
               }}
-              className="rounded border border-gray-300 bg-white px-2 py-1 text-sm dark:border-gray-700 dark:bg-gray-900"
-            >
-              <option value="COMMENT">Comment</option>
-              <option value="REQUEST_CHANGES">Request changes</option>
-              <option value="APPROVE">Approve</option>
-            </select>
+              options={[
+                { value: 'COMMENT', label: 'Comment' },
+                { value: 'REQUEST_CHANGES', label: 'Request changes' },
+                { value: 'APPROVE', label: 'Approve' },
+              ]}
+            />
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={runPreview}
               disabled={postReview.isPending}
-              className="rounded border border-gray-300 px-2 py-0.5 text-sm hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
+              className="inline-flex h-7 items-center whitespace-nowrap rounded-ui bg-ui-raise px-2.5 text-meta font-medium text-ui-ink hover:bg-ui-hover disabled:cursor-not-allowed disabled:opacity-50 touch:h-10 touch:px-3"
             >
               Preview
             </button>
@@ -2303,7 +2308,7 @@ export function ClaudeReviewTab({
                 type="button"
                 onClick={() => setConfirmPost(true)}
                 disabled={postReview.isPending}
-                className="rounded border border-blue-400 px-2 py-0.5 text-sm text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:border-blue-600 dark:text-blue-400 dark:hover:bg-blue-900/30"
+                className="inline-flex h-7 items-center whitespace-nowrap rounded-ui bg-ui-raise px-2.5 text-meta font-medium text-ui-ink hover:bg-ui-hover disabled:cursor-not-allowed disabled:opacity-50 touch:h-10 touch:px-3"
               >
                 Post to GitHub
               </button>
@@ -2316,14 +2321,14 @@ export function ClaudeReviewTab({
                   type="button"
                   onClick={runPost}
                   disabled={postReview.isPending}
-                  className="rounded border border-blue-400 px-2 py-0.5 text-xs text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:border-blue-600 dark:text-blue-400 dark:hover:bg-blue-900/30"
+                  className="inline-flex h-7 items-center whitespace-nowrap rounded-ui bg-ui-raise px-2.5 text-meta font-medium text-ui-ink hover:bg-ui-hover disabled:cursor-not-allowed disabled:opacity-50 touch:h-10 touch:px-3"
                 >
                   Confirm post
                 </button>
                 <button
                   type="button"
                   onClick={() => setConfirmPost(false)}
-                  className="rounded border border-gray-300 px-2 py-0.5 text-xs hover:border-gray-400 dark:border-gray-700 dark:hover:border-gray-500"
+                  className="inline-flex h-7 items-center whitespace-nowrap rounded-ui bg-ui-raise px-2.5 text-meta font-medium text-ui-ink hover:bg-ui-hover disabled:cursor-not-allowed disabled:opacity-50 touch:h-10 touch:px-3"
                 >
                   Cancel
                 </button>
@@ -2364,6 +2369,7 @@ export function ClaudeReviewTab({
       )}
 
     </div>
+    </QuietReviewSections>
     </ReviewTabPrRefs>
   );
 }
@@ -2417,7 +2423,7 @@ function FailedAutoReviewLine({
               );
             }}
             disabled={sweep.isPending}
-            className="rounded border border-gray-300 px-2 py-0.5 text-xs hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
+            className="inline-flex h-7 items-center whitespace-nowrap rounded-ui bg-ui-raise px-2.5 text-meta font-medium text-ui-ink hover:bg-ui-hover disabled:cursor-not-allowed disabled:opacity-50 touch:h-10 touch:px-3"
           >
             {sweep.isPending ? 'Retrying…' : 'Retry'}
           </button>
