@@ -60,8 +60,10 @@ function Row({
   children: React.ReactNode;
 }): JSX.Element {
   return (
-    <div className="flex gap-3 px-4 py-1.5 text-sm">
-      <span className="w-28 shrink-0 text-xs uppercase tracking-wide text-gray-400">
+    // Label above the value on a phone, beside it from sm up. A quiet mute word, never an
+    // uppercase tracked label (docs/redesign/DESIGN.md § Type).
+    <div className="flex flex-col gap-0.5 px-4 py-1.5 text-body sm:flex-row sm:gap-3 md:px-5">
+      <span className="shrink-0 text-meta text-ui-faint sm:w-28 sm:pt-0.5">
         {label}
       </span>
       <div className="min-w-0 flex-1">{children}</div>
@@ -115,7 +117,7 @@ export function PrTicketBranchLine({
       {pr.headRefName != null && (
         <span className="flex min-w-0 items-center gap-1.5">
           {tickets != null && (
-            <span className="shrink-0 text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
+            <span className="shrink-0 text-meta text-ui-faint">
               Branch
             </span>
           )}
@@ -437,10 +439,10 @@ function PrSummary({ body }: { body: string }): JSX.Element {
 
   return (
     <div>
-      <div className="px-4 pb-1 pt-2 text-xs font-semibold uppercase tracking-wide text-gray-400">
+      <div className="px-4 pb-1 pt-2 text-meta text-ui-faint md:px-5">
         Summary
       </div>
-      <div className="px-4 pb-3 text-sm">
+      <div className="px-4 pb-3 text-body md:px-5">
         <div
           ref={ref}
           className={`overflow-hidden${expanded ? '' : ' pr-summary-collapsed'}`}
@@ -654,7 +656,7 @@ export function ChecksTab({
           approve the app.)
         </div>
       )}
-      <div className="divide-y divide-gray-100 py-1 dark:divide-gray-800">
+      <div className="py-1">
         {/* Status = CI + mergeability on one row (the two are one "can this ship?" fact). The
             wrapper is the scroll + focus target for PrDetail's header CI readout. */}
         <div

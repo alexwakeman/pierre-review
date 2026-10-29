@@ -10,6 +10,7 @@ import type {
 import { useAddReviewComment } from '../../hooks/usePrWrites.js';
 import { usePrFileContent, usePrFileFullDiff } from '../../hooks/usePr.js';
 import { useDiffWrap } from '../../hooks/useDiffWrap.js';
+import { Switch } from '../ui/index.js';
 import { ApiError } from '../../api/client.js';
 import {
   anchorRowFor,
@@ -703,15 +704,8 @@ function DiffTable({
 export function DiffWrapToggle(): JSX.Element {
   const [wrap, setWrap] = useDiffWrap();
   return (
-    <label className="inline-flex cursor-pointer select-none items-center gap-1.5 text-[12px] text-gray-600 dark:text-gray-300">
-      <input
-        type="checkbox"
-        checked={wrap}
-        onChange={(e) => setWrap(e.target.checked)}
-        className="h-3.5 w-3.5 rounded border-gray-300 dark:border-gray-600"
-      />
-      Wrap lines
-    </label>
+    // A Switch: it takes effect at once (docs/redesign/DESIGN.md § Components). ON by default.
+    <Switch label="Wrap lines" checked={wrap} onChange={(e) => setWrap(e.target.checked)} className="text-meta" />
   );
 }
 

@@ -18,7 +18,8 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import type { AiKindStatus, AiRunKind, ClaudeReviewSummary, MeResponse } from '@pierre-review/shared';
 import { aiGateReadyFor, aiRunnableProviders, aiProviderReadyFor } from '../src/lib/aiCapabilities.js';
 import { chatPreferredProviderOf, followUpProviderOf, resolveModelPick } from '../src/lib/modelPick.js';
-import { nextShownReviewId } from '../src/lib/reviewHistory.js';
+import { nextShownReviewId, reviewHistoryOptions } from '../src/lib/reviewHistory.js';
+import { reviewRunWhen } from '../src/lib/claudeReviewColumn.js';
 import { ReviewHistoryList } from '../src/components/ReviewHistoryList.js';
 
 const KINDS: AiRunKind[] = ['review', 'review_chat', 'fix', 'plan', 'complete'];
@@ -213,20 +214,28 @@ describe('the history select', () => {
     createElement(ReviewHistoryList, { history, shownId: 1, latestId: 3, onShow: () => {} }),
   );
 
+  // The redesign swapped the native <select> for the custom Select, whose options exist only
+  // while it is open: the list is pinned through the fold it renders (`reviewHistoryOptions`), the
+  // closed control through the label it shows.
+  const options = reviewHistoryOptions(history, 3, reviewRunWhen);
+  const labels = options.map((o) => o.label).join('\n');
+
   it('lists every run, every provider, newest first, each with what ran, its head, status and Auto', () => {
-    expect(html.match(/<option /g)).toHaveLength(3);
-    expect(html.indexOf('value="3"')).toBeLessThan(html.indexOf('value="1"'));
-    expect(html).toContain('Codex · GPT-6.1 Sol');
-    expect(html).toContain('Auto review');
-    expect(html).toContain('Failed');
-    expect(html).toContain('Claude Sonnet 5');
-    expect(html).toContain('abcdef1');
-    expect(html).toContain('(latest)');
+    expect(options).toHaveLength(3);
+    expect(options.map((o) => o.id)).toEqual([3, 2, 1]);
+    expect(labels).toContain('Codex · GPT-6.1 Sol');
+    expect(labels).toContain('Auto review');
+    expect(labels).toContain('Failed');
+    expect(labels).toContain('Claude Sonnet 5');
+    expect(labels).toContain('abcdef1');
+    expect(labels).toContain('(latest)');
   });
 
-  it('selects the shown run, and only it', () => {
-    expect(html.match(/selected=""/g)).toHaveLength(1);
-    expect(html).toMatch(/<option value="1"[^>]*selected=""/);
+  it('shows the shown run, and only it, on the closed control', () => {
+    expect(html).toContain('role="combobox"');
+    expect(html).toContain('aria-label="Showing"');
+    expect(html).toContain('Claude Sonnet 5');
+    expect(html).not.toContain('GPT-6.1 Sol');
   });
 });
 

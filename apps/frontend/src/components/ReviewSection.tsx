@@ -9,7 +9,19 @@
 // ⚠ Do not hand-roll a section header inside the pane: the user reported the old mix (some
 // sections boxed, some bare, one with no header at all, titles in three sizes) as unreadable.
 // Titles are sentence case and all the same size; the count pills sit right after the title.
-import type { ReactNode } from 'react';
+//
+// THE REDESIGN'S QUIET SECTIONS (docs/redesign/DESIGN.md): inside `<QuietReviewSections>` (the AI
+// Review and AI Fix tabs, the story view) a section is a 15px title over its content — no box, no
+// band; sections are separated by space and items by tone. Outside it (Settings) the boxed shell
+// stays until that screen is redesigned.
+import { createContext, useContext, type ReactNode } from 'react';
+
+const QuietContext = createContext(false);
+
+/** Every ReviewSection under this draws quiet (title + content, no box). */
+export function QuietReviewSections({ children }: { children: ReactNode }): JSX.Element {
+  return <QuietContext.Provider value>{children}</QuietContext.Provider>;
+}
 
 export function ReviewSection({
   title,
@@ -29,6 +41,20 @@ export function ReviewSection({
   children?: ReactNode;
 }): JSX.Element {
   const hasBody = children != null && children !== false;
+  const quiet = useContext(QuietContext);
+  if (quiet) {
+    return (
+      <section aria-label={title} className="min-w-0">
+        <header className="flex min-h-8 flex-wrap items-center gap-x-2 gap-y-1 pb-2">
+          <h3 className="text-title text-ui-ink">{title}</h3>
+          {pills}
+          {info}
+          {actions != null && <div className="ml-auto flex flex-wrap items-center gap-2">{actions}</div>}
+        </header>
+        {hasBody && <div className="space-y-2 text-body text-ui-ink">{children}</div>}
+      </section>
+    );
+  }
   return (
     <section
       aria-label={title}
@@ -52,7 +78,7 @@ export function ReviewSection({
 // A count pill for a section header ("3 findings"). Neutral; a coloured status chip is the caller's.
 export function SectionCount({ children }: { children: ReactNode }): JSX.Element {
   return (
-    <span className="inline-flex shrink-0 items-center rounded bg-gray-500/10 px-1.5 py-0.5 text-[11px] font-medium text-gray-700 dark:text-gray-300">
+    <span className="inline-flex shrink-0 items-center rounded-ui bg-ui-raise px-1.5 py-0.5 text-meta font-medium tabular-nums text-ui-mute">
       {children}
     </span>
   );

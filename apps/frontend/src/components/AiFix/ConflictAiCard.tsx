@@ -17,9 +17,9 @@ import { RegenProgressBar } from '../Activity/RegenProgressBar.js';
 import { SparkleIcon } from '../Icons.js';
 
 const BTN =
-  'whitespace-nowrap rounded border border-blue-400 px-2.5 py-1 text-xs text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:border-blue-600 dark:text-blue-400 dark:hover:bg-blue-900/30';
+  'inline-flex h-7 items-center whitespace-nowrap rounded-ui bg-ui-raise px-2.5 text-meta font-medium text-ui-ink hover:bg-ui-hover disabled:cursor-not-allowed disabled:opacity-50 touch:h-10 touch:px-3';
 const BTN_SECONDARY =
-  'whitespace-nowrap rounded border border-gray-300 px-2.5 py-1 text-xs hover:border-gray-400 dark:border-gray-700 dark:hover:border-gray-500';
+  'inline-flex h-7 items-center whitespace-nowrap rounded-ui bg-ui-raise px-2.5 text-meta font-medium text-ui-ink hover:bg-ui-hover disabled:cursor-not-allowed disabled:opacity-50 touch:h-10 touch:px-3';
 
 export function resolverTargetOf(pr: PrDetail): ResolverTarget {
   return {
@@ -62,7 +62,7 @@ export function ConflictAiCard({ pr }: { pr: PrDetail }): JSX.Element {
   const done = run?.phase === 'succeeded' ? run.resolution : null;
 
   return (
-    <div className="mb-3 rounded border border-gray-200 p-3 dark:border-gray-800">
+    <div className="mb-3 rounded-ui bg-ui-surface p-3">
       <div className="flex items-center gap-1.5 text-sm font-medium text-gray-800 dark:text-gray-100">
         <SparkleIcon size={13} className="text-ai-signal" />
         This branch conflicts with {base}

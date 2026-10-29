@@ -107,12 +107,17 @@ const VIEWS = [
       id === 105 && t === 'claude_review'
         ? {
             act: async (page) => {
-              await page.getByLabel('Model').first().selectOption('codex:gpt-6.1-sol');
+              // "Model" and "Showing" are the redesign's custom Select (role="combobox"): open it
+              // and click the option by its words; its options exist only while it is open.
+              await page.getByLabel('Model').first().click();
+              await page.getByRole('option', { name: /^Codex · GPT-6\.1 Sol/ }).first().click();
               const history = page.getByLabel('Showing').first();
               await history.waitFor({ timeout: 10_000 });
-              // A closed select's options are not page text: read their labels. Both ran at
-              // Effort = High, and each label says so.
-              const labels = await history.locator('option').allTextContents();
+              // Read the history's labels with it open. Both ran at Effort = High, and each label
+              // says so.
+              await history.click();
+              const labels = await page.getByRole('option').allTextContents();
+              await page.keyboard.press('Escape');
               const want = ['Codex · GPT-6.1 Sol · high', 'Claude Opus 5.5 · high'];
               const absent = want.filter((w) => !labels.some((l) => l.includes(w)));
               if (labels.length !== 2 || absent.length > 0) {

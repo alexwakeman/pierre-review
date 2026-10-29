@@ -49,7 +49,7 @@ import { ConflictAiCard, resolverTargetOf, usePrConflictsResolvable } from './Ai
 import { startConflictAiRun } from '../hooks/useConflictAiResolve.js';
 
 const BTN_PRIMARY =
-  'whitespace-nowrap rounded border border-blue-400 px-2.5 py-1 text-xs text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:border-blue-600 dark:text-blue-400 dark:hover:bg-blue-900/30';
+  'inline-flex h-7 items-center whitespace-nowrap rounded-ui bg-ui-raise px-2.5 text-meta font-medium text-ui-ink hover:bg-ui-hover disabled:cursor-not-allowed disabled:opacity-50 touch:h-10 touch:px-3';
 function errText(err: unknown): string {
   if (err instanceof ApiError) return err.message;
   if (err instanceof Error) return err.message;
@@ -57,7 +57,7 @@ function errText(err: unknown): string {
 }
 
 const BTN_SECONDARY =
-  'whitespace-nowrap rounded border border-gray-300 px-2.5 py-1 text-xs hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500';
+  'inline-flex h-7 items-center whitespace-nowrap rounded-ui bg-ui-raise px-2.5 text-meta font-medium text-ui-ink hover:bg-ui-hover disabled:cursor-not-allowed disabled:opacity-50 touch:h-10 touch:px-3';
 
 function SectionTitle({
   children,
@@ -67,8 +67,8 @@ function SectionTitle({
   info?: React.ReactNode;
 }): JSX.Element {
   return (
-    <div className="flex items-center gap-1 px-4 pb-1 pt-3 text-xs font-semibold uppercase tracking-wide text-gray-400">
-      {children}
+    <div className="flex items-center gap-1.5 px-4 pb-2 pt-4 text-title text-ui-ink md:px-5">
+      <h3>{children}</h3>
       {info}
     </div>
   );
@@ -307,7 +307,7 @@ function FixerSection({
                   <label className="mt-3 flex cursor-pointer items-start gap-2 text-xs text-gray-800 dark:text-gray-100">
                     <input
                       type="checkbox"
-                      className="mt-0.5"
+                      className="mt-0.5 h-4 w-4 shrink-0 accent-ui-accent-fill"
                       checked={alsoResolve}
                       disabled={fixStarting}
                       onChange={(e) => setAlsoResolve(e.target.checked)}
@@ -327,6 +327,7 @@ function FixerSection({
                       <label className="flex cursor-pointer items-center gap-1.5 text-xs text-gray-800 dark:text-gray-100">
                         <input
                           type="checkbox"
+                          className="h-4 w-4 shrink-0 accent-ui-accent-fill"
                           checked={planFirst}
                           disabled={fixStarting}
                           onChange={(e) => setPlanFirst(e.target.checked)}
@@ -537,7 +538,7 @@ function FixResult({
             </span>
             <DiffWrapToggle />
           </div>
-          <div className="overflow-hidden rounded border border-gray-200 text-gray-800 dark:border-gray-800 dark:text-gray-200">
+          <div className="overflow-hidden rounded-ui bg-ui-surface text-ui-ink">
             <FileDiffView files={diffFiles} />
           </div>
           <PushControls
@@ -596,8 +597,8 @@ function FixHistory({
   );
   if (pushed.length === 0) return null;
   return (
-    <div className="mt-4 border-t border-gray-200 pt-3 dark:border-gray-800">
-      <div className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-gray-400">
+    <div className="mt-6">
+      <div className="mb-2 text-title text-ui-ink">
         Earlier fixes pushed
       </div>
       <ul className="space-y-2">
@@ -690,7 +691,7 @@ function PushControls({
   };
 
   return (
-    <div className="mt-3 rounded border border-gray-200 p-2 dark:border-gray-800">
+    <div className="mt-3 rounded-ui bg-ui-surface p-2">
       {fix.commitMessage && (
         <div
           className="mb-2 rounded bg-gray-50 px-2 py-1 font-mono text-xs text-gray-700 dark:bg-gray-900 dark:text-gray-200"
@@ -712,6 +713,7 @@ function PushControls({
       >
         <input
           type="radio"
+          className="h-4 w-4 shrink-0 accent-ui-accent-fill"
           checked={target === 'existing'}
           disabled={!canPushSameBranch || busy}
           onChange={() => setTarget('existing')}
@@ -724,6 +726,7 @@ function PushControls({
       <label className="mt-1 flex items-center gap-2 text-xs">
         <input
           type="radio"
+          className="h-4 w-4 shrink-0 accent-ui-accent-fill"
           checked={target === 'new'}
           disabled={busy}
           onChange={() => setTarget('new')}
@@ -733,7 +736,7 @@ function PushControls({
       {target === 'new' && (
         <input
           type="text"
-          className="mt-1 w-full rounded border border-gray-300 bg-transparent px-2 py-1 font-mono text-xs dark:border-gray-700"
+          className="mt-1 w-full rounded-ui bg-ui-raise px-2 py-1 font-mono text-meta ring-1 ring-inset ring-ui-line focus:outline-none focus:ring-2 focus:ring-ui-accent touch:min-h-10"
           value={branch}
           disabled={busy}
           onChange={(e) => setBranch(e.target.value)}

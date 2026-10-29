@@ -1,9 +1,10 @@
 import type { ClaudeReviewSummary } from '@pierre-review/shared';
+import { Select } from './ui/index.js';
 import { reviewRunWhen } from '../lib/claudeReviewColumn.js';
 import { historyOptionIdFor, reviewHistoryOptions } from '../lib/reviewHistory.js';
 
 /**
- * THE AI REVIEW TAB'S HISTORY: a native drop-down of EVERY review of the PR (all providers, all heads,
+ * THE AI REVIEW TAB'S HISTORY: one drop-down (the custom Select) of EVERY review of the PR (all providers, all heads,
  * newest first — the server's history is uncapped), so a long history stays one control. One option
  * per review (`reviewHistoryOptions`): a Claude + Codex pair is ONE option ("Claude + Codex · abc1234 ·
  * <when>"), a replies pass reads "Replies checked · …", any other run its run label. Picking one shows
@@ -24,20 +25,18 @@ export function ReviewHistoryList({
   const options = reviewHistoryOptions(history, latestId, reviewRunWhen);
   if (options.length < 2) return null;
   const value = historyOptionIdFor(options, shownId ?? latestId) ?? options[0]!.id;
+  // The redesign's custom Select (a bottom sheet on a phone): scripts open it and pick an option by
+  // its words (`role="option"`), never `selectOption()`.
   return (
-    <label className="flex flex-wrap items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
-      Showing
-      <select
-        value={value}
-        onChange={(e) => onShow(Number(e.target.value))}
-        className="max-w-full rounded border border-gray-300 bg-white px-2 py-1 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
-      >
-        {options.map((o) => (
-          <option key={o.id} value={o.id} data-review-run={o.id}>
-            {o.label}
-          </option>
-        ))}
-      </select>
-    </label>
+    <div className="flex min-w-0 flex-wrap items-center gap-2 text-meta text-ui-mute">
+      <span aria-hidden>Showing</span>
+      <Select
+        label="Showing"
+        value={String(value)}
+        onChange={(v) => onShow(Number(v))}
+        options={options.map((o) => ({ value: String(o.id), label: o.label }))}
+        className="max-w-full"
+      />
+    </div>
   );
 }

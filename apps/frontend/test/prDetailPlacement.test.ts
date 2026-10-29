@@ -36,8 +36,9 @@ describe('PrDetail placement', () => {
   it('header icon buttons share one ink class', () => {
     expect(detail.match(/className=\{PR_HEADER_ICON_BTN\}/g)?.length).toBe(5);
     expect(detail).toContain('`${PR_HEADER_ICON_BTN} disabled:opacity-60`');
-    expect(detail).toMatch(
-      /PR_HEADER_ICON_BTN =\s*'[^']*text-gray-900[^']*dark:text-gray-100[^']*'/,
-    );
+    // The redesign: one --ui-* ink for both themes (docs/redesign/DESIGN.md), hidden below md
+    // where the overflow menu carries every action in words.
+    expect(detail).toMatch(/PR_HEADER_ICON_BTN =\s*'[^']*text-ui-mute[^']*md:inline-flex[^']*'/);
+    expect(detail).toContain('label="More actions for this pull request"');
   });
 });

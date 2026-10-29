@@ -1,4 +1,5 @@
 import {
+  type ReactNode,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -28,6 +29,8 @@ import {
   useResolveEvents,
 } from '../hooks/useResolveEvents.js';
 import { CopyButton } from './CopyButton.js';
+import { cx, FOCUS_RING, Menu, shortcutBlocked, useRegisterCommands, type Command, type MenuEntry } from './ui/index.js';
+import { FileTypeIcon } from './FileTypeIcons.js';
 
 // The "Changes" tab: every file the PR touches with its inline diff hunks and per-line
 // review-comment affordances. The per-file rendering lives in the shared FileDiffView
@@ -174,6 +177,7 @@ function Header({
   threadsOnly,
   onThreadsOnlyChange,
   wrapToggle = false,
+  filesMenu,
 }: {
   pr: PrDetail;
   barRef?: Ref<HTMLDivElement>;
@@ -181,14 +185,17 @@ function Header({
   onThreadsOnlyChange: (on: boolean) => void;
   /** Only while code is on screen — the metadata list and the Threads only view have none. */
   wrapToggle?: boolean;
+  /** Below md, where the rail is hidden: the changed files as a menu (a sheet on a phone). */
+  filesMenu?: ReactNode;
 }): JSX.Element {
   const threadCount = pr.threads.length;
   return (
     <div
       ref={barRef}
       data-testid="changes-bar"
-      className="sticky top-0 z-30 flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-gray-200 bg-white px-4 py-1.5 text-xs dark:border-gray-800 dark:bg-gray-950"
+      className="sticky top-0 z-30 flex flex-wrap items-center gap-x-3 gap-y-1 bg-ui-bg px-4 py-1.5 text-meta text-ui-mute md:px-5"
     >
+      {filesMenu}
       {/* "Threads only": the review threads without the code. A toggle, so it says its state to
           a screen reader. Absent on a PR with no threads (there is nothing to show). The 4-state
           mix beside it counts `pr.threads`, not the indexed map, so a thread on a file not loaded
@@ -200,15 +207,18 @@ function Header({
             aria-pressed={threadsOnly}
             onClick={() => onThreadsOnlyChange(!threadsOnly)}
             data-testid="changes-threads-only"
-            className={`flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs font-medium transition-colors ${
-              threadsOnly
-                ? 'border-sky-400 bg-sky-50 text-sky-700 dark:border-sky-500/60 dark:bg-sky-950/30 dark:text-sky-300'
-                : 'border-gray-300 text-gray-600 hover:border-gray-400 dark:border-gray-700 dark:text-gray-300'
-            }`}
+            title="Show the review threads without the code"
+            aria-keyshortcuts="t"
+            className={cx(
+              'inline-flex h-7 items-center gap-1.5 rounded-ui px-2 text-meta font-medium touch:h-10 touch:px-3',
+              'motion-safe:transition-colors motion-safe:duration-ui-fast',
+              threadsOnly ? 'bg-ui-sel text-ui-ink' : 'bg-ui-raise text-ui-mute hover:bg-ui-hover hover:text-ui-ink',
+              FOCUS_RING,
+            )}
           >
             <ThreadsIcon size={12} className="shrink-0" />
             Threads only
-            <span className="tabular-nums opacity-70">{threadCount}</span>
+            <span className="tabular-nums text-ui-faint">{threadCount}</span>
           </button>
           <ThreadCountChips counts={rollupCounts(pr.threads)} />
         </>
@@ -219,7 +229,7 @@ function Header({
           href={`${pr.githubUrl}/files`}
           target="_blank"
           rel="noreferrer noopener"
-          className="text-blue-500 hover:underline"
+          className="inline-flex items-center gap-1 text-ui-accent hover:underline touch:min-h-10"
         >
           Files changed <ExternalLinkIcon size={11} className="inline-block align-[-0.1em]" />
         </a>
@@ -235,6 +245,7 @@ export function ChangesTab({
   threadsOnly,
   onThreadsOnlyChange,
   renderThreads,
+  keysEnabled = false,
 }: {
   pr: PrDetail;
   // An outside-in reveal request (today: a Claude Review finding's code anchor, and a thread
@@ -258,6 +269,11 @@ export function ChangesTab({
    * filters and the thread → code ladder). `visibleThreadIds` is the rail's file pick, null for
    * every file.
    */
+  /**
+   * n / p (next / previous file), ] / [ (next / previous thread), t (Threads only) and their ⌘K
+   * commands — only while this PR is the one on screen (PrDetail's `liveVisible`).
+   */
+  keysEnabled?: boolean;
   renderThreads: (visibleThreadIds: ReadonlySet<number> | null) => JSX.Element;
 }): JSX.Element {
   const { data, isLoading, isError } = usePrFiles(pr.id);
@@ -446,13 +462,141 @@ export function ChangesTab({
   );
 
   // No changes at all on this PR — same empty state as before.
+  // KEYBOARD: n / p walk the files, ] / [ walk the threads in file order, t toggles Threads only.
+  // The cursor is the last file / thread a key (or a rail click, via `focus`) went to. Every move
+  // goes through `setFocus`, the same reveal a rail click or a finding anchor uses. Hooks sit above
+  // the early returns; the handler reads the latest values through a ref.
+  const orderedThreads = useMemo(() => {
+    const out: { path: string; id: number; line: number | null }[] = [];
+    for (const f of files) {
+      const ts = [...(threadsByPath.get(f.path) ?? [])].sort(
+        (a, b) => (a.line ?? Number.MAX_SAFE_INTEGER) - (b.line ?? Number.MAX_SAFE_INTEGER) || a.id - b.id,
+      );
+      for (const t of ts) out.push({ path: f.path, id: t.id, line: t.line ?? null });
+    }
+    return out;
+  }, [files, threadsByPath]);
+  const threadCursor = useRef(-1);
+  const navLive = useRef({ files, orderedThreads, focus, threadsOnly, threadsPath });
+  navLive.current = { files, orderedThreads, focus, threadsOnly, threadsPath };
+  const stepFile = useCallback(
+    (delta: 1 | -1): void => {
+      const { files: fs, focus: f, threadsOnly: only, threadsPath: tp } = navLive.current;
+      if (fs.length === 0) return;
+      if (only) {
+        // In the Threads only view the rail lists a file's threads: step through files that have some.
+        const withThreads = fs.filter((x) => (threadsByPath.get(x.path)?.length ?? 0) > 0);
+        if (withThreads.length === 0) return;
+        const at = withThreads.findIndex((x) => x.path === tp);
+        const next = withThreads[(at + delta + withThreads.length) % withThreads.length] ?? withThreads[0]!;
+        setThreadsPath(next.path);
+        return;
+      }
+      const at = f == null ? -1 : fs.findIndex((x) => x.path === f.path || x.previousPath === f.path);
+      const nextIdx = at < 0 ? (delta === 1 ? 0 : fs.length - 1) : (at + delta + fs.length) % fs.length;
+      const next = fs[nextIdx];
+      if (next) setFocus({ path: next.path, nonce: Date.now() });
+    },
+    [threadsByPath],
+  );
+  const stepThread = useCallback(
+    (delta: 1 | -1): void => {
+      const { orderedThreads: ts } = navLive.current;
+      if (ts.length === 0) return;
+      const at = threadCursor.current;
+      const nextIdx = at < 0 ? (delta === 1 ? 0 : ts.length - 1) : (at + delta + ts.length) % ts.length;
+      const t = ts[nextIdx];
+      if (!t) return;
+      threadCursor.current = nextIdx;
+      // The code comes back: a thread jump is "Show in context".
+      if (navLive.current.threadsOnly) onThreadsOnlyChange(false);
+      setFocus({ path: t.path, line: t.line, side: 'RIGHT', threadId: t.id, nonce: Date.now() });
+    },
+    [onThreadsOnlyChange],
+  );
+  const toggleThreadsOnly = useCallback((): void => {
+    if (pr.threads.length > 0) onThreadsOnlyChange(!navLive.current.threadsOnly);
+  }, [pr.threads.length, onThreadsOnlyChange]);
+  useEffect(() => {
+    if (!keysEnabled) return;
+    const onKey = (e: KeyboardEvent): void => {
+      if (shortcutBlocked(e)) return;
+      if (e.key === 'n') stepFile(1);
+      else if (e.key === 'p') stepFile(-1);
+      else if (e.key === ']') stepThread(1);
+      else if (e.key === '[') stepThread(-1);
+      else if (e.key === 't') toggleThreadsOnly();
+      else return;
+      e.preventDefault();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [keysEnabled, stepFile, stepThread, toggleThreadsOnly]);
+  const hasThreads = pr.threads.length > 0;
+  const changesCommands = useMemo((): Command[] | null => {
+    if (!keysEnabled) return null;
+    return [
+      { id: 'changes:next-file', title: 'Next file', group: 'Actions', shortcut: 'n', keywords: ['diff', 'changes'], run: () => stepFile(1) },
+      { id: 'changes:prev-file', title: 'Previous file', group: 'Actions', shortcut: 'p', keywords: ['diff', 'changes'], run: () => stepFile(-1) },
+      ...(hasThreads
+        ? [
+            { id: 'changes:next-thread', title: 'Next review thread', group: 'Actions' as const, shortcut: ']', keywords: ['comment'], run: () => stepThread(1) },
+            { id: 'changes:prev-thread', title: 'Previous review thread', group: 'Actions' as const, shortcut: '[', keywords: ['comment'], run: () => stepThread(-1) },
+            { id: 'changes:threads-only', title: 'Threads only: show or hide the code', group: 'Actions' as const, shortcut: 't', run: toggleThreadsOnly },
+          ]
+        : []),
+    ];
+  }, [keysEnabled, hasThreads, stepFile, stepThread, toggleThreadsOnly]);
+  useRegisterCommands('pr-changes', changesCommands);
+
   if (pr.files.length === 0 && pr.changedFilesCount === 0 && pr.threads.length === 0 && !isLoading) {
     return (
-      <div className="px-3 py-6 text-center text-sm text-gray-500 dark:text-gray-400">
+      <div className="px-5 py-6 text-center text-body text-ui-mute">
         No file changes on this PR.
       </div>
     );
   }
+
+  // BELOW md THE RAIL IS HIDDEN: the same files, as a menu (a bottom sheet on a phone) — a pick
+  // does what a rail click does.
+  const filesMenu =
+    files.length > 0 ? (
+      <span className="md:hidden">
+        <Menu
+          label="Changed files"
+          items={files.map(
+            (f): MenuEntry => ({
+              id: f.path,
+              label: f.path.split('/').at(-1) ?? f.path,
+              text: f.path.split('/').at(-1) ?? f.path,
+              icon: <FileTypeIcon path={f.path} size={14} />,
+              hint: (
+                <span className="tabular-nums">
+                  {(threadsByPath.get(f.path)?.length ?? 0) > 0 && (
+                    <span className="mr-2">{threadsByPath.get(f.path)!.length} threads</span>
+                  )}
+                  +{f.additions} −{f.deletions}
+                </span>
+              ),
+              onSelect: () =>
+                threadsOnly ? setThreadsPath(f.path) : setFocus({ path: f.path, nonce: Date.now() }),
+            }),
+          )}
+          trigger={(p) => (
+            <button
+              {...p}
+              type="button"
+              className={cx(
+                'inline-flex h-7 items-center gap-1.5 rounded-ui bg-ui-raise px-2 text-meta font-medium text-ui-ink hover:bg-ui-hover touch:h-10 touch:px-3',
+                FOCUS_RING,
+              )}
+            >
+              Files <span className="tabular-nums text-ui-faint">{files.length}</span>
+            </button>
+          )}
+        />
+      </span>
+    ) : null;
 
   const bar = (wrapToggle: boolean): JSX.Element => (
     <Header
@@ -461,6 +605,7 @@ export function ChangesTab({
       threadsOnly={threadsOnly}
       onThreadsOnlyChange={onThreadsOnlyChange}
       wrapToggle={wrapToggle && !threadsOnly}
+      filesMenu={wrapToggle ? filesMenu : null}
     />
   );
 
@@ -481,7 +626,7 @@ export function ChangesTab({
     return (
       <div style={rootStyle}>
         {bar(false)}
-        <div className="px-3 py-6 text-center text-sm text-gray-500 dark:text-gray-400">
+        <div className="px-5 py-6 text-center text-body text-ui-mute">
           Loading diff…
         </div>
       </div>
@@ -564,7 +709,7 @@ export function ChangesTab({
             // The WIDTH is the user's dragged value (useResizablePane), which is why the old
             // `md:w-56` is gone — an inline style and a utility class would fight.
             style={{ width: railW, ...(railCap != null ? { maxHeight: railCap } : null) }}
-            className="max-h-[70vh] min-w-0 shrink-0 overflow-y-auto overscroll-contain border-r border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-950"
+            className="max-h-[70vh] min-w-0 shrink-0 overflow-y-auto overscroll-contain bg-ui-surface"
           >
             <FileTree
               nodes={tree}
@@ -601,13 +746,13 @@ export function ChangesTab({
               reset as a double-click. */}
           <div
             {...separatorProps}
-            className="w-1.5 shrink-0 cursor-col-resize touch-none bg-gray-200 transition-colors hover:bg-blue-400 focus-visible:bg-blue-500 focus-visible:outline-none dark:bg-gray-800 dark:hover:bg-blue-500"
+            className="w-1.5 shrink-0 cursor-col-resize touch-none bg-ui-bg motion-safe:transition-colors hover:bg-ui-accent/40 focus-visible:bg-ui-accent focus-visible:outline-none"
           />
         </div>
         {threadsOnly && (
           <div className="min-w-0 flex-1" data-testid="changes-threads-view">
             {threadsPath != null && (
-              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-gray-100 px-3 py-1.5 text-xs text-gray-600 dark:border-gray-800 dark:text-gray-300">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-4 py-1.5 text-meta text-ui-mute md:px-5">
                 <span>Threads on</span>
                 <code className="min-w-0 truncate font-mono font-semibold" title={threadsPath}>
                   {threadsPath.split('/').at(-1)}
@@ -615,7 +760,7 @@ export function ChangesTab({
                 <button
                   type="button"
                   onClick={() => setThreadsPath(null)}
-                  className="rounded px-1.5 py-0.5 text-blue-600 underline-offset-2 hover:underline dark:text-blue-400"
+                  className="rounded-ui px-1.5 py-0.5 text-ui-accent underline-offset-2 hover:underline touch:min-h-10"
                 >
                   All files
                 </button>

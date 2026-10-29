@@ -34,12 +34,12 @@ export function DetailPane(): JSX.Element {
   return (
     <div className="relative h-full" data-testid="detail-pane">
       {selectedPrId != null && (
-        <div className="absolute right-2 top-1.5 z-10 flex items-center gap-2">
+        <div className="absolute right-2 top-2 z-10 flex items-center gap-2">
           <button
             type="button"
             data-testid="detail-clear"
             onClick={clearSelection}
-            className="flex items-center rounded px-2 py-0.5 text-xs text-gray-900 hover:bg-gray-100 dark:text-gray-100 dark:hover:bg-gray-800"
+            className="flex h-8 w-8 items-center justify-center rounded-ui text-ui-mute hover:bg-ui-hover hover:text-ui-ink touch:h-10 touch:w-10"
             aria-label="Clear selection (Esc)"
             title="Clear selection (Esc)"
           >
@@ -56,7 +56,7 @@ export function DetailPane(): JSX.Element {
           placement="pane"
         />
       ) : (
-        <div className="flex h-full items-center justify-center px-4 text-center text-sm text-gray-400">
+        <div className="flex h-full items-center justify-center px-4 text-center text-body text-ui-faint">
           Select a PR on the timeline to see its details — your relevance-ranked state
           of play lives in the Activity.
         </div>

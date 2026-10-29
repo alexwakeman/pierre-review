@@ -16,7 +16,7 @@ import { InfoButton } from '../InfoModal.js';
 const CHIP =
   'inline-flex max-w-full items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium bg-gray-500/10 text-gray-700 dark:text-gray-200';
 const HEADING =
-  'mb-1 mt-3 flex items-center gap-1 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400';
+  'mb-1 mt-3 flex items-center gap-1 text-meta font-medium text-ui-mute';
 
 /** Where a chip can jump: a finding of a review shows in the Claude Review tab with a DOM anchor. */
 function findingAnchor(item: AiFixReviewItem): string | null {
