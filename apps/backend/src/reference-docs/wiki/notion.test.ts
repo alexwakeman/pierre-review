@@ -8,6 +8,7 @@ import type { PageTransport } from '../url-fetch.js';
 import { folderFigureSink } from '../figures.js';
 import { NOTION_EDIT_FUZZ_MS, notionRequest, notionSource, rateLimiter, toNotionPage } from './notion.js';
 import { WikiSourceError, type WikiPageRef } from './source.js';
+import { __setNotionClock, isNotionLimited, waitNotionSlot } from '../../tracker/notion/client.js';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 
@@ -84,6 +85,34 @@ describe('Notion addresses and tokens', () => {
 });
 
 describe('the transport', () => {
+  it('shares ONE lane per token with the Notion tracker: a slot the tracker took spaces the next wiki call', async () => {
+    let now = 1_000_000;
+    const slept: number[] = [];
+    __setNotionClock({ now: () => now, sleep: async (ms) => { slept.push(ms); now += ms; } });
+    try {
+      const f = fake();
+      await waitNotionSlot(CRED.credential.token); // the tracker's call
+      await notionRequest('/users/me', CRED, { transport: f.transport }); // the wiki's, on the default lane
+      expect(slept).toEqual([340]);
+      await notionRequest('/users/me', { credential: { email: null, token: 'ntn_another0000000000000000000000000' } }, { transport: f.transport });
+      expect(slept).toEqual([340]); // another token: its own lane, no wait
+    } finally {
+      __setNotionClock(null);
+    }
+  });
+
+  it("a 429 the wiki meets is noted on the token's lane, so the tracker holds off too", async () => {
+    let now = 1_000_000;
+    __setNotionClock({ now: () => now, sleep: async (ms) => void (now += ms) });
+    try {
+      const t: JiraTransport = async () => ({ status: 429, headers: { 'retry-after': '30' }, contentType: 'application/json', body: '{}' }) as RawResponse;
+      await notionRequest('/users/me', CRED, { transport: t, sleep: async () => {} }).catch(() => null);
+      expect(isNotionLimited(CRED.credential.token)).toBe(true);
+    } finally {
+      __setNotionClock(null);
+    }
+  });
+
   it('sends the bearer token and the pinned version to the one fixed host', async () => {
     const f = fake();
     await notionRequest('/users/me', CRED, { transport: f.transport, limit: noWait });

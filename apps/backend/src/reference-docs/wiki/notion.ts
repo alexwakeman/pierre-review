@@ -1,5 +1,6 @@
 import { notionIdOf, parseNotionPageUrl } from '@pierre-review/shared';
 import { JiraFetchError, checkJiraUrl, guardedLookup, nodeTransport, type JiraTransport } from '../../tracker/jira/fetch.js';
+import { noteNotionRetryAfter, waitNotionSlot } from '../../tracker/notion/client.js';
 import { PUBLIC_ONLY, fetchImageBytes } from '../figure-fetch.js';
 import type { PageTransport } from '../url-fetch.js';
 import { retryAfterMs } from './confluence.js';
@@ -21,7 +22,8 @@ import { WikiSourceError, type WikiCallOptions, type WikiPage, type WikiPageMeta
 // (an internal integration's), `Notion-Version` PINNED. ⚠ NEVER LOG the headers.
 //
 // RATE: Notion allows about three requests a second per integration. Every request waits its turn on
-// ONE process-wide limiter (NOTION_MIN_INTERVAL_MS apart), and a 429 is waited out (Retry-After, ≤
+// the token's ONE lane, shared with the Notion tracker (tracker/notion/client.ts `waitNotionSlot`), so a
+// workspace using one integration for both is paced once; a 429 is noted on that lane and waited out (Retry-After, ≤
 // RATE_WAIT_MAX_MS in all, cancellable) before it becomes `rate_limited` with the wait.
 //
 // Notion has NO "version" — `last_edited_time` (rounded to the minute) is the change marker, so the
@@ -30,7 +32,6 @@ import { WikiSourceError, type WikiCallOptions, type WikiPage, type WikiPageMeta
 
 export const NOTION_API = 'https://api.notion.com/v1';
 export const NOTION_VERSION = '2022-06-28';
-export const NOTION_MIN_INTERVAL_MS = 350;
 export const NOTION_TIMEOUT_MS = 15_000;
 export const NOTION_MAX_BYTES = 8 * 1024 * 1024;
 export const NOTION_RATE_WAIT_MAX_MS = 60_000;
@@ -72,14 +73,13 @@ export function rateLimiter(intervalMs: number, now: () => number = Date.now, sl
   };
 }
 
-const processLimiter = rateLimiter(NOTION_MIN_INTERVAL_MS);
 
 export interface NotionDeps {
   transport?: JiraTransport;
   /** The credential-free image download (a Notion file address carries its own signature). */
   pageTransport?: PageTransport;
   sleep?: Sleep;
-  /** Waits for a request slot. Absent ⇒ the process-wide limiter. */
+  /** Waits for a request slot. Absent ⇒ the token's lane, shared with the Notion tracker. */
   limit?: (signal?: AbortSignal) => Promise<void>;
 }
 
@@ -113,7 +113,7 @@ export async function notionRequest(
 ): Promise<unknown> {
   const transport = deps.transport ?? nodeTransport;
   const sleep = deps.sleep ?? realSleep;
-  const limit = deps.limit ?? processLimiter;
+  const limit = deps.limit ?? (() => waitNotionSlot(opts.credential.token));
   let url: URL;
   try {
     url = checkJiraUrl(`${NOTION_API}${path}`, { cloud: true });
@@ -144,6 +144,7 @@ export async function notionRequest(
     }
     if (res.status === 429) {
       const wait = retryAfterMs(res.headers?.['retry-after']) ?? 1_000 * (attempt + 1);
+      if (deps.limit == null) noteNotionRetryAfter(opts.credential.token, wait);
       if (attempt >= MAX_RATE_RETRIES || waited + wait > NOTION_RATE_WAIT_MAX_MS) throw new WikiSourceError('rate_limited', 429, wait);
       waited += wait;
       await sleep(wait, opts.signal);

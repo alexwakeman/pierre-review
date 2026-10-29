@@ -269,7 +269,7 @@ clone count. **The invariant: a GitHub token never reaches disk.**
 - **Reference-docs Notion pages (`reference-docs/wiki/notion.ts`) — ONE fixed host.** Every request goes to
   `api.notion.com` only (asserted after the URL check) through the tracker's guarded transport: https,
   public addresses at connect time, NO redirects, 15 s, 8 MB, JSON only, `Bearer` + a PINNED
-  `Notion-Version`. A process-wide limiter (≈ 3 requests a second) and a bounded 429 wait. The token is
+  `Notion-Version`. One lane per token, shared with the Notion tracker (≈ 3 requests a second), and a bounded 429 wait. The token is
   shape-checked (`NOTION_TOKEN_RE`), SEALED and write-only (`workspace_wiki_credentials`, provider
   `notion`); the export carries `hasToken` only. Everything Notion answers is a stranger's: block text is
   escaped so it cannot become markdown syntax or a figure marker; only http(s)/mailto targets link.

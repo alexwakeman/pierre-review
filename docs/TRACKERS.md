@@ -680,7 +680,8 @@ is a different feature). ⚠ **READ-ONLY**: no Notion write exists; the status p
   2022-06-28` (pinned: the databases query API; Notion's 2025 versions move queries to data sources).
 - ⚠ **RATE LIMITS ARE PRE-EMPTED, NEVER SURFACED.** Notion allows ≈ 3 requests a second per
   integration: calls with one token are spaced `NOTION_MIN_GAP_MS` (340 ms) apart, the slot claimed
-  synchronously so concurrent calls queue. A 429 records `Retry-After` (seconds, default 60 s, ≤ 15 min)
+  synchronously so concurrent calls queue. The lane (`waitNotionSlot`) is SHARED with the Notion wiki
+  source, so one integration used for both is paced once, and a 429 either meets holds both off. A 429 records `Retry-After` (seconds, default 60 s, ≤ 15 min)
   and every call before then throws the same 429 WITHOUT calling; the worker turns it into the 5-minute
   workspace backoff, no row written. 401 → `unauthorized` (30-minute backoff); 403 → `forbidden`; 404
   (also Notion's answer for a page not shared with the integration) → `not_found`, stored per ticket.

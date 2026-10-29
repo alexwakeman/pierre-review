@@ -307,8 +307,10 @@ VIEW `?v=` names no page and is refused) — and its child pages 1–3 levels do
 
 - **Transport**: ONE fixed host, `api.notion.com`, through the tracker's guarded transport (https, public
   addresses at connect time, no redirects, 15 s, 8 MB, JSON only), `Authorization: Bearer <token>`,
-  `Notion-Version: 2022-06-28` PINNED. ⚠ ONE process-wide limiter spaces every request
-  `NOTION_MIN_INTERVAL_MS` (350 ms ≈ Notion's three a second); a 429 is waited out (Retry-After, ≤ 60 s in
+  `Notion-Version: 2022-06-28` PINNED. ⚠ Requests go on the TOKEN's one lane
+  (`tracker/notion/client.ts` `waitNotionSlot`, 340 ms apart ≈ Notion's three a second), SHARED with the
+  Notion tracker so one integration used for both is paced once; a 429 is noted on that lane
+  (`noteNotionRetryAfter`, so the tracker holds off too) and waited out (Retry-After, ≤ 60 s in
   all, cancellable), then `rate_limited` with the wait. A 404 means "no such page OR not shared with the
   integration" — the sentence says both.
 - **A page** (`GET /v1/pages/{id}`): the title is the ONE property whose type is `title`; `last_edited_time`

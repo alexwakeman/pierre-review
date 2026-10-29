@@ -67,17 +67,26 @@ export function isNotionLimited(token: string, now: number = clock.now()): boole
   return (lanes.get(tokenFp(token))?.limitedUntil ?? 0) > now;
 }
 
-/** Wait for this token's next slot. Throws a 429 while Notion's Retry-After runs. */
-async function takeSlot(token: string): Promise<void> {
+/**
+ * Wait for this token's next slot: calls with one token go NOTION_MIN_GAP_MS apart. ONE lane per token
+ * for EVERY Notion caller — this tracker client and the Notion wiki source (reference-docs/wiki/notion.ts)
+ * — so a workspace that uses one integration for both is paced once, never twice as fast.
+ */
+export async function waitNotionSlot(token: string): Promise<void> {
   const fp = tokenFp(token);
   const lane = lanes.get(fp) ?? { next: 0, limitedUntil: 0 };
   lanes.set(fp, lane);
   const now = clock.now();
-  if (lane.limitedUntil > now) throw new JiraFetchError('http', 429);
   // ⚠ Claimed SYNCHRONOUSLY, before the await, so concurrent calls queue one gap apart.
   const at = Math.max(now, lane.next);
   lane.next = at + NOTION_MIN_GAP_MS;
   if (at > now) await clock.sleep(at - now);
+}
+
+/** The tracker's slot: as `waitNotionSlot`, but a 429 while Notion's Retry-After runs, without calling. */
+async function takeSlot(token: string): Promise<void> {
+  if (isNotionLimited(token)) throw new JiraFetchError('http', 429);
+  await waitNotionSlot(token);
 }
 
 /** Notion's `Retry-After` (seconds) → milliseconds, clamped; the default when absent or unreadable. */
@@ -89,9 +98,14 @@ export function retryAfterMs(h: Record<string, string> | undefined): number {
 }
 
 function noteLimited(token: string, h: Record<string, string> | undefined): void {
+  noteNotionRetryAfter(token, retryAfterMs(h));
+}
+
+/** Notion asked this token to wait `ms` (a 429): every caller on the lane sees it (the wiki source too). */
+export function noteNotionRetryAfter(token: string, ms: number): void {
   const fp = tokenFp(token);
   const lane = lanes.get(fp) ?? { next: 0, limitedUntil: 0 };
-  lane.limitedUntil = clock.now() + retryAfterMs(h);
+  lane.limitedUntil = Math.max(lane.limitedUntil, clock.now() + ms);
   lanes.set(fp, lane);
 }
 
