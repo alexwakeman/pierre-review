@@ -33,18 +33,18 @@ function BotRollup({ result }: { result: BotThemesResult }): JSX.Element | null 
   if (result.bots.length === 0) return null;
   return (
     <div className="mt-3">
-      <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+      <div className="mb-1 text-meta font-semibold text-ui-mute">
         By reviewer
       </div>
       <div className="space-y-1">
         {result.bots.map((b) => (
-          <div key={b.key} className="flex items-center gap-2 text-[11px]">
-            <span className="min-w-0 flex-1 truncate text-gray-700 dark:text-gray-200">{b.label}</span>
-            <span className="shrink-0 tabular-nums text-gray-500 dark:text-gray-400">
+          <div key={b.key} className="flex items-center gap-2 text-meta">
+            <span className="min-w-0 flex-1 truncate text-ui-ink">{b.label}</span>
+            <span className="shrink-0 tabular-nums text-ui-mute">
               {b.comments} comment{b.comments === 1 ? '' : 's'}
             </span>
             <span
-              className="w-16 shrink-0 text-right tabular-nums text-gray-400"
+              className="w-16 shrink-0 text-right tabular-nums text-ui-faint"
               title="Share of this reviewer's threads later resolved or likely-addressed (approximate)"
             >
               {b.actedOnPct != null ? `${b.actedOnPct}% acted` : '—'}
@@ -59,7 +59,7 @@ function BotRollup({ result }: { result: BotThemesResult }): JSX.Element | null 
 function BotCoverageLine({ result }: { result: BotThemesResult }): JSX.Element {
   const c = result.coverage;
   return (
-    <div className="mt-3 border-t border-ai-hairline pt-2 text-[11px] text-gray-400">
+    <div className="mt-3 border-t border-ai-hairline pt-2 text-meta text-ui-faint">
       Summarised {c.deduped.toLocaleString()} distinct {c.deduped === 1 ? 'point' : 'points'} from{' '}
       {c.totalComments.toLocaleString()} bot comment{c.totalComments === 1 ? '' : 's'}
       {c.analyzed < c.deduped ? ` (top ${c.analyzed.toLocaleString()} analysed)` : ''}
@@ -96,11 +96,11 @@ export function BotThemesPanel({ repoIds }: { repoIds: number[] | null }): JSX.E
 
   return (
     <div
-      className="rounded-lg border border-ai-border bg-ai-surface p-4"
+      className="rounded-ui border border-ai-border bg-ai-surface p-4"
       data-testid="bot-themes-panel"
     >
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-base font-semibold text-gray-800 dark:text-gray-100">
+        <span className="text-title font-semibold text-ui-ink">
           <MagnifierIcon size={15} className="inline-block align-[-0.1em]" /> What they’re flagging
         </span>
         <InfoButton title="What they’re flagging" className="text-ai-ink">
@@ -113,14 +113,14 @@ export function BotThemesPanel({ repoIds }: { repoIds: number[] | null }): JSX.E
             counts, the per-theme counts and the “where” lists are counted exactly.
           </p>
         </InfoButton>
-        <span className="text-[11px] text-gray-500 dark:text-gray-400">AI read</span>
+        <span className="text-meta text-ui-mute">AI read</span>
         <span className="ml-auto">
           <AiRunGate kind="complete">
             <button
               type="button"
               onClick={() => refresh.mutate()}
               disabled={busy || workspaceId == null}
-              className="rounded bg-ai-signal px-3 py-1 text-[11px] font-semibold text-white hover:opacity-90 disabled:opacity-50 dark:text-gray-950"
+              className="rounded-ui bg-ai-signal px-3 py-1 text-meta font-semibold text-white hover:opacity-90 disabled:opacity-50"
               title="Summarise what the review bots are flagging in this scope (runs the Haiku model; unchanged comments are not re-read)"
             >
               {busy ? (
@@ -139,16 +139,16 @@ export function BotThemesPanel({ repoIds }: { repoIds: number[] | null }): JSX.E
       </div>
 
       {refresh.isError && (
-        <div className="mt-2 text-[11px] text-red-500">
+        <div className="mt-2 text-meta text-ui-danger">
           {(refresh.error as Error)?.message ?? 'Couldn’t generate the summary.'}
         </div>
       )}
-      {!refresh.isError && refresh.notice && <div className="mt-2 text-[11px] text-gray-400">{refresh.notice}</div>}
+      {!refresh.isError && refresh.notice && <div className="mt-2 text-meta text-ui-faint">{refresh.notice}</div>}
 
       {busy && !result ? (
         <ThemesSkeleton />
       ) : query.isLoading ? (
-        <div className="mt-3 h-24 animate-pulse rounded bg-ai-surface-2" />
+        <div className="mt-3 h-24 animate-pulse rounded-ui bg-ai-surface-2" />
       ) : result ? (
         /* ⚠ NO SCROLL REGION. The `max-h-[32rem] overflow-y-auto` wrapper that used to sit here
            existed to keep the deterministic Measure surface below — caution banners, ROI table,
@@ -170,7 +170,7 @@ export function BotThemesPanel({ repoIds }: { repoIds: number[] | null }): JSX.E
           />
         </div>
       ) : (
-        <div className="mt-3 flex items-center justify-between gap-2 rounded-md border border-dashed border-ai-border p-3 text-[12px] text-gray-500 dark:text-gray-400">
+        <div className="mt-3 flex items-center justify-between gap-2 rounded-ui border border-dashed border-ai-border p-3 text-meta text-ui-mute">
           <span>No summary yet — generate one to see what your review bots are flagging.</span>
         </div>
       )}

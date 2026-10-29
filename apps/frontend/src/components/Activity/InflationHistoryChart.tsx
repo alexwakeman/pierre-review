@@ -155,7 +155,7 @@ export function inflationHistory(rows: InflationHistoryRow[]): InflationHistory 
 // would quietly make them two encodings of one fact.
 function DirectionKey(): JSX.Element {
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px]">
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-meta">
       <span className="flex items-center gap-1" style={{ color: OVER_COLOR }}>
         <ArrowIcon dir="up" size={10} />
         Bot graded it worse (inflation)
@@ -186,7 +186,7 @@ function InflationPanelChart({
   return (
     <div>
       <div className="mb-0.5 flex items-baseline justify-between gap-2">
-        <span className="flex min-w-0 items-center gap-1.5 text-[11px] font-medium text-gray-700 dark:text-gray-200">
+        <span className="flex min-w-0 items-center gap-1.5 text-meta font-medium text-ui-ink">
           <span
             className="inline-block h-2 w-2 shrink-0 rounded-full"
             style={{ background: color }}
@@ -196,7 +196,7 @@ function InflationPanelChart({
         {/* Both 12-week totals, so the panel's own span is stated as a number and not only as a
             shape. These are 84-day figures and deliberately do NOT match the table's Inflation
             counts, which are the selected window — the caption above says so. */}
-        <span className="shrink-0 tabular-nums text-[11px] text-gray-400">
+        <span className="shrink-0 tabular-nums text-meta text-ui-faint">
           <span style={{ color: OVER_COLOR }}>{panel.overTotal}</span>
           {' · '}
           <span style={{ color: UNDER_COLOR }}>{panel.underTotal}</span>
@@ -290,7 +290,7 @@ export function InflationHistoryChart({
         </div>
       )}
       {(unbadged.length > 0 || quiet.length > 0) && (
-        <div className="mt-2 space-y-0.5 text-[11px] leading-snug text-gray-500 dark:text-gray-400">
+        <div className="mt-2 space-y-0.5 text-meta leading-snug text-ui-mute">
           {unbadged.length > 0 && (
             <div>
               Not charted: {unbadged.join(', ')} — {unbadged.length === 1 ? 'it badges' : 'they badge'}{' '}

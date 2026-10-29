@@ -149,11 +149,11 @@ export function WorkspaceReachCard({
       }
     >
       {nothingMerged ? (
-        <p className="text-[12px] text-gray-500 dark:text-gray-400">
+        <p className="text-meta text-ui-mute">
           No pull requests merged in this window.
         </p>
       ) : noneRead ? (
-        <p className="text-[12px] text-gray-500 dark:text-gray-400">
+        <p className="text-meta text-ui-mute">
           {count(reach.merged)} {plural(reach.merged, 'pull request', 'pull requests')} merged in
           this window, none with a reach level yet.
         </p>
@@ -168,7 +168,7 @@ export function WorkspaceReachCard({
           }}
         />
       )}
-      <div className="mt-2 space-y-1 text-[12px] text-gray-500 dark:text-gray-400">
+      <div className="mt-2 space-y-1 text-meta text-ui-mute">
         {!noneRead && reach.unread > 0 && (
           // ⚠ THE BARS DO NOT TOTAL THE MERGED COUNT, and this sentence is the only place that
           // difference is visible. Both halves are printed so the subtraction is checkable.

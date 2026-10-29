@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { TABLE_BOX_STICKY_FIRST } from './reportChrome.js';
 import type { BotVolumePrRow, BotVolumePrSort, BotWindowKind } from '@pierre-review/shared';
 import { useAutoLoadSentinel } from '../../hooks/useAutoLoadSentinel.js';
 import { useBotVolumePrs } from '../../hooks/useBotVolume.js';
@@ -58,7 +59,7 @@ function Skeleton(): JSX.Element {
   return (
     <div className="space-y-2">
       {[0, 1, 2, 3].map((i) => (
-        <div key={i} className="h-9 animate-pulse rounded bg-gray-100 dark:bg-gray-900/40" />
+        <div key={i} className="h-9 animate-pulse rounded-ui bg-ui-raise" />
       ))}
     </div>
   );
@@ -77,28 +78,28 @@ function Row({
   const href = safeExternalUrl(row.prUrl);
   const detail = ratioDetail(row);
   return (
-    <tr className="border-b border-gray-100 last:border-0 dark:border-gray-800/60">
+    <tr className="last:border-0">
       <td className="px-2 py-1.5">
         <div className="flex flex-wrap items-baseline gap-1.5">
-          <span className="font-mono text-[11px] text-gray-400">{row.repoFullName}</span>
+          <span className="font-mono text-meta text-ui-faint">{row.repoFullName}</span>
           {href ? (
             <a
               href={href}
               target="_blank"
               rel="noopener noreferrer"
-              className="font-mono text-[11px] text-gray-500 hover:underline dark:text-gray-400"
+              className="font-mono text-meta text-ui-mute hover:underline"
               title="Open on GitHub"
             >
               #{row.prNumber}
             </a>
           ) : (
-            <span className="font-mono text-[11px] text-gray-500 dark:text-gray-400">#{row.prNumber}</span>
+            <span className="font-mono text-meta text-ui-mute">#{row.prNumber}</span>
           )}
           <button
             type="button"
             onClick={() => onOpenPr(row)}
             title="Open this PR"
-            className="max-w-[46rem] truncate text-left text-gray-700 hover:underline dark:text-gray-200"
+            className="max-w-[46rem] truncate text-left text-ui-ink hover:underline"
           >
             {row.prTitle}
           </button>
@@ -112,7 +113,7 @@ function Row({
             {row.byBot.map((b) => (
               <span
                 key={b.key}
-                className="rounded bg-gray-100 px-1 py-px text-[11px] text-gray-500 dark:bg-gray-800 dark:text-gray-400"
+                className="rounded-ui bg-ui-raise px-1 py-px text-meta text-ui-mute"
               >
                 {b.label} <span className="tabular-nums">{b.comments}</span>
               </span>
@@ -120,7 +121,7 @@ function Row({
           </div>
         )}
       </td>
-      <td className="px-2 py-1.5 text-right font-semibold tabular-nums text-gray-700 dark:text-gray-200">
+      <td className="px-2 py-1.5 text-right font-semibold tabular-nums text-ui-ink">
         {row.botComments.toLocaleString()}
       </td>
       {/* LOC and files are DASHED when the size was never observed — never 0. Under lean storage
@@ -128,7 +129,7 @@ function Row({
           null rather than fabricating a zero (which would also drop the PR into the smallest size
           bucket and manufacture a spectacular ratio). */}
       <td
-        className="px-2 py-1.5 text-right tabular-nums text-gray-500 dark:text-gray-400"
+        className="px-2 py-1.5 text-right tabular-nums text-ui-mute"
         title={
           row.loc == null
             ? 'This PR’s size was never observed — under lean storage that is indistinguishable from an empty PR, so it is left blank rather than shown as 0.'
@@ -137,7 +138,7 @@ function Row({
       >
         {formatLoc(row.loc)}
       </td>
-      <td className="px-2 py-1.5 text-right tabular-nums text-gray-500 dark:text-gray-400">
+      <td className="px-2 py-1.5 text-right tabular-nums text-ui-mute">
         {row.changedFiles == null ? '—' : row.changedFiles.toLocaleString()}
       </td>
       {/* ⚠ `expected` AND `baselinePrs` RIDE BESIDE THE MULTIPLIER, not behind the tooltip. A
@@ -149,7 +150,7 @@ function Row({
           {formatRatio(row.ratio, row.baseline)}
         </span>
         {detail && (
-          <div className="text-[11px] tabular-nums text-gray-400">
+          <div className="text-meta tabular-nums text-ui-faint">
             {detail}
             {row.baseline === 'repo' && ' · repo avg, not size-matched'}
             {row.baseline === 'low_expectation' && ' · too few expected to compare'}
@@ -280,7 +281,7 @@ export function BotVolumeDetail(): JSX.Element {
   const header = (
     <>
       <div className="flex flex-wrap items-baseline gap-2">
-        <h2 className="text-base font-semibold text-gray-800 dark:text-gray-100">
+        <h2 className="text-title font-semibold text-ui-ink">
           Bot comments per merged PR
         </h2>
         <InfoButton title="Bot comments per merged PR">
@@ -293,12 +294,12 @@ export function BotVolumeDetail(): JSX.Element {
             is keyed on the merge date, so a quiet window can simply mean little was merged.
           </p>
         </InfoButton>
-        <span className="text-[11px] text-gray-400">
+        <span className="text-meta text-ui-faint">
           {bots ? `${botNarrowLabel(bots)}’s comments` : 'every bot in this workspace'}
         </span>
         {repoName && (
           <span
-            className="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[11px] text-gray-500 dark:bg-gray-800 dark:text-gray-400"
+            className="rounded-ui bg-ui-raise px-1.5 py-0.5 font-mono text-meta text-ui-mute"
             title="This drill-down was opened from a single repo’s Bots tab, so it measures that repo — the same narrowing the column you clicked was computed at."
           >
             {repoName}
@@ -306,16 +307,16 @@ export function BotVolumeDetail(): JSX.Element {
         )}
         <div className="ml-auto flex flex-wrap items-center gap-2">
           {/* Window picker — writes the SHARED store field (see WINDOWS above). */}
-          <div className="inline-flex overflow-hidden rounded border border-gray-300 dark:border-gray-700">
+          <div className="inline-flex overflow-hidden rounded-ui">
             {WINDOWS.map((wOpt) => (
               <button
                 key={wOpt.key}
                 type="button"
                 onClick={() => setWindow(wOpt.key)}
-                className={`px-2 py-0.5 text-[11px] font-medium ${
+                className={`px-2 py-0.5 text-meta font-medium ${
                   window === wOpt.key
                     ? 'bg-ai-signal/15 text-ai-signal'
-                    : 'text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800'
+                    : 'text-ui-mute hover:bg-ui-hover'
                 }`}
               >
                 {wOpt.label}
@@ -335,7 +336,7 @@ export function BotVolumeDetail(): JSX.Element {
         // Unreachable in practice — the tab is ephemeral (never persisted, never parsed back from a
         // tab key), so it cannot exist without the seed that opened it. Said plainly rather than
         // rendered as an empty list, which would read as "no bot said anything".
-        <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-400 dark:border-gray-700">
+        <div className="rounded-ui p-6 text-center text-body text-ui-faint bg-ui-surface">
           Open this from the Comments/PR column on the Bots rail to see the PRs behind it.
         </div>
       ) : workspaceId == null || isLoading ? (
@@ -346,14 +347,14 @@ export function BotVolumeDetail(): JSX.Element {
         // No page landed. The infinite query surfaces no error flag of its own, so an absent total
         // once loading has settled IS the failure state — and it must not be dressed up as an
         // empty result, which would claim these bots said nothing.
-        <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-400 dark:border-gray-700">
+        <div className="rounded-ui p-6 text-center text-body text-ui-faint bg-ui-surface">
           Couldn’t load the merged PRs for this window.
         </div>
       ) : (
         <>
           {/* Controls: the ordering, and the bot narrowing if one arrived with the seed. */}
           <div className="flex flex-wrap items-center gap-2">
-            <div className="inline-flex overflow-hidden rounded border border-gray-300 dark:border-gray-700">
+            <div className="inline-flex overflow-hidden rounded-ui">
               {VOLUME_SORTS.map((s) => (
                 <button
                   key={s.key}
@@ -361,10 +362,10 @@ export function BotVolumeDetail(): JSX.Element {
                   onClick={() => setSort(s.key)}
                   aria-pressed={sort === s.key}
                   title={s.help}
-                  className={`px-2 py-0.5 text-[11px] font-medium ${
+                  className={`px-2 py-0.5 text-meta font-medium ${
                     sort === s.key
-                      ? 'bg-sky-500/15 text-sky-700 dark:text-sky-300'
-                      : 'text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800'
+                      ? 'bg-ui-sel text-ui-accent'
+                      : 'text-ui-mute hover:bg-ui-hover'
                   }`}
                 >
                   {s.label}
@@ -380,7 +381,7 @@ export function BotVolumeDetail(): JSX.Element {
                 type="button"
                 onClick={() => setBots(null)}
                 title={`Only ${botNarrowLabel(bots)}${bots.label ? '’s' : '’'} comments — opened from that bot's cell in the Bots table. Click to widen to every bot, keeping this window and scope.`}
-                className="flex items-center gap-1 rounded-full border border-ai-signal/50 bg-ai-signal/10 px-2 py-0.5 text-[11px] font-medium text-ai-signal hover:border-ai-signal"
+                className="flex items-center gap-1 rounded-full border border-ai-signal/50 bg-ai-signal/10 px-2 py-0.5 text-meta font-medium text-ai-signal hover:border-ai-signal"
               >
                 <BotIcon size={11} />
                 {botNarrowLabel(bots)} only
@@ -396,12 +397,12 @@ export function BotVolumeDetail(): JSX.Element {
               shows "most comments" has quietly shipped a size ranking. The example that proves it
               is real: a 17-LOC, single-file PR that drew 25 bot comments — 3.7× what a PR that
               size usually draws — sits 123rd under the default order and 8th under this one. */}
-          <p className="max-w-4xl text-[11px] text-gray-500 dark:text-gray-400">{sortMeta?.help}</p>
+          <p className="max-w-4xl text-meta text-ui-mute">{sortMeta?.help}</p>
 
           {truncated && (
             // The same honesty rule the column's own scan cap follows: say the numbers are a
             // most-recent sample rather than presenting a capped count as the whole window.
-            <div className="rounded border border-gray-300 px-2 py-1 text-[11px] text-gray-500 dark:border-gray-700 dark:text-gray-400">
+            <div className="rounded-ui px-2 py-1 text-meta text-ui-mute bg-ui-surface">
               More PRs merged in this window than one read covers — this list and its counts
               describe the most recent sample, not the whole window.
             </div>
@@ -410,7 +411,7 @@ export function BotVolumeDetail(): JSX.Element {
           {filteredTotal === 0 ? (
             // TWO DISTINCT EMPTY STATES. "Nothing matched your filter" without a way out reads as
             // a broken list; "no bot commented" must NOT offer to clear a filter that isn't on.
-            <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-400 dark:border-gray-700">
+            <div className="rounded-ui p-6 text-center text-body text-ui-faint bg-ui-surface">
               {bots ? (
                 <>
                   {botNarrowLabel(bots)} commented on none of the {total.toLocaleString()} PR
@@ -419,7 +420,7 @@ export function BotVolumeDetail(): JSX.Element {
                     <button
                       type="button"
                       onClick={() => setBots(null)}
-                      className="rounded border border-gray-300 px-2 py-0.5 text-[11px] font-medium text-gray-500 hover:border-gray-400 dark:border-gray-700 dark:text-gray-400 dark:hover:border-gray-500"
+                      className="rounded-ui px-2 py-0.5 text-meta font-medium text-ui-mute bg-ui-surface"
                     >
                       Show every bot
                     </button>
@@ -430,7 +431,7 @@ export function BotVolumeDetail(): JSX.Element {
                   {total === 0
                     ? 'Nothing merged in this window.'
                     : `No bot commented on any of the ${total.toLocaleString()} PRs merged in this window.`}
-                  <div className="mt-1 text-[12px]">Try a wider window above.</div>
+                  <div className="mt-1 text-meta">Try a wider window above.</div>
                 </>
               )}
             </div>
@@ -441,21 +442,21 @@ export function BotVolumeDetail(): JSX.Element {
             <button
               type="button"
               onClick={() => setShowReceipts(true)}
-              className="w-full rounded-lg border border-dashed border-gray-300 px-3 py-2 text-center text-[12px] font-medium text-gray-500 hover:border-gray-400 hover:text-gray-700 dark:border-gray-700 dark:text-gray-400 dark:hover:border-gray-500 dark:hover:text-gray-200"
+              className="w-full rounded-ui px-3 py-2 text-center text-meta font-medium text-ui-mute hover:text-ui-ink bg-ui-surface"
             >
               Show the {filteredTotal.toLocaleString()} merged PR{filteredTotal === 1 ? '' : 's'}{' '}
               this summary was computed from
             </button>
           ) : (
             <>
-              <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-800">
-                <table className="w-full min-w-[720px] border-collapse text-[11px]">
+              <div className={TABLE_BOX_STICKY_FIRST}>
+                <table className="w-full min-w-[720px] border-collapse text-meta">
                   <thead>
-                    <tr className="border-b border-gray-200 text-left text-gray-500 dark:border-gray-800 dark:text-gray-400">
+                    <tr className="text-left text-ui-mute">
                       <th className="px-2 py-1.5 font-medium">PR</th>
                       <th
                         className="px-2 py-1.5 text-right font-medium"
-                        title="Every comment the bots left on this PR — inline review comments, PR-level comments and review bodies."
+                        title="Every comment the bots left on this PR — inline review comments, PR-level comments and bodies."
                       >
                         Bot comments
                       </th>
@@ -485,7 +486,7 @@ export function BotVolumeDetail(): JSX.Element {
               {/* NEVER A BARE COUNT. Three different numbers live here — how many rows are on
                   screen, how many merged PRs drew bot comments, and how many merged at all. */}
               <div
-                className="text-[11px] tabular-nums text-gray-400"
+                className="text-meta tabular-nums text-ui-faint"
                 title="Both totals are the server's, folded from the same scan the Comments/PR column was — not a separate query."
               >
                 {/* ⚠ UNDER A BOT NARROWING `filteredTotal` IS THAT BOT'S PR COUNT, NOT "PRs that
@@ -505,15 +506,15 @@ export function BotVolumeDetail(): JSX.Element {
               {hasMore && (
                 <div ref={sentinelRef} className="flex justify-center pt-1">
                   {isFetchingMore ? (
-                    <span className="flex items-center gap-2 py-1.5 text-xs text-gray-400">
-                      <span className="h-3 w-3 animate-spin rounded-full border-2 border-gray-300 border-t-transparent dark:border-gray-600 dark:border-t-transparent" />
+                    <span className="flex items-center gap-2 py-1.5 text-meta text-ui-faint">
+                      <span className="h-3 w-3 animate-spin rounded-full border-2 border-t-transparent dark:border-t-transparent" />
                       Loading more…
                     </span>
                   ) : (
                     <button
                       type="button"
                       onClick={fetchMore}
-                      className="rounded-full border border-gray-300 px-4 py-1.5 text-xs font-medium text-gray-600 hover:border-gray-400 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:border-gray-500 dark:hover:bg-gray-800/50"
+                      className="rounded-full px-4 py-1.5 text-meta font-medium text-ui-mute hover:bg-ui-hover"
                     >
                       Load more
                     </button>

@@ -84,8 +84,8 @@ function valueBefore(column: RepoRowColumn): boolean {
 }
 
 const HEAD =
-  'pb-1 text-[11px] font-semibold text-gray-500 dark:text-gray-400';
-const CELL = 'py-[3px] text-[11px]';
+  'pb-1 text-meta font-semibold text-ui-mute';
+const CELL = 'py-[3px] text-meta';
 
 export function RepoRows({
   labels,
@@ -175,10 +175,10 @@ export function RepoRows({
                   {labelFor != null ? (
                     labelFor(i)
                   ) : (
-                    <span className="break-words text-gray-700 dark:text-gray-200">{label}</span>
+                    <span className="break-words text-ui-ink">{label}</span>
                   )}
                   {note != null && (
-                    <span className="block text-gray-500 dark:text-gray-400">{note}</span>
+                    <span className="block text-ui-mute">{note}</span>
                   )}
                 </th>
                 {columns.map((c, ci) => {
@@ -187,11 +187,11 @@ export function RepoRows({
                   const cells: JSX.Element[] = [
                     <td key={`${c.key}-bar`} className={`${CELL} pr-2 align-middle`}>
                       {values == null ? (
-                        <span className="text-gray-500 dark:text-gray-400">{c.unknownLabel}</span>
+                        <span className="text-ui-mute">{c.unknownLabel}</span>
                       ) : (
                         <span
                           aria-hidden="true"
-                          className="flex h-2 w-full overflow-hidden rounded-[2px] bg-gray-100 dark:bg-gray-800"
+                          className="flex h-2 w-full overflow-hidden rounded-[2px] bg-ui-raise"
                         >
                           {c.segments.map((s, si) => {
                             const v = values[si] ?? 0;
@@ -221,7 +221,7 @@ export function RepoRows({
                     put(
                       <td
                         key={`${c.key}-total`}
-                        className={`${CELL} pr-2 text-right align-middle tabular-nums text-gray-700 dark:text-gray-200`}
+                        className={`${CELL} pr-2 text-right align-middle tabular-nums text-ui-ink`}
                       >
                         {values == null ? null : c.format(sum(values))}
                         {/* The bar is aria-hidden, so a column whose split is drawn but not
@@ -240,7 +240,7 @@ export function RepoRows({
                       cells.push(
                         <td
                           key={`${c.key}-${s.key}`}
-                          className={`${CELL} pr-2 text-right align-middle tabular-nums text-gray-700 dark:text-gray-200`}
+                          className={`${CELL} pr-2 text-right align-middle tabular-nums text-ui-ink`}
                         >
                           {values == null ? null : c.format(values[si] ?? 0)}
                         </td>,
@@ -260,8 +260,8 @@ export function RepoRows({
               <Fragment key={c.key}>
                 {valueBefore(c) && <td />}
                 {/* The scale, under its own column and nowhere near its neighbour's. */}
-                <td className="border-t border-gray-200 pr-2 pt-1 dark:border-gray-800">
-                  <span className="flex items-baseline justify-between gap-1 text-[11px] text-gray-500 dark:text-gray-400">
+                <td className="pr-2 pt-1">
+                  <span className="flex items-baseline justify-between gap-1 text-meta text-ui-mute">
                     <span>0</span>
                     <span className="text-right tabular-nums">{(c.axisFormat ?? c.format)(columnMax[ci] ?? 0)}</span>
                   </span>

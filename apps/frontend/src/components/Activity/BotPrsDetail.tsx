@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
+import { TABLE_BOX_STICKY_FIRST } from './reportChrome.js';
+import { Tabs } from '../ui/index.js';
 import { PRODUCT_NAME } from '@pierre-review/shared';
 import type {
   BotVendorAnalytics,
@@ -104,26 +106,26 @@ function CommentRow({
 }): JSX.Element {
   const state = c.derivedState ? DERIVED_STATE_META[c.derivedState] : null;
   return (
-    <tr className="border-t border-gray-100 align-top dark:border-gray-800/60">
+    <tr className="align-top">
       {showSeverity && (
         <td className="py-2 pr-3">
           {c.mlLabel ? (
             <MlSeverityBadge label={c.mlLabel} />
           ) : (
-            <span className="text-[11px] text-gray-500 dark:text-gray-400" title="Not scored yet">
+            <span className="text-meta text-ui-mute" title="Not scored yet">
               —
             </span>
           )}
         </td>
       )}
       <td className="max-w-2xl py-2 pr-3">
-        <div className="mb-1 flex flex-wrap items-center gap-1.5 text-[11px] text-gray-400">
-          <span className="uppercase tracking-wide">{TARGET_KIND_LABEL[c.targetKind]}</span>
+        <div className="mb-1 flex flex-wrap items-center gap-1.5 text-meta text-ui-faint">
+          <span className="">{TARGET_KIND_LABEL[c.targetKind]}</span>
           {c.path && <span className="truncate font-mono">{c.path}</span>}
           {state && <MetaChip meta={state} />}
         </div>
         {/* Full markdown — comment/review bodies are always persisted (lean storage keeps them). */}
-        <div className="text-xs">
+        <div className="text-meta">
           <Markdown>{c.body ?? ''}</Markdown>
         </div>
       </td>
@@ -134,15 +136,15 @@ function CommentRow({
           className="block max-w-56 text-left hover:underline"
           title={`${c.repoFullName} #${c.prNumber} — ${c.prTitle}`}
         >
-          <span className="block truncate font-mono text-[11px] text-gray-400">
+          <span className="block truncate font-mono text-meta text-ui-faint">
             {c.repoFullName} #{c.prNumber}
           </span>
-          <span className="block truncate text-[11px] text-gray-700 dark:text-gray-200">
+          <span className="block truncate text-meta text-ui-ink">
             {c.prTitle}
           </span>
         </button>
       </td>
-      <td className="whitespace-nowrap py-2 text-[11px] text-gray-500 dark:text-gray-400">
+      <td className="whitespace-nowrap py-2 text-meta text-ui-mute">
         {relativeTime(c.createdAt)}
       </td>
     </tr>
@@ -152,7 +154,7 @@ function CommentRow({
 function CiCell({ ci }: { ci: BotVendorPr['ciStatus'] }): JSX.Element {
   const meta = ci ? CI_META[ci] : null;
   return (
-    <span className="inline-flex items-center gap-1 text-[11px] text-gray-500 dark:text-gray-400">
+    <span className="inline-flex items-center gap-1 text-meta text-ui-mute">
       <span
         className="inline-block h-2 w-2 rounded-full"
         style={meta ? { background: meta.color } : { boxShadow: 'inset 0 0 0 1px #9ca3af' }}
@@ -165,10 +167,10 @@ function CiCell({ ci }: { ci: BotVendorPr['ciStatus'] }): JSX.Element {
 
 function DiffCell({ pr }: { pr: BotVendorPr }): JSX.Element {
   return (
-    <span className="whitespace-nowrap text-[11px]">
-      <span className="text-gray-400">{pr.changedFiles}f</span>{' '}
-      <span className="font-mono text-green-600 dark:text-green-400">+{pr.additions}</span>{' '}
-      <span className="font-mono text-red-500 dark:text-red-400">−{pr.deletions}</span>
+    <span className="whitespace-nowrap text-meta">
+      <span className="text-ui-faint">{pr.changedFiles}f</span>{' '}
+      <span className="font-mono text-ui-success">+{pr.additions}</span>{' '}
+      <span className="font-mono text-ui-danger">−{pr.deletions}</span>
     </span>
   );
 }
@@ -182,7 +184,7 @@ function AuthorCell({
 }): JSX.Element {
   const u = id != null ? usersById.get(id) : undefined;
   return (
-    <span className="inline-flex items-center gap-1 text-[11px] text-gray-600 dark:text-gray-300">
+    <span className="inline-flex items-center gap-1 text-meta text-ui-mute">
       <Avatar user={u} size={14} />
       <UserName user={u} fallbackId={id ?? 0} />
     </span>
@@ -192,11 +194,11 @@ function AuthorCell({
 // Bot threads on this PR, with still-untouched surfaced in amber.
 function ThreadsCell({ pr }: { pr: BotVendorPr }): JSX.Element {
   return (
-    <span className="whitespace-nowrap text-[11px] tabular-nums">
-      <span className="text-gray-700 dark:text-gray-200">{pr.botThreads}</span>
+    <span className="whitespace-nowrap text-meta tabular-nums">
+      <span className="text-ui-ink">{pr.botThreads}</span>
       {pr.botUntouched > 0 && (
         <span
-          className="ml-1 text-amber-600 dark:text-amber-400"
+          className="ml-1 text-ui-warn"
           title={`${pr.botUntouched} still untouched — no reply, no follow-up commit`}
         >
           {pr.botUntouched} untouched
@@ -211,9 +213,9 @@ function ThreadsCell({ pr }: { pr: BotVendorPr }): JSX.Element {
 function ActedOnCell({ pr }: { pr: BotVendorPr }): JSX.Element {
   const pct = pr.botThreads > 0 ? Math.round((pr.botActedOn / pr.botThreads) * 100) : null;
   return (
-    <span className="whitespace-nowrap text-[11px] tabular-nums">
-      <span className="text-gray-700 dark:text-gray-200">{pr.botActedOn}</span>
-      {pct != null && <span className="ml-1 text-gray-400">{pct}%</span>}
+    <span className="whitespace-nowrap text-meta tabular-nums">
+      <span className="text-ui-ink">{pr.botActedOn}</span>
+      {pct != null && <span className="ml-1 text-ui-faint">{pct}%</span>}
     </span>
   );
 }
@@ -228,7 +230,7 @@ function Row({
   onOpen: (pr: BotVendorPr) => void;
 }): JSX.Element {
   return (
-    <tr className="border-t border-gray-100 align-top hover:bg-gray-50/70 dark:border-gray-800/60 dark:hover:bg-gray-900/40">
+    <tr className="align-top hover:bg-ui-hover">
       <td className="py-1.5 pr-3">
         {/* Two lines per PR: the repo/number pointer, then the title. */}
         <button
@@ -237,16 +239,16 @@ function Row({
           className="block max-w-md text-left hover:underline"
           title={`${pr.repoFullName} #${pr.prNumber} — ${pr.prTitle}`}
         >
-          <span className="block truncate font-mono text-[11px] text-gray-400">
+          <span className="block truncate font-mono text-meta text-ui-faint">
             {pr.repoFullName} #{pr.prNumber}
           </span>
           <span className="flex items-center gap-1.5">
-            <span className="min-w-0 truncate text-sm font-medium text-gray-800 dark:text-gray-100">
+            <span className="min-w-0 truncate text-body font-medium text-ui-ink">
               {pr.prTitle}
             </span>
             {pr.botOnly && (
               <span
-                className="shrink-0 rounded bg-amber-500/10 px-1 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300"
+                className="shrink-0 rounded-ui bg-ui-surface px-1 py-0.5 text-meta font-semibold text-ui-ink"
                 title="Only bots touched this PR — no human review or comment"
               >
                 bot-only
@@ -270,7 +272,7 @@ function Row({
       <td className="py-1.5 pr-3">
         <AuthorCell id={pr.authorId} usersById={usersById} />
       </td>
-      <td className="py-1.5 pr-3 text-[11px] text-gray-500 dark:text-gray-400">
+      <td className="py-1.5 pr-3 text-meta text-ui-mute">
         {pr.lastBotActivityAt ? relativeTime(pr.lastBotActivityAt) : '—'}
       </td>
     </tr>
@@ -287,10 +289,10 @@ function Table({
   onOpen: (pr: BotVendorPr) => void;
 }): JSX.Element {
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full min-w-[720px] border-collapse text-sm">
+    <div className={TABLE_BOX_STICKY_FIRST}>
+      <table className="w-full min-w-[720px] border-collapse text-body">
         <thead>
-          <tr className="text-left text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+          <tr className="text-left text-meta font-semibold text-ui-faint">
             <th className="pb-1 pr-3 font-semibold">Pull request</th>
             <th className="pb-1 pr-3 font-semibold">Bot threads</th>
             <th className="pb-1 pr-3 font-semibold">Acted on</th>
@@ -479,33 +481,33 @@ export function BotPrsDetail(): JSX.Element {
   return (
     <div className="mx-auto max-w-[100rem] space-y-4 p-4">
       <div className="flex flex-wrap items-baseline gap-2">
-        <h2 className="text-base font-semibold text-gray-800 dark:text-gray-100">
+        <h2 className="text-title font-semibold text-ui-ink">
           Bot Drill-Down
         </h2>
-        <span className="text-[11px] text-gray-400">
+        <span className="text-meta text-ui-faint">
           {effectiveView === 'comments'
             ? `What ${activeLabel ?? 'an automated reviewer'} said in the window`
             : `PRs ${activeLabel ?? 'an automated reviewer'} touched · most-recent activity first`}
           {botOnlyPrs > 0 && (
             <>
               {' · '}
-              <span className="text-amber-600 dark:text-amber-400">
+              <span className="text-ui-warn">
                 {botOnlyPrs} bot-only open
               </span>
             </>
           )}
         </span>
         {/* Window picker (shared with the Bot-ROI panel via botAnalyticsWindow). */}
-        <div className="ml-auto inline-flex overflow-hidden rounded border border-gray-300 dark:border-gray-700">
+        <div className="ml-auto inline-flex overflow-hidden rounded-ui">
           {WINDOWS.map((wOpt) => (
             <button
               key={wOpt.key}
               type="button"
               onClick={() => setWindow(wOpt.key)}
-              className={`px-2 py-0.5 text-[11px] font-medium ${
+              className={`px-2 py-0.5 text-meta font-medium ${
                 window === wOpt.key
                   ? 'bg-ai-signal/15 text-ai-signal'
-                  : 'text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800'
+                  : 'text-ui-mute hover:bg-ui-hover'
               }`}
             >
               {wOpt.label}
@@ -516,7 +518,7 @@ export function BotPrsDetail(): JSX.Element {
           type="button"
           onClick={refresh}
           disabled={isFetching}
-          className="rounded border border-gray-300 px-1.5 py-0.5 text-[11px] font-medium hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
+          className="rounded-ui px-1.5 py-0.5 text-meta font-medium disabled:opacity-50 bg-ui-surface"
         >
           <RefreshIcon
             size={11}
@@ -529,15 +531,15 @@ export function BotPrsDetail(): JSX.Element {
       {analytics.isLoading ? (
         <div className="space-y-2">
           {[0, 1, 2, 3].map((i) => (
-            <div key={i} className="h-8 animate-pulse rounded bg-gray-100 dark:bg-gray-900/40" />
+            <div key={i} className="h-8 animate-pulse rounded-ui bg-ui-raise" />
           ))}
         </div>
       ) : analytics.isError ? (
-        <div className="text-sm text-red-500">Couldn’t load bot analytics.</div>
+        <div className="text-body text-ui-danger">Couldn’t load bot analytics.</div>
       ) : vendors.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-400 dark:border-gray-700">
+        <div className="rounded-ui p-6 text-center text-body text-ui-faint bg-ui-surface">
           No automated-reviewer activity in this window.
-          <div className="mt-1 text-[11px]">
+          <div className="mt-1 text-meta">
             When review bots (CodeRabbit, Copilot, in-house AI…) comment on your PRs, the PRs
             they touched land here.
           </div>
@@ -545,37 +547,29 @@ export function BotPrsDetail(): JSX.Element {
       ) : (
         <>
           {/* Sub-tab bar — one per detected vendor. */}
-          <div role="tablist" className="flex flex-wrap gap-1 border-b border-gray-200 dark:border-gray-800">
-            {vendors.map((v) => {
-              const on = v.key === active;
-              const color = botColor({ login: v.login, kind: v.kind });
-              return (
-                <button
-                  key={v.key}
-                  type="button"
-                  role="tab"
-                  aria-selected={on}
-                  onClick={() => setActive(v.key)}
-                  className={`-mb-px flex items-center gap-1 rounded-t-md border border-b-0 px-3 py-1.5 text-xs font-medium ${
-                    on
-                      ? 'border-gray-300 bg-white dark:border-gray-700 dark:bg-gray-950'
-                      : 'border-transparent text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-900/60'
-                  }`}
-                  style={on ? { color } : undefined}
-                >
+          <Tabs
+            label="Bots"
+            idPrefix="bot-prs"
+            value={active ?? ''}
+            onChange={setActive}
+            tabs={vendors.map((v) => ({
+              id: v.key,
+              label: v.label,
+              count: v.threads,
+              // The vendor's colour marks the icon only (identity), never the words.
+              icon: (
+                <span className="decorative-mark flex" style={{ color: botColor({ login: v.login, kind: v.kind }) }}>
                   <BotIcon size={12} />
-                  {v.label}
-                  <span className="ml-1 text-gray-400">{v.threads}</span>
-                </button>
-              );
-            })}
-          </div>
+                </span>
+              ),
+            }))}
+          />
 
           {/* Comments | PRs sub-view toggle — Comments first, and the view this tab opens on.
               Comments is DISABLED for the 'pierre' sentinel (verbatim reviews are posted with the
               human's token — no per-comment rows), which is the one case that lands on PRs. */}
           <div className="flex flex-wrap items-center gap-2">
-            <div className="inline-flex overflow-hidden rounded border border-gray-300 dark:border-gray-700">
+            <div className="inline-flex overflow-hidden rounded-ui">
               {(
                 [
                   { key: 'comments', label: 'Comments' },
@@ -596,10 +590,10 @@ export function BotPrsDetail(): JSX.Element {
                           ? 'Everything this bot said in the window — inline comments, PR comments and review summaries'
                           : 'The PRs this bot touched in the window'
                     }
-                    className={`px-2 py-0.5 text-[11px] font-medium disabled:cursor-not-allowed disabled:opacity-40 ${
+                    className={`px-2 py-0.5 text-meta font-medium disabled:cursor-not-allowed disabled:opacity-40 ${
                       effectiveView === t.key
                         ? 'bg-ai-signal/15 text-ai-signal'
-                        : 'text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800'
+                        : 'text-ui-mute hover:bg-ui-hover'
                     }`}
                   >
                     {t.label}
@@ -610,7 +604,7 @@ export function BotPrsDetail(): JSX.Element {
             {/* Sort. Both DATE orders are always offered; Severity only where severities exist
                 to sort by (no scoring service ⇒ the option would sort by nothing). */}
             {effectiveView === 'comments' && (
-              <div className="ml-auto inline-flex overflow-hidden rounded border border-gray-300 dark:border-gray-700">
+              <div className="ml-auto inline-flex overflow-hidden rounded-ui">
                 {(
                   [
                     { key: 'newest', label: 'Newest', title: 'Most recent first' },
@@ -630,10 +624,10 @@ export function BotPrsDetail(): JSX.Element {
                       type="button"
                       onClick={() => setCommentSort(s.key)}
                       title={s.title}
-                      className={`px-2 py-0.5 text-[11px] font-medium ${
+                      className={`px-2 py-0.5 text-meta font-medium ${
                         effectiveSort === s.key
                           ? 'bg-ai-signal/15 text-ai-signal'
-                          : 'text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800'
+                          : 'text-ui-mute hover:bg-ui-hover'
                       }`}
                     >
                       {s.label}
@@ -649,7 +643,7 @@ export function BotPrsDetail(): JSX.Element {
               un-enriched (or OSS) install advertises a filter that can only return nothing. */}
           {effectiveView === 'comments' && showCommentFilters && (
             <div className="flex flex-wrap items-center gap-1.5">
-              <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+              <span className="text-meta font-semibold text-ui-faint">
                 Severity
               </span>
               {SEVERITY_PILLS.map((k) => {
@@ -663,10 +657,8 @@ export function BotPrsDetail(): JSX.Element {
                     onClick={() => togglePill(k)}
                     aria-pressed={on}
                     disabled={count === 0 && !on}
-                    className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors disabled:opacity-40 ${
-                      on
-                        ? 'border-sky-400 bg-sky-50 text-sky-700 dark:border-sky-500/60 dark:bg-sky-950/30 dark:text-sky-300'
-                        : 'border-gray-300 text-gray-500 hover:border-gray-400 dark:border-gray-700 dark:text-gray-400'
+                    className={`flex items-center gap-1 rounded-full px-2.5 py-0.5 text-meta font-medium transition-colors disabled:opacity-40 touch:py-2 ${
+                      on ? 'bg-ui-sel text-ui-ink' : 'bg-ui-raise text-ui-mute hover:text-ui-ink'
                     }`}
                     title={meta.description}
                   >
@@ -685,10 +677,8 @@ export function BotPrsDetail(): JSX.Element {
                 onClick={() => setDisagreesOnly((v) => !v)}
                 aria-pressed={activeDisagrees}
                 disabled={facets.disagreements === 0 && !activeDisagrees}
-                className={`ml-1 flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors disabled:opacity-40 ${
-                  activeDisagrees
-                    ? 'border-amber-400 bg-amber-50 text-amber-700 dark:border-amber-500/60 dark:bg-amber-950/30 dark:text-amber-300'
-                    : 'border-gray-300 text-gray-500 hover:border-gray-400 dark:border-gray-700 dark:text-gray-400'
+                className={`ml-1 flex items-center gap-1 rounded-full px-2.5 py-0.5 text-meta font-medium transition-colors disabled:opacity-40 touch:py-2 ${
+                  activeDisagrees ? 'bg-ui-sel text-ui-ink' : 'bg-ui-raise text-ui-mute hover:text-ui-ink'
                 }`}
                 title="Only comments where the bot's OWN declared severity badge differs from Limn's. This is a SEVERITY disagreement and nothing else: vendors declare no machine-readable category, so category disagreement is not derivable and is never claimed here."
               >
@@ -702,7 +692,7 @@ export function BotPrsDetail(): JSX.Element {
                 <button
                   type="button"
                   onClick={clearCommentFilters}
-                  className="rounded px-1.5 py-0.5 text-[11px] text-gray-500 dark:text-gray-400 underline-offset-2 hover:underline"
+                  className="rounded-ui px-1.5 py-0.5 text-meta text-ui-mute underline-offset-2 hover:underline"
                 >
                   Clear
                 </button>
@@ -714,15 +704,15 @@ export function BotPrsDetail(): JSX.Element {
             comments.isLoading ? (
               <div className="space-y-2">
                 {[0, 1, 2, 3].map((i) => (
-                  <div key={i} className="h-8 animate-pulse rounded bg-gray-100 dark:bg-gray-900/40" />
+                  <div key={i} className="h-8 animate-pulse rounded-ui bg-ui-raise" />
                 ))}
               </div>
             ) : comments.isError ? (
-              <div className="text-sm text-red-500">Couldn’t load the comment list.</div>
+              <div className="text-body text-ui-danger">Couldn’t load the comment list.</div>
             ) : commentRows.length === 0 ? (
               // Two different empty states: nothing was said, versus nothing survived the pills.
               // The second must offer the way out, or the filter reads as a broken list.
-              <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-400 dark:border-gray-700">
+              <div className="rounded-ui p-6 text-center text-body text-ui-faint bg-ui-surface">
                 {commentsFiltered ? (
                   <>
                     None of this bot’s {fetchedComments.length.toLocaleString()} comments match
@@ -731,7 +721,7 @@ export function BotPrsDetail(): JSX.Element {
                       <button
                         type="button"
                         onClick={clearCommentFilters}
-                        className="rounded border border-gray-300 px-2 py-0.5 text-[11px] font-medium text-gray-500 hover:border-gray-400 dark:border-gray-700 dark:text-gray-400 dark:hover:border-gray-500"
+                        className="rounded-ui px-2 py-0.5 text-meta font-medium text-ui-mute bg-ui-surface"
                       >
                         Clear filters
                       </button>
@@ -744,15 +734,15 @@ export function BotPrsDetail(): JSX.Element {
             ) : (
               <>
                 {comments.data?.truncated && (
-                  <div className="rounded border border-gray-300 px-2 py-1 text-[11px] text-gray-500 dark:border-gray-700 dark:text-gray-400">
+                  <div className="rounded-ui px-2 py-1 text-meta text-ui-mute bg-ui-surface">
                     This bot said more in the window than one read covers — showing the most
                     recent {fetchedComments.length.toLocaleString()}.
                   </div>
                 )}
-                <div className="overflow-x-auto">
-                  <table className="w-full min-w-[720px] border-collapse text-sm">
+                <div className={TABLE_BOX_STICKY_FIRST}>
+                  <table className="w-full min-w-[720px] border-collapse text-body">
                     <thead>
-                      <tr className="text-left text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+                      <tr className="text-left text-meta font-semibold text-ui-faint">
                         {mlEnabled && <th className="pb-1 pr-3 font-semibold">Severity</th>}
                         <th className="pb-1 pr-3 font-semibold">Comment</th>
                         <th className="pb-1 pr-3 font-semibold">Pull request</th>
@@ -775,14 +765,14 @@ export function BotPrsDetail(): JSX.Element {
                   <button
                     type="button"
                     onClick={() => setVisibleComments((n) => n + COMMENTS_PAGE_STEP)}
-                    className="w-full rounded border border-gray-300 px-2 py-1 text-[11px] font-medium text-gray-500 hover:border-gray-400 dark:border-gray-700 dark:text-gray-400 dark:hover:border-gray-500"
+                    className="w-full rounded-ui px-2 py-1 text-meta font-medium text-ui-mute bg-ui-surface"
                   >
                     Show more ({(commentRows.length - visibleComments).toLocaleString()} remaining)
                   </button>
                 )}
                 {/* Filtered-of-fetched, never a bare count: with pills on, "50 comments" would
                     read as the bot's whole output for the window. */}
-                <div className="text-[11px] text-gray-400">
+                <div className="text-meta text-ui-faint">
                   {commentsFiltered
                     ? `${commentRows.length.toLocaleString()} of ${fetchedComments.length.toLocaleString()} comments match`
                     : `${fetchedComments.length.toLocaleString()} comments`}
@@ -792,13 +782,13 @@ export function BotPrsDetail(): JSX.Element {
           ) : prs.isLoading ? (
             <div className="space-y-2">
               {[0, 1, 2, 3].map((i) => (
-                <div key={i} className="h-8 animate-pulse rounded bg-gray-100 dark:bg-gray-900/40" />
+                <div key={i} className="h-8 animate-pulse rounded-ui bg-ui-raise" />
               ))}
             </div>
           ) : prs.isError ? (
-            <div className="text-sm text-red-500">Couldn’t load the PR list.</div>
+            <div className="text-body text-ui-danger">Couldn’t load the PR list.</div>
           ) : rows.length === 0 ? (
-            <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-400 dark:border-gray-700">
+            <div className="rounded-ui p-6 text-center text-body text-ui-faint bg-ui-surface">
               No PRs for this bot in the window.
             </div>
           ) : (

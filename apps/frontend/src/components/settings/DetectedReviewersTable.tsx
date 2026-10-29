@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { Select } from '../ui/index.js';
 import type {
   AutomatedReviewerKind,
   CostModel,
@@ -51,14 +52,12 @@ const MAX_REPO_CHIPS = 8;
 // so appending a width to it does nothing — the vendor picker and label box stretched edge to edge
 // and the row read as a form, not a list. This is the same chrome with the width left off.
 const FIELD_CLS =
-  'rounded border border-gray-300 bg-white px-2 py-1 text-xs text-gray-800 outline-none focus:border-sky-400 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100';
+  'rounded-ui bg-ui-raise px-2 py-1 text-meta text-ui-ink outline-none ring-1 ring-inset ring-ui-line focus-visible:ring-2 focus-visible:ring-ui-accent touch:h-10';
 // The label in front of each control row on a card ("Counts as", "Role", "Vendor").
-const CONTROL_LABEL_CLS = 'w-16 shrink-0 text-[11px] font-medium text-gray-500 dark:text-gray-400';
+const CONTROL_LABEL_CLS = 'w-16 shrink-0 text-meta font-medium text-ui-mute';
 const segmentCls = (active: boolean): string =>
-  `px-2 py-0.5 text-[11px] font-medium disabled:opacity-40 ${
-    active
-      ? 'bg-sky-600 text-white'
-      : 'bg-white text-gray-600 hover:bg-gray-100 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700'
+  `rounded-ui px-2.5 py-0.5 text-meta font-medium disabled:opacity-40 touch:py-2 ${
+    active ? 'bg-ui-sel text-ui-ink' : 'text-ui-mute hover:text-ui-ink'
   }`;
 
 // What each role MEANS, in terms of the consequence the user is choosing. Every string names the
@@ -220,7 +219,7 @@ export function DetectedReviewersTable({
   if (workspaceId == null) {
     return (
       <SectionShell title={title} desc={desc} info={info}>
-        <p className="py-3 text-center text-[11px] text-gray-400">Loading…</p>
+        <p className="py-3 text-center text-meta text-ui-faint">Loading…</p>
       </SectionShell>
     );
   }
@@ -232,11 +231,11 @@ export function DetectedReviewersTable({
   return (
     <SectionShell title={title} desc={desc} info={info}>
       {q.isLoading ? (
-        <p className="py-3 text-center text-[11px] text-gray-400">Loading…</p>
+        <p className="py-3 text-center text-meta text-ui-faint">Loading…</p>
       ) : q.isError ? (
-        <p className="py-3 text-center text-[11px] text-red-500">{(q.error as Error).message}</p>
+        <p className="py-3 text-center text-meta text-ui-danger">{(q.error as Error).message}</p>
       ) : emptyKind != null ? (
-        <p className="py-3 text-center text-[11px] text-gray-400">
+        <p className="py-3 text-center text-meta text-ui-faint">
           {emptyStateCopy(emptyKind, listRepoIds.length)}
         </p>
       ) : (
@@ -245,7 +244,7 @@ export function DetectedReviewersTable({
               said edits apply "everywhere", which was true of an account-wide identity table and
               is now wrong in both directions: a change here reaches every repo in this Workspace
               (wider than the repo you may be looking at) and reaches no other Workspace at all. */}
-          <p className="rounded border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-700 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-300">
+          <p className="rounded-ui bg-ui-surface px-2 py-1 text-meta text-ui-ink">
             Everything here applies to{' '}
             <span className="font-semibold">this Workspace</span>: all {listRepoIds.length} of its
             repo{listRepoIds.length === 1 ? '' : 's'}, and none of your other Workspaces.
@@ -310,7 +309,7 @@ export function DetectedReviewersTable({
           />
 
           {/* The workspace cost total. */}
-          <p className="text-xs text-gray-500 dark:text-gray-400">
+          <p className="text-meta text-ui-mute">
             {costTotal.totalUsd == null ? (
               <>
                 No monthly prices set yet. Add one per bot above to see $ per used thread in the
@@ -318,7 +317,7 @@ export function DetectedReviewersTable({
               </>
             ) : (
               <>
-                <span className="font-medium tabular-nums text-gray-600 dark:text-gray-300">
+                <span className="font-medium tabular-nums text-ui-mute">
                   ${formatCostInput(costTotal.totalUsd)}/mo
                 </span>{' '}
                 across {costTotal.pricedActors} bot{costTotal.pricedActors === 1 ? '' : 's'} in this
@@ -336,9 +335,9 @@ export function DetectedReviewersTable({
           {/* Search-to-promote: find a reviewer this Workspace currently treats as human and mark
               them automated. One button now — the judgement is Workspace-wide, so there is no repo
               to pick and no row to fabricate. */}
-          <div className="mt-3 space-y-1.5 border-t border-gray-200 pt-3 dark:border-gray-800">
-            <label className="flex flex-col gap-1 text-xs">
-              <span className="font-medium text-gray-600 dark:text-gray-300">Add a review bot</span>
+          <div className="mt-3 space-y-1.5 pt-3">
+            <label className="flex flex-col gap-1 text-meta">
+              <span className="font-medium text-ui-mute">Add a review bot</span>
               <input
                 className={inputCls}
                 value={query}
@@ -348,17 +347,17 @@ export function DetectedReviewersTable({
               />
             </label>
             {query.trim() === '' ? (
-              <p className="text-xs text-gray-500 dark:text-gray-400">
+              <p className="text-meta text-ui-mute">
                 Type a reviewer&apos;s name to treat them as an automated reviewer in this
                 Workspace. They join the <span className="font-medium">Review bots</span> list
                 above, where you set the vendor and the price.
               </p>
             ) : matches.length === 0 ? (
-              <p className="text-xs text-gray-500 dark:text-gray-400">
+              <p className="text-meta text-ui-mute">
                 No matching reviewers this Workspace currently treats as human.
               </p>
             ) : (
-              <ul className="divide-y divide-gray-100 rounded border border-gray-200 dark:divide-gray-800 dark:border-gray-700">
+              <ul className="rounded-ui">
                 {matches.map((m) => (
                   <li key={m.userId} className="flex flex-wrap items-center gap-2 px-2.5 py-1.5">
                     {safeExternalUrl(m.avatarUrl) !== undefined && (
@@ -369,10 +368,10 @@ export function DetectedReviewersTable({
                         className="h-5 w-5 shrink-0 rounded-full"
                       />
                     )}
-                    <span className="truncate text-xs font-medium text-gray-800 dark:text-gray-100">
+                    <span className="truncate text-meta font-medium text-ui-ink">
                       {m.login}
                       {m.displayName != null && m.displayName !== m.login && (
-                        <span className="ml-1 font-normal text-gray-400">{m.displayName}</span>
+                        <span className="ml-1 font-normal text-ui-faint">{m.displayName}</span>
                       )}
                     </span>
                     <button
@@ -385,7 +384,7 @@ export function DetectedReviewersTable({
                         onPatch(m.userId, { automated: true });
                         setQuery('');
                       }}
-                      className="ml-auto rounded bg-sky-600 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-sky-700 disabled:opacity-40"
+                      className="ml-auto rounded-ui bg-ui-accent-fill px-2 py-0.5 text-meta font-medium text-ui-on-accent hover:opacity-90 disabled:opacity-40 touch:py-2"
                     >
                       Treat as a review bot in this Workspace
                     </button>
@@ -396,7 +395,7 @@ export function DetectedReviewersTable({
           </div>
         </>
       )}
-      {anyError != null && <p className="text-[11px] text-red-500">{anyError.message}</p>}
+      {anyError != null && <p className="text-meta text-ui-danger">{anyError.message}</p>}
     </SectionShell>
   );
 }
@@ -432,10 +431,10 @@ function ReviewerList({
   return (
     <section className="space-y-2">
       <div className="flex flex-wrap items-baseline gap-1.5">
-        <h4 className="text-xs font-semibold text-gray-700 dark:text-gray-200">
+        <h4 className="text-meta font-semibold text-ui-ink">
           {heading} ({reviewers.length})
         </h4>
-        <span className="text-[11px] text-gray-500 dark:text-gray-400">{note}</span>
+        <span className="text-meta text-ui-mute">{note}</span>
       </div>
       {/* A responsive GRID of distinct cards: one column at phone width, two from `md`, three on a
           wide screen. `items-start` keeps a short card from stretching to its row-mate's height. */}
@@ -542,10 +541,9 @@ function ReviewerCard({
 
   return (
     <li
-      className={`relative flex min-w-0 flex-col gap-2.5 overflow-hidden rounded-lg border py-3 pl-4 pr-3 ${
-        isPerson
-          ? 'border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-900/40'
-          : 'border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900'
+      className={`relative flex min-w-0 flex-col gap-2.5 overflow-hidden rounded-ui py-3 pl-4 pr-3 ${
+        // A person row stays muted: it is not a bot here.
+        isPerson ? 'bg-ui-surface/60 text-ui-mute' : 'bg-ui-surface'
       }`}
       data-testid="bot-classification-card"
     >
@@ -561,12 +559,12 @@ function ReviewerCard({
         <BotAvatar avatarUrl={r.avatarUrl} name={title} color={color} muted={isPerson} />
         <div className="min-w-0 flex-1">
           <div
-            className="truncate text-sm font-semibold text-gray-800 dark:text-gray-100"
+            className="truncate text-body font-semibold text-ui-ink"
             title={r.sampleReviewBody ?? undefined}
           >
             {title}
           </div>
-          <div className="truncate text-xs text-gray-500 dark:text-gray-400">
+          <div className="truncate text-meta text-ui-mute">
             @{r.login}
             {r.displayName != null && r.displayName !== r.login && r.displayName !== title && (
               <span className="ml-1">· {r.displayName}</span>
@@ -576,8 +574,8 @@ function ReviewerCard({
         {/* The Workspace-wide footprint. All-zero counts mean "a judgement recorded for a
             Workspace this reviewer no longer touches". */}
         <span
-          className="shrink-0 text-[11px] tabular-nums text-gray-500 dark:text-gray-400"
-          title="Reviews / inline threads / PR comments across this Workspace over the last 90 days"
+          className="shrink-0 text-meta tabular-nums text-ui-mute"
+          title="Reviews / inline threads PR comments across this Workspace over the last 90 days"
         >
           {f.reviews}r · {f.threads}t · {f.comments}c · 90d
         </span>
@@ -585,41 +583,41 @@ function ReviewerCard({
 
       <div className="flex flex-wrap items-center gap-1.5">
         {isPerson ? (
-          <span className="inline-flex items-center rounded-full border border-gray-300 px-2 py-0.5 text-[11px] font-medium text-gray-600 dark:border-gray-700 dark:text-gray-300">
+          <span className="inline-flex items-center rounded-full px-2 py-0.5 text-meta font-medium text-ui-mute">
             Person
           </span>
         ) : (
-          <span className="inline-flex items-center gap-1 rounded-full border border-gray-300 px-2 py-0.5 text-[11px] text-gray-600 dark:border-gray-700 dark:text-gray-300">
-            <span className="text-gray-500 dark:text-gray-400">Role</span>
+          <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-meta text-ui-mute">
+            <span className="text-ui-mute">Role</span>
             <span className="font-medium">{REVIEWER_ROLE_LABEL[r.role]}</span>
           </span>
         )}
         <span
-          className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium"
+          className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-meta font-medium"
           style={{ ...vendorInk(color), backgroundColor: `${color}1a` }}
         >
           <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: color }} />
           {vendorLabel}
         </span>
         {r.identitySource === 'manual' && (
-          <span className="rounded bg-sky-50 px-1.5 py-0.5 text-[11px] font-medium text-sky-700 dark:bg-sky-950 dark:text-sky-300">
+          <span className="rounded-ui bg-ui-sel px-1.5 py-0.5 text-meta font-medium text-ui-accent">
             Named by you
           </span>
         )}
         {r.isManualOverride ? (
-          <span className="rounded bg-sky-50 px-1.5 py-0.5 text-[11px] font-medium text-sky-700 dark:bg-sky-950 dark:text-sky-300">
+          <span className="rounded-ui bg-ui-sel px-1.5 py-0.5 text-meta font-medium text-ui-accent">
             Set by you
           </span>
         ) : (
           <span
-            className="text-[11px] text-gray-500 dark:text-gray-400"
+            className="text-meta text-ui-mute"
             title={r.reasons.join(' · ')}
           >
             Detected: {r.source.replace(/_/g, ' ')}
           </span>
         )}
         {r.automated && r.confidence !== 'high' && !r.isManualOverride && (
-          <span className="text-[11px] text-amber-700 dark:text-amber-300" title={r.reasons.join(' · ')}>
+          <span className="text-meta text-ui-warn" title={r.reasons.join(' · ')}>
             likely ({r.confidence})
           </span>
         )}
@@ -629,24 +627,24 @@ function ReviewerCard({
           judges, names and prices this bot in all of these repos at once. */}
       {footprints.length > 0 && (
         <div className="flex flex-wrap items-center gap-1" title={allRepoNames}>
-          <span className="text-[11px] text-gray-500 dark:text-gray-400">Active in</span>
+          <span className="text-meta text-ui-mute">Active in</span>
           {shownRepos.map((e) => (
             <span
               key={e.repoId}
-              className="max-w-full truncate rounded bg-gray-100 px-1.5 py-0.5 text-[11px] text-gray-600 dark:bg-gray-800 dark:text-gray-300"
+              className="max-w-full truncate rounded-ui bg-ui-raise px-1.5 py-0.5 text-meta text-ui-mute"
               title={`${e.reviews}r · ${e.threads}t · ${e.comments}c here over the last 90 days`}
             >
               {repoName.get(e.repoId) ?? `repo #${e.repoId}`}
             </span>
           ))}
           {hiddenRepos > 0 && (
-            <span className="text-[11px] text-gray-500 dark:text-gray-400">+{hiddenRepos} more</span>
+            <span className="text-meta text-ui-mute">+{hiddenRepos} more</span>
           )}
         </div>
       )}
 
       {/* ── CONTROLS, beneath the header ── */}
-      <div className="space-y-2 border-t border-gray-200 pt-2.5 dark:border-gray-800">
+      <div className="space-y-2 pt-2.5">
         {/* ── JUDGEMENT (provenance: source) ── */}
         {/* Bot or person: a segmented pair, so the stored state is always one of the two words on
             screen. Pressing the side already held writes nothing. Both writes stamp
@@ -656,7 +654,7 @@ function ReviewerCard({
           <span
             role="group"
             aria-label={`Is ${r.login} a bot in this Workspace?`}
-            className="inline-flex overflow-hidden rounded border border-gray-300 dark:border-gray-700"
+            className="inline-flex rounded-ui bg-ui-raise p-0.5"
           >
             <button
               type="button"
@@ -691,7 +689,7 @@ function ReviewerCard({
               disabled={busy}
               onClick={() => onResetJudgement(r.userId)}
               title={`Forget your bot / person and role judgement for this Workspace and let detection decide again. The vendor name and the price are untouched.`}
-              className="rounded border border-dashed border-gray-300 px-2 py-0.5 text-[11px] font-medium text-gray-600 hover:bg-gray-100 disabled:opacity-40 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+              className="rounded-ui px-2 py-0.5 text-meta font-medium text-ui-mute hover:bg-ui-hover disabled:opacity-40 bg-ui-surface"
             >
               Reset classification
             </button>
@@ -701,22 +699,17 @@ function ReviewerCard({
           <div className="flex flex-wrap items-center gap-2">
             {/* ⚠ A SELECT OVER ALL SIX ROLES, never a two-way toggle (a toggle silently re-roled the
                 four newer roles to `quality_check`). Its `title` names the consequence. */}
-            <label className="flex items-center gap-2">
-              <span className={CONTROL_LABEL_CLS}>Role</span>
-              <select
+            <div className="flex items-center gap-2" title={ROLE_HELP[role]}>
+              <span className={CONTROL_LABEL_CLS} id={`role-label-${r.userId}`}>Role</span>
+              <Select
+                size="sm"
                 disabled={busy}
                 value={role}
-                onChange={(e) => setRole(e.target.value as ReviewerRole)}
-                title={ROLE_HELP[role]}
-                className={`${FIELD_CLS} py-0.5 disabled:opacity-40`}
-              >
-                {REVIEWER_ROLES.map((k) => (
-                  <option key={k} value={k}>
-                    {REVIEWER_ROLE_LABEL[k]}
-                  </option>
-                ))}
-              </select>
-            </label>
+                onChange={(v) => setRole(v)}
+                labelledBy={`role-label-${r.userId}`}
+                options={REVIEWER_ROLES.map((k) => ({ value: k, label: REVIEWER_ROLE_LABEL[k] }))}
+              />
+            </div>
             {/* ⚠ THE ROLE WRITE IS BEHIND AN EXPLICIT BUTTON. Writing on the select's `change`
                 event made a persistent, provenance-stamping write out of a scroll wheel or a
                 browser form restore — a live row once went `review` → `housekeeping` with nobody
@@ -734,7 +727,7 @@ function ReviewerCard({
                   })
                 }
                 title={ROLE_HELP[role]}
-                className="rounded bg-sky-600 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-sky-700 disabled:opacity-40"
+                className="rounded-ui bg-ui-accent-fill px-2 py-0.5 text-meta font-medium text-ui-on-accent hover:opacity-90 disabled:opacity-40 touch:py-2"
               >
                 Apply role
               </button>
@@ -744,10 +737,10 @@ function ReviewerCard({
         {/* On screen rather than only on hover: the reset is the half of the model that is not
             guessable from the buttons. */}
         {r.isManualOverride && (
-          <p className="text-[11px] text-gray-500 dark:text-gray-400">
+          <p className="text-meta text-ui-mute">
             Set by you — detection will not change it in this Workspace until you reset. Resetting
             keeps the bot&apos;s{' '}
-            <span className="font-medium text-gray-600 dark:text-gray-300">
+            <span className="font-medium text-ui-mute">
               name and price
             </span>
             .
@@ -768,22 +761,21 @@ function ReviewerCard({
               write that wrong vendor. Role and identity are independently owned halves, so a row
               legitimately carries a vendor from another family (someone marks CodeRabbit a quality
               check without renaming it), and the stored value has to stay selectable. */}
-          <select
-            className={`${FIELD_CLS} w-auto py-0.5`}
+          <Select
+            size="sm"
             value={kind}
-            onChange={(e) => setKind(e.target.value as AutomatedReviewerKind)}
-            aria-label={`Vendor for ${r.login} in this Workspace`}
-          >
-            {vendorKindsForRole(role, kind).map((k) => (
-              <option key={k} value={k}>
-                {automatedReviewerMeta(k).label}
-                {/* Name the mismatch rather than hiding it — see `current` above. */}
-                {roleForVendorKind(k) != null && roleForVendorKind(k) !== role
+            onChange={(v) => setKind(v)}
+            label={`Vendor for ${r.login} in this Workspace`}
+            options={vendorKindsForRole(role, kind).map((k) => ({
+              value: k,
+              // Name the mismatch rather than hiding it — see `current` above.
+              label: `${automatedReviewerMeta(k).label}${
+                roleForVendorKind(k) != null && roleForVendorKind(k) !== role
                   ? ` (${REVIEWER_ROLE_LABEL[roleForVendorKind(k)!].toLowerCase()})`
-                  : ''}
-              </option>
-            ))}
-          </select>
+                  : ''
+              }`,
+            }))}
+          />
           <input
             className={`${FIELD_CLS} w-40 py-0.5`}
             value={label}
@@ -801,7 +793,7 @@ function ReviewerCard({
               onPatch(r.userId, { kind, label: label.trim() === '' ? null : label })
             }
             title="Name this bot for this Workspace. It does not change whether it counts as a bot, and it does not reach your other Workspaces."
-            className="rounded bg-sky-600 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-sky-700 disabled:opacity-40"
+            className="rounded-ui bg-ui-accent-fill px-2 py-0.5 text-meta font-medium text-ui-on-accent hover:opacity-90 disabled:opacity-40 touch:py-2"
           >
             Save name
           </button>
@@ -815,7 +807,7 @@ function ReviewerCard({
               disabled={busy}
               onClick={() => onResetIdentity(r.userId)}
               title={`Forget the vendor and label you set and let detection name this bot again in this Workspace. The monthly price is kept, and the bot / not-a-bot verdict is unchanged.`}
-              className="rounded border border-gray-300 px-2 py-0.5 text-[11px] font-medium text-gray-600 hover:bg-gray-100 disabled:opacity-40 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+              className="rounded-ui px-2 py-0.5 text-meta font-medium text-ui-mute hover:bg-ui-hover disabled:opacity-40 bg-ui-surface"
             >
               Reset name
             </button>
@@ -824,9 +816,9 @@ function ReviewerCard({
         {/* Stated on screen, not only in a tooltip: "reset" reads as "delete everything", and the
             one thing a user is afraid of losing here is the number they typed into the box below. */}
         {r.identitySource === 'manual' && (
-          <p className="text-[11px] text-gray-500 dark:text-gray-400">
+          <p className="text-meta text-ui-mute">
             Reset hands the vendor and label back to detection for this Workspace —{' '}
-            <span className="font-medium text-gray-600 dark:text-gray-300">the price is kept</span>. Bot or person does not change.
+            <span className="font-medium text-ui-mute">the price is kept</span>. Bot or person does not change.
           </p>
         )}
 
@@ -880,7 +872,7 @@ function BotAvatar({
         height={36}
         loading="lazy"
         onError={() => setFailedSrc(src)}
-        className={`h-9 w-9 shrink-0 rounded-md border border-gray-200 bg-white object-cover dark:border-gray-700 ${
+        className={`h-9 w-9 shrink-0 rounded-ui bg-ui-surface object-cover ${
           muted ? 'grayscale' : ''
         }`}
       />
@@ -890,7 +882,7 @@ function BotAvatar({
   return (
     <span
       aria-hidden="true"
-      className="flex h-9 w-9 shrink-0 select-none items-center justify-center rounded-md text-xs font-semibold"
+      className="flex h-9 w-9 shrink-0 select-none items-center justify-center rounded-ui text-meta font-semibold"
       style={{ backgroundColor: bg, color: monogramInk(bg) }}
     >
       {monogramFor(name)}
@@ -904,8 +896,8 @@ function BotAvatar({
 // box means something different in each: on a priced bot it CLEARS, on an unpriced one it does
 // nothing.
 const COST_INPUT_CLS: Record<CostState, string> = {
-  set: 'border-ai-signal/60 text-gray-800 dark:text-gray-100',
-  none: 'border-gray-300 text-gray-800 dark:border-gray-700 dark:text-gray-100',
+  set: 'border-ai-signal/60 text-ui-ink',
+  none: 'border-ui-line text-ui-ink',
 };
 
 /**
@@ -986,25 +978,23 @@ function CostEditor({
     }
 
   const modeBtnCls = (active: boolean): string =>
-    `px-1.5 py-0.5 text-[11px] font-medium ${
-      active
-        ? 'bg-sky-600 text-white'
-        : 'bg-white text-gray-500 hover:bg-gray-100 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-gray-700'
+    `rounded-ui px-2 py-0.5 text-meta font-medium touch:py-2 ${
+      active ? 'bg-ui-sel text-ui-ink' : 'text-ui-mute hover:text-ui-ink'
     }`;
 
   return (
     <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
-      <span className="text-[11px] font-medium text-gray-500 dark:text-gray-400">
+      <span className="text-meta font-medium text-ui-mute">
         Price for this Workspace
       </span>
-      <span className="text-[11px] text-gray-400">$</span>
+      <span className="text-meta text-ui-faint">$</span>
       <input
         type="text"
         inputMode="decimal"
         // Not `type="number"`: a number input in several browsers reports '' for a partially-typed
         // or invalid value, which would be indistinguishable from the CLEAR gesture. Parsing the
         // raw text keeps the two states honest.
-        className={`w-20 rounded border bg-white px-1.5 py-0.5 text-[11px] tabular-nums outline-none focus:border-sky-400 dark:bg-gray-800 ${COST_INPUT_CLS[state]}`}
+        className={`w-20 rounded-ui border bg-ui-raise px-1.5 py-0.5 text-meta tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-ui-accent touch:h-10 ${COST_INPUT_CLS[state]}`}
         value={text}
         placeholder="—"
         onChange={(e) => setText(e.target.value)}
@@ -1015,14 +1005,14 @@ function CostEditor({
         }}
         aria-label={`Monthly cost in US dollars for ${login} in this Workspace`}
       />
-      <span className="text-[11px] text-gray-400">{mode === 'per_seat' ? '/seat/mo' : '/mo'}</span>
+      <span className="text-meta text-ui-faint">{mode === 'per_seat' ? '/seat/mo' : '/mo'}</span>
 
       {/* Flat vs per-seat. A segmented pair rather than a checkbox so the stored state is always
           one of the two words on screen. */}
       <span
         role="group"
         aria-label={`Pricing model for ${login} in this Workspace`}
-        className="inline-flex overflow-hidden rounded border border-gray-300 dark:border-gray-700"
+        className="inline-flex rounded-ui bg-ui-raise p-0.5"
       >
         <button type="button" disabled={busy} onClick={() => setMode('flat')} className={modeBtnCls(mode === 'flat')}>
           flat
@@ -1042,7 +1032,7 @@ function CostEditor({
           for a saved figure. */}
       {mode === 'per_seat' && parsed.ok && parsed.value != null && (
         <span
-          className="text-[11px] tabular-nums text-gray-400"
+          className="text-meta tabular-nums text-ui-faint"
           title="Seats are the distinct humans who opened a PR in this Workspace’s repos over the last 30 days. The monthly figure is derived at read time and moves with the team."
         >
           × {workspaceSeatCount} seat{workspaceSeatCount === 1 ? '' : 's'} ≈ $
@@ -1057,12 +1047,12 @@ function CostEditor({
           if (parsed.ok && outcome?.dirty === true) onApply(parsed.value, mode);
         }}
         title={hint}
-        className="rounded border border-gray-300 px-2 py-0.5 text-[11px] font-medium text-gray-600 hover:bg-gray-100 disabled:opacity-40 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+        className="rounded-ui px-2 py-0.5 text-meta font-medium text-ui-mute hover:bg-ui-hover disabled:opacity-40 bg-ui-surface"
       >
         {outcome?.kind === 'clear' ? 'Clear' : 'Save price'}
       </button>
 
-      <span className={`text-[11px] ${parsed.ok ? 'text-gray-400' : 'text-red-500'}`}>{hint}</span>
+      <span className={`text-meta ${parsed.ok ? 'text-ui-faint' : 'text-ui-danger'}`}>{hint}</span>
     </div>
   );
 }

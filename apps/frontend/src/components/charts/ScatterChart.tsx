@@ -58,7 +58,7 @@ export function ScatterChart({
   const PAD_L = 36;
   const PAD_R = 8;
   const PAD_T = 8;
-  const PAD_B = 16;
+  const PAD_B = 18;
   const innerW = Math.max(w - PAD_L - PAD_R, 1);
   const innerH = height - PAD_T - PAD_B;
   const lg = (v: number): number => Math.log10(1 + Math.max(0, v));
@@ -148,11 +148,11 @@ export function ScatterChart({
                   y1={Y(v)}
                   x2={w - PAD_R}
                   y2={Y(v)}
-                  className="decorative-mark text-gray-200 dark:text-gray-700"
+                  className="decorative-mark text-ui-faint"
                   stroke="currentColor"
                   strokeWidth={1}
                 />
-                <text x={PAD_L - 4} y={Y(v) + 3} textAnchor="end" className="fill-gray-500 dark:fill-gray-400 text-[11px]">
+                <text x={PAD_L - 4} y={Y(v) + 3} textAnchor="end" className="fill-gray-500 dark:fill-gray-400 text-meta">
                   {formatY(v)}
                 </text>
               </g>
@@ -163,7 +163,7 @@ export function ScatterChart({
                 x={X(v)}
                 y={height - 3}
                 textAnchor="middle"
-                className="fill-gray-500 dark:fill-gray-400 text-[11px]"
+                className="fill-gray-500 dark:fill-gray-400 text-meta"
               >
                 {formatX(v)}
               </text>
@@ -212,7 +212,7 @@ export function ScatterChart({
                 x={PAD_L + 5}
                 y={PAD_T + 9}
                 fill={PALETTE.amber}
-                className="text-[11px] font-semibold"
+                className="text-meta font-semibold"
               >
                 ≈ {yLabel} ∝ {xLabel}^{fitLine.slope.toFixed(1)}
               </text>
@@ -243,7 +243,7 @@ export function ScatterChart({
       <div className="flex items-center justify-between">
         {/* Both axes named, each with its scale: the x axis is ALWAYS log, and a linear y caption must
             not leave the chart reading as two linear axes. */}
-        <span className="text-[11px] text-gray-500 dark:text-gray-400">
+        <span className="text-meta text-ui-mute">
           {yLabel}
           {linY ? '' : ' (log)'} ↑ · {xLabel} (log) →
         </span>

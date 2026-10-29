@@ -60,19 +60,19 @@ export function FlowPointersPanel({
   return (
     <section
       data-testid="chronology-pointers"
-      className="rounded-lg border border-ai-border bg-ai-surface p-4"
+      className="rounded-ui border border-ai-border bg-ai-surface p-4"
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <SparkleIcon size={14} className="text-ai-signal" />
           <span className="flex items-center gap-1">
-            <h4 className="text-sm font-semibold text-ai-ink">Pointers</h4>
+            <h4 className="text-body font-semibold text-ai-ink">Pointers</h4>
             <InfoButton title="Pointers" className="text-ai-ink">
               <PointersInfo />
             </InfoButton>
           </span>
           {result != null && data.stale && (
-            <span className="rounded border border-ai-hairline px-1.5 text-[11px] text-ai-ink">
+            <span className="rounded-ui border border-ai-hairline px-1.5 text-meta text-ai-ink">
               Out of date
             </span>
           )}
@@ -83,30 +83,30 @@ export function FlowPointersPanel({
               type="button"
               disabled={generating}
               onClick={() => generate.mutate()}
-              className="rounded border border-ai-border px-2.5 py-1 text-xs font-medium text-ai-ink hover:bg-ai-surface-2 disabled:opacity-50"
+              className="rounded-ui border border-ai-border px-2.5 py-1 text-meta font-medium text-ai-ink hover:bg-ai-surface-2 disabled:opacity-50"
             >
               {generating ? 'Writing…' : result == null ? 'Write pointers' : 'Rewrite'}
             </button>
           </AiRunGate>
         )}
       </div>
-      <p className="mt-0.5 text-xs text-ai-ink">Written by AI from the pull requests on this page.</p>
+      <p className="mt-0.5 text-meta text-ai-ink">Written by AI from the pull requests on this page.</p>
 
       {data.empty ? (
-        <p className="mt-3 text-xs text-ai-ink">Nothing merged in this window to write about.</p>
+        <p className="mt-3 text-meta text-ai-ink">Nothing merged in this window to write about.</p>
       ) : result == null ? (
-        <p className="mt-3 text-xs text-ai-ink">
+        <p className="mt-3 text-meta text-ai-ink">
           {q.isLoading ? 'Loading…' : 'No pointers for this window yet.'}
         </p>
       ) : (
         <ul className="mt-3 space-y-3">
           {result.pointers.map((p, i) => (
             <li key={i} className="border-l-2 border-ai-signal/50 pl-3">
-              <div className="text-[11px] font-semibold uppercase tracking-wide text-ai-signal">
+              <div className="text-meta font-semibold text-ai-signal">
                 {KIND_LABEL[p.kind] ?? p.kind}
               </div>
-              <p className="text-sm leading-relaxed text-ai-ink">{p.text}</p>
-              <div className="mt-1 flex flex-col gap-0.5 text-xs">
+              <p className="text-body leading-relaxed text-ai-ink">{p.text}</p>
+              <div className="mt-1 flex flex-col gap-0.5 text-meta">
                 {p.cites.map((id) => {
                   const l = links.get(id);
                   return l ? <PrLink key={id} pr={l} /> : null;
@@ -118,7 +118,7 @@ export function FlowPointersPanel({
       )}
 
       {result != null && (
-        <p className="mt-3 text-xs text-ai-ink">
+        <p className="mt-3 text-meta text-ai-ink">
           Written {when(result.generatedAt)} over {result.prCount} pull requests.
           {result.droppedPointers > 0 &&
             ` ${result.droppedPointers} ${result.droppedPointers === 1 ? 'pointer was' : 'pointers were'} dropped for citing nothing real or breaking a rule.`}
@@ -127,10 +127,10 @@ export function FlowPointersPanel({
         </p>
       )}
       {last?.throttled && (
-        <p className="mt-1 text-xs text-ai-ink">Written moments ago — try again in a minute.</p>
+        <p className="mt-1 text-meta text-ai-ink">Written moments ago — try again in a minute.</p>
       )}
       {generate.isError && (
-        <p className="mt-1 text-xs text-rose-700 dark:text-rose-400">
+        <p className="mt-1 text-meta text-ui-danger">
           {(generate.error as Error)?.message ?? 'Could not write pointers.'}
         </p>
       )}

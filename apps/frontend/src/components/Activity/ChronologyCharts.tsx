@@ -46,12 +46,12 @@ export const COURT_SWATCH: Record<PrCourt, string> = {
 };
 /** A court's figure as TEXT — the darker/lighter shades, so it reads on either ground. */
 export const COURT_TEXT: Record<PrCourt, string> = {
-  reviewer: 'text-amber-700 dark:text-amber-400',
+  reviewer: 'text-ui-warn',
   author: 'text-teal-700 dark:text-teal-400',
   landing: 'text-indigo-600 dark:text-indigo-400',
 };
 
-const AXIS_TEXT = 'fill-gray-500 dark:fill-gray-400 text-[11px]';
+const AXIS_TEXT = 'fill-gray-500 dark:fill-gray-400 text-meta';
 
 /** The evidence rows carry no author identity, so the lookup is always empty by construction. */
 const NO_AUTHOR_LOOKUP = new Map<number, never>() as never;
@@ -78,8 +78,8 @@ export function useOpenFlowPr(): (pr: {
 export function Figure({ value, label }: { value: string; label: string }): JSX.Element {
   return (
     <div>
-      <div className="text-lg font-semibold tabular-nums text-gray-900 dark:text-gray-50">{value}</div>
-      <div className="text-xs text-gray-500 dark:text-gray-400">{label}</div>
+      <div className="text-title font-semibold tabular-nums text-ui-ink">{value}</div>
+      <div className="text-meta text-ui-mute">{label}</div>
     </div>
   );
 }
@@ -105,7 +105,7 @@ export function CourtSplit({
   const alone = size === 'bar';
   const bar = (
     <div
-      className={`flex w-full overflow-hidden rounded-sm bg-gray-200 dark:bg-gray-800 ${
+      className={`flex w-full overflow-hidden rounded-ui bg-ui-raise ${
         size === 'lg' ? 'h-2.5' : 'h-2'
       }`}
       {...(alone
@@ -125,10 +125,10 @@ export function CourtSplit({
     return (
       <div>
         {bar}
-        <div className="mt-1 text-xs tabular-nums text-gray-600 dark:text-gray-300">
+        <div className="mt-1 text-meta tabular-nums text-ui-mute">
           {COURT_ORDER.map((c, i) => (
             <Fragment key={c}>
-              {i > 0 && <span className="decorative-mark text-gray-400 dark:text-gray-500"> · </span>}
+              {i > 0 && <span className="decorative-mark text-ui-faint"> · </span>}
               {COURT_SHORT[c]} <strong className={`font-semibold ${COURT_TEXT[c]}`}>{formatPct(share(c))}</strong>
             </Fragment>
           ))}
@@ -142,10 +142,10 @@ export function CourtSplit({
       <div className="mt-2 flex flex-wrap items-baseline gap-x-6 gap-y-1">
         {COURT_ORDER.map((c) => (
           <span key={c} className="inline-flex items-baseline gap-1.5">
-            <span className={`text-2xl font-semibold tabular-nums ${COURT_TEXT[c]}`}>
+            <span className={`text-display font-semibold tabular-nums ${COURT_TEXT[c]}`}>
               {formatPct(share(c))}
             </span>
-            <span className="text-xs text-gray-600 dark:text-gray-300">{COURT_LABEL[c].toLowerCase()}</span>
+            <span className="text-meta text-ui-mute">{COURT_LABEL[c].toLowerCase()}</span>
           </span>
         ))}
       </div>
@@ -159,7 +159,7 @@ export function CourtLegend({ prefix = '' }: { prefix?: string }): JSX.Element {
       {COURT_ORDER.map((court) => (
         <span
           key={court}
-          className="inline-flex items-center gap-1.5 text-[11px] text-gray-500 dark:text-gray-400"
+          className="inline-flex items-center gap-1.5 text-meta text-ui-mute"
         >
           <span className={`h-2.5 w-2.5 rounded-full ${COURT_SWATCH[court]}`} />
           {prefix}
@@ -173,12 +173,12 @@ export function CourtLegend({ prefix = '' }: { prefix?: string }): JSX.Element {
 // ── Each wait against its budget ─────────────────────────────────────────────────────────────
 
 const VERDICT_CHIP: Record<NonNullable<FlowBudgetRow['verdict']>, string> = {
-  good: 'text-emerald-700 dark:text-emerald-400',
-  ok: 'text-amber-700 dark:text-amber-400',
-  slow: 'text-rose-700 dark:text-rose-400',
+  good: 'text-ui-success',
+  ok: 'text-ui-warn',
+  slow: 'text-ui-danger',
 };
 
-const QUIET_CHIP = 'inline-flex items-center gap-1 text-xs font-medium text-gray-600 dark:text-gray-300';
+const QUIET_CHIP = 'inline-flex items-center gap-1 text-meta font-medium text-ui-mute';
 
 /**
  * The verdict, in words and an icon — never colour alone. ⚠ A ROW WITH NO VERDICT STILL SAYS SO.
@@ -204,7 +204,7 @@ function VerdictChip({ row }: { row: FlowBudgetRow }): JSX.Element {
   return (
     <span
       data-testid={`verdict-${row.measure}`}
-      className={`inline-flex items-center gap-1 text-xs font-medium ${VERDICT_CHIP[verdict]}`}
+      className={`inline-flex items-center gap-1 text-meta font-medium ${VERDICT_CHIP[verdict]}`}
     >
       <Icon size={12} />
       {VERDICT_LABEL[verdict]}
@@ -217,14 +217,14 @@ function BudgetPopover({ row }: { row: FlowBudgetRow }): JSX.Element {
   const { note, figures } = budgetPopoverRows(row);
   return (
     <div>
-      <div className="font-semibold text-gray-900 dark:text-gray-50">{FLOW_BUDGET_LABEL[row.measure]}</div>
-      <div className="text-gray-600 dark:text-gray-300">{BUDGET_SUB[row.measure]}</div>
+      <div className="font-semibold text-ui-ink">{FLOW_BUDGET_LABEL[row.measure]}</div>
+      <div className="text-ui-mute">{BUDGET_SUB[row.measure]}</div>
       {note != null && <p className="mt-1.5">{note}</p>}
       <dl className="mt-1.5 grid grid-cols-[1fr_auto] gap-x-4 gap-y-0.5">
         {figures.map(([k, v]) => (
           <Fragment key={k}>
-            <dt className="text-gray-600 dark:text-gray-300">{k}</dt>
-            <dd className="text-right font-medium tabular-nums text-gray-900 dark:text-gray-50">{v}</dd>
+            <dt className="text-ui-mute">{k}</dt>
+            <dd className="text-right font-medium tabular-nums text-ui-ink">{v}</dd>
           </Fragment>
         ))}
       </dl>
@@ -312,33 +312,33 @@ export function BudgetChart({
   const anyClipped = rows.some((r) => budgetClip(r, max) === 'bar');
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-gray-500 dark:text-gray-400">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-meta text-ui-mute">
         <span className="inline-flex items-center gap-1.5">
-          <span className="h-2.5 w-4 rounded-sm bg-emerald-500/25 dark:bg-emerald-400/25" />
+          <span className="h-2.5 w-4 rounded-ui bg-emerald-500/25 dark:bg-emerald-400/25" />
           within budget
         </span>
         <span className="inline-flex items-center gap-1.5">
-          <span className="h-2.5 w-4 rounded-sm bg-amber-400/30 dark:bg-amber-400/25" />
+          <span className="h-2.5 w-4 rounded-ui bg-amber-400/30 dark:bg-amber-400/25" />
           acceptable
         </span>
         <span className="inline-flex items-center gap-1.5">
-          <span className="h-2.5 w-4 rounded-sm bg-rose-500/15 dark:bg-rose-400/20" />
+          <span className="h-2.5 w-4 rounded-ui bg-rose-500/15 dark:bg-rose-400/20" />
           past limit
         </span>
         <span className="inline-flex items-center gap-1.5">
-          <span className="h-0 w-4 border-t-[1.5px] border-dashed border-gray-800 dark:border-gray-100" />
+          <span className="h-0 w-4 border-t-[1.5px] border-dashed border-ui-ink" />
           time budget
         </span>
         <span className="inline-flex items-center gap-1.5">
-          <span className="h-2 w-4 rounded-sm bg-gray-800 dark:bg-gray-100" />
+          <span className="h-2 w-4 rounded-ui bg-ui-ink" />
           three in four finished
         </span>
         <span className="inline-flex items-center gap-1.5">
-          <span className="h-0 w-4 border-t-[1.5px] border-gray-500 dark:border-gray-400" />
+          <span className="h-0 w-4 border-t-[1.5px] border-ui-mute" />
           nine in ten finished
         </span>
         <span className="inline-flex items-center gap-1.5">
-          <span className="h-2.5 w-2.5 rounded-full border-2 border-gray-800 dark:border-gray-100" />
+          <span className="h-2.5 w-2.5 rounded-full border-2" />
           half finished
         </span>
         {anyClipped && (
@@ -353,7 +353,7 @@ export function BudgetChart({
       {rows.map((row) => (
         <div key={row.measure} data-testid={`budget-${row.measure}`}>
           <div className="flex items-baseline justify-between gap-3">
-            <span className="text-sm font-medium text-gray-800 dark:text-gray-100">
+            <span className="text-body font-medium text-ui-ink">
               {FLOW_BUDGET_LABEL[row.measure]}
             </span>
             <VerdictChip row={row} />
@@ -394,14 +394,14 @@ function PrTip({ p, width }: { p: Placed; width: number }): JSX.Element {
   const left = Math.max(8, Math.min(p.x + 14, width - 268));
   return (
     <div
-      className="pointer-events-none absolute z-20 w-64 rounded-md border border-gray-200 bg-white px-2.5 py-2 text-[11px] leading-snug text-gray-700 shadow-lg dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"
+      className="pointer-events-none absolute z-20 w-64 rounded-ui bg-ui-surface px-2.5 py-2 text-meta leading-snug text-ui-ink shadow-lg"
       style={{ left, top: Math.max(0, p.y - 20) }}
     >
-      <div className="font-medium text-gray-900 dark:text-gray-50">{pr.prTitle}</div>
-      <div className="text-gray-500 dark:text-gray-400">
+      <div className="font-medium text-ui-ink">{pr.prTitle}</div>
+      <div className="text-ui-mute">
         {pr.repoFullName} #{pr.prNumber}
       </div>
-      <div className="mt-1.5 flex h-1.5 w-full overflow-hidden rounded-sm bg-gray-200 dark:bg-gray-800">
+      <div className="mt-1.5 flex h-1.5 w-full overflow-hidden rounded-ui bg-ui-raise">
         {total > 0 &&
           COURT_ORDER.map((c) => (
             <div key={c} className={COURT_SWATCH[c]} style={{ width: `${(pr.workHours[c] / total) * 100}%` }} />
@@ -411,7 +411,7 @@ function PrTip({ p, width }: { p: Placed; width: number }): JSX.Element {
         <span>
           <span className="font-semibold">{formatWorkHours(pr.leadWorkHours)}</span> in working hours
         </span>
-        <span className="text-gray-500 dark:text-gray-400">{formatWorkHours(pr.leadHours)} on the clock</span>
+        <span className="text-ui-mute">{formatWorkHours(pr.leadHours)} on the clock</span>
         {COURT_ORDER.map((c) => (
           <span key={c}>
             {COURT_SHORT[c]} {formatWorkHours(pr.workHours[c])}
@@ -427,9 +427,9 @@ function PrTip({ p, width }: { p: Placed; width: number }): JSX.Element {
         {pr.ciRedHours > 0 && <span>Checks red {formatWorkHours(pr.ciRedHours)} (clock)</span>}
       </div>
       {pr.reachAreas.length > 0 && (
-        <div className="mt-1 text-gray-500 dark:text-gray-400">Touches {pr.reachAreas.join(', ').replace(/_/g, ' ')}</div>
+        <div className="mt-1 text-ui-mute">Touches {pr.reachAreas.join(', ').replace(/_/g, ' ')}</div>
       )}
-      <div className="mt-1 text-gray-500 dark:text-gray-400">Click to open</div>
+      <div className="mt-1 text-ui-mute">Click to open</div>
     </div>
   );
 }
@@ -492,15 +492,15 @@ export function LeadScatter({
     <div>
       <div className="mb-1.5 flex flex-wrap items-center gap-x-4 gap-y-1">
         <CourtLegend prefix="mostly " />
-        <span className="inline-flex items-center gap-1.5 text-[11px] text-gray-500 dark:text-gray-400">
-          <span className="h-0 w-4 border-t-[1.5px] border-dashed border-gray-800 dark:border-gray-100" />
+        <span className="inline-flex items-center gap-1.5 text-meta text-ui-mute">
+          <span className="h-0 w-4 border-t-[1.5px] border-dashed border-ui-ink" />
           time budget, opened to merged
         </span>
-        <span className="inline-flex items-center gap-1.5 text-[11px] text-gray-500 dark:text-gray-400">
-          <span className="h-0 w-4 border-t border-dotted border-gray-500 dark:border-gray-400" />
+        <span className="inline-flex items-center gap-1.5 text-meta text-ui-mute">
+          <span className="h-0 w-4 border-dotted" />
           three in four merged within
         </span>
-        <span className="text-[11px] text-gray-500 dark:text-gray-400">bigger dot = more lines changed</span>
+        <span className="text-meta text-ui-mute">bigger dot = more lines changed</span>
       </div>
       <div ref={ref} className="relative" style={{ height: H }}>
         {geometry != null && (
@@ -557,7 +557,7 @@ export function LeadScatter({
         )}
         {hover != null && w > 0 && <PrTip p={hover} width={w} />}
       </div>
-      <div className="text-xs text-gray-500 dark:text-gray-400">
+      <div className="text-meta text-ui-mute">
         Working hours to merge (log scale), by day merged
       </div>
     </div>
@@ -615,12 +615,12 @@ export function CourtTriangle({
     <div>
       <div className="mb-1.5 flex flex-wrap items-center gap-x-4 gap-y-1">
         <CourtLegend prefix="mostly " />
-        <span className="inline-flex items-center gap-1.5 text-[11px] text-gray-500 dark:text-gray-400">
-          <span className="h-3 w-3 rounded-full border-2 border-gray-800 bg-white dark:border-gray-100 dark:bg-gray-950" />
+        <span className="inline-flex items-center gap-1.5 text-meta text-ui-mute">
+          <span className="h-3 w-3 rounded-full border-2 bg-ui-surface" />
           the workspace as a whole
         </span>
-        <span className="inline-flex items-center gap-1.5 text-[11px] text-gray-500 dark:text-gray-400">
-          <span className="h-3 w-3 rounded-full border-[1.5px] border-dashed border-gray-500 dark:border-gray-400" />
+        <span className="inline-flex items-center gap-1.5 text-meta text-ui-mute">
+          <span className="h-3 w-3 rounded-full border-[1.5px] border-dashed border-ui-mute" />
           equal thirds
         </span>
       </div>

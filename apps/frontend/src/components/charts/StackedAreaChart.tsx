@@ -25,10 +25,10 @@ export function StackedAreaChart({
   const [ref, w] = useChartWidth();
   const [hover, setHover] = useState<number | null>(null);
 
-  const PAD_L = 30;
+  const PAD_L = 36;
   const PAD_R = 8;
   const PAD_T = 8;
-  const PAD_B = 16;
+  const PAD_B = 18;
   const n = labels.length;
   const innerW = Math.max(w - PAD_L - PAD_R, 1);
   const innerH = height - PAD_T - PAD_B;
@@ -77,11 +77,11 @@ export function StackedAreaChart({
                   y1={y(v)}
                   x2={w - PAD_R}
                   y2={y(v)}
-                  className="decorative-mark text-gray-200 dark:text-gray-700"
+                  className="decorative-mark text-ui-faint"
                   stroke="currentColor"
                   strokeWidth={1}
                 />
-                <text x={PAD_L - 4} y={y(v) + 3} textAnchor="end" className="fill-gray-500 dark:fill-gray-400 text-[11px]">
+                <text x={PAD_L - 4} y={y(v) + 3} textAnchor="end" className="fill-gray-500 dark:fill-gray-400 text-meta">
                   {fmtNum(v)}
                 </text>
               </g>
@@ -95,15 +95,15 @@ export function StackedAreaChart({
                 y1={PAD_T}
                 x2={x(hover)}
                 y2={baseY}
-                className="text-gray-400 dark:text-gray-300"
+                className="text-ui-faint"
                 stroke="currentColor"
                 strokeWidth={1}
               />
             )}
-            <text x={PAD_L} y={height - 4} className="fill-gray-500 dark:fill-gray-400 text-[11px]">
+            <text x={PAD_L} y={height - 4} className="fill-gray-500 dark:fill-gray-400 text-meta">
               {labels[0] ? fmtDate(labels[0]) : ''}
             </text>
-            <text x={w - PAD_R} y={height - 4} textAnchor="end" className="fill-gray-500 dark:fill-gray-400 text-[11px]">
+            <text x={w - PAD_R} y={height - 4} textAnchor="end" className="fill-gray-500 dark:fill-gray-400 text-meta">
               {labels[n - 1] ? fmtDate(labels[n - 1]!) : ''}
             </text>
             <rect
@@ -126,7 +126,7 @@ export function StackedAreaChart({
                 {s.label}: {formatValue(at(s, hover))}
               </div>
             ))}
-            <div className="mt-0.5 border-t border-gray-200 pt-0.5 dark:border-gray-700">
+            <div className="mt-0.5 pt-0.5">
               total: {formatValue(colTotal(hover))}
             </div>
           </FloatingTip>

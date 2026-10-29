@@ -63,10 +63,10 @@ export function BarChart({
   const [ref, w] = useChartWidth();
   const [hover, setHover] = useState<number | null>(null);
 
-  const PAD_L = 30;
+  const PAD_L = rotateLabels ? 46 : 38;
   const PAD_R = 8;
   const PAD_T = 8;
-  const PAD_B = rotateLabels ? 40 : 16;
+  const PAD_B = rotateLabels ? 46 : 18;
   const n = labels.length;
   const innerW = Math.max(w - PAD_L - PAD_R, 1);
   const innerH = height - PAD_T - PAD_B;
@@ -114,11 +114,11 @@ export function BarChart({
                   y1={y(v)}
                   x2={w - PAD_R}
                   y2={y(v)}
-                  className="decorative-mark text-gray-200 dark:text-gray-700"
+                  className="decorative-mark text-ui-faint"
                   stroke="currentColor"
                   strokeWidth={1}
                 />
-                <text x={PAD_L - 4} y={y(v) + 3} textAnchor="end" className="fill-gray-500 dark:fill-gray-400 text-[11px]">
+                <text x={PAD_L - 4} y={y(v) + 3} textAnchor="end" className="fill-gray-500 dark:fill-gray-400 text-meta">
                   {formatY(v)}
                 </text>
               </g>
@@ -129,7 +129,7 @@ export function BarChart({
                 y={PAD_T}
                 width={bandW}
                 height={innerH}
-                className="text-gray-400/10 dark:text-gray-300/10"
+                className="text-gray-400/10"
                 fill="currentColor"
               />
             )}
@@ -184,7 +184,7 @@ export function BarChart({
                     y={ly}
                     textAnchor="end"
                     transform={`rotate(-35 ${cx} ${ly})`}
-                    className="fill-gray-500 dark:fill-gray-400 text-[11px]"
+                    className="fill-gray-500 dark:fill-gray-400 text-meta"
                   >
                     {labelFor(i)}
                   </text>
@@ -196,7 +196,7 @@ export function BarChart({
                   x={cx}
                   y={height - 4}
                   textAnchor="middle"
-                  className="fill-gray-500 dark:fill-gray-400 text-[11px]"
+                  className="fill-gray-500 dark:fill-gray-400 text-meta"
                 >
                   {labelFor(i)}
                 </text>
@@ -227,7 +227,7 @@ export function BarChart({
               <button
                 key={`hit-${i}`}
                 type="button"
-                className="pointer-events-auto absolute cursor-pointer rounded-sm bg-transparent focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
+                className="pointer-events-auto absolute cursor-pointer rounded-ui bg-transparent focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
                 style={{ left: PAD_L + i * bandW, top: PAD_T, width: bandW, height: innerH }}
                 onMouseEnter={() => setHover(i)}
                 // ⚠ EACH BAND MUST CLEAR ITS OWN HOVER. The svg's full-size transparent overlay
@@ -259,7 +259,7 @@ export function BarChart({
               </div>
             ))}
             {mode === 'stacked' && series.length > 1 && (
-              <div className="mt-0.5 border-t border-gray-200 pt-0.5 dark:border-gray-700">
+              <div className="mt-0.5 pt-0.5">
                 total: {formatValue(colTotal(hover))}
               </div>
             )}

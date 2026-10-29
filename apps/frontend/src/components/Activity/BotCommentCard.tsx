@@ -124,7 +124,7 @@ function CardBody({ body }: { body: string }): JSX.Element {
   }, [body, expanded]);
 
   return (
-    <div className="mt-1.5 rounded bg-gray-50 px-2 py-1.5 text-sm dark:bg-gray-900/50">
+    <div className="mt-1.5 rounded-ui bg-ui-surface px-2 py-1.5 text-body">
       <div
         ref={outerRef}
         className={expanded ? '' : 'overflow-hidden'}
@@ -138,7 +138,7 @@ function CardBody({ body }: { body: string }): JSX.Element {
         <button
           type="button"
           onClick={() => setExpanded((v) => !v)}
-          className="mt-1 text-[11px] font-medium text-sky-600 hover:underline dark:text-sky-400"
+          className="mt-1 text-meta font-medium text-ui-accent hover:underline"
         >
           {expanded ? 'Show less' : 'Show more'}
         </button>
@@ -200,31 +200,31 @@ function BotCommentCardImpl({
   const hasContextRow = showPrRef || c.line != null || state != null || confidence != null;
 
   return (
-    <article className="rounded-md border border-gray-200 bg-white p-2.5 text-sm dark:border-gray-800 dark:bg-gray-950">
+    <article className="rounded-ui bg-ui-surface p-2.5 text-body">
       {/* header: who said it, in what kind of comment, and when */}
       <div className="flex flex-wrap items-center gap-2">
         <Avatar user={user} size={18} />
         <span
-          className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium"
+          className="inline-flex shrink-0 items-center gap-1 rounded-ui px-1.5 py-0.5 text-meta font-medium"
           style={{ ...vendorInk(color), background: `${color}1a` }}
           title={`${c.authorLabel} — an automated reviewer Limn triages`}
         >
           <BotIcon size={10} />
           {c.authorLabel}
         </span>
-        <span className="shrink-0 text-[11px] uppercase tracking-wide text-gray-400">
+        <span className="shrink-0 text-meta text-ui-faint">
           {TARGET_KIND_LABEL[c.targetKind]}
         </span>
         {threadCount > 1 && (
           <span
-            className="shrink-0 rounded bg-gray-100 px-1 py-px text-[11px] font-medium text-gray-500 dark:bg-gray-800 dark:text-gray-400"
+            className="shrink-0 rounded-ui bg-ui-raise px-1 py-px text-meta font-medium text-ui-mute"
             title={`This bot left ${threadCount} separate threads in the same line area — collapsed to one row here, exactly as the overlap count treats them.`}
           >
             ×{threadCount}
           </span>
         )}
         <span
-          className="ml-auto shrink-0 text-[11px] text-gray-400"
+          className="ml-auto shrink-0 text-meta text-ui-faint"
           title={dateTime(c.createdAt)}
         >
           {relativeTime(c.createdAt)}
@@ -240,8 +240,8 @@ function BotCommentCardImpl({
           <MlSeverityBadge label={c.mlLabel} vendorClaim />
         ) : (
           <span
-            className="text-[11px] text-gray-400 dark:text-gray-500"
-            title="Not scored yet — the enrichment worker labels bot text on its own pass, which always FOLLOWS the sync that stored it."
+            className="text-meta text-ui-faint"
+            title="Not scored yet — the enrichment worker labels bot text on its own pass, which always FOLLOWS sync that stored it."
           >
             not scored
           </span>
@@ -250,26 +250,26 @@ function BotCommentCardImpl({
 
       {/* context row: where it landed, and what happened to it */}
       {hasContextRow && (
-        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px]">
+        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-meta">
           {showPrRef && (
             <button
               type="button"
               onClick={() => onOpenPr(c)}
-              className="shrink-0 font-medium text-gray-700 hover:text-sky-600 hover:underline dark:text-gray-200"
+              className="shrink-0 font-medium text-ui-ink hover:text-ui-accent hover:underline"
               title={`${c.repoFullName} #${c.prNumber} — ${c.prTitle}`}
             >
               {c.repoFullName} #{c.prNumber}
             </button>
           )}
           {showPrRef && c.path != null && (
-            <span className="min-w-0 truncate font-mono text-gray-400" title={c.path}>
+            <span className="min-w-0 truncate font-mono text-ui-faint" title={c.path}>
               {c.path}
               {c.line != null ? `:${c.line}` : ''}
             </span>
           )}
           {/* Inside a cluster the file is the cluster's; only this member's own line varies. */}
           {!showPrRef && c.line != null && (
-            <span className="shrink-0 font-mono text-gray-400">L{c.line}</span>
+            <span className="shrink-0 font-mono text-ui-faint">L{c.line}</span>
           )}
           {state && <MetaChip meta={state} />}
           {confidence && <MetaChip meta={confidence} prefix="addressed: " />}
@@ -286,18 +286,18 @@ function BotCommentCardImpl({
         // from. The row is SHOWN rather than dropped on purpose: `total` is counted from the
         // labels, so hiding it here would make the list unable to reach the tile it was opened
         // from — the same drift the shared fold exists to prevent. Its severity is still real.
-        <div className="mt-1 rounded border border-dashed border-gray-300 px-2 py-1.5 text-[11px] text-gray-400 dark:border-gray-700">
+        <div className="mt-1 rounded-ui px-2 py-1.5 text-meta text-ui-faint bg-ui-surface">
           GitHub no longer returns this comment’s text, so only its scored severity survives. It
           still counts toward the number above.
         </div>
       )}
 
-      <div className="mt-1.5 flex flex-wrap items-center gap-3 text-[11px]">
+      <div className="mt-1.5 flex flex-wrap items-center gap-3 text-meta">
         {threadId != null && (
           <button
             type="button"
             onClick={() => onOpenThread(c, threadId)}
-            className="font-medium text-sky-600 hover:underline dark:text-sky-400"
+            className="font-medium text-ui-accent hover:underline"
           >
             Open thread
           </button>
@@ -307,7 +307,7 @@ function BotCommentCardImpl({
             href={prHref}
             target="_blank"
             rel="noreferrer noopener"
-            className="inline-flex items-center gap-0.5 font-medium text-sky-600 hover:underline dark:text-sky-400"
+            className="inline-flex items-center gap-0.5 font-medium text-ui-accent hover:underline"
             title={`${c.repoFullName} #${c.prNumber} on GitHub. There is deliberately no per-comment permalink — the comment's REST id isn't stored, so an anchor would 404.`}
           >
             <ExternalLinkIcon size={11} />
@@ -354,19 +354,19 @@ function UnbodiedMember({
   const confidence =
     member.addressedConfidence !== 'none' ? CONFIDENCE_META[member.addressedConfidence] : null;
   return (
-    <div className="rounded-md border border-dashed border-gray-200 p-2 text-[11px] dark:border-gray-800">
+    <div className="rounded-ui p-2 text-meta bg-ui-surface">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
         <span
-          className="text-gray-400"
+          className="text-ui-faint"
           title="This thread has no stored comment by its own bot, so there is no body and no author to name here — it still counts toward the overlap."
         >
           another bot thread here — no stored comment
         </span>
         {member.line != null && (
-          <span className="shrink-0 font-mono text-gray-400">L{member.line}</span>
+          <span className="shrink-0 font-mono text-ui-faint">L{member.line}</span>
         )}
         {member.threadIds.length > 1 && (
-          <span className="shrink-0 rounded bg-gray-100 px-1 py-px font-medium text-gray-500 dark:bg-gray-800 dark:text-gray-400">
+          <span className="shrink-0 rounded-ui bg-ui-raise px-1 py-px font-medium text-ui-mute">
             ×{member.threadIds.length}
           </span>
         )}
@@ -375,7 +375,7 @@ function UnbodiedMember({
         <button
           type="button"
           onClick={() => onOpenThread(cluster, member.threadId)}
-          className="font-medium text-sky-600 hover:underline dark:text-sky-400"
+          className="font-medium text-ui-accent hover:underline"
         >
           Open thread
         </button>
@@ -421,30 +421,30 @@ function BotClusterCardImpl({
   const mixed = new Set(rated).size > 1;
 
   return (
-    <section className="rounded-md border border-sky-200 bg-sky-50/60 p-2.5 text-sm dark:border-sky-800 dark:bg-sky-950/30">
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+    <section className="rounded-ui bg-ui-raise p-2.5 text-body">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-meta">
         <BotIcon size={12} />
-        <span className="font-medium text-sky-800 dark:text-sky-200">
+        <span className="font-medium text-ui-accent">
           {cluster.members.length} bots flagged the same lines
         </span>
         <button
           type="button"
           onClick={() => onOpenPr(cluster)}
-          className="shrink-0 font-medium text-gray-700 hover:text-sky-600 hover:underline dark:text-gray-200"
+          className="shrink-0 font-medium text-ui-ink hover:text-ui-accent hover:underline"
           title={`${cluster.repoFullName} #${cluster.prNumber} — ${cluster.prTitle}`}
         >
           {cluster.repoFullName} #{cluster.prNumber}
         </button>
         <span
-          className="min-w-0 truncate font-mono text-gray-500 dark:text-gray-400"
+          className="min-w-0 truncate font-mono text-ui-mute"
           title={cluster.path}
         >
           {file}
         </span>
-        <span className="shrink-0 font-mono text-gray-500 dark:text-gray-400">{lineLabel}</span>
+        <span className="shrink-0 font-mono text-ui-mute">{lineLabel}</span>
         {cluster.threadCount > cluster.members.length && (
           <span
-            className="shrink-0 text-gray-400"
+            className="shrink-0 text-ui-faint"
             title="Threads in this line area across all its bots — more than one bot left several, and each bot is collapsed to a single row below."
           >
             {cluster.threadCount} threads
@@ -455,7 +455,7 @@ function BotClusterCardImpl({
             href={prHref}
             target="_blank"
             rel="noreferrer noopener"
-            className="ml-auto inline-flex shrink-0 items-center gap-0.5 font-medium text-sky-600 hover:underline dark:text-sky-400"
+            className="ml-auto inline-flex shrink-0 items-center gap-0.5 font-medium text-ui-accent hover:underline"
           >
             <ExternalLinkIcon size={11} />
             PR
@@ -463,16 +463,16 @@ function BotClusterCardImpl({
         )}
       </div>
 
-      <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px]">
+      <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-meta">
         {cluster.members.map((m, i) => {
           const c = m.comment;
           const color = c ? botColor({ login: c.authorLogin, kind: c.authorKind }) : '#94a3b8';
           const sev = c?.mlLabel ? ML_SEVERITY_META[c.mlLabel.severity] : null;
           return (
             <Fragment key={m.threadId}>
-              {i > 0 && <span className="text-gray-400">vs</span>}
+              {i > 0 && <span className="text-ui-faint">vs</span>}
               <span
-                className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-medium"
+                className="inline-flex items-center gap-1 rounded-ui px-1.5 py-0.5 font-medium"
                 style={{ ...vendorInk(color), background: `${color}1a` }}
               >
                 {c?.authorLabel ?? 'a bot'}
@@ -486,7 +486,7 @@ function BotClusterCardImpl({
                   {sev.label}
                 </span>
               ) : (
-                <span className="text-gray-400" title="Not scored yet.">
+                <span className="text-ui-faint" title="Not scored yet.">
                   —
                 </span>
               )}
@@ -495,7 +495,7 @@ function BotClusterCardImpl({
         })}
         {mixed && (
           <span
-            className="rounded bg-amber-100 px-1.5 py-0.5 font-semibold text-amber-700 dark:bg-amber-900/40 dark:text-amber-300"
+            className="rounded-ui bg-ui-surface px-1.5 py-0.5 font-semibold text-ui-ink"
             title="Our model rated these bots' comments at different severities — the same lines read as trivial to one reviewer and substantive to another. This compares OUR ratings of what each bot said, not the bots' own badges (those are on each card below)."
           >
             rated differently

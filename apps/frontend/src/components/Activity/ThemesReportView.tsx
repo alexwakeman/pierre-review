@@ -18,10 +18,10 @@ type ActorIcon = (props: { size?: number; className?: string }) => JSX.Element;
 // drifting apart.
 
 export const SEVERITY_META: Record<BotThemeSeverity, { label: string; cls: string }> = {
-  critical: { label: 'Critical', cls: 'bg-red-100 text-red-700 dark:bg-red-950/50 dark:text-red-300' },
-  major: { label: 'Major', cls: 'bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300' },
-  minor: { label: 'Minor', cls: 'bg-sky-100 text-sky-700 dark:bg-sky-950/50 dark:text-sky-300' },
-  nit: { label: 'Nit', cls: 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400' },
+  critical: { label: 'Critical', cls: 'bg-ui-raise text-ui-danger' },
+  major: { label: 'Major', cls: 'bg-ui-raise text-ui-warn' },
+  minor: { label: 'Minor', cls: 'bg-ui-raise text-ui-ink' },
+  nit: { label: 'Nit', cls: 'bg-ui-raise text-ui-mute' },
 };
 
 const CATEGORY_LABEL: Record<BotThemeCategory, string> = {
@@ -39,7 +39,7 @@ const CATEGORY_LABEL: Record<BotThemeCategory, string> = {
 export function SeverityPill({ severity }: { severity: BotThemeSeverity }): JSX.Element {
   const m = SEVERITY_META[severity];
   return (
-    <span className={`shrink-0 rounded px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide ${m.cls}`}>
+    <span className={`shrink-0 rounded-ui px-1.5 py-0.5 text-meta font-semibold ${m.cls}`}>
       {m.label}
     </span>
   );
@@ -64,7 +64,7 @@ function ThemeCard({
   const hasThreads = theme.threads.length > 0;
   return (
     <li
-      className={`rounded-md border border-gray-200 bg-white/70 p-3 dark:border-gray-800 dark:bg-gray-900/40 ${
+      className={`rounded-ui bg-ui-surface p-3 ${
         hasThreads ? 'cursor-pointer transition-colors hover:border-ai-signal/40 hover:bg-ai-surface-2' : ''
       }`}
       {...(hasThreads
@@ -85,8 +85,8 @@ function ThemeCard({
         <SeverityPill severity={theme.severity} />
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-2">
-            <span className="text-[13px] font-semibold text-gray-800 dark:text-gray-100">{theme.title}</span>
-            <span className="shrink-0 rounded bg-gray-100 px-1 text-[11px] font-medium uppercase tracking-wide text-gray-500 dark:bg-gray-800 dark:text-gray-400">
+            <span className="text-body font-semibold text-ui-ink">{theme.title}</span>
+            <span className="shrink-0 rounded-ui bg-ui-raise px-1 text-meta font-medium text-ui-mute">
               {CATEGORY_LABEL[theme.category]}
             </span>
             {/* Exact when the server computed it (bot reports: Σ of the cited clusters'
@@ -96,14 +96,14 @@ function ThemeCard({
                 approximate fallback deliberately stays humbler. */}
             {theme.commentCount != null ? (
               <span
-                className="ml-auto shrink-0 text-[11px] font-semibold tabular-nums text-gray-600 dark:text-gray-300"
+                className="ml-auto shrink-0 text-meta font-semibold tabular-nums text-ui-mute"
                 title="Comments across this theme's member clusters — computed from the clusters, not the model"
               >
                 {theme.commentCount} comment{theme.commentCount === 1 ? '' : 's'}
               </span>
             ) : theme.occurrences > 0 ? (
               <span
-                className="ml-auto shrink-0 text-[11px] tabular-nums text-gray-400"
+                className="ml-auto shrink-0 text-meta tabular-nums text-ui-faint"
                 title="Approximate number of comments this theme covers"
               >
                 ≈{theme.occurrences}
@@ -111,17 +111,17 @@ function ThemeCard({
             ) : null}
           </div>
           {theme.summary && (
-            <p className="mt-0.5 text-[12px] leading-relaxed text-gray-600 dark:text-gray-300">{theme.summary}</p>
+            <p className="mt-0.5 text-meta leading-relaxed text-ui-mute">{theme.summary}</p>
           )}
-          <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-gray-400">
+          <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-meta text-ui-faint">
             {theme.bots.length > 0 && (
               <span>
-                <ActorIcon size={11} className="mr-1 inline-block align-[-0.1em] text-gray-400" />
+                <ActorIcon size={11} className="mr-1 inline-block align-[-0.1em] text-ui-faint" />
                 {theme.bots.join(', ')}
               </span>
             )}
             {theme.areas.length > 0 && (
-              <span className="font-mono text-gray-500 dark:text-gray-400">{theme.areas.join(' · ')}</span>
+              <span className="font-mono text-ui-mute">{theme.areas.join(' · ')}</span>
             )}
             {theme.prs.length > 0 && (
               <span className="flex flex-wrap items-center gap-1">
@@ -134,7 +134,7 @@ function ThemeCard({
                       onOpenPr(pr);
                     }}
                     title={`${pr.repoFullName}#${pr.prNumber}${pr.title ? ` — ${pr.title}` : ''} — open PR`}
-                    className="rounded px-1 tabular-nums text-sky-600 hover:bg-sky-100 hover:underline dark:text-sky-400 dark:hover:bg-sky-950/50"
+                    className="rounded-ui px-1 tabular-nums text-ui-accent hover:bg-ui-sel hover:underline"
                   >
                     #{pr.prNumber}
                   </button>
@@ -164,7 +164,7 @@ function SeverityStrip({ bySeverity }: { bySeverity: BotThemeSeverityCount[] }):
       {bySeverity.map((s) => (
         <span
           key={s.severity}
-          className={`rounded px-1.5 py-0.5 text-[11px] font-semibold ${SEVERITY_META[s.severity].cls}`}
+          className={`rounded-ui px-1.5 py-0.5 text-meta font-semibold ${SEVERITY_META[s.severity].cls}`}
           title="Aggregated from the themes’ approximate occurrence estimates — the model’s read, not an exact count"
         >
           {SEVERITY_META[s.severity].label} · {s.count}
@@ -180,16 +180,16 @@ function AreaDistribution({ byArea }: { byArea: BotThemeAreaCount[] }): JSX.Elem
   if (total === 0) return null;
   return (
     <div className="mt-3">
-      <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Where</div>
+      <div className="mb-1 text-meta font-semibold text-ui-mute">Where</div>
       <div className="flex flex-wrap gap-1">
         {byArea.map((a) => (
           <span
             key={a.area}
-            className="rounded bg-gray-100 px-1.5 py-0.5 text-[11px] text-gray-600 dark:bg-gray-800 dark:text-gray-300"
+            className="rounded-ui bg-ui-raise px-1.5 py-0.5 text-meta text-ui-mute"
             title={`${a.count} of ${total} comments`}
           >
             <span className="font-mono">{a.area}</span>{' '}
-            <span className="tabular-nums text-gray-400">{Math.round((a.count / total) * 100)}%</span>
+            <span className="tabular-nums text-ui-faint">{Math.round((a.count / total) * 100)}%</span>
           </span>
         ))}
       </div>
@@ -201,7 +201,7 @@ export function ThemesSkeleton(): JSX.Element {
   return (
     <div className="mt-3 space-y-2" aria-hidden="true">
       {[0, 1, 2].map((i) => (
-        <div key={i} className="rounded-md border border-gray-200 p-3 dark:border-gray-800">
+        <div key={i} className="rounded-ui p-3 bg-ui-surface">
           <div className="digest-skeleton-line h-3.5" style={{ width: '40%' }} />
           <div className="digest-skeleton-line mt-1.5 h-3" style={{ width: '88%' }} />
         </div>
@@ -239,7 +239,7 @@ export function ThemesReportBody({
   return (
     <div className="mt-3">
       {narrative && (
-        <div className="rounded-md border border-ai-hairline bg-white/60 p-3 dark:bg-gray-900/40">
+        <div className="rounded-ui border border-ai-hairline bg-ui-surface p-3">
           <SummaryMarkdown markdown={narrative} prRefs={[]} onOpenPr={() => {}} />
         </div>
       )}
@@ -253,7 +253,7 @@ export function ThemesReportBody({
           ))}
         </ul>
       ) : (
-        <div className="mt-3 text-[12px] text-gray-500 dark:text-gray-400">{emptyThemesLabel}</div>
+        <div className="mt-3 text-meta text-ui-mute">{emptyThemesLabel}</div>
       )}
 
       {reviewerSection}

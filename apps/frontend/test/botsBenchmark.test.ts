@@ -392,7 +392,8 @@ describe('the visible Bots sub-tab is DERIVED, never written back', () => {
 
   it('lists the themes tab on both mounts, with one panel mount', () => {
     const view = sourceOf('components/Activity/BotsView.tsx');
-    expect(view).toMatch(/\{ key: 'themes', label: 'Themes' \} as const/);
+    // The strip is the shared Tabs primitive: Themes is listed on both mounts, hidden with AI off.
+    expect(view).toMatch(/\{ id: 'themes', label: 'Themes', hidden: !showThemes \}/);
     // ⚠ ONE MOUNT, AND IT IS THE TAB'S. A panel left behind in the `roi` branch would render twice.
     expect((view.match(/<BotThemesPanel/g) ?? []).length).toBe(1);
     expect(view).toMatch(/effectiveTab === 'themes' \?/);

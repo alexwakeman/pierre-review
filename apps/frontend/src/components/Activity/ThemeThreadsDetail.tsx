@@ -85,8 +85,8 @@ function ThemePrGroup({
   const memberComments = (pr?.comments ?? []).filter((c) => commentIds.has(c.id));
 
   return (
-    <div className="rounded-lg border border-gray-200 dark:border-gray-800">
-      <div className="flex items-center gap-2 border-b border-gray-200 bg-gray-50 px-3 py-2 dark:border-gray-800 dark:bg-gray-900/50">
+    <div className="rounded-ui">
+      <div className="flex items-center gap-2 bg-ui-surface px-3 py-2">
         <span
           role="button"
           tabIndex={0}
@@ -97,24 +97,24 @@ function ThemePrGroup({
               openThisPr();
             }
           }}
-          className="min-w-0 flex-1 cursor-pointer truncate text-sm hover:underline"
+          className="min-w-0 flex-1 cursor-pointer truncate text-body hover:underline"
           title="Open this PR in its own detail tab"
         >
-          <span className="font-mono text-gray-500 dark:text-gray-400">{repoFullName}</span>{' '}
-          <span className="font-semibold text-gray-800 dark:text-gray-100">#{prNumber}</span>
-          {pr?.title ? <span className="text-gray-600 dark:text-gray-300"> — {pr.title}</span> : null}
+          <span className="font-mono text-ui-mute">{repoFullName}</span>{' '}
+          <span className="font-semibold text-ui-ink">#{prNumber}</span>
+          {pr?.title ? <span className="text-ui-mute"> — {pr.title}</span> : null}
         </span>
         <button
           type="button"
           onClick={openThisPr}
-          className="shrink-0 rounded border border-sky-300 px-2 py-0.5 text-[11px] font-medium text-sky-600 hover:bg-sky-50 dark:border-sky-800 dark:text-sky-300 dark:hover:bg-sky-950/40"
+          className="shrink-0 rounded-ui bg-ui-raise px-2 py-0.5 text-meta font-medium text-ui-accent hover:bg-ui-hover touch:py-2"
         >
           Open PR →
         </button>
       </div>
       <div className="space-y-2 p-3">
         {isLoading && !pr ? (
-          <div className="h-16 animate-pulse rounded bg-gray-100 dark:bg-gray-900" />
+          <div className="h-16 animate-pulse rounded-ui bg-ui-raise" />
         ) : (
           <>
             {memberThreads.map((t) => (
@@ -131,7 +131,7 @@ function ThemePrGroup({
               <CommentCard key={`c${c.id}`} comment={c} usersById={usersById} repoId={pr?.repoId} />
             ))}
             {memberThreads.length === 0 && memberComments.length === 0 && (
-              <div className="text-[12px] text-gray-400">
+              <div className="text-meta text-ui-faint">
                 {refs.length} comment{refs.length === 1 ? '' : 's'} in this PR — not currently loaded
                 (the thread may be outdated or still hydrating).
               </div>
@@ -277,7 +277,7 @@ export function foldThemeMetrics(
 function MlSevChip({ label, color, count }: { label: string; color: string; count: number }): JSX.Element {
   return (
     <span
-      className="rounded px-1.5 py-0.5 text-[11px] font-medium tabular-nums"
+      className="rounded-ui px-1.5 py-0.5 text-meta font-medium tabular-nums"
       style={{ ...vendorInk(color), background: `${color}1a` }}
     >
       {label} · {count}
@@ -326,7 +326,7 @@ function ThemeMetricsStrip({
 
   return (
     <div
-      className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-[11px] text-gray-500 dark:border-gray-800 dark:bg-gray-900/40 dark:text-gray-400"
+      className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-ui bg-ui-surface px-3 py-2 text-meta text-ui-mute"
       data-testid="theme-metrics-strip"
     >
       <span title="The theme's linked members — the resolved (capped) member set, not necessarily every comment the theme covers">
@@ -350,7 +350,7 @@ function ThemeMetricsStrip({
         </span>
       )}
       {m.loadedPrCount < m.shownPrCount && (
-        <span className="text-gray-400 dark:text-gray-500">
+        <span className="text-ui-faint">
           · {m.loadedPrCount} of {m.shownPrCount} PRs loaded
         </span>
       )}
@@ -377,7 +377,7 @@ export function ThemeThreadsDetail(): JSX.Element {
   const seed = useFilters((s) => s.themeThreadsSeed);
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
 
-  if (!seed) return <div className="p-6 text-sm text-gray-400">No theme selected.</div>;
+  if (!seed) return <div className="p-6 text-body text-ui-faint">No theme selected.</div>;
   const { theme, source } = seed;
 
   // Group member threads by PR (first-appearance order).
@@ -400,17 +400,17 @@ export function ThemeThreadsDetail(): JSX.Element {
       <div>
         <div className="flex flex-wrap items-center gap-2">
           <SeverityPill severity={theme.severity} />
-          <h2 className="text-base font-semibold text-gray-800 dark:text-gray-100">{theme.title}</h2>
-          <span className="rounded bg-gray-100 px-1.5 text-[11px] font-medium uppercase tracking-wide text-gray-500 dark:bg-gray-800 dark:text-gray-400">
+          <h2 className="text-title font-semibold text-ui-ink">{theme.title}</h2>
+          <span className="rounded-ui bg-ui-raise px-1.5 text-meta font-medium text-ui-mute">
             {source === 'bot' ? 'Bot theme' : 'Discussion theme'}
           </span>
         </div>
-        {theme.summary && <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">{theme.summary}</p>}
+        {theme.summary && <p className="mt-1 text-body text-ui-mute">{theme.summary}</p>}
         {/* No count meta here — the metrics strip below carries the member/PR/repo numbers with
             the right names ("linked members", split threads vs PR-level). The old "N threads
             across M PRs" line counted PR-level refs as threads and contradicted the strip one
             row beneath it. */}
-        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-gray-400">
+        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-meta text-ui-faint">
           {theme.prs.length > 0 && (
             <span className="flex flex-wrap items-center gap-1">
               {theme.prs.map((pr: ThemePrRef) => (
@@ -418,7 +418,7 @@ export function ThemeThreadsDetail(): JSX.Element {
                   key={pr.prId}
                   type="button"
                   onClick={() => openPrDetailTab(prRefToMeta(pr), { fromActivity: true })}
-                  className="rounded px-1 tabular-nums text-sky-600 hover:bg-sky-100 hover:underline dark:text-sky-400 dark:hover:bg-sky-950/50"
+                  className="rounded-ui px-1 tabular-nums text-ui-accent hover:bg-ui-sel hover:underline"
                   title={`${pr.repoFullName}#${pr.prNumber} — open PR`}
                 >
                   #{pr.prNumber}
@@ -430,7 +430,7 @@ export function ThemeThreadsDetail(): JSX.Element {
       </div>
 
       {theme.threads.length === 0 ? (
-        <div className="text-sm text-gray-400">This theme has no linked threads.</div>
+        <div className="text-body text-ui-faint">This theme has no linked threads.</div>
       ) : (
         <>
           <ThemeMetricsStrip members={theme.threads} shown={shown} />
@@ -445,7 +445,7 @@ export function ThemeThreadsDetail(): JSX.Element {
               />
             ))}
             {hiddenGroups > 0 && (
-              <div className="text-[12px] text-gray-400">
+              <div className="text-meta text-ui-faint">
                 + {hiddenGroups} more PR{hiddenGroups === 1 ? '' : 's'} not shown.
               </div>
             )}

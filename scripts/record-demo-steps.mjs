@@ -103,8 +103,9 @@ export const STEPS = [
       for (const w of ['7d', '30d', 'Sprint', '14d']) await h.clickRole('button', new RegExp(`^${w}$`));
       // The flagging tiles, the two "Show list" banners and the first rows' figures each open a
       // drill-down (with its synthesis card).
-      for (const label of ['FINDINGS', 'HIGH SEVERITY', 'NITS', 'TOP TOPIC', 'SAME-LINE OVERLAP']) {
-        if (await h.click(h.page.getByText(label, { exact: true }))) {
+      // The tile labels are sentence case now (no uppercase styling), so match without case.
+      for (const label of ['Findings', 'High severity', 'Nits', 'Top topic', 'Same-line overlap']) {
+        if (await h.click(h.page.getByText(new RegExp(`^${label}$`, 'i')).first())) {
           await h.scroll();
           await h.go(url);
         }

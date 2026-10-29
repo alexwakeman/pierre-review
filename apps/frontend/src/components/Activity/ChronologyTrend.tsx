@@ -56,8 +56,8 @@ import {
 // ⚠ A MARKER NAMES A FIRST APPEARANCE AND NOTHING ELSE. No figure is attributed to the person or
 // bot it names; the lens compares weeks, not people.
 
-const NOTE = 'text-xs text-gray-500 dark:text-gray-400';
-const AXIS_TEXT = 'fill-gray-500 dark:fill-gray-400 text-[11px]';
+const NOTE = 'text-meta text-ui-mute';
+const AXIS_TEXT = 'fill-gray-500 dark:fill-gray-400 text-meta';
 const VEIL = 'fill-white dark:fill-gray-950';
 const PAD_L = 124;
 const PAD_R = 12;
@@ -94,8 +94,8 @@ const LENS_LABEL: Record<FlowTrendLensRow['measure'], string> = {
 };
 
 const LENS_SIGNIFICANT: Record<'better' | 'worse', { word: string; bar: string; ink: string }> = {
-  better: { word: 'Real improvement', bar: 'bg-emerald-500', ink: 'text-emerald-700 dark:text-emerald-400' },
-  worse: { word: 'Real slowdown', bar: 'bg-rose-500', ink: 'text-rose-700 dark:text-rose-400' },
+  better: { word: 'Real improvement', bar: 'bg-emerald-500', ink: 'text-ui-success' },
+  worse: { word: 'Real slowdown', bar: 'bg-rose-500', ink: 'text-ui-danger' },
 };
 
 interface Geometry {
@@ -295,7 +295,7 @@ function BallRiver({
       )}
       <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
         {COURT_ORDER.map((c) => (
-          <span key={c} className="flex items-center gap-1 text-[11px] text-gray-600 dark:text-gray-300">
+          <span key={c} className="flex items-center gap-1 text-meta text-ui-mute">
             <span className={`inline-block h-2 w-2 rounded-[2px] ${COURT_SWATCH[c]}`} />
             {COURT_LABEL[c]}
           </span>
@@ -390,13 +390,13 @@ function BudgetWeather({
       )}
       <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
         {(['good', 'ok', 'slow'] as const).map((v) => (
-          <span key={v} className="flex items-center gap-1 text-[11px] text-gray-600 dark:text-gray-300">
+          <span key={v} className="flex items-center gap-1 text-meta text-ui-mute">
             <span className={`inline-block h-2 w-2 rounded-[2px] ${VERDICT_SWATCH[v]}`} />
             {VERDICT_LABEL[v]}
           </span>
         ))}
-        <span className="flex items-center gap-1 text-[11px] text-gray-600 dark:text-gray-300">
-          <span className="inline-block h-2 w-2 rounded-[2px] bg-gray-300 dark:bg-gray-600" />
+        <span className="flex items-center gap-1 text-meta text-ui-mute">
+          <span className="inline-block h-2 w-2 rounded-[2px] bg-ui-faint/50" />
           Too few to judge
         </span>
       </div>
@@ -451,7 +451,7 @@ function HourlyCost({ workspaceId, hours }: { workspaceId: number | null; hours:
   const save = (value: number | null): void => {
     update.mutate({ hourlyCostUsd: value }, { onSuccess: () => setEditing(false) });
   };
-  const link = 'text-xs font-medium text-sky-700 hover:underline dark:text-sky-400';
+  const link = 'text-meta font-medium text-ui-accent hover:underline';
   const info = (
     <InfoButton title="Hours saved in dollars">
       <p>
@@ -464,7 +464,7 @@ function HourlyCost({ workspaceId, hours }: { workspaceId: number | null; hours:
   if (editing) {
     return (
       <form
-        className="inline-flex flex-wrap items-center gap-1.5 text-xs text-gray-600 dark:text-gray-300"
+        className="inline-flex flex-wrap items-center gap-1.5 text-meta text-ui-mute"
         onSubmit={(e) => {
           e.preventDefault();
           if (valid) save(Math.round(parsed * 100) / 100);
@@ -481,7 +481,7 @@ function HourlyCost({ workspaceId, hours }: { workspaceId: number | null; hours:
             autoFocus
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
-            className="w-20 rounded border border-gray-300 bg-white px-1.5 py-0.5 tabular-nums dark:border-gray-700 dark:bg-gray-900"
+            className="w-20 rounded-ui bg-ui-surface px-1.5 py-0.5 tabular-nums"
           />
           <span>an hour</span>
         </label>
@@ -496,7 +496,7 @@ function HourlyCost({ workspaceId, hours }: { workspaceId: number | null; hours:
         <button type="button" className={link} onClick={() => setEditing(false)}>
           Cancel
         </button>
-        {update.isError && <span className="text-red-600 dark:text-red-400">Could not save.</span>}
+        {update.isError && <span className="text-ui-danger">Could not save.</span>}
       </form>
     );
   }
@@ -516,12 +516,12 @@ function HourlyCost({ workspaceId, hours }: { workspaceId: number | null; hours:
     );
   }
   return (
-    <span className="inline-flex flex-wrap items-baseline gap-x-1 text-xs text-gray-600 dark:text-gray-300">
+    <span className="inline-flex flex-wrap items-baseline gap-x-1 text-meta text-ui-mute">
       <span>
-        ≈ <span className="font-semibold tabular-nums text-gray-900 dark:text-gray-50">{usd(dollars)}</span> of
+        ≈ <span className="font-semibold tabular-nums text-ui-ink">{usd(dollars)}</span> of
         engineering time
       </span>
-      <span className="text-gray-500 dark:text-gray-400">at {usd(rate)} an hour</span>
+      <span className="text-ui-mute">at {usd(rate)} an hour</span>
       {info}
       <button type="button" className={link} onClick={startEditing}>
         Change
@@ -558,7 +558,7 @@ function GainLine({
           ? `Not enough weeks yet to set a baseline: it needs ${FLOW_TREND.baselineWeeks} weeks with at least ${FLOW_TREND.thinWeekPrs} pull requests each.`
           : 'Too few usable weeks before that week to set a baseline there.'}
         {from != null && (
-          <button type="button" className="ml-2 font-medium text-sky-700 hover:underline dark:text-sky-400" onClick={() => onPickBaseline(null)}>
+          <button type="button" className="ml-2 font-medium text-ui-accent hover:underline" onClick={() => onPickBaseline(null)}>
             Use the default baseline
           </button>
         )}
@@ -583,8 +583,8 @@ function GainLine({
     <div className="relative">
       <div className="mb-1 flex flex-wrap items-baseline gap-x-4 gap-y-1">
         <div>
-          <span className="text-lg font-semibold tabular-nums text-gray-900 dark:text-gray-50">{signedHours(last)}</span>{' '}
-          <span className="text-xs text-gray-600 dark:text-gray-300">
+          <span className="text-title font-semibold tabular-nums text-ui-ink">{signedHours(last)}</span>{' '}
+          <span className="text-meta text-ui-mute">
             working hours {last >= 0 ? 'saved' : 'lost'} since{' '}
             {startWeek ? `the week of ${weekLabel(startWeek.weekStart)}` : 'the baseline'}
           </span>
@@ -594,7 +594,7 @@ function GainLine({
           Baseline: half merged within {hoursShort(gain.baseline)} ({gain.baselineWeeks.length} weeks)
         </span>
         {from != null && (
-          <button type="button" className="text-xs font-medium text-sky-700 hover:underline dark:text-sky-400" onClick={() => onPickBaseline(null)}>
+          <button type="button" className="text-meta font-medium text-ui-accent hover:underline" onClick={() => onPickBaseline(null)}>
             Use the default baseline
           </button>
         )}
@@ -714,18 +714,18 @@ function BeforeAfterLens({
   return (
     <section
       aria-label={`Before and after the week of ${weekLabel(w.weekStart)}`}
-      className="rounded-lg border border-sky-200 bg-sky-50/40 p-3 dark:border-sky-900 dark:bg-sky-950/30"
+      className="rounded-ui bg-ui-surface p-3"
       data-testid="chronology-trend-lens"
     >
       <div className="flex items-start justify-between gap-2">
         <div>
-          <h5 className="text-xs font-semibold text-gray-800 dark:text-gray-100">
+          <h5 className="text-meta font-semibold text-ui-ink">
             Before and after the week of {weekLabel(w.weekStart)}
           </h5>
           <ul className="mt-1 max-h-40 space-y-0.5 overflow-y-auto">
             {events.map((e) => (
-              <li key={e.id} className="flex items-center gap-1.5 text-xs text-gray-700 dark:text-gray-200">
-                <span className="text-gray-500 dark:text-gray-400">{KIND_ICON[e.kind](12)}</span>
+              <li key={e.id} className="flex items-center gap-1.5 text-meta text-ui-ink">
+                <span className="text-ui-mute">{KIND_ICON[e.kind](12)}</span>
                 {eventLine(e)}
               </li>
             ))}
@@ -758,7 +758,7 @@ function BeforeAfterLens({
             type="button"
             onClick={onClose}
             aria-label="Close before and after"
-            className="rounded p-0.5 text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800"
+            className="rounded-ui p-0.5 text-ui-mute hover:bg-ui-hover"
           >
             <CloseIcon size={12} />
           </button>
@@ -773,8 +773,8 @@ function BeforeAfterLens({
           const pct = (v: number | null): string => `${v == null ? 0 : Math.max((v / max) * 100, v > 0 ? 1.5 : 0)}%`;
           return (
             <li key={r.measure}>
-              <div className="flex items-baseline justify-between gap-2 text-xs">
-                <span className="text-gray-700 dark:text-gray-200">{LENS_LABEL[r.measure]}</span>
+              <div className="flex items-baseline justify-between gap-2 text-meta">
+                <span className="text-ui-ink">{LENS_LABEL[r.measure]}</span>
                 {meta != null && (
                   <span className={`shrink-0 font-medium tabular-nums ${meta.ink}`}>
                     {meta.word} · {lensChange(r.measure, r.before, r.after)}
@@ -782,23 +782,23 @@ function BeforeAfterLens({
                 )}
               </div>
               <div
-                className="mt-1 grid grid-cols-[3.25rem_1fr_3.5rem] items-center gap-x-2 gap-y-1 text-[11px] text-gray-500 dark:text-gray-400"
+                className="mt-1 grid grid-cols-[3.25rem_1fr_3.5rem] items-center gap-x-2 gap-y-1 text-meta text-ui-mute"
                 role="img"
                 aria-label={`${LENS_LABEL[r.measure]}: before ${lensValue(r.measure, r.before)}, after ${lensValue(r.measure, r.after)}${meta != null ? `, ${meta.word.toLowerCase()}` : ''}`}
               >
                 <span>Before</span>
-                <span className="h-2.5 rounded-sm bg-gray-100 dark:bg-gray-800">
-                  <span className="block h-full rounded-sm bg-gray-300 dark:bg-gray-600" style={{ width: pct(r.before) }} />
+                <span className="h-2.5 rounded-ui bg-ui-raise">
+                  <span className="block h-full rounded-ui bg-ui-faint/50" style={{ width: pct(r.before) }} />
                 </span>
-                <span className="text-right tabular-nums text-gray-700 dark:text-gray-200">{lensValue(r.measure, r.before)}</span>
+                <span className="text-right tabular-nums text-ui-ink">{lensValue(r.measure, r.before)}</span>
                 <span>After</span>
-                <span className="h-2.5 rounded-sm bg-gray-100 dark:bg-gray-800">
+                <span className="h-2.5 rounded-ui bg-ui-raise">
                   <span
-                    className={`block h-full rounded-sm ${meta?.bar ?? 'bg-gray-500 dark:bg-gray-400'}`}
+                    className={`block h-full rounded-ui ${meta?.bar ?? 'bg-ui-faint'}`}
                     style={{ width: pct(r.after) }}
                   />
                 </span>
-                <span className={`text-right tabular-nums ${meta?.ink ?? 'text-gray-700 dark:text-gray-200'}`}>
+                <span className={`text-right tabular-nums ${meta?.ink ?? 'text-ui-ink'}`}>
                   {lensValue(r.measure, r.after)}
                 </span>
               </div>
@@ -809,7 +809,7 @@ function BeforeAfterLens({
       <button
         type="button"
         onClick={onUseAsBaseline}
-        className="mt-2 text-xs font-medium text-sky-700 hover:underline dark:text-sky-400"
+        className="mt-2 text-meta font-medium text-ui-accent hover:underline"
       >
         Measure hours saved from this week
       </button>
@@ -871,7 +871,10 @@ function ChronologyTrendFor({ workspaceId }: { workspaceId: number | null }): JS
   const setSelected = (next: number | null | ((s: number | null) => number | null)): void =>
     setSelectedWeek(weekAt(typeof next === 'function' ? next(selected) : next));
   const setBaselineFrom = (i: number | null): void => setBaselineWeek(weekAt(i));
-  const geo = geometryFor(width, data?.weeks.length ?? FLOW_TREND.weeks);
+  // 26 weekly columns need room: below ~640px the charts keep that width and scroll inside their
+  // own box (the notes above them still wrap to the screen).
+  const chartWidth = width === 0 ? 0 : Math.max(width, 640);
+  const geo = geometryFor(chartWidth, data?.weeks.length ?? FLOW_TREND.weeks);
   const clusters = useMemo(() => clusterEvents(data?.events ?? [], shown), [data?.events, shown]);
   const markers = data == null ? [] : markersFor(clusters, geo, data.weeks, selected, (w) => setSelected((s) => (s === w ? null : w)));
   const counts = eventCounts(data?.events ?? []);
@@ -880,11 +883,11 @@ function ChronologyTrendFor({ workspaceId }: { workspaceId: number | null }): JS
   return (
     <section
       data-testid="chronology-trend"
-      className="rounded-lg border border-gray-200 p-4 dark:border-gray-800"
+      className="rounded-ui p-4 bg-ui-surface"
     >
       <div className="flex items-center gap-1">
-        <h4 className="text-sm font-semibold text-gray-800 dark:text-gray-100">Over time</h4>
-        <span className="text-xs text-gray-500 dark:text-gray-400">· Last {FLOW_TREND.weeks} weeks</span>
+        <h4 className="text-body font-semibold text-ui-ink">Over time</h4>
+        <span className="text-meta text-ui-mute">· Last {FLOW_TREND.weeks} weeks</span>
         {data != null && (
           <InfoButton title="Chronology over time" width="lg">
             <TrendInfo data={data} />
@@ -913,7 +916,7 @@ function ChronologyTrendFor({ workspaceId }: { workspaceId: number | null }): JS
                 </p>
               )}
               {data.truncated && (
-                <p className="flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-400">
+                <p className="flex items-start gap-1.5 text-meta text-ui-warn">
                   <WarningIcon size={12} className="mt-0.5 shrink-0" />
                   <span>Some weeks hit a scan limit, so not every pull request is counted.</span>
                 </p>
@@ -936,10 +939,10 @@ function ChronologyTrendFor({ workspaceId }: { workspaceId: number | null }): JS
                         return next;
                       })
                     }
-                    className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs ${
+                    className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-meta touch:py-2 ${
                       on
-                        ? 'border-gray-400 bg-gray-100 text-gray-800 dark:border-gray-500 dark:bg-gray-800 dark:text-gray-100'
-                        : 'border-gray-200 text-gray-500 dark:border-gray-700 dark:text-gray-400'
+                        ? 'border-ui-line bg-ui-sel text-ui-ink'
+                        : 'border-ui-line text-ui-mute'
                     } ${k === 'shift' ? 'border-dashed' : ''}`}
                   >
                     {KIND_ICON[k](11)}
@@ -951,9 +954,13 @@ function ChronologyTrendFor({ workspaceId }: { workspaceId: number | null }): JS
             </div>
 
             <div>
-              <h5 className="mb-1 text-xs font-medium text-gray-700 dark:text-gray-200">Where the working hours went</h5>
-              <EventMarkerRail markers={markers} width={width} />
-              <BallRiver data={data} geo={geo} markers={markers} />
+              <h5 className="mb-1 text-meta font-medium text-ui-ink">Where the working hours went</h5>
+              <div className="overflow-x-auto overscroll-x-contain">
+                <div style={{ width: chartWidth }}>
+                  <EventMarkerRail markers={markers} width={chartWidth} />
+                  <BallRiver data={data} geo={geo} markers={markers} />
+                </div>
+              </div>
             </div>
 
             {selected != null && (
@@ -966,24 +973,32 @@ function ChronologyTrendFor({ workspaceId }: { workspaceId: number | null }): JS
             )}
 
             <div>
-              <h5 className="mb-1 text-xs font-medium text-gray-700 dark:text-gray-200">Each wait against its budget</h5>
-              <EventMarkerRail markers={markers} width={width} interactive={false} />
-              <BudgetWeather data={data} geo={geo} markers={markers} />
+              <h5 className="mb-1 text-meta font-medium text-ui-ink">Each wait against its budget</h5>
+              <div className="overflow-x-auto overscroll-x-contain">
+                <div style={{ width: chartWidth }}>
+                  <EventMarkerRail markers={markers} width={chartWidth} interactive={false} />
+                  <BudgetWeather data={data} geo={geo} markers={markers} />
+                </div>
+              </div>
             </div>
 
             <div>
-              <h5 className="mb-1 text-xs font-medium text-gray-700 dark:text-gray-200">
+              <h5 className="mb-1 text-meta font-medium text-ui-ink">
                 Working hours saved, opened to merged
               </h5>
-              <EventMarkerRail markers={markers} width={width} interactive={false} />
-              <GainLine
-                data={data}
-                geo={geo}
-                markers={markers}
-                from={baselineFrom}
-                onPickBaseline={setBaselineFrom}
-                workspaceId={workspaceId}
-              />
+              <div className="overflow-x-auto overscroll-x-contain">
+                <div style={{ width: chartWidth }}>
+                  <EventMarkerRail markers={markers} width={chartWidth} interactive={false} />
+                  <GainLine
+                    data={data}
+                    geo={geo}
+                    markers={markers}
+                    from={baselineFrom}
+                    onPickBaseline={setBaselineFrom}
+                    workspaceId={workspaceId}
+                  />
+                </div>
+              </div>
             </div>
           </div>
         )}

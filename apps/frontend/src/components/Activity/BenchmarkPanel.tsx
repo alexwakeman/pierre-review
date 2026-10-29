@@ -152,7 +152,7 @@ function DistributionStrip({
     <svg
       width={width}
       height={STRIP_HEIGHT}
-      className="decorative-mark text-gray-300 dark:text-gray-600"
+      className="decorative-mark text-ui-faint"
       aria-hidden="true"
     >
       {/* The p10–p90 spread, then the p25–p75 box on top of it. */}
@@ -252,7 +252,7 @@ function Card({
 }): JSX.Element {
   return (
     <div
-      className={`rounded-lg border border-gray-200 bg-white p-3 dark:border-gray-800 dark:bg-gray-950 ${className}`}
+      className={`rounded-ui bg-ui-surface p-3 ${className}`}
     >
       {children}
     </div>
@@ -288,15 +288,15 @@ function RefusalNote({
   return (
     <div
       data-testid={testId}
-      className="rounded border border-dashed border-gray-300 bg-gray-50 px-2.5 py-2 text-[11px] dark:border-gray-700 dark:bg-gray-900/40"
+      className="rounded-ui bg-ui-surface px-2.5 py-2 text-meta"
     >
       <div className="flex items-start gap-1.5">
-        <InfoIcon className="mt-0.5 shrink-0 text-gray-400" />
+        <InfoIcon className="mt-0.5 shrink-0 text-ui-faint" />
         <div>
-          <div className="font-medium text-gray-700 dark:text-gray-200">{headline}</div>
-          <p className="mt-0.5 leading-relaxed text-gray-500 dark:text-gray-400">{message}</p>
+          <div className="font-medium text-ui-ink">{headline}</div>
+          <p className="mt-0.5 leading-relaxed text-ui-mute">{message}</p>
           {shortfall.length > 0 && (
-            <p className="mt-1 tabular-nums text-gray-400 dark:text-gray-500">
+            <p className="mt-1 tabular-nums text-ui-faint">
               {shortfall.join(' · ')}
             </p>
           )}
@@ -316,7 +316,7 @@ function RefusalNote({
 function BasisChip({ basis }: { basis: CostBasis }): JSX.Element {
   return (
     <span
-      className="rounded bg-gray-500/10 px-1 text-[11px] font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300"
+      className="rounded-ui bg-gray-500/10 px-1 text-meta font-semibold text-ui-mute"
       data-testid={`benchmark-cost-basis-${basis}`}
     >
       {COST_BASIS_LABEL[basis]}
@@ -341,9 +341,9 @@ function CostRefusedRow({
 }): JSX.Element {
   return (
     <div className="flex flex-wrap items-baseline gap-x-2 py-1">
-      <span className="w-44 shrink-0 text-[11px] text-gray-500 dark:text-gray-400">{label}</span>
+      <span className="w-44 shrink-0 text-meta text-ui-mute">{label}</span>
       <span
-        className="text-[11px] font-medium text-gray-400"
+        className="text-meta font-medium text-ui-faint"
         title={refusal.message}
         data-testid={`benchmark-cost-refused-${refusal.reason}`}
       >
@@ -369,11 +369,11 @@ function CostValueRow({
 }): JSX.Element {
   return (
     <div className="flex flex-wrap items-baseline gap-x-2 py-1" data-testid={testId}>
-      <span className="w-44 shrink-0 text-[11px] text-gray-600 dark:text-gray-300">{label}</span>
-      <span className="shrink-0 text-[11px] font-semibold tabular-nums text-gray-800 dark:text-gray-100">
+      <span className="w-44 shrink-0 text-meta text-ui-mute">{label}</span>
+      <span className="shrink-0 text-meta font-semibold tabular-nums text-ui-ink">
         {figure}
       </span>
-      <span className="text-[11px] tabular-nums text-gray-400">{detail}</span>
+      <span className="text-meta tabular-nums text-ui-faint">{detail}</span>
       <BasisChip basis={basis} />
     </div>
   );
@@ -414,14 +414,14 @@ function FindingsSection({
     // ⚠ "CHECKED", NOT "NOTHING HERE". Empty is the common and healthy answer, and the numbers say
     // so — a bare "no findings" is indistinguishable from a panel that never ran.
     return (
-      <Card className="border-gray-200 dark:border-gray-800">
-        <div className="flex items-start gap-2 text-[11px]">
-          <ScalesIcon className="mt-0.5 shrink-0 text-gray-400" />
+      <Card className="">
+        <div className="flex items-start gap-2 text-meta">
+          <ScalesIcon className="mt-0.5 shrink-0 text-ui-faint" />
           <div>
-            <div className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+            <div className="text-body font-semibold text-ui-ink">
               {FINDINGS_EMPTY_HEADLINE.nothing_stands_out}
             </div>
-            <p className="mt-0.5 leading-relaxed text-gray-500 dark:text-gray-400">
+            <p className="mt-0.5 leading-relaxed text-ui-mute">
               {formatCount(tally.compared)} comparison
               {tally.compared === 1 ? '' : 's'} across {formatCount(tally.placed)} placed reviewer
               {tally.placed === 1 ? '' : 's'} — none of them far enough from its peer cohort, in
@@ -441,28 +441,28 @@ function FindingsSection({
         return (
           <div
             key={row.key}
-            className="rounded-lg border border-amber-300 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-950/30"
+            className="rounded-ui bg-ui-surface p-3"
           >
             <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-              <WarningIcon className="shrink-0 text-amber-600 dark:text-amber-400" />
-              <span className="text-sm font-semibold text-amber-800 dark:text-amber-200">
+              <WarningIcon className="shrink-0 text-ui-warn" />
+              <span className="text-body font-semibold text-ui-ink">
                 {row.headline}
               </span>
-              <span className="text-[11px] text-amber-700/80 dark:text-amber-300/80">
+              <span className="text-meta text-ui-mute">
                 {reviewerLabel(row.unit.botKind)} in {unitTitle(row.unit)}
               </span>
             </div>
             {/* The ACTION. Templated server-side — there is no model anywhere in this feature. */}
-            <p className="mt-1 text-[12px] leading-relaxed text-amber-800 dark:text-amber-200">
+            <p className="mt-1 text-meta leading-relaxed text-ui-ink">
               {anomaly.action}
             </p>
             {/* ⚠ BOTH GATES, SEPARATELY. The share and the magnitude are published as two numbers
                 rather than as their conjunction so a reader can see WHY this fired and argue with
                 the threshold instead of the verdict. */}
-            <dl className="mt-2 grid grid-cols-1 gap-x-4 gap-y-1 text-[11px] sm:grid-cols-2">
+            <dl className="mt-2 grid grid-cols-1 gap-x-4 gap-y-1 text-meta sm:grid-cols-2">
               <div className="flex gap-1.5">
-                <dt className="text-amber-700/80 dark:text-amber-300/90">Rank</dt>
-                <dd className="tabular-nums text-amber-900 dark:text-amber-100">
+                <dt className="text-ui-mute">Rank</dt>
+                <dd className="tabular-nums text-ui-ink">
                   {percentileSentence({
                     percentile: anomaly.share.percentile,
                     nRepos: rankRepos,
@@ -471,8 +471,8 @@ function FindingsSection({
                 </dd>
               </div>
               <div className="flex gap-1.5">
-                <dt className="text-amber-700/80 dark:text-amber-300/90">Gap</dt>
-                <dd className="tabular-nums text-amber-900 dark:text-amber-100">
+                <dt className="text-ui-mute">Gap</dt>
+                <dd className="tabular-nums text-ui-ink">
                   {row.metricLabel}: yours {formatMetricValue(anomaly.magnitude.value, anomaly.magnitude.unit)},
                   {' '}a typical team{' '}
                   {formatMetricValue(anomaly.magnitude.cohortMedian, anomaly.magnitude.unit)}
@@ -526,7 +526,7 @@ function UnitCard({
     <Card>
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
         <span
-          className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium"
+          className="inline-flex items-center gap-1 rounded-ui px-1.5 py-0.5 text-meta font-medium"
           style={
             color != null
               ? { color, background: `${color}1a` }
@@ -538,20 +538,20 @@ function UnitCard({
               seen is still this workspace's biggest reviewer, and it must not read as a zero. */}
           {reviewerLabel(unit.botKind)}
         </span>
-        <span className="text-xs font-medium text-gray-700 dark:text-gray-200">
+        <span className="text-meta font-medium text-ui-ink">
           {unitTitle(unit)}
         </span>
         {/* The logins folded into this one unit — two accounts the workspace classifies as one
             vendor are ONE unit, which is the corpus's own semantics. */}
         {unit.reviewers.length > 0 && (
-          <span className="text-[11px] text-gray-500 dark:text-gray-400">
+          <span className="text-meta text-ui-mute">
             {unit.reviewers.map((r) => r.login).join(', ')}
           </span>
         )}
       </div>
 
       {placement.status === 'placed' ? (
-        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-gray-500 dark:text-gray-400">
+        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-meta text-ui-mute">
           {/* ⚠ THE BAND COUNT RIDES THE BAND. "Band 6" is meaningless; "band 6 of 10" is a rank. */}
           <span className="tabular-nums">
             Size group {placement.bandLabel} ({formatCount(placement.bandRange[0])}–
@@ -569,7 +569,7 @@ function UnitCard({
             {formatCount(unit.activity.prsConsidered)} of its most recent PRs read
           </span>
           {placement.aboveTopBandBy != null && (
-            <span className="text-amber-600 dark:text-amber-400">
+            <span className="text-ui-warn">
               Busier than the top band’s own edge by {formatCount(placement.aboveTopBandBy)} —
               the outermost band is open in the direction it faces.
             </span>
@@ -577,7 +577,7 @@ function UnitCard({
           {/* ⚠ SAID OUT LOUD, because "band 1 of 10 (2–3 merged PRs)" beside "You: 0 merged"
               otherwise reads as a contradiction. It is not one: the band is a rank CUT drawn over
               the support repositories, not a bucket the customer has to fall inside. */}
-          {bandNote != null && <span className="text-gray-400">{bandNote}</span>}
+          {bandNote != null && <span className="text-ui-faint">{bandNote}</span>}
         </div>
       ) : (
         <div className="mt-2">
@@ -610,17 +610,17 @@ function UnitCard({
           />
         </div>
       ) : (
-      <div className="mt-2 divide-y divide-gray-100 dark:divide-gray-800/70">
+      <div className="mt-2">
         {rows.map((row) => {
           const m = row.metric;
           if (m.status === 'excluded') {
             return (
               <div key={row.name} className="flex flex-wrap items-baseline gap-x-2 py-1.5">
-                <span className="w-52 shrink-0 text-[11px] text-gray-500 dark:text-gray-400">
+                <span className="w-52 shrink-0 text-meta text-ui-mute">
                   {row.label}
                 </span>
                 <span
-                  className="text-[11px] font-medium text-gray-400"
+                  className="text-meta font-medium text-ui-faint"
                   title={m.message}
                   data-testid={`benchmark-metric-excluded-${m.reason}`}
                 >
@@ -635,16 +635,16 @@ function UnitCard({
           if (m.status === 'uncompared') {
             return (
               <div key={row.name} className="flex flex-wrap items-baseline gap-x-2 py-1.5">
-                <span className="w-52 shrink-0 text-[11px] text-gray-500 dark:text-gray-400">
+                <span className="w-52 shrink-0 text-meta text-ui-mute">
                   {row.label}
                 </span>
-                <span className="w-16 shrink-0 text-right text-[11px] font-semibold tabular-nums text-gray-700 dark:text-gray-200">
+                <span className="w-16 shrink-0 text-right text-meta font-semibold tabular-nums text-ui-ink">
                   {formatMetricValue(m.value, unitStr)}
                 </span>
                 {/* ⚠ NO PERCENTILE, AND NOT A ZERO. The customer has a real value; the COHORT
                     refused this metric in this cell, so there is no distribution to rank within. */}
                 <span
-                  className="text-[11px] text-gray-400"
+                  className="text-meta text-ui-faint"
                   title={m.cohortRefusal.message}
                   data-testid="benchmark-metric-uncompared"
                 >
@@ -658,17 +658,17 @@ function UnitCard({
           return (
             <div key={row.name} className="py-1.5">
               <div className="flex flex-wrap items-baseline gap-x-2">
-                <span className="w-52 shrink-0 text-[11px] text-gray-600 dark:text-gray-300">
+                <span className="w-52 shrink-0 text-meta text-ui-mute">
                   {row.label}
-                  <span className="ml-1 text-[11px] text-gray-500 dark:text-gray-400">
+                  <span className="ml-1 text-meta text-ui-mute">
                     {DIRECTION_LABEL[m.cohort.direction]}
                   </span>
                 </span>
-                <span className="w-16 shrink-0 text-right text-[11px] font-semibold tabular-nums text-gray-800 dark:text-gray-100">
+                <span className="w-16 shrink-0 text-right text-meta font-semibold tabular-nums text-ui-ink">
                   {formatMetricValue(m.value, m.cohort.unit)}
                 </span>
                 {/* ⚠ RULE 2: the cohort n and the band count ride EVERY percentile. */}
-                <span className="text-[11px] tabular-nums text-gray-500 dark:text-gray-400">
+                <span className="text-meta tabular-nums text-ui-mute">
                   {percentileSentence({
                     percentile: m.percentile,
                     nRepos: m.cohort.nRepos,
@@ -676,12 +676,12 @@ function UnitCard({
                       placement.status === 'placed' ? placement.bandLabel : '',
                   })}
                 </span>
-                <span className="text-[11px] tabular-nums text-gray-400">
+                <span className="text-meta tabular-nums text-ui-faint">
                   over {formatCount(m.units)} of yours
                 </span>
               </div>
               <div className="mt-1 flex items-center gap-2">
-                <span className="w-52 shrink-0 text-[11px] tabular-nums text-gray-400">
+                <span className="w-52 shrink-0 text-meta tabular-nums text-ui-faint">
                   peer median {formatMetricValue(m.cohort.quantiles['p50'] ?? 0, m.cohort.unit)}
                   {m.cohort.ciMedian95 != null && (
                     <>
@@ -704,7 +704,7 @@ function UnitCard({
                 ) : (
                   // ⚠ NO STRIP RATHER THAN A PARTIAL ONE. A chart drawn from an incomplete grid is
                   // a picture of a distribution nobody fitted.
-                  <span className="text-[11px] text-gray-500 dark:text-gray-400">
+                  <span className="text-meta text-ui-mute">
                     {geom == null ? 'No readable distribution to draw' : ''}
                   </span>
                 )}
@@ -773,15 +773,15 @@ function WorkspaceCostBlock({
 
   return (
     <div
-      className="mt-2 rounded border border-gray-200 bg-gray-50/60 px-2.5 py-2 dark:border-gray-800 dark:bg-gray-900/30"
+      className="mt-2 rounded-ui bg-ui-surface px-2.5 py-2"
       data-testid="benchmark-workspace-cost"
     >
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-        <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-gray-700 dark:text-gray-200">
-          <CoinIcon size={12} className="text-gray-400" />
+        <span className="inline-flex items-center gap-1 text-meta font-semibold text-ui-ink">
+          <CoinIcon size={12} className="text-ui-faint" />
           Cost
         </span>
-        <span className="text-[11px] tabular-nums text-gray-600 dark:text-gray-300">
+        <span className="text-meta tabular-nums text-ui-mute">
           {workspaceCostPriceLine(cost)}
         </span>
         <BasisChip basis="stored" />
@@ -795,18 +795,18 @@ function WorkspaceCostBlock({
           a price that could not be STATED: this sentence points at a figure, and there is none. */}
       {cost.monthlyUsd != null && (
         <p
-          className="mt-1 text-[12px] leading-relaxed text-gray-500 dark:text-gray-400"
+          className="mt-1 text-meta leading-relaxed text-ui-mute"
           data-testid="benchmark-workspace-cost-coverage"
         >
           {coverage}
         </p>
       )}
       {summed != null && (
-        <p className="mt-0.5 text-[12px] leading-relaxed text-gray-400">{summed}</p>
+        <p className="mt-0.5 text-meta leading-relaxed text-ui-faint">{summed}</p>
       )}
       {seatNote != null && (
         <p
-          className="mt-0.5 text-[12px] leading-relaxed text-amber-700 dark:text-amber-400"
+          className="mt-0.5 text-meta leading-relaxed text-ui-warn"
           data-testid="benchmark-cost-seat-unresolved"
         >
           {seatNote}
@@ -817,7 +817,7 @@ function WorkspaceCostBlock({
           by 0 is what put "Recorded as free" on a reviewer somebody priced. */}
       {seatZeroNote != null && (
         <p
-          className="mt-0.5 text-[12px] leading-relaxed text-amber-700 dark:text-amber-400"
+          className="mt-0.5 text-meta leading-relaxed text-ui-warn"
           data-testid="benchmark-cost-seat-zero"
         >
           {seatZeroNote}
@@ -840,7 +840,7 @@ function WorkspaceCostBlock({
           />
         </div>
       ) : (
-        <div className="mt-1 divide-y divide-gray-200/70 dark:divide-gray-800/70">
+        <div className="mt-1">
           {/* ⚠ NO WINDOW SUFFIX ON A RATIO. "US$5.52 per 14 days" reads as $/PR/fortnight and
               invites the reader to double it for a month, but a cost per merged pull request does
               not scale with the window at all — both halves of the fraction scale together. The
@@ -893,13 +893,13 @@ function WorkspaceCostBlock({
           cannot reunite them by accident. */}
       {headline != null && (
         <div
-          className="mt-1.5 space-y-1 border-t border-gray-200 pt-1.5 text-[12px] leading-relaxed text-gray-700 dark:border-gray-800 dark:text-gray-200"
+          className="mt-1.5 space-y-1 pt-1.5 text-meta leading-relaxed text-ui-ink"
           data-testid={`benchmark-workspace-cost-headline-${headline.tone}`}
         >
           <p data-testid="benchmark-workspace-cost-headline-spend">{headline.spend}</p>
           {headline.comparison != null && (
             <p
-              className="text-gray-500 dark:text-gray-400"
+              className="text-ui-mute"
               data-testid="benchmark-workspace-cost-headline-comparison"
             >
               {headline.comparison}
@@ -915,7 +915,7 @@ function WorkspaceCostBlock({
           figure was on screen; there are no span-anchored figures left, and the sentence a reader
           uses to check the arithmetic must be there whenever the arithmetic is. */}
       {collapsed == null && (
-        <p className="mt-1 text-[12px] leading-relaxed text-gray-400">{cost.basisNote}</p>
+        <p className="mt-1 text-meta leading-relaxed text-ui-faint">{cost.basisNote}</p>
       )}
 
       {/* ⚠ TWO DISCLOSURES WITH TWO CAUSES AND TWO SENTENCES, and neither is optional chrome: a
@@ -926,7 +926,7 @@ function WorkspaceCostBlock({
           number, one line quieter. */}
       {spanUnobserved != null && (
         <p
-          className="mt-0.5 text-[12px] leading-relaxed text-gray-400"
+          className="mt-0.5 text-meta leading-relaxed text-ui-faint"
           data-testid="benchmark-workspace-cost-span-unobserved"
         >
           {spanUnobserved}
@@ -934,7 +934,7 @@ function WorkspaceCostBlock({
       )}
       {partialWindow != null && (
         <p
-          className="mt-0.5 text-[12px] leading-relaxed text-gray-400"
+          className="mt-0.5 text-meta leading-relaxed text-ui-faint"
           data-testid="benchmark-workspace-cost-partial-window"
         >
           {partialWindow}
@@ -946,7 +946,7 @@ function WorkspaceCostBlock({
           and for how long. */}
       {windowIncomplete != null && (
         <p
-          className="mt-0.5 text-[12px] leading-relaxed text-amber-700 dark:text-amber-400"
+          className="mt-0.5 text-meta leading-relaxed text-ui-warn"
           data-testid="benchmark-workspace-cost-window-incomplete"
         >
           {windowIncomplete}
@@ -1102,10 +1102,10 @@ function PooledCounters({ counters }: { counters: BotBenchmarkPlacementCounters 
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         data-testid="benchmark-rollup-counters-toggle"
-        className="flex items-center gap-1.5 text-[11px] font-semibold text-gray-700 hover:text-gray-900 dark:text-gray-200 dark:hover:text-gray-50"
+        className="flex items-center gap-1.5 text-meta font-semibold text-ui-ink hover:text-ui-ink"
       >
         <ChevronIcon dir={open ? 'down' : 'right'} />
-        <ThreadsIcon size={12} className="text-gray-400" />
+        <ThreadsIcon size={12} className="text-ui-faint" />
         The raw counts behind every figure on this card
       </button>
       {/* ⚠ THE VALUE SITS AGAINST ITS OWN LABEL, NOT AT THE FAR EDGE OF THE CARD. The first cut was
@@ -1122,7 +1122,7 @@ function PooledCounters({ counters }: { counters: BotBenchmarkPlacementCounters 
           const meta = COUNTER_GROUP_LABEL[group];
           return (
             <div key={group}>
-              <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+              <div className="text-meta font-semibold text-ui-faint">
                 {meta.label}{' '}
                 <span className="font-normal normal-case tracking-normal text-gray-400/80">
                   · {meta.population}
@@ -1131,10 +1131,10 @@ function PooledCounters({ counters }: { counters: BotBenchmarkPlacementCounters 
               <dl className="mt-0.5 flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
                 {entries.map(([key, value]) => (
                   <div key={key} className="flex items-baseline gap-1">
-                    <dt className="text-[11px] text-gray-500 dark:text-gray-400">
+                    <dt className="text-meta text-ui-mute">
                       {counterLabel(key, group)}
                     </dt>
-                    <dd className="text-[11px] font-semibold tabular-nums text-gray-700 dark:text-gray-200">
+                    <dd className="text-meta font-semibold tabular-nums text-ui-ink">
                       {formatCount(value)}
                     </dd>
                   </div>
@@ -1173,8 +1173,8 @@ function EvidenceTable({
 }): JSX.Element {
   return (
     <div className="mt-2" data-testid="benchmark-rollup-evidence">
-      <div className="flex items-center gap-1.5 text-[11px] font-semibold text-gray-700 dark:text-gray-200">
-        <WorkspaceIcon size={12} className="text-gray-400" />
+      <div className="flex items-center gap-1.5 text-meta font-semibold text-ui-ink">
+        <WorkspaceIcon size={12} className="text-ui-faint" />
         Where these numbers come from
         <InfoButton title="Where these numbers come from">
           <p>One row per repository this bot works in.</p>
@@ -1193,9 +1193,9 @@ function EvidenceTable({
       {/* ⚠ THE TABLE SCROLLS INSIDE ITS OWN BOX. The panel's body must never scroll horizontally —
           the rail is a narrow column on a laptop and five columns do not fit it. */}
       <div className="mt-1 overflow-x-auto">
-        <table className="w-full min-w-[32rem] border-collapse text-[11px]">
+        <table className="w-full min-w-[32rem] border-collapse text-meta">
           <thead>
-            <tr className="border-b border-gray-200 text-left text-[11px] uppercase tracking-wide text-gray-400 dark:border-gray-800">
+            <tr className="text-left text-meta text-ui-faint">
               <th scope="col" className="py-1 pr-3 font-semibold">
                 Repository
               </th>
@@ -1213,29 +1213,29 @@ function EvidenceTable({
               </th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-100 dark:divide-gray-800/70">
+          <tbody className="">
             {rows.map((row) => (
               <tr key={row.key}>
-                <td className="py-1 pr-3 text-gray-700 dark:text-gray-200">{row.repo}</td>
-                <td className="py-1 pr-3 text-gray-500 dark:text-gray-400">
+                <td className="py-1 pr-3 text-ui-ink">{row.repo}</td>
+                <td className="py-1 pr-3 text-ui-mute">
                   {!row.bandRefused ? (
                     <span className="tabular-nums">{row.band}</span>
                   ) : statedRefusal != null && row.refusalIsVendorWide ? (
-                    <span className="text-gray-400">—</span>
+                    <span className="text-ui-faint">—</span>
                   ) : (
-                    <span className="text-gray-400">
+                    <span className="text-ui-faint">
                       <ThinSampleIcon className="mr-1 inline-block align-[-0.05em]" />
                       {row.band}
                     </span>
                   )}
                 </td>
-                <td className="py-1 pr-3 text-right tabular-nums text-gray-600 dark:text-gray-300">
+                <td className="py-1 pr-3 text-right tabular-nums text-ui-mute">
                   {row.mergedPrs}
                 </td>
-                <td className="py-1 pr-3 text-right tabular-nums text-gray-600 dark:text-gray-300">
+                <td className="py-1 pr-3 text-right tabular-nums text-ui-mute">
                   {row.actedOn}
                 </td>
-                <td className="py-1 text-right tabular-nums text-gray-600 dark:text-gray-300">
+                <td className="py-1 text-right tabular-nums text-ui-mute">
                   {row.percentile}
                 </td>
               </tr>
@@ -1275,7 +1275,7 @@ function RollupCard({ row }: { row: RollupRow }): JSX.Element {
           repositories are the evidence. */}
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1" title={row.title}>
         <span
-          className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium"
+          className="inline-flex items-center gap-1 rounded-ui px-1.5 py-0.5 text-meta font-medium"
           style={row.color != null ? { color: row.color, background: `${row.color}1a` } : undefined}
         >
           <BotIcon size={12} />
@@ -1285,11 +1285,11 @@ function RollupCard({ row }: { row: RollupRow }): JSX.Element {
         </span>
         {/* ⚠ BOTH NUMBERS, ALWAYS — "live in 4 of 8 repositories". `liveInRepos` alone is an
             unanchored count, and it is the denominator every sum on this card runs over. */}
-        <span className="text-xs font-medium text-gray-700 dark:text-gray-200">{row.coverage}</span>
+        <span className="text-meta font-medium text-ui-ink">{row.coverage}</span>
         {/* The logins folded into this one card — two accounts the workspace classifies as one
             vendor are ONE card, which is the corpus's own semantics. */}
         {rollup.reviewers.length > 0 && (
-          <span className="text-[11px] text-gray-500 dark:text-gray-400">
+          <span className="text-meta text-ui-mute">
             {rollup.reviewers.map((r) => r.login).join(', ')}
           </span>
         )}
@@ -1308,10 +1308,10 @@ function RollupCard({ row }: { row: RollupRow }): JSX.Element {
           the rank of anything. */}
       {spread != null && (
         <div
-          className="mt-2 flex items-start gap-1.5 text-[12px] leading-relaxed text-gray-600 dark:text-gray-300"
+          className="mt-2 flex items-start gap-1.5 text-meta leading-relaxed text-ui-mute"
           data-testid="benchmark-rollup-spread"
         >
-          <ScalesIcon className="mt-0.5 shrink-0 text-gray-400" />
+          <ScalesIcon className="mt-0.5 shrink-0 text-ui-faint" />
           <p>{spread}</p>
         </div>
       )}
@@ -1347,10 +1347,10 @@ function RollupCard({ row }: { row: RollupRow }): JSX.Element {
           POPULATIONS", shipped three times in that feature before it was believed. */}
       {expectation != null && (
         <div
-          className="mt-2 flex items-start gap-1.5 text-[12px] leading-relaxed text-gray-600 dark:text-gray-300"
+          className="mt-2 flex items-start gap-1.5 text-meta leading-relaxed text-ui-mute"
           data-testid="benchmark-rollup-expectation"
         >
-          <ChartIcon size={13} className="mt-0.5 shrink-0 text-gray-400" />
+          <ChartIcon size={13} className="mt-0.5 shrink-0 text-ui-faint" />
           <p>{expectation}</p>
         </div>
       )}
@@ -1397,7 +1397,7 @@ function MeasuredDefinitions(): JSX.Element {
     <div data-testid="benchmark-specs">
       {isLoading && <SkeletonBlock className="h-16" />}
       {!isLoading && specs.length === 0 && (
-        <p className="text-gray-500 dark:text-gray-400">
+        <p className="text-ui-mute">
           No metric definitions are available in this build.
         </p>
       )}
@@ -1405,17 +1405,17 @@ function MeasuredDefinitions(): JSX.Element {
         <dl className="space-y-2">
           {specs.map((s) => (
             <div key={s.name}>
-              <dt className="font-medium text-gray-800 dark:text-gray-100">
+              <dt className="font-medium text-ui-ink">
                 {metricLabel(s.name)}{' '}
-                <span className="text-xs font-normal text-gray-500 dark:text-gray-400">
+                <span className="text-meta font-normal text-ui-mute">
                   {DERIVATION_LABEL[s.derivation]} · {DIRECTION_LABEL[s.direction]} · needs at
                   least {formatCount(s.minUnits)}
                 </span>
               </dt>
-              <dd className="text-gray-600 dark:text-gray-300">
+              <dd className="text-ui-mute">
                 {s.definition}
                 <br />
-                <span className="text-xs text-gray-500 dark:text-gray-400">
+                <span className="text-meta text-ui-mute">
                   {s.numerator} ÷ {s.denominator} · over {populations[s.population] ?? s.population}
                 </span>
               </dd>
@@ -1451,13 +1451,13 @@ function BenchmarkInfo({
           to render the customer's severity distribution against nothing. */}
       {absent.length > 0 && (
         <div data-testid="benchmark-absent-metrics">
-          <h3 className="font-semibold text-gray-900 dark:text-gray-50">Not compared yet</h3>
+          <h3 className="font-semibold text-ui-ink">Not compared yet</h3>
           <ul className="mt-1 list-disc space-y-1 pl-5">
             {absent.map((m) => (
               <li key={m.name}>
                 <span className="font-medium">{m.label}</span>: {m.note}
                 {Object.entries(m.requires).length > 0 && (
-                  <span className="text-gray-500 dark:text-gray-400">
+                  <span className="text-ui-mute">
                     {' '}
                     ({Object.entries(m.requires)
                       .map(([k, v]) => `${k.replace(/_/g, ' ')}: ${v}`)
@@ -1470,8 +1470,8 @@ function BenchmarkInfo({
         </div>
       )}
       <div>
-        <h3 className="font-semibold text-gray-900 dark:text-gray-50">How each figure is measured</h3>
-        <p className="mb-2 text-gray-600 dark:text-gray-300">
+        <h3 className="font-semibold text-ui-ink">How each figure is measured</h3>
+        <p className="mb-2 text-ui-mute">
           The other teams’ data counts these differently from this app’s own bot columns.
         </p>
         <MeasuredDefinitions />
@@ -1480,7 +1480,7 @@ function BenchmarkInfo({
           than used to withhold it. Server-authored, rendered verbatim. */}
       {disclosures != null && disclosures.length > 0 && (
         <div>
-          <h3 className="font-semibold text-gray-900 dark:text-gray-50">Limits</h3>
+          <h3 className="font-semibold text-ui-ink">Limits</h3>
           <ul className="mt-1 list-disc space-y-1 pl-5">
             {disclosures.map((d) => (
               <li key={d}>{d}</li>
@@ -1546,7 +1546,7 @@ function Body({
   if (isError || data == null) {
     return (
       <Card>
-        <p className="text-[11px] text-gray-500 dark:text-gray-400">
+        <p className="text-meta text-ui-mute">
           Could not load the peer benchmark for this Workspace.
         </p>
       </Card>
@@ -1577,7 +1577,7 @@ function Body({
 
   return (
     <>
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-gray-600 dark:text-gray-300">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-meta text-ui-mute">
         <span className="inline-flex items-center gap-1">
           <ChartIcon size={12} />
           Each bot against the same bot in similar-sized repos

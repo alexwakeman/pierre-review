@@ -9,6 +9,10 @@ import { BenchmarkPanel } from './BenchmarkPanel.js';
 import { effectiveBotsTab } from './benchmarkModel.js';
 import { BotIcon } from '../Icons.js';
 import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
+import { Tabs, useRegisterCommands, type Command, type TabItem } from '../ui/index.js';
+import { Callout, PageHeader } from './reportChrome.js';
+import type { BotsInnerTab } from '../../store/filters.js';
+import type { BotWindowKind } from '@pierre-review/shared';
 
 // The Bots rail view — "the calm layer above your review bots". It composes:
 //   • the ROI / utilisation panel (per-bot signal-to-noise + trend + keep/tune/noisy verdicts).
@@ -56,49 +60,61 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
   const showThemes = useAiCapabilities().enabled;
   const effectiveTab = effectiveBotsTab(innerTab, { showClassification, showThemes });
 
-  return (
-    <div className="space-y-3" data-testid="bots-view">
-      <div className="flex flex-wrap items-baseline gap-2">
-        <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-200">Bots Monitoring</h2>
-        {/* The per-repo mount says what it is scoped to; the rail needs no tagline. */}
-        {repoId != null && (
-          <span className="text-[12px] text-gray-500 dark:text-gray-400">
-            This Workspace’s bots, measured on this repo.
-          </span>
-        )}
-      </div>
+  // ⌘K while Bots Monitoring is showing: the window, and the two lists behind the callouts.
+  const setWindow = useFilters((s) => s.setBotAnalyticsWindow);
+  const openBotThreadsDetail = useFilters((s) => s.openBotThreadsDetail);
+  const commands = useMemo<Command[]>(() => {
+    const icon = <BotIcon size={14} />;
+    const win = (v: BotWindowKind, label: string): Command => ({
+      id: `bots:window:${v}`,
+      group: 'Actions',
+      title: `Bots: measure ${label}`,
+      keywords: ['window', 'roi'],
+      icon,
+      run: () => {
+        setInnerTab('roi');
+        setWindow(v);
+      },
+    });
+    return [
+      win('rolling_7', 'the last 7 days'),
+      win('rolling_14', 'the last 14 days'),
+      win('rolling_30', 'the last 30 days'),
+      win('sprint', 'this sprint'),
+      { id: 'bots:bot-only', group: 'Actions', title: 'Bots: open PRs only a bot reviewed', icon, run: () => openBotOnlyDetail(repoId ?? null) },
+      { id: 'bots:resolve', group: 'Actions', title: 'Bots: review & resolve likely-addressed threads', icon, run: () => openBotThreadsDetail(repoId ?? null) },
+    ];
+  }, [setInnerTab, setWindow, openBotOnlyDetail, openBotThreadsDetail, repoId]);
+  useRegisterCommands(repoId != null ? `bots:repo:${repoId}` : 'bots', commands);
 
-      {/* Inner sub-tab bar. Shows in BOTH the cross-repo rail Bots view and the per-repo
-          console Bots tab (one BotsView body). */}
-      <div role="tablist" className="flex gap-1 border-b border-gray-200 dark:border-gray-800">
-        {([
-          { key: 'roi', label: 'ROI' },
-          // ⚠ SECOND, NOT LAST. The panel sat FIRST on the Measure surface until it moved here, so
-          // second in the strip is what preserves its prominence — a report demoted to the far end
-          // of the strip on the day it got its own tab would read as a downgrade.
-          ...(showThemes ? [{ key: 'themes', label: 'Themes' } as const] : []),
-          { key: 'benchmark', label: 'Benchmark' },
-          ...(showClassification ? [{ key: 'classification', label: 'Classification' } as const] : []),
-        ] as const).map((t) => {
-          const on = effectiveTab === t.key;
-          return (
-            <button
-              key={t.key}
-              type="button"
-              role="tab"
-              aria-selected={on}
-              onClick={() => setInnerTab(t.key)}
-              className={`-mb-px flex items-center gap-1 rounded-t-md border border-b-0 px-3 py-1.5 text-xs font-medium ${
-                on
-                  ? 'border-gray-300 bg-white text-sky-600 dark:border-gray-700 dark:bg-gray-950 dark:text-sky-300'
-                  : 'border-transparent text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-900/60'
-              }`}
-            >
-              {t.label}
-            </button>
-          );
-        })}
-      </div>
+  const tabs: readonly TabItem<BotsInnerTab>[] = [
+    { id: 'roi', label: 'ROI' },
+    // ⚠ SECOND, NOT LAST. The panel sat FIRST on the Measure surface until it moved here, so
+    // second in the strip is what preserves its prominence.
+    { id: 'themes', label: 'Themes', hidden: !showThemes },
+    { id: 'benchmark', label: 'Benchmark' },
+    { id: 'classification', label: 'Classification', hidden: !showClassification },
+  ];
+
+  return (
+    <div className="mx-auto max-w-[1400px] space-y-5" data-testid="bots-view">
+      {/* One page header (the rail mount) — the per-repo console mount already has its own header
+          and tab strip, so there the title drops to a section heading and the 1–9 keys stay with
+          the console. Both mounts are one BotsView body. */}
+      {repoId == null ? (
+        <PageHeader title="Bots Monitoring">
+          <Tabs label="Bots Monitoring tabs" idPrefix="bots" numberKeys value={effectiveTab} onChange={setInnerTab} tabs={tabs} />
+        </PageHeader>
+      ) : (
+        <header className="space-y-3">
+          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <h2 className="text-title text-ui-ink">Bots Monitoring</h2>
+            {/* The per-repo mount says what it is scoped to; the rail needs no tagline. */}
+            <span className="text-meta text-ui-mute">This Workspace’s bots, measured on this repo.</span>
+          </div>
+          <Tabs label="Bots Monitoring tabs" idPrefix="repo-bots" value={effectiveTab} onChange={setInnerTab} tabs={tabs} />
+        </header>
+      )}
 
       {effectiveTab === 'classification' ? (
         // Who counts as a bot in this Workspace, plus each bot's price. The Feed's and the
@@ -127,29 +143,22 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
           {botOnly > 0 && (
             // The WHOLE caution is clickable — it opens the bot-only-PRs drill-down tab (the exact
             // PR list behind the count; same route/scope → count ≡ list).
-            <button
-              type="button"
+            <Callout
+              tone="warn"
+              icon={<BotIcon />}
               onClick={() => openBotOnlyDetail(repoId ?? null)}
-              data-testid="bot-only-caption"
+              testId="bot-only-caption"
               title="Show the open PRs only a bot reviewed"
-              className="flex w-full items-start gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-left text-[11px] text-amber-700 hover:bg-amber-100 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-300 dark:hover:bg-amber-900/40"
+              action="Show list →"
             >
-              <span className="flex-1">
-                <BotIcon className="mr-1 inline-block align-[-0.1em]" />
-                Only a bot reviewed{' '}
-                <span className="font-semibold tabular-nums">{botOnly}</span>{' '}
-                open PR{botOnly === 1 ? '' : 's'} — no human review yet. Consider a human pass before
-                they merge.{' '}
-                {/* The count is a live review-state snapshot of currently-OPEN PRs (any age); merged
-                    PRs are excluded here (they're in the list behind "Show merged"). */}
-                <span className="text-amber-600/80 dark:text-amber-400/70">
-                  Open PRs only, any age.
-                </span>
-              </span>
-              <span className="shrink-0 self-center rounded border border-amber-400 px-1.5 py-0.5 text-[11px] font-medium text-amber-700 dark:border-amber-600/70 dark:text-amber-300">
-                Show list →
-              </span>
-            </button>
+              Only a bot reviewed{' '}
+              <span className="font-semibold tabular-nums">{botOnly}</span>{' '}
+              open PR{botOnly === 1 ? '' : 's'} — no human review yet. Consider a human pass before
+              they merge.{' '}
+              {/* The count is a live review-state snapshot of currently-OPEN PRs (any age); merged
+                  PRs are excluded here (they're in the list behind "Show merged"). */}
+              <span className="text-ui-mute">Open PRs only, any age.</span>
+            </Callout>
           )}
 
           {/* Directly beneath the "only a bot reviewed" caution: the likely-addressed backlog, in

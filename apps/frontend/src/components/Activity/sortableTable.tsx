@@ -56,8 +56,8 @@ export function SortHeader<C extends string>({
         type="button"
         onClick={() => onSort(col)}
         title={title}
-        className={`inline-flex items-center gap-0.5 uppercase tracking-wide hover:text-gray-600 dark:hover:text-gray-300 ${
-          dir != null ? 'text-gray-600 dark:text-gray-300' : ''
+        className={`inline-flex items-center gap-0.5 hover:text-ui-mute ${
+          dir != null ? 'text-ui-mute' : ''
         }`}
       >
         {label}

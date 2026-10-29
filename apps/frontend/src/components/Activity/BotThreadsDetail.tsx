@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Checkbox, Select } from '../ui/index.js';
 import type {
   AddressedConfidence,
   AddressedConfidenceCounts,
@@ -76,7 +77,7 @@ function confidenceScore(c: AddressedConfidenceCounts): number {
 function ConfidenceMix({ counts }: { counts: AddressedConfidenceCounts }): JSX.Element {
   const levels: AddressedConfidence[] = ['high', 'medium', 'low'];
   const shown = levels.filter((l) => counts[l] > 0);
-  if (shown.length === 0) return <span className="text-[11px] text-gray-400">—</span>;
+  if (shown.length === 0) return <span className="text-meta text-ui-faint">—</span>;
   return (
     <span className="inline-flex items-center gap-1">
       {shown.map((l) => {
@@ -85,11 +86,11 @@ function ConfidenceMix({ counts }: { counts: AddressedConfidenceCounts }): JSX.E
           <span
             key={l}
             title={`${counts[l]} ${meta.label}-confidence thread${counts[l] === 1 ? '' : 's'} — ${meta.description}`}
-            className="inline-flex items-center gap-0.5 rounded px-1.5 py-px text-[11px] font-semibold tabular-nums"
+            className="inline-flex items-center gap-0.5 rounded-ui px-1.5 py-px text-meta font-semibold tabular-nums"
             style={{ ...vendorInk(meta.color), background: `${meta.color}1f` }}
           >
             {counts[l]}
-            <span className="tracking-wide">{meta.label[0]}</span>
+            <span className="">{meta.label[0]}</span>
           </span>
         );
       })}
@@ -318,7 +319,7 @@ export function BotThreadsDetail(): JSX.Element {
   // receipts without touching either.
   const header = (
     <div className="flex flex-wrap items-baseline gap-2">
-        <h2 className="text-base font-semibold text-gray-800 dark:text-gray-100">
+        <h2 className="text-title font-semibold text-ui-ink">
           <ResolveIcon size={15} className="inline-block align-[-0.1em]" /> Resolve bot threads
         </h2>
         <InfoButton title="Resolve bot threads">
@@ -331,33 +332,32 @@ export function BotThreadsDetail(): JSX.Element {
             Check each thread before you resolve it. Resolving here resolves the thread on GitHub.
           </p>
         </InfoButton>
-        <span className="text-[11px] text-gray-500 dark:text-gray-400">
+        <span className="text-meta text-ui-mute">
           Review, then resolve on GitHub. Click a PR to inspect.
         </span>
         {/* Cross-repo repo filter (single-repo tabs omit it). */}
         {isCrossRepo && repoOptions.length > 1 && (
-          <select
-            value={effectiveRepoFilter}
-            onChange={(e) => {
-              setRepoFilter(e.target.value === 'all' ? 'all' : Number(e.target.value));
-              setPage(0);
-            }}
-            className="rounded border border-gray-300 bg-white px-1.5 py-0.5 text-[11px] dark:border-gray-700 dark:bg-gray-900"
-            title="Filter by repo"
-          >
-            <option value="all">All repos ({repoOptions.length})</option>
-            {repoOptions.map(([id, name]) => (
-              <option key={id} value={id}>
-                {name}
-              </option>
-            ))}
-          </select>
+          <span title="Filter by repo">
+            <Select
+              size="sm"
+              label="Filter by repo"
+              value={String(effectiveRepoFilter)}
+              onChange={(v) => {
+                setRepoFilter(v === 'all' ? 'all' : Number(v));
+                setPage(0);
+              }}
+              options={[
+                { value: 'all', label: `All repos (${repoOptions.length})` },
+                ...repoOptions.map(([id, name]) => ({ value: String(id), label: name })),
+              ]}
+            />
+          </span>
         )}
         <button
           type="button"
           onClick={() => void refetch()}
           disabled={isFetching}
-          className="ml-auto rounded border border-gray-300 px-1.5 py-0.5 text-[11px] font-medium hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
+          className="ml-auto rounded-ui px-1.5 py-0.5 text-meta font-medium disabled:opacity-50 bg-ui-surface"
         >
           <RefreshIcon
             size={11}
@@ -376,13 +376,13 @@ export function BotThreadsDetail(): JSX.Element {
       {isLoading ? (
         <div className="space-y-2">
           {[0, 1, 2, 3].map((i) => (
-            <div key={i} className="h-8 animate-pulse rounded bg-gray-100 dark:bg-gray-900/40" />
+            <div key={i} className="h-8 animate-pulse rounded-ui bg-ui-raise" />
           ))}
         </div>
       ) : isError ? (
-        <div className="text-sm text-red-500">Couldn’t load the resolvable threads.</div>
+        <div className="text-body text-ui-danger">Couldn’t load the resolvable threads.</div>
       ) : prs.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-400 dark:border-gray-700">
+        <div className="rounded-ui p-6 text-center text-body text-ui-faint bg-ui-surface">
           <CheckCircleIcon className="mr-1.5 inline-block align-[-0.1em] opacity-70" />
           No likely-addressed bot threads to review.
         </div>
@@ -393,7 +393,7 @@ export function BotThreadsDetail(): JSX.Element {
         <button
           type="button"
           onClick={() => setShowReceipts(true)}
-          className="w-full rounded-lg border border-dashed border-gray-300 px-3 py-2 text-center text-[12px] font-medium text-gray-500 hover:border-gray-400 hover:text-gray-700 dark:border-gray-700 dark:text-gray-400 dark:hover:border-gray-500 dark:hover:text-gray-200"
+          className="w-full rounded-ui px-3 py-2 text-center text-meta font-medium text-ui-mute hover:text-ui-ink bg-ui-surface"
         >
           Show the {totalThreads.toLocaleString()} thread{totalThreads === 1 ? '' : 's'} across{' '}
           {prs.length.toLocaleString()} PR{prs.length === 1 ? '' : 's'} this summary was computed
@@ -402,10 +402,10 @@ export function BotThreadsDetail(): JSX.Element {
       ) : (
         <>
           {/* TOP action bar — the bulk resolve pinned above the list. */}
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-gray-200 bg-gray-50/60 px-3 py-2 dark:border-gray-800 dark:bg-gray-900/40">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-ui bg-ui-surface px-3 py-2">
             {resolve.isPending && progress ? (
               <>
-                <span className="text-[12px] text-gray-500 dark:text-gray-400 tabular-nums">
+                <span className="text-meta text-ui-mute tabular-nums">
                   Resolving… {progress.done}/{progress.total} ({progress.resolved} resolved
                   {progress.failed > 0 ? `, ${progress.failed} failed` : ''})
                 </span>
@@ -414,7 +414,7 @@ export function BotThreadsDetail(): JSX.Element {
                   onClick={() => {
                     stopRef.current = true;
                   }}
-                  className="rounded border border-amber-400 px-2 py-1 text-[12px] font-medium text-amber-700 hover:bg-amber-100 dark:border-amber-600 dark:text-amber-300 dark:hover:bg-amber-900/30"
+                  className="rounded-ui bg-ui-raise px-2 py-1 text-meta font-medium text-ui-ink hover:bg-ui-hover touch:py-2"
                   title="Stop after the current batch finishes"
                 >
                   Stop
@@ -422,7 +422,7 @@ export function BotThreadsDetail(): JSX.Element {
               </>
             ) : confirming ? (
               <>
-                <span className="text-[12px] text-gray-600 dark:text-gray-300">
+                <span className="text-meta text-ui-mute">
                   Resolve {selectedThreadIds.length} likely-addressed thread
                   {selectedThreadIds.length === 1 ? '' : 's'} across {selectedPrIds.length} PR
                   {selectedPrIds.length === 1 ? '' : 's'} on GitHub?
@@ -431,7 +431,7 @@ export function BotThreadsDetail(): JSX.Element {
                   type="button"
                   disabled={resolve.isPending || selectedThreadIds.length === 0}
                   onClick={runResolve}
-                  className="rounded bg-green-600 px-2.5 py-1 text-[12px] font-medium text-white hover:bg-green-700 disabled:opacity-60"
+                  className="rounded-ui bg-ui-accent-fill px-2.5 py-1 text-meta font-medium text-ui-on-accent hover:opacity-90 disabled:opacity-60 touch:py-2"
                 >
                   Yes, resolve
                 </button>
@@ -439,7 +439,7 @@ export function BotThreadsDetail(): JSX.Element {
                   type="button"
                   disabled={resolve.isPending}
                   onClick={() => setConfirming(false)}
-                  className="rounded px-2 py-1 text-[12px] text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
+                  className="rounded-ui px-2 py-1 text-meta text-ui-mute hover:text-ui-ink"
                 >
                   Cancel
                 </button>
@@ -450,7 +450,7 @@ export function BotThreadsDetail(): JSX.Element {
                   type="button"
                   disabled={selectedThreadIds.length === 0}
                   onClick={() => setConfirming(true)}
-                  className="rounded border border-sky-400 px-2.5 py-1 text-[12px] font-medium text-sky-700 hover:bg-sky-100 disabled:opacity-50 dark:border-sky-600 dark:text-sky-200 dark:hover:bg-sky-900/30"
+                  className="rounded-ui bg-ui-raise px-2.5 py-1 text-meta font-medium text-ui-accent hover:bg-ui-hover disabled:opacity-50 touch:py-2"
                   title="These threads only LOOK addressed (a later commit touched their file) — you approve the batch before it resolves on GitHub."
                 >
                   Resolve {selectedThreadIds.length} thread
@@ -461,7 +461,7 @@ export function BotThreadsDetail(): JSX.Element {
                   type="button"
                   onClick={selectAll}
                   disabled={allSelected || filtered.length === 0}
-                  className="rounded border border-gray-300 px-2 py-1 text-[12px] font-medium text-gray-600 hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:text-gray-300"
+                  className="rounded-ui px-2 py-1 text-meta font-medium text-ui-mute disabled:opacity-50 bg-ui-surface"
                   title="Select every PR in the list (across all pages)"
                 >
                   Select all{effectiveRepoFilter === 'all' ? '' : ' (repo)'}
@@ -473,25 +473,20 @@ export function BotThreadsDetail(): JSX.Element {
                   // or high-only filter that hides every selected PR, Clear greys out in step with
                   // the "0 of 0 selected" summary instead of dangling enabled off a hidden ghost.
                   disabled={selectedPrIds.length === 0}
-                  className="rounded px-2 py-1 text-[12px] text-gray-500 dark:text-gray-400 hover:text-gray-700 disabled:opacity-40 dark:hover:text-gray-300"
+                  className="rounded-ui px-2 py-1 text-meta text-ui-mute hover:text-ui-ink disabled:opacity-40"
                 >
                   Clear
                 </button>
-                <label
-                  className="flex items-center gap-1 text-[11px] text-gray-500 dark:text-gray-400"
-                  title="Show only PRs with a HIGH-confidence resolvable thread, and resolve just those — GitHub marked the lines outdated AND a later commit touched them, or the bot itself confirmed/resolved it. The safest subset."
-                >
-                  <input
-                    type="checkbox"
+                <span title="Show only PRs with a HIGH-confidence resolvable thread, and resolve just those — GitHub marked the lines outdated AND a later commit touched them, or the bot itself confirmed/resolved it. The safest subset.">
+                  <Checkbox
                     checked={highOnly}
                     onChange={(e) => setHighOnly(e.target.checked)}
-                    className="h-3.5 w-3.5 cursor-pointer accent-green-600"
+                    label={`High-confidence only${totalHigh > 0 ? ` (${totalHigh})` : ''}`}
                   />
-                  High-confidence only{totalHigh > 0 ? ` (${totalHigh})` : ''}
-                </label>
+                </span>
               </>
             )}
-            <span className="text-[11px] text-gray-400 tabular-nums">
+            <span className="text-meta text-ui-faint tabular-nums">
               {selectedPrIds.length} of {filtered.length} PR{filtered.length === 1 ? '' : 's'}{' '}
               selected · {backlogThreads} {highOnly ? 'high-confidence ' : ''}thread
               {backlogThreads === 1 ? '' : 's'} in backlog
@@ -499,14 +494,14 @@ export function BotThreadsDetail(): JSX.Element {
             {!resolve.isPending &&
               resolve.data &&
               (resolve.data.resolved > 0 || resolve.data.failed > 0 || resolve.data.stopped) && (
-                <span className="text-[11px] text-gray-500 dark:text-gray-400">
+                <span className="text-meta text-ui-mute">
                   Resolved {resolve.data.resolved}
                   {resolve.data.failed > 0 && ` · ${resolve.data.failed} failed`}
                   {resolve.data.stopped && ' · stopped'}.
                 </span>
               )}
             {resolve.isError && (
-              <span className="text-[11px] text-red-500">
+              <span className="text-meta text-ui-danger">
                 {(resolve.error as Error)?.message ?? 'Couldn’t resolve.'}
               </span>
             )}
@@ -515,7 +510,7 @@ export function BotThreadsDetail(): JSX.Element {
           {/* When "High-confidence only" (or a repo filter) empties the list, explain it instead
               of leaving a bare header-only table. */}
           {filtered.length === 0 && (
-            <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-400 dark:border-gray-700">
+            <div className="rounded-ui p-6 text-center text-body text-ui-faint bg-ui-surface">
               {highOnly
                 ? 'No high-confidence threads here — uncheck “High-confidence only” to see the rest of the backlog.'
                 : 'No PRs match this filter.'}
@@ -527,16 +522,15 @@ export function BotThreadsDetail(): JSX.Element {
               per-thread enumeration. */}
           {filtered.length > 0 && (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[940px] border-collapse text-sm">
+            <table className="w-full min-w-[940px] border-collapse text-body">
               <thead>
-                <tr className="text-left text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+                <tr className="text-left text-meta font-semibold text-ui-faint">
                   <th className="pb-1 pr-2">
-                    <input
-                      type="checkbox"
+                    <Checkbox
                       checked={allSelected}
                       onChange={() => (allSelected ? clearSelection() : selectAll())}
                       title={allSelected ? 'Deselect all' : 'Select all (across pages)'}
-                      className="h-3.5 w-3.5 cursor-pointer accent-sky-500"
+                      aria-label={allSelected ? 'Deselect all' : 'Select all (across pages)'}
                     />
                   </th>
                   <SortHeader col="pr" label="Pull request" sort={sort} onSort={onSort} />
@@ -560,50 +554,49 @@ export function BotThreadsDetail(): JSX.Element {
                       key={g.prId}
                       onClick={() => openPr(g)}
                       title="Open this PR's likely-addressed threads"
-                      className={`cursor-pointer border-t border-gray-100 align-top hover:bg-gray-50/70 dark:border-gray-800/60 dark:hover:bg-gray-900/40 ${
-                        isSel ? 'bg-sky-50/60 dark:bg-sky-950/20' : ''
+                      className={`cursor-pointer align-top hover:bg-ui-hover ${
+                        isSel ? 'bg-ui-sel' : ''
                       }`}
                     >
                       <td className="py-1.5 pr-2" onClick={(e) => e.stopPropagation()}>
-                        <input
-                          type="checkbox"
+                        <Checkbox
                           checked={isSel}
                           onChange={() => toggleRow(g.prId)}
                           title={isSel ? 'Exclude this PR' : 'Include this PR'}
-                          className="h-3.5 w-3.5 cursor-pointer accent-sky-500"
+                          aria-label={`${isSel ? 'Exclude' : 'Include'} #${g.prNumber}`}
                         />
                       </td>
                       <td className="max-w-md py-1.5 pr-3">
                         <span className="flex items-center gap-1.5">
-                          <span className="font-mono text-[11px] text-gray-400">#{g.prNumber}</span>
-                          <span className="min-w-0 truncate text-sm font-medium text-gray-800 dark:text-gray-100">
+                          <span className="font-mono text-meta text-ui-faint">#{g.prNumber}</span>
+                          <span className="min-w-0 truncate text-body font-medium text-ui-ink">
                             {g.prTitle}
                           </span>
                         </span>
                       </td>
                       {showRepoCol && (
-                        <td className="py-1.5 pr-3 text-[11px] text-gray-500 dark:text-gray-400">
+                        <td className="py-1.5 pr-3 text-meta text-ui-mute">
                           <span className="block max-w-[12rem] truncate font-mono">
                             {g.repoFullName}
                           </span>
                         </td>
                       )}
                       <td className="py-1.5 pr-3">
-                        <span className="inline-flex items-center gap-1 text-[11px] text-gray-600 dark:text-gray-300">
+                        <span className="inline-flex items-center gap-1 text-meta text-ui-mute">
                           <Avatar user={author} size={14} />
                           <span className="max-w-[8rem] truncate">
                             {userLabel(author, g.authorId)}
                           </span>
                         </span>
                       </td>
-                      <td className="py-1.5 pr-3 text-[11px] text-gray-500 dark:text-gray-400">
+                      <td className="py-1.5 pr-3 text-meta text-ui-mute">
                         {relativeTime(g.openedAt)}
                       </td>
-                      <td className="py-1.5 pr-3 text-[11px] text-gray-500 dark:text-gray-400">
+                      <td className="py-1.5 pr-3 text-meta text-ui-mute">
                         {relativeTime(g.updatedAt)}
                       </td>
                       <td className="py-1.5 pr-3">
-                        <span className="inline-flex items-center gap-1 whitespace-nowrap text-[11px] text-gray-500 dark:text-gray-400">
+                        <span className="inline-flex items-center gap-1 whitespace-nowrap text-meta text-ui-mute">
                           <span
                             className="inline-block h-2 w-2 rounded-full"
                             style={ci ? { background: ci.color } : { boxShadow: 'inset 0 0 0 1px #9ca3af' }}
@@ -613,7 +606,7 @@ export function BotThreadsDetail(): JSX.Element {
                         </span>
                       </td>
                       <td className="py-1.5 pr-3">
-                        <span className="rounded bg-sky-100 px-1.5 py-px text-[11px] font-semibold tabular-nums text-sky-700 dark:bg-sky-900/40 dark:text-sky-300">
+                        <span className="rounded-ui bg-ui-sel px-1.5 py-px text-meta font-semibold tabular-nums text-ui-accent">
                           {g.resolvableCount}
                         </span>
                       </td>
@@ -640,12 +633,12 @@ export function BotThreadsDetail(): JSX.Element {
 
           {/* Client-side pager (selection + "Select all" span every page). */}
           {pageCount > 1 && (
-            <div className="flex items-center justify-center gap-3 text-[11px] text-gray-500 dark:text-gray-400">
+            <div className="flex items-center justify-center gap-3 text-meta text-ui-mute">
               <button
                 type="button"
                 onClick={() => setPage(Math.max(0, safePage - 1))}
                 disabled={safePage === 0}
-                className="inline-flex items-center gap-0.5 rounded border border-gray-300 px-2 py-0.5 font-medium hover:border-gray-400 disabled:opacity-40 dark:border-gray-700"
+                className="inline-flex items-center gap-0.5 rounded-ui px-2 py-0.5 font-medium disabled:opacity-40 bg-ui-surface"
               >
                 <ChevronIcon dir="left" size={11} />
                 Prev
@@ -657,7 +650,7 @@ export function BotThreadsDetail(): JSX.Element {
                 type="button"
                 onClick={() => setPage(Math.min(pageCount - 1, safePage + 1))}
                 disabled={safePage >= pageCount - 1}
-                className="inline-flex items-center gap-0.5 rounded border border-gray-300 px-2 py-0.5 font-medium hover:border-gray-400 disabled:opacity-40 dark:border-gray-700"
+                className="inline-flex items-center gap-0.5 rounded-ui px-2 py-0.5 font-medium disabled:opacity-40 bg-ui-surface"
               >
                 Next
                 <ChevronIcon dir="right" size={11} />

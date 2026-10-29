@@ -76,10 +76,10 @@ const densAxis = (n: number): string => (n >= 10 ? String(Math.round(n)) : Strin
 // A compact headline stat (label + value + optional sub-line). Shared with BotDetailPanel.
 export function Stat({ label, value, sub }: { label: string; value: string; sub?: string }): JSX.Element {
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-2 dark:border-gray-800 dark:bg-gray-900/40">
-      <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">{label}</div>
-      <div className="text-base font-semibold text-gray-800 dark:text-gray-100">{value}</div>
-      {sub && <div className="text-[11px] text-gray-400">{sub}</div>}
+    <div className="rounded-ui bg-ui-surface p-2">
+      <div className="text-meta font-semibold text-ui-faint">{label}</div>
+      <div className="text-title font-semibold text-ui-ink">{value}</div>
+      {sub && <div className="text-meta text-ui-faint">{sub}</div>}
     </div>
   );
 }
@@ -150,8 +150,8 @@ function BotSubsetLegend({
             key={b.key}
             type="button"
             onClick={() => subset.toggle(b.key)}
-            className={`flex items-center gap-1 text-[11px] ${
-              on ? 'text-gray-600 dark:text-gray-300' : 'text-gray-400 line-through opacity-60'
+            className={`flex items-center gap-1 text-meta ${
+              on ? 'text-ui-mute' : 'text-ui-faint line-through opacity-60'
             }`}
           >
             <span
@@ -166,7 +166,7 @@ function BotSubsetLegend({
         <button
           type="button"
           onClick={subset.reset}
-          className="text-[11px] text-sky-600 hover:underline dark:text-sky-400"
+          className="text-meta text-ui-accent hover:underline"
         >
           all
         </button>
@@ -303,10 +303,10 @@ function DensityTrendChart({
     const arrow = trendPct <= -10 ? '↘' : trendPct >= 10 ? '↗' : '→';
     const cls =
       trendPct <= -10
-        ? 'text-green-600 dark:text-green-400'
+        ? 'text-ui-success'
         : trendPct >= 10
-          ? 'text-amber-600 dark:text-amber-400'
-          : 'text-gray-500 dark:text-gray-400';
+          ? 'text-ui-warn'
+          : 'text-ui-mute';
     return { text: `${arrow} ${trendPct > 0 ? '+' : ''}${trendPct}% over 12 wks`, cls };
   })();
 
@@ -315,14 +315,12 @@ function DensityTrendChart({
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-2 text-[11px]">
+        <div className="flex items-center gap-2 text-meta">
           <button
             type="button"
             onClick={() => setShowTrend((s) => !s)}
-            className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 font-medium ${
-              showTrend
-                ? 'border-amber-400 bg-amber-500/10 text-amber-700 dark:text-amber-300'
-                : 'border-gray-300 text-gray-500 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-400 dark:hover:bg-gray-800'
+            className={`inline-flex items-center gap-1 rounded-ui px-2 py-0.5 font-medium touch:py-2 ${
+              showTrend ? 'bg-ui-sel text-ui-ink' : 'bg-ui-raise text-ui-mute hover:bg-ui-hover'
             }`}
           >
             <span
@@ -333,7 +331,7 @@ function DensityTrendChart({
           </button>
           {showTrend && trendChip && <span className={`font-medium ${trendChip.cls}`}>{trendChip.text}</span>}
         </div>
-        <div className="inline-flex overflow-hidden rounded border border-gray-300 text-[11px] dark:border-gray-700">
+        <div className="inline-flex overflow-hidden rounded-ui text-meta">
           {([
             ['kloc', 'per KLoC'],
             ['pr', 'per PR'],
@@ -344,8 +342,8 @@ function DensityTrendChart({
               onClick={() => setMode(k)}
               className={`px-2 py-0.5 font-medium ${
                 mode === k
-                  ? 'bg-sky-500/15 text-sky-700 dark:text-sky-300'
-                  : 'text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800'
+                  ? 'bg-ui-sel text-ui-accent'
+                  : 'text-ui-mute hover:bg-ui-hover'
               }`}
             >
               {lbl}
@@ -474,9 +472,9 @@ function BotOverlapSection({ overlap, color }: { overlap: BotOverlapStats; color
   const pct = Math.round((multiReviewedPrs / reviewedPrs) * 100);
   const maxPair = Math.max(1, ...pairs.map((p) => p.prs));
   return (
-    <div className="space-y-2 rounded-lg border border-gray-200 p-3 dark:border-gray-800">
+    <div className="space-y-2 rounded-ui p-3 bg-ui-surface">
       <div className="flex flex-wrap items-baseline gap-2">
-        <span className="text-sm font-semibold text-gray-800 dark:text-gray-100">Bot overlap</span>
+        <span className="text-body font-semibold text-ui-ink">Bot overlap</span>
         <InfoButton title="Bot overlap">
           <p>
             Where more than one bot reviewed the same pull request, or commented on the same line,
@@ -506,12 +504,12 @@ function BotOverlapSection({ overlap, color }: { overlap: BotOverlapStats; color
           ) : (
             <ul className="space-y-1 py-1">
               {pairs.slice(0, 8).map((p) => (
-                <li key={`${p.aKey}-${p.bKey}`} className="flex items-center gap-2 text-[11px]">
-                  <span className="w-40 shrink-0 truncate text-gray-600 dark:text-gray-300" title={`${p.aLabel} ↔ ${p.bLabel}`}>
-                    {p.aLabel} <span className="text-gray-400">↔</span> {p.bLabel}
+                <li key={`${p.aKey}-${p.bKey}`} className="flex items-center gap-2 text-meta">
+                  <span className="w-40 shrink-0 truncate text-ui-mute" title={`${p.aLabel} ↔ ${p.bLabel}`}>
+                    {p.aLabel} <span className="text-ui-faint">↔</span> {p.bLabel}
                   </span>
-                  <span className="h-2 rounded-full bg-sky-400/70" style={{ width: `${(p.prs / maxPair) * 100}%`, minWidth: 4 }} />
-                  <span className="ml-auto shrink-0 tabular-nums text-gray-400">{p.prs}</span>
+                  <span className="h-2 rounded-full bg-ui-accent/60" style={{ width: `${(p.prs / maxPair) * 100}%`, minWidth: 4 }} />
+                  <span className="ml-auto shrink-0 tabular-nums text-ui-faint">{p.prs}</span>
                 </li>
               ))}
             </ul>
@@ -610,7 +608,7 @@ function BotRepoWorkChart({
   const { columns, groups, singleRepo, legend } = model;
 
   const height = 210;
-  const PAD_L = 30;
+  const PAD_L = 36;
   const PAD_R = 8;
   const PAD_T = 8;
   const PAD_B = singleRepo ? 42 : 56; // rotated labels (repo/bot) + a bot band beneath (multi-repo)
@@ -658,7 +656,7 @@ function BotRepoWorkChart({
       note={
         singleRepo
           ? 'per bot: inline threads by codebase area'
-          : 'per bot: inline threads by repo, split by codebase area'
+          : 'per bot: inline threads by repo, split codebase area'
       }
     >
       <div ref={ref} className="relative" style={{ height }}>
@@ -666,14 +664,14 @@ function BotRepoWorkChart({
           <svg width={w} height={height} className="block">
             {[0, maxV].map((v) => (
               <g key={v}>
-                <line x1={PAD_L} y1={y(v)} x2={w - PAD_R} y2={y(v)} className="decorative-mark text-gray-200 dark:text-gray-700" stroke="currentColor" strokeWidth={1} />
-                <text x={PAD_L - 4} y={y(v) + 3} textAnchor="end" className="fill-gray-500 dark:fill-gray-400 text-[11px]">
+                <line x1={PAD_L} y1={y(v)} x2={w - PAD_R} y2={y(v)} className="decorative-mark text-ui-faint" stroke="currentColor" strokeWidth={1} />
+                <text x={PAD_L - 4} y={y(v) + 3} textAnchor="end" className="fill-gray-500 dark:fill-gray-400 text-meta">
                   {fmtNum(v)}
                 </text>
               </g>
             ))}
             {hover != null && (
-              <rect x={colLeft[hover]!} y={PAD_T} width={unitW} height={innerH} className="text-gray-400/10 dark:text-gray-300/10" fill="currentColor" />
+              <rect x={colLeft[hover]!} y={PAD_T} width={unitW} height={innerH} className="text-gray-400/10" fill="currentColor" />
             )}
             {columns.map((c, i) => {
               let acc = 0;
@@ -688,7 +686,7 @@ function BotRepoWorkChart({
               const cx = colCenter(i);
               const ly = baseY + 9;
               return (
-                <text key={`lbl-${i}`} x={cx} y={ly} textAnchor="end" transform={`rotate(-35 ${cx} ${ly})`} className="fill-gray-500 dark:fill-gray-400 text-[11px]">
+                <text key={`lbl-${i}`} x={cx} y={ly} textAnchor="end" transform={`rotate(-35 ${cx} ${ly})`} className="fill-gray-500 dark:fill-gray-400 text-meta">
                   {singleRepo ? c.botLabel : c.repoName}
                 </text>
               );
@@ -701,7 +699,7 @@ function BotRepoWorkChart({
                 return (
                   <g key={`grp-${g.start}`}>
                     <line x1={x0} y1={gy} x2={x1} y2={gy} stroke={g.color} strokeWidth={2} />
-                    <text x={(x0 + x1) / 2} y={gy + 10} textAnchor="middle" className="text-[11px] font-medium" fill={g.color}>
+                    <text x={(x0 + x1) / 2} y={gy + 10} textAnchor="middle" className="text-meta font-medium" fill={g.color}>
                       {g.label}
                     </text>
                   </g>
@@ -718,7 +716,7 @@ function BotRepoWorkChart({
               <FloatingTip x={colCenter(hover)} y={PAD_T} width={w}>
                 <div className="font-medium">
                   {c.botLabel}
-                  {!singleRepo && <span className="text-gray-400"> · {c.repoFull}</span>}
+                  {!singleRepo && <span className="text-ui-faint"> · {c.repoFull}</span>}
                 </div>
                 {c.segments.map((s) => (
                   <div key={s.dir} className="flex items-center gap-1">
@@ -726,14 +724,14 @@ function BotRepoWorkChart({
                     {areaLabel(s.dir)}: {fmtNum(s.count)}
                   </div>
                 ))}
-                <div className="mt-0.5 border-t border-gray-200 pt-0.5 dark:border-gray-700">total: {fmtNum(c.total)}</div>
+                <div className="mt-0.5 pt-0.5">total: {fmtNum(c.total)}</div>
               </FloatingTip>
             );
           })()}
       </div>
       <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5">
         {legend.map((l) => (
-          <span key={l.dir} className="flex items-center gap-1 text-[11px] text-gray-500 dark:text-gray-400">
+          <span key={l.dir} className="flex items-center gap-1 text-meta text-ui-mute">
             <span className="inline-block h-2 w-2 rounded-[2px]" style={{ background: l.color }} />
             {areaLabel(l.dir)}
           </span>
@@ -828,7 +826,7 @@ function BotVolumeSizeChart({
   // would draw the wrong scope's bars under this window's caption. See the ⚠ at the query above.
   if (pending) {
     return (
-      <div className="h-40 animate-pulse rounded-lg border border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-900/40" />
+      <div className="h-40 animate-pulse rounded-ui bg-ui-surface" />
     );
   }
   // No merged PR in scope had an observed size — there is no x-axis to draw and nothing honest to
@@ -873,8 +871,8 @@ function BotVolumeSizeChart({
       ) : (
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
           <div>
-            <div className="mb-0.5 text-[11px] font-medium text-gray-600 dark:text-gray-300">
-              Per merged PR <span className="font-normal text-gray-400">— rises with size</span>
+            <div className="mb-0.5 text-meta font-medium text-ui-mute">
+              Per merged PR <span className="font-normal text-ui-faint">— rises with size</span>
             </div>
             <BarChart
               labels={labels}
@@ -885,9 +883,9 @@ function BotVolumeSizeChart({
             />
           </div>
           <div>
-            <div className="mb-0.5 text-[11px] font-medium text-gray-600 dark:text-gray-300">
+            <div className="mb-0.5 text-meta font-medium text-ui-mute">
               Per 100 lines{' '}
-              <span className="font-normal text-gray-400">— falls, usually by a lot</span>
+              <span className="font-normal text-ui-faint">— falls, usually by a lot</span>
             </div>
             <BarChart
               labels={labels}
@@ -902,8 +900,8 @@ function BotVolumeSizeChart({
 
       {/* The support behind each bar. A mean over 3 PRs and a mean over 268 draw at identical
           visual weight, so the counts have to be on screen next to them, not in a tooltip. */}
-      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-0.5 text-[11px] text-gray-500 dark:text-gray-400">
-        <span className="text-gray-400">Merged PRs behind each bar:</span>
+      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-0.5 text-meta text-ui-mute">
+        <span className="text-ui-faint">Merged PRs behind each bar:</span>
         {model.rows.map((r) => (
           // The interpunct is not decoration: without it "<50 268 PRs 50–200 12 PRs" runs two
           // separate readings together, and the bucket edges are themselves numbers.
@@ -917,14 +915,14 @@ function BotVolumeSizeChart({
           cannot be read as "PRs this big are not measured here". Distinct from a band that IS on
           the axis with no bar, which is the real finding "PRs this size merged and drew nothing". */}
       {model.emptyLabels.length > 0 && (
-        <div className="mt-1 text-[12px] text-gray-400">
+        <div className="mt-1 text-meta text-ui-faint">
           No merged PR of this size in this window: {model.emptyLabels.join(', ')}. Left off the axis,
           not drawn as zero.
         </div>
       )}
-      {unsized && <div className="mt-1 text-[12px] text-gray-400">{unsized}</div>}
+      {unsized && <div className="mt-1 text-meta text-ui-faint">{unsized}</div>}
 
-      <div className="mt-1 text-[12px] font-medium text-amber-600 dark:text-amber-400">
+      <div className="mt-1 text-meta font-medium text-ui-warn">
         <WarningIcon size={11} className="mr-0.5 inline-block align-[-0.1em]" />A correlation, not
         a rule, and it varies by repo.
       </div>
@@ -953,9 +951,9 @@ export function WorkspaceBotCharts({ repoId }: { repoId?: number } = {}): JSX.El
         type="button"
         onClick={() => setOpen((s) => !s)}
         aria-expanded={open}
-        className="inline-flex items-center gap-1 text-[11px] font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+        className="inline-flex min-h-8 items-center gap-1 rounded-ui text-left text-body text-ui-mute hover:text-ui-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent touch:min-h-10"
       >
-        <ChevronIcon dir={open ? 'down' : 'right'} size={11} />
+        <ChevronIcon dir={open ? 'down' : 'right'} size={12} className="shrink-0" />
         Workspace charts — cross-bot trends, overlap and coverage
       </button>
       <InfoButton title="Workspace charts">
@@ -969,18 +967,18 @@ export function WorkspaceBotCharts({ repoId }: { repoId?: number } = {}): JSX.El
           <li>Each bot’s own charts open from “Depth →” on its ROI table row.</li>
         </ul>
       </InfoButton>
-      {open && <span className="text-[11px] text-gray-400">· {windowLabel}</span>}
+      {open && <span className="text-meta text-ui-faint">· {windowLabel}</span>}
       </div>
       {open && (
         <>
           {isLoading ? (
-            <div className="h-40 animate-pulse rounded-lg border border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-900/40" />
+            <div className="h-40 animate-pulse rounded-ui bg-ui-surface" />
           ) : isError ? (
-            <div className="text-sm text-red-500">Couldn’t load bot behaviour analytics.</div>
+            <div className="text-body text-ui-danger">Couldn’t load bot behaviour analytics.</div>
           ) : bots.length === 0 ? (
-            <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-400 dark:border-gray-700">
+            <div className="rounded-ui p-6 text-center text-body text-ui-faint bg-ui-surface">
               No automated-reviewer activity in this window.
-              <div className="mt-1 text-[12px]">
+              <div className="mt-1 text-meta">
                 A bot that was active earlier may just be quiet. Try a wider window above.
               </div>
             </div>

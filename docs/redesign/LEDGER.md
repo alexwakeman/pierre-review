@@ -2473,7 +2473,7 @@ Cross-cutting:
   - [ ] Closing every dynamic tab lands on Activity
 - Tests: `test/closeTabs.test.ts`, `test/isolateFilter.test.ts`, `test/urlHistory.test.ts`, `e2e/activity-feed.spec.ts`
 
-### [ ] Reports shell (Overview · Chronology · Stories)
+### [x] Reports shell (Overview · Chronology · Stories) → one page header (`reportChrome.tsx` `PageHeader`: "Reports" as the page title) + the shared `Tabs` (1–3 keys; same store/URL values, `bottlenecks` still labelled Chronology); empty card kept; ⌘K adds "Period reports by sprint/month" and every "Flow metrics: …" drill-down
 - Entry: rail "Reports" (`?activityRepo=insights`; store value stays `'insights'`);
   `?insightsTab=overview|bottlenecks|stories` ("bottlenecks" labelled Chronology); `?reportGrain=`, `?report=`
 - Files: `Activity/InsightsView.tsx`, `Activity/index.tsx`, `store/filters.ts`
@@ -2490,7 +2490,7 @@ Cross-cutting:
   `e2e/activity-feed.spec.ts`, verify-demo reports:overview, reports:bottlenecks, reports:stories,
   reports:month, ws2:chronology
 
-### [ ] Reports → Overview: flow metrics tiles and trend charts
+### [x] Reports → Overview: flow metrics tiles and trend charts → "Flow metrics" a title-size heading with its ⓘ; tiles on tone (no border), sentence-case labels, tabular figures, delta in success/danger ink (dropped on low confidence as before), 2-up on a phone; "Right now" group kept apart (no rule); charts on the re-stepped categorical palette (`charts/common.tsx` PALETTE, validated both themes); "More charts" a ≥40px touch row
 - Files: `Activity/WorkspaceFlowMetrics.tsx`, `Activity/WorkspaceMetricsPanel.tsx`,
   `charts/LineChart.tsx`, `charts/BarChart.tsx`, `charts/ChartPopover.tsx`, `charts/common.tsx`,
   `hooks/useRepoWorkspaceMetrics.ts`, `hooks/useWorkspaceInsights.ts`
@@ -2519,7 +2519,7 @@ Cross-cutting:
   - [ ] "Nothing to measure…" empty card
 - Tests: `test/reportingWindowLabels.test.ts`, `test/activePopover.test.ts`, verify-demo reports:overview
 
-### [ ] Reports → Overview: "Where the work is happening" (repo rows + reach)
+### [x] Reports → Overview: "Where the work is happening" (repo rows + reach) → unchanged structure, tone not borders
 - Files: `Activity/WorkspaceRepoActivityCharts.tsx`, `Activity/WorkspaceReachCard.tsx`,
   `Activity/reachModel.ts`, `charts/RepoRows.tsx`
 - Essential info:
@@ -2533,7 +2533,7 @@ Cross-cutting:
   - [ ] Self-hides when nothing was opened in the window; absent on an older server response
 - Tests: `test/repoActivityChart.test.ts`, `test/reachModel.test.ts`
 
-### [ ] Flow metrics drill-down tab (metrics-detail)
+### [x] Flow metrics drill-down tab (metrics-detail) → metric sub-tabs are the shared `Tabs` (counts as tab counts); Longest/Fastest first a segmented control; table scrolls in its own box with the PR column sticky (55vw on a phone); repo filter uses the shared `Checkbox`
 - Files: `Activity/MetricsDetail.tsx`, `Activity/sortableTable.tsx`, `hooks/useWorkspaceMetricsDetail.ts`
 - Essential info:
   - [ ] Title "Flow metrics", ⓘ
@@ -2549,7 +2549,7 @@ Cross-cutting:
   - [ ] "Couldn’t load the metric detail."; loading
 - Mobile: a wide table must scroll inside its own box, never the page
 
-### [ ] Reports → Overview: Period reports
+### [x] Reports → Overview: Period reports → grain + period chips on tone (`bg-ui-sel` selected, not the AI hue); "Earlier…" native select → the shared `Menu` (same periods, same `setSelectedKey`); movers chips grey with only the direction in success/danger ink; partial-coverage note a quiet callout with a warn icon; metric table scrolls with the Metric column sticky; print styles unchanged (the sidebar is outside `data-print-report`, so it is hidden by the `visibility` rule). The "Model" select stays native (verify-demo/record scripts select it)
 - Files: `Activity/PeriodReportsPanel.tsx`, `Activity/periodReportMarkdown.ts`,
   `Activity/PeriodMetricSpark.tsx`, `Activity/RegenProgressBar.tsx`, `hooks/usePeriodReports.ts`
 - Essential info:
@@ -2572,7 +2572,7 @@ Cross-cutting:
 - Tests: `test/periodMetricRow.test.ts`, `test/periodReportMarkdown.test.ts`,
   `test/periodReportUrl.test.ts`, `test/aiGating.test.ts`, verify-demo reports:month
 
-### [ ] Reports → Chronology (court ledger)
+### [x] Reports → Chronology (court ledger) → window picker is the `Segmented` control (same four windows); every block, refusal and ⓘ kept; legend swatches restored with ui ink
 - Files: `Activity/BottlenecksPanel.tsx`, `bottlenecksModel.ts`, `chronologyModel.ts`,
   `chronologyInfo.tsx`, `ChronologyCharts.tsx`, `ChronologyTables.tsx`, `charts/ScatterChart.tsx`
 - Essential info:
@@ -2595,7 +2595,7 @@ Cross-cutting:
   - [ ] "Measuring…"; "Could not load this workspace’s flow."; "Nothing to measure in this workspace yet."; older-server layout
 - Tests: `test/chronologyModel.test.ts`, verify-demo reports:bottlenecks, ws2:chronology
 
-### [ ] Chronology → Over time (26-week trend, savings, before/after)
+### [x] Chronology → Over time (26-week trend, savings, before/after) → the three weekly charts keep ≥640px and scroll inside their own box on a phone (notes still wrap); event filter chips keep the dashed "shift" chip; lens on tone
 - Files: `Activity/ChronologyTrend.tsx`, `Activity/chronologyTrendModel.ts`, `hooks/useFlowTrend.ts`
 - Essential info:
   - [ ] "Over time" with ⓘ
@@ -2611,7 +2611,7 @@ Cross-cutting:
   - [ ] "Could not load the last 26 weeks." / "Measuring…"; "Nothing to measure" cells; "Too few…"; "Before the baseline"
 - Tests: `test/chronologyTrendModel.test.ts`
 
-### [ ] Chronology → Pointers (AI)
+### [x] Chronology → Pointers (AI) → unchanged (AiRunGate), error line in danger ink
 - Files: `Activity/FlowPointersPanel.tsx`, `hooks/useFlowPointers.ts`
 - Essential info:
   - [ ] "Pointers" with ⓘ; "Written by AI from the pull requests on this page."
@@ -2622,7 +2622,7 @@ Cross-cutting:
   - [ ] Hidden unless me.ai.enabled and server enables it; empty/loading/error lines; "Written moments ago — try again in a minute."
 - Tests: `test/aiGating.test.ts`
 
-### [ ] Reports → Stories
+### [x] Reports → Stories → unchanged structure, ui ink tokens
 - Files: `Activity/StoriesView.tsx`, `Activity/storiesModel.ts`, `hooks/useStories.ts`
 - Essential info:
   - [ ] "Stories — <reporting window caption>" with ⓘ
@@ -2637,7 +2637,7 @@ Cross-cutting:
   - [ ] "Could not load stories." / "Loading…"; "No tickets with a pull request merged <window phrase>."; "No ticket has both a known size and a criteria count."
 - Tests: `test/storiesModel.test.ts`, verify-demo reports:stories
 
-### [ ] Bots Monitoring shell (+ the per-repo Bots tab)
+### [x] Bots Monitoring shell (+ the per-repo Bots tab) → rail: one page header + shared `Tabs` (1–4 keys, Themes `hidden` with AI off, Classification hidden per-repo); repo console: a title-size heading + the tagline + the same Tabs without number keys (the console owns them); ⌘K adds the four windows and the two lists
 - Entry: rail "Bots Monitoring" (`?activityRepo=bots`), `?botsTab=roi|themes|benchmark|classification`
   (legacy `botsTab=settings`, `feedTab=classification` → Classification); also each repo console's Bots tab
 - Files: `Activity/BotsView.tsx`, `Activity/benchmarkModel.ts`, `Activity/index.tsx`, `store/filters.ts`
@@ -2650,7 +2650,7 @@ Cross-cutting:
   - [ ] Themes hidden with AI off; Classification hidden per-repo; repoId narrows data only
 - Tests: `test/botsBenchmark.test.ts`, `test/aiGating.test.ts`, verify-demo bots:roi, bots:themes, bots:benchmark, bots:classification
 
-### [ ] Bots → ROI (cautions, tuning suggestions, ROI table, flagging strip, charts)
+### [x] Bots → ROI (cautions, tuning suggestions, ROI table, flagging strip, charts) → the two cautions are quiet `Callout`s (warn / accent icon, ink words, "Show list →", same testids, whole callout one button); tuning suggestions on tone with a warn icon; window picker `Segmented` (labels 7d/14d/30d/Sprint unchanged); per-bot table in its own scroll box with the Bot column sticky, numbers in ink (no amber/red per cell), verdict words in success/warn/danger ink; quality checks a tone disclosure; every column, tooltip and figure kept
 - Files: `Activity/BotsView.tsx`, `Activity/BotRoiPanel.tsx`, `Activity/InflationHistoryChart.tsx`,
   `Activity/SeverityAgreementMatrix.tsx`, `Activity/WorkspaceBotCharts.tsx`, `hooks/useTriage.ts`,
   `hooks/useBotVolume.ts`, `hooks/useBotColors.ts`, `lib/botReviewers.ts`, `lib/botCost.ts`,
@@ -2686,7 +2686,7 @@ Cross-cutting:
   `botMlSeries`, `inflationHistory`, `severityAgreement`, `resolvableBotThreads`,
   `botReviewerQueryKey`, `mlScoring`, `vendorInk`, `textContrast`, `botsBenchmark` (all `test/*.test.ts`), verify-demo bots:roi
 
-### [ ] Bots drill-down tabs (bot-detail, bot-prs, bot-only-prs, bot-threads, bot-flagging, bot-volume)
+### [x] Bots drill-down tabs (bot-detail, bot-prs, bot-only-prs, bot-threads, bot-flagging, bot-volume) → bot-prs vendor strip is the shared `Tabs` (vendor colour on the icon only); filter pills on tone; repo filters and severity/topic pickers are the shared `Select`; Show merged / High-confidence / row checkboxes the shared `Checkbox`; bulk resolve the accent primary; tables scroll with the first column sticky
 - Files: `Activity/BotDetailPanel.tsx`, `BotPrsDetail.tsx`, `BotCommentCard.tsx`, `BotOnlyPrsDetail.tsx`,
   `BotThreadsDetail.tsx`, `BotFlaggingDetail.tsx`, `BotVolumeDetail.tsx`, `charts/DayStrip.tsx`, `charts/Heatmap.tsx`
 - Essential info:
@@ -2707,7 +2707,7 @@ Cross-cutting:
   - [ ] Loading and error per tab; lists lazy
 - Tests: `test/resolvableBotThreads.test.ts`, `test/botComments.test.ts`, `test/mlSeverityBadge.test.ts`, verify-demo bot-detail:8
 
-### [ ] Bots → Themes (+ theme-threads drill-down)
+### [x] Bots → Themes (+ theme-threads drill-down) → unchanged structure; severity chips: critical danger ink, major warn ink, minor/nit grey
 - Files: `Activity/BotThemesPanel.tsx`, `Activity/ThemesReportView.tsx`, `Activity/ThemeThreadsDetail.tsx`, `hooks/useBotThemes.ts`
 - Essential info:
   - [ ] "AI read" label; themes and narrative labelled approximate
@@ -2723,7 +2723,7 @@ Cross-cutting:
   - [ ] "No summary yet — generate one…"; "Couldn’t generate the summary."; hidden with AI off
 - Tests: `test/themeCardCount.test.ts`, `test/themeMetrics.test.ts`, `test/aiGating.test.ts`, verify-demo bots:themes
 
-### [ ] Bots → Benchmark
+### [x] Bots → Benchmark → anomaly findings a tone card with a warn icon and ink text; every percentile, n, band count and refusal kept
 - Files: `Activity/BenchmarkPanel.tsx`, `Activity/benchmarkModel.ts`, `hooks/useBotBenchmark.ts`
 - Essential info:
   - [ ] Anomaly findings first, with how much was checked
@@ -2739,7 +2739,7 @@ Cross-cutting:
   - [ ] Skeleton; error card; no gate (test pins it ungated); money only on the workspace rollup
 - Tests: `test/botsBenchmark.test.ts`, verify-demo bots:benchmark
 
-### [ ] Bots → Classification
+### [x] Bots → Classification → cards on tone (vendor accent bar kept, person row muted); Counts as / flat·per seat segmented on tone; Role and Vendor are the shared `Select` (Role still applied only by "Apply role"; the stored vendor stays an option); price input ringed; cost total, Slack pointer, "Add a review bot" kept
 - Files: `Activity/BotSettingsPanel.tsx`, `settings/DetectedReviewersTable.tsx`, `hooks/useBotTriage.ts`, `lib/botAvatar.ts`
 - Essential info:
   - [ ] "Bot classification" with ⓘ

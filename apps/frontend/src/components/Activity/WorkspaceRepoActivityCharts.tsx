@@ -162,7 +162,7 @@ export function WorkspaceRepoActivityCharts({
 
   return (
     <div className="space-y-2" data-testid="repo-activity-charts">
-      <h4 className="pt-1 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+      <h4 className="pt-1 text-meta font-semibold text-ui-mute">
         Where the work is happening
       </h4>
       {/* Two columns on a wide screen, stacked below `lg`. It stays two columns even when only ONE
@@ -216,7 +216,7 @@ export function WorkspaceRepoActivityCharts({
 
             {/* The disclosures. Each one exists because the alternative is a list that quietly
                 asserts something false; none of them is decoration. */}
-            <div className="mt-2 space-y-1 text-[12px] text-gray-500 dark:text-gray-400">
+            <div className="mt-2 space-y-1 text-meta text-ui-mute">
               {/* The window is in the note ("This sprint so far" / "Last 14 days"); that it has NO
                   prior-period comparison — unlike the tiles above — is in the card's info modal. */}
               {activity.omitted.repos > 0 && (

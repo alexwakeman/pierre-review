@@ -53,7 +53,7 @@ export function Heatmap({
                 x={PAD_L - 4}
                 y={PAD_T + row * cellH + cellH - 4}
                 textAnchor="end"
-                className="fill-gray-500 dark:fill-gray-400 text-[11px]"
+                className="fill-gray-500 dark:fill-gray-400 text-meta"
               >
                 {d}
               </text>
@@ -71,7 +71,7 @@ export function Heatmap({
                     height={cellH - 1}
                     rx={1.5}
                     fill={c > 0 ? hue : 'currentColor'}
-                    className={c > 0 ? '' : 'decorative-mark text-gray-100 dark:text-gray-800'}
+                    className={c > 0 ? '' : 'decorative-mark text-ui-faint'}
                     fillOpacity={c > 0 ? 0.15 + 0.85 * (c / max) : 1}
                     stroke={isHover ? hue : 'none'}
                     strokeWidth={isHover ? 1.5 : 0}
@@ -84,7 +84,7 @@ export function Heatmap({
                 key={hr}
                 x={PAD_L + hr * cellW}
                 y={H - 3}
-                className="fill-gray-500 dark:fill-gray-400 text-[11px]"
+                className="fill-gray-500 dark:fill-gray-400 text-meta"
               >
                 {hr}:00
               </text>
