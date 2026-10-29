@@ -45,6 +45,7 @@ import {
   indexUsers,
   relativeTime,
   userLabel,
+  vendorInk,
 } from '../../lib/ui.js';
 import { nearestScrollParent } from '../../lib/scrollParent.js';
 import { formatBehind } from '../GlobalLoadingBar.js';
@@ -58,6 +59,7 @@ import {
   PullRequestIcon,
 } from '../Icons.js';
 import { Markdown } from '../Markdown.js';
+import { useRegisterCommands, type Command } from '../ui/index.js';
 import { PrCommentComposer } from '../PrCommentComposer.js';
 import { ThreadStatePill } from '../ThreadView/ClaudeThreadBadge.js';
 import { ThreadCard } from '../ThreadView/index.js';
@@ -77,9 +79,10 @@ type FeedPillMeta = {
   ink: string;
 };
 const FEED_PILL_META = {
-  comments: { icon: CommentIcon, label: 'Comment', ink: 'text-teal-600 dark:text-teal-300' },
-  prEvents: { icon: PullRequestIcon, label: 'PR event', ink: 'text-indigo-600 dark:text-indigo-300' },
-  commits: { icon: CommitIcon, label: 'Commits', ink: 'text-amber-600 dark:text-amber-300' },
+  // Grey ink in the redesign (colour only for what blocks / is ready): the SHAPE tells them apart.
+  comments: { icon: CommentIcon, label: 'Comment', ink: 'text-ui-faint' },
+  prEvents: { icon: PullRequestIcon, label: 'PR event', ink: 'text-ui-faint' },
+  commits: { icon: CommitIcon, label: 'Commits', ink: 'text-ui-faint' },
 } satisfies Record<string, FeedPillMeta>;
 function feedPillOf(kind: string): FeedPillMeta | null {
   if (kind === 'review_comment' || kind === 'pr_comment') return FEED_PILL_META.comments;
@@ -87,6 +90,13 @@ function feedPillOf(kind: string): FeedPillMeta | null {
   if (feedPrEventChip(kind) != null) return FEED_PILL_META.prEvents;
   return null;
 }
+
+// The filter chips (redesign): one quiet shape for every toggle — pressed = the `sel` tone, never a
+// colour. The category icon inside says which kind of card it keeps.
+const FEED_CHIP =
+  'flex h-7 shrink-0 whitespace-nowrap items-center gap-1 rounded-ui px-2 text-meta font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent motion-safe:transition-colors motion-safe:duration-ui-fast touch:h-10';
+const FEED_CHIP_ON = 'bg-ui-sel text-ui-ink';
+const FEED_CHIP_OFF = 'text-ui-mute hover:bg-ui-hover hover:text-ui-ink';
 
 // The "no chips pressed" reading of the PR-event sub-selection, hoisted so it is REFERENTIALLY
 // STABLE: `activePrEventKinds` feeds catMatch's dep array, and a fresh `[]` per render would
@@ -105,6 +115,15 @@ function itemGlyph(item: ConsolidatedFeedItem): { color: string; label: string }
   }
   const meta = EVENT_META[item.kind as EventType];
   return { color: meta?.color ?? '#6b7280', label: meta?.label ?? item.kind };
+}
+
+/** The event words' ink (redesign): red only for a review that requested changes, green only for
+ *  an approval or a merge — every other event is grey. */
+function glyphTone(item: ConsolidatedFeedItem): string {
+  if (item.kind === 'review_submitted' && item.reviewState === 'changes_requested') return 'text-ui-danger';
+  if (item.kind === 'review_submitted' && item.reviewState === 'approved') return 'text-ui-success';
+  if (item.kind === 'pr_merged') return 'text-ui-success';
+  return 'text-ui-mute';
 }
 
 // Local review-state presentation (label + colour) — kept local so we don't widen the
@@ -1238,8 +1257,33 @@ export function FeedView({
 
   const slice = visible.slice(win.start, win.end);
 
+  // ⌘K: the filter bar's every switch, while a Feed is on screen.
+  const feedCommands = useMemo<Command[]>(
+    () => [
+      ...(!personScoped
+        ? [
+            { id: 'people', group: 'Actions' as const, title: 'Feed: show people', keywords: ['humans'], icon: <PeopleIcon size={14} />, run: () => setFeedAuthors('humans') },
+            { id: 'bots', group: 'Actions' as const, title: 'Feed: show bots', keywords: ['automation'], icon: <BotIcon size={14} />, run: () => setFeedAuthors('bots') },
+          ]
+        : []),
+      { id: 'comments', group: 'Actions', title: `Feed: ${feedCatComments ? 'stop narrowing to' : 'show only'} comments`, icon: <CommentIcon size={14} />, run: toggleFeedCatComments },
+      { id: 'pr-events', group: 'Actions', title: `Feed: ${feedCatPrEvents ? 'stop narrowing to' : 'show only'} PR events`, icon: <PullRequestIcon size={14} />, run: toggleFeedCatPrEvents },
+      { id: 'commits', group: 'Actions', title: `Feed: ${feedShowCommits ? 'hide plain' : 'show every'} commit push`, icon: <CommitIcon size={14} />, run: toggleFeedShowCommits },
+    ],
+    [personScoped, feedCatComments, feedCatPrEvents, feedShowCommits, setFeedAuthors, toggleFeedCatComments, toggleFeedCatPrEvents, toggleFeedShowCommits],
+  );
+  useRegisterCommands('feed', feedCommands);
+
   return (
     <div className="space-y-3" data-testid="feed-view" ref={rootRef}>
+      {/* The page's one slim header — the cross-repo Feed only (a repo console and a person's tab
+          head themselves). */}
+      {repoId == null && userIds == null && (
+        <header className="flex flex-wrap items-baseline gap-x-3 px-1">
+          <h2 className="text-display text-ui-ink">Feed</h2>
+          <span className="text-body text-ui-mute">{feedAuthors === 'bots' ? 'What bots did' : 'What people did'}, newest first</span>
+        </header>
+      )}
       {/* THERE IS NO "New activity — Refresh" BANNER. Newly-arrived items are spliced into the
           stream where they belong (useFeedAutoInsert) and wear a "New" chip until the reader has
           seen them, so nothing is withheld behind a click and nothing sticky sits over the feed.
@@ -1252,19 +1296,19 @@ export function FeedView({
       {/* Filter pills. Row 1: humans | bots (never mixed), then the category pills. The PR-events
           pill's dependent chip row sits under it while pressed. Last row: the review-thread
           derived-STATE pills. Toggling multiple within a row ORs them; the rows AND together. */}
-      <div className="space-y-2 px-0.5">
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="space-y-1.5 px-0.5">
+      <div role="toolbar" aria-label="Feed filters" className="flex flex-wrap items-center gap-1.5 max-sm:-mx-3 max-sm:flex-nowrap max-sm:overflow-x-auto max-sm:px-3 max-sm:[scrollbar-width:none]">
         {/* Humans | Bots — a two-state SEGMENTED control, server-side (`authors`). Hidden on a
             person's activity tab, whose side follows the person (see `authors`). */}
         {!personScoped && (
           <div
             role="radiogroup"
             aria-label="Whose activity"
-            className="inline-flex rounded-full border border-gray-300 p-0.5 dark:border-gray-700"
+            className="mr-1 inline-flex gap-px rounded-ui bg-ui-raise p-0.5"
           >
             {(
               [
-                { id: 'humans', label: 'Humans', Icon: PeopleIcon },
+                { id: 'humans', label: 'People', Icon: PeopleIcon },
                 { id: 'bots', label: 'Bots', Icon: BotIcon },
               ] as const
             ).map(({ id, label, Icon }) => {
@@ -1276,10 +1320,8 @@ export function FeedView({
                   role="radio"
                   aria-checked={on}
                   onClick={() => setFeedAuthors(id)}
-                  className={`flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium transition-colors ${
-                    on
-                      ? 'bg-sky-100 text-sky-800 dark:bg-sky-900/50 dark:text-sky-200'
-                      : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+                  className={`flex h-6 items-center gap-1.5 rounded-[4px] px-2 text-meta font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent motion-safe:transition-colors motion-safe:duration-ui-fast touch:h-9 ${
+                    on ? 'bg-ui-sel text-ui-ink' : 'text-ui-mute hover:text-ui-ink'
                   }`}
                   title={
                     id === 'humans'
@@ -1287,7 +1329,7 @@ export function FeedView({
                       : "Bots' activity, including their replies to people"
                   }
                 >
-                  <Icon /> {label}
+                  <Icon size={12} /> {label}
                 </button>
               );
             })}
@@ -1300,29 +1342,21 @@ export function FeedView({
           type="button"
           onClick={toggleFeedCatComments}
           aria-pressed={feedCatComments}
-          className={`flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
-            feedCatComments
-              ? 'border-teal-400 bg-teal-50 text-teal-700 dark:border-teal-500/60 dark:bg-teal-950/30 dark:text-teal-300'
-              : 'border-gray-300 text-gray-500 hover:border-gray-400 dark:border-gray-700 dark:text-gray-400'
-          }`}
+          className={`${FEED_CHIP} ${feedCatComments ? FEED_CHIP_ON : FEED_CHIP_OFF}`}
           title="Show comment activity (review threads + PR comments)"
         >
-          <FEED_PILL_META.comments.icon /> Comments
-          {commentCount > 0 && <span className="tabular-nums opacity-70">{commentCount}</span>}
+          <FEED_PILL_META.comments.icon size={12} /> Comments
+          {commentCount > 0 && <span className="tabular-nums text-ui-faint">{commentCount}</span>}
         </button>
         <button
           type="button"
           onClick={toggleFeedCatPrEvents}
           aria-pressed={feedCatPrEvents}
-          className={`flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
-            feedCatPrEvents
-              ? 'border-indigo-400 bg-indigo-50 text-indigo-700 dark:border-indigo-500/60 dark:bg-indigo-950/30 dark:text-indigo-300'
-              : 'border-gray-300 text-gray-500 hover:border-gray-400 dark:border-gray-700 dark:text-gray-400'
-          }`}
+          className={`${FEED_CHIP} ${feedCatPrEvents ? FEED_CHIP_ON : FEED_CHIP_OFF}`}
           title="Show PR events (opens, merges, closes, reopens, ready-for-review, reviews)"
         >
-          <FEED_PILL_META.prEvents.icon /> PR events
-          {prEventsCount > 0 && <span className="tabular-nums opacity-70">{prEventsCount}</span>}
+          <FEED_PILL_META.prEvents.icon size={12} /> PR events
+          {prEventsCount > 0 && <span className="tabular-nums text-ui-faint">{prEventsCount}</span>}
         </button>
         {/* Commits — opt-in (off by default). On: every commit-push run surfaces; off: only the
             pushes that addressed a review thread. A fetch toggle (the server can't be asked for
@@ -1331,15 +1365,11 @@ export function FeedView({
           type="button"
           onClick={toggleFeedShowCommits}
           aria-pressed={feedShowCommits}
-          className={`flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
-            feedShowCommits
-              ? 'border-amber-400 bg-amber-50 text-amber-700 dark:border-amber-500/60 dark:bg-amber-950/30 dark:text-amber-300'
-              : 'border-gray-300 text-gray-500 hover:border-gray-400 dark:border-gray-700 dark:text-gray-400'
-          }`}
+          className={`${FEED_CHIP} ${feedShowCommits ? FEED_CHIP_ON : FEED_CHIP_OFF}`}
           title="Show every commit push. Off shows only pushes that addressed a review thread."
         >
-          <FEED_PILL_META.commits.icon /> Commits
-          {commitsCount > 0 && <span className="tabular-nums opacity-70">{commitsCount}</span>}
+          <FEED_PILL_META.commits.icon size={12} /> Commits
+          {commitsCount > 0 && <span className="tabular-nums text-ui-faint">{commitsCount}</span>}
         </button>
       </div>
       {/* The "PR events" pill's dependent chip row — rendered ONLY while that pill is pressed.
@@ -1349,8 +1379,8 @@ export function FeedView({
           No chip pressed = all four = the pill's whole bucket, so this row starts inert. The
           selection is REMEMBERED when the parent goes off: this block simply stops rendering. */}
       {feedCatPrEvents && (
-        <div className="flex flex-wrap items-center gap-2 pl-3">
-          <span className="text-[11px] font-semibold text-gray-500 dark:text-gray-400">Kind</span>
+        <div className="flex flex-wrap items-center gap-1.5 max-sm:-mx-3 max-sm:flex-nowrap max-sm:overflow-x-auto max-sm:px-3 max-sm:[scrollbar-width:none]">
+          <span className="mr-1 shrink-0 text-meta text-ui-faint">Kind</span>
           {FEED_PR_EVENT_CHIPS.map((chip) => {
             const on = activePrEventKinds.includes(chip.id);
             const count = prEventKindCounts.get(chip.id) ?? 0;
@@ -1360,25 +1390,19 @@ export function FeedView({
                 type="button"
                 onClick={() => toggleFeedPrEventKind(chip.id)}
                 aria-pressed={on}
-                className={`flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
-                  on
-                    ? 'border-indigo-400 bg-indigo-50 text-indigo-700 dark:border-indigo-500/60 dark:bg-indigo-950/30 dark:text-indigo-300'
-                    : 'border-gray-300 text-gray-500 hover:border-gray-400 dark:border-gray-700 dark:text-gray-400'
-                }`}
+                className={`${FEED_CHIP} ${on ? FEED_CHIP_ON : FEED_CHIP_OFF}`}
                 title={chip.title}
               >
                 {chip.label}
-                {count > 0 && <span className="tabular-nums opacity-70">{count}</span>}
+                {count > 0 && <span className="tabular-nums text-ui-faint">{count}</span>}
               </button>
             );
           })}
         </div>
       )}
         {/* Review-thread derived-STATE pills + the honest count line — every feed view. */}
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-[11px] font-semibold text-gray-500 dark:text-gray-400">
-            State
-          </span>
+        <div className="flex flex-wrap items-center gap-1.5 max-sm:-mx-3 max-sm:flex-nowrap max-sm:overflow-x-auto max-sm:px-3 max-sm:[scrollbar-width:none]">
+          <span className="mr-1 shrink-0 text-meta text-ui-faint">State</span>
           {BOT_STATE_ORDER.map((st) => {
             const meta = DERIVED_STATE_META[st];
             const on = botStateFilter.has(st);
@@ -1389,11 +1413,7 @@ export function FeedView({
                 type="button"
                 onClick={() => toggleBotState(st)}
                 aria-pressed={on}
-                className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
-                  on
-                    ? 'border-sky-400 bg-sky-50 text-sky-700 dark:border-sky-500/60 dark:bg-sky-950/30 dark:text-sky-300'
-                    : 'border-gray-300 text-gray-500 hover:border-gray-400 dark:border-gray-700 dark:text-gray-400'
-                }`}
+                className={`${FEED_CHIP} gap-1.5 ${on ? FEED_CHIP_ON : FEED_CHIP_OFF}`}
                 title={meta.description}
               >
                 <span
@@ -1402,12 +1422,12 @@ export function FeedView({
                   style={{ background: meta.color }}
                 />
                 {meta.label}
-                {count > 0 && <span className="tabular-nums opacity-70">{count}</span>}
+                {count > 0 && <span className="tabular-nums text-ui-faint">{count}</span>}
               </button>
             );
           })}
           {items.length > 0 && (
-            <span className="text-[11px] text-gray-400">{countLabel}</span>
+            <span className="ml-auto shrink-0 whitespace-nowrap text-meta tabular-nums text-ui-faint">{countLabel}</span>
           )}
         </div>
       </div>
@@ -1425,12 +1445,12 @@ export function FeedView({
             aria-label="Loading activity"
             className="flex h-32 flex-col justify-center gap-2 px-1"
           >
-            <div className="h-3 w-1/3 animate-pulse rounded bg-gray-100 dark:bg-gray-900/40" />
-            <div className="h-3 w-2/3 animate-pulse rounded bg-gray-100 dark:bg-gray-900/40" />
-            <div className="h-3 w-1/2 animate-pulse rounded bg-gray-100 dark:bg-gray-900/40" />
+            <div className="h-3 w-1/3 rounded-ui bg-ui-raise motion-safe:animate-pulse" />
+            <div className="h-3 w-2/3 rounded-ui bg-ui-raise motion-safe:animate-pulse" />
+            <div className="h-3 w-1/2 rounded-ui bg-ui-raise motion-safe:animate-pulse" />
           </div>
         ) : (
-          <div className="flex h-32 items-center justify-center px-4 text-center text-sm text-gray-400">
+          <div className="flex h-32 items-center justify-center px-4 text-center text-body text-ui-mute">
             {staleNotice ??
               (authors === 'bots'
                 ? isolatedPrId != null
@@ -1444,11 +1464,11 @@ export function FeedView({
         // query and the carried-over pages hold the other side's rows. Until the new fetch lands,
         // any "nothing here" sentence would be a fabricated claim. Say nothing verdict-shaped
         // while the data is borrowed.
-        <div className="flex h-32 items-center justify-center text-sm text-gray-400">
+        <div className="flex h-32 items-center justify-center text-body text-ui-mute">
           Loading…
         </div>
       ) : visible.length === 0 ? (
-        <div className="flex h-32 items-center justify-center text-sm text-gray-400">
+        <div className="flex h-32 items-center justify-center px-4 text-center text-body text-ui-mute">
           {botStateFilter.size > 0
             ? 'Nothing matches these state filters.'
             : prEventKindsNarrowing
@@ -1495,15 +1515,15 @@ export function FeedView({
       {showSentinel && (
         <div ref={sentinelRef} className="flex justify-center pt-1">
           {isFetchingMore ? (
-            <span className="flex items-center gap-2 py-1.5 text-xs text-gray-400">
-              <span className="h-3 w-3 animate-spin rounded-full border-2 border-gray-300 border-t-transparent dark:border-gray-600 dark:border-t-transparent" />
+            <span className="flex items-center gap-2 py-1.5 text-meta text-ui-faint">
+              <span className="h-3 w-3 rounded-full border-2 border-ui-line border-t-transparent motion-safe:animate-spin" />
               Loading more…
             </span>
           ) : (
             <button
               type="button"
               onClick={() => void loadMore()}
-              className="rounded-full border border-gray-300 px-4 py-1.5 text-xs font-medium text-gray-600 hover:border-gray-400 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:border-gray-500 dark:hover:bg-gray-800/50"
+              className="h-8 rounded-ui bg-ui-raise px-3 text-body font-medium text-ui-ink hover:bg-ui-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent touch:h-11"
             >
               Load more
             </button>
@@ -1931,58 +1951,26 @@ function FeedRowImpl({
   };
 
   return (
-    <li ref={innerRef} className="pb-2">
+    <li ref={innerRef} className="pb-1">
       <article
         onClick={onCardClick}
-        className={`cursor-pointer rounded-md border p-2.5 text-sm transition-colors ${
-          flash
-            ? 'border-sky-400 ring-2 ring-sky-400/60 dark:border-sky-500'
-            : isMyTurn
-              ? 'border-yellow-400 bg-yellow-50/40 dark:border-yellow-500/50 dark:bg-yellow-950/15'
-              : 'border-gray-200 hover:border-sky-300 dark:border-gray-800 dark:hover:border-sky-700'
+        data-my-turn={isMyTurn ? 'true' : undefined}
+        className={`group/feed relative cursor-pointer rounded-ui px-3 py-2.5 text-body motion-safe:transition-colors motion-safe:duration-ui-fast ${
+          flash ? 'bg-ui-sel ring-2 ring-inset ring-ui-accent' : isMyTurn ? 'bg-ui-surface hover:bg-ui-hover' : 'hover:bg-ui-hover'
         }`}
       >
-        {/* header: (the item's filter-pill icon + Focus magnifier + event time on the left) then
-            avatar + actor + action chip + (My Turn badge + why-pill) */}
-        <div className="flex items-center gap-2">
-          {/* WHICH PILL THIS CARD BELONGS TO, in that pill's own icon and ink — a glance tells a
-              comment from a PR event from a push. Decorative (the action chip names the kind). */}
+        {/* MY TURN: a 2px accent bar on the left edge + the "My Turn" words (it was a yellow border). */}
+        {isMyTurn && <span aria-hidden className="absolute inset-y-2 left-0 w-0.5 rounded-full bg-ui-accent" />}
+        {/* LINE 1 — who did what, and when: the category icon, the actor (+ bot vendor), the event,
+            My Turn and why, New … the Focus button and the age on the right. */}
+        <div className="flex min-w-0 items-center gap-2">
+          {/* WHICH PILL THIS CARD BELONGS TO, by its shape. Decorative (the event words name it). */}
           {pill != null && <pill.icon size={13} className={`shrink-0 ${pill.ink}`} />}
-          {item.prId != null && (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onFocus(item);
-              }}
-              className="shrink-0 rounded p-0.5 text-blue-500 hover:text-blue-600"
-              title="Focus — open this PR in its own isolated timeline tab"
-              aria-label="Focus this PR in its own timeline tab"
-            >
-              <MagnifierIcon size={13} />
-            </button>
-          )}
-          {/* Arrived while you had the feed open. Clears once you've been to the top of the
-              feed AND more activity has landed behind it — see FeedNewCohorts. */}
-          {isNew && (
-            <span
-              className="shrink-0 rounded-full bg-sky-500/15 px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-sky-600 dark:text-sky-300"
-              title="Arrived since you last looked at the top of the feed"
-            >
-              New
-            </span>
-          )}
-          <span
-            className="shrink-0 text-[11px] text-gray-400"
-            title={dateTime(item.occurredAt)}
-          >
-            {relativeTime(item.occurredAt)}
-          </span>
-          <Avatar user={actorUser} size={20} />
+          <Avatar user={actorUser} size={18} />
           {/* A real actor's name opens the user popover (stats + activity tab); the synthetic
               label ('A contributor') has no user behind it and stays plain text. */}
           {actorUser != null ? (
-            <span className="truncate font-medium text-gray-800 dark:text-gray-100">
+            <span className="min-w-0 truncate font-medium text-ui-ink">
               <UserName
                 user={actorUser}
                 fallbackId={item.actorId}
@@ -1990,15 +1978,15 @@ function FeedRowImpl({
               />
             </span>
           ) : (
-            <span className="truncate font-medium text-gray-800 dark:text-gray-100">
+            <span className="min-w-0 truncate font-medium text-ui-ink">
               {actorName}
             </span>
           )}
           {automatedTag && (
             <span className="group/bot inline-flex shrink-0 items-center gap-1">
               <span
-                className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium"
-                style={{ color: automatedTag.color, background: `${automatedTag.color}1a` }}
+                className="inline-flex items-center gap-1 text-meta font-medium"
+                style={vendorInk(automatedTag.color)}
                 title={`${automatedTag.label} — an automated reviewer Limn triages`}
               >
                 <BotIcon size={11} />
@@ -2013,7 +2001,7 @@ function FeedRowImpl({
                       onNotBot(automatedTag.userId, automatedTag.label);
                   }}
                   disabled={overridePending}
-                  className="text-[11px] text-gray-400 underline underline-offset-2 opacity-0 transition-opacity hover:text-gray-600 disabled:opacity-40 group-hover/bot:opacity-100 dark:hover:text-gray-200"
+                  className="text-meta text-ui-faint underline underline-offset-2 opacity-0 hover:text-ui-ink focus:opacity-100 disabled:opacity-40 group-hover/bot:opacity-100 touch:opacity-100 motion-safe:transition-opacity"
                   title="Not a bot? Stop treating this reviewer as automated ACROSS THIS WHOLE WORKSPACE — every repo in it, not just this PR's. It keeps its vendor name, other Workspaces are unaffected, and you'll be asked to confirm."
                 >
                   {overridePending ? 'saving…' : 'not a bot?'}
@@ -2021,55 +2009,71 @@ function FeedRowImpl({
               )}
             </span>
           )}
-          <span
-            className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium"
-            style={{ color: glyph.color, background: glyph.color + '1a' }}
-          >
-            {glyph.label}
-          </span>
+          <span className={`min-w-0 shrink truncate text-meta ${glyphTone(item)}`}>{glyph.label}</span>
           {isMyTurn && (
-            <span className="shrink-0 rounded bg-yellow-400/20 px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-yellow-700 dark:text-yellow-300">
-              My Turn
-            </span>
+            <span className="shrink-0 text-meta font-medium text-ui-accent">My Turn</span>
           )}
           {isMyTurn && primaryReason != null && (
             <span
-              className="shrink-0 rounded border border-yellow-300 px-1.5 py-0.5 text-[11px] font-medium text-yellow-700 dark:border-yellow-600/50 dark:text-yellow-300"
+              className="min-w-0 shrink truncate text-meta text-ui-mute max-sm:hidden"
               title={item.myTurnReasons.map((r) => MY_TURN_REASON_META[r].title).join(' · ')}
             >
               {MY_TURN_REASON_META[primaryReason].label}
             </span>
           )}
+          {/* Arrived while you had the feed open. Clears once you've been to the top of the
+              feed AND more activity has landed behind it — see FeedNewCohorts. */}
+          {isNew && (
+            <span
+              className="shrink-0 text-meta font-medium text-ui-accent"
+              title="Arrived since you last looked at the top of the feed"
+            >
+              New
+            </span>
+          )}
+          <span className="ml-auto flex shrink-0 items-center gap-1">
+            {item.prId != null && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onFocus(item);
+                }}
+                className="flex h-6 w-6 items-center justify-center rounded-ui text-ui-faint opacity-0 hover:bg-ui-sel hover:text-ui-ink focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent group-hover/feed:opacity-100 touch:h-10 touch:w-10 touch:opacity-100"
+                title="Focus — open this PR in its own isolated timeline tab"
+                aria-label="Focus this PR in its own timeline tab"
+              >
+                <MagnifierIcon size={13} />
+              </button>
+            )}
+            <span
+              className="text-meta tabular-nums text-ui-faint"
+              title={dateTime(item.occurredAt)}
+            >
+              {relativeTime(item.occurredAt)}
+            </span>
+          </span>
         </div>
 
-        {/* PR ref line — the keyboard-accessible open affordance */}
-        <div className="mt-1 flex items-baseline gap-1.5 text-xs">
-          <span className="shrink-0 text-gray-400">{item.repoFullName}</span>
+        {/* LINE 2 — the PR: repo · #N title (the keyboard-accessible open affordance), its flags. */}
+        <div className="mt-0.5 flex min-w-0 items-baseline gap-1.5 pl-[21px] text-meta">
+          <span className="shrink-0 text-ui-faint">{item.repoFullName}</span>
           {prLabel !== '' && (
             <button
               type="button"
               onClick={() => onOpen(item)}
-              className="min-w-0 truncate font-medium text-gray-700 hover:text-sky-600 hover:underline dark:text-gray-200"
+              className="min-w-0 truncate text-body text-ui-mute hover:text-ui-ink hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent"
             >
               {prLabel}
             </button>
           )}
-          {/* The large-PR flag on the PR-ref line — it is a fact about the PULL REQUEST, so it
-              belongs beside its number rather than inside `PrOpenedExtras` (which only renders on
-              `pr_opened` cards, while the server enriches `codeLoc` onto EVERY item on the page).
-              Icon-only here: this line already truncates the title, so the count rides the
-              accessible label and the hover title instead of taking horizontal space. */}
+          {/* The large-PR flag and the blast radius ride beside the number, icon-only (the line
+              truncates). ⚠ Reach is SUPPRESSED on pr_opened cards: they carry the LABELLED chip on
+              their own metadata row below (`PrOpenedExtras`) — never the same fact twice. */}
           <LargePrFlag pr={item} iconOnly className="self-center" />
-          {/* Blast radius, on the same terms — a fact about the pull request, beside its number,
-              icon-only because this line already truncates.
-              ⚠ SUPPRESSED ON pr_opened CARDS, which carry the LABELLED chip on their own metadata
-              row below (`PrOpenedExtras`). Every other kind — a comment, a review, a merge — has
-              no such row, so this is the only place their reader can see it. Rendering both would
-              state the same fact twice on one card, the double-count the large-PR flag rule above
-              already names. */}
           {!isPrOpened && <BlastRadiusChip pr={item} iconOnly className="self-center" />}
           {item.path != null && (
-            <span className="shrink-0 text-gray-400">· {item.path.split('/').pop()}</span>
+            <span className="min-w-0 shrink truncate text-ui-faint">· {item.path.split('/').pop()}</span>
           )}
         </div>
 
@@ -2081,7 +2085,7 @@ function FeedRowImpl({
             render the whole conversation inline below (with this comment highlighted),
             so a standalone preview would just duplicate it. */}
         {hasBody && !isThreadCard && (
-          <div className="mt-1.5 rounded bg-gray-50 px-2 py-1.5 text-sm dark:bg-gray-900/50">
+          <div className="ml-[21px] mt-1.5 rounded-ui bg-ui-raise/60 px-2.5 py-1.5 text-body">
             <div
               ref={bodyRef}
               className={expanded ? '' : 'overflow-hidden'}
@@ -2095,7 +2099,7 @@ function FeedRowImpl({
               <button
                 type="button"
                 onClick={() => onToggleExpanded(item.id)}
-                className="mt-1 text-[11px] font-medium text-sky-600 hover:underline dark:text-sky-400"
+                className="mt-1 text-meta font-medium text-ui-mute hover:text-ui-ink hover:underline"
               >
                 {expanded ? 'Show less' : 'Show more'}
               </button>
@@ -2107,7 +2111,7 @@ function FeedRowImpl({
             demand so the card isn't blank (common in the single-PR isolated feed, which shows
             full history). Only for issue-level PR comments with a comment id. */}
         {isPrCommentCard && !hasBody && item.commentId != null && item.prId != null && (
-          <div className="mt-1.5 rounded bg-gray-50 px-2 py-1.5 text-sm dark:bg-gray-900/50">
+          <div className="ml-[21px] mt-1.5 rounded-ui bg-ui-raise/60 px-2.5 py-1.5 text-body">
             <PrCommentBody prId={item.prId} commentId={item.commentId} />
           </div>
         )}
@@ -2117,13 +2121,13 @@ function FeedRowImpl({
             commented" instead of separate feed rows. Independent of the card's own body, so a
             bare approval + comment or a "Comment and close" still shows it. */}
         {item.mergedComments.length > 0 && (
-          <div className="mt-1.5 space-y-1.5">
+          <div className="ml-[21px] mt-1.5 space-y-1.5">
             {item.mergedComments.map((c) => (
               <div
                 key={c.commentId}
-                className="rounded bg-gray-50 px-2 py-1.5 text-sm dark:bg-gray-900/50"
+                className="rounded-ui bg-ui-raise/60 px-2.5 py-1.5 text-body"
               >
-                <div className="mb-0.5 text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+                <div className="mb-0.5 text-meta text-ui-faint">
                   Also commented
                 </div>
                 <div className="max-h-72 overflow-auto">
@@ -2138,9 +2142,9 @@ function FeedRowImpl({
             push under "show commits" isn't a bare card), and when it addressed review threads,
             those threads inline so the reader sees the change without opening the PR. */}
         {(item.changeSummary != null || affected.length > 0) && (
-          <div className="mt-1.5 space-y-1.5">
+          <div className="ml-[21px] mt-1.5 space-y-1.5">
             {item.changeSummary != null && (
-              <div className="text-[11px] font-medium text-gray-500 dark:text-gray-400">
+              <div className="text-meta text-ui-mute">
                 {item.changeSummary}
               </div>
             )}
@@ -2157,7 +2161,7 @@ function FeedRowImpl({
         {/* merge-credit line — only the parts meaningful for this card. The review
             verdict now lives in the top pill (see itemGlyph), so it's no longer here. */}
         {(showMergedBy || showReviewers) && (
-          <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-gray-500 dark:text-gray-400">
+          <div className="ml-[21px] mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-meta text-ui-mute">
             {showMergedBy && (
               <span>
                 Merged by <span className="font-medium">{mergedByLabel}</span>
@@ -2176,7 +2180,7 @@ function FeedRowImpl({
             highlighted new. Stop propagation so interacting never opens the tab, and
             reset the cursor so the thread body doesn't inherit the card's pointer. */}
         {isThreadCard && (
-          <div className="mt-1.5 cursor-default" onClick={(e) => e.stopPropagation()}>
+          <div className="ml-[21px] mt-1.5 cursor-default max-sm:ml-0" onClick={(e) => e.stopPropagation()}>
             <InlineThread item={item} />
           </div>
         )}
@@ -2184,7 +2188,7 @@ function FeedRowImpl({
         {/* A PR (issue-level) comment card can be replied to — a new comment
             prefilled with the original quoted + its author @mentioned. */}
         {isPrCommentCard && item.prId != null && (
-          <div className="mt-1.5">
+          <div className="ml-[21px] mt-1.5">
             {!replyOpen ? (
               <div className="flex items-center gap-3">
                 <button
@@ -2193,7 +2197,7 @@ function FeedRowImpl({
                     e.stopPropagation();
                     onSetReplyOpen(item.id, true);
                   }}
-                  className="text-[11px] font-medium text-sky-600 hover:underline dark:text-sky-400"
+                  className="-ml-1 h-7 rounded-ui px-1 text-meta font-medium text-ui-mute hover:bg-ui-sel hover:text-ui-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent touch:h-10"
                 >
                   Reply
                 </button>

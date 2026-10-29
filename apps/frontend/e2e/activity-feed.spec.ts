@@ -215,8 +215,9 @@ test.describe('Activity Feed / click-to-detail flows', () => {
       hasText: 'Can you take another look at this?',
     });
     await expect(row).toBeVisible();
-    // My Turn (participated) items render as a yellow-bordered card with a badge + why-pill.
-    await expect(row.locator('article.border-yellow-400')).toBeVisible();
+    // My Turn (participated) items carry the My Turn marker (redesign: an accent bar + the words,
+    // where it was a yellow border) and the why-pill.
+    await expect(row.locator('article[data-my-turn="true"]')).toBeVisible();
     await expect(row.getByText('My Turn', { exact: true })).toBeVisible();
     await expect(row.getByText('You authored')).toBeVisible();
   });
@@ -272,7 +273,7 @@ test.describe('Activity Feed / click-to-detail flows', () => {
     await page.goto('/app/?view=open-prs');
     await expect(overlay(page)).toBeVisible();
     await expect(page.getByTestId('open-prs-view')).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'Open PRs', exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Open pull requests', exact: true })).toBeVisible();
     await expect(page).not.toHaveURL(/view=open-prs/);
 
     // A reload lands back on it.

@@ -183,7 +183,9 @@ describe('the wiring', () => {
     expect(cards.match(/<TicketStorySection\s/g)).toHaveLength(1);
   });
 
-  it('a board stack never collapses, and its key + title are ONE button to the story view', () => {
+  // The CARD stack (the story view's one stack, Merged so far) never collapses. The redesigned Open
+  // PRs board draws its ticket GROUPS in OpenPrsRows.tsx, and those fold per session (test/openPrsRows.test.ts).
+  it('a card stack never collapses, and its key + title are ONE button to the story view', () => {
     const cards = src('components/Activity/OpenPrsCards.tsx');
     expect(cards).not.toMatch(/data-stack-toggle|toggleCollapsed|collapsed\.includes|hidden=\{collapsed\}/);
     const header = cards.slice(cards.indexOf('function TicketStack('), cards.indexOf('function MergedPanel('));

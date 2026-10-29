@@ -1096,7 +1096,7 @@ the ONE HeaderToastStrip (MyTurnDismissToast, DependencyMergeToast).
   - [ ] Per-SUBJECT dismissal, expires on the next related event
 - Tests: `test/pendingMutePatch.test.ts`, `test/myTurnSettingsForm.test.ts`
 
-### [ ] Open PRs header and controls
+### [x] Open PRs header and controls → one slim header (OpenPrsDetail): "Open pull requests" + "N open · N drafts · scope", Refresh on the title line; the quiet line = the default branches + "N of M auto reviews today · resets in" + Run auto reviews now (AiRunGate kind=review, meter off, same `data-run-auto-reviews`); toolbar = Group by ticket | List · Sort menu (radio items, ↑↓, Esc) + reverse · repo filter (Checkbox primitive, "Only", "No repos with data."); every sort/layout/repo/refresh choice is also a ⌘K command
 - Entry: rail → Open PRs (default landing, `?view=activity`)
 - Files: `components/Activity/OpenPrsDetail.tsx`, `OpenPrsCards.tsx` (`OpenPrsSortMenu`,
   `OpenPrsViewToggle`, `AutoReviewUsageLine`, `RunAutoReviewsButton`), `MetricRepoFilter.tsx`,
@@ -1127,7 +1127,7 @@ the ONE HeaderToastStrip (MyTurnDismissToast, DependencyMergeToast).
   `test/switchWorkspaceToOpenPrs.test.ts`, `test/claudeAutoReview.test.ts`, verify-demo "open-prs"
   (open-prs.png), record-demo-steps open-prs, ws2:open-prs
 
-### [ ] Default branches (trunk) strip
+### [x] Default branches (trunk) strip → the header's quiet line on Open PRs (still collapsed on arrival, same testid + `:scope > button[aria-expanded]`; words in mute ink, only "N failing" in danger ink); expanded rows, trends, merged PRs and links unchanged; the compact per-repo console mount unchanged
 - Entry: top of Open PRs (hidden in an empty workspace); compact non-collapsible copy in the per-repo console header
 - Files: `components/Activity/DefaultBranchesSlot.tsx`, `BranchStatusPanel.tsx`, `hooks/useBranchStatus.ts`
 - Essential info:
@@ -1154,7 +1154,7 @@ the ONE HeaderToastStrip (MyTurnDismissToast, DependencyMergeToast).
   default branch", "Open PRs is headed by the default branches; My turn is not"),
   `test/branchName.test.ts`, `test/prBranchRow.test.ts`
 
-### [ ] Open PR card
+### [x] Open PR card → one ROW (OpenPrsRows.tsx): lead = can it land (mergeVerdict: red conflicts/blocked, green ready, grey otherwise, quiet Draft) · title · repo#N (+ "Draft ·") · ticket key (List) · CI icon · review standing icon · open threads count (warn when untouched) · AI marker (verdict / working pulse / failed) · +A −D · author · age; every chip in words in the SIDE PANEL (Can it land + detail, Checks, Reviews, Threads + bar, AI working, Tickets → story view / tracker, "Also in" → unfolds and scrolls to that group, Author, Opened, Updated, Size + files + large-PR flag, Reach (expandable reasons), copy link); panel footer: Open pull request (↵), AI review (r), GitHub (o); double-click opens the PR; ⌘K acts on the selected row. The card itself survives for the story view and Merged so far
 - Entry: each PR in Open PRs (List, or inside a ticket stack); click or Enter opens the PR detail tab (`fromActivity`)
 - Files: `components/Activity/OpenPrsCards.tsx` (`OpenPrCard`, `ReviewChip`, `ThreadsChip`,
   `MergeChip`, `ClaudeWorkChip`), `PrCardShell.tsx`, `lib/cardTickets.ts`
@@ -1179,7 +1179,7 @@ the ONE HeaderToastStrip (MyTurnDismissToast, DependencyMergeToast).
 - Tests: `test/prCardShell.test.ts`, `test/cardTickets.test.ts`, `test/ticketLinks.test.ts`,
   `test/largePrFlag.test.ts`, `test/reachModel.test.ts`
 
-### [ ] AI review panel on Open PR cards
+### [x] AI review panel on Open PR cards → the side panel's "AI review" section (the same ClaudeReviewPanel: outcome, auto mark, currency, severities, ignored, threads to fix, CI pill, ticket pills, Earlier, posted, Fix pill, Review / Re-review / Open review); the row carries the verdict as one quiet marker
 - Entry: bottom of each Open PR card when `me.ai.enabled` (whole panel click opens the AI review)
 - Files: `components/Activity/ClaudeReviewCell.tsx` (`ClaudeReviewPanel`, `TicketPillsRow`), `lib/claudeReviewCell.ts`
 - Essential info:
@@ -1203,7 +1203,7 @@ the ONE HeaderToastStrip (MyTurnDismissToast, DependencyMergeToast).
 - Tests: `test/claudeReviewColumn.test.ts`, `test/claudeReviewActive.test.ts`,
   `test/claudeReviewFollowUp.test.ts`, `test/ticketReview.test.ts`
 
-### [ ] Open PRs grouped by ticket (ticket stacks)
+### [x] Open PRs grouped by ticket (ticket stacks) → collapsible groups (fold per session, never stored): one ticket line = chevron · key + title (→ story view; tracker link when no ident) · status (dot + words) · type · assignee / Unassigned · criteria met (red none / green all) + stale currency + reviewed ago + Check story / Re-check (aiReadyFor ticket_review) · roll-up (red / green) · "N PRs"; then its rows; then "Merged (N)" (collapsed, opens the merged PR); "Tickets loaded. [Group by ticket]" offer kept; rows draw 60 at a time with Show more + scroll trigger. The story view's single stack keeps the card layout
 - Entry: Open PRs → "Group by ticket" (tracker on); while tickets load the list is held, then a
   "Tickets loaded. [Group by ticket]" offer appears
 - Files: `components/Activity/OpenPrsCards.tsx` (`TicketStack`, `StackCoverage`, `StoryViewHeader`,
@@ -1232,7 +1232,7 @@ the ONE HeaderToastStrip (MyTurnDismissToast, DependencyMergeToast).
   `test/ticketShare.test.ts`, `test/storyView.test.ts`, `test/storyHeaderAndSummary.test.ts`,
   `test/ticketStatusPicker.test.ts`, `test/ticketStory.test.ts`
 
-### [ ] Feed filter bar (people vs bots, categories, kinds, state)
+### [x] Feed filter bar (people vs bots, categories, kinds, state) → one quiet toolbar under a slim "Feed" header: People | Bots segmented (same `feedAuthors`; label "Humans" → "People"), Comments / PR events / Commits toggles (pressed = sel tone, icons grey), Kind row, State row with the thread-state dots, count line right; on a phone each row scrolls sideways in its own box; every switch is a ⌘K command
 - Entry: rail → Feed (`?activityRepo=feed`); also inside a repo console and person-scoped (userIds) mounts
 - Files: `components/Activity/FeedView.tsx`, `lib/ui.ts` (`FEED_PR_EVENT_CHIPS`, `DERIVED_STATE_META`),
   `hooks/useConsolidatedFeed.ts`, `store/filters.ts`
@@ -1255,7 +1255,7 @@ the ONE HeaderToastStrip (MyTurnDismissToast, DependencyMergeToast).
   `e2e/activity-feed.spec.ts` ("the Feed is the stream alone…", "a Feed link opens the Feed and
   survives a reload", "the legacy My Turn / Feed header pills are removed"), verify-demo "feed"
 
-### [ ] Feed row (one event card)
+### [x] Feed row (one event card) → same content, row language: line 1 = category icon · avatar · actor (UserName) · bot vendor (vendorInk) + "not a bot?" · event words (red only for changes requested, green for approved / merged) · My Turn (accent words + a 2px accent bar, was a yellow border) + reason · New · Focus (hover; always on touch) · age; line 2 = repo · #N title button · large-PR / reach icons · file; bodies, Also commented, change summary + affected threads, Merged by / Reviewed by, inline thread, Reply indented under the actor; no borders
 - Entry: each item in the Feed stream; click opens the PR at the thread / comment / PR
 - Files: `components/Activity/FeedView.tsx` (`FeedRowImpl`, `InlineThread`, `PrOpenedExtras`,
   `AffectedThreadsList`), `components/ThreadView/index.tsx`, `components/PrCommentComposer.tsx`
@@ -1290,7 +1290,7 @@ the ONE HeaderToastStrip (MyTurnDismissToast, DependencyMergeToast).
   changes, "clicking a My Turn item opens the PR detail tab", "clicking a plain feed event opens
   the PR detail tab", "the feed has no Done/seen control"), `test/claudeThreadMarker.test.ts`
 
-### [ ] Feed stream states, paging, new-item insertion and single-PR isolation
+### [x] Feed stream states, paging, new-item insertion and single-PR isolation → unchanged logic (virtualised window, New markers, isolation banner, every empty sentence); skeletons / Load more / Loading more… restyled to the --ui tokens
 - Entry: Feed; `?feedPr=<id>` isolates to one PR (also from a repo console), with the "Showing only #N" banner
 - Files: `components/Activity/FeedView.tsx`, `FeedIsolationBanner.tsx`, `lib/feedNewCohorts.ts`
 - Essential info:

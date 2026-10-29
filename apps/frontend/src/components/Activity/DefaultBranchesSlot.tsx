@@ -10,10 +10,9 @@ import { anyBranchSynced, BranchStatusPanel } from './BranchStatusPanel.js';
 //
 // ⚠ INFORMATIONAL. Nothing read here reaches a tab badge, a my_turn count, the scorer, the liveness
 // sweep or a notification — trunk status is a readout, not an alert channel.
-const skeleton =
-  'h-9 animate-pulse rounded-lg border border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-900/40';
-const note = 'text-[12px] text-gray-500 dark:text-gray-400';
-const fail = 'text-[12px] text-red-600 dark:text-red-400';
+const skeleton = 'h-7 w-64 max-w-full rounded-ui bg-ui-raise motion-safe:animate-pulse';
+const note = 'flex h-7 items-center text-meta text-ui-faint';
+const fail = 'flex h-7 items-center text-meta text-ui-danger';
 
 /**
  * The default-branch slot. ⚠ UNKNOWN IS NEVER ZERO: a placeholder while the query has no answer

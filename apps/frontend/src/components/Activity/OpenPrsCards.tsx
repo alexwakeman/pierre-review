@@ -39,7 +39,7 @@ import {
 import { Avatar } from '../CommentCard.js';
 import { CopyButton } from '../CopyButton.js';
 import { githubPrUrl } from '../../lib/prLink.js';
-import { ArrowIcon, CaretIcon, CheckCircleIcon, CheckIcon, ChevronIcon, LinkIcon, MergeIcon, TicketIcon } from '../Icons.js';
+import { ArrowIcon, CaretIcon, CheckCircleIcon, CheckIcon, ChevronIcon, LinkIcon, MergeIcon, SparkleIcon, TicketIcon } from '../Icons.js';
 import { TrackerLinkOut } from '../TrackerLinkOut.js';
 import { cardTicketLabel, cardTickets, type CardTicket } from '../../lib/cardTickets.js';
 import {
@@ -81,6 +81,7 @@ import {
 } from '../../lib/openPrsWindow.js';
 import { ReviewedAgo } from '../ReviewedAgo.js';
 import { TicketStorySection } from './TicketStorySection.js';
+import { OpenPrsRows } from './OpenPrsRows.js';
 import { ThreadStateBar } from './ThreadStateBar.js';
 import { ClaudeReviewPanel, TicketPillsRow } from './ClaudeReviewCell.js';
 import { BlastRadiusChip } from './BlastRadiusChip.js';
@@ -266,9 +267,9 @@ export function OpenPrsSortMenu({
         pick();
         setOpen(false);
       }}
-      className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-xs text-gray-800 hover:bg-gray-100 focus:bg-gray-100 focus:outline-none dark:text-gray-100 dark:hover:bg-gray-800 dark:focus:bg-gray-800"
+      className="flex h-8 w-full items-center gap-2 rounded-ui px-2 text-left text-body text-ui-ink hover:bg-ui-hover focus:bg-ui-hover focus:outline-none touch:h-11"
     >
-      <span className="inline-flex w-3 shrink-0 justify-center">{checked && <CheckIcon size={11} />}</span>
+      <span className="inline-flex w-3 shrink-0 justify-center text-ui-accent">{checked && <CheckIcon size={12} />}</span>
       {label}
     </button>
   );
@@ -281,10 +282,10 @@ export function OpenPrsSortMenu({
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}
-        className="inline-flex items-center gap-1 whitespace-nowrap rounded-full border border-gray-300 py-0.5 pl-2.5 pr-2 text-xs text-gray-600 hover:border-gray-400 dark:border-gray-700 dark:text-gray-300 dark:hover:border-gray-500"
+        className="inline-flex h-7 items-center gap-1 whitespace-nowrap rounded-ui bg-ui-raise px-2 text-meta text-ui-mute hover:bg-ui-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent touch:h-10"
       >
-        <span className="text-gray-500 dark:text-gray-400">Sort:</span>
-        <span className="font-medium text-gray-800 dark:text-gray-100">{sortLabel(shown)}</span>
+        <span className="max-sm:sr-only">Sort:</span>
+        <span className="font-medium text-ui-ink">{sortLabel(shown)}</span>
         <CaretIcon dir="down" />
       </button>
       {shown != null && (
@@ -293,9 +294,9 @@ export function OpenPrsSortMenu({
           onClick={() => onChange(reverseSort(shown))}
           aria-label="Reverse the order"
           title="Reverse the order"
-          className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-gray-300 text-gray-600 hover:border-gray-400 dark:border-gray-700 dark:text-gray-300 dark:hover:border-gray-500"
+          className="inline-flex h-7 w-7 items-center justify-center rounded-ui bg-ui-raise text-ui-mute hover:bg-ui-hover hover:text-ui-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent touch:h-10 touch:w-10"
         >
-          <ArrowIcon dir={shown.dir === 'asc' ? 'up' : 'down'} size={11} />
+          <ArrowIcon dir={shown.dir === 'asc' ? 'up' : 'down'} size={12} />
         </button>
       )}
       {open && (
@@ -304,10 +305,10 @@ export function OpenPrsSortMenu({
           role="menu"
           aria-label="Sort open PRs"
           onKeyDown={onMenuKey}
-          className="absolute right-0 top-full z-[60] mt-1 w-56 rounded-lg border border-gray-200 bg-white p-1 shadow-lg dark:border-gray-700 dark:bg-gray-900"
+          className="absolute left-0 top-full z-[60] mt-1 max-h-[70vh] w-60 overflow-y-auto rounded-ui bg-ui-raise p-1 shadow-lg ring-1 ring-ui-line motion-safe:animate-ui-pop"
         >
           {item('default', 'Recent activity', shown == null, () => onChange(null))}
-          <div className="my-1 border-t border-gray-200 dark:border-gray-700" />
+          <div aria-hidden className="mx-2 my-1 h-px bg-ui-line" />
           {sortOptionsFor(claudeOn).map((o) =>
             item(o.key, o.name, shown?.key === o.key, () => onChange(pickSort(o.key))),
           )}
@@ -327,10 +328,8 @@ export function OpenPrsViewToggle(): JSX.Element {
       type="button"
       aria-pressed={view === v}
       onClick={() => setView(v)}
-      className={`rounded-full px-2.5 py-0.5 text-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
-        view === v
-          ? 'bg-gray-900 font-medium text-white dark:bg-gray-100 dark:text-gray-900'
-          : 'text-gray-600 hover:text-gray-900 dark:text-gray-300 dark:hover:text-gray-50'
+      className={`h-6 rounded-[4px] px-2 text-meta focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent touch:h-9 ${
+        view === v ? 'bg-ui-sel font-medium text-ui-ink' : 'text-ui-mute hover:text-ui-ink'
       }`}
     >
       {label}
@@ -340,7 +339,7 @@ export function OpenPrsViewToggle(): JSX.Element {
     <div
       role="group"
       aria-label="Layout"
-      className="inline-flex items-center rounded-full border border-gray-300 p-px dark:border-gray-700"
+      className="inline-flex items-center gap-px rounded-ui bg-ui-raise p-0.5"
     >
       {option('grouped', 'Group by ticket')}
       {option('list', 'List')}
@@ -367,6 +366,7 @@ export function OpenPrsCards({
   ),
   story,
   windowScope,
+  layout = 'cards',
 }: {
   prs: TimelinePr[];
   isLoading: boolean;
@@ -397,6 +397,9 @@ export function OpenPrsCards({
    *  component (workspace + repo filter); the sort and the layout are added here, and a change to
    *  any of them resets the window to one page. Absent = draw every card. */
   windowScope?: OpenPrsWindowScope;
+  /** 'rows' = the redesign's one-line rows + side panel (OpenPrsRows.tsx) — Activity → Open PRs.
+   *  The story view and "Merged so far" keep the cards. Every read above is the same either way. */
+  layout?: 'cards' | 'rows';
 }): JSX.Element {
   const { data: users } = useUsers();
   const { data: repos } = useRepos();
@@ -572,6 +575,24 @@ export function OpenPrsCards({
   }, [windowed, drawnCards, totalCards, showStacks, stacked, stackCount, stackRows, rows.length]);
   const listRef = useRef<HTMLDivElement>(null);
 
+  const rowsLayout = layout === 'rows' && story == null && !merged;
+  if (rowsLayout && (isLoading || ticketGate.waiting)) {
+    return (
+      <div className="space-y-px" aria-busy="true" aria-label="Loading open pull requests">
+        {[0, 1, 2, 3, 4, 5, 6, 7].map((i) => (
+          <div key={i} className="flex h-row items-center gap-3 px-3 touch:h-row-touch">
+            <span className="h-3.5 w-3.5 rounded-full bg-ui-raise" />
+            <span className="h-3 flex-1 rounded-ui bg-ui-raise motion-safe:animate-pulse" style={{ maxWidth: `${60 - (i % 3) * 12}%` }} />
+          </div>
+        ))}
+      </div>
+    );
+  }
+  if (rowsLayout && isError) return <p className="px-3 text-body text-ui-danger">Couldn’t load the open PRs.</p>;
+  if (rowsLayout && rows.length === 0) {
+    return <p className="flex items-center gap-2 px-3 py-10 text-body text-ui-mute">{emptyLabel}</p>;
+  }
+
   if (isLoading || ticketGate.waiting) {
     return (
       <div className="space-y-2" aria-busy="true" aria-label={merged ? 'Loading merged pull requests' : 'Loading open pull requests'}>
@@ -593,6 +614,45 @@ export function OpenPrsCards({
   }
 
   const ticketsOf = (pr: TimelinePr): CardTicket[] => cardTickets(detectedTickets.get(pr.id));
+
+  if (rowsLayout) {
+    const offer =
+      wantsStacks && ticketGate.heldList && ticketData != null ? (
+        <div className="mb-2 flex flex-wrap items-center gap-2 px-2 text-meta text-ui-mute">
+          <TicketIcon size={12} className="shrink-0" />
+          <span>Tickets loaded.</span>
+          <button
+            type="button"
+            onClick={ticketGate.release}
+            className="h-7 rounded-ui bg-ui-raise px-2 text-meta font-medium text-ui-ink hover:bg-ui-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent touch:h-10"
+          >
+            Group by ticket
+          </button>
+        </div>
+      ) : null;
+    return (
+      <OpenPrsRows
+        rows={rows}
+        stacks={showStacks && stacked != null ? stacked.stacks : null}
+        usersById={usersById}
+        repoNameById={repoNameById}
+        claudeOn={claudeOn}
+        ticketReviewOn={ticketReviewOn}
+        claudeStates={claudeStates}
+        ciStates={ciStates}
+        teamClaimSkips={teamClaimSkips}
+        ticketStates={ticketStates}
+        ticketsOf={ticketsOf}
+        mergedStacks={mergedStacks}
+        onOpenMerged={openMerged}
+        onOpenPr={onOpenPr}
+        onOpenReview={(pr) => openClaudeReview(metaOf(pr), { fromActivity: true })}
+        onOpenFix={(pr) => openAiFix(metaOf(pr))}
+        windowKey={fullKey}
+        offer={offer}
+      />
+    );
+  }
 
   const renderCard = (
     pr: TimelinePr,
@@ -734,7 +794,7 @@ export function OpenPrsCards({
  * view's Story section, so there is no modal. ⚠ The card beneath it opens the PR on click, so the
  * button stops the event.
  */
-function TicketKeyButton({
+export function TicketKeyButton({
   ticket,
   className,
   children,
@@ -1426,7 +1486,7 @@ export function AutoReviewUsageLine(): JSX.Element | null {
   const full = usage.used >= usage.cap;
   return (
     <span
-      className={`text-[11px] ${full ? 'text-amber-700 dark:text-amber-300' : 'text-gray-500 dark:text-gray-400'}`}
+      className={`text-meta tabular-nums ${full ? 'text-ui-warn' : 'text-ui-faint'}`}
       title="Auto code reviews started today in this Workspace (the day is counted in UTC)"
     >
       {usage.used} of {usage.cap} auto reviews today · resets in {resetsInLabel(usage.resetsAt, now)}
@@ -1474,13 +1534,14 @@ export function RunAutoReviewsButton(): JSX.Element | null {
           onClick={run}
           disabled={sweep.isPending}
           title="Review every PR that is due now: new PRs, new commits or comments, and failed auto reviews. The daily limit still applies."
-          className="rounded border border-gray-300 px-1.5 py-0.5 text-[11px] font-medium hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
+          className="inline-flex h-7 items-center gap-1.5 rounded-ui px-2 text-meta font-medium text-ai-signal hover:bg-ui-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent disabled:opacity-60 touch:h-10"
         >
+          <SparkleIcon size={12} />
           {sweep.isPending ? 'Checking…' : 'Run auto reviews now'}
         </button>
       </AiRunGate>
       {line != null && (
-        <span role="status" className="text-[11px] text-gray-600 dark:text-gray-300">
+        <span role="status" className="text-meta text-ui-mute">
           {line}
         </span>
       )}

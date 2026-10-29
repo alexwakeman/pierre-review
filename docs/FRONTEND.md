@@ -321,6 +321,19 @@ One sidebar, one slim top bar, the page (`components/shell/`, docs/redesign/DESI
   per-kind branches collapsed to a config switch, which is what made the drag/menu handlers a
   one-place change; the e2e selectors (`data-testid="pinned-tabs"`, `role="tab"` names, ✕
   aria-labels) are load-bearing and survived.
+  **REDESIGN (2026-10-29, `redesign/open-prs`): Open PRs draws ONE-LINE ROWS + a SIDE PANEL**
+  (`Activity/OpenPrsRows.tsx`, mounted by `<OpenPrsCards layout="rows">` from `OpenPrsDetail`).
+  `OpenPrsCards` still owns EVERY read (the ticket gate, the ONE batched Claude / CI / ticket-review /
+  merged-PR requests, the sort, the stacks) and hands the folded answers down; the rows file asks for
+  nothing (nothing fetches on selection). The row: lead = `mergeVerdict` (red conflicts/blocked,
+  green ready, grey otherwise) · title · repo#N · CI icon · review standing · open threads · ONE AI
+  marker · +A −D · author · age; every old chip is in words in the panel (+ the unchanged
+  `ClaudeReviewPanel`). Keys: j/k, ↵ panel then PR, `o` GitHub, `r` AI review; double-click opens the
+  PR; selection, panel state and the drawn window survive Back (session memo). Grouped by ticket =
+  collapsible groups (fold per session, never stored) with one ticket line. Drawing pages are 60
+  rows. The story view and Reports → "Merged so far" keep the CARDS described below. The Feed keeps
+  its stream but in the row language (no borders, grey category icons, My Turn = accent bar + words,
+  `data-my-turn`). Both register their switches in ⌘K. Pinned in `test/openPrsRows.test.ts`.
   **Open PRs is Activity's FIRST RAIL LINE AND THE DEFAULT** (`activityRepoId: 'open-prs'`, the
   one rail value `writeToUrl` omits; null renders it too). It was a third fixed view until
   2026-10-09; the fixed views are now Activity · Timeline (`FIXED_VIEWS`). A URL with NO `view=`

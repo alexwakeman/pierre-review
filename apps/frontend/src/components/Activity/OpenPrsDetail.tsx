@@ -8,7 +8,10 @@ import { useOpenPrsView } from '../../store/openPrsView.js';
 import { useFilters } from '../../store/filters.js';
 import { usePinnedTabs, type TabMeta } from '../../store/pinnedTabs.js';
 import { indexUsers } from '../../lib/ui.js';
-import { RefreshIcon } from '../Icons.js';
+import { ArrowIcon, PullRequestIcon, RefreshIcon, RepoIcon, TicketIcon } from '../Icons.js';
+import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
+import { useRegisterCommands, type Command } from '../ui/index.js';
+import { effectiveSort, pickSort, reverseSort, sortOptionsFor } from '../../lib/openPrsSort.js';
 import { MetricRepoFilter } from './MetricRepoFilter.js';
 import { FirstRunOnboarding } from './FirstRunOnboarding.js';
 import { DefaultBranchesSlot } from './DefaultBranchesSlot.js';
@@ -96,6 +99,42 @@ export function OpenPrsDetail(): JSX.Element {
   const windowScope = useMemo(() => ({ workspaceId, repoIds: repoSel }), [workspaceId, repoSel]);
   const draftCount = rows.reduce((n, p) => n + (p.isDraft ? 1 : 0), 0);
 
+  // ⌘K: the toolbar's every choice, while Open PRs is on screen.
+  const claudeOn = useAiCapabilities().enabled;
+  const setView = useOpenPrsView((s) => s.setView);
+  const commands = useMemo<Command[]>(() => {
+    const shown = effectiveSort(sort, claudeOn);
+    const list: Command[] = [
+      { id: 'sort:default', group: 'Actions', title: 'Sort open PRs by recent activity', keywords: ['order'], icon: <ArrowIcon dir="down" size={14} />, run: () => setSort(null) },
+      ...sortOptionsFor(claudeOn).map((o) => ({
+        id: `sort:${o.key}`,
+        group: 'Actions' as const,
+        title: `Sort open PRs by ${o.name.toLowerCase()}`,
+        keywords: ['order'],
+        icon: <ArrowIcon dir="down" size={14} />,
+        run: () => setSort(pickSort(o.key)),
+      })),
+      { id: 'refresh', group: 'Actions', title: 'Refresh the open PRs', icon: <RefreshIcon size={14} />, run: () => void refetch() },
+    ];
+    if (shown != null) {
+      list.push({ id: 'reverse', group: 'Actions', title: 'Reverse the order of the open PRs', icon: <ArrowIcon dir={shown.dir === 'asc' ? 'down' : 'up'} size={14} />, run: () => setSort(reverseSort(shown)) });
+    }
+    if (ticketsOn) {
+      list.push(
+        { id: 'grouped', group: 'Actions', title: 'Group the open PRs by ticket', icon: <TicketIcon size={14} />, run: () => setView('grouped') },
+        { id: 'list', group: 'Actions', title: 'Show the open PRs as a list', icon: <PullRequestIcon size={14} />, run: () => setView('list') },
+      );
+    }
+    if (repoSel != null) {
+      list.push({ id: 'all-repos', group: 'Actions', title: 'Show open PRs from every repo', icon: <RepoIcon size={14} />, run: () => setRepoSel(null) });
+    }
+    for (const r of repoOptions) {
+      list.push({ id: `only:${r.id}`, group: 'Actions', title: `Show only ${r.fullName} open PRs`, keywords: ['filter', 'repo'], icon: <RepoIcon size={14} />, run: () => setRepoSel([r.id]) });
+    }
+    return list;
+  }, [sort, claudeOn, ticketsOn, repoSel, repoOptions, refetch, setView, setRepoSel]);
+  useRegisterCommands('open-prs', commands);
+
   // This pane is where the app OPENS, so it owns the two empty-workspace states Activity used to:
   // an account with no repos at all gets first-run onboarding, and a workspace with none of them
   // gets the "move some in" guidance — never a bare "No open PRs here.".
@@ -106,42 +145,49 @@ export function OpenPrsDetail(): JSX.Element {
   if (noReposAtAll) return <FirstRunOnboarding />;
 
   return (
-    <div data-testid="open-prs-view" className="mx-auto max-w-[100rem] space-y-4">
-      {/* The workspace's default branches, above the cards — informational, never a count. */}
-      {!emptyWorkspace && <DefaultBranchesSlot />}
-      <div className="flex flex-wrap items-baseline gap-2">
-        <h2 className="text-base font-semibold text-gray-800 dark:text-gray-100">Open PRs</h2>
-        <span className="text-[11px] text-gray-400">
-          {/* Non-draft headline: the Flow tile and the rail's [N] stat count non-draft opens,
-              and this header must reconcile with the number the user just clicked (the
-              RepoOpenPrList convention), not contradict it. */}
-          {scopeLabel} · {rows.length - draftCount} open
-          {draftCount > 0 && ` · ${draftCount} draft${draftCount === 1 ? '' : 's'}`}
-        </span>
-        {/* Today's auto code reviews against the workspace's daily cap — only while auto review is on. */}
-        <AutoReviewUsageLine />
-        {/* Run one auto-review sweep now (failed runs included) — only while auto review is on. */}
-        <RunAutoReviewsButton />
-        <div className="ml-auto flex flex-wrap items-center gap-2">
-          {ticketsOn && <OpenPrsViewToggle />}
-          <OpenPrsSortMenu sort={sort} onChange={setSort} />
-          <MetricRepoFilter repos={repoOptions} selected={repoSel} onChange={setRepoSel} />
+    <div data-testid="open-prs-view" className="mx-auto max-w-[100rem]">
+      {/* THE ONE SLIM HEADER (docs/redesign/DESIGN.md): the title and its counts, one quiet line
+          (the default branches + today's auto reviews), then the toolbar. */}
+      <header className="space-y-2 px-1 pb-3">
+        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
+          <h2 className="text-display text-ui-ink">Open pull requests</h2>
+          <span className="text-body tabular-nums text-ui-mute">
+            {/* Non-draft headline: the Flow tile and the sidebar's count are non-draft opens, and
+                this header must reconcile with the number the reader just clicked. */}
+            {rows.length - draftCount} open
+            {draftCount > 0 && ` · ${draftCount} draft${draftCount === 1 ? '' : 's'}`}
+            <span className="text-ui-faint"> · {scopeLabel}</span>
+          </span>
           <button
             type="button"
             onClick={() => void refetch()}
             disabled={isFetching}
-            className="rounded border border-gray-300 px-1.5 py-0.5 text-[11px] font-medium hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
+            aria-label="Refresh"
+            title="Refresh the open PRs"
+            className="ml-auto inline-flex h-7 items-center gap-1.5 self-center rounded-ui px-2 text-meta text-ui-mute hover:bg-ui-hover hover:text-ui-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent disabled:opacity-60 touch:h-10"
           >
-            <RefreshIcon
-              size={11}
-              className={`inline-block align-[-0.1em] ${isFetching ? 'animate-spin' : ''}`}
-            />{' '}
-            Refresh
+            <RefreshIcon size={12} className={isFetching ? 'motion-safe:animate-spin' : ''} />
+            <span className="max-sm:sr-only">Refresh</span>
           </button>
         </div>
-      </div>
+        <div className="flex flex-wrap items-start gap-x-4 gap-y-1">
+          {/* The workspace's default branches — informational, never a count. */}
+          <div className="min-w-0 flex-1 basis-64">{!emptyWorkspace && <DefaultBranchesSlot />}</div>
+          {/* Today's auto reviews against the cap, and one sweep now — only while auto review is on. */}
+          <div className="flex min-w-0 max-w-full flex-wrap items-center gap-x-3 gap-y-1">
+            <AutoReviewUsageLine />
+            <RunAutoReviewsButton />
+          </div>
+        </div>
+        <div role="toolbar" aria-label="Open PRs view" className="flex flex-wrap items-center gap-1.5">
+          {ticketsOn && <OpenPrsViewToggle />}
+          <OpenPrsSortMenu sort={sort} onChange={setSort} />
+          <MetricRepoFilter repos={repoOptions} selected={repoSel} onChange={setRepoSel} />
+        </div>
+      </header>
 
       <OpenPrsCards
+        layout="rows"
         prs={rows}
         isLoading={isLoading}
         answered={data != null}
@@ -149,12 +195,12 @@ export function OpenPrsDetail(): JSX.Element {
         sort={sort}
         grouped={view === 'grouped'}
         onOpenPr={openTab}
-        // Ten cards, then ten more near the bottom (lib/openPrsWindow.ts). The workspace and the
-        // repo filter are this list's identity: either changing starts again at ten.
+        // The workspace and the repo filter are this list's identity: either changing starts the
+        // drawn window (and the selection) again.
         windowScope={windowScope}
         emptyLabel={
           emptyWorkspace
-            ? 'No repos in this workspace yet. Open "Manage repos & workspaces" in the header to move some in.'
+            ? 'No repos in this workspace yet. Open "Manage repos & workspaces" from the workspace menu in the sidebar to move some in.'
             : repoSel != null && prs.length > 0
               ? 'No open PRs for the selected repos — adjust the repo filter.'
               : undefined
