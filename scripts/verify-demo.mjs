@@ -116,7 +116,8 @@ const VIEWS = [
               // Read the history's labels with it open. Both ran at Effort = High, and each label
               // says so.
               await history.click();
-              const labels = await page.getByRole('option').allTextContents();
+              const listId = await history.getAttribute('aria-controls');
+              const labels = await page.locator(`[id="${listId}"] [role="option"]`).allTextContents();
               await page.keyboard.press('Escape');
               const want = ['Codex · GPT-6.1 Sol · high', 'Claude Opus 5.5 · high'];
               const absent = want.filter((w) => !labels.some((l) => l.includes(w)));
@@ -277,6 +278,9 @@ async function main() {
     // settle (recorded streams replay over a few seconds).
     await page.waitForFunction(() => document.body.innerText.trim().length > 300, null, { timeout: 20_000 }).catch(() => {});
     await page.waitForTimeout(1800);
+    // A lazy tab (AI Review, AI Fix, Bot activity) shows a bare "Loading…" until its chunk arrives;
+    // the first such view of a run could be read before it did (a flaky "text not shown").
+    await page.getByText('Loading…', { exact: true }).first().waitFor({ state: 'detached', timeout: 10_000 }).catch(() => {});
     const problems = [];
     if (opts?.act) {
       try {

@@ -85,8 +85,8 @@ export function TicketStorySection({
   const headingId = useId();
   return (
     <section aria-labelledby={headingId} className="px-3 pb-2" data-testid="story-section">
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-1 py-0.5">
-        <h4 id={headingId} className="text-xs font-semibold text-gray-700 dark:text-gray-200">
+      <div className="flex min-h-8 flex-wrap items-center gap-x-2 gap-y-1 px-1 py-0.5">
+        <h4 id={headingId} className="text-title text-ui-ink">
           Story
         </h4>
         <span className="ml-auto flex flex-wrap items-center gap-1.5" data-testid="story-actions">
@@ -94,7 +94,7 @@ export function TicketStorySection({
           <StoryDesignButton design={design} />
         </span>
       </div>
-      <div className="mt-1.5 space-y-3 rounded-md border border-gray-200 bg-white p-3 dark:border-gray-800 dark:bg-gray-950">
+      <div className="mt-1.5 space-y-3 rounded-ui bg-ui-surface p-3 md:p-4">
         <StoryBody ticket={ticket} state={state} storyPrId={storyPrId} docs={docs} design={design} />
       </div>
     </section>
@@ -212,7 +212,7 @@ function BriefSummary({
     <div className="space-y-2" data-testid="story-brief">
       <div className="flex items-start gap-1.5">
         {brief.summary !== '' ? (
-          <p className="min-w-0 flex-1 text-sm text-gray-800 dark:text-gray-100">{brief.summary}</p>
+          <p className="min-w-0 flex-1 text-body text-ui-ink">{brief.summary}</p>
         ) : (
           <span className="flex-1" />
         )}
@@ -232,7 +232,7 @@ function BriefSummary({
             {shown.map((c) => {
               const docs = docsItems.get(c.n);
               return (
-                <li key={c.n} className="flex flex-col px-1 text-[13px] text-gray-800 dark:text-gray-100">
+                <li key={c.n} className="flex flex-col px-1 text-body text-ui-ink">
                   <div className="flex items-baseline gap-2">
                     <span className={`w-5 shrink-0 text-right font-mono text-xs ${MUTED}`}>{c.n}</span>
                     <span className="min-w-0 break-words">{c.text}</span>
@@ -251,7 +251,7 @@ function BriefSummary({
               type="button"
               aria-expanded={all}
               onClick={() => setAll((v) => !v)}
-              className="px-1 text-xs text-sky-700 hover:underline dark:text-sky-300"
+              className="px-1 text-meta text-ui-accent hover:underline touch:min-h-10"
             >
               {all ? 'Show fewer' : `Show all ${brief.criteria.length} criteria`}
             </button>

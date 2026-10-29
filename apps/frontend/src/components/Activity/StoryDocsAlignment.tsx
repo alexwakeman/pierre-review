@@ -196,7 +196,7 @@ export function StoryDocsAlignmentBlock({
   return (
     <section aria-label="Docs check" className="space-y-2" data-testid="story-docs">
       <div className="flex flex-wrap items-center gap-1.5">
-        <h4 className="text-xs font-semibold text-gray-700 dark:text-gray-200">Docs check</h4>
+        <h4 className="text-body font-medium text-ui-ink">Docs check</h4>
         <StoryDocsInfo />
         {shown != null && <AiRunLabel provider={shown.provider} model={shown.model} />}
         {shown != null && !shown.current && !checking && (
@@ -247,13 +247,13 @@ function StoryDocsResultView({ run, attached }: { run: StoryDocsAlignmentRun; at
           {STORY_DOCS_OVERALL_VERDICT_LABEL[overall.verdict]}
         </span>
       </div>
-      <p className={`${REVIEW_PROSE} text-gray-800 dark:text-gray-100`}>{overall.summary}</p>
+      <p className={`${REVIEW_PROSE} text-ui-ink`}>{overall.summary}</p>
       {overall.actions.length > 0 && (
         <div className="space-y-1">
-          <h5 className="text-xs font-semibold text-gray-700 dark:text-gray-200">What to do</h5>
+          <h5 className="text-meta font-medium text-ui-mute">What to do</h5>
           <ul className="list-disc space-y-1.5 pl-5">
             {overall.actions.map((a, i) => (
-              <li key={i} className="text-[13px] text-gray-800 dark:text-gray-100">
+              <li key={i} className="text-body text-ui-ink">
                 <span className="break-words">{a.text}</span>
                 <StoryDocsRefLinks refs={a.refs} />
               </li>
@@ -263,12 +263,12 @@ function StoryDocsResultView({ run, attached }: { run: StoryDocsAlignmentRun; at
       )}
       {result.storyParts.length > 0 && (
         <div className="space-y-1">
-          <h5 className="text-xs font-semibold text-gray-700 dark:text-gray-200">Other parts of the story</h5>
+          <h5 className="text-meta font-medium text-ui-mute">Other parts of the story</h5>
           <ul className="space-y-1.5">
             {result.storyParts.map((p, i) => {
               const t = ITEM_TONE[p.verdict];
               return (
-                <li key={i} className="rounded border border-gray-100 px-3 py-2 dark:border-gray-800">
+                <li key={i} className="rounded-ui bg-ui-raise px-3 py-2">
                   <div className="flex flex-wrap items-baseline gap-1.5">
                     <span className="text-[13px] font-semibold text-gray-800 dark:text-gray-100">{p.part}</span>
                     <span className={`${REVIEW_CHIP} ${TONE_CLASS[t]}`}>

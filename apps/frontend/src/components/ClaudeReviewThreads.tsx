@@ -82,8 +82,9 @@ export function ThreadRow({
   const [whyOpen, setWhyOpen] = useState(false);
   return (
     <li
-      className={`rounded border px-3 py-2 text-sm ${
-        toFix ? 'border-amber-300 dark:border-amber-700/60' : 'border-gray-100 dark:border-gray-800'
+      // A surface-toned row; one still to fix keeps a thin warn edge (it is the news here).
+      className={`rounded-ui bg-ui-surface px-3 py-2.5 text-body ${
+        toFix ? 'shadow-[inset_2px_0_0_rgb(var(--ui-warn))]' : ''
       }`}
     >
       <div className="flex flex-wrap items-center gap-2">

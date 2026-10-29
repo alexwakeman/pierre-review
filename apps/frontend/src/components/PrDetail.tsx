@@ -582,14 +582,14 @@ function PrCommentsList({
 
   if (items.length === 0) {
     return (
-      <div className="px-3 py-6 text-center text-sm text-gray-500 dark:text-gray-400">
+      <div className="px-4 py-6 text-center text-body text-ui-mute md:px-5">
         No PR comments on this PR.
       </div>
     );
   }
 
   return (
-    <div className="space-y-2 px-3 pb-3">
+    <div className="mx-auto max-w-4xl space-y-2 px-3 pb-3 md:px-5">
       {items.map((it) => {
         const user = it.authorId != null ? usersById.get(it.authorId) : undefined;
         const isNew = isNewComment(it.at, viewedSince);
@@ -606,13 +606,12 @@ function PrCommentsList({
               if (el) cardRefs.current.set(rowKey, el);
               else cardRefs.current.delete(rowKey);
             }}
-            className={`rounded-md border px-2.5 py-2 ${
-              selected
-                ? 'border-amber-400 bg-amber-400/5'
-                : 'border-gray-200 dark:border-gray-800'
+            // A tone, not a border; the selected comment keeps its permanent amber ring.
+            className={`rounded-ui bg-ui-surface px-3 py-2.5 ${
+              selected ? 'ring-1 ring-amber-400' : ''
             } ${isNew ? 'comment-new' : ''} ${flashing ? 'activity-flash' : ''}`}
           >
-            <div className="flex items-center gap-2 text-xs">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-meta text-ui-mute">
               <ShowOnTimeline
                 prId={pr.id}
                 at={it.at}
@@ -627,16 +626,15 @@ function PrCommentsList({
                     : 'Show this review on the timeline'
                 }
               />
-              <span className="decorative-mark text-gray-300 dark:text-gray-600">·</span>
               <Avatar user={user} size={18} />
               <UserName
                 user={user}
                 fallbackId={it.authorId}
                 repoId={pr.repoId}
-                className="font-semibold"
+                className="font-medium text-ui-ink"
               />
               {it.kind === 'review' && it.state != null && <ReviewStateTag state={it.state} />}
-              <span className="text-gray-400" title={dateTime(it.at)}>
+              <span className="whitespace-nowrap text-ui-faint" title={dateTime(it.at)}>
                 {relativeTime(it.at)}
               </span>
               {isNew && <NewTag />}
@@ -656,7 +654,7 @@ function PrCommentsList({
                 className="ml-auto"
               />
             </div>
-            <div className="mt-1 text-sm">
+            <div className="mt-1.5 text-body">
               <Markdown>{it.body}</Markdown>
             </div>
             {/* Emoji reactions on this conversation item. BOTH kinds are reactable on GitHub —
@@ -672,12 +670,12 @@ function PrCommentsList({
               id={it.id}
               className="mt-1.5 pl-2"
             />
-            <div className="mt-2 flex items-center gap-3 pl-2 text-[11px]">
+            <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-meta">
               {replyingTo !== rowKey && (
                 <button
                   type="button"
                   onClick={() => setReplyingTo(rowKey)}
-                  className="text-blue-500 hover:underline"
+                  className="text-ui-accent hover:underline touch:min-h-10"
                 >
                   Reply
                 </button>
@@ -687,9 +685,9 @@ function PrCommentsList({
                   href={safeExternalUrl(it.url)}
                   target="_blank"
                   rel="noreferrer noopener"
-                  className="text-blue-500 hover:underline"
+                  className="inline-flex items-center gap-1 text-ui-accent hover:underline touch:min-h-10"
                 >
-                  <ExternalLinkIcon size={11} className="inline-block align-[-0.1em]" />{' '}
+                  <ExternalLinkIcon size={11} />
                   {isComment ? 'View comment on GitHub' : 'View review on GitHub'}
                 </a>
               )}

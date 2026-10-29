@@ -102,6 +102,7 @@ import { CheckIcon, ChevronIcon, CloseIcon, PlusIcon, RefreshIcon } from './Icon
 import { InfoButton } from './InfoModal.js';
 import { JiraStoryView } from './ClaudeReviewTickets.js';
 import { ReviewSection } from './ReviewSection.js';
+import { Select } from './ui/index.js';
 import { PrRefText } from './ReviewPrRefs.js';
 import { Markdown } from './Markdown.js';
 import { REVIEW_CHIP, REVIEW_ITEM_CARD, REVIEW_ITEM_TITLE, REVIEW_PROSE, REVIEW_SUBHEAD } from '../lib/reviewStyles.js';
@@ -892,26 +893,23 @@ export function AcFieldPicker({
   }
   return (
     <div>
-      <label htmlFor={selectId} className="text-xs font-medium text-gray-700 dark:text-gray-200">
+      <label htmlFor={selectId} className="text-meta font-medium text-ui-mute">
         Take the criteria from
         {details.issueType != null && (
           <span className={`font-normal ${MUTED}`}> ({details.issueType.name})</span>
         )}
       </label>
-      <select
+      <Select
         id={selectId}
         value={chosen}
         disabled={disabled}
-        onChange={(e) => onChoose(e.target.value)}
-        className={INPUT}
-      >
-        {(allowNone || chosen === '') && <option value="">None of these</option>}
-        {details.candidates.map((c) => (
-          <option key={c.id} value={c.id}>
-            {acCandidateLabel(c)}
-          </option>
-        ))}
-      </select>
+        onChange={(v) => onChoose(v)}
+        className="mt-0.5 flex w-full"
+        options={[
+          ...(allowNone || chosen === '' ? [{ value: '', label: 'None of these' }] : []),
+          ...details.candidates.map((c) => ({ value: c.id, label: acCandidateLabel(c) })),
+        ]}
+      />
       {details.omittedCandidates > 0 && (
         <p className={`mt-0.5 text-xs ${MUTED}`}>
           {details.omittedCandidates} more {details.omittedCandidates === 1 ? 'field' : 'fields'} with
@@ -1286,14 +1284,14 @@ export function FollowUpRow({
   const anchor = followUpAnchor(item, findingsById, headMoved, changedPaths);
   const border =
     item.status === 'not_addressed' || item.status === 'partly_addressed' || item.status === 'reply_disputed'
-      ? 'border-amber-300 dark:border-amber-700/60'
-      : 'border-gray-100 dark:border-gray-800';
+      ? 'shadow-[inset_2px_0_0_rgb(var(--ui-warn))]'
+      : '';
   const reraised =
     item.reraisedFindingId != null && findingsById.has(item.reraisedFindingId)
       ? item.reraisedFindingId
       : null;
   return (
-    <li className={`rounded border px-3 py-2 text-sm ${border}`}>
+    <li className={`rounded-ui bg-ui-surface px-3 py-2.5 text-body ${border}`}>
       <div className="flex flex-wrap items-center gap-2">
         {selection}
         <span className={`${CHIP} ${FOLLOW_UP_STATUS_CLASS[item.status]}`}>

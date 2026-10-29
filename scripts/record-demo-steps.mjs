@@ -283,13 +283,15 @@ export const STEPS = [
       let count = 0;
       if ((await history.count()) > 0) {
         await history.click();
-        count = await h.page.getByRole('option').count();
+        const listId = await history.getAttribute('aria-controls');
+        count = await h.page.locator(`[id="${listId}"] [role="option"]`).count();
         await h.page.keyboard.press('Escape');
       }
       for (let i = 0; i < Math.min(count, 8); i++) {
         try {
           await history.click({ timeout: 2000 });
-          await h.page.getByRole('option').nth(i).click({ timeout: 2000 });
+          const listId = await history.getAttribute('aria-controls');
+          await h.page.locator(`[id="${listId}"] [role="option"]`).nth(i).click({ timeout: 2000 });
           await h.settle({ quietMs: 600 });
         } catch {
           /* gone after a re-render */

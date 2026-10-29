@@ -52,7 +52,7 @@ import { useAiCapabilities, useAiProviderName } from '../hooks/useAiCapabilities
 import { aiCredentialWords, reviewPeerReadLabel } from '@pierre-review/shared';
 import { AiRunGate } from './AiSetup.js';
 import { ModelPicker } from './ModelPicker.js';
-import { cx, FOCUS_RING } from './ui/index.js';
+import { cx, FOCUS_RING, Select } from './ui/index.js';
 import { ReviewHistoryList } from './ReviewHistoryList.js';
 import { useFilters } from '../store/filters.js';
 import { PrActionControls, usePrActionsVisible } from './pr/PrActionsRow.js';
@@ -2279,21 +2279,20 @@ export function ClaudeReviewTab({
             >
               Save draft
             </button>
-            <select
-              aria-label="Verdict"
+            <Select<ClaudeReviewVerdict>
+              label="Verdict"
               value={userVerdict}
-              onChange={(e) => {
-                const v = e.target.value as ClaudeReviewVerdict;
+              onChange={(v) => {
                 setUserVerdict(v);
                 setPreview(null);
                 updateReview.mutate({ reviewId: review.id, userVerdict: v });
               }}
-              className="rounded border border-gray-300 bg-white px-2 py-1 text-sm dark:border-gray-700 dark:bg-gray-900"
-            >
-              <option value="COMMENT">Comment</option>
-              <option value="REQUEST_CHANGES">Request changes</option>
-              <option value="APPROVE">Approve</option>
-            </select>
+              options={[
+                { value: 'COMMENT', label: 'Comment' },
+                { value: 'REQUEST_CHANGES', label: 'Request changes' },
+                { value: 'APPROVE', label: 'Approve' },
+              ]}
+            />
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <button

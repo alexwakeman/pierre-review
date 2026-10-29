@@ -12,7 +12,7 @@ export function TicketTabView(): JSX.Element | null {
   const meta = tabs.find((t) => t.key === activeTab)?.ticketMeta ?? null;
   if (ident == null) return null;
   return (
-    <div data-testid="ticket-tab-view" className="mx-auto max-w-5xl p-4">
+    <div data-testid="ticket-tab-view" className="mx-auto max-w-5xl px-3 py-4 md:px-5 md:py-6">
       <StoryViewBody ident={ident} meta={meta} />
     </div>
   );
