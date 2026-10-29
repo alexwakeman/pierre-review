@@ -1166,6 +1166,8 @@ interface DemoSection {
 }
 
 interface DemoWiki {
+  /** Absent ⇒ Confluence. */
+  provider?: 'confluence' | 'notion';
   rootPageId: string;
   depth: number;
   checkedHoursAgo: number;
@@ -1174,6 +1176,8 @@ interface DemoWiki {
   pages: string[];
   /** Set: the page has answered 403 since then. */
   unreachableHoursAgo?: number;
+  /** The build's figures line (docs/REFERENCE-DOCS.md § Figures). */
+  figures?: { described: number; outlined: number; kept: number; pending: number; note: string | null };
 }
 
 const LIBRARY: Array<{ slug: string; title: string; source: string; summary: string; topics: string[]; sections: DemoSection[]; wiki?: DemoWiki }> = [
@@ -1262,6 +1266,37 @@ const LIBRARY: Array<{ slug: string; title: string; source: string; summary: str
       },
     ],
   },
+  // A NOTION page tree (docs/REFERENCE-DOCS.md § Wiki sources → Notion), with a FIGURE: the checkout
+  // diagram was described by Claude at import (labelled as AI in the text), and its Mermaid source block
+  // was kept as text. Read with the workspace's Notion token (fictional).
+  {
+    slug: 'checkout-design',
+    title: 'Checkout design notes',
+    source: 'https://www.notion.so/acme/Checkout-design-notes-7c1e2a40b9d84f0e9a3c5d6e7f801234',
+    summary: 'How checkout talks to payments: the request flow, retries and what the customer sees.',
+    topics: ['checkout', 'payments', 'retries'],
+    wiki: {
+      provider: 'notion',
+      rootPageId: '7c1e2a40-b9d8-4f0e-9a3c-5d6e7f801234',
+      depth: 1,
+      checkedHoursAgo: 1,
+      editedHoursAgo: 20,
+      pages: ['7c1e2a40-b9d8-4f0e-9a3c-5d6e7f801234', '7c1e2a40-b9d8-4f0e-9a3c-5d6e7f805678'],
+      figures: { described: 1, outlined: 1, kept: 0, pending: 0, note: null },
+    },
+    sections: [
+      {
+        title: 'Checkout design notes',
+        summary: 'The checkout request flow, with its diagram described.',
+        body: 'Checkout never charges a card itself. It asks the payments service for a payment intent and redirects the customer to confirm it.\n\n[Figure (described by AI): checkout-flow.png — A sequence diagram with three lanes, Browser, Checkout API and Payments. Browser → Checkout API: POST /orders. Checkout API → Payments: create intent. Payments → Checkout API: intent id. Checkout API → Browser: redirect to confirm.]\n\n```mermaid\nsequenceDiagram\n  Browser->>Checkout API: POST /orders\n  Checkout API->>Payments: create intent\n  Payments-->>Checkout API: intent id\n  Checkout API-->>Browser: redirect to confirm\n```',
+      },
+      {
+        title: 'Retries',
+        summary: 'Retry a payment call only with the same idempotency key.',
+        body: 'A call to payments is retried at most three times, with the same idempotency key every time, so a retry never charges twice.\n\nThe customer sees one spinner for all of it, and a plain error after the last try.',
+      },
+    ],
+  },
   // A second Confluence page that has stopped answering: the last built version stays readable, and the
   // document line says since when it cannot be reached.
   {
@@ -1310,8 +1345,8 @@ async function seedReferenceDocs(c: AgenticSeedCtx): Promise<number> {
       ...(d.wiki
         ? {
             wiki: {
-              provider: 'confluence',
-              origin: 'https://acme.atlassian.net',
+              provider: d.wiki.provider ?? 'confluence',
+              origin: d.wiki.provider === 'notion' ? 'https://www.notion.so' : 'https://acme.atlassian.net',
               rootPageId: d.wiki.rootPageId,
               rootUrl: d.source,
               depth: d.wiki.depth,
@@ -1377,6 +1412,7 @@ async function seedReferenceDocs(c: AgenticSeedCtx): Promise<number> {
       const sections = Object.fromEntries(drafts.map((dr) => [sectionHash(dr), dr.summary]));
       const { patchDoc } = await import('../src/reference-docs/store.js');
       await patchDoc(1, row.id, { summaryCache: { v: 1, sections, doc: { title: d.title, summary: d.summary, topics: d.topics } } });
+      if (w.figures) await patchDoc(1, row.id, { figures: w.figures });
     }
   }
   // Settings → Confluence: the page site is the demo's Jira site, so the pages read with the Jira token
@@ -1384,6 +1420,8 @@ async function seedReferenceDocs(c: AgenticSeedCtx): Promise<number> {
   {
     const { writeWikiCredentials } = await import('../src/reference-docs/wiki/credentials.js');
     await writeWikiCredentials(1, ws, 'confluence', { siteUrl: 'https://acme.atlassian.net', email: 'morgan.diaz@acme.example', token: 'demo-not-a-real-token' });
+    // Settings → Notion: a fictional integration token (the shape a real one has; it opens nothing).
+    await writeWikiCredentials(1, ws, 'notion', { token: 'ntn_demo0000000000000000000000000000000000000' });
   }
   await writeIndex(1, ws);
   // Reviews read the library (Settings → Docs → "Use in reviews").

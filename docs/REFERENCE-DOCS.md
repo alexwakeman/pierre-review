@@ -1,6 +1,6 @@
 # Reference docs — the workspace library
 
-A workspace's reference material (PDF, Word, text, markdown, web pages, Confluence pages), turned into a markdown tree
+A workspace's reference material (PDF, Word, text, markdown, web pages, Confluence and Notion pages), turned into a markdown tree
 that an agent navigates by REASONING over contents, not by embedding search. CORE and agentic
 (registered by `registerAgenticRoutes`, absent under `LIMN_AI_DISABLED`). Sonnet 5
 does the content building. Code: `apps/backend/src/reference-docs/`. Wire types:
@@ -92,8 +92,9 @@ NULs) — then the NAME tells markdown (`.md`/`.markdown`/`.mdx`) from HTML (`.h
   `crawl: {depth}` (1–3). See § Following links.
 - **Conversion**: text/markdown as is. Word: `mammoth` → HTML → `turndown` (+ `turndown-plugin-gfm`
   tables). HTML: narrowed to `<main>`/`<article>` when present; `script`/`style`/`nav`/`footer`/forms/
-  embeds dropped; images become `[Image: alt]` (a Word file's `data:` images would otherwise be
-  megabytes of base64); a link that is not http(s)/mailto/# keeps its text and loses its target.
+  embeds dropped; an image whose bytes are at hand (a Word file's `data:` image, a web page's image
+  downloaded for the build) becomes a FIGURE (§ Figures), else `[Image: alt]` (never the base64); a
+  link that is not http(s)/mailto/# keeps its text and loses its target.
   **PDF is not converted**: Claude reads it natively in the build (the Read tool, ≤ 20 pages a call).
   ⚠ **The three converters are NOT npm dependencies** of `limn-review`: they ride the AI runtime
   download (`AI_RUNTIME_PACKAGES`, pins in `limnAiRuntime`, loaded ONLY through `ai/runtime.ts`
@@ -173,21 +174,22 @@ long to split, in a sentence.
 Progress: the converting stage reads "Crawling 6 of 25" (the SPA's bar shows the server's stage
 words). Cancel aborts between requests and during the politeness wait.
 
-## Wiki sources — Confluence (`wiki/`; migration `0140`)
+## Wiki sources — Confluence and Notion (`wiki/`; migrations `0140`, `0145`)
 
 A Confluence Cloud page — and, optionally, its child pages 1–3 levels down (the crawl's depth words,
 reused) — becomes ONE document (`sourceKind: 'wiki'`, `doc.wiki`), the root and each child a chapter.
-Pasting a Confluence page address into "Add web page" switches the form to it ("Add Confluence page",
-"With child pages, N levels"); `parseConfluencePageUrl` (shared) decides — `/wiki/spaces/<K>/pages/<id>`,
+Pasting a Confluence (or Notion — § Notion) page address into "Add web page" switches the form to it ("Add Confluence page",
+"With child pages, N levels"); shared `wikiProviderOfUrl` decides, through `parseConfluencePageUrl` — `/wiki/spaces/<K>/pages/<id>`,
 `…/pages/edit-v2/<id>`, `viewpage.action?pageId=<id>`; https only; a short `/wiki/x/…` link names no id
 and is refused. ≤ `REFERENCE_DOC_WIKI_MAX_PAGES` (100) pages, root included; the rest are counted
 (`pagesLeftOut`).
 
-**The seam, for the next wiki (Notion).** `wiki/source.ts` `WikiSource` — `resolveRef(url)` (pure),
+**The seam.** `wiki/source.ts` `WikiSource` — `resolveRef(url)` (pure),
 `getPage(site, id, {body})` (title, parent, version / last-edit time, body in the provider's format),
 `listDescendants(site, root, depth, cap)` (ids, parents, depth, order; no bodies), `changedSince(site,
-root, since)` (may over-report, never under), `toMarkdown(page)`, `checkAccess(site)`, `pageUrl(site,
-id)`. Errors are `WikiSourceError` CODES (never the upstream body). Adapters register in
+root, since, {known})` (may over-report, never under; `known` = the document's page ids, for a wiki whose
+search is not scoped to a tree), `toMarkdown(page, {figures})` (images read NOW, § Figures), `checkAccess(site)`,
+`pageUrl(site, id)`. Errors are `WikiSourceError` CODES (never the upstream body). Adapters register in
 `wiki/register.ts`; `sync.ts`, `build.ts`, `refresh.ts` and the routes never name a provider (except the
 credential ladder below and the provider union on the wire). `fake-wiki.ts` is the in-memory adapter the
 tests use.
@@ -207,16 +209,17 @@ waits for it).
 ONE turndown pipeline (`htmlToMarkdown`). code / noformat → a fenced block (language kept); info / note /
 tip / warning / panel (+ the new editor's `ac:adf-extension` panels) → a quote headed by its kind;
 expand → its title in bold then its body; mermaid / PlantUML with a text source → a fenced block of it;
-draw.io / Gliffy / Lucidchart (or a diagram with no text) → `[Diagram: name]` — ⚠ **DIAGRAM_HOOK**: the
-image-description pass (another branch) replaces exactly these placeholders (`diagramPlaceholder`);
+draw.io / Gliffy → the adapter's text for it (§ Figures: an outline of its file, else its PNG preview as a
+figure), else — and always for Lucidchart or a diagram with no text — `[Diagram: name]` (`diagramPlaceholder`);
 status / Jira → their words; toc / children / anchor and other navigation macros dropped; an unknown
-macro → its rich-text body; `ac:link` → its text; `ac:image` → `[Image: alt or file name]`; task lists →
+macro → its rich-text body; `ac:link` → its text; `ac:image` → its figure marker, else `[Image: alt or file
+name]` (an attachment of ANOTHER page keeps its name); task lists →
 `[x]` / `[ ]`; table cells and list items unwrap their `<p>`. Bracketed words travel through turndown as
 private-use sentinels so they are not escaped. ⚠ The body is a stranger's: ONE forward tokenizer pass,
 quote-aware tag ends, an element stack capped at 256 (no quadratic close-tag matching), scripts dropped.
 
 **Credentials** (`wiki/credentials.ts`, `workspace_wiki_credentials`; Settings → AI review →
-**Confluence**): ONE ladder — the workspace's own Confluence credential when its site's host is the
+**Confluence** / **Notion**): for Confluence, ONE ladder — the workspace's own Confluence credential when its site's host is the
 page's host; else the workspace's JIRA credential when Jira is its tracker, the hosts match and an email
 + token are saved (Atlassian Cloud shares one API token); else none (`400 NoWikiCredential`, "Add a
 Confluence API token in Settings"). HTTP Basic `email:apiToken`. ⚠ The token is SEALED exactly like a
@@ -261,9 +264,145 @@ cancelled or budget-skipped refresh never advances a version, so the next check 
   version stays readable and the document line says "Can't reach this page in Confluence since <date>."
   A first build that cannot read the wiki fails with the sentence.
 
-**On screen**: the document line reads "Confluence · N pages · M sections", then "Checked 2 hours ago ·
-last edited <date>" or the can't-reach line; "Refresh now" beside Rebuild. The form's ⓘ explains the
-import and the refresh.
+**On screen**: the document line reads "Confluence · N pages · M sections" (or "Notion · …", with its own
+mark — `ConfluenceIcon` / `NotionIcon`), then "Checked 2 hours ago · last edited <date>" or the can't-reach
+line, then the figures line (§ Figures); "Refresh now" beside Rebuild. The form's ⓘ explains the import,
+the credential and the refresh. The address box is TEXT (`inputMode="url"`): a bare Notion id is accepted.
+
+### Notion (`wiki/notion.ts`, `wiki/notion-blocks.ts`)
+
+A Notion page — `notion.so` / `www.notion.so` / `notion.com` / `<name>.notion.site` addresses ending in the
+32-hex id (dashes or not), a database row opened as `?p=<id>`, or a bare id (`parseNotionPageUrl`; a database
+VIEW `?v=` names no page and is refused) — and its child pages 1–3 levels down, as ONE document.
+
+- **Transport**: ONE fixed host, `api.notion.com`, through the tracker's guarded transport (https, public
+  addresses at connect time, no redirects, 15 s, 8 MB, JSON only), `Authorization: Bearer <token>`,
+  `Notion-Version: 2022-06-28` PINNED. ⚠ ONE process-wide limiter spaces every request
+  `NOTION_MIN_INTERVAL_MS` (350 ms ≈ Notion's three a second); a 429 is waited out (Retry-After, ≤ 60 s in
+  all, cancellable), then `rate_limited` with the wait. A 404 means "no such page OR not shared with the
+  integration" — the sentence says both.
+- **A page** (`GET /v1/pages/{id}`): the title is the ONE property whose type is `title`; `last_edited_time`
+  is the change marker (`version` is null); a page in the trash reads as gone (`not_found`).
+- **The body** (`readBlockTree`): `GET /v1/blocks/{id}/children`, paginated, recursing into every block with
+  children — bounded by `NOTION_MAX_BLOCKS` (5,000), `NOTION_MAX_BLOCK_REQUESTS` (250) and depth 8. A synced
+  block reads its ORIGINAL's children (one visit each; an original the integration may not read keeps
+  nothing). `child_page` / `child_database` are NEVER entered: they are chapters. The body is stored as
+  JSON (`{v:1, blocks}`), the provider's own format.
+- **The tree** (`listDescendants`): the same block walk per page, collecting `child_page` blocks ANYWHERE in
+  it (columns, toggles, lists) and the rows of each `child_database` (`POST /v1/databases/{id}/query`, ≤ 100,
+  trashed rows left out) — a database is transparent, like a Confluence folder: its rows are the containing
+  page's children. Reading order; the cap applies in that order. (It reads each page's blocks, so a daily
+  list costs about what a full read does — at three requests a second.)
+- **Changes** (`changedSince`): Notion has no ancestor query, so `POST /v1/search` — pages, sorted by
+  `last_edited_time` descending, 100 a page — is read until a page older than `since − 2 min`. Kept: the
+  document's own pages (`known`) and NEW pages whose parent is one of them; the rest of the workspace is
+  ignored. ⚠ An edit to a child page bumps only ITS time (never the parent's), which is why the stored
+  per-page records are compared one by one. ⚠ `last_edited_time` is rounded to the MINUTE, so every hit is
+  reported `NOTION_EDIT_FUZZ_MS` (60 s) later: an edit in the same minute as the last read still reads as
+  newer (an unchanged page read again costs a request, never a model call — its hash does not move). ⚠ Past
+  `NOTION_MAX_SEARCH_REQUESTS` (30) pages of results without reaching `since`, EVERY known page is
+  reported: over, never under. A new row in a child DATABASE is found by the daily list only. The root is in
+  `known`, so the search can name it too (`syncWikiTree` then reads the root again).
+- **Converting** (`notionBlocksToMarkdown`, pure): headings; paragraphs with bold / italic / strikethrough /
+  code and http(s)/mailto links; bulleted, numbered (running number) and to-do (`[x]` / `[ ]`) lists, nested
+  by indentation; a toggle → its summary in bold, then its contents (a toggleable heading stays a heading);
+  quote / callout (its emoji kept) → a quote; code → a fenced block with its language — **`mermaid` /
+  `plantuml` stay fenced: the source IS the diagram**; table → a GitHub table (first row as header, `|`
+  escaped); divider; equation → a fenced `math` block; bookmark / embed / link preview → a link; image → its
+  figure marker or `[Image: caption or file name]`; file / pdf / video / audio → `[File: name]` (a
+  Notion-hosted address expires, so only an EXTERNAL one links); column list / column / synced block → their
+  contents; child page / database / link-to-page / table of contents / breadcrumb / template / unsupported →
+  nothing. ⚠ Every string is a stranger's: text is ESCAPED so it cannot become a link, a heading or a figure
+  marker.
+- **Credentials**: ONE rung — the workspace's own Notion row (provider `notion`, token only; no site, no
+  email). The token must match `NOTION_TOKEN_RE` (`ntn_…`, issued since September 2024, or the older
+  `secret_…`, then 20+ letters and digits), so a pasted page address never becomes the stored token. Sealed
+  and write-only exactly like Confluence's. The integration must be SHARED with the pages in Notion (the
+  settings' ⓘ says how). "Test connection" (`POST …/wiki-credentials/check {provider: 'notion'}`) reads
+  `GET /v1/users/me`.
+- **The page address** in a chapter's `Source:` line is `https://www.notion.so/<id without dashes>`.
+
+## Figures — images and diagrams as text (`figures.ts`, `figure-describer.ts`, `diagram-outline.ts`, `figure-fetch.ts`; migration `0145`)
+
+Every source's images and diagrams become WORDS, in this order of preference:
+
+1. **Their own source, no model.** A Mermaid / PlantUML block (a Confluence macro, a Notion code block, a
+   markdown fence) stays a fenced block. A Confluence **draw.io** or **Gliffy** diagram whose file can be read
+   (an attachment named after the diagram: `name`, `name.drawio`, `name.xml` for draw.io; `name` for Gliffy)
+   becomes a DETERMINISTIC outline (`drawioOutline` / `gliffyOutline`): `[Diagram outline from its draw.io
+   source: Name]`, then `- Shapes: A; B; C` and one `- A → B: label` per connector (labels drawn on a
+   connector join it; compressed draw.io pages are inflated, capped at 5 MB; HTML labels are flattened). The
+   same file always gives the same text, so an unchanged diagram never changes a section's hash. A diagram
+   whose file does not read falls back to its PNG preview (`name.png`) as a figure, then to `[Diagram: name]`.
+2. **A description by Claude's vision**, one call per image (below).
+3. **Its name**: `[Image: alt]` / `[Diagram: name]` — icons, unsupported formats (SVG, …), past the cap, on
+   Codex, with no Claude sign-in.
+
+**At ingest** (the converters and the wiki adapters) an image's bytes go to a `FigureSink`
+(`folderFigureSink`, the document's `sources/<slug>/figures/<sha256>`), which answers a MARKER for the text:
+`[[limn-figure:<sha256>:<fallback>]]`. It answers null — the caller writes the name — for anything that is not
+PNG / JPEG / GIF / WebP (`imageInfo`, from the header), under `REFERENCE_DOC_FIGURE_MIN_BYTES` (2 KB) or
+`REFERENCE_DOC_FIGURE_MIN_PIXELS` (48 px) on a side (icons), or over `REFERENCE_DOC_FIGURE_MAX_BYTES` (5 MB). The
+same image twice is ONE file and one figure. A build downloads at most `FIGURE_MAX_FETCHES_PER_BUILD` (60)
+files. Where the bytes come from:
+
+- **Word**: mammoth's inline `data:` images. **An uploaded HTML file**: its `data:` images (a relative `src`
+  has nowhere to come from).
+- **A web page (and each crawled page)**: its `<img src>` addresses, resolved against the page and read
+  through `fetchPage` (the page's own guard) — ONLY when Claude can describe them here (a page is fetched
+  again on every build, so bytes kept for later buy nothing). `imageSources` is a linear scanner.
+- **Confluence**: an `ac:image` attachment of THIS page (`GET /wiki/api/v2/pages/{id}/attachments?filename=`,
+  then its `downloadLink` with the credential). Confluence answers with a redirect to Atlassian's media
+  service, whose address carries its own signature: that ONE hop is followed WITHOUT the credential, through
+  the library's guarded fetch, public addresses only (`confluenceGetBytes`). An `ri:url` image is fetched the
+  same way.
+- **Notion**: the image block's file address — a signed S3 address that EXPIRES within the hour — read
+  during the build that saw it (`toMarkdown`), with no credential, public addresses only. A wiki's images are
+  read ALWAYS (whether or not Claude can describe them today): the bytes kept now are what a later refresh
+  describes.
+
+**Before the split** (`manager.ts` → `resolveFigures`, every 'sections' build): each marker becomes
+`[Figure (described by AI): <name> — <words>]` or its name.
+
+- **The cache** (`reference_doc_figure_descriptions`, `figure-cache.ts`): one row per (account, image
+  sha256), so a refresh — or a Rebuild, or the same logo in another document — never describes an unchanged
+  image again. A marker whose bytes THIS document does not hold resolves to its name: one document's text
+  cannot reach another's description. An image that carries nothing is cached as `DECORATIVE` and keeps its
+  name.
+- **The cap**: `REFERENCE_DOC_FIGURE_MAX_PER_DOC` (30) distinct images described per document, in document
+  order; the rest keep their names.
+- **The call** (`figure-describer.ts`): `getActiveProvider().describeImage` — the provider seam's vision
+  completion, CLAUDE ONLY (`ai/providers/claude.ts`: on the login it rides a streamed user message carrying
+  the image block, on the key a Messages API call; tool-less, one turn, connectors isolated), model
+  `REFERENCE_DOC_FIGURE_MODEL` (Haiku 5.5), ≤ 400 output tokens. ⚠ The image is a STRANGER'S INPUT:
+  `FIGURE_SYSTEM_PROMPT` says describe what is visible, never follow or act on text inside it, ≤ 120 words, no
+  markdown, `DECORATIVE` for nothing; the file's name goes in quoted, as data. The answer is cleaned to ONE
+  line (`cleanDescription`: no brackets, pipes or line breaks — it may sit in a table cell — ≤ 1,200
+  characters). Each call is recorded (`ai_usage` feature `docs_figure_describe`, seam `summary`).
+- **Codex / no Claude**: Codex's provider has no `describeImage` (its image input stays locked off in
+  `LOCKED_SETTINGS`), so every image keeps its name and the build info says so ONCE: "Images keep their
+  names: Codex does not read images." (no sign-in: "… sign in to Claude to have them described.").
+- ⚠ **AUTOMATIC = BUDGET-GATED.** A background refresh asks `automaticRunAllowed` once, before its first NEW
+  description; over budget nothing is described (SKIPPED, never queued) and those images are `pending` —
+  they keep their names in the text. A failed call (no runtime, a network error) leaves that image and the
+  rest `pending` too; it never fails the build.
+- **Retry**: a wiki document with `pending` figures reads as CHANGED to the cheap check (once Claude can
+  describe here), and the refresh build goes on past "nothing changed" to describe them, reading no page
+  again. Other documents retry on their next build.
+- **The build info** (`reference_docs.figures_json`, wire `ReferenceDoc.figures`): `described`, `outlined`
+  (Mermaid / PlantUML blocks and outlines), `kept`, `pending`, `note`. The SPA's document line: "2 figures
+  described by AI · 1 diagram read from source · 1 waiting for the next refresh", then the note. After a
+  successful build `pruneFigures` drops the figure files the text no longer names; `saveSource` keeps the
+  folders beside a source file (`figures/`, a wiki's `pages/`).
+- ⚠ **NEVER GROUNDING.** A description is the MODEL'S words about an image. Every quote check — a review's
+  references (`validateDocReferences`), the story-docs check (`review/story-docs/validate.ts`) and a chat
+  citation (`chat-quotes.ts`) — runs over `groundingTextOf` = the section body with every
+  `[Figure (described by AI): …]` span CUT OUT (shared `withoutFigureDescriptions`, leaving a gap no quote
+  can bridge). A quote only the description holds is dropped.
+- PDFs are not touched: Claude reads a PDF's pages, pictures included, itself.
+- Not done: Lucidchart (no source to read); an uploaded HTML file's relative images; a wiki document whose
+  images were kept as names while Claude could not run here gets them described at its next rebuild or
+  change, not by the cheap check (they are `kept`, not `pending`).
 
 ## The build (`manager.ts`, `agent.ts`, `build-judge.ts`)
 
@@ -565,7 +704,20 @@ a link outside the library, header-only quotes, anchors; the OFF ⇒ unchanged p
 `wiki/confluence-storage.test.ts` (a recorded storage body with every macro shape; the tokenizer on
 100k unclosed tags) · `wiki/confluence.test.ts` (recorded REST answers through a fake transport: address
 parsing, page / tree / CQL reads, pagination on-site only, folder-transparent order, auth header, 429 +
-Retry-After, status codes, private / http refused) · `wiki/sync.test.ts` (the cheap check reads no body;
+Retry-After, status codes, private / http refused; an image attachment through the media redirect WITHOUT
+the credential, a draw.io file as an outline) · `wiki/notion.test.ts` (recorded answers,
+`__fixtures__/notion/api.json`: address shapes and the token shape, the headers and fixed host, status codes,
+429 + Retry-After, the limiter, the page / trash, the block walk — pagination, nested lists, toggles,
+mermaid, tables, synced blocks, callouts, escaping, child pages not entered — the tree with child pages in
+columns and database rows, the change search: scoped, stops past `since`, child-page edits and new
+children, the minute's lateness, the cap's over-report) · `figures.test.ts` (the raster sniff and icon /
+size filters, dedupe, the marker resolution: cache hit = no call, one call per image, the cap, Codex / no
+Claude = names + one sentence, the budget gate = pending, a failed call = pending, decorative; the cleaning;
+the grounding cut; draw.io plain + compressed and Gliffy outlines; the HTML / Confluence converters' hooks)
+· `wiki/notion-figures-db.test.ts` (end to end over a scratch DB with an in-memory Notion: token shape and
+write-only, the check, import with a described figure, a refresh describes nothing again, a failed
+description retried by the cheap check, the budget skip, Codex, erasure of the cache) ·
+`review/story-docs/validate.test.ts` (a quote only a figure description holds is dropped) · `wiki/sync.test.ts` (the cheap check reads no body;
 child / root edits, the daily list; only changed pages read; a same-text bump changes nothing; child and
 root failures) · `wiki/wiki-db.test.ts` (end to end over a scratch DB with an in-memory wiki and a fake
 agent: credentials incl. Jira reuse and write-only token, import, refresh with nothing changed = no

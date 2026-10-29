@@ -289,7 +289,7 @@ export const STEPS = [
       // Related repos (Settings → Workspace), both workspaces.
       await h.fetchGet('/api/workspaces/1/related-repos');
       await h.fetchGet('/api/workspaces/2/related-repos');
-      // Settings → AI review → Confluence (the reference docs' wiki source), both workspaces.
+      // Settings → AI review → Confluence + Notion (the reference docs' wiki sources: one answer), both workspaces.
       await h.fetchGet('/api/workspaces/1/wiki-credentials');
       await h.fetchGet('/api/workspaces/2/wiki-credentials');
     },
