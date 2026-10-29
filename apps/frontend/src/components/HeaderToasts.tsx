@@ -14,8 +14,8 @@ import { anchorToastPanel } from '../lib/toastAnchor.js';
 
 // ── THE ONE HEADER TOAST STRIP ───────────────────────────────────────────────────────────────
 //
-// Every toast in the app renders as a HORIZONTAL CARD in the top header, between the wordmark
-// and the right-hand controls (App.tsx mounts `<HeaderToastStrip>` exactly once). It replaced
+// Every toast in the app renders as a HORIZONTAL CARD in the slim top bar (components/shell/
+// TopBar.tsx; App.tsx mounts `<HeaderToastStrip>` exactly once). It replaced
 // the bottom-right toast column; ⚠ never add an independent `fixed` toast element anywhere else,
 // and never a second strip.
 //

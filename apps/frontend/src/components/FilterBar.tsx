@@ -1,4 +1,5 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
+import { useIsPhone } from './ui/media.js';
 import { type User } from '@pierre-review/shared';
 import { buildMemberSections } from '../hooks/useMemberSections.js';
 import { useMergers, useRepos, useSearchTimeline, useUsers } from '../hooks/useTimeline.js';
@@ -9,11 +10,9 @@ import { boardSlotMode, usePinnedTabs } from '../store/pinnedTabs.js';
 import { EventSelectPanel } from './EventSelectPanel.js';
 import { RepoSelectPanel } from './RepoSelectPanel.js';
 import { StatusSelectPanel } from './StatusSelectPanel.js';
-import { WorkspaceSelector } from './WorkspaceSelector.js';
-import { GlobalSearch } from './Search/GlobalSearch.js';
 import { ThreadStateSelectPanel } from './ThreadStateSelectPanel.js';
 import { UserSelectPanel } from './UserSelectPanel.js';
-import { BotIcon, CloseIcon } from './Icons.js';
+import { BotIcon, ChevronIcon, CloseIcon, FilterIcon } from './Icons.js';
 
 const PRESETS: Exclude<RangePreset, 'custom'>[] = ['7d', '14d', '30d', '90d'];
 
@@ -96,7 +95,7 @@ function Section({
   );
 }
 
-export function FilterBar(): JSX.Element {
+export function FilterBar(): JSX.Element | null {
   const { data: repos } = useRepos();
   const { data: workspaces } = useWorkspaces();
   const { data: users } = useUsers();
@@ -241,25 +240,65 @@ export function FilterBar(): JSX.Element {
     f.allowedBotIds,
   ]);
 
+  // On a phone the board's filters fold behind one "Filters" button (they wrapped to three rows
+  // above a board that needs the height); Now stays on the line.
+  const phone = useIsPhone();
+  const [phoneOpen, setPhoneOpen] = useState(false);
+
+  // Nothing to filter off the board (every hook above still ran: rules of hooks).
+  if (!showEvents) return null;
+
+  if (phone && !phoneOpen) {
+    return (
+      <div data-testid="filter-bar" className="flex shrink-0 items-center gap-2 bg-ui-surface px-3 py-1.5">
+        <button
+          type="button"
+          onClick={() => setPhoneOpen(true)}
+          aria-expanded={false}
+          className="flex h-10 items-center gap-1.5 rounded-ui px-2 text-body text-ui-mute hover:bg-ui-hover hover:text-ui-ink"
+        >
+          <FilterIcon size={13} />
+          Filters
+          <ChevronIcon dir="down" size={10} />
+        </button>
+        {isTimeline && (
+          <button
+            type="button"
+            onClick={() => f.centerTimelineNow()}
+            title="Recenter the timeline on the current time (keeps the zoom)"
+            className="ml-auto flex h-10 items-center rounded-ui px-3 text-body text-ui-mute hover:bg-ui-hover hover:text-ui-ink"
+          >
+            Now
+          </button>
+        )}
+      </div>
+    );
+  }
+
   return (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-gray-200 bg-gray-50 px-4 py-2 dark:border-gray-800 dark:bg-gray-900">
+    <div
+      data-testid="filter-bar"
+      className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 bg-ui-surface px-4 py-2"
+    >
+      {phone && (
+        <button
+          type="button"
+          onClick={() => setPhoneOpen(false)}
+          aria-expanded
+          className="-ml-2 flex h-10 items-center gap-1.5 rounded-ui px-2 text-body text-ui-ink hover:bg-ui-hover"
+        >
+          <FilterIcon size={13} />
+          Filters
+          <ChevronIcon dir="up" size={10} />
+        </button>
+      )}
       {/* The board filters. Always live — focus is a separate tab now, not an overlay
           that locks the board. */}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-        {/* THE SCOPE, and it is now a SINGLE control: WHICH WORKSPACE (single-select — there is no
-            "all", a workspace is the only scope). It shows on EVERY view (Timeline +
-            Activity/Insights + every drill-down); repo and workspace management lives inside the
-            selector's dropdown, so the Activity rail carries no scope control of its own. */}
-        <Section>
-          <WorkspaceSelector />
-        </Section>
-
-        {/* Full-text search — global (shown on EVERY view), scoped to the active workspace.
-            Searches the server index (PR bodies, review threads, comments, people), distinct from
-            the timeline-title TimelineSearch below. */}
-        <Section>
-          <GlobalSearch />
-        </Section>
+        {/* The workspace picker and the search box LEFT this bar with the redesign's shell: the
+            picker heads the sidebar, and search is ⌘K (or `/`), which runs the same workspace
+            search. What remains is the Timeline's own board filters, so the bar shows only on the
+            Timeline and on a PR Focus tab. */}
 
         {/* The per-repo show/hide panel is TIMELINE-ONLY, in placement AND in effect: `repoIds`
             narrows the timeline board and nothing else. It sits with the other board filters

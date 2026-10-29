@@ -39,6 +39,7 @@ export function Menu({
   items,
   label,
   align = 'start',
+  side = 'bottom',
   className,
 }: {
   /** Render the trigger; spread `props` onto a <button> (Button / IconButton accept them). */
@@ -54,6 +55,8 @@ export function Menu({
   /** The menu's accessible name. */
   label: string;
   align?: 'start' | 'end';
+  /** Open below the trigger (default) or above it (a control at the foot of the sidebar). */
+  side?: 'bottom' | 'top';
   className?: string;
 }): JSX.Element {
   const [open, setOpen] = useState(false);
@@ -180,7 +183,8 @@ export function Menu({
               phone
                 ? 'fixed inset-x-0 bottom-0 max-h-[70vh] rounded-t-xl pb-[max(8px,env(safe-area-inset-bottom))] motion-safe:animate-ui-sheet-up'
                 : cx(
-                    'absolute top-full mt-1 max-h-80 min-w-[200px] rounded-ui motion-safe:animate-ui-pop',
+                    'absolute max-h-80 min-w-[200px] rounded-ui motion-safe:animate-ui-pop',
+                    side === 'top' ? 'bottom-full mb-1' : 'top-full mt-1',
                     align === 'end' ? 'right-0' : 'left-0',
                   ),
             )}

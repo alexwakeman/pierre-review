@@ -1409,3 +1409,83 @@ export function PendingDependencyIcon({ size = 13, ...rest }: IconProps): JSX.El
     </IconShell>
   );
 }
+
+// ── THE SHELL (the redesign's sidebar, top bar and bottom bar) ───────────────────────────────
+
+// The My Turn notifications bell. `filled` = notifications are on (the pressed state's second,
+// non-colour signal). Was an inline SVG in App.tsx.
+export function BellIcon({ size = 14, filled = false, ...rest }: IconProps & { filled?: boolean }): JSX.Element {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width={size}
+      height={size}
+      fill={filled ? 'currentColor' : 'none'}
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={rest.className}
+      aria-hidden={rest.title == null ? true : undefined}
+      role={rest.title != null ? 'img' : undefined}
+    >
+      {rest.title != null && <title>{rest.title}</title>}
+      <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
+      <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+    </svg>
+  );
+}
+
+// Three bars: opens the sidebar drawer on a narrow screen.
+export function MenuIcon({ size = 16, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} {...rest}>
+      <line x1="4" y1="7" x2="20" y2="7" />
+      <line x1="4" y1="12" x2="20" y2="12" />
+      <line x1="4" y1="17" x2="20" y2="17" />
+    </IconShell>
+  );
+}
+
+// A keyboard: the shortcut sheet.
+export function KeyboardIcon({ size = 14, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} strokeWidth={1.8} {...rest}>
+      <rect x="2.5" y="6" width="19" height="12" rx="2" />
+      <path d="M6.5 10h.01M10 10h.01M14 10h.01M17.5 10h.01M7.5 14h9" />
+    </IconShell>
+  );
+}
+
+// An in-tray: the Activity destinations as a whole. Was PinnedTabsBar's inline ActivityIcon.
+export function InboxIcon({ size = 14, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} {...rest}>
+      <polyline points="22 12 16 12 14 15 10 15 8 12 2 12" />
+      <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
+    </IconShell>
+  );
+}
+
+// Four bars of different heights: a flow-metric drill-down. Was PinnedTabsBar's inline MetricsIcon.
+export function BarsIcon({ size = 14, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} {...rest}>
+      <line x1="4" y1="20" x2="4" y2="12" />
+      <line x1="10" y1="20" x2="10" y2="6" />
+      <line x1="16" y1="20" x2="16" y2="14" />
+      <line x1="20" y1="20" x2="20" y2="9" />
+    </IconShell>
+  );
+}
+
+// A repository (book with a spine bookmark): the sidebar's Repositories group.
+export function RepoIcon({ size = 14, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} strokeWidth={1.9} {...rest}>
+      <path d="M5 4.5A1.5 1.5 0 0 1 6.5 3H19v15H6.5A1.5 1.5 0 0 0 5 19.5z" />
+      <path d="M5 19.5A1.5 1.5 0 0 0 6.5 21H19v-3" />
+      <path d="M9 3v7l2-1.5L13 10V3" />
+    </IconShell>
+  );
+}

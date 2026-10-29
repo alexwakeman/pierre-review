@@ -1,7 +1,13 @@
 import { useCallback, useMemo } from 'react';
 import {
+  BellIcon,
   BookIcon,
   BotIcon,
+  CloseIcon,
+  KeyboardIcon,
+  MergeIcon,
+  RepoIcon,
+  SparkleIcon,
   ChartIcon,
   FeedIcon,
   GearIcon,
@@ -26,6 +32,14 @@ import { useAiCapabilities } from './useAiCapabilities.js';
 import { useRepos, useUsers } from './useTimeline.js';
 import { useWorkspaceOpenPrs } from './useTriage.js';
 import { useWorkspaces } from './useWorkspaces.js';
+import { useArmedMerges } from './useAutoMerge.js';
+import { useMyTurnByWorkspace } from './useMyTurnByWorkspace.js';
+import { useNotificationToggle } from './useNotificationPref.js';
+import { usePaletteSearch } from './usePaletteSearch.js';
+import { goTo } from '../components/shell/nav.js';
+import { tabWords } from '../components/shell/Sidebar.js';
+import { openWorkspaceManager } from '../components/WorkspaceSelector.js';
+import { useShell } from '../store/shell.js';
 
 // THE SHELL'S ⌘K COMMANDS: every destination, every workspace, every Settings tab, the global
 // actions, and every open pull request in the workspace (plus "Search everything for …", which
@@ -171,10 +185,133 @@ export function useShellCommands({
 
   useRegisterCommands('shell', commands);
 
+  // ── what the redesign's shell added (the old header / rail / strip controls, reachable by name) ──
+  const { data: allRepos } = useRepos();
+  const tabs = usePinnedTabs((s) => s.tabs);
+  const { lines: needsYou } = useMyTurnByWorkspace();
+  const notif = useNotificationToggle();
+  const { data: armed } = useArmedMerges();
+  const armedCount = (armed?.requests ?? []).filter((r) => r.state === 'armed').length;
+  const shellExtras = useMemo<Command[]>(() => {
+    const out: Command[] = [
+      {
+        id: 'manage-workspaces',
+        group: 'Settings',
+        title: 'Manage repos & workspaces',
+        icon: <GearIcon size={14} />,
+        keywords: ['add repo', 'remove repo', 'move repo', 'new workspace', 'rename workspace', 'resync'],
+        run: openWorkspaceManager,
+      },
+      {
+        id: 'shortcuts',
+        group: 'Help',
+        title: 'Keyboard shortcuts',
+        shortcut: '?',
+        icon: <KeyboardIcon size={14} />,
+        keywords: ['keys', 'hotkeys'],
+        run: () => useShell.getState().setShortcutsOpen(true),
+      },
+    ];
+    if (notif.supported) {
+      out.push({
+        id: 'notifications',
+        group: 'Actions',
+        title: notif.enabled ? 'Turn off My Turn notifications' : 'Turn on My Turn notifications',
+        icon: <BellIcon size={14} />,
+        keywords: ['bell', 'alerts', 'browser'],
+        run: notif.toggle,
+      });
+    }
+    if (aiOn) {
+      out.push({
+        id: 'run-auto-reviews',
+        group: 'Actions',
+        // It TAKES YOU to the button rather than running: every AI run goes through the ONE
+        // AiRunGate (the auth line, the over-budget second press), which lives on that button.
+        title: 'Run auto reviews now…',
+        hint: 'Open pull requests',
+        icon: <SparkleIcon size={14} />,
+        keywords: ['claude', 'codex', 'ai review', 'sweep'],
+        run: () => {
+          goTo('open-prs');
+          window.setTimeout(() => {
+            document.querySelector<HTMLElement>('[data-run-auto-reviews] button, [data-run-auto-reviews]')?.focus();
+          }, 120);
+        },
+      });
+    }
+    if (armedCount > 0) {
+      out.push({
+        id: 'merge-when-ready',
+        group: 'Actions',
+        title: 'Merge when ready: show what is armed',
+        hint: `${armedCount} armed`,
+        icon: <MergeIcon size={14} />,
+        keywords: ['auto-merge', 'armed', 'queue'],
+        // Opens the one "Merge when ready" card in the header strip (AutoMergeBanner).
+        run: () => {
+          window.setTimeout(() => {
+            document.querySelector<HTMLElement>('[data-testid="auto-merge-toast"] [aria-expanded="false"]')?.click();
+          }, 0);
+        },
+      });
+    }
+    // Workspace by workspace: the "Needs you" rows (the old Welcome-back chips).
+    for (const l of needsYou) {
+      out.push({
+        id: `needs-you:${l.workspaceId}`,
+        group: 'Go to',
+        title: `Show what needs you in ${l.name}`,
+        hint: `${l.count}${l.cap != null ? '+' : ''}`,
+        icon: <PendingBallIcon size={14} />,
+        keywords: ['my turn', 'pending', 'welcome back'],
+        run: () => useFilters.getState().openMyTurnInWorkspace(l.workspaceId),
+      });
+    }
+    // Every repo in the workspace: its console (the old rail's per-repo rows).
+    for (const r of (allRepos ?? []).filter((x) => x.workspaceId === workspaceId)) {
+      out.push({
+        id: `repo:${r.id}`,
+        group: 'Go to',
+        title: r.fullName,
+        hint: 'Repository',
+        icon: <RepoIcon size={14} />,
+        keywords: ['repo', 'console'],
+        run: () => goTo(r.id),
+      });
+    }
+    // Open tabs, and closing them (the strip's chips and its right-click menu).
+    for (const tab of tabs) {
+      out.push({
+        id: `tab:${tab.key}`,
+        group: 'Go to',
+        title: `Tab: ${tabWords(tab)}`,
+        icon: <TimelineIcon size={14} />,
+        keywords: ['open tab'],
+        run: () => usePinnedTabs.getState().setActiveTab(tab.key),
+      });
+    }
+    if (tabs.length > 0) {
+      out.push({
+        id: 'close-all-tabs',
+        group: 'Actions',
+        title: 'Close all tabs',
+        hint: `${tabs.length} open`,
+        icon: <CloseIcon size={14} />,
+        run: () => usePinnedTabs.getState().closeAllTabs(),
+      });
+    }
+    return out;
+  }, [notif.supported, notif.enabled, notif.toggle, aiOn, armedCount, needsYou, allRepos, workspaceId, tabs]);
+  useRegisterCommands('shell:extras', shellExtras);
+
+  // The server search (PR bodies, reviews, threads, comments, people, tickets) — the old search box.
+  usePaletteSearch();
+
   // Every open PR in the workspace (data the Open PRs rail line already holds — no new request
   // shape), and the search fallback that reaches everything else.
   const { data: openPrs } = useWorkspaceOpenPrs();
-  const { data: repos } = useRepos();
+  const repos = allRepos;
   const { data: users } = useUsers();
   const prCommands = useMemo<Command[]>(() => {
     const repoName = new Map((repos ?? []).map((r) => [r.id, r.fullName]));

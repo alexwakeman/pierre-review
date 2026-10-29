@@ -150,10 +150,11 @@ Global (any screen, not while typing, not under a modal unless noted):
 | Key | Does |
 |---|---|
 | `⌘K` / `Ctrl+K` | command palette — works even while typing |
-| `/` | focus search (today); opens the palette once the sidebar shell replaces the FilterBar search |
+| `/` | the palette (it replaced the FilterBar search box); the add-repo field while "Manage repos" is open |
+| `g` then a letter | go to a page: `p` Pending · `o` Open pull requests · `s` This Sprint · `t` Timeline · `d` Docs · `f` Feed · `r` Reports · `b` Bots Monitoring (`components/shell/nav.ts`) |
 | `1`–`9` | switch the page's own tabs (Pending's seven, Sprint's four, PR detail's tabs) |
 | `i` | Activity (kept) |
-| `?` | Help and the key list (with the shell) |
+| `?` | the key sheet (`components/shell/ShortcutsSheet.tsx`) |
 | `Esc` | close the top layer: popover → menu → dialog → side panel; then today's behaviour (blur / leave to the Timeline / clear selection) |
 
 Lists (`useListKeyboard`):

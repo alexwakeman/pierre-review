@@ -46,6 +46,13 @@ interface RegistryState {
   open: boolean;
   /** The text the palette opens with ("" normally). */
   initialQuery: string;
+  /**
+   * What is typed in the palette NOW ("" while closed). Published so an async source (the server
+   * search, hooks/usePaletteSearch.tsx) can fetch for it and hand its answer to a synchronous
+   * provider; providers themselves still never fetch.
+   */
+  query: string;
+  setQuery: (q: string) => void;
   setSource: (id: string, commands: readonly Command[] | null) => void;
   setProvider: (id: string, provider: CommandProvider | null) => void;
   openPalette: (initialQuery?: string) => void;
@@ -58,6 +65,8 @@ export const useCommandRegistry = create<RegistryState>((set) => ({
   providers: {},
   open: false,
   initialQuery: '',
+  query: '',
+  setQuery: (q) => set({ query: q }),
   setSource: (id, commands) =>
     set((s) => {
       const sources = { ...s.sources };
@@ -72,9 +81,9 @@ export const useCommandRegistry = create<RegistryState>((set) => ({
       else providers[id] = provider;
       return { providers };
     }),
-  openPalette: (initialQuery = '') => set({ open: true, initialQuery }),
-  closePalette: () => set({ open: false }),
-  togglePalette: () => set((s) => ({ open: !s.open, initialQuery: '' })),
+  openPalette: (initialQuery = '') => set({ open: true, initialQuery, query: initialQuery }),
+  closePalette: () => set({ open: false, query: '' }),
+  togglePalette: () => set((s) => ({ open: !s.open, initialQuery: '', query: '' })),
 }));
 
 /** Open the palette from anywhere (a "Search or jump" button, a keyboard handler). */

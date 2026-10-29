@@ -4,8 +4,9 @@ import { fixtures, installMockApi } from './mock-api.js';
 // Regression gates for the consolidated Activity Feed + click-to-detail UX (see CLAUDE.md):
 //   • a bare URL lands on the OPEN PRS tab (the default view); Activity opens on its Pending rail
 //     entry; an empty workspace lands on the guidance to move repos in
-//   • the rail reads Open PRs, Pending, This Sprint, Feed, Reports, Bots Monitoring
-//   • This Sprint is a fixed tab and a legacy ?insightsTab=sprint|merged link lands on it
+//   • the sidebar reads Pending, Open pull requests, This Sprint, Timeline, Feed, Reports, Bots
+//     Monitoring (Docs too, where AI runs)
+//   • a legacy ?insightsTab=sprint|merged link lands on This Sprint
 //   • the Open PRs trunk strip arrives collapsed, and expands on a click
 //   • a Feed link names `?activityRepo=feed`, and the consolidated stream renders there, flat —
 //     the stream ALONE (no daily brief, no trunk strip, no open-PR panel)
@@ -15,8 +16,10 @@ import { fixtures, installMockApi } from './mock-api.js';
 //     get a yellow-bordered card + badge; there is no "seen/Done" control
 //   • clicking ANY feed item opens the full-height PR DETAIL tab (an overlay + a closable
 //     PR tab), NOT an isolated timeline — Show/Focus in the detail then drive the timeline
-//   • Activity and Timeline are permanent, non-closable TABS in the tab strip; Open PRs is
-//     Activity's first rail line and the default
+//   • THE REDESIGN'S SHELL: one sidebar replaced the tab row and the Activity rail. Pending, Open
+//     pull requests, This Sprint and Timeline lead it; Docs, Feed, Reports and Bots Monitoring
+//     follow. `aria-current="page"` marks where you are. The tab strip (`pinned-tabs`) now holds
+//     only the dynamic tabs (a PR, a drill-down) and renders nothing when none is open.
 
 const overlay = (p: Page) => p.getByTestId('activity-overlay');
 const tabs = (p: Page) => p.getByTestId('pinned-tabs');
@@ -34,17 +37,26 @@ async function gotoActivity(page: Page, query = ''): Promise<void> {
 const gotoFeed = (page: Page): Promise<void> =>
   gotoActivity(page, '?view=activity&activityRepo=feed');
 
-const railButton = (p: Page, name: string) =>
-  overlay(p).getByRole('button', { name, exact: true });
+// The sidebar's destination items, by their words (each carries a stable test id: its store value).
+const NAV_ID: Record<string, string> = {
+  Pending: 'attention',
+  'Open PRs': 'open-prs',
+  'This Sprint': 'sprint',
+  Timeline: 'timeline',
+  Docs: 'docs',
+  Feed: 'feed',
+  Reports: 'insights',
+  'Bots Monitoring': 'bots',
+};
+const railButton = (p: Page, name: string) => p.getByTestId(`nav-${NAV_ID[name] ?? name}`);
+const isCurrent = (p: Page, name: string) => expect(railButton(p, name)).toHaveAttribute('aria-current', 'page');
+const isNotCurrent = (p: Page, name: string) => expect(railButton(p, name)).not.toHaveAttribute('aria-current', 'page');
 
 test.describe('Activity Feed / click-to-detail flows', () => {
   test('lands on the Activity console with Open PRs selected by default', async ({ page }) => {
     await gotoActivity(page);
-    await expect(overlay(page).getByRole('button', { name: /^Open PRs/ })).toHaveAttribute(
-      'aria-pressed',
-      'true',
-    );
-    await expect(railButton(page, 'Pending')).toHaveAttribute('aria-pressed', 'false');
+    await isCurrent(page, 'Open PRs');
+    await isNotCurrent(page, 'Pending');
     // The list itself renders — a fixture gap would blank it rather than fail loudly.
     await expect(page.getByTestId('open-prs-view')).toBeVisible();
     // Open PRs is the default, so the app's own URL names no console.
@@ -93,34 +105,29 @@ test.describe('Activity Feed / click-to-detail flows', () => {
     await expect(overlay(page).getByText(/No repos in this workspace yet/)).toBeVisible();
     await expect(page.getByTestId('attention-view')).toHaveCount(0);
     // Still the Pending entry: the guidance replaces the board, not the selection.
-    await expect(railButton(page, 'Pending')).toHaveAttribute('aria-pressed', 'true');
+    await isCurrent(page, 'Pending');
   });
 
-  test('the rail reads Open PRs, Pending, Feed, Reports, Bots Monitoring', async ({ page }) => {
+  test('the sidebar reads Pending, Open pull requests, This Sprint, Timeline, then Feed, Reports, Bots Monitoring', async ({ page }) => {
     await gotoActivity(page);
-    // The pseudo-rows are the first `aria-pressed` buttons in the overlay; the per-repo rows
-    // follow them. Polled, because the rail can re-render while the workspace resolves.
+    // The destination items, top to bottom (the LABEL span only: some carry a count after it).
+    // Polled, because the sidebar can re-render while the workspace resolves. Docs shows only where
+    // AI runs; the fixture's me has it off.
     await expect
       .poll(() =>
-        overlay(page)
-          .locator('button[aria-pressed]')
-          .evaluateAll((els) =>
-            // The LABEL span only: Open PRs carries a count after it.
-            els.slice(0, 5).map((el) => (el.querySelector('.truncate')?.textContent ?? '').trim()),
-          ),
+        page
+          .getByTestId('sidebar')
+          .locator('nav[aria-label="Main"] button[data-testid^="nav-"]')
+          .evaluateAll((els) => els.map((el) => (el.querySelector('.nav-label')?.textContent ?? '').trim())),
       )
-      .toEqual(['Open PRs', 'Pending', 'Feed', 'Reports', 'Bots Monitoring']);
-    // This Sprint left the rail for a fixed tab of its own.
-    await expect(railButton(page, 'This Sprint')).toHaveCount(0);
+      .toEqual(['Pending', 'Open pull requests', 'This Sprint', 'Timeline', 'Feed', 'Reports', 'Bots Monitoring']);
+    // No fixed views in the tab strip any more: with no PR open it is not there at all.
+    await expect(tabs(page)).toHaveCount(0);
   });
 
-  test('This Sprint is a fixed tab beside Activity, opening on Theme, with Critical path, People and Merged so far', async ({ page }) => {
+  test('This Sprint is a sidebar destination, opening on Theme, with Critical path, People and Merged so far', async ({ page }) => {
     await gotoActivity(page);
-    const chips = page.getByTestId('pinned-tabs').getByRole('tab');
-    await expect(chips.nth(0)).toContainText('Activity');
-    await expect(chips.nth(1)).toContainText('This Sprint');
-    await expect(chips.nth(2)).toContainText('Timeline');
-    await chips.nth(1).click();
+    await railButton(page, 'This Sprint').click();
     const view = page.getByTestId('sprint-tab-view');
     await expect(view).toBeVisible();
     await expect(page).toHaveURL(/view=sprint/);
@@ -173,16 +180,16 @@ test.describe('Activity Feed / click-to-detail flows', () => {
     // Leaving and coming back is a fresh visit: collapsed again.
     await railButton(page, 'Feed').click();
     await expect(page.getByTestId('feed-view')).toBeVisible();
-    await overlay(page).getByRole('button', { name: /^Open PRs/ }).first().click();
+    await railButton(page, 'Open PRs').click();
     await expect(header()).toHaveAttribute('aria-expanded', 'false');
   });
 
   test('a Feed link opens the Feed and survives a reload', async ({ page }) => {
     await gotoFeed(page);
-    await expect(railButton(page, 'Feed')).toHaveAttribute('aria-pressed', 'true');
+    await isCurrent(page, 'Feed');
     await page.reload();
     await expect(overlay(page)).toBeVisible();
-    await expect(railButton(page, 'Feed')).toHaveAttribute('aria-pressed', 'true');
+    await isCurrent(page, 'Feed');
     await expect(page).toHaveURL(/activityRepo=feed/);
   });
 
@@ -241,7 +248,7 @@ test.describe('Activity Feed / click-to-detail flows', () => {
     await gotoActivity(page);
     const list = page.getByTestId('open-prs-view');
     await expect(list.getByTestId('branch-status-panel')).toBeVisible();
-    // The tab strip carries no Open PRs chip any more: it is a rail line.
+    // No tab strip chip for Open PRs: it is a sidebar destination.
     await expect(tabs(page).getByRole('tab', { name: /^Open PRs/ })).toHaveCount(0);
 
     // ⚠ The branch read is CACHED now, so a strip still mounted on My turn would render at once —
@@ -260,16 +267,7 @@ test.describe('Activity Feed / click-to-detail flows', () => {
     await expect(page.getByTestId('open-prs-view')).toBeVisible();
   });
 
-  test('the tab strip is Activity, This Sprint, Timeline; a legacy ?view=open-prs link lands on Open PRs', async ({
-    page,
-  }) => {
-    await gotoActivity(page);
-    const strip = tabs(page);
-    // Auto-retrying (a one-shot `allTextContents` raced the strip's first paint).
-    await expect(strip.getByRole('tab').nth(0)).toHaveText('Activity');
-    await expect(strip.getByRole('tab').nth(1)).toHaveText('This Sprint');
-    await expect(strip.getByRole('tab').nth(2)).toHaveText('Timeline');
-
+  test('a legacy ?view=open-prs link lands on Open PRs', async ({ page }) => {
     await installMockApi(page);
     await page.goto('/app/?view=open-prs');
     await expect(overlay(page)).toBeVisible();
@@ -315,7 +313,7 @@ test.describe('Activity Feed / click-to-detail flows', () => {
     // in the Feed's first render.
     await page.goto('/app/?view=activity');
     await expect(page.getByTestId('open-prs-view').getByTestId('branch-status-panel')).toBeVisible();
-    await expect(overlay(page).getByRole('button', { name: /^Open PRs \d/ })).toBeVisible();
+    await expect(railButton(page, 'Open PRs')).toContainText(/\d/);
     await (await brief).finished();
 
     await railButton(page, 'Feed').click();
@@ -326,14 +324,54 @@ test.describe('Activity Feed / click-to-detail flows', () => {
     await expect.soft(page.getByTestId('open-prs-panel')).toHaveCount(0);
   });
 
-  test('the Activity | Timeline tabs toggle the board', async ({ page }) => {
+  test('the sidebar toggles between the board and Activity; g-keys and i do too', async ({ page }) => {
     await gotoActivity(page);
-    // Activity and Timeline are permanent tabs (role=tab) in the tab strip, not a header pill.
-    await tabs(page).getByRole('tab', { name: 'Timeline' }).click();
+    await railButton(page, 'Timeline').click();
     await expect(overlay(page)).toBeHidden();
     await expect(page.locator('.vis-timeline')).toBeVisible();
+    await isCurrent(page, 'Timeline');
     // …and back to the Activity console.
-    await tabs(page).getByRole('tab', { name: 'Activity' }).click();
+    await railButton(page, 'Open PRs').click();
     await expect(overlay(page)).toBeVisible();
+    // g then t: the board; i: Activity again; g then p: Pending.
+    await page.keyboard.press('g');
+    await page.keyboard.press('t');
+    await expect(overlay(page)).toBeHidden();
+    await page.keyboard.press('i');
+    await expect(overlay(page)).toBeVisible();
+    await page.keyboard.press('g');
+    await page.keyboard.press('p');
+    await expect(page).toHaveURL(/activityRepo=attention/);
+  });
+
+  test('⌘K and / open the command menu, which reaches every destination', async ({ page }) => {
+    await gotoActivity(page);
+    await page.keyboard.press('/');
+    const palette = page.getByRole('dialog', { name: 'Command menu' });
+    await expect(palette).toBeVisible();
+    await expect(palette.getByRole('combobox')).toBeFocused();
+    await page.keyboard.type('feed');
+    await expect(palette.getByRole('option').first()).toHaveAttribute('aria-selected', 'true');
+    await expect(palette.getByRole('option').first()).toContainText('Feed');
+    await page.keyboard.press('Enter');
+    await expect(palette).toBeHidden();
+    await expect(page).toHaveURL(/activityRepo=feed/);
+    await isCurrent(page, 'Feed');
+    // ⌘K (Ctrl+K off a Mac) opens it too, from anywhere.
+    await page.keyboard.press('ControlOrMeta+k');
+    await expect(palette).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(palette).toBeHidden();
+    await isCurrent(page, 'Feed');
+  });
+
+  test('? opens the key sheet and Escape closes it without leaving the page', async ({ page }) => {
+    await gotoActivity(page, '?activityRepo=feed');
+    await page.keyboard.press('?');
+    await expect(page.getByTestId('shortcuts-sheet')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.getByTestId('shortcuts-sheet')).toHaveCount(0);
+    await expect(overlay(page)).toBeVisible();
+    await isCurrent(page, 'Feed');
   });
 });

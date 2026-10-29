@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { FilterBar } from './components/FilterBar.js';
-import { PinnedTabsBar } from './components/PinnedTabsBar.js';
 import { PrDetail } from './components/PrDetail.js';
 import { Timeline } from './components/Timeline/index.js';
 import { ActivityView } from './components/Activity/index.js';
@@ -20,12 +19,9 @@ import { DetailPane } from './components/DetailPane.js';
 import { ClaudeReviewBanner } from './components/ClaudeReviewBanner.js';
 import { AiFixBanner } from './components/AiFixBanner.js';
 import { AutoMergeBanner } from './components/AutoMergeBanner.js';
-import { SyncStatus } from './components/SyncStatus.js';
 import { GlobalLoadingBar } from './components/GlobalLoadingBar.js';
 import { HeaderToastStrip } from './components/HeaderToasts.js';
 import { AiBudgetToast } from './components/AiBudget.js';
-import { AiUsageMenu } from './components/AiUsageMenu.js';
-import { WelcomeBackBanner } from './components/WelcomeBackBanner.js';
 import { HelpModal } from './components/HelpModal.js';
 import { SettingsModal } from './components/settings/SettingsModal.js';
 import { useSettingsModal } from './store/settingsModal.js';
@@ -34,26 +30,28 @@ import { ClosedResolverToast } from './components/conflicts/ClosedResolverToast.
 import { MyTurnDismissToast } from './components/Activity/MyTurnDismissToast.js';
 import { DependencyMergeToast } from './components/Activity/DependencyMergeAll.js';
 import { AuthNoticeBanner } from './components/AuthNoticeBanner.js';
-import { UserMenu } from './components/UserMenu.js';
 import { useUrlState } from './hooks/useUrlState.js';
 import { useLocalStorage } from './hooks/useLocalStorage.js';
 import { useKeyboard } from './hooks/useKeyboard.js';
 import { useDetailCacheReconciler } from './hooks/useDetailCache.js';
 import { useClaudeReviewActiveSync } from './hooks/useClaudeReview.js';
 import { useMyTurnNotifications } from './hooks/useMyTurnNotifications.js';
-import { useNotificationPref } from './hooks/useNotificationPref.js';
+import { useNotificationPref, notificationsSupported } from './hooks/useNotificationPref.js';
 import { useMe } from './hooks/useTriage.js';
 import { useFilters } from './store/filters.js';
 import { boardSlotMode, isFixedView, usePinnedTabs, type TimelineMode } from './store/pinnedTabs.js';
 import { ApiError, api } from './api/client.js';
 import { Wordmark } from './components/Wordmark';
-import { MagnifierIcon, MoonIcon, SunIcon } from './components/Icons.js';
 import { CommandPalette } from './components/ui/CommandPalette.js';
 import { UndoToast } from './components/ui/UndoToast.js';
-import { openCommandPalette } from './components/ui/commands.js';
-import { Kbd } from './components/ui/Kbd.js';
-import { modKeyLabel } from './components/ui/keys.js';
 import { useShellCommands } from './hooks/useShellCommands.js';
+import { Sidebar } from './components/shell/Sidebar.js';
+import { TopBar } from './components/shell/TopBar.js';
+import { BottomBar } from './components/shell/BottomBar.js';
+import { ShortcutsSheet } from './components/shell/ShortcutsSheet.js';
+import { useShell } from './store/shell.js';
+import { useWorkspaceShell } from './components/WorkspaceSelector.js';
+import { WorkspaceManagerModal } from './components/Activity/WorkspaceManager.js';
 
 function useDarkMode(): [boolean, () => void] {
   const [dark, setDark] = useState(
@@ -82,8 +80,17 @@ export default function App(): JSX.Element {
   // passive observer of the polled active list; it fetches nothing itself.
   useClaudeReviewActiveSync();
   const [dark, toggleDark] = useDarkMode();
-  const [helpOpen, setHelpOpen] = useState(false);
-  const openHelp = useCallback(() => setHelpOpen(true), []);
+  // Help and the key sheet open from the sidebar foot, ⌘K and `?`, so their state is the shell's.
+  const helpOpen = useShell((s) => s.helpOpen);
+  const setHelpOpen = useShell((s) => s.setHelpOpen);
+  const shortcutsOpen = useShell((s) => s.shortcutsOpen);
+  const setShortcutsOpen = useShell((s) => s.setShortcutsOpen);
+  const openHelp = useCallback(() => setHelpOpen(true), [setHelpOpen]);
+  const closeHelp = useCallback(() => setHelpOpen(false), [setHelpOpen]);
+  const closeShortcuts = useCallback(() => setShortcutsOpen(false), [setShortcutsOpen]);
+  // The workspace scope keeper, first-run's "Manage repos & workspaces" and the manager itself —
+  // they lived inside the workspace picker, which is now in a sidebar that can be display:none.
+  const { managerOpen, closeManager } = useWorkspaceShell();
   // ⌘K reaches every destination, every Settings tab and every open PR (components/ui/commands.ts).
   useShellCommands({ toggleTheme: toggleDark, openHelp });
   // The Settings modal opens from the avatar menu AND from Pending's "Customise" link, so its
@@ -92,31 +99,14 @@ export default function App(): JSX.Element {
   // `onClose`, and an inline arrow re-registered it on every App render.
   const settingsOpen = useSettingsModal((s) => s.open);
   const settingsFocus = useSettingsModal((s) => s.focus);
-  const openSettings = useSettingsModal((s) => s.openSettings);
   const closeSettings = useSettingsModal((s) => s.closeSettings);
 
-  // Opt-in browser notifications for new My Turn items + completed Claude reviews.
-  // Shared pref (the Claude-review banner reads it too); the watcher fires only
-  // while granted + enabled.
-  const [notifEnabled, setNotifEnabled] = useNotificationPref();
-  const notifSupported = typeof window !== 'undefined' && 'Notification' in window;
-  useMyTurnNotifications(notifEnabled && notifSupported);
-  const toggleNotifs = (): void => {
-    if (!notifSupported) return;
-    if (notifEnabled) {
-      setNotifEnabled(false);
-      return;
-    }
-    if (Notification.permission === 'granted') {
-      setNotifEnabled(true);
-    } else if (Notification.permission !== 'denied') {
-      void Notification.requestPermission().then((p) => setNotifEnabled(p === 'granted'));
-    }
-  };
+  // Opt-in browser notifications for new My Turn items + completed Claude reviews. Shared pref
+  // (the Claude-review banner reads it too); the watcher fires only while granted + enabled. The
+  // bell itself is in the sidebar foot (useNotificationToggle).
+  const [notifEnabled] = useNotificationPref();
+  useMyTurnNotifications(notifEnabled && notificationsSupported());
 
-  // The GitHub user, synthesized from `gh api user`. Can be null (e.g. offline), so every read
-  // below is guarded.
-  const meUser = me.data?.user ?? null;
   // Item 7: the detail pane exists only once a PR is selected on the board; no
   // selection → the Timeline takes the full height.
   const selectedPrId = useFilters((s) => s.selectedPrId);
@@ -231,8 +221,15 @@ export default function App(): JSX.Element {
     setPaneH(paneRef.current.offsetHeight); // commit + persist
   };
 
-  // Initial load: minimal centered dark splash until /api/me settles.
-  if (me.isLoading && !me.data) {
+  // Initial load: minimal centered dark splash until /api/me settles (a failed /api/me falls
+  // through to the app with `meUser` null).
+  //
+  // ⚠ `isPending`, NOT `isLoading`. While PersistQueryClientProvider restores the IndexedDB cache
+  // the query is pending but NOT fetching (`isLoading` false), so the app rendered once, then the
+  // fetch started, `isLoading` flipped true and the splash REPLACED THE WHOLE TREE ~1s after every
+  // load — remounting the shell and losing anything the reader had already opened (the ⌘K palette
+  // reappeared empty, the first keys typed into it were lost).
+  if (me.data == null && me.isPending) {
     return (
       <div className="flex h-full min-h-screen items-center justify-center bg-gray-950">
         <Wordmark className="text-4xl text-gray-100" />
@@ -240,340 +237,263 @@ export default function App(): JSX.Element {
     );
   }
 
+  // The ONE header toast strip (components/HeaderToasts.tsx), now in the slim top bar. Every toast in
+  // the app is a one-line card in here — never an independent `fixed` element, never a second
+  // strip. Order = left to right: the agent runs, the one-shot results, then the ambient loading bar.
+  const toasts = (
+    <HeaderToastStrip>
+      <ClaudeReviewBanner />
+      {/* Agentic AI-Fix runs started this session — the progress UI for a fix started outside the
+          AI Fix tab. */}
+      <AiFixBanner />
+      {/* Automatic Claude runs paused by the reader's spend budget. */}
+      <AiBudgetToast />
+      {/* The way back into a conflict resolver the reader closed with decisions still in the store.
+          The resolver has no URL and no history entry, so this card is the ONLY route back. */}
+      <ClosedResolverToast />
+      {/* Undo for the My Turn entry just dismissed from the Pending board. */}
+      <MyTurnDismissToast />
+      {/* The outcome of Pending → Dependencies' "Merge or arm all". */}
+      <DependencyMergeToast />
+      {/* "Merge when ready" — what is armed and what just landed (the old header's merge pill). */}
+      <AutoMergeBanner />
+      {/* Ambient heavy-work indicator (backfills + ML bot-comment scoring). Non-dismissible. */}
+      <GlobalLoadingBar />
+      {/* Undo for an optimistic row removal (components/ui/undo.ts). */}
+      <UndoToast />
+    </HeaderToastStrip>
+  );
+
   return (
     <div className="flex h-full flex-col">
       <AuthNoticeBanner notices={me.data?.authNotices ?? []} />
-      {/* ⚠ A FIXED HEIGHT (`h-11`, no vertical padding): the toast strip and its cards fit inside
-          it, so a card appearing or disappearing never moves the page below by a pixel. It used to
-          be content-sized (`py-2`), and a 28px card made it 2px taller than the bare controls. */}
-      <header className="flex h-11 shrink-0 items-center gap-2 border-b sm:gap-3 border-gray-200 px-4 dark:border-gray-800">
-        <h1 className="shrink-0" title="Limn — to depict, to make clear">
-          <Wordmark />
-        </h1>
-        {/* The ONE header toast strip (components/HeaderToasts.tsx). Every toast in the app is a
-            one-line card in here — never an independent `fixed` element, never a second strip.
-            It takes the flexible space between the wordmark and the controls, so a card coming
-            or going never moves them; many cards scroll it sideways, and a card expands on CLICK
-            OVER the page (anchored at its own top-left), never by growing the header. Order = left
-            to right: the agent runs, the one-shot results, then the ambient loading bar. */}
-        <HeaderToastStrip>
-          <ClaudeReviewBanner />
-          {/* Agentic AI-Fix runs started this session — the progress UI for a fix started
-              outside the AI Fix tab. */}
-          <AiFixBanner />
-          {/* Automatic Claude runs paused by the reader's spend budget. */}
-          <AiBudgetToast />
-          {/* The way back into a conflict resolver the reader closed with decisions still in the
-              store. The resolver has no URL and no history entry, so this card is the ONLY route
-              back; it files nothing after a commit, when the pins have already moved. */}
-          <ClosedResolverToast />
-          {/* Undo for the My Turn entry just dismissed from the Pending board. */}
-          <MyTurnDismissToast />
-          {/* The outcome of Pending → Dependencies' "Merge or arm all". */}
-          <DependencyMergeToast />
-          <AutoMergeBanner />
-          {/* Ambient heavy-work indicator (full-mode backfills + ML bot-comment scoring).
-              An indicator, not a dialog: non-dismissible, no action. */}
-          <GlobalLoadingBar />
-          {/* Undo for an optimistic row removal (components/ui/undo.ts). */}
-          <UndoToast />
-        </HeaderToastStrip>
-        <div className="flex shrink-0 items-center gap-2 sm:gap-3">
-          {/* The command menu's pointer entry (⌘K / Ctrl+K from the keyboard). */}
-          <button
-            type="button"
-            onClick={() => openCommandPalette()}
-            className="inline-flex items-center gap-1.5 rounded border border-gray-300 px-2 py-0.5 text-xs text-gray-600 hover:border-gray-400 dark:border-gray-700 dark:text-gray-300 dark:hover:border-gray-500"
-            title={`Search or jump (${modKeyLabel()}K)`}
-            aria-label="Search or jump"
-            aria-keyshortcuts="Meta+K Control+K"
-          >
-            <MagnifierIcon size={13} />
-            <Kbd className="max-sm:hidden">{`${modKeyLabel()}K`}</Kbd>
-          </button>
-          <SyncStatus />
-          {notifSupported && (
-            <button
-              type="button"
-              onClick={toggleNotifs}
-              aria-pressed={notifEnabled}
-              className={`rounded border px-2 py-0.5 text-xs hover:border-gray-400 dark:hover:border-gray-500 ${
-                notifEnabled
-                  ? 'border-blue-400 text-blue-600 dark:border-blue-600 dark:text-blue-400'
-                  : 'border-gray-300 dark:border-gray-700'
-              }`}
-              title={
-                notifEnabled
-                  ? 'Notifications on — alerts when a new item enters your My Turn. Click to turn off.'
-                  : 'Turn on browser notifications for new My Turn items'
-              }
-              aria-label="Toggle My Turn notifications"
-            >
-              <svg
-                viewBox="0 0 24 24"
-                width="14"
-                height="14"
-                fill={notifEnabled ? 'currentColor' : 'none'}
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
-              >
-                <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
-                <path d="M13.73 21a2 2 0 0 1-3.46 0" />
-              </svg>
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={() => setHelpOpen(true)}
-            className="rounded border border-gray-300 px-2 py-0.5 text-xs font-semibold hover:border-gray-400 dark:border-gray-700 dark:hover:border-gray-500"
-            title="Help — what is Limn and how to use it"
-            aria-label="Help"
-          >
-            ?
-          </button>
-          <button
-            type="button"
-            onClick={toggleDark}
-            className="rounded border border-gray-300 px-2 py-0.5 text-xs hover:border-gray-400 dark:border-gray-700 dark:hover:border-gray-500"
-            title="Toggle dark mode"
-          >
-            {dark ? (
-              <SunIcon className="inline-block align-[-0.15em]" />
-            ) : (
-              <MoonIcon className="inline-block align-[-0.15em]" />
-            )}
-          </button>
-          {/* Claude usage so far (the spend budget's ONE query); the popover has the detail. */}
-          <AiUsageMenu />
-          {/* The GitHub user — a subtle button at the far right opening an account menu
-              (Settings · Open Profile on GitHub). */}
-          {meUser != null && (
-            <UserMenu
-              user={meUser}
-              // ⚠ UNGATED: the modal always has sections to show (the large-PR threshold among
-              // them), so the entry point needs no gate.
-              onOpenSettings={() => openSettings()}
-            />
-          )}
-        </div>
-      </header>
+      {/* THE SHELL (docs/redesign/DESIGN.md § 1): one sidebar, one slim top bar, the page. The
+          sidebar is rendered ONCE and never unmounted (SyncStatus, the sync round's driver, lives in
+          its foot); below lg it is a drawer, below md the phone also gets the bottom bar. */}
+      <div className="flex min-h-0 flex-1">
+        <Sidebar dark={dark} toggleDark={toggleDark} />
+        <div className="flex min-w-0 flex-1 flex-col bg-ui-bg">
+          <TopBar toasts={toasts} />
+          {/* The Timeline's board filters (and a PR Focus tab's two) — nothing on other views. */}
+          <FilterBar />
+          {/* `relative` anchors the full-main overlays (pr-detail / Activity) below. `overflow-clip`: a
+              page wider than a phone scrolls inside its own box, never the document (no scroll
+              container is created, so no descendant scrollIntoView can push the shell off-screen). */}
+          <main className="relative flex min-h-0 flex-1 flex-col overflow-clip">
+            {/* The one board-slot Timeline. `mode` absent = the shared board; an isolate
+                mode = a PR's own timeline — each a keyed remount so vis tears down cleanly
+                (never reconfigured in place). */}
+            <section ref={timelineSectionRef} className="min-h-0 flex-1 overflow-hidden">
+              {boardMode == null ? (
+                <Timeline key="board" />
+              ) : (
+                <Timeline key={`focus:${boardMode.prId}`} mode={boardMode} />
+              )}
+            </section>
 
-      {helpOpen && <HelpModal onClose={() => setHelpOpen(false)} />}
+            {/* Item 7: the resize handle + detail pane exist only once a PR is selected on
+                the board. No selection → the Timeline takes the full height. */}
+            {paneVisible && (
+              <>
+                <div
+                  role="separator"
+                  aria-orientation="horizontal"
+                  aria-label="Resize detail pane"
+                  onPointerDown={onResizeDown}
+                  onPointerMove={onResizeMove}
+                  onPointerUp={onResizeUp}
+                  title="Drag to resize"
+                  className="h-1 shrink-0 cursor-row-resize bg-ui-surface transition-colors hover:bg-ui-accent-fill touch:h-3"
+                />
+                <section
+                  ref={paneRef}
+                  style={{ height: paneH }}
+                  className="shrink-0 overflow-auto"
+                >
+                  <DetailPane />
+                </section>
+              </>
+            )}
+
+            {/* A pr-detail PR shown full-screen: an overlay covering the board (which stays
+                mounted underneath for instant, state-preserving return). Keyed by id so
+                switching tabs remounts a fresh PrDetail. */}
+            {prDetailId != null && (
+              <div
+                data-testid="pinned-pr-overlay"
+                className="absolute inset-0 z-20 bg-ui-bg"
+              >
+                <PrDetail
+                  key={prDetailId}
+                  prId={prDetailId}
+                  // A feed thread click opens this tab AND selects the thread — deep-link the
+                  // Changes tab's threads to it (only when the selection is for THIS PR).
+                  selectedThreadId={selectedPrId === prDetailId ? selectedThreadId : null}
+                  placement="fullscreen"
+                />
+              </div>
+            )}
+
+            {/* The Activity triage console — a sibling full-main overlay over the board (which
+                stays mounted underneath, like the pr-detail overlay). Never co-renders with
+                a pr-detail PR. */}
+            {inboxActive && (
+              <div
+                data-testid="activity-overlay"
+                // ⚠ `overflow-clip`, NOT `overflow-hidden`. `hidden` still creates a scroll
+                // CONTAINER — it only removes the scrollbar — so a descendant's `scrollIntoView`
+                // can write a scrollTop onto this box and the user has no gesture to undo it: the
+                // Pending board and the rail sit permanently pushed off the top. `clip` creates no
+                // scroll container at all, so that scrollTop is unwritable. The Activity pane owning
+                // its own containing block (see Activity/index.tsx) removes the phantom scroll range
+                // that made this reachable; this removes the mechanism itself, for every future
+                // descendant that scrolls something into view.
+                className="absolute inset-0 z-20 overflow-clip bg-ui-bg"
+              >
+                <ActivityView />
+              </div>
+            )}
+
+            {/* This Sprint — a fixed tab, a sibling full-main overlay over the board like Activity.
+                The overlay is the scroll box (useRememberedScroll restores each sub-tab's position). */}
+            {sprintActive && (
+              <div
+                data-testid="sprint-overlay"
+                className="absolute inset-0 z-20 overflow-auto bg-ui-bg"
+              >
+                <SprintTabView />
+              </div>
+            )}
+
+            {/* The flow-metric drill-down — a sibling full-main overlay over the board. */}
+            {metricsActive && (
+              <div
+                data-testid="metrics-overlay"
+                className="absolute inset-0 z-20 overflow-auto bg-ui-bg"
+              >
+                <MetricsDetail />
+              </div>
+            )}
+
+            {/* The bot-vendor PR drill-down — a sibling full-main overlay over the board. */}
+            {botPrsActive && (
+              <div
+                data-testid="bot-prs-overlay"
+                className="absolute inset-0 z-20 overflow-auto bg-ui-bg"
+              >
+                <BotPrsDetail />
+              </div>
+            )}
+
+            {/* The bot-only-PRs drill-down — a sibling full-main overlay over the board. */}
+            {botOnlyActive && (
+              <div
+                data-testid="bot-only-prs-overlay"
+                className="absolute inset-0 z-20 overflow-auto bg-ui-bg"
+              >
+                <BotOnlyPrsDetail />
+              </div>
+            )}
+
+            {/* The resolvable-bot-threads review & resolve — a sibling full-main overlay. */}
+            {botThreadsActive && (
+              <div
+                data-testid="bot-threads-overlay"
+                className="absolute inset-0 z-20 overflow-auto bg-ui-bg"
+              >
+                <BotThreadsDetail />
+              </div>
+            )}
+            {/* The ML-strip drill-down ("what the bots are flagging") — a sibling full-main overlay.
+                Its own scroll pane is what the list's auto-load sentinel roots its IntersectionObserver
+                on (lib/scrollParent.ts), so `overflow-auto` here is load-bearing, not cosmetic. */}
+            {botFlaggingActive && (
+              <div
+                data-testid="bot-flagging-overlay"
+                className="absolute inset-0 z-20 overflow-auto bg-ui-bg"
+              >
+                <BotFlaggingDetail />
+              </div>
+            )}
+            {/* The merged PRs behind the ROI table's "bot comments per PR" column — a sibling
+                full-main overlay. `overflow-auto` is load-bearing here too: it is the scroll pane the
+                list's auto-load sentinel roots its IntersectionObserver on (lib/scrollParent.ts). */}
+            {botVolumeActive && (
+              <div
+                data-testid="bot-volume-overlay"
+                className="absolute inset-0 z-20 overflow-auto bg-ui-bg"
+              >
+                <BotVolumeDetail />
+              </div>
+            )}
+            {themeThreadsActive && (
+              <div
+                data-testid="theme-threads-overlay"
+                className="absolute inset-0 z-20 overflow-auto bg-ui-bg"
+              >
+                <ThemeThreadsDetail />
+              </div>
+            )}
+            {/* One contributor's activity feed — a sibling full-main overlay. Keyed on the tab so
+                switching between two people's tabs remounts the feed rather than reusing state. */}
+            {userActivityActive && (
+              <div
+                key={activeTab}
+                data-testid="user-activity-overlay"
+                className="absolute inset-0 z-20 overflow-auto bg-ui-bg"
+              >
+                <UserActivityDetail />
+              </div>
+            )}
+            {/* One review bot's depth analytics — a sibling full-main overlay. Keyed on the tab so
+                switching between two bots' tabs remounts the panel rather than reusing state. */}
+            {botDetailActive && (
+              <div
+                key={activeTab}
+                data-testid="bot-detail-overlay"
+                className="absolute inset-0 z-20 overflow-auto bg-ui-bg"
+              >
+                <BotDetailPanel />
+              </div>
+            )}
+            {/* One ticket's pull requests (the ticket tab) — a sibling full-main overlay. Keyed on the
+                tab so switching between two tickets' tabs remounts the view. */}
+            {ticketActive && (
+              <div
+                key={activeTab}
+                data-testid="ticket-overlay"
+                className="absolute inset-0 z-20 overflow-auto bg-ui-bg"
+              >
+                <TicketTabView />
+              </div>
+            )}
+            {/* Cross-repo search results (scoped to the active workspace) — a sibling full-main
+                overlay. */}
+            {searchActive && (
+              <div
+                data-testid="search-overlay"
+                className="absolute inset-0 z-20 overflow-auto bg-ui-bg"
+              >
+                <SearchResultsTab />
+              </div>
+            )}
+          </main>
+          <BottomBar />
+        </div>
+      </div>
+
+      {helpOpen && <HelpModal onClose={closeHelp} />}
+      {shortcutsOpen && <ShortcutsSheet onClose={closeShortcuts} />}
       <CommandPalette />
       {settingsOpen && <SettingsModal focus={settingsFocus} onClose={closeSettings} />}
+      {/* "Manage repos & workspaces": opened from the workspace menu, ⌘K, the empty-workspace note,
+          and once for a zero-repo account (useWorkspaceShell). */}
+      {managerOpen && <WorkspaceManagerModal onClose={closeManager} />}
       {/* The merge-conflict resolver, mounted HERE and not inside PrDetail: it opens from three
           places (the pane's Conflicts row, the expanded merge panel, the Pending board) and must
           not unmount when the pane behind it closes. It renders null until something opens it —
           `store/conflictResolver.ts` holds the target — so this costs one selector read. */}
       <ConflictResolverOverlay />
-
-      <WelcomeBackBanner />
-      <FilterBar />
-      <PinnedTabsBar />
-
-      {/* `relative` anchors the full-main overlays (pr-detail / Activity) below. */}
-      <main className="relative flex min-h-0 flex-1 flex-col">
-        {/* The one board-slot Timeline. `mode` absent = the shared board; an isolate
-            mode = a PR's own timeline — each a keyed remount so vis tears down cleanly
-            (never reconfigured in place). */}
-        <section ref={timelineSectionRef} className="min-h-0 flex-1 overflow-hidden">
-          {boardMode == null ? (
-            <Timeline key="board" />
-          ) : (
-            <Timeline key={`focus:${boardMode.prId}`} mode={boardMode} />
-          )}
-        </section>
-
-        {/* Item 7: the resize handle + detail pane exist only once a PR is selected on
-            the board. No selection → the Timeline takes the full height. */}
-        {paneVisible && (
-          <>
-            <div
-              role="separator"
-              aria-orientation="horizontal"
-              aria-label="Resize detail pane"
-              onPointerDown={onResizeDown}
-              onPointerMove={onResizeMove}
-              onPointerUp={onResizeUp}
-              title="Drag to resize"
-              className="h-1 shrink-0 cursor-row-resize bg-gray-200 transition-colors hover:bg-blue-400 dark:bg-gray-800 dark:hover:bg-blue-500"
-            />
-            <section
-              ref={paneRef}
-              style={{ height: paneH }}
-              className="shrink-0 overflow-auto"
-            >
-              <DetailPane />
-            </section>
-          </>
-        )}
-
-        {/* A pr-detail PR shown full-screen: an overlay covering the board (which stays
-            mounted underneath for instant, state-preserving return). Keyed by id so
-            switching tabs remounts a fresh PrDetail. */}
-        {prDetailId != null && (
-          <div
-            data-testid="pinned-pr-overlay"
-            className="absolute inset-0 z-20 bg-white dark:bg-gray-950"
-          >
-            <PrDetail
-              key={prDetailId}
-              prId={prDetailId}
-              // A feed thread click opens this tab AND selects the thread — deep-link the
-              // Changes tab's threads to it (only when the selection is for THIS PR).
-              selectedThreadId={selectedPrId === prDetailId ? selectedThreadId : null}
-              placement="fullscreen"
-            />
-          </div>
-        )}
-
-        {/* The Activity triage console — a sibling full-main overlay over the board (which
-            stays mounted underneath, like the pr-detail overlay). Never co-renders with
-            a pr-detail PR. */}
-        {inboxActive && (
-          <div
-            data-testid="activity-overlay"
-            // ⚠ `overflow-clip`, NOT `overflow-hidden`. `hidden` still creates a scroll
-            // CONTAINER — it only removes the scrollbar — so a descendant's `scrollIntoView`
-            // can write a scrollTop onto this box and the user has no gesture to undo it: the
-            // Pending board and the rail sit permanently pushed off the top. `clip` creates no
-            // scroll container at all, so that scrollTop is unwritable. The Activity pane owning
-            // its own containing block (see Activity/index.tsx) removes the phantom scroll range
-            // that made this reachable; this removes the mechanism itself, for every future
-            // descendant that scrolls something into view.
-            className="absolute inset-0 z-20 overflow-clip bg-white dark:bg-gray-950"
-          >
-            <ActivityView />
-          </div>
-        )}
-
-        {/* This Sprint — a fixed tab, a sibling full-main overlay over the board like Activity.
-            The overlay is the scroll box (useRememberedScroll restores each sub-tab's position). */}
-        {sprintActive && (
-          <div
-            data-testid="sprint-overlay"
-            className="absolute inset-0 z-20 overflow-auto bg-white dark:bg-gray-950"
-          >
-            <SprintTabView />
-          </div>
-        )}
-
-        {/* The flow-metric drill-down — a sibling full-main overlay over the board. */}
-        {metricsActive && (
-          <div
-            data-testid="metrics-overlay"
-            className="absolute inset-0 z-20 overflow-auto bg-white dark:bg-gray-950"
-          >
-            <MetricsDetail />
-          </div>
-        )}
-
-        {/* The bot-vendor PR drill-down — a sibling full-main overlay over the board. */}
-        {botPrsActive && (
-          <div
-            data-testid="bot-prs-overlay"
-            className="absolute inset-0 z-20 overflow-auto bg-white dark:bg-gray-950"
-          >
-            <BotPrsDetail />
-          </div>
-        )}
-
-        {/* The bot-only-PRs drill-down — a sibling full-main overlay over the board. */}
-        {botOnlyActive && (
-          <div
-            data-testid="bot-only-prs-overlay"
-            className="absolute inset-0 z-20 overflow-auto bg-white dark:bg-gray-950"
-          >
-            <BotOnlyPrsDetail />
-          </div>
-        )}
-
-        {/* The resolvable-bot-threads review & resolve — a sibling full-main overlay. */}
-        {botThreadsActive && (
-          <div
-            data-testid="bot-threads-overlay"
-            className="absolute inset-0 z-20 overflow-auto bg-white dark:bg-gray-950"
-          >
-            <BotThreadsDetail />
-          </div>
-        )}
-        {/* The ML-strip drill-down ("what the bots are flagging") — a sibling full-main overlay.
-            Its own scroll pane is what the list's auto-load sentinel roots its IntersectionObserver
-            on (lib/scrollParent.ts), so `overflow-auto` here is load-bearing, not cosmetic. */}
-        {botFlaggingActive && (
-          <div
-            data-testid="bot-flagging-overlay"
-            className="absolute inset-0 z-20 overflow-auto bg-white dark:bg-gray-950"
-          >
-            <BotFlaggingDetail />
-          </div>
-        )}
-        {/* The merged PRs behind the ROI table's "bot comments per PR" column — a sibling
-            full-main overlay. `overflow-auto` is load-bearing here too: it is the scroll pane the
-            list's auto-load sentinel roots its IntersectionObserver on (lib/scrollParent.ts). */}
-        {botVolumeActive && (
-          <div
-            data-testid="bot-volume-overlay"
-            className="absolute inset-0 z-20 overflow-auto bg-white dark:bg-gray-950"
-          >
-            <BotVolumeDetail />
-          </div>
-        )}
-        {themeThreadsActive && (
-          <div
-            data-testid="theme-threads-overlay"
-            className="absolute inset-0 z-20 overflow-auto bg-white dark:bg-gray-950"
-          >
-            <ThemeThreadsDetail />
-          </div>
-        )}
-        {/* One contributor's activity feed — a sibling full-main overlay. Keyed on the tab so
-            switching between two people's tabs remounts the feed rather than reusing state. */}
-        {userActivityActive && (
-          <div
-            key={activeTab}
-            data-testid="user-activity-overlay"
-            className="absolute inset-0 z-20 overflow-auto bg-white dark:bg-gray-950"
-          >
-            <UserActivityDetail />
-          </div>
-        )}
-        {/* One review bot's depth analytics — a sibling full-main overlay. Keyed on the tab so
-            switching between two bots' tabs remounts the panel rather than reusing state. */}
-        {botDetailActive && (
-          <div
-            key={activeTab}
-            data-testid="bot-detail-overlay"
-            className="absolute inset-0 z-20 overflow-auto bg-white dark:bg-gray-950"
-          >
-            <BotDetailPanel />
-          </div>
-        )}
-        {/* One ticket's pull requests (the ticket tab) — a sibling full-main overlay. Keyed on the
-            tab so switching between two tickets' tabs remounts the view. */}
-        {ticketActive && (
-          <div
-            key={activeTab}
-            data-testid="ticket-overlay"
-            className="absolute inset-0 z-20 overflow-auto bg-white dark:bg-gray-950"
-          >
-            <TicketTabView />
-          </div>
-        )}
-        {/* Cross-repo search results (scoped to the active workspace) — a sibling full-main
-            overlay. */}
-        {searchActive && (
-          <div
-            data-testid="search-overlay"
-            className="absolute inset-0 z-20 overflow-auto bg-white dark:bg-gray-950"
-          >
-            <SearchResultsTab />
-          </div>
-        )}
-      </main>
     </div>
   );
 }

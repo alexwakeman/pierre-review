@@ -6,7 +6,7 @@ import { weightPhrase } from './settings/myTurnSettingsForm.js';
 import { aiCredentialWords } from '@pierre-review/shared';
 import { useAiProvider } from '../hooks/useAiCapabilities.js';
 
-// Compact, scrollable help overlay opened from the header "?" button. A very brief
+// Compact, scrollable help overlay opened from the sidebar's "?" button, ⌘K or the key sheet. A very brief
 // tour of the core flows — tracking repos, the timeline, focus mode, navigation.
 // Dismissed via the backdrop, the X, or Escape. The Escape handler runs in the
 // capture phase and stops propagation so a stray dismiss doesn't also reach the
@@ -60,28 +60,32 @@ export function HelpModal({ onClose }: { onClose: () => void }): JSX.Element {
             A dashboard for GitHub pull-request activity across a Workspace of repos —
             built for sprint situational-awareness: who’s doing what, which PRs are
             stalled, which review threads sit untouched, and what needs <em>you</em>. It
-            opens on <strong>Pending</strong>, in the <strong>Activity</strong> console; the{' '}
-            <strong>Timeline</strong> is a second lens. Runs on your machine off your{' '}
+            opens on <strong>Open pull requests</strong>; everything else is one click away in the
+            sidebar, or one keystroke away with <Kbd>⌘K</Kbd>. Runs on your machine off your{' '}
             <Code>gh</Code> login.
           </p>
 
           <Section title="Add repos & scope with Workspaces">
             Every repo lives in exactly one <strong>Workspace</strong>, and a Workspace is the
             only scope there is: the <WorkspaceIcon className="inline-block align-[-0.1em]" />{' '}
-            selector top-left picks <em>one</em>, and that
+            selector at the top of the sidebar picks <em>one</em>, and that
             choice narrows the whole app — Activity, Insights and the Timeline — at once. There
             is no “all repos” and no “unassigned” bucket. <strong>Default</strong> is made for
             you: you can rename it, you can’t delete it, and new repos land there. Add repos,
             create Workspaces and move repos between them under{' '}
-            <strong>Manage repos &amp; workspaces</strong> — assigning a repo elsewhere{' '}
+            <strong>Manage repos &amp; workspaces</strong> (in that selector, or <Kbd>⌘K</Kbd>) — assigning a repo elsewhere{' '}
             <em>moves</em> it, it is never in two places. Inside the selected Workspace, the
-            repo show/hide dropdown narrows further without changing scope.
+            Timeline’s repo show/hide dropdown narrows further without changing scope.
           </Section>
 
-          <Section title="Activity console (the default)">
-            The left rail is your state of play: <strong>Pending</strong>, where the app opens,
-            then a cross-repo <strong>Feed</strong>, <strong>Bots</strong> and{' '}
-            <strong>Reports</strong>, then the Workspace’s repos as a flat list. The Feed is one
+          <Section title="The sidebar">
+            <strong>Pending</strong>, <strong>Open pull requests</strong>, <strong>This Sprint</strong>{' '}
+            and the <strong>Timeline</strong> first; then <strong>Docs</strong> and the{' '}
+            <strong>Feed</strong>, <strong>Reports</strong> and <strong>Bots Monitoring</strong>; then
+            the Workspace’s repos, each opening its own console. <strong>Needs you</strong> lists other
+            Workspaces with work waiting for you. Sync, AI usage, notifications, the theme and your
+            account sit at the bottom. On a phone the four main pages are along the bottom and{' '}
+            <strong>More</strong> opens the rest. The Feed is one
             chronological stream of real activity
             — opens, merges, reviews, comments, and pushes that addressed a thread. Filter it with
             the pills: <strong>My Turn</strong> (things that concern you — you authored it, were
@@ -140,8 +144,8 @@ export function HelpModal({ onClose }: { onClose: () => void }): JSX.Element {
             Rows are grouped <strong>repo → contributor</strong>; each PR is a bar, the
             markers are events. Scroll to pan, hold the zoom key to zoom. <strong>Show</strong>{' '}
             centres a PR on the shared board; <strong>Focus</strong> (or double-clicking a
-            bar) opens the PR in its own isolated tab. The tab strip carries{' '}
-            <strong>Activity</strong> and <strong>Timeline</strong> plus any PR tabs you open.
+            bar) opens the PR in its own isolated tab. Every pull request or drill-down you open becomes
+            a tab along the top; right-click one to close others.
           </Section>
 
           <Section title="AI Review and AI Fix (on your machine)">
@@ -168,9 +172,12 @@ export function HelpModal({ onClose }: { onClose: () => void }): JSX.Element {
           </Section>
 
           <Section title="Keyboard">
-            <Kbd>⌘K</Kbd> or <Kbd>Ctrl K</Kbd> go anywhere: a page, a setting, an open pull request ·{' '}
-            <Kbd>/</Kbd> focus search · <Kbd>j</Kbd>/<Kbd>k</Kbd> cycle PRs ·{' '}
-            <Kbd>i</Kbd> Activity console · <Kbd>Esc</Kbd> leave a tab/overlay, else clear the
+            <Kbd>⌘K</Kbd> or <Kbd>Ctrl K</Kbd> go anywhere: a page, a setting, a pull request, a
+            search · <Kbd>/</Kbd> the same · <Kbd>g</Kbd> then a letter goes to a page (
+            <Kbd>p</Kbd> Pending, <Kbd>o</Kbd> Open pull requests, <Kbd>s</Kbd> This Sprint,{' '}
+            <Kbd>t</Kbd> Timeline, <Kbd>r</Kbd> Reports, <Kbd>b</Kbd> Bots, <Kbd>d</Kbd> Docs,{' '}
+            <Kbd>f</Kbd> Feed) · <Kbd>j</Kbd>/<Kbd>k</Kbd> move through a list or the Timeline’s PRs ·{' '}
+            <Kbd>?</Kbd> every key · <Kbd>Esc</Kbd> close the top layer, leave a tab, else clear the
             selection.
           </Section>
         </div>

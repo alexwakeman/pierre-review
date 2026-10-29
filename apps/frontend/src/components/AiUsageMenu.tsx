@@ -27,7 +27,17 @@ const TONE: Record<'normal' | 'near' | 'over', string> = {
   over: 'border-red-400 text-red-700 dark:border-red-700 dark:text-red-300',
 };
 
-export function AiUsageMenu(): JSX.Element | null {
+const SIDEBAR_TONE: Record<'normal' | 'near' | 'over', string> = {
+  normal: 'text-ui-mute',
+  near: 'text-ui-warn',
+  over: 'text-ui-danger',
+};
+
+/**
+ * `variant="sidebar"` is the redesign's sidebar foot: a full-width row ("AI usage  40%") whose
+ * popover opens UPWARD from the foot. The header variant is the old pill.
+ */
+export function AiUsageMenu({ variant = 'header' }: { variant?: 'header' | 'sidebar' } = {}): JSX.Element | null {
   const ai = useAiCapabilities();
   const q = useAiBudget();
   const openSettings = useSettingsModal((s) => s.openSettings);
@@ -66,7 +76,7 @@ export function AiUsageMenu(): JSX.Element | null {
   const infoAt = details?.findIndex((d) => d.hasLimnShare) ?? -1;
 
   return (
-    <div ref={rootRef} className="relative">
+    <div ref={rootRef} className={variant === 'sidebar' ? 'relative w-full' : 'relative'}>
       <button
         ref={buttonRef}
         type="button"
@@ -80,11 +90,21 @@ export function AiUsageMenu(): JSX.Element | null {
         aria-controls={open ? panelId : undefined}
         aria-label={head.figure != null ? `${head.label} ${head.figure}. ${head.title}` : head.label}
         title={head.title}
-        className={`inline-flex items-center gap-1 whitespace-nowrap rounded border px-2 py-0.5 text-xs tabular-nums hover:border-gray-400 dark:hover:border-gray-500 ${TONE[head.tone]}`}
+        className={
+          variant === 'sidebar'
+            ? `flex h-8 w-full min-w-0 items-center gap-2 rounded-ui px-2 text-left text-meta outline-none hover:bg-ui-hover focus-visible:ring-2 focus-visible:ring-ui-accent touch:h-11 ${SIDEBAR_TONE[head.tone]}`
+            : `inline-flex items-center gap-1 whitespace-nowrap rounded border px-2 py-0.5 text-xs tabular-nums hover:border-gray-400 dark:hover:border-gray-500 ${TONE[head.tone]}`
+        }
       >
-        <SparkleIcon size={12} className="shrink-0" />
-        <span className="sr-only">{head.label}</span>
-        {head.figure != null && <span className="font-medium">{head.figure}</span>}
+        <SparkleIcon size={variant === 'sidebar' ? 14 : 12} className="shrink-0" />
+        {variant === 'sidebar' ? (
+          <span aria-hidden className="min-w-0 flex-1 truncate">
+            AI usage
+          </span>
+        ) : (
+          <span className="sr-only">{head.label}</span>
+        )}
+        {head.figure != null && <span className="font-medium tabular-nums">{head.figure}</span>}
       </button>
 
       {open && details != null && (
@@ -92,7 +112,12 @@ export function AiUsageMenu(): JSX.Element | null {
           id={panelId}
           role="dialog"
           aria-label="AI usage"
-          className="absolute right-0 top-full z-[60] mt-1 max-h-[calc(100vh-4rem)] overflow-y-auto w-[22rem] max-w-[calc(100vw-1rem)] max-sm:fixed max-sm:inset-x-2 max-sm:top-auto max-sm:w-auto max-sm:max-w-none rounded-lg border border-gray-200 bg-white p-3 text-xs text-gray-700 shadow-lg dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"
+          className={
+            variant === 'sidebar'
+              ? // Opens UP from the sidebar foot; never wider than the screen in the phone drawer.
+                'absolute bottom-full left-0 z-[60] mb-1 max-h-[calc(100vh-6rem)] w-[22rem] max-w-[calc(100vw-1.5rem)] overflow-y-auto overscroll-contain rounded-ui bg-ui-raise p-3 text-xs text-gray-700 shadow-xl shadow-black/30 motion-safe:animate-ui-pop dark:text-gray-200'
+              : 'absolute right-0 top-full z-[60] mt-1 max-h-[calc(100vh-4rem)] overflow-y-auto w-[22rem] max-w-[calc(100vw-1rem)] max-sm:fixed max-sm:inset-x-2 max-sm:top-auto max-sm:w-auto max-sm:max-w-none rounded-lg border border-gray-200 bg-white p-3 text-xs text-gray-700 shadow-lg dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200'
+          }
         >
           {details.map((detail, i) => (
             <div

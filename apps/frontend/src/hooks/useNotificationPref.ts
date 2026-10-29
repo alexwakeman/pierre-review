@@ -40,3 +40,28 @@ export function useNotificationPref(): [boolean, (v: boolean) => void] {
 
   return [enabled, set];
 }
+
+/** Browser notifications exist here at all (the bell is hidden where they do not). */
+export const notificationsSupported = (): boolean =>
+  typeof window !== 'undefined' && 'Notification' in window;
+
+/**
+ * The My Turn bell's toggle (it lived in App.tsx; the sidebar foot and ⌘K share it now). The first
+ * enable asks the browser for permission; a denied permission means it cannot turn on.
+ */
+export function useNotificationToggle(): { supported: boolean; enabled: boolean; toggle: () => void } {
+  const [enabled, setEnabled] = useNotificationPref();
+  const supported = notificationsSupported();
+  const toggle = useCallback((): void => {
+    if (!notificationsSupported()) return;
+    if (enabled) {
+      setEnabled(false);
+      return;
+    }
+    if (Notification.permission === 'granted') setEnabled(true);
+    else if (Notification.permission !== 'denied') {
+      void Notification.requestPermission().then((p) => setEnabled(p === 'granted'));
+    }
+  }, [enabled, setEnabled]);
+  return { supported, enabled, toggle };
+}

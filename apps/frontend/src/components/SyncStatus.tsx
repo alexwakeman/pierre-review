@@ -25,36 +25,11 @@ import {
   useMlEnrichmentStatus,
   useMlSeverityEnabled,
 } from '../hooks/useMlLabels.js';
+import { createPortal } from 'react-dom';
 import { SyncProgressModal } from './SyncProgressModal.js';
+import { RefreshIcon } from './Icons.js';
+import { relativeTime } from '../lib/ui.js';
 import { mostRecentCheck, mostRecentSync, syncTooltip } from '../lib/syncTooltip.js';
-
-// Circular-arrows glyph for the sync trigger; spins while a sync runs.
-function RefreshIcon({
-  spinning = false,
-  size = 14,
-}: {
-  spinning?: boolean;
-  size?: number;
-}): JSX.Element {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      width={size}
-      height={size}
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-      className={spinning ? 'animate-spin' : undefined}
-    >
-      <polyline points="23 4 23 10 17 10" />
-      <polyline points="1 20 1 14 7 14" />
-      <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
-    </svg>
-  );
-}
 
 // The header sync control + the single DRIVER of the shared sync round.
 //
@@ -67,11 +42,19 @@ function RefreshIcon({
 // The header button itself is a PLAIN button: click = shallow sync of all repos, no dialog —
 // the icon spins until the whole round (walk + ML scoring) is done, and errors surface as the
 // red dot + the hover tooltip. Deep re-sync lives in the WorkspaceManager now.
-export function SyncStatus(): JSX.Element | null {
+export function SyncStatus({ variant = 'header' }: { variant?: 'header' | 'sidebar' } = {}): JSX.Element | null {
   const qc = useQueryClient();
   const round = useFilters((s) => s.syncRound);
   const setSyncRound = useFilters((s) => s.setSyncRound);
   const managerOpen = useFilters((s) => s.managerOpen);
+  // The sidebar line says "Synced 2m ago": re-render it every 30s so the words stay true. The
+  // header variant shows no time and skips the tick.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (variant !== 'sidebar') return;
+    const id = window.setInterval(() => setTick((n) => n + 1), 30_000);
+    return () => window.clearInterval(id);
+  }, [variant]);
   // Latch: have we actually OBSERVED a sync running since the round's walk began?
   // A just-triggered (or just-added) repo isn't reflected in the status poll for
   // a tick or two, so `runningCount === 0` on its own can't tell "not started
@@ -487,6 +470,17 @@ export function SyncStatus(): JSX.Element | null {
     : mlScoring
       ? scoringLine
       : 'Click to sync all repos now';
+  // The sidebar's one line: what it is doing now, else when GitHub last answered.
+  const lastCheck = mostRecentCheck(repos ?? []) ?? lastSync;
+  const statusWords = round.syncing
+    ? progress.charAt(0).toUpperCase() + progress.slice(1)
+    : mlScoring
+      ? 'Scoring bot comments…'
+      : erroredRepo
+        ? 'Sync error'
+        : lastCheck != null
+          ? `Synced ${relativeTime(lastCheck)}`
+          : 'Sync';
   const title = [errorLine, actionLine, syncTooltip(lastSync, mostRecentCheck(repos ?? []))]
     .filter(Boolean)
     .join('\n');
@@ -496,31 +490,55 @@ export function SyncStatus(): JSX.Element | null {
       {/* The standalone overlay renders ONLY while the manager is closed AND the round asked
           for a modal (the onboarding add path) — with the manager open the same content shows
           as its embedded right-hand column instead (EmbeddedSyncPanel), never both. */}
-      {round.open && round.modal && !managerOpen && (
-        <SyncProgressModal
-          repos={scopedRepos}
-          statuses={scopedStatuses}
-          ml={ml}
-          cancelling={round.cancelling}
-          onCancel={() => void cancelSync()}
-          onDismiss={dismissRound}
-        />
-      )}
+      {/* PORTALLED to <body>: SyncStatus now lives in the sidebar, which is `display: none` while
+          the phone drawer is closed — a `fixed` dialog inside it would never paint there. The
+          driver stays mounted either way (the sidebar is never unmounted). */}
+      {round.open &&
+        round.modal &&
+        !managerOpen &&
+        createPortal(
+          <SyncProgressModal
+            repos={scopedRepos}
+            statuses={scopedStatuses}
+            ml={ml}
+            cancelling={round.cancelling}
+            onCancel={() => void cancelSync()}
+            onDismiss={dismissRound}
+          />,
+          document.body,
+        )}
       <button
         type="button"
         onClick={() => void runSyncAll(false)}
         aria-busy={round.syncing || mlScoring}
         title={title}
-        className="relative flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"
+        aria-label={variant === 'sidebar' ? `Sync all repos now. ${statusWords}` : undefined}
+        className={
+          variant === 'sidebar'
+            ? 'relative flex h-8 w-full min-w-0 items-center gap-2 rounded-ui px-2 text-left text-meta text-ui-mute outline-none hover:bg-ui-hover hover:text-ui-ink focus-visible:ring-2 focus-visible:ring-ui-accent touch:h-11'
+            : 'relative flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800'
+        }
       >
         {/* Spins for BOTH halves. Stopping it when the GitHub walk ends was the visible form
             of the bug: the badges the user is waiting for were still being computed. */}
-        <RefreshIcon spinning={round.syncing || mlScoring} />
-        <span className="hidden sm:inline">Sync</span>
+        <RefreshIcon size={14} className={round.syncing || mlScoring ? 'shrink-0 animate-spin' : 'shrink-0'} />
+        {variant === 'sidebar' ? (
+          // The sidebar has room for the state in words, so the red dot is no longer the only
+          // signal: the line says "Sync error" in danger ink.
+          <span className={`min-w-0 flex-1 truncate ${erroredRepo && !round.syncing && !mlScoring ? 'text-ui-danger' : ''}`}>
+            {statusWords}
+          </span>
+        ) : (
+          <span className="hidden sm:inline">Sync</span>
+        )}
         {erroredRepo && !round.syncing && !mlScoring && (
           <span
             aria-hidden
-            className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-red-500 ring-1 ring-white dark:ring-gray-900"
+            className={
+              variant === 'sidebar'
+                ? 'h-1.5 w-1.5 shrink-0 rounded-full bg-ui-danger'
+                : 'absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-red-500 ring-1 ring-white dark:ring-gray-900'
+            }
           />
         )}
       </button>

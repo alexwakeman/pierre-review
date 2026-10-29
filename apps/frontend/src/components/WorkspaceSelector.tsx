@@ -1,12 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Workspace } from '@pierre-review/shared';
 import { useClickOutside } from '../hooks/useClickOutside.js';
-import { activeWorkspaceBadge, useMyTurnByWorkspace } from '../hooks/useMyTurnByWorkspace.js';
+import { useMyTurnByWorkspace } from '../hooks/useMyTurnByWorkspace.js';
 import { consumeRestoredWorkspaceScope, markUrlCorrection } from '../hooks/useUrlState.js';
 import { useRepos } from '../hooks/useTimeline.js';
 import { useWorkspaces } from '../hooks/useWorkspaces.js';
 import { useFilters } from '../store/filters.js';
-import { WorkspaceManagerModal } from './Activity/WorkspaceManager.js';
 import { CaretIcon, DotIcon, GearIcon, WorkspaceIcon } from './Icons.js';
 
 /**
@@ -17,24 +16,9 @@ import { CaretIcon, DotIcon, GearIcon, WorkspaceIcon } from './Icons.js';
  */
 let firstRunManagerShown = false;
 
-/**
- * The My-Turn count badge, shared by the collapsed trigger and every menu row so the two can
- * never drift apart.
- *
- * ⚠ AND THEY NOW CARRY THE SAME KIND OF NUMBER: each badge is ITS OWN workspace's personal my-turn
- * count. The trigger used to carry the sum over the OTHER workspaces while sitting against the
- * ACTIVE one's name, so the shared styling was the only thing the two had in common — the reader
- * read "Default 10" and took the 10 for Default's.
- *
- * OUTLINE, NOT FILL. A solid amber pill read as an alert blob next to the workspace name and
- * fought the rail's quiet grey-on-dark for attention — this control is a SCOPE PICKER that also
- * happens to carry a count, not a notification. A hairline ring with a transparent centre keeps
- * the number legible and lets the amber mean "there is work here" without shouting it.
- * `min-w` + `text-center` keep a 1-digit and a 3-digit badge the same optical shape so a column
- * of rows does not ripple; `tabular-nums` stops the digits themselves jittering.
- */
-const MY_TURN_BADGE_CLASS =
-  'shrink-0 rounded-full border border-amber-500/60 px-1 text-center text-[11px] font-medium leading-[16px] tabular-nums text-amber-600 dark:border-amber-400/50 dark:text-amber-400';
+// Each menu row carries ITS OWN workspace's personal My Turn count (the same figure the sidebar's
+// Pending item shows for the active one), plain ink and tabular — a scope picker that happens to
+// carry a count, not a notification, so it wears no alert colour (docs/redesign/DESIGN.md § 3).
 
 /**
  * Keep `workspaceId` resolved and `repoIds` HONEST — and note what it deliberately does NOT do.
@@ -181,6 +165,40 @@ export function syncWorkspaceScope(args: {
   setRepoIds(pruned.length > 0 ? pruned : null);
 }
 
+/**
+ * The parts of the old selector that must run on EVERY screen, whether or not the picker is visible
+ * (the sidebar is `display: none` in a closed phone drawer): keep the workspace resolved, open the
+ * manager once for a zero-repo account, and mount the manager itself. Called once, from App.
+ *
+ * The manager's open state is the store's `managerOpen` (it was component state here), so the
+ * picker, ⌘K ("Manage repos & workspaces") and first-run all open the same modal.
+ */
+export function useWorkspaceShell(): { managerOpen: boolean; closeManager: () => void } {
+  useWorkspaceSync();
+  const { data: repos } = useRepos();
+  const { data: workspaces } = useWorkspaces();
+  const managerOpen = useFilters((s) => s.managerOpen);
+  const setManagerOpen = useFilters((s) => s.setManagerOpen);
+  // A FIRST-TIME account (no repos at all) opens straight into the manager, once per page load, so
+  // the first thing on screen is the way to add a repo. `repos` is never persisted to IndexedDB, so
+  // an empty list here is the server's answer for this load, not a stale one; `undefined` is
+  // "still loading" and must not open anything. It waits for the workspaces too, so the add box
+  // opens already aimed at a workspace. Never closed for the reader: once a repo is added the
+  // modal stays up showing its sync.
+  useEffect(() => {
+    if (firstRunManagerShown || repos == null || workspaces == null) return;
+    if (repos.length > 0) return;
+    firstRunManagerShown = true;
+    setManagerOpen(true);
+  }, [repos, workspaces, setManagerOpen]);
+  return { managerOpen, closeManager: () => setManagerOpen(false) };
+}
+
+/** Open "Manage repos & workspaces" from anywhere (the picker, ⌘K, an empty-state link). */
+export function openWorkspaceManager(): void {
+  useFilters.getState().setManagerOpen(true);
+}
+
 /** Default first (it is where new repos land), then the rest by name. */
 function orderWorkspaces(workspaces: Workspace[]): Workspace[] {
   return [...workspaces].sort((a, b) => {
@@ -197,7 +215,7 @@ function orderWorkspaces(workspaces: Workspace[]): Workspace[] {
  * can no longer exist. The rows are radios, not checkboxes; narrowing WITHIN the selected
  * workspace is the neighbouring Repos panel's job.
  *
- * Mounted once, in the FilterBar, on every view — it is the single scope control, so the Activity
+ * Mounted once, at the top of the sidebar (components/shell/Sidebar.tsx) — it is the single scope control, so the Activity
  * rail carries none of its own.
  */
 export function WorkspaceSelector(): JSX.Element {
@@ -205,27 +223,23 @@ export function WorkspaceSelector(): JSX.Element {
   const switchWorkspaceToOpenPrs = useFilters((s) => s.switchWorkspaceToOpenPrs);
   const { data: workspaces } = useWorkspaces();
   const [open, setOpen] = useState(false);
-  // Repo/workspace management lives INSIDE this dropdown (no separate rail button) — an entry at
-  // the bottom opens the full management modal.
-  const [manageOpen, setManageOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
-  // A FIRST-TIME account (no repos at all) opens straight into the manager, once per page load, so
-  // the first thing on screen is the way to add a repo. `repos` is never persisted to IndexedDB, so
-  // an empty list here is the server's answer for this load, not a stale one; `undefined` is
-  // "still loading" and must not open anything. It waits for the workspaces too, so the add box
-  // opens already aimed at a workspace. Never closed for the reader: once a repo is added the
-  // modal stays up showing its sync.
-  const { data: repos } = useRepos();
+  // Escape closes the menu and hands focus back — in the CAPTURE phase with stopPropagation, so
+  // the app's global Esc (useKeyboard → the Timeline) never also fires.
   useEffect(() => {
-    if (firstRunManagerShown || repos == null || workspaces == null) return;
-    if (repos.length > 0) return;
-    firstRunManagerShown = true;
-    setManageOpen(true);
-  }, [repos, workspaces]);
-
-  // Resolve the active workspace and keep repoIds honest (see the hook above).
-  useWorkspaceSync();
+    if (!open) return;
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== 'Escape') return;
+      e.stopPropagation();
+      e.preventDefault();
+      setOpen(false);
+      triggerRef.current?.focus();
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [open]);
 
   useClickOutside(rootRef, () => setOpen(false), open);
 
@@ -234,7 +248,7 @@ export function WorkspaceSelector(): JSX.Element {
 
   // Per-workspace "My Turn" counts (see the hook). The rows are the ONE place in the app that
   // lists every workspace at once, which makes them the right place to say where your work is —
-  // the amber badge is "N things are on your plate in THAT workspace". Same fold, same number and
+  // the badge is "N things are on your plate in THAT workspace". Same fold, same number and
   // same cap phrasing as the Welcome-back banner.
   //
   // ⚠ IT COUNTS THE PERSONAL SUBSET (`myTurnPersonal`), like every other surface that NOTIFIES —
@@ -252,11 +266,10 @@ export function WorkspaceSelector(): JSX.Element {
   // have NO number rather than a zero one — those rows render a dim "—" and the footer names how
   // many, because a badge that exists to say "you have unseen work" must not omit a workspace
   // silently. Nothing renders at all until the brief lands (`workspaceId === null` ⇒ idle).
-  const { active: activeMyTurn, byWorkspace, elsewhereCount, elsewhereCapped, uncounted } =
-    useMyTurnByWorkspace();
-  // The COLLAPSED trigger's badge — the ACTIVE workspace's own figure. See `activeWorkspaceBadge`
-  // for why it is no longer the "elsewhere" sum, which is the bug the reader hit.
-  const badge = activeWorkspaceBadge(activeMyTurn);
+  const { byWorkspace, elsewhereCount, elsewhereCapped, uncounted } = useMyTurnByWorkspace();
+  // (The collapsed trigger's own badge — this workspace's personal My Turn count — moved to the
+  // sidebar's Pending item, which is where that list opens: components/shell/Sidebar.tsx. The
+  // menu rows below still carry every workspace's figure.)
 
   // Switching workspace shows all of it — a subset the user picked in the workspace they are
   // leaving is not a narrowing of the one they are entering — and lands on Open PRs (see above).
@@ -271,15 +284,14 @@ export function WorkspaceSelector(): JSX.Element {
   const activeLabel = active?.name ?? 'Workspace';
 
   const rowCls = (selected: boolean): string =>
-    `flex w-full items-center justify-between gap-2 rounded px-2 py-1 text-left text-xs ${
-      selected
-        ? 'bg-sky-50 font-medium text-sky-700 dark:bg-sky-950/40 dark:text-sky-300'
-        : 'text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800'
+    `flex h-8 w-full items-center justify-between gap-2 rounded-ui px-2 text-left text-body touch:h-11 ${
+      selected ? 'bg-ui-sel font-medium text-ui-ink' : 'text-ui-ink hover:bg-ui-hover'
     }`;
 
   return (
-    <div ref={rootRef} className="relative">
+    <div ref={rootRef} className="relative min-w-0">
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="true"
@@ -300,44 +312,27 @@ export function WorkspaceSelector(): JSX.Element {
         ]
           .filter((s): s is string => s != null)
           .join('. ')}
-        className="inline-flex max-w-[12rem] items-center gap-1 whitespace-nowrap rounded-full border border-gray-300 py-0.5 pl-2.5 pr-2 text-xs text-gray-600 hover:border-gray-400 dark:border-gray-700 dark:text-gray-300 dark:hover:border-gray-500"
+        aria-label={`Workspace: ${activeLabel}`}
+        className="flex h-9 w-full min-w-0 items-center gap-2 rounded-ui px-2 text-left text-title text-ui-ink outline-none hover:bg-ui-hover focus-visible:ring-2 focus-visible:ring-ui-accent touch:h-11"
       >
-        <WorkspaceIcon className="shrink-0 text-sky-500" />
-        <span className="truncate">{activeLabel}</span>
-        {/* THE BADGE IS THIS WORKSPACE'S OWN COUNT — the name and the number beside it describe
-            the same thing, which is the whole fix. It is the PERSONAL fold, capped, with the "+"
-            and the exact pair in the title: the same figure as this workspace's row in the menu
-            below, the Welcome-back banner's chip for it, and the browser notification. */}
-        {badge != null && (
-          <span
-            title={
-              activeMyTurn?.cap?.title ??
-              (badge.count === 1
-                ? `1 item needs you in ${activeLabel} — it is on the Pending board`
-                : `${badge.count} items need you in ${activeLabel} — they are on the Pending board`)
-            }
-            className={`${MY_TURN_BADGE_CLASS} min-w-[1.35rem]`}
-          >
-            {badge.count}
-            {badge.cappedTotal != null && (
-              <>
-                <span aria-hidden>+</span>
-                <span className="sr-only"> of {badge.cappedTotal}</span>
-              </>
-            )}
-          </span>
+        <WorkspaceIcon size={15} className="shrink-0 text-ui-mute" />
+        <span className="min-w-0 flex-1 truncate">{activeLabel}</span>
+        {elsewhereCount > 0 && (
+          // Work waiting in OTHER workspaces: a quiet dot (the sentence is in the title, and the
+          // menu names each workspace's figure).
+          <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full bg-ui-accent" />
         )}
-        <CaretIcon dir="down" className="shrink-0" />
+        <CaretIcon dir="down" className="shrink-0 text-ui-faint" />
       </button>
 
       {open && (
         <div
           role="menu"
           aria-label="Workspace"
-          className="absolute left-0 top-full z-[60] mt-1 max-h-80 w-56 overflow-y-auto rounded-lg border border-gray-200 bg-white p-1 shadow-lg dark:border-gray-700 dark:bg-gray-900"
+          className="absolute left-0 top-full z-[60] mt-1 max-h-[min(24rem,70vh)] w-[min(18rem,calc(100vw-1.5rem))] overflow-y-auto overscroll-contain rounded-ui bg-ui-raise p-1 shadow-xl shadow-black/30 motion-safe:animate-ui-pop"
         >
           {rows.length === 0 ? (
-            <div className="px-2 py-1.5 text-xs text-gray-500 dark:text-gray-400">Loading workspaces…</div>
+            <div className="px-2 py-1.5 text-body text-ui-mute">Loading workspaces…</div>
           ) : (
             rows.map((w) => {
               const selected = w.id === workspaceId;
@@ -356,8 +351,8 @@ export function WorkspaceSelector(): JSX.Element {
                       aria-hidden
                       className={`inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full border text-[11px] leading-none ${
                         selected
-                          ? 'border-sky-500 bg-sky-500 text-white'
-                          : 'border-gray-300 dark:border-gray-600'
+                          ? 'border-ui-accent-fill bg-ui-accent-fill text-ui-on-accent'
+                          : 'border-ui-line'
                       }`}
                     >
                       {selected && <DotIcon size={5} />}
@@ -367,9 +362,7 @@ export function WorkspaceSelector(): JSX.Element {
                         IS where new repos land and where a deleted workspace's repos come back
                         to, which is worth saying on the row that cannot be deleted. */}
                     {w.isDefault && (
-                      <span className="shrink-0 rounded bg-gray-100 px-1 text-[11px] uppercase tracking-wide text-gray-500 dark:bg-gray-800 dark:text-gray-400">
-                        Default
-                      </span>
+                      <span className="shrink-0 text-meta text-ui-faint">Default</span>
                     )}
                   </span>
                   <span className="flex shrink-0 items-center gap-1.5">
@@ -397,7 +390,7 @@ export function WorkspaceSelector(): JSX.Element {
                               ? `1 item needs you in ${w.name}`
                               : `${myTurn.count} items need you in ${w.name}`)
                         }
-                        className={`${MY_TURN_BADGE_CLASS} min-w-[1.35rem]`}
+                        className="shrink-0 text-meta font-medium tabular-nums text-ui-ink"
                       >
                         {myTurn.count}
                         {myTurn.cap != null && (
@@ -412,17 +405,17 @@ export function WorkspaceSelector(): JSX.Element {
                       // Not counted, NOT zero — see the note above the hook call.
                       <span
                         title="Not counted here — the cross-workspace roll-up covers only the first few Workspaces. Switch to it to see its own count."
-                        className="text-[11px] decorative-mark text-gray-300 dark:text-gray-600"
+                        className="text-meta text-ui-faint"
                       >
                         —
                       </span>
                     )}
                     {/* ⚠ IT CARRIES ITS UNIT, and that is not decoration. This grey figure sits
-                        six pixels from the amber my-turn badge, and on a real account both read
+                        six pixels from the my-turn badge, and on a real account both read
                         `8`: two populations, same digit, distinguished only by a colour a reader
                         has no key for and a title they have to hover to find. Colour alone is not
                         a label — the word is. */}
-                    <span className="tabular-nums text-[11px] text-gray-400">
+                    <span className="tabular-nums text-meta text-ui-faint">
                       {w.repoCount} repo{w.repoCount === 1 ? '' : 's'}
                     </span>
                   </span>
@@ -431,12 +424,12 @@ export function WorkspaceSelector(): JSX.Element {
             })
           )}
           {uncounted.length > 0 && (
-            <div className="px-2 pb-0.5 pt-1 text-[11px] leading-tight text-gray-400">
+            <div className="px-2 pb-0.5 pt-1 text-meta text-ui-faint">
               {uncounted.length} Workspace{uncounted.length === 1 ? '' : 's'} beyond the
               cross-workspace roll-up{uncounted.length === 1 ? ' is' : ' are'} not counted here.
             </div>
           )}
-          <div className="my-1 border-t border-gray-100 dark:border-gray-800" />
+          <div role="separator" className="my-1 h-px bg-ui-line" />
           {/* Repo/workspace management — add or remove repos, create workspaces, move repos
               between them. A repo belongs to exactly one workspace, so assigning it elsewhere
               MOVES it; there is no "unassign". */}
@@ -445,22 +438,21 @@ export function WorkspaceSelector(): JSX.Element {
             role="menuitem"
             onClick={() => {
               setOpen(false);
-              setManageOpen(true);
+              openWorkspaceManager();
             }}
             title="Add or remove repos, create Workspaces, and move repos between them"
-            className="flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-xs text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"
+            className="flex h-8 w-full items-center gap-2 rounded-ui px-2 text-left text-body text-ui-ink hover:bg-ui-hover touch:h-11"
           >
-            <GearIcon className="shrink-0" />
+            <GearIcon className="shrink-0 text-ui-mute" />
             <span className="truncate">Manage repos &amp; workspaces</span>
             {rows.length > 0 && (
-              <span className="ml-auto shrink-0 tabular-nums text-[11px] text-gray-400">
+              <span className="ml-auto shrink-0 tabular-nums text-meta text-ui-faint">
                 {rows.length}
               </span>
             )}
           </button>
         </div>
       )}
-      {manageOpen && <WorkspaceManagerModal onClose={() => setManageOpen(false)} />}
     </div>
   );
 }

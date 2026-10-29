@@ -142,12 +142,54 @@ data" Settings sections, GA + the cookie banner and `useAuthProviders` were remo
 with the hosted mode; GA and its consent banner live only on the website, `apps/landing`.) An
 expired SAML authorisation shows the reconnect banner, which now says `gh auth refresh`.
 
-### UI regions (`App.tsx`)
+### UI regions (`App.tsx`) — THE SHELL (redesign, 2026-10)
 
-- **FilterBar** — the scope row is **`WorkspaceSelector` + `GlobalSearch`, which show on EVERY
-  view**; everything else, `RepoSelectPanel` included, is Timeline-only — with ONE exception: a
-  pr-focus tab also shows exactly two controls, Events (`EventSelectPanel`: categories + review
-  verdicts) and a "Hide bots" pill (see below).
+One sidebar, one slim top bar, the page (`components/shell/`, docs/redesign/DESIGN.md § 1, § 6):
+
+- **`Sidebar`** (`components/shell/Sidebar.tsx`) — top to bottom: the wordmark (the `h1`), the
+  **`WorkspaceSelector`**, "Search or jump ⌘K" (opens the palette), the destinations
+  (`components/shell/nav.ts` `DESTINATIONS`: Pending · Open pull requests · This Sprint · Timeline;
+  Library: Docs (AI only) · Feed; Insights: Reports · Bots Monitoring), **Needs you** (the old
+  Welcome-back strip), **Open tabs** (phones only), **Repositories** (collapsible, remembered in
+  `localStorage`; each repo opens its console; the thread-state legend is behind the ⓘ), and the
+  foot: `SyncStatus` (sidebar variant: "Synced 2m ago" / "Sync error" in words), `AiUsageMenu`,
+  the bell, Help, the key sheet, the theme, and the account menu (`UserMenu`, opens UP).
+  ⚠ **RENDERED ONCE, NEVER UNMOUNTED**: below `lg` the closed drawer is `display: none`, because
+  `SyncStatus` — the sync round's ONE driver — lives in its foot. Anything it must show while
+  hidden is PORTALLED (the `SyncProgressModal`). The workspace scope keeper (`useWorkspaceSync`),
+  the zero-repo first-run open and the `WorkspaceManagerModal` mount moved OUT of the picker into
+  App (`useWorkspaceShell`); the manager's open state is the store's `managerOpen`
+  (`openWorkspaceManager()` — the picker, ⌘K and the empty-workspace note all call it).
+- **Navigation is `goTo(dest | repoId)`** (`nav.ts`): the same store actions the old tab row and
+  Activity rail called (`setActivityRepo` FIRST, then `showActivity`; `showSprint`; `showTimeline`),
+  so every URL key keeps its meaning — `'attention'` is Pending, `'insights'` is Reports. The
+  highlight is `currentLocation(activeTab, tabs, activityRepoId)`; items carry
+  `aria-current="page"` and `data-testid="nav-<store value>"` (e2e selects on those).
+- **`TopBar`** (`h-11`, FIXED height): the menu button (below `lg`), where you are (below `lg`),
+  the open-tabs strip (`PinnedTabsBar`, md+, dynamic tabs ONLY — the fixed views left it; it
+  renders nothing when no tab is open; one-line chips, the author rides the tooltip) and the ONE
+  `HeaderToastStrip` (below).
+- **`BottomBar`** (below `md`): the four primaries + More (opens the drawer).
+- **Keys** (`hooks/useKeyboard.ts`): `/` opens the palette (or focuses `#add-repo-input` while the
+  manager is open), `?` the key sheet (`ShortcutsSheet`), `g` then p/o/s/t/d/f/r/b goes to a page —
+  the chord's second key is taken in the CAPTURE phase so it never also reaches a list's own keys
+  (`o` = open on GitHub in a list) — `i` Activity, j/k the board, Esc as before.
+- **⌘K** (`hooks/useShellCommands.tsx`): every destination and sub-tab, every repo console, every
+  workspace, "Show what needs you in <workspace>", every Settings tab, "Manage repos & workspaces",
+  sync, theme, notifications, the key sheet, open tabs + "Close all tabs", "Merge when ready" (opens
+  that header card), "Run auto reviews now…" (takes you to the button — the run stays behind its
+  `AiRunGate`), every open PR, and the SERVER SEARCH (`hooks/usePaletteSearch.tsx`: the old
+  `GlobalSearch` dropdown's request — `useSearchDropdown`, ≥ 2 chars, 300ms, same tier — as Tickets
+  and Search rows; "Search everything" still opens the full results tab).
+- ⚠ **The splash waits on `me.isPending`, never `isLoading`**: while the persisted cache restores,
+  the `me` query is pending but not fetching, so an `isLoading` gate rendered the app, then the
+  splash, then the app again ~1s after every load — a whole-tree remount.
+
+- **FilterBar** — **Timeline-only now** (it renders nothing elsewhere): the workspace picker moved
+  to the sidebar and the search box to ⌘K. Everything in it, `RepoSelectPanel` included, is
+  Timeline-only — with ONE exception: a pr-focus tab also shows exactly two controls, Events
+  (`EventSelectPanel`: categories + review verdicts) and a "Hide bots" pill (see below). On a phone
+  the filters fold behind one "Filters" button.
   - **`WorkspaceSelector`** (was `TeamSelector`) is a **single-select RADIO list** — no "All
     repos", no "All Teams", no "No team", no checkboxes, no `toggleTeam`. Default first (badged
     "Default"), then the rest by name, each with its repo count; the trigger label is the active
@@ -4161,12 +4203,12 @@ and they are ONE fold: `hooks/useMyTurnByWorkspace.ts` over the existing
   that cleared it (viewing the Feed) was WORKSPACE-scoped — so reading workspace A zeroed a
   number that was mostly workspace B's, and the figure opened no list. There is therefore **no
   per-workspace `seen` state and no schema change**: a line disappears when the work is done.
-- **`WelcomeBackBanner` is one line per workspace with a non-zero count**, the ACTIVE one
-  visually distinguished (filled dot + "this Workspace") because the others are the ones the
-  reader cannot see from where they are. Dismissal is component-local and therefore lasts the
-  session — that is the only mute there is now, since standing work is never "marked seen".
-  It shows under EVERY tab, Activity included (it used to hide there, which removed the one
-  cross-workspace summary from the landing view); the dismiss × sits at its LEFT edge.
+- **The Welcome-back strip is the sidebar's "Needs you" group now** (`NeedsYou`, still in
+  `components/WelcomeBackBanner.tsx`): "Needs you · N" (N+ when capped), one row per workspace with
+  a non-zero count (filled dot = the active one), "+N more" with the "Not counted here" note, and a
+  × that hides it for the session (`store/shell.ts`). It shows only when it says something the
+  Pending item does not — work in ANOTHER workspace, or an uncounted one; the ACTIVE workspace's
+  figure rides the sidebar's Pending item (it was the workspace pill's badge).
 - **`useFilters.openMyTurnInWorkspace(workspaceId)` is THE deep-link** — used by the
   `WelcomeBackBanner` lines (the strip's "Elsewhere" roll-up went with the strip). ⚠ A bare
   `setWorkspace` there HALF-navigates — it re-scopes and
@@ -4411,10 +4453,11 @@ shared between the header sync button and the WorkspaceManager's embedded progre
 ⚠ **Never add an independent `fixed` toast element, and never a second strip.** The old
 bottom-right column (itself the fix for three `fixed bottom-4 right-4` elements painting over
 each other) is GONE: every toast is now a horizontal card in the top header, in
-`<HeaderToastStrip>` between the wordmark and the right-hand controls (Sync · bell · ? · theme ·
-user). App.tsx mounts, left to right: the Claude reviews frame, `AiFixBanner`,
+`<HeaderToastStrip>`, which fills the right of the slim `TopBar` (components/shell/TopBar.tsx; the
+controls that used to flank it — Sync · bell · ? · theme · AI usage · user — are in the sidebar's
+foot). App.tsx mounts, left to right: the Claude reviews frame, `AiFixBanner`, `AiBudgetToast`,
 `ClosedResolverToast`, `MyTurnDismissToast`, `DependencyMergeToast`, `AutoMergeBanner`,
-`GlobalLoadingBar`.
+`GlobalLoadingBar`, `UndoToast`.
 
 - **EVERY CARD IS THE SAME CARD.** One `HeaderToast`, one slot size (`h-7`, `w-28 sm:w-56 lg:w-64`;
   below `sm` the words are `max-sm:sr-only`, leaving the icon, the action and the X), one line
@@ -4423,7 +4466,7 @@ user). App.tsx mounts, left to right: the Claude reviews frame, `AiFixBanner`,
   toggle's accessible name. ⚠ Never `sr-only sm:not-sr-only`: `not-sr-only` sets `white-space:
   normal` + `overflow: visible`, which beat `truncate` and wrapped "Merge when ready · 2 armed · 4
   merged" onto a second, clipped line inside the 26px card.
-- **THE HEADER HAS A FIXED HEIGHT** (`h-11`, no vertical padding, App.tsx). It used to be
+- **THE TOP BAR HAS A FIXED HEIGHT** (`h-11`, no vertical padding, `TopBar`). It used to be
   content-sized (`py-2`), so a 28px card made it 45px against 43px with no toast and the whole page
   jumped as cards came and went; measured 44px both ways now.
 - **EXPANDS ON CLICK, NEVER ON HOVER OR FOCUS, and only when it has more to show** (`children` /

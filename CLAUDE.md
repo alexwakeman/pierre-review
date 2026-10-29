@@ -262,8 +262,8 @@ shortest honest version wins.
 Four separated state layers: **server state** in TanStack Query (detail on demand,
 IndexedDB-persisted), **filter/selection** in Zustand `store/filters.ts` (`workspaceId` is the
 scope), **tabs** in `store/pinnedTabs.ts` (one board mounts at a time), **URL** mirrored by
-`useUrlState.ts`. App lands on **Activity → Open PRs** (headed by the trunk strip). Fixed tabs:
-Activity · This Sprint · Timeline. Pending is `?activityRepo=attention`; the Insights rail entry is
+`useUrlState.ts`. App lands on **Activity → Open PRs** (headed by the trunk strip). Nav: ONE
+sidebar (`components/shell/` `goTo`), never unmounted. Pending is `?activityRepo=attention`; the Insights rail entry is
 labelled **"Reports"** (store/URL value stays `'insights'`). The only gates are
 `me.ai.enabled` (agentic) and `me.mlSeverity` (ML queries).
 Read [docs/FRONTEND.md](docs/FRONTEND.md) before touching any of:

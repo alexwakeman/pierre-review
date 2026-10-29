@@ -1466,7 +1466,8 @@ export function RunAutoReviewsButton(): JSX.Element | null {
     );
   };
   return (
-    <span className="inline-flex flex-wrap items-center gap-2">
+    // `data-run-auto-reviews`: ⌘K "Run auto reviews now…" lands focus here (hooks/useShellCommands.tsx).
+    <span data-run-auto-reviews className="inline-flex flex-wrap items-center gap-2">
       <AiRunGate kind="review" meter={false}>
         <button
           type="button"

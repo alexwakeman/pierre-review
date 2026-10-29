@@ -1,10 +1,14 @@
-import { useEffect, useRef, useState } from 'react';
-import { useClickOutside } from '../hooks/useClickOutside.js';
 import { profileUrl } from '../lib/ui.js';
-import { CaretIcon, ExternalLinkIcon } from './Icons.js';
+import { ExternalLinkIcon, GearIcon } from './Icons.js';
+import { Menu, type MenuEntry } from './ui/Menu.js';
+import { cx, FOCUS_RING } from './ui/cx.js';
 
-// The user chip at the far right of the header: a subtle button (avatar + name) that opens a
-// small dropdown menu — Settings and "Open Profile on GitHub".
+// The account menu at the foot of the sidebar: who is signed in (avatar + name, "@login" in the
+// trigger's title), Settings, and the GitHub profile. Built on the shared `Menu` (one popover at a
+// time, type-ahead, its own Escape, a bottom sheet on a phone); it opens UPWARD from the foot.
+//
+// ⚠ The trigger's `title` starts "Signed in as" and the item is named "Settings": scripts/
+// verify-demo.mjs and record-demo.mjs open Settings through exactly those two.
 export function UserMenu({
   user,
   onOpenSettings,
@@ -13,30 +17,13 @@ export function UserMenu({
   // Opens the user-configuration modal.
   onOpenSettings: (() => void) | null;
 }): JSX.Element {
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
   const label = user.displayName ?? user.login;
-
-  useClickOutside(rootRef, () => setOpen(false), open);
-  // Escape closes the menu. stopPropagation so it doesn't bubble to the global `esc`
-  // handler (useKeyboard), which would otherwise leave the current tab/overlay too.
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') {
-        e.stopPropagation();
-        setOpen(false);
-      }
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [open]);
 
   const avatar =
     user.avatarUrl != null ? (
       <img
         src={user.avatarUrl}
-        alt={label}
+        alt=""
         width={20}
         height={20}
         className="shrink-0 rounded-full"
@@ -44,82 +31,52 @@ export function UserMenu({
       />
     ) : (
       <span
-        className="flex shrink-0 items-center justify-center rounded-full bg-gray-300 text-[11px] font-semibold text-gray-700 dark:bg-gray-700 dark:text-gray-200"
+        aria-hidden
+        className="flex shrink-0 items-center justify-center rounded-full bg-ui-hover text-[11px] font-semibold text-ui-ink"
         style={{ width: 20, height: 20 }}
       >
         {label.slice(0, 2).toUpperCase()}
       </span>
     );
 
-  return (
-    <div ref={rootRef} className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        className={`flex items-center gap-1.5 rounded px-1.5 py-0.5 text-xs font-medium text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800 ${
-          open ? 'bg-gray-100 dark:bg-gray-800' : ''
-        }`}
-        title={
-          user.displayName != null
-            ? `Signed in as ${user.displayName} (@${user.login})`
-            : `Signed in as ${user.login}`
-        }
-      >
-        {avatar}
-        {/* The name is the first thing to give way at phone width (it pushed the header 20px
-            past a 390px viewport); `sr-only` keeps it as the button's accessible name. */}
-        <span className="sr-only sm:not-sr-only sm:max-w-[10rem] sm:truncate">{label}</span>
-        <CaretIcon dir="down" className="shrink-0 text-gray-400" />
-      </button>
+  const items: MenuEntry[] = [
+    { heading: `@${user.login}`, id: 'who' },
+    ...(onOpenSettings != null
+      ? [{ id: 'settings', label: 'Settings', icon: <GearIcon size={13} />, onSelect: onOpenSettings }]
+      : []),
+    {
+      id: 'profile',
+      label: 'Open Profile on GitHub',
+      icon: <ExternalLinkIcon size={13} />,
+      onSelect: () => window.open(profileUrl(user.login), '_blank', 'noopener,noreferrer'),
+    },
+  ];
 
-      {open && (
-        <div
-          role="menu"
-          aria-label="Account menu"
-          className="absolute right-0 top-full z-[60] mt-1 w-52 rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-900"
-        >
-          {onOpenSettings != null && (
-            <button
-              role="menuitem"
-              type="button"
-              onClick={() => {
-                setOpen(false);
-                onOpenSettings();
-              }}
-              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800"
-            >
-              <svg
-                viewBox="0 0 24 24"
-                width="13"
-                height="13"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
-              >
-                <circle cx="12" cy="12" r="3" />
-                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-              </svg>
-              Settings
-            </button>
+  return (
+    <Menu
+      label="Account menu"
+      side="top"
+      className="w-full min-w-0"
+      items={items}
+      trigger={(props) => (
+        <button
+          type="button"
+          {...props}
+          title={
+            user.displayName != null
+              ? `Signed in as ${user.displayName} (@${user.login})`
+              : `Signed in as ${user.login}`
+          }
+          className={cx(
+            'flex h-8 w-full min-w-0 items-center gap-2 rounded-ui px-2 text-left text-body text-ui-mute hover:bg-ui-hover hover:text-ui-ink touch:h-11',
+            props['aria-expanded'] && 'bg-ui-hover text-ui-ink',
+            FOCUS_RING,
           )}
-          <a
-            role="menuitem"
-            href={profileUrl(user.login)}
-            target="_blank"
-            rel="noreferrer noopener"
-            onClick={() => setOpen(false)}
-            className="flex items-center gap-2 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800"
-          >
-            <ExternalLinkIcon size={13} />
-            Open Profile on GitHub
-          </a>
-        </div>
+        >
+          {avatar}
+          <span className="min-w-0 flex-1 truncate">{label}</span>
+        </button>
       )}
-    </div>
+    />
   );
 }

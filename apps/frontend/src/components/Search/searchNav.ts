@@ -63,7 +63,7 @@ export const KIND_LABEL: Record<SearchHitKind, string> = {
 
 // A compact mark per hit kind (matches the drill-down chip style). COMPONENTS, not glyph strings:
 // every consumer renders this straight into JSX, so the mark inherits the row's colour and size
-// instead of painting its own. Both consumers live in this directory (GlobalSearch's dropdown and
+// instead of painting its own. Its consumers: the ⌘K server search (hooks/usePaletteSearch.tsx, which replaced GlobalSearch's dropdown) and
 // SearchResultsTab's HitHeader) — neither concatenates it into a string.
 export const KIND_ICON: Record<
   SearchHitKind,

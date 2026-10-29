@@ -32,21 +32,21 @@ keyboard, URL state). Shots: `/tmp/limn-demo-shots/open-prs.png`, `timeline.png`
 
 Known debts the redesign must clear here:
 
-- [ ] Stacked chrome at 1440px today is ~184px before content (demo bar 28 · header 44 · welcome
+- [x] → one sidebar + a 44px top bar (+24px demo bar). Stacked chrome at 1440px today is ~184px before content (demo bar 28 · header 44 · welcome
   strip 28 · FilterBar ~42 · tab strip 42). Target: one sidebar + one slim page header.
-- [ ] Mobile today: the Activity rail becomes a horizontal chip strip below md (w-56 chips,
+- [x] → drawer below lg, bottom bar below md, no page overflow at 390/768 (checked). Mobile today: the Activity rail becomes a horizontal chip strip below md (w-56 chips,
   overflow-x-auto, legend hidden); the header hides the "Sync" word, the user name and the toast
   words below sm. Nothing else adapts. Target: every screen works at 390px and 768px.
-- [ ] Off-catalogue inline SVGs to move into `Icons.tsx`: the bell (`App.tsx`), `RefreshIcon`
+- [x] → `BellIcon`, `RefreshIcon` (catalogue), `GearIcon`, `BarsIcon`, `InboxIcon`, `TimelineIcon`. Off-catalogue inline SVGs to move into `Icons.tsx`: the bell (`App.tsx`), `RefreshIcon`
   (`SyncStatus.tsx`), the gear in `UserMenu.tsx`, `MetricsIcon` / `ActivityIcon` / `TimelineIcon`
   in `PinnedTabsBar.tsx`.
-- [ ] Two literal characters used as icons: the Help button's "?" and the WelcomeBack "+" sup.
+- [x] → `QuestionIcon`; the "+" sup is gone with the strip. Two literal characters used as icons: the Help button's "?" and the WelcomeBack "+" sup.
 - [x] Under-11px text in the shell (rail legend 10px, rail generatedAt 10px, BranchStatusChip 10px,
   rail attention chip 10px, workspace "Default" badge 9px, PR-chip author line 10px, PR-chip
   initials 8px, WelcomeBack "+" sup 8px, search People header 10px, search hit meta 10px) → raised
   to the 11px floor app-wide in the foundation commit.
 
-### [ ] Demo notice bar (static demo only)
+### [x] Demo notice bar (static demo only) → kept, slimmer (24px, no rule under it: demo/demo.css)
 - Entry: always on top in the demo build only (`vite --mode demo`, base `/demo/`). Mounted by
   `src/demo/entry.ts` before the app loads; plain DOM outside React, so the app cannot unmount it.
 - Files: `demo/banner.ts`, `demo/entry.ts`, `demo/demo.css`
@@ -63,7 +63,7 @@ Known debts the redesign must clear here:
   - [ ] On a narrow screen `demo.css` hides `.limn-demo-install`
 - Tests: `scripts/verify-demo.mjs` (every VIEW runs under it), `docs/DEMO.md`
 
-### [ ] Boot splash
+### [x] Boot splash → kept; its gate is `me.data == null && me.isPending` (an `isLoading` gate remounted the whole app ~1s after every load)
 - Entry: first paint while `/api/me` is loading (`me.isLoading && !me.data`)
 - Files: `App.tsx`, `components/Wordmark.tsx`
 - Essential info:
@@ -72,7 +72,7 @@ Known debts the redesign must clear here:
   - [ ] Shown only until `/api/me` settles. A failed `/api/me` falls through to the app with
     `meUser` null, so UserMenu is hidden
 
-### [ ] AuthNoticeBanner (GitHub SSO not authorized)
+### [ ] AuthNoticeBanner (GitHub SSO not authorized) → kept, unchanged, above the shell
 - Entry: automatic full-width strip above the header when `/api/me` `authNotices` is non-empty
 - Files: `components/AuthNoticeBanner.tsx`, `App.tsx`
 - Essential info:
@@ -86,7 +86,7 @@ Known debts the redesign must clear here:
   - [ ] Amber tone today
 - Tests: `e2e/mock-api.ts` `/api/me` fixture (`authNotices`)
 
-### [ ] Header bar + wordmark
+### [x] Header bar + wordmark → the wordmark (h1, same title) heads the sidebar; the header is the slim `TopBar` (h-11, fixed): menu button · location (below lg) · open tabs (md+) · toast strip
 - Entry: top of every screen, fixed height `h-11` (load-bearing: toast cards must never move the page)
 - Files: `App.tsx`, `components/Wordmark.tsx`
 - Essential info:
@@ -97,7 +97,7 @@ Known debts the redesign must clear here:
   - [ ] The controls cluster gap shrinks below sm
 - Tests: `docs/FRONTEND.md` § There is ONE header toast strip
 
-### [ ] HeaderToastStrip + HeaderToast (the ONE toast strip)
+### [x] HeaderToastStrip + HeaderToast (the ONE toast strip) → unchanged component, now the right of `TopBar`; same order (+ AiBudgetToast, UndoToast)
 - Entry: fills the header between the wordmark and the controls. Every toast in the app is a card
   here; never a fixed element and never a second strip.
 - Files: `components/HeaderToasts.tsx`, `lib/toastAnchor.ts`, `App.tsx`
@@ -259,7 +259,7 @@ Known debts the redesign must clear here:
 - Tests: `test/catchupLine.test.ts`; ETA helpers are exported pure functions
   (`docs/FRONTEND.md` § ETA mechanics); testId `global-loading-bar`
 
-### [ ] SyncStatus (Sync button, sole driver of the sync round)
+### [x] SyncStatus (Sync button, sole driver of the sync round) → sidebar foot: icon + words ("Synced 2m ago", "Syncing 2 repos…", "Sync error" in danger ink + dot), same tooltip and click; still always mounted (the sidebar is never unmounted), its SyncProgressModal portalled to body; ⌘K "Sync all repos now"
 - Entry: header button "Sync" (refresh icon; word hidden below sm). Always mounted, every screen
 - Files: `components/SyncStatus.tsx`, `components/SyncProgressModal.tsx`,
   `components/SyncProgressPanel.tsx`, `lib/syncTooltip.ts`, `hooks/prCacheSync.ts`
@@ -284,7 +284,7 @@ Known debts the redesign must clear here:
 - Tests: `test/syncTooltip.test.ts`, `test/prCacheSync.test.ts`, `test/prWriteCascadeGuard.test.ts`,
   `docs/FRONTEND.md` § The sync round
 
-### [ ] My Turn notifications bell
+### [x] My Turn notifications bell → sidebar foot (`BellIcon`, filled + pressed when on, same titles); ⌘K "Turn on/off My Turn notifications"
 - Entry: header bell button (inline SVG). Shown only where `window.Notification` exists
 - Files: `App.tsx`, `hooks/useNotificationPref.ts`, `hooks/useMyTurnNotifications.ts`
 - Essential info:
@@ -298,7 +298,7 @@ Known debts the redesign must clear here:
   - [ ] Hidden when Notification is unsupported
   - [ ] The pref is shared with ClaudeReviewBanner
 
-### [ ] Help button + HelpModal
+### [x] Help button + HelpModal → sidebar foot (`QuestionIcon`), ⌘K "Help and keyboard shortcuts"; the Keyboard and sidebar sections rewritten for the shell; plus the new `?` key sheet
 - Entry: header "?" button (aria-label Help)
 - Files: `components/HelpModal.tsx`, `App.tsx`
 - Essential info:
@@ -312,7 +312,7 @@ Known debts the redesign must clear here:
   - [ ] No URL. Local state in App
   - [ ] Keyboard section must be updated to the new key map
 
-### [ ] Theme toggle
+### [x] Theme toggle → sidebar foot; ⌘K "Switch light / dark theme"
 - Entry: header sun/moon button
 - Files: `App.tsx` (`useDarkMode`), `components/Icons.tsx` (`SunIcon`, `MoonIcon`)
 - Essential info:
@@ -321,7 +321,7 @@ Known debts the redesign must clear here:
   - [ ] Toggle dark/light (`html.dark` class)
 - Tests: textContrast / vendorInk tests cover both themes
 
-### [ ] AI usage menu (AiUsageMenu, the header %)
+### [x] AI usage menu (AiUsageMenu, the header %) → sidebar foot, "AI usage 40%" (tone: warn / danger ink), popover opens upward; same testIds
 - Entry: header button with sparkle + figure (e.g. "40%")
 - Files: `components/AiUsageMenu.tsx`, `lib/aiBudget.ts`, `hooks/useAiBudget.ts`
 - Essential info:
@@ -339,7 +339,7 @@ Known debts the redesign must clear here:
   - [ ] Below sm the popover is fixed full-width at the bottom
 - Tests: `test/aiBudget.test.ts`, testIds `ai-usage-button`, `ai-usage-provider-{provider}`
 
-### [ ] User menu (account) + the Settings entry
+### [x] User menu (account) + the Settings entry → sidebar foot (shared `Menu`, opens upward; "@login" heading; title still "Signed in as …", item still "Settings")
 - Entry: header far right: avatar (or initials) + name (sr-only below sm) + caret. Title "Signed in as …"
 - Files: `components/UserMenu.tsx`, `App.tsx`, `store/settingsModal.ts`
 - Essential info:
@@ -353,7 +353,7 @@ Known debts the redesign must clear here:
   menuitem "Settings" — keep a reachable path or update the script;
   `e2e/pending-keyboard.spec.ts` (Settings open/close, focus return)
 
-### [ ] Settings modal (shell part: openers and tabs)
+### [x] Settings modal (shell part: openers and tabs) → unchanged; every tab is also a ⌘K command
 - Entry: no URL. Opened by User menu → Settings; Pending's "Customise" (focus `my-turn` → Pending
   tab); AiUsageMenu "AI spend settings", AiBudgetToast "Settings" and AiBudgetMeter (focus
   `claude-spend` → AI tab); This Sprint tracker setup (focus `issue-tracker` → Integrations tab)
@@ -373,7 +373,7 @@ Known debts the redesign must clear here:
 - Tests: `test/settingsTabs.test.ts`, `e2e/pending-keyboard.spec.ts`, `scripts/verify-demo.mjs`
   settings views (`openSettingsTab('AI')`, "AI review", …)
 
-### [ ] Welcome back strip (WelcomeBackBanner)
+### [x] Welcome back strip (WelcomeBackBanner) → sidebar "Needs you · N" group (rows per workspace, filled dot = active, +N more popover with "Not counted here", × for the session) shown when another workspace has work or is uncounted; the active workspace's count is the Pending item's badge; ⌘K "Show what needs you in <workspace>"
 - Entry: automatic h-7 amber strip under the header when any workspace has My Turn items
 - Files: `components/WelcomeBackBanner.tsx`, `hooks/useMyTurnByWorkspace.ts`
 - Essential info:
@@ -391,7 +391,7 @@ Known debts the redesign must clear here:
   - [ ] Hidden when dismissed, when `me.user` is null, or when no lines
 - Tests: `test/myTurnCapDisclosure.test.ts`, `docs/FRONTEND.md` § Per-workspace "My Turn"
 
-### [ ] Workspace selector (FilterBar scope row)
+### [x] Workspace selector (FilterBar scope row) → top of the sidebar (full-width trigger; a dot + title say work waits elsewhere; menu rows unchanged with counts and "N repos"; Escape now closes it); the trigger's own My Turn badge → the Pending item; manager open state → store `managerOpen` (⌘K "Manage repos & workspaces"); `useWorkspaceSync` + first-run open → `useWorkspaceShell` in App
 - Entry: FilterBar left, on EVERY view: pill with the workspace icon, the active name, the My Turn badge and a caret
 - Files: `components/WorkspaceSelector.tsx`, `hooks/useMyTurnByWorkspace.ts`, `hooks/useWorkspaces.ts`,
   `store/filters.ts` (`switchWorkspaceToOpenPrs`, `setWorkspace`)
@@ -420,7 +420,7 @@ Known debts the redesign must clear here:
   `test/myTurnCapDisclosure.test.ts`, `e2e/activity-feed.spec.ts` ("claims no counts before the
   workspace resolves", "empty workspace" guidance), verify-demo `ws2:*` views (`?workspace=2`)
 
-### [ ] Global search (GlobalSearch + SearchResultsTab)
+### [x] Global search (GlobalSearch + SearchResultsTab) → ⌘K / `/`: the same dropdown request (stories → Tickets, people, hits → Search rows with kind + repo#N) via `usePaletteSearch`; "Search everything" opens the unchanged results tab (snippets, highlights, kind filters, paging); the FilterBar input is gone
 - Entry: FilterBar, every view: input `#global-search-input` "Search PRs, threads, people…". "/" focuses it
 - Files: `components/Search/GlobalSearch.tsx`, `components/Search/SearchResultsTab.tsx`,
   `components/Search/searchNav.ts`, `components/Search/highlight.tsx`, `hooks/useSearch.ts`
@@ -442,7 +442,7 @@ Known debts the redesign must clear here:
   - [ ] The search tab is ephemeral: no `view=` and dropped on reload
 - Tests: testIds `search-story`, `search-overlay`
 
-### [ ] FilterBar: Timeline-only board filters
+### [x] FilterBar: Timeline-only board filters → unchanged, Timeline only (the bar renders nothing elsewhere); on a phone folded behind "Filters" with Now kept on the line
 - Entry: FilterBar row, only when `activeTab === 'timeline'`
 - Files: `components/FilterBar.tsx`, `components/RepoSelectPanel.tsx`, `components/UserSelectPanel.tsx`,
   `components/StatusSelectPanel.tsx`, `components/EventSelectPanel.tsx`,
@@ -466,7 +466,7 @@ Known debts the redesign must clear here:
 - Tests: `test/memberSections.test.ts`, `test/filterStorageMigration.test.ts`,
   `test/isolateFilter.test.ts`, `scripts/ui-smoke.mjs` (`pnpm verify:ui`, `.tl-repo-header`)
 
-### [ ] FilterBar: PR Focus-only controls
+### [ ] FilterBar: PR Focus-only controls → unchanged
 - Entry: FilterBar when a pr-focus tab is active (`boardSlotMode != null`)
 - Files: `components/FilterBar.tsx`, `components/Timeline/isolateFilter.ts`, `store/pinnedTabs.ts` (`boardSlotMode`)
 - Essential info:
@@ -479,7 +479,7 @@ Known debts the redesign must clear here:
   - [ ] Decided by the same `boardSlotMode` resolver as App, so a stale focus key shows no Focus controls
 - Tests: `test/isolateFilter.test.ts`
 
-### [ ] Tab strip: fixed views (PinnedTabsBar)
+### [x] Tab strip: fixed views (PinnedTabsBar) → sidebar primaries (Pending · Open pull requests · This Sprint · Timeline) + the phone's bottom bar; "Activity" itself is `i` / the Activity destinations; "Close all tabs" → any chip's right-click, ⌘K, the phone drawer
 - Entry: always-shown strip under the FilterBar (`data-testid pinned-tabs`, role tablist "Views").
   Three permanent chips: Activity, This Sprint, Timeline
 - Files: `components/PinnedTabsBar.tsx`, `store/pinnedTabs.ts`
@@ -496,7 +496,7 @@ Known debts the redesign must clear here:
   Sprint is a fixed tab…", "the Activity | Timeline tabs toggle the board"); selectors
   `getByTestId('pinned-tabs').getByRole('tab', {name})` are load-bearing; `test/landingTab.test.ts`
 
-### [ ] Tab strip: dynamic tabs (PR and drill-down chips)
+### [x] Tab strip: dynamic tabs (PR and drill-down chips) → `TopBar` strip at md+ (one-line chips: avatar · #N title; author/"PR focus" in the tooltip + accessible name; drag, ×, right-click menu kept); phone: the drawer's "Open tabs" list (activate, ×, Close all); ⌘K "Tab: …"
 - Entry: opened from across the app (rows, search, toasts, links). Chips follow the fixed views
 - Files: `components/PinnedTabsBar.tsx`, `store/pinnedTabs.ts`, `App.tsx` (one overlay per kind)
 - Essential info:
@@ -527,7 +527,7 @@ Known debts the redesign must clear here:
 - Tests: `test/closeTabs.test.ts`, `test/ticketTab.test.ts`, `test/urlHistory.test.ts`; e2e
   role=tab names and × aria-labels are load-bearing
 
-### [ ] Activity rail: destination rows
+### [x] Activity rail: destination rows → the sidebar (Library: Docs AI-only, Feed; Insights: Reports, Bots Monitoring); tooltips kept + the g-key; Open PRs count kept (unknown is blank); Pending now carries this workspace's personal My Turn count; "generated N ago" + refetch hairline → the Repositories group header
 - Entry: Activity view left rail (`md:w-72`; a horizontal chip strip below md)
 - Files: `components/Activity/index.tsx`, `lib/openPrsTab.ts`, `hooks/useTriage.ts` (`useWorkspaceOpenPrs`)
 - Essential info:
@@ -551,7 +551,7 @@ Known debts the redesign must clear here:
   `test/openPrsTab.test.ts`, `test/docsRailUrl.test.ts`, verify-demo views open-prs, pending:*,
   feed, bots:*, reports:*, docs
 
-### [ ] Activity rail: per-repo rows + thread-state legend
+### [x] Activity rail: per-repo rows + thread-state legend → sidebar "Repositories" (collapsible, remembered): name · shield · unread dot · attention count · open PRs on line 1; thread bar · default-branch line on line 2; same sort; legend behind the ⓘ beside the heading; ⌘K lists every repo
 - Entry: below the destination rows, one per repo in the workspace
 - Files: `components/Activity/index.tsx` (`RailRow`), `components/Activity/ThreadStateBar.tsx`,
   `components/Activity/BranchStatusChip.tsx`, `components/MaintainerShield.tsx`, `lib/ui.ts` (`DERIVED_STATE_META`)
@@ -572,7 +572,7 @@ Known debts the redesign must clear here:
   - [ ] Metrics lines appear only once loaded; the branch line hides until the branch is synced
 - Tests: `scripts/record-demo-steps.mjs` "repo-console" (`?view=activity&activityRepo=2`)
 
-### [ ] Activity right pane: routing and empty states
+### [x] Activity right pane: routing and empty states → `ActivityView` is the pane alone; empty-workspace copy names the workspace menu in the sidebar and carries a "Manage repos & workspaces" button
 - Entry: right of the rail; content follows `activityRepoId`
 - Files: `components/Activity/index.tsx`, `FirstRunOnboarding.tsx`, `OpenPrsDetail.tsx`,
   `AttentionView.tsx`, `InsightsView.tsx`, `DocsView.tsx`, `BotsView.tsx`, `FeedView.tsx` (all under `components/Activity/`)
@@ -590,7 +590,7 @@ Known debts the redesign must clear here:
   default", "an empty workspace opens on the guidance…", "a bare URL lands on Activity → Open
   PRs"); testIds `activity-overlay`, `open-prs-view`
 
-### [ ] Per-repo console
+### [x] Per-repo console → unchanged; its Activity | Bots sub-tabs are the `Tabs` primitive
 - Entry: a per-repo rail row (`?activityRepo=<id>`)
 - Files: `components/Activity/index.tsx` (`RepoConsole`), `RepoFeedHeader.tsx`, `RepoStats.tsx`,
   `BranchStatusPanel.tsx`, `RepoInsightsPanel.tsx`, `RepoOpenPrList.tsx`, `FeedIsolationBanner.tsx`
@@ -627,7 +627,7 @@ Known debts the redesign must clear here:
 - Tests: testIds `detail-pane`, `detail-clear`; `e2e/cluster-back-nav.mjs`,
   `e2e/selection-glow.mjs`, `e2e/focus-retained-on-reopen.mjs`; verify-demo "timeline" (`?view=timeline&preset=30d`)
 
-### [ ] Full-main overlays (one per tab kind)
+### [x] Full-main overlays (one per tab kind) → unchanged testIds, `bg-ui-bg`; `<main>` is `overflow-clip` so a too-wide page never widens the phone's layout viewport
 - Entry: an absolute inset-0 z-20 layer over the warm board, one per active tab kind
 - Files: `App.tsx`, `PrDetail.tsx`, `Sprint/SprintTabView.tsx`, `Activity/MetricsDetail.tsx`,
   `Activity/BotPrsDetail.tsx`, `Activity/BotOnlyPrsDetail.tsx`, `Activity/BotThreadsDetail.tsx`,
@@ -666,7 +666,7 @@ Known debts the redesign must clear here:
   - [ ] Gated to `writableRepoIds` at its openers
 - Tests: `docs/FRONTEND.md` § The merge-conflict resolver
 
-### [ ] Global keyboard (useKeyboard)
+### [x] Global keyboard (useKeyboard) → kept `/` (now the palette, add-repo field first) · `i` · j/k (board) · Esc; added `g`+letter (capture phase) and `?`
 - Entry: window keydown, everywhere
 - Files: `hooks/useKeyboard.ts`, `components/HelpModal.tsx` (documents it)
 - Essential info:
@@ -681,7 +681,7 @@ Known debts the redesign must clear here:
     or Esc yanks the reader to the Timeline
 - Tests: `test/activePopover.test.ts`, `e2e/pending-keyboard.spec.ts`
 
-### [ ] URL state map (useUrlState: read, write, popstate)
+### [x] URL state map (useUrlState: read, write, popstate) → unchanged; the shell writes only through the same store actions (`components/shell/nav.ts` `goTo`)
 - Entry: address bar, Back/Forward, bookmarks. `/app/` (`/` → 302 `/app`)
 - Files: `hooks/useUrlState.ts`, `store/pinnedTabs.ts`, `store/filters.ts`,
   `lib/docReferences.ts` (`parseDocsDeepLink`), `store/docsView.ts`
@@ -741,7 +741,7 @@ Enter/Space (PrCardFrame). Back from a PR scrolls to and flashes the card or row
 (`activityFlashItemId`, `returnItemId`) on Pending and the Feed — **must survive**. Toasts go through
 the ONE HeaderToastStrip (MyTurnDismissToast, DependencyMergeToast).
 
-### [ ] Activity rail entries for these three areas (shell entry points)
+### [x] Activity rail entries for these three areas (shell entry points) → the sidebar (Pending, Open pull requests, Feed; repo rows under Repositories); see § 1
 - Entry: Activity → rail: "Open PRs" (default landing; `?view=activity` with no activityRepo;
   legacy `?view=open-prs`), "Pending" (`?activityRepo=attention`), "Feed" (`?activityRepo=feed`).
   Per-repo rows (`?activityRepo=<repoId>`) open a repo console that also mounts the Feed.

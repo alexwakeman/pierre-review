@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { closeActivePopover } from '../../lib/activePopover.js';
 import { MagnifierIcon } from '../Icons.js';
 import { collectCommands, rankCommands, useCommandRegistry, type Command } from './commands.js';
@@ -35,10 +35,14 @@ function PaletteDialog(): JSX.Element {
   const sources = useCommandRegistry((s) => s.sources);
   const providers = useCommandRegistry((s) => s.providers);
   const close = useCommandRegistry((s) => s.closePalette);
+  const publishQuery = useCommandRegistry((s) => s.setQuery);
   const [query, setQuery] = useState(initialQuery);
+  // Publish what is typed, for async sources (the server search); see commands.ts `query`.
+  useEffect(() => publishQuery(query), [query, publishQuery]);
   const [active, setActive] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
   const opener = useRef<HTMLElement | null>(null);
   const listId = useId();
 
@@ -47,7 +51,9 @@ function PaletteDialog(): JSX.Element {
     [sources, providers, query],
   );
 
-  useEffect(() => {
+  // LAYOUT effect, not a passive one: a passive effect can run a frame after the dialog paints, and
+  // the keys of a fast "/feed↵" typed in that frame went to the page instead of the input.
+  useLayoutEffect(() => {
     opener.current = document.activeElement as HTMLElement | null;
     closeActivePopover();
     inputRef.current?.focus();
@@ -55,6 +61,19 @@ function PaletteDialog(): JSX.Element {
   }, []);
 
   useEffect(() => setActive(0), [query]);
+
+  // A modal keeps focus: anything that focuses itself behind the dialog while it is open (a list
+  // that lands its data, a field the page autofocuses) hands it straight back to the input, so no
+  // keystroke typed into the palette goes to the page instead.
+  useEffect(() => {
+    const onFocusIn = (e: FocusEvent): void => {
+      const t = e.target as Node | null;
+      if (t != null && dialogRef.current?.contains(t)) return;
+      inputRef.current?.focus();
+    };
+    document.addEventListener('focusin', onFocusIn);
+    return () => document.removeEventListener('focusin', onFocusIn);
+  }, []);
 
   useEffect(() => {
     listRef.current?.querySelector(`[data-cmd-index="${active}"]`)?.scrollIntoView?.({ block: 'nearest' });
@@ -96,6 +115,7 @@ function PaletteDialog(): JSX.Element {
     <div className="fixed inset-0 z-[70] flex justify-center md:items-start md:pt-[14vh]">
       <div className="absolute inset-0 bg-ui-scrim/50 motion-safe:animate-ui-fade" onClick={close} aria-hidden />
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label="Command menu"
@@ -116,7 +136,7 @@ function PaletteDialog(): JSX.Element {
             aria-activedescendant={results[active] ? `${listId}-${active}` : undefined}
             aria-autocomplete="list"
             aria-label="Type a command or search"
-            placeholder="Type a command, a page or a pull request"
+            placeholder="Search pull requests, threads, people, tickets, or jump to a page"
             autoComplete="off"
             spellCheck={false}
             value={query}

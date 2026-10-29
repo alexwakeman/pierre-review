@@ -13,6 +13,7 @@ import { useFilters } from '../store/filters.js';
 import { useRepos } from '../hooks/useTimeline.js';
 import { botNarrowLabel, selectorLabel } from '../lib/severityAgreement.js';
 import {
+  BarsIcon,
   BotIcon,
   CloseIcon,
   CommentIcon,
@@ -24,21 +25,15 @@ import {
 } from './Icons.js';
 import { storyTabLabels } from '../lib/ticketTab.js';
 
-const MetricsIcon = (
-  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <line x1="4" y1="20" x2="4" y2="12" />
-    <line x1="10" y1="20" x2="10" y2="6" />
-    <line x1="16" y1="20" x2="16" y2="14" />
-    <line x1="20" y1="20" x2="20" y2="9" />
-  </svg>
-);
-
 // Active-label tone per chip flavour (inactive is the shared gray).
+// The redesign drops the per-kind colours (docs/redesign/DESIGN.md § 3: colour means blocks /
+// ready / the accent only): every active label is plain ink. The keys stay so each kind still
+// names its family in one place.
 const TONES = {
-  violet: 'text-violet-600 dark:text-violet-400',
-  sky: 'text-sky-600 dark:text-sky-400',
-  amber: 'text-amber-600 dark:text-amber-400',
-  ai: 'text-ai-signal',
+  violet: 'text-ui-ink',
+  sky: 'text-ui-ink',
+  amber: 'text-ui-ink',
+  ai: 'text-ui-ink',
 } as const;
 
 function chipLabelClass(active: boolean, tone: keyof typeof TONES): string {
@@ -46,9 +41,7 @@ function chipLabelClass(active: boolean, tone: keyof typeof TONES): string {
   // to absorb whatever space the icon and the ✕ leave. A max-width instead lets a long label push
   // the ✕ out of its column on some tabs and not others — the exact misalignment the fixed width
   // exists to remove. `min-w-0` is what actually lets `truncate` engage inside a flex row.
-  return `min-w-0 flex-1 truncate text-xs font-medium ${
-    active ? TONES[tone] : 'text-gray-600 dark:text-gray-300'
-  }`;
+  return `min-w-0 flex-1 truncate text-body ${active ? `${TONES[tone]} font-medium` : 'text-ui-mute'}`;
 }
 
 // Pointer handlers the strip installs on every DYNAMIC chip wrapper (the fixed
@@ -105,13 +98,9 @@ function ChipShell({
       //
       // touch-none + select-none: without them the strip's overflow-x scroll (and text
       // selection) swallow the pointer drag before it can reorder anything.
-      className={`group flex ${width ?? 'w-52'} shrink-0 touch-none select-none items-center gap-1 rounded-t-md border border-b-0 pl-2 pr-1 ${
+      className={`group flex ${width ?? 'w-52'} h-7 shrink-0 touch-none select-none items-center gap-1 rounded-ui pl-2 pr-0.5 touch:h-10 ${
         isDragged ? 'cursor-grabbing opacity-50 ' : ''
-      }${
-        active
-          ? 'border-gray-300 bg-white dark:border-gray-700 dark:bg-gray-950'
-          : 'border-transparent bg-transparent hover:bg-gray-200/60 dark:hover:bg-gray-800/60'
-      }`}
+      }${active ? 'bg-ui-sel' : 'bg-transparent hover:bg-ui-hover'}`}
     >
       <button
         type="button"
@@ -121,7 +110,7 @@ function ChipShell({
         // `min-w-0 flex-1` by default too: the activating button must OWN the space left over
         // after the ✕, or a single-line chip sizes to its content and leaves the ✕ floating in the
         // middle of a fixed-width tab.
-        className={buttonClass ?? 'flex min-w-0 flex-1 items-center gap-1.5 py-1.5 text-left'}
+        className={buttonClass ?? 'flex h-full min-w-0 flex-1 items-center gap-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ui-accent'}
         title={title}
       >
         {body}
@@ -130,7 +119,7 @@ function ChipShell({
         type="button"
         data-tab-close
         onClick={() => closeTab(tabKey)}
-        className="flex shrink-0 items-center self-center rounded px-1 py-0.5 text-xs leading-none text-gray-400 hover:bg-gray-200 hover:text-gray-700 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-ui text-ui-faint opacity-70 hover:bg-ui-hover hover:text-ui-ink hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent group-hover:opacity-100 touch:h-9 touch:w-9 touch:opacity-100"
         title="Close this tab"
         aria-label={closeAria}
       >
@@ -186,8 +175,8 @@ function TabChip({
       closeAria: 'Close flow-metrics tab',
       body: (
         <>
-          <span aria-hidden="true" className="shrink-0 text-violet-500">
-            {MetricsIcon}
+          <span aria-hidden="true" className="shrink-0 text-ui-mute">
+            <BarsIcon />
           </span>
           <span className={chipLabelClass(active, 'violet')}>Flow metrics</span>
         </>
@@ -242,7 +231,7 @@ function TabChip({
               loading="lazy"
               referrerPolicy="no-referrer"
               draggable={false}
-              className="h-3.5 w-3.5 shrink-0 rounded-full bg-gray-200 dark:bg-gray-800"
+              className="h-3.5 w-3.5 shrink-0 rounded-full bg-ui-hover"
             />
           ) : (
             <span aria-hidden="true" className="shrink-0">
@@ -385,7 +374,7 @@ function TabChip({
       closeAria: 'Close search tab',
       body: (
         <>
-          <span aria-hidden="true" className="shrink-0 text-gray-500 dark:text-gray-400">
+          <span aria-hidden="true" className="shrink-0 text-ui-mute">
             <MagnifierIcon size={13} />
           </span>
           <span className={chipLabelClass(active, 'sky')}>{q ? `“${q}”` : 'Search'}</span>
@@ -399,22 +388,23 @@ function TabChip({
     const isFocus = tab.kind === 'pr-focus';
     const meta = tab.meta;
     const author = meta?.authorDisplayName ?? meta?.authorLogin ?? 'unknown';
+    // ONE LINE in the redesign's slim bar: "#N title". The author (the old second line) and "PR
+    // focus" ride the tooltip and the accessible name; the magnifier still marks a focus tab.
     cfg = {
-      buttonClass: 'flex min-w-0 flex-1 items-center gap-1.5 py-1 text-left',
       title: `${meta?.repoFullName ?? ''} #${meta?.number ?? ''} · ${meta?.title ?? ''}${
-        isFocus ? ' (focus)' : ''
+        isFocus ? ' (PR focus)' : ` · by ${author}`
       }`,
       closeAria: `Close ${isFocus ? 'focus' : 'detail'} tab for PR #${meta?.number ?? ''}`,
       body: (
         <>
           {isFocus ? (
-            <span aria-hidden="true" className="shrink-0 text-sky-500">
-              <MagnifierIcon size={14} />
+            <span aria-hidden="true" className="shrink-0 text-ui-mute">
+              <MagnifierIcon size={13} />
             </span>
           ) : meta?.authorAvatarUrl != null ? (
             <img
               src={meta.authorAvatarUrl}
-              alt={author}
+              alt=""
               width={16}
               height={16}
               draggable={false}
@@ -423,23 +413,16 @@ function TabChip({
             />
           ) : (
             <span
-              className="flex shrink-0 items-center justify-center rounded-full bg-gray-300 text-[11px] font-semibold text-gray-700 dark:bg-gray-700 dark:text-gray-200"
+              aria-hidden
+              className="flex shrink-0 items-center justify-center rounded-full bg-ui-hover text-[11px] font-semibold text-ui-ink"
               style={{ width: 16, height: 16 }}
             >
               {author.slice(0, 2).toUpperCase()}
             </span>
           )}
-          <span className="flex min-w-0 flex-col leading-tight">
-            <span
-              className={`truncate text-xs font-medium ${
-                active ? 'text-blue-600 dark:text-blue-400' : 'text-gray-600 dark:text-gray-300'
-              }`}
-            >
-              <span className="text-gray-400">#{meta?.number}</span> {meta?.title}
-            </span>
-            <span className="truncate text-[11px] text-gray-500 dark:text-gray-400">
-              {isFocus ? 'PR focus' : author}
-            </span>
+          <span className={chipLabelClass(active, 'sky')}>
+            <span className="tabular-nums text-ui-faint">#{meta?.number}</span> {meta?.title}
+            <span className="sr-only">{isFocus ? ' · PR focus' : ` · ${author}`}</span>
           </span>
         </>
       ),
@@ -462,63 +445,6 @@ function TabChip({
     />
   );
 }
-
-// A permanent, NON-closable tab (Activity / Timeline). These live at the head of the strip
-// as first-class tabs so the two core views read the same as the dynamic PR tabs — one
-// clear place to switch, no separate header toggle (reduces confusion). Not draggable and
-// not a drop target; right-click still offers "Close all tabs" (a dead right-click reads
-// as a bug, and "close others"/"close all" mean the same thing here).
-function FixedChip({
-  active,
-  onClick,
-  onContextMenu,
-  icon,
-  label,
-  title,
-}: {
-  active: boolean;
-  onClick: () => void;
-  onContextMenu: (e: React.MouseEvent) => void;
-  icon: JSX.Element;
-  label: string;
-  title: string;
-}): JSX.Element {
-  return (
-    <button
-      type="button"
-      role="tab"
-      aria-selected={active}
-      onClick={onClick}
-      onContextMenu={onContextMenu}
-      title={title}
-      className={`flex shrink-0 items-center gap-1.5 rounded-t-md border border-b-0 px-3 py-1.5 text-xs font-semibold ${
-        active
-          ? 'border-gray-300 bg-white text-blue-600 dark:border-gray-700 dark:bg-gray-950 dark:text-blue-400'
-          : 'border-transparent bg-transparent text-gray-600 hover:bg-gray-200/60 dark:text-gray-300 dark:hover:bg-gray-800/60'
-      }`}
-    >
-      <span aria-hidden="true" className="shrink-0">
-        {icon}
-      </span>
-      {label}
-    </button>
-  );
-}
-
-const ActivityIcon = (
-  <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <polyline points="22 12 16 12 14 15 10 15 8 12 2 12" />
-    <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
-  </svg>
-);
-const SprintTabIcon = <TicketIcon size={13} />;
-const TimelineIcon = (
-  <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <line x1="4" y1="7" x2="20" y2="7" />
-    <line x1="4" y1="12" x2="14" y2="12" />
-    <line x1="4" y1="17" x2="18" y2="17" />
-  </svg>
-);
 
 // The right-click menu for a chip. ONE instance rendered from the strip (not per chip), in
 // a FloatingPortal — the strip is overflow-x-auto, so a non-portaled absolute menu would
@@ -574,7 +500,7 @@ function TabContextMenu({
   }, [onClose]);
 
   const item =
-    'flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-gray-700 enabled:hover:bg-gray-100 disabled:opacity-40 dark:text-gray-200 dark:enabled:hover:bg-gray-800';
+    'flex h-8 w-full items-center gap-2 rounded-ui px-2 text-left text-body text-ui-ink enabled:hover:bg-ui-hover disabled:text-ui-faint touch:h-11';
   return (
     <FloatingPortal>
       <div
@@ -583,7 +509,7 @@ function TabContextMenu({
         {...getFloatingProps()}
         role="menu"
         aria-label="Tab actions"
-        className="z-[60] w-44 rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-900"
+        className="z-[60] w-48 rounded-ui bg-ui-raise p-1 shadow-xl shadow-black/30 motion-safe:animate-ui-pop"
       >
         {tabKey != null && (
           <button
@@ -629,15 +555,15 @@ function TabContextMenu({
   );
 }
 
-// The tab strip: Activity + Timeline are permanent, non-closable tabs at the head (the two
-// core views — no separate header toggle); the dynamic pinned tabs follow and are closable,
-// drag-to-reorderable (pointer events, not HTML5 drag) and right-clickable for close actions.
-export function PinnedTabsBar(): JSX.Element {
+// The OPEN TABS strip, in the redesign's slim top bar (md and wider; the phone drawer lists the
+// same tabs: components/shell/Sidebar.tsx). The fixed views — Activity, This Sprint, Timeline —
+// left it for the sidebar; what remains are the dynamic tabs (a PR, a focus board, a drill-down),
+// closable, drag-to-reorder (pointer events, not HTML5 drag) and right-clickable for close actions.
+// Renders NOTHING when no tab is open.
+export function PinnedTabsBar(): JSX.Element | null {
   const tabs = usePinnedTabs((s) => s.tabs);
   const activeTab = usePinnedTabs((s) => s.activeTab);
   const setActiveTab = usePinnedTabs((s) => s.setActiveTab);
-  const showTimeline = usePinnedTabs((s) => s.showTimeline);
-  const showSprint = usePinnedTabs((s) => s.showSprint);
   const moveTab = usePinnedTabs((s) => s.moveTab);
 
   const stripRef = useRef<HTMLDivElement>(null);
@@ -932,67 +858,19 @@ export function PinnedTabsBar(): JSX.Element {
     return ordered;
   }, [tabs, previewKeys]);
 
+  if (tabs.length === 0) return null;
+
   return (
     <>
     <div
       ref={stripRef}
       data-testid="pinned-tabs"
       role="tablist"
-      aria-label="Views"
-      // Fixed min-height so the strip never shrinks when the (taller, two-line) PR tabs are all
-      // closed. `items-stretch` makes EVERY tab fill the strip's full height, so the single-line
-      // chips (Activity / Timeline / drill-downs) and the two-line PR tabs come out the SAME
-      // height with vertically-centred content — no ragged tops or misaligned text.
-      className="tab-scrollbar flex min-h-[42px] shrink-0 items-stretch gap-1 overflow-x-auto bg-gray-100 px-2 pt-1 dark:bg-gray-900"
+      aria-label="Open tabs"
+      className="tab-scrollbar flex min-w-0 flex-1 items-center gap-1 overflow-x-auto overscroll-contain"
     >
-      {/* Activity FIRST: it is the app's default view (a URL with no `view=`), opening on its
-          Open PRs rail line. */}
-      <FixedChip
-        active={activeTab === 'activity'}
-        onClick={() => setActiveTab('activity')}
-        onContextMenu={(e) => openMenu(e, null)}
-        icon={ActivityIcon}
-        label="Activity"
-        title="Activity — per-repo triage console"
-      />
-      {/* This Sprint — the tracker's current sprint (Theme · Critical path · People · Merged so far).
-          A fixed tab since it left the Activity rail. */}
-      <FixedChip
-        active={activeTab === 'sprint'}
-        onClick={showSprint}
-        onContextMenu={(e) => openMenu(e, null)}
-        icon={SprintTabIcon}
-        label="This Sprint"
-        title="This Sprint — the tracker's current sprint"
-      />
-      <FixedChip
-        active={activeTab === 'timeline'}
-        onClick={showTimeline}
-        onContextMenu={(e) => openMenu(e, null)}
-        icon={TimelineIcon}
-        label="Timeline"
-        title="Timeline — the activity board"
-      />
       {displayTabs.map((t, i) => (
         <Fragment key={t.key}>
-          {/* A Chrome-style pipe between adjacent DYNAMIC tabs only — `i > 0`, since index 0 abuts
-              the fixed Timeline chip and the fixed chips (Activity · This Sprint · Timeline) are never
-              separated.
-              ⚠ It must carry NO `data-tabkey`: `updatePreview` derives the drag drop-slot from
-              `strip.querySelectorAll('[data-tabkey]')` midpoints and then maps those elements'
-              `dataset.tabkey` into the order committed by `moveTab` — a tagged separator would
-              splice `undefined` into the tab order. A bare `aria-hidden` span with no role also
-              keeps it out of the `role="tablist"` accessibility tree.
-              It HIDES next to the active tab (Chrome does the same): the active chip paints a
-              `border-gray-300 dark:border-gray-700` outline, which an abutting pipe double-strikes.
-              `w-px -mx-px` puts the pipe INSIDE the strip's existing 4px gap so net spacing is
-              unchanged; `self-center h-4` stops `items-stretch` growing it into a full-height rule. */}
-          {i > 0 && displayTabs[i - 1]?.key !== activeTab && t.key !== activeTab && (
-            <span
-              aria-hidden="true"
-              className="pointer-events-none -mx-px h-4 w-px shrink-0 self-center bg-gray-300 dark:bg-gray-700"
-            />
-          )}
           <TabChip
             tab={t}
             isDragged={draggedKey === t.key}
@@ -1021,7 +899,7 @@ export function PinnedTabsBar(): JSX.Element {
     <div
       ref={ghostRef}
       aria-hidden="true"
-      className={`pointer-events-none fixed left-0 top-0 z-[70] flex items-stretch rounded-t-md shadow-lg ring-1 ring-black/10 dark:ring-white/10 ${
+      className={`pointer-events-none fixed left-0 top-0 z-[70] flex items-stretch rounded-ui bg-ui-raise shadow-lg shadow-black/30 ${
         draggedKey == null ? 'hidden' : ''
       }`}
       style={{ transform: 'translate3d(-9999px, -9999px, 0)' }}
