@@ -1,8 +1,16 @@
-import type { ReactNode } from 'react';
+import { forwardRef, type InputHTMLAttributes, type ReactNode } from 'react';
+import { Button, cx, FOCUS_RING } from '../ui/index.js';
+import { CheckIcon } from '../Icons.js';
 
 // Shared, READ-ONLY presentational helpers for the config-modal sections. Kept in one small
 // file so each section component stays self-contained (sections never edit this file → the
 // features touch disjoint files).
+//
+// THE REDESIGN (docs/redesign/DESIGN.md): sections are separated by SPACE, never a rule; a
+// section's heading is the one `text-title`, its consequence line `text-meta`, its controls
+// `text-body`; fields are a raised tone with a hairline ring; the Save is the section's ONE primary
+// button; checkboxes and radios are real <input>s, restyled (`CheckInput` / `RadioInput` below for
+// rows that lay out their own label; the `Checkbox` / `Radio` primitives in ui/ otherwise).
 //
 // ⚠ THERE IS NO `SectionProps` ANY MORE, AND THAT IS A GRAIN FACT, NOT A TIDY-UP. It was
 // `{settings, save, saving}` — the ACCOUNT's `ProSettings` plus the modal's one shared account
@@ -31,21 +39,19 @@ export function SectionShell({
   children: ReactNode;
 }): JSX.Element {
   return (
-    <section className="border-b border-gray-100 pb-4 last:border-b-0 dark:border-gray-800">
+    <section className="pb-6 text-body text-ui-ink last:pb-0">
       <div className="flex items-center gap-1">
         <h3
           id={headingId}
           tabIndex={headingId != null ? -1 : undefined}
-          className="text-sm font-semibold text-gray-800 outline-none dark:text-gray-100"
+          className="scroll-mt-4 text-title text-ui-ink outline-none"
         >
           {title}
         </h3>
         {info}
       </div>
-      {desc != null && (
-        <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{desc}</p>
-      )}
-      <div className="mt-2.5 space-y-2.5">{children}</div>
+      {desc != null && <p className="mt-0.5 text-meta text-ui-mute">{desc}</p>}
+      <div className="mt-3 space-y-3">{children}</div>
     </section>
   );
 }
@@ -54,24 +60,39 @@ export function Field({
   label,
   htmlFor,
   hint,
+  group = false,
   children,
 }: {
   label: string;
   htmlFor?: string;
   hint?: ReactNode;
+  /** A <div>, not a <label>: for a custom `Select` (its button names itself with `label`). A
+   *  <label> around a listbox re-clicks the button on every option click and reopens it. */
+  group?: boolean;
   children: ReactNode;
 }): JSX.Element {
+  if (group) {
+    return (
+      <div className="flex flex-col items-start gap-1 text-body">
+        <span className="text-meta font-medium text-ui-mute">{label}</span>
+        {children}
+        {hint != null && <span className="text-meta text-ui-faint">{hint}</span>}
+      </div>
+    );
+  }
   return (
-    <label htmlFor={htmlFor} className="flex flex-col gap-1 text-xs">
-      <span className="font-medium text-gray-600 dark:text-gray-300">{label}</span>
+    <label htmlFor={htmlFor} className="flex flex-col gap-1 text-body">
+      <span className="text-meta font-medium text-ui-mute">{label}</span>
       {children}
-      {hint != null && <span className="text-[11px] text-gray-400">{hint}</span>}
+      {hint != null && <span className="text-meta text-ui-faint">{hint}</span>}
     </label>
   );
 }
 
+/** A text field (input, textarea, a native time/date/number input): a raised tone with a hairline
+ *  ring, the accent ring on focus, 40px tall on touch. */
 export const inputCls =
-  'w-full rounded border border-gray-300 bg-white px-2 py-1 text-xs text-gray-800 outline-none focus:border-sky-400 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100';
+  'w-full rounded-ui bg-ui-raise px-2.5 py-1.5 text-body text-ui-ink ring-1 ring-inset ring-ui-line placeholder:text-ui-faint outline-none focus:ring-2 focus:ring-ui-accent disabled:opacity-50 touch:py-2.5 [color-scheme:light] dark:[color-scheme:dark]';
 
 export function SaveButton({
   dirty,
@@ -82,14 +103,57 @@ export function SaveButton({
   saving: boolean;
   onClick: () => void;
 }): JSX.Element {
+  // The section's ONE primary action, disabled until something changed — so a glance says which
+  // section holds an unsaved draft.
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={!dirty || saving}
-      className="self-start rounded bg-sky-600 px-3 py-1 text-xs font-medium text-white hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-40"
-    >
+    <Button variant="primary" size="sm" onClick={onClick} disabled={!dirty || saving} className="self-start">
       {saving ? 'Saving…' : 'Save'}
-    </button>
+    </Button>
   );
 }
+
+type BareInputProps = Omit<InputHTMLAttributes<HTMLInputElement>, 'type'>;
+
+/**
+ * A bare checkbox for a row that already has its own <label> (most sections lay out the words, the
+ * hint and an ⓘ themselves). The shared `Checkbox` look — a REAL <input>, restyled, with the
+ * Icons.tsx check laid over it — so forms, `name`/`value` selectors and Playwright clicks still work.
+ */
+export const CheckInput = forwardRef<HTMLInputElement, BareInputProps>(function CheckInput({ className, ...rest }, ref) {
+  return (
+    <span className={cx('relative inline-flex h-4 w-4 shrink-0 align-[-3px]', className)}>
+      <input
+        ref={ref}
+        type="checkbox"
+        className={cx(
+          'peer h-4 w-4 cursor-pointer appearance-none rounded-[4px] bg-ui-raise ring-1 ring-inset ring-ui-line',
+          'checked:bg-ui-accent-fill checked:ring-0 disabled:cursor-not-allowed disabled:opacity-50',
+          'motion-safe:transition-colors motion-safe:duration-ui-fast',
+          FOCUS_RING,
+        )}
+        {...rest}
+      />
+      <span className="pointer-events-none absolute inset-0 hidden items-center justify-center text-ui-on-accent peer-checked:flex">
+        <CheckIcon size={12} />
+      </span>
+    </span>
+  );
+});
+
+/** A bare radio, the shared `Radio` look, for a row that already has its own <label>. */
+export const RadioInput = forwardRef<HTMLInputElement, BareInputProps>(function RadioInput({ className, ...rest }, ref) {
+  return (
+    <input
+      ref={ref}
+      type="radio"
+      className={cx(
+        'relative h-4 w-4 shrink-0 cursor-pointer appearance-none rounded-full bg-ui-raise align-[-3px] ring-1 ring-inset ring-ui-line',
+        'checked:ring-[5px] checked:ring-ui-accent-fill disabled:cursor-not-allowed disabled:opacity-50',
+        'motion-safe:transition-[box-shadow] motion-safe:duration-ui-fast',
+        FOCUS_RING,
+        className,
+      )}
+      {...rest}
+    />
+  );
+});

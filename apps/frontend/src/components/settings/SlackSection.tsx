@@ -8,8 +8,9 @@ import {
 } from '../../hooks/useSlackTarget.js';
 import { InfoButton } from '../InfoModal.js';
 import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
-import { Field, SaveButton, SectionShell, inputCls } from './ui.js';
+import { Field, SaveButton, SectionShell, inputCls, CheckInput } from './ui.js';
 import { ScopePendingSection, useSettingsWorkspace } from './workspaceScope.js';
+import { Select, type SelectOption } from '../ui/index.js';
 
 const HOURS = Array.from({ length: 24 }, (_, h) => h);
 const hourLabel = (h: number): string => {
@@ -17,6 +18,7 @@ const hourLabel = (h: number): string => {
   const h12 = h % 12 === 0 ? 12 : h % 12;
   return `${h12}:00 ${am ? 'AM' : 'PM'}`;
 };
+const HOUR_OPTIONS = HOURS.map((h) => ({ value: String(h), label: hourLabel(h) }));
 
 /**
  * The Slack digest for the CURRENTLY-SELECTED workspace.
@@ -55,6 +57,12 @@ const hourLabel = (h: number): string => {
  * times. The name STAYS in the sentences where it disambiguates one workspace from ANOTHER (the
  * cap disclosure points at a different team's settings), and only there.
  */
+const CADENCE_OPTIONS: readonly SelectOption<SlackDigestCadence>[] = [
+  { value: 'off', label: 'Off (paused, channel kept)' },
+  { value: 'daily', label: 'Daily' },
+  { value: 'twice_daily', label: 'Twice daily' },
+];
+
 export function SlackSection(): JSX.Element {
   const { workspaceId, name } = useSettingsWorkspace();
   const query = useSlackTarget(workspaceId != null, workspaceId);
@@ -214,18 +222,18 @@ export function SlackSection(): JSX.Element {
       }
     >
       {mutation.isError && (
-        <p className="rounded bg-red-50 px-2 py-1 text-xs text-red-600 dark:bg-red-950 dark:text-red-300">
+        <p className="rounded-ui bg-ui-raise px-2 py-1 text-body text-ui-danger">
           {(mutation.error as Error).message}
         </p>
       )}
       {removal.isError && (
-        <p className="rounded bg-red-50 px-2 py-1 text-xs text-red-600 dark:bg-red-950 dark:text-red-300">
+        <p className="rounded-ui bg-ui-raise px-2 py-1 text-body text-ui-danger">
           {(removal.error as Error).message}
         </p>
       )}
 
       {target == null && (
-        <p className="text-xs text-gray-500 dark:text-gray-400">
+        <p className="text-meta text-ui-mute">
           This workspace receives no digest. Add a webhook below to start.
         </p>
       )}
@@ -234,7 +242,7 @@ export function SlackSection(): JSX.Element {
         label="Incoming webhook URL"
         hint={
           target != null ? (
-            <span className="text-emerald-500">
+            <span className="text-ui-mute">
               A webhook is stored. Enter a new URL to replace it.
             </span>
           ) : (
@@ -253,46 +261,33 @@ export function SlackSection(): JSX.Element {
         />
       </Field>
 
-      <div className="flex gap-2">
-        <Field label="Cadence">
-          <select
-            className={inputCls}
+      <div className="flex flex-wrap gap-3">
+        <Field group label="Cadence">
+          <Select
+            label="Cadence"
             value={cadence}
-            onChange={(e) => setCadence(e.target.value as SlackDigestCadence)}
-          >
-            <option value="off">Off (paused, channel kept)</option>
-            <option value="daily">Daily</option>
-            <option value="twice_daily">Twice daily</option>
-          </select>
+            onChange={(v) => setCadence(v)}
+            options={CADENCE_OPTIONS}
+          />
         </Field>
         {cadence !== 'off' && (
-          <Field label="Send at" hint={target?.timezone ?? 'server time'}>
-            <select
-              className={inputCls}
-              value={hour1}
-              onChange={(e) => setHour1(Number(e.target.value))}
-            >
-              {HOURS.map((h) => (
-                <option key={h} value={h}>
-                  {hourLabel(h)}
-                </option>
-              ))}
-            </select>
+          <Field group label="Send at" hint={target?.timezone ?? 'server time'}>
+            <Select
+              label="Send at"
+              value={String(hour1)}
+              onChange={(v) => setHour1(Number(v))}
+              options={HOUR_OPTIONS}
+            />
           </Field>
         )}
         {cadence === 'twice_daily' && (
-          <Field label="And at">
-            <select
-              className={inputCls}
-              value={hour2}
-              onChange={(e) => setHour2(Number(e.target.value))}
-            >
-              {HOURS.map((h) => (
-                <option key={h} value={h}>
-                  {hourLabel(h)}
-                </option>
-              ))}
-            </select>
+          <Field group label="And at">
+            <Select
+              label="And at"
+              value={String(hour2)}
+              onChange={(v) => setHour2(Number(v))}
+              options={HOUR_OPTIONS}
+            />
           </Field>
         )}
       </div>
@@ -302,18 +297,17 @@ export function SlackSection(): JSX.Element {
           decides what goes INTO the message configured directly above it. Its previous home was a
           separate account-wide "Review bots" section in this modal, which is deleted — there is no
           longer a second grain here to fence off. */}
-      <label className="flex items-start gap-2 text-xs">
-        <input
-          type="checkbox"
+      <label className="flex items-start gap-2 text-body">
+        <CheckInput
           className="mt-0.5"
           checked={botDigest}
           onChange={(e) => setBotDigest(e.target.checked)}
         />
         <span>
-          <span className="font-medium text-gray-700 dark:text-gray-200">
+          <span className="font-medium text-ui-ink">
             Include a review-bot summary
           </span>
-          <span className="block text-[11px] text-gray-400">
+          <span className="block text-meta text-ui-faint">
             Adds each review bot’s comment count, the share your team used and the number left
             untouched. This workspace’s digest only.
           </span>
@@ -323,36 +317,34 @@ export function SlackSection(): JSX.Element {
       {/* The two EVENT signals (plugin migration 0040). Same row, same Save; the cadence above
           does not gate them — "Off" pauses the digest, not these. */}
       {reviewsCanRun && (
-        <label className="flex items-start gap-2 text-xs">
-          <input
-            type="checkbox"
+        <label className="flex items-start gap-2 text-body">
+          <CheckInput
             className="mt-0.5"
             checked={notifyReviews}
             onChange={(e) => setNotifyReviews(e.target.checked)}
           />
           <span>
-            <span className="font-medium text-gray-700 dark:text-gray-200">
+            <span className="font-medium text-ui-ink">
               Post when an auto review finishes
             </span>
-            <span className="block text-[12px] text-gray-400">
+            <span className="block text-meta text-ui-faint">
               Reviews you start yourself are never posted. The pull request, its verdict and the
               review’s summary. Not the comments.
             </span>
           </span>
         </label>
       )}
-      <label className="flex items-start gap-2 text-xs">
-        <input
-          type="checkbox"
+      <label className="flex items-start gap-2 text-body">
+        <CheckInput
           className="mt-0.5"
           checked={notifyMerges}
           onChange={(e) => setNotifyMerges(e.target.checked)}
         />
         <span>
-          <span className="font-medium text-gray-700 dark:text-gray-200">
+          <span className="font-medium text-ui-ink">
             Post when a pull request merges
           </span>
-          <span className="block text-[12px] text-gray-400">
+          <span className="block text-meta text-ui-faint">
             The pull request and who merged it.
           </span>
         </span>
@@ -362,7 +354,7 @@ export function SlackSection(): JSX.Element {
           screen that listed every delivery, so this line is now the only place a reader can see
           how much of the sweep is already committed. The numbers are the server's. */}
       <p
-        className={`text-[11px] ${wouldExceedCap ? 'text-red-500' : 'text-gray-500 dark:text-gray-400'}`}
+        className={`text-meta ${wouldExceedCap ? 'text-ui-danger' : 'text-ui-mute'}`}
       >
         {data.configuredCount} of {data.cap} workspaces{' '}
         {data.configuredCount === 1 ? 'has' : 'have'} a digest, each its own report on every send.
@@ -378,29 +370,29 @@ export function SlackSection(): JSX.Element {
           onClick={onSave}
         />
         {needsWebhook && dirty && (
-          <span className="text-[11px] text-red-500">A webhook URL is required.</span>
+          <span className="text-meta text-ui-danger">A webhook URL is required.</span>
         )}
       </div>
 
       {target != null && (
-        <div className="flex flex-wrap items-center gap-2 border-t border-gray-100 pt-3 dark:border-gray-800">
+        <div className="flex flex-wrap items-center gap-2 border-t border-ui-line pt-3">
           <button
             type="button"
             onClick={() => void sendTest()}
             disabled={test.busy}
-            className="rounded border border-gray-300 px-3 py-1 text-xs font-medium text-gray-600 hover:bg-gray-100 disabled:opacity-40 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+            className="inline-flex h-7 items-center rounded-ui bg-ui-raise px-2.5 text-body font-medium text-ui-ink hover:bg-ui-hover touch:h-10 disabled:opacity-40"
           >
             {test.busy ? 'Sending…' : 'Send test'}
           </button>
           {test.msg != null && (
             <span
-              className={`text-[11px] ${test.ok ? 'text-emerald-500' : 'text-gray-500 dark:text-gray-400'}`}
+              className={`text-meta ${test.ok ? 'text-ui-success' : 'text-ui-mute'}`}
             >
               {test.msg}
             </span>
           )}
           {target.lastSentAt != null && (
-            <span className="text-[11px] text-gray-400">
+            <span className="text-meta text-ui-faint">
               Last sent {new Date(target.lastSentAt).toLocaleString()}
             </span>
           )}
@@ -408,7 +400,7 @@ export function SlackSection(): JSX.Element {
             type="button"
             onClick={() => removal.mutate()}
             disabled={removal.isPending}
-            className="ml-auto text-[11px] text-gray-400 underline hover:text-red-500 disabled:opacity-50"
+            className="ml-auto text-meta text-ui-faint underline hover:text-ui-danger disabled:opacity-50"
             title="Delete this workspace's channel and stop the digest. Use cadence 'Off' to pause without losing the webhook."
           >
             {removal.isPending ? 'Stopping…' : 'Stop sending (delete the channel)'}

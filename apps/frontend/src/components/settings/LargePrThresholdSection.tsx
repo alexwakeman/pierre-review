@@ -90,7 +90,7 @@ export function LargePrThresholdSection(): JSX.Element {
       </Field>
 
       {error != null && (
-        <div id="large-pr-threshold-error" className="text-[11px] text-red-500">
+        <div id="large-pr-threshold-error" className="text-meta text-ui-danger">
           {error}
         </div>
       )}
@@ -105,7 +105,7 @@ export function LargePrThresholdSection(): JSX.Element {
       />
 
       {save.isError && (
-        <div className="text-[11px] text-red-500">
+        <div className="text-meta text-ui-danger">
           {(save.error as Error)?.message ?? 'Couldn’t save your threshold.'}
         </div>
       )}

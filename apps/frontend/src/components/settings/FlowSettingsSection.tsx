@@ -73,8 +73,8 @@ export function FlowSettingsSection(): JSX.Element {
       desc="Chronology counts only the hours your team works, and holds each wait against a budget. Nights, weekends and days off are not counted as waiting."
     >
       <div className="grid gap-3 sm:grid-cols-2">
-        <div className="flex flex-col gap-1 text-xs">
-          <label htmlFor="flow-tz" className="font-medium text-gray-600 dark:text-gray-300">
+        <div className="flex flex-col gap-1 text-body">
+          <label htmlFor="flow-tz" className="font-medium text-ui-mute">
             Time zone
           </label>
           <TimeZoneCombobox
@@ -84,8 +84,8 @@ export function FlowSettingsSection(): JSX.Element {
             defaultZone={defaultZone}
           />
         </div>
-        <div className="flex flex-col gap-1 text-xs">
-          <span className="font-medium text-gray-600 dark:text-gray-300">Working day</span>
+        <div className="flex flex-col gap-1 text-body">
+          <span className="font-medium text-ui-mute">Working day</span>
           <div className="flex items-center gap-2">
             <input
               type="time"
@@ -94,7 +94,7 @@ export function FlowSettingsSection(): JSX.Element {
               value={form.start}
               onChange={(e) => setForm((f) => ({ ...f, start: e.target.value }))}
             />
-            <span className="text-gray-500 dark:text-gray-400">to</span>
+            <span className="text-ui-mute">to</span>
             <input
               type="time"
               aria-label="End of the working day"
@@ -106,8 +106,8 @@ export function FlowSettingsSection(): JSX.Element {
         </div>
       </div>
 
-      <div className="text-xs">
-        <div className="mb-1 font-medium text-gray-600 dark:text-gray-300">Working days</div>
+      <div className="text-body">
+        <div className="mb-1 font-medium text-ui-mute">Working days</div>
         <div className="flex flex-wrap gap-1.5">
           {DAYS.map((d) => {
             const on = form.days.includes(d.iso);
@@ -117,10 +117,10 @@ export function FlowSettingsSection(): JSX.Element {
                 type="button"
                 aria-pressed={on}
                 onClick={() => toggleDay(d.iso)}
-                className={`rounded border px-2 py-0.5 text-xs ${
+                className={`rounded-ui border px-2 py-0.5 text-body ${
                   on
-                    ? 'border-sky-600 bg-sky-600 text-white'
-                    : 'border-gray-300 text-gray-600 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800'
+                    ? 'border-transparent bg-ui-accent-fill text-ui-on-accent'
+                    : 'border-ui-line text-ui-mute hover:bg-ui-hover'
                 }`}
               >
                 {d.short}
@@ -133,7 +133,7 @@ export function FlowSettingsSection(): JSX.Element {
       <BudgetSliders form={form} setForm={setForm} stored={stored} />
 
       {problem != null && (
-        <p className="text-xs text-rose-700 dark:text-rose-400" role="alert">
+        <p className="text-body text-ui-danger" role="alert">
           {problem}
         </p>
       )}
@@ -149,14 +149,14 @@ export function FlowSettingsSection(): JSX.Element {
             type="button"
             disabled={setWorkspaceFlowSettings.isPending}
             onClick={() => setWorkspaceFlowSettings.mutate({ id: workspaceId, settings: {} })}
-            className="text-xs text-gray-600 hover:underline disabled:opacity-40 dark:text-gray-300"
+            className="text-meta text-ui-mute hover:underline disabled:opacity-40"
           >
             Reset to defaults
           </button>
         )}
       </div>
       {setWorkspaceFlowSettings.isError && (
-        <div className="text-xs text-rose-700 dark:text-rose-400">
+        <div className="text-body text-ui-danger">
           {(setWorkspaceFlowSettings.error as Error)?.message ?? 'Couldn’t save the working hours.'}
         </div>
       )}

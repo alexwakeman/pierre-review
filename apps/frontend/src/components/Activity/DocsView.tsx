@@ -43,7 +43,8 @@ import {
 import { useDocsView, type DocsOpen } from '../../store/docsView.js';
 import { useFilters } from '../../store/filters.js';
 import { AiRunGate } from '../AiSetup.js';
-import { BookIcon, ChevronIcon, CollapseAllIcon, ConfluenceIcon, ExpandAllIcon, NotionIcon, UploadIcon } from '../Icons.js';
+import { BookIcon, ChevronIcon, CollapseAllIcon, ConfluenceIcon, ExpandAllIcon, NotionIcon, RefreshIcon, SparkleIcon, UploadIcon, WarningIcon } from '../Icons.js';
+import { Button, Select, Tabs, cx, FOCUS_RING, useRegisterCommands, type Command } from '../ui/index.js';
 import { InfoButton } from '../InfoModal.js';
 import { DocsChat } from './DocsChat.js';
 import { DocsViewer } from './DocsViewer.js';
@@ -66,16 +67,18 @@ import { aiCredentialWords, aiModelWords, aiRunLabel } from '@pierre-review/shar
 // Build progress is live: an SSE stream per document being built — never a queued one, at most
 // MAX_DOC_STREAMS (useReferenceDocs) — the list polled as the fallback.
 
-const MUTED = 'text-gray-500 dark:text-gray-400';
-const SMALL_BUTTON = 'text-xs text-sky-700 hover:underline disabled:opacity-50 dark:text-sky-300';
+const MUTED = 'text-ui-mute';
 const DEFAULT_OPEN: DocsOpen = { path: LIBRARY_INDEX_PATH, anchor: null, quote: null, seq: 0 };
 const LIBRARY_W_KEY = 'pierre:docsLibraryWidth';
 const CHAT_W_KEY = 'pierre:docsChatWidth';
 const LIBRARY_COLLAPSED_KEY = 'pierre:docsLibraryCollapsed';
 const SEPARATOR =
-  'mx-1 w-1.5 shrink-0 cursor-col-resize touch-none rounded-full bg-gray-200 transition-colors hover:bg-blue-400 focus-visible:bg-blue-500 focus-visible:outline-none dark:bg-gray-800 dark:hover:bg-blue-500';
+  'mx-1 w-1 shrink-0 cursor-col-resize touch-none rounded-full bg-transparent transition-colors hover:bg-ui-accent focus-visible:bg-ui-accent focus-visible:outline-none';
 const COLLAPSE_BUTTON =
-  'shrink-0 rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100';
+  'inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-ui text-ui-mute hover:bg-ui-hover hover:text-ui-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent touch:h-10 touch:w-10';
+/** A tree row's disclosure chevron: 24px, 40px on touch. */
+const TREE_TOGGLE =
+  'inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-ui text-ui-mute hover:bg-ui-hover hover:text-ui-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent touch:h-10 touch:w-10';
 
 const KIND_LABEL: Record<ReferenceDoc['sourceKind'], string> = {
   pdf: 'PDF',
@@ -109,7 +112,7 @@ function FiguresLine({ doc }: { doc: ReferenceDoc }): JSX.Element | null {
   ].filter(Boolean);
   if (parts.length === 0 && !f.note) return null;
   return (
-    <p className={`text-[11px] ${MUTED}`} data-testid="doc-figures">
+    <p className={`text-meta ${MUTED}`} data-testid="doc-figures">
       {parts.join(' · ')}
       {parts.length > 0 && f.note ? '. ' : ''}
       {f.note}
@@ -128,7 +131,7 @@ function WikiStatus({ doc }: { doc: ReferenceDoc }): JSX.Element | null {
   const name = WIKI_PROVIDER_NAMES[w.provider];
   if (w.unreachableSince && w.unreachableReason) {
     return (
-      <p className="text-[11px] text-rose-700 dark:text-rose-400" data-testid="wiki-unreachable">
+      <p className="text-meta text-ui-danger" data-testid="wiki-unreachable">
         Can&rsquo;t reach this page in {name} since {formatDate(w.unreachableSince)}. {wikiUnreachableWords(w.provider, w.unreachableReason)}
       </p>
     );
@@ -139,7 +142,7 @@ function WikiStatus({ doc }: { doc: ReferenceDoc }): JSX.Element | null {
   ].filter(Boolean);
   if (parts.length === 0) return null;
   return (
-    <p className={`text-[11px] ${MUTED}`} title={w.rootUrl}>
+    <p className={`text-meta ${MUTED}`} title={w.rootUrl}>
       {parts.join(' · ')}
     </p>
   );
@@ -151,7 +154,7 @@ function BuildProgress({ doc }: { doc: ReferenceDoc }): JSX.Element {
   const label = doc.stage ?? docStageLabel(doc.status);
   return (
     <div className="space-y-0.5" aria-live="polite">
-      <div className="flex items-center justify-between gap-2 text-[11px] text-ai-signal">
+      <div className="flex items-center justify-between gap-2 text-meta text-ai-signal">
         <span>{label}</span>
         <span className="tabular-nums">{pct}%</span>
       </div>
@@ -177,9 +180,9 @@ function DocTree({ workspaceId, doc, open, onOpen }: { workspaceId: number; doc:
   const nodes = useMemo(() => (tree.data ? docTreeNodes(docTreeRows(tree.data.sections)) : []), [tree.data]);
   const branchKeys = useMemo(() => docTreeBranchKeys(nodes), [nodes]);
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
-  if (tree.isPending) return <p className={`py-1 pl-6 text-[11px] ${MUTED}`}>Loading…</p>;
-  if (tree.isError) return <p className="py-1 pl-6 text-[11px] text-rose-700 dark:text-rose-400">{tree.error.message}</p>;
-  if (nodes.length === 0) return <p className={`py-1 pl-6 text-[11px] ${MUTED}`}>No sections.</p>;
+  if (tree.isPending) return <p className={`py-1 pl-6 text-meta ${MUTED}`}>Loading…</p>;
+  if (tree.isError) return <p className="py-1 pl-6 text-meta text-ui-danger">{tree.error.message}</p>;
+  if (nodes.length === 0) return <p className={`py-1 pl-6 text-meta ${MUTED}`}>No sections.</p>;
   const toggle = (key: string): void =>
     setExpanded((prev) => {
       const next = new Set(prev);
@@ -244,22 +247,22 @@ function DocTreeItem({
   const indent = { paddingLeft: `${0.25 + level * 0.75}rem` };
   const anchor = r.kind === 'heading' ? r.anchor : null;
   const on = r.kind !== 'group' && open.path === r.path && open.anchor === anchor;
-  const titleClass = 'block min-w-0 flex-1 py-0.5 text-left text-[11px] font-medium text-gray-700 dark:text-gray-200';
+  const titleClass = 'block min-w-0 flex-1 py-1 text-left text-meta font-medium text-ui-mute';
   return (
     <li>
-      <div style={indent} className="flex items-start gap-0.5">
+      <div style={indent} className="flex items-center gap-0.5">
         {hasChildren ? (
           <button
             type="button"
             onClick={() => onToggle(r.key)}
             aria-expanded={isOpen}
             aria-label={`${isOpen ? 'Collapse' : 'Expand'} ${r.title}`}
-            className="mt-0.5 shrink-0 rounded p-0.5 text-gray-500 hover:bg-gray-100 hover:text-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100"
+            className={TREE_TOGGLE}
           >
             <ChevronIcon dir={isOpen ? 'down' : 'right'} size={10} />
           </button>
         ) : (
-          <span className="w-[18px] shrink-0" aria-hidden="true" />
+          <span className="w-6 shrink-0 touch:w-10" aria-hidden="true" />
         )}
         {r.kind === 'group' ? (
           hasChildren ? (
@@ -277,9 +280,7 @@ function DocTreeItem({
             onClick={() => onOpen(r.path, anchor)}
             aria-current={on ? 'true' : undefined}
             title={r.kind === 'section' && r.summary !== '' ? r.summary : undefined}
-            className={`block min-w-0 flex-1 rounded px-1 py-0.5 text-left text-xs ${
-              on ? 'bg-sky-50 font-medium text-sky-800 dark:bg-sky-950/40 dark:text-sky-200' : 'text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800/50'
-            } ${r.kind === 'heading' ? 'text-[11px] text-gray-600 dark:text-gray-300' : ''}`}
+            className={cx('block min-w-0 flex-1 rounded-ui px-1.5 py-1 text-left', r.kind === 'heading' ? 'text-meta' : 'text-body', on ? 'bg-ui-sel font-medium text-ui-ink' : 'text-ui-ink hover:bg-ui-hover', FOCUS_RING)}
           >
             {r.title}
           </button>
@@ -318,105 +319,121 @@ function DocRow({
   const building = isDocBuilding(doc.status);
   const contentsPath = `${doc.slug}/CONTENTS.md`;
   const onContents = open.path === contentsPath;
+  // THE ROW ON SHOW: the document whose contents or a section of it is open in the viewer. Its row
+  // opens up to carry the facts and the actions (docs/redesign/DESIGN.md § 1 — one line per item,
+  // detail where the selection is). A row that BLOCKS (Confluence unreachable, a failed build) or is
+  // building shows that line whatever is selected.
+  const current = open.path.startsWith(`${doc.slug}/`);
+  const failed = doc.status === 'failed';
+  const unreachable = doc.wiki?.unreachableSince != null && doc.wiki.unreachableReason != null;
   const error = rebuild.error ?? refresh.error ?? cancel.error ?? remove.error;
+  const showActions = current || failed || building || confirmRemove;
+  const meta = [
+    sourceLabel(doc),
+    doc.crawl?.pages != null ? `${doc.crawl.pages.length} page${doc.crawl.pages.length === 1 ? '' : 's'}` : null,
+    doc.wiki?.pageCount != null ? `${doc.wiki.pageCount} page${doc.wiki.pageCount === 1 ? '' : 's'}` : null,
+    doc.available ? `${doc.sectionCount} section${doc.sectionCount === 1 ? '' : 's'}` : null,
+    doc.available && doc.model ? aiRunLabel(doc.provider ?? null, doc.model) : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
 
   return (
-    <li className="rounded border border-gray-200 dark:border-gray-800">
-      <div className="space-y-1 px-2 py-1.5">
-        <div className="flex items-start gap-1">
+    <li>
+      <div className={cx('rounded-ui', current ? 'bg-ui-sel' : 'hover:bg-ui-hover')}>
+        <div className="flex items-start gap-0.5 pl-1 pr-2">
           {doc.available ? (
             <button
               type="button"
               onClick={() => toggle(workspaceId, doc.id)}
               aria-expanded={expanded}
               aria-label={`${expanded ? 'Hide' : 'Show'} the contents of ${doc.title}`}
-              className="mt-0.5 shrink-0 rounded p-0.5 text-gray-500 hover:bg-gray-100 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100"
+              className={cx(TREE_TOGGLE, 'mt-1.5')}
             >
-              <ChevronIcon dir={expanded ? 'down' : 'right'} size={11} />
+              <ChevronIcon dir={expanded ? 'down' : 'right'} size={10} />
             </button>
           ) : (
-            <span className="mt-0.5 shrink-0 p-0.5 text-gray-500 dark:text-gray-400">
-              {doc.wiki ? <WikiMark provider={doc.wiki.provider} size={11} /> : <BookIcon size={11} />}
+            <span className="mt-1.5 flex h-6 w-6 shrink-0 items-center justify-center text-ui-faint" aria-hidden="true">
+              {doc.wiki ? <WikiMark provider={doc.wiki.provider} size={12} /> : <BookIcon size={12} />}
             </span>
           )}
-          <div className="min-w-0 flex-1">
+          <div className="min-w-0 flex-1 py-1.5">
             {doc.available ? (
               <button
                 type="button"
                 onClick={() => onOpen(contentsPath, null)}
                 aria-current={onContents ? 'true' : undefined}
-                className={`block text-left text-xs font-semibold hover:underline ${onContents ? 'text-sky-800 dark:text-sky-200' : 'text-gray-800 dark:text-gray-100'}`}
+                className={cx('block w-full min-w-0 truncate rounded-ui text-left text-body font-medium text-ui-ink', FOCUS_RING)}
               >
                 {doc.title}
               </button>
             ) : (
-              <span className="block text-xs font-semibold text-gray-800 dark:text-gray-100">{doc.title}</span>
+              <span className="block truncate text-body font-medium text-ui-ink">{doc.title}</span>
             )}
-            <p className={`truncate text-[11px] ${MUTED}`} title={doc.sourceName}>
-              {doc.wiki && <WikiMark provider={doc.wiki.provider} size={10} className="mr-0.5 inline-block align-[-1px]" />}
-              {sourceLabel(doc)}
-              {doc.crawl?.pages != null && ` · ${doc.crawl.pages.length} page${doc.crawl.pages.length === 1 ? '' : 's'}`}
-              {doc.wiki?.pageCount != null && ` · ${doc.wiki.pageCount} page${doc.wiki.pageCount === 1 ? '' : 's'}`}
-              {doc.available && ` · ${doc.sectionCount} section${doc.sectionCount === 1 ? '' : 's'}`}
-              {doc.available && doc.model ? ` · ${aiRunLabel(doc.provider ?? null, doc.model)}` : ''}
+            <p className="flex min-w-0 items-center gap-1 text-meta text-ui-mute" title={`${meta}\n${doc.sourceName}`}>
+              {doc.wiki && <WikiMark provider={doc.wiki.provider} size={11} className="shrink-0" />}
+              <span className="truncate">{meta}</span>
             </p>
           </div>
-        </div>
-
-        {!building && <WikiStatus doc={doc} />}
-        {!building && <FiguresLine doc={doc} />}
-        {building && <BuildProgress doc={doc} />}
-        {doc.status === 'failed' && (
-          <p className="text-[11px] text-rose-700 dark:text-rose-400">
-            {doc.error ?? 'The build failed.'}
-            {doc.available && ' The last built version is still here.'}
-          </p>
-        )}
-
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-          {building ? (
-            <button type="button" className={SMALL_BUTTON} disabled={cancel.isPending} onClick={() => cancel.mutate(doc.id)}>
-              Cancel
-            </button>
-          ) : (
-            aiReadyFor(ai, 'docs_build') && (
-              <>
-                {doc.wiki && doc.available && (
-                  <button type="button" className={SMALL_BUTTON} disabled={refresh.isPending} onClick={() => refresh.mutate(doc.id)}>
-                    Refresh now
-                  </button>
-                )}
-                <button type="button" className={SMALL_BUTTON} disabled={rebuild.isPending} onClick={() => rebuild.mutate(doc.id)}>
-                  {doc.status === 'failed' ? 'Try again' : 'Rebuild'}
-                </button>
-              </>
-            )
-          )}
-          {confirmRemove ? (
-            <span className="inline-flex flex-wrap items-center gap-2 text-xs">
-              <span className="text-gray-700 dark:text-gray-200">Remove this document?</span>
-              <button
-                type="button"
-                disabled={remove.isPending}
-                onClick={() => remove.mutate(doc.id)}
-                className="font-medium text-rose-700 hover:underline disabled:opacity-50 dark:text-rose-400"
-              >
-                Remove
-              </button>
-              <button type="button" className={SMALL_BUTTON} onClick={() => setConfirmRemove(false)}>
-                Keep
-              </button>
+          {(unreachable || failed) && !building && (
+            <span className="mt-2 shrink-0 text-ui-danger" title={failed ? 'The build failed' : 'Can’t reach this page'}>
+              <WarningIcon size={13} aria-hidden />
             </span>
-          ) : (
-            <button type="button" className={SMALL_BUTTON} onClick={() => setConfirmRemove(true)}>
-              Remove
-            </button>
           )}
         </div>
-        {error != null && <p className="text-[11px] text-rose-700 dark:text-rose-400">{error.message}</p>}
+
+        <div className="space-y-1.5 pb-2 pl-8 pr-2 empty:hidden">
+          {!building && (unreachable || current) && <WikiStatus doc={doc} />}
+          {!building && current && <FiguresLine doc={doc} />}
+          {building && <BuildProgress doc={doc} />}
+          {failed && (
+            <p className="text-meta text-ui-danger">
+              {doc.error ?? 'The build failed.'}
+              {doc.available && ' The last built version is still here.'}
+            </p>
+          )}
+          {showActions && (
+            <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+              {building ? (
+                <Button size="sm" disabled={cancel.isPending} onClick={() => cancel.mutate(doc.id)}>
+                  Cancel
+                </Button>
+              ) : (
+                aiReadyFor(ai, 'docs_build') && (
+                  <>
+                    {doc.wiki && doc.available && (
+                      <Button size="sm" icon={<RefreshIcon size={12} />} disabled={refresh.isPending} onClick={() => refresh.mutate(doc.id)}>
+                        Refresh now
+                      </Button>
+                    )}
+                    <Button size="sm" disabled={rebuild.isPending} onClick={() => rebuild.mutate(doc.id)}>
+                      {failed ? 'Try again' : 'Rebuild'}
+                    </Button>
+                  </>
+                )
+              )}
+              {confirmRemove ? (
+                <span className="inline-flex flex-wrap items-center gap-1.5 text-meta">
+                  <span className="text-ui-ink">Remove this document?</span>
+                  <Button size="sm" variant="danger" disabled={remove.isPending} onClick={() => remove.mutate(doc.id)}>
+                    Remove
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => setConfirmRemove(false)}>
+                    Keep
+                  </Button>
+                </span>
+              ) : (
+                <Button size="sm" variant="ghost" onClick={() => setConfirmRemove(true)}>
+                  Remove
+                </Button>
+              )}
+            </div>
+          )}
+          {error != null && <p className="text-meta text-ui-danger">{error.message}</p>}
+        </div>
       </div>
       {expanded && doc.available && (
-        <div className="border-t border-gray-100 dark:border-gray-800">
+        <div className="pb-1 pl-3">
           <DocTree workspaceId={workspaceId} doc={doc} open={open} onOpen={onOpen} />
         </div>
       )}
@@ -480,9 +497,10 @@ function AddDocs({ workspaceId, maxBytes }: { workspaceId: number; maxBytes: num
         onDragLeave={() => setDragging(false)}
         onDrop={onDrop}
         data-testid="docs-drop-zone"
-        className={`rounded-lg border border-dashed px-3 py-3 text-center text-xs ${
-          dragging ? 'border-sky-500 bg-sky-50 dark:bg-sky-950/30' : 'border-gray-300 dark:border-gray-700'
-        }`}
+        className={cx(
+          'flex flex-wrap items-center gap-x-2 gap-y-1 rounded-ui border border-dashed px-2.5 py-2 text-body',
+          dragging ? 'border-ui-accent bg-ui-sel' : 'border-ui-line',
+        )}
       >
         <input
           ref={inputRef}
@@ -498,19 +516,19 @@ function AddDocs({ workspaceId, maxBytes }: { workspaceId: number; maxBytes: num
           }}
         />
         {sending != null ? (
-          <p className="text-gray-700 dark:text-gray-200">Uploading {sending}…</p>
+          <p className="text-ui-ink">Uploading {sending}…</p>
         ) : (
           <>
             <button
               type="button"
               data-ai-run
               onClick={() => inputRef.current?.click()}
-              className="inline-flex items-center gap-1 rounded border border-gray-300 px-2 py-1 font-medium text-gray-700 hover:border-gray-400 dark:border-gray-700 dark:text-gray-200 dark:hover:border-gray-500"
+              className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-ui bg-ui-raise px-2.5 text-body font-medium text-ui-ink hover:bg-ui-hover touch:h-10 outline-none focus-visible:ring-2 focus-visible:ring-ui-accent"
             >
               <UploadIcon size={12} />
               Choose files
             </button>
-            <p className={`mt-1 text-[11px] ${MUTED}`}>
+            <p className={`min-w-0 flex-1 text-meta ${MUTED}`}>
               {onCodex
                 ? 'or drop Word, text or markdown files here. Codex cannot read PDFs.'
                 : 'or drop PDF, Word, text or markdown files here'}
@@ -519,7 +537,7 @@ function AddDocs({ workspaceId, maxBytes }: { workspaceId: number; maxBytes: num
         )}
       </div>
       {problems.length > 0 && (
-        <ul className="space-y-0.5 text-[11px] text-rose-700 dark:text-rose-400">
+        <ul className="space-y-0.5 text-meta text-ui-danger">
           {problems.map((p, i) => (
             <li key={`${p.name}-${i}`}>
               {p.name}: {p.message}
@@ -544,25 +562,26 @@ function AddDocs({ workspaceId, maxBytes }: { workspaceId: number; maxBytes: num
           inputMode="url"
           value={url}
           onChange={(e) => setUrl(e.target.value)}
+          id="docs-add-url"
           aria-label="Web page address"
           placeholder="https://…"
           maxLength={2048}
-          className="min-w-0 flex-1 basis-40 rounded border border-gray-300 bg-white px-2 py-1 text-xs text-gray-800 placeholder:text-gray-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:placeholder:text-gray-400"
+          className="h-7 min-w-0 flex-1 basis-full rounded-ui bg-ui-raise px-2.5 text-body text-ui-ink ring-1 ring-inset ring-ui-line placeholder:text-ui-faint focus:outline-none focus:ring-2 focus:ring-ui-accent touch:h-10"
         />
         <span className="inline-flex shrink-0 items-center gap-0.5">
-          <select
-            value={crawlDepth}
-            onChange={(e) => setCrawlDepth(Number(e.target.value))}
-            aria-label={onWiki ? 'Child pages to include' : 'Links to follow'}
-            className="rounded border border-gray-300 bg-white px-1 py-1 text-xs text-gray-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
-          >
-            <option value={0}>This page only</option>
-            {Array.from({ length: onWiki ? REFERENCE_DOC_WIKI_MAX_DEPTH : REFERENCE_DOC_CRAWL_MAX_DEPTH }, (_, i) => i + 1).map((d) => (
-              <option key={d} value={d}>
-                {onWiki ? `With child pages, ${d} level${d === 1 ? '' : 's'}` : `Follow links, ${d} level${d === 1 ? '' : 's'}`}
-              </option>
-            ))}
-          </select>
+          <Select
+            size="sm"
+            label={onWiki ? 'Child pages to include' : 'Links to follow'}
+            value={String(crawlDepth)}
+            onChange={(v) => setCrawlDepth(Number(v))}
+            options={[
+              { value: '0', label: 'This page only' },
+              ...Array.from({ length: onWiki ? REFERENCE_DOC_WIKI_MAX_DEPTH : REFERENCE_DOC_CRAWL_MAX_DEPTH }, (_, i) => i + 1).map((d) => ({
+                value: String(d),
+                label: onWiki ? `With child pages, ${d} level${d === 1 ? '' : 's'}` : `Follow links, ${d} level${d === 1 ? '' : 's'}`,
+              })),
+            ]}
+          />
           {onWiki ? (
             <InfoButton title={`${wikiName} pages`}>
               <p>
@@ -605,12 +624,12 @@ function AddDocs({ workspaceId, maxBytes }: { workspaceId: number; maxBytes: num
           type="submit"
           data-ai-run
           disabled={adding.isPending || url.trim() === ''}
-          className="shrink-0 rounded border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700 hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:text-gray-200 dark:hover:border-gray-500"
+          className="ml-auto inline-flex h-7 shrink-0 items-center rounded-ui bg-ui-raise px-2.5 text-body font-medium text-ui-ink hover:bg-ui-hover disabled:opacity-50 touch:h-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent"
         >
           {onWiki ? `Add ${wikiName} page` : 'Add web page'}
         </button>
       </form>
-      {adding.isError && <p className="text-[11px] text-rose-700 dark:text-rose-400">{adding.error.message}</p>}
+      {adding.isError && <p className="text-meta text-ui-danger">{adding.error.message}</p>}
     </div>
   );
 }
@@ -696,139 +715,208 @@ function DocsPane({ workspaceId }: { workspaceId: number }): JSX.Element {
     if (widths.lib !== lib.width || widths.chat !== chat.width) setWidths({ lib: lib.width, chat: chat.width });
   }, [lib.width, chat.width, widths]);
 
+  // NARROW PANES (DESIGN.md § 6): below lg the library, the viewer and the chat share ONE column, one
+  // at a time, picked by the header's tabs; lg–xl keeps the library beside a Read / Ask pair; xl shows
+  // all three. The pane on screen is DERIVED (a stored 'library' reads as Read once the library sits
+  // beside it) — never written back, so the reader's own choice survives a resize.
+  const pane: 'library' | 'viewer' | 'chat' = narrowPane === 'library' && wide ? 'viewer' : narrowPane;
+  const paneTabs = useMemo(
+    () => [
+      { id: 'library' as const, label: 'Library', count: docs.length, hidden: wide },
+      { id: 'viewer' as const, label: 'Read' },
+      { id: 'chat' as const, label: 'Ask' },
+    ],
+    [docs.length, wide],
+  );
+
+  // ⌘K: every document of this library, "Ask about these docs" and "Add a document", while Docs is open.
+  const commands = useMemo<Command[]>(
+    () => [
+      {
+        id: 'docs:ask',
+        group: 'Actions',
+        title: 'Ask about these docs',
+        icon: <SparkleIcon size={14} />,
+        keywords: ['docs', 'chat', 'question'],
+        run: () => {
+          setNarrowPane('chat');
+          requestAnimationFrame(() => document.getElementById('docs-chat-question')?.focus());
+        },
+      },
+      {
+        id: 'docs:add',
+        group: 'Actions',
+        title: 'Add a document to Docs',
+        icon: <UploadIcon size={14} />,
+        keywords: ['upload', 'web page', 'confluence', 'notion', 'pdf'],
+        run: () => {
+          setNarrowPane('library');
+          requestAnimationFrame(() => document.getElementById('docs-add-url')?.focus());
+        },
+      },
+      {
+        id: 'docs:index',
+        group: 'Go to',
+        title: 'Docs: all documents',
+        icon: <BookIcon size={14} />,
+        run: () => onOpen(LIBRARY_INDEX_PATH, null),
+      },
+      ...sorted
+        .filter((d) => d.available)
+        .map((d) => ({
+          id: `docs:open:${d.id}`,
+          group: 'Go to' as const,
+          title: `Docs: ${d.title}`,
+          hint: sourceLabel(d),
+          icon: d.wiki ? <WikiMark provider={d.wiki.provider} size={14} /> : <BookIcon size={14} />,
+          run: () => onOpen(`${d.slug}/CONTENTS.md`, null),
+        })),
+    ],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [library.data, onOpen, setNarrowPane],
+  );
+  useRegisterCommands('docs', commands);
+
+  const docsInfo = (
+    <InfoButton title="Docs">
+      <p>Reference material for this workspace: PDF, Word, text and markdown files, and web pages.</p>
+      <p>
+        {aiModelWords(aiProvider, 'Sonnet')} turns each one into markdown sections with a contents list, and the library keeps one contents
+        page across every document. {aiName} reads only the sections a question needs.
+      </p>
+      <p>
+        Ask about the docs in the chat. To have AI Review check stories against them, switch it on in Settings →
+        Workspace.
+      </p>
+      <p>Everything stays on this machine. Building a document runs on {aiCredentialWords(aiProvider)}.</p>
+      <p>Drag the bars between the columns to resize them (or focus one and use the arrow keys). Double-click a bar to reset it.</p>
+    </InfoButton>
+  );
+
   return (
-    <div ref={rowRef} className="flex h-full min-h-[32rem] flex-col gap-3 lg:flex-row lg:gap-0" data-testid="docs-view">
-      {/* LEFT: the library — or, collapsed, a slim strip with the expand control and the count */}
-      {collapsed ? (
-        <section
-          aria-label="Library"
-          style={{ width: DOCS_LIBRARY_STRIP_W }}
-          className="mr-3 flex shrink-0 flex-col items-center gap-2 rounded-lg border border-gray-200 py-2 dark:border-gray-800"
-        >
-          <button
-            type="button"
-            onClick={() => setCollapsed(false)}
-            aria-expanded={false}
-            aria-label={`Show the document list (${docs.length} document${docs.length === 1 ? '' : 's'})`}
-            title="Show the document list"
-            className={COLLAPSE_BUTTON}
+    <div className="flex h-full min-h-[32rem] flex-col" data-testid="docs-view">
+      {/* THE PAGE HEADER: the title, its ⓘ, the count — and, while the panes share a column, their tabs. */}
+      <header className="flex flex-wrap items-center gap-x-3 gap-y-2 pb-3">
+        <div className="flex items-center gap-1.5">
+          <h1 className="text-display text-ui-ink">Docs</h1>
+          {docsInfo}
+        </div>
+        {library.data != null && (
+          <span className="text-meta tabular-nums text-ui-mute">
+            {docs.length} document{docs.length === 1 ? '' : 's'}
+          </span>
+        )}
+        <Tabs
+          tabs={paneTabs}
+          value={pane}
+          onChange={(k) => setNarrowPane(k)}
+          label="Docs panes"
+          className="w-full xl:hidden sm:ml-auto sm:w-auto"
+        />
+      </header>
+
+      <div ref={rowRef} className="flex min-h-0 flex-1">
+        {/* LEFT: the library — or, collapsed, a slim strip with the expand control and the count */}
+        {collapsed ? (
+          <section
+            aria-label="Library"
+            style={{ width: DOCS_LIBRARY_STRIP_W }}
+            className="flex shrink-0 flex-col items-center gap-2 rounded-ui bg-ui-surface py-2"
           >
-            <ChevronIcon dir="right" size={12} />
-          </button>
-          <span className="text-gray-500 dark:text-gray-400" aria-hidden="true">
-            <BookIcon size={14} />
-          </span>
-          <span className="font-mono text-[11px] tabular-nums text-gray-600 dark:text-gray-300" aria-hidden="true">
-            {docs.length}
-          </span>
-        </section>
-      ) : (
-        <section
-          ref={lib.paneRef}
-          aria-label="Library"
-          style={wide ? { width: lib.width } : undefined}
-          className="flex min-h-0 flex-col gap-3 lg:shrink-0"
-        >
-          <div className="flex items-center gap-1">
-            <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-200">Docs</h2>
-            <InfoButton title="Docs">
-              <p>Reference material for this workspace: PDF, Word, text and markdown files, and web pages.</p>
-              <p>
-                {aiModelWords(aiProvider, 'Sonnet')} turns each one into markdown sections with a contents list, and the library keeps one contents
-                page across every document. {aiName} reads only the sections a question needs.
-              </p>
-              <p>
-                Ask about the docs in the chat. To have AI Review check stories against them, switch it on in Settings →
-                Workspace.
-              </p>
-              <p>Everything stays on this machine. Building a document runs on {aiCredentialWords(aiProvider)}.</p>
-              <p>Drag the bars between the columns to resize them (or focus one and use the arrow keys). Double-click a bar to reset it.</p>
-            </InfoButton>
-            {wide && (
-              <button
-                type="button"
-                onClick={() => setCollapsed(true)}
-                aria-expanded={true}
-                aria-label="Hide the document list"
-                title="Hide the document list"
-                className={`ml-auto ${COLLAPSE_BUTTON}`}
-              >
-                <ChevronIcon dir="left" size={12} />
-              </button>
+            <button
+              type="button"
+              onClick={() => setCollapsed(false)}
+              aria-expanded={false}
+              aria-label={`Show the document list (${docs.length} document${docs.length === 1 ? '' : 's'})`}
+              title="Show the document list"
+              className={COLLAPSE_BUTTON}
+            >
+              <ChevronIcon dir="right" size={12} />
+            </button>
+            <span className="text-ui-faint" aria-hidden="true">
+              <BookIcon size={14} />
+            </span>
+            <span className="text-meta tabular-nums text-ui-mute" aria-hidden="true">
+              {docs.length}
+            </span>
+          </section>
+        ) : (
+          <section
+            ref={lib.paneRef}
+            aria-label="Library"
+            style={wide ? { width: lib.width } : undefined}
+            className={cx(
+              'min-h-0 min-w-0 flex-1 flex-col gap-3 rounded-ui bg-ui-surface p-2 lg:flex lg:flex-none lg:shrink-0',
+              pane === 'library' ? 'flex' : 'hidden',
             )}
-          </div>
-          <AiRunGate kind="docs_build">
-            <AddDocs workspaceId={workspaceId} maxBytes={maxBytes} />
-          </AiRunGate>
-          <div className="min-h-0 flex-1 overflow-y-auto">
-            {library.isPending ? (
-              <p className={`text-xs ${MUTED}`}>Loading…</p>
-            ) : library.isError ? (
-              <p className="text-xs text-rose-700 dark:text-rose-400">{library.error.message}</p>
-            ) : (
-              <div className="space-y-1.5">
+          >
+            <div className="hidden min-h-7 items-center gap-1 px-1.5 pt-1 lg:flex">
+              <h2 className="text-body font-semibold text-ui-ink">Library</h2>
+              {wide && (
                 <button
                   type="button"
-                  onClick={() => onOpen(LIBRARY_INDEX_PATH, null)}
-                  aria-current={open.path === LIBRARY_INDEX_PATH ? 'true' : undefined}
-                  className={`flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-xs font-semibold ${
-                    open.path === LIBRARY_INDEX_PATH
-                      ? 'bg-sky-50 text-sky-800 dark:bg-sky-950/40 dark:text-sky-200'
-                      : 'text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800/50'
-                  }`}
+                  onClick={() => setCollapsed(true)}
+                  aria-expanded={true}
+                  aria-label="Hide the document list"
+                  title="Hide the document list"
+                  className={`ml-auto ${COLLAPSE_BUTTON}`}
                 >
-                  <BookIcon size={12} />
-                  <span className="flex-1">All documents</span>
-                  <span className="font-mono text-[11px] tabular-nums text-gray-500 dark:text-gray-400">{docs.length}</span>
+                  <ChevronIcon dir="left" size={12} />
                 </button>
-                {sorted.length === 0 ? (
-                  <p className={`px-2 text-xs ${MUTED}`}>No documents yet.</p>
-                ) : (
-                  <ul className="space-y-1.5">
-                    {sorted.map((d) => (
-                      <DocRow key={d.id} workspaceId={workspaceId} doc={d} open={open} onOpen={onOpen} />
-                    ))}
-                  </ul>
-                )}
-              </div>
-            )}
-          </div>
-        </section>
-      )}
-      {wide && !collapsed && <div {...lib.separatorProps} className={SEPARATOR} />}
+              )}
+            </div>
+            <div className="px-1.5">
+              <AiRunGate kind="docs_build">
+                <AddDocs workspaceId={workspaceId} maxBytes={maxBytes} />
+              </AiRunGate>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto">
+              {library.isPending ? (
+                <p className="px-2 text-meta text-ui-mute">Loading…</p>
+              ) : library.isError ? (
+                <p className="px-2 text-meta text-ui-danger">{library.error.message}</p>
+              ) : (
+                <div className="space-y-px">
+                  <button
+                    type="button"
+                    onClick={() => onOpen(LIBRARY_INDEX_PATH, null)}
+                    aria-current={open.path === LIBRARY_INDEX_PATH ? 'true' : undefined}
+                    className={cx(
+                      'flex h-8 w-full items-center gap-2 rounded-ui px-2 text-left text-body font-medium touch:h-11',
+                      open.path === LIBRARY_INDEX_PATH ? 'bg-ui-sel text-ui-ink' : 'text-ui-ink hover:bg-ui-hover',
+                      FOCUS_RING,
+                    )}
+                  >
+                    <BookIcon size={12} className="text-ui-mute" />
+                    <span className="flex-1">All documents</span>
+                    <span className="text-meta tabular-nums text-ui-mute">{docs.length}</span>
+                  </button>
+                  {sorted.length === 0 ? (
+                    <p className="px-2 py-2 text-meta text-ui-mute">No documents yet.</p>
+                  ) : (
+                    <ul className="space-y-px">
+                      {sorted.map((d) => (
+                        <DocRow key={d.id} workspaceId={workspaceId} doc={d} open={open} onOpen={onOpen} />
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+            </div>
+          </section>
+        )}
+        {wide && !collapsed && <div {...lib.separatorProps} className={SEPARATOR} />}
 
-      {/* CENTRE + RIGHT: side by side when wide; one at a time, by tab, when narrow */}
-      <div className="flex min-h-[28rem] min-w-0 flex-1 flex-col gap-2 lg:min-h-0">
-        <div role="tablist" className="flex gap-1 border-b border-gray-200 xl:hidden dark:border-gray-800">
-          {(['viewer', 'chat'] as const).map((k) => {
-            const on = narrowPane === k;
-            return (
-              <button
-                key={k}
-                type="button"
-                role="tab"
-                aria-selected={on}
-                onClick={() => setNarrowPane(k)}
-                className={`-mb-px rounded-t-md border border-b-0 px-3 py-1.5 text-xs font-medium ${
-                  on
-                    ? 'border-gray-300 bg-white text-sky-600 dark:border-gray-700 dark:bg-gray-950 dark:text-sky-300'
-                    : 'border-transparent text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-900/60'
-                }`}
-              >
-                {k === 'viewer' ? 'Read' : 'Ask'}
-              </button>
-            );
-          })}
-        </div>
-        <div className="flex min-h-0 flex-1">
-          <div className={`min-h-0 min-w-0 flex-1 ${narrowPane === 'viewer' ? 'flex' : 'hidden xl:flex'}`}>
+        {/* CENTRE + RIGHT: side by side at xl; one at a time, by the header's tabs, below. */}
+        <div className={cx('min-h-0 min-w-0 flex-1 lg:flex', pane === 'library' ? 'hidden' : 'flex')}>
+          <div className={cx('min-h-0 min-w-0 flex-1', pane === 'viewer' ? 'flex' : 'hidden xl:flex')}>
             <DocsViewer workspaceId={workspaceId} open={open} hasDocs={builtCount > 0} onOpen={onOpen} />
           </div>
           {chatBeside && <div {...chat.separatorProps} className={SEPARATOR} />}
           <div
             ref={chat.paneRef}
             style={chatBeside ? { width: chat.width } : undefined}
-            className={`min-h-0 min-w-0 flex-1 xl:flex-none ${narrowPane === 'chat' ? 'flex' : 'hidden xl:flex'}`}
+            className={cx('min-h-0 min-w-0 flex-1 xl:flex-none', pane === 'chat' ? 'flex' : 'hidden xl:flex')}
           >
             <DocsChat workspaceId={workspaceId} canAsk={builtCount > 0} onOpen={onOpen} />
           </div>
@@ -845,11 +933,11 @@ export function DocsView(): JSX.Element | null {
   if (me.data == null) return null;
   if (!ai.enabled) {
     return (
-      <p className={`px-6 py-10 text-center text-sm ${MUTED}`}>
+      <p className={`px-6 py-10 text-center text-body ${MUTED}`}>
         Reference docs need AI, which is switched off here.
       </p>
     );
   }
-  if (workspaceId == null) return <p className={`text-xs ${MUTED}`}>Loading…</p>;
+  if (workspaceId == null) return <p className={`text-body ${MUTED}`}>Loading…</p>;
   return <DocsPane workspaceId={workspaceId} />;
 }

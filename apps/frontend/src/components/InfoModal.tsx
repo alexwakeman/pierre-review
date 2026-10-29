@@ -73,7 +73,7 @@ export function InfoModal({ title, onClose, children, width = 'md' }: InfoModalP
   return (
     <FloatingPortal>
       <div
-        className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4"
+        className="fixed inset-0 z-[60] flex items-end justify-center bg-ui-scrim/40 sm:items-center sm:p-4 motion-safe:animate-ui-fade"
         role="presentation"
         onClick={(e) => {
           // The backdrop only: a click that started on the dialog and bubbled here is not one.
@@ -87,25 +87,26 @@ export function InfoModal({ title, onClose, children, width = 'md' }: InfoModalP
             aria-modal="true"
             aria-labelledby={titleId}
             tabIndex={-1}
-            className={`flex max-h-[85vh] max-w-[94vw] flex-col rounded-lg border border-gray-200 bg-white shadow-xl focus:outline-none dark:border-gray-700 dark:bg-gray-900 ${WIDTH[width]}`}
+            className={`flex max-h-[90vh] w-full flex-col rounded-t-xl bg-ui-raise pb-[env(safe-area-inset-bottom)] shadow-2xl shadow-black/30 focus:outline-none motion-safe:animate-ui-sheet-up sm:max-h-[85vh] sm:max-w-[94vw] sm:rounded-ui sm:pb-0 sm:motion-safe:animate-ui-pop ${WIDTH[width]}`}
           >
-            <div className="flex items-center justify-between gap-3 border-b border-gray-200 px-5 py-3 dark:border-gray-800">
-              <h2 id={titleId} className="text-base font-semibold text-gray-900 dark:text-gray-50">
+            <div className="flex items-center justify-between gap-3 px-5 pb-1 pt-4">
+              <h2 id={titleId} className="text-title text-ui-ink">
                 {title}
               </h2>
               <button
                 type="button"
                 onClick={onClose}
                 aria-label="Close (Esc)"
-                className="rounded p-0.5 text-gray-500 hover:text-gray-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 dark:text-gray-400 dark:hover:text-gray-100"
+                title="Close (Esc)"
+                className="-mr-1.5 inline-flex h-7 w-7 items-center justify-center rounded-ui text-ui-mute hover:bg-ui-hover hover:text-ui-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent touch:h-10 touch:w-10"
               >
-                <CloseIcon size={16} />
+                <CloseIcon size={14} />
               </button>
             </div>
             <div
               ref={bodyRef}
               tabIndex={0}
-              className="min-h-0 flex-1 space-y-3 overflow-auto rounded-b-lg px-5 py-4 text-sm leading-relaxed text-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sky-500 dark:text-gray-200"
+              className="min-h-0 flex-1 space-y-3 overflow-auto rounded-b-ui px-5 pb-5 pt-2 text-body leading-relaxed text-ui-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ui-accent"
             >
               {children}
             </div>
@@ -193,8 +194,8 @@ export function InfoButton({ title, children, width = 'md', className }: InfoBut
   const colour =
     className ??
     (open
-      ? 'text-gray-800 dark:text-gray-100'
-      : 'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-100');
+      ? 'text-ui-ink'
+      : 'text-ui-mute hover:text-ui-ink');
   return (
     <>
       <button
@@ -205,7 +206,7 @@ export function InfoButton({ title, children, width = 'md', className }: InfoBut
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-label={`About “${title}”`}
-        className={`inline-flex shrink-0 items-center justify-center rounded-full p-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 ${colour}`}
+        className={`relative inline-flex shrink-0 items-center justify-center rounded-full p-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent touch:after:absolute touch:after:-inset-3 touch:after:content-[''] ${colour}`}
       >
         <InfoIcon size={13} />
       </button>
@@ -219,18 +220,18 @@ export function InfoButton({ title, children, width = 'md', className }: InfoBut
               role="dialog"
               aria-labelledby={titleId}
               data-noactivate
-              className={`z-[60] flex ${POPOVER_WIDTH[width]} max-w-[92vw] cursor-default flex-col rounded-lg border border-gray-200 bg-white text-gray-700 shadow-lg dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200`}
+              className={`z-[60] flex ${POPOVER_WIDTH[width]} max-w-[92vw] cursor-default flex-col rounded-ui bg-ui-raise text-ui-ink shadow-xl shadow-black/25 ring-1 ring-ui-line motion-safe:animate-ui-pop`}
             >
               <p
                 id={titleId}
-                className="px-3 pt-2.5 text-[12px] font-semibold text-gray-900 dark:text-gray-50"
+                className="px-3.5 pt-3 text-body font-semibold text-ui-ink"
               >
                 {title}
               </p>
               <div
                 ref={bodyRef}
                 tabIndex={0}
-                className="min-h-0 flex-1 space-y-2 overflow-auto rounded-b-lg px-3 pb-3 pt-1 text-[12px] leading-relaxed focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sky-500"
+                className="min-h-0 flex-1 space-y-2 overflow-auto rounded-b-ui px-3.5 pb-3.5 pt-1.5 text-meta leading-relaxed text-ui-mute focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ui-accent"
               >
                 {children}
               </div>

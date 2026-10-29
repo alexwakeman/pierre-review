@@ -13,7 +13,7 @@ import { useMe } from '../../hooks/useTriage.js';
 import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
 import { useSetMyTurnSettings } from '../../hooks/useMyTurnSettings.js';
 import { ArrowIcon } from '../Icons.js';
-import { SaveButton } from './ui.js';
+import { SaveButton, CheckInput, RadioInput } from './ui.js';
 import {
   ADD_ROWS,
   buildMyTurnSettingsBody,
@@ -52,13 +52,11 @@ import {
 const SECTION_ID = 'settings-my-turn';
 export const MY_TURN_SECTION_HEADING_ID = 'settings-my-turn-heading';
 
-const sub = 'text-xs font-medium text-gray-600 dark:text-gray-300';
-const hint = 'text-[12px] text-gray-500 dark:text-gray-400';
+const sub = 'text-meta font-medium text-ui-mute';
+const hint = 'text-meta text-ui-mute';
 const pill = (on: boolean): string =>
-  `rounded-full border px-2 py-0.5 text-[12px] font-medium transition-colors ${
-    on
-      ? 'border-gray-400 bg-gray-100 text-gray-800 dark:border-gray-500 dark:bg-gray-800 dark:text-gray-100'
-      : 'border-gray-300 text-gray-600 hover:border-gray-400 dark:border-gray-700 dark:text-gray-300'
+  `inline-flex h-7 items-center rounded-ui px-2.5 text-body font-medium transition-colors touch:h-10 ${
+    on ? 'bg-ui-sel text-ui-ink' : 'bg-ui-raise text-ui-mute hover:bg-ui-hover hover:text-ui-ink'
   }`;
 
 export function MyTurnSection(): JSX.Element {
@@ -123,16 +121,16 @@ export function MyTurnSection(): JSX.Element {
     <section
       id={SECTION_ID}
       aria-labelledby={MY_TURN_SECTION_HEADING_ID}
-      className="border-b border-gray-100 pb-4 last:border-b-0 dark:border-gray-800"
+      className="pb-6 text-body text-ui-ink last:pb-0"
     >
       <h3
         id={MY_TURN_SECTION_HEADING_ID}
         tabIndex={-1}
-        className="text-sm font-semibold text-gray-800 outline-none dark:text-gray-100"
+        className="scroll-mt-4 text-title text-ui-ink outline-none"
       >
         My Turn
       </h3>
-      <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+      <p className="mt-0.5 text-meta text-ui-mute">
         What counts as your turn, and how Pending orders cards. Applies to every workspace.
       </p>
 
@@ -143,14 +141,13 @@ export function MyTurnSection(): JSX.Element {
           <div className="grid gap-x-4 gap-y-1.5 sm:grid-cols-2">
             {showRows.map(({ reason, hint: line }) => (
               <label key={reason} className="flex cursor-pointer items-start gap-2">
-                <input
-                  type="checkbox"
+                <CheckInput
                   className="mt-0.5"
                   checked={form.show[reason]}
                   onChange={(e) => setShow(reason, e.target.checked)}
                 />
                 <span className="min-w-0">
-                  <span className="block text-[12px] font-medium text-gray-700 dark:text-gray-200">
+                  <span className="block text-meta font-medium text-ui-ink">
                     {MY_TURN_SETTING_LABEL[reason]}
                   </span>
                   <span className={`block ${hint}`}>{line}</span>
@@ -169,32 +166,30 @@ export function MyTurnSection(): JSX.Element {
           <legend className={sub}>Add to My Turn</legend>
           <div className="grid gap-x-4 gap-y-1 sm:grid-cols-2">
             {ADD_ROWS.map((reason) => (
-              <label key={reason} className="flex cursor-pointer items-center gap-2 text-[12px]">
-                <input
-                  type="checkbox"
+              <label key={reason} className="flex cursor-pointer items-center gap-2 text-body">
+                <CheckInput
                   checked={form.show[reason]}
                   onChange={(e) => setShow(reason, e.target.checked)}
                 />
-                <span className="text-gray-700 dark:text-gray-200">
+                <span className="text-ui-ink">
                   {MY_TURN_SETTING_LABEL[reason]}
                 </span>
               </label>
             ))}
           </div>
           <div role="radiogroup" aria-label={MY_TURN_SETTING_LABEL.trunk_red} className="space-y-1">
-            <div className="text-[12px] font-medium text-gray-700 dark:text-gray-200">
+            <div className="text-meta font-medium text-ui-ink">
               {MY_TURN_SETTING_LABEL.trunk_red}
             </div>
             <div className="flex flex-wrap gap-x-4 gap-y-1">
               {MY_TURN_TRUNK_SCOPES.map((scope) => (
-                <label key={scope} className="flex cursor-pointer items-center gap-1.5 text-[12px]">
-                  <input
-                    type="radio"
+                <label key={scope} className="flex cursor-pointer items-center gap-1.5 text-body">
+                  <RadioInput
                     name="my-turn-trunk-scope"
                     checked={form.trunkScope === scope}
                     onChange={() => setForm((f) => ({ ...f, trunkScope: scope }))}
                   />
-                  <span className="text-gray-700 dark:text-gray-200">{TRUNK_SCOPE_LABEL[scope]}</span>
+                  <span className="text-ui-ink">{TRUNK_SCOPE_LABEL[scope]}</span>
                 </label>
               ))}
             </div>
@@ -216,15 +211,15 @@ export function MyTurnSection(): JSX.Element {
               return (
                 <li
                   key={reason}
-                  className="flex items-center gap-2 rounded px-1 text-[12px] hover:bg-gray-50 dark:hover:bg-gray-800/60"
+                  className="flex items-center gap-2 rounded-ui px-1 text-meta hover:bg-ui-hover"
                 >
-                  <span className="w-5 shrink-0 text-right tabular-nums text-gray-500 dark:text-gray-400">
+                  <span className="w-5 shrink-0 text-right tabular-nums text-ui-mute">
                     {i + 1}
                   </span>
-                  <span className="min-w-0 flex-1 text-gray-700 dark:text-gray-200">
+                  <span className="min-w-0 flex-1 text-ui-ink">
                     {label}
                     {isOff(form, reason) && (
-                      <span className="ml-1 text-gray-500 dark:text-gray-400">(off)</span>
+                      <span className="ml-1 text-ui-mute">(off)</span>
                     )}
                   </span>
                   {([-1, 1] as const).map((dir) => (
@@ -239,7 +234,7 @@ export function MyTurnSection(): JSX.Element {
                       onClick={() => move(reason, dir)}
                       disabled={dir === -1 ? i === 0 : i === visibleOrder.length - 1}
                       aria-label={`Move “${label}” ${dir === -1 ? 'up' : 'down'}`}
-                      className="rounded p-1.5 text-gray-600 hover:bg-gray-100 hover:text-gray-900 disabled:cursor-default disabled:opacity-30 disabled:hover:bg-transparent dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-gray-50"
+                      className="rounded-ui p-1.5 text-ui-mute hover:bg-ui-hover hover:text-ui-ink disabled:cursor-default disabled:opacity-30 disabled:hover:bg-transparent"
                     >
                       <ArrowIcon dir={dir === -1 ? 'up' : 'down'} size={12} />
                     </button>
@@ -268,7 +263,7 @@ export function MyTurnSection(): JSX.Element {
               {DO_NEXT_PRESET_ORDER.map((p) => (
                 <label
                   key={p}
-                  className={`${pill(preset === p)} relative cursor-pointer has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-sky-500`}
+                  className={`${pill(preset === p)} relative cursor-pointer has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ui-accent`}
                 >
                   <input
                     type="radio"
@@ -294,7 +289,7 @@ export function MyTurnSection(): JSX.Element {
                 <div key={k} className="flex items-center gap-2">
                   <label
                     htmlFor={id}
-                    className="w-36 shrink-0 text-[12px] text-gray-700 sm:w-44 dark:text-gray-200"
+                    className="w-36 shrink-0 text-meta text-ui-ink sm:w-44"
                   >
                     {WEIGHT_LABEL[k]}
                   </label>
@@ -315,7 +310,7 @@ export function MyTurnSection(): JSX.Element {
                   />
                   <output
                     htmlFor={id}
-                    className="w-10 shrink-0 text-right text-xs tabular-nums text-gray-800 dark:text-gray-100"
+                    className="w-10 shrink-0 text-right text-body tabular-nums text-ui-ink"
                   >
                     {v}%
                   </output>
@@ -328,14 +323,14 @@ export function MyTurnSection(): JSX.Element {
             type="button"
             onClick={() => setForm(resetOrderAndWeights)}
             disabled={atDefaultRanking}
-            className="rounded border border-gray-300 px-2 py-0.5 text-[12px] font-medium text-gray-600 hover:bg-gray-50 disabled:cursor-default disabled:opacity-40 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+            className="inline-flex h-7 items-center rounded-ui bg-ui-raise px-2.5 text-body font-medium text-ui-ink hover:bg-ui-hover touch:h-10 disabled:cursor-default disabled:opacity-40"
           >
             Reset
           </button>
         </div>
 
         {problem != null && (
-          <p className="text-[12px] text-red-600 dark:text-red-400" role="alert">
+          <p className="text-meta text-ui-danger" role="alert">
             {problem}
           </p>
         )}
@@ -345,7 +340,7 @@ export function MyTurnSection(): JSX.Element {
           onClick={() => save.mutate(buildMyTurnSettingsBody(form))}
         />
         {save.isError && (
-          <p className="text-[12px] text-red-600 dark:text-red-400" role="alert">
+          <p className="text-meta text-ui-danger" role="alert">
             {save.error?.message ?? 'Couldn’t save your My Turn settings.'}
           </p>
         )}

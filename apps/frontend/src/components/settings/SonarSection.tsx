@@ -6,7 +6,7 @@ import { Field, SaveButton, SectionShell, inputCls } from './ui.js';
 import { ScopePendingSection, useSettingsWorkspace } from './workspaceScope.js';
 
 const SECONDARY_BTN =
-  'rounded border border-gray-300 px-2 py-0.5 text-xs text-gray-700 hover:border-gray-400 disabled:cursor-not-allowed disabled:opacity-40 dark:border-gray-700 dark:text-gray-200 dark:hover:border-gray-500';
+  'inline-flex h-7 items-center gap-1 rounded-ui bg-ui-raise px-2.5 text-body font-medium text-ui-ink hover:bg-ui-hover touch:h-10 outline-none focus-visible:ring-2 focus-visible:ring-ui-accent disabled:cursor-not-allowed disabled:opacity-40';
 
 /**
  * "SonarCloud" for THIS workspace (CORE, free, both modes; docs/SONARCLOUD.md). The organization, a
@@ -123,10 +123,10 @@ function SonarForm({ workspaceId, saved }: { workspaceId: number; saved: Workspa
           />
         </Field>
       ) : (
-        <div className="flex flex-col gap-1 text-xs">
-          <span className="font-medium text-gray-600 dark:text-gray-300">Token</span>
+        <div className="flex flex-col gap-1 text-body">
+          <span className="font-medium text-ui-mute">Token</span>
           <div className="flex items-center gap-2">
-            <span className="text-gray-700 dark:text-gray-200">
+            <span className="text-ui-ink">
               {removing ? 'Removed when you save' : saved.tokenUnreadable ? 'Saved, but unreadable here. Replace it.' : 'Saved'}
             </span>
             {removing ? (
@@ -149,13 +149,13 @@ function SonarForm({ workspaceId, saved }: { workspaceId: number; saved: Workspa
 
       {saved.repos.length > 0 && (
         <div className="space-y-1.5">
-          <span className="text-xs font-medium text-gray-600 dark:text-gray-300">Project keys</span>
+          <span className="text-meta font-medium text-ui-mute">Project keys</span>
           <ul className="space-y-1">
             {saved.repos.map((r) => {
               const f = found.get(r.repoId);
               return (
                 <li key={r.repoId} className="grid grid-cols-1 items-center gap-1 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:gap-2">
-                  <span className="break-all text-xs text-gray-700 dark:text-gray-200">{r.fullName}</span>
+                  <span className="break-all text-body text-ui-ink">{r.fullName}</span>
                   <input
                     aria-label={`SonarCloud project key for ${r.fullName}`}
                     className={inputCls}
@@ -164,7 +164,7 @@ function SonarForm({ workspaceId, saved }: { workspaceId: number; saved: Workspa
                     value={keys[r.repoId] ?? ''}
                     onChange={(e) => setKeys((k) => ({ ...k, [r.repoId]: e.target.value }))}
                   />
-                  <span className="text-[11px] text-gray-500 dark:text-gray-400">
+                  <span className="text-meta text-ui-mute">
                     {f === true ? 'Found' : f === false ? 'Not found' : ''}
                   </span>
                 </li>
@@ -183,24 +183,24 @@ function SonarForm({ workspaceId, saved }: { workspaceId: number; saved: Workspa
         >
           {check.isPending ? 'Testing…' : 'Test connection'}
         </button>
-        {dirty && <span className="text-[11px] text-gray-500 dark:text-gray-400">Save first.</span>}
+        {dirty && <span className="text-meta text-ui-mute">Save first.</span>}
         {!dirty && (!saved.hasToken || saved.organization == null) && (
-          <span className="text-[11px] text-gray-500 dark:text-gray-400">Save an organization and a token first.</span>
+          <span className="text-meta text-ui-mute">Save an organization and a token first.</span>
         )}
         {result != null && (
           <span
-            className={`text-[11px] ${result.ok ? 'text-emerald-700 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}
+            className={`text-meta ${result.ok ? 'text-ui-success' : 'text-ui-danger'}`}
           >
             {result.message}
           </span>
         )}
       </div>
-      {check.isError && <p className="text-xs text-red-600 dark:text-red-400">{check.error.message}</p>}
+      {check.isError && <p className="text-body text-ui-danger">{check.error.message}</p>}
 
       <SaveButton dirty={dirty} saving={save.isPending} onClick={onSave} />
-      <p className="text-[11px] text-gray-400">Applies to this workspace only.</p>
+      <p className="text-meta text-ui-faint">Applies to this workspace only.</p>
       {save.isError && (
-        <div className="text-[11px] text-red-500">{save.error?.message ?? 'Couldn’t save this setting.'}</div>
+        <div className="text-meta text-ui-danger">{save.error?.message ?? 'Couldn’t save this setting.'}</div>
       )}
     </SectionShell>
   );

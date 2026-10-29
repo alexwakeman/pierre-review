@@ -3,8 +3,9 @@ import { RELATED_REPOS_MAX_PER_REPO, TICKET_REVIEW_PEER_MAX_FOR_PR_REVIEW } from
 import { useRepos } from '../../hooks/useTimeline.js';
 import { partnerIsFull, relatedTo, useRelatedRepos, useSetRelatedRepos } from '../../hooks/useRelatedRepos.js';
 import { InfoButton } from '../InfoModal.js';
-import { inputCls, SaveButton, SectionShell } from './ui.js';
+import { inputCls, SaveButton, SectionShell, CheckInput } from './ui.js';
 import { ScopePendingSection, useSettingsWorkspace } from './workspaceScope.js';
+import { Select } from '../ui/index.js';
 
 // RELATED REPOS for THIS workspace (CORE, free; `GET /api/workspaces/:id/related-repos`, `PUT
 // …/related-repos/:repoId`, `repo_relations`, migration 0131; docs/CLAUDE-REVIEW.md § Related repos).
@@ -83,45 +84,39 @@ export function RelatedReposSection(): JSX.Element {
       }
     >
       {repos.isLoading ? (
-        <p className="text-[11px] text-gray-500 dark:text-gray-400">Loading this workspace’s repositories…</p>
+        <p className="text-meta text-ui-mute">Loading this workspace’s repositories…</p>
       ) : members.length < 2 ? (
-        <p className="text-[11px] text-gray-500 dark:text-gray-400">This needs two or more repositories in the workspace.</p>
+        <p className="text-meta text-ui-mute">This needs two or more repositories in the workspace.</p>
       ) : (
         <>
-          <label className="flex flex-col gap-1 text-xs">
-            <span className="font-medium text-gray-600 dark:text-gray-300">Repository</span>
-            <select
-              className={inputCls}
-              value={current ?? ''}
-              onChange={(e) => setRepoId(Number(e.target.value))}
-              aria-label="Repository"
-            >
-              {members.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.fullName}
-                </option>
-              ))}
-            </select>
-          </label>
+          <div className="flex flex-col items-start gap-1 text-body">
+            <span className="text-meta font-medium text-ui-mute">Repository</span>
+            <Select
+              label="Repository"
+              className="w-full sm:w-auto"
+              value={current != null ? String(current) : null}
+              onChange={(v) => setRepoId(Number(v))}
+              options={members.map((r) => ({ value: String(r.id), label: r.fullName }))}
+            />
+          </div>
           <div className="space-y-1.5">
-            <div className="text-xs font-medium text-gray-600 dark:text-gray-300">Reviewed together with</div>
-            <div className="max-h-44 space-y-1 overflow-auto rounded border border-gray-200 p-2 dark:border-gray-700">
+            <div className="text-meta font-medium text-ui-mute">Reviewed together with</div>
+            <div className="max-h-52 space-y-1 overflow-auto rounded-ui bg-ui-surface p-2.5">
               {members
                 .filter((r) => r.id !== current)
                 .map((r) => {
                   // The cap holds on both sides: a repo already related to the most it can take.
                   const theyAreFull = current != null && partnerIsFull(pairs, current, r.id, RELATED_REPOS_MAX_PER_REPO);
                   return (
-                    <label key={r.id} className="flex items-center gap-2 text-xs">
-                      <input
-                        type="checkbox"
+                    <label key={r.id} className="flex items-center gap-2 text-body">
+                      <CheckInput
                         checked={draft.includes(r.id)}
                         disabled={!draft.includes(r.id) && (full || theyAreFull)}
                         onChange={() => toggle(r.id)}
                       />
-                      <span className="truncate text-gray-700 dark:text-gray-200">{r.fullName}</span>
+                      <span className="truncate text-ui-ink">{r.fullName}</span>
                       {theyAreFull && !draft.includes(r.id) && (
-                        <span className="shrink-0 text-[11px] text-gray-500 dark:text-gray-400">
+                        <span className="shrink-0 text-meta text-ui-mute">
                           already has {RELATED_REPOS_MAX_PER_REPO}
                         </span>
                       )}
@@ -139,7 +134,7 @@ export function RelatedReposSection(): JSX.Element {
       )}
 
       {pairs.length > 0 && (
-        <ul className="space-y-0.5 text-xs text-gray-600 dark:text-gray-300" aria-label="Related pairs">
+        <ul className="space-y-0.5 text-meta text-ui-mute" aria-label="Related pairs">
           {pairs.map((p) => (
             <li key={`${p.repoId}:${p.relatedRepoId}`}>
               {nameOf.get(p.repoId) ?? `#${p.repoId}`} and {nameOf.get(p.relatedRepoId) ?? `#${p.relatedRepoId}`}
@@ -147,10 +142,10 @@ export function RelatedReposSection(): JSX.Element {
           ))}
         </ul>
       )}
-      <p className="text-[11px] text-gray-500 dark:text-gray-400">Applies to this workspace only.</p>
+      <p className="text-meta text-ui-mute">Applies to this workspace only.</p>
 
       {save.isError && (
-        <div className="text-[11px] text-red-500">{save.error?.message ?? 'Couldn’t save this setting.'}</div>
+        <div className="text-meta text-ui-danger">{save.error?.message ?? 'Couldn’t save this setting.'}</div>
       )}
     </SectionShell>
   );

@@ -26,7 +26,7 @@ import {
   useWorkspaceAutoReview,
 } from '../../hooks/useWorkspaceAutoReview.js';
 import { dateTime } from '../../lib/ui.js';
-import { SaveButton, SectionShell } from './ui.js';
+import { SaveButton, SectionShell, CheckInput, RadioInput } from './ui.js';
 
 const CAP_MIN = 1;
 const CAP_MAX = 500;
@@ -38,6 +38,7 @@ function parseCap(text: string): number | null {
   return n >= CAP_MIN && n <= CAP_MAX ? n : null;
 }
 import { ScopePendingSection, useSettingsWorkspace } from './workspaceScope.js';
+import { Select } from '../ui/index.js';
 
 /**
  * AUTO CLAUDE REVIEW for the currently-selected workspace — CORE, on the workspace row (migration
@@ -284,26 +285,24 @@ export function AutoReviewSection(): JSX.Element {
         </InfoButton>
       }
     >
-      <label className="flex items-start gap-2 text-xs">
-        <input
-          type="checkbox"
+      <label className="flex items-start gap-2 text-body">
+        <CheckInput
           className="mt-0.5"
           checked={on}
           onChange={(e) => setOn(e.target.checked)}
         />
         <span>
-          <span className="font-medium text-gray-700 dark:text-gray-200">
+          <span className="font-medium text-ui-ink">
             Review new PRs automatically
           </span>
-          <span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">
+          <span className="mt-0.5 block text-meta text-ui-mute">
             Only PRs opened after you turn this on.
           </span>
         </span>
       </label>
-      <div className={`flex items-start gap-1 pl-5 text-xs ${on ? '' : 'opacity-60'}`}>
-        <label className="flex items-start gap-2 text-gray-700 dark:text-gray-200">
-          <input
-            type="checkbox"
+      <div className={`flex items-start gap-1 pl-5 text-body ${on ? '' : 'opacity-60'}`}>
+        <label className="flex items-start gap-2 text-ui-ink">
+          <CheckInput
             className="mt-0.5"
             checked={claimsOn}
             onChange={(e) => setClaimsOn(e.target.checked)}
@@ -324,25 +323,24 @@ export function AutoReviewSection(): JSX.Element {
           <p>Needs write access to the repo. Without it, Limn reviews without a line.</p>
         </InfoButton>
       </div>
-      <div className={`space-y-1.5 pl-5 text-xs ${on ? '' : 'opacity-60'}`}>
+      <div className={`space-y-1.5 pl-5 text-body ${on ? '' : 'opacity-60'}`}>
         <div className="flex items-start gap-1">
-          <label className="flex flex-wrap items-center gap-2 text-gray-700 dark:text-gray-200">
+          <div className="flex flex-wrap items-center gap-2 text-ui-ink">
             <span className="font-medium">Auto reviews use</span>
-            <select
-              aria-label="Auto reviews use"
+            <Select
+              label="Auto reviews use"
+              size="sm"
               value={providers}
-              onChange={(e) => setProviders(e.target.value === 'both' ? 'both' : 'default')}
-              className="rounded border border-gray-300 bg-white px-1.5 py-0.5 text-xs dark:border-gray-700 dark:bg-gray-900"
-            >
-              <option value="default">{ai.providerName} (the default)</option>
-              <option value="both" disabled={!pairReady && providers !== 'both'}>
-                {PAIR_PICK_LABEL}
-              </option>
-            </select>
+              onChange={(v) => setProviders(v === 'both' ? 'both' : 'default')}
+              options={[
+                { value: 'default' as const, label: `${ai.providerName} (the default)` },
+                { value: 'both' as const, label: PAIR_PICK_LABEL, disabled: !pairReady && providers !== 'both' },
+              ]}
+            />
             {!pairReady && (
-              <span className="text-xs text-gray-500 dark:text-gray-400">Claude + Codex needs both signed in.</span>
+              <span className="text-meta text-ui-mute">Claude + Codex needs both signed in.</span>
             )}
-          </label>
+          </div>
           <InfoButton title="Claude + Codex">
             <p>
               Claude reviews first. Codex then reviews the same commit, is told what Claude found, and
@@ -357,11 +355,10 @@ export function AutoReviewSection(): JSX.Element {
         {pairReady && (
           <div className="flex items-start gap-1" data-pair-strictness>
             <fieldset className="space-y-1">
-              <legend className="font-medium text-gray-700 dark:text-gray-200">When Claude and Codex disagree</legend>
+              <legend className="font-medium text-ui-ink">When Claude and Codex disagree</legend>
               {STRICTNESS_ROWS.map(({ value, label }) => (
-                <label key={value} className="flex items-start gap-2 text-gray-700 dark:text-gray-200">
-                  <input
-                    type="radio"
+                <label key={value} className="flex items-start gap-2 text-ui-ink">
+                  <RadioInput
                     name="pair-strictness"
                     className="mt-0.5"
                     checked={strictness === value}
@@ -391,10 +388,9 @@ export function AutoReviewSection(): JSX.Element {
         )}
         <div className="flex items-start gap-1">
           <fieldset className="space-y-1">
-            <legend className="font-medium text-gray-700 dark:text-gray-200">When an auto review finishes</legend>
-            <label className="flex items-start gap-2 text-gray-700 dark:text-gray-200">
-              <input
-                type="radio"
+            <legend className="font-medium text-ui-ink">When an auto review finishes</legend>
+            <label className="flex items-start gap-2 text-ui-ink">
+              <RadioInput
                 name="auto-review-outcome"
                 className="mt-0.5"
                 checked={!postOn}
@@ -402,14 +398,13 @@ export function AutoReviewSection(): JSX.Element {
               />
               <span>
                 Keep it in Limn
-                <span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">
+                <span className="mt-0.5 block text-meta text-ui-mute">
                   Read it in the AI Review tab and post it yourself if you want.
                 </span>
               </span>
             </label>
-            <label className="flex items-start gap-2 text-gray-700 dark:text-gray-200">
-              <input
-                type="radio"
+            <label className="flex items-start gap-2 text-ui-ink">
+              <RadioInput
                 name="auto-review-outcome"
                 className="mt-0.5"
                 checked={postOn}
@@ -417,7 +412,7 @@ export function AutoReviewSection(): JSX.Element {
               />
               <span>
                 Post to GitHub
-                <span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">
+                <span className="mt-0.5 block text-meta text-ui-mute">
                   As soon as it finishes. Reviews you start yourself keep the Post button.
                 </span>
               </span>
@@ -446,10 +441,9 @@ export function AutoReviewSection(): JSX.Element {
         {postOn && (
         <div className="space-y-1.5 pl-5">
           <fieldset className="space-y-1">
-            <legend className="font-medium text-gray-700 dark:text-gray-200">Which PRs</legend>
-            <label className="flex items-start gap-2 text-gray-700 dark:text-gray-200">
-              <input
-                type="radio"
+            <legend className="font-medium text-ui-ink">Which PRs</legend>
+            <label className="flex items-start gap-2 text-ui-ink">
+              <RadioInput
                 name="auto-post-scope"
                 className="mt-0.5"
                 checked={scope === 'mine'}
@@ -457,9 +451,8 @@ export function AutoReviewSection(): JSX.Element {
               />
               <span>Your own PRs, and PRs you are asked to review or have reviewed or commented on</span>
             </label>
-            <label className="flex items-start gap-2 text-gray-700 dark:text-gray-200">
-              <input
-                type="radio"
+            <label className="flex items-start gap-2 text-ui-ink">
+              <RadioInput
                 name="auto-post-scope"
                 className="mt-0.5"
                 checked={scope === 'all'}
@@ -469,11 +462,10 @@ export function AutoReviewSection(): JSX.Element {
             </label>
           </fieldset>
           <fieldset className="space-y-1">
-            <legend className="font-medium text-gray-700 dark:text-gray-200">What to post</legend>
+            <legend className="font-medium text-ui-ink">What to post</legend>
             {KIND_ROWS.map(({ key, label }) => (
-              <label key={key} className="flex items-start gap-2 text-gray-700 dark:text-gray-200">
-                <input
-                  type="checkbox"
+              <label key={key} className="flex items-start gap-2 text-ui-ink">
+                <CheckInput
                   className="mt-0.5"
                   checked={kinds[key]}
                   onChange={(e) => setKinds((k) => ({ ...k, [key]: e.target.checked }))}
@@ -483,24 +475,23 @@ export function AutoReviewSection(): JSX.Element {
             ))}
           </fieldset>
           <label className="flex items-start gap-2">
-            <input
-              type="checkbox"
+            <CheckInput
               className="mt-0.5"
               checked={verdict}
               onChange={(e) => setVerdict(e.target.checked)}
             />
             <span>
-              <span className="font-medium text-gray-700 dark:text-gray-200">
+              <span className="font-medium text-ui-ink">
                 Approve or request changes for me
               </span>
-              <span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">
+              <span className="mt-0.5 block text-meta text-ui-mute">
                 Approves only with no blockers or warnings. Only when your last review was a
                 comment, never on your own PRs. When it does not approve, it says why.
               </span>
             </span>
           </label>
           <fieldset className={`space-y-1 pl-5 ${verdict ? '' : 'opacity-60'}`}>
-            <legend className="flex items-center gap-1 font-medium text-gray-700 dark:text-gray-200">
+            <legend className="flex items-center gap-1 font-medium text-ui-ink">
               Approve
               <InfoButton title="Approve by impact">
                 <p>
@@ -515,9 +506,8 @@ export function AutoReviewSection(): JSX.Element {
               </InfoButton>
             </legend>
             {IMPACT_ROWS.map(({ key, label }) => (
-              <label key={key} className="flex items-start gap-2 text-gray-700 dark:text-gray-200">
-                <input
-                  type="checkbox"
+              <label key={key} className="flex items-start gap-2 text-ui-ink">
+                <CheckInput
                   className="mt-0.5"
                   checked={impact[key]}
                   onChange={(e) => setImpact((v) => ({ ...v, [key]: e.target.checked }))}
@@ -527,7 +517,7 @@ export function AutoReviewSection(): JSX.Element {
             ))}
           </fieldset>
           <fieldset className={`space-y-1 pl-5 ${verdict ? '' : 'opacity-60'}`} data-approve-leftovers>
-            <legend className="flex items-center gap-1 font-medium text-gray-700 dark:text-gray-200">
+            <legend className="flex items-center gap-1 font-medium text-ui-ink">
               Approve with open findings
               <InfoButton title="Approve with open findings">
                 <p>
@@ -538,9 +528,8 @@ export function AutoReviewSection(): JSX.Element {
               </InfoButton>
             </legend>
             {LEFTOVER_ROWS.map(({ value, label }) => (
-              <label key={value} className="flex items-start gap-2 text-gray-700 dark:text-gray-200">
-                <input
-                  type="radio"
+              <label key={value} className="flex items-start gap-2 text-ui-ink">
+                <RadioInput
                   name="approve-leftovers"
                   className="mt-0.5"
                   checked={leftovers === value}
@@ -551,17 +540,16 @@ export function AutoReviewSection(): JSX.Element {
             ))}
           </fieldset>
           <label className="flex items-start gap-2">
-            <input
-              type="checkbox"
+            <CheckInput
               className="mt-0.5"
               checked={resolve}
               onChange={(e) => setResolve(e.target.checked)}
             />
             <span>
-              <span className="font-medium text-gray-700 dark:text-gray-200">
+              <span className="font-medium text-ui-ink">
                 Resolve Limn’s threads once fixed
               </span>
-              <span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">
+              <span className="mt-0.5 block text-meta text-ui-mute">
                 When a later review finds a posted comment fixed, Limn replies and resolves it.
               </span>
             </span>
@@ -569,40 +557,39 @@ export function AutoReviewSection(): JSX.Element {
         </div>
         )}
       </div>
-      <div className={`pl-5 text-xs ${on ? '' : 'opacity-60'}`}>
-        <label className="flex flex-wrap items-center gap-1.5 text-gray-700 dark:text-gray-200">
+      <div className={`pl-5 text-body ${on ? '' : 'opacity-60'}`}>
+        <label className="flex flex-wrap items-center gap-1.5 text-ui-ink">
           <span>Up to</span>
           <input
             type="text"
             inputMode="numeric"
             aria-label="Auto reviews a day"
             aria-invalid={cap == null}
-            className="w-16 rounded border border-gray-300 bg-white px-1.5 py-0.5 text-xs dark:border-gray-600 dark:bg-gray-800"
+            className="w-16 rounded-ui bg-ui-raise px-2 py-1 text-body ring-1 ring-inset ring-ui-line outline-none focus:ring-2 focus:ring-ui-accent"
             value={capText}
             onChange={(e) => setCapText(e.target.value)}
           />
           <span>auto reviews a day (UTC). The rest wait for the next day.</span>
         </label>
         {cap == null && (
-          <span className="mt-0.5 block text-xs text-red-500">
+          <span className="mt-0.5 block text-body text-ui-danger">
             Enter a whole number from {CAP_MIN} to {CAP_MAX}.
           </span>
         )}
       </div>
-      <div className={`flex items-start gap-1 pl-5 text-xs ${on ? '' : 'opacity-60'}`}>
+      <div className={`flex items-start gap-1 pl-5 text-body ${on ? '' : 'opacity-60'}`}>
         <label className="flex items-start gap-2">
-          <input
-            type="checkbox"
+          <CheckInput
             className="mt-0.5"
             checked={fixOn}
             disabled={!on}
             onChange={(e) => setFixOn(e.target.checked)}
           />
           <span>
-            <span className="font-medium text-gray-700 dark:text-gray-200">
+            <span className="font-medium text-ui-ink">
               Auto AI Fix on your own PRs
             </span>
-            <span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">
+            <span className="mt-0.5 block text-meta text-ui-mute">
               {!on
                 ? 'Runs only after an auto review, so it is off while auto review is off.'
                 : autoPush
@@ -623,13 +610,12 @@ export function AutoReviewSection(): JSX.Element {
           </p>
         </InfoButton>
       </div>
-      <div className={`space-y-1 pl-10 text-xs ${on && fixOn ? '' : 'opacity-60'}`}>
+      <div className={`space-y-1 pl-10 text-body ${on && fixOn ? '' : 'opacity-60'}`}>
         <fieldset className="space-y-1">
-          <legend className="font-medium text-gray-700 dark:text-gray-200">Always include</legend>
+          <legend className="font-medium text-ui-ink">Always include</legend>
           {FIX_ROWS.map(({ key, label }) => (
-            <label key={key} className="flex items-start gap-2 text-gray-700 dark:text-gray-200">
-              <input
-                type="checkbox"
+            <label key={key} className="flex items-start gap-2 text-ui-ink">
+              <CheckInput
                 className="mt-0.5"
                 checked={include[key]}
                 onChange={(e) => setInclude((v) => ({ ...v, [key]: e.target.checked }))}
@@ -639,40 +625,38 @@ export function AutoReviewSection(): JSX.Element {
           ))}
         </fieldset>
         <label className="flex items-start gap-2">
-          <input
-            type="checkbox"
+          <CheckInput
             className="mt-0.5"
             checked={autoPush}
             onChange={(e) => setAutoPush(e.target.checked)}
           />
           <span>
-            <span className="font-medium text-gray-700 dark:text-gray-200">Push automatically</span>
-            <span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">
+            <span className="font-medium text-ui-ink">Push automatically</span>
+            <span className="mt-0.5 block text-meta text-ui-mute">
               Pushes a finished fix to the PR’s branch. Not built or tested first.
             </span>
           </span>
         </label>
       </div>
       {!aiReady && (
-        <div className="flex flex-wrap items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
+        <div className="flex flex-wrap items-center gap-2 text-meta text-ui-mute">
           <span>Nothing is reviewed until AI is set up.</span>
           {ai.runtime !== 'ready' ? <AiRuntimeSetup /> : <AiAuthLine kind="review" />}
         </div>
       )}
       {storedOn && stored?.enabledAt != null && (
-        <p className="text-xs text-gray-500 dark:text-gray-400">
+        <p className="text-meta text-ui-mute">
           On since {dateTime(stored.enabledAt)}.
         </p>
       )}
-      <div className="flex items-start gap-1 border-t border-gray-200 pt-2 text-xs dark:border-gray-700">
+      <div className="flex items-start gap-1 border-t border-ui-line pt-2 text-body">
         <label className="flex items-start gap-2">
-          <input
-            type="checkbox"
+          <CheckInput
             className="mt-0.5"
             checked={diagramsOn}
             onChange={(e) => setDiagramsOn(e.target.checked)}
           />
-          <span className="font-medium text-gray-700 dark:text-gray-200">
+          <span className="font-medium text-ui-ink">
             Draw a design diagram after each review
           </span>
         </label>
@@ -724,7 +708,7 @@ export function AutoReviewSection(): JSX.Element {
         }
       />
       {update.isError && (
-        <div className="text-xs text-red-500">
+        <div className="text-body text-ui-danger">
           {(update.error as Error)?.message ?? 'Couldn’t save.'}
         </div>
       )}

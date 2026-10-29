@@ -40,16 +40,16 @@ export function BotScoringSection(): JSX.Element | null {
       {ml.state !== 'ready' && (
         <div className="flex flex-wrap items-center gap-2">
           {running ? (
-            <span className="text-xs text-gray-600 dark:text-gray-300" role="status">
+            <span className="text-meta text-ui-mute" role="status">
               Setting up…{state.message != null ? ` ${state.message}` : ''}
             </span>
           ) : (
             <>
-              {failure != null && <span className="text-xs text-red-600 dark:text-red-400">{failure}</span>}
+              {failure != null && <span className="text-body text-ui-danger">{failure}</span>}
               <button
                 type="button"
                 onClick={() => startMlInstall(qc)}
-                className="rounded border border-gray-300 px-2 py-1 text-xs hover:border-gray-400 dark:border-gray-700 dark:hover:border-gray-500"
+                className="inline-flex h-7 items-center gap-1 rounded-ui bg-ui-raise px-2.5 text-body font-medium text-ui-ink hover:bg-ui-hover touch:h-10 outline-none focus-visible:ring-2 focus-visible:ring-ui-accent"
               >
                 {failure != null ? 'Retry' : ML_SETUP_LABEL}
               </button>

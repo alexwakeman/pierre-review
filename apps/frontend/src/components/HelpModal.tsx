@@ -2,6 +2,7 @@ import { useEffect, type ReactNode } from 'react';
 import { Wordmark } from './Wordmark';
 import { CloseIcon, WorkspaceIcon } from './Icons.js';
 import { closeActivePopover } from '../lib/activePopover.js';
+import { useShell } from '../store/shell.js';
 import { weightPhrase } from './settings/myTurnSettingsForm.js';
 import { aiCredentialWords } from '@pierre-review/shared';
 import { useAiProvider } from '../hooks/useAiCapabilities.js';
@@ -17,6 +18,8 @@ export function HelpModal({ onClose }: { onClose: () => void }): JSX.Element {
   // its first Escape (lib/activePopover.ts).
   useEffect(() => {
     closeActivePopover();
+    // Opened from the drawer's foot below lg: the drawer would otherwise stay drawn over this dialog.
+    useShell.getState().setDrawerOpen(false);
   }, []);
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
@@ -31,23 +34,23 @@ export function HelpModal({ onClose }: { onClose: () => void }): JSX.Element {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      className="fixed inset-0 z-50 flex items-end justify-center bg-ui-scrim/40 sm:items-center sm:p-4 motion-safe:animate-ui-fade"
       onClick={onClose}
       role="presentation"
     >
       <div
-        className="flex max-h-[80vh] w-[34rem] max-w-[92vw] flex-col rounded-lg border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-900"
+        className="flex max-h-[92vh] w-full flex-col rounded-t-xl bg-ui-raise pb-[env(safe-area-inset-bottom)] shadow-2xl shadow-black/30 motion-safe:animate-ui-sheet-up sm:max-h-[80vh] sm:w-[36rem] sm:max-w-[92vw] sm:rounded-ui sm:pb-0 sm:motion-safe:animate-ui-pop"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
         aria-label="Limn help"
       >
-        <div className="flex items-center justify-between border-b border-gray-200 px-4 py-2 dark:border-gray-800">
+        <div className="flex items-center justify-between px-5 pb-1 pt-3">
           <h2><Wordmark /></h2>
           <button
             type="button"
             onClick={onClose}
-            className="flex items-center self-stretch text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+            className="-mr-1.5 inline-flex h-7 w-7 items-center justify-center rounded-ui text-ui-mute hover:bg-ui-hover hover:text-ui-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent touch:h-10 touch:w-10"
             aria-label="Close (Esc)"
             title="Close (Esc)"
           >
@@ -55,8 +58,8 @@ export function HelpModal({ onClose }: { onClose: () => void }): JSX.Element {
           </button>
         </div>
 
-        <div className="min-h-0 flex-1 space-y-4 overflow-auto px-4 py-3 text-sm leading-relaxed text-gray-600 dark:text-gray-300">
-          <p className="text-gray-500 dark:text-gray-400">
+        <div className="min-h-0 flex-1 space-y-5 overflow-auto px-5 pb-5 pt-2 text-body leading-relaxed text-ui-mute">
+          <p className="text-ui-mute">
             A dashboard for GitHub pull-request activity across a Workspace of repos —
             built for sprint situational-awareness: who’s doing what, which PRs are
             stalled, which review threads sit untouched, and what needs <em>you</em>. It
@@ -189,7 +192,7 @@ export function HelpModal({ onClose }: { onClose: () => void }): JSX.Element {
 function Section({ title, children }: { title: string; children: ReactNode }): JSX.Element {
   return (
     <section>
-      <h3 className="mb-1 font-semibold text-gray-800 dark:text-gray-100">{title}</h3>
+      <h3 className="mb-1 text-title text-ui-ink">{title}</h3>
       <p>{children}</p>
     </section>
   );
@@ -197,7 +200,7 @@ function Section({ title, children }: { title: string; children: ReactNode }): J
 
 function Code({ children }: { children: ReactNode }): JSX.Element {
   return (
-    <code className="rounded bg-gray-100 px-1 font-mono text-[12px] text-gray-700 dark:bg-gray-800 dark:text-gray-300">
+    <code className="rounded-[4px] bg-ui-hover px-1 font-mono text-meta text-ui-ink">
       {children}
     </code>
   );
@@ -205,7 +208,7 @@ function Code({ children }: { children: ReactNode }): JSX.Element {
 
 function Kbd({ children }: { children: ReactNode }): JSX.Element {
   return (
-    <kbd className="rounded border border-gray-300 bg-gray-100 px-1 text-[11px] font-medium text-gray-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300">
+    <kbd className="rounded-[4px] bg-ui-hover px-1.5 py-px text-meta font-medium text-ui-ink">
       {children}
     </kbd>
   );

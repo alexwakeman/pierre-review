@@ -298,7 +298,7 @@ Known debts the redesign must clear here:
   - [ ] Hidden when Notification is unsupported
   - [ ] The pref is shared with ClaudeReviewBanner
 
-### [x] Help button + HelpModal → sidebar foot (`QuestionIcon`), ⌘K "Help and keyboard shortcuts"; the Keyboard and sidebar sections rewritten for the shell; plus the new `?` key sheet
+### [x] Help button + HelpModal → (restyled: tone, no borders, a bottom sheet below sm; opening closes the drawer) sidebar foot (`QuestionIcon`), ⌘K "Help and keyboard shortcuts"; the Keyboard and sidebar sections rewritten for the shell; plus the new `?` key sheet
 - Entry: header "?" button (aria-label Help)
 - Files: `components/HelpModal.tsx`, `App.tsx`
 - Essential info:
@@ -719,7 +719,7 @@ Known debts the redesign must clear here:
   `test/ticketTab.test.ts`, `e2e/activity-feed.spec.ts`; `scripts/verify-demo.mjs` VIEWS and
   `scripts/record-demo-steps.mjs` drive every screen by these URLs
 
-### [ ] InfoButton / InfoModal (explanation primitive)
+### [x] InfoButton / InfoModal (explanation primitive) → same API and behaviour (click, Esc captured, focus trap/return); tone, no borders, `ui-pop`; the ⓘ gets a 40px touch hit area; InfoModal is a bottom sheet below sm
 - Entry: ⓘ buttons beside headings app-wide (in the shell: AiUsageMenu "Limn's share")
 - Files: `components/InfoModal.tsx`
 - Essential info:
@@ -2758,7 +2758,7 @@ Cross-cutting:
 - Tests: `test/botReviewers.test.ts`, `test/botAvatar.test.ts`, `test/botCost.test.ts`,
   `test/vendorInk.test.ts`, verify-demo bots:classification
 
-### [ ] Docs (workspace reference library: list, add, tree, reader, chat)
+### [x] Docs (workspace reference library: list, add, tree, reader, chat) → a page header (Docs ⓘ, "N documents", the pane tabs); library rows are two lines (title · source, pages, sections, model) with a red mark + line where a row blocks (unreachable, failed); the open document's row opens up with Checked/last edited, figures and Refresh now / Rebuild / Remove; below lg one column with Library · Read · Ask tabs (lg–xl: library beside Read / Ask); custom Selects for depth and conversation; ⌘K: every document, "Ask about these docs", "Add a document to Docs"
 - Entry: rail "Docs" (`?activityRepo=docs`), only when `me.ai.enabled`. Also from a review's
   "Reference docs", a finding citation or a story docs check (`store/openDocs.ts`)
 - Files: `Activity/DocsView.tsx`, `Activity/DocsViewer.tsx`, `Activity/DocsChat.tsx`,
@@ -2800,7 +2800,7 @@ Cross-cutting:
   verify-demo docs (expects "Release handbook", "Confluence · 3 pages", "Refresh now", "Can’t
   reach this page in Confluence since", "Checkout design notes", "Notion · 2 pages", "1 figure described by AI")
 
-### [ ] Settings modal shell (tabs, workspace boundary, focus landing)
+### [x] Settings modal shell (tabs, workspace boundary, focus landing) → md+: a sheet with the areas column (surface) beside the area (title in its header); phone: full screen, the list of areas (each with a one-line summary) THEN the area with Back; deep links open straight on the area; the boundary is a tone band whose copy names "the top of the sidebar"; Escape also yields to an open Select/Menu; opening closes the drawer
 - See § 1 Settings modal. Extra:
   - [ ] Title "Settings", Close "Close (Esc)"
   - [ ] Tabs vertical at sm+, a top row on narrow screens (→ phones: full-screen sheet)
@@ -2813,7 +2813,7 @@ Cross-cutting:
   `test/workspaceScope.test.ts`, `e2e/pending-keyboard.spec.ts`, verify-demo settings:ai,
   settings:ai-effort, settings:ai-codex, settings:related-repos, settings:confluence, settings:notion, ws2:settings:notion
 
-### [ ] Settings → Pull requests (Large pull requests, Blast radius)
+### [x] Settings → Pull requests (Large pull requests, Blast radius) → restyled; radios/checkboxes are the restyled real inputs (`CheckInput`/`RadioInput`)
 - Files: `settings/LargePrThresholdSection.tsx`, `settings/BlastRadiusSection.tsx`
 - Essential info:
   - [ ] "Large pull requests": line threshold (code churn only), one number per account
@@ -2828,7 +2828,7 @@ Cross-cutting:
   - [ ] "Enter a number greater than zero." / "Enter a whole number of lines, or leave empty."; save errors
 - Tests: `test/largePrFlag.test.ts`, `test/reachModel.test.ts`
 
-### [ ] Settings → Pending (My Turn; Pending mute)
+### [x] Settings → Pending (My Turn; Pending mute) → restyled; presets are a segmented control (same radiogroup, one Tab stop); sliders on --ui-* tokens
 - Files: `settings/MyTurnSection.tsx`, `settings/myTurnSettingsForm.ts`, `settings/PendingMuteSection.tsx`,
   `packages/shared/src/my-turn-settings.ts`
 - Essential info:
@@ -2850,7 +2850,7 @@ Cross-cutting:
 - Tests: `test/myTurnSettingsForm.test.ts`, `test/pendingMutePatch.test.ts`,
   `test/myTurnCapDisclosure.test.ts`, `e2e/pending-keyboard.spec.ts`
 
-### [ ] Settings → AI (provider, sign-in, effort, AI spend)
+### [x] Settings → AI (provider, sign-in, effort, AI spend) → `#ai-effort` and "Your subscription" are custom Selects (hidden input `name=ai-effort`; verify-demo clicks the option); `input[name=ai-provider]` radios unchanged in behaviour
 - Files: `settings/AiProviderSection.tsx`, `settings/ClaudeSpendSection.tsx`, `settings/claudeSpendForm.ts`,
   `hooks/useAiCapabilities.ts`, `hooks/useAiProvider.ts`, `hooks/useAiBudget.ts`
 - Essential info:
@@ -2872,7 +2872,7 @@ Cross-cutting:
   verify-demo settings:ai, settings:ai-effort, settings:ai-codex. ⚠ A custom Select/Radio must keep
   these selectors working (or the scripts are updated in the same commit)
 
-### [ ] Settings → AI review (Auto review, Reference docs, Confluence, Notion, Related repos)
+### [x] Settings → AI review (Auto review, Reference docs, Confluence, Notion, Related repos) → restyled; "Auto reviews use" and the Repository picker are custom Selects
 - Files: `settings/AutoReviewSection.tsx`, `settings/ReferenceDocsSection.tsx`, `settings/ConfluenceSection.tsx`,
   `settings/NotionSection.tsx`, `settings/RelatedReposSection.tsx`, `hooks/useWorkspaceAutoReview.ts`,
   `hooks/useRelatedRepos.ts`, `lib/modelPick.ts`
@@ -2901,7 +2901,7 @@ Cross-cutting:
 - Tests: `test/autoPost.test.ts`, `test/verdictStrictness.test.ts`, `test/claudeAutoReview.test.ts`,
   `test/relatedRepos.test.ts`, verify-demo settings:related-repos, settings:confluence, settings:notion
 
-### [ ] Settings → Reports and sprint (Working hours and budgets; Sprint cadence and comparison window)
+### [x] Settings → Reports and sprint (Working hours and budgets; Sprint cadence and comparison window) → restyled; Sprint length and Comparison window are custom Selects
 - Files: `settings/FlowSettingsSection.tsx`, `settings/flowSettingsForm.ts`, `settings/BudgetSliders.tsx`,
   `settings/TimeZoneCombobox.tsx`, `settings/timeZones.ts`, `settings/SprintSection.tsx`
 - Essential info:
@@ -2917,7 +2917,7 @@ Cross-cutting:
   - [ ] "Enter the working day as two times, like 09:00 and 18:00." / "Pick at least one working day."; save error
 - Tests: `test/flowSettingsForm.test.ts`, `test/timeZones.test.ts`, `test/sprintSectionPatch.test.ts`, `test/escapeOwner.test.ts`
 
-### [ ] Settings → Integrations (Issue tracker; SonarCloud; Slack)
+### [x] Settings → Integrations (Issue tracker; SonarCloud; Slack) → restyled; Provider, Where to look, Notion property mappings, Current sprint, Cadence / Send at / And at are custom Selects; API-access boxes are tone panels
 - Files: `settings/IssueLinksSection.tsx`, `settings/JiraApiAccess.tsx`, `settings/LinearApiAccess.tsx`,
   `settings/NotionTrackerSetup.tsx`, `settings/SonarSection.tsx`, `settings/SlackSection.tsx`,
   `hooks/useWorkspaceTracker.ts`, `hooks/useSlackTarget.ts`, `hooks/useSonar.ts`
@@ -2943,7 +2943,7 @@ Cross-cutting:
     "Save first."; "A webhook URL is required."; Save disabled over the digest cap; save error
 - Tests: `test/githubTracker.test.ts`, `test/jiraTicket.test.ts`, verify-demo ws2:settings:notion
 
-### [ ] Settings → Bots (Bot comment scoring; Dependency updates)
+### [x] Settings → Bots (Bot comment scoring; Dependency updates) → restyled
 - Files: `settings/BotScoringSection.tsx`, `settings/DependencyAutoMergeSection.tsx`, `hooks/useMlInstall.ts`
 - Essential info:
   - [ ] "Bot comment scoring" (global): "Score how serious each bot review comment is."; one-time

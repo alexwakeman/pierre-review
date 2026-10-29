@@ -215,7 +215,7 @@ export function TimeZoneCombobox({
             // Keeps focus in the input for a click anywhere in the list, the scrollbar included —
             // a blur would close the list before the click landed.
             onMouseDown={(e) => e.preventDefault()}
-            className="z-[70] overflow-auto rounded-md border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-900"
+            className="z-[70] overflow-auto rounded-ui bg-ui-raise p-1 shadow-xl shadow-black/25 ring-1 ring-ui-line"
           >
             {/* The floating props go on the LISTBOX, not the box around it: they carry
                 `aria-orientation`, which a role-less element may not have. The box also holds the
@@ -233,16 +233,16 @@ export function TimeZoneCombobox({
                   role="option"
                   id={`${listId}-opt-${i}`}
                   aria-selected={i === active}
-                  className={`flex cursor-pointer items-center justify-between gap-3 px-2 py-1 text-xs ${
-                    i === active ? 'bg-sky-50 dark:bg-sky-950/40' : ''
+                  className={`flex cursor-pointer items-center justify-between gap-3 px-2 py-1 text-body ${
+                    i === active ? 'bg-ui-sel' : ''
                   }`}
                 >
-                  <span className="flex min-w-0 items-center gap-1 text-gray-800 dark:text-gray-100">
+                  <span className="flex min-w-0 items-center gap-1 text-ui-ink">
                     <span className="truncate">{row.label}</span>
                     {row.value === current && <CheckIcon size={11} className="shrink-0" />}
                   </span>
                   {row.offset !== '' && (
-                    <span className="shrink-0 tabular-nums text-gray-500 dark:text-gray-400">
+                    <span className="shrink-0 tabular-nums text-ui-mute">
                       {row.offset}
                     </span>
                   )}
@@ -250,7 +250,7 @@ export function TimeZoneCombobox({
               ))}
             </div>
             {rows.length === 0 && (
-              <p className="px-2 py-1 text-xs text-gray-500 dark:text-gray-400">
+              <p className="px-2 py-1 text-meta text-ui-mute">
                 No time zone matches “{query.trim()}”.
               </p>
             )}

@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
-import { useMediaQuery } from '../../hooks/useMediaQuery.js';
 import { SprintSection } from './SprintSection.js';
 import { SlackSection } from './SlackSection.js';
 import { IssueLinksSection, ISSUE_TRACKER_SECTION_HEADING_ID } from './IssueLinksSection.js';
@@ -29,15 +28,18 @@ import {
   type SettingsTabDef,
   type SettingsTabId,
 } from './settingsTabs.js';
-import { CloseIcon } from '../Icons.js';
+import { ChevronIcon, CloseIcon } from '../Icons.js';
+import { IconButton, cx, FOCUS_RING, useIsPhone } from '../ui/index.js';
+import { useShell } from '../../store/shell.js';
 import { escapeOwnedByControl } from '../../lib/escapeOwner.js';
-import { closeActivePopover } from '../../lib/activePopover.js';
+import { closeActivePopover, hasActivePopover } from '../../lib/activePopover.js';
 import { focusReturner } from '../../lib/focusReturn.js';
 import { useSettingsModal, type SettingsFocus } from '../../store/settingsModal.js';
 
-// User configuration modal, opened from the header avatar menu. Mirrors HelpModal's shell
-// (fixed overlay + role=dialog card + capture-phase Escape so a dismiss doesn't reach the global
-// keyboard hook).
+// User configuration modal, opened from the sidebar foot's account menu, ⌘K "Settings: <area>" and the
+// deep links below (fixed overlay + role=dialog + capture-phase Escape so a dismiss doesn't reach the
+// global keyboard hook). Redesign (docs/redesign/DESIGN.md): a tone-separated sheet; from md a
+// column of areas beside the area on show; on a phone, full screen, the list of areas THEN one area.
 //
 // ── ONE AREA AT A TIME: A TAB LIST, NOT ONE LONG PANEL ──────────────────────────────────────────
 // The modal was a single scrolling column of sixteen sections; finding Slack meant scrolling past
@@ -54,8 +56,8 @@ import { useSettingsModal, type SettingsFocus } from '../../store/settingsModal.
 // ── THE GRAIN SPLIT SURVIVES INSIDE EACH TAB ─────────────────────────────────────────────────
 // Global sections first, then ONE "Workspace · <name>" heading and the tab's workspace-scoped
 // sections beneath it. The heading is load-bearing, not decoration: it is the ONLY thing telling
-// the reader which team they are retuning (there is no workspace picker in Settings — the rail's
-// selection is the scope), and by being a boundary rather than a suffix it also says which
+// the reader which team they are retuning (there is no workspace picker in Settings — the sidebar's
+// workspace is the scope), and by being a boundary rather than a suffix it also says which
 // settings are NOT a team's. Sections below it name a workspace only in a sentence that names a
 // DIFFERENT one (see SlackSection's cap disclosure). Every tab with workspace sections draws it.
 //
@@ -124,15 +126,22 @@ export function SettingsModal({
   const [tab, setTab] = useState<SettingsTabId>(() => initialSettingsTab(focus, lastTab, aiEnabled));
   // AI can turn off while the modal is open (rare); never leave an unshown tab selected.
   const activeTab: SettingsTabId = tabs.some((t) => t.id === tab) ? tab : tabs[0]!.id;
-  const wide = useMediaQuery('(min-width: 640px)');
+  // PHONE (< md): a full-screen sheet that shows EITHER the list of areas OR one area, with a Back
+  // button between them (docs/redesign/DESIGN.md § 6). A deep link (a `focus`) opens straight on its
+  // area; a plain open starts on the list. Wider: the list is a column beside the area.
+  const phone = useIsPhone();
+  const [phoneList, setPhoneList] = useState(focus == null);
+  const showList = !phone || phoneList;
+  const showPanel = !phone || !phoneList;
   const scrollerRef = useRef<HTMLDivElement>(null);
   const tabRefs = useRef(new Map<SettingsTabId, HTMLButtonElement>());
   // The tab the modal OPENED on — the one the mount effect focuses when no section was asked for.
   const initialTabRef = useRef(activeTab);
 
   const select = useCallback(
-    (id: SettingsTabId, moveFocus: boolean): void => {
+    (id: SettingsTabId, moveFocus: boolean, openArea = true): void => {
       setTab(id);
+      if (openArea) setPhoneList(false);
       // One scroller serves every panel, so a new tab starts at its top, not at the old one's depth.
       if (scrollerRef.current) scrollerRef.current.scrollTop = 0;
       if (moveFocus) tabRefs.current.get(id)?.focus();
@@ -152,7 +161,8 @@ export function SettingsModal({
     const next = tabForKey(e.key, activeTab, tabs);
     if (next == null) return;
     e.preventDefault();
-    select(next, true);
+    // On the phone's list the arrows walk the list; a tap or Enter opens the area.
+    select(next, true, !phone);
   };
 
   useEffect(() => {
@@ -162,6 +172,8 @@ export function SettingsModal({
       // and the modal stays. Capture on window runs before the control's own handler, so this
       // must step aside.
       if (escapeOwnedByControl(e.target)) return;
+      // So does an open Select or Menu inside it (they hold the one popover slot, lib/activePopover.ts).
+      if (hasActivePopover()) return;
       e.stopImmediatePropagation();
       onClose();
     };
@@ -183,6 +195,9 @@ export function SettingsModal({
   //    Captured before the rAF moves it; skipped when the opener is gone (the avatar menu unmounts).
   useEffect(() => {
     closeActivePopover();
+    // Opened from the drawer (the account menu sits in its foot below lg): the drawer is its own
+    // modal layer and would otherwise stay drawn over this one.
+    useShell.getState().setDrawerOpen(false);
     const returnFocus = focusReturner(document.activeElement, document.body);
     // The issue tracker's heading appears only once its own GET answers (a pending shell renders
     // first), and on a cold cache or a slow local server that can take seconds. So the landing WAITS
@@ -244,39 +259,36 @@ export function SettingsModal({
   }, []);
 
   const scopeReady = workspaceId != null;
+  const activeDef = tabs.find((t) => t.id === activeTab);
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      className="fixed inset-0 z-50 flex items-stretch justify-center bg-ui-scrim/40 md:items-center md:p-6 motion-safe:animate-ui-fade"
       onClick={onClose}
       role="presentation"
     >
       <div
-        className="flex h-[85vh] w-[60rem] max-w-[95vw] flex-col rounded-lg border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-900"
+        className={cx(
+          'flex h-full w-full overflow-hidden bg-ui-bg text-body text-ui-ink shadow-2xl shadow-black/30',
+          'pt-[env(safe-area-inset-top)] md:h-[85vh] md:w-[60rem] md:max-w-[95vw] md:rounded-[10px] md:pt-0',
+          'motion-safe:animate-ui-sheet-up md:motion-safe:animate-ui-pop',
+        )}
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
         aria-label="Settings"
       >
-        <div className="flex items-center justify-between border-b border-gray-200 px-4 py-2 dark:border-gray-800">
-          <h2 className="text-sm font-semibold text-gray-800 dark:text-gray-100">Settings</h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
-            aria-label="Close (Esc)"
-            title="Close (Esc)"
-          >
-            <CloseIcon size={14} />
-          </button>
-        </div>
-
-        <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
+        {/* THE AREAS: a column beside the area from md; on a phone, the whole sheet until one is picked. */}
+        <div className={cx('min-h-0 shrink-0 flex-col bg-ui-surface md:flex md:w-52', showList ? 'flex w-full' : 'hidden')}>
+          <div className="flex h-12 shrink-0 items-center justify-between gap-2 pl-5 pr-2 md:h-14 md:pl-4">
+            <h2 className="text-title text-ui-ink">Settings</h2>
+            {phone && <IconButton label="Close (Esc)" icon={<CloseIcon size={14} />} onClick={onClose} />}
+          </div>
           <div
             role="tablist"
             aria-label="Settings areas"
-            aria-orientation={wide ? 'vertical' : 'horizontal'}
-            className="flex shrink-0 gap-1 overflow-x-auto border-b border-gray-200 px-2 py-1.5 dark:border-gray-800 sm:w-44 sm:flex-col sm:overflow-x-visible sm:overflow-y-auto sm:border-b-0 sm:border-r sm:py-3"
+            aria-orientation="vertical"
+            className="flex min-h-0 flex-1 flex-col gap-px overflow-y-auto px-2 pb-3"
           >
             {tabs.map((t) => {
               const selected = t.id === activeTab;
@@ -295,28 +307,75 @@ export function SettingsModal({
                   tabIndex={selected ? 0 : -1}
                   onClick={() => select(t.id, false)}
                   onKeyDown={onTabKey}
-                  className={`shrink-0 whitespace-nowrap rounded px-2.5 py-1.5 text-left text-xs font-medium outline-none focus-visible:ring-2 focus-visible:ring-sky-400 ${
-                    selected
-                      ? 'bg-sky-50 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300'
-                      : 'text-gray-600 hover:bg-gray-100 hover:text-gray-800 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-gray-100'
-                  }`}
+                  className={cx(
+                    'flex shrink-0 items-center justify-between gap-2 whitespace-nowrap rounded-ui px-2.5 text-left text-body',
+                    phone ? 'min-h-11 py-2' : 'h-8 touch:h-11',
+                    'motion-safe:transition-colors motion-safe:duration-ui-fast',
+                    // The phone's list is a list of places to go, not a selection: no highlight.
+                    phone
+                      ? 'text-ui-ink hover:bg-ui-hover'
+                      : selected
+                        ? 'bg-ui-sel font-medium text-ui-ink'
+                        : 'text-ui-mute hover:bg-ui-hover hover:text-ui-ink',
+                    FOCUS_RING,
+                    'focus-visible:ring-offset-ui-surface',
+                  )}
                 >
-                  {t.label}
+                  {phone ? (
+                    <span className="min-w-0">
+                      <span className="block">{t.label}</span>
+                      <span className="block truncate text-meta text-ui-mute">{t.summary}</span>
+                    </span>
+                  ) : (
+                    t.label
+                  )}
+                  {phone && <ChevronIcon dir="right" size={12} className="shrink-0 text-ui-faint" />}
                 </button>
               );
             })}
           </div>
+        </div>
 
-          <div ref={scrollerRef} className="min-h-0 min-w-0 flex-1 overflow-auto px-5 py-4">
-            {tabs.map((t) => (
-              <SettingsTabPanel
-                key={t.id}
-                def={t}
-                hidden={t.id !== activeTab}
-                scopeReady={scopeReady}
-                workspaceName={name}
-              />
-            ))}
+        {/* THE AREA ON SHOW. One scroller serves every panel; every panel stays mounted. */}
+        <div className={cx('min-h-0 min-w-0 flex-1 flex-col', showPanel ? 'flex' : 'hidden')}>
+          <div className="flex h-12 shrink-0 items-center gap-1 px-2 md:h-14 md:pl-8">
+            {phone && (
+              <button
+                type="button"
+                onClick={() => {
+                  setPhoneList(true);
+                  requestAnimationFrame(() => tabRefs.current.get(activeTab)?.focus());
+                }}
+                className={cx(
+                  'inline-flex h-10 shrink-0 items-center gap-1.5 rounded-ui px-2 text-body text-ui-mute hover:bg-ui-hover hover:text-ui-ink',
+                  FOCUS_RING,
+                )}
+              >
+                <ChevronIcon dir="left" size={12} />
+                Settings
+              </button>
+            )}
+            <p className="min-w-0 flex-1 truncate text-title text-ui-ink" aria-hidden="true">
+              {phone ? '' : activeDef?.label}
+            </p>
+            <IconButton label="Close (Esc)" icon={<CloseIcon size={14} />} onClick={onClose} />
+          </div>
+          <div
+            ref={scrollerRef}
+            className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-[max(2rem,env(safe-area-inset-bottom))] pt-2 md:px-8"
+          >
+            {phone && activeDef != null && <p className="mb-5 text-display text-ui-ink">{activeDef.label}</p>}
+            <div className="max-w-[44rem]">
+              {tabs.map((t) => (
+                <SettingsTabPanel
+                  key={t.id}
+                  def={t}
+                  hidden={t.id !== activeTab}
+                  scopeReady={scopeReady}
+                  workspaceName={name}
+                />
+              ))}
+            </div>
           </div>
         </div>
       </div>
@@ -348,30 +407,31 @@ function SettingsTabPanel({
           opens on a divider with nothing above it. */}
       {def.global.length > 0 && <div className="peer space-y-4">{renderSections(def.global)}</div>}
 
-      {/* ── WORKSPACE. One team — the one selected in the rail — named ONCE per tab, here. ── */}
+      {/* ── WORKSPACE. One team — the one selected in the sidebar — named ONCE per tab, here. ── */}
       {/* The heading is gated on the scope resolving, below, and on nothing else. */}
       {def.workspace.length > 0 && (
         <section
           className={
             def.global.length > 0
-              ? 'mt-4 border-t border-gray-100 pt-4 peer-empty:mt-0 peer-empty:border-t-0 peer-empty:pt-0 dark:border-gray-800'
+              ? 'mt-6 border-t border-ui-line pt-6 peer-empty:mt-0 peer-empty:border-t-0 peer-empty:pt-0'
               : undefined
           }
         >
-          <div className="mb-3">
-            <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-100">
+          {/* The boundary is a tone band, not a rule: the ONE place that names the team. */}
+          <div className="mb-6 rounded-ui bg-ui-surface px-4 py-3">
+            <h3 className="text-body font-semibold text-ui-ink">
               Workspace
               {workspaceName != null && (
                 <>
                   {' · '}
-                  <span className="text-sky-600 dark:text-sky-400">{workspaceName}</span>
+                  <span>{workspaceName}</span>
                 </>
               )}
             </h3>
-            <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+            <p className="mt-0.5 text-meta text-ui-mute">
               Everything below applies to{' '}
-              <span className="font-medium">{workspaceName ?? 'the selected workspace'}</span> alone
-              — every other workspace keeps its own. Switch workspace in the rail to configure a
+              <span className="font-medium text-ui-ink">{workspaceName ?? 'the selected workspace'}</span> alone
+              — every other workspace keeps its own. Switch workspace at the top of the sidebar to configure a
               different one.
             </p>
           </div>
@@ -382,9 +442,7 @@ function SettingsTabPanel({
               heading that cannot yet name anybody reads as several broken sections rather than
               one unfinished request. */}
           {!scopeReady ? (
-            <p className="py-4 text-center text-xs text-gray-400">
-              Loading this workspace’s settings…
-            </p>
+            <p className="py-4 text-center text-meta text-ui-faint">Loading this workspace’s settings…</p>
           ) : (
             <div className="space-y-4">{renderSections(def.workspace)}</div>
           )}

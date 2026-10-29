@@ -15,9 +15,10 @@ import { useUpdateWorkspaceTracker } from '../../hooks/useWorkspaceTracker.js';
 import { NotionIcon } from '../Icons.js';
 import { InfoButton } from '../InfoModal.js';
 import { Field, SaveButton, inputCls } from './ui.js';
+import { Select } from '../ui/index.js';
 
 const SECONDARY_BTN =
-  'rounded border border-gray-300 px-2 py-0.5 text-xs text-gray-700 hover:border-gray-400 disabled:cursor-not-allowed disabled:opacity-40 dark:border-gray-700 dark:text-gray-200 dark:hover:border-gray-500';
+  'inline-flex h-7 items-center gap-1 rounded-ui bg-ui-raise px-2.5 text-body font-medium text-ui-ink hover:bg-ui-hover touch:h-10 outline-none focus-visible:ring-2 focus-visible:ring-ui-accent disabled:cursor-not-allowed disabled:opacity-40';
 
 const CATEGORY_LABEL: Record<JiraStatusCategory, string> = { new: 'To do', indeterminate: 'In progress', done: 'Done' };
 
@@ -63,10 +64,10 @@ export function NotionTrackerSetup({
   const dirty = draft != null && JSON.stringify(draft) !== JSON.stringify(saved);
 
   return (
-    <div className="space-y-2.5 rounded border border-gray-200 p-2.5 dark:border-gray-800">
+    <div className="space-y-2.5 rounded-ui bg-ui-surface p-3.5">
       <div className="flex items-center gap-1.5">
-        <NotionIcon size={14} className="text-gray-700 dark:text-gray-200" />
-        <h4 className="text-xs font-semibold text-gray-800 dark:text-gray-100">Notion</h4>
+        <NotionIcon size={14} className="text-ui-ink" />
+        <h4 className="text-body font-semibold text-ui-ink">Notion</h4>
         <InfoButton title="Notion as an issue tracker">
           <p>
             Each ticket is a page in this database. Limn finds a ticket by its Unique ID, such as ENG-123, in the PR
@@ -97,9 +98,9 @@ export function NotionTrackerSetup({
           />
         </Field>
       ) : (
-        <div className="flex items-center gap-2 text-xs">
-          <span className="font-medium text-gray-600 dark:text-gray-300">Integration token</span>
-          <span className="text-gray-700 dark:text-gray-200">Saved</span>
+        <div className="flex items-center gap-2 text-body">
+          <span className="font-medium text-ui-mute">Integration token</span>
+          <span className="text-ui-ink">Saved</span>
           <button type="button" className={SECONDARY_BTN} onClick={() => setReplacing(true)}>
             Replace
           </button>
@@ -127,23 +128,23 @@ export function NotionTrackerSetup({
         >
           {schema.isPending ? 'Reading…' : saved != null ? 'Change mapping' : 'Read database'}
         </button>
-        {!jira.hasToken && <span className="text-[11px] text-gray-500 dark:text-gray-400">Save a token first.</span>}
+        {!jira.hasToken && <span className="text-meta text-ui-mute">Save a token first.</span>}
         {read == null && saved != null && (
-          <span className="text-[11px] text-gray-600 dark:text-gray-300">{mappingSummary(saved)}</span>
+          <span className="text-meta text-ui-mute">{mappingSummary(saved)}</span>
         )}
         {read == null && saved == null && jira.hasToken && (
-          <span className="text-[11px] text-amber-700 dark:text-amber-400">Not mapped yet. Nothing is read until it is.</span>
+          <span className="text-meta text-ui-warn">Not mapped yet. Nothing is read until it is.</span>
         )}
       </div>
-      {schema.isError && <p className="text-xs text-red-600 dark:text-red-400">{schema.error.message}</p>}
-      {read?.refusal != null && <p className="text-xs text-red-600 dark:text-red-400">{read.refusal}</p>}
+      {schema.isError && <p className="text-body text-ui-danger">{schema.error.message}</p>}
+      {read?.refusal != null && <p className="text-body text-ui-danger">{read.refusal}</p>}
 
       {read != null && read.refusal == null && draft != null && (
         <MappingForm schema={read} draft={draft} onChange={setDraft} />
       )}
       {read != null && draft != null && (
         <>
-          {problem != null && <p className="text-xs text-red-600 dark:text-red-400">{problem}</p>}
+          {problem != null && <p className="text-body text-ui-danger">{problem}</p>}
           <SaveButton
             dirty={dirty && problem == null}
             saving={mutation.isPending}
@@ -151,7 +152,7 @@ export function NotionTrackerSetup({
           />
         </>
       )}
-      {mutation.isError && <p className="text-xs text-red-600 dark:text-red-400">{mutation.error.message}</p>}
+      {mutation.isError && <p className="text-body text-ui-danger">{mutation.error.message}</p>}
     </div>
   );
 }
@@ -181,19 +182,14 @@ function PropSelect({
   hint?: string;
 }): JSX.Element {
   return (
-    <Field label={label} hint={hint}>
-      <select
-        className={inputCls}
+    <Field group label={label} hint={hint}>
+      <Select
+        label={label}
+        className="w-full sm:w-auto"
         value={value ?? ''}
-        onChange={(e) => onChange(props.find((p) => p.id === e.target.value) ?? null)}
-      >
-        <option value="">{noneLabel}</option>
-        {props.map((p) => (
-          <option key={p.id} value={p.id}>
-            {p.name}
-          </option>
-        ))}
-      </select>
+        onChange={(v) => onChange(props.find((p) => p.id === v) ?? null)}
+        options={[{ value: '', label: noneLabel }, ...props.map((p) => ({ value: p.id, label: p.name }))]}
+      />
     </Field>
   );
 }
@@ -230,7 +226,7 @@ function MappingForm({
 
   return (
     <div className="space-y-2" data-testid="notion-mapping-form">
-      <p className="text-xs text-gray-700 dark:text-gray-200">
+      <p className="text-body text-ui-ink">
         {schema.title}: keys look like {draft.uniqueId.prefix}-123 ({draft.uniqueId.property.name}).
       </p>
       <PropSelect
@@ -251,21 +247,16 @@ function MappingForm({
       {draft.status?.type === 'select' && statusProp != null && (
         <div className="grid grid-cols-2 gap-1.5 pl-2">
           {(statusProp.options ?? []).map((o) => (
-            <Field key={o} label={o}>
-              <select
-                className={inputCls}
+            <Field key={o} group label={o}>
+              <Select
+                label={o}
                 value={draft.status?.type === 'select' ? (draft.status.options[o] ?? 'new') : 'new'}
-                onChange={(e) =>
+                onChange={(v) =>
                   draft.status?.type === 'select' &&
-                  set({ status: { ...draft.status, options: { ...draft.status.options, [o]: e.target.value as JiraStatusCategory } } })
+                  set({ status: { ...draft.status, options: { ...draft.status.options, [o]: v } } })
                 }
-              >
-                {(Object.keys(CATEGORY_LABEL) as JiraStatusCategory[]).map((c) => (
-                  <option key={c} value={c}>
-                    {CATEGORY_LABEL[c]}
-                  </option>
-                ))}
-              </select>
+                options={(Object.keys(CATEGORY_LABEL) as JiraStatusCategory[]).map((c) => ({ value: c, label: CATEGORY_LABEL[c] }))}
+              />
             </Field>
           ))}
         </div>
@@ -289,18 +280,14 @@ function MappingForm({
         />
       )}
       {draft.sprint?.kind === 'select' && sprintProp != null && (
-        <Field label="Current sprint">
-          <select
-            className={inputCls}
+        <Field group label="Current sprint">
+          <Select
+            label="Current sprint"
+            className="w-full sm:w-auto"
             value={draft.sprint.current}
-            onChange={(e) => draft.sprint?.kind === 'select' && set({ sprint: { ...draft.sprint, current: e.target.value } })}
-          >
-            {(sprintProp.options ?? []).map((o) => (
-              <option key={o} value={o}>
-                {o}
-              </option>
-            ))}
-          </select>
+            onChange={(v) => draft.sprint?.kind === 'select' && set({ sprint: { ...draft.sprint, current: v } })}
+            options={(sprintProp.options ?? []).map((o) => ({ value: o, label: o }))}
+          />
         </Field>
       )}
       <PropSelect label="Type" props={of('select')} value={draft.issueType?.id ?? null} onChange={(p) => set({ issueType: p != null ? ref(p) : null })} />

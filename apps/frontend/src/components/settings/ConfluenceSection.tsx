@@ -6,7 +6,7 @@ import { Field, SaveButton, SectionShell, inputCls } from './ui.js';
 import { ScopePendingSection, useSettingsWorkspace } from './workspaceScope.js';
 
 const SECONDARY_BTN =
-  'rounded border border-gray-300 px-2 py-0.5 text-xs text-gray-700 hover:border-gray-400 disabled:cursor-not-allowed disabled:opacity-40 dark:border-gray-700 dark:text-gray-200 dark:hover:border-gray-500';
+  'inline-flex h-7 items-center gap-1 rounded-ui bg-ui-raise px-2.5 text-body font-medium text-ui-ink hover:bg-ui-hover touch:h-10 outline-none focus-visible:ring-2 focus-visible:ring-ui-accent disabled:cursor-not-allowed disabled:opacity-40';
 
 /**
  * "Confluence" for THIS workspace's reference docs (CORE, local only — mounted beside Reference docs on
@@ -106,10 +106,10 @@ function ConfluenceForm({ workspaceId, saved }: { workspaceId: number; saved: Wi
           />
         </Field>
       ) : (
-        <div className="flex flex-col gap-1 text-xs">
-          <span className="font-medium text-gray-600 dark:text-gray-300">API token</span>
+        <div className="flex flex-col gap-1 text-body">
+          <span className="font-medium text-ui-mute">API token</span>
           <div className="flex items-center gap-2">
-            <span className="text-gray-700 dark:text-gray-200">{removing ? 'Removed when you save' : 'Saved'}</span>
+            <span className="text-ui-ink">{removing ? 'Removed when you save' : 'Saved'}</span>
             {removing ? (
               <button type="button" className={SECONDARY_BTN} onClick={() => setRemoving(false)}>
                 Keep it
@@ -132,17 +132,17 @@ function ConfluenceForm({ workspaceId, saved }: { workspaceId: number; saved: Wi
         <button type="button" className={SECONDARY_BTN} disabled={!canTest || check.isPending} onClick={() => check.mutate()}>
           {check.isPending ? 'Testing…' : 'Test connection'}
         </button>
-        {dirty && <span className="text-[11px] text-gray-500 dark:text-gray-400">Save first.</span>}
+        {dirty && <span className="text-meta text-ui-mute">Save first.</span>}
         {check.data != null && (
-          <span className={`text-[11px] ${check.data.ok ? 'text-emerald-700 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+          <span className={`text-meta ${check.data.ok ? 'text-ui-success' : 'text-ui-danger'}`}>
             {check.data.message}
           </span>
         )}
       </div>
-      {check.isError && <p className="text-xs text-red-600 dark:text-red-400">{check.error.message}</p>}
+      {check.isError && <p className="text-body text-ui-danger">{check.error.message}</p>}
 
       <SaveButton dirty={dirty} saving={save.isPending} onClick={onSave} />
-      {save.isError && <div className="text-[11px] text-red-500">{save.error?.message ?? 'Couldn’t save this setting.'}</div>}
+      {save.isError && <div className="text-meta text-ui-danger">{save.error?.message ?? 'Couldn’t save this setting.'}</div>}
     </SectionShell>
   );
 }

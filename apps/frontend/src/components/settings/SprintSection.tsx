@@ -7,9 +7,18 @@ import {
 import { InfoButton } from '../InfoModal.js';
 import { Field, SaveButton, SectionShell, inputCls } from './ui.js';
 import { ScopePendingSection, useSettingsWorkspace } from './workspaceScope.js';
+import { Select } from '../ui/index.js';
 
 const PRESETS = [7, 14, 21, 28];
 const NONE = 'none';
+const LENGTH_OPTIONS = [
+  { value: NONE, label: 'No sprint — this workspace doesn’t run one' },
+  { value: '7', label: '1 week' },
+  { value: '14', label: '2 weeks' },
+  { value: '21', label: '3 weeks' },
+  { value: '28', label: '4 weeks' },
+  { value: 'custom', label: 'Custom…' },
+] as const;
 
 const MODE_OPTIONS: { value: SprintComparisonMode; label: string; hint: string }[] = [
   {
@@ -180,6 +189,7 @@ export function SprintSection(): JSX.Element {
       }
     >
       <Field
+        group
         label="Sprint length"
         hint={
           enabled
@@ -187,11 +197,12 @@ export function SprintSection(): JSX.Element {
             : 'No sprint grid: Reports cannot generate at the sprint grain and the comparison window below falls back to a rolling 14 days.'
         }
       >
-        <select
-          className={inputCls}
+        <Select
+          label="Sprint length"
+          className="w-full sm:w-auto"
           value={days == null ? NONE : custom ? 'custom' : String(days)}
-          onChange={(e) => {
-            const v = e.target.value;
+          options={LENGTH_OPTIONS}
+          onChange={(v) => {
             if (v === NONE) {
               setCustom(false);
               setDays(null);
@@ -203,14 +214,7 @@ export function SprintSection(): JSX.Element {
               setDays(Number(v));
             }
           }}
-        >
-          <option value={NONE}>No sprint — this workspace doesn’t run one</option>
-          <option value="7">1 week</option>
-          <option value="14">2 weeks</option>
-          <option value="21">3 weeks</option>
-          <option value="28">4 weeks</option>
-          <option value="custom">Custom…</option>
-        </select>
+        />
       </Field>
 
       {enabled && (
@@ -252,7 +256,7 @@ export function SprintSection(): JSX.Element {
             />
           </Field>
           {start === '' && (
-            <p className="text-[11px] text-amber-600 dark:text-amber-400">
+            <p className="text-meta text-ui-warn">
               A cadence needs a start date to locate its boundaries. Until one is set, this
               workspace has no period grid and Reports cannot generate.
             </p>
@@ -262,24 +266,20 @@ export function SprintSection(): JSX.Element {
 
       {/* The comparison window — the SAME grain as the cadence above it since plugin migration
           0032, so no fence, no second caption and no second Save. */}
-      <Field label="Comparison window" hint={activeHint}>
-        <select
-          className={inputCls}
+      <Field group label="Comparison window" hint={activeHint}>
+        <Select
+          label="Comparison window"
+          className="w-full sm:w-auto"
           value={mode}
-          onChange={(e) => setMode(e.target.value as SprintComparisonMode)}
-        >
-          {MODE_OPTIONS.map((o) => (
-            <option key={o.value} value={o.value}>
-              {o.label}
-            </option>
-          ))}
-        </select>
+          options={MODE_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
+          onChange={(v) => setMode(v)}
+        />
       </Field>
 
       {/* ⚠ THE DISCLOSURE. Stated BEFORE the Save, and only when the edit would actually regrid —
           so a mode-only change never raises it. */}
       {cadenceDirty && (
-        <p className="rounded border border-amber-300/60 bg-amber-50 px-2 py-1.5 text-[11px] text-amber-800 dark:border-amber-500/30 dark:bg-amber-950/40 dark:text-amber-200">
+        <p className="rounded-ui bg-ui-raise px-2 py-1.5 text-meta text-ui-warn">
           Saving moves this workspace’s period boundaries. Reports already generated are{' '}
           <span className="font-medium">kept unchanged</span> but leave the period picker; they
           stay readable under <span className="font-medium">Earlier cadences</span> at the bottom
@@ -293,7 +293,7 @@ export function SprintSection(): JSX.Element {
         onClick={onSave}
       />
       {mutation.isError && (
-        <p className="text-[11px] text-red-500">{(mutation.error as Error).message}</p>
+        <p className="text-meta text-ui-danger">{(mutation.error as Error).message}</p>
       )}
     </SectionShell>
   );

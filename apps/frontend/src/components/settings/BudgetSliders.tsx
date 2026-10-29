@@ -43,19 +43,19 @@ export function BudgetSliders({
   const steps = budgetScaleSteps(dayHours, stored);
 
   return (
-    <div className="text-xs">
-      <div className="mb-1 font-medium text-gray-600 dark:text-gray-300">Budgets, in working hours</div>
+    <div className="text-body">
+      <div className="mb-1 font-medium text-ui-mute">Budgets, in working hours</div>
       {/* ⚠ BELOW `sm` EACH WAIT'S NAME TAKES ITS OWN ROW, above its two sliders. On one row at phone
           width the name column and two value columns left each track 22px (9px at 360px, narrower
           than the thumb) for 17 steps — settable by keyboard only, and a phone has no arrow keys.
           Good and Acceptable stay side by side at every width. */}
       <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-center gap-x-4 gap-y-2 sm:grid-cols-[8.5rem_minmax(0,1fr)_minmax(0,1fr)]">
         <span className="hidden sm:block" />
-        <span className="text-[11px] font-medium text-gray-500 dark:text-gray-400">Good</span>
-        <span className="text-[11px] font-medium text-gray-500 dark:text-gray-400">Acceptable</span>
+        <span className="text-meta font-medium text-ui-mute">Good</span>
+        <span className="text-meta font-medium text-ui-mute">Acceptable</span>
         {FLOW_BUDGET_MEASURES.map((m) => (
           <Fragment key={m}>
-            <span className="col-span-2 text-xs text-gray-700 sm:col-span-1 dark:text-gray-200">
+            <span className="col-span-2 text-body text-ui-ink sm:col-span-1">
               {FLOW_BUDGET_LABEL[m]}
             </span>
             {(['good', 'ok'] as const).map((k) => (
@@ -72,7 +72,7 @@ export function BudgetSliders({
           </Fragment>
         ))}
       </div>
-      <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+      <p className="mt-1.5 text-meta text-ui-mute">
         {budgetScaleNote(steps, dayHours)}
       </p>
     </div>
@@ -121,13 +121,13 @@ function BudgetSlider({
         />
         <span
           aria-hidden
-          className="absolute top-[15px] h-2 w-0.5 bg-gray-700 dark:bg-gray-300"
+          className="absolute top-[15px] h-2 w-0.5 bg-ui-mute"
           style={{ left: `calc(${tick * 100}% - ${tick * THUMB_PX}px + ${THUMB_PX / 2 - 1}px)` }}
         />
       </div>
       <output
         htmlFor={inputId}
-        className="inline-flex w-12 shrink-0 items-center justify-end gap-0.5 text-xs tabular-nums text-gray-800 dark:text-gray-100"
+        className="inline-flex w-12 shrink-0 items-center justify-end gap-0.5 text-body tabular-nums text-ui-ink"
       >
         {formatBudgetHours(value)}
         {pos.off != null && <ArrowIcon dir={pos.off === 'above' ? 'right' : 'left'} size={10} />}
