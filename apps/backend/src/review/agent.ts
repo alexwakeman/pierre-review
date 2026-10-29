@@ -18,12 +18,11 @@ import { submitReviewShape, type SubmitReviewPayload } from './schema.js';
 import { applyClaudeReviewAuth } from './auth.js';
 import {
   cleanupCloneCache,
-  prepDefaultBranchCheckouts,
-  prepPeerWorktrees,
   prepWorktree,
   removeWorktreeLocked,
 } from './clone-manager.js';
 import { relatedCheckoutsSection } from './claude-review/prompts.js';
+import { checkOutPeers } from './peer-checkouts.js';
 import { estimateCostUsd } from './pricing.js';
 import { runProvider } from './run-provider.js';
 import { mapSubmittedReview } from './submit-map.js';
@@ -156,47 +155,6 @@ export function reviewMaxTurnsFor(
 
 // How many recent-activity lines to keep in the live progress ring buffer.
 const ACTIVITY_LOG_CAP = 25;
-
-type RunPeer = NonNullable<RunReviewArgs['peers']>[number];
-
-/**
- * Check out every peer, read-only: PR peers at their heads (`prepPeerWorktrees`), branch and
- * default-branch peers at the branch tip (`prepDefaultBranchCheckouts`, one per repo). Returns the
- * path per ref (absent = not checked out); each preparation's cleanup is pushed to `cleanups`.
- */
-async function checkOutPeers(
-  peers: readonly RunPeer[],
-  cleanups: Array<() => Promise<void>>,
-): Promise<Map<string, string>> {
-  const paths = new Map<string, string>();
-  const prPeers = peers.filter((p): p is Extract<RunPeer, { prNumber: number }> => p.kind == null || p.kind === 'pr');
-  const refPeers = peers.filter((p): p is Extract<RunPeer, { branch: string | null }> => p.kind === 'branch' || p.kind === 'default_branch');
-  const [pr, refs] = await Promise.all([
-    prPeers.length > 0
-      ? prepPeerWorktrees(prPeers.map((p) => ({ owner: p.owner, name: p.name, number: p.prNumber, headSha: p.headSha })))
-      : null,
-    refPeers.length > 0
-      ? prepDefaultBranchCheckouts(refPeers.map((p) => ({ owner: p.owner, name: p.name, branch: p.branch })))
-      : null,
-  ]);
-  if (pr) {
-    cleanups.push(pr.cleanup);
-    prPeers.forEach((p, i) => {
-      const path = pr.peers[i]?.path;
-      if (path) paths.set(p.ref, path);
-    });
-  }
-  if (refs) {
-    cleanups.push(refs.cleanup);
-    // One checkout per repository (deduplicated, case-insensitively), so match by owner/name.
-    for (const p of refPeers) {
-      const key = `${p.owner}/${p.name}`.toLowerCase();
-      const c = refs.checkouts.find((x) => `${x.owner}/${x.name}`.toLowerCase() === key);
-      if (c?.path) paths.set(p.ref, c.path);
-    }
-  }
-  return paths;
-}
 
 export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
   const { model, mode, onProgress, abortController } = args;

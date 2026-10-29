@@ -698,8 +698,8 @@ never bumps `updatedAt`. Tabs (Overview / Comments / Changes, + a presence-gated
   `approved`), then **Merged by**, **Requested** reviewers, labels, meta, an **Actions** row
   (⚠ **HIDDEN BY DEFAULT behind ONE reveal button**, "Show actions" / "Hide actions", in
   `PrActionControls` itself so the Overview and the Claude Review tab's "Reviews and actions" get the
-  same gate; the choice is remembered for the browser session (`sessionStorage`
-  `limn.prActions.open`, read through `readPrActionsOpen`, closed when unset or unreadable). Only the
+  same gate; ⚠ nothing remembers the choice — every mount (a new tab, another view, another PR)
+  starts closed, so the actions show only after a click in the view at hand). Only the
   BUTTONS hide: the closed row still states "You approved" / "You requested changes" and "Merging…"
   (read off the shared mutation keys), and the merge facts stay on the Status row. ⚠ The Claude
   Review tab's "Post to GitHub" composer (its Verdict select + Post) is NOT behind this reveal — it

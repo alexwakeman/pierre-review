@@ -57,14 +57,26 @@ incremental, fetch loop, cancel, rate limits). In brief:
   `POST /api/repos/:id/sync`. The periodic pass is always-on.
 - **Adaptive polling is THE sync strategy** (docs/REALTIME-SYNC.md;
   `config.syncAdaptive` defaults to **`true`**). The cron is a **tick**, not a
-  cadence — `isDue()` gates each repo by activity bucket (hot <1h→120s, warm <6h→300s,
-  cold→900s), and incremental syncs run a conditional REST probe first (a `304` costs no rate
-  limit), with a 30-min floor forcing a re-walk. ⚠ The floor walk uses the same `since`
-  window, so it does NOT refresh changes that leave `updatedAt` alone (CI finishing,
-  mergeability computed, a thread resolve); the first two are re-read by the unsettled-PR
-  backstop (`sync/unsettled-prs.ts`, docs/REALTIME-SYNC.md § Post-write settle).
-  **`syncCron`'s default keys off `syncAdaptive`: `*/1` adaptive, `*/5` not** — a `*/5` tick
-  would pin every repo to 5 min and negate the hot bucket, so the two MUST move together.
+  cadence — `isDue()` gates each repo by activity bucket (hot <1h→20s, warm <6h→60s,
+  cold→300s), and incremental syncs run a conditional REST probe first (a `304` costs no rate
+  limit). A probe's `200` marks the repo DIRTY and it is walked at most once per
+  `SYNC_MIN_WALK_INTERVAL_SEC` (60s) — as soon as the cap allows, never lost. Manual sync,
+  the first-sync two-phase, backfills and the viewed-PR refresh are not capped. A 3h
+  INSURANCE walk replaces the old 30-min floor (same `since` window, so it never caught CI
+  finishing, a thread resolve or a trunk move). Those updatedAt-SILENT changes are found by
+  the SETTLE SWEEP (`sync/settle-sweep.ts`): every 5 min (hot/warm) / 15 min (cold), one
+  aliased ~1-point-per-repo read of every open PR's head, CI rollup and unresolved-thread
+  count; only the PRs that differ are re-synced (≤20 per sweep), and a trunk move schedules
+  the ≤25 merge-state recheck (docs/REALTIME-SYNC.md § The settle sweep). The unsettled-PR
+  backstop (`sync/unsettled-prs.ts`) runs after every walk AND every sweep. ⚠ Only a `2xx` probe
+  is a change: a failing probe (non-2xx status, which `ghRestGetConditional` reports rather than
+  throws) marks nothing dirty and walks at most every 15 min+ (doubling); a limiter's 403/429
+  calls `noteLimited`.
+  **`syncCron`'s default keys off `syncAdaptive`: `*/10 * * * * *` adaptive, `*/5` not** — a
+  slow tick would pin every repo to it and negate the hot bucket, so the two MUST move
+  together. A tick never starts while the previous one runs (`syncAllRepos`' claim), and a
+  probe holds a `probing` slot, not `running`, so it neither reads as "syncing" nor refuses a
+  person's Sync.
   **Landmine: an explicitly-set `SYNC_CRON` wins**, so
   an install pinning `*/5` silently keeps the old cadence with adaptive on.
 - **Plan** (`sync-manager.ts`): never-synced → **full backfill** (`since = now −
@@ -134,7 +146,7 @@ is attached to its PR asynchronously, mergeability and CI settle later, and none
   `notePrChangedForPr(s)`, which write routes AWAIT before replying. Its front door for a push is
   `settlePrAfterWrite` in `sync/resync-after-write.ts` (resync, verify the head inside ~7s, hand
   off the rest).
-- `sync/unsettled-prs.ts` — the backstop after every walk (merge state stored unknown, CI stuck
+- `sync/unsettled-prs.ts` — the backstop after every walk and settle sweep (merge state stored unknown, CI stuck
   `pending`) and `noteMergeLanded`'s trunk-moved recheck of a repo's other open PRs.
 - `sync/pr-change-signal.ts` — `notePrChanged`, surfaced as `Repo.lastPrChangeAt` on
   `GET /api/repos`. Never a `sync_state` cursor.

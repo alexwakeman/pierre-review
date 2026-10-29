@@ -466,8 +466,11 @@ describe('one busy ticket cannot spend the day (BMD-1086)', () => {
     const { eq, and } = await import('drizzle-orm');
     const FAILS = 'jira:https://acme.atlassian.net/rest/api/3#BMD-1090';
     // What the real lane does with a queued run that then fails: it is prepared (members written),
-    // then fails without clearing its fingerprint.
-    const prepareAndFail = async (): Promise<number> => {
+    // then fails without clearing its fingerprint. ⚠ The row's own stamps come from the REAL clock
+    // (created_at is SQL unixepoch()), while the sweep's ticks are injected: re-stamp the attempt at
+    // the tick it ran in, or the attempt reads OLDER than the join it answers whenever the test runs
+    // before ~11:00 UTC (CI failed at 08:20 and 09:50 UTC, passed at 11:42).
+    const prepareAndFail = async (ranAt: number): Promise<number> => {
       const rows = (await db
         .select({ id: schema.ticketReviews.id })
         .from(schema.ticketReviews)
@@ -484,6 +487,12 @@ describe('one busy ticket cannot spend the day (BMD-1086)', () => {
           members: live.map((m) => ({ ...m, checkedOut: true })),
         });
         await persist.markTicketReviewFailed(ctx, 1, r.id, 'turn limit');
+        const stamp = new Date(ranAt);
+        await db
+          .update(schema.ticketReviews)
+          .set({ createdAt: stamp, startedAt: stamp, completedAt: stamp })
+          .where(eq(schema.ticketReviews.id, r.id))
+          .execute();
       }
       return rows.length;
     };
@@ -506,7 +515,7 @@ describe('one busy ticket cannot spend the day (BMD-1086)', () => {
     membership[FAILS] = ['f1', 'f2', 'f3', 'f4'];
     await sweep.runTicketReviewSweep(ctx, at(310), limited());
     await sweep.runTicketReviewSweep(ctx, at(316), limited());
-    expect(await prepareAndFail()).toBe(1);
+    expect(await prepareAndFail(at(316))).toBe(1);
 
     // Every later push is push-only against that attempt's members: the limit (2 cascade rows of
     // this ticket today, the failed join-check included) holds after one more.
@@ -517,7 +526,7 @@ describe('one busy ticket cannot spend the day (BMD-1086)', () => {
       await sweep.runTicketReviewSweep(ctx, at(t), limited());
       const r = await sweep.runTicketReviewSweep(ctx, at(t + 6), limited());
       queued += r.queued.filter((q) => q.ident === FAILS).length;
-      await prepareAndFail();
+      await prepareAndFail(at(t + 6));
       t += 7;
     }
     expect(queued).toBe(1);

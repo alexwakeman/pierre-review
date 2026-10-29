@@ -1135,6 +1135,22 @@ check(
   (await getRepoMergeStateTargets(2, A.repoId, 'open')).length === 0,
 );
 
+// ── The settle sweep's stored-row read (sync/settle-sweep.ts) ────────────────────
+// Repo-addressed: every row it returns is compared with GitHub's answer on this account's token,
+// and a difference becomes a single-PR sync. A's seeded PR is open, so both directions are
+// non-vacuous; asking by A's PR number too covers the "listed by number" half of the predicate.
+{
+  const { getSettleStoredPrs } = await import('../src/sync/settle-sweep.js');
+  check(
+    'getSettleStoredPrs(A, A’s repo) resolves A’s PR',
+    (await getSettleStoredPrs(1, A.repoId, [])).some((s) => s.id === A.prId),
+  );
+  check(
+    'getSettleStoredPrs(B, A’s repo, A’s numbers) returns nothing (IDOR blocked)',
+    (await getSettleStoredPrs(2, A.repoId, [1, 2, 3])).length === 0,
+  );
+}
+
 // ── The stale-CI nudge (nudgeStaleCiPending, sync/unsettled-prs.ts) ──────────────
 // Repo-addressed like the selection above, and every PR it picks is handed to the settle ladder,
 // i.e. re-read from GitHub on this account's token. A throwaway stale-`pending` PR of A's (no

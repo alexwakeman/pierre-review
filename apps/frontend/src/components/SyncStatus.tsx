@@ -26,6 +26,7 @@ import {
   useMlSeverityEnabled,
 } from '../hooks/useMlLabels.js';
 import { SyncProgressModal } from './SyncProgressModal.js';
+import { mostRecentCheck, mostRecentSync, syncTooltip } from '../lib/syncTooltip.js';
 
 // Circular-arrows glyph for the sync trigger; spins while a sync runs.
 function RefreshIcon({
@@ -53,42 +54,6 @@ function RefreshIcon({
       <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
     </svg>
   );
-}
-
-function mostRecentSync(repos: Repo[]): string | null {
-  let latest: string | null = null;
-  for (const r of repos) {
-    const t = r.lastIncrementalSyncAt ?? r.lastFullSyncAt;
-    if (t && (!latest || t > latest)) latest = t;
-  }
-  return latest;
-}
-
-// Matches the backend's default cron (`*/5 * * * *` in config.ts): the scheduler
-// fires on clock boundaries (:00, :05, :10, …), not 5 min after the last run.
-const SYNC_INTERVAL_MIN = 5;
-
-const hhmm = (d: Date): string =>
-  d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
-// The next clock boundary that's a multiple of the interval, strictly after now.
-function nextSyncAt(intervalMin: number): Date {
-  const now = new Date();
-  const next = new Date(now);
-  next.setSeconds(0, 0);
-  next.setMinutes(Math.floor(now.getMinutes() / intervalMin) * intervalMin + intervalMin);
-  return next;
-}
-
-// Tooltip lines for the sync button: explain the automatic cadence and when the
-// next sync lands (absolute time + an approximate countdown).
-function syncTooltip(lastSync: string | null): string {
-  const next = nextSyncAt(SYNC_INTERVAL_MIN);
-  const mins = Math.max(1, Math.round((next.getTime() - Date.now()) / 60000));
-  const lines = lastSync ? [`Last synced ${hhmm(new Date(lastSync))}`] : [];
-  lines.push(`Syncs automatically every ${SYNC_INTERVAL_MIN} minutes`);
-  lines.push(`Next sync ~${hhmm(next)} (in ${mins} min)`);
-  return lines.join('\n');
 }
 
 // The header sync control + the single DRIVER of the shared sync round.
@@ -522,7 +487,7 @@ export function SyncStatus(): JSX.Element | null {
     : mlScoring
       ? scoringLine
       : 'Click to sync all repos now';
-  const title = [errorLine, actionLine, syncTooltip(lastSync)]
+  const title = [errorLine, actionLine, syncTooltip(lastSync, mostRecentCheck(repos ?? []))]
     .filter(Boolean)
     .join('\n');
 
