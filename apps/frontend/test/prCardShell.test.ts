@@ -109,13 +109,16 @@ describe('cardClickActivates', () => {
 });
 
 describe('both surfaces mount the shared shell', () => {
-  it('Open PRs and Pending cards are built on PrCardFrame', () => {
+  it('Open PRs cards are built on PrCardFrame; Pending is one-line rows with the card in a side panel', () => {
     expect(src('components/Activity/OpenPrsCards.tsx')).toMatch(/<PrCardFrame /);
     const pending = src('components/Activity/AttentionCards.tsx');
-    expect(pending).toMatch(/<PrCardFrame/);
-    // Layout B: the card leads with the EVENT heading (the shell's optional slot), and the PR's
-    // meta line ("by · opened · files") lives behind Details.
-    expect(pending).toMatch(/<PrCardEventHeading/);
+    // THE REDESIGN (docs/redesign/DESIGN.md): Pending is an inbox — one `Row` per item, and the
+    // whole card (event heading first, then the action line, content, facts, AI line, buttons)
+    // in the `SidePanel`. The PR's meta line ("by · opened · files") still lives behind Details.
+    expect(pending).not.toMatch(/<PrCardFrame/);
+    expect(pending).toMatch(/<Row\b/);
+    expect(pending).toMatch(/<SidePanel\b/);
+    expect(pending).toMatch(/<h3\s+id=\{titleId\}/);
     expect(pending).toMatch(/<PrCardMeta\b/);
     // The old header strip, title line and chip row are gone from the Pending card.
     expect(pending).not.toMatch(/function PrLine\(/);
@@ -138,7 +141,7 @@ describe('both surfaces mount the shared shell', () => {
   it('the Pending card fetches nothing on mount: the thread waits for Details; no PR summary', () => {
     const pending = src('components/Activity/AttentionCards.tsx');
     // The one fetching reader mounts ONLY inside `PrDetails`, which renders only while open.
-    expect(pending).toMatch(/hasDetails && detailsOpen && prRef != null && \(\s*<PrDetails/);
+    expect(pending).toMatch(/\{detailsOpen && prRef != null && \(\s*<PrDetails/);
     const details = pending.slice(pending.indexOf('function PrDetails('), pending.indexOf('function InsightThreadById('));
     expect(details).toMatch(/<InsightThreadById/);
     // The AI PR summary is removed, and the expanded card no longer fetches the PR at all.

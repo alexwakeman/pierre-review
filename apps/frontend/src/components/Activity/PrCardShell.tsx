@@ -268,11 +268,12 @@ export function PrCardEventHeading({
   );
 }
 
-/** The Pending card's action-row buttons: the one primary action, the secondaries, and the quiet
- *  text buttons (Details, Dismiss). Left-aligned, in that order — nothing on the right edge. */
+/** The Pending panel's action-bar buttons (docs/redesign/DESIGN.md § Controls): the one primary
+ *  action (accent fill), the secondaries (raised tone), and the quiet text buttons (Details). The
+ *  same shapes as the shared `Button` primitive — one radius, 32px (44px on touch). */
 export const CARD_PRIMARY_BUTTON =
-  'inline-flex items-center gap-1 whitespace-nowrap rounded-md border border-gray-900 bg-gray-900 px-2.5 py-1 text-[12px] font-semibold text-white hover:bg-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-gray-100 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white';
+  'inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-ui bg-ui-accent-fill px-3 text-body font-medium text-ui-on-accent hover:brightness-110 outline-none focus-visible:ring-2 focus-visible:ring-ui-accent focus-visible:ring-offset-1 focus-visible:ring-offset-ui-bg disabled:opacity-50 touch:h-11 touch:px-4';
 export const CARD_SECONDARY_BUTTON =
-  'inline-flex items-center gap-1 whitespace-nowrap rounded-md border border-gray-300 bg-white px-2.5 py-1 text-[12px] font-medium text-gray-800 hover:border-gray-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:hover:border-gray-500';
+  'inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-ui bg-ui-raise px-3 text-body font-medium text-ui-ink hover:bg-ui-hover outline-none focus-visible:ring-2 focus-visible:ring-ui-accent focus-visible:ring-offset-1 focus-visible:ring-offset-ui-bg disabled:opacity-50 touch:h-11 touch:px-4';
 export const CARD_QUIET_BUTTON =
-  'inline-flex items-center gap-1 whitespace-nowrap rounded px-1.5 py-1 text-[12px] text-gray-600 hover:bg-gray-100 hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-60 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100';
+  'inline-flex h-7 shrink-0 items-center gap-1 whitespace-nowrap rounded-ui px-2 text-body text-ui-mute hover:bg-ui-hover hover:text-ui-ink outline-none focus-visible:ring-2 focus-visible:ring-ui-accent disabled:opacity-60 touch:h-10';

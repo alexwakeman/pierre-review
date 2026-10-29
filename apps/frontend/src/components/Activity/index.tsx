@@ -132,7 +132,13 @@ export function ActivityView(): JSX.Element {
     // content run (measured: 18805px vs 586px with this class present) — a phantom scroll range
     // the user cannot scroll back, into which any `scrollIntoView` (the Pending Back-restore flash)
     // clamps and pushes the whole screen off the top. Scrolling belongs to THIS box.
-    <div className="relative h-full min-h-0 overflow-y-auto p-3 md:p-4">
+    // Pending lays out its own header, list and side panel edge to edge (each scrolls in its own
+    // box), so it takes no padding and no outer scroll.
+    <div
+      className={`relative h-full min-h-0 ${
+        showingAttention && !noRepos && !noReposAtAll ? 'flex flex-col overflow-hidden' : 'overflow-y-auto p-3 md:p-4'
+      }`}
+    >
       {noReposAtAll ? (
         // First-run: detect the viewer's recent repos + one-click add.
         <FirstRunOnboarding />

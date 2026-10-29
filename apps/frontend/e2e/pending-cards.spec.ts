@@ -10,12 +10,13 @@ import type {
 import { PENDING_TABS, pendingAuthorSideOf, pendingTabHolds } from '@pierre-review/shared';
 import { fixtures, installMockApi } from './mock-api.js';
 
-// THE PENDING CARD, LAYOUT B — what the reader sees first, and what waits for a click:
-//   • the card leads with the EVENT: "Bob replied: “…” · 1d", not the PR title
+// THE PENDING INBOX — one line per item, the whole card in the side panel:
+//   • the row names the PR (title, repo#N, size, author, age) and is one line
+//   • the panel leads with the EVENT: "Bob replied: “…” · 1d", not the PR title
 //   • the action line says what to do and where, with the PR title as a link to Overview
 //   • inside My turn there is no "Your turn" label — the tab already says it
-//   • ⚠ NOTHING ON THE BOARD FETCHES ON MOUNT: the thread's conversation is behind Details, and
-//     only the click asks for it
+//   • ⚠ NOTHING ON THE BOARD FETCHES ON MOUNT, ON SELECTION OR ON OPENING THE PANEL: the thread's
+//     conversation is behind Details, and only that click asks for it
 //
 // This spec overrides only `/api/attention`; everything else is mock-api.ts (thread 5001 is there).
 
@@ -107,13 +108,18 @@ async function openMyTurn(page: Page): Promise<{ threadHits: () => number }> {
   return { threadHits: () => threads };
 }
 
-test.describe('Pending: the event-first card', () => {
-  test('leads with what happened, says what to do, and claims no "Your turn" inside My turn', async ({
+const row = (page: Page) => page.getByRole('option', { name: /Login: remember the last account/ });
+const panel = (page: Page) => page.getByTestId('pending-panel');
+
+test.describe('Pending: one line per item, the event-first card in the panel', () => {
+  test('the row is the PR; the panel leads with what happened and claims no "Your turn" inside My turn', async ({
     page,
   }) => {
     await openMyTurn(page);
-    const card = page.getByRole('listitem', { name: /Bob replied/ });
-    await expect(card).toBeVisible();
+    await expect(row(page)).toBeVisible();
+    await expect(row(page)).toContainText('+40 −8');
+    await row(page).click();
+    const card = panel(page);
     await expect(card.getByRole('heading', { level: 3 })).toContainText(
       'Bob replied: “Can you take another look at this?”',
     );
@@ -123,17 +129,34 @@ test.describe('Pending: the event-first card', () => {
     await expect(card.getByRole('button', { name: /Login: remember the last account/ })).toBeVisible();
     // The tab says it; the card does not.
     await expect(card).not.toContainText('Your turn');
-    // The type chip and the server's @login sentence are gone.
-    await expect(card).not.toContainText('Reply needed');
+    // The server's @login sentence is gone.
     await expect(card).not.toContainText('@bob');
-    // The buttons sit on the left, Dismiss last and quiet.
+    // The buttons sit in the panel's action bar, Dismiss last and quiet.
     await expect(card.getByRole('button', { name: 'Reply', exact: true })).toBeVisible();
-    await expect(card.getByRole('button', { name: 'Dismiss' })).toBeVisible();
+    await expect(card.getByRole('button', { name: /^Dismiss/ })).toBeVisible();
+    // Escape closes the panel; the row stays selected.
+    await page.keyboard.press('Escape');
+    await expect(panel(page)).toHaveCount(0);
+    await expect(row(page)).toHaveAttribute('aria-selected', 'true');
   });
 
-  test('the conversation waits for Details — nothing is fetched to paint the board', async ({ page }) => {
+  test('Enter opens the selected row, and e dismisses it with an Undo in the header strip', async ({ page }) => {
+    await openMyTurn(page);
+    await expect(row(page)).toBeVisible();
+    await page.getByRole('listbox', { name: 'Pending items' }).focus();
+    await page.keyboard.press('Enter');
+    await expect(panel(page)).toBeVisible();
+    const dismissed = page.waitForRequest((r) => r.method() === 'PUT' && /my-turn\/dismissals/.test(new URL(r.url()).pathname));
+    await page.keyboard.press('e');
+    await dismissed;
+    await expect(page.getByTestId('undo-toast')).toContainText('until something new happens on it');
+  });
+
+  test('the conversation waits for Details — nothing is fetched to paint, select or open', async ({ page }) => {
     const { threadHits } = await openMyTurn(page);
-    const card = page.getByRole('listitem', { name: /Bob replied/ });
+    await expect(row(page)).toBeVisible();
+    await row(page).click();
+    const card = panel(page);
     await expect(card).toBeVisible();
     // Give any eager fetch the chance to happen before asserting it did not.
     await page.waitForTimeout(500);

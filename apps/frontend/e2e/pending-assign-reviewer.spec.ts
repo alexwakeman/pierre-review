@@ -156,7 +156,14 @@ async function openWaitingOnReview(page: Page): Promise<Harness> {
     .getByRole('tablist', { name: 'Pending', exact: true })
     .getByRole('tab', { name: /^Waiting on review/ })
     .click();
+  await openRow(page, 'Add resumable uploads');
   return { bodies, boardHits: () => hits, releaseAlice };
+}
+
+/** The inbox shows one line per item; the card (and its Assign buttons) opens in the side panel. */
+async function openRow(page: Page, title: string): Promise<void> {
+  await page.getByRole('option', { name: new RegExp(title) }).click();
+  await expect(page.getByTestId('pending-panel')).toBeVisible();
 }
 
 const row = (page: Page, reason: string) =>
@@ -177,8 +184,10 @@ test.describe('Pending: one Assign per suggested reviewer', () => {
     await expect(page.getByRole('button', { name: /Assign all/ })).toHaveCount(0);
 
     // A repo the viewer only reads: the suggestion shows, the button does not.
+    await openRow(page, 'Fix the docs index');
     await expect(row(page, DAVE_REASON)).toBeVisible();
     await expect(page.getByRole('button', { name: 'Assign @dave' })).toHaveCount(0);
+    await openRow(page, 'Add resumable uploads');
 
     // Two rows in flight at once, and one's success marks only itself.
     await assignAlice.click();
@@ -207,6 +216,7 @@ test.describe('Pending: one Assign per suggested reviewer', () => {
     await tabs.getByRole('tab', { name: /^Ready to land/ }).click();
     await expect(page.getByTestId('suggested-reviewer')).toHaveCount(0);
     await tabs.getByRole('tab', { name: /^Waiting on review/ }).click();
+    await openRow(page, 'Add resumable uploads');
     await expect(row(page, ALICE_REASON).getByText('Requested')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Assign @alice', exact: true })).toHaveCount(0);
 

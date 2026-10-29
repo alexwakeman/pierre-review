@@ -79,13 +79,13 @@ export function DependencyMergeAll({
         disabled={running || workspaceId == null}
         onClick={() => setOpen(true)}
         aria-haspopup="dialog"
-        className="rounded border border-gray-300 px-2 py-0.5 text-[12px] font-medium text-gray-800 hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:text-gray-100 dark:hover:border-gray-500"
+        className="inline-flex h-7 items-center rounded-ui bg-ui-raise px-2.5 text-body font-medium text-ui-ink hover:bg-ui-hover outline-none focus-visible:ring-2 focus-visible:ring-ui-accent disabled:opacity-50 touch:h-10 touch:px-3"
       >
         {running ? 'Merging and arming…' : 'Merge or arm all'}
       </button>
       {open && (
         <div
-          className="fixed inset-0 z-[80] flex items-start justify-center bg-black/40 p-4 pt-24"
+          className="fixed inset-0 z-[80] flex items-start justify-center bg-ui-scrim/40 p-4 pt-24 max-md:items-end max-md:p-0"
           onClick={(e) => {
             if (e.target === e.currentTarget) setOpen(false);
           }}
@@ -94,22 +94,22 @@ export function DependencyMergeAll({
             role="dialog"
             aria-modal="true"
             aria-labelledby="dep-merge-all-title"
-            className="w-full max-w-md rounded-lg border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-900"
+            className="w-full max-w-md rounded-[10px] bg-ui-raise shadow-xl motion-safe:animate-ui-pop max-md:max-w-none max-md:rounded-b-none max-md:rounded-t-xl max-md:pb-[env(safe-area-inset-bottom)]"
           >
-            <div className="flex items-center justify-between border-b border-gray-200 px-4 py-2.5 dark:border-gray-800">
-              <h2 id="dep-merge-all-title" className="text-sm font-semibold text-gray-800 dark:text-gray-100">
+            <div className="flex items-center justify-between px-4 pb-1 pt-3">
+              <h2 id="dep-merge-all-title" className="text-title text-ui-ink">
                 Merge or arm all dependency updates
               </h2>
               <button
                 type="button"
                 onClick={() => setOpen(false)}
                 aria-label="Close"
-                className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+                className="flex h-7 w-7 items-center justify-center rounded-ui text-ui-faint hover:bg-ui-hover hover:text-ui-ink touch:h-10 touch:w-10"
               >
                 <CloseIcon size={14} />
               </button>
             </div>
-            <div className="space-y-2 px-4 py-3 text-[12px] text-gray-700 dark:text-gray-300">
+            <div className="space-y-2 px-4 py-3 text-body text-ui-mute">
               {plan.isLoading ? (
                 <p>Checking {prIds.length} pull requests…</p>
               ) : plan.isError ? (
@@ -146,11 +146,11 @@ export function DependencyMergeAll({
                 </>
               )}
             </div>
-            <div className="flex justify-end gap-2 border-t border-gray-200 px-4 py-2.5 dark:border-gray-800">
+            <div className="flex justify-end gap-2 px-4 pb-4 pt-1">
               <button
                 type="button"
                 onClick={() => setOpen(false)}
-                className="rounded border border-gray-300 px-2.5 py-1 text-[12px] text-gray-700 hover:border-gray-400 dark:border-gray-700 dark:text-gray-200"
+                className="inline-flex h-8 items-center rounded-ui bg-ui-surface px-3 text-body text-ui-ink hover:bg-ui-hover touch:h-11"
               >
                 Cancel
               </button>
@@ -165,7 +165,7 @@ export function DependencyMergeAll({
                     run.mutate(ids);
                     setOpen(false);
                   }}
-                  className="rounded bg-gray-900 px-2.5 py-1 text-[12px] font-medium text-white hover:bg-gray-700 disabled:opacity-50 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-gray-300"
+                  className="inline-flex h-8 items-center rounded-ui bg-ui-accent-fill px-3 text-body font-medium text-ui-on-accent hover:brightness-110 disabled:opacity-50 touch:h-11"
                 >
                   {toMerge > 0 && toArm > 0
                     ? `Merge ${toMerge}, arm ${toArm}`

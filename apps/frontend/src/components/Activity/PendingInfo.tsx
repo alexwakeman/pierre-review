@@ -63,10 +63,12 @@ import { WEIGHT_LABEL, weightPhrase } from '../settings/myTurnSettingsForm.js';
 // through the COMPONENT tree — so a click on popover text reaches the card's own onClick, which
 // would open the PR. CardShell already ignores targets inside `[data-noactivate]`.
 
+// The urgency mark (non-text): only 'high' carries a colour, the amber a row's mark takes when
+// nothing that blocks or lands applies (pendingRow.ts).
 const SEV_DOT: Record<InsightSeverity, string> = {
-  high: 'bg-red-500',
-  warn: 'bg-amber-500',
-  info: 'bg-sky-500',
+  high: 'bg-ui-warn',
+  warn: 'bg-ui-mute',
+  info: 'bg-ui-faint',
 };
 
 // ── the button + popover shell ─────────────────────────────────────────────────────────────
@@ -593,14 +595,18 @@ export function PendingGuideModal({
 
           <GuideSection title="Colours">
             <p>
-              The coloured edge on a card shows how urgent it is. It does not change the order.
+              The mark at the start of each row is <span className="font-medium text-ui-danger">red</span> when
+              the item blocks a merge or a build (a failing build, a merge conflict, a security alert),{' '}
+              <span className="font-medium text-ui-success">green</span> when it can land now,{' '}
+              <span className="font-medium text-ui-warn">amber</span> when it is urgent and neither of those
+              applies, and grey otherwise. Neither colour nor urgency changes the order. How urgent each card is:
             </p>
             <table className="w-full border-collapse text-sm">
               <thead>
                 <tr>
                   <th className={th}>Card</th>
                   <th className={th}>It appears when</th>
-                  <th className={th}>Colour</th>
+                  <th className={th}>Urgency</th>
                 </tr>
               </thead>
               <tbody>
@@ -732,7 +738,7 @@ export function PendingGuideModal({
                   <th className={th}>Card</th>
                   <th className={th}>It appears when</th>
                   <th className={th}>It goes away when</th>
-                  <th className={th}>Colour</th>
+                  <th className={th}>Urgency</th>
                 </tr>
               </thead>
               <tbody>

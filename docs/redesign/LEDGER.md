@@ -190,7 +190,7 @@ Known debts the redesign must clear here:
   - [ ] tone conflicts
 - Tests: testId `closed-resolver-toast`
 
-### [ ] Toast: My Turn dismissed, with Undo (MyTurnDismissToast)
+### [x] Toast: My Turn dismissed, with Undo (MyTurnDismissToast) → for Pending, the same words through the ONE `UndoToast` (testId `undo-toast`, 10s, Undo + `z`); the `my-turn-dismiss-toast` card stays mounted in the strip but nothing on Pending raises it now
 - Entry: appears for 10s after a Pending entry is dismissed
 - Files: `components/Activity/MyTurnDismissToast.tsx`, `hooks/useMyTurnDismiss.ts`
 - Essential info:
@@ -771,7 +771,7 @@ the ONE HeaderToastStrip (MyTurnDismissToast, DependencyMergeToast).
   `?view=open-prs`, no counts before workspace resolves), `test/openPrsTab.test.ts`,
   `test/switchWorkspaceToOpenPrs.test.ts`, `scripts/record-demo-steps.mjs` "repo-console", ws2:* views
 
-### [ ] Pending board header + work-plan narration
+### [x] Pending board header + work-plan narration → ONE page header: "Pending" (text-display) + ⓘ order popover → guide; the plan's headline / parked / dropped lines are the header's quiet sentences (AI ink, sparkle); stale · written N ago · Re-plan (secondary Button inside AiRunGate, meter kept) at the header's end, under the title on a phone; each `why` is a sparkle mark on its row (tooltip) and its full line in the side panel. The guide's Colours table is rewritten (red blocks · green lands · amber urgent · grey; urgency words Urgent / Soon / Routine). Liveness sweep unchanged. ⌘K: Plan / Re-plan my day (focuses the gated button), How Pending works, Customise My turn
 - Entry: rail → Pending (`?view=activity&activityRepo=attention`). Notifications and banner links
   seat a tab, kind or lens via `attnTab`, `attn`, `attnRel` (legacy `attnPersonal=1`), `attnBy`;
   legacy `attnView=branches` lands on My turn
@@ -805,7 +805,7 @@ the ONE HeaderToastStrip (MyTurnDismissToast, DependencyMergeToast).
 - Tests: `test/pendingExplain.test.ts`, `test/activePopover.test.ts`, `e2e/pending-keyboard.spec.ts`,
   `test/aiGating.test.ts`, verify-demo `pending:<tab>` (pending.png, pending-deps.png)
 
-### [ ] Pending tab strip (the seven PENDING_TABS)
+### [x] Pending tab strip (the seven PENDING_TABS) → the shared `Tabs` (label "Pending", icon + count, "…" while loading, 0 dimmed, the AI reviews hiding rule kept); `1`–`7` switch (numberKeys); tabpanel ids `pending-panel-<tab>`
 - Entry: inside the Pending board; `?attnTab=my_turn|claude|fixing|review|threads|land|deps`
 - Files: `components/Activity/AttentionView.tsx`, `pendingTabs.ts`, `PendingKindIcon.tsx`,
   `packages/shared/src/pending-rules.ts`
@@ -829,7 +829,7 @@ the ONE HeaderToastStrip (MyTurnDismissToast, DependencyMergeToast).
 - Tests: `test/pendingTabs.test.ts`, `test/attentionIsolation.test.ts`, `test/ciFailingCard.test.ts`,
   verify-demo `pending:my_turn…pending:deps`, record-demo-steps `pending:<tab>`
 
-### [ ] Pending tab controls row (kind chips, Only yours, Anyone/People/Automation, Customise)
+### [x] Pending tab controls row (kind chips, Only yours, Anyone/People/Automation, Customise) → one slim row under the tabs (token pills, wraps on a phone); same store setters and server figures; Customise keeps `openSettings('my-turn')` and the focus return; ⌘K: Only yours, opened by people / automation / anyone, Customise
 - Entry: under the tab strip; rendered when the tab has kind chips, an offered lens, or is My turn
   (always on My turn, even empty)
 - Files: `components/Activity/AttentionView.tsx`, `pendingTabs.ts`, `store/settingsModal.ts`
@@ -852,7 +852,7 @@ the ONE HeaderToastStrip (MyTurnDismissToast, DependencyMergeToast).
   Settings on the Pending tab…"), `test/pendingTabs.test.ts`, record-demo-steps `pending:mine`,
   `pending:others`, `pending:people`, `pending:automation`
 
-### [ ] Pending list body: sections, cap line, empty notes, Dismissed list
+### [x] Pending list body: sections, cap line, empty notes, Dismissed list → ONE `List` (one mount; the Back-flash selects, scrolls to and flashes the row): groups "Reviews waiting on people · not ranked", "Do next", "Everything else"; one-line rows (tone mark · reason column, dropped in a one-kind tab and screen-reader-only on a phone · title + repo#N · plan mark · size · author · age, falling back to the opening time with a tooltip saying so); the cap sentence and "Dismissed N" (one-line rows, Bring back, ↗) below the rows; empty notes with Show all / Show everyone’s above; skeleton rows at row height while loading; the error sentence kept
 - Entry: the tab panel under the controls
 - Files: `components/Activity/AttentionView.tsx`, `AttentionCards.tsx`, `pendingExplain.ts`,
   `MyTurnDismissedList.tsx`, `hooks/useMyTurnDismiss.ts`
@@ -882,7 +882,7 @@ the ONE HeaderToastStrip (MyTurnDismissToast, DependencyMergeToast).
 - Tests: `test/pendingExplain.test.ts`, `test/myTurnCapDisclosure.test.ts`, `test/pendingTabs.test.ts`,
   `e2e/pending-cards.spec.ts`
 
-### [ ] Pending card anatomy (shared by every kind)
+### [x] Pending card anatomy (shared by every kind) → the SIDE PANEL renders the whole card: title = the PR title (the kind for a repository or person card), subtitle repo#N; h3 event heading (tone mark, quote, age); action line (label, muted, verb, where, PR-title button → Overview, ref, by, after, ↗, ⓘ placement); why line; event content; fact line; AI line; Details (click only, fetches only then); footer = primary · secondaries · Approve (A) · Dismiss (E); the header's "Open (Enter)" runs the old whole-card click, and so does Enter with the panel open. Opened by a click or Enter; docked from 1024px, a sheet from 768px, full screen with Back on a phone. Nothing fetches on selection or on opening (e2e pins it)
 - Entry: each row; clicking anywhere not on a control opens "the event" (thread → Changes at the
   thread; comment → Changes/Comments scrolled to it; PR → a given tab; claude_review → the AI
   review; trunk → GitHub checks page in a new window, else the landing PR). Enter/Space on the
@@ -941,7 +941,7 @@ the ONE HeaderToastStrip (MyTurnDismissToast, DependencyMergeToast).
   `test/prCardShell.test.ts`, `test/failingChecksText.test.ts`, `test/reachModel.test.ts`,
   `test/largePrFlag.test.ts`
 
-### [ ] My turn card types (my_turn reasons) and their buttons
+### [x] My turn card types (my_turn reasons) and their buttons → the same builders, now in the panel footer; NEW `a` approves a review_request / pushed_since / watched_repo_pr card (never your own PR), deferred with Undo
 - Entry: My turn tab (grouped by reason in Settings order); claude_review cards live in AI reviews
 - Files: `components/Activity/AttentionCards.tsx`, `lib/pendingHeadings.ts`,
   `packages/shared/src/types.ts` (`MyTurnCardReason`)
@@ -973,7 +973,7 @@ the ONE HeaderToastStrip (MyTurnDismissToast, DependencyMergeToast).
   - [ ] AI buttons only where `me.ai.enabled`
 - Tests: `test/pendingHeadings.test.ts`, `test/ciFailingCard.test.ts`, `e2e/pending-cards.spec.ts`
 
-### [ ] Needs fixing / Waiting on review / Unanswered threads card kinds
+### [x] Needs fixing / Waiting on review / Unanswered threads card kinds → the same content and buttons in the panel (one Assign per suggestion, the resolver entry hidden not disabled, the reviewer-load PR list with touch-size targets)
 - Entry: Needs fixing (ci_failing, conflicts), Waiting on review (stalled_review, reviewer_routing,
   the reviewer_load strip), Unanswered threads (untouched_thread)
 - Files: `components/Activity/AttentionCards.tsx`, `components/conflicts/ResolveConflictsButton.tsx`,
@@ -1001,7 +1001,7 @@ the ONE HeaderToastStrip (MyTurnDismissToast, DependencyMergeToast).
 - Tests: `e2e/pending-assign-reviewer.spec.ts`, `test/ciFailingCard.test.ts`,
   `test/mergeResolver.test.ts`, `test/claudeConflictPrefill.test.ts`
 
-### [ ] Ready to land merge row (merge / update_branch / own_ready / dependency cards)
+### [x] Ready to land merge row (merge / update_branch / own_ready / dependency cards) → `PendingMergeActions` unchanged in the panel footer; NEW `m` merges only when `pendingMergeGate` offers Merge (not queued, not armed): deferred removal ("Merging · repo#N — Undo stops it"), the live merge options fetched when it fires, a queue repo refused with a sentence, a failure puts the row back with "Failed to merge the PR. <reason>"; otherwise a status line says why ("Can’t merge: update the branch first.")
 - Entry: Ready to land tab, own_ready My turn cards, Dependencies cards
 - Files: `components/Activity/AttentionCards.tsx` (`PendingMergeActions`, `pendingMergeGate`,
   `mergeRowCardOf`), `components/MergeControl.tsx`, `components/MergeWhenReadyControl.tsx`, `lib/ui.ts` (`mergeVerdict`)
@@ -1032,7 +1032,7 @@ the ONE HeaderToastStrip (MyTurnDismissToast, DependencyMergeToast).
   `test/mergeWhenReadyEligibility.test.ts`, `test/autoMergeOutcomes.test.ts`,
   `test/mergeBlockers.test.ts`, record-demo-steps (attnTab=land step)
 
-### [ ] Dependencies tab (security + dependency_bump) and "Merge or arm all"
+### [x] Dependencies tab (security + dependency_bump) and "Merge or arm all" → the button sits above the rows (restyled), its dialog is a bottom sheet on a phone; the cards are in the panel; ⌘K "Merge or arm all dependency updates…" opens the tab
 - Entry: Pending → Dependencies (`?attnTab=deps`); chips All / Security / Bumps
 - Files: `components/Activity/AttentionCards.tsx` (`SecurityDetail`, `DependencyActions`,
   `advisoryParts`), `DependencyMergeAll.tsx`, `hooks/useDependencyMergeAll.ts`
@@ -1057,7 +1057,7 @@ the ONE HeaderToastStrip (MyTurnDismissToast, DependencyMergeToast).
   - [ ] Dialog error "Couldn’t check these pull requests."
 - Tests: verify-demo `pending:deps` (pending-deps.png), `test/pendingHeadings.test.ts`
 
-### [ ] AI review on Pending cards (line + buttons)
+### [x] AI review on Pending cards (line + buttons) → `ClaudeReviewLine` / `ClaudeReviewActions` unchanged in the panel (the AI button reshaped to the token radius and height); one batched states request for the board
 - Entry: every PR card on Pending when `me.ai.enabled`; one batched claude-review-states +
   ci-review-states request for the board
 - Files: `components/Activity/PendingClaude.tsx`, `hooks/useClaudeReview.ts`
@@ -1081,7 +1081,7 @@ the ONE HeaderToastStrip (MyTurnDismissToast, DependencyMergeToast).
 - Tests: `test/claudeReviewColumn.test.ts`, `test/ciReview.test.ts`, `test/claudeAutoReview.test.ts`,
   `test/aiStatusAndPrActions.test.ts`, `test/aiProviderCopy.test.ts`
 
-### [ ] Dismiss + undo toast
+### [x] Dismiss + undo toast → `e` and the panel's Dismiss remove the row at once through `removeOptimistically` (immediate; Undo = restore, which re-baselines notifications); the ONE `UndoToast` reads "Dismissed · <repo #N> — until something new happens on it" for 10s; `z` undoes; "Couldn’t dismiss it." shows on the row and in the panel. MyTurnDismissToast stays mounted, but Pending no longer triggers it
 - Entry: "Dismiss" quiet button on every My turn card (PR or trunk repo); toast in the ONE header strip
 - Files: `components/Activity/AttentionCards.tsx` (`DismissButton`), `MyTurnDismissToast.tsx`,
   `hooks/useMyTurnDismiss.ts`, `components/HeaderToasts.tsx`, `App.tsx`
