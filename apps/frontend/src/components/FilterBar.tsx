@@ -7,92 +7,66 @@ import { useSearchOpenPrs } from '../hooks/useTriage.js';
 import { useWorkspaces, workspaceRepoIds } from '../hooks/useWorkspaces.js';
 import { useFilters, type RangePreset } from '../store/filters.js';
 import { boardSlotMode, usePinnedTabs } from '../store/pinnedTabs.js';
+import { useTimelineLayout } from '../store/timelineLayout.js';
 import { EventSelectPanel } from './EventSelectPanel.js';
 import { RepoSelectPanel } from './RepoSelectPanel.js';
 import { StatusSelectPanel } from './StatusSelectPanel.js';
 import { ThreadStateSelectPanel } from './ThreadStateSelectPanel.js';
 import { UserSelectPanel } from './UserSelectPanel.js';
-import { BotIcon, ChevronIcon, CloseIcon, FilterIcon } from './Icons.js';
+import { useTimelineCommands } from './Timeline/useTimelineCommands.js';
+import { BotIcon, ChevronIcon, FilterIcon } from './Icons.js';
+import { cx, FOCUS_RING } from './ui/cx.js';
 
 const PRESETS: Exclude<RangePreset, 'custom'>[] = ['7d', '14d', '30d', '90d'];
 
-function Chip({
-  active,
-  onClick,
-  children,
-  color,
-  title,
-  onRemove,
-  removeTitle,
-  removeDisabled,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-  color?: string;
-  title?: string;
-  onRemove?: () => void;
-  removeTitle?: string;
-  removeDisabled?: boolean;
-}): JSX.Element {
-  const pill = `whitespace-nowrap rounded-full border text-xs transition ${
-    active
-      ? 'border-transparent bg-blue-600 text-white'
-      : 'border-gray-300 text-gray-600 hover:border-gray-400 dark:border-gray-700 dark:text-gray-300 dark:hover:border-gray-500'
-  }`;
-  const style = active && color ? { backgroundColor: color } : undefined;
+/** One quiet toolbar button (Now, Clear filters, the phone's Filters / List toggles). */
+const TOOL = `inline-flex h-7 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-ui px-2.5 text-body text-ui-mute hover:bg-ui-hover hover:text-ui-ink touch:h-10 touch:px-3 motion-safe:transition-colors motion-safe:duration-ui-fast ${FOCUS_RING}`;
 
-  // Without a remove affordance the chip is a single button. With one, render
-  // the toggle and the ✕ as *sibling* buttons inside a shared pill — never a
-  // button nested in a button (which can swallow the inner click).
-  if (!onRemove) {
-    return (
-      <button type="button" onClick={onClick} title={title} className={`${pill} px-2.5 py-0.5`} style={style}>
-        {children}
-      </button>
-    );
-  }
+/**
+ * A SEGMENTED control: the Range presets, and the phone's Board / List choice. One raised track, the
+ * chosen segment in the selection tone (never a coloured fill — colour is for what blocks or lands).
+ */
+function Segmented<T extends string>({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: T | null;
+  options: ReadonlyArray<{ id: T; label: React.ReactNode; title?: string }>;
+  onChange: (id: T) => void;
+}): JSX.Element {
   return (
-    <span className={`inline-flex items-center ${pill}`} style={style}>
-      <button type="button" onClick={onClick} title={title} className="py-0.5 pl-2.5 pr-1">
-        {children}
-      </button>
-      <button
-        type="button"
-        onClick={onRemove}
-        disabled={removeDisabled}
-        title={removeTitle}
-        aria-label={removeTitle}
-        className="flex items-center self-stretch py-0.5 pl-0.5 pr-2 opacity-50 hover:opacity-100 disabled:opacity-30"
-      >
-        <CloseIcon size={11} />
-      </button>
-    </span>
+    <div role="group" aria-label={label} className="inline-flex shrink-0 items-center rounded-ui bg-ui-raise p-0.5">
+      {options.map((o) => {
+        const on = o.id === value;
+        return (
+          <button
+            key={o.id}
+            type="button"
+            aria-pressed={on}
+            title={o.title}
+            onClick={() => onChange(o.id)}
+            className={cx(
+              'inline-flex h-6 items-center gap-1 rounded-[5px] px-2 text-body tabular-nums touch:h-9 touch:px-3',
+              'motion-safe:transition-colors motion-safe:duration-ui-fast',
+              on ? 'bg-ui-sel font-medium text-ui-ink shadow-sm shadow-black/20' : 'text-ui-mute hover:text-ui-ink',
+              FOCUS_RING,
+            )}
+          >
+            {o.label}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
-function Section({
-  label,
-  children,
-}: {
-  // Optional: the dropdown-panel sections (Repos / Status / Members / Events /
-  // Threads) omit it because their trigger button already shows the name — the
-  // label would be redundant. The Range chip section keeps it, since its chips
-  // don't repeat the category name. Without a label the wrapper still groups its
-  // children with the same spacing.
-  label?: string;
-  children: React.ReactNode;
-}): JSX.Element {
-  return (
-    <div className="flex items-center gap-1.5">
-      {label != null && (
-        <span className="text-[11px] uppercase tracking-wide text-gray-400">
-          {label}
-        </span>
-      )}
-      {children}
-    </div>
-  );
+const RANGE_OPTIONS = PRESETS.map((p) => ({ id: p, label: p, title: `The last ${p.replace('d', ' days')}` }));
+
+function Section({ children }: { children: React.ReactNode }): JSX.Element {
+  return <div className="flex items-center gap-1.5">{children}</div>;
 }
 
 export function FilterBar(): JSX.Element | null {
@@ -241,52 +215,57 @@ export function FilterBar(): JSX.Element | null {
   ]);
 
   // On a phone the board's filters fold behind one "Filters" button (they wrapped to three rows
-  // above a board that needs the height); Now stays on the line.
+  // above a board that needs the height); Now and the Board / List choice stay on the line.
   const phone = useIsPhone();
   const [phoneOpen, setPhoneOpen] = useState(false);
+  // A phone reads the Timeline as a LIST by default (components/Timeline/TimelineList.tsx); the board
+  // is one tap away. Wider screens always draw the board.
+  const phoneLayout = useTimelineLayout((s) => s.phone);
+  const setPhoneLayout = useTimelineLayout((s) => s.setPhone);
+
+  // ⌘K: the Timeline's own actions (range, Now, Clear filters, Board / List), while it is on screen.
+  useTimelineCommands({ enabled: isTimeline, phone });
 
   // Nothing to filter off the board (every hook above still ran: rules of hooks).
   if (!showEvents) return null;
 
+  const layoutToggle = phone && isTimeline && (
+    <Segmented
+      label="Show the timeline as"
+      value={phoneLayout}
+      onChange={setPhoneLayout}
+      options={[
+        { id: 'list', label: 'List', title: 'One line per pull request' },
+        { id: 'board', label: 'Board', title: 'The time-axis board' },
+      ]}
+    />
+  );
+  const nowButton = isTimeline && (
+    <button type="button" onClick={() => f.centerTimelineNow()} title="Recenter the timeline on the current time (keeps the zoom)" className={TOOL}>
+      Now
+    </button>
+  );
+
   if (phone && !phoneOpen) {
     return (
-      <div data-testid="filter-bar" className="flex shrink-0 items-center gap-2 bg-ui-surface px-3 py-1.5">
-        <button
-          type="button"
-          onClick={() => setPhoneOpen(true)}
-          aria-expanded={false}
-          className="flex h-10 items-center gap-1.5 rounded-ui px-2 text-body text-ui-mute hover:bg-ui-hover hover:text-ui-ink"
-        >
+      <div data-testid="filter-bar" className="flex shrink-0 items-center gap-1 bg-ui-bg px-2 py-1.5">
+        <button type="button" onClick={() => setPhoneOpen(true)} aria-expanded={false} className={TOOL}>
           <FilterIcon size={13} />
           Filters
           <ChevronIcon dir="down" size={10} />
         </button>
-        {isTimeline && (
-          <button
-            type="button"
-            onClick={() => f.centerTimelineNow()}
-            title="Recenter the timeline on the current time (keeps the zoom)"
-            className="ml-auto flex h-10 items-center rounded-ui px-3 text-body text-ui-mute hover:bg-ui-hover hover:text-ui-ink"
-          >
-            Now
-          </button>
-        )}
+        <span className="ml-auto" />
+        {/* Now moves the board; the list has no "now" to centre on. */}
+        {phoneLayout === 'board' && nowButton}
+        {layoutToggle}
       </div>
     );
   }
 
   return (
-    <div
-      data-testid="filter-bar"
-      className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 bg-ui-surface px-4 py-2"
-    >
+    <div data-testid="filter-bar" className="flex shrink-0 flex-wrap items-center gap-x-1.5 gap-y-2 bg-ui-bg px-3 py-2 md:px-4">
       {phone && (
-        <button
-          type="button"
-          onClick={() => setPhoneOpen(false)}
-          aria-expanded
-          className="-ml-2 flex h-10 items-center gap-1.5 rounded-ui px-2 text-body text-ui-ink hover:bg-ui-hover"
-        >
+        <button type="button" onClick={() => setPhoneOpen(false)} aria-expanded className={cx(TOOL, '-ml-1 text-ui-ink')}>
           <FilterIcon size={13} />
           Filters
           <ChevronIcon dir="up" size={10} />
@@ -294,18 +273,15 @@ export function FilterBar(): JSX.Element | null {
       )}
       {/* The board filters. Always live — focus is a separate tab now, not an overlay
           that locks the board. */}
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+      <div className="contents">
         {/* The workspace picker and the search box LEFT this bar with the redesign's shell: the
             picker heads the sidebar, and search is ⌘K (or `/`), which runs the same workspace
             search. What remains is the Timeline's own board filters, so the bar shows only on the
             Timeline and on a PR Focus tab. */}
 
         {/* The per-repo show/hide panel is TIMELINE-ONLY, in placement AND in effect: `repoIds`
-            narrows the timeline board and nothing else. It sits with the other board filters
-            below, NOT beside the workspace selector — a control mounted on a view it cannot
-            change is exactly the confusion this move removes. Narrowing Activity is the rail's
-            job (click a repo row); narrowing a drill-down table is that table's own repo
-            dropdown. */}
+            narrows the timeline board and nothing else. Narrowing Activity is the sidebar's job
+            (a repo row); narrowing a drill-down table is that table's own repo dropdown. */}
         {isTimeline && (
           <Section>
             <RepoSelectPanel
@@ -337,9 +313,7 @@ export function FilterBar(): JSX.Element | null {
           </Section>
         )}
 
-        {/* Status / Threads / Range are timeline-only — shown only on the Timeline board;
-            Events also shows on a PR Focus tab (below). Every other tab keeps just the
-            workspace selector + global search. */}
+        {/* Status / Threads / Range are timeline-only; Events also shows on a PR Focus tab. */}
         {isTimeline && (
           <Section>
             <StatusSelectPanel
@@ -386,11 +360,7 @@ export function FilterBar(): JSX.Element | null {
                     ? `Bot activity is hidden, except ${keptBotCount} ${keptBotCount === 1 ? 'bot' : 'bots'} you chose to keep`
                     : 'Bot activity is hidden'
               }
-              className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-2.5 py-0.5 text-xs transition ${
-                f.excludeBots
-                  ? 'border-transparent bg-blue-600 text-white'
-                  : 'border-gray-300 text-gray-600 hover:border-gray-400 dark:border-gray-700 dark:text-gray-300 dark:hover:border-gray-500'
-              }`}
+              className={cx(TOOL, f.excludeBots ? 'bg-ui-sel text-ui-ink' : 'bg-ui-raise')}
             >
               <BotIcon size={12} />
               {f.excludeBots && keptBotCount > 0 ? `Hide bots (except ${keptBotCount})` : 'Hide bots'}
@@ -408,40 +378,25 @@ export function FilterBar(): JSX.Element | null {
           </Section>
         )}
 
-        {/* Range (+ Now) sits at the END of the board-filters cluster. */}
+        {/* Range (+ Now) sits at the END of the board-filters cluster. A custom from/to (URL only)
+            leaves no preset pressed. */}
         {isTimeline && (
-          <Section label="Range">
-            {PRESETS.map((p) => (
-              <Chip key={p} active={f.preset === p} onClick={() => f.setPreset(p)}>
-                {p}
-              </Chip>
-            ))}
-            <button
-              type="button"
-              onClick={() => f.centerTimelineNow()}
-              title="Recenter the timeline on the current time (keeps the zoom)"
-              className="whitespace-nowrap rounded-full border border-sky-300 px-2.5 py-0.5 text-xs text-sky-600 transition hover:border-sky-400 hover:bg-sky-50 dark:border-sky-700 dark:text-sky-400 dark:hover:bg-sky-900/30"
-            >
-              Now
-            </button>
+          <Section>
+            <span className="ml-1.5 text-meta text-ui-faint">Range</span>
+            <Segmented label="Range" value={f.preset === 'custom' ? null : f.preset} options={RANGE_OPTIONS} onChange={(p) => f.setPreset(p)} />
+            {!phone && nowButton}
           </Section>
         )}
-
-
       </div>
 
-      {/* Right cluster, pinned next to the timeline. Timeline-only — Clear filters shows only on
-          the Timeline board (every other tab keeps just the workspace selector + global search). */}
+      {/* Right cluster: Clear filters (Timeline only), and on a phone the Board / List choice. */}
       {isTimeline && (
-        <div className="ml-auto flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => f.resetAllFilters()}
-            title="Reset all filters to their defaults"
-            className="whitespace-nowrap rounded border border-gray-300 px-2 py-0.5 text-xs text-gray-600 transition hover:border-gray-400 hover:text-gray-800 dark:border-gray-700 dark:text-gray-300 dark:hover:border-gray-500 dark:hover:text-gray-100"
-          >
+        <div className="ml-auto flex items-center gap-1">
+          <button type="button" onClick={() => f.resetAllFilters()} title="Reset all filters to their defaults" className={TOOL}>
             Clear filters
           </button>
+          {phone && phoneLayout === 'board' && nowButton}
+          {layoutToggle}
         </div>
       )}
     </div>

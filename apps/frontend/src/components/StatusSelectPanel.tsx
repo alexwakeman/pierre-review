@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { PrStatus } from '@pierre-review/shared';
 import { ALL_PR_STATUSES, DEFAULT_PR_STATUSES } from '../store/filters.js';
 import { useClickOutside } from '../hooks/useClickOutside.js';
+import { CheckboxBox } from './ui/FormControls.js';
 import { CaretIcon, CloseIcon } from './Icons.js';
 
 const STATUS_LABELS: Record<PrStatus, string> = {
@@ -81,13 +82,13 @@ export function StatusSelectPanel({
     <div ref={rootRef} className="relative">
       {/* Trigger + (when deviating from the default) a reset-✕. Sibling buttons in
           one pill — never a button nested in a button (that can swallow clicks). */}
-      <span className="inline-flex items-center whitespace-nowrap rounded-full border border-gray-300 text-xs text-gray-600 hover:border-gray-400 dark:border-gray-700 dark:text-gray-300 dark:hover:border-gray-500">
+      <span className="inline-flex items-center whitespace-nowrap rounded-ui bg-ui-raise text-body text-ui-mute hover:text-ui-ink">
         <button
           type="button"
           onClick={() => setOpen((o) => !o)}
           aria-haspopup="true"
           aria-expanded={open}
-          className={`inline-flex items-center gap-1 py-0.5 pl-2.5 ${
+          className={`inline-flex h-7 items-center gap-1 rounded-ui pl-2.5 touch:h-10 focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent ${
             atDefault ? 'pr-2.5' : 'pr-1'
           }`}
         >
@@ -100,7 +101,7 @@ export function StatusSelectPanel({
             onClick={reset}
             title="Reset statuses to default"
             aria-label="Reset statuses to default"
-            className="flex items-center self-stretch py-0.5 pl-0.5 pr-2 opacity-60 hover:opacity-100"
+            className="flex items-center self-stretch rounded-ui pl-0.5 pr-2 opacity-60 hover:opacity-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent touch:px-3"
           >
             <CloseIcon size={11} />
           </button>
@@ -111,49 +112,47 @@ export function StatusSelectPanel({
         <div
           role="dialog"
           aria-label="PR statuses"
-          className="absolute left-0 top-full z-[60] mt-1 w-60 rounded-lg border border-gray-200 bg-white p-2 shadow-lg dark:border-gray-700 dark:bg-gray-900"
+          className="absolute left-0 top-full z-[60] mt-1 w-60 max-w-[calc(100vw-2rem)] rounded-ui bg-ui-raise p-2 text-ui-ink shadow-xl shadow-black/30 ring-1 ring-ui-line motion-safe:animate-ui-pop max-sm:fixed max-sm:inset-x-2 max-sm:bottom-2 max-sm:top-auto max-sm:mt-0 max-sm:max-h-[75vh] max-sm:w-auto max-sm:max-w-none max-sm:overflow-y-auto max-sm:pb-[calc(0.5rem+env(safe-area-inset-bottom))]"
         >
           <div className="max-h-72 overflow-y-auto">
             {ALL_PR_STATUSES.map((s) => (
               <label
                 key={s}
-                className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 text-xs hover:bg-gray-100 dark:hover:bg-gray-800"
+                className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 text-meta hover:bg-ui-hover"
               >
-                <input
-                  type="checkbox"
+                <CheckboxBox
                   checked={statuses.includes(s)}
                   onChange={() => onToggle(s)}
                 />
-                <span className="text-gray-800 dark:text-gray-100">
+                <span className="text-ui-ink">
                   {STATUS_LABELS[s]}
                 </span>
               </label>
             ))}
 
-            <div className="my-1 border-t border-gray-200 dark:border-gray-700" />
+            <div className="my-1 border-t border-ui-line" />
 
             <label
               title={STALE_TOOLTIP}
-              className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 text-xs hover:bg-gray-100 dark:hover:bg-gray-800"
+              className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 text-meta hover:bg-ui-hover"
             >
-              <input
-                type="checkbox"
+              <CheckboxBox
                 checked={!excludeStale}
                 onChange={() => onExcludeStaleChange(!excludeStale)}
               />
-              <span className="text-gray-800 dark:text-gray-100">Show stale PRs</span>
+              <span className="text-ui-ink">Show stale PRs</span>
             </label>
           </div>
 
           {!atDefault && (
-            <div className="mt-2 flex items-center justify-between border-t border-gray-200 pt-2 dark:border-gray-700">
-              <span className="text-[11px] text-gray-400">
+            <div className="mt-2 flex items-center justify-between border-t border-ui-line pt-2">
+              <span className="text-meta text-ui-faint">
                 {count} of {total} shown
               </span>
               <button
                 type="button"
                 onClick={reset}
-                className="text-[11px] text-gray-400 hover:text-gray-600"
+                className="text-meta text-ui-faint hover:text-ui-ink"
               >
                 Reset to default
               </button>

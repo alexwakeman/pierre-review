@@ -1,6 +1,7 @@
 import { useSettingsModal } from '../../store/settingsModal.js';
 import { InfoButton } from '../InfoModal.js';
 import { GearIcon } from '../Icons.js';
+import { FOCUS_RING } from '../ui/cx.js';
 
 // This Sprint with NO issue tracker on the workspace: one line, the way to set one up behind a
 // button that opens Settings AT the Issue tracker section (`openSettings('issue-tracker')`), and the
@@ -11,7 +12,7 @@ export function SprintTrackerSetup(): JSX.Element {
   return (
     <div
       data-testid="sprint-view"
-      className="flex flex-col items-center gap-3 rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-600 dark:border-gray-700 dark:text-gray-300"
+      className="flex flex-col items-center gap-3 rounded-ui bg-ui-surface px-6 py-10 text-center text-body text-ui-mute"
     >
       <div className="flex items-center gap-1">
         <span>Connect Jira, Linear or GitHub Issues to see this sprint.</span>
@@ -24,7 +25,7 @@ export function SprintTrackerSetup(): JSX.Element {
       <button
         type="button"
         onClick={() => openSettings('issue-tracker')}
-        className="inline-flex items-center gap-1 rounded border border-gray-300 px-2.5 py-1 text-xs font-medium text-gray-700 hover:border-gray-400 dark:border-gray-700 dark:text-gray-200 dark:hover:border-gray-500"
+        className={`inline-flex h-8 items-center gap-1.5 rounded-ui bg-ui-raise px-3 text-body font-medium text-ui-ink hover:bg-ui-hover touch:h-11 ${FOCUS_RING}`}
       >
         <GearIcon size={13} />
         Set up in Settings

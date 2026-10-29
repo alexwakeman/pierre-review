@@ -397,18 +397,34 @@ export function ticketCardTags(n: Pick<SprintGraphNode, 'prs' | 'assignee' | 'gh
   return tags;
 }
 
-/** A TicketCard's border, by STYLE as well as colour: on a critical path = 2px solid accent; waiting
- *  on another unfinished ticket = dashed (accent and dashed when both); outside the sprint = a faint
- *  1px dashed border on a tinted ground, whatever else it is (a light accent when on a path).
- *  A pull request is NOT a border: the card wears a violet dot by its key (TicketCard). */
-export function ticketCardBorder(o: { critical: boolean; waiting: boolean; ghost: boolean }): string {
-  // A ticket outside the sprint is FAINT whatever else it is — on a path, its dashed border is the accent, lighter.
-  if (o.ghost) {
-    return `border border-dashed ${o.critical ? 'border-ai-signal-fill/60' : 'border-gray-300 dark:border-gray-700'} bg-gray-50 dark:bg-gray-900/60`;
-  }
-  if (o.critical) return `border-2 ${o.waiting ? 'border-dashed' : 'border-solid'} border-ai-signal-fill bg-white dark:bg-gray-950`;
-  if (o.waiting) return 'border border-dashed border-gray-500 bg-white dark:border-gray-400 dark:bg-gray-950';
-  return 'border border-solid border-gray-300 bg-white dark:border-gray-700 dark:bg-gray-950';
+/** What a TicketCard marks about itself, in the order the card draws them. Each is an ICON + its
+ *  words (the card's mark row, its accessible name and the board's key), never a border colour: the
+ *  redesign keeps the meaning and drops the decoration (docs/redesign/DESIGN.md § Colour). The old
+ *  2px vermilion / dashed borders read as alarms on a board where most cards are simply on a path.
+ *  'critical' = on a critical path; 'waiting' = waiting on another unfinished ticket; 'outside' =
+ *  outside the sprint (also a recessed ground, `ticketCardSurface`). A pull request is a dot by the
+ *  key, not a mark here. Pure. */
+export type TicketCardMark = 'critical' | 'waiting' | 'outside';
+
+export function ticketCardMarks(o: { critical: boolean; waiting: boolean; ghost: boolean }): TicketCardMark[] {
+  const out: TicketCardMark[] = [];
+  if (o.critical) out.push('critical');
+  if (o.waiting) out.push('waiting');
+  if (o.ghost) out.push('outside');
+  return out;
+}
+
+/** The words for each mark (the card's tooltip and the board key). */
+export const TICKET_CARD_MARK_LABEL: Record<TicketCardMark, string> = {
+  critical: 'On a critical path',
+  waiting: 'Waiting on another ticket',
+  outside: 'Outside the sprint',
+};
+
+/** A TicketCard's ground, by TONE (no border): a sprint ticket is a raised surface; a ticket outside
+ *  the sprint is recessed — the page's own ground with a faint 1px ring — whatever else it is. */
+export function ticketCardSurface(o: { ghost: boolean }): string {
+  return o.ghost ? 'bg-ui-bg ring-1 ring-inset ring-ui-line' : 'bg-ui-surface';
 }
 
 /** Tickets waiting on another unfinished ticket: an unfinished ticket with a `depends_on` edge onto one

@@ -12,6 +12,8 @@ import {
 import { useSprintSetStatuses } from '../../hooks/useSprintStories.js';
 import { ChevronIcon, CloseIcon, GripIcon, PlusIcon } from '../Icons.js';
 import { InfoButton } from '../InfoModal.js';
+import { Select, type SelectOption } from '../ui/Select.js';
+import { Checkbox } from '../ui/FormControls.js';
 import {
   addBucket,
   bucketsDraftChanged,
@@ -53,7 +55,10 @@ import {
 // Over the 60-status cap Save leaves 0-count statuses out first (`statusesLeftOutOnSave`) and says so. ⚠ Explanations live
 // behind the ⓘ only.
 
-const MUTED = 'text-gray-500 dark:text-gray-400';
+const MUTED = 'text-ui-mute';
+
+/** The bucket meanings, for the custom Select (it replaced a native select in the redesign). */
+const MEANING_OPTIONS: ReadonlyArray<SelectOption<SprintStage>> = SPRINT_STAGES.map((s) => ({ value: s, label: SPRINT_STAGE_LABEL[s] }));
 
 type Place = { bucket: number; index: number };
 
@@ -146,14 +151,14 @@ export function SprintStatusSettings({
   };
 
   const btn =
-    'rounded p-1 text-gray-600 hover:bg-gray-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500 disabled:opacity-30 dark:text-gray-300 dark:hover:bg-gray-800';
-  const line = 'pointer-events-none absolute inset-x-0 h-0.5 rounded bg-blue-600 dark:bg-blue-400';
+    'rounded-ui p-1 text-ui-mute hover:bg-ui-hover hover:text-ui-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-ui-accent disabled:opacity-30 touch:p-2.5';
+  const line = 'pointer-events-none absolute inset-x-0 h-0.5 rounded bg-ui-accent';
   const field =
-    'rounded border border-gray-300 bg-white px-1.5 py-0.5 text-xs text-gray-800 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100';
+    'rounded-ui bg-ui-raise px-1.5 py-0.5 text-meta text-ui-ink ring-1 ring-ui-line focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent';
 
   return (
     <section ref={rootRef} data-testid="sprint-status-settings" className="space-y-2" aria-label="Statuses">
-      <h5 className="flex items-center gap-1 text-xs font-semibold text-gray-700 dark:text-gray-200">
+      <h5 className="flex items-center gap-1 text-meta font-semibold text-ui-ink">
         Statuses
         <span className={`font-normal ${MUTED}`}>· {statusOrderSourceLabel(changed ? 'override' : layout.orderSource)}</span>
         <InfoButton title="Statuses">
@@ -186,7 +191,7 @@ export function SprintStatusSettings({
           </p>
         </InfoButton>
       </h5>
-      <p className="text-xs text-gray-700 dark:text-gray-200" data-testid="sprint-coding-bounds">
+      <p className="text-meta text-ui-ink" data-testid="sprint-coding-bounds">
         Coding begins: <strong className="font-medium">{bounds.begins ?? 'none'}</strong>
         <span className={MUTED}> · </span>
         Coding ends: <strong className="font-medium">{bounds.ends ?? 'none'}</strong>
@@ -194,7 +199,7 @@ export function SprintStatusSettings({
       <p className="sr-only" aria-live="polite">
         {announce}
       </p>
-      {empty && <p className={`text-xs ${MUTED}`}>No statuses read yet.</p>}
+      {empty && <p className={`text-meta ${MUTED}`}>No statuses read yet.</p>}
       <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
         {draft.buckets.map((bucket, bi) => {
           const list = bucket.statuses;
@@ -210,10 +215,10 @@ export function SprintStatusSettings({
                 e.preventDefault();
                 drop({ bucket: bi, index: slot?.bucket === bi ? slot.index : list.length });
               }}
-              className={`flex min-w-0 flex-col gap-1 rounded border p-2 ${
+              className={`flex min-w-0 flex-col gap-1 rounded-ui bg-ui-surface p-2.5 ring-1 ${
                 slot?.bucket === bi
-                  ? 'border-blue-400 bg-blue-50/60 dark:border-blue-500 dark:bg-blue-950/30'
-                  : 'border-gray-200 dark:border-gray-700'
+                  ? 'ring-ui-accent bg-ui-sel'
+                  : 'ring-transparent'
               }`}
             >
               <div className="flex items-center gap-1">
@@ -226,7 +231,7 @@ export function SprintStatusSettings({
                   onChange={(e) => setDraft(renameBucket(draft, bucket.id, e.target.value))}
                   className={`${field} min-w-0 flex-1 font-semibold`}
                 />
-                <span className={`text-xs tabular-nums ${MUTED}`}>{list.length}</span>
+                <span className={`text-meta tabular-nums ${MUTED}`}>{list.length}</span>
                 <button
                   type="button"
                   className={btn}
@@ -261,21 +266,17 @@ export function SprintStatusSettings({
                   <CloseIcon size={11} />
                 </button>
               </div>
-              <label className={`flex items-center gap-1 text-xs ${MUTED}`}>
-                Means
-                <select
-                  aria-label={`What ${label} means`}
+              <div className={`flex items-center gap-1.5 text-meta ${MUTED}`}>
+                <span aria-hidden>Means</span>
+                <Select<SprintStage>
+                  label={`What ${label} means`}
                   value={bucket.meaning}
-                  onChange={(e) => setDraft(setBucketMeaning(draft, bucket.id, e.target.value as SprintStage))}
-                  className={field}
-                >
-                  {SPRINT_STAGES.map((s) => (
-                    <option key={s} value={s}>
-                      {SPRINT_STAGE_LABEL[s]}
-                    </option>
-                  ))}
-                </select>
-              </label>
+                  onChange={(v) => setDraft(setBucketMeaning(draft, bucket.id, v))}
+                  options={MEANING_OPTIONS}
+                  size="sm"
+                  className="min-w-0 flex-1"
+                />
+              </div>
               <ol aria-label={`Statuses in ${label}`} className="relative flex-1 space-y-1">
                 {list.map((name, i) => {
                   const above = slot?.bucket === bi && slot.index === i;
@@ -293,12 +294,12 @@ export function SprintStatusSettings({
                       }}
                       onDragEnd={endDrag}
                       onDragOver={(e) => overRow(e, bi, i)}
-                      className={`relative flex cursor-grab items-center gap-1 rounded border border-gray-200 bg-white py-0.5 pl-1 pr-0.5 text-xs text-gray-800 active:cursor-grabbing dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 ${
+                      className={`relative flex cursor-grab items-center gap-1 rounded-ui bg-ui-raise py-0.5 pl-1 pr-0.5 text-meta text-ui-ink active:cursor-grabbing ${
                         isDragged ? 'opacity-40' : ''
                       }`}
                     >
                       {above && <span aria-hidden="true" className={`${line} -top-[3px]`} />}
-                      <GripIcon size={11} className="decorative-mark shrink-0 text-gray-400 dark:text-gray-500" />
+                      <GripIcon size={11} className="decorative-mark shrink-0 text-ui-faint" />
                       <span className="min-w-0 flex-1 break-words">
                         {name}
                         {unplaced.has(name) && <span className={MUTED}> · not placed yet</span>}
@@ -332,8 +333,8 @@ export function SprintStatusSettings({
                 {list.length === 0 ? (
                   <li
                     aria-hidden="true"
-                    className={`relative rounded border border-dashed px-2 py-2 text-center text-xs ${
-                      endSlot ? 'border-blue-500 text-blue-700 dark:text-blue-300' : `border-gray-300 dark:border-gray-600 ${MUTED}`
+                    className={`relative rounded border border-dashed px-2 py-2 text-center text-meta ${
+                      endSlot ? 'border-ui-accent text-ui-accent' : `border-ui-line ${MUTED}`
                     }`}
                   >
                     Drop a status here
@@ -358,22 +359,20 @@ export function SprintStatusSettings({
             setDraft(next);
             setAnnounce(`${next.buckets[next.buckets.length - 1]?.name ?? 'Bucket'} added at the end.`);
           }}
-          className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-blue-700 hover:bg-blue-50 dark:text-blue-300 dark:hover:bg-blue-950/40"
+          className="inline-flex items-center gap-1 rounded-ui px-2 py-1 text-meta text-ui-mute hover:bg-ui-hover hover:text-ui-ink touch:min-h-10"
         >
           <PlusIcon size={11} />
           Add bucket
         </button>
       )}
-      <div className="flex items-center gap-1 text-xs text-gray-700 dark:text-gray-200">
-        <label className="flex items-center gap-1.5">
-          <input
-            type="checkbox"
-            checked={draft.mergedColumn}
-            disabled={!hasProductReview}
-            onChange={(e) => setDraft({ ...draft, mergedColumn: e.target.checked })}
-          />
-          Move tickets whose pull requests have all merged into Product review
-        </label>
+      <div className="flex items-center gap-1 text-meta text-ui-ink">
+        <Checkbox
+          checked={draft.mergedColumn}
+          disabled={!hasProductReview}
+          onChange={(e) => setDraft({ ...draft, mergedColumn: e.target.checked })}
+          label="Move tickets whose pull requests have all merged into Product review"
+          className="text-meta"
+        />
         <InfoButton title="Merged tickets">
           <p>
             A ticket in a Code review bucket moves to your first Product review bucket when every pull request on it is
@@ -382,20 +381,20 @@ export function SprintStatusSettings({
           <p>With no Product review bucket, nothing moves.</p>
         </InfoButton>
       </div>
-      {!hasProductReview && <p className={`text-xs ${MUTED}`}>Add a bucket meaning Product review to use this.</p>}
+      {!hasProductReview && <p className={`text-meta ${MUTED}`}>Add a bucket meaning Product review to use this.</p>}
       {leftOut.size > 0 && (
-        <p className={`text-xs ${MUTED}`} data-testid="sprint-status-left-out">
+        <p className={`text-meta ${MUTED}`} data-testid="sprint-status-left-out">
           Save keeps {SPRINT_STATUS_ORDER_MAX} statuses at most, so it leaves out {[...leftOut].map((n) => `“${n}”`).join(', ')}.
         </p>
       )}
-      {problem != null && <p className="text-xs text-rose-700 dark:text-rose-400">{problem}</p>}
-      {save.isError && <p className="text-xs text-rose-700 dark:text-rose-400">{save.error.message}</p>}
+      {problem != null && <p className="text-meta text-ui-danger">{problem}</p>}
+      {save.isError && <p className="text-meta text-ui-danger">{save.error.message}</p>}
       <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
           disabled={save.isPending || !changed || problem != null}
           onClick={() => save.mutate(bucketsToSave(layout, draft), { onSuccess: (d) => setDraft(bucketsDraftOf(d.statusLayout)) })}
-          className="rounded bg-blue-600 px-3 py-1 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+          className="rounded-ui bg-ui-accent-fill px-3 py-1 text-body font-medium text-ui-on-accent hover:brightness-110 disabled:opacity-50 touch:min-h-10"
         >
           {save.isPending ? 'Saving…' : 'Save statuses'}
         </button>
@@ -406,7 +405,7 @@ export function SprintStatusSettings({
             setDraft(bucketsDraftOf(layout));
             setAnnounce('Changes dropped.');
           }}
-          className="rounded px-2 py-1 text-xs text-gray-600 hover:text-gray-800 disabled:opacity-50 dark:text-gray-300 dark:hover:text-gray-100"
+          className="rounded-ui px-2 py-1 text-body text-ui-mute hover:bg-ui-hover hover:text-ui-ink disabled:opacity-50 touch:min-h-10"
         >
           Cancel
         </button>
@@ -417,7 +416,7 @@ export function SprintStatusSettings({
             onClick={() =>
               save.mutate({ ...SPRINT_STATUS_SETTINGS_DEFAULT }, { onSuccess: (d) => setDraft(bucketsDraftOf(d.statusLayout)) })
             }
-            className="rounded px-2 py-1 text-xs text-gray-600 hover:text-gray-800 disabled:opacity-50 dark:text-gray-300 dark:hover:text-gray-100"
+            className="rounded-ui px-2 py-1 text-body text-ui-mute hover:bg-ui-hover hover:text-ui-ink disabled:opacity-50 touch:min-h-10"
           >
             Reset to automatic
           </button>

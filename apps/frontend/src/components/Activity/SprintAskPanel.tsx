@@ -20,7 +20,7 @@ import { aiCredentialWords, aiModelWords, aiProviderOfModel, aiRunLabel } from '
 // Ticket keys in an answer are links: each opens its story in the page's TRAY (TicketRefLink reads
 // SprintView's `StoryOpenOverride`).
 
-const MUTED = 'text-gray-500 dark:text-gray-400';
+const MUTED = 'text-ui-mute';
 const EMPTY: SprintAskShownTurn[] = [];
 
 export function SprintAskPanel({
@@ -75,12 +75,12 @@ export function SprintAskPanel({
   return (
     <section
       aria-label={`Ask ${aiName} about this sprint`}
-      className="flex max-h-[28rem] w-full max-w-2xl flex-col rounded-lg border border-ai-border bg-white shadow-sm dark:bg-gray-950"
+      className="flex max-h-[28rem] w-full max-w-2xl flex-col rounded-ui bg-ai-surface ring-1 ring-ai-border"
       data-testid="sprint-ask"
     >
-      <div className="flex items-center gap-1.5 border-b border-gray-200 px-3 py-2 dark:border-gray-800">
+      <div className="flex items-center gap-1.5 px-3 py-2">
         <SparkleIcon size={12} className="text-ai-signal" />
-        <h3 className="text-xs font-semibold text-gray-800 dark:text-gray-100">Ask {aiName} about this sprint</h3>
+        <h3 className="text-meta font-semibold text-ui-ink">Ask {aiName} about this sprint</h3>
         <InfoButton title={`Ask ${aiName} about this sprint`}>
           <p>
             {aiModelWords(aiProvider, 'Haiku')} answers from what this page holds: the tickets, their statuses, summaries and links, and their pull
@@ -91,7 +91,7 @@ export function SprintAskPanel({
         </InfoButton>
         <span className="ml-auto" />
         {turns.length > 0 && (
-          <button type="button" onClick={() => clear(workspaceId)} className="text-xs text-sky-700 hover:underline dark:text-sky-300">
+          <button type="button" onClick={() => clear(workspaceId)} className="text-meta text-ui-accent hover:underline">
             Clear
           </button>
         )}
@@ -99,24 +99,24 @@ export function SprintAskPanel({
           type="button"
           onClick={onClose}
           aria-label="Close"
-          className="inline-flex h-6 w-6 items-center justify-center rounded text-gray-500 hover:bg-gray-100 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100"
+          className="inline-flex h-7 w-7 items-center justify-center rounded-ui text-ui-mute hover:bg-ui-hover hover:text-ui-ink touch:h-10 touch:w-10"
         >
           <CloseIcon size={12} />
         </button>
       </div>
       <div ref={listRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-2" aria-live="polite">
         {turns.length === 0 && pending == null && (
-          <p className={`text-xs ${MUTED}`}>For example: what is blocking the work in review?</p>
+          <p className={`text-meta ${MUTED}`}>For example: what is blocking the work in review?</p>
         )}
         {turns.map((t, i) => (
           <div key={i} className="space-y-1">
-            <p className="ml-6 rounded-md bg-gray-100 px-2 py-1 text-xs text-gray-800 dark:bg-gray-800 dark:text-gray-100">{t.question}</p>
-            <div className="text-[13px] text-gray-800 dark:text-gray-100">
+            <p className="ml-6 rounded-ui bg-ui-raise px-2.5 py-1.5 text-body text-ui-ink">{t.question}</p>
+            <div className="text-body text-ui-ink">
               <Markdown ticketLinks rehypeExtra={rehype}>
                 {t.answer}
               </Markdown>
             </div>
-            <p className={`text-[11px] ${MUTED}`}>
+            <p className={`text-meta ${MUTED}`}>
               {[
                 // Who answered, and its cost judged by THAT provider (never the other one's reading).
                 t.model ? aiRunLabel(null, t.model) : null,
@@ -133,13 +133,13 @@ export function SprintAskPanel({
         ))}
         {pending != null && (
           <div className="space-y-1">
-            <p className="ml-6 rounded-md bg-gray-100 px-2 py-1 text-xs text-gray-800 dark:bg-gray-800 dark:text-gray-100">{pending}</p>
+            <p className="ml-6 rounded-ui bg-ui-raise px-2.5 py-1.5 text-body text-ui-ink">{pending}</p>
             <AiStatusLine stage="Thinking" />
           </div>
         )}
-        {ask.isError && !asking && <p className="text-xs text-rose-700 dark:text-rose-400">{ask.error.message}</p>}
+        {ask.isError && !asking && <p className="text-meta text-ui-danger">{ask.error.message}</p>}
       </div>
-      <div className="border-t border-gray-200 px-3 py-2 dark:border-gray-800">
+      <div className="px-3 py-2">
         <AiRunGate kind="complete">
           <form
             className="flex items-end gap-2"
@@ -162,12 +162,12 @@ export function SprintAskPanel({
               rows={2}
               aria-label="Your question"
               placeholder="Ask about this sprint"
-              className="min-w-0 flex-1 resize-none rounded border border-gray-300 bg-white px-2 py-1 text-xs text-gray-800 placeholder:text-gray-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:placeholder:text-gray-400"
+              className="min-w-0 flex-1 resize-none rounded border border-transparent bg-ui-raise px-2.5 py-1.5 text-body text-ui-ink ring-1 ring-ui-line placeholder:text-ui-faint focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent"
             />
             <button
               type="submit"
               disabled={asking || question.trim() === ''}
-              className="inline-flex items-center gap-1 rounded border border-ai-border px-2 py-1 text-xs font-medium text-ai-ink hover:bg-ai-surface-2 disabled:opacity-50"
+              className="inline-flex items-center gap-1 rounded border border-ai-border px-2 py-1 text-meta font-medium text-ai-ink hover:bg-ai-surface-2 disabled:opacity-50"
             >
               Ask
             </button>

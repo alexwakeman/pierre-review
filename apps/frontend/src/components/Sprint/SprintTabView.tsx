@@ -3,6 +3,10 @@ import { useFilters } from '../../store/filters.js';
 import { MergedPrsView } from '../Activity/MergedPrsView.js';
 import { SprintView } from '../Activity/SprintView.js';
 import { effectiveSprintTab, SPRINT_RAIL_TABS } from '../Activity/sprintRailModel.js';
+import { panelId, tabId, Tabs, type TabItem } from '../ui/Tabs.js';
+import type { SprintInnerTab } from '../../store/filters.js';
+
+const TABS: ReadonlyArray<TabItem<SprintInnerTab>> = SPRINT_RAIL_TABS.map((t) => ({ id: t.key, label: t.label }));
 
 // The **This Sprint** TAB (`activeTab === 'sprint'`, `?view=sprint`) — a FIXED tab beside Activity
 // (strip order Activity · This Sprint · Timeline). It was an Activity rail line under Pending until
@@ -26,31 +30,18 @@ export function SprintTabView(): JSX.Element {
   const tab = effectiveSprintTab(raw);
   // Back, or re-opening the tab, returns to where the reader was on THIS sub-tab (per session).
   const scrollRef = useRememberedScroll<HTMLDivElement>(`sprint:${tab}`);
+  // THE PAGE HEADER (docs/redesign/DESIGN.md § 1): the page title once, then the page's own tabs —
+  // the shared `Tabs`, which give 1–4 from anywhere on the page (`numberKeys`). The panel below is
+  // labelled by its tab.
   return (
-    <div ref={scrollRef} className="space-y-4 p-4" data-testid="sprint-tab-view">
-      <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-200">This Sprint</h2>
-      <div role="tablist" className="flex gap-1 overflow-x-auto overflow-y-hidden border-b border-gray-200 dark:border-gray-800">
-        {SPRINT_RAIL_TABS.map((t) => {
-          const on = tab === t.key;
-          return (
-            <button
-              key={t.key}
-              type="button"
-              role="tab"
-              aria-selected={on}
-              onClick={() => setTab(t.key)}
-              className={`-mb-px flex shrink-0 items-center gap-1 whitespace-nowrap rounded-t-md border border-b-0 px-3 py-1.5 text-xs font-medium ${
-                on
-                  ? 'border-gray-300 bg-white text-sky-600 dark:border-gray-700 dark:bg-gray-950 dark:text-sky-300'
-                  : 'border-transparent text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-900/60'
-              }`}
-            >
-              {t.label}
-            </button>
-          );
-        })}
+    <div ref={scrollRef} className="pb-10" data-testid="sprint-tab-view">
+      <header className="space-y-3 px-4 pb-2 pt-4 md:px-7 md:pt-5">
+        <h2 className="text-display text-ui-ink">This Sprint</h2>
+        <Tabs tabs={TABS} value={tab} onChange={setTab} label="This Sprint views" numberKeys idPrefix="sprint" className="-mx-1" />
+      </header>
+      <div role="tabpanel" id={panelId('sprint', tab)} aria-labelledby={tabId('sprint', tab)} className="px-4 pt-3 md:px-7">
+        {tab === 'merged' ? <MergedPrsView /> : <SprintView view={tab} />}
       </div>
-      {tab === 'merged' ? <MergedPrsView /> : <SprintView view={tab} />}
     </div>
   );
 }
