@@ -96,8 +96,9 @@ export function autoVerdictLine(
     if (a.status !== 'posted' && a.status !== 'partial') return null;
     return v.submitted === 'APPROVE' ? 'Approved automatically.' : 'Requested changes automatically.';
   }
-  // The "Not approved: …" reason is shown under the review's verdict (`notApprovedLine`), once.
-  if (v.reasonText != null && v.reasonText !== '') return null;
+  // A held APPROVE's "Not approved: …" reason is shown under the review's verdict (`notApprovedLine`),
+  // once. A held REQUEST_CHANGES keeps its own line: its reason is about the findings, not the hold.
+  if (v.wanted === 'APPROVE' && v.reasonText != null && v.reasonText !== '') return null;
   const verb = v.wanted === 'APPROVE' ? 'Not approved' : 'Changes not requested';
   switch (v.heldReason) {
     case 'own_pr':

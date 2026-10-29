@@ -56,7 +56,7 @@ import {
   type OwnLatestReview,
 } from './auto-post.js';
 import { readVerdictRulesForPr, readWorkspaceAutoPostForPr } from './auto-settings.js';
-import { DEFAULT_VERDICT_RULES, repliesDissent, withReason } from './auto-verdict.js';
+import { DEFAULT_VERDICT_RULES, reasonMayPost, repliesDissent, withReason } from './auto-verdict.js';
 import {
   getClaudeReviewById,
   getReviewPostContext,
@@ -370,10 +370,13 @@ async function postOutcome(
   // THE REASON, ALONE: an approval this pass computed and something held (the rules, or a gate) —
   // once per (PR, head).
   const heldApproval = heldByRules != null || (wanted === 'APPROVE' && event !== 'APPROVE');
-  const reasonText = heldApproval && verdict?.reasonText ? verdict.reasonText : null;
+  // Never a Limn-only gate reason (own PR, unreadable reviews: `reasonMayPost`), and never while a
+  // review request of the reader is open (the review would answer it).
+  const reasonText = heldApproval && reasonMayPost(verdict) ? (verdict?.reasonText ?? null) : null;
   const reasonOnly =
     event === 'COMMENT' &&
     reasonText != null &&
+    facts.openRequestOfMe !== true &&
     !(await reasonPostedAtHead(ctx, accountId, prId, pctx.reviewHeadSha, [reviewId]).catch(() => true));
   // ⚠ Otherwise NO COMMENT-ONLY REVIEW: a held verdict (and no lift) is recorded, nothing posts.
   if (event === 'COMMENT' && liftId == null && !reasonOnly) {

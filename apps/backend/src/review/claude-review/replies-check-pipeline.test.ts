@@ -460,7 +460,7 @@ describe('an AUTO pass: the outcome, both ways, through the auto-post gates', ()
     expect(postReview.mock.calls[0]![0]).toMatchObject({
       verdict: 'COMMENT',
       includedFindings: [],
-      body: 'Not approved: an earlier review by this account still stands.\n\n_Posted automatically by Limn’s Claude review._',
+      body: 'Not approved: your own review on GitHub still stands.\n\n_Posted automatically by Limn’s Claude review._',
     });
     const pass = (await persist.getClaudeReviewById(ctx, (await passRows(pr))[0]!.id, 1))!;
     expect(pass.autoPost).toMatchObject({
@@ -468,6 +468,23 @@ describe('an AUTO pass: the outcome, both ways, through the auto-post gates', ()
       reasonOnly: true,
       verdict: { wanted: 'APPROVE', submitted: 'COMMENT', heldReason: 'prior_review' },
     });
+  });
+
+  it('⚠ an OPEN review request of the reader: the held approval’s reason stays in Limn (a review would answer the request)', async () => {
+    const pr = await makePr();
+    await db.insert(schema.reviewRequests).values({ prId: pr, userId: users.me }).execute();
+    await reviewed(pr, [{ title: 'Naming is off', severity: 'warning', replies: [{ by: 'alice', body: 'It follows the house style.' }] }]);
+    liveReviewList = [{ id: 1, login: 'me', state: 'APPROVED' }];
+    script = () => ({ replies: [{ ref: 'T1', status: 'reply_accepted', acceptKind: 'not_valid', reply: 'Fair.' }] });
+    await rc.startRepliesCheck(ctx, { accountId: 1, prId: pr, trigger: 'auto' });
+    await settleFor(pr);
+    expect(postReview).not.toHaveBeenCalled();
+    const pass = (await persist.getClaudeReviewById(ctx, (await passRows(pr))[0]!.id, 1))!;
+    expect(pass.autoPost).toMatchObject({
+      status: 'skipped',
+      verdict: { wanted: 'APPROVE', submitted: 'COMMENT', heldReason: 'prior_review' },
+    });
+    expect(pass.autoPost?.reasonPosted).toBeUndefined();
   });
 
   it('LEFTOVERS: a question still open under "nits only" holds the approval; the reason is stored, shown and posted', async () => {

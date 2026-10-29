@@ -47,6 +47,19 @@ describe('the not-approved line', () => {
     expect(autoVerdictLine({ status: 'posted', verdict: { wanted: 'REQUEST_CHANGES', submitted: 'REQUEST_CHANGES', heldReason: null } })).toBe(
       'Requested changes automatically.',
     );
+    // ⚠ A HELD REQUEST_CHANGES keeps its own line: its reasonText is about the findings ("a blocker is
+    // still open"), not why changes were not requested.
+    const rc = (heldReason: 'own_pr' | 'already_requested' | 'refused') => ({
+      wanted: 'REQUEST_CHANGES' as const,
+      submitted: 'COMMENT' as const,
+      heldReason,
+      reasonText: 'Not approved: a blocker is still open.',
+    });
+    expect(autoVerdictLine({ status: 'posted', verdict: rc('own_pr') })).toBe('Changes not requested: this is your own PR.');
+    expect(autoVerdictLine({ status: 'posted', verdict: rc('already_requested') })).toBe('Changes already requested by Claude’s earlier review.');
+    expect(autoVerdictLine({ status: 'posted', verdict: rc('refused') })).toBe(
+      'Changes not requested: GitHub refused it, so the comments were posted on their own.',
+    );
   });
 
   it('a replies pass says why too, manual and automatic', () => {

@@ -2608,7 +2608,7 @@ auto-posting: claim before any GitHub write, never retried.
     single run, a relaxed pair's asker, or "neither Claude nor Codex approved"); leftovers the rule
     forbids ("Not approved: a question is still open.");
   - or the GATE'S, when a wanted APPROVE was held (`heldReasonText`): "your own pull request.",
-    "an earlier review by this account still stands.", "the earlier request for changes still
+    "your own review on GitHub still stands.", "the earlier request for changes still
     stands.", "couldn’t read the earlier reviews on GitHub.", "High impact." / "impact unknown.",
     "GitHub refused it.".
   Stored on the record (`ClaudeAutoVerdictRecord.reasonText`; `heldReason` gains `open_findings` /
@@ -2621,7 +2621,17 @@ auto-posting: claim before any GitHub write, never retried.
   old `nothing_new` skip) it goes out as ONE short COMMENT review — the reason + the auto footer + the
   marker — CLAIMED before the write (the run's own `auto_post`, `reasonPosted` + `reasonOnly`
   recorded from the claim on), never retried, at most ONCE per (PR, head): any record at this head
-  (full review or replies pass) with `reasonPosted` ⇒ nothing more (`reasonPostedAtHead`). This
+  (full review or replies pass) with `reasonPosted` ⇒ nothing more (`reasonPostedAtHead`).
+  ⚠ **LIMN-ONLY REASONS** (`reasonMayPost`): a held APPROVE's `own_pr` (an author can never approve
+  their own PR — it would go out on every head), `reviews_unreadable` (a transient read failure) and
+  `refused` are shown in Limn, never posted (no body line, no reason-only review, `reasonPosted` not
+  set, so the head's one post is not used up). ⚠ **A REASON-ONLY REVIEW CONSUMES A REVIEW REQUEST**:
+  it goes out under the reader's account, and any review the reader submits answers their pending
+  request on GitHub (it leaves My Turn's "Awaiting your review"). So it is never sent while a request
+  of the reader is OPEN (`AutoPostPrFacts.openRequestOfMe`, the synced `review_requests` row); the
+  reason stays in Limn. (A review carrying findings already answered the request before 0139.) The
+  tab keeps `autoVerdictLine` for a held REQUEST_CHANGES (its `reasonText` is the findings', not the
+  hold's); only a held APPROVE's line yields to the reason. This
   supersedes "a held verdict with nothing to post is a skip" for this one case only. Model text is
   made safe first (`safeReasonText`: no @-pings, no `<!--`, one line). Pinned by
   `verdict-strictness.test.ts`, `auto-post.test.ts`, `replies-check-pipeline.test.ts` and the SPA's

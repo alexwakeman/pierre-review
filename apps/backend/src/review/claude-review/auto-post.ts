@@ -97,6 +97,7 @@ import {
   autoVerdictFor,
   findingsNotApproved,
   pairVerdict,
+  reasonMayPost,
   safeReasonText,
   withReason,
   type VerdictRules,
@@ -127,6 +128,10 @@ export interface AutoPostPrFacts {
   authorIsBot: boolean;
   authorIsMe: boolean;
   requestedOfMe: boolean;
+  // A review request of the reader is OPEN right now (synced `review_requests`). Any review the reader
+  // submits — a reason-only COMMENT included — answers it on GitHub, so a reason-only review is never
+  // sent then (the reason stays in Limn).
+  openRequestOfMe?: boolean;
   // The reader wrote a review, a review comment or a PR comment on it (synced rows).
   participatedByMe?: boolean;
 }
@@ -612,6 +617,7 @@ export async function readAutoPostPrFacts(
     deps.accountUserId(accountId),
   ]);
   let requestedOfMe = false;
+  let openRequestOfMe = false;
   if (me != null) {
     const [open, history] = await Promise.all([
       ctx.db
@@ -633,7 +639,8 @@ export async function readAutoPostPrFacts(
         .limit(1)
         .execute() as Promise<unknown[]>,
     ]);
-    requestedOfMe = open.length > 0 || history.length > 0;
+    openRequestOfMe = open.length > 0;
+    requestedOfMe = openRequestOfMe || history.length > 0;
   }
   let participatedByMe = false;
   if (me != null && !authorIsMe && !requestedOfMe) {
@@ -648,7 +655,7 @@ export async function readAutoPostPrFacts(
     const hits = await Promise.all([by(t.reviews), by(t.reviewComments), by(t.prComments)]);
     participatedByMe = hits.some((h) => h.length > 0);
   }
-  return { state: pr.state, isDraft: pr.isDraft === true, authorIsBot, authorIsMe, requestedOfMe, participatedByMe };
+  return { state: pr.state, isDraft: pr.isDraft === true, authorIsBot, authorIsMe, requestedOfMe, openRequestOfMe, participatedByMe };
 }
 
 /** Every earlier run's findings of this PR (account-scoped), as the dedupe reads them. */
@@ -886,7 +893,9 @@ async function autoPostReview(
   const limnBlockIds = !facts.authorIsMe ? await loadLimnAutoBlockIds(ctx, accountId, prId, reviewId) : new Set<string>();
   const mayLift = noBlocker && unjudgedBlockers.length === 0 && limnBlockIds.size > 0;
   // A COMMENT-only run with a reason still to tell GitHub goes on (to the reason-only review).
-  const commentReasonToPost = wanted === 'COMMENT' && verdict?.reasonText != null && !reasonAlreadyAtHead;
+  // (Never while a review request of the reader is open: any review answers it.)
+  const commentReasonToPost =
+    wanted === 'COMMENT' && reasonMayPost(verdict) && !reasonAlreadyAtHead && facts.openRequestOfMe !== true;
   if (picked.toPost.length === 0 && (wanted == null || wanted === 'COMMENT') && !mayLift && !commentReasonToPost) {
     return skip(...nothingReason());
   }
@@ -947,12 +956,18 @@ async function autoPostReview(
     }
     verdict = withReason(verdict, findingsReason);
   }
-  // The reason this run tells GitHub (none on an approval, none with the verdict switched off).
+  // The reason this run tells GitHub (none on an approval, none with the verdict switched off, none
+  // for a Limn-only gate reason — own PR, unreadable reviews, a refusal: `reasonMayPost`).
   const reasonNow = (): string | null =>
-    verdict != null && verdict.submitted !== 'APPROVE' && verdict.reasonText ? verdict.reasonText : null;
-  // NOTHING ELSE TO POST: the reason alone, as one short COMMENT review — once per (PR, head).
+    verdict != null && verdict.submitted !== 'APPROVE' && reasonMayPost(verdict) ? (verdict.reasonText ?? null) : null;
+  // NOTHING ELSE TO POST: the reason alone, as one short COMMENT review — once per (PR, head), and
+  // never while a review request of the reader is open (the review would answer it).
   const reasonOnly =
-    picked.toPost.length === 0 && (verdict?.submitted ?? 'COMMENT') === 'COMMENT' && reasonNow() != null && !reasonAlreadyAtHead;
+    picked.toPost.length === 0 &&
+    (verdict?.submitted ?? 'COMMENT') === 'COMMENT' &&
+    reasonNow() != null &&
+    !reasonAlreadyAtHead &&
+    facts.openRequestOfMe !== true;
   // Limn's own automatic request for changes still stands, this run has no blocker and none behind
   // the block is left unjudged: lift it — superseded by the APPROVE this run sends, else dismissed.
   const liftId = noBlocker && !blockersRemain && standing.state === 'LIMN_AUTO_CHANGES_REQUESTED' ? standing.reviewId : null;

@@ -736,20 +736,20 @@ describe('auto verdict', () => {
       heldReason: 'own_pr',
       reasonText: 'Not approved: a blocker is still open.',
     });
-    // Nothing else to post on your own clean PR ⇒ the REASON alone, as one short COMMENT review
-    // (migration 0145) — never an empty one.
+    // Nothing else to post on your own clean PR ⇒ the reason stays IN LIMN: GitHub never lets an
+    // author approve their own PR, so "your own pull request" is never posted (it would go out on
+    // every head and never be actionable).
     postReview.mockClear();
     const clean = await makePr({ author: 'me' });
     const cleanRun = await run(clean, [], 'auto', 'APPROVE');
-    expect(await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: clean, reviewId: cleanRun }, deps())).toMatchObject({
-      kind: 'done',
-      record: { status: 'posted', reasonOnly: true, verdict: { heldReason: 'own_pr' } },
+    expect(await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: clean, reviewId: cleanRun }, deps())).toEqual({
+      kind: 'skipped',
+      reason: 'nothing_new',
     });
-    expect(postReview.mock.calls[0]![0]).toMatchObject({
-      verdict: 'COMMENT',
-      includedFindings: [],
-      body: `Not approved: your own pull request.\n\n${AUTO_POST_FOOTER}`,
-    });
+    expect(postReview).not.toHaveBeenCalled();
+    const rec = (await persist.getClaudeReviewById(ctx, cleanRun, 1))?.autoPost;
+    expect(rec?.verdict).toMatchObject({ heldReason: 'own_pr', reasonText: 'Not approved: your own pull request.' });
+    expect(rec?.reasonPosted).toBeUndefined();
   });
 
   it('your standing APPROVED (read live, even when the synced table says nothing) holds it to COMMENT', async () => {
@@ -771,7 +771,7 @@ describe('auto verdict', () => {
     expect(await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr2, reviewId: id2 }, deps())).toMatchObject({ kind: 'done' });
     expect(postReview.mock.calls[0]![0]).toMatchObject({
       verdict: 'COMMENT',
-      body: `Not approved: an earlier review by this account still stands.\n\n${AUTO_POST_FOOTER}`,
+      body: `Not approved: your own review on GitHub still stands.\n\n${AUTO_POST_FOOTER}`,
     });
     expect((await persist.getClaudeReviewById(ctx, id2, 1))?.autoPost?.verdict?.heldReason).toBe('prior_review');
     // A second run at the same head says nothing more.
@@ -789,6 +789,36 @@ describe('auto verdict', () => {
     await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: id }, deps());
     expect(postReview.mock.calls[0]![0].verdict).toBe('COMMENT');
     expect((await persist.getClaudeReviewById(ctx, id, 1))?.autoPost?.verdict?.heldReason).toBe('reviews_unreadable');
+
+    // Nothing else to post: a failed read is not news for the team — the reason stays in Limn, and
+    // does not use up the head's one reason post.
+    postReview.mockClear();
+    const pr2 = await makePr({ author: 'alice' });
+    const id2 = await run(pr2, [], 'auto', 'APPROVE');
+    expect(await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr2, reviewId: id2 }, deps())).toEqual({
+      kind: 'skipped',
+      reason: 'nothing_new',
+    });
+    expect(postReview).not.toHaveBeenCalled();
+    const rec = (await persist.getClaudeReviewById(ctx, id2, 1))?.autoPost;
+    expect(rec?.verdict).toMatchObject({ heldReason: 'reviews_unreadable', reasonText: 'Not approved: couldn’t read the earlier reviews on GitHub.' });
+    expect(rec?.reasonPosted).toBeUndefined();
+  });
+
+  it('a review request of the reader is OPEN: the reason-only review is never sent (it would answer the request)', async () => {
+    await setPost(true, { scope: 'all', autoVerdict: true });
+    liveReviewList = [{ login: 'me', state: 'APPROVED' }];
+    const pr = await makePr({ author: 'alice' });
+    await db.insert(schema.reviewRequests).values({ prId: pr, userId: users.me }).execute();
+    const id = await run(pr, [], 'auto', 'APPROVE');
+    expect(await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: id }, deps())).toEqual({
+      kind: 'skipped',
+      reason: 'nothing_new',
+    });
+    expect(postReview).not.toHaveBeenCalled();
+    const rec = (await persist.getClaudeReviewById(ctx, id, 1))?.autoPost;
+    expect(rec?.verdict).toMatchObject({ heldReason: 'prior_review', reasonText: 'Not approved: your own review on GitHub still stands.' });
+    expect(rec?.reasonPosted).toBeUndefined();
   });
   const refusal = () => Object.assign(new Error('GitHub REST POST /reviews -> 422: Review cannot be submitted'), { status: 422 });
 
