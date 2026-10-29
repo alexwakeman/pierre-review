@@ -33,8 +33,9 @@ import { ticketCommentsBlock } from '../ticket-review/prompts.js';
 // ⚠ GROUNDING DOES NOT TRUST THE INLINED TEXT: validate.ts re-reads every cited section from disk.
 
 export const STORY_DOCS_TOOL_NAME = 'submit_alignment';
-/** Claude's effort on the read: the text is in the prompt, so this is reading comprehension, not search. */
-export const STORY_DOCS_CLAUDE_EFFORT = 'low' as const;
+/** The read's effort, on Claude and Codex alike: the text is in the prompt, so this is reading
+ *  comprehension, not search. */
+export const STORY_DOCS_EFFORT = 'low' as const;
 /** Turns when every section is inline whole: the submit, a refusal's retry, and the closing turn. */
 export const STORY_DOCS_INLINE_TURNS = 4;
 /** Turns when a section was cut (a few reads of the cut parts first). */

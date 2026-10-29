@@ -13,7 +13,7 @@ import { DISALLOWED_TOOLS } from '../agent.js';
 import { applyClaudeReviewAuth } from '../auth.js';
 import { DISPATCH_TOOL_NAMES } from '../claude-review/specialists.js';
 import { emptyUsage, type UsageTokens } from '../usage.js';
-import { STORY_DOCS_CLAUDE_EFFORT, STORY_DOCS_TOOL_NAME } from './prompts.js';
+import { STORY_DOCS_EFFORT, STORY_DOCS_TOOL_NAME } from './prompts.js';
 export { storyDocsRoots, storyDocsTurnCap } from './prompts.js';
 import { submitAlignmentShape } from './schema.js';
 import { alignmentShapeProblems, type AlignmentContext } from './validate.js';
@@ -23,7 +23,7 @@ import { alignmentShapeProblems, type AlignmentContext } from './validate.js';
 //
 // ONE TURN BY DESIGN: the shortlisted sections' text is in the prompt (prompts.ts `inlineSections`), so
 // the run is one `submit_alignment` (plus a refusal's retry) — the manager caps the turns low
-// (`storyDocsTurnCap`) and Claude runs it at effort 'low' (STORY_DOCS_CLAUDE_EFFORT: a fixed depth like
+// (`storyDocsTurnCap`) and both providers run it at effort 'low' (STORY_DOCS_EFFORT: a fixed depth like
 // every kind outside the review and AI Fix — Settings → AI → Effort does not reach it, ai/effort.ts).
 //
 // TOOLS: Read, Glob, Grep (for a section the inline budget CUT) and the in-process `submit_alignment`;
@@ -180,7 +180,8 @@ export async function runStoryDocsAgent(args: RunStoryDocsAgentArgs): Promise<Ru
       tools,
       budget: { usd: config.storyDocsBudgetUsd, turns: args.maxTurns ?? config.storyDocsMaxTurns },
       abortController,
-      claude: { allowedTools: policy.allowedTools, disallowedTools: policy.disallowedTools, effort: STORY_DOCS_CLAUDE_EFFORT },
+      claude: { allowedTools: policy.allowedTools, disallowedTools: policy.disallowedTools, effort: STORY_DOCS_EFFORT },
+      codex: { effort: STORY_DOCS_EFFORT },
       ...(args.usageRecord ? { usageRecord: args.usageRecord } : {}),
       onProgress: (p) => {
         if (p.kind === 'step') {

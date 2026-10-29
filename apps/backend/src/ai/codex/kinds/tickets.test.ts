@@ -470,6 +470,12 @@ describe('story_docs on Codex', () => {
     expect(T.recorded).toEqual([expect.objectContaining({ provider: 'codex', feature: 'story_docs_alignment' })]);
   });
 
+  it('runs at low effort, like Claude: the sections are already in the prompt', async () => {
+    scenario({ first: answerFor(buildSubmitAlignmentShape(z), ALIGN_ARGS) });
+    await run();
+    expect(cfg(calls()[0].argv, 'model_reasoning_effort')).toBe('"low"');
+  });
+
   it('a refused answer (the shape judge) is retried once with the refusal, then accepted', async () => {
     const strict = answerFor(buildSubmitAlignmentShape(z), ALIGN_ARGS) as any;
     scenario({ first: { ...strict, overall: { ...strict.overall, actions: [strict.overall.actions[0]] } }, resume: strict });

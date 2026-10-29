@@ -713,10 +713,10 @@ automatic, never on view. `registerAgenticRoutes` registers the two routes (docs
   `[…cut]`). So the read is ONE answer: ≤ 4 turns (`storyDocsTurnCap`: the submit, a refusal's retry, the
   closing turn), ≤ 8 when a section was cut (the prompt then lists the shortlisted folders and says to Read a
   cut file only when its missing part matters); never above `STORY_DOCS_ALIGNMENT_MAX_TURNS` (16);
-  `STORY_DOCS_ALIGNMENT_BUDGET_USD` $1.50. ⚠ **Effort**: Claude runs it at `low` (`STORY_DOCS_CLAUDE_EFFORT`,
-  `spec.claude.effort`) — reading comprehension over text it already has. Settings → AI → Effort does NOT reach
+  `STORY_DOCS_ALIGNMENT_BUDGET_USD` $1.50. ⚠ **Effort**: both providers run it at `low` (`STORY_DOCS_EFFORT`,
+  `spec.claude.effort` / `spec.codex.effort`) — reading comprehension over text it already has. Settings → AI → Effort does NOT reach
   it (ai/effort.ts: that setting governs only the review, AI Fix and Plan first; every other kind runs a fixed
-  depth), so this is that fixed depth. Codex keeps its role default (standard = medium). Tools are unchanged:
+  depth), so this is that fixed depth. Tools are unchanged:
   Read/Glob/Grep + `submit_alignment`; Bash, every write tool, the web and dispatch denied. ⚠ **The path
   guard's ONLY read-only roots are the SHORTLISTED documents' folders** (`storyDocsRoots`) — never the library
   folder, so INDEX.md and every other document are unreachable. The working directory is an empty scratch dir.
