@@ -163,6 +163,34 @@ const VIEWS = [
   ],
   ['user-activity:2', '?view=user-activity:2', null],
   ['ws2:open-prs', '?view=activity&workspace=2', null],
+  // The Web workspace reads NOTION (docs/TRACKERS.md § Notion): the sprint from the Sprints database,
+  // a ticket's story with its comments (the bot's hidden), and Settings → Integrations' mapping.
+  ['ws2:sprint', '?view=sprint&workspace=2', null, { expect: ['Web Sprint 9'] }],
+  [
+    'ticket:notion:WEB-34',
+    `?view=${encodeURIComponent('ticket:notion:https://www.notion.so/5e1f0c2a7b3d4e8f9a0b1c2d3e4f5a6b#WEB-34')}&workspace=2`,
+    null,
+    {
+      act: async (page) => {
+        await page.getByRole('button', { name: /^As written in Notion/ }).first().click();
+        await page.getByRole('button', { name: /^Comments \(2\)/ }).first().click();
+      },
+      expect: ['Move between open-PR cards with the keyboard', 'Comments (2)', 'Home and End are in'],
+    },
+  ],
+  [
+    'ws2:settings:notion',
+    '?view=activity&workspace=2',
+    null,
+    {
+      act: async (page) => {
+        await openSettingsTab('Integrations')(page);
+        await page.getByTestId('notion-read-database').first().click();
+        await page.getByTestId('notion-mapping-form').first().waitFor({ timeout: 10_000 });
+      },
+      expect: ['Database URL', 'Integration token', 'keys look like WEB-123', 'Sprint dates'],
+    },
+  ],
   ['ws2:chronology', '?view=activity&workspace=2&activityRepo=insights&insightsTab=bottlenecks', null],
 ];
 

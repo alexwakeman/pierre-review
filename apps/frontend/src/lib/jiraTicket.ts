@@ -34,7 +34,7 @@ export function trackerNameOf(tickets: readonly Pick<TicketRef, 'provider'>[] | 
 /** A ticket whose criteria SOURCE is fixed by its tracker (GitHub Issues, Linear: sub-issues, a task
  *  list or an "Acceptance criteria" section), so there is no field to pick. */
 export const hasFixedAcSource = (ref: Pick<TicketRef, 'provider'> | null | undefined): boolean =>
-  ref?.provider === 'github' || ref?.provider === 'linear';
+  ref?.provider === 'github' || ref?.provider === 'linear' || ref?.provider === 'notion';
 
 /**
  * Jira or Linear tickets detected on the PR that CANNOT be filled — the PR's own workspace (the one
@@ -43,7 +43,7 @@ export const hasFixedAcSource = (ref: Pick<TicketRef, 'provider'> | null | undef
  */
 export function unfillableJiraTickets(tickets: readonly TicketRef[] | null | undefined): TicketRef[] {
   if (!tickets) return [];
-  return tickets.filter((t) => (t.provider === 'jira' || t.provider === 'linear') && t.canFetchDetails !== true);
+  return tickets.filter((t) => t.provider !== 'github' && t.canFetchDetails !== true);
 }
 
 /** The draft after a fill: title and description REPLACED; the criteria are left for the picker. */

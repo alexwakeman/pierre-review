@@ -2,7 +2,13 @@ import { and, eq, isNull } from 'drizzle-orm';
 import {
   TRACKER_PROVIDERS_AVAILABLE,
   linearSiteRoot,
+  NOTION_TOKEN_RE,
+  notionDatabaseRoot,
+  notionMappingProblem,
+  notionRootDatabaseId,
+  parseNotionMapping,
   type IssueMatchScope,
+  type NotionTrackerMapping,
   type TrackerProvider,
   type WorkspaceIssueSettings,
   type WorkspaceTrackerSettings,
@@ -31,6 +37,8 @@ export interface WorkspaceTrackerRow {
   matchScope: string | null;
   authEmail: string | null;
   authToken: string | null;
+  /** Notion's property mapping, JSON (migration 0150). Optional so a narrow caller may omit it. */
+  notionConfig?: string | null;
 }
 
 /** ⚠ NULL reads as `'title_branch'` — the behaviour before the setting existed. */
@@ -54,6 +62,7 @@ export async function readStoredTrackerRow(
       matchScope: t.matchScope,
       authEmail: t.authEmail,
       authToken: t.authToken,
+      notionConfig: t.notionConfig,
     })
     .from(t)
     .where(and(eq(t.accountId, accountId), eq(t.workspaceId, workspaceId)))
@@ -107,6 +116,7 @@ export function effectiveTrackerRow(stored: WorkspaceTrackerRow | null, detected
     matchScope: stored?.matchScope ?? null,
     authEmail: stored?.authEmail ?? null,
     authToken: stored?.authToken ?? null,
+    notionConfig: stored?.notionConfig ?? null,
   };
 }
 
@@ -187,6 +197,7 @@ export function toWorkspaceTrackerSettings(
       email: row?.authEmail ?? null,
       hasToken: row?.authToken != null && row.authToken !== '',
     },
+    notion: parseNotionMapping(row?.notionConfig),
   };
 }
 
@@ -218,6 +229,8 @@ export interface WorkspaceTrackerAccess {
   issue: WorkspaceIssueSettings;
   email: string | null;
   token: OpenedToken;
+  /** Notion's saved property mapping; null when none (or not Notion). */
+  notion?: NotionTrackerMapping | null;
 }
 
 /** The access half of an already-read row (so a caller answers from ONE read). */
@@ -226,6 +239,7 @@ export function trackerAccessOf(host: HostSeal | undefined, row: WorkspaceTracke
     issue: issueOf(row),
     email: row?.authEmail ?? null,
     token: openTrackerToken(host, row?.authToken),
+    notion: parseNotionMapping(row?.notionConfig),
   };
 }
 
@@ -288,6 +302,17 @@ export function trackerPatchError(existing: WorkspaceTrackerRow | null, patch: W
   if (provider === 'linear' && token !== '' && !LINEAR_KEY_RE.test(token)) {
     return 'That is not a Linear personal API key. Create one in Linear under Settings → Security & access; it starts with lin_api_.';
   }
+  if (provider === 'notion' && token !== '' && !NOTION_TOKEN_RE.test(token)) {
+    return 'That is not a Notion integration token. Create an internal integration at notion.so/my-integrations; its token starts with ntn_ or secret_.';
+  }
+  if (patch.notion != null) {
+    const problem = notionMappingProblem(patch.notion);
+    if (problem != null) return problem;
+    const baseUrl = patch.issue?.baseUrl !== undefined ? patch.issue.baseUrl : (existing?.baseUrl ?? null);
+    if (notionRootDatabaseId(notionDatabaseRoot(baseUrl)) !== patch.notion.databaseId) {
+      return 'This mapping is for a different database than the URL above. Read the database again.';
+    }
+  }
   return null;
 }
 
@@ -308,6 +333,7 @@ export function mergeTracker(
     matchScope: existing?.matchScope ?? null,
     authEmail: existing?.authEmail ?? null,
     authToken: existing?.authToken ?? null,
+    notionConfig: existing?.notionConfig ?? null,
   };
 
   if (patch.issue) {
@@ -345,6 +371,18 @@ export function mergeTracker(
     const token = typeof j.token === 'string' ? j.token.trim() : '';
     if (token !== '') out.authToken = storeTrackerToken(host, token);
     else if (j.clearToken === true) out.authToken = null;
+  }
+
+  // ── NOTION (docs/TRACKERS.md § Notion) ──
+  // A mapping belongs to ONE database: pointing the URL at another database drops it (the token is the
+  // integration's, not the database's, and stays). A mapping sent in the patch replaces it.
+  if (notionDatabaseRoot(existing?.baseUrl ?? null) !== notionDatabaseRoot(out.baseUrl)) out.notionConfig = null;
+  if (patch.notion !== undefined) out.notionConfig = patch.notion == null ? null : JSON.stringify(patch.notion);
+  // ⚠ THE UNIQUE ID PREFIX IS THE ALLOWLIST. Detection reads `project_keys`; for Notion it is the mapped
+  // prefix and nothing else (no mapping → no key list → the adapter detects nothing).
+  if (out.provider === 'notion') {
+    const m = parseNotionMapping(out.notionConfig);
+    out.projectKeys = m != null ? m.uniqueId.prefix.toUpperCase() : null;
   }
 
   return out;

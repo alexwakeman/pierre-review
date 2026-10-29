@@ -51,7 +51,8 @@ export type SprintFallbackReason =
 
 /** Per workspace, what the stored list IS. Named on screen through `sprintSourceTitle`. */
 export type SprintSource =
-  | { kind: 'sprint'; provider: 'jira'; names: string[] }
+  // Notion: the current sprint by the workspace's mapping (a Sprints relation, a select or a date).
+  | { kind: 'sprint'; provider: 'jira' | 'notion'; names: string[] }
   | { kind: 'cycle'; provider: 'linear'; names: string[] }
   | { kind: 'milestone'; provider: 'github'; name: string; dueOn: string | null; repos: string[] }
   | {
@@ -196,7 +197,7 @@ export function sprintPhaseOfStage(stage: SprintStage): SprintPhase {
 
 /** The automatic order as the sprint read stored it (`sprint_reads.status_order_json`). */
 export interface SprintStatusAutoOrder {
-  source: 'jira_board' | 'linear_states' | 'github';
+  source: 'jira_board' | 'linear_states' | 'github' | 'notion_status';
   /** In board / workflow order. `id` is the tracker's status id when it has one. */
   statuses: Array<{ id: string | null; name: string; category: JiraStatusCategory | null }>;
   /** ISO-8601 of the read that produced it. */

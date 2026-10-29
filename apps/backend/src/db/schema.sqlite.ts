@@ -2755,7 +2755,7 @@ export const prMentions = sqliteTable(
 // and runs in the public `npx limn-review` install. Contract: docs/TRACKERS.md.
 
 // ── workspace_trackers: ONE tracker per workspace ─────────────────────────────────────────────────
-// provider ('jira' | 'github' | 'linear'), the base URL links are built on, the project-key
+// provider ('jira' | 'github' | 'linear' | 'notion'), the base URL links are built on, the project-key
 // allowlist, the match scope, and — for Jira and Linear — the API credential.
 //
 // ⚠ `auth_token` IS A CREDENTIAL — the provider's API token (Jira: an API token with `auth_email`,
@@ -2792,6 +2792,11 @@ export const workspaceTrackers = sqliteTable(
     // Jira Cloud signs in with email + API token (HTTP Basic); null = Bearer (Server / Data Center).
     authEmail: text('auth_email'),
     authToken: text('auth_token'),
+    // NOTION ONLY (migration 0150; docs/TRACKERS.md § Notion): the property mapping as JSON (shared
+    // `NotionTrackerMapping` — the database id, the Unique ID property + prefix, status / assignee /
+    // sprint / type / criteria / blocked-by properties). Not a secret; cleared when the database URL
+    // moves to another database. NULL = not mapped (a Notion workspace then reads nothing).
+    notionConfig: text('notion_config'),
     updatedAt: integer('updated_at', { mode: 'timestamp' })
       .notNull()
       .default(sql`(unixepoch())`),

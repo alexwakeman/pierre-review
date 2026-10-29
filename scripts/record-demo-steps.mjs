@@ -24,6 +24,9 @@ const TICKETS = [
   'PLAT-292', 'PLAT-301', 'PLAT-288', 'PLAT-305', 'PLAT-312', 'PLAT-296', 'PLAT-297', 'PLAT-310', 'PLAT-315', 'PLAT-318',
   'INFRA-231', 'INFRA-244', 'INFRA-260', 'INFRA-248', 'INFRA-252', 'INFRA-199', 'INFRA-180',
 ];
+// The Web workspace's tracker is NOTION (apps/backend/scripts/seed-demo-notion.ts): its sprint tickets.
+const NOTION_ROOT = 'https://www.notion.so/5e1f0c2a7b3d4e8f9a0b1c2d3e4f5a6b';
+const NOTION_TICKETS = ['WEB-31', 'WEB-34', 'WEB-28', 'WEB-36', 'WEB-37'];
 const PEOPLE = [1, 2, 5, 6, 3];
 const BOTS = [8, 9, 10, 20];
 
@@ -205,6 +208,19 @@ export const STEPS = [
       await h.go(`?view=${enc(`ticket:${ident(k)}`)}`);
       await explore(h, { max: 10, scope: 'main' });
     },
+  })),
+
+  // The Notion workspace's tickets (Web): each story tab, and its sprint tray.
+  ...NOTION_TICKETS.map((k) => ({
+    name: `ticket:notion:${k}`,
+    run: async (h) => {
+      await h.go(`?view=${enc(`ticket:notion:${NOTION_ROOT}#${k}`)}&workspace=2`);
+      await explore(h, { max: 10, scope: 'main' });
+    },
+  })),
+  ...NOTION_TICKETS.map((k) => ({
+    name: `ws2:sprint:tray:${k}`,
+    run: (h) => h.go(`?view=sprint&sprintTab=themes&workspace=2&sprintStory=${enc(`notion:${NOTION_ROOT}#${k}`)}`),
   })),
 
   // ── Timeline ──

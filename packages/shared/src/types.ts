@@ -1,3 +1,4 @@
+import type { NotionTrackerMapping } from './notion-tracker.js';
 import type { TicketComment } from './ticket-comments.js';
 // API types shared between frontend and backend.
 // All timestamps are ISO-8601 strings over the wire.
@@ -3986,11 +3987,13 @@ export type SlackDigestCadence = 'off' | 'daily' | 'twice_daily';
 // account's own GitHub token; `linear` links the issues Linear attached the PR to (plus the keys
 // detection finds) and reads them with a saved Linear personal API key.
 // `TRACKER_PROVIDERS_AVAILABLE` is the list the route and the Settings picker both read.
-export type TrackerProvider = 'jira' | 'github' | 'linear';
+// `notion` reads the pages of ONE Notion database, keyed by their prefixed Unique ID (ENG-123), with a
+// saved integration token and a per-workspace property mapping (shared notion-tracker.ts).
+export type TrackerProvider = 'jira' | 'github' | 'linear' | 'notion';
 /** @deprecated The old name. Same union. */
 export type IssueProvider = TrackerProvider;
 /** The providers a workspace may choose today, in picker order. */
-export const TRACKER_PROVIDERS_AVAILABLE: readonly TrackerProvider[] = ['jira', 'github', 'linear'];
+export const TRACKER_PROVIDERS_AVAILABLE: readonly TrackerProvider[] = ['jira', 'github', 'linear', 'notion'];
 
 /**
  * What a provider's Settings section asks for. GitHub Issues asks for NOTHING: it links the issues a
@@ -4006,6 +4009,9 @@ export const TRACKER_PROVIDER_FIELDS: Record<
   // Linear: the workspace URL (`https://linear.app/<org>` — the ticket root and the link base), the
   // team-key allowlist and scope for detection, and a personal API key (write-only, sealed).
   linear: { baseUrl: true, projectKeys: true, matchScope: true, token: true },
+  // Notion: the DATABASE URL (its id is the ticket root), an integration token, and the property
+  // mapping (`WorkspaceTrackerUpdate.notion`). No key list: the Unique ID's prefix IS the allowlist.
+  notion: { baseUrl: true, projectKeys: false, matchScope: true, token: true },
 };
 
 // Read shape (GET /api/pro/settings). ⚠ The Slack config left this type in plugin migration 0030 —
@@ -4239,6 +4245,9 @@ export interface WorkspaceTrackerSettings {
   // This workspace's repos that use GitHub Issues (issues enabled + an issue linked to a PR in the
   // last 90 days), `owner/name`, sorted. Sent whatever the choice, so Settings can say why.
   githubIssuesRepos: string[];
+  // The saved Notion property mapping (docs/TRACKERS.md § Notion); null when none is saved. Sent
+  // whatever the provider, so switching away and back keeps it on screen.
+  notion?: NotionTrackerMapping | null;
 }
 
 // The PUT body: a PARTIAL patch. An omitted section is untouched; an omitted key inside one is too.
@@ -4258,6 +4267,8 @@ export interface WorkspaceTrackerUpdate {
     // true removes the saved token (ignored when `token` is sent in the same patch).
     clearToken?: boolean;
   };
+  // The Notion property mapping (shared `notionMappingProblem` decides what is refused); null clears it.
+  notion?: NotionTrackerMapping | null;
 }
 
 export interface WorkspaceProSettings {
@@ -5501,6 +5512,9 @@ export interface TicketLink {
   assignee?: TicketAssignee | null;
   /** The issue type's name ("Story", "Bug"). */
   issueType?: string | null;
+  /** The ticket's ident (shared `trackerTicketIdent`) when the server can name it. Notion needs it: its
+   *  link (`notion.so/ENG-123`) does not name the database the ident is rooted on. */
+  ident?: string;
 }
 
 export interface PrTicketLinks {

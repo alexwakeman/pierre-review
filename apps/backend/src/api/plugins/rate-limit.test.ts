@@ -245,6 +245,9 @@ describe('tierFor — the issue tracker', () => {
     expect(tiers('GET', '/api/workspaces/3/tracker/linear-check')).toEqual(['search', 'read']);
     // A near-miss spelling is NOT the Linear check.
     expect(tiers('GET', '/api/workspaces/3/tracker/linear-checks')).toEqual(['read']);
+    // The Notion mapping read calls Notion with the saved token.
+    expect(tiers('GET', '/api/workspaces/3/tracker/notion-schema')).toEqual(['search', 'read']);
+    expect(tiers('GET', '/api/workspaces/3/tracker/notion-schemas')).toEqual(['read']);
     expect(tiers('GET', '/api/workspaces/3/tracker')).toEqual(['read']);
     // The rest of the workspace family is untouched.
     expect(tiers('PUT', '/api/workspaces/3/pending-mute')).toEqual(['read']);

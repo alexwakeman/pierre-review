@@ -16,13 +16,21 @@ export type PreparedCall =
   | { ok: false; status: number; error: string; message: string };
 
 export const MSG_NO_READING_TRACKER =
-  'This workspace’s issue tracker is not one Limn reads. Set Jira, GitHub Issues or Linear in Settings.';
+  'This workspace’s issue tracker is not one Limn reads. Set Jira, GitHub Issues, Linear or Notion in Settings.';
+
+/** The sentence for a Notion workspace whose properties are not mapped yet. */
+export const MSG_NOTION_UNMAPPED = 'Map this Notion database’s properties in Settings before Limn can read it.';
+
+// The words for a provider's credential.
+const credentialWord = (provider: string, label: string): string =>
+  provider === 'linear' ? 'Linear API key' : provider === 'notion' ? 'Notion integration token' : `${label} token`;
 
 export function prepareTrackerCall(
   access: WorkspaceTrackerAccess,
   // `github`: the account's GitHub access (`githubAccessFor`) — required by GitHub Issues, ignored
   // by every other provider.
-  opts: { transport?: JiraTransport; github?: GithubCallAccess },
+  // `allowUnmapped`: Notion's Settings schema read, which runs BEFORE a mapping exists.
+  opts: { transport?: JiraTransport; github?: GithubCallAccess; allowUnmapped?: boolean },
 ): PreparedCall {
   const adapter = maybeAdapterFor(access.issue.provider);
   if (adapter?.reader == null || access.issue.provider == null) {
@@ -41,7 +49,9 @@ export function prepareTrackerCall(
       message:
         access.issue.provider === 'linear'
           ? 'The Linear workspace URL in Settings is not a linear.app address, like https://linear.app/your-workspace.'
-          : `The ${label} base URL in Settings is not a valid web address.`,
+          : access.issue.provider === 'notion'
+            ? 'The Notion database URL in Settings is not a Notion database link.'
+            : `The ${label} base URL in Settings is not a valid web address.`,
     };
   }
   if (adapter.reader.credential === 'token') {
@@ -50,7 +60,7 @@ export function prepareTrackerCall(
         ok: false,
         status: 400,
         error: 'NoJiraToken',
-        message: `No ${access.issue.provider === 'linear' ? 'Linear API key' : `${label} token`} is saved for this workspace. Add one in Settings.`,
+        message: `No ${credentialWord(access.issue.provider, label)} is saved for this workspace. Add one in Settings.`,
       };
     }
     if (access.token.state === 'unreadable') {
@@ -58,9 +68,17 @@ export function prepareTrackerCall(
         ok: false,
         status: 400,
         error: 'JiraTokenUnreadable',
-        message: `The saved ${access.issue.provider === 'linear' ? 'Linear API key' : `${label} token`} cannot be read on this server. Save it again in Settings.`,
+        message: `The saved ${credentialWord(access.issue.provider, label)} cannot be read on this server. Save it again in Settings.`,
       };
     }
+  }
+  // ⚠ A NOTION MAPPING belongs to ONE database: one for another database than the URL is no mapping.
+  const notion =
+    access.issue.provider === 'notion' && access.notion != null && `https://www.notion.so/${access.notion.databaseId}` === apiRoot
+      ? access.notion
+      : null;
+  if (access.issue.provider === 'notion' && notion == null && opts.allowUnmapped !== true) {
+    return { ok: false, status: 400, error: 'NoNotionMapping', message: MSG_NOTION_UNMAPPED };
   }
   return {
     ok: true,
@@ -76,6 +94,7 @@ export function prepareTrackerCall(
       policy: { cloud: false },
       transport: opts.transport,
       ...(access.issue.provider === 'github' ? { github: opts.github } : {}),
+      ...(notion != null ? { notion } : {}),
     },
   };
 }

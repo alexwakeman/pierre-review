@@ -131,6 +131,7 @@ beforeAll(async () => {
   );
   // The core tracker tables (migration 0088), exactly as a real install has them.
   sqlite.exec(migration('0088_issue_tracker.sql'));
+  sqlite.exec(migration('0150_workspace_tracker_notion.sql'));
   sqlite.exec(migration('0098_tracker_ticket_dates.sql'));
   // The blocking links + status id (migration 0103's tracker_tickets half).
   sqlite.exec('ALTER TABLE tracker_tickets ADD blocked_by_json text; ALTER TABLE tracker_tickets ADD status_id text;');
@@ -567,4 +568,76 @@ describe('4. the enricher tells the SPA when the button may show', () => {
 // (5. "the account export cannot reach the token" moved to core's own export test: the tracker row
 // IS exported now — the user typed it — with the token reduced to `hasToken`; see
 // db/erase-account.test.ts "NEVER includes the stored GitHub token".)
+
+// ── 6. NOTION (docs/TRACKERS.md § Notion): the mapping survives the schema; the schema read is the
+// SAVED database's, with the saved token; a database without a prefixed Unique ID is refused. ──
+describe('6. notion — the mapping PUT and the schema read', () => {
+  const DB = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+  const NOTION_TOKEN = 'ntn_abcdefghijklmnopqrstuvwxyz0123456789';
+  const FIX = JSON.parse(readFileSync(fileURLToPath(new URL('./notion/__fixtures__/notion-api.json', import.meta.url)), 'utf8')) as Record<string, unknown>;
+  const mapping = {
+    version: 1,
+    databaseId: DB,
+    uniqueId: { property: { id: 'u%3Aid', name: 'ID' }, prefix: 'ENG' },
+    status: { type: 'status', property: { id: 'st%3A1', name: 'Status' } },
+    assignee: null,
+    sprint: null,
+    issueType: null,
+    criteria: null,
+    blockedBy: null,
+  };
+  const useNotion = async (): Promise<void> => {
+    const r = await put(WS, { issue: { provider: 'notion', baseUrl: `https://www.notion.so/acme/${DB}?v=1` }, jira: { token: NOTION_TOKEN } });
+    expect(r.statusCode).toBe(200);
+  };
+
+  it('the PUT keeps the mapping (never stripped), refuses a bad one with a sentence, and sets the allowlist', async () => {
+    await useNotion();
+    const bad = await put(WS, { notion: { ...mapping, uniqueId: { ...mapping.uniqueId, prefix: '' } } });
+    expect(bad.statusCode).toBe(400);
+    expect(bad.json().message).toMatch(/Unique ID property with a prefix/);
+    const ok = await put(WS, { notion: mapping });
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json().notion).toEqual(mapping);
+    expect(ok.json().issue).toMatchObject({ provider: 'notion', projectKeys: ['ENG'] });
+    expect(JSON.stringify(ok.json())).not.toContain(NOTION_TOKEN);
+    const badToken = await put(WS, { jira: { token: 'lin_api_abcdefghijklmnop' } });
+    expect(badToken.statusCode).toBe(400);
+  });
+
+  it('the schema read: one call with the saved token, a suggestion; a refusal without a prefix', async () => {
+    await useNotion();
+    transportImpl = async (url) => {
+      const u = url as URL;
+      const v = FIX[`GET ${u.pathname}`];
+      return v == null
+        ? { status: 404, contentType: 'application/json', body: '{}' }
+        : { status: 200, contentType: 'application/json', body: JSON.stringify(v) };
+    };
+    try {
+      const res = await app.inject({ method: 'GET', url: `/api/workspaces/${WS}/tracker/notion-schema` });
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+      expect(body).toMatchObject({ workspaceId: WS, databaseId: DB, title: 'Engineering tasks', refusal: null });
+      expect(body.suggested.uniqueId.prefix).toBe('ENG');
+      expect(body.sprintDatabases['sp%3A1'].title).toBe('Sprints');
+      expect(calls[0]!.auth).toBe(`Bearer ${NOTION_TOKEN}`);
+      expect(calls[0]!.url).toBe(`https://api.notion.com/v1/databases/${DB}`);
+
+      const noPrefix = JSON.parse(JSON.stringify(FIX[`GET /v1/databases/${DB}`]));
+      noPrefix.properties.ID.unique_id.prefix = null;
+      transportImpl = async () => ({ status: 200, contentType: 'application/json', body: JSON.stringify(noPrefix) });
+      const refused = await app.inject({ method: 'GET', url: `/api/workspaces/${WS}/tracker/notion-schema` });
+      expect(refused.json()).toMatchObject({ refusal: expect.stringMatching(/prefix/), suggested: null });
+    } finally {
+      transportImpl = null;
+    }
+  });
+
+  it('refuses another tenant’s workspace (404) and a workspace that is not Notion (400), before any call', async () => {
+    expect((await app.inject({ method: 'GET', url: '/api/workspaces/90/tracker/notion-schema' })).statusCode).toBe(404);
+    expect((await app.inject({ method: 'GET', url: `/api/workspaces/${WS}/tracker/notion-schema` })).statusCode).toBe(400);
+    expect(calls).toHaveLength(0);
+  });
+});
 

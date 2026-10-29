@@ -9,6 +9,7 @@ import {
 import { useUpdateWorkspaceTracker, useWorkspaceTracker } from '../../hooks/useWorkspaceTracker.js';
 import { JiraApiAccess } from './JiraApiAccess.js';
 import { LinearApiAccess } from './LinearApiAccess.js';
+import { NotionTrackerSetup } from './NotionTrackerSetup.js';
 import { InfoButton } from '../InfoModal.js';
 import { Field, SaveButton, SectionShell, inputCls } from './ui.js';
 import { ScopePendingSection, useSettingsWorkspace } from './workspaceScope.js';
@@ -17,8 +18,9 @@ const PLACEHOLDER: Record<TrackerProvider, string> = {
   jira: 'https://your-org.atlassian.net',
   linear: 'https://linear.app/your-workspace',
   github: 'https://github.com/your-org/your-repo',
+  notion: 'https://www.notion.so/your-team/Tasks-1a2b3c…',
 };
-const LABEL: Record<TrackerProvider, string> = { jira: 'Jira', linear: 'Linear', github: 'GitHub Issues' };
+const LABEL: Record<TrackerProvider, string> = { jira: 'Jira', linear: 'Linear', github: 'GitHub Issues', notion: 'Notion' };
 
 /**
  * The issue tracker (provider + base URL) for the CURRENTLY-SELECTED workspace. When set, PR detail
@@ -141,6 +143,10 @@ export function IssueLinksSection(): JSX.Element {
             always found. Beyond those, a key in the PR title or branch counts only if its team is
             on your list.
           </p>
+          <p>
+            <strong>Notion:</strong> tickets are the pages of one database, found by their Unique ID (such as
+            ENG-123) in the PR title or branch.
+          </p>
           <p>Commit messages are never read.</p>
         </InfoButton>
       }
@@ -173,11 +179,13 @@ export function IssueLinksSection(): JSX.Element {
       {fields?.baseUrl === true && (
         <>
           <Field
-            label={provider === 'linear' ? 'Workspace URL' : 'Base URL'}
+            label={provider === 'linear' ? 'Workspace URL' : provider === 'notion' ? 'Database URL' : 'Base URL'}
             hint={
               provider === 'jira'
                 ? `Tickets link to {base}/browse/KEY-123.${data.jira.hasToken ? ' Moving to a different Jira site removes the saved API token.' : ''}`
-                : `Your Linear workspace’s address. Tickets link to {base}/issue/KEY-123.${data.jira.hasToken ? ' Moving to a different Linear workspace removes the saved API key.' : ''}`
+                : provider === 'notion'
+                  ? 'Copy the link of the database that holds your tickets. Moving to another database clears its mapping.'
+                  : `Your Linear workspace’s address. Tickets link to {base}/issue/KEY-123.${data.jira.hasToken ? ' Moving to a different Linear workspace removes the saved API key.' : ''}`
             }
           >
             <input
@@ -188,6 +196,7 @@ export function IssueLinksSection(): JSX.Element {
               onChange={(e) => setBaseUrl(e.target.value)}
             />
           </Field>
+          {fields.projectKeys && (
           <Field
             label={provider === 'linear' ? 'Team keys' : 'Project keys'}
             hint={
@@ -204,6 +213,7 @@ export function IssueLinksSection(): JSX.Element {
               onChange={(e) => setProjectKeys(e.target.value)}
             />
           </Field>
+          )}
           {/* ⚠ DISABLED WITHOUT KEYS, RATHER THAN PRESENT AND INERT. With no allowlist the branch
               is never scanned at all — a lowercase `eng-123` is structurally indistinguishable
               from `node-18` or `release-2` — so this control would be one that does nothing, and
@@ -211,7 +221,7 @@ export function IssueLinksSection(): JSX.Element {
           <Field
             label="Where to look"
             hint={
-              hasKeys
+              hasKeys || provider === 'notion'
                 ? undefined
                 : `Set ${provider === 'linear' ? 'team' : 'project'} keys above first. Without them only the PR title is searched for keys.`
             }
@@ -219,7 +229,7 @@ export function IssueLinksSection(): JSX.Element {
             <select
               className={inputCls}
               value={matchScope}
-              disabled={!hasKeys}
+              disabled={!hasKeys && provider !== 'notion'}
               onChange={(e) => setMatchScope(e.target.value as IssueMatchScope)}
             >
               <option value="title">PR title only</option>
@@ -247,6 +257,10 @@ export function IssueLinksSection(): JSX.Element {
       {/* The same rule for Linear: the key belongs to the SAVED workspace URL. */}
       {saved.provider === 'linear' && provider === 'linear' && (saved.baseUrl ?? '') !== '' && (
         <LinearApiAccess workspaceId={workspaceId} jira={data.jira} baseUrl={saved.baseUrl ?? ''} />
+      )}
+      {/* Notion: the token and the property mapping belong to the SAVED database URL. */}
+      {saved.provider === 'notion' && provider === 'notion' && (saved.baseUrl ?? '') !== '' && (
+        <NotionTrackerSetup workspaceId={workspaceId} jira={data.jira} saved={data.notion ?? null} />
       )}
     </SectionShell>
   );

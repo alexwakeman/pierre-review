@@ -8,22 +8,23 @@ the private Pro plugin until the plugin's apiVersion 23 (2026-10), and this docu
 since the move. Code: `apps/backend/src/tracker/`.
 
 > Phases. Phase 1: the seam, Jira as the first adapter, Linear kept link-only. Phase 2: the GitHub
-> Issues adapter (§ GitHub Issues below). Phase 3: the Linear reader (§ Linear below). Each slots in by
+> Issues adapter (§ GitHub Issues below). Phase 3: the Linear reader (§ Linear below). Phase 4: Notion
+> (§ Notion below), where the tickets are the pages of one database. Each slots in by
 > adding an adapter (`tracker/registry.ts`), its key shape in shared `parseTicketIdent`, and its name
 > to shared `TRACKER_PROVIDERS_AVAILABLE`. Nothing else should need to change.
 
 ## The seam (`tracker/types.ts`)
 
 ONE tracker per workspace (`workspace_trackers`), ONE adapter per provider
-(`TrackerProvider = 'jira' | 'github' | 'linear'`). An adapter answers five questions:
+(`TrackerProvider = 'jira' | 'github' | 'linear' | 'notion'`). An adapter answers five questions:
 
-| Concern | Member | Jira | GitHub Issues | Linear |
-|---|---|---|---|---|
-| IDENTITY | `siteRoot(baseUrl)`, `isKey(key)`, `normalizeKey(raw)` | shared `jiraApiRoot` (the ONE fold) | fixed `https://github.com`; key `owner/repo#12` | shared `linearSiteRoot`: `https://linear.app/<urlKey>`; key `ENG-123` |
-| LINKING | `detect(cfg, pr)`, `browseUrl(base, key)`, optional `linker` | `PREFIX-123` in title (+ branch with an allowlist) → `{base}/browse/KEY` | the issues the PR CLOSES (`linker` reads them; `required`) → `…/owner/repo/issues/12` | the issues the PR is ATTACHED to (`linker`, not `required`) ∪ Jira-style detection → `{root}/issue/KEY` (stored rows keep Linear's own URL) |
-| FETCH | `reader.fetchTicket(call, key)` | REST v2 `issue/KEY?fields=*all&expand=names,schema` (+ its comments, § Ticket comments) | one GraphQL call per issue (+ `comments(last: 20)`) | one GraphQL POST per issue to the fixed `api.linear.app` (+ `comments(last: 20)`) |
-| PEERS | not per-adapter | stored rows sharing `(provider, api_root, issue_key)` | same | same |
-| CREDENTIAL | `reader.credential` | `'token'` (sealed, per workspace) | `'none'` — the account's GitHub token | `'token'` — a personal API key, the same sealed slot |
+| Concern | Member | Jira | GitHub Issues | Linear | Notion |
+|---|---|---|---|---|---|
+| IDENTITY | `siteRoot(baseUrl)`, `isKey(key)`, `normalizeKey(raw)` | shared `jiraApiRoot` (the ONE fold) | fixed `https://github.com`; key `owner/repo#12` | shared `linearSiteRoot`: `https://linear.app/<urlKey>`; key `ENG-123` | shared `notionDatabaseRoot`: `https://www.notion.so/<database id>`; key = the Unique ID, `ENG-123` |
+| LINKING | `detect(cfg, pr)`, `browseUrl(base, key)`, optional `linker` | `PREFIX-123` in title (+ branch with an allowlist) → `{base}/browse/KEY` | the issues the PR CLOSES (`linker` reads them; `required`) → `…/owner/repo/issues/12` | the issues the PR is ATTACHED to (`linker`, not `required`) ∪ Jira-style detection → `{root}/issue/KEY` (stored rows keep Linear's own URL) | Jira-style detection, the Unique ID prefix as the allowlist → `https://www.notion.so/KEY` (stored rows keep the page URL) |
+| FETCH | `reader.fetchTicket(call, key)` | REST v2 `issue/KEY?fields=*all&expand=names,schema` (+ its comments, § Ticket comments) | one GraphQL call per issue (+ `comments(last: 20)`) | one GraphQL POST per issue to the fixed `api.linear.app` (+ `comments(last: 20)`) | a database query on the Unique ID, the page's blocks, its comments (fixed `api.notion.com`) |
+| PEERS | not per-adapter | stored rows sharing `(provider, api_root, issue_key)` | same | same | same |
+| CREDENTIAL | `reader.credential` | `'token'` (sealed, per workspace) | `'none'` — the account's GitHub token | `'token'` — a personal API key, the same sealed slot | `'token'` — an internal integration token, the same sealed slot |
 
 Everything else is written ONCE over the seam: the stored tickets (`tracker/store.ts`), the
 worker (`tracker/worker.ts`), the PR chips (`tracker/enricher.ts`), the routes
@@ -34,7 +35,7 @@ worker (`tracker/worker.ts`), the PR chips (`tracker/enricher.ts`), the routes
 (`tracker/runtime.ts`), never `ProContext`; tests hand in an in-memory SQLite and a fake seal.
 
 - ⚠ **A provider with no adapter is "no tracker".** The settings PUT accepts only
-  `TRACKER_PROVIDERS_AVAILABLE` (`['jira', 'github', 'linear']`); a stored value naming another provider reads
+  `TRACKER_PROVIDERS_AVAILABLE` (`['jira', 'github', 'linear', 'notion']`); a stored value naming another provider reads
   as `provider: null` (`tracker/settings.ts` `liveProvider`). The Settings picker lists the same
   shared array — never a hard-coded list.
 - ⚠ **Only a READING provider is walked.** The worker's population is workspaces whose adapter has
@@ -152,7 +153,9 @@ are given it as discussion — never as the story.
   `/issue/KEY/comment?startAt=<total-20>&maxResults=20`, for the newest page; an answer with no comment
   field, or that extra call failing, leaves the comments UNKNOWN (never the oldest page, which would
   prune newer stored ones). **GitHub Issues** — `comments(last: 20)` in the one issue query (still 1
-  point). **Linear** — `comments(last: 20)` on `issue(id:)` (≈ 40 complexity points). Bodies are markdown.
+  point). **Linear** — `comments(last: 20)` on `issue(id:)` (≈ 40 complexity points). **Notion** — the one
+  extra read `GET /v1/comments?block_id=<page>` (≤ 5 pages of 100; more than that, or a refused read —
+  the integration lacks "read comments" — leaves them UNKNOWN), rich text → markdown. Bodies are markdown.
 - **STORED PER TICKET** (`tracker_ticket_comments`, migration `0142`): `(account_id, provider,
   api_root, issue_key, comment_id)` — a ticket on five PRs has its comments once. The worker writes once
   per ticket per read (`writeTicketComments`): the newest `TICKET_COMMENTS_KEPT` (20) are upserted, each
@@ -167,7 +170,8 @@ are given it as discussion — never as the story.
   `author.accountType === 'app'` (Automation for Jira, Connect / Forge apps) or an automation NAME (shared
   `isAutomationCommentName`, for Server / Data Center); GitHub `author.__typename === 'Bot'`, a `[bot]`
   login, or a login the automation or review-bot vocabulary claims (`isAutomationCommentLogin`); Linear
-  a comment with no `user` (an integration's).
+  a comment with no `user` (an integration's); Notion an author whose `GET /v1/users/{id}` says `type: 'bot'`
+  (cached an hour; a refused user read is an unknown person, not a bot) or an automation NAME.
 - **WHERE THEY GO.** `ticketComments(account, ident)` (peers.ts, the ticket source) → the ticket review
   (`review/ticket-review/prompts.ts`) and the story docs check (`review/story-docs/`) get a nonce-fenced
   `TICKET COMMENTS` block, oldest first, `Author, YYYY-MM-DD:` per comment, at most
@@ -185,7 +189,7 @@ are given it as discussion — never as the story.
 - **SHOWN** under the ticket as written (`components/TicketComments.tsx`, in `StoryDisclosure`):
   "Comments (n)", collapsed, author · date · body. They ride `GET /api/prs/:id/tracker-ticket`
   (`JiraTicketDetails.comments`), already click-gated — no request of their own.
-- **A NEW ADAPTER** (Notion, …) plugs in by returning `FetchedTicket.comments` from its
+- **A NEW ADAPTER** (as Notion did) plugs in by returning `FetchedTicket.comments` from its
   `reader.fetchTicket` — `{id, authorName, authorId, isBot, body (markdown), createdAt, updatedAt}`,
   `isBot` by its own rule, `undefined` when its answer did not carry them. Nothing else changes: the
   worker stores them under the ticket's `(provider, api_root, issue_key)`.
@@ -206,8 +210,9 @@ it keeps: **a view still never calls a reader.** `GET /api/sprint-graph` only st
   `jiraGetJson` (`/rest/api/3/search/jql`, one retry on Server's `/rest/api/2/search` after a 404),
   sprint names from the `gh-sprint` field; Linear each team's `activeCycle`; GitHub Issues the
   nearest-due open milestone across the workspace's repos (never an overdue one; ≤ 20 repos per pass,
-  `truncated` when cut). Project keys / team keys are the ones seen on this workspace's stored
-  `tracker_tickets` (+ the tracker's `project_keys`); none → `no_projects`.
+  `truncated` when cut); Notion the workspace's mapped current-sprint rule (§ Notion). Project keys /
+  team keys are the ones seen on this workspace's stored `tracker_tickets` (+ the tracker's
+  `project_keys`); none → `no_projects`.
 - **The sprint's DATES** (migration `0111`, `sprint_reads.sprint_starts_at / _ends_at`): read
   off the same answers, never a second call — the Jira sprint field's `startDate` / `endDate` (Cloud
   objects; Server's `…[startDate=…,endDate=<null>,…]` string, `sprintsOf`), Linear's `activeCycle {
@@ -248,7 +253,7 @@ it keeps: **a view still never calls a reader.** `GET /api/sprint-graph` only st
     references come from its brief, written AFTER the read, so the brief pass asks for the next hop
     itself (`expandSprintGhosts` through the `setSprintGhostExpander` seam, mode `missing`: only keys
     nothing stores, never a delete) — still the read's pipeline, ⚠ never a view.
-  - **The call**: Jira only — JQL `key in ("A-1",…)`, `fields=*all&expand=names,schema` (the same fold
+  - **The call**: Jira only (Linear, GitHub Issues and Notion look nothing up) — JQL `key in ("A-1",…)`, `fields=*all&expand=names,schema` (the same fold
     as the sprint list), `SPRINT_REF_CHUNK` (40) keys per call through `jiraGetJson` (404 → the v2
     search). ⚠ Jira answers 400 for the WHOLE query when one key does not exist, so a 400 chunk is
     BISECTED down to the lone bad key, which is dropped — `SPRINT_REF_CALLS_MAX` (16) calls per lookup.
@@ -272,6 +277,9 @@ relation phrase from THIS ticket's side, and an https browse URL; ≤ 20). Migra
 - **Linear** — `inverseRelations` (another issue's relation TO this one) with `type: "blocks"`: the
   other issue blocks this one. 20 per issue on the one-issue read, 10 on the sprint list (complexity).
 - **GitHub Issues** — none (`blockedBy: null`); a GitHub ticket is "Blocked" only from its text.
+- **Notion** — the mapped "Blocked by" relation (to the same database): ≤ 10 linked pages read
+  (`GET /v1/pages/{id}`) for their Unique ID, title and status; a linked page of another database is
+  skipped. No relation mapped → `null`.
 - ⚠ **POSITIVE-ANSWER RULE** (`store.ts` `linkColumns`, shared by the worker and the sprint read): an
   answer without the field leaves the stored value; `[]` clears it; a refused read clears it with the
   rest of the content. A link change is NOT story text — `changed_at` does not move.
@@ -337,6 +345,9 @@ reader of `stage` works whatever the buckets are.
   teams first, names deduped.
 - **GitHub Issues**: Open, then the closed names. Projects v2 status is NOT stored on tickets, so it is
   not read — every GitHub ticket's category is `new`, so all are "Not started".
+- **Notion** (`notion_status`): a `status` property's options in GROUP order (To-do → In progress →
+  Complete, each group's own option order); a mapped `select`'s options by their mapped category, then
+  Notion's order. From the database schema — one call, `{ fresh: true }`.
 - ⚠ **AN ORDER FAILURE NEVER FAILS THE LIST.** A failed board read returns `statusOrder: undefined`
   (the stored order stands) and a code that is logged; `null` (no board) clears it, and the page falls
   back to category then name.
@@ -357,8 +368,8 @@ reader of `stage` works whatever the buckets are.
 
 Limn writes to a tracker in exactly one place: **the Jira status transition the reader picks** from
 the story view's status chip (`components/Ticket/TicketStatusPicker.tsx`, mounted by the story view's
-one stack header — so the story TAB and This Sprint's story TRAY share it). Jira only; GitHub Issues
-and Linear show the status chip as before. Nothing else writes — no worker, no automation, no retry,
+one stack header — so the story TAB and This Sprint's story TRAY share it). Jira only; GitHub Issues,
+Linear and Notion show the status chip as before (⚠ Notion is READ-ONLY: nothing calls a Notion write). Nothing else writes — no worker, no automation, no retry,
 no confirm step (the reader picks the status by name, and it changes AT ONCE). The old per-ticket
 write-back (`tracker/write/`, `tracker_writes`) stays removed (2026-10-12, migration `0107`).
 
@@ -408,6 +419,7 @@ stories by the CREATED week.
 | Jira | `fields.created` | `fields.resolutiondate` | none — the issue read is already `?fields=*all` |
 | GitHub Issues | `createdAt` | `closedAt` | two scalars on the existing issue query |
 | Linear | `createdAt` | `completedAt` | two scalars on the existing issue query |
+| Notion | the page's `created_time` | never read (Notion has no resolution date) — `undefined`, so nothing is cleared | none — on the page already read |
 
 - **The positive-answer rule** (`trackerDate`, ONE parse for all three): a field ABSENT from the
   answer is `undefined` and its key is left out of the write, so the stored value stands; `null` means
@@ -609,11 +621,82 @@ Linear OAuth is NOT built; pasting a personal key is the only route.
   `organization`, one call, click-gated). The PUT refuses a value that is not shaped like a personal
   key (`lin_api_…`) with a sentence, so a pasted GitHub or Jira token is never sealed and sent.
 
+## Notion (phase 4) — `tracker/notion/`
+
+A team whose tickets are the pages of ONE Notion database. A Notion workspace asks for three things
+(shared `TRACKER_PROVIDER_FIELDS`): the **database URL** (an IDENTITY, never fetched), an **internal
+integration token** (write-only, sealed — § Credential; shape `ntn_…` or the older `secret_…`,
+`NOTION_TOKEN_RE`, so a pasted Linear or GitHub token is refused with a sentence), and the **property
+mapping** (below). No key list: the Unique ID prefix IS the allowlist. Shared vocabulary:
+`packages/shared/src/notion-tracker.ts` (deliberately not `notion.ts` — the reference-docs Notion source
+is a different feature). ⚠ **READ-ONLY**: no Notion write exists; the status picker stays Jira-only.
+
+- **IDENTITY.** The root is the DATABASE: `https://www.notion.so/<32-hex id>` (shared
+  `notionDatabaseRoot`, the ONE fold — any notion.so / `*.notion.site` URL, the last path segment's
+  trailing id, dashed or not, `?v=` ignored). The key is the page's **Unique ID with its prefix**,
+  upper-cased (`ENG-123`); the ident is `notion:https://www.notion.so/<id>#ENG-123`, and
+  `parseTicketIdent` accepts a Notion ident only with that root shape (`NOTION_ROOT_RE`).
+  - ⚠ **A DATABASE WITHOUT A PREFIXED UNIQUE ID IS REFUSED.** That key is what branches and PR titles
+    name; without it a page has nothing detection can find. The schema read answers `refusal` (one
+    sentence, `NOTION_NO_PREFIX_MESSAGE`) and no suggestion; the PUT refuses a mapping without one
+    (`notionMappingProblem`). The prefix must fit detection: 2–10 letters/digits, starting with a letter.
+  - **THE LINK** is `https://www.notion.so/ENG-123` (Notion opens a page by its prefixed Unique ID);
+    a read row keeps the page's own URL. ⚠ Neither names the DATABASE, so the SPA cannot fold a Notion
+    link into an ident (`ticketIdentForLink` answers null): `POST /api/ticket-links` sends
+    `TicketLink.ident` wherever the link fold cannot name it (Notion only, today), and
+    `cardTickets` prefers it. `TicketRef.ident` (PR detail) was already the server's.
+- **LINKING.** The prefix-key rule (`detectPrefixKeys`) with the mapping's prefix as `project_keys` —
+  `mergeTracker` writes it on every save of a Notion row (and NULLs it with no mapping), so detection is
+  exact and may read the branch (`eng-123-…`) under the match scope. No mapping → nothing is detected.
+- **PASTE** (§ Adding a ticket by hand): `notion.so/ENG-123` is a loose `url` ref on the Notion root;
+  a PAGE link (`notion.so/acme/Title-<32 hex>`) parses as `notion_page` and the server reads the page
+  (`GET /v1/pages/{id}`, `notionPageKeys`) for its database and Unique ID — a page of another database
+  is `other_tracker`, one the integration cannot see `not_found`.
+- **THE MAPPING** (`workspace_trackers.notion_config`, JSON `NotionTrackerMapping`, migration `0150`;
+  property ids — Notion's stable `id`, the filter key — with the name they had when saved):
+  `uniqueId {property, prefix}` (required) · `status` — a `status` property (its GROUPS To-do / In
+  progress / Complete → `new` / `indeterminate` / `done`, read from the schema, cached 10 min) or a
+  `select` with a per-option category (an unlisted option is To do) · `assignee` (people, the first) ·
+  `sprint` — a `relation` to a Sprints database + its date property, a `select` + the current option,
+  or a `date` (range) on each page · `issueType` (select) · `criteria` (rich text; else the shared
+  `tracker/ac.ts` rule over the page body — `notion:task_list` / `notion:heading`) · `blockedBy` (a
+  relation to the same database). ⚠ A mapping belongs to ONE database: moving the URL to another
+  database clears it (the token is the integration's and stays); a mapping for another database than
+  the URL is refused; `prepareTrackerCall` refuses an unmapped Notion workspace (`NoNotionMapping`) —
+  except the Settings schema read (`allowUnmapped`). `TrackerCall.notion` carries it to the reader.
+- **SETTINGS** (`components/settings/NotionTrackerSetup.tsx`, under Settings → Integrations once Notion
+  is SAVED with a database URL): the token (Saved / Replace / Remove), **Read database** (click-gated:
+  `GET …/tracker/notion-schema` — the database, + ≤ 3 related databases for the Sprints choice, with
+  the saved token; a guessed mapping, or the saved one when it is for this database), the mapping form,
+  Save (`PUT …/tracker {notion}`).
+- **FETCH** (`notion/reader.ts`): (1) `POST /v1/databases/{db}/query` filtered on the Unique ID number,
+  page size 1 — a key with another prefix is `not_found` before any call; (2) the properties per the
+  mapping; (3) the body, `GET /v1/blocks/{id}/children` → markdown (`notion/blocks.ts`: headings,
+  paragraphs, lists, to-dos, code, quotes, callouts, toggles, tables, dividers; the rest skipped;
+  ≤ 20 calls, 400 blocks, 3 levels — a cut body ends with one line saying so); (4) blockers; (5)
+  comments (§ Ticket comments). Created = `created_time`; no resolved date.
+- **THE CALL** (`notion/client.ts`) goes to ONE FIXED HOST, `https://api.notion.com/v1`, through the
+  Jira transport (no redirects, 10 s, 5 MiB), `Authorization: Bearer <token>`, `Notion-Version:
+  2022-06-28` (pinned: the databases query API; Notion's 2025 versions move queries to data sources).
+- ⚠ **RATE LIMITS ARE PRE-EMPTED, NEVER SURFACED.** Notion allows ≈ 3 requests a second per
+  integration: calls with one token are spaced `NOTION_MIN_GAP_MS` (340 ms) apart, the slot claimed
+  synchronously so concurrent calls queue. A 429 records `Retry-After` (seconds, default 60 s, ≤ 15 min)
+  and every call before then throws the same 429 WITHOUT calling; the worker turns it into the 5-minute
+  workspace backoff, no row written. 401 → `unauthorized` (30-minute backoff); 403 → `forbidden`; 404
+  (also Notion's answer for a page not shared with the integration) → `not_found`, stored per ticket.
+- **THE SPRINT LIST** (`sprint/notion.ts`, source `{kind: 'sprint', provider: 'notion'}`): `relation`
+  — the Sprints pages whose date range holds TODAY (start ≤ today ≤ end; no end = that day; ≤ 5), then
+  the pages whose relation CONTAINS one, the sprint names their titles, the dates the busiest one's;
+  `select` — the chosen option, no dates; `date` — pages whose own range holds today (started within
+  90 days), the busiest range as the dates. No sprint mapped → the status fallback `no_sprint_concept`;
+  nothing current → `none_active` (To-do + In-progress options, edited in the window). Each page's body
+  and blockers are read (comments are left to the per-ticket reader). Ghost lookups: none (Jira only).
+
 ## Credential — the sealed per-workspace token
 
 `workspace_trackers.auth_token` (with `auth_email`). Jira: email set → HTTP Basic
 `email:apiToken` (Cloud); no email → `Bearer <PAT>` (Server / Data Center). Linear: a personal API
-key, sent bare as `Authorization: <key>` (the wire's `jira` block is the workspace's ONE credential
+key, sent bare as `Authorization: <key>`. Notion: an internal integration token, `Bearer <token>` (the wire's `jira` block is the workspace's ONE credential
 block, named for its first provider — `jira.token` / `jira.hasToken` / `jira.clearToken`).
 
 - ⚠ **WRITE-ONLY.** No route returns it (`hasToken` only); saving without a token keeps it;
@@ -629,9 +712,9 @@ block, named for its first provider — `jira.token` / `jira.hasToken` / `jira.c
 
 ## Outbound calls — the SSRF guard (`tracker/jira/fetch.ts`)
 
-Every call to a customer-named host goes through ONE helper — never a bare `fetch`. (Linear's host is
-FIXED, never customer-named; its POST rides the same transport for the same no-redirect, timeout and
-size rules — § Linear.) GET only — the ONE exception on a customer-named host is `jiraPostJson`, the
+Every call to a customer-named host goes through ONE helper — never a bare `fetch`. (Linear's and
+Notion's hosts are FIXED, never customer-named; their calls ride the same transport for the same
+no-redirect, timeout and size rules — § Linear, § Notion.) GET only — the ONE exception on a customer-named host is `jiraPostJson`, the
 status transition (§ The status change), with every rule below unchanged (a 2xx with no body is fine) — a 10 s
 timeout, a 5 MiB cap, **no redirects** (a 3xx is an error; following it would forward the
 Authorization header), JSON only. http and LAN hosts are allowed (an on-prem Jira is normal; the
@@ -647,6 +730,7 @@ closes DNS rebinding) is what SonarCloud's fixed host is called with. Details: [
 | `PUT /api/workspaces/:id/tracker` | partial patch `{issue?, jira?}`; kicks the worker | `search` |
 | `GET /api/workspaces/:id/tracker/jira-fields` | the Settings connection check (one Jira call) | `search` |
 | `GET /api/workspaces/:id/tracker/linear-check` | the Linear connection check (one Linear call) | `search` |
+| `GET /api/workspaces/:id/tracker/notion-schema` | the Notion mapping read (the saved database + ≤ 3 related ones) | `search` |
 | `GET /api/prs/:id/tracker-ticket?key=` | one detected ticket's STORED row (read once if never reached) | `search` |
 | `POST /api/prs/:id/tracker-ticket/refresh` | re-read now (backoff bypassed) | `search` |
 | `PUT /api/prs/:id/tracker-ticket/ac-field` | the criteria field for the ticket's issue type | `search` |

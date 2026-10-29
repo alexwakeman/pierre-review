@@ -1,4 +1,5 @@
 import { GITHUB_TRACKER_ROOT, canonicalTicketKey, githubIssueKey, isGithubIssueKey, jiraApiRoot, linearSiteRoot } from './claude-review.js';
+import { NOTION_APP_ORIGIN, notionBrowseUrl, notionUniqueIdOfUrl, notionUrlId } from './notion-tracker.js';
 import type { TrackerProvider } from './types.js';
 
 // ── PASTED TICKET REFERENCES (docs/TRACKERS.md § Adding a ticket by hand) ──────────────────────────
@@ -23,7 +24,11 @@ export type ParsedTicketRef =
   | { kind: 'issue_number'; number: number }
   // A link. `loose`: a Jira board link (`?selectedIssue=KEY`) or a Jira Cloud issue view
   // (`…/issues/KEY`) whose root is only the host — it matches a workspace whose site starts there.
-  | { kind: 'url'; provider: 'jira' | 'github' | 'linear'; root: string; key: string; loose: boolean }
+  // A Notion Unique-ID link (`notion.so/ENG-123`) is loose too: it names no database.
+  | { kind: 'url'; provider: 'jira' | 'github' | 'linear' | 'notion'; root: string; key: string; loose: boolean }
+  // A Notion PAGE link (`notion.so/acme/Fix-login-<32 hex>`): it names the page, not its key — the
+  // server reads the page to learn its database and Unique ID.
+  | { kind: 'notion_page'; pageId: string }
   | { kind: 'invalid' };
 
 /** Split a paste into references: commas, semicolons and whitespace separate; duplicates go. */
@@ -77,6 +82,12 @@ export function parseTicketRef(input: string): ParsedTicketRef {
     return root != null && PREFIX_KEY_RE.test(key)
       ? { kind: 'url', provider: 'linear', root, key, loose: false }
       : { kind: 'invalid' };
+  }
+  if (host === 'notion.so' || host === 'www.notion.so' || host.endsWith('.notion.site')) {
+    const key = notionUniqueIdOfUrl(raw);
+    if (key != null) return { kind: 'url', provider: 'notion', root: NOTION_APP_ORIGIN, key, loose: true };
+    const pageId = notionUrlId(raw);
+    return pageId != null ? { kind: 'notion_page', pageId } : { kind: 'invalid' };
   }
   // Anything else is read as a Jira link: `<root>/browse/KEY`, `…/issues/KEY`, or a board's `?selectedIssue=KEY`.
   const at = segs.findIndex((s) => s.toLowerCase() === 'browse');
@@ -235,6 +246,7 @@ export function ticketBrowseUrl(site: TicketSite, key: string): string | null {
     const m = /^([^/]+)\/([^#]+)#(\d+)$/.exec(key);
     return m ? `https://github.com/${m[1]}/${m[2]}/issues/${m[3]}` : null;
   }
+  if (site.provider === 'notion') return notionBrowseUrl(key);
   if (!/^https?:\/\//i.test(root)) return null;
   return site.provider === 'linear' ? `${root}/issue/${encodeURIComponent(key)}` : `${root}/browse/${encodeURIComponent(key)}`;
 }

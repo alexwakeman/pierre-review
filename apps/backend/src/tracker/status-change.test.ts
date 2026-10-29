@@ -76,6 +76,7 @@ beforeAll(async () => {
       'workspace_id integer NOT NULL, ident text NOT NULL, status_name text, status_category text);',
   );
   sqlite.exec(migration('0088_issue_tracker.sql'));
+  sqlite.exec(migration('0150_workspace_tracker_notion.sql'));
   sqlite.exec(migration('0098_tracker_ticket_dates.sql'));
   sqlite.exec('ALTER TABLE tracker_tickets ADD blocked_by_json text; ALTER TABLE tracker_tickets ADD status_id text;');
   const ctx = {

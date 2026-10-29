@@ -193,6 +193,8 @@ export async function exportAccountData(accountId: number): Promise<AccountExpor
       matchScope: schema.workspaceTrackers.matchScope,
       email: schema.workspaceTrackers.authEmail,
       hasToken: schema.workspaceTrackers.authToken,
+      // The Notion property mapping (not a secret).
+      notionConfig: schema.workspaceTrackers.notionConfig,
       updatedAt: schema.workspaceTrackers.updatedAt,
     })
     .from(schema.workspaceTrackers)

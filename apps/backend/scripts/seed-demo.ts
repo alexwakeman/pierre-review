@@ -2267,6 +2267,11 @@ if (proSeeded) {
   console.log(
     `  this sprint: ${t.sprintTickets} Jira tickets + ${t.ghosts} outside it, ${t.briefs} briefs, ${t.themes} themes, ${t.paths} critical paths`,
   );
+  // The Web workspace's tracker is NOTION (scripts/seed-demo-notion.ts): a fictional "Web tasks"
+  // database read through the real worker and sprint list, so a Notion workspace is in the demo.
+  const { seedDemoNotion } = await import('./seed-demo-notion.js');
+  const n = await seedDemoNotion({ db, schema, now, workspaceId: WEB_WS });
+  console.log(`  notion (Web): ${n.tickets} PR tickets, ${n.sprintTickets} in the current sprint`);
 }
 
 // ===========================================================================

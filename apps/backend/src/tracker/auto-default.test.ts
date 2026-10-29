@@ -92,6 +92,7 @@ beforeEach(() => {
   sqlite = new Database(':memory:');
   sqlite.exec(SETUP);
   sqlite.exec(mig('0088_issue_tracker.sql'));
+  sqlite.exec(mig('0150_workspace_tracker_notion.sql'));
   sqlite.exec(mig('0094_repo_uses_github_issues.sql'));
   calls = [];
   answer = () => ({ data: { repository: { hasIssuesEnabled: true }, search: { issueCount: 3 } } });
@@ -155,6 +156,7 @@ describe('2. the migration', () => {
     const db2 = new Database(':memory:');
     db2.exec(SETUP);
     db2.exec(mig('0088_issue_tracker.sql'));
+    db2.exec(mig('0150_workspace_tracker_notion.sql'));
     db2.exec("INSERT INTO workspace_trackers (account_id, workspace_id, provider) VALUES (1,1,NULL),(1,2,'jira')");
     db2.exec("INSERT INTO workspace_trackers (account_id, workspace_id, provider, match_scope) VALUES (1,3,NULL,'title')");
     db2.exec(mig('0094_repo_uses_github_issues.sql'));

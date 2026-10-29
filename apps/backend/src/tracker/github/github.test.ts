@@ -337,6 +337,7 @@ beforeAll(async () => {
         'linear_links text, linear_links_root text, linear_links_checked_at integer);',
   );
   sqlite.exec(migration('0088_issue_tracker.sql'));
+  sqlite.exec(migration('0150_workspace_tracker_notion.sql'));
   sqlite.exec(migration('0098_tracker_ticket_dates.sql'));
   // The blocking links + status id (migration 0103's tracker_tickets half).
   sqlite.exec('ALTER TABLE tracker_tickets ADD blocked_by_json text; ALTER TABLE tracker_tickets ADD status_id text;');

@@ -45,7 +45,8 @@ export function cardTickets(detected: PrTicketLinks | null | undefined): CardTic
     const key = canonicalTicketKey(t.key) ?? t.key.trim().toUpperCase();
     if (key === '' || seen.has(key)) continue;
     const row: CardTicket = { key, title: cleanTitle(t.title), url: t.url || null, provider: t.provider };
-    const ident = ticketIdentOf({ key, url: t.url || null, provider: t.provider });
+    // The server's ident first (a Notion link names no database); else the link fold.
+    const ident = t.ident ?? ticketIdentOf({ key, url: t.url || null, provider: t.provider });
     if (ident != null) row.ident = ident;
     const status = cleanTitle(t.status);
     if (status != null) row.status = status;

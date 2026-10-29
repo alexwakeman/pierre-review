@@ -1255,6 +1255,15 @@ backfill: comments arrive on each ticket's next read. ⚠ Numbered 0142/0143 bec
 [TRACKERS.md](TRACKERS.md) § Ticket comments. Journal `idx` 142 / 143, `when` sqlite `1792137629016` /
 `1792137630016`.
 
+### `0150_workspace_tracker_notion` — Notion as an issue tracker
+Adds the nullable `workspace_trackers.notion_config` (text, JSON shared `NotionTrackerMapping`): the
+Notion database's property mapping beside the one tracker row it belongs to. On an existing table, so
+the erasure, the export (named column, not a secret) and the composite FK already cover it. Additive, no
+backfill: a Notion workspace is unmapped until someone saves a mapping. Every tracker test that builds
+`workspace_trackers` from `0088` also runs `0150`. ⚠ Numbered 0150 because parallel branches may hold
+0139–0149; renumber (file, tag, journal `idx`) at integration if they land differently.
+[TRACKERS.md](TRACKERS.md) § Notion. Journal `idx` 150, `when` sqlite `1792137640016`.
+
 ### No migration — "Check against code" removed (2026-10-18): `sprint_ticket_repos` + `sprint_assessments` DORMANT
 
 The sprint drawer, its repo picker and "Check against code" (`review/sprint-assess/`) were removed with
