@@ -233,12 +233,13 @@ export function heldReasonText(v: Pick<ClaudeAutoVerdictRecord, 'heldReason' | '
 
 /**
  * Gate reasons that stay IN LIMN, never posted to GitHub: an author can never approve their own PR
- * ('own_pr' — it would fire on every head and never be actionable), and an internal / transient
+ * ('own_pr' — it would fire on every head and never be actionable), the reader's own review still
+ * standing ('prior_review' — posted under the same account, "not approved" would only confuse), and an internal / transient
  * failure ('reviews_unreadable' — a failed read; 'refused' — GitHub's own answer) is not news for the
  * team. Only a wanted APPROVE's gate text is ever one of these (a REQUEST_CHANGES held by a gate
  * carries the findings reason instead).
  */
-const LIMN_ONLY_HELD_REASONS: ReadonlySet<string> = new Set(['own_pr', 'reviews_unreadable', 'refused']);
+const LIMN_ONLY_HELD_REASONS: ReadonlySet<string> = new Set(['own_pr', 'prior_review', 'reviews_unreadable', 'refused']);
 
 /** May this verdict record's reason go to GitHub (body line or reason-only review)? Pure. */
 export function reasonMayPost(v: Pick<ClaudeAutoVerdictRecord, 'wanted' | 'heldReason' | 'reasonText'> | null | undefined): boolean {

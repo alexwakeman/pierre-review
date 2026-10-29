@@ -2623,7 +2623,8 @@ auto-posting: claim before any GitHub write, never retried.
   recorded from the claim on), never retried, at most ONCE per (PR, head): any record at this head
   (full review or replies pass) with `reasonPosted` ⇒ nothing more (`reasonPostedAtHead`).
   ⚠ **LIMN-ONLY REASONS** (`reasonMayPost`): a held APPROVE's `own_pr` (an author can never approve
-  their own PR — it would go out on every head), `reviews_unreadable` (a transient read failure) and
+  their own PR — it would go out on every head), `prior_review` (the reader's own review still stands,
+  under the same account — "not approved" would only confuse), `reviews_unreadable` (a transient read failure) and
   `refused` are shown in Limn, never posted (no body line, no reason-only review, `reasonPosted` not
   set, so the head's one post is not used up). ⚠ **A REASON-ONLY REVIEW CONSUMES A REVIEW REQUEST**:
   it goes out under the reader's account, and any review the reader submits answers their pending

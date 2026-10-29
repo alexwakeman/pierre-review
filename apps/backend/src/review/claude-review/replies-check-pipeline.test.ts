@@ -448,26 +448,20 @@ describe('an AUTO pass: the outcome, both ways, through the auto-post gates', ()
     expect(second.autoPost).toMatchObject({ status: 'skipped', verdict: { wanted: 'REQUEST_CHANGES', heldReason: 'already_requested' } });
   });
 
-  it('⚠ a person’s standing review holds the verdict: no approval, only its reason (once per head)', async () => {
+  it('⚠ the reader’s own standing review holds the verdict: no approval, and the reason stays in Limn', async () => {
     const pr = await makePr();
     await reviewed(pr, [{ title: 'Naming is off', severity: 'warning', replies: [{ by: 'alice', body: 'It follows the house style.' }] }]);
     liveReviewList = [{ id: 1, login: 'me', state: 'APPROVED' }];
     script = () => ({ replies: [{ ref: 'T1', status: 'reply_accepted', acceptKind: 'not_valid', reply: 'Fair.' }] });
     await rc.startRepliesCheck(ctx, { accountId: 1, prId: pr, trigger: 'auto' });
     await settleFor(pr);
-    // The pass HELD an approval it computed: the reason goes out as one short COMMENT review.
-    expect(postReview).toHaveBeenCalledTimes(1);
-    expect(postReview.mock.calls[0]![0]).toMatchObject({
-      verdict: 'COMMENT',
-      includedFindings: [],
-      body: 'Not approved: your own review on GitHub still stands.\n\n_Posted automatically by Limn’s Claude review._',
-    });
+    expect(postReview).not.toHaveBeenCalled();
     const pass = (await persist.getClaudeReviewById(ctx, (await passRows(pr))[0]!.id, 1))!;
     expect(pass.autoPost).toMatchObject({
-      status: 'posted',
-      reasonOnly: true,
+      status: 'skipped',
       verdict: { wanted: 'APPROVE', submitted: 'COMMENT', heldReason: 'prior_review' },
     });
+    expect(pass.autoPost?.reasonPosted).toBeUndefined();
   });
 
   it('⚠ an OPEN review request of the reader: the held approval’s reason stays in Limn (a review would answer the request)', async () => {

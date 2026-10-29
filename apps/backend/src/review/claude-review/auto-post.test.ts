@@ -764,17 +764,18 @@ describe('auto verdict', () => {
     expect(postReview.mock.calls[0]![0].verdict).toBe('COMMENT');
     expect((await persist.getClaudeReviewById(ctx, id, 1))?.autoPost?.verdict?.heldReason).toBe('prior_review');
 
-    // With nothing else to post, a held APPROVE posts its reason alone (once per head).
+    // With nothing else to post, the held APPROVE's reason stays IN LIMN: the reader's own review is
+    // already the PR's standing verdict, so "not approved" would only confuse the team.
     postReview.mockClear();
     const pr2 = await makePr({ author: 'alice' });
     const id2 = await run(pr2, [], 'auto', 'APPROVE');
-    expect(await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr2, reviewId: id2 }, deps())).toMatchObject({ kind: 'done' });
-    expect(postReview.mock.calls[0]![0]).toMatchObject({
-      verdict: 'COMMENT',
-      body: `Not approved: your own review on GitHub still stands.\n\n${AUTO_POST_FOOTER}`,
+    expect(await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr2, reviewId: id2 }, deps())).toEqual({ kind: 'skipped', reason: 'nothing_new' });
+    expect(postReview).not.toHaveBeenCalled();
+    expect((await persist.getClaudeReviewById(ctx, id2, 1))?.autoPost?.verdict).toMatchObject({
+      heldReason: 'prior_review',
+      reasonText: 'Not approved: your own review on GitHub still stands.',
     });
-    expect((await persist.getClaudeReviewById(ctx, id2, 1))?.autoPost?.verdict?.heldReason).toBe('prior_review');
-    // A second run at the same head says nothing more.
+    // A second run at the same head says nothing either.
     postReview.mockClear();
     const id3 = await run(pr2, [], 'auto', 'APPROVE');
     expect(await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr2, reviewId: id3 }, deps())).toEqual({ kind: 'skipped', reason: 'nothing_new' });
@@ -1055,9 +1056,8 @@ describe("lifting Limn's own automatic request for changes", () => {
     liveReviewList = [{ id: 'R7', login: 'me', state: 'CHANGES_REQUESTED' } as any];
     const b = await run(pr, [], 'auto', 'APPROVE');
     await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: b }, liftDeps());
-    // Only the reason goes out (a COMMENT); the reader's request for changes is never touched.
-    expect(postReview).toHaveBeenCalledTimes(1);
-    expect(postReview.mock.calls[0]![0].verdict).toBe('COMMENT');
+    // Nothing goes out (the reason stays in Limn); the reader's request for changes is never touched.
+    expect(postReview).not.toHaveBeenCalled();
     expect(dismissReview).not.toHaveBeenCalled();
     expect((await rec(b)).verdict.heldReason).toBe('prior_review');
   });
