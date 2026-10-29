@@ -36,8 +36,8 @@ import {
 // lists under the size chart. No separate button. The small arrow beside a row's name opens the
 // ticket in the tracker.
 
-const MUTED = 'text-gray-500 dark:text-gray-400';
-const CARD = 'rounded-lg border border-gray-200 p-3 dark:border-gray-800';
+const MUTED = 'text-ui-mute';
+const CARD = 'rounded-ui p-3 bg-ui-surface';
 
 function StoriesInfo(): JSX.Element {
   return (
@@ -84,8 +84,8 @@ function StoryLink({
       title={`Open the ${story.key} story`}
       className={`break-words text-left hover:underline ${className}`}
     >
-      <span className="font-medium text-sky-700 dark:text-sky-300">{story.key}</span>
-      {title !== '' && <span className="text-gray-800 dark:text-gray-100"> {title}</span>}
+      <span className="font-medium text-ui-accent">{story.key}</span>
+      {title !== '' && <span className="text-ui-ink"> {title}</span>}
     </button>
   );
 }
@@ -133,14 +133,14 @@ function StoriesBlock({
 
   const header = (
     <div className="flex flex-wrap items-baseline gap-2">
-      <h3 className="flex items-center gap-1 text-sm font-semibold text-gray-800 dark:text-gray-100">
+      <h3 className="flex items-center gap-1 text-body font-semibold text-ui-ink">
         {w != null ? `Stories — ${reportingWindowCaption(w)}` : 'Stories'}
         <InfoButton title="Stories">
           <StoriesInfo />
         </InfoButton>
       </h3>
       {w != null && data != null && data.trackerOn && (
-        <span className={`text-xs ${MUTED}`}>
+        <span className={`text-meta ${MUTED}`}>
           {windowDates(w)} · {data.stories.length} {data.stories.length === 1 ? 'ticket' : 'tickets'}
         </span>
       )}
@@ -151,7 +151,7 @@ function StoriesBlock({
     return (
       <div className="space-y-3">
         {header}
-        <p className="text-sm text-rose-700 dark:text-rose-400">Could not load stories.</p>
+        <p className="text-body text-ui-danger">Could not load stories.</p>
       </div>
     );
   }
@@ -159,7 +159,7 @@ function StoriesBlock({
     return (
       <div className="space-y-3">
         {header}
-        <p className={`text-sm ${MUTED}`}>Loading…</p>
+        <p className={`text-body ${MUTED}`}>Loading…</p>
       </div>
     );
   }
@@ -167,7 +167,7 @@ function StoriesBlock({
     return (
       <div className="space-y-3">
         {header}
-        <p className={`text-sm ${MUTED}`}>
+        <p className={`text-body ${MUTED}`}>
           Stories needs an issue tracker. Add one in Settings → Workspace → Issue tracker.
         </p>
       </div>
@@ -177,7 +177,7 @@ function StoriesBlock({
     return (
       <div className="space-y-3">
         {header}
-        <p className={`text-sm ${MUTED}`}>
+        <p className={`text-body ${MUTED}`}>
           No tickets with a pull request merged {w != null ? reportingWindowPhrase(w) : 'in this window'}.
         </p>
       </div>
@@ -193,7 +193,7 @@ function StoriesBlock({
     <div className="space-y-4">
       {header}
       {data.truncated && (
-        <p className="text-xs text-amber-800 dark:text-amber-300">
+        <p className="text-meta text-ui-warn">
           Showing the latest {data.stories.length} tickets in this window; earlier ones are not listed.
         </p>
       )}
@@ -206,13 +206,13 @@ function StoriesBlock({
           type="button"
           aria-expanded={open}
           onClick={() => setOpen((o) => !o)}
-          className="inline-flex items-center gap-1 text-xs font-semibold text-gray-700 hover:underline dark:text-gray-200"
+          className="inline-flex items-center gap-1 text-meta font-semibold text-ui-ink hover:underline"
         >
           <ChevronIcon dir={open ? 'down' : 'right'} size={10} />
           All {data.stories.length} {data.stories.length === 1 ? 'story' : 'stories'}
         </button>
         {/* The split, readable before opening: how many fell short and how many have no review. */}
-        <span className={`ml-2 text-xs ${MUTED}`}>
+        <span className={`ml-2 text-meta ${MUTED}`}>
           {shortfall.length} fell short · {unchecked.length} not reviewed
         </span>
         {open && (
@@ -264,11 +264,11 @@ function StoryList({
 }): JSX.Element {
   return (
     <section data-testid={testId} className="space-y-2">
-      <h4 className="text-xs font-semibold text-gray-700 dark:text-gray-200">
+      <h4 className="text-meta font-semibold text-ui-ink">
         {title} <span className={`font-normal tabular-nums ${MUTED}`}>{rows.length}</span>
       </h4>
       {rows.length === 0 ? (
-        <p className={`text-xs ${MUTED}`}>{emptyLabel}</p>
+        <p className={`text-meta ${MUTED}`}>{emptyLabel}</p>
       ) : (
         <ul className="space-y-2">
           {rows.map((s) => (
@@ -285,7 +285,7 @@ function StoryItem({ story, workingDayHours }: { story: StoryRow; workingDayHour
   const shortParts = reviewShortfallParts(story);
   return (
     <li className={CARD} data-testid="story-row">
-      <div className="flex items-start gap-1.5 text-sm">
+      <div className="flex items-start gap-1.5 text-body">
         <StoryLink story={story} />
         {href != null && (
           <a
@@ -294,15 +294,15 @@ function StoryItem({ story, workingDayHours }: { story: StoryRow; workingDayHour
             rel="noreferrer"
             aria-label={`Open ${story.key} in the tracker`}
             title="Open in the tracker"
-            className={`mt-0.5 shrink-0 hover:text-gray-700 dark:hover:text-gray-200 ${MUTED}`}
+            className={`mt-0.5 shrink-0 hover:text-ui-ink ${MUTED}`}
           >
             <ExternalLinkIcon size={12} />
           </a>
         )}
       </div>
-      <div className={`mt-0.5 text-xs ${MUTED}`}>{storyMetaParts(story, workingDayHours).join(' · ')}</div>
+      <div className={`mt-0.5 text-meta ${MUTED}`}>{storyMetaParts(story, workingDayHours).join(' · ')}</div>
       {story.review != null && (
-        <div className="mt-0.5 text-xs text-gray-700 dark:text-gray-200">
+        <div className="mt-0.5 text-meta text-ui-ink">
           {TICKET_ALIGNMENT_LABEL[story.review.alignment]}
           {shortParts.length > 0 && ` · ${shortParts.join(' · ')}`}
         </div>
@@ -318,7 +318,7 @@ function TimeChart({ stories, workingDayHours }: { stories: StoryRow[]; workingD
   const byIdent = indexStories(stories);
   return (
     <section data-testid="stories-time-chart" className={CARD}>
-      <h4 className="mb-2 flex items-center gap-1 text-xs font-semibold text-gray-700 dark:text-gray-200">
+      <h4 className="mb-2 flex items-center gap-1 text-meta font-semibold text-ui-ink">
         Time and pull requests
         <InfoButton title="Time and pull requests">
           <TimeChartInfo />
@@ -331,7 +331,7 @@ function TimeChart({ stories, workingDayHours }: { stories: StoryRow[]; workingD
         labelFor={(i) => {
           const s = byIdent.get(m.idents[i] ?? '');
           return s == null ? (
-            <span className="break-words text-gray-700 dark:text-gray-200">{m.labels[i]}</span>
+            <span className="break-words text-ui-ink">{m.labels[i]}</span>
           ) : (
             <StoryLink story={s} />
           );
@@ -364,7 +364,7 @@ function TimeChart({ stories, workingDayHours }: { stories: StoryRow[]; workingD
           },
         ]}
       />
-      {m.more > 0 && <p className={`mt-1 text-xs ${MUTED}`}>{m.more} more not shown.</p>}
+      {m.more > 0 && <p className={`mt-1 text-meta ${MUTED}`}>{m.more} more not shown.</p>}
     </section>
   );
 }
@@ -374,14 +374,14 @@ function SizeChart({ stories, shortfall }: { stories: StoryRow[]; shortfall: str
   const hasFlagged = m.points.some((p) => p.flagged);
   return (
     <section data-testid="stories-size-chart" className={CARD}>
-      <h4 className="mb-2 flex items-center gap-1 text-xs font-semibold text-gray-700 dark:text-gray-200">
+      <h4 className="mb-2 flex items-center gap-1 text-meta font-semibold text-ui-ink">
         Size and criteria
         <InfoButton title="Size and criteria">
           <SizeChartInfo />
         </InfoButton>
       </h4>
       {m.points.length === 0 ? (
-        <p className={`text-xs ${MUTED}`}>No ticket has both a known size and a criteria count.</p>
+        <p className={`text-meta ${MUTED}`}>No ticket has both a known size and a criteria count.</p>
       ) : (
         <ScatterChart
           points={m.points}
@@ -415,11 +415,11 @@ function UnplottedList({
   detail?: (s: StoryRow) => string;
 }): JSX.Element {
   return (
-    <div className="mt-2 text-xs">
-      <div className="font-semibold text-gray-700 dark:text-gray-200">
+    <div className="mt-2 text-meta">
+      <div className="font-semibold text-ui-ink">
         {title} <span className={`font-normal ${MUTED}`}>{rows.length}</span>
       </div>
-      <ul className="mt-0.5 space-y-0.5 text-gray-700 dark:text-gray-200">
+      <ul className="mt-0.5 space-y-0.5 text-ui-ink">
         {rows.map((s) => (
           <li key={s.ident} className="break-words">
             <StoryLink story={s} />

@@ -1,4 +1,5 @@
 import { useMemo, useState, type ReactNode } from 'react';
+import { Segmented } from './reportChrome.js';
 import type {
   CourtEvidencePr,
   PrCourt,
@@ -100,7 +101,7 @@ import {
 const NO_AUTHOR_LOOKUP = new Map<number, never>() as never;
 
 /** A one-line disclosure: a count from the wire, in a sentence. */
-const NOTE = 'text-xs text-gray-500 dark:text-gray-400';
+const NOTE = 'text-meta text-ui-mute';
 
 /**
  * One openable pull request.
@@ -122,30 +123,30 @@ function EvidenceRow({ pr, court }: { pr: CourtEvidencePr; court: PrCourt | null
     NO_AUTHOR_LOOKUP,
   );
   return (
-    <li className="flex items-baseline gap-2 py-1 text-xs">
+    <li className="flex items-baseline gap-2 py-1 text-meta">
       <button
         type="button"
         onClick={() => openPrDetailTab(meta, { fromActivity: true })}
         title={pr.prTitle}
-        className="inline-flex min-w-0 items-center gap-1 font-medium text-sky-600 hover:underline dark:text-sky-400"
+        className="inline-flex min-w-0 items-center gap-1 font-medium text-ui-accent hover:underline"
       >
         <PullRequestIcon size={11} className="shrink-0" />
         <span className="shrink-0">#{pr.prNumber}</span>
-        <span className="truncate text-gray-600 dark:text-gray-300">{pr.prTitle}</span>
+        <span className="truncate text-ui-mute">{pr.prTitle}</span>
       </button>
       {pr.authorIsBot && (
         // Should not occur — automation's own pull requests are excluded from this population —
         // but if the exclusion ever regresses, the row says so rather than passing a dependency
         // bump off as somebody's waiting work.
         <span
-          className="inline-flex shrink-0 items-center gap-0.5 rounded bg-gray-100 px-1 text-[11px] text-gray-600 dark:bg-gray-800 dark:text-gray-300"
+          className="inline-flex shrink-0 items-center gap-0.5 rounded-ui bg-ui-raise px-1 text-meta text-ui-mute"
           title="Opened by automation"
         >
           <BotIcon size={10} />
           bot
         </span>
       )}
-      <span className="ml-auto shrink-0 whitespace-nowrap tabular-nums text-gray-500 dark:text-gray-400">
+      <span className="ml-auto shrink-0 whitespace-nowrap tabular-nums text-ui-mute">
         {court != null ? (
           <>
             <span className={`font-semibold ${COURT_TEXT[court]}`}>
@@ -165,7 +166,7 @@ function EvidenceRow({ pr, court }: { pr: CourtEvidencePr; court: PrCourt | null
           rel="noopener noreferrer"
           title="Open on GitHub"
           aria-label={`Open ${pr.repoFullName} #${pr.prNumber} on GitHub`}
-          className="shrink-0 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+          className="shrink-0 text-ui-mute hover:text-ui-ink"
         >
           <ExternalLinkIcon size={10} />
         </a>
@@ -181,14 +182,14 @@ function EvidenceRow({ pr, court }: { pr: CourtEvidencePr; court: PrCourt | null
 function RepoRow({ repo }: { repo: RepoCourtProfile }): JSX.Element {
   const court = repo.dominant;
   return (
-    <li className="rounded-lg border border-gray-200 p-3 dark:border-gray-800">
+    <li className="rounded-ui p-3 bg-ui-surface">
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-        <span className="font-mono text-xs font-semibold text-gray-800 dark:text-gray-100">
+        <span className="font-mono text-meta font-semibold text-ui-ink">
           {repo.repoFullName}
         </span>
-        <span className="whitespace-nowrap text-xs tabular-nums text-gray-500 dark:text-gray-400">
+        <span className="whitespace-nowrap text-meta tabular-nums text-ui-mute">
           {formatCount(repo.prs)} PRs · half merged within {formatHours(repo.medianLeadHours)} · three in four within{' '}
-          <span className="font-semibold text-gray-700 dark:text-gray-200">
+          <span className="font-semibold text-ui-ink">
             {formatHours(repo.p75LeadHours)}
           </span>
         </span>
@@ -197,8 +198,8 @@ function RepoRow({ repo }: { repo: RepoCourtProfile }): JSX.Element {
         <CourtSplit courts={repo.courts} size="sm" />
       </div>
       {repo.evidence.length > 0 && court != null && (
-        <div className="mt-2 border-t border-gray-100 pt-1.5 dark:border-gray-800/70">
-          <div className="text-[11px] font-medium text-gray-500 dark:text-gray-400">
+        <div className="mt-2 pt-1.5">
+          <div className="text-meta font-medium text-ui-mute">
             Longest waits
           </div>
           <ul>
@@ -232,23 +233,12 @@ function WindowPicker({
   reporting: ReportingWindowInfo | null;
 }): JSX.Element {
   return (
-    <div role="group" aria-label="Window" className="inline-flex rounded-md border border-gray-200 p-0.5 dark:border-gray-700">
-      {CHRONOLOGY_WINDOWS.map((w) => (
-        <button
-          key={w}
-          type="button"
-          aria-pressed={value === w}
-          onClick={() => onChange(w)}
-          className={`rounded px-2 py-0.5 text-xs ${
-            value === w
-              ? 'bg-gray-800 font-medium text-white dark:bg-gray-100 dark:text-gray-900'
-              : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800'
-          }`}
-        >
-          {chronologyWindowLabel(w, reporting)}
-        </button>
-      ))}
-    </div>
+    <Segmented
+      label="Window"
+      value={value}
+      onChange={onChange}
+      options={CHRONOLOGY_WINDOWS.map((w) => ({ value: w, label: chronologyWindowLabel(w, reporting) }))}
+    />
   );
 }
 
@@ -274,9 +264,9 @@ function Block({
   testId?: string;
 }): JSX.Element {
   return (
-    <section data-testid={testId} className="rounded-lg border border-gray-200 p-4 dark:border-gray-800">
+    <section data-testid={testId} className="rounded-ui p-4 bg-ui-surface">
       <div className="flex items-center gap-1">
-        <h4 className="text-sm font-semibold text-gray-800 dark:text-gray-100">{title}</h4>
+        <h4 className="text-body font-semibold text-ui-ink">{title}</h4>
         {info != null && (
           <InfoButton title={title} width={infoWidth}>
             {info}
@@ -310,9 +300,9 @@ function CourtHeading({
 }): JSX.Element {
   return (
     <div className="flex items-center gap-2">
-      {swatch != null && <span className={`h-2.5 w-2.5 rounded-sm ${swatch}`} />}
-      <h5 className="text-xs font-semibold text-gray-700 dark:text-gray-200">{label}</h5>
-      <span className="text-xs text-gray-500 dark:text-gray-400">
+      {swatch != null && <span className={`h-2.5 w-2.5 rounded-ui ${swatch}`} />}
+      <h5 className="text-meta font-semibold text-ui-ink">{label}</h5>
+      <span className="text-meta text-ui-mute">
         {count} {count === 1 ? 'repository' : 'repositories'}
       </span>
     </div>
@@ -346,7 +336,7 @@ export function BottlenecksPanel(): JSX.Element {
 
   if (model == null || resp == null) {
     return (
-      <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
+      <div className="rounded-ui p-6 text-center text-body text-ui-mute bg-ui-surface">
         {q.isError ? 'Could not load this workspace’s flow.' : 'Measuring…'}
       </div>
     );
@@ -366,7 +356,7 @@ export function BottlenecksPanel(): JSX.Element {
       <div>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-1">
-            <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200">Chronology</h3>
+            <h3 className="text-body font-semibold text-ui-ink">Chronology</h3>
             <InfoButton title="How Chronology works">
               <ChronologyAboutInfo settings={resp.settings ?? null} />
             </InfoButton>
@@ -385,7 +375,7 @@ export function BottlenecksPanel(): JSX.Element {
           </p>
           {exclusions != null && <p className={NOTE}>{exclusions}</p>}
           {truncation != null && (
-            <p className="flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-400">
+            <p className="flex items-start gap-1.5 text-meta text-ui-warn">
               <WarningIcon size={12} className="mt-0.5 shrink-0" />
               <span>{truncation}</span>
             </p>
@@ -395,9 +385,9 @@ export function BottlenecksPanel(): JSX.Element {
 
       {model.nothingMeasured ? (
         <>
-          <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
+          <div className="rounded-ui p-6 text-center text-body text-ui-mute bg-ui-surface">
             Nothing to measure in this workspace yet.
-            <p className="mt-1 text-xs">
+            <p className="mt-1 text-meta">
               A pull request has to merge, and a person has to have reviewed or commented on it,
               before its waiting time can be counted.
             </p>
@@ -466,7 +456,7 @@ export function BottlenecksPanel(): JSX.Element {
                     type="button"
                     onClick={() => setShowSlowest((v) => !v)}
                     aria-expanded={showSlowest}
-                    className="mt-2 text-xs font-medium text-sky-700 hover:underline dark:text-sky-400"
+                    className="mt-2 text-meta font-medium text-ui-accent hover:underline"
                   >
                     {showSlowest ? 'Hide' : 'Show'} as a table, longest first
                   </button>
@@ -494,11 +484,11 @@ export function BottlenecksPanel(): JSX.Element {
                     )}
                     <div className="grid gap-5 md:grid-cols-2">
                       <div>
-                        <h5 className="mb-2 text-xs font-medium text-gray-700 dark:text-gray-200">Time to merge, by size</h5>
+                        <h5 className="mb-2 text-meta font-medium text-ui-ink">Time to merge, by size</h5>
                         <SizeBandsChart bands={resp.sizeBands ?? []} />
                       </div>
                       <div>
-                        <h5 className="mb-2 text-xs font-medium text-gray-700 dark:text-gray-200">
+                        <h5 className="mb-2 text-meta font-medium text-ui-ink">
                           Time to merge, by the day it opened
                         </h5>
                         <WeekdayChart days={resp.weekdays ?? []} />
@@ -585,7 +575,7 @@ export function BottlenecksPanel(): JSX.Element {
                         on every row it produced six identical paragraphs on a real workspace. The
                         server's one line is on the page; its full paragraph is behind the "i". */}
                     {section.summary !== '' && (
-                      <p className="text-xs text-gray-700 dark:text-gray-300">{section.summary}</p>
+                      <p className="text-meta text-ui-ink">{section.summary}</p>
                     )}
                     <ul className="space-y-2">
                       {section.repos.map((r) => (
@@ -604,16 +594,16 @@ export function BottlenecksPanel(): JSX.Element {
                       {model.quiet.map((r) => (
                         <li
                           key={r.repoId}
-                          className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-dashed border-gray-200 px-3 py-2 dark:border-gray-800"
+                          className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-ui px-3 py-2 bg-ui-surface"
                         >
-                          <CheckCircleIcon size={12} className="shrink-0 text-gray-500 dark:text-gray-400" />
-                          <span className="font-mono text-xs text-gray-600 dark:text-gray-300">
+                          <CheckCircleIcon size={12} className="shrink-0 text-ui-mute" />
+                          <span className="font-mono text-meta text-ui-mute">
                             {r.repoFullName}
                           </span>
                           <span className="w-24 shrink-0">
                             <CourtSplit courts={r.courts} size="bar" />
                           </span>
-                          <span className="ml-auto text-xs tabular-nums text-gray-500 dark:text-gray-400">
+                          <span className="ml-auto text-meta tabular-nums text-ui-mute">
                             {formatCount(r.prs)} PRs · three in four merged within {formatHours(r.p75LeadHours)}
                           </span>
                         </li>
@@ -633,19 +623,19 @@ export function BottlenecksPanel(): JSX.Element {
             >
               <ul className="space-y-2">
                 {model.unreviewed.map((u) => (
-                  <li key={u.repoId} className="rounded-lg border border-gray-200 p-3 dark:border-gray-800">
+                  <li key={u.repoId} className="rounded-ui p-3 bg-ui-surface">
                     <div className="flex flex-wrap items-baseline justify-between gap-x-3">
-                      <span className="font-mono text-xs font-semibold text-gray-800 dark:text-gray-100">
+                      <span className="font-mono text-meta font-semibold text-ui-ink">
                         {u.repoFullName}
                       </span>
-                      <span className="text-xs tabular-nums text-gray-500 dark:text-gray-400">
-                        <span className="font-semibold text-amber-700 dark:text-amber-400">
+                      <span className="text-meta tabular-nums text-ui-mute">
+                        <span className="font-semibold text-ui-warn">
                           {formatPct(u.share)}
                         </span>{' '}
                         — {u.withoutHumanReview} of {u.merged} merges
                       </span>
                     </div>
-                    <ul className="mt-1.5 border-t border-gray-100 pt-1 dark:border-gray-800/70">
+                    <ul className="mt-1.5 pt-1">
                       {u.evidence.map((pr) => (
                         <EvidenceRow key={pr.prId} pr={pr} court={null} />
                       ))}
@@ -662,7 +652,7 @@ export function BottlenecksPanel(): JSX.Element {
             <p
               key={r.kind}
               data-testid="bottleneck-refusal"
-              className="flex items-start gap-1.5 rounded-lg border border-dashed border-gray-300 px-3 py-2 text-xs text-gray-500 dark:border-gray-700 dark:text-gray-400"
+              className="flex items-start gap-1.5 rounded-ui px-3 py-2 text-meta text-ui-mute bg-ui-surface"
             >
               {r.basis === 'measured_clean' ? (
                 <CheckCircleIcon size={12} className="mt-0.5 shrink-0" />

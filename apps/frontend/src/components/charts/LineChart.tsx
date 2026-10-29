@@ -61,10 +61,10 @@ export function LineChart({
   const [ref, w] = useChartWidth();
   const [hover, setHover] = useState<number | null>(null);
 
-  const PAD_L = 30;
+  const PAD_L = 36;
   const PAD_R = 8;
   const PAD_T = 8;
-  const PAD_B = 16;
+  const PAD_B = 18;
   const n = labels.length;
   const innerW = Math.max(w - PAD_L - PAD_R, 1);
   const innerH = height - PAD_T - PAD_B;
@@ -221,7 +221,7 @@ export function LineChart({
                   y1={y(v)}
                   x2={w - PAD_R}
                   y2={y(v)}
-                  className="decorative-mark text-gray-200 dark:text-gray-700"
+                  className="decorative-mark text-ui-faint"
                   stroke="currentColor"
                   strokeWidth={1}
                 />
@@ -229,7 +229,7 @@ export function LineChart({
                   x={PAD_L - 4}
                   y={y(v) + 3}
                   textAnchor="end"
-                  className="fill-gray-500 dark:fill-gray-400 text-[11px]"
+                  className="fill-gray-500 dark:fill-gray-400 text-meta"
                 >
                   {formatY(v)}
                 </text>
@@ -244,7 +244,7 @@ export function LineChart({
                 y1={PAD_T}
                 x2={x(hover)}
                 y2={baseY}
-                className="decorative-mark text-gray-300 dark:text-gray-600"
+                className="decorative-mark text-ui-faint"
                 stroke="currentColor"
                 strokeWidth={1}
               />
@@ -283,14 +283,14 @@ export function LineChart({
             {/* dashed trend line(s) painted last so they sit above every data line + dot */}
             {series.filter((s) => s.dashed).map(renderPath)}
             {/* x ticks: first + last */}
-            <text x={PAD_L} y={height - 4} className="fill-gray-500 dark:fill-gray-400 text-[11px]">
+            <text x={PAD_L} y={height - 4} className="fill-gray-500 dark:fill-gray-400 text-meta">
               {labels[0] ? fmtDate(labels[0]) : ''}
             </text>
             <text
               x={w - PAD_R}
               y={height - 4}
               textAnchor="end"
-              className="fill-gray-500 dark:fill-gray-400 text-[11px]"
+              className="fill-gray-500 dark:fill-gray-400 text-meta"
             >
               {labels[n - 1] ? fmtDate(labels[n - 1]!) : ''}
             </text>
@@ -324,7 +324,7 @@ export function LineChart({
                   {note && (
                     <div
                       className={`ml-2.5 mt-0.5 flex max-w-[220px] items-start gap-1 whitespace-normal ${
-                        noteTone === 'muted' ? 'text-gray-500 dark:text-gray-400' : ''
+                        noteTone === 'muted' ? 'text-ui-mute' : ''
                       }`}
                       style={noteTone === 'muted' ? undefined : { color: ANOMALY_RING }}
                     >
@@ -343,12 +343,12 @@ export function LineChart({
       {/* Below-chart summary strip — the point-in-time breakdown, right-aligned, outside the plot
           so it never covers the lines or a neighbouring panel. Reserves height to avoid a jump. */}
       {tipBelow && (
-        <div className="mt-1 flex min-h-[1.75rem] flex-wrap items-baseline justify-end gap-x-3 gap-y-0.5 text-[11px] leading-tight">
+        <div className="mt-1 flex min-h-[1.75rem] flex-wrap items-baseline justify-end gap-x-3 gap-y-0.5 text-meta leading-tight">
           {hover == null ? (
-            <span className="text-gray-400">hover a week for its point-in-time breakdown</span>
+            <span className="text-ui-faint">hover a week for its point-in-time breakdown</span>
           ) : (
             <>
-              <span className="font-medium text-gray-600 dark:text-gray-300">
+              <span className="font-medium text-ui-mute">
                 {labels[hover] ? fmtDate(labels[hover]!) : ''}
               </span>
               {series
@@ -362,12 +362,12 @@ export function LineChart({
                         className="inline-block h-1.5 w-1.5 translate-y-px rounded-[1px]"
                         style={{ background: s.color }}
                       />
-                      <span className="text-gray-600 dark:text-gray-300">
+                      <span className="text-ui-mute">
                         {s.label}: {v == null ? '—' : formatY(v)}
                       </span>
                       {note &&
                         (noteTone === 'muted' ? (
-                          <span className="text-gray-500 dark:text-gray-400">· {note}</span>
+                          <span className="text-ui-mute">· {note}</span>
                         ) : (
                           <span
                             className="inline-flex items-center gap-1"

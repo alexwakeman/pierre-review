@@ -30,7 +30,7 @@ export function BotSettingsPanel(): JSX.Element {
           and the Slack bot block became a field on the DELIVERY row (plugin migration 0033) — a
           checkbox inside the per-workspace Slack section. A pointer to a deleted screen is worse
           than no pointer: it sends a reader looking for a control that was never coming back. */}
-      <p className="border-t border-gray-200 pt-2.5 text-[12px] text-gray-500 dark:text-gray-400 dark:border-gray-800">
+      <p className="pt-2.5 text-meta text-ui-mute">
         To add a review-bot summary to a Slack digest, turn it on in{' '}
         <span className="font-medium">Settings → Workspace → Slack digest</span>.
       </p>

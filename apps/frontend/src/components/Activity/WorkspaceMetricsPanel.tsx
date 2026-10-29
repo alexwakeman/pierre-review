@@ -60,29 +60,27 @@ function Stat({
   const showDelta = delta != null && delta !== 0 && !lowConfidence;
   return (
     <TileShell onActivate={onActivate}>
-      <div className="text-[11px] font-medium text-gray-500 dark:text-gray-400">{label}</div>
-      <div className="text-lg font-semibold text-gray-800 dark:text-gray-100">
+      <div className="text-meta text-ui-mute">{label}</div>
+      <div className="mt-0.5 text-title font-semibold tabular-nums text-ui-ink">
         {v == null ? '—' : format(v)}
       </div>
       {showDelta ? (
         <div
-          className={`text-[11px] ${
-            improved ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'
-          }`}
+          className={`text-meta tabular-nums ${improved ? 'text-ui-success' : 'text-ui-danger'}`}
         >
           <CaretIcon dir={delta > 0 ? 'up' : 'down'} className="inline-block align-[-0.1em]" />{' '}
-          {format(Math.abs(delta))} <span className="text-gray-400">vs before</span>
+          {format(Math.abs(delta))} <span className="text-ui-faint">vs before</span>
         </div>
       ) : lowConfidence ? (
         // Why there is no arrow is in the "Flow metrics" info modal; a title= alone is out of reach
         // on touch and keyboard.
-        <div className="text-[11px] text-gray-400">
+        <div className="text-meta text-ui-faint">
           {p == null ? 'nothing to compare yet' : `was ${format(p)}`}
         </div>
       ) : (
-        <div className="text-[11px] text-gray-400">{p == null ? 'nothing to compare yet' : 'no change'}</div>
+        <div className="text-meta text-ui-faint">{p == null ? 'nothing to compare yet' : 'no change'}</div>
       )}
-      <div className="mt-0.5 text-[11px] text-gray-400">{sub}</div>
+      <div className="mt-0.5 text-meta text-ui-faint">{sub}</div>
     </TileShell>
   );
 }
@@ -96,14 +94,14 @@ function TileShell({
   children: React.ReactNode;
 }): JSX.Element {
   const base =
-    'block w-full rounded-lg border border-gray-200 bg-white p-2 text-left dark:border-gray-800 dark:bg-gray-900/40';
+    'block h-full w-full rounded-ui bg-ui-surface px-3 py-2.5 text-left';
   if (!onActivate) return <div className={base}>{children}</div>;
   return (
     <button
       type="button"
       onClick={onActivate}
       title="Show the pull requests behind this figure"
-      className={`${base} cursor-pointer transition hover:border-gray-300 hover:bg-gray-50/70 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 dark:hover:border-gray-600 dark:hover:bg-gray-900/60`}
+      className={`${base} cursor-pointer hover:bg-ui-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent motion-safe:transition-colors motion-safe:duration-ui-fast`}
     >
       {children}
     </button>
@@ -248,12 +246,12 @@ export function WorkspaceMetricsPanel({
 
   return (
     <div
-      className="space-y-3 rounded-lg border border-gray-200 bg-gray-50/50 p-3 dark:border-gray-800 dark:bg-gray-900/20"
+      className="space-y-4"
       data-testid="flow-metrics"
     >
       <div className="flex flex-wrap items-baseline gap-2">
         <div className="flex items-center gap-1">
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-300">
+          <h3 className="text-title text-ui-ink">
             Flow metrics
           </h3>
           <InfoButton title="Flow metrics">
@@ -279,7 +277,7 @@ export function WorkspaceMetricsPanel({
             </p>
           </InfoButton>
         </div>
-        <span className="text-[11px] text-gray-400">
+        <span className="text-meta text-ui-faint">
           {windowLabel}
           {onOpenMetric ? ' · click a tile for the pull requests behind it' : ''}
         </span>
@@ -291,7 +289,7 @@ export function WorkspaceMetricsPanel({
           sit apart under their own "Right now" heading where nobody reads them as sprint figures. */}
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,5fr)_minmax(0,2fr)]">
         <div role="group" aria-label={windowGroupLabel}>
-          <h4 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+          <h4 className="mb-1.5 text-meta text-ui-mute">
             {windowGroupLabel}
           </h4>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
@@ -340,42 +338,40 @@ export function WorkspaceMetricsPanel({
         <div
           role="group"
           aria-label="Right now"
-          className="border-gray-200 lg:border-l lg:pl-3 dark:border-gray-800"
+
           data-testid="flow-metrics-right-now"
         >
-          <h4 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+          <h4 className="mb-1.5 text-meta text-ui-mute">
             Right now
           </h4>
           <div className="grid grid-cols-2 gap-2">
             <TileShell onActivate={onOpenOpenPrs}>
-              <div className="text-[11px] font-medium text-gray-500 dark:text-gray-400">
+              <div className="text-meta text-ui-mute">
                 Open pull requests
               </div>
-              <div className="text-lg font-semibold text-gray-800 dark:text-gray-100">
+              <div className="mt-0.5 text-title font-semibold tabular-nums text-ui-ink">
                 {metrics.openPrs}
               </div>
-              <div className="text-[11px] text-gray-400">{openPrsSubtitle}</div>
-              <div className="mt-0.5 text-[11px] text-gray-400">open now, drafts not counted</div>
+              <div className="text-meta text-ui-faint">{openPrsSubtitle}</div>
+              <div className="mt-0.5 text-meta text-ui-faint">open now, drafts not counted</div>
             </TileShell>
             <TileShell onActivate={open('ci_red')}>
-              <div className="text-[11px] font-medium text-gray-500 dark:text-gray-400">
+              <div className="text-meta text-ui-mute">
                 Red checks now
               </div>
               <div
-                className={`text-lg font-semibold ${
-                  metrics.ciFailingNow > 0
-                    ? 'text-red-500 dark:text-red-400'
-                    : 'text-gray-800 dark:text-gray-100'
+                className={`mt-0.5 text-title font-semibold tabular-nums ${
+                  metrics.ciFailingNow > 0 ? 'text-ui-danger' : 'text-ui-ink'
                 }`}
               >
                 {metrics.ciFailingNow}
               </div>
-              <div className="text-[11px] text-gray-400">
+              <div className="text-meta text-ui-faint">
                 {metrics.ciFailingNow > 0 && metrics.ciFailingMedianAgeHours != null
                   ? `red for ~${fmtDuration(metrics.ciFailingMedianAgeHours)} (median)`
                   : 'all green'}
               </div>
-              <div className="mt-0.5 text-[11px] text-gray-400">open pull requests</div>
+              <div className="mt-0.5 text-meta text-ui-faint">open pull requests</div>
             </TileShell>
           </div>
         </div>
@@ -385,7 +381,7 @@ export function WorkspaceMetricsPanel({
           "12-week trend" label sits HERE, over the charts, rather than up in the tiles' caption
           where it read as part of the comparison-window scope — the tiles compare over the
           window, but these weekly series span 12 weeks (per-chart notes say "weekly"/"window"). */}
-      <h4 className="pt-1 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+      <h4 className="-mb-2 text-meta text-ui-mute">
         Last 12 weeks
       </h4>
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
@@ -422,7 +418,8 @@ export function WorkspaceMetricsPanel({
         <button
           type="button"
           onClick={() => setShowMore((s) => !s)}
-          className="text-[11px] font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+          aria-expanded={showMore}
+          className="inline-flex min-h-8 items-center gap-1 rounded-ui text-body text-ui-mute hover:text-ui-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent touch:min-h-10"
         >
           <ChevronIcon dir={showMore ? 'down' : 'right'} className="inline-block align-[-0.1em]" />{' '}
           More charts

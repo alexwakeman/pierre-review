@@ -88,7 +88,7 @@ export function SeverityAgreementMatrixView({
   // direction toggle derives itself off rather than being written back.)
   if (matrix.declared === 0) {
     return (
-      <div className="rounded-lg border border-gray-200 p-3 text-xs text-gray-500 dark:border-gray-800 dark:text-gray-400">
+      <div className="rounded-ui p-3 text-meta text-ui-mute bg-ui-surface">
         None of the {matrix.total.toLocaleString()} scored comments here carry a severity badge from
         the bot itself, so there is nothing to compare our ratings against.
       </div>
@@ -115,9 +115,9 @@ export function SeverityAgreementMatrixView({
   const shareOfDeclared = (n: number): string => `${Math.round((n / matrix.declared) * 100)}%`;
 
   return (
-    <div className="rounded-lg border border-gray-200 p-3 dark:border-gray-800">
+    <div className="rounded-ui p-3 bg-ui-surface">
       <div className="mb-2 flex flex-wrap items-baseline gap-2">
-        <h3 className="text-sm font-semibold">Our severity vs the bot’s own badge</h3>
+        <h3 className="text-body font-semibold">Our severity vs the bot’s own badge</h3>
         <InfoButton title="Our severity vs the bot’s own badge">
           <p>
             Each row is the severity the bot put on its own comment; each column is the severity
@@ -138,7 +138,7 @@ export function SeverityAgreementMatrixView({
             category to compare.
           </p>
         </InfoButton>
-        <span className="text-[11px] text-gray-500 dark:text-gray-400">
+        <span className="text-meta text-ui-mute">
           click a cell to narrow the list
         </span>
       </div>
@@ -149,7 +149,7 @@ export function SeverityAgreementMatrixView({
             <tr>
               {/* Both axes are named in the corner. Without this the grid is a 20-number square
                   whose orientation the reader has to guess — and guessing wrong inverts it. */}
-              <th className="px-2 py-1 text-left align-bottom text-[11px] font-medium leading-tight text-gray-400">
+              <th className="px-2 py-1 text-left align-bottom text-meta font-medium leading-tight text-ui-faint">
                 <div>we scored →</div>
                 <div>bot badged ↓</div>
               </th>
@@ -159,7 +159,7 @@ export function SeverityAgreementMatrixView({
                   <th
                     key={ours}
                     scope="col"
-                    className="px-3 py-1 text-center text-[11px] font-semibold"
+                    className="px-3 py-1 text-center text-meta font-semibold"
                     style={vendorInk(meta.color)}
                     title={`We scored these ${meta.label}. ${meta.description}`}
                   >
@@ -174,11 +174,11 @@ export function SeverityAgreementMatrixView({
               const undeclaredRow = vendor === 'none';
               const vendorMeta = undeclaredRow ? null : ML_SEVERITY_META[vendor];
               return (
-                <tr key={vendor} className="border-t border-gray-100 dark:border-gray-900">
+                <tr key={vendor} className="">
                   <th
                     scope="row"
-                    className={`px-2 py-1 text-left text-[11px] font-semibold${
-                      undeclaredRow ? ' text-gray-400' : ''
+                    className={`px-2 py-1 text-left text-meta font-semibold${
+                      undeclaredRow ? ' text-ui-faint' : ''
                     }`}
                     style={vendorMeta ? vendorInk(vendorMeta.color) : undefined}
                     title={
@@ -259,16 +259,16 @@ export function SeverityAgreementMatrixView({
                           // Tailwind's `hover:ring-1` would otherwise narrow the active cell's
                           // ring-2 and recolour it grey on hover, i.e. the selection would appear
                           // to switch off under the cursor that is about to clear it.
-                          className={`w-full rounded px-3 py-2 text-center text-[13px] tabular-nums transition-colors disabled:cursor-default ${
+                          className={`w-full rounded-ui px-3 py-2 text-center text-body tabular-nums transition-colors disabled:cursor-default ${
                             active
                               ? 'ring-2 ring-sky-500 ring-offset-1 ring-offset-white dark:ring-offset-gray-950'
                               : count > 0
-                                ? 'hover:ring-1 hover:ring-gray-400'
+                                ? 'hover:ring-1 hover:ring-ui-line'
                                 : ''
                           } ${
                             count === 0
-                              ? 'text-gray-500 dark:text-gray-400'
-                              : 'font-medium text-gray-800 dark:text-gray-100'
+                              ? 'text-ui-mute'
+                              : 'font-medium text-ui-ink'
                           }`}
                           style={
                             count === 0
@@ -297,14 +297,14 @@ export function SeverityAgreementMatrixView({
 
       {/* The triangles' meaning lives in the InfoButton beside the heading; the axes are named in
           the grid's corner cell. Read straight off the wire — never re-derived from `cells`. */}
-      <div className="mt-2 text-[11px] text-gray-500 tabular-nums dark:text-gray-400">
+      <div className="mt-2 text-meta text-ui-mute tabular-nums">
         Of the {matrix.declared.toLocaleString()} badged: {matrix.agree.toLocaleString()} agree ·{' '}
         {matrix.overCall.toLocaleString()} the bot called worse ·{' '}
         {matrix.underCall.toLocaleString()} milder
       </div>
 
       {topDisagreement && (
-        <div className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+        <div className="mt-1 text-meta text-ui-mute">
           Most common disagreement: the bot badged{' '}
           <span className="font-semibold tabular-nums">
             {topDisagreement.count.toLocaleString()}
@@ -329,7 +329,7 @@ export function SeverityAgreementMatrixView({
 
       {/* THE HONESTY LINE. Without it a sparse grid reads as "the bots mostly agree with us" when
           the truth is that they mostly said nothing at all — the `vendorDeclared` precedent. */}
-      <div className="mt-1 text-[11px] text-gray-400 tabular-nums">
+      <div className="mt-1 text-meta text-ui-faint tabular-nums">
         {matrix.declared.toLocaleString()} of {matrix.total.toLocaleString()} rows carry a badge from
         the bot; the rest ({matrix.undeclared.toLocaleString()}) declared nothing.
       </div>

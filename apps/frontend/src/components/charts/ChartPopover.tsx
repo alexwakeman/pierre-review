@@ -124,7 +124,7 @@ export function ChartPopover({ label, content, children, anchorX, testId }: Char
         data-testid={testId}
         aria-label={label}
         aria-expanded={open}
-        className="block w-full cursor-pointer rounded text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
+        className="block w-full cursor-pointer rounded-ui text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
         {...getReferenceProps({
           // A click pins; a second one unpins AND closes, even with the pointer still over it.
           onClick: () => {
@@ -141,7 +141,7 @@ export function ChartPopover({ label, content, children, anchorX, testId }: Char
             ref={refs.setFloating}
             style={floatingStyles}
             {...getFloatingProps()}
-            className="z-[60] w-64 max-w-[92vw] rounded-md border border-gray-200 bg-white px-3 py-2 text-xs leading-snug text-gray-700 shadow-lg dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"
+            className="z-[60] w-64 max-w-[92vw] rounded-ui bg-ui-surface px-3 py-2 text-meta leading-snug text-ui-ink shadow-lg"
           >
             {content}
           </div>

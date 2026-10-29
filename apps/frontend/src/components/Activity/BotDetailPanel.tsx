@@ -130,19 +130,19 @@ function BotCard({
 }): JSX.Element {
   const meta = automatedReviewerMeta(bot.kind);
   return (
-    <div className="space-y-2 rounded-lg border border-gray-200 p-3 dark:border-gray-800">
+    <div className="space-y-2 rounded-ui p-3 bg-ui-surface">
       <div className="flex flex-wrap items-baseline gap-2">
-        <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-gray-800 dark:text-gray-100">
+        <span className="inline-flex items-center gap-1.5 text-body font-semibold text-ui-ink">
           <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: color }} aria-hidden />
           {bot.label}
         </span>
         <span
-          className="rounded px-1.5 py-0.5 text-[11px] font-medium"
+          className="rounded-ui px-1.5 py-0.5 text-meta font-medium"
           style={{ ...vendorInk(meta.color), background: `${meta.color}1a` }}
         >
           {meta.label}
         </span>
-        <span className="text-[11px] text-gray-400">
+        <span className="text-meta text-ui-faint">
           {bot.prsReviewed} PR{bot.prsReviewed === 1 ? '' : 's'} first-reviewed · {bot.totalActivity}{' '}
           action{bot.totalActivity === 1 ? '' : 's'} in window
         </span>
@@ -330,18 +330,18 @@ export function BotDetailPanel(): JSX.Element {
 
   let body: JSX.Element;
   if (userId == null) {
-    body = <div className="text-sm text-gray-500 dark:text-gray-400">No bot selected.</div>;
+    body = <div className="text-body text-ui-mute">No bot selected.</div>;
   } else if (isLoading) {
     body = (
-      <div className="h-40 animate-pulse rounded-lg border border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-900/40" />
+      <div className="h-40 animate-pulse rounded-ui bg-ui-surface" />
     );
   } else if (isError) {
-    body = <div className="text-sm text-red-500">Couldn’t load bot behaviour analytics.</div>;
+    body = <div className="text-body text-ui-danger">Couldn’t load bot behaviour analytics.</div>;
   } else if (bot == null) {
     body = (
-      <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-400 dark:border-gray-700">
+      <div className="rounded-ui p-6 text-center text-body text-ui-faint bg-ui-surface">
         No activity for this bot in this window.
-        <div className="mt-1 text-[12px]">
+        <div className="mt-1 text-meta">
           A bot that was active earlier may just be quiet. Try a wider window above.
         </div>
       </div>
@@ -390,10 +390,10 @@ export function BotDetailPanel(): JSX.Element {
   return (
     <div className="mx-auto max-w-[100rem] space-y-3 p-4">
       <div className="flex flex-wrap items-center gap-2">
-        <h2 className="inline-flex items-center gap-1.5 text-base font-semibold text-gray-800 dark:text-gray-100">
+        <h2 className="inline-flex items-center gap-1.5 text-title font-semibold text-ui-ink">
           <BotIcon size={15} />
           {label}
-          <span className="font-normal text-gray-400"> · depth</span>
+          <span className="font-normal text-ui-faint"> · depth</span>
         </h2>
         <InfoButton title={`${label}: depth`}>
           <p>How this bot behaves over time. No AI is involved.</p>
@@ -403,20 +403,20 @@ export function BotDetailPanel(): JSX.Element {
           </ul>
         </InfoButton>
         {botMeta?.repoId != null && (
-          <span className="text-[12px] text-gray-500 dark:text-gray-400">
+          <span className="text-meta text-ui-mute">
             Measured on the repo the pill was opened from.
           </span>
         )}
-        <div className="ml-auto inline-flex overflow-hidden rounded border border-gray-300 dark:border-gray-700">
+        <div className="ml-auto inline-flex overflow-hidden rounded-ui">
           {WINDOWS.map((wOpt) => (
             <button
               key={wOpt.key}
               type="button"
               onClick={() => setWindow(wOpt.key)}
-              className={`px-2 py-0.5 text-[11px] font-medium ${
+              className={`px-2 py-0.5 text-meta font-medium ${
                 window === wOpt.key
-                  ? 'bg-sky-500/15 text-sky-700 dark:text-sky-300'
-                  : 'text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800'
+                  ? 'bg-ui-sel text-ui-accent'
+                  : 'text-ui-mute hover:bg-ui-hover'
               }`}
             >
               {wOpt.label}

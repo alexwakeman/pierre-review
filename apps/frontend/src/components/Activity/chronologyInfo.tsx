@@ -24,7 +24,7 @@ import {
 // each court's `directive`, verbatim, and it is templated and person-free by construction.
 
 function Sub({ children }: { children: string }): JSX.Element {
-  return <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-50">{children}</h3>;
+  return <h3 className="text-body font-semibold text-ui-ink">{children}</h3>;
 }
 
 /** The header's "How Chronology works". */
@@ -90,7 +90,7 @@ export function BudgetsInfo(): JSX.Element {
       <dl className="space-y-1.5">
         {FLOW_BUDGET_MEASURES.map((m) => (
           <div key={m}>
-            <dt className="font-medium text-gray-900 dark:text-gray-50">{FLOW_BUDGET_LABEL[m]}</dt>
+            <dt className="font-medium text-ui-ink">{FLOW_BUDGET_LABEL[m]}</dt>
             <dd>{BUDGET_SUB[m]}.</dd>
           </div>
         ))}

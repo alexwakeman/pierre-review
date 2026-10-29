@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Segmented, TABLE_BOX_STICKY_FIRST } from './reportChrome.js';
+import { Tabs } from '../ui/index.js';
 import type { MetricPr, WorkspaceMetricKey, User } from '@pierre-review/shared';
 import { WORKSPACE_METRIC_KEYS } from '@pierre-review/shared';
 import { useWorkspaceMetricsDetail } from '../../hooks/useWorkspaceMetricsDetail.js';
@@ -241,7 +243,7 @@ function listFor(
 function CiCell({ ci }: { ci: MetricPr['ciStatus'] }): JSX.Element {
   const meta = ci ? CI_META[ci] : null;
   return (
-    <span className="inline-flex items-center gap-1 text-[11px] text-gray-500 dark:text-gray-400">
+    <span className="inline-flex items-center gap-1 text-meta text-ui-mute">
       <span
         className="inline-block h-2 w-2 rounded-full"
         style={meta ? { background: meta.color } : { boxShadow: 'inset 0 0 0 1px #9ca3af' }}
@@ -254,10 +256,10 @@ function CiCell({ ci }: { ci: MetricPr['ciStatus'] }): JSX.Element {
 
 function DiffCell({ pr }: { pr: MetricPr }): JSX.Element {
   return (
-    <span className="whitespace-nowrap text-[11px]">
-      <span className="text-gray-400">{pr.changedFiles}f</span>{' '}
-      <span className="font-mono text-green-600 dark:text-green-400">+{pr.additions}</span>{' '}
-      <span className="font-mono text-red-500 dark:text-red-400">−{pr.deletions}</span>
+    <span className="whitespace-nowrap text-meta">
+      <span className="text-ui-faint">{pr.changedFiles}f</span>{' '}
+      <span className="font-mono text-ui-success">+{pr.additions}</span>{' '}
+      <span className="font-mono text-ui-danger">−{pr.deletions}</span>
     </span>
   );
 }
@@ -271,7 +273,7 @@ function AuthorCell({
 }): JSX.Element {
   const u = id != null ? usersById.get(id) : undefined;
   return (
-    <span className="inline-flex items-center gap-1 text-[11px] text-gray-600 dark:text-gray-300">
+    <span className="inline-flex items-center gap-1 text-meta text-ui-mute">
       <Avatar user={u} size={14} />
       <UserName user={u} fallbackId={id ?? 0} />
     </span>
@@ -285,7 +287,7 @@ function Reviewers({
   ids: number[];
   usersById: Map<number, User>;
 }): JSX.Element {
-  if (ids.length === 0) return <span className="text-[11px] italic text-gray-400">none</span>;
+  if (ids.length === 0) return <span className="text-meta italic text-ui-faint">none</span>;
   return (
     <span className="flex flex-wrap gap-1">
       {ids.map((id) => {
@@ -293,7 +295,7 @@ function Reviewers({
         return (
           <span
             key={id}
-            className="inline-flex items-center gap-1 rounded bg-gray-500/10 px-1 py-0.5 text-[11px]"
+            className="inline-flex items-center gap-1 rounded-ui bg-gray-500/10 px-1 py-0.5 text-meta"
           >
             <Avatar user={u} size={11} />
             <UserName user={u} fallbackId={id} />
@@ -330,13 +332,13 @@ function ValueCell({ m, pr }: { m: WorkspaceMetricKey; pr: MetricPr }): JSX.Elem
     case 'review_latency':
       return <span className="font-medium">{dur(pr.reviewLatencyHours)}</span>;
     case 'ci_recovery':
-      return <span className="font-medium text-orange-600 dark:text-orange-400">{dur(pr.recoveryHours)}</span>;
+      return <span className="font-medium text-ui-warn">{dur(pr.recoveryHours)}</span>;
     case 'ci_red':
-      return <span className="font-medium text-red-500 dark:text-red-400">{dur(pr.redAgeHours)}</span>;
+      return <span className="font-medium text-ui-danger">{dur(pr.redAgeHours)}</span>;
     case 'merge_ci': {
       const red = pr.ciStatus === 'failure' || pr.ciStatus === 'error';
       return (
-        <span className={`font-medium ${red ? 'text-red-500 dark:text-red-400' : 'text-gray-500 dark:text-gray-400'}`}>
+        <span className={`font-medium ${red ? 'text-ui-danger' : 'text-ui-mute'}`}>
           {pr.ciStatus ?? '—'}
         </span>
       );
@@ -358,7 +360,7 @@ function Row({
   const showReviewers = m === 'review_latency';
   const showMergedBy = m === 'merges' || m === 'merge_ci';
   return (
-    <tr className="border-t border-gray-100 align-top hover:bg-gray-50/70 dark:border-gray-800/60 dark:hover:bg-gray-900/40">
+    <tr className="align-top hover:bg-ui-hover">
       <td className="py-1.5 pr-3">
         {/* Two lines per PR: the repo/number pointer, then the title — easier to scan than
             one long truncated line. */}
@@ -368,10 +370,10 @@ function Row({
           className="block max-w-md text-left hover:underline"
           title={`${pr.repoFullName} #${pr.prNumber} — ${pr.prTitle}`}
         >
-          <span className="block truncate font-mono text-[11px] text-gray-400">
+          <span className="block truncate font-mono text-meta text-ui-faint">
             {pr.repoFullName} #{pr.prNumber}
           </span>
-          <span className="block truncate text-sm font-medium text-gray-800 dark:text-gray-100">
+          <span className="block truncate text-body font-medium text-ui-ink">
             {pr.prTitle}
           </span>
         </button>
@@ -388,7 +390,7 @@ function Row({
       <td className="py-1.5 pr-3">
         <AuthorCell id={pr.authorId} usersById={usersById} />
       </td>
-      <td className="py-1.5 pr-3 text-[11px] text-gray-500 dark:text-gray-400">
+      <td className="py-1.5 pr-3 text-meta text-ui-mute">
         {showReviewers ? (
           <Reviewers ids={pr.reviewerIds} usersById={usersById} />
         ) : showMergedBy ? (
@@ -397,7 +399,7 @@ function Row({
           relativeTime(pr.openedAt)
         )}
       </td>
-      <td className="py-1.5 pr-3 text-[11px] text-gray-500 dark:text-gray-400">
+      <td className="py-1.5 pr-3 text-meta text-ui-mute">
         {relativeTime(pr.updatedAt)}
       </td>
     </tr>
@@ -421,10 +423,10 @@ function Table({
 }): JSX.Element {
   const lastCol = m === 'review_latency' ? 'Reviewers' : m === 'merges' || m === 'merge_ci' ? 'Merged by' : 'Opened';
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full min-w-[760px] border-collapse text-sm">
+    <div className={TABLE_BOX_STICKY_FIRST}>
+      <table className="w-full min-w-[760px] border-collapse text-body">
         <thead>
-          <tr className="text-left text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+          <tr className="text-left text-meta font-semibold text-ui-faint">
             <SortHeader col="pr" label="Pull request" sort={sort} onSort={onSort} />
             <SortHeader col="value" label={valueHeader(m)} sort={sort} onSort={onSort} />
             <SortHeader col="ci" label="Checks" sort={sort} onSort={onSort} />
@@ -547,11 +549,11 @@ export function MetricsDetail(): JSX.Element {
     <div className="mx-auto max-w-[100rem] space-y-4 p-4">
       <div className="flex flex-wrap items-baseline gap-2">
         <div className="flex items-center gap-1">
-          <h2 className="text-base font-semibold text-gray-800 dark:text-gray-100">Flow metrics</h2>
+          <h2 className="text-title font-semibold text-ui-ink">Flow metrics</h2>
           <MetricsInfo />
         </div>
         {detail && (
-          <span className="text-[11px] text-gray-400">
+          <span className="text-meta text-ui-faint">
             {windowDate(detail.sprint.from)} to {windowDate(detail.sprint.to)}
           </span>
         )}
@@ -559,7 +561,7 @@ export function MetricsDetail(): JSX.Element {
           type="button"
           onClick={() => void refetch()}
           disabled={isFetching}
-          className="ml-auto rounded border border-gray-300 px-1.5 py-0.5 text-[11px] font-medium hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
+          className="ml-auto rounded-ui px-1.5 py-0.5 text-meta font-medium disabled:opacity-50 bg-ui-surface"
         >
           <RefreshIcon
             size={11}
@@ -570,60 +572,37 @@ export function MetricsDetail(): JSX.Element {
       </div>
 
       {/* Sub-tab bar — one per metric. */}
-      <div role="tablist" className="flex flex-wrap gap-1 border-b border-gray-200 dark:border-gray-800">
-        {WORKSPACE_METRIC_KEYS.map((m) => {
-          const on = m === active;
-          const n = listFor(detail, m).length;
-          return (
-            <button
-              key={m}
-              type="button"
-              role="tab"
-              aria-selected={on}
-              onClick={() => setActive(m)}
-              className={`-mb-px rounded-t-md border border-b-0 px-3 py-1.5 text-xs font-medium ${
-                on
-                  ? 'border-gray-300 bg-white text-violet-600 dark:border-gray-700 dark:bg-gray-950 dark:text-violet-300'
-                  : 'border-transparent text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-900/60'
-              }`}
-            >
-              {METRIC_META[m].label}
-              {detail ? <span className="ml-1 text-gray-400">{n}</span> : null}
-            </button>
-          );
-        })}
-      </div>
+      <Tabs
+        label="Flow metrics"
+        idPrefix="metrics-detail"
+        value={active}
+        onChange={setActive}
+        tabs={WORKSPACE_METRIC_KEYS.map((m) => ({
+          id: m,
+          label: METRIC_META[m].label,
+          count: detail ? listFor(detail, m).length : null,
+        }))}
+      />
 
       <div className="flex flex-wrap items-center gap-2">
-        <div className="text-[11px] text-gray-400">
+        <div className="text-meta text-ui-faint">
           {isDuration ? METRIC_META[active].blurb.replace(/ · longest first$/, '') : METRIC_META[active].blurb}
           {isDuration && fastFirst ? ' · fastest first' : isDuration && longestFirst ? ' · longest first' : ''}
           {' '}· click a column to sort
         </div>
         {isDuration && (
-          <div role="group" aria-label="Order" className="inline-flex overflow-hidden rounded border border-gray-300 text-[11px] dark:border-gray-700">
-            {([
-              [false, 'Longest first', longestFirst],
-              [true, 'Fastest first', fastFirst],
-            ] as const).map(([fast, label, on]) => (
-              <button
-                key={label}
-                type="button"
-                aria-pressed={on}
-                onClick={() => setOrder(fast)}
-                className={`px-1.5 py-0.5 font-medium ${
-                  on
-                    ? 'bg-gray-800 text-white dark:bg-gray-100 dark:text-gray-900'
-                    : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-900/60'
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
+          <Segmented
+            label="Order"
+            value={fastFirst ? 'fast' : longestFirst ? 'long' : ''}
+            onChange={(v) => setOrder(v === 'fast')}
+            options={[
+              { value: 'long', label: 'Longest first' },
+              { value: 'fast', label: 'Fastest first' },
+            ]}
+          />
         )}
         {rows.length !== allRows.length && (
-          <span className="text-[11px] text-gray-400">
+          <span className="text-meta text-ui-faint">
             · {rows.length} of {allRows.length}
           </span>
         )}
@@ -637,17 +616,17 @@ export function MetricsDetail(): JSX.Element {
           {[0, 1, 2, 3].map((i) => (
             <div
               key={i}
-              className="h-8 animate-pulse rounded bg-gray-100 dark:bg-gray-900/40"
+              className="h-8 animate-pulse rounded-ui bg-ui-raise"
             />
           ))}
         </div>
       ) : isError ? (
-        <div className="text-sm text-red-500">Couldn’t load the metric detail.</div>
+        <div className="text-body text-ui-danger">Couldn’t load the metric detail.</div>
       ) : rows.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-400 dark:border-gray-700">
+        <div className="rounded-ui p-6 text-center text-body text-ui-faint bg-ui-surface">
           {allRows.length === 0 ? (
             <>
-              <CheckCircleIcon className="mr-1.5 inline-block align-[-0.15em] decorative-mark text-gray-300 dark:text-gray-600" />
+              <CheckCircleIcon className="mr-1.5 inline-block align-[-0.15em] decorative-mark text-ui-faint" />
               Nothing to show for this figure in this window.
             </>
           ) : (

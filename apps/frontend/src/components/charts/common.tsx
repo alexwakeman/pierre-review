@@ -34,18 +34,22 @@ export function useChartWidth(): [(node: HTMLDivElement | null) => void, number]
 
 // App-aligned categorical palette (timeline marker hues + a few extensions).
 export const PALETTE = {
-  blue: '#3b82f6',
-  green: '#22c55e',
-  gray: '#9ca3af',
-  orange: '#f97316',
-  amber: '#f59e0b',
-  purple: '#8957e5',
-  indigo: '#6366f1',
-  red: '#ef4444',
-  teal: '#14b8a6',
-  pink: '#ec4899',
-  slate: '#64748b',
-  violet: '#a78bfa',
+  // One hex per hue that reads on BOTH themes' surfaces (#F7F7F8 / #131417). The categorical
+  // order in SERIES_COLORS was run through the dataviz palette validator in both modes (CVD and
+  // normal-vision separation pass; teal and amber sit just under 3:1 on the light surface, so
+  // every chart carrying them keeps its legend and hover values).
+  blue: '#3381e0',
+  green: '#1a8f1a',
+  gray: '#8b909a',
+  orange: '#e2612d',
+  amber: '#c48200',
+  purple: '#7a6ae0',
+  indigo: '#5b6be0',
+  red: '#e45858',
+  teal: '#1aa676',
+  pink: '#df6693',
+  slate: '#6b7280',
+  violet: '#9085e9',
 } as const;
 
 // The colour for an anomaly marker (a divergence from a bot's own typical) — shared so the
@@ -55,12 +59,12 @@ export const ANOMALY_RING = PALETTE.red;
 // A rotating set for series whose count isn't fixed (e.g. reviewers).
 export const SERIES_COLORS = [
   PALETTE.blue,
-  PALETTE.green,
-  PALETTE.amber,
-  PALETTE.purple,
+  PALETTE.orange,
   PALETTE.teal,
+  PALETTE.amber,
   PALETTE.pink,
-  PALETTE.slate,
+  PALETTE.green,
+  PALETTE.purple,
 ];
 
 export interface Series {
@@ -124,7 +128,7 @@ export function Legend({
   return (
     <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
       {series.map((s) => (
-        <span key={s.label} className="flex items-center gap-1 text-[11px] text-gray-500 dark:text-gray-400">
+        <span key={s.label} className="flex items-center gap-1 text-meta text-ui-mute">
           <span
             className="inline-block h-2 w-2 rounded-[2px]"
             style={s.shape === 'hollow-square' ? { border: `1.5px solid ${s.color}` } : { background: s.color }}
@@ -161,7 +165,7 @@ export function FloatingTip({
     <div
       className={`pointer-events-none absolute z-20 -translate-x-1/2 ${
         centered ? '' : '-translate-y-full'
-      } whitespace-nowrap rounded-md border border-gray-200 bg-white/95 px-2 py-1 text-[11px] leading-tight text-gray-700 shadow-md dark:border-gray-700 dark:bg-gray-900/95 dark:text-gray-200`}
+      } whitespace-nowrap rounded-ui bg-ui-raise px-2 py-1 text-meta leading-tight text-ui-ink shadow-lg ring-1 ring-ui-line`}
       style={{ left: clampedX, top: centered ? 2 : Math.max(y - 6, 0) }}
     >
       {children}
@@ -193,16 +197,14 @@ export function ChartCard({
   return (
     <div
       data-testid={testId}
-      className={`rounded-lg border border-gray-200 p-3 dark:border-gray-800${
-        className ? ` ${className}` : ''
-      }`}
+      className={`min-w-0 rounded-ui bg-ui-surface p-3 sm:p-4${className ? ` ${className}` : ''}`}
     >
-      <div className="mb-1 flex items-baseline justify-between gap-2">
-        <div className="flex items-baseline gap-1">
-          <h4 className="text-xs font-semibold text-gray-700 dark:text-gray-200">{title}</h4>
+      <div className="mb-2 flex flex-wrap items-baseline justify-between gap-x-2 gap-y-0.5">
+        <div className="flex min-w-0 items-baseline gap-1">
+          <h4 className="text-body font-medium text-ui-ink">{title}</h4>
           {info}
         </div>
-        {note && <span className="text-[11px] text-gray-400">{note}</span>}
+        {note && <span className="text-meta text-ui-faint">{note}</span>}
       </div>
       {children}
     </div>
@@ -212,7 +214,7 @@ export function ChartCard({
 // Shared empty-state body for a chart with no data in the window.
 export function ChartEmpty({ label = 'No data in this window' }: { label?: string }): JSX.Element {
   return (
-    <div className="flex h-[120px] items-center justify-center rounded-md border border-dashed border-gray-200 text-[11px] text-gray-400 dark:border-gray-800">
+    <div className="flex h-[120px] items-center justify-center rounded-ui bg-ui-raise px-3 text-center text-meta text-ui-mute">
       {label}
     </div>
   );

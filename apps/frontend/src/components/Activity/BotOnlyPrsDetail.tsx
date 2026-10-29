@@ -1,4 +1,6 @@
 import { useMemo, useState } from 'react';
+import { Checkbox, Select } from '../ui/index.js';
+import { Segmented, TABLE_BOX_STICKY_FIRST } from './reportChrome.js';
 import type { BotOnlyPrItem, BotWindowKind, User } from '@pierre-review/shared';
 import { useBotOnlyPrs } from '../../hooks/useBotTriage.js';
 import { useUsers } from '../../hooks/useTimeline.js';
@@ -82,40 +84,40 @@ function Row({
     <tr
       onClick={() => onOpen(pr)}
       title={`Open #${pr.number} in its own tab`}
-      className="cursor-pointer border-t border-gray-100 align-top hover:bg-gray-50/70 dark:border-gray-800/60 dark:hover:bg-gray-900/40"
+      className="cursor-pointer align-top hover:bg-ui-hover"
     >
       <td className="max-w-md py-1.5 pr-3">
         <span className="flex items-center gap-1.5">
-          <span className="font-mono text-[11px] text-gray-400">#{pr.number}</span>
-          <span className="min-w-0 truncate text-sm font-medium text-gray-800 dark:text-gray-100">
+          <span className="font-mono text-meta text-ui-faint">#{pr.number}</span>
+          <span className="min-w-0 truncate text-body font-medium text-ui-ink">
             {pr.title}
           </span>
         </span>
       </td>
       {showRepo && (
-        <td className="py-1.5 pr-3 text-[11px] text-gray-500 dark:text-gray-400">
+        <td className="py-1.5 pr-3 text-meta text-ui-mute">
           <span className="block max-w-[12rem] truncate font-mono">{pr.repoFullName}</span>
         </td>
       )}
       <td className="py-1.5 pr-3">
-        <span className="inline-flex items-center gap-1 rounded border border-amber-300 bg-amber-100/70 px-1.5 py-px text-[11px] font-medium text-amber-700 dark:border-amber-700/60 dark:bg-amber-900/30 dark:text-amber-300">
+        <span className="inline-flex items-center gap-1 rounded-ui bg-ui-surface px-1.5 py-px text-meta font-medium text-ui-ink">
           <BotIcon size={10} />
           {pr.botLabel}
         </span>
       </td>
-      <td className="py-1.5 pr-3 text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
+      <td className="py-1.5 pr-3 text-meta text-ui-mute">
         {pr.state}
       </td>
       <td className="py-1.5 pr-3">
-        <span className="inline-flex items-center gap-1 text-[11px] text-gray-600 dark:text-gray-300">
+        <span className="inline-flex items-center gap-1 text-meta text-ui-mute">
           <Avatar user={author} size={14} />
           <span className="max-w-[8rem] truncate">{userLabel(author, pr.authorId)}</span>
         </span>
       </td>
-      <td className="py-1.5 pr-3 text-[11px] text-gray-500 dark:text-gray-400">
+      <td className="py-1.5 pr-3 text-meta text-ui-mute">
         {relativeTime(pr.openedAt)}
       </td>
-      <td className="py-1.5 pr-3 text-[11px] text-gray-500 dark:text-gray-400">
+      <td className="py-1.5 pr-3 text-meta text-ui-mute">
         {relativeTime(pr.updatedAt)}
       </td>
       <td className="py-1.5 pr-3">
@@ -124,7 +126,7 @@ function Row({
           target="_blank"
           rel="noreferrer noopener"
           onClick={(e) => e.stopPropagation()}
-          className="inline-flex items-center gap-0.5 text-[11px] text-gray-500 hover:underline dark:text-gray-400"
+          className="inline-flex items-center gap-0.5 text-meta text-ui-mute hover:underline"
           title="Open on GitHub"
         >
           GitHub
@@ -137,7 +139,7 @@ function Row({
           // bot-ACTOR events — isolating it in the bot feed would show nothing. Explain
           // instead of offering a dead-end button.
           <span
-            className="cursor-help rounded border border-amber-300/60 px-1.5 py-0.5 text-[11px] text-amber-500 dark:border-amber-700/50 dark:text-amber-400/70"
+            className="cursor-help rounded-ui bg-ui-raise px-1.5 py-0.5 text-meta text-ui-mute"
             title="This review was posted via Limn with your token, so it has no bot activity to show in the Feed — open it on GitHub instead."
           >
             via Limn
@@ -147,7 +149,7 @@ function Row({
             type="button"
             onClick={() => onShowInFeed(pr)}
             aria-pressed={isolated}
-            className="rounded border border-amber-400 px-1.5 py-0.5 text-[11px] font-medium text-amber-700 hover:bg-amber-100 dark:border-amber-600/70 dark:text-amber-300 dark:hover:bg-amber-900/30"
+            className="rounded-ui bg-ui-raise px-1.5 py-0.5 text-meta font-medium text-ui-ink hover:bg-ui-hover touch:py-2"
             title="Open the Feed's bot activity for just this PR"
           >
             Show in feed
@@ -266,7 +268,7 @@ export function BotOnlyPrsDetail(): JSX.Element {
   return (
     <div className="mx-auto max-w-[100rem] space-y-4 p-4">
       <div className="flex flex-wrap items-baseline gap-2">
-        <h2 className="text-base font-semibold text-gray-800 dark:text-gray-100">Bot-only PRs</h2>
+        <h2 className="text-title font-semibold text-ui-ink">Bot-only PRs</h2>
         <InfoButton title="Bot-only PRs">
           <p>
             Pull requests that only a bot has reviewed: no person has left a review or a comment.
@@ -274,66 +276,50 @@ export function BotOnlyPrsDetail(): JSX.Element {
             merged in this window.
           </p>
         </InfoButton>
-        <span className="text-[11px] text-gray-400">
-          <span className="text-amber-600 dark:text-amber-400">
+        <span className="text-meta text-ui-faint">
+          <span className="text-ui-ink">
             {showMerged ? `${openCount} open · ${mergedCount} merged` : `${openCount} open`}
           </span>{' '}
           · click a column to sort · click a row to open it
         </span>
         {/* Cross-repo repo filter — narrows the list to one repo (single-repo tabs omit it). */}
         {isCrossRepo && repoOptions.length > 1 && (
-          <select
-            value={effectiveRepoFilter}
-            onChange={(e) =>
-              setRepoFilter(e.target.value === 'all' ? 'all' : Number(e.target.value))
-            }
-            className="rounded border border-gray-300 bg-white px-1.5 py-0.5 text-[11px] dark:border-gray-700 dark:bg-gray-900"
-            title="Filter by repo"
-          >
-            <option value="all">All repos ({repoOptions.length})</option>
-            {repoOptions.map(([id, name]) => (
-              <option key={id} value={id}>
-                {name}
-              </option>
-            ))}
-          </select>
+          <span title="Filter by repo">
+            <Select
+              size="sm"
+              label="Filter by repo"
+              value={String(effectiveRepoFilter)}
+              onChange={(v) => setRepoFilter(v === 'all' ? 'all' : Number(v))}
+              options={[
+                { value: 'all', label: `All repos (${repoOptions.length})` },
+                ...repoOptions.map(([id, name]) => ({ value: String(id), label: name })),
+              ]}
+            />
+          </span>
         )}
         {/* Show-merged toggle — OPEN bot-only PRs show by default (the actionable set, matching
             the banner); ticking adds the merged-in-window rows (already shipped). */}
-        <label
-          className="flex items-center gap-1 text-[11px] text-gray-500 dark:text-gray-400"
-          title="Also show bot-only PRs that already merged in this window — open PRs are the actionable set"
-        >
-          <input
-            type="checkbox"
+        <span title="Also show bot-only PRs that already merged in this window — open PRs are the actionable set">
+          <Checkbox
             checked={showMerged}
             onChange={(e) => setShowMerged(e.target.checked)}
-            className="h-3.5 w-3.5 cursor-pointer accent-ai-signal"
+            label={`Show merged${mergedCount > 0 ? ` (${mergedCount})` : ''}`}
           />
-          Show merged{mergedCount > 0 ? ` (${mergedCount})` : ''}
-        </label>
+        </span>
         {/* Window picker (shared with the Bot-ROI panel via botAnalyticsWindow). */}
-        <div className="ml-auto inline-flex overflow-hidden rounded border border-gray-300 dark:border-gray-700">
-          {WINDOWS.map((wOpt) => (
-            <button
-              key={wOpt.key}
-              type="button"
-              onClick={() => setWindow(wOpt.key)}
-              className={`px-2 py-0.5 text-[11px] font-medium ${
-                window === wOpt.key
-                  ? 'bg-ai-signal/15 text-ai-signal'
-                  : 'text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800'
-              }`}
-            >
-              {wOpt.label}
-            </button>
-          ))}
+        <div className="ml-auto">
+          <Segmented
+            label="Window"
+            value={window}
+            onChange={setWindow}
+            options={WINDOWS.map((w) => ({ value: w.key, label: w.label }))}
+          />
         </div>
         <button
           type="button"
           onClick={() => void refetch()}
           disabled={isFetching}
-          className="rounded border border-gray-300 px-1.5 py-0.5 text-[11px] font-medium hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
+          className="rounded-ui px-1.5 py-0.5 text-meta font-medium disabled:opacity-50 bg-ui-surface"
         >
           <RefreshIcon
             size={11}
@@ -346,13 +332,13 @@ export function BotOnlyPrsDetail(): JSX.Element {
       {isLoading ? (
         <div className="space-y-2">
           {[0, 1, 2, 3].map((i) => (
-            <div key={i} className="h-8 animate-pulse rounded bg-gray-100 dark:bg-gray-900/40" />
+            <div key={i} className="h-8 animate-pulse rounded-ui bg-ui-raise" />
           ))}
         </div>
       ) : isError ? (
-        <div className="text-sm text-red-500">Couldn’t load the PR list.</div>
+        <div className="text-body text-ui-danger">Couldn’t load the PR list.</div>
       ) : rows.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-400 dark:border-gray-700">
+        <div className="rounded-ui p-6 text-center text-body text-ui-faint bg-ui-surface">
           {!showMerged && mergedCount > 0 ? (
             `No open bot-only PRs — ${mergedCount} merged in this window. Tick “Show merged” to see them.`
           ) : (
@@ -363,10 +349,10 @@ export function BotOnlyPrsDetail(): JSX.Element {
           )}
         </div>
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[760px] border-collapse text-sm">
+        <div className={TABLE_BOX_STICKY_FIRST}>
+          <table className="w-full min-w-[760px] border-collapse text-body">
             <thead>
-              <tr className="text-left text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+              <tr className="text-left text-meta font-semibold text-ui-faint">
                 <SortHeader col="pr" label="Pull request" sort={sort} onSort={onSort} />
                 {showRepoCol && <SortHeader col="repo" label="Repo" sort={sort} onSort={onSort} />}
                 <SortHeader col="bot" label="Bot" sort={sort} onSort={onSort} />

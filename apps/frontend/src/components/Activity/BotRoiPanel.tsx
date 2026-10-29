@@ -40,7 +40,8 @@ import { RARELY_USED_MAX_PCT, RARELY_USED_MIN_THREADS, stopPayingLine } from '..
 import { formatAvg, volumeByKey } from '../../lib/botVolume.js';
 import { useBotVolume } from '../../hooks/useBotVolume.js';
 import { useBotColors } from '../../hooks/useBotColors.js';
-import { ArrowIcon, BotIcon, ResolveIcon } from '../Icons.js';
+import { ArrowIcon, BotIcon, ResolveIcon, WarningIcon } from '../Icons.js';
+import { Callout, Segmented, STICKY_COL, TABLE, TABLE_SCROLL, TR_HOVER } from './reportChrome.js';
 import { InfoButton } from '../InfoModal.js';
 import { SeverityBar } from '../MlSeverityBadge.js';
 import { LineChart } from '../charts/LineChart.js';
@@ -83,14 +84,12 @@ const WINDOWS: { key: BotWindowKind; label: string }[] = [
 const VERDICT_META: Record<BotVerdict, { label: string; className: string; title: string }> = {
   keep: {
     label: 'Keep',
-    className:
-      'bg-green-500/10 text-green-700 dark:text-green-300 border border-green-500/30',
+    className: 'text-ui-success',
     title: 'Healthy signal-to-noise — worth keeping on.',
   },
   tune: {
     label: 'Tune',
-    className:
-      'bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/30',
+    className: 'text-ui-warn',
     // Two routes reach this chip and the copy has to cover both: a lot of threads going
     // unaddressed, OR a bot whose scored findings are overwhelmingly nits (the same gates as the
     // nit tuning suggestion, so the reason is spelled out in the list below the table).
@@ -99,7 +98,7 @@ const VERDICT_META: Record<BotVerdict, { label: string; className: string; title
   },
   noisy: {
     label: 'Rarely used',
-    className: 'bg-red-500/10 text-red-700 dark:text-red-300 border border-red-500/30',
+    className: 'text-ui-danger',
     title:
       'High volume, few comments used, and many threads left unanswered past your normal response window — probably not paying for itself.',
   },
@@ -249,7 +248,7 @@ function EffectivenessChart({ vendors }: { vendors: BotVendorAnalytics[] }): JSX
         {(['keep', 'tune', 'noisy'] as BotVerdict[]).map((v) => (
           <span
             key={v}
-            className="flex items-center gap-1 text-[11px] capitalize text-gray-500 dark:text-gray-400"
+            className="flex items-center gap-1 text-meta capitalize text-ui-mute"
           >
             <span
               className="inline-block h-2 w-2 rounded-[2px]"
@@ -276,8 +275,9 @@ export function TuningSuggestions({
 }): JSX.Element | null {
   if (suggestions.length === 0) return null;
   return (
-    <div className="rounded-lg border border-amber-300/50 bg-amber-50/50 p-3 dark:border-amber-500/30 dark:bg-amber-950/20">
-      <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300">
+    <div className="rounded-ui bg-ui-surface px-3 py-2.5">
+      <div className="mb-1.5 flex items-center gap-1.5 text-body font-medium text-ui-ink">
+        <WarningIcon className="text-ui-warn" />
         Tuning suggestions
       </div>
       <ul className="space-y-1.5">
@@ -286,16 +286,16 @@ export function TuningSuggestions({
           return (
             <li
               key={`${s.vendorKind}:${s.pathGlob ?? '*'}:${s.severity ?? '*'}:${i}`}
-              className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px]"
+              className="flex flex-wrap items-center gap-x-2 gap-y-1 text-meta"
             >
               <span
-                className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-medium"
+                className="inline-flex items-center gap-1 rounded-ui px-1.5 py-0.5 font-medium"
                 style={{ ...vendorInk(meta.color), background: `${meta.color}1a` }}
               >
                 <BotIcon size={11} />
                 {meta.label}
               </span>
-              <span className="text-gray-600 dark:text-gray-300">{s.rationale}</span>
+              <span className="text-ui-mute">{s.rationale}</span>
             </li>
           );
         })}
@@ -306,12 +306,12 @@ export function TuningSuggestions({
 
 // The totals-strip tile chrome, byte-identical to the plain card it replaces. Split out so the
 // five tiles can become drill-downs without any of them restating the class list.
-const TILE_CLASS = 'rounded border border-gray-200 px-2 py-1.5 dark:border-gray-800';
+const TILE_CLASS = 'rounded-ui px-2 py-1.5 bg-ui-surface';
 // The interactive affordance, and nothing else: a hover border + a focus ring. `text-left`
 // matters — a <button> centres its text, which would silently re-align every tile.
 const TILE_INTERACTIVE_CLASS =
-  'block w-full text-left transition hover:border-sky-300 focus:outline-none' +
-  ' focus-visible:ring-1 focus-visible:ring-sky-400 dark:hover:border-sky-700';
+  'block w-full text-left transition focus:outline-none' +
+  ' focus-visible:ring-1 focus-visible:ring-sky-400';
 
 // One tile: a plain <div> card, or a <button> when the parent supplied a handler — the
 // WorkspaceMetricsPanel `TileShell` rule (a tile becomes clickable only when someone is there to
@@ -399,7 +399,7 @@ function MlTotalsStrip({
   // The Findings tile carries its own chrome rather than going through `Tile` — see the ⚠ note at
   // its markup. `focus-within` stands in for the focus ring a single <button> would have had.
   const findingsTileClass = onOpen
-    ? `${TILE_CLASS} transition hover:border-sky-300 focus-within:border-sky-300 dark:hover:border-sky-700`
+    ? `${TILE_CLASS} transition`
     : TILE_CLASS;
   const coverage =
     ml.labelled + ml.pending > 0 ? ml.labelled / (ml.labelled + ml.pending) : 0;
@@ -413,9 +413,9 @@ function MlTotalsStrip({
   const topCategory = ml.byCategory[0];
 
   return (
-    <div className="rounded-lg border border-gray-200 p-3 dark:border-gray-800">
+    <div className="rounded-ui p-3 bg-ui-surface">
       <div className="mb-2 flex flex-wrap items-baseline gap-2">
-        <h3 className="text-sm font-semibold">What the bots are flagging</h3>
+        <h3 className="text-body font-semibold">What the bots are flagging</h3>
         <InfoButton title="What the bots are flagging">
           <p>
             Each bot comment is given a severity (nit, minor, major, critical) and up to eight
@@ -435,9 +435,9 @@ function MlTotalsStrip({
             GitHub no longer has it. They are left out of every figure here.
           </p>
         </InfoButton>
-        <span className="text-[11px] text-gray-500 dark:text-gray-400">model-scored</span>
+        <span className="text-meta text-ui-mute">model-scored</span>
         {ml.pending > 0 && (
-          <span className="ml-auto text-[11px] text-gray-400 tabular-nums">
+          <span className="ml-auto text-meta text-ui-faint tabular-nums">
             {ml.labelled.toLocaleString()} of {(ml.labelled + ml.pending).toLocaleString()} bot
             comments in this window scored ({Math.round(coverage * 100)}%), the rest still
             in progress
@@ -448,7 +448,7 @@ function MlTotalsStrip({
             the unscorable population is legacy by nature and sits outside rolling windows. */}
         {ml.unscorable > 0 && (
           <span
-            className={`text-[11px] text-gray-400 tabular-nums${ml.pending > 0 ? '' : ' ml-auto'}`}
+            className={`text-meta text-ui-faint tabular-nums${ml.pending > 0 ? '' : ' ml-auto'}`}
           >
             {ml.unscorable.toLocaleString()} older comment{ml.unscorable === 1 ? '' : 's'} can’t
             be scored
@@ -457,14 +457,14 @@ function MlTotalsStrip({
       </div>
 
       {ml.truncated && (
-        <div className="mb-2 rounded border border-gray-300 px-2 py-1 text-[11px] text-gray-500 dark:border-gray-700 dark:text-gray-400">
+        <div className="mb-2 rounded-ui px-2 py-1 text-meta text-ui-mute bg-ui-surface">
           This window has more labelled bot comments than one read covers — the numbers below
           cover the most recent {ml.labelled.toLocaleString()}.
         </div>
       )}
 
       {fallbackOnly && (
-        <div className="mb-2 rounded border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] text-amber-700 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-300">
+        <div className="mb-2 rounded-ui bg-ui-surface px-2 py-1 text-meta text-ui-ink">
           The scoring service is running a simple fallback, not the trained model, so these
           severities are much less reliable.
         </div>
@@ -488,15 +488,15 @@ function MlTotalsStrip({
               title="Show the findings behind this number"
               className="block w-full text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-sky-400"
             >
-              <div className="text-[11px] uppercase tracking-wide text-gray-400">Findings</div>
-              <div className="text-lg font-semibold tabular-nums">
+              <div className="text-meta text-ui-faint">Findings</div>
+              <div className="text-title font-semibold tabular-nums">
                 {ml.findings.toLocaleString()}
               </div>
             </button>
           ) : (
             <>
-              <div className="text-[11px] uppercase tracking-wide text-gray-400">Findings</div>
-              <div className="text-lg font-semibold tabular-nums">
+              <div className="text-meta text-ui-faint">Findings</div>
+              <div className="text-title font-semibold tabular-nums">
                 {ml.findings.toLocaleString()}
               </div>
             </>
@@ -506,12 +506,12 @@ function MlTotalsStrip({
               type="button"
               onClick={() => onOpen({ kind: 'summaries' })}
               title="Show the walkthroughs and summaries — a separate population, not counted as findings"
-              className="block w-full text-left text-[11px] text-gray-400 hover:text-gray-600 focus:outline-none focus-visible:ring-1 focus-visible:ring-sky-400 dark:hover:text-gray-200"
+              className="block w-full text-left text-meta text-ui-faint hover:text-ui-mute focus:outline-none focus-visible:ring-1 focus-visible:ring-sky-400"
             >
               + {ml.summaries.toLocaleString()} walkthrough/summary
             </button>
           ) : (
-            <div className="text-[11px] text-gray-400">
+            <div className="text-meta text-ui-faint">
               + {ml.summaries.toLocaleString()} walkthrough/summary
             </div>
           )}
@@ -520,14 +520,14 @@ function MlTotalsStrip({
           openLabel="Show the major and critical findings behind this share"
           onClick={open({ kind: 'severity', severities: ['major', 'critical'] })}
         >
-          <div className="text-[11px] uppercase tracking-wide text-gray-400">High severity</div>
+          <div className="text-meta text-ui-faint">High severity</div>
           <div
-            className="text-lg font-semibold tabular-nums"
+            className="text-title font-semibold tabular-nums"
             style={{ color: ML_SEVERITY_META.major.color }}
           >
             {Math.round(highShare * 100)}%
           </div>
-          <div className="text-[11px] text-gray-400">
+          <div className="text-meta text-ui-faint">
             {highFindings.toLocaleString()} major or critical
           </div>
         </Tile>
@@ -535,14 +535,14 @@ function MlTotalsStrip({
           openLabel="Show the findings scored as nits"
           onClick={open({ kind: 'severity', severities: ['nit'] })}
         >
-          <div className="text-[11px] uppercase tracking-wide text-gray-400">Nits</div>
+          <div className="text-meta text-ui-faint">Nits</div>
           <div
-            className="text-lg font-semibold tabular-nums"
+            className="text-title font-semibold tabular-nums"
             style={{ color: ML_SEVERITY_META.nit.color }}
           >
             {Math.round(nitShare * 100)}%
           </div>
-          <div className="text-[11px] text-gray-400">
+          <div className="text-meta text-ui-faint">
             {ml.bySeverity.nit.toLocaleString()} trivial or optional
           </div>
         </Tile>
@@ -554,11 +554,11 @@ function MlTotalsStrip({
             topCategory ? open({ kind: 'category', category: topCategory.category }) : undefined
           }
         >
-          <div className="text-[11px] uppercase tracking-wide text-gray-400">Top topic</div>
-          <div className="truncate text-lg font-semibold">
+          <div className="text-meta text-ui-faint">Top topic</div>
+          <div className="truncate text-title font-semibold">
             {topCategory ? (ML_CATEGORY_LABEL[topCategory.category] ?? topCategory.category) : '—'}
           </div>
-          <div className="text-[11px] text-gray-400">
+          <div className="text-meta text-ui-faint">
             {topCategory
               ? `${topCategory.count.toLocaleString()} findings`
               : 'no categorised findings yet'}
@@ -569,13 +569,13 @@ function MlTotalsStrip({
           openLabel="Show the line areas more than one bot flagged"
           onClick={open({ kind: 'overlap' })}
         >
-          <div className="text-[11px] uppercase tracking-wide text-gray-400">
+          <div className="text-meta text-ui-faint">
             Same-line overlap
           </div>
-          <div className="text-lg font-semibold tabular-nums">
+          <div className="text-title font-semibold tabular-nums">
             {overlapClusters.toLocaleString()}
           </div>
-          <div className="text-[11px] text-gray-400">
+          <div className="text-meta text-ui-faint">
             line area{overlapClusters === 1 ? '' : 's'} flagged by &gt;1 bot · window
           </div>
         </Tile>
@@ -583,7 +583,7 @@ function MlTotalsStrip({
 
       {/* Top-category chips (rehomed from the old per-bot table's column) + the severity legend,
           which doubles as the vocabulary key for the per-bot mix bars below. */}
-      <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-gray-400">
+      <div className="mt-2 flex flex-wrap items-center gap-2 text-meta text-ui-faint">
         {/* Chip 1 and the "Top topic" tile deliberately emit the IDENTICAL selector — they are
             the same `ml.byCategory[0]` object, so they open the same tab. That is correct, not a
             duplicate control: the tile names the topic, the chip sits in the ranked row. */}
@@ -594,14 +594,14 @@ function MlTotalsStrip({
               type="button"
               onClick={() => onOpen({ kind: 'category', category: c.category })}
               title={`Show the findings categorised as ${ML_CATEGORY_LABEL[c.category] ?? c.category}`}
-              className="rounded bg-gray-100 px-1 py-0.5 font-medium text-gray-500 hover:bg-gray-200 focus:outline-none focus-visible:ring-1 focus-visible:ring-sky-400 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-gray-700"
+              className="rounded-ui bg-ui-raise px-1 py-0.5 font-medium text-ui-mute hover:bg-ui-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-sky-400"
             >
               {ML_CATEGORY_LABEL[c.category] ?? c.category} {c.count}
             </button>
           ) : (
             <span
               key={c.category}
-              className="rounded bg-gray-100 px-1 py-0.5 font-medium text-gray-500 dark:bg-gray-800 dark:text-gray-400"
+              className="rounded-ui bg-ui-raise px-1 py-0.5 font-medium text-ui-mute"
             >
               {ML_CATEGORY_LABEL[c.category] ?? c.category} {c.count}
             </span>
@@ -657,17 +657,17 @@ function QualityCheckSection({
 }): JSX.Element | null {
   if (rows.length === 0) return null;
   return (
-    <details className="rounded-lg border border-gray-200 dark:border-gray-800">
-      <summary className="cursor-pointer select-none px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+    <details className="rounded-ui bg-ui-surface">
+      <summary className="cursor-pointer select-none rounded-ui px-3 py-2 text-body text-ui-mute hover:text-ui-ink touch:py-3">
         Quality checks ({rows.length}){' '}
-        <span className="font-normal normal-case tracking-normal text-gray-400">
+        <span className="font-normal normal-case tracking-normal text-ui-faint">
           — excluded from ROI
         </span>
       </summary>
-      <div className="border-t border-gray-200 px-3 py-2 dark:border-gray-800">
+      <div className="px-3 py-2">
         {/* The InfoButton sits in the BODY, not the <summary>: a button inside a summary toggles
             the disclosure in some browsers as well as opening the modal. */}
-        <div className="mb-2 flex items-center gap-1.5 text-[11px] text-gray-500 dark:text-gray-400">
+        <div className="mb-2 flex items-center gap-1.5 text-meta text-ui-mute">
           <span>
             Belongs in the ROI table? Change its role in{' '}
             <span className="font-medium">Settings</span>.
@@ -684,9 +684,9 @@ function QualityCheckSection({
           </InfoButton>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[380px] border-collapse text-[11px]">
+          <table className="w-full min-w-[380px] border-collapse text-meta">
             <thead>
-              <tr className="text-left text-gray-500 dark:text-gray-400">
+              <tr className="text-left text-ui-mute">
                 <th className="py-1 pr-3 font-medium">Check</th>
                 <th className="py-1 pr-3 text-right font-medium">Threads</th>
                 <th className="py-1 pr-3 text-right font-medium">Comments</th>
@@ -695,18 +695,18 @@ function QualityCheckSection({
             </thead>
             <tbody>
               {rows.map((v) => (
-                <tr key={v.key} className="border-t border-gray-100 dark:border-gray-800/60">
+                <tr key={v.key} className="">
                   <td className="py-1 pr-3">
                     <span className="inline-flex items-center gap-1.5">
                       <span
                         className="inline-block h-2 w-2 shrink-0 rounded-full"
                         style={{ background: botColor({ login: v.login, kind: v.kind }) }}
                       />
-                      <span className="text-gray-700 dark:text-gray-200">{v.label}</span>
+                      <span className="text-ui-ink">{v.label}</span>
                       {/* A dormant gate is the interesting case here: it usually means the
                           integration broke, not that the bot got quieter. */}
                       {v.dormant && (
-                        <span className="rounded bg-gray-500/10 px-1 py-px text-[11px] text-gray-500 dark:text-gray-400">
+                        <span className="rounded-ui bg-gray-500/10 px-1 py-px text-meta text-ui-mute">
                           dormant
                         </span>
                       )}
@@ -714,7 +714,7 @@ function QualityCheckSection({
                   </td>
                   <td className="py-1 pr-3 text-right tabular-nums">{v.threads}</td>
                   <td className="py-1 pr-3 text-right tabular-nums">{v.comments}</td>
-                  <td className="py-1 text-right text-gray-500 dark:text-gray-400">
+                  <td className="py-1 text-right text-ui-mute">
                     {v.lastActiveAt != null ? relativeTime(v.lastActiveAt) : '—'}
                   </td>
                 </tr>
@@ -765,7 +765,7 @@ function VolumeCell({
   if (loading) {
     return (
       <span
-        className="inline-block h-3 w-8 animate-pulse rounded bg-gray-100 align-middle dark:bg-gray-800"
+        className="inline-block h-3 w-8 animate-pulse rounded-ui bg-ui-raise align-middle"
         title="Counting the bot comments on this window’s merged PRs…"
       />
     );
@@ -773,7 +773,7 @@ function VolumeCell({
   if (!bot) {
     return (
       <span
-        className="text-gray-500 dark:text-gray-400"
+        className="text-ui-mute"
         title="This bot commented on nothing that merged inside the window. (The thread columns can still be non-zero — they count threads OPENED in the window, on PRs that may not have merged yet.)"
       >
         —
@@ -794,7 +794,7 @@ function VolumeCell({
       onClick={() => onOpen({ userId: bot.authorUserId, label: bot.label })}
       // No aria-label — it would displace the number as the accessible name (the `Tile` rule).
       title={`${detail} Click for the PRs behind it.`}
-      className="rounded px-1 underline decoration-dotted underline-offset-2 hover:bg-gray-100 hover:text-gray-900 dark:hover:bg-gray-800 dark:hover:text-gray-100"
+      className="rounded-ui px-1 underline decoration-dotted underline-offset-2 hover:bg-ui-hover hover:text-ui-ink"
     >
       {label}
     </button>
@@ -882,7 +882,7 @@ function InflationCell({
     // Omitted-and-named, never a zero — no badge is silence, not agreement.
     return (
       <span
-        className="text-gray-500 dark:text-gray-400"
+        className="text-ui-mute"
         title="badges nothing — no badge is silence, not agreement"
       >
         —
@@ -909,7 +909,7 @@ function InflationCell({
     const color = direction === 'over' ? PALETTE.amber : PALETTE.violet;
     if (!canOpen) {
       return (
-        <span title={title} style={n > 0 ? { color } : undefined} className={n > 0 ? '' : 'text-gray-400'}>
+        <span title={title} style={n > 0 ? { color } : undefined} className={n > 0 ? '' : 'text-ui-faint'}>
           {label}
         </span>
       );
@@ -920,7 +920,7 @@ function InflationCell({
         onClick={() => onOpen(direction, { userIds: [userId], label: vendor.label })}
         title={title}
         style={n > 0 ? { color } : undefined}
-        className={`rounded px-0.5 underline decoration-dotted underline-offset-2 hover:bg-gray-100 dark:hover:bg-gray-800 ${n > 0 ? '' : 'text-gray-400'}`}
+        className={`rounded-ui px-0.5 underline decoration-dotted underline-offset-2 hover:bg-ui-hover ${n > 0 ? '' : 'text-ui-faint'}`}
       >
         {label}
       </button>
@@ -1002,13 +1002,14 @@ function VendorTable({
   const volumeByBot = useMemo(() => volumeByKey(volume?.bots), [volume?.bots]);
   const mergedPrs = volume?.totals.prs ?? 0;
   return (
-    <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-800">
+    // Its own scroll box with the Bot column sticky, so the wide table never widens the page.
+    <div className={TABLE_SCROLL} data-testid="bot-roi-table">
       <table
-        className={`w-full border-collapse text-[11px] ${showMl ? 'min-w-[1560px]' : 'min-w-[1080px]'}`}
+        className={`${TABLE} text-meta ${showMl ? 'min-w-[1560px]' : 'min-w-[1080px]'}`}
       >
         <thead>
-          <tr className={`text-left text-gray-500 dark:text-gray-400${showMl ? '' : ' border-b border-gray-200 dark:border-gray-800'}`}>
-            <th rowSpan={headSpan} className="px-2 py-1.5 font-medium">Bot</th>
+          <tr className={`text-left text-ui-mute${showMl ? '' : ' '}`}>
+            <th rowSpan={headSpan} className={`${STICKY_COL} px-2 py-1.5 font-medium`}>Bot</th>
             <th rowSpan={headSpan} className="px-2 py-1.5 text-right font-medium">Threads</th>
             {/* ⚠ THIS COLUMN AND THE ONE BESIDE IT ARE NOT A NUMERATOR AND A RATIO, and their
                 adjacency invites exactly that reading. They disagree on BOTH axes:
@@ -1057,7 +1058,7 @@ function VendorTable({
               className="px-2 py-1.5 text-right font-medium"
               title={`Not-addressed threads older than the ${Math.round(
                 overdueGraceMs / 3_600_000,
-              )}h grace window — the genuinely-ignored ones that drive the 'Rarely used' verdict`}
+              )}h grace window — the genuinely-ignored ones that drive 'Rarely used' verdict`}
             >
               Unanswered after {Math.round(overdueGraceMs / 3_600_000)}h
             </th>
@@ -1113,7 +1114,7 @@ function VendorTable({
                     exactly that subtraction. */}
                 <th
                   colSpan={4}
-                  className="border-l border-gray-200 px-2 pb-0 pt-1.5 text-center font-medium dark:border-gray-800"
+                  className="px-2 pb-0 pt-1.5 text-center font-medium"
                   title="This bot's not-addressed threads, split by the predicted severity of the finding that opened each one. Model-scored and advisory: threads whose opening comment was never scored aren't counted, so these need not add up to the Not addressed column."
                 >
                   Not addressed by severity
@@ -1122,7 +1123,7 @@ function VendorTable({
                     folded into the row. `rowSpan={headSpan}` like every other non-group ML cell. */}
                 <th
                   rowSpan={headSpan}
-                  className="border-l border-gray-200 px-2 py-1.5 text-right font-medium dark:border-gray-800"
+                  className="px-2 py-1.5 text-right font-medium"
                   title="How often this bot's OWN severity badge contradicted our label, over its badged findings in the window: the up-arrow count = the bot graded a finding worse than we did (inflation), the down-arrow count = we graded it worse than the bot (what a nit-filter on its own grades would drop). Counts, never shares. A bot that badges nothing shows a dash — no badge is silence, not agreement. Click a count for the comments behind it."
                 >
                   Inflation
@@ -1163,11 +1164,11 @@ function VendorTable({
             )}
           </tr>
           {showMl && (
-            <tr className="border-b border-gray-200 text-left text-gray-500 dark:border-gray-800 dark:text-gray-400">
+            <tr className="text-left text-ui-mute">
               {SEVERITY_COLUMNS.map((s, i) => (
                 <th
                   key={s}
-                  className={`px-1.5 pb-1.5 text-right text-[11px] font-medium${i === 0 ? ' border-l border-gray-200 dark:border-gray-800' : ''}`}
+                  className={`px-1.5 pb-1.5 text-right text-meta font-medium${i === 0 ? ' ' : ''}`}
                   style={{ color: ML_SEVERITY_META[s].color }}
                   title={`Not-addressed threads whose opening finding scored ${ML_SEVERITY_META[s].label.toLowerCase()}`}
                 >
@@ -1184,29 +1185,29 @@ function VendorTable({
             // A DORMANT row (no window activity — the row survives on its 12-week trend):
             // zeros here would read as "active but useless", so dash the window metrics and
             // explain via a chip + last-active instead.
-            const dash = <span className="text-gray-500 dark:text-gray-400">—</span>;
+            const dash = <span className="text-ui-mute">—</span>;
             return (
               <tr
                 key={v.key}
-                className="border-b border-gray-100 last:border-0 dark:border-gray-800/60"
+                className={`group ${TR_HOVER}`}
               >
-                <td className="px-2 py-1.5">
+                <td className={`${STICKY_COL} whitespace-nowrap px-2 py-1.5 group-hover:bg-ui-hover`}>
                   <button
                     type="button"
                     onClick={() => onOpenVendor(v.key)}
                     title="Open the bot drill-down — its comments (default) and the PRs it touched"
-                    className="inline-flex cursor-pointer items-center gap-1 rounded px-1.5 py-0.5 font-medium hover:underline"
+                    className="inline-flex cursor-pointer items-center gap-1 rounded-ui px-1.5 py-0.5 font-medium hover:underline"
                     style={{ ...vendorInk(color), background: `${color}1a` }}
                   >
                     <BotIcon size={11} />
                     {v.label}
                   </button>
                   {v.reviewers > 1 && (
-                    <span className="ml-1 text-gray-400">×{v.reviewers}</span>
+                    <span className="ml-1 text-ui-faint">×{v.reviewers}</span>
                   )}
                   {v.dormant && (
                     <span
-                      className="ml-1.5 inline-block rounded border border-gray-300 px-1 py-px text-[11px] text-gray-500 dark:border-gray-700 dark:text-gray-400"
+                      className="ml-1.5 inline-block rounded-ui px-1 py-px text-meta text-ui-mute bg-ui-surface"
                       title="No activity in the selected window — the trend below still shows its earlier threads. Widen the window to see them counted."
                     >
                       dormant
@@ -1217,7 +1218,7 @@ function VendorTable({
                 <td className="px-2 py-1.5 text-right tabular-nums">
                   {v.dormant ? dash : v.threads}
                 </td>
-                <td className="px-2 py-1.5 text-right tabular-nums text-gray-500 dark:text-gray-400">
+                <td className="px-2 py-1.5 text-right tabular-nums text-ui-mute">
                   {v.dormant ? dash : v.comments}
                 </td>
                 {/* Comments per merged PR. NOT dashed on `dormant`: dormancy is judged on the
@@ -1240,8 +1241,8 @@ function VendorTable({
                     dash
                   ) : (
                     <>
-                      <span className="text-gray-700 dark:text-gray-200">{v.actedOn}</span>
-                      <span className="ml-1 text-gray-400">{pct(v.actedOnPct)}</span>
+                      <span className="text-ui-ink">{v.actedOn}</span>
+                      <span className="ml-1 text-ui-faint">{pct(v.actedOnPct)}</span>
                     </>
                   )}
                 </td>
@@ -1251,7 +1252,7 @@ function VendorTable({
                   ) : (
                     <span
                       className={
-                        v.untouched > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-gray-400'
+                        v.untouched > 0 ? 'text-ui-ink' : 'text-ui-faint'
                       }
                     >
                       {v.untouched}
@@ -1264,7 +1265,7 @@ function VendorTable({
                   ) : (
                     <span
                       className={
-                        v.overdueUntouched > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-400'
+                        v.overdueUntouched > 0 ? 'text-ui-ink' : 'text-ui-faint'
                       }
                       title={
                         v.untouched > 0
@@ -1293,28 +1294,26 @@ function VendorTable({
                   ) : (
                     <span
                       className={
-                        v.mergedPastPrs > 0
-                          ? 'text-amber-600 dark:text-amber-400'
-                          : 'text-gray-400'
+                        v.mergedPastPrs > 0 ? 'text-ui-ink' : 'text-ui-faint'
                       }
                     >
                       {v.mergedPastPrs}
                     </span>
                   )}
                 </td>
-                <td className="px-2 py-1.5 text-right tabular-nums text-gray-500 dark:text-gray-400">
+                <td className="px-2 py-1.5 text-right tabular-nums text-ui-mute">
                   {v.dormant ? dash : dur(v.medianAddressedMs)}
                 </td>
-                <td className="px-2 py-1.5 text-right tabular-nums text-gray-500 dark:text-gray-400">
+                <td className="px-2 py-1.5 text-right tabular-nums text-ui-mute">
                   {v.oldestUntouchedDays != null ? `${v.oldestUntouchedDays}d` : '—'}
                 </td>
-                <td className="px-2 py-1.5 text-right tabular-nums text-gray-500 dark:text-gray-400">
+                <td className="px-2 py-1.5 text-right tabular-nums text-ui-mute">
                   {v.dormant ? dash : pct(v.noiseRatioPct)}
                 </td>
                 {/* Same-line overlap — advisory. `?? null` guards a stale cached response that
                     predates the field (the column then reads as blank, never NaN). */}
                 <td
-                  className="px-2 py-1.5 text-right tabular-nums text-gray-500 dark:text-gray-400"
+                  className="px-2 py-1.5 text-right tabular-nums text-ui-mute"
                   title={
                     v.topOverlapPartner
                       ? `${v.overlapThreads} thread${v.overlapThreads === 1 ? '' : 's'} land on lines ${v.topOverlapPartner.label} also flagged (${v.topOverlapPartner.clusters} shared spot${v.topOverlapPartner.clusters === 1 ? '' : 's'})`
@@ -1343,14 +1342,12 @@ function VendorTable({
                       )}
                     </td>
                     <td
-                      className="px-2 py-1.5 text-right font-semibold tabular-nums"
-                      style={v.mlHighPct != null ? { color: ML_SEVERITY_META.major.color } : undefined}
+                      className="px-2 py-1.5 text-right font-medium tabular-nums text-ui-ink"
                     >
                       {v.mlHighPct != null ? `${v.mlHighPct}%` : dash}
                     </td>
                     <td
-                      className="px-2 py-1.5 text-right tabular-nums"
-                      style={v.mlNitPct != null ? { color: ML_SEVERITY_META.nit.color } : undefined}
+                      className="px-2 py-1.5 text-right tabular-nums text-ui-mute"
                     >
                       {v.mlNitPct != null ? `${v.mlNitPct}%` : dash}
                     </td>
@@ -1364,7 +1361,7 @@ function VendorTable({
                       return (
                         <td
                           key={s}
-                          className={`px-1.5 py-1.5 text-right tabular-nums${i === 0 ? ' border-l border-gray-200 dark:border-gray-800' : ''}`}
+                          className={`px-1.5 py-1.5 text-right tabular-nums${i === 0 ? ' ' : ''}`}
                           style={n > 0 ? { color: ML_SEVERITY_META[s].color } : undefined}
                           title={
                             n > 0
@@ -1379,7 +1376,7 @@ function VendorTable({
                     {/* Inflation — counts + sparkline. NOT dashed on dormant: like the ML
                         cells above, its window population is labels, not threads, and the cell
                         carries its own dash rule (badges nothing ⇒ dash, never zero). */}
-                    <td className="border-l border-gray-200 px-2 py-1.5 text-right dark:border-gray-800">
+                    <td className="px-2 py-1.5 text-right">
                       <InflationCell vendor={v} onOpen={onOpenInflation} />
                     </td>
                   </>
@@ -1393,7 +1390,7 @@ function VendorTable({
                     another one. */}
                 {showCost && (
                 <td
-                  className="px-2 py-1.5 text-right tabular-nums text-gray-500 dark:text-gray-400"
+                  className="px-2 py-1.5 text-right tabular-nums text-ui-mute"
                   // Money is printed through the same formatter as the cost box in Bots →
                   // Settings, so "45.50" there can't read back as "45.5" here.
                   title={
@@ -1429,7 +1426,7 @@ function VendorTable({
                     dash
                   ) : (
                     <span
-                      className={`inline-block rounded px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide ${verdict.className}`}
+                      className={`inline-block rounded-ui px-1.5 py-0.5 text-meta font-semibold ${verdict.className}`}
                       title={verdict.title}
                     >
                       {verdict.label}
@@ -1456,7 +1453,7 @@ function VendorTable({
                             })
                           }
                           title="Open this bot's depth tab — latency, cadence, coverage and consistency, plus its severity-over-time and category mix"
-                          className="rounded border border-sky-400 px-1.5 py-0.5 text-[11px] font-medium text-sky-700 hover:bg-sky-50 dark:border-sky-600/70 dark:text-sky-300 dark:hover:bg-sky-950/40"
+                          className="whitespace-nowrap rounded-ui px-1.5 py-0.5 text-meta font-medium text-ui-accent hover:bg-ui-hover touch:py-2"
                         >
                           Depth →
                         </button>
@@ -1496,23 +1493,18 @@ export function ResolveBacklogBanner({
   if (totalThreads === 0) return null;
 
   return (
-    <button
-      type="button"
+    <Callout
+      tone="info"
+      icon={<ResolveIcon />}
       onClick={() => openBotThreadsDetail(repoIds?.[0] ?? null)}
-      data-testid="resolve-backlog-caption"
+      testId="resolve-backlog-caption"
       title="Review & resolve the likely-addressed bot threads"
-      className="flex w-full items-start gap-1.5 rounded-lg border border-sky-300 bg-sky-50 px-3 py-2 text-left text-[11px] text-sky-700 hover:bg-sky-100 dark:border-sky-800 dark:bg-sky-950/30 dark:text-sky-300 dark:hover:bg-sky-900/40"
+      action="Show list →"
     >
-      <span className="flex-1">
-        <ResolveIcon className="mr-1 inline-block align-[-0.1em]" />
-        <span className="font-semibold tabular-nums">{totalThreads}</span> likely-addressed bot
-        thread{totalThreads === 1 ? '' : 's'} look resolved by later commits — review before
-        resolving on GitHub.
-      </span>
-      <span className="shrink-0 self-center rounded border border-sky-400 px-1.5 py-0.5 text-[11px] font-medium text-sky-700 dark:border-sky-600/70 dark:text-sky-300">
-        Show list →
-      </span>
-    </button>
+      <span className="font-semibold tabular-nums">{totalThreads}</span> likely-addressed bot
+      thread{totalThreads === 1 ? '' : 's'} look resolved by later commits — review before
+      resolving on GitHub.
+    </Callout>
   );
 }
 
@@ -1662,25 +1654,17 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
     // The window picker writes the SHARED `botAnalyticsWindow` field that BotsView's caution and
     // the hoisted tuning suggestions also read; neither makes a window CLAIM in its copy.
     <div className="flex flex-wrap items-center gap-2">
-      <span className="inline-flex items-center gap-1 text-[11px] text-gray-500 dark:text-gray-400">
+      <span className="inline-flex items-center gap-1 text-meta text-ui-mute">
         How this is measured
         <InfoButton title="How Bot ROI is measured">{roiInfo}</InfoButton>
       </span>
-      <div className="ml-auto inline-flex overflow-hidden rounded border border-gray-300 dark:border-gray-700">
-        {WINDOWS.map((wOpt) => (
-          <button
-            key={wOpt.key}
-            type="button"
-            onClick={() => setWindow(wOpt.key)}
-            className={`px-2 py-0.5 text-[11px] font-medium ${
-              window === wOpt.key
-                ? 'bg-ai-signal/15 text-ai-signal'
-                : 'text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800'
-            }`}
-          >
-            {wOpt.label}
-          </button>
-        ))}
+      <div className="ml-auto">
+        <Segmented
+          label="Window"
+          value={window}
+          onChange={setWindow}
+          options={WINDOWS.map((w) => ({ value: w.key, label: w.label }))}
+        />
       </div>
     </div>
   );
@@ -1688,10 +1672,10 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
   let body: JSX.Element;
   if (isLoading) {
     body = (
-      <div className="h-28 animate-pulse rounded-lg border border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-900/40" />
+      <div className="h-28 animate-pulse rounded-ui bg-ui-surface" />
     );
   } else if (isError) {
-    body = <div className="text-sm text-red-500">Couldn’t load bot analytics.</div>;
+    body = <div className="text-body text-ui-danger">Couldn’t load bot analytics.</div>;
   } else if (!data || vendors.length === 0) {
     // LANDMINE: "no vendors" is NOT the same as "no bots". If every automated reviewer in scope
     // is roled `quality_check`, `vendors` is empty while `qualityChecks` is not — claiming "no
@@ -1699,9 +1683,9 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
     // quality-check section renders in the empty branch too, and the wording softens to name it.
     body = (
       <div className="space-y-3">
-        <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-400 dark:border-gray-700">
+        <div className="rounded-ui p-6 text-center text-body text-ui-faint bg-ui-surface">
           No review-bot activity in this window.
-          <div className="mt-1 text-[12px]">
+          <div className="mt-1 text-meta">
             Try a wider window above.
             {qualityChecks.length > 0 && ' Quality checks are listed below.'}
           </div>
@@ -1734,14 +1718,14 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
             onOpen={(s) => openBotFlaggingDetail(s, repoId ?? null)}
           />
         )}
-        <div className="text-[11px] text-gray-500 dark:text-gray-400">
-          <span className="font-semibold tabular-nums text-gray-700 dark:text-gray-200">
+        <div className="text-meta text-ui-mute">
+          <span className="font-semibold tabular-nums text-ui-ink">
             {t.threads}
           </span>{' '}
           bot thread{t.threads === 1 ? '' : 's'} · {t.comments} comment
           {t.comments === 1 ? '' : 's'} ·{' '}
           <span className="tabular-nums">{pct(t.actedOnPct)}</span> used ·{' '}
-          <span className="tabular-nums text-amber-600 dark:text-amber-400">
+          <span className="tabular-nums text-ui-warn">
             {t.untouched}
           </span>{' '}
           not addressed
@@ -1754,9 +1738,9 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
             type="button"
             onClick={() => openBotOnlyDetail(repoId ?? null)}
             title="Show the OPEN PRs only a bot reviewed — no human review or comment since they opened"
-            className="rounded underline decoration-dotted underline-offset-2 hover:text-gray-700 dark:hover:text-gray-200"
+            className="rounded-ui underline decoration-dotted underline-offset-2 hover:text-ui-ink"
           >
-            <b className="tabular-nums text-gray-700 dark:text-gray-200">{t.botOnlyPrs}</b>{' '}
+            <b className="tabular-nums text-ui-ink">{t.botOnlyPrs}</b>{' '}
             bot-only open PR{t.botOnlyPrs === 1 ? '' : 's'}
           </button>
         </div>
@@ -1812,7 +1796,7 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
           return (
             <div className="space-y-1" data-testid="bot-stop-paying">
               {lines.map((l) => (
-                <p key={l.key} className="text-[12px] text-gray-700 dark:text-gray-200">
+                <p key={l.key} className="text-meta text-ui-ink">
                   {l.text}
                 </p>
               ))}
@@ -1863,7 +1847,7 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
             sentence because there the instruction is true and the figure it produces is exact.
             The per-repo mount says instead where the money does live, so the absence reads as a
             grain decision rather than as a missing column. */}
-        <div className="text-[11px] text-gray-500 dark:text-gray-400">
+        <div className="text-meta text-ui-mute">
           {showCost ? (
             <>
               Set a bot’s monthly price in <span className="font-medium">Bots Monitoring → Classification</span> to

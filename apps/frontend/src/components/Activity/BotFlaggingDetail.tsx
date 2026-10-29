@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Select } from '../ui/index.js';
 import type {
   BotFlaggingSelector,
   BotWindowKind,
@@ -103,7 +104,7 @@ function Skeleton(): JSX.Element {
   return (
     <div className="space-y-2">
       {[0, 1, 2, 3].map((i) => (
-        <div key={i} className="h-16 animate-pulse rounded bg-gray-100 dark:bg-gray-900/40" />
+        <div key={i} className="h-16 animate-pulse rounded-ui bg-ui-raise" />
       ))}
     </div>
   );
@@ -201,55 +202,43 @@ function PopulationPicker({
 
   // Same chrome as the other Activity drill-downs' selects (BotThreadsDetail / BotOnlyPrsDetail),
   // sized to sit level with the window picker beside it.
-  const cls =
-    'rounded border border-gray-300 bg-white px-1.5 py-0.5 text-[11px] dark:border-gray-700 dark:bg-gray-900';
 
   if (family === 'severity') {
     // Non-null by `isSeverityFamily` — that predicate IS `severityPickOf(s) !== null`.
     const current = severityPickOf(selector);
     return (
-      <select
-        value={current ?? ''}
-        onChange={(e) => {
-          // Read the pick back OUT of the option list rather than casting the raw string: an
-          // unrecognised value is then a no-op instead of a selector shape the server can't answer.
-          const pick = SEVERITY_PICKS.find((p: SeverityPick) => p === e.target.value);
-          if (pick) onPick(severityPickToSelector(pick));
-        }}
-        className={cls}
-        // A <select>'s accessible name is not its selected option, and there is no visible label in
-        // this row — so it needs one here. (aria-label on a plain form control, NOT on a button
-        // whose visible text carries the numbers; that is the other rule, elsewhere.)
-        aria-label="Severity"
-        title="Show a different severity over the same window and scope. The counts are the strip’s own numbers."
-      >
-        {options.severity.map((o) => (
-          <option key={o.value} value={o.value}>
-            {o.label}
-          </option>
-        ))}
-      </select>
+      // There is no visible label in this row, so the control carries its own name.
+      <span title="Show a different severity over the same window and scope. The counts are the strip’s own numbers.">
+        <Select
+          size="sm"
+          label="Severity"
+          value={current ?? null}
+          onChange={(v) => {
+            // Read the pick back OUT of the option list rather than casting the raw string: an
+            // unrecognised value is then a no-op instead of a selector shape the server can't answer.
+            const pick = SEVERITY_PICKS.find((p: SeverityPick) => p === v);
+            if (pick) onPick(severityPickToSelector(pick));
+          }}
+          options={options.severity.map((o) => ({ value: String(o.value), label: o.label }))}
+        />
+      </span>
     );
   }
 
   return (
-    <select
-      // Narrowed by `isCategoryFamily`, which is the only way to reach this branch.
-      value={selector.kind === 'category' ? selector.category : ''}
-      onChange={(e) => {
-        const category = TOPIC_PICKS.find((c: MlCategory) => c === e.target.value);
-        if (category) onPick({ kind: 'category', category });
-      }}
-      className={cls}
-      aria-label="Topic"
-      title="Show a different topic over the same window and scope. Categories are multi-label, so these counts overlap."
-    >
-      {options.topic.map((o) => (
-        <option key={o.value} value={o.value}>
-          {o.label}
-        </option>
-      ))}
-    </select>
+    <span title="Show a different topic over the same window and scope. Categories are multi-label, so these counts overlap.">
+      <Select
+        size="sm"
+        label="Topic"
+        // Narrowed by `isCategoryFamily`, which is the only way to reach this branch.
+        value={selector.kind === 'category' ? selector.category : null}
+        onChange={(v) => {
+          const category = TOPIC_PICKS.find((c: MlCategory) => c === v);
+          if (category) onPick({ kind: 'category', category });
+        }}
+        options={options.topic.map((o) => ({ value: String(o.value), label: o.label }))}
+      />
+    </span>
   );
 }
 
@@ -504,7 +493,7 @@ export function BotFlaggingDetail(): JSX.Element {
       <div className="flex flex-wrap items-baseline gap-2">
         {/* The BARE tile name — `selectorLabel` returns it unprefixed and PinnedTabsBar adds its
             own "Flagged ·", so the tab chip and this heading always name the same population. */}
-        <h2 className="text-base font-semibold text-gray-800 dark:text-gray-100">{title}</h2>
+        <h2 className="text-title font-semibold text-ui-ink">{title}</h2>
         {/* ⚠ On the overlap selector the grid folds the CLUSTERS' member comments, not the
             clusters — a cluster is not an ML row. Its total is unrelated to the list's count and
             must never be read as its denominator; the modal says so. */}
@@ -517,10 +506,10 @@ export function BotFlaggingDetail(): JSX.Element {
             </p>
           </InfoButton>
         )}
-        <span className="text-[11px] text-gray-400">What the bots are flagging</span>
+        <span className="text-meta text-ui-faint">What the bots are flagging</span>
         {repoName && (
           <span
-            className="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[11px] text-gray-500 dark:bg-gray-800 dark:text-gray-400"
+            className="rounded-ui bg-ui-raise px-1.5 py-0.5 font-mono text-meta text-ui-mute"
             title="This drill-down was opened from a single repo’s Bots tab, so it measures that repo — the same narrowing the tile you clicked was computed at."
           >
             {repoName}
@@ -542,7 +531,7 @@ export function BotFlaggingDetail(): JSX.Element {
             onPick={onPickSelector}
           />
           {/* Window picker — writes the SHARED store field (see WINDOWS above). */}
-          <div className="inline-flex overflow-hidden rounded border border-gray-300 dark:border-gray-700">
+          <div className="inline-flex overflow-hidden rounded-ui">
             {WINDOWS.map((wOpt) => (
               <button
                 key={wOpt.key}
@@ -559,10 +548,10 @@ export function BotFlaggingDetail(): JSX.Element {
                   setDisagree(seedDisagree);
                   setWindow(wOpt.key);
                 }}
-                className={`px-2 py-0.5 text-[11px] font-medium ${
+                className={`px-2 py-0.5 text-meta font-medium ${
                   window === wOpt.key
                     ? 'bg-ai-signal/15 text-ai-signal'
-                    : 'text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800'
+                    : 'text-ui-mute hover:bg-ui-hover'
                 }`}
               >
                 {wOpt.label}
@@ -571,7 +560,7 @@ export function BotFlaggingDetail(): JSX.Element {
           </div>
         </div>
       </div>
-      <p className="max-w-4xl text-[11px] text-gray-500 dark:text-gray-400">{subtitle}</p>
+      <p className="max-w-4xl text-meta text-ui-mute">{subtitle}</p>
     </>
   );
 
@@ -583,7 +572,7 @@ export function BotFlaggingDetail(): JSX.Element {
         // Unreachable in practice — the tab is ephemeral (never persisted, never parsed back from a
         // tab key), so it cannot exist without the seed that opened it. Said plainly rather than
         // rendered as an empty list, which would read as "nothing was flagged".
-        <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-400 dark:border-gray-700">
+        <div className="rounded-ui p-6 text-center text-body text-ui-faint bg-ui-surface">
           Open this from a tile on the Bots rail to see what it counted.
         </div>
       ) : workspaceId == null || isLoading ? (
@@ -594,7 +583,7 @@ export function BotFlaggingDetail(): JSX.Element {
         // No page landed. The infinite query surfaces no error flag of its own, so an absent
         // `total` once loading has settled IS the failure state — and it must not be dressed up as
         // an empty result, which would claim these bots said nothing.
-        <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-400 dark:border-gray-700">
+        <div className="rounded-ui p-6 text-center text-body text-ui-faint bg-ui-surface">
           Couldn’t load what the bots flagged in this window.
         </div>
       ) : (
@@ -618,10 +607,8 @@ export function BotFlaggingDetail(): JSX.Element {
                       ? `${DISAGREE_LABEL[disagree].title} Click to step to the next direction.`
                       : 'Narrow to rows where the bot’s own severity badge contradicts ours. Click again to step through over-calls and under-calls.'
                   }
-                  className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors ${
-                    disagree != null
-                      ? 'border-amber-400 bg-amber-50 text-amber-700 dark:border-amber-500/60 dark:bg-amber-950/30 dark:text-amber-300'
-                      : 'border-gray-300 text-gray-500 hover:border-gray-400 dark:border-gray-700 dark:text-gray-400'
+                  className={`flex items-center gap-1 rounded-full px-2.5 py-0.5 text-meta font-medium transition-colors touch:py-2 ${
+                    disagree != null ? 'bg-ui-sel text-ui-ink' : 'bg-ui-raise text-ui-mute hover:text-ui-ink'
                   }`}
                 >
                   <ScalesIcon size={11} />
@@ -630,7 +617,7 @@ export function BotFlaggingDetail(): JSX.Element {
               )}
               {cell && (
                 <span
-                  className="rounded-full border border-sky-400 bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-700 dark:border-sky-500/60 dark:bg-sky-950/30 dark:text-sky-300"
+                  className="rounded-full bg-ui-sel px-2.5 py-0.5 text-meta font-medium text-ui-ink"
                   title="One cell of the grid above. Click that cell again to clear it."
                 >
                   bot said {cell.vendor === 'none' ? 'nothing' : cell.vendor} · we scored{' '}
@@ -648,7 +635,7 @@ export function BotFlaggingDetail(): JSX.Element {
                   type="button"
                   onClick={() => setBots(null)}
                   title={`Only ${botNarrowLabel(bots)}${bots.label ? '’s' : '’'} comments — opened from the Behaviour tab’s inflation index. Click to widen back to every bot, keeping this window, scope and direction.`}
-                  className="flex items-center gap-1 rounded-full border border-ai-signal/50 bg-ai-signal/10 px-2 py-0.5 text-[11px] font-medium text-ai-signal hover:border-ai-signal"
+                  className="flex items-center gap-1 rounded-full border border-ai-signal/50 bg-ai-signal/10 px-2 py-0.5 text-meta font-medium text-ai-signal hover:border-ai-signal"
                 >
                   <BotIcon size={11} />
                   {botNarrowLabel(bots)} only
@@ -661,7 +648,7 @@ export function BotFlaggingDetail(): JSX.Element {
                 <button
                   type="button"
                   onClick={clearRefine}
-                  className="rounded px-1.5 py-0.5 text-[11px] text-gray-500 dark:text-gray-400 underline-offset-2 hover:underline"
+                  className="rounded-ui px-1.5 py-0.5 text-meta text-ui-mute underline-offset-2 hover:underline"
                 >
                   Clear
                 </button>
@@ -672,7 +659,7 @@ export function BotFlaggingDetail(): JSX.Element {
           {truncated && (
             // The same honesty rule the strip's own scan cap follows: say that the numbers are a
             // most-recent sample rather than quietly presenting a capped count as the whole window.
-            <div className="rounded border border-gray-300 px-2 py-1 text-[11px] text-gray-500 dark:border-gray-700 dark:text-gray-400">
+            <div className="rounded-ui px-2 py-1 text-meta text-ui-mute bg-ui-surface">
               More matched this window than one read covers — the counts and the grid above describe
               the most recent sample, not the whole window.
             </div>
@@ -681,7 +668,7 @@ export function BotFlaggingDetail(): JSX.Element {
           {filteredTotal === 0 ? (
             // TWO DISTINCT EMPTY STATES. "Nothing matched your filters" without a way out reads as
             // a broken list; "nothing was flagged" must NOT offer to clear a filter that isn't on.
-            <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-400 dark:border-gray-700">
+            <div className="rounded-ui p-6 text-center text-body text-ui-faint bg-ui-surface">
               {refined ? (
                 <>
                   None of these {total.toLocaleString()} {noun} match the filters you’ve applied.
@@ -689,7 +676,7 @@ export function BotFlaggingDetail(): JSX.Element {
                     <button
                       type="button"
                       onClick={clearRefine}
-                      className="rounded border border-gray-300 px-2 py-0.5 text-[11px] font-medium text-gray-500 hover:border-gray-400 dark:border-gray-700 dark:text-gray-400 dark:hover:border-gray-500"
+                      className="rounded-ui px-2 py-0.5 text-meta font-medium text-ui-mute bg-ui-surface"
                     >
                       Clear filters
                     </button>
@@ -698,7 +685,7 @@ export function BotFlaggingDetail(): JSX.Element {
               ) : (
                 <>
                   Nothing was flagged here in this window.
-                  <div className="mt-1 text-[11px]">
+                  <div className="mt-1 text-meta">
                     {isClusters
                       ? 'No two review bots landed within a few lines of each other — either only one bot is reviewing, or they’re looking at different things.'
                       : 'Either the bots said nothing that fits, or their comments haven’t been scored yet — the enrichment pass always FOLLOWS the sync that stored them.'}
@@ -713,7 +700,7 @@ export function BotFlaggingDetail(): JSX.Element {
             <button
               type="button"
               onClick={() => setShowReceipts(true)}
-              className="w-full rounded-lg border border-dashed border-gray-300 px-3 py-2 text-center text-[12px] font-medium text-gray-500 hover:border-gray-400 hover:text-gray-700 dark:border-gray-700 dark:text-gray-400 dark:hover:border-gray-500 dark:hover:text-gray-200"
+              className="w-full rounded-ui px-3 py-2 text-center text-meta font-medium text-ui-mute hover:text-ui-ink bg-ui-surface"
             >
               Show the {filteredTotal.toLocaleString()} {noun} this summary was computed from
             </button>
@@ -753,7 +740,7 @@ export function BotFlaggingDetail(): JSX.Element {
                   number. "412 comments" under a filtered list would claim the third while showing
                   the first. */}
               <div
-                className="text-[11px] tabular-nums text-gray-400"
+                className="text-meta tabular-nums text-ui-faint"
                 title={`The ${total.toLocaleString()} figure is the tile you clicked, recomputed from the same windowed scan and the same fold — not a separate query.`}
               >
                 Showing {loaded.toLocaleString()} of {filteredTotal.toLocaleString()} {noun}
@@ -777,15 +764,15 @@ export function BotFlaggingDetail(): JSX.Element {
               {hasMore && (
                 <div ref={sentinelRef} className="flex justify-center pt-1">
                   {isFetchingMore ? (
-                    <span className="flex items-center gap-2 py-1.5 text-xs text-gray-400">
-                      <span className="h-3 w-3 animate-spin rounded-full border-2 border-gray-300 border-t-transparent dark:border-gray-600 dark:border-t-transparent" />
+                    <span className="flex items-center gap-2 py-1.5 text-meta text-ui-faint">
+                      <span className="h-3 w-3 animate-spin rounded-full border-2 border-t-transparent dark:border-t-transparent" />
                       Loading more…
                     </span>
                   ) : (
                     <button
                       type="button"
                       onClick={fetchMore}
-                      className="rounded-full border border-gray-300 px-4 py-1.5 text-xs font-medium text-gray-600 hover:border-gray-400 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:border-gray-500 dark:hover:bg-gray-800/50"
+                      className="rounded-full px-4 py-1.5 text-meta font-medium text-ui-mute hover:bg-ui-hover"
                     >
                       Load more
                     </button>

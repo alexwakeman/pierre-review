@@ -41,7 +41,9 @@ import {
   PartialCircleIcon,
   RefreshIcon,
   ThinSampleIcon,
+  WarningIcon,
 } from '../Icons.js';
+import { FOCUS_RING, Menu } from '../ui/index.js';
 import type { Fmt, MetricMeta } from './periodReportMarkdown.js';
 import {
   METRIC_META,
@@ -121,9 +123,9 @@ function grainCaption(grain: PeriodGrain, cadenceDays: number): string {
     : `sprint · ${cadenceDays} days`;
 }
 
-const GOOD = 'text-green-600 dark:text-green-400';
-const BAD = 'text-red-500 dark:text-red-400';
-const MUTED = 'text-gray-400';
+const GOOD = 'text-ui-success';
+const BAD = 'text-ui-danger';
+const MUTED = 'text-ui-faint';
 
 // Did the change go the metric's good way? `null` for a neutral metric (opened PRs, thread
 // volume, bot comment counts) — those genuinely have no good direction and must not be coloured.
@@ -151,7 +153,7 @@ function NoPrior({
   if (notComputed) {
     return (
       <span
-        className={`text-[11px] ${MUTED}`}
+        className={`text-meta ${MUTED}`}
         title="This period was backfilled for the forecast series; no comparison was run for it"
       >
         not compared
@@ -160,13 +162,13 @@ function NoPrior({
   }
   return hasPriorPeriod ? (
     <span
-      className={`text-[11px] ${MUTED}`}
+      className={`text-meta ${MUTED}`}
       title="The previous period exists but has no figure for this metric, so there is nothing to subtract"
     >
       no prior figure
     </span>
   ) : (
-    <span className={`text-[11px] ${MUTED}`} title="Nothing is stored for the period before this one">
+    <span className={`text-meta ${MUTED}`} title="Nothing is stored for the period before this one">
       no prior period
     </span>
   );
@@ -190,13 +192,13 @@ function ChangeCell({
   if (delta.prior == null) return <NoPrior hasPriorPeriod={hasPriorPeriod} notComputed={false} />;
   if (delta.value == null || delta.absoluteChange == null) {
     return (
-      <span className={`text-[11px] ${MUTED}`} title="No data for this metric in this period">
+      <span className={`text-meta ${MUTED}`} title="No data for this metric in this period">
         —
       </span>
     );
   }
   if (delta.absoluteChange === 0) {
-    return <span className={`text-[11px] ${MUTED}`}>no change</span>;
+    return <span className={`text-meta ${MUTED}`}>no change</span>;
   }
 
   // INSIGNIFICANT — the raw figures only, no percentage and no verdict colour. The columns either
@@ -204,18 +206,18 @@ function ChangeCell({
   if (!delta.significant) {
     return (
       <span
-        className={`text-[11px] ${MUTED}`}
+        className={`text-meta ${MUTED}`}
         title="Below the sample or size floor for this metric — the figures are real, but the change is not distinguishable from noise, so no percentage is quoted"
       >
         {signed(delta.absoluteChange, format)}
-        <span className="ml-1 text-[11px]">· not significant</span>
+        <span className="ml-1 text-meta">· not significant</span>
       </span>
     );
   }
 
   const fav = favourability(delta);
   return (
-    <span className={`text-[11px] font-medium ${toneClass(fav)}`}>
+    <span className={`text-meta font-medium ${toneClass(fav)}`}>
       <CaretIcon
         dir={delta.absoluteChange > 0 ? 'up' : 'down'}
         className="inline-block align-[-0.1em]"
@@ -243,18 +245,18 @@ function ForecastCell({
   format: Fmt;
 }): JSX.Element {
   if (forecast == null) {
-    return <span className={`text-[11px] ${MUTED}`}>—</span>;
+    return <span className={`text-meta ${MUTED}`}>—</span>;
   }
   if (!forecast.available) {
     return (
-      <span className={`text-[11px] ${MUTED}`} title={REFUSAL_TEXT[forecast.reason]}>
+      <span className={`text-meta ${MUTED}`} title={REFUSAL_TEXT[forecast.reason]}>
         not forecast · {forecast.reason.replace(/_/g, ' ')}
       </span>
     );
   }
   return (
     <span
-      className="text-[11px] text-ai-signal"
+      className="text-meta text-ai-signal"
       title={`${forecast.basis} · ${forecast.periodsUsed} periods`}
     >
       ≈ {format(forecast.point)}
@@ -336,10 +338,10 @@ function LaneBar({
   total: number;
 }): JSX.Element {
   if (total <= 0) {
-    return <div className="h-2 w-full rounded-sm bg-gray-100 dark:bg-gray-900" title="nothing in this period" />;
+    return <div className="h-2 w-full rounded-ui bg-ui-raise" title="nothing in this period" />;
   }
   return (
-    <div className="flex h-2 w-full overflow-hidden rounded-sm">
+    <div className="flex h-2 w-full overflow-hidden rounded-ui">
       {parts
         .filter((p) => p.n > 0)
         .map((p) => (
@@ -365,7 +367,7 @@ function LanesInfo(): JSX.Element {
       <dl className="space-y-1.5">
         {ACTOR_LANES.map((lane) => (
           <div key={lane}>
-            <dt className="font-medium text-gray-900 dark:text-gray-50">{LANE_META[lane].label}</dt>
+            <dt className="font-medium text-ui-ink">{LANE_META[lane].label}</dt>
             <dd>{LANE_META[lane].note}.</dd>
           </div>
         ))}
@@ -413,10 +415,10 @@ function LanesPanel({ lanes }: { lanes: PeriodLanes }): JSX.Element | null {
     lanes.lanes.reduce((n, l) => (ACTOR_LANE_BAND[l.lane] === band ? n + l.mergedPrs : n), 0);
 
   return (
-    <div className="space-y-2 rounded-md border border-gray-200 px-3 py-2.5 dark:border-gray-800">
+    <div className="space-y-2 rounded-ui px-3 py-2.5 bg-ui-surface">
       <div className="flex flex-wrap items-baseline gap-x-2">
         <span className="flex items-center gap-1">
-          <span className="text-[12px] font-medium text-gray-700 dark:text-gray-200">
+          <span className="text-meta font-medium text-ui-ink">
             Effort vs automation
           </span>
           <InfoButton title="Effort vs automation">
@@ -424,7 +426,7 @@ function LanesPanel({ lanes }: { lanes: PeriodLanes }): JSX.Element | null {
           </InfoButton>
         </span>
         {lanes.automationMergeSharePct != null && (
-          <span className="text-[11px] text-gray-500 dark:text-gray-400">
+          <span className="text-meta text-ui-mute">
             {/* THE headline. One number that reframes every throughput figure above it. */}
             {lanes.automationMergeSharePct}% of merges were automated
           </span>
@@ -435,12 +437,12 @@ function LanesPanel({ lanes }: { lanes: PeriodLanes }): JSX.Element | null {
         const total = lanes.lanes.reduce((n, l) => n + axis.pick(l), 0);
         return (
           <div key={axis.key} className="grid grid-cols-[7.5rem_1fr_3rem] items-center gap-2">
-            <span className="text-[11px] text-gray-500 dark:text-gray-400">{axis.label}</span>
+            <span className="text-meta text-ui-mute">{axis.label}</span>
             <LaneBar
               parts={order.map((lane) => ({ lane, n: axis.pick(byLane.get(lane) ?? ({} as PeriodLaneStats) ) || 0 }))}
               total={total}
             />
-            <span className="text-right text-[11px] tabular-nums text-gray-400">{total}</span>
+            <span className="text-right text-meta tabular-nums text-ui-faint">{total}</span>
           </div>
         );
       })}
@@ -450,7 +452,7 @@ function LanesPanel({ lanes }: { lanes: PeriodLanes }): JSX.Element | null {
           write it, or did a machine only comment on it". Rendered only when something merged;
           a share of nothing is not 0%. */}
       {mergeTotal > 0 && (
-        <div className="flex flex-wrap gap-x-3 gap-y-0.5 pt-0.5 text-[11px] text-gray-500 dark:text-gray-400">
+        <div className="flex flex-wrap gap-x-3 gap-y-0.5 pt-0.5 text-meta text-ui-mute">
           {(['people', 'authors', 'responds'] as ActorLaneBand[]).map((band) => {
             const n = bandMerges(band);
             // `responds` is ~always 0 merges by construction (a reviewer does not author), so it
@@ -459,7 +461,7 @@ function LanesPanel({ lanes }: { lanes: PeriodLanes }): JSX.Element | null {
             if (n === 0) return null;
             return (
               <span key={band}>
-                <span className="font-medium text-gray-600 dark:text-gray-300">
+                <span className="font-medium text-ui-mute">
                   {Math.round((n / mergeTotal) * 100)}%
                 </span>{' '}
                 {BAND_LABEL[band].toLowerCase()}
@@ -474,9 +476,9 @@ function LanesPanel({ lanes }: { lanes: PeriodLanes }): JSX.Element | null {
           <span
             key={lane}
             title={LANE_META[lane].note}
-            className="flex items-center gap-1 text-[11px] text-gray-500 dark:text-gray-400"
+            className="flex items-center gap-1 text-meta text-ui-mute"
           >
-            <span className="h-2 w-2 rounded-sm" style={{ backgroundColor: LANE_META[lane].hex }} />
+            <span className="h-2 w-2 rounded-ui" style={{ backgroundColor: LANE_META[lane].hex }} />
             {LANE_META[lane].label}
           </span>
         ))}
@@ -488,7 +490,7 @@ function LanesPanel({ lanes }: { lanes: PeriodLanes }): JSX.Element | null {
           90 days. Only stated when automation is otherwise present, so a team that has genuinely
           not bought an AI reviewer is not nagged about it. */}
       {ai != null && ai.comments === 0 && lanes.silentAutomation.length > 0 && (
-        <div className="text-[12px] text-amber-600 dark:text-amber-400">
+        <div className="text-meta text-ui-warn">
           No AI review comments this period, though automation is set up. Check it is still running.
         </div>
       )}
@@ -496,7 +498,7 @@ function LanesPanel({ lanes }: { lanes: PeriodLanes }): JSX.Element | null {
       {/* The human figures the blended table above cannot show. `fmtDuration`, not a raw number:
           an unformatted 5.484166666666667h is how a panel about honesty starts looking careless. */}
       {human != null && (human.medianPrSizeLines != null || human.medianLeadTimeHours != null) && (
-        <div className="text-[12px] text-gray-400">
+        <div className="text-meta text-ui-faint">
           Pull requests by people
           {human.medianPrSizeLines != null && ` ran ${human.medianPrSizeLines} lines at the median`}
           {human.medianLeadTimeHours != null &&
@@ -515,7 +517,7 @@ function LanesPanel({ lanes }: { lanes: PeriodLanes }): JSX.Element | null {
           `getPeriodLanes`, so they cannot disagree — and saying so is what stops the next reader
           assuming one of the two screens is stale. */}
       {lanes.medianTimeToFirstHumanReviewHours != null && (
-        <div className="text-[12px] text-gray-400">
+        <div className="text-meta text-ui-faint">
           First review by a person: {fmtDuration(lanes.medianTimeToFirstHumanReviewHours)} at the
           median.
         </div>
@@ -569,11 +571,12 @@ function MetricTable({ report }: { report: PeriodReport }): JSX.Element {
   const populationsDiffer = subsetCovers > 0 && subsetCovers !== report.coverage.totalRepos;
 
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full min-w-[46rem] text-left text-xs">
+    // Scrolls inside its own box on a narrow screen; the Metric column stays put.
+    <div className="max-w-full overflow-x-auto overscroll-x-contain">
+      <table className="w-full min-w-[46rem] border-separate border-spacing-0 text-left text-meta tabular-nums">
         <thead>
-          <tr className="border-b border-gray-200 text-[11px] uppercase tracking-wide text-gray-400 dark:border-gray-800">
-            <th className="py-1 pr-3 font-medium">Metric</th>
+          <tr className="text-meta text-ui-faint">
+            <th className="sticky left-0 z-[1] bg-ui-bg py-1 pr-3 font-medium">Metric</th>
             <th className="py-1 pr-3 text-right font-medium">This period</th>
             <th className="py-1 pr-3 text-right font-medium">Prior</th>
             <th className="py-1 pr-3 font-medium">Change</th>
@@ -595,12 +598,10 @@ function MetricTable({ report }: { report: PeriodReport }): JSX.Element {
             // number have to tell the same story.
             const sparkTone = delta?.significant ? toneHex(fav) : PALETTE.gray;
             return (
-              <tr
-                key={key}
-                className="border-b border-gray-100 last:border-0 dark:border-gray-900">
-                <td className="py-1.5 pr-3 align-top">
-                  <div className="font-medium text-gray-700 dark:text-gray-200">{meta.label}</div>
-                  {meta.note && <div className="text-[11px] text-gray-400">{meta.note}</div>}
+              <tr key={key} className="group hover:bg-ui-hover">
+                <td className="sticky left-0 z-[1] w-[11rem] max-w-[11rem] bg-ui-bg py-1.5 pr-3 align-top group-hover:bg-ui-hover sm:w-auto sm:max-w-none">
+                  <div className="font-medium text-ui-ink">{meta.label}</div>
+                  {meta.note && <div className="text-meta text-ui-faint">{meta.note}</div>}
                 </td>
                 <td className="py-1.5 pr-3 text-right align-top">
                   {/* null is "—", never 0. The `sampleSize` title is only shown when this cell IS
@@ -608,7 +609,7 @@ function MetricTable({ report }: { report: PeriodReport }): JSX.Element {
                       the headline's count beside a subset figure would describe a different
                       population from the number above it. */}
                   <span
-                    className="text-[13px] font-semibold text-gray-800 dark:text-gray-100"
+                    className="text-body font-semibold text-ui-ink"
                     title={
                       mv && !delta
                         ? `${mv.sampleSize} item${mv.sampleSize === 1 ? '' : 's'} behind this figure`
@@ -625,7 +626,7 @@ function MetricTable({ report }: { report: PeriodReport }): JSX.Element {
                       stronger statement. */}
                   {lowSample && value != null && (
                     <span
-                      className="ml-1 align-super text-[11px] font-normal text-amber-600 dark:text-amber-400"
+                      className="ml-1 align-super text-meta font-normal text-ui-warn"
                       title={
                         mv
                           ? `Thin sample — ${mv.sampleSize} item${mv.sampleSize === 1 ? '' : 's'} behind this figure. It is what was observed, but it moves easily.`
@@ -638,14 +639,14 @@ function MetricTable({ report }: { report: PeriodReport }): JSX.Element {
                   )}
                   {headline != null && (
                     <div
-                      className="text-[11px] text-gray-400"
+                      className="text-meta text-ui-faint"
                       title={`The comparison covers the ${subsetCovers} repo${subsetCovers === 1 ? '' : 's'} tracked across both periods. This is the figure for all ${report.coverage.totalRepos}.`}
                     >
                       all repos: {meta.format(headline)}
                     </div>
                   )}
                 </td>
-                <td className="py-1.5 pr-3 text-right align-top text-[12px] text-gray-500 dark:text-gray-400">
+                <td className="py-1.5 pr-3 text-right align-top text-meta text-ui-mute">
                   {/* '—' for both flavours of absence; the Change cell beside it says which. */}
                   {prior == null ? '—' : meta.format(prior)}
                 </td>
@@ -665,7 +666,7 @@ function MetricTable({ report }: { report: PeriodReport }): JSX.Element {
                 </td>
                 <td className="py-1.5 pr-3 align-top">
                   {notComputed ? (
-                    <span className={`text-[11px] ${MUTED}`} title="No forecast was computed for a backfilled period">
+                    <span className={`text-meta ${MUTED}`} title="No forecast was computed for a backfilled period">
                       not forecast
                     </span>
                   ) : (
@@ -700,9 +701,10 @@ function MetricTable({ report }: { report: PeriodReport }): JSX.Element {
 // `rankMovements`; this component shipped doing it anyway.) The direction does reach the SPA —
 // on the matching `PeriodMetricDelta` — so the tone is looked up by key there, and a metric with
 // no delta row falls back to neutral rather than guessing.
-const NEUTRAL_PILL = 'border-gray-300 text-gray-500 dark:border-gray-700 dark:text-gray-400';
-const GOOD_PILL = 'border-green-300 text-green-700 dark:border-green-800 dark:text-green-300';
-const BAD_PILL = 'border-red-300 text-red-600 dark:border-red-900 dark:text-red-300';
+const NEUTRAL_PILL = 'text-ui-mute';
+// The chip is a grey ground; only the direction's words carry the colour.
+const GOOD_PILL = 'text-ui-success';
+const BAD_PILL = 'text-ui-danger';
 
 function Movements({
   movements,
@@ -718,7 +720,7 @@ function Movements({
   const directionOf = new Map(deltas.map((d) => [d.key, d.direction]));
   return (
     <div className="flex flex-wrap items-center gap-1.5">
-      <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+      <span className="mr-1 text-meta text-ui-mute">
         Biggest movers
       </span>
       {top.map((m) => {
@@ -729,7 +731,7 @@ function Movements({
         return (
           <span
             key={m.key}
-            className={`rounded border px-1.5 py-0.5 text-[11px] ${
+            className={`rounded-ui bg-ui-surface px-2 py-0.5 text-meta tabular-nums ${
               neutral ? NEUTRAL_PILL : m.favourable ? GOOD_PILL : BAD_PILL
             }`}
             title={
@@ -774,10 +776,8 @@ function ReportBody({ report }: { report: PeriodReport }): JSX.Element {
           being tracked" is the sentence that makes the figure trustworthy, and it only means
           something if its absence is meaningful too. */}
       <div
-        className={`rounded-md border px-2 py-1.5 text-[11px] ${
-          report.coverage.complete
-            ? 'border-gray-200 text-gray-500 dark:border-gray-800 dark:text-gray-400'
-            : 'border-amber-300 bg-amber-50/50 text-amber-700 dark:border-amber-800 dark:bg-amber-950/20 dark:text-amber-300'
+        className={`rounded-ui bg-ui-surface px-3 py-2 text-meta ${
+          report.coverage.complete ? 'text-ui-mute' : 'text-ui-ink'
         }`}
       >
         {report.coverage.complete ? (
@@ -787,6 +787,7 @@ function ReportBody({ report }: { report: PeriodReport }): JSX.Element {
           </>
         ) : (
           <>
+            <WarningIcon className="mr-1 inline-block align-[-0.1em] text-ui-warn" />
             <span className="font-medium">Partial coverage.</span>{' '}
             {report.coverage.trackedRepos} of {report.coverage.totalRepos} repos in this workspace
             were being tracked when this period started. The headline figures below cover the whole
@@ -801,7 +802,7 @@ function ReportBody({ report }: { report: PeriodReport }): JSX.Element {
           a bug. The report is immutable by design, so this is not something regeneration under
           the same period "fixes" silently — it produces a NEW row at the current version. */}
       {report.metricsSchemaVersion !== PERIOD_METRICS_SCHEMA_VERSION && (
-        <div className="text-[11px] text-gray-400">
+        <div className="text-meta text-ui-faint">
           Written under metric schema v{report.metricsSchemaVersion} (current is v
           {PERIOD_METRICS_SCHEMA_VERSION}) — any metric added since is blank here, not zero.
         </div>
@@ -819,7 +820,7 @@ function ReportBody({ report }: { report: PeriodReport }): JSX.Element {
           about the DATA rather than about what was run — and it invited the reader to press
           Generate on eight periods to fix something that was never broken. */}
       {isFiguresOnly && (
-        <div className="rounded-md border border-gray-200 px-2 py-1.5 text-[12px] text-gray-500 dark:border-gray-800 dark:text-gray-400">
+        <div className="rounded-ui px-2 py-1.5 text-meta text-ui-mute bg-ui-surface">
           <span className="font-medium">Figures only.</span> Filled in automatically as forecast
           history, with no comparison, forecast or write-up. Generate it to compare it with the period
           before.
@@ -832,7 +833,7 @@ function ReportBody({ report }: { report: PeriodReport }): JSX.Element {
           across the whole SERIES. A forecast over most of a workspace is worth having; one the
           reader assumes covers all of it is not. */}
       {!isFiguresOnly && report.forecastDisclosure && (
-        <div className="text-[11px] text-gray-500 dark:text-gray-400">
+        <div className="text-meta text-ui-mute">
           Forecast {report.forecastDisclosure}
         </div>
       )}
@@ -840,12 +841,12 @@ function ReportBody({ report }: { report: PeriodReport }): JSX.Element {
       {/* The comparison's own disclosure, VERBATIM from the server. It is the one sentence that
           says which repos the deltas are actually about. */}
       {isFiguresOnly ? null : comparison.refusal ? (
-        <div className="rounded-md border border-gray-200 px-2 py-1.5 text-[11px] text-gray-500 dark:border-gray-800 dark:text-gray-400">
+        <div className="rounded-ui px-2 py-1.5 text-meta text-ui-mute bg-ui-surface">
           <span className="font-medium">No comparison.</span> {REFUSAL_TEXT[comparison.refusal]}
         </div>
       ) : (
         comparison.subsetDisclosure && (
-          <div className="text-[11px] text-gray-500 dark:text-gray-400">
+          <div className="text-meta text-ui-mute">
             Comparison {comparison.subsetDisclosure}
             {comparison.priorPeriodKey && (
               <span className={MUTED}> · vs {comparison.priorPeriodKey}</span>
@@ -859,11 +860,11 @@ function ReportBody({ report }: { report: PeriodReport }): JSX.Element {
       {/* The narration. A backfilled period has none by design (metrics-only, no LLM) — say
           that plainly rather than showing an empty box. */}
       {report.narrative ? (
-        <div className="rounded-md border border-ai-hairline bg-white/60 p-3 dark:bg-gray-900/40">
+        <div className="rounded-ui border border-ai-hairline bg-ui-surface p-3">
           <SummaryMarkdown markdown={report.narrative} prRefs={[]} onOpenPr={() => {}} />
         </div>
       ) : (
-        <div className="rounded-md border border-dashed border-gray-200 px-2 py-1.5 text-[12px] text-gray-400 dark:border-gray-800">
+        <div className="rounded-ui px-2 py-1.5 text-meta text-ui-faint bg-ui-surface">
           Not written up yet. Generating adds a write-up; the figures above are final.
         </div>
       )}
@@ -922,13 +923,13 @@ function GenerateControls({
     <div className="space-y-1.5">
       <div className="flex flex-wrap items-center gap-2">
         {showModelPicker && (
-          <label className="flex items-center gap-1 text-[11px] text-gray-500 dark:text-gray-400">
+          <label className="flex items-center gap-1 text-meta text-ui-mute">
             Model
             <select
               value={effectiveModel ?? ''}
               onChange={(e) => setModel(e.target.value)}
               disabled={running}
-              className="rounded border border-gray-300 bg-white px-1 py-0.5 text-[11px] dark:border-gray-700 dark:bg-gray-950"
+              className="rounded-ui bg-ui-surface px-1 py-0.5 text-meta"
             >
               {choices.map((c) => (
                 <option key={c.id} value={c.id}>
@@ -945,7 +946,7 @@ function GenerateControls({
             type="button"
             onClick={() => generate.mutate(model != null ? { model } : {})}
             disabled={blocked}
-            className="rounded border border-ai-border px-2 py-0.5 text-[11px] font-medium text-ai-signal hover:border-ai-signal/60 hover:bg-ai-surface-2 disabled:opacity-50"
+            className="rounded-ui border border-ai-border px-2 py-0.5 text-meta font-medium text-ai-signal hover:border-ai-signal/60 hover:bg-ai-surface-2 disabled:opacity-50"
             title={
               hasReport
                 ? 'Write this period up again. The stored figures are immutable; regenerating replaces the narrative for this model.'
@@ -973,12 +974,12 @@ function GenerateControls({
       </div>
 
       {generate.isError && (
-        <div className="text-[11px] text-red-500">
+        <div className="text-meta text-ui-danger">
           {(generate.error as Error)?.message ?? 'Couldn’t generate the report.'}
         </div>
       )}
       {result?.cadenceMissing && (
-        <div className="text-[11px] text-amber-600 dark:text-amber-400">
+        <div className="text-meta text-ui-warn">
           No sprint cadence is configured, so there is no period to report on.
         </div>
       )}
@@ -986,7 +987,7 @@ function GenerateControls({
           loud. ⚠ `generated === false` is also false when no cadence is configured, which already
           prints its own line above — so that case is excluded here. */}
       {result != null && !generate.isError && !result.cadenceMissing && (
-        <div className="text-[11px] text-gray-400">
+        <div className="text-meta text-ui-faint">
           {result.generated === false
             ? 'Already had this one — served from cache.'
             : `Generated with ${runModelName(result.spend?.model ?? result.report?.ranModel ?? result.report?.model ?? effectiveModel) ?? 'the default model'}.`}
@@ -1033,8 +1034,8 @@ function PeriodReportsInfo(): JSX.Element {
 // ── Empty / setup states ─────────────────────────────────────────────────────────────────────
 function SetupPrompt(): JSX.Element {
   return (
-    <div className="rounded-lg border border-dashed border-gray-300 p-4 text-xs text-gray-500 dark:border-gray-700 dark:text-gray-400">
-      <div className="mb-1 font-medium text-gray-700 dark:text-gray-200">
+    <div className="rounded-ui p-4 text-meta text-ui-mute bg-ui-surface">
+      <div className="mb-1 font-medium text-ui-ink">
         Set a sprint cadence first
       </div>
       Sprint reports follow this workspace’s sprints. Set a sprint length and start date in{' '}
@@ -1173,7 +1174,7 @@ export function PeriodReportsPanel(): JSX.Element | null {
           the loading branches so the control never disappears while a list reloads (switching
           grain is exactly when that reload happens). */}
       <div className="flex flex-wrap items-center gap-1.5 print:hidden">
-        <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+        <span className="mr-1 w-12 text-meta text-ui-mute">
           Grain
         </span>
         {(
@@ -1192,10 +1193,8 @@ export function PeriodReportsPanel(): JSX.Element | null {
             onClick={() => setGrain(g)}
             aria-pressed={grain === g}
             title={hint}
-            className={`rounded border px-1.5 py-0.5 text-[11px] ${
-              grain === g
-                ? 'border-ai-signal/50 bg-ai-signal/10 text-ai-signal'
-                : 'border-gray-300 text-gray-500 hover:border-gray-400 dark:border-gray-700 dark:text-gray-400'
+            className={`inline-flex h-7 items-center rounded-ui px-2.5 text-body touch:h-10 ${FOCUS_RING} ${
+              grain === g ? 'bg-ui-sel text-ui-ink' : 'bg-ui-surface text-ui-mute hover:bg-ui-hover hover:text-ui-ink'
             }`}
           >
             {label}
@@ -1207,7 +1206,7 @@ export function PeriodReportsPanel(): JSX.Element | null {
       ) : list.data?.cadenceConfigured === false ? (
         <SetupPrompt />
       ) : periods.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-gray-300 p-4 text-xs text-gray-500 dark:border-gray-700 dark:text-gray-400">
+        <div className="rounded-ui p-4 text-meta text-ui-mute bg-ui-surface">
           {grain === 'month'
             ? 'No months yet. A report covers one completed calendar month — the first one appears once a month has ended with activity behind it.'
             : 'No periods yet. A report covers one completed sprint — the first one appears once a sprint boundary has passed with activity behind it.'}
@@ -1217,7 +1216,7 @@ export function PeriodReportsPanel(): JSX.Element | null {
           {/* Period picker. Newest first; the label IS the date range, which is also the title
               below — the reader never has to decode a key to know what they are looking at. */}
           <div className="flex flex-wrap items-center gap-1.5 print:hidden">
-            <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+            <span className="mr-1 w-12 text-meta text-ui-mute">
               Period
             </span>
             {periods.slice(0, 8).map((p) => {
@@ -1234,10 +1233,8 @@ export function PeriodReportsPanel(): JSX.Element | null {
                      one chip carrying the mark used to stand taller than every chip beside it.
                      The explicit `h-[22px]` then matches the `Earlier…` select below, which a
                      browser renders taller than a bare button whatever the padding says. */
-                  className={`inline-flex h-[22px] items-center gap-1 rounded border px-1.5 text-[11px] leading-none ${
-                    on
-                      ? 'border-ai-signal/50 bg-ai-signal/10 text-ai-signal'
-                      : 'border-gray-300 text-gray-500 hover:border-gray-400 dark:border-gray-700 dark:text-gray-400'
+                  className={`inline-flex h-7 items-center gap-1 rounded-ui px-2.5 text-body tabular-nums leading-none touch:h-10 ${FOCUS_RING} ${
+                    on ? 'bg-ui-sel text-ui-ink' : 'bg-ui-surface text-ui-mute hover:bg-ui-hover hover:text-ui-ink'
                   }`}
                   title={
                     p.hasNarrative
@@ -1248,7 +1245,7 @@ export function PeriodReportsPanel(): JSX.Element | null {
                   <span className="truncate">{shortPeriodLabel(p)}</span>
                   {!p.coverageComplete && (
                     <span
-                      className="flex shrink-0 items-center text-amber-600 dark:text-amber-400"
+                      className="flex shrink-0 items-center text-ui-warn"
                       title="Partial repo coverage"
                     >
                       <PartialCircleIcon />
@@ -1258,18 +1255,32 @@ export function PeriodReportsPanel(): JSX.Element | null {
               );
             })}
             {periods.length > 8 && (
-              <select
-                value={periods.slice(0, 8).some((p) => p.periodKey === selectedKey) ? '' : (selectedKey ?? '')}
-                onChange={(e) => e.target.value && setSelectedKey(e.target.value)}
-                className="h-[22px] rounded border border-gray-300 bg-white px-1 text-[11px] leading-none dark:border-gray-700 dark:bg-gray-950"
-              >
-                <option value="">Earlier…</option>
-                {periods.slice(8).map((p) => (
-                  <option key={p.periodKey} value={p.periodKey}>
-                    {shortPeriodLabel(p)}
-                  </option>
-                ))}
-              </select>
+              (() => {
+                const earlier = periods.slice(8);
+                const picked = earlier.find((p) => p.periodKey === selectedKey) ?? null;
+                return (
+                  <Menu
+                    label="Earlier periods"
+                    trigger={(props) => (
+                      <button
+                        {...props}
+                        type="button"
+                        className={`inline-flex h-7 items-center gap-1 rounded-ui px-2.5 text-body tabular-nums touch:h-10 ${FOCUS_RING} ${
+                          picked ? 'bg-ui-sel text-ui-ink' : 'bg-ui-surface text-ui-mute hover:bg-ui-hover hover:text-ui-ink'
+                        }`}
+                      >
+                        {picked ? shortPeriodLabel(picked) : 'Earlier…'}
+                        <CaretIcon dir="down" />
+                      </button>
+                    )}
+                    items={earlier.map((p) => ({
+                      id: p.periodKey,
+                      label: shortPeriodLabel(p),
+                      onSelect: () => setSelectedKey(p.periodKey),
+                    }))}
+                  />
+                );
+              })()
             )}
           </div>
 
@@ -1279,19 +1290,19 @@ export function PeriodReportsPanel(): JSX.Element | null {
           {selected && (
             <div className="flex flex-wrap items-baseline gap-2">
               <span className="flex items-center gap-1 self-center">
-                <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-100">
+                <h3 className="text-title text-ui-ink">
                   {periodTitle(
                     selected.periodStart,
                     selected.periodEnd,
                     selected.grain ?? current?.grain ?? 'sprint',
                   )}
                 </h3>
-                <InfoButton title="Period reports" className="print:hidden text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-100">
+                <InfoButton title="Period reports" className="print:hidden text-ui-mute hover:text-ui-ink">
                   <PeriodReportsInfo />
                 </InfoButton>
               </span>
               <span
-                className="text-[11px] text-gray-400"
+                className="text-meta text-ui-faint"
                 title={
                   (selected.grain ?? current?.grain ?? 'sprint') === 'month'
                     ? 'A calendar month, from the 1st (UTC)'
@@ -1312,7 +1323,7 @@ export function PeriodReportsPanel(): JSX.Element | null {
                   !current?.archived && <span className="ml-1">· this workspace</span>}
               </span>
               {current && !current.inProgress && (
-                <span className="text-[11px] text-gray-400" title={current.periodKey}>
+                <span className="text-meta text-ui-faint" title={current.periodKey}>
                   {current.model ? `${aiRunLabel(current.provider ?? null, current.ranModel ?? current.model)} · ` : ''}
                   generated {new Date(current.generatedAt).toLocaleString()}
                 </span>
@@ -1322,7 +1333,7 @@ export function PeriodReportsPanel(): JSX.Element | null {
                   nothing to generate, nothing to go stale, and nothing written up. */}
               {current?.inProgress && (
                 <span
-                  className="rounded bg-ai-signal/10 px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-ai-signal"
+                  className="rounded-ui bg-ai-signal/10 px-1.5 py-0.5 text-meta font-semibold text-ai-signal"
                   title="This month is still running. The figures are recomputed live on every read — nothing is stored, nothing is written up, and there is nothing to regenerate. The comparison is against the SAME stretch of the previous month, not against the whole of it."
                 >
                   in progress · {current.elapsedDays ?? 0} day
@@ -1331,7 +1342,7 @@ export function PeriodReportsPanel(): JSX.Element | null {
               )}
               {current?.archived && (
                 <span
-                  className="rounded bg-gray-500/10 px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300"
+                  className="rounded-ui bg-gray-500/10 px-1.5 py-0.5 text-meta font-semibold text-ui-mute"
                   title="Generated under a sprint cadence this workspace no longer runs. It is kept exactly as it was written and cannot be regenerated — its window is not on the current period grid."
                 >
                   archived · {current.cadenceDays}-day cadence
@@ -1339,7 +1350,7 @@ export function PeriodReportsPanel(): JSX.Element | null {
               )}
               {current?.stale && (
                 <span
-                  className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300"
+                  className="rounded-ui bg-ui-surface px-1.5 py-0.5 text-meta font-semibold text-ui-ink"
                   title="The underlying data changed after this report was written. It is kept exactly as generated — a copy someone has already forwarded has to stay comparable — so regenerate if you want the newer figures."
                 >
                   stale
@@ -1378,7 +1389,7 @@ export function PeriodReportsPanel(): JSX.Element | null {
           {reportLoading ? (
             <Skeleton />
           ) : report.isError ? (
-            <div className="text-[11px] text-red-500">
+            <div className="text-meta text-ui-danger">
               {(report.error as Error)?.message ?? 'Couldn’t load this report.'}
             </div>
           ) : current ? (
@@ -1388,7 +1399,7 @@ export function PeriodReportsPanel(): JSX.Element | null {
               <ReportBody report={current} />
             </div>
           ) : (
-            <div className="rounded-lg border border-dashed border-gray-300 p-4 text-xs text-gray-500 dark:border-gray-700 dark:text-gray-400">
+            <div className="rounded-ui p-4 text-meta text-ui-mute bg-ui-surface">
               {isMonthToDate
                 ? 'Couldn’t read the month-to-date figures. Try again.'
                 : grain === 'month'
@@ -1407,11 +1418,11 @@ export function PeriodReportsPanel(): JSX.Element | null {
               Collapsed by default: this is a shelf, not part of the current reading. */}
           {archived.length > 0 && (
             <details className="print:hidden">
-              <summary className="cursor-pointer text-[11px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
+              <summary className="cursor-pointer text-meta text-ui-faint hover:text-ui-mute">
                 Earlier cadences ({archived.length})
               </summary>
-              <div className="mt-1.5 space-y-1 border-l border-gray-200 pl-2 dark:border-gray-800">
-                <p className="text-[12px] text-gray-400">
+              <div className="mt-1.5 space-y-1 pl-2">
+                <p className="text-meta text-ui-faint">
                   Kept as written. They cannot be regenerated.
                 </p>
                 {archived.map((a) => (
@@ -1420,10 +1431,10 @@ export function PeriodReportsPanel(): JSX.Element | null {
                     type="button"
                     onClick={() => setSelectedKey(a.archivedKey)}
                     aria-pressed={a.archivedKey === selectedKey}
-                    className={`block text-left text-[11px] hover:underline ${
+                    className={`block text-left text-meta hover:underline ${
                       a.archivedKey === selectedKey
                         ? 'text-ai-signal'
-                        : 'text-gray-500 dark:text-gray-400'
+                        : 'text-ui-mute'
                     }`}
                     title={
                       a.reason === 'cadence_changed'
@@ -1432,7 +1443,7 @@ export function PeriodReportsPanel(): JSX.Element | null {
                     }
                   >
                     {periodTitle(a.periodStart, a.periodEnd, a.grain ?? 'sprint')}
-                    <span className="ml-1.5 text-gray-400">
+                    <span className="ml-1.5 text-ui-faint">
                       {a.cadenceDays}-day
                       {a.hasNarrative ? ' · written up' : ' · figures only'}
                     </span>

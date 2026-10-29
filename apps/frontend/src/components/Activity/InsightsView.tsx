@@ -5,6 +5,18 @@ import { effectiveInsightsTab } from './bottlenecksModel.js';
 import { PeriodReportsPanel } from './PeriodReportsPanel.js';
 import { StoriesView } from './StoriesView.js';
 import { WorkspaceFlowMetrics } from './WorkspaceFlowMetrics.js';
+import { PageHeader, SectionHeading } from './reportChrome.js';
+import { Tabs, useRegisterCommands, type Command, type TabItem } from '../ui/index.js';
+import { useMemo } from 'react';
+import { ChartIcon } from '../Icons.js';
+import type { InsightsInnerTab } from '../../store/filters.js';
+
+// ⚠ LABEL-ONLY rename: the store/URL literal stays 'bottlenecks' (see InsightsInnerTab).
+const REPORT_TABS: readonly TabItem<InsightsInnerTab>[] = [
+  { id: 'overview', label: 'Overview' },
+  { id: 'bottlenecks', label: 'Chronology' },
+  { id: 'stories', label: 'Stories' },
+];
 
 // The "Reports" pane — the Activity rail entry formerly labelled "Insights" (the store value
 // behind it is still `activityRepoId === 'insights'`; see Activity/index.tsx).
@@ -37,41 +49,46 @@ export function InsightsView(): JSX.Element {
   // prompt, because "no metrics yet" is not the end of the pane.
   const nothingToShow = metrics.data != null && metrics.data.metrics == null;
 
-  return (
-    <div className="space-y-4" data-testid="insights-view">
-      <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-200">Reports</h2>
+  // ⌘K while Reports is showing: the period grain and every flow-metric drill-down.
+  const commands = useMemo<Command[]>(() => {
+    const f = (): ReturnType<typeof useFilters.getState> => useFilters.getState();
+    const icon = <ChartIcon size={14} />;
+    const metric = (key: Parameters<ReturnType<typeof useFilters.getState>['openMetricsDetail']>[0], label: string): Command => ({
+      id: `reports:metric:${key}`,
+      group: 'Actions',
+      title: `Flow metrics: ${label}`,
+      keywords: ['drill down', 'pull requests behind'],
+      icon,
+      run: () => f().openMetricsDetail(key),
+    });
+    return [
+      { id: 'reports:grain:sprint', group: 'Actions', title: 'Period reports by sprint', icon, run: () => { f().setInsightsInnerTab('overview'); f().setInsightsReportGrain('sprint'); } },
+      { id: 'reports:grain:month', group: 'Actions', title: 'Period reports by month', icon, run: () => { f().setInsightsInnerTab('overview'); f().setInsightsReportGrain('month'); } },
+      metric('merges', 'Merged'),
+      metric('lead_time', 'Time to merge'),
+      metric('review_latency', 'Time to first review'),
+      metric('merge_ci', 'Checks green at merge'),
+      metric('ci_recovery', 'Time to fix red checks'),
+      metric('ci_red', 'Red checks now'),
+    ];
+  }, []);
+  useRegisterCommands('reports', commands);
 
-      {/* The pane's sub-tab strip.
-          `effectiveTab` (derived, never written back) picks the body.
-          The strip can be wider than a phone: the strip scrolls inside itself, never the page. */}
-      <div role="tablist" className="flex gap-1 overflow-x-auto overflow-y-hidden border-b border-gray-200 dark:border-gray-800">
-        {(
-          [
-            { key: 'overview', label: 'Overview' },
-            // ⚠ LABEL-ONLY: the store/URL literal stays 'bottlenecks' (see InsightsInnerTab).
-            { key: 'bottlenecks', label: 'Chronology' },
-            { key: 'stories', label: 'Stories' },
-          ] as const
-        ).map((t) => {
-          const on = effectiveTab === t.key;
-          return (
-            <button
-              key={t.key}
-              type="button"
-              role="tab"
-              aria-selected={on}
-              onClick={() => setInnerTab(t.key)}
-              className={`-mb-px flex shrink-0 items-center gap-1 whitespace-nowrap rounded-t-md border border-b-0 px-3 py-1.5 text-xs font-medium ${
-                on
-                  ? 'border-gray-300 bg-white text-sky-600 dark:border-gray-700 dark:bg-gray-950 dark:text-sky-300'
-                  : 'border-transparent text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-900/60'
-              }`}
-            >
-              {t.label}
-            </button>
-          );
-        })}
-      </div>
+  return (
+    <div className="mx-auto max-w-[1400px] space-y-6" data-testid="insights-view">
+      {/* The page header: title + the sub-tab strip (the Tabs primitive; 1–3 pick a tab).
+          `effectiveTab` (derived, never written back) picks the body. The strip scrolls inside
+          itself on a phone, never the page. */}
+      <PageHeader title="Reports">
+        <Tabs
+          label="Reports tabs"
+          idPrefix="reports"
+          numberKeys
+          value={effectiveTab}
+          onChange={setInnerTab}
+          tabs={REPORT_TABS}
+        />
+      </PageHeader>
 
       {effectiveTab === 'bottlenecks' ? (
         <BottlenecksPanel />
@@ -83,24 +100,22 @@ export function InsightsView(): JSX.Element {
               state stands in for the SECTION — heading included — rather than being stacked under
               a heading with nothing beneath it. */}
           {nothingToShow ? (
-            <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-400 dark:border-gray-700">
+            <div className="rounded-ui bg-ui-surface px-4 py-8 text-center text-body text-ui-ink">
               Nothing to measure in this Workspace yet.
-              <div className="mt-1 text-[11px]">
+              <div className="mt-1 text-meta text-ui-mute">
                 Flow metrics appear once this workspace has merged pull requests to measure.
               </div>
             </div>
           ) : (
             // No section heading here: the panel's own "Flow metrics" heading (with its info
             // button) is the heading, and a second one above it read as a stutter.
-            <section className="space-y-2">
+            <section>
               <WorkspaceFlowMetrics />
             </section>
           )}
 
-          <section className="space-y-2">
-            <h3 className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-400">
-              Period reports
-            </h3>
+          <section className="space-y-3">
+            <SectionHeading title="Period reports" />
             <PeriodReportsPanel />
           </section>
         </>

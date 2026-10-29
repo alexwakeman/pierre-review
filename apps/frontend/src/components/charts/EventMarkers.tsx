@@ -83,12 +83,12 @@ export function EventMarkerRail({
       {markers.map((m) => {
         const cls = `absolute top-0 flex h-5 w-5 -translate-x-1/2 items-center justify-center rounded-full border ${
           m.selected
-            ? 'border-sky-600 bg-sky-50 text-sky-700 dark:border-sky-400 dark:bg-sky-950 dark:text-sky-300'
-            : 'border-gray-300 bg-white text-gray-600 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-300'
+            ? 'border-ui-accent bg-ui-sel text-ui-accent'
+            : 'border-ui-line bg-ui-surface text-ui-mute'
         } ${m.dashed ? 'border-dashed' : ''}`;
         const badge =
           m.count > 1 ? (
-            <span className="absolute -right-1.5 -top-1 rounded-full bg-gray-700 px-1 text-[11px] leading-[13px] text-white dark:bg-gray-200 dark:text-gray-900">
+            <span className="absolute -right-1.5 -top-1 rounded-full bg-ui-ink px-1 text-meta leading-[13px] text-ui-bg">
               {m.count}
             </span>
           ) : null;
@@ -104,7 +104,7 @@ export function EventMarkerRail({
           <button
             key={m.key}
             type="button"
-            className={`${cls} hover:border-sky-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500`}
+            className={`${cls} focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent`}
             style={{ left: m.x }}
             aria-label={m.label}
             aria-pressed={m.selected ? true : undefined}
@@ -122,7 +122,7 @@ export function EventMarkerRail({
       {interactive && tip != null && (
         <div
           role="tooltip"
-          className="pointer-events-none absolute top-6 z-30 max-w-[280px] -translate-x-1/2 rounded-md border border-gray-200 bg-white/95 px-2 py-1 text-[11px] leading-snug text-gray-700 shadow-md dark:border-gray-700 dark:bg-gray-900/95 dark:text-gray-200"
+          className="pointer-events-none absolute top-6 z-30 max-w-[280px] -translate-x-1/2 rounded-ui bg-ui-raise px-2 py-1 text-meta leading-snug text-ui-ink shadow-lg ring-1 ring-ui-line"
           style={{ left: Math.max(140, Math.min(tip.x, width - 140)) }}
         >
           {tip.lines.map((l, i) => (

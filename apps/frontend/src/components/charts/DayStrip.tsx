@@ -109,7 +109,7 @@ export function DayStrip({
                     height={cellH}
                     rx={1.5}
                     fill={on ? hue : 'currentColor'}
-                    className={on ? '' : 'decorative-mark text-gray-100 dark:text-gray-800'}
+                    className={on ? '' : 'decorative-mark text-ui-faint'}
                     fillOpacity={on ? 0.2 + 0.8 * (c / max) : 1}
                     stroke={isHover ? hue : 'none'}
                     strokeWidth={isHover ? 1.5 : 0}
@@ -184,10 +184,10 @@ export function DayStrip({
               />
             ))}
             {/* x ticks: first + last date */}
-            <text x={0} y={H - 2} className="fill-gray-500 dark:fill-gray-400 text-[11px]">
+            <text x={0} y={H - 2} className="fill-gray-500 dark:fill-gray-400 text-meta">
               {dateAt(0)}
             </text>
-            <text x={w} y={H - 2} textAnchor="end" className="fill-gray-500 dark:fill-gray-400 text-[11px]">
+            <text x={w} y={H - 2} textAnchor="end" className="fill-gray-500 dark:fill-gray-400 text-meta">
               {dateAt(n - 1)}
             </text>
             <rect
