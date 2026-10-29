@@ -4349,6 +4349,20 @@ check(
   await wc.writeWikiCredentials(1, defaultB, 'confluence', { token: 'evil' }, {}).catch(() => {});
   const credB = await wc.resolveWikiCredential(2, defaultB, { provider: 'confluence', host: 'acme.atlassian.net' }, {});
   check("B's Confluence token survives A's write naming B's workspace", credB.state === 'ok' && credB.credential.token === 'tok-2');
+  // NOTION (same table, provider 'notion'): one token per workspace, never another account's.
+  await wc.writeWikiCredentials(2, defaultB, 'notion', { token: 'ntn_bbbbbbbbbbbbbbbbbbbbbbbb' }, {});
+  check("resolveWikiCredential(A, B's workspace, notion) finds nothing", (await wc.resolveWikiCredential(1, defaultB, { provider: 'notion', host: 'www.notion.so' }, {})).state === 'none');
+  check("readWikiCredentialsSettings(A, B's workspace) shows no Notion token", (await wc.readWikiCredentialsSettings(1, defaultB)).notion.hasToken === false);
+  const notionB = await wc.resolveWikiCredential(2, defaultB, { provider: 'notion', host: 'www.notion.so' }, {});
+  check("resolveWikiCredential(B, B's workspace, notion) opens B's token (mutation check)", notionB.state === 'ok' && notionB.credential.token === 'ntn_bbbbbbbbbbbbbbbbbbbbbbbb');
+  // FIGURE DESCRIPTIONS (migration 0145): the cache is keyed by (account, image hash).
+  const fc = await import('../src/reference-docs/figure-cache.js');
+  const sharedHash = 'f'.repeat(64);
+  await fc.saveFigureDescription(2, sharedHash, "B's diagram", { provider: 'claude', model: 'claude-haiku-5-5', costUsd: 0.001 });
+  check("cachedFigureDescriptions(A, B's image hash) is empty", (await fc.cachedFigureDescriptions(1, [sharedHash])).size === 0);
+  check("cachedFigureDescriptions(B, B's image hash) is B's (mutation check)", (await fc.cachedFigureDescriptions(2, [sharedHash])).get(sharedHash) === "B's diagram");
+  await fc.saveFigureDescription(1, sharedHash, "A's own words", { provider: 'claude', model: 'claude-haiku-5-5', costUsd: 0.001 });
+  check("A's description of the same image never overwrites B's", (await fc.cachedFigureDescriptions(2, [sharedHash])).get(sharedHash) === "B's diagram");
 
   const Fastify = (await import('fastify')).default;
   const rapp = Fastify({ logger: false });

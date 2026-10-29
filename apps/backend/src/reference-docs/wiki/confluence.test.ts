@@ -6,6 +6,10 @@ import { parseConfluencePageUrl } from '@pierre-review/shared';
 import type { JiraTransport, RawResponse } from '../../tracker/jira/fetch.js';
 import { confluenceGetJson, confluenceSource, cqlSince, nextUrl, orderTree, retryAfterMs } from './confluence.js';
 import { WikiSourceError, type WikiPageRef } from './source.js';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import type { PageTransport } from '../url-fetch.js';
+import { folderFigureSink } from '../figures.js';
 
 // THE CONFLUENCE ADAPTER against RECORDED answers (__fixtures__/confluence/*.json) through a fake
 // transport — no real Confluence call. Pinned: address parsing, the page / tree / change-search reads,
@@ -158,5 +162,51 @@ describe('429 — Retry-After is honoured', () => {
     expect(retryAfterMs(new Date(Date.UTC(2026, 0, 1, 0, 0, 30)).toUTCString(), Date.UTC(2026, 0, 1))).toBe(30_000);
     expect(retryAfterMs('soon')).toBeNull();
     expect(retryAfterMs(undefined)).toBeNull();
+  });
+});
+
+describe('figures (docs/REFERENCE-DOCS.md § Figures)', () => {
+  it('an image attachment is downloaded (the media redirect followed WITHOUT the credential); a draw.io file becomes an outline', async () => {
+    const png = Buffer.alloc(4096);
+    png.writeUInt32BE(0x89504e47, 0);
+    png.writeUInt32BE(640, 16);
+    png.writeUInt32BE(480, 20);
+    const xml = '<mxfile><diagram><mxGraphModel><root><mxCell id="a" value="Shop" vertex="1"/><mxCell id="b" value="Bank" vertex="1"/><mxCell id="e" value="pays" edge="1" source="a" target="b"/></root></mxGraphModel></diagram></mxfile>';
+    const { transport, calls } = fakeTransport((url) => {
+      const file = url.searchParams.get('filename');
+      if (url.pathname.endsWith('/attachments') && file === 'flow.png') return json(JSON.stringify({ results: [{ downloadLink: '/download/attachments/1001/flow.png?api=v2' }] }));
+      if (url.pathname.endsWith('/attachments') && file === 'Checkout') return json(JSON.stringify({ results: [{ downloadLink: '/download/attachments/1001/Checkout?api=v2' }] }));
+      if (url.pathname.endsWith('/attachments')) return json(JSON.stringify({ results: [] }));
+      if (url.pathname === '/wiki/download/attachments/1001/flow.png') return { status: 302, contentType: '', body: '', headers: { location: 'https://api.media.atlassian.com/file/abc/binary?token=signed' } };
+      if (url.pathname === '/wiki/download/attachments/1001/Checkout') return { status: 200, contentType: 'application/vnd.jgraph.mxfile', body: xml, headers: {} };
+      return json('{}', 404);
+    });
+    const media: string[] = [];
+    const pageTransport: PageTransport = async (url) => {
+      media.push(url.href);
+      return { status: 200, contentType: 'image/png', location: null, body: png };
+    };
+    const dir = mkdtempSync(join(tmpdir(), 'conf-fig-'));
+    try {
+      const src = confluenceSource({ transport, pageTransport });
+      const page = {
+        id: '1001', title: 'Checkout', parentId: null, version: 3, editedAt: null, depth: 0, position: null,
+        webUrl: 'https://acme.atlassian.net/wiki/spaces/PAY/pages/1001/Checkout',
+        body: '<p>Intro</p><ac:image ac:alt="Flow"><ri:attachment ri:filename="flow.png"/></ac:image><ac:structured-macro ac:name="drawio"><ac:parameter ac:name="diagramName">Checkout</ac:parameter></ac:structured-macro>',
+      };
+      const md = await src.toMarkdown(page, { ...CRED, figures: folderFigureSink(dir) });
+      expect(md).toMatch(/\[\[limn-figure:[0-9a-f]{64}:Image: Flow\]\]/);
+      expect(md).toContain('[Diagram outline from its draw.io source: Checkout]');
+      expect(md).toContain('- Shop → Bank: pays');
+      expect(media).toEqual(['https://api.media.atlassian.com/file/abc/binary?token=signed']);
+      // The credential went to Confluence only, never to the media host.
+      expect(calls.every((c) => c.url.startsWith('https://acme.atlassian.net/') && c.auth?.startsWith('Basic '))).toBe(true);
+      // Without a sink, nothing is downloaded and the names stay.
+      const plain = await src.toMarkdown(page);
+      expect(plain).toContain('[Image: Flow]');
+      expect(plain).toContain('[Diagram: Checkout]');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

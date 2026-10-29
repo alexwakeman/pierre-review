@@ -3,6 +3,7 @@ import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'nod
 import { join } from 'node:path';
 import {
   WIKI_PROVIDER_NAMES,
+  type ReferenceDocFigures,
   type ReferenceDocSummaryCache,
   type ReferenceDocCrawl,
   type ReferenceDocSourceKind,
@@ -25,11 +26,14 @@ import {
 } from '../review/claude-review/manager.js';
 import { pickReviewNonce } from '../review/claude-review/prompts.js';
 import { outstanding, type BuildMode } from './build-judge.js';
-import { ConverterMissingError, convertToMarkdown, htmlToMarkdown, pdfPageCount, sniffFetched, sniffUpload, type SniffResult } from './convert.js';
+import { ConverterMissingError, convertToMarkdown, htmlToMarkdown, pdfPageCount, sniffFetched, sniffUpload, type HtmlFigureOptions, type SniffResult } from './convert.js';
+import { figureDeps, figureDescriptionAvailable } from './figure-describer.js';
+import { fetchImageBytes, imageSources } from './figure-fetch.js';
+import { figuresDirOf, figuresOf, folderFigureSink, pruneFigures, readFigure, resolveFigures, FIGURE_MAX_FETCHES_PER_BUILD, type FigureSink } from './figures.js';
 import { CrawlRefusal, bundleCrawlMarkdown, crawlSite, type BundlePage } from './crawl.js';
 import { makeLinkRanker } from './crawl-rank.js';
 import { installDocFolder, readSource, saveSource, writeIndex } from './library.js';
-import { stagingRoot } from './paths.js';
+import { sourcesDir, stagingRoot } from './paths.js';
 import { BUILD_PDF_SYSTEM_PROMPT, buildPdfPrompt, buildSectionsPrompt, buildSectionsSystemPrompt, buildSectionsUpdatePrompt } from './prompts.js';
 import { draftsFromWritten, renderDocFolder, trimTitle } from './assemble.js';
 import { sectionFileNames, validateDocFolder } from './render.js';
@@ -46,7 +50,7 @@ import {
   type DocRow,
   type Telemetry,
 } from './store.js';
-import { UrlFetchError, fetchPage, type FetchedPage } from './url-fetch.js';
+import { UrlFetchError, defaultPagePolicy, fetchPage, type FetchedPage } from './url-fetch.js';
 import { WikiIdle, WikiRefusal, readWikiForBuild, type WikiRead } from './wiki/build.js';
 import { automaticRunAllowed } from '../review/budget-gate.js';
 
@@ -216,7 +220,7 @@ interface SourceRead {
 }
 
 /** A wiki tree (docs/REFERENCE-DOCS.md § Wiki sources): only the changed pages are read again. */
-async function wikiSource(job: Job, row: DocRow, report: Report, signal: AbortSignal): Promise<SourceRead> {
+async function wikiSource(job: Job, row: DocRow, report: Report, signal: AbortSignal, sink: FigureSink): Promise<SourceRead> {
   const name = WIKI_PROVIDER_NAMES[wikiStateOf(row.wiki)?.provider ?? 'confluence'];
   report('converting', 3, `Checking ${name}`, true);
   const read = await readWikiForBuild({
@@ -224,8 +228,26 @@ async function wikiSource(job: Job, row: DocRow, report: Report, signal: AbortSi
     full: job.full,
     signal,
     onProgress: (done, total) => report('converting', 3 + (5 * done) / Math.max(1, total), `Reading ${name} pages (${done} of ${total})`),
+    // A wiki page's images are read with it, always: a Notion file address expires within the hour, so
+    // bytes kept now are what a later refresh describes if Claude cannot do it today.
+    figures: sink,
   });
   return { body: Buffer.from(read.markdown, 'utf8'), sniff: { ok: true, kind: 'markdown', ext: 'md' }, wiki: read };
+}
+
+/**
+ * A web page's images, downloaded for figures (docs/REFERENCE-DOCS.md § Figures) — only when Claude can
+ * describe them here: a page is fetched again on every build, so bytes kept for later buy nothing.
+ */
+async function pageImages(html: string, baseUrl: string | null, sink: FigureSink, signal: AbortSignal): Promise<HtmlFigureOptions> {
+  if (!baseUrl || !figureDescriptionAvailable().ok) return { figures: sink };
+  const images = new Map<string, Buffer>();
+  for (const src of imageSources(html, baseUrl, FIGURE_MAX_FETCHES_PER_BUILD)) {
+    if (signal.aborted || !sink.canFetch()) break;
+    const bytes = await fetchImageBytes(src, sink, defaultPagePolicy());
+    if (bytes) images.set(src, bytes);
+  }
+  return { figures: sink, images, baseUrl };
 }
 
 /** A section's identity for the summary cache: its title, its trail and its text. */
@@ -248,7 +270,7 @@ function singlePage(row: DocRow, page: FetchedPage): SourceRead {
  * (crawl.ts, every request through the guarded `fetchPage`), then bundle the pages into ONE markdown
  * source — a chapter per page — that the ordinary 'sections' pipeline splits and summarises.
  */
-async function crawlSource(job: Job, row: DocRow, crawl: ReferenceDocCrawl, report: Report, signal: AbortSignal): Promise<SourceRead> {
+async function crawlSource(job: Job, row: DocRow, crawl: ReferenceDocCrawl, report: Report, signal: AbortSignal, sink: FigureSink): Promise<SourceRead> {
   const { ctx, accountId } = job;
   const { cheapComplete } = await import('../review/llm.js');
   const ranker = makeLinkRanker({
@@ -295,7 +317,7 @@ async function crawlSource(job: Job, row: DocRow, crawl: ReferenceDocCrawl, repo
   const bundled: BundlePage[] = [];
   for (const p of outcome.pages) {
     if (signal.aborted) throw new BuildRefusal('Cancelled.');
-    bundled.push({ url: p.url, title: p.title, markdown: await htmlToMarkdown(p.html) });
+    bundled.push({ url: p.url, title: p.title, markdown: await htmlToMarkdown(p.html, await pageImages(p.html, p.url, sink, signal)) });
   }
   const body = Buffer.from(bundleCrawlMarkdown(bundled), 'utf8');
   saveSource(row.accountId, row.workspaceId, row.slug, body, 'md');
@@ -310,12 +332,12 @@ async function crawlSource(job: Job, row: DocRow, crawl: ReferenceDocCrawl, repo
 }
 
 /** The document's bytes and their kind. A URL is fetched again; anything else reads the stored source. */
-async function readSourceFor(job: Job, row: DocRow, report: Report, signal: AbortSignal): Promise<SourceRead> {
-  if (row.sourceKind === 'wiki') return wikiSource(job, row, report, signal);
+async function readSourceFor(job: Job, row: DocRow, report: Report, signal: AbortSignal, sink: FigureSink): Promise<SourceRead> {
+  if (row.sourceKind === 'wiki') return wikiSource(job, row, report, signal, sink);
   if (row.sourceKind === 'url') {
     if (!row.sourceUrl) throw new BuildRefusal('This document has no address to read.');
     const crawl = crawlOf(row.crawl);
-    if (crawl) return crawlSource(job, row, crawl, report, signal);
+    if (crawl) return crawlSource(job, row, crawl, report, signal, sink);
     let page;
     try {
       page = await fetchPage(row.sourceUrl);
@@ -345,12 +367,17 @@ async function runBuild(job: Job, controller: AbortController): Promise<void> {
 
   const staging = join(stagingRoot(accountId, row.workspaceId), `${row.slug}-${docId}-${Date.now().toString(36)}`);
   const sectionsDir = join(staging, 'sections');
+  // FIGURES (docs/REFERENCE-DOCS.md § Figures): the document's images, kept beside its source.
+  const figuresDir = figuresDirOf(sourcesDir(accountId, row.workspaceId, row.slug));
+  const sink = folderFigureSink(figuresDir);
   try {
     mkdirSync(sectionsDir, { recursive: true });
-    const { body, sniff, crawl: crawled, wiki } = await readSourceFor(job, row, report, controller.signal);
+    const { body, sniff, crawl: crawled, wiki } = await readSourceFor(job, row, report, controller.signal, sink);
     // A WIKI REFRESH THAT CHANGED NOTHING (every page hash, title and place as stored): no rebuild and
-    // no model — record the check and go back to ready.
-    if (wiki && !wiki.sync.contentChanged && row.builtAt != null && !job.full) {
+    // no model — record the check and go back to ready. Unless figures wait for a description Claude
+    // can give now (an earlier refresh was over the AI budget): then the build goes on to describe them.
+    const figuresWaiting = (figuresOf(row.figures)?.pending ?? 0) > 0 && figureDescriptionAvailable().ok;
+    if (wiki && !wiki.sync.contentChanged && row.builtAt != null && !job.full && !figuresWaiting) {
       await wiki.commit();
       await markDocIdle(accountId, docId, 'Nothing to build.');
       publish({ type: 'done', docId, status: 'ready', error: null });
@@ -362,6 +389,8 @@ async function runBuild(job: Job, controller: AbortController): Promise<void> {
     let names: string[] = [];
     let convertedTitle: string | null = null;
     let pageCount: number | null = null;
+    let figureInfo: ReferenceDocFigures | null = null;
+    let markedMarkdown: string | null = null;
 
     if (effective === 'pdf') {
       // ⚠ A PDF is read through Claude's own Read tool: Codex cannot read one (reference-docs/agent.ts).
@@ -380,10 +409,23 @@ async function runBuild(job: Job, controller: AbortController): Promise<void> {
     } else {
       mode = 'sections';
       report('converting', 8, 'Converting to markdown', true);
-      const converted = await convertToMarkdown(effective, body);
+      const fig: HtmlFigureOptions =
+        row.sourceKind === 'url' && effective === 'html'
+          ? await pageImages(body.toString('utf8'), row.sourceUrl, sink, controller.signal)
+          : { figures: sink };
+      const converted = await convertToMarkdown(effective, body, fig);
       convertedTitle = converted.title;
       if (converted.markdown.trim() === '') throw new BuildRefusal('No text could be read from this file.');
-      drafts = splitMarkdown(converted.markdown, trimTitle(convertedTitle ?? row.title) || 'Introduction');
+      // Each figure marker → its description (cached, or one vision call), or its name (figures.ts).
+      markedMarkdown = converted.markdown;
+      const resolved = await resolveFigures(converted.markdown, {
+        ...figureDeps({ accountId, ctx, automatic: job.automatic }),
+        read: (h) => readFigure(figuresDir, h),
+        signal: controller.signal,
+        onProgress: (done, total) => report('converting', 8, `Describing figures (${done} of ${total})`),
+      });
+      figureInfo = resolved.figures;
+      drafts = splitMarkdown(resolved.markdown, trimTitle(convertedTitle ?? row.title) || 'Introduction');
       if (drafts.length === 0) throw new BuildRefusal('No text could be read from this file.');
       names = sectionFileNames(drafts.map((d) => d.title));
       drafts.forEach((d, i) => {
@@ -541,6 +583,10 @@ async function runBuild(job: Job, controller: AbortController): Promise<void> {
     installDocFolder(accountId, row.workspaceId, row.slug, outDir);
     await saveDocBuilt(accountId, docId, { title, summary: finish.summary, topics: finish.topics, sections: entries }, telemetry);
     if (crawled) await patchDoc(accountId, docId, { crawl: crawled.stored });
+    if (mode === 'sections') {
+      await patchDoc(accountId, docId, { figures: figureInfo });
+      if (markedMarkdown != null) pruneFigures(figuresDir, markedMarkdown);
+    }
     if (wiki) {
       // The cache the NEXT refresh reads, then the pages and the refresh state — only now, so a failed
       // or skipped build never advances a version.

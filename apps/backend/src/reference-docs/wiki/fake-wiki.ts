@@ -1,7 +1,20 @@
+import { parseNotionPageUrl, type WikiProviderId } from '@pierre-review/shared';
 import { WikiSourceError, type WikiPage, type WikiPageMeta, type WikiSource } from './source.js';
 
-// AN IN-MEMORY WIKI for the tests (sync.test.ts, wiki-db.test.ts) — the provider-blind half of the
-// WikiSource contract, with every call counted. Not imported by production code.
+/** A PNG header of the given size, distinct per seed (figures.ts reads only the header). */
+export function fakePng(seed: number, w = 640, h = 480): Buffer {
+  const b = Buffer.alloc(4096);
+  b.writeUInt32BE(0x89504e47, 0);
+  b.writeUInt32BE(0x0d0a1a0a, 4);
+  b.writeUInt32BE(w, 16);
+  b.writeUInt32BE(h, 20);
+  b.writeUInt32BE(seed, 4092);
+  return b;
+}
+
+// AN IN-MEMORY WIKI for the tests (sync.test.ts, wiki-db.test.ts, notion-figures-db.test.ts) — the
+// provider-blind half of the WikiSource contract, with every call counted. Not imported by production
+// code. A body's `{{figure:N}}` is an image: with a figure sink it becomes a marker (fakePng(N)).
 
 export interface FakePage {
   id: string;
@@ -22,7 +35,7 @@ export interface FakeWiki extends WikiSource {
   resetCalls(): void;
 }
 
-export function fakeWiki(seed: FakePage[]): FakeWiki {
+export function fakeWiki(seed: FakePage[], provider: WikiProviderId = 'confluence'): FakeWiki {
   const pages = new Map(seed.map((p) => [p.id, { ...p }]));
   const calls = { getMeta: [] as string[], getBody: [] as string[], list: 0, changed: 0, access: 0 };
   const failing = new Map<string, WikiSourceError>();
@@ -45,11 +58,15 @@ export function fakeWiki(seed: FakePage[]): FakeWiki {
     position: p.position ?? null,
   });
   return {
-    provider: 'confluence',
+    provider,
     pages,
     calls,
     failing,
     resolveRef: (raw) => {
+      if (provider === 'notion') {
+        const a = parseNotionPageUrl(raw);
+        return a ? { provider: 'notion', origin: a.origin, host: a.host, pageId: a.pageId } : null;
+      }
       const m = /^https:\/\/([a-z0-9.-]+)\/wiki\/spaces\/[A-Z]+\/pages\/(\d+)/.exec(raw);
       return m ? { provider: 'confluence', origin: `https://${m[1]}`, host: m[1]!, pageId: m[2]! } : null;
     },
@@ -79,8 +96,8 @@ export function fakeWiki(seed: FakePage[]): FakeWiki {
       calls.changed += 1;
       return [...pages.values()].filter((p) => p.id !== root && depthOf(p.id, root) > 0 && p.editedAt.getTime() > since.getTime() - 24 * 3600_000).map((p) => meta(p));
     },
-    async toMarkdown(page) {
-      return page.body;
+    async toMarkdown(page, opts) {
+      return page.body.replace(/\{\{figure:(\d+)\}\}/g, (_m, n: string) => opts?.figures?.add(fakePng(Number(n)), `Image: figure-${n}.png`) ?? `[Image: figure-${n}.png]`);
     },
     async checkAccess() {
       calls.access += 1;

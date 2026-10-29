@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { REFERENCE_DOC_WIKI_MAX_PAGES, type ReferenceDocWikiState } from '@pierre-review/shared';
 import { demoteHeadings } from '../crawl.js';
+import type { FigureSink } from '../figures.js';
 import { WikiSourceError, type WikiCredential, type WikiPageMeta, type WikiPageRef, type WikiSource } from './source.js';
 
 // THE WIKI TREE, READ EFFICIENTLY (docs/REFERENCE-DOCS.md § Wiki sources → Refresh). Provider-blind:
@@ -62,6 +63,8 @@ export interface WikiSyncArgs {
   now: Date;
   signal?: AbortSignal;
   onProgress?(done: number, total: number): void;
+  /** Where a fetched page's images go (figures.ts). Absent ⇒ images keep their names. */
+  figures?: FigureSink;
 }
 
 export interface WikiSyncResult {
@@ -84,7 +87,8 @@ async function changedPages(args: Pick<WikiSyncArgs, 'source' | 'site' | 'state'
   if (args.state.depth <= 0) return out;
   const since = new Date(args.state.lastCheckedAt ?? 0);
   const byId = new Map(args.stored.map((p) => [p.pageId, p]));
-  for (const m of await args.source.changedSince(args.site, args.state.rootPageId, since, { credential: args.credential, signal: args.signal })) {
+  const known = new Set(args.stored.map((p) => p.pageId));
+  for (const m of await args.source.changedSince(args.site, args.state.rootPageId, since, { credential: args.credential, signal: args.signal, known })) {
     const s = byId.get(m.id);
     const moved = s == null || (m.version != null ? m.version !== s.version : m.editedAt != null && (s.lastEditedAt?.getTime() ?? 0) < m.editedAt.getTime());
     if (moved) out.set(m.id, m);
@@ -158,7 +162,8 @@ export async function syncWikiTree(args: WikiSyncArgs): Promise<WikiSyncResult> 
     const isRoot = i === 0;
     const prev = byId.get(meta.id);
     const cached = prev ? args.readCached(meta.id) : null;
-    const stale = isRoot ? rootMoved(rootMeta, prev) : changed.has(meta.id) || (prev != null && meta.title !== prev.title && listed);
+    // The root: its own metadata, or the search naming it (a wiki whose search sees the root — Notion).
+    const stale = isRoot ? rootMoved(rootMeta, prev) || changed.has(meta.id) : changed.has(meta.id) || (prev != null && meta.title !== prev.title && listed);
     const url = source.pageUrl(site, meta.id);
     args.onProgress?.(i + 1, order.length);
     if (prev && cached != null && !stale) {
@@ -180,7 +185,7 @@ export async function syncWikiTree(args: WikiSyncArgs): Promise<WikiSyncResult> 
     }
     try {
       const page = await source.getPage(site, meta.id, { ...call, body: true });
-      const markdown = (await source.toMarkdown(page)).trim();
+      const markdown = (await source.toMarkdown(page, { ...call, figures: args.figures })).trim();
       fetched += 1;
       out.push({
         pageId: meta.id,

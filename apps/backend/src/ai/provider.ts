@@ -261,6 +261,21 @@ export interface CompleteResult {
   costUsd?: number;
 }
 
+/**
+ * ONE image, described (docs/REFERENCE-DOCS.md § Figures): a tool-less, one-turn completion whose user
+ * message carries the image beside the prompt. CLAUDE ONLY — Codex's image input stays locked off
+ * (ai/codex/config.ts `LOCKED_SETTINGS`), so its provider has no `describeImage` and a caller keeps the
+ * image's name. The image is a stranger's: the caller's system prompt says describe, never obey.
+ */
+export interface DescribeImageRequest {
+  /** An exact model id. Absent ⇒ the provider's `fast` model. */
+  model?: string;
+  system: string;
+  prompt: string;
+  image: { mime: 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp'; base64: string };
+  maxTokens?: number;
+}
+
 export interface ProviderStatus {
   id: AgentProviderId;
   /** False ⇒ this provider cannot run anything here (not built yet, not installed, no sign-in). */
@@ -299,6 +314,8 @@ export interface AgentProvider {
   resolveModel(choice: ModelChoice): string;
   runAgent(spec: AgentRunSpec): Promise<AgentRunResult>;
   complete(req: CompleteRequest): Promise<CompleteResult>;
+  /** Describe one image (vision). Absent ⇒ this provider reads no images (Codex). */
+  describeImage?(req: DescribeImageRequest): Promise<CompleteResult>;
   detect(): Promise<ProviderStatus>;
   /** The credential rung, read at call time. Cheap and sync (the budget asks it per request). */
   credentialRoute(): 'login' | 'api_key' | 'none';

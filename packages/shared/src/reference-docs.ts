@@ -88,9 +88,41 @@ export interface ReferenceDoc {
   /** A wiki page tree (Confluence): where it lives, how many pages, when it was last checked, and
    *  whether the wiki can still be reached. Absent / null for every other source. */
   wiki?: ReferenceDocWiki | null;
+  /** The images and diagrams of the latest build (docs/REFERENCE-DOCS.md § Figures): how many were
+   *  described by AI, kept as their names, or left for a later refresh, and ONE sentence when they
+   *  could not be described here. Absent / null when the build met no figure. */
+  figures?: ReferenceDocFigures | null;
   createdAt: string;
   updatedAt: string;
   builtAt: string | null;
+}
+
+// ---- figures: images and diagrams as text (docs/REFERENCE-DOCS.md § Figures) ----
+
+/** The most figures one document has described by AI; the rest keep their names. */
+export const REFERENCE_DOC_FIGURE_MAX_PER_DOC = 30;
+/** The largest image read for a description. Larger ones keep their names. */
+export const REFERENCE_DOC_FIGURE_MAX_BYTES = 5 * 1024 * 1024;
+/** Images smaller than this (bytes) are icons: never described. */
+export const REFERENCE_DOC_FIGURE_MIN_BYTES = 2 * 1024;
+/** Images narrower or shorter than this (pixels) are icons: never described. */
+export const REFERENCE_DOC_FIGURE_MIN_PIXELS = 48;
+/** The model that describes an image (Claude only — Codex reads no images). */
+export const REFERENCE_DOC_FIGURE_MODEL = 'claude-haiku-5-5';
+/** How a generated description opens, in the library's text. A quote inside one is never grounding. */
+export const REFERENCE_DOC_FIGURE_PREFIX = '[Figure (described by AI): ';
+
+export interface ReferenceDocFigures {
+  /** Figures whose text is an AI description (new this build or from the cache). */
+  described: number;
+  /** Figures read from their own source (Mermaid / PlantUML text, a draw.io or Gliffy outline). */
+  outlined: number;
+  /** Figures kept as their names (icons, unsupported formats, past the cap, no Claude). */
+  kept: number;
+  /** Figures waiting for a description (the AI budget was spent): a later refresh tries again. */
+  pending: number;
+  /** One sentence when figures could not be described here (Codex, no Claude sign-in), else null. */
+  note: string | null;
 }
 
 export interface ReferenceDocsResponse {

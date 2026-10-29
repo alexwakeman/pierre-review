@@ -86,7 +86,9 @@ export function removeWorkspaceDocs(accountId: number, workspaceId: number): voi
 
 export function saveSource(accountId: number, workspaceId: number, slug: string, body: Buffer, ext: string): void {
   const dir = sourcesDir(accountId, workspaceId, slug);
-  rmSync(dir, { recursive: true, force: true });
+  // The previous source FILE goes; the folders beside it stay (a wiki's `pages/`, the figures a build
+  // just stored in `figures/` — pruned after a successful build, figures.ts `pruneFigures`).
+  if (existsSync(dir)) for (const f of readdirSync(dir)) if (/^source\.[a-z0-9]+$/i.test(f)) rmSync(join(dir, f), { force: true });
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, `source.${ext.replace(/[^a-z0-9]/gi, '').slice(0, 8) || 'bin'}`), body);
 }

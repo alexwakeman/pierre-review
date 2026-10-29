@@ -34,6 +34,7 @@ import type {
   AgentRunSpec,
   CompleteRequest,
   CompleteResult,
+  DescribeImageRequest,
   ModelChoice,
   ModelRole,
   ProviderStatus,
@@ -319,6 +320,79 @@ async function agentComplete(
   return { text: trimmed, usage: { inputTokens, outputTokens } };
 }
 
+// ---- describeImage (vision; docs/REFERENCE-DOCS.md § Figures) ------------------------------------
+//
+// The cheap completion's twin with ONE image beside the prompt: the same ladder, the same request shape
+// (low effort + thinking headroom on the adaptive model), no tools, one turn. On the login the image
+// rides a streamed user message (the Agent SDK's only way to send content blocks); on the key it is a
+// plain Messages API call.
+
+async function describeImage(req: DescribeImageRequest): Promise<CompleteResult> {
+  const model = req.model ?? CLAUDE_MODEL_FOR_ROLE.fast;
+  const credential = resolveAiCredential();
+  const route = cheapRoute(credential);
+  if (route === 'none') throw new Error(NO_CLAUDE_AUTH_MESSAGE);
+  const content = [
+    { type: 'image' as const, source: { type: 'base64' as const, media_type: req.image.mime, data: req.image.base64 } },
+    { type: 'text' as const, text: req.prompt },
+  ];
+  const shape = cheapRequestShape(model, req.maxTokens ?? 400);
+  if (route === 'api' && credential.route === 'api_key') {
+    const { default: Anthropic } = await loadAnthropicSdk();
+    const client = new Anthropic({ apiKey: credential.apiKey });
+    const resp = await client.messages.create({
+      model,
+      max_tokens: shape.maxTokens,
+      ...(shape.effort ? { output_config: { effort: shape.effort } } : {}),
+      system: req.system,
+      messages: [{ role: 'user', content }],
+    });
+    const blocks: unknown = resp.content;
+    const text = (Array.isArray(blocks) ? blocks : [])
+      .map((b) => {
+        const block = b as { type?: unknown; text?: unknown };
+        return block?.type === 'text' && typeof block.text === 'string' ? block.text : '';
+      })
+      .join('');
+    return { text: text.trim(), usage: { inputTokens: resp.usage.input_tokens, outputTokens: resp.usage.output_tokens }, model };
+  }
+  const { query } = await loadAgentSdk();
+  async function* oneMessage(): AsyncGenerator<Record<string, unknown>> {
+    yield { type: 'user', message: { role: 'user', content }, parent_tool_use_id: null, session_id: '' };
+  }
+  const q = query({
+    prompt: oneMessage() as never,
+    options: {
+      model,
+      ...(shape.effort ? { effort: shape.effort } : {}),
+      systemPrompt: req.system,
+      allowedTools: [],
+      maxTurns: 1,
+      permissionMode: 'bypassPermissions',
+      settingSources: [],
+      ...ISOLATED_MCP,
+      hooks: { PreToolUse: [ownToolsOnlyHook([])] },
+      ...claudeExecutableOptions(),
+      env: agentSdkEnv(process.env, credential),
+    },
+  });
+  let text = '';
+  let inputTokens = 0;
+  let outputTokens = 0;
+  for await (const message of q as AsyncIterable<Record<string, unknown>>) {
+    if (message.type === 'assistant') {
+      const inner = (message.message ?? {}) as { content?: Array<{ type?: unknown; text?: unknown }> };
+      for (const b of inner.content ?? []) if (b?.type === 'text' && typeof b.text === 'string') text += b.text;
+    } else if (message.type === 'result') {
+      const usage = (message.usage ?? {}) as { input_tokens?: number; output_tokens?: number };
+      inputTokens = usage.input_tokens ?? inputTokens;
+      outputTokens = usage.output_tokens ?? outputTokens;
+    }
+  }
+  if (!text.trim()) throw new Error('The image description came back empty.');
+  return { text: text.trim(), usage: { inputTokens, outputTokens }, model };
+}
+
 // ---- detect ----------------------------------------------------------------------------------
 
 async function detect(): Promise<ProviderStatus> {
@@ -391,6 +465,7 @@ export const claudeProvider: AgentProvider = {
   resolveModel,
   runAgent,
   complete,
+  describeImage,
   detect,
   credentialRoute: () => resolveAiCredential().route,
   usage: {

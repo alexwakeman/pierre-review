@@ -981,6 +981,13 @@
       "when": 1792137627016,
       "tag": "0140_reference_doc_wiki",
       "breakpoints": true
+    },
+    {
+      "idx": 145,
+      "version": "6",
+      "when": 1792137632016,
+      "tag": "0145_reference_doc_figures",
+      "breakpoints": true
     }
   ]
 }

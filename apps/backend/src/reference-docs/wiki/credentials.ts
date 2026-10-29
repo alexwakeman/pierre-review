@@ -1,5 +1,5 @@
 import { and, eq } from 'drizzle-orm';
-import type { WikiCredentialsSettings, WikiProviderId } from '@pierre-review/shared';
+import { NOTION_TOKEN_RE, type WikiCredentialsSettings, type WikiProviderId } from '@pierre-review/shared';
 import { decryptToken, encryptToken, sealingAvailable } from '../../auth/crypto.js';
 import { db, schema } from '../../db/client.js';
 import { openTrackerToken, storeTrackerToken, type HostSeal } from '../../tracker/secret.js';
@@ -13,6 +13,9 @@ import type { WikiCredential, WikiPageRef } from './source.js';
 //      page's host (Confluence Cloud and Jira Cloud share `<x>.atlassian.net` and one API token), and
 //      an email and a token are saved;
 //   3. else none — the import / refresh says "Add a Confluence API token in Settings".
+//
+// NOTION has ONE rung: the workspace's own Notion row (provider 'notion', token only — api.notion.com is
+// the only host, so there is no site to match). The integration must be SHARED with the pages in Notion.
 //
 // ⚠ THE TOKEN IS WRITE-ONLY AND SEALED exactly like a tracker token (tracker/secret.ts: `sealed:v1:`
 // when the process holds an ENCRYPTION_KEY, else `plain:` — the trust of the machine's own `gh` token).
@@ -79,7 +82,11 @@ async function jiraRow(accountId: number, workspaceId: number): Promise<{ host: 
 }
 
 export async function readWikiCredentialsSettings(accountId: number, workspaceId: number): Promise<WikiCredentialsSettings> {
-  const [row, jira] = await Promise.all([readRow(accountId, workspaceId, 'confluence'), jiraRow(accountId, workspaceId)]);
+  const [row, jira, notion] = await Promise.all([
+    readRow(accountId, workspaceId, 'confluence'),
+    jiraRow(accountId, workspaceId),
+    readRow(accountId, workspaceId, 'notion'),
+  ]);
   return {
     workspaceId,
     confluence: {
@@ -89,6 +96,8 @@ export async function readWikiCredentialsSettings(accountId: number, workspaceId
       hasToken: row?.authToken != null && row.authToken !== '',
       jiraSite: jira && (jira.email ?? '').trim() !== '' && jira.token ? jira.host : null,
     },
+    // ⚠ presence only — never the token.
+    notion: { hasToken: notion?.authToken != null && notion.authToken !== '' },
   };
 }
 
@@ -96,6 +105,14 @@ export interface WikiCredentialPatch {
   siteUrl?: string | null;
   email?: string | null;
   token?: string | null;
+}
+
+/** A Notion patch's problem, in a sentence, or null (the token's SHAPE: a stray paste never becomes it). */
+export function notionCredentialPatchError(p: { token?: string | null }): string | null {
+  if (p.token != null && p.token.trim() !== '' && !NOTION_TOKEN_RE.test(p.token.trim())) {
+    return 'That is not a Notion integration token. It starts with ntn_ (or secret_ for an older one).';
+  }
+  return null;
 }
 
 /** A patch's problem, in a sentence, or null. */
@@ -147,6 +164,13 @@ export async function resolveWikiCredential(
 ): Promise<ResolvedCredential> {
   const host = ref.host.toLowerCase();
   const own = await readRow(accountId, workspaceId, ref.provider);
+  // Notion: one token per workspace, for its one API host.
+  if (ref.provider === 'notion') {
+    if (!own?.authToken) return { state: 'none' };
+    const opened = openTrackerToken(seal, own.authToken);
+    if (opened.state === 'ok') return { state: 'ok', credential: { email: null, token: opened.token }, from: 'wiki' };
+    return opened.state === 'unreadable' ? { state: 'unreadable' } : { state: 'none' };
+  }
   if (own && siteHost(own.siteUrl) === host && own.authToken) {
     const opened = openTrackerToken(seal, own.authToken);
     if (opened.state === 'ok') return { state: 'ok', credential: { email: own.authEmail, token: opened.token }, from: 'wiki' };

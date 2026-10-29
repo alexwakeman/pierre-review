@@ -39,6 +39,7 @@ import type {
   ReferenceDocCrawl,
   ReferenceDocWikiState,
   ReferenceDocSummaryCache,
+  ReferenceDocFigures,
   ReferenceDocSectionEntry,
   ReviewDocReference,
   ReviewPeerRead,
@@ -3741,6 +3742,9 @@ export const referenceDocs = sqliteTable(
     // 0140. The incremental build's summary cache: section content hash → its one-line summary, plus
     // the document summary and topics, from the last successful build (wiki documents).
     summaryCache: text('summary_cache_json', { mode: 'json' }).$type<ReferenceDocSummaryCache>(),
+    // 0145. The latest build's figures (ReferenceDocFigures): described / outlined / kept / pending and
+    // the one sentence when they could not be described here. NULL = the build met no figure.
+    figures: text('figures_json', { mode: 'json' }).$type<ReferenceDocFigures>(),
     pageCount: integer('page_count'),
     costUsd: real('cost_usd'),
     inputTokens: integer('input_tokens'),
@@ -3838,6 +3842,30 @@ export const workspaceWikiCredentials = sqliteTable(
       columns: [t.workspaceId, t.accountId],
       foreignColumns: [workspaces.id, workspaces.accountId],
     }).onDelete('cascade'),
+  }),
+);
+
+// reference_doc_figure_descriptions (migration 0145; docs/REFERENCE-DOCS.md § Figures) — the CACHE of
+// AI image descriptions, keyed by the image's sha256 within the ACCOUNT, so a refresh or a rebuild never
+// describes an unchanged image again (and a logo on every page is described once). `description` is
+// the model's words (one line) or 'DECORATIVE'. Read only for hashes the document itself holds, so one
+// document's text cannot reach another's description. In accountScopedTables(), erased, exported.
+export const referenceDocFigureDescriptions = sqliteTable(
+  'reference_doc_figure_descriptions',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    imageHash: text('image_hash').notNull(),
+    description: text('description').notNull(),
+    provider: text('provider'),
+    model: text('model'),
+    costUsd: real('cost_usd'),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    accountHashUx: uniqueIndex('reference_doc_figure_descriptions_account_hash').on(t.accountId, t.imageHash),
   }),
 );
 

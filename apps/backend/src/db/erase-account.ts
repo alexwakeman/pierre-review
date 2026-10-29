@@ -220,6 +220,8 @@ export async function eraseAccountData(accountId: number): Promise<EraseResult> 
     // sealed wiki credential. Both cascade too, and are explicit anyway.
     await tx.delete(schema.referenceDocWikiPages).where(eq(schema.referenceDocWikiPages.accountId, accountId)).execute();
     await tx.delete(schema.workspaceWikiCredentials).where(eq(schema.workspaceWikiCredentials.accountId, accountId)).execute();
+    // Figure descriptions (migration 0145): the account's image-description cache.
+    await tx.delete(schema.referenceDocFigureDescriptions).where(eq(schema.referenceDocFigureDescriptions.accountId, accountId)).execute();
     await tx.delete(schema.referenceDocs).where(eq(schema.referenceDocs.accountId, accountId)).execute();
     // Story docs checks (migration 0121 / pg 0108): cascade from workspaces too, and are explicit anyway.
     await tx.delete(schema.storyDocsAlignments).where(eq(schema.storyDocsAlignments.accountId, accountId)).execute();
@@ -395,6 +397,12 @@ export function accountScopedTables(): {
     },
     // Wiki sources (migration 0140), erased explicitly above; `workspaceWikiCredentials` holds a credential.
     { name: 'referenceDocWikiPages', col: schema.referenceDocWikiPages.accountId, table: schema.referenceDocWikiPages },
+    // Figure descriptions (migration 0145), erased explicitly above.
+    {
+      name: 'referenceDocFigureDescriptions',
+      col: schema.referenceDocFigureDescriptions.accountId,
+      table: schema.referenceDocFigureDescriptions,
+    },
     {
       name: 'workspaceWikiCredentials',
       col: schema.workspaceWikiCredentials.accountId,
