@@ -37,8 +37,15 @@ describe('Settings → Claude spend: the 5-hour share follows the week', () => {
 
   it('refuses a 5-hour share out of range', () => {
     expect(claudeSpendBodyOf(draft({ fiveHourSharePct: '0' }), 'login')).toHaveProperty('error');
-    expect(claudeSpendBodyOf(draft({ fiveHourSharePct: '51' }), 'login')).toHaveProperty('error');
+    expect(claudeSpendBodyOf(draft({ fiveHourSharePct: '101' }), 'login')).toHaveProperty('error');
+    expect(claudeSpendBodyOf(draft({ weekSharePct: '101' }), 'login')).toHaveProperty('error');
     expect(claudeSpendBodyOf(draft({ fiveHourSharePct: '2.5' }), 'login')).toHaveProperty('error');
+  });
+
+  it('accepts a share up to the whole allowance (100%)', () => {
+    expect(claudeSpendBodyOf(draft({ weekSharePct: '100', fiveHourSharePct: '100' }), 'login')).toMatchObject({
+      body: { weekSharePct: 100, fiveHourSharePct: 100 },
+    });
   });
 
   it('API key: no 5-hour setting in the body', () => {

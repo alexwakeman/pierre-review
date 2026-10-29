@@ -20,13 +20,14 @@ import { claudeSpendBodyOf, claudeSpendDraftOf, type ClaudeSpendDraft } from './
 import { InfoButton } from '../InfoModal.js';
 import { Field, SaveButton, SectionShell, inputCls } from './ui.js';
 
-// "AI spend" — the ONE optional budget that pauses Limn's AUTOMATIC AI runs before they eat
+// "AI spend" — the ONE budget that pauses Limn's AUTOMATIC AI runs before they eat
 // the reader's subscription allowance or API bill (GET/PUT /api/ai/budget; docs/CLAUDE-REVIEW.md
 // § The Claude spend budget). ACCOUNT-grained (it guards this machine's Claude login or API key),
-// so it sits in the modal's global half. OFF until the reader switches it on.
+// so it sits in the modal's global half. ON by default at 50% of the week on a subscription (the
+// reader may change it or switch it off); on an API key nothing applies until the reader sets a figure.
 //
 // The form follows the CREDENTIAL ROUTE the server reports: the Claude Code login gets ONE number,
-// Limn's share of the weekly allowance (1–50%) — the 5-hour share follows it unless the reader opens
+// Limn's share of the weekly allowance (1–100%) — the 5-hour share follows it unless the reader opens
 // "Set a separate 5-hour limit" (claudeSpendForm.ts) — plus the subscription (detected, or picked where
 // Claude's report is ambiguous) — percentages only, never US$; an API key gets a weekly US$ budget.
 // The server decides; this section only edits the settings and words the status.

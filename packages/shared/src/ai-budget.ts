@@ -70,11 +70,13 @@ export const SUBSCRIPTION_ESTIMATES: Record<AiSubscriptionKind, { week: number; 
 };
 
 /** Limn's share of the week (and of a 5-hour session): a whole number from 1 to this. */
-export const AI_BUDGET_SHARE_MAX = 50;
+export const AI_BUDGET_SHARE_MAX = 100;
 
-/** The defaults the Settings form fills in when the reader switches the budget on. */
+/** The defaults. A subscription budget is ON at 50% of the week until the reader changes or switches
+ *  it off (Settings → AI spend); `weeklyUsd` is the API-key form's suggestion only (never applied
+ *  unasked — see `budgetSettingsInForce`). */
 export const AI_BUDGET_DEFAULTS = {
-  weekSharePct: 5,
+  weekSharePct: 50,
   weeklyUsd: 25,
 } as const;
 
@@ -115,13 +117,13 @@ export function cycleCostUsd(input: {
   return input.autoDiagrams ? review + pick(input.diagramMeanUsd, AI_CYCLE_COST_FALLBACKS.diagram) : review;
 }
 
-/** What `accounts.ai_budget_settings` holds (NULL = never set = off with the defaults). Older rows
+/** What `accounts.ai_budget_settings` holds (NULL = never set = ON at the default share). Older rows
  *  may still carry `fiveHourPct` / `weekPct` / `dailyUsd`; they are ignored on read. */
 export interface AiBudgetSettings {
   enabled: boolean;
-  /** Subscription: Limn's share of the weekly allowance, a whole number 1–50. */
+  /** Subscription: Limn's share of the weekly allowance, a whole number 1–100. */
   weekSharePct: number;
-  /** Subscription: Limn's share of the 5-hour session allowance, a whole number 1–50, or null =
+  /** Subscription: Limn's share of the 5-hour session allowance, a whole number 1–100, or null =
    *  the same as `weekSharePct` (the default; "5% a week → 5% a session"). */
   fiveHourSharePct: number | null;
   /** Subscription: the reader's pick, used where Claude's own report is ambiguous ('max', unknown). */
@@ -134,6 +136,19 @@ function isSharePct(v: unknown): v is number {
   return typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= AI_BUDGET_SHARE_MAX;
 }
 
+/**
+ * The settings the DECISION uses. A subscription share is on by default, but an API key has no
+ * allowance to take a share of: a never-set row (`isDefault`) on an API key applies no US$ cap until
+ * the reader types one. Pure.
+ */
+export function budgetSettingsInForce(
+  settings: AiBudgetSettings,
+  isDefault: boolean,
+  route: 'login' | 'api_key' | 'none',
+): AiBudgetSettings {
+  return isDefault && route === 'api_key' ? { ...settings, enabled: false } : settings;
+}
+
 /** The 5-hour share in force: the reader's own, else the weekly share. */
 export function effectiveFiveHourSharePct(settings: Pick<AiBudgetSettings, 'weekSharePct' | 'fiveHourSharePct'>): number {
   return settings.fiveHourSharePct ?? settings.weekSharePct;
@@ -144,7 +159,8 @@ export function resolveAiBudgetSettings(raw: Partial<AiBudgetSettings> | null | 
   const r = (raw ?? {}) as Partial<AiBudgetSettings>;
   const usd = r.weeklyUsd;
   return {
-    enabled: r.enabled === true,
+    // ON unless the reader switched it off: a row never set (NULL) reads as on.
+    enabled: r.enabled !== false,
     weekSharePct: isSharePct(r.weekSharePct) ? r.weekSharePct : AI_BUDGET_DEFAULTS.weekSharePct,
     fiveHourSharePct: isSharePct(r.fiveHourSharePct) ? r.fiveHourSharePct : null,
     subscription:
@@ -366,8 +382,8 @@ export function aiProviderWorthShowing(usage: AiUsageView): boolean {
 
 /**
  * The scale a Limn share's bar is drawn against, in % of the allowance: the reader's limit while the
- * budget is on, else AI_BUDGET_SHARE_MAX (50%) — the most Limn can be given, so the bar still says how
- * far along it is with no limit set. `limitSet` says which. Pure.
+ * budget is on, else the whole allowance (100%) — the bar still says how far along Limn is with the
+ * budget switched off. `limitSet` says which. Pure.
  */
 export function limnShareScale(
   status: AiBudgetStatus,

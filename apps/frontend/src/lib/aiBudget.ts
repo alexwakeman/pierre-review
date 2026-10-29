@@ -340,8 +340,8 @@ export function windowNote(resetsAt: string | null | undefined, rolling: string,
 }
 
 /**
- * One Limn share row: "0.4% · limit 5%" with a bar against the limit, or — no limit set — "0.4% · max
- * 50%" with a bar against the most Limn can be given (`limnShareScale`). Null while the share is unknown.
+ * One Limn share row: "0.4% · limit 50%" with a bar against the limit, or — the budget switched off —
+ * "0.4%" with a bar against the whole allowance (`limnShareScale`). Null while the share is unknown.
  */
 function limnShareRow(
   label: string,
@@ -354,7 +354,7 @@ function limnShareRow(
   const { maxPct, limitSet } = limnShareScale(status, which);
   return {
     label,
-    value: `${formatFineSharePct(sharePct)} · ${limitSet ? 'limit' : 'max'} ${maxPct}%`,
+    value: limitSet ? `${formatFineSharePct(sharePct)} · limit ${maxPct}%` : formatFineSharePct(sharePct),
     barPct: barOf((sharePct / maxPct) * 100),
     note,
   };

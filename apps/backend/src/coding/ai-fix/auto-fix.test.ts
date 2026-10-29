@@ -226,7 +226,7 @@ describe('maybeStartAutoFix — the author gate', () => {
 describe('maybeStartAutoFix — the spend budget, on Codex (docs/CODEX-PLAN.md Phase 3)', () => {
   it('⚠ Codex over its share of the ChatGPT window ⇒ skipped "over_budget", the seed never loaded and no fix started', async () => {
     const { budgetWindowStart, decideAiBudget, resolveAiBudgetSettings } = await import('@pierre-review/shared');
-    // Limn is ALL of a week window reading 6% — over the default 5% share (the token-weighted fold).
+    // Limn is ALL of a week window reading 6% — over a 5% share (the token-weighted fold).
     const reading = {
       week: { utilization: 6, resetsAtMs: NOW + 3 * 24 * HOUR, observedAtMs: NOW },
       fiveHour: { utilization: 1, resetsAtMs: NOW + 2 * HOUR, observedAtMs: NOW },
@@ -239,7 +239,7 @@ describe('maybeStartAutoFix — the spend budget, on Codex (docs/CODEX-PLAN.md P
         allowAutomaticRun: async (_accountId: number, what: string) => {
           asked.push(what);
           const status = decideAiBudget({
-            settings: resolveAiBudgetSettings({ enabled: true }),
+            settings: resolveAiBudgetSettings({ enabled: true, weekSharePct: 5 }),
             route: 'login',
             reading,
             ledger: [{ atMs: NOW - HOUR, usd: 0, inputTokens: 1000, outputTokens: 0 }],

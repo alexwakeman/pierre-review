@@ -3,7 +3,8 @@
 // neither leak nor depend on. It judges the ACTIVE provider (provider.ts), as the server does.
 //
 // CLAUDE (the default). The demo reader is on a Claude subscription Claude reports as "max" (picked:
-// Max 20x), with the budget ON at the default 5% share (the 5-hour share following it), of which Limn
+// Max 20x), with the budget ON at a 5% share (set explicitly: the product default is 50%; the 5-hour
+// share following it), of which Limn
 // has used 2% this week — so the meter beside every Run button and the header's usage item show.
 // Claude's own account reading: 5-hour session 12%, week 31%, Opus 9%, Sonnet 22%.
 //
@@ -46,7 +47,7 @@ const REPORTED = 'max';
 const RUNS = 24;
 const RUN_USD = (0.02 * SUBSCRIPTION_ESTIMATES.max20x.week) / RUNS;
 
-const INITIAL: AiBudgetSettings = resolveAiBudgetSettings({ enabled: true, subscription: 'max20x' });
+const INITIAL: AiBudgetSettings = resolveAiBudgetSettings({ enabled: true, weekSharePct: 5, subscription: 'max20x' });
 
 function settingsOf(srv: DemoServer): AiBudgetSettings {
   const s = srv.overlay.stored.get(KEY);

@@ -167,13 +167,13 @@ describe('the ledger is read per provider', () => {
     const codexRows = (await db.select().from(schema.aiUsage).execute()).filter((r: any) => r.provider === 'codex' && r.costUsd === 0);
     expect(codexRows).toHaveLength(2);
     expect(codexRows.filter((r: any) => r.inputTokens === null && r.outputTokens === null)).toHaveLength(1);
-    await B.writeAiBudgetSettings(7, { enabled: true });
+    await B.writeAiBudgetSettings(7, { enabled: true, weekSharePct: 5 });
     try {
       const snap = await B.aiBudgetSnapshot(7, { probe: false, nowMs: now + 1000 });
       expect(snap.status.provider).toBe('codex');
       expect(snap.status.route).toBe('login');
       expect(snap.status.mode).toBe('subscription');
-      // 200 / 400 × 10% = 5% of the week ⇒ at the 5% default share: over.
+      // 200 / 400 × 10% = 5% of the week ⇒ at a 5% share: over.
       expect(snap.status.subscription?.usedSharePct).toBe(5);
       // 200 / 400 × 4% = 2% of the 5-hour window.
       expect(snap.status.subscription?.fiveHourUsedSharePct).toBe(2);

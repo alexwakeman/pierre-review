@@ -292,15 +292,16 @@ describe('the usage popover', () => {
     expect(d.sections[0]!.rows.map((r) => r.label)).toEqual(['Runs this week']);
     expect(d.updated).toBeNull();
   });
-  it('no limit set: a bar anyway, against the 50% most Limn can be given', () => {
+  it('budget switched off: the share alone, with a bar against the whole allowance (100%)', () => {
     const d = usageDetailOf(resp({ enabled: false, mode: 'off', subscription: null }), now);
     const rows = d.sections.flatMap((s) => s.rows);
     const week = rows.find((r) => r.label === 'This week')!;
-    expect(week.value).toBe('2% · max 50%');
-    expect(week.barPct).toBe(4);
+    expect(week.value).toBe('2%');
+    expect(week.barPct).toBe(2);
     const five = rows.find((r) => r.label === 'This 5-hour session')!;
-    expect(five.value).toBe('0.4% · max 50%');
-    expect(five.barPct).toBeCloseTo(0.8, 5);
+    expect(five.value).toBe('0.4%');
+    expect(five.barPct).toBeCloseTo(0.4, 5);
+    expect(JSON.stringify(d)).not.toMatch(/max \d|limit \d/);
     expect(JSON.stringify(d)).not.toMatch(/\$/);
   });
   it('no reset known (or an older server): the rolling window, named', () => {

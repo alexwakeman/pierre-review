@@ -5,13 +5,13 @@ import { useClickOutside } from '../hooks/useClickOutside.js';
 import { useSettingsModal } from '../store/settingsModal.js';
 import { headerUsageOf, usageDetailsOf } from '../lib/aiBudget.js';
 import { InfoButton } from './InfoModal.js';
-import { AI_BUDGET_SHARE_MAX } from '@pierre-review/shared';
+import { AI_BUDGET_DEFAULTS } from '@pierre-review/shared';
 import { SparkleIcon } from './Icons.js';
 
 // THE HEADER'S AI USAGE ITEM, beside the light/dark button: ONE figure of budget used so far
 // (lib/aiBudget.ts `headerUsageOf` says which), and on click a popover with what is known — Limn's
 // share of this 5-hour session and of the week (a bar each: against the reader's limit, else against
-// the 50% most Limn can be given), each provider's own account windows with their reset times, Limn's
+// the whole allowance when the budget is switched off), each provider's own account windows with their reset times, Limn's
 // runs and tokens this week; on an API key the US$ figures. EVERY provider in use gets its own block —
 // the default first, then each other one signed in or run this week (`others`). Unknown pieces are
 // left out.
@@ -159,8 +159,8 @@ function LimnShareInfo(): JSX.Element {
         last 5 hours and the last 7 days.
       </p>
       <p>
-        The bar runs to the limit you set in AI spend settings. With no limit set it runs to {AI_BUDGET_SHARE_MAX}%,
-        the most Limn can be given — nothing pauses Limn’s runs until you set a limit.
+        The bar runs to Limn’s limit, {AI_BUDGET_DEFAULTS.weekSharePct}% of the week unless you change it in AI spend
+        settings; past it, automatic runs pause. Switch the limit off there and the bar runs to your whole allowance.
       </p>
       <p>Claude’s share is an estimate from Anthropic’s unpublished limits. Codex’s is your account’s figure, weighted by Limn’s tokens.</p>
     </InfoButton>

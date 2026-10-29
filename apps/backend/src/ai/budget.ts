@@ -57,6 +57,7 @@ import {
   liveFiveHourReset,
   liveWeekReset,
   resolveAiBudgetSettings,
+  budgetSettingsInForce,
   rollingSpend,
   type AiBudgetSettings,
   type AiBudgetStatus,
@@ -377,7 +378,10 @@ export async function aiBudgetSnapshot(accountId: number, opts: AiBudgetStatusOp
   // the ledger — the named one (a manual run's per-run choice), else the default (active) one.
   const provider = opts.provider ? getProvider(opts.provider) : getActiveProvider();
   const route = provider.credentialRoute();
-  const { settings, isDefault } = await readAiBudgetSettings(accountId);
+  const stored = await readAiBudgetSettings(accountId);
+  const isDefault = stored.isDefault;
+  // On by default (a share of the week); a never-set row on an API key applies no US$ cap.
+  const settings = budgetSettingsInForce(stored.settings, isDefault, route);
   const probe = opts.probe ?? 'when_on';
   if (route === 'login' && (probe === 'always' || (probe === 'when_on' && settings.enabled))) kickUsageProbe(nowMs, provider);
   const isCodex = provider.id === 'codex';

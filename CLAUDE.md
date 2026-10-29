@@ -418,7 +418,7 @@ history: [docs/CODEX-PLAN.md](docs/CODEX-PLAN.md). Non-negotiables:
 - **No AI SDK in the npm manifest** — downloaded on first use ("Set up AI" / `limn ai install
   [codex]`) and value-imported ONLY by `ai/runtime.ts` (`loadAgentSdk`/`loadAnthropicSdk`/`loadZod`);
   `build-release.mjs` asserts it.
-- **THE SPEND BUDGET** (optional, per machine, `ai/budget.ts`; read per provider): ⚠
+- **THE SPEND BUDGET** (ON by default at 50% of the week on a subscription — the reader may change or switch it off; never-set on an API key = no cap; per machine, `ai/budget.ts`; read per provider): ⚠
   **every AUTOMATIC model run asks the ONE gate first** (`review/budget-gate.ts`
   `automaticRunAllowed` / `ctx.aiBudget`) and is SKIPPED, never queued, when over; a reader's click
   is never refused (the SPA asks). On a subscription it is a share of the week and of the 5-hour

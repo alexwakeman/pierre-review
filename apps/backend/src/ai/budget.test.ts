@@ -21,6 +21,8 @@ import {
   runWeekShareText,
   cycleCostUsd,
   resolveAiBudgetSettings,
+  budgetSettingsInForce,
+  AI_BUDGET_DEFAULTS,
   resolveAiSubscription,
   reviewsPerDayFor,
   validateAiBudgetBody,
@@ -47,8 +49,10 @@ const NOW = Date.UTC(2026, 9, 24, 12, 0);
 const H = 60 * 60 * 1000;
 const D = 24 * H;
 const eqId = (id: number) => eq(schema.accounts.id, id);
+// The arithmetic below is worked at a 5% share (the default is 50%): pinned here, so a default change
+// never silently re-prices these fixtures.
 const on = (over: Partial<AiBudgetSettings> = {}): AiBudgetSettings =>
-  resolveAiBudgetSettings({ enabled: true, ...over });
+  resolveAiBudgetSettings({ enabled: true, weekSharePct: 5, ...over });
 const NO_COSTS = { reviewMeanUsd: null, diagramMeanUsd: null, autoDiagrams: false };
 const decide = (over: Partial<Parameters<typeof import('./budget.js').decideAiBudget>[0]> = {}) =>
   B.decideAiBudget({ settings: on(), route: 'login', reading: null, ledger: [], costs: NO_COSTS, nowMs: NOW, ...over });
@@ -70,7 +74,7 @@ beforeAll(async () => {
   schema = client.schema;
   closeDb = client.closeDb;
   await runMigrations();
-  for (const id of [1, 2]) {
+  for (const id of [1, 2, 3]) {
     await db.insert(schema.accounts).values({ id, githubUserId: `U${id}`, githubLogin: `me${id}`, isLocal: id === 1 }).onConflictDoNothing().execute();
   }
   B = await import('./budget.js');
@@ -85,8 +89,10 @@ beforeEach(() => B._resetAiBudgetForTest());
 
 describe('decideAiBudget — off', () => {
   it('⚠ switched off never blocks, whatever the spend', () => {
-    const s = decide({ settings: resolveAiBudgetSettings(null), route: 'api_key', ledger: [{ atMs: NOW - H, usd: 10_000 }] });
-    expect(s).toMatchObject({ enabled: false, mode: 'off', overBudget: false, subscription: null, apiKey: null });
+    for (const route of ['api_key', 'login'] as const) {
+      const s = decide({ settings: resolveAiBudgetSettings({ enabled: false }), route, ledger: [{ atMs: NOW - H, usd: 10_000 }] });
+      expect(s).toMatchObject({ enabled: false, mode: 'off', overBudget: false, subscription: null, apiKey: null });
+    }
   });
 
   it('no credential is off too', () => {
@@ -416,13 +422,18 @@ describe('limnShareScale — the bar’s scale, with and without a limit', () =>
     const st = decide({ settings: on({ weekSharePct: 12, subscription: 'pro' }) });
     expect(limnShareScale(st, 'five_hour')).toEqual({ maxPct: 12, limitSet: true });
   });
-  it('no limit set (budget off, or an API key): the 50% most Limn can be given', () => {
+  it('no limit set (budget off, or an API key): the whole allowance, 100%', () => {
     const off = decide({ settings: resolveAiBudgetSettings({ enabled: false, weekSharePct: 8 }) });
-    expect(AI_BUDGET_SHARE_MAX).toBe(50);
-    expect(limnShareScale(off, 'week')).toEqual({ maxPct: 50, limitSet: false });
-    expect(limnShareScale(off, 'five_hour')).toEqual({ maxPct: 50, limitSet: false });
+    expect(AI_BUDGET_SHARE_MAX).toBe(100);
+    expect(limnShareScale(off, 'week')).toEqual({ maxPct: 100, limitSet: false });
+    expect(limnShareScale(off, 'five_hour')).toEqual({ maxPct: 100, limitSet: false });
     const key = decide({ route: 'api_key' });
-    expect(limnShareScale(key, 'week')).toEqual({ maxPct: 50, limitSet: false });
+    expect(limnShareScale(key, 'week')).toEqual({ maxPct: 100, limitSet: false });
+  });
+  it('the default (a never-set row on a login): a limit at 50% of the week and of the session', () => {
+    const st = decide({ settings: resolveAiBudgetSettings(null) });
+    expect(limnShareScale(st, 'week')).toEqual({ maxPct: 50, limitSet: true });
+    expect(limnShareScale(st, 'five_hour')).toEqual({ maxPct: 50, limitSet: true });
   });
 });
 
@@ -667,23 +678,58 @@ describe('validateAiBudgetBody', () => {
   it('accepts a subset and refuses bad values and retired keys', () => {
     expect(validateAiBudgetBody({ enabled: true })).toBeNull();
     expect(validateAiBudgetBody({ subscription: null, weekSharePct: 50 })).toBeNull();
-    expect(validateAiBudgetBody({ weekSharePct: 0 })).toMatch(/1 to 50/);
-    expect(validateAiBudgetBody({ weekSharePct: 51 })).toMatch(/1 to 50/);
+    expect(validateAiBudgetBody({ weekSharePct: 100 })).toBeNull();
+    expect(validateAiBudgetBody({ weekSharePct: 0 })).toMatch(/1 to 100/);
+    expect(validateAiBudgetBody({ weekSharePct: 101 })).toMatch(/1 to 100/);
     expect(validateAiBudgetBody({ weekSharePct: 5.5 })).toMatch(/whole/);
     expect(validateAiBudgetBody({ subscription: 'gold' })).toMatch(/subscription/);
     expect(validateAiBudgetBody({ weeklyUsd: -1 })).toMatch(/weeklyUsd/);
     expect(validateAiBudgetBody({ weeklyUsd: 0 })).toMatch(/weeklyUsd/);
     for (const k of ['fiveHourPct', 'weekPct', 'dailyUsd', 'nope']) expect(validateAiBudgetBody({ [k]: 1 })).toMatch(/Unknown/);
-    // The 5-hour share: a whole 1–50, or null (= follow the weekly share).
+    // The 5-hour share: a whole 1–100, or null (= follow the weekly share).
     expect(validateAiBudgetBody({ fiveHourSharePct: 10 })).toBeNull();
+    expect(validateAiBudgetBody({ fiveHourSharePct: 100 })).toBeNull();
     expect(validateAiBudgetBody({ fiveHourSharePct: null })).toBeNull();
-    for (const v of [0, 51, 2.5, '5']) expect(validateAiBudgetBody({ fiveHourSharePct: v })).toMatch(/fiveHourSharePct/);
+    for (const v of [0, 101, 2.5, '5']) expect(validateAiBudgetBody({ fiveHourSharePct: v })).toMatch(/fiveHourSharePct/);
     expect(validateAiBudgetBody([])).not.toBeNull();
   });
 
   it('old stored JSON (fiveHourPct / weekPct / dailyUsd) is tolerated and ignored on read', () => {
     const s = resolveAiBudgetSettings({ enabled: true, fiveHourPct: 70, weekPct: 80, dailyUsd: 3, weeklyUsd: 12 } as never);
-    expect(s).toEqual({ enabled: true, weekSharePct: 5, fiveHourSharePct: null, subscription: null, weeklyUsd: 12 });
+    expect(s).toEqual({ enabled: true, weekSharePct: 50, fiveHourSharePct: null, subscription: null, weeklyUsd: 12 });
+  });
+
+  it('a NULL (never-set) row is ON at the default 50% share; only a stored enabled:false is off', () => {
+    expect(AI_BUDGET_DEFAULTS.weekSharePct).toBe(50);
+    for (const raw of [null, undefined, {}]) {
+      expect(resolveAiBudgetSettings(raw)).toEqual({ enabled: true, weekSharePct: 50, fiveHourSharePct: null, subscription: null, weeklyUsd: AI_BUDGET_DEFAULTS.weeklyUsd });
+    }
+    expect(resolveAiBudgetSettings({ enabled: false }).enabled).toBe(false);
+    // Junk is not a switch-off: only the literal false is.
+    expect(resolveAiBudgetSettings({ enabled: 'no' } as never).enabled).toBe(true);
+    // Out-of-range shares fall back to the default / null.
+    expect(resolveAiBudgetSettings({ weekSharePct: 101, fiveHourSharePct: 101 })).toMatchObject({ weekSharePct: 50, fiveHourSharePct: null });
+    expect(resolveAiBudgetSettings({ weekSharePct: 100, fiveHourSharePct: 100 })).toMatchObject({ weekSharePct: 100, fiveHourSharePct: 100 });
+  });
+
+  it('budgetSettingsInForce: a never-set row on an API key is OFF (no US$ cap unasked); everything else as read', () => {
+    const never = resolveAiBudgetSettings(null);
+    expect(budgetSettingsInForce(never, true, 'api_key')).toEqual({ ...never, enabled: false });
+    expect(budgetSettingsInForce(never, true, 'login')).toEqual(never);
+    expect(budgetSettingsInForce(never, true, 'login').enabled).toBe(true);
+    // A stored row on an API key is applied as stored, on or off.
+    const storedOn = resolveAiBudgetSettings({ enabled: true, weeklyUsd: 12 });
+    expect(budgetSettingsInForce(storedOn, false, 'api_key')).toEqual(storedOn);
+    const storedOff = resolveAiBudgetSettings({ enabled: false });
+    expect(budgetSettingsInForce(storedOff, false, 'api_key')).toEqual(storedOff);
+    expect(budgetSettingsInForce(storedOff, false, 'login').enabled).toBe(false);
+    // Pure: the input is never mutated.
+    expect(never.enabled).toBe(true);
+    // Through the decision: a never-set key row never blocks; a never-set login row is a subscription share.
+    expect(decide({ settings: budgetSettingsInForce(never, true, 'api_key'), route: 'api_key', ledger: [{ atMs: NOW - H, usd: 10_000 }] }))
+      .toMatchObject({ mode: 'off', overBudget: false });
+    expect(decide({ settings: budgetSettingsInForce(never, true, 'login'), reading: reading('pro', NOW + 2 * D) }).subscription)
+      .toMatchObject({ sharePct: 50 });
   });
 
   it('the wire view carries the US$ budget on the API-key route only', () => {
@@ -701,10 +747,11 @@ describe('on the database', () => {
     process.env = env;
   });
 
-  it('settings round-trip: NULL reads as off with the defaults, a write merges over what is stored, old keys go', async () => {
+  it('settings round-trip: NULL reads as on with the defaults, a write merges over what is stored, old keys go', async () => {
     const first = await B.readAiBudgetSettings(2);
     expect(first.isDefault).toBe(true);
     expect(first.settings).toEqual(resolveAiBudgetSettings(null));
+    expect(first.settings).toMatchObject({ enabled: true, weekSharePct: 50 });
     await db.update(schema.accounts).set({ aiBudgetSettings: { enabled: true, weekPct: 80, dailyUsd: 3 } }).where(eqId(2)).execute();
     await B.writeAiBudgetSettings(2, { weeklyUsd: 12 });
     await B.writeAiBudgetSettings(2, { weekSharePct: 7 });
@@ -732,6 +779,32 @@ describe('on the database', () => {
     expect(s.mode).toBe('api_key');
     expect(s.apiKey).toEqual({ weeklyUsd: 12, usedUsd: 13 });
     expect(s.overBudget).toBe(true);
+  });
+
+  it('a never-set row: OFF on an API key (no US$ cap unasked), ON at 50% of the week on a login', async () => {
+    const saved = { ...process.env };
+    try {
+      expect((await B.readAiBudgetSettings(3)).isDefault).toBe(true);
+      process.env.ANTHROPIC_API_KEY = 'sk-test';
+      process.env.LIMN_AI_USE_API_KEY = 'true';
+      delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+      const key = await B.aiBudgetStatus(3, { nowMs: NOW, probe: false });
+      expect(key).toMatchObject({ route: 'api_key', enabled: false, mode: 'off', overBudget: false });
+      delete process.env.ANTHROPIC_API_KEY;
+      delete process.env.LIMN_AI_USE_API_KEY;
+      process.env.CLAUDE_CODE_OAUTH_TOKEN = 'tok';
+      const login = await B.aiBudgetStatus(3, { nowMs: NOW, probe: false });
+      expect(login).toMatchObject({ route: 'login', enabled: true, mode: 'subscription' });
+      expect(login.subscription).toMatchObject({ sharePct: 50 });
+      // Once the reader saves a row on the key, it is applied as stored.
+      process.env.ANTHROPIC_API_KEY = 'sk-test';
+      process.env.LIMN_AI_USE_API_KEY = 'true';
+      delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+      await B.writeAiBudgetSettings(3, { weeklyUsd: 30 });
+      expect(await B.aiBudgetStatus(3, { nowMs: NOW, probe: false })).toMatchObject({ mode: 'api_key', apiKey: { weeklyUsd: 30, usedUsd: 0 } });
+    } finally {
+      process.env = saved;
+    }
   });
 
   it('cycle costs: the account’s own 28-day means, and whether any workspace draws diagrams', async () => {
@@ -762,7 +835,7 @@ describe('on the database', () => {
     const s = await B.aiBudgetStatus(1, { nowMs: NOW + 60_000, probe: false });
     expect(s.route).toBe('login');
     expect(s.subscription).toMatchObject({ subscription: 'pro', window: 'reset', weekResetsAt: new Date(resetSec * 1000).toISOString() });
-    // Account 1 spent $500 an hour ago in the setup above: over its 5% of Pro — Limn's own spend.
+    // Account 1 spent $500 an hour ago in the setup above: over its 50% of Pro ($85) — Limn's own spend.
     expect(s.overBudget).toBe(true);
     expect(s.resumesAt).toBe(new Date(resetSec * 1000).toISOString());
   });

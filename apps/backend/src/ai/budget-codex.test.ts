@@ -36,7 +36,8 @@ function reading(weekPct: number | null, fivePct: number | null): AiUsageReading
   };
 }
 const row = (atMs: number, inputTokens: number, outputTokens = 0): AiLedgerRow => ({ atMs, usd: 0, inputTokens, outputTokens });
-const on = resolveAiBudgetSettings({ enabled: true });
+// Worked at a 5% share (the default is 50%), pinned so a default change never re-prices these cases.
+const on = resolveAiBudgetSettings({ enabled: true, weekSharePct: 5 });
 // The account's tokens over the WHOLE window (the span the fold then counts Limn's rows over too).
 const span = (r: AiUsageReading | null, which: 'week' | 'five_hour', tokens: number | null): AiAccountTokenSpan | null =>
   tokens == null ? null : { tokens, ...budgetWindowStart(r, NOW, which), toMs: NOW };

@@ -237,10 +237,13 @@ stored; the ladder is read at call time, so an env change takes effect on the ne
   `apps/backend/src/ai/runtime.ts`, value-imports them. [PACKAGING.md](PACKAGING.md) owns the
   details and the guardrail. The product modules import no SDK themselves.
 
-### The AI spend budget (optional, one per machine)
+### The AI spend budget (on by default, one per machine)
 
-An optional limit that PAUSES Limn's AUTOMATIC model runs before they use up the reader's Claude
-allowance or API bill. OFF until switched on (Settings suggests the defaults). ONE per account =
+A limit that PAUSES Limn's AUTOMATIC model runs before they use up the reader's Claude
+allowance or API bill. ON BY DEFAULT on a subscription at 50% of the week (a NULL row reads as on);
+the reader may change the share (1–100%) or switch it off in Settings → AI spend, and a stored
+`enabled: false` stays off. On an API key a never-set row applies NO US$ cap (`budgetSettingsInForce`:
+there is no allowance to take a share of) until the reader types one. ONE per account =
 per machine (the login / key it guards is the machine's), never per workspace. Types, defaults and
 the estimate table: `packages/shared/src/ai-budget.ts`; the decision, the reading and the gate:
 `ai/budget.ts`; stored on `accounts.ai_budget_settings` + `accounts.ai_budget_reading` (migration

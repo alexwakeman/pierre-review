@@ -192,9 +192,9 @@ describe('AI spend with Codex active', () => {
     const acct = d.sections[1]!.rows.map((r) => `${r.label}: ${r.value}`);
     expect(acct).toEqual(['5-hour session: 12% used · 88% left', 'Week: 31% used · 69% left']);
     const limn = d.sections[0]!.rows.map((r) => `${r.label}: ${r.value}`);
-    // The 5-hour session first, then the week; no limit set ⇒ a bar against the 50% most Limn can be given.
-    expect(limn.slice(0, 2)).toEqual(['This 5-hour session: 1% · max 50%', 'This week: 2.4% · max 50%']);
-    expect(d.sections[0]!.rows[1]!.barPct).toBeCloseTo(4.8, 5);
+    // The 5-hour session first, then the week; budget off ⇒ the share alone, a bar against the whole allowance.
+    expect(limn.slice(0, 2)).toEqual(['This 5-hour session: 1%', 'This week: 2.4%']);
+    expect(d.sections[0]!.rows[1]!.barPct).toBeCloseTo(2.4, 5);
     expect(JSON.stringify(d)).not.toMatch(/\$|Claude/);
   });
 
