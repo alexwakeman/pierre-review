@@ -861,6 +861,14 @@ function pushRelatedCodeSection(lines: string[], peers: readonly PromptPeer[], n
     "- Do not say whether the ticket's acceptance criteria are met, and do not judge the ticket. A separate ticket review does that.",
   );
   lines.push('');
+  pushRelatedPeerBlocks(lines, peers, nonce);
+}
+
+/**
+ * Each peer's heading and fenced block, as the related-code section lists them (also the replies
+ * pass's, claude-review/replies-check-prompt.ts — the same entries, so a related repo reads the same).
+ */
+export function pushRelatedPeerBlocks(lines: string[], peers: readonly PromptPeer[], nonce: string): void {
   for (const p of peers) {
     lines.push(relatedPeerHeading(p));
     lines.push('');

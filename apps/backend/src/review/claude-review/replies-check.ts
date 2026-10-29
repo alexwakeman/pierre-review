@@ -26,6 +26,9 @@ import {
   REVIEW_APPLY_AUTH_ENV,
   pumpReviewLane,
   registerReviewSlotPeer,
+  reviewPeersFor,
+  runPeerOf,
+  type ReviewPeer,
   reviewHeldForPr,
   reviewLaneWaiting,
   reviewSlotFree,
@@ -46,7 +49,9 @@ import { attachFindingThreads } from './finding-replies.js';
 import type { PriorFindingForFollowUp } from './follow-up.js';
 import type { AutoPostDeps } from './auto-post.js';
 import type { AutoResolveDeps } from './auto-resolve.js';
-import { pickReviewNonce } from './prompts.js';
+import { peerTexts, pickReviewNonce } from './prompts.js';
+import { checkOutPeers } from '../peer-checkouts.js';
+import { linkedPrsFor, linkedRunPeer, type LinkedPr } from './replies-linked-prs.js';
 import {
   REPLIES_PASS_CODE_CONTEXT_LINES,
   judgedThroughFor,
@@ -76,6 +81,11 @@ import { buildRepliesPrompt, repliesSystemPrompt } from './replies-check-prompt.
 // one `claude_reviews` row, `kind = 'replies'` — per provider, one after the other in the ONE shared
 // review slot (`registerReviewSlotPeer`). Standard depth, the Effort setting, read-only: Read / Glob /
 // Grep in the PR's read-only worktree behind the path guard, Bash denied (replies-check-agent.ts).
+// Beside it, read-only and behind the same guard (each checkout a root, removed after the pass): the
+// RELATED REPOS' code a full review of the PR reads (`reviewPeersFor`, the same peers and checkouts),
+// and at most REPLIES_LINKED_PR_MAX pull requests a judged reply LINKS to in the PR's own or a related
+// repo (replies-linked-prs.ts: an open one at its head, a merged one as its default branch), so "fixed
+// in the backend PR" can be checked instead of left not_checked.
 //
 // AFTER IT: an AUTO pass hands each row to auto resolve and auto pushback (their own switches and
 // claimed records — at most ONE pushback per thread, ever), then the outcome re-check
@@ -572,6 +582,8 @@ async function runJob(job: Job, controller: AbortController): Promise<void> {
   // in ANY group must not be covered by another group's row.
   const stamps: Array<{ reviewId: number; newestSentMs: number }> = [];
   const omittedReplyMs: number[] = [];
+  // The related repos' and the linked PRs' read-only checkouts; each cleanup runs in finally.
+  const peerCleanups: Array<() => Promise<void>> = [];
   try {
     let worktreePath: string | null = null;
     try {
@@ -581,6 +593,7 @@ async function runJob(job: Job, controller: AbortController): Promise<void> {
     } catch {
       worktreePath = null;
     }
+    const related = await relatedCheckouts(ctx, accountId, prId, headSha, peerCleanups);
     scratch = mkdtempSync(join(tmpdir(), 'pierre-replies-check-'));
     for (const g of job.groups) {
       if (controller.signal.aborted) {
@@ -604,7 +617,21 @@ async function runJob(job: Job, controller: AbortController): Promise<void> {
         }
       }
       const plan = planRepliesPass(findings, headSha, code);
-      const nonce = pickReviewNonce([pr.title, ...repliesPlanTexts(plan)]);
+      // This group's threads' linked PRs (the job-wide set, narrowed to the threads it sends).
+      const sentIds = new Set(plan.sent.map((x) => x.finding.id));
+      const linked = related.linked
+        .map((l) => ({ ...l, findingIds: l.findingIds.filter((id) => sentIds.has(id)) }))
+        .filter((l) => l.findingIds.length > 0);
+      const checkouts = [
+        ...related.peers.map((p) => ({ ref: p.ref, path: related.paths.get(p.ref) ?? null })),
+        ...linked.map((l) => ({ ref: l.ref, path: related.paths.get(l.ref) ?? null })),
+      ];
+      const nonce = pickReviewNonce([
+        pr.title,
+        ...repliesPlanTexts(plan),
+        ...peerTexts(related.peers),
+        ...linked.map((l) => l.title),
+      ]);
       const prompt = buildRepliesPrompt({
         repoFullName: `${pr.owner}/${pr.name}`,
         number: pr.number,
@@ -614,12 +641,19 @@ async function runJob(job: Job, controller: AbortController): Promise<void> {
         plan,
         nonce,
         provider: g.provider,
+        peers: related.peers,
+        linked,
+        checkouts,
       });
+      const roots = [
+        ...(worktreePath ? [worktreePath] : []),
+        ...checkouts.flatMap((c) => (c.path ? [c.path] : [])),
+      ];
       const { runRepliesCheckAgent } = await import('./replies-check-agent.js');
       const res = await runRepliesCheckAgent({
         model: REPLIES_CHECK_MODEL,
         cwd: scratch,
-        worktrees: worktreePath ? [worktreePath] : [],
+        worktrees: [...new Set(roots)],
         systemPrompt: repliesSystemPrompt(g.provider),
         prompt,
         applyAuthEnv: REVIEW_APPLY_AUTH_ENV,
@@ -678,6 +712,7 @@ async function runJob(job: Job, controller: AbortController): Promise<void> {
     }
   } finally {
     await cleanupWorktree?.().catch(() => {});
+    for (const c of peerCleanups) await c().catch(() => {});
     if (scratch) {
       try {
         rmSync(scratch, { recursive: true, force: true });
@@ -695,6 +730,53 @@ async function runJob(job: Job, controller: AbortController): Promise<void> {
   }
   if (succeeded.length === 0) return;
   await afterPass(ctx, job, succeeded, headSha);
+}
+
+interface RelatedCheckouts {
+  // The related repos' peers, as a full review of the PR gets them (refs X1…).
+  peers: ReviewPeer[];
+  // The PRs the judged replies link to (refs L1…), every group's threads.
+  linked: LinkedPr[];
+  // Where each ref was checked out (absent = it could not be).
+  paths: Map<string, string>;
+}
+
+/**
+ * The related code a pass may read beside the PR (see the header): the full review's peers and the
+ * linked PRs, checked out read-only through the deep review's own mechanism (`checkOutPeers`). Two
+ * separate checkouts, so a linked PR's default branch never shares a related repo's feature-branch
+ * checkout. Each cleanup is pushed to `cleanups` (run in the caller's finally, success or failure).
+ * Never throws: related code is optional; a failure costs it, never the pass.
+ */
+async function relatedCheckouts(
+  ctx: AgentContext,
+  accountId: number,
+  prId: number,
+  headSha: string,
+  cleanups: Array<() => Promise<void>>,
+): Promise<RelatedCheckouts> {
+  const out: RelatedCheckouts = { peers: [], linked: [], paths: new Map() };
+  try {
+    out.peers = await reviewPeersFor({ ctx, accountId, prId });
+    const planned = await planRepliesCheck(ctx, accountId, prId);
+    if (!('refused' in planned)) {
+      // The order the pass sends them in (most severe first), so the cap keeps the weightiest links.
+      const ordered = planRepliesPass(planned.findings, headSha).sent.map((x) => x.finding);
+      const rest = planned.findings.filter((f) => !ordered.includes(f));
+      out.linked = await linkedPrsFor(ctx, accountId, prId, [...ordered, ...rest]);
+    }
+    // One after the other: a rejection never leaves the other's cleanup to arrive after the caller's
+    // finally has run.
+    if (out.peers.length > 0) {
+      for (const [ref, path] of await checkOutPeers(out.peers.map(runPeerOf), cleanups)) out.paths.set(ref, path);
+    }
+    if (out.linked.length > 0) {
+      for (const [ref, path] of await checkOutPeers(out.linked.map(linkedRunPeer), cleanups)) out.paths.set(ref, path);
+    }
+  } catch (err) {
+    ctx.log.warn(`replies check pr ${prId}: related code not read: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  return out;
 }
 
 /**

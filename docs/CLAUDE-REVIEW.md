@@ -818,7 +818,7 @@ showed.
   read nothing from a repo the reader related. The walk is told the cap (`maxPeers`) and stops once
   the leading group is full, so no rule-3 GitHub read is spent on a change the cap would drop. Refs
   `X1…` in that order.
-- **The checkout** (`agent.ts` `checkOutPeers`): a PR peer at its head (`prepPeerWorktrees`), a branch
+- **The checkout** (`review/peer-checkouts.ts` `checkOutPeers`, shared with the replies pass): a PR peer at its head (`prepPeerWorktrees`), a branch
   or default-branch peer at the branch tip (`prepDefaultBranchCheckouts`, `RunReviewArgs.peers[].kind`).
   All are READ roots: Claude's path guard and `additionalDirectories`, Codex's workspace MCP server and
   its PreToolUse guard (`roots`, never write roots; pinned in `codex-review-runs.test.ts`).
@@ -831,6 +831,10 @@ showed.
 - **What was read** (`claude_reviews.peers_read`, `RunReviewResult.peersCheckedOut`): only the peers
   that checked out; served as `ClaudeReview.alsoRead` and shown under the run's meta line, "Also read:
   acme/api#21, acme/infra @ bmd-1048-…" (`reviewPeerReadLabel`).
+- **The replies pass reads them too** (2026-10-29): the SAME `reviewPeersFor` peers, checked out the
+  same way, as read roots on both providers, under "## Related code in other repositories" (the same
+  per-peer blocks, `pushRelatedPeerBlocks`; its own short intro, so the PR-review goldens are
+  untouched). Plus the PRs a reply LINKS to — § The replies pass.
 - **Not the ticket review.** It reads every PR on its ticket already (and the default branch of the
   merged members' repos); it does not use `reviewPeersFor` and is unchanged.
 
@@ -1287,6 +1291,27 @@ JUST the replies, cheaply, at the current head. Pure half `claude-review/replies
   pushed back — every block NONCE-FENCED as data. Result tool `submit_replies` (Codex: its strict
   schema in `ai/result-schemas.ts`): `reply_accepted` (+ `acceptKind`) / `reply_disputed` /
   `not_checked`, each through THE SAME GATE, `judgeReplyReport` (a deferred blocker is disputed…).
+- **Related code** (2026-10-29; PR 188673 left a frontend warning `not_checked` because the reply's
+  fix was in `bng-metric-backend#556` and the pass read only the frontend). The pass now reads, READ
+  ONLY, beside the PR's own worktree: (1) the RELATED REPOS' peers a full review of the PR reads
+  (`reviewPeersFor`, refs `X1…`, § Related repos); (2) at most `REPLIES_LINKED_PR_MAX` (2) PULL
+  REQUESTS A JUDGED REPLY LINKS TO (`replies-linked-prs.ts`, refs `L1…`): a GitHub PR URL,
+  `owner/name#N`, `name#N` (the PR's owner) or `#N` (the PR's repo). ⚠ The reply is UNTRUSTED: a
+  bounded prefix (`LINK_SCAN_CHARS`) read by patterns whose every quantifier is bounded (linear), at
+  most `LINKS_PER_REPLY` per reply; a link counts only in the PR's OWN repo or a repo RELATED to it in
+  its current workspace (`relatedRepoScope`, the one reading of the relation), only for a PR Limn has
+  STORED, never the PR itself — Limn never fetches an arbitrary repository. Open ⇒ a worktree at its
+  HEAD; merged ⇒ its repo's DEFAULT BRANCH (what it landed); closed unmerged ⇒ ignored. Priority: the
+  threads in send order (most severe first), each thread's newest reply first. Both sets go through
+  the deep review's `checkOutPeers` (two separate calls, so a merged link's default branch never shares
+  a related repo's feature-branch checkout), every path becomes a path-guard root and a Codex
+  workspace-MCP root, and every cleanup runs in the pass's `finally`, success or failure. The prompt
+  names each thread's linked refs INSIDE its fence ("Pull requests these replies link to: L1 (…#556)"),
+  lists the linked PRs (title fenced) and the related code, then the "Related checkouts" paths; and
+  one rule: a reply that says the issue is fixed elsewhere is VERIFIED in that checkout first —
+  fixed ⇒ `reply_accepted` (`not_valid` when the fix means the finding does not apply here,
+  `deferred` when it has not landed), not fixed ⇒ disputed, not visible ⇒ `not_checked`. Still
+  `judgeReplyReport`'s gate. A failure to read or check out related code costs it, never the pass.
 - **Stored as a run row**: `claude_reviews.kind = 'replies'` (migration 0136), `trigger` auto/manual,
   no findings, its `follow_up` items shaped EXACTLY like a review's (`priorReviewId` = the full
   review), labelled by `aiRunLabel` like any run ("Replies checked" in the history). So

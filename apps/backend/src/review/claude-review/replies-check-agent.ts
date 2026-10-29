@@ -28,8 +28,9 @@ import type { RepliesReport } from './replies-pass.js';
 //
 // THE TOOL SURFACE: Read, Glob, Grep and the in-process `submit_replies` — nothing else. Bash is
 // denied outright, so are the write and web tools and the sub-agent dispatch tools; the provider's
-// PreToolUse PATH GUARD confines every path to the scratch directory and the worktree (the replies
-// are attacker-influenced). Connectors are isolated by the provider. The model is the STANDARD depth
+// PreToolUse PATH GUARD confines every path to the scratch directory and the worktrees (the PR's own
+// plus the related repos' and linked PRs' read-only checkouts, replies-check.ts); the replies
+// are attacker-influenced. Connectors are isolated by the provider. The model is the STANDARD depth
 // (Claude Sonnet; Codex resolves the role to its own standard model) and the effort is the ONE setting
 // (Settings → AI → Effort, `agenticRunEffort`).
 

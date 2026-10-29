@@ -128,6 +128,80 @@ export async function relatedRepoPeersFor(
   return (await relatedRepoCompanions(ctx, accountId, prId, opts)).peers;
 }
 
+export interface RelatedRepoScope {
+  // The PR's own repo, and its CURRENT workspace.
+  self: {
+    repoId: number;
+    owner: string;
+    name: string;
+    title: string;
+    headRefName: string | null;
+    workspaceId: number;
+  };
+  // The repos related to it in that workspace, each a member of it NOW (any order).
+  related: Array<{ id: number; owner: string; name: string; defaultBranch: string | null }>;
+}
+
+/**
+ * The relation set of a PR's repo: the PR's repo, its current workspace, and the repos related to it
+ * there (both members of that workspace now; a stale row is never read). Account-scoped. null when
+ * the PR is not this account's or its repo has no workspace. Throws on a DB error (callers catch).
+ * The ONE reading of the relation, shared by the companion walk and the replies pass's linked PRs.
+ */
+export async function relatedRepoScope(ctx: AgentContext, accountId: number, prId: number): Promise<RelatedRepoScope | null> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const s = ctx.schema as any;
+  const { pullRequests: prs, repos, workspaceRepos, repoRelations } = s;
+  const self = (
+    await ctx.db
+      .select({ repoId: prs.repoId, title: prs.title, headRefName: prs.headRefName, owner: repos.owner, name: repos.name })
+      .from(prs)
+      .innerJoin(repos, eq(repos.id, prs.repoId))
+      .where(and(eq(prs.id, prId), eq(repos.accountId, accountId)))
+      .limit(1)
+      .execute()
+  )[0] as { repoId: number; title: string; headRefName: string | null; owner: string; name: string } | undefined;
+  if (!self) return null;
+  const membership = (
+    await ctx.db
+      .select({ workspaceId: workspaceRepos.workspaceId })
+      .from(workspaceRepos)
+      .where(and(eq(workspaceRepos.accountId, accountId), eq(workspaceRepos.repoId, self.repoId)))
+      .limit(1)
+      .execute()
+  )[0] as { workspaceId: number } | undefined;
+  if (!membership) return null;
+  const out: RelatedRepoScope = { self: { ...self, workspaceId: membership.workspaceId }, related: [] };
+  const relRows = (await ctx.db
+    .select({ relatedRepoId: repoRelations.relatedRepoId })
+    .from(repoRelations)
+    .where(
+      and(
+        eq(repoRelations.accountId, accountId),
+        eq(repoRelations.workspaceId, membership.workspaceId),
+        eq(repoRelations.repoId, self.repoId),
+      ),
+    )
+    .execute()) as Array<{ relatedRepoId: number }>;
+  const relatedIds = [...new Set(relRows.map((r) => r.relatedRepoId))].filter((id) => id !== self.repoId);
+  if (relatedIds.length === 0) return out;
+  // Only repos that are members of the SAME workspace now (a stale row is never read).
+  out.related = (await ctx.db
+    .select({ id: repos.id, owner: repos.owner, name: repos.name, defaultBranch: repos.defaultBranch })
+    .from(repos)
+    .innerJoin(workspaceRepos, eq(workspaceRepos.repoId, repos.id))
+    .where(
+      and(
+        eq(repos.accountId, accountId),
+        inArray(repos.id, relatedIds),
+        eq(workspaceRepos.accountId, accountId),
+        eq(workspaceRepos.workspaceId, membership.workspaceId),
+      ),
+    )
+    .execute()) as RelatedRepoScope['related'];
+  return out;
+}
+
 /** `relatedRepoPeersFor`, plus which related repos a ticket peer already covers. Never throws. */
 export async function relatedRepoCompanions(
   ctx: AgentContext,
@@ -137,55 +211,13 @@ export async function relatedRepoCompanions(
 ): Promise<RelatedRepoCompanions> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const s = ctx.schema as any;
-  const { pullRequests: prs, repos, workspaceRepos, repoRelations, workspaceTrackers } = s;
+  const { pullRequests: prs, workspaceTrackers } = s;
   const none: RelatedRepoCompanions = { peers: [], coveredRepoKeys: [] };
   try {
-    const self = (
-      await ctx.db
-        .select({ repoId: prs.repoId, title: prs.title, headRefName: prs.headRefName })
-        .from(prs)
-        .innerJoin(repos, eq(repos.id, prs.repoId))
-        .where(and(eq(prs.id, prId), eq(repos.accountId, accountId)))
-        .limit(1)
-        .execute()
-    )[0] as { repoId: number; title: string; headRefName: string | null } | undefined;
-    if (!self) return none;
-    const membership = (
-      await ctx.db
-        .select({ workspaceId: workspaceRepos.workspaceId })
-        .from(workspaceRepos)
-        .where(and(eq(workspaceRepos.accountId, accountId), eq(workspaceRepos.repoId, self.repoId)))
-        .limit(1)
-        .execute()
-    )[0] as { workspaceId: number } | undefined;
-    if (!membership) return none;
-    const relRows = (await ctx.db
-      .select({ relatedRepoId: repoRelations.relatedRepoId })
-      .from(repoRelations)
-      .where(
-        and(
-          eq(repoRelations.accountId, accountId),
-          eq(repoRelations.workspaceId, membership.workspaceId),
-          eq(repoRelations.repoId, self.repoId),
-        ),
-      )
-      .execute()) as Array<{ relatedRepoId: number }>;
-    const relatedIds = [...new Set(relRows.map((r) => r.relatedRepoId))].filter((id) => id !== self.repoId);
-    if (relatedIds.length === 0) return none;
-    // Only repos that are members of the SAME workspace now (a stale row is never read).
-    const repoRows = (await ctx.db
-      .select({ id: repos.id, owner: repos.owner, name: repos.name, defaultBranch: repos.defaultBranch })
-      .from(repos)
-      .innerJoin(workspaceRepos, eq(workspaceRepos.repoId, repos.id))
-      .where(
-        and(
-          eq(repos.accountId, accountId),
-          inArray(repos.id, relatedIds),
-          eq(workspaceRepos.accountId, accountId),
-          eq(workspaceRepos.workspaceId, membership.workspaceId),
-        ),
-      )
-      .execute()) as Array<{ id: number; owner: string; name: string; defaultBranch: string | null }>;
+    const scope = await relatedRepoScope(ctx, accountId, prId);
+    if (!scope) return none;
+    const { self, related: repoRows } = scope;
+    const membership = { workspaceId: self.workspaceId };
     const keyOf = (r: { owner: string; name: string }): string => `${r.owner}/${r.name}`.toLowerCase();
     const sorted = repoRows.sort((a, b) => `${a.owner}/${a.name}`.localeCompare(`${b.owner}/${b.name}`));
     const coveredRepoKeys = sorted.filter((r) => opts.skipRepoKeys?.has(keyOf(r))).map(keyOf);
