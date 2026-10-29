@@ -72,6 +72,34 @@ export function useDismissMyTurn(target: MyTurnDismissTarget, label: string) {
   });
 }
 
+// ── THE PENDING INBOX'S OPTIMISTIC PATH (`e` and the panel's Dismiss) ──────────────────────────
+//
+// The inbox removes the row AT ONCE (components/ui/undo.ts) and offers Undo in the one header
+// strip, so it needs the two writes without the mutation-scoped toast below. Same server calls,
+// same four reads moved together; the restore re-baselines the notification watcher exactly like
+// `useRestoreMyTurn`, so an undone dismissal never rings.
+//
+// ⚠ THE ROW IS HIDDEN ONLY UNTIL THESE REFETCHES LAND: `useOptimisticList` drops the hidden key
+// once the board no longer lists the card, and the caller un-hides it if the board still does —
+// so the counts and the cap disclosures read the server's figures again within one refetch.
+
+/** Dismiss now and wait for the board to move. Throws on failure (the caller puts the row back). */
+export async function dismissMyTurnNow(qc: QueryClient, target: MyTurnDismissTarget): Promise<void> {
+  await api.dismissMyTurn(target);
+  await refetchMyTurnReads(qc);
+}
+
+/** Bring a dismissed subject back (the Undo of `dismissMyTurnNow`). */
+export async function restoreMyTurnNow(qc: QueryClient, target: MyTurnDismissTarget): Promise<void> {
+  rebaselinePending = true;
+  try {
+    await api.restoreMyTurn(target);
+  } finally {
+    // A 404 means the dismissal had already gone: either way, show what is true now.
+    await refetchMyTurnReads(qc);
+  }
+}
+
 /** Bring a subject back — the toast's Undo and the Dismissed list's rows. */
 export function useRestoreMyTurn() {
   const qc = useQueryClient();

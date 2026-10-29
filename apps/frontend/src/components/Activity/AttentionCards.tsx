@@ -1,5 +1,5 @@
-import { Fragment, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { useIsMutating } from '@tanstack/react-query';
+import { Fragment, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useIsMutating, useQueryClient } from '@tanstack/react-query';
 import type {
   AutomatedReviewerKind,
   CiFailingCard,
@@ -82,7 +82,10 @@ import {
   reviewerSuggestionLabel,
 } from '../../lib/reviewerRequest.js';
 import { usePrArmedIntent, usePrStoppedIntent } from '../../hooks/useAutoMerge.js';
-import { useDismissMyTurn } from '../../hooks/useMyTurnDismiss.js';
+import { dismissMyTurnNow, restoreMyTurnNow } from '../../hooks/useMyTurnDismiss.js';
+import { useArmedMerges } from '../../hooks/useAutoMerge.js';
+import { invalidateAfterPrWrite } from '../../hooks/prCacheSync.js';
+import { api } from '../../api/client.js';
 import { usePinnedTabs, type PinnedPr } from '../../store/pinnedTabs.js';
 import { useFilters } from '../../store/filters.js';
 import {
@@ -104,6 +107,7 @@ import {
 } from '../../lib/ui.js';
 import { Avatar } from '../CommentCard.js';
 import {
+  ArrowIcon,
   BotIcon,
   CheckIcon,
   ChevronIcon,
@@ -124,6 +128,37 @@ import {
   useConflictResolverEntry,
 } from '../conflicts/ResolveConflictsButton.js';
 import { LargePrFlag } from './LargePrFlag.js';
+import {
+  Button,
+  IconButton,
+  List,
+  ListGroup,
+  Row,
+  RowLead,
+  RowMeta,
+  RowTitle,
+  SidePanel,
+  useListKeyboard,
+  useRegisterCommands,
+  removeOptimistically,
+  undoLast,
+  useOptimisticList,
+  useUndoStore,
+  prefersReducedMotion,
+  shortcutBlocked,
+  type Command,
+} from '../ui/index.js';
+import {
+  approveOffered,
+  dismissTargetOf,
+  pendingRowBlocks,
+  githubUrlOf,
+  pendingRowSummary,
+  pendingRowTone,
+  PENDING_ROW_TONE_CLASS,
+  PENDING_ROW_TONE_WORD,
+  reasonColumnShown,
+} from './pendingRow.js';
 import { PendingCardIcon } from './PendingKindIcon.js';
 import { BlastRadiusChip } from './BlastRadiusChip.js';
 import {
@@ -155,8 +190,6 @@ import {
   CARD_SECONDARY_BUTTON,
   CardSep,
   LineDelta,
-  PrCardEventHeading,
-  PrCardFrame,
   PrCardMeta,
   filesLabel,
 } from './PrCardShell.js';
@@ -1382,30 +1415,6 @@ export function checksPageHref(url: string | null | undefined): string | null {
   return safeExternalUrl(`${trimmed}/checks`) ?? null;
 }
 
-function DismissButton({ card }: { card: MyTurnCard | MyTurnTrunkCard }): JSX.Element {
-  const target: MyTurnDismissTarget =
-    card.reason === 'trunk_red' ? { kind: 'repo', id: card.repoId } : { kind: 'pr', id: card.prId };
-  const label =
-    card.reason === 'trunk_red' ? card.repoFullName : `${card.repoFullName} #${card.prNumber}`;
-  const dismiss = useDismissMyTurn(target, label);
-  return (
-    <>
-      <button
-        type="button"
-        onClick={() => dismiss.mutate()}
-        disabled={dismiss.isPending}
-        title="Take this off My turn until something new happens on it"
-        className={CARD_QUIET_BUTTON}
-      >
-        {dismiss.isPending ? 'Dismissing…' : 'Dismiss'}
-      </button>
-      {dismiss.isError && (
-        <span className="text-[12px] text-red-600 dark:text-red-400">Couldn’t dismiss it.</span>
-      )}
-    </>
-  );
-}
-
 /** What the board's merge row offers for one FORWARD card, decided WITHOUT a network call. */
 export interface PendingMergeGate {
   /** Does the row render at all? False HIDES it — never disables it (the ChecksTab rule: an
@@ -2226,8 +2235,14 @@ interface PendingBoardApi {
   claudeStates: Map<number, ClaudeReviewPrState>;
   // The CI review's states (its own run), from ONE batched request for the board.
   ciStates: Map<number, CiReviewState>;
-  setCardRef: (id: string, el: HTMLLIElement | null) => void;
-  flashId: string | null;
+  /** The inbox's optimistic row actions (`e`, `a` and the panel's buttons). */
+  dismiss: (card: InsightCard) => void;
+  approve: (card: InsightCard) => void;
+  approveOk: (card: InsightCard) => boolean;
+  /** The reason a row's last action failed, shown on the row and at the top of its panel. */
+  rowError: (id: string) => string | null;
+  /** The open panel publishes what Enter (with the panel open) does — the card's own "open". */
+  activateRef: { current: (() => void) | null };
 }
 
 /** "·" between action-line and fact-line items. */
@@ -2249,12 +2264,12 @@ function ActionLine({
   external?: { href: string | null; title: string };
 }): JSX.Element {
   const items: ReactNode[] = [];
-  if (line.label != null) items.push(<span className="text-gray-600 dark:text-gray-400">{line.label}</span>);
+  if (line.label != null) items.push(<span className="text-ui-mute">{line.label}</span>);
   if (line.muted) {
     items.push(
       // EXPLANATION, NOT ARITHMETIC — why this card carries the neutral label. Nothing counts it.
       <span
-        className="text-gray-600 dark:text-gray-400"
+        className="text-ui-mute"
         title="Pending items from this repository are muted — they still appear here, but they don’t claim your turn and don’t notify you. Change it in Settings → Workspace."
       >
         muted
@@ -2262,11 +2277,11 @@ function ActionLine({
     );
   }
   if (line.verb != null) {
-    items.push(<span className="font-semibold text-gray-900 dark:text-gray-50">{line.verb}</span>);
+    items.push(<span className="font-medium text-ui-ink">{line.verb}</span>);
   }
   for (const w of line.where) {
     const href = w.href != null ? safeExternalUrl(w.href) : null;
-    const text = w.mono ? <span className="break-all font-mono text-[11px]">{w.text}</span> : w.text;
+    const text = w.mono ? <span className="break-all font-mono text-meta">{w.text}</span> : w.text;
     items.push(
       href != null ? (
         <a
@@ -2274,7 +2289,7 @@ function ActionLine({
           target="_blank"
           rel="noreferrer noopener"
           onClick={(e) => e.stopPropagation()}
-          className="text-gray-800 underline decoration-dotted underline-offset-2 hover:decoration-solid dark:text-gray-200"
+          className="text-ui-ink underline decoration-dotted underline-offset-2 hover:decoration-solid"
           title="Open the commit on GitHub"
         >
           {text}
@@ -2291,19 +2306,19 @@ function ActionLine({
         <button
           type="button"
           onClick={pr.open}
-          className="min-w-0 truncate text-left text-gray-800 underline-offset-2 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-gray-200"
+          className="min-w-0 truncate rounded-ui text-left text-ui-ink underline-offset-2 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent"
           title={`${pr.title} — open the PR`}
         >
           {pr.title}
         </button>
       </span>,
     );
-    items.push(<span className="font-mono text-[11px] text-gray-600 dark:text-gray-400">{pr.ref}</span>);
+    items.push(<span className="font-mono text-meta text-ui-mute">{pr.ref}</span>);
   }
   if (line.by != null) items.push(<span>by {line.by}</span>);
   for (const a of line.after) items.push(<span>{a.text}</span>);
   return (
-    <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[12px] text-gray-700 dark:text-gray-300">
+    <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-body text-ui-mute">
       {joinWithSeps(items)}
       <span className="inline-flex items-center gap-1">
         {external != null && <ExternalCardLink href={external.href} title={external.title} />}
@@ -2597,7 +2612,15 @@ function offersClaudeStart(card: InsightCard): boolean {
 }
 
 /** One Pending card, layout B. */
-function PendingCard({ card, board }: { card: InsightCard; board: PendingBoardApi }): JSX.Element {
+function PendingCard({
+  card,
+  board,
+  onClose,
+}: {
+  card: InsightCard;
+  board: PendingBoardApi;
+  onClose: () => void;
+}): JSX.Element {
   const titleId = useId();
   const [detailsOpen, setDetailsOpen] = useState(false);
   const boardInfo = useContext(PendingBoardContext);
@@ -2845,9 +2868,9 @@ function PendingCard({ card, board }: { card: InsightCard; board: PendingBoardAp
     case 'reviewer_load':
       if (card.pendingPrs.length > 0) {
         content.push(
-          <ul key="prs" className="mt-1.5 space-y-0.5">
+          <ul key="prs" className="space-y-0.5">
             {card.pendingPrs.map((p) => (
-              <li key={p.prId} className="truncate text-[12px]">
+              <li key={p.prId} className="truncate text-body">
                 <button
                   type="button"
                   onClick={() =>
@@ -2864,7 +2887,7 @@ function PendingCard({ card, board }: { card: InsightCard; board: PendingBoardAp
                       card.id,
                     )
                   }
-                  className="text-left text-gray-800 hover:underline dark:text-gray-200"
+                  className="max-w-full truncate py-0.5 text-left text-ui-ink hover:underline touch:min-h-10"
                 >
                   {p.prTitle}{' '}
                   <span className="font-mono text-[11px] text-gray-600 dark:text-gray-400">
@@ -2969,78 +2992,182 @@ function PendingCard({ card, board }: { card: InsightCard; board: PendingBoardAp
         ? card.threadId
         : null;
 
-  return (
-    <PrCardFrame
-      innerRef={(el) => board.setCardRef(card.id, el)}
-      labelledBy={titleId}
-      onOpen={activate}
-      accentClass={`border-l-4 ${SEV[card.severity].border}`}
-      flash={board.flashId === card.id}
-    >
-      <PrCardEventHeading
-        id={titleId}
-        icon={<PendingCardIcon card={card} />}
-        lead={heading.lead}
-        quote={heading.quote?.text ?? null}
-        age={age}
-        ageTitle={heading.at != null ? dateTime(heading.at) : undefined}
-      />
-      <ActionLine
-        card={card}
-        line={line}
-        pr={prLine}
-        external={
-          trunk != null
-            ? trunk.arm === 'trunk'
-              ? undefined
-              : { href: trunk.githubUrl, title: 'Open the PR on GitHub' }
-            : prRef != null
-              ? { href: prRef.githubUrl, title: 'Open on GitHub' }
-              : undefined
-        }
-      />
-      {/* GENERATED (work plan) — its own line, palette and mark, never mixed with a fact. */}
-      {whyLine != null && whyLine.trim() !== '' && (
-        <p className="mt-1 flex items-start gap-1 text-[12px] italic text-ai-ink">
-          <SparkleIcon size={11} className="mt-0.5 shrink-0 not-italic text-ai-signal" />
-          <span className="min-w-0">{whyLine}</span>
-        </p>
-      )}
-      {content}
-      {prRef != null && (
-        <FactLine
-          card={prRef as InsightPrRef & InsightCard}
-          plan={plan}
-          merging={rowCard != null}
-          checksListed={
-            (card.kind === 'security' || card.kind === 'dependency_bump') && card.depState === 'ci_red'
-          }
-        />
-      )}
-      {claudeLine}
-      <div className="mt-2 flex flex-wrap items-center gap-2" data-noactivate>
-        {buttons}
-        {hasDetails && (
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              setDetailsOpen((v) => !v);
-            }}
-            aria-expanded={detailsOpen}
-            className={CARD_QUIET_BUTTON}
-          >
-            Details
-            <ChevronIcon dir={detailsOpen ? 'down' : 'right'} size={10} />
-          </button>
-        )}
-        {card.kind === 'my_turn' && <DismissButton card={card} />}
-      </div>
-      {hasDetails && detailsOpen && prRef != null && (
-        <PrDetails card={prRef as InsightPrRef & InsightCard} plan={plan} board={board} threadId={threadIdForDetails} />
-      )}
-    </PrCardFrame>
+  // Enter, with the panel open, does what a click on the old card did: open the event.
+  useEffect(() => {
+    board.activateRef.current = activate ?? null;
+  });
+  useEffect(
+    () => () => {
+      board.activateRef.current = null;
+    },
+    [board.activateRef],
   );
+
+  const tone = pendingRowTone(card);
+  const dismissable = dismissTargetOf(card) != null;
+  const canApprove = board.approveOk(card);
+  const rowError = board.rowError(card.id);
+  // A PR card is titled by its PR; a card about a repository or a person by what it is
+  // ("Trunk red", "Review load") — its heading says the rest.
+  const titleText = prLine?.title ?? (card.kind === 'my_turn' ? myTurnReasonLabel(card) : cardKindLabel(card));
+  const subtitleRef =
+    prLine?.ref ?? ('repoFullName' in card && typeof card.repoFullName === 'string' ? card.repoFullName : null);
+  const external =
+    trunk != null
+      ? trunk.arm === 'trunk'
+        ? undefined
+        : { href: trunk.githubUrl, title: 'Open the PR on GitHub' }
+      : prRef != null
+        ? { href: prRef.githubUrl, title: 'Open on GitHub' }
+        : undefined;
+
+  return (
+    <SidePanel
+      open
+      onClose={onClose}
+      title={titleText}
+      subtitle={subtitleRef}
+      testId="pending-panel"
+      headerActions={
+        activate != null ? (
+          <IconButton label="Open (Enter)" icon={<ArrowIcon dir="right" size={14} />} size="sm" onClick={activate} />
+        ) : undefined
+      }
+      footer={
+        <>
+          {buttons}
+          {canApprove && (
+            <Button
+              kbd="A"
+              onClick={() => board.approve(card)}
+              title="Approve this pull request on GitHub — Undo stops it for a few seconds"
+            >
+              Approve
+            </Button>
+          )}
+          {dismissable && (
+            <Button
+              variant="ghost"
+              kbd="E"
+              onClick={() => board.dismiss(card)}
+              title="Take this off My turn until something new happens on it"
+            >
+              Dismiss
+            </Button>
+          )}
+        </>
+      }
+    >
+      <article aria-labelledby={titleId} data-card-id={card.id} className="space-y-3">
+        {rowError != null && (
+          <p role="alert" className="text-body text-ui-danger">
+            {rowError}
+          </p>
+        )}
+        <h3
+          id={titleId}
+          className="flex min-w-0 items-start gap-2 break-words text-body font-medium text-ui-ink [overflow-wrap:anywhere]"
+        >
+          <span
+            className={`mt-0.5 flex shrink-0 ${PENDING_ROW_TONE_CLASS[tone]}`}
+            title={PENDING_ROW_TONE_WORD[tone] || undefined}
+          >
+            <PendingCardIcon card={card} size={14} />
+          </span>
+          <span className="min-w-0">
+            {heading.lead}
+            {heading.quote != null && heading.quote.text !== '' && (
+              <>
+                {': '}
+                <span className="font-normal text-ui-mute">“{heading.quote.text}”</span>
+              </>
+            )}
+            {age != null && (
+              <span
+                className="whitespace-nowrap text-meta font-normal text-ui-faint"
+                title={heading.at != null ? dateTime(heading.at) : undefined}
+              >
+                {' · '}
+                {age}
+              </span>
+            )}
+          </span>
+        </h3>
+        <ActionLine card={card} line={line} pr={prLine} external={external} />
+        {/* GENERATED (work plan) — its own line, palette and mark, never mixed with a fact. */}
+        {whyLine != null && whyLine.trim() !== '' && (
+          <p className="flex items-start gap-1.5 text-body italic text-ai-ink">
+            <SparkleIcon size={12} className="mt-1 shrink-0 not-italic text-ai-signal" />
+            <span className="min-w-0">{whyLine}</span>
+          </p>
+        )}
+        {content}
+        {prRef != null && (
+          <FactLine
+            card={prRef as InsightPrRef & InsightCard}
+            plan={plan}
+            merging={rowCard != null}
+            checksListed={
+              (card.kind === 'security' || card.kind === 'dependency_bump') && card.depState === 'ci_red'
+            }
+          />
+        )}
+        {claudeLine}
+        {hasDetails && (
+          <div>
+            <button
+              type="button"
+              onClick={() => setDetailsOpen((v) => !v)}
+              aria-expanded={detailsOpen}
+              className={`-ml-2 ${CARD_QUIET_BUTTON}`}
+            >
+              Details
+              <ChevronIcon dir={detailsOpen ? 'down' : 'right'} size={10} />
+            </button>
+            {/* Click only: the thread's conversation and the PR summary FETCH on expand, so a panel
+                opened by a selection still asks for nothing. */}
+            {detailsOpen && prRef != null && (
+              <PrDetails
+                card={prRef as InsightPrRef & InsightCard}
+                plan={plan}
+                board={board}
+                threadId={threadIdForDetails}
+              />
+            )}
+          </div>
+        )}
+      </article>
+    </SidePanel>
+  );
+}
+
+// ── THE INBOX ────────────────────────────────────────────────────────────────────────────────
+//
+// One line per item (`pendingRow.ts`), keyboard first (`useListKeyboard`): j/k move, Enter opens
+// the side panel (and, with it open, the event), `a` approves a review asked of you, `m` merges
+// what `mergeVerdict` says can land, `e` dismisses from My turn, `z` undoes, `o` opens GitHub. The
+// side panel renders the FULL card (every heading, line, button and Details the card carried).
+//
+// ⚠ NOTHING FETCHES ON SELECTION OR ON OPEN. The panel's reads are the board's batched states and
+// cache selectors; the thread, the PR summary and the merge options still wait for their clicks.
+// `m` buys the live merge options when the deferred merge FIRES (a press, then the Undo window).
+//
+// ⚠ ONE LIST, ONE MOUNT — the Back-flash token (`activityFlashItemId`) is claimed once.
+
+const LIST_ID = 'pending-list';
+/** The optimistic-removal scope: card ids are unique across the board, so one scope serves every tab. */
+export const PENDING_UNDO_SCOPE = 'pending';
+
+/** A request from outside the list (the command palette) to select a card and open its panel. */
+export interface PendingFocusRequest {
+  id: string;
+  /** Bumped per request, so asking for the same card twice still lands. */
+  n: number;
+}
+
+function errorText(err: unknown, lead: string): string {
+  const msg = err instanceof Error ? err.message : null;
+  return msg != null && msg !== '' ? `${lead} ${msg}` : lead;
 }
 
 export function AttentionCards({
@@ -3049,44 +3176,84 @@ export function AttentionCards({
   doNextCount,
   people,
   explain,
+  before,
+  after,
+  focusRequest,
 }: {
   /** The list on screen, highest score first. Do next is its first `doNextCount` cards. */
   cards: InsightCard[];
   users: User[] | undefined;
   /** How many leading cards are Do next (0 = no split, e.g. a response predating scores). */
   doNextCount?: number;
-  /** Review-load cards for the "who has reviews waiting" strip, rendered above the ranked list.
-   *  ⚠ In THIS list, never a second `<AttentionCards>` mount — see the one-mount note below. */
+  /** Review-load cards for the "who has reviews waiting" group, above the ranked rows. */
   people?: InsightCard[];
-  /**
-   * The Pending board's placement data, which turns on every card's info button and carries the
-   * work plan's per-card lines. Absent on any other mount (the Insights pane).
-   */
+  /** The Pending board's placement data (every card's ⓘ) and the work plan's per-card lines. */
   explain?: Pick<
     PendingBoardInfo,
     'tab' | 'rules' | 'scores' | 'viewName' | 'total' | 'whyById' | 'onOpenGuide'
   >;
+  /** Inside the list's scroll box, above / below the rows (empty notes, Merge or arm all, the cap
+   *  sentence, the Dismissed list). */
+  before?: ReactNode;
+  after?: ReactNode;
+  focusRequest?: PendingFocusRequest | null;
 }): JSX.Element {
+  const qc = useQueryClient();
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
   const selectThread = useFilters((s) => s.selectThread);
   const setPrDetailTab = useFilters((s) => s.setPrDetailTab);
   const usersById = useMemo(() => indexUsers(users), [users]);
 
+  // ── the rows still shown (optimistic removals hidden), in board order ──
+  const allRows = useMemo(() => [...(people ?? []), ...cards], [people, cards]);
+  const { visible, isLeaving } = useOptimisticList(PENDING_UNDO_SCOPE, allRows, (c) => c.id);
+  const split = doNextCount ?? 0;
+  const groups = useMemo(() => {
+    const peopleIds = new Set((people ?? []).map((c) => c.id));
+    const doNextIds = new Set(cards.slice(0, split).map((c) => c.id));
+    const peopleRows = visible.filter((c) => peopleIds.has(c.id));
+    const ranked = visible.filter((c) => !peopleIds.has(c.id));
+    const doNextRows = ranked.filter((c) => doNextIds.has(c.id));
+    const restRows = ranked.filter((c) => !doNextIds.has(c.id));
+    // The flat order the keys walk — exactly the order painted below.
+    return { peopleRows, ranked, doNextRows, restRows, flat: [...peopleRows, ...doNextRows, ...restRows] };
+  }, [visible, people, cards, split]);
+  const { peopleRows, ranked, doNextRows, restRows, flat } = groups;
+
+  // ── selection: by id, falling back to the same slot when the selected row leaves ──
+  const [sel, setSel] = useState<{ id: string | null; index: number }>({ id: null, index: 0 });
+  const [panelOpen, setPanelOpen] = useState(false);
+  const found = sel.id != null ? flat.findIndex((c) => c.id === sel.id) : -1;
+  const selIndex = flat.length === 0 ? null : found >= 0 ? found : Math.min(sel.index, flat.length - 1);
+  const selected = selIndex != null ? (flat[selIndex] ?? null) : null;
+  const select = useCallback(
+    (i: number): void => {
+      const c = flat[i];
+      if (c != null) setSel({ id: c.id, index: i });
+    },
+    [flat],
+  );
+
   // Back-from-a-click flash — EXACT parity with the Feed (FeedView): a real browser Back pops a
   // URL that lands on Activity, and `applyUrlTab({ fromPop: true })` promotes the pending return
   // target into the one-shot activityFlashItemId (the returnItemId we stamped when opening the
-  // PR = the card's id); on return we scroll that card into view and flash it.
+  // PR = the card's id); on return the row is selected, scrolled into view and flashed.
   const flashTarget = usePinnedTabs((s) => s.activityFlashItemId);
   const clearFlash = usePinnedTabs((s) => s.clearActivityFlashItem);
-  const rowRefs = useRef<Map<string, HTMLLIElement>>(new Map());
   const [flashId, setFlashId] = useState<string | null>(null);
+  const listRef = useRef<HTMLUListElement>(null);
+  const flatRef = useRef(flat);
+  flatRef.current = flat;
   useEffect(() => {
     if (flashTarget == null) return;
     const id = flashTarget;
     const raf = requestAnimationFrame(() => {
-      const el = rowRefs.current.get(id);
-      if (el) {
-        el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      const i = flatRef.current.findIndex((c) => c.id === id);
+      if (i >= 0) {
+        setSel({ id, index: i });
+        listRef.current
+          ?.querySelector<HTMLElement>(`[data-row-index="${i}"]`)
+          ?.scrollIntoView({ block: 'center', behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
         setFlashId(id);
         window.setTimeout(() => setFlashId((c) => (c === id ? null : c)), 1800);
       }
@@ -3094,13 +3261,59 @@ export function AttentionCards({
     });
     return () => cancelAnimationFrame(raf);
   }, [flashTarget, clearFlash]);
-  const setCardRef = (id: string, el: HTMLLIElement | null): void => {
-    if (el) rowRefs.current.set(id, el);
-    else rowRefs.current.delete(id);
-  };
 
-  // The PR title opens the PR on its Overview tab; the card body opens "the event in question" —
-  // the thread, the commits, the review, the failing job.
+  // A new tab starts at its first row (a kept index would land on an arbitrary row of the new list).
+  const tabOnScreen = explain?.tab ?? null;
+  const tabRef = useRef(tabOnScreen);
+  useEffect(() => {
+    if (tabRef.current === tabOnScreen) return;
+    tabRef.current = tabOnScreen;
+    setSel({ id: null, index: 0 });
+  }, [tabOnScreen]);
+
+  // The command palette asked for one card: select it and open its panel.
+  useEffect(() => {
+    if (focusRequest == null) return;
+    const i = flatRef.current.findIndex((c) => c.id === focusRequest.id);
+    if (i < 0) return;
+    setSel({ id: focusRequest.id, index: i });
+    setPanelOpen(true);
+  }, [focusRequest, flat.length]);
+
+  // Nothing left to show → nothing to keep open.
+  useEffect(() => {
+    if (selected == null && panelOpen) setPanelOpen(false);
+  }, [selected, panelOpen]);
+
+  // ── the status line: a key that cannot act says why, briefly (never an error toast) ──
+  const [status, setStatus] = useState<string | null>(null);
+  const statusTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const say = useCallback((msg: string): void => {
+    setStatus(msg);
+    if (statusTimer.current) clearTimeout(statusTimer.current);
+    statusTimer.current = setTimeout(() => setStatus(null), 4000);
+  }, []);
+  useEffect(
+    () => () => {
+      if (statusTimer.current) clearTimeout(statusTimer.current);
+    },
+    [],
+  );
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const setRowError = useCallback((id: string, msg: string | null): void => {
+    setErrors((e) => {
+      if (msg == null) {
+        if (!(id in e)) return e;
+        const rest = { ...e };
+        delete rest[id];
+        return rest;
+      }
+      return { ...e, [id]: msg };
+    });
+  }, []);
+
+  // The PR title opens the PR on its Overview tab; the card's "open" opens "the event in
+  // question" — the thread, the commits, the review, the failing job.
   const open = (meta: PinnedPr, returnItemId?: string): void =>
     openPrDetailTab(meta, { fromActivity: true, returnItemId });
   const openPr = (card: PrCardRef & { id: string }, tab: PrDetailTab = 'overview'): void => {
@@ -3137,11 +3350,8 @@ export function AttentionCards({
   const openClaudeReview = useFilters((s) => s.openClaudeReview);
   const openAiFix = useFilters((s) => s.openAiFix);
   const claudePrIds = useMemo(
-    () =>
-      [...(people ?? []), ...cards]
-        .map(pendingCardPrId)
-        .filter((id): id is number => id != null),
-    [cards, people],
+    () => allRows.map(pendingCardPrId).filter((id): id is number => id != null),
+    [allRows],
   );
   const { data: claudeData } = useClaudeReviewStates(claudePrIds, claudeOn);
   const claudeStates = useMemo(
@@ -3161,11 +3371,15 @@ export function AttentionCards({
   const sharedOwner = useMemo(
     () =>
       sharedRepoOwner(
-        [...(people ?? []), ...cards].flatMap((c) =>
-          'repoFullName' in c ? [c.repoFullName] : c.kind === 'reviewer_load' ? c.pendingPrs.map((p) => p.repoFullName) : [],
+        allRows.flatMap((c) =>
+          'repoFullName' in c
+            ? [c.repoFullName]
+            : c.kind === 'reviewer_load'
+              ? c.pendingPrs.map((p) => p.repoFullName)
+              : [],
         ),
       ),
-    [cards, people],
+    [allRows],
   );
   const nameOf = useMemo<NameOf>(
     () => (id) => {
@@ -3175,10 +3389,157 @@ export function AttentionCards({
     },
     [usersById],
   );
+  const ctx = useMemo(
+    () => ({ nameOf, tab: explain?.tab ?? null, viewerId, sharedOwner }),
+    [nameOf, explain?.tab, viewerId, sharedOwner],
+  );
+  // Armed auto-merge intents — a selector over the account-wide poll the app keeps warm.
+  const { data: armedData } = useArmedMerges();
+  const armedPrIds = useMemo(
+    () => new Set((armedData?.requests ?? []).filter((r) => r.state === 'armed').map((r) => r.prId)),
+    [armedData],
+  );
 
+  // ── the row actions ────────────────────────────────────────────────────────────────────────
+  //
+  // Each removes the row at once and offers Undo in the ONE header strip (`UndoToast`). After the
+  // write's refetch the key is un-hidden: if the board still lists the card, the server says it is
+  // still here, and the row comes back rather than vanishing for the session.
+  const unhide = (key: string): void =>
+    useUndoStore.setState((s) => ({
+      removed: {
+        ...s.removed,
+        [PENDING_UNDO_SCOPE]: (s.removed[PENDING_UNDO_SCOPE] ?? []).filter((k) => k !== key),
+      },
+    }));
+  const refOf = (c: InsightCard): string => {
+    const label = pendingCardPrLabel(c, null);
+    return label?.ref ?? ('repoFullName' in c && typeof c.repoFullName === 'string' ? c.repoFullName : c.id);
+  };
+
+  const dismiss = (card: InsightCard): void => {
+    const d = dismissTargetOf(card);
+    if (d == null) {
+      say('Only My turn items can be dismissed. This one leaves when its work is done.');
+      return;
+    }
+    setRowError(card.id, null);
+    removeOptimistically({
+      scope: PENDING_UNDO_SCOPE,
+      key: card.id,
+      label: 'Dismissed',
+      summary: `${d.label} — until something new happens on it`,
+      mode: 'immediate',
+      tone: 'attention',
+      ms: 10_000,
+      commit: async () => {
+        await dismissMyTurnNow(qc, d.target);
+        unhide(card.id);
+      },
+      undo: () => restoreMyTurnNow(qc, d.target),
+      onError: () => setRowError(card.id, 'Couldn’t dismiss it.'),
+    });
+  };
+
+  const approveOk = (card: InsightCard): boolean => approveOffered(card, viewerId);
+  const approve = (card: InsightCard): void => {
+    if (!approveOk(card) || !('prId' in card) || typeof card.prId !== 'number') {
+      say('Approve from the pull request — this item is not a review asked of you.');
+      return;
+    }
+    const prId = card.prId;
+    setRowError(card.id, null);
+    removeOptimistically({
+      scope: PENDING_UNDO_SCOPE,
+      key: card.id,
+      label: 'Approving',
+      summary: `${refOf(card)} — Undo stops it`,
+      mode: 'deferred',
+      commit: async () => {
+        await api.approvePr(prId);
+        await invalidateAfterPrWrite(qc, prId);
+        unhide(card.id);
+      },
+      onError: (err) => setRowError(card.id, errorText(err, 'Couldn’t approve it.')),
+    });
+  };
+
+  const merge = (card: InsightCard): void => {
+    const rowCard = mergeRowCardOf(card);
+    const gate = rowCard != null ? pendingMergeGate(rowCard) : null;
+    if (rowCard == null || gate == null || !gate.show) {
+      say(
+        pendingRowBlocks(card)
+          ? `Can’t merge: ${(card.kind === 'my_turn' ? myTurnReasonLabel(card) : cardKindLabel(card)).toLowerCase()}.`
+          : 'Nothing to merge here.',
+      );
+      return;
+    }
+    if (armedPrIds.has(rowCard.prId)) {
+      say('Can’t merge from here: it is set to merge when ready.');
+      return;
+    }
+    if (gate.queued) {
+      say('Can’t merge: GitHub’s merge queue is landing it.');
+      return;
+    }
+    if (gate.action !== 'merge') {
+      say(
+        gate.action === 'update_branch'
+          ? 'Can’t merge: update the branch first.'
+          : `Can’t merge: ${gate.verdict.label.toLowerCase()}.`,
+      );
+      return;
+    }
+    const prId = rowCard.prId;
+    setRowError(card.id, null);
+    removeOptimistically({
+      scope: PENDING_UNDO_SCOPE,
+      key: card.id,
+      label: 'Merging',
+      summary: `${refOf(card)} — Undo stops it`,
+      mode: 'deferred',
+      tone: 'merge',
+      commit: async () => {
+        // The live answer, bought only now (the press and its Undo window): the repo's default
+        // method, and whether a merge queue owns landing here (then the panel's button enqueues).
+        const opts = await qc.fetchQuery({
+          queryKey: ['merge-options', prId],
+          queryFn: () => api.mergeOptions(prId),
+          staleTime: 0,
+        });
+        if (opts.mergeQueue?.enabled) {
+          throw new Error('This repo lands through GitHub’s merge queue — use Merge in the panel to add it.');
+        }
+        // Through the SHARED mutation key, so every "Merging…" on screen sees it in flight.
+        await qc
+          .getMutationCache()
+          .build(qc, {
+            mutationKey: mergePrMutationKey(prId),
+            mutationFn: () => api.mergePr(prId, { method: opts.defaultMethod }),
+          })
+          .execute(undefined);
+        await invalidateAfterPrWrite(qc, prId, { merged: true });
+        unhide(card.id);
+      },
+      onError: (err) => setRowError(card.id, errorText(err, 'Failed to merge the PR.')),
+    });
+  };
+
+  const openOnGitHub = (card: InsightCard): void => {
+    const url = githubUrlOf(card);
+    const href = url != null ? safeExternalUrl(url) : null;
+    if (href == null) {
+      say('This item has no GitHub page.');
+      return;
+    }
+    window.open(href, '_blank', 'noopener,noreferrer');
+  };
+
+  const activateRef = useRef<(() => void) | null>(null);
   const board: PendingBoardApi = {
     usersById,
-    ctx: { nameOf, tab: explain?.tab ?? null, viewerId, sharedOwner },
+    ctx,
     openPr,
     openMeta: open,
     openThreadOn,
@@ -3188,20 +3549,140 @@ export function AttentionCards({
     claudeOn,
     claudeStates,
     ciStates,
-    setCardRef,
-    flashId,
+    dismiss,
+    approve,
+    approveOk,
+    rowError: (id) => errors[id] ?? null,
+    activateRef,
   };
 
-  // ⚠ The two bot kinds are filtered out upstream (they live in the free Bots console). A NEW
-  // InsightKind lands in `PendingCard`'s default arms and still renders a heading off its kind
-  // label — never nothing, which is how `my_turn` once shipped invisible while still counted.
-  const renderCard = (card: InsightCard): JSX.Element | null =>
-    card.kind === 'bot_signal' || card.kind === 'bot_only_review' ? null : (
-      <PendingCard key={card.id} card={card} board={board} />
-    );
+  // ── keys ──
+  const onOpen = (i: number): void => {
+    select(i);
+    if (panelOpen && i === selIndex && activateRef.current != null) activateRef.current();
+    else setPanelOpen(true);
+  };
+  const withSelected =
+    (fn: (c: InsightCard) => void) =>
+    (i: number): void => {
+      const c = flat[i];
+      if (c != null) fn(c);
+    };
+  useListKeyboard({
+    containerRef: listRef,
+    count: flat.length,
+    selected: selIndex,
+    onSelect: select,
+    onOpen,
+    actions: {
+      a: withSelected(approve),
+      m: withSelected(merge),
+      e: withSelected(dismiss),
+      o: withSelected(openOnGitHub),
+      z: () => undoLast(),
+    },
+  });
+  // Enter also opens while focus rests on the page itself (nothing focused): the inbox's main
+  // gesture must not depend on clicking into the list first. A focused control keeps its Enter.
+  const onOpenRef = useRef(onOpen);
+  onOpenRef.current = onOpen;
+  const selIndexRef = useRef(selIndex);
+  selIndexRef.current = selIndex;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== 'Enter' || shortcutBlocked(e)) return;
+      const t = e.target;
+      if (t !== document.body && t !== document.documentElement) return;
+      const i = selIndexRef.current;
+      if (i == null) return;
+      e.preventDefault();
+      onOpenRef.current(i);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
-  const split = doNextCount ?? 0;
-  const showDivider = shouldShowDivider(split, cards.length);
+  // ── ⌘K: the selected row's actions, while Pending is on screen ──
+  const undoOffer = useUndoStore((s) => s.offer);
+  const selectedSummary = selected != null ? pendingRowSummary(selected, ctx) : null;
+  const selectedRowCard = selected != null ? mergeRowCardOf(selected) : null;
+  const selectedGate = selectedRowCard != null ? pendingMergeGate(selectedRowCard) : null;
+  const selectedMergeable =
+    selectedGate != null &&
+    selectedGate.show &&
+    selectedGate.action === 'merge' &&
+    !selectedGate.queued &&
+    selectedRowCard != null &&
+    !armedPrIds.has(selectedRowCard.prId);
+  const live = useRef({ approve, merge, dismiss, openOnGitHub, onOpen, selIndex });
+  live.current = { approve, merge, dismiss, openOnGitHub, onOpen, selIndex };
+  const commandsKey = [
+    selected?.id ?? '',
+    panelOpen,
+    selectedMergeable,
+    undoOffer?.id ?? '',
+    viewerId ?? '',
+    selectedSummary?.title ?? '',
+  ].join('|');
+  const commands = useMemo<Command[] | null>(() => {
+    const out: Command[] = [];
+    if (selected != null && selectedSummary != null) {
+      const name = selectedSummary.ref ?? selectedSummary.title;
+      out.push({
+        id: 'pending:open-selected',
+        group: 'Actions',
+        title: panelOpen ? `Open ${name}` : `Show details: ${selectedSummary.title}`,
+        shortcut: '↵',
+        run: () => live.current.onOpen(live.current.selIndex ?? 0),
+      });
+      if (approveOffered(selected, viewerId)) {
+        out.push({
+          id: 'pending:approve',
+          group: 'Actions',
+          title: `Approve ${name}`,
+          shortcut: 'A',
+          keywords: ['lgtm'],
+          run: () => live.current.approve(selected),
+        });
+      }
+      if (selectedMergeable) {
+        out.push({ id: 'pending:merge', group: 'Actions', title: `Merge ${name}`, shortcut: 'M', run: () => live.current.merge(selected) });
+      }
+      if (dismissTargetOf(selected) != null) {
+        out.push({
+          id: 'pending:dismiss',
+          group: 'Actions',
+          title: `Dismiss ${name} from My turn`,
+          shortcut: 'E',
+          keywords: ['done'],
+          run: () => live.current.dismiss(selected),
+        });
+      }
+      if (githubUrlOf(selected) != null) {
+        out.push({
+          id: 'pending:github',
+          group: 'Actions',
+          title: `Open ${name} on GitHub`,
+          shortcut: 'O',
+          run: () => live.current.openOnGitHub(selected),
+        });
+      }
+    }
+    if (undoOffer != null) {
+      out.push({
+        id: 'pending:undo',
+        group: 'Actions',
+        title: `Undo: ${undoOffer.label} ${undoOffer.summary}`,
+        shortcut: 'Z',
+        run: () => undoLast(),
+      });
+    }
+    return out;
+    // Rebuilt when what it offers changes, not per render (the runs read `live`).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [commandsKey]);
+  useRegisterCommands('pending-row', commands);
+
   // Everything a card needs to explain its own position — built once per render, from the SAME
   // ordered array the list paints, so "3rd of 12" is the row the reader is on.
   const boardInfo = useMemo<PendingBoardInfo | null>(() => {
@@ -3211,34 +3692,105 @@ export function AttentionCards({
     return { ...explain, indexById, doNextCount: split };
   }, [explain, cards, people, split]);
 
-  const heading = (key: string, label: string, extra?: string): JSX.Element => (
-    <li key={key} className="flex items-baseline gap-2 pt-1 first:pt-0">
-      <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-        {label}
-      </span>
-      {extra != null && <span className="text-[11px] text-gray-500 dark:text-gray-400">{extra}</span>}
-      <span className="h-px flex-1 bg-gray-200 dark:bg-gray-800" aria-hidden />
-    </li>
-  );
+  const summaries = useMemo(() => new Map(flat.map((c) => [c.id, pendingRowSummary(c, ctx)])), [flat, ctx]);
+  const reasonShown = reasonColumnShown([...summaries.values()].map((s) => s.reason));
+  const whyById = explain?.whyById;
+  const now = Date.now();
+  const renderRow = (card: InsightCard): JSX.Element => {
+    const i = flat.indexOf(card);
+    const s = summaries.get(card.id) ?? pendingRowSummary(card, ctx);
+    const why = whyById?.get(card.id);
+    const err = errors[card.id];
+    const age = s.at != null ? compactAge(s.at, now) : null;
+    const toneWord = PENDING_ROW_TONE_WORD[s.tone];
+    return (
+      <Row
+        key={card.id}
+        listId={LIST_ID}
+        index={i}
+        selected={i === selIndex}
+        onSelect={select}
+        onOpen={() => setPanelOpen(true)}
+        leaving={isLeaving(card)}
+        flash={flashId === card.id}
+        className="gap-2.5"
+      >
+        <RowLead>
+          <span className={`flex ${PENDING_ROW_TONE_CLASS[s.tone]}`} title={toneWord || undefined}>
+            <PendingCardIcon card={card} size={14} />
+          </span>
+        </RowLead>
+        {/* The reason: a column when the list mixes kinds; read aloud (never drawn) on a phone and
+            in a one-kind tab, where the tab's name already says it. */}
+        <span
+          className={`w-[9.5rem] shrink-0 truncate ${s.tone === 'blocked' ? 'text-ui-danger' : 'text-ui-mute'} ${
+            reasonShown ? 'max-md:sr-only' : 'sr-only'
+          }`}
+        >
+          {s.reason}
+          {toneWord !== '' && s.tone !== 'blocked' && <span className="sr-only"> · {toneWord}</span>}
+        </span>
+        <RowTitle sub={s.ref != null ? <span className="max-sm:hidden">{s.ref}</span> : undefined}>{s.title}</RowTitle>
+        {why != null && why.trim() !== '' && (
+          <span className="flex shrink-0 text-ai-signal" title={why}>
+            <SparkleIcon size={12} />
+            <span className="sr-only">The plan says: {why}</span>
+          </span>
+        )}
+        {err != null && <span className="max-w-[40%] shrink truncate text-meta text-ui-danger">{err}</span>}
+        {s.size != null && (
+          <RowMeta hideBelow="lg" className="w-[5.5rem] text-right">
+            {s.size}
+          </RowMeta>
+        )}
+        <RowMeta hideBelow="md" className="w-[7.5rem] text-ui-mute">
+          {s.author ?? ''}
+        </RowMeta>
+        <RowMeta className="w-9 text-right">
+          {age != null ? (
+            <span title={s.at != null ? `${s.atIsOpened ? 'Opened ' : ''}${dateTime(s.at)}` : undefined}>{age}</span>
+          ) : (
+            ''
+          )}
+        </RowMeta>
+      </Row>
+    );
+  };
 
-  // ⚠ ONE `<ul>`, ONE `<AttentionCards>` MOUNT — never a separate list per section. Two mounts
-  // would race on the single `usePinnedTabs.activityFlashItemId` token: each mount's rAF calls
-  // `clearFlash()` unconditionally, so whichever ran second would clear a flash the first had
-  // just claimed. So the people strip, Do next and Everything else are sections of ONE list.
   return (
     <PendingBoardContext.Provider value={boardInfo}>
-      <ul className="space-y-2">
-        {people != null && people.length > 0 && [
-          heading('__people', 'Reviews waiting on people', 'not ranked'),
-          ...people.map((c) => renderCard(c)),
-        ]}
-        {split > 0 && heading('__do-next', 'Do next')}
-        {cards.flatMap((card, i) =>
-          showDivider && i === split
-            ? [heading('__everything-else', 'Everything else'), renderCard(card)]
-            : [renderCard(card)],
+      <div className="flex min-h-0 flex-1">
+        <div className="min-w-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-10 max-md:px-1.5 lg:px-5">
+          <p
+            role="status"
+            aria-live="polite"
+            className={status != null ? 'px-3 pb-1 pt-2 text-body text-ui-mute' : 'sr-only'}
+          >
+            {status ?? ''}
+          </p>
+          {before}
+          {flat.length > 0 && (
+            <List id={LIST_ID} label="Pending items" selected={selIndex} listRef={listRef}>
+              {peopleRows.length > 0 && (
+                <ListGroup label="Reviews waiting on people" hint={<span>not ranked</span>}>
+                  {peopleRows.map(renderRow)}
+                </ListGroup>
+              )}
+              {split > 0 && doNextRows.length > 0 && <ListGroup label="Do next">{doNextRows.map(renderRow)}</ListGroup>}
+              {restRows.length > 0 &&
+                (split > 0 && shouldShowDivider(split, ranked.length + (cards.length - ranked.length)) ? (
+                  <ListGroup label="Everything else">{restRows.map(renderRow)}</ListGroup>
+                ) : (
+                  restRows.map(renderRow)
+                ))}
+            </List>
+          )}
+          {after}
+        </div>
+        {panelOpen && selected != null && (
+          <PendingCard key={selected.id} card={selected} board={board} onClose={() => setPanelOpen(false)} />
         )}
-      </ul>
+      </div>
     </PendingBoardContext.Provider>
   );
 }

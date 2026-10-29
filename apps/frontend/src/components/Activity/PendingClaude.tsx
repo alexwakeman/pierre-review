@@ -171,7 +171,7 @@ export function ClaudeReviewLine({
 
 /** The card action row's button style for a Claude control. */
 export const PENDING_AI_BUTTON =
-  'whitespace-nowrap rounded-md border border-ai-border bg-ai-surface px-2.5 py-1 text-[12px] font-medium text-ai-signal hover:border-ai-signal/60 hover:bg-ai-surface-2 disabled:cursor-default disabled:opacity-60';
+  'inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-ui border border-ai-border bg-ai-surface px-3 text-body font-medium text-ai-signal hover:border-ai-signal/60 hover:bg-ai-surface-2 outline-none focus-visible:ring-2 focus-visible:ring-ui-accent disabled:cursor-default disabled:opacity-60 touch:h-11 touch:px-4';
 
 /**
  * Claude's buttons for a Pending card's action row: "Open review" (or "Re-review" once the head has

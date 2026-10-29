@@ -38,10 +38,16 @@ import { PRESET_LABEL, WEIGHT_LABEL } from '../settings/myTurnSettingsForm.js';
 //
 // Pure, JSX-free, so `test/pendingExplain.test.ts` can pin it.
 
+/**
+ * THE CARD'S URGENCY, in words (`card.severity`). It used to be the card's coloured edge (red /
+ * amber / blue); under the redesign's colour rule (docs/redesign/DESIGN.md § Colour) red and green
+ * mean "blocks" and "can land", so urgency is named, and only 'high' marks a row (amber) when
+ * nothing that blocks or lands applies. It never changes the order.
+ */
 export const SEVERITY_WORD: Record<InsightSeverity, string> = {
-  high: 'Red',
-  warn: 'Amber',
-  info: 'Blue',
+  high: 'Urgent',
+  warn: 'Soon',
+  info: 'Routine',
 };
 
 // ── small formatters ──────────────────────────────────────────────────────────────────────

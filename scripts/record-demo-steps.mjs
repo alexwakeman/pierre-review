@@ -60,8 +60,17 @@ export const STEPS = [
     name: 'pending:merge-controls',
     run: async (h) => {
       await h.go('?view=activity&activityRepo=attention&attnTab=land');
-      // The merge control fetches its live options on click (GitHub stand-in answers).
-      await h.clickAll(h.page.getByRole('button', { name: /^(Merge|Merge when ready)$/ }), { max: 3, after: () => h.escape() });
+      // Pending is one line per item; a row's merge controls live in its side panel. The merge
+      // control fetches its live options on click (GitHub stand-in answers).
+      const rows = h.page.getByRole('option');
+      const n = Math.min(3, await rows.count());
+      for (let i = 0; i < n; i += 1) {
+        await rows.nth(i).click();
+        await h.clickAll(
+          h.page.getByTestId('pending-panel').getByRole('button', { name: /^(Merge|Merge when ready)$/ }),
+          { max: 2, after: () => h.escape() },
+        );
+      }
     },
   },
 

@@ -4953,3 +4953,28 @@ shorter form of each rule; this is the full wording.
 - **EVERY ICON IS A COMPONENT IN `components/Icons.tsx`** (exception: `FileTypeIcons.tsx`); no
   icon emoji/library. What stayed a character is listed in that file's header (regexes over vendor
   bodies must not change). `CaretIcon` = menu trigger, `ChevronIcon` = expand/collapse.
+
+## Pending is an inbox: one line per item, the card in a side panel (the redesign)
+
+`AttentionView.tsx` is one page header (title + ⓘ, the work plan's quiet sentences, Re-plan inside
+`AiRunGate`), the shared `Tabs` (`1`–`7`), the controls row, then `AttentionCards` — now a
+`List` of one-line rows (`pendingRow.ts`: tone mark, reason, title + repo#N, plan mark, size,
+author, age) beside a `SidePanel` that renders the WHOLE card (`PendingCard`): heading, action
+line, why line, content, fact line, AI line, Details, and every button in the footer. Nothing was
+removed from the card; it moved one click (or Enter) away.
+
+- **Colour**: a row's mark is red when it blocks, green when it can land, amber when `severity` is
+  `high` and neither applies, grey otherwise. Severity is named as urgency (Urgent / Soon /
+  Routine) in the ⓘ popover and the guide.
+- **Keys** (`useListKeyboard`): j/k, Enter (opens the panel; with it open, the card's own "open"),
+  `a` approve (a review asked of you, not your PR), `m` merge (only where `pendingMergeGate`
+  offers Merge, not queued, not armed), `e` dismiss (My turn), `z` undo, `o` GitHub. A key that
+  cannot act writes one line into the board's status line.
+- **Optimistic removal** (`removeOptimistically`, scope `pending`): dismiss is immediate with a
+  restore as Undo; approve and merge are DEFERRED (they fire when the Undo offer ends). After the
+  write's refetch the key is un-hidden, so a card the server still lists comes back instead of
+  vanishing for the session. The tab counts stay the server's figures.
+- ⚠ **Nothing fetches on selection or on opening the panel** (`e2e/pending-cards.spec.ts`). `m`
+  buys the live merge options only when the deferred merge fires.
+- ⌘K: the selected row's actions (`pending-row`), the page's controls (`pending-page`), and every
+  Pending item across tabs (provider `pending-items`, which switches tab, selects and opens it).
