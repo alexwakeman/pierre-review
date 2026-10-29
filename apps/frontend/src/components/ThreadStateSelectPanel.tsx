@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { DERIVED_STATES, type DerivedState } from '@pierre-review/shared';
 import { DERIVED_STATE_META } from '../lib/ui.js';
 import { useClickOutside } from '../hooks/useClickOutside.js';
+import { CheckboxBox } from './ui/FormControls.js';
 import { CaretIcon, CloseIcon } from './Icons.js';
 
 // Show/hide dropdown for the derived thread-state ("Threads") filter. Replaces the
@@ -47,13 +48,13 @@ export function ThreadStateSelectPanel({
     <div ref={rootRef} className="relative">
       {/* Trigger + (when the filter is active) a clear-✕. Sibling buttons in one
           pill — never a button nested in a button (that can swallow clicks). */}
-      <span className="inline-flex items-center whitespace-nowrap rounded-full border border-gray-300 text-xs text-gray-600 hover:border-gray-400 dark:border-gray-700 dark:text-gray-300 dark:hover:border-gray-500">
+      <span className="inline-flex items-center whitespace-nowrap rounded-ui bg-ui-raise text-body text-ui-mute hover:text-ui-ink">
         <button
           type="button"
           onClick={() => setOpen((o) => !o)}
           aria-haspopup="true"
           aria-expanded={open}
-          className={`inline-flex items-center gap-1 py-0.5 pl-2.5 ${
+          className={`inline-flex h-7 items-center gap-1 rounded-ui pl-2.5 touch:h-10 focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent ${
             active ? 'pr-1' : 'pr-2.5'
           }`}
         >
@@ -66,7 +67,7 @@ export function ThreadStateSelectPanel({
             onClick={onClear}
             title="Clear the thread-state filter"
             aria-label="Clear the thread-state filter"
-            className="flex items-center self-stretch py-0.5 pl-0.5 pr-2 opacity-60 hover:opacity-100"
+            className="flex items-center self-stretch rounded-ui pl-0.5 pr-2 opacity-60 hover:opacity-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent touch:px-3"
           >
             <CloseIcon size={11} />
           </button>
@@ -77,9 +78,9 @@ export function ThreadStateSelectPanel({
         <div
           role="dialog"
           aria-label="Thread states"
-          className="absolute left-0 top-full z-[60] mt-1 w-64 rounded-lg border border-gray-200 bg-white p-2 shadow-lg dark:border-gray-700 dark:bg-gray-900"
+          className="absolute left-0 top-full z-[60] mt-1 w-64 max-w-[calc(100vw-2rem)] rounded-ui bg-ui-raise p-2 text-ui-ink shadow-xl shadow-black/30 ring-1 ring-ui-line motion-safe:animate-ui-pop max-sm:fixed max-sm:inset-x-2 max-sm:bottom-2 max-sm:top-auto max-sm:mt-0 max-sm:max-h-[75vh] max-sm:w-auto max-sm:max-w-none max-sm:overflow-y-auto max-sm:pb-[calc(0.5rem+env(safe-area-inset-bottom))]"
         >
-          <p className="px-1 pb-1.5 text-[11px] leading-snug text-gray-400">
+          <p className="px-1 pb-1.5 text-meta leading-snug text-ui-faint">
             Show only PRs with a review thread that is:
           </p>
           <div className="max-h-72 overflow-y-auto">
@@ -89,10 +90,9 @@ export function ThreadStateSelectPanel({
                 <label
                   key={s}
                   title={meta.description}
-                  className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 text-xs hover:bg-gray-100 dark:hover:bg-gray-800"
+                  className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 text-meta hover:bg-ui-hover"
                 >
-                  <input
-                    type="checkbox"
+                  <CheckboxBox
                     checked={derivedStates.includes(s)}
                     onChange={() => onToggle(s)}
                   />
@@ -101,7 +101,7 @@ export function ThreadStateSelectPanel({
                     className="h-2.5 w-2.5 shrink-0 rounded-full"
                     style={{ backgroundColor: meta.color }}
                   />
-                  <span className="text-gray-800 dark:text-gray-100">
+                  <span className="text-ui-ink">
                     {meta.label}
                   </span>
                 </label>
@@ -110,14 +110,14 @@ export function ThreadStateSelectPanel({
           </div>
 
           {active && (
-            <div className="mt-2 flex items-center justify-between border-t border-gray-200 pt-2 dark:border-gray-700">
-              <span className="text-[11px] text-gray-400">
+            <div className="mt-2 flex items-center justify-between border-t border-ui-line pt-2">
+              <span className="text-meta text-ui-faint">
                 {count} selected
               </span>
               <button
                 type="button"
                 onClick={onClear}
-                className="text-[11px] text-gray-400 hover:text-gray-600"
+                className="text-meta text-ui-faint hover:text-ui-ink"
               >
                 Clear
               </button>

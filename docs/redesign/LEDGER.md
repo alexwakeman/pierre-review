@@ -466,7 +466,7 @@ Known debts the redesign must clear here:
 - Tests: `test/memberSections.test.ts`, `test/filterStorageMigration.test.ts`,
   `test/isolateFilter.test.ts`, `scripts/ui-smoke.mjs` (`pnpm verify:ui`, `.tl-repo-header`)
 
-### [ ] FilterBar: PR Focus-only controls → unchanged
+### [x] FilterBar: PR Focus-only controls → unchanged behaviour (Events + "Hide bots"/"Hide bots (except N)", aria-pressed, same `boardSlotMode` resolver); the bots toggle is the toolbar button style (selection tone when on)
 - Entry: FilterBar when a pr-focus tab is active (`boardSlotMode != null`)
 - Files: `components/FilterBar.tsx`, `components/Timeline/isolateFilter.ts`, `store/pinnedTabs.ts` (`boardSlotMode`)
 - Essential info:
@@ -611,7 +611,7 @@ Known debts the redesign must clear here:
   - [ ] Insights and the open-PR list are hidden while isolated to one PR
 - Tests: testId `repo-console`
 
-### [ ] Board slot + resizable detail pane (Timeline)
+### [x] Board slot + resizable detail pane (Timeline) → unchanged at md+ (one `<Timeline>`, resize separator, `pierre:detailPaneHeight`, inert under overlays); phone: list over the warm board, detail as a full-screen sheet
 - Entry: the Timeline tab (`?view=timeline`), or `?pr=` / `?thread=` deep links
 - Files: `App.tsx`, `components/DetailPane.tsx`, `components/Timeline/index.tsx`
 - Essential info:
@@ -2169,7 +2169,7 @@ Cross-cutting:
 
 ## 4. This Sprint, Timeline, Reports, Bots Monitoring, Docs, Settings
 
-### [ ] This Sprint tab shell (sub-tab strip)
+### [x] This Sprint tab shell (sub-tab strip) → page header: `text-display` "This Sprint" + the shared `Tabs` (role=tab, same labels/order, `1`–`4` keys, tabpanel labelled by its tab); same store/URL keys, derived tab, remembered scroll
 - Entry: fixed tab "This Sprint", `?view=sprint`; `?sprintTab=themes|paths|people|merged` (invalid
   or retired "graph" → Theme, derived). Legacy: `?activityRepo=sprint`, `?insightsTab=sprint|merged`
 - Files: `Sprint/SprintTabView.tsx`, `Activity/sprintRailModel.ts`, `store/filters.ts`
@@ -2187,7 +2187,7 @@ Cross-cutting:
   Sprint is a fixed tab beside Activity, opening on Theme…", legacy link), verify-demo
   `sprint:themes|paths|people|merged`, `ws2:sprint` (expects "Web Sprint 9")
 
-### [ ] Sprint page toolbar and page-level states (SprintView)
+### [x] Sprint page toolbar and page-level states (SprintView) → one compact toolbar line (title `text-title` + ⓘ · dates · tickets; Ask / Statuses ghost toggles, Refresh secondary; wraps under the name on a phone); every note, error (danger ink + icon), truncation line, AI status line and state kept; ⌘K "Refresh the sprint", "Ask <provider> about this sprint", "Edit the sprint statuses"
 - Entry: Theme, Critical path or People
 - Files: `Activity/SprintView.tsx`, `Activity/SprintProgressBar.tsx`, `Activity/sprintPathsModel.ts`,
   `AiStatusLine.tsx`, `hooks/useSprintStories.ts`, `lib/sprintChangeToken.ts`
@@ -2221,7 +2221,7 @@ Cross-cutting:
 - Tests: `test/sprintPathsModel.test.ts`, `test/sprintChangeToken.test.ts`, `test/aiProviderCopy.test.ts`,
   `test/aiStatusAndPrActions.test.ts`, `test/storyView.test.ts`, `e2e/mock-api.ts` sprint-graph fixtures, verify-demo sprint:*
 
-### [ ] Sprint board filters (Has PRs / Needs code)
+### [x] Sprint board filters (Has PRs / Needs code) → same two aria-pressed toggles on the raise tone (selection tone when on, 40px on touch), ⓘ and "N of M tickets" kept; ⌘K "Sprint: only tickets that have PRs / need code"
 - Files: `Activity/SprintBoards.tsx` (`SprintBoardFilters`, `NoMatch`), `store/sprintBoardFilter.ts`, `lib/laneBoard.ts`
 - Essential info:
   - [ ] Two toggle chips "Has PRs" and "Needs code" (aria-pressed)
@@ -2235,7 +2235,7 @@ Cross-cutting:
   - [ ] "No tickets match these filters."
 - Tests: `test/laneBoard.test.ts`, `test/sprintModel.test.ts`
 
-### [ ] Theme view (lane board by theme)
+### [x] Theme view (lane board by theme) → same lanes/columns/arrows; hairline lane rules instead of zebra; "Card borders" key → "Card marks" (icons); phone: `StackedLaneBoard` (lanes down, columns down, arrows as a visible numbered Dependencies list)
 - Files: `Activity/SprintBoards.tsx` (`SprintThemesView`), `LaneBoard.tsx`, `lib/laneBoard.ts`, `TicketCard.tsx`
 - Essential info:
   - [ ] One lane per theme, "No theme" last (or one "all tickets" lane)
@@ -2257,7 +2257,7 @@ Cross-cutting:
   - [ ] Filtered empty
 - Tests: `test/laneBoard.test.ts`, `test/sprintModel.test.ts`, `test/storyView.test.ts`, verify-demo sprint:themes
 
-### [ ] Critical path view (pace, paths, call-outs, count table)
+### [x] Critical path view (pace, paths, call-outs, count table) → pace strip and call-outs on the surface tone (no borders); risk is a word (+ warning icon on High, warn ink) not a coloured chip; table hairlines; AiRunGate line, AiRunLabel, data-state kept; phone stacked as Theme
 - Files: `Activity/SprintBoards.tsx` (`SprintPathsView`, `PaceStrip`, `PathsInfo`, `Callouts`,
   `CountTableView`), `Activity/sprintPathsModel.ts`, `lib/laneBoard.ts`, `AiRunLabel.tsx`, `AiSetup.tsx` (AiRunGate sprint_paths)
 - Essential info:
@@ -2282,7 +2282,7 @@ Cross-cutting:
   - [ ] Gated on me.ai.enabled and the sprint_paths credential
 - Tests: `test/sprintPathsModel.test.ts`, `test/laneBoard.test.ts`, verify-demo sprint:paths
 
-### [ ] People view (lane board by assignee)
+### [x] People view (lane board by assignee) → as Theme (lane line, colour bar + hover key, theme in the person slot, hand-off arrows → the phone's Dependencies list)
 - Files: `Activity/SprintBoards.tsx` (`SprintPeopleView`), `lib/laneBoard.ts`
 - Essential info:
   - [ ] One lane per assignee, "Unassigned" last, by PR count
@@ -2294,7 +2294,7 @@ Cross-cutting:
 - States: filtered empty
 - Tests: `test/laneBoard.test.ts`, `test/peopleRosterScope.test.ts`, verify-demo sprint:people
 
-### [ ] Ticket card (shared by all three sprint views)
+### [x] Ticket card (shared by all three sprint views) → quiet surface card, no border; critical path / waiting are MARKS beside the key (`CriticalPathIcon` vermilion, `WaitingIcon`; also in the accessible name and `title`), outside the sprint = recessed ground; PR dot → pull-request mark (same testid); CI failing the one red (icon + words); accent ring when open in the tray; the corner arrow shows on hover/focus (always on touch); every line, tag, pill, marker and the accessible name kept
 - Files: `TicketCard.tsx`, `lib/laneBoard.ts`, `LaneBoard.tsx`
 - Essential info:
   - [ ] Ticket key mono, violet dot when it has an open or merged PR (those sit first)
@@ -2313,7 +2313,7 @@ Cross-cutting:
   - [ ] Ghost styling; "Not judged yet" marker
 - Tests: `test/storyView.test.ts`, `test/laneBoard.test.ts`, `test/textContrast.test.ts`
 
-### [ ] No-tracker state (SprintTrackerSetup)
+### [x] No-tracker state (SprintTrackerSetup) → same line, ⓘ and "Set up in Settings" (raise-tone button), on the surface tone instead of a dashed box; `sprint-view` testid kept
 - Files: `Sprint/SprintTrackerSetup.tsx`
 - Essential info:
   - [ ] "Connect Jira, Linear or GitHub Issues to see this sprint."
@@ -2323,7 +2323,7 @@ Cross-cutting:
 - States:
   - [ ] Keeps `data-testid sprint-view`
 
-### [ ] Merged so far
+### [x] Merged so far → unchanged content (the cards are the Open PRs agent's); tokens on its header and the capped-list line (warn ink)
 - Entry: `?sprintTab=merged`; needs no tracker
 - Files: `Activity/MergedPrsView.tsx`, `Activity/OpenPrsCards.tsx` (merged variant), `Activity/reportingWindowText.ts`
 - Essential info:
@@ -2340,7 +2340,7 @@ Cross-cutting:
     merged <window phrase>." / "No pull requests merged in this window."
 - Tests: `e2e/mock-api.ts` `/api/merged-prs`, verify-demo sprint:merged
 
-### [ ] Ask <provider> about this sprint (SprintAskPanel)
+### [x] Ask <provider> about this sprint (SprintAskPanel) → same panel on the AI surface tone (ring, no inner rules), same send through AiRunGate, cost line, ticket-key links; ⌘K "Ask <provider> about this sprint" toggles it
 - Files: `Activity/SprintAskPanel.tsx`, `TicketRefLink.tsx`, `lib/aiBudget.ts`
 - Essential info:
   - [ ] Panel "Ask <provider> about this sprint" with ⓘ (remembers earlier questions; gone on leaving)
@@ -2357,7 +2357,7 @@ Cross-cutting:
   - [ ] A completed answer survives closing mid-answer
 - Tests: `test/aiGating.test.ts`, `test/aiStatusAndPrActions.test.ts`
 
-### [ ] Statuses (sprint status buckets editor)
+### [x] Statuses (sprint status buckets editor) → buckets on the surface tone (accent ring while dragging over), the meaning `<select>` → the custom `Select` (same accessible name "What <bucket> means"), the merge rule → `Checkbox`; Save is the primary button; drag, move, rename, delete, add, reset, live region, problems all kept; ⌘K "Edit the sprint statuses"
 - Files: `Activity/SprintStatusSettings.tsx`, `Activity/sprintModel.ts`
 - Essential info:
   - [ ] "Statuses · <source>" with ⓘ
@@ -2378,7 +2378,7 @@ Cross-cutting:
   - [ ] "No statuses read yet."; draft until Save; only when `data.statusLayout` exists
 - Tests: `test/sprintModel.test.ts`
 
-### [ ] Sprint story tray
+### [x] Sprint story tray → same body, open-tab button, ×, Escape, resize handle and width memory; surface tone, no border; a FULL-SCREEN sheet with Back on a phone (resize hidden there), a right sheet md–lg, sticky column lg+; ⌘K lists every sprint ticket ("KEY · title" → the tray)
 - Entry: card, call-out key or ticket key in an Ask answer; `?sprintStory=<ident>` (navigation key: Back closes it)
 - Files: `Sprint/SprintStoryTray.tsx`, `Ticket/StoryViewBody.tsx`, `lib/ticketTab.ts`
 - Essential info:
@@ -2398,7 +2398,7 @@ Cross-cutting:
   entries here: Reports → Stories ticket names; `?view=ticket:notion:<url>#WEB-34`.
 - Tests: `test/storyTabs.test.ts` in addition to § 3's list
 
-### [ ] Timeline board (vis-timeline)
+### [x] Timeline board (vis-timeline) → the board itself unchanged (bars, markers, tooltips, popovers, zoom, keys); a PHONE opens the Timeline as a LIST by default (`Timeline/TimelineList.tsx`: one line per PR the board draws a bar for — state icon, #N title, author, events in the window, last activity — grouped by repo; tap = bar click) with Board one tap away (FilterBar "List | Board", ⌘K); the board stays mounted underneath
 - Entry: fixed tab "Timeline" (`?view=timeline`) with `?preset=`/`?from`/`?to` and filter keys;
   bar click sets `?pr=`. Keys j/k, Esc, /
 - Files: `Timeline/index.tsx`, `Timeline/prBar.ts`, `Timeline/userRow.ts`, `Timeline/lanes.ts`,
@@ -2435,7 +2435,7 @@ Cross-cutting:
   `e2e/selection-glow.mjs`, `e2e/focus-retained-on-reopen.mjs`, `scripts/ui-smoke.mjs`,
   `e2e/mock-api.ts` `/api/timeline`, verify-demo timeline
 
-### [ ] Timeline marker popover, user popover and bottom detail pane
+### [x] Timeline marker popover, user popover and bottom detail pane → popovers unchanged; the pane's × is an IconButton-sized token button (same testid/label); on a phone the pane is a FULL-SCREEN sheet with Back (= clear selection), no resize strip
 - Files: `Timeline/MarkerPopover.tsx`, `UserProfilePopover.tsx`, `DetailPane.tsx`, `App.tsx`
 - Essential info:
   - [ ] Popover: event(s), actor, "on <owner>'s #<n> <title>", time, body or verdict; expanded cluster lists
@@ -2449,7 +2449,7 @@ Cross-cutting:
   - [ ] In a PR-focus tab, clicking an event highlights it and opens its popover without leaving focus
 - Tests: `test/prDetailPlacement.test.ts`, `test/claudeThreadMarker.test.ts`
 
-### [ ] FilterBar (workspace scope + Timeline-only filters)
+### [x] FilterBar (workspace scope + Timeline-only filters) → token toolbar: panel triggers on the raise tone (same names/counts/clear ×), panels raise-tone popovers that become bottom sheets below sm, every checkbox a `CheckboxBox` (real input); Range a segmented control (7d/14d/30d/90d, custom = none pressed), Now and Clear filters quiet buttons; ⌘K: each range, "Timeline: centre on now", "Timeline: clear filters"
 - See § 1 Workspace selector, Global search, FilterBar: Timeline-only board filters and PR Focus-only
   controls. Extra details:
   - [ ] Repos panel: "Last sync failed" marker, "Show every repo in this workspace", isolate-one

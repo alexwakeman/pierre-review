@@ -69,6 +69,35 @@ export const Checkbox = forwardRef<HTMLInputElement, BaseProps & { indeterminate
   );
 });
 
+/**
+ * The checkbox BOX alone — the same restyled real <input> as `Checkbox`, without its own <label> —
+ * for a row that is ALREADY a label holding more than words (an avatar, a colour dot, a shield: the
+ * Timeline's filter panels). Never nest it in another `Checkbox`.
+ */
+export const CheckboxBox = forwardRef<HTMLInputElement, Omit<InputHTMLAttributes<HTMLInputElement>, 'type' | 'size'>>(function CheckboxBox(
+  { className, ...rest },
+  ref,
+) {
+  return (
+    <span className={cx('relative flex h-4 w-4 shrink-0', className)}>
+      <input
+        ref={ref}
+        type="checkbox"
+        className={cx(
+          'peer h-4 w-4 cursor-[inherit] appearance-none rounded-[4px] bg-ui-bg ring-1 ring-inset ring-ui-line',
+          'checked:bg-ui-accent-fill checked:ring-0 disabled:opacity-50',
+          'motion-safe:transition-colors motion-safe:duration-ui-fast',
+          FOCUS_RING,
+        )}
+        {...rest}
+      />
+      <span className="pointer-events-none absolute inset-0 hidden items-center justify-center text-ui-on-accent peer-checked:flex">
+        <CheckIcon size={12} />
+      </span>
+    </span>
+  );
+});
+
 export const Radio = forwardRef<HTMLInputElement, BaseProps>(function Radio({ label, hint, className, ...rest }, ref) {
   return (
     <label className={cx(ROW, className)}>

@@ -8,7 +8,9 @@
 //            column is narrow and shows counts; "Show" opens the whole column, and a lane's own
 //            "n tickets" opens that lane's cell only ("Hide" folds it again). NARROW (< NARROW_PX): the lane label
 //            moves to a band heading above the lane's cards, as the design grid's layer names do. Below
-//            the columns' minimum widths the board scrolls inside its own box, never the page.
+//            the columns' minimum widths the board scrolls inside its own box (snapping to columns),
+//            never the page. A PHONE gets `StackedLaneBoard` instead: lanes down, each lane's columns
+//            down, the arrows as a visible numbered list (the redesign; docs/redesign/DESIGN.md § 6).
 //   ARROWS   routed by lib/designGrid.ts `routeArrow` through the padding round each card and the grid's
 //            gaps, re-measured by a ResizeObserver. A critical arrow is drawn in the accent. A labelled
 //            arrow carries a number, keyed below the board. HOVERING an arrow's line or its number (or
@@ -22,7 +24,9 @@ import { avoidRects } from '../lib/avoidRects.js';
 import { HOVER_PANEL_CLASS } from './HoverPopover.js';
 import { geometryOf, placeArrowLabels, routePoints, separateArrowRuns, type ArrowGeometry, type PlacedCard } from '../lib/designGrid.js';
 import type { BoardLayout } from '../lib/laneBoard.js';
-import { ChevronIcon } from './Icons.js';
+import { ArrowIcon, ChevronIcon } from './Icons.js';
+import { cx, FOCUS_RING } from './ui/cx.js';
+import { useIsPhone } from './ui/media.js';
 
 // ── The shared arrow pieces (the design grid draws with these too) ───────────────────────────────
 
@@ -156,7 +160,7 @@ export const useBoardObstacles = (): (() => readonly DOMRect[]) => useContext(Ob
 
 /** The numbered marker on an arrow and in its key. */
 const NUMBER_CLASS =
-  'flex h-4 min-w-4 items-center justify-center rounded-full border border-gray-400 px-0.5 text-[11px] font-semibold leading-none dark:border-gray-500';
+  'flex h-4 min-w-4 items-center justify-center rounded-full ring-1 ring-ui-line px-0.5 text-[11px] font-semibold leading-none';
 
 /** What an arrow means, for its popover: the keyed words and the full sentence. */
 export interface ArrowDetail {
@@ -272,7 +276,7 @@ export function ArrowLayer({
             <span
               key={`l:${p.key}`}
               aria-hidden
-              className={`pointer-events-none absolute z-20 -translate-x-1/2 -translate-y-1/2 bg-white text-gray-800 dark:bg-gray-950 dark:text-gray-100 ${NUMBER_CLASS}`}
+              className={`pointer-events-none absolute z-20 -translate-x-1/2 -translate-y-1/2 bg-ui-bg text-ui-ink ${NUMBER_CLASS}`}
               style={{ left: p.lx, top: p.ly }}
             >
               {n}
@@ -346,7 +350,7 @@ function ArrowMarker({
           {...getReferenceProps()}
           aria-label={name}
           aria-describedby={open ? popId : undefined}
-          className={`absolute z-20 -translate-x-1/2 -translate-y-1/2 cursor-default bg-white text-gray-800 hover:border-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 dark:bg-gray-950 dark:text-gray-100 dark:hover:border-gray-300 ${NUMBER_CLASS}`}
+          className={`absolute z-20 -translate-x-1/2 -translate-y-1/2 cursor-default bg-ui-bg text-ui-ink hover:bg-ui-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent ${NUMBER_CLASS}`}
           style={{ left: x, top: y }}
         >
           {n}
@@ -384,7 +388,7 @@ function ArrowMarker({
 export function ArrowKey({ items }: { items: ReadonlyArray<{ n: number; label: string }> }): JSX.Element | null {
   if (items.length === 0) return null;
   return (
-    <ol aria-hidden className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[12px] text-gray-700 dark:text-gray-300">
+    <ol aria-hidden className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-meta text-ui-mute">
       {items.map((it) => (
         <li key={it.n} className="inline-flex items-center gap-1">
           <span className={NUMBER_CLASS}>{it.n}</span>
@@ -402,8 +406,10 @@ export interface BorderKeyItem {
   label: string;
   /** The card's own border classes, for a card-shaped swatch. */
   swatch?: string;
-  /** Classes for a small round dot instead (e.g. "Has a pull request"). */
+  /** Classes for a small round dot instead. */
   dot?: string;
+  /** An icon from Icons.tsx instead (This Sprint's card marks: the route, the hourglass). */
+  icon?: ReactNode;
 }
 
 /**
@@ -425,10 +431,14 @@ export function BorderKey({
 }): JSX.Element | null {
   if (items.length === 0) return null;
   return (
-    <ul aria-label={label} data-testid={testId} className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[12px] text-gray-700 dark:text-gray-300">
+    <ul aria-label={label} data-testid={testId} className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-meta text-ui-mute">
       {items.map((it) => (
         <li key={it.key} className="inline-flex items-center gap-1.5">
-          {it.dot != null ? (
+          {it.icon != null ? (
+            <span aria-hidden className="flex shrink-0">
+              {it.icon}
+            </span>
+          ) : it.dot != null ? (
             <span aria-hidden className={`inline-block h-2 w-2 rounded-full ${it.dot}`} />
           ) : (
             <span aria-hidden className={`inline-block h-3.5 w-6 shrink-0 rounded ${it.swatch ?? ''}`} />
@@ -456,16 +466,8 @@ export function ArrowList({ label, items }: { label: string; items: ReadonlyArra
 
 const NARROW_PX = 760;
 
-export function LaneBoard<L, C>({
-  label,
-  layout,
-  laneWidth,
-  renderLane,
-  renderCard,
-  onToggleColumn,
-  onToggleCell,
-  legend,
-}: {
+/** The board's props (the grid on a wide screen, the stacked list on a phone). */
+interface LaneBoardProps<L, C> {
   /** The accessible name of the whole board. */
   label: string;
   layout: BoardLayout<L, C>;
@@ -477,9 +479,21 @@ export function LaneBoard<L, C>({
   onToggleColumn: (id: string) => void;
   /** Show or hide ONE lane's cards in a collapsed column (its "n tickets"). Absent = a plain count. */
   onToggleCell?: (laneId: string, columnId: string) => void;
-  /** A key drawn under the board, before the arrows' key (e.g. the card borders). */
+  /** A key drawn under the board, before the arrows' key (e.g. the card marks). */
   legend?: ReactNode;
-}): JSX.Element {
+}
+
+/** The quiet link-like toggle a column header and a collapsed cell use ("Show", "2 tickets"). */
+const TOGGLE_CLASS = `inline-flex items-center gap-0.5 rounded-ui px-1 text-meta font-medium text-ui-mute hover:bg-ui-hover hover:text-ui-ink touch:min-h-10 ${FOCUS_RING}`;
+
+export function LaneBoard<L, C>(props: LaneBoardProps<L, C>): JSX.Element {
+  // A PHONE stacks the board (lanes down, then each lane's columns down) — a five-column grid at
+  // 390px left every card a sliver. Every fact survives: the arrows become a visible numbered list.
+  const phone = useIsPhone();
+  return phone ? <StackedLaneBoard {...props} /> : <GridLaneBoard {...props} />;
+}
+
+function GridLaneBoard<L, C>({ label, layout, laneWidth, renderLane, renderCard, onToggleColumn, onToggleCell, legend }: LaneBoardProps<L, C>): JSX.Element {
   const cells = layout.cards;
   const arrows = layout.arrows;
   // A collapsed column's "n tickets" (or an opened cell's "Hide") sits in its lane's first row: an arrow
@@ -504,20 +518,21 @@ export function LaneBoard<L, C>({
     return m;
   }, [layout.lanes]);
   const gridRow = (logical: number): number => (narrow ? logical + 3 + (laneIndexOfRow[logical] ?? 0) : logical + 2);
-  const track = (c: (typeof layout.columns)[number]): string => (c.collapsed && !c.widened ? 'minmax(4.5rem, 6rem)' : 'minmax(6.5rem, 1fr)');
+  const track = (c: (typeof layout.columns)[number]): string => (c.collapsed && !c.widened ? 'minmax(4.5rem, 6rem)' : narrow ? 'minmax(9rem, 1fr)' : 'minmax(7.5rem, 1fr)');
   const template = `${narrow ? '' : `${laneWidth} `}${layout.columns.map(track).join(' ')}`;
 
   return (
     <ObstaclesContext.Provider value={cardRects}>
     <div role="group" aria-label={label} className="w-full">
-      <div className="w-full overflow-x-auto">
-        <div ref={gridRef} className="relative grid gap-x-12 gap-y-2 pb-1 pr-1" style={{ gridTemplateColumns: template }}>
-          {/* Lane stripes, under everything: a rule above each lane and a faint ground on every other. */}
-          {layout.lanes.map((l, i) => (
+      <div className={cx('w-full overflow-x-auto', narrow && 'snap-x snap-proximity')}>
+        <div ref={gridRef} className={cx('relative grid gap-y-1 pb-1 pr-1', narrow ? 'gap-x-8' : 'gap-x-12')} style={{ gridTemplateColumns: template }}>
+          {/* Lane rules, under everything: a hairline above each lane (no zebra ground — the cards
+              are the raised tone, the lanes are the page). */}
+          {layout.lanes.map((l) => (
             <div
               key={`bg:${l.id}`}
               aria-hidden
-              className={`pointer-events-none z-0 border-t border-gray-200 dark:border-gray-800 ${i % 2 === 1 ? 'bg-gray-50/70 dark:bg-gray-900/40' : ''}`}
+              className="pointer-events-none z-0 border-t border-ui-line/70"
               style={{ gridRow: narrow ? `${gridRow(l.row) - 1} / span ${l.span + 1}` : `${gridRow(l.row)} / span ${l.span}`, gridColumn: '1 / -1' }}
             />
           ))}
@@ -529,18 +544,18 @@ export function LaneBoard<L, C>({
           {layout.columns.map((c) => (
             <div
               key={c.id}
-              className="relative z-10 flex min-w-0 flex-wrap items-end gap-x-1.5 self-end pb-1 text-[12px] font-semibold text-gray-800 dark:text-gray-100"
+              className="relative z-10 flex min-w-0 snap-start flex-wrap items-end gap-x-1.5 self-end pb-1.5 text-body font-medium text-ui-ink"
               style={{ gridRow: 1, gridColumn: c.index + col0 }}
             >
               <span className="min-w-0 break-words">{c.name}</span>
-              <span className="font-normal text-gray-600 dark:text-gray-300">{c.count}</span>
+              <span className="text-meta font-normal tabular-nums text-ui-faint">{c.count}</span>
               {c.collapsible && (
                 <button
                   type="button"
                   aria-expanded={!c.collapsed}
                   aria-label={`${c.collapsed ? 'Show' : 'Hide'} ${c.name} tickets`}
                   onClick={() => onToggleColumn(c.id)}
-                  className="inline-flex items-center gap-0.5 rounded px-1 text-[11px] font-medium text-sky-700 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 dark:text-sky-300"
+                  className={TOGGLE_CLASS}
                 >
                   <ChevronIcon size={10} dir={c.collapsed ? 'right' : 'down'} />
                   {c.collapsed ? 'Show' : 'Hide'}
@@ -552,7 +567,7 @@ export function LaneBoard<L, C>({
           {layout.lanes.map((l) => (
             <Fragment key={l.id}>
               <div
-                className={`relative z-10 min-w-0 break-words py-1.5 ${narrow ? '' : 'pr-1'}`}
+                className={`relative z-10 min-w-0 break-words py-2.5 ${narrow ? '' : 'pr-1'}`}
                 style={narrow ? { gridRow: gridRow(l.row) - 1, gridColumn: '1 / -1' } : { gridRow: `${gridRow(l.row)} / span ${l.span}`, gridColumn: 1 }}
               >
                 {renderLane(l)}
@@ -561,27 +576,13 @@ export function LaneBoard<L, C>({
                 ({ colId, n, open }) => {
                   const c = layout.columns.find((x) => x.id === colId);
                   if (c == null) return null;
-                  const words = `${n} ${n === 1 ? 'ticket' : 'tickets'}`;
                   return (
                     <div
                       key={`h:${l.id}:${colId}`}
-                      className="relative z-10 self-center px-1 text-[11px] text-gray-600 dark:text-gray-300"
+                      className="relative z-10 self-center px-1 text-meta text-ui-mute"
                       style={{ gridRow: gridRow(l.row), gridColumn: c.index + col0 }}
                     >
-                      {onToggleCell == null ? (
-                        words
-                      ) : (
-                        <button
-                          type="button"
-                          aria-expanded={open}
-                          aria-label={`${open ? 'Hide' : 'Show'} ${words} in ${c.name} for ${l.label}`}
-                          onClick={() => onToggleCell(l.id, colId)}
-                          className="inline-flex items-center gap-0.5 rounded px-0.5 font-medium text-sky-700 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 dark:text-sky-300"
-                        >
-                          <ChevronIcon size={10} dir={open ? 'down' : 'right'} />
-                          {open ? 'Hide' : words}
-                        </button>
-                      )}
+                      <CellToggle n={n} open={open} column={c.name} lane={l.label} onToggle={onToggleCell == null ? null : () => onToggleCell(l.id, colId)} />
                     </div>
                   );
                 },
@@ -604,5 +605,119 @@ export function LaneBoard<L, C>({
       <ArrowList label="Dependencies" items={arrows} />
     </div>
     </ObstaclesContext.Provider>
+  );
+}
+
+/** A collapsed column's per-lane "n tickets" (or "Hide" once opened). `onToggle` null = a plain count. */
+function CellToggle({ n, open, column, lane, onToggle }: { n: number; open: boolean; column: string; lane: string; onToggle: (() => void) | null }): JSX.Element {
+  const words = `${n} ${n === 1 ? 'ticket' : 'tickets'}`;
+  if (onToggle == null) return <>{words}</>;
+  return (
+    <button type="button" aria-expanded={open} aria-label={`${open ? 'Hide' : 'Show'} ${words} in ${column} for ${lane}`} onClick={onToggle} className={TOGGLE_CLASS}>
+      <ChevronIcon size={10} dir={open ? 'down' : 'right'} />
+      {open ? 'Hide' : words}
+    </button>
+  );
+}
+
+const NO_REF = (): void => {};
+
+/**
+ * THE PHONE BOARD: each lane is a section (its header, then one block per column that holds its
+ * cards: "In progress 2" over the cards, two to a row). A collapsed column keeps its per-lane
+ * "n tickets" toggle, and its header toggle moves to a "Complete 3 · Show" line above the board. The
+ * ARROWS cannot be routed through a stack, so they become a VISIBLE list under the board (every
+ * arrow's full sentence, numbered as on the wide board; the cards still wear the waiting mark).
+ */
+function StackedLaneBoard<L, C>({ label, layout, renderLane, renderCard, onToggleColumn, onToggleCell, legend }: LaneBoardProps<L, C>): JSX.Element {
+  const collapsible = layout.columns.filter((c) => c.collapsible);
+  const byLane = useMemo(
+    () =>
+      layout.lanes.map((l) => {
+        const own = layout.cards.filter((c) => c.row >= l.row && c.row < l.row + l.span);
+        const cols = layout.columns
+          .map((col) => ({
+            col,
+            cards: own.filter((c) => c.col === col.index).sort((a, b) => a.row - b.row),
+            hidden: l.hidden.get(col.id) ?? null,
+            opened: l.opened.get(col.id) ?? null,
+          }))
+          .filter((x) => x.cards.length > 0 || x.hidden != null);
+        return { lane: l, cols };
+      }),
+    [layout],
+  );
+  const deps = layout.arrows;
+  return (
+    <div role="group" aria-label={label} data-layout="stacked" className="w-full">
+      {collapsible.length > 0 && (
+        <p className="flex flex-wrap items-center gap-x-3 pb-1 text-meta text-ui-mute">
+          {collapsible.map((c) => (
+            <span key={c.id} className="inline-flex items-center gap-1">
+              {c.name} <span className="tabular-nums text-ui-faint">{c.count}</span>
+              <button
+                type="button"
+                aria-expanded={!c.collapsed}
+                aria-label={`${c.collapsed ? 'Show' : 'Hide'} ${c.name} tickets`}
+                onClick={() => onToggleColumn(c.id)}
+                className={TOGGLE_CLASS}
+              >
+                <ChevronIcon size={10} dir={c.collapsed ? 'right' : 'down'} />
+                {c.collapsed ? 'Show' : 'Hide'}
+              </button>
+            </span>
+          ))}
+        </p>
+      )}
+      {byLane.map(({ lane, cols }) => (
+        <section key={lane.id} aria-label={lane.label} className="space-y-3 border-t border-ui-line/70 py-3">
+          <div>{renderLane(lane)}</div>
+          {cols.map(({ col, cards, hidden, opened }) => (
+            <div key={col.id} className="space-y-1.5">
+              <p className="flex min-h-6 items-center gap-1.5 text-meta font-medium text-ui-mute">
+                {col.name}
+                <span className="font-normal tabular-nums text-ui-faint">{cards.length > 0 ? cards.length : hidden}</span>
+                {hidden != null && (
+                  <CellToggle n={hidden} open={false} column={col.name} lane={lane.label} onToggle={onToggleCell == null ? null : () => onToggleCell(lane.id, col.id)} />
+                )}
+                {opened != null && (
+                  <CellToggle n={opened} open column={col.name} lane={lane.label} onToggle={onToggleCell == null ? null : () => onToggleCell(lane.id, col.id)} />
+                )}
+              </p>
+              {cards.length > 0 && (
+                <div className="grid grid-cols-2 gap-2">
+                  {cards.map((c) => (
+                    <div key={c.id} className="flex min-w-0 flex-col">
+                      {renderCard(c, NO_REF)}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </section>
+      ))}
+      {legend}
+      {deps.length > 0 && (
+        <div className="pt-3">
+          <p className="text-meta font-medium text-ui-mute">Dependencies</p>
+          <ol aria-hidden className="mt-1 space-y-1.5 text-meta text-ui-mute">
+            {deps.map((a) => (
+              <li key={a.key} className="flex items-start gap-1.5">
+                {a.n != null ? (
+                  <span className={`mt-px shrink-0 ${NUMBER_CLASS}`}>{a.n}</span>
+                ) : (
+                  <span className="mt-px flex w-4 shrink-0 justify-center">
+                    <ArrowIcon size={11} />
+                  </span>
+                )}
+                <span className={a.critical ? 'text-ui-ink' : undefined}>{a.text}</span>
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
+      <ArrowList label="Dependencies" items={deps} />
+    </div>
   );
 }

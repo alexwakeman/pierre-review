@@ -2,6 +2,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { FilterBar } from './components/FilterBar.js';
 import { PrDetail } from './components/PrDetail.js';
 import { Timeline } from './components/Timeline/index.js';
+import { TimelineList } from './components/Timeline/TimelineList.js';
+import { useIsPhone } from './components/ui/media.js';
+import { useTimelineLayout } from './store/timelineLayout.js';
 import { ActivityView } from './components/Activity/index.js';
 import { SprintTabView } from './components/Sprint/SprintTabView.js';
 import { MetricsDetail } from './components/Activity/MetricsDetail.js';
@@ -167,6 +170,10 @@ export default function App(): JSX.Element {
   // The detail pane is shown at the bottom of any board-slot Timeline (shared or
   // pr-focus) once a PR is selected there.
   const paneVisible = selectedPrId != null && !overlayActive;
+  // A phone: the shared board reads as a list by default, and the detail pane is a full-screen sheet.
+  const phone = useIsPhone();
+  const phoneLayout = useTimelineLayout((s) => s.phone);
+  const phoneTimelineList = phone && phoneLayout === 'list' && boardMode == null;
 
   // Resizable detail pane (Fix 2). Default taller than the old fixed 320px, and
   // the dragged height is remembered across reloads. During a drag we set the
@@ -283,17 +290,20 @@ export default function App(): JSX.Element {
             {/* The one board-slot Timeline. `mode` absent = the shared board; an isolate
                 mode = a PR's own timeline — each a keyed remount so vis tears down cleanly
                 (never reconfigured in place). */}
-            <section ref={timelineSectionRef} className="min-h-0 flex-1 overflow-hidden">
+            <section ref={timelineSectionRef} className="relative min-h-0 flex-1 overflow-hidden">
               {boardMode == null ? (
                 <Timeline key="board" />
               ) : (
                 <Timeline key={`focus:${boardMode.prId}`} mode={boardMode} />
               )}
+              {/* A phone reads the shared board as a LIST by default (the board stays mounted
+                  underneath, warm, one tap away) — components/Timeline/TimelineList.tsx. */}
+              {phoneTimelineList && <TimelineList />}
             </section>
 
             {/* Item 7: the resize handle + detail pane exist only once a PR is selected on
                 the board. No selection → the Timeline takes the full height. */}
-            {paneVisible && (
+            {paneVisible && !phone && (
               <>
                 <div
                   role="separator"
@@ -313,6 +323,17 @@ export default function App(): JSX.Element {
                   <DetailPane />
                 </section>
               </>
+            )}
+            {/* A PHONE: the selected PR's detail is a FULL-SCREEN sheet over the board (Back clears
+                the selection, as Esc and the × do), not a 384px strip under a 390px-wide canvas. */}
+            {paneVisible && phone && (
+              <section
+                ref={paneRef}
+                aria-label="Pull request detail"
+                className="fixed inset-0 z-50 flex flex-col overflow-hidden bg-ui-bg pb-[env(safe-area-inset-bottom)] pt-[env(safe-area-inset-top)] motion-safe:animate-ui-sheet-up"
+              >
+                <DetailPane sheet />
+              </section>
             )}
 
             {/* A pr-detail PR shown full-screen: an overlay covering the board (which stays

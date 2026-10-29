@@ -524,6 +524,17 @@ One sidebar, one slim top bar, the page (`components/shell/`, docs/redesign/DESI
 
 ### The timeline (`components/Timeline/`)
 
+**REDESIGN (2026-10).** The FilterBar is a token toolbar: panel triggers on the raise tone (their panels
+become bottom sheets below `sm`, their checkboxes `CheckboxBox`), Range a segmented control, Now / Clear
+filters quiet buttons. ⌘K while the Timeline is the page (`Timeline/useTimelineCommands.tsx`): each range,
+"centre on now", "clear filters", and on a phone Board / List. ⚠ **A PHONE READS THE TIMELINE AS A LIST** by
+default (`Timeline/TimelineList.tsx` over the board, which stays mounted): one line per PR the board would
+draw a bar for (`Timeline/listModel.ts` — the board's payload plus its Members and Threads narrowings,
+the selected PR always kept), grouped by repo, newest activity first; a tap = a bar click (`selectPr`).
+The choice is `store/timelineLayout.ts` (localStorage only, never the URL); the BOARD is one tap away.
+On a phone the selected PR's detail is a FULL-SCREEN sheet (App.tsx, `DetailPane sheet`, Back clears
+the selection) instead of the resizable bottom pane.
+
 `vis-timeline` with `stack:false` + `stackSubgroups:true`. Rows are nested groups
 **repo → contributor** (ids `repo:<rid>`, `repo:<rid>:user:<uid>`); within a contributor
 row, subgroups order a PR-bar line, its own-work event line, and a shared cross-user marker
@@ -2167,6 +2178,17 @@ the next refetch.
 
 ### This Sprint (a fixed tab — formerly "Activity → This Sprint")
 
+**REDESIGN (2026-10, docs/redesign/DESIGN.md).** One page header (`text-display` "This Sprint", then the
+shared `Tabs` — `1`–`4` switch them); a compact toolbar (sprint name + ⓘ, dates · tickets; Ask / Statuses as
+ghost buttons, Refresh secondary); quiet cards (surface tone, no border; MARKS not borders — below);
+hairline lane rules, no zebra. ⌘K while the board is up (`SprintCommands` in SprintView): Refresh,
+Ask, Statuses, both filters, and every ticket ("PLAT-292 · title" shows its story in the tray). ⚠ A
+PHONE (`useIsPhone`) gets `StackedLaneBoard` (LaneBoard.tsx): lanes down, each lane's columns down,
+cards two to a row, the Complete toggle as a line above, and the ARROWS as a VISIBLE numbered
+"Dependencies" list (every sentence) — a routed arrow cannot cross a stack. 768–1023: the grid in
+narrow mode, columns ≥ 9rem, scrolling sideways in its own box with snap. The story tray is a
+FULL-SCREEN sheet on a phone (Back, top left), a right sheet md–lg, the sticky column at lg+.
+
 (The heading keeps its old name because links point at it.) This Sprint is a **FIXED TAB** beside
 Activity — strip order Activity · This Sprint · Timeline; `activeTab === 'sprint'`, `?view=sprint`,
 rendered by `components/Sprint/SprintTabView.tsx` in its own `sprint-overlay` (App.tsx). It was an
@@ -2235,8 +2257,8 @@ sprint. The API route keeps its old name (`GET /api/sprint-graph`); only the SPA
     words share a number. An sr-only list ("Dependencies") reads every arrow as "B waits on A: why".
     Hovering a line or its number shows the popover — HOVER / FOCUS ONLY, no pin (§ Design diagrams →
     Arrow popovers). Above the arrow key, `BorderKey` (`components/LaneBoard.tsx`, the SAME component the
-    design grid's key uses) names each card border style the board draws, each swatch built from
-    `ticketCardBorder` itself (`sprintBorderKeyItems`). ⚠ `useRoutedArrows`, `ArrowLayer`, `ArrowKey`,
+    design grid's key uses) names each card MARK the board draws ("Card marks"), each with the card's own icon or ground
+    (`ticketCardMarks` / `ticketCardSurface`, `sprintBorderKeyItems`). ⚠ `useRoutedArrows`, `ArrowLayer`, `ArrowKey`,
     `BorderKey` and `ArrowList` are SHARED with `DesignGrid`, which kept its look; change them for both or
     neither. ⚠ The SAME border means different things on the two surfaces (dashed accent = waiting here,
     "Changed" on the design grid) — which is why each surface draws its own visible key.
@@ -2258,17 +2280,17 @@ sprint. The API route keeps its old name (`GET /api/sprint-graph`); only the SPA
     "No owner" tag is dropped there, never said twice). On People (the lane IS the person) the same line
     carries the ticket's theme, so every card on every view keeps one height —, then the tags as WORDS
     (`ticketCardTags`: "CI failing" on an open PR's red checks, "No PR" or "n PRs · m open" — closed
-    unmerged ones ignored —, "No owner"). The BORDER marks state by style (`ticketCardBorder`): 2px
-    solid accent = on a stored critical path; dashed = waiting on another unfinished ticket
-    (`waitingIdents`); both = dashed accent; outside the sprint = FAINT, 1px dashed on a tinted ground,
-    whatever else it is. ⚠ **A CARD WITH A PULL REQUEST** (`hasLivePr`: an open or merged one — the PR
-    tag's population; never a ghost) wears a small VIOLET DOT before its key, top left (the merge family;
-    `data-testid="ticket-pr-dot"`) — NOT a border or glow, which a critical-path card's orange 2px border
-    hid. ⚠ **PR cards are GROUPED FIRST in every cell** (`BoardCardDef.group`, 0 = has a PR):
+    unmerged ones ignored —, "No owner"). ⚠ **NO BORDER CARRIES MEANING** (the redesign, 2026-10): state is a MARK beside the key
+    (`ticketCardMarks`) — the route (`CriticalPathIcon`, vermilion like the critical arrows) = on a stored
+    critical path; the hourglass (`WaitingIcon`) = waiting on another unfinished ticket (`waitingIdents`);
+    outside the sprint = RECESSED (`ticketCardSurface`: the page ground with a faint ring), whatever else
+    it is. Cards are the surface tone, no border; the open-story arrow shows on hover/focus (always on touch). ⚠ **A CARD WITH A PULL REQUEST** (`hasLivePr`: an open or merged one — the PR
+    tag's population; never a ghost) wears the PULL-REQUEST MARK before its key, top left (`data-testid="ticket-pr-dot"`, kept for
+    history) — NOT a border or glow. ⚠ **PR cards are GROUPED FIRST in every cell** (`BoardCardDef.group`, 0 = has a PR):
     `layoutBoard` partitions stably, and `orderByLinks` sorts on (group, barycentre, place) so the
     link ordering works WITHIN a group and never lifts a card without a PR above one with a PR — on
     Critical path too, where a cell's PR cards come first and path order follows. `BorderKey` names
-    the dot "Has a pull request" when any card wears it. Its accessible name says all of it. ⚠ **A click
+    the mark "Has a pull request" when any card wears it. Its accessible name says all of it. ⚠ **A click
     opens the STORY TRAY beside the board** (`Sprint/SprintStoryTray.tsx`; the StoryPeek popover is
     DELETED): an `<aside>` on the RIGHT rendering EXACTLY the story tab's content — the ONE
     `Ticket/StoryViewBody.tsx` the tab mounts too (§ The story view), never a copy — under a header with

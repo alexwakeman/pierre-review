@@ -23,7 +23,9 @@ import {
   hasLivePr,
   assigneeLabel,
   personIndex,
-  ticketCardBorder,
+  ticketCardMarks,
+  ticketCardSurface,
+  TICKET_CARD_MARK_LABEL,
   type BoardLayout,
   type LaneSegment,
   type SprintBoard,
@@ -41,6 +43,8 @@ import { TicketCard } from '../TicketCard.js';
 import { SprintProgressBar } from './SprintProgressBar.js';
 import { sprintPathsView } from './sprintPathsModel.js';
 import { AiRunLabel } from '../AiRunLabel.js';
+import { CriticalPathIcon, PullRequestIcon, WaitingIcon, WarningIcon } from '../Icons.js';
+import { cx, FOCUS_RING } from '../ui/cx.js';
 
 // ACTIVITY → THIS SPRINT: THE THREE VIEWS (docs/FRONTEND.md § Activity → This Sprint). Three independent
 // angles on the same sprint, each a LANE BOARD (components/LaneBoard.tsx; layout lib/laneBoard.ts) over
@@ -62,7 +66,7 @@ import { AiRunLabel } from '../AiRunLabel.js';
 // "Unassigned" stay last. FILTERS: the "Has PRs" / "Needs code" chips above the board
 // (`SprintBoardFilters`, store/sprintBoardFilter.ts) drop cards on every view.
 
-const MUTED = 'text-gray-600 dark:text-gray-300';
+const MUTED = 'text-ui-mute';
 
 const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
 
@@ -73,9 +77,9 @@ function useCardFilter(): { filter: SprintCardFilter; keep: ((n: SprintGraphNode
   return { filter, keep };
 }
 
-const CHIP = 'rounded-full border px-2 py-0.5 text-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500';
-const CHIP_ON = 'border-sky-600 bg-sky-50 font-medium text-sky-800 dark:border-sky-400 dark:bg-sky-950 dark:text-sky-200';
-const CHIP_OFF = 'border-gray-300 text-gray-700 hover:border-gray-400 dark:border-gray-700 dark:text-gray-200 dark:hover:border-gray-500';
+const CHIP = `inline-flex h-7 items-center gap-1.5 rounded-ui px-2.5 text-body touch:h-10 touch:px-3 motion-safe:transition-colors motion-safe:duration-ui-fast ${FOCUS_RING}`;
+const CHIP_ON = 'bg-ui-sel font-medium text-ui-ink';
+const CHIP_OFF = 'bg-ui-raise text-ui-mute hover:bg-ui-hover hover:text-ui-ink';
 
 /** The board's two filter chips, above every view: "Has PRs" and "Needs code". With one on, how many
  *  sprint tickets show, of how many. */
@@ -179,13 +183,13 @@ function SprintLaneBoard({
     () => layoutBoard<SprintLaneData, SprintCardData>({ ...board, collapsed: collapsedColumns(board.columns, shown), expanded: cells }),
     [board, shown, cells],
   );
-  // Every border style a card on this board actually draws — the same three facts `ticketCardBorder`
-  // reads, so the key can neither miss a style nor show one no card has.
+  // Every mark a card on this board actually draws — the same three facts `ticketCardMarks` reads,
+  // so the key can neither miss a mark nor show one no card has.
   const borders = useMemo(
     () =>
-      new Set([
-        ...layout.cards.map((c) => cardStyleKey(c.data.node.ghost === true, c.data.critical, c.data.waiting)),
-        ...(layout.cards.some((c) => c.data.node.ghost !== true && hasLivePr(c.data.node)) ? [PR_DOT_KEY] : []),
+      new Set<string>([
+        ...layout.cards.flatMap((c) => ticketCardMarks({ critical: c.data.critical, waiting: c.data.waiting, ghost: c.data.node.ghost === true })),
+        ...(layout.cards.some((c) => c.data.node.ghost !== true && hasLivePr(c.data.node)) ? [PR_KEY] : []),
       ]),
     [layout.cards],
   );
@@ -196,7 +200,7 @@ function SprintLaneBoard({
       laneWidth={laneWidth}
       onToggleColumn={toggle}
       onToggleCell={toggleCell}
-      legend={<BorderKey items={sprintBorderKeyItems(borders)} testId="card-border-key" />}
+      legend={<BorderKey items={sprintBorderKeyItems(borders)} label="Card marks" testId="card-border-key" />}
       renderLane={(l) => <LaneHeader lane={l} />}
       renderCard={(c, ref) => (
         <TicketCard
@@ -217,28 +221,33 @@ function SprintLaneBoard({
   );
 }
 
-const RISK_CHIP: Record<SprintPathRisk, string> = {
-  high: 'border-rose-300 text-rose-700 dark:border-rose-800 dark:text-rose-300',
-  medium: 'border-amber-300 text-amber-800 dark:border-amber-800 dark:text-amber-300',
-  low: 'border-gray-300 text-gray-700 dark:border-gray-700 dark:text-gray-200',
+// A path's risk is a WORD with a mark, never a coloured chip: high risk is an attention mark (warn ink +
+// the warning icon), medium and low are plain words. It is not red — a risky path does not block.
+const RISK_TONE: Record<SprintPathRisk, string> = {
+  high: 'text-ui-warn',
+  medium: 'text-ui-mute',
+  low: 'text-ui-faint',
 };
 
 function LaneHeader({ lane }: { lane: BoardLayout<SprintLaneData, SprintCardData>['lanes'][number] }): JSX.Element {
   const d = lane.data;
-  const name = <h4 className="text-[12px] font-semibold leading-snug text-gray-900 dark:text-gray-50">{lane.label}</h4>;
+  const name = <h4 className="text-body font-medium text-ui-ink">{lane.label}</h4>;
   // The rows are sorted by this count, so each row says it.
   const prs = (
-    <p data-testid="lane-prs" className={`text-[11px] ${MUTED}`}>
+    <p data-testid="lane-prs" className={`text-meta ${MUTED}`}>
       {plural(d.prs, 'PR')}
     </p>
   );
   if (d.kind === 'path') {
     return (
       <div className="space-y-0.5">
-        <span className={`inline-block rounded border px-1 text-[11px] font-medium ${RISK_CHIP[d.risk]}`}>{SPRINT_PATH_RISK_LABEL[d.risk]}</span>
+        <span data-risk={d.risk} className={`inline-flex items-center gap-1 text-meta font-medium ${RISK_TONE[d.risk]}`}>
+          {d.risk === 'high' && <WarningIcon size={11} />}
+          {SPRINT_PATH_RISK_LABEL[d.risk]}
+        </span>
         {name}
         {prs}
-        <p className={`text-[12px] leading-snug ${MUTED}`}>{d.advice}</p>
+        <p className={`text-meta leading-snug ${MUTED}`}>{d.advice}</p>
       </div>
     );
   }
@@ -247,7 +256,7 @@ function LaneHeader({ lane }: { lane: BoardLayout<SprintLaneData, SprintCardData
       <div className="space-y-1">
         {name}
         {prs}
-        {d.summary != null && <p className="text-[12px] leading-snug text-gray-700 dark:text-gray-200">{d.summary}</p>}
+        {d.summary != null && <p className="text-meta leading-snug text-ui-ink">{d.summary}</p>}
         <SegmentBar segments={d.segments} lane={lane.label} progress={d.progress} code={d.code} />
       </div>
     );
@@ -255,7 +264,7 @@ function LaneHeader({ lane }: { lane: BoardLayout<SprintLaneData, SprintCardData
   return (
     <div className="space-y-1">
       {name}
-      <p className={`text-[11px] ${MUTED}`}>
+      <p className={`text-meta ${MUTED}`}>
         {d.tickets} {d.tickets === 1 ? 'ticket' : 'tickets'} · {plural(d.prs, 'PR')}
         {/* null = no GitHub account mapped: say nothing, never 0. */}
         {d.reviewsWaiting != null && ` · ${d.reviewsWaiting} ${d.reviewsWaiting === 1 ? 'review' : 'reviews'} waiting`}
@@ -266,12 +275,12 @@ function LaneHeader({ lane }: { lane: BoardLayout<SprintLaneData, SprintCardData
 }
 
 const SEGMENT_FILL: Record<SprintStage | 'unknown', string> = {
-  not_started: 'bg-gray-300 dark:bg-gray-600',
+  not_started: 'bg-ui-faint',
   in_progress: 'bg-sky-500',
   in_review: 'bg-amber-500',
   product_review: 'bg-emerald-400',
   done: 'bg-emerald-700 dark:bg-emerald-500',
-  unknown: 'bg-gray-200 dark:bg-gray-700',
+  unknown: 'bg-ui-line',
 };
 
 /** A lane's tickets per column, as one bar. Hovering or focusing it shows CODE's row lines (the
@@ -312,11 +321,11 @@ function SegmentBar({
               </li>
             ))}
           </ul>
-          <p className="mt-1 text-gray-600 dark:text-gray-300">Each part is as wide as its share of the row&rsquo;s {total} tickets.</p>
+          <p className="mt-1 text-ui-mute">Each part is as wide as its share of the row&rsquo;s {total} tickets.</p>
         </div>
       }
     >
-      <span aria-hidden className="flex h-1.5 w-full overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800">
+      <span aria-hidden className="flex h-1.5 w-full overflow-hidden rounded-full bg-ui-raise">
         {segments.map((s) => (
           <span key={s.column} className={SEGMENT_FILL[s.meaning ?? 'unknown']} style={{ width: `${(100 * s.count) / total}%` }} />
         ))}
@@ -325,34 +334,19 @@ function SegmentBar({
   );
 }
 
-/** One card's border style, as the key names it. A ticket outside the sprint is faint whatever else it is. */
-function cardStyleKey(ghost: boolean, critical: boolean, waiting: boolean): string {
-  if (ghost) return critical ? 'gc' : 'g';
-  return `${critical ? 'c' : ''}${waiting ? 'w' : ''}` || 'plain';
-}
+/** The key entry for the pull-request mark a card with an open or merged pull request wears (TicketCard). */
+const PR_KEY = 'pr';
 
-/** The key entry for the violet dot a card with an open or merged pull request wears (TicketCard). */
-const PR_DOT_KEY = 'pr-dot';
-
-const BORDER_KEY: ReadonlyArray<{ key: string; label: string; critical: boolean; waiting: boolean; ghost: boolean }> = [
-  { key: 'c', label: 'On a critical path', critical: true, waiting: false, ghost: false },
-  { key: 'w', label: 'Waiting on another ticket', critical: false, waiting: true, ghost: false },
-  { key: 'cw', label: 'On a path and waiting', critical: true, waiting: true, ghost: false },
-  { key: 'g', label: 'Outside the sprint', critical: false, waiting: false, ghost: true },
-  { key: 'gc', label: 'Outside the sprint, on a path', critical: true, waiting: false, ghost: true },
-];
-
-/** The key to the card borders, under a board: exactly the styles the board draws (the shared
- *  `BorderKey`, each swatch from `ticketCardBorder` itself). */
+/** The key to the card marks, under a board: exactly the marks the board draws (the shared
+ *  `BorderKey`), each with the card's own icon or ground. */
 function sprintBorderKeyItems(present: ReadonlySet<string>): BorderKeyItem[] {
-  return [
-    ...BORDER_KEY.filter((k) => present.has(k.key)).map((k) => ({
-      key: k.key,
-      label: k.label,
-      swatch: ticketCardBorder({ critical: k.critical, waiting: k.waiting, ghost: k.ghost }),
-    })),
-    ...(present.has(PR_DOT_KEY) ? [{ key: PR_DOT_KEY, label: 'Has a pull request', dot: 'bg-violet-500 dark:bg-violet-400' }] : []),
-  ];
+  const items: BorderKeyItem[] = [];
+  if (present.has('critical'))
+    items.push({ key: 'critical', label: TICKET_CARD_MARK_LABEL.critical, icon: <CriticalPathIcon size={12} className="text-ai-signal" /> });
+  if (present.has('waiting')) items.push({ key: 'waiting', label: TICKET_CARD_MARK_LABEL.waiting, icon: <WaitingIcon size={12} className="text-ui-mute" /> });
+  if (present.has('outside')) items.push({ key: 'outside', label: TICKET_CARD_MARK_LABEL.outside, swatch: ticketCardSurface({ ghost: true }) });
+  if (present.has(PR_KEY)) items.push({ key: PR_KEY, label: 'Has a pull request', icon: <PullRequestIcon size={11} className="text-ui-mute" /> });
+  return items;
 }
 
 // ── Critical path ────────────────────────────────────────────────────────────────────────────────
@@ -384,7 +378,7 @@ export function SprintPathsView({ data, actions }: { data: SprintGraphResponse; 
       {data.pace != null && <PaceStrip pace={data.pace} productReview={productReview} />}
       {heading && (
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-          <h4 className="text-sm font-medium text-gray-800 dark:text-gray-100">{calm ? 'No critical paths in this sprint.' : 'Critical paths'}</h4>
+          <h4 className="text-sm font-medium text-ui-ink">{calm ? 'No critical paths in this sprint.' : 'Critical paths'}</h4>
           <InfoButton title="Critical paths">
             <PathsInfo aiEnabled={data.aiEnabled} />
           </InfoButton>
@@ -420,11 +414,11 @@ export function SprintPathsView({ data, actions }: { data: SprintGraphResponse; 
 function PaceStrip({ pace, productReview }: { pace: SprintPace; productReview: boolean }): JSX.Element {
   const items = paceItems(pace, { productReview });
   return (
-    <dl data-testid="sprint-pace" aria-label="Pace" className="flex flex-wrap gap-x-6 gap-y-2 rounded-md border border-gray-200 px-3 py-2 dark:border-gray-800">
+    <dl data-testid="sprint-pace" aria-label="Pace" className="flex flex-wrap gap-x-8 gap-y-2 rounded-ui bg-ui-surface px-4 py-3">
       {items.map((it) => (
         <div key={it.label} className="min-w-0">
-          <dt className={`text-[11px] ${MUTED}`}>{it.label}</dt>
-          <dd className="flex items-center gap-2 text-[13px] font-semibold text-gray-900 dark:text-gray-50">
+          <dt className={`text-meta ${MUTED}`}>{it.label}</dt>
+          <dd className="flex items-center gap-2 text-body font-semibold text-ui-ink">
             {it.value}
             {it.pct != null && (
               <span
@@ -433,9 +427,9 @@ function PaceStrip({ pace, productReview }: { pace: SprintPace; productReview: b
                 aria-valuemin={0}
                 aria-valuemax={100}
                 aria-valuenow={it.pct}
-                className="inline-block h-1.5 w-20 overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700"
+                className="inline-block h-1.5 w-20 overflow-hidden rounded-full bg-ui-raise"
               >
-                <span className="block h-full bg-gray-700 dark:bg-gray-300" style={{ width: `${Math.max(0, Math.min(100, it.pct))}%` }} />
+                <span className="block h-full bg-ui-mute" style={{ width: `${Math.max(0, Math.min(100, it.pct))}%` }} />
               </span>
             )}
           </dd>
@@ -501,9 +495,9 @@ function Callouts({ data, onOpen }: { data: SprintGraphResponse; onOpen: OpenTic
       {items.map((it) => {
         const tickets = it.idents.map((x) => byIdent.get(x)).filter((n): n is SprintGraphNode => n != null);
         return (
-          <li key={it.key} className="space-y-0.5 rounded-md border border-gray-200 px-2.5 py-1.5 dark:border-gray-800">
-            <p className={`text-[11px] font-medium ${MUTED}`}>{it.label}</p>
-            <p className="text-xs font-semibold text-gray-800 dark:text-gray-100">{it.title}</p>
+          <li key={it.key} className="space-y-0.5 rounded-ui bg-ui-surface px-3 py-2.5">
+            <p className={`text-meta font-medium ${MUTED}`}>{it.label}</p>
+            <p className="text-xs font-semibold text-ui-ink">{it.title}</p>
             {it.sentence != null && <p className={`text-xs ${MUTED}`}>{it.sentence}</p>}
             {tickets.length > 0 && (
               <p className="flex flex-wrap gap-1 pt-0.5">
@@ -513,7 +507,7 @@ function Callouts({ data, onOpen }: { data: SprintGraphResponse; onOpen: OpenTic
                     type="button"
                     onClick={() => onOpen(n)}
                     aria-label={`${n.key}${n.title !== '' ? `: ${n.title}` : ''}, shows its story beside the board`}
-                    className="rounded border border-gray-300 px-1 font-mono text-[11px] text-gray-800 hover:border-gray-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 dark:border-gray-700 dark:text-gray-100"
+                    className={`inline-flex h-6 items-center rounded-ui bg-ui-raise px-1.5 font-mono text-meta text-ui-ink hover:bg-ui-hover touch:h-10 touch:px-2.5 ${FOCUS_RING}`}
                   >
                     {n.key}
                   </button>
@@ -533,10 +527,10 @@ function CountTableView({ data }: { data: SprintGraphResponse }): JSX.Element | 
   const cell = 'px-2 py-1 text-right tabular-nums';
   return (
     <div className="overflow-x-auto">
-      <table data-testid="sprint-count-table" className="min-w-full text-[12px] text-gray-800 dark:text-gray-100">
-        <caption className="pb-1 text-left text-xs font-medium text-gray-800 dark:text-gray-100">Every ticket, by theme and column</caption>
+      <table data-testid="sprint-count-table" className="min-w-full text-meta text-ui-ink">
+        <caption className="pb-1 text-left text-xs font-medium text-ui-ink">Every ticket, by theme and column</caption>
         <thead className={MUTED}>
-          <tr className="border-b border-gray-200 dark:border-gray-800">
+          <tr className="border-b border-ui-line">
             <th scope="col" className="px-2 py-1 text-left font-medium">
               Theme
             </th>
@@ -552,7 +546,7 @@ function CountTableView({ data }: { data: SprintGraphResponse }): JSX.Element | 
         </thead>
         <tbody>
           {t.rows.map((r) => (
-            <tr key={r.id} className="border-b border-gray-100 dark:border-gray-800/60">
+            <tr key={r.id} className="border-b border-ui-line/50">
               <th scope="row" className="px-2 py-1 text-left font-normal">
                 {r.label}
               </th>

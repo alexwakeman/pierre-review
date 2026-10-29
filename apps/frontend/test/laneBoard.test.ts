@@ -19,7 +19,8 @@ import {
   lanePrCount,
   sprintCardFilter,
   ticketCodeNote,
-  ticketCardBorder,
+  ticketCardMarks,
+  ticketCardSurface,
   ticketCardCriteria,
   ticketCardTags,
   waitingIdents,
@@ -445,14 +446,19 @@ describe('TicketCard tags are words', () => {
   it('a ticket outside the sprint is never "No owner" (its assignee is not read)', () => {
     expect(ticketCardTags(node('X-1', { ghost: true, assignee: null }))).toEqual(['No PR']);
   });
-  it('the border marks state by STYLE, not colour alone: critical = 2px solid, waiting = dashed', () => {
-    expect(ticketCardBorder({ critical: true, waiting: false, ghost: false })).toMatch(/border-2 border-solid border-ai-signal-fill/);
-    expect(ticketCardBorder({ critical: true, waiting: true, ghost: false })).toMatch(/border-2 border-dashed border-ai-signal-fill/);
-    expect(ticketCardBorder({ critical: false, waiting: true, ghost: false })).toMatch(/border-dashed/);
-    expect(ticketCardBorder({ critical: false, waiting: false, ghost: true })).toMatch(/border-dashed/);
-    // Outside the sprint stays FAINT even on a path: 1px, dashed, tinted.
-    expect(ticketCardBorder({ critical: true, waiting: false, ghost: true })).toMatch(/^border border-dashed border-ai-signal-fill\/60 bg-gray-50/);
-    expect(ticketCardBorder({ critical: false, waiting: false, ghost: false })).toMatch(/border-solid/);
+  // The redesign (docs/redesign/DESIGN.md § Colour) moved these facts from BORDER STYLES (2px
+  // vermilion solid / dashed) to MARKS — an icon + words on the card and in the board key.
+  it('a card marks its state as named marks, never a border colour', () => {
+    expect(ticketCardMarks({ critical: true, waiting: false, ghost: false })).toEqual(['critical']);
+    expect(ticketCardMarks({ critical: true, waiting: true, ghost: false })).toEqual(['critical', 'waiting']);
+    expect(ticketCardMarks({ critical: false, waiting: true, ghost: false })).toEqual(['waiting']);
+    expect(ticketCardMarks({ critical: true, waiting: false, ghost: true })).toEqual(['critical', 'outside']);
+    expect(ticketCardMarks({ critical: false, waiting: false, ghost: false })).toEqual([]);
+  });
+  it('outside the sprint is a recessed ground; no card wears a border or a red', () => {
+    expect(ticketCardSurface({ ghost: true })).toMatch(/bg-ui-bg/);
+    expect(ticketCardSurface({ ghost: false })).toBe('bg-ui-surface');
+    for (const ghost of [true, false]) expect(ticketCardSurface({ ghost })).not.toMatch(/border|dashed|signal|rose|red/);
   });
 });
 
@@ -463,12 +469,9 @@ describe('cards with a pull request', () => {
     expect(hasLivePr(node('A-1', { prs: [pr({ state: 'merged' })] }))).toBe(true);
     expect(hasLivePr(node('A-1', { prs: [pr()] }))).toBe(true);
   });
-  it('a pull request is not a border: no violet, no glow', () => {
-    expect(ticketCardBorder({ critical: false, waiting: false, ghost: false })).toBe(
-      'border border-solid border-gray-300 bg-white dark:border-gray-700 dark:bg-gray-950',
-    );
-    expect(ticketCardBorder({ critical: true, waiting: false, ghost: false })).toMatch(/border-2 border-solid border-ai-signal-fill/);
-    expect(ticketCardBorder({ critical: true, waiting: false, ghost: false })).not.toMatch(/violet|ticket-card-pr/);
+  it('a pull request is not a mark or a ground: no violet, no glow', () => {
+    expect(ticketCardSurface({ ghost: false })).not.toMatch(/violet|ticket-card-pr/);
+    expect(ticketCardMarks({ critical: false, waiting: false, ghost: false })).toEqual([]);
   });
   it('PR cards sit FIRST in every cell, input order kept within each group', () => {
     const nodes = [node('A-1'), node('A-2', { prs: [pr()] }), node('A-3'), node('A-4', { prs: [pr({ state: 'merged' })] }), node('A-5', { prs: [pr({ state: 'closed' })] })];

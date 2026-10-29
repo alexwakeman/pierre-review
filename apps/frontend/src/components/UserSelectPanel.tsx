@@ -3,6 +3,7 @@ import type { User } from '@pierre-review/shared';
 import { Avatar } from './CommentCard.js';
 import { useClickOutside } from '../hooks/useClickOutside.js';
 import { userLabel } from '../lib/ui.js';
+import { CheckboxBox } from './ui/FormControls.js';
 import { CaretIcon, CloseIcon } from './Icons.js';
 
 // A labelled group of members in the picker (e.g. "Maintainers", a repo name,
@@ -85,9 +86,9 @@ export function MemberSectionList({
   const memberRow = (sec: MemberSection, u: User): JSX.Element => (
     <label
       key={`${sec.key}:${u.id}`}
-      className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 text-xs hover:bg-gray-100 dark:hover:bg-gray-800"
+      className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 text-meta hover:bg-ui-hover"
     >
-      <input type="checkbox" checked={staged.has(u.id)} onChange={() => onToggle(u.id)} />
+      <CheckboxBox checked={staged.has(u.id)} onChange={() => onToggle(u.id)} />
       <Avatar user={u} size={16} />
       <span className="min-w-0 truncate" title={u.githubLogin}>
         {userLabel(u, u.id)}
@@ -99,9 +100,9 @@ export function MemberSectionList({
   return (
     <>
       {totalMembers === 0 ? (
-        <div className="px-1 py-2 text-xs text-gray-500 dark:text-gray-400">No members in range.</div>
+        <div className="px-1 py-2 text-meta text-ui-mute">No members in range.</div>
       ) : visibleSections.length === 0 ? (
-        <div className="px-1 py-2 text-xs text-gray-500 dark:text-gray-400">No members match.</div>
+        <div className="px-1 py-2 text-meta text-ui-mute">No members match.</div>
       ) : (
         visibleSections.map((sec) => {
           const ids = sec.members.map((u) => u.id);
@@ -121,15 +122,15 @@ export function MemberSectionList({
             <div key={sec.key} className="mb-1 last:mb-0">
               {/* Opaque + z-10 + a hairline so a scrolling member row passes cleanly BEHIND
                   the pinned repo name instead of bleeding through it. */}
-              <div className="sticky top-0 z-10 flex items-center justify-between border-b border-gray-100 bg-white px-1 pb-0.5 pt-1 dark:border-gray-800 dark:bg-gray-900">
-                <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+              <div className="sticky top-0 z-10 flex items-center justify-between border-b border-ui-line bg-ui-raise px-1 pb-0.5 pt-1">
+                <span className="text-meta font-semibold text-ui-faint">
                   {sec.label}
                 </span>
                 <button
                   type="button"
                   onClick={() => onToggleMany(ids, !allChecked)}
                   title="Select / clear every member in this repo (including any collapsed below)"
-                  className="text-[11px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+                  className="text-meta text-ui-faint hover:text-ui-ink"
                 >
                   {allChecked ? 'none' : 'all'}
                 </button>
@@ -137,14 +138,14 @@ export function MemberSectionList({
               {maints.map((u) => memberRow(sec, u))}
               {visibleRest.map((u) => memberRow(sec, u))}
               {!searching && rest.length > 0 && (
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 px-1 py-0.5 text-[11px]">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 px-1 py-0.5 text-meta">
                   {remaining > 0 && (
                     <button
                       type="button"
                       onClick={() =>
                         setShownOthers((s) => ({ ...s, [sec.key]: (s[sec.key] ?? 0) + 10 }))
                       }
-                      className="font-medium text-blue-600 hover:underline dark:text-blue-400"
+                      className="font-medium text-ui-accent hover:underline"
                     >
                       {/* Lead number == what THIS click reveals (always ≤10, since the
                           onClick bumps by 10); "· N hidden" is the total still collapsed. */}
@@ -157,7 +158,7 @@ export function MemberSectionList({
                     <button
                       type="button"
                       onClick={() => setShownOthers((s) => ({ ...s, [sec.key]: 0 }))}
-                      className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                      className="text-ui-faint hover:text-ui-ink"
                     >
                       Show fewer
                     </button>
@@ -277,13 +278,13 @@ export function UserSelectPanel({
     <div ref={rootRef} className="relative">
       {/* Trigger + (when a selection is active) a clear-✕. Sibling buttons inside
           one pill — never a button nested in a button (that can swallow clicks). */}
-      <span className="inline-flex items-center whitespace-nowrap rounded-full border border-gray-300 text-xs text-gray-600 hover:border-gray-400 dark:border-gray-700 dark:text-gray-300 dark:hover:border-gray-500">
+      <span className="inline-flex items-center whitespace-nowrap rounded-ui bg-ui-raise text-body text-ui-mute hover:text-ui-ink">
         <button
           type="button"
           onClick={() => (open ? setOpen(false) : openPanel())}
           aria-haspopup="true"
           aria-expanded={open}
-          className={`inline-flex items-center gap-1 py-0.5 pl-2.5 ${
+          className={`inline-flex h-7 items-center gap-1 rounded-ui pl-2.5 touch:h-10 focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent ${
             activeCount > 0 ? 'pr-1' : 'pr-2.5'
           }`}
         >
@@ -299,7 +300,7 @@ export function UserSelectPanel({
             }}
             title="Clear members filter"
             aria-label="Clear members filter"
-            className="flex items-center self-stretch py-0.5 pl-0.5 pr-2 opacity-60 hover:opacity-100"
+            className="flex items-center self-stretch rounded-ui pl-0.5 pr-2 opacity-60 hover:opacity-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent touch:px-3"
           >
             <CloseIcon size={11} />
           </button>
@@ -310,7 +311,7 @@ export function UserSelectPanel({
         <div
           role="dialog"
           aria-label="Select members"
-          className="absolute left-0 top-full z-[60] mt-1 w-80 rounded-lg border border-gray-200 bg-white p-2 shadow-lg dark:border-gray-700 dark:bg-gray-900"
+          className="absolute left-0 top-full z-[60] mt-1 w-80 max-w-[calc(100vw-2rem)] rounded-ui bg-ui-raise p-2 text-ui-ink shadow-xl shadow-black/30 ring-1 ring-ui-line motion-safe:animate-ui-pop max-sm:fixed max-sm:inset-x-2 max-sm:bottom-2 max-sm:top-auto max-sm:mt-0 max-sm:max-h-[75vh] max-sm:w-auto max-sm:max-w-none max-sm:overflow-y-auto max-sm:pb-[calc(0.5rem+env(safe-area-inset-bottom))]"
         >
           <input
             autoFocus
@@ -319,7 +320,7 @@ export function UserSelectPanel({
             onChange={(e) => setFilter(e.target.value)}
             placeholder="Filter members…"
             aria-label="Filter members"
-            className="mb-2 w-full rounded border border-gray-300 bg-transparent px-2 py-0.5 text-xs focus:border-blue-500 focus:outline-none dark:border-gray-700"
+            className="mb-2 w-full rounded-ui bg-ui-bg px-2 py-1 text-body text-ui-ink ring-1 ring-ui-line placeholder:text-ui-faint focus:outline-none focus:ring-2 focus:ring-ui-accent"
           />
           {maintainerIds.size > 0 &&
             (() => {
@@ -332,16 +333,16 @@ export function UserSelectPanel({
                   type="button"
                   onClick={() => toggleMany(ids, !allChecked)}
                   title="Select every maintainer in the current filter"
-                  className={`mb-2 flex w-full items-center gap-2 rounded px-2 py-1 text-xs transition ${
+                  className={`mb-2 flex w-full items-center gap-2 rounded px-2 py-1 text-meta transition ${
                     allChecked
                       ? 'bg-[#8957e5]/15 text-[#8957e5]'
-                      : 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800'
+                      : 'text-ui-mute hover:bg-ui-hover hover:text-ui-ink'
                   }`}
                 >
                   <MaintainerShield />
                   <span className="font-medium">Maintainers</span>
-                  <span className="text-gray-400">({ids.length})</span>
-                  <span className="ml-auto text-[11px] text-gray-400">
+                  <span className="text-ui-faint">({ids.length})</span>
+                  <span className="ml-auto text-meta text-ui-faint">
                     {allChecked ? 'clear' : 'select all'}
                   </span>
                 </button>
@@ -363,9 +364,8 @@ export function UserSelectPanel({
               staged behind Apply): it's a visibility switch over bot actors, not a
               member selection, so it takes effect on click like the repo/event
               show/hide controls. */}
-          <label className="mt-2 flex cursor-pointer items-center gap-2 border-t border-gray-200 pt-2 text-xs text-gray-600 dark:border-gray-700 dark:text-gray-300">
-            <input
-              type="checkbox"
+          <label className="mt-2 flex cursor-pointer items-center gap-2 border-t border-ui-line pt-2 text-meta text-ui-mute">
+            <CheckboxBox
               checked={excludeBots}
               onChange={(e) => onExcludeBotsChange(e.target.checked)}
             />
@@ -375,25 +375,25 @@ export function UserSelectPanel({
           {/* Per-repo Bots (item 3): allow-list the important bots so they stay visible even
               while "Exclude bots" hides the rest. IMMEDIATE like the exclude toggle. */}
           {visibleBotSections.length > 0 && (
-            <div className="mt-2 border-t border-gray-200 pt-2 dark:border-gray-700">
+            <div className="mt-2 border-t border-ui-line pt-2">
               <div className="mb-1 flex items-center gap-1.5 px-1">
-                <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+                <span className="text-meta font-semibold text-ui-faint">
                   Bots
                 </span>
-                <span className="text-[11px] text-gray-400">
+                <span className="text-meta text-ui-faint">
                   {excludeBots ? '· ticked stay visible' : '· all shown (bots not excluded)'}
                 </span>
               </div>
               <div className="max-h-40 overflow-y-auto">
                 {visibleBotSections.map((sec) => (
                   <div key={sec.key} className="mb-1 last:mb-0">
-                    <div className="sticky top-0 z-10 border-b border-gray-100 bg-white px-1 pb-0.5 pt-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:border-gray-800 dark:bg-gray-900">
+                    <div className="sticky top-0 z-10 border-b border-ui-line bg-ui-raise px-1 pb-0.5 pt-1 text-meta font-semibold text-ui-faint">
                       {sec.label}
                     </div>
                     {sec.members.map((u) => (
                       <label
                         key={`${sec.key}:${u.id}`}
-                        className={`flex items-center gap-2 rounded px-1 py-1 text-xs hover:bg-gray-100 dark:hover:bg-gray-800 ${
+                        className={`flex items-center gap-2 rounded px-1 py-1 text-meta hover:bg-ui-hover ${
                           excludeBots ? 'cursor-pointer' : 'cursor-pointer opacity-60'
                         }`}
                         title={
@@ -402,8 +402,7 @@ export function UserSelectPanel({
                             : 'Bots are currently shown; enable "Exclude bots" for this to take effect'
                         }
                       >
-                        <input
-                          type="checkbox"
+                        <CheckboxBox
                           checked={allowedSet.has(u.id)}
                           onChange={() => onToggleAllowedBot(u.id)}
                         />
@@ -422,14 +421,14 @@ export function UserSelectPanel({
             <button
               type="button"
               onClick={clearAll}
-              className="text-[11px] text-gray-400 hover:text-gray-600"
+              className="text-meta text-ui-faint hover:text-ui-ink"
             >
               Clear all
             </button>
             <button
               type="button"
               onClick={apply}
-              className="rounded bg-blue-600 px-2.5 py-0.5 text-xs text-white"
+              className="rounded-ui bg-ui-accent-fill px-2.5 py-1 text-body font-medium text-ui-on-accent hover:brightness-110 touch:min-h-10"
             >
               Apply
             </button>

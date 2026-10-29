@@ -479,6 +479,30 @@ export function TimerIcon({ size = 13, ...rest }: IconProps): JSX.Element {
   );
 }
 
+// A route: two stops joined by a bending line — a ticket on one of This Sprint's CRITICAL PATHS
+// (the ticket card's mark and the board key). Purpose-built: the sprint card used to say this with a
+// thick vermilion border, which read as an alarm rather than a fact.
+export function CriticalPathIcon({ size = 12, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} strokeWidth={2} {...rest}>
+      <circle cx="5" cy="18" r="2.4" />
+      <circle cx="19" cy="6" r="2.4" />
+      <path d="M7.4 18H14a3.5 3.5 0 0 0 0-7h-4a3.5 3.5 0 0 1 0-7h6.6" />
+    </IconShell>
+  );
+}
+
+// An hourglass — a sprint ticket WAITING on another unfinished ticket (the card's mark and the board
+// key). Not `TimerIcon`, which is elapsed time; this is "blocked behind something else".
+export function WaitingIcon({ size = 12, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} strokeWidth={2} {...rest}>
+      <path d="M6 3h12M6 21h12" />
+      <path d="M7 3c0 5 5 5.5 5 9s-5 4-5 9M17 3c0 5-5 5.5-5 9s5 4 5 9" />
+    </IconShell>
+  );
+}
+
 // A hollow ring — the anomaly marker on the bot charts (a point that sits outside its own
 // baseline). Deliberately just an outline: it annotates a datum, it is not a status.
 export function RingIcon({ size = 10, ...rest }: IconProps): JSX.Element {

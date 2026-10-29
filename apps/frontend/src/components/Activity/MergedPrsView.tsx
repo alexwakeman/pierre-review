@@ -70,11 +70,11 @@ export function MergedPrsView(): JSX.Element {
   return (
     <div data-testid="merged-prs-view" className="space-y-3">
       <div className="flex flex-wrap items-baseline gap-2">
-        <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-100">
+        <h3 className="text-body font-semibold text-ui-ink">
           {w != null ? reportingWindowCaption(w) : 'Merged so far'}
         </h3>
         {w != null && (
-          <span className="text-xs text-gray-500 dark:text-gray-400">
+          <span className="text-meta text-ui-mute">
             {windowDates(w)} · {n} pull request{n === 1 ? '' : 's'} merged
           </span>
         )}
@@ -88,7 +88,7 @@ export function MergedPrsView(): JSX.Element {
         </div>
       </div>
       {data?.truncated === true && (
-        <p className="text-xs text-amber-800 dark:text-amber-300">
+        <p className="text-meta text-ui-warn">
           Showing the latest {prs.length} merges in this window; earlier ones are not listed.
         </p>
       )}

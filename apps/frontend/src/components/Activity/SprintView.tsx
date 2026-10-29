@@ -13,7 +13,10 @@ import { StoryOpenOverride, useOpenStory, type OpenStoryArgs } from '../../lib/t
 import { ticketKeyOfIdent } from '../../store/pinnedTabs.js';
 import type { SprintBoardView } from '../../lib/laneBoard.js';
 import { useFilters } from '../../store/filters.js';
-import { GearIcon, RefreshIcon, SparkleIcon } from '../Icons.js';
+import { FilterIcon, GearIcon, RefreshIcon, SparkleIcon, TicketIcon, WarningIcon } from '../Icons.js';
+import { Button } from '../ui/Button.js';
+import { useRegisterCommands, type Command } from '../ui/commands.js';
+import { useSprintBoardFilter } from '../../store/sprintBoardFilter.js';
 import { InfoButton } from '../InfoModal.js';
 import { AiStatusLine } from '../AiStatusLine.js';
 import { SprintAskPanel } from './SprintAskPanel.js';
@@ -41,9 +44,7 @@ import { useAiProviderName } from '../../hooks/useAiCapabilities.js';
 //   TOOLBAR REFRESH  reads the sprint from the tracker now AND (local, AI on) starts up to
 //            SPRINT_REFRESH_TICKET_CHECKS ticket checks; the count started is said briefly after.
 
-const MUTED = 'text-gray-600 dark:text-gray-300';
-const TOOL_BUTTON =
-  'inline-flex items-center gap-1 rounded border border-gray-300 px-2 py-0.5 text-xs text-gray-700 hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:text-gray-200 dark:hover:border-gray-500';
+const MUTED = 'text-ui-mute';
 
 const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
 
@@ -138,8 +139,8 @@ export function SprintView({ view }: { view: SprintBoardView }): JSX.Element {
   );
   const trayNode = trayIdent != null ? data?.nodes.find((n) => n.ident === trayIdent) : undefined;
 
-  if (isError) return <p className="text-sm text-rose-700 dark:text-rose-400">Could not load this sprint.</p>;
-  if (isLoading || data == null || workspaceId == null) return <p className={`text-xs ${MUTED}`}>Loading…</p>;
+  if (isError) return <p className="text-body text-ui-danger">Could not load this sprint.</p>;
+  if (isLoading || data == null || workspaceId == null) return <p className={`text-meta ${MUTED}`}>Loading…</p>;
   // No tracker: one line and the way to set one up (Settings → Workspace → Issue tracker).
   if (!data.trackerOn) return <SprintTrackerSetup />;
   const reading = data.read.readAt == null && data.read.error == null;
@@ -161,55 +162,90 @@ export function SprintView({ view }: { view: SprintBoardView }): JSX.Element {
     refresh.mutate();
   };
 
+  const refreshDisabled = refreshing || progress?.label === 'Reading the sprint';
+
   return (
     <StoryOpenOverride.Provider value={showInTray}>
-    <div className="flex items-start gap-3">
-    <div data-testid="sprint-view" data-view={view} className="min-w-0 flex-1 space-y-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <h3 className="flex items-center gap-1.5 text-sm font-semibold text-gray-800 dark:text-gray-100">
-          {title}
-          <InfoButton title="Reading this sprint">
-            <BoardInfo name={aiName} />
-          </InfoButton>
-        </h3>
-        {datesLine != null && (
-          <span data-testid="sprint-dates" className="text-xs text-gray-600 dark:text-gray-300">
-            {datesLine}
+    <SprintCommands
+      nodes={data.nodes}
+      aiName={aiName}
+      showAsk={showAsk}
+      askOpen={askOpen}
+      onAsk={() => setAskOpen((o) => !o)}
+      statusesOpen={settingsOpen}
+      onStatuses={() => setSettingsOpen((o) => !o)}
+      onRefresh={refreshDisabled ? null : startRefresh}
+      onShowStory={select}
+    />
+    <div className="flex items-start gap-4">
+    <div data-testid="sprint-view" data-view={view} className="min-w-0 flex-1 space-y-4">
+      {/* THE TOOLBAR: the sprint's name and facts on the left, its three actions on the right (they
+          wrap under the name on a phone). Quiet buttons — nothing here is the page's primary action. */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-0.5">
+          <h3 className="flex items-center gap-1.5 text-title text-ui-ink">
+            {title}
+            <InfoButton title="Reading this sprint">
+              <BoardInfo name={aiName} />
+            </InfoButton>
+          </h3>
+          <span className={`flex flex-wrap items-center gap-x-1.5 text-meta ${MUTED}`}>
+            {datesLine != null && <span data-testid="sprint-dates">{datesLine}</span>}
+            {datesLine != null && (reading || sprintCount > 0) && <span aria-hidden>·</span>}
+            {!reading && sprintCount > 0 && <span className="tabular-nums">{plural(sprintCount, 'ticket')}</span>}
+            {reading && <span>Reading the sprint…</span>}
           </span>
-        )}
-        {!reading && sprintCount > 0 && <span className={`text-xs ${MUTED}`}>{plural(sprintCount, 'ticket')}</span>}
-        {reading && <span className={`text-xs ${MUTED}`}>Reading the sprint…</span>}
+        </div>
         <span className="ml-auto" />
-        {showAsk && (
-          <button
-            type="button"
-            onClick={() => setAskOpen((o) => !o)}
-            aria-pressed={askOpen}
-            className="inline-flex items-center gap-1 rounded border border-ai-border px-2 py-0.5 text-xs font-medium text-ai-ink hover:bg-ai-surface-2"
+        <div className="flex flex-wrap items-center gap-1">
+          {showAsk && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setAskOpen((o) => !o)}
+              aria-pressed={askOpen}
+              icon={<SparkleIcon size={12} className="text-ai-signal" />}
+              className={askOpen ? 'bg-ui-sel text-ui-ink' : undefined}
+            >
+              Ask {aiName}
+            </Button>
+          )}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setSettingsOpen((o) => !o)}
+            aria-expanded={settingsOpen}
+            icon={<GearIcon size={12} />}
+            className={settingsOpen ? 'bg-ui-sel text-ui-ink' : undefined}
           >
-            <SparkleIcon size={12} className="text-ai-signal" />
-            Ask {aiName}
-          </button>
-        )}
-        <button type="button" onClick={() => setSettingsOpen((o) => !o)} aria-expanded={settingsOpen} className={TOOL_BUTTON}>
-          <GearIcon size={12} />
-          Statuses
-        </button>
-        <button type="button" onClick={startRefresh} disabled={refreshing || progress?.label === 'Reading the sprint'} className={TOOL_BUTTON}>
-          <RefreshIcon size={12} className={progress?.kind === 'busy' ? 'animate-spin motion-reduce:animate-none' : undefined} />
-          Refresh
-        </button>
+            Statuses
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={startRefresh}
+            disabled={refreshDisabled}
+            icon={<RefreshIcon size={12} className={progress?.kind === 'busy' ? 'animate-spin motion-reduce:animate-none' : undefined} />}
+          >
+            Refresh
+          </Button>
+        </div>
       </div>
-      {progress != null && <SprintProgressBar progress={progress} className="h-[3px] w-full rounded-full" />}
+      {progress != null && <SprintProgressBar progress={progress} className="h-[2px] w-full rounded-full" />}
       {settingsOpen && data.statusLayout != null && <SprintStatusSettings workspaceId={data.workspaceId} layout={data.statusLayout} />}
       {checksNote != null && (
-        <p data-testid="sprint-checks-note" role="status" className={`text-xs ${MUTED}`}>
+        <p data-testid="sprint-checks-note" role="status" className={`text-meta ${MUTED}`}>
           {checksNote}
         </p>
       )}
-      {data.read.error != null && <p className="text-xs text-rose-700 dark:text-rose-400">{data.read.error}</p>}
+      {data.read.error != null && (
+        <p className="flex items-center gap-1.5 text-meta text-ui-danger">
+          <WarningIcon size={12} />
+          {data.read.error}
+        </p>
+      )}
       {(data.read.truncated || (data.ghostsTruncated && view === 'paths')) && (
-        <p className={`text-xs ${MUTED}`}>
+        <p className={`text-meta ${MUTED}`}>
           {[
             data.read.truncated ? `Showing the first ${SPRINT_TICKETS_MAX} tickets.` : null,
             data.ghostsTruncated && view === 'paths' ? `Showing ${SPRINT_GHOST_MAX} tickets outside the sprint.` : null,
@@ -225,7 +261,7 @@ export function SprintView({ view }: { view: SprintBoardView }): JSX.Element {
 
       {sprintCount > 0 && <SprintBoardFilters data={data} />}
       {sprintCount === 0 ? (
-        !reading && <p className={`text-sm ${MUTED}`}>No tickets in this sprint.</p>
+        !reading && <p className={`text-body ${MUTED}`}>No tickets in this sprint.</p>
       ) : view === 'themes' ? (
         <SprintThemesView data={data} actions={actions} />
       ) : view === 'people' ? (
@@ -246,6 +282,104 @@ export function SprintView({ view }: { view: SprintBoardView }): JSX.Element {
     </div>
     </StoryOpenOverride.Provider>
   );
+}
+
+/**
+ * ⌘K while This Sprint's boards are on screen (docs/redesign/DESIGN.md § Command palette): the
+ * toolbar's actions, the two filters, and every ticket on the board ("PLAT-292 · title" shows its
+ * story in the tray, exactly as a card click does). The sub-tabs themselves are the shell's commands
+ * (hooks/useShellCommands.tsx) and the page's 1–4 keys. Renders nothing.
+ */
+function SprintCommands({
+  nodes,
+  aiName,
+  showAsk,
+  askOpen,
+  onAsk,
+  statusesOpen,
+  onStatuses,
+  onRefresh,
+  onShowStory,
+}: {
+  nodes: readonly SprintGraphNode[];
+  aiName: string;
+  showAsk: boolean;
+  askOpen: boolean;
+  onAsk: () => void;
+  statusesOpen: boolean;
+  onStatuses: () => void;
+  /** null while a read is already running. */
+  onRefresh: (() => void) | null;
+  onShowStory: (n: SprintGraphNode) => void;
+}): null {
+  const filter = useSprintBoardFilter((s) => s.filter);
+  const toggle = useSprintBoardFilter((s) => s.toggle);
+  // The parent's handlers are fresh closures every render; the commands call the latest through a ref
+  // so the list re-registers only when what it SAYS changes.
+  const live = useRef({ onAsk, onStatuses, onRefresh, onShowStory });
+  live.current = { onAsk, onStatuses, onRefresh, onShowStory };
+  const canRefresh = onRefresh != null;
+  const commands = useMemo<Command[]>(() => {
+    const out: Command[] = [];
+    if (canRefresh)
+      out.push({
+        id: 'refresh',
+        group: 'Actions',
+        title: 'Refresh the sprint',
+        keywords: ['read', 'tracker', 'jira', 'reload'],
+        icon: <RefreshIcon size={14} />,
+        run: () => live.current.onRefresh?.(),
+      });
+    if (showAsk)
+      out.push({
+        id: 'ask',
+        group: 'Actions',
+        title: askOpen ? `Close Ask ${aiName}` : `Ask ${aiName} about this sprint`,
+        keywords: ['question', 'ai', 'chat'],
+        icon: <SparkleIcon size={14} />,
+        run: () => live.current.onAsk(),
+      });
+    out.push({
+      id: 'statuses',
+      group: 'Actions',
+      title: statusesOpen ? 'Close the sprint statuses' : 'Edit the sprint statuses',
+      keywords: ['buckets', 'columns', 'status'],
+      icon: <GearIcon size={14} />,
+      run: () => live.current.onStatuses(),
+    });
+    out.push(
+      {
+        id: 'filter:hasPrs',
+        group: 'Actions',
+        title: filter.hasPrs ? 'Sprint: show every ticket, not only Has PRs' : 'Sprint: only tickets that have PRs',
+        keywords: ['filter', 'has prs'],
+        icon: <FilterIcon size={14} />,
+        run: () => toggle('hasPrs'),
+      },
+      {
+        id: 'filter:needsCode',
+        group: 'Actions',
+        title: filter.needsCode ? 'Sprint: turn off Needs code' : 'Sprint: only tickets that need code',
+        keywords: ['filter', 'needs code'],
+        icon: <FilterIcon size={14} />,
+        run: () => toggle('needsCode'),
+      },
+    );
+    for (const n of nodes) {
+      out.push({
+        id: `ticket:${n.ident}`,
+        group: 'Tickets',
+        title: n.title !== '' ? `${n.key} · ${n.title}` : n.key,
+        hint: n.ghost ? 'Outside the sprint' : (n.status?.name ?? undefined),
+        keywords: ['story', 'ticket'],
+        icon: <TicketIcon size={14} />,
+        run: () => live.current.onShowStory(n),
+      });
+    }
+    return out;
+  }, [nodes, aiName, showAsk, askOpen, statusesOpen, canRefresh, filter, toggle]);
+  useRegisterCommands('sprint-board', commands);
+  return null;
 }
 
 function BoardInfo({ name }: { name: string }): JSX.Element {
@@ -284,9 +418,9 @@ function BoardInfo({ name }: { name: string }): JSX.Element {
           Show opens the column, and a row&rsquo;s own count opens that row only.
         </li>
         <li>
-          <strong>Borders</strong>: a thick orange border is a ticket on a critical path; a dashed one is waiting on another
-          unfinished ticket; a faint dashed one on a grey ground is outside the sprint. A violet dot before the key is a ticket
-          with an open or merged pull request, and those tickets come first in each cell. The key under each board names them.
+          <strong>Marks</strong>: the route mark beside a key is a ticket on a critical path; the hourglass is a ticket waiting
+          on another unfinished ticket; a card sunk into the page is outside the sprint. The pull-request mark before the key is a
+          ticket with an open or merged pull request, and those tickets come first in each cell. The key under each board names them.
         </li>
         <li>
           <strong>Names</strong>: Critical path and Theme show who each ticket is assigned to; People shows its theme there

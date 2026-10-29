@@ -4,7 +4,9 @@ import { escapeOwnedByControl } from '../../lib/escapeOwner.js';
 import { hasActivePopover } from '../../lib/activePopover.js';
 import { useOpenStory } from '../../lib/ticketTab.js';
 import { StoryViewBody } from '../Ticket/StoryViewBody.js';
-import { ArrowIcon, CloseIcon } from '../Icons.js';
+import { ArrowIcon, ChevronIcon, CloseIcon } from '../Icons.js';
+import { Button, IconButton } from '../ui/Button.js';
+import { cx, FOCUS_RING } from '../ui/cx.js';
 
 // THIS SPRINT'S STORY TRAY (docs/FRONTEND.md § This Sprint, § The story view): a ticket clicked on the
 // board (a card, a call-out key, a ticket key in an Ask Claude answer) shows its story HERE, on the
@@ -16,7 +18,8 @@ import { ArrowIcon, CloseIcon } from '../Icons.js';
 //            fetches until a ticket was clicked (NOTHING ON THE BOARD FETCHES ON MOUNT).
 //   LAYOUT   wide screens: a column beside the board, sticky in the overlay's scroll box, scrolling on
 //            its own; the board narrows and scrolls sideways in its own box (LaneBoard re-routes its
-//            arrows on resize). Below `lg`: a sheet over the right of the page.
+//            arrows on resize). md–lg: a sheet over the right of the page; a PHONE: a full-screen
+//            sheet with Back top left (the redesign; docs/redesign/DESIGN.md § 6).
 //            ⚠ Its height is the SCROLL BOX's visible height (measured), never `100vh - Npx`: a tray
 //            taller than the box it sticks in stretched the row and left blank space under the board.
 //   WIDTH    the left edge is a drag handle (also arrow keys); the width is remembered in localStorage
@@ -171,9 +174,16 @@ export function SprintStoryTray({
       data-testid="sprint-story-tray"
       data-noactivate
       style={style}
-      className="fixed inset-y-0 right-0 z-30 flex w-[min(var(--tray-w),92vw)] flex-col border-l border-gray-200 bg-white shadow-xl dark:border-gray-800 dark:bg-gray-950 lg:sticky lg:inset-y-auto lg:right-auto lg:top-0 lg:z-auto lg:max-h-[var(--tray-h,calc(100vh-7rem))] lg:w-[min(var(--tray-w),calc(100%-20rem))] lg:shrink-0 lg:self-start lg:rounded-md lg:border lg:shadow-none"
+      // Phone: a FULL-SCREEN sheet (Back closes it). md–lg: a sheet over the right of the page. lg+: a
+      // sticky column beside the board, the surface tone against the page (no border).
+      className={cx(
+        'fixed inset-0 z-50 flex flex-col bg-ui-surface pb-[env(safe-area-inset-bottom)] pt-[env(safe-area-inset-top)] motion-safe:animate-ui-sheet-up',
+        'md:inset-y-0 md:left-auto md:right-0 md:w-[min(var(--tray-w),92vw)] md:pt-0 md:shadow-2xl md:shadow-black/30 md:motion-safe:animate-ui-slide-in',
+        'lg:sticky lg:inset-y-auto lg:right-auto lg:top-0 lg:z-auto lg:max-h-[var(--tray-h,calc(100vh-7rem))] lg:w-[min(var(--tray-w),calc(100%-20rem))] lg:shrink-0 lg:self-start lg:rounded-ui lg:pb-0 lg:shadow-none',
+      )}
     >
-      {/* The width handle: the tray's left edge. Drag, or focus it and use the arrow keys (Home resets). */}
+      {/* The width handle: the tray's left edge. Drag, or focus it and use the arrow keys (Home resets).
+          Not on a phone, where the sheet is the whole screen. */}
       <div
         role="separator"
         aria-orientation="vertical"
@@ -186,28 +196,25 @@ export function SprintStoryTray({
         onPointerDown={onHandleDown}
         onKeyDown={onHandleKey}
         onDoubleClick={() => setSavedWidth(null)}
-        className="absolute inset-y-0 -left-1 z-10 w-2 cursor-col-resize touch-none rounded hover:bg-sky-500/30 focus:outline-none focus-visible:bg-sky-500/40"
+        className="absolute inset-y-0 -left-1 z-10 hidden w-2 cursor-col-resize touch-none rounded-ui hover:bg-ui-accent/30 focus:outline-none focus-visible:bg-ui-accent/40 md:block"
       />
-      <div className="flex shrink-0 items-center gap-2 border-b border-gray-200 px-3 py-2 dark:border-gray-800">
-        <span className="min-w-0 flex-1 truncate font-mono text-xs font-semibold text-gray-800 dark:text-gray-100">{ticketKey}</span>
-        <button
-          type="button"
-          onClick={() => openStory({ ident, key: ticketKey, title })}
-          className="inline-flex shrink-0 items-center gap-1 rounded border border-gray-300 px-2 py-0.5 text-xs text-gray-700 hover:border-gray-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 dark:border-gray-700 dark:text-gray-200 dark:hover:border-gray-500"
-        >
-          <ArrowIcon size={11} />
-          Open story tab
-        </button>
+      <div className="flex h-12 shrink-0 items-center gap-2 px-2 md:h-11 md:px-4">
+        {/* Phone: Back, top left (the sheet's way out); wider: the × on the right. */}
         <button
           type="button"
           onClick={onClose}
-          aria-label="Close the story"
-          className="shrink-0 rounded p-1 text-gray-600 hover:bg-gray-100 hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-gray-50"
+          className={cx('-ml-1 flex h-10 items-center gap-1 rounded-ui px-2 text-body text-ui-mute hover:bg-ui-hover hover:text-ui-ink md:hidden', FOCUS_RING)}
         >
-          <CloseIcon size={12} />
+          <ChevronIcon dir="left" size={12} />
+          Back
         </button>
+        <span className="min-w-0 flex-1 truncate font-mono text-body font-medium text-ui-ink">{ticketKey}</span>
+        <Button variant="ghost" size="sm" icon={<ArrowIcon size={11} />} onClick={() => openStory({ ident, key: ticketKey, title })}>
+          Open story tab
+        </Button>
+        <IconButton label="Close the story" icon={<CloseIcon size={12} />} size="sm" onClick={onClose} className="hidden md:inline-flex" />
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto p-3">
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4 pt-1 md:px-4">
         {/* Keyed on the ticket, so switching tickets starts the body afresh. */}
         <StoryViewBody key={ident} ident={ident} meta={{ key: ticketKey, title }} />
       </div>
