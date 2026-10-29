@@ -135,6 +135,7 @@ describe('2. the store', () => {
   beforeEach(() => {
     sqlite = new Database(':memory:');
     sqlite.exec(migration('0088_issue_tracker.sql'));
+    sqlite.exec(migration('0150_workspace_tracker_notion.sql'));
     sqlite.exec(migration('0142_tracker_ticket_comments.sql'));
     ctx = {
       db: drizzle(sqlite),

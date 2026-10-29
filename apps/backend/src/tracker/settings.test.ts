@@ -54,6 +54,7 @@ beforeEach(() => {
   sqlite = new Database(':memory:');
   sqlite.exec(SETUP);
   sqlite.exec(migration);
+  sqlite.exec(readFileSync(fileURLToPath(new URL('../db/migrations/0150_workspace_tracker_notion.sql', import.meta.url)), 'utf8'));
   ctx = {
     db: drizzle(sqlite),
     host: {},

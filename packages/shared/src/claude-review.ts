@@ -16,6 +16,7 @@
 // The follow-up / criteria SENTENCES are TEMPLATED from server-validated statuses (a code-derived
 // figure). Claude's own explanations are shown separately, as Claude's text — CLAUDE.md's rule
 // that a model-derived and a code-derived figure are labelled apart.
+import { NOTION_ROOT_RE } from './notion-tracker.js';
 import type {
   ClaudeFindingSeverity,
   ClaudeFindingStory,
@@ -486,18 +487,20 @@ export function stripStoredStoryLead(body: string, story: ClaudeFindingStory | n
 //
 // ⚠ ONE KEY SHAPE PER PROVIDER, AND A PROVIDER WITH NO SHAPE DOES NOT PARSE (a request body cannot
 // smuggle an ident in for a provider no adapter reads). Jira, GitHub Issues and Linear all read now.
-const TICKET_KEY_SHAPE: Record<'jira' | 'github' | 'linear', RegExp | null> = {
+const TICKET_KEY_SHAPE: Record<'jira' | 'github' | 'linear' | 'notion', RegExp | null> = {
   jira: /^[A-Z][A-Z0-9_]{0,19}-\d{1,9}$/,
   // A GitHub ident's key is the issue NUMBER; its root names the repository (below).
   github: /^\d{1,9}$/,
   // A Linear key is the team key and the issue number, upper-cased: `ENG-123`.
   linear: /^[A-Z][A-Z0-9_]{0,19}-\d{1,9}$/,
+  // A Notion key is the page's Unique ID with its prefix, upper-cased: `ENG-123`.
+  notion: /^[A-Z][A-Z0-9_]{0,19}-\d{1,9}$/,
 };
 // A GitHub ident's root: `https://github.com/<owner>/<repo>`, lower-cased.
 const GITHUB_IDENT_ROOT_RE = /^https:\/\/github\.com\/[a-z0-9][a-z0-9-]{0,38}\/[a-z0-9._-]{1,100}$/;
 // A Linear ident's root: `https://linear.app/<workspace url key>`, lower-cased (`linearSiteRoot`).
 const LINEAR_IDENT_ROOT_RE = /^https:\/\/linear\.app\/[a-z0-9][a-z0-9_-]{0,63}$/;
-const TRACKER_IDENT_RE = /^(jira|github|linear):(.+)#([^#]+)$/;
+const TRACKER_IDENT_RE = /^(jira|github|linear|notion):(.+)#([^#]+)$/;
 const MANUAL_IDENT_RE = /^manual:(\d{1,12}):([0-9a-f]{8})$/;
 // An ident is bounded so a request body can never carry an unbounded key.
 export const TICKET_IDENT_MAX_CHARS = 600;
@@ -532,7 +535,7 @@ export function jiraApiRoot(baseUrl: string | null | undefined): string | null {
 }
 
 /** `<provider>:<root>#<KEY>` — THE ident builder. `root` must already be the canonical root. */
-export const ticketIdent = (provider: 'jira' | 'github' | 'linear', root: string, key: string): string =>
+export const ticketIdent = (provider: 'jira' | 'github' | 'linear' | 'notion', root: string, key: string): string =>
   `${provider}:${root}#${key}`;
 
 /** 'jira:<apiRoot>#<KEY>' — the same Jira site and key are the same ticket across workspaces. */
@@ -540,8 +543,8 @@ export const jiraTicketIdent = (apiRoot: string, key: string): string => ticketI
 
 /** A tracker ticket's parsed ident. `apiRoot` is `root` under its historical (Jira) name. */
 export interface ParsedTrackerIdent {
-  kind: 'jira' | 'github' | 'linear';
-  provider: 'jira' | 'github' | 'linear';
+  kind: 'jira' | 'github' | 'linear' | 'notion';
+  provider: 'jira' | 'github' | 'linear' | 'notion';
   root: string;
   apiRoot: string;
   key: string;
@@ -565,6 +568,7 @@ export function parseTicketIdent(ident: string): ParsedTicketIdent | null {
     if (shape == null || !shape.test(key)) return null;
     if (provider === 'github' && !GITHUB_IDENT_ROOT_RE.test(t[2]!)) return null;
     if (provider === 'linear' && !LINEAR_IDENT_ROOT_RE.test(t[2]!)) return null;
+    if (provider === 'notion' && !NOTION_ROOT_RE.test(t[2]!)) return null;
     return { kind: provider, provider, root: t[2]!, apiRoot: t[2]!, key };
   }
   const m = MANUAL_IDENT_RE.exec(ident);
@@ -652,7 +656,7 @@ export function canonicalTicketKey(raw: string | null | undefined): string | nul
 }
 
 /** The ident of a stored ticket row. ⚠ The ONE way a row becomes an ident. */
-export function trackerTicketIdent(provider: 'jira' | 'github' | 'linear', apiRoot: string, issueKey: string): string {
+export function trackerTicketIdent(provider: 'jira' | 'github' | 'linear' | 'notion', apiRoot: string, issueKey: string): string {
   if (provider === 'github') {
     const gh = parseGithubIssueKey(issueKey);
     if (gh != null) return ticketIdent('github', `${GITHUB_TRACKER_ROOT}/${gh.owner}/${gh.repo}`, String(gh.number));
@@ -662,7 +666,7 @@ export function trackerTicketIdent(provider: 'jira' | 'github' | 'linear', apiRo
 
 /** The stored row identity of a parsed tracker ident — the inverse of `trackerTicketIdent`. */
 export function trackerTicketRow(parsed: ParsedTrackerIdent): {
-  provider: 'jira' | 'github' | 'linear';
+  provider: 'jira' | 'github' | 'linear' | 'notion';
   apiRoot: string;
   issueKey: string;
 } {
@@ -694,17 +698,20 @@ export function ticketIdentForLink(link: { key: string; url: string | null; prov
     const root = linearSiteRoot(link.url);
     if (key !== '' && root != null) ident = ticketIdent('linear', root, key);
   }
+  // Notion: the link (`notion.so/ENG-123`, or a page URL) does not name the DATABASE the ident is
+  // rooted on, so a Notion ident comes from the server (`TicketLink.ident`), never from a link.
   return ident != null && parseTicketIdent(ident) != null ? ident : null;
 }
 
 /** Providers whose tickets Limn READS (title, story, criteria) — every provider since Linear's reader
  *  (phase 3). Whether THIS workspace can read is `TicketRef.canFetchDetails` (a token saved). */
 export const isReadingTrackerProvider = (p: string | null | undefined): boolean =>
-  p === 'jira' || p === 'github' || p === 'linear';
+  p === 'jira' || p === 'github' || p === 'linear' || p === 'notion';
 
 /** The product's own name for a provider, for "Open in …" copy. */
-export const TRACKER_PROVIDER_LABEL: Record<'jira' | 'github' | 'linear', string> = {
+export const TRACKER_PROVIDER_LABEL: Record<'jira' | 'github' | 'linear' | 'notion', string> = {
   jira: 'Jira',
   github: 'GitHub',
   linear: 'Linear',
+  notion: 'Notion',
 };

@@ -150,10 +150,12 @@ function tierFor(method: string, path: string): readonly Tier[] {
   //                                                the customer's Jira with the saved token.
   //   GET /api/workspaces/:id/tracker/linear-check the Linear connection check — one call to
   //                                                Linear with the saved key.
-  // All three take the 60/min `search` bucket, the "one upstream call per request" tier. The plain
+  //   GET /api/workspaces/:id/tracker/notion-schema the Notion mapping read — the saved database's
+  //                                                schema (+ ≤ 3 related databases) with the saved token.
+  // All four take the 60/min `search` bucket, the "one upstream call per request" tier. The plain
   // `GET …/tracker` is DB-only and stays on `read` with the rest of the family.
   if (method === 'PUT' && /^\/api\/workspaces\/\d+\/tracker$/.test(path)) return [TIERS.search, TIERS.read];
-  if (!mutating && /^\/api\/workspaces\/\d+\/tracker\/(jira-fields|linear-check)$/.test(path)) {
+  if (!mutating && /^\/api\/workspaces\/\d+\/tracker\/(jira-fields|linear-check|notion-schema)$/.test(path)) {
     return [TIERS.search, TIERS.read];
   }
   // SONARCLOUD (sonar/routes.ts): "Test connection" calls SonarCloud with the saved token (one call

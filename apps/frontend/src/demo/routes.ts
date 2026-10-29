@@ -3,7 +3,17 @@
 // make, answered with a plausible success shaped by the shared types and folded into the
 // in-memory overlay so later reads show it.
 
-import { aiKindsAll, aiProviderName, aiRunProvider, isAiEffort, isAiProviderSetting, LARGE_PR_CODE_LOC_DEFAULT } from '@pierre-review/shared';
+import {
+  aiKindsAll,
+  aiProviderName,
+  aiRunProvider,
+  isAiEffort,
+  isAiProviderSetting,
+  LARGE_PR_CODE_LOC_DEFAULT,
+  type NotionPropertyInfo,
+  type NotionSchemaResponse,
+  type NotionTrackerMapping,
+} from '@pierre-review/shared';
 import { normalisePath } from './recording.js';
 import type { DemoReply, DemoRequest, DemoRoute, DemoServer } from './server.js';
 import { fakeSha, isRecord, notInDemo } from './util.js';
@@ -156,6 +166,50 @@ export function mergeSettings(target: Record<string, unknown>, patch: Record<str
   return out;
 }
 
+/** A Notion schema answer made from a saved mapping (the demo makes no Notion call). */
+export function demoNotionSchema(workspaceId: number, m: NotionTrackerMapping): NotionSchemaResponse {
+  const props: NotionPropertyInfo[] = [
+    { id: 'title', name: 'Name', type: 'title' },
+    { id: m.uniqueId.property.id, name: m.uniqueId.property.name, type: 'unique_id', prefix: m.uniqueId.prefix },
+  ];
+  if (m.status != null) {
+    const options = m.status.type === 'select' ? Object.keys(m.status.options) : ['Not started', 'In progress', 'In review', 'Done'];
+    props.push({
+      id: m.status.property.id,
+      name: m.status.property.name,
+      type: m.status.type,
+      options,
+      ...(m.status.type === 'status'
+        ? { optionCategory: { 'Not started': 'new', 'In progress': 'indeterminate', 'In review': 'indeterminate', Done: 'done' } as const }
+        : {}),
+    });
+  }
+  if (m.assignee != null) props.push({ ...m.assignee, type: 'people' });
+  if (m.sprint != null) {
+    props.push({
+      ...m.sprint.property,
+      type: m.sprint.kind,
+      ...(m.sprint.kind === 'relation' ? { relationDatabaseId: m.sprint.sprintDatabaseId } : {}),
+      ...(m.sprint.kind === 'select' ? { options: [m.sprint.current] } : {}),
+    });
+  }
+  if (m.issueType != null) props.push({ ...m.issueType, type: 'select', options: ['Story', 'Bug', 'Task'] });
+  if (m.criteria != null) props.push({ ...m.criteria, type: 'rich_text' });
+  if (m.blockedBy != null) props.push({ ...m.blockedBy, type: 'relation', relationDatabaseId: m.databaseId });
+  return {
+    workspaceId,
+    databaseId: m.databaseId,
+    title: 'Web tasks',
+    properties: props,
+    sprintDatabases:
+      m.sprint?.kind === 'relation'
+        ? { [m.sprint.property.id]: { databaseId: m.sprint.sprintDatabaseId, title: 'Web sprints', dateProperties: [m.sprint.dateProperty] } }
+        : {},
+    refusal: null,
+    suggested: m,
+  };
+}
+
 /** The current read of a settings path: what this session stored, else the recording. */
 function currentRead(srv: DemoServer, url: string): unknown {
   const key = normalisePath(url);
@@ -292,6 +346,22 @@ export const ROUTES: DemoRoute[] = [
       }
       setAiState(srv, { effort: value ?? null });
       return OK({ setting: { value: value ?? null, source: 'settings' } });
+    },
+  },
+  // Settings → Issue tracker → Notion → "Change mapping": the schema read would call Notion, so the demo
+  // answers it from the workspace's SAVED mapping (the recorded tracker GET): the mapped properties
+  // and the Sprints database, the saved mapping as the suggestion.
+  {
+    method: 'GET',
+    re: /^\/api\/workspaces\/(\d+)\/tracker\/notion-schema$/,
+    run: (_req, m, srv) => {
+      const id = Number(m[1]);
+      const tracker = currentRead(srv, `/api/workspaces/${id}/tracker`) as Record<string, unknown> | null;
+      const notion = (tracker?.notion ?? null) as NotionTrackerMapping | null;
+      if (notion == null) {
+        return { status: 400, body: { error: 'NoNotionMapping', message: 'Not available in the demo.' } };
+      }
+      return OK(demoNotionSchema(id, notion));
     },
   },
   { method: 'GET', re: /^\/api\/ai\/codex\/login$/, run: (_r, _m, srv) => OK(codexLogin(srv)) },

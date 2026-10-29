@@ -242,6 +242,15 @@ clone count. **The invariant: a GitHub token never reaches disk.**
   and a `RATELIMITED` answer is a quiet 5-minute workspace backoff. The connection check
   (`GET …/tracker/linear-check`) is on `search` in `tierFor`. A personal key reads everything
   that user can see in Linear — the same scope a Jira API token has.
+- **Notion (`tracker/notion/`)** — ONE fixed host, `https://api.notion.com/v1`, through the same
+  transport (no redirects, 10 s, 5 MB); the database URL in Settings is an identity, never fetched.
+  The internal integration token rides the same sealed write-only slot, sent as `Bearer`; the PUT
+  refuses a value not shaped `ntn_…` / `secret_…`. It reads only what the workspace's owner SHARED
+  with the integration. READ-ONLY: every call is a GET or a database query; Limn never writes to
+  Notion. Calls with one token are spaced ≈ 3 a second and a 429's `Retry-After` is honoured without
+  calling (in memory). The mapping read (`GET …/tracker/notion-schema`) is on `search` in `tierFor`.
+  Page text, comments and property values are UNTRUSTED like every ticket's: rich-text links are kept
+  only when https.
 - **Jira SSRF (`tracker/jira/fetch.ts`) — the base URL is customer-typed, so every Jira call is a
   server-side request to a place they chose.** ONE helper, `jiraGetJson`, makes every call: GET
   only (the ONE exception is `jiraPostJson`, the Jira status transition the reader picks —

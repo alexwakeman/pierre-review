@@ -620,8 +620,11 @@ Core since migration `0088`; the contract is [TRACKERS.md](TRACKERS.md).
   `TrackerProvider`; a value with no adapter reads as none), `base_url`, `project_keys`
   (comma-joined, normalised), `match_scope` (NULL = `title_branch`), `auth_email`, and the
   CREDENTIAL `auth_token` (`sealed:v1:` / `plain:` — never on the wire, never logged, exported as
-  `hasToken` only). Named composite FK `workspace_trackers_workspace_account_fk` (the id arrives in a
-  request PATH) ON DELETE cascade — a tracker is a fact about that workspace.
+  `hasToken` only), and `notion_config` (migration `0150`: Notion's property mapping as JSON, shared
+  `NotionTrackerMapping`; not a secret, exported; cleared when the database URL moves to another
+  database; a Notion row's `project_keys` is written from its Unique ID prefix). Named composite FK
+  `workspace_trackers_workspace_account_fk` (the id arrives in a request PATH) ON DELETE cascade — a
+  tracker is a fact about that workspace.
 - **`tracker_tickets`** — ONE row per `(account_id, pr_id, issue_key)`: the ticket as the worker last
   read it (provider, site `api_root`, title, description, criteria + its field, issue type, status +
   category, assignee, candidate fields, read state and TTL, `changed_at`). The ticket's IDENTITY is

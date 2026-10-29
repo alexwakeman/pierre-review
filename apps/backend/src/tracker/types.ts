@@ -2,6 +2,7 @@ import type {
   IssueMatchScope,
   JiraAcCandidate,
   JiraStatusCategory,
+  NotionTrackerMapping,
   TicketLinkBlocker,
   TrackerProvider,
 } from '@pierre-review/shared';
@@ -155,6 +156,8 @@ export interface TrackerCall {
   transport?: JiraTransport;
   /** Present for a provider that reads with the account's GitHub token. */
   github?: GithubCallAccess;
+  /** Notion: the workspace's property mapping (which database, which properties). */
+  notion?: NotionTrackerMapping;
 }
 
 export interface TrackerReader {

@@ -43,6 +43,16 @@ describe('cardTickets — the Open PRs ticket row', () => {
     });
   });
 
+  it('a Notion ticket takes the SERVER’s ident (its link names no database); none sent → no ident', () => {
+    const root = `https://www.notion.so/${'a'.repeat(32)}`;
+    const [t] = cardTickets(
+      detected([{ key: 'ENG-42', url: 'https://www.notion.so/ENG-42', provider: 'notion', title: null, ident: `notion:${root}#ENG-42` }], null),
+    );
+    expect(t?.ident).toBe(`notion:${root}#ENG-42`);
+    const [u] = cardTickets(detected([{ key: 'ENG-42', url: 'https://www.notion.so/ENG-42', provider: 'notion', title: null }], null));
+    expect(u?.ident).toBeUndefined();
+  });
+
   it('a GitHub issue keeps its lower-cased owner/repo#n key and gets the GitHub ident', () => {
     const url = 'https://github.com/acme/web/issues/12';
     const out = cardTickets(

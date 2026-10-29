@@ -3733,6 +3733,11 @@ check(
     "GET /api/workspaces/<B's>/tracker/linear-check as A → 404",
     (await app.inject({ method: 'GET', url: `/api/workspaces/${defaultB}/tracker/linear-check` })).statusCode === 404,
   );
+  // Notion's mapping read (docs/TRACKERS.md § Notion) is the same PATH-id shape: another tenant's → 404.
+  check(
+    "GET /api/workspaces/<B's>/tracker/notion-schema as A → 404",
+    (await app.inject({ method: 'GET', url: `/api/workspaces/${defaultB}/tracker/notion-schema` })).statusCode === 404,
+  );
   const linCross = await app.inject({ method: 'GET', url: `/api/workspaces/${defaultB}/tracker` });
   check("GET /api/workspaces/<B's>/tracker as A never shows B's Linear key", linCross.statusCode === 404 && !linCross.body.includes('lin_api_'));
   check(

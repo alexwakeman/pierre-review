@@ -210,6 +210,7 @@ import type {
   WorkspaceTrackerUpdate,
   JiraFieldListResponse,
   LinearConnectionCheck,
+  NotionSchemaResponse,
   TicketLinksBody,
   TicketLinksResponse,
   TicketMergedPrsResponse,
@@ -1259,6 +1260,10 @@ export const api = {
   // Click-gated (one call to Linear).
   linearCheck: (workspaceId: number) =>
     get<LinearConnectionCheck>(`/api/workspaces/${workspaceId}/tracker/linear-check`),
+  // The Notion mapping read: the SAVED database's properties, with the saved token, a suggested
+  // mapping, or a refusal sentence. Click-gated (one Notion call, plus ≤ 3 for related databases).
+  notionSchema: (workspaceId: number) =>
+    get<NotionSchemaResponse>(`/api/workspaces/${workspaceId}/tracker/notion-schema`),
   // One ticket's STORED title / description / criteria / status / assignee — read by the tracker's
   // worker when the PR was received, so this makes no tracker call. The server refuses a key it did
   // not itself detect on this PR, so this is not a general tracker lookup.

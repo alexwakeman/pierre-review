@@ -2,20 +2,23 @@ import type { TicketRef, TrackerProvider } from '@pierre-review/shared';
 import { githubAdapter } from './github/adapter.js';
 import { jiraAdapter } from './jira/adapter.js';
 import { linearAdapter } from './linear/adapter.js';
+import { notionAdapter } from './notion/adapter.js';
 import type { TrackerAdapter } from './types.js';
 
 // ONE ADAPTER PER PROVIDER (./types.ts is the seam). Jira, GitHub Issues and Linear all read
 // tickets. A stored value naming a provider with no adapter reads as "no tracker".
-const ADAPTERS: Partial<Record<TrackerProvider, TrackerAdapter>> = {
+// ⚠ A TOTAL Record: a provider added to `TrackerProvider` without an adapter is a compile error.
+const ADAPTERS: Record<TrackerProvider, TrackerAdapter> = {
   jira: jiraAdapter,
   github: githubAdapter,
   linear: linearAdapter,
+  notion: notionAdapter,
 };
 
 /** The adapter for a provider, or null when none is implemented. */
 export function maybeAdapterFor(provider: TrackerProvider | string | null | undefined): TrackerAdapter | null {
   if (provider == null) return null;
-  return ADAPTERS[provider as TrackerProvider] ?? null;
+  return Object.prototype.hasOwnProperty.call(ADAPTERS, provider) ? ADAPTERS[provider as TrackerProvider] : null;
 }
 
 export function adapterFor(provider: TrackerProvider): TrackerAdapter {

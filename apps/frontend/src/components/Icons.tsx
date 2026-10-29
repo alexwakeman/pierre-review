@@ -145,6 +145,17 @@ export function OctocatIcon({ size = 15, ...rest }: IconProps): JSX.Element {
   );
 }
 
+// Notion mark — a page with a bold N, beside the Notion tracker's settings (the issue tracker and the
+// reference-docs source share this one name, `NotionIcon`). A stroke outline, not the brand fill.
+export function NotionIcon({ size = 14, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} {...rest}>
+      <rect x="4" y="3" width="16" height="18" rx="2.5" />
+      <polyline points="9 16 9 8 15 16 15 8" />
+    </IconShell>
+  );
+}
+
 // "Open in its own tab" — a tabbed panel (window + tab strip), distinct from the
 // ExternalLinkIcon's arrow (which means "open on GitHub"). Mirrors the app's PinnedTabsBar.
 export function NewTabIcon({ size = 13, ...rest }: IconProps): JSX.Element {

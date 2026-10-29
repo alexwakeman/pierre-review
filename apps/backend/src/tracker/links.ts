@@ -2,6 +2,8 @@ import { and, eq, inArray } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import {
   TICKET_LINKS_MAX_PRS,
+  ticketIdentForLink,
+  trackerTicketIdent,
   type PrTicketLinks,
   type TicketLink,
   type TicketLinksBody,
@@ -10,7 +12,7 @@ import {
 import { inChunks, type TrackerContext } from './context.js';
 import { detectKeysWithAccess, linksUnknownFor, manualKeysOf, prLinkColumns, withParsedLinks } from './enricher.js';
 import { trackerBaseUrl } from './settings.js';
-import { buildTicketRefs, ticketUrl } from './registry.js';
+import { buildTicketRefs, maybeAdapterFor, ticketUrl } from './registry.js';
 import type { JiraTransport } from './jira/fetch.js';
 import { groupByPr, readStoredTickets, toLinkExtras } from './store.js';
 import { isBackedOff, kickTrackerSyncForPrs, workspaceCallsFor } from './worker.js';
@@ -106,6 +108,7 @@ export async function ticketLinksForPrs(
     const keys = detectKeysWithAccess(wc.access, { ...row, manualKeys: manualKeysOf(mine, wc.access) });
     const baseUrl = trackerBaseUrl(wc.access.issue);
     if (keys == null || provider == null || baseUrl == null) continue;
+    const root = maybeAdapterFor(provider)?.siteRoot(baseUrl) ?? null;
     const tickets: TicketLink[] = buildTicketRefs(provider, baseUrl, keys).map((r) => {
       const s =
         wc.call != null
@@ -114,7 +117,13 @@ export async function ticketLinksForPrs(
       if (wc.call != null && s == null && !(wc.fp != null && isBackedOff(accountId, wsId, wc.fp, t0))) {
         if (!missing.includes(id)) missing.push(id);
       }
-      return { key: r.key, url: r.url, provider: r.provider, ...toLinkExtras(s) };
+      // The ident ONLY where the SPA's link fold (shared `ticketIdentForLink`) cannot name it — a Notion
+      // link (`notion.so/ENG-123`) names no database. Elsewhere the link says it already.
+      const ident =
+        root != null && ticketIdentForLink({ key: r.key, url: r.url, provider }) == null
+          ? trackerTicketIdent(provider, root, r.key)
+          : null;
+      return { key: r.key, url: r.url, provider: r.provider, ...(ident != null ? { ident } : {}), ...toLinkExtras(s) };
     });
     out.push({
       prId: id,

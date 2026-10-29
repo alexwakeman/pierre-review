@@ -264,6 +264,8 @@ export function statusOrderSourceLabel(
         return 'your board’s columns';
       case 'linear_states':
         return 'Linear’s workflow';
+      case 'notion_status':
+        return 'the order of Notion’s status options';
       case 'github':
         return 'open, then closed';
       case 'fallback':
@@ -277,6 +279,8 @@ export function statusOrderSourceLabel(
       return 'Your board’s columns';
     case 'linear_states':
       return 'Linear’s workflow';
+    case 'notion_status':
+      return 'Notion’s status options';
     case 'github':
       return 'Open, then closed';
     case 'fallback':

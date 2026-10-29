@@ -22,6 +22,8 @@ import { JiraFetchError, type JiraTransport } from './jira/fetch.js';
 import { hasContent, readStoredTickets, upsertTicketRow, type StoredTicketRow } from './store.js';
 import { backoffCode, accessFingerprint, syncOnePrNow } from './worker.js';
 import type { TrackerCall } from './types.js';
+import { notionErrorMessage } from './notion/client.js';
+import { notionKeyOfPage } from './notion/reader.js';
 
 // ── ADDING A TICKET BY HAND (docs/TRACKERS.md § Adding a ticket by hand) ─────────────────────────
 //
@@ -54,7 +56,7 @@ function safeHttpsUrl(url: string | null): string | null {
   return url != null && /^https?:\/\/[^\s]+$/i.test(url) ? url : null;
 }
 
-const TRACKER_NAME: Record<TrackerProvider, string> = { jira: 'Jira', github: 'GitHub Issues', linear: 'Linear' };
+const TRACKER_NAME: Record<TrackerProvider, string> = { jira: 'Jira', github: 'GitHub Issues', linear: 'Linear', notion: 'Notion' };
 
 type Decided = { key: string } | { status: TicketRefStatus; message: string };
 
@@ -63,6 +65,8 @@ export function decideRef(
   raw: string,
   call: Pick<TrackerCall, 'provider' | 'apiRoot'>,
   prRepo: { owner: string; name: string } | null,
+  // A Notion PAGE link's answer, read before deciding (`notionPageKeys`): page id → the key or a refusal.
+  notionPages: ReadonlyMap<string, Decided> = new Map(),
 ): Decided {
   const provider = call.provider;
   const adapter = adapterFor(provider);
@@ -89,6 +93,12 @@ export function decideRef(
         return { status: 'other_tracker', message: `${p.key} is not a GitHub issue. Paste the issue link or owner/repo#12.` };
       }
       return own(p.key);
+    case 'notion_page': {
+      if (provider !== 'notion') {
+        return { status: 'other_tracker', message: `That is a Notion link. This workspace’s tickets are in ${here}.` };
+      }
+      return notionPages.get(p.pageId) ?? { status: 'failed', message: 'Could not read that Notion page just now.' };
+    }
     case 'url': {
       if (p.provider !== provider) {
         return { status: 'other_tracker', message: `That is a ${TRACKER_NAME[p.provider]} link. This workspace’s tickets are in ${here}.` };
@@ -108,6 +118,36 @@ export function decideRef(
       return own(p.key);
     }
   }
+}
+
+/**
+ * NOTION PAGE LINKS → KEYS. A pasted page URL names the page, not its Unique ID, so each one is read
+ * (`GET /v1/pages/{id}`, ≤ TICKET_REFS_MAX) to learn its database and key. A page of another database
+ * is `other_tracker`; one the integration cannot see is `not_found`.
+ */
+export async function notionPageKeys(call: TrackerCall, refs: readonly string[]): Promise<Map<string, Decided>> {
+  const out = new Map<string, Decided>();
+  for (const ref of refs) {
+    const p = parseTicketRef(ref);
+    if (p.kind !== 'notion_page' || out.has(p.pageId)) continue;
+    try {
+      const r = await notionKeyOfPage(call, p.pageId);
+      out.set(
+        p.pageId,
+        'key' in r ? { key: r.key } : { status: 'other_tracker', message: 'That page is in another Notion database than this workspace’s.' },
+      );
+    } catch (err) {
+      const code = err instanceof JiraFetchError ? err.code : 'network';
+      out.set(p.pageId, {
+        status: errorStatus(code),
+        message:
+          code === 'not_found'
+            ? 'Notion has no such page, or it is not shared with the integration.'
+            : notionErrorMessage(err),
+      });
+    }
+  }
+  return out;
 }
 
 function errorStatus(code: string): TicketRefStatus {
@@ -184,6 +224,7 @@ export async function resolveTicketRefs(
   const linkOf = (key: string, stored?: string | null): string | null =>
     safeHttpsUrl(stored ?? null) ?? (base != null ? safeHttpsUrl(ticketUrl(provider, base, key)) : null);
   const prRepo = refs.some((r) => /^#\d/.test(r.trim())) ? await repoOf(ctx, accountId, pr.repoId) : null;
+  const notionPages = provider === 'notion' ? await notionPageKeys(call, refs) : new Map<string, Decided>();
 
   const results: TicketRefResult[] = refs.map((ref) => ({
     ref,
@@ -197,7 +238,7 @@ export async function resolveTicketRefs(
   // key → the indexes of the references naming it (two spellings of one ticket are read once).
   const byKey = new Map<string, number[]>();
   refs.forEach((ref, i) => {
-    const d = decideRef(ref, call, prRepo);
+    const d = decideRef(ref, call, prRepo, notionPages);
     const res = results[i]!;
     if ('key' in d) {
       res.key = d.key;

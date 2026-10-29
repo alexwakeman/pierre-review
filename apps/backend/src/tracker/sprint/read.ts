@@ -7,7 +7,7 @@ import {
   type TrackerProvider,
 } from '@pierre-review/shared';
 import { githubAccessFor, type TrackerContext } from '../context.js';
-import { MSG_NO_READING_TRACKER, prepareTrackerCall } from '../calls.js';
+import { MSG_NO_READING_TRACKER, MSG_NOTION_UNMAPPED, prepareTrackerCall } from '../calls.js';
 import { JiraFetchError, type JiraFetchErrorCode, type JiraTransport } from '../jira/fetch.js';
 import { maybeAdapterFor } from '../registry.js';
 import { githubIssuesRepos, readWorkspaceTrackerRow, trackerAccessOf } from '../settings.js';
@@ -18,6 +18,7 @@ import { afterSprintRead } from './hooks.js';
 import { listGithubMilestone } from './github.js';
 import { listJiraSprint } from './jira.js';
 import { listLinearCycle } from './linear.js';
+import { listNotionSprint } from './notion.js';
 import { refreshSprintRefTickets, type RefLister } from './ref-status.js';
 import { sprintProjectKeys, workspaceRepoNames } from './project-keys.js';
 import type { SprintFetchedTicket, SprintLister } from './types.js';
@@ -50,6 +51,7 @@ export const SPRINT_LISTERS: Record<TrackerProvider, SprintLister> = {
   jira: listJiraSprint,
   linear: listLinearCycle,
   github: listGithubMilestone,
+  notion: listNotionSprint,
 };
 
 /** Workspaces read per tick at most. */
@@ -475,17 +477,22 @@ export async function isSprintReadDue(ctx: TrackerContext, accountId: number, wo
 
 // ---- the sentence ----
 
+const credentialWord = (label: string, p: TrackerProvider | null): string =>
+  p === 'linear' ? 'Linear API key' : p === 'notion' ? 'Notion integration token' : `${label} token`;
+
 const PREPARE_MESSAGES: Record<string, (label: string, provider: TrackerProvider | null) => string> = {
   NotJira: () => MSG_NO_READING_TRACKER,
+  NoNotionMapping: () => MSG_NOTION_UNMAPPED,
   no_tracker: () => MSG_NO_READING_TRACKER,
   NoGithubAccess: () => 'Limn cannot reach GitHub as this account here.',
   NoJiraUrl: (label, p) =>
     p === 'linear'
       ? 'The Linear workspace URL in Settings is not a linear.app address, like https://linear.app/your-workspace.'
-      : `The ${label} base URL in Settings is not a valid web address.`,
-  NoJiraToken: (label, p) => `No ${p === 'linear' ? 'Linear API key' : `${label} token`} is saved for this workspace. Add one in Settings.`,
-  JiraTokenUnreadable: (label, p) =>
-    `The saved ${p === 'linear' ? 'Linear API key' : `${label} token`} cannot be read on this server. Save it again in Settings.`,
+      : p === 'notion'
+        ? 'The Notion database URL in Settings is not a Notion database link.'
+        : `The ${label} base URL in Settings is not a valid web address.`,
+  NoJiraToken: (label, p) => `No ${credentialWord(label, p)} is saved for this workspace. Add one in Settings.`,
+  JiraTokenUnreadable: (label, p) => `The saved ${credentialWord(label, p)} cannot be read on this server. Save it again in Settings.`,
 };
 
 /** Plain-English sentence for a stored `error_code`, naming the provider. Never anything a tracker sent. */
@@ -504,7 +511,9 @@ export function sprintReadErrorMessage(provider: TrackerProvider | null, code: s
     case 'not_found':
       return provider === 'github'
         ? 'GitHub could not find these repositories, or your GitHub account cannot see them.'
-        : `${label} could not find these projects, or the saved ${provider === 'linear' ? 'key' : 'token'} cannot see them.`;
+        : provider === 'notion'
+          ? 'Notion could not find this database, or it is not shared with the integration.'
+          : `${label} could not find these projects, or the saved ${provider === 'linear' ? 'key' : 'token'} cannot see them.`;
     case 'no_access':
       return `The saved ${provider === 'linear' ? 'Linear key' : `${label} token`} does not have access to these projects.`;
     case 'unknown':

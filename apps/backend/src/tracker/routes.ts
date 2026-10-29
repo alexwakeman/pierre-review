@@ -6,6 +6,8 @@ import {
   type JiraTicketDetails,
   type JiraTicketRefreshBody,
   type LinearConnectionCheck,
+  type NotionSchemaResponse,
+  notionRootDatabaseId,
   type WorkspaceTrackerSettings,
   type WorkspaceTrackerUpdate,
 } from '@pierre-review/shared';
@@ -24,6 +26,8 @@ import { ownedPr } from './stories.js';
 import type { JiraTransport } from './jira/fetch.js';
 import { fetchJiraFields, isJiraFieldId, jiraErrorMessage } from './jira/client.js';
 import { fetchLinearViewer } from './linear/client.js';
+import { richTextPlain } from './notion/blocks.js';
+import { readNotionDatabase, readSprintDatabases, schemaProperties, schemaRefusal, suggestMapping } from './notion/schema.js';
 import { linearSiteRoot } from '@pierre-review/shared';
 import { JiraFetchError } from './jira/fetch.js';
 import {
@@ -45,7 +49,7 @@ import { registerManualTicketLinkRoute } from './manual-links.js';
 import { registerTicketStatusRoutes } from './status-change.js';
 import { writeSettingEvent } from '../db/setting-event-write.js';
 
-const TRACKER_NAME: Record<string, string> = { jira: 'Jira', github: 'GitHub Issues', linear: 'Linear' };
+const TRACKER_NAME: Record<string, string> = { jira: 'Jira', github: 'GitHub Issues', linear: 'Linear', notion: 'Notion' };
 
 // THE TRACKER'S HTTP SURFACE — CORE and FREE, both modes (the plugin's `/api/pro/*` Jira routes until
 // apiVersion 23). Every route that can spend the customer's tracker quota sits on the `search`
@@ -58,6 +62,9 @@ const TRACKER_NAME: Record<string, string> = { jira: 'Jira', github: 'GitHub Iss
 //                                                     site's custom fields with the SAVED token).
 //   GET  /api/workspaces/:id/tracker/linear-check     the Linear CONNECTION CHECK (one call with the
 //                                                     SAVED key: who it is, and which Linear workspace).
+//   GET  /api/workspaces/:id/tracker/notion-schema    the Notion MAPPING READ (the SAVED database's
+//                                                     properties, with the saved token; a refusal
+//                                                     when it has no prefixed Unique ID).
 //   GET  /api/prs/:id/tracker-ticket?key=<KEY>        one detected ticket's STORED row: title,
 //                                                     description, issue type, status, assignee, the
 //                                                     criteria the server picked and every candidate
@@ -146,6 +153,9 @@ const trackerBodySchema = {
         clearToken: { type: 'boolean' },
       },
     },
+    // The Notion property mapping. Its SHAPE is checked by shared `notionMappingProblem` in the handler
+    // (one plain sentence), so the schema only says "an object or null".
+    notion: { type: ['object', 'null'] },
   },
 } as const;
 
@@ -197,7 +207,7 @@ export function registerTrackerRoutes(
       }
       // A changed tracker or token: read this account's tickets with it now, not at the next tick
       // (fire-and-forget; a no-op while the worker is off).
-      if ('issue' in body || 'jira' in body) void kickTrackerSync(ctx, accountId);
+      if ('issue' in body || 'jira' in body || 'notion' in body) void kickTrackerSync(ctx, accountId);
       return saved;
     },
   );
@@ -255,6 +265,50 @@ export function registerTrackerRoutes(
         };
       } catch (err) {
         return jiraFailed(ctx, reply, err, { accountId, workspaceId, route: 'linear-check' }, 'linear');
+      }
+    },
+  );
+
+  // The Notion MAPPING READ — the saved database's schema with the SAVED token (one call, plus one per
+  // relation that might be a Sprints database, ≤ 3). Click-gated in Settings. A database without a
+  // prefixed Unique ID answers 200 with `refusal` (a sentence) and no suggestion: it cannot be mapped.
+  app.get<{ Params: { id: number } }>(
+    '/api/workspaces/:id/tracker/notion-schema',
+    { schema: { params: wsIdParam } },
+    async (req, reply): Promise<NotionSchemaResponse | FastifyReply> => {
+      const accountId = ctx.accountIdOf(req);
+      const workspaceId = await ownedWorkspaceId(ctx, accountId, req.params.id);
+      if (workspaceId == null) return notFound(reply, req.params.id);
+      const access = await readWorkspaceTrackerAccess(ctx, accountId, workspaceId);
+      if (access.issue.provider !== 'notion') {
+        return reply.code(400).send({
+          error: 'NotNotion',
+          message: 'This workspace does not use Notion. Set Notion as the issue tracker in Settings.',
+        });
+      }
+      const prepared = prepareTrackerCall(access, { transport: opts.transport, allowUnmapped: true });
+      if (!prepared.ok) return reply.code(prepared.status).send({ error: prepared.error, message: prepared.message });
+      const databaseId = notionRootDatabaseId(prepared.call.apiRoot);
+      if (databaseId == null) {
+        return reply.code(400).send({ error: 'NoJiraUrl', message: 'The Notion database URL in Settings is not a Notion database link.' });
+      }
+      try {
+        const db = await readNotionDatabase(prepared.call, databaseId, { fresh: true });
+        const properties = schemaProperties(db);
+        const refusal = schemaRefusal(properties);
+        const sprintDatabases = refusal == null ? await readSprintDatabases(prepared.call, properties) : {};
+        const saved = access.notion != null && access.notion.databaseId === databaseId ? access.notion : null;
+        return {
+          workspaceId,
+          databaseId,
+          title: richTextPlain(db.title).trim().slice(0, 200) || 'Untitled',
+          properties,
+          sprintDatabases,
+          refusal,
+          suggested: refusal != null ? null : (saved ?? suggestMapping(databaseId, properties, sprintDatabases)),
+        };
+      } catch (err) {
+        return jiraFailed(ctx, reply, err, { accountId, workspaceId, route: 'notion-schema' }, 'notion');
       }
     },
   );
