@@ -21,8 +21,7 @@ export const NOTION_APP_ORIGIN = 'https://www.notion.so';
 /** A Notion tracker root: `https://www.notion.so/<database id>`. */
 export const NOTION_ROOT_RE = /^https:\/\/www\.notion\.so\/[0-9a-f]{32}$/;
 
-/** A Notion internal-integration token: `ntn_…` (since 2024) or the older `secret_…`. */
-export const NOTION_TOKEN_RE = /^(secret_|ntn_)[A-Za-z0-9]{20,}$/;
+// The token's shape (`NOTION_TOKEN_RE`) is shared with the Notion wiki source: reference-docs-wiki.ts.
 
 /** A Unique ID prefix Limn can find in a PR title or branch (the same shape as a Jira project key). */
 export const NOTION_PREFIX_RE = /^[A-Za-z][A-Za-z0-9]{1,9}$/;

@@ -6,7 +6,7 @@ that an agent navigates by REASONING over contents, not by embedding search. COR
 does the content building. Code: `apps/backend/src/reference-docs/`. Wire types:
 `packages/shared/src/reference-docs.ts`. Routes: [API.md](API.md) § Reference docs.
 
-The backend, the SPA (Activity → Docs, Settings → Workspace → Reference docs — § The SPA) and the review
+The backend, the SPA (Activity → Docs, Settings → AI review → Reference docs — § The SPA) and the review
 integration (§ Use in reviews) are built.
 
 ## The idea (PageIndex, without the vectors)

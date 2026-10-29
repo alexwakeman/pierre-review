@@ -94,8 +94,8 @@ export function registerWikiDocRoutes(app: FastifyInstance, ctx: AgentContext, h
           400,
           'NoWikiCredential',
           ref.provider === 'notion'
-            ? 'Add a Notion token in Settings → Workspace → Reference docs, then add the page again.'
-            : `Add a ${name} API token in Settings → Workspace → Reference docs, then add the page again.`,
+            ? 'Add a Notion token in Settings → AI review → Notion, then add the page again.'
+            : `Add a ${name} API token in Settings → AI review → ${name}, then add the page again.`,
         );
       }
       if (cred.state === 'unreadable') return h.fail(reply, 400, 'NoWikiCredential', `Save the ${name} token again in Settings.`);
@@ -151,7 +151,7 @@ export function registerWikiDocRoutes(app: FastifyInstance, ctx: AgentContext, h
     return { doc: toReferenceDoc((await getDocRow(accountId, id))!) };
   });
 
-  // ---- credentials (Settings → Workspace → Reference docs) ----
+  // ---- credentials (Settings → AI review → Confluence / Notion) ----
   app.get('/api/workspaces/:id/wiki-credentials', { schema: idParam }, async (req, reply): Promise<WikiCredentialsSettings | ErrorBody> => {
     if (!AGENTIC_AI_ENABLED) return h.featureOff(reply);
     const accountId = ctx.accountIdOf(req);

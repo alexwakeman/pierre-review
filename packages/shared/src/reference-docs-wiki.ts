@@ -247,8 +247,8 @@ export function wikiUnreachableWords(provider: WikiProviderId, reason: WikiUnrea
       return provider === 'notion' ? 'Notion did not accept the saved token.' : `${name} did not accept the saved email and token.`;
     case 'no_credential':
       return provider === 'notion'
-        ? 'Add a Notion token in Settings → Workspace → Reference docs.'
-        : `Add a ${name} API token in Settings → Workspace → Reference docs.`;
+        ? 'Add a Notion token in Settings → AI review → Notion.'
+        : `Add a ${name} API token in Settings → AI review → ${name}.`;
     case 'rate_limited':
       return `${name} asked Limn to slow down. It will try again later.`;
     case 'network':

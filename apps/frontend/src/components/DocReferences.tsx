@@ -118,7 +118,7 @@ export function DocReferencesInfo({ by = 'Claude' }: { by?: string } = {}): JSX.
         it says. <strong>Context</strong>: it explains, but decides nothing.
       </p>
       <p>Every link and quote was checked against the library before it was saved; anything that did not match was left out.</p>
-      <p>Switch this on or off in Settings → Workspace → Reference docs.</p>
+      <p>Switch this on or off in Settings → AI review → Reference docs.</p>
     </InfoButton>
   );
 }

@@ -571,12 +571,12 @@ function AddDocs({ workspaceId, maxBytes }: { workspaceId: number; maxBytes: num
               </p>
               {wikiProvider === 'notion' ? (
                 <p>
-                  Limn reads Notion with the integration token in Settings → Workspace → Reference docs. Share the page with
+                  Limn reads Notion with the integration token in Settings → AI review → Notion. Share the page with
                   that integration in Notion first.
                 </p>
               ) : (
                 <p>
-                  Limn reads Confluence with the API token in Settings → Workspace → Reference docs. A page on your Jira site
+                  Limn reads Confluence with the API token in Settings → AI review → Confluence. A page on your Jira site
                   uses the Jira token.
                 </p>
               )}

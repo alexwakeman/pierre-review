@@ -206,7 +206,7 @@ export function useRefreshReferenceDoc(workspaceId: number | null) {
   return useLibraryMutation(workspaceId, (docId: number) => api.refreshReferenceDoc(docId));
 }
 
-// ---- the workspace's wiki credential (Settings → Workspace → Reference docs) ----
+// ---- the workspace's wiki credential (Settings → AI review → Confluence / Notion) ----
 const wikiCredentialsKey = (workspaceId: number | null) => ['wiki-credentials', workspaceId] as const;
 
 export function useWikiCredentials(workspaceId: number | null) {

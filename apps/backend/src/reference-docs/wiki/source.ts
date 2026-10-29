@@ -145,8 +145,8 @@ export function wikiErrorMessage(providerName: string, err: unknown): string {
   switch (code) {
     case 'no_credential':
       return notion
-        ? 'Add a Notion token in Settings → Workspace → Reference docs, then try again.'
-        : `Add a ${providerName} API token in Settings → Workspace → Reference docs, then try again.`;
+        ? 'Add a Notion token in Settings → AI review → Notion, then try again.'
+        : `Add a ${providerName} API token in Settings → AI review → ${providerName}, then try again.`;
     case 'unauthorized':
       return notion ? 'Notion did not accept the saved token.' : `${providerName} did not accept the saved email and token.`;
     case 'forbidden':
