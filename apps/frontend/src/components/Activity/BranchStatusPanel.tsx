@@ -469,14 +469,23 @@ export function BranchStatusPanel({
   // gets no pill; the repo count on the right still counts it, so the pills need not total it.
   const green = rows.filter((r) => r.ciStatus === 'success').length;
   const running = rows.filter((r) => r.ciStatus === 'pending' || r.ciStatus === 'expected').length;
+  // The redesign's quiet line (cross-repo mount): words in mute ink, red only for what fails —
+  // trunk green is a readout, not "ready to land". The compact console header keeps its chips.
+  const quiet = !compact;
   const header = (
     <>
-      <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+      <span
+        className={
+          quiet
+            ? 'shrink-0 text-meta font-medium text-ui-mute'
+            : 'text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400'
+        }
+      >
         Default branches
       </span>
       {green > 0 && (
         <span
-          className="rounded bg-green-500/15 px-1 text-[11px] font-semibold text-green-700 dark:text-green-400"
+          className={quiet ? 'shrink-0 text-meta text-ui-mute' : 'rounded bg-green-500/15 px-1 text-[11px] font-semibold text-green-700 dark:text-green-400'}
           title="Default branches whose latest CI passed"
         >
           {allGreen && green > 1 ? `all ${green} green` : `${green} green`}
@@ -484,7 +493,7 @@ export function BranchStatusPanel({
       )}
       {failing > 0 && (
         <span
-          className="rounded bg-red-500/15 px-1 text-[11px] font-semibold text-red-600 dark:text-red-400"
+          className={quiet ? 'shrink-0 text-meta font-medium text-ui-danger' : 'rounded bg-red-500/15 px-1 text-[11px] font-semibold text-red-600 dark:text-red-400'}
           title="Default branches whose latest CI is failing"
         >
           {failing} failing
@@ -492,13 +501,14 @@ export function BranchStatusPanel({
       )}
       {running > 0 && (
         <span
-          className="rounded bg-amber-500/15 px-1 text-[11px] font-semibold text-amber-700 dark:text-amber-400"
+          className={quiet ? 'shrink-0 text-meta text-ui-mute' : 'rounded bg-amber-500/15 px-1 text-[11px] font-semibold text-amber-700 dark:text-amber-400'}
           title="Default branches whose latest CI is still running"
         >
           {running} running
         </span>
       )}
-      <span className="ml-auto text-[11px] text-gray-500 dark:text-gray-400">
+      <span className={quiet ? 'shrink-0 text-meta text-ui-faint' : 'ml-auto text-[11px] text-gray-500 dark:text-gray-400'}>
+        {quiet && <span aria-hidden>· </span>}
         {rows.length} repo{rows.length === 1 ? '' : 's'}
       </span>
     </>
@@ -506,7 +516,7 @@ export function BranchStatusPanel({
 
   return (
     <section
-      className="rounded-lg border border-gray-200 dark:border-gray-800"
+      className={quiet ? `rounded-ui ${expanded ? 'bg-ui-surface' : ''}` : 'rounded-lg border border-gray-200 dark:border-gray-800'}
       data-testid="branch-status-panel"
     >
       {/* The WHOLE header bar is the toggle on the cross-repo mount (the Open PRs panel beside it
@@ -523,11 +533,9 @@ export function BranchStatusPanel({
           // is also what seats the explicit choice that retires the default.
           onClick={() => setUserExpanded(!expanded)}
           aria-expanded={expanded}
-          className={`flex w-full items-center gap-2 px-2 py-1 text-left hover:bg-gray-50 dark:hover:bg-gray-800/40 ${
-            expanded ? 'border-b border-gray-100 dark:border-gray-800/60' : ''
-          }`}
+          className="-ml-1 flex h-7 max-w-full items-center gap-2 overflow-hidden rounded-ui px-1 text-left hover:bg-ui-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent touch:h-10"
         >
-          <ChevronIcon dir={expanded ? 'down' : 'right'} size={10} className="shrink-0 text-gray-400" />
+          <ChevronIcon dir={expanded ? 'down' : 'right'} size={11} className="shrink-0 text-ui-faint" />
           {header}
         </button>
       ) : (
