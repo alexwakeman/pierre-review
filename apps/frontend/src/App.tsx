@@ -309,8 +309,6 @@ export default function App(): JSX.Element {
           >
             ?
           </button>
-          {/* Claude usage so far (the spend budget's ONE query); the popover has the detail. */}
-          <AiUsageMenu />
           <button
             type="button"
             onClick={toggleDark}
@@ -323,6 +321,8 @@ export default function App(): JSX.Element {
               <MoonIcon className="inline-block align-[-0.15em]" />
             )}
           </button>
+          {/* Claude usage so far (the spend budget's ONE query); the popover has the detail. */}
+          <AiUsageMenu />
           {/* The GitHub user — a subtle button at the far right opening an account menu
               (Settings · Open Profile on GitHub). */}
           {meUser != null && (
