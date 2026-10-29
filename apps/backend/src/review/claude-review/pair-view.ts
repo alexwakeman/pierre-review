@@ -20,8 +20,7 @@ import {
   type ClaudeReviewVerdict,
   type ClaudeSettledFinding,
 } from '@pierre-review/shared';
-import { autoVerdictFor } from './auto-verdict.js';
-import { pairVerdict } from './pair.js';
+import { autoVerdictFor, DEFAULT_VERDICT_RULES, pairVerdict, type VerdictRules } from './auto-verdict.js';
 
 // ---- "not ended yet" (this process only) ----
 
@@ -50,15 +49,17 @@ export function sourceOfRun(run: Pick<ClaudeReview, 'provider' | 'model'>): Excl
 
 /**
  * THE PAIR'S VERDICT, IN CODE: the auto-post rule (`autoVerdictFor`) over the CONSOLIDATED findings,
- * with both halves' own verdicts as Claude's would read (`pairVerdict`: APPROVE only when both
- * approved). The model never decides it.
+ * with both halves' own verdicts folded by the workspace's rules (`pairVerdict`: strict = APPROVE
+ * only when both approved; relaxed = one approved and neither asked for changes; `approveLeftovers`
+ * for what may stay open). The model never decides it.
  */
 export function pairCodeVerdict(
   a: ClaudeReview['verdict'],
   b: ClaudeReview['verdict'],
   findings: Parameters<typeof autoVerdictFor>[1],
+  rules: VerdictRules = DEFAULT_VERDICT_RULES,
 ): ClaudeReviewVerdict {
-  return autoVerdictFor(pairVerdict(a, b), findings);
+  return autoVerdictFor(pairVerdict(a, b, rules.pairStrictness), findings, rules.approveLeftovers);
 }
 
 /** The fallback summary: each half's summary, named, in one block ("Claude: … / Codex: …"). */
@@ -90,6 +91,7 @@ export function codeConsolidation(
   halves: ReadonlyArray<ClaudeReview>,
   failedHalf: ClaudeReviewPairFailedHalf | null,
   at: string,
+  rules: VerdictRules = DEFAULT_VERDICT_RULES,
 ): ClaudeReviewPairConsolidation {
   const ok = halves.filter((h) => h.status === 'succeeded');
   const sourceOf: Record<string, ClaudeFindingSource> = {};
@@ -102,7 +104,7 @@ export function codeConsolidation(
   return {
     how: 'code',
     summary: joinedPairSummary(ok),
-    verdict: a && b ? pairCodeVerdict(a.verdict, b.verdict, ok.flatMap((h) => h.findings)) : null,
+    verdict: a && b ? pairCodeVerdict(a.verdict, b.verdict, ok.flatMap((h) => h.findings), rules) : null,
     sourceOf,
     mergedFrom: {},
     failedHalf: null,

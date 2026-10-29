@@ -1243,6 +1243,7 @@ export async function installMockApi(page: Page): Promise<void> {
             autoDiagramsEnabled: true,
             teamClaimsEnabled: false,
             autoReviewProviders: 'default',
+            pairStrictness: 'strict',
             autoFix: {
               include: {
                 findings: true,
@@ -1271,6 +1272,7 @@ export async function installMockApi(page: Page): Promise<void> {
               autoVerdict: false,
               autoResolve: false,
               approveImpact: { high: true, medium: true, low: true },
+              approveLeftovers: 'nits_questions',
             },
           },
         } satisfies WorkspaceAutoReviewResponse);

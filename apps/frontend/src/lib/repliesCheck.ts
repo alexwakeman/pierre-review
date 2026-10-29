@@ -2,7 +2,7 @@
 // A pass judges only people's replies on Limn's own posted findings; the tab shows "Check replies"
 // while some wait, and one line about the newest pass.
 import type { ClaudeRepliesCheckRun, ClaudeRepliesCheckState } from '@pierre-review/shared';
-import { autoLiftLine, autoPostFailureLine, autoVerdictLine } from './autoPost.js';
+import { autoLiftLine, autoPostFailureLine, autoVerdictLine, notApprovedLine } from './autoPost.js';
 import { relativeTime } from './ui.js';
 
 /** The history list's and the run header's label for a replies pass. */
@@ -41,13 +41,15 @@ export function repliesCheckLine(run: ClaudeRepliesCheckRun | null | undefined, 
   const when = run.finishedAt ?? run.createdAt;
   const counts = repliesCountsText(run);
   const head = `${REPLIES_CHECK_LABEL} ${relativeTime(when)}${counts ? `: ${counts}` : '.'}`;
+  // Why the outcome is not an approval (`notApproved`), when the auto verdict is on.
+  const why = notApprovedLine(run);
   const outcome =
     run.trigger === 'auto'
-      ? (autoVerdictLine(run.autoPost, by) ?? autoLiftLine(run.autoPost, by) ?? autoPostFailureLine(run.autoPost))
+      ? (autoVerdictLine(run.autoPost, by) ?? why ?? autoLiftLine(run.autoPost, by) ?? autoPostFailureLine(run.autoPost))
       : run.verdict === 'APPROVE'
         ? 'Would approve.'
         : run.verdict === 'REQUEST_CHANGES'
           ? 'Would request changes.'
-          : null;
+          : why;
   return outcome ? `${head} ${outcome}` : head;
 }

@@ -534,8 +534,11 @@ paramount … we should still get a review outcome if at least one agent ran ok.
     verdict, and `failedHalf {provider, reason}` — the other's stored error's first sentence, "it was
     stopped", or why it never started (`notStartedHalf`: "the spend budget is used up", "a teammate's
     Limn is reviewing with Codex"). No pass. **Neither ⇒ nothing is written**: the pair failed.
-  - ⚠ **THE VERDICT IS CODE** (`pairCodeVerdict` = `autoVerdictFor(pairVerdict(a, b), the kept
-    findings)`), never the model's.
+  - ⚠ **THE VERDICT IS CODE** (`pairCodeVerdict` = `autoVerdictFor(pairVerdict(a, b, strictness), the
+    kept findings, leftovers)`), never the model's — folded by the WORKSPACE'S rules
+    (`readVerdictRulesForPr`, read once when the pair is consolidated: strict / relaxed, what may stay
+    open; § Auto-posting → THE TWO RULES). This is also the manual pair's suggested verdict. A pair with
+    no record yet (or one from before 0139) reads the defaults.
   - ⚠ **A MERGED-AWAY DUPLICATE** (`claude_review_findings.merged_into` = the kept id) stays stored
     but every read of a run's findings leaves it out (`getClaudeReviewById`, `isMergedAway`): it is
     never shown, posted (the single-finding route answers `409 MergedDuplicate`), counted in a verdict
@@ -587,8 +590,10 @@ paramount … we should still get a review outcome if at least one agent ran ok.
   labels; a finding with no label word falls back to a `_Raised by Codex._` line — and carries its own
   run's provider footer), ONE body (the pass's summary lead; joined in code, `**Claude:** <lead>` /
   `**Codex:** <lead>`; then `PAIR_AUTO_POST_FOOTER`, listed in `AUTO_POST_FOOTERS`), ONE verdict over
-  the kept findings (`autoVerdictFor(pairVerdict(a, b), …)`: APPROVE only when both approved and
-  neither left a blocker or warning). ⚠ THE CLAIM covers the pair: compare-and-set on the SECOND half's
+  the kept findings (`autoVerdictFor(pairVerdict(a, b, strictness), …, leftovers)`: strict = APPROVE
+  only when both approved; relaxed = one approved and neither asked for changes; never with a blocker
+  or warning left — § Auto-posting → THE TWO RULES). Not approved ⇒ the reason is the body's last line;
+  with nothing else to post, the reason alone (§ THE REASON). ⚠ THE CLAIM covers the pair: compare-and-set on the SECOND half's
   `auto_post`, then on the first's (its record names the second, `viaPairReviewId`) — both BEFORE any
   write; a first half someone else claimed keeps its findings out; a failure is recorded on both and
   never retried. Only one half succeeded ⇒ that half posts alone, as any auto run. Auto resolve and
@@ -1347,16 +1352,28 @@ JUST the replies, cheaply, at the current head. Pure half `claude-review/replies
   never acts on, nothing posts and no block is lifted. Open = the latest full
   review's counted findings minus the settled ones (own id or any ancestor), plus the earlier
   blockers it left unjudged. A blocker this pass DISPUTED ⇒ REQUEST_CHANGES; this pass ACCEPTED one
-  and no blocker or warning is left ⇒ APPROVE; anything else ⇒ nothing (never a COMMENT review that
-  says nothing changed). The newest row's `verdict` stores it (a manual pass: "Would approve." /
-  "Would request changes."). AUTO with auto-posting on: `maybePostRepliesOutcome` runs it through the
+  and no blocker or warning is left — nor a nit / question the workspace's `approveLeftovers` forbids,
+  nor a pair half standing in the way (`repliesDissent`: a half that did NOT approve and RAISED NOTHING
+  of its own — counted through the consolidation's `sourceOf`, so a merged 'both' finding counts for
+  both — is a reluctance no reply can settle; strict: any such half holds it; relaxed: only one that
+  asked for changes, or every half when none approved) ⇒ APPROVE; anything else ⇒ nothing changes.
+  The newest row's `verdict` stores it (a manual pass: "Would approve." / "Would request changes.").
+  ⚠ WHY NOT (`repliesNotApproved`, migration 0139): while the auto verdict is on, the reason is stored
+  on the pass row (`claude_reviews.verdict_reason`, manual and auto) and shown in the tab's replies
+  line (`ClaudeRepliesCheckRun.notApproved`; the auto-post record's reason wins). `held` = the old rule
+  (no blocker, no warning) WOULD have approved and the leftovers rule or a pair half held it.
+  AUTO with auto-posting on: `maybePostRepliesOutcome` runs it through the
   auto-post gates exactly (the `autoVerdict` switch, `autoPostEligibility`, the LIVE PR, the impact
   gate, the reader's standing review read live — a person's holds it, Limn's own block is superseded
   by an APPROVE and a second request is held `already_requested` — and the lift: no blocker left ⇒
   Limn's own block is dismissed when no APPROVE lands). ONE short review, no comments ("Replies
   checked: the remaining points are settled." / "Replies checked: “<title>” is still a blocker.") +
   the auto footer + the marker, CLAIMED on the pass row's `auto_post` (compare-and-set from NULL)
-  before any write, never retried; a held verdict is recorded `skipped` with why, nothing posts. Its
+  before any write, never retried. ⚠ AN APPROVAL IT COMPUTED AND SOMETHING HELD (the leftovers rule, a
+  pair half, or a gate — impact, own PR, a person's standing review) posts its REASON as ONE short
+  COMMENT review (the reason + the footer naming whoever ran the review — `PAIR_AUTO_POST_FOOTER` for
+  a pair — + the marker), at most ONCE per (PR, head) (`reasonPostedAtHead`; recorded `reasonPosted` +
+  `reasonOnly`); any other held verdict is recorded `skipped` with why and nothing posts. Its
   `githubReviewId` + REQUEST_CHANGES make it Limn's own block for later lifts
   (`loadLimnAutoBlockIds`).
 - **The tab**: `ClaudeReviewResponse.repliesCheck {unjudged, live, latest}` (DB-only + the in-memory
@@ -2553,7 +2570,8 @@ auto-posting: claim before any GitHub write, never retried.
   failed read is unknown) — else `heldReason: 'impact'` with `impact` recorded ("Not approved: High
   impact."). The impact read comes FIRST, so a held approve costs no live review read;
   REQUEST_CHANGES is never held by it. Held ⇒ COMMENT. A sendable APPROVE / REQUEST_CHANGES
-  goes out even with no new comment (body only); a held one with nothing to post is a skip. Recorded
+  goes out even with no new comment (body only); a held one with nothing to post sends only its
+  REASON, once per (PR, head) (THE REASON, below), else is a skip. Recorded
   on `ClaudeAutoPostRecord.verdict`; the tab prints "Approved automatically." / "Not approved: …".
   ⚠ The verdict and the comments are ONE submission. A verdict GitHub REFUSES (a 4xx on the review
   POST other than 401/429 — repo policy, permissions; `isVerdictRefusal`) gets the ONE retry: the
@@ -2562,6 +2580,52 @@ auto-posting: claim before any GitHub write, never retried.
   Safe because a refused POST created nothing (the seam posts PR-level comments only after the review
   lands). A 5xx / network / rate-limit failure is ambiguous and is NEVER retried; a refused bare
   verdict with no comments posts nothing more (`failed`).
+- **THE TWO RULES** (migration 0139; user decision 2026-10-29, after PR 190400 — Claude APPROVE,
+  Codex COMMENT with no findings because "the binary fixture change cannot be verified from this
+  diff", which left the pair at COMMENT with nothing posted and nothing said). Both per workspace,
+  OVERRIDES ONLY, on the auto-review route + PUT + the settings history (`setWorkspaceAutoReview`
+  logs "Claude + Codex verdict: …" / "Auto-approve: …"), read through ONE reader
+  (`readVerdictRulesForPr`; pure folds in `auto-verdict.ts`):
+  - **`pairStrictness`** (`workspaces.pair_verdict_strictness`; wire top-level): 'strict' (NULL, the
+    default — today's rule) = a pair approves only when BOTH approved; 'relaxed' = at least one
+    approved and NEITHER asked for changes (a half that said COMMENT does not veto; a half with no
+    verdict at all does). Every pair verdict: auto-post, the consolidation (= the manual pair's
+    suggested verdict), the replies outcome (`repliesDissent`). Settings shows it ONLY while both
+    Claude and Codex are signed in (`pairReviewReady`): "When Claude and Codex disagree", two radios,
+    the ⓘ saying a model may hold back when it cannot check something (a binary file).
+  - **`approveLeftovers`** (`workspaces.approve_leftovers`; wire `autoPost.approveLeftovers`): what may
+    still be open when Limn approves, after every check (follow-up judgements, accepted replies,
+    merged duplicates): 'none' / 'nits' / 'nits_questions' (NULL, the default — today's rule).
+    Blockers and warnings ALWAYS hold; praise never counts (`leftoverAllowed`). Read by
+    `autoVerdictFor` (single runs and pairs) and `repliesVerdict`. Settings: "Approve with open
+    findings", three radios under Approve, dimmed while the verdict switch is off.
+- **THE REASON — ALWAYS ONE WHEN NOT APPROVED** (migration 0139). While the auto verdict is on, a run
+  that does not end in an APPROVE gets ONE plain-English line, "Not approved: …":
+  - from the findings and the model(s) (`findingsNotApproved`, pure — null EXACTLY when
+    `autoVerdictFor` would approve), in order: blockers / warnings still open ("Not approved: 2
+    warnings are still open."); the model(s) ("Not approved: Codex didn’t approve. <its summary's first
+    sentence, clipped at a sentence end>" — `pair_strict` in a strict pair, `model_comment` for a
+    single run, a relaxed pair's asker, or "neither Claude nor Codex approved"); leftovers the rule
+    forbids ("Not approved: a question is still open.");
+  - or the GATE'S, when a wanted APPROVE was held (`heldReasonText`): "your own pull request.",
+    "an earlier review by this account still stands.", "the earlier request for changes still
+    stands.", "couldn’t read the earlier reviews on GitHub.", "High impact." / "impact unknown.",
+    "GitHub refused it.".
+  Stored on the record (`ClaudeAutoVerdictRecord.reasonText`; `heldReason` gains `open_findings` /
+  `model_comment` / `pair_strict` for a run that only wanted a COMMENT — a REQUEST_CHANGES keeps its
+  gate's `heldReason`, the reason is its blockers). The tab ALWAYS shows it under the verdict
+  (`ClaudeReview.notApproved`, `not-approved.ts` on the two GET routes): the record's, else — a manual
+  run, auto-posting off, a skip before the verdict — computed on read by the SAME rule plus "your own
+  pull request" (the live gates are only known to a real post). ON GITHUB (auto runs, auto-posting on):
+  posted findings carry it as the body's LAST line before the footer; with NOTHING else to post (the
+  old `nothing_new` skip) it goes out as ONE short COMMENT review — the reason + the auto footer + the
+  marker — CLAIMED before the write (the run's own `auto_post`, `reasonPosted` + `reasonOnly`
+  recorded from the claim on), never retried, at most ONCE per (PR, head): any record at this head
+  (full review or replies pass) with `reasonPosted` ⇒ nothing more (`reasonPostedAtHead`). This
+  supersedes "a held verdict with nothing to post is a skip" for this one case only. Model text is
+  made safe first (`safeReasonText`: no @-pings, no `<!--`, one line). Pinned by
+  `verdict-strictness.test.ts`, `auto-post.test.ts`, `replies-check-pipeline.test.ts` and the SPA's
+  `test/verdictStrictness.test.ts`.
 - ⚠ **LIMN LIFTS ITS OWN AUTOMATIC BLOCK** (`loadLimnAutoBlockIds`, `LIFT_BLOCK_MESSAGE`). An
   automatic REQUEST_CHANGES is posted under the reader's account, so GitHub cannot tell it from the
   reader's own — and the gate used to hold every later APPROVE as `prior_review`, leaving a PR
@@ -2614,7 +2678,9 @@ auto-posting: claim before any GitHub write, never retried.
   record is still `posting` (cut off by a restart) counts everything it tried as POSSIBLY POSTED,
   for good. Nothing left ⇒ `skipped` and no GitHub call: `already_posted` (+ `alreadyPostedFindingIds`,
   wire `alreadyPostedCount`) when the dedupe alone emptied it — shown as "Not posted automatically:
-  all N comments are already on GitHub." — else `nothing_new`, shown nowhere.
+  all N comments are already on GitHub." — else `nothing_new`, shown nowhere. ⚠ EXCEPT the
+  not-approved REASON (§ AUTO VERDICT → THE REASON): with the verdict on and no reason posted at this
+  head yet, the reason goes out alone instead of the skip.
 - ⚠ **WHAT IS ALREADY ON GITHUB — ONE ANSWER FOR THE TAB, BOTH POST ROUTES AND AUTO-POSTING**
   (`claude-review/posted-state.ts`, applied inside `getClaudeReviewById`; DB-only). Measured on PR 4
   of DEFRA/bng-metric-template (2026-10-14): GitHub answered an auto post's review POST with **422

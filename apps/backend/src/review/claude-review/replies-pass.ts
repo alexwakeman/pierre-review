@@ -17,14 +17,18 @@
 //
 // THE OUTCOME (`repliesVerdict`): after the pass, the PR's open findings at the current head are the
 // latest full review's counted findings, minus the ones a reply settled. A disputed blocker wants
-// REQUEST_CHANGES; no blocker and no warning left, once a reply settled something, wants APPROVE;
-// anything else changes nothing (null — never a COMMENT review that says nothing new).
+// REQUEST_CHANGES; no blocker and no warning left — and nothing the workspace's `approveLeftovers`
+// forbids, and no pair half standing in the way (`repliesDissent`) — once a reply settled something,
+// wants APPROVE; anything else changes nothing (null). Why it is not an approval: `repliesNotApproved`.
 import type {
+  ApproveLeftovers,
   AutoVerdictEvent,
   ClaudeFindingSeverity,
   ClaudeFollowUpItemRecord,
   ClaudeFollowUpStatus,
+  ClaudeNotApproved,
 } from '@pierre-review/shared';
+import { leftoverAllowed, openFindingsReason } from './auto-verdict.js';
 import { judgeReplyReport, type PriorFindingForFollowUp } from './follow-up.js';
 import { judgeableReplies } from './reply-text.js';
 
@@ -340,13 +344,20 @@ export interface RepliesVerdictInput {
   unjudgedEarlierBlockers: number;
   // This pass's own judgements.
   items: readonly Pick<ClaudeFollowUpItemRecord, 'status' | 'severity' | 'title'>[];
+  // What may stay open on an approve (`WorkspaceAutoPostSettings.approveLeftovers`; absent = the
+  // default, nits and questions).
+  leftovers?: ApproveLeftovers;
+  // A half of a Claude + Codex review that holds the approval whatever the replies say
+  // (auto-verdict.ts `repliesDissent`, by the workspace's strictness). Absent/null = none.
+  dissent?: ClaudeNotApproved | null;
 }
 
 /**
  * What the replies point to (null ⇒ the outcome does not change):
  *   • a blocker this pass DISPUTED ⇒ REQUEST_CHANGES (it stays open at its severity);
  *   • otherwise, when this pass ACCEPTED a reply and no blocker (nor an unjudged earlier one) and no
- *     warning is left open ⇒ APPROVE;
+ *     warning is left open — nor a nit / question `leftovers` forbids, nor a pair half's dissent ⇒
+ *     APPROVE;
  *   • otherwise null — nothing posts just to say nothing changed. Pure.
  */
 export function repliesVerdict(i: RepliesVerdictInput): AutoVerdictEvent | null {
@@ -355,7 +366,31 @@ export function repliesVerdict(i: RepliesVerdictInput): AutoVerdictEvent | null 
   if (!accepted) return null;
   if (i.unjudgedEarlierBlockers > 0) return null;
   if (i.open.some((f) => f.severity === 'blocker' || f.severity === 'warning')) return null;
+  if (i.open.some((f) => !leftoverAllowed(f.severity, i.leftovers ?? 'nits_questions'))) return null;
+  if (i.dissent != null) return null;
   return 'APPROVE';
+}
+
+/**
+ * WHY THE REPLIES' OUTCOME IS NOT AN APPROVAL (null when it is one, or when the replies changed
+ * nothing — no reply accepted and no blocker disputed). `held` = the old rule (no blocker, no
+ * warning) WOULD have approved, and the workspace's leftovers rule or a pair half held it: only
+ * then may an automatic pass tell GitHub. Pure.
+ */
+export function repliesNotApproved(i: RepliesVerdictInput): { reason: ClaudeNotApproved; held: boolean } | null {
+  const disputed = i.items.some((it) => it.status === 'reply_disputed' && it.severity === 'blocker');
+  const accepted = i.items.some((it) => it.status === 'reply_accepted');
+  if (!disputed && !accepted) return null;
+  const severe = openFindingsReason(i.open, 'severe');
+  if (severe != null) return { reason: severe, held: false };
+  if (disputed) return { reason: { heldReason: 'open_findings', text: 'Not approved: a blocker is still open.' }, held: false };
+  if (i.unjudgedEarlierBlockers > 0) {
+    return { reason: { heldReason: 'open_findings', text: 'Not approved: an earlier blocker is not checked yet.' }, held: false };
+  }
+  const leftover = openFindingsReason(i.open, 'leftovers', i.leftovers ?? 'nits_questions');
+  if (leftover != null) return { reason: leftover, held: true };
+  if (i.dissent != null) return { reason: i.dissent, held: true };
+  return null;
 }
 
 /** The disputed blocker the REQUEST_CHANGES body names (the first), or null. */

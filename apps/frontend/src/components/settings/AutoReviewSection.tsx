@@ -3,16 +3,19 @@ import {
   AUTO_FIX_DAILY_CAP,
   AUTO_FIX_DEFAULT_INCLUDE,
   AUTO_POST_DEFAULT_APPROVE_IMPACT,
+  AUTO_POST_DEFAULT_APPROVE_LEFTOVERS,
   AUTO_POST_DEFAULT_KINDS,
   AUTO_POST_DEFAULT_SCOPE,
+  type ApproveLeftovers,
   type AutoApproveImpact,
   type AutoFixInclude,
   type AutoPostKinds,
   type AutoPostScope,
   type AutoReviewProviders,
+  type PairVerdictStrictness,
 } from '@pierre-review/shared';
 import { useMe } from '../../hooks/useTriage.js';
-import { aiRunnableProviders } from '../../lib/aiCapabilities.js';
+import { pairReviewReady } from '../../lib/aiCapabilities.js';
 import { PAIR_PICK_LABEL } from '../../lib/modelPick.js';
 import { aiReadyFor, useAiCapabilities } from '../../hooks/useAiCapabilities.js';
 import { aiCredentialWords } from '@pierre-review/shared';
@@ -84,6 +87,12 @@ import { ScopePendingSection, useSettingsWorkspace } from './workspaceScope.js';
  * changes is never held by them. Dimmed while the verdict switch is off (they do nothing then).
  * The level is the chip's level: the server folds the same shared `blastRadius()` with the
  * account's Settings → Blast radius config. Unknown is held as High — said behind the ⓘ only.
+ *
+ * THE AUTO VERDICT'S TWO RULES (migration 0139): under Approve, three radios for what may still be
+ * open when Limn approves (`autoPost.approveLeftovers`: nothing / nits / nits and questions, the
+ * default); and — ONLY while both Claude and Codex are signed in — "When Claude and Codex disagree"
+ * (`pairStrictness`: strict, the default, or relaxed), explained behind its ⓘ. It governs every pair
+ * verdict (yours too), so it is not dimmed by the verdict switch.
  */
 
 const KIND_ROWS: Array<{ key: keyof AutoPostKinds; label: string }> = [
@@ -120,6 +129,17 @@ const IMPACT_ROWS: Array<{ key: keyof AutoApproveImpact; label: string }> = [
 ];
 const sameImpact = (a: AutoApproveImpact, b: AutoApproveImpact): boolean =>
   IMPACT_ROWS.every(({ key }) => a[key] === b[key]);
+
+const LEFTOVER_ROWS: Array<{ value: ApproveLeftovers; label: string }> = [
+  { value: 'none', label: 'Only when nothing is left open' },
+  { value: 'nits', label: 'When only nits are left' },
+  { value: 'nits_questions', label: 'When only nits and questions are left' },
+];
+
+const STRICTNESS_ROWS: Array<{ value: PairVerdictStrictness; label: string }> = [
+  { value: 'strict', label: 'Strict: approve only if both approve' },
+  { value: 'relaxed', label: 'Relaxed: approve if one approves and the other raises nothing that blocks' },
+];
 export function AutoReviewSection(): JSX.Element {
   const { workspaceId } = useSettingsWorkspace();
   const settings = useWorkspaceAutoReview(true, workspaceId);
@@ -141,8 +161,11 @@ export function AutoReviewSection(): JSX.Element {
   // Who runs auto reviews: the default provider, or Claude + Codex (a pair; migration 0135).
   const storedProviders: AutoReviewProviders = stored?.autoReviewProviders === 'both' ? 'both' : 'default';
   const [providers, setProviders] = useState<AutoReviewProviders>(storedProviders);
-  const ready = aiRunnableProviders(useMe().data, 'review');
-  const pairReady = ready.includes('claude') && ready.includes('codex');
+  // Both Claude and Codex signed in: the pair choice, and "When Claude and Codex disagree".
+  const pairReady = pairReviewReady(useMe().data);
+  // When Claude and Codex disagree (migration 0139): strict unless a stored 'relaxed' says otherwise.
+  const storedStrictness: PairVerdictStrictness = stored?.pairStrictness === 'relaxed' ? 'relaxed' : 'strict';
+  const [strictness, setStrictness] = useState<PairVerdictStrictness>(storedStrictness);
   const storedCap = stored?.dailyCap ?? 20;
   const [capText, setCapText] = useState(String(storedCap));
   const storedPost = stored?.autoPost ?? null;
@@ -160,6 +183,8 @@ export function AutoReviewSection(): JSX.Element {
   const storedImpact: AutoApproveImpact = storedPost?.approveImpact ?? AUTO_POST_DEFAULT_APPROVE_IMPACT;
   const storedImpactKey = IMPACT_ROWS.map(({ key }) => (storedImpact[key] ? '1' : '0')).join('');
   const [impact, setImpact] = useState<AutoApproveImpact>(storedImpact);
+  const storedLeftovers: ApproveLeftovers = storedPost?.approveLeftovers ?? AUTO_POST_DEFAULT_APPROVE_LEFTOVERS;
+  const [leftovers, setLeftovers] = useState<ApproveLeftovers>(storedLeftovers);
   const storedInclude: AutoFixInclude = stored?.autoFix?.include ?? AUTO_FIX_DEFAULT_INCLUDE;
   const storedIncludeKey = FIX_ROWS.map(({ key }) => (storedInclude[key] ? '1' : '0')).join('');
   const storedPush = stored?.autoFix?.autoPush === true;
@@ -203,6 +228,12 @@ export function AutoReviewSection(): JSX.Element {
     setResolve(storedResolve);
   }, [workspaceId, storedResolve]);
   useEffect(() => {
+    setStrictness(storedStrictness);
+  }, [workspaceId, storedStrictness]);
+  useEffect(() => {
+    setLeftovers(storedLeftovers);
+  }, [workspaceId, storedLeftovers]);
+  useEffect(() => {
     setImpact(storedImpact);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceId, storedImpactKey]);
@@ -225,7 +256,8 @@ export function AutoReviewSection(): JSX.Element {
     !sameKinds(kinds, storedKinds) ||
     verdict !== storedVerdict ||
     resolve !== storedResolve ||
-    !sameImpact(impact, storedImpact);
+    !sameImpact(impact, storedImpact) ||
+    leftovers !== storedLeftovers;
   const fixSettingsDirty = autoPush !== storedPush || !sameInclude(include, storedInclude);
 
   return (
@@ -322,6 +354,41 @@ export function AutoReviewSection(): JSX.Element {
             </p>
           </InfoButton>
         </div>
+        {pairReady && (
+          <div className="flex items-start gap-1" data-pair-strictness>
+            <fieldset className="space-y-1">
+              <legend className="font-medium text-gray-700 dark:text-gray-200">When Claude and Codex disagree</legend>
+              {STRICTNESS_ROWS.map(({ value, label }) => (
+                <label key={value} className="flex items-start gap-2 text-gray-700 dark:text-gray-200">
+                  <input
+                    type="radio"
+                    name="pair-strictness"
+                    className="mt-0.5"
+                    checked={strictness === value}
+                    onChange={() => setStrictness(value)}
+                  />
+                  <span>{label}</span>
+                </label>
+              ))}
+            </fieldset>
+            <InfoButton title="When Claude and Codex disagree">
+              <p>
+                A Claude + Codex review gives one verdict. Blockers, warnings and the open findings
+                you allow below count the same either way.
+              </p>
+              <p>
+                Strict approves only when both approve. Relaxed also approves when one approves and
+                the other only comments, as long as it raised nothing that blocks. Either way, if one
+                asks for changes, Limn does not approve.
+              </p>
+              <p>
+                A model may hold back its approval when it cannot check something, for example a
+                binary file in the diff. Strict treats that as a reason not to approve; relaxed does
+                not. Limn always says why it did not approve.
+              </p>
+            </InfoButton>
+          </div>
+        )}
         <div className="flex items-start gap-1">
           <fieldset className="space-y-1">
             <legend className="font-medium text-gray-700 dark:text-gray-200">When an auto review finishes</legend>
@@ -367,6 +434,11 @@ export function AutoReviewSection(): JSX.Element {
               left out, and so is anything you ignored. Merged, closed and draft PRs, and PRs opened
               by bots, are never posted on. A review request to a team does not make a PR yours:
               Limn does not know which teams you are in.
+            </p>
+            <p>
+              With Approve or request changes on, a review that is not approved says why, in Limn and
+              on GitHub. When nothing else is left to post, the reason goes out as one short comment,
+              once per commit.
             </p>
             <p>If a post fails, the AI Review tab says so and the Post button stays.</p>
           </InfoButton>
@@ -423,7 +495,7 @@ export function AutoReviewSection(): JSX.Element {
               </span>
               <span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">
                 Approves only with no blockers or warnings. Only when your last review was a
-                comment, never on your own PRs.
+                comment, never on your own PRs. When it does not approve, it says why.
               </span>
             </span>
           </label>
@@ -449,6 +521,30 @@ export function AutoReviewSection(): JSX.Element {
                   className="mt-0.5"
                   checked={impact[key]}
                   onChange={(e) => setImpact((v) => ({ ...v, [key]: e.target.checked }))}
+                />
+                <span>{label}</span>
+              </label>
+            ))}
+          </fieldset>
+          <fieldset className={`space-y-1 pl-5 ${verdict ? '' : 'opacity-60'}`} data-approve-leftovers>
+            <legend className="flex items-center gap-1 font-medium text-gray-700 dark:text-gray-200">
+              Approve with open findings
+              <InfoButton title="Approve with open findings">
+                <p>
+                  Checked after everything else: earlier findings judged fixed, replies accepted, and
+                  findings Claude and Codex both raised counted once.
+                </p>
+                <p>Open blockers or warnings always stop an approval.</p>
+              </InfoButton>
+            </legend>
+            {LEFTOVER_ROWS.map(({ value, label }) => (
+              <label key={value} className="flex items-start gap-2 text-gray-700 dark:text-gray-200">
+                <input
+                  type="radio"
+                  name="approve-leftovers"
+                  className="mt-0.5"
+                  checked={leftovers === value}
+                  onChange={() => setLeftovers(value)}
                 />
                 <span>{label}</span>
               </label>
@@ -595,6 +691,7 @@ export function AutoReviewSection(): JSX.Element {
             diagramsOn !== storedDiagrams ||
             claimsOn !== storedClaims ||
             providers !== storedProviders ||
+            strictness !== storedStrictness ||
             capDirty ||
             postDirty ||
             fixSettingsDirty)
@@ -607,6 +704,7 @@ export function AutoReviewSection(): JSX.Element {
             ...(diagramsOn !== storedDiagrams ? { autoDiagramsEnabled: diagramsOn } : {}),
             ...(claimsOn !== storedClaims ? { teamClaimsEnabled: claimsOn } : {}),
             ...(providers !== storedProviders ? { autoReviewProviders: providers } : {}),
+            ...(strictness !== storedStrictness ? { pairStrictness: strictness } : {}),
             ...(capDirty && cap != null ? { dailyCap: cap } : {}),
             ...(postDirty
               ? {
@@ -617,6 +715,7 @@ export function AutoReviewSection(): JSX.Element {
                     autoVerdict: verdict,
                     autoResolve: resolve,
                     approveImpact: impact,
+                    approveLeftovers: leftovers,
                   },
                 }
               : {}),

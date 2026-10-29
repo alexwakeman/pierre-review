@@ -12,18 +12,27 @@
 // ⚠ CLAIM BEFORE ANY WRITE, NEVER RETRIED: the record is `claude_reviews.auto_post` of the replies
 // pass's own row, written by a compare-and-set from NULL (`status: 'posting'`) before GitHub is
 // touched. A refused verdict is recorded, never sent again (there are no comments to fall back to).
-// ⚠ NEVER A COMMENT-ONLY REVIEW: a held verdict is recorded (`skipped` + why), nothing posts.
+// THE RULES (migration 0139): the workspace's `approveLeftovers` and, for a Claude + Codex review, its
+// strictness (`repliesDissent`: a half that did not approve and raised nothing holds the approval —
+// strict: any; relaxed: one that asked for changes). WHY NOT APPROVED (`repliesNotApproved`) is
+// stored on the pass row (`verdict_reason`) while the auto verdict is on, and shown in Limn.
+// ⚠ A COMMENT-ONLY REVIEW ONLY TO SAY WHY: when the pass HOLDS AN APPROVAL it computed (the leftovers
+// rule, a pair half, or a gate — impact, own PR, a standing review), ONE short COMMENT review whose
+// body is the reason goes out, at most once per (PR, head) (`reasonPostedAtHead`); any other held
+// verdict is recorded (`skipped` + why), nothing posts.
 // ⚠ A MANUAL pass never writes: its row's `verdict` shows what the outcome WOULD be.
 // ⚠ Never throws.
 import { and, desc, eq, isNull, ne, or } from 'drizzle-orm';
 import {
   aiRunProviderName,
   autoPostFooter,
+  PAIR_AUTO_POST_FOOTER,
   type AutoApproveImpact,
   type AutoVerdictEvent,
   type ClaudeAutoPostRecord,
   type ClaudeAutoVerdictRecord,
   type ClaudeFollowUpItemRecord,
+  type ClaudeNotApproved,
   type ClaudeReview,
 } from '@pierre-review/shared';
 import type { AgentContext } from '../agent-context.js';
@@ -40,20 +49,26 @@ import {
   unsettledEarlierBlockers,
   verdictGate,
   liftBlockMessage,
+  reasonPostedAtHead,
+  withReasonLine,
   type AutoPostDeps,
   type ImpactLevel,
   type OwnLatestReview,
 } from './auto-post.js';
-import { readWorkspaceAutoPostForPr } from './auto-settings.js';
+import { readVerdictRulesForPr, readWorkspaceAutoPostForPr } from './auto-settings.js';
+import { DEFAULT_VERDICT_RULES, repliesDissent, withReason } from './auto-verdict.js';
 import {
   getClaudeReviewById,
   getReviewPostContext,
   isReaderIgnoredFinding,
   loadSettledByReplyFindings,
+  readPairConsolidation,
 } from './persist.js';
+import { sourceOfRun } from './pair-view.js';
 import {
   disputedBlockerTitle,
   openFindingsAfterReplies,
+  repliesNotApproved,
   repliesReviewBody,
   repliesVerdict,
 } from './replies-pass.js';
@@ -76,6 +91,12 @@ export interface RepliesOutcome {
   // Every half the outcome rests on is an AUTO run. Only then may an automatic pass ACT on it: a
   // manual run is the reader's, kept local or posted by hand, and auto-post never acts on it.
   restsOnAuto: boolean;
+  // WHY IT IS NOT AN APPROVAL (`repliesNotApproved`; null when it is one or nothing changed), and
+  // whether an approval the old rule would give was HELD by the leftovers rule or a pair half.
+  reason?: ClaudeNotApproved | null;
+  heldApproval?: boolean;
+  // The workspace's auto verdict switch, as read with the rules.
+  autoVerdict?: boolean;
 }
 
 /**
@@ -119,13 +140,49 @@ export async function computeRepliesOutcome(
   // An earlier blocker the full review left unjudged is still open — unless a reply settled it since.
   const unjudged = [...new Set(halves.flatMap((h) => unsettledEarlierBlockers(h)))].filter((id) => !settledIds.has(id));
   const disputedBlocker = items.some((it) => it.status === 'reply_disputed' && it.severity === 'blocker');
+  // THE WORKSPACE'S RULES (migration 0139); a failed read is the defaults, auto verdict off.
+  const rules = await readVerdictRulesForPr(ctx, accountId, prId).catch(() => ({ ...DEFAULT_VERDICT_RULES, autoVerdict: false }));
+  const dissent = halves.length >= 2 ? repliesDissent(await pairHalvesRaised(ctx, prId, halves), rules.pairStrictness) : null;
+  const input = { open, unjudgedEarlierBlockers: unjudged.length, items, leftovers: rules.approveLeftovers, dissent };
+  const why = repliesNotApproved(input);
   return {
-    wanted: repliesVerdict({ open, unjudgedEarlierBlockers: unjudged.length, items }),
+    wanted: repliesVerdict(input),
     noBlocker: !disputedBlocker && unjudged.length === 0 && !open.some((f) => f.severity === 'blocker'),
     blockerTitle: disputedBlockerTitle(items),
     full,
     restsOnAuto: halves.every((h) => h.trigger === 'auto'),
+    reason: why?.reason ?? null,
+    heldApproval: why?.held === true,
+    autoVerdict: rules.autoVerdict,
   };
+}
+
+/**
+ * Each half of a pair as `repliesDissent` reads it: who ran it, its verdict and summary, and how many
+ * findings it RAISED (non-praise, non-story) — a finding the consolidation merged and credited to
+ * both ('both') counts for both halves, though only one half's row keeps it.
+ */
+async function pairHalvesRaised(
+  ctx: AgentContext,
+  prId: number,
+  halves: readonly ClaudeReview[],
+): Promise<Array<{ by: string; verdict: ClaudeReview['verdict']; summary: string | null; raised: number }>> {
+  const pairId = halves.find((h) => h.pair?.pairId != null)?.pair?.pairId ?? null;
+  const record = pairId != null ? await readPairConsolidation(ctx, pairId, prId).catch(() => null) : null;
+  const raised = new Map<string, number>();
+  for (const h of halves) {
+    for (const f of h.findings) {
+      if (f.severity === 'praise' || f.story != null) continue;
+      const src = record?.sourceOf[String(f.id)] ?? sourceOfRun(h);
+      for (const p of src === 'both' ? ['claude', 'codex'] : [src]) raised.set(p, (raised.get(p) ?? 0) + 1);
+    }
+  }
+  return halves.map((h) => ({
+    by: aiRunProviderName(h),
+    verdict: h.verdict,
+    summary: h.summary,
+    raised: raised.get(sourceOfRun(h)) ?? 0,
+  }));
 }
 
 /**
@@ -231,12 +288,15 @@ async function postOutcome(
   // ⚠ An automatic write rests only on AUTO runs (`restsOnAuto`): never on a run the reader started.
   if (!outcome.restsOnAuto) return { kind: 'nothing' };
   const wanted = ws.settings.autoVerdict ? outcome.wanted : null;
+  // An approval the leftovers rule or a pair half held (auto verdict on): its reason may be posted.
+  const heldByRules: ClaudeNotApproved | null =
+    ws.settings.autoVerdict && outcome.heldApproval === true && wanted == null ? (outcome.reason ?? null) : null;
   const facts = await readAutoPostPrFacts(ctx, deps, accountId, ws.workspaceId, prId);
   if (!facts) return { kind: 'not_found' };
   const limnBlockIds = !facts.authorIsMe ? await loadLimnAutoBlockIds(ctx, accountId, prId, ALL_RUNS) : new Set<string>();
   const mayLift = outcome.noBlocker && limnBlockIds.size > 0;
   // Nothing the replies changed: nothing is recorded and nothing posts.
-  if ((wanted == null || wanted === 'COMMENT') && !mayLift) return { kind: 'nothing' };
+  if ((wanted == null || wanted === 'COMMENT') && !mayLift && heldByRules == null) return { kind: 'nothing' };
 
   const skip = async (reason: ClaudeAutoPostRecord['reason'], verdict?: ClaudeAutoVerdictRecord): Promise<RepliesOutcomePost> => {
     const rec: ClaudeAutoPostRecord = {
@@ -301,11 +361,22 @@ async function postOutcome(
     if (verdict.submitted === 'APPROVE' && standing.state === 'LIMN_AUTO_CHANGES_REQUESTED' && blockersRemain) {
       verdict = { ...verdict, submitted: 'COMMENT', heldReason: 'already_requested' };
     }
+    verdict = withReason(verdict, outcome.reason ?? null);
+  } else if (heldByRules != null) {
+    verdict = { wanted: 'COMMENT', submitted: 'COMMENT', heldReason: heldByRules.heldReason, reasonText: heldByRules.text };
   }
   const liftId = !blockersRemain && standing.state === 'LIMN_AUTO_CHANGES_REQUESTED' ? standing.reviewId : null;
   const event = verdict?.submitted ?? 'COMMENT';
-  // ⚠ NEVER A COMMENT-ONLY REVIEW: a held verdict (and no lift) is recorded, nothing posts.
-  if (event === 'COMMENT' && liftId == null) {
+  // THE REASON, ALONE: an approval this pass computed and something held (the rules, or a gate) —
+  // once per (PR, head).
+  const heldApproval = heldByRules != null || (wanted === 'APPROVE' && event !== 'APPROVE');
+  const reasonText = heldApproval && verdict?.reasonText ? verdict.reasonText : null;
+  const reasonOnly =
+    event === 'COMMENT' &&
+    reasonText != null &&
+    !(await reasonPostedAtHead(ctx, accountId, prId, pctx.reviewHeadSha, [reviewId]).catch(() => true));
+  // ⚠ Otherwise NO COMMENT-ONLY REVIEW: a held verdict (and no lift) is recorded, nothing posts.
+  if (event === 'COMMENT' && liftId == null && !reasonOnly) {
     return verdict ? skip('nothing_new', verdict) : { kind: 'nothing' };
   }
 
@@ -318,6 +389,8 @@ async function postOutcome(
     postedFindingIds: [],
     githubReviewId: null,
     ...(verdict ? { verdict } : {}),
+    // Recorded from the claim on: possibly posted, never sent again at this head.
+    ...(reasonOnly ? { reasonPosted: reasonText, reasonOnly: true } : {}),
   };
   if (live.headSha !== pctx.reviewHeadSha) {
     const rec = { ...record, status: 'failed' as const, error: 'The PR changed since the replies were checked.' };
@@ -327,16 +400,21 @@ async function postOutcome(
   if (!(await claimRow(ctx, reviewId, record))) return { kind: 'already_claimed' };
 
   const by = aiRunProviderName(row);
+  // The footer names who ran the review the outcome rests on (both, for a pair).
+  const footer = outcome.full?.pair != null ? PAIR_AUTO_POST_FOOTER : autoPostFooter(by);
   const errors: string[] = [];
   let reviewFailed = false;
-  if (event !== 'COMMENT') {
+  if (event !== 'COMMENT' || reasonOnly) {
     try {
       const posted = await ctx.review.postReview({
         owner: pctx.owner,
         name: pctx.name,
         prNumber: pctx.prNumber,
         reviewHeadSha: pctx.reviewHeadSha,
-        body: `${repliesReviewBody(event, outcome.blockerTitle)}\n\n${autoPostFooter(by)}`,
+        body:
+          event === 'COMMENT'
+            ? withReasonLine(reasonText, footer)
+            : `${repliesReviewBody(event, outcome.blockerTitle)}\n\n${autoPostFooter(by)}`,
         verdict: event,
         includedFindings: [],
         dryRun: false,
@@ -350,7 +428,7 @@ async function postOutcome(
     } catch (err) {
       reviewFailed = true;
       // A refused verdict created nothing; it is recorded and never sent again.
-      if (isVerdictRefusal(err) && verdict) {
+      if (isVerdictRefusal(err) && verdict && event !== 'COMMENT') {
         verdict = { ...verdict, submitted: 'COMMENT', heldReason: 'refused', refusedError: errText(err) };
         record.verdict = verdict;
       }

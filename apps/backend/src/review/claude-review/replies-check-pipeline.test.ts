@@ -448,16 +448,81 @@ describe('an AUTO pass: the outcome, both ways, through the auto-post gates', ()
     expect(second.autoPost).toMatchObject({ status: 'skipped', verdict: { wanted: 'REQUEST_CHANGES', heldReason: 'already_requested' } });
   });
 
-  it('⚠ a person’s standing review holds the verdict: recorded, nothing posts', async () => {
+  it('⚠ a person’s standing review holds the verdict: no approval, only its reason (once per head)', async () => {
     const pr = await makePr();
     await reviewed(pr, [{ title: 'Naming is off', severity: 'warning', replies: [{ by: 'alice', body: 'It follows the house style.' }] }]);
     liveReviewList = [{ id: 1, login: 'me', state: 'APPROVED' }];
     script = () => ({ replies: [{ ref: 'T1', status: 'reply_accepted', acceptKind: 'not_valid', reply: 'Fair.' }] });
     await rc.startRepliesCheck(ctx, { accountId: 1, prId: pr, trigger: 'auto' });
     await settleFor(pr);
-    expect(postReview).not.toHaveBeenCalled();
+    // The pass HELD an approval it computed: the reason goes out as one short COMMENT review.
+    expect(postReview).toHaveBeenCalledTimes(1);
+    expect(postReview.mock.calls[0]![0]).toMatchObject({
+      verdict: 'COMMENT',
+      includedFindings: [],
+      body: 'Not approved: an earlier review by this account still stands.\n\n_Posted automatically by Limn’s Claude review._',
+    });
     const pass = (await persist.getClaudeReviewById(ctx, (await passRows(pr))[0]!.id, 1))!;
-    expect(pass.autoPost).toMatchObject({ status: 'skipped', verdict: { wanted: 'APPROVE', submitted: 'COMMENT', heldReason: 'prior_review' } });
+    expect(pass.autoPost).toMatchObject({
+      status: 'posted',
+      reasonOnly: true,
+      verdict: { wanted: 'APPROVE', submitted: 'COMMENT', heldReason: 'prior_review' },
+    });
+  });
+
+  it('LEFTOVERS: a question still open under "nits only" holds the approval; the reason is stored, shown and posted', async () => {
+    await settings.setWorkspaceAutoReview(ctx, 1, wsId, { autoPost: { approveLeftovers: 'nits' } as any });
+    try {
+      const pr = await makePr();
+      await reviewed(pr, [
+        { title: 'Unchecked input', severity: 'warning', replies: [{ by: 'alice', body: EXPLAIN }] },
+        { title: 'Why a map', severity: 'question' as any, replies: [] },
+      ]);
+      script = () => ({ replies: [{ ref: 'T1', status: 'reply_accepted', acceptKind: 'not_valid', reply: 'Fair.' }] });
+      await rc.startRepliesCheck(ctx, { accountId: 1, prId: pr, trigger: 'auto' });
+      await settleFor(pr);
+      expect(postReview).toHaveBeenCalledTimes(1);
+      expect(postReview.mock.calls[0]![0]).toMatchObject({
+        verdict: 'COMMENT',
+        body: 'Not approved: a question is still open.\n\n_Posted automatically by Limn’s Claude review._',
+      });
+      const state = await rc.repliesCheckState(ctx, 1, pr);
+      expect(state?.latest?.notApproved).toEqual({ heldReason: 'open_findings', text: 'Not approved: a question is still open.' });
+      // The default rule (nits and questions may remain) would have approved.
+      await settings.setWorkspaceAutoReview(ctx, 1, wsId, { autoPost: { approveLeftovers: 'nits_questions' } as any });
+      const { computeRepliesOutcome } = await import('./replies-outcome.js');
+      const pass = (await persist.getClaudeReviewById(ctx, (await passRows(pr))[0]!.id, 1))!;
+      expect((await computeRepliesOutcome(ctx, 1, pr, pass.followUp!.items)).wanted).toBe('APPROVE');
+    } finally {
+      await settings.setWorkspaceAutoReview(ctx, 1, wsId, { autoPost: { approveLeftovers: 'nits_questions' } as any });
+    }
+  });
+
+  it('A CLAUDE + CODEX REVIEW: a half that said COMMENT and raised nothing holds it under strict, not under relaxed', async () => {
+    try {
+      const pr = await makePr();
+      const first = await reviewed(
+        pr,
+        [{ title: 'Unchecked input', severity: 'warning', replies: [{ by: 'alice', body: EXPLAIN }] }],
+        { provider: 'claude', verdict: 'APPROVE', pair: { role: 'first' } },
+      );
+      await reviewed(pr, [], { provider: 'codex', verdict: 'COMMENT', pair: { role: 'second', pairId: first.reviewId } });
+      script = () => ({ replies: [{ ref: 'T1', status: 'reply_accepted', acceptKind: 'not_valid', reply: 'Fair.' }] });
+      await rc.startRepliesCheck(ctx, { accountId: 1, prId: pr, trigger: 'auto' });
+      await settleFor(pr);
+      expect(postReview).toHaveBeenCalledTimes(1);
+      const sent = postReview.mock.calls[0]![0];
+      expect(sent.verdict).toBe('COMMENT');
+      expect(sent.body.startsWith('Not approved: Codex didn’t approve.')).toBe(true);
+      const pass = (await persist.getClaudeReviewById(ctx, (await passRows(pr))[0]!.id, 1))!;
+      expect(pass.autoPost).toMatchObject({ verdict: { heldReason: 'pair_strict' } });
+      // Relaxed: the same outcome approves.
+      await settings.setWorkspaceAutoReview(ctx, 1, wsId, { pairStrictness: 'relaxed' });
+      const { computeRepliesOutcome } = await import('./replies-outcome.js');
+      expect((await computeRepliesOutcome(ctx, 1, pr, pass.followUp!.items)).wanted).toBe('APPROVE');
+    } finally {
+      await settings.setWorkspaceAutoReview(ctx, 1, wsId, { pairStrictness: 'strict' });
+    }
   });
 
   it('nothing the replies changed (a warning still open) ⇒ no review, no record', async () => {

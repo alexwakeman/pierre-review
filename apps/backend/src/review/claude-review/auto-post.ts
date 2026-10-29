@@ -37,8 +37,15 @@
 //      (`unsettledEarlierBlockers`) and none of the blocking run's own blockers that never reached
 //      GitHub (`loadUnpostedBlockersOfBlock` — never followed up, so never judged). Otherwise no
 //      dismissal, and an APPROVE over the block is held as 'already_requested';
-//   4. nothing to post and nothing but COMMENT to send ⇒ `skipped` — `already_posted` (with the
-//      ids) when the dedupe alone emptied it, else `nothing_new` — no GitHub write;
+//   3c. THE REASON (only with `autoVerdict` on): a run that does not end in an APPROVE gets ONE
+//      plain-English "Not approved: …" line (`findingsNotApproved` + the gate's `heldReason`,
+//      ./auto-verdict.ts), stored on the verdict record (`reasonText`). Posted findings carry it as the
+//      review body's last line before the footer; with NOTHING else to post it goes out as ONE short
+//      COMMENT review of its own — at most once per (PR, head): an earlier record at this head with
+//      `reasonPosted` (a full review's or a replies pass's) means nothing more is posted;
+//   4. nothing to post, nothing but COMMENT to send and no reason to post ⇒ `skipped` —
+//      `already_posted` (with the ids) when the dedupe alone emptied it, else `nothing_new` — no
+//      GitHub write;
 //   5. the LIVE PR is still open, not a draft, at the reviewed head (a moved head ⇒ `failed`);
 //   6. THE CLAIM — a compare-and-set of `claude_reviews.auto_post` from NULL to `status: 'posting'`
 //      BEFORE any write, so a second call (or a restart) can never post the same run twice;
@@ -86,7 +93,15 @@ import {
   readPairConsolidation,
 } from './persist.js';
 import { resolveFindingBody } from './follow-up.js';
-import { autoVerdictFor } from './auto-verdict.js';
+import {
+  autoVerdictFor,
+  findingsNotApproved,
+  pairVerdict,
+  safeReasonText,
+  withReason,
+  type VerdictRules,
+  type VerdictRun,
+} from './auto-verdict.js';
 import {
   aiRunProviderName,
   autoPostFooter,
@@ -95,7 +110,7 @@ import {
   PAIR_AUTO_POST_FOOTER,
   type AiProviderName,
 } from '@pierre-review/shared';
-import { pairRaisedByLead, pairReviewBody, pairVerdict } from './pair.js';
+import { pairRaisedByLead, pairReviewBody } from './pair.js';
 
 // A pair's body names both when it falls back to a count ("3 comments from Claude and Codex.").
 const PAIR_BODY_BY = 'Claude and Codex';
@@ -327,9 +342,41 @@ export function autoReviewBodyLead(summary: string | null, commentCount: number,
   return commentCount === 1 ? `One comment from ${by}.` : `${commentCount} comments from ${by}.`;
 }
 
-/** The posted body of an auto review: the lead, then the footer (the seam appends the marker). */
-export function autoReviewBody(summary: string | null, commentCount: number, by: AiProviderName = 'Claude'): string {
-  return `${autoReviewBodyLead(summary, commentCount, by)}\n\n${autoPostFooter(by)}`;
+/** The posted body of an auto review: the lead, then the not-approved reason when there is one, then
+ *  the footer (the seam appends the marker). */
+export function autoReviewBody(
+  summary: string | null,
+  commentCount: number,
+  by: AiProviderName = 'Claude',
+  reason: string | null = null,
+): string {
+  return `${autoReviewBodyLead(summary, commentCount, by)}\n\n${withReasonLine(reason, autoPostFooter(by))}`;
+}
+
+/** The footer, led by the not-approved reason as its own line when there is one. */
+export function withReasonLine(reason: string | null, footer: string): string {
+  return reason ? `${safeReasonText(reason)}\n\n${footer}` : footer;
+}
+
+/**
+ * Has a not-approved reason already gone to GitHub at this head (any run of the PR other than
+ * `exceptIds`, full review or replies pass — a record whose `reasonPosted` is set, whatever became of
+ * it: never retried)? A reason-only review goes out at most once per (PR, head).
+ */
+export async function reasonPostedAtHead(
+  ctx: AgentContext,
+  accountId: number,
+  prId: number,
+  headSha: string,
+  exceptIds: readonly number[],
+): Promise<boolean> {
+  const cr = s(ctx).claudeReviews;
+  const rows = (await ctx.db
+    .select({ id: cr.id, autoPost: cr.autoPost })
+    .from(cr)
+    .where(and(eq(cr.prId, prId), eq(cr.accountId, accountId), eq(cr.headSha, headSha)))
+    .execute()) as Array<{ id: number; autoPost: ClaudeAutoPostRecord | null }>;
+  return rows.some((r) => !exceptIds.includes(r.id) && r.autoPost?.reasonPosted != null && r.autoPost.reasonPosted !== '');
 }
 
 // ---- I/O ----
@@ -771,8 +818,13 @@ async function autoPostReview(
   const byOf = new Map<number, AiProviderName>();
   for (const r of runs) for (const f of r.findings) byOf.set(f.id, aiRunProviderName(r));
   const allFindings = runs.flatMap((r) => r.findings);
+  // THE WORKSPACE'S VERDICT RULES (migration 0145): strict / relaxed for a pair, and what may stay open.
+  const rules: VerdictRules = { pairStrictness: ws.pairStrictness, approveLeftovers: ws.settings.approveLeftovers };
   // The run's verdict as `autoVerdictFor` reads it: a pair's is both runs' together.
-  const runVerdict = first ? pairVerdict(first.verdict, review.verdict) : review.verdict;
+  const runVerdict = first ? pairVerdict(first.verdict, review.verdict, rules.pairStrictness) : review.verdict;
+  // WHY NOT APPROVED, from the findings and the model(s) — only while the auto verdict is on.
+  const verdictRuns: VerdictRun[] = runs.map((r) => ({ by: aiRunProviderName(r), verdict: r.verdict, summary: r.summary }));
+  const findingsReason = ws.settings.autoVerdict ? findingsNotApproved(verdictRuns, allFindings, rules) : null;
   // Claim the FIRST half as posted in this pair's review (compare-and-set from NULL): false ⇒ some
   // other writer has it, and its findings leave this post.
   const claimFirst = async (rec: ClaudeAutoPostRecord): Promise<boolean> =>
@@ -797,6 +849,15 @@ async function autoPostReview(
     return { kind: 'skipped', reason };
   };
 
+  const wanted: AutoVerdictEvent | null = ws.settings.autoVerdict
+    ? autoVerdictFor(runVerdict, allFindings, rules.approveLeftovers)
+    : null;
+  // A run that never wanted more than a COMMENT is recorded with its reason from the start (shown in
+  // Limn whatever happens next).
+  if (wanted != null && wanted === 'COMMENT') {
+    verdict = withReason(verdictGate('COMMENT', { authorIsMe: false, ownLatest: 'none' }), findingsReason);
+  }
+
   const facts = await readAutoPostPrFacts(ctx, deps, accountId, ws.workspaceId, prId);
   if (!facts) return { kind: 'not_found' };
   const notEligible = autoPostEligibility(facts, ws.settings.scope);
@@ -808,12 +869,15 @@ async function autoPostReview(
   const picked = selectFindingsToPost(allFindings, ws.settings.kinds, earlier);
   const nothingReason = (): [AutoPostSkipReason, number[] | undefined] =>
     picked.alreadyPosted.length > 0 ? ['already_posted', picked.alreadyPosted.map((f) => f.id)] : ['nothing_new', undefined];
-  const wanted: AutoVerdictEvent | null = ws.settings.autoVerdict ? autoVerdictFor(runVerdict, allFindings) : null;
-  if (wanted != null && wanted === 'COMMENT') verdict = verdictGate('COMMENT', { authorIsMe: facts.authorIsMe, ownLatest: 'none' });
+  // A reason-only review goes out at most once per (PR, head): read only when nothing else would post.
+  const reasonAlreadyAtHead =
+    ws.settings.autoVerdict && picked.toPost.length === 0
+      ? await reasonPostedAtHead(ctx, accountId, prId, review.headSha, runs.map((r) => r.id))
+      : false;
   // LIFTING LIMN'S OWN BLOCK: a run with NO blocker (whatever the auto-verdict switch says now) may
   // withdraw an earlier AUTOMATIC request for changes of Limn's that still stands. A DB pre-check
   // first, so an ordinary run costs no extra GitHub read.
-  const noBlocker = autoVerdictFor(runVerdict, allFindings) !== 'REQUEST_CHANGES';
+  const noBlocker = autoVerdictFor(runVerdict, allFindings, rules.approveLeftovers) !== 'REQUEST_CHANGES';
   // ⚠ "No blocker" from this run's OWN findings is not enough to lift: an earlier blocker the run
   // did not judge (a 'not_checked' follow-up) is still open as far as anyone knows. (A pair: either
   // half's.)
@@ -821,7 +885,11 @@ async function autoPostReview(
   // (Read for a REQUEST_CHANGES too: the gate must tell Limn's own standing block from a person's.)
   const limnBlockIds = !facts.authorIsMe ? await loadLimnAutoBlockIds(ctx, accountId, prId, reviewId) : new Set<string>();
   const mayLift = noBlocker && unjudgedBlockers.length === 0 && limnBlockIds.size > 0;
-  if (picked.toPost.length === 0 && (wanted == null || wanted === 'COMMENT') && !mayLift) return skip(...nothingReason());
+  // A COMMENT-only run with a reason still to tell GitHub goes on (to the reason-only review).
+  const commentReasonToPost = wanted === 'COMMENT' && verdict?.reasonText != null && !reasonAlreadyAtHead;
+  if (picked.toPost.length === 0 && (wanted == null || wanted === 'COMMENT') && !mayLift && !commentReasonToPost) {
+    return skip(...nothingReason());
+  }
 
   const pctx = await getReviewPostContext(ctx, reviewId, accountId);
   if (!pctx) return { kind: 'not_found' };
@@ -877,16 +945,23 @@ async function autoPostReview(
     if (verdict.submitted === 'APPROVE' && standing.state === 'LIMN_AUTO_CHANGES_REQUESTED' && blockersRemain) {
       verdict = { ...verdict, submitted: 'COMMENT', heldReason: 'already_requested' };
     }
+    verdict = withReason(verdict, findingsReason);
   }
+  // The reason this run tells GitHub (none on an approval, none with the verdict switched off).
+  const reasonNow = (): string | null =>
+    verdict != null && verdict.submitted !== 'APPROVE' && verdict.reasonText ? verdict.reasonText : null;
+  // NOTHING ELSE TO POST: the reason alone, as one short COMMENT review — once per (PR, head).
+  const reasonOnly =
+    picked.toPost.length === 0 && (verdict?.submitted ?? 'COMMENT') === 'COMMENT' && reasonNow() != null && !reasonAlreadyAtHead;
   // Limn's own automatic request for changes still stands, this run has no blocker and none behind
   // the block is left unjudged: lift it — superseded by the APPROVE this run sends, else dismissed.
   const liftId = noBlocker && !blockersRemain && standing.state === 'LIMN_AUTO_CHANGES_REQUESTED' ? standing.reviewId : null;
-  if (picked.toPost.length === 0 && (verdict?.submitted ?? 'COMMENT') === 'COMMENT' && liftId == null) {
+  if (picked.toPost.length === 0 && (verdict?.submitted ?? 'COMMENT') === 'COMMENT' && liftId == null && !reasonOnly) {
     return skip(...nothingReason());
   }
   const event: AutoVerdictEvent = verdict?.submitted ?? 'COMMENT';
   // Nothing but the lift to do: no review is sent at all.
-  const sendsReview = picked.toPost.length > 0 || event !== 'COMMENT';
+  const sendsReview = picked.toPost.length > 0 || event !== 'COMMENT' || reasonOnly;
 
   const record: ClaudeAutoPostRecord = {
     status: 'posting',
@@ -903,6 +978,12 @@ async function autoPostReview(
     if (!(await claimRun(ctx, reviewId, rec))) return { kind: 'already_claimed' };
     await claimFirst(rec);
     return { kind: 'done', record: rec };
+  }
+  // The reason rides the review (its last line, or the whole body): recorded as POSSIBLY POSTED from
+  // the claim on, so a restart never sends it again at this head.
+  if (sendsReview && reasonNow() != null) {
+    record.reasonPosted = reasonNow();
+    if (reasonOnly) record.reasonOnly = true;
   }
   // ⚠ THE CLAIM, BEFORE ANY WRITE — on THIS run, then (a pair) on its first half. A first half
   // someone else claimed meanwhile keeps its findings out of this post.
@@ -926,26 +1007,30 @@ async function autoPostReview(
   const posted = new Set<number>();
   const errors: string[] = [];
 
+  // The body. With findings: the lead, the reason line, the footer. Reason only: the reason, the footer.
+  const bodyOf = (reason: string | null): string => {
+    const footer = pairFirst != null ? PAIR_AUTO_POST_FOOTER : autoPostFooter(aiRunProviderName(review));
+    if (reasonOnly && reason != null) return withReasonLine(reason, footer);
+    if (pairFirst == null) return autoReviewBody(review.summary, picked.toPost.length, aiRunProviderName(review), reason);
+    return consolidation?.how === 'pass'
+      ? `${autoReviewBodyLead(consolidation.summary, picked.toPost.length, PAIR_BODY_BY)}\n\n${withReasonLine(reason, footer)}`
+      : // Joined in code (or an older pair): each half's lead, named.
+        pairReviewBody(
+          [pairFirst, review].map((r) => {
+            const mine = new Set(r.findings.map((x) => x.id));
+            const n = picked.toPost.filter((f) => mine.has(f.id)).length;
+            return { by: aiRunProviderName(r), text: autoReviewBodyLead(r.summary, n, aiRunProviderName(r)) };
+          }),
+          withReasonLine(reason, footer),
+        );
+  };
   const submit = (ev: AutoVerdictEvent) =>
     ctx.review.postReview({
       owner: pctx.owner,
       name: pctx.name,
       prNumber: pctx.prNumber,
       reviewHeadSha: pctx.reviewHeadSha,
-      body:
-        pairFirst != null
-          ? consolidation?.how === 'pass'
-            ? `${autoReviewBodyLead(consolidation.summary, picked.toPost.length, PAIR_BODY_BY)}\n\n${PAIR_AUTO_POST_FOOTER}`
-            : // Joined in code (or an older pair): each half's lead, named.
-              pairReviewBody(
-                [pairFirst, review].map((r) => {
-                  const mine = new Set(r.findings.map((x) => x.id));
-                  const n = picked.toPost.filter((f) => mine.has(f.id)).length;
-                  return { by: aiRunProviderName(r), text: autoReviewBodyLead(r.summary, n, aiRunProviderName(r)) };
-                }),
-                PAIR_AUTO_POST_FOOTER,
-              )
-          : autoReviewBody(review.summary, picked.toPost.length, aiRunProviderName(review)),
+      body: bodyOf(ev === 'APPROVE' ? null : reasonNow()),
       // COMMENT unless auto verdict is on AND its gate let the verdict through.
       verdict: ev,
       // Questions ride the same review: the seam anchors each inline, else falls back. In a pair each
@@ -968,8 +1053,12 @@ async function autoPostReview(
         // the review lands), so sending the same review once more as a COMMENT cannot double-post.
         // Never on a COMMENT, never on an ambiguous failure (5xx, network, rate limit), never twice.
         if (event === 'COMMENT' || !isVerdictRefusal(err)) throw err;
-        verdict = { ...(verdict as ClaudeAutoVerdictRecord), submitted: 'COMMENT', heldReason: 'refused', refusedError: errText(err).slice(0, 300) };
+        verdict = withReason(
+          { ...(verdict as ClaudeAutoVerdictRecord), submitted: 'COMMENT', heldReason: 'refused', refusedError: errText(err).slice(0, 300) },
+          findingsReason,
+        );
         record.verdict = verdict;
+        if (picked.toPost.length > 0 && reasonNow() != null) record.reasonPosted = reasonNow();
         // A bare verdict with no comments behind it: nothing is left to post. GitHub created
         // nothing, so a lift may still go ahead.
         if (picked.toPost.length === 0) {

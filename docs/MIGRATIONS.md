@@ -1295,6 +1295,17 @@ backfill: a Notion workspace is unmapped until someone saves a mapping. Every tr
 `workspace_trackers` from `0088` also runs `0144`.
 [TRACKERS.md](TRACKERS.md) § Notion. Journal `idx` 144, `when` sqlite `1792137640016`.
 
+### `0145_verdict_strictness` — the auto verdict's two rules + a replies pass's reason
+`ALTER TABLE workspaces ADD pair_verdict_strictness text` (NULL = strict: a Claude + Codex pair
+approves only when both approved; `'relaxed'`), `ALTER TABLE workspaces ADD approve_leftovers text`
+(NULL = nits and questions may stay open on an approve; `'nits'`, `'none'`) and `ALTER TABLE
+claude_reviews ADD verdict_reason text` (JSON `{heldReason, text}`, a replies pass's "Not approved: …"
+line). Additive, nullable, no backfill: NULL is today's rule everywhere. Both tables are already in
+`accountScopedTables()`, the erasure and the export. [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Auto-posting
+→ THE TWO RULES / THE REASON. Journal `idx` 145, `when` sqlite `1792137641016`. ⚠ Written as `0139` on its own branch and
+renumbered on merge (the reference-docs and tracker migrations had published 0139–0144); a database that
+had applied it as `0139` was re-applied by hand once.
+
 ### No migration — "Check against code" removed (2026-10-18): `sprint_ticket_repos` + `sprint_assessments` DORMANT
 
 The sprint drawer, its repo picker and "Check against code" (`review/sprint-assess/`) were removed with

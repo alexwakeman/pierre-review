@@ -93,7 +93,8 @@ describe('the switch and its floor', () => {
       autoDiagramsEnabled: true,
       teamClaimsEnabled: false,
       autoReviewProviders: 'default',
-      autoPost: { enabled: false, scope: 'mine', kinds: AUTO_POST_DEFAULT_KINDS, autoVerdict: false, autoResolve: false, approveImpact: AUTO_POST_DEFAULT_APPROVE_IMPACT },
+      pairStrictness: 'strict',
+      autoPost: { enabled: false, scope: 'mine', kinds: AUTO_POST_DEFAULT_KINDS, autoVerdict: false, autoResolve: false, approveImpact: AUTO_POST_DEFAULT_APPROVE_IMPACT, approveLeftovers: 'nits_questions' },
       autoFix: { include: AUTO_FIX_DEFAULT_INCLUDE, autoPush: false },
     });
   });
@@ -467,7 +468,7 @@ describe('auto-posting — off by default, overrides only', () => {
       .execute();
     for (const id of [wsA, wsA2, fresh.id]) {
       const r = await s.readWorkspaceAutoReview(ctx, 1, id);
-      expect(r?.autoPost).toEqual({ enabled: false, scope: 'mine', kinds: AUTO_POST_DEFAULT_KINDS, autoVerdict: false, autoResolve: false, approveImpact: AUTO_POST_DEFAULT_APPROVE_IMPACT });
+      expect(r?.autoPost).toEqual({ enabled: false, scope: 'mine', kinds: AUTO_POST_DEFAULT_KINDS, autoVerdict: false, autoResolve: false, approveImpact: AUTO_POST_DEFAULT_APPROVE_IMPACT, approveLeftovers: 'nits_questions' });
     }
     expect(AUTO_POST_DEFAULT_KINDS).toEqual({
       blockers: true,
@@ -488,10 +489,10 @@ describe('auto-posting — off by default, overrides only', () => {
   });
 
   it('resolves malformed or partial overrides to the defaults', () => {
-    expect(s.resolveAutoPostSettings(null, null)).toEqual({ enabled: false, scope: 'mine', kinds: AUTO_POST_DEFAULT_KINDS, autoVerdict: false, autoResolve: false, approveImpact: AUTO_POST_DEFAULT_APPROVE_IMPACT });
+    expect(s.resolveAutoPostSettings(null, null)).toEqual({ enabled: false, scope: 'mine', kinds: AUTO_POST_DEFAULT_KINDS, autoVerdict: false, autoResolve: false, approveImpact: AUTO_POST_DEFAULT_APPROVE_IMPACT, approveLeftovers: 'nits_questions' });
     expect(
       s.resolveAutoPostSettings(true, { scope: 'bogus' as any, kinds: { nits: true, blockers: 'yes' as any } }),
-    ).toEqual({ enabled: true, scope: 'mine', kinds: { ...AUTO_POST_DEFAULT_KINDS, nits: true }, autoVerdict: false, autoResolve: false, approveImpact: AUTO_POST_DEFAULT_APPROVE_IMPACT });
+    ).toEqual({ enabled: true, scope: 'mine', kinds: { ...AUTO_POST_DEFAULT_KINDS, nits: true }, autoVerdict: false, autoResolve: false, approveImpact: AUTO_POST_DEFAULT_APPROVE_IMPACT, approveLeftovers: 'nits_questions' });
     expect(s.autoPostOverrides({ scope: 'mine', kinds: AUTO_POST_DEFAULT_KINDS, autoVerdict: false, autoResolve: false, approveImpact: AUTO_POST_DEFAULT_APPROVE_IMPACT })).toBeNull();
     expect(s.autoPostOverrides({ scope: 'all', kinds: { ...AUTO_POST_DEFAULT_KINDS, questions: false } })).toEqual({
       scope: 'all',
@@ -502,11 +503,11 @@ describe('auto-posting — off by default, overrides only', () => {
   it('writes alone, keeps unsent kinds, stores overrides only, and leaves auto review alone', async () => {
     const before = await s.readWorkspaceAutoReview(ctx, 1, wsA2);
     const on = await s.setWorkspaceAutoReview(ctx, 1, wsA2, { autoPost: { enabled: true, kinds: { nits: true } } });
-    expect(on?.autoPost).toEqual({ enabled: true, scope: 'mine', kinds: { ...AUTO_POST_DEFAULT_KINDS, nits: true }, autoVerdict: false, autoResolve: false, approveImpact: AUTO_POST_DEFAULT_APPROVE_IMPACT });
+    expect(on?.autoPost).toEqual({ enabled: true, scope: 'mine', kinds: { ...AUTO_POST_DEFAULT_KINDS, nits: true }, autoVerdict: false, autoResolve: false, approveImpact: AUTO_POST_DEFAULT_APPROVE_IMPACT, approveLeftovers: 'nits_questions' });
     expect(on?.enabled).toBe(before?.enabled);
     expect(on?.enabledAt).toBe(before?.enabledAt);
     const scoped = await s.setWorkspaceAutoReview(ctx, 1, wsA2, { autoPost: { scope: 'all' } });
-    expect(scoped?.autoPost).toEqual({ enabled: true, scope: 'all', kinds: { ...AUTO_POST_DEFAULT_KINDS, nits: true }, autoVerdict: false, autoResolve: false, approveImpact: AUTO_POST_DEFAULT_APPROVE_IMPACT });
+    expect(scoped?.autoPost).toEqual({ enabled: true, scope: 'all', kinds: { ...AUTO_POST_DEFAULT_KINDS, nits: true }, autoVerdict: false, autoResolve: false, approveImpact: AUTO_POST_DEFAULT_APPROVE_IMPACT, approveLeftovers: 'nits_questions' });
     const [row] = await (ctx.db as any)
       .select({ st: (ctx.schema as any).workspaces.autoPostSettings })
       .from((ctx.schema as any).workspaces)
@@ -557,6 +558,7 @@ describe('auto-posting — off by default, overrides only', () => {
       autoVerdict: false,
       autoResolve: false,
       approveImpact: AUTO_POST_DEFAULT_APPROVE_IMPACT,
+      approveLeftovers: 'nits_questions',
     });
     expect((await app.inject({ method: 'GET', url })).json()).toEqual(ok.json());
     await app.inject({ method: 'PUT', url, payload: { autoPost: { enabled: false, scope: 'mine', kinds: { questions: true } } } });

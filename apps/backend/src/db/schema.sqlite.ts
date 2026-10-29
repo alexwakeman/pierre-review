@@ -30,6 +30,7 @@ import type {
   ClaudeAutoPostRecord,
   ClaudeTeamClaimRecord,
   ClaudeReviewPairConsolidation,
+  ClaudeNotApproved,
   ClaudeCiFailuresRecord,
   CiAutoPostRecord,
   SonarIssue,
@@ -1313,6 +1314,11 @@ export const claudeReviews = sqliteTable(
     // people's replies on Limn's own posted findings; NULL on every full review (migration 0136).
     // ⚠ Every "the latest review" / "a run at this head" reader filters `kind IS NULL`.
     kind: text('kind', { enum: ['replies'] }),
+    // A REPLIES PASS's not-approved reason (migration 0145; review/claude-review/replies-outcome.ts):
+    // `{heldReason, text}`, written when the pass ends while the workspace's auto verdict is on and
+    // the outcome is not an approval. NULL on every full review (its reason rides `auto_post`, or is
+    // computed on read).
+    verdictReason: text('verdict_reason', { mode: 'json' }).$type<ClaudeNotApproved>(),
   },
   (t) => ({
     prIdx: index('cr_pr_idx').on(t.prId),
@@ -2053,6 +2059,13 @@ export const workspaces = sqliteTable(
     // Claude then Codex as one pair (docs/CLAUDE-REVIEW.md § Claude + Codex). The ONE writer is
     // `setWorkspaceAutoReview` (review/claude-review/auto-settings.ts).
     autoReviewProviders: text('auto_review_providers'),
+    // THE AUTO VERDICT'S TWO RULES (migration 0145; docs/CLAUDE-REVIEW.md § Auto-posting → AUTO
+    // VERDICT), OVERRIDES ONLY. `pairVerdictStrictness`: NULL = 'strict' (a Claude + Codex pair approves
+    // only when both approved), 'relaxed' (one approved and neither asked for changes).
+    // `approveLeftovers`: NULL = 'nits_questions' (nits and questions may remain open on an approve),
+    // 'nits', 'none'. The ONE writer is `setWorkspaceAutoReview` (review/claude-review/auto-settings.ts).
+    pairVerdictStrictness: text('pair_verdict_strictness'),
+    approveLeftovers: text('approve_leftovers'),
     // DEPENDENCY AUTO-MERGE (migration 0093 / pg 0080): may the server arm "merge when ready" on
     // every open dependency-automation PR in this workspace's repos (merge/dependency-policy.ts)?
     // NULL/false = OFF, the default for every workspace; nullable with no default, so no insert

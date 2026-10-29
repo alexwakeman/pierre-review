@@ -434,7 +434,8 @@ history: [docs/CODEX-PLAN.md](docs/CODEX-PLAN.md). Non-negotiables:
 - **Nothing is posted or pushed until the reader presses the button**, except the per-workspace
   auto-post / Push automatically switches (OFF by default). Auto-posting is AUTO RUNS ONLY, under
   the reader's account, ONE review, `COMMENT` unless the OFF-by-default `autoVerdict` allows
-  stricter; ⚠ the `auto_post` record is CLAIMED (compare-and-set) BEFORE any GitHub write, a
+  stricter (then a run not approved says why — alone, ONCE per (PR, head), if nothing else posts);
+  ⚠ the `auto_post` record is CLAIMED (compare-and-set) BEFORE any GitHub write, a
   failure is recorded and NEVER retried. Every posted body carries the hidden marker so
   `isLimnPostedComment` holds.
 - **Auto review is OFF per workspace until switched on**; ONE start rule (`autoReviewDue`); it

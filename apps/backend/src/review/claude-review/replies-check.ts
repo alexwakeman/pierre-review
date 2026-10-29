@@ -5,6 +5,8 @@ import { and, asc, desc, eq, gt, gte, inArray, isNull, ne, or } from 'drizzle-or
 import {
   aiRunProvider,
   type AiProviderId,
+  type ClaudeAutoPostWire,
+  type ClaudeNotApproved,
   type ClaudeFollowUpItemRecord,
   type ClaudeRepliesCheckRun,
   type ClaudeRepliesCheckState,
@@ -174,6 +176,8 @@ interface PassRow {
   verdict: string | null;
   error: string | null;
   autoPost: unknown;
+  // Why the outcome is not an approval (migration 0139); absent on an older schema.
+  verdictReason?: unknown;
 }
 
 /** The replies passes of this PR after a review id, oldest first (any status). */
@@ -191,6 +195,7 @@ async function passesAfter(ctx: AgentContext, accountId: number, prId: number, a
       verdict: cr.verdict,
       error: cr.error,
       autoPost: cr.autoPost,
+      ...(cr.verdictReason ? { verdictReason: cr.verdictReason } : {}),
     })
     .from(cr)
     .where(and(eq(cr.prId, prId), eq(cr.accountId, accountId), eq(cr.kind, 'replies'), gt(cr.id, afterId)))
@@ -831,6 +836,12 @@ async function afterPass(
       const cr = sch(ctx).claudeReviews;
       await ctx.db.update(cr).set({ verdict: outcome.wanted }).where(eq(cr.id, last.reviewId)).execute();
     }
+    // WHY NOT APPROVED (migration 0139), shown in Limn manual and auto alike — only while the
+    // workspace's auto verdict is on.
+    if (outcome.autoVerdict === true && outcome.reason != null) {
+      const cr = sch(ctx).claudeReviews;
+      await ctx.db.update(cr).set({ verdictReason: outcome.reason }).where(eq(cr.id, last.reviewId)).execute();
+    }
     if (job.trigger === 'auto') {
       await maybePostRepliesOutcome(ctx, { accountId, prId, reviewId: last.reviewId, outcome }, autoDeps.post);
     }
@@ -843,6 +854,7 @@ async function afterPass(
 
 function runWire(r: PassRow): ClaudeRepliesCheckRun {
   const items = r.followUp?.items ?? [];
+  const autoPost = autoPostWireOf(r.autoPost);
   return {
     reviewId: r.id,
     status: r.status as ClaudeRepliesCheckRun['status'],
@@ -854,8 +866,22 @@ function runWire(r: PassRow): ClaudeRepliesCheckRun {
     disputed: items.filter((i) => i.status === 'reply_disputed').length,
     notChecked: items.filter((i) => i.status === 'not_checked').length,
     verdict: (r.verdict as ClaudeRepliesCheckRun['verdict']) ?? null,
-    autoPost: autoPostWireOf(r.autoPost),
+    autoPost,
+    notApproved: passNotApproved(autoPost, r.verdictReason),
   };
+}
+
+/** A pass's not-approved reason: what auto-posting recorded (a gate's reason included), else the row's
+ *  own (`verdict_reason`); none on an approval. */
+function passNotApproved(autoPost: ClaudeAutoPostWire | null, stored: unknown): ClaudeNotApproved | null {
+  const v = autoPost?.verdict;
+  if (v?.submitted === 'APPROVE' && (autoPost?.status === 'posted' || autoPost?.status === 'partial')) return null;
+  if (v?.reasonText) return { heldReason: v.heldReason ?? 'open_findings', text: v.reasonText };
+  if (stored != null && typeof stored === 'object') {
+    const s = stored as Partial<ClaudeNotApproved>;
+    if (typeof s.text === 'string' && typeof s.heldReason === 'string') return { heldReason: s.heldReason, text: s.text };
+  }
+  return null;
 }
 
 /** The AI Review tab's replies state. DB-only (plus the in-memory live phase). Never throws. */

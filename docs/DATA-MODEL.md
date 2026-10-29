@@ -675,6 +675,15 @@ post is recorded on the second half's `auto_post`, the first's carrying `viaPair
 `'both'` = a pair (`resolveAutoReviewProviders`, `review/claude-review/pair.ts`; one writer,
 `setWorkspaceAutoReview`).
 
+THE AUTO VERDICT'S TWO RULES (migration `0139`; [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Auto-posting →
+THE TWO RULES), both OVERRIDES ONLY on `workspaces`, one writer (`setWorkspaceAutoReview`), one reader
+(`readVerdictRulesForPr`): `pair_verdict_strictness` (NULL = `'strict'`, `'relaxed'`) and
+`approve_leftovers` (NULL = `'nits_questions'`, `'nits'`, `'none'`). `claude_reviews.verdict_reason`
+(same migration, JSON `ClaudeNotApproved {heldReason, text}`): a REPLIES PASS's not-approved reason,
+written when the pass ends while the auto verdict is on; NULL on every full review (its reason rides
+`auto_post.verdict.reasonText` — with `auto_post.reasonPosted` / `reasonOnly` when it went to GitHub —
+or is computed on read).
+
 THE PAIR'S ONE REVIEW (migration `0137`; [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Claude + Codex → One
 review): `claude_reviews.pair_consolidation` on the pair's FIRST row only, written ONCE when the pair
 ends (`savePairConsolidation`, one transaction with the marks below) — `ClaudeReviewPairConsolidation

@@ -41,6 +41,7 @@ import {
   autoPostSkipLine,
   autoResolveLabel,
   autoVerdictLine,
+  notApprovedLine,
   canPostReminder,
   effectivePost,
   postedChipLabel,
@@ -1430,6 +1431,12 @@ export function ClaudesReview({
         }
       >
         <div className="text-xs text-gray-500 dark:text-gray-400">{metaLine(review, costText)}</div>
+        {/* WHY IT WAS NOT APPROVED (auto verdict on): one line under the verdict, always. */}
+        {notApprovedLine(storedReview) != null && (
+          <div className="text-xs text-gray-700 dark:text-gray-200" data-not-approved>
+            {notApprovedLine(storedReview)}
+          </div>
+        )}
         {/* A pair whose other half did not finish: one plain line. */}
         {review.pair?.failedHalf != null && (
           <div className="text-xs text-gray-600 dark:text-gray-300" data-pair-failed-half>

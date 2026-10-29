@@ -8,6 +8,7 @@ import {
   AUTO_POST_DEFAULT_AUTO_VERDICT,
   AUTO_POST_DEFAULT_KINDS,
   AUTO_POST_DEFAULT_SCOPE,
+  type ApproveLeftovers,
   type AutoApproveImpact,
   type AutoFixInclude,
   type AutoFixSettings,
@@ -16,6 +17,7 @@ import {
   type AutoReviewSweepBody,
   type AutoReviewSweepResponse,
   type AutoReviewUsage,
+  type PairVerdictStrictness,
   type SetWorkspaceAutoReviewBody,
   type StoredAutoFixSettings,
   type StoredAutoPostSettings,
@@ -26,6 +28,12 @@ import {
 import type { AgentContext } from '../agent-context.js';
 import { dropAutoReviews } from './manager.js';
 import { resolveAutoReviewProviders } from './pair.js';
+import {
+  DEFAULT_VERDICT_RULES,
+  resolveApproveLeftovers,
+  resolvePairStrictness,
+  type VerdictRules,
+} from './auto-verdict.js';
 import { onOff, writeSettingEvent } from '../../db/setting-event-write.js';
 
 // AUTO CLAUDE REVIEW — THE PER-WORKSPACE SWITCH (CORE since migration 0074 / pg 0061; it lived on
@@ -67,6 +75,11 @@ import { onOff, writeSettingEvent } from '../../db/setting-event-write.js';
 // `autoResolve` switches (both OFF by default) ride the same overrides JSON (no column), and so
 // does `approveImpact` (which blast-radius levels an auto verdict may APPROVE; all by default).
 //
+// THE AUTO VERDICT'S TWO RULES ride the same route as two more columns (migration 0145), OVERRIDES
+// ONLY (NULL = today's rule): `pair_verdict_strictness` ('relaxed', else strict — wire
+// `pairStrictness`) and `approve_leftovers` ('nits' / 'none', else 'nits_questions' — wire
+// `autoPost.approveLeftovers`). `readVerdictRulesForPr` is what every verdict reads.
+//
 // TEAM CLAIMS ("Mark auto reviews on GitHub") ride the same route as one more column,
 // `team_claims_enabled` (migration 0134): may an AUTO review post a status line on the PR's head so
 // teammates' Limn skips it (team-claim.ts)? OFF by default — only a stored true is on.
@@ -96,12 +109,15 @@ export function resolveAutoReviewDailyCap(stored: number | null | undefined): nu
 
 const AUTO_POST_KIND_KEYS = Object.keys(AUTO_POST_DEFAULT_KINDS) as Array<keyof AutoPostKinds>;
 export const APPROVE_IMPACT_KEYS = Object.keys(AUTO_POST_DEFAULT_APPROVE_IMPACT) as Array<keyof AutoApproveImpact>;
+const APPROVE_LEFTOVERS: ApproveLeftovers[] = ['none', 'nits', 'nits_questions'];
 const isScope = (v: unknown): v is AutoPostScope => v === 'mine' || v === 'all';
 
 /** The stored switch + overrides → the settings in force. Anything malformed reads as the default. */
 export function resolveAutoPostSettings(
   enabled: boolean | null | undefined,
   stored: StoredAutoPostSettings | null | undefined,
+  // `workspaces.approve_leftovers` (migration 0145): its own column, NULL = the default.
+  approveLeftovers?: string | null,
 ): WorkspaceAutoPostSettings {
   const kinds = { ...AUTO_POST_DEFAULT_KINDS };
   const sk = stored?.kinds;
@@ -120,6 +136,7 @@ export function resolveAutoPostSettings(
     autoVerdict: typeof stored?.autoVerdict === 'boolean' ? stored.autoVerdict : AUTO_POST_DEFAULT_AUTO_VERDICT,
     autoResolve: typeof stored?.autoResolve === 'boolean' ? stored.autoResolve : AUTO_POST_DEFAULT_AUTO_RESOLVE,
     approveImpact,
+    approveLeftovers: resolveApproveLeftovers(approveLeftovers),
   };
 }
 
@@ -176,6 +193,9 @@ const toMs = (v: Date | number | null | undefined): number | null =>
 interface AutoRow {
   // Who runs auto reviews (migration 0135): NULL = the default provider, 'both' = a pair.
   providers?: string | null;
+  // The auto verdict's two rules (migration 0145): NULL = the defaults.
+  pairStrictness?: string | null;
+  approveLeftovers?: string | null;
   enabled: boolean | null;
   enabledAt: Date | number | null;
   autoFixEnabled: boolean | null;
@@ -200,7 +220,8 @@ export function autoReviewOf(row: AutoRow | null): WorkspaceAutoReviewSettings {
     // ON unless explicitly switched off (0126).
     autoDiagramsEnabled: row?.autoDiagramsEnabled !== false,
     autoReviewProviders: resolveAutoReviewProviders(row?.providers),
-    autoPost: resolveAutoPostSettings(row?.autoPostEnabled, row?.autoPostSettings),
+    pairStrictness: resolvePairStrictness(row?.pairStrictness),
+    autoPost: resolveAutoPostSettings(row?.autoPostEnabled, row?.autoPostSettings, row?.approveLeftovers),
     autoFix: resolveAutoFixSettings(row?.autoFixSettings),
     // OFF unless explicitly switched on (0134).
     teamClaimsEnabled: row?.teamClaimsEnabled === true,
@@ -216,18 +237,55 @@ export async function readWorkspaceAutoPostForPr(
   ctx: AgentContext,
   accountId: number,
   prId: number,
-): Promise<{ workspaceId: number; settings: WorkspaceAutoPostSettings } | null> {
+): Promise<{ workspaceId: number; settings: WorkspaceAutoPostSettings; pairStrictness: PairVerdictStrictness } | null> {
   const { workspaces: w, workspaceRepos: wr, pullRequests: prs } = ctx.schema;
   const rows = (await ctx.db
-    .select({ workspaceId: w.id, enabled: w.autoPostEnabled, stored: w.autoPostSettings })
+    .select({
+      workspaceId: w.id,
+      enabled: w.autoPostEnabled,
+      stored: w.autoPostSettings,
+      ...verdictRuleCols(w),
+    })
     .from(prs)
     .innerJoin(wr, and(eq(wr.repoId, prs.repoId), eq(wr.accountId, accountId)))
     .innerJoin(w, and(eq(w.id, wr.workspaceId), eq(w.accountId, accountId)))
     .where(and(eq(prs.id, prId), eq(prs.accountId, accountId)))
     .limit(1)
-    .execute()) as Array<{ workspaceId: number; enabled: boolean | null; stored: StoredAutoPostSettings | null }>;
+    .execute()) as Array<{
+    workspaceId: number;
+    enabled: boolean | null;
+    stored: StoredAutoPostSettings | null;
+    pairStrictness?: string | null;
+    approveLeftovers?: string | null;
+  }>;
   const r = rows[0];
-  return r ? { workspaceId: r.workspaceId, settings: resolveAutoPostSettings(r.enabled, r.stored) } : null;
+  return r
+    ? {
+        workspaceId: r.workspaceId,
+        settings: resolveAutoPostSettings(r.enabled, r.stored, r.approveLeftovers),
+        pairStrictness: resolvePairStrictness(r.pairStrictness),
+      }
+    : null;
+}
+
+// The two rule columns (migration 0145), when the schema has them (an older test schema may not).
+const verdictRuleCols = (w: AgentContext['schema'][string]) => ({
+  ...(w.pairVerdictStrictness ? { pairStrictness: w.pairVerdictStrictness } : {}),
+  ...(w.approveLeftovers ? { approveLeftovers: w.approveLeftovers } : {}),
+});
+
+/**
+ * THE AUTO VERDICT'S RULES for the workspace holding this PR's repo (strict / relaxed, what may stay
+ * open), with whether its auto verdict is on. A PR with no membership row reads the defaults, off.
+ */
+export async function readVerdictRulesForPr(
+  ctx: AgentContext,
+  accountId: number,
+  prId: number,
+): Promise<VerdictRules & { autoVerdict: boolean }> {
+  const ws = await readWorkspaceAutoPostForPr(ctx, accountId, prId);
+  if (!ws) return { ...DEFAULT_VERDICT_RULES, autoVerdict: false };
+  return { pairStrictness: ws.pairStrictness, approveLeftovers: ws.settings.approveLeftovers, autoVerdict: ws.settings.autoVerdict };
 }
 
 /**
@@ -276,6 +334,7 @@ export async function readWorkspaceAutoFixSettingsForPr(
 
 const autoCols = (w: AgentContext['schema'][string]) => ({
   providers: w.autoReviewProviders,
+  ...verdictRuleCols(w),
   enabled: w.autoReviewEnabled,
   enabledAt: w.autoReviewEnabledAt,
   autoFixEnabled: w.autoFixEnabled,
@@ -328,7 +387,17 @@ export async function setWorkspaceAutoReview(
     .execute()) as AutoRow[];
   const existing = rows[0];
   if (!existing) return null;
-  const { enabled, autoFixEnabled, autoDiagramsEnabled, teamClaimsEnabled, dailyCap, autoPost, autoFix, autoReviewProviders } = change;
+  const {
+    enabled,
+    autoFixEnabled,
+    autoDiagramsEnabled,
+    teamClaimsEnabled,
+    dailyCap,
+    autoPost,
+    autoFix,
+    autoReviewProviders,
+    pairStrictness,
+  } = change;
   const wasOn = existing.enabled === true && toMs(existing.enabledAt) != null;
   let review: Pick<AutoRow, 'enabled' | 'enabledAt'>;
   if (enabled === undefined || (enabled && wasOn)) review = existing;
@@ -355,7 +424,7 @@ export async function setWorkspaceAutoReview(
   const capOverride =
     dailyCap === undefined ? existing.dailyCap : dailyCap === AUTO_REVIEW_DAILY_CAP ? null : dailyCap;
   // Auto-posting: each field optional; a kind left out keeps its stored value.
-  const postBefore = resolveAutoPostSettings(existing.autoPostEnabled, existing.autoPostSettings);
+  const postBefore = resolveAutoPostSettings(existing.autoPostEnabled, existing.autoPostSettings, existing.approveLeftovers);
   const postAfter: WorkspaceAutoPostSettings = {
     enabled: autoPost?.enabled ?? postBefore.enabled,
     scope: autoPost?.scope ?? postBefore.scope,
@@ -363,7 +432,13 @@ export async function setWorkspaceAutoReview(
     autoVerdict: autoPost?.autoVerdict ?? postBefore.autoVerdict,
     autoResolve: autoPost?.autoResolve ?? postBefore.autoResolve,
     approveImpact: { ...postBefore.approveImpact },
+    approveLeftovers: autoPost?.approveLeftovers ?? postBefore.approveLeftovers,
   };
+  // The leftovers rule is its own column (migration 0145): NULL = the default.
+  const leftoversStored: string | null = postAfter.approveLeftovers === 'nits_questions' ? null : postAfter.approveLeftovers;
+  // How a pair's verdict folds (migration 0145): NULL = strict.
+  const strictnessWas = resolvePairStrictness(existing.pairStrictness);
+  const strictness: PairVerdictStrictness = pairStrictness ?? strictnessWas;
   for (const k of AUTO_POST_KIND_KEYS) {
     const v = autoPost?.kinds?.[k];
     if (typeof v === 'boolean') postAfter.kinds[k] = v;
@@ -389,6 +464,8 @@ export async function setWorkspaceAutoReview(
   const providers = autoReviewProviders ?? providersWas;
   const next: AutoRow = {
     providers: providers === 'both' ? 'both' : null,
+    pairStrictness: strictness === 'relaxed' ? 'relaxed' : null,
+    approveLeftovers: leftoversStored,
     enabled: review.enabled,
     enabledAt: review.enabledAt,
     autoFixEnabled: fix,
@@ -418,6 +495,12 @@ export async function setWorkspaceAutoReview(
   }
   if (autoReviewProviders !== undefined && providers !== providersWas) {
     set.autoReviewProviders = providers === 'both' ? 'both' : null;
+  }
+  if (pairStrictness !== undefined && strictness !== strictnessWas) {
+    set.pairVerdictStrictness = strictness === 'relaxed' ? 'relaxed' : null;
+  }
+  if (autoPost?.approveLeftovers !== undefined && postAfter.approveLeftovers !== postBefore.approveLeftovers) {
+    set.approveLeftovers = leftoversStored;
   }
   if (autoPost !== undefined) {
     if (postAfter.enabled !== (existing.autoPostEnabled === true)) set.autoPostEnabled = postAfter.enabled;
@@ -470,6 +553,25 @@ function settingChanges(
     const was = resolveAutoFixSettings(existing.autoFixSettings).autoPush;
     const now = resolveAutoFixSettings(next.autoFixSettings).autoPush;
     out.push(['auto_fix', was !== now ? `Auto fix push ${onOff(now)}` : 'Auto fix contents changed']);
+  }
+  if ('pairVerdictStrictness' in set) {
+    out.push([
+      'auto_post',
+      next.pairStrictness === 'relaxed'
+        ? 'Claude + Codex verdict: relaxed (approve if one approves and neither asks for changes)'
+        : 'Claude + Codex verdict: strict (approve only if both approve)',
+    ]);
+  }
+  if ('approveLeftovers' in set) {
+    const now = resolveApproveLeftovers(next.approveLeftovers);
+    out.push([
+      'auto_post',
+      now === 'none'
+        ? 'Auto-approve: only with nothing open'
+        : now === 'nits'
+          ? 'Auto-approve: nits may stay open'
+          : 'Auto-approve: nits and questions may stay open',
+    ]);
   }
   if ('autoPostEnabled' in set) out.push(['auto_post', `Auto-posting ${onOff(next.autoPostEnabled === true)}`]);
   else if ('autoPostSettings' in set) out.push(['auto_post', 'Auto-posting settings changed']);
@@ -650,6 +752,7 @@ export function registerAutoReviewSettingsRoutes(app: FastifyInstance, ctx: Agen
             autoDiagramsEnabled: { type: 'boolean' },
             teamClaimsEnabled: { type: 'boolean' },
             autoReviewProviders: { type: 'string', enum: ['default', 'both'] },
+            pairStrictness: { type: 'string', enum: ['strict', 'relaxed'] },
             // An integer 1..500; anything else (a fraction, a string, out of range) is a 400.
             dailyCap: {
               type: 'integer',
@@ -677,6 +780,7 @@ export function registerAutoReviewSettingsRoutes(app: FastifyInstance, ctx: Agen
                   additionalProperties: false,
                   properties: Object.fromEntries(APPROVE_IMPACT_KEYS.map((k) => [k, { type: 'boolean' }])),
                 },
+                approveLeftovers: { type: 'string', enum: APPROVE_LEFTOVERS },
               },
             },
             autoFix: {

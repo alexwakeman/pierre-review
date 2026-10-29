@@ -103,6 +103,13 @@ export function aiRunnableProviders(me: MeResponse | undefined, kind: AiRunKind)
   return order.filter((p) => aiProviderReadyFor(me, p, kind));
 }
 
+/** Can a Claude + Codex review run (both signed in and able to review)? Gates the pair choices in
+ *  Settings → Auto review, "When Claude and Codex disagree" included. */
+export function pairReviewReady(me: MeResponse | undefined): boolean {
+  const ready = aiRunnableProviders(me, 'review');
+  return ready.includes('claude') && ready.includes('codex');
+}
+
 /**
  * IS A RUN GATE'S BUTTON READY, by a provider's own answer — or null when the gate falls back to the
  * DEFAULT provider's runtime and sign-in checks (AiSetup.tsx `AiRunGate`).

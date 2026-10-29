@@ -246,6 +246,8 @@ export function autoPostWireOf(v: unknown): ClaudeAutoPostWire | null {
     ...(r.verdict != null && typeof r.verdict === 'object' ? { verdict: r.verdict } : {}),
     ...(r.liftedBlock != null && typeof r.liftedBlock === 'object' ? { liftedBlock: r.liftedBlock } : {}),
     ...(typeof r.viaPairReviewId === 'number' ? { viaPairReviewId: r.viaPairReviewId } : {}),
+    ...(typeof r.reasonPosted === 'string' && r.reasonPosted !== '' ? { reasonPosted: true } : {}),
+    ...(r.reasonOnly === true ? { reasonOnly: true } : {}),
   };
 }
 

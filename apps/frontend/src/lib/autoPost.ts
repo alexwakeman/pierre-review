@@ -5,8 +5,10 @@ import type {
   AutoPostSkipReason,
   AutoPostStatus,
   ClaudeAutoLiftRecord,
+  ClaudeAutoPostWire,
   ClaudeAutoVerdictRecord,
   ClaudeFinding,
+  ClaudeNotApproved,
   FindingAutoResolveRecord,
 } from '@pierre-review/shared';
 import { relativeTime } from './ui.js';
@@ -94,6 +96,8 @@ export function autoVerdictLine(
     if (a.status !== 'posted' && a.status !== 'partial') return null;
     return v.submitted === 'APPROVE' ? 'Approved automatically.' : 'Requested changes automatically.';
   }
+  // The "Not approved: …" reason is shown under the review's verdict (`notApprovedLine`), once.
+  if (v.reasonText != null && v.reasonText !== '') return null;
   const verb = v.wanted === 'APPROVE' ? 'Not approved' : 'Changes not requested';
   switch (v.heldReason) {
     case 'own_pr':
@@ -117,6 +121,25 @@ export function autoVerdictLine(
     default:
       return null;
   }
+}
+
+/**
+ * WHY IT WAS NOT APPROVED, the one line under the review's verdict (docs/CLAUDE-REVIEW.md § AUTO
+ * VERDICT → The reason): the server's `notApproved` (recorded by auto-posting, else computed on read),
+ * else the auto-post record's own reason; null on an approval or when the auto verdict is off. With
+ * "· Posted on GitHub." when the reason went out as a comment of its own.
+ */
+export function notApprovedLine(r: {
+  notApproved?: ClaudeNotApproved | null;
+  autoPost?: Pick<ClaudeAutoPostWire, 'status' | 'verdict' | 'reasonOnly'> | null;
+}): string | null {
+  const v = r.autoPost?.verdict;
+  const approved = v?.submitted === 'APPROVE' && (r.autoPost?.status === 'posted' || r.autoPost?.status === 'partial');
+  if (approved) return null;
+  const text = r.notApproved?.text ?? (v?.reasonText != null && v.reasonText !== '' ? v.reasonText : null);
+  if (text == null) return null;
+  const postedAlone = r.autoPost?.reasonOnly === true && (r.autoPost.status === 'posted' || r.autoPost.status === 'partial');
+  return postedAlone ? `${text} Posted on GitHub.` : text;
 }
 
 /** What happened to Claude's earlier automatic request for changes, when this run lifted it; else

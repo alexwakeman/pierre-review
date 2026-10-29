@@ -67,6 +67,7 @@ import { getLatestThreadCheck, threadCheckWire } from './thread-check-persist.js
 import { findingCommentUrl, reminderLead } from './posted-state.js';
 import { clearTeamClaim, teamClaimPendingFor, teamClaimSkipFor, teamClaimSkipsFor } from './team-claim.js';
 import { pairProvidersReady, pairRaisedByLead } from './pair.js';
+import { notApprovedForView } from './not-approved.js';
 
 // The Claude Review product API (CORE, free, LOCAL ONLY). The paths are the historical ones
 // (/api/prs/:id/claude-review*, /api/claude-reviews/*, /api/claude-findings/*,
@@ -220,7 +221,9 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
     // A picker surface: ready when ANY provider can run a review (the run names its own; the start
     // route checks THAT one).
     const auth = anyProviderPreflight(preflightFor(ctx), 'review', ctx.llm.detectAuth('review'));
-    const review = await getLatestClaudeReview(ctx, id, accountId);
+    const latest = await getLatestClaudeReview(ctx, id, accountId);
+    // WHY IT WAS NOT APPROVED (not-approved.ts): recorded by auto-posting, else computed (DB-only).
+    const review = latest ? { ...latest, notApproved: await notApprovedForView(ctx, accountId, latest) } : null;
     const autoReview = autoReviewHold(id, accountId);
     // The judgements as they stand now: the latest review's, with later Check threads runs over it.
     const current = (await currentThreadAssessmentsForPrs(ctx, accountId, [id])).get(id)?.assessments ?? null;
@@ -584,7 +587,7 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
       reply.status(404);
       return { error: 'NotFound', message: `Review ${reviewId} not found` };
     }
-    return review;
+    return { ...review, notApproved: await notApprovedForView(ctx, ctx.accountIdOf(req), review) };
   });
 
   app.patch('/api/claude-reviews/:reviewId', { schema: updateReviewSchema }, async (req, reply) => {

@@ -4362,6 +4362,8 @@ export interface SetWorkspaceAutoReviewBody {
   autoDiagramsEnabled?: boolean;
   // Who runs auto reviews (`WorkspaceAutoReviewSettings.autoReviewProviders`).
   autoReviewProviders?: AutoReviewProviders;
+  // How a Claude + Codex pair's verdict is folded (`WorkspaceAutoReviewSettings.pairStrictness`).
+  pairStrictness?: PairVerdictStrictness;
   // The daily cap (`WorkspaceAutoReviewSettings.dailyCap`): an integer 1..500, else a 400.
   dailyCap?: number;
   // "Mark auto reviews on GitHub" (`WorkspaceAutoReviewSettings.teamClaimsEnabled`).
@@ -4377,6 +4379,8 @@ export interface SetWorkspaceAutoReviewBody {
     autoResolve?: boolean;
     // `WorkspaceAutoPostSettings.approveImpact`; a level left out keeps its stored value.
     approveImpact?: Partial<AutoApproveImpact>;
+    // `WorkspaceAutoPostSettings.approveLeftovers`.
+    approveLeftovers?: ApproveLeftovers;
   };
   // Auto AI Fix's contents + push switch (`WorkspaceAutoReviewSettings.autoFix`). Each field
   // optional; an `include` section left out keeps its stored value.
@@ -4414,6 +4418,12 @@ export interface WorkspaceAutoReviewSettings {
   // default provider (Settings → AI); 'both' = Claude, then Codex, as one PAIR (docs/CLAUDE-REVIEW.md
   // § Claude + Codex). With 'both' and only one provider signed in when a run starts, that one runs.
   autoReviewProviders: AutoReviewProviders;
+  // WHEN CLAUDE AND CODEX DISAGREE (`workspaces.pair_verdict_strictness`, migration 0139): how a
+  // pair's ONE verdict is folded — every pair verdict (auto-post, the manual pair's suggested verdict,
+  // the replies outcome). 'strict' (the default) = approve only when both approved; 'relaxed' =
+  // approve when at least one approved and NEITHER asked for changes (a half that said COMMENT does
+  // not veto). Findings rules (`autoPost.approveLeftovers`, blockers, warnings) apply either way.
+  pairStrictness: PairVerdictStrictness;
   // What an auto fix always includes, and whether a succeeded one is pushed
   // (`workspaces.auto_fix_settings`, migration 0091 / pg 0078, OVERRIDES ONLY). Always a full
   // resolved value — `resolveAutoFixSettings` (auto-settings.ts) is the ONE fold.
@@ -4431,6 +4441,19 @@ export interface WorkspaceAutoReviewSettings {
 
 // Who runs a workspace's auto reviews: the default provider, or Claude then Codex as one pair.
 export type AutoReviewProviders = 'default' | 'both';
+
+// How a Claude + Codex pair's verdict is folded (`WorkspaceAutoReviewSettings.pairStrictness`).
+export type PairVerdictStrictness = 'strict' | 'relaxed';
+export const PAIR_VERDICT_DEFAULT_STRICTNESS: PairVerdictStrictness = 'strict';
+
+// WHAT MAY STAY OPEN WHEN LIMN APPROVES (`WorkspaceAutoPostSettings.approveLeftovers`), after every
+// check (follow-up judgements, accepted replies, merged duplicates). Blockers and warnings always
+// prevent an approval; praise never counts.
+//   'none'            nothing open at all
+//   'nits'            nits only
+//   'nits_questions'  nits and questions (the default — the rule before the setting existed)
+export type ApproveLeftovers = 'none' | 'nits' | 'nits_questions';
+export const AUTO_POST_DEFAULT_APPROVE_LEFTOVERS: ApproveLeftovers = 'nits_questions';
 
 // WHICH PRs auto-posting may post on:
 //   'mine' (default)  PRs you opened, and PRs where you are (or were) asked to review — a review
@@ -4490,6 +4513,9 @@ export interface WorkspaceAutoPostSettings {
   // APPROVE into a COMMENT (`heldReason: 'impact'`); REQUEST_CHANGES is never held by it. An
   // UNKNOWN level (the resolver draws nothing) is treated as HIGH — the safe direction.
   approveImpact: AutoApproveImpact;
+  // WHAT MAY STAY OPEN ON AN APPROVE (`workspaces.approve_leftovers`, migration 0139; NULL = the
+  // default 'nits_questions'). Read by every verdict: single runs, pairs, the replies outcome.
+  approveLeftovers: ApproveLeftovers;
   // AUTO RESOLVE (default OFF): a Limn-posted inline finding thread that a later review's
   // follow-up judges 'addressed' / 'no_longer_applies' gets a short reply and is resolved. ONLY
   // Limn's own threads; once per finding (`claude_review_findings.auto_resolved_at` +
@@ -4596,13 +4622,40 @@ export type AutoPostSkipReason =
 //   impact     the PR's impact level when the APPROVE was weighed against `approveImpact`
 //              ('unknown' = the resolver drew nothing, held as if high). Absent otherwise.
 export type AutoVerdictEvent = 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT';
+//   heldReason also says why a run that wanted only a COMMENT did not approve (migration 0139):
+//              'open_findings' (blockers / warnings, or nits / questions the workspace's
+//              `approveLeftovers` does not allow, are still open), 'model_comment' (the model did not
+//              approve — or, in a relaxed pair, a half asked for changes or neither approved),
+//              'pair_strict' (a strict Claude + Codex pair where one half did not approve).
+//   reasonText the ONE plain-English "Not approved: …" line (set whenever the run was not approved
+//              while auto verdict was on). Shown in Limn; posted on GitHub where auto-posting is on.
+export type AutoVerdictHeldReason =
+  | 'own_pr'
+  | 'prior_review'
+  | 'already_requested'
+  | 'reviews_unreadable'
+  | 'refused'
+  | 'impact'
+  | 'open_findings'
+  | 'model_comment'
+  | 'pair_strict';
 export interface ClaudeAutoVerdictRecord {
   wanted: AutoVerdictEvent;
   submitted: AutoVerdictEvent;
-  heldReason: 'own_pr' | 'prior_review' | 'already_requested' | 'reviews_unreadable' | 'refused' | 'impact' | null;
+  heldReason: AutoVerdictHeldReason | null;
   impact?: 'high' | 'medium' | 'low' | 'unknown' | null;
   // GitHub's answer when heldReason is 'refused'.
   refusedError?: string | null;
+  // "Not approved: …" (see above). Absent on an approval and on older records.
+  reasonText?: string | null;
+}
+// WHY A RUN WAS NOT APPROVED, as the AI Review tab shows it under the verdict line: the stored
+// record's reason when auto-posting recorded one, else computed on read (a manual run, auto-posting
+// off) — or, for a replies pass, `claude_reviews.verdict_reason`. Only while the workspace's auto
+// verdict is on.
+export interface ClaudeNotApproved {
+  heldReason: AutoVerdictHeldReason;
+  text: string;
 }
 export interface ClaudeAutoPostRecord {
   status: AutoPostStatus;
@@ -4623,6 +4676,12 @@ export interface ClaudeAutoPostRecord {
   // A CLAUDE + CODEX PAIR posts ONE review for both runs, claimed on the SECOND run's record. The
   // first run's record names the second here (its findings went out in that review); absent otherwise.
   viaPairReviewId?: number | null;
+  // The not-approved reason this run put on GitHub (migration 0139): as the last line of its review
+  // body, or — `reasonOnly` — as a COMMENT review of its own because nothing else was left to post.
+  // A reason-only review goes out at most ONCE per (PR, head): a later run at the same head whose
+  // record (or an earlier one's) already carries `reasonPosted` posts nothing more.
+  reasonPosted?: string | null;
+  reasonOnly?: boolean;
 }
 // Limn lifting its own earlier AUTOMATIC request for changes (matched by an earlier run's
 // `githubReviewId`, never by marker) on a run with no blocker: 'superseded' (this run's APPROVE
@@ -4657,6 +4716,9 @@ export interface ClaudeAutoPostWire {
   liftedBlock?: ClaudeAutoLiftRecord | null;
   // Posted in the pair's one review, recorded on this run (see ClaudeAutoPostRecord.viaPairReviewId).
   viaPairReviewId?: number | null;
+  // The not-approved reason went to GitHub (ClaudeAutoPostRecord.reasonPosted / .reasonOnly).
+  reasonPosted?: boolean;
+  reasonOnly?: boolean;
 }
 
 // What CI auto-posting did with ONE auto CI review run (`ci_reviews.auto_post`, migration 0091 /
@@ -7164,6 +7226,9 @@ export interface ClaudeReview {
   // What auto-posting did with this run (migration 0087 / pg 0074). null/absent = it never looked
   // (a manual run, or auto-posting was off).
   autoPost?: ClaudeAutoPostWire | null;
+  // WHY IT WAS NOT APPROVED (`ClaudeNotApproved`), on the two GET routes of the AI Review tab only,
+  // while the workspace's auto verdict is on. null/absent = approved (or would be), or not asked.
+  notApproved?: ClaudeNotApproved | null;
   // The reference-library passages this run used (docs/REFERENCE-DOCS.md § Use in reviews), each
   // server-checked. null/absent = the run did not read the library (switch off, empty library, or a
   // run from before the feature).
@@ -7283,6 +7348,9 @@ export interface ClaudeRepliesCheckRun {
   // The outcome the replies point to (the run's verdict), and what auto-posting did with it.
   verdict: ClaudeReviewVerdict | null;
   autoPost: ClaudeAutoPostWire | null;
+  // Why the outcome is not an approval (`claude_reviews.verdict_reason`, migration 0139); absent on
+  // an older server, null when there is none.
+  notApproved?: ClaudeNotApproved | null;
 }
 
 // `POST /api/prs/:id/claude-review/replies` — start a replies pass by hand.

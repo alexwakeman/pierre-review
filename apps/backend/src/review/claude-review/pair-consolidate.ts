@@ -40,6 +40,8 @@ import { estimateCostUsd } from '../pricing.js';
 import { pickReviewNonce } from './prompts.js';
 import { getClaudeReviewById, savePairConsolidation } from './persist.js';
 import { codeConsolidation, pairCodeVerdict, shortFailReason, sourceOfRun } from './pair-view.js';
+import { DEFAULT_VERDICT_RULES, type VerdictRules } from './auto-verdict.js';
+import { readVerdictRulesForPr } from './auto-settings.js';
 
 // ---- the pass's limits ----
 
@@ -243,9 +245,10 @@ export function consolidatedVerdict(
   a: ClaudeReview,
   b: ClaudeReview,
   mergedFrom: Readonly<Record<string, number>>,
+  rules: VerdictRules = DEFAULT_VERDICT_RULES,
 ): ClaudeReview['verdict'] {
   const kept: ClaudeFinding[] = [...a.findings, ...b.findings].filter((f) => mergedFrom[String(f.id)] == null);
-  return pairCodeVerdict(a.verdict, b.verdict, kept);
+  return pairCodeVerdict(a.verdict, b.verdict, kept, rules);
 }
 
 // ---- the I/O half ----
@@ -352,23 +355,26 @@ export async function consolidatePair(
     const halves = [first, second].filter((h): h is ClaudeReview => h != null && h.prId === a.prId);
     const ok = halves.filter((h) => h.status === 'succeeded');
     if (ok.length === 0) return null;
+    // The workspace's verdict rules (strict / relaxed, what may stay open), read once; a failed read
+    // is the defaults.
+    const rules = await readVerdictRulesForPr(ctx, a.accountId, a.prId).catch(() => DEFAULT_VERDICT_RULES);
     let record: ClaudeReviewPairConsolidation;
     if (ok.length === 1) {
       const bad = halves.find((h) => h.status !== 'succeeded');
       const failedHalf: ClaudeReviewPairFailedHalf | null = bad
         ? { provider: sourceOfRun(bad), reason: shortFailReason(bad.status, bad.error) }
         : (a.notStarted ?? null);
-      record = codeConsolidation(halves, failedHalf, at);
+      record = codeConsolidation(halves, failedHalf, at, rules);
     } else {
       const [x, y] = ok as [ClaudeReview, ClaudeReview];
       const pass = await runMergePass(ctx, a.accountId, a.prId, x, y, deps);
-      if (pass == null) record = codeConsolidation(halves, null, at);
+      if (pass == null) record = codeConsolidation(halves, null, at, rules);
       else {
         const { sourceOf, mergedFrom } = applyDuplicateGroups(mergeFindingsOf([x, y]), pass.groups);
         record = {
           how: 'pass',
           summary: pass.summary,
-          verdict: consolidatedVerdict(x, y, mergedFrom),
+          verdict: consolidatedVerdict(x, y, mergedFrom, rules),
           sourceOf,
           mergedFrom,
           failedHalf: null,

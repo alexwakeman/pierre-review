@@ -734,13 +734,22 @@ describe('auto verdict', () => {
       wanted: 'REQUEST_CHANGES',
       submitted: 'COMMENT',
       heldReason: 'own_pr',
+      reasonText: 'Not approved: a blocker is still open.',
     });
-    // Nothing to post on your own clean PR ⇒ a skip, not an empty COMMENT review.
+    // Nothing else to post on your own clean PR ⇒ the REASON alone, as one short COMMENT review
+    // (migration 0145) — never an empty one.
     postReview.mockClear();
     const clean = await makePr({ author: 'me' });
     const cleanRun = await run(clean, [], 'auto', 'APPROVE');
-    expect(await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: clean, reviewId: cleanRun }, deps())).toEqual({ kind: 'skipped', reason: 'nothing_new' });
-    expect(postReview).not.toHaveBeenCalled();
+    expect(await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: clean, reviewId: cleanRun }, deps())).toMatchObject({
+      kind: 'done',
+      record: { status: 'posted', reasonOnly: true, verdict: { heldReason: 'own_pr' } },
+    });
+    expect(postReview.mock.calls[0]![0]).toMatchObject({
+      verdict: 'COMMENT',
+      includedFindings: [],
+      body: `Not approved: your own pull request.\n\n${AUTO_POST_FOOTER}`,
+    });
   });
 
   it('your standing APPROVED (read live, even when the synced table says nothing) holds it to COMMENT', async () => {
@@ -755,13 +764,21 @@ describe('auto verdict', () => {
     expect(postReview.mock.calls[0]![0].verdict).toBe('COMMENT');
     expect((await persist.getClaudeReviewById(ctx, id, 1))?.autoPost?.verdict?.heldReason).toBe('prior_review');
 
-    // With nothing to post, a held verdict posts nothing at all.
+    // With nothing else to post, a held APPROVE posts its reason alone (once per head).
     postReview.mockClear();
     const pr2 = await makePr({ author: 'alice' });
     const id2 = await run(pr2, [], 'auto', 'APPROVE');
-    expect(await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr2, reviewId: id2 }, deps())).toEqual({ kind: 'skipped', reason: 'nothing_new' });
-    expect(postReview).not.toHaveBeenCalled();
+    expect(await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr2, reviewId: id2 }, deps())).toMatchObject({ kind: 'done' });
+    expect(postReview.mock.calls[0]![0]).toMatchObject({
+      verdict: 'COMMENT',
+      body: `Not approved: an earlier review by this account still stands.\n\n${AUTO_POST_FOOTER}`,
+    });
     expect((await persist.getClaudeReviewById(ctx, id2, 1))?.autoPost?.verdict?.heldReason).toBe('prior_review');
+    // A second run at the same head says nothing more.
+    postReview.mockClear();
+    const id3 = await run(pr2, [], 'auto', 'APPROVE');
+    expect(await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr2, reviewId: id3 }, deps())).toEqual({ kind: 'skipped', reason: 'nothing_new' });
+    expect(postReview).not.toHaveBeenCalled();
   });
 
   it('the live read fails ⇒ COMMENT, recorded as unreadable', async () => {
@@ -876,16 +893,17 @@ describe('auto verdict', () => {
           expect(liveReviews).not.toHaveBeenCalled();
         }
       }
-      // A held approve with nothing to post is a skip, not an empty COMMENT review.
+      // A held approve with nothing else to post: the reason alone, never an empty COMMENT review.
       postReview.mockClear();
       const bare = await makePr({ author: 'alice' });
       const bareRun = await run(bare, [], 'auto', 'APPROVE');
-      expect(await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: bare, reviewId: bareRun }, impactDeps('high'))).toEqual({
-        kind: 'skipped',
-        reason: 'nothing_new',
+      expect(await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: bare, reviewId: bareRun }, impactDeps('high'))).toMatchObject({
+        kind: 'done',
+        record: { reasonOnly: true, reasonPosted: 'Not approved: High impact.' },
       });
-      expect(postReview).not.toHaveBeenCalled();
+      expect(postReview.mock.calls[0]![0]).toMatchObject({ verdict: 'COMMENT', body: `Not approved: High impact.\n\n${AUTO_POST_FOOTER}` });
       // Every level off: a blocker still requests changes, and impact is never read for it.
+      postReview.mockClear();
       await setPost(true, { approveImpact: { medium: false } });
       const blocked = await makePr({ author: 'alice' });
       const blockedRun = await run(blocked, [{ severity: 'blocker', title: 'Bug' }]);
@@ -1007,7 +1025,9 @@ describe("lifting Limn's own automatic request for changes", () => {
     liveReviewList = [{ id: 'R7', login: 'me', state: 'CHANGES_REQUESTED' } as any];
     const b = await run(pr, [], 'auto', 'APPROVE');
     await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: b }, liftDeps());
-    expect(postReview).not.toHaveBeenCalled();
+    // Only the reason goes out (a COMMENT); the reader's request for changes is never touched.
+    expect(postReview).toHaveBeenCalledTimes(1);
+    expect(postReview.mock.calls[0]![0].verdict).toBe('COMMENT');
     expect(dismissReview).not.toHaveBeenCalled();
     expect((await rec(b)).verdict.heldReason).toBe('prior_review');
   });

@@ -13,8 +13,6 @@ import {
   type AutoReviewProviders,
   type AiProviderId,
   type AiProviderName,
-  type ClaudeReview,
-  type ClaudeReviewVerdict,
 } from '@pierre-review/shared';
 import { similarTitles } from './settled-by-reply.js';
 import type { PromptPairInput } from './prompts.js';
@@ -78,15 +76,9 @@ export function pairRaisedByLead(by: string): string {
   return `_Raised by ${by}._`;
 }
 
-/**
- * The pair's verdict as Claude's would read for `autoVerdictFor`: APPROVE only when BOTH runs
- * approved; REQUEST_CHANGES when either asked for changes; else COMMENT.
- */
-export function pairVerdict(a: ClaudeReview['verdict'], b: ClaudeReview['verdict']): ClaudeReviewVerdict {
-  if (a === 'REQUEST_CHANGES' || b === 'REQUEST_CHANGES') return 'REQUEST_CHANGES';
-  if (a === 'APPROVE' && b === 'APPROVE') return 'APPROVE';
-  return 'COMMENT';
-}
+// The pair's verdict as one model verdict for `autoVerdictFor` (strict by default; the workspace's
+// `pairStrictness` may relax it) lives with the verdict rule, ./auto-verdict.ts.
+export { pairVerdict } from './auto-verdict.js';
 
 /** One run's part of a pair body: who ran it and its line (already worded). */
 export interface PairBodyPart {

@@ -1539,6 +1539,16 @@ reappears.
     is never held by it. ⚠ The level is the SAME one the PR's chip shows — the server folds it through
     the ONE shared `blastRadius()` with the account's dial — and a PR with no level counts as HIGH. The
     ⓘ says both; the surface carries only the labels.
+  - **Approve with open findings** (migration 0139): under Approve, three radios (`LEFTOVER_ROWS`:
+    nothing / nits / nits and questions — the default; `autoPost.approveLeftovers`), dimmed with the
+    verdict switch, ⓘ beside the legend. **When Claude and Codex disagree** (`pairStrictness`: Strict
+    — the default — / Relaxed) renders ONLY while both are signed in (`pairReviewReady`,
+    `lib/aiCapabilities.ts`), under "Auto reviews use", NOT dimmed by the verdict switch (it also
+    sets a manual pair's suggested verdict); its ⓘ explains strict vs relaxed for two agents.
+  - **"Not approved: …"** (`lib/autoPost.ts` `notApprovedLine`): ONE line under the review's verdict
+    in the AI Review tab header — the server's `ClaudeReview.notApproved`, else the record's
+    `reasonText`; "… Posted on GitHub." when it went out alone. `autoVerdictLine` no longer repeats a
+    reason in the Post section; the replies line (`repliesCheckLine`) appends a pass's `notApproved`.
   - What it did is shown where the posts are: `lib/autoPost.ts` `postedChipLabel` turns a finding's
     "Posted" chip into "Posted automatically · <time ago>" (`ClaudeFinding.postedAuto`), the Post to
     GitHub pill does the same off `ClaudeReview.autoPost`, and `autoPostFailureLine` prints ONE amber
