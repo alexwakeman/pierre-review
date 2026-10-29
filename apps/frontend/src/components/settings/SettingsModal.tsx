@@ -16,6 +16,7 @@ import { DependencyAutoMergeSection } from './DependencyAutoMergeSection.js';
 import { SonarSection } from './SonarSection.js';
 import { ReferenceDocsSection } from './ReferenceDocsSection.js';
 import { ConfluenceSection } from './ConfluenceSection.js';
+import { NotionSection } from './NotionSection.js';
 import { RelatedReposSection } from './RelatedReposSection.js';
 import { FlowSettingsSection } from './FlowSettingsSection.js';
 import { useSettingsWorkspace } from './workspaceScope.js';
@@ -84,6 +85,7 @@ const SECTIONS: Record<string, () => JSX.Element | null> = {
   AutoReviewSection,
   ReferenceDocsSection,
   ConfluenceSection,
+  NotionSection,
   RelatedReposSection,
   FlowSettingsSection,
   SprintSection,

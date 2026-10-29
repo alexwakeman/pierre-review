@@ -6,9 +6,10 @@ import {
   REFERENCE_DOC_WIKI_MAX_DEPTH,
   REFERENCE_DOC_WIKI_MAX_PAGES,
   WIKI_PROVIDER_NAMES,
-  parseConfluencePageUrl,
+  wikiProviderOfUrl,
   wikiUnreachableWords,
   type ReferenceDoc,
+  type WikiProviderId,
 } from '@pierre-review/shared';
 import { formatDate, relativeTime } from '../../lib/ui.js';
 import { aiReadyFor, useAiCapabilities, useAiProvider, useAiProviderName } from '../../hooks/useAiCapabilities.js';
@@ -42,7 +43,7 @@ import {
 import { useDocsView, type DocsOpen } from '../../store/docsView.js';
 import { useFilters } from '../../store/filters.js';
 import { AiRunGate } from '../AiSetup.js';
-import { BookIcon, ChevronIcon, CollapseAllIcon, ConfluenceIcon, ExpandAllIcon, UploadIcon } from '../Icons.js';
+import { BookIcon, ChevronIcon, CollapseAllIcon, ConfluenceIcon, ExpandAllIcon, NotionIcon, UploadIcon } from '../Icons.js';
 import { InfoButton } from '../InfoModal.js';
 import { DocsChat } from './DocsChat.js';
 import { DocsViewer } from './DocsViewer.js';
@@ -88,6 +89,33 @@ const KIND_LABEL: Record<ReferenceDoc['sourceKind'], string> = {
 
 /** The source words on a document's line: the wiki's own name for a wiki tree. */
 const sourceLabel = (doc: ReferenceDoc): string => (doc.wiki ? WIKI_PROVIDER_NAMES[doc.wiki.provider] : KIND_LABEL[doc.sourceKind]);
+
+/** A wiki's mark (Confluence, Notion), in the current ink. */
+function WikiMark({ provider, size, className }: { provider: WikiProviderId; size: number; className?: string }): JSX.Element {
+  return provider === 'notion' ? <NotionIcon size={size} className={className} aria-hidden /> : <ConfluenceIcon size={size} className={className} aria-hidden />;
+}
+
+/**
+ * The figures line (docs/REFERENCE-DOCS.md § Figures): how many images Claude described, and the one
+ * sentence when it could not describe them here (Codex, no sign-in). Nothing when the build met none.
+ */
+function FiguresLine({ doc }: { doc: ReferenceDoc }): JSX.Element | null {
+  const f = doc.figures;
+  if (!f || !doc.available) return null;
+  const parts = [
+    f.described > 0 ? `${f.described} figure${f.described === 1 ? '' : 's'} described by AI` : null,
+    f.outlined > 0 ? `${f.outlined} diagram${f.outlined === 1 ? '' : 's'} read from source` : null,
+    f.pending > 0 ? `${f.pending} waiting for the next refresh` : null,
+  ].filter(Boolean);
+  if (parts.length === 0 && !f.note) return null;
+  return (
+    <p className={`text-[11px] ${MUTED}`} data-testid="doc-figures">
+      {parts.join(' · ')}
+      {parts.length > 0 && f.note ? '. ' : ''}
+      {f.note}
+    </p>
+  );
+}
 
 /**
  * A wiki document's freshness line (docs/REFERENCE-DOCS.md § Wiki sources): when Limn last asked the
@@ -308,7 +336,7 @@ function DocRow({
             </button>
           ) : (
             <span className="mt-0.5 shrink-0 p-0.5 text-gray-500 dark:text-gray-400">
-              {doc.wiki ? <ConfluenceIcon size={11} aria-hidden /> : <BookIcon size={11} />}
+              {doc.wiki ? <WikiMark provider={doc.wiki.provider} size={11} /> : <BookIcon size={11} />}
             </span>
           )}
           <div className="min-w-0 flex-1">
@@ -325,9 +353,7 @@ function DocRow({
               <span className="block text-xs font-semibold text-gray-800 dark:text-gray-100">{doc.title}</span>
             )}
             <p className={`truncate text-[11px] ${MUTED}`} title={doc.sourceName}>
-              {doc.wiki && (
-                <ConfluenceIcon size={10} className="mr-0.5 inline-block align-[-1px]" aria-hidden />
-              )}
+              {doc.wiki && <WikiMark provider={doc.wiki.provider} size={10} className="mr-0.5 inline-block align-[-1px]" />}
               {sourceLabel(doc)}
               {doc.crawl?.pages != null && ` · ${doc.crawl.pages.length} page${doc.crawl.pages.length === 1 ? '' : 's'}`}
               {doc.wiki?.pageCount != null && ` · ${doc.wiki.pageCount} page${doc.wiki.pageCount === 1 ? '' : 's'}`}
@@ -338,6 +364,7 @@ function DocRow({
         </div>
 
         {!building && <WikiStatus doc={doc} />}
+        {!building && <FiguresLine doc={doc} />}
         {building && <BuildProgress doc={doc} />}
         {doc.status === 'failed' && (
           <p className="text-[11px] text-rose-700 dark:text-rose-400">
@@ -410,9 +437,11 @@ function AddDocs({ workspaceId, maxBytes }: { workspaceId: number; maxBytes: num
   const [url, setUrl] = useState('');
   const [crawlDepth, setCrawlDepth] = useState(0);
   const addWiki = useAddReferenceDocWiki(workspaceId);
-  // A Confluence page address goes to the wiki import (child pages, not links, and a refresh that
-  // reads only what changed); any other address is a web page.
-  const onWiki = parseConfluencePageUrl(url) != null;
+  // A Confluence or Notion page address goes to the wiki import (child pages, not links, and a refresh
+  // that reads only what changed); any other address is a web page.
+  const wikiProvider = wikiProviderOfUrl(url);
+  const onWiki = wikiProvider != null;
+  const wikiName = wikiProvider ? WIKI_PROVIDER_NAMES[wikiProvider] : '';
   const adding = onWiki ? addWiki : addUrl;
 
   const send = async (files: File[]): Promise<void> => {
@@ -510,7 +539,9 @@ function AddDocs({ workspaceId, maxBytes }: { workspaceId: number; maxBytes: num
         }}
       >
         <input
-          type="url"
+          // Text, not url: a bare Notion page id is accepted too.
+          type="text"
+          inputMode="url"
           value={url}
           onChange={(e) => setUrl(e.target.value)}
           aria-label="Web page address"
@@ -533,15 +564,23 @@ function AddDocs({ workspaceId, maxBytes }: { workspaceId: number; maxBytes: num
             ))}
           </select>
           {onWiki ? (
-            <InfoButton title="Confluence pages">
+            <InfoButton title={`${wikiName} pages`}>
               <p>
                 The page and the child pages you choose become one document, a chapter per page, up to{' '}
-                {REFERENCE_DOC_WIKI_MAX_PAGES} pages.
+                {REFERENCE_DOC_WIKI_MAX_PAGES} pages.{wikiProvider === 'notion' && ' A database on the page counts its rows as child pages.'}
               </p>
-              <p>
-                Limn reads Confluence with the API token in Settings → Workspace → Reference docs. A page on your Jira site
-                uses the Jira token.
-              </p>
+              {wikiProvider === 'notion' ? (
+                <p>
+                  Limn reads Notion with the integration token in Settings → Workspace → Reference docs. Share the page with
+                  that integration in Notion first.
+                </p>
+              ) : (
+                <p>
+                  Limn reads Confluence with the API token in Settings → Workspace → Reference docs. A page on your Jira site
+                  uses the Jira token.
+                </p>
+              )}
+              <p>Images become text: Claude describes them, and a diagram with readable source is read from it.</p>
               <p>
                 Limn checks the pages every few hours while the library is in use, and before a review reads it. Only pages
                 that changed are read again, and only sections that changed are summarised again. Refresh now checks at once.
@@ -568,7 +607,7 @@ function AddDocs({ workspaceId, maxBytes }: { workspaceId: number; maxBytes: num
           disabled={adding.isPending || url.trim() === ''}
           className="shrink-0 rounded border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700 hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:text-gray-200 dark:hover:border-gray-500"
         >
-          {onWiki ? 'Add Confluence page' : 'Add web page'}
+          {onWiki ? `Add ${wikiName} page` : 'Add web page'}
         </button>
       </form>
       {adding.isError && <p className="text-[11px] text-rose-700 dark:text-rose-400">{adding.error.message}</p>}
