@@ -200,7 +200,7 @@ export async function eraseAccountData(accountId: number): Promise<EraseResult> 
     // hostname AND the sealed API token. No FKs on the first two, so the explicit deletes are the
     // whole guarantee; workspace_trackers cascades from workspaces too, and is explicit anyway.
     await tx.delete(schema.trackerTickets).where(eq(schema.trackerTickets.accountId, accountId)).execute();
-    // The tickets' comments (migration 0142): people's words from the tracker. No FKs.
+    // The tickets' comments (migration 0141): people's words from the tracker. No FKs.
     await tx
       .delete(schema.trackerTicketComments)
       .where(eq(schema.trackerTicketComments.accountId, accountId))
@@ -225,7 +225,7 @@ export async function eraseAccountData(accountId: number): Promise<EraseResult> 
     // sealed wiki credential. Both cascade too, and are explicit anyway.
     await tx.delete(schema.referenceDocWikiPages).where(eq(schema.referenceDocWikiPages.accountId, accountId)).execute();
     await tx.delete(schema.workspaceWikiCredentials).where(eq(schema.workspaceWikiCredentials.accountId, accountId)).execute();
-    // Figure descriptions (migration 0145): the account's image-description cache.
+    // Figure descriptions (migration 0143): the account's image-description cache.
     await tx.delete(schema.referenceDocFigureDescriptions).where(eq(schema.referenceDocFigureDescriptions.accountId, accountId)).execute();
     await tx.delete(schema.referenceDocs).where(eq(schema.referenceDocs.accountId, accountId)).execute();
     // Story docs checks (migration 0121 / pg 0108): cascade from workspaces too, and are explicit anyway.
@@ -384,7 +384,7 @@ export function accountScopedTables(): {
     // The issue tracker (migration 0088 / pg 0075). All three carry their own accountId and are
     // erased explicitly above; `workspaceTrackers` holds a credential.
     { name: 'trackerTickets', col: schema.trackerTickets.accountId, table: schema.trackerTickets },
-    // Ticket comments (migration 0142), erased explicitly above.
+    // Ticket comments (migration 0141), erased explicitly above.
     { name: 'trackerTicketComments', col: schema.trackerTicketComments.accountId, table: schema.trackerTicketComments },
     { name: 'jiraAcFields', col: schema.jiraAcFields.accountId, table: schema.jiraAcFields },
     { name: 'workspaceTrackers', col: schema.workspaceTrackers.accountId, table: schema.workspaceTrackers },
@@ -404,7 +404,7 @@ export function accountScopedTables(): {
     },
     // Wiki sources (migration 0140), erased explicitly above; `workspaceWikiCredentials` holds a credential.
     { name: 'referenceDocWikiPages', col: schema.referenceDocWikiPages.accountId, table: schema.referenceDocWikiPages },
-    // Figure descriptions (migration 0145), erased explicitly above.
+    // Figure descriptions (migration 0143), erased explicitly above.
     {
       name: 'referenceDocFigureDescriptions',
       col: schema.referenceDocFigureDescriptions.accountId,

@@ -1,7 +1,7 @@
 import { and, eq, inArray } from 'drizzle-orm';
 import { db, schema } from '../db/client.js';
 
-// THE IMAGE-DESCRIPTION CACHE (`reference_doc_figure_descriptions`, migration 0145; docs/REFERENCE-DOCS.md
+// THE IMAGE-DESCRIPTION CACHE (`reference_doc_figure_descriptions`, migration 0143; docs/REFERENCE-DOCS.md
 // § Figures): one row per (account, image sha256). Every statement carries the ACCOUNT predicate. The
 // caller asks only for hashes its own document holds (figures.ts `resolveFigures`).
 

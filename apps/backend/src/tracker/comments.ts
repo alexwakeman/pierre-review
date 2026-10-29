@@ -11,7 +11,7 @@ import type { FetchedTicketComment } from './types.js';
 import { clipTicketField } from './clip.js';
 
 // TICKET COMMENTS — the store (docs/TRACKERS.md § Ticket comments; table `tracker_ticket_comments`,
-// migration 0142). Keyed per TICKET — (account, provider, api_root, issue_key) — never per PR.
+// migration 0141). Keyed per TICKET — (account, provider, api_root, issue_key) — never per PR.
 //
 // THE HOOK FOR AN ADAPTER: a reader returns `FetchedTicket.comments` (./types.ts
 // `FetchedTicketComment[]`, bodies already MARKDOWN, `isBot` set by the adapter's own rule) in the same

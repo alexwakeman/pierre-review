@@ -89,7 +89,7 @@ export interface TicketReviewRow {
   assessment: TicketAssessment | null;
   // What auto-posting did with this run (migration 0087 / pg 0074). Absent on older reads.
   autoPost?: TicketAutoPostRecord | null;
-  // The people comments the run was given (migration 0143). Absent on older reads / test schemas.
+  // The people comments the run was given (migration 0142). Absent on older reads / test schemas.
   commentsSeen?: { ids: string[]; count: number; hash: string } | null;
 }
 

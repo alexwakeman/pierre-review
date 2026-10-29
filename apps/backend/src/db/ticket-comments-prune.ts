@@ -2,7 +2,7 @@ import { and, inArray, sql } from 'drizzle-orm';
 import { schema, type Executor } from './client.js';
 
 // THE TICKET-COMMENTS HALF OF BOTH PR DELETE PATHS (deleteRepo in queries.ts, retention's
-// deletePrSubtree). Comments are stored per TICKET (`tracker_ticket_comments`, migration 0142), not per
+// deletePrSubtree). Comments are stored per TICKET (`tracker_ticket_comments`, migration 0141), not per
 // PR, so deleting a PR's `tracker_tickets` rows does not reach them. After those rows go, the comments
 // of every ticket NO `tracker_tickets` row of the same account names any more are deleted — a ticket
 // still on a surviving PR keeps its comments. Runs inside the caller's transaction. `accountIds` narrows

@@ -37,7 +37,7 @@ export interface WorkspaceTrackerRow {
   matchScope: string | null;
   authEmail: string | null;
   authToken: string | null;
-  /** Notion's property mapping, JSON (migration 0150). Optional so a narrow caller may omit it. */
+  /** Notion's property mapping, JSON (migration 0144). Optional so a narrow caller may omit it. */
   notionConfig?: string | null;
 }
 

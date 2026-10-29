@@ -100,7 +100,7 @@ beforeAll(async () => {
       "INSERT INTO pull_requests VALUES (90,2,900,1,'foreign','open',9000,null,null);",
   );
   sqlite.exec(migration('0088_issue_tracker.sql'));
-  sqlite.exec(migration('0150_workspace_tracker_notion.sql'));
+  sqlite.exec(migration('0144_workspace_tracker_notion.sql'));
   sqlite.exec(migration('0098_tracker_ticket_dates.sql'));
 
   const row = (acct: number, ws: number, prId: number, apiRoot: string, fetched: number | null, title = 'Cookie banner', state = 'ok'): string =>

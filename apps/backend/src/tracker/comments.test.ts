@@ -1,4 +1,4 @@
-// ── TICKET COMMENTS (migration 0142; docs/TRACKERS.md § Ticket comments) ────────────────────────────
+// ── TICKET COMMENTS (migration 0141; docs/TRACKERS.md § Ticket comments) ────────────────────────────
 // Pinned here (the worker's end-to-end half is worker.test.ts § 9):
 //   1. PARSING per adapter: Jira (wiki markup and ADF bodies, `accountType: 'app'` and automation names
 //      are bots), GitHub Issues (`__typename: Bot`, `[bot]` logins and the automation vocabulary),
@@ -135,8 +135,8 @@ describe('2. the store', () => {
   beforeEach(() => {
     sqlite = new Database(':memory:');
     sqlite.exec(migration('0088_issue_tracker.sql'));
-    sqlite.exec(migration('0150_workspace_tracker_notion.sql'));
-    sqlite.exec(migration('0142_tracker_ticket_comments.sql'));
+    sqlite.exec(migration('0144_workspace_tracker_notion.sql'));
+    sqlite.exec(migration('0141_tracker_ticket_comments.sql'));
     ctx = {
       db: drizzle(sqlite),
       schema: { trackerTickets, trackerTicketComments },

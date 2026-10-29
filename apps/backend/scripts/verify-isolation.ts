@@ -3857,7 +3857,7 @@ check(
   check("createdDatesFor(A) reads A's created date, never B's", dA?.ms === Date.parse('2026-01-01T00:00:00Z'));
 }
 
-// ── TICKET COMMENTS (tracker_ticket_comments, migration 0142; docs/TRACKERS.md § Ticket comments) ──
+// ── TICKET COMMENTS (tracker_ticket_comments, migration 0141; docs/TRACKERS.md § Ticket comments) ──
 // BOTH accounts hold comments on the SAME site + key. MUTATION CHECK: drop the accountId predicate from
 // `readTicketComments` or from `writeTicketComments`' delete (tracker/comments.ts) and a check goes red.
 {
@@ -4383,7 +4383,7 @@ check(
   check("readWikiCredentialsSettings(A, B's workspace) shows no Notion token", (await wc.readWikiCredentialsSettings(1, defaultB)).notion.hasToken === false);
   const notionB = await wc.resolveWikiCredential(2, defaultB, { provider: 'notion', host: 'www.notion.so' }, {});
   check("resolveWikiCredential(B, B's workspace, notion) opens B's token (mutation check)", notionB.state === 'ok' && notionB.credential.token === 'ntn_bbbbbbbbbbbbbbbbbbbbbbbb');
-  // FIGURE DESCRIPTIONS (migration 0145): the cache is keyed by (account, image hash).
+  // FIGURE DESCRIPTIONS (migration 0143): the cache is keyed by (account, image hash).
   const fc = await import('../src/reference-docs/figure-cache.js');
   const sharedHash = 'f'.repeat(64);
   await fc.saveFigureDescription(2, sharedHash, "B's diagram", { provider: 'claude', model: 'claude-haiku-5-5', costUsd: 0.001 });

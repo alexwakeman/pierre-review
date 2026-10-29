@@ -156,7 +156,7 @@ are given it as discussion — never as the story.
   point). **Linear** — `comments(last: 20)` on `issue(id:)` (≈ 40 complexity points). **Notion** — the one
   extra read `GET /v1/comments?block_id=<page>` (≤ 5 pages of 100; more than that, or a refused read —
   the integration lacks "read comments" — leaves them UNKNOWN), rich text → markdown. Bodies are markdown.
-- **STORED PER TICKET** (`tracker_ticket_comments`, migration `0142`): `(account_id, provider,
+- **STORED PER TICKET** (`tracker_ticket_comments`, migration `0141`): `(account_id, provider,
   api_root, issue_key, comment_id)` — a ticket on five PRs has its comments once. The worker writes once
   per ticket per read (`writeTicketComments`): the newest `TICKET_COMMENTS_KEPT` (20) are upserted, each
   body cut to `TICKET_COMMENT_BODY_MAX` (4000), and the ticket's other rows deleted. A merged PR's copy
@@ -183,7 +183,7 @@ are given it as discussion — never as the story.
   hash is the sprint read's; comments would re-bill them).
 - ⚠ **NOT STORY TEXT. A COMMENT NEVER RE-BILLS.** Comments are outside `storyOrMembershipMoved`
   (`changed_at`), the story hash, the ticket review's fingerprint and the docs check's `storyHash`. A run
-  stores what it was given instead (`ticket_reviews.comments_seen {ids, count, hash}`, migration `0143`),
+  stores what it was given instead (`ticket_reviews.comments_seen {ids, count, hash}`, migration `0142`),
   and `TicketReviewState.newComments` counts the people comments since — "2 new comments since this
   check" beside the result, so the reader decides whether to Re-check.
 - **SHOWN** under the ticket as written (`components/TicketComments.tsx`, in `StoryDisclosure`):
@@ -652,7 +652,7 @@ is a different feature). ⚠ **READ-ONLY**: no Notion write exists; the status p
   a PAGE link (`notion.so/acme/Title-<32 hex>`) parses as `notion_page` and the server reads the page
   (`GET /v1/pages/{id}`, `notionPageKeys`) for its database and Unique ID — a page of another database
   is `other_tracker`, one the integration cannot see `not_found`.
-- **THE MAPPING** (`workspace_trackers.notion_config`, JSON `NotionTrackerMapping`, migration `0150`;
+- **THE MAPPING** (`workspace_trackers.notion_config`, JSON `NotionTrackerMapping`, migration `0144`;
   property ids — Notion's stable `id`, the filter key — with the name they had when saved):
   `uniqueId {property, prefix}` (required) · `status` — a `status` property (its GROUPS To-do / In
   progress / Complete → `new` / `indeterminate` / `done`, read from the schema, cached 10 min) or a

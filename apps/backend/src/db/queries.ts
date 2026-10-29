@@ -9602,7 +9602,7 @@ export async function deleteRepo(id: number, accountId: number): Promise<boolean
       // Stored tracker tickets (core since migration 0088 / pg 0075; the plugin used to prune them
       // per PR). No FKs, so nothing would cascade.
       await tx.delete(schema.trackerTickets).where(inArray(schema.trackerTickets.prId, prIds)).execute();
-      // Their tickets' comments (migration 0142), once no PR of this account names the ticket.
+      // Their tickets' comments (migration 0141), once no PR of this account names the ticket.
       await pruneOrphanTicketComments(tx, [accountId]);
       // SonarCloud snapshots (migration 0114 / pg 0101). No FKs, so nothing would cascade.
       await tx.delete(schema.sonarSnapshots).where(inArray(schema.sonarSnapshots.prId, prIds)).execute();

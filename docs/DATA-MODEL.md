@@ -620,7 +620,7 @@ Core since migration `0088`; the contract is [TRACKERS.md](TRACKERS.md).
   `TrackerProvider`; a value with no adapter reads as none), `base_url`, `project_keys`
   (comma-joined, normalised), `match_scope` (NULL = `title_branch`), `auth_email`, and the
   CREDENTIAL `auth_token` (`sealed:v1:` / `plain:` — never on the wire, never logged, exported as
-  `hasToken` only), and `notion_config` (migration `0150`: Notion's property mapping as JSON, shared
+  `hasToken` only), and `notion_config` (migration `0144`: Notion's property mapping as JSON, shared
   `NotionTrackerMapping`; not a secret, exported; cleared when the database URL moves to another
   database; a Notion row's `project_keys` is written from its Unique ID prefix). Named composite FK
   `workspace_trackers_workspace_account_fk` (the id arrives in a request PATH) ON DELETE cascade — a
@@ -633,7 +633,7 @@ Core since migration `0088`; the contract is [TRACKERS.md](TRACKERS.md).
   `api_root = 'https://github.com'`, `issue_key = 'owner/repo#12'`, and its ident names the repo in
   the root (`github:https://github.com/owner/repo#12`) — convert ONLY through shared
   `trackerTicketIdent` / `trackerTicketRow`.
-- **`tracker_ticket_comments`** (migration `0142`) — ONE row per `(account_id, provider, api_root,
+- **`tracker_ticket_comments`** (migration `0141`) — ONE row per `(account_id, provider, api_root,
   issue_key, comment_id)`: a ticket's comment, per TICKET (never per PR): author name + id, `is_bot`,
   markdown `body` (≤ 4000), `created_at` / `updated_at`, `fetched_at`. The newest 20 per ticket; the
   worker's ONE writer `writeTicketComments` (`tracker/comments.ts`) upserts on that composite target and
@@ -641,7 +641,7 @@ Core since migration `0088`; the contract is [TRACKERS.md](TRACKERS.md).
   No FKs: rows of a ticket no `tracker_tickets` row names are pruned by the worker's key prune and BOTH
   delete paths (`db/ticket-comments-prune.ts`); in `accountScopedTables()`. ⚠ NOT story text — never
   moves `changed_at` or any hash ([TRACKERS.md](TRACKERS.md) § Ticket comments).
-- **`ticket_reviews.comments_seen`** (migration `0143`) — `{ids, count, hash}` of the people comments a
+- **`ticket_reviews.comments_seen`** (migration `0142`) — `{ids, count, hash}` of the people comments a
   run was given. Outside the `fingerprint`; feeds `TicketReviewState.newComments`. NULL on older runs
   and pasted stories.
 - **`pull_requests.closing_issues` / `closing_issues_checked_at`** (migration `0089`) — the
@@ -816,7 +816,7 @@ fact per account. Every read predicates on `account_id` (`currentLabelRowsFor`);
   account_id)` ON DELETE cascade. ⚠ Written ONLY by `reference-docs/wiki/pages.ts` `commitWikiPages`,
   after a successful build (a failed or skipped refresh never advances a version). `accountScopedTables()`,
   erasure, export, `verify:isolation`.
-- **`reference_doc_figure_descriptions`** (migration `0145`) — the AI image-description CACHE: one row per
+- **`reference_doc_figure_descriptions`** (migration `0143`) — the AI image-description CACHE: one row per
   (account, image sha256) — `description` (one line, or `DECORATIVE`), `provider`, `model`, `cost_usd`.
   Unique `(account_id, image_hash)`, the upsert target. Read only for hashes the document itself holds
   (`reference-docs/figure-cache.ts`). In `accountScopedTables()`, erased, exported, checked by

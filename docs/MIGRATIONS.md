@@ -1262,23 +1262,21 @@ CASCADE) and `workspace_wiki_credentials` (a SEALED wiki token per `(account, wo
 composite FK onto `workspaces`, cascade). Both join `accountScopedTables()`, the erasure (explicitly,
 pages before their documents) and the export (the credential WITHOUT its token); the docs DELETE route
 removes the page rows explicitly too. No backfill. Journal `idx` 140, `when` sqlite `1792137627016`
-(0139 is left for a parallel branch; renumber at integration if needed).
 
-### `0142_tracker_ticket_comments` + `0143_ticket_review_comments_seen` — ticket comments
-`0142` creates the CORE table `tracker_ticket_comments`: one row per `(account_id, provider, api_root,
+### `0141_tracker_ticket_comments` + `0142_ticket_review_comments_seen` — ticket comments
+`0141` creates the CORE table `tracker_ticket_comments`: one row per `(account_id, provider, api_root,
 issue_key, comment_id)` — per TICKET, never per PR — with author name + id, `is_bot`, markdown `body`,
 `created_at` / `updated_at` / `fetched_at`, and the unique index every upsert targets
 (`tracker_ticket_comments_ticket_comment`). No FKs (the `tracker_tickets` precedent): the worker's key
 prune and BOTH PR delete paths remove comments of tickets no `tracker_tickets` row names
-(`db/ticket-comments-prune.ts`); the erasure and `accountScopedTables()` take it explicitly. `0143` adds
+(`db/ticket-comments-prune.ts`); the erasure and `accountScopedTables()` take it explicitly. `0142` adds
 the nullable `ticket_reviews.comments_seen` (JSON `{ids, count, hash}`), kept OUT of the fingerprint.
 Split in two so a test schema can build the tracker table without `ticket_reviews`. Additive, no
-backfill: comments arrive on each ticket's next read. ⚠ Numbered 0142/0143 because parallel branches held
-0139–0141; renumber (file, tag, journal `idx`) at integration if those land differently.
-[TRACKERS.md](TRACKERS.md) § Ticket comments. Journal `idx` 142 / 143, `when` sqlite `1792137629016` /
+backfill: comments arrive on each ticket's next read.
+[TRACKERS.md](TRACKERS.md) § Ticket comments. Journal `idx` 141 / 142, `when` sqlite `1792137629016` /
 `1792137630016`.
 
-### `0145_reference_doc_figures` — figures as text (+ Notion, which needs no schema)
+### `0143_reference_doc_figures` — figures as text (+ Notion, which needs no schema)
 Self-contained and additive ([REFERENCE-DOCS.md](REFERENCE-DOCS.md) § Figures, § Wiki sources → Notion).
 One new nullable JSON column, `reference_docs.figures_json` (`ReferenceDocFigures`: the latest build's
 described / outlined / kept / pending figures and the one sentence when they could not be described here),
@@ -1287,17 +1285,15 @@ and one new table, `reference_doc_figure_descriptions` — the AI image-descript
 `provider`, `model`, `cost_usd`, `created_at`; FK onto `accounts`, cascade. It joins `accountScopedTables()`,
 the erasure (explicitly) and the export, and `verify:isolation` checks it. NOTION adds no schema: its token is
 a `workspace_wiki_credentials` row with provider `notion` (0140), and `reference_docs.wiki_json` already
-carries the provider. No backfill. Journal `idx` 145, `when` sqlite `1792137632016` (0139 and 0141–0144 are
-left for parallel branches; renumber at integration if needed).
+carries the provider. No backfill. Journal `idx` 143, `when` sqlite `1792137632016`.
 
-### `0150_workspace_tracker_notion` — Notion as an issue tracker
+### `0144_workspace_tracker_notion` — Notion as an issue tracker
 Adds the nullable `workspace_trackers.notion_config` (text, JSON shared `NotionTrackerMapping`): the
 Notion database's property mapping beside the one tracker row it belongs to. On an existing table, so
 the erasure, the export (named column, not a secret) and the composite FK already cover it. Additive, no
 backfill: a Notion workspace is unmapped until someone saves a mapping. Every tracker test that builds
-`workspace_trackers` from `0088` also runs `0150`. ⚠ Numbered 0150 because parallel branches may hold
-0139–0149; renumber (file, tag, journal `idx`) at integration if they land differently.
-[TRACKERS.md](TRACKERS.md) § Notion. Journal `idx` 150, `when` sqlite `1792137640016`.
+`workspace_trackers` from `0088` also runs `0144`.
+[TRACKERS.md](TRACKERS.md) § Notion. Journal `idx` 144, `when` sqlite `1792137640016`.
 
 ### No migration — "Check against code" removed (2026-10-18): `sprint_ticket_repos` + `sprint_assessments` DORMANT
 

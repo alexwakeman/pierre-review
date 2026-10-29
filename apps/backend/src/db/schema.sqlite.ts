@@ -1547,7 +1547,7 @@ export const ticketReviews = sqliteTable(
     // What auto-posting did with this run (migration 0087 / pg 0074) — review/ticket-review/
     // auto-post.ts. Also holds the posted "Not asked for" entries, which have no item row.
     autoPost: text('auto_post', { mode: 'json' }).$type<TicketAutoPostRecord>(),
-    // The ticket's people comments this run was given (migration 0143; docs/TRACKERS.md § Ticket
+    // The ticket's people comments this run was given (migration 0142; docs/TRACKERS.md § Ticket
     // comments): their ids, how many and a hash. NOT in `fingerprint` — a new comment never makes a
     // run stale; the state route counts the comments not in `ids` ("n new comments since this check").
     // NULL on a run from before comments were read, or a pasted story.
@@ -2798,7 +2798,7 @@ export const workspaceTrackers = sqliteTable(
     // Jira Cloud signs in with email + API token (HTTP Basic); null = Bearer (Server / Data Center).
     authEmail: text('auth_email'),
     authToken: text('auth_token'),
-    // NOTION ONLY (migration 0150; docs/TRACKERS.md § Notion): the property mapping as JSON (shared
+    // NOTION ONLY (migration 0144; docs/TRACKERS.md § Notion): the property mapping as JSON (shared
     // `NotionTrackerMapping` — the database id, the Unique ID property + prefix, status / assignee /
     // sprint / type / criteria / blocked-by properties). Not a secret; cleared when the database URL
     // moves to another database. NULL = not mapped (a Notion workspace then reads nothing).
@@ -2913,7 +2913,7 @@ export const trackerTickets = sqliteTable(
   }),
 );
 
-// ── tracker_ticket_comments: THE DISCUSSION UNDER A TICKET (migration 0142) ───────────────────────
+// ── tracker_ticket_comments: THE DISCUSSION UNDER A TICKET (migration 0141) ───────────────────────
 // ONE ROW PER (account, provider, api_root, issue_key, comment_id) — per TICKET, never per PR (a ticket
 // named by five PRs has its comments once). Written by the ticket worker from the SAME issue read
 // (tracker/comments.ts `writeTicketComments`; docs/TRACKERS.md § Ticket comments): the newest
@@ -3803,7 +3803,7 @@ export const referenceDocs = sqliteTable(
     // 0140. The incremental build's summary cache: section content hash → its one-line summary, plus
     // the document summary and topics, from the last successful build (wiki documents).
     summaryCache: text('summary_cache_json', { mode: 'json' }).$type<ReferenceDocSummaryCache>(),
-    // 0145. The latest build's figures (ReferenceDocFigures): described / outlined / kept / pending and
+    // 0143. The latest build's figures (ReferenceDocFigures): described / outlined / kept / pending and
     // the one sentence when they could not be described here. NULL = the build met no figure.
     figures: text('figures_json', { mode: 'json' }).$type<ReferenceDocFigures>(),
     pageCount: integer('page_count'),
@@ -3906,7 +3906,7 @@ export const workspaceWikiCredentials = sqliteTable(
   }),
 );
 
-// reference_doc_figure_descriptions (migration 0145; docs/REFERENCE-DOCS.md § Figures) — the CACHE of
+// reference_doc_figure_descriptions (migration 0143; docs/REFERENCE-DOCS.md § Figures) — the CACHE of
 // AI image descriptions, keyed by the image's sha256 within the ACCOUNT, so a refresh or a rebuild never
 // describes an unchanged image again (and a logo on every page is described once). `description` is
 // the model's words (one line) or 'DECORATIVE'. Read only for hashes the document itself holds, so one

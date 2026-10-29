@@ -116,7 +116,7 @@ export interface AccountExport {
   referenceDocWikiPages: Record<string, unknown>[];
   /** Each workspace's wiki credential (migration 0140): site and email. ⚠ THE TOKEN IS WITHHELD. */
   workspaceWikiCredentials: Record<string, unknown>[];
-  /** The image-description cache (core `reference_doc_figure_descriptions`, migration 0145). */
+  /** The image-description cache (core `reference_doc_figure_descriptions`, migration 0143). */
   referenceDocFigureDescriptions: Record<string, unknown>[];
   /**
    * Related repos (core `repo_relations`, migration 0131): the pairs the user chose, both directions,

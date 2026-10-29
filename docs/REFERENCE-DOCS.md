@@ -204,7 +204,7 @@ long to split, in a sentence.
 Progress: the converting stage reads "Crawling 6 of 25" (the SPA's bar shows the server's stage
 words). Cancel aborts between requests and during the politeness wait.
 
-## Wiki sources — Confluence and Notion (`wiki/`; migrations `0140`, `0145`)
+## Wiki sources — Confluence and Notion (`wiki/`; migrations `0140`, `0143`)
 
 A Confluence Cloud page — and, optionally, its child pages 1–3 levels down (the crawl's depth words,
 reused) — becomes ONE document (`sourceKind: 'wiki'`, `doc.wiki`), the root and each child a chapter.
@@ -352,7 +352,7 @@ VIEW `?v=` names no page and is refused) — and its child pages 1–3 levels do
   `GET /v1/users/me`.
 - **The page address** in a chapter's `Source:` line is `https://www.notion.so/<id without dashes>`.
 
-## Figures — images and diagrams as text (`figures.ts`, `figure-describer.ts`, `diagram-outline.ts`, `figure-fetch.ts`; migration `0145`)
+## Figures — images and diagrams as text (`figures.ts`, `figure-describer.ts`, `diagram-outline.ts`, `figure-fetch.ts`; migration `0143`)
 
 Every source's images and diagrams become WORDS, in this order of preference:
 

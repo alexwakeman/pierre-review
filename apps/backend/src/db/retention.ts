@@ -127,7 +127,7 @@ async function deletePrSubtree(
   // Stored tracker tickets (core since migration 0088 / pg 0075; the plugin's `pruneProByPrIds`
   // used to take them). No FKs — explicit, pr-keyed.
   await tx.delete(schema.trackerTickets).where(inArray(schema.trackerTickets.prId, prIds)).execute();
-  // Their tickets' comments (migration 0142), once no PR names the ticket (db/ticket-comments-prune.ts).
+  // Their tickets' comments (migration 0141), once no PR names the ticket (db/ticket-comments-prune.ts).
   await pruneOrphanTicketComments(tx, null);
   // SonarCloud snapshots (migration 0114 / pg 0101). No FKs — explicit, pr-keyed.
   await tx.delete(schema.sonarSnapshots).where(inArray(schema.sonarSnapshots.prId, prIds)).execute();

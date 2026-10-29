@@ -198,9 +198,9 @@ beforeAll(async () => {
   );
   // The core tracker tables (migration 0088), exactly as a real install has them.
   sqlite.exec(migration('0088_issue_tracker.sql'));
-  sqlite.exec(migration('0150_workspace_tracker_notion.sql'));
+  sqlite.exec(migration('0144_workspace_tracker_notion.sql'));
   sqlite.exec(migration('0098_tracker_ticket_dates.sql'));
-  sqlite.exec(migration('0142_tracker_ticket_comments.sql'));
+  sqlite.exec(migration('0141_tracker_ticket_comments.sql'));
   // The blocking links + status id (migration 0103's tracker_tickets half).
   sqlite.exec('ALTER TABLE tracker_tickets ADD blocked_by_json text; ALTER TABLE tracker_tickets ADD status_id text;');
   // The PR columns the GitHub Issues linker reads (migration 0089).
@@ -835,7 +835,7 @@ describe('8. merged pull requests', () => {
   });
 });
 
-// ── 9. TICKET COMMENTS (migration 0142; docs/TRACKERS.md § Ticket comments) ───────────────────────
+// ── 9. TICKET COMMENTS (migration 0141; docs/TRACKERS.md § Ticket comments) ───────────────────────
 describe('9. ticket comments', () => {
   const page = (...cs: Array<{ id: string; who: string; at: string; body: unknown; app?: boolean }>) => ({
     total: cs.length,
