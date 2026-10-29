@@ -8,7 +8,12 @@ import { judgeableReplies } from './reply-text.js';
 // THE PULL REQUESTS A REPLY POINTS TO (docs/CLAUDE-REVIEW.md § The replies pass). "Fixed on the
 // backend in DEFRA/bng-metric-backend#556" can only be checked against #556's code, so the replies
 // pass checks that PR out, read-only, beside the PR's own: its HEAD while it is open, the DEFAULT
-// BRANCH once it is merged (what it landed). A closed, unmerged PR fixed nothing and is ignored.
+// BRANCH IT WAS MERGED INTO once it is merged (what it landed: its stored `baseRefName`, the
+// default branch only when that is unknown or IS the default branch). ⚠ Never assume a merged PR
+// reached the default branch: a stacked PR merged into its parent's branch, or a gitflow `develop`,
+// did not, and checking out `main` would show the old code and steer the agent to dispute a real
+// fix. A base branch that is gone (deleted after the merge) fails to check out, so the link's path is
+// null and the prompt's not_checked rule applies. A closed, unmerged PR fixed nothing and is ignored.
 //
 // ⚠ A REPLY IS UNTRUSTED TEXT. The scanner reads a bounded prefix of each reply with three patterns
 // whose every quantifier is bounded (no nesting, no unbounded repetition), so it is linear in the
@@ -99,17 +104,34 @@ export interface LinkedPr {
   number: number;
   title: string;
   state: 'open' | 'merged';
-  // Open: its head commit (checked out there). Merged: null (the default branch is checked out).
+  // Open: its head commit (checked out there). Merged: null (the branch it landed on is checked out).
   headSha: string | null;
   defaultBranch: string | null;
+  // Merged: the branch it was merged into (its stored base), null when unknown. Open: null.
+  mergedInto: string | null;
   // The threads (finding ids) whose replies link it.
   findingIds: number[];
 }
 
-/** The linked PR as a checkout request (`checkOutPeers`): open → its head, merged → the default branch. */
+/**
+ * The branch a merged linked PR is checked out as: the branch it was merged into, or null for the
+ * repo's default branch (the base is unknown, or it IS the default branch). Pure.
+ */
+export function linkedLandedBranch(l: Pick<LinkedPr, 'mergedInto' | 'defaultBranch'>): string | null {
+  return l.mergedInto && l.mergedInto !== l.defaultBranch ? l.mergedInto : null;
+}
+
+/**
+ * The linked PR as a checkout request (`checkOutPeers`): open → its head; merged → the branch it was
+ * merged into (`linkedLandedBranch`), the default branch only when that is it or unknown.
+ */
 export function linkedRunPeer(l: LinkedPr): ReviewRunPeer {
-  return l.state === 'open' && l.headSha
-    ? { ref: l.ref, owner: l.owner, name: l.name, prNumber: l.number, headSha: l.headSha }
+  if (l.state === 'open' && l.headSha) {
+    return { ref: l.ref, owner: l.owner, name: l.name, prNumber: l.number, headSha: l.headSha };
+  }
+  const landed = linkedLandedBranch(l);
+  return landed
+    ? { ref: l.ref, owner: l.owner, name: l.name, kind: 'branch', branch: landed }
     : { ref: l.ref, owner: l.owner, name: l.name, kind: 'default_branch', branch: l.defaultBranch };
 }
 
@@ -173,7 +195,7 @@ export async function linkedPrsFor(
     }
     if (wanted.length === 0) return [];
     const rows = (await ctx.db
-      .select({ id: prs.id, repoId: prs.repoId, number: prs.number, title: prs.title, state: prs.state, headSha: prs.headSha })
+      .select({ id: prs.id, repoId: prs.repoId, number: prs.number, title: prs.title, state: prs.state, headSha: prs.headSha, baseRefName: prs.baseRefName })
       .from(prs)
       .where(
         and(
@@ -182,7 +204,7 @@ export async function linkedPrsFor(
           inArray(prs.number, [...new Set(wanted.map((w) => w.number))]),
         ),
       )
-      .execute()) as Array<{ id: number; repoId: number; number: number; title: string | null; state: string; headSha: string | null }>;
+      .execute()) as Array<{ id: number; repoId: number; number: number; title: string | null; state: string; headSha: string | null; baseRefName: string | null }>;
     const byKey = new Map(rows.map((r) => [`${r.repoId}#${r.number}`, r]));
     const out: LinkedPr[] = [];
     for (const w of wanted) {
@@ -207,6 +229,7 @@ export async function linkedPrsFor(
         state: row.state === 'open' ? 'open' : 'merged',
         headSha: row.state === 'open' ? row.headSha : null,
         defaultBranch: w.repo.defaultBranch,
+        mergedInto: row.state === 'merged' ? (row.baseRefName ?? null) : null,
         findingIds: [w.findingId],
       });
     }

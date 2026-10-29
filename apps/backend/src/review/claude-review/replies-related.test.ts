@@ -135,7 +135,7 @@ const resolveDeps = {
 
 async function makePr(
   repoId: number,
-  over: { number?: number; state?: 'open' | 'merged' | 'closed'; headSha?: string | null; title?: string } = {},
+  over: { number?: number; state?: 'open' | 'merged' | 'closed'; headSha?: string | null; title?: string; baseRefName?: string | null } = {},
 ): Promise<number> {
   prSeq += 1;
   const [p] = await db
@@ -152,6 +152,7 @@ async function makePr(
       updatedAt: new Date(),
       headSha: over.headSha === undefined ? HEAD : over.headSha,
       headRefName: `branch-${prSeq}`,
+      baseRefName: over.baseRefName === undefined ? 'main' : over.baseRefName,
       authorId: users.robin,
     })
     .returning()
@@ -330,12 +331,27 @@ describe('the link scanner (untrusted text)', () => {
   it('open → a worktree at its HEAD; merged → the default branch', () => {
     const base: LinkedPr = {
       ref: 'L1', prId: 9, repoId: 2, owner: 'DEFRA', name: 'bng-metric-backend', repoFullName: 'DEFRA/bng-metric-backend',
-      number: 556, title: 't', state: 'open', headSha: 'f'.repeat(40), defaultBranch: 'main', findingIds: [1],
+      number: 556, title: 't', state: 'open', headSha: 'f'.repeat(40), defaultBranch: 'main', mergedInto: null, findingIds: [1],
     };
     expect(linkedRunPeer(base)).toEqual({ ref: 'L1', owner: 'DEFRA', name: 'bng-metric-backend', prNumber: 556, headSha: 'f'.repeat(40) });
     expect(linkedRunPeer({ ...base, state: 'merged', headSha: null })).toEqual({
       ref: 'L1', owner: 'DEFRA', name: 'bng-metric-backend', kind: 'default_branch', branch: 'main',
     });
+    expect(linkedRunPeer({ ...base, state: 'merged', headSha: null, mergedInto: 'main' })).toEqual({
+      ref: 'L1', owner: 'DEFRA', name: 'bng-metric-backend', kind: 'default_branch', branch: 'main',
+    });
+  });
+
+  it('a merged PR whose base is NOT the default branch is checked out as that base, never the default branch', () => {
+    const merged: LinkedPr = {
+      ref: 'L1', prId: 9, repoId: 2, owner: 'DEFRA', name: 'bng-metric-backend', repoFullName: 'DEFRA/bng-metric-backend',
+      number: 556, title: 't', state: 'merged', headSha: null, defaultBranch: 'main', mergedInto: 'develop', findingIds: [1],
+    };
+    expect(linkedRunPeer(merged)).toEqual({ ref: 'L1', owner: 'DEFRA', name: 'bng-metric-backend', kind: 'branch', branch: 'develop' });
+    // A stacked PR merged into its parent's feature branch.
+    expect(linkedRunPeer({ ...merged, mergedInto: 'feature/parent' })).toMatchObject({ kind: 'branch', branch: 'feature/parent' });
+    // Default branch name unknown, base known: still the base.
+    expect(linkedRunPeer({ ...merged, defaultBranch: null })).toMatchObject({ kind: 'branch', branch: 'develop' });
   });
 });
 
@@ -362,9 +378,24 @@ describe('which linked PRs a pass checks out', () => {
     ]);
     expect(linked[0]!.headSha).toBe('c'.repeat(40));
     expect(linked[1]!.headSha).toBeNull();
+    expect(linked[0]!.mergedInto).toBeNull();
+    expect(linked[1]!.mergedInto).toBe('main');
     // A reply with no link reads nothing more; a broken ctx costs the links only.
     expect(await linkedMod.linkedPrsFor(ctx, 1, fe, [f(4, 'Thanks!')])).toEqual([]);
     expect(await linkedMod.linkedPrsFor({ ...ctx, schema: {} } as any, 1, fe, [f(2, '#429')])).toEqual([]);
+  });
+});
+
+describe('a merged linked PR records the branch it was merged into', () => {
+  it('base develop ≠ default main → checked out as develop; unknown base → the default branch', async () => {
+    const fe = await makePr(repo['bng-metric-frontend']!, { number: 438 });
+    await makePr(repo['bng-metric-backend']!, { number: 656, state: 'merged', baseRefName: 'develop' });
+    await makePr(repo['bng-metric-backend']!, { number: 657, state: 'merged', baseRefName: null });
+    const f = (id: number, body: string): any => ({ id, thread: { replies: [{ author: 'robin', body, at: new Date(LATER).toISOString() }] } });
+    const linked = await linkedMod.linkedPrsFor(ctx, 1, fe, [f(1, 'Fixed in DEFRA/bng-metric-backend#656 and bng-metric-backend#657.')]);
+    expect(linked.map((l) => [l.number, l.mergedInto])).toEqual([[656, 'develop'], [657, null]]);
+    expect(linkedRunPeer(linked[0]!)).toMatchObject({ kind: 'branch', branch: 'develop' });
+    expect(linkedRunPeer(linked[1]!)).toMatchObject({ kind: 'default_branch', branch: 'main' });
   });
 });
 
@@ -376,7 +407,7 @@ describe('the prompt maps each thread to its linked checkout', () => {
     };
     const linked: LinkedPr[] = [{
       ref: 'L1', prId: 9, repoId: 2, owner: 'DEFRA', name: 'bng-metric-backend', repoFullName: 'DEFRA/bng-metric-backend',
-      number: 556, title: 'Template rows re-sync', state: 'merged', headSha: null, defaultBranch: 'main', findingIds: [7],
+      number: 556, title: 'Template rows re-sync', state: 'merged', headSha: null, defaultBranch: 'main', mergedInto: 'main', findingIds: [7],
     }];
     const peers: any[] = [{
       ref: 'X1', repoFullName: 'DEFRA/bng-metric-backend', kind: 'default_branch', source: 'related_repo', match: null,
@@ -389,7 +420,16 @@ describe('the prompt maps each thread to its linked checkout', () => {
         checkouts: [{ ref: 'X1', path: '/tmp/x1' }, { ref: 'L1', path: '/tmp/l1' }],
       });
       expect(prompt).toMatch(/---BEGIN THREAD T1 n0nce---[\s\S]*Pull requests these replies link to: L1 \(DEFRA\/bng-metric-backend#556\)[\s\S]*---END THREAD T1 n0nce---/);
-      expect(prompt).toContain('### L1: DEFRA/bng-metric-backend#556 (merged)');
+      expect(prompt).toContain('### L1: DEFRA/bng-metric-backend#556 (merged)\n\nCheckout: the default branch, which it was merged into, as it stands now.');
+      expect(prompt).not.toContain('with the change landed');
+      // Merged into another branch: the prompt names it and says it is not the default branch.
+      const onDevelop = buildRepliesPrompt({
+        repoFullName: 'DEFRA/bng-metric-frontend', number: 428, title: 'Frontend', headSha: HEAD, worktreePath: null,
+        plan: planRepliesPass([finding], HEAD), nonce: 'n0nce', provider, peers: [], linked: [{ ...linked[0]!, mergedInto: 'develop' }],
+        checkouts: [{ ref: 'L1', path: '/tmp/l1' }],
+      });
+      expect(onDevelop).toContain('Checkout: the branch it was merged into, "develop", as it stands now. That is not the default branch');
+      expect(onDevelop).not.toContain('Checkout: the default branch');
       expect(prompt).toContain('---BEGIN LINKED PR L1 n0nce---\nTitle: Template rows re-sync\n---END LINKED PR L1 n0nce---');
       expect(prompt).toContain('### X1: DEFRA/bng-metric-backend · Reference: default branch');
       expect(prompt).toContain('- X1: /tmp/x1');

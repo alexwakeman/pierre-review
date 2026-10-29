@@ -1301,7 +1301,13 @@ JUST the replies, cheaply, at the current head. Pure half `claude-review/replies
   most `LINKS_PER_REPLY` per reply; a link counts only in the PR's OWN repo or a repo RELATED to it in
   its current workspace (`relatedRepoScope`, the one reading of the relation), only for a PR Limn has
   STORED, never the PR itself — Limn never fetches an arbitrary repository. Open ⇒ a worktree at its
-  HEAD; merged ⇒ its repo's DEFAULT BRANCH (what it landed); closed unmerged ⇒ ignored. Priority: the
+  HEAD; merged ⇒ THE BRANCH IT WAS MERGED INTO (its stored `baseRefName`, `LinkedPr.mergedInto`,
+  `linkedLandedBranch`), the DEFAULT BRANCH only when that base is unknown or IS the default branch;
+  closed unmerged ⇒ ignored. ⚠ Never assume a merged PR reached the default branch: a stacked PR
+  merged into its parent's branch, or a gitflow `develop`, did not, and checking out `main` would
+  steer the agent to dispute a real fix (and an auto pass to post that pushback). The prompt says
+  per linked PR which branch is checked out and whether it is the default branch; a base branch
+  deleted after the merge fails to check out ⇒ null path ⇒ `not_checked`. Priority: the
   threads in send order (most severe first), each thread's newest reply first. Both sets go through
   the deep review's `checkOutPeers` (two separate calls, so a merged link's default branch never shares
   a related repo's feature-branch checkout), every path becomes a path-guard root and a Codex
