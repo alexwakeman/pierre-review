@@ -57,7 +57,7 @@ function OwnerAvatar({
     );
   }
   return (
-    <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-gray-300 text-[9px] font-semibold text-gray-700 dark:bg-gray-700 dark:text-gray-200">
+    <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-gray-300 text-[11px] font-semibold text-gray-700 dark:bg-gray-700 dark:text-gray-200">
       {login.slice(0, 2).toUpperCase()}
     </span>
   );
@@ -307,7 +307,7 @@ export function RepoSearch({
               >
                 {s.owner}/{s.name}
               </span>
-              <span className="shrink-0 rounded bg-gray-100 px-1 text-[9px] uppercase tracking-wide text-gray-500 dark:bg-gray-800 dark:text-gray-400">
+              <span className="shrink-0 rounded bg-gray-100 px-1 text-[11px] uppercase tracking-wide text-gray-500 dark:bg-gray-800 dark:text-gray-400">
                 {s.category}
               </span>
             </span>
@@ -315,7 +315,7 @@ export function RepoSearch({
               {s.why}
             </span>
           </span>
-          <span className="mt-0.5 shrink-0 rounded bg-blue-600 px-1.5 py-0.5 text-[10px] text-white">
+          <span className="mt-0.5 shrink-0 rounded bg-blue-600 px-1.5 py-0.5 text-[11px] text-white">
             {adding ? 'Adding…' : 'Add'}
           </span>
         </button>
@@ -326,7 +326,7 @@ export function RepoSearch({
           onClick={(e) => e.stopPropagation()}
           title="Open on GitHub"
           aria-label={`Open ${s.owner}/${s.name} on GitHub`}
-          className="flex shrink-0 items-center px-2 text-[10px] text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+          className="flex shrink-0 items-center px-2 text-[11px] text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
         >
           <ExternalLinkIcon size={12} />
         </a>
@@ -379,7 +379,7 @@ export function RepoSearch({
             <div ref={listRef}>
               {botSuggestions.length === 0 && suggestions.length === 0 ? (
                 <div>
-                  <div className="sticky top-0 z-10 border-b border-gray-200 bg-white px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:border-gray-700 dark:bg-gray-900">
+                  <div className="sticky top-0 z-10 border-b border-gray-200 bg-white px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:border-gray-700 dark:bg-gray-900">
                     Suggested repos
                   </div>
                   <div className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">
@@ -391,10 +391,10 @@ export function RepoSearch({
                   {botSuggestions.length > 0 && (
                     <div>
                       <div className="sticky top-0 z-10 border-b border-gray-200 bg-white px-3 py-1.5 dark:border-gray-700 dark:bg-gray-900">
-                        <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+                        <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
                           Bot monitoring demos
                         </div>
-                        <div className="mt-0.5 text-[10px] leading-snug text-gray-400 dark:text-gray-500">
+                        <div className="mt-0.5 text-[11px] leading-snug text-gray-400 dark:text-gray-500">
                           Several AI review bots are active in these — good for
                           exploring the Bots tab. First sync can take a few
                           minutes.
@@ -405,7 +405,7 @@ export function RepoSearch({
                   )}
                   {suggestions.length > 0 && (
                     <div>
-                      <div className="sticky top-0 z-10 border-b border-gray-200 bg-white px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:border-gray-700 dark:bg-gray-900">
+                      <div className="sticky top-0 z-10 border-b border-gray-200 bg-white px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:border-gray-700 dark:bg-gray-900">
                         Suggested repos
                       </div>
                       {suggestions.map((s, idx) =>
@@ -478,12 +478,12 @@ export function RepoSearch({
                             {r.fullName}
                           </span>
                           {r.isPrivate && (
-                            <span className="shrink-0 rounded bg-gray-200 px-1 text-[9px] uppercase tracking-wide text-gray-500 dark:bg-gray-700 dark:text-gray-300">
+                            <span className="shrink-0 rounded bg-gray-200 px-1 text-[11px] uppercase tracking-wide text-gray-500 dark:bg-gray-700 dark:text-gray-300">
                               private
                             </span>
                           )}
                           {r.isOwnedOrMember && (
-                            <span className="shrink-0 rounded bg-sky-100 px-1 text-[9px] uppercase tracking-wide text-sky-700 dark:bg-sky-900/50 dark:text-sky-300">
+                            <span className="shrink-0 rounded bg-sky-100 px-1 text-[11px] uppercase tracking-wide text-sky-700 dark:bg-sky-900/50 dark:text-sky-300">
                               yours
                             </span>
                           )}
@@ -493,7 +493,7 @@ export function RepoSearch({
                             {r.description}
                           </span>
                         )}
-                        <span className="mt-0.5 flex items-center gap-2 text-[10px] text-gray-400">
+                        <span className="mt-0.5 flex items-center gap-2 text-[11px] text-gray-400">
                           <span
                             className="flex items-center gap-1"
                             title={`${r.stargazerCount} stars`}
@@ -508,7 +508,7 @@ export function RepoSearch({
                           </span>
                         </span>
                       </span>
-                      <span className="mt-0.5 shrink-0 rounded bg-blue-600 px-1.5 py-0.5 text-[10px] text-white">
+                      <span className="mt-0.5 shrink-0 rounded bg-blue-600 px-1.5 py-0.5 text-[11px] text-white">
                         {adding ? 'Adding…' : 'Add'}
                       </span>
                     </button>
@@ -522,7 +522,7 @@ export function RepoSearch({
                       onClick={(e) => e.stopPropagation()}
                       title="Open on GitHub"
                       aria-label={`Open ${r.fullName} on GitHub`}
-                      className="flex shrink-0 items-center px-2 text-[10px] text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+                      className="flex shrink-0 items-center px-2 text-[11px] text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
                     >
                       <ExternalLinkIcon size={12} />
                     </a>

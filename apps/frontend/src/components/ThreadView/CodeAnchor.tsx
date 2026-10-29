@@ -104,7 +104,7 @@ export function CodeAnchor({
       className={`flex w-full items-center gap-2 overflow-hidden rounded-r border-l-2 bg-gray-50 py-0.5 pl-2 pr-2 text-left font-mono text-[12px] leading-snug hover:bg-gray-100 dark:bg-gray-900/60 dark:hover:bg-gray-800/60 ${BORDER[kind]} ${ink}`}
     >
       <span className="min-w-0 flex-1 truncate">{body}</span>
-      <span className="inline-flex shrink-0 items-center gap-1 font-sans text-[10px] text-gray-400">
+      <span className="inline-flex shrink-0 items-center gap-1 font-sans text-[11px] text-gray-400">
         <ChevronIcon dir="down" size={10} />
         {lines.length} lines
       </span>

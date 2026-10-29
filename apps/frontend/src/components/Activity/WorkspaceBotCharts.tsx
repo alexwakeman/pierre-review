@@ -667,7 +667,7 @@ function BotRepoWorkChart({
             {[0, maxV].map((v) => (
               <g key={v}>
                 <line x1={PAD_L} y1={y(v)} x2={w - PAD_R} y2={y(v)} className="decorative-mark text-gray-200 dark:text-gray-700" stroke="currentColor" strokeWidth={1} />
-                <text x={PAD_L - 4} y={y(v) + 3} textAnchor="end" className="fill-gray-500 dark:fill-gray-400 text-[8px]">
+                <text x={PAD_L - 4} y={y(v) + 3} textAnchor="end" className="fill-gray-500 dark:fill-gray-400 text-[11px]">
                   {fmtNum(v)}
                 </text>
               </g>
@@ -688,7 +688,7 @@ function BotRepoWorkChart({
               const cx = colCenter(i);
               const ly = baseY + 9;
               return (
-                <text key={`lbl-${i}`} x={cx} y={ly} textAnchor="end" transform={`rotate(-35 ${cx} ${ly})`} className="fill-gray-500 dark:fill-gray-400 text-[8px]">
+                <text key={`lbl-${i}`} x={cx} y={ly} textAnchor="end" transform={`rotate(-35 ${cx} ${ly})`} className="fill-gray-500 dark:fill-gray-400 text-[11px]">
                   {singleRepo ? c.botLabel : c.repoName}
                 </text>
               );
@@ -701,7 +701,7 @@ function BotRepoWorkChart({
                 return (
                   <g key={`grp-${g.start}`}>
                     <line x1={x0} y1={gy} x2={x1} y2={gy} stroke={g.color} strokeWidth={2} />
-                    <text x={(x0 + x1) / 2} y={gy + 10} textAnchor="middle" className="text-[8px] font-medium" fill={g.color}>
+                    <text x={(x0 + x1) / 2} y={gy + 10} textAnchor="middle" className="text-[11px] font-medium" fill={g.color}>
                       {g.label}
                     </text>
                   </g>

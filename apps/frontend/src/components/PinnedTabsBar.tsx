@@ -423,7 +423,7 @@ function TabChip({
             />
           ) : (
             <span
-              className="flex shrink-0 items-center justify-center rounded-full bg-gray-300 text-[8px] font-semibold text-gray-700 dark:bg-gray-700 dark:text-gray-200"
+              className="flex shrink-0 items-center justify-center rounded-full bg-gray-300 text-[11px] font-semibold text-gray-700 dark:bg-gray-700 dark:text-gray-200"
               style={{ width: 16, height: 16 }}
             >
               {author.slice(0, 2).toUpperCase()}
@@ -437,7 +437,7 @@ function TabChip({
             >
               <span className="text-gray-400">#{meta?.number}</span> {meta?.title}
             </span>
-            <span className="truncate text-[10px] text-gray-500 dark:text-gray-400">
+            <span className="truncate text-[11px] text-gray-500 dark:text-gray-400">
               {isFocus ? 'PR focus' : author}
             </span>
           </span>

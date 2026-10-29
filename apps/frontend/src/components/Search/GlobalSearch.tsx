@@ -112,7 +112,7 @@ export function GlobalSearch(): JSX.Element {
               )}
               {people.length > 0 && (
                 <div className="border-b border-gray-100 py-1 dark:border-gray-800">
-                  <div className="px-3 pb-0.5 pt-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+                  <div className="px-3 pb-0.5 pt-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400">
                     People
                   </div>
                   {people.map((p) => (
@@ -136,7 +136,7 @@ export function GlobalSearch(): JSX.Element {
                           <span className="text-gray-400"> · {p.displayName}</span>
                         ) : null}
                       </span>
-                      <span className="ml-auto shrink-0 text-[10px] text-gray-400">
+                      <span className="ml-auto shrink-0 text-[11px] text-gray-400">
                         {p.matchCount}
                       </span>
                     </button>
@@ -155,7 +155,7 @@ export function GlobalSearch(): JSX.Element {
                     }}
                     className="flex w-full flex-col gap-0.5 px-3 py-1.5 text-left hover:bg-gray-100 dark:hover:bg-gray-800"
                   >
-                    <span className="flex items-center gap-1 text-[10px] text-gray-400">
+                    <span className="flex items-center gap-1 text-[11px] text-gray-400">
                       <KindIcon size={11} />
                       <span className="font-medium text-gray-500 dark:text-gray-400">
                         {KIND_LABEL[h.kind]}

@@ -129,7 +129,7 @@ export function CheckRow({
 
   const dot = (
     <span
-      className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white"
+      className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white"
       style={{ backgroundColor: m.color }}
       title={m.label}
     >
@@ -219,7 +219,7 @@ export function CheckRow({
           className="flex flex-1 items-center justify-end gap-1.5 text-gray-400"
         >
           <span className="text-xs">{m.label}</span>
-          <span className="inline-flex items-center gap-0.5 text-[10px] font-medium text-blue-500">
+          <span className="inline-flex items-center gap-0.5 text-[11px] font-medium text-blue-500">
             <ChevronIcon dir={expanded ? 'down' : 'right'} size={10} />
             {expanded ? 'hide logs' : 'logs'}
           </span>
@@ -231,7 +231,7 @@ export function CheckRow({
             <div className="px-1 py-2 text-gray-400">Loading logs…</div>
           ) : view?.available ? (
             <>
-              <div className="mb-1 flex items-center justify-between gap-2 px-1 text-[10px] text-gray-400">
+              <div className="mb-1 flex items-center justify-between gap-2 px-1 text-[11px] text-gray-400">
                 <span>
                   {view.partial && view.loadedBytes != null
                     ? `${view.lines} lines · ${formatLogBytes(view.loadedBytes)}${
@@ -248,7 +248,7 @@ export function CheckRow({
                   {(logs.hasNextPage || logs.isFetchingNextPage) && (
                     <button
                       type="button"
-                      className="rounded border border-gray-300 px-1.5 py-0.5 text-[10px] hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
+                      className="rounded border border-gray-300 px-1.5 py-0.5 text-[11px] hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
                       disabled={!canLoadEarlier}
                       onClick={loadEarlier}
                       title="Load the previous chunk of this log (or just scroll up)"

@@ -229,7 +229,7 @@ export function LineChart({
                   x={PAD_L - 4}
                   y={y(v) + 3}
                   textAnchor="end"
-                  className="fill-gray-500 dark:fill-gray-400 text-[8px]"
+                  className="fill-gray-500 dark:fill-gray-400 text-[11px]"
                 >
                   {formatY(v)}
                 </text>
@@ -283,14 +283,14 @@ export function LineChart({
             {/* dashed trend line(s) painted last so they sit above every data line + dot */}
             {series.filter((s) => s.dashed).map(renderPath)}
             {/* x ticks: first + last */}
-            <text x={PAD_L} y={height - 4} className="fill-gray-500 dark:fill-gray-400 text-[8px]">
+            <text x={PAD_L} y={height - 4} className="fill-gray-500 dark:fill-gray-400 text-[11px]">
               {labels[0] ? fmtDate(labels[0]) : ''}
             </text>
             <text
               x={w - PAD_R}
               y={height - 4}
               textAnchor="end"
-              className="fill-gray-500 dark:fill-gray-400 text-[8px]"
+              className="fill-gray-500 dark:fill-gray-400 text-[11px]"
             >
               {labels[n - 1] ? fmtDate(labels[n - 1]!) : ''}
             </text>
@@ -343,7 +343,7 @@ export function LineChart({
       {/* Below-chart summary strip — the point-in-time breakdown, right-aligned, outside the plot
           so it never covers the lines or a neighbouring panel. Reserves height to avoid a jump. */}
       {tipBelow && (
-        <div className="mt-1 flex min-h-[1.75rem] flex-wrap items-baseline justify-end gap-x-3 gap-y-0.5 text-[10px] leading-tight">
+        <div className="mt-1 flex min-h-[1.75rem] flex-wrap items-baseline justify-end gap-x-3 gap-y-0.5 text-[11px] leading-tight">
           {hover == null ? (
             <span className="text-gray-400">hover a week for its point-in-time breakdown</span>
           ) : (

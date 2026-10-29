@@ -122,14 +122,14 @@ export function MemberSectionList({
               {/* Opaque + z-10 + a hairline so a scrolling member row passes cleanly BEHIND
                   the pinned repo name instead of bleeding through it. */}
               <div className="sticky top-0 z-10 flex items-center justify-between border-b border-gray-100 bg-white px-1 pb-0.5 pt-1 dark:border-gray-800 dark:bg-gray-900">
-                <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
                   {sec.label}
                 </span>
                 <button
                   type="button"
                   onClick={() => onToggleMany(ids, !allChecked)}
                   title="Select / clear every member in this repo (including any collapsed below)"
-                  className="text-[10px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+                  className="text-[11px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
                 >
                   {allChecked ? 'none' : 'all'}
                 </button>
@@ -137,7 +137,7 @@ export function MemberSectionList({
               {maints.map((u) => memberRow(sec, u))}
               {visibleRest.map((u) => memberRow(sec, u))}
               {!searching && rest.length > 0 && (
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 px-1 py-0.5 text-[10px]">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 px-1 py-0.5 text-[11px]">
                   {remaining > 0 && (
                     <button
                       type="button"
@@ -341,7 +341,7 @@ export function UserSelectPanel({
                   <MaintainerShield />
                   <span className="font-medium">Maintainers</span>
                   <span className="text-gray-400">({ids.length})</span>
-                  <span className="ml-auto text-[10px] text-gray-400">
+                  <span className="ml-auto text-[11px] text-gray-400">
                     {allChecked ? 'clear' : 'select all'}
                   </span>
                 </button>
@@ -377,17 +377,17 @@ export function UserSelectPanel({
           {visibleBotSections.length > 0 && (
             <div className="mt-2 border-t border-gray-200 pt-2 dark:border-gray-700">
               <div className="mb-1 flex items-center gap-1.5 px-1">
-                <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
                   Bots
                 </span>
-                <span className="text-[10px] text-gray-400">
+                <span className="text-[11px] text-gray-400">
                   {excludeBots ? '· ticked stay visible' : '· all shown (bots not excluded)'}
                 </span>
               </div>
               <div className="max-h-40 overflow-y-auto">
                 {visibleBotSections.map((sec) => (
                   <div key={sec.key} className="mb-1 last:mb-0">
-                    <div className="sticky top-0 z-10 border-b border-gray-100 bg-white px-1 pb-0.5 pt-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:border-gray-800 dark:bg-gray-900">
+                    <div className="sticky top-0 z-10 border-b border-gray-100 bg-white px-1 pb-0.5 pt-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:border-gray-800 dark:bg-gray-900">
                       {sec.label}
                     </div>
                     {sec.members.map((u) => (

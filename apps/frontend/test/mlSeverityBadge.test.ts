@@ -167,10 +167,10 @@ describe('MlSeverityBadge — the common path must not move', () => {
   const FROZEN =
     '<span class="inline-flex items-center gap-1" title="Minor: A small but genuine issue.\n' +
     'Confidence 62%. Category: Correctness, Testing.">' +
-    '<span class="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold" ' +
+    '<span class="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[11px] font-semibold" ' +
     'style="background-color:#0284c71a;--ink-light:#027ab8;--ink-dark:#0284c7">' +
     '<span class="inline-block h-1.5 w-1.5 rounded-full" style="background-color:#0284c7"></span>Minor</span>' +
-    '<span class="rounded bg-gray-100 px-1 py-0.5 text-[10px] font-medium uppercase tracking-wide ' +
+    '<span class="rounded bg-gray-100 px-1 py-0.5 text-[11px] font-medium uppercase tracking-wide ' +
     'text-gray-500 dark:bg-gray-800 dark:text-gray-400">Correctness · Testing</span></span>';
 
   // ⚠ THE FROZEN OUTPUT MOVED ONCE, DELIBERATELY: `color:#0284c7` became
@@ -186,7 +186,7 @@ describe('MlSeverityBadge — the common path must not move', () => {
   const FROZEN_COMPACT =
     '<span class="inline-flex items-center gap-1" title="Minor: A small but genuine issue.\n' +
     'Confidence 62%. Category: Correctness, Testing.">' +
-    '<span class="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold" ' +
+    '<span class="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[11px] font-semibold" ' +
     'style="background-color:#0284c71a;--ink-light:#027ab8;--ink-dark:#0284c7">' +
     '<span class="inline-block h-1.5 w-1.5 rounded-full" style="background-color:#0284c7"></span>Minor</span></span>';
 

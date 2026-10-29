@@ -61,7 +61,7 @@ export function BranchStatusChip({
   const ciMeta = CI_META[status.ciStatus];
   return (
     <span
-      className={`flex min-w-0 items-center gap-1 text-[10px] text-gray-400 ${className}`}
+      className={`flex min-w-0 items-center gap-1 text-[11px] text-gray-400 ${className}`}
       title={`${status.branchName}: ${ciMeta?.label ?? 'no CI reported'}${
         status.lastCommitAt != null
           ? ` · last commit ${relativeTime(status.lastCommitAt)}`

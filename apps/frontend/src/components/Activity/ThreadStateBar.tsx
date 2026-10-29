@@ -104,7 +104,7 @@ export function ThreadStateBar({
               <span>{meta.label.toLowerCase()}</span>
             </>
           );
-          const cls = `flex items-center gap-1 text-[10px] ${
+          const cls = `flex items-center gap-1 text-[11px] ${
             dim ? 'text-gray-400 opacity-60' : 'text-gray-600 dark:text-gray-300'
           }`;
           return onSegmentClick ? (
@@ -124,7 +124,7 @@ export function ThreadStateBar({
             </span>
           );
         })}
-        <span className="ml-auto text-[10px] tabular-nums text-gray-400">{sum}</span>
+        <span className="ml-auto text-[11px] tabular-nums text-gray-400">{sum}</span>
       </div>
     </div>
   );

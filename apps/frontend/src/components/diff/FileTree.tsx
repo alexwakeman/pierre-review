@@ -49,13 +49,13 @@ function Counts({
 }): JSX.Element {
   if (muted) {
     return (
-      <span className="shrink-0 font-mono text-[10px] tabular-nums text-gray-400 dark:text-gray-500">
+      <span className="shrink-0 font-mono text-[11px] tabular-nums text-gray-400 dark:text-gray-500">
         +{additions} −{deletions}
       </span>
     );
   }
   return (
-    <span className="shrink-0 font-mono text-[10px] tabular-nums">
+    <span className="shrink-0 font-mono text-[11px] tabular-nums">
       <span className="text-green-600 dark:text-green-400">+{additions}</span>{' '}
       <span className="text-red-500 dark:text-red-400">−{deletions}</span>
     </span>
@@ -284,7 +284,7 @@ export function FileTree({
       {/* Sticky within the rail (the overflow-y-auto box in ChangesTab IS the scroll
           container): Collapse-all exists for exactly the long trees whose rows would
           otherwise scroll it out of reach. Opaque bg matches the rail's. */}
-      <div className="sticky top-0 z-10 flex items-center gap-2 bg-white px-2 pb-0.5 pt-1 text-[10px] text-gray-400 dark:bg-gray-950 dark:text-gray-500">
+      <div className="sticky top-0 z-10 flex items-center gap-2 bg-white px-2 pb-0.5 pt-1 text-[11px] text-gray-400 dark:bg-gray-950 dark:text-gray-500">
         <span>
           {fileCount} file{fileCount === 1 ? '' : 's'}
         </span>

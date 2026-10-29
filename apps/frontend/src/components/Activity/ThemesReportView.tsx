@@ -39,7 +39,7 @@ const CATEGORY_LABEL: Record<BotThemeCategory, string> = {
 export function SeverityPill({ severity }: { severity: BotThemeSeverity }): JSX.Element {
   const m = SEVERITY_META[severity];
   return (
-    <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${m.cls}`}>
+    <span className={`shrink-0 rounded px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide ${m.cls}`}>
       {m.label}
     </span>
   );
@@ -86,7 +86,7 @@ function ThemeCard({
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-2">
             <span className="text-[13px] font-semibold text-gray-800 dark:text-gray-100">{theme.title}</span>
-            <span className="shrink-0 rounded bg-gray-100 px-1 text-[9px] font-medium uppercase tracking-wide text-gray-500 dark:bg-gray-800 dark:text-gray-400">
+            <span className="shrink-0 rounded bg-gray-100 px-1 text-[11px] font-medium uppercase tracking-wide text-gray-500 dark:bg-gray-800 dark:text-gray-400">
               {CATEGORY_LABEL[theme.category]}
             </span>
             {/* Exact when the server computed it (bot reports: Σ of the cited clusters'
@@ -103,7 +103,7 @@ function ThemeCard({
               </span>
             ) : theme.occurrences > 0 ? (
               <span
-                className="ml-auto shrink-0 text-[10px] tabular-nums text-gray-400"
+                className="ml-auto shrink-0 text-[11px] tabular-nums text-gray-400"
                 title="Approximate number of comments this theme covers"
               >
                 ≈{theme.occurrences}
@@ -113,7 +113,7 @@ function ThemeCard({
           {theme.summary && (
             <p className="mt-0.5 text-[12px] leading-relaxed text-gray-600 dark:text-gray-300">{theme.summary}</p>
           )}
-          <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-gray-400">
+          <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-gray-400">
             {theme.bots.length > 0 && (
               <span>
                 <ActorIcon size={11} className="mr-1 inline-block align-[-0.1em] text-gray-400" />
@@ -164,7 +164,7 @@ function SeverityStrip({ bySeverity }: { bySeverity: BotThemeSeverityCount[] }):
       {bySeverity.map((s) => (
         <span
           key={s.severity}
-          className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${SEVERITY_META[s.severity].cls}`}
+          className={`rounded px-1.5 py-0.5 text-[11px] font-semibold ${SEVERITY_META[s.severity].cls}`}
           title="Aggregated from the themes’ approximate occurrence estimates — the model’s read, not an exact count"
         >
           {SEVERITY_META[s.severity].label} · {s.count}
@@ -185,7 +185,7 @@ function AreaDistribution({ byArea }: { byArea: BotThemeAreaCount[] }): JSX.Elem
         {byArea.map((a) => (
           <span
             key={a.area}
-            className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-600 dark:bg-gray-800 dark:text-gray-300"
+            className="rounded bg-gray-100 px-1.5 py-0.5 text-[11px] text-gray-600 dark:bg-gray-800 dark:text-gray-300"
             title={`${a.count} of ${total} comments`}
           >
             <span className="font-mono">{a.area}</span>{' '}

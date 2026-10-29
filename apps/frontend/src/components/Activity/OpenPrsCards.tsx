@@ -981,7 +981,7 @@ function TicketPeopleAndStatus({
         <span className="inline-flex items-center gap-1.5">
           <span
             aria-hidden
-            className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-gray-200 text-[10px] font-semibold text-gray-700 dark:bg-gray-700 dark:text-gray-100"
+            className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-gray-200 text-[11px] font-semibold text-gray-700 dark:bg-gray-700 dark:text-gray-100"
           >
             {initialsOf(t.assignee.name)}
           </span>

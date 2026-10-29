@@ -351,7 +351,7 @@ function PrHitCard({ hit, query }: { hit: SearchHit; query: string }): JSX.Eleme
       >
         <div className="flex items-center gap-2">
           <span
-            className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold text-white"
+            className="shrink-0 rounded px-1.5 py-0.5 text-[11px] font-semibold text-white"
             style={{ backgroundColor: stateMeta.color }}
           >
             {stateMeta.label}

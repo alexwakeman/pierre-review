@@ -326,7 +326,7 @@ export function ThreadList({
           style={vendor ? { boxShadow: `inset 3px 0 0 ${vendor.color}` } : undefined}
         >
           <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
               State
             </span>
             {DERIVED_STATES.map((st) => {
@@ -389,7 +389,7 @@ export function ThreadList({
               advertise a filter that can only ever return nothing. */}
           {mlIndex != null && mlIndex.size > 0 && (
             <div className="flex flex-wrap items-center gap-1.5">
-              <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
                 Severity
               </span>
               {ML_SEVERITIES.map((sev) => {
@@ -539,7 +539,7 @@ export function ThreadList({
                         <button
                           type="button"
                           onClick={() => cycleToThread(clusterKey, m.userId, ids)}
-                          className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium hover:opacity-80"
+                          className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium hover:opacity-80"
                           style={{ ...vendorInk(meta.color), background: `${meta.color}1a` }}
                           title={
                             ids.length > 1
@@ -560,14 +560,14 @@ export function ThreadList({
                   </span>
                   {cluster.conflict ? (
                     <span
-                      className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:bg-amber-900/40 dark:text-amber-300"
+                      className="rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-semibold text-amber-700 dark:bg-amber-900/40 dark:text-amber-300"
                       title="The bots disagree on severity/verdict here — worth a human look."
                     >
                       bots disagree here
                     </span>
                   ) : cluster.consensus ? (
                     <span
-                      className="rounded bg-green-100 px-1.5 py-0.5 text-[10px] font-semibold text-green-700 dark:bg-green-900/40 dark:text-green-300"
+                      className="rounded bg-green-100 px-1.5 py-0.5 text-[11px] font-semibold text-green-700 dark:bg-green-900/40 dark:text-green-300"
                       title="The bots agree here — one fix likely clears both."
                     >
                       consensus

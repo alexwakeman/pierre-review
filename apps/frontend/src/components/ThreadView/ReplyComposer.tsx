@@ -82,7 +82,7 @@ export function ReplyComposer({
         >
           Cancel
         </button>
-        {error && <span className="text-[10px] text-red-500">{error}</span>}
+        {error && <span className="text-[11px] text-red-500">{error}</span>}
       </div>
     </div>
   );

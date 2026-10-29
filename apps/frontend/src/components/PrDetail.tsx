@@ -452,7 +452,7 @@ function ReviewStateTag({ state }: { state: ReviewState }): JSX.Element {
   const t = REVIEW_TAG[state];
   return (
     <span
-      className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${t.cls}`}
+      className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${t.cls}`}
       title={`Review: ${state.replace('_', ' ')}`}
     >
       {t.label}

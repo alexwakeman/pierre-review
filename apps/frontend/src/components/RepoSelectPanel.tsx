@@ -174,7 +174,7 @@ export function RepoSelectPanel({
                         onClick={() => onOnly(r.id)}
                         title={`Show only ${r.fullName}`}
                         aria-label={`Show only ${r.fullName}`}
-                        className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-gray-400 opacity-0 hover:bg-gray-200 hover:text-gray-700 focus:opacity-100 group-hover:opacity-100 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+                        className="shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium uppercase tracking-wide text-gray-400 opacity-0 hover:bg-gray-200 hover:text-gray-700 focus:opacity-100 group-hover:opacity-100 dark:hover:bg-gray-700 dark:hover:text-gray-200"
                       >
                         only
                       </button>

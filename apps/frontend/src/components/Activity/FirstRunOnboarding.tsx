@@ -45,7 +45,7 @@ function OwnerAvatar({ login, src }: { login: string; src: string | null }): JSX
     );
   }
   return (
-    <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-gray-300 text-[9px] font-semibold text-gray-700 dark:bg-gray-700 dark:text-gray-200">
+    <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-gray-300 text-[11px] font-semibold text-gray-700 dark:bg-gray-700 dark:text-gray-200">
       {login.slice(0, 2).toUpperCase()}
     </span>
   );
@@ -206,12 +206,12 @@ export function FirstRunOnboarding(): JSX.Element {
                         {r.fullName}
                       </span>
                       {r.isPrivate && (
-                        <span className="shrink-0 rounded bg-gray-200 px-1 text-[9px] uppercase tracking-wide text-gray-500 dark:bg-gray-700 dark:text-gray-300">
+                        <span className="shrink-0 rounded bg-gray-200 px-1 text-[11px] uppercase tracking-wide text-gray-500 dark:bg-gray-700 dark:text-gray-300">
                           private
                         </span>
                       )}
                       {r.isOwnedOrMember && (
-                        <span className="shrink-0 rounded bg-sky-100 px-1 text-[9px] uppercase tracking-wide text-sky-700 dark:bg-sky-900/50 dark:text-sky-300">
+                        <span className="shrink-0 rounded bg-sky-100 px-1 text-[11px] uppercase tracking-wide text-sky-700 dark:bg-sky-900/50 dark:text-sky-300">
                           yours
                         </span>
                       )}
@@ -221,7 +221,7 @@ export function FirstRunOnboarding(): JSX.Element {
                         {r.description}
                       </span>
                     )}
-                    <span className="mt-0.5 flex items-center gap-2 text-[10px] text-gray-400">
+                    <span className="mt-0.5 flex items-center gap-2 text-[11px] text-gray-400">
                       <span
                         className="flex items-center gap-1"
                         title={`${r.stargazerCount} stars`}

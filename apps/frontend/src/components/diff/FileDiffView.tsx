@@ -288,7 +288,7 @@ function DiffLine({
                 type="button"
                 onClick={onOpen}
                 title="Comment on this line"
-                className="rounded bg-blue-500 px-1 text-[10px] font-bold leading-tight text-white opacity-0 transition-opacity hover:bg-blue-600 group-hover:opacity-100"
+                className="rounded bg-blue-500 px-1 text-[11px] font-bold leading-tight text-white opacity-0 transition-opacity hover:bg-blue-600 group-hover:opacity-100"
               >
                 +
               </button>
@@ -832,7 +832,7 @@ function InlineCommentBox({
 
   return (
     <div className="space-y-1 rounded border border-gray-300 bg-white p-2 font-sans dark:border-gray-700 dark:bg-gray-900">
-      <div className="text-[10px] text-gray-400">
+      <div className="text-[11px] text-gray-400">
         Commenting on {side === 'LEFT' ? 'old' : 'new'} line {line}
       </div>
       <MentionTextarea
@@ -866,10 +866,10 @@ function InlineCommentBox({
         >
           {notice?.posted ? 'Close' : 'Cancel'}
         </button>
-        {error && <span className="text-[10px] text-red-500">{error}</span>}
+        {error && <span className="text-[11px] text-red-500">{error}</span>}
       </div>
       {notice && (
-        <div className="text-[10px] text-amber-600 dark:text-amber-400">
+        <div className="text-[11px] text-amber-600 dark:text-amber-400">
           {notice.text}
           {notice.url && (
             <>

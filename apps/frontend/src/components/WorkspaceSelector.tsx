@@ -354,7 +354,7 @@ export function WorkspaceSelector(): JSX.Element {
                   <span className="flex min-w-0 items-center gap-1.5">
                     <span
                       aria-hidden
-                      className={`inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full border text-[9px] leading-none ${
+                      className={`inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full border text-[11px] leading-none ${
                         selected
                           ? 'border-sky-500 bg-sky-500 text-white'
                           : 'border-gray-300 dark:border-gray-600'
@@ -367,7 +367,7 @@ export function WorkspaceSelector(): JSX.Element {
                         IS where new repos land and where a deleted workspace's repos come back
                         to, which is worth saying on the row that cannot be deleted. */}
                     {w.isDefault && (
-                      <span className="shrink-0 rounded bg-gray-100 px-1 text-[9px] uppercase tracking-wide text-gray-500 dark:bg-gray-800 dark:text-gray-400">
+                      <span className="shrink-0 rounded bg-gray-100 px-1 text-[11px] uppercase tracking-wide text-gray-500 dark:bg-gray-800 dark:text-gray-400">
                         Default
                       </span>
                     )}
@@ -412,7 +412,7 @@ export function WorkspaceSelector(): JSX.Element {
                       // Not counted, NOT zero — see the note above the hook call.
                       <span
                         title="Not counted here — the cross-workspace roll-up covers only the first few Workspaces. Switch to it to see its own count."
-                        className="text-[10px] decorative-mark text-gray-300 dark:text-gray-600"
+                        className="text-[11px] decorative-mark text-gray-300 dark:text-gray-600"
                       >
                         —
                       </span>
@@ -431,7 +431,7 @@ export function WorkspaceSelector(): JSX.Element {
             })
           )}
           {uncounted.length > 0 && (
-            <div className="px-2 pb-0.5 pt-1 text-[10px] leading-tight text-gray-400">
+            <div className="px-2 pb-0.5 pt-1 text-[11px] leading-tight text-gray-400">
               {uncounted.length} Workspace{uncounted.length === 1 ? '' : 's'} beyond the
               cross-workspace roll-up{uncounted.length === 1 ? ' is' : ' are'} not counted here.
             </div>
@@ -453,7 +453,7 @@ export function WorkspaceSelector(): JSX.Element {
             <GearIcon className="shrink-0" />
             <span className="truncate">Manage repos &amp; workspaces</span>
             {rows.length > 0 && (
-              <span className="ml-auto shrink-0 tabular-nums text-[10px] text-gray-400">
+              <span className="ml-auto shrink-0 tabular-nums text-[11px] text-gray-400">
                 {rows.length}
               </span>
             )}

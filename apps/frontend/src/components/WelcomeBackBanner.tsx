@@ -160,7 +160,7 @@ export function WelcomeBackBanner(): JSX.Element | null {
               {l.count}
               {l.cap != null && (
                 <>
-                  <sup className="ml-px text-[8px] font-normal opacity-70" aria-hidden>
+                  <sup className="ml-px text-[11px] font-normal opacity-70" aria-hidden>
                     +
                   </sup>
                   <span className="sr-only"> of {l.cap.total}</span>

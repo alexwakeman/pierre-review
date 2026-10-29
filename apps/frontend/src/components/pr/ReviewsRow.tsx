@@ -39,7 +39,7 @@ function AutomatedReviewerBadge({
   return (
     <span
       data-testid="reviewer-provenance"
-      className="inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[10px] font-medium"
+      className="inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[11px] font-medium"
       style={{ ...vendorInk(meta.color), background: `${meta.color}1a` }}
       title={`Automated reviewer — ${meta.label}${prov}`}
     >

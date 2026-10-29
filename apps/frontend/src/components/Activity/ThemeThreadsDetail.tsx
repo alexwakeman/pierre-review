@@ -277,7 +277,7 @@ export function foldThemeMetrics(
 function MlSevChip({ label, color, count }: { label: string; color: string; count: number }): JSX.Element {
   return (
     <span
-      className="rounded px-1.5 py-0.5 text-[10px] font-medium tabular-nums"
+      className="rounded px-1.5 py-0.5 text-[11px] font-medium tabular-nums"
       style={{ ...vendorInk(color), background: `${color}1a` }}
     >
       {label} · {count}
@@ -401,7 +401,7 @@ export function ThemeThreadsDetail(): JSX.Element {
         <div className="flex flex-wrap items-center gap-2">
           <SeverityPill severity={theme.severity} />
           <h2 className="text-base font-semibold text-gray-800 dark:text-gray-100">{theme.title}</h2>
-          <span className="rounded bg-gray-100 px-1.5 text-[10px] font-medium uppercase tracking-wide text-gray-500 dark:bg-gray-800 dark:text-gray-400">
+          <span className="rounded bg-gray-100 px-1.5 text-[11px] font-medium uppercase tracking-wide text-gray-500 dark:bg-gray-800 dark:text-gray-400">
             {source === 'bot' ? 'Bot theme' : 'Discussion theme'}
           </span>
         </div>

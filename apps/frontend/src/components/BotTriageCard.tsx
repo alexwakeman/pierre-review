@@ -306,7 +306,7 @@ export function BotTriageCard({
               const excerpt = (t.comments[0]?.body ?? '').replace(/\s+/g, ' ').slice(0, 90);
               return (
                 <li key={t.id} className="flex items-baseline gap-1.5">
-                  <code className="shrink-0 font-mono text-[10px] text-gray-500 dark:text-gray-400">
+                  <code className="shrink-0 font-mono text-[11px] text-gray-500 dark:text-gray-400">
                     {t.path.split('/').pop() ?? t.path}
                     {t.line != null ? `:${t.line}` : ''}
                   </code>

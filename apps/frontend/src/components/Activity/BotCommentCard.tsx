@@ -205,19 +205,19 @@ function BotCommentCardImpl({
       <div className="flex flex-wrap items-center gap-2">
         <Avatar user={user} size={18} />
         <span
-          className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium"
+          className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium"
           style={{ ...vendorInk(color), background: `${color}1a` }}
           title={`${c.authorLabel} — an automated reviewer Limn triages`}
         >
           <BotIcon size={10} />
           {c.authorLabel}
         </span>
-        <span className="shrink-0 text-[10px] uppercase tracking-wide text-gray-400">
+        <span className="shrink-0 text-[11px] uppercase tracking-wide text-gray-400">
           {TARGET_KIND_LABEL[c.targetKind]}
         </span>
         {threadCount > 1 && (
           <span
-            className="shrink-0 rounded bg-gray-100 px-1 py-px text-[10px] font-medium text-gray-500 dark:bg-gray-800 dark:text-gray-400"
+            className="shrink-0 rounded bg-gray-100 px-1 py-px text-[11px] font-medium text-gray-500 dark:bg-gray-800 dark:text-gray-400"
             title={`This bot left ${threadCount} separate threads in the same line area — collapsed to one row here, exactly as the overlap count treats them.`}
           >
             ×{threadCount}
@@ -240,7 +240,7 @@ function BotCommentCardImpl({
           <MlSeverityBadge label={c.mlLabel} vendorClaim />
         ) : (
           <span
-            className="text-[10px] text-gray-400 dark:text-gray-500"
+            className="text-[11px] text-gray-400 dark:text-gray-500"
             title="Not scored yet — the enrichment worker labels bot text on its own pass, which always FOLLOWS the sync that stored it."
           >
             not scored

@@ -44,7 +44,7 @@ export function UserMenu({
       />
     ) : (
       <span
-        className="flex shrink-0 items-center justify-center rounded-full bg-gray-300 text-[9px] font-semibold text-gray-700 dark:bg-gray-700 dark:text-gray-200"
+        className="flex shrink-0 items-center justify-center rounded-full bg-gray-300 text-[11px] font-semibold text-gray-700 dark:bg-gray-700 dark:text-gray-200"
         style={{ width: 20, height: 20 }}
       >
         {label.slice(0, 2).toUpperCase()}

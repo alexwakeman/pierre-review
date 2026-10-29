@@ -1966,7 +1966,7 @@ function FeedRowImpl({
               feed AND more activity has landed behind it — see FeedNewCohorts. */}
           {isNew && (
             <span
-              className="shrink-0 rounded-full bg-sky-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-sky-600 dark:text-sky-300"
+              className="shrink-0 rounded-full bg-sky-500/15 px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-sky-600 dark:text-sky-300"
               title="Arrived since you last looked at the top of the feed"
             >
               New
@@ -1997,7 +1997,7 @@ function FeedRowImpl({
           {automatedTag && (
             <span className="group/bot inline-flex shrink-0 items-center gap-1">
               <span
-                className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium"
+                className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium"
                 style={{ color: automatedTag.color, background: `${automatedTag.color}1a` }}
                 title={`${automatedTag.label} — an automated reviewer Limn triages`}
               >
@@ -2013,7 +2013,7 @@ function FeedRowImpl({
                       onNotBot(automatedTag.userId, automatedTag.label);
                   }}
                   disabled={overridePending}
-                  className="text-[9px] text-gray-400 underline underline-offset-2 opacity-0 transition-opacity hover:text-gray-600 disabled:opacity-40 group-hover/bot:opacity-100 dark:hover:text-gray-200"
+                  className="text-[11px] text-gray-400 underline underline-offset-2 opacity-0 transition-opacity hover:text-gray-600 disabled:opacity-40 group-hover/bot:opacity-100 dark:hover:text-gray-200"
                   title="Not a bot? Stop treating this reviewer as automated ACROSS THIS WHOLE WORKSPACE — every repo in it, not just this PR's. It keeps its vendor name, other Workspaces are unaffected, and you'll be asked to confirm."
                 >
                   {overridePending ? 'saving…' : 'not a bot?'}
@@ -2028,13 +2028,13 @@ function FeedRowImpl({
             {glyph.label}
           </span>
           {isMyTurn && (
-            <span className="shrink-0 rounded bg-yellow-400/20 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-yellow-700 dark:text-yellow-300">
+            <span className="shrink-0 rounded bg-yellow-400/20 px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-yellow-700 dark:text-yellow-300">
               My Turn
             </span>
           )}
           {isMyTurn && primaryReason != null && (
             <span
-              className="shrink-0 rounded border border-yellow-300 px-1.5 py-0.5 text-[10px] font-medium text-yellow-700 dark:border-yellow-600/50 dark:text-yellow-300"
+              className="shrink-0 rounded border border-yellow-300 px-1.5 py-0.5 text-[11px] font-medium text-yellow-700 dark:border-yellow-600/50 dark:text-yellow-300"
               title={item.myTurnReasons.map((r) => MY_TURN_REASON_META[r].title).join(' · ')}
             >
               {MY_TURN_REASON_META[primaryReason].label}
@@ -2123,7 +2123,7 @@ function FeedRowImpl({
                 key={c.commentId}
                 className="rounded bg-gray-50 px-2 py-1.5 text-sm dark:bg-gray-900/50"
               >
-                <div className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+                <div className="mb-0.5 text-[11px] font-semibold uppercase tracking-wide text-gray-400">
                   Also commented
                 </div>
                 <div className="max-h-72 overflow-auto">

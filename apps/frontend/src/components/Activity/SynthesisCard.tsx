@@ -38,7 +38,7 @@ function ClusterLines({ synthesis }: { synthesis: StoredSynthesis }): JSX.Elemen
           <span className="min-w-0 flex-1 text-gray-700 dark:text-gray-200">{c.label}</span>
           {c.configFixable && (
             <span
-              className="shrink-0 rounded bg-amber-500/10 px-1 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400"
+              className="shrink-0 rounded bg-amber-500/10 px-1 py-0.5 text-[11px] font-medium text-amber-600 dark:text-amber-400"
               title="This whole cluster looks fixable in the bot's own configuration. A hint, never an action."
             >
               config-fixable
@@ -58,7 +58,7 @@ function ClusterLines({ synthesis }: { synthesis: StoredSynthesis }): JSX.Elemen
 
 function CoverageLine({ synthesis }: { synthesis: StoredSynthesis }): JSX.Element {
   return (
-    <div className="mt-2 border-t border-ai-hairline pt-1.5 text-[10px] text-gray-400">
+    <div className="mt-2 border-t border-ai-hairline pt-1.5 text-[11px] text-gray-400">
       Summarised {synthesis.analyzedCount.toLocaleString()} of{' '}
       {synthesis.totalCount.toLocaleString()} item{synthesis.totalCount === 1 ? '' : 's'}
       {synthesis.truncated ? ' (the newest — items beyond the cap were not analysed)' : ''}.
@@ -111,7 +111,7 @@ export function SynthesisCard({
           <span className="text-sm font-semibold text-gray-800 dark:text-gray-100">{title}</span>
           {synthesis && resp?.stale && (
             <span
-              className="shrink-0 rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400"
+              className="shrink-0 rounded bg-amber-500/10 px-1.5 py-0.5 text-[11px] font-medium text-amber-600 dark:text-amber-400"
               title="The items below have changed since this summary was generated — the counts still describe the set it was computed over."
             >
               stale

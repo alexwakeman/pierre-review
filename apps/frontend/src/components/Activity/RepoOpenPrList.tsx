@@ -114,13 +114,13 @@ export function OpenPrRow({
             takes it from the flexible title instead; every other row keeps the column still. */}
         <span className="flex min-w-28 shrink-0 items-center justify-end gap-1 whitespace-nowrap">
           {pr.isDraft && (
-            <span className="shrink-0 rounded bg-gray-500/15 px-1 text-[10px] font-medium text-gray-500 dark:text-gray-400">
+            <span className="shrink-0 rounded bg-gray-500/15 px-1 text-[11px] font-medium text-gray-500 dark:text-gray-400">
               draft
             </span>
           )}
           {standing != null && (
             <span
-              className="shrink-0 rounded px-1 text-[10px] font-semibold"
+              className="shrink-0 rounded px-1 text-[11px] font-semibold"
               style={{ color: standing.color, background: standing.color + '1a' }}
             >
               {standing.label}
@@ -128,7 +128,7 @@ export function OpenPrRow({
           )}
           {warn != null && (
             <span
-              className={`shrink-0 rounded px-1 text-[10px] font-medium ${MERGE_TONE_CHIP[warn.tone]}`}
+              className={`shrink-0 rounded px-1 text-[11px] font-medium ${MERGE_TONE_CHIP[warn.tone]}`}
               title={warn.detail ?? warn.label}
             >
               {warn.label}
@@ -140,14 +140,14 @@ export function OpenPrRow({
         <span className="hidden w-20 shrink-0 justify-end text-right sm:flex">
           {reason.myTurn ? (
             <span
-              className="truncate rounded px-1 text-[10px] font-medium"
+              className="truncate rounded px-1 text-[11px] font-medium"
               style={{ color: reason.color, background: reason.color + '1a' }}
               title={userLabel(author, pr.authorId)}
             >
               {reason.label}
             </span>
           ) : (
-            <span className="truncate text-[10px] text-gray-400">
+            <span className="truncate text-[11px] text-gray-400">
               {relativeTime(pr.updatedAt)}
             </span>
           )}

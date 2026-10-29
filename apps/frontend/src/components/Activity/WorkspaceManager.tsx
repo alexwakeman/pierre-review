@@ -279,7 +279,7 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
           </button>
         </div>
         {hint && (
-          <div className="pl-1 pt-0.5 text-[10px] text-amber-600 dark:text-amber-500">
+          <div className="pl-1 pt-0.5 text-[11px] text-amber-600 dark:text-amber-500">
             {hint.kind === 'cooldown'
               ? 'recently synced — try again in a moment'
               : 'couldn’t start the sync — check the header sync button for details'}
@@ -468,13 +468,13 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
                         </span>
                         {w.isDefault && (
                           <span
-                            className="shrink-0 rounded bg-gray-100 px-1 text-[9px] uppercase tracking-wide text-gray-500 dark:bg-gray-800 dark:text-gray-400"
+                            className="shrink-0 rounded bg-gray-100 px-1 text-[11px] uppercase tracking-wide text-gray-500 dark:bg-gray-800 dark:text-gray-400"
                             title="New repos land here, and a deleted workspace's repos come back here."
                           >
                             default
                           </span>
                         )}
-                        <span className="shrink-0 tabular-nums text-[10px] text-gray-400">
+                        <span className="shrink-0 tabular-nums text-[11px] text-gray-400">
                           {w.repoCount}
                         </span>
                       </button>
@@ -544,7 +544,7 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
                 <>
                   {selected && (
                     <>
-                      <div className="px-1 pb-1 pt-0.5 text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+                      <div className="px-1 pb-1 pt-0.5 text-[11px] font-semibold uppercase tracking-wide text-gray-400">
                         In “{selected.name}” · {inSelected.length}
                       </div>
                       {inSelected.length === 0 ? (
@@ -558,7 +558,7 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
                   )}
                   {elsewhere.length > 0 && (
                     <>
-                      <div className="border-t border-gray-100 px-1 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:border-gray-800">
+                      <div className="border-t border-gray-100 px-1 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:border-gray-800">
                         In other workspaces · {elsewhere.length}
                       </div>
                       <ul className="space-y-0.5">{elsewhere.map(RepoRow)}</ul>

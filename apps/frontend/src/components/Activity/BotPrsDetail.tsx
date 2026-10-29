@@ -117,7 +117,7 @@ function CommentRow({
         </td>
       )}
       <td className="max-w-2xl py-2 pr-3">
-        <div className="mb-1 flex flex-wrap items-center gap-1.5 text-[10px] text-gray-400">
+        <div className="mb-1 flex flex-wrap items-center gap-1.5 text-[11px] text-gray-400">
           <span className="uppercase tracking-wide">{TARGET_KIND_LABEL[c.targetKind]}</span>
           {c.path && <span className="truncate font-mono">{c.path}</span>}
           {state && <MetaChip meta={state} />}
@@ -246,7 +246,7 @@ function Row({
             </span>
             {pr.botOnly && (
               <span
-                className="shrink-0 rounded bg-amber-500/10 px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300"
+                className="shrink-0 rounded bg-amber-500/10 px-1 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300"
                 title="Only bots touched this PR — no human review or comment"
               >
                 bot-only
@@ -290,7 +290,7 @@ function Table({
     <div className="overflow-x-auto">
       <table className="w-full min-w-[720px] border-collapse text-sm">
         <thead>
-          <tr className="text-left text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+          <tr className="text-left text-[11px] font-semibold uppercase tracking-wide text-gray-400">
             <th className="pb-1 pr-3 font-semibold">Pull request</th>
             <th className="pb-1 pr-3 font-semibold">Bot threads</th>
             <th className="pb-1 pr-3 font-semibold">Acted on</th>
@@ -649,7 +649,7 @@ export function BotPrsDetail(): JSX.Element {
               un-enriched (or OSS) install advertises a filter that can only return nothing. */}
           {effectiveView === 'comments' && showCommentFilters && (
             <div className="flex flex-wrap items-center gap-1.5">
-              <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
                 Severity
               </span>
               {SEVERITY_PILLS.map((k) => {
@@ -752,7 +752,7 @@ export function BotPrsDetail(): JSX.Element {
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[720px] border-collapse text-sm">
                     <thead>
-                      <tr className="text-left text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+                      <tr className="text-left text-[11px] font-semibold uppercase tracking-wide text-gray-400">
                         {mlEnabled && <th className="pb-1 pr-3 font-semibold">Severity</th>}
                         <th className="pb-1 pr-3 font-semibold">Comment</th>
                         <th className="pb-1 pr-3 font-semibold">Pull request</th>

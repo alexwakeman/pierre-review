@@ -146,7 +146,7 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
                   Open PRs only, any age.
                 </span>
               </span>
-              <span className="shrink-0 self-center rounded border border-amber-400 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:border-amber-600/70 dark:text-amber-300">
+              <span className="shrink-0 self-center rounded border border-amber-400 px-1.5 py-0.5 text-[11px] font-medium text-amber-700 dark:border-amber-600/70 dark:text-amber-300">
                 Show list →
               </span>
             </button>

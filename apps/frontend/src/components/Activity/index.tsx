@@ -117,7 +117,7 @@ function RailRow({
           {threadTotals != null && <ThreadStateBar counts={threadTotals} compact />}
           {attentionCount > 0 && (
             <span
-              className="shrink-0 rounded bg-amber-500/15 px-1 text-[10px] font-semibold text-amber-600 dark:text-amber-400"
+              className="shrink-0 rounded bg-amber-500/15 px-1 text-[11px] font-semibold text-amber-600 dark:text-amber-400"
               title="PRs needing attention"
             >
               <WarningIcon size={10} className="mr-0.5 inline-block align-[-0.1em]" />
@@ -363,7 +363,7 @@ export function ActivityView(): JSX.Element {
             WorkspaceSelector (shown on every view), so the rail carries no header of its own. */}
         {generatedAt != null && (
           <div
-            className="px-3 py-1 text-[10px] text-gray-400"
+            className="px-3 py-1 text-[11px] text-gray-400"
             title={new Date(generatedAt).toLocaleString()}
           >
             {relativeTime(generatedAt)}
@@ -557,7 +557,7 @@ export function ActivityView(): JSX.Element {
               (k) => (
                 <span
                   key={k}
-                  className="flex items-center gap-1 text-[10px] text-gray-400"
+                  className="flex items-center gap-1 text-[11px] text-gray-400"
                   title={DERIVED_STATE_META[k].description}
                 >
                   <span
