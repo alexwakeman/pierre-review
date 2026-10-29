@@ -17,30 +17,11 @@ import { ReopenPrControl } from '../ReopenPrControl.js';
  * top of the Claude Review tab. Each caller supplies its own row chrome; this renders the controls.
  *
  * ⚠ HIDDEN BY DEFAULT behind ONE reveal button ("Show actions"), so a write is never one stray
- * click away while reading. The choice is remembered for the browser session (sessionStorage, both
- * places at once); a fresh session starts closed. Only the BUTTONS hide: the merge facts stay on
- * the Overview's Status row, and the closed row still says where the viewer stands ("You
- * approved") and whether a merge is in flight.
+ * click away while reading. ⚠ NOTHING REMEMBERS THE CHOICE: every mount (a new tab, another view,
+ * another PR) starts closed, so the actions show only after a click in the view at hand. Only the
+ * BUTTONS hide: the merge facts stay on the Overview's Status row, and the closed row still says
+ * where the viewer stands ("You approved") and whether a merge is in flight.
  */
-
-export const PR_ACTIONS_OPEN_KEY = 'limn.prActions.open';
-
-/** The reveal's starting state: closed unless this session opened it. Exported for tests. */
-export function readPrActionsOpen(storage: Pick<Storage, 'getItem'> | null): boolean {
-  try {
-    return storage?.getItem(PR_ACTIONS_OPEN_KEY) === '1';
-  } catch {
-    return false;
-  }
-}
-
-function sessionStore(): Storage | null {
-  try {
-    return typeof window === 'undefined' ? null : window.sessionStorage;
-  } catch {
-    return null;
-  }
-}
 
 /**
  * The facts the blocked-reason derivation reads. Built here so the Overview's Status row verdict
@@ -97,19 +78,13 @@ export function PrActionControls({
   const prSyncedAt = useQueryDataUpdatedAt(['pr', pr.id]);
   const armedIntent = usePrArmedIntent(pr.id);
   const facts = blockFacts ?? prBlockFacts(pr);
-  const [open, setOpen] = useState(() => readPrActionsOpen(sessionStore()));
+  // Open for ONE PR: a pane that stays mounted while the reader moves to another PR starts closed.
+  const [openFor, setOpenFor] = useState<number | null>(null);
+  const open = openFor === pr.id;
   // A merge or branch update started here keeps running while the buttons are hidden; say so.
   const merging = useIsMutating({ mutationKey: mergePrMutationKey(pr.id) }) > 0;
   const updating = useIsMutating({ mutationKey: updateBranchMutationKey(pr.id) }) > 0;
-  const toggle = (): void => {
-    const next = !open;
-    setOpen(next);
-    try {
-      sessionStore()?.setItem(PR_ACTIONS_OPEN_KEY, next ? '1' : '0');
-    } catch {
-      /* private window: the choice just isn't remembered */
-    }
-  };
+  const toggle = (): void => setOpenFor(open ? null : pr.id);
   const standing =
     pr.viewerReviewStanding === 'approved'
       ? 'You approved'

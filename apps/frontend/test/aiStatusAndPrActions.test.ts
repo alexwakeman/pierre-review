@@ -8,7 +8,6 @@ import { join } from 'node:path';
 import { aiStatusText, formatElapsed } from '../src/components/AiStatusLine.js';
 import { threadCheckStage } from '../src/components/CheckThreadsButton.js';
 import { sprintAiPass, ticketChecksNote } from '../src/components/Activity/SprintView.js';
-import { PR_ACTIONS_OPEN_KEY, readPrActionsOpen } from '../src/components/pr/PrActionsRow.js';
 import { threadCheckActive } from '../src/hooks/useThreadCheck.js';
 
 const src = (p: string) => readFileSync(join(__dirname, '../src', p), 'utf8');
@@ -103,20 +102,11 @@ describe('This Sprint refresh: the ticket-checks note', () => {
 });
 
 describe('PR actions are hidden by default', () => {
-  it('starts closed with no stored choice, a blocked store, or a closed choice', () => {
-    expect(readPrActionsOpen(null)).toBe(false);
-    expect(readPrActionsOpen({ getItem: () => null })).toBe(false);
-    expect(readPrActionsOpen({ getItem: () => '0' })).toBe(false);
-    expect(
-      readPrActionsOpen({
-        getItem: () => {
-          throw new Error('blocked');
-        },
-      }),
-    ).toBe(false);
-  });
-  it('opens only when this session opened it', () => {
-    expect(readPrActionsOpen({ getItem: (k) => (k === PR_ACTIONS_OPEN_KEY ? '1' : null) })).toBe(true);
+  it('always starts closed: nothing remembers the choice across tabs or views', () => {
+    const row = src('components/pr/PrActionsRow.tsx');
+    expect(row).toContain('useState<number | null>(null)');
+    expect(row).toContain('openFor === pr.id');
+    expect(row).not.toMatch(/sessionStorage|localStorage/);
   });
   it('both places share the one control', () => {
     expect(src('components/ChecksTab.tsx')).toContain('<PrActionControls');
