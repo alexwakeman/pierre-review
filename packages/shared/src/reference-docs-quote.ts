@@ -158,3 +158,31 @@ export function foldRenderedText(segments: readonly QuoteTextSegment[]): FoldedR
   }
   return { folded: out.join(''), seg: Int32Array.from(seg), start: Int32Array.from(start), end: Int32Array.from(end) };
 }
+
+// ---- generated figure descriptions are never grounding (docs/REFERENCE-DOCS.md § Figures) ----
+
+/** How a generated description opens (reference-docs.ts `REFERENCE_DOC_FIGURE_PREFIX`, repeated here so
+ *  this module stays import-free). */
+const FIGURE_PREFIX = '[Figure (described by AI): ';
+/** What a removed description leaves: no quote can contain it, so a quote cannot bridge the gap. */
+export const FIGURE_GAP = ' ⟦figure⟧ ';
+
+/**
+ * A section's text with every AI-written figure description CUT OUT (`[Figure (described by AI): …]`,
+ * up to its closing bracket — the server writes descriptions with no bracket inside). A quote that only
+ * matches words a model wrote about an image is not the document's own words, so it never grounds a
+ * reference, a story-docs point or a chat citation. Linear: indexOf only.
+ */
+export function withoutFigureDescriptions(text: string): string {
+  let at = text.indexOf(FIGURE_PREFIX);
+  if (at < 0) return text;
+  let out = '';
+  let from = 0;
+  while (at >= 0) {
+    const close = text.indexOf(']', at + FIGURE_PREFIX.length);
+    out += text.slice(from, at) + FIGURE_GAP;
+    from = close < 0 ? text.length : close + 1;
+    at = text.indexOf(FIGURE_PREFIX, from);
+  }
+  return out + text.slice(from);
+}

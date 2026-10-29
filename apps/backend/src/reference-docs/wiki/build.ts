@@ -1,4 +1,6 @@
 import { WIKI_PROVIDER_NAMES, type ReferenceDocWikiState } from '@pierre-review/shared';
+import { figureDescriptionAvailable } from '../figure-describer.js';
+import { figuresOf, type FigureSink } from '../figures.js';
 import { getDocRow, patchDoc, wikiStateOf, type DocRow } from '../store.js';
 import { resolveWikiCredential } from './credentials.js';
 import { commitWikiPages, listWikiPages, readCachedPage, saveWikiSource } from './pages.js';
@@ -90,6 +92,8 @@ export async function readWikiForBuild(opts: {
   signal?: AbortSignal;
   onProgress?(done: number, total: number): void;
   now?: () => number;
+  /** Where a fetched page's images go (figures.ts). */
+  figures?: FigureSink;
 }): Promise<WikiRead> {
   const { row } = opts;
   const now = opts.now ?? Date.now;
@@ -110,6 +114,7 @@ export async function readWikiForBuild(opts: {
       now: new Date(started),
       signal: opts.signal,
       onProgress: opts.onProgress,
+      figures: opts.figures,
     });
   } catch (err) {
     if (err instanceof WikiRefusal) throw err;
@@ -183,6 +188,9 @@ export async function quickCheckWikiDoc(row: DocRow, now: () => number = Date.no
       signal,
     });
     if (res.changed) return 'changed';
+    // Figures left waiting by an earlier refresh (the AI budget was spent) count as a change, once
+    // Claude can describe them here: the refresh reads no page again, only describes them.
+    if ((figuresOf(row.figures)?.pending ?? 0) > 0 && figureDescriptionAvailable().ok) return 'changed';
     await patchState(row, {
       lastCheckedAt: started,
       ...(res.listed ? { lastListedAt: started } : {}),

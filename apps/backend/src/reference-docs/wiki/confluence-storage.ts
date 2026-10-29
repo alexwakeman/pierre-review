@@ -201,6 +201,65 @@ const literal = (s: string): string => {
 };
 const SENTINEL = /(\d+)/g;
 
+// FIGURES (docs/REFERENCE-DOCS.md § Figures). The adapter reads the page's images and diagram files
+// BEFORE rendering (confluence.ts) and hands back the text for each, keyed as `figureRefs` names them:
+// an image's figure marker, a diagram's outline (or its preview's marker). Rendering stays pure and
+// synchronous: it only looks the key up. Without a replacement the placeholder stays.
+let replacements: ReadonlyMap<string, string> = new Map();
+
+export interface StorageFigureRef {
+  key: string;
+  kind: 'attachment' | 'url' | 'drawio' | 'gliffy';
+  /** The attachment's file name (an image), the address (an external image) or the diagram's name. */
+  name: string;
+  /** What the image keeps when it is not described. */
+  fallback: string;
+}
+
+const DRAWIO = new Set(['drawio', 'drawio-sketch', 'inc-drawio']);
+
+function diagramName(el: El, macro: string): string {
+  return param(el, 'diagramDisplayName') ?? param(el, 'diagramName') ?? param(el, 'name') ?? param(el, 'title') ?? param(el, 'filename') ?? macro;
+}
+
+/** The images and readable diagrams of a page, in order, once each (bounded by the stack-capped tree). */
+export function storageFigureRefs(storage: string): StorageFigureRef[] {
+  const out: StorageFigureRef[] = [];
+  const seen = new Set<string>();
+  const push = (r: StorageFigureRef): void => {
+    if (seen.has(r.key) || out.length >= 200) return;
+    seen.add(r.key);
+    out.push(r);
+  };
+  const stack: Node[] = [parseStorage(storage)];
+  let visited = 0;
+  while (stack.length > 0 && visited < 200_000) {
+    visited += 1;
+    const n = stack.pop()!;
+    if (!isEl(n)) continue;
+    if (n.name === 'ac:image') {
+      const att = child(n, 'ri:attachment');
+      const url = child(n, 'ri:url');
+      const alt = n.attrs['ac:alt'] ?? n.attrs['ac:title'] ?? '';
+      const file = att?.attrs['ri:filename'] ?? '';
+      // An attachment of ANOTHER page (ri:page inside ri:attachment) is not this page's: left as its name.
+      if (att && file && !child(att, 'ri:page')) push({ key: `att:${file}`, kind: 'attachment', name: file, fallback: `Image: ${alt || file}` });
+      else if (url?.attrs['ri:value']) push({ key: `url:${url.attrs['ri:value']}`, kind: 'url', name: url.attrs['ri:value'], fallback: `Image: ${alt || url.attrs['ri:value']}` });
+      continue;
+    }
+    if (n.name === 'ac:structured-macro' || n.name === 'ac:macro') {
+      const macro = (n.attrs['ac:name'] ?? '').toLowerCase();
+      if (DRAWIO.has(macro) || macro === 'gliffy') {
+        const name = diagramName(n, macro);
+        const file = param(n, 'diagramName') ?? param(n, 'name') ?? name;
+        push({ key: `diagram:${macro}:${name}`, kind: macro === 'gliffy' ? 'gliffy' : 'drawio', name: file, fallback: `Diagram: ${name}` });
+      }
+    }
+    for (let k = n.children.length - 1; k >= 0; k--) stack.push(n.children[k]!);
+  }
+  return out;
+}
+
 function renderMacro(el: El, depth: number): string {
   const macro = (el.attrs['ac:name'] ?? '').toLowerCase();
   const body = child(el, 'ac:rich-text-body');
@@ -225,9 +284,10 @@ function renderMacro(el: El, depth: number): string {
     const source = plain ? plainText(plain).trim() : '';
     const lang = TEXT_DIAGRAMS[macro];
     if (lang && source !== '') return `<pre><code class="language-${lang}">${escapeHtml(source)}</code></pre>`;
-    return diagramPlaceholder(
-      param(el, 'diagramDisplayName') ?? param(el, 'diagramName') ?? param(el, 'name') ?? param(el, 'title') ?? param(el, 'filename') ?? macro,
-    );
+    const name = diagramName(el, macro);
+    const replaced = replacements.get(`diagram:${macro}:${name}`);
+    if (replaced) return `<p>${literal(replaced)}</p>`;
+    return diagramPlaceholder(name);
   }
   if (macro === 'status') {
     const t = param(el, 'title') ?? param(el, 'colour') ?? '';
@@ -299,6 +359,12 @@ function render(n: Node, depth: number): string {
     case 'ac:image': {
       const att = child(n, 'ri:attachment');
       const url = child(n, 'ri:url');
+      const replaced = att?.attrs['ri:filename'] && !child(att, 'ri:page')
+        ? replacements.get(`att:${att.attrs['ri:filename']}`)
+        : url?.attrs['ri:value']
+          ? replacements.get(`url:${url.attrs['ri:value']}`)
+          : undefined;
+      if (replaced) return literal(replaced);
       const alt = n.attrs['ac:alt'] ?? n.attrs['ac:title'] ?? att?.attrs['ri:filename'] ?? url?.attrs['ri:value'] ?? '';
       return alt ? `<img alt="${escapeHtml(alt)}">` : '';
     }
@@ -375,13 +441,15 @@ function unwrapParagraphs(html: string): string {
   return html.replace(/<\/p>\s*<p>/g, ' ').replace(/^\s*<p>/, '').replace(/<\/p>\s*$/, '').replace(/<\/?p>/g, ' ');
 }
 
-function renderWithLiterals(storage: string): { html: string; lits: string[] } {
+function renderWithLiterals(storage: string, figures?: ReadonlyMap<string, string>): { html: string; lits: string[] } {
   literals = [];
+  replacements = figures ?? new Map();
   try {
     const html = render(parseStorage(storage), 0);
     return { html, lits: literals };
   } finally {
     literals = [];
+    replacements = new Map();
   }
 }
 
@@ -392,8 +460,8 @@ export function storageToHtml(storage: string): string {
 }
 
 /** Storage XHTML → markdown, through the library's turndown pipeline. */
-export async function storageToMarkdown(storage: string): Promise<string> {
-  const { html, lits } = renderWithLiterals(storage);
+export async function storageToMarkdown(storage: string, figures?: ReadonlyMap<string, string>): Promise<string> {
+  const { html, lits } = renderWithLiterals(storage, figures);
   if (html.trim() === '') return '';
   const md = await htmlToMarkdown(`<article>${html}</article>`);
   return md.replace(SENTINEL, (_m, i: string) => lits[Number(i)] ?? '');

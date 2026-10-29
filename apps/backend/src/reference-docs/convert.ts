@@ -6,6 +6,8 @@ import {
   loadTurndownGfm,
   type TurndownService,
 } from '../ai/runtime.js';
+import { dataUriBytes } from './figure-fetch.js';
+import type { FigureSink } from './figures.js';
 import { cleanHeadingTitle, normalizeMarkdown, parseBlocks } from './split.js';
 
 // WHAT A FILE IS, AND ITS MARKDOWN (docs/REFERENCE-DOCS.md § Ingest).
@@ -113,7 +115,27 @@ export class ConverterMissingError extends Error {
 
 const SAFE_HREF = /^(?:https?:|mailto:|#)/i;
 
-async function turndownService(): Promise<TurndownService> {
+/** What an HTML conversion may do with its images (docs/REFERENCE-DOCS.md § Figures). */
+export interface HtmlFigureOptions {
+  /** Keep images as figures (their bytes stored, a marker in the text). Absent ⇒ alt text only. */
+  figures?: FigureSink;
+  /** Bytes already downloaded for a page's images, by absolute address. */
+  images?: ReadonlyMap<string, Buffer>;
+  /** The page's own address, to resolve a relative `src`. */
+  baseUrl?: string;
+}
+
+const fileNameOf = (src: string): string => {
+  if (/^data:/i.test(src)) return '';
+  const last = src.split(/[?#]/)[0]!.split('/').pop() ?? '';
+  try {
+    return decodeURIComponent(last).slice(0, 120);
+  } catch {
+    return last.slice(0, 120);
+  }
+};
+
+async function turndownService(fig: HtmlFigureOptions = {}): Promise<TurndownService> {
   let Turndown;
   let gfm;
   try {
@@ -126,11 +148,27 @@ async function turndownService(): Promise<TurndownService> {
   t.use(gfm.gfm);
   t.remove(['script', 'style', 'noscript', 'iframe', 'object', 'embed', 'nav', 'footer', 'form', 'button', 'svg', 'canvas', 'template']);
   // Images become their alt text: a library is text, and a `data:` image from a Word file can be
-  // megabytes of base64 an agent would otherwise have to read past.
+  // megabytes of base64 an agent would otherwise have to read past. With a figure sink, an image whose
+  // bytes are at hand (inline, or downloaded for the page) becomes a FIGURE marker instead — described
+  // by AI before the split, or its name again (figures.ts).
   t.addRule('limnImages', {
     filter: 'img',
     replacement: (_content: string, node: { getAttribute(n: string): string | null }) => {
       const alt = (node.getAttribute('alt') ?? '').replace(/\s+/g, ' ').trim();
+      if (fig.figures) {
+        const src = (node.getAttribute('src') ?? '').trim();
+        let bytes = dataUriBytes(src);
+        if (!bytes && fig.images && src) {
+          try {
+            bytes = fig.images.get(new URL(src, fig.baseUrl).href) ?? null;
+          } catch {
+            bytes = null;
+          }
+        }
+        const name = alt || fileNameOf(src);
+        const marker = bytes ? fig.figures.add(bytes, name ? `Image: ${name}` : 'Image') : null;
+        if (marker) return marker;
+      }
       return alt ? `[Image: ${alt}]` : '';
     },
   });
@@ -160,8 +198,8 @@ function htmlTitle(html: string): string | null {
 }
 
 /** HTML → markdown (turndown + GitHub tables), narrowed to the page's <main> / <article> when it has one. */
-export async function htmlToMarkdown(html: string): Promise<string> {
-  const t = await turndownService();
+export async function htmlToMarkdown(html: string, fig: HtmlFigureOptions = {}): Promise<string> {
+  const t = await turndownService(fig);
   // A page's main content, when it marks it: the nav, sidebars and cookie banners around it are noise.
   const main = /<main[\s>][\s\S]*?<\/main>/i.exec(html)?.[0] ?? /<article[\s>][\s\S]*?<\/article>/i.exec(html)?.[0];
   return normalizeMarkdown(t.turndown(main ?? html)).trim();
@@ -174,7 +212,11 @@ export interface Converted {
 }
 
 /** A non-PDF source → markdown. Throws ConverterMissingError when a converter is not installed. */
-export async function convertToMarkdown(kind: Exclude<ReferenceDocSourceKind, 'pdf' | 'url' | 'wiki'>, buf: Buffer): Promise<Converted> {
+export async function convertToMarkdown(
+  kind: Exclude<ReferenceDocSourceKind, 'pdf' | 'url' | 'wiki'>,
+  buf: Buffer,
+  fig: HtmlFigureOptions = {},
+): Promise<Converted> {
   switch (kind) {
     case 'text':
     case 'markdown': {
@@ -183,7 +225,7 @@ export async function convertToMarkdown(kind: Exclude<ReferenceDocSourceKind, 'p
     }
     case 'html': {
       const html = decodeText(buf) ?? '';
-      const markdown = await htmlToMarkdown(html);
+      const markdown = await htmlToMarkdown(html, fig);
       return { markdown, title: htmlTitle(html) ?? firstHeading(markdown) };
     }
     case 'docx': {
@@ -195,7 +237,7 @@ export async function convertToMarkdown(kind: Exclude<ReferenceDocSourceKind, 'p
         throw err;
       }
       const { value } = await mammoth.convertToHtml({ buffer: buf });
-      const markdown = await htmlToMarkdown(value);
+      const markdown = await htmlToMarkdown(value, fig);
       return { markdown, title: firstHeading(markdown) };
     }
   }

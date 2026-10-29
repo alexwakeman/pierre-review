@@ -1278,6 +1278,18 @@ backfill: comments arrive on each ticket's next read. ⚠ Numbered 0142/0143 bec
 [TRACKERS.md](TRACKERS.md) § Ticket comments. Journal `idx` 142 / 143, `when` sqlite `1792137629016` /
 `1792137630016`.
 
+### `0145_reference_doc_figures` — figures as text (+ Notion, which needs no schema)
+Self-contained and additive ([REFERENCE-DOCS.md](REFERENCE-DOCS.md) § Figures, § Wiki sources → Notion).
+One new nullable JSON column, `reference_docs.figures_json` (`ReferenceDocFigures`: the latest build's
+described / outlined / kept / pending figures and the one sentence when they could not be described here),
+and one new table, `reference_doc_figure_descriptions` — the AI image-description CACHE, one row per
+`(account_id, image_hash)` (UNIQUE, the upsert target): `description` (one line, or `DECORATIVE`),
+`provider`, `model`, `cost_usd`, `created_at`; FK onto `accounts`, cascade. It joins `accountScopedTables()`,
+the erasure (explicitly) and the export, and `verify:isolation` checks it. NOTION adds no schema: its token is
+a `workspace_wiki_credentials` row with provider `notion` (0140), and `reference_docs.wiki_json` already
+carries the provider. No backfill. Journal `idx` 145, `when` sqlite `1792137632016` (0139 and 0141–0144 are
+left for parallel branches; renumber at integration if needed).
+
 ### No migration — "Check against code" removed (2026-10-18): `sprint_ticket_repos` + `sprint_assessments` DORMANT
 
 The sprint drawer, its repo picker and "Check against code" (`review/sprint-assess/`) were removed with

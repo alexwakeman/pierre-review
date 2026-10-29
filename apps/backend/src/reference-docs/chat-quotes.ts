@@ -7,7 +7,7 @@ import {
 } from '@pierre-review/shared';
 import { parseLibraryPath } from './paths.js';
 import { markdownLinks } from './render.js';
-import { sectionBodyOf } from './review-refs.js';
+import { groundingTextOf } from './review-refs.js';
 import type { DocRow } from './store.js';
 
 // THE QUOTE BESIDE A CHAT LINK (docs/REFERENCE-DOCS.md § The chat). A chat answer cites a section with
@@ -196,7 +196,7 @@ export function extractCitations(
   const verifiedQuote = (path: string, body: string, start: number, end: number): string | undefined => {
     let hay = folded.get(path);
     if (hay == null) {
-      hay = foldForQuote(sectionBodyOf(body));
+      hay = foldForQuote(groundingTextOf(body));
       folded.set(path, hay);
     }
     for (const q of quoteCandidates(text, start, end)) {

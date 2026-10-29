@@ -1,7 +1,8 @@
 import type { WikiProviderId, WikiUnreachableReason } from '@pierre-review/shared';
+import type { FigureSink } from '../figures.js';
 
-// THE WIKI-SOURCE SEAM (docs/REFERENCE-DOCS.md § Wiki sources). A team wiki — Confluence today, Notion
-// next — is read through ONE adapter interface, so the import, the change check, the incremental
+// THE WIKI-SOURCE SEAM (docs/REFERENCE-DOCS.md § Wiki sources). A team wiki — Confluence or Notion — is
+// read through ONE adapter interface, so the import, the change check, the incremental
 // rebuild and the refresh cadence (sync.ts, refresh.ts) never name a provider. An adapter:
 //
 //   • resolves a pasted address to a page reference (pure, no request);
@@ -57,6 +58,12 @@ export interface WikiCallOptions {
   signal?: AbortSignal;
 }
 
+/** What a page's conversion may read besides its body: its images and diagram files (figures.ts). */
+export interface WikiMarkdownOptions extends WikiCallOptions {
+  /** Where an image's bytes go (a figure marker comes back). Absent ⇒ images keep their names. */
+  figures?: FigureSink;
+}
+
 export interface WikiSource {
   readonly provider: WikiProviderId;
   /** A pasted page address → its reference, or null when it names no page of this wiki. Pure. */
@@ -73,9 +80,12 @@ export interface WikiSource {
     opts: WikiCallOptions,
   ): Promise<{ pages: WikiPageMeta[]; more: boolean }>;
   /** Descendant pages of `rootId` (any depth) edited after `since` — may over-report, never under. */
-  changedSince(site: WikiPageRef, rootId: string, since: Date, opts: WikiCallOptions): Promise<WikiPageMeta[]>;
-  /** A page's body → markdown (the library's text). Hook: diagrams carry `[Diagram: name]` today. */
-  toMarkdown(page: WikiPage): Promise<string>;
+  /** `known` = the page ids the document holds (a wiki whose search is not scoped to a tree — Notion —
+   *  keeps only those and their new children). */
+  changedSince(site: WikiPageRef, rootId: string, since: Date, opts: WikiCallOptions & { known?: ReadonlySet<string> }): Promise<WikiPageMeta[]>;
+  /** A page's body → markdown (the library's text). With `opts.figures`, its images and readable
+   *  diagrams are read now (a Notion file address expires within the hour) and become figures. */
+  toMarkdown(page: WikiPage, opts?: WikiMarkdownOptions): Promise<string>;
   /** Settings' "Test connection": one cheap authenticated read of the site. Throws on failure. */
   checkAccess(site: Pick<WikiPageRef, 'provider' | 'origin' | 'host'>, opts: WikiCallOptions): Promise<void>;
   /** A page's address in the wiki (the chapter's "Source:" line). Pure. */
@@ -131,15 +141,20 @@ export function unreachableReasonOf(err: unknown): WikiUnreachableReason {
 /** A sentence for a failed import (a first build), never the upstream body. */
 export function wikiErrorMessage(providerName: string, err: unknown): string {
   const code = err instanceof WikiSourceError ? err.code : 'network';
+  const notion = providerName === 'Notion';
   switch (code) {
     case 'no_credential':
-      return `Add a ${providerName} API token in Settings → Workspace → Reference docs, then try again.`;
+      return notion
+        ? 'Add a Notion token in Settings → Workspace → Reference docs, then try again.'
+        : `Add a ${providerName} API token in Settings → Workspace → Reference docs, then try again.`;
     case 'unauthorized':
-      return `${providerName} did not accept the saved email and token.`;
+      return notion ? 'Notion did not accept the saved token.' : `${providerName} did not accept the saved email and token.`;
     case 'forbidden':
       return `The saved ${providerName} token may not read this page.`;
     case 'not_found':
-      return `${providerName} has no such page, or the saved token cannot see it.`;
+      return notion
+        ? 'Notion has no such page, or the page is not shared with the integration.'
+        : `${providerName} has no such page, or the saved token cannot see it.`;
     case 'rate_limited':
       return `${providerName} asked Limn to slow down. Try again in a few minutes.`;
     case 'blocked':

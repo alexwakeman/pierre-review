@@ -1002,6 +1002,13 @@
       "when": 1792137630016,
       "tag": "0143_ticket_review_comments_seen",
       "breakpoints": true
+    },
+    {
+      "idx": 145,
+      "version": "6",
+      "when": 1792137632016,
+      "tag": "0145_reference_doc_figures",
+      "breakpoints": true
     }
   ]
 }

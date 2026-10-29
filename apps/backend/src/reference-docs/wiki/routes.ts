@@ -4,6 +4,7 @@ import {
   WIKI_PROVIDER_NAMES,
   type AddReferenceDocWikiBody,
   type ReferenceDocMutationResponse,
+  type WikiCredentialsCheckBody,
   type WikiCredentialsCheckResponse,
   type WikiCredentialsSettings,
   type WikiCredentialsUpdate,
@@ -14,6 +15,7 @@ import { enqueueBuild } from '../manager.js';
 import { getDocRow, isBuilding, listDocRows, requeueDoc, toReferenceDoc, workspaceOwned, type DocRow, type NewDoc } from '../store.js';
 import {
   normalizeSiteUrl,
+  notionCredentialPatchError,
   readWikiCredentialsSettings,
   resolveWikiCredential,
   siteHost,
@@ -21,6 +23,7 @@ import {
   writeWikiCredentials,
 } from './credentials.js';
 import './register.js';
+import { NOTION_SITE } from './notion.js';
 import { WikiSourceError, resolveWikiUrl, wikiErrorMessage, wikiSourceFor } from './source.js';
 
 // THE WIKI ROUTES (docs/API.md § Reference docs → Wiki sources). Registered by
@@ -30,9 +33,9 @@ import { WikiSourceError, resolveWikiUrl, wikiErrorMessage, wikiSourceFor } from
 //                                                       build that reads the wiki   → search + ai + ai_hourly
 //   POST /api/docs/:id/refresh                          checks the wiki; rebuilds only what changed
 //                                                                                    → search + ai + ai_hourly
-//   GET  /api/workspaces/:id/wiki-credentials           the settings, never the token → read
-//   PUT  /api/workspaces/:id/wiki-credentials           a partial patch (DB only)      → read
-//   POST /api/workspaces/:id/wiki-credentials/check     one read with the saved token  → search + read
+//   GET  /api/workspaces/:id/wiki-credentials           the settings, never a token    → read
+//   PUT  /api/workspaces/:id/wiki-credentials           a partial patch, Confluence and/or Notion (DB only) → read
+//   POST /api/workspaces/:id/wiki-credentials/check     { provider? } one read with the saved token → search + read
 //
 // TENANCY as the library's: a document id in a PATH resolves within the account (→ 404); a workspace id
 // in a PATH must be the account's (→ 404); a body's `workspaceId` falls back to the Default.
@@ -75,7 +78,7 @@ export function registerWikiDocRoutes(app: FastifyInstance, ctx: AgentContext, h
       const b = req.body as AddReferenceDocWikiBody;
       const resolved = resolveWikiUrl(b.url);
       if (!resolved) {
-        return h.fail(reply, 400, 'NotAWikiPage', "That is not a Confluence page address. Open the page and copy the address from the browser.");
+        return h.fail(reply, 400, 'NotAWikiPage', 'That is not a Confluence or Notion page address. Open the page and copy the address from the browser.');
       }
       const { ref } = resolved;
       const name = WIKI_PROVIDER_NAMES[ref.provider];
@@ -86,7 +89,14 @@ export function registerWikiDocRoutes(app: FastifyInstance, ctx: AgentContext, h
       // No request to the wiki here (the build reads it); only whether there is a credential to read with.
       const cred = await resolveWikiCredential(accountId, workspaceId, ref);
       if (cred.state === 'none') {
-        return h.fail(reply, 400, 'NoWikiCredential', `Add a ${name} API token in Settings → Workspace → Reference docs, then add the page again.`);
+        return h.fail(
+          reply,
+          400,
+          'NoWikiCredential',
+          ref.provider === 'notion'
+            ? 'Add a Notion token in Settings → Workspace → Reference docs, then add the page again.'
+            : `Add a ${name} API token in Settings → Workspace → Reference docs, then add the page again.`,
+        );
       }
       if (cred.state === 'unreadable') return h.fail(reply, 400, 'NoWikiCredential', `Save the ${name} token again in Settings.`);
       const pre = await h.preflight(ctx, accountId, reply);
@@ -157,7 +167,7 @@ export function registerWikiDocRoutes(app: FastifyInstance, ctx: AgentContext, h
         ...idParam,
         body: {
           type: 'object',
-          required: ['confluence'],
+          minProperties: 1,
           additionalProperties: false,
           properties: {
             confluence: {
@@ -169,6 +179,11 @@ export function registerWikiDocRoutes(app: FastifyInstance, ctx: AgentContext, h
                 token: { type: ['string', 'null'], maxLength: 4096 },
               },
             },
+            notion: {
+              type: 'object',
+              additionalProperties: false,
+              properties: { token: { type: ['string', 'null'], maxLength: 4096 } },
+            },
           },
         },
       },
@@ -178,22 +193,36 @@ export function registerWikiDocRoutes(app: FastifyInstance, ctx: AgentContext, h
       const accountId = ctx.accountIdOf(req);
       const { id } = req.params as { id: number };
       if (!(await workspaceOwned(accountId, id))) return h.fail(reply, 404, 'NotFound', `Workspace ${id} not found`);
-      const patch = (req.body as WikiCredentialsUpdate).confluence;
-      const problem = wikiCredentialPatchError(patch);
+      const body = req.body as WikiCredentialsUpdate;
+      const problem = (body.confluence ? wikiCredentialPatchError(body.confluence) : null) ?? (body.notion ? notionCredentialPatchError(body.notion) : null);
       if (problem) return h.fail(reply, 400, 'BadCredential', problem);
-      await writeWikiCredentials(accountId, id, 'confluence', patch);
+      if (body.confluence) await writeWikiCredentials(accountId, id, 'confluence', body.confluence);
+      // Notion has no site and no email: only its token.
+      if (body.notion && body.notion.token !== undefined) await writeWikiCredentials(accountId, id, 'notion', { token: body.notion.token });
       return readWikiCredentialsSettings(accountId, id);
     },
   );
 
   app.post(
     '/api/workspaces/:id/wiki-credentials/check',
+    // The body is optional (`{ provider }`; none ⇒ Confluence), so it is read by hand, not by schema.
     { schema: idParam },
     async (req, reply): Promise<WikiCredentialsCheckResponse | ErrorBody> => {
       if (!AGENTIC_AI_ENABLED) return h.featureOff(reply);
       const accountId = ctx.accountIdOf(req);
       const { id } = req.params as { id: number };
       if (!(await workspaceOwned(accountId, id))) return h.fail(reply, 404, 'NotFound', `Workspace ${id} not found`);
+      const asked = req.body != null && typeof req.body === 'object' ? (req.body as WikiCredentialsCheckBody).provider : undefined;
+      if (asked === 'notion') {
+        const cred = await resolveWikiCredential(accountId, id, NOTION_SITE);
+        if (cred.state !== 'ok') return { ok: false, message: wikiErrorMessage('Notion', new WikiSourceError('no_credential')) };
+        try {
+          await wikiSourceFor('notion')!.checkAccess(NOTION_SITE, { credential: cred.credential });
+          return { ok: true, message: 'Connected to Notion.' };
+        } catch (err) {
+          return { ok: false, message: wikiErrorMessage('Notion', err) };
+        }
+      }
       const settings = await readWikiCredentialsSettings(accountId, id);
       const origin = normalizeSiteUrl(settings.confluence.siteUrl) ?? (settings.confluence.jiraSite ? `https://${settings.confluence.jiraSite}` : null);
       const host = siteHost(origin);

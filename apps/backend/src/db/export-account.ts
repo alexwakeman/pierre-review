@@ -116,6 +116,8 @@ export interface AccountExport {
   referenceDocWikiPages: Record<string, unknown>[];
   /** Each workspace's wiki credential (migration 0140): site and email. ⚠ THE TOKEN IS WITHHELD. */
   workspaceWikiCredentials: Record<string, unknown>[];
+  /** The image-description cache (core `reference_doc_figure_descriptions`, migration 0145). */
+  referenceDocFigureDescriptions: Record<string, unknown>[];
   /**
    * Related repos (core `repo_relations`, migration 0131): the pairs the user chose, both directions,
    * per workspace.
@@ -262,6 +264,16 @@ export async function exportAccountData(accountId: number): Promise<AccountExpor
     })
     .from(schema.workspaceWikiCredentials)
     .where(eq(schema.workspaceWikiCredentials.accountId, accountId))
+    .execute();
+  const figureRows = await db
+    .select({
+      imageHash: schema.referenceDocFigureDescriptions.imageHash,
+      description: schema.referenceDocFigureDescriptions.description,
+      model: schema.referenceDocFigureDescriptions.model,
+      createdAt: schema.referenceDocFigureDescriptions.createdAt,
+    })
+    .from(schema.referenceDocFigureDescriptions)
+    .where(eq(schema.referenceDocFigureDescriptions.accountId, accountId))
     .execute();
   const docChatRows = await db
     .select({
@@ -441,6 +453,7 @@ export async function exportAccountData(accountId: number): Promise<AccountExpor
     referenceDocWikiPages: wikiPageRows,
     // ⚠ PRESENCE ONLY — never the stored token, in any form.
     workspaceWikiCredentials: wikiCredentialRows.map((t) => ({ ...t, hasToken: t.hasToken != null && t.hasToken !== '' })),
+    referenceDocFigureDescriptions: figureRows,
     repoRelations: repoRelationRows,
     sprintCodeJudgements: capped('sprintCodeJudgements', codeJudgementRows),
     referenceDocChatMessages: capped('referenceDocChatMessages', docChatRows),

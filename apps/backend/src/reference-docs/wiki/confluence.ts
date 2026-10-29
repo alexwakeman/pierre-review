@@ -6,7 +6,11 @@ import {
   nodeTransport,
   type JiraTransport,
 } from '../../tracker/jira/fetch.js';
-import { storageToMarkdown } from './confluence-storage.js';
+import { drawioOutline, gliffyOutline } from '../diagram-outline.js';
+import { PUBLIC_ONLY, fetchImageBytes } from '../figure-fetch.js';
+import type { FigureSink } from '../figures.js';
+import type { PageTransport } from '../url-fetch.js';
+import { storageFigureRefs, storageToMarkdown, type StorageFigureRef } from './confluence-storage.js';
 import {
   WikiSourceError,
   type WikiCallOptions,
@@ -47,6 +51,8 @@ const MAX_LIST_REQUESTS = 40;
 
 export interface ConfluenceDeps {
   transport?: JiraTransport;
+  /** The credential-free download of an attachment's redirect target (Atlassian's media address). */
+  pageTransport?: PageTransport;
   /** Waits (a test passes a fake clock). */
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
 }
@@ -141,6 +147,41 @@ export async function confluenceGetJson(url: string, opts: WikiCallOptions, deps
     } catch {
       throw new WikiSourceError('not_json', res.status);
     }
+  }
+}
+
+/**
+ * An attachment's BYTES (docs/REFERENCE-DOCS.md § Figures): the download address with the credential,
+ * under the same guard; Confluence answers it with a redirect to Atlassian's media service, whose
+ * address carries its own signature — that one hop is followed WITHOUT the credential, through the
+ * library's guarded fetch (public addresses only). Null on any failure: the figure keeps its name.
+ */
+export async function confluenceGetBytes(url: string, opts: WikiCallOptions, sink: FigureSink, deps: ConfluenceDeps = {}): Promise<Buffer | null> {
+  if (!sink.canFetch()) return null;
+  sink.noteFetch();
+  const transport = deps.transport ?? nodeTransport;
+  let checked: URL;
+  try {
+    checked = checkJiraUrl(url, { cloud: true });
+  } catch {
+    return null;
+  }
+  try {
+    const res = await transport(
+      checked,
+      { accept: '*/*', 'user-agent': 'Limn', authorization: authHeader(opts.credential) },
+      { lookup: guardedLookup(), timeoutMs: CONFLUENCE_TIMEOUT_MS, maxBytes: sink.maxBytes },
+    );
+    if (res.status >= 300 && res.status < 400 && res.headers?.location) {
+      return fetchImageBytes(new URL(res.headers.location, checked).href, { ...sink, canFetch: () => true, noteFetch: () => {} }, PUBLIC_ONLY, deps.pageTransport);
+    }
+    if (res.status < 200 || res.status >= 300) return null;
+    return res.bytes ?? Buffer.from(res.body, 'utf8');
+  } catch (err) {
+    if (err instanceof JiraFetchError && err.code === 'redirect' && err.location) {
+      return fetchImageBytes(new URL(err.location, checked).href, { ...sink, canFetch: () => true, noteFetch: () => {} }, PUBLIC_ONLY, deps.pageTransport);
+    }
+    return null;
   }
 }
 
@@ -267,12 +308,85 @@ export function confluenceSource(deps: ConfluenceDeps = {}): WikiSource {
       }
       return out;
     },
-    toMarkdown: (page) => storageToMarkdown(page.body),
+    async toMarkdown(page, opts) {
+      if (!opts?.figures) return storageToMarkdown(page.body);
+      const site = { origin: originOf(page.webUrl) };
+      if (!site.origin) return storageToMarkdown(page.body);
+      return storageToMarkdown(page.body, await readFigures(site.origin, page.id, storageFigureRefs(page.body), opts, opts.figures, deps));
+    },
     async checkAccess(site, opts) {
       await get(`${site.origin}/wiki/api/v2/spaces?limit=1`, opts);
     },
     pageUrl: (site, pageId) => `${site.origin}/wiki/pages/viewpage.action?pageId=${encodeURIComponent(pageId)}`,
   };
+}
+
+/** `https://<host>` of a page's web address (the page answer carries it), or null. */
+function originOf(webUrl: string | null): string | null {
+  if (!webUrl) return null;
+  try {
+    const u = new URL(webUrl);
+    return u.protocol === 'https:' ? `https://${u.host}` : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A page's images and diagram files → the text for each (keyed as `storageFigureRefs` names them):
+ * an image's figure marker; a draw.io / Gliffy diagram's OUTLINE when its file reads (no model), else
+ * its PNG preview as a figure; nothing (the placeholder stays) when neither can be read.
+ */
+async function readFigures(
+  origin: string,
+  pageId: string,
+  refs: StorageFigureRef[],
+  opts: WikiCallOptions,
+  sink: FigureSink,
+  deps: ConfluenceDeps = {},
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  const attachmentBytes = async (file: string): Promise<Buffer | null> => {
+    if (!sink.canFetch()) return null;
+    let link: string | null = null;
+    try {
+      const raw = obj(await confluenceGetJson(`${origin}/wiki/api/v2/pages/${pageId}/attachments?filename=${encodeURIComponent(file)}&limit=5`, opts, deps));
+      const first = obj(Array.isArray(raw?.results) ? raw!.results[0] : null);
+      link = str(first?.downloadLink) ?? str(obj(first?._links)?.download);
+    } catch {
+      return null;
+    }
+    if (!link || !link.startsWith('/')) return null;
+    const path = link.startsWith('/wiki/') ? link : `/wiki${link}`;
+    return confluenceGetBytes(`${origin}${path}`, opts, sink, deps);
+  };
+  for (const r of refs) {
+    if (opts.signal?.aborted) break;
+    if (r.kind === 'attachment' || r.kind === 'url') {
+      const bytes = r.kind === 'attachment' ? await attachmentBytes(r.name) : await fetchImageBytes(r.name, sink, PUBLIC_ONLY, deps.pageTransport);
+      const marker = bytes ? sink.add(bytes, r.fallback) : null;
+      if (marker) out.set(r.key, marker);
+      continue;
+    }
+    // A diagram: its own file first (an outline, no model), then its preview image.
+    const files = r.kind === 'gliffy' ? [r.name] : [r.name, `${r.name}.drawio`, `${r.name}.xml`];
+    let outline: string | null = null;
+    for (const f of files) {
+      const bytes = await attachmentBytes(f);
+      if (!bytes) continue;
+      const text = bytes.toString('utf8');
+      outline = r.kind === 'gliffy' ? gliffyOutline(r.fallback.replace(/^Diagram:\s*/, ''), text) : drawioOutline(r.fallback.replace(/^Diagram:\s*/, ''), text);
+      if (outline) break;
+    }
+    if (outline) {
+      out.set(r.key, outline);
+      continue;
+    }
+    const png = await attachmentBytes(`${r.name}.png`);
+    const marker = png ? sink.add(png, r.fallback) : null;
+    if (marker) out.set(r.key, marker);
+  }
+  return out;
 }
 
 /**

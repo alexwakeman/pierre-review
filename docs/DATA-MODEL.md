@@ -813,6 +813,12 @@ fact per account. Every read predicates on `account_id` (`currentLabelRowsFor`);
   account_id)` ON DELETE cascade. ⚠ Written ONLY by `reference-docs/wiki/pages.ts` `commitWikiPages`,
   after a successful build (a failed or skipped refresh never advances a version). `accountScopedTables()`,
   erasure, export, `verify:isolation`.
+- **`reference_doc_figure_descriptions`** (migration `0145`) — the AI image-description CACHE: one row per
+  (account, image sha256) — `description` (one line, or `DECORATIVE`), `provider`, `model`, `cost_usd`.
+  Unique `(account_id, image_hash)`, the upsert target. Read only for hashes the document itself holds
+  (`reference-docs/figure-cache.ts`). In `accountScopedTables()`, erased, exported, checked by
+  `verify:isolation`. Also new: `reference_docs.figures_json` (`ReferenceDocFigures`, the latest build's
+  figures line) (docs/REFERENCE-DOCS.md § Figures).
 - **`workspace_wiki_credentials`** (migration `0140`) — a SEALED wiki token per (account, workspace,
   provider), plus site + email; never returned (`hasToken`). Composite workspace FK, cascade. Read only
   through `reference-docs/wiki/credentials.ts` `resolveWikiCredential` (own token on the same host, else the

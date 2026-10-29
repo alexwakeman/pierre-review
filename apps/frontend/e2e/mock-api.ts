@@ -1278,11 +1278,12 @@ export async function installMockApi(page: Page): Promise<void> {
       if (/\/api\/workspaces\/\d+\/docs-settings$/.test(path)) {
         return json(route, { workspaceId: WORKSPACE.id, docsInReview: false } satisfies ReferenceDocsSettings);
       }
-      // Settings → Confluence (reference docs' wiki source; mounted only while AI is on): nothing saved.
+      // Settings → Confluence + Notion (reference docs' wiki sources; mounted only while AI is on): nothing saved.
       if (/\/api\/workspaces\/\d+\/wiki-credentials$/.test(path)) {
         return json(route, {
           workspaceId: WORKSPACE.id,
           confluence: { siteUrl: null, email: null, hasToken: false, jiraSite: null },
+          notion: { hasToken: false },
         } satisfies WikiCredentialsSettings);
       }
       if (path.endsWith('/api/ticket-links')) {

@@ -1128,6 +1128,19 @@ export function ConfluenceIcon({ size = 14, ...rest }: IconProps): JSX.Element {
   );
 }
 
+// A slanted page block with an N on its face — Notion, a wiki-sourced document in the Docs library (in
+// the current ink, like ConfluenceIcon; never a brand colour as text). Purpose-built, not BookIcon.
+export function NotionIcon({ size = 14, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} strokeWidth={1.9} {...rest}>
+      <path d="M5 5.5 15.5 4.2 19 6.6v13l-11.2 1-2.8-2.6z" />
+      <path d="M5 5.5 7.8 8l11.2-1.4" />
+      <path d="M7.8 8v12.6" />
+      <path d="M10.5 17V10.3l5 6.5V9.8" />
+    </IconShell>
+  );
+}
+
 // An arrow up out of a tray — adding a file (the Docs drop zone).
 export function UploadIcon({ size = 14, ...rest }: IconProps): JSX.Element {
   return (

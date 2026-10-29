@@ -177,6 +177,24 @@ describe('grounding (storage)', () => {
     expect(v.ok && v.value.result.criteria.map((c) => c.n)).toEqual([1]);
   });
 
+  it('drops an item whose quote matches only an AI-written figure description (docs/REFERENCE-DOCS.md § Figures)', () => {
+    const withFigure: LibrarySnapshot = {
+      ...LIB,
+      read: (p) =>
+        p === 'refunds/sections/01-refunds.md'
+          ? `${files[p]}\n\n[Figure (described by AI): flow.png — Every refund is approved by the finance lead before payout.]`
+          : (files[p] ?? null),
+    };
+    const fromFigure = { link: 'refunds/sections/01-refunds.md', quote: 'approved by the finance lead before payout' };
+    const v = validateAlignment(
+      payload({ criteria: [{ n: 1, verdict: 'aligned', note: 'from the picture', refs: [fromFigure] }, { n: 2, verdict: 'diverges', note: 'from the text', refs: [good] }] }),
+      withFigure,
+      CTX,
+      SHORTLIST,
+    );
+    expect(v.ok && v.value.result.criteria.map((c) => c.n)).toEqual([2]);
+  });
+
   it('an unusable overall fails the answer', () => {
     expect(validateAlignment(payload({ overall: null }), LIB, CTX, SHORTLIST).ok).toBe(false);
   });

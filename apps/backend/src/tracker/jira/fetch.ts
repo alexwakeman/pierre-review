@@ -58,6 +58,8 @@ export class JiraFetchError extends Error {
   constructor(
     public readonly code: JiraFetchErrorCode,
     public readonly status: number | null = null,
+    /** A redirect's Location (never followed here; a caller that may follow one WITHOUT the credential reads it). */
+    public readonly location: string | null = null,
   ) {
     super(`jira request failed: ${code}${status != null ? ` (${status})` : ''}`);
     this.name = 'JiraFetchError';
@@ -228,6 +230,8 @@ export interface RawResponse {
   body: string;
   /** Response headers, lower-cased names (Linear's rate-limit counters). Absent from a fake. */
   headers?: Record<string, string>;
+  /** The raw body bytes (an image or attachment download). Absent from a fake that sends text only. */
+  bytes?: Buffer;
 }
 
 /** A request BODY — the Linear GraphQL POST (tracker/linear/client.ts). Absent = a GET. */
@@ -265,7 +269,8 @@ export const nodeTransport: JiraTransport = (url, headers, opts, init) =>
       // Do not read a redirect's body, and never follow its Location.
       if (status >= 300 && status < 400) {
         res.resume();
-        return fail(new JiraFetchError('redirect', status));
+        const loc = res.headers.location;
+        return fail(new JiraFetchError('redirect', status, typeof loc === 'string' ? loc : null));
       }
       const declared = Number(res.headers['content-length'] ?? '');
       if (Number.isFinite(declared) && declared > opts.maxBytes) {
@@ -285,7 +290,8 @@ export const nodeTransport: JiraTransport = (url, headers, opts, init) =>
         clearTimeout(timer);
         const out: Record<string, string> = {};
         for (const [k, v] of Object.entries(res.headers)) if (typeof v === 'string') out[k.toLowerCase()] = v;
-        resolve({ status, contentType, body: Buffer.concat(chunks).toString('utf8'), headers: out });
+        const bytes = Buffer.concat(chunks);
+        resolve({ status, contentType, body: bytes.toString('utf8'), headers: out, bytes });
       });
       res.on('error', () => fail(new JiraFetchError('network')));
     });

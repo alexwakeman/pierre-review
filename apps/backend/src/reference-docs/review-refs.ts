@@ -13,7 +13,7 @@ import {
   type ReviewDocReference,
   type ReviewDocVerdict,
 } from '@pierre-review/shared';
-import { foldForQuote, quoteAppearsIn } from '@pierre-review/shared';
+import { foldForQuote, quoteAppearsIn, withoutFigureDescriptions } from '@pierre-review/shared';
 import { parseLibraryPath, SECTION_FILE } from './paths.js';
 import { docsNavigationPrompt } from './prompts.js';
 import { fileAnchors, SECTION_HEADER_MARK } from './render.js';
@@ -159,6 +159,15 @@ export function sectionBodyOf(text: string): string {
   return lines.slice(i).join('\n');
 }
 
+/**
+ * The words a quote may be checked against: the section's own text with every AI-written figure
+ * description cut out (docs/REFERENCE-DOCS.md § Figures) — a model's words about an image are not
+ * the document's, so they never ground a reference, a story-docs point or a chat citation.
+ */
+export function groundingTextOf(text: string): string {
+  return withoutFigureDescriptions(sectionBodyOf(text));
+}
+
 const letters = (s: string): number => (s.match(/[\p{L}\p{N}]/gu) ?? []).length;
 
 const clip = (raw: unknown, max: number): string => {
@@ -284,7 +293,7 @@ export function validateDocReferences(raw: unknown, lib: LibrarySnapshot): DocRe
       continue;
     }
     // A document-relative link may name a file in several documents: the quote picks the one.
-    const matching = citationCandidates(e.link, lib).filter((h) => quoteAppearsIn(sectionBodyOf(h.text), quote));
+    const matching = citationCandidates(e.link, lib).filter((h) => quoteAppearsIn(groundingTextOf(h.text), quote));
     const hit = matching.length === 1 ? matching[0]! : null;
     if (hit == null) {
       dropped += 1;

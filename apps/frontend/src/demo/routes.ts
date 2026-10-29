@@ -888,15 +888,18 @@ export const ROUTES: DemoRoute[] = [
       return OK({ doc: wiki && wiki.unreachableSince == null ? { ...doc, wiki: { ...wiki, lastCheckedAt: srv.nowIso() } } : doc });
     },
   },
-  // Settings → Confluence: a save answers the saved settings (the token never comes back); the test
-  // reads the fictional site.
+  // Settings → Confluence / Notion: a save answers the saved settings (no token ever comes back); the
+  // test reads the fictional site (or Notion).
   {
     method: 'PUT',
     re: /^\/api\/workspaces\/(\d+)\/wiki-credentials$/,
     run: (req, m, srv) => {
       const rec = srv.recorded('GET', `/api/workspaces/${m[1]}/wiki-credentials`);
       const prev = isRecord(rec) && isRecord(rec.confluence) ? rec.confluence : {};
-      const patch = isRecord(bodyRecord(req).confluence) ? (bodyRecord(req).confluence as Record<string, unknown>) : {};
+      const prevNotion = isRecord(rec) && isRecord(rec.notion) ? rec.notion : {};
+      const body = bodyRecord(req);
+      const patch = isRecord(body.confluence) ? (body.confluence as Record<string, unknown>) : {};
+      const notion = isRecord(body.notion) ? (body.notion as Record<string, unknown>) : {};
       return OK({
         workspaceId: Number(m[1]),
         confluence: {
@@ -905,13 +908,14 @@ export const ROUTES: DemoRoute[] = [
           hasToken: 'token' in patch ? patch.token != null && patch.token !== '' : Boolean(prev.hasToken),
           jiraSite: prev.jiraSite ?? null,
         },
+        notion: { hasToken: 'token' in notion ? notion.token != null && notion.token !== '' : Boolean(prevNotion.hasToken) },
       });
     },
   },
   {
     method: 'POST',
     re: /^\/api\/workspaces\/\d+\/wiki-credentials\/check$/,
-    run: () => OK({ ok: true, message: 'Connected to acme.atlassian.net.' }),
+    run: (req) => OK({ ok: true, message: bodyRecord(req).provider === 'notion' ? 'Connected to Notion.' : 'Connected to acme.atlassian.net.' }),
   },
   {
     method: 'POST',

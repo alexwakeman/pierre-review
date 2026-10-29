@@ -53,8 +53,14 @@ const VIEWS = [
   ['bot-detail:8', '?view=bot-detail:8', null],
   ...['overview', 'bottlenecks', 'stories'].map((t) => [`reports:${t}`, `?view=activity&activityRepo=insights&insightsTab=${t}`, t === 'overview' ? 'reports' : t === 'bottlenecks' ? 'chronology' : null]),
   ['reports:month', '?view=activity&activityRepo=insights&reportGrain=month', 'reports-month'],
-  // Two Confluence page trees beside the files: one current, one Confluence has stopped answering.
-  ['docs', '?view=activity&activityRepo=docs', 'docs', { expect: ['Release handbook', 'Confluence · 3 pages', 'Refresh now', 'Can’t reach this page in Confluence since'] }],
+  // Two Confluence page trees beside the files (one current, one Confluence has stopped answering) and a
+  // Notion page tree whose diagram Claude described (docs/REFERENCE-DOCS.md § Figures).
+  [
+    'docs',
+    '?view=activity&activityRepo=docs',
+    'docs',
+    { expect: ['Release handbook', 'Confluence · 3 pages', 'Refresh now', 'Can’t reach this page in Confluence since', 'Checkout design notes', 'Notion · 2 pages', '1 figure described by AI'] },
+  ],
   ...['themes', 'paths', 'people', 'merged'].map((t) => [`sprint:${t}`, `?view=sprint&sprintTab=${t}`, t === 'themes' ? 'sprint-themes' : t === 'paths' ? 'sprint-paths' : null]),
   ['sprint:tray', `?view=sprint&sprintTab=themes&sprintStory=${story('PLAT-292')}`, 'sprint-tray'],
   ['ticket:PLAT-292', `?view=${ident('PLAT-292')}`, 'story-view'],
@@ -169,6 +175,13 @@ const VIEWS = [
     '?view=activity',
     null,
     { act: openSettingsTab('AI review'), expect: ['Confluence', 'Pages on acme.atlassian.net use your Jira token.', 'Test connection'] },
+  ],
+  // Settings → AI review → Notion: a token saved (never shown), the sharing rule behind the ⓘ.
+  [
+    'settings:notion',
+    '?view=activity',
+    null,
+    { act: openSettingsTab('AI review'), expect: ['Notion', 'Add Notion pages to Docs.', 'Integration token'] },
   ],
   ['user-activity:2', '?view=user-activity:2', null],
   ['ws2:open-prs', '?view=activity&workspace=2', null],

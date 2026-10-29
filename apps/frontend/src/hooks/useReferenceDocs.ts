@@ -18,6 +18,7 @@ import type {
   ReferenceDocsResponse,
   ReferenceDocsSettings,
   WikiCredentialsCheckResponse,
+  WikiProviderId,
   WikiCredentialsSettings,
   WikiCredentialsUpdate,
 } from '@pierre-review/shared';
@@ -225,7 +226,9 @@ export function useSetWikiCredentials(workspaceId: number | null) {
   });
 }
 export function useCheckWikiCredentials(workspaceId: number | null) {
-  return useMutation<WikiCredentialsCheckResponse, Error, void>({ mutationFn: () => api.checkWikiCredentials(workspaceId!) });
+  return useMutation<WikiCredentialsCheckResponse, Error, WikiProviderId | void>({
+    mutationFn: (provider) => api.checkWikiCredentials(workspaceId!, provider ?? undefined),
+  });
 }
 
 export function useRebuildReferenceDoc(workspaceId: number | null) {

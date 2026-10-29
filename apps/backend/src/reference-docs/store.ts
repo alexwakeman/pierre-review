@@ -6,6 +6,7 @@ import type {
   ReferenceDocCitation,
   ReferenceDocCrawl,
   ReferenceDocSummaryCache,
+  ReferenceDocFigures,
   ReferenceDocWiki,
   ReferenceDocWikiState,
   ReferenceDocSectionEntry,
@@ -15,6 +16,7 @@ import type {
   ReferenceDocsConversationSummary,
 } from '@pierre-review/shared';
 import { db, schema } from '../db/client.js';
+import { figuresOf } from './figures.js';
 import type { IndexEntry } from './render.js';
 
 // THE REFERENCE DOCS' ROWS (migration 0116 / pg 0103; docs/REFERENCE-DOCS.md § Storage). Every read
@@ -51,7 +53,7 @@ const isoMs = (ms: number | null | undefined): string | null => (typeof ms === '
 export function wikiStateOf(v: unknown): ReferenceDocWikiState | null {
   if (v == null || typeof v !== 'object') return null;
   const w = v as Partial<ReferenceDocWikiState>;
-  if (w.provider !== 'confluence' || typeof w.origin !== 'string' || typeof w.rootPageId !== 'string') return null;
+  if ((w.provider !== 'confluence' && w.provider !== 'notion') || typeof w.origin !== 'string' || typeof w.rootPageId !== 'string') return null;
   const n = (x: unknown): number | null => (typeof x === 'number' && Number.isFinite(x) ? x : null);
   return {
     provider: w.provider,
@@ -130,6 +132,7 @@ export function toReferenceDoc(r: DocRow): ReferenceDoc {
     ...(r.model ? { model: r.model, provider: aiRunProvider(r.provider, r.model) } : {}),
     crawl: crawlOf(r.crawl),
     ...(wiki ? { wiki: toWikiWire(wiki) } : {}),
+    figures: figuresOf(r.figures),
     createdAt: iso(r.createdAt)!,
     updatedAt: iso(r.updatedAt)!,
     builtAt: iso(r.builtAt),
@@ -246,6 +249,7 @@ export interface ProgressPatch {
   crawl?: ReferenceDocCrawl | null;
   wiki?: ReferenceDocWikiState | null;
   summaryCache?: ReferenceDocSummaryCache | null;
+  figures?: ReferenceDocFigures | null;
 }
 
 export async function patchDoc(accountId: number, id: number, patch: ProgressPatch): Promise<boolean> {

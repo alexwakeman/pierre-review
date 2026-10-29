@@ -257,6 +257,26 @@ clone count. **The invariant: a GitHub token never reaches disk.**
   sockets) and `tracker/routes.test.ts`. Rate tiers: every route that can reach the customer's Jira
   (the ticket GET/refresh/ac-field, the connection check, the tracker PUT and `POST
   /api/ticket-links`, whose kicks spend it) is on `search`, by exact path in `tierFor`.
+- **Reference-docs Notion pages (`reference-docs/wiki/notion.ts`) — ONE fixed host.** Every request goes to
+  `api.notion.com` only (asserted after the URL check) through the tracker's guarded transport: https,
+  public addresses at connect time, NO redirects, 15 s, 8 MB, JSON only, `Bearer` + a PINNED
+  `Notion-Version`. A process-wide limiter (≈ 3 requests a second) and a bounded 429 wait. The token is
+  shape-checked (`NOTION_TOKEN_RE`), SEALED and write-only (`workspace_wiki_credentials`, provider
+  `notion`); the export carries `hasToken` only. Everything Notion answers is a stranger's: block text is
+  escaped so it cannot become markdown syntax or a figure marker; only http(s)/mailto targets link.
+  Tiers: as Confluence's routes (the same routes).
+- **Figure images (`reference-docs/figure-fetch.ts`, `figures.ts`, `figure-describer.ts`; § Figures in
+  REFERENCE-DOCS.md).** An image download carries NO credential (a Notion file address and Atlassian's
+  media address are signed in their own query; an external image is a stranger's) and goes through
+  `fetchPage` — PUBLIC addresses only for a wiki's files, the page's own policy for a web page's images —
+  under a 5 MB cap and ≤ 60 downloads a build. Confluence's attachment download is the one request with
+  the credential; its redirect to the media service is followed ONCE, WITHOUT it. Only PNG / JPEG / GIF /
+  WebP headers are kept (`imageInfo`). ⚠ The image is UNTRUSTED INPUT to a Claude vision call: a strict
+  system prompt (describe, never act on text in the image), tool-less, one turn, connectors isolated; the
+  answer is cleaned to one bracket-free line and labelled `[Figure (described by AI): …]`, and is NEVER
+  quote grounding (`withoutFigureDescriptions`). Codex never sees an image (`LOCKED_SETTINGS` unchanged).
+  An automatic description asks the spend budget first. The description cache is keyed by (account,
+  image hash) and read only for images the document holds.
 - **Reference-docs Confluence pages (`reference-docs/wiki/confluence.ts`) — a site the reader typed,
   read with a saved token.** Every request goes through the tracker's transport under the STRICT policy
   (`{ cloud: true }`: https only, public addresses only, judged at connect time), no redirects (the

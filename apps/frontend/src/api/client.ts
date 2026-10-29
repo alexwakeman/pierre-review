@@ -13,6 +13,7 @@ import type {
   AddReferenceDocUrlBody,
   AddReferenceDocWikiBody,
   WikiCredentialsCheckResponse,
+  WikiProviderId,
   WikiCredentialsSettings,
   WikiCredentialsUpdate,
   SetReferenceDocsSettingsBody,
@@ -1600,8 +1601,11 @@ export const api = {
   wikiCredentials: (workspaceId: number) => get<WikiCredentialsSettings>(`/api/workspaces/${workspaceId}/wiki-credentials`),
   setWikiCredentials: (workspaceId: number, body: WikiCredentialsUpdate) =>
     fetch(`/api/workspaces/${workspaceId}/wiki-credentials`, jsonBody('PUT', body)).then((r) => handle<WikiCredentialsSettings>(r)),
-  checkWikiCredentials: (workspaceId: number) =>
-    fetch(`/api/workspaces/${workspaceId}/wiki-credentials/check`, jsonBody('POST')).then((r) => handle<WikiCredentialsCheckResponse>(r)),
+  // No body ⇒ Confluence (the route's default); `provider` names the wiki to test.
+  checkWikiCredentials: (workspaceId: number, provider?: WikiProviderId) =>
+    fetch(`/api/workspaces/${workspaceId}/wiki-credentials/check`, jsonBody('POST', provider ? { provider } : undefined)).then((r) =>
+      handle<WikiCredentialsCheckResponse>(r),
+    ),
   rebuildReferenceDoc: (docId: number) =>
     fetch(`/api/docs/${docId}/rebuild`, jsonBody('POST')).then((r) => handle<ReferenceDocMutationResponse>(r)),
   cancelReferenceDoc: (docId: number) =>
