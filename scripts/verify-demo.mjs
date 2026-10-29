@@ -88,6 +88,8 @@ const VIEWS = [
     {
       act: async (page) => {
         await page.getByRole('button', { name: 'Check docs again' }).first().click();
+        // The heading's button is now the forced re-run.
+        await page.getByRole('button', { name: 'Check again anyway' }).first().waitFor({ timeout: 10_000 });
       },
       expect: ['Nothing has changed since this check.', 'Check again anyway'],
     },

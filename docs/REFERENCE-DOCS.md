@@ -738,7 +738,8 @@ automatic, never on view. `registerAgenticRoutes` registers the two routes (docs
   ident + the three hashes + BOTH models (Haiku's id, the read's model on the provider) + the provider. A POST
   without `force` whose fingerprint equals the newest SUCCEEDED run's (same `version`) answers
   `{outcome:'reused', runId}` — no row, no model call, not counted against the cap; the SPA keeps drawing that
-  run and says "Nothing has changed since this check." with "Check again anyway" (`force: true`). A field that
+  run and says "Nothing has changed since this check.", and the Story heading's button becomes "Check again
+  anyway" (`force: true`) — run buttons live in the heading, never in the block (`ticketShare.test.ts`). A field that
   changes the answer and is missing from the fingerprint would serve a stale answer as current — add it there.
 - **Storage**: `story_docs_alignments`, ONE ROW PER RUN — a re-run never rewrites the good row, and the GET
   returns `lastSucceeded` beside a newer failed or in-flight run. Composite FK onto `workspaces`; a deleted

@@ -2,10 +2,11 @@
 // § The story view). CORE, free, LOCAL ONLY (`me.ai.enabled`), and only on a CLICK: Claude Sonnet reads the
 // workspace's reference library — all of it when it is short, else the sections Claude Haiku picks — and says where the story matches them and where it does not.
 //
-//   StoryDocsButton           "Check against docs" / "Check again" — one of the STORY'S ACTIONS, in the
-//                             Story section's heading row (TicketStorySection.tsx), not in the block
+//   StoryDocsButton           "Check against docs" / "Check docs again" / "Check again anyway" (after a
+//                             click the server answered `reused`: the forced re-run) — one of the STORY'S
+//                             ACTIONS, in the Story section's heading row (TicketStorySection.tsx), not in the block
 //   StoryDocsAlignmentBlock   the heading, the ⓘ, progress, failure, refusal, "Nothing has changed since
-//                             this check." (a click the server answered `reused`, with a forced re-run), and the whole-story
+//                             this check." (a click the server answered `reused`), and the whole-story
 //                             result: verdict, 2-3 sentences, actionable bullets, points on other parts
 //                             of the story, and — when the notes cannot sit under the section's own
 //                             criteria — the run's own numbered list
@@ -127,6 +128,17 @@ function StoryDocsInfo(): JSX.Element {
   );
 }
 
+/** This mount's click was answered with the last good check (nothing changed since), and that check is
+ *  still the one shown. The block says so; the heading's button becomes the forced re-run. */
+function reusedAnswer(
+  data: StoryDocsAlignmentResponse,
+  start: UseMutationResult<StartStoryDocsAlignmentResponse, Error, StartStoryDocsVars>,
+  starting: boolean,
+): boolean {
+  const clickStale = starting || clickMessageStale(data.run, start.submittedAt);
+  return !clickStale && start.data?.outcome === 'reused' && shownRun(data)?.id === start.data.runId;
+}
+
 /** The Story heading's docs action. Only where agentic AI runs and the workspace has docs to check
  *  against (`available`), behind the one AiRunGate. */
 export function StoryDocsButton({
@@ -141,10 +153,12 @@ export function StoryDocsButton({
   const ai = useAiCapabilities();
   const data = q.data;
   if (!ai.enabled || data == null || !data.available) return null;
+  // After a click the server answered from the last check, the next press runs anyway.
+  const force = reusedAnswer(data, start, starting);
   return (
     <AiRunGate kind="story_docs">
-      <button type="button" className={BTN} disabled={docsChecking(data, starting)} onClick={() => start.mutate()}>
-        {docsButtonLabel(data, starting)}
+      <button type="button" className={BTN} disabled={docsChecking(data, starting)} onClick={() => start.mutate(force ? { force: true } : undefined)}>
+        {force ? 'Check again anyway' : docsButtonLabel(data, starting)}
       </button>
     </AiRunGate>
   );
@@ -176,8 +190,9 @@ export function StoryDocsAlignmentBlock({
   // A click answered `reused` makes the good run the answer: an older failure no longer speaks for it.
   const failed = !starting && data.run?.status === 'failed' && !(!clickStale && start.data?.outcome === 'reused') ? data.run : null;
   const refusal = !clickStale && start.data?.outcome === 'refused' ? STORY_DOCS_REFUSAL_TEXT[start.data.refusal] : null;
-  // The click was answered with the last good check (nothing changed since): say so, and offer a run.
-  const reused = !clickStale && start.data?.outcome === 'reused' && shown?.id === start.data.runId;
+  // The click was answered with the last good check (nothing changed since): say so — the heading's
+  // button is now "Check again anyway" (run buttons live in the Story heading, never in a block).
+  const reused = reusedAnswer(data, start, starting);
   return (
     <section aria-label="Docs check" className="space-y-2" data-testid="story-docs">
       <div className="flex flex-wrap items-center gap-1.5">
@@ -199,16 +214,7 @@ export function StoryDocsAlignmentBlock({
       )}
       {failed != null && <p className="text-xs text-red-600 dark:text-red-400">{failed.error ?? 'The docs check failed.'}</p>}
       {refusal != null && <p className={`text-xs ${MUTED}`}>{refusal}</p>}
-      {reused && (
-        <div className={`flex flex-wrap items-center gap-1.5 text-xs ${MUTED}`}>
-          <span>Nothing has changed since this check.</span>
-          <AiRunGate kind="story_docs">
-            <button type="button" className="underline hover:no-underline" onClick={() => start.mutate({ force: true })}>
-              Check again anyway
-            </button>
-          </AiRunGate>
-        </div>
-      )}
+      {reused && <p className={`text-xs ${MUTED}`}>Nothing has changed since this check.</p>}
       {start.isError && !clickStale && <p className="text-xs text-red-600 dark:text-red-400">{start.error.message}</p>}
       {shown != null && <StoryDocsResultView run={shown} attached={attached} />}
     </section>
