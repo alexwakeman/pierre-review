@@ -12,7 +12,7 @@
 // ⚠ CLAIM BEFORE ANY WRITE, NEVER RETRIED: the record is `claude_reviews.auto_post` of the replies
 // pass's own row, written by a compare-and-set from NULL (`status: 'posting'`) before GitHub is
 // touched. A refused verdict is recorded, never sent again (there are no comments to fall back to).
-// THE RULES (migration 0139): the workspace's `approveLeftovers` and, for a Claude + Codex review, its
+// THE RULES (migration 0145): the workspace's `approveLeftovers` and, for a Claude + Codex review, its
 // strictness (`repliesDissent`: a half that did not approve and raised nothing holds the approval —
 // strict: any; relaxed: one that asked for changes). WHY NOT APPROVED (`repliesNotApproved`) is
 // stored on the pass row (`verdict_reason`) while the auto verdict is on, and shown in Limn.
@@ -140,7 +140,7 @@ export async function computeRepliesOutcome(
   // An earlier blocker the full review left unjudged is still open — unless a reply settled it since.
   const unjudged = [...new Set(halves.flatMap((h) => unsettledEarlierBlockers(h)))].filter((id) => !settledIds.has(id));
   const disputedBlocker = items.some((it) => it.status === 'reply_disputed' && it.severity === 'blocker');
-  // THE WORKSPACE'S RULES (migration 0139); a failed read is the defaults, auto verdict off.
+  // THE WORKSPACE'S RULES (migration 0145); a failed read is the defaults, auto verdict off.
   const rules = await readVerdictRulesForPr(ctx, accountId, prId).catch(() => ({ ...DEFAULT_VERDICT_RULES, autoVerdict: false }));
   const dissent = halves.length >= 2 ? repliesDissent(await pairHalvesRaised(ctx, prId, halves), rules.pairStrictness) : null;
   const input = { open, unjudgedEarlierBlockers: unjudged.length, items, leftovers: rules.approveLeftovers, dissent };

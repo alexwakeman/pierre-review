@@ -1,4 +1,4 @@
-// THE AUTO VERDICT'S TWO RULES AND THE ONE REASON (migration 0139; docs/CLAUDE-REVIEW.md § Auto-posting
+// THE AUTO VERDICT'S TWO RULES AND THE ONE REASON (migration 0145; docs/CLAUDE-REVIEW.md § Auto-posting
 // → AUTO VERDICT). Over the REAL core client and a FAKE GitHub (`ctx.review.postReview` is a recorded
 // stub — nothing reaches GitHub or a model). What is pinned:
 //   1. PAIR STRICTNESS on the PR 190400 shape (Claude APPROVE + Codex COMMENT, no findings): strict ⇒

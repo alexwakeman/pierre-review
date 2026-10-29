@@ -538,7 +538,7 @@ paramount … we should still get a review outcome if at least one agent ran ok.
     kept findings, leftovers)`), never the model's — folded by the WORKSPACE'S rules
     (`readVerdictRulesForPr`, read once when the pair is consolidated: strict / relaxed, what may stay
     open; § Auto-posting → THE TWO RULES). This is also the manual pair's suggested verdict. A pair with
-    no record yet (or one from before 0139) reads the defaults.
+    no record yet (or one from before 0145) reads the defaults.
   - ⚠ **A MERGED-AWAY DUPLICATE** (`claude_review_findings.merged_into` = the kept id) stays stored
     but every read of a run's findings leaves it out (`getClaudeReviewById`, `isMergedAway`): it is
     never shown, posted (the single-finding route answers `409 MergedDuplicate`), counted in a verdict
@@ -1358,7 +1358,7 @@ JUST the replies, cheaply, at the current head. Pure half `claude-review/replies
   both — is a reluctance no reply can settle; strict: any such half holds it; relaxed: only one that
   asked for changes, or every half when none approved) ⇒ APPROVE; anything else ⇒ nothing changes.
   The newest row's `verdict` stores it (a manual pass: "Would approve." / "Would request changes.").
-  ⚠ WHY NOT (`repliesNotApproved`, migration 0139): while the auto verdict is on, the reason is stored
+  ⚠ WHY NOT (`repliesNotApproved`, migration 0145): while the auto verdict is on, the reason is stored
   on the pass row (`claude_reviews.verdict_reason`, manual and auto) and shown in the tab's replies
   line (`ClaudeRepliesCheckRun.notApproved`; the auto-post record's reason wins). `held` = the old rule
   (no blocker, no warning) WOULD have approved and the leftovers rule or a pair half held it.
@@ -2580,7 +2580,7 @@ auto-posting: claim before any GitHub write, never retried.
   Safe because a refused POST created nothing (the seam posts PR-level comments only after the review
   lands). A 5xx / network / rate-limit failure is ambiguous and is NEVER retried; a refused bare
   verdict with no comments posts nothing more (`failed`).
-- **THE TWO RULES** (migration 0139; user decision 2026-10-29, after PR 190400 — Claude APPROVE,
+- **THE TWO RULES** (migration 0145; user decision 2026-10-29, after PR 190400 — Claude APPROVE,
   Codex COMMENT with no findings because "the binary fixture change cannot be verified from this
   diff", which left the pair at COMMENT with nothing posted and nothing said). Both per workspace,
   OVERRIDES ONLY, on the auto-review route + PUT + the settings history (`setWorkspaceAutoReview`
@@ -2599,7 +2599,7 @@ auto-posting: claim before any GitHub write, never retried.
     Blockers and warnings ALWAYS hold; praise never counts (`leftoverAllowed`). Read by
     `autoVerdictFor` (single runs and pairs) and `repliesVerdict`. Settings: "Approve with open
     findings", three radios under Approve, dimmed while the verdict switch is off.
-- **THE REASON — ALWAYS ONE WHEN NOT APPROVED** (migration 0139). While the auto verdict is on, a run
+- **THE REASON — ALWAYS ONE WHEN NOT APPROVED** (migration 0145). While the auto verdict is on, a run
   that does not end in an APPROVE gets ONE plain-English line, "Not approved: …":
   - from the findings and the model(s) (`findingsNotApproved`, pure — null EXACTLY when
     `autoVerdictFor` would approve), in order: blockers / warnings still open ("Not approved: 2
@@ -2630,7 +2630,7 @@ auto-posting: claim before any GitHub write, never retried.
   it goes out under the reader's account, and any review the reader submits answers their pending
   request on GitHub (it leaves My Turn's "Awaiting your review"). So it is never sent while a request
   of the reader is OPEN (`AutoPostPrFacts.openRequestOfMe`, the synced `review_requests` row); the
-  reason stays in Limn. (A review carrying findings already answered the request before 0139.) The
+  reason stays in Limn. (A review carrying findings already answered the request before 0145.) The
   tab keeps `autoVerdictLine` for a held REQUEST_CHANGES (its `reasonText` is the findings', not the
   hold's); only a held APPROVE's line yields to the reason. This
   supersedes "a held verdict with nothing to post is a skip" for this one case only. Model text is

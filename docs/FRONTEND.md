@@ -1539,7 +1539,7 @@ reappears.
     is never held by it. ⚠ The level is the SAME one the PR's chip shows — the server folds it through
     the ONE shared `blastRadius()` with the account's dial — and a PR with no level counts as HIGH. The
     ⓘ says both; the surface carries only the labels.
-  - **Approve with open findings** (migration 0139): under Approve, three radios (`LEFTOVER_ROWS`:
+  - **Approve with open findings** (migration 0145): under Approve, three radios (`LEFTOVER_ROWS`:
     nothing / nits / nits and questions — the default; `autoPost.approveLeftovers`), dimmed with the
     verdict switch, ⓘ beside the legend. **When Claude and Codex disagree** (`pairStrictness`: Strict
     — the default — / Relaxed) renders ONLY while both are signed in (`pairReviewReady`,

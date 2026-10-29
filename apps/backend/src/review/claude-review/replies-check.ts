@@ -176,7 +176,7 @@ interface PassRow {
   verdict: string | null;
   error: string | null;
   autoPost: unknown;
-  // Why the outcome is not an approval (migration 0139); absent on an older schema.
+  // Why the outcome is not an approval (migration 0145); absent on an older schema.
   verdictReason?: unknown;
 }
 
@@ -836,7 +836,7 @@ async function afterPass(
       const cr = sch(ctx).claudeReviews;
       await ctx.db.update(cr).set({ verdict: outcome.wanted }).where(eq(cr.id, last.reviewId)).execute();
     }
-    // WHY NOT APPROVED (migration 0139), shown in Limn manual and auto alike — only while the
+    // WHY NOT APPROVED (migration 0145), shown in Limn manual and auto alike — only while the
     // workspace's auto verdict is on.
     if (outcome.autoVerdict === true && outcome.reason != null) {
       const cr = sch(ctx).claudeReviews;

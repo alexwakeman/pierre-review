@@ -3,7 +3,7 @@
 // can compute the pair's verdict without importing the auto-post I/O. auto-post.ts re-exports
 // `autoVerdictFor` under its old name. docs/CLAUDE-REVIEW.md § Auto-posting → AUTO VERDICT.
 //
-// TWO WORKSPACE RULES (migration 0139), both OVERRIDES ONLY:
+// TWO WORKSPACE RULES (migration 0145), both OVERRIDES ONLY:
 //   • `approveLeftovers` — what may stay open on an approve: 'nits_questions' (default), 'nits',
 //     'none'. Blockers and warnings ALWAYS prevent it; praise never counts.
 //   • `pairStrictness` — how a pair's two model verdicts fold (`pairVerdict`): 'strict' (default) =

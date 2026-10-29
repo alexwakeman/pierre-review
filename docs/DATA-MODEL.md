@@ -675,7 +675,7 @@ post is recorded on the second half's `auto_post`, the first's carrying `viaPair
 `'both'` = a pair (`resolveAutoReviewProviders`, `review/claude-review/pair.ts`; one writer,
 `setWorkspaceAutoReview`).
 
-THE AUTO VERDICT'S TWO RULES (migration `0139`; [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Auto-posting →
+THE AUTO VERDICT'S TWO RULES (migration `0145`; [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Auto-posting →
 THE TWO RULES), both OVERRIDES ONLY on `workspaces`, one writer (`setWorkspaceAutoReview`), one reader
 (`readVerdictRulesForPr`): `pair_verdict_strictness` (NULL = `'strict'`, `'relaxed'`) and
 `approve_leftovers` (NULL = `'nits_questions'`, `'nits'`, `'none'`). `claude_reviews.verdict_reason`

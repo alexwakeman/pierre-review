@@ -4418,7 +4418,7 @@ export interface WorkspaceAutoReviewSettings {
   // default provider (Settings → AI); 'both' = Claude, then Codex, as one PAIR (docs/CLAUDE-REVIEW.md
   // § Claude + Codex). With 'both' and only one provider signed in when a run starts, that one runs.
   autoReviewProviders: AutoReviewProviders;
-  // WHEN CLAUDE AND CODEX DISAGREE (`workspaces.pair_verdict_strictness`, migration 0139): how a
+  // WHEN CLAUDE AND CODEX DISAGREE (`workspaces.pair_verdict_strictness`, migration 0145): how a
   // pair's ONE verdict is folded — every pair verdict (auto-post, the manual pair's suggested verdict,
   // the replies outcome). 'strict' (the default) = approve only when both approved; 'relaxed' =
   // approve when at least one approved and NEITHER asked for changes (a half that said COMMENT does
@@ -4513,7 +4513,7 @@ export interface WorkspaceAutoPostSettings {
   // APPROVE into a COMMENT (`heldReason: 'impact'`); REQUEST_CHANGES is never held by it. An
   // UNKNOWN level (the resolver draws nothing) is treated as HIGH — the safe direction.
   approveImpact: AutoApproveImpact;
-  // WHAT MAY STAY OPEN ON AN APPROVE (`workspaces.approve_leftovers`, migration 0139; NULL = the
+  // WHAT MAY STAY OPEN ON AN APPROVE (`workspaces.approve_leftovers`, migration 0145; NULL = the
   // default 'nits_questions'). Read by every verdict: single runs, pairs, the replies outcome.
   approveLeftovers: ApproveLeftovers;
   // AUTO RESOLVE (default OFF): a Limn-posted inline finding thread that a later review's
@@ -4622,7 +4622,7 @@ export type AutoPostSkipReason =
 //   impact     the PR's impact level when the APPROVE was weighed against `approveImpact`
 //              ('unknown' = the resolver drew nothing, held as if high). Absent otherwise.
 export type AutoVerdictEvent = 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT';
-//   heldReason also says why a run that wanted only a COMMENT did not approve (migration 0139):
+//   heldReason also says why a run that wanted only a COMMENT did not approve (migration 0145):
 //              'open_findings' (blockers / warnings, or nits / questions the workspace's
 //              `approveLeftovers` does not allow, are still open), 'model_comment' (the model did not
 //              approve — or, in a relaxed pair, a half asked for changes or neither approved),
@@ -4676,7 +4676,7 @@ export interface ClaudeAutoPostRecord {
   // A CLAUDE + CODEX PAIR posts ONE review for both runs, claimed on the SECOND run's record. The
   // first run's record names the second here (its findings went out in that review); absent otherwise.
   viaPairReviewId?: number | null;
-  // The not-approved reason this run put on GitHub (migration 0139): as the last line of its review
+  // The not-approved reason this run put on GitHub (migration 0145): as the last line of its review
   // body, or — `reasonOnly` — as a COMMENT review of its own because nothing else was left to post.
   // A reason-only review goes out at most ONCE per (PR, head): a later run at the same head whose
   // record (or an earlier one's) already carries `reasonPosted` posts nothing more.
@@ -7348,7 +7348,7 @@ export interface ClaudeRepliesCheckRun {
   // The outcome the replies point to (the run's verdict), and what auto-posting did with it.
   verdict: ClaudeReviewVerdict | null;
   autoPost: ClaudeAutoPostWire | null;
-  // Why the outcome is not an approval (`claude_reviews.verdict_reason`, migration 0139); absent on
+  // Why the outcome is not an approval (`claude_reviews.verdict_reason`, migration 0145); absent on
   // an older server, null when there is none.
   notApproved?: ClaudeNotApproved | null;
 }

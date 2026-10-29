@@ -88,7 +88,7 @@ import { ScopePendingSection, useSettingsWorkspace } from './workspaceScope.js';
  * The level is the chip's level: the server folds the same shared `blastRadius()` with the
  * account's Settings → Blast radius config. Unknown is held as High — said behind the ⓘ only.
  *
- * THE AUTO VERDICT'S TWO RULES (migration 0139): under Approve, three radios for what may still be
+ * THE AUTO VERDICT'S TWO RULES (migration 0145): under Approve, three radios for what may still be
  * open when Limn approves (`autoPost.approveLeftovers`: nothing / nits / nits and questions, the
  * default); and — ONLY while both Claude and Codex are signed in — "When Claude and Codex disagree"
  * (`pairStrictness`: strict, the default, or relaxed), explained behind its ⓘ. It governs every pair
@@ -163,7 +163,7 @@ export function AutoReviewSection(): JSX.Element {
   const [providers, setProviders] = useState<AutoReviewProviders>(storedProviders);
   // Both Claude and Codex signed in: the pair choice, and "When Claude and Codex disagree".
   const pairReady = pairReviewReady(useMe().data);
-  // When Claude and Codex disagree (migration 0139): strict unless a stored 'relaxed' says otherwise.
+  // When Claude and Codex disagree (migration 0145): strict unless a stored 'relaxed' says otherwise.
   const storedStrictness: PairVerdictStrictness = stored?.pairStrictness === 'relaxed' ? 'relaxed' : 'strict';
   const [strictness, setStrictness] = useState<PairVerdictStrictness>(storedStrictness);
   const storedCap = stored?.dailyCap ?? 20;
