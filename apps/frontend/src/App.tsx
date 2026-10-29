@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { FilterBar } from './components/FilterBar.js';
 import { PinnedTabsBar } from './components/PinnedTabsBar.js';
 import { PrDetail } from './components/PrDetail.js';
@@ -47,7 +47,13 @@ import { useFilters } from './store/filters.js';
 import { boardSlotMode, isFixedView, usePinnedTabs, type TimelineMode } from './store/pinnedTabs.js';
 import { ApiError, api } from './api/client.js';
 import { Wordmark } from './components/Wordmark';
-import { MoonIcon, SunIcon } from './components/Icons.js';
+import { MagnifierIcon, MoonIcon, SunIcon } from './components/Icons.js';
+import { CommandPalette } from './components/ui/CommandPalette.js';
+import { UndoToast } from './components/ui/UndoToast.js';
+import { openCommandPalette } from './components/ui/commands.js';
+import { Kbd } from './components/ui/Kbd.js';
+import { modKeyLabel } from './components/ui/keys.js';
+import { useShellCommands } from './hooks/useShellCommands.js';
 
 function useDarkMode(): [boolean, () => void] {
   const [dark, setDark] = useState(
@@ -57,7 +63,9 @@ function useDarkMode(): [boolean, () => void] {
     document.documentElement.classList.toggle('dark', dark);
     localStorage.setItem('theme', dark ? 'dark' : 'light');
   }, [dark]);
-  return [dark, () => setDark((d) => !d)];
+  // Stable, so the ⌘K command list built from it is not rebuilt on every render.
+  const toggle = useCallback(() => setDark((d) => !d), []);
+  return [dark, toggle];
 }
 
 export default function App(): JSX.Element {
@@ -75,6 +83,9 @@ export default function App(): JSX.Element {
   useClaudeReviewActiveSync();
   const [dark, toggleDark] = useDarkMode();
   const [helpOpen, setHelpOpen] = useState(false);
+  const openHelp = useCallback(() => setHelpOpen(true), []);
+  // ⌘K reaches every destination, every Settings tab and every open PR (components/ui/commands.ts).
+  useShellCommands({ toggleTheme: toggleDark, openHelp });
   // The Settings modal opens from the avatar menu AND from Pending's "Customise" link, so its
   // state lives in a store. `closeSettings` is a zustand action — referentially STABLE, which
   // SettingsModal needs: it registers its capture-phase Escape handler in an effect keyed on
@@ -264,8 +275,22 @@ export default function App(): JSX.Element {
           {/* Ambient heavy-work indicator (full-mode backfills + ML bot-comment scoring).
               An indicator, not a dialog: non-dismissible, no action. */}
           <GlobalLoadingBar />
+          {/* Undo for an optimistic row removal (components/ui/undo.ts). */}
+          <UndoToast />
         </HeaderToastStrip>
         <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+          {/* The command menu's pointer entry (⌘K / Ctrl+K from the keyboard). */}
+          <button
+            type="button"
+            onClick={() => openCommandPalette()}
+            className="inline-flex items-center gap-1.5 rounded border border-gray-300 px-2 py-0.5 text-xs text-gray-600 hover:border-gray-400 dark:border-gray-700 dark:text-gray-300 dark:hover:border-gray-500"
+            title={`Search or jump (${modKeyLabel()}K)`}
+            aria-label="Search or jump"
+            aria-keyshortcuts="Meta+K Control+K"
+          >
+            <MagnifierIcon size={13} />
+            <Kbd className="max-sm:hidden">{`${modKeyLabel()}K`}</Kbd>
+          </button>
           <SyncStatus />
           {notifSupported && (
             <button
@@ -337,6 +362,7 @@ export default function App(): JSX.Element {
       </header>
 
       {helpOpen && <HelpModal onClose={() => setHelpOpen(false)} />}
+      <CommandPalette />
       {settingsOpen && <SettingsModal focus={settingsFocus} onClose={closeSettings} />}
       {/* The merge-conflict resolver, mounted HERE and not inside PrDetail: it opens from three
           places (the pane's Conflicts row, the expanded merge panel, the Pending board) and must

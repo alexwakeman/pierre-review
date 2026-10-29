@@ -55,6 +55,52 @@
   --ai-signal-fill: 242 107 78;   /* same — one dark vermilion          */
 }
 
+/* ── THE REDESIGN'S COLOUR ROLES (docs/redesign/DESIGN.md § Colour) ───────────────────────────
+   Space-separated RGB channels (the --ai-* pattern) so Tailwind can apply alpha. Surfaces are
+   separated by TONE, not borders: bg → surface → raise → hover → sel, each one step lighter in dark
+   and one step darker in light. Text has three inks (ink / mute / faint), every one AA (4.5:1) on
+   every surface, measured by test/designTokens.test.ts — change a value here and that test says
+   whether it still holds. Colour is reserved: danger = what blocks, success = what is ready to
+   land, accent = the selection and the one primary action. Everything else is ink on surface.
+   warn is for the few legacy "attention" marks the redesign keeps (stale, near a limit). */
+:root {
+  --ui-bg: 255 255 255;           /* #FFFFFF page                         */
+  --ui-surface: 247 247 248;      /* #F7F7F8 sidebar, side panel          */
+  --ui-raise: 240 241 243;        /* #F0F1F3 inputs, secondary buttons    */
+  --ui-hover: 234 235 238;        /* #EAEBEE row hover                    */
+  --ui-sel: 227 230 236;          /* #E3E6EC selected row, active tab     */
+  --ui-line: 220 222 227;         /* #DCDEE3 the rare divider / input edge */
+  --ui-ink: 22 23 26;             /* #16171A primary text                 */
+  --ui-mute: 80 85 94;            /* #50555E secondary text               */
+  --ui-faint: 98 102 111;         /* #62666F tertiary text, meta          */
+  --ui-accent: 29 91 214;         /* #1D5BD6 accent as TEXT / focus ring  */
+  --ui-accent-fill: 37 99 235;    /* #2563EB primary button ground        */
+  --ui-on-accent: 255 255 255;    /* text on accent-fill                  */
+  --ui-danger: 184 42 38;         /* #B82A26 blocks: conflicts, red CI    */
+  --ui-success: 19 112 74;        /* #13704A ready to land                */
+  --ui-warn: 143 84 0;            /* #8F5400 attention (legacy marks)     */
+  --ui-scrim: 15 16 20;           /* modal / sheet backdrop (use at /40)  */
+}
+
+.dark {
+  --ui-bg: 14 15 17;              /* #0E0F11 */
+  --ui-surface: 19 20 23;         /* #131417 */
+  --ui-raise: 24 25 29;           /* #18191D */
+  --ui-hover: 28 30 34;           /* #1C1E22 */
+  --ui-sel: 34 37 43;             /* #22252B */
+  --ui-line: 40 43 50;            /* #282B32 */
+  --ui-ink: 232 233 236;          /* #E8E9EC */
+  --ui-mute: 161 165 174;         /* #A1A5AE */
+  --ui-faint: 139 144 154;        /* #8B909A */
+  --ui-accent: 107 157 247;       /* #6B9DF7 */
+  --ui-accent-fill: 52 102 212;   /* #3466D4 */
+  --ui-on-accent: 255 255 255;
+  --ui-danger: 240 117 114;       /* #F07572 */
+  --ui-success: 79 199 142;       /* #4FC78E */
+  --ui-warn: 226 163 54;          /* #E2A336 */
+  --ui-scrim: 0 0 0;
+}
+
 html,
 body,
 #root {
@@ -151,7 +197,7 @@ body {
   width: 16px;
   height: 16px;
   border-radius: 9999px;
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1;
   color: inherit;
   /* Hidden until the pill is hovered (reserve its width so the pill doesn't jump). */
@@ -916,7 +962,7 @@ body {
   vertical-align: middle;
 }
 .pr-author {
-  font-size: 10px;
+  font-size: 11px;
   opacity: 0.8;
   white-space: nowrap;
   overflow: hidden;
@@ -933,7 +979,7 @@ body {
   max-width: 22ch;
 }
 .pr-draft-tag {
-  font-size: 9px;
+  font-size: 11px;
   text-transform: uppercase;
   background: rgba(0, 0, 0, 0.25);
   border-radius: 3px;
@@ -986,12 +1032,12 @@ body {
 }
 .pr-tt-meta {
   margin-top: 1px;
-  font-size: 10px;
+  font-size: 11px;
   color: #9ca3af;
 }
 .pr-tt-section {
   margin-top: 5px;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -1065,7 +1111,7 @@ body {
   border-radius: 9px;
   background: #475569;
   color: #fff;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   line-height: 1;
   cursor: pointer;
@@ -1396,7 +1442,7 @@ body {
   [data-print-report] table {
     min-width: 0 !important;
     width: 100% !important;
-    font-size: 10px;
+    font-size: 11px;
   }
   [data-print-report] table th,
   [data-print-report] table td {
@@ -1893,4 +1939,19 @@ body {
 }
 .dark .doc-quote-swatch {
   background-color: #92400e;
+}
+
+/* ── REDUCED MOTION, ONCE FOR THE WHOLE APP ───────────────────────────────────────────────────
+   The redesign's primitives use `motion-safe:` for their own transitions; this backstop covers
+   every animation and transition that predates them, so a reader who asked for less motion gets
+   none anywhere (state still changes; it just does not move). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

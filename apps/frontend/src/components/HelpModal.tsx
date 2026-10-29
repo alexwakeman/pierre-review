@@ -168,6 +168,7 @@ export function HelpModal({ onClose }: { onClose: () => void }): JSX.Element {
           </Section>
 
           <Section title="Keyboard">
+            <Kbd>⌘K</Kbd> or <Kbd>Ctrl K</Kbd> go anywhere: a page, a setting, an open pull request ·{' '}
             <Kbd>/</Kbd> focus search · <Kbd>j</Kbd>/<Kbd>k</Kbd> cycle PRs ·{' '}
             <Kbd>i</Kbd> Activity console · <Kbd>Esc</Kbd> leave a tab/overlay, else clear the
             selection.
