@@ -79,6 +79,19 @@ const VIEWS = [
     },
   ],
   ['ticket:PLAT-301', `?view=${ident('PLAT-301')}`, null],
+  // An unchanged story checked again (docs/REFERENCE-DOCS.md § Check a story against the docs): the
+  // server reuses the last check, so the click answers at once with a line and a forced re-run.
+  [
+    'ticket:PLAT-301:docs-reuse',
+    `?view=${ident('PLAT-301')}`,
+    null,
+    {
+      act: async (page) => {
+        await page.getByRole('button', { name: 'Check docs again' }).first().click();
+      },
+      expect: ['Nothing has changed since this check.', 'Check again anyway'],
+    },
+  ],
   ['ticket:INFRA-260', `?view=${ident('INFRA-260')}`, null],
   ['timeline', '?view=timeline&preset=30d', 'timeline'],
   ...[113, 114, 105, 116].flatMap((id) =>

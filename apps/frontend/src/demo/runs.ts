@@ -532,6 +532,18 @@ export class RunSimulator {
         const b = isRecord(req.body) ? req.body : {};
         const ident = typeof b.ident === 'string' ? b.ident : null;
         if (!ident) return notInDemo(400);
+        // NOTHING CHANGED (the server's fingerprint reuse): a demo library never changes, so a story
+        // already checked — in this visit or in the recording — answers `reused` unless forced.
+        if (b.force !== true) {
+          const done = this.latestFor('docs-alignment', ident);
+          if (done && this.isDone(done) && this.statusOf(done) === 'succeeded') return { status: 200, body: { outcome: 'reused', runId: done.id } };
+          if (!done) {
+            for (const g of this.srv.recordedGets(/^\/api\/docs\/story-alignment$/)) {
+              const run = isRecord(g.body) && g.body.ident === ident && isRecord(g.body.run) ? g.body.run : null;
+              if (run && run.status === 'succeeded' && typeof run.id === 'number') return { status: 200, body: { outcome: 'reused', runId: run.id } };
+            }
+          }
+        }
         const r = this.start('docs-alignment', ident, null, ident);
         return r ? { status: 200, body: { outcome: 'queued', runId: r.id } } : notInDemo();
       }
