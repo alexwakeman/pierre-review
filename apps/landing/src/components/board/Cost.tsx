@@ -16,7 +16,7 @@ export function Cost() {
             both ready out of the box.
           </p>
           <p className="c1-budget">
-            Want a ceiling? Give Limn a share of your weekly AI usage, 5% unless you change it, and automatic
+            Want a ceiling? Give Limn a share of your weekly AI usage, 50% unless you change it, and automatic
             reviews stop when it's used.{' '}
             <Link to="/getting-started#budget-h">Set a budget</Link>
           </p>

@@ -278,7 +278,7 @@ export default function GettingStarted(): JSX.Element {
                 <dl>
                   <div>
                     <dt>Limn's share of your week</dt>
-                    <dd>5%, you choose</dd>
+                    <dd>50%, you choose</dd>
                   </div>
                   <div>
                     <dt>Each 5-hour session</dt>
@@ -303,8 +303,8 @@ export default function GettingStarted(): JSX.Element {
           </p>
           <ul className="gs-list">
             <li>
-              On a Claude or ChatGPT subscription, you choose what share of your weekly allowance Limn may use: 5%
-              unless you change it, up to 50%. Limn adds up what its own runs use and compares that with the
+              On a Claude or ChatGPT subscription, you choose what share of your weekly allowance Limn may use: 50%
+              unless you change it, from 1% to 100%. Limn adds up what its own runs use and compares that with the
               allowance. Allowances aren't published exactly, so this is an estimate. On Claude Max, Limn asks whether
               it's Max 5x or Max 20x.
             </li>
