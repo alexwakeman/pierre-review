@@ -104,7 +104,7 @@ export function TopBar({ toasts, collapsed = false }: { toasts: ReactNode; colla
       <div className="hidden min-w-0 flex-1 md:flex">
         <PinnedTabsBar />
       </div>
-      <div className="flex min-w-0 max-w-[62%] shrink-0 justify-end md:max-w-[min(34rem,45%)] md:flex-none md:basis-[34rem] md:justify-start">
+      <div className="flex min-w-0 max-w-[62%] shrink-0 justify-end md:max-w-[min(34rem,45%)] md:flex-none md:basis-auto md:justify-start">
         {toasts}
       </div>
     </header>
