@@ -3730,7 +3730,7 @@ export type AiAgentKind =
 
 /**
  * What a Run gate asks about: one agent kind, or `'complete'` — the ONE-SHOT features (sprint briefs
- * and themes, story labels, the sprint "Ask", the impact note, work-plan wording, …), which run on any
+ * and themes, story labels, the sprint "Ask", work-plan wording, …), which run on any
  * signed-in provider.
  */
 export type AiRunKind = AiAgentKind | 'complete';
