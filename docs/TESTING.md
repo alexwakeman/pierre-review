@@ -194,7 +194,7 @@ Three full runs of the `fast` project on the same shared machine, default worker
 The wall clocks are NOT comparable: the machine's load changed the result more than the change
 did, so the table is a record, not a speed-up claim. What changed for certain: 3 `live` files no
 longer load ~8 heavy modules to skip 34 cases; 4 spawn-bound files (measured 11s of test time in
-the first run, with 4 of the 30 slowest tests) left `fast`; `fast` is now 421 files. The first run's
+the first run, 4 of the 40 slowest tests among them) left `fast`; `fast` is now 421 files. The first run's
 slowest `fast` files (`db/my-turn-settings` 21s, `benchmark-rollup` 10s) are in-process sweeps and
 are on the allowlist, not moved.
 
