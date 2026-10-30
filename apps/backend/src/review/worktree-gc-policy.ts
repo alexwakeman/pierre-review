@@ -119,6 +119,28 @@ export function fixRowStates(row: { status: string; pushedAt: number | null; has
 }
 
 /**
+ * A story build's repository row (`story_build_repos`, runId of a `story_build` tree) and its session's
+ * status → the KEPT write worktree's run and work state (docs/STORY-BUILD.md § Worktree ledger):
+ *   running   while the repository is `preparing | building | checking`
+ *   unpushed  `ready` with a stored patch and no push — kept for Retry / Re-run checks until pinMaxMs
+ *   pushed    pushed (the patch is on GitHub; the tree is spent)
+ *   discarded the session was discarded / cancelled, or the repository failed / was cancelled / skipped
+ * The patch is stored after every pass, so removing a tree loses nothing: a later pass re-makes it.
+ */
+export function storyBuildRepoStates(
+  row: { status: string; sessionStatus: string | null; hasPatch: boolean; pushedAt: number | null } | null,
+): { runState: RunState; workState: WorkState } {
+  if (!row) return { runState: 'unknown', workState: 'none' };
+  if (row.status === 'preparing' || row.status === 'building' || row.status === 'checking') return { runState: 'running', workState: 'none' };
+  if (row.sessionStatus === 'discarded' || row.sessionStatus === 'cancelled') return { runState: 'finished', workState: 'discarded' };
+  if (row.status === 'pushed' || row.pushedAt != null) return { runState: 'finished', workState: 'pushed' };
+  if (row.status === 'ready' && row.hasPatch) return { runState: 'finished', workState: 'unpushed' };
+  if (row.status === 'failed' || row.status === 'cancelled' || row.status === 'skipped') return { runState: 'finished', workState: 'discarded' };
+  // queued / planned: no pass is running in it right now.
+  return { runState: 'finished', workState: 'none' };
+}
+
+/**
  * Is `path` a per-run checkout inside Limn's clone cache — exactly `<cloneDir>/<clone>/.worktrees/<entry>`?
  * The sweep removes NOTHING that fails this. Both sides must already be resolved (realpath).
  */

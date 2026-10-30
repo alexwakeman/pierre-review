@@ -13,6 +13,7 @@ import {
   decideOrphan,
   fixRowStates,
   isCacheWorktreePath,
+  storyBuildRepoStates,
   type PrState,
   type RunState,
   type WorkState,
@@ -370,6 +371,7 @@ async function dbFacts(rows: readonly LedgerRowForSweep[]): Promise<Map<number, 
       fixes.set(r.id, { status: r.status, planStatus: r.planStatus, pushedAt: toMs(r.pushedAt), hasPatch: (r.patchLen ?? 0) > 0 });
     }
   }
+  const storyBuildRepos = await storyBuildRepoFacts(rows);
   const reviews = new Map<number, string>();
   if (reviewIds.length > 0) {
     const c = schema.claudeReviews;
@@ -387,12 +389,41 @@ async function dbFacts(rows: readonly LedgerRowForSweep[]): Promise<Map<number, 
       // A plan is read-only: it never holds work to push. Running while its pass is.
       const fx = fixes.get(row.runId);
       runState = !fx ? 'unknown' : fx.planStatus === 'planning' || fx.status === 'running' ? 'running' : 'finished';
+    } else if (row.kind === 'story_build' && row.runId != null) {
+      ({ runState, workState } = storyBuildRepoStates(storyBuildRepos.get(row.runId) ?? null));
     } else if (row.kind === 'review' && row.runId != null) {
       const st = reviews.get(row.runId);
       runState = st == null ? 'unknown' : st === 'queued' || st === 'running' ? 'running' : 'finished';
     }
     const pr: PrState = row.prId == null ? null : (prState.get(row.prId) ?? 'gone');
     out.set(row.id, { runState, workState, prState: pr });
+  }
+  return out;
+}
+
+/** `story_build` trees: their repository rows (runId = story_build_repos.id) with the session's status. */
+async function storyBuildRepoFacts(
+  rows: readonly LedgerRowForSweep[],
+): Promise<Map<number, { status: string; sessionStatus: string | null; hasPatch: boolean; pushedAt: number | null }>> {
+  const out = new Map<number, { status: string; sessionStatus: string | null; hasPatch: boolean; pushedAt: number | null }>();
+  const ids = [...new Set(rows.filter((r) => r.kind === 'story_build' && r.runId != null).map((r) => r.runId!))];
+  if (ids.length === 0) return out;
+  const r = schema.storyBuildRepos;
+  const b = schema.storyBuilds;
+  const got = await db
+    .select({
+      id: r.id,
+      status: r.status,
+      pushedAt: r.pushedAt,
+      patchLen: sql<number | null>`length(${r.patch})`,
+      sessionStatus: b.status,
+    })
+    .from(r)
+    .leftJoin(b, and(eq(b.id, r.buildId), eq(b.accountId, r.accountId)))
+    .where(inArray(r.id, ids))
+    .execute();
+  for (const x of got) {
+    out.set(x.id, { status: x.status, sessionStatus: x.sessionStatus ?? null, hasPatch: (x.patchLen ?? 0) > 0, pushedAt: toMs(x.pushedAt) });
   }
   return out;
 }

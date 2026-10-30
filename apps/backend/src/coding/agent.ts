@@ -110,7 +110,7 @@ const PLAN_MAX_TURNS = 25;
 // disabled thinking / a thinking budget / a forced tool_choice, none of which is sent here).
 const ACTIVITY_LOG_CAP = 25;
 
-interface LiveUsage {
+export interface LiveUsage {
   inputTokens: number;
   outputTokens: number;
   cacheReadTokens: number;
@@ -141,6 +141,13 @@ interface AgentRunOptions {
   checks?: AgentCheckTool;
   /** True ⇒ the run may write inside the worktree (the fixer); false ⇒ read-only. */
   writes: boolean;
+  /**
+   * Folders the run may READ but never write (a story build: the earlier repositories' worktrees, the
+   * reference library). Absent ⇒ none — every AI Fix run.
+   */
+  readOnlyRoots?: string[];
+  /** The build's write deny-list (review/write-deny.ts; a story build). Absent ⇒ off. */
+  protectWrites?: boolean;
   maxTurns: number;
   maxBudgetUsd: number;
   abortController: AbortController;
@@ -250,8 +257,9 @@ export async function runAgentInWorktree(
     ...(opts.systemPrompt ? { system: opts.systemPrompt } : {}),
     cwd: opts.worktreePath,
     roots: [],
-    readOnlyRoots: [],
+    readOnlyRoots: opts.readOnlyRoots ?? [],
     writeRoots: opts.writes ? [opts.worktreePath] : [],
+    ...(opts.protectWrites && opts.writes ? { protectWrites: true } : {}),
     tools: opts.tools,
     ...(opts.checks ? { checks: opts.checks } : {}),
     budget: { usd: opts.maxBudgetUsd, turns: opts.maxTurns },
@@ -327,7 +335,7 @@ export async function runAgentInWorktree(
 // (ai/check-tool.ts names the server and tool; tool-surface.test.ts pins the spelling to them.)
 const FIX_TOOLS_WITH_CHECKS = [...FIX_TOOLS, 'mcp__checks__run_check'];
 // How many times a failing pre-commit hook goes back to the agent (each a short follow-up pass).
-const MAX_HOOK_REPAIRS = 2;
+export const MAX_HOOK_REPAIRS = 2;
 // A follow-up pass is not started with less than this left of the run's budget.
 const MIN_REPAIR_BUDGET_USD = 0.25;
 
@@ -401,10 +409,16 @@ export interface BuildInWorktreeArgs {
   provider?: AgentProviderId;
   codex?: CodexRunOptions;
   effort?: AiEffort;
+  /** Folders the build may read but never write. Absent ⇒ none (AI Fix). */
+  readOnlyRoots?: string[];
+  /** The build's write deny-list (a story build). Absent ⇒ off (AI Fix). */
+  protectWrites?: boolean;
 }
 
 export type BuildInWorktreeResult =
-  | { aborted: true; usageRecorded: boolean }
+  // A cancelled run still spent: AI Fix drops it (its row records no spend for a cancel, as before); a
+  // story build records it against the session's budget.
+  | { aborted: true; usageRecorded: boolean; usage: LiveUsage; costUsd: number | null }
   | {
       aborted: false;
       /** The agent's last accepted report (UNVALIDATED), or null when it never called the tool. */
@@ -523,6 +537,8 @@ export async function buildInWorktree(args: BuildInWorktreeArgs): Promise<BuildI
         tools,
         ...(checkTool ? { checks: checkTool } : {}),
         writes: true,
+        ...(args.readOnlyRoots && args.readOnlyRoots.length > 0 ? { readOnlyRoots: args.readOnlyRoots } : {}),
+        ...(args.protectWrites ? { protectWrites: true } : {}),
         maxTurns: args.maxTurns,
         maxBudgetUsd: budgetUsd,
         abortController,
@@ -541,7 +557,7 @@ export async function buildInWorktree(args: BuildInWorktreeArgs): Promise<BuildI
     // A user cancel aborts the SDK iterator; surface a clean aborted result (the caller marks its
     // row cancelled — no worktree changes are captured).
     const aborted = (): boolean => abortController.signal.aborted;
-    if (outcome.aborted || aborted()) return { aborted: true, usageRecorded: outcome.usageRecorded };
+    if (outcome.aborted || aborted()) return { aborted: true, usageRecorded: outcome.usageRecorded, usage: total.usage, costUsd: total.costUsd };
 
     // "Run tests": Limn's own run, then the commit hook (and its bounded repair passes).
     if (checkSession) {
@@ -580,7 +596,7 @@ export async function buildInWorktree(args: BuildInWorktreeArgs): Promise<BuildI
         hookAttempts,
         agentRuns: checkSession.agentRuns().length,
       };
-      if (aborted()) return { aborted: true, usageRecorded: total.usageRecorded };
+      if (aborted()) return { aborted: true, usageRecorded: total.usageRecorded, usage: total.usage, costUsd: total.costUsd };
     }
 
     onProgress({ phase: 'capturing' });

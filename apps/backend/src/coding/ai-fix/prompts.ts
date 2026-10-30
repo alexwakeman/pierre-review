@@ -127,7 +127,7 @@ const WORKTREE_RULES_REST = `- Nothing is installed, built or tested here, delib
 // "RUN TESTS" (coding/checks/): the one line that changes when the reader asked for the project's own
 // checks. The shell stays gone — `run_check` takes a check NAME, and Limn runs it in a sandbox. The
 // list of names is appended at run time (`checksSection`), once Limn knows which can run.
-const CHECKS_RULE = `- You may run this project's own checks (tests, lint, type checks) with the run_check tool, by NAME only — the list is at the end. Limn runs each in a sandbox with no network and returns its output; it is NOT a shell and runs nothing else. Read the code first, make the change, then run the relevant checks and fix what YOUR change broke. A failure your change did not cause (it fails without it, or needs a service that is not running) is not yours to fix: say so in your summary.`;
+export const CHECKS_RULE = `- You may run this project's own checks (tests, lint, type checks) with the run_check tool, by NAME only — the list is at the end. Limn runs each in a sandbox with no network and returns its output; it is NOT a shell and runs nothing else. Read the code first, make the change, then run the relevant checks and fix what YOUR change broke. A failure your change did not cause (it fails without it, or needs a service that is not running) is not yours to fix: say so in your summary.`;
 
 function worktreeRules(t: PromptTools, checks = false): string {
   const first = t.either(
