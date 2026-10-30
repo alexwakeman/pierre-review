@@ -1,13 +1,14 @@
 import { test, expect, type Page } from '@playwright/test';
-import { fixtures, installMockApi } from './mock-api.js';
+import { fixtures, installMockApi, STORY_BUILD_DOCS_RUNNING, STORY_BUILD_PLAN_READY_DOCS } from './mock-api.js';
+import type { StoryBuild, StoryBuildDocsDecisionsBody } from '@pierre-review/shared';
 
 // "Implement story" (docs/STORY-BUILD.md) against the mocked API (mock-api.ts keeps ACME-1's session
 // per page): the Implement button sits ONLY on the not-started card with no pull request (owner
 // decision 4), opens the build tab, Start makes a plan, Accept builds, Push pushes one repository.
 
 /** The fixtures keep AI dark; this feature needs it on (`me.ai.enabled`). */
-async function withAi(page: Page): Promise<void> {
-  await installMockApi(page);
+async function withAi(page: Page, storyBuild?: StoryBuild): Promise<void> {
+  await installMockApi(page, storyBuild != null ? { storyBuild } : {});
   const me = { ...fixtures.ME_RESPONSE, ai: { ...fixtures.ME_RESPONSE.ai, enabled: true } };
   await page.route(
     (u) => u.pathname.endsWith('/api/me'),
@@ -78,6 +79,34 @@ test.describe('Implement story', () => {
     await page.goto(`/app/?view=${encodeURIComponent('story-build:jira:https://acme.atlassian.net#ACME-1')}`);
     await expect(page.getByTestId('story-build-overlay')).toBeVisible();
     await expect(page.getByTestId('story-build-header')).toContainText('ACME-1');
+  });
+
+  test('a docs tick names the docs run it was aimed at', async ({ page }) => {
+    await withAi(page, STORY_BUILD_PLAN_READY_DOCS);
+    await page.goto(`/app/?view=${encodeURIComponent('story-build:jira:https://acme.atlassian.net#ACME-1')}`);
+    const docs = page.getByTestId('story-build-docs');
+    await expect(docs).toContainText('Suggestions from the docs (2)');
+    await expect(docs).toContainText('This story changes the docs (1)');
+    await expect(docs).toContainText('Grounded in the docs (2)');
+    const put = page.waitForRequest((r) => r.method() === 'PUT' && r.url().endsWith('/docs/decisions'));
+    await docs.locator('[data-testid="story-build-docs-item"][data-kind="suggestion"]').first().getByRole('checkbox').click();
+    const body = (await put).postDataJSON() as StoryBuildDocsDecisionsBody;
+    expect(body).toMatchObject({ planRevision: 1, runId: 'run-a', decisions: { D4: 'ignore', D5: 'include' } });
+  });
+
+  test('Cancel stops a docs-only run, from the docs section and from ⌘K', async ({ page }) => {
+    await withAi(page, STORY_BUILD_DOCS_RUNNING);
+    await page.goto(`/app/?view=${encodeURIComponent('story-build:jira:https://acme.atlassian.net#ACME-1')}`);
+    const docs = page.getByTestId('story-build-docs');
+    await expect(docs).toContainText('Reading the docs');
+    await expect(docs.getByRole('button', { name: 'Cancel' })).toBeVisible();
+    await page.keyboard.press('ControlOrMeta+k');
+    const option = page.getByRole('option', { name: /Cancel the build of ACME-1/ });
+    await expect(option).toBeVisible();
+    const cancel = page.waitForRequest((r) => r.method() === 'POST' && r.url().endsWith('/cancel'));
+    await option.click();
+    await cancel;
+    await expect(docs).toContainText('Couldn’t check the docs.');
   });
 
   test('a build tab URL for a ticket the board does not offer cannot start one', async ({ page }) => {

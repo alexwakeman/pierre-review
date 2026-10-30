@@ -15,6 +15,11 @@ import {
   type NotionPropertyInfo,
   type NotionSchemaResponse,
   type NotionTrackerMapping,
+  type StoryBuildActionResponse,
+  type StoryBuildCancelResponse,
+  type StoryBuildDocsDecisionsResponse,
+  type StoryBuildDocsResponse,
+  type StoryBuildPushResponse,
 } from '@pierre-review/shared';
 import { normalisePath } from './recording.js';
 import type { DemoReply, DemoRequest, DemoRoute, DemoServer } from './server.js';
@@ -893,29 +898,42 @@ export const ROUTES: DemoRoute[] = [
 
   // Claude Review: edits, posting and the chat. (Starting runs lives in ./runs.ts.)
   // "Implement story" (docs/STORY-BUILD.md). The recorded sessions are read as recorded; every write
-  // is INERT: nothing is planned, built or pushed in the demo. Start on a ticket with a recorded open
-  // session answers that session (`already_open`); a pass (chat, docs, Accept, Retry) answers "Not
-  // available in the demo."; a push answers each repository "skipped" with the reason; the docs ticks
-  // are kept in memory (read back through `patchRecordedGet`); Cancel and Discard change nothing.
+  // is INERT: nothing is planned, built or pushed in the demo, and every answer names the SAME session
+  // (the SPA re-reads it and finds it unchanged). Start on a ticket with a recorded open session answers
+  // that session (`already_open`); a pass (chat, Accept, Retry) answers its 202 shape with the session's
+  // id; the docs run answers `current`; a push answers each repository "skipped" with the reason; the docs
+  // ticks are kept in memory (read back through `patchRecordedGet`); Cancel and Discard change nothing.
+  // The SSE stream is never recorded: an unrecorded stream simply ends (server.ts).
   { method: 'POST', re: /^\/api\/story-builds$/, run: (req, _m, srv) => startStoryBuild(srv, bodyRecord(req)) },
   {
     method: 'POST',
-    re: /^\/api\/story-builds\/(\d+)\/(plan\/message|docs|accept|repos\/\d+\/retry)$/,
-    run: () => notInDemo(),
+    re: /^\/api\/story-builds\/(\d+)\/(?:plan\/message|accept|repos\/\d+\/retry)$/,
+    run: (_req, m) => ({ status: 202, body: { buildId: Number(m[1]) } satisfies StoryBuildActionResponse }),
+  },
+  {
+    method: 'POST',
+    re: /^\/api\/story-builds\/(\d+)\/docs$/,
+    run: (_req, m) => OK({ outcome: 'current', buildId: Number(m[1]), message: null } satisfies StoryBuildDocsResponse),
   },
   {
     method: 'POST',
     re: /^\/api\/story-builds\/(\d+)\/(?:repos\/(\d+)\/)?push$/,
     run: (_req, m, srv) => pushStoryBuild(srv, Number(m[1]), m[2] != null ? Number(m[2]) : null),
   },
-  { method: 'POST', re: /^\/api\/story-builds\/(\d+)\/(cancel|discard)$/, run: (_req, m) => OK({ status: 'ok', buildId: Number(m[1]) }) },
+  { method: 'POST', re: /^\/api\/story-builds\/\d+\/cancel$/, run: () => OK({ status: 'idle' } satisfies StoryBuildCancelResponse) },
+  { method: 'POST', re: /^\/api\/story-builds\/\d+\/discard$/, run: () => notInDemo() },
   {
     method: 'PUT',
     re: /^\/api\/story-builds\/(\d+)\/docs\/decisions$/,
     run: (req, m, srv) => {
-      const decisions = isRecord(bodyRecord(req).decisions) ? (bodyRecord(req).decisions as Record<string, unknown>) : {};
-      srv.overlay.stored.set(storyBuildDecisionsKey(Number(m[1])), decisions);
-      return OK({ status: 'ok' });
+      const id = Number(m[1]);
+      const asked = isRecord(bodyRecord(req).decisions) ? (bodyRecord(req).decisions as Record<string, unknown>) : {};
+      const prev = srv.overlay.stored.get(storyBuildDecisionsKey(id));
+      const merged = { ...(isRecord(prev) ? prev : {}), ...asked };
+      srv.overlay.stored.set(storyBuildDecisionsKey(id), merged);
+      const b = recordedStoryBuilds(srv).find((x) => x.id === id);
+      const decisions = { ...(isRecord(b) && isRecord(b.docsDecisions) ? b.docsDecisions : {}), ...merged } as StoryBuildDocsDecisionsResponse['decisions'];
+      return OK({ decisions } satisfies StoryBuildDocsDecisionsResponse);
     },
   },
   { method: 'PATCH', re: /^\/api\/claude-reviews\/\d+$/, run: () => OK({ status: 'ok' }) },
@@ -1306,14 +1324,14 @@ function pushStoryBuild(srv: DemoServer, id: number, repoId: number | null): Dem
   const named = repos.filter((r) => (repoId != null ? r.repoId === repoId : r.include === true && r.status === 'ready'));
   return OK({
     results: named.map((r) => ({
-      repoId: r.repoId,
-      outcome: 'skipped',
+      repoId: Number(r.repoId),
+      outcome: 'skipped' as const,
       prNumber: null,
       prUrl: null,
       code: null,
       error: 'Nothing is pushed from the demo.',
     })),
-  });
+  } satisfies StoryBuildPushResponse);
 }
 
 /** A session read with the docs ticks this visit made. */

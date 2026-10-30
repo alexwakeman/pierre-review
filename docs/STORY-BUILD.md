@@ -379,5 +379,12 @@ PR's head are protected and refused before any process runs), then `createPullRe
 | WP3 docs | `feat/story-build-docs` | the story-docs `build` mode, `docs.ts`, `routes-docs.ts` |
 | WP4 frontend + demo | `feat/story-build-ui` | the tab kind, `useOpenStoryBuild`, `components/StoryBuild/*`, the card button + mark, ⌘K, hooks + client, `mock-api.ts`, demo seed/recorder |
 
+**The demo** (`seed-demo-agentic.ts seedStoryBuilds`, docs/DEMO.md): on not-started PLAT sprint tickets with no
+PR — PLAT-310 a READY build (acme/api pushed as draft #143, its `pull_requests` row seeded and not linked to the
+ticket; acme/web-app ready, tests 3 passed + 1 failed + the hook), PLAT-312 PLAN READY (a design, a two-turn chat,
+the docs weighed: 2 grounded, 1 superseded, 2 suggestions not in the plan yet), PLAT-318 no session (the
+Implement button). The demo answers every write inert (routes.ts), the checks preview from its own fixture, and
+the stream as an unrecorded (ended) stream.
+
 Each WP owns its files; the manager reaches WP2/WP3 only through `seams.ts` (`storyBuildDeps()`; tests use
 `setStoryBuildDepsForTests`). Merge order: WP1 → WP3 → WP2 → WP4, then re-record the demo.

@@ -62,12 +62,19 @@ import type {
   SprintGraphResponse,
   SprintGraphTokenResponse,
   StoryBuild,
+  StoryBuildActionResponse,
+  StoryBuildCancelResponse,
   StoryBuildChecksPreview,
   StoryBuildDiffResponse,
+  StoryBuildDiscardResponse,
+  StoryBuildDocsDecisionsBody,
+  StoryBuildDocsDecisionsResponse,
+  StoryBuildDocsResponse,
   StoryBuildForTicketResponse,
   StoryBuildPushResponse,
   StoryBuildRepo,
   StoryBuildStartResponse,
+  StoryBuildStreamEvent,
   WorkspaceProSettings,
   WorkspaceSlackTargetResponse,
 } from '@pierre-review/shared';
@@ -863,6 +870,41 @@ export const STORY_BUILD_READY: StoryBuild = {
   })),
 };
 
+const docsRef = (docSlug: string, file: string, sectionTitle: string, quote: string) => ({
+  path: `${docSlug}/sections/${file}`,
+  workspaceId: WORKSPACE.id,
+  anchor: null,
+  docSlug,
+  docTitle: docSlug === 'api-conventions' ? 'API conventions' : 'Reports handbook',
+  sectionTitle,
+  quote,
+});
+
+/** The plan with the docs weighed (2 grounded, 1 superseded, 2 suggestions) — the docs section's states. */
+export const STORY_BUILD_PLAN_READY_DOCS: StoryBuild = {
+  ...STORY_BUILD_PLAN_READY,
+  wantDocs: true,
+  docsStatus: 'ready',
+  docs: {
+    summary: 'The conventions already fix the CSV header and the streaming rule. One point changes what the handbook says; two are not in the plan yet.',
+    nothingGrounded: false,
+    planRevision: 1,
+    runId: 'run-a',
+    items: [
+      { id: 'D1', kind: 'grounded', about: 'AC2', note: 'One header row is the conventions’ own rule.', suggestion: null, refs: [docsRef('api-conventions', '02-exports.md', 'Exports', 'Every export starts with exactly one header row.')] },
+      { id: 'D2', kind: 'grounded', about: 'AC3', note: 'Large exports stream.', suggestion: null, refs: [docsRef('api-conventions', '02-exports.md', 'Exports', 'Exports over a thousand rows are streamed.')] },
+      { id: 'D3', kind: 'superseded', about: 'AC1', note: 'The handbook puts downloads in the report menu; the story asks for a button.', suggestion: null, refs: [docsRef('reports-handbook', '01-layout.md', 'Layout', 'Downloads live in the report menu.')] },
+      { id: 'D4', kind: 'suggestion', about: 'R1:step 1', note: 'Exports name their file after the report and the date.', suggestion: 'Name the file after the report and the date.', refs: [docsRef('api-conventions', '02-exports.md', 'Exports', 'Name the file after the report and the date.')] },
+      { id: 'D5', kind: 'suggestion', about: 'story', note: 'Every export is logged.', suggestion: 'Log each CSV download.', refs: [docsRef('api-conventions', '03-audit.md', 'Audit', 'Every export is written to the audit log.')] },
+    ],
+  },
+  docsDecisions: { D3: 'ignore', D4: 'include', D5: 'include' },
+  docsCostUsd: 0.2,
+};
+
+/** The same plan while ONLY the docs run (the plan pass is done): the docs section's own Cancel. */
+export const STORY_BUILD_DOCS_RUNNING: StoryBuild = { ...STORY_BUILD_PLAN_READY, wantDocs: true, docsStatus: 'running' };
+
 const STORY_BUILD_DIFF: StoryBuildDiffResponse = {
   repoId: 11,
   baseSha: 'b'.repeat(40),
@@ -1151,9 +1193,9 @@ export function prDetailFor(id: number): PrDetail {
   };
 }
 
-function json(route: Route, body: unknown): Promise<void> {
+function json(route: Route, body: unknown, status = 200): Promise<void> {
   return route.fulfill({
-    status: 200,
+    status,
     contentType: 'application/json',
     body: JSON.stringify(body),
   });
@@ -1237,9 +1279,10 @@ const AI_BUDGET: AiBudgetResponse = {
   others: [],
 };
 
-export async function installMockApi(page: Page): Promise<void> {
-  // "Implement story": ACME-1's session, advanced by the writes below (one per page).
-  let storyBuild: StoryBuild | null = null;
+export async function installMockApi(page: Page, opts: { storyBuild?: StoryBuild | null } = {}): Promise<void> {
+  // "Implement story": ACME-1's session, advanced by the writes below (one per page). A spec may start
+  // from a session (`opts.storyBuild`).
+  let storyBuild: StoryBuild | null = opts.storyBuild ?? null;
   await page.route(
     (url) => url.pathname.startsWith('/api/'),
     async (route) => {
@@ -1260,7 +1303,29 @@ export async function installMockApi(page: Page): Promise<void> {
         }
         if (path.endsWith('/accept')) {
           storyBuild = STORY_BUILD_READY;
-          return json(route, { status: 'building' });
+          return json(route, { buildId: STORY_BUILD_READY.id } satisfies StoryBuildActionResponse, 202);
+        }
+        if (path.endsWith('/plan/message') || /\/repos\/\d+\/retry$/.test(path)) {
+          return json(route, { buildId: storyBuild?.id ?? STORY_BUILD_PLAN_READY.id } satisfies StoryBuildActionResponse, 202);
+        }
+        if (path.endsWith('/docs/decisions') && method === 'PUT') {
+          // The PUT names the docs run it was aimed at; another run's is 409 DocsMoved (docs/STORY-BUILD.md).
+          const body = route.request().postDataJSON() as StoryBuildDocsDecisionsBody;
+          const docs = storyBuild?.docs ?? null;
+          if (docs == null || body.planRevision !== docs.planRevision || body.runId !== (docs.runId ?? null)) {
+            return json(route, { error: 'DocsMoved', message: 'The docs points changed since you looked. Tick them again.' }, 409);
+          }
+          const decisions = { ...storyBuild!.docsDecisions, ...body.decisions };
+          storyBuild = { ...storyBuild!, docsDecisions: decisions };
+          return json(route, { decisions } satisfies StoryBuildDocsDecisionsResponse);
+        }
+        if (path.endsWith('/docs') && method === 'POST') {
+          return json(route, { outcome: 'current', buildId: storyBuild?.id ?? STORY_BUILD_PLAN_READY.id, message: null } satisfies StoryBuildDocsResponse);
+        }
+        if (path.endsWith('/cancel')) {
+          const was = storyBuild;
+          if (was != null && was.docsStatus === 'running') storyBuild = { ...was, docsStatus: 'failed', docsError: 'Stopped.' };
+          return json(route, { status: was?.docsStatus === 'running' ? 'cancelling' : 'idle' } satisfies StoryBuildCancelResponse);
         }
         if (/\/repos\/\d+\/push$/.test(path)) {
           const repoId = Number(path.split('/').at(-2));
@@ -1279,10 +1344,14 @@ export async function installMockApi(page: Page): Promise<void> {
         }
         if (/\/repos\/\d+\/diff$/.test(path)) return json(route, STORY_BUILD_DIFF);
         if (/\/repos\/\d+\/checks$/.test(path)) return json(route, STORY_BUILD_CHECKS);
-        if (path.endsWith('/stream')) return route.fulfill({ status: 200, contentType: 'text/event-stream', body: '' });
+        if (path.endsWith('/stream')) {
+          // Nothing runs in the mock: the pass is over at once (one `done` frame, then the end).
+          const done: StoryBuildStreamEvent = { type: 'done' };
+          return route.fulfill({ status: 200, contentType: 'text/event-stream', body: `data: ${JSON.stringify(done)}\n\n` });
+        }
         if (path.endsWith('/discard')) {
           storyBuild = storyBuild != null ? { ...storyBuild, status: 'discarded' } : null;
-          return json(route, { status: 'discarded' });
+          return json(route, { status: 'discarded' } satisfies StoryBuildDiscardResponse);
         }
         if (/\/api\/story-builds\/\d+$/.test(path)) return json(route, storyBuild ?? STORY_BUILD_PLAN_READY);
         return json(route, { status: 'ok' });

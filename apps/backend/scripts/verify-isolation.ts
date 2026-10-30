@@ -4627,7 +4627,7 @@ check(
     ['POST', `/api/story-builds/${b}/cancel`, {}],
     ['POST', `/api/story-builds/${b}/discard`, {}],
     ['POST', `/api/story-builds/${b}/docs`, {}],
-    ['PUT', `/api/story-builds/${b}/docs/decisions`, { decisions: {} }],
+    ['PUT', `/api/story-builds/${b}/docs/decisions`, { decisions: {}, planRevision: 1, runId: null }],
     ['GET', `/api/story-builds/${b}/repos/${B.repoId}/checks`, undefined],
     ['GET', `/api/story-builds/${b}/repos/${B.repoId}/diff`, undefined],
     ['POST', `/api/story-builds/${b}/repos/${B.repoId}/retry`, {}],
