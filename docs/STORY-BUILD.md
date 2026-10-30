@@ -2,10 +2,11 @@
 
 > Topic doc for the "Implement story" feature (`apps/backend/src/coding/story-build/`,
 > `packages/shared/src/story-build.ts`). CLAUDE.md keeps only the doc-map row; put new detail HERE.
-> Status: the CONTRACT (C0) is in — shared types, the tables, the seams, the route paths and tiers, the
-> sprint card field. The session manager, the agents, the push, the docs run and the screen arrive in
-> work packages WP1–WP4 (§ Work packages). Sections marked _(WP n)_ describe the agreed design that WP
-> implements.
+> Status: the CONTRACT (C0) and the SESSION + PLAN (WP1) are in — shared types, the tables, the seams,
+> the route paths and tiers, the sprint card field; the assess pipeline, the `story_plan` agent on both
+> providers, chat re-plans, Accept, the build lane, cancel / discard, the restart reconcile, the SSE and
+> the session routes. The build + push (WP2), the docs run (WP3) and the screen (WP4) arrive in their
+> work packages (§ Work packages). Sections marked _(WP n)_ describe the agreed design that WP implements.
 
 ## What it is
 
@@ -68,7 +69,7 @@ Two core tables, both account-scoped and on the erase checklist (`accountScopedT
 The wire mapper is ONE function, `coding/story-build/persist.ts toStoryBuild`: never a patch (that is
 `GET …/diff`), never the seed, never a worktree path.
 
-## State machine _(WP1)_
+## State machine
 
 ```
 POST /api/story-builds  ──► assessing ──► planning ──► plan_ready ◄──► planning (chat re-plan)
@@ -89,6 +90,48 @@ Discard (any non-running state) ⇒ discarded
   `ready` if an earlier pass stored a patch.
 - **The stream gap:** set the in-memory running marker in the same tick as the claim
   (`persist.ts insertStoryBuild`), before any await, and emit `done` on every bail path.
+
+## Session and plan (WP1)
+
+`coding/story-build/manager.ts` is the ONE state machine; the rest of WP1 is pure or seamed:
+
+- **Inputs** (`inputs.ts`): `resolveStoryDocsInputs` (the SAME criteria order the story view numbers),
+  plus the ticket's PRs (tracker members, live open + merged, `byReader` from the PR author vs the
+  account), their contribution cards at the current heads and the stored browse URL — FROZEN into
+  `seed_json` (`StoryBuildSeed`, never on the wire). Every tracker import is lazy.
+- **The gap fold** (`coverage.ts`): pure `foldCoverage`; `assessCoverage` starts ONE manual ticket check
+  only when the ticket has PRs and no CURRENT check (`deriveTicketReviewState`), waits ≤ 15 min, and
+  falls back to "every criterion a gap" ('failed') or the last verdicts ('stale') in one line.
+- **Candidates** (`candidates.ts`): ticket-PR repositories, then their `repo_relations`, then ONE fast
+  completion (`story_build_repos` in the ledger; fenced; validated; asked once more) when more than two
+  workspace repositories are left; no model ⇒ the most recently active. `baseFor` is owner decision 1.
+- **Checkouts** (`checkouts.ts`): one read-only worktree per candidate at its base, ledgered
+  `story_plan`; the first pass FIXES each default-branch sha, so every re-plan reads the same code.
+- **The plan pass** (`plan-agent.ts`, `plan.ts`, `prompts.ts`, `schema.ts`): READ-ONLY by code
+  (`STORY_PLAN_TOOLS` / `STORY_PLAN_DISALLOWED_TOOLS`, `no-shell.test.ts`); roots = the scratch cwd
+  (`REPOS.md`) + every readable checkout + the library when usable, NO write root. `submit_story_plan`
+  is judged in the tool (≤ 3 calls on Claude, 2 on Codex); a design still wrong on the last call is
+  dropped ("Couldn't draw the design.") and the plan kept. The design is `validateDesign` kind
+  `'planned'` (cells name repo refs). Claude's prompts are golden (`__fixtures__/story-plan-prompts.json`);
+  Codex's wording goes through `ai/prompt-tools.ts`. Effort: `agenticRunEffort` per pass; model: the
+  start's manual pick, follow-ups on the session's provider (`followUpProvider`, `requestModelOf`).
+- **Lanes:** the read-only passes (assess + plan, re-plans, the docs run) are a `registerReviewSlotPeer`
+  peer — a PR-review click goes first; one pass per session. The build lane is its own, ONE at a time.
+- **The SSE** (`GET …/stream`): frames are bare `StoryBuildProgress`; the stream ENDS with the pass
+  (or at once when nothing runs). Phases are also written to `story_builds.phase` (and the repository's
+  status follows the build's phases), so a poll reads the same step.
+- **Spend:** the plan budget is the assess + every pass (+ the shortlist); the session budget is
+  everything (`sessionSpent`). The manager writes Claude's ledger rows for the plan (`story_plan`) AND
+  for each repository's build (`story_build`, from `RepoBuildResult.costUsd` when `provider !== 'codex'`)
+  — WP2's `buildRepo` must hand Codex a `usageRecord` and must NOT record Claude's row itself.
+
+**What WP2 / WP3 call** (all in `manager.ts`, account-scoped, answering a `StoryBuildActionResult` the
+routes map with `routes.ts sendStoryBuildAction`): `retryStoryBuildRepo` (the retry route),
+`startStoryBuildDocs` (the docs route; it sets `docs_status = 'running'`, runs `runBuildDocs` in the
+read-only lane and records a throw as `refused`), `subscribeStoryBuild` / `isStoryBuildLive`, and
+`routes.ts storyBuildWire` for a `StoryBuild` answer. A build's repositories are handed to `buildRepo`
+with status `preparing`; the manager writes every result column (patch capped at
+`STORY_BUILD_PATCH_MAX_BYTES`), sums the repository's cost across retries, and settles the session.
 
 ## Phases and agents
 
