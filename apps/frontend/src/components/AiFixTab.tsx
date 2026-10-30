@@ -384,7 +384,8 @@ function FixerSection({
                       <button
                         type="button"
                         className={BTN_PRIMARY}
-                        disabled={fixStarting || picked.length === 0}
+                        // "Run tests" ticked: wait for the checks list, or the run would start without them.
+                        disabled={fixStarting || picked.length === 0 || (runTests.on && runTests.query.isLoading)}
                         onClick={startFromReview}
                       >
                         {planFirst ? 'Make a plan' : 'Start fix'}
