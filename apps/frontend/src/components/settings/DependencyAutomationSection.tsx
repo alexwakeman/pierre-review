@@ -142,6 +142,8 @@ export function DependencyAutomationSection(): JSX.Element {
     set({ trusted: [...cur].sort((a, b) => a - b) });
   };
   const trustedNeeded = draft.autoApprove || draft.autoResolveConflicts;
+  // "Only these" with nothing ticked would admit nothing at all — never saved that way.
+  const noEcosystem = draft.ecosystems != null && draft.ecosystems.length === 0;
 
   return (
     <SectionShell
@@ -273,7 +275,8 @@ export function DependencyAutomationSection(): JSX.Element {
         )}
       </fieldset>
 
-      <SaveButton dirty={dirty} saving={save.isPending} onClick={() => save.mutate(patch)} />
+      {noEcosystem && <p className="text-meta text-ui-mute">Tick at least one ecosystem, or pick All ecosystems.</p>}
+      <SaveButton dirty={dirty && !noEcosystem} saving={save.isPending} onClick={() => save.mutate(patch)} />
       <p className="text-meta text-ui-faint">Applies to this workspace only.</p>
 
       {save.isError && (

@@ -164,6 +164,7 @@ export async function dependencyMergeRoutes(app: FastifyInstance): Promise<void>
             securityOnly: { type: 'boolean' },
             ecosystems: {
               type: ['array', 'null'],
+              minItems: 1,
               maxItems: DEPENDENCY_ECOSYSTEMS.length,
               items: { type: 'string', enum: [...DEPENDENCY_ECOSYSTEMS] },
             },
