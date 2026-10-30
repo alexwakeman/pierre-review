@@ -1,6 +1,6 @@
 // The cheap-tier ("Haiku") completion seam: every one-shot model call in Limn — core's (sprint
 // briefs/themes, story labels, docs ranking, sprint Ask Claude…) and the platform's through
-// ctx.llm (reports, synthesis, work-plan wording, pointers, bot themes, the impact note, the
+// ctx.llm (reports, synthesis, work-plan wording, pointers, bot themes, the
 // Slack report). Non-agentic: one completion, no tools.
 //
 // ⚠ THE DEFAULT MODEL THINKS UNLESS TOLD OTHERWISE. Its adaptive thinking is on by default and its

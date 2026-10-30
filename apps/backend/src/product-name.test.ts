@@ -69,13 +69,15 @@ describe('the product name is Limn', () => {
 
 // Every scan inside uses `read()`, which THROWS on a path that has moved.
 describe('no user-visible "Pierre" in the platform\'s rendered strings', () => {
-  // The plugin's one-shot prompts — the impact note's, the one per-PR prompt left. (The CI-analysis
-  // and PR-summary prompts in `ai-fix/prompts.ts` are gone.)
+  // The platform's one-shot prompts. (The impact note's per-PR prompt, and the CI-analysis and
+  // PR-summary prompts in `ai-fix/prompts.ts`, are gone.)
   it('the plugin prompts carry no old brand outside comments', () => {
-    const src = read('apps/backend/src/platform/annotations/prompts.ts');
-    const emitted = src.split('\n').filter((l) => !l.trimStart().startsWith('//'));
-    expect(emitted.length).toBeGreaterThan(0); // the scan found the file, not an empty one
-    for (const l of emitted) expect(l).not.toMatch(OLD_BRAND);
+    for (const f of ['work-plan/prompt.ts', 'bot-themes/prompt.ts', 'flow-pointers/prompt.ts', 'synthesis/prompt.ts']) {
+      const src = read(`apps/backend/src/platform/${f}`);
+      const emitted = src.split('\n').filter((l) => !l.trimStart().startsWith('//'));
+      expect(emitted.length).toBeGreaterThan(0); // the scan found the file, not an empty one
+      for (const l of emitted) expect(l).not.toMatch(OLD_BRAND);
+    }
   });
 
   // The Slack digest was the copy that rotted, because a digest bullet is the one place nobody

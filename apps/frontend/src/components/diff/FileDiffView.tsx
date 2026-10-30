@@ -346,7 +346,7 @@ function DiffLine({
 // which start collapsed whatever they hold. The OPEN STATE is the READER's (`ctx.openMemory`):
 // read once at mount, latched while mounted (a refetch that resolves the thread under the reader
 // does not snap it shut), and every open/close is written through so a remount restores it.
-// ThreadCard mounts only while open; its ML/annotation queries are one per PR and its reaction
+// ThreadCard mounts only while open; its ML queries are one per PR and its reaction
 // bars batch per tick, so an open pill fetches nothing of its own. No store field, no URL.
 function InlineThread({
   thread,

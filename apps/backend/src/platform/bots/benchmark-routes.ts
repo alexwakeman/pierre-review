@@ -33,7 +33,7 @@ import { mapCell, mapManifest, mapUnfittableVendor } from './benchmark/map.js';
 // CHANGE. The tier below is argued from "the response body is the work"; a leg that reads the
 // tenant's PRs is a different cost with a different bucket. `/api/attention` learned this the
 // expensive way — the fold moved in and the tier moved after the fact. Likewise it must never grow
-// a GENERATION leg (the `GET /api/pro/prs/:id/annotations` precedent).
+// a GENERATION leg.
 //
 // ENTITLEMENT, three layers (the standard /api/pro/* stack, the bot-behaviour precedent verbatim):
 //  1. Registration — the route exists only when the plugin loads; a pure-OSS checkout has no route

@@ -26,7 +26,6 @@ import { getPersonPeriod } from '../db/person-period.js';
 // counts) only survives if both live where the next reader can see them together.
 import { getWorkPlan } from '../db/work-plan.js';
 import { getFlowPointerEvidence } from '../db/flow-pointers.js';
-import { getBlastSignalsForPr } from '../db/blast-radius-query.js';
 import { dormantBotUserIds } from '../db/bot-dormancy.js';
 import { getPendingBoardSnapshot } from '../db/pending-tabs.js';
 import { forecastNext } from '../db/forecast.js';
@@ -171,8 +170,6 @@ export async function bindPlatform(app: FastifyInstance): Promise<void> {
       // Optional on the contract; THIS host implements it, so it is always present here.
       getFlowPointerEvidence: (accountId, scope, windowDays, opts) =>
         getFlowPointerEvidence(accountId, scope, windowDays, opts),
-      // Blast radius for one PR — the deterministic evidence the `impact` annotation narrates.
-      getBlastSignals: (accountId, prId) => getBlastSignalsForPr(accountId, prId),
       // The workspace's derived human seat count — the ONE multiplier a `per_seat` price is read
       // through, shared with `effectiveMonthlyUsd` and the ROI table's effective `costMonthlyUsd`
       // so the Benchmark tab cannot quote a different monthly figure for the same bot than the

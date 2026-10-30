@@ -1164,7 +1164,7 @@ of 4,127 threads are unresolved; of 581 PRs with threads, 361 carry 1–5, 23 ca
 and the most is 532 (29 files, one bot comment each). The Threads only view already mounts a full card
 for every one of those (`FileGroup` opens any file holding an unresolved thread), so this default
 is bounded by a screen that already exists. An open pill fetches nothing of its own: ThreadCard's
-ML and annotation queries are one per PR, and its reaction bars batch per tick (`useReactions`, 60
+ML queries are one per PR, and its reaction bars batch per tick (`useReactions`, 60
 targets a request, a cache shared with the Threads only view — 532 threads is 9 lookups).
 
 - ⚠ **THE OPEN STATE IS THE READER'S, REMEMBERED PER THREAD ID — AND ONLY THEIR DECISIONS ARE.**
@@ -1377,7 +1377,7 @@ EVERY model-backed surface gates on the TOP-LEVEL `MeResponse.ai` through
 through the one `AiRunGate`: the agentic ones — Claude Review (run, follow-up, user-story check,
 auto review, the review chat), AI Fix, Resolve with Claude, the docs library — AND the one-shot
 ones — Bot themes (the Bots Themes sub-tab is ABSENT while AI is off), the synthesis cards,
-Chronology pointers, the period-report write-up, the impact note and the work-plan narration. They
+Chronology pointers, the period-report write-up and the work-plan narration. They
 run on the reader's own Claude Code login or `ANTHROPIC_API_KEY` (the one credential ladder,
 docs/CLAUDE-REVIEW.md § The credential ladder); Limn stores no key and charges nothing. Copy reads
 "your own Claude Code login or Anthropic API key". There is no `me.pro`, no `useProCapabilities`,
@@ -1407,7 +1407,7 @@ reappears.
 - **ONE STATUS LINE FOR EVERY AGENTIC PASS** — `components/AiStatusLine.tsx`: the stage in words,
   an optional "N of M", and the elapsed clock; no spinner, and it fetches nothing (each surface feeds
   it what it has: Claude Review's SSE phase, Check threads' poll, the sprint read's `briefs` +
-  `passes` via `sprintAiPass`, or a single request's pending state — the impact note, the work-plan
+  `passes` via `sprintAiPass`, or a single request's pending state — the work-plan
   wording, sprint Ask, the docs check). A new agentic pass uses it; `test/aiStatusAndPrActions.test.ts`
   pins the mounts.
 - **The old CI-analysis card is DELETED** (the CI review diagnoses failing CI). The AI summary, the
@@ -3431,7 +3431,9 @@ board.
   → Stories' ticket names (chart rows, story rows, unplotted lists), a ticket key
   in any text (`TicketRefLink`, e.g. an "Ask Claude" answer), the PR pane's Ticket row chips (`PrTicketChip`
   in ChecksTab.tsx: the key opens the story, a small icon opens the tracker; needs `TicketRef.ident`, set
-  by the server's `prTicketView`, else the chip only links out), and a search's **Stories** facet (dropdown
+  by the server's `prTicketView`, else the chip only links out), the PR header's "…" menu **"Open
+  story"** (`TicketIcon`, the key as its hint, one item per ticket with an ident, absent when there is
+  none; ⌘K lists the same as "Open the KEY story"; `test/prDetailOpenStory.test.ts`), and a search's **Stories** facet (dropdown
   and results tab, listed FIRST; `openSearchStory` in Search/searchNav.ts, the one non-hook caller of
   `openTicketTab`). Never call the store action from a component. The sprint drawer and its reference cards are GONE.
   On This Sprint a ticket LINK opens the page's tray instead (`StoryOpenOverride` / `useStoryLinkOpener`);
@@ -4973,7 +4975,7 @@ shorter form of each rule; this is the full wording.
 
 - **Every AI surface gates VISIBILITY on `me.ai.enabled` and its Run button on the ONE
   `AiRunGate`** (`components/AiSetup.tsx`) — agentic and one-shot alike (bot themes, synthesis,
-  pointers, period write-up, impact note, work-plan wording). Never credits: on an API key a run
+  pointers, period write-up, work-plan wording). Never credits: on an API key a run
   shows US$; on a subscription it shows its share of the week, never US$ — always through ONE
   formatter, `useRunCostText()` (`lib/aiBudget.ts` `runCostText`).
 

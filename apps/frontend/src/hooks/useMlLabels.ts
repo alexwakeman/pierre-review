@@ -11,7 +11,7 @@ import { useMe } from './useTriage.js';
 // ML severity/category labels on bot comments (CORE, FREE TIER — a local ONNX classifier on the
 // server, no LLM, nothing billed, no GitHub quota).
 //
-// Shaped after the annotation index deliberately: ONE query per PR holds every label on it, and
+// ONE query per PR holds every label on it, and
 // each badge looks itself up by (targetKind, targetId). A PR with 300 bot comments still costs
 // exactly one request no matter how many badges are on screen, and a target with no label
 // renders nothing.
@@ -23,7 +23,7 @@ export function useMlSeverityEnabled(): boolean {
 
 /**
  * Per-PR key. NO workspace segment on purpose — a PR names its own scope server-side, exactly
- * like ['pr-annotations', prId] and ['bot-dedup', prId].
+ * like ['bot-dedup', prId].
  */
 export function prMlLabelsKey(prId: number | null): unknown[] {
   return ['ml-labels', prId];

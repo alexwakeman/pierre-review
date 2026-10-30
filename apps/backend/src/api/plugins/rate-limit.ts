@@ -56,7 +56,7 @@ function tier(name: string, perWindow: number, windowMs: number): Tier {
 
 const TIERS = {
   // Anthropic-spending generation. A sprint report, a period report, a themes
-  // rebuild, an impact note, an agentic review or fix. The most
+  // rebuild, an agentic review or fix. The most
   // expensive thing in the app and the tightest bucket.
   ai: tier('ai', 20, MINUTE),
   // A second, longer window on the same routes: 20/min would still be 1200/hour.
@@ -221,8 +221,7 @@ function tierFor(method: string, path: string): readonly Tier[] {
   //                               keeps it on the 60/min `search` bucket, never the 600/min
   //                               blanket. (The "By workspace" axis that once rode it, 2 windows ×
   //                               N workspaces, was removed 2026-10-26.) Still DB only — it must
-  //                               NEVER grow a generation leg (the
-  //                               `GET /api/pro/prs/:id/annotations` precedent).
+  //                               NEVER grow a generation leg.
   // Anchored on the exact family prefix so no sibling `/api/pro/insights/*` route is swept in.
   if (path === '/api/pro/insights/reports' || path.startsWith('/api/pro/insights/reports/')) {
     // (`POST …/:periodKey/chat` was REMOVED 2026-10-22; a POST to that path now lands on `read`
@@ -316,7 +315,7 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // nicety: without it one request folds an entire workspace and the arithmetic above is wrong by
   // whatever a tenant's repository count happens to be.
   //
-  // It must NEVER grow a GENERATION leg (the `GET /api/pro/prs/:id/annotations` precedent) — there
+  // It must NEVER grow a GENERATION leg — there
   // is no model anywhere in this feature and its anomaly sentences are templated.
   if (!mutating && path === '/api/pro/bot-benchmark/placement') {
     return [TIERS.search, TIERS.read];
@@ -336,8 +335,7 @@ function tierFor(method: string, path: string): readonly Tier[] {
   //                            bot-behaviour shape of cost — this process's event loop and this
   //                            database, not GitHub and not Anthropic — so it borrows the same
   //                            60/min `search` bucket, NOT the catch-all's 600/min GET→read
-  //                            branch. It must NEVER grow a generation leg (the
-  //                            `GET /api/pro/prs/:id/annotations` precedent).
+  //                            branch. It must NEVER grow a generation leg.
   if (path === '/api/pro/synthesis') {
     if (mutating) return [TIERS.ai, TIERS.aiHourly];
     return [TIERS.search, TIERS.read];
@@ -359,8 +357,7 @@ function tierFor(method: string, path: string): readonly Tier[] {
   //                            Anthropic — so it takes the same 60/min `search` bucket, NOT the
   //                            catch-all's 600/min GET→read branch. The narration now decorates
   //                            the Pending board, so this GET fires whenever that board is
-  //                            mounted. It must NEVER grow a generation leg (the
-  //                            `GET /api/pro/prs/:id/annotations` precedent).
+  //                            mounted. It must NEVER grow a generation leg.
   if (path === '/api/pro/work-plan') {
     if (mutating) return [TIERS.ai, TIERS.aiHourly];
     return [TIERS.search, TIERS.read];
@@ -489,11 +486,7 @@ function tierFor(method: string, path: string): readonly Tier[] {
   if (method === 'POST' && path === '/api/ticket-status') return [TIERS.search, TIERS.read];
 
   // ---- AI generation ----
-  // `POST /api/pro/prs/:id/annotations/run` (the blast-radius impact note — the one kind left;
-  // the comment kinds that hydrated hunks and compared shas are REMOVED) stays on `ai` (20/min).
-  // The PAIRED `GET /api/pro/prs/:id/annotations` must STAY on `read`: it is a pure DB read fired
-  // on every PR open, and it must never grow a hydration leg (see the prDetail note above for
-  // what that cost the first time).
+  // (The annotations routes — the blast-radius impact note — are REMOVED, 2026-10-30.)
   //
   // Two shapes: the Pro plugin's /api/pro/* generators, and the Claude Review
   // family, which for back-compat kept the pre-plugin paths (/api/prs/:id/
@@ -738,7 +731,7 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // asserting in this very comment that `suggested-reviewers` "really is DB-only": it calls
   // `getAccessToken` on line 35 of github/reviewer-suggest.ts. When in doubt, follow the token.
   // Genuinely DB-only and correctly left on `read`: `/bot-behaviour`, `/bot-dedup`,
-  // `/mention-candidates`, `/claude-review` (retrieval), `/annotations` (the cached GET).
+  // `/mention-candidates`, `/claude-review` (retrieval).
   const prGithubGet =
     /^\/api\/prs\/\d+(\/(merge-options|files|files\/content|files\/diff|suggested-reviewers|checks\/[^/]+\/logs))?$/;
   if (!mutating && prGithubGet.test(path)) {

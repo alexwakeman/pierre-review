@@ -2,7 +2,7 @@
 // Fix, the ticket / CI reviews, diagrams, sprint paths, the docs build and chat, resolve with
 // Claude, every chat) AND the one-shot completions (review/llm.ts `cheapComplete`, which the
 // sprint briefs/themes, story labels, docs ranking, sprint Ask Claude and every platform feature —
-// reports, synthesis, work-plan wording, pointers, bot themes, the impact note, the Slack
+// reports, synthesis, work-plan wording, pointers, bot themes, the Slack
 // report — all go through).
 //
 //   1. THE LOCAL CLAUDE CODE LOGIN (default) — a `claude` session on disk or

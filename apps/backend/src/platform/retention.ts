@@ -80,8 +80,8 @@ export async function eraseProByAccountId(
     pro.repoDigests,
     pro.commentAssessments,
     pro.addressedChecks,
-    // The comment-annotations platform (kind × target). Carries account_id like the two tables
-    // above it, which it supersedes as the live writer.
+    // The comment-annotations table (kind × target). DORMANT since the impact note's removal
+    // (2026-10-30), still erased. Carries account_id like the two tables above it.
     pro.prCommentAnnotations,
     pro.sprintReports,
     // NOTE: `retroReports` is gone from this list because the table itself is gone (plugin

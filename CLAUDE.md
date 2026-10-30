@@ -30,13 +30,13 @@ tiny service, `apps/site`.
 | [MERGE-CI-TRUNK](docs/MERGE-CI-TRUNK.md) | merge verdict/queue, auto-merge runner, the in-app conflict resolver, CI logs, trunk status |
 | [CLAUDE-REVIEW](docs/CLAUDE-REVIEW.md) · [CODEX-PLAN](docs/CODEX-PLAN.md) | Claude Review, ticket/CI reviews, diagrams, AI Fix, auto-posting, sprint briefs/paths, the Codex provider · its build history |
 | [BOTTLENECKS](docs/BOTTLENECKS.md) | the court ledger behind Reports → Chronology, its budgets and pointers |
-| [BLAST-RADIUS](docs/BLAST-RADIUS.md) | the Low/Medium/High reach chip, the co-change index, the impact note |
+| [BLAST-RADIUS](docs/BLAST-RADIUS.md) | the Low/Medium/High reach chip, the co-change index |
 | [TRACKERS](docs/TRACKERS.md) | the issue tracker: Jira, GitHub Issues, Linear, Notion, stored tickets + worker, the sealed token |
 | [SONARCLOUD](docs/SONARCLOUD.md) | the per-(PR, head) snapshot, the review block, the one PR comment, AI Fix's `Q<n>` items |
 | [REFERENCE-DOCS](docs/REFERENCE-DOCS.md) | the workspace reference library: ingest, the INDEX → CONTENTS → section tree, `docsContextFor` |
 | [ML-SEVERITY](docs/ML-SEVERITY.md) · [ML-NODE-PORT](docs/ML-NODE-PORT.md) | ML severity/category of bot comments · the in-process scorer (`ml/`) |
 | [PERIOD-REPORTING](docs/PERIOD-REPORTING.md) | window purity, coverage bias, actor lanes, the person vector |
-| [PLATFORM](docs/PLATFORM.md) · [DEMO](docs/DEMO.md) | the platform features (formerly Pro): Activity, Feed, Bots Monitoring, peer benchmark, impact note, work plan, Slack |
+| [PLATFORM](docs/PLATFORM.md) · [DEMO](docs/DEMO.md) | the platform features (formerly Pro): Activity, Feed, Bots Monitoring, the peer benchmark, the work plan, Slack |
 | [SECURITY](docs/SECURITY.md) | app.ts, CORS/CSP, host guard, rate limits, data export, dependency posture |
 | [PACKAGING](docs/PACKAGING.md) · [RELEASE](docs/RELEASE.md) | build-release, CLI, the AI/ML runtimes · CI publishing |
 | [MIGRATIONS](docs/MIGRATIONS.md) · [TESTING](docs/TESTING.md) | any migration; history and fold rules · test projects, CI |
@@ -465,7 +465,7 @@ history: [docs/CODEX-PLAN.md](docs/CODEX-PLAN.md). Non-negotiables:
 ## Platform features (formerly Pro)
 
 The old `@pierre/pro` plugin is core code at **`apps/backend/src/platform/`** — reporting, Bots
-Monitoring, the work-plan wording, the impact note, Slack.
+Monitoring, the work-plan wording, Slack.
 [docs/PLATFORM.md](docs/PLATFORM.md).
 
 - **Bound statically at boot**: `platform/context.ts` `bindPlatform` builds ONE `ProContext`
@@ -588,8 +588,6 @@ AI route. `api/plugins/security.ts` (CSP, loopback-only CORS, cross-origin guard
   new event types get a deterministic `dedupeKey`.
 - **`req.raw.on('close')` fires when a POST body is read** — watch `reply.raw` for a disconnect.
   The GET `…/stream` endpoints are fine.
-- **A PR with no stored impact note issues NO request of its own** — read the one per-PR
-  `useAnnotationIndex` query.
 - **A feature can be built and UNREACHABLE — grep for the mount** (`grep '<Component'`).
 - **TypeScript is strict** (`noUncheckedIndexedAccess`, `verbatimModuleSyntax`).
 

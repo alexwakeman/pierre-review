@@ -1,5 +1,5 @@
-// The one-shot generation constants — the ONE source of truth every generating path reads (bots, insights, synthesis, work plan, flow pointers, bot themes, the
-// impact note). They lived in the per-repo activity digest until that feature was removed; the
+// The one-shot generation constants — the ONE source of truth every generating path reads (bots, insights, synthesis, work plan, flow pointers, bot
+// themes). They lived in the per-repo activity digest until that feature was removed; the
 // env var names keep their historical `PRO_DIGEST_*` spelling so existing deployments carry on.
 export const DIGEST_MODEL = process.env.PRO_DIGEST_MODEL ?? 'claude-haiku-5-5';
 export const MIN_INTERVAL_SEC = intEnv('PRO_DIGEST_MIN_INTERVAL_SEC', 60);

@@ -88,8 +88,6 @@ const blastRadiusConfigSchema = {
         required: ['sensitivity'],
         properties: {
           sensitivity: { type: 'string', enum: ['cautious', 'balanced', 'relaxed'] },
-          // Show the Pro AI impact note on the PR pane. Absent = shown; only `false` is stored.
-          showImpactNote: { type: 'boolean' },
           surfacesOff: {
             type: 'array',
             maxItems: 32,

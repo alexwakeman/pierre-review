@@ -1320,5 +1320,6 @@ Removing the one-shot Haiku features (AI PR summary, "Check review", assess / ad
 the per-hunk conflict suggestion, the per-repo digest, "Discussion themes", preset prompts) took
 **no migration in either repo**: `repo_digests`, `human_theme_reports`, `comment_assessments`,
 `addressed_checks`, `ai_pr_analyses` and `preset_reports` stay declared, erased and pruned; nothing
-reads or writes them. `pr_comment_annotations` stays live for `impact`; its comment-kind rows and
-`pro_synthesis`'s `brief` / `rollup` rows are dormant. See DATA-MODEL.md § Dormant tables.
+reads or writes them. `pr_comment_annotations` stayed live for `impact` until the impact note's
+removal (2026-10-30, again no migration — the whole table is dormant now); `pro_synthesis`'s
+`brief` / `rollup` rows are dormant. See DATA-MODEL.md § Dormant tables.

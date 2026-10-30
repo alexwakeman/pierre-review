@@ -36,7 +36,6 @@ import * as annotSchema from '../annotations/schema.sqlite.js';
 import * as advisorSchema from '../advisor/schema.sqlite.js';
 import * as proSettingsSchema from '../settings/schema.sqlite.js';
 import { scopeKeyFor } from '../insights/workspace-scope.js';
-import { readAnnotation, readPrAnnotationRows } from '../annotations/runner.js';
 import { loadSynthesis } from '../synthesis/routes.js';
 import { canonicalSynthesisParams, synthesisScopeKey } from '../synthesis/scope.js';
 import { loadReport as loadBotThemesReport } from '../bot-themes/routes.js';
@@ -555,11 +554,8 @@ beforeAll(() => {
     .values({ accountId: 2, workspaceId: WS_B_DEFAULT, repoId: 20, botUserId: 501, source: 'user_reported', occurredAt: now, description: 'B tuned', createdAt: now })
     .run();
 
-  // pr_comment_annotations — BOTH accounts hold a judgement on the SAME (kind, target_kind,
-  // target_id) triple, AND account 1 additionally holds a second KIND on the same target. The
-  // (account_id, kind, target_kind, target_id) unique index must let those coexist while keeping
-  // the two accounts' rows distinct. Seeding account 2 with REAL rows is what makes the
-  // assertions below non-vacuous — see the mutation test at the end of that block.
+  // pr_comment_annotations (DORMANT) — rows for both accounts, so the erasure test below proves it
+  // deletes only the caller's.
   db.insert(annotSchema.prCommentAnnotations)
     .values({ accountId: 1, repoId: 10, prId: 100, kind: 'validity', targetKind: 'review_comment', targetId: 900, verdict: 'valid', confidence: null, body: 'A validity', payloadHash: 'pa1', model: 'm', createdAt: now })
     .run();
@@ -965,77 +961,22 @@ describe('addressed_checks isolation', () => {
   });
 });
 
-describe('pr_comment_annotations isolation', () => {
-  it('readAnnotation scopes accountId on a SHARED (kind, targetKind, targetId)', async () => {
-    // Both accounts hold a `validity` judgement on review-comment 900.
-    const a = await readAnnotation(ctx, 1, 'validity', 'review_comment', 900);
-    const b = await readAnnotation(ctx, 2, 'validity', 'review_comment', 900);
-    expect(a?.body).toBe('A validity');
-    expect(b?.body).toBe('B validity');
-    expect(a?.verdict).toBe('valid');
-    expect(b?.verdict).toBe('weak');
-  });
-
-  it('target_kind is part of the identity — the same id in two id spaces never collides', async () => {
-    // Account 2 holds `addressed` on PR-COMMENT 900 but nothing on REVIEW-comment 900.
-    expect(await readAnnotation(ctx, 2, 'addressed', 'pr_comment', 900)).not.toBeNull();
-    expect(await readAnnotation(ctx, 2, 'addressed', 'review_comment', 900)).toBeNull();
-    // …and account 1 holds neither (it only has validity + simplify on the review comment).
-    expect(await readAnnotation(ctx, 1, 'addressed', 'pr_comment', 900)).toBeNull();
-  });
-
-  it('kinds coexist on one target, and readPrAnnotationRows never crosses accounts', async () => {
-    const a = await readPrAnnotationRows(ctx, 1, 100);
-    expect(a.map((r) => r.kind).sort()).toEqual(['simplify', 'validity']);
-    expect(a.every((r) => r.body.startsWith('A '))).toBe(true);
-
-    // Account 1 asking for account 2's PR id gets nothing — the accountId predicate, not the
-    // prId, is what excludes it.
-    expect(await readPrAnnotationRows(ctx, 1, 200)).toHaveLength(0);
-    // Account 2's own rows are intact and its own.
-    const b = await readPrAnnotationRows(ctx, 2, 200);
-    expect(b).toHaveLength(2);
-    expect(b.every((r) => r.body.startsWith('B '))).toBe(true);
-
-    // Kind narrowing still stays account-scoped.
-    const aValidity = await readPrAnnotationRows(ctx, 1, 100, ['validity']);
-    expect(aValidity).toHaveLength(1);
-    expect(aValidity[0]!.body).toBe('A validity');
-  });
-
-  it('MUTATION CHECK: the assertions above fail without the accountId predicate', () => {
-    // An isolation test whose seed data can only ever match one account is VACUOUS — it passes
-    // whether or not the query scopes accountId. This asserts the counterfactual directly: run
-    // the SAME lookup with the accountId predicate REMOVED and prove it would return BOTH
-    // accounts' rows, so the predicate is what does the work above.
+describe('pr_comment_annotations (DORMANT) erasure', () => {
+  // The impact note — the table's last live kind — is REMOVED; nothing reads or writes the table.
+  // What stays load-bearing is that the account erasure still reaches it, and only the caller's.
+  it('GDPR: eraseProByAccountId still deletes the dormant rows, and only the caller\'s', async () => {
     const t = annotSchema.prCommentAnnotations;
-    const withoutAccountScope = db
-      .select()
-      .from(t)
-      .where(
-        and(eq(t.kind, 'validity'), eq(t.targetKind, 'review_comment'), eq(t.targetId, 900)),
-      )
-      .all();
-    expect(withoutAccountScope).toHaveLength(2);
-    expect(
-      withoutAccountScope.map((r: { accountId: number }) => r.accountId).sort(),
-    ).toEqual([1, 2]);
-
-    // The same query WITH the predicate returns exactly one — the caller's own.
-    const scoped = db
-      .select()
-      .from(t)
-      .where(
-        and(
-          eq(t.accountId, 1),
-          eq(t.kind, 'validity'),
-          eq(t.targetKind, 'review_comment'),
-          eq(t.targetId, 900),
-        ),
-      )
-      .all();
-    expect(scoped).toHaveLength(1);
-    expect(scoped[0].body).toBe('A validity');
+    db.insert(t)
+      .values({ accountId: 3, repoId: 30, prId: 300, kind: 'impact', targetKind: 'pull_request', targetId: 300, verdict: 'concern', confidence: null, body: 'C impact', payloadHash: 'pc1', model: 'm', createdAt: new Date() })
+      .run();
+    expect(db.select().from(t).where(eq(t.accountId, 3)).all()).toHaveLength(1);
+    await eraseProByAccountId(
+      { ...ctx, log: { error: () => {} } } as unknown as ProContext,
+      3,
+    );
+    expect(db.select().from(t).where(eq(t.accountId, 3)).all()).toHaveLength(0);
+    expect(db.select().from(t).where(eq(t.accountId, 1)).all().length).toBeGreaterThan(0);
+    expect(db.select().from(t).where(eq(t.accountId, 2)).all().length).toBeGreaterThan(0);
   });
 });
 

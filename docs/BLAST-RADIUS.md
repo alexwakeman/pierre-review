@@ -1,7 +1,7 @@
 # Blast radius — how far a pull request can reach
 
 **Read this before touching `db/blast-radius.ts`, `db/file-coupling.ts`, the shared
-`blastRadius()` (`packages/shared/src/blast-radius.ts`, re-exported by `lib/ui.ts`), or the `impact` annotation kind.**
+`blastRadius()` (`packages/shared/src/blast-radius.ts`, re-exported by `lib/ui.ts`).**
 
 A maintainer looking at the Pending board cannot tell, without opening each pull request, which
 ones deserve a real review and which can be pushed through on a glance. The board already carries
@@ -16,19 +16,19 @@ and disagree with the verdict.
 **The product promise is the LOW chip.** High and medium are useful; the reason the feature exists
 is to let someone merge a third of their queue after a glance instead of a review.
 
-The **level is CORE and deterministic**, with no AI and no GitHub calls. Only the **impact note** —
-two sentences explaining what could break — calls a model, shown while `me.ai.enabled`.
+The **level is CORE and deterministic**, with no AI and no GitHub calls. Nothing in blast radius
+calls a model: the AI **impact note** that once explained the chip was REMOVED (2026-10-30, see
+[The impact note (removed)](#the-impact-note-removed)).
 
 ---
 
-## The three parts
+## The parts
 
 | Part | Where | Model? |
 |---|---|---|
 | The signal vector, folded from stored `files[]` | `db/blast-radius.ts` | no |
 | The co-change ("hub file") index | `db/file-coupling.ts` + `repo_file_coupling` | no |
 | The level + the reasons | `packages/shared/src/blast-radius.ts` → `blastRadius()` (re-exported by `lib/ui.ts`) | no |
-| The impact note | `apps/backend/src/platform/annotations/` — kind `impact` | **yes** (Haiku, the credential ladder) |
 
 **The wire carries SIGNALS, never a level.** Exactly the rule `codeLoc` follows, for the same three
 payoffs: the sensitivity dial becomes a pure render-time comparison (change it in Settings and
@@ -143,12 +143,6 @@ the sentinel that stops it being retried on every walk.
 file now uses something it did not, which is a real change with real reach. They are one line
 apart in a diff. If it is ever added it belongs beside `deps` — carried for narration, never as a
 reason to lower a level.
-
-The impact note is fed the same fact and told it **outranks the file paths** — otherwise a
-model shown "crypto/ touched" reaches for a security consequence a documentation change does not
-have. `promptLevelFor` mirrors the cap so the note never explains a verdict the reader is not
-looking at, and `contentKind` is folded into the payload hash so a note written *before* the diff
-was read is marked stale rather than frozen wrong.
 
 ### ⚠ The anti-double-count rule
 
@@ -279,8 +273,7 @@ LEVEL itself also shows on cards, PR detail, Feed and timeline.
 ## The expansion needs no model, because it is deterministic
 
 Every reason and every figure in the disclosure comes from `blastRadius()` and `blastSignalsFor()`.
-**No model is in that call path**, so it shows even with AI switched off. (The model-written half
-of blast radius is the impact *note*, a different component.)
+**No model is in that call path**, so it shows even with AI switched off.
 
 ⚠ **EVERY pull request expands, not only multi-reason ones — and that is only defensible because
 the panel shows the EVIDENCE, not just the reasons.** An earlier cut opened onto `reasons[]` alone,
@@ -292,76 +285,21 @@ read*) is what makes the click worth making.
 without it an expanded panel makes the row tall and vertically centres the author line against it —
 the line visibly drifts as the reader opens the disclosure.
 
-## Showing and hiding the impact note
+## The impact note (removed)
 
-`BlastRadiusConfig.showImpactNote` — account-grained, beside the sensitivity dial. **Absent means
-SHOWN**, so an account that has never expressed an opinion gets the feature; only `false` is ever
-stored, for the same two-state reason nothing else in that blob stores a default.
+A model-written note ("What could this break?") once sat under PR detail's meta line, explaining
+the chip in two sentences. It was **REMOVED 2026-10-30** — the routes
+(`GET`/`POST /api/pro/prs/:id/annotations[/run]`), the runner, `BlastImpactNote`, `useAnnotations`,
+the Settings switch (`BlastRadiusConfig.showImpactNote`) and the demo's seeded notes. What stays:
 
-**There are TWO controls and they answer different questions.**
+- `pr_comment_annotations` is **DORMANT** — never read or written, still pruned with its PRs
+  (`platform/retention.ts`) and erased with the account. Never drop it.
+- A stored blast config that still carries `showImpactNote` is read without it
+  (`auth/account.ts` normalises the blob); the PUT schema no longer accepts the field.
+- `db/blast-radius-query.ts` keeps only `getPrImpactLevel` (the auto-approve impact gate).
 
-| Control | Where | Means | Stored |
-|---|---|---|---|
-| **Collapse** (`⌄ Impact note`) | on the note | "folded right now" — one click unfolds it | `localStorage`, per viewer |
-| **Offer the impact note** | Settings | "never offer this at all" — removes the button, stops the query | `showImpactNote`, server |
-
-⚠ **Collapsing used to write the SERVER field, which made one click a one-way trip.** The reader
-could only get the note back through Settings — reported as "when I 'Hide' the summary, it is gone
-for good". The caret is now the reversible control and the server field is only the permanent
-switch.
-
-⚠ **The collapse is `localStorage`, per this codebase's stated rule** for a lightweight per-viewer
-convenience: whether this browser currently shows a panel folded is a fact about this browser.
-Wrapped in try/catch, correct when it comes back empty (empty = expanded). It is deliberately not
-the Zustand filter store, which persists and resets from one shared list — "Clear filters" would
-silently unfold every note.
-
-⚠ **The collapsed stub still shows a `· flagged` marker** when the model escalated. Hiding the
-fact that something was flagged is the one thing a fold may not do.
-
-⚠ **Collapsing never hides the "What could this break?" button** — only a generated note. A reader
-who folded one must still be able to ask for another.
-
-Hiding via Settings removes the **whole affordance**, button included — and it is ANDed into the annotation
-query's own `enabled`, because a "hidden" note that still costs a request on every PR open is not
-hidden. Two entry points write the one field: the Settings checkbox, and a **"Hide these"** link
-on the note itself. ⚠ The inline link sends the **whole config**, because the route REPLACES the
-blob rather than merging — sending `{showImpactNote:false}` alone would silently reset the
-reader's dial and surface opt-outs.
-
-The checkbox renders even while AI is off: this is a **reading preference**, so a reader who turns
-it off stays off if they later switch AI on.
-
-## The impact note
-
-**The code decides the level. The model explains the consequence.** The same split the
-work plan and Chronology live by. The SPA offers it while `me.ai.enabled`, and its Run button goes
-through the one `AiRunGate`.
-
-- The annotations module's ONLY kind (the comment checks that shared it were REMOVED 2026-10-18;
-  the read skips their DORMANT rows).
-- Lands as `kind: 'impact'`, `targetKind: 'pull_request'`, `targetId = prId` on the **existing**
-  `pr_comment_annotations` table — whose unique index is already
-  `(accountId, kind, targetKind, targetId)`, so **no migration**.
-- Inherits the whole cost machinery: the payload-hash cache ($0 on unchanged), the pure cached GET
-  (opening a PR costs nothing), the one billing path, the per-account in-flight slot, the
-  min-interval, `shouldStop` on socket close.
-- **One target per PR**, so it never chunks.
-
-⚠ **It may never LOWER the level.** Its only verdicts are `concern` (raise a separately-labelled
-flag *beside* the chip) and `none`. A model that can say "actually this is fine" is a model that
-can talk a maintainer out of reviewing a migration. Escalation is safe because its only effect is
-making someone look harder. `FALLBACK_VERDICT.impact` is `none` for the same reason — an
-unparseable response must not raise an alarm the model never raised.
-
-⚠ **PR detail only, click-gated.** Never on a Pending card or the timeline: the board may not fetch
-on mount, and a board that *billed* on mount would be worse.
-
-⚠ **The payload hash folds only stored facts** — head sha, the file list, title, body, and the
-signal vector including the hub fields. Nothing hydrated, nothing `Date.now()`-derived. The free
-cached GET recomputes it on every PR open on a path that hydrates nothing; a hydrated or
-clock-derived input would make GET and run disagree forever — every note permanently `stale`,
-re-billed on every click. That defect has already cost this codebase two bugs.
+⚠ Do not bring a model back into the level: **the code decides the level**, and a model that can
+say "actually this is fine" can talk a maintainer out of reviewing a migration.
 
 ---
 
@@ -434,7 +372,7 @@ empty PR still refuses.
 ```bash
 pnpm typecheck && pnpm test                                    # includes the fixture suite
 ./apps/backend/node_modules/.bin/vitest run --root apps/frontend   # the LEVEL rules — hand-run
-pnpm --filter @pierre-review/backend verify:isolation           # both new id-addressed getters
+pnpm --filter @pierre-review/backend verify:isolation           # the id-addressed getters
 ```
 
 ⚠ **`apps/frontend/test/` is neither run in CI nor typechecked** (its tsconfig includes only

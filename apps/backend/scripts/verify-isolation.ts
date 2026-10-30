@@ -2700,10 +2700,8 @@ check(
 // Two id-addressed getters that live OUTSIDE db/queries.ts, so this script cannot see them
 // unless they are imported by name.
 //
-// `getBlastSignalsForPr` is the one that matters most: it takes a PR ID and is reached through
-// the Pro plugin's `ctx.queries.getBlastSignals`, i.e. ultimately from a route whose id arrives
-// in a URL. A leak there would let one tenant spend their own AI credits having a model describe
-// another tenant's diff — and store the result where their own cached GET serves it back.
+// `getPrImpactLevel` takes a PR ID (the auto-approve impact gate reads it per PR). A leak there would
+// let one tenant's dial read another tenant's diff.
 //
 // `loadRepoCoupling` takes REPO ids and returns file PATHS. Its predicate must be on account_id,
 // not repo_id alone; a repo id is guessable.
@@ -2711,10 +2709,10 @@ check(
 // ⚠ BOTH CHECKS ARE WRITTEN NON-VACUOUSLY: the positive direction is asserted first, so a getter
 // that returned null for EVERYTHING would fail rather than pass the cross-tenant half by accident.
 {
-  const { getBlastSignalsForPr } = await import('../src/db/blast-radius-query.js');
+  const { getPrImpactLevel } = await import('../src/db/blast-radius-query.js');
   const { loadRepoCoupling, rebuildRepoCoupling } = await import('../src/db/file-coupling.js');
 
-  // The fixture PRs carry no `files`, so signals are null for both tenants — which would make a
+  // The fixture PRs carry no `files`, so the level is null for both tenants — which would make a
   // bare "B sees null" check vacuous. Give A's PR a file list first.
   await db
     .update(schema.pullRequests)
@@ -2728,16 +2726,16 @@ check(
     .execute();
 
   check(
-    'getBlastSignalsForPr(A, A’s PR) MEASURES it — the positive direction, so the next check is not vacuous',
-    (await getBlastSignalsForPr(1, A.prId))?.codeFiles === 1,
+    'getPrImpactLevel(A, A’s PR) MEASURES it — the positive direction, so the next check is not vacuous',
+    (await getPrImpactLevel(1, A.prId)) !== null,
   );
   check(
-    'getBlastSignalsForPr(B, A’s PR) returns null (IDOR blocked)',
-    (await getBlastSignalsForPr(2, A.prId)) === null,
+    'getPrImpactLevel(B, A’s PR) returns null (IDOR blocked)',
+    (await getPrImpactLevel(2, A.prId)) === null,
   );
   check(
-    'getBlastSignalsForPr(A, B’s PR) returns null (IDOR blocked, both directions)',
-    (await getBlastSignalsForPr(1, B.prId)) === null,
+    'getPrImpactLevel(A, B’s PR) returns null (IDOR blocked, both directions)',
+    (await getPrImpactLevel(1, B.prId)) === null,
   );
 
   // The coupling index. The fixture is far below the coverage floor, so no row is written for
