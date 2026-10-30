@@ -3,11 +3,17 @@ name: CI
 # Quality gate for pull requests: the same checks the release pipeline runs
 # (typecheck + unit tests + the browser E2E regression suite), so a PR can't merge
 # with a broken My Turn / Feed / Focus-mode flow. Pushes to main are gated by the
-# release workflow (which runs the identical checks before publishing), so this only
-# triggers on pull_request to avoid double-running on main.
+# release workflow (which runs the identical checks, and the WHOLE backend suite,
+# before publishing), so this triggers on pull_request — plus a nightly run of
+# everything on main, and on demand.
 on:
   pull_request:
     branches: [main]
+  schedule:
+    # Nightly, the whole suite on main: catches a slow-project test that broke through an input
+    # no import reaches (docs/TESTING.md). 03:17 UTC, off the hour on purpose.
+    - cron: '17 3 * * *'
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -18,6 +24,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history: the slow-project step below diffs the PR against its base branch.
+          fetch-depth: 0
 
       # pnpm version comes from the root package.json "packageManager" field.
       - uses: pnpm/action-setup@v4
@@ -29,9 +38,46 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      # ---- Which browser checks can this PR affect? (docs/TESTING.md) ----
+      # The E2E suite answers every /api request from fixtures, and the demo check serves the
+      # built SPA through apps/site — so neither reads a line of the backend. A PR that touches
+      # none of the paths below cannot change their result, and skips them (~3 minutes). The
+      # nightly and manual runs always take them; so does any PR that touches a manifest, the
+      # lockfile or a workflow.
+      - name: Paths this PR touches
+        id: paths
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "browser=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          changed="$(git diff --name-only "origin/${{ github.base_ref }}...HEAD")"
+          printf '%s\n' "$changed"
+          if printf '%s\n' "$changed" | grep -qE '^(apps/frontend/|apps/site/|packages/shared/|scripts/(verify-demo|record-demo)|playwright\.config\.ts$|pnpm-lock\.yaml$|(.*/)?package\.json$|\.github/workflows/)'; then
+            echo "browser=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "browser=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - run: pnpm typecheck
 
+      # The fast project (every backend file except the spawn-bound ones) + the site's tests.
       - run: pnpm test
+
+      # ---- The slow backend project (vitest.workspace.ts, docs/TESTING.md) ----
+      # Real git, the fake Codex CLI, the runtime installer, the ONNX scorer: ~93% of the suite's
+      # time in ~5% of its files. A pull request runs the slow files whose IMPORT GRAPH holds a file
+      # the PR changed (static and dynamic imports), and ALL of them when it touches an input no
+      # import reaches (vitest.config.ts FORCE_RERUN_TRIGGERS: migrations, fixtures, spawned entry
+      # files, package.json, the lockfile, this workflow). The nightly and manual runs take them all.
+      - name: Slow backend tests (those this PR can affect)
+        if: github.event_name == 'pull_request'
+        run: >-
+          pnpm --filter @pierre-review/backend exec vitest run --project slow
+          --changed origin/${{ github.base_ref }} --passWithNoTests
+
+      - name: Slow backend tests (all)
+        if: github.event_name != 'pull_request'
+        run: pnpm test:slow
 
       # ---- Marketing-site prerender guardrails ----
       # Every assertion that protects the prerendered landing site lives in
@@ -73,15 +119,18 @@ jobs:
         run: pnpm audit --audit-level high --prod
 
       - name: Install Playwright browser
+        if: steps.paths.outputs.browser == 'true'
         run: pnpm exec playwright install --with-deps chromium
 
       - name: E2E regression tests (My Turn / Feed / Focus)
+        if: steps.paths.outputs.browser == 'true'
         run: pnpm test:e2e
 
       # The static demo (limn-review.com/demo/) must answer every request the SPA in THIS PR makes.
       # A failure lists the missing requests: extend the seed + recorder steps and run
       # `pnpm demo:record` (CLAUDE.md § The website and the demo).
       - name: Demo answers every view
+        if: steps.paths.outputs.browser == 'true'
         run: |
           pnpm --filter @pierre-review/frontend build:demo
           node scripts/verify-demo.mjs

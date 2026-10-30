@@ -47,7 +47,9 @@ jobs:
 
       - run: pnpm typecheck
 
-      - run: pnpm test
+      # EVERYTHING, slow project included (docs/TESTING.md): a PR ran only the slow files it
+      # could affect, so main is where the whole suite is proven before a publish.
+      - run: pnpm test:all
 
       # Browser regression gate for the My Turn / Feed / Focus-mode UX flows. Uses
       # API-mocked fixtures (no backend) against the Vite dev server it boots itself.

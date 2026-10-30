@@ -1,13 +1,13 @@
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { defineConfig } from 'vitest/config';
+import { configDefaults, defineConfig } from 'vitest/config';
 
 // Backend test config.
 //
-// Bare `vitest run` (the backend suite, `pnpm --filter @pierre-review/backend test`)
-// keeps vitest's built-in discovery untouched — root = this workspace, the default
-// include/exclude globs — so which tests run is unaffected.
+// Which files run is decided by vitest.workspace.ts: two projects, `fast` (`pnpm test`) and
+// `slow` (`pnpm test:slow`), both extending this file; a bare `vitest run` runs both. This
+// file holds what they share.
 //
 // The defaults we override are the two TIMEOUTS, for one reason: vitest runs test FILES
 // in parallel, so every duration here is a function of how loaded the machine is.
@@ -35,7 +35,7 @@ const HOOK_TIMEOUT_MS = 30_000;
 // Same argument, applied to test bodies (see above).
 //
 // ⚠ RAISED 20s → 90s FOR `src/conflict/`, AND THE REASON IS MEASURED, NOT A GUESS.
-// `land.test.ts` and `model.test.ts` prove claims about what git does with a tree nobody
+// `land*.test.ts` and `model*.test.ts` prove claims about what git does with a tree nobody
 // checked out, so they shell out ~30 times per test (a model build is merge-base +
 // 3×diff-tree + batch-check + merge-tree + rev-list + per-blob cat-file + the merge-file
 // oracle, and a land REBUILDS the model before it commits, so the whole sequence runs
@@ -49,19 +49,44 @@ const HOOK_TIMEOUT_MS = 30_000;
 // with `syspolicyd` (Gatekeeper's assessment daemon) pegged at ~87% of a core throughout.
 // Forking a vitest worker's large heap and re-assessing the binary is a per-exec tax, so a
 // suite's runtime here is a function of how many processes the whole run is starting — the
-// same contention argument as above, two orders of magnitude louder. Idle, `land.test.ts`
-// runs its 27 tests in ~112s (~4s each); during a full `pnpm test` the same tests take
-// 24–34s and six of them failed on the 20s ceiling, each with a green assertion behind it.
+// same contention argument as above, two orders of magnitude louder. (Re-measured 2026-10-30:
+// 150–550 ms per `git --version` inside a worker against ~20 ms from plain node — the reason
+// these files are the `slow` project in vitest.workspace.ts.) Idle, `land.test.ts` (before it
+// was split three ways) ran its 27 tests in ~112s (~4s each); during a full `pnpm test` the
+// same tests took 24–34s and six of them failed on the 20s ceiling, each with a green
+// assertion behind it.
 //
 // 90s is slack for that tax and nothing else. `conflict/git.ts` kills any git command at
 // 120s, so a genuinely hung or lock-waiting git still fails the run rather than sitting
 // there, and — as above — raising a ceiling cannot turn a failing assertion green.
 const TEST_TIMEOUT_MS = 90_000;
 
+// THE INPUTS NO IMPORT REACHES. CI runs the `slow` project with `--changed`, which picks the
+// test files whose import graph holds a changed file. These are read from disk or run as a
+// separate process instead of imported, so a change to one of them runs EVERY test rather than
+// none: the migration chain every DB suite applies, the recorded fixtures, the entry files the
+// Codex tests spawn, and the test setup itself. (The defaults spread here are vitest's own
+// package.json / config triggers.) ⚠ vitest.config.ts is spelled out: the default
+// `**/{vitest,vite}.config.*/**` does NOT match a plain `vitest.config.ts` path under micromatch
+// (measured), so without it a change to the timeouts or to this list ran no slow test.
+const FORCE_RERUN_TRIGGERS = [
+  ...configDefaults.forceRerunTriggers,
+  '**/vitest.config.ts',
+  '**/vitest.workspace.ts',
+  '**/pnpm-lock.yaml',
+  '**/src/db/migrations/**',
+  '**/src/platform/migrations/**',
+  '**/__fixtures__/**',
+  '**/*.test-support.ts',
+  '**/src/ai/codex/*-main.ts',
+  '**/.github/workflows/**',
+];
+
 export default defineConfig({
   test: {
     hookTimeout: HOOK_TIMEOUT_MS,
     testTimeout: TEST_TIMEOUT_MS,
+    forceRerunTriggers: FORCE_RERUN_TRIGGERS,
     // ⚠ NEVER THE READER'S ~/.limn. Modules resolve the data directory at IMPORT time (the AI runtime,
     // the Codex home), before a test's own beforeEach can set LIMN_DATA_DIR — so a machine with Codex
     // installed and signed in under ~/.limn saw it in "not installed" tests, and a sign-in test could

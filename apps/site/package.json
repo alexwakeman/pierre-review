@@ -10,7 +10,8 @@
     "precompress": "node dist/precompress.js",
     "dev": "tsx watch src/server.ts",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:all": "vitest run"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",

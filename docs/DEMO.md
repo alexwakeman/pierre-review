@@ -115,8 +115,9 @@ opens a document in Read, its row facts are back on Library). It is not in CI ye
 A `VIEWS` row may carry `{ act, expect }`: a click the view hides behind (Settings has no URL) and
 text the page must then show (the run list and both providers' labels on #105 after picking Codex's model, "Default: Codex." after the switch).
 
-**What guards it.** PR CI (`ci.yml`) and the site deploy (`deploy-site.yml`, which will not push the image
-on a failure) both run `verify-demo`: every listed view must load with no page error, no blank page and no
+**What guards it.** PR CI (`ci.yml`, on any PR that touches the frontend, the site, `packages/shared`, the
+demo scripts, a manifest or a workflow — docs/TESTING.md) and the site deploy (`deploy-site.yml`, which will
+not push the image on a failure) both run `verify-demo`: every listed view must load with no page error, no blank page and no
 request the recording cannot answer. It cannot see a view missing from `VIEWS`, or a stored answer whose
 SHAPE is stale but still renders. The re-record is the author's job.
 
