@@ -1334,6 +1334,17 @@ every auto fix). `ai_fixes` is already in `accountScopedTables()`, the erasure a
 [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Run tests. Journal `idx` 148, `when` sqlite `1792137652016`
 (built as `0146`, renumbered on merge after `0146_worktree_ledger` and `0147_dependency_automation`).
 
+### `0149_story_builds` — "Implement story" sessions
+Two NEW tables: `story_builds` (one row per session; named composite FK `story_builds_workspace_account_fk`
+onto `workspaces (id, account_id)`, cascade; unique `story_builds_id_account`; the PARTIAL unique
+`story_builds_one_open` on `(account_id, workspace_id, ident) WHERE status IN
+('assessing','planning','plan_ready','building','ready')` — one open session per ticket, in the `.sql` only)
+and `story_build_repos` (one row per repository; composite FKs onto `story_builds (id, account_id)` and
+`repos (id, account_id)`, cascade; unique `(build_id, repo_id)` = the ON CONFLICT target; `stacked_on_pr_id`
+has no FK). Both on `accountScopedTables()`, erased, exported (the seed withheld, the patch capped);
+`deleteRepo` deletes a repository's rows explicitly. Additive, no backfill. [STORY-BUILD.md](STORY-BUILD.md)
+§ Data model. Journal `idx` 149, `when` sqlite `1792137653016`.
+
 ### No migration — "Check against code" removed (2026-10-18): `sprint_ticket_repos` + `sprint_assessments` DORMANT
 
 The sprint drawer, its repo picker and "Check against code" (`review/sprint-assess/`) were removed with

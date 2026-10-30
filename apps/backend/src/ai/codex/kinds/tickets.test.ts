@@ -109,10 +109,10 @@ const { shapeToJsonSchema, toStrictJsonSchema } = await import('../../result-sch
 const { runTicketReviewAgent } = await import('../../../review/ticket-review/agent.js');
 const { runCardAgent, runCardPrepass } = await import('../../../review/ticket-review/prepass.js');
 const { runCiReviewAgent } = await import('../../../review/ci-review/agent.js');
-const { runStoryDocsAgent } = await import('../../../review/story-docs/agent.js');
+const { runStoryDocsAgent, runBuildDocsAgent } = await import('../../../review/story-docs/agent.js');
 const { buildSubmitTicketReviewShape, buildSubmitPrCardShape } = await import('../../../review/ticket-review/schema.js');
 const { buildSubmitCiReviewShape } = await import('../../../review/ci-review/schema.js');
-const { buildSubmitAlignmentShape } = await import('../../../review/story-docs/schema.js');
+const { buildSubmitAlignmentShape, buildSubmitBuildDocsShape } = await import('../../../review/story-docs/schema.js');
 const { runCiReviewSweep, _resetCiSweepForTest } = await import('../../../review/ci-review/sweep.js');
 const { runTicketReviewSweep } = await import('../../../review/ticket-review/sweep.js');
 
@@ -495,6 +495,71 @@ describe('story_docs on Codex', () => {
     const { res } = await run();
     expect(res.payload).toBeNull();
     expect(res.failureReason).toMatch(/^no usable answer: .*actions has 1/);
+  });
+
+  it('a cancelled run is aborted', async () => {
+    scenario({ hang: true });
+    const ac = new AbortController();
+    setTimeout(() => ac.abort(), 400);
+    const { res } = await run({ abortController: ac });
+    expect(res).toMatchObject({ payload: null, aborted: true });
+  });
+});
+
+// "Implement story" → docs consideration: the SAME `story_docs` read in its BUILD mode (submit_build_docs).
+const BUILD_DOCS_ARGS = {
+  summary: 'The plan follows the refund policy except for the deadline. The story sets a longer one on purpose.',
+  items: [
+    { kind: 'superseded', about: 'AC1', note: 'The story pays within 30 days; the policy says 14.', refs: [good] },
+    { kind: 'suggestion', about: 'R1:step 1', note: 'The policy needs an approved request.', suggestion: 'Check the request is approved first.', refs: [good] },
+  ],
+};
+const BUILD_DOCS_CTX = { abouts: ['story', 'AC1', 'R1:step 1'] };
+
+describe('story_docs BUILD mode on Codex', () => {
+  const run = async (over: Record<string, unknown> = {}) => {
+    const cwd = scratch('bd');
+    const doc = scratch('bdoc');
+    const res = await runBuildDocsAgent({
+      cwd,
+      roots: [doc],
+      systemPrompt: 'SYS',
+      prompt: 'PROMPT',
+      build: BUILD_DOCS_CTX,
+      applyAuthEnv: true,
+      abortController: new AbortController(),
+      usageRecord: { accountId: 7, seam: 'agent', feature: 'story_build_docs' },
+      budgetUsd: 0.9,
+      ...over,
+    });
+    return { res, cwd, doc };
+  };
+
+  it('succeeds through the strict schema: the SAME judge accepts it; read-only roots; the session ledger feature', async () => {
+    scenario({ first: answerFor(buildSubmitBuildDocsShape(z), BUILD_DOCS_ARGS) });
+    const { res, cwd, doc } = await run();
+    expect(res.payload).toMatchObject({ items: [{ kind: 'superseded', about: 'AC1' }, { kind: 'suggestion', suggestion: 'Check the request is approved first.' }] });
+    // The strict form's null for an absent `suggestion` was dropped before the judge saw it.
+    expect((res.payload as any).items[0]).not.toHaveProperty('suggestion');
+    expect(res).toMatchObject({ lastRefusal: null, aborted: false, costUsd: 0, ledgerByProvider: true, model: 'gpt-6.1-terra' });
+    const guard = JSON.parse(calls()[0].guard);
+    expect(new Set(guard.read)).toEqual(new Set([cwd, doc]));
+    expect(guard.write).toEqual([]);
+    expect(cfg(calls()[0].argv, 'model_reasoning_effort')).toBe('"low"');
+    expect(calls()[0].schema.properties.items.items.properties.suggestion.anyOf).toEqual(expect.arrayContaining([{ type: 'null' }]));
+    expect(T.recorded).toEqual([expect.objectContaining({ provider: 'codex', feature: 'story_build_docs' })]);
+  });
+
+  it('a superseded item carrying a fix is refused once (the precedence rule), then accepted', async () => {
+    const strict = answerFor(buildSubmitBuildDocsShape(z), BUILD_DOCS_ARGS) as any;
+    const bad = { ...strict, items: [{ ...strict.items[0], suggestion: 'Change the story to 14 days.' }, strict.items[1]] };
+    scenario({ first: bad, resume: strict });
+    const { res } = await run();
+    expect(res.payload).not.toBeNull();
+    const [, retry] = calls();
+    expect(retry.resumed).toBe(true);
+    expect(retry.stdin).toContain("is 'superseded': leave `suggestion` out");
+    expect(retry.stdin).not.toContain('submit_build_docs');
   });
 
   it('a cancelled run is aborted', async () => {

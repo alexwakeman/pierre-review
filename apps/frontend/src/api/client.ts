@@ -274,7 +274,25 @@ import type {
   PrCiReviewResponse,
   StartCiReviewBody,
   StartCiReviewResponse,
+  StoryBuild,
+  StoryBuildAcceptBody,
+  StoryBuildActionResponse,
+  StoryBuildCancelResponse,
+  StoryBuildChecksPreview,
+  StoryBuildDiffResponse,
+  StoryBuildDiscardResponse,
+  StoryBuildDocsBody,
+  StoryBuildDocsDecisionsBody,
+  StoryBuildDocsDecisionsResponse,
+  StoryBuildDocsResponse,
+  StoryBuildForTicketResponse,
+  StoryBuildPlanMessageBody,
+  StoryBuildPushBody,
+  StoryBuildPushResponse,
+  StoryBuildStartBody,
+  StoryBuildStartResponse,
 } from '@pierre-review/shared';
+import { storyBuildPath } from '@pierre-review/shared';
 
 class ApiError extends Error {
   constructor(
@@ -1716,6 +1734,48 @@ export const api = {
     fetch(`/api/pro/ai-fixes/${fixId}/push`, jsonBody('POST', body)).then((r) =>
       handle<AiFixPushResult>(r),
     ),
+
+  // ---- "Implement story" (docs/STORY-BUILD.md; every path is shared STORY_BUILD_API) ----
+  // The ticket's latest session + the earlier ones (DB only).
+  storyBuildFor: (workspaceId: number, ident: string) =>
+    get<StoryBuildForTicketResponse>(
+      withQuery(storyBuildPath('list'), workspaceParam(workspaceId), `ident=${encodeURIComponent(ident)}`),
+    ),
+  storyBuild: (id: number) => get<StoryBuild>(storyBuildPath('one', { id })),
+  // Start: 202 {outcome:'started'} · 200 {outcome:'already_open'} (one open session per ticket).
+  startStoryBuild: (body: StoryBuildStartBody) =>
+    fetch(storyBuildPath('list'), jsonBody('POST', body)).then((r) => handle<StoryBuildStartResponse>(r)),
+  // A re-plan pass steered by the reader's message.
+  sendStoryBuildMessage: (id: number, body: StoryBuildPlanMessageBody) =>
+    fetch(storyBuildPath('planMessage', { id }), jsonBody('POST', body)).then((r) => handle<StoryBuildActionResponse>(r)),
+  // The docs consideration run (the story wins over the docs).
+  runStoryBuildDocs: (id: number, body: StoryBuildDocsBody = {}) =>
+    fetch(storyBuildPath('docs', { id }), jsonBody('POST', body)).then((r) => handle<StoryBuildDocsResponse>(r)),
+  // The reader's ticks on the docs points (DB only).
+  setStoryBuildDocsDecisions: (id: number, body: StoryBuildDocsDecisionsBody) =>
+    fetch(storyBuildPath('docsDecisions', { id }), jsonBody('PUT', body)).then((r) => handle<StoryBuildDocsDecisionsResponse>(r)),
+  // "Run tests": the checks one repository declares at its base (one GitHub read; asked when ticked).
+  storyBuildRepoChecks: (id: number, repoId: number) =>
+    get<StoryBuildChecksPreview>(storyBuildPath('repoChecks', { id, repoId })),
+  // Accept the plan revision on screen and build. 409 PlanMoved when a newer revision exists.
+  acceptStoryBuild: (id: number, body: StoryBuildAcceptBody) =>
+    fetch(storyBuildPath('accept', { id }), jsonBody('POST', body)).then((r) => handle<StoryBuildActionResponse>(r)),
+  retryStoryBuildRepo: (id: number, repoId: number) =>
+    fetch(storyBuildPath('repoRetry', { id, repoId }), jsonBody('POST')).then((r) => handle<StoryBuildActionResponse>(r)),
+  // The stored patch, fetched only when the reader opens the diff.
+  storyBuildRepoDiff: (id: number, repoId: number) =>
+    get<StoryBuildDiffResponse>(storyBuildPath('repoDiff', { id, repoId })),
+  // Push one repository / every unpushed ready one (in plan order). Draft unless `draft === false`.
+  pushStoryBuildRepo: (id: number, repoId: number, body: StoryBuildPushBody) =>
+    fetch(storyBuildPath('repoPush', { id, repoId }), jsonBody('POST', body)).then((r) =>
+      handle<StoryBuildPushResponse>(r),
+    ),
+  pushStoryBuildAll: (id: number, body: StoryBuildPushBody) =>
+    fetch(storyBuildPath('pushAll', { id }), jsonBody('POST', body)).then((r) => handle<StoryBuildPushResponse>(r)),
+  cancelStoryBuild: (id: number) =>
+    fetch(storyBuildPath('cancel', { id }), jsonBody('POST')).then((r) => handle<StoryBuildCancelResponse>(r)),
+  discardStoryBuild: (id: number) =>
+    fetch(storyBuildPath('discard', { id }), jsonBody('POST')).then((r) => handle<StoryBuildDiscardResponse>(r)),
 
   // ---- Bot triage (CORE, deterministic, no AI) ----
   //

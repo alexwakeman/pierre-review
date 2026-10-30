@@ -8,9 +8,10 @@
 //     CLAUDE.md or skills), `ISOLATED_MCP` (no claude.ai connectors), the LIMN_CLAUDE_PATH
 //     executable and the credential ladder's environment (`agentAuthOptions()`);
 //   • ⚠ THE PATH GUARD as the FIRST PreToolUse hook — `createPathGuard(cwd, roots, {readOnlyRoots})`
-//     — then `ownToolsOnlyHook(<the run's own server>)`, then the run's extra hooks (the specialist
-//     cap, the docs build's sections-write guard). Under bypassPermissions a PreToolUse deny is the
-//     only thing that confines an absolute path, and the prompt is attacker-authored;
+//     — then `ownToolsOnlyHook(<the run's own server>)`, then (a story build, `spec.protectWrites`) the
+//     write deny-list (review/write-deny.ts), then the run's extra hooks (the specialist cap, the docs
+//     build's sections-write guard). Under bypassPermissions a PreToolUse deny is the only thing that
+//     confines an absolute path, and the prompt is attacker-authored;
 //   • `additionalDirectories` = roots + read-only roots, only when there are any (the SDK adds one
 //     `--add-dir` per entry, so an empty list and no list run the same CLI);
 //   • the result tools as ONE in-process MCP server (`createSdkMcpServer`, version 1.0.0), each
@@ -24,6 +25,7 @@ import { config } from '../../config.js';
 import { NO_CLAUDE_AUTH_MESSAGE } from '../../review/auth.js';
 import { sdkModelOptions } from '../../review/model-options.js';
 import { createPathGuard, pathGuardHook } from '../../review/path-guard.js';
+import { protectedWriteHook } from '../../review/write-deny.js';
 import { recordUsage, sumModelUsage, sumUsageMap, type UsageTokens } from '../../review/usage.js';
 import { CHECKS_TOOL_SERVER, RUN_CHECK_TOOL } from '../check-tool.js';
 import type {
@@ -129,6 +131,8 @@ async function runAgent(spec: AgentRunSpec): Promise<AgentRunResult> {
         PreToolUse: [
           pathGuardHook(guard),
           ownToolsOnlyHook(ownServers),
+          // The build's write deny-list (review/write-deny.ts), only on a run that asks for it.
+          ...(spec.protectWrites && spec.writeRoots.length > 0 ? [protectedWriteHook(spec.writeRoots, spec.cwd)] : []),
           ...(c.extraPreToolUse ?? []),
         ] as never,
       },

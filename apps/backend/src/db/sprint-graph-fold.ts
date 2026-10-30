@@ -17,6 +17,7 @@ import {
   type SprintGraphEdge,
   type SprintGraphNode,
   type SprintGraphPr,
+  type SprintNodeBuild,
   type SprintStage,
   type SprintTicketCheck,
   type TicketLinkBlocker,
@@ -79,6 +80,10 @@ export interface GraphFoldInput {
    *  ticket in Not started with no pull request). Given → every node carries `codeJudgement` (null when
    *  not asked); absent → the field is left off. */
   codeJudgementOf?: (ident: string) => SprintCodeJudgement;
+  /** "Implement story": sprint ticket ident → its latest OPEN build session (db/sprint-builds.ts). Given →
+   *  every node carries `build` (null for a ghost or a ticket with none); absent (AI off) → `build: null`
+   *  too, so the field is always present on a current server. */
+  builds?: ReadonlyMap<string, SprintNodeBuild>;
   ghostMax?: number;
   depthMax?: number;
 }
@@ -250,6 +255,7 @@ export function foldSprintGraph(input: GraphFoldInput): GraphFoldResult {
     degree: degree.get(t.ident) ?? 0,
     theme: ghost ? null : (input.themes?.get(t.ident) ?? null),
     ...(judge != null ? { codeJudgement: sprintCodeAsked({ ghost, stage, prs }) ? judge(t.ident) : null } : {}),
+    build: ghost ? null : (input.builds?.get(t.ident) ?? null),
     };
   };
   const sprintNodes = input.sprint
@@ -267,7 +273,8 @@ export function foldSprintGraph(input: GraphFoldInput): GraphFoldResult {
  * over what the CARDS show — per node (sorted by ident): its column, bucket, status, assignee, theme,
  * brief state + one-liner + criteria count, ticket check counts / staleness / running, the "needs code"
  * judgement's state, and each PR's
- * id, state, draft flag and CI; plus every edge. ⚠ CLOCK-FREE: nothing derived from `Date.now()` (pace,
+ * id, state, draft flag and CI; the build session's id, status and repository counts (when one is open);
+ * plus every edge. ⚠ CLOCK-FREE: nothing derived from `Date.now()` (pace,
  * signals, dates) and not the read's time either — a sprint read that changed nothing must not suggest a
  * refresh. Pure.
  */
@@ -290,6 +297,9 @@ export function sprintChangeTokenOf(g: Pick<GraphFoldResult, 'nodes' | 'edges'>)
       n.checkRunning,
       n.codeJudgement?.state ?? null,
       n.prs.map((p) => [p.prId, p.state, p.draft, p.ciState]),
+      // The build mark (coarse). Appended ONLY when present, so a sprint with no session keeps the token
+      // it had before the field existed (no spurious "refresh" on upgrade).
+      ...(n.build != null ? [[n.build.id, n.build.status, n.build.readyRepos, n.build.pushedRepos]] : []),
     ]);
   const edges = g.edges.map((e) => [e.from, e.to, e.kind, e.source]).sort((a, b) => (a.join('\u0000') < b.join('\u0000') ? -1 : 1));
   return createHash('sha256').update(JSON.stringify({ nodes, edges })).digest('hex').slice(0, 16);

@@ -576,6 +576,26 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // `search` bucket (one upstream call per request) + `read`, spelled exactly so the /api/pro/ GET
   // catch-all below (600/min) never swallows it.
   if (!mutating && /^\/api\/pro\/prs\/\d+\/ai-fix\/checks$/.test(path)) return [TIERS.search, TIERS.read];
+  // IMPLEMENT STORY (coding/story-build/routes*.ts, LOCAL ONLY; paths: shared STORY_BUILD_API). The whole
+  // family DECIDED here, by exact shape, FOLLOWING THE TOKEN — it sits under no prefix the rules below
+  // would catch, so without these lines every route (the agent starts AND the GitHub pushes) would fall
+  // to the 600/min blanket `read`:
+  //   POST /api/story-builds                               starts assess + plan agent passes → ai + ai_hourly
+  //   POST …/:id/plan/message · …/:id/docs · …/:id/accept   one agent pass / starts the builds → ai + ai_hourly
+  //   POST …/:id/repos/:repoId/retry                        one repository's build agent      → ai + ai_hourly
+  //   POST …/:id/repos/:repoId/push · …/:id/push            branch push + PR create (GitHub)  → github_write
+  //   GET  …/:id/repos/:repoId/checks                       one GitHub read of manifest files → search + read
+  //   GET list / :id / stream / diff · PUT docs/decisions · POST cancel / discard  DB only    → read
+  // ⚠ The pushes are spelled EXACTLY here: the `hitsGithub` alternation further down is anchored to
+  // `/api/prs/\d+/` and only reached by the Claude Review / `/api/pro/` family, so it never sees them.
+  if (path === '/api/story-builds' || path.startsWith('/api/story-builds/')) {
+    if (mutating && path === '/api/story-builds') return [TIERS.ai, TIERS.aiHourly];
+    if (mutating && /^\/api\/story-builds\/\d+\/(plan\/message|docs|accept)$/.test(path)) return [TIERS.ai, TIERS.aiHourly];
+    if (mutating && /^\/api\/story-builds\/\d+\/repos\/\d+\/retry$/.test(path)) return [TIERS.ai, TIERS.aiHourly];
+    if (mutating && /^\/api\/story-builds\/\d+\/(repos\/\d+\/)?push$/.test(path)) return [TIERS.githubWrite];
+    if (!mutating && /^\/api\/story-builds\/\d+\/repos\/\d+\/checks$/.test(path)) return [TIERS.search, TIERS.read];
+    return [TIERS.read];
+  }
   if (/^\/api\/claude-reviews\/[^/]+\/chat$/.test(path)) {
     return mutating ? [TIERS.ai, TIERS.aiHourly] : [TIERS.read];
   }

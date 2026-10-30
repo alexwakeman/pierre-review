@@ -40,12 +40,18 @@ export const RESULT_TOOL_NAMES = [
   'submit_design',
   'submit_paths',
   'submit_alignment',
+  // The story docs read's BUILD mode ("Implement story" → docs consideration).
+  'submit_build_docs',
   'submit_explanations',
   'record_sections',
   // The docs build's closing call (beside record_sections): a result too.
   'finish_document',
   // The docs build on CODEX: record_sections + finish_document as ONE final answer (Phase 3).
   'submit_document',
+  // "Implement story": the read-only plan pass (coding/story-build/schema.ts).
+  'submit_story_plan',
+  // "Implement story": one repository's build (coding/story-build/build.ts) — the `submit_fix` shape.
+  'submit_build',
 ] as const;
 export type ResultToolName = (typeof RESULT_TOOL_NAMES)[number];
 
@@ -71,10 +77,13 @@ const BUILDERS: Record<ResultToolName, ShapeBuilder> = {
   submit_design: async (z) => (await import('../review/diagrams/schema.js')).buildSubmitDesignShape(z),
   submit_paths: async (z) => (await import('../review/sprint-paths/schema.js')).buildSubmitPathsShape(z),
   submit_alignment: async (z) => (await import('../review/story-docs/schema.js')).buildSubmitAlignmentShape(z),
+  submit_build_docs: async (z) => (await import('../review/story-docs/schema.js')).buildSubmitBuildDocsShape(z),
   submit_explanations: async (z) => (await import('../review/claude-review/chat-explain.js')).buildSubmitExplanationsShape(z),
   record_sections: async (z) => (await import('../reference-docs/schema.js')).buildRecordSectionsShape(z),
   finish_document: async (z) => (await import('../reference-docs/schema.js')).buildFinishShape(z),
   submit_document: async (z) => (await import('../reference-docs/schema.js')).buildSubmitDocumentShape(z),
+  submit_story_plan: async (z) => (await import('../coding/story-build/schema.js')).buildSubmitStoryPlanShape(z),
+  submit_build: async (z) => (await import('../coding/schema.js')).buildSubmitFixShape(z),
 };
 
 /** The raw zod shape the Claude tool `name` is registered with. `z` defaults to the AI runtime's. */

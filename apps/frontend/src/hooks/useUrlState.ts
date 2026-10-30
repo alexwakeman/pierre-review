@@ -39,6 +39,7 @@ import {
 import {
   parseBotDetailKey,
   parseTicketTabKey,
+  parseStoryBuildTabKey,
   parseTabKey,
   parseUserActivityKey,
   usePinnedTabs,
@@ -263,7 +264,8 @@ export function landingTabFromUrl(search: string): ActiveTab {
     (parseTabKey(view) != null ||
       parseUserActivityKey(view) != null ||
       parseBotDetailKey(view) != null ||
-      parseTicketTabKey(view) != null)
+      parseTicketTabKey(view) != null ||
+      parseStoryBuildTabKey(view) != null)
   ) {
     return view;
   }
@@ -726,7 +728,8 @@ export function writeToUrl(s: FilterState): void {
     parseTabKey(activeTab) != null ||
     parseUserActivityKey(activeTab) != null ||
     parseBotDetailKey(activeTab) != null ||
-    parseTicketTabKey(activeTab) != null
+    parseTicketTabKey(activeTab) != null ||
+    parseStoryBuildTabKey(activeTab) != null
   ) {
     // A SELF-DESCRIBING tab: the key IS the address (see landingTabFromUrl). Emitted verbatim so
     // a PR read full-screen, a contributor's feed and a bot's depth each have their own URL —

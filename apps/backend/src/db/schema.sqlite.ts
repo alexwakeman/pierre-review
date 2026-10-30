@@ -73,6 +73,14 @@ import type {
   TicketAssessment,
   AiBudgetSettings,
   AiUsageReading,
+  AiFixChangeReport,
+  CheckRunReport,
+  StoryBuildCandidate,
+  StoryBuildCoverage,
+  StoryBuildDocs,
+  StoryBuildDocsDecisions,
+  StoryBuildMessage,
+  StoryBuildPlan,
 } from '@pierre-review/shared';
 
 // A tenant. Local mode synthesizes exactly one row (id 1, isLocal=true) from
@@ -4095,6 +4103,146 @@ export const storyDocsAlignments = sqliteTable(
       name: 'story_docs_alignments_workspace_account_fk',
       columns: [t.workspaceId, t.accountId],
       foreignColumns: [workspaces.id, workspaces.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+// ---- "IMPLEMENT STORY" (migration 0149; docs/STORY-BUILD.md) ----
+// story_builds — ONE row per SESSION (one ticket, one reader click). Status: shared `StoryBuildStatus`.
+// ONE OPEN SESSION PER TICKET is the partial unique `story_builds_one_open` in the .sql ONLY (drizzle
+// predicates are inert). `workspace_id` arrives in a request body, so its FK is the named COMPOSITE one;
+// a session stays with the workspace it started in (never re-homed). `seed_json` is the frozen, fenced
+// prompt input: NEVER on the wire (like `ai_fixes.plan_seed`).
+export const storyBuilds = sqliteTable(
+  'story_builds',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    workspaceId: integer('workspace_id').notNull(),
+    // The tracker ticket ident (never a manual one).
+    ident: text('ident').notNull(),
+    ticketKey: text('ticket_key').notNull(),
+    ticketTitle: text('ticket_title'),
+    // StoryBuildStatus.
+    status: text('status').notNull(),
+    // StoryBuildPhase while a pass runs; null otherwise.
+    phase: text('phase'),
+    error: text('error'),
+    // What the plan passes ran on (`ranOn`); NULL until the first pass starts.
+    provider: text('provider'),
+    model: text('model'),
+    effort: text('effort'),
+    wantDiagram: integer('want_diagram', { mode: 'boolean' }).notNull().default(false),
+    wantDocs: integer('want_docs', { mode: 'boolean' }).notNull().default(false),
+    // The story inputs (review/story-docs/inputs.ts resolveStoryDocsInputs): StoryDocsCriteriaSource.
+    storyHash: text('story_hash'),
+    criteriaSource: text('criteria_source'),
+    criteriaJson: text('criteria_json', { mode: 'json' }).$type<StoryDocsCriterion[]>(),
+    coverageJson: text('coverage_json', { mode: 'json' }).$type<StoryBuildCoverage>(),
+    // Backend-only (coding/story-build/persist.ts StoryBuildSeed). Never on the wire.
+    seedJson: text('seed_json', { mode: 'json' }).$type<Record<string, unknown>>(),
+    candidatesJson: text('candidates_json', { mode: 'json' }).$type<StoryBuildCandidate[]>(),
+    planJson: text('plan_json', { mode: 'json' }).$type<StoryBuildPlan>(),
+    planRevision: integer('plan_revision').notNull().default(0),
+    transcriptJson: text('transcript_json', { mode: 'json' }).$type<StoryBuildMessage[]>(),
+    designJson: text('design_json', { mode: 'json' }).$type<DesignDiagram>(),
+    // StoryBuildDocsStatus.
+    docsStatus: text('docs_status').notNull().default('none'),
+    docsJson: text('docs_json', { mode: 'json' }).$type<StoryBuildDocs>(),
+    docsDecisionsJson: text('docs_decisions_json', { mode: 'json' }).$type<StoryBuildDocsDecisions>(),
+    docsError: text('docs_error'),
+    docsCostUsd: real('docs_cost_usd'),
+    // Frozen at Accept.
+    acceptedRevision: integer('accepted_revision'),
+    acceptedDocsJson: text('accepted_docs_json', { mode: 'json' }).$type<StoryBuildDocsDecisions>(),
+    // The assess + plan passes, summed across revisions, US$.
+    planCostUsd: real('plan_cost_usd'),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    numTurns: integer('num_turns'),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
+    startedAt: integer('started_at', { mode: 'timestamp' }),
+    completedAt: integer('completed_at', { mode: 'timestamp' }),
+  },
+  (t) => ({
+    // The parent key `story_build_repos` points its composite FK at.
+    idAccountUx: uniqueIndex('story_builds_id_account').on(t.id, t.accountId),
+    // The newest session per ticket.
+    subjectIdx: index('story_builds_subject_idx').on(t.accountId, t.workspaceId, t.ident, t.id),
+    accountCreatedIdx: index('story_builds_account_created').on(t.accountId, t.createdAt),
+    workspaceAccountFk: foreignKey({
+      name: 'story_builds_workspace_account_fk',
+      columns: [t.workspaceId, t.accountId],
+      foreignColumns: [workspaces.id, workspaces.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+// story_build_repos — ONE row per repository in a session. Status: shared `StoryBuildRepoStatus`. The
+// worktree is LEDGERED (kind 'story_build', runId = this id) and kept for Retry / Re-run checks; the
+// patch is stored after every pass, so a swept tree is re-made from `base_sha` + `patch`.
+// `stacked_on_pr_id` carries NO FK (readers re-scope it by account).
+export const storyBuildRepos = sqliteTable(
+  'story_build_repos',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    buildId: integer('build_id').notNull(),
+    repoId: integer('repo_id').notNull(),
+    // `R1`… — the candidate ref the plan named.
+    ref: text('ref').notNull(),
+    // The plan's build order (0-based): repositories build SEQUENTIALLY in this order.
+    buildOrder: integer('build_order').notNull().default(0),
+    include: integer('include', { mode: 'boolean' }).notNull().default(true),
+    status: text('status').notNull(),
+    baseRef: text('base_ref').notNull(),
+    baseSha: text('base_sha').notNull(),
+    stackedOnPrId: integer('stacked_on_pr_id'),
+    branch: text('branch'),
+    worktreePath: text('worktree_path'),
+    patch: text('patch'),
+    filesChangedJson: text('files_changed_json', { mode: 'json' }).$type<string[]>(),
+    summary: text('summary'),
+    commitMessage: text('commit_message'),
+    changeReportJson: text('change_report_json', { mode: 'json' }).$type<AiFixChangeReport>(),
+    checksWantedJson: text('checks_wanted_json', { mode: 'json' }).$type<string[]>(),
+    checksJson: text('checks_json', { mode: 'json' }).$type<CheckRunReport>(),
+    prTitle: text('pr_title'),
+    prBody: text('pr_body'),
+    pushedBranch: text('pushed_branch'),
+    pushedPrNumber: integer('pushed_pr_number'),
+    pushedPrUrl: text('pushed_pr_url'),
+    pushedCommitSha: text('pushed_commit_sha'),
+    pushedAt: integer('pushed_at', { mode: 'timestamp' }),
+    pushError: text('push_error'),
+    provider: text('provider'),
+    model: text('model'),
+    effort: text('effort'),
+    costUsd: real('cost_usd'),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    numTurns: integer('num_turns'),
+    error: text('error'),
+    startedAt: integer('started_at', { mode: 'timestamp' }),
+    completedAt: integer('completed_at', { mode: 'timestamp' }),
+  },
+  (t) => ({
+    // The ON CONFLICT target for a session's repository rows.
+    buildRepoUx: uniqueIndex('story_build_repos_build_repo').on(t.buildId, t.repoId),
+    accountIdx: index('story_build_repos_account_idx').on(t.accountId, t.buildId),
+    buildAccountFk: foreignKey({
+      name: 'story_build_repos_build_account_fk',
+      columns: [t.buildId, t.accountId],
+      foreignColumns: [storyBuilds.id, storyBuilds.accountId],
+    }).onDelete('cascade'),
+    repoAccountFk: foreignKey({
+      name: 'story_build_repos_repo_account_fk',
+      columns: [t.repoId, t.accountId],
+      foreignColumns: [repos.id, repos.accountId],
     }).onDelete('cascade'),
   }),
 );

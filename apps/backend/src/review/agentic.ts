@@ -29,6 +29,7 @@ import { registerReferenceDocsRoutes } from '../reference-docs/routes.js';
 import { reconcileReferenceDocsOnStartup } from '../reference-docs/startup.js';
 import { registerStoryDocsRoutes } from './story-docs/routes.js';
 import { reconcileStoryDocsOnStartup } from './story-docs/manager.js';
+import { registerStoryBuildRoutes } from '../coding/story-build/routes.js';
 
 // THE AGENTIC FEATURES' ONE REGISTRATION POINT — Claude Review (run, follow-up, the chat, auto
 // review), the ticket review (one run per ticket across its PRs, + its cascade sweeper), the CI
@@ -79,6 +80,9 @@ export function registerAgenticRoutes(app: FastifyInstance): AgentContext | null
   // CHECK A STORY AGAINST THE DOCS: on a click only, a Haiku shortlist of library sections, then a
   // Sonnet read of ONLY those documents (review/story-docs/). Agentic and local-only.
   registerStoryDocsRoutes(app, ctx);
+  // IMPLEMENT STORY (coding/story-build/, docs/STORY-BUILD.md): plan a not-started sprint ticket across
+  // its repositories (read-only), build each one in its own worktree (no shell), push on a click only.
+  registerStoryBuildRoutes(app, ctx);
   return ctx;
 }
 
@@ -146,6 +150,13 @@ export async function startAgenticBackground(app: FastifyInstance): Promise<void
     await reconcileStoryDocsOnStartup(ctx);
   } catch (err) {
     app.log.warn({ err }, 'story docs: startup reconcile failed');
+  }
+  try {
+    // "Implement story": a plan pass or a build a restart cut off never stays "running".
+    const { reconcileStoryBuildsOnStartup } = await import('../coding/story-build/manager.js');
+    await reconcileStoryBuildsOnStartup(ctx);
+  } catch (err) {
+    app.log.warn({ err }, 'story builds: startup reconcile failed');
   }
   // Codex's own record of earlier runs (rows a crash or a lost retry left in Limn's Codex home): the
   // periodic sweep is armed NOW when that home exists, not only after the next Codex run.

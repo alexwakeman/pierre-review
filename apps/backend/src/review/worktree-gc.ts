@@ -13,6 +13,7 @@ import {
   decideOrphan,
   fixRowStates,
   isCacheWorktreePath,
+  storyBuildRepoStates,
   type PrState,
   type RunState,
   type WorkState,
@@ -20,6 +21,8 @@ import {
   type WorktreePolicy,
   type WorktreeRemoveReason,
 } from './worktree-gc-policy.js';
+import { isStoryBuildOpen, type StoryBuildStatus } from '@pierre-review/shared';
+import { sweepStoryBuildBaseRefs } from '../coding/story-build/base-refs.js';
 import { PROCESS_INSTANCE, recordWorktreeCreated, recordWorktreeReleased } from './worktree-ledger.js';
 
 // THE WORKTREE SWEEP (docs/BACKEND.md § Worktree cleanup).
@@ -97,6 +100,8 @@ export interface WorktreeSweepDeps {
   pruneClosedRows(before: Date): Promise<void>;
   pidAlive(pid: number): boolean;
   lock<T>(owner: string, name: string, fn: () => Promise<T>): Promise<T>;
+  /** Drop the fetch refs that pin a closed session's base commits ("Implement story"); optional for tests. */
+  sweepRefs?(): Promise<void>;
 }
 
 const emptyReport = (): WorktreeSweepReport => ({
@@ -319,6 +324,7 @@ export async function runWorktreeSweep(
   for (const p of held) heldWorktrees.add(p);
 
   await deps.pruneClosedRows(new Date(now - LEDGER_HISTORY_MS)).catch(() => {});
+  if (!report.timedOut && deps.sweepRefs) await deps.sweepRefs().catch(() => {});
   return report;
 }
 
@@ -344,6 +350,8 @@ async function dbFacts(rows: readonly LedgerRowForSweep[]): Promise<Map<number, 
   const prIds = [...new Set(rows.map((r) => r.prId).filter((id): id is number => id != null))];
   const fixIds = [...new Set(rows.filter((r) => (r.kind === 'fix' || r.kind === 'plan') && r.runId != null).map((r) => r.runId!))];
   const reviewIds = [...new Set(rows.filter((r) => r.kind === 'review' && r.runId != null).map((r) => r.runId!))];
+  // "Implement story": a plan pass's read-only checkouts (runId = story_builds.id).
+  const storyPlanIds = [...new Set(rows.filter((r) => r.kind === 'story_plan' && r.runId != null).map((r) => r.runId!))];
 
   const prState = new Map<number, PrState>();
   if (prIds.length > 0) {
@@ -370,11 +378,19 @@ async function dbFacts(rows: readonly LedgerRowForSweep[]): Promise<Map<number, 
       fixes.set(r.id, { status: r.status, planStatus: r.planStatus, pushedAt: toMs(r.pushedAt), hasPatch: (r.patchLen ?? 0) > 0 });
     }
   }
+  const storyBuildRepos = await storyBuildRepoFacts(rows);
   const reviews = new Map<number, string>();
   if (reviewIds.length > 0) {
     const c = schema.claudeReviews;
     for (const r of await db.select({ id: c.id, status: c.status }).from(c).where(inArray(c.id, reviewIds)).execute()) {
       reviews.set(r.id, r.status);
+    }
+  }
+  const storyPlans = new Map<number, string>();
+  if (storyPlanIds.length > 0) {
+    const b = schema.storyBuilds;
+    for (const r of await db.select({ id: b.id, status: b.status }).from(b).where(inArray(b.id, storyPlanIds)).execute()) {
+      storyPlans.set(r.id, r.status);
     }
   }
 
@@ -387,12 +403,45 @@ async function dbFacts(rows: readonly LedgerRowForSweep[]): Promise<Map<number, 
       // A plan is read-only: it never holds work to push. Running while its pass is.
       const fx = fixes.get(row.runId);
       runState = !fx ? 'unknown' : fx.planStatus === 'planning' || fx.status === 'running' ? 'running' : 'finished';
+    } else if (row.kind === 'story_plan' && row.runId != null) {
+      // Read-only: never holds work to push. Running while the session's assess / plan pass is.
+      const st = storyPlans.get(row.runId);
+      runState = st == null ? 'unknown' : st === 'assessing' || st === 'planning' ? 'running' : 'finished';
+    } else if (row.kind === 'story_build' && row.runId != null) {
+      ({ runState, workState } = storyBuildRepoStates(storyBuildRepos.get(row.runId) ?? null));
     } else if (row.kind === 'review' && row.runId != null) {
       const st = reviews.get(row.runId);
       runState = st == null ? 'unknown' : st === 'queued' || st === 'running' ? 'running' : 'finished';
     }
     const pr: PrState = row.prId == null ? null : (prState.get(row.prId) ?? 'gone');
     out.set(row.id, { runState, workState, prState: pr });
+  }
+  return out;
+}
+
+/** `story_build` trees: their repository rows (runId = story_build_repos.id) with the session's status. */
+async function storyBuildRepoFacts(
+  rows: readonly LedgerRowForSweep[],
+): Promise<Map<number, { status: string; sessionStatus: string | null; hasPatch: boolean; pushedAt: number | null }>> {
+  const out = new Map<number, { status: string; sessionStatus: string | null; hasPatch: boolean; pushedAt: number | null }>();
+  const ids = [...new Set(rows.filter((r) => r.kind === 'story_build' && r.runId != null).map((r) => r.runId!))];
+  if (ids.length === 0) return out;
+  const r = schema.storyBuildRepos;
+  const b = schema.storyBuilds;
+  const got = await db
+    .select({
+      id: r.id,
+      status: r.status,
+      pushedAt: r.pushedAt,
+      patchLen: sql<number | null>`length(${r.patch})`,
+      sessionStatus: b.status,
+    })
+    .from(r)
+    .leftJoin(b, and(eq(b.id, r.buildId), eq(b.accountId, r.accountId)))
+    .where(inArray(r.id, ids))
+    .execute();
+  for (const x of got) {
+    out.set(x.id, { status: x.status, sessionStatus: x.sessionStatus ?? null, hasPatch: (x.patchLen ?? 0) > 0, pushedAt: toMs(x.pushedAt) });
   }
   return out;
 }
@@ -435,7 +484,41 @@ export function dbSweepDeps(): WorktreeSweepDeps {
     },
     pidAlive,
     lock: (owner, name, fn) => withRepoLock(`${owner}/${name}`, fn),
+    sweepRefs: async () => {
+      await sweepStoryBuildBaseRefs(storyBuildRefsToKeep);
+    },
   };
+}
+
+/**
+ * Which `refs/pierre/story-build/<buildId>/<repoId>` still pin a base someone needs: the session is OPEN
+ * and, once it has repository rows, that repository is not pushed (a read-only candidate the build left
+ * out stays pinned only until the plan is accepted). Keys `buildId/repoId`.
+ */
+async function storyBuildRefsToKeep(refs: ReadonlyArray<{ buildId: number; repoId: number }>): Promise<ReadonlySet<string>> {
+  const keep = new Set<string>();
+  const buildIds = [...new Set(refs.map((r) => r.buildId))];
+  if (buildIds.length === 0) return keep;
+  const b = schema.storyBuilds;
+  const r = schema.storyBuildRepos;
+  const sessions = new Map(
+    (await db.select({ id: b.id, status: b.status }).from(b).where(inArray(b.id, buildIds)).execute()).map((x) => [x.id, x.status as StoryBuildStatus]),
+  );
+  const repoRows = await db
+    .select({ buildId: r.buildId, repoId: r.repoId, status: r.status })
+    .from(r)
+    .where(inArray(r.buildId, buildIds))
+    .execute();
+  const repoStatus = new Map(repoRows.map((x) => [`${x.buildId}/${x.repoId}`, x.status]));
+  for (const ref of refs) {
+    const status = sessions.get(ref.buildId);
+    if (status == null || !isStoryBuildOpen(status)) continue;
+    const key = `${ref.buildId}/${ref.repoId}`;
+    const rs = repoStatus.get(key);
+    if (rs == null ? status === 'building' || status === 'ready' : rs === 'pushed') continue;
+    keep.add(key);
+  }
+  return keep;
 }
 
 // ---- Scheduling: one sweep at a time; a run's kick is throttled ----

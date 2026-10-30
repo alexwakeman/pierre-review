@@ -17,6 +17,7 @@ import { BotFlaggingDetail } from './components/Activity/BotFlaggingDetail.js';
 import { BotVolumeDetail } from './components/Activity/BotVolumeDetail.js';
 import { UserActivityDetail } from './components/Activity/UserActivityDetail.js';
 import { TicketTabView } from './components/Ticket/TicketTabView.js';
+import { StoryBuildTabView } from './components/StoryBuild/StoryBuildTabView.js';
 import { BotDetailPanel } from './components/Activity/BotDetailPanel.js';
 import { ThemeThreadsDetail } from './components/Activity/ThemeThreadsDetail.js';
 import { SearchResultsTab } from './components/Search/SearchResultsTab.js';
@@ -148,6 +149,7 @@ export default function App(): JSX.Element {
   const userActivityActive = activeTabObj?.kind === 'user-activity';
   const botDetailActive = activeTabObj?.kind === 'bot-detail';
   const ticketActive = activeTabObj?.kind === 'ticket';
+  const storyBuildActive = activeTabObj?.kind === 'story-build';
   // null = the full board. The ONE resolver the FilterBar also reads (store/pinnedTabs.ts), so the
   // bar's Focus controls and this slot can never disagree about a stale key.
   const boardMode: TimelineMode | null = boardSlotMode(activeTab, tabs);
@@ -174,7 +176,8 @@ export default function App(): JSX.Element {
     searchActive ||
     userActivityActive ||
     botDetailActive ||
-    ticketActive;
+    ticketActive ||
+    storyBuildActive;
   // The detail pane is shown at the bottom of a PR FOCUS tab's Timeline (the tab's own PR is
   // selected). The SHARED board has no pane: a bar click opens the PR popover there
   // (components/Timeline/PrPopover.tsx), whose "Open details" opens the PR's own tab.
@@ -502,6 +505,17 @@ export default function App(): JSX.Element {
                 className="absolute inset-0 z-20 overflow-auto bg-ui-bg"
               >
                 <TicketTabView />
+              </div>
+            )}
+            {/* One ticket's "Implement story" session (the build tab) — a sibling full-main overlay.
+                Keyed on the tab so switching between two tickets' builds remounts the view. */}
+            {storyBuildActive && (
+              <div
+                key={activeTab}
+                data-testid="story-build-overlay"
+                className="absolute inset-0 z-20 overflow-auto bg-ui-bg"
+              >
+                <StoryBuildTabView />
               </div>
             )}
             {/* Cross-repo search results (scoped to the active workspace) — a sibling full-main

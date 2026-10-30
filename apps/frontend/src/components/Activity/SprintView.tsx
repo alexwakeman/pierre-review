@@ -4,16 +4,18 @@ import {
   SPRINT_GHOST_MAX,
   SPRINT_TICKETS_MAX,
   sprintSourceTitle,
+  storyBuildOffered,
   type SprintGraphNode,
   type SprintGraphResponse,
   type SprintRefreshTicketChecks,
 } from '@pierre-review/shared';
 import { useSprintAiOn, useSprintChangeToken, useSprintGraph, useSprintRefresh, useSprintRefreshing } from '../../hooks/useSprintStories.js';
 import { StoryOpenOverride, useOpenStory, type OpenStoryArgs } from '../../lib/ticketTab.js';
+import { useOpenStoryBuild } from '../../lib/storyBuildTab.js';
 import { ticketKeyOfIdent } from '../../store/pinnedTabs.js';
 import type { SprintBoardView } from '../../lib/laneBoard.js';
 import { useFilters } from '../../store/filters.js';
-import { FilterIcon, GearIcon, RefreshIcon, SparkleIcon, TicketIcon, WarningIcon } from '../Icons.js';
+import { BuildIcon, FilterIcon, GearIcon, RefreshIcon, SparkleIcon, TicketIcon, WarningIcon } from '../Icons.js';
 import { Button } from '../ui/Button.js';
 import { useRegisterCommands, type Command } from '../ui/commands.js';
 import { useSprintBoardFilter } from '../../store/sprintBoardFilter.js';
@@ -26,7 +28,7 @@ import { pathsWriting, sprintDatesLine, sprintProgress } from './sprintPathsMode
 import { SprintStatusSettings } from './SprintStatusSettings.js';
 import { SprintTrackerSetup } from '../Sprint/SprintTrackerSetup.js';
 import { SprintStoryTray } from '../Sprint/SprintStoryTray.js';
-import { useAiProviderName } from '../../hooks/useAiCapabilities.js';
+import { useAiCapabilities, useAiProviderName } from '../../hooks/useAiCapabilities.js';
 
 // This Sprint (a fixed tab, FREE) — THE SPRINT (GET /api/sprint-graph; the route keeps its name):
 // the toolbar (title + ⓘ, dates, Ask Claude, the status buckets behind the gear, Refresh), the page's
@@ -133,9 +135,18 @@ export function SprintView({ view }: { view: SprintBoardView }): JSX.Element {
   const trayId = useId();
   const showInTray = useCallback((t: OpenStoryArgs): void => setTray(t.ident), [setTray]);
   const select = useCallback((n: SprintGraphNode): void => setTray(n.ident), [setTray]);
+  // "Implement story" (docs/STORY-BUILD.md): the card's build button and mark open the build tab — ONLY
+  // with AI on (owner decision 4; which cards offer it is shared `storyBuildOffered`).
+  const openBuild = useOpenStoryBuild();
+  const aiOn = useAiCapabilities().enabled;
+  const buildsOn = aiOn && data?.aiEnabled === true;
+  const implement = useCallback(
+    (n: SprintGraphNode): void => openBuild({ ident: n.ident, key: n.key, title: n.title !== '' ? n.title : null }),
+    [openBuild],
+  );
   const actions = useMemo<SprintCardActions>(
-    () => ({ onSelect: select, onOpen: open, selectedIdent: trayIdent, trayId }),
-    [select, open, trayIdent, trayId],
+    () => ({ onSelect: select, onOpen: open, onImplement: buildsOn ? implement : undefined, selectedIdent: trayIdent, trayId }),
+    [select, open, buildsOn, implement, trayIdent, trayId],
   );
   const trayNode = trayIdent != null ? data?.nodes.find((n) => n.ident === trayIdent) : undefined;
 
@@ -176,6 +187,7 @@ export function SprintView({ view }: { view: SprintBoardView }): JSX.Element {
       onStatuses={() => setSettingsOpen((o) => !o)}
       onRefresh={refreshDisabled ? null : startRefresh}
       onShowStory={select}
+      onImplement={buildsOn ? implement : null}
     />
     <div className="flex items-start gap-4">
     <div data-testid="sprint-view" data-view={view} className="min-w-0 flex-1 space-y-4">
@@ -300,6 +312,7 @@ function SprintCommands({
   onStatuses,
   onRefresh,
   onShowStory,
+  onImplement,
 }: {
   nodes: readonly SprintGraphNode[];
   aiName: string;
@@ -311,13 +324,16 @@ function SprintCommands({
   /** null while a read is already running. */
   onRefresh: (() => void) | null;
   onShowStory: (n: SprintGraphNode) => void;
+  /** Open a ticket's build tab; null while AI is off. */
+  onImplement: ((n: SprintGraphNode) => void) | null;
 }): null {
   const filter = useSprintBoardFilter((s) => s.filter);
   const toggle = useSprintBoardFilter((s) => s.toggle);
   // The parent's handlers are fresh closures every render; the commands call the latest through a ref
   // so the list re-registers only when what it SAYS changes.
-  const live = useRef({ onAsk, onStatuses, onRefresh, onShowStory });
-  live.current = { onAsk, onStatuses, onRefresh, onShowStory };
+  const live = useRef({ onAsk, onStatuses, onRefresh, onShowStory, onImplement });
+  live.current = { onAsk, onStatuses, onRefresh, onShowStory, onImplement };
+  const canImplement = onImplement != null;
   const canRefresh = onRefresh != null;
   const commands = useMemo<Command[]>(() => {
     const out: Command[] = [];
@@ -365,6 +381,20 @@ function SprintCommands({
         run: () => toggle('needsCode'),
       },
     );
+    // "Implement KEY · title": the SAME tickets the card offers it on (owner decision 4 — a sprint
+    // ticket, Not started, no pull request, no open session), only while this board is open.
+    if (canImplement)
+      for (const n of nodes) {
+        if (!storyBuildOffered(n)) continue;
+        out.push({
+          id: `implement:${n.ident}`,
+          group: 'Actions',
+          title: n.title !== '' ? `Implement ${n.key} · ${n.title}` : `Implement ${n.key}`,
+          keywords: ['build', 'story', 'code', 'implement'],
+          icon: <BuildIcon size={14} />,
+          run: () => live.current.onImplement?.(n),
+        });
+      }
     for (const n of nodes) {
       out.push({
         id: `ticket:${n.ident}`,
@@ -377,7 +407,7 @@ function SprintCommands({
       });
     }
     return out;
-  }, [nodes, aiName, showAsk, askOpen, statusesOpen, canRefresh, filter, toggle]);
+  }, [nodes, aiName, showAsk, askOpen, statusesOpen, canRefresh, canImplement, filter, toggle]);
   useRegisterCommands('sprint-board', commands);
   return null;
 }
@@ -421,6 +451,11 @@ function BoardInfo({ name }: { name: string }): JSX.Element {
           <strong>Marks</strong>: the route mark beside a key is a ticket on a critical path; the hourglass is a ticket waiting
           on another unfinished ticket; a card sunk into the page is outside the sprint. The pull-request mark before the key is a
           ticket with an open or merged pull request, and those tickets come first in each cell. The key under each board names them.
+        </li>
+        <li>
+          <strong>Implement</strong>: a not-started ticket with no pull request has a hammer button in its corner. It opens a build tab
+          where {name} plans the change and, once you accept the plan, writes it. Nothing is pushed until you press Push. A ticket with a
+          build open says how far it got beside its key.
         </li>
         <li>
           <strong>Names</strong>: Critical path and Theme show who each ticket is assigned to; People shows its theme there

@@ -174,6 +174,59 @@ const VIEWS = [
     },
   ],
   ['ticket:INFRA-260', `?view=${ident('INFRA-260')}`, null],
+  // "Implement story" (docs/STORY-BUILD.md): the sprint board's entry points (the Implement button on a
+  // not-started ticket with no session, the build marks on the two with one), the ready two-repository
+  // build (acme/api pushed as a draft, acme/web-app ready with a failing check), the plan waiting for
+  // Accept with its design, chat and docs, and the start state of a ticket with no session.
+  [
+    'sprint:implement',
+    '?view=sprint&sprintTab=themes',
+    null,
+    {
+      act: async (page) => {
+        // The corner build button is revealed on hover; attached is what counts.
+        await page.locator('[aria-label="Implement PLAT-318"]').first().waitFor({ state: 'attached', timeout: 10_000 });
+        await page.locator('[aria-label="Open PLAT-310\'s build: Ready to push"]').first().waitFor({ state: 'attached', timeout: 10_000 });
+        await page.locator('[aria-label="Open PLAT-312\'s build: Plan ready"]').first().waitFor({ state: 'attached', timeout: 10_000 });
+      },
+      expect: ['Ready to push', 'Plan ready'],
+    },
+  ],
+  [
+    'story-build:PLAT-310',
+    `?view=${encodeURIComponent('story-build:jira:https://acme.atlassian.net#PLAT-310')}`,
+    'story-build',
+    { expect: ['Plan', 'Build', 'acme/api', 'acme/web-app', 'Pushed', 'Ready to push', 'Tests: 4 passed, 1 failed', 'pre-commit hook'] },
+  ],
+  [
+    'story-build:PLAT-310:diff',
+    `?view=${encodeURIComponent('story-build:jira:https://acme.atlassian.net#PLAT-310')}`,
+    null,
+    {
+      act: async (page) => {
+        await page.locator('[data-testid="story-build-repo"][data-repo="acme/web-app"]').getByTestId('story-build-diff-toggle').click();
+        await page.getByTestId('story-build-diff').first().waitFor({ timeout: 10_000 });
+      },
+      expect: ['Paused until'],
+    },
+  ],
+  [
+    'story-build:PLAT-312',
+    `?view=${encodeURIComponent('story-build:jira:https://acme.atlassian.net#PLAT-312')}`,
+    'story-build-plan',
+    {
+      expect: [
+        'Accept plan and build',
+        'acme/api',
+        'Leave the load balancer check alone.',
+        'Suggestions from the docs (2)',
+        'This story changes the docs (1)',
+        'Grounded in the docs (2)',
+        'aren’t in the plan yet',
+      ],
+    },
+  ],
+  ['story-build:PLAT-318', `?view=${encodeURIComponent('story-build:jira:https://acme.atlassian.net#PLAT-318')}`, null, { expect: ['Draw a design', 'Start'] }],
   ['timeline', '?view=timeline&preset=30d', 'timeline'],
   ...[113, 114, 105, 116].flatMap((id) =>
     ['overview', 'comments', 'changes', 'claude_review', 'ai_fix'].map((t) => [

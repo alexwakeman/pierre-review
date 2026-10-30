@@ -25,6 +25,11 @@ export type WorktreeKind =
   | 'diagram'
   | 'merge'
   | 'resolve'
+  // "Implement story" (docs/STORY-BUILD.md): TWO kinds, so a runId names ONE table — the plan pass's
+  // read-only checkouts ('story_plan', runId = story_builds.id) and each repository's KEPT write worktree
+  // ('story_build', runId = story_build_repos.id).
+  | 'story_plan'
+  | 'story_build'
   | 'other';
 
 export interface WorktreeOwner {
@@ -33,7 +38,8 @@ export interface WorktreeOwner {
   prId?: number | null;
   /** A ticket review's / diagram's ticket ident. */
   ticket?: string | null;
-  /** The owning run's row id (ai_fixes for 'fix' / 'plan', claude_reviews for 'review'). */
+  /** The owning run's row id (ai_fixes for 'fix' / 'plan', claude_reviews for 'review', story_build_repos
+   *  for 'story_build', story_builds for 'story_plan'). */
   runId?: number | null;
 }
 

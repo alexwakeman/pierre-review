@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { AiFix, AiFixCheckResult, AiFixChecks, AiFixChecksPreview } from '@pierre-review/shared';
+import type { AiFixCheckResult, AiFixChecks, AiFixChecksPreview, CheckRunReport } from '@pierre-review/shared';
 import { useAiFixChecks } from '../../hooks/useAiFix.js';
 import { CheckCircleIcon, ChevronIcon, PendingBuildFailedIcon, SkipIcon, TimerIcon, WarningIcon } from '../Icons.js';
 import { InfoButton } from '../InfoModal.js';
@@ -13,7 +13,7 @@ import { StatusIcon, type StatusTone } from '../ui/StatusIcon.js';
 // ---- the picker ----------------------------------------------------------------------------------
 
 /** The reader's last choice per repository (local only): Run tests on/off and their ticks. */
-interface RunTestsMemory {
+export interface RunTestsMemory {
   on: boolean;
   ticks: Record<string, boolean>;
 }
@@ -44,18 +44,39 @@ export function pickedCheckNames(preview: AiFixChecksPreview | undefined, on: bo
   return preview.checks.filter((c) => c.refused == null && (ticks[c.name] ?? c.defaultOn)).map((c) => c.name);
 }
 
-/**
- * The "Run tests" state for one PR's picker: whether it is on, the ticks, and the names to send.
- * The checks list is fetched only once the box is ticked (one GitHub read).
- */
-export function useRunTests(prId: number, repoFullName: string) {
+/** What the picker reads: the checks list query (any source — a PR's head, a build repository's base). */
+export interface RunTestsQuery {
+  data: AiFixChecksPreview | undefined;
+  isLoading: boolean;
+  isError: boolean;
+}
+
+/** The "Run tests" state a picker renders: on/off, the ticks, the list, and the names to send. */
+export interface RunTestsState {
+  on: boolean;
+  setOn: (on: boolean) => void;
+  ticks: Record<string, boolean>;
+  setTick: (name: string, value: boolean) => void;
+  query: RunTestsQuery;
+  names: string[];
+}
+
+/** The reader's remembered choice for one repository (local only). */
+export function useRunTestsMemory(repoFullName: string): { memory: RunTestsMemory; update: (m: RunTestsMemory) => void } {
   const [memory, setMemory] = useState<RunTestsMemory>(() => readMemory(repoFullName));
   useEffect(() => setMemory(readMemory(repoFullName)), [repoFullName]);
   const update = (m: RunTestsMemory): void => {
     setMemory(m);
     writeMemory(repoFullName, m);
   };
-  const query = useAiFixChecks(prId, memory.on);
+  return { memory, update };
+}
+
+/** The picker state from the remembered choice and ITS checks query (the query is enabled only while
+ *  the box is ticked — the caller passes `memory.on` as its `enabled`). Shared by AI Fix and the story
+ *  build's repository cards. */
+export function runTestsState(m: { memory: RunTestsMemory; update: (m: RunTestsMemory) => void }, query: RunTestsQuery): RunTestsState {
+  const { memory, update } = m;
   return {
     on: memory.on,
     setOn: (on: boolean) => update({ ...memory, on }),
@@ -66,7 +87,17 @@ export function useRunTests(prId: number, repoFullName: string) {
   };
 }
 
-export function RunTestsOption({ state, disabled }: { state: ReturnType<typeof useRunTests>; disabled: boolean }): JSX.Element {
+/**
+ * The "Run tests" state for one PR's picker: whether it is on, the ticks, and the names to send.
+ * The checks list is fetched only once the box is ticked (one GitHub read).
+ */
+export function useRunTests(prId: number, repoFullName: string): RunTestsState {
+  const m = useRunTestsMemory(repoFullName);
+  const query = useAiFixChecks(prId, m.memory.on);
+  return runTestsState(m, query);
+}
+
+export function RunTestsOption({ state, disabled }: { state: RunTestsState; disabled: boolean }): JSX.Element {
   const { on, setOn, ticks, setTick, query } = state;
   const preview = query.data;
   return (
@@ -213,15 +244,16 @@ export function checksStatusLine(checks: AiFixChecks | null | undefined): { text
   return { text: `Tests: ${passed} passed, ${bad} failed`, tone: 'blocked' };
 }
 
-export function ChecksStatus({ fix }: { fix: AiFix }): JSX.Element | null {
-  const line = checksStatusLine(fix.checks);
+/** The one-line status beside Push. Takes a run's `CheckRunReport` (an AI Fix, a story build repository). */
+export function ChecksStatus({ checks }: { checks: CheckRunReport | null | undefined }): JSX.Element | null {
+  const line = checksStatusLine(checks);
   if (!line) return null;
   const look = line.tone === 'ready' ? <CheckCircleIcon /> : line.tone === 'blocked' ? <PendingBuildFailedIcon /> : <SkipIcon />;
   return <StatusIcon tone={line.tone} icon={look} label={line.text} className="text-meta" />;
 }
 
-export function ChecksReport({ fix }: { fix: AiFix }): JSX.Element | null {
-  const checks = fix.checks;
+/** The finished run's results. Takes a run's `CheckRunReport` (an AI Fix, a story build repository). */
+export function ChecksReport({ checks }: { checks: CheckRunReport | null | undefined }): JSX.Element | null {
   const [installOpen, setInstallOpen] = useState(false);
   if (!checks) return null;
   const installFailed = checks.install.some((r) => r.status !== 'passed' && r.status !== 'skipped');

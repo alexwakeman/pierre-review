@@ -183,7 +183,12 @@ kill or a failed `git worktree remove` leaves a full checkout behind. Two pieces
   policy, read the header). Keep: in use by a job in this process (`liveWorktrees` — identity,
   never age); made by another LIVE Limn process and not idle (`WORKTREE_IDLE_DAYS`, 3); holding a
   fix the reader has not pushed (`ai_fixes` succeeded with a patch, not pushed — kept until pushed
-  or discarded, at most `WORKTREE_PIN_DAYS`, 14). Remove: PR merged / closed / gone; the run let go;
+  or discarded, at most `WORKTREE_PIN_DAYS`, 14), or a story build's repository the reader has not
+  pushed. "Implement story" ledgers two kinds: `story_plan` (the plan pass's read-only checkouts,
+  runId = `story_builds.id`; running while the session is `assessing` / `planning`, never holding
+  work) and `story_build` (each repository's KEPT write tree, runId = `story_build_repos.id`: kept
+  while `ready` with a patch — `storyBuildRepoStates`; docs/STORY-BUILD.md § The builder). Remove:
+  PR merged / closed / gone; the run let go;
   the run's row is over; the creating process has exited; idle. A directory with NO ledger row
   (older builds, a failed write) goes after `WORKTREE_TTL_HOURS` (6) by its mtime. Removal is
   `git worktree remove --force` under the repo lock, an rm of what is left, then one `git worktree

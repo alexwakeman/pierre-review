@@ -15,6 +15,11 @@ import {
   type NotionPropertyInfo,
   type NotionSchemaResponse,
   type NotionTrackerMapping,
+  type StoryBuildActionResponse,
+  type StoryBuildCancelResponse,
+  type StoryBuildDocsDecisionsResponse,
+  type StoryBuildDocsResponse,
+  type StoryBuildPushResponse,
 } from '@pierre-review/shared';
 import { normalisePath } from './recording.js';
 import type { DemoReply, DemoRequest, DemoRoute, DemoServer } from './server.js';
@@ -892,6 +897,45 @@ export const ROUTES: DemoRoute[] = [
   },
 
   // Claude Review: edits, posting and the chat. (Starting runs lives in ./runs.ts.)
+  // "Implement story" (docs/STORY-BUILD.md). The recorded sessions are read as recorded; every write
+  // is INERT: nothing is planned, built or pushed in the demo, and every answer names the SAME session
+  // (the SPA re-reads it and finds it unchanged). Start on a ticket with a recorded open session answers
+  // that session (`already_open`); a pass (chat, Accept, Retry) answers its 202 shape with the session's
+  // id; the docs run answers `current`; a push answers each repository "skipped" with the reason; the docs
+  // ticks are kept in memory (read back through `patchRecordedGet`); Cancel and Discard change nothing.
+  // The SSE stream is never recorded: an unrecorded stream simply ends (server.ts).
+  { method: 'POST', re: /^\/api\/story-builds$/, run: (req, _m, srv) => startStoryBuild(srv, bodyRecord(req)) },
+  {
+    method: 'POST',
+    re: /^\/api\/story-builds\/(\d+)\/(?:plan\/message|accept|repos\/\d+\/retry)$/,
+    run: (_req, m) => ({ status: 202, body: { buildId: Number(m[1]) } satisfies StoryBuildActionResponse }),
+  },
+  {
+    method: 'POST',
+    re: /^\/api\/story-builds\/(\d+)\/docs$/,
+    run: (_req, m) => OK({ outcome: 'current', buildId: Number(m[1]), message: null } satisfies StoryBuildDocsResponse),
+  },
+  {
+    method: 'POST',
+    re: /^\/api\/story-builds\/(\d+)\/(?:repos\/(\d+)\/)?push$/,
+    run: (_req, m, srv) => pushStoryBuild(srv, Number(m[1]), m[2] != null ? Number(m[2]) : null),
+  },
+  { method: 'POST', re: /^\/api\/story-builds\/\d+\/cancel$/, run: () => OK({ status: 'idle' } satisfies StoryBuildCancelResponse) },
+  { method: 'POST', re: /^\/api\/story-builds\/\d+\/discard$/, run: () => notInDemo() },
+  {
+    method: 'PUT',
+    re: /^\/api\/story-builds\/(\d+)\/docs\/decisions$/,
+    run: (req, m, srv) => {
+      const id = Number(m[1]);
+      const asked = isRecord(bodyRecord(req).decisions) ? (bodyRecord(req).decisions as Record<string, unknown>) : {};
+      const prev = srv.overlay.stored.get(storyBuildDecisionsKey(id));
+      const merged = { ...(isRecord(prev) ? prev : {}), ...asked };
+      srv.overlay.stored.set(storyBuildDecisionsKey(id), merged);
+      const b = recordedStoryBuilds(srv).find((x) => x.id === id);
+      const decisions = { ...(isRecord(b) && isRecord(b.docsDecisions) ? b.docsDecisions : {}), ...merged } as StoryBuildDocsDecisionsResponse['decisions'];
+      return OK({ decisions } satisfies StoryBuildDocsDecisionsResponse);
+    },
+  },
   { method: 'PATCH', re: /^\/api\/claude-reviews\/\d+$/, run: () => OK({ status: 'ok' }) },
   { method: 'PATCH', re: /^\/api\/claude-findings\/\d+$/, run: () => OK({ status: 'ok' }) },
   { method: 'POST', re: /^\/api\/claude-findings\/\d+\/post$/, run: (req, _m, srv) => OK({ githubCommentId: String(srv.nextId()), postedAt: srv.nowIso(), ...(bodyRecord(req).reminder ? { reminder: true } : {}) }) },
@@ -1250,6 +1294,52 @@ function findReviewer(srv: DemoServer, userId: number): Record<string, unknown> 
   return null;
 }
 
+// ── "Implement story" ─────────────────────────────────────────────────────────────────────────
+
+const storyBuildDecisionsKey = (id: number): string => `story-build-docs:${id}`;
+
+/** Every recorded session, from the per-ticket reads and the per-id reads. */
+function recordedStoryBuilds(srv: DemoServer): Array<Record<string, unknown>> {
+  const out: Array<Record<string, unknown>> = [];
+  for (const g of srv.recordedGets(/^\/api\/story-builds$/)) {
+    if (isRecord(g.body) && isRecord(g.body.build)) out.push(g.body.build);
+  }
+  for (const g of srv.recordedGets(/^\/api\/story-builds\/\d+$/)) {
+    if (isRecord(g.body)) out.push(g.body);
+  }
+  return out;
+}
+
+const OPEN_STATUSES = new Set(['assessing', 'planning', 'plan_ready', 'building', 'ready']);
+
+function startStoryBuild(srv: DemoServer, body: Record<string, unknown>): DemoReply {
+  const open = recordedStoryBuilds(srv).find((b) => b.ident === body.ident && OPEN_STATUSES.has(String(b.status)));
+  return open != null && typeof open.id === 'number' ? OK({ outcome: 'already_open', buildId: open.id }) : notInDemo();
+}
+
+/** Push answers every repository it names as skipped: nothing leaves the demo. */
+function pushStoryBuild(srv: DemoServer, id: number, repoId: number | null): DemoReply {
+  const b = recordedStoryBuilds(srv).find((x) => x.id === id);
+  const repos = isRecord(b) && Array.isArray(b.repos) ? b.repos.filter(isRecord) : [];
+  const named = repos.filter((r) => (repoId != null ? r.repoId === repoId : r.include === true && r.status === 'ready'));
+  return OK({
+    results: named.map((r) => ({
+      repoId: Number(r.repoId),
+      outcome: 'skipped' as const,
+      prNumber: null,
+      prUrl: null,
+      code: null,
+      error: 'Nothing is pushed from the demo.',
+    })),
+  } satisfies StoryBuildPushResponse);
+}
+
+/** A session read with the docs ticks this visit made. */
+function patchStoryBuild(srv: DemoServer, build: Record<string, unknown>): Record<string, unknown> {
+  const stored = typeof build.id === 'number' ? srv.overlay.stored.get(storyBuildDecisionsKey(build.id)) : undefined;
+  return isRecord(stored) ? { ...build, docsDecisions: { ...(isRecord(build.docsDecisions) ? build.docsDecisions : {}), ...stored } } : build;
+}
+
 // ── fallbacks for GETs the recording does not have ───────────────────────────────────────────
 // Only shapes that are small and fully known; everything else answers 404 "Not available in the
 // demo", which every query already handles as an error state.
@@ -1287,6 +1377,14 @@ export const GET_FALLBACKS: DemoRoute[] = [
     re: /^\/api\/pro\/prs\/(\d+)\/ai-fix\/checks$/,
     run: () => OK(DEMO_CHECKS_PREVIEW),
   },
+  // "Implement story": a ticket the recorder never opened has no session (the build tab's start
+  // state), and "Run tests" lists the demo project's checks.
+  {
+    method: 'GET',
+    re: /^\/api\/story-builds$/,
+    run: (req) => OK({ workspaceId: Number(req.query.get('workspace') ?? 0), build: null, earlier: [] }),
+  },
+  { method: 'GET', re: /^\/api\/story-builds\/\d+\/repos\/\d+\/checks$/, run: () => OK(DEMO_CHECKS_PREVIEW) },
   { method: 'GET', re: /^\/api\/prs\/(\d+)\/mention-candidates$/, run: (_r, _m, srv) => OK(srv.recorded('GET', '/api/users') ?? []) },
   { method: 'GET', re: /^\/api\/prs\/(\d+)\/suggested-reviewers$/, run: () => OK({ suggestedReviewers: [], users: [] }) },
   { method: 'GET', re: /^\/api\/prs\/(\d+)\/ml-labels$/, run: (_r, m, srv) => OK({ prId: Number(m[1]), labels: [], generatedAt: srv.nowIso() }) },
@@ -1322,6 +1420,8 @@ export function patchRecordedGet(req: DemoRequest, body: unknown, srv: DemoServe
     return { ...body, prs };
   }
 
+  if (p === '/api/story-builds' && isRecord(body) && isRecord(body.build)) return { ...body, build: patchStoryBuild(srv, body.build) };
+  if (/^\/api\/story-builds\/\d+$/.test(p) && isRecord(body)) return patchStoryBuild(srv, body);
   if (p === '/api/attention' && isRecord(body)) return patchAttention(srv, body).body;
   if (p === '/api/my-turn' && isRecord(body)) return patchMyTurn(srv, body);
   if (p === '/api/daily-brief' && isRecord(body)) return patchDailyBrief(srv, body);

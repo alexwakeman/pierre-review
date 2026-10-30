@@ -729,6 +729,10 @@ the sprint brief / story passes (above).
 
 ## Check a story against the docs (`review/story-docs/`; migration `0121`)
 
+> **Its `build` mode** ("Implement story" → docs consideration: `submit_build_docs`, `build-prompts.ts`,
+> `build-validate.ts`) is the same read weighed against a story build's PLAN, where THE STORY WINS. It stores on
+> the build's own row, never here: [STORY-BUILD.md § Docs consideration](STORY-BUILD.md#docs-consideration-wp3).
+
 A per-story button in the Story section (Open PRs ticket stack and the story view). MANUAL ONLY — never
 automatic, never on view. `registerAgenticRoutes` registers the two routes (docs/API.md
 § Check a story against the docs). Contract: `packages/shared/src/story-docs-alignment.ts`.

@@ -202,6 +202,26 @@ use it): `openCheckSession` → `agentTool()` / `verify()` / `runHook()` / `rest
   per-run `core.excludesFile` (known output names + every path that appeared during Limn's own
   install / final run). Tracked files are never excluded; the reader sees the diff before Push.
 
+### Implement story — an untrusted spec driving a WRITE agent (`coding/story-build/`, WP2)
+
+The build agent (`story_build`) writes code from a ticket, its comments, other people's PR cards and the
+docs — all attacker-reachable text. Its boundary, beside the fences and the prompt's rules:
+- **No shell, ever** (`STORY_BUILD_TOOLS`; `Bash` and `NotebookEdit` denied outright; `buildInWorktree`
+  refuses a deny list without Bash). "Run tests" is the sandboxed checks above, by NAME.
+- **The path guard**: writes only in its own worktree; the earlier repositories' worktrees and the
+  library are READ-ONLY roots.
+- **THE WRITE DENY-LIST** (`review/write-deny.ts`, `AgentRunSpec.protectWrites`): no write to CI and
+  automation config, git's own files (`.git*`), hook managers, package-manager config, lockfiles or agent
+  settings (`.claude/`, `CLAUDE.md`, `AGENTS.md` …), at any depth, judged as named AND with symlinks
+  followed. Claude enforces it as a PreToolUse hook; Codex in its guard process (`GuardRoots.protect`,
+  inside the ALLOW-list). A workflow or a hook the agent could write would run on GitHub or on the next
+  person's commit. Names compare case-insensitively, and the rule runs again on the captured result
+  (checks and the pre-commit hook are repository code in the same tree).
+- **Text it writes to GitHub is quoted, never obeyed**: `push.ts defangGithubText` breaks closing
+  keywords before an issue reference and `@mentions` in the PR body and commit message.
+- **Nothing reaches GitHub until the reader presses Push**: a NEW branch, never forced, the default branch
+  and a stacked PR's head protected, a DRAFT PR by default. Rate tier `github_write` (C0).
+
 **The local clone cache (`~/.limn/clones`) — five fixes, and the standing invariant.**
 The AI-Fix agent, Claude Review and now the merge-conflict resolver all work inside this cache, so
 it went from a corner to a hot path and was hardened before the resolver was allowed to multiply the

@@ -2,6 +2,7 @@ import { and, eq } from 'drizzle-orm';
 import { getAccessToken, getAccountById } from '../auth/account.js';
 import {
   cleanupCloneCache,
+  prepBranchWorktree,
   prepWorktree,
   removeWorktreeLocked,
 } from '../review/clone-manager.js';
@@ -20,6 +21,7 @@ import type {
 } from '../platform/contract.js';
 import {
   applyPatchToWorktree,
+  assertPushTarget,
   codedError,
   commitAll,
   pushRef,
@@ -255,6 +257,110 @@ export async function applyAndPush(
       await removeWorktreeLocked(owner, name, repoCloneDir, worktreePath).catch(
         () => {},
       );
+    }
+    if (repoCloneDir) {
+      setImmediate(() => {
+        try {
+          cleanupCloneCache();
+        } catch {
+          /* advisory cleanup — never surface */
+        }
+      });
+    }
+  }
+}
+
+export interface ApplyAndPushBranchArgs {
+  accountId: number;
+  owner: string;
+  name: string;
+  /** The commit the patch was built on, and the branch it was read from (for the fetch). */
+  baseSha: string;
+  baseRef: string;
+  patch: string;
+  commitMessage: string;
+  /** The NEW branch (never an existing one: `BRANCH_EXISTS`). */
+  branch: string;
+  /** The branch the new PR targets (the default branch, or the stacked PR's head branch). */
+  prBase: string;
+  title: string;
+  body: string;
+  draft: boolean;
+  /** Branch names this push must never land on (the default branch, a stacked PR's head). */
+  protect: string[];
+  /** Runs once the new PR has synced (it is a local row then); never awaited, a throw is swallowed. */
+  afterSync?: (prNumber: number) => Promise<void>;
+}
+
+/**
+ * THE NO-PR VARIANT of `applyAndPush` (a story build's push, coding/story-build/push.ts): the same
+ * stateless steps — a FRESH worktree at `baseSha` (`prepBranchWorktree`, no PR to fetch), the stored
+ * patch applied, ONE commit by the reader, pushed to a NEW branch (refused with `BRANCH_EXISTS` when
+ * it is live; never forced; `protect` refused before any process runs), then a PR opened against
+ * `prBase` — as a DRAFT when `draft`. The new PR is synced in the background (`syncNewPrInRepo`, never
+ * rejects); after the push lands nothing here throws.
+ */
+export async function applyAndPushBranch(
+  args: ApplyAndPushBranchArgs,
+): Promise<{ pushedBranch: string; commitSha: string; prNumber: number; prUrl: string }> {
+  const { accountId, owner, name } = args;
+  const token = await getAccessToken(accountId);
+  const account = await getAccountById(accountId);
+  const authorName = account?.displayName || account?.githubLogin || 'pierre-review';
+  const authorEmail = account?.githubLogin
+    ? `${account.githubLogin}@users.noreply.github.com`
+    : 'pierre-review@users.noreply.github.com';
+
+  // The name is the reader's (or the plan's slug): git's own check and the protected names FIRST, before
+  // it is spelled into a GitHub URL — each segment encoded (`#`, `%` and the like are valid in a ref).
+  await assertPushTarget(args.branch, args.protect);
+  const refPath = args.branch.split('/').map(encodeURIComponent).join('/');
+  const existing = await ghRestGetText(token, `/repos/${owner}/${name}/git/ref/heads/${refPath}`);
+  if (existing.ok) {
+    throw codedError('BRANCH_EXISTS', `branch ${args.branch} already exists on ${owner}/${name}`);
+  }
+
+  let repoCloneDir: string | null = null;
+  let worktreePath: string | null = null;
+  try {
+    ({ repoCloneDir, worktreePath } = await prepBranchWorktree(
+      owner,
+      name,
+      { remoteRef: `refs/heads/${args.baseRef}`, destRef: 'refs/pierre/story-build-base', sha: args.baseSha },
+      token,
+    ));
+    await applyPatchToWorktree(worktreePath, args.patch);
+    const commitSha = await commitAll(worktreePath, { message: args.commitMessage, authorName, authorEmail });
+    await pushRef({ worktree: worktreePath, owner, name, token, committish: 'HEAD', protect: args.protect, remoteBranch: args.branch });
+    let pr: { number: number; url: string };
+    try {
+      pr = await createPullRequest(token, {
+        owner,
+        name,
+        head: args.branch,
+        base: args.prBase,
+        title: args.title,
+        body: args.body,
+        draft: args.draft,
+      });
+    } catch (err) {
+      // The branch IS on GitHub: say so, so nobody presses Push again into BRANCH_EXISTS.
+      const e = new Error(
+        `The branch ${args.branch} was pushed, but GitHub did not open the pull request (${err instanceof Error ? err.message : String(err)}). Open it on GitHub.`,
+      ) as Error & { code: string; commitSha: string };
+      e.code = 'PR_NOT_OPENED';
+      e.commitSha = commitSha;
+      throw e;
+    }
+    // ── The PR exists: nothing below may throw. Synced in the background (see applyAndPush). ──
+    const opened = pr.number;
+    void syncNewPrInRepo(accountId, owner, name, opened)
+      .then(() => args.afterSync?.(opened))
+      .catch(() => {});
+    return { pushedBranch: args.branch, commitSha, prNumber: pr.number, prUrl: pr.url };
+  } finally {
+    if (repoCloneDir && worktreePath) {
+      await removeWorktreeLocked(owner, name, repoCloneDir, worktreePath).catch(() => {});
     }
     if (repoCloneDir) {
       setImmediate(() => {

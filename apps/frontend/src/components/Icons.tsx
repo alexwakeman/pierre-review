@@ -811,6 +811,16 @@ export function SparkleIcon({ size = 13, ...rest }: IconProps): JSX.Element {
   );
 }
 
+// A hammer — "Implement story": build a ticket's code (the sprint card's Implement button, the build tab).
+export function BuildIcon({ size = 13, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} strokeWidth={1.9} {...rest}>
+      <path d="m14.5 6.5-9.8 9.8a1.8 1.8 0 0 0 2.5 2.5l9.8-9.8" />
+      <path d="m12.6 4.6 2.2-1.6c1.3-.9 3-.8 4.1.3l1.8 1.8-1.4 1.4 1 1-2.8 2.8-1-1-1.4 1.4-3.9-3.9z" />
+    </IconShell>
+  );
+}
+
 // Bars — charts / analytics.
 export function ChartIcon({ size = 13, ...rest }: IconProps): JSX.Element {
   return (

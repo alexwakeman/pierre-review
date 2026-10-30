@@ -682,13 +682,14 @@ Default, Low, Medium, High, Extra high, Max.
   (`review/agent.ts`: the lead, Claude's specialists through the SDK's per-agent `effort` — sent only
   when a level is chosen — and Codex's Limn-run specialists), its follow-up re-reviews (same runner),
   AI Fix and Plan first (`coding/ai-fix/manager.ts` decides it, `GenerateFixArgs.effort` /
-  `GeneratePlanArgs.effort` carry it). Claude gets it as `spec.claude.effort`
+  `GeneratePlanArgs.effort` carry it), and "Implement story"'s plan and build passes (`story_plan`,
+  `story_build`; `coding/story-build/manager.ts` decides it per pass, docs/STORY-BUILD.md). Claude gets it as `spec.claude.effort`
   (`sdkModelOptions(model, mode, effort)`), Codex as `spec.codex.effort`. Every other kind keeps
   `defaultRunEffort`. A provider switch never changes the level, only who reads it.
 - **Precedence**: an explicitly set `REVIEW_EFFORT` (one of the five) WINS and locks the control
   ("Set by REVIEW_EFFORT"; the PUT answers 409). `REVIEW_DIFF_ONLY_EFFORT`, when set, decides every
   diff-only review on both providers, at Default too. ⚠ **Both env vars reach EXACTLY what the
-  control reaches** (the review, AI Fix, Plan first) — `defaultRunEffort` reads no environment, so the
+  control reaches** (the review, AI Fix, Plan first, the story plan and build) — `defaultRunEffort` reads no environment, so the
   CI review, ticket review, diagrams, Check threads, chats and Resolve with Claude keep their fixed
   depth (Opus 5.5 medium, as under the old pin). Before 2026-10-26 these two variables also moved
   Sonnet on every Claude kind; that was dropped so the label under the control is the whole story.
@@ -3061,6 +3062,12 @@ checks. The runner is the reusable `coding/checks/` module; this is how AI Fix u
   only with ≥ $0.25 of the run's budget left; after a repair the checks run again. Spend of every
   pass is summed into the row. Tests that cannot start NEVER fail the fix: the run goes on as before
   and `checks.note` says why.
+- **SHARED WITH THE STORY BUILD:** everything from the check session to the diff capture is
+  `coding/agent.ts buildInWorktree` (extracted 2026-10-30 with no behaviour change; the caller states its
+  own literal tool lists through `toolsFor`, and a deny list without Bash is refused).
+  `runCodingAgent` keeps the worktree prep, the teardown and the patch cap; the story build
+  (docs/STORY-BUILD.md § The builder) calls it on a kept worktree with read-only roots and the write
+  deny-list.
 - **STORED** on `ai_fixes.checks` (JSON `AiFixChecks`: `requested`, `ran`, `note`, `sandbox`,
   `install[]`, `results[]` (Limn's run + the skipped, each `AiFixCheckResult {name, kind, command,
   status: passed|failed|timed_out|skipped|error, exitCode, durationMs, output, truncated, note}`),

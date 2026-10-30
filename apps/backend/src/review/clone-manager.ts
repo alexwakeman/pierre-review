@@ -87,7 +87,7 @@ export async function withRepoLock<T>(key: string, fn: () => Promise<T>): Promis
 }
 
 /** Absolute path to a repo's long-lived partial clone under config.cloneDir. */
-function repoCloneDir(owner: string, name: string): string {
+export function repoCloneDir(owner: string, name: string): string {
   return join(config.cloneDir, `${owner}__${name}`);
 }
 
@@ -341,6 +341,38 @@ export async function prepWorktree(
     await fetchPrHead(dir, owner, name, prNumber, sha, token);
     const worktreePath = await addWorktree(dir, sha, { owner, name });
     return { repoCloneDir: dir, worktreePath };
+  });
+}
+
+/**
+ * A WRITE worktree at a BRANCH's commit, for a run that opens no PR of its own (a story build, its push).
+ * One entry of `prepDefaultBranchCheckouts`, under the repo lock: ensure the clone; when `sha` is given
+ * and already in the object store, no fetch at all; otherwise fetch `remoteRef` into the NAMESPACED
+ * `destRef` (never FETCH_HEAD — the clone is shared). When the branch has moved past `sha`, the commit is
+ * fetched by itself (GitHub serves an unadvertised commit by its sha). The worktree is checked out at
+ * `sha` (or the fetched tip), detached; the caller owns its removal. `pinRef` (optional) is pointed at
+ * the commit, under the same lock, so it stays reachable after the shared fetch ref moves.
+ */
+export async function prepBranchWorktree(
+  owner: string,
+  name: string,
+  ref: { remoteRef: string; destRef: string; sha?: string | null; pinRef?: string },
+  token: string = getGithubToken(),
+): Promise<{ repoCloneDir: string; worktreePath: string; sha: string }> {
+  return withRepoLock(`${owner}/${name}`, async () => {
+    const dir = await ensureClone(owner, name, token);
+    let sha = ref.sha ?? null;
+    if (sha == null || !(await hasCommit(dir, sha))) {
+      const tip = await fetchRefIntoClone({ cloneDir: dir, owner, name, token, remoteRef: ref.remoteRef, destRef: ref.destRef });
+      if (sha == null) sha = tip;
+      else if (!(await hasCommit(dir, sha))) {
+        await git(['-C', dir, 'fetch', '--no-tags', '--force', tokenizedUrl(owner, name, token), sha]);
+      }
+    }
+    // A caller-owned ref that keeps this commit reachable (a story build's base: coding/story-build/base-refs.ts).
+    if (ref.pinRef) await git(['-C', dir, 'update-ref', ref.pinRef, sha]);
+    const worktreePath = await addWorktree(dir, sha, { owner, name });
+    return { repoCloneDir: dir, worktreePath, sha };
   });
 }
 

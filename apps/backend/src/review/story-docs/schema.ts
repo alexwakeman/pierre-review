@@ -12,6 +12,12 @@ import {
   STORY_DOCS_REFS_PER_ITEM_MAX,
   STORY_DOCS_STORY_PARTS_MAX,
   REVIEW_DOC_QUOTE_MIN_CHARS,
+  STORY_BUILD_DOCS_ITEM_KINDS,
+  STORY_BUILD_DOCS_ITEMS_MAX,
+  STORY_BUILD_DOCS_NOTE_MAX,
+  STORY_BUILD_DOCS_REFS_MAX,
+  STORY_BUILD_DOCS_REFS_MIN,
+  STORY_BUILD_DOCS_SUGGESTION_MAX,
 } from '@pierre-review/shared';
 import { loadZod } from '../../ai/runtime.js';
 
@@ -74,4 +80,44 @@ export type SubmitAlignmentPayload = Zod.infer<Zod.ZodObject<SubmitAlignmentShap
 
 export async function submitAlignmentShape(): Promise<SubmitAlignmentShape> {
   return buildSubmitAlignmentShape(await loadZod());
+}
+
+// ---- the BUILD mode ("Implement story", docs/STORY-BUILD.md § Docs consideration) --------------------
+//
+// `submit_build_docs`: the docs weighed against a story build's PLAN. The story is the spec, so an item
+// is `grounded` (the docs agree), `superseded` (the story changes what the docs say — never a fix to the
+// story) or `suggestion` (the docs require something the story is silent on). Loose for the same reason
+// as above: build-validate.ts refuses with what to fix, and drops what does not ground.
+
+export const SUBMIT_BUILD_DOCS_TOOL_NAME = 'submit_build_docs';
+
+export function buildSubmitBuildDocsShape(z: ZodNs) {
+  const ref = z.object({
+    link: z.string().describe("The section's link from the library root, with the heading's anchor when you can: 'billing-handbook/sections/04-refunds.md#partial-refunds'."),
+    quote: z.string().describe(`Words copied EXACTLY from that section: at least ${REVIEW_DOC_QUOTE_MIN_CHARS} letters, at most ${STORY_DOCS_QUOTE_MAX} characters. Use … to skip words.`),
+  });
+  return {
+    summary: z.string().describe('2-3 plain sentences: how the plan stands against the docs.'),
+    items: z
+      .array(
+        z.object({
+          kind: z.string().describe(`One of: ${STORY_BUILD_DOCS_ITEM_KINDS.join(', ')}.`),
+          about: z.string().describe("What it is about, exactly as the message lists it: a criterion ('AC2'), an ask outside the criteria ('M1'), a plan step ('R1:step 3') or 'story'."),
+          note: z.string().describe(`One or two sentences, at most ${STORY_BUILD_DOCS_NOTE_MAX} characters.`),
+          suggestion: z
+            .string()
+            .optional()
+            .describe(`kind 'suggestion' only: what to add to the work, one sentence, at most ${STORY_BUILD_DOCS_SUGGESTION_MAX} characters. Leave it out for the other kinds.`),
+          refs: z.array(ref).describe(`${STORY_BUILD_DOCS_REFS_MIN}-${STORY_BUILD_DOCS_REFS_MAX} passages this point rests on.`),
+        }),
+      )
+      .describe(`At most ${STORY_BUILD_DOCS_ITEMS_MAX} points. None is a valid answer when the docs say nothing about the plan.`),
+  };
+}
+
+export type SubmitBuildDocsShape = ReturnType<typeof buildSubmitBuildDocsShape>;
+export type SubmitBuildDocsPayload = Zod.infer<Zod.ZodObject<SubmitBuildDocsShape>>;
+
+export async function submitBuildDocsShape(): Promise<SubmitBuildDocsShape> {
+  return buildSubmitBuildDocsShape(await loadZod());
 }

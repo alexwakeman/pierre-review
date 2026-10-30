@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { TICKET_TAB_PREFIX, isTrackerIdent, parseTicketIdent, trackerTicketRow } from '@pierre-review/shared';
+import { STORY_BUILD_TAB_PREFIX, TICKET_TAB_PREFIX, isTrackerIdent, parseTicketIdent, trackerTicketRow } from '@pierre-review/shared';
 
 // Lightweight metadata captured when a PR-backed tab is opened, so the tab can
 // render its label (title + author) without re-fetching the full PR detail on
@@ -34,6 +34,9 @@ export type PinnedPr = TabMeta;
 //  - ticket: ONE tracker ticket's pull requests in isolation — its open PRs and its merged PRs
 //    (keyed PER TICKET ident, non-PR, EPHEMERAL but SELF-DESCRIBING: the key is the address, so a URL
 //    re-creates it). FREE core, wherever it is opened from. docs/FRONTEND.md § The ticket tab.
+//  - story-build: ONE ticket's "Implement story" session (docs/STORY-BUILD.md) — keyed PER TICKET
+//    ident (`story-build:<ident>`), EPHEMERAL but SELF-DESCRIBING exactly like `ticket`. Opened ONLY
+//    through `useOpenStoryBuild()` (lib/storyBuildTab.ts).
 export type TabKind =
   | 'pr-detail'
   | 'pr-focus'
@@ -47,7 +50,8 @@ export type TabKind =
   | 'search'
   | 'user-activity'
   | 'bot-detail'
-  | 'ticket';
+  | 'ticket'
+  | 'story-build';
 
 // The label metadata a user-activity tab carries, so its chip renders without a lookup
 // (and keeps rendering if the user drops out of the roster). Captured at open time.
@@ -85,7 +89,7 @@ export interface Tab {
   meta: TabMeta | null; // label meta for PR tabs
   userMeta?: TabUserMeta | null; // label meta for user-activity tabs
   botMeta?: TabBotMeta | null; // label meta for bot-detail tabs
-  ticketMeta?: TabTicketMeta | null; // label meta for ticket tabs
+  ticketMeta?: TabTicketMeta | null; // label meta for ticket and story-build tabs
 }
 
 // Which "tab" the main area is showing: one of the three FIXED views (the Activity console — the
@@ -181,6 +185,17 @@ export function parseTicketTabKey(key: string): string | null {
   const ident = key.slice(TICKET_TAB_PREFIX.length);
   return ident.trim() === '' || ident.length > 600 ? null : ident;
 }
+// One ticket's "Implement story" session (the build tab), keyed PER TICKET like the story tab, with the
+// ident VERBATIM after `story-build:`. EPHEMERAL (`persist` keeps only the two PR kinds) but
+// SELF-DESCRIBING: `applyUrlTab` re-creates it from the key alone. ⚠ The prefixes never overlap
+// (`ticket:` vs `story-build:`), so a key parses as at most one of the two.
+export const storyBuildTabKey = (ident: string): string => `${STORY_BUILD_TAB_PREFIX}${ident}`;
+/** The ident behind a build tab key (null for any other key or an empty ident). */
+export function parseStoryBuildTabKey(key: string): string | null {
+  if (!key.startsWith(STORY_BUILD_TAB_PREFIX)) return null;
+  const ident = key.slice(STORY_BUILD_TAB_PREFIX.length);
+  return ident.trim() === '' || ident.length > 600 ? null : ident;
+}
 /** The ticket key an ident names (`…#BMD-568` → `BMD-568`; a GitHub ident
  *  `github:https://github.com/o/r#12` → `o/r#12`, through shared `trackerTicketRow`), for a chip with
  *  no meta yet. Falls back to the text after the last `#`. */
@@ -259,6 +274,9 @@ interface TabsState {
   // Ensure (and activate) one ticket's PR tab. Keyed per ticket ident. Callers go through
   // `useOpenStory()` (lib/ticketTab.ts), never this action directly.
   openTicketTab: (ticket: TabTicketMeta, opts?: OpenOpts) => void;
+  // Ensure (and activate) one ticket's build tab ("Implement story"). Keyed per ticket ident. Callers
+  // go through `useOpenStoryBuild()` (lib/storyBuildTab.ts), never this action directly.
+  openStoryBuildTab: (ticket: TabTicketMeta, opts?: OpenOpts) => void;
 
   syncMeta: (meta: TabMeta) => void; // backfill label on every tab with this prId
   closeTab: (key: string) => void; // remove; if it was active → a neighbour tab, else Activity
@@ -482,6 +500,17 @@ export const usePinnedTabs = create<TabsState>((set, get) => {
         },
         opts,
       ),
+    openStoryBuildTab: (ticket, opts) =>
+      openTab(
+        {
+          key: storyBuildTabKey(ticket.ident),
+          kind: 'story-build',
+          prId: 0,
+          meta: null,
+          ticketMeta: ticket,
+        },
+        opts,
+      ),
 
     syncMeta: (meta) =>
       set((s) => {
@@ -607,7 +636,19 @@ export const usePinnedTabs = create<TabsState>((set, get) => {
                           title: null,
                         },
                       }
-                    : null;
+                    : parseStoryBuildTabKey(tab) != null
+                      ? {
+                          key: tab,
+                          kind: 'story-build',
+                          prId: 0,
+                          meta: null,
+                          ticketMeta: {
+                            ident: parseStoryBuildTabKey(tab) as string,
+                            key: ticketKeyOfIdent(parseStoryBuildTabKey(tab) as string),
+                            title: null,
+                          },
+                        }
+                      : null;
         const tabs = newTab != null ? [...s.tabs, newTab] : s.tabs;
         if (tabs !== s.tabs) persist(tabs);
         // The Back-flash: EXACTLY on a pop that lands on Activity with a launching item pending.

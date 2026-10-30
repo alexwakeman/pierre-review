@@ -166,12 +166,13 @@ describe('the registry (LIMN_AI_PROVIDER)', () => {
 });
 
 describe('the kinds (Phase 3 foundation)', () => {
-  it('CODEX_AGENT_KINDS is the union of the four streams’ files, each holding only its own stream’s kinds', async () => {
+  it('CODEX_AGENT_KINDS is the union of the streams’ files, each holding only its own stream’s kinds', async () => {
     const files = await Promise.all([
       import('./codex/kinds/review.js').then((m) => m.CODEX_REVIEW_KINDS),
       import('./codex/kinds/fix.js').then((m) => m.CODEX_FIX_KINDS),
       import('./codex/kinds/tickets.js').then((m) => m.CODEX_TICKETS_KINDS),
       import('./codex/kinds/docs.js').then((m) => m.CODEX_DOCS_KINDS),
+      import('./codex/kinds/story-build.js').then((m) => m.CODEX_STORY_BUILD_KINDS),
     ]);
     // Each stream adds a kind to ITS file only in the commit that ports it (docs/CODEX-PLAN.md § 5).
     const own: string[][] = [
@@ -179,6 +180,7 @@ describe('the kinds (Phase 3 foundation)', () => {
       ['fix', 'plan', 'resolve'],
       ['ticket_review', 'pr_card', 'ci_review', 'story_docs'],
       ['diagram', 'sprint_paths', 'docs_build', 'docs_chat'],
+      ['story_plan', 'story_build'],
     ];
     files.forEach((f, i) => expect(f.every((k) => own[i]!.includes(k)), String(i)).toBe(true));
     const all = files.flat();

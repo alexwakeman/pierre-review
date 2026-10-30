@@ -71,7 +71,10 @@ describe('the fixer is confined to its worktree', () => {
   // PreToolUse, then the own-tools-only hook for the run's own servers (its result tools, plus
   // `checks` when "Run tests" hands it run_check — and nothing else).
   it('runs behind the path guard rooted at the worktree', () => {
-    expect(SRC).toContain('cwd: opts.worktreePath,\n    roots: [],\n    readOnlyRoots: [],');
+    // No other READ-WRITE root, ever. Read-only roots (a story build's earlier worktrees, never a fix's)
+    // can only be read: the path guard refuses any other tool there (review/path-guard.ts).
+    expect(SRC).toContain('cwd: opts.worktreePath,\n    roots: [],\n    readOnlyRoots: opts.readOnlyRoots ?? [],');
+    expect(SRC).toContain('writeRoots: opts.writes ? [opts.worktreePath] : [],');
     const provider = readFileSync(fileURLToPath(new URL('../ai/providers/claude.ts', import.meta.url)), 'utf8');
     expect(provider).toContain('const guard = createPathGuard(spec.cwd, spec.roots, { readOnlyRoots: spec.readOnlyRoots });');
     expect(provider).toMatch(

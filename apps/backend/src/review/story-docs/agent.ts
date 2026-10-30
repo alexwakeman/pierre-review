@@ -15,7 +15,8 @@ import { DISPATCH_TOOL_NAMES } from '../claude-review/specialists.js';
 import { emptyUsage, type UsageTokens } from '../usage.js';
 import { STORY_DOCS_EFFORT, STORY_DOCS_TOOL_NAME } from './prompts.js';
 export { storyDocsRoots, storyDocsTurnCap } from './prompts.js';
-import { submitAlignmentShape } from './schema.js';
+import { SUBMIT_BUILD_DOCS_TOOL_NAME, submitAlignmentShape, submitBuildDocsShape } from './schema.js';
+import { buildDocsShapeProblems, type BuildDocsContext } from './build-validate.js';
 import { alignmentShapeProblems, type AlignmentContext } from './validate.js';
 
 // THE STORY DOCS READ — the SDK half (a copy of diagrams/agent.ts). Reached ONLY through a lazy
@@ -40,12 +41,17 @@ import { alignmentShapeProblems, type AlignmentContext } from './validate.js';
 // tool lists below are Claude's only, and the provider writes the ledger row (`ledgerByProvider`).
 
 export const STORY_DOCS_TOOL = `mcp__storydocs__${STORY_DOCS_TOOL_NAME}`;
-const ALLOWED_TOOLS = ['Read', 'Glob', 'Grep', STORY_DOCS_TOOL];
+const READ_TOOLS = ['Read', 'Glob', 'Grep'];
 export const MAX_SUBMIT_ATTEMPTS = 3;
 /** The tool policy. Pure, so the no-shell, no-write, no-dispatch rule is pinned by a test. */
 export function storyDocsToolPolicy(): { allowedTools: string[]; disallowedTools: string[] } {
+  return docsReadToolPolicy(STORY_DOCS_TOOL);
+}
+
+/** Read/Glob/Grep + the mode's one submit tool; Bash, every write tool and sub-agent dispatch denied. */
+function docsReadToolPolicy(submitTool: string): { allowedTools: string[]; disallowedTools: string[] } {
   return {
-    allowedTools: [...ALLOWED_TOOLS],
+    allowedTools: [...READ_TOOLS, submitTool],
     disallowedTools: [...new Set([...DISALLOWED_TOOLS, ...DISPATCH_TOOL_NAMES])],
   };
 }
@@ -57,7 +63,16 @@ export function judgeSubmission(
   ctx: AlignmentContext,
   t: PromptTools = promptTools('claude'),
 ): { accepted: unknown } | { reply: string; refusal: string } {
-  const problems = alignmentShapeProblems(payload, ctx);
+  return judgeWith(alignmentShapeProblems(payload, ctx), payload, attempt, STORY_DOCS_TOOL_NAME, t);
+}
+
+function judgeWith(
+  problems: string[],
+  payload: unknown,
+  attempt: number,
+  toolName: string,
+  t: PromptTools,
+): { accepted: unknown } | { reply: string; refusal: string } {
   if (problems.length === 0) return { accepted: payload };
   const message = problems.map((p) => `- ${p}`).join('\n');
   return {
@@ -65,7 +80,7 @@ export function judgeSubmission(
     reply:
       attempt >= MAX_SUBMIT_ATTEMPTS
         ? `Refused:\n${message}\nThat was the last attempt; stop now.`
-        : `Refused:\n${message}\n${t.either(`Fix every point and call ${STORY_DOCS_TOOL_NAME} again with the whole answer.`, 'Fix every point and answer again with the whole answer.')}`,
+        : `Refused:\n${message}\n${t.either(`Fix every point and call ${toolName} again with the whole answer.`, 'Fix every point and answer again with the whole answer.')}`,
   };
 }
 
@@ -103,6 +118,64 @@ export interface RunStoryDocsAgentResult {
 }
 
 export async function runStoryDocsAgent(args: RunStoryDocsAgentArgs): Promise<RunStoryDocsAgentResult> {
+  return runDocsReadAgent(args, {
+    name: STORY_DOCS_TOOL_NAME,
+    description: 'Submit the whole check of the story against the docs. Its shape is checked at once: a refusal lists what to fix.',
+    shape: submitAlignmentShape,
+    judge: (a, attempt, words) => judgeSubmission(a, attempt, args.alignment, words),
+  });
+}
+
+// ---- the BUILD mode ("Implement story" → docs consideration; docs/STORY-BUILD.md) ------------------
+//
+// The SAME read (kind `story_docs`, the same confinement, effort and turn caps), answering
+// `submit_build_docs` (schema.ts) judged by build-validate.ts. Its spend is the story build's: the caller
+// passes the session's remaining budget (never above STORY_DOCS_ALIGNMENT_BUDGET_USD).
+
+export const BUILD_DOCS_TOOL = `mcp__storydocs__${SUBMIT_BUILD_DOCS_TOOL_NAME}`;
+
+/** The build mode's tool policy (Read/Glob/Grep + its own submit; no shell, no write, no dispatch). */
+export function buildDocsToolPolicy(): { allowedTools: string[]; disallowedTools: string[] } {
+  return docsReadToolPolicy(BUILD_DOCS_TOOL);
+}
+
+/** The build mode's submit decision, pure: accept, or answer with what to fix (shape only). */
+export function judgeBuildDocsSubmission(
+  payload: unknown,
+  attempt: number,
+  ctx: BuildDocsContext,
+  t: PromptTools = promptTools('claude'),
+): { accepted: unknown } | { reply: string; refusal: string } {
+  return judgeWith(buildDocsShapeProblems(payload, ctx), payload, attempt, SUBMIT_BUILD_DOCS_TOOL_NAME, t);
+}
+
+export interface RunBuildDocsAgentArgs extends Omit<RunStoryDocsAgentArgs, 'alignment'> {
+  build: BuildDocsContext;
+  /** The pass's US$ cap (the session's remaining budget, at most STORY_DOCS_ALIGNMENT_BUDGET_USD). */
+  budgetUsd?: number;
+}
+
+export async function runBuildDocsAgent(args: RunBuildDocsAgentArgs): Promise<RunStoryDocsAgentResult> {
+  return runDocsReadAgent(args, {
+    name: SUBMIT_BUILD_DOCS_TOOL_NAME,
+    description: 'Submit the whole weighing of the plan against the docs. Its shape is checked at once: a refusal lists what to fix.',
+    shape: submitBuildDocsShape,
+    judge: (a, attempt, words) => judgeBuildDocsSubmission(a, attempt, args.build, words),
+  });
+}
+
+// ---- the one read, shared by both modes ------------------------------------------------------------
+
+interface DocsReadTool {
+  name: string;
+  description: string;
+  shape(): Promise<Record<string, unknown>>;
+  judge(payload: unknown, attempt: number, words: PromptTools): { accepted: unknown } | { reply: string; refusal: string };
+}
+
+type DocsReadArgs = Omit<RunStoryDocsAgentArgs, 'alignment'> & { budgetUsd?: number };
+
+async function runDocsReadAgent(args: DocsReadArgs, tool: DocsReadTool): Promise<RunStoryDocsAgentResult> {
   const model = args.model ?? (STORY_DOCS_ALIGNMENT_MODEL as ClaudeReviewModel);
   const { abortController } = args;
   const provider = runProvider(args.provider);
@@ -137,14 +210,14 @@ export async function runStoryDocsAgent(args: RunStoryDocsAgentArgs): Promise<Ru
 
   try {
     if (provider.id === 'claude') restoreEnv = applyClaudeReviewAuth(args.applyAuthEnv);
-    const shape = await submitAlignmentShape();
+    const shape = await tool.shape();
     let attempts = 0;
     const tools: AgentToolServer = {
       server: 'storydocs',
       tools: [
         {
-          name: STORY_DOCS_TOOL_NAME,
-          description: 'Submit the whole check of the story against the docs. Its shape is checked at once: a refusal lists what to fix.',
+          name: tool.name,
+          description: tool.description,
           shape,
           handle: async (a) => {
             if (accepted != null) return { text: 'Already recorded.' };
@@ -152,7 +225,7 @@ export async function runStoryDocsAgent(args: RunStoryDocsAgentArgs): Promise<Ru
               return { text: 'No more attempts. Stop now.', isError: true };
             }
             attempts += 1;
-            const j = judgeSubmission(a, attempts, args.alignment, words);
+            const j = tool.judge(a, attempts, words);
             if ('accepted' in j) {
               accepted = j.accepted;
               return { text: 'Recorded.' };
@@ -164,7 +237,8 @@ export async function runStoryDocsAgent(args: RunStoryDocsAgentArgs): Promise<Ru
       ],
     };
     // ⚠ THE CONFINEMENT LIVES HERE, not in the prompt: a PreToolUse deny holds under bypassPermissions.
-    const policy = storyDocsToolPolicy();
+    const policy = docsReadToolPolicy(`mcp__storydocs__${tool.name}`);
+    const budgetUsd = args.budgetUsd != null ? Math.min(args.budgetUsd, config.storyDocsBudgetUsd) : config.storyDocsBudgetUsd;
     ({ outcome } = await provider.runAgent({
       kind: 'story_docs',
       model: choice,
@@ -178,7 +252,7 @@ export async function runStoryDocsAgent(args: RunStoryDocsAgentArgs): Promise<Ru
       readOnlyRoots: [...args.roots],
       writeRoots: [],
       tools,
-      budget: { usd: config.storyDocsBudgetUsd, turns: args.maxTurns ?? config.storyDocsMaxTurns },
+      budget: { usd: budgetUsd, turns: args.maxTurns ?? config.storyDocsMaxTurns },
       abortController,
       claude: { allowedTools: policy.allowedTools, disallowedTools: policy.disallowedTools, effort: STORY_DOCS_EFFORT },
       codex: { effort: STORY_DOCS_EFFORT },
@@ -198,7 +272,7 @@ export async function runStoryDocsAgent(args: RunStoryDocsAgentArgs): Promise<Ru
           ? `no usable answer: ${lastRefusal}`
           : outcome && outcome.subtype !== 'success'
             ? `agent stopped (${outcome.subtype}) without submitting`
-            : `agent finished without calling ${STORY_DOCS_TOOL_NAME}`;
+            : `agent finished without calling ${tool.name}`;
       return fail(reason, false);
     }
     return { payload: accepted, lastRefusal, aborted: false, ...telemetry() };

@@ -28,6 +28,17 @@ const TICKETS = [
 // The Web workspace's tracker is NOTION (apps/backend/scripts/seed-demo-notion.ts): its sprint tickets.
 const NOTION_ROOT = 'https://www.notion.so/5e1f0c2a7b3d4e8f9a0b1c2d3e4f5a6b';
 const NOTION_TICKETS = ['WEB-31', 'WEB-34', 'WEB-28', 'WEB-36', 'WEB-37'];
+// "Implement story" (seed-demo-agentic.ts `seedStoryBuilds`): PLAT-310's ready build (session 1:
+// acme/api pushed as draft #143, acme/web-app ready with a failing check), PLAT-312's plan waiting for
+// Accept with its design, chat and docs (session 2), and PLAT-318 — not started, no pull request, no
+// session — whose sprint card shows Implement and whose build tab is the start state. The checks preview
+// is answered by the demo itself (routes.ts GET_FALLBACKS), never recorded: it reads GitHub.
+const STORY_BUILD_TICKETS = ['PLAT-310', 'PLAT-312', 'PLAT-318'];
+const STORY_BUILD_SESSIONS = [1, 2];
+const STORY_BUILD_DIFFS = [
+  [1, 2],
+  [1, 1],
+];
 const PEOPLE = [1, 2, 5, 6, 3];
 const BOTS = [8, 9, 10, 20];
 
@@ -250,6 +261,31 @@ export const STEPS = [
     name: `sprint:tray:${k}`,
     run: (h) => h.go(`?view=sprint&sprintTab=themes&sprintStory=${enc(ident(k))}`),
   })),
+
+  // ── "Implement story": the sprint card's Implement button (hover), then each build tab with its
+  // disclosures open (plan Details, the docs' grounded list, each repository's diff). Nothing is
+  // started, accepted or pushed: the sessions are the seeder's rows. ──
+  {
+    name: 'sprint:implement',
+    run: async (h) => {
+      await h.go('?view=sprint&sprintTab=themes');
+      await h.page.locator(`[data-ticket="PLAT-318"]`).first().hover().catch(() => {});
+    },
+  },
+  ...STORY_BUILD_TICKETS.map((k) => ({
+    name: `story-build:${k}`,
+    run: async (h) => {
+      await h.go(`?view=${enc(`story-build:${ident(k)}`)}`);
+      await explore(h, { max: 12, scope: 'main' });
+    },
+  })),
+  {
+    name: 'story-build:reads',
+    run: async (h) => {
+      for (const id of STORY_BUILD_SESSIONS) await h.fetchGet(`/api/story-builds/${id}`);
+      for (const [id, repoId] of STORY_BUILD_DIFFS) await h.fetchGet(`/api/story-builds/${id}/repos/${repoId}/diff`);
+    },
+  },
 
   // ── Ticket (story) tabs ──
   ...TICKETS.map((k) => ({
