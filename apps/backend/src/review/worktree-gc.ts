@@ -21,6 +21,8 @@ import {
   type WorktreePolicy,
   type WorktreeRemoveReason,
 } from './worktree-gc-policy.js';
+import { isStoryBuildOpen, type StoryBuildStatus } from '@pierre-review/shared';
+import { sweepStoryBuildBaseRefs } from '../coding/story-build/base-refs.js';
 import { PROCESS_INSTANCE, recordWorktreeCreated, recordWorktreeReleased } from './worktree-ledger.js';
 
 // THE WORKTREE SWEEP (docs/BACKEND.md § Worktree cleanup).
@@ -98,6 +100,8 @@ export interface WorktreeSweepDeps {
   pruneClosedRows(before: Date): Promise<void>;
   pidAlive(pid: number): boolean;
   lock<T>(owner: string, name: string, fn: () => Promise<T>): Promise<T>;
+  /** Drop the fetch refs that pin a closed session's base commits ("Implement story"); optional for tests. */
+  sweepRefs?(): Promise<void>;
 }
 
 const emptyReport = (): WorktreeSweepReport => ({
@@ -320,6 +324,7 @@ export async function runWorktreeSweep(
   for (const p of held) heldWorktrees.add(p);
 
   await deps.pruneClosedRows(new Date(now - LEDGER_HISTORY_MS)).catch(() => {});
+  if (!report.timedOut && deps.sweepRefs) await deps.sweepRefs().catch(() => {});
   return report;
 }
 
@@ -479,7 +484,41 @@ export function dbSweepDeps(): WorktreeSweepDeps {
     },
     pidAlive,
     lock: (owner, name, fn) => withRepoLock(`${owner}/${name}`, fn),
+    sweepRefs: async () => {
+      await sweepStoryBuildBaseRefs(storyBuildRefsToKeep);
+    },
   };
+}
+
+/**
+ * Which `refs/pierre/story-build/<buildId>/<repoId>` still pin a base someone needs: the session is OPEN
+ * and, once it has repository rows, that repository is not pushed (a read-only candidate the build left
+ * out stays pinned only until the plan is accepted). Keys `buildId/repoId`.
+ */
+async function storyBuildRefsToKeep(refs: ReadonlyArray<{ buildId: number; repoId: number }>): Promise<ReadonlySet<string>> {
+  const keep = new Set<string>();
+  const buildIds = [...new Set(refs.map((r) => r.buildId))];
+  if (buildIds.length === 0) return keep;
+  const b = schema.storyBuilds;
+  const r = schema.storyBuildRepos;
+  const sessions = new Map(
+    (await db.select({ id: b.id, status: b.status }).from(b).where(inArray(b.id, buildIds)).execute()).map((x) => [x.id, x.status as StoryBuildStatus]),
+  );
+  const repoRows = await db
+    .select({ buildId: r.buildId, repoId: r.repoId, status: r.status })
+    .from(r)
+    .where(inArray(r.buildId, buildIds))
+    .execute();
+  const repoStatus = new Map(repoRows.map((x) => [`${x.buildId}/${x.repoId}`, x.status]));
+  for (const ref of refs) {
+    const status = sessions.get(ref.buildId);
+    if (status == null || !isStoryBuildOpen(status)) continue;
+    const key = `${ref.buildId}/${ref.repoId}`;
+    const rs = repoStatus.get(key);
+    if (rs == null ? status === 'building' || status === 'ready' : rs === 'pushed') continue;
+    keep.add(key);
+  }
+  return keep;
 }
 
 // ---- Scheduling: one sweep at a time; a run's kick is throttled ----

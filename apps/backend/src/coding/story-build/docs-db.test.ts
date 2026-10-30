@@ -183,7 +183,12 @@ beforeEach(() => {
 });
 
 const post = (id: number, body: any = {}, acct = 1) => app.inject({ method: 'POST', url: `/api/story-builds/${id}/docs`, headers: as(acct), payload: body });
-const put = (id: number, decisions: any, acct = 1) => app.inject({ method: 'PUT', url: `/api/story-builds/${id}/docs/decisions`, headers: as(acct), payload: { decisions } });
+const putAs = (id: number, payload: any, acct = 1) => app.inject({ method: 'PUT', url: `/api/story-builds/${id}/docs/decisions`, headers: as(acct), payload });
+/** A PUT aimed at the docs run stored NOW (what the SPA sends: the docs it shows). */
+const put = async (id: number, decisions: any, acct = 1) => {
+  const docs = (await P.getStoryBuildRow(ctx, 1, id))?.docsJson ?? null;
+  return putAs(id, { decisions, planRevision: docs?.planRevision ?? 0, runId: docs?.runId ?? null }, acct);
+};
 const row = (id: number, acct = 1) => P.getStoryBuildRow(ctx, acct, id);
 
 describe('before any document is built', () => {
@@ -248,6 +253,15 @@ describe('a docs run', () => {
     const b = (await row(id))!;
     expect(b.docsDecisionsJson).toBeNull();
     expect(b.docsCostUsd).toBeCloseTo(0.4);
+  });
+
+  it('PUT decisions aimed at another docs run is 409 DocsMoved (a newer run reuses the ids)', async () => {
+    const before = (await row(id))!.docsJson!;
+    expect(before.runId).toMatch(/^[0-9a-f-]{36}$/);
+    expect((await putAs(id, { decisions: { D1: 'include' }, planRevision: before.planRevision, runId: 'an-older-run' })).json()).toMatchObject({ error: 'DocsMoved' });
+    expect((await putAs(id, { decisions: { D1: 'include' }, planRevision: before.planRevision + 1, runId: before.runId })).statusCode).toBe(409);
+    expect((await putAs(id, { decisions: { D1: 'include' } })).statusCode).toBe(400);
+    expect((await row(id))!.docsDecisionsJson).toBeNull();
   });
 
   it('PUT decisions: unknown and grounded ids dropped, the rest merged; frozen after Accept', async () => {
@@ -346,7 +360,7 @@ describe('never stuck', () => {
     agentPayload = { ...PAYLOAD, items: [{ kind: 'grounded', about: 'story', note: 'x', refs: [bad] }] };
     await post(id);
     await R._storyBuildDocsIdleForTest();
-    expect((await row(id))!.docsJson).toEqual({ summary: '', items: [], nothingGrounded: true, planRevision: 1 });
+    expect((await row(id))!.docsJson).toEqual({ summary: '', items: [], nothingGrounded: true, planRevision: 1, runId: expect.any(String) });
   });
 
   it('a throwing implementation ends `failed`, never `running`', async () => {

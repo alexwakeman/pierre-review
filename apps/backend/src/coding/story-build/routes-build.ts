@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import {
   STORY_BUILD_API,
   STORY_BUILD_PUSH_DRAFT_DEFAULT,
+  type StoryBuildActionResponse,
   type StoryBuildChecksPreview,
   type StoryBuildDiffResponse,
   type StoryBuildPushResponse,
@@ -110,7 +111,8 @@ export function registerStoryBuildBuildRoutes(app: FastifyInstance, ctx: AgentCo
     if (!lane) return reply.code(503).send({ error: 'NotReady', message: 'Building is not available in this version of Limn yet.' });
     const out = await lane.retryRepo(ctx, { accountId, buildId: id, repoId });
     if (!out.ok) return reply.code(out.status).send({ error: out.error, message: out.message });
-    return reply.code(202).send({ ok: true });
+    const resp: StoryBuildActionResponse = { buildId: id };
+    return reply.code(202).send(resp);
   });
 
   app.post<{ Params: Params; Body: unknown }>(STORY_BUILD_API.repoPush, async (req, reply) => {

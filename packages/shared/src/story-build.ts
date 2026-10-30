@@ -303,6 +303,9 @@ export interface StoryBuildDocs {
   nothingGrounded: boolean;
   /** The plan revision the docs were weighed against. */
   planRevision: number;
+  /** This docs run, one token per stored run (a re-run against the same revision gets a new one); the
+   *  decisions PUT names it. Absent on a run stored before it existed. */
+  runId?: string | null;
   /** The decisions the latest plan pass was given (written with that pass's plan); absent ⇒ no plan pass
    *  has seen these docs yet. `storyBuildDocsPending` compares it with the decisions in force. */
   plannedDecisions?: StoryBuildDocsDecisions | null;
@@ -475,6 +478,13 @@ export interface StoryBuildProgress {
   };
 }
 
+/**
+ * One SSE frame of `GET /api/story-builds/:id/stream` (`data: <JSON>`): a step of the pass in flight, or
+ * `done` — the pass ended (the server then closes the stream). A stream opened when nothing runs closes
+ * at once with no frame. The SPA re-reads the session on every new step and on the end.
+ */
+export type StoryBuildStreamEvent = { type: 'progress'; progress: StoryBuildProgress } | { type: 'done' };
+
 // ---- request / response bodies -----------------------------------------------------------------------
 
 /** `POST /api/story-builds`. `provider`/`model` = the reader's manual pick (absent ⇒ the default, deep). */
@@ -518,10 +528,35 @@ export interface StoryBuildDocsResponse {
 }
 
 /** `PUT /api/story-builds/:id/docs/decisions` (DB only). Ids not in the current docs (and grounded items,
- *  which carry no decision) are dropped; the rest MERGE over the stored decisions. The answer is the same
- *  shape: the decisions now in force (`storyBuildDocsEffectiveDecisions`). */
+ *  which carry no decision) are dropped; the rest MERGE over the stored decisions.
+ *  ⚠ `planRevision` + `runId` name the docs run the reader was looking at (`StoryBuildDocs`): a newer run
+ *  reuses the ids D1… for different points, so a PUT naming another run is refused `409 DocsMoved` and the
+ *  SPA re-reads the session. */
 export interface StoryBuildDocsDecisionsBody {
   decisions: StoryBuildDocsDecisions;
+  planRevision: number;
+  runId: string | null;
+}
+
+/** The answer to the decisions PUT: the decisions now in force (`storyBuildDocsEffectiveDecisions`). */
+export interface StoryBuildDocsDecisionsResponse {
+  decisions: StoryBuildDocsDecisions;
+}
+
+/** 202 — a pass was queued: `POST …/plan/message`, `POST …/accept`, `POST …/repos/:repoId/retry`. Follow
+ *  the session (its SSE and its row). */
+export interface StoryBuildActionResponse {
+  buildId: number;
+}
+
+/** `POST …/cancel`: `cancelling` — a pass (plan, build or docs run) was told to stop; `idle` — nothing ran. */
+export interface StoryBuildCancelResponse {
+  status: 'cancelling' | 'idle';
+}
+
+/** `POST …/discard` (409 `NotReady` while anything runs). */
+export interface StoryBuildDiscardResponse {
+  status: 'discarded';
 }
 
 export interface StoryBuildAcceptRepo {
@@ -582,6 +617,7 @@ export type StoryBuildErrorCode =
   | 'PlanBudgetSpent'
   | 'SessionBudgetSpent'
   | 'PlanMoved'
+  | 'DocsMoved'
   | 'BadRequest'
   | 'NotFound';
 

@@ -189,7 +189,10 @@ describe('linear scanners', () => {
     extractLinks(page, 'https://example.com/');
     pageText(page);
     pageTitle(page);
-    expect(performance.now() - t0).toBeLessThan(1000);
+    // A guard against QUADRATIC blow-up (the old spans took tens of seconds on these), not a speed
+    // benchmark: idle each case is well under a second, but under parallel test load a 1s ceiling
+    // flaked. 3s still fails the quadratic case by an order of magnitude.
+    expect(performance.now() - t0).toBeLessThan(3000);
   });
   it('an unclosed anchor still yields its address', () => {
     const { links } = extractLinks('<body><a href="/kept">never closed', 'https://example.com/');

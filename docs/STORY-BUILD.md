@@ -32,7 +32,10 @@ These override the design document where they differ.
 
 1. **Stacking.** A repository with an OPEN ticket PR that is the READER'S OWN: stack on it (base = its head,
    the new PR targets that branch). Someone else's open PR: branch from the default branch and say so in
-   one line (`StoryBuildCandidate.baseNote`).
+   one line (`StoryBuildCandidate.baseNote`). ⚠ Never a PR opened from a FORK (its branch is not in this
+   repository): the head repository is not synced, so `candidates.ts unstackablePrs` reads it live (ONE
+   `fetchPrHeadInfo` per stacked PR, at plan time) and falls back to the default branch with one line ("Your
+   #n is from a fork, …"; a failed read falls back too). Push re-reads it and refuses `STACK_FORK`.
 2. **Draft by default** (`STORY_BUILD_PUSH_DRAFT_DEFAULT`), with a toggle to open ready for review.
 3. **≤ 4 repositories change** (`STORY_BUILD_MAX_REPOS`), built **sequentially in plan order** (a later
    repository reads earlier ones' worktrees read-only); **one build at a time per machine**.
@@ -106,6 +109,13 @@ Discard (any non-running state) ⇒ discarded
   workspace repositories are left; no model ⇒ the most recently active. `baseFor` is owner decision 1.
 - **Checkouts** (`checkouts.ts`): one read-only worktree per candidate at its base, ledgered
   `story_plan`; the first pass FIXES each default-branch sha, so every re-plan reads the same code.
+- **Base refs** (`base-refs.ts`): every base sha is PINNED by the session's own ref,
+  `refs/pierre/story-build/<buildId>/<repoId>` — written at the plan's checkout and by each build pass
+  (`prepBranchWorktree` `pinRef`). The shared fetch refs (`story-plan-base`, `story-build-base`) move with the
+  next fetch and a stacked PR's head is fetched with no ref, so without it a long-open session's base could be
+  pruned (the conflict janitor's `gc --prune=now`). Deleted on Discard, once every included repository is
+  pushed, and by the worktree sweep (`worktree-gc.ts storyBuildRefsToKeep`: kept while the session is OPEN and
+  that repository is not pushed; a candidate the build left out only until Accept).
 - **The plan pass** (`plan-agent.ts`, `plan.ts`, `prompts.ts`, `schema.ts`): READ-ONLY by code
   (`STORY_PLAN_TOOLS` / `STORY_PLAN_DISALLOWED_TOOLS`, `no-shell.test.ts`); roots = the scratch cwd
   (`REPOS.md`) + every readable checkout + the library when usable, NO write root. `submit_story_plan`
@@ -119,10 +129,12 @@ Discard (any non-running state) ⇒ discarded
   ⚠ While the coverage phase WAITS on the ticket check it started (which needs a slot of its own), the
   pass LENDS its slot back (`withSlotLent`) and retakes one after — else a full pool deadlocks until
   the 15-minute wait times out (certain at `PRO_REVIEW_CONCURRENCY=1`).
-- **The SSE** (`GET …/stream`): frames are bare `StoryBuildProgress`; the stream ENDS with the pass
-  (or at once when nothing runs). Phases are also written to `story_builds.phase` (and the repository's
+- **The SSE** (`GET …/stream`): frames are shared `StoryBuildStreamEvent` (`{type:'progress', progress}` ·
+  `{type:'done'}`); the stream ENDS after `done` (or at once, with no frame, when nothing runs). Phases are also written to `story_builds.phase` (and the repository's
   status follows the build's phases), so a poll reads the same step.
-- **Spend:** the plan budget is the assess + every pass (+ the shortlist); the session budget is
+- **Spend:** the shortlist is priced by `review/cheap-usage.ts cheapUsage`, like every cheap completion: an
+  answer the default provider gave on CODEX keeps Codex's model, tokens and own US$ (0 on a login), never
+  Haiku's rates (`routes-db.test.ts` pins it). The plan budget is the assess + every pass (+ the shortlist); the session budget is
   everything (`sessionSpent`). The manager writes Claude's ledger rows for the plan (`story_plan`) AND
   for each repository's build (`story_build`, from `RepoBuildResult.costUsd` when `provider !== 'codex'`)
   — WP2's `buildRepo` must hand Codex a `usageRecord` and must NOT record Claude's row itself.
@@ -193,15 +205,15 @@ read scopes the account (wrong owner ⇒ 404). Registered only from `review/agen
 | `GET /api/story-builds/:id` | `StoryBuild` | read | 1 |
 | `GET /api/story-builds/:id/stream` | SSE `StoryBuildProgress` | read | 1 |
 | `POST /api/story-builds` | `StoryBuildStartBody` → 202/200 `StoryBuildStartResponse` | ai + ai_hourly | 1 |
-| `POST …/:id/plan/message` | re-plan pass | ai + ai_hourly | 1 |
-| `POST …/:id/accept` | freeze + start the builds (409 `PlanMoved`) | ai + ai_hourly | 1 |
-| `POST …/:id/cancel` · `…/discard` | DB + abort | read | 1 |
+| `POST …/:id/plan/message` | re-plan pass → 202 `StoryBuildActionResponse` | ai + ai_hourly | 1 |
+| `POST …/:id/accept` | freeze + start the builds → 202 `StoryBuildActionResponse` (409 `PlanMoved`) | ai + ai_hourly | 1 |
+| `POST …/:id/cancel` · `…/discard` | DB + abort → `StoryBuildCancelResponse` · `StoryBuildDiscardResponse` | read | 1 |
 | `GET …/:id/repos/:repoId/checks` | `StoryBuildChecksPreview` | search + read | 2 |
-| `POST …/:id/repos/:repoId/retry` | rebuild one repository | ai + ai_hourly | 2 |
+| `POST …/:id/repos/:repoId/retry` | rebuild one repository → 202 `StoryBuildActionResponse` | ai + ai_hourly | 2 |
 | `GET …/:id/repos/:repoId/diff` | `StoryBuildDiffResponse` | read | 2 |
 | `POST …/:id/repos/:repoId/push` · `POST …/:id/push` | `StoryBuildPushBody` → `StoryBuildPushResponse` | github_write | 2 |
 | `POST …/:id/docs` | `StoryBuildDocsBody` → 202/200 `StoryBuildDocsResponse` (`started` · `already_running` · `current` · `refused`) | ai + ai_hourly | 3 |
-| `PUT …/:id/docs/decisions` | `StoryBuildDocsDecisionsBody` → the decisions in force (DB only) | read | 3 |
+| `PUT …/:id/docs/decisions` | `StoryBuildDocsDecisionsBody` → `StoryBuildDocsDecisionsResponse` (DB only; 409 `DocsMoved`) | read | 3 |
 
 Error codes: shared `StoryBuildErrorCode`.
 
@@ -251,7 +263,11 @@ own answer `submit_build_docs` (`review/story-docs/schema.ts`, strict form in `a
   session SSE; `{kind:'done'}` ends a run) and `phase` on the row while no plan/build pass owns it.
 - **Defaults** (owner decision 6, `storyBuildDocsDefaultDecision`): suggestion ticked, superseded unticked,
   grounded no checkbox. `PUT …/docs/decisions` merges over the stored ones, drops unknown and grounded ids, and
-  refuses while a docs run is in flight (it replaces the points) and once the plan is accepted. ⚠ A run that
+  refuses while a docs run is in flight (it replaces the points) and once the plan is accepted. ⚠ The PUT names
+  the docs run it was aimed at (`planRevision` + `runId`, a token minted per stored run): a newer run reuses
+  the ids D1… for different points, so another run's PUT is `409 DocsMoved` and the SPA re-reads the session.
+- **Cancel** stops a docs-only run too (`cancelStoryBuild` → `abortStoryBuildDocs`): the docs section shows its
+  own Cancel while only the docs run, and ⌘K's Cancel (`storyBuildCancellable`) presses it. ⚠ A run that
   outlives Accept, Cancel or Discard ends `failed` "Stopped." and never replaces `docs_json`: the frozen
   decisions name its ids. The `about` list printed to the model (outside the fences) keeps only short codes.
 - **Consumption** (`docsBlocksFor(build, {nonce, frozen})`, through `storyBuildDeps()`): `included` = every
@@ -337,7 +353,9 @@ PR's head are protected and refused before any process runs), then `createPullRe
   name is spelled into the `BRANCH_EXISTS` lookup URL, each segment URL-encoded. Retry answers 409 while
   that repository's push is in flight.
 - **Stacked:** the new PR targets the head branch of the reader's own open PR it stacks on; once that PR
-  is no longer open the push is refused (`STACK_CLOSED`: build again to start from the default branch).
+  is no longer open the push is refused (`STACK_CLOSED`: build again to start from the default branch); a PR
+  GitHub says is from a FORK (read live at the press) is refused `STACK_FORK`, an unreadable one
+  `STACK_UNKNOWN`.
 - **Recorded** on the repository row: `pushed` + branch / PR / commit / title / body, or `push_error`. A PR
   GitHub refused to open (`PR_NOT_OPENED`) keeps the branch it pushed and says so. `getViewerCanPush` is
   re-checked (`NO_PUSH_PERMISSION`); a push while the session is `building` is `BUSY`; a second press on a

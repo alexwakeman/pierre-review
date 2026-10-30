@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import { useIsMutating } from '@tanstack/react-query';
-import type { StoryBuild, StoryBuildDocsItem } from '@pierre-review/shared';
+import { isStoryBuildRunning, type StoryBuild, type StoryBuildDocsItem } from '@pierre-review/shared';
 import { useFollowUpProvider } from '../../hooks/useModelPick.js';
-import { storyBuildMutationKey, useStoryBuildDocsDecisions, useStoryBuildDocsRun } from '../../hooks/useStoryBuild.js';
+import { storyBuildMutationKey, useStoryBuildCancel, useStoryBuildDocsDecisions, useStoryBuildDocsRun } from '../../hooks/useStoryBuild.js';
+import { ApiError } from '../../api/client.js';
 import { TICKET_CRITERION_STATUS_CLASS } from '../../lib/claudeReviewFollowUp.js';
 import { REVIEW_CHIP } from '../../lib/reviewStyles.js';
-import { docsItemIncluded, docsPointsNotInPlan, storyBuildDocsGroups } from '../../lib/storyBuild.js';
+import { docsItemIncluded, docsPointsNotInPlan, storyBuildDocsGroups, storyBuildErrorText } from '../../lib/storyBuild.js';
 import { StoryDocsRefLinks } from '../Activity/StoryDocsAlignment.js';
 import { AiRunGate } from '../AiSetup.js';
 import { ChevronIcon } from '../Icons.js';
@@ -33,6 +34,7 @@ export function BuildDocsSection({ build, editable }: { build: StoryBuild; edita
   const ident = build.ident;
   const run = useStoryBuildDocsRun(build.workspaceId, ident);
   const decide = useStoryBuildDocsDecisions(build.workspaceId, ident);
+  const cancel = useStoryBuildCancel(build.workspaceId, ident);
   const busy = useIsMutating({ mutationKey: storyBuildMutationKey(ident) }) > 0;
   const provider = useFollowUpProvider(build.provider ?? null, 'story_docs');
   const [groundedOpen, setGroundedOpen] = useState(false);
@@ -40,7 +42,8 @@ export function BuildDocsSection({ build, editable }: { build: StoryBuild; edita
   const groups = storyBuildDocsGroups(build.docs);
   const pending = docsPointsNotInPlan(build);
   const toggle = (item: StoryBuildDocsItem, on: boolean): void => {
-    decide.mutate({ id: build.id, decisions: { ...build.docsDecisions, [item.id]: on ? 'include' : 'ignore' } });
+    if (build.docs == null) return;
+    decide.mutate({ id: build.id, decisions: { ...build.docsDecisions, [item.id]: on ? 'include' : 'ignore' }, docs: build.docs });
   };
   const canRun = editable && build.docsStatus !== 'running';
   return (
@@ -77,7 +80,22 @@ export function BuildDocsSection({ build, editable }: { build: StoryBuild; edita
           </AiRunGate>
         </div>
       )}
-      {build.docsStatus === 'running' && <p className="text-meta text-ui-mute">Reading the docs…</p>}
+      {build.docsStatus === 'running' && (
+        <div className="flex flex-wrap items-center gap-2 text-meta text-ui-mute">
+          Reading the docs…
+          {/* The one Cancel while only the docs run (⌘K's Cancel presses it). */}
+          {!isStoryBuildRunning(build.status) && (
+            <Button size="sm" variant="secondary" data-story-build-action="cancel" onClick={() => cancel.mutate(build.id)}>
+              Cancel
+            </Button>
+          )}
+        </div>
+      )}
+      {decide.error != null && build.docs != null && (
+        <p className="text-meta text-ui-warn">
+          {storyBuildErrorText(decide.error instanceof ApiError ? decide.error : { message: 'Couldn’t save that tick.' })}
+        </p>
+      )}
       {build.docsStatus === 'failed' && <p className="text-meta text-ui-warn">Couldn&rsquo;t check the docs.</p>}
       {build.docsStatus === 'refused' && <p className="text-meta text-ui-mute">The library has nothing that touches this plan.</p>}
       {build.docs != null && (

@@ -493,6 +493,35 @@ describe('the repository shortlist (DB)', () => {
     expect(usage.slice(before).map((u) => u.feature)).toEqual(['story_build_repos', 'story_build_repos']);
     expect(res.costUsd).toBeGreaterThan(0);
   });
+
+  it('a shortlist CODEX answered is recorded as Codex (its model, its own US$), never at Claude rates', async () => {
+    const { pickCandidates } = await import('./candidates.js');
+    const ids: number[] = [];
+    for (const name of ['ledger', 'mailer', 'search']) {
+      const [r] = await db.insert(schema.repos).values({ accountId: 1, githubNodeId: `R1y${name}`, owner: 'acme', name, defaultBranch: 'main' }).returning().execute();
+      ids.push(r.id);
+    }
+    const before = usage.length;
+    const fake = {
+      ...ctx,
+      llm: {
+        ...ctx.llm,
+        complete: async () => ({
+          text: '{"repos": ["acme/ledger"]}',
+          usage: { inputTokens: 5_000, outputTokens: 50 },
+          provider: 'codex' as const,
+          model: 'gpt-6-luna',
+          costUsd: 0,
+        }),
+      },
+    };
+    const res = await pickCandidates(fake, { accountId: 1, workspaceId: ws[1]!, memberRepoIds: ids, story: { key: 'ACME-215', title: 'Ledger', text: 'Ledger' }, prs: [] });
+    expect(res.candidates.map((c) => c.fullName)).toEqual(['acme/ledger']);
+    expect(usage.slice(before)).toEqual([
+      expect.objectContaining({ feature: 'story_build_repos', provider: 'codex', model: 'gpt-6-luna', costUsd: 0, inputTokens: 5_000, outputTokens: 50 }),
+    ]);
+    expect(res.costUsd).toBe(0);
+  });
 });
 
 describe('the coverage wait lends the review slot back', () => {

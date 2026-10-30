@@ -10,6 +10,7 @@ import {
   withRepoLock,
 } from '../../review/clone-manager.js';
 import { withWorktreeOwner } from '../../review/worktree-owner.js';
+import { pinStoryBuildBase } from './base-refs.js';
 
 // THE PLAN PASS'S READ-ONLY CHECKOUTS ("Implement story", docs/STORY-BUILD.md § The plan). One per-run
 // worktree per candidate, at its BASE:
@@ -17,9 +18,11 @@ import { withWorktreeOwner } from '../../review/worktree-owner.js';
 //   stacked     (the reader's own open PR) `pull/<n>/head`, at the PR head the candidate names;
 //   default     the default branch fetched into a NAMESPACED ref (never FETCH_HEAD — one file per
 //               repository, shared across jobs) — the FIRST pass records the sha it found as `baseSha`;
-//               a re-plan checks out THAT sha again (still in the shared clone's object store), so
-//               every revision of one plan reads the same code. A sha the store has lost fails that
-//               candidate (unreadable this pass), never a silent move to a newer commit.
+//               a re-plan checks out THAT sha again, so every revision of one plan reads the same code.
+//               Either way the sha is PINNED by the session's own ref (base-refs.ts
+//               `refs/pierre/story-build/<buildId>/<repoId>`), so no gc prunes it while the session is
+//               open. A sha the store has lost anyway fails that candidate (unreadable this pass), never
+//               a silent move to a newer commit.
 //
 // Every tree is LEDGERED `story_plan` (runId = story_builds.id, docs/BACKEND.md § Worktree cleanup), and
 // removed when the pass ends (`cleanup`, idempotent, never throws). A failure is PER CANDIDATE (`path`
@@ -83,6 +86,9 @@ export const checkOutCandidates: CheckOutFn = async (a) => {
               });
               sha = c.baseSha !== '' ? c.baseSha : tip;
             }
+            // The session's OWN ref holds the base from now on (base-refs.ts): the shared fetch ref moves
+            // with the next fetch, and a commit reachable from nothing can be pruned before a re-plan.
+            await pinStoryBuildBase(dir, a.buildId, c.repoId, sha);
             const path = await addWorktree(dir, sha, { owner, name });
             made.push({ owner, name, dir, path });
             return { candidate: c, path, sha, error: null };

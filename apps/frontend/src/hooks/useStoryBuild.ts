@@ -8,11 +8,13 @@ import {
   type StoryBuildAcceptBody,
   type StoryBuildChecksPreview,
   type StoryBuildDiffResponse,
+  type StoryBuildDocs,
   type StoryBuildDocsDecisions,
   type StoryBuildForTicketResponse,
   type StoryBuildProgress,
   type StoryBuildPushResponse,
   type StoryBuildStartBody,
+  type StoryBuildStreamEvent,
 } from '@pierre-review/shared';
 import { api } from '../api/client.js';
 import { sseStream } from '../api/sse.js';
@@ -83,19 +85,20 @@ export function useStoryBuildStream(
     }
     const ac = new AbortController();
     const refetch = (): void => void invalidateBuild(qc, workspaceId, ident);
-    void sseStream<StoryBuildProgress | { type: 'done' }>(storyBuildPath('stream', { id: buildId }), {
+    void sseStream<StoryBuildStreamEvent>(storyBuildPath('stream', { id: buildId }), {
       signal: ac.signal,
       onEvent: (e) => {
-        if ('phase' in e && typeof e.phase === 'string') {
-          setProgress(e);
+        if (e.type === 'progress') {
+          setProgress(e.progress);
           // A new step (or a new repository) changed what the snapshot says: read it again.
-          const step = `${e.phase}:${e.repoId ?? ''}`;
+          const step = `${e.progress.phase}:${e.progress.repoId ?? ''}`;
           if (step !== lastStep.current) {
             lastStep.current = step;
             refetch();
           }
           return;
         }
+        // `done`: the pass ended (the stream closes next).
         refetch();
       },
     })
@@ -164,7 +167,10 @@ export function useStoryBuildDocsDecisions(workspaceId: number | null, ident: st
   const qc = useQueryClient();
   const key = storyBuildForKey(workspaceId, ident);
   return useMutation({
-    mutationFn: (v: { id: number; decisions: StoryBuildDocsDecisions }) => api.setStoryBuildDocsDecisions(v.id, { decisions: v.decisions }),
+    // `docs` = the run the reader is looking at: a newer run reuses its ids, so the server refuses a tick
+    // aimed at another one (409 DocsMoved) and the settle below re-reads the session.
+    mutationFn: (v: { id: number; decisions: StoryBuildDocsDecisions; docs: Pick<StoryBuildDocs, 'planRevision' | 'runId'> }) =>
+      api.setStoryBuildDocsDecisions(v.id, { decisions: v.decisions, planRevision: v.docs.planRevision, runId: v.docs.runId ?? null }),
     onMutate: (v) => {
       qc.setQueryData<StoryBuildForTicketResponse>(key, (d) =>
         d?.build != null && d.build.id === v.id ? { ...d, build: { ...d.build, docsDecisions: v.decisions } } : d,

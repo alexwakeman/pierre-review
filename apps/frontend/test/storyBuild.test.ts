@@ -21,6 +21,7 @@ import {
   docsItemIncluded,
   docsPointsNotInPlan,
   pushAllOffered,
+  storyBuildCancellable,
   storyBuildDocsGroups,
   storyBuildErrorText,
   storyBuildSteps,
@@ -185,6 +186,18 @@ describe('Accept', () => {
     expect(branchNameProblem('')).toBe('Name the branch.');
     expect(branchNameProblem('a..b')).not.toBeNull();
     expect(branchNameProblem('PLAT-310/retry')).toBeNull();
+  });
+});
+
+describe('Cancel', () => {
+  it('is offered while a plan or build pass runs, and while ONLY the docs run (⌘K Cancel stops it)', () => {
+    expect(storyBuildCancellable(build({ status: 'planning' }))).toBe(true);
+    expect(storyBuildCancellable(build({ status: 'plan_ready', docsStatus: 'running' }))).toBe(true);
+    expect(storyBuildCancellable(build({ status: 'plan_ready', docsStatus: 'ready' }))).toBe(false);
+  });
+
+  it('a stale docs tick reads in words', () => {
+    expect(storyBuildErrorText({ code: 'DocsMoved', message: 'x' })).toBe('The docs points changed since you looked. Tick them again.');
   });
 });
 

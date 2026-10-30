@@ -276,10 +276,15 @@ import type {
   StartCiReviewResponse,
   StoryBuild,
   StoryBuildAcceptBody,
+  StoryBuildActionResponse,
+  StoryBuildCancelResponse,
   StoryBuildChecksPreview,
   StoryBuildDiffResponse,
+  StoryBuildDiscardResponse,
   StoryBuildDocsBody,
   StoryBuildDocsDecisionsBody,
+  StoryBuildDocsDecisionsResponse,
+  StoryBuildDocsResponse,
   StoryBuildForTicketResponse,
   StoryBuildPlanMessageBody,
   StoryBuildPushBody,
@@ -1742,21 +1747,21 @@ export const api = {
     fetch(storyBuildPath('list'), jsonBody('POST', body)).then((r) => handle<StoryBuildStartResponse>(r)),
   // A re-plan pass steered by the reader's message.
   sendStoryBuildMessage: (id: number, body: StoryBuildPlanMessageBody) =>
-    fetch(storyBuildPath('planMessage', { id }), jsonBody('POST', body)).then((r) => handle<unknown>(r)),
+    fetch(storyBuildPath('planMessage', { id }), jsonBody('POST', body)).then((r) => handle<StoryBuildActionResponse>(r)),
   // The docs consideration run (the story wins over the docs).
   runStoryBuildDocs: (id: number, body: StoryBuildDocsBody = {}) =>
-    fetch(storyBuildPath('docs', { id }), jsonBody('POST', body)).then((r) => handle<unknown>(r)),
+    fetch(storyBuildPath('docs', { id }), jsonBody('POST', body)).then((r) => handle<StoryBuildDocsResponse>(r)),
   // The reader's ticks on the docs points (DB only).
   setStoryBuildDocsDecisions: (id: number, body: StoryBuildDocsDecisionsBody) =>
-    fetch(storyBuildPath('docsDecisions', { id }), jsonBody('PUT', body)).then((r) => handle<unknown>(r)),
+    fetch(storyBuildPath('docsDecisions', { id }), jsonBody('PUT', body)).then((r) => handle<StoryBuildDocsDecisionsResponse>(r)),
   // "Run tests": the checks one repository declares at its base (one GitHub read; asked when ticked).
   storyBuildRepoChecks: (id: number, repoId: number) =>
     get<StoryBuildChecksPreview>(storyBuildPath('repoChecks', { id, repoId })),
   // Accept the plan revision on screen and build. 409 PlanMoved when a newer revision exists.
   acceptStoryBuild: (id: number, body: StoryBuildAcceptBody) =>
-    fetch(storyBuildPath('accept', { id }), jsonBody('POST', body)).then((r) => handle<unknown>(r)),
+    fetch(storyBuildPath('accept', { id }), jsonBody('POST', body)).then((r) => handle<StoryBuildActionResponse>(r)),
   retryStoryBuildRepo: (id: number, repoId: number) =>
-    fetch(storyBuildPath('repoRetry', { id, repoId }), jsonBody('POST')).then((r) => handle<unknown>(r)),
+    fetch(storyBuildPath('repoRetry', { id, repoId }), jsonBody('POST')).then((r) => handle<StoryBuildActionResponse>(r)),
   // The stored patch, fetched only when the reader opens the diff.
   storyBuildRepoDiff: (id: number, repoId: number) =>
     get<StoryBuildDiffResponse>(storyBuildPath('repoDiff', { id, repoId })),
@@ -1768,9 +1773,9 @@ export const api = {
   pushStoryBuildAll: (id: number, body: StoryBuildPushBody) =>
     fetch(storyBuildPath('pushAll', { id }), jsonBody('POST', body)).then((r) => handle<StoryBuildPushResponse>(r)),
   cancelStoryBuild: (id: number) =>
-    fetch(storyBuildPath('cancel', { id }), jsonBody('POST')).then((r) => handle<unknown>(r)),
+    fetch(storyBuildPath('cancel', { id }), jsonBody('POST')).then((r) => handle<StoryBuildCancelResponse>(r)),
   discardStoryBuild: (id: number) =>
-    fetch(storyBuildPath('discard', { id }), jsonBody('POST')).then((r) => handle<unknown>(r)),
+    fetch(storyBuildPath('discard', { id }), jsonBody('POST')).then((r) => handle<StoryBuildDiscardResponse>(r)),
 
   // ---- Bot triage (CORE, deterministic, no AI) ----
   //

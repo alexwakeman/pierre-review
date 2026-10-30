@@ -8,11 +8,15 @@ import {
   parseTicketIdent,
   type StoryBuild,
   type StoryBuildAcceptBody,
+  type StoryBuildActionResponse,
+  type StoryBuildCancelResponse,
+  type StoryBuildDiscardResponse,
   type StoryBuildErrorCode,
   type StoryBuildForTicketResponse,
   type StoryBuildPlanMessageBody,
   type StoryBuildStartBody,
   type StoryBuildStartResponse,
+  type StoryBuildStreamEvent,
 } from '@pierre-review/shared';
 import { preflightFor, resolveManualRunChoice } from '../../ai/run-choice.js';
 import { resolveWorkspaceScope } from '../../db/queries.js';
@@ -92,7 +96,7 @@ export async function storyBuildWire(ctx: AgentContext, accountId: number, row: 
 }
 
 /** One action's answer: 202 `{ buildId }`, or the refusal it maps to. */
-export function sendStoryBuildAction(reply: FastifyReply, res: StoryBuildActionResult): { buildId: number } | ErrorBody {
+export function sendStoryBuildAction(reply: FastifyReply, res: StoryBuildActionResult): StoryBuildActionResponse | ErrorBody {
   switch (res.status) {
     case 'queued':
       reply.status(202);
@@ -184,11 +188,13 @@ export function registerStoryBuildRoutes(app: FastifyInstance, ctx: AgentContext
       unsub();
       if (!raw.writableEnded) raw.end();
     };
+    const send = (e: StoryBuildStreamEvent): void => {
+      if (!raw.writableEnded) raw.write(`data: ${JSON.stringify(e)}\n\n`);
+    };
     // Subscribe BEFORE the snapshot so an ending pass cannot slip through the gap.
     const unsub = subscribeStoryBuild(id, (e) => {
-      if (e.type === 'progress') {
-        if (!raw.writableEnded) raw.write(`data: ${JSON.stringify(e.progress)}\n\n`);
-      } else cleanup();
+      send(e);
+      if (e.type === 'done') cleanup();
     });
     // A GET: the request's close is the client going away (CLAUDE.md: only a POST's fires early).
     req.raw.on('close', cleanup);
@@ -197,7 +203,7 @@ export function registerStoryBuildRoutes(app: FastifyInstance, ctx: AgentContext
       return;
     }
     const now = storyBuildLiveProgress(id);
-    if (now != null && !raw.writableEnded) raw.write(`data: ${JSON.stringify(now)}\n\n`);
+    if (now != null) send({ type: 'progress', progress: now });
   });
 
   // ---- POST start ----
@@ -330,7 +336,8 @@ export function registerStoryBuildRoutes(app: FastifyInstance, ctx: AgentContext
     if (id == null) return notFound(reply);
     const res = await cancelStoryBuild(ctx, ctx.accountIdOf(req), id);
     if (res.status === 'not_found') return notFound(reply);
-    return { status: res.status };
+    const out: StoryBuildCancelResponse = { status: res.status };
+    return out;
   });
 
   app.post(STORY_BUILD_API.discard, { schema: idParams }, async (req, reply) => {
@@ -340,7 +347,8 @@ export function registerStoryBuildRoutes(app: FastifyInstance, ctx: AgentContext
     const res = await discardStoryBuild(ctx, ctx.accountIdOf(req), id);
     if (res.status === 'not_found') return notFound(reply);
     if (res.status === 'not_ready') return fail(reply, 409, 'NotReady', 'Cancel the build before discarding it.');
-    return { status: res.status };
+    const out: StoryBuildDiscardResponse = { status: res.status };
+    return out;
   });
 
   registerStoryBuildBuildRoutes(app, ctx);

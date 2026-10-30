@@ -18,8 +18,10 @@ import type { StoryBuildTicketPr } from './inputs.js';
 //      A workspace with only a couple of repositories left needs no model: they are all read.
 //      No model (a test context, a failure) ⇒ the code picks, else the most recently active repositories.
 //   3. The BASE of each (owner decision 1): an OPEN ticket PR in that repository that is the READER'S OWN
-//      ⇒ stack on it (base = its head branch at its head; the new PR targets that branch). Someone else's
-//      open PR ⇒ the default branch, said in one line (`baseNote`). Otherwise the default branch.
+//      ⇒ stack on it (base = its head branch at its head; the new PR targets that branch) — unless GitHub
+//      says it was opened from a FORK (one live read, `unstackablePrs`): its branch is not in this
+//      repository, so the default branch, said in one line. Someone else's open PR ⇒ the default branch,
+//      said in one line (`baseNote`). Otherwise the default branch.
 //      The default branch's sha is resolved at checkout (checkouts.ts), so `baseSha` is '' until then.
 
 /** At most this many repositories are read without asking a model. */
@@ -60,16 +62,22 @@ export function codeCandidates(
   return out;
 }
 
-/** The base of one candidate (pure; owner decision 1). `defaultBranch` null ⇒ the remote's HEAD. */
+/**
+ * The base of one candidate (pure; owner decision 1). `defaultBranch` null ⇒ the remote's HEAD.
+ * `unstackable` names the reader's open PRs that must NOT be stacked on, with the one-line reason: a PR
+ * opened from a FORK (its head branch exists only on the fork, so a new PR here could not target it), or
+ * one whose head repository could not be checked (`pickCandidates` reads GitHub once per such PR).
+ */
 export function baseFor(
   repo: { id: number; defaultBranch: string | null },
   prs: readonly StoryBuildTicketPr[],
+  unstackable: ReadonlyMap<number, 'fork' | 'unknown'> = new Map(),
 ): Pick<StoryBuildCandidate, 'baseRef' | 'baseSha' | 'stackedOnPrId' | 'stackedOnPrNumber' | 'baseNote'> {
   const open = prs.filter((p) => p.repoId === repo.id && p.state === 'open');
-  const mine = open
-    .filter((p) => p.byReader && p.headRefName != null && p.headRefName !== '' && p.headSha !== '')
-    .sort((a, b) => b.number - a.number)[0];
+  const stackable = (p: StoryBuildTicketPr): boolean => p.byReader && p.headRefName != null && p.headRefName !== '' && p.headSha !== '';
+  const mine = open.filter((p) => stackable(p) && !unstackable.has(p.prId)).sort((a, b) => b.number - a.number)[0];
   const defaultRef = repo.defaultBranch ?? 'HEAD';
+  const defaultName = repo.defaultBranch ?? 'the default branch';
   if (mine != null) {
     return {
       baseRef: mine.headRefName!,
@@ -79,17 +87,49 @@ export function baseFor(
       baseNote: `Builds on your open PR #${mine.number}; the new PR targets its branch.`,
     };
   }
-  const other = open.sort((a, b) => b.number - a.number)[0];
-  return {
-    baseRef: defaultRef,
-    baseSha: '',
-    stackedOnPrId: null,
-    stackedOnPrNumber: null,
-    baseNote:
-      other != null
-        ? `#${other.number} on this ticket is someone else's, so this builds from ${repo.defaultBranch ?? 'the default branch'}.`
-        : null,
-  };
+  const skipped = open.filter((p) => stackable(p) && unstackable.has(p.prId)).sort((a, b) => b.number - a.number)[0];
+  const other = [...open].sort((a, b) => b.number - a.number)[0];
+  const note =
+    skipped != null
+      ? unstackable.get(skipped.prId) === 'fork'
+        ? `Your #${skipped.number} is from a fork, so this builds from ${defaultName}.`
+        : `Couldn't check your #${skipped.number} on GitHub, so this builds from ${defaultName}.`
+      : other != null
+        ? `#${other.number} on this ticket is someone else's, so this builds from ${defaultName}.`
+        : null;
+  return { baseRef: defaultRef, baseSha: '', stackedOnPrId: null, stackedOnPrNumber: null, baseNote: note };
+}
+
+/**
+ * The reader's open PRs a candidate would stack on that must not be: ONE live read per PR (the PR's head
+ * repository is not synced), through the existing `fetchPrHeadInfo`. A fork ⇒ 'fork'; a failed read ⇒
+ * 'unknown' (the default branch is the safe base). No GitHub seam (a test context) ⇒ nothing is checked.
+ */
+export async function unstackablePrs(
+  ctx: AgentContext,
+  accountId: number,
+  repos: ReadonlyArray<{ id: number; owner: string; name: string; defaultBranch: string | null }>,
+  prs: readonly StoryBuildTicketPr[],
+): Promise<Map<number, 'fork' | 'unknown'>> {
+  const out = new Map<number, 'fork' | 'unknown'>();
+  const fetch = ctx.github?.fetchPrHeadInfo;
+  if (typeof fetch !== 'function') return out;
+  for (const repo of repos) {
+    // Each candidate's stacked PR, re-picked until it is one GitHub says is not a fork.
+    for (;;) {
+      const base = baseFor(repo, prs, out);
+      if (base.stackedOnPrId == null || base.stackedOnPrNumber == null) break;
+      try {
+        const info = await fetch.call(ctx.github, accountId, repo.owner, repo.name, base.stackedOnPrNumber);
+        if (!info.isFork) break;
+        out.set(base.stackedOnPrId, 'fork');
+      } catch (err) {
+        ctx.log.warn({ err }, 'story build: checking a stacked PR failed');
+        out.set(base.stackedOnPrId, 'unknown');
+      }
+    }
+  }
+  return out;
 }
 
 // ---- the shortlist (one fast completion) ---------------------------------------------------------------
@@ -256,6 +296,8 @@ export async function pickCandidates(ctx: AgentContext, a: PickCandidatesArgs): 
     }
     for (const id of chosen ?? []) if (picks.length < STORY_BUILD_MAX_CANDIDATES) picks.push({ repoId: id, source: 'picked' });
   }
+  const picked = picks.map((p) => byId.get(p.repoId)).filter((r): r is WorkspaceRepoInfo => r != null);
+  const unstackable = await unstackablePrs(ctx, a.accountId, picked, a.prs);
   const candidates: StoryBuildCandidate[] = [];
   for (const p of picks) {
     const repo = byId.get(p.repoId);
@@ -265,7 +307,7 @@ export async function pickCandidates(ctx: AgentContext, a: PickCandidatesArgs): 
       repoId: repo.id,
       fullName: full(repo),
       source: p.source,
-      ...baseFor(repo, a.prs),
+      ...baseFor(repo, a.prs, unstackable),
     });
   }
   return { candidates, costUsd };

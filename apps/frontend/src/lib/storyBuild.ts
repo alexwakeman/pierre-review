@@ -119,8 +119,8 @@ export function storyBuildClosed(b: Pick<StoryBuild, 'status'> | null | undefine
 }
 
 /** The pass in flight, for the Cancel button. */
-export function storyBuildCancellable(b: Pick<StoryBuild, 'status'>): boolean {
-  return isStoryBuildRunning(b.status);
+export function storyBuildCancellable(b: Pick<StoryBuild, 'status' | 'docsStatus'>): boolean {
+  return isStoryBuildRunning(b.status) || b.docsStatus === 'running';
 }
 
 /** Discard is offered whenever nothing runs and something is left to throw away. */
@@ -256,6 +256,7 @@ export const STORY_BUILD_ERROR_WORDS: Record<Exclude<StoryBuildErrorCode, 'BadRe
   PlanBudgetSpent: 'The planning budget is spent. Accept the plan, or discard it and start again.',
   SessionBudgetSpent: 'This build’s budget is spent.',
   PlanMoved: 'The plan changed. Read the new one, then accept it.',
+  DocsMoved: 'The docs points changed since you looked. Tick them again.',
   NotFound: 'This build no longer exists.',
 };
 

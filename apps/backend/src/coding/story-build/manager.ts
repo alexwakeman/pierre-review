@@ -20,6 +20,7 @@ import {
   type StoryBuildProgress,
   type StoryBuildRepoStatus,
   type StoryBuildStatus,
+  type StoryBuildStreamEvent,
 } from '@pierre-review/shared';
 import { agenticRunEffort } from '../../ai/effort.js';
 import { claudeModelChoice, getProvider, requestModelOf, type AgentProviderId } from '../../ai/provider.js';
@@ -35,6 +36,7 @@ import {
   reviewSlotFree,
 } from '../../review/claude-review/manager.js';
 import { pickReviewNonce } from '../../review/claude-review/prompts.js';
+import { dropSessionBaseRefs } from './base-refs.js';
 import { pickCandidates } from './candidates.js';
 import { checkOutCandidates, type CheckOutFn, type PlanCheckouts } from './checkouts.js';
 import { assessCoverage, defaultCoverageSeams, gapRefsOf, type CoverageSeams } from './coverage.js';
@@ -147,8 +149,8 @@ interface Live {
   cancelled: boolean;
 }
 
-/** A frame of the session's SSE stream: progress, or the end of the pass. */
-export type StoryBuildStreamEvent = { type: 'progress'; progress: StoryBuildProgress } | { type: 'done' };
+/** A frame of the session's SSE stream: progress, or the end of the pass (the wire type is shared). */
+export type { StoryBuildStreamEvent };
 
 const live = new Map<number, Live>();
 const subs = new Map<number, Set<(e: StoryBuildStreamEvent) => void>>();
@@ -1037,6 +1039,8 @@ export async function discardStoryBuild(ctx: AgentContext, accountId: number, bu
     await releaseStoryBuildWorktree(names.get(r.repoId) ?? '', r.worktreePath).catch(() => {});
     await updateStoryBuildRepo(ctx, accountId, r.id, { worktreePath: null }).catch(() => {});
   }
+  // The session's pinned base commits go too (base-refs.ts); the sweep would, later.
+  await dropSessionBaseRefs([...(row.candidatesJson ?? []).map((c) => c.fullName), ...names.values()], buildId);
   return { status: 'discarded' };
 }
 

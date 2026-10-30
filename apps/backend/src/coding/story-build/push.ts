@@ -9,6 +9,7 @@ import {
 import type { AgentContext } from '../../review/agent-context.js';
 import { applyAndPushBranch } from '../git-ops.js';
 import { getViewerCanPush } from '../ai-fix/pr-context.js';
+import { dropSessionBaseRefs } from './base-refs.js';
 import { releaseStoryBuildWorktree } from './build.js';
 import {
   getStoryBuildRepoRow,
@@ -261,6 +262,21 @@ async function pushClaimed(ctx: AgentContext, a: PushRepoArgs, build: StoryBuild
         `${pr ? `Pull request #${pr.number}` : 'The pull request'}, which this build stacks on, is no longer open. Build this repository again to start from the default branch.`,
       );
     }
+    // ⚠ NEVER A FORK'S BRANCH: a PR opened from a fork has its head branch on the fork only, so a new PR
+    // here could not target it. The plan falls back to the default branch for one (candidates.ts); this
+    // re-reads GitHub at the press, since the PR's head repository is not synced.
+    let fork: boolean;
+    try {
+      fork = (await ctx.github.fetchPrHeadInfo(a.accountId, owner, name, pr.number)).isFork;
+    } catch {
+      return recordError('STACK_UNKNOWN', `Couldn't check pull request #${pr.number} on GitHub. Try again.`);
+    }
+    if (fork) {
+      return recordError(
+        'STACK_FORK',
+        `Pull request #${pr.number}, which this build stacks on, is from a fork, so a new pull request cannot target its branch. Discard this build and start again to build from the default branch.`,
+      );
+    }
     stackedNumber = pr.number;
     prBase = pr.headRefName ?? repo.baseRef;
   }
@@ -315,6 +331,11 @@ async function pushClaimed(ctx: AgentContext, a: PushRepoArgs, build: StoryBuild
       pushError: null,
     }).catch((err: unknown) => ctx.log.warn({ err }, 'story build: recording a push failed'));
     void releaseStoryBuildWorktree(fullName, repo.worktreePath);
+    // Every included repository pushed: the session's pinned base commits are needed no more.
+    const after = await listStoryBuildRepoRows(ctx, a.accountId, build.id).catch(() => null);
+    if (after != null && after.filter((r) => r.include).every((r) => r.id === repo.id || r.status === 'pushed')) {
+      void dropSessionBaseRefs([...(build.candidatesJson ?? []).map((c) => c.fullName), fullName], build.id);
+    }
     return result(a.repoId, 'pushed', null, null, { number: pushed.prNumber, url: pushed.prUrl });
   } catch (err) {
     const code = (err as { code?: string })?.code ?? 'failed';

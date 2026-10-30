@@ -18,6 +18,7 @@ import { protectedWriteReason } from '../../review/write-deny.js';
 import type { AgentContext } from '../../review/agent-context.js';
 import { buildInWorktree, type BuildInWorktreeResult } from '../agent.js';
 import { normalizeChangeReport } from '../ai-fix/review-seed.js';
+import { storyBuildBaseRef } from './base-refs.js';
 import { partialSpendOf } from '../partial-spend.js';
 import {
   buildStoryBuildSystemPrompt,
@@ -229,7 +230,17 @@ export const buildRepo: BuildRepoFn = async (ctx, a) => {
     try {
       const token = await getAccessToken(a.accountId);
       made = await withWorktreeOwner({ kind: 'story_build', accountId: a.accountId, ticket: a.build.ident, runId: a.repo.id }, () =>
-        prepBranchWorktree(owner, name, { remoteRef: `refs/heads/${a.repo.baseRef}`, destRef: STORY_BUILD_BASE_REF, sha: a.repo.baseSha }, token),
+        prepBranchWorktree(
+          owner,
+          name,
+          {
+            remoteRef: `refs/heads/${a.repo.baseRef}`,
+            destRef: STORY_BUILD_BASE_REF,
+            sha: a.repo.baseSha,
+            pinRef: storyBuildBaseRef(a.build.id, a.repo.repoId),
+          },
+          token,
+        ),
       );
     } catch (err) {
       if (controller.signal.aborted) return cancelled();

@@ -5,7 +5,7 @@
 //     criteria covered, the ticket link, sibling PRs, "Closes" on a single-repository GitHub Issues build
 //     only, the product footer), the protected refs, the stacked base;
 //   • outcomes recorded on the row: pushed (status + PR), BRANCH_EXISTS (a sentence, no clobber), a
-//     closed stacked PR refused before any push, no write permission refused, PR_NOT_OPENED keeps the
+//     closed stacked PR refused before any push, a stacked PR from a FORK (read live) refused too, no write permission refused, PR_NOT_OPENED keeps the
 //     branch it pushed; the manual tracker link written once the PR syncs;
 //   • Push all: every unpushed ready repository IN PLAN ORDER, each on its own, a later body linking
 //     the earlier PR;
@@ -26,6 +26,7 @@ const G = vi.hoisted(() => ({
   fail: null as null | { code: string; message: string; commitSha?: string },
   links: [] as any[],
   nextPr: 100,
+  forks: new Set<number>(),
 }));
 
 vi.mock('../git-ops.js', () => ({
@@ -115,6 +116,15 @@ beforeAll(async () => {
     log: { warn: () => {}, info: () => {}, error: () => {} },
     accountIdOf: (req: any) => Number(req.headers['x-account'] ?? 1),
     github: {
+      // The stacked PR's head repository, read live at the press (a fork is refused).
+      fetchPrHeadInfo: async (_acct: number, _owner: string, _name: string, number: number) => ({
+        headSha: 'h',
+        headRef: 'r',
+        headRepoFullName: G.forks.has(number) ? 'someone/fork' : 'acme/api',
+        isFork: G.forks.has(number),
+        maintainerCanModify: false,
+        baseRef: 'main',
+      }),
       fetchRepoFiles: async (_acct: number, a: any) => {
         fetched.push(a);
         return { 'package.json': JSON.stringify({ scripts: { test: 'vitest run' } }) };
@@ -280,6 +290,15 @@ describe('pushRepo', () => {
     expect(G.pushes[0]).toMatchObject({ prBase: 'u1/refunds-base', baseRef: 'u1/refunds-base' });
     expect(G.pushes[0].protect).toEqual(['main', 'u1/refunds-base']);
     expect(G.pushes[0].body).toContain('Stacked on #31.');
+
+    // A PR from a FORK: its branch is not in this repository, so nothing is pushed.
+    G.forks.add(31);
+    const sf = await readySession({ stackedOnPrId: pr.id });
+    const forked = await push.pushRepo(ctx, { accountId: 1, buildId: sf.id, repoId: api, draft: true });
+    G.forks.delete(31);
+    expect(forked).toMatchObject({ outcome: 'failed', code: 'STACK_FORK' });
+    expect(forked.error).toContain('is from a fork');
+    expect(G.pushes).toHaveLength(1);
 
     const s2 = await readySession({ stackedOnPrId: pr.id });
     await db.update(schema.pullRequests).set({ state: 'merged' }).where((await import('drizzle-orm')).eq(schema.pullRequests.id, pr.id)).execute();

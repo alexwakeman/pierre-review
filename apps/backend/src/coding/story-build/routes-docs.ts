@@ -7,6 +7,7 @@ import {
   type StoryBuildDocsDecision,
   type StoryBuildDocsDecisions,
   type StoryBuildDocsDecisionsBody,
+  type StoryBuildDocsDecisionsResponse,
   type StoryBuildDocsResponse,
   type StoryBuildErrorCode,
 } from '@pierre-review/shared';
@@ -26,7 +27,8 @@ import { getStoryBuildRow, updateStoryBuild } from './persist.js';
 //        · 409 SessionBudgetSpent · 400 NoClaudeAuth
 //   PUT  /api/story-builds/:id/docs/decisions { decisions }   DB only                         → read
 //        Ids not in the current docs (and grounded items: no decision) are dropped; the rest MERGE over
-//        the stored ones. Answers the decisions in force. 409 NotReady once the plan is accepted (frozen).
+//        the stored ones. Answers the decisions in force. 409 NotReady once the plan is accepted (frozen);
+//        409 DocsMoved when `planRevision` / `runId` name another docs run than the stored one.
 //
 // TENANCY: every read is `getStoryBuildRow(ctx, accountId, id)` — another account's id is 404.
 
@@ -60,9 +62,11 @@ const decisionsBody = {
   ...idParams,
   body: {
     type: 'object',
-    required: ['decisions'],
+    required: ['decisions', 'planRevision'],
     additionalProperties: false,
     properties: {
+      planRevision: { type: 'integer', minimum: 0 },
+      runId: { type: ['string', 'null'], maxLength: 64 },
       decisions: {
         type: 'object',
         maxProperties: 100,
@@ -99,7 +103,7 @@ export function registerStoryBuildDocsRoutes(app: FastifyInstance, ctx: AgentCon
     return { outcome: 'started', buildId: id, message: null };
   });
 
-  app.put(STORY_BUILD_API.docsDecisions, { schema: decisionsBody }, async (req, reply): Promise<StoryBuildDocsDecisionsBody | ErrorBody> => {
+  app.put(STORY_BUILD_API.docsDecisions, { schema: decisionsBody }, async (req, reply): Promise<StoryBuildDocsDecisionsResponse | ErrorBody> => {
     if (!AGENTIC_AI_ENABLED) return notFound(reply);
     const id = Number((req.params as { id: string }).id);
     const accountId = ctx.accountIdOf(req);
@@ -109,7 +113,13 @@ export function registerStoryBuildDocsRoutes(app: FastifyInstance, ctx: AgentCon
     if (row.status !== 'plan_ready') return fail(reply, 409, 'NotReady', 'The plan is accepted: the docs points are frozen.');
     // A run in flight replaces these points (and starts its decisions afresh): a choice now would be lost.
     if (row.docsStatus === 'running' || storyBuildDocsHeld(id)) return fail(reply, 409, 'NotReady', 'The docs are being weighed again.');
-    const asked = (req.body as StoryBuildDocsDecisionsBody).decisions;
+    const body = req.body as StoryBuildDocsDecisionsBody;
+    // ⚠ THE RUN THE READER WAS LOOKING AT: a newer run reuses the ids D1… for different points, so a tick
+    // aimed at the old ones must never land on the new ones. The SPA re-reads the session on 409.
+    if (body.planRevision !== row.docsJson.planRevision || (body.runId ?? null) !== (row.docsJson.runId ?? null)) {
+      return fail(reply, 409, 'DocsMoved', 'The docs points changed since you looked. Tick them again.');
+    }
+    const asked = body.decisions;
     const merged: StoryBuildDocsDecisions = {};
     for (const it of row.docsJson.items) {
       // Grounded items carry no decision.

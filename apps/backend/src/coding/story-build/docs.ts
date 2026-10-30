@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -168,7 +169,8 @@ export const runBuildDocs: RunBuildDocsFn = async (ctx, { accountId, buildId, fo
       docsStatus: set.docsStatus,
       docsError: set.docsError,
       // A NEW run starts its decisions afresh: its ids (D1…) name different points.
-      ...(set.docsJson !== undefined ? { docsJson: set.docsJson, docsDecisionsJson: null } : {}),
+      // Each stored run gets its own token: the decisions PUT names the run it was aimed at.
+      ...(set.docsJson !== undefined ? { docsJson: { ...set.docsJson, runId: randomUUID() }, docsDecisionsJson: null } : {}),
       ...(spentUsd > 0 ? { docsCostUsd: (now?.docsCostUsd ?? 0) + spentUsd } : {}),
       // The phase is the docs run's only while no plan or build pass owns it.
       ...(!isStoryBuildRunning(now.status) ? { phase: null } : {}),

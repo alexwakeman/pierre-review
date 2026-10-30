@@ -312,7 +312,8 @@ describe('Implement story, end to end', () => {
   });
 
   it('decisions, then a re-plan WITH the docs points (fenced): nothing pending after it', async () => {
-    const d = await put(`/api/story-builds/${id}/docs/decisions`, { decisions: { D1: 'include' } });
+    const shown = (await get(`/api/story-builds/${id}`)).json().docs;
+    const d = await put(`/api/story-builds/${id}/docs/decisions`, { decisions: { D1: 'include' }, planRevision: shown.planRevision, runId: shown.runId });
     expect(d.json()).toEqual({ decisions: { D1: 'include', D2: 'include' } });
     expect((await post(`/api/story-builds/${id}/plan/message`, { text: 'Use the docs.' })).statusCode).toBe(202);
     await idle();
@@ -356,7 +357,7 @@ describe('Implement story, end to end', () => {
     // Ledger: plan passes + the docs read here; the build's row is buildRepo's own (a fake writes none).
     expect(usage.map((u) => u.feature).sort()).toEqual(['story_build_docs', 'story_plan', 'story_plan', 'story_plan']);
     // Decisions are frozen now.
-    expect((await put(`/api/story-builds/${id}/docs/decisions`, { decisions: { D1: 'ignore' } })).statusCode).toBe(409);
+    expect((await put(`/api/story-builds/${id}/docs/decisions`, { decisions: { D1: 'ignore' }, planRevision: 0, runId: null })).statusCode).toBe(409);
   });
 
   it('the diff, then a retry through the manager lane (never 503)', async () => {
