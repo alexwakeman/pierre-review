@@ -1,5 +1,6 @@
 import type { AiProviderId, CiStatus, JiraStatusCategory, TrackerProvider } from './types.js';
 import type { StoryReferenceRelation } from './story-health.js';
+import type { SprintNodeBuild } from './story-build.js';
 import type {
   SprintReadState,
   SprintSource,
@@ -215,6 +216,11 @@ export interface SprintGraphNode {
    *  request of any state (`sprintCodeAsked`); null / absent for every other ticket (a ticket with a
    *  pull request needs no guess). The SPA's "Needs code" filter reads it. */
   codeJudgement?: SprintCodeJudgement | null;
+  /** "Implement story" (docs/STORY-BUILD.md): the ticket's latest OPEN build session, coarse (status +
+   *  repository counts — it rides the change token). null when none is open, for a ghost, and whenever
+   *  AI is off. Absent from an older server. The card's mark is `storyBuildMark(build)`; the Implement
+   *  button's gate is `storyBuildOffered(node)`. */
+  build?: SprintNodeBuild | null;
 }
 
 // ── "Needs code": the judgement on not-started tickets ──────────────────────────────────────────

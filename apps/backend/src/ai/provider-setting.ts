@@ -9,6 +9,7 @@ import { codexCredentialRunnable, resolveAiCredential, resolveCodexCredential } 
 import { CODEX_DOCS_KINDS } from './codex/kinds/docs.js';
 import { CODEX_FIX_KINDS } from './codex/kinds/fix.js';
 import { CODEX_REVIEW_KINDS } from './codex/kinds/review.js';
+import { CODEX_STORY_BUILD_KINDS } from './codex/kinds/story-build.js';
 import { CODEX_TICKETS_KINDS } from './codex/kinds/tickets.js';
 import type { AgentKind } from './provider.js';
 
@@ -75,6 +76,8 @@ export const CODEX_AGENT_KINDS: ReadonlySet<AgentKind> = new Set<AgentKind>([
   ...CODEX_FIX_KINDS,
   ...CODEX_TICKETS_KINDS,
   ...CODEX_DOCS_KINDS,
+  // "Implement story" (listed from its contract commit — see that file's header).
+  ...CODEX_STORY_BUILD_KINDS,
 ]);
 
 /** Can Codex run this agent kind in this version? (`allow` is for tests.) */
@@ -97,6 +100,8 @@ const KIND_WORDS: Record<AgentKind, string> = {
   story_docs: 'checks against docs',
   docs_build: 'the docs library',
   docs_chat: 'the docs chat',
+  story_plan: 'story plans',
+  story_build: 'story builds',
 };
 
 /** Every agent kind (the KIND_WORDS keys, so a new kind cannot be missed: the Record is exhaustive). */

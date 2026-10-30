@@ -66,6 +66,8 @@ export function aiUsageFeatureGroup(feature: string): AiUsageFeatureGroup {
   if (f === 'ticket_review' || f === 'story_labels') return 'story';
   if (f === 'ci_review' || f === 'ci_analysis') return 'ci';
   if (f === 'ai_fix' || f === 'ai_fix_plan') return 'fix';
+  // "Implement story" (story-build.ts STORY_BUILD_LEDGER_FEATURES) writes code like AI Fix does.
+  if (f === 'story_plan' || f === 'story_build' || f === 'story_build_docs' || f === 'story_build_repos') return 'fix';
   if (f === 'claude_review_chat') return 'chat';
   if (f === 'sequence_diagram') return 'diagrams';
   // `sprint_report` is the Reports sprint narration (a summary), not the Sprint view.
