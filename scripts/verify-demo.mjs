@@ -79,7 +79,56 @@ const VIEWS = [
         if (PHONE) await page.getByRole('tab', { name: /^Library/ }).first().click();
         await page.getByText('1 figure described by AI').first().waitFor({ timeout: 10_000 });
       },
-      expect: ['Release handbook', 'Confluence · 3 pages', 'Refresh now', 'Can’t reach this page in Confluence since', 'Checkout design notes', 'Notion · 2 pages', '1 figure described by AI'],
+      expect: ['Release handbook', 'Confluence · 3 pages', 'Can’t reach this page in Confluence since', 'Checkout design notes', 'Notion · 2 pages', '1 figure described by AI', 'On-call runbooks', 'GitHub · 3 pages'],
+    },
+  ],
+  // A document's "…" menu holds Refresh now, Rebuild and Remove (docs/REFERENCE-DOCS.md § The SPA).
+  [
+    'docs:menu',
+    '?view=activity&activityRepo=docs',
+    null,
+    {
+      act: async (page) => {
+        await page.getByRole('button', { name: 'More actions for Release handbook' }).first().click();
+      },
+      expect: ['Refresh now', 'Rebuild', 'Remove…'],
+    },
+  ],
+  // THE ADD-DOCUMENTS WIZARD: a GitHub folder (its folders counted), and a whole Confluence space.
+  [
+    'docs:wizard-github',
+    '?view=activity&activityRepo=docs',
+    'docs-wizard',
+    {
+      act: async (page) => {
+        if (PHONE) await page.getByRole('tab', { name: /^Library/ }).first().click();
+        await page.getByRole('button', { name: 'Add documents' }).first().click();
+        await page.getByText('GitHub repository', { exact: true }).first().click();
+        await page.getByRole('button', { name: 'Next' }).click();
+        await page.getByPlaceholder('owner/name').fill('acme/web');
+        await page.getByRole('button', { name: 'Next' }).click();
+        await page.getByText('docs/adr', { exact: true }).waitFor({ timeout: 10_000 });
+        await page.getByText('docs', { exact: true }).first().click();
+        await page.getByRole('button', { name: 'Next' }).click();
+      },
+      expect: ['This will add 11 documents from acme/web/docs.', 'Start'],
+    },
+  ],
+  [
+    'docs:wizard-confluence',
+    '?view=activity&activityRepo=docs',
+    null,
+    {
+      act: async (page) => {
+        if (PHONE) await page.getByRole('tab', { name: /^Library/ }).first().click();
+        await page.getByRole('button', { name: 'Add documents' }).first().click();
+        await page.getByText('Confluence', { exact: true }).first().click();
+        await page.getByRole('button', { name: 'Next' }).click();
+        await page.getByRole('button', { name: 'Next' }).click();
+        await page.getByPlaceholder(/atlassian\.net/).fill('https://acme.atlassian.net/wiki/spaces/ENG/overview');
+        await page.getByRole('button', { name: 'Next' }).click();
+      },
+      expect: ['This will add 42 pages from the whole Engineering wiki.', 'Read with your Jira connection.'],
     },
   ],
   ...['themes', 'paths', 'people', 'merged'].map((t) => [`sprint:${t}`, `?view=sprint&sprintTab=${t}`, t === 'themes' ? 'sprint-themes' : t === 'paths' ? 'sprint-paths' : null]),

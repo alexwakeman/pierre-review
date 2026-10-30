@@ -24,6 +24,7 @@
 import { createHash } from 'node:crypto';
 import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import type { WikiScope } from '@pierre-review/shared';
 // @ts-expect-error — a plain ESM module shared with the recorder (scripts/lib), no types.
 import { DEMO_DIFFS, TERRAFORM_PLAN_JOB_ID, TERRAFORM_PLAN_LOG, addedLines, fileStats, unifiedDiff } from '../../../scripts/lib/demo-diffs.mjs';
 import { ticketIdent } from './seed-demo-tracker.js';
@@ -1179,7 +1180,10 @@ interface DemoSection {
 
 interface DemoWiki {
   /** Absent ⇒ Confluence. */
-  provider?: 'confluence' | 'notion';
+  provider?: 'confluence' | 'notion' | 'github';
+  /** What the source covers (the add-documents wizard's sources); absent ⇒ a page + `depth` levels. */
+  scope?: WikiScope;
+  rootTitle?: string;
   rootPageId: string;
   depth: number;
   checkedHoursAgo: number;
@@ -1259,7 +1263,16 @@ const LIBRARY: Array<{ slug: string; title: string; source: string; summary: str
     source: 'https://acme.atlassian.net/wiki/spaces/PLAT/pages/40001/Release+handbook',
     summary: 'How Acme platform changes ship: the release train, the freeze, and rolling back.',
     topics: ['releases', 'deploys', 'feature flags', 'rollback'],
-    wiki: { rootPageId: '40001', depth: 1, checkedHoursAgo: 2, editedHoursAgo: 30, pages: ['40001', '40002', '40003'] },
+    // Added from the wizard as the WHOLE Platform space (its home page): every page below it.
+    wiki: {
+      rootPageId: '40001',
+      depth: 32,
+      checkedHoursAgo: 2,
+      editedHoursAgo: 30,
+      pages: ['40001', '40002', '40003'],
+      scope: { kind: 'space', name: 'Platform', key: 'PLAT', id: '65537' },
+      rootTitle: 'Platform',
+    },
     sections: [
       {
         title: 'Release handbook',
@@ -1306,6 +1319,78 @@ const LIBRARY: Array<{ slug: string; title: string; source: string; summary: str
         title: 'Retries',
         summary: 'Retry a payment call only with the same idempotency key.',
         body: 'A call to payments is retried at most three times, with the same idempotency key every time, so a retry never charges twice.\n\nThe customer sees one spinner for all of it, and a plain error after the last try.',
+      },
+    ],
+  },
+  // A Confluence SUBTREE from the wizard (docs/REFERENCE-DOCS.md § Wiki sources → Scopes): the
+  // "On-call runbooks" page and every page below it, never its siblings — a second section of the OPS
+  // space beside "Incident process", each its own source.
+  {
+    slug: 'on-call-runbooks',
+    title: 'On-call runbooks',
+    source: 'https://acme.atlassian.net/wiki/spaces/OPS/pages/52100/On-call+runbooks',
+    summary: 'What the on-call engineer does for the three alerts that page most often.',
+    topics: ['on-call', 'alerts', 'queues', 'databases'],
+    wiki: {
+      rootPageId: '52100',
+      depth: 32,
+      checkedHoursAgo: 3,
+      editedHoursAgo: 52,
+      pages: ['52100', '52101', '52102'],
+      scope: { kind: 'tree' },
+      rootTitle: 'On-call runbooks',
+    },
+    sections: [
+      {
+        title: 'On-call runbooks',
+        summary: 'Start here: acknowledge, look at the dashboard, then open the runbook for the alert.',
+        body: 'Acknowledge the page within five minutes. Open the service dashboard before you change anything, and write what you see in the incident channel.\n\nEach alert below has its own runbook. If none fits, declare an incident.',
+      },
+      {
+        title: 'Sync queue backed up',
+        summary: 'Check the dead-letter queue first; re-drive only after the cause is fixed.',
+        body: 'When the sync queue is older than fifteen minutes, look at the dead-letter queue first. A message that failed three times will fail again until its cause is fixed.\n\nScale the workers only when the queue is long and nothing is failing.',
+      },
+      {
+        title: 'Database connections exhausted',
+        summary: 'Find the long transaction; never raise the pool size during an incident.',
+        body: 'Find the longest-running transaction and the service that holds it. Do not raise the pool size during an incident: it moves the limit to the database.',
+      },
+    ],
+  },
+  // A GITHUB REPOSITORY folder from the wizard (docs/REFERENCE-DOCS.md § GitHub repositories): the
+  // markdown under acme/web's docs/ — the folder's README is its own text, each document a chapter.
+  {
+    slug: 'acme-web-docs',
+    title: 'web/docs',
+    source: 'https://github.com/acme/web/tree/main/docs',
+    summary: 'The web app’s own docs: how it is laid out, how to run it, and the decisions behind it.',
+    topics: ['frontend', 'architecture', 'local setup', 'decisions'],
+    wiki: {
+      provider: 'github',
+      rootPageId: 'gZG9jcw',
+      depth: 32,
+      checkedHoursAgo: 1,
+      editedHoursAgo: 70,
+      pages: ['gZG9jcw', 'gZG9jcy9kZXZlbG9wbWVudC5tZA', 'gZG9jcy9hZHI'],
+      scope: { kind: 'repo', owner: 'acme', repo: 'web', path: 'docs', branch: 'main' },
+      rootTitle: 'web/docs',
+    },
+    sections: [
+      {
+        title: 'web/docs',
+        summary: 'How the web app is laid out: routes, the API client and shared state.',
+        body: 'The web app is one React app. Each route lives in its own folder under `src/routes`, and every call to the platform API goes through `src/api/client.ts`.\n\nShared state is kept in small stores, one per concern. A component reads the store it needs and nothing else.',
+      },
+      {
+        title: 'development.md',
+        summary: 'Run the app locally against a seeded API.',
+        body: 'Run `pnpm dev` from the repository root. The app starts on port 5173 and talks to a local API seeded with fictional data.\n\nTests run with `pnpm test`. A change to a shared type needs a test on both sides.',
+      },
+      {
+        title: 'adr',
+        summary: 'Architecture decisions: why the app polls instead of holding a socket.',
+        body: 'Decision 7: the app polls for changes every few seconds instead of holding a socket open. Polling survives sleeping laptops and proxies, and the server answers an unchanged poll cheaply.',
       },
     ],
   },
@@ -1358,7 +1443,7 @@ async function seedReferenceDocs(c: AgenticSeedCtx): Promise<number> {
         ? {
             wiki: {
               provider: d.wiki.provider ?? 'confluence',
-              origin: d.wiki.provider === 'notion' ? 'https://www.notion.so' : 'https://acme.atlassian.net',
+              origin: d.wiki.provider === 'notion' ? 'https://www.notion.so' : d.wiki.provider === 'github' ? 'https://github.com' : 'https://acme.atlassian.net',
               rootPageId: d.wiki.rootPageId,
               rootUrl: d.source,
               depth: d.wiki.depth,
@@ -1370,6 +1455,7 @@ async function seedReferenceDocs(c: AgenticSeedCtx): Promise<number> {
               unreachableSince: d.wiki.unreachableHoursAgo != null ? hoursAgoMs(d.wiki.unreachableHoursAgo) : null,
               unreachableReason: d.wiki.unreachableHoursAgo != null ? 'forbidden' : null,
               retryAfter: null,
+              ...(d.wiki.scope ? { scope: d.wiki.scope, rootTitle: d.wiki.rootTitle ?? d.title } : {}),
             },
           }
         : {}),
