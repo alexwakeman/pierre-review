@@ -88,6 +88,7 @@ import {
   type TeamClaimHandle,
 } from './team-claim.js';
 import { ensureSonarSnapshot } from '../../sonar/snapshot.js';
+import { withWorktreeOwner } from '../worktree-owner.js';
 
 // The Claude Review queue/concurrency/SSE manager (CORE, free, local-only) — the analog of the
 // AI-Fix manager. It owns the product pipeline (prepare → route → prompt → run → persist), calling
@@ -1148,7 +1149,7 @@ async function runPipeline(
     nonce,
   });
 
-  const res = await ctx.review.runReview({
+  const res = await withWorktreeOwner({ kind: 'review', accountId: item.accountId, prId: item.prId, runId: reviewId }, () => ctx.review.runReview({
     owner: prCtx.owner,
     name: prCtx.name,
     prNumber: prCtx.number,
@@ -1178,7 +1179,7 @@ async function runPipeline(
         recentActivity: p.recentActivity,
         usage: p.usage,
       }),
-  });
+  }));
 
   emit({ phase: 'persisting' });
   // What ran (provider + model id), whatever the outcome — before the row's status moves.

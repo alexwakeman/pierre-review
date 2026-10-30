@@ -358,11 +358,21 @@ export const config = {
   conflictModelTimeoutMs: intFromEnv('CONFLICT_MODEL_TIMEOUT_MS', 45_000),
   conflictSessionTtlMs: intFromEnv('CONFLICT_SESSION_TTL_MIN', 30) * 60_000,
   conflictSuggestMaxChars: intFromEnv('CONFLICT_SUGGEST_MAX_CHARS', 4000),
-  // A worktree older than this is an ORPHAN — its run died without its `finally`. The
-  // startup sweep prunes it, and the LRU may evict its repo despite `.worktrees/` being
-  // non-empty. Without this one crashed run pins a repo in the cache permanently.
+  // A worktree with NO ledger row older than this is an ORPHAN — its run died without its
+  // `finally`, or predates the ledger. The worktree sweep removes it, and the LRU may evict its repo
+  // despite `.worktrees/` being non-empty. Without this one crashed run pins a repo permanently.
   worktreeTtlMs: intFromEnv('WORKTREE_TTL_HOURS', 6) * 3_600_000,
   cloneSweepMaxMs: intFromEnv('CLONE_SWEEP_MAX_MS', 30_000),
+  // ---- The worktree sweep (review/worktree-gc.ts; docs/BACKEND.md § Worktree cleanup) ----
+  // A ledgered checkout another live Limn process made is kept until idle this long; one whose
+  // maker has exited, whose run ended or whose PR closed goes at the next sweep regardless.
+  worktreeIdleMs: intFromEnv('WORKTREE_IDLE_DAYS', 3) * 86_400_000,
+  // A checkout holding work the reader may still push is kept until pushed or discarded, or this long.
+  worktreePinMaxMs: intFromEnv('WORKTREE_PIN_DAYS', 14) * 86_400_000,
+  // A run making a worktree kicks a sweep at most this often; the boot always runs one.
+  worktreeSweepMinGapMs: intFromEnv('WORKTREE_SWEEP_MIN_GAP_MIN', 10) * 60_000,
+  // One sweep stops looking after this long (it runs in the background; the rest waits for the next).
+  worktreeSweepMaxMs: intFromEnv('WORKTREE_SWEEP_MAX_MS', 120_000),
   // ---- The clone-cache janitor (conflict/janitor.ts, scheduled in sync/scheduler.ts) ----
   // The boot sweep runs ONCE; a long-lived process accumulates a session's two fetch refs per
   // resolver opened and never closed, and each ref pins objects the repack cannot drop. This is

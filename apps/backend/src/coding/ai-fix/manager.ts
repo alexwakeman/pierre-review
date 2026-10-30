@@ -74,6 +74,7 @@ import { agenticRunEffort } from '../../ai/effort.js';
 import { claudeModelChoice, getProvider, requestModelOf, type AgentProviderId, type AiRanOn } from '../../ai/provider.js';
 import { providerName } from '../../ai/prompt-tools.js';
 import { followUpProvider, preflightFor } from '../../ai/run-choice.js';
+import { withWorktreeOwner } from '../../review/worktree-owner.js';
 
 // In-memory job manager for AI Fix's agentic fixer (CORE, free, local-only — it left the plugin
 // with Claude Review; the PR summary and the CI-failure analysis stayed Pro). A SINGLE global slot (concurrency 1) carries every
@@ -640,7 +641,7 @@ async function launchFix(ctx: AgentContext, job: FixJob): Promise<void> {
     // row stores it for the label).
     const effort = agenticRunEffort(job.provider, claudeModelChoice(job.model), 'worktree');
     await markFixRanOn(ctx, job.fixId, ranOnFor(job.provider, job.model, effort));
-    const result = await ctx.coding.generateFix({
+    const result = await withWorktreeOwner({ kind: 'fix', accountId: job.accountId, prId: job.prId, runId: job.fixId }, () => ctx.coding.generateFix({
       accountId: job.accountId,
       owner: job.owner,
       name: job.name,
@@ -654,7 +655,7 @@ async function launchFix(ctx: AgentContext, job: FixJob): Promise<void> {
       prId: job.prId,
       provider: job.provider,
       effort,
-    });
+    }));
 
     if (result.aborted || controller.signal.aborted) {
       await markFixCancelled(ctx, job.fixId);
@@ -760,7 +761,7 @@ async function launchPlanPass(ctx: AgentContext, job: PlanJob): Promise<void> {
     // What this planning pass runs on (the provider the prompt was worded for, and its model id).
     const effort = agenticRunEffort(job.provider, claudeModelChoice(job.model), 'worktree');
     await markPlanRanOn(ctx, job.fixId, ranOnFor(job.provider, job.model, effort));
-    const result = await ctx.coding.generatePlan({
+    const result = await withWorktreeOwner({ kind: 'plan', accountId: job.accountId, prId: job.prId, runId: job.fixId }, () => ctx.coding.generatePlan({
       accountId: job.accountId,
       owner: job.owner,
       name: job.name,
@@ -776,7 +777,7 @@ async function launchPlanPass(ctx: AgentContext, job: PlanJob): Promise<void> {
       prId: job.prId,
       provider: job.provider,
       effort,
-    });
+    }));
     const pass = { costUsd: result.costUsd, usage: result.usage, ...(result.usageRecorded ? { usageRecorded: true } : {}) };
     if (result.aborted || controller.signal.aborted) {
       await markPlanPassEnded(ctx, job.fixId, { kind: 'cancelled' }, pass);

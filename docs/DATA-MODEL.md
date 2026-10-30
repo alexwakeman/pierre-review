@@ -663,6 +663,17 @@ moved repo's rows (`dropRepoRelations`) and every reader joins membership. Off b
 `claude_reviews.peers_read` (same migration) records what a run read beside the PR (`ReviewPeerRead[]`;
 NULL = nothing or an older row).
 
+## `worktree_ledger` — which run a checkout on disk belongs to (CORE; migration `0146`)
+
+One row per per-run checkout `addWorktree` made under `<cloneDir>/<owner__name>/.worktrees/`: the
+owner (`kind`, `pr_id`, `ticket`, `run_id`), the creating process (`pid` + a per-boot `instance`
+token), `pin_reason`, created / last-used / released / removed, and on close `remove_reason` +
+`bytes_reclaimed`. MACHINE bookkeeping, not product data: `account_id` is NULLABLE, nothing joins it
+into a product read, and no FK points at it. It is on `accountScopedTables()` and erased with the
+account; it is NOT in the data export. Closed rows are deleted after 30 days (they feed Settings →
+AI → Disk space's "freed" figure). Every write is best-effort and never fails a run. The sweep that
+reads it and its rules: [BACKEND.md](BACKEND.md) § Worktree cleanup.
+
 ## Claude + Codex pairs (CORE; migration `0135`)
 
 A pair is TWO ordinary `claude_reviews` rows ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Claude + Codex):
@@ -1101,6 +1112,7 @@ and check every hit against its table's declared unique.**
 | `tracker_ticket_comments` | `[accountId, provider, apiRoot, issueKey, commentId]` (`tracker_ticket_comments_ticket_comment`) | `tracker/comments.ts` `writeTicketComments` (the worker, once per ticket per read) |
 | `pro_jira_ac_fields` | `[accountId, workspaceId, apiRoot, issueTypeId]` (`pro_jira_ac_fields_account_ws_site_type`) | `tracker/store.ts` `writeAcFieldSetting` |
 | `ticket_review_pr_cards` | `[accountId, prId, headSha]` (`trpc_account_pr_head_ux`), `onConflictDoUpdate` (replaces `card`, `source`, `model`, `cost_usd`, `created_at`) | `review/ticket-review/cards.ts` `saveCards` (the ONLY writer: pre-pass + story-check cards) |
+| `worktree_ledger` | `[path]` (`worktree_ledger_path`), `onConflictDoUpdate` (overwrites the whole row and reopens it: a recycled pid reached the same per-run path) | `review/worktree-ledger.ts` `recordWorktreeCreated` (the ONLY insert; `recordWorktreeReleased` and the sweep's `closeRow` only UPDATE) |
 | `accounts` | the account uniques | `auth/account.ts` (`ensureLocalAccount`) |
 | `repos` head/trunk columns | `[accountId, githubNodeId]` / `branch_commits` composite | `sync/branch-status.ts`, `sync/sync-repo.ts` |
 

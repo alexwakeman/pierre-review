@@ -8664,6 +8664,20 @@ export type AiFixModel = ClaudeReviewModel;
 export const DEFAULT_AI_FIX_MODEL: AiFixModel = 'claude-opus-5-5';
 
 
+// GET /api/storage/clones — what Limn's clone cache holds on disk (Settings → AI → Disk space;
+// backend review/worktree-gc.ts `getWorktreeStorage`). Machine-wide, not per workspace.
+export interface CloneStorageResponse {
+  /** The shared repository copies, without the per-run checkouts. */
+  cloneBytes: number;
+  /** Per-run checkouts on disk right now (in use, held, or waiting for the next sweep). */
+  checkouts: number;
+  checkoutBytes: number;
+  /** What the worktree sweep removed in the last 30 days; null when the ledger could not be read. */
+  freedBytes30d: number | null;
+  /** When this process last finished a sweep (ISO-8601); null before the first. */
+  lastSweepAt: string | null;
+}
+
 // ---- the agentic fixer (aiFix capability) ----
 
 export type AiFixStatus =

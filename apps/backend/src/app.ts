@@ -15,6 +15,7 @@ import { healthRoutes } from './api/routes/health.js';
 import { aiRuntimeRoutes } from './api/routes/ai-runtime.js';
 import { aiCodexRoutes } from './api/routes/ai-codex.js';
 import { aiBudgetRoutes } from './api/routes/ai-budget.js';
+import { storageRoutes } from './api/routes/storage.js';
 import { aiProviderRoutes } from './api/routes/ai-provider.js';
 import { mlRuntimeRoutes } from './api/routes/ml-runtime.js';
 import { registerAgenticRoutes } from './review/agentic.js';
@@ -227,6 +228,9 @@ export async function buildApp(): Promise<FastifyInstance> {
   if (config.aiEnabled) await app.register(aiUsageReportRoutes);
   // The AI provider choice (Settings → AI): PUT /api/ai/provider. Same gate.
   if (config.aiEnabled) await app.register(aiProviderRoutes);
+  // Settings → AI → Disk space: the clone cache and its per-run checkouts (review/worktree-gc.ts).
+  // Same gate — the checkouts are the agentic runs'.
+  if (config.aiEnabled) await app.register(storageRoutes);
   // "Set up" for local bot-comment scoring (ml/runtime.ts). Not registered under LIMN_ML_DISABLED.
   if (config.mlLocalEnabled) await app.register(mlRuntimeRoutes);
   // The agentic features — Claude Review (+ chat, follow-up, ticket check, auto review) and AI

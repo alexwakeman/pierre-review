@@ -124,6 +124,9 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // THE EFFORT LEVEL: PUT /api/ai/effort (same file, same shape: one validated UPDATE of one column,
   // held in memory — no model, no GitHub, no process). `read`, decided; EXACT `===`.
   if (path === '/api/ai/effort') return [TIERS.read];
+  // DISK SPACE: GET /api/storage/clones (api/routes/storage.ts). A walk of the local clone cache,
+  // cached for a minute inside review/worktree-gc.ts — no model, no GitHub. `read`, decided; EXACT `===`.
+  if (path === '/api/storage/clones') return [TIERS.read];
 
   // ---- Workspace CRUD: `read`, RECORDED rather than inherited ----
   //

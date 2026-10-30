@@ -1,6 +1,7 @@
 import type { Page, Route } from '@playwright/test';
 import type {
   AiBudgetResponse,
+  CloneStorageResponse,
   ThreadCheckStatusResponse,
   ReferenceDocSectionResponse,
   ReferenceDocTreeResponse,
@@ -978,6 +979,14 @@ function json(route: Route, body: unknown): Promise<void> {
 // ask for — and matching on the pathname keeps it that way whether or not a given surface has
 // resolved its workspace yet. If a spec ever needs two workspaces to differ, read
 // `new URL(route.request().url()).searchParams.get('workspace')` here and branch on it.
+// Settings → AI → Disk space (GET /api/storage/clones): two repositories cloned, no checkouts left.
+const CLONE_STORAGE: CloneStorageResponse = {
+  cloneBytes: 412 * 1024 * 1024,
+  checkouts: 0,
+  checkoutBytes: 0,
+  freedBytes30d: 1.6 * 1024 ** 3,
+  lastSweepAt: null,
+};
 // The Claude spend budget (GET /api/ai/budget): never set, so off with the shipped defaults. Read
 // only while `me.ai.enabled` (dark above), but served so a spec that flips AI on gets a real shape
 // rather than the catch-all `{}` (the header toast and every Run button read it).
@@ -1052,6 +1061,7 @@ export async function installMockApi(page: Page): Promise<void> {
 
       if (path.endsWith('/api/me')) return json(route, ME_RESPONSE);
       if (path.endsWith('/api/ai/budget')) return json(route, AI_BUDGET);
+      if (path.endsWith('/api/storage/clones')) return json(route, CLONE_STORAGE);
       // The one-time AI runtime download streams `AiRuntimeInstallEvent` SSE frames; one `done`
       // frame is a complete, successful install.
       if (path.endsWith('/api/ai/runtime/install'))

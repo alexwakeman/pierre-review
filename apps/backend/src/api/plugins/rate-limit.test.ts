@@ -886,6 +886,10 @@ describe('the AI runtime download', () => {
     expect(tiers('PUT', '/api/ai/effort')).not.toContain('ai');
   });
 
+  it('keeps the disk-space read on read (a local walk, no model, no GitHub)', () => {
+    expect(tiers('GET', '/api/storage/clones')).toEqual(['read']);
+  });
+
   it('puts POST /api/ai/runtime/install on the sync tier', () => {
     expect(tiers('POST', '/api/ai/runtime/install')).toEqual(['sync']);
   });

@@ -4096,3 +4096,49 @@ export const instanceMeta = sqliteTable('instance_meta', {
   key: text('key').primaryKey(),
   value: text('value').notNull(),
 });
+
+// 0146. THE WORKTREE LEDGER (docs/BACKEND.md § Worktree cleanup). One row per per-run checkout
+// `addWorktree` made under `<cloneDir>/<owner__name>/.worktrees/`, naming what it was FOR (kind, PR,
+// ticket, run) and which process made it, so the sweep (review/worktree-gc.ts) can tell a tree a
+// running job or unpushed work still needs from one a crashed run left behind. A row outlives its
+// directory (`removedAt` + `bytesReclaimed`) for 30 days, then the sweep deletes it.
+// `accountId` is NULL when the creating run named no account; the clone cache itself is the machine's.
+export const worktreeLedger = sqliteTable(
+  'worktree_ledger',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id'),
+    // The worktree's absolute path — the identity (one per run: `<sha>-<pid>-<n>`).
+    path: text('path').notNull(),
+    cloneDir: text('clone_dir').notNull(),
+    owner: text('owner').notNull(),
+    name: text('name').notNull(),
+    // WorktreeKind (review/worktree-owner.ts): 'review' | 'chat' | 'fix' | 'plan' | … | 'other'.
+    kind: text('kind').notNull(),
+    prId: integer('pr_id'),
+    // A ticket review's / diagram's ticket ident, when the run was for a ticket.
+    ticket: text('ticket'),
+    // The owning run's row id (an ai_fixes id for 'fix' / 'plan'; a claude_reviews id for 'review').
+    runId: integer('run_id'),
+    headSha: text('head_sha'),
+    // The creating process: its pid, and a random token minted at boot (a pid is reused, a token is not).
+    pid: integer('pid').notNull(),
+    instance: text('instance').notNull(),
+    // Held: 'running' while its run is in flight (cleared when the run lets go), 'unpushed' while it
+    // holds work the reader may still push. NULL = nothing holds it.
+    pinReason: text('pin_reason'),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+    lastUsedAt: integer('last_used_at', { mode: 'timestamp' }).notNull(),
+    // The run's own clean-up asked for removal (its `finally`); the sweep finishes it if that failed.
+    releasedAt: integer('released_at', { mode: 'timestamp' }),
+    removedAt: integer('removed_at', { mode: 'timestamp' }),
+    // WorktreeRemoveReason — why the sweep (or the run) removed it.
+    removeReason: text('remove_reason'),
+    bytesReclaimed: integer('bytes_reclaimed'),
+  },
+  (t) => ({
+    pathUq: uniqueIndex('worktree_ledger_path').on(t.path),
+    // The sweep's read: every row still on disk.
+    openIdx: index('worktree_ledger_removed').on(t.removedAt),
+  }),
+);

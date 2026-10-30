@@ -19,10 +19,35 @@ import {
   tightenCloneRoot,
   tightenClonePerms,
 } from './clone-hygiene.js';
+import { currentWorktreeOwner, type WorktreeOwner } from './worktree-owner.js';
 
 // Re-exported so consumers see ONE clone API. The map itself lives in clone-hygiene.ts
 // because the startup sweep needs it and this module imports that one, not the reverse.
 export { liveWorktrees };
+
+/**
+ * THE WORKTREE LEDGER's seam (docs/BACKEND.md § Worktree cleanup). The boot installs it
+ * (review/worktree-gc.ts `installWorktreeLedger`); until then — and in every unit test that drives
+ * the git helpers — no row is written and no sweep is kicked, so this module never opens the database.
+ * Each hook is best-effort and must never throw into a run.
+ */
+export interface WorktreeLedgerHooks {
+  created(args: {
+    path: string;
+    cloneDir: string;
+    owner: string;
+    name: string;
+    headSha: string;
+    ownerInfo: WorktreeOwner | null;
+  }): Promise<void>;
+  released(path: string, removed: boolean): Promise<void>;
+  /** A run is starting: a cheap, throttled, fire-and-forget sweep. */
+  runStarting(): void;
+}
+let ledgerHooks: WorktreeLedgerHooks | null = null;
+export function setWorktreeLedgerHooks(hooks: WorktreeLedgerHooks | null): void {
+  ledgerHooks = hooks;
+}
 
 const execFileAsync = promisify(execFile);
 
@@ -237,6 +262,7 @@ let worktreeSeq = 0;
 export async function addWorktree(
   repoCloneDir: string,
   sha: string,
+  repo?: { owner: string; name: string },
 ): Promise<string> {
   const worktreePath = join(
     repoCloneDir,
@@ -254,6 +280,13 @@ export async function addWorktree(
     sha,
   ]);
   liveWorktrees.set(worktreePath, Date.now());
+  if (ledgerHooks && repo) {
+    // AFTER `liveWorktrees.set`, so a sweep that reads the new row also sees the tree in use.
+    await ledgerHooks
+      .created({ path: worktreePath, cloneDir: repoCloneDir, owner: repo.owner, name: repo.name, headSha: sha, ownerInfo: currentWorktreeOwner() })
+      .catch(() => {});
+    ledgerHooks.runStarting();
+  }
   return worktreePath;
 }
 
@@ -287,6 +320,7 @@ export async function removeWorktree(
   // The rmSync fallback deletes the directory but leaves git's registry entry behind, and a
   // stale entry keeps the repo looking busy. Prune here so the fallback path self-heals.
   await git(['-C', repoCloneDir, 'worktree', 'prune']).catch(() => {});
+  if (ledgerHooks) await ledgerHooks.released(worktreePath, !existsSync(worktreePath)).catch(() => {});
 }
 
 /**
@@ -305,7 +339,7 @@ export async function prepWorktree(
   return withRepoLock(`${owner}/${name}`, async () => {
     const dir = await ensureClone(owner, name, token);
     await fetchPrHead(dir, owner, name, prNumber, sha, token);
-    const worktreePath = await addWorktree(dir, sha);
+    const worktreePath = await addWorktree(dir, sha, { owner, name });
     return { repoCloneDir: dir, worktreePath };
   });
 }
@@ -482,7 +516,7 @@ export async function prepDefaultBranchCheckouts(
             remoteRef: r.branch ? `refs/heads/${r.branch}` : 'HEAD',
             destRef: 'refs/pierre/ticket-default-branch',
           });
-          const path = await addWorktree(dir, sha);
+          const path = await addWorktree(dir, sha, { owner: r.owner, name: r.name });
           return { ...r, path, repoCloneDir: dir, sha, error: null };
         });
       } catch (err) {

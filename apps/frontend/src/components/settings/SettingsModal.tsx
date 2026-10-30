@@ -10,6 +10,7 @@ import { MyTurnSection, MY_TURN_SECTION_HEADING_ID } from './MyTurnSection.js';
 import { BotScoringSection } from './BotScoringSection.js';
 import { ClaudeSpendSection, CLAUDE_SPEND_SECTION_HEADING_ID } from './ClaudeSpendSection.js';
 import { AiProviderSection, AI_SECTION_HEADING_ID } from './AiProviderSection.js';
+import { DiskSpaceSection } from './DiskSpaceSection.js';
 import { PendingMuteSection } from './PendingMuteSection.js';
 import { DependencyAutoMergeSection } from './DependencyAutoMergeSection.js';
 import { SonarSection } from './SonarSection.js';
@@ -84,6 +85,7 @@ const SECTIONS: Record<string, () => JSX.Element | null> = {
   PendingMuteSection,
   AiProviderSection,
   ClaudeSpendSection,
+  DiskSpaceSection,
   AutoReviewSection,
   ReferenceDocsSection,
   ConfluenceSection,

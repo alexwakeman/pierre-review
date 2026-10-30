@@ -43,6 +43,7 @@ import {
   threadTexts,
   type ThreadPlan,
 } from './threads.js';
+import { withWorktreeOwner } from '../worktree-owner.js';
 
 // CHECK THREADS — a light, threads-only Claude pass (docs/CLAUDE-REVIEW.md § Check threads).
 //
@@ -387,7 +388,7 @@ async function runPipeline(
   try {
     let worktreePath: string | null = null;
     try {
-      const wt = await prepareMemberWorktrees([member]);
+      const wt = await withWorktreeOwner({ kind: 'thread_check', accountId, prId }, () => prepareMemberWorktrees([member]));
       cleanupWorktree = wt.cleanup;
       worktreePath = wt.byPr.get(prId)?.path ?? null;
     } catch {

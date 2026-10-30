@@ -12,6 +12,7 @@ import {
 import { fetchPrHeadInfo } from '../github/mutations.js';
 import { codedError, pushForceWithLease, pushRef } from './git.js';
 import { protectedRefsFor } from './git-ops.js';
+import { withWorktreeOwner } from '../review/worktree-owner.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -342,7 +343,7 @@ export async function updatePrBranchFromTrunk(args: {
   let worktreePath: string | null = null;
   try {
     // Check out the PR head branch (prepWorktree checks out at the given sha).
-    ({ repoCloneDir, worktreePath } = await prepWorktree(owner, name, prNumber, headSha, token));
+    ({ repoCloneDir, worktreePath } = await withWorktreeOwner({ kind: 'merge', accountId }, () => prepWorktree(owner, name, prNumber, headSha, token)));
     const trunkSha = await fetchTrunk(worktreePath, owner, name, token, trunk);
 
     if (strategy === 'rebase') {
