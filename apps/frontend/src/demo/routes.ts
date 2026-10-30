@@ -958,6 +958,42 @@ export const ROUTES: DemoRoute[] = [
       return OK({ doc: wiki && wiki.unreachableSince == null ? { ...doc, wiki: { ...wiki, lastCheckedAt: srv.nowIso() } } : doc });
     },
   },
+  // THE ADD-DOCUMENTS WIZARD's counts (docs/REFERENCE-DOCS.md § The SPA → Adding): the demo reads no
+  // wiki and no repository, so each answers a fixed, fictional Acme count. Start is not in the demo.
+  {
+    method: 'POST',
+    re: /^\/api\/docs\/wiki\/preflight$/,
+    run: (req) => {
+      const url = String(bodyRecord(req).url ?? '');
+      const notion = /notion\.(so|site|com)/.test(url) || /^[0-9a-f-]{32,36}$/i.test(url.trim());
+      if (notion) return OK({ provider: 'notion', rootTitle: 'Checkout design notes', scope: { kind: 'tree' }, pageCount: 6, more: false, credentialFrom: 'wiki', existing: null });
+      const space = /\/wiki\/spaces\/[^/]+\/?(overview)?$/.test(url);
+      return OK(
+        space
+          ? { provider: 'confluence', rootTitle: 'Engineering', scope: { kind: 'space', name: 'Engineering', key: 'ENG', id: '98304' }, pageCount: 42, more: false, credentialFrom: 'jira', existing: null }
+          : { provider: 'confluence', rootTitle: 'Runbooks', scope: { kind: 'tree' }, pageCount: 9, more: false, credentialFrom: 'jira', existing: null },
+      );
+    },
+  },
+  {
+    method: 'POST',
+    re: /^\/api\/docs\/github\/preflight$/,
+    run: (req) => {
+      const [owner = 'acme', repo = 'web'] = String(bodyRecord(req).repo ?? 'acme/web').split('/');
+      return OK({
+        owner,
+        repo,
+        branch: 'main',
+        folders: [
+          { path: '', docs: 14 },
+          { path: 'docs', docs: 11 },
+          { path: 'docs/adr', docs: 6 },
+          { path: 'docs/runbooks', docs: 4 },
+        ],
+        truncated: false,
+      });
+    },
+  },
   // Settings → Confluence / Notion: a save answers the saved settings (no token ever comes back); the
   // test reads the fictional site (or Notion).
   {

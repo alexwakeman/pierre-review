@@ -16,17 +16,21 @@ export interface DocsOpen {
   quote: string | null;
   /** Bumped on every open, so re-opening the same anchor scrolls to it again. */
   seq: number;
+  /** Opened from OUTSIDE the library list (a citation in a review, a chat, a story check, a deep
+   *  link): the contents tree reveals the row — ancestors opened, scrolled to, highlighted briefly. */
+  reveal?: boolean;
 }
 
 interface DocsViewState {
   open: Record<number, DocsOpen | undefined>;
-  /** Document ids whose contents tree is expanded. */
+  /** The document whose contents tree is expanded — AT MOST ONE (an accordion: opening one closes the
+   *  other). An array for the store's shape; never more than one id. */
   expanded: Record<number, number[] | undefined>;
   /** The conversation on screen; null = a new one. */
   conversation: Record<number, string | null | undefined>;
   /** Below the wide breakpoint the viewer and the chat share one column. */
   narrowPane: 'library' | 'viewer' | 'chat';
-  openPath: (workspaceId: number, path: string, anchor?: string | null, quote?: string | null) => void;
+  openPath: (workspaceId: number, path: string, anchor?: string | null, quote?: string | null, reveal?: boolean) => void;
   toggleExpanded: (workspaceId: number, docId: number) => void;
   setExpanded: (workspaceId: number, docId: number, on: boolean) => void;
   setConversation: (workspaceId: number, conversationId: string | null) => void;
@@ -47,19 +51,19 @@ export const useDocsView = create<DocsViewState>((set) => ({
   expanded: {},
   conversation: {},
   narrowPane: 'library',
-  openPath: (workspaceId, path, anchor = null, quote = null) =>
-    set((s) => ({ open: { ...s.open, [workspaceId]: { path, anchor, quote, seq: ++seq } }, narrowPane: 'viewer' })),
+  openPath: (workspaceId, path, anchor = null, quote = null, reveal = false) =>
+    set((s) => ({ open: { ...s.open, [workspaceId]: { path, anchor, quote, seq: ++seq, ...(reveal ? { reveal: true } : {}) } }, narrowPane: 'viewer' })),
+  // ⚠ AN ACCORDION: expanding a document collapses any other.
   toggleExpanded: (workspaceId, docId) =>
     set((s) => {
       const cur = s.expanded[workspaceId] ?? [];
-      const next = cur.includes(docId) ? cur.filter((d) => d !== docId) : [...cur, docId];
-      return { expanded: { ...s.expanded, [workspaceId]: next } };
+      return { expanded: { ...s.expanded, [workspaceId]: cur.includes(docId) ? [] : [docId] } };
     }),
   setExpanded: (workspaceId, docId, on) =>
     set((s) => {
       const cur = s.expanded[workspaceId] ?? [];
-      if (cur.includes(docId) === on) return {};
-      return { expanded: { ...s.expanded, [workspaceId]: on ? [...cur, docId] : cur.filter((d) => d !== docId) } };
+      if (on ? cur.length === 1 && cur[0] === docId : !cur.includes(docId)) return {};
+      return { expanded: { ...s.expanded, [workspaceId]: on ? [docId] : cur.filter((d) => d !== docId) } };
     }),
   setConversation: (workspaceId, conversationId) =>
     set((s) => ({ conversation: { ...s.conversation, [workspaceId]: conversationId } })),

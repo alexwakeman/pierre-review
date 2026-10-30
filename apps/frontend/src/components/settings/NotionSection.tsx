@@ -9,9 +9,9 @@ const SECONDARY_BTN =
   'inline-flex h-7 items-center gap-1 rounded-ui bg-ui-raise px-2.5 text-body font-medium text-ui-ink hover:bg-ui-hover touch:h-10 outline-none focus-visible:ring-2 focus-visible:ring-ui-accent disabled:cursor-not-allowed disabled:opacity-40';
 
 /**
- * "Notion" for THIS workspace's reference docs (CORE, local only — mounted beside Confluence on
- * `me.ai.enabled`; docs/REFERENCE-DOCS.md § Wiki sources → Notion). ONE write-only internal-integration
- * token; the integration must be shared with the pages in Notion (said behind the ⓘ).
+ * "Notion" for THIS workspace's reference docs (CORE, local only — Settings → Docs on `me.ai.enabled`,
+ * and inside the add-documents wizard; docs/REFERENCE-DOCS.md § Wiki sources → Notion). ONE write-only
+ * internal-integration token; the integration must be shared with the pages in Notion (said behind the ⓘ).
  *
  * ⚠ DRAFT + SAVE like every section here. ⚠ THE TOKEN IS NEVER SHOWN (`hasToken` only). ⚠ "Test
  * connection" is CLICK-GATED (one Notion read with the SAVED token).
@@ -25,7 +25,7 @@ export function NotionSection(): JSX.Element {
   return <NotionForm key={workspaceId} workspaceId={workspaceId} saved={q.data} />;
 }
 
-function NotionForm({ workspaceId, saved }: { workspaceId: number; saved: WikiCredentialsSettings }): JSX.Element {
+export function NotionForm({ workspaceId, saved }: { workspaceId: number; saved: WikiCredentialsSettings }): JSX.Element {
   const save = useSetWikiCredentials(workspaceId);
   const check = useCheckWikiCredentials(workspaceId);
   const tokenId = useId();

@@ -1,12 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent } from 'react';
 import {
-  REFERENCE_DOC_CRAWL_MAX_DEPTH,
-  REFERENCE_DOC_CRAWL_MAX_PAGES,
   REFERENCE_DOC_MAX_BYTES,
-  REFERENCE_DOC_WIKI_MAX_DEPTH,
-  REFERENCE_DOC_WIKI_MAX_PAGES,
   WIKI_PROVIDER_NAMES,
-  wikiProviderOfUrl,
+  wikiScopeWords,
   wikiUnreachableWords,
   type ReferenceDoc,
   type WikiProviderId,
@@ -14,8 +10,6 @@ import {
 import { formatDate, relativeTime } from '../../lib/ui.js';
 import { aiReadyFor, useAiCapabilities, useAiProvider, useAiProviderName } from '../../hooks/useAiCapabilities.js';
 import {
-  useAddReferenceDocUrl,
-  useAddReferenceDocWiki,
   useCancelReferenceDoc,
   useDeleteReferenceDoc,
   useRebuildReferenceDoc,
@@ -36,15 +30,35 @@ import {
   docTreeBranchKeys,
   docTreeNodes,
   docTreeRows,
+  docTreeTrail,
   isDocBuilding,
+  slugOfLibraryPath,
   type DocTreeNode,
   uploadRefusal,
 } from '../../lib/referenceDocs.js';
 import { useDocsView, type DocsOpen } from '../../store/docsView.js';
 import { useFilters } from '../../store/filters.js';
 import { AiRunGate } from '../AiSetup.js';
-import { BookIcon, ChevronIcon, CollapseAllIcon, ConfluenceIcon, ExpandAllIcon, NotionIcon, RefreshIcon, SparkleIcon, UploadIcon, WarningIcon } from '../Icons.js';
-import { Button, PageHeader, Select, Tabs, cx, FOCUS_RING, useRegisterCommands, type Command } from '../ui/index.js';
+import {
+  BookIcon,
+  ChevronIcon,
+  CollapseAllIcon,
+  ConfluenceIcon,
+  EllipsisIcon,
+  ExpandAllIcon,
+  ExternalLinkIcon,
+  NotionIcon,
+  OctocatIcon,
+  PlusIcon,
+  RefreshIcon,
+  SparkleIcon,
+  TrashIcon,
+  UploadIcon,
+  WarningIcon,
+} from '../Icons.js';
+import { Button, IconButton, Menu, PageHeader, Tabs, cx, FOCUS_RING, useRegisterCommands, type Command, type MenuEntry } from '../ui/index.js';
+import { safeExternalUrl } from '../../lib/ui.js';
+import { DocsAddWizard } from './DocsAddWizard.js';
 import { InfoButton } from '../InfoModal.js';
 import { DocsChat } from './DocsChat.js';
 import { DocsViewer } from './DocsViewer.js';
@@ -95,6 +109,7 @@ const sourceLabel = (doc: ReferenceDoc): string => (doc.wiki ? WIKI_PROVIDER_NAM
 
 /** A wiki's mark (Confluence, Notion), in the current ink. */
 function WikiMark({ provider, size, className }: { provider: WikiProviderId; size: number; className?: string }): JSX.Element {
+  if (provider === 'github') return <OctocatIcon size={size} className={className} aria-hidden />;
   return provider === 'notion' ? <NotionIcon size={size} className={className} aria-hidden /> : <ConfluenceIcon size={size} className={className} aria-hidden />;
 }
 
@@ -132,11 +147,12 @@ function WikiStatus({ doc }: { doc: ReferenceDoc }): JSX.Element | null {
   if (w.unreachableSince && w.unreachableReason) {
     return (
       <p className="text-meta text-ui-danger" data-testid="wiki-unreachable">
-        Can&rsquo;t reach this page in {name} since {formatDate(w.unreachableSince)}. {wikiUnreachableWords(w.provider, w.unreachableReason)}
+        Can&rsquo;t reach {w.provider === 'github' ? 'this folder on' : 'this page in'} {name} since {formatDate(w.unreachableSince)}. {wikiUnreachableWords(w.provider, w.unreachableReason)}
       </p>
     );
   }
   const parts = [
+    wikiScopeWords(w.scope, w.rootTitle),
     w.lastCheckedAt ? `Checked ${relativeTime(w.lastCheckedAt)}` : null,
     w.lastChangedAt ? `last edited ${formatDate(w.lastChangedAt)}` : null,
   ].filter(Boolean);
@@ -180,6 +196,28 @@ function DocTree({ workspaceId, doc, open, onOpen }: { workspaceId: number; doc:
   const nodes = useMemo(() => (tree.data ? docTreeNodes(docTreeRows(tree.data.sections)) : []), [tree.data]);
   const branchKeys = useMemo(() => docTreeBranchKeys(nodes), [nodes]);
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
+  // REVEAL: the open file's row — its branches opened, scrolled into view, and (opened from a citation
+  // outside the list) marked for a moment. Keyed on the open's `seq`, so every open reveals once.
+  const trail = useMemo(() => docTreeTrail(nodes, open.path, open.anchor), [nodes, open.path, open.anchor]);
+  const listRef = useRef<HTMLUListElement | null>(null);
+  const [flash, setFlash] = useState<string | null>(null);
+  const revealedSeq = useRef<number | null>(null);
+  useEffect(() => {
+    if (trail == null || revealedSeq.current === open.seq) return;
+    revealedSeq.current = open.seq;
+    if (trail.ancestors.some((k) => !expanded.has(k))) setExpanded((prev) => new Set([...prev, ...trail.ancestors]));
+    if (open.reveal) setFlash(trail.key);
+  }, [trail, open.seq, open.reveal, expanded]);
+  useEffect(() => {
+    if (trail == null) return;
+    const el = listRef.current?.querySelector<HTMLElement>(`[data-tree-key="${CSS.escape(trail.key)}"]`);
+    el?.scrollIntoView({ block: 'nearest' });
+  }, [trail, open.seq, expanded]);
+  useEffect(() => {
+    if (flash == null) return;
+    const t = window.setTimeout(() => setFlash(null), 1800);
+    return () => window.clearTimeout(t);
+  }, [flash]);
   if (tree.isPending) return <p className={`py-1 pl-6 text-meta ${MUTED}`}>Loading…</p>;
   if (tree.isError) return <p className="py-1 pl-6 text-meta text-ui-danger">{tree.error.message}</p>;
   if (nodes.length === 0) return <p className={`py-1 pl-6 text-meta ${MUTED}`}>No sections.</p>;
@@ -217,9 +255,9 @@ function DocTree({ workspaceId, doc, open, onOpen }: { workspaceId: number; doc:
           </button>
         </div>
       )}
-      <ul className="space-y-px" aria-label={`Contents of ${doc.title}`} data-testid="doc-tree">
+      <ul ref={listRef} className="space-y-px" aria-label={`Contents of ${doc.title}`} data-testid="doc-tree">
         {nodes.map((n) => (
-          <DocTreeItem key={n.row.key} node={n} level={0} expanded={expanded} onToggle={toggle} open={open} onOpen={onOpen} />
+          <DocTreeItem key={n.row.key} node={n} level={0} expanded={expanded} onToggle={toggle} open={open} onOpen={onOpen} flash={flash} />
         ))}
       </ul>
     </div>
@@ -233,6 +271,7 @@ function DocTreeItem({
   onToggle,
   open,
   onOpen,
+  flash,
 }: {
   node: DocTreeNode;
   level: number;
@@ -240,6 +279,8 @@ function DocTreeItem({
   onToggle: (key: string) => void;
   open: DocsOpen;
   onOpen: (path: string, anchor: string | null) => void;
+  /** The row a citation just revealed: marked for a moment. */
+  flash: string | null;
 }): JSX.Element {
   const r = node.row;
   const hasChildren = node.children.length > 0;
@@ -250,7 +291,12 @@ function DocTreeItem({
   const titleClass = 'block min-w-0 flex-1 py-1 text-left text-meta font-medium text-ui-mute';
   return (
     <li>
-      <div style={indent} className="flex items-center gap-0.5">
+      <div
+        style={indent}
+        data-tree-key={r.key}
+        data-revealed={flash === r.key ? 'true' : undefined}
+        className={cx('flex items-center gap-0.5 rounded-ui motion-safe:transition-colors motion-safe:duration-700', flash === r.key && 'bg-ui-accent/15')}
+      >
         {hasChildren ? (
           <button
             type="button"
@@ -289,7 +335,7 @@ function DocTreeItem({
       {isOpen && (
         <ul className="space-y-px">
           {node.children.map((c) => (
-            <DocTreeItem key={c.row.key} node={c} level={level + 1} expanded={expanded} onToggle={onToggle} open={open} onOpen={onOpen} />
+            <DocTreeItem key={c.row.key} node={c} level={level + 1} expanded={expanded} onToggle={onToggle} open={open} onOpen={onOpen} flash={flash} />
           ))}
         </ul>
       )}
@@ -311,6 +357,7 @@ function DocRow({
   const ai = useAiCapabilities();
   const expanded = useDocsView((s) => (s.expanded[workspaceId] ?? []).includes(doc.id));
   const toggle = useDocsView((s) => s.toggleExpanded);
+  const setExpanded = useDocsView((s) => s.setExpanded);
   const rebuild = useRebuildReferenceDoc(workspaceId);
   const refresh = useRefreshReferenceDoc(workspaceId);
   const cancel = useCancelReferenceDoc(workspaceId);
@@ -327,7 +374,20 @@ function DocRow({
   const failed = doc.status === 'failed';
   const unreachable = doc.wiki?.unreachableSince != null && doc.wiki.unreachableReason != null;
   const error = rebuild.error ?? refresh.error ?? cancel.error ?? remove.error;
-  const showActions = current || failed || building || confirmRemove;
+  // Only the build's own control (Cancel), a failure's retry and the remove confirmation stay in the
+  // row; Refresh, Rebuild and Remove live in the document's "…" menu.
+  const showActions = failed || building || confirmRemove;
+  const canBuild = aiReadyFor(ai, 'docs_build');
+  const source = safeExternalUrl(doc.wiki?.rootUrl ?? doc.sourceUrl ?? null);
+  const menuItems: MenuEntry[] = [
+    ...(canBuild && doc.wiki && doc.available && !building
+      ? [{ id: 'refresh', label: 'Refresh now', icon: <RefreshIcon size={13} />, onSelect: () => refresh.mutate(doc.id) }]
+      : []),
+    ...(canBuild && !building ? [{ id: 'rebuild', label: 'Rebuild', icon: <SparkleIcon size={13} />, onSelect: () => rebuild.mutate(doc.id) }] : []),
+    ...(source ? [{ id: 'source', label: 'Open the source', icon: <ExternalLinkIcon size={13} />, onSelect: () => window.open(source, '_blank', 'noopener,noreferrer') }] : []),
+    { separator: true as const, id: 'sep' },
+    { id: 'remove', label: 'Remove…', icon: <TrashIcon size={13} />, danger: true, onSelect: () => setConfirmRemove(true) },
+  ];
   const meta = [
     sourceLabel(doc),
     doc.crawl?.pages != null ? `${doc.crawl.pages.length} page${doc.crawl.pages.length === 1 ? '' : 's'}` : null,
@@ -346,6 +406,7 @@ function DocRow({
             <button
               type="button"
               onClick={() => toggle(workspaceId, doc.id)}
+              data-testid="doc-row-toggle"
               aria-expanded={expanded}
               aria-label={`${expanded ? 'Hide' : 'Show'} the contents of ${doc.title}`}
               className={cx(TREE_TOGGLE, 'mt-1.5')}
@@ -361,8 +422,13 @@ function DocRow({
             {doc.available ? (
               <button
                 type="button"
-                onClick={() => onOpen(contentsPath, null)}
+                // Opening a document expands its contents and closes any other (an accordion).
+                onClick={() => {
+                  onOpen(contentsPath, null);
+                  setExpanded(workspaceId, doc.id, true);
+                }}
                 aria-current={onContents ? 'true' : undefined}
+                aria-expanded={expanded}
                 className={cx('block w-full min-w-0 truncate rounded-ui text-left text-body font-medium text-ui-ink touch:min-h-10', FOCUS_RING)}
               >
                 {doc.title}
@@ -380,6 +446,13 @@ function DocRow({
               <WarningIcon size={13} aria-hidden />
             </span>
           )}
+          <Menu
+            label={`Actions for ${doc.title}`}
+            align="end"
+            items={menuItems}
+            className="mt-1"
+            trigger={(p) => <IconButton {...p} size="sm" label={`More actions for ${doc.title}`} icon={<EllipsisIcon size={14} />} className="mt-1 shrink-0" />}
+          />
         </div>
 
         <div className="space-y-1.5 pb-2 pl-8 pr-2 empty:hidden">
@@ -399,20 +472,14 @@ function DocRow({
                   Cancel
                 </Button>
               ) : (
-                aiReadyFor(ai, 'docs_build') && (
-                  <>
-                    {doc.wiki && doc.available && (
-                      <Button size="sm" icon={<RefreshIcon size={12} />} disabled={refresh.isPending} onClick={() => refresh.mutate(doc.id)}>
-                        Refresh now
-                      </Button>
-                    )}
-                    <Button size="sm" disabled={rebuild.isPending} onClick={() => rebuild.mutate(doc.id)}>
-                      {failed ? 'Try again' : 'Rebuild'}
-                    </Button>
-                  </>
+                failed &&
+                canBuild && (
+                  <Button size="sm" disabled={rebuild.isPending} onClick={() => rebuild.mutate(doc.id)}>
+                    Try again
+                  </Button>
                 )
               )}
-              {confirmRemove ? (
+              {confirmRemove && (
                 <span className="inline-flex flex-wrap items-center gap-1.5 text-meta">
                   <span className="text-ui-ink">Remove this document?</span>
                   <Button size="sm" variant="danger" disabled={remove.isPending} onClick={() => remove.mutate(doc.id)}>
@@ -422,10 +489,6 @@ function DocRow({
                     Keep
                   </Button>
                 </span>
-              ) : (
-                <Button size="sm" variant="ghost" onClick={() => setConfirmRemove(true)}>
-                  Remove
-                </Button>
               )}
             </div>
           )}
@@ -441,25 +504,16 @@ function DocRow({
   );
 }
 
+// The drop zone and file picker. Web pages, wikis and repositories come in through the "+" (the
+// add-documents wizard, DocsAddWizard.tsx).
 function AddDocs({ workspaceId, maxBytes }: { workspaceId: number; maxBytes: number }): JSX.Element {
   // Codex cannot read PDF pages (the build refuses one on Codex): say so BEFORE the upload.
   const onCodex = useMe().data?.ai.provider === 'codex';
   const upload = useUploadReferenceDoc(workspaceId);
-  const addUrl = useAddReferenceDocUrl(workspaceId);
-  const aiProvider = useAiProvider();
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [dragging, setDragging] = useState(false);
   const [sending, setSending] = useState<string | null>(null);
   const [problems, setProblems] = useState<Array<{ name: string; message: string }>>([]);
-  const [url, setUrl] = useState('');
-  const [crawlDepth, setCrawlDepth] = useState(0);
-  const addWiki = useAddReferenceDocWiki(workspaceId);
-  // A Confluence or Notion page address goes to the wiki import (child pages, not links, and a refresh
-  // that reads only what changed); any other address is a web page.
-  const wikiProvider = wikiProviderOfUrl(url);
-  const onWiki = wikiProvider != null;
-  const wikiName = wikiProvider ? WIKI_PROVIDER_NAMES[wikiProvider] : '';
-  const adding = onWiki ? addWiki : addUrl;
 
   const send = async (files: File[]): Promise<void> => {
     const found: Array<{ name: string; message: string }> = [];
@@ -545,91 +599,6 @@ function AddDocs({ workspaceId, maxBytes }: { workspaceId: number; maxBytes: num
           ))}
         </ul>
       )}
-      <form
-        className="flex flex-wrap items-center gap-1.5"
-        onSubmit={(e) => {
-          e.preventDefault();
-          const u = url.trim();
-          if (u === '' || adding.isPending) return;
-          const depth = crawlDepth > 0 ? crawlDepth : null;
-          if (onWiki) addWiki.mutate({ url: u, childDepth: depth }, { onSuccess: () => setUrl('') });
-          else addUrl.mutate({ url: u, crawlDepth: depth }, { onSuccess: () => setUrl('') });
-        }}
-      >
-        <input
-          // Text, not url: a bare Notion page id is accepted too.
-          type="text"
-          inputMode="url"
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-          id="docs-add-url"
-          aria-label="Web page address"
-          placeholder="https://…"
-          maxLength={2048}
-          className="h-7 min-w-0 flex-1 basis-full rounded-ui bg-ui-raise px-2.5 text-body text-ui-ink ring-1 ring-inset ring-ui-line placeholder:text-ui-faint focus:outline-none focus:ring-2 focus:ring-ui-accent touch:h-10"
-        />
-        <span className="inline-flex shrink-0 items-center gap-0.5">
-          <Select
-            size="sm"
-            label={onWiki ? 'Child pages to include' : 'Links to follow'}
-            value={String(crawlDepth)}
-            onChange={(v) => setCrawlDepth(Number(v))}
-            options={[
-              { value: '0', label: 'This page only' },
-              ...Array.from({ length: onWiki ? REFERENCE_DOC_WIKI_MAX_DEPTH : REFERENCE_DOC_CRAWL_MAX_DEPTH }, (_, i) => i + 1).map((d) => ({
-                value: String(d),
-                label: onWiki ? `With child pages, ${d} level${d === 1 ? '' : 's'}` : `Follow links, ${d} level${d === 1 ? '' : 's'}`,
-              })),
-            ]}
-          />
-          {onWiki ? (
-            <InfoButton title={`${wikiName} pages`}>
-              <p>
-                The page and the child pages you choose become one document, a chapter per page, up to{' '}
-                {REFERENCE_DOC_WIKI_MAX_PAGES} pages.{wikiProvider === 'notion' && ' A database on the page counts its rows as child pages.'}
-              </p>
-              {wikiProvider === 'notion' ? (
-                <p>
-                  Limn reads Notion with the integration token in Settings → AI review → Notion. Share the page with
-                  that integration in Notion first.
-                </p>
-              ) : (
-                <p>
-                  Limn reads Confluence with the API token in Settings → AI review → Confluence. A page on your Jira site
-                  uses the Jira token.
-                </p>
-              )}
-              <p>Images become text: Claude describes them, and a diagram with readable source is read from it.</p>
-              <p>
-                Limn checks the pages every few hours while the library is in use, and before a review reads it. Only pages
-                that changed are read again, and only sections that changed are summarised again. Refresh now checks at once.
-              </p>
-            </InfoButton>
-          ) : (
-          <InfoButton title="Follow links">
-            <p>
-              Limn reads the page, then asks {aiModelWords(aiProvider, 'Haiku')} which of its links lead to more about the same topic, and reads
-              only those. Each level follows links from the pages read at the level before.
-            </p>
-            <p>
-              Links are followed on the same site only, to web pages only (not PDFs, images or downloads), and only where
-              the site's robots.txt allows. A crawl reads at most {REFERENCE_DOC_CRAWL_MAX_PAGES} pages, and each address
-              is read once.
-            </p>
-            <p>All the pages become one document, a chapter per page. Rebuild reads the site again.</p>
-          </InfoButton>
-          )}
-        </span>
-        <button
-          type="submit"
-          data-ai-run
-          disabled={adding.isPending || url.trim() === ''}
-          className="ml-auto inline-flex h-7 shrink-0 items-center rounded-ui bg-ui-raise px-2.5 text-body font-medium text-ui-ink hover:bg-ui-hover disabled:opacity-50 touch:h-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent"
-        >
-          {onWiki ? `Add ${wikiName} page` : 'Add web page'}
-        </button>
-      </form>
-      {adding.isError && <p className="text-meta text-ui-danger">{adding.error.message}</p>}
     </div>
   );
 }
@@ -641,6 +610,8 @@ function DocsPane({ workspaceId }: { workspaceId: number }): JSX.Element {
   const open = useDocsView((s) => s.open[workspaceId]) ?? DEFAULT_OPEN;
   const openPath = useDocsView((s) => s.openPath);
   const narrowPane = useDocsView((s) => s.narrowPane);
+  const ai = useAiCapabilities();
+  const [adding, setAdding] = useState(false);
   const setNarrowPane = useDocsView((s) => s.setNarrowPane);
   const onOpen = useCallback(
     (path: string, anchor: string | null, quote: string | null = null) => openPath(workspaceId, path, anchor, quote),
@@ -656,7 +627,7 @@ function DocsPane({ workspaceId }: { workspaceId: number }): JSX.Element {
   const expandSlug = useRef<string | null>(null);
   useEffect(() => {
     if (pending == null) return;
-    openPath(workspaceId, pending.path, pending.anchor, pending.quote);
+    openPath(workspaceId, pending.path, pending.anchor, pending.quote, true);
     expandSlug.current = pending.slug;
     seatDeepLink(null);
   }, [pending, openPath, seatDeepLink, workspaceId]);
@@ -667,6 +638,18 @@ function DocsPane({ workspaceId }: { workspaceId: number }): JSX.Element {
     if (doc != null) setExpanded(workspaceId, doc.id, true);
     expandSlug.current = null;
   }, [library.data, pending, setExpanded, workspaceId]);
+
+  // REVEAL: whatever opens a document's file (a citation, a link followed in the viewer) expands that
+  // document in the list — closing any other — and its tree opens the branch (DocTree).
+  const expandedIds = useDocsView((s) => s.expanded[workspaceId]);
+  const revealedSeq = useRef<number | null>(null);
+  useEffect(() => {
+    if (library.data == null || revealedSeq.current === open.seq) return;
+    revealedSeq.current = open.seq;
+    const slug = slugOfLibraryPath(open.path);
+    const doc = slug == null ? null : library.data.docs.find((d) => d.slug === slug && d.available);
+    if (doc != null && !(expandedIds ?? []).includes(doc.id)) setExpanded(workspaceId, doc.id, true);
+  }, [library.data, open.seq, open.path, expandedIds, setExpanded, workspaceId]);
 
   const docs = library.data?.docs ?? [];
   const sorted = [...docs].sort((a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: 'base' }));
@@ -746,13 +729,10 @@ function DocsPane({ workspaceId }: { workspaceId: number }): JSX.Element {
       {
         id: 'docs:add',
         group: 'Actions',
-        title: 'Add a document to Docs',
-        icon: <UploadIcon size={14} />,
-        keywords: ['upload', 'web page', 'confluence', 'notion', 'pdf'],
-        run: () => {
-          setNarrowPane('library');
-          requestAnimationFrame(() => document.getElementById('docs-add-url')?.focus());
-        },
+        title: 'Add documents to Docs',
+        icon: <PlusIcon size={14} />,
+        keywords: ['upload', 'web page', 'confluence', 'notion', 'github', 'repository', 'wiki'],
+        run: () => setAdding(true),
       },
       {
         id: 'docs:index',
@@ -779,14 +759,17 @@ function DocsPane({ workspaceId }: { workspaceId: number }): JSX.Element {
 
   const docsInfo = (
     <InfoButton title="Docs">
-      <p>Reference material for this workspace: PDF, Word, text and markdown files, and web pages.</p>
+      <p>
+        Reference material for this workspace: PDF, Word, text and markdown files, web pages, Confluence and Notion
+        wikis, and the documents in a GitHub repository. Press + to add a source.
+      </p>
       <p>
         {aiModelWords(aiProvider, 'Sonnet')} turns each one into markdown sections with a contents list, and the library keeps one contents
         page across every document. {aiName} reads only the sections a question needs.
       </p>
       <p>
         Ask about the docs in the chat. To have AI Review check stories against them, switch it on in Settings →
-        Workspace.
+        Docs.
       </p>
       <p>Everything stays on this machine. Building a document runs on {aiCredentialWords(aiProvider)}.</p>
       <p>Drag the bars between the columns to resize them (or focus one and use the arrow keys). Double-click a bar to reset it.</p>
@@ -795,6 +778,7 @@ function DocsPane({ workspaceId }: { workspaceId: number }): JSX.Element {
 
   return (
     <div className="flex h-full min-h-[32rem] flex-col" data-testid="docs-view">
+      {adding && <DocsAddWizard workspaceId={workspaceId} onClose={() => setAdding(false)} />}
       {/* THE PAGE HEADER: the title, its ⓘ, the count — and, while the panes share a column, their tabs. */}
       <PageHeader
         inset={false}
@@ -855,8 +839,18 @@ function DocsPane({ workspaceId }: { workspaceId: number }): JSX.Element {
               pane === 'library' ? 'flex' : 'hidden',
             )}
           >
-            <div className="hidden min-h-7 items-center gap-1 px-1.5 pt-1 lg:flex">
+            <div className="flex min-h-7 items-center gap-1 px-1.5 pt-1">
               <h2 className="text-body font-semibold text-ui-ink">Library</h2>
+              {aiReadyFor(ai, 'docs_build') && (
+                <IconButton
+                  size="sm"
+                  label="Add documents"
+                  icon={<PlusIcon size={13} />}
+                  onClick={() => setAdding(true)}
+                  data-testid="docs-add"
+                  className={wide ? undefined : 'ml-auto'}
+                />
+              )}
               {wide && (
                 <button
                   type="button"

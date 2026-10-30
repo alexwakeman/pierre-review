@@ -1176,6 +1176,30 @@ export function UploadIcon({ size = 14, ...rest }: IconProps): JSX.Element {
   );
 }
 
+// A globe — a web page or site as a Docs source (the add-documents wizard's first step).
+export function GlobeIcon({ size = 14, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} {...rest}>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M3.5 12h17" />
+      <path d="M12 3.5c2.3 2.4 3.5 5.2 3.5 8.5s-1.2 6.1-3.5 8.5c-2.3-2.4-3.5-5.2-3.5-8.5s1.2-6.1 3.5-8.5z" />
+    </IconShell>
+  );
+}
+
+// A bin — removing something for good (a Docs document's "…" menu; it still confirms).
+export function TrashIcon({ size = 14, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} {...rest}>
+      <path d="M4.5 7h15" />
+      <path d="M9.5 7V5a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v2" />
+      <path d="M6.5 7l.9 12a1.5 1.5 0 0 0 1.5 1.4h6.2a1.5 1.5 0 0 0 1.5-1.4l.9-12" />
+      <line x1="10" y1="11" x2="10" y2="17" />
+      <line x1="14" y1="11" x2="14" y2="17" />
+    </IconShell>
+  );
+}
+
 /* ─────────────────────────────────────────────────────────────────────────────────────────────
    Pending card types — one purpose-built mark per card type, leading each card's heading and
    each tab / kind chip (`Activity/PendingKindIcon.tsx` maps a card to its mark). Decorative
