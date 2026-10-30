@@ -164,7 +164,7 @@ function AiFixBannerRow({
           ) : done ? (
             <span className="inline-block h-2 w-2 shrink-0 rounded-full bg-ui-faint" />
           ) : (
-            <span className="inline-block h-2.5 w-2.5 shrink-0 animate-spin rounded-full border-2 border-ui-line border-t-ui-accent/50" />
+            <span className="inline-block h-2.5 w-2.5 shrink-0 animate-spin rounded-full border-2 border-ui-line border-t-ui-line" />
           )}
           <span className="truncate font-medium text-ui-accent hover:underline">
             {run.repoFullName} #{run.prNumber}

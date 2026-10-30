@@ -88,14 +88,14 @@ export function ThreadCard({
     <div
       className={`rounded-ui border px-2.5 py-2 ${
         selected
-          ? 'border-ui-warn/40 bg-ui-warn/10'
+          ? 'border-ui-line bg-ui-raise'
           : 'border-ui-line'
       }`}
     >
       <div
         className={`mb-2 flex items-center gap-2 text-meta text-ui-faint${
           onOpenInPr
-            ? ' -mx-1 cursor-pointer rounded-ui px-1 hover:bg-ui-accent/10'
+            ? ' -mx-1 cursor-pointer rounded-ui px-1 hover:bg-ui-hover'
             : ''
         }`}
         role={onOpenInPr ? 'button' : undefined}
@@ -163,7 +163,7 @@ export function ThreadCard({
               e.stopPropagation();
               openInChanges.run();
             }}
-            className="hit shrink-0 rounded-ui px-1 py-0.5 text-meta font-medium text-ui-accent hover:bg-ui-accent/10 hover:text-ui-accent"
+            className="hit shrink-0 rounded-ui px-1 py-0.5 text-meta font-medium text-ui-accent hover:bg-ui-hover hover:text-ui-accent"
             title={
               openInChanges.line == null
                 ? 'Show this file’s code. This thread’s line is no longer in the diff.'

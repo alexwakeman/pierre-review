@@ -152,7 +152,7 @@ function PrRow({
               })
             }
             title={`Open #${pr.prNumber} in this app`}
-            className="hit shrink-0 rounded-ui bg-ui-accent/10 px-1 font-mono text-meta text-ui-accent hover:bg-ui-accent/10"
+            className="hit shrink-0 rounded-ui bg-ui-sel px-1 font-mono text-meta text-ui-accent hover:bg-ui-hover"
           >
             #{pr.prNumber}
           </button>
@@ -485,7 +485,7 @@ export function BranchStatusPanel({
       </span>
       {green > 0 && (
         <span
-          className={quiet ? 'shrink-0 text-meta text-ui-mute' : 'rounded-ui bg-ui-success/10 px-1 text-meta font-semibold text-ui-success'}
+          className={quiet ? 'shrink-0 text-meta text-ui-mute' : 'rounded-ui bg-ui-raise px-1 text-meta font-semibold text-ui-success'}
           title="Default branches whose latest CI passed"
         >
           {allGreen && green > 1 ? `all ${green} green` : `${green} green`}
@@ -501,7 +501,7 @@ export function BranchStatusPanel({
       )}
       {running > 0 && (
         <span
-          className={quiet ? 'shrink-0 text-meta text-ui-mute' : 'rounded-ui bg-ui-warn/10 px-1 text-meta font-semibold text-ui-warn'}
+          className={quiet ? 'shrink-0 text-meta text-ui-mute' : 'rounded-ui bg-ui-raise px-1 text-meta font-semibold text-ui-warn'}
           title="Default branches whose latest CI is still running"
         >
           {running} running

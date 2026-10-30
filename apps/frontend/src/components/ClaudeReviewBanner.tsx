@@ -234,7 +234,7 @@ export function ClaudeReviewBanner(): JSX.Element | null {
                 {e.done ? (
                   <CheckIcon size={11} className="shrink-0 text-ui-success" />
                 ) : (
-                  <span className="inline-block h-2.5 w-2.5 shrink-0 animate-spin rounded-full border-2 border-ui-line border-t-ui-accent/50" />
+                  <span className="inline-block h-2.5 w-2.5 shrink-0 animate-spin rounded-full border-2 border-ui-line border-t-ui-line" />
                 )}
                 <span className="truncate font-medium text-ui-accent hover:underline">
                   {e.repoFullName} #{e.prNumber}

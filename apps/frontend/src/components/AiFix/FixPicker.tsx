@@ -59,11 +59,11 @@ const SEVERITY_LABEL: Record<ClaudeFindingSeverity, string> = {
 };
 const SEVERITY_CLASS: Partial<Record<ClaudeFindingSeverity, string>> = {
   blocker: 'bg-ui-danger/10 text-ui-danger',
-  warning: 'bg-ui-warn/10 text-ui-warn',
+  warning: 'bg-ui-raise text-ui-warn',
   nit: 'bg-ui-raise text-ui-mute',
 };
 const WONT_FIT_CHIP =
-  'whitespace-nowrap rounded-ui bg-ui-warn/10 px-1 py-px text-meta text-ui-warn';
+  'whitespace-nowrap rounded-ui bg-ui-raise px-1 py-px text-meta text-ui-warn';
 const NO_PATHS: ReadonlySet<string> = new Set();
 
 function where(path: string | null, line: number | null): string | null {
@@ -120,7 +120,7 @@ function PlainRow({
       <label
         className={`flex cursor-pointer items-start gap-2 rounded-ui border px-2 py-1.5 text-meta ${
           picked
-            ? 'border-ui-accent/50 bg-ui-accent/10'
+            ? 'border-ui-line bg-ui-sel'
             : 'border-ui-line'
         }`}
       >

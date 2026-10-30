@@ -314,11 +314,11 @@ export function BudgetChart({
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-meta text-ui-mute">
         <span className="inline-flex items-center gap-1.5">
-          <span className="h-2.5 w-4 rounded-ui bg-ui-success/10" />
+          <span className="h-2.5 w-4 rounded-ui bg-ui-raise" />
           within budget
         </span>
         <span className="inline-flex items-center gap-1.5">
-          <span className="h-2.5 w-4 rounded-ui bg-ui-warn/10" />
+          <span className="h-2.5 w-4 rounded-ui bg-ui-raise" />
           acceptable
         </span>
         <span className="inline-flex items-center gap-1.5">

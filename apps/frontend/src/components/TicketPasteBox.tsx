@@ -23,10 +23,10 @@ const ERROR_TEXT = 'text-ui-danger';
 const BTN =
   'whitespace-nowrap rounded-ui border border-ui-line px-2 py-0.5 text-meta hover:border-ui-line disabled:opacity-50';
 const BTN_PRIMARY =
-  'whitespace-nowrap rounded-ui border border-ui-accent/50 px-2 py-0.5 text-meta text-ui-accent hover:bg-ui-accent/10 disabled:opacity-50';
+  'whitespace-nowrap rounded-ui border border-ui-line px-2 py-0.5 text-meta text-ui-accent hover:bg-ui-hover disabled:opacity-50';
 const LINK_BTN = 'text-meta text-ui-accent hover:underline disabled:opacity-50';
 const SPINNER =
-  'inline-block h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-ui-line border-t-ui-accent/50';
+  'inline-block h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-ui-line border-t-ui-line';
 
 interface Chip {
   ref: string;
@@ -272,7 +272,7 @@ function ChipView({ chip, onRemove }: { chip: Chip; onRemove: () => void }): JSX
         r == null
           ? 'border-ui-line text-ui-ink'
           : ok
-            ? 'border-ui-success/40 text-ui-ink'
+            ? 'border-ui-line text-ui-ink'
             : 'border-ui-danger/40 text-ui-ink'
       }`}
     >

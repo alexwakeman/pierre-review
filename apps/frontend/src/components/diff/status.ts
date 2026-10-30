@@ -21,9 +21,9 @@ export const STATUS_META: Record<
 // diff block (FileDiffView) so clicking a file marks BOTH with the same 2px cyan line. Both
 // sides carry `border-l-2` unconditionally and only switch the colour, so selecting a file
 // shifts nothing.
-export const SELECTED_BORDER = 'border-ui-accent/50';
+export const SELECTED_BORDER = 'border-ui-line';
 // …and the same FILL behind the whole name row: the rail row and the diff block's sticky file
 // header. A bright cyan, a step more vivid than the app's sky accents, so the selected file is
 // unmistakable while scrolling; opaque in the header (it is sticky over the code).
-export const SELECTED_FILL = 'bg-ui-accent/10';
+export const SELECTED_FILL = 'bg-ui-sel';
 export const UNSELECTED_BORDER = 'border-transparent';

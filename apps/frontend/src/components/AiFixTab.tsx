@@ -507,7 +507,7 @@ function FixResult({
       {/* An AUTOMATIC push that failed (auto-push.ts): recorded on the succeeded row's `error`,
           never retried — Push below still works. */}
       {fix.pushedAt == null && fix.error && (
-        <p className="mb-2 rounded-ui border border-ui-warn/40 bg-ui-warn/10 p-2 text-meta text-ui-warn">
+        <p className="mb-2 rounded-ui border border-ui-line bg-ui-raise p-2 text-meta text-ui-warn">
           {fix.error}
         </p>
       )}
@@ -555,7 +555,7 @@ function FixResult({
 
 function PushedCard({ fix }: { fix: AiFix }): JSX.Element {
   return (
-    <div className="mb-2 rounded-ui border border-ui-success/40 bg-ui-success/10 p-2 text-meta text-ui-success">
+    <div className="mb-2 rounded-ui border border-ui-line bg-ui-raise p-2 text-meta text-ui-success">
       <div>
         Pushed to <span className="font-mono">{fix.pushedBranch}</span>
         {fix.pushedPrUrl && (

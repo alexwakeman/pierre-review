@@ -348,7 +348,7 @@ export function CiRerunControl({
     <div className="mt-2 flex flex-wrap items-center gap-2">
       <button
         type="button"
-        className="hit whitespace-nowrap rounded-ui border border-ui-accent/50 px-2.5 py-1 text-meta text-ui-accent hover:bg-ui-accent/10 disabled:opacity-50"
+        className="hit whitespace-nowrap rounded-ui border border-ui-line px-2.5 py-1 text-meta text-ui-accent hover:bg-ui-hover disabled:opacity-50"
         disabled={rerun.isPending || failedRunIds.length === 0}
         onClick={() => fire('failed', failedRunIds)}
         title="Re-run only the failed jobs of the failing workflow run(s)"

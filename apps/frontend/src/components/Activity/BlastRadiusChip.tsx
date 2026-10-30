@@ -35,7 +35,8 @@ const LEVEL_META: Record<
   BlastVerdict['level'],
   { rings: 1 | 2 | 3; className: string; word: string }
 > = {
-  low: { rings: 1, className: 'text-ui-success', word: 'Low' },
+  // Low is grey ink, not green: green is reserved for "ready to land" (docs/redesign/DESIGN.md § 3).
+  low: { rings: 1, className: 'text-ui-faint', word: 'Low' },
   medium: { rings: 2, className: 'text-ui-mute', word: 'Medium' },
   high: { rings: 3, className: 'text-ui-warn', word: 'High' },
 };

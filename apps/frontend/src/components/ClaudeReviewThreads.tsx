@@ -99,7 +99,7 @@ export function ThreadRow({
           <span
             className={`${CHIP} ${
               t.resolved === true
-                ? 'bg-ui-success/10 text-ui-success'
+                ? 'bg-ui-raise text-ui-success'
                 : threadAddressedClass(t)
             }`}
           >

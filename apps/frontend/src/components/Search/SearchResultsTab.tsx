@@ -89,7 +89,7 @@ export function SearchResultsTab(): JSX.Element {
                 onClick={() => toggleKind(f.key)}
                 className={`rounded-full border px-2 py-0.5 text-meta ${
                   on
-                    ? 'border-ui-accent/50 bg-ui-accent/10 text-ui-accent'
+                    ? 'border-ui-line bg-ui-sel text-ui-accent'
                     : 'border-ui-line text-ui-mute hover:bg-ui-hover'
                 }`}
               >
@@ -127,7 +127,7 @@ export function SearchResultsTab(): JSX.Element {
                   type="button"
                   data-testid="search-story"
                   onClick={() => openSearchStory(st)}
-                  className="hit flex w-full items-start gap-2 rounded-ui border border-ui-accent/50 bg-ui-accent/10 px-3 py-2 text-left hover:bg-ui-accent/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent"
+                  className="hit flex w-full items-start gap-2 rounded-ui border border-ui-line bg-ui-sel px-3 py-2 text-left hover:bg-ui-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent"
                 >
                   <TicketIcon size={14} className="mt-0.5 shrink-0 text-ui-accent" />
                   <span className="min-w-0">

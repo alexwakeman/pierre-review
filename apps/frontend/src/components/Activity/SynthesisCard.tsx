@@ -38,7 +38,7 @@ function ClusterLines({ synthesis }: { synthesis: StoredSynthesis }): JSX.Elemen
           <span className="min-w-0 flex-1 text-ui-ink">{c.label}</span>
           {c.configFixable && (
             <span
-              className="shrink-0 rounded-ui bg-ui-warn/10 px-1 py-0.5 text-meta font-medium text-ui-warn"
+              className="shrink-0 rounded-ui bg-ui-raise px-1 py-0.5 text-meta font-medium text-ui-warn"
               title="This whole cluster looks fixable in the bot's own configuration. A hint, never an action."
             >
               config-fixable
@@ -111,7 +111,7 @@ export function SynthesisCard({
           <span className="text-body font-semibold text-ui-ink">{title}</span>
           {synthesis && resp?.stale && (
             <span
-              className="shrink-0 rounded-ui bg-ui-warn/10 px-1.5 py-0.5 text-meta font-medium text-ui-warn"
+              className="shrink-0 rounded-ui bg-ui-raise px-1.5 py-0.5 text-meta font-medium text-ui-warn"
               title="The items below have changed since this summary was generated — the counts still describe the set it was computed over."
             >
               stale

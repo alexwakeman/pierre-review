@@ -141,7 +141,7 @@ function MoreFilesNote({
           type="button"
           onClick={onLoadMore}
           disabled={loading}
-          className="hit rounded-ui border border-ui-accent/50 px-2 py-0.5 text-ui-accent hover:bg-ui-accent/10 disabled:opacity-60"
+          className="hit rounded-ui border border-ui-line px-2 py-0.5 text-ui-accent hover:bg-ui-hover disabled:opacity-60"
         >
           {loading ? 'Loading files…' : `Load next 100 files (${ofTotal})`}
         </button>
@@ -777,7 +777,7 @@ export function ChangesTab({
             No divide-y: each file's (sticky) header carries its own bottom border. */}
         <div className={threadsOnly ? 'hidden' : 'min-w-0 flex-1'}>
           {focusMissing && focus != null && (
-            <div className="border-b border-ui-warn/40 bg-ui-warn/10 px-4 py-1.5 text-meta text-ui-warn">
+            <div className="border-b border-ui-line bg-ui-raise px-4 py-1.5 text-meta text-ui-warn">
               <code className="font-mono">{focus.path}</code> isn’t in the diff shown here.
               {truncated
                 ? ' It may be in the files not loaded yet.'

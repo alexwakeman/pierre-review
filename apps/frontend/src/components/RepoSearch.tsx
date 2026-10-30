@@ -66,7 +66,7 @@ function OwnerAvatar({
 // Small inline spinner (matches the convention used in the Claude Review tab).
 function Spinner(): JSX.Element {
   return (
-    <span className="inline-block h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-ui-line border-t-ui-accent/50" />
+    <span className="inline-block h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-ui-line border-t-ui-line" />
   );
 }
 
@@ -368,7 +368,7 @@ export function RepoSearch({
           className="absolute left-0 top-full z-[60] mt-1 max-h-96 w-96 overflow-y-auto rounded-ui border border-ui-line bg-ui-surface shadow-lg"
         >
           {atRepoLimit && (
-            <div className="sticky top-0 z-20 border-b border-ui-warn/40 bg-ui-warn/10 px-3 py-1.5 text-meta text-ui-warn">
+            <div className="sticky top-0 z-20 border-b border-ui-line bg-ui-raise px-3 py-1.5 text-meta text-ui-warn">
               You&rsquo;ve added the maximum of {MAX_REPOS_PER_ACCOUNT} repos.
               Remove one to add another.
             </div>
@@ -483,7 +483,7 @@ export function RepoSearch({
                             </span>
                           )}
                           {r.isOwnedOrMember && (
-                            <span className="shrink-0 rounded-ui bg-ui-accent/10 px-1 text-meta uppercase tracking-wide text-ui-accent">
+                            <span className="shrink-0 rounded-ui bg-ui-sel px-1 text-meta uppercase tracking-wide text-ui-accent">
                               yours
                             </span>
                           )}

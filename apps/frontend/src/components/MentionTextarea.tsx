@@ -235,7 +235,7 @@ export function MentionTextarea({
                 onMouseEnter={() => setActive(i)}
                 className={`flex w-full items-center gap-2 px-2 py-1 text-left text-meta ${
                   i === active
-                    ? 'bg-ui-accent/10'
+                    ? 'bg-ui-sel'
                     : 'hover:bg-ui-hover'
                 }`}
               >

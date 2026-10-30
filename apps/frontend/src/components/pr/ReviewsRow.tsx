@@ -39,11 +39,14 @@ function AutomatedReviewerBadge({
   return (
     <span
       data-testid="reviewer-provenance"
-      className="inline-flex items-center gap-0.5 rounded-ui px-1 py-0.5 text-meta font-medium"
-      style={{ ...vendorInk(meta.color), background: `${meta.color}1a` }}
+      // The vendor colour is the MARK only (the bot glyph, through vendorInk); the words are grey
+      // (docs/redesign/DESIGN.md § 3 — identity colour stays small).
+      className="inline-flex items-center gap-0.5 text-meta text-ui-mute"
       title={`Automated reviewer — ${meta.label}${prov}`}
     >
-      <BotIcon size={10} />
+      <span aria-hidden className="flex" style={vendorInk(meta.color)}>
+        <BotIcon size={10} />
+      </span>
       {meta.label}
       {prov}
     </span>
@@ -147,7 +150,7 @@ export function ReviewsChips({
       {onlyBotsReviewed && (
         <span
           data-testid="only-bots-reviewed"
-          className="inline-flex items-center gap-1 rounded-ui bg-ui-warn/10 px-1.5 py-0.5 font-medium text-ui-warn"
+          className="inline-flex items-center gap-1 rounded-ui bg-ui-raise px-1.5 py-0.5 font-medium text-ui-warn"
           title="Every review on this PR came from an automated reviewer — no human has reviewed it yet."
         >
           <BotIcon size={12} />

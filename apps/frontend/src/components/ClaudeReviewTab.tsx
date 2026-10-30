@@ -906,7 +906,7 @@ export function FindingRow({
               </span>
             )}
             {storyLabel != null && (
-              <span className="rounded-ui bg-ui-accent/10 px-1.5 py-0.5 text-meta text-ui-accent">
+              <span className="rounded-ui bg-ui-sel px-1.5 py-0.5 text-meta text-ui-accent">
                 {storyLabel}
               </span>
             )}
@@ -932,14 +932,14 @@ export function FindingRow({
                   href={safeExternalUrl(commentUrl)}
                   target="_blank"
                   rel="noreferrer noopener"
-                  className="hit inline-flex items-center gap-1 rounded-ui bg-ui-success/10 px-1.5 py-0.5 text-meta text-ui-success hover:underline"
+                  className="hit inline-flex items-center gap-1 rounded-ui bg-ui-raise px-1.5 py-0.5 text-meta text-ui-success hover:underline"
                   title="View this comment on GitHub"
                 >
                   {postedChipLabel(post!)}
                   <CheckIcon size={11} />
                 </a>
               ) : (
-                <span className="inline-flex items-center gap-1 rounded-ui bg-ui-success/10 px-1.5 py-0.5 text-meta text-ui-success">
+                <span className="inline-flex items-center gap-1 rounded-ui bg-ui-raise px-1.5 py-0.5 text-meta text-ui-success">
                   {postedChipLabel(post!)}
                   <CheckIcon size={11} />
                 </span>
@@ -949,7 +949,7 @@ export function FindingRow({
                 href={safeExternalUrl(reminderUrl)}
                 target="_blank"
                 rel="noreferrer noopener"
-                className="hit inline-flex items-center gap-1 rounded-ui bg-ui-success/10 px-1.5 py-0.5 text-meta text-ui-success hover:underline"
+                className="hit inline-flex items-center gap-1 rounded-ui bg-ui-raise px-1.5 py-0.5 text-meta text-ui-success hover:underline"
                 title="View the reminder on GitHub"
               >
                 {reminderChipLabel(finding.reminder)}
@@ -959,15 +959,15 @@ export function FindingRow({
               <span
                 className={`rounded-ui px-1.5 py-0.5 text-meta ${
                   finding.autoResolve?.status === 'failed'
-                    ? 'bg-ui-warn/10 text-ui-warn'
-                    : 'bg-ui-success/10 text-ui-success'
+                    ? 'bg-ui-raise text-ui-warn'
+                    : 'bg-ui-raise text-ui-success'
                 }`}
               >
                 {autoResolveLabel(finding.autoResolve)}
               </span>
             )}
             {hasReword && !isPosted && (
-              <span className="rounded-ui bg-ui-accent/10 px-1.5 py-0.5 text-meta text-ui-accent">
+              <span className="rounded-ui bg-ui-sel px-1.5 py-0.5 text-meta text-ui-accent">
                 Your wording
               </span>
             )}
@@ -988,7 +988,7 @@ export function FindingRow({
                 </span>
               ) : (
                 <span
-                  className="rounded-ui bg-ui-warn/10 px-1.5 py-0.5 text-meta text-ui-warn"
+                  className="rounded-ui bg-ui-raise px-1.5 py-0.5 text-meta text-ui-warn"
                   title="Posts as a PR comment"
                 >
                   File not in diff
@@ -1103,7 +1103,7 @@ export function FindingRow({
 
           {/* Your reword — shown when set, editable on the latest run. */}
           {hasReword && !rewording && (
-            <div className="mt-1.5 rounded-ui border border-ui-accent/50 bg-ui-accent/10 px-2 py-1">
+            <div className="mt-1.5 rounded-ui border border-ui-line bg-ui-sel px-2 py-1">
               <div className="text-meta font-medium text-ui-accent">
                 Your wording
               </div>
@@ -2034,7 +2034,7 @@ export function ClaudeReviewTab({
             )}
             {status?.progress?.reviewMode != null && (
               <span
-                className="rounded-ui bg-ui-accent/10 px-1.5 py-0.5 text-meta font-medium text-ui-accent"
+                className="rounded-ui bg-ui-sel px-1.5 py-0.5 text-meta font-medium text-ui-accent"
                 title="The review depth chosen for this run"
               >
                 {REVIEW_MODE_LABEL[status.progress.reviewMode]} review
@@ -2344,7 +2344,7 @@ export function ClaudeReviewTab({
 
           {/* Post result. */}
           {postResult != null && (
-            <div className="rounded-ui border border-ui-success/40 bg-ui-success/10 px-3 py-2 text-body text-ui-success">
+            <div className="rounded-ui border border-ui-line bg-ui-raise px-3 py-2 text-body text-ui-success">
               <div>
                 Posted review #{postResult.postedReviewId ?? '?'} ·{' '}
                 {postResult.postedCommentCount} inline comment

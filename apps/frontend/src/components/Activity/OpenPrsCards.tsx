@@ -171,7 +171,7 @@ function ReviewChip({ pr }: { pr: TimelinePr }): JSX.Element | null {
   }
   if (pr.isApproved) {
     return (
-      <span className={`${TONE_CHIP} bg-ui-success/10 text-ui-success`}>
+      <span className={`${TONE_CHIP} bg-ui-raise text-ui-success`}>
         <CheckIcon size={11} />
         Approved
       </span>
@@ -195,7 +195,7 @@ function ThreadsChip({ pr }: { pr: TimelinePr }): JSX.Element | null {
   if (label == null) return null;
   return (
     <span
-      className={label.warn ? `${TONE_CHIP} bg-ui-warn/10 text-ui-warn` : NEUTRAL_CHIP}
+      className={label.warn ? `${TONE_CHIP} bg-ui-raise text-ui-warn` : NEUTRAL_CHIP}
       title="Review threads: untouched · replied · likely addressed · resolved"
     >
       <ThreadStateBar counts={pr.threadCounts} compact className="!w-8" />
@@ -823,8 +823,8 @@ export function TicketKeyButton({
 
 const STATUS_PILL: Record<'new' | 'indeterminate' | 'done', string> = {
   new: 'bg-ui-raise text-ui-ink',
-  indeterminate: 'bg-ui-accent/10 text-ui-accent',
-  done: 'bg-ui-success/10 text-ui-success',
+  indeterminate: 'bg-ui-sel text-ui-accent',
+  done: 'bg-ui-raise text-ui-success',
 };
 const STATUS_WORD: Record<'new' | 'indeterminate' | 'done', string> = {
   new: 'To do',
@@ -952,8 +952,8 @@ function ShowMoreRow({
 }
 
 const COVERAGE_TONE: Record<CoverageTone, string> = {
-  ok: 'bg-ui-success/10 text-ui-success',
-  partial: 'bg-ui-warn/10 text-ui-warn',
+  ok: 'bg-ui-raise text-ui-success',
+  partial: 'bg-ui-raise text-ui-warn',
   bad: 'bg-ui-danger/10 text-ui-danger',
   muted: 'bg-ui-raise text-ui-ink',
 };

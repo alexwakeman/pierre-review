@@ -1,3 +1,4 @@
+import { Select } from '../ui/index.js';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { Repo, Workspace } from '@pierre-review/shared';
@@ -241,23 +242,18 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
             <span className="text-ui-faint">{r.owner}/</span>
             <span className="font-medium text-ui-ink">{r.name}</span>
           </span>
-          <select
-            value={current ?? ''}
+          <Select<string>
+            size="sm"
+            value={current != null ? String(current) : null}
             disabled={current == null || assignRepoToWorkspace.isPending}
-            aria-label={`Workspace for ${r.fullName}`}
-            title={`Move ${r.fullName} to another workspace (it leaves the one it's in now)`}
-            onChange={(e) => {
-              const next = Number(e.target.value);
+            label={`Workspace for ${r.fullName}`}
+            className="max-w-[9rem] shrink-0"
+            onChange={(v) => {
+              const next = Number(v);
               if (Number.isFinite(next) && next !== current) moveRepo(r.id, next);
             }}
-            className="max-w-[9rem] shrink-0 truncate rounded-ui border border-ui-line bg-transparent px-1 py-0.5 text-meta focus:border-ui-accent/50 focus:outline-none disabled:opacity-40"
-          >
-            {list.map((w) => (
-              <option key={w.id} value={w.id}>
-                {w.name}
-              </option>
-            ))}
-          </select>
+            options={list.map((w) => ({ value: String(w.id), label: w.name }))}
+          />
           <button
             type="button"
             onClick={() => confirmDeepResyncRepo(r)}
@@ -334,7 +330,7 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
             somewhere invisible. onSuccess (not fire-and-forget) so the switch can't race the
             move and land on the pre-move membership. */}
         {noReposYet && (
-          <div className="border-b border-ui-line bg-ui-accent/10 px-4 py-3">
+          <div className="border-b border-ui-line bg-ui-sel px-4 py-3">
             <div className="text-body font-semibold text-ui-ink">
               Add a repo to get started
             </div>
@@ -434,7 +430,7 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
                     key={w.id}
                     className={`group flex items-center gap-1.5 rounded-ui px-2 py-1 text-meta ${
                       isSelected
-                        ? 'bg-ui-accent/10'
+                        ? 'bg-ui-sel'
                         : 'hover:bg-ui-hover'
                     }`}
                   >

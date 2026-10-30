@@ -9,7 +9,7 @@ import type {
 } from '@pierre-review/shared';
 
 const CHIP_RED = 'bg-ui-danger/10 text-ui-danger';
-const CHIP_ORANGE = 'bg-ui-warn/10 text-ui-warn';
+const CHIP_ORANGE = 'bg-ui-raise text-ui-warn';
 const CHIP_GREY = 'bg-ui-raise text-ui-mute';
 
 export const CI_CATEGORY_LABEL: Record<ClaudeCiFailureCategory, string> = {

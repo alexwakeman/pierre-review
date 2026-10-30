@@ -459,8 +459,9 @@ body {
 .dark .vis-labelset .vis-label {
   color: #d1d5db;
 }
+.vis-current-time,
 .dark .vis-current-time {
-  background-color: #ef4444;
+  background-color: rgb(var(--ui-accent));
 }
 
 /* nested member sub-lanes sit slightly indented + dimmer */
@@ -685,13 +686,13 @@ body {
 .vis-foreground .vis-group.tl-user-row[class*='tl-repo-tint-'],
 .vis-labelset .vis-label.tl-repo-header[class*='tl-repo-tint-'],
 .vis-foreground .vis-group.tl-repo-header[class*='tl-repo-tint-'] {
-  background-color: rgb(var(--tl-tint) / 0.10);
+  background-color: rgb(var(--tl-tint) / 0.04);
 }
 .dark .vis-labelset .vis-label.tl-user-row[class*='tl-repo-tint-'],
 .dark .vis-foreground .vis-group.tl-user-row[class*='tl-repo-tint-'],
 .dark .vis-labelset .vis-label.tl-repo-header[class*='tl-repo-tint-'],
 .dark .vis-foreground .vis-group.tl-repo-header[class*='tl-repo-tint-'] {
-  background-color: rgb(var(--tl-tint) / 0.13);
+  background-color: rgb(var(--tl-tint) / 0.05);
 }
 
 /* Sticky repo-name header — an absolutely-positioned overlay built in the Timeline
@@ -728,10 +729,10 @@ body {
    the row zebra above. `--tl-tint` comes from the `tl-repo-tint-N` class the updater
    copies onto the node. */
 .tl-repo-sticky[class*='tl-repo-tint-'] {
-  background-image: linear-gradient(rgb(var(--tl-tint) / 0.1), rgb(var(--tl-tint) / 0.1));
+  background-image: linear-gradient(rgb(var(--tl-tint) / 0.04), rgb(var(--tl-tint) / 0.04));
 }
 .dark .tl-repo-sticky[class*='tl-repo-tint-'] {
-  background-image: linear-gradient(rgb(var(--tl-tint) / 0.13), rgb(var(--tl-tint) / 0.13));
+  background-image: linear-gradient(rgb(var(--tl-tint) / 0.05), rgb(var(--tl-tint) / 0.05));
 }
 
 /* Zebra striping: every other contributor row gets a subtle band so adjacent
@@ -1133,13 +1134,13 @@ body {
    work above from their contributions to others below. Decorative only — never
    intercept clicks meant for the markers drawn over it. */
 .vis-item.vis-background.cross-sep {
-  border-top: 1px solid rgba(99, 102, 241, 0.38);
-  background: rgba(99, 102, 241, 0.06);
+  border-top: 1px solid rgb(var(--ui-line));
+  background: rgb(var(--ui-surface) / 0.6);
   pointer-events: none;
 }
 .dark .vis-item.vis-background.cross-sep {
-  border-top-color: rgba(129, 140, 248, 0.42);
-  background: rgba(129, 140, 248, 0.09);
+  border-top-color: rgb(var(--ui-line));
+  background: rgb(var(--ui-surface) / 0.6);
 }
 
 /* Own-work cue: events on the actor's OWN PR (.ev-own) sit on the subgroup band
@@ -1204,26 +1205,26 @@ body {
    shared `cross` line — both must stay 16px to sit on one centreline. */
 .vis-item.ev-cross .ev-marker-inner {
   border-radius: 9999px;
-  background: rgba(99, 102, 241, 0.1);
+  background: rgb(var(--ui-hover));
 }
 /* The chip's ring is a box-shadow, which the sky selection/focus pulse also drives
    (animated, and a static fallback under prefers-reduced-motion). Yield the ring
    to those states so a selected/focused cross marker still reads as sky, not
    indigo — the faint disc background stays, harmlessly, underneath. */
 .vis-item.ev-cross:not(.ev-selected):not(.ev-cross-linked):not(.ev-exit-glow) .ev-marker-inner {
-  box-shadow: inset 0 0 0 1px rgba(99, 102, 241, 0.42);
+  box-shadow: inset 0 0 0 1px rgb(var(--ui-line));
 }
 .vis-item.ev-cross:not(.ev-selected):not(.ev-cross-linked):not(.ev-exit-glow) .ev-cluster-inner {
-  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.25);
+  box-shadow: 0 0 0 2px rgb(var(--ui-line));
 }
 .dark .vis-item.ev-cross .ev-marker-inner {
-  background: rgba(129, 140, 248, 0.16);
+  background: rgb(var(--ui-hover));
 }
 .dark .vis-item.ev-cross:not(.ev-selected):not(.ev-cross-linked):not(.ev-exit-glow) .ev-marker-inner {
-  box-shadow: inset 0 0 0 1px rgba(129, 140, 248, 0.52);
+  box-shadow: inset 0 0 0 1px rgb(var(--ui-line));
 }
 .dark .vis-item.ev-cross:not(.ev-selected):not(.ev-cross-linked):not(.ev-exit-glow) .ev-cluster-inner {
-  box-shadow: 0 0 0 2px rgba(129, 140, 248, 0.32);
+  box-shadow: 0 0 0 2px rgb(var(--ui-line));
 }
 
 /* legacy default-dot styling (kept for any non-custom points) */
@@ -2012,4 +2013,138 @@ body {
   .tl-repo-sticky {
     max-width: min(30vw, 7.5rem);
   }
+}
+
+/* A checkbox / radio ROW on touch: the whole label is the target, so it is at least 40px tall
+   (the 16px box alone is not). Covers the settings' bare CheckInput / RadioInput rows and any
+   hand-laid label around a real input; the ui/ primitives already do this through `touch:min-h-10`. */
+@media (pointer: coarse) {
+  label:has(input[type='checkbox']),
+  label:has(input[type='radio']) {
+    min-height: 40px;
+    align-items: center;
+  }
+}
+
+/* NATIVE CONTROLS IN THE HOUSE STYLE (docs/redesign/DESIGN.md § 7). A real <input> keeps working
+   (forms, labels, selectors, Playwright); only its look changes. The ui/ primitives style their own
+   inputs with `appearance-none` classes, so these rules skip them. */
+input[type='checkbox']:not([class*='appearance-none']),
+input[type='radio']:not([class*='appearance-none']) {
+  appearance: none;
+  -webkit-appearance: none;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  vertical-align: -3px;
+  background: rgb(var(--ui-raise));
+  box-shadow: inset 0 0 0 1px rgb(var(--ui-line));
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color 80ms, box-shadow 80ms;
+}
+input[type='radio']:not([class*='appearance-none']) {
+  border-radius: 9999px;
+}
+input[type='checkbox']:not([class*='appearance-none']):checked {
+  background: rgb(var(--ui-accent-fill))
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 8.5 6.8 11 12 5.5'/%3E%3C/svg%3E")
+    center / 12px 12px no-repeat;
+  box-shadow: none;
+}
+input[type='radio']:not([class*='appearance-none']):checked {
+  box-shadow: inset 0 0 0 5px rgb(var(--ui-accent-fill));
+}
+input[type='checkbox']:not([class*='appearance-none']):focus-visible,
+input[type='radio']:not([class*='appearance-none']):focus-visible {
+  outline: 2px solid rgb(var(--ui-accent));
+  outline-offset: 2px;
+}
+input[type='checkbox']:not([class*='appearance-none']):disabled,
+input[type='radio']:not([class*='appearance-none']):disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Range: a slim toned track and a round accent thumb. */
+input[type='range'] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 20px;
+  background: transparent;
+  cursor: pointer;
+}
+input[type='range']::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 9999px;
+  background: rgb(var(--ui-hover));
+}
+input[type='range']::-moz-range-track {
+  height: 4px;
+  border-radius: 9999px;
+  background: rgb(var(--ui-hover));
+}
+input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  margin-top: -6px;
+  border-radius: 9999px;
+  background: rgb(var(--ui-accent-fill));
+  border: 2px solid rgb(var(--ui-bg));
+}
+input[type='range']::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 9999px;
+  background: rgb(var(--ui-accent-fill));
+  border: 2px solid rgb(var(--ui-bg));
+}
+input[type='range']:focus-visible {
+  outline: 2px solid rgb(var(--ui-accent));
+  outline-offset: 2px;
+}
+@media (pointer: coarse) {
+  input[type='range'] {
+    height: 40px;
+  }
+  input[type='range']::-webkit-slider-thumb {
+    width: 22px;
+    height: 22px;
+    margin-top: -9px;
+  }
+}
+
+/* Date / number: the field look, and the picker glyph in the theme's ink. */
+input[type='date'],
+input[type='number'] {
+  color-scheme: light;
+}
+.dark input[type='date'],
+.dark input[type='number'] {
+  color-scheme: dark;
+}
+
+/* <details> disclosures: the ChevronIcon drawing instead of the browser's triangle. */
+details > summary {
+  list-style: none;
+}
+details > summary::-webkit-details-marker {
+  display: none;
+}
+details > summary::before {
+  content: '';
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 6px;
+  vertical-align: -1px;
+  background-color: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='9 6 15 12 9 18'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='9 6 15 12 9 18'/%3E%3C/svg%3E") center / contain no-repeat;
+  transition: transform 80ms;
+}
+details[open] > summary::before {
+  transform: rotate(90deg);
 }

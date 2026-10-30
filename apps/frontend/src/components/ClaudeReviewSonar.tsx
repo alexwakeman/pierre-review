@@ -31,8 +31,8 @@ const MUTED = 'text-ui-mute';
 const SEVERITY_TONE: Record<SonarSeverity, string> = {
   blocker: 'bg-ui-danger/10 text-ui-danger',
   critical: 'bg-ui-danger/10 text-ui-danger',
-  major: 'bg-ui-warn/10 text-ui-warn',
-  minor: 'bg-ui-warn/10 text-ui-warn',
+  major: 'bg-ui-raise text-ui-warn',
+  minor: 'bg-ui-raise text-ui-warn',
   info: 'bg-ui-raise text-ui-mute',
 };
 const TYPE_LABEL: Record<string, string> = {
@@ -110,7 +110,7 @@ export function SonarIssueRow({
           {it.code.map((c) => (
             <div
               key={c.line}
-              className={c.flagged ? 'bg-ui-warn/10 text-ui-ink' : 'text-ui-mute'}
+              className={c.flagged ? 'bg-ui-raise text-ui-ink' : 'text-ui-mute'}
             >
               <span className="mr-2 inline-block w-8 select-none text-right text-ui-mute">{c.line}</span>
               {c.code}
@@ -144,7 +144,7 @@ export function SonarIssueRow({
 function gatePill(s: SonarSnapshot): JSX.Element | null {
   const g = s.qualityGate;
   if (!g || g.status === 'NONE') return null;
-  const tone = g.status === 'OK' ? 'bg-ui-success/10 text-ui-success' : g.status === 'WARN' ? SEVERITY_TONE.major : SEVERITY_TONE.blocker;
+  const tone = g.status === 'OK' ? 'bg-ui-raise text-ui-success' : g.status === 'WARN' ? SEVERITY_TONE.major : SEVERITY_TONE.blocker;
   const word = g.status === 'OK' ? 'Quality gate passed' : g.status === 'WARN' ? 'Quality gate warning' : 'Quality gate failed';
   return <span className={`${REVIEW_CHIP} ${tone}`}>{word}</span>;
 }

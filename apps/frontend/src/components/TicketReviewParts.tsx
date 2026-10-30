@@ -84,7 +84,7 @@ const MUTED = 'text-ui-mute';
 const ERROR_TEXT = 'text-ui-danger';
 const BTN_PRIMARY =
   'inline-flex h-7 items-center whitespace-nowrap rounded-ui bg-ui-raise px-2.5 text-meta font-medium text-ui-ink hover:bg-ui-hover disabled:cursor-not-allowed disabled:opacity-50 touch:h-10 touch:px-3';
-const RUNNING_CLASS = 'bg-ui-accent/10 text-ui-accent';
+const RUNNING_CLASS = 'bg-ui-sel text-ui-accent';
 const NO_PATHS: ReadonlySet<string> = new Set();
 
 const CURRENCY_CLASS: Record<TicketCurrency['tone'], string> = {
@@ -516,8 +516,8 @@ export function TicketResults({
 }
 
 const CARD_CHANGE_CLASS: Record<TicketPrCard['interfaces'][number]['change'], string> = {
-  added: 'bg-ui-success/10 text-ui-success',
-  changed: 'bg-ui-warn/10 text-ui-warn',
+  added: 'bg-ui-raise text-ui-success',
+  changed: 'bg-ui-raise text-ui-warn',
   removed: 'bg-ui-danger/10 text-ui-danger',
 };
 

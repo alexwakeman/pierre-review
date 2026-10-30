@@ -51,10 +51,10 @@ export const SEVERITY_RANK: Record<ClaudeFindingSeverity, number> = {
 
 export const SEVERITY_CLASS: Record<ClaudeFindingSeverity, string> = {
   blocker: 'bg-ui-danger/10 text-ui-danger',
-  warning: 'bg-ui-warn/10 text-ui-warn',
-  nit: 'bg-ui-warn/10 text-ui-warn',
-  question: 'bg-ui-accent/10 text-ui-accent',
-  praise: 'bg-ui-success/10 text-ui-success',
+  warning: 'bg-ui-raise text-ui-warn',
+  nit: 'bg-ui-raise text-ui-warn',
+  question: 'bg-ui-sel text-ui-accent',
+  praise: 'bg-ui-raise text-ui-success',
 };
 
 // ---- praise: not a finding ----
@@ -102,10 +102,10 @@ export function sortFindingsForDisplay(findings: readonly ClaudeFinding[]): Clau
 // ---- chip palette (the file's existing contrast-safe pairs) ----
 
 const CHIP_RED = 'bg-ui-danger/10 text-ui-danger';
-const CHIP_ORANGE = 'bg-ui-warn/10 text-ui-warn';
-const CHIP_GREEN = 'bg-ui-success/10 text-ui-success';
+const CHIP_ORANGE = 'bg-ui-raise text-ui-warn';
+const CHIP_GREEN = 'bg-ui-raise text-ui-success';
 const CHIP_GREY = 'bg-ui-raise text-ui-mute';
-const CHIP_SKY = 'bg-ui-accent/10 text-ui-accent';
+const CHIP_SKY = 'bg-ui-sel text-ui-accent';
 
 // ⚠ `not_checked` is GREY, never amber: it is unknown, not "not addressed".
 export const FOLLOW_UP_STATUS_CLASS: Record<ClaudeFollowUpStatus, string> = {

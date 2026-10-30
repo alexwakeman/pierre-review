@@ -33,9 +33,9 @@ const ROW_KIND: Record<LineKind, DiffRowKind> = {
 // colours for the same pixels — so it is dropped there (see `lineClass`). The `@@` header and
 // context rows keep theirs: neither is an add/del claim, and both are deliberately quieter.
 const LINE_BG: Record<LineKind, string> = {
-  add: 'bg-ui-success/10',
+  add: 'bg-ui-raise',
   del: 'bg-ui-danger/10',
-  meta: 'bg-ui-accent/10 dark:bg-transparent',
+  meta: 'bg-ui-sel dark:bg-transparent',
   ctx: '',
 };
 const LINE_INK: Record<LineKind, string> = {
@@ -127,7 +127,7 @@ export function DiffHunk({
                 aria-expanded={true}
                 aria-label="Hide code context"
                 title="Hide code context"
-                className={`block w-full whitespace-pre px-3 text-left hover:bg-ui-accent/10 ${lineClass(kind, false)}`}
+                className={`block w-full whitespace-pre px-3 text-left hover:bg-ui-hover ${lineClass(kind, false)}`}
               >
                 {line || ' '}
               </button>

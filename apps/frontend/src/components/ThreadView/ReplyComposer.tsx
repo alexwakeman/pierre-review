@@ -66,7 +66,7 @@ export function ReplyComposer({
           type="button"
           onClick={send}
           disabled={reply.isPending || body.trim().length === 0}
-          className="hit whitespace-nowrap rounded-ui border border-ui-accent/50 px-2 py-0.5 text-meta text-ui-accent hover:bg-ui-accent/10 disabled:opacity-50"
+          className="hit whitespace-nowrap rounded-ui border border-ui-line px-2 py-0.5 text-meta text-ui-accent hover:bg-ui-hover disabled:opacity-50"
         >
           {reply.isPending ? 'Sending…' : 'Send'}
         </button>

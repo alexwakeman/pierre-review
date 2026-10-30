@@ -30,9 +30,9 @@ const VALIDITY_TONE: Record<ClaudeValidityPill, string> = {
 };
 
 const STATE_TONE: Record<ClaudeStatePill, string> = {
-  resolved: 'border-ui-success/40 text-ui-success',
-  addressed: 'border-ui-success/40 text-ui-success',
-  partly_addressed: 'border-ui-warn/40 text-ui-warn',
+  resolved: 'border-ui-line text-ui-success',
+  addressed: 'border-ui-line text-ui-success',
+  partly_addressed: 'border-ui-line text-ui-warn',
   open: 'border-ui-line text-ui-ink',
 };
 
@@ -186,7 +186,7 @@ export function ClaudeThreadReason({
             type="button"
             onClick={() => setOpen((v) => !v)}
             aria-expanded={open}
-            className="hit inline-flex shrink-0 items-center gap-0.5 rounded-ui px-1 text-meta text-ui-accent hover:bg-ui-accent/10"
+            className="hit inline-flex shrink-0 items-center gap-0.5 rounded-ui px-1 text-meta text-ui-accent hover:bg-ui-hover"
           >
             {open ? 'Less' : 'More'}
             <ChevronIcon dir={open ? 'up' : 'down'} size={10} />

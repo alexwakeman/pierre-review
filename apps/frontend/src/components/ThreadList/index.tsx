@@ -341,7 +341,7 @@ export function ThreadList({
                   aria-pressed={on}
                   className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-meta font-medium transition-colors ${
                     on
-                      ? 'border-ui-accent/50 bg-ui-accent/10 text-ui-accent'
+                      ? 'border-ui-line bg-ui-sel text-ui-accent'
                       : 'border-ui-line text-ui-mute hover:border-ui-line'
                   }`}
                   title={meta.description}
@@ -405,7 +405,7 @@ export function ThreadList({
                     disabled={count === 0 && !on}
                     className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-meta font-medium transition-colors disabled:opacity-40 ${
                       on
-                        ? 'border-ui-accent/50 bg-ui-accent/10 text-ui-accent'
+                        ? 'border-ui-line bg-ui-sel text-ui-accent'
                         : 'border-ui-line text-ui-mute hover:border-ui-line'
                     }`}
                     title={meta.description}
@@ -509,7 +509,7 @@ export function ThreadList({
       {dedupClusters.length > 0 && (
         <div
           data-testid="bot-dedup"
-          className="mx-3 my-2 rounded-ui border border-ui-accent/50 bg-ui-accent/10 px-3 py-2 text-meta"
+          className="mx-3 my-2 rounded-ui border border-ui-line bg-ui-sel px-3 py-2 text-meta"
         >
           <div className="mb-1.5 flex items-center gap-1.5 font-medium text-ui-accent">
             <BotIcon />
@@ -560,14 +560,14 @@ export function ThreadList({
                   </span>
                   {cluster.conflict ? (
                     <span
-                      className="rounded-ui bg-ui-warn/10 px-1.5 py-0.5 text-meta font-semibold text-ui-warn"
+                      className="rounded-ui bg-ui-raise px-1.5 py-0.5 text-meta font-semibold text-ui-warn"
                       title="The bots disagree on severity/verdict here — worth a human look."
                     >
                       bots disagree here
                     </span>
                   ) : cluster.consensus ? (
                     <span
-                      className="rounded-ui bg-ui-success/10 px-1.5 py-0.5 text-meta font-semibold text-ui-success"
+                      className="rounded-ui bg-ui-raise px-1.5 py-0.5 text-meta font-semibold text-ui-success"
                       title="The bots agree here — one fix likely clears both."
                     >
                       consensus

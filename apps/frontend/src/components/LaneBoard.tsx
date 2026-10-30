@@ -26,7 +26,7 @@ import { geometryOf, placeArrowLabels, routePoints, separateArrowRuns, type Arro
 import type { BoardLayout } from '../lib/laneBoard.js';
 import { ArrowIcon, ChevronIcon } from './Icons.js';
 import { cx, FOCUS_RING } from './ui/cx.js';
-import { useIsPhone } from './ui/media.js';
+import { useIsDesktop } from './ui/media.js';
 
 // ── The shared arrow pieces (the design grid draws with these too) ───────────────────────────────
 
@@ -222,7 +222,7 @@ export function ArrowLayer({
           </marker>
           <marker
             id={accent}
-            className="text-ai-signal-fill"
+            className="text-ui-ink"
             viewBox="0 0 10 10"
             refX="9"
             refY="5"
@@ -243,7 +243,9 @@ export function ArrowLayer({
                 d={p.d}
                 fill="none"
                 stroke="currentColor"
-                className={on ? 'text-ai-signal-fill' : lit ? 'text-ui-ink' : undefined}
+                // Grey, always: the critical path is the INK line (heavier), never a hue — red is
+                // reserved for what blocks (docs/redesign/DESIGN.md § 3).
+                className={on || lit ? 'text-ui-ink' : 'text-ui-faint'}
                 strokeWidth={(on ? 2.25 : 1.75) + (lit ? 1 : 0)}
                 strokeLinejoin="round"
                 strokeLinecap="round"
@@ -489,8 +491,10 @@ const TOGGLE_CLASS = `inline-flex items-center gap-0.5 rounded-ui px-1 text-meta
 export function LaneBoard<L, C>(props: LaneBoardProps<L, C>): JSX.Element {
   // A PHONE stacks the board (lanes down, then each lane's columns down) — a five-column grid at
   // 390px left every card a sliver. Every fact survives: the arrows become a visible numbered list.
-  const phone = useIsPhone();
-  return phone ? <StackedLaneBoard {...props} /> : <GridLaneBoard {...props} />;
+  // Below lg the grid is too narrow too (at 768 a collapsed column's name clipped to "C" and every
+  // card footer truncated), so the stacked board runs up to lg, two cards to a row from md.
+  const desktop = useIsDesktop();
+  return !desktop ? <StackedLaneBoard {...props} /> : <GridLaneBoard {...props} />;
 }
 
 function GridLaneBoard<L, C>({ label, layout, laneWidth, renderLane, renderCard, onToggleColumn, onToggleCell, legend }: LaneBoardProps<L, C>): JSX.Element {
@@ -684,8 +688,10 @@ function StackedLaneBoard<L, C>({ label, layout, renderLane, renderCard, onToggl
                   <CellToggle n={opened} open column={col.name} lane={lane.label} onToggle={onToggleCell == null ? null : () => onToggleCell(lane.id, col.id)} />
                 )}
               </p>
+              {/* One card per row on a phone (a lone card no longer leaves half the screen empty while
+                  it truncates); two from md. */}
               {cards.length > 0 && (
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
                   {cards.map((c) => (
                     <div key={c.id} className="flex min-w-0 flex-col">
                       {renderCard(c, NO_REF)}

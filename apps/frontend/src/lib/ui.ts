@@ -771,7 +771,7 @@ export const REVIEW_STATE_META: Record<ReviewState, ReviewStateMeta> = {
   approved: reviewStateMeta(
     'Approved',
     CheckIcon,
-    'bg-ui-success/10',
+    'bg-ui-raise',
     'text-ui-success',
     'Approved',
   ),
@@ -1181,8 +1181,8 @@ export const MERGE_TONE_CLASS: Record<MergeVerdictInfo['tone'], string> = {
 
 // Chip backgrounds for the dense list rows (RepoOpenPrList).
 export const MERGE_TONE_CHIP: Record<MergeVerdictInfo['tone'], string> = {
-  ok: 'bg-ui-success/10 text-ui-success',
-  warn: 'bg-ui-warn/10 text-ui-warn',
+  ok: 'bg-ui-raise text-ui-success',
+  warn: 'bg-ui-raise text-ui-warn',
   bad: 'bg-ui-danger/10 text-ui-danger',
   muted: 'bg-ui-raise text-ui-mute',
 };

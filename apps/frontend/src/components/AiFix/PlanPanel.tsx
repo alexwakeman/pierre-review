@@ -199,7 +199,7 @@ export function PlanPanel({
 
       {/* A re-plan that failed keeps the plan above; the reason sits here. */}
       {fix.error && (
-        <p className="mt-2 rounded-ui border border-ui-warn/40 bg-ui-warn/10 p-2 text-meta text-ui-warn">
+        <p className="mt-2 rounded-ui border border-ui-line bg-ui-raise p-2 text-meta text-ui-warn">
           {fix.error}
         </p>
       )}

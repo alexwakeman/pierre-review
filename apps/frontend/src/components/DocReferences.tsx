@@ -29,7 +29,7 @@ import { ReviewSection, SectionCount } from './ReviewSection.js';
 
 const VERDICT_TONE: Record<ReviewDocVerdict, string> = {
   contradicts: 'bg-ui-danger/10 text-ui-danger',
-  supports: 'bg-ui-success/10 text-ui-success',
+  supports: 'bg-ui-raise text-ui-success',
   context: 'bg-ui-raise text-ui-ink',
 };
 

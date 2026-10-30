@@ -299,7 +299,7 @@ function ActivityList({
   return (
     <ul className="divide-y divide-ui-line" data-testid="pr-activity-list">
       {since && (
-        <li className="flex items-center gap-2 bg-ui-accent/10 px-4 py-1 text-meta text-ui-accent">
+        <li className="flex items-center gap-2 bg-ui-sel px-4 py-1 text-meta text-ui-accent">
           <span>Showing {rows.length} since you last looked</span>
           <button
             type="button"
@@ -457,12 +457,12 @@ export const prConversationCount = (pr: PrDetailT): number =>
 // Small state pill next to a review author in the conversation, so an approval-with-note
 // reads differently from a plain review comment or a change request.
 const REVIEW_TAG: Record<ReviewState, { label: string; cls: string }> = {
-  approved: { label: 'approved', cls: 'bg-ui-success/10 text-ui-success' },
+  approved: { label: 'approved', cls: 'bg-ui-raise text-ui-success' },
   changes_requested: {
     label: 'changes requested',
-    cls: 'bg-ui-warn/10 text-ui-warn',
+    cls: 'bg-ui-raise text-ui-warn',
   },
-  commented: { label: 'review', cls: 'bg-ui-accent/10 text-ui-accent' },
+  commented: { label: 'review', cls: 'bg-ui-sel text-ui-accent' },
   dismissed: { label: 'dismissed', cls: 'bg-ui-raise text-ui-mute' },
   pending: { label: 'pending', cls: 'bg-ui-raise text-ui-mute' },
 };

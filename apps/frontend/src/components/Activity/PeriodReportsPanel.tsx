@@ -43,7 +43,7 @@ import {
   ThinSampleIcon,
   WarningIcon,
 } from '../Icons.js';
-import { FOCUS_RING, Menu } from '../ui/index.js';
+import { FOCUS_RING, Menu, Select } from '../ui/index.js';
 import type { Fmt, MetricMeta } from './periodReportMarkdown.js';
 import {
   METRIC_META,
@@ -923,21 +923,17 @@ function GenerateControls({
     <div className="space-y-1.5">
       <div className="flex flex-wrap items-center gap-2">
         {showModelPicker && (
-          <label className="flex items-center gap-1 text-meta text-ui-mute">
+          <div className="flex items-center gap-1 text-meta text-ui-mute">
             Model
-            <select
-              value={effectiveModel ?? ''}
-              onChange={(e) => setModel(e.target.value)}
+            <Select<string>
+              label="Model"
+              size="sm"
+              value={effectiveModel ?? null}
+              onChange={(v) => setModel(v)}
               disabled={running}
-              className="rounded-ui bg-ui-surface px-1 py-0.5 text-meta"
-            >
-              {choices.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.hint ? `${c.label} — ${c.hint}` : c.label}
-                </option>
-              ))}
-            </select>
-          </label>
+              options={choices.map((c) => ({ value: c.id, label: c.label, hint: c.hint ?? undefined }))}
+            />
+          </div>
         )}
         {/* The write-up is a model run: hidden when AI is off, swapped for the one setup or
             sign-in line when it cannot run (AiRunGate). */}

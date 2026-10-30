@@ -1,3 +1,4 @@
+import { Select } from './ui/index.js';
 import { useEffect, useRef, useState } from 'react';
 import { ReviewSection } from './ReviewSection.js';
 import {
@@ -53,7 +54,7 @@ const BTN_ASK =
   'whitespace-nowrap rounded-ui bg-ui-accent-fill px-4 py-1.5 text-body font-semibold text-ui-on-accent hover:bg-ui-accent-fill disabled:opacity-50';
 const MUTED = 'text-ui-mute';
 const PILL =
-  'inline-flex max-w-full items-center gap-1 rounded-full border border-ui-accent/50 bg-ui-accent/10 px-2.5 py-0.5 text-meta text-ui-accent';
+  'inline-flex max-w-full items-center gap-1 rounded-full border border-ui-line bg-ui-sel px-2.5 py-0.5 text-meta text-ui-accent';
 
 const sameRef = (a: ClaudeReviewChatPinRef, b: ClaudeReviewChatPinRef): boolean => chatPinKey(a) === chatPinKey(b);
 
@@ -122,7 +123,7 @@ function PinPill({ label, onRemove }: { label: string; onRemove?: () => void }):
           type="button"
           onClick={onRemove}
           aria-label={`Remove ${label} from the chat`}
-          className="hit -mr-1 shrink-0 rounded-full p-0.5 hover:bg-ui-accent/10"
+          className="hit -mr-1 shrink-0 rounded-full p-0.5 hover:bg-ui-hover"
         >
           <CloseIcon size={10} />
         </button>
@@ -427,20 +428,16 @@ function EarlierChats({ prId, reviewId }: { prId: number; reviewId: number }): J
           )}
           {run != null && (
             <>
-              <label className="flex flex-wrap items-center gap-2 text-meta">
+              <div className="flex flex-wrap items-center gap-2 text-meta">
                 <span className={MUTED}>Review</span>
-                <select
-                  value={run.reviewId}
-                  onChange={(e) => setPicked(Number(e.target.value))}
-                  className="rounded-ui border border-ui-line bg-ui-surface px-1.5 py-0.5 text-meta"
-                >
-                  {runs.map((r) => (
-                    <option key={r.reviewId} value={r.reviewId}>
-                      {historyRunLabel(r)}
-                    </option>
-                  ))}
-                </select>
-              </label>
+                <Select<string>
+                  label="Review"
+                  size="sm"
+                  value={String(run.reviewId)}
+                  onChange={(v) => setPicked(Number(v))}
+                  options={runs.map((r) => ({ value: String(r.reviewId), label: historyRunLabel(r) }))}
+                />
+              </div>
               <div className="rounded-ui border border-ui-line p-2">
                 <ChatMessages messages={run.messages} />
               </div>

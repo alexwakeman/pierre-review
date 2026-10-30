@@ -14,7 +14,7 @@ function classify(line: string): LineKind {
 // On a highlighted line the green/red ink and the syntax colours fight over the same characters,
 // and the 2px border already says which side the anchor is on. Split so one can be dropped.
 const BORDER: Record<LineKind, string> = {
-  add: 'border-ui-success/40',
+  add: 'border-ui-line',
   del: 'border-ui-danger/40',
   ctx: 'border-ui-line',
 };

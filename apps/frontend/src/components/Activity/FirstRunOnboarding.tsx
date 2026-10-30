@@ -186,7 +186,7 @@ export function FirstRunOnboarding(): JSX.Element {
                 <label
                   key={r.githubNodeId}
                   className={`flex cursor-pointer items-start gap-2.5 border-b border-ui-line px-3 py-2 last:border-b-0 ${
-                    on ? 'bg-ui-accent/10' : 'hover:bg-ui-hover'
+                    on ? 'bg-ui-sel' : 'hover:bg-ui-hover'
                   } ${running ? 'cursor-default opacity-70' : ''}`}
                 >
                   <input
@@ -211,7 +211,7 @@ export function FirstRunOnboarding(): JSX.Element {
                         </span>
                       )}
                       {r.isOwnedOrMember && (
-                        <span className="shrink-0 rounded-ui bg-ui-accent/10 px-1 text-meta uppercase tracking-wide text-ui-accent">
+                        <span className="shrink-0 rounded-ui bg-ui-sel px-1 text-meta uppercase tracking-wide text-ui-accent">
                           yours
                         </span>
                       )}
@@ -261,7 +261,7 @@ export function FirstRunOnboarding(): JSX.Element {
           </div>
 
           {failures.length > 0 && (
-            <div className="rounded-ui border border-ui-warn/40 bg-ui-warn/10 px-3 py-2 text-meta text-ui-warn">
+            <div className="rounded-ui border border-ui-line bg-ui-raise px-3 py-2 text-meta text-ui-warn">
               <div className="font-semibold">Couldn&rsquo;t add {failures.length} repo{failures.length === 1 ? '' : 's'}:</div>
               <ul className="mt-1 space-y-0.5">
                 {failures.map((f) => (

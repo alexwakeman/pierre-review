@@ -39,6 +39,7 @@ import { pendingRowSummary } from './pendingRow.js';
 import {
   Button,
   Tabs,
+  cx,
   panelId,
   tabId,
   useCommandProvider,
@@ -374,6 +375,7 @@ export function AttentionView(): JSX.Element {
 
   // ── "HOW IS THIS ORDERED" ─────────────────────────────────────────────────────────────────
   const [guideOpen, setGuideOpen] = useState(false);
+  const [planOpen, setPlanOpen] = useState(false);
   const openGuide = useCallback(() => setGuideOpen(true), []);
   const closeGuide = useCallback(() => setGuideOpen(false), []);
   const viewName =
@@ -545,7 +547,7 @@ export function AttentionView(): JSX.Element {
       {plan != null && wp.data?.stale === true && (
         <span
           className="text-ui-warn"
-          title="The list has moved on since this plan was written — the rows are current, the italic lines describe the list as it stood."
+          title="The list has moved on since this plan was written — the rows are current, the lines marked with the sparkle describe the list as it stood."
         >
           stale
         </span>
@@ -597,15 +599,24 @@ export function AttentionView(): JSX.Element {
               <PendingOrderInfo onOpenGuide={openGuide} rules={data?.rules} />
             </div>
             {/* GENERATED — the plan's framing sentences, quiet, labelled by their ink and mark. */}
+            {/* The model's words are grey text; only the sparkle wears the AI colour. On a phone
+                the headline is one line until tapped (the parked line shows with it). */}
             {plan != null && plan.headline.trim() !== '' && (
-              <p key={plan.generatedAt} className="digest-fade-in mt-1 flex items-start gap-1.5 text-body italic text-ai-ink">
-                <SparkleIcon size={12} className="mt-1 shrink-0 not-italic text-ai-signal" />
-                <span className="min-w-0">{plan.headline}</span>
-              </p>
+              <button
+                type="button"
+                key={plan.generatedAt}
+                onClick={() => setPlanOpen((o) => !o)}
+                aria-expanded={planOpen}
+                className="digest-fade-in mt-1 flex w-full items-start gap-1.5 rounded-ui text-left text-body text-ui-mute md:pointer-events-none md:cursor-text"
+                tabIndex={-1}
+              >
+                <SparkleIcon size={12} className="mt-1 shrink-0 text-ai-signal" />
+                <span className={cx('min-w-0', !planOpen && 'max-md:line-clamp-1')}>{plan.headline}</span>
+              </button>
             )}
             {plan != null && plan.parked != null && plan.parked.trim() !== '' && (
-              <p className="mt-0.5 flex items-start gap-1.5 text-meta italic text-ai-ink">
-                <SparkleIcon size={11} className="mt-0.5 shrink-0 not-italic text-ai-signal" />
+              <p className={cx('mt-0.5 flex items-start gap-1.5 text-meta text-ui-mute', !planOpen && 'max-md:hidden')}>
+                <SparkleIcon size={11} className="mt-0.5 shrink-0 text-ai-signal" />
                 <span className="min-w-0">{plan.parked}</span>
               </p>
             )}
@@ -644,7 +655,8 @@ export function AttentionView(): JSX.Element {
             and — at the end — the People / Automation lens wherever it would change the list, then
             My turn's "Customise". One line; it scrolls sideways on a phone rather than wrapping. */}
         {showControls && (
-          <div className="-mx-2 mt-1 flex flex-wrap items-center gap-1">
+          // One row on a phone that scrolls sideways (never three stacked rows above the list).
+          <div className="-mx-2 mt-1 flex items-center gap-1 max-md:overflow-x-auto max-md:[scrollbar-width:none] md:flex-wrap">
             {view.chips != null && (
               <>
                 <button type="button" onClick={() => setAttentionTab(tabKey)} aria-pressed={view.kind == null} className={pill(view.kind == null)}>
@@ -685,7 +697,7 @@ export function AttentionView(): JSX.Element {
             {/* ⚠ ONE wrapper for everything at the row's end. Two `ml-auto` siblings split the free
                 space between them, so the lens would float mid-row. */}
             {(authorLensOffered || tabKey === 'my_turn') && (
-              <div className="ml-auto flex shrink-0 flex-wrap items-center gap-1 md:pl-3">
+              <div className="flex shrink-0 items-center gap-1 md:ml-auto md:flex-wrap md:pl-3">
                 {authorLensOffered && (
                   // ⚠ `setAttentionAuthorLens` ALONE — the lens is orthogonal to the tab, the kind
                   // chip and "Only yours", and each pill's figure is the server's own count of the

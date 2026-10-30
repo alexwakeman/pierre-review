@@ -199,8 +199,8 @@ function startsCollapsed(file: DiffFile): boolean {
 }
 
 const ROW_BG: Record<DiffRow['kind'], string> = {
-  hunk: 'bg-ui-accent/10 text-ui-accent select-none',
-  add: 'bg-ui-success/10',
+  hunk: 'bg-ui-sel text-ui-accent select-none',
+  add: 'bg-ui-raise',
   del: 'bg-ui-danger/10',
   context: '',
 };
@@ -270,7 +270,7 @@ function DiffLine({
       <tr
         ref={rowRef}
         className={`group transition-colors ${
-          flash ? 'bg-ui-warn/10' : ROW_BG[row.kind]
+          flash ? 'bg-ui-raise' : ROW_BG[row.kind]
         }`}
       >
         {/* Widths come from the table's `<colgroup>` (see `DiffColumns`), never from these cells. */}
@@ -843,7 +843,7 @@ function InlineCommentBox({
           type="button"
           onClick={send}
           disabled={busy || body.trim().length === 0}
-          className="hit whitespace-nowrap rounded-ui border border-ui-accent/50 px-2 py-0.5 text-meta text-ui-accent hover:bg-ui-accent/10 disabled:opacity-50"
+          className="hit whitespace-nowrap rounded-ui border border-ui-line px-2 py-0.5 text-meta text-ui-accent hover:bg-ui-hover disabled:opacity-50"
         >
           {refreshing ? 'Loading it…' : add.isPending ? 'Posting…' : 'Send'}
         </button>
@@ -920,7 +920,7 @@ function NoPatchNote({
           type="button"
           onClick={onLoad}
           disabled={status === 'loading'}
-          className="hit rounded-ui border border-ui-accent/50 px-2 py-0.5 text-ui-accent hover:bg-ui-accent/10 disabled:opacity-60"
+          className="hit rounded-ui border border-ui-line px-2 py-0.5 text-ui-accent hover:bg-ui-hover disabled:opacity-60"
         >
           {status === 'loading' ? 'Loading full diff…' : 'Load full diff'}
         </button>
@@ -973,7 +973,7 @@ function GapRow({
       ? gapSummary(remaining, gap.context)
       : [GAP_STATUS_TEXT[status] ?? '', gap.context].filter((p) => p !== '').join(' · ');
   return (
-    <tr className="bg-ui-accent/10">
+    <tr className="bg-ui-sel">
       <td colSpan={2} className="border-r border-ui-line p-0 align-middle">
         {controls.length > 0 && (
           <div className="flex flex-col">
@@ -1376,7 +1376,7 @@ function FileDiffBlock({
       <div
         className={`sticky top-[var(--diff-sticky-top,0px)] z-10 flex items-center gap-2 border-b px-3 py-1.5 text-meta ${
           focus != null
-            ? `${SELECTED_FILL} border-ui-accent/50`
+            ? `${SELECTED_FILL} border-ui-line`
             : 'border-ui-line bg-ui-surface hover:bg-ui-hover'
         }`}
       >

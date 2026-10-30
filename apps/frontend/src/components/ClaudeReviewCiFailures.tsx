@@ -75,7 +75,7 @@ export function CiFailureRow({
   return (
     <li
       className={`rounded-ui border px-3 py-2 text-body ${
-        fixable ? 'border-ui-warn/40' : 'border-ui-line'
+        fixable ? 'border-ui-line' : 'border-ui-line'
       }`}
     >
       <div className="flex flex-wrap items-center gap-2">

@@ -23,7 +23,7 @@ import { SparkleIcon } from './Icons.js';
 
 const TONE: Record<'normal' | 'near' | 'over', string> = {
   normal: 'border-ui-line text-ui-ink',
-  near: 'border-ui-warn/40 text-ui-warn',
+  near: 'border-ui-line text-ui-warn',
   over: 'border-ui-danger/40 text-ui-danger',
 };
 

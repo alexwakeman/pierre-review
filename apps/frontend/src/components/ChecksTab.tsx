@@ -20,6 +20,7 @@ import {
   mergeVerdict,
   relativeTime,
   safeExternalUrl,
+  vendorInk,
 } from '../lib/ui.js';
 // The queue chip's wording, IMPORTED from the Pending board's labels rather than re-spelled here.
 // The board and this pane describe one PR's queue entry, and "Leaving the merge queue" is the whole
@@ -180,7 +181,7 @@ export function ChecksSummary({
         <ChevronIcon dir={open ? 'down' : 'right'} size={10} className="shrink-0 text-ui-faint" />
         {passed > 0 && (
           <span
-            className="rounded-ui bg-ui-success/10 px-1 text-meta font-semibold text-ui-success"
+            className="rounded-ui bg-ui-raise px-1 text-meta font-semibold text-ui-success"
             title="Checks that passed"
           >
             {allPassed && passed > 1 ? `all ${passed} passed` : `${passed} passed`}
@@ -196,7 +197,7 @@ export function ChecksSummary({
         )}
         {running > 0 && (
           <span
-            className="rounded-ui bg-ui-warn/10 px-1 text-meta font-semibold text-ui-warn"
+            className="rounded-ui bg-ui-raise px-1 text-meta font-semibold text-ui-warn"
             title="Checks still running"
           >
             {running} running
@@ -629,7 +630,7 @@ export function ChecksTab({
   return (
     <>
       {pr.authNotice?.kind === 'saml_sso' && (
-        <div className="mx-4 mt-2 rounded-ui border border-ui-warn/40 bg-ui-warn/10 px-3 py-2 text-meta leading-relaxed text-ui-warn">
+        <div className="mx-4 mt-2 rounded-ui border border-ui-line bg-ui-raise px-3 py-2 text-meta leading-relaxed text-ui-warn">
           <strong className="font-semibold">
             Some data from {pr.authNotice.org} is hidden.
           </strong>{' '}
@@ -942,8 +943,9 @@ export function ChecksTab({
                 key={g.kind}
                 type="button"
                 onClick={() => setThreadBotFilter(g.kind)}
-                className="hit inline-flex items-center gap-1 rounded-ui px-1.5 py-0.5 font-medium transition-opacity hover:opacity-80"
-                style={{ color: g.color, background: `${g.color}1a` }}
+                // Grey words on a tone; the vendor colour is the bot MARK only, through vendorInk (a
+                // raw brand hex is never text colour). "need a look" is the one figure in ink.
+                className="hit inline-flex items-center gap-1 rounded-ui bg-ui-raise px-1.5 py-0.5 text-ui-mute hover:bg-ui-hover hover:text-ui-ink"
                 title={`${g.label} opened ${g.threads} review thread${
                   g.threads === 1 ? '' : 's'
                 } on this PR${
@@ -952,15 +954,17 @@ export function ChecksTab({
                     : ' · all acted on'
                 } — click to see its threads`}
               >
-                <BotIcon size={12} />
+                <span aria-hidden className="flex" style={vendorInk(g.color)}>
+                  <BotIcon size={12} />
+                </span>
                 {g.label}
-                <span className="tabular-nums opacity-70">· {g.threads}</span>
+                <span className="tabular-nums text-ui-faint">· {g.threads}</span>
                 {/* "need a look", NOT "unresolved" — this counts untouched|replied_unresolved
                     and EXCLUDES likely_addressed, while the Blocked row's merge count is
                     everything GitHub hasn't seen resolved. Two populations on one screen, so
                     neither may wear the other's word. */}
                 {g.unresolved > 0 && (
-                  <span className="tabular-nums font-semibold">· {g.unresolved} need a look</span>
+                  <span className="tabular-nums font-medium text-ui-ink">· {g.unresolved} need a look</span>
                 )}
               </button>
             ))}
@@ -1063,8 +1067,8 @@ export function ChecksTab({
             {pr.labels.map((l) => (
               <span
                 key={l.name}
-                className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-meta"
-                style={{ borderColor: `#${l.color}` }}
+                // The label's own colour is its DOT only; the words are grey on a tone.
+                className="inline-flex items-center gap-1 rounded-ui bg-ui-raise px-1.5 py-0.5 text-meta text-ui-mute"
               >
                 <span
                   className="inline-block h-2 w-2 rounded-full"
@@ -1129,7 +1133,7 @@ function PrTicketChip({ prId, ticket: t }: { prId: number; ticket: TicketRef }):
         <button
           type="button"
           onClick={() => openStory({ ident: t.ident!, key: t.key, title: null })}
-          className="hit inline-flex items-center rounded-l-ui px-1.5 py-0.5 text-meta font-medium text-ui-accent hover:bg-ui-accent/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent"
+          className="hit inline-flex items-center rounded-l-ui px-1.5 py-0.5 text-meta font-medium text-ui-accent hover:bg-ui-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent"
           title={`Open the ${t.key} story`}
           data-testid="pr-ticket-story"
         >
@@ -1142,7 +1146,7 @@ function PrTicketChip({ prId, ticket: t }: { prId: number; ticket: TicketRef }):
             rel="noreferrer noopener"
             aria-label={`Open ${t.key} in ${trackerLabel}`}
             title={`Open ${t.key} in ${trackerLabel}`}
-            className={`inline-flex items-center self-stretch px-1 text-ui-accent hover:bg-ui-accent/10 ${
+            className={`inline-flex items-center self-stretch px-1 text-ui-accent hover:bg-ui-hover ${
               t.manual ? '' : 'rounded-r-ui'
             }`}
           >
@@ -1155,7 +1159,7 @@ function PrTicketChip({ prId, ticket: t }: { prId: number; ticket: TicketRef }):
         href={external}
         target="_blank"
         rel="noreferrer noopener"
-        className={`inline-flex items-center px-1.5 py-0.5 text-meta font-medium text-ui-accent hover:bg-ui-accent/10 ${
+        className={`inline-flex items-center px-1.5 py-0.5 text-meta font-medium text-ui-accent hover:bg-ui-hover ${
           t.manual ? 'rounded-l-ui' : 'rounded-ui'
         }`}
         title={`Open ${t.key} in ${trackerLabel}`}
@@ -1164,7 +1168,7 @@ function PrTicketChip({ prId, ticket: t }: { prId: number; ticket: TicketRef }):
       </a>
     );
   return (
-    <span className="inline-flex items-center rounded-ui border border-ui-accent/50 bg-ui-accent/10">
+    <span className="inline-flex items-center rounded-ui bg-ui-raise">
       {link}
       {t.manual === true && (
         <button
@@ -1172,7 +1176,7 @@ function PrTicketChip({ prId, ticket: t }: { prId: number; ticket: TicketRef }):
           disabled={remove.isPending}
           onClick={() => remove.mutate(t.key)}
           aria-label={`Remove ${t.key} (added by hand)`}
-          className="hit rounded-r-ui px-1 py-1 text-ui-accent hover:bg-ui-accent/10 disabled:opacity-50"
+          className="hit rounded-r-ui px-1 py-1 text-ui-accent hover:bg-ui-hover disabled:opacity-50"
         >
           <CloseIcon size={10} />
         </button>

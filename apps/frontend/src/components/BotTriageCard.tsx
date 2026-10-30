@@ -283,7 +283,7 @@ export function BotTriageCard({
             type="button"
             onClick={() => setConfirming(true)}
             disabled={resolveBotThreads.isPending}
-            className="hit ml-auto rounded-ui border border-ui-success/40 px-2 py-0.5 font-medium text-ui-success hover:bg-ui-success/10 disabled:opacity-60"
+            className="hit ml-auto rounded-ui border border-ui-line px-2 py-0.5 font-medium text-ui-success hover:bg-ui-hover disabled:opacity-60"
             title="A later commit touched the file each of these threads flags — review the exact list, then resolve them on GitHub in one click."
           >
             Resolve the {resolvableIds.length} addressed
@@ -294,7 +294,7 @@ export function BotTriageCard({
       {/* Confirm step: the exact threads, listed — resolve is user-initiated and confirm-gated,
           always naming what it will touch (nothing ever auto-resolves). */}
       {confirming && (
-        <div className="mt-2 rounded-ui border border-ui-success/40 bg-white/60 p-2">
+        <div className="mt-2 rounded-ui border border-ui-line bg-white/60 p-2">
           <div className="mb-1 font-medium text-ui-ink">
             Resolve {resolvableThreads.length} likely-addressed bot thread
             {resolvableThreads.length === 1 ? '' : 's'} on GitHub?

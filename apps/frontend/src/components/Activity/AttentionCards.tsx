@@ -204,8 +204,8 @@ import {
 // Left-accent + label per severity — the same visual grammar as the Feed's cards.
 const SEV: Record<InsightSeverity, { border: string; dot: string }> = {
   high: { border: 'border-l-ui-danger/40', dot: 'bg-ui-danger' },
-  warn: { border: 'border-l-ui-warn/40', dot: 'bg-ui-warn' },
-  info: { border: 'border-l-ui-accent/50', dot: 'bg-ui-accent-fill' },
+  warn: { border: 'border-l-ui-line', dot: 'bg-ui-warn' },
+  info: { border: 'border-l-ui-line', dot: 'bg-ui-accent-fill' },
 };
 
 // The kind and card labels live in `pendingLabels.ts` (the Pending info popovers read them too, and
@@ -1947,7 +1947,7 @@ function SecurityDetail({
   // Amber only for Dependabot's inferred fix with nothing else behind it — the card's own colour.
   const inferredOnly = card.fix === 'inferred' && card.alertCount === 0;
   const tint = inferredOnly
-    ? 'bg-ui-warn/10 text-ui-warn'
+    ? 'bg-ui-raise text-ui-warn'
     : 'bg-ui-danger/10 text-ui-danger';
   const mark = inferredOnly ? 'text-ui-warn' : 'text-ui-danger';
   const ids = card.advisoryIds;

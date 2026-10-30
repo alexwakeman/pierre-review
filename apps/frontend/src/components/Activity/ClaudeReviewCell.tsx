@@ -78,9 +78,9 @@ const TICKET_TONE: Record<CoverageTone, string> = {
 // The panel's left accent, by outcome. `none` keeps the plain AI border (an offer, not a result).
 const ACCENT: Record<ReviewTone, string> = {
   none: 'border-l-ai-border',
-  active: 'border-l-ui-accent/50',
+  active: 'border-l-ui-line',
   bad: 'border-l-ui-danger/40',
-  ok: 'border-l-ui-success/40',
+  ok: 'border-l-ui-line',
   neutral: 'border-l-ui-line',
 };
 

@@ -98,7 +98,7 @@ export function ReactionBar({
             }}
             className={`inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-meta leading-none transition-colors disabled:opacity-60 ${
               g.viewerHasReacted
-                ? 'border-ui-accent/50 bg-ui-accent/10 text-ui-accent'
+                ? 'border-ui-line bg-ui-sel text-ui-accent'
                 : 'border-ui-line text-ui-mute hover:border-ui-line'
             }`}
           >
@@ -159,7 +159,7 @@ export function ReactionBar({
                   react(content, !mine);
                 }}
                 className={`rounded-ui px-1 py-0.5 text-body leading-none hover:bg-ui-hover ${
-                  mine ? 'bg-ui-accent/10' : ''
+                  mine ? 'bg-ui-sel' : ''
                 }`}
               >
                 <span aria-hidden>{REACTION_EMOJI[content]}</span>
