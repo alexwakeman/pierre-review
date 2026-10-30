@@ -26,6 +26,7 @@ import { ChevronIcon } from '../Icons.js';
 import { RegenProgressBar } from '../Activity/RegenProgressBar.js';
 import { aiProviderName, aiRunProvider, aiRunProviderName } from '@pierre-review/shared';
 import { useFollowUpProvider } from '../../hooks/useModelPick.js';
+import { PlanMessageBox, PlanTranscript } from './PlanChat.js';
 
 // PLAN MODE (manual AI Fix only; docs/CLAUDE-REVIEW.md § AI Fix "Plan mode"). Claude reads the code
 // and writes a plan; it edits nothing. The reader steers it by chat — each message runs a fresh
@@ -204,16 +205,7 @@ export function PlanPanel({
         </p>
       )}
 
-      {state.transcript.length > 0 && (
-        <ul className="mt-3 space-y-1.5 border-t border-ui-line pt-2 text-meta">
-          {state.transcript.map((m, i) => (
-            <li key={i} className="whitespace-pre-wrap text-ui-ink">
-              <span className="font-semibold">{m.role === 'reader' ? 'You' : plannedBy}: </span>
-              {m.text}
-            </li>
-          ))}
-        </ul>
-      )}
+      <PlanTranscript transcript={state.transcript} plannedBy={plannedBy} />
 
       {passRunning && (
         <div className="mt-3">
@@ -243,31 +235,14 @@ export function PlanPanel({
       {ready && plan && (
         <div className="mt-3">
           <AiRunGate kind="plan" auth={auth} meter={false} followUp provider={passProvider}>
-            <textarea
-              aria-label="Change the plan"
-              className="w-full rounded-ui bg-ui-raise px-2 py-1 text-body ring-1 ring-inset ring-ui-line focus:outline-none focus:ring-2 focus:ring-ui-accent"
-              rows={2}
-              placeholder={`Tell ${name} what to change in the plan`}
-              value={draft}
-              disabled={busy}
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                  e.preventDefault();
-                  send();
-                }
-              }}
+            <PlanMessageBox
+              name={name}
+              draft={draft}
+              setDraft={setDraft}
+              busy={busy}
+              maxChars={AI_FIX_PLAN_MAX_MESSAGE_CHARS}
+              onSend={send}
             />
-            {tooLong && (
-              <p className="text-meta text-ui-danger">
-                Keep it under {AI_FIX_PLAN_MAX_MESSAGE_CHARS.toLocaleString('en-US')} characters.
-              </p>
-            )}
-            <div className="mt-2">
-              <button type="button" data-ai-run className={BTN_SECONDARY} disabled={busy || text === '' || tooLong} onClick={send}>
-                Update plan
-              </button>
-            </div>
           </AiRunGate>
           <div className="mt-2 flex flex-wrap items-center gap-2">
             <AiRunGate kind="fix" auth={auth} followUp provider={buildProvider}>

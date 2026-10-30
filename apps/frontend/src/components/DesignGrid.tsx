@@ -51,6 +51,7 @@ export function DesignGrid({
   members = [],
   label,
   openFile,
+  refNames,
 }: {
   design: DesignDiagram;
   // Story designs: the members, in ref order (PR1 = members[0]). Empty for a PR design.
@@ -59,6 +60,9 @@ export function DesignGrid({
   label: string;
   // Absent ⇒ cards are not clickable.
   openFile?: OpenDesignFile;
+  // A PLANNED design (the story build, docs/STORY-BUILD.md): a cell's `pr` is a repository ref (`R1`)
+  // with no pull request yet — its chip reads the repository's name from here.
+  refNames?: ReadonlyMap<string, string>;
 }): JSX.Element {
   const layout = useMemo(() => layoutDesign(design), [design]);
   const badges = useMemo(() => prBadgeTexts(members), [members]);
@@ -139,6 +143,7 @@ export function DesignGrid({
                   stage={layout.acts[g.col]!.title}
                   layerLabel={r.label}
                   member={memberForRef(g.cell.pr, members)}
+                  refName={g.cell.pr != null ? (refNames?.get(g.cell.pr) ?? null) : null}
                   badges={badges}
                   openFile={openFile}
                   cardRef={cardRef(g.cell.id)}
@@ -168,6 +173,7 @@ function DesignCard({
   stage,
   layerLabel,
   member,
+  refName,
   badges,
   openFile,
   cardRef,
@@ -176,6 +182,8 @@ function DesignCard({
   stage: string;
   layerLabel: string;
   member: SequenceDiagramMember | null;
+  /** A planned design's repository name for the cell's ref (no pull request yet). */
+  refName: string | null;
   badges: Map<number, string>;
   openFile?: OpenDesignFile;
   cardRef: (el: HTMLElement | null) => void;
@@ -223,6 +231,9 @@ function DesignCard({
             {badges.get(member.prId) ?? `#${member.number}`}
           </span>
         )}
+        {member == null && refName != null && (
+          <span className="whitespace-nowrap rounded-ui border border-ui-line px-1 text-meta text-ui-ink">{refName}</span>
+        )}
       </span>
       <span className="mt-0.5 line-clamp-2 block break-words text-body leading-snug text-ui-ink">
         {cell.label}
@@ -235,6 +246,7 @@ function DesignCard({
     word ?? 'Unchanged',
     cell.pattern != null ? `pattern ${cell.pattern}` : null,
     member != null ? `pull request ${member.repo} #${member.number}` : null,
+    member == null && refName != null ? `repository ${refName}` : null,
     `${stage}, ${layerLabel}`,
     clickable ? (many ? `${cell.files.length} files` : `open ${cell.files[0]}`) : null,
   ]

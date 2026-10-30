@@ -563,7 +563,7 @@ function FixResult({
           diff at all, and that is exactly the run whose "Not addressed" list matters most. */}
       <FixReport pr={pr} fix={fix} />
       {/* "Run tests": Limn's own run of the chosen checks, the install and the commit hook. */}
-      <ChecksReport fix={fix} />
+      <ChecksReport checks={fix.checks} />
       {noChanges ? (
         <p className="mt-2 text-meta text-ui-mute">
           No files changed.
@@ -797,7 +797,7 @@ function PushControls({
           {busy ? 'Pushing…' : target === 'new' ? 'Push + open PR' : 'Push'}
         </button>
         {/* "Run tests": the results' one line. Push works whatever they say. */}
-        <ChecksStatus fix={fix} />
+        <ChecksStatus checks={fix.checks} />
       </div>
 
       {push.isError && (
