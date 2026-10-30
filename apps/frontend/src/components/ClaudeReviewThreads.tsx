@@ -82,9 +82,9 @@ export function ThreadRow({
   const [whyOpen, setWhyOpen] = useState(false);
   return (
     <li
-      // A surface-toned row; one still to fix keeps a thin warn edge (it is the news here).
+      // A surface-toned row (no stripe: its "Not addressed" chip already says it is still to fix).
       className={`rounded-ui bg-ui-surface px-3 py-2.5 text-body ${
-        toFix ? 'shadow-[inset_2px_0_0_rgb(var(--ui-warn))]' : ''
+        toFix ? '' : ''
       }`}
     >
       <div className="flex flex-wrap items-center gap-2">

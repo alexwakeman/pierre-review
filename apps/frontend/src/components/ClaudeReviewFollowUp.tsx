@@ -1284,7 +1284,7 @@ export function FollowUpRow({
   const anchor = followUpAnchor(item, findingsById, headMoved, changedPaths);
   const border =
     item.status === 'not_addressed' || item.status === 'partly_addressed' || item.status === 'reply_disputed'
-      ? 'shadow-[inset_2px_0_0_rgb(var(--ui-warn))]'
+      ? ''
       : '';
   const reraised =
     item.reraisedFindingId != null && findingsById.has(item.reraisedFindingId)

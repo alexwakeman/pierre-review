@@ -1621,7 +1621,7 @@ function GenerateFixButton({
       <button
         type="button"
         onClick={() => openAiFixFromReview(prId, review.id)}
-        className="hit inline-flex items-center gap-1 whitespace-nowrap rounded-ui border border-ai-border px-2.5 py-1 text-meta text-ai-signal hover:border-ai-signal/60 hover:bg-ai-surface-2"
+        className="hit inline-flex items-center gap-1 whitespace-nowrap rounded-ui border border-ai-border px-2.5 py-1 text-meta text-ai-signal hover:border-ai-signal/60 hover:bg-ai-surface-2 touch:min-h-10"
       >
         Generate fix from this review
         <ArrowIcon dir="right" size={11} />
@@ -1921,7 +1921,7 @@ export function ClaudeReviewTab({
   return (
     <ReviewTabPrRefs pr={pr} review={shownReview}>
     <QuietReviewSections>
-    <div className="max-w-5xl space-y-7 px-1 py-2">
+    <div className="max-w-5xl space-y-7 px-5 py-2 max-md:px-3">
       {/* Reviews, Actions and the AI Fix hand-off (latest succeeded run only), above everything. */}
       <PrReviewActionsSection pr={pr} usersById={usersById} fixReview={canEdit ? review : null} />
       {/* The run controls are ALWAYS shown; a missing AI runtime or Claude credential replaces
