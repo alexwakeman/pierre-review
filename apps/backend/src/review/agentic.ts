@@ -151,6 +151,13 @@ export async function startAgenticBackground(app: FastifyInstance): Promise<void
   } catch (err) {
     app.log.warn({ err }, 'story docs: startup reconcile failed');
   }
+  try {
+    // "Implement story": a plan pass or a build a restart cut off never stays "running".
+    const { reconcileStoryBuildsOnStartup } = await import('../coding/story-build/manager.js');
+    await reconcileStoryBuildsOnStartup(ctx);
+  } catch (err) {
+    app.log.warn({ err }, 'story builds: startup reconcile failed');
+  }
   // Codex's own record of earlier runs (rows a crash or a lost retry left in Limn's Codex home): the
   // periodic sweep is armed NOW when that home exists, not only after the next Codex run.
   try {
