@@ -122,12 +122,13 @@ ANTHROPIC_API_KEY*. The ladder lives in `apps/backend/src/ai/credentials.ts`.
 Every AI feature can run on Codex instead, on your own ChatGPT plan. One provider runs
 everything at a time.
 
+Codex comes with Limn (see One-time setup below). Sign in from **Settings → AI**, or:
+
 ```bash
-npx limn-review ai install codex   # adds the Codex CLI to the AI download
 npx limn-review ai login codex     # sign in with ChatGPT (add --device-auth on a headless machine)
 ```
 
-Or press **Set up AI** and sign in from **Settings → AI**. Limn keeps its own Codex
+Limn keeps its own Codex
 sign-in in `~/.limn/codex`; your `~/.codex` is not read or changed. Codex with an
 OpenAI API key is not available yet.
 
@@ -140,16 +141,21 @@ budget counts Limn's share of your ChatGPT plan's 5-hour and weekly limits.
 
 ### One-time setup
 
-The npm package ships no AI SDKs, so `npx limn-review` stays small. The first time
-you use an AI feature, press **Set up AI** (a one-time download of about 110 MB), or
-run:
+Claude and Codex both work out of the box. The npm package ships no AI SDKs, so
+`npx limn-review` stays small; the first time Limn starts, it downloads both in the
+background (Claude about 110 MB, Codex about 360 MB unpacked) while you use the rest of
+the app. Its progress shows where the Run buttons will be, with **Retry** if it fails.
+Signing in to Claude Code or Codex is the only step.
+
+To run the download yourself, or again:
 
 ```bash
-npx limn-review ai install     # or `limn ai install` if installed globally
+npx limn-review ai install codex   # Claude and Codex; `ai install` alone is Claude only
 ```
 
-This installs exact, pinned versions of the Claude Agent SDK and its peers into
-`~/.limn/ai-runtime`. From a checkout (`pnpm dev`) they resolve from `node_modules`
+This installs exact, pinned versions of the Claude Agent SDK and its peers, and the
+Codex CLI, into `~/.limn/ai-runtime`. Set `LIMN_AI_AUTO_INSTALL=false` to skip the
+automatic download (`LIMN_AI_DISABLED=true` skips it too). From a checkout (`pnpm dev`) they resolve from `node_modules`
 and there is nothing to install. To use the `claude` you already have installed
 instead of the bundled one, set `LIMN_CLAUDE_PATH=/path/to/claude`.
 

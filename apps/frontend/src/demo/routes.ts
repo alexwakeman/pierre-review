@@ -117,6 +117,8 @@ function demoAi(srv: DemoServer): Record<string, unknown> {
   const message = provider === 'codex' ? codexMessage : null;
   return {
     enabled: true,
+    // Claude and Codex come with Limn (downloaded on the first boot): both are here already.
+    autoInstall: true,
     runtime: 'ready',
     runtimeMessage: null,
     auth,
@@ -126,7 +128,7 @@ function demoAi(srv: DemoServer): Record<string, unknown> {
     providerSetting: { value: st.setting, source: 'settings' },
     effortSetting: { value: st.effort, source: 'settings' },
     providers: {
-      claude: { auth: 'ok', route: 'login', message: null, runtime: 'ready' },
+      claude: { auth: 'ok', route: 'login', message: null, runtime: 'ready', runtimeMessage: null },
       codex: {
         runtime: 'ready',
         runtimeMessage: null,

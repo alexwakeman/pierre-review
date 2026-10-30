@@ -71,6 +71,9 @@ const baseEnv = {
   LIMN_DOCS_DIR: join(DATA_DIR, 'docs'),
   CLONE_DIR: join(DATA_DIR, 'clones'),
   DATABASE_URL: DB,
+  // No first-boot AI download (ai/auto-install.ts): it would hit the network and turn /api/me's
+  // `ai.runtime` into 'installing' mid-shot.
+  LIMN_AI_AUTO_INSTALL: 'false',
   DISABLE_SCHEDULER: 'true',
   // The walk below is far faster than a person; a 429 would be recorded as the answer.
   RATE_LIMIT_DISABLED: 'true',

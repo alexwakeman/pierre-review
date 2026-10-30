@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { aiSignInLine, type AiProviderId, type AiRunKind } from '@pierre-review/shared';
 import {
+  AI_SETUP_LABEL_BOTH,
   aiSetupLabel,
   aiAuthFor,
   useAiCapabilities,
@@ -13,8 +14,8 @@ import { aiGateReadyFor } from '../lib/aiCapabilities.js';
 
 /**
  * What sits in place of a Run button for an agentic AI surface (Claude Review, the review chat,
- * AI Fix). In order: nothing when AI is off; the one-time runtime download when the SDKs are not
- * installed yet; ONE plain line when the active provider has no credential; otherwise the children
+ * AI Fix). In order: nothing when AI is off; the one-time download's progress (Limn starts it by
+ * itself on the first boot) or its Retry while the runtime is not ready; ONE plain line when the active provider has no credential; otherwise the children
  * (the real button).
  *
  * `auth` lets a surface pass a fresher answer than `/api/me` (the Claude Review route reports its
@@ -86,19 +87,24 @@ export function AiAuthLine({ kind, provider }: { kind?: AiRunKind; provider?: Ai
   return <span className="text-meta text-ui-mute">{line}</span>;
 }
 
-/** The "Set up AI" button, its progress line, and a failure with Retry. */
+/**
+ * What stands where "Set up AI" used to: Limn downloads Claude and Codex by itself on the first boot
+ * (`ai.autoInstall`), so this is the download's progress line, then — only if it failed — the reason
+ * and Retry. The Set up button shows only where the automatic download is off (LIMN_AI_AUTO_INSTALL=false).
+ */
 export function AiRuntimeSetup(): JSX.Element | null {
   const ai = useAiCapabilities();
   const { state, start } = useAiRuntimeInstall();
-  // Started somewhere else (another tab, `limn ai install`): watch it finish.
-  const serverInstalling = ai.runtime === 'installing' && state.phase !== 'running';
-  useAiRuntimePoll(serverInstalling);
+  // Poll while the SERVER is downloading (the automatic one, another tab's, `limn ai install`): its
+  // step shows, and the line turns into Run on its own.
+  useAiRuntimePoll(ai.runtime === 'installing');
   if (!ai.enabled || ai.runtime === 'ready') return null;
 
   if (state.phase === 'running' || ai.runtime === 'installing') {
+    const step = state.message ?? (ai.runtime === 'installing' ? ai.runtimeMessage : null);
     return (
       <span className="text-meta text-ui-mute" role="status">
-        Setting up AI…{state.message != null ? ` ${state.message}` : ''}
+        Setting up AI…{step != null ? ` ${step}` : ''}
       </span>
     );
   }
@@ -117,9 +123,8 @@ export function AiRuntimeSetup(): JSX.Element | null {
         onClick={() => start()}
         className="hit bg-ui-raise rounded-ui px-2 py-1 text-meta hover:bg-ui-hover"
       >
-        {failure != null ? 'Retry' : aiSetupLabel(ai.provider)}
+        {failure != null ? 'Retry' : ai.autoInstall ? AI_SETUP_LABEL_BOTH : aiSetupLabel(ai.provider)}
       </button>
     </span>
   );
 }
-

@@ -57,7 +57,7 @@ export const ROUTE_SEO: Record<string, RouteSeo> = {
   },
   '/getting-started': {
     title: `Getting started — install, run and connect · ${SITE_NAME}`,
-    description: `Run ${SITE_NAME} with one command: npx ${NPM_PACKAGE}. Then connect Claude Code or Codex, give Limn a share of your weekly AI usage, add the scoring model for review-bot comments, add your repositories, and connect Jira or Linear and Slack. It runs on your machine and uses your logged-in gh.`,
+    description: `Run ${SITE_NAME} with one command: npx ${NPM_PACKAGE}. Then sign in to Claude Code or Codex (both work out of the box), give Limn a share of your weekly AI usage, add the scoring model for review-bot comments, add your repositories, and connect Jira or Linear and Slack. It runs on your machine and uses your logged-in gh.`,
   },
   '/reporting': {
     title: `Reporting and metrics — where the work is and where it waits · ${SITE_NAME}`,
@@ -80,8 +80,8 @@ export const ROUTE_SEO: Record<string, RouteSeo> = {
     description: `The two analytics cookies this site sets if you agree to them, what they do, how long they last, and a one-click control to change your choice.`,
   },
   '/terms': {
-    title: `Terms of use — ${SITE_NAME}`,
-    description: `The terms for this website and the ${SITE_NAME} software, a summary of the Limn License — free for individuals, and for organisations where no more than ${FREE_TEAM_SIZE} people use it — and the limits of liability.`,
+    title: `Terms and conditions — ${SITE_NAME}`,
+    description: `The terms for this website and the ${SITE_NAME} software: a summary of the Limn License (free for individuals, and for organisations where no more than ${FREE_TEAM_SIZE} people use it), the frontier models the AI tools support, what we do against leaks and prompt injection, and why the software is provided as is.`,
   },
 };
 

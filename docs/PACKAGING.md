@@ -71,7 +71,7 @@ pre-rename `~/.pierre-review` to `~/.limn` (below), then defaults the DB to
 `~/.limn/pierre-review.sqlite` (never the read-only install dir; the FILE keeps its old name so the
 move carries it and its WAL files untouched) + pre-checks `gh auth token`. Prints the banner + URL, boots via `start()` (guarded run-as-main), opens the
 browser (built-in, no dep) unless `--no-open`. **`limn ai install` / `limn ai status`** run the
-same AI-runtime download as the app's "Set up AI" button (below); refused under
+same AI-runtime download Limn starts by itself on the first boot (below); refused under
 `LIMN_AI_DISABLED=true`. `limn ai install codex` adds the Codex CLI; **`limn ai login codex`**
 (`--device-auth` on a headless machine) / **`limn ai logout codex`** sign Limn's own Codex home in and
 out (§ The Codex CLI). **`limn ml install`** downloads the bot-comment severity model
@@ -119,7 +119,7 @@ specifier, **any AI SDK in `dependencies` / `optionalDependencies` / `peerDepend
 missing or inexact AI-runtime pin, or **an AI SDK specifier in any emitted JS file other than
 `dist/ai/runtime.js`**. `better-sqlite3` is a native runtime dep: ⚠ keep it ≥ 13 (N-API, binaries INSIDE the package, no install script). 11.x had no Node 24 prebuild and relied on an install script; under npx that left no binary ("Could not locate the bindings file").
 
-### No AI SDK in the manifest; installed on first use
+### No AI SDK in the manifest; downloaded on the first boot
 
 Every model-backed feature (Claude Review, AI Fix, the reports and narration, …) ships in
 the package **as code** and runs on the user's own Claude Code login or `ANTHROPIC_API_KEY` —
@@ -136,9 +136,21 @@ them by default, and a dependent package cannot switch off its dependency's plat
   against), each asserted EXACT and asserted to satisfy the range `apps/backend/package.json`
   declares. ⚠ The field name is spelled twice — the script and `AI_RUNTIME_MANIFEST_FIELD` in
   `ai/runtime.ts` — and the script fails if they diverge.
-- **The download** (`installAiRuntime`): "Set up AI (one-time ~110 MB download)" in the app →
-  `POST /api/ai/runtime/install` (SSE progress; registered only when
-  `config.aiEnabled`; `sync` rate-limit tier), or `limn ai install`. It writes a `package.json`
+- **Claude and Codex are INCLUDED BY DEFAULT — no click** (`ai/auto-install.ts`). After `listen`
+  (never before, never awaited — it cannot slow the boot), a boot that finds either runtime not
+  `ready` (absent, stale, no native program) downloads what is missing (`['claude', 'codex']`;
+  `['claude']` when only Claude is; ⚠ `['codex']` ALONE over a ready Claude, which `runCodexOnly`
+  stages apart and moves in WITHOUT re-downloading or swapping Claude's packages under a live run). `MeResponse.ai.autoInstall` says it is on; while it runs,
+  `runtime: 'installing'` with the current STEP in `runtimeMessage` (Limn's own words, never npm's
+  lines — `currentStep` in `ai/runtime.ts`), polled by the SPA where "Set up AI" used to be. A failure
+  is retried ONCE automatically (3 min later), then left to the SPA's Retry (which re-POSTs with
+  `provider: 'codex'`, i.e. both), `limn ai install codex` or the next boot — never a loop. Skipped
+  under `LIMN_AI_DISABLED=true` and `LIMN_AI_AUTO_INSTALL=false` (the demo and recording stacks set
+  the latter: a download would turn `/api/me` into 'installing' mid-shot). Signing in to each
+  provider is then the only step.
+- **The download** (`installAiRuntime`): the automatic one above, the SPA's Retry / Set up (where
+  the automatic one is off) → `POST /api/ai/runtime/install` (SSE progress; registered only when
+  `config.aiEnabled`; `sync` rate-limit tier), or `limn ai install [codex]`. It writes a `package.json`
   carrying the pins into a STAGING dir and runs `npm install --prefix <staging> --ignore-scripts
   --no-package-lock` — npm's own `npm-cli.js` under `process.execPath`, `shell: false`, no string
   interpolation (pins are regex-checked exact versions) — verifies every package landed at its pin,
@@ -174,7 +186,7 @@ missing from one source falls through to the other (the `<dataDir>/ai-runtime` i
   runtime installed BEFORE them is **stale, not absent** (`AI_RUNTIME_LATER_PACKAGES`): every agent
   still loads, the status says "Set up AI again", and only a Word or web-page build refuses until then.
 
-### The Codex CLI (installed on request)
+### The Codex CLI (downloaded with Claude's packages)
 
 Codex is the second AI provider ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Codex, the second
 provider). Limn runs the Codex CLI's native program; it never imports a Codex package.
@@ -185,8 +197,10 @@ provider). Limn runs the Codex CLI's native program; it never imports a Codex pa
   rather than reading `node_modules`, and `ai/runtime.ts` reads the same field in dev. The models
   (`CODEX_MODEL_FOR_ROLE`) are pinned for this version: re-check them, and the spike's checks, on
   every bump.
-- **Installed only when asked for**, into the same `~/.limn/ai-runtime`: "Set up AI" with Codex
-  (`POST /api/ai/runtime/install {provider: 'codex'}`) or `limn ai install codex`. npm brings the
+- **Downloaded on the first boot with Claude's packages** (the automatic download above), into the
+  same `~/.limn/ai-runtime`; by hand, `limn ai install codex` or the SPA's Retry
+  (`POST /api/ai/runtime/install {provider: 'codex'}`: Codex only when Claude is ready, else both). A
+  plain `limn ai install` stays Claude-only. npm brings the
   platform package (`@openai/codex-<platform>`); `codexBinaryIn` finds the native program the way
   the package's own `bin/codex.js` does. ⚠ Codex is STAGED APART from Claude's packages: a Codex
   failure is recorded as Codex's alone and never fails Claude's install, and a Claude-only "Set up

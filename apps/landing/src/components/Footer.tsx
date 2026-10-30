@@ -69,7 +69,7 @@ export default function Footer(): JSX.Element {
         <div>
           <Link to="/privacy">Privacy</Link>
           <Link to="/cookies">Cookies</Link>
-          <Link to="/terms">Terms</Link>
+          <Link to="/terms">Terms and conditions</Link>
           {analyticsConfigured() && (
             <button type="button" onClick={changeCookieChoice}>
               Cookie settings

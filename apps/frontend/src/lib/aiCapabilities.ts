@@ -23,7 +23,11 @@ import {
  */
 export interface AiCapabilities {
   enabled: boolean;
+  /** Limn downloads Claude and Codex by itself on boot (`MeResponse.ai.autoInstall`): a manual
+   *  Set up / Retry then fetches BOTH. Absent (an older server) ⇒ false. */
+  autoInstall: boolean;
   runtime: MeResponse['ai']['runtime'];
+  /** While 'installing', the server's current step; when 'failed', why. */
   runtimeMessage: string | null;
   auth: MeResponse['ai']['auth'];
   authMessage: string | null;
@@ -49,6 +53,8 @@ export const AI_SETUP_LABEL_CODEX = 'Set up AI (one-time download; Codex takes ~
 export function aiSetupLabel(provider: AiProviderId | null | undefined): string {
   return provider === 'codex' ? AI_SETUP_LABEL_CODEX : AI_SETUP_LABEL;
 }
+/** The setup button when Limn sets up BOTH providers (`autoInstall`): one download, Claude and Codex. */
+export const AI_SETUP_LABEL_BOTH = 'Set up Claude and Codex (one-time download)';
 
 export function aiCapabilitiesOf(me: MeResponse | undefined): AiCapabilities {
   const ai = me?.ai;
@@ -58,6 +64,7 @@ export function aiCapabilitiesOf(me: MeResponse | undefined): AiCapabilities {
   const provider: AiProviderId = ai?.provider === 'codex' ? 'codex' : 'claude';
   return {
     enabled,
+    autoInstall: enabled && ai?.autoInstall === true,
     runtime,
     runtimeMessage: ai?.runtimeMessage ?? null,
     auth,

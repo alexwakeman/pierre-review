@@ -283,6 +283,7 @@ const ME_RESPONSE: MeResponse = {
   // serves those routes itself.
   ai: {
     enabled: false,
+    autoInstall: false,
     runtime: 'ready',
     runtimeMessage: null,
     auth: 'ok',

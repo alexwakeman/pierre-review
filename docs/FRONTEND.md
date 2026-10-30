@@ -1444,15 +1444,19 @@ reappears.
   the people who have not set one up, and the detection is a heuristic (the run is the real check).
 - **What sits in place of a Run button is ONE component, `AiRunGate`** (`components/AiSetup.tsx`),
   wrapped round Claude Review's Run, the chat's Ask, AI Fix's Generate and the CI card's "Fix it". In
-  order: runtime not `ready` → `AiRuntimeSetup` ("Set up AI (one-time ~110 MB download)", streaming
-  `POST /api/ai/runtime/install` over `sseStream`; `failed` prints its message + Retry); `auth: 'none'`
+  order: runtime not `ready` → `AiRuntimeSetup` (the server downloads Claude and Codex by itself on
+  the first boot, `ai.autoInstall`: "Setting up AI… <step>" while `installing`, polling `['me']`;
+  `failed` prints its message + Retry, which streams `POST /api/ai/runtime/install` over `sseStream`
+  for both; a "Set up" button only where the automatic download is off); `auth: 'none'`
   (from `/api/me`, or the surface's own route answer passed as `auth`) → the one line "Sign in to
   Claude Code or set ANTHROPIC_API_KEY"; else the button. Past reviews and the story panel stay
   usable either way. The Open PRs cell has no room for the line, so its Review button
   OPENS the PR's Claude Review tab while `ai.ready` is false.
-- **The install is ONE per page** — a module-level store in `useAiCapabilities.ts`, so two "Set up
-  AI" buttons show one progress line and cannot start two downloads; an install the SERVER reports
-  (`runtime: 'installing'`, e.g. `limn ai install` in a terminal) is watched by polling `['me']`.
+- **The install is ONE per page** — a module-level store in `useAiCapabilities.ts`, so two Retry
+  buttons show one progress line and cannot start two downloads; a download the SERVER reports
+  (`runtime: 'installing'`: the automatic one, or `limn ai install` in a terminal) is watched by
+  polling `['me']`, its step in `runtimeMessage`. Settings → AI shows each provider's download line
+  (`providers.claude.runtimeMessage` / `providers.codex.runtimeMessage`) before its sign-in.
 - **`LIMN_AI_DISABLED=true`**: the agentic tabs are not listed and the one-shot blocks do not
   render; nothing prints in their place.
 - **Money, not credits.** Runs show US$ (`formatUsd` in `lib/ui.ts`) — a credit figure would invent

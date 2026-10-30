@@ -1,7 +1,7 @@
 // The AI runtime INSTALLER (ai/runtime.ts `install`), over temp directories only: each case runs a
 // stand-in npm as a real child process, which is why this file is in the slow project
 // (vitest.workspace.ts, docs/TESTING.md). The loader's tests are in runtime.test.ts.
-import { mkdirSync, readFileSync, realpathSync, existsSync, writeFileSync, readdirSync } from 'node:fs';
+import { mkdirSync, readFileSync, realpathSync, existsSync, writeFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
@@ -104,6 +104,8 @@ await new Promise((r) => setTimeout(r, 50));
     const npm = fakeNpm('ok');
     const a = rt.install(undefined, { npm });
     expect(rt.status().runtime).toBe('installing');
+    // The current STEP rides the status, so a download nobody pressed for (the first-boot one) shows it.
+    expect(rt.status().runtimeMessage).toBe('Downloading Claude (about 110 MB).');
     const b = rt.install(undefined, { npm });
     expect(await a).toEqual({ ok: true });
     expect(await b).toEqual({ ok: true });
@@ -221,6 +223,9 @@ await new Promise((r) => setTimeout(r, 50));
       join(realpathSync(rt.runtimeDir), 'node_modules', CODEX_PLATFORM_PKG, 'vendor', CODEX_TRIPLE, 'bin', process.platform === 'win32' ? 'codex.exe' : 'codex'),
     );
     expect(phases.at(-1)).toBe('AI is set up, with Codex.');
+    expect(phases).toContain('Downloading Codex (about 360 MB unpacked).');
+    // The step is cleared once the download ends.
+    expect(rt.codexStatus().runtimeMessage).toBeNull();
     // Claude and Codex are staged APART: two downloads.
     expect(npmCalls()).toBe(2);
     // A later Claude-only install (an update, "Set up AI again") KEEPS Codex — and never re-downloads it.
@@ -229,6 +234,45 @@ await new Promise((r) => setTimeout(r, 50));
     expect(JSON.parse(readFileSync(join(dataDir, 'ai-runtime', 'package.json'), 'utf8')).dependencies[CODEX_PACKAGE]).toBe(CODEX_PIN);
     expect(rt.codexStatus().runtime).toBe('ready');
     expect(rt.codexBinary()).toBe(bin);
+    expect(readdirSync(dataDir)).toEqual(['ai-runtime']);
+  });
+
+  it('⚠ a Claude that is already ready stays ready while a download runs (the first boot adding Codex)', async () => {
+    withCodexPin();
+    const rt = runtime();
+    expect(await rt.install(undefined, { npm: fakeNpm('ok') })).toEqual({ ok: true });
+    const running = rt.install(undefined, { npm: fakeNpm('ok'), providers: ['claude', 'codex'] });
+    expect(rt.status()).toEqual({ runtime: 'ready', runtimeMessage: null });
+    expect(rt.codexStatus().runtime).toBe('installing');
+    expect(await running).toEqual({ ok: true });
+    expect(rt.codexStatus().runtime).toBe('ready');
+  });
+
+  it('⚠ Codex alone over a ready Claude: one download, Claude neither fetched again nor swapped', async () => {
+    withCodexPin();
+    const rt = runtime();
+    expect(await rt.install(undefined, { npm: fakeNpm('ok') })).toEqual({ ok: true });
+    expect(npmCalls()).toBe(1);
+    const claudeFile = join(dataDir, 'ai-runtime', 'node_modules', '@anthropic-ai', 'claude-agent-sdk', 'package.json');
+    const inode = statSync(claudeFile).ino;
+    const phases: string[] = [];
+    const running = rt.install((p) => phases.push(p.message), { npm: fakeNpm('ok'), providers: ['codex'] });
+    expect(rt.status()).toEqual({ runtime: 'ready', runtimeMessage: null });
+    expect(rt.codexStatus()).toEqual({ runtime: 'installing', runtimeMessage: 'Downloading Codex (about 360 MB unpacked).' });
+    expect(await running).toEqual({ ok: true });
+    expect(npmCalls()).toBe(2);
+    expect(statSync(claudeFile).ino).toBe(inode);
+    expect(phases.at(-1)).toBe('Codex is set up.');
+    expect(rt.codexStatus()).toEqual({ runtime: 'ready', runtimeMessage: null });
+    expect(rt.status()).toEqual({ runtime: 'ready', runtimeMessage: null });
+    const manifest = JSON.parse(readFileSync(join(dataDir, 'ai-runtime', 'package.json'), 'utf8'));
+    expect(manifest.dependencies).toEqual({ ...PINS, [CODEX_PACKAGE]: CODEX_PIN });
+    expect(readdirSync(dataDir)).toEqual(['ai-runtime']);
+    // A failed Codex-only download is Codex's alone and keeps the Codex already there.
+    const again = await rt.install(undefined, { npm: fakeNpm('codex-fail'), providers: ['codex'] });
+    expect(again.ok).toBe(false);
+    expect(rt.status()).toEqual({ runtime: 'ready', runtimeMessage: null });
+    expect(rt.codexStatus().runtime).toBe('ready');
     expect(readdirSync(dataDir)).toEqual(['ai-runtime']);
   });
 

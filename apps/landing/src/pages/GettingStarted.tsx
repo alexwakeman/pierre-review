@@ -6,7 +6,6 @@ import { DEMO_PATH, INSTALL_COMMAND, NPM_PACKAGE } from '../lib/site';
 import { useReveal } from '../components/board/useReveal';
 import { copyText } from '../components/board/copyText';
 import { useLightbox } from '../components/Lightbox';
-import aiSetup from '../assets/pages/gs-ai-setup.jpg';
 import aiReady from '../assets/pages/gs-ai-ready.jpg';
 import mlSetup from '../assets/pages/gs-ml-setup.jpg';
 import mlBadges from '../assets/pages/gs-ml-badges.jpg';
@@ -28,7 +27,6 @@ import './getting-started.css';
 // Button and field names are quoted exactly as the app spells them.
 // ---------------------------------------------------------------------------
 
-const AI_INSTALL = `${INSTALL_COMMAND} ai install`;
 const CODEX_INSTALL = `${INSTALL_COMMAND} ai install codex`;
 const CODEX_LOGIN = `${INSTALL_COMMAND} ai login codex`;
 const ML_INSTALL = `${INSTALL_COMMAND} ml install`;
@@ -230,40 +228,32 @@ export default function GettingStarted(): JSX.Element {
             <Shots
               shots={[
                 {
-                  src: aiSetup,
-                  width: 1424,
-                  height: 226,
-                  label: 'Before',
-                  phoneHide: true,
-                  alt: "A pull request's AI Review tab with the button 'Set up AI (one-time ~110 MB download)'",
-                },
-                {
                   src: aiReady,
                   width: 1424,
                   height: 227,
-                  label: 'After',
-                  alt: "The same tab once AI is set up: a model picker, a Re-review button and the review",
+                  label: 'Signed in',
+                  alt: "A pull request's AI Review tab once you are signed in: a model picker, a Re-review button and the review",
                 },
               ]}
             />
           }
         >
           <p>
-            AI Review, AI Fix and the chats run on your own AI agent tooling: Claude Code or Codex. Limn stores no key
-            and charges nothing.
+            AI Review, AI Fix and the chats run on your own AI agent tooling: Claude Code or Codex. Both work out of the
+            box. The first time Limn starts, it downloads them in the background, so signing in is the only step. Limn
+            stores no key and charges nothing.
           </p>
-          <p>
-            The first time, press <b>Set up AI (one-time ~110 MB download)</b>, shown where the Run button will be, or run:
-          </p>
-          <Command text={AI_INSTALL} />
           <p>
             <b>Claude Code.</b> Sign in once with <code>claude</code>, or set <code>ANTHROPIC_API_KEY</code>.
           </p>
           <p>
-            <b>Codex.</b> Add Codex and sign in with your ChatGPT account, or do both from <b>Settings → AI</b>:
+            <b>Codex.</b> Sign in with your ChatGPT account from <b>Settings → AI</b>, or run:
           </p>
-          <Command text={CODEX_INSTALL} />
           <Command text={CODEX_LOGIN} />
+          <p className="gs-note">
+            While the download runs, its progress shows where the Run button will be. If it fails, press{' '}
+            <b>Retry</b>, or run <code>{CODEX_INSTALL}</code>.
+          </p>
           <p className="gs-note">
             On a machine without a browser, add <code>--device-auth</code> to the sign-in. Limn keeps its own Codex
             sign-in in <code>~/.limn/codex</code> and never touches <code>~/.codex</code>. An OpenAI API key is not
@@ -288,7 +278,7 @@ export default function GettingStarted(): JSX.Element {
                 <dl>
                   <div>
                     <dt>Limn's share of your week</dt>
-                    <dd>5%, you choose</dd>
+                    <dd>50%, you choose</dd>
                   </div>
                   <div>
                     <dt>Each 5-hour session</dt>
@@ -313,8 +303,8 @@ export default function GettingStarted(): JSX.Element {
           </p>
           <ul className="gs-list">
             <li>
-              On a Claude or ChatGPT subscription, you choose what share of your weekly allowance Limn may use: 5%
-              unless you change it, up to 50%. Limn adds up what its own runs use and compares that with the
+              On a Claude or ChatGPT subscription, you choose what share of your weekly allowance Limn may use: 50%
+              unless you change it, from 1% to 100%. Limn adds up what its own runs use and compares that with the
               allowance. Allowances aren't published exactly, so this is an estimate. On Claude Max, Limn asks whether
               it's Max 5x or Max 20x.
             </li>

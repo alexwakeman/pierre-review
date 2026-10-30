@@ -137,9 +137,10 @@ export default function Privacy(): JSX.Element {
             from your machine.
           </li>
           <li>
-            <T>First-use downloads</T> — the AI runtime and the comment-grading model are
-            downloaded the first time you ask for them, from npm and the model host. Those
-            services see the request, as with any download.
+            <T>One-time downloads</T> — the AI runtimes (Claude and Codex) are downloaded from
+            npm the first time {SITE_NAME} starts, and the comment-grading model from the model
+            host the first time you ask for it. Those services see the request, as with any
+            download.
           </li>
         </UL>
         <P>
