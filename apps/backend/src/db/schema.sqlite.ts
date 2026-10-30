@@ -1951,6 +1951,9 @@ export const aiFixes = sqliteTable(
     // 0130. The reasoning effort the build and the latest planning pass used. NULL = older row.
     effort: text('effort'),
     planEffort: text('plan_effort'),
+    // 0146. "Run tests" (coding/checks/): JSON AiFixChecks — the names the reader ticked (written at
+    // insert, so a plan's build runs the same), then what ran and how it went. NULL = no tests asked.
+    checks: text('checks'),
   },
   (t) => ({
     prCreatedIdx: index('af_account_pr_created').on(t.accountId, t.prId, t.createdAt),

@@ -8760,11 +8760,84 @@ export interface AiFixChangeReport {
 export type AiFixPhase =
   | 'fetching_diff'
   | 'cloning'
+  // "Run tests": finding the sandbox, asking Docker, installing dependencies.
+  | 'preparing_checks'
   | 'fixing'
+  // "Run tests": Limn's own run of the chosen checks and the commit hook, after the agent.
+  | 'running_checks'
   | 'capturing'
   | 'persisting'
   // A plan-mode pass (read-only): the first plan or a re-plan after a chat message.
   | 'planning';
+
+// ---- "Run tests" (docs/CLAUDE-REVIEW.md § AI Fix "Run tests"; docs/SECURITY.md § Sandboxed checks) ----
+// A manual fix may run the project's OWN declared checks (package.json scripts, Makefile targets,
+// pytest, cargo test, go test, Gradle, Maven) in an OS sandbox: the agent through a `run_check` tool
+// that takes a NAME only, then Limn once more after the agent, plus the commit with the pre-commit
+// hook enabled. The agent still has no shell.
+
+export type AiFixCheckKind = 'test' | 'lint' | 'typecheck' | 'check' | 'hook';
+export type AiFixCheckStatus = 'passed' | 'failed' | 'timed_out' | 'skipped' | 'error';
+
+// One check the repository declares, for the picker (`GET /api/pro/prs/:id/ai-fix/checks`).
+export interface AiFixCheckOption {
+  // What the reader ticks and the agent names: `test`, `lint:types`, `pre-commit hook` …
+  name: string;
+  kind: AiFixCheckKind;
+  // The argv, joined for display.
+  command: string;
+  // Where it is declared: `package.json script "test"`.
+  source: string;
+  // Ticked on open (test, lint, typecheck; the commit hook).
+  defaultOn: boolean;
+  needsDocker: boolean;
+  // Why it can never run (a script that publishes, starts containers …), or null.
+  refused: string | null;
+}
+
+export interface AiFixChecksPreview {
+  checks: AiFixCheckOption[];
+  // The machine's sandbox: macOS Seatbelt, Linux bubblewrap, or none.
+  sandbox: 'seatbelt' | 'bwrap' | 'none';
+  // One sentence when tests cannot run here at all (no sandbox and not allowed), else null.
+  unavailable: string | null;
+  // LIMN_CHECKS_ALLOW_UNSANDBOXED is on and there is no sandbox: tests would run without one.
+  unsandboxed: boolean;
+}
+
+export interface AiFixCheckResult {
+  name: string;
+  kind: AiFixCheckKind;
+  command: string;
+  status: AiFixCheckStatus;
+  exitCode: number | null;
+  durationMs: number;
+  // stdout + stderr, ANSI stripped, the middle cut when long. Plain text.
+  output: string;
+  truncated: boolean;
+  // One line when it did not run, or why it errored.
+  note: string | null;
+}
+
+// What "Run tests" did on one fix run (`ai_fixes.checks`, migration 0146).
+export interface AiFixChecks {
+  // The names the reader ticked.
+  requested: string[];
+  // True once Limn ran at least one check (the results are real); false ⇒ `note` says why not.
+  ran: boolean;
+  note: string | null;
+  sandbox: 'seatbelt' | 'bwrap' | 'none' | null;
+  // The dependency install steps.
+  install: AiFixCheckResult[];
+  // Limn's own run of each chosen check after the agent, plus the ones skipped (status 'skipped').
+  results: AiFixCheckResult[];
+  // The commit with the pre-commit hook, when one ran.
+  hook: AiFixCheckResult | null;
+  // How many times the hook ran (a failure goes back to the agent, at most twice).
+  hookAttempts: number;
+  // run_check calls the agent made.
+  agentRuns: number;
+}
 
 // ---- Plan mode (manual fixes only; docs/CLAUDE-REVIEW.md § AI Fix "Plan mode") ----
 // A MANUAL fix may plan first: a READ-ONLY agent pass (Read/Glob/Grep + submit_plan, no edits, no
@@ -8897,6 +8970,9 @@ export interface AiFix {
   // Plan mode: the plan, its chat and its status. null when the run never planned (every auto fix,
   // every older row).
   plan: AiFixPlanState | null;
+  // "Run tests": what ran and how it went. null when the reader did not ask for tests (every auto
+  // fix, every older row). Optional: an older server omits it.
+  checks?: AiFixChecks | null;
   costUsd: number | null;
   numTurns: number | null;
   error: string | null;
@@ -8985,6 +9061,9 @@ export interface GenerateFixBody {
   // include. Absent ⇒ the server's defaults (`defaultIncluded`). An unknown key is ignored; a list
   // selecting nothing ⇒ 409 NothingToFix. The budget is applied AFTER selection.
   include?: string[];
+  // "Run tests": the check names to run (`AiFixCheckOption.name`). Absent / empty ⇒ no tests, as
+  // before. Names the repository does not declare at the fix's commit are skipped, never run.
+  checks?: string[];
 }
 
 // ---- The fix picker: what a review-seeded fix would include (before a manual fix starts) ----

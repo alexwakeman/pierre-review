@@ -8,7 +8,9 @@
 //     is read for its `*** Add File:` / `*** Update File:` / `*** Delete File:` / `*** Move to:`
 //     headers; a write naming NO path we can find is denied (fail closed).
 //   • `mcp__workspace__*` (Limn's own server) is allowed when every `path` it names is inside a READ
-//     root (the server checks again).
+//     root (the server checks again) — except `mcp__workspace__run_check` (the project's own checks,
+//     coding/checks/), allowed ONLY when the run carries checks (`roots.checks`) and the call names a
+//     check by a plain string; the server runs only names from its frozen list.
 //   • Any OTHER MCP tool is denied: only Limn's server may run (a user's own servers never load —
 //     Limn's CODEX_HOME carries none — and this keeps it so).
 //   • ⚠ AN ALLOW-LIST, NOT A DENY-LIST. The hook's matcher is `.*` (hook.ts), so it sees EVERY tool
@@ -31,7 +33,11 @@ const PATCH_HEADER = /^\s*\*\*\*\s*(Add File|Update File|Delete File|Move to)\s*
 export interface GuardRoots {
   read: string[];
   write: string[];
+  /** The run may call `mcp__workspace__run_check` (AI Fix with "Run tests"). Absent ⇒ never. */
+  checks?: boolean;
 }
+
+export const RUN_CHECK_TOOL_NAME = 'mcp__workspace__run_check';
 
 export type HookDecision = { allow: true } | { allow: false; reason: string };
 
@@ -118,6 +124,13 @@ export function decideCodexToolCall(toolName: string, toolInput: unknown, roots:
     return { allow: true };
   }
 
+  if (toolName === RUN_CHECK_TOOL_NAME) {
+    if (roots.checks !== true) return deny('refused: this run may not run checks.');
+    const name = toolInput && typeof toolInput === 'object' ? (toolInput as Record<string, unknown>).name : undefined;
+    if (typeof name !== 'string' || name === '' || name.length > 120) return deny('refused: name the check to run.');
+    return { allow: true };
+  }
+
   if (toolName.startsWith('mcp__')) {
     if (!toolName.startsWith(WORKSPACE_TOOL_PREFIX)) return deny(`refused: only Limn's workspace tools may run, not ${toolName}.`);
     if (readRoots.length === 0) return deny('refused: this run has no readable folders.');
@@ -139,7 +152,7 @@ export function decideCodexToolCall(toolName: string, toolInput: unknown, roots:
 export const GUARD_ENV = 'LIMN_CODEX_GUARD';
 
 export function encodeGuardRoots(roots: GuardRoots): string {
-  return JSON.stringify({ read: roots.read, write: roots.write });
+  return JSON.stringify({ read: roots.read, write: roots.write, ...(roots.checks ? { checks: true } : {}) });
 }
 
 /** Null when the variable is missing or malformed — the hook then denies everything it sees. */
@@ -148,9 +161,10 @@ export function decodeGuardRoots(raw: string | undefined): GuardRoots | null {
   try {
     const v = JSON.parse(raw) as unknown;
     if (!v || typeof v !== 'object') return null;
-    const { read, write } = v as { read?: unknown; write?: unknown };
+    const { read, write, checks } = v as { read?: unknown; write?: unknown; checks?: unknown };
     const ok = (a: unknown): a is string[] => Array.isArray(a) && a.every((x) => typeof x === 'string' && isAbsolute(x));
-    return ok(read) && ok(write) ? { read, write } : null;
+    if (!ok(read) || !ok(write)) return null;
+    return checks === true ? { read, write, checks: true } : { read, write };
   } catch {
     return null;
   }

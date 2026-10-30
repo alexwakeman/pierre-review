@@ -2,6 +2,7 @@ import {
   claudeModelChoice,
   getActiveProvider,
   getProvider,
+  type AgentCheckTool,
   type AgentKind,
   type AgentOutcome,
   type AgentProviderId,
@@ -34,6 +35,11 @@ import {
 } from './ai-fix/plan.js';
 import { captureWorktreeDiff } from './git.js';
 import { withPartialSpend } from './partial-spend.js';
+import { join } from 'node:path';
+import type { AiFixCheckResult, AiFixChecks } from '@pierre-review/shared';
+import { openCheckSession, type CheckRunResult, type CheckSession } from './checks/index.js';
+import { buildHookRepairPrompt, checksSection } from './ai-fix/prompts.js';
+import { pickReviewNonce } from '../review/claude-review/prompts.js';
 
 // The WRITE tool surface for the fixer: Read/Glob/Grep to explore, Write/Edit/MultiEdit to
 // make the change, and the submit_fix MCP tool for the prose summary. NO SHELL.
@@ -126,6 +132,8 @@ interface AgentRunOptions {
   disallowedTools: string[];
   /** The run's result tools (submit_fix / submit_plan / submit_resolution), one server. */
   tools: AgentToolServer;
+  /** "Run tests": the project's own checks as the `run_check` tool (coding/checks/). Absent ⇒ none. */
+  checks?: AgentCheckTool;
   /** True ⇒ the run may write inside the worktree (the fixer); false ⇒ read-only. */
   writes: boolean;
   maxTurns: number;
@@ -240,6 +248,7 @@ export async function runAgentInWorktree(
     readOnlyRoots: [],
     writeRoots: opts.writes ? [opts.worktreePath] : [],
     tools: opts.tools,
+    ...(opts.checks ? { checks: opts.checks } : {}),
     budget: { usd: opts.maxBudgetUsd, turns: opts.maxTurns },
     abortController: opts.abortController,
     claude: {
@@ -309,12 +318,46 @@ export async function runAgentInWorktree(
   }
 }
 
+/** The fixer's tools when the run carries the project's checks: FIX_TOOLS + `run_check`, still no shell. */
+// (ai/check-tool.ts names the server and tool; tool-surface.test.ts pins the spelling to them.)
+const FIX_TOOLS_WITH_CHECKS = [...FIX_TOOLS, 'mcp__checks__run_check'];
+// How many times a failing pre-commit hook goes back to the agent (each a short follow-up pass).
+const MAX_HOOK_REPAIRS = 2;
+// A follow-up pass is not started with less than this left of the run's budget.
+const MIN_REPAIR_BUDGET_USD = 0.25;
+
+function toWire(r: CheckRunResult): AiFixCheckResult {
+  return {
+    name: r.name,
+    kind: r.kind,
+    command: r.command,
+    status: r.status,
+    exitCode: r.exitCode,
+    durationMs: r.durationMs,
+    output: r.output,
+    truncated: r.truncated,
+    note: r.note,
+  };
+}
+
+/** "Run tests" asked for but nothing ran: the reason, and every asked-for check marked skipped. */
+function checksNotRun(requested: string[], note: string, skipped: CheckRunResult[] = []): AiFixChecks {
+  return { requested, ran: false, note, sandbox: null, install: [], results: skipped.map(toWire), hook: null, hookAttempts: 0, agentRuns: 0 };
+}
+
 /**
  * Run the write-capable coding agent against a PR's head in an ephemeral worktree and
  * return the captured changeset (a binary-safe unified diff) + a prose summary. This
  * is the implementation behind ctx.coding.generateFix; it owns the worktree prep +
  * diff capture + teardown, and delegates the sandboxed SDK run to runAgentInWorktree.
  * Never commits or pushes — the host's git-ops does that later from the STORED patch.
+ *
+ * "RUN TESTS" (`args.checks`; coding/checks/, docs/CLAUDE-REVIEW.md § AI Fix "Run tests"): after the
+ * worktree is ready, Limn opens a check session (sandbox, Docker preflight, dependency install) and
+ * hands the agent `run_check`; after the agent, Limn runs every chosen check ONCE MORE itself (the
+ * result the reader sees), then the commit with the pre-commit hook in the sandbox — a failing hook
+ * goes back to the agent, at most twice. Tests that cannot start never fail the fix: the run goes on
+ * as before and the note says why.
  */
 export async function runCodingAgent(
   args: GenerateFixArgs,
@@ -325,6 +368,7 @@ export async function runCodingAgent(
 
   let repoCloneDir: string | null = null;
   let worktreePath: string | null = null;
+  let checkSession: CheckSession | null = null;
 
   try {
     onProgress({ phase: 'cloning' });
@@ -335,6 +379,41 @@ export async function runCodingAgent(
       baseSha,
       token,
     ));
+
+    // "Run tests": open the session BEFORE the agent, so it gets the tool and its prompt the list.
+    const requested = (args.checks ?? []).filter((n) => typeof n === 'string' && n !== '');
+    let checks: AiFixChecks | null = null;
+    if (requested.length > 0) {
+      onProgress({ phase: 'preparing_checks' });
+      try {
+        const opened = await openCheckSession({
+          worktree: worktreePath,
+          repoCloneDir,
+          wanted: requested,
+          runRoot: join(config.dataDir, 'check-runs'),
+          cacheDir: join(config.dataDir, 'check-cache'),
+          darkRoots: [config.dataDir, config.cloneDir],
+          allowUnsandboxed: config.checksAllowUnsandboxed,
+          checkTimeoutMs: config.aiFixCheckTimeoutMs,
+          signal: abortController.signal,
+          onStatus: (message) => onProgress({ phase: 'preparing_checks', message }),
+        });
+        if (opened.ok) checkSession = opened.session;
+        else checks = checksNotRun(requested, opened.note, opened.skipped);
+      } catch (err) {
+        checks = checksNotRun(requested, `Tests could not start: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    const agentTool = checkSession && checkSession.agentChecks.length > 0 ? checkSession.agentTool() : null;
+    const checkTool: AgentCheckTool | undefined =
+      agentTool && checkSession
+        ? { ...agentTool, specFile: checkSession.specFile, timeoutSec: Math.ceil(config.aiFixCheckTimeoutMs / 1000) }
+        : undefined;
+    const sessionNote = checkSession && checkSession.notes.length > 0 ? checkSession.notes.join(' ') : null;
+    const systemPrompt =
+      requested.length > 0 && args.systemPrompt != null
+        ? args.systemPrompt + checksSection(agentTool?.names ?? null, checkTool ? sessionNote : (checks?.note ?? sessionNote), checkSession?.hook != null)
+        : args.systemPrompt;
 
     const fixShape = await submitFixShape();
     let captured: SubmitFixPayload | null = null;
@@ -360,31 +439,48 @@ export async function runCodingAgent(
       ],
     };
 
+    const total = { usage: emptyUsage(), costUsd: null as number | null, numTurns: null as number | null, usageRecorded: false };
+    const add = (o: AgentRunOutcome): void => {
+      total.usage.inputTokens += o.usage.inputTokens;
+      total.usage.outputTokens += o.usage.outputTokens;
+      total.usage.cacheReadTokens += o.usage.cacheReadTokens;
+      total.usage.cacheCreationTokens += o.usage.cacheCreationTokens;
+      if (o.costUsd != null) total.costUsd = (total.costUsd ?? 0) + o.costUsd;
+      if (o.numTurns != null) total.numTurns = (total.numTurns ?? 0) + o.numTurns;
+      if (o.usageRecorded) total.usageRecorded = true;
+    };
+    const maxBudgetUsd = args.maxBudgetUsd ?? config.aiFixBudgetUsd;
+    const pass = (prompt: string, budgetUsd: number): Promise<AgentRunOutcome> =>
+      runAgentInWorktree({
+        kind: 'fix',
+        worktreePath: worktreePath!,
+        model,
+        systemPrompt,
+        prompt,
+        allowedTools: checkTool ? FIX_TOOLS_WITH_CHECKS : FIX_TOOLS,
+        disallowedTools: DISALLOWED_TOOLS,
+        tools,
+        ...(checkTool ? { checks: checkTool } : {}),
+        writes: true,
+        maxTurns: args.maxTurns ?? config.aiFixMaxTurns,
+        maxBudgetUsd: budgetUsd,
+        abortController,
+        onActivity: (activity, usage) =>
+          onProgress({ phase: 'fixing', recentActivity: activity, usage }),
+        ...(args.provider ? { provider: args.provider } : {}),
+        usageRecord: { accountId: args.accountId, seam: 'agent', feature: 'ai_fix', prId: args.prId ?? null },
+        ...(args.codex ? { codex: args.codex } : {}),
+        ...(args.effort ? { effort: args.effort } : {}),
+      });
+
     onProgress({ phase: 'fixing' });
-    const outcome = await runAgentInWorktree({
-      kind: 'fix',
-      worktreePath,
-      model,
-      systemPrompt: args.systemPrompt,
-      prompt: args.prompt,
-      allowedTools: FIX_TOOLS,
-      disallowedTools: DISALLOWED_TOOLS,
-      tools,
-      writes: true,
-      maxTurns: args.maxTurns ?? config.aiFixMaxTurns,
-      maxBudgetUsd: args.maxBudgetUsd ?? config.aiFixBudgetUsd,
-      abortController,
-      onActivity: (activity, usage) =>
-        onProgress({ phase: 'fixing', recentActivity: activity, usage }),
-      ...(args.provider ? { provider: args.provider } : {}),
-      usageRecord: { accountId: args.accountId, seam: 'agent', feature: 'ai_fix', prId: args.prId ?? null },
-      ...(args.codex ? { codex: args.codex } : {}),
-      ...(args.effort ? { effort: args.effort } : {}),
-    });
+    const outcome = await pass(args.prompt, maxBudgetUsd);
+    add(outcome);
 
     // A user cancel aborts the SDK iterator; surface a clean aborted result (the
     // manager marks the row cancelled — no worktree changes are captured).
-    if (outcome.aborted || abortController.signal.aborted) {
+    const aborted = (): boolean => abortController.signal.aborted;
+    if (outcome.aborted || aborted()) {
       return {
         summary: '',
         commitMessage: '',
@@ -399,8 +495,56 @@ export async function runCodingAgent(
       };
     }
 
+    // "Run tests": Limn's own run, then the commit hook (and its bounded repair passes).
+    if (checkSession) {
+      onProgress({ phase: 'running_checks' });
+      let results = await checkSession.verify();
+      let hook: CheckRunResult | null = null;
+      let hookAttempts = 0;
+      let repaired = false;
+      if (checkSession.hook) {
+        for (;;) {
+          const fix = captured as SubmitFixPayload | null;
+          onProgress({ phase: 'running_checks', message: 'Running the pre-commit hook' });
+          hook = await checkSession.runHook(fix?.commitMessage ?? 'AI fix', baseSha);
+          if (hook) hookAttempts++;
+          const left = maxBudgetUsd - (total.costUsd ?? 0);
+          if (!hook || hook.status !== 'failed' || hookAttempts > MAX_HOOK_REPAIRS || aborted() || left < MIN_REPAIR_BUDGET_USD) break;
+          // The hook's output goes back to the agent: one short follow-up pass in the same worktree.
+          onProgress({ phase: 'fixing', message: 'Fixing what the pre-commit hook reported' });
+          const nonce = pickReviewNonce([hook.output]);
+          const again = await pass(buildHookRepairPrompt({ output: hook.output, nonce, ...(args.provider ? { provider: args.provider } : {}) }), left);
+          add(again);
+          repaired = true;
+          if (again.aborted || aborted()) break;
+        }
+      }
+      // A repair pass changed the code after Limn's run: run the checks again so the results match.
+      if (repaired && !aborted()) results = await checkSession.verify();
+      checks = {
+        requested,
+        ran: results.length > 0 || hook != null,
+        note: checkSession.notes.length > 0 ? checkSession.notes.join(' ') : null,
+        sandbox: checkSession.sandbox,
+        install: checkSession.prepare.map(toWire),
+        results: [...results.map(toWire), ...checkSession.skipped.map(toWire)],
+        hook: hook ? toWire(hook) : null,
+        hookAttempts,
+        agentRuns: checkSession.agentRuns().length,
+      };
+      if (aborted()) {
+        return { summary: '', commitMessage: '', patch: '', filesChanged: [], baseSha, usage: emptyUsage(), costUsd: null, numTurns: null, aborted: true, ...(total.usageRecorded ? { usageRecorded: true } : {}) };
+      }
+    }
+
     onProgress({ phase: 'capturing' });
-    const { patch, filesChanged } = await captureWorktreeDiff(worktreePath);
+    // ⚠ The worktree's `.git` file goes back to what git wrote BEFORE Limn's own git reads it: a check
+    // (or the agent's Write) could have pointed it at a git folder whose config runs a command.
+    checkSession?.restoreGit();
+    const { patch, filesChanged } = await captureWorktreeDiff(
+      worktreePath,
+      checkSession ? { excludesFile: checkSession.excludesFile } : {},
+    );
     if (patch.length > config.aiFixPatchMaxBytes) {
       throw new Error(
         `fix patch too large (${patch.length} bytes > ${config.aiFixPatchMaxBytes})`,
@@ -426,13 +570,15 @@ export async function runCodingAgent(
       patch,
       filesChanged,
       baseSha,
-      usage: outcome.usage,
-      costUsd: outcome.costUsd,
-      numTurns: outcome.numTurns,
+      usage: total.usage,
+      costUsd: total.costUsd,
+      numTurns: total.numTurns,
       aborted: false,
-      ...(outcome.usageRecorded ? { usageRecorded: true } : {}),
+      ...(total.usageRecorded ? { usageRecorded: true } : {}),
+      ...(checks ? { checks } : {}),
     };
   } finally {
+    await checkSession?.close().catch(() => {});
     if (repoCloneDir && worktreePath) {
       await removeWorktreeLocked(owner, name, repoCloneDir, worktreePath).catch(
         () => {},

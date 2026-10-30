@@ -37,8 +37,11 @@ async function git(
  */
 export async function captureWorktreeDiff(
   worktree: string,
+  // "Run tests" (coding/checks/): the run's excludes file — what the dependency step and the checks
+  // left behind (node_modules, coverage …) stays OUT of the patch. Untracked files only.
+  opts: { excludesFile?: string } = {},
 ): Promise<{ patch: string; filesChanged: string[] }> {
-  await git(['add', '-A'], worktree);
+  await git(opts.excludesFile ? ['-c', `core.excludesFile=${opts.excludesFile}`, 'add', '-A'] : ['add', '-A'], worktree);
   const { stdout: patch } = await git(
     ['diff', '--cached', '--binary'],
     worktree,

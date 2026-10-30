@@ -53,6 +53,7 @@ import {
   markPlanApproved,
   markPlanDiscarded,
   markPlanPassEnded,
+  parseChecks,
   parseReviewItems,
   reconcileOrphanedFixes,
   saveFixSuccess,
@@ -195,6 +196,9 @@ export interface StartFixInput {
   // THE PER-RUN CHOICE (a manual start's picker, validated by the route). Absent ⇒ the default
   // provider (Settings → AI) — always so for an automatic fix.
   provider?: AgentProviderId;
+  // "RUN TESTS" (a manual start's picker): the check names to run (coding/checks/). Absent / empty ⇒
+  // none, as before — always so for an automatic fix.
+  checks?: string[];
 }
 
 /** The stored review a seed names, checked to be THIS PR's succeeded run. null otherwise. */
@@ -494,6 +498,8 @@ async function startRun(
         reviewItems,
         planSeed: seed,
         provider,
+        // Stored with the plan, so "Approve and build" runs the same checks.
+        checks: input.checks ?? null,
       });
       fixIdByPr.set(prId, fixId);
       queuePlanPass(ctx, {
@@ -516,7 +522,8 @@ async function startRun(
       return { status: 'queued', fixId };
     }
 
-    const systemPrompt = buildFixSystemPrompt(provider);
+    const checks = input.checks && input.checks.length > 0 ? input.checks : null;
+    const systemPrompt = buildFixSystemPrompt(provider, { checks: checks != null });
     const prompt = buildFixUserPrompt({ pr, diff, seed, provider });
 
     const fixId = await insertQueuedFix(ctx, {
@@ -531,6 +538,7 @@ async function startRun(
       trigger,
       reviewItems,
       provider,
+      checks,
     });
     fixIdByPr.set(prId, fixId);
 
@@ -548,6 +556,7 @@ async function startRun(
       sentRefs,
       trigger,
       provider,
+      ...(checks ? { checks } : {}),
     });
     return { status: 'queued', fixId };
   } catch (err) {
@@ -606,6 +615,8 @@ interface FixJob {
   trigger: AiFixTrigger;
   // The provider the prompt was worded for; the run uses the same one.
   provider: AgentProviderId;
+  // "Run tests": the check names (absent ⇒ none).
+  checks?: string[];
 }
 
 async function launchFix(ctx: AgentContext, job: FixJob): Promise<void> {
@@ -654,6 +665,7 @@ async function launchFix(ctx: AgentContext, job: FixJob): Promise<void> {
       prId: job.prId,
       provider: job.provider,
       effort,
+      ...(job.checks && job.checks.length > 0 ? { checks: job.checks } : {}),
     });
 
     if (result.aborted || controller.signal.aborted) {
@@ -986,6 +998,8 @@ export async function approvePlan(
     const planText = renderPlanText(plan);
     const nonce = pickReviewNonce([seed.text, pr.title, pr.body ?? '', planText]);
     const prompt = buildFixUserPrompt({ pr, diff, seed, plan: { plan, nonce }, provider });
+    // "Run tests": the checks the reader ticked when the plan started.
+    const planChecks = parseChecks(row.checks)?.requested ?? [];
     if (!(await markPlanApproved(ctx, row.id, { prompt, baseSha }))) {
       release();
       return { status: 'not_ready' };
@@ -1000,11 +1014,12 @@ export async function approvePlan(
       baseSha,
       // The row stores what RAN (a Codex id on Codex): ask again for the same depth.
       model: requestModelOf(row.model),
-      systemPrompt: buildFixSystemPrompt(provider),
+      systemPrompt: buildFixSystemPrompt(provider, { checks: planChecks.length > 0 }),
       prompt,
       sentRefs: shownRefsOf(parseReviewItems(row.reviewItems)),
       trigger: 'manual',
       provider,
+      ...(planChecks.length > 0 ? { checks: planChecks } : {}),
     });
     return { status: 'queued', fixId: row.id };
   } catch (err) {

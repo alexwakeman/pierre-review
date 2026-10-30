@@ -90,6 +90,26 @@ export interface AgentToolServer {
   tools: AgentResultTool[];
 }
 
+/**
+ * THE PROJECT'S OWN CHECKS as an agent tool, `run_check` (coding/checks/; docs/SECURITY.md § Sandboxed
+ * checks). Not a result tool: the run goes on after it answers. The agent passes a NAME from `names`
+ * and nothing else; Limn froze each check's argv, sandbox, environment and timeout before the run.
+ *   Claude  `mcp__checks__run_check`, in Limn's own process (`run`);
+ *   Codex   `mcp__workspace__run_check`, in Limn's workspace MCP server, which reads `specFile` once
+ *           at start-up (the path-guard hook allows it only when the run carries checks).
+ */
+export interface AgentCheckTool {
+  names: string[];
+  description: string;
+  run(args: unknown): Promise<AgentToolReply>;
+  /** The frozen list, written where neither the agent nor a check can write. */
+  specFile: string;
+  /** The longest one check may take, in seconds (Codex's per-call MCP timeout). */
+  timeoutSec: number;
+}
+
+export { CHECKS_TOOL_SERVER, RUN_CHECK_TOOL } from './check-tool.js';
+
 /** A PreToolUse hook entry in the Agent SDK's shape (Claude only). */
 export interface ClaudePreToolUseEntry {
   hooks: Array<(input: { hook_event_name: string; tool_name?: string; tool_input?: unknown }) => Promise<unknown>>;
@@ -176,6 +196,8 @@ export interface AgentRunSpec {
   writeRoots: string[];
   /** The result tools. Absent ⇒ the run has none (a chat answering in text). */
   tools?: AgentToolServer;
+  /** The project's own checks (`run_check`). Absent ⇒ the run cannot run any (every run but a fix with "Run tests"). */
+  checks?: AgentCheckTool;
   // `turns` undefined = no turn limit (a worktree review unless REVIEW_MAX_TURNS is set).
   budget: { usd: number | undefined; turns: number | undefined };
   abortController: AbortController;

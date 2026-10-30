@@ -4,6 +4,7 @@ import type {
   FastifyBaseLogger,
 } from 'fastify';
 import type {
+  AiFixChecks,
   BotWindowKind,
   CheckLogsResponse,
   ClaudeFindingSeverity,
@@ -56,7 +57,9 @@ export interface CodingProgress {
   phase:
     | 'fetching_diff'
     | 'cloning'
+    | 'preparing_checks'
     | 'fixing'
+    | 'running_checks'
     | 'capturing'
     | 'persisting';
   message?: string;
@@ -102,6 +105,11 @@ export interface GenerateFixArgs {
   codex?: { effort?: string; timeoutMs?: number };
   /** The run's effort (ai/effort.ts `agenticRunEffort`, decided by the manager). Absent ⇒ Default. */
   effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+  /**
+   * "Run tests": the check names the reader ticked (coding/checks/). Absent / empty ⇒ none — the run
+   * is exactly what it was before.
+   */
+  checks?: string[];
 }
 
 // The fix agent's self-report, as the `submit_fix` tool received it (UNVALIDATED — the AI Fix
@@ -133,6 +141,8 @@ export interface GenerateFixResult {
   aborted: boolean;
   /** True ⇒ the provider already wrote this run's AI-usage ledger row (Codex): write no second one. */
   usageRecorded?: boolean;
+  /** "Run tests": what ran and how it went. Absent when no tests were asked for. */
+  checks?: AiFixChecks;
 }
 
 // Where a completed fix is pushed. 'existing' pushes onto the PR's own head branch

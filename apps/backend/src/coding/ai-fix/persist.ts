@@ -1,6 +1,7 @@
 import { and, desc, eq, isNotNull } from 'drizzle-orm';
 import type {
   AiFixChangeReport,
+  AiFixChecks,
   AiFixReviewItem,
   AiFixSeed,
   AiFixStatus,
@@ -68,6 +69,35 @@ export interface AiFixRow {
   planRevision?: number | null;
   planSeed?: string | null;
   planCostUsd?: number | null;
+  // 0146 — "Run tests": JSON AiFixChecks. NULL = no tests asked for.
+  checks?: string | null;
+}
+
+/** The "Run tests" record a queued run starts with: the names asked for, nothing run yet. */
+export function requestedChecks(requested: readonly string[]): AiFixChecks {
+  return { requested: [...requested], ran: false, note: null, sandbox: null, install: [], results: [], hook: null, hookAttempts: 0, agentRuns: 0 };
+}
+
+/** A stored "Run tests" record, or null (absent, or unparseable — this getter must never throw). */
+export function parseChecks(raw: string | null | undefined): AiFixChecks | null {
+  if (!raw) return null;
+  try {
+    const v = JSON.parse(raw) as Partial<AiFixChecks>;
+    if (!v || !Array.isArray(v.requested)) return null;
+    return {
+      requested: v.requested.filter((x): x is string => typeof x === 'string'),
+      ran: v.ran === true,
+      note: typeof v.note === 'string' ? v.note : null,
+      sandbox: v.sandbox === 'seatbelt' || v.sandbox === 'bwrap' || v.sandbox === 'none' ? v.sandbox : null,
+      install: Array.isArray(v.install) ? v.install : [],
+      results: Array.isArray(v.results) ? v.results : [],
+      hook: v.hook ?? null,
+      hookAttempts: typeof v.hookAttempts === 'number' ? v.hookAttempts : 0,
+      agentRuns: typeof v.agentRuns === 'number' ? v.agentRuns : 0,
+    };
+  } catch {
+    return null;
+  }
 }
 
 export async function insertQueuedFix(
@@ -90,6 +120,8 @@ export async function insertQueuedFix(
     planSeed?: FixSeed | null;
     // The provider the job goes to (the manager's, picked once). Absent ⇒ the default provider.
     provider?: 'claude' | 'codex';
+    // "Run tests": the check names the reader ticked. Absent / empty ⇒ no tests (NULL).
+    checks?: readonly string[] | null;
   },
 ): Promise<number> {
   const t = ctx.schema.aiFixes;
@@ -112,6 +144,7 @@ export async function insertQueuedFix(
       trigger: input.trigger ?? 'manual',
       // Omitted (→ NULL) on a plain run: null means "this run had no review items".
       ...(items != null ? { reviewItems: JSON.stringify(items) } : {}),
+      ...(input.checks && input.checks.length > 0 ? { checks: JSON.stringify(requestedChecks(input.checks)) } : {}),
       ...(planSeed
         ? {
             planStatus: 'planning',
@@ -177,6 +210,8 @@ export async function saveFixSuccess(
       numTurns: data.numTurns,
       finishedAt: new Date(),
       changeReport: JSON.stringify(report),
+      // "Run tests": what ran (absent when none was asked for — the column keeps its NULL).
+      ...(data.checks ? { checks: JSON.stringify(data.checks) } : {}),
     })
     .where(eq(t.id, id))
     .execute();

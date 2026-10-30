@@ -125,3 +125,29 @@ describe('a re-plan carries the chat', () => {
     expect(p).toContain("LATEST steering message");
   });
 });
+
+// "RUN TESTS": the one line about building and testing changes; the shell sentence does not.
+describe('the fix prompt with "Run tests"', () => {
+  it('without checks the prompt is unchanged (byte for byte the old default)', () => {
+    expect(buildFixSystemPrompt('claude', {})).toBe(buildFixSystemPrompt('claude'));
+    expect(buildFixSystemPrompt('claude')).toContain('Nothing is installed, built or tested here');
+  });
+
+  it('with checks it offers run_check by NAME, still no shell and no Bash', () => {
+    for (const provider of ['claude', 'codex'] as const) {
+      const p = buildFixSystemPrompt(provider, { checks: true });
+      expect(p).toContain('You have NO shell here');
+      expect(p).toContain('run_check tool, by NAME only');
+      expect(p).not.toContain('Nothing is installed, built or tested here');
+      expect(p).not.toMatch(/\bBash\b/);
+      expect(p).toContain('Do NOT commit, push, create branches');
+    }
+  });
+
+  it('the run-time section lists the names, or says plainly that nothing is tested', async () => {
+    const { checksSection } = await import('./prompts.js');
+    expect(checksSection(['test', 'lint'], null)).toContain('Checks you may run with run_check: test, lint.');
+    expect(checksSection(null, 'Docker isn’t running.')).toContain('nothing is installed, built or tested here');
+    expect(checksSection(null, null, true)).toContain('pre-commit hook');
+  });
+});

@@ -35,7 +35,7 @@ describe('workspaceMcpConfig', () => {
   });
 
   it('round-trips through the entry argv parser', () => {
-    expect(parseServerArgv(['--read', '/a', '--read', '/b', '--log', '/l'])).toEqual({ read: ['/a', '/b'], logFile: '/l' });
+    expect(parseServerArgv(['--read', '/a', '--read', '/b', '--log', '/l'])).toEqual({ read: ['/a', '/b'], logFile: '/l', checksSpec: null });
     expect(() => parseServerArgv(['--write', '/a'])).toThrow(/unexpected argument/);
   });
 });
