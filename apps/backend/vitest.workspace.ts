@@ -6,8 +6,8 @@ import { defaultExclude, defineWorkspace } from 'vitest/config';
 //   • `slow` — the files whose time is spent STARTING PROCESSES, not running our code: real `git`
 //     (init, commit, merge-tree, rebase — up to ~60 spawns per case), the fake Codex CLI (a node
 //     script per run, plus `exec resume` for the retry), the AI-runtime installer and the ONNX
-//     scorer. Measured 2026-10-30 they were 17 of 419 files and 93% of the suite's test time
-//     (1,654s of 1,778s), and the longest of them alone set the wall clock of the whole run.
+//     scorer. Measured 2026-10-30 these cases were 20 of 419 files and 93% of the suite's test
+//     time (1,655s of 1,778s), and the longest file alone set the wall clock of the whole run.
 //
 // `pnpm test:all` (or a bare `vitest run`) runs both. Naming a file runs it whichever project it
 // is in, so `vitest run src/conflict/land.test.ts` still works.

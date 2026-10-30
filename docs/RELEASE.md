@@ -22,7 +22,8 @@ On every release run it:
 2. Installs pnpm (pinned to `pnpm@9.15.9` via the root `package.json`
    `packageManager` field, read by `pnpm/action-setup`) + Node 20 and runs
    `pnpm install --frozen-lockfile`.
-3. Runs `pnpm typecheck` and `pnpm test` (a failure here aborts the release).
+3. Runs `pnpm typecheck` and `pnpm test:all` — the whole backend suite, the `slow` project
+   included (docs/TESTING.md) — and the E2E suite (a failure here aborts the release).
 4. **Computes the next version**, drift-proof: it takes the **highest** of {npm's
    latest published `limn-review`, the old name's latest `pierre-review` (so the
    version line continues across the rename), the committed `apps/backend/package.json` version, the

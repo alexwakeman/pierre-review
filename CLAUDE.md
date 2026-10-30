@@ -36,10 +36,10 @@ tiny service, `apps/site`.
 | [REFERENCE-DOCS](docs/REFERENCE-DOCS.md) | the workspace reference library: ingest, the INDEX → CONTENTS → section tree, `docsContextFor` |
 | [ML-SEVERITY](docs/ML-SEVERITY.md) · [ML-NODE-PORT](docs/ML-NODE-PORT.md) | ML severity/category of bot comments · the in-process scorer (`ml/`) |
 | [PERIOD-REPORTING](docs/PERIOD-REPORTING.md) | window purity, coverage bias, actor lanes, the person vector |
-| [PLATFORM](docs/PLATFORM.md) · [DEMO](docs/DEMO.md) | the platform features (formerly Pro): Activity, Feed, Bots Monitoring, the peer benchmark, the impact note, the work plan, Slack |
+| [PLATFORM](docs/PLATFORM.md) · [DEMO](docs/DEMO.md) | the platform features (formerly Pro): Activity, Feed, Bots Monitoring, peer benchmark, impact note, work plan, Slack |
 | [SECURITY](docs/SECURITY.md) | app.ts, CORS/CSP, host guard, rate limits, data export, dependency posture |
 | [PACKAGING](docs/PACKAGING.md) · [RELEASE](docs/RELEASE.md) | build-release, CLI, the AI/ML runtimes · CI publishing |
-| [MIGRATIONS](docs/MIGRATIONS.md) | any migration; history and fold rules |
+| [MIGRATIONS](docs/MIGRATIONS.md) · [TESTING](docs/TESTING.md) | any migration; history and fold rules · test projects, CI |
 | [`apps/site/README.md`](apps/site/README.md) · [`apps/frontend/src/demo/README.md`](apps/frontend/src/demo/README.md) | the website service + contact form · the static demo and its recording format |
 
 ---
@@ -134,7 +134,7 @@ All from the repo root unless noted.
 | `pnpm dev` | backend (`:4000`) + frontend (`:5173`); bot comments scored in-process |
 | `pnpm dev:backend` / `dev:frontend` / `dev:ml` / `dev:site` | run one side only |
 | `pnpm build` · `pnpm typecheck` | recursive build · `tsc --noEmit` everywhere — **run typecheck before calling work done** |
-| `pnpm test` | recursive `vitest` (backend incl. `src/platform/`, site; frontend is a no-op) |
+| `pnpm test` · `test:all` | fast backend tests + site · plus the `slow` ones |
 | `pnpm db:generate` · `db:migrate` · `db:studio` | Drizzle migration from `schema.sqlite.ts` · apply (also runs on boot) · studio |
 | `pnpm sync:once owner/repo` | one-off sync of one repo without the server |
 | `pnpm --filter @pierre-review/backend verify:isolation` | query-layer cross-account IDOR check |
@@ -595,9 +595,9 @@ AI route. `api/plugins/security.ts` (CSP, loopback-only CORS, cross-origin guard
 
 ## Verifying changes
 
-`pnpm test` + `pnpm typecheck` for backend/heuristic logic. For UI work `pnpm dev` is usually
-running (pick cases from the real DB with `sqlite3`); state deep-links via URL params (`?pr=<id>`, `?repos=<ids>`) against `/app/`. New id-routes: run
-`verify:isolation`.
+`pnpm test` + `pnpm typecheck` for backend/heuristic logic (+ touched `slow` files). For UI,
+`pnpm dev` is usually running (real-DB cases: `sqlite3`); deep-link with `?pr=<id>`, `?repos=<ids>`
+on `/app/`. New id-routes: `verify:isolation`.
 
 ⚠ **`apps/frontend/test/` does not run in CI** (the frontend's `test` script is a no-op) and is
 not typechecked — run it by hand: `./apps/backend/node_modules/.bin/vitest run --root
