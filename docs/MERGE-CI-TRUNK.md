@@ -1087,7 +1087,9 @@ land), then the merge sweep, then the watcher. ≤ 6 GitHub writes per tick acro
   through the in-app resolver (`startAiResolve`, the provider seam — Claude or Codex, whichever
   `activeProviderId` picks), ⚠ only where agentic AI runs (`bindDependencyAutomationAi` from
   `startAgenticBackground`) and only when `automaticRunAllowed` says so (over budget = skipped, never
-  queued). (4) `watchAndLand` waits for it and commits UNATTENDED only when `aiResolutionCommit`
+  queued). ⚠ It NEVER takes over a reader's resolver: a session with a subscriber (the overlay is
+  open) or an AI run already going is skipped with no claim, and only a run THIS call `started` is
+  watched and landed. (4) `watchAndLand` waits for it and commits UNATTENDED only when `aiResolutionCommit`
   passes: every conflicted file supported, every decidable region carries the AI's choice, none
   `low` confidence. Stricter than a reader's commit ON PURPOSE (nobody is looking). Strategy
   `merge` onto `pr_branch` — never a rebase, which would rewrite the bot's branch. It lands through

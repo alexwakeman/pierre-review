@@ -32,6 +32,8 @@ const fake = vi.hoisted(() => ({
   answer: null as any,
   started: 0,
   land: [] as any[],
+  /** What `peekSession` says BEFORE the automation starts its own run (a reader's session). */
+  readerSession: null as any,
 }));
 vi.mock('../review/budget-gate.js', () => ({
   automaticRunAllowed: vi.fn(async () => fake.allowed),
@@ -51,7 +53,10 @@ const MODEL = {
   files: [{ index: 0, path: 'package.json', unsupported: null, regions: [{ id: 1, kind: 'conflict' }] }],
 };
 vi.mock('../conflict/session.js', () => ({
-  peekSession: vi.fn(() => ({ aiRunning: false, sessionId: 's1', modelHash: 'mh', model: MODEL })),
+  peekSession: vi.fn(
+    () =>
+      fake.readerSession ?? { aiRunning: false, subscribers: new Set(), sessionId: 's1', modelHash: 'mh', model: MODEL },
+  ),
 }));
 vi.mock('../api/routes/conflicts.js', () => ({
   runOpen: vi.fn(),
@@ -237,6 +242,7 @@ describe('the AI fallback', () => {
     fake.allowed = true;
     fake.started = 0;
     fake.land = [];
+    fake.readerSession = null;
     await auto.setDependencyAutomation(A, wsId, { autoResolveConflicts: true, trustedBotIds: [botId] });
     await setPr(botPr, { mergeStateStatus: 'dirty', mergeable: 'conflicting' });
     auto.bindDependencyAutomationAi({ aiBudget: null } as any);
@@ -286,6 +292,17 @@ describe('the AI fallback', () => {
     fake.allowed = false;
     await auto.runDependencyAutomationTick(log, LATER());
     expect(fake.started).toBe(0);
+    expect((await actions()).some((r) => r.action === 'ai_resolve')).toBe(false);
+  });
+
+  it('never takes over a resolver a reader has open or an AI run a reader started', async () => {
+    fake.answer = answer([choice()]);
+    fake.readerSession = { aiRunning: false, subscribers: new Set([() => {}]), sessionId: 's1', modelHash: 'mh', model: MODEL };
+    await auto.runDependencyAutomationTick(log, LATER());
+    fake.readerSession = { aiRunning: true, subscribers: new Set(), sessionId: 's1', modelHash: 'mh', model: MODEL };
+    await auto.runDependencyAutomationTick(log, LATER());
+    expect(fake.started).toBe(0);
+    expect(fake.land).toEqual([]);
     expect((await actions()).some((r) => r.action === 'ai_resolve')).toBe(false);
   });
 });

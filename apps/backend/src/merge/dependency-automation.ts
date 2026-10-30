@@ -784,12 +784,18 @@ async function startAiFallback(
 ): Promise<void> {
   // THE AUTOMATIC-RUN BUDGET GATE: over budget → skipped, never queued (the next tick re-derives).
   if (!(await automaticRunAllowed(ctx, accountId, 'dependency conflicts'))) return;
-  const claim = await claimAction(accountId, pr.id, pr.headSha, 'ai_resolve');
-  if (claim == null) return;
-  const [{ startAiResolve }, { runOpen }] = await Promise.all([
+  const [{ startAiResolve }, { runOpen }, { peekSession }] = await Promise.all([
     import('../coding/ai-resolve/run.js'),
     import('../api/routes/conflicts.js'),
+    import('../conflict/session.js'),
   ]);
+  // ⚠ NEVER TAKE OVER A READER'S RESOLVER: a session someone has open, or an AI run a reader
+  // started, is theirs — committing it unattended would land decisions they are still making.
+  // Skipped without a claim; a later tick looks again once they have left.
+  const open = peekSession(accountId, pr.id);
+  if (open != null && (open.aiRunning || open.subscribers.size > 0)) return;
+  const claim = await claimAction(accountId, pr.id, pr.headSha, 'ai_resolve');
+  if (claim == null) return;
   const res = await startAiResolve(ctx, {
     accountId,
     prId: pr.id,
@@ -801,7 +807,8 @@ async function startAiFallback(
     log.warn({ err, prId: pr.id }, 'dependency automation: AI run did not start');
     return null;
   });
-  if (res == null || (res.status !== 'started' && res.status !== 'running')) {
+  // Only a run THIS call started is ours to land ('running' is somebody else's, raced in since).
+  if (res == null || res.status !== 'started') {
     // Nothing was written and no model ran: give the claim back so a later tick may try.
     if (res?.status === 'no_conflicts' || res?.status === 'no_auth') {
       await settleAction(claim, 'failed', res.status === 'no_auth' ? 'No AI sign-in.' : 'No longer conflicts.');
