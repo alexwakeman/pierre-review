@@ -10,6 +10,7 @@ import {
   isAiEffort,
   isAiProviderSetting,
   LARGE_PR_CODE_LOC_DEFAULT,
+  type CloneStorageResponse,
   type NotionPropertyInfo,
   type NotionSchemaResponse,
   type NotionTrackerMapping,
@@ -322,6 +323,20 @@ export const ROUTES: DemoRoute[] = [
   // The Claude spend budget: simulated, never recorded (aiBudget.ts says why).
   { method: 'GET', re: /^\/api\/ai\/budget$/, run: (req, _m, srv) => getAiBudget(req, srv) },
   { method: 'PUT', re: /^\/api\/ai\/budget$/, run: (req, _m, srv) => putAiBudget(req, srv) },
+  // Settings → AI → Disk space: hand-written, never recorded — the real answer is the recording
+  // machine's own clone cache. Fictional Acme figures: three repositories cloned, one run's checkout.
+  {
+    method: 'GET',
+    re: /^\/api\/storage\/clones$/,
+    run: () =>
+      OK({
+        cloneBytes: 1.3 * 1024 ** 3,
+        checkouts: 1,
+        checkoutBytes: 184 * 1024 * 1024,
+        freedBytes30d: 2.4 * 1024 ** 3,
+        lastSweepAt: null,
+      } satisfies CloneStorageResponse),
+  },
   // The AI provider choice and the Codex sign-in: simulated (provider.ts). A ChatGPT sign-in in the
   // demo completes at once, with no page to open.
   {

@@ -174,7 +174,8 @@ const VIEWS = [
     'settings:ai',
     '?view=activity',
     'settings-ai',
-    { act: openSettingsTab('AI'), expect: ['Default: Claude.', 'Automatic runs and default:', 'Signed in with ChatGPT Plus.', 'Effort for AI Review and AI Fix:'] },
+    // Disk space: the clone cache's one line (hand-written in the demo, demo/routes.ts).
+    { act: openSettingsTab('AI'), expect: ['Default: Claude.', 'Automatic runs and default:', 'Signed in with ChatGPT Plus.', 'Effort for AI Review and AI Fix:', 'Repositories 1.3 GB · 1 checkout (184 MB) · 2.4 GB freed in 30 days'] },
   ],
   // Settings → AI → Effort: a level is picked (simulated, provider.ts) and the control keeps it.
   [

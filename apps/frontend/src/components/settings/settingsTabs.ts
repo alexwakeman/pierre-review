@@ -48,9 +48,9 @@ export const SETTINGS_TABS: readonly SettingsTabDef[] = [
   { id: 'pending', label: 'Pending', summary: 'My Turn, muted repositories', global: ['MyTurnSection'], workspace: ['PendingMuteSection'] },
   {
     id: 'ai',
-    label: 'AI', summary: 'Provider, sign-in, effort, AI spend',
+    label: 'AI', summary: 'Provider, sign-in, effort, AI spend, disk space',
     aiOnly: true,
-    global: ['AiProviderSection', 'ClaudeSpendSection'],
+    global: ['AiProviderSection', 'ClaudeSpendSection', 'DiskSpaceSection'],
     workspace: [],
   },
   {

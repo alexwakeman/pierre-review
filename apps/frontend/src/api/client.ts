@@ -162,6 +162,7 @@ import type {
   MyTurnSettingsResponse,
   AiBudgetBody,
   AiBudgetResponse,
+  CloneStorageResponse,
   AiProviderSetting,
   AiProviderSettingResponse,
   AiEffort,
@@ -936,6 +937,9 @@ export const api = {
     get<AiBudgetResponse>(provider ? `/api/ai/budget?provider=${provider}` : '/api/ai/budget'),
   setAiBudget: (body: AiBudgetBody) =>
     fetch('/api/ai/budget', jsonBody('PUT', body)).then((r) => handle<AiBudgetResponse>(r)),
+  // Settings → AI → Disk space (backend api/routes/storage.ts): the clone cache and its per-run
+  // checkouts. Machine-wide. Registered only when AI is on.
+  cloneStorage: () => get<CloneStorageResponse>('/api/storage/clones'),
   // THE AI PROVIDER CHOICE (Settings → AI; backend api/routes/ai-provider.ts). 409 while
   // LIMN_AI_PROVIDER is set (the environment decides). The read side is `/api/me` (`ai.provider`,
   // `ai.providerSetting`): invalidate `['me']` after a write.
