@@ -204,7 +204,9 @@ own answer `submit_build_docs` (`review/story-docs/schema.ts`, strict form in `a
   session SSE; `{kind:'done'}` ends a run) and `phase` on the row while no plan/build pass owns it.
 - **Defaults** (owner decision 6, `storyBuildDocsDefaultDecision`): suggestion ticked, superseded unticked,
   grounded no checkbox. `PUT …/docs/decisions` merges over the stored ones, drops unknown and grounded ids, and
-  refuses once the plan is accepted.
+  refuses while a docs run is in flight (it replaces the points) and once the plan is accepted. ⚠ A run that
+  outlives Accept, Cancel or Discard ends `failed` "Stopped." and never replaces `docs_json`: the frozen
+  decisions name its ids. The `about` list printed to the model (outside the fences) keeps only short codes.
 - **Consumption** (`docsBlocksFor(build, {nonce, frozen})`, through `storyBuildDeps()`): `included` = every
   ticked item, fenced `DOCS POINTS THE READER INCLUDED` (a ticked SUPERSEDED item says the reader chose the docs
   there); `superseded` = every unticked superseded item, fenced `DOCS THE STORY SUPERSEDES (acknowledged)`

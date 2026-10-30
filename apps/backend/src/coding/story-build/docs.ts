@@ -7,6 +7,7 @@ import {
   STORY_DOCS_ALIGNMENT_MODEL,
   STORY_DOCS_REFUSAL_TEXT,
   aiRunProvider,
+  isStoryBuildOpen,
   isStoryBuildRunning,
   storyBuildDocsEffectiveDecisions,
   storyBuildDocsPending,
@@ -157,6 +158,12 @@ export const runBuildDocs: RunBuildDocsFn = async (ctx, { accountId, buildId, fo
   let spentUsd = 0;
   const finish = async (set: { docsStatus: 'ready' | 'failed' | 'refused'; docsError: string | null; docsJson?: StoryBuildDocs }): Promise<void> => {
     const now = await getStoryBuildRow(ctx, accountId, buildId);
+    if (now == null) return;
+    // ⚠ The docs are FROZEN once the plan is accepted (or the session ended): a run that outlived Accept,
+    // Cancel or Discard must never replace the items the frozen decisions name (ids D1… are reused).
+    if (set.docsJson !== undefined && (now.acceptedRevision != null || !isStoryBuildOpen(now.status))) {
+      set = { docsStatus: 'failed', docsError: BUILD_DOCS_TEXT.stopped };
+    }
     await updateStoryBuild(ctx, accountId, buildId, {
       docsStatus: set.docsStatus,
       docsError: set.docsError,
@@ -164,7 +171,7 @@ export const runBuildDocs: RunBuildDocsFn = async (ctx, { accountId, buildId, fo
       ...(set.docsJson !== undefined ? { docsJson: set.docsJson, docsDecisionsJson: null } : {}),
       ...(spentUsd > 0 ? { docsCostUsd: (now?.docsCostUsd ?? 0) + spentUsd } : {}),
       // The phase is the docs run's only while no plan or build pass owns it.
-      ...(now != null && !isStoryBuildRunning(now.status) ? { phase: null } : {}),
+      ...(!isStoryBuildRunning(now.status) ? { phase: null } : {}),
     });
   };
   const phase = async (p: StoryBuildPhase): Promise<void> => {

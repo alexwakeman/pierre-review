@@ -95,17 +95,21 @@ export interface BuildDocsPromptInput {
 const STORY_CHARS = 12_000;
 const clip = (s: string, max: number): string => (s.length <= max ? s : `${s.slice(0, max)}\n${CUT_MARK}`);
 
+const ABOUT_REF = /^[A-Z][A-Z0-9]{0,7}$/;
+
 /** Every `about` the answer may name, canonical: story, the criteria, the asks outside them, each step. */
 export function buildDocsAbouts(
   criteria: readonly Pick<BuildDocsCriterion, 'ref'>[],
   missing: ReadonlyArray<{ ref: string }>,
   plan: Pick<StoryBuildPlan, 'repos'>,
 ): string[] {
+  // ⚠ This list is printed OUTSIDE the fences: a ref that is not a short code (AC2, M1, R1) never reaches it.
+  const ok = (ref: string): boolean => ABOUT_REF.test(ref);
   return [
     'story',
-    ...criteria.map((c) => c.ref.toUpperCase()),
-    ...missing.map((m) => m.ref.toUpperCase()),
-    ...plan.repos.flatMap((r) => r.steps.map((_, i) => `${r.ref.toUpperCase()}:step ${i + 1}`)),
+    ...criteria.map((c) => c.ref.toUpperCase()).filter(ok),
+    ...missing.map((m) => m.ref.toUpperCase()).filter(ok),
+    ...plan.repos.filter((r) => ok(r.ref.toUpperCase())).flatMap((r) => r.steps.map((_, i) => `${r.ref.toUpperCase()}:step ${i + 1}`)),
   ];
 }
 

@@ -310,6 +310,28 @@ describe('a docs run', () => {
   });
 });
 
+describe('the freeze', () => {
+  it('a decision while a run is in flight is refused; a run that outlives Accept never replaces the docs', async () => {
+    const id = await planReady();
+    expect((await post(id)).statusCode).toBe(202);
+    await R._storyBuildDocsIdleForTest();
+    const first = (await row(id))!.docsJson;
+    expect(first).not.toBeNull();
+    let open!: () => void;
+    gate = new Promise<void>((r) => (open = r));
+    agentArgs = null;
+    agentPayload = { ...PAYLOAD, items: [PAYLOAD.items[1]] };
+    expect((await post(id, { force: true })).statusCode).toBe(202);
+    expect((await put(id, { D1: 'include' })).json()).toMatchObject({ error: 'NotReady', message: 'The docs are being weighed again.' });
+    for (let i = 0; i < 100 && agentArgs?.usageRecord == null; i += 1) await new Promise((r) => setTimeout(r, 10));
+    // Accept lands while the read is still going (WP1 did not abort it).
+    await P.updateStoryBuild(ctx, 1, id, { status: 'building', acceptedRevision: 1, acceptedDocsJson: { D1: 'ignore' } });
+    open();
+    await R._storyBuildDocsIdleForTest();
+    expect(await row(id)).toMatchObject({ docsStatus: 'failed', docsError: 'Stopped.', docsJson: first, acceptedDocsJson: { D1: 'ignore' } });
+  });
+});
+
 describe('never stuck', () => {
   it('a read with no answer is `failed` with a sentence', async () => {
     const id = await planReady();

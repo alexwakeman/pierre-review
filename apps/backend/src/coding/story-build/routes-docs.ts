@@ -117,6 +117,8 @@ export function registerStoryBuildDocsRoutes(app: FastifyInstance, ctx: AgentCon
     if (row == null) return notFound(reply);
     if (row.docsJson == null) return fail(reply, 409, 'NotReady', 'There are no docs points to decide.');
     if (row.status !== 'plan_ready') return fail(reply, 409, 'NotReady', 'The plan is accepted: the docs points are frozen.');
+    // A run in flight replaces these points (and starts its decisions afresh): a choice now would be lost.
+    if (row.docsStatus === 'running' || storyBuildDocsHeld(id)) return fail(reply, 409, 'NotReady', 'The docs are being weighed again.');
     const asked = (req.body as StoryBuildDocsDecisionsBody).decisions;
     const merged: StoryBuildDocsDecisions = {};
     for (const it of row.docsJson.items) {
