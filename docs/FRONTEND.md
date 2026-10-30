@@ -170,10 +170,23 @@ One sidebar, one slim top bar, the page (`components/shell/`, docs/redesign/DESI
   renders nothing when no tab is open; one-line chips, the author rides the tooltip) and the ONE
   `HeaderToastStrip` (below).
 - **`BottomBar`** (below `md`): the four primaries + More (opens the drawer).
+- **BELOW `lg` THE SHELL'S STATE STAYS GLANCEABLE** (`components/shell/shellSignals.ts`
+  `useShellSignals`, NO new fetch — `['repos']`, the AI budget and the daily brief the shell already
+  holds): the menu button and More carry a dot — red for a repo whose last sync failed or the AI
+  budget over, amber near it, accent (More only) when other workspaces need you; the bottom bar's
+  Pending carries this workspace's personal My Turn count (`activeWorkspaceBadge`); the top bar's
+  location reads "<workspace> / <page>". The words stay in the drawer (foot, Needs you).
+- **The drawer scrolls as ONE column** (foot included) so Insights is never below a pinned foot;
+  the docked sidebar's middle fades at the hidden edge (`ui/edgeFade.ts`). The Repositories group
+  is ONE line per repo (unread dot · name · a red dot only when the default branch fails · open
+  PRs; everything else in the tooltip / accessible name) and shows 6 rows before "Show all".
+- **"Search or jump" from the drawer** skips the drawer's focus restore (`skipRestoreRef`) and the
+  palette re-takes focus one frame after opening — otherwise on a phone the keyboard never came up.
 - **Keys** (`hooks/useKeyboard.ts`): `/` opens the palette (or focuses `#add-repo-input` while the
   manager is open), `?` the key sheet (`ShortcutsSheet`), `g` then p/o/s/t/d/f/r/b goes to a page —
-  the chord's second key is taken in the CAPTURE phase so it never also reaches a list's own keys
-  (`o` = open on GitHub in a list) — `i` Activity, j/k the board, Esc as before.
+  the chord's second key is taken in the CAPTURE phase and ALWAYS swallowed (a known letter goes
+  somewhere, an unknown one does nothing) so it never also reaches a list's own keys (`o` = open on
+  GitHub, `e` = dismiss) — `i` Activity, j/k the board, Esc as before.
 - **⌘K** (`hooks/useShellCommands.tsx`): every destination and sub-tab, every repo console, every
   workspace, "Show what needs you in <workspace>", every Settings tab, "Manage repos & workspaces",
   sync, theme, notifications, the key sheet, open tabs + "Close all tabs", "Merge when ready" (opens

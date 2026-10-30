@@ -322,7 +322,7 @@ export function ThreadList({
       {threads.length > 0 && (
         <div
           // Sticks UNDER the Changes tab's own sticky bar (`--diff-sticky-top`, set by ChangesTab).
-          className="sticky top-[var(--diff-sticky-top,0px)] z-10 space-y-2 border-b border-gray-100 bg-white/95 px-3 py-2 backdrop-blur dark:border-gray-800 dark:bg-gray-900/95"
+          className="sticky top-[var(--diff-sticky-top,0px)] z-10 space-y-2 border-b border-ui-line bg-ui-surface/95 px-3 py-2 backdrop-blur"
           style={vendor ? { boxShadow: `inset 3px 0 0 ${vendor.color}` } : undefined}
         >
           <div className="flex flex-wrap items-center gap-1.5">

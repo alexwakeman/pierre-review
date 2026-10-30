@@ -1587,7 +1587,7 @@ function InlineThread({ item }: { item: ConsolidatedFeedItem }): JSX.Element {
           type="button"
           onClick={() => setExpanded((v) => !v)}
           aria-expanded={expanded}
-          className="hit bg-ui-raise group/rt flex w-full cursor-pointer items-center gap-1.5 rounded-ui bg-white/60 px-2 py-1 text-left text-meta hover:border-ui-accent/50"
+          className="hit bg-ui-raise group/rt flex w-full cursor-pointer items-center gap-1.5 rounded-ui px-2 py-1 text-left text-meta hover:bg-ui-hover"
         >
           {/* ── COLLAPSE-ONLY CHROME ────────────────────────────────────────────────────────
               The Resolved pill, the anchor line and the comment tally are what make this row
@@ -1757,7 +1757,7 @@ function AffectedThreadRow({
       <button
         type="button"
         onClick={onOpen}
-        className="hit bg-ui-raise group/th block w-full rounded-ui bg-white/60 px-2 py-1 text-left hover:border-ui-accent/50"
+        className="hit bg-ui-raise group/th block w-full rounded-ui px-2 py-1 text-left hover:bg-ui-hover"
       >
         <span className="flex items-center gap-1.5 text-meta">
           <span

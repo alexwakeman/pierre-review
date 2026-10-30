@@ -45,7 +45,7 @@ function OwnerAvatar({ login, src }: { login: string; src: string | null }): JSX
     );
   }
   return (
-    <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-ui-faint text-meta font-semibold text-ui-ink">
+    <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-ui-hover text-meta font-semibold text-ui-ink">
       {login.slice(0, 2).toUpperCase()}
     </span>
   );

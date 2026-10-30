@@ -25,7 +25,7 @@ export function Avatar({
   }
   return (
     <span
-      className="flex shrink-0 items-center justify-center rounded-full bg-ui-faint text-meta font-semibold text-ui-ink"
+      className="flex shrink-0 items-center justify-center rounded-full bg-ui-hover text-meta font-semibold text-ui-ink"
       style={{ width: size, height: size }}
     >
       {label.slice(0, 2).toUpperCase()}

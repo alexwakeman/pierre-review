@@ -1921,7 +1921,7 @@ export function ClaudeReviewTab({
   return (
     <ReviewTabPrRefs pr={pr} review={shownReview}>
     <QuietReviewSections>
-    <div className="mx-auto max-w-5xl space-y-7 px-4 py-4 md:px-5">
+    <div className="max-w-5xl space-y-7 px-1 py-2">
       {/* Reviews, Actions and the AI Fix hand-off (latest succeeded run only), above everything. */}
       <PrReviewActionsSection pr={pr} usersById={usersById} fixReview={canEdit ? review : null} />
       {/* The run controls are ALWAYS shown; a missing AI runtime or Claude credential replaces

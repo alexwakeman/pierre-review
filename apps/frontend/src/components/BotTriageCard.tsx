@@ -294,7 +294,7 @@ export function BotTriageCard({
       {/* Confirm step: the exact threads, listed — resolve is user-initiated and confirm-gated,
           always naming what it will touch (nothing ever auto-resolves). */}
       {confirming && (
-        <div className="mt-2 rounded-ui border border-ui-line bg-white/60 p-2">
+        <div className="mt-2 rounded-ui border border-ui-line bg-ui-surface p-2">
           <div className="mb-1 font-medium text-ui-ink">
             Resolve {resolvableThreads.length} likely-addressed bot thread
             {resolvableThreads.length === 1 ? '' : 's'} on GitHub?

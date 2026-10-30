@@ -998,7 +998,7 @@ function StackCoverage({
           disabled={starting}
           onClick={() => start.mutate({ prId, ident })}
           title="Check this ticket against all its PRs"
-          className="hit whitespace-nowrap rounded-ui border border-ai-border bg-white/70 px-2 py-0.5 text-meta font-medium text-ai-signal hover:border-ai-signal/60 hover:bg-ai-surface-2 disabled:opacity-60"
+          className="hit whitespace-nowrap rounded-ui bg-ui-raise px-2 py-0.5 text-meta font-medium text-ui-ink hover:bg-ui-hover disabled:opacity-60"
         >
           {starting ? 'Starting…' : cov == null ? 'Check story' : 'Re-check'}
         </button>
@@ -1183,7 +1183,7 @@ function StoryCurrencyLine({
           disabled={starting}
           onClick={() => start.mutate({ prId, ident })}
           title="Check this ticket against all its PRs"
-          className="hit whitespace-nowrap rounded-ui border border-ai-border bg-white/70 px-2 py-0.5 text-meta font-medium text-ai-signal hover:border-ai-signal/60 hover:bg-ai-surface-2 disabled:opacity-60"
+          className="hit whitespace-nowrap rounded-ui bg-ui-raise px-2 py-0.5 text-meta font-medium text-ui-ink hover:bg-ui-hover disabled:opacity-60"
         >
           {starting ? 'Starting…' : cov == null ? 'Check story' : 'Re-check'}
         </button>

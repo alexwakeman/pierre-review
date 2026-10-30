@@ -46,7 +46,7 @@ describe('the four type sizes', () => {
 });
 
 describe('raw palette classes', () => {
-  const PALETTE_CEILING = 29;
+  const PALETTE_CEILING = 18;
   it(`may only go down (ceiling ${PALETTE_CEILING})`, () => {
     const re =
       /(?<![\w-])(?:[a-z-]+:)*(?:bg|text|border|ring|divide)-(?:gray|slate|zinc|neutral|stone|sky|blue|cyan|emerald|green|lime|teal|amber|yellow|orange|red|rose)-\d{2,3}(?![\w-])/g;

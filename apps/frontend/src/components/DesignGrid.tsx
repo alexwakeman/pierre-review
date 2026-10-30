@@ -279,7 +279,7 @@ function DesignCard({
               {...getFloatingProps({ onClick: (e) => e.stopPropagation() })}
               id={listId}
               data-noactivate
-              className="z-[60] max-w-[min(28rem,92vw)] rounded-ui border border-gray-200 bg-white p-1 shadow-lg dark:border-gray-700 dark:bg-gray-900"
+              className="z-[60] max-w-[min(28rem,92vw)] rounded-ui border border-ui-line bg-ui-surface p-1 shadow-lg"
             >
               <ul className="space-y-0.5">
                 {cell.files.map((f) => (

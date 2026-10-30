@@ -26,8 +26,10 @@ Normative. New and redesigned UI follows this file; the primitives in
 | `text-title` | 15 / 22, 600 | side-panel title, section heading, dialog title, palette input |
 | `text-display` | 22 / 28, 600 | the page title in the page header — once per page |
 
-- **Nothing under 11px, anywhere** (`designTokens.test.ts` fails the build). `text-[11px]` survives
-  only in code not yet redesigned; new code uses the four tokens.
+- **Nothing under 11px, anywhere** (`designTokens.test.ts` fails the build). The four tokens are
+  the ONLY sizes: `test/designRules.test.ts` fails on any `text-[Npx]` or `text-xs/sm/base/lg` in
+  src, and holds raw palette classes (`text-gray-500`, `bg-amber-50` …) to a ratchet that only goes
+  down.
 - Weight: 400 body, 500 for a row's emphasis and buttons, 600 only for title/display. No uppercase
   labels with tracking (the old `UPPERCASE 10px` section heads become `text-meta` mute words).
 - Numbers: `tabular-nums` wherever they line up (counts, ages, +/−).
@@ -126,7 +128,14 @@ All in `components/ui/`, exported from `components/ui/index.ts`.
 - **`Tabs`** — page tabs with counts (`number` · `'loading'` → "…" · `null` → nothing; 0 stays
   visible and dimmed). `numberKeys` gives 1–9 to the page's own tablist only.
 - **`Button` / `IconButton`** — `primary` (one per surface), `secondary`, `ghost`, `danger` (danger
-  ink, never a red ground). `kbd` shows the shortcut. `IconButton` requires `label`.
+  ink, never a red ground). `kbd` names the shortcut in `aria-keyshortcuts` and the tooltip — it is
+  NEVER printed on the button (shortcuts are listed by ⌘K and the `?` sheet). `IconButton` requires
+  `label`.
+- **`hit`** (index.css) — a small control's tap area grows to 40 × 40 on a coarse pointer through an
+  invisible centred `::after`, without moving layout. Every hand-rolled `<button>` / `<a>` with a
+  class string carries it; a primitive with real `touch:` sizes does not need it.
+- **`useEdgeFade(ref, 'x' | 'y')`** — a scroll box fades the edge that hides more (wide tables, the
+  sidebar's middle). `Tabs` does the same and keeps the selected tab in view.
 - **`StatusIcon`** — icon + words, tone by rule.
 - **`Checkbox` / `Radio` / `RadioGroup` / `Switch`** — real inputs restyled (forms, labels and
   selectors keep working). Switch = takes effect at once; Checkbox = saved by a Save button.
