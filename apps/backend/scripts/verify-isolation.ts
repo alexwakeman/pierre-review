@@ -2548,6 +2548,31 @@ check(
     .execute();
 }
 
+// ── DEPENDENCY AUTOMATION (merge/dependency-automation.ts) ──────────────────────
+// The panel is id-addressed by a PATH param and its PUT carries bot ids in a BODY; the log takes
+// repo ids. Non-vacuous: A's workspace exists, and A's PR carries a claimed action B must not see.
+{
+  const auto = await import('../src/merge/dependency-automation.js');
+  const wsA = await q.resolveWorkspaceScope(1, null);
+  check(
+    'setDependencyAutomation(B, A’s workspace) refuses (IDOR blocked)',
+    (await auto.setDependencyAutomation(2, wsA.workspaceId, { autoApprove: true })) === false &&
+      (await auto.getDependencyAutomation(1, wsA.workspaceId))?.settings.autoApprove === false,
+  );
+  check(
+    'getDependencyAutomation(B, A’s workspace) reads nothing',
+    (await auto.getDependencyAutomation(2, wsA.workspaceId)) === null,
+  );
+  const claim = await auto.claimAction(1, A.prId, 'iso-head', 'approve');
+  check(
+    'the automation log: A sees A’s action; B naming A’s repos sees nothing',
+    claim != null &&
+      (await auto.listDependencyAutomationLog(1, wsA.repoIds)).length === 1 &&
+      (await auto.listDependencyAutomationLog(2, wsA.repoIds)).length === 0,
+  );
+  await db.delete(schema.dependencyAutomationActions).execute();
+}
+
 // ── The PENDING MUTE (db/pending-mute.ts) ──────────────────────────────────────
 // TWO id-addressed writes and one account-wide read, none of which live in db/queries.ts, so this
 // script cannot see them unless they are imported by name.

@@ -78,6 +78,16 @@ export const STEPS = [
       await explore(h, { max: 8, scope: 'main' });
     },
   })),
+  // Pending → Dependencies → "What automation did" (Settings → Dependencies' log; fetched on the click).
+  {
+    name: 'pending:deps-automation',
+    run: async (h) => {
+      await h.go('?view=activity&activityRepo=attention&attnTab=deps');
+      await h.click(h.page.getByRole('button', { name: 'What automation did' }).first());
+      await h.fetchGet('/api/dependencies/automation-log?workspace=1');
+      await h.fetchGet('/api/dependencies/automation-log?workspace=2');
+    },
+  },
   { name: 'pending:mine', run: (h) => h.go('?view=activity&activityRepo=attention&attnRel=mine') },
   { name: 'pending:others', run: (h) => h.go('?view=activity&activityRepo=attention&attnRel=others') },
   { name: 'pending:people', run: (h) => h.go('?view=activity&activityRepo=attention&attnBy=people') },
@@ -357,6 +367,9 @@ export const STEPS = [
       await h.openSettings();
       await h.scrollModal();
       await h.escape();
+      // Settings → Dependencies, both workspaces (scrollModal visits the tab; these make sure).
+      await h.fetchGet('/api/workspaces/1/dependency-automation');
+      await h.fetchGet('/api/workspaces/2/dependency-automation');
       // Related repos (Settings → Workspace), both workspaces.
       await h.fetchGet('/api/workspaces/1/related-repos');
       await h.fetchGet('/api/workspaces/2/related-repos');

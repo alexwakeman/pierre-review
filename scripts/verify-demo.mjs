@@ -206,6 +206,28 @@ const VIEWS = [
       expect: ['Default: Codex.'],
     },
   ],
+  // Settings → Dependencies: merge, approve and resolve conflicts, the policy, and Dependabot trusted.
+  [
+    'settings:dependencies',
+    '?view=activity',
+    'settings-dependencies',
+    {
+      act: openSettingsTab('Dependencies'),
+      expect: ['Dependency updates', 'Approve them automatically', 'Resolve their conflicts', 'Patch and minor updates', 'Trusted bots', 'Dependabot'],
+    },
+  ],
+  // Pending → Dependencies → "What automation did": the seeded approval, rebase request and AI run.
+  [
+    'pending:deps-automation',
+    '?view=activity&activityRepo=attention&attnTab=deps',
+    null,
+    {
+      act: async (page) => {
+        await page.getByRole('button', { name: 'What automation did' }).first().click();
+      },
+      expect: ['Approved', 'Asked to rebase', 'Resolved conflicts'],
+    },
+  ],
   // Settings → AI review → Related repos: the seeded pair (acme/api with acme/infrastructure).
   [
     'settings:related-repos',

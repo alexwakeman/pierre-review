@@ -12,14 +12,14 @@ import type { SettingsFocus } from '../../store/settingsModal.js';
 // panel would otherwise vanish with no error.
 //
 // ⚠ THE GRAIN SPLIT SURVIVES INSIDE A TAB. A tab may hold global AND workspace sections (Pending
-// holds the account's My Turn beside a workspace's mute; Bots holds the machine's scorer beside a
-// workspace's dependency switch). Global sections come first and the workspace ones sit under the
+// holds the account's My Turn beside a workspace's mute). Global sections come first and the workspace ones sit under the
 // one `Workspace · <name>` boundary, which the modal draws in every tab that has workspace
 // sections — never a suffix on a section's own title.
 
 export type SettingsTabId =
   | 'pull-requests'
   | 'pending'
+  | 'dependencies'
   | 'ai'
   | 'ai-review'
   | 'reports'
@@ -46,6 +46,12 @@ export const SETTINGS_TABS: readonly SettingsTabDef[] = [
     workspace: [],
   },
   { id: 'pending', label: 'Pending', summary: 'My Turn, muted repositories', global: ['MyTurnSection'], workspace: ['PendingMuteSection'] },
+  {
+    id: 'dependencies',
+    label: 'Dependencies', summary: 'Merge, approve and resolve dependency updates',
+    global: [],
+    workspace: ['DependencyAutomationSection'],
+  },
   {
     id: 'ai',
     label: 'AI', summary: 'Provider, sign-in, effort, AI spend',
@@ -74,9 +80,9 @@ export const SETTINGS_TABS: readonly SettingsTabDef[] = [
   },
   {
     id: 'bots',
-    label: 'Bots', summary: 'Bot comment scoring, dependency updates',
+    label: 'Bots', summary: 'Bot comment scoring',
     global: ['BotScoringSection'],
-    workspace: ['DependencyAutoMergeSection'],
+    workspace: [],
   },
 ];
 

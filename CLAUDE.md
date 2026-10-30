@@ -97,10 +97,8 @@ credits, Stripe billing and the cloud benchmark collection (the full list:
 
 ## Stack
 
-- **Monorepo:** pnpm workspaces, TypeScript + ESM throughout, Node ≥20 (dev on 24).
-- **Backend:** Fastify + Drizzle ORM (SQLite), `node-cron`, pino.
-- **Frontend:** React + Vite + Tailwind + `vis-timeline`, Zustand, TanStack Query.
-- **GitHub:** `@octokit/graphql` (one fat query per repo) + occasional REST.
+pnpm workspaces, TS + ESM, Node ≥20 · Fastify + Drizzle (SQLite), `node-cron`, pino · React + Vite +
+Tailwind + `vis-timeline`, Zustand, TanStack Query · `@octokit/graphql` (one fat query/repo) + REST.
 
 ## Repo layout
 
@@ -111,10 +109,9 @@ credits, Stripe billing and the cloud benchmark collection (the full list:
 ```
 pierre-review/
 ├─ apps/
-│  ├─ backend/   src/{index,app,config,cli}.ts · auth/ · ai/ (provider, credentials, codex/) · db/
-│  │             (schema.sqlite.ts, client.ts, queries.ts, migrations/) · github/ · sync/ (+
-│  │             __fixtures__/threads/) · merge/ · conflict/ · review/ · coding/ · tracker/ ·
-│  │             sonar/ · reference-docs/ · ml/ · platform/ (formerly Pro) · api/{routes,plugins}/
+│  ├─ backend/   src/{index,app,config,cli}.ts · auth/ · ai/ · db/ · github/ · sync/ · merge/ ·
+│  │             conflict/ · review/ · coding/ · tracker/ · sonar/ · reference-docs/ · ml/ ·
+│  │             platform/ · api/{routes,plugins}/
 │  ├─ frontend/  the SPA (base `/app/`): App.tsx · store/ · hooks/ · api/client.ts · components/ ·
 │  │             lib/ui.ts · src/demo/ (the static demo runtime, `--mode demo` only)
 │  ├─ landing/   the marketing site, PRERENDERED per route (served by apps/site, NOT the npm release)
@@ -354,15 +351,17 @@ Full detail: [docs/MERGE-CI-TRUNK.md](docs/MERGE-CI-TRUNK.md). The invariants:
   re-check at LAND time. ⚠ **`behindBy > 0` is normal** — only `mergeStateStatus === 'behind'`
   blocks. Every arm goes through `armIntentLive`. Queue repos: freshen BEFORE the first enqueue,
   never while queued.
-- **Dependency auto-merge** (`merge/dependency-policy.ts`): OFF by default; a person's cancel is
-  never overridden; red CI backs off after ONE live-proven failure.
+- **Dependency automation** (Settings → Dependencies): all OFF; ONE policy gates merge, approve,
+  resolve; the last two only for a TRUSTED bot (stored row + reader's mark). Resolve = ask the bot
+  to rebase, then an unattended AI run. ⚠ Claim before write, never retry; an AI-pushed head must go
+  green again; a person's cancel wins; red CI backs off after ONE live-proven failure.
 - **A repo's armed intents land ONE AT A TIME** (`db/merge-queue.ts`; `queued_local` ≠
   `queued`). ⚠ Rules 1–4 still run for every intent; `freshenedIntents` is once per TURN.
 - **Conflicts are resolved in the app** (`src/conflict/`, `components/conflicts/`; read the doc's
   § Resolving conflicts first). ⚠ The commit body carries only indexes, ids and enum members — an
   edited region travels as an opaque `editId` (`POST …/conflicts/edit`). ⚠ The wand NEVER picks a
   side. ⚠ Nothing is applied before the reader presses something, except a "Resolve with Claude"
-  run the reader started. ⚠ Sessions are pinned to `(headSha, baseSha, modelHash)` — **bump
+  run the reader started, or Dependencies' unattended one. ⚠ Sessions are pinned to `(headSha, baseSha, modelHash)` — **bump
   `CONFLICT_MODEL_VERSION` with any fold change**. ⚠ The commit is HARD BLOCKED until every
   decidable region is decided (`CommitPlan.canCommit`).
 - CI logs are live ranged reads of the signed Actions blob URL — **NEVER returned to a client**.

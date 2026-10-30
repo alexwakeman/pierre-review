@@ -203,8 +203,10 @@ with no wash at all and every decidable region reads "Needs a decision". ⚠ **T
 SPA sends, which is now the contract. ⚠ **Do NOT bump `CONFLICT_MODEL_VERSION` for it**: `autoApply`
 changes which decision a region STARTS on, not what the region IS, which is exactly why `hash.ts`
 leaves it out of the model hash — a defensive bump would throw away every live session's decisions.
-⚠ **ONE EXCEPTION, AND ONLY ONE: a "Resolve with Claude" run the reader started** (§ Resolve with
-Claude, below). Its answer pre-fills the regions the reader has not decided, each marked "Claude".
+⚠ **TWO EXCEPTIONS, AND ONLY TWO: a "Resolve with Claude" run the reader started** (§ Resolve with
+Claude, below) — its answer pre-fills the regions the reader has not decided, each marked "Claude" —
+**and Settings → Dependencies' unattended AI run on a TRUSTED dependency bot's PR** (§ Dependency
+automation), opt-in per workspace, committed only when every region is decided with confidence.
 The resolver opened any other way still opens bare, and the open still sends `autoApply: false`.
 
 **The commit is HARD BLOCKED until every decidable region in every supported file is decided.**
@@ -504,7 +506,9 @@ clone-cache hardening it rests on: [docs/SECURITY.md](SECURITY.md).
 ### Resolve with Claude (`src/coding/ai-resolve/`, CORE, agentic)
 
 The agentic half of the resolver. **Claude's answer is reviewed IN THE RESOLVER** — the run decides
-regions; it never commits, pushes or writes a file.
+regions; it never commits, pushes or writes a file. (The ONE caller that commits an answer without a
+reader is Settings → Dependencies' conflict resolution, through `landSessionResolution` and only
+under `aiResolutionCommit`'s stricter rule — § Dependency automation.)
 
 - **Agentic, so it follows the agentic rule.** Its three routes (`POST|GET|DELETE
   /api/prs/:id/conflicts/ai-resolve`) are registered by `registerAgenticRoutes` and 404 under
@@ -999,8 +1003,9 @@ workspace's bot maps, the same resolution the Dependencies tab's membership read
   ⚠ ALWAYS GitHub's merge-in update, never the local clone rebase — a force-push onto a Dependabot /
   Renovate branch makes the bot stop maintaining it (same as the policy sweep). Outcomes come back per PR and land as
   ONE card in the header toast strip; the SPA refetches through `invalidateAfterPrWrite`.
-- **"Merge dependency updates automatically"** (`workspaces.dependency_auto_merge`, NULL = OFF,
-  Settings → Workspace; a draft + Save like every other section — ticking the box writes nothing).
+- **"Merge them automatically"** (`workspaces.dependency_auto_merge`, NULL = OFF, Settings →
+  Dependencies; a draft + Save like every other section — ticking the box writes nothing). The
+  panel's POLICY (§ Dependency automation, below) gates it like the other two switches.
   `runDependencyPolicyTick` runs on the watcher's cron just before it
   (≤ 10 arms per tick) and arms each open, non-draft, non-conflicting, not-queued dependency PR in
   a repo the account can push to — pinned to its LIVE head, `armedByPolicy: true`, update strategy
@@ -1041,6 +1046,64 @@ workspace's bot maps, the same resolution the Dependencies tab's membership read
 Every arm — the click, the bulk run, the sweep — goes through ONE function, `armIntentLive`
 (`merge/arm-intent.ts`): live head pinned, base checked and pinned, a queued PR refused, the queue
 probe stamped.
+
+### Dependency automation (`merge/dependency-automation.ts` + pure `merge/dependency-rules.ts`, CORE)
+
+**Settings → Dependencies** (`DependencyAutomationSection`, its own tab; it used to be one checkbox
+under Bots) holds, per workspace and EVERY ONE OFF BY DEFAULT: merge (above), **approve**, and
+**resolve conflicts**, plus ONE **policy** that gates all three, plus the **trusted bots**. One
+draft, one Save, only what changed is sent (`PUT /api/workspaces/:id/dependency-automation`).
+`runDependencyAutomationTick` runs on the watcher's cron FIRST (an approval may be what lets a PR
+land), then the merge sweep, then the watcher. ≤ 6 GitHub writes per tick across every account.
+
+- **THE POLICY** (`policyVerdict`, tested in `dependency-rules.test.ts`): the largest update
+  (`patch` / `minor` / `major` = every size, the default), security fixes only (`pull_requests.
+  security_fix` set), and an ecosystem list (null = every ecosystem). First refusal wins:
+  security-only → ecosystem → size. ⚠ **AN UNREAD SIZE IS NOT A SMALL ONE**: it passes only
+  `major`. Size = the LARGEST semver change found in the title + body (Dependabot's "from X to Y",
+  grouped "Updates `x` from …", Renovate's `` `a` -> `b` `` table, its Update column); a 0.x minor is
+  major. Ecosystems = Dependabot's branch id + Renovate's title topic + the manifest/lock files the PR
+  changes; a list admits a PR only when it touches ≥ 1 ecosystem and EVERY one is listed. Synced
+  facts first; ONE live `GET /pulls/{n}` (`fetchPrForAutomation`) when only the size is missing,
+  remembered per (PR, head) so a refused PR is not re-read every tick.
+- **TRUST** (`isTrustedDependencyBot`): approval and conflict resolution act ONLY on PRs whose
+  author's STORED `workspace_reviewers` row says `automated`, role `dependency`, and
+  `dependency_trusted` — the reader's mark in the panel's "Trusted bots" list (which lists exactly
+  those stored dependency rows). ⚠ Never a login guess over the stored judgement — a person can open
+  a fork PR under a bot-like login; a fork is refused anyway (live check). The merge switch keeps
+  its own wider classifier (`authorAutomationFor`), unchanged.
+- **APPROVE**: an open, non-draft, same-repo PR of a trusted bot, synced `ci_status = success`
+  (GREEN, not merely not red — so a repo with no CI is never auto-approved), review decision not
+  already `approved`, write access, policy admits it. The live re-read must show the SYNCED head; the
+  review is `APPROVE` pinned with `commit_id` and carries the hidden Limn marker. Then the approve
+  route's own tail: `upsertLocalReview` → `clearOwnReviewRequest` → `resyncPrAfterWrite` →
+  `schedulePrSettle(mergeStateNot:'blocked')` → `notePrChangedForPr`.
+- **RESOLVE CONFLICTS** (`conflictStep`, once per HEAD each): (1) ask the bot to rebase
+  (`rebaseRequestFor`, by the STORED kind) — Dependabot: the `@dependabot rebase` comment (stamped
+  with `upsertLocalPrComment`); Renovate: tick its `- [ ] <!-- rebase-check -->` box in the live body
+  (PATCH, then a re-read) — Renovate has no comment command, and no unticked box means it can't be
+  asked; any other bot can't. (2) wait `REBASE_WAIT_MS` (30 min) — a rebase is a NEW head, so a
+  successful one ends it. (3) the bot can't, the ask failed, or the wait ran out → ONE AI run
+  through the in-app resolver (`startAiResolve`, the provider seam — Claude or Codex, whichever
+  `activeProviderId` picks), ⚠ only where agentic AI runs (`bindDependencyAutomationAi` from
+  `startAgenticBackground`) and only when `automaticRunAllowed` says so (over budget = skipped, never
+  queued). (4) `watchAndLand` waits for it and commits UNATTENDED only when `aiResolutionCommit`
+  passes: every conflicted file supported, every decidable region carries the AI's choice, none
+  `low` confidence. Stricter than a reader's commit ON PURPOSE (nobody is looking). Strategy
+  `merge` onto `pr_branch` — never a rebase, which would rewrite the bot's branch. It lands through
+  `landSessionResolution` (api/routes/conflicts.ts) — the commit route's SAME slot, land path and
+  settle. ⚠ **THE PUSHED HEAD MUST GO GREEN AGAIN**: `result_sha` marks it; the merge sweep skips it
+  until `ci_status = success`, and approval already requires that.
+- ⚠ **CLAIM BEFORE WRITE, NEVER RETRY** (`dependency_automation_actions`, unique on (account, PR,
+  head, action)): every action inserts its row `running` BEFORE the GitHub write; no row → somebody
+  already did it. A failure is settled `failed` with GitHub's words and never retried at that head
+  (a new head is a new action). An AI run that could not START (busy) gives its claim back — nothing
+  was written. Boot settles leftover `running` rows `failed`.
+- ⚠ **A PERSON'S CANCEL WINS FOR ALL THREE**: a PR in `auto_merge_policy_skips` is never approved,
+  rebased or resolved either.
+- **WHAT IT DID**: Pending → Dependencies → "What automation did" (`DependencyAutomationLog`), a
+  disclosure that fetches `GET /api/dependencies/automation-log` only once OPENED (nothing on the
+  board fetches on mount); a row opens its PR.
 
 ### CI logs (`github/actions-logs.ts`)
 
@@ -1212,6 +1275,9 @@ shorter form of each rule; this is the full wording.
 - **Dependency auto-merge** (`merge/dependency-policy.ts`): OFF by default; a policy intent merges
   like a click; a person's cancel is never overridden; red CI backs off after ONE live-proven
   failure (`checks_failed`).
+- **Dependency automation** (`merge/dependency-automation.ts`, Settings → Dependencies): approve +
+  resolve conflicts, OFF by default, TRUSTED bots only (the stored row's mark); one policy gates all
+  three switches; claim before write, never retried; an AI-pushed head must be green again.
 
 ### Auto-merge
 
