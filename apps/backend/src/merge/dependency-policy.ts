@@ -53,6 +53,7 @@ import {
 import { asSyncLogger } from '../sync/resync-after-write.js';
 import { noteMergeLanded } from '../sync/unsettled-prs.js';
 import { armIntentLive, defaultMergeMethod } from './arm-intent.js';
+import { aiPushedHeads, policyAdmits, policyFromColumns, prPolicyFacts } from './dependency-automation.js';
 
 const { autoMergePolicySkips, autoMergeRequests, pullRequests, repos, users, workspaces } = schema;
 
@@ -406,7 +407,13 @@ export async function runDependencyPolicyTick(log: FastifyBaseLogger): Promise<v
   let budget = POLICY_ARMS_PER_TICK;
   try {
     const roster = await db
-      .select({ accountId: workspaces.accountId, workspaceId: workspaces.id })
+      .select({
+        accountId: workspaces.accountId,
+        workspaceId: workspaces.id,
+        maxLevel: workspaces.dependencyMaxLevel,
+        securityOnly: workspaces.dependencySecurityOnly,
+        ecosystems: workspaces.dependencyEcosystems,
+      })
       .from(workspaces)
       .where(eq(workspaces.dependencyAutoMerge, true))
       .execute();
@@ -448,9 +455,21 @@ export async function runDependencyPolicyTick(log: FastifyBaseLogger): Promise<v
         });
         if (due.length === 0) continue;
         const token = await getAccessToken(ws.accountId);
+        // THE WORKSPACE'S POLICY (Settings → Dependencies: size, security-only, ecosystems) gates
+        // the merge exactly as it gates approval; and a head Limn's AI conflict run PUSHED must be
+        // GREEN (`success`), not merely not red, before it is armed.
+        const policy = policyFromColumns(ws);
+        const dueIds = due.map((p) => p.id);
+        const [facts, pushed] = await Promise.all([
+          prPolicyFacts(ws.accountId, dueIds),
+          aiPushedHeads(ws.accountId, dueIds),
+        ]);
         const methodByRepo = new Map<number, Awaited<ReturnType<typeof defaultMergeMethod>>>();
         for (const pr of due) {
           if (budget <= 0) break;
+          if (pushed.has(`${pr.id}:${pr.headSha}`) && pr.ciStatus !== 'success') continue;
+          const f = facts.get(pr.id);
+          if (!f || !(await policyAdmits(policy, f, pr, { token })).ok) continue;
           budget -= 1;
           try {
             if (!methodByRepo.has(pr.repoId)) {

@@ -71,3 +71,126 @@ export interface WorkspaceDependencyAutoMergeResponse {
   workspaceId: number;
   dependencyAutoMerge: WorkspaceDependencyAutoMerge;
 }
+
+// ── DEPENDENCY AUTOMATION (the Settings → Dependencies panel) ───────────────────────────────────
+//
+// docs/MERGE-CI-TRUNK.md § Dependency automation. Three per-workspace switches, every one OFF by
+// default — merge (the setting above), APPROVE, and RESOLVE CONFLICTS (ask the bot to rebase, then
+// an AI run through the in-app resolver) — and ONE policy that gates all three: how big an update
+// may be, security fixes only, which ecosystems. Approval and conflict resolution act only on PRs
+// opened by a bot the reader TRUSTS (`trustedBotIds`, a mark on the workspace's bot row).
+//   GET / PUT /api/workspaces/:id/dependency-automation   the panel (DB only)
+//   GET /api/dependencies/automation-log?workspace=        what automation did (DB only)
+
+/** How big a version change is, by semver. Ordered: a policy of `minor` admits patch and minor. */
+export type DependencyUpdateLevel = 'patch' | 'minor' | 'major';
+export const DEPENDENCY_UPDATE_LEVELS: readonly DependencyUpdateLevel[] = ['patch', 'minor', 'major'];
+
+/** The ecosystems a policy can name — a reader's words, folded from Dependabot's ids, Renovate's
+ *  titles and the files a PR changes (merge/dependency-rules.ts). */
+export type DependencyEcosystem =
+  | 'javascript'
+  | 'python'
+  | 'go'
+  | 'rust'
+  | 'ruby'
+  | 'java'
+  | 'dotnet'
+  | 'php'
+  | 'docker'
+  | 'github_actions'
+  | 'terraform';
+
+export const DEPENDENCY_ECOSYSTEM_LABEL: Record<DependencyEcosystem, string> = {
+  javascript: 'JavaScript (npm, Yarn, pnpm, Bun)',
+  python: 'Python',
+  go: 'Go',
+  rust: 'Rust',
+  ruby: 'Ruby',
+  java: 'Java (Maven, Gradle)',
+  dotnet: '.NET',
+  php: 'PHP',
+  docker: 'Docker',
+  github_actions: 'GitHub Actions',
+  terraform: 'Terraform',
+};
+export const DEPENDENCY_ECOSYSTEMS = Object.keys(DEPENDENCY_ECOSYSTEM_LABEL) as DependencyEcosystem[];
+
+export interface DependencyAutomationPolicy {
+  /** The largest update the automation acts on. Default `major` (every update). */
+  maxLevel: DependencyUpdateLevel;
+  /** Only security fixes. Default false. */
+  securityOnly: boolean;
+  /** Only these ecosystems; null = every ecosystem (the default). */
+  ecosystems: DependencyEcosystem[] | null;
+}
+
+export const DEFAULT_DEPENDENCY_POLICY: DependencyAutomationPolicy = {
+  maxLevel: 'major',
+  securityOnly: false,
+  ecosystems: null,
+};
+
+export interface DependencyAutomationSettings {
+  /** Merge dependency updates once their required checks pass (`dependency_auto_merge`). */
+  autoMerge: boolean;
+  /** Approve them under the reader's account once CI is green. Trusted bots only. */
+  autoApprove: boolean;
+  /** Conflicts: ask the bot to rebase; if it can't, resolve them with AI. Trusted bots only. */
+  autoResolveConflicts: boolean;
+  policy: DependencyAutomationPolicy;
+}
+
+/** One dependency bot of the workspace (stored role `dependency`) and whether the reader trusts it. */
+export interface DependencyBot {
+  userId: number;
+  login: string;
+  /** The stored vendor kind (`dependabot`, `renovate`, …) or null. */
+  kind: string | null;
+  /** The name a person gave it in Bot settings, or null (the SPA shows the brand, else the login). */
+  label: string | null;
+  trusted: boolean;
+  /** Can Limn ask it to rebase? Dependabot (a comment) and Renovate (its checkbox) can. */
+  canRebase: boolean;
+}
+
+export interface WorkspaceDependencyAutomationResponse {
+  workspaceId: number;
+  settings: DependencyAutomationSettings;
+  bots: DependencyBot[];
+}
+
+/** PUT body. Every field optional; only what is sent changes. */
+export interface DependencyAutomationPatch {
+  autoMerge?: boolean;
+  autoApprove?: boolean;
+  autoResolveConflicts?: boolean;
+  maxLevel?: DependencyUpdateLevel;
+  securityOnly?: boolean;
+  ecosystems?: DependencyEcosystem[] | null;
+  /** The full trusted set among the workspace's dependency bots; the rest become untrusted. */
+  trustedBotIds?: number[];
+}
+
+/** What the automation did to one PR. */
+export type DependencyAutomationActionKind = 'approve' | 'rebase_request' | 'ai_resolve';
+export type DependencyAutomationActionState = 'running' | 'done' | 'failed';
+
+export interface DependencyAutomationLogItem {
+  id: number;
+  prId: number;
+  repoFullName: string;
+  prNumber: number;
+  prTitle: string;
+  action: DependencyAutomationActionKind;
+  state: DependencyAutomationActionState;
+  /** The bot asked to rebase, the commit pushed, or why it failed — one plain sentence. */
+  detail: string | null;
+  /** ISO-8601. */
+  at: string;
+}
+
+export interface DependencyAutomationLogResponse {
+  workspaceId: number;
+  items: DependencyAutomationLogItem[];
+}

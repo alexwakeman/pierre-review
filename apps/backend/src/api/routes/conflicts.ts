@@ -1,6 +1,7 @@
 import type { FastifyBaseLogger, FastifyInstance, FastifyReply } from 'fastify';
 import type {
   ConflictCommitBody,
+  ConflictCommitResult,
   ConflictLandErrorCode,
   ConflictOpenBody,
   ConflictRegionEditBody,
@@ -707,17 +708,38 @@ export async function runOpen(rec: ConflictSessionRecord, log: FastifyBaseLogger
   }
 }
 
+/** How a land ended — what `runCommit` settled the session with. */
+export type CommitOutcome =
+  | { ok: true; result: ConflictCommitResult }
+  | { ok: false; code: ConflictLandErrorCode; message: string };
+
+/**
+ * Land a resolution the SERVER assembled, through the SAME slot, land path and session settle as
+ * the commit route — the dependency automation's unattended AI answer (merge/dependency-
+ * automation.ts). The slot is claimed synchronously here, so it can never race a reader's press.
+ * Its body names only indexes, ids and enum members, exactly like the route's.
+ */
+export async function landSessionResolution(
+  rec: ConflictSessionRecord,
+  body: ConflictCommitBody,
+  log: FastifyBaseLogger,
+): Promise<CommitOutcome> {
+  const slot = claimCommitSlot(rec);
+  if (!slot.ok) return { ok: false, code: 'GitFailed', message: 'The resolver is busy with this pull request.' };
+  return runCommit(rec, body, slot.signal, log);
+}
+
 /** Land the resolution behind the 202. NEVER REJECTS, for the same reason `runOpen` does not. */
 async function runCommit(
   rec: ConflictSessionRecord,
   body: ConflictCommitBody,
   signal: AbortSignal,
   log: FastifyBaseLogger,
-): Promise<void> {
+): Promise<CommitOutcome> {
   const model = rec.model;
   if (!model) {
     settleCommitFailed(rec, 'SessionExpired', SESSION_EXPIRED);
-    return;
+    return { ok: false, code: 'SessionExpired', message: SESSION_EXPIRED };
   }
   try {
     const result = await landConflictResolution({
@@ -733,15 +755,17 @@ async function runCommit(
       log,
     });
     settleCommitDone(rec, result);
+    return { ok: true, result };
   } catch (err) {
     const code = (err as ConflictLandError | null)?.code;
     const message = err instanceof Error ? err.message : String(err);
     if (isLandErrorCode(code)) {
       settleCommitFailed(rec, code, message);
-      return;
+      return { ok: false, code, message };
     }
     log.error({ err, prId: rec.prId }, 'conflict commit failed');
     settleCommitFailed(rec, 'GitFailed', 'The resolved commit didn’t reach GitHub.');
+    return { ok: false, code: 'GitFailed', message: 'The resolved commit didn’t reach GitHub.' };
   }
 }
 
