@@ -315,13 +315,17 @@ export function CriterionRow({
   }
   return (
     <li className={REVIEW_ITEM_CARD}>
-      <div className="flex items-start gap-2">
+      {/* Below sm the verdict sits ABOVE the criterion (beside it, a long "Can't tell from the
+          code" squeezed the criterion into a column a few words wide). */}
+      <div className="flex flex-wrap items-start gap-x-2 gap-y-1 sm:flex-nowrap">
         {selection}
         <span className={`${CHIP} ${TICKET_CRITERION_STATUS_CLASS[c.status]}`}>
           {TICKET_CRITERION_STATUS_LABEL[c.status]}
         </span>
-        <span className={`shrink-0 font-mono text-meta leading-5 ${MUTED}`}>{c.ref}</span>
-        <span className="min-w-0 flex-1 whitespace-pre-wrap break-words font-semibold">{criterionTextOnly(c.text, c.ref)}</span>
+        <span className="flex min-w-0 basis-full items-start gap-2 sm:basis-auto sm:flex-1">
+          <span className={`shrink-0 font-mono text-meta leading-5 ${MUTED}`}>{c.ref}</span>
+          <span className="min-w-0 flex-1 whitespace-pre-wrap break-words font-semibold">{criterionTextOnly(c.text, c.ref)}</span>
+        </span>
       </div>
       {(done != null || belongs != null) && (
         <div className={`mt-0.5 text-meta ${MUTED}`}>

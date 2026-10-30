@@ -91,7 +91,12 @@ export function BlastImpactNote({
   // `enabled`: hiding the note must stop the QUERY too, or "hidden" still costs a request on every
   // PR open.
   const wanted = useBlastConfig().showImpactNote;
-  const [collapsed, setCollapsed] = useState(readCollapsed);
+  // On a phone the note starts folded to its one line ("Impact note · flagged") unless the reader
+  // chose otherwise: open, its paragraph pushed the tabs to the lower half of the screen. The phone
+  // default is never written; only a click is.
+  const [collapsed, setCollapsed] = useState(
+    () => readCollapsed() || (typeof matchMedia === 'function' && matchMedia('(max-width: 767px)').matches),
+  );
   // ⚠ THE WRITE IS IN THE HANDLER, NOT INSIDE THE STATE UPDATER — and that is a correctness rule,
   // not style. A `setCollapsed((v) => { writeCollapsed(!v); return !v; })` looks equivalent and is
   // not: React invokes updaters TWICE under StrictMode, the second pass against the already-
