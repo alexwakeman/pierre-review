@@ -59,7 +59,7 @@ import {
   PullRequestIcon,
 } from '../Icons.js';
 import { Markdown } from '../Markdown.js';
-import { useRegisterCommands, type Command } from '../ui/index.js';
+import { useEdgeFade, useRegisterCommands, type Command } from '../ui/index.js';
 import { PrCommentComposer } from '../PrCommentComposer.js';
 import { ThreadStatePill } from '../ThreadView/ClaudeThreadBadge.js';
 import { ThreadCard } from '../ThreadView/index.js';
@@ -274,6 +274,13 @@ export function FeedView({
   userIds?: number[] | null;
 }): JSX.Element {
   const workspaceId = useFilters((s) => s.workspaceId);
+  // The phone's filter rows scroll sideways; each fades the edge that hides more pills.
+  const fadeRow1 = useRef<HTMLDivElement>(null);
+  const fadeRow2 = useRef<HTMLDivElement>(null);
+  const fadeRow3 = useRef<HTMLDivElement>(null);
+  const fade1 = useEdgeFade(fadeRow1, 'x');
+  const fade2 = useEdgeFade(fadeRow2, 'x');
+  const fade3 = useEdgeFade(fadeRow3, 'x');
   const feedAuthors = useFilters((s) => s.feedAuthors);
   const setFeedAuthors = useFilters((s) => s.setFeedAuthors);
   const feedCatComments = useFilters((s) => s.feedCatComments);
@@ -1297,7 +1304,7 @@ export function FeedView({
           pill's dependent chip row sits under it while pressed. Last row: the review-thread
           derived-STATE pills. Toggling multiple within a row ORs them; the rows AND together. */}
       <div className="space-y-1.5 px-0.5">
-      <div role="toolbar" aria-label="Feed filters" className="flex flex-wrap items-center gap-1.5 max-sm:-mx-3 max-sm:flex-nowrap max-sm:overflow-x-auto max-sm:px-3 max-sm:[scrollbar-width:none]">
+      <div ref={fadeRow1} style={fade1} role="toolbar" aria-label="Feed filters" className="flex flex-wrap items-center gap-1.5 max-sm:-mx-3 max-sm:flex-nowrap max-sm:overflow-x-auto max-sm:px-3 max-sm:[scrollbar-width:none]">
         {/* Humans | Bots — a two-state SEGMENTED control, server-side (`authors`). Hidden on a
             person's activity tab, whose side follows the person (see `authors`). */}
         {!personScoped && (
@@ -1379,7 +1386,7 @@ export function FeedView({
           No chip pressed = all four = the pill's whole bucket, so this row starts inert. The
           selection is REMEMBERED when the parent goes off: this block simply stops rendering. */}
       {feedCatPrEvents && (
-        <div className="flex flex-wrap items-center gap-1.5 max-sm:-mx-3 max-sm:flex-nowrap max-sm:overflow-x-auto max-sm:px-3 max-sm:[scrollbar-width:none]">
+        <div ref={fadeRow2} style={fade2} className="flex flex-wrap items-center gap-1.5 max-sm:-mx-3 max-sm:flex-nowrap max-sm:overflow-x-auto max-sm:px-3 max-sm:[scrollbar-width:none]">
           <span className="mr-1 shrink-0 text-meta text-ui-faint">Kind</span>
           {FEED_PR_EVENT_CHIPS.map((chip) => {
             const on = activePrEventKinds.includes(chip.id);
@@ -1401,7 +1408,7 @@ export function FeedView({
         </div>
       )}
         {/* Review-thread derived-STATE pills + the honest count line — every feed view. */}
-        <div className="flex flex-wrap items-center gap-1.5 max-sm:-mx-3 max-sm:flex-nowrap max-sm:overflow-x-auto max-sm:px-3 max-sm:[scrollbar-width:none]">
+        <div ref={fadeRow3} style={fade3} className="flex flex-wrap items-center gap-1.5 max-sm:-mx-3 max-sm:flex-nowrap max-sm:overflow-x-auto max-sm:px-3 max-sm:[scrollbar-width:none]">
           <span className="mr-1 shrink-0 text-meta text-ui-faint">State</span>
           {BOT_STATE_ORDER.map((st) => {
             const meta = DERIVED_STATE_META[st];

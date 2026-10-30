@@ -28,7 +28,9 @@ export function useEdgeFade(ref: RefObject<HTMLElement>, axis: 'x' | 'y'): CSSPr
       el.removeEventListener('scroll', measure);
       ro?.disconnect();
     };
-  }, [ref, axis]);
+    // Re-subscribed when the element itself changes (a row that mounts later, behind a condition).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ref.current, axis]);
   if (!edges.start && !edges.end) return undefined;
   const dir = axis === 'x' ? 'to right' : 'to bottom';
   const g = `linear-gradient(${dir}, ${edges.start ? `transparent, black ${FADE}px` : 'black'}, ${

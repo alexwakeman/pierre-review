@@ -1239,8 +1239,10 @@ function TicketStack({
       id={stackDomId(stack.id)}
       aria-labelledby={headingId}
       tabIndex={-1}
-      className={`scroll-mt-4 rounded-ui focus:outline-none border bg-ui-surface ${
-        t == null ? 'border-dashed border-ui-line' : 'border-ui-line'
+      // A tone, not a border (a "no ticket" stack keeps its dashed edge: it says "not a ticket").
+      // The story view (`single`) is the page itself, so below sm it drops even the tone.
+      className={`scroll-mt-4 rounded-ui focus:outline-none ${
+        t == null ? 'border border-dashed border-ui-line bg-ui-surface' : single ? 'bg-ui-surface max-sm:-mx-3 max-sm:bg-transparent' : 'bg-ui-surface'
       }`}
     >
       {single && t != null ? (

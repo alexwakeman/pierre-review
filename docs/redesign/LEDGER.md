@@ -72,7 +72,7 @@ Known debts the redesign must clear here:
   - [ ] Shown only until `/api/me` settles. A failed `/api/me` falls through to the app with
     `meUser` null, so UserMenu is hidden
 
-### [ ] AuthNoticeBanner (GitHub SSO not authorized) → kept, unchanged, above the shell
+### [ ] AuthNoticeBanner (GitHub SSO not authorized) → kept, unchanged, above the shell — checked 2026-10-30: still mounted at the top of App above the shell (palette moved to `--ui-*`); the demo has no `authNotices`, so not seen at 1440 / 390
 - Entry: automatic full-width strip above the header when `/api/me` `authNotices` is non-empty
 - Files: `components/AuthNoticeBanner.tsx`, `App.tsx`
 - Essential info:
@@ -126,7 +126,7 @@ Known debts the redesign must clear here:
   `closed-resolver-toast`, `my-turn-dismiss-toast`, `dependency-merge-toast`, `auto-merge-toast`,
   `global-loading-bar`
 
-### [ ] Toast: AI reviews (ClaudeReviewBanner)
+### [ ] Toast: AI reviews (ClaudeReviewBanner) — checked 2026-10-30: mounted (App.tsx toast strip), drawn by the ONE `HeaderToast` (restyled: a toned card, no border, the source on the icon/fill only, `touch:h-10`). NOT raisable by the demo recording, so not yet seen at 1440 / 390 — leave unticked until a run raises it
 - Entry: appears while Claude/Codex reviews started this session are running or ready
 - Files: `components/ClaudeReviewBanner.tsx`
 - Essential info:
@@ -144,7 +144,7 @@ Known debts the redesign must clear here:
   - [ ] tone ai
 - Tests: testId `claude-review-toast`
 
-### [ ] Toast: AI fixes (AiFixBanner)
+### [ ] Toast: AI fixes (AiFixBanner) — checked 2026-10-30: mounted (App.tsx toast strip), drawn by the ONE `HeaderToast` (restyled: a toned card, no border, the source on the icon/fill only, `touch:h-10`). NOT raisable by the demo recording, so not yet seen at 1440 / 390 — leave unticked until a run raises it
 - Entry: appears for AI Fix runs started this session
 - Files: `components/AiFixBanner.tsx`
 - Essential info:
@@ -160,7 +160,7 @@ Known debts the redesign must clear here:
   - [ ] Hidden when there are no rows
 - Tests: `test/aiFixProgress.test.ts`, `test/aiFixRuns.test.ts`
 
-### [ ] Toast: automatic runs paused (AiBudgetToast)
+### [ ] Toast: automatic runs paused (AiBudgetToast) — checked 2026-10-30: mounted (App.tsx toast strip), drawn by the ONE `HeaderToast` (restyled: a toned card, no border, the source on the icon/fill only, `touch:h-10`). NOT raisable by the demo recording, so not yet seen at 1440 / 390 — leave unticked until a run raises it
 - Entry: appears when the AI spend budget is over
 - Files: `components/AiBudget.tsx`, `lib/aiBudget.ts`
 - Essential info:
@@ -174,7 +174,7 @@ Known debts the redesign must clear here:
   - [ ] A subscription account never shows US$
 - Tests: `test/aiBudget.test.ts`, `test/claudeSpendForm.test.ts`
 
-### [ ] Toast: reopen closed conflict resolver (ClosedResolverToast)
+### [ ] Toast: reopen closed conflict resolver (ClosedResolverToast) — checked 2026-10-30: mounted (App.tsx toast strip), drawn by the ONE `HeaderToast` (restyled: a toned card, no border, the source on the icon/fill only, `touch:h-10`). NOT raisable by the demo recording, so not yet seen at 1440 / 390 — leave unticked until a run raises it
 - Entry: appears for 20s after the reader closes the resolver with decisions still held
 - Files: `components/conflicts/ClosedResolverToast.tsx`, `store/conflictResolver.ts`
 - Essential info:
@@ -203,7 +203,7 @@ Known debts the redesign must clear here:
   - [ ] tone attention
 - Tests: testId `my-turn-dismiss-toast`
 
-### [ ] Toast: dependency merge-all outcome (DependencyMergeToast)
+### [ ] Toast: dependency merge-all outcome (DependencyMergeToast) — checked 2026-10-30: mounted (App.tsx toast strip), drawn by the ONE `HeaderToast` (restyled: a toned card, no border, the source on the icon/fill only, `touch:h-10`). NOT raisable by the demo recording, so not yet seen at 1440 / 390 — leave unticked until a run raises it
 - Entry: appears for 15s after Pending → Dependencies "Merge or arm all"
 - Files: `components/Activity/DependencyMergeAll.tsx`
 - Essential info:
@@ -217,7 +217,7 @@ Known debts the redesign must clear here:
   - [ ] tone merge
 - Tests: testId `dependency-merge-toast`
 
-### [ ] Toast: Merge when ready (AutoMergeBanner) — the "merge pill" in the top bar
+### [x] Toast: Merge when ready (AutoMergeBanner) — the "merge pill" in the top bar → seen 2026-10-30 at 1440 (256×28, right of the tab strip), 768 (224×40) and 390 (112×40, "1 armed", fits inside the top bar); a toned card, no purple border, the merge icon in the accent
 - Entry: appears while any PR is armed or has a fresh outcome. Fed by `GET /api/auto-merge`
 - Files: `components/AutoMergeBanner.tsx`, `hooks/useAutoMerge.ts`
 - Essential info:
@@ -241,7 +241,7 @@ Known debts the redesign must clear here:
   - [ ] Outcomes remembered 5 at a time
 - Tests: `test/armedPhaseHeadline.test.ts`, `test/autoMergeOutcomes.test.ts`, testId `auto-merge-toast`
 
-### [ ] Toast: Loading data (GlobalLoadingBar)
+### [ ] Toast: Loading data (GlobalLoadingBar) — checked 2026-10-30: mounted (App.tsx toast strip), drawn by the ONE `HeaderToast` (restyled: a toned card, no border, the source on the icon/fill only, `touch:h-10`). NOT raisable by the demo recording, so not yet seen at 1440 / 390 — leave unticked until a run raises it
 - Entry: appears during backfills, catch-up syncs and ML bot-comment scoring
 - Files: `components/GlobalLoadingBar.tsx`
 - Essential info:
@@ -656,7 +656,7 @@ Known debts the redesign must clear here:
   - [ ] user-activity, bot-detail and ticket are keyed on the tab so they remount
 - Tests: e2e and capture-shots use these data-testids
 
-### [ ] Conflict resolver overlay mount
+### [ ] Conflict resolver overlay — see the mount line above (restyled by the palette pass, not yet seen) mount — checked 2026-10-30: still mounted once in App above main; its chrome moved to `--ui-*` by the palette pass (the gutter arrow keeps its MEASURED gray/sky pair — `resolverControls.test.ts`). The demo has no resolver session, so not seen at 1440 / 390
 - Entry: mounted once in App, above main. Opened from PrDetail's Conflicts row, the merge panel,
   Pending's conflicts card, or ClosedResolverToast
 - Files: `components/conflicts/ConflictResolverOverlay.tsx`, `store/conflictResolver.ts`
@@ -2150,7 +2150,7 @@ Cross-cutting:
   `ticket:PLAT-292:comments`, `ticket:PLAT-301`, `ticket:PLAT-301:docs-reuse`, `ticket:INFRA-260`,
   `ticket:notion:WEB-34`, `sprint:tray`
 
-### [ ] Global banners that deep-link into PR detail
+### [ ] Global banners that deep-link into PR detail — the AutoMergeBanner one seen (above); ClaudeReviewBanner / AiFixBanner not raisable in the demo
 - Entry: the App-level toast strip (ClaudeReviewBanner, AiFixBanner, AutoMergeBanner)
 - Files: `ClaudeReviewBanner.tsx`, `AiFixBanner.tsx`, `AutoMergeBanner.tsx`, `HeaderToasts.tsx`
 - Essential info:
@@ -2393,7 +2393,7 @@ Cross-cutting:
   - [ ] Nothing fetches until a ticket is clicked
 - Tests: `test/storyView.test.ts`, verify-demo sprint:tray
 
-### [ ] Story view (ticket tab) body, incl. the Story section
+### [x] Story view (ticket tab) body, incl. the Story section → seen 2026-10-30 at 1440 and 390 (`?view=ticket:…PLAT-292`): the stack is a tone, not a bordered box (no tone at all below sm); the AI review strip has no stripe; severity counts grey except blockers; below sm a criterion's verdict sits ABOVE its text
 - See § 3 "Story view (ticket tab) and the sprint story tray" — one checklist covers both. Extra
   entries here: Reports → Stories ticket names; `?view=ticket:notion:<url>#WEB-34`.
 - Tests: `test/storyTabs.test.ts` in addition to § 3's list
@@ -2464,7 +2464,7 @@ Cross-cutting:
 - Tests: `test/memberSections.test.ts`, `test/filterStorageMigration.test.ts`,
   `test/switchWorkspaceToOpenPrs.test.ts`, `test/workspaceOpenPrsScope.test.ts`, `test/isolateFilter.test.ts`
 
-### [ ] Tab strip and PR focus tabs (PinnedTabsBar)
+### [x] Tab strip and PR focus tabs (PinnedTabsBar) → seen 2026-10-30 at 1440 / 768 in the top bar (PR / story chips, close ×, "Tab actions" menu); below md the tabs are the drawer's "Open tabs" list
 - See § 1 tab strip surfaces. Extra:
   - [ ] PR-focus tab: its own isolated Timeline fitted to the PR, cross-person connectors, hour-free zoom floor
   - [ ] "Tab actions" menu (as well as right-click): Close this / other / all

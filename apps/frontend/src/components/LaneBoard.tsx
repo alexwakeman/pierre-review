@@ -689,9 +689,9 @@ function StackedLaneBoard<L, C>({ label, layout, renderLane, renderCard, onToggl
                 )}
               </p>
               {/* One card per row on a phone (a lone card no longer leaves half the screen empty while
-                  it truncates); two from md. */}
+                  it truncates); two from md when there are two or more. */}
               {cards.length > 0 && (
-                <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                <div className={cx('grid grid-cols-1 gap-2', cards.length > 1 && 'md:grid-cols-2')}>
                   {cards.map((c) => (
                     <div key={c.id} className="flex min-w-0 flex-col">
                       {renderCard(c, NO_REF)}

@@ -40,6 +40,7 @@ import {
   Button,
   Tabs,
   cx,
+  useEdgeFade,
   panelId,
   tabId,
   useCommandProvider,
@@ -376,6 +377,9 @@ export function AttentionView(): JSX.Element {
   // ── "HOW IS THIS ORDERED" ─────────────────────────────────────────────────────────────────
   const [guideOpen, setGuideOpen] = useState(false);
   const [planOpen, setPlanOpen] = useState(false);
+  // The phone's one filter row scrolls sideways; its hidden edge fades so the rest reads as "more".
+  const filterRowRef = useRef<HTMLDivElement>(null);
+  const filterFade = useEdgeFade(filterRowRef, 'x');
   const openGuide = useCallback(() => setGuideOpen(true), []);
   const closeGuide = useCallback(() => setGuideOpen(false), []);
   const viewName =
@@ -656,7 +660,7 @@ export function AttentionView(): JSX.Element {
             My turn's "Customise". One line; it scrolls sideways on a phone rather than wrapping. */}
         {showControls && (
           // One row on a phone that scrolls sideways (never three stacked rows above the list).
-          <div className="-mx-2 mt-1 flex items-center gap-1 max-md:overflow-x-auto max-md:[scrollbar-width:none] md:flex-wrap">
+          <div ref={filterRowRef} style={filterFade} className="-mx-2 mt-1 flex items-center gap-1 max-md:overflow-x-auto max-md:[scrollbar-width:none] md:flex-wrap">
             {view.chips != null && (
               <>
                 <button type="button" onClick={() => setAttentionTab(tabKey)} aria-pressed={view.kind == null} className={pill(view.kind == null)}>
