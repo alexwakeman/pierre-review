@@ -66,9 +66,12 @@ const TEST_TIMEOUT_MS = 90_000;
 // separate process instead of imported, so a change to one of them runs EVERY test rather than
 // none: the migration chain every DB suite applies, the recorded fixtures, the entry files the
 // Codex tests spawn, and the test setup itself. (The defaults spread here are vitest's own
-// package.json / config triggers.)
+// package.json / config triggers.) ⚠ vitest.config.ts is spelled out: the default
+// `**/{vitest,vite}.config.*/**` does NOT match a plain `vitest.config.ts` path under micromatch
+// (measured), so without it a change to the timeouts or to this list ran no slow test.
 const FORCE_RERUN_TRIGGERS = [
   ...configDefaults.forceRerunTriggers,
+  '**/vitest.config.ts',
   '**/vitest.workspace.ts',
   '**/pnpm-lock.yaml',
   '**/src/db/migrations/**',

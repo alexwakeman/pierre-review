@@ -52,7 +52,8 @@ built SPA and its committed recording through `apps/site`.
 that edits `conflict/model.ts` runs the conflict suites and `codex-fix`, and one that edits
 `ai/codex/hook-rule.ts` runs every Codex suite. Some inputs are not imports — the migration chain
 every DB suite applies, recorded `__fixtures__`, the `*-main.ts` entry files the Codex tests spawn,
-`*.test-support.ts`, any `package.json`, the lockfile, the workflows. Touching one of those runs
+`*.test-support.ts`, `vitest.config.ts` / `vitest.workspace.ts`, any `package.json`, the lockfile,
+the workflows. Touching one of those runs
 EVERY slow file (`FORCE_RERUN_TRIGGERS` in `apps/backend/vitest.config.ts`). A new non-import input
 to a slow file belongs on that list. The checkout uses `fetch-depth: 0` because `--changed` diffs
 `<base>...HEAD`.
