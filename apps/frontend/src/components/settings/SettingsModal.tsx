@@ -3,13 +3,13 @@ import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
 import { SprintSection } from './SprintSection.js';
 import { SlackSection } from './SlackSection.js';
 import { IssueLinksSection, ISSUE_TRACKER_SECTION_HEADING_ID } from './IssueLinksSection.js';
-import { AutoReviewSection } from './AutoReviewSection.js';
+import { AutoReviewSection, AUTO_REVIEW_SECTION_HEADING_ID } from './AutoReviewSection.js';
 import { LargePrThresholdSection } from './LargePrThresholdSection.js';
 import { BlastRadiusSection } from './BlastRadiusSection.js';
 import { MyTurnSection, MY_TURN_SECTION_HEADING_ID } from './MyTurnSection.js';
 import { BotScoringSection } from './BotScoringSection.js';
 import { ClaudeSpendSection, CLAUDE_SPEND_SECTION_HEADING_ID } from './ClaudeSpendSection.js';
-import { AiProviderSection } from './AiProviderSection.js';
+import { AiProviderSection, AI_SECTION_HEADING_ID } from './AiProviderSection.js';
 import { PendingMuteSection } from './PendingMuteSection.js';
 import { DependencyAutoMergeSection } from './DependencyAutoMergeSection.js';
 import { SonarSection } from './SonarSection.js';
@@ -210,7 +210,11 @@ export function SettingsModal({
           ? ISSUE_TRACKER_SECTION_HEADING_ID
           : focus === 'claude-spend'
             ? CLAUDE_SPEND_SECTION_HEADING_ID
-            : null;
+            : focus === 'auto-review'
+              ? AUTO_REVIEW_SECTION_HEADING_ID
+              : focus === 'ai-effort'
+                ? AI_SECTION_HEADING_ID
+                : null;
     let raf: number | null = null;
     let observer: MutationObserver | null = null;
     const INTERACTIONS = ['wheel', 'pointerdown', 'keydown', 'touchstart'] as const;

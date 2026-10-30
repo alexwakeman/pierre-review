@@ -351,6 +351,27 @@ choice). Build history and the measurements behind each rule:
 [CODEX-PLAN.md](CODEX-PLAN.md) and [CODEX-SPIKE.md](CODEX-SPIKE.md) (its "Plan changes" overrule
 the plan). Phase 3 is complete: every agent kind runs on Codex and `codexRunnable()` is true.
 
+### Reports → AI usage (the ledger read back)
+
+Where Limn's own runs went: Reports → "AI usage" (`Activity/AiUsageView.tsx`, `GET /api/ai/usage-report`,
+core `db/ai-usage-report.ts`; contract in [API.md](API.md)). It reads the SAME `ai_usage` ledger the
+budget sums, plus `claude_reviews` / `ticket_reviews` for what the ledger lacks (status, trigger, diff
+size, cache reads). It never runs a model and never starts the usage probe.
+
+- ⚠ **TOKENS ARE THE MEASURE; THE COST IS CLAUDE'S, IN ONE UNIT.** API key → `usd`; a subscription of
+  known kind → `week_pct`, converted ON THE SERVER with `usage.weekPctPerUsd` (the budget's own rate)
+  before the response is built, so the wire carries no US$ on a subscription; unknown kind (e.g. a
+  "max" not yet picked) → no unit, tokens only. Codex rows carry tokens only. The SPA words a summed
+  cost through `lib/aiBudget.ts` `usageCostText` ("US$4.10" · "3.2% of a week"), beside `runCostText`.
+- **Feature groups** are a pure map of the ledger's free-text `feature` (shared `aiUsageFeatureGroup`);
+  a new feature lands in "Summaries" until it is mapped. Codex's specialists are `claude_review:<name>`.
+- **Suggestions are code, not a model** (`foldAiUsageReport`): auto re-reviews past the second per PR,
+  failed/stopped runs that spent tokens, large-diff reviews dominating, the deepest model against the
+  standard one on the workspace's own runs, PRs reviewed by hand more than three times. Each states
+  the fact, an estimated saving over the window, and the setting that changes it (Settings focus
+  `auto-review` / `ai-effort`). ⚠ Auto runs the budget SKIPPED are not recorded anywhere, so the report
+  cannot count them — do not invent the figure.
+
 ### The provider seam
 
 - **`ai/provider.ts`** is the ONE door for every model call. The agent runners call a provider's

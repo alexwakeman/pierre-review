@@ -3,6 +3,8 @@ import { useAiBudget } from '../hooks/useAiBudget.js';
 import { useAiCapabilities } from '../hooks/useAiCapabilities.js';
 import { useClickOutside } from '../hooks/useClickOutside.js';
 import { useSettingsModal } from '../store/settingsModal.js';
+import { useFilters } from '../store/filters.js';
+import { goTo } from './shell/nav.js';
 import { headerUsageOf, usageDetailsOf } from '../lib/aiBudget.js';
 import { InfoButton } from './InfoModal.js';
 import { AI_BUDGET_DEFAULTS } from '@pierre-review/shared';
@@ -156,7 +158,19 @@ export function AiUsageMenu({ variant = 'header' }: { variant?: 'header' | 'side
               )}
             </div>
           ))}
-          <div className="mt-3 flex items-center justify-end gap-2 border-t border-ui-line pt-2">
+          <div className="mt-3 flex items-center justify-end gap-4 border-t border-ui-line pt-2">
+            {/* Where the usage went: Reports → AI usage. */}
+            <button
+              type="button"
+              onClick={() => {
+                setOpen(false);
+                useFilters.getState().setInsightsInnerTab('ai-usage');
+                goTo('insights');
+              }}
+              className="hit rounded-ui text-meta text-ui-ink hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent"
+            >
+              Usage report
+            </button>
             <button
               type="button"
               onClick={() => {

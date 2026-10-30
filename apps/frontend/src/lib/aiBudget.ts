@@ -7,6 +7,7 @@ import {
   runWeekShareText,
   type AiBudgetResponse,
   type AiProviderId,
+  type AiUsageCostUnit,
   type AiBudgetStatus,
   type AiUsageView,
   type AiUsageWindowView,
@@ -134,6 +135,19 @@ export function runCostText(
   if (usage.route === 'api_key') return formatRunUsd(costUsd);
   if (usage.route === 'login') return runWeekShareText(costUsd, usage.weekPctPerUsd);
   return null;
+}
+
+/**
+ * THE ONE WORDING OF A SUMMED COST (Reports → AI usage). The server sends Claude's cost in ONE unit:
+ * `usd` on an API key → "US$4.10" (the same formatter as a run's cost); `week_pct` on a subscription →
+ * "3.2% of a week" (the same share formatter as a run's "of your week" — "a week", because a sum can
+ * span several). Null (show nothing) with no unit, no figure, or nothing spent. Never US$ on a
+ * subscription: the wire carries none.
+ */
+export function usageCostText(cost: number | null | undefined, unit: AiUsageCostUnit | null | undefined): string | null {
+  if (cost == null || unit == null || !Number.isFinite(cost) || cost <= 0) return null;
+  if (unit === 'usd') return formatRunUsd(cost);
+  return `${formatFineSharePct(cost)} of a week`;
 }
 
 /**

@@ -39,6 +39,8 @@ describe('opening at a section opens its tab', () => {
       'my-turn': 'MyTurnSection',
       'issue-tracker': 'IssueLinksSection',
       'claude-spend': 'ClaudeSpendSection',
+      'auto-review': 'AutoReviewSection',
+      'ai-effort': 'AiProviderSection',
     };
     for (const [focus, tabId] of Object.entries(SETTINGS_FOCUS_TAB)) {
       const tab = SETTINGS_TABS.find((t) => t.id === tabId)!;

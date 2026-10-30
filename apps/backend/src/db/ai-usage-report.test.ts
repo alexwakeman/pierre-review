@@ -181,7 +181,8 @@ describe('foldAiUsageReport', () => {
     expect(s.saving.tokens).toBe(3 * 11_000);
     expect(s.saving.claudeCost).toBeCloseTo(3);
     expect(s.setting).toBe('auto-review');
-    expect(s.prIds).toEqual([1]);
+    expect(s.prs.map((p) => p.prId)).toEqual([1]);
+    expect(s.prs[0]!.number).toBe(11);
   });
 
   it('counts failed and stopped runs that spent tokens', () => {
@@ -206,7 +207,7 @@ describe('foldAiUsageReport', () => {
     const s = out.suggestions.find((x) => x.kind === 'large_diffs')!;
     expect(s.fact).toBe('2 reviews of diffs over 150 KB used 93% of code review tokens.');
     expect(s.saving.tokens).toBe(2 * 20_000);
-    expect(s.prIds).toEqual([2]);
+    expect(s.prs.map((p) => p.prId)).toEqual([2]);
   });
 
   it('compares the deepest model with the standard one on the workspace’s own runs', () => {

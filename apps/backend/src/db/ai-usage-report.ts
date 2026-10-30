@@ -15,6 +15,7 @@ import {
   type AiUsageFeatureGroup,
   type AiUsageFigures,
   type AiUsageInsight,
+  type AiUsagePrRef,
   type AiUsagePrRow,
   type AiUsageReportResponse,
   type AiUsageStoryRow,
@@ -311,6 +312,14 @@ export function foldAiUsageReport(
   const full = reviews.filter((r) => r.kind == null && r.status !== 'queued' && r.status !== 'running');
   const suggestions: AiUsageSuggestion[] = [];
   const insights: AiUsageInsight[] = [];
+  // The pull requests behind a suggestion, most first, named (≤ 5; an unnamed PR is skipped).
+  const refs = (counts: ReadonlyMap<number, number>): AiUsagePrRef[] =>
+    topIds(counts)
+      .flatMap((id) => {
+        const p = input.prs.get(id);
+        return p == null ? [] : [{ prId: id, number: p.number, title: p.title, repoFullName: p.repoFullName }];
+      })
+      .slice(0, 5);
 
   // 1. Auto review re-running on many pushes.
   const autoByPr = groupByPr(full.filter((r) => r.trigger === 'auto'));
@@ -333,7 +342,7 @@ export function foldAiUsageReport(
         action: `Saving if each pull request were auto-reviewed at most ${AI_USAGE_AUTO_REVIEWS_KEPT} times.`,
         saving: savingOf(excess, unit),
         setting: 'auto-review',
-        prIds: topIds(prExcess),
+        prs: refs(prExcess),
       });
     }
   }
@@ -356,7 +365,7 @@ export function foldAiUsageReport(
         action: 'Tokens spent with no result.',
         saving,
         setting: anyAuto ? 'auto-review' : null,
-        prIds: topIds(prCounts),
+        prs: refs(prCounts),
       });
     }
   }
@@ -385,7 +394,7 @@ export function foldAiUsageReport(
         action: 'Saving if they had cost a typical review. Smaller pull requests review for less.',
         saving: { tokens: f.tokens, claudeCost: f.claudeCost },
         setting: null,
-        prIds: topIds(prCounts),
+        prs: refs(prCounts),
       });
     }
   }
@@ -427,7 +436,7 @@ export function foldAiUsageReport(
           action: "Saving if the deepest model's reviews had cost the standard model's average.",
           saving: { tokens: Math.round(dTok * deep.length), claudeCost: costSaving },
           setting: 'ai-effort',
-          prIds: topIds(prCounts),
+          prs: refs(prCounts),
         });
       }
     }
@@ -455,7 +464,7 @@ export function foldAiUsageReport(
         action: `Saving if each had been reviewed at most ${AI_USAGE_MANUAL_REVIEWS_KEPT} times.`,
         saving: savingOf(excess, unit),
         setting: null,
-        prIds: topIds(prExcess),
+        prs: refs(prExcess),
       });
     }
   }
@@ -523,7 +532,6 @@ function savingOf(
 function topIds(counts: ReadonlyMap<number, number>): number[] {
   return [...counts.entries()]
     .sort((a, b) => b[1] - a[1] || a[0] - b[0])
-    .slice(0, 5)
     .map(([id]) => id);
 }
 
@@ -596,52 +604,7 @@ export async function getAiUsageReport(
     .where(and(eq(aiUsage.accountId, accountId), gte(aiUsage.occurredAt, new Date(sinceMs))))
     .execute();
 
-  // 2. Every PR the ledger names: its repository decides the workspace.
-  const prIds = [...new Set(raw.flatMap((r) => (r.prId == null ? [] : [r.prId])))];
-  const prRows = await chunked(prIds, (chunk) =>
-    db
-      .select({ id: pr.id, repoId: pr.repoId, number: pr.number, title: pr.title })
-      .from(pr)
-      .where(and(eq(pr.accountId, accountId), inArray(pr.id, chunk)))
-      .execute(),
-  );
-  const prRepo = new Map(prRows.map((p) => [p.id, p.repoId]));
-  const ledger: LedgerRowIn[] = [];
-  for (const r of raw) {
-    const repoId = r.prId != null ? (prRepo.get(r.prId) ?? r.repoId) : r.repoId;
-    if (r.prId != null && repoId == null) continue; // a pruned PR with no repository: cannot be placed
-    if (repoId != null && !inScope.has(repoId)) continue;
-    ledger.push({
-      feature: r.feature,
-      provider: r.provider,
-      model: r.model,
-      cost: toCost(r.provider, r.costUsd),
-      inputTokens: r.inputTokens,
-      outputTokens: r.outputTokens,
-      prId: r.prId != null && prRepo.has(r.prId) ? r.prId : null,
-      repoId,
-      occurredAtMs: r.occurredAt.getTime(),
-    });
-  }
-
-  // 3. PR names (in-scope only).
-  const scopedPrs = prRows.filter((p) => inScope.has(p.repoId));
-  const repoIds = [...new Set(scopedPrs.map((p) => p.repoId))];
-  const repoRows = await chunked(repoIds, (chunk) =>
-    db
-      .select({ id: repos.id, owner: repos.owner, name: repos.name })
-      .from(repos)
-      .where(and(eq(repos.accountId, accountId), inArray(repos.id, chunk)))
-      .execute(),
-  );
-  const repoName = new Map(repoRows.map((r) => [r.id, `${r.owner}/${r.name}`]));
-  const prs = new Map<number, PrMetaIn>();
-  for (const p of scopedPrs) {
-    const name = repoName.get(p.repoId);
-    if (name != null) prs.set(p.id, { id: p.id, number: p.number, title: p.title ?? '', repoFullName: name });
-  }
-
-  // 4. Code-review runs in the window on this workspace's PRs.
+  // 2. Code-review runs in the window on this workspace's PRs.
   const reviewRaw =
     scope.repoIds.length === 0
       ? []
@@ -685,6 +648,52 @@ export async function getAiUsageReport(
     diffBytes: r.diffBytes,
     createdAtMs: r.createdAt.getTime(),
   }));
+
+  // 3. Every PR the ledger or a review names: its repository decides the workspace (a review's PR is
+  //    in scope by its query; it is read here only for its name).
+  const prIds = [...new Set([...raw.flatMap((r) => (r.prId == null ? [] : [r.prId])), ...reviews.map((r) => r.prId)])];
+  const prRows = await chunked(prIds, (chunk) =>
+    db
+      .select({ id: pr.id, repoId: pr.repoId, number: pr.number, title: pr.title })
+      .from(pr)
+      .where(and(eq(pr.accountId, accountId), inArray(pr.id, chunk)))
+      .execute(),
+  );
+  const prRepo = new Map(prRows.map((p) => [p.id, p.repoId]));
+  const ledger: LedgerRowIn[] = [];
+  for (const r of raw) {
+    const repoId = r.prId != null ? (prRepo.get(r.prId) ?? r.repoId) : r.repoId;
+    if (r.prId != null && repoId == null) continue; // a pruned PR with no repository: cannot be placed
+    if (repoId != null && !inScope.has(repoId)) continue;
+    ledger.push({
+      feature: r.feature,
+      provider: r.provider,
+      model: r.model,
+      cost: toCost(r.provider, r.costUsd),
+      inputTokens: r.inputTokens,
+      outputTokens: r.outputTokens,
+      prId: r.prId != null && prRepo.has(r.prId) ? r.prId : null,
+      repoId,
+      occurredAtMs: r.occurredAt.getTime(),
+    });
+  }
+
+  // 4. PR names (in-scope only).
+  const scopedPrs = prRows.filter((p) => inScope.has(p.repoId));
+  const repoIds = [...new Set(scopedPrs.map((p) => p.repoId))];
+  const repoRows = await chunked(repoIds, (chunk) =>
+    db
+      .select({ id: repos.id, owner: repos.owner, name: repos.name })
+      .from(repos)
+      .where(and(eq(repos.accountId, accountId), inArray(repos.id, chunk)))
+      .execute(),
+  );
+  const repoName = new Map(repoRows.map((r) => [r.id, `${r.owner}/${r.name}`]));
+  const prs = new Map<number, PrMetaIn>();
+  for (const p of scopedPrs) {
+    const name = repoName.get(p.repoId);
+    if (name != null) prs.set(p.id, { id: p.id, number: p.number, title: p.title ?? '', repoFullName: name });
+  }
 
   // 5. This workspace's ticket reviews in the window.
   const ticketRaw = await db

@@ -106,11 +106,15 @@ export interface AiUsageGroupRow {
   figures: AiUsageFigures;
 }
 
-export interface AiUsagePrRow {
+/** A pull request named on the report. */
+export interface AiUsagePrRef {
   prId: number;
   number: number;
   title: string;
   repoFullName: string;
+}
+
+export interface AiUsagePrRow extends AiUsagePrRef {
   figures: AiUsageFigures;
 }
 
@@ -153,7 +157,7 @@ export interface AiUsageSuggestion {
   saving: Pick<AiUsageFigures, 'tokens' | 'claudeCost'>;
   setting: AiUsageSettingLink | null;
   /** The pull requests behind it, most first (≤ 5). */
-  prIds: number[];
+  prs: AiUsagePrRef[];
 }
 
 export type AiUsageInsightKind = 'cache' | 'specialists' | 'model_mix' | 'auto_share' | 'unmeasured';
