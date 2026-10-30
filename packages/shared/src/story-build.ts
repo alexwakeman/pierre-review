@@ -45,6 +45,8 @@ export const STORY_BUILD_DOCS_NOTE_MAX = 400;
 export const STORY_BUILD_DOCS_SUGGESTION_MAX = 240;
 export const STORY_BUILD_DOCS_REFS_MIN = 1;
 export const STORY_BUILD_DOCS_REFS_MAX = 3;
+/** Docs consideration: the items one run may keep (grounded + superseded + suggestion). */
+export const STORY_BUILD_DOCS_ITEMS_MAX = 12;
 
 // ---- spend and run limits: the DEFAULTS (the backend reads the env overrides, coding/story-build/limits.ts)
 
@@ -278,6 +280,7 @@ export type StoryBuildMessage = AiFixPlanMessage;
  *   suggestion  the docs require something the story is silent on — default TICKED
  */
 export type StoryBuildDocsItemKind = 'grounded' | 'superseded' | 'suggestion';
+export const STORY_BUILD_DOCS_ITEM_KINDS: readonly StoryBuildDocsItemKind[] = ['grounded', 'superseded', 'suggestion'];
 
 export interface StoryBuildDocsItem {
   /** Stable within one docs run (`D1`…); the decisions map is keyed by it. */
@@ -300,6 +303,9 @@ export interface StoryBuildDocs {
   nothingGrounded: boolean;
   /** The plan revision the docs were weighed against. */
   planRevision: number;
+  /** The decisions the latest plan pass was given (written with that pass's plan); absent ⇒ no plan pass
+   *  has seen these docs yet. `storyBuildDocsPending` compares it with the decisions in force. */
+  plannedDecisions?: StoryBuildDocsDecisions | null;
 }
 
 export type StoryBuildDocsDecision = 'include' | 'ignore';
@@ -321,6 +327,20 @@ export function storyBuildDocsEffectiveDecisions(docs: StoryBuildDocs | null, st
     out[it.id] = stored?.[it.id] ?? def;
   }
   return out;
+}
+
+/**
+ * Docs points whose decision the plan has not taken yet ("2 docs points aren't in the plan yet"): an item
+ * the reader now includes that the latest plan pass did not, or one that pass included and the reader now
+ * leaves out. An acknowledged superseded point is not pending: the plan already follows the story.
+ */
+export function storyBuildDocsPending(docs: StoryBuildDocs | null, stored: StoryBuildDocsDecisions | null): number {
+  if (docs == null) return 0;
+  const now = storyBuildDocsEffectiveDecisions(docs, stored);
+  const planned = docs.plannedDecisions ?? {};
+  let n = 0;
+  for (const [id, d] of Object.entries(now)) if ((d === 'include') !== (planned[id] === 'include')) n += 1;
+  return n;
 }
 
 // ---- tests ("Run tests"): the AI Fix shapes, named for both features --------------------------------
@@ -403,6 +423,8 @@ export interface StoryBuild {
   /** The planned design (`want_diagram`); cells name repo refs, never PRs. */
   design: DesignDiagram | null;
   docsStatus: StoryBuildDocsStatus;
+  /** Why the latest docs run failed or was refused (one sentence); null otherwise. */
+  docsError: string | null;
   docs: StoryBuildDocs | null;
   /** The decisions in force (stored over defaults: `storyBuildDocsEffectiveDecisions`). */
   docsDecisions: StoryBuildDocsDecisions;
@@ -481,7 +503,23 @@ export interface StoryBuildDocsBody {
   force?: boolean;
 }
 
-/** `PUT /api/story-builds/:id/docs/decisions` (DB only). Ids not in the current docs are dropped. */
+/**
+ * The answer to `POST …/docs`:
+ *   started          202 — the run is queued (follow the session: `docsStatus` goes `running` → `ready`)
+ *   already_running  200 — a docs run of this session is queued or running
+ *   current          200 — the stored docs were weighed against the current plan revision (send `force`)
+ *   refused          200 — nothing to weigh (no built docs in the workspace); `message` says so and the
+ *                    session reads `docsStatus: 'refused'`
+ */
+export interface StoryBuildDocsResponse {
+  outcome: 'started' | 'already_running' | 'current' | 'refused';
+  buildId: number;
+  message: string | null;
+}
+
+/** `PUT /api/story-builds/:id/docs/decisions` (DB only). Ids not in the current docs (and grounded items,
+ *  which carry no decision) are dropped; the rest MERGE over the stored decisions. The answer is the same
+ *  shape: the decisions now in force (`storyBuildDocsEffectiveDecisions`). */
 export interface StoryBuildDocsDecisionsBody {
   decisions: StoryBuildDocsDecisions;
 }
