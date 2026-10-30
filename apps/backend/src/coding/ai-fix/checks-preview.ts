@@ -40,9 +40,16 @@ export async function loadChecksPreview(
   if (hit && Date.now() - hit.at < TTL_MS) return hit.value;
 
   const files = await fetchFiles(input.accountId, { owner: pr.owner, name: pr.name, ref, paths: CHECK_MANIFEST_FILES });
+  const value = checksPreviewFromFiles(files);
+  cache.set(key, { at: Date.now(), value });
+  return value;
+}
+
+/** The picker's list from the manifest files at one commit (AI Fix's head, a story build's base). */
+export function checksPreviewFromFiles(files: Readonly<Record<string, string | null>>): AiFixChecksPreview {
   const plan = discoverChecks({ read: (p) => files[p] ?? null });
   const sandbox = detectSandbox();
-  const value: AiFixChecksPreview = {
+  return {
     checks: plan.checks.map((c) => ({
       name: c.name,
       kind: c.kind,
@@ -56,6 +63,4 @@ export async function loadChecksPreview(
     unavailable: checksUnavailableNote(sandbox, config.checksAllowUnsandboxed),
     unsandboxed: sandbox.kind === 'none' && config.checksAllowUnsandboxed,
   };
-  cache.set(key, { at: Date.now(), value });
-  return value;
 }
