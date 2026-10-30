@@ -112,8 +112,12 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // call and no GitHub call. The PUT is one validated UPDATE of one column; the GET (the header's usage
   // item polls it every ~2 minutes) reads the ledger and may START the usage probe in the background,
   // which is single-flight and at most once per 5 minutes inside ai/budget.ts — a loop cannot
-  // multiply it. `read`, decided rather than inherited; EXACT `===`. No other usage route exists.
+  // multiply it. `read`, decided rather than inherited; EXACT `===`.
   if (path === '/api/ai/budget') return [TIERS.read];
+  // REPORTS → AI USAGE: GET /api/ai/usage-report (api/routes/ai-usage-report.ts). FOLLOWING THE TOKEN:
+  // the ledger and the run tables read back — no model, no GitHub, and it never starts the usage
+  // probe. `read`, decided; EXACT `===`.
+  if (path === '/api/ai/usage-report') return [TIERS.read];
   // THE AI PROVIDER CHOICE: PUT /api/ai/provider (api/routes/ai-provider.ts). One validated UPDATE of
   // one column, held in memory — no model, no GitHub, no process. `read`, decided; EXACT `===`.
   if (path === '/api/ai/provider') return [TIERS.read];

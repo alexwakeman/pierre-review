@@ -881,6 +881,10 @@ describe('the AI runtime download', () => {
     expect(tiers('GET', '/api/ai/budget')).not.toContain('ai');
   });
 
+  it('keeps the AI usage report on read (the ledger read back, no model, no GitHub)', () => {
+    expect(tiers('GET', '/api/ai/usage-report')).toEqual(['read']);
+  });
+
   it('keeps the AI provider choice on read (one UPDATE, no model, no GitHub)', () => {
     expect(tiers('PUT', '/api/ai/provider')).toEqual(['read']);
     expect(tiers('PUT', '/api/ai/provider')).not.toContain('ai');
