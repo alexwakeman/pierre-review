@@ -40,6 +40,8 @@ export const RESULT_TOOL_NAMES = [
   'submit_design',
   'submit_paths',
   'submit_alignment',
+  // The story docs read's BUILD mode ("Implement story" → docs consideration).
+  'submit_build_docs',
   'submit_explanations',
   'record_sections',
   // The docs build's closing call (beside record_sections): a result too.
@@ -73,6 +75,7 @@ const BUILDERS: Record<ResultToolName, ShapeBuilder> = {
   submit_design: async (z) => (await import('../review/diagrams/schema.js')).buildSubmitDesignShape(z),
   submit_paths: async (z) => (await import('../review/sprint-paths/schema.js')).buildSubmitPathsShape(z),
   submit_alignment: async (z) => (await import('../review/story-docs/schema.js')).buildSubmitAlignmentShape(z),
+  submit_build_docs: async (z) => (await import('../review/story-docs/schema.js')).buildSubmitBuildDocsShape(z),
   submit_explanations: async (z) => (await import('../review/claude-review/chat-explain.js')).buildSubmitExplanationsShape(z),
   record_sections: async (z) => (await import('../reference-docs/schema.js')).buildRecordSectionsShape(z),
   finish_document: async (z) => (await import('../reference-docs/schema.js')).buildFinishShape(z),

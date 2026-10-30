@@ -387,6 +387,7 @@ export function toStoryBuild(row: StoryBuildRow, repoRows: readonly StoryBuildRe
     transcript: row.transcriptJson ?? [],
     design: row.designJson ?? null,
     docsStatus: row.docsStatus,
+    docsError: row.docsError ?? null,
     docs: row.docsJson ?? null,
     docsDecisions: storyBuildDocsEffectiveDecisions(row.docsJson ?? null, row.docsDecisionsJson ?? null),
     acceptedRevision: row.acceptedRevision ?? null,

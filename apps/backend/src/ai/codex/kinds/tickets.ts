@@ -20,6 +20,8 @@
 //   story_docs      review/story-docs/agent.ts — the scratch cwd + the shortlisted documents' folders
 //                   READ-ONLY (`storyDocsRoots`); result `submit_alignment`, judged by the SAME shape
 //                   judge (the one Codex retry carries its refusal), every quote checked at storage.
+//                   Its BUILD mode ("Implement story" → docs consideration, `runBuildDocsAgent`) is the same
+//                   kind and confinement answering `submit_build_docs`, judged by build-validate.ts.
 // The ledger: a Codex run writes its own row (provider 'codex', its model, its tokens; US$ 0 on the
 // ChatGPT sign-in) from `usageRecord`, and the managers' recorders skip it (`ledgerByProvider`).
 // The spend-budget gate (review/budget-gate.ts) is asked by the ticket and CI sweeps exactly as before.
