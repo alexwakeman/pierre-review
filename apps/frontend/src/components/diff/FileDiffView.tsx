@@ -442,14 +442,14 @@ function InlineThread({
     if (consumedFocus != null) consumedFocus.current = focusNonce;
     decide(true);
     // Held until the lazily-mounted code around it settles — the pill is often in a file that
-    // mounted for this very reveal, between placeholders of estimated height.
-    const stop = headerRef.current != null ? revealIntoView(headerRef.current, 'center') : null;
+    // mounted for this very reveal, between placeholders of estimated height. ⚠ NOT stopped by this
+    // cleanup: the `consumedFocus` guard makes a re-run a no-op, so StrictMode's mount-cleanup-mount
+    // would cancel the settle for good. It ends itself (a newer reveal, reader input, the target
+    // leaving the DOM, or its own cap).
+    if (headerRef.current != null) revealIntoView(headerRef.current, 'center');
     setFlash(true);
     const t = setTimeout(() => setFlash(false), FOCUS_HIGHLIGHT_MS);
-    return () => {
-      clearTimeout(t);
-      stop?.();
-    };
+    return () => clearTimeout(t);
     // `decide` is stable for the pill's life and deliberately left out (see its comment).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusNonce, consumedFocus]);

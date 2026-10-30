@@ -1173,7 +1173,9 @@ header.)
 - **Highlighting is per chunk** (`highlightDiffRows(rows, lang, max, {from, to})`): only hunks
   overlapping the chunk are lexed, each hunk still WHOLE, and the whole-file line gate still counts
   every hunk — a row comes out identical to the whole-file call (pinned in `test/diffChunks.test.ts`).
-  Code that never comes near the screen is never lexed. Still behind `expanded`, as before.
+  Code that never comes near the screen is never lexed. Still behind `expanded`, as before. A hunk's
+  lex is cached per `rows` array (`cachedSegment`), so a giant hunk spanning many chunks is lexed
+  once, not once per chunk.
 - ⚠ **A REVEAL FORCES ITS CHUNK.** `forcedChunks` holds the addressed line's chunk, the target
   thread's (`focus.threadId`, through the same `anchorRowFor` ladder that places its pill) and the
   just-posted thread's; a forced chunk mounts in that render and latches. File-grain pills
@@ -1187,7 +1189,8 @@ header.)
   the target moved (a scrollbar drag), stops it; a newer reveal cancels an older one. Browser scroll
   anchoring absorbs most shifts on its own (Chrome, Firefox); the settle covers the rest (Safari has
   no `overflow-anchor`, so scrolling UP into placeholders there can nudge the view by the estimate's
-  error).
+  error). ⚠ A pill's reveal is NOT stopped by its effect cleanup: the `consumedFocus` guard makes a
+  re-run a no-op, so StrictMode's mount-cleanup-mount would kill the settle for good.
 - **The Threads only view is unaffected**: it renders from `pr.threads`, never from the diff, so it
   lists every thread whether or not its code has mounted. The hidden code under it intersects nothing
   and mounts nothing while hidden.

@@ -5,7 +5,8 @@
 //
 // Run from the workspace that HAS vitest:
 //   ./apps/backend/node_modules/.bin/vitest run --root apps/frontend
-import { describe, expect, it } from 'vitest';
+import hljs from 'highlight.js';
+import { describe, expect, it, vi } from 'vitest';
 import {
   DIFF_CHUNK_ROWS,
   chunkIndexOf,
@@ -115,5 +116,25 @@ describe('highlightDiffRows with a range (one chunk at a time)', () => {
   it('is null when nothing in the range is code', () => {
     // Row 0 is the first hunk header alone.
     expect(highlightDiffRows(rows, 'typescript', MAX_FILE_DIFF_HIGHLIGHT_LINES, { from: 0, to: 1 })).toBeNull();
+  });
+
+  it('lexes a giant hunk ONCE however many chunks it spans', () => {
+    const big = parsePatch(hunks([1000]));
+    const chunks = diffChunks(big);
+    expect(chunks.length).toBeGreaterThan(3);
+    const spy = vi.spyOn(hljs, 'highlight');
+    try {
+      const first = highlightDiffRows(big, 'typescript', MAX_FILE_DIFF_HIGHLIGHT_LINES, chunks[0]!);
+      const calls = spy.mock.calls.length;
+      expect(calls).toBeGreaterThan(0);
+      for (const c of chunks.slice(1)) {
+        const part = highlightDiffRows(big, 'typescript', MAX_FILE_DIFF_HIGHLIGHT_LINES, c)!;
+        expect(part[c.from]).not.toBeNull();
+      }
+      expect(spy.mock.calls.length).toBe(calls);
+      expect(first?.[1]).not.toBeNull();
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

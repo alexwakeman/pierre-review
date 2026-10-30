@@ -449,7 +449,7 @@ export function highlightDiffRows(
   const flush = (end: number): void => {
     // Outside the range: not lexed at all.
     if (end > segStart && end > from && segStart < to) {
-      const html = highlightSegment(rows, segStart, end, language, maxLines);
+      const html = cachedSegment(rows, segStart, end, language, maxLines);
       if (html != null) {
         for (let i = Math.max(segStart, from); i < Math.min(end, to); i += 1) {
           out[i] = html[i - segStart] ?? null;
@@ -465,6 +465,32 @@ export function highlightDiffRows(
   });
   flush(rows.length);
   return coloured ? out : null;
+}
+
+// One hunk's lex, remembered per `rows` array: a hunk longer than a chunk (`diffChunks` cuts a giant
+// hunk every 240 rows) is lexed WHOLE by every chunk it spans, so without this a 2,000-line added
+// file would be lexed once per chunk as the reader scrolls through it. Keyed weakly on the rows
+// (FileDiffView memoises them per patch), so a new patch drops the old entries.
+const segmentCache = new WeakMap<readonly DiffRow[], Map<string, (string | null)[] | null>>();
+
+function cachedSegment(
+  rows: readonly DiffRow[],
+  from: number,
+  to: number,
+  language: string,
+  maxLines: number,
+): (string | null)[] | null {
+  let byKey = segmentCache.get(rows);
+  if (byKey == null) {
+    byKey = new Map();
+    segmentCache.set(rows, byKey);
+  }
+  const key = `${from}:${to}:${language}:${maxLines}`;
+  const hit = byKey.get(key);
+  if (hit !== undefined) return hit;
+  const html = highlightSegment(rows, from, to, language, maxLines);
+  byKey.set(key, html);
+  return html;
 }
 
 /** The two-pass lex (see `highlightDiffRows`) over `rows[from, to)` — ONE hunk. Null = refused. */
