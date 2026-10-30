@@ -685,6 +685,17 @@ account; it is NOT in the data export. Closed rows are deleted after 30 days (th
 AI → Disk space's "freed" figure). Every write is best-effort and never fails a run. The sweep that
 reads it and its rules: [BACKEND.md](BACKEND.md) § Worktree cleanup.
 
+## `story_builds` + `story_build_repos` — "Implement story" (CORE; migration `0149`)
+
+`story_builds`: ONE row per session (one sprint ticket, one click) — status (shared `StoryBuildStatus`), the
+frozen inputs (`coverage_json`, `candidates_json`, and `seed_json`, the fenced prompt input that is NEVER on
+the wire nor exported), the plan + its chat + the planned design, the docs consideration + the reader's
+decisions, what Accept froze, spend. ONE OPEN SESSION PER TICKET via the partial unique
+`story_builds_one_open` (in the `.sql` only). `story_build_repos`: ONE row per repository — base (+ the PR it
+stacks on), branch, build order, the patch and change report, "Run tests", the push. Composite FKs onto the
+session and `repos (id, account_id)`; `deleteRepo` deletes a repository's rows and keeps the session. The
+ONE wire mapper is `coding/story-build/persist.ts toStoryBuild`. [STORY-BUILD.md](STORY-BUILD.md).
+
 ## Claude + Codex pairs (CORE; migration `0135`)
 
 A pair is TWO ordinary `claude_reviews` rows ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Claude + Codex):
