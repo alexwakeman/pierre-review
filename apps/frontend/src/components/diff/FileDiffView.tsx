@@ -14,7 +14,9 @@ import { Switch } from '../ui/index.js';
 import { ApiError } from '../../api/client.js';
 import {
   anchorRowFor,
+  chunkIndexOf,
   commentTarget,
+  diffChunks,
   highlightDiffRows,
   inlineThreadStartsOpen,
   isLockFile,
@@ -47,6 +49,7 @@ import {
   highlightLines,
   languageForPath,
 } from '../../lib/hljsLines.js';
+import { revealIntoView } from '../../lib/settleScroll.js';
 import { DERIVED_STATE_META, relativeTime, safeExternalUrl, userLabel } from '../../lib/ui.js';
 import {
   CheckIcon,
@@ -67,6 +70,7 @@ import { ThreadCountChips, rollupCounts } from '../ThreadList/ThreadCountChips.j
 import { SELECTED_BORDER, SELECTED_FILL, STATUS_META, UNSELECTED_BORDER } from './status.js';
 import { FileTypeIcon } from '../FileTypeIcons.js';
 import type { ThreadResolveBus } from '../../hooks/useResolveEvents.js';
+import { LazyMountContext, createLazyMounter, useMountWhenNear } from './lazyMount.js';
 
 // The shared per-file diff renderer used by BOTH the Changes tab (with inline
 // commenting) and the AI Fix tab (read-only, pre-push). Per-file collapsible blocks
@@ -76,9 +80,14 @@ import type { ThreadResolveBus } from '../../hooks/useResolveEvents.js';
 // threads (`threadCtx`, resolved included) so they render inline at their diff line as
 // pills — unresolved open, resolved shut, like GitHub.
 //
-// The code is syntax-highlighted per file, language resolved from the PATH (`highlightDiffRows`
-// — two passes over the reconstructed old and new sides, one hunk at a time, because a unified
-// diff is not valid source). ⚠ The add/del signal is carried by `ROW_BG`'s TINT and the gutters
+// The rows MOUNT LAZILY: each file's rows are cut into chunks (`diffChunks`) that render as they
+// near the scroll pane and then stay (`DiffChunk`, `lazyMount.ts`); a reveal forces its target's
+// chunk and scrolls through `revealIntoView`, which holds the target while the placeholders around
+// it settle (docs/FRONTEND.md § Lazy mounting).
+//
+// The code is syntax-highlighted per chunk as it mounts, language resolved from the PATH
+// (`highlightDiffRows` — two passes over the reconstructed old and new sides, one hunk at a time,
+// because a unified diff is not valid source). ⚠ The add/del signal is carried by `ROW_BG`'s TINT and the gutters
 // (a removed line has only an old number, an added one only a new number), plus an sr-only
 // "added"/"removed" word — NO DIFF NOTATION IS PRINTED: no `+`/`-` column, no `@@` header and no
 // `\ No newline at end of file`. Each `@@` header is drawn as GitHub's HUNK EXPANDER instead —
@@ -259,16 +268,21 @@ function DiffLine({
       setFlash(false);
       return;
     }
-    rowRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    // Held until the lazily-mounted rows around it settle (`revealIntoView`).
+    const stop = rowRef.current != null ? revealIntoView(rowRef.current, 'center') : null;
     setFlash(true);
     const t = setTimeout(() => setFlash(false), FOCUS_HIGHLIGHT_MS);
-    return () => clearTimeout(t);
+    return () => {
+      clearTimeout(t);
+      stop?.();
+    };
   }, [focused, focusNonce]);
 
   return (
     <>
       <tr
         ref={rowRef}
+        data-diff-row=""
         className={`group transition-colors ${
           flash ? 'bg-ui-raise' : ROW_BG[row.kind]
         }`}
@@ -410,7 +424,7 @@ function InlineThread({
   useEffect(() => {
     if (!focused) return;
     decide(true);
-    headerRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    if (headerRef.current != null) revealIntoView(headerRef.current, 'center');
     ctx.onThreadShown?.();
     // Only re-run when this thread becomes the focus target.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -427,10 +441,15 @@ function InlineThread({
     if (consumedFocus?.current === focusNonce) return;
     if (consumedFocus != null) consumedFocus.current = focusNonce;
     decide(true);
-    headerRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    // Held until the lazily-mounted code around it settles — the pill is often in a file that
+    // mounted for this very reveal, between placeholders of estimated height.
+    const stop = headerRef.current != null ? revealIntoView(headerRef.current, 'center') : null;
     setFlash(true);
     const t = setTimeout(() => setFlash(false), FOCUS_HIGHLIGHT_MS);
-    return () => clearTimeout(t);
+    return () => {
+      clearTimeout(t);
+      stop?.();
+    };
     // `decide` is stable for the pill's life and deliberately left out (see its comment).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusNonce, consumedFocus]);
@@ -456,7 +475,7 @@ function InlineThread({
   const ringed = focused || flash;
 
   return (
-    <div className={`rounded-ui font-sans ${ringed ? 'ring-2 ring-ui-warn/40' : ''}`}>
+    <div data-thread-id={thread.id} className={`rounded-ui font-sans ${ringed ? 'ring-2 ring-ui-warn/40' : ''}`}>
       <button
         ref={headerRef}
         type="button"
@@ -685,7 +704,8 @@ function DiffTable({
         <col style={{ width: '1.5rem' }} />
         <col />
       </colgroup>
-      <tbody>{children}</tbody>
+      {/* One <tbody> per lazily-mounted chunk (`DiffChunk`), plus one for the file-grain pills. */}
+      {children}
     </table>
   );
   if (wrap) return table;
@@ -1137,6 +1157,89 @@ function GapExpansion({
   );
 }
 
+// ---- lazy mounting: one file's rows in chunks (`diffChunks`), each mounted as it nears the pane ----
+// A placeholder's height is ESTIMATED from what it will hold, so the scrollbar and the rail's jumps
+// are about right before anything mounts; `revealIntoView` absorbs the error on a jump. The figures
+// are RENDERED sizes, MEASURED in Chrome on the e2e big diff (`e2e/big-diff.ts`): a one-line code
+// row 19.4px, a gap row 21px with one arrow and 40px with two, a shut pill's row 32px, an open one
+// (a ThreadCard with one short comment) 173px. Longer conversations make an open pill taller, which
+// only makes a placeholder a little short.
+const ROW_PX = 19.4;
+const GAP_ROW_PX = 21;
+const GAP_ROW_TWO_ARROWS_PX = 40;
+const SHUT_PILL_PX = 32;
+const OPEN_PILL_PX = 175;
+// With Wrap on, a line longer than this many characters takes another visual line (a rough
+// average over pane widths; the estimate only has to be close).
+const WRAP_CHARS = 110;
+
+function estimateChunkPx(
+  rows: readonly DiffRow[],
+  from: number,
+  to: number,
+  byRow: ReadonlyMap<number, readonly { thread: ThreadDetail }[]>,
+  memory: Map<number, boolean> | null,
+  wrap: boolean,
+): number {
+  let px = 0;
+  for (let i = from; i < to; i += 1) {
+    const row = rows[i]!;
+    if (row.kind === 'hunk') {
+      if (row.gap != null && row.gap.count > 0) {
+        px +=
+          gapControls(gapPlace(rows, i), row.gap.count).length > 1 ? GAP_ROW_TWO_ARROWS_PX : GAP_ROW_PX;
+      }
+    } else if (!isNoNewlineRow(row)) {
+      const lines = wrap ? Math.max(1, Math.ceil(row.text.length / WRAP_CHARS)) : 1;
+      px += lines * ROW_PX;
+    }
+    for (const a of byRow.get(i) ?? []) {
+      px += memory != null && inlineThreadStartsOpen(a.thread, memory) ? OPEN_PILL_PX : SHUT_PILL_PX;
+    }
+  }
+  return Math.round(px);
+}
+
+/**
+ * One chunk of a file's diff: its rows once LIVE, an estimated-height placeholder until then. It is
+ * its own `<tbody>` so a placeholder is one table row and the columns never move. Highlighting
+ * happens HERE, per chunk (`highlightDiffRows` with a range), so code that has never been near the
+ * screen is never lexed. `force` mounts it at once (a reveal's target row is inside).
+ */
+function DiffChunk({
+  rows,
+  from,
+  to,
+  language,
+  force,
+  estimatePx,
+  renderRows,
+}: {
+  rows: readonly DiffRow[];
+  from: number;
+  to: number;
+  language: string | null;
+  force: boolean;
+  estimatePx: number;
+  renderRows: (from: number, to: number, html: (string | null)[] | null) => React.ReactNode;
+}): JSX.Element {
+  const { live, ref } = useMountWhenNear<HTMLTableSectionElement>(force);
+  const html = useMemo(
+    () => (live ? highlightDiffRows(rows, language, MAX_FILE_DIFF_HIGHLIGHT_LINES, { from, to }) : null),
+    [live, rows, language, from, to],
+  );
+  if (!live) {
+    return (
+      <tbody ref={ref} data-diff-placeholder="" aria-hidden>
+        <tr>
+          <td colSpan={4} className="p-0" style={{ height: estimatePx }} />
+        </tr>
+      </tbody>
+    );
+  }
+  return <tbody>{renderRows(from, to, html)}</tbody>;
+}
+
 function FileDiffBlock({
   file,
   commenting,
@@ -1270,32 +1373,21 @@ function FileDiffBlock({
     if (hasFocus) setExpanded(true);
   }, [hasFocus]);
 
-  // Language-aware colouring for the whole file's rows, in ONE two-pass lexer run (see
-  // `highlightDiffRows`). Memoised beside `rows` because it is the expensive part: the inline
-  // comment box opening and a data refetch re-render this block (a pill toggle re-renders only
-  // the pill; a ~5s poll tick that leaves the threads alone no longer reaches here, see the memo
-  // on FileDiffView).
-  // Null — an unlisted extension, a patch past the line gate, a lexer that threw — means every row
-  // renders as plain text, which is what this diff looked like before.
+  // Language-aware colouring, two passes per hunk (`highlightDiffRows`) — now done PER CHUNK, by
+  // each `DiffChunk` as it mounts, so only code that has come near the screen is ever lexed. Null —
+  // an unlisted extension, a patch past the line gate, a lexer that threw — means plain text.
   //
-  // ⚠ GATED ON `expanded`, AND THAT IS WHY IT IS DECLARED DOWN HERE RATHER THAN BESIDE `rows`.
-  // The diff table is behind `{expanded && …}`, and `startsCollapsed` fires at
-  // `LARGE_PATCH_LINES` (250) while `highlightDiffRows` only refused past `MAX_HIGHLIGHT_LINES`
-  // (400) PER RECONSTRUCTED SIDE — so every file in the 251-to-~800-row band, `pnpm-lock.yaml`
-  // included, was fully lexed on mount for output nobody could see. MEASURED at ~17-20ms per file
-  // at the gate, and a page is 100 blocks with no windowing ("Load next 100 files" adds more). The
-  // memo re-runs when the reader opens the file, which is the moment the work is first needed.
+  // ⚠ STILL ONLY WHEN EXPANDED (the table is behind `{expanded && …}`): `startsCollapsed` fires at
+  // `LARGE_PATCH_LINES` (250), and every file in the 251-to-~800-row band, `pnpm-lock.yaml`
+  // included, used to be fully lexed on mount for output nobody could see (MEASURED ~17-20ms per
+  // file at the gate). The chunks now go further: an expanded file far down the PR is not lexed
+  // until it is scrolled near.
   //
-  // ⚠ AND THAT GATE IS WHY THIS SITE HAS ITS OWN LINE LIMIT (`MAX_FILE_DIFF_HIGHLIGHT_LINES`, not
-  // the shared 400): with the lex paid once per click, the 400 bought nothing here and left every
-  // ADDED file past 400 lines — whose patch is all new side — completely uncoloured.
-  const html = useMemo(
-    () =>
-      expanded
-        ? highlightDiffRows(rows, languageForPath(file.path), MAX_FILE_DIFF_HIGHLIGHT_LINES)
-        : null,
-    [expanded, rows, file.path],
-  );
+  // ⚠ THIS SITE HAS ITS OWN LINE LIMIT (`MAX_FILE_DIFF_HIGHLIGHT_LINES`, not the shared 400): with
+  // the lex paid on demand, the 400 bought nothing here and left every ADDED file past 400 lines —
+  // whose patch is all new side — completely uncoloured.
+  const language = useMemo(() => languageForPath(file.path), [file.path]);
+  const chunks = useMemo(() => diffChunks(rows), [rows]);
 
   // Which row (if any) the focus target addresses. Known even while collapsed — `rows` is
   // parsed from the patch, not from what's rendered — so the block can decide up front
@@ -1304,6 +1396,22 @@ function FileDiffBlock({
     if (focus == null || focus.line == null) return null;
     return lineRowIndex(rows, focus.line, focus.side ?? 'RIGHT');
   }, [rows, focus]);
+
+  // The chunks a reveal needs MOUNTED NOW, whatever their position: the addressed line's, the
+  // target thread's (a "Show in context" jump, a deep link), the just-posted thread's. A thread's
+  // row comes from the same anchoring ladder that places its pill.
+  const focusThreadId = focus?.threadId ?? null;
+  const postedThreadId = threadCtx?.focusThreadId ?? null;
+  const forcedChunks = useMemo(() => {
+    const out = new Set<number>();
+    if (focusRow != null) out.add(chunkIndexOf(chunks, focusRow));
+    for (const [row, list] of byRow) {
+      if (list.some((a) => a.thread.id === focusThreadId || a.thread.id === postedThreadId)) {
+        out.add(chunkIndexOf(chunks, row));
+      }
+    }
+    return out;
+  }, [chunks, focusRow, byRow, focusThreadId, postedThreadId]);
 
   // An explicit reveal ALWAYS wins over the collapse heuristic — including lock files and
   // >250-line patches. A deliberate click that scrolls to a closed `▸` header reads as a
@@ -1318,8 +1426,12 @@ function FileDiffBlock({
     // the next if the file was shut), and this effect runs AFTER the pill's (child-first), so a
     // header scroll here would cancel it — see `revealScrollsFileHeader`. That also makes a
     // same-nonce re-run (a new `focus` object, same reveal) a no-op rather than a jump back up.
-    if (revealScrollsFileHeader(focus, focusRow, threadCtx != null ? threads : [])) {
-      blockRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    if (
+      revealScrollsFileHeader(focus, focusRow, threadCtx != null ? threads : []) &&
+      blockRef.current != null
+    ) {
+      // Held while the placeholders above it mount and change height (`revealIntoView`).
+      return revealIntoView(blockRef.current, 'start');
     }
     // focusRow is derived from `focus`; re-running on it would double-scroll. `threads` and
     // `threadCtx` are read as they stand when the reveal arrives — a refetch is not a reveal.
@@ -1336,6 +1448,66 @@ function FileDiffBlock({
   const meta = STATUS_META[file.status];
   const path = file.previousPath ? `${file.previousPath} → ${file.path}` : file.path;
   const githubUrl = file.githubUrl ?? null;
+
+  // One chunk's rows (`DiffChunk` calls this once it is live, with that chunk's highlighting).
+  // Indices are the FILE's row indices, so anchoring, the reveal and the gap reveals address rows
+  // exactly as they did before the chunks.
+  const renderRows = (from: number, to: number, html: (string | null)[] | null): JSX.Element[] => {
+    const out: JSX.Element[] = [];
+    for (let i = from; i < to; i += 1) {
+      const row = rows[i]!;
+      out.push(
+        <Fragment key={i}>
+          {row.kind === 'hunk' ? (
+            row.gap != null && row.gap.count > 0 ? (
+              <GapExpansion
+                gap={row.gap}
+                place={gapPlace(rows, i)}
+                reveal={reveals.get(i)}
+                lines={usableLines}
+                html={fileHtml}
+                side={side}
+                expandable={fileSource != null}
+                status={reveals.has(i) ? gapStatus : 'idle'}
+                onExpand={(c, count) => expandGap(i, c, count)}
+                wrap={wrap}
+              />
+            ) : null
+          ) : isNoNewlineRow(row) ? null : (
+            <DiffLine
+              row={row}
+              html={html?.[i] ?? null}
+              filePath={file.path}
+              fileUrl={githubUrl}
+              commenting={commenting}
+              onPosted={onPosted}
+              open={openRow === i}
+              onOpen={() => setOpenRow(i)}
+              onClose={() => setOpenRow(null)}
+              focused={focusRow === i}
+              focusNonce={focus?.nonce ?? null}
+              wrap={wrap}
+            />
+          )}
+          {threadCtx &&
+            byRow.get(i)?.map((a) => (
+              <InlineThreadRow
+                key={a.thread.id}
+                thread={a.thread}
+                ctx={threadCtx}
+                approximate={a.approximate}
+                focusNonce={
+                  focus != null && focus.threadId === a.thread.id ? focus.nonce : null
+                }
+                consumedFocus={consumedThreadFocus}
+                wrap={wrap}
+              />
+            ))}
+        </Fragment>,
+      );
+    }
+    return out;
+  };
 
   // The two no-table branches (binary / too large, and an empty textual diff) still list every
   // thread — the same pill unit as the table path, in a <div> instead of a row. A thread never
@@ -1365,6 +1537,7 @@ function FileDiffBlock({
     // the colour changes, so no block moves when the selection does.
     <div
       ref={blockRef}
+      data-file-block={file.path}
       // `--diff-sticky-top` is the Changes tab's own sticky bar (ChangesTab measures it); unset
       // (the AI Fix tab) it is 0. The scroll margin keeps a 'start' reveal out from under it.
       className={`scroll-mt-[var(--diff-sticky-top,0px)] border-l-2 ${focus != null ? SELECTED_BORDER : UNSELECTED_BORDER}`}
@@ -1473,8 +1646,9 @@ function FileDiffBlock({
             </div>
           ) : (
             <DiffTable rows={rows} wrap={wrap}>
-                {threadCtx &&
-                  unanchored.map((t) => (
+              {threadCtx && unanchored.length > 0 && (
+                <tbody>
+                  {unanchored.map((t) => (
                     <InlineThreadRow
                       key={`u-${t.id}`}
                       thread={t}
@@ -1487,58 +1661,29 @@ function FileDiffBlock({
                       wrap={wrap}
                     />
                   ))}
-                {rows.map((row, i) => (
-                  <Fragment key={i}>
-                    {row.kind === 'hunk' ? (
-                      row.gap != null && row.gap.count > 0 ? (
-                        <GapExpansion
-                          gap={row.gap}
-                          place={gapPlace(rows, i)}
-                          reveal={reveals.get(i)}
-                          lines={usableLines}
-                          html={fileHtml}
-                          side={side}
-                          expandable={fileSource != null}
-                          status={reveals.has(i) ? gapStatus : 'idle'}
-                          onExpand={(c, count) => expandGap(i, c, count)}
-                          wrap={wrap}
-                        />
-                      ) : null
-                    ) : isNoNewlineRow(row) ? null : (
-                    <DiffLine
-                      row={row}
-                      html={html?.[i] ?? null}
-                      filePath={file.path}
-                      fileUrl={githubUrl}
-                      commenting={commenting}
-                      onPosted={onPosted}
-                      open={openRow === i}
-                      onOpen={() => setOpenRow(i)}
-                      onClose={() => setOpenRow(null)}
-                      focused={focusRow === i}
-                      focusNonce={focus?.nonce ?? null}
-                      wrap={wrap}
-                    />
-                    )}
-                    {threadCtx &&
-                      byRow.get(i)?.map((a) => (
-                        <InlineThreadRow
-                          key={a.thread.id}
-                          thread={a.thread}
-                          ctx={threadCtx}
-                          approximate={a.approximate}
-                          focusNonce={
-                            focus != null && focus.threadId === a.thread.id
-                              ? focus.nonce
-                              : null
-                          }
-                          consumedFocus={consumedThreadFocus}
-                          wrap={wrap}
-                        />
-                      ))}
-                  </Fragment>
-                ))}
-                {trailingGap != null && (
+                </tbody>
+              )}
+              {chunks.map((c, ci) => (
+                <DiffChunk
+                  key={c.from}
+                  rows={rows}
+                  from={c.from}
+                  to={c.to}
+                  language={language}
+                  force={forcedChunks.has(ci)}
+                  estimatePx={estimateChunkPx(
+                    rows,
+                    c.from,
+                    c.to,
+                    byRow,
+                    threadCtx?.openMemory ?? null,
+                    wrap,
+                  )}
+                  renderRows={renderRows}
+                />
+              ))}
+              {trailingGap != null && (
+                <tbody>
                   <GapExpansion
                     gap={trailingGap}
                     place="trailing"
@@ -1551,7 +1696,8 @@ function FileDiffBlock({
                     onExpand={(c, count) => expandGap(-1, c, count)}
                     wrap={wrap}
                   />
-                )}
+                </tbody>
+              )}
             </DiffTable>
           )}
         </div>
@@ -1593,6 +1739,9 @@ export const FileDiffView = memo(function FileDiffView({
   // it, then fades. A caller-supplied deep-link focus always wins over it.
   const [postedThreadId, setPostedThreadId] = useState<number | null>(null);
   const [wrap] = useDiffWrap();
+  // ONE IntersectionObserver for every chunk of every file (`lazyMount.ts`), rooted on the pane.
+  const [mounter] = useState(createLazyMounter);
+  useEffect(() => () => mounter.disconnect(), [mounter]);
   const fadeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(
     () => () => {
@@ -1642,6 +1791,7 @@ export const FileDiffView = memo(function FileDiffView({
   // the whole app shell jumped ~265px up and left a gap at the bottom. MEASURED: html scrollHeight
   // 29,462 against a 1,000px window before; equal to the window after.
   return (
+    <LazyMountContext.Provider value={mounter}>
     <div className="relative">
       {files.map((f) => (
         <FileDiffBlock
@@ -1657,5 +1807,6 @@ export const FileDiffView = memo(function FileDiffView({
         />
       ))}
     </div>
+    </LazyMountContext.Provider>
   );
 });
