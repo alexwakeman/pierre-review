@@ -3,9 +3,9 @@
 > Topic doc for the "Implement story" feature (`apps/backend/src/coding/story-build/`,
 > `packages/shared/src/story-build.ts`). CLAUDE.md keeps only the doc-map row; put new detail HERE.
 > Status: the CONTRACT (C0) is in — shared types, the tables, the seams, the route paths and tiers, the
-> sprint card field. The session manager, the agents, the push, the docs run and the screen arrive in
-> work packages WP1–WP4 (§ Work packages). Sections marked _(WP n)_ describe the agreed design that WP
-> implements.
+> sprint card field — and WP2 (the builder, push and the build-side routes). The session manager, the plan
+> agent, the docs run and the screen arrive in WP1, WP3 and WP4 (§ Work packages). Sections marked
+> _(WP n)_ describe the agreed design that WP implements.
 
 ## What it is
 
@@ -176,15 +176,80 @@ spec. Stored on the build's own row — never in `story_docs_alignments`. The ne
 decisions fenced (`DOCS POINTS THE READER INCLUDED` / `DOCS THE STORY SUPERSEDES (acknowledged)`); Accept
 freezes them (`accepted_docs_json`) and the builder gets the same two blocks.
 
-## Push _(WP2)_
+## The builder (WP2, `coding/story-build/build.ts`)
 
-A no-PR `applyAndPush` variant (base = `base_sha`; protected refs = the default branch, plus the stacked
-PR's head), `createPullRequest` with `draft`, `getViewerCanPush` re-checked. Title `${KEY}: ${title}` (what
-Jira, Linear and Notion detection read). Body: the summary, the criteria covered, the ticket link
-(`safeExternalUrl`), sibling PRs already pushed, "Built with Limn from <KEY>". GitHub Issues: "Closes" only
-on a single-repository build. Always a `detected_from='manual'` tracker link row after the PR syncs. Push
-all runs in plan order; each repository succeeds or fails on its own. The SPA refetches through
-`invalidateAfterPrWrite` + `['ticket-prs']` + `['sprint-graph']`.
+`buildRepo` (the seams.ts `BuildRepoFn`) builds ONE repository of the ACCEPTED plan; the manager calls it
+one repository at a time, in plan order.
+
+- **What runs:** the session's provider when it can still run `story_build` (`followUpProvider`), the
+  session's model (`requestModelOf`; deep when none is stored), the effort from Settings → AI → Effort
+  (`agenticRunEffort`, read once per pass). The result carries what ran (`provider` / `model` / `effort`).
+- **The worktree:** FRESH every pass, at the repository's stored base commit —
+  `review/clone-manager.ts prepBranchWorktree` (the branch fetched into `refs/pierre/story-build-base`,
+  the commit by sha when the branch moved), under `withWorktreeOwner({kind:'story_build', runId: <repo
+  row id>})`. An earlier pass's tree is released first (`releaseStoryBuildWorktree`, exported for the
+  manager's Discard too). KEPT on success (a later repository reads it; push releases it), released on
+  failure or cancel. The patch is the durable result.
+- **The run** is the shared `coding/agent.ts buildInWorktree` (extracted from AI Fix's `runCodingAgent`
+  with no behaviour change): "Run tests" through `openCheckSession` (checks that cannot start NEVER fail
+  the repository — `checks.note` says why), the agent, Limn's own check run, the pre-commit hook with at
+  most `MAX_HOOK_REPAIRS` (2) repair passes while ≥ $0.25 is left. Tools `STORY_BUILD_TOOLS` (Read, Glob,
+  Grep, Write, Edit, MultiEdit, `submit_build`; + `run_check` with checks), `Bash` and `NotebookEdit`
+  denied outright; the write deny-list on (`protectWrites`); READ-ONLY roots = the earlier repositories'
+  worktrees + the reference library when `reviewDocsFor` gives one. Budget min(session left, `STORY_BUILD_REPO_BUDGET_USD`),
+  turns `STORY_BUILD_MAX_TURNS`.
+- **The result:** the `submit_build` report (the `submit_fix` shape; a strict schema for Codex) validated
+  by `normalizeChangeReport` against the refs this repository was shown (its steps' refs + the criteria
+  planned for it) and the captured diff. Refused: a plan revision other than the accepted one, a spent
+  budget, a nonce that appears in any fenced text, no change at all, a patch over
+  `STORY_BUILD_PATCH_MAX_BYTES`.
+- ⚠ **`buildRepo` WRITES THE PASS'S LEDGER ROW** (`story_build`, with the repository): Codex's provider
+  writes its own, Claude's is written by `buildRepo` through `ctx.recordAiUsage`. The manager writes none.
+- **Prompts** (`build-prompts.ts`): the story, criteria, comments, earlier PR cards, the AGREED PLAN, the
+  docs blocks (pre-fenced by WP3 with the same nonce) and the earlier repositories' reports, all fenced
+  with the pass's nonce; the rules name no shell and the files a write is refused for. Claude's text is
+  pinned by `__fixtures__/story-build-prompts.json`; the tool lists and the words by
+  `build-prompts.test.ts`. The manager can scan its nonce with `storyBuildUntrustedTexts`.
+- **The write deny-list** (`review/write-deny.ts`, ONE rule): CI and automation config (`.github/`,
+  `.gitlab/`, `.circleci/`, `.gitlab-ci.yml`, `Jenkinsfile` …), git's own files (any `.git*`), hook
+  managers (`.husky/`, lefthook, pre-commit), package-manager config (`.npmrc`, `.yarnrc*`, `.yarn/`,
+  `.pnpmfile.*`, `.envrc`), lockfiles, and agent settings (`.claude/`, `.codex/`, `.cursor/`,
+  `.devcontainer/`, `CLAUDE.md`, `AGENTS.md`) — at any depth, judged relative to the write root as named
+  AND with symlinks followed. Claude: a PreToolUse hook after the path guard and the own-tools hook.
+  Codex: `GuardRoots.protect` in its guard process. Off for every other run.
+- **Retry** goes through the MANAGER's lane: the manager registers `seams.ts registerStoryBuildLane({retryRepo})`
+  (one build at a time per machine); until it does, `POST …/retry` answers 503.
+- **The sweep** (`worktree-gc-policy.ts storyBuildRepoStates`): running while the repository is
+  `preparing/building/checking`; `unpushed` (pinned up to `WORKTREE_PIN_DAYS`) while `ready` with a patch;
+  released when pushed, failed, cancelled, skipped, or the session is discarded / cancelled.
+
+## Push (WP2, `coding/story-build/push.ts`)
+
+Only on the reader's press. `coding/git-ops.ts applyAndPushBranch` is the NO-PR variant of AI Fix's
+stateless push: a fresh worktree at `base_sha`, the stored patch, ONE commit by the reader, a NEW branch
+(`BRANCH_EXISTS` refused with a sentence, never forced; the default branch, the base ref and a stacked
+PR's head are protected and refused before any process runs), then `createPullRequest` (which gains
+`draft`). PRs open as **drafts** unless the body says `draft: false`.
+
+- **Title** `${KEY}: ${title}` (what Jira, Linear and Notion detection read).
+- **Body:** the summary, the criteria this repository covers (what its report delivered, else what the
+  plan put here), the ticket link (http(s) only), `Stacked on #n.`, the sibling PRs this session already
+  pushed, `Closes owner/repo#n` on a single-repository GitHub Issues build only, and "Built with Limn
+  from KEY."
+- **Stacked:** the new PR targets the head branch of the reader's own open PR it stacks on; once that PR
+  is no longer open the push is refused (`STACK_CLOSED`: build again to start from the default branch).
+- **Recorded** on the repository row: `pushed` + branch / PR / commit / title / body, or `push_error`. A PR
+  GitHub refused to open (`PR_NOT_OPENED`) keeps the branch it pushed and says so. `getViewerCanPush` is
+  re-checked (`NO_PUSH_PERMISSION`); a push while the session is `building` is `BUSY`; a second press on a
+  pushed repository is `skipped` (`ALREADY_PUSHED`); a press while one is in flight is `PUSH_IN_PROGRESS`.
+- **After the PR syncs** (`syncNewPrInRepo`, then `afterSync`): a `detected_from='manual'` tracker link
+  row (`tracker/manual-links.ts resolveTicketRefs`, imported lazily), so GitHub Issues links it too. The
+  kept build worktree is released once the push lands.
+- **Push all** (`pushAllRepos`) pushes every included, unpushed, ready repository IN PLAN ORDER; each
+  succeeds or fails on its own, and a later body links the earlier PRs.
+- The routes answer 200 `StoryBuildPushResponse` with per-repository results (`404` for another
+  account's build). The SPA refetches through `invalidateAfterPrWrite` + `['ticket-prs']` +
+  `['sprint-graph']`.
 
 ## Work packages
 
