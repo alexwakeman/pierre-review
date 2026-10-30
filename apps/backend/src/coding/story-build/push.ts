@@ -44,10 +44,28 @@ const BODY_MAX = 60_000;
 /** Repository rows with a push in flight in this process: a second press answers `PUSH_IN_PROGRESS`. */
 const pushing = new Set<number>();
 
+/** A push of this repository row is in flight (Retry waits for it: a pass would replace the tree it pushes). */
+export function isStoryBuildRepoPushing(repoRowId: number): boolean {
+  return pushing.has(repoRowId);
+}
+
 const clip = (s: string, n: number): string => (s.length <= n ? s : `${s.slice(0, n - 1).trimEnd()}…`);
 
 function httpUrl(url: string | null | undefined): string | null {
   return url != null && /^https?:\/\/[^\s<>()]+$/i.test(url) ? url : null;
+}
+
+/**
+ * MODEL- AND TICKET-WRITTEN TEXT IS QUOTED, NEVER OBEYED, on GitHub too: in a PR body or a commit
+ * message, `Fixes owner/repo#12` closes that issue on merge and `@someone` notifies them. A zero-width
+ * space breaks both without changing what a person reads. The one closing line this push means to
+ * write (a single-repository GitHub Issues build) is added by the code AFTER this runs.
+ */
+export function defangGithubText(text: string, opts: { mentions?: boolean } = {}): string {
+  // Only a keyword FOLLOWED BY AN ISSUE REFERENCE is touched, so `fix: …` and "fixes the bug" stay as written.
+  const closing = /\b(close[sd]?|fix(?:e[sd])?|resolve[sd]?)\b(?=\s*:?\s*(?:(?:[\w.-]+\/[\w.-]+)?#\d|https?:\/\/))/gi;
+  const out = text.replace(closing, (k) => `${k.slice(0, 1)}\u200b${k.slice(1)}`);
+  return opts.mentions === false ? out : out.replace(/(^|[^\w`])@(?=[A-Za-z0-9])/g, '$1@\u200b');
 }
 
 /** The new PR's title: `KEY: title` (the detection key first). */
@@ -73,13 +91,13 @@ export interface PrBodyInput {
 /** The new PR's body. People who never saw Limn read it on GitHub: plain, short, the product named once. */
 export function storyBuildPrBody(b: PrBodyInput): string {
   const lines: string[] = [];
-  if (b.summary) lines.push(b.summary.trim(), '');
+  if (b.summary) lines.push(defangGithubText(b.summary.trim()), '');
   const url = httpUrl(b.ticketUrl);
-  const story = `${b.ticketKey}${b.ticketTitle ? `: ${b.ticketTitle.trim()}` : ''}`;
+  const story = defangGithubText(`${b.ticketKey}${b.ticketTitle ? `: ${b.ticketTitle.trim()}` : ''}`).replace(/[[\]]/g, '');
   lines.push(`**Story:** ${url ? `[${story}](${url})` : story}`);
   if (b.covers.length > 0) {
     lines.push('', '**Covers:**');
-    for (const c of b.covers) lines.push(`- ${c.ref}: ${c.text.replace(/\s+/g, ' ').trim()}`);
+    for (const c of b.covers) lines.push(`- ${c.ref}: ${defangGithubText(c.text.replace(/\s+/g, ' ').trim())}`);
   }
   if (b.stackedOnPrNumber != null) lines.push('', `Stacked on #${b.stackedOnPrNumber}.`);
   if (b.siblings.length > 0) {
@@ -265,7 +283,7 @@ async function pushClaimed(ctx: AgentContext, a: PushRepoArgs, build: StoryBuild
     stackedOnPrNumber: stackedNumber,
     closes: closesFor(build, rows.filter((r) => r.include).length),
   });
-  const commitMessage = (repo.commitMessage ?? '').trim() || title;
+  const commitMessage = defangGithubText((repo.commitMessage ?? '').trim() || title, { mentions: false });
 
   try {
     const pushed = await applyAndPushBranch({

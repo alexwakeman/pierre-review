@@ -215,7 +215,10 @@ docs — all attacker-reachable text. Its boundary, beside the fences and the pr
   settings (`.claude/`, `CLAUDE.md`, `AGENTS.md` …), at any depth, judged as named AND with symlinks
   followed. Claude enforces it as a PreToolUse hook; Codex in its guard process (`GuardRoots.protect`,
   inside the ALLOW-list). A workflow or a hook the agent could write would run on GitHub or on the next
-  person's commit.
+  person's commit. Names compare case-insensitively, and the rule runs again on the captured result
+  (checks and the pre-commit hook are repository code in the same tree).
+- **Text it writes to GitHub is quoted, never obeyed**: `push.ts defangGithubText` breaks closing
+  keywords before an issue reference and `@mentions` in the PR body and commit message.
 - **Nothing reaches GitHub until the reader presses Push**: a NEW branch, never forced, the default branch
   and a stacked PR's head protected, a DRAFT PR by default. Rate tier `github_write` (C0).
 

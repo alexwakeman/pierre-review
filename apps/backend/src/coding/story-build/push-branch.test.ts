@@ -26,6 +26,7 @@ const T = vi.hoisted(() => {
     prs: [] as any[],
     posts: [] as any[],
     branchExists: false,
+    refReads: [] as string[],
     prFails: false,
     worktree: '' as string,
     base: '' as string,
@@ -39,7 +40,10 @@ vi.mock('../../auth/account.js', () => ({
 vi.mock('../../sync/sync-one-pr.js', () => ({ syncOnePr: async () => {} }));
 vi.mock('../../sync/resync-after-write.js', () => ({ settlePrAfterWrite: async () => {} }));
 vi.mock('../../github/client.js', () => ({
-  ghRestGetText: async () => ({ ok: T.branchExists }),
+  ghRestGetText: async (_t: string, path: string) => {
+    T.refReads.push(path);
+    return { ok: T.branchExists };
+  },
   ghRestGetFor: async () => ({}),
   ghRestPostFor: async (_t: string, path: string, body: unknown) => {
     T.posts.push({ path, body });
@@ -164,6 +168,17 @@ describe('applyAndPushBranch — the no-PR push', () => {
     await expect(applyAndPushBranch(args({ branch: 'u1/refunds-base', protect: ['main', 'u1/refunds-base'] }))).rejects.toMatchObject({ code: 'PUSH_DENIED' });
     expect(T.pushed).toEqual([]);
     expect(T.prs).toEqual([]);
+  });
+
+  it('checks the branch name BEFORE spelling it into a GitHub URL, and encodes each segment', async () => {
+    T.refReads.length = 0;
+    await expect(applyAndPushBranch(args({ branch: 'x..y' }))).rejects.toMatchObject({ code: 'PUSH_DENIED' });
+    await expect(applyAndPushBranch(args({ branch: 'main' }))).rejects.toMatchObject({ code: 'PUSH_DENIED' });
+    expect(T.refReads).toEqual([]);
+    T.branchExists = true;
+    await expect(applyAndPushBranch(args({ branch: 'feature/#123' }))).rejects.toMatchObject({ code: 'BRANCH_EXISTS' });
+    expect(T.refReads).toEqual(['/repos/acme/web/git/ref/heads/feature/%23123']);
+    T.branchExists = false;
   });
 
   it('a patch that does not apply is APPLY_FAILED, nothing pushed', async () => {

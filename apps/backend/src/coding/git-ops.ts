@@ -21,6 +21,7 @@ import type {
 } from '../platform/contract.js';
 import {
   applyPatchToWorktree,
+  assertPushTarget,
   codedError,
   commitAll,
   pushRef,
@@ -310,7 +311,11 @@ export async function applyAndPushBranch(
     ? `${account.githubLogin}@users.noreply.github.com`
     : 'pierre-review@users.noreply.github.com';
 
-  const existing = await ghRestGetText(token, `/repos/${owner}/${name}/git/ref/heads/${args.branch}`);
+  // The name is the reader's (or the plan's slug): git's own check and the protected names FIRST, before
+  // it is spelled into a GitHub URL — each segment encoded (`#`, `%` and the like are valid in a ref).
+  await assertPushTarget(args.branch, args.protect);
+  const refPath = args.branch.split('/').map(encodeURIComponent).join('/');
+  const existing = await ghRestGetText(token, `/repos/${owner}/${name}/git/ref/heads/${refPath}`);
   if (existing.ok) {
     throw codedError('BRANCH_EXISTS', `branch ${args.branch} already exists on ${owner}/${name}`);
   }

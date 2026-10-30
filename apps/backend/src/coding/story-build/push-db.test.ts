@@ -305,6 +305,34 @@ describe('pushRepo', () => {
   });
 });
 
+describe('defangGithubText', () => {
+  it('breaks a closing keyword before an issue reference and an @mention, and leaves the rest as written', () => {
+    const out = push.defangGithubText('Fixes #12. Also closes other/repo#3, resolves https://github.com/a/b/issues/1. cc @someone');
+    expect(out).not.toMatch(/\b(fixes|closes|resolves)\s/i);
+    expect(out).not.toMatch(/@[a-z]/);
+    expect(out.replace(/\u200b/g, '')).toBe('Fixes #12. Also closes other/repo#3, resolves https://github.com/a/b/issues/1. cc @someone');
+    expect(push.defangGithubText('fix: handle refunds; it fixes the bug')).toBe('fix: handle refunds; it fixes the bug');
+    expect(push.defangGithubText('bump @types/node', { mentions: false })).toBe('bump @types/node');
+  });
+
+  it('the PR body quotes the build summary and the criteria, never obeys them; the code-written Closes line stays live', () => {
+    const body = push.storyBuildPrBody({
+      summary: 'Done. Fixes #1 and pings @boss.',
+      ticketKey: 'ACME-1',
+      ticketTitle: 'T',
+      ticketUrl: null,
+      covers: [{ ref: 'AC1', text: 'closes acme/web#9' }],
+      siblings: [],
+      stackedOnPrNumber: null,
+      closes: 'acme/web#4',
+    });
+    expect(body).not.toMatch(/Fixes #1/);
+    expect(body).not.toMatch(/@boss/);
+    expect(body).not.toMatch(/closes acme\/web#9/);
+    expect(body).toContain('Closes acme/web#4');
+  });
+});
+
 describe('pushAllRepos', () => {
   it('pushes every unpushed ready repository IN PLAN ORDER; a later body links the earlier PR', async () => {
     const s = await readySession();

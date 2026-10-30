@@ -216,7 +216,12 @@ one repository at a time, in plan order.
   `.pnpmfile.*`, `.envrc`), lockfiles, and agent settings (`.claude/`, `.codex/`, `.cursor/`,
   `.devcontainer/`, `CLAUDE.md`, `AGENTS.md`) — at any depth, judged relative to the write root as named
   AND with symlinks followed. Claude: a PreToolUse hook after the path guard and the own-tools hook.
-  Codex: `GuardRoots.protect` in its guard process. Off for every other run.
+  Codex: `GuardRoots.protect` in its guard process. Off for every other run. File names compare
+  case-insensitively (on macOS `cargo.lock` IS `Cargo.lock`). The SAME rule runs once more on the
+  captured `filesChanged`: a check or the pre-commit hook (the repository's own code) also runs in the
+  tree, so a result touching a protected file fails the repository and is never kept.
+- **Refs** (`AC2`, `M1`, `R1`) are quoted OUTSIDE the fences (YOUR REFS, report labels); a plan whose refs
+  are not that plain shape (`STORY_BUILD_REF_SHAPE`) is refused before any checkout.
 - **Retry** goes through the MANAGER's lane: the manager registers `seams.ts registerStoryBuildLane({retryRepo})`
   (one build at a time per machine); until it does, `POST …/retry` answers 503.
 - **The sweep** (`worktree-gc-policy.ts storyBuildRepoStates`): running while the repository is
@@ -235,7 +240,13 @@ PR's head are protected and refused before any process runs), then `createPullRe
 - **Body:** the summary, the criteria this repository covers (what its report delivered, else what the
   plan put here), the ticket link (http(s) only), `Stacked on #n.`, the sibling PRs this session already
   pushed, `Closes owner/repo#n` on a single-repository GitHub Issues build only, and "Built with Limn
-  from KEY."
+  from KEY." The summary, the criteria and the commit message are model- or ticket-written:
+  `defangGithubText` breaks a closing keyword before an issue reference (`Fixes #12`) and an `@mention`
+  with a zero-width space, so merging never closes an issue the story named and nobody is pinged. The
+  code-written `Closes` line is added after it.
+- **Branch name**: `assertPushTarget` (git's own format check + the protected names) runs BEFORE the
+  name is spelled into the `BRANCH_EXISTS` lookup URL, each segment URL-encoded. Retry answers 409 while
+  that repository's push is in flight.
 - **Stacked:** the new PR targets the head branch of the reader's own open PR it stacks on; once that PR
   is no longer open the push is refused (`STACK_CLOSED`: build again to start from the default branch).
 - **Recorded** on the repository row: `pushed` + branch / PR / commit / title / body, or `push_error`. A PR

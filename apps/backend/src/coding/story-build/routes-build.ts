@@ -10,7 +10,7 @@ import type { AgentContext } from '../../review/agent-context.js';
 import { CHECK_MANIFEST_FILES } from '../checks/index.js';
 import { checksPreviewFromFiles } from '../ai-fix/checks-preview.js';
 import { getStoryBuildRepoPatch, getStoryBuildRepoRow, getStoryBuildRow, storyBuildRepoNames } from './persist.js';
-import { pushAllRepos } from './push.js';
+import { isStoryBuildRepoPushing, pushAllRepos } from './push.js';
 import { storyBuildDeps, storyBuildLane } from './seams.js';
 
 // "IMPLEMENT STORY" — THE BUILD-SIDE ROUTES, WORK PACKAGE 2 (docs/STORY-BUILD.md § Routes; contracts in
@@ -105,6 +105,7 @@ export function registerStoryBuildBuildRoutes(app: FastifyInstance, ctx: AgentCo
     if (!row) return reply.code(404).send(NOT_FOUND);
     if (row.status === 'pushed') return reply.code(409).send({ error: 'NotReady', message: 'This repository is already pushed.' });
     if (!row.include) return reply.code(409).send({ error: 'NotReady', message: 'This repository is not part of the build.' });
+    if (isStoryBuildRepoPushing(row.id)) return reply.code(409).send({ error: 'NotReady', message: 'This repository is being pushed.' });
     const lane = storyBuildLane();
     if (!lane) return reply.code(503).send({ error: 'NotReady', message: 'Building is not available in this version of Limn yet.' });
     const out = await lane.retryRepo(ctx, { accountId, buildId: id, repoId });
