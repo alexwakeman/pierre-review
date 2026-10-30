@@ -3620,7 +3620,12 @@ One ticket's build session, full-main overlay `data-testid="story-build-overlay"
   (`storyBuildMark`: Building… / Plan ready / Ready to push / Pushed — words, in the accessible name
   and the board's `BorderKey`) and the same button opens the build tab. ⌘K: `SprintCommands` lists
   "Implement KEY · title" for the SAME tickets while the board is mounted. Not on the story view, Open
-  PRs or Reports.
+  PRs or Reports. ⚠ A tab rebuilt from a URL may name ANY ticket, so `StartPanel` applies the SAME
+  gate (`storyBuildOffered` on the cached sprint-graph node, `build` ignored) and shows Start only
+  then; the whole tab says "AI is off" and asks nothing while `me.ai.enabled` is false.
+- **Plan choices** (include, branch, tests) live in the tab, reset on a new plan revision or session —
+  EXCEPT the ticked tests: each card reports them from its own effect, which runs BEFORE the tab's
+  reset in the same commit, so wiping them would Accept with no checks while Run tests reads ticked.
 - **Server state** (`hooks/useStoryBuild.ts`): ONE query per ticket, `['story-build-for', ws:<id>,
   ident]` → `StoryBuildForTicketResponse`, polled at 2 s ONLY while `storyBuildActive`; the SSE stream
   (`useStoryBuildStream`) opens only then and refetches per step and at its end. Every billed action

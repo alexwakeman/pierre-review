@@ -79,4 +79,11 @@ test.describe('Implement story', () => {
     await expect(page.getByTestId('story-build-overlay')).toBeVisible();
     await expect(page.getByTestId('story-build-header')).toContainText('ACME-1');
   });
+
+  test('a build tab URL for a ticket the board does not offer cannot start one', async ({ page }) => {
+    await withAi(page);
+    await page.goto(`/app/?view=${encodeURIComponent('story-build:jira:https://acme.atlassian.net#ACME-2')}`);
+    await expect(page.getByTestId('story-build-not-offered')).toBeVisible();
+    await expect(page.getByTestId('story-build-start-button')).toHaveCount(0);
+  });
 });

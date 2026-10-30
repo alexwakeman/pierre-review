@@ -231,6 +231,9 @@ function PushedPrLink({ repo, url }: { repo: StoryBuildRepo; url: string | null 
         return;
       }
       if (url != null) window.open(url, '_blank', 'noopener,noreferrer');
+    } catch {
+      // The lookup failed: GitHub still has the pull request.
+      if (url != null) window.open(url, '_blank', 'noopener,noreferrer');
     } finally {
       setLooking(false);
     }

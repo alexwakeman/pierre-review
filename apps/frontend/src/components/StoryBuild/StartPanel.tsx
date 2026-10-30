@@ -1,10 +1,11 @@
 import { useIsMutating, useQuery } from '@tanstack/react-query';
 import { skipToken } from '@tanstack/react-query';
-import { DEFAULT_AI_FIX_MODEL, type StoryBuild } from '@pierre-review/shared';
+import { DEFAULT_AI_FIX_MODEL, storyBuildOffered, type StoryBuild } from '@pierre-review/shared';
 import { api, ApiError } from '../../api/client.js';
 import { useModelPick } from '../../hooks/useModelPick.js';
 import { referenceDocsKey } from '../../hooks/useReferenceDocs.js';
 import { storyBuildMutationKey, useStartStoryBuild } from '../../hooks/useStoryBuild.js';
+import { useSprintGraph } from '../../hooks/useSprintStories.js';
 import { storyBuildErrorText, storyBuildStatusLine } from '../../lib/storyBuild.js';
 import { AiRunGate } from '../AiSetup.js';
 import { ModelPicker } from '../ModelPicker.js';
@@ -46,6 +47,13 @@ export function StartPanel({
     staleTime: 60_000,
   });
   const hasDocs = (docs.data?.docs ?? []).some((d) => d.status === 'ready');
+  // THE ENTRY GATE holds here too (owner decision 4, shared `storyBuildOffered`): a tab rebuilt from a
+  // URL may name any ticket, but a NEW session starts only for a sprint ticket that is Not started and
+  // has no pull request. A closed session is no open session, so `build` is ignored. (The sprint graph
+  // is the board's own DB-only query, usually cached.)
+  const graph = useSprintGraph(workspaceId);
+  const node = graph.data?.nodes.find((n) => n.ident === ident);
+  const offered = node != null && storyBuildOffered({ ...node, build: null });
   const go = (): void => {
     start.mutate({
       provider: pick.chosen.provider,
@@ -79,20 +87,30 @@ export function StartPanel({
         )}
       </div>
       <div className="mt-4 flex flex-wrap items-center gap-2">
-        <ModelPicker state={pick} onPick={pick.pick} disabled={busy} />
-        <AiRunGate kind="story_plan" anyProvider provider={pick.chosen.provider}>
-          <Button
-            variant="primary"
-            data-ai-run
-            data-testid="story-build-start-button"
-            icon={<BuildIcon size={13} />}
-            busy={busy}
-            busyLabel="Starting…"
-            onClick={go}
-          >
-            Start
-          </Button>
-        </AiRunGate>
+        {offered ? (
+          <>
+            <ModelPicker state={pick} onPick={pick.pick} disabled={busy} />
+            <AiRunGate kind="story_plan" anyProvider provider={pick.chosen.provider}>
+              <Button
+                variant="primary"
+                data-ai-run
+                data-testid="story-build-start-button"
+                icon={<BuildIcon size={13} />}
+                busy={busy}
+                busyLabel="Starting…"
+                onClick={go}
+              >
+                Start
+              </Button>
+            </AiRunGate>
+          </>
+        ) : graph.isLoading ? (
+          <p className="text-meta text-ui-mute">Loading…</p>
+        ) : (
+          <p data-testid="story-build-not-offered" className="text-meta text-ui-mute">
+            A build starts only from a This Sprint ticket that is not started and has no pull request.
+          </p>
+        )}
       </div>
       {err != null && <p className="mt-2 text-meta text-ui-danger">{storyBuildErrorText(err)}</p>}
     </section>

@@ -24,6 +24,8 @@ import {
 } from '../../lib/storyBuild.js';
 import { parseStoryBuildTabKey, ticketKeyOfIdent, usePinnedTabs } from '../../store/pinnedTabs.js';
 import { useFilters } from '../../store/filters.js';
+import { useMe } from '../../hooks/useTriage.js';
+import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
 import { AiRunGate } from '../AiSetup.js';
 import { BuildIcon, CloseIcon, PullRequestIcon } from '../Icons.js';
 import { Button } from '../ui/Button.js';
@@ -52,11 +54,16 @@ export function StoryBuildTabView(): JSX.Element | null {
   const ident = parseStoryBuildTabKey(activeTab);
   const meta = tabs.find((t) => t.key === activeTab)?.ticketMeta ?? null;
   const workspaceId = useFilters((s) => s.workspaceId);
+  // An AI surface (`me.ai.enabled`): with AI off the routes are not registered, so ask nothing.
+  const me = useMe();
+  const aiOn = useAiCapabilities().enabled;
   if (ident == null) return null;
   return (
     <div data-testid="story-build-tab-view" className={`max-w-5xl pb-10 ${PAGE_GUTTER}`}>
-      {workspaceId == null ? (
+      {workspaceId == null || me.data == null ? (
         <p className="pt-5 text-meta text-ui-mute">Loading…</p>
+      ) : !aiOn ? (
+        <p className="pt-5 text-meta text-ui-mute">AI is off on this machine.</p>
       ) : (
         <StoryBuildBody workspaceId={workspaceId} ident={ident} ticketKey={meta?.key ?? ticketKeyOfIdent(ident)} title={meta?.title ?? null} />
       )}
@@ -86,8 +93,19 @@ function StoryBuildBody({ workspaceId, ident, ticketKey, title }: { workspaceId:
   }, []);
   // A new plan revision starts the cards from what the plan says again (keeping branch edits would
   // name branches for repositories the new plan may not have).
+  // ⚠ The tests to run are KEPT: each card reports them from its own effect, which React runs BEFORE
+  // this parent effect in the same commit, so wiping them here would send Accept with no checks while
+  // "Run tests" still reads ticked (a cached checks list never reports again).
   const planRevision = build?.planRevision ?? 0;
-  useEffect(() => setChoices(new Map()), [planRevision, build?.id]);
+  useEffect(
+    () =>
+      setChoices((m) => {
+        const next = new Map<number, Partial<RepoChoice>>();
+        for (const [id, c] of m) if (c.checks != null) next.set(id, { checks: c.checks });
+        return next;
+      }),
+    [planRevision, build?.id],
+  );
 
   const headerActions = build != null && !closed ? <HeaderActions build={build} draft={draft} setDraft={setDraft} /> : null;
 
