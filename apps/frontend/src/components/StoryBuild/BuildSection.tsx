@@ -110,7 +110,6 @@ function BuildRepoCard({
         </PrCardTitle>
         <PrCardChips>
           <span className={statusTone}>{STORY_BUILD_REPO_STATUS_WORDS[repo.status]}</span>
-          {repo.status === 'ready' && <ChecksStatus checks={repo.checks} />}
         </PrCardChips>
         <PrCardMeta
           parts={[
