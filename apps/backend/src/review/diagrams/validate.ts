@@ -48,8 +48,11 @@ import {
 
 /** What the run knows that the answer is checked against. */
 export interface DesignContext {
-  kind: 'pr' | 'story';
-  // In ref order: PR1 first. A PR design has exactly one.
+  // 'planned' ("Implement story", coding/story-build/plan.ts): a story's design BEFORE any PR exists —
+  // the refs are the plan's REPOSITORY refs (R1…) and `changedFiles` the files its steps name. It is
+  // judged exactly like a story design.
+  kind: 'pr' | 'story' | 'planned';
+  // In ref order: PR1 first (a planned design: R1 first). A PR design has exactly one.
   prs: ReadonlyArray<{ ref: string; changedFiles: readonly string[] }>;
 }
 
@@ -188,7 +191,7 @@ export function validateDesign(raw: unknown, ctx: DesignContext): DesignValidati
     // pr refs: a story's must be one the prompt gave; a PR design's is always null.
     let pr: string | null = null;
     const prRaw = plain(o.pr).toUpperCase();
-    if (ctx.kind === 'story' && prRaw !== '') {
+    if (ctx.kind !== 'pr' && prRaw !== '') {
       if (!refs.has(prRaw)) add(`${where} names pr "${prRaw.slice(0, 20)}"; use one of: ${[...refs.keys()].join(', ')}, or null.`);
       else pr = prRaw;
     }
@@ -203,7 +206,7 @@ export function validateDesign(raw: unknown, ctx: DesignContext): DesignValidati
       const m = matchPath(plain(f), scope);
       if (m != null && !files.includes(m)) files.push(m);
     }
-    if (ctx.kind === 'story' && pr == null && files.length > 0) {
+    if (ctx.kind !== 'pr' && pr == null && files.length > 0) {
       const owner = ctx.prs.find((x) => x.changedFiles.some((cf) => normPath(cf) === files[0]));
       if (owner != null) {
         pr = owner.ref.toUpperCase();

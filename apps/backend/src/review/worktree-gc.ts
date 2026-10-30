@@ -344,6 +344,8 @@ async function dbFacts(rows: readonly LedgerRowForSweep[]): Promise<Map<number, 
   const prIds = [...new Set(rows.map((r) => r.prId).filter((id): id is number => id != null))];
   const fixIds = [...new Set(rows.filter((r) => (r.kind === 'fix' || r.kind === 'plan') && r.runId != null).map((r) => r.runId!))];
   const reviewIds = [...new Set(rows.filter((r) => r.kind === 'review' && r.runId != null).map((r) => r.runId!))];
+  // "Implement story": a plan pass's read-only checkouts (runId = story_builds.id).
+  const storyPlanIds = [...new Set(rows.filter((r) => r.kind === 'story_plan' && r.runId != null).map((r) => r.runId!))];
 
   const prState = new Map<number, PrState>();
   if (prIds.length > 0) {
@@ -377,6 +379,13 @@ async function dbFacts(rows: readonly LedgerRowForSweep[]): Promise<Map<number, 
       reviews.set(r.id, r.status);
     }
   }
+  const storyPlans = new Map<number, string>();
+  if (storyPlanIds.length > 0) {
+    const b = schema.storyBuilds;
+    for (const r of await db.select({ id: b.id, status: b.status }).from(b).where(inArray(b.id, storyPlanIds)).execute()) {
+      storyPlans.set(r.id, r.status);
+    }
+  }
 
   for (const row of rows) {
     let runState: RunState = 'unknown';
@@ -387,6 +396,10 @@ async function dbFacts(rows: readonly LedgerRowForSweep[]): Promise<Map<number, 
       // A plan is read-only: it never holds work to push. Running while its pass is.
       const fx = fixes.get(row.runId);
       runState = !fx ? 'unknown' : fx.planStatus === 'planning' || fx.status === 'running' ? 'running' : 'finished';
+    } else if (row.kind === 'story_plan' && row.runId != null) {
+      // Read-only: never holds work to push. Running while the session's assess / plan pass is.
+      const st = storyPlans.get(row.runId);
+      runState = st == null ? 'unknown' : st === 'assessing' || st === 'planning' ? 'running' : 'finished';
     } else if (row.kind === 'review' && row.runId != null) {
       const st = reviews.get(row.runId);
       runState = st == null ? 'unknown' : st === 'queued' || st === 'running' ? 'running' : 'finished';

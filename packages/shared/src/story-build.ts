@@ -544,6 +544,7 @@ export type StoryBuildErrorCode =
   | 'PlanBudgetSpent'
   | 'SessionBudgetSpent'
   | 'PlanMoved'
+  | 'BadRequest'
   | 'NotFound';
 
 // ---- the routes (one spelling for the backend's registration, the client and the rate-limit tiers) ----

@@ -339,6 +339,30 @@ types: `packages/shared/src/story-docs-alignment.ts`. The workspace resolves thr
 | `GET /api/docs/story-alignment?workspace=&ident=` | `StoryDocsAlignmentResponse {workspaceId, ident, available, docCount, run, lastSucceeded}` — `available` = a BUILT document in this workspace (the `docsInReview` switch is not read); `run` = the newest run (any status), `lastSucceeded` = the newest succeeded one when `run` is not it. Each `StoryDocsAlignmentRun` carries `current` + `staleBecause` (`story` / `criteria` / `library` / `version`), recomputed per read; in flight ⇒ current. DB + disk only, no model, no tracker call. Tier `read` |
 | `POST /api/docs/story-alignment {workspaceId?, ident, force?}` | Queue ONE check. In order (after `already_running`): `200 {outcome:'refused', runId:null, refusal:'no_docs'}` (no built document), `'no_story'` (no text and no criteria), `200 {outcome:'reused', runId}` when `force` is not `true` and the newest SUCCEEDED run's fingerprint equals the one a run started now would store (story, criteria, built library, version, both models, provider) — that run IS the answer: no row, no model call, not counted against the cap; `400 NoClaudeAuth`, `'daily_cap'` (`STORY_DOCS_ALIGNMENT_DAILY_CAP` per account per UTC day; no row). → `202 {outcome:'queued', runId}`, or `200 {outcome:'already_running', runId}` while one is held. `409 Busy` (> 10 waiting). Tiers **`ai` + `ai_hourly`** (matched ABOVE the `/api/docs/` `read` catch-all) |
 
+### Implement story (the session routes, WP1)
+
+`coding/story-build/routes.ts`, registered by `registerAgenticRoutes` (absent under `LIMN_AI_DISABLED` →
+`404`). [STORY-BUILD.md](STORY-BUILD.md). Paths and wire types: `packages/shared/src/story-build.ts`
+(`STORY_BUILD_API`). The workspace resolves through `resolveWorkspaceScope` (absent / unknown / another
+account's ⇒ the caller's Default, echoed); every `:id` is read through the account-scoped getter (another
+account's ⇒ `404`). Errors are `{error: StoryBuildErrorCode, message}`; a manual or malformed ident →
+`400 BadRequest`.
+
+| Route | Contract |
+|---|---|
+| `GET /api/story-builds?workspace=&ident=` | `StoryBuildForTicketResponse {workspaceId, build, earlier}` — the ticket's newest session (any status) as `StoryBuild`, and up to 19 earlier ones as `{id, status, createdAt}`. DB only. Tier `read` |
+| `GET /api/story-builds/:id` | `StoryBuild` — never a patch, the frozen seed or a worktree path. Tier `read` |
+| `GET /api/story-builds/:id/stream` | SSE: each frame's `data:` is ONE `StoryBuildProgress`; the stream ENDS when the pass ends (or at once when nothing runs) — the client then refetches. Heartbeat comment every 15 s. Tier `read` |
+| `POST /api/story-builds {workspaceId?, ident, provider?, model?, diagram?, docs?}` | Start. The manual run choice (`resolveManualRunChoice(kind 'story_plan')`; default depth deep) → `400 ModelNotOnProvider` / `NoClaudeAuth` / `BadRequest`; no story text and no criteria → `400 NoStory`. → `202 {outcome:'started', buildId}`, or `200 {outcome:'already_open', buildId}` (ONE open session per ticket). `409 Busy` (> 10 waiting). Tiers `ai` + `ai_hourly` |
+| `POST /api/story-builds/:id/plan/message {text}` | A fresh plan pass steered by `text` (1..2,000 chars) → `202 {buildId}`. `409 NotReady` (not `plan_ready`, or a pass running), `PlanRevisionCap` (12 re-plans), `PlanBudgetSpent` / `SessionBudgetSpent` (below $0.25 left), `400 NoClaudeAuth`. Tiers `ai` + `ai_hourly` |
+| `POST /api/story-builds/:id/accept {planRevision, repos:[{repoId, include, branch, checks}]}` | Freeze the plan revision and the docs decisions in force; build the included repositories in plan order → `202 {buildId}`. `409 PlanMoved` (`planRevision` is not the latest), `400 BadRequest` (a repo not in the plan, a branch git refuses, no repository included), `409 NotReady` / `SessionBudgetSpent` / `Busy`. A repository left out of `repos` keeps its defaults (included, the proposed branch, no checks). Tiers `ai` + `ai_hourly` |
+| `POST /api/story-builds/:id/cancel` | Abort the pass in flight (or drop it from its lane) → `{status:'cancelling'}`, `{status:'idle'}` when nothing runs. Tier `read` |
+| `POST /api/story-builds/:id/discard` | Close a session with nothing running → `{status:'discarded'}`; `409 NotReady` while a pass runs. Tier `read` |
+
+The build-side routes (checks, diff, retry, push) and the docs routes are WP2's and WP3's
+(STORY-BUILD.md § Routes). `SprintGraphNode.build` (`SprintNodeBuild | null`) rides the sprint graph GET
+(DB only; null when AI is off).
+
 ### AI provider, runtime and Codex sign-in
 
 Which AI provider runs, whether it is set up, and Limn's own Codex sign-in

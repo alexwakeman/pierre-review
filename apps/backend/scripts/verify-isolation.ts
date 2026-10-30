@@ -4562,6 +4562,81 @@ check(
   sm._setStoryDocsSeamsForTest(null);
 }
 
+// ── "Implement story" (story_builds + story_build_repos, migration 0149; coding/story-build/) ──────────
+// Every session getter / updater is account-scoped (B's id reads null and writes nothing); every
+// :id route answers 404 for B's session; `?workspace=` of B falls back to A's Default; the composite FKs
+// refuse a cross-account workspace or repository; the sprint card's batched read sees only A's sessions.
+{
+  console.log('\nstory_builds (Implement story)');
+  const sbp = await import('../src/coding/story-build/persist.js');
+  const { registerStoryBuildRoutes } = await import('../src/coding/story-build/routes.js');
+  const { sprintBuildsFor } = await import('../src/db/sprint-builds.js');
+  const dc = { db, schema: schema as unknown as Record<string, any> };
+  const IDENT = 'jira:https://acme.atlassian.net#ISOBUILD-1';
+  const open = async (acct: number, ws: number) =>
+    sbp.insertStoryBuild(dc, { accountId: acct, workspaceId: ws, ident: IDENT, ticketKey: 'ISOBUILD-1', ticketTitle: `T${acct}`, wantDiagram: false, wantDocs: false, provider: 'claude', model: 'claude-opus-5-5' });
+  const a = (await open(1, defaultA)).id;
+  const b = (await open(2, defaultB)).id;
+  await sbp.updateStoryBuild(dc, 2, b, { status: 'plan_ready' });
+  const bRepo = await sbp.upsertStoryBuildRepo(dc, { accountId: 2, buildId: b, repoId: B.repoId, ref: 'R1', buildOrder: 0, include: true, status: 'planned', baseRef: 'main', baseSha: 'b', stackedOnPrId: null, branch: 'b' });
+  check("getStoryBuildRow(A, B's id) is null", (await sbp.getStoryBuildRow(dc, 1, b)) === null);
+  check("getStoryBuildRow(B, B's id) is B's (mutation check)", (await sbp.getStoryBuildRow(dc, 2, b))?.id === b);
+  check("listStoryBuildRowsFor(A, B's workspace, shared ident) is empty", (await sbp.listStoryBuildRowsFor(dc, 1, defaultB, IDENT)).length === 0);
+  check("listStoryBuildRowsFor(A, A's workspace, shared ident) is A's only", (await sbp.listStoryBuildRowsFor(dc, 1, defaultA, IDENT)).map((r) => r.id).join() === String(a));
+  check("listStoryBuildRepoRows(A, B's id) is empty", (await sbp.listStoryBuildRepoRows(dc, 1, b)).length === 0);
+  check("getStoryBuildRepoPatch(A, B's id, B's repo) is null", (await sbp.getStoryBuildRepoPatch(dc, 1, b, B.repoId)) === null);
+  check("storyBuildRepoNames(A, [B's repo]) is empty", (await sbp.storyBuildRepoNames(dc, 1, [B.repoId])).size === 0);
+  check("updateStoryBuild(A, B's id) writes nothing", !(await sbp.updateStoryBuild(dc, 1, b, { status: 'discarded' })));
+  check("updateStoryBuildRepo(A, B's repo row) writes nothing", !(await sbp.updateStoryBuildRepo(dc, 1, bRepo, { status: 'failed' })));
+  check("B's session is untouched", (await sbp.getStoryBuildRow(dc, 2, b))?.status === 'plan_ready');
+  let wsFkRefused = false;
+  try {
+    await sbp.insertStoryBuild(dc, { accountId: 1, workspaceId: defaultB, ident: `${IDENT}-x`, ticketKey: 'X', ticketTitle: null, wantDiagram: false, wantDocs: false, provider: null, model: null });
+  } catch {
+    wsFkRefused = true;
+  }
+  check("a session naming B's workspace under account A is refused by the composite FK", wsFkRefused);
+  let repoFkRefused = false;
+  try {
+    await sbp.upsertStoryBuildRepo(dc, { accountId: 1, buildId: a, repoId: B.repoId, ref: 'R9', buildOrder: 0, include: true, status: 'planned', baseRef: 'main', baseSha: 'x', stackedOnPrId: null, branch: null });
+  } catch {
+    repoFkRefused = true;
+  }
+  check("a repository row naming B's repo under account A is refused by the composite FK", repoFkRefused);
+  const marks = await sprintBuildsFor(1, defaultA, [IDENT]);
+  check("sprintBuildsFor(A) sees A's session only", marks.get(IDENT)?.id === a);
+  check("sprintBuildsFor(A, B's workspace) is empty", (await sprintBuildsFor(1, defaultB, [IDENT])).size === 0);
+
+  const Fastify = (await import('fastify')).default;
+  const bapp = Fastify({ logger: false });
+  registerStoryBuildRoutes(bapp, {
+    ...dc,
+    accountIdOf: () => 1,
+    log: { info() {}, warn() {}, error() {} },
+    llm: { detectAuth: () => ({ status: 'ok' }) },
+    recordAiUsage: async () => {},
+  } as any);
+  await bapp.ready();
+  for (const [method, url, payload] of [
+    ['GET', `/api/story-builds/${b}`, undefined],
+    ['GET', `/api/story-builds/${b}/stream`, undefined],
+    ['POST', `/api/story-builds/${b}/plan/message`, { text: 'x' }],
+    ['POST', `/api/story-builds/${b}/accept`, { planRevision: 0, repos: [] }],
+    ['POST', `/api/story-builds/${b}/cancel`, {}],
+    ['POST', `/api/story-builds/${b}/discard`, {}],
+  ] as const) {
+    const r = await bapp.inject({ method, url, ...(payload ? { payload } : {}) });
+    check(`${method} ${url.replace(String(b), "<B's>")} as A → 404`, r.statusCode === 404);
+  }
+  const list = await bapp.inject({ method: 'GET', url: `/api/story-builds?workspace=${defaultB}&ident=${encodeURIComponent(IDENT)}` });
+  check(
+    "GET /api/story-builds?workspace=<B's> as A → A's default and A's session, never B's",
+    list.statusCode === 200 && list.json().workspaceId === defaultA && list.json().build?.id === a,
+  );
+  check("B's session survives A's discard", (await sbp.getStoryBuildRow(dc, 2, b))?.status === 'plan_ready');
+  await bapp.close();
+}
+
 console.log(`\nISOLATION: ${pass} passed, ${fail} failed`);
 await closeDb();
 process.exit(fail === 0 ? 0 : 1);

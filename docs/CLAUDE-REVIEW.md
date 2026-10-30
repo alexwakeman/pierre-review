@@ -682,13 +682,14 @@ Default, Low, Medium, High, Extra high, Max.
   (`review/agent.ts`: the lead, Claude's specialists through the SDK's per-agent `effort` — sent only
   when a level is chosen — and Codex's Limn-run specialists), its follow-up re-reviews (same runner),
   AI Fix and Plan first (`coding/ai-fix/manager.ts` decides it, `GenerateFixArgs.effort` /
-  `GeneratePlanArgs.effort` carry it). Claude gets it as `spec.claude.effort`
+  `GeneratePlanArgs.effort` carry it), and "Implement story"'s plan and build passes (`story_plan`,
+  `story_build`; `coding/story-build/manager.ts` decides it per pass, docs/STORY-BUILD.md). Claude gets it as `spec.claude.effort`
   (`sdkModelOptions(model, mode, effort)`), Codex as `spec.codex.effort`. Every other kind keeps
   `defaultRunEffort`. A provider switch never changes the level, only who reads it.
 - **Precedence**: an explicitly set `REVIEW_EFFORT` (one of the five) WINS and locks the control
   ("Set by REVIEW_EFFORT"; the PUT answers 409). `REVIEW_DIFF_ONLY_EFFORT`, when set, decides every
   diff-only review on both providers, at Default too. ⚠ **Both env vars reach EXACTLY what the
-  control reaches** (the review, AI Fix, Plan first) — `defaultRunEffort` reads no environment, so the
+  control reaches** (the review, AI Fix, Plan first, the story plan and build) — `defaultRunEffort` reads no environment, so the
   CI review, ticket review, diagrams, Check threads, chats and Resolve with Claude keep their fixed
   depth (Opus 5.5 medium, as under the old pin). Before 2026-10-26 these two variables also moved
   Sonnet on every Claude kind; that was dropped so the label under the control is the whole story.

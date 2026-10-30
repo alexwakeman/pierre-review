@@ -46,6 +46,8 @@ export const RESULT_TOOL_NAMES = [
   'finish_document',
   // The docs build on CODEX: record_sections + finish_document as ONE final answer (Phase 3).
   'submit_document',
+  // "Implement story": the read-only plan pass (coding/story-build/schema.ts).
+  'submit_story_plan',
 ] as const;
 export type ResultToolName = (typeof RESULT_TOOL_NAMES)[number];
 
@@ -75,6 +77,7 @@ const BUILDERS: Record<ResultToolName, ShapeBuilder> = {
   record_sections: async (z) => (await import('../reference-docs/schema.js')).buildRecordSectionsShape(z),
   finish_document: async (z) => (await import('../reference-docs/schema.js')).buildFinishShape(z),
   submit_document: async (z) => (await import('../reference-docs/schema.js')).buildSubmitDocumentShape(z),
+  submit_story_plan: async (z) => (await import('../coding/story-build/schema.js')).buildSubmitStoryPlanShape(z),
 };
 
 /** The raw zod shape the Claude tool `name` is registered with. `z` defaults to the AI runtime's. */

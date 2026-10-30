@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, asc } from 'drizzle-orm';
+import { and, desc, eq, inArray, asc, notInArray } from 'drizzle-orm';
 import {
   aiRunProvider,
   isStoryBuildOpen,
@@ -265,6 +265,22 @@ export async function updateStoryBuildRepo(ctx: Ctx, accountId: number, id: numb
     .returning({ id: r.id })
     .execute()) as Array<{ id: number }>;
   return rows.length > 0;
+}
+
+/**
+ * A re-plan dropped these repositories: delete the session's repository rows NOT in `keepRepoIds` (only
+ * rows that never built — a plan is re-made only before Accept, so none has). Scoped by account.
+ */
+export async function deleteStoryBuildRepoRowsExcept(ctx: Ctx, accountId: number, buildId: number, keepRepoIds: readonly number[]): Promise<number> {
+  const r = R(ctx);
+  const preds = [eq(r.buildId, buildId), eq(r.accountId, accountId)];
+  if (keepRepoIds.length > 0) preds.push(notInArray(r.repoId, [...keepRepoIds]));
+  const rows = (await ctx.db
+    .delete(r)
+    .where(and(...preds))
+    .returning({ id: r.id })
+    .execute()) as Array<{ id: number }>;
+  return rows.length;
 }
 
 /** The stored patch of one repository (the `…/diff` route; never part of `StoryBuild`). */
