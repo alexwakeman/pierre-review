@@ -12,7 +12,8 @@ export function Cost() {
         <h2 id="cost-h">No extra seat</h2>
         <div className="c1-txt">
           <p style={{ fontSize: 'var(--step-lead)', maxWidth: '32ch' }}>
-            No per-review fee, no new bot to pay for. Limn runs on the AI agent you already have: Claude Code or Codex.
+            No per-review fee, no new bot to pay for. Limn runs on the AI agent you already have: Claude Code or Codex,
+            both ready out of the box.
           </p>
           <p className="c1-budget">
             Want a ceiling? Give Limn a share of your weekly AI usage, 5% unless you change it, and automatic

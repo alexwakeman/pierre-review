@@ -6,6 +6,10 @@ const QUESTIONS: ReadonlyArray<{ q: string; a: string }> = [
     a: 'Nothing from us. Reviews run on your own AI agent — Claude Code or Codex — and Limn shows what each run used.',
   },
   {
+    q: 'Do I need to install Claude or Codex?',
+    a: 'No. Both work out of the box: Limn downloads them the first time it starts. You only sign in.',
+  },
+  {
     q: 'Does my code leave my machine?',
     a: 'No. Everything lives in SQLite on your disk. Your AI agent sees code only when a review runs.',
   },
