@@ -32,6 +32,7 @@ import { meRoutes } from './api/routes/me.js';
 import { openPrsRoutes } from './api/routes/open-prs.js';
 import { mergersRoutes } from './api/routes/mergers.js';
 import { insightsRoutes } from './api/routes/insights.js';
+import { aiUsageReportRoutes } from './api/routes/ai-usage-report.js';
 import { activityRoutes } from './api/routes/activity.js';
 import { searchRoutes } from './api/routes/search.js';
 import { dailyBriefRoutes } from './api/routes/daily-brief.js';
@@ -222,6 +223,8 @@ export async function buildApp(): Promise<FastifyInstance> {
   // The Claude spend budget (ai/budget.ts): GET/PUT /api/ai/budget. Not registered under
   // LIMN_AI_DISABLED.
   if (config.aiEnabled) await app.register(aiBudgetRoutes);
+  // Reports → AI usage: the ledger read back (DB only).
+  if (config.aiEnabled) await app.register(aiUsageReportRoutes);
   // The AI provider choice (Settings → AI): PUT /api/ai/provider. Same gate.
   if (config.aiEnabled) await app.register(aiProviderRoutes);
   // "Set up" for local bot-comment scoring (ml/runtime.ts). Not registered under LIMN_ML_DISABLED.

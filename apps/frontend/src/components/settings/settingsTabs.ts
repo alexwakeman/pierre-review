@@ -90,6 +90,8 @@ export const SETTINGS_FOCUS_TAB: Record<SettingsFocus, SettingsTabId> = {
   'my-turn': 'pending',
   'issue-tracker': 'integrations',
   'claude-spend': 'ai',
+  'auto-review': 'ai-review',
+  'ai-effort': 'ai',
 };
 
 /** The tab the modal opens on: the focus's tab, else the last one shown, else the first — never a

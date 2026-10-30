@@ -168,3 +168,43 @@ export function putAiBudget(req: DemoRequest, srv: DemoServer): DemoReply {
   srv.overlay.stored.set(KEY, next);
   return { status: 200, body: withOthers(srv) };
 }
+
+// ── Reports → AI usage (GET /api/ai/usage-report) ─────────────────────────────────────────────
+//
+// The report itself is RECORDED (the seeded ledger), but its cost unit is the RECORDING machine's
+// Claude credential, which the demo must neither leak nor depend on. A recording in US$ (an API key)
+// is re-worded as a share of a week by the demo's OWN simulated subscription (the same rate the
+// meter uses), so it follows a subscription picked in Settings → AI spend; any other recording is
+// served as it was (tokens only when the recording had no unit). ⚠ Never US$ beside a subscription.
+
+/** Every `claudeCost` in the body, scaled. */
+function scaleClaudeCost(v: unknown, k: number): unknown {
+  if (Array.isArray(v)) return v.map((x) => scaleClaudeCost(x, k));
+  if (!isRecord(v)) return v;
+  const out: Record<string, unknown> = {};
+  for (const [key, x] of Object.entries(v)) {
+    out[key] = key === 'claudeCost' && typeof x === 'number' ? x * k : scaleClaudeCost(x, k);
+  }
+  return out;
+}
+
+export function getAiUsageReport(req: DemoRequest, srv: DemoServer): DemoReply | null {
+  const rec = srv.recorded('GET', req.url);
+  if (!isRecord(rec)) return null;
+  if (rec.costUnit !== 'usd') return { status: 200, body: rec };
+  const rate = response(srv, 'claude').usage.weekPctPerUsd;
+  if (rate == null || !(rate > 0)) return { status: 200, body: { ...nullCosts(rec), costUnit: null } };
+  return { status: 200, body: { ...(scaleClaudeCost(rec, rate) as Record<string, unknown>), costUnit: 'week_pct' } };
+}
+
+/** With no rate there is no unit: every `claudeCost` becomes null. */
+function nullCosts(rec: Record<string, unknown>): Record<string, unknown> {
+  const strip = (v: unknown): unknown => {
+    if (Array.isArray(v)) return v.map(strip);
+    if (!isRecord(v)) return v;
+    const out: Record<string, unknown> = {};
+    for (const [key, x] of Object.entries(v)) out[key] = key === 'claudeCost' ? null : strip(x);
+    return out;
+  };
+  return strip(rec) as Record<string, unknown>;
+}

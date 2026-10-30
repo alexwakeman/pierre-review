@@ -2286,6 +2286,17 @@ if (proSeeded) {
 }
 
 // ===========================================================================
+// THE AI USAGE LEDGER (scripts/seed-demo-ai-usage.ts): Reports → AI usage. One ledger row per run
+// seeded above (the agentic seed stubs `recordAiUsage`), #116's earlier auto re-reviews, and twelve
+// weeks of history in the Platform workspace.
+// ===========================================================================
+{
+  const { seedDemoAiUsage } = await import('./seed-demo-ai-usage.js');
+  const u = await seedDemoAiUsage({ db, schema, now, workspaceId: PLATFORM_WS });
+  console.log(`  ai usage: ${JSON.stringify(u)}`);
+}
+
+// ===========================================================================
 // SETTINGS, MERGE STATE AND THE WRITTEN SUMMARIES (scripts/seed-demo-platform.ts) — last, because
 // the summaries and the work-plan wording hash what everything above wrote.
 // ===========================================================================

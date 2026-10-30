@@ -831,8 +831,9 @@ export const ciStatusEvents = sqliteTable(
 // Append-only AI-spend ledger. Every billable AI operation (LLM completion or Agent-SDK
 // run) records ONE row here, so month-to-date usage can be summed across features — the
 // per-feature cost columns (claude_reviews / repo_digests / sprint_reports / ai_* in the
-// Pro submodule) upsert-overwrite and can't be summed. Surfaced ONLY as credits (never
-// dollars) via /api/pro/ai-usage. `seam` splits summary (cheap completions) vs agent
+// Pro submodule) upsert-overwrite and can't be summed. Read by the spend budget (ai/budget.ts)
+// and Reports → AI usage (db/ai-usage-report.ts — tokens, with Claude's cost in ONE unit: US$ on an
+// API key, a share of a week on a subscription). `seam` splits summary (cheap completions) vs agent
 // (Agent-SDK runs). No FK on pr_id/repo_id — the ledger must survive PR/repo pruning.
 export const aiUsage = sqliteTable(
   'ai_usage',

@@ -170,6 +170,7 @@ import type {
   OpenPrsResponse,
   MergedPrsResponse,
   StoriesResponse,
+  AiUsageReportResponse,
   StartStoryLabelRunBody,
   StoryLabelRunResponse,
   SprintGraphResponse,
@@ -967,6 +968,9 @@ export const api = {
   // Reports → Stories: every ticket with a PR merged in the window.
   stories: (workspaceId: number) =>
     get<StoriesResponse>(withQuery('/api/stories', workspaceParam(workspaceId))),
+  // Reports → AI usage: the ledger over the reporting window + the last 12 weeks (AI on only).
+  aiUsageReport: (workspaceId: number) =>
+    get<AiUsageReportResponse>(withQuery('/api/ai/usage-report', workspaceParam(workspaceId))),
   // This Sprint (a fixed tab). The graph GET
   // stamps the workspace as viewed, which is what lets the worker read its sprint at all. Both GETs
   // are DB only.

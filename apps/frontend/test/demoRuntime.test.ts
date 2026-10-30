@@ -615,6 +615,24 @@ describe('the AI provider (Settings → AI)', () => {
     expect(chat.messages.at(-1).content).toContain('Codex is not connected');
   });
 
+  it('re-words a US$ usage report as a share of the demo subscription’s week, and leaves a unitless one alone', async () => {
+    const report = (costUnit: string | null) => ({
+      workspaceId: 1,
+      costUnit,
+      totals: { runs: 2, tokens: 100, claudeTokens: 100, codexTokens: 0, claudeCost: costUnit == null ? null : 2 },
+      groups: [{ group: 'code', figures: { runs: 2, tokens: 100, claudeTokens: 100, codexTokens: 0, claudeCost: costUnit == null ? null : 2 } }],
+    });
+    const srvUsd = new DemoServer(recording([{ method: 'GET', path: '/api/ai/usage-report?workspace=1', status: 200, body: report('usd') }]), { now: () => CAPTURED_MS });
+    const usd = await json(srvUsd, 'GET', '/api/ai/usage-report?workspace=1');
+    const rate = (await json(srvUsd, 'GET', '/api/ai/budget?provider=claude')).usage.weekPctPerUsd;
+    expect(rate).toBeGreaterThan(0);
+    expect(usd.costUnit).toBe('week_pct');
+    expect(usd.totals.claudeCost).toBeCloseTo(2 * rate);
+    expect(usd.groups[0].figures.claudeCost).toBeCloseTo(2 * rate);
+    const srvNone = new DemoServer(recording([{ method: 'GET', path: '/api/ai/usage-report?workspace=1', status: 200, body: report(null) }]), { now: () => CAPTURED_MS });
+    expect(await json(srvNone, 'GET', '/api/ai/usage-report?workspace=1')).toMatchObject({ costUnit: null, totals: { claudeCost: null } });
+  });
+
   it('signing out of Codex leaves Codex chosen but without a credential', async () => {
     const srv = make();
     await json(srv, 'PUT', '/api/ai/provider', { value: 'codex' });

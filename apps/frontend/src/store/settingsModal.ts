@@ -20,8 +20,9 @@ import type { SettingsTabId } from '../components/settings/settingsTabs.js';
 /** Which section the modal should land on when it opens — its TAB first (`SETTINGS_FOCUS_TAB`),
  *  then the section scrolled to and focused: My Turn (the Pending board's "Customise"), the
  *  workspace's issue tracker (This Sprint's "Set up in Settings"), or the Claude spend budget (the
- *  budget meter beside a Run button, the over-budget toast). */
-export type SettingsFocus = 'my-turn' | 'issue-tracker' | 'claude-spend';
+ *  budget meter beside a Run button, the over-budget toast), the workspace's auto review and the AI
+ *  section's effort (Reports → AI usage's suggestions). */
+export type SettingsFocus = 'my-turn' | 'issue-tracker' | 'claude-spend' | 'auto-review' | 'ai-effort';
 
 interface SettingsModalState {
   open: boolean;

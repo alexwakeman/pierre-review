@@ -29,6 +29,7 @@ export * from './reference-docs-quote.js';
 export * from './sprint-members.js';
 export * from './story-docs-alignment.js';
 export * from './ai-budget.js';
+export * from './ai-usage-report.js';
 export * from './ai-run-label.js';
 export * from './ai-effort.js';
 export * from './ai-provider-words.js';

@@ -2523,12 +2523,12 @@ sprint. The API route keeps its old name (`GET /api/sprint-graph`); only the SPA
   Group by ticket / List choice is the SAME per-viewer `store/openPrsView.ts`
   state as Open PRs; the repo dropdown is the tab's own local state.
 
-## The Reports pane is three tabs, and the Pending board can now merge
+## The Reports pane is three tabs (four with AI on), and the Pending board can now merge
 
-### Reports → Overview | Chronology | Stories (`insightsTab`)
+### Reports → Overview | Chronology | Stories | AI usage (`insightsTab`)
 
 `InsightsView` is a THREE-TAB pane (Overview · Chronology · Stories — Stories sits to the RIGHT of
-Chronology since 2026-10-26; This Sprint and Merged so far
+Chronology since 2026-10-26; **AI usage** joins last while `me.ai.enabled`; This Sprint and Merged so far
 left for their own rail line, above). **Overview** is the pane as it was — Flow metrics above the Period reports. **Chronology** is the COURT LEDGER panel (`BottlenecksPanel.tsx`, contract in
 [BOTTLENECKS.md](BOTTLENECKS.md)). ⚠ It renders NO PERSON — not a login, not an avatar, not a
 per-head count — and the server sends no actor ids, which makes that structural rather than a
@@ -2572,6 +2572,20 @@ convention this file has to remember.
   - ⚠ **Story health is DELETED** (2026-10-11, "not adding anything"): no `StoryHealth.tsx`, no
     `useStoryHealth`, no `GET /api/story-health`. Do not re-add a weekly-chart panel here. The label
     run's client methods (`api.startStoryLabelRun` etc.) remain with no screen calling them.
+- **AI usage** (`?insightsTab=ai-usage`, `AiUsageView.tsx` + pure `aiUsageModel.ts`,
+  `test/aiUsageModel.test.ts`; `GET /api/ai/usage-report`, `useAiUsageReport`, key
+  `['ai-usage-report','ws:<id>']`) — where Limn's own AI runs went over the REPORTING WINDOW: totals,
+  "Tokens over time" (a stacked `BarChart` by feature, By day | By week — the week fold is the SPA's),
+  "Where it goes" (`RepoRows`: tokens split Claude | Codex, runs, and the cost column only when the
+  response has a unit), "Top pull requests" (each opens its PR tab) and "Top stories" (each opens its
+  story tab via `useOpenStory()`), **"Last 12 weeks"** (the LABELLED exception, with the trend words
+  from the server's slope) and "Ways to use fewer tokens" (the server's suggestions: fact, saving, a
+  settings button — `openSettings('auto-review' | 'ai-effort')` — and the PRs behind it; then its
+  facts). ⚠ The tab is in the strip only while `me.ai.enabled`, and that condition lives in the PANE:
+  `effectiveInsightsTab` keeps `'ai-usage'`, so a bookmark still seats it and the pane says AI is
+  off. ⚠ Every cost goes through `usageCostText`; the wire carries no US$ on a subscription. The
+  sidebar AI usage popover's "Usage report" opens this tab. The static demo serves the RECORDED report
+  re-worded by its own simulated subscription (`src/demo/aiBudget.ts` `getAiUsageReport`).
 - ⚠ **`BottlenecksPanel` holds NO gate of its own**, which is what keeps its
   "Measuring…" / "Could not load this workspace's flow." branch a two-state question about the
   REQUEST. `useFlowFindings` gates its own `enabled`

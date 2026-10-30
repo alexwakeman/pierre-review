@@ -4,6 +4,8 @@ import { BottlenecksPanel } from './BottlenecksPanel.js';
 import { effectiveInsightsTab } from './bottlenecksModel.js';
 import { PeriodReportsPanel } from './PeriodReportsPanel.js';
 import { StoriesView } from './StoriesView.js';
+import { AiUsageView } from './AiUsageView.js';
+import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
 import { WorkspaceFlowMetrics } from './WorkspaceFlowMetrics.js';
 import { PageHeader, SectionHeading } from './reportChrome.js';
 import { Tabs, useRegisterCommands, type Command, type TabItem } from '../ui/index.js';
@@ -17,6 +19,10 @@ const REPORT_TABS: readonly TabItem<InsightsInnerTab>[] = [
   { id: 'bottlenecks', label: 'Chronology' },
   { id: 'stories', label: 'Stories' },
 ];
+// "AI usage" joins the strip only where agentic AI runs (`me.ai.enabled`). The condition lives HERE,
+// in the pane, never in `effectiveInsightsTab`: a bookmarked `?insightsTab=ai-usage` still lands on
+// the tab, which then says AI is off.
+const AI_USAGE_TAB: TabItem<InsightsInnerTab> = { id: 'ai-usage', label: 'AI usage' };
 
 // The "Reports" pane — the Activity rail entry formerly labelled "Insights" (the store value
 // behind it is still `activityRepoId === 'insights'`; see Activity/index.tsx).
@@ -28,6 +34,8 @@ const REPORT_TABS: readonly TabItem<InsightsInnerTab>[] = [
 //     where people's time went.
 //   • Stories    — every tracker ticket with a PR merged in the REPORTING WINDOW: two charts and
 //     the lists (StoriesView, GET /api/stories). Sits to the RIGHT of Chronology.
+//   • AI usage   — where Limn's own AI runs went, with token-saving suggestions (AiUsageView,
+//     GET /api/ai/usage-report). Last, and only while AI is on.
 // ("Merged so far" and "This sprint" LEFT this pane for the This Sprint tab —
 // Sprint/SprintTabView; a legacy `?insightsTab=sprint|merged` lands there.)
 //
@@ -41,6 +49,11 @@ export function InsightsView(): JSX.Element {
   const innerTab = useFilters((s) => s.insightsInnerTab);
   const setInnerTab = useFilters((s) => s.setInsightsInnerTab);
   const effectiveTab = effectiveInsightsTab(innerTab);
+  const aiEnabled = useAiCapabilities().enabled;
+  const tabs = useMemo(
+    () => (aiEnabled || effectiveTab === 'ai-usage' ? [...REPORT_TABS, AI_USAGE_TAB] : REPORT_TABS),
+    [aiEnabled, effectiveTab],
+  );
   // `workspaceId === null` means "not resolved yet" — the hook holds itself idle until then, so
   // this reads `undefined` rather than another workspace's numbers.
   const metrics = useWorkspaceMetrics(workspaceId);
@@ -64,6 +77,9 @@ export function InsightsView(): JSX.Element {
     return [
       { id: 'reports:grain:sprint', group: 'Actions', title: 'Period reports by sprint', icon, run: () => { f().setInsightsInnerTab('overview'); f().setInsightsReportGrain('sprint'); } },
       { id: 'reports:grain:month', group: 'Actions', title: 'Period reports by month', icon, run: () => { f().setInsightsInnerTab('overview'); f().setInsightsReportGrain('month'); } },
+      ...(aiEnabled
+        ? [{ id: 'reports:ai-usage', group: 'Actions' as const, title: 'Reports: AI usage', keywords: ['tokens', 'spend', 'cost'], icon, run: () => f().setInsightsInnerTab('ai-usage') }]
+        : []),
       metric('merges', 'Merged'),
       metric('lead_time', 'Time to merge'),
       metric('review_latency', 'Time to first review'),
@@ -71,7 +87,7 @@ export function InsightsView(): JSX.Element {
       metric('ci_recovery', 'Time to fix red checks'),
       metric('ci_red', 'Red checks now'),
     ];
-  }, []);
+  }, [aiEnabled]);
   useRegisterCommands('reports', commands);
 
   return (
@@ -86,7 +102,7 @@ export function InsightsView(): JSX.Element {
           numberKeys
           value={effectiveTab}
           onChange={setInnerTab}
-          tabs={REPORT_TABS}
+          tabs={tabs}
         />
       </PageHeader>
 
@@ -94,6 +110,8 @@ export function InsightsView(): JSX.Element {
         <BottlenecksPanel />
       ) : effectiveTab === 'stories' ? (
         <StoriesView />
+      ) : effectiveTab === 'ai-usage' ? (
+        <AiUsageView />
       ) : (
         <>
           {/* `WorkspaceFlowMetrics` self-hides when there is nothing to measure, so the empty

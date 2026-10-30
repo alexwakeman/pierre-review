@@ -72,8 +72,12 @@ export type RepoConsoleTab = 'activity' | 'bots';
 // an Activity rail line before that). The two literals still sit in bookmarks and in history entries
 // Back replays (`?insightsTab=sprint|merged`), so useUrlState's READ maps them onto the tab + its
 // sub-tab; they are never emitted again.
-export type InsightsInnerTab = 'overview' | 'stories' | 'bottlenecks';
-export const INSIGHTS_INNER_TABS: readonly InsightsInnerTab[] = ['overview', 'bottlenecks', 'stories'];
+//
+// `'ai-usage'` is the "AI usage" tab (`?insightsTab=ai-usage`): where Limn's own AI runs went. It is
+// on screen only while AI is on (`me.ai.enabled`); that condition lives in the PANE's strip, never
+// in the derive, so a bookmarked `?insightsTab=ai-usage` still seats it (the pane then says AI is off).
+export type InsightsInnerTab = 'overview' | 'stories' | 'bottlenecks' | 'ai-usage';
+export const INSIGHTS_INNER_TABS: readonly InsightsInnerTab[] = ['overview', 'bottlenecks', 'stories', 'ai-usage'];
 // The This Sprint tab's sub-tab strip (FREE on every tier): three independent views of the
 // sprint on one lane board — `'themes'` (Theme, the landing panel), `'paths'` (Critical path) and
 // `'people'` (People) — then `'merged'` ("Merged so far", MergedPrsView — every PR merged in the

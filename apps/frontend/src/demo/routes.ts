@@ -17,7 +17,7 @@ import {
 import { normalisePath } from './recording.js';
 import type { DemoReply, DemoRequest, DemoRoute, DemoServer } from './server.js';
 import { fakeSha, isRecord, notInDemo } from './util.js';
-import { getAiBudget, putAiBudget } from './aiBudget.js';
+import { getAiBudget, getAiUsageReport, putAiBudget } from './aiBudget.js';
 import { activeProvider, aiState, DEMO_CODEX_PLAN, ranOnNow, setAiState } from './provider.js';
 
 const OK = (body: unknown): DemoReply => ({ status: 200, body });
@@ -322,6 +322,8 @@ export const ROUTES: DemoRoute[] = [
   // The Claude spend budget: simulated, never recorded (aiBudget.ts says why).
   { method: 'GET', re: /^\/api\/ai\/budget$/, run: (req, _m, srv) => getAiBudget(req, srv) },
   { method: 'PUT', re: /^\/api\/ai\/budget$/, run: (req, _m, srv) => putAiBudget(req, srv) },
+  // Reports → AI usage: recorded, its cost re-worded by the demo's own subscription (aiBudget.ts).
+  { method: 'GET', re: /^\/api\/ai\/usage-report$/, run: (req, _m, srv) => getAiUsageReport(req, srv) },
   // The AI provider choice and the Codex sign-in: simulated (provider.ts). A ChatGPT sign-in in the
   // demo completes at once, with no page to open.
   {

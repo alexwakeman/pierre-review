@@ -60,6 +60,10 @@ function codexLine(c: AiCodexProviderStatus): string {
   return c.message ?? 'Not signed in.';
 }
 
+/** The heading the modal lands on for `openSettings('ai-effort')` (Reports → AI usage): the AI
+ *  section, whose Effort control sits under it. */
+export const AI_SECTION_HEADING_ID = 'settings-ai';
+
 export function AiProviderSection(): JSX.Element | null {
   const me = useMe().data;
   const ai = me?.ai;
@@ -97,7 +101,7 @@ export function AiProviderSection(): JSX.Element | null {
   const chosen = set.isPending && set.variables != null ? set.variables : setting.value;
 
   return (
-    <SectionShell title="AI" info={info} desc={`Default: ${aiProviderName(ai.provider)}.`}>
+    <SectionShell title="AI" headingId={AI_SECTION_HEADING_ID} info={info} desc={`Default: ${aiProviderName(ai.provider)}.`}>
       <fieldset disabled={fromEnv || set.isPending} className="flex flex-wrap items-center gap-3 text-body">
         <legend className="sr-only">Automatic runs and default</legend>
         <span aria-hidden="true" className="text-ui-ink">

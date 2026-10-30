@@ -141,6 +141,9 @@ const STRICTNESS_ROWS: Array<{ value: PairVerdictStrictness; label: string }> = 
   { value: 'strict', label: 'Strict: approve only if both approve' },
   { value: 'relaxed', label: 'Relaxed: approve if one approves and the other raises nothing that blocks' },
 ];
+/** The heading the modal lands on for `openSettings('auto-review')` (Reports → AI usage). */
+export const AUTO_REVIEW_SECTION_HEADING_ID = 'settings-auto-review';
+
 export function AutoReviewSection(): JSX.Element {
   const { workspaceId } = useSettingsWorkspace();
   const settings = useWorkspaceAutoReview(true, workspaceId);
@@ -264,6 +267,7 @@ export function AutoReviewSection(): JSX.Element {
   return (
     <SectionShell
       title="Auto review"
+      headingId={AUTO_REVIEW_SECTION_HEADING_ID}
       desc={`${ai.providerName} reviews each new PR a person opens in this workspace, with the same model and budget as the Review button. It runs on ${aiCredentialWords(ai.provider)}.`}
       info={
         <InfoButton title="Auto review">
