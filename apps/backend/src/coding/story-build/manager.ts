@@ -93,13 +93,16 @@ import { registerStoryBuildLane, storyBuildDeps, type RepoBuildResult, type Stor
 //             earlier ones' worktrees (WP2 `buildRepo`). ≥ 1 ready ⇒ `ready`; none ⇒ `failed`.
 //   CANCEL    aborts the pass in flight (or drops it from its lane). A first plan ⇒ cancelled; a re-plan
 //             ⇒ the plan as it was; a build ⇒ the repositories not built yet go `cancelled`.
-//   DISCARD   any state with nothing running ⇒ discarded (the ledger then sweeps the kept trees).
+//   DISCARD   any state with nothing running (and no push in flight) ⇒ discarded; the kept write trees
+//             are released at once (the patches stay). Cancel / Discard / Accept stop a docs run.
+//   DOCS      WP3's docs-runner.ts owns the docs queue (`requestStoryBuildDocs`); its progress is forwarded
+//             to this session's SSE; a re-plan waits while a docs run holds the session.
 //   RESTART   `reconcileStoryBuildsOnStartup`: a pass a restart cut off never stays "running".
 //
 // SPEND: every pass asks the SESSION budget (STORY_BUILD_SESSION_BUDGET_USD) and its own cap; a pass is
 // refused below STORY_BUILD_MIN_BUDGET_LEFT_USD left. Manual runs: no `automaticRunAllowed` gate (the SPA
-// asks before the click). The ledger: Claude's rows are written here (or by WP2's runner for a build —
-// see `recordBuildUsage`); a Codex run writes its own (`ledgerByProvider`).
+// asks before the click). The ledger: the plan pass's Claude row is written here (a Codex run writes its
+// own, `ledgerByProvider`); a build's row is ALWAYS `buildRepo`'s own (WP2) — the manager writes none.
 
 export const RESTART_LINE = 'Stopped when Limn restarted.';
 export const NO_STORY_LINE = 'There is no story text or criteria to build from.';

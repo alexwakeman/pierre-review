@@ -241,9 +241,11 @@ own answer `submit_build_docs` (`review/story-docs/schema.ts`, strict form in `a
 - **Provider and spend**: a follow-up on the session's provider when it can run `story_docs`, else the default
   (`buildDocsProvider`); the read's US$ cap is min(`STORY_DOCS_ALIGNMENT_BUDGET_USD`, the session's remaining
   budget); below $0.25 left ⇒ `409 SessionBudgetSpent`.
-- **The queue** (`docs-runner.ts`): one claim per session, taken synchronously; one FIFO lane (≤ 10 ⇒ `409
-  Busy`); a registered review-slot PEER (read-only pass). A throw, a timeout (10 min), an abort
-  (`abortStoryBuildDocs` — WP1 calls it on Cancel / Discard / Accept) or a restart
+- **The queue** (`docs-runner.ts`, THE one docs queue): ONE entry, `requestStoryBuildDocs` (the route, and
+  "Check against docs" at Start once the first plan pass has ended); one claim per session, taken
+  synchronously; one FIFO lane (≤ 10 ⇒ `409 Busy`); a registered review-slot PEER (read-only pass). A chat
+  re-plan answers `409 NotReady` while a docs run holds the session (both write `docs_json`). A throw, a timeout (10 min), an abort
+  (`abortStoryBuildDocs` — the manager calls it on Cancel / Discard / Accept) or a restart
   (`reconcileStoryBuildDocsOnStartup`, kicked from `registerStoryBuildDocsRoutes`) all end `failed` with a
   sentence — never stuck `running`. Progress: `onStoryBuildDocsProgress` (the manager forwards each event to the
   session SSE; `{kind:'done'}` ends a run) and `phase` on the row while no plan/build pass owns it.
@@ -309,7 +311,8 @@ one repository at a time, in plan order.
 - **Refs** (`AC2`, `M1`, `R1`) are quoted OUTSIDE the fences (YOUR REFS, report labels); a plan whose refs
   are not that plain shape (`STORY_BUILD_REF_SHAPE`) is refused before any checkout.
 - **Retry** goes through the MANAGER's lane: the manager registers `seams.ts registerStoryBuildLane({retryRepo})`
-  (one build at a time per machine); until it does, `POST …/retry` answers 503.
+  (one build at a time per machine) from `registerStoryBuildRoutes`. Retry and Discard answer 409 while a push of
+  the session is in flight (a push releases a kept tree a later build reads).
 - **The sweep** (`worktree-gc-policy.ts storyBuildRepoStates`): running while the repository is
   `preparing/building/checking`; `unpushed` (pinned up to `WORKTREE_PIN_DAYS`) while `ready` with a patch;
   released when pushed, failed, cancelled, skipped, or the session is discarded / cancelled.

@@ -7,11 +7,11 @@
 //   3. chat re-plan: the reader's message + the reply in the transcript, revision + 1, STEERING fenced in the
 //      prompt; refused at the revision cap and below the plan budget; a failed re-plan KEEPS the plan;
 //   4. accept: 409 PlanMoved on a stale revision, 400 on a bad branch; the build runs IN PLAN ORDER, a later
-//      repository given the earlier one, docs decisions FROZEN, Claude's build spend in the ledger;
+//      repository given the earlier one, docs decisions FROZEN, no second build ledger row (buildRepo's own);
 //   5. tenancy: another account's session id is 404 on EVERY route; `?workspace=` of another account
 //      falls back to the caller's Default; the SSE of a session with nothing running ends at once;
 //   6. cancel mid-plan ⇒ cancelled; discard refuses while running, frees the ticket after;
-//   7. "Check against docs" at Start runs WP3's docs run after the first plan (the stub ⇒ refused);
+//   7. "Check against docs" at Start asks WP3's docs queue after the first plan (no built docs ⇒ refused);
 //   8. the restart reconcile: nothing stays "running".
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -361,7 +361,8 @@ describe('start → plan_ready', () => {
       ['ready', true, 1.25],
     ]);
     expect(b.totalCostUsd).toBe(1.5 + 2.5);
-    expect(usage.filter((u) => u.feature === 'story_build')).toHaveLength(2);
+    // ⚠ The build's ledger row is `buildRepo`'s own (WP2): the manager writes none, so a fake writes none.
+    expect(usage.filter((u) => u.feature === 'story_build')).toHaveLength(0);
     expect(JSON.stringify(b)).not.toContain('diff --git');
     // Nothing more to accept or re-plan.
     expect((await post(`/api/story-builds/${id}/plan/message`, { text: 'x' })).json().error).toBe('NotReady');
@@ -414,14 +415,17 @@ describe('cancel, docs, refusals', () => {
     expect((await post(`/api/story-builds/${id}/cancel`, {})).json()).toEqual({ status: 'idle' });
   });
 
-  it('"Check against docs" at Start runs the docs run after the first plan (the stub ⇒ refused)', async () => {
+  it('"Check against docs" at Start asks the docs queue after the first plan (no built docs ⇒ refused)', async () => {
     const r = await start(IDENT2, 1, { docs: true });
     expect(r.statusCode).toBe(202);
     await M._storyBuildIdleForTest();
-    await new Promise((x) => setTimeout(x, 20));
-    await M._storyBuildIdleForTest();
+    for (let i = 0; i < 100; i += 1) {
+      if ((await P.getStoryBuildRow(ctx, 1, r.json().buildId))?.docsStatus === 'refused') break;
+      await new Promise((x) => setTimeout(x, 10));
+    }
     const b = (await get(`/api/story-builds/${r.json().buildId}`)).json();
-    expect(docsCalls).toBe(1);
+    // The workspace has no built docs: refused before any run (the e2e flow test drives a real run).
+    expect(docsCalls).toBe(0);
     expect(b).toMatchObject({ status: 'plan_ready', docsStatus: 'refused' });
   });
 });

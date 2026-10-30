@@ -74,7 +74,7 @@ const decisionsBody = {
 
 export function registerStoryBuildDocsRoutes(app: FastifyInstance, ctx: AgentContext): void {
   // A restart cut off any docs run that was going: fail it (never stuck on "running").
-  void reconcileStoryBuildDocsOnStartup(ctx).catch((err) => ctx.log.warn({ err }, 'story build docs: startup reconcile failed'));
+  if (AGENTIC_AI_ENABLED) void reconcileStoryBuildDocsOnStartup(ctx).catch((err) => ctx.log.warn({ err }, 'story build docs: startup reconcile failed'));
 
   app.post(STORY_BUILD_API.docs, { schema: docsBody }, async (req, reply): Promise<StoryBuildDocsResponse | ErrorBody> => {
     if (!AGENTIC_AI_ENABLED) return notFound(reply);
