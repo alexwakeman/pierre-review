@@ -28,7 +28,14 @@
 //   CLICK    the card opens the STORY TRAY beside the board (Sprint/SprintStoryTray.tsx — the story
 //            view's own body; `onSelect`). The open card wears the accent ring (the selection colour).
 //            The small arrow in the corner opens the story TAB (`onOpen` — `useOpenStory`).
-import type { SprintGraphNode } from '@pierre-review/shared';
+//   BUILD    "Implement story" (docs/STORY-BUILD.md, owner decision 4): beside the corner arrow, a second
+//            icon button (`BuildIcon`, the same hover/focus/touch reveal, ONE height) — "Implement KEY" —
+//            ONLY on a card `storyBuildOffered` allows (a sprint ticket, Not started, no pull request, no
+//            open session) and only when the board passes `onImplement` (AI on). Hidden, never disabled.
+//            Once a session is open the card wears its MARK beside the key (`storyBuildMark`: Building… /
+//            Plan ready / Ready to push / Pushed — words, no border; in the accessible name and the
+//            board's key) and the same corner button opens the build tab (`useOpenStoryBuild`).
+import { STORY_BUILD_MARK_WORDS, storyBuildMark, storyBuildOffered, type SprintGraphNode } from '@pierre-review/shared';
 import {
   hasLivePr,
   TICKET_CARD_MARK_LABEL,
@@ -39,7 +46,7 @@ import {
   ticketCodeNote,
 } from '../lib/laneBoard.js';
 import { cx, FOCUS_RING } from './ui/cx.js';
-import { ArrowIcon, CriticalPathIcon, PullRequestIcon, RefreshIcon, WaitingIcon, WarningIcon } from './Icons.js';
+import { ArrowIcon, BuildIcon, CriticalPathIcon, PullRequestIcon, RefreshIcon, WaitingIcon, WarningIcon } from './Icons.js';
 
 export function TicketCard({
   node,
@@ -53,6 +60,7 @@ export function TicketCard({
   onOpen,
   cardRef,
   codeMarker = false,
+  onImplement,
 }: {
   node: SprintGraphNode;
   critical: boolean;
@@ -72,6 +80,8 @@ export function TicketCard({
   cardRef?: (el: HTMLElement | null) => void;
   /** The board's Needs code filter is on: a ticket not judged yet says so beside its key. */
   codeMarker?: boolean;
+  /** Open the ticket's build tab ("Implement story"). Absent ⇒ no build button (AI off). */
+  onImplement?: (node: SprintGraphNode) => void;
 }): JSX.Element {
   // "No owner" and "Unassigned" would say one thing twice on the person line's views.
   const tags = ticketCardTags(node).filter((t) => !(show === 'person' && t === 'No owner'));
@@ -83,6 +93,10 @@ export function TicketCard({
   const marker = codeMarker ? (code?.marker ?? null) : null;
   // 'outside' is the recessed ground (and the column it sits in), not an icon.
   const marks = ticketCardMarks({ critical, waiting, ghost: node.ghost }).filter((m) => m !== 'outside');
+  // "Implement story": the session's mark, and whether the corner build button shows at all.
+  const buildMark = onImplement != null ? storyBuildMark(node.build) : null;
+  const offered = onImplement != null && storyBuildOffered(node);
+  const buildButton = offered || buildMark != null;
 
   const name = [
     `${node.key}: ${title}`,
@@ -98,6 +112,7 @@ export function TicketCard({
     critical ? 'on a critical path' : null,
     waiting ? 'waiting on another ticket' : null,
     code?.tooltip ?? null,
+    buildMark != null ? `build: ${STORY_BUILD_MARK_WORDS[buildMark]}` : null,
     'shows its story beside the board',
   ]
     .filter(Boolean)
@@ -110,6 +125,7 @@ export function TicketCard({
       data-pr={withPr ? 'true' : undefined}
       data-selected={selected ? 'true' : undefined}
       data-marks={marks.length > 0 ? marks.join(' ') : undefined}
+      data-build={buildMark ?? undefined}
       className={cx(
         'group relative flex w-full min-w-0 flex-col rounded-ui',
         'motion-safe:transition-colors motion-safe:duration-ui-fast',
@@ -128,7 +144,7 @@ export function TicketCard({
         onClick={() => onSelect(node)}
         className={cx('hit flex w-full min-w-0 flex-col rounded-ui px-2.5 py-2 text-left', FOCUS_RING)}
       >
-        <span className="flex h-4 min-w-0 items-center gap-1 pr-5 [@media(hover:hover)]:pr-0">
+        <span className={cx('flex h-4 min-w-0 items-center gap-1 [@media(hover:hover)]:pr-0', buildButton ? 'pr-12' : 'pr-5')}>
           {/* Has an open or merged pull request: the pull-request mark, before the key. */}
           {withPr && (
             <span aria-hidden data-testid="ticket-pr-dot" title="Has a pull request" className="flex shrink-0 text-ui-mute">
@@ -147,6 +163,21 @@ export function TicketCard({
               {m === 'critical' ? <CriticalPathIcon size={12} /> : <WaitingIcon size={12} />}
             </span>
           ))}
+          {buildMark != null && (
+            <span
+              aria-hidden
+              data-testid="ticket-build-mark"
+              title={`Build: ${STORY_BUILD_MARK_WORDS[buildMark]}`}
+              className={cx('flex min-w-0 shrink items-center gap-0.5 truncate text-meta', buildMark === 'ready_to_push' || buildMark === 'plan_ready' ? 'font-medium text-ui-ink' : 'text-ui-mute')}
+            >
+              {buildMark === 'building' ? (
+                <RefreshIcon size={10} className="shrink-0 animate-spin motion-reduce:animate-none" />
+              ) : (
+                <BuildIcon size={11} className="shrink-0" />
+              )}
+              <span className="truncate">{STORY_BUILD_MARK_WORDS[buildMark]}</span>
+            </span>
+          )}
           {marker != null && (
             <span aria-hidden data-testid="ticket-code-marker" className="ml-auto shrink-0 truncate text-meta italic text-ui-mute">
               {marker}
@@ -207,6 +238,23 @@ export function TicketCard({
           </span>
         </span>
       </button>
+      {buildButton && onImplement != null && (
+        <button
+          type="button"
+          data-testid="ticket-implement"
+          onClick={() => onImplement(node)}
+          aria-label={buildMark != null ? `Open ${node.key}'s build: ${STORY_BUILD_MARK_WORDS[buildMark]}` : `Implement ${node.key}`}
+          title={buildMark != null ? 'Open the build' : 'Implement this story'}
+          className={cx(
+            'absolute right-8 top-1 flex h-6 w-6 items-center justify-center rounded-ui text-ui-faint hover:bg-ui-raise hover:text-ui-ink touch:right-12 touch:h-10 touch:w-10',
+            // The corner arrow's reveal: on hover or focus with a mouse, always there on touch.
+            'group-hover:bg-ui-hover [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:group-focus-within:opacity-100',
+            FOCUS_RING,
+          )}
+        >
+          <BuildIcon size={12} />
+        </button>
+      )}
       <button
         type="button"
         onClick={() => onOpen(node)}

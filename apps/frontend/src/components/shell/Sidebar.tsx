@@ -9,6 +9,7 @@ import { useRepos } from '../../hooks/useTimeline.js';
 import { useMe, useWorkspaceOpenPrs } from '../../hooks/useTriage.js';
 import { openPrsTabCount } from '../../lib/openPrsTab.js';
 import { storyTabLabels } from '../../lib/ticketTab.js';
+import { storyBuildTabLabels } from '../../lib/storyBuildTab.js';
 import { CI_META, DERIVED_STATE_META, relativeTime } from '../../lib/ui.js';
 import { useFilters } from '../../store/filters.js';
 import { usePinnedTabs, type Tab } from '../../store/pinnedTabs.js';
@@ -226,6 +227,8 @@ export function tabWords(tab: Tab): string {
       return `#${tab.meta?.number ?? ''} ${tab.meta?.title ?? ''} · PR focus`;
     case 'ticket':
       return storyTabLabels(tab.ticketMeta?.key).chip;
+    case 'story-build':
+      return storyBuildTabLabels(tab.ticketMeta?.key).chip;
     case 'user-activity':
       return tab.userMeta?.login ?? tab.userMeta?.displayName ?? 'Contributor';
     case 'bot-detail':
