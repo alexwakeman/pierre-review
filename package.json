@@ -18,6 +18,8 @@
     "package": "node scripts/build-release.mjs",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
+    "test:slow": "pnpm --filter @pierre-review/backend test:slow",
+    "test:all": "pnpm -r --if-present run test:all",
     "verify:ui": "node scripts/ui-smoke.mjs",
     "demo": "node scripts/demo-stack.mjs",
     "shots": "node scripts/demo-stack.mjs --shots",
