@@ -19,8 +19,9 @@ import '../pages/legal.css';
  * that HAS changed is a compliance problem, and three separately-maintained dates
  * is the shape in which one of them gets forgotten.
  *
- * Last moved when Limn became local-only and free (all three rewritten). */
-export const LEGAL_LAST_UPDATED = '22 October 2026';
+ * Last moved when the terms gained the AI safeguards and liability sections, and the
+ * privacy policy's download line changed (Claude and Codex download on first start). */
+export const LEGAL_LAST_UPDATED = '30 October 2026';
 
 /** The controller's contact point, referenced from all three documents. */
 export const LEGAL_CONTACT_EMAIL = 'wakemana@gmail.com';

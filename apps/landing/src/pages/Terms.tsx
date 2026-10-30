@@ -14,7 +14,7 @@ import {
   UL,
 } from '../components/legal';
 
-// Terms of use. Kept short and readable.
+// Terms and conditions. Kept short and readable.
 //
 // There is no hosted service any more, so there are no accounts, no billing and no
 // service levels to describe. What is left: this website (marketing pages, the demo,
@@ -22,9 +22,12 @@ import {
 // at the repository root, NOT by this page. §3 summarises that licence and says the
 // licence wins; FREE_TEAM_SIZE mirrors it.
 //
-// The two clauses that genuinely matter are §4 (you are responsible for what you point
-// Limn at, because it reads repositories with your token) and §5 (AI output is a
-// suggestion, not a review you can rely on).
+// The clauses that genuinely matter: §4 (you are responsible for what you point Limn
+// at, because it reads repositories with your token), §5 (AI output is a suggestion,
+// and you review anything pushed), §6 (what we do against leaks and prompt injection,
+// stated as effort, never as a guarantee — every safeguard named there exists in the
+// code: review/path-guard.ts, the no-shell tool lists, the Codex ALLOW-list hook and
+// LOCKED_SETTINGS, the push gate) and §7 (as is; liability rests with you).
 
 const LINK = LEGAL_LINK;
 
@@ -34,7 +37,7 @@ export default function Terms(): JSX.Element {
   return (
     <LegalPage
       pigment="madder"
-      title="Terms of use"
+      title="Terms and conditions"
       intro={
         <>
           <p>
@@ -131,7 +134,7 @@ export default function Terms(): JSX.Element {
         </P>
         <P>On this website, you agree not to:</P>
         <UL>
-          <li>probe, scan or overload the site (security research is welcome — see §7);</li>
+          <li>probe, scan or overload the site (security research is welcome — see §8);</li>
           <li>use the contact form to send spam or anything unlawful.</li>
         </UL>
       </LegalSection>
@@ -145,13 +148,60 @@ export default function Terms(): JSX.Element {
           switch on the automatic setting yourself.
         </P>
         <P>
-          You are responsible for anything you post, merge or act on. We accept no liability
-          for a defect an AI review failed to find, or for a change made on the strength of
-          one.
+          <T>You are responsible for reviewing anything that is posted or pushed</T>, and for
+          anything you merge or act on. We accept no liability for a defect an AI review failed
+          to find, or for a change made on the strength of one.
+        </P>
+        <P>
+          <T>Only frontier models are supported</T> for the AI coding tools (AI Review, AI Fix and
+          the conflict resolver): the Claude models {SITE_NAME} offers, through Claude Code or an
+          Anthropic API key, and the Codex models it offers, through a ChatGPT sign-in. Their
+          safeguards and their judgement are part of what keeps a run safe. Pointing{' '}
+          {SITE_NAME} at any other model is unsupported and at your own risk.
         </P>
       </LegalSection>
 
-      <LegalSection id="liability" heading="6. No warranty, and liability">
+      <LegalSection id="safeguards" heading="6. What we do to keep your code safe">
+        <P>
+          The AI features read code that other people wrote, and that code can try to instruct
+          the model. We put a lot of effort into preventing data leaks, malicious prompt injection
+          and unexpected calls to your computer:
+        </P>
+        <UL>
+          <li>
+            <T>A path guard.</T> Every file an agent reads or writes is checked against the
+            pull request&apos;s own working copy. Paths outside it are refused.
+          </li>
+          <li>
+            <T>No shell for reviewers.</T> A review or a chat can only read. The fixer can edit
+            files but cannot run commands, so it builds and tests nothing.
+          </li>
+          <li>
+            <T>Allow-listed tools.</T> Each agent gets a fixed list of tools. Anything else is
+            refused before it runs.
+          </li>
+          <li>
+            <T>Sandboxing.</T> Agents work in a throwaway copy of the repository, with no web
+            access, and apart from your own Claude Code and Codex settings, plugins and connected
+            accounts.
+          </li>
+          <li>
+            <T>Untrusted input.</T> Anything an agent reads from a pull request is treated as
+            untrusted, never as an instruction from you.
+          </li>
+          <li>
+            <T>Nothing pushed without you.</T> Nothing is posted to GitHub or pushed until you
+            press the button, unless you switch on an automatic setting yourself.
+          </li>
+        </UL>
+        <P>
+          <T>None of this is a guarantee.</T> Models and the tools around them change, and new
+          attacks appear. You remain responsible for what you run {SITE_NAME} on and for
+          reviewing what it produces.
+        </P>
+      </LegalSection>
+
+      <LegalSection id="liability" heading="7. As is, and liability">
         <P>
           {SITE_NAME} and this website are provided <T>as is</T>, with no warranty of any kind,
           including merchantability, fitness for a particular purpose and non-infringement.
@@ -159,15 +209,16 @@ export default function Terms(): JSX.Element {
           there.
         </P>
         <P>
-          To the fullest extent the law allows, we are not liable for indirect or
-          consequential loss, lost profits, lost data or business interruption. Nothing here
-          limits liability for death or personal injury caused by negligence, for fraud, or
-          for anything else that cannot lawfully be limited — and if you are a consumer, your
-          statutory rights are unaffected.
+          <T>You use {SITE_NAME} at your own risk, and all liability for that use rests with
+          you.</T> To the fullest extent the law allows, we are not liable for any loss, including
+          indirect or consequential loss, lost profits, lost data, a leaked secret, a defect
+          shipped or business interruption. Nothing here limits liability for death or personal
+          injury caused by negligence, for fraud, or for anything else that cannot lawfully be
+          limited — and if you are a consumer, your statutory rights are unaffected.
         </P>
       </LegalSection>
 
-      <LegalSection id="security" heading="7. Security reports">
+      <LegalSection id="security" heading="8. Security reports">
         <P>
           Found a security problem? Report it privately to <Mail /> rather than opening a
           public issue. We will not pursue good-faith testing that does not degrade the site
@@ -175,7 +226,7 @@ export default function Terms(): JSX.Element {
         </P>
       </LegalSection>
 
-      <LegalSection id="changes" heading="8. Changes to these terms">
+      <LegalSection id="changes" heading="9. Changes to these terms">
         <P>
           We will update the date at the top when these terms change. Every revision is in the
           public git history.
