@@ -155,8 +155,8 @@ read scopes the account (wrong owner ⇒ 404). Registered only from `review/agen
 | `POST …/:id/repos/:repoId/retry` | rebuild one repository | ai + ai_hourly | 2 |
 | `GET …/:id/repos/:repoId/diff` | `StoryBuildDiffResponse` | read | 2 |
 | `POST …/:id/repos/:repoId/push` · `POST …/:id/push` | `StoryBuildPushBody` → `StoryBuildPushResponse` | github_write | 2 |
-| `POST …/:id/docs` | docs consideration run | ai + ai_hourly | 3 |
-| `PUT …/:id/docs/decisions` | `StoryBuildDocsDecisionsBody` (DB only) | read | 3 |
+| `POST …/:id/docs` | `StoryBuildDocsBody` → 202/200 `StoryBuildDocsResponse` (`started` · `already_running` · `current` · `refused`) | ai + ai_hourly | 3 |
+| `PUT …/:id/docs/decisions` | `StoryBuildDocsDecisionsBody` → the decisions in force (DB only) | read | 3 |
 
 Error codes: shared `StoryBuildErrorCode`.
 
@@ -169,12 +169,51 @@ only when present, so a sprint with no session keeps its old token. The board fe
 
 ## Docs consideration _(WP3)_
 
-A `build` mode of the story-docs pipeline (shortlist, inline sections, `validateDocReferences`, low effort)
-with its own submit shape `submit_build_docs` → `StoryBuildDocs` items `grounded | superseded | suggestion`,
-each with 1–3 checked references (an unreferenced item is dropped). The PRECEDENCE RULE: the story is the
-spec. Stored on the build's own row — never in `story_docs_alignments`. The next plan pass gets the
-decisions fenced (`DOCS POINTS THE READER INCLUDED` / `DOCS THE STORY SUPERSEDES (acknowledged)`); Accept
-freezes them (`accepted_docs_json`) and the builder gets the same two blocks.
+A `build` mode of the story-docs pipeline — the SAME `story_docs` read (shortlist, inlined sections, the
+shortlisted documents' folders as the only read-only roots, Read/Glob/Grep + one submit, Bash and every write
+tool denied, low effort on both providers, `storyDocsTurnCap`) — weighed against the session's PLAN, with its
+own answer `submit_build_docs` (`review/story-docs/schema.ts`, strict form in `ai/result-schemas.ts`).
+
+- **THE PRECEDENCE RULE: the story is the spec** (`review/story-docs/build-prompts.ts`). `grounded` = the docs
+  agree; `superseded` = the story changes what the docs say — NEVER a fix to the story; `suggestion` = the docs
+  require something the story is silent on (only this kind carries `suggestion` text). The validator holds the
+  machine-checkable half: a `suggestion` on any other kind is REFUSED back ("the story is never changed to
+  match the docs").
+- **Shape** (`build-validate.ts`, refused with what to fix, ≤ 3 attempts; Codex: one `exec resume`): a 2–3
+  sentence summary, ≤ `STORY_BUILD_DOCS_ITEMS_MAX` (12) items, `about` ONLY from the values the prompt lists
+  (`story`, the gap fold's `AC…`/`M…`, every plan step `R1:step 3`; loose spellings read canonical), note ≤ 400,
+  suggestion ≤ 240, 1–3 references with quotes of ≥ 12 letters.
+- **Grounding = DROP**: every reference through `validateDocReferences` against the library filtered to the
+  shortlist; an item with none left is dropped. Survivors get ids `D1…` in order. Something said but nothing
+  survives ⇒ `nothingGrounded` with the summary hidden. An empty shortlist stores "Nothing in the docs bears on
+  this plan." with no items.
+- **Inputs** (`docs.ts buildDocsInputsOf`): the frozen seed (story, comments), the gap fold (else the seed's
+  criteria as `AC<n>`), the CURRENT plan revision and the candidates' names — all nonce-fenced, all in the
+  nonce scan. The prefilter's query adds the plan's steps.
+- **Storage**: the SESSION's row only (`docs_status` running → ready | failed | refused, `docs_json`,
+  `docs_error`, `docs_cost_usd` summed across runs) — never `story_docs_alignments`. A new run CLEARS
+  `docs_decisions_json` (its ids name different points). Ledger: `story_docs_shortlist` + `story_build_docs`.
+- **Provider and spend**: a follow-up on the session's provider when it can run `story_docs`, else the default
+  (`buildDocsProvider`); the read's US$ cap is min(`STORY_DOCS_ALIGNMENT_BUDGET_USD`, the session's remaining
+  budget); below $0.25 left ⇒ `409 SessionBudgetSpent`.
+- **The queue** (`docs-runner.ts`): one claim per session, taken synchronously; one FIFO lane (≤ 10 ⇒ `409
+  Busy`); a registered review-slot PEER (read-only pass). A throw, a timeout (10 min), an abort
+  (`abortStoryBuildDocs` — WP1 calls it on Cancel / Discard / Accept) or a restart
+  (`reconcileStoryBuildDocsOnStartup`, kicked from `registerStoryBuildDocsRoutes`) all end `failed` with a
+  sentence — never stuck `running`. Progress: `onStoryBuildDocsProgress` (the manager forwards each event to the
+  session SSE; `{kind:'done'}` ends a run) and `phase` on the row while no plan/build pass owns it.
+- **Defaults** (owner decision 6, `storyBuildDocsDefaultDecision`): suggestion ticked, superseded unticked,
+  grounded no checkbox. `PUT …/docs/decisions` merges over the stored ones, drops unknown and grounded ids, and
+  refuses once the plan is accepted.
+- **Consumption** (`docsBlocksFor(build, {nonce, frozen})`, through `storyBuildDeps()`): `included` = every
+  ticked item, fenced `DOCS POINTS THE READER INCLUDED` (a ticked SUPERSEDED item says the reader chose the docs
+  there); `superseded` = every unticked superseded item, fenced `DOCS THE STORY SUPERSEDES (acknowledged)`
+  ("the story wins"). Grounded items never reach a prompt. ⚠ The pass's nonce must be picked over
+  `storyBuildDocsUntrustedTexts(build, {frozen})` too. `frozen: true` reads `accepted_docs_json` (the build).
+- **"n docs points aren't in the plan yet"** = shared `storyBuildDocsPending(docs, decisions)`: a point the
+  reader includes now that the latest plan pass did not, or the reverse. ⚠ WP1's plan pass stores
+  `docsJson: plannedDocsFor(build)` WITH its new plan (stamps `plannedDecisions`), so pending reads 0 until the
+  reader changes a decision; docs with no stamp count every included point as pending.
 
 ## Push _(WP2)_
 
