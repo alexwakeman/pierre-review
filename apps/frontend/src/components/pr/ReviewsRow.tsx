@@ -39,7 +39,7 @@ function AutomatedReviewerBadge({
   return (
     <span
       data-testid="reviewer-provenance"
-      className="inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[11px] font-medium"
+      className="inline-flex items-center gap-0.5 rounded-ui px-1 py-0.5 text-meta font-medium"
       style={{ ...vendorInk(meta.color), background: `${meta.color}1a` }}
       title={`Automated reviewer — ${meta.label}${prov}`}
     >
@@ -112,7 +112,7 @@ export function ReviewsChips({
 }): JSX.Element {
   const { unnamedReviewers, automatedByAuthor, onlyBotsReviewed } = reviewFacts(pr);
   return (
-    <div className="flex flex-wrap gap-2 text-xs">
+    <div className="flex flex-wrap gap-2 text-meta">
       {pr.reviewStandings.map((r) => {
         const u = usersById.get(r.userId);
         // ⚠ ONE table, shared with the Pending board's chips (lib/ui.ts). `icon` is a COMPONENT
@@ -122,7 +122,7 @@ export function ReviewsChips({
         return (
           <span
             key={r.userId}
-            className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 ${meta.cls}`}
+            className={`inline-flex items-center gap-1 rounded-ui px-1.5 py-0.5 ${meta.cls}`}
             title={`${meta.title} · ${dateTime(r.standingAt)}`}
           >
             {meta.icon && <meta.icon size={12} />}
@@ -136,7 +136,7 @@ export function ReviewsChips({
           cheaper than a row that quietly says fewer people looked than did. */}
       {unnamedReviewers > 0 && (
         <span
-          className="inline-flex items-center rounded bg-gray-500/10 px-1.5 py-0.5 text-gray-500 dark:text-gray-400"
+          className="inline-flex items-center rounded-ui bg-gray-500/10 px-1.5 py-0.5 text-gray-500 dark:text-gray-400"
           title="GitHub no longer has an account for these reviews, so they cannot be named here."
         >
           {unnamedReviewers === 1
@@ -147,7 +147,7 @@ export function ReviewsChips({
       {onlyBotsReviewed && (
         <span
           data-testid="only-bots-reviewed"
-          className="inline-flex items-center gap-1 rounded bg-amber-400/10 px-1.5 py-0.5 font-medium text-amber-700 dark:text-amber-300"
+          className="inline-flex items-center gap-1 rounded-ui bg-amber-400/10 px-1.5 py-0.5 font-medium text-amber-700 dark:text-amber-300"
           title="Every review on this PR came from an automated reviewer — no human has reviewed it yet."
         >
           <BotIcon size={12} />

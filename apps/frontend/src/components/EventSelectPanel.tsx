@@ -142,7 +142,7 @@ export function EventSelectPanel({
             {ALL_REVIEW_STATES.map((s) => (
               <label
                 key={s}
-                className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 text-meta hover:bg-ui-hover"
+                className="flex cursor-pointer items-center gap-2 rounded-ui px-1 py-1 text-meta hover:bg-ui-hover"
               >
                 <CheckboxBox
                   checked={reviewStates.includes(s)}
@@ -164,7 +164,7 @@ export function EventSelectPanel({
             {ALL_CATEGORIES.map((c) => (
               <label
                 key={c}
-                className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 text-meta hover:bg-ui-hover"
+                className="flex cursor-pointer items-center gap-2 rounded-ui px-1 py-1 text-meta hover:bg-ui-hover"
               >
                 <CheckboxBox
                   checked={categories.includes(c)}

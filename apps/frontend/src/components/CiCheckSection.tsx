@@ -143,11 +143,11 @@ export function CiCheckSection({
           {shown != null && <ReviewedAgo at={shown.completedAt} />}
           {shown != null && <AiRunLabel provider={shown.provider} model={shown.model} />}
           {shown?.trigger === 'auto' && (
-            <span className="rounded bg-gray-500/10 px-1.5 py-0.5 text-xs text-gray-600 dark:text-gray-300">
+            <span className="rounded-ui bg-gray-500/10 px-1.5 py-0.5 text-meta text-gray-600 dark:text-gray-300">
               {AUTO_REVIEW_LABEL}
             </span>
           )}
-          {rows.length > 0 && <span className={`text-xs ${MUTED}`}>{ciFailingLabel(rows.length)}</span>}
+          {rows.length > 0 && <span className={`text-meta ${MUTED}`}>{ciFailingLabel(rows.length)}</span>}
           {countPills.map((p) => (
             <span key={p.key} className={`${REVIEW_CHIP} ${p.cls}`}>
               {p.label}
@@ -193,14 +193,14 @@ export function CiCheckSection({
         />
       </div>
       {running && (
-        <p className={`text-xs ${MUTED}`}>
+        <p className={`text-meta ${MUTED}`}>
           {stream.progress != null ? CI_PHASE_LABEL[stream.progress.phase] : 'Starting'}…
         </p>
       )}
-      {start.isError && <p className={`text-xs ${ERROR_TEXT}`}>{start.error.message || 'Could not start the check.'}</p>}
-      {isError && <p className={`text-xs ${ERROR_TEXT}`}>Could not load the CI check.</p>}
-      {refused != null && <p className={`text-xs ${MUTED}`}>{ciRefusalSentence(refused)}</p>}
-      {failed != null && <p className={`text-xs ${ERROR_TEXT}`}>{failed}</p>}
+      {start.isError && <p className={`text-meta ${ERROR_TEXT}`}>{start.error.message || 'Could not start the check.'}</p>}
+      {isError && <p className={`text-meta ${ERROR_TEXT}`}>Could not load the CI check.</p>}
+      {refused != null && <p className={`text-meta ${MUTED}`}>{ciRefusalSentence(refused)}</p>}
+      {failed != null && <p className={`text-meta ${ERROR_TEXT}`}>{failed}</p>}
       {show === 'legacy' && (
         <p className={REVIEW_META}>From an earlier AI review of this commit.</p>
       )}
@@ -209,7 +209,7 @@ export function CiCheckSection({
         <p className={REVIEW_META}>Posted to the PR automatically.</p>
       )}
       {show === 'ci' && shown?.autoPost?.status === 'failed' && (
-        <p className={`text-xs ${ERROR_TEXT}`}>
+        <p className={`text-meta ${ERROR_TEXT}`}>
           Couldn’t post automatically{shown.autoPost.error ? `: ${shown.autoPost.error}` : '.'}
         </p>
       )}
@@ -237,7 +237,7 @@ export function CiCheckSection({
         </ul>
       )}
       {show !== 'legacy' && shown == null && !running && refused == null && failed == null && (
-        <p className={`text-xs ${MUTED}`}>Not checked yet.</p>
+        <p className={`text-meta ${MUTED}`}>Not checked yet.</p>
       )}
     </ReviewSection>
   );

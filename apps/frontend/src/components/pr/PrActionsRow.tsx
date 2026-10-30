@@ -96,7 +96,7 @@ export function PrActionControls({
       type="button"
       onClick={toggle}
       aria-expanded={open}
-      className="hit inline-flex items-center gap-1 whitespace-nowrap rounded border border-gray-300 px-2 py-0.5 text-sm text-gray-700 hover:border-gray-400 dark:border-gray-700 dark:text-gray-200 dark:hover:border-gray-500"
+      className="hit inline-flex items-center gap-1 whitespace-nowrap rounded-ui border border-gray-300 px-2 py-0.5 text-body text-gray-700 hover:border-gray-400 dark:border-gray-700 dark:text-gray-200 dark:hover:border-gray-500"
     >
       {open ? 'Hide actions' : 'Show actions'}
       <ChevronIcon dir={open ? 'up' : 'down'} size={11} />
@@ -106,10 +106,10 @@ export function PrActionControls({
     return (
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1" data-testid="pr-actions-closed">
         {reveal}
-        {standing != null && <span className="text-xs text-gray-600 dark:text-gray-300">{standing}</span>}
-        {merging && <span className="text-xs text-gray-600 dark:text-gray-300">Merging…</span>}
+        {standing != null && <span className="text-meta text-gray-600 dark:text-gray-300">{standing}</span>}
+        {merging && <span className="text-meta text-gray-600 dark:text-gray-300">Merging…</span>}
         {!merging && updating && (
-          <span className="text-xs text-gray-600 dark:text-gray-300">Updating the branch…</span>
+          <span className="text-meta text-gray-600 dark:text-gray-300">Updating the branch…</span>
         )}
       </div>
     );

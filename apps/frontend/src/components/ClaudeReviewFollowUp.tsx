@@ -157,13 +157,13 @@ function CodeAnchorRef({
       <button
         type="button"
         onClick={() => onOpenInChanges(path, line, side)}
-        className="hit break-all text-left font-mono text-xs text-blue-600 hover:underline dark:text-blue-400"
+        className="hit break-all text-left font-mono text-meta text-blue-600 hover:underline dark:text-blue-400"
       >
         {label}
       </button>
     );
   }
-  return <span className={`break-all font-mono text-xs ${MUTED}`}>{label}</span>;
+  return <span className={`break-all font-mono text-meta ${MUTED}`}>{label}</span>;
 }
 
 // ---- (a) the input panel ----
@@ -186,15 +186,15 @@ function TicketField({
   const counter = fieldCounter(field, value);
   return (
     <div>
-      <label htmlFor={id} className="text-xs font-medium text-gray-700 dark:text-gray-200">
+      <label htmlFor={id} className="text-meta font-medium text-gray-700 dark:text-gray-200">
         {label}
       </label>
       {children}
       {counter != null && (
-        <div className={`mt-0.5 text-xs ${counter.over ? ERROR_TEXT : MUTED}`}>{counter.text}</div>
+        <div className={`mt-0.5 text-meta ${counter.over ? ERROR_TEXT : MUTED}`}>{counter.text}</div>
       )}
       {error != null && (
-        <p id={`${id}-error`} className={`mt-0.5 text-xs ${ERROR_TEXT}`}>
+        <p id={`${id}-error`} className={`mt-0.5 text-meta ${ERROR_TEXT}`}>
           {error}
         </p>
       )}
@@ -295,10 +295,10 @@ const storyPullMemory = createStoryPullMemory();
 const JIRA_TICKET_STALE_MS = 60_000;
 
 const TAB_ICON_BTN =
-  'rounded p-0.5 text-gray-500 hover:bg-gray-200 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100';
+  'rounded-ui p-0.5 text-gray-500 hover:bg-gray-200 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100';
 const PRIMARY_BTN =
   'inline-flex h-7 items-center whitespace-nowrap rounded-ui bg-ui-raise px-2.5 text-meta font-medium text-ui-ink hover:bg-ui-hover disabled:cursor-not-allowed disabled:opacity-50 touch:h-10 touch:px-3';
-const LINK_BTN = 'text-xs text-blue-700 hover:underline disabled:opacity-50 dark:text-blue-300';
+const LINK_BTN = 'text-meta text-blue-700 hover:underline disabled:opacity-50 dark:text-blue-300';
 const SPINNER =
   'inline-block h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-gray-300 border-t-blue-500 dark:border-gray-600 dark:border-t-blue-400';
 
@@ -674,8 +674,8 @@ export function ClaudeReviewTicketPanel({
           <PlusIcon size={11} />
           Add story
         </button>
-        {hintText !== '' && <span className={`text-xs ${check.ok ? MUTED : ERROR_TEXT}`}>{hintText}</span>}
-        {busy && <span className={`text-xs ${MUTED}`}>Pulling from {tracker}…</span>}
+        {hintText !== '' && <span className={`text-meta ${check.ok ? MUTED : ERROR_TEXT}`}>{hintText}</span>}
+        {busy && <span className={`text-meta ${MUTED}`}>Pulling from {tracker}…</span>}
         {pullButton}
         {info}
       </div>
@@ -685,14 +685,14 @@ export function ClaudeReviewTicketPanel({
   return (
     <div className="mt-2 rounded-ui bg-ui-surface">
       <div className="flex flex-wrap items-center gap-2 px-2 py-1.5">
-        <span className="text-xs font-medium text-gray-700 dark:text-gray-200">Stories to check</span>
-        {hintText !== '' && <span className={`text-xs ${check.ok ? MUTED : ERROR_TEXT}`}>{hintText}</span>}
+        <span className="text-meta font-medium text-gray-700 dark:text-gray-200">Stories to check</span>
+        {hintText !== '' && <span className={`text-meta ${check.ok ? MUTED : ERROR_TEXT}`}>{hintText}</span>}
         {pullButton}
         {info}
         <button
           type="button"
           onClick={close}
-          className={`ml-auto inline-flex items-center gap-1 text-xs ${MUTED} hover:text-gray-800 hover:underline dark:hover:text-gray-100`}
+          className={`ml-auto inline-flex items-center gap-1 text-meta ${MUTED} hover:text-gray-800 hover:underline dark:hover:text-gray-100`}
         >
           <CloseIcon size={10} />
           Close
@@ -702,7 +702,7 @@ export function ClaudeReviewTicketPanel({
         <div className="border-t border-gray-200 px-2 pb-2 pt-1.5 dark:border-gray-800">
           {pullable.length > 1 && !busy && (
             <div className="mb-1.5 flex flex-wrap items-center gap-1">
-              <span className={`text-xs ${MUTED}`}>Or pull one:</span>
+              <span className={`text-meta ${MUTED}`}>Or pull one:</span>
               {pullable.map((k) => (
                 <button
                   key={k}
@@ -717,7 +717,7 @@ export function ClaudeReviewTicketPanel({
             </div>
           )}
           {fillable.length === 0 && unfillable.length > 0 && (
-            <p className={`mb-1.5 text-xs ${MUTED}`}>
+            <p className={`mb-1.5 text-meta ${MUTED}`}>
               To pull {unfillable.map((t) => t.key).join(', ')}, add{' '}
               {unfillable.every((t) => t.provider === 'linear') ? 'a Linear API key' : 'a Jira API token'} in Settings for the{' '}
               {prWorkspaceName != null ? `${prWorkspaceName} workspace` : 'workspace this repository is in'}.
@@ -734,7 +734,7 @@ export function ClaudeReviewTicketPanel({
                   <div
                     key={jira ? `jira-${d.key}` : `typed-${i}`}
                     role="presentation"
-                    className={`-mb-px flex items-center rounded-t border ${
+                    className={`-mb-px flex items-center rounded-t-ui border ${
                       active
                         ? 'border-gray-200 border-b-white bg-white dark:border-gray-800 dark:border-b-gray-950 dark:bg-gray-950'
                         : 'border-transparent hover:bg-gray-100 dark:hover:bg-gray-900'
@@ -752,7 +752,7 @@ export function ClaudeReviewTicketPanel({
                       tabIndex={active ? 0 : -1}
                       onClick={() => setSelected(i)}
                       onKeyDown={(e) => onTabKeyDown(e, i)}
-                      className={`py-1 pl-2 pr-1 text-xs font-medium ${jira ? 'font-mono' : ''} ${
+                      className={`py-1 pl-2 pr-1 text-meta font-medium ${jira ? 'font-mono' : ''} ${
                         bad ? ERROR_TEXT : active ? 'text-gray-900 dark:text-gray-100' : MUTED
                       }`}
                     >
@@ -774,7 +774,7 @@ export function ClaudeReviewTicketPanel({
               })}
             </div>
             {busy && (
-              <span role="status" className={`flex items-center gap-1.5 px-2 py-1 text-xs ${MUTED}`}>
+              <span role="status" className={`flex items-center gap-1.5 px-2 py-1 text-meta ${MUTED}`}>
                 <span className={SPINNER} aria-hidden="true" />
                 Pulling {pulling.join(', ')}…
               </span>
@@ -783,21 +783,21 @@ export function ClaudeReviewTicketPanel({
               <button
                 type="button"
                 onClick={addStory}
-                className="hit flex items-center gap-1 px-2 py-1 text-xs text-blue-700 hover:underline dark:text-blue-300"
+                className="hit flex items-center gap-1 px-2 py-1 text-meta text-blue-700 hover:underline dark:text-blue-300"
               >
                 <PlusIcon size={11} />
                 Add story
               </button>
             )}
             {value.length > 1 && (
-              <button type="button" onClick={clearAll} className={`ml-auto px-1 py-1 text-xs ${MUTED} hover:underline`}>
+              <button type="button" onClick={clearAll} className={`ml-auto px-1 py-1 text-meta ${MUTED} hover:underline`}>
                 Clear all
               </button>
             )}
           </div>
-          {note != null && <p className={`mt-1.5 text-xs ${ERROR_TEXT}`}>{note}</p>}
+          {note != null && <p className={`mt-1.5 text-meta ${ERROR_TEXT}`}>{note}</p>}
           {!check.ok && check.index !== selected && (
-            <p className={`mt-1.5 text-xs ${ERROR_TEXT}`}>{check.message}</p>
+            <p className={`mt-1.5 text-meta ${ERROR_TEXT}`}>{check.message}</p>
           )}
           {current != null && (
             <div
@@ -820,7 +820,7 @@ export function ClaudeReviewTicketPanel({
                   }
                   fieldControl={
                     <div className="space-y-1">
-                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-meta">
                         <span className={MUTED}>Criteria from:</span>
                         <span className="font-medium text-gray-800 dark:text-gray-200">{acFieldText(current)}</span>
                         {current.key != null && refFor(current.key) != null && (
@@ -847,7 +847,7 @@ export function ClaudeReviewTicketPanel({
                             </button>
                           </div>
                         ) : (
-                          <p className={`text-xs ${MUTED}`}>Reading {current.key}…</p>
+                          <p className={`text-meta ${MUTED}`}>Reading {current.key}…</p>
                         )
                       )}
                     </div>
@@ -889,7 +889,7 @@ export function AcFieldPicker({
   const { details, chosen } = fetched;
   const note = jiraFillNote(details, chosen);
   if (details.candidates.length === 0) {
-    return note != null ? <p className={`text-xs ${MUTED}`}>{note}</p> : null;
+    return note != null ? <p className={`text-meta ${MUTED}`}>{note}</p> : null;
   }
   return (
     <div>
@@ -911,12 +911,12 @@ export function AcFieldPicker({
         ]}
       />
       {details.omittedCandidates > 0 && (
-        <p className={`mt-0.5 text-xs ${MUTED}`}>
+        <p className={`mt-0.5 text-meta ${MUTED}`}>
           {details.omittedCandidates} more {details.omittedCandidates === 1 ? 'field' : 'fields'} with
           text not listed.
         </p>
       )}
-      {note != null && <p className={`mt-0.5 text-xs ${MUTED}`}>{note}</p>}
+      {note != null && <p className={`mt-0.5 text-meta ${MUTED}`}>{note}</p>}
     </div>
   );
 }
@@ -937,11 +937,11 @@ function CriterionRow({
   // MET is one compact line: tick, ref, criterion, where. Nothing to act on, so no card.
   if (c.status === 'met') {
     return (
-      <li className="flex items-baseline gap-2 px-1 text-[13px]">
+      <li className="flex items-baseline gap-2 px-1 text-body">
         <span className="shrink-0 self-center text-green-700 dark:text-green-400" aria-label="Met">
           <CheckIcon size={12} />
         </span>
-        <span className={`shrink-0 font-mono text-xs ${MUTED}`}>{c.ref}</span>
+        <span className={`shrink-0 font-mono text-meta ${MUTED}`}>{c.ref}</span>
         <span className="min-w-0 break-words text-gray-800 dark:text-gray-200">
           {c.text}
           {c.path != null && c.path !== '' && (
@@ -968,7 +968,7 @@ function CriterionRow({
         <span className={`${CHIP} ${TICKET_CRITERION_STATUS_CLASS[c.status]}`}>
           {TICKET_CRITERION_STATUS_LABEL[c.status]}
         </span>
-        <span className={`shrink-0 font-mono text-xs leading-5 ${MUTED}`}>{c.ref}</span>
+        <span className={`shrink-0 font-mono text-meta leading-5 ${MUTED}`}>{c.ref}</span>
         <span className="min-w-0 flex-1 whitespace-pre-wrap break-words font-semibold">{c.text}</span>
       </div>
       {c.path != null && c.path !== '' && (
@@ -1077,13 +1077,13 @@ export function ClaudeReviewTicketResults({
         <h4 className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
           {label != null && (
             <span
-              className={`text-sm font-semibold text-gray-900 dark:text-gray-100 ${ticket.key != null ? 'font-mono' : ''}`}
+              className={`text-body font-semibold text-gray-900 dark:text-gray-100 ${ticket.key != null ? 'font-mono' : ''}`}
             >
               {label}
             </span>
           )}
           {ticket.title != null && ticket.title !== '' && (
-            <span className="min-w-0 break-words text-sm font-semibold text-gray-900 dark:text-gray-100">
+            <span className="min-w-0 break-words text-body font-semibold text-gray-900 dark:text-gray-100">
               {ticket.title}
             </span>
           )}
@@ -1092,13 +1092,13 @@ export function ClaudeReviewTicketResults({
               {TICKET_ALIGNMENT_LABEL[assessment.alignment]}
             </span>
           )}
-          {sentence != null && <span className={`text-xs font-normal ${MUTED}`}>{sentence.replace(/\.$/, '')}</span>}
+          {sentence != null && <span className={`text-meta font-normal ${MUTED}`}>{sentence.replace(/\.$/, '')}</span>}
         </h4>
         {aside}
       </div>
       {below}
       {assessment == null ? (
-        <p className={`text-xs ${MUTED}`}>Not checked in this run.</p>
+        <p className={`text-meta ${MUTED}`}>Not checked in this run.</p>
       ) : (
         <>
           {assessment.summary != null && assessment.summary !== '' && (
@@ -1204,12 +1204,12 @@ function ReplyBlock({
   return (
     <div className="mt-1 space-y-1">
       {item.reply != null && (
-        <p className={`text-xs ${MUTED}`}>
+        <p className={`text-meta ${MUTED}`}>
           @{item.reply.author} replied: “{item.reply.excerpt}”
         </p>
       )}
       {item.deferralRefused === true && (
-        <p className={`text-xs ${MUTED}`}>A blocker can’t wait for a later change.</p>
+        <p className={`text-meta ${MUTED}`}>A blocker can’t wait for a later change.</p>
       )}
       {actions.showText && item.response != null && item.response !== '' && (
         <p className={REVIEW_PROSE}>
@@ -1217,7 +1217,7 @@ function ReplyBlock({
           {item.response}
         </p>
       )}
-      {actions.note != null && !posted && <p className={`text-xs ${MUTED}`}>{actions.note}</p>}
+      {actions.note != null && !posted && <p className={`text-meta ${MUTED}`}>{actions.note}</p>}
       {canWrite && (actions.canPost || actions.canResolve || posted) && (
         <div className="flex flex-wrap items-center gap-2">
           {actions.canPost && !posted && (
@@ -1226,7 +1226,7 @@ function ReplyBlock({
             </button>
           )}
           {posted && (
-            <span className={`text-xs ${MUTED}`}>
+            <span className={`text-meta ${MUTED}`}>
               {post.data?.status === 'resolved' ? 'Replied and resolved.' : 'Reply posted.'}
             </span>
           )}
@@ -1240,11 +1240,11 @@ function ReplyBlock({
               {resolve.isPending ? 'Resolving…' : 'Resolve'}
             </button>
           )}
-          {resolved && <span className={`text-xs ${MUTED}`}>Resolved.</span>}
+          {resolved && <span className={`text-meta ${MUTED}`}>Resolved.</span>}
         </div>
       )}
       {error != null && (
-        <p className={`text-xs ${ERROR_TEXT}`}>{error instanceof Error ? error.message : String(error)}</p>
+        <p className={`text-meta ${ERROR_TEXT}`}>{error instanceof Error ? error.message : String(error)}</p>
       )}
     </div>
   );
@@ -1308,7 +1308,7 @@ export function FollowUpRow({
         {isResolvedPushback(item) && (
           <span className={`${CHIP} ${RESOLVED_ON_GITHUB_CHIP.cls}`}>{RESOLVED_ON_GITHUB_CHIP.label}</span>
         )}
-        {item.carried && <span className={`text-xs ${MUTED}`}>from an earlier review</span>}
+        {item.carried && <span className={`text-meta ${MUTED}`}>from an earlier review</span>}
       </div>
       <div className="mt-0.5">
         <CodeAnchorRef
@@ -1324,7 +1324,7 @@ export function FollowUpRow({
           <PrRefText text={item.explanation} />
         </p>
       ) : item.status === 'not_checked' ? (
-        <p className={`mt-1 text-xs ${MUTED}`}>{notCheckedReason(item, by)}</p>
+        <p className={`mt-1 text-meta ${MUTED}`}>{notCheckedReason(item, by)}</p>
       ) : null}
       {/* Without actions the block keeps its text and drops its buttons (they need prId + reviewId). */}
       <ReplyBlock item={item} prId={actions ? prId : undefined} reviewId={actions ? reviewId : undefined} />
@@ -1336,7 +1336,7 @@ export function FollowUpRow({
               .getElementById(`claude-finding-${reraised}`)
               ?.scrollIntoView({ block: 'center', behavior: 'smooth' })
           }
-          className="hit mt-1 inline-flex items-center gap-1 text-xs text-blue-600 hover:underline dark:text-blue-400"
+          className="hit mt-1 inline-flex items-center gap-1 text-meta text-blue-600 hover:underline dark:text-blue-400"
         >
           Raised again below
           <ChevronIcon dir="down" size={11} />
@@ -1361,7 +1361,7 @@ function SettledEarlierRow({
   onOpenInChanges?: OpenInChanges;
 }): JSX.Element {
   return (
-    <li className="rounded border border-gray-100 px-3 py-2 text-sm dark:border-gray-800">
+    <li className="rounded-ui border border-gray-100 px-3 py-2 text-body dark:border-gray-800">
       <div className="flex flex-wrap items-center gap-2">
         <span className={`${CHIP} ${FOLLOW_UP_STATUS_CLASS.reply_accepted}`}>{settledEarlierHeading(item)}</span>
         {item.severity != null && (
@@ -1370,7 +1370,7 @@ function SettledEarlierRow({
         <span className="min-w-0 break-words text-gray-600 dark:text-gray-400">
           <PrRefText text={item.title} />
         </span>
-        <span className={`text-xs ${MUTED}`}>settled in an earlier review</span>
+        <span className={`text-meta ${MUTED}`}>settled in an earlier review</span>
       </div>
       <div className="mt-0.5">
         <CodeAnchorRef
@@ -1382,7 +1382,7 @@ function SettledEarlierRow({
         />
       </div>
       {item.reply != null && (
-        <p className={`mt-1 text-xs ${MUTED}`}>
+        <p className={`mt-1 text-meta ${MUTED}`}>
           @{item.reply.author} replied: “{item.reply.excerpt}”
         </p>
       )}
@@ -1443,7 +1443,7 @@ export function ClaudeReviewFollowUpSection({
       pills={
         <>
           {followUp != null && (
-            <span className={`font-mono text-xs ${MUTED}`} title={followUp.priorHeadSha}>
+            <span className={`font-mono text-meta ${MUTED}`} title={followUp.priorHeadSha}>
               {followUp.priorHeadSha.slice(0, 7)}
             </span>
           )}
@@ -1471,7 +1471,7 @@ export function ClaudeReviewFollowUpSection({
         </ul>
       )}
       {leftOutLine != null && (
-        <p className={`text-xs ${MUTED}`} title={(followUp?.leftOut ?? []).map((l) => l.title).join('\n')}>
+        <p className={`text-meta ${MUTED}`} title={(followUp?.leftOut ?? []).map((l) => l.title).join('\n')}>
           {leftOutLine}
         </p>
       )}
@@ -1481,7 +1481,7 @@ export function ClaudeReviewFollowUpSection({
             type="button"
             onClick={() => setClosedOpen((o) => !o)}
             aria-expanded={closedOpen}
-            className={`inline-flex items-center gap-1 text-xs ${MUTED} hover:text-gray-700 dark:hover:text-gray-200`}
+            className={`inline-flex items-center gap-1 text-meta ${MUTED} hover:text-gray-700 dark:hover:text-gray-200`}
           >
             <ChevronIcon dir={closedOpen ? 'down' : 'right'} size={11} />
             Addressed, settled or no longer applies ({closedCount})

@@ -107,7 +107,7 @@ export function FileMenu({
         onClick={() => onOpenChange(!open)}
         aria-haspopup="listbox"
         aria-expanded={open}
-        className="hit flex min-w-0 items-center gap-1.5 rounded border border-gray-300 px-2 py-1 text-xs text-gray-800 hover:border-gray-400 dark:border-gray-700 dark:text-gray-100 dark:hover:border-gray-600"
+        className="hit flex min-w-0 items-center gap-1.5 rounded-ui border border-gray-300 px-2 py-1 text-meta text-gray-800 hover:border-gray-400 dark:border-gray-700 dark:text-gray-100 dark:hover:border-gray-600"
       >
         <span className="truncate font-mono" title={active?.path}>
           {active == null ? 'No files' : truncateLeft(active.path, 44)}
@@ -121,9 +121,9 @@ export function FileMenu({
             ref={refs.setFloating}
             style={floatingStyles}
             {...getFloatingProps()}
-            className="z-[70] w-[26rem] max-w-[92vw] overflow-hidden rounded-md border border-gray-200 bg-white shadow-lg dark:border-gray-800 dark:bg-gray-900"
+            className="z-[70] w-[26rem] max-w-[92vw] overflow-hidden rounded-ui border border-gray-200 bg-white shadow-lg dark:border-gray-800 dark:bg-gray-900"
           >
-            <div className="flex items-center justify-between border-b border-gray-200 px-2.5 py-1.5 text-[11px] text-gray-600 dark:border-gray-800 dark:text-gray-300">
+            <div className="flex items-center justify-between border-b border-gray-200 px-2.5 py-1.5 text-meta text-gray-600 dark:border-gray-800 dark:text-gray-300">
               <span>{fileCount(resolvedFiles, files.length)}</span>
               {unsupportedCount > 0 && <span>{unsupportedHeadline(unsupportedCount)}</span>}
             </div>
@@ -168,7 +168,7 @@ export function FileMenu({
                             onOpenChange(false);
                           }
                     }
-                    className={`flex items-center gap-2 px-2.5 py-1 text-xs ${
+                    className={`flex items-center gap-2 px-2.5 py-1 text-meta ${
                       disabled ? 'cursor-default' : 'cursor-pointer'
                     } ${
                       disabled
@@ -186,7 +186,7 @@ export function FileMenu({
                     <span className="min-w-0 flex-1 truncate font-mono" title={entry.path}>
                       {truncateLeft(entry.path, 40)}
                     </span>
-                    <span className={`shrink-0 text-[11px] ${ROW_STATE_INK[row.state]}`}>
+                    <span className={`shrink-0 text-meta ${ROW_STATE_INK[row.state]}`}>
                       {row.label}
                     </span>
                   </div>

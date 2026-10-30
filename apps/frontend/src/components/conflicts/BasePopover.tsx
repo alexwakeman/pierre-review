@@ -66,7 +66,7 @@ export function BasePopover({
         onClick={() => onOpenChange(!open)}
         aria-expanded={open}
         title={COMPARE_BASE_HEADER}
-        className="hit flex items-center gap-1 rounded border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:border-gray-400 dark:border-gray-700 dark:text-gray-200 dark:hover:border-gray-600"
+        className="hit flex items-center gap-1 rounded-ui border border-gray-300 px-2 py-1 text-meta text-gray-700 hover:border-gray-400 dark:border-gray-700 dark:text-gray-200 dark:hover:border-gray-600"
       >
         <CompareBaseIcon size={13} />
         {COMPARE_BASE}
@@ -80,17 +80,17 @@ export function BasePopover({
             {...getFloatingProps()}
             role="dialog"
             aria-label={COMPARE_BASE_HEADER}
-            className="z-[70] w-[36rem] max-w-[92vw] overflow-hidden rounded-md border border-gray-200 bg-white shadow-lg dark:border-gray-800 dark:bg-gray-900"
+            className="z-[70] w-[36rem] max-w-[92vw] overflow-hidden rounded-ui border border-gray-200 bg-white shadow-lg dark:border-gray-800 dark:bg-gray-900"
           >
-            <div className="border-b border-gray-200 px-2.5 py-1.5 text-[11px] text-gray-600 dark:border-gray-800 dark:text-gray-300">
+            <div className="border-b border-gray-200 px-2.5 py-1.5 text-meta text-gray-600 dark:border-gray-800 dark:text-gray-300">
               {COMPARE_BASE_HEADER}
             </div>
             {region == null ? (
-              <div className="px-2.5 py-2 text-xs text-gray-600 dark:text-gray-300">
+              <div className="px-2.5 py-2 text-meta text-gray-600 dark:text-gray-300">
                 {COMPARE_BASE_EMPTY}
               </div>
             ) : (
-              <div className="code-hl max-h-[50vh] overflow-y-auto px-2.5 py-1.5 font-mono text-[12px] leading-[18px] text-gray-900 dark:text-gray-100">
+              <div className="code-hl max-h-[50vh] overflow-y-auto px-2.5 py-1.5 font-mono text-meta leading-[18px] text-gray-900 dark:text-gray-100">
                 {lines.map((text, i) => (
                   <div key={i} className="flex">
                     <span className="w-9 shrink-0 select-none pr-2 text-right tabular-nums text-gray-500 dark:text-gray-400">

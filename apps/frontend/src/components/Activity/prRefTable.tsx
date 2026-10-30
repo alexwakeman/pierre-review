@@ -233,7 +233,7 @@ export function PrTable({
           The sprint report emits one table per repo (separated by repo-name lines), so
           without this each repo's columns sized to its own content and the tables didn't
           line up — this makes them all align. */}
-      <table className="w-full min-w-[852px] table-fixed border-collapse text-[12px]">
+      <table className="w-full min-w-[852px] table-fixed border-collapse text-meta">
         <colgroup>
           <col style={{ width: '320px' }} />
           <col style={{ width: '24px' }} />
@@ -245,7 +245,7 @@ export function PrTable({
           <col />
         </colgroup>
         <thead>
-          <tr className="text-left text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+          <tr className="text-left text-meta font-semibold uppercase tracking-wide text-gray-400">
             <th className="pb-1 pr-2 font-semibold">Pull request</th>
             <th className="pb-1 pr-2 font-semibold">CI</th>
             <th className="pb-1 pr-2 font-semibold">Age</th>
@@ -282,7 +282,7 @@ export function PrTable({
                   </td>
                   <td className="py-1 pr-2">
                     <span
-                      className="inline-flex items-center gap-1 text-[11px] text-gray-500 dark:text-gray-400"
+                      className="inline-flex items-center gap-1 text-meta text-gray-500 dark:text-gray-400"
                       title={ci?.label ?? 'no checks'}
                     >
                       <span
@@ -292,11 +292,11 @@ export function PrTable({
                       />
                     </span>
                   </td>
-                  <td className="whitespace-nowrap py-1 pr-2 text-[11px] text-gray-500 dark:text-gray-400">
+                  <td className="whitespace-nowrap py-1 pr-2 text-meta text-gray-500 dark:text-gray-400">
                     {pr.openedAt ? relativeTime(pr.openedAt) : '—'}
                   </td>
                   <td className="overflow-hidden py-1 pr-2">
-                    <span className="flex min-w-0 items-center gap-1 text-[11px] text-gray-600 dark:text-gray-300">
+                    <span className="flex min-w-0 items-center gap-1 text-meta text-gray-600 dark:text-gray-300">
                       <span className="shrink-0">
                         <Avatar user={u} size={13} />
                       </span>
@@ -309,14 +309,14 @@ export function PrTable({
                       </span>
                     </span>
                   </td>
-                  <td className="whitespace-nowrap py-1 pr-2 text-[11px]">
+                  <td className="whitespace-nowrap py-1 pr-2 text-meta">
                     <span className="font-mono text-green-600 dark:text-green-400">+{fmtDelta(pr.additions)}</span>{' '}
                     <span className="font-mono text-red-500 dark:text-red-400">−{fmtDelta(pr.deletions)}</span>
                   </td>
                   {ri === 0 && (
                     <td
                       rowSpan={g.prs.length}
-                      className="py-1 align-top text-[12px] leading-relaxed text-gray-700 dark:text-gray-200"
+                      className="py-1 align-top text-meta leading-relaxed text-gray-700 dark:text-gray-200"
                     >
                       {g.summary
                         ? renderInlineMarkdown(g.summary, index, onOpenPr)
@@ -349,9 +349,9 @@ function MdTable({
 }): JSX.Element {
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[480px] border-collapse text-[12px]">
+      <table className="w-full min-w-[480px] border-collapse text-meta">
         <thead>
-          <tr className="text-left text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+          <tr className="text-left text-meta font-semibold uppercase tracking-wide text-gray-400">
             {table.header.map((h, ci) => (
               <th key={ci} className="pb-1 pr-2 font-semibold">
                 {renderInlineMarkdown(h, index, onOpenPr)}
@@ -368,7 +368,7 @@ function MdTable({
               {table.header.map((_, ci) => (
                 <td
                   key={ci}
-                  className="py-1 pr-2 text-[12px] leading-relaxed text-gray-700 dark:text-gray-200"
+                  className="py-1 pr-2 text-meta leading-relaxed text-gray-700 dark:text-gray-200"
                 >
                   {renderInlineMarkdown(row[ci] ?? '', index, onOpenPr)}
                 </td>
@@ -419,7 +419,7 @@ export function SummaryMarkdown({
           return (
             <div
               key={i}
-              className="border-l-2 border-ai-signal-fill pl-2 text-[13px] font-semibold leading-relaxed text-gray-800 dark:text-gray-100"
+              className="border-l-2 border-ai-signal-fill pl-2 text-body font-semibold leading-relaxed text-gray-800 dark:text-gray-100"
             >
               {render(renderInlineMarkdown(b.text ?? '', index, onOpenPr))}
             </div>
@@ -429,7 +429,7 @@ export function SummaryMarkdown({
           return (
             <div
               key={i}
-              className="pt-1 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400"
+              className="pt-1 text-meta font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400"
             >
               {render(renderInlineMarkdown(b.text ?? '', index, onOpenPr))}
             </div>
@@ -439,7 +439,7 @@ export function SummaryMarkdown({
           return (
             <div
               key={i}
-              className="pt-1.5 text-[12px] font-semibold text-gray-700 dark:text-gray-200"
+              className="pt-1.5 text-meta font-semibold text-gray-700 dark:text-gray-200"
             >
               {render(renderInlineMarkdown(b.text ?? '', index, onOpenPr))}
             </div>
@@ -448,7 +448,7 @@ export function SummaryMarkdown({
         return (
           <div
             key={i}
-            className="flex gap-1.5 text-[13px] leading-relaxed text-gray-700 dark:text-gray-200"
+            className="flex gap-1.5 text-body leading-relaxed text-gray-700 dark:text-gray-200"
           >
             <span aria-hidden="true" className="select-none text-gray-400">
               •

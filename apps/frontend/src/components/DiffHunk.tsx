@@ -106,7 +106,7 @@ export function DiffHunk({
   const collapse =
     onCollapse != null && classify(lines[0] ?? '') === 'meta' ? onCollapse : null;
   return (
-    <pre className="overflow-x-auto rounded-md border border-gray-200 bg-gray-50 text-[12px] leading-[1.45] dark:border-gray-800 dark:bg-gray-900">
+    <pre className="overflow-x-auto rounded-ui border border-gray-200 bg-gray-50 text-meta leading-[1.45] dark:border-gray-800 dark:bg-gray-900">
       {/* w-max min-w-full so a row's tint (and the header's hover) spans the whole
           scrolled width, not just the visible content box. */}
       <code className="block w-max min-w-full font-mono">

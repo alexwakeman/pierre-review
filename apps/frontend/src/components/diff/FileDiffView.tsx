@@ -289,7 +289,7 @@ function DiffLine({
                 type="button"
                 onClick={onOpen}
                 title="Comment on this line"
-                className="hit rounded bg-blue-500 px-1 text-[11px] font-bold leading-tight text-white opacity-0 transition-opacity hover:bg-blue-600 group-hover:opacity-100"
+                className="hit rounded-ui bg-blue-500 px-1 text-meta font-bold leading-tight text-white opacity-0 transition-opacity hover:bg-blue-600 group-hover:opacity-100"
               >
                 +
               </button>
@@ -456,7 +456,7 @@ function InlineThread({
   const ringed = focused || flash;
 
   return (
-    <div className={`rounded font-sans ${ringed ? 'ring-2 ring-amber-400/70' : ''}`}>
+    <div className={`rounded-ui font-sans ${ringed ? 'ring-2 ring-amber-400/70' : ''}`}>
       <button
         ref={headerRef}
         type="button"
@@ -481,7 +481,7 @@ function InlineThread({
               ? 'rgb(var(--ai-signal-fill))'
               : meta.color,
         }}
-        className={`flex w-full items-center gap-1.5 rounded border border-l-2 border-gray-200 bg-white px-2 py-1 text-left text-[11px] hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:hover:bg-gray-800 ${
+        className={`flex w-full items-center gap-1.5 rounded-ui border border-l-2 border-gray-200 bg-white px-2 py-1 text-left text-meta hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:hover:bg-gray-800 ${
           resolved
             ? 'text-gray-400 opacity-70 dark:text-gray-500'
             : 'text-gray-600 dark:text-gray-300'
@@ -674,7 +674,7 @@ function DiffTable({
   const gutter = gutterWidth(rows);
   const table = (
     <table
-      className={`border-collapse font-mono text-[12px] leading-[1.45] ${
+      className={`border-collapse font-mono text-meta leading-[1.45] ${
         wrap ? 'w-full table-fixed' : 'w-max min-w-full'
       }`}
     >
@@ -825,8 +825,8 @@ function InlineCommentBox({
   };
 
   return (
-    <div className="space-y-1 rounded border border-gray-300 bg-white p-2 font-sans dark:border-gray-700 dark:bg-gray-900">
-      <div className="text-[11px] text-gray-400">
+    <div className="space-y-1 rounded-ui border border-gray-300 bg-white p-2 font-sans dark:border-gray-700 dark:bg-gray-900">
+      <div className="text-meta text-gray-400">
         Commenting on {side === 'LEFT' ? 'old' : 'new'} line {line}
       </div>
       <MentionTextarea
@@ -836,14 +836,14 @@ function InlineCommentBox({
         rows={3}
         autoFocus
         placeholder="Add an inline review comment (markdown)…"
-        className="w-full rounded border border-gray-300 bg-white px-2 py-1.5 text-xs dark:border-gray-700 dark:bg-gray-950"
+        className="w-full rounded-ui border border-gray-300 bg-white px-2 py-1.5 text-meta dark:border-gray-700 dark:bg-gray-950"
       />
       <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
           onClick={send}
           disabled={busy || body.trim().length === 0}
-          className="hit whitespace-nowrap rounded border border-blue-400 px-2 py-0.5 text-xs text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:border-blue-600 dark:text-blue-400 dark:hover:bg-blue-900/30"
+          className="hit whitespace-nowrap rounded-ui border border-blue-400 px-2 py-0.5 text-meta text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:border-blue-600 dark:text-blue-400 dark:hover:bg-blue-900/30"
         >
           {refreshing ? 'Loading it…' : add.isPending ? 'Posting…' : 'Send'}
         </button>
@@ -856,14 +856,14 @@ function InlineCommentBox({
             onClose();
           }}
           disabled={busy}
-          className="hit whitespace-nowrap rounded border border-gray-300 px-2 py-0.5 text-xs hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
+          className="hit whitespace-nowrap rounded-ui border border-gray-300 px-2 py-0.5 text-meta hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
         >
           {notice?.posted ? 'Close' : 'Cancel'}
         </button>
-        {error && <span className="text-[11px] text-red-500">{error}</span>}
+        {error && <span className="text-meta text-red-500">{error}</span>}
       </div>
       {notice && (
-        <div className="text-[11px] text-amber-600 dark:text-amber-400">
+        <div className="text-meta text-amber-600 dark:text-amber-400">
           {notice.text}
           {notice.url && (
             <>
@@ -920,7 +920,7 @@ function NoPatchNote({
           type="button"
           onClick={onLoad}
           disabled={status === 'loading'}
-          className="hit rounded border border-blue-400 px-2 py-0.5 text-blue-600 hover:bg-blue-50 disabled:opacity-60 dark:border-blue-600 dark:text-blue-400 dark:hover:bg-blue-900/30"
+          className="hit rounded-ui border border-blue-400 px-2 py-0.5 text-blue-600 hover:bg-blue-50 disabled:opacity-60 dark:border-blue-600 dark:text-blue-400 dark:hover:bg-blue-900/30"
         >
           {status === 'loading' ? 'Loading full diff…' : 'Load full diff'}
         </button>
@@ -1374,7 +1374,7 @@ function FileDiffBlock({
           opaque background + a z-index above the diff table. It pins BELOW the Changes tab's
           sticky bar. */}
       <div
-        className={`sticky top-[var(--diff-sticky-top,0px)] z-10 flex items-center gap-2 border-b px-3 py-1.5 text-xs ${
+        className={`sticky top-[var(--diff-sticky-top,0px)] z-10 flex items-center gap-2 border-b px-3 py-1.5 text-meta ${
           focus != null
             ? `${SELECTED_FILL} border-cyan-300 dark:border-cyan-600`
             : 'border-gray-100 bg-white hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-950 dark:hover:bg-gray-900'
@@ -1430,7 +1430,7 @@ function FileDiffBlock({
       {expanded && (
         <div className="border-b border-gray-100 dark:border-gray-800">
           {patch == null ? (
-            <div className="px-3 py-3 text-center text-xs text-gray-500 dark:text-gray-400">
+            <div className="px-3 py-3 text-center text-meta text-gray-500 dark:text-gray-400">
               {fileSource != null ? (
                 <NoPatchNote
                   status={
@@ -1467,7 +1467,7 @@ function FileDiffBlock({
               {fileGrainPills}
             </div>
           ) : rows.length === 0 ? (
-            <div className="px-3 py-3 text-center text-xs text-gray-500 dark:text-gray-400">
+            <div className="px-3 py-3 text-center text-meta text-gray-500 dark:text-gray-400">
               No textual diff for this file.
               {fileGrainPills}
             </div>

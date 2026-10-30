@@ -118,13 +118,13 @@ export function RegionEditPanel({
       ref={panelRef}
       className="border-l-2 border-gray-300 bg-gray-50 dark:border-gray-700 dark:bg-gray-900"
     >
-      <div className="px-2 py-1 text-[11px] font-medium text-gray-700 dark:text-gray-200">
+      <div className="px-2 py-1 text-meta font-medium text-gray-700 dark:text-gray-200">
         {EDIT_PANEL_TITLE}
       </div>
       {state.status === 'refused' && (
         // Verbatim, and above the box rather than replacing it: the reader's text is still there
         // and this says what to change about it.
-        <div className="px-2 pb-1 text-[12px] text-gray-800 dark:text-gray-100">
+        <div className="px-2 pb-1 text-meta text-gray-800 dark:text-gray-100">
           {state.message}
         </div>
       )}
@@ -144,7 +144,7 @@ export function RegionEditPanel({
         // with the three panes they are editing it against. `rows` tracks the draft's own line
         // count so a short hunk gets a short box, capped at 60vh and at 24 rows, after which it
         // scrolls inside itself rather than pushing the panes off screen.
-        className="block max-h-[60vh] w-full resize-y border-0 bg-transparent px-2 py-1 font-mono text-[12px] leading-[18px] text-gray-900 outline-none read-only:opacity-60 focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-sky-600 dark:text-gray-100 dark:focus-visible:ring-sky-400"
+        className="block max-h-[60vh] w-full resize-y border-0 bg-transparent px-2 py-1 font-mono text-meta leading-[18px] text-gray-900 outline-none read-only:opacity-60 focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-sky-600 dark:text-gray-100 dark:focus-visible:ring-sky-400"
         rows={Math.min(24, Math.max(3, text.split('\n').length + 1))}
       />
       <div className="flex flex-wrap items-center gap-2 px-2 py-1">
@@ -152,19 +152,19 @@ export function RegionEditPanel({
           type="button"
           disabled={busy}
           onClick={() => onSave(text)}
-          className="hit rounded border border-gray-500 px-1.5 py-0.5 text-[11px] font-medium text-gray-900 hover:bg-gray-100 disabled:opacity-60 dark:border-gray-400 dark:text-gray-50 dark:hover:bg-gray-800"
+          className="hit rounded-ui border border-gray-500 px-1.5 py-0.5 text-meta font-medium text-gray-900 hover:bg-gray-100 disabled:opacity-60 dark:border-gray-400 dark:text-gray-50 dark:hover:bg-gray-800"
         >
           {busy ? EDIT_SAVING : EDIT_SAVE}
         </button>
         <button
           type="button"
           onClick={onCancel}
-          className="hit rounded border border-gray-300 px-1.5 py-0.5 text-[11px] text-gray-700 hover:border-gray-400 dark:border-gray-700 dark:text-gray-200"
+          className="hit rounded-ui border border-gray-300 px-1.5 py-0.5 text-meta text-gray-700 hover:border-gray-400 dark:border-gray-700 dark:text-gray-200"
         >
           {EDIT_CANCEL}
         </button>
         {/* 12px, not 11: it is a sentence, and 11 is the floor for a LABEL. */}
-        <span className="text-[12px] text-gray-600 dark:text-gray-300">{EDIT_HINT}</span>
+        <span className="text-meta text-gray-600 dark:text-gray-300">{EDIT_HINT}</span>
       </div>
     </div>
   );

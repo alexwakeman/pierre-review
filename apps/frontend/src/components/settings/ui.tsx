@@ -126,7 +126,7 @@ export const CheckInput = forwardRef<HTMLInputElement, BareInputProps>(function 
         ref={ref}
         type="checkbox"
         className={cx(
-          'peer h-4 w-4 cursor-pointer appearance-none rounded-[4px] bg-ui-raise ring-1 ring-inset ring-ui-line',
+          'peer h-4 w-4 cursor-pointer appearance-none rounded-ui bg-ui-raise ring-1 ring-inset ring-ui-line',
           'checked:bg-ui-accent-fill checked:ring-0 disabled:cursor-not-allowed disabled:opacity-50',
           'motion-safe:transition-colors motion-safe:duration-ui-fast',
           FOCUS_RING,

@@ -148,7 +148,7 @@ const TAB_LABELS: Record<Tab, string> = {
 
 // The Claude Review tab label's outcome pill: the verdict in its VERDICT_CLASS colour, or the run
 // in flight / failed. 11px, the label floor.
-const TAB_PILL = 'ml-1.5 inline-flex items-center gap-1 rounded px-1.5 py-px text-[11px] font-medium';
+const TAB_PILL = 'ml-1.5 inline-flex items-center gap-1 rounded-ui px-1.5 py-px text-meta font-medium';
 function ReviewTabOutcome({ pill }: { pill: ReviewTabPill }): JSX.Element {
   const tone =
     pill.kind === 'verdict'
@@ -299,7 +299,7 @@ function ActivityList({
   return (
     <ul className="divide-y divide-gray-100 dark:divide-gray-800" data-testid="pr-activity-list">
       {since && (
-        <li className="flex items-center gap-2 bg-sky-500/5 px-4 py-1 text-xs text-sky-700 dark:text-sky-400">
+        <li className="flex items-center gap-2 bg-sky-500/5 px-4 py-1 text-meta text-sky-700 dark:text-sky-400">
           <span>Showing {rows.length} since you last looked</span>
           <button
             type="button"
@@ -320,7 +320,7 @@ function ActivityList({
               if (el) rowRefs.current.set(r.key, el);
               else rowRefs.current.delete(r.key);
             }}
-            className={`flex items-center gap-1.5 px-4 py-1 text-xs ${
+            className={`flex items-center gap-1.5 px-4 py-1 text-meta ${
               r.key === flashKey ? 'activity-flash' : ''
             }`}
           >
@@ -371,7 +371,7 @@ function ActivityList({
                 href={href}
                 target="_blank"
                 rel="noreferrer noopener"
-                className="hit shrink-0 rounded p-0.5 text-gray-500 hover:text-blue-500 dark:text-gray-400"
+                className="hit shrink-0 rounded-ui p-0.5 text-gray-500 hover:text-blue-500 dark:text-gray-400"
                 title="Open on GitHub"
                 aria-label="Open on GitHub"
               >
@@ -471,7 +471,7 @@ function ReviewStateTag({ state }: { state: ReviewState }): JSX.Element {
   const t = REVIEW_TAG[state];
   return (
     <span
-      className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${t.cls}`}
+      className={`rounded-ui px-1.5 py-0.5 text-meta font-medium ${t.cls}`}
       title={`Review: ${state.replace('_', ' ')}`}
     >
       {t.label}

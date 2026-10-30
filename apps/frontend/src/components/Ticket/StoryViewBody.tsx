@@ -111,19 +111,19 @@ export function StoryViewBody({
       ) : prsQ.isLoading || data == null ? (
         <div aria-busy="true" aria-label="Loading the story" className="h-32 rounded-ui bg-ui-surface motion-safe:animate-pulse" />
       ) : !found ? (
-        <p className={`text-sm ${MUTED}`}>This ticket isn’t on this workspace’s tracker.</p>
+        <p className={`text-body ${MUTED}`}>This ticket isn’t on this workspace’s tracker.</p>
       ) : (
         <>
           <OpenPrsCards prs={open} isLoading={false} isError={false} sort={null} grouped story={story} onOpenPr={openTab} />
           {total === 0 && (
-            <p className={`px-1 text-sm ${MUTED}`}>
+            <p className={`px-1 text-body ${MUTED}`}>
               {outside > 0
                 ? `No pull requests in this workspace. ${plural(outside, 'pull request')} in other workspaces.`
                 : 'No pull requests for this ticket yet.'}
             </p>
           )}
-          {total > 0 && outside > 0 && <p className={`px-1 text-xs ${MUTED}`}>{plural(outside, 'pull request')} in other workspaces.</p>}
-          {data.truncated && <p className="px-1 text-xs text-amber-800 dark:text-amber-300">Showing the latest pull requests only.</p>}
+          {total > 0 && outside > 0 && <p className={`px-1 text-meta ${MUTED}`}>{plural(outside, 'pull request')} in other workspaces.</p>}
+          {data.truncated && <p className="px-1 text-meta text-amber-800 dark:text-amber-300">Showing the latest pull requests only.</p>}
           {closed.length > 0 && <ClosedList prs={closed} repoNameById={repoNameById} onOpenPr={openTab} />}
         </>
       )}

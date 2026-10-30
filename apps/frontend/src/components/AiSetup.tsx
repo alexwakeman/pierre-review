@@ -83,7 +83,7 @@ export function AiAuthLine({ kind, provider }: { kind?: AiRunKind; provider?: Ai
   const ai = useAiCapabilities();
   const line =
     provider != null && provider !== ai.provider ? aiSignInLine(provider) : (aiAuthFor(ai, kind).message ?? aiSignInLine(ai.provider));
-  return <span className="text-xs text-gray-600 dark:text-gray-300">{line}</span>;
+  return <span className="text-meta text-gray-600 dark:text-gray-300">{line}</span>;
 }
 
 /** The "Set up AI" button, its progress line, and a failure with Retry. */
@@ -97,7 +97,7 @@ export function AiRuntimeSetup(): JSX.Element | null {
 
   if (state.phase === 'running' || ai.runtime === 'installing') {
     return (
-      <span className="text-xs text-gray-600 dark:text-gray-300" role="status">
+      <span className="text-meta text-gray-600 dark:text-gray-300" role="status">
         Setting up AI…{state.message != null ? ` ${state.message}` : ''}
       </span>
     );
@@ -111,11 +111,11 @@ export function AiRuntimeSetup(): JSX.Element | null {
         : null;
   return (
     <span className="inline-flex flex-wrap items-center gap-2">
-      {failure != null && <span className="text-xs text-red-600 dark:text-red-400">{failure}</span>}
+      {failure != null && <span className="text-meta text-red-600 dark:text-red-400">{failure}</span>}
       <button
         type="button"
         onClick={() => start()}
-        className="hit rounded border border-gray-300 px-2 py-1 text-xs hover:border-gray-400 dark:border-gray-700 dark:hover:border-gray-500"
+        className="hit rounded-ui border border-gray-300 px-2 py-1 text-meta hover:border-gray-400 dark:border-gray-700 dark:hover:border-gray-500"
       >
         {failure != null ? 'Retry' : aiSetupLabel(ai.provider)}
       </button>

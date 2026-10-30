@@ -39,7 +39,7 @@ export function UserActivityDetail(): JSX.Element {
 
   if (userId == null) {
     return (
-      <div className="mx-auto max-w-[100rem] p-4 text-sm text-gray-500 dark:text-gray-400">
+      <div className="mx-auto max-w-[100rem] p-4 text-body text-gray-500 dark:text-gray-400">
         No contributor selected.
       </div>
     );
@@ -59,11 +59,11 @@ export function UserActivityDetail(): JSX.Element {
             className="h-8 w-8 shrink-0 rounded-full bg-gray-100 dark:bg-gray-800"
           />
         ) : (
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gray-200 text-xs font-semibold text-gray-500 dark:bg-gray-800 dark:text-gray-400">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gray-200 text-meta font-semibold text-gray-500 dark:bg-gray-800 dark:text-gray-400">
             {(label[0] ?? '?').toUpperCase()}
           </span>
         )}
-        <h2 className="text-base font-semibold text-gray-800 dark:text-gray-100">
+        <h2 className="text-title font-semibold text-gray-800 dark:text-gray-100">
           {label}
           <span className="font-normal text-gray-400"> · activity</span>
         </h2>
@@ -71,7 +71,7 @@ export function UserActivityDetail(): JSX.Element {
             every repo in the active Workspace. It used to name the FilterBar's per-repo
             visibility, which is a Timeline-board filter the feed no longer honours — a caption
             reading "across 2 repos" over a Workspace-wide feed is worse than no caption. */}
-        <span className="text-[11px] text-gray-400">
+        <span className="text-meta text-gray-400">
           last {FEED_WINDOW_DAYS} days · across this Workspace · merge/close rows are PRs they authored
         </span>
         {login && (
@@ -79,7 +79,7 @@ export function UserActivityDetail(): JSX.Element {
             href={profileUrl(login)}
             target="_blank"
             rel="noreferrer noopener"
-            className="hit ml-auto inline-flex items-center gap-0.5 rounded border border-gray-300 px-1.5 py-0.5 text-[11px] font-medium text-gray-600 hover:border-gray-400 dark:border-gray-700 dark:text-gray-300 dark:hover:border-gray-500"
+            className="hit ml-auto inline-flex items-center gap-0.5 rounded-ui border border-gray-300 px-1.5 py-0.5 text-meta font-medium text-gray-600 hover:border-gray-400 dark:border-gray-700 dark:text-gray-300 dark:hover:border-gray-500"
             title={`@${login} on GitHub`}
           >
             GitHub

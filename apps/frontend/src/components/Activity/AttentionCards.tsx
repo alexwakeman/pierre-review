@@ -464,7 +464,7 @@ function UserChip({
 }): JSX.Element {
   const u = usersById.get(id);
   return (
-    <span className="inline-flex items-center gap-1 rounded bg-gray-500/10 px-1.5 py-0.5 text-[11px]">
+    <span className="inline-flex items-center gap-1 rounded-ui bg-gray-500/10 px-1.5 py-0.5 text-meta">
       <Avatar user={u} size={13} />
       <UserName user={u} fallbackId={id} />
     </span>
@@ -495,7 +495,7 @@ function BotVendorPill({
   // have no brand.
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium${
+      className={`inline-flex items-center gap-1 rounded-ui px-1.5 py-0.5 text-meta font-medium${
         meta == null ? ' bg-gray-500/10 text-gray-600 dark:text-gray-300' : ''
       }`}
       style={meta != null ? { ...vendorInk(meta.color), background: `${meta.color}1a` } : undefined}
@@ -685,7 +685,7 @@ export function PrByline({
         return (
           <span
             key={part}
-            className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-medium${
+            className={`inline-flex items-center gap-1 rounded-ui px-1.5 py-0.5 font-medium${
               meta == null ? ' bg-gray-500/10 text-gray-600 dark:text-gray-300' : ''
             }`}
             style={meta != null ? { ...vendorInk(meta.color), background: `${meta.color}1a` } : undefined}
@@ -705,7 +705,7 @@ export function PrByline({
     }
   };
   return (
-    <span className="inline-flex min-w-0 flex-wrap items-center gap-1 text-[11px] text-gray-600 dark:text-gray-300">
+    <span className="inline-flex min-w-0 flex-wrap items-center gap-1 text-meta text-gray-600 dark:text-gray-300">
       {bylineParts(b).map(draw)}
     </span>
   );
@@ -822,7 +822,7 @@ export function FailingChecksLine({
   if (failing == null) return null;
   const FailedIcon = CHECK_STATE_META.failure.icon;
   return (
-    <div className="mt-1 flex min-w-0 items-center gap-1 text-xs text-red-600 dark:text-red-400">
+    <div className="mt-1 flex min-w-0 items-center gap-1 text-meta text-red-600 dark:text-red-400">
       <FailedIcon size={12} className="shrink-0" />
       <span className="sr-only">Failing checks: </span>
       <FailingCheckNames parts={failing} />
@@ -847,7 +847,7 @@ export function PrMetaRow({
 }): JSX.Element {
   const byline = usersById != null && 'automation' in pr;
   return (
-    <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-gray-500 dark:text-gray-400">
+    <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-meta text-gray-500 dark:text-gray-400">
       {byline && (
         <PrByline pr={{ authorId: pr.authorId ?? null, automation: pr.automation }} usersById={usersById} />
       )}
@@ -1083,7 +1083,7 @@ function ReviewerChip({
   const u = usersById.get(reviewer.userId);
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 ${meta.cls}`}
+      className={`inline-flex items-center gap-1 rounded-ui px-1.5 py-0.5 ${meta.cls}`}
       // `standingAt` is the review that SET the standing, NOT the reviewer's latest activity —
       // dating an approval by a later drive-by comment is a false claim about a person.
       title={`${meta.title} · ${relativeTime(reviewer.standingAt)}`}
@@ -1122,17 +1122,17 @@ function MyTurnReplyBody({
   }, [reply.body, expanded]);
   return (
     <div className="mt-1.5 border-l-2 border-gray-300 pl-2 dark:border-gray-600" data-noactivate>
-      {byline != null && <div className="mb-0.5 text-[11px] text-gray-500 dark:text-gray-400">{byline}</div>}
+      {byline != null && <div className="mb-0.5 text-meta text-gray-500 dark:text-gray-400">{byline}</div>}
       <div
         ref={boxRef}
-        className={`text-[12px] text-gray-700 dark:text-gray-300 ${
+        className={`text-meta text-gray-700 dark:text-gray-300 ${
           expanded ? '' : 'max-h-[4.6rem] overflow-hidden [&_img]:hidden'
         }`}
       >
         <Markdown>{reply.body}</Markdown>
       </div>
       {(overflows || expanded || reply.truncated) && (
-        <div className="mt-0.5 flex gap-3 text-[11px]">
+        <div className="mt-0.5 flex gap-3 text-meta">
           {(overflows || expanded) && (
             <button
               type="button"
@@ -1176,12 +1176,12 @@ function PushedCommitList({
   const nameAuthors = authors.size > 1;
   const more = Math.max(0, (ball.humanCommitsAfter ?? list.length) - list.length);
   return (
-    <ul className="mt-1.5 space-y-0.5 text-[12px] text-gray-700 dark:text-gray-300">
+    <ul className="mt-1.5 space-y-0.5 text-meta text-gray-700 dark:text-gray-300">
       {list.map((c) => {
         const login = c.authorId != null ? usersById.get(c.authorId)?.githubLogin : undefined;
         return (
           <li key={c.sha} className="flex min-w-0 items-baseline gap-2">
-            <span className="shrink-0 font-mono text-[11px] text-gray-500 dark:text-gray-400">
+            <span className="shrink-0 font-mono text-meta text-gray-500 dark:text-gray-400">
               {c.sha.slice(0, 7)}
             </span>
             {c.headline != null ? (
@@ -1192,13 +1192,13 @@ function PushedCommitList({
               </span>
             )}
             {nameAuthors && login != null && (
-              <span className="shrink-0 text-[11px] text-gray-500 dark:text-gray-400">@{login}</span>
+              <span className="shrink-0 text-meta text-gray-500 dark:text-gray-400">@{login}</span>
             )}
           </li>
         );
       })}
       {more > 0 && (
-        <li className="text-[11px] text-gray-500 dark:text-gray-400">
+        <li className="text-meta text-gray-500 dark:text-gray-400">
           and {more} more
         </li>
       )}
@@ -1218,7 +1218,7 @@ export function PrDescriptionToggle({ prId }: { prId: number }): JSX.Element {
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
-        className="hit text-[11px] font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+        className="hit text-meta font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
       >
         <ChevronIcon
           dir={open ? 'down' : 'right'}
@@ -1234,17 +1234,17 @@ export function PrDescriptionToggle({ prId }: { prId: number }): JSX.Element {
 
 function PrDescriptionBody({ prId }: { prId: number }): JSX.Element {
   const { data: pr, isLoading } = usePr(prId);
-  if (isLoading) return <div className="mt-1 text-[11px] text-gray-400">Loading…</div>;
-  if (!pr) return <div className="mt-1 text-[11px] text-gray-400">Couldn’t load this PR.</div>;
+  if (isLoading) return <div className="mt-1 text-meta text-gray-400">Loading…</div>;
+  if (!pr) return <div className="mt-1 text-meta text-gray-400">Couldn’t load this PR.</div>;
   const hasBody = pr.body != null && pr.body.trim() !== '';
   return (
-    <div className="mt-1 space-y-2 rounded border border-gray-200 bg-gray-50 p-2 dark:border-gray-800 dark:bg-gray-900/40">
+    <div className="mt-1 space-y-2 rounded-ui border border-gray-200 bg-gray-50 p-2 dark:border-gray-800 dark:bg-gray-900/40">
       {hasBody ? (
-        <div className="max-h-64 overflow-auto text-sm">
+        <div className="max-h-64 overflow-auto text-body">
           <Markdown>{pr.body as string}</Markdown>
         </div>
       ) : (
-        <div className="text-[11px] italic text-gray-500 dark:text-gray-400">No PR description.</div>
+        <div className="text-meta italic text-gray-500 dark:text-gray-400">No PR description.</div>
       )}
     </div>
   );
@@ -1275,7 +1275,7 @@ function RoutingReviewers({
     // data-noactivate: CardShell opens the PR on any other click; a click that just misses a button
     // here must not navigate away mid-request (the PendingMergeActions rule).
     <div className="mt-1.5 space-y-1" data-noactivate>
-      <div className="text-[11px] font-medium text-gray-500 dark:text-gray-400">
+      <div className="text-meta font-medium text-gray-500 dark:text-gray-400">
         Suggested reviewers
       </div>
       <ul className="space-y-1">
@@ -1314,7 +1314,7 @@ function RoutingReviewerRow({
   return (
     <li
       data-testid="suggested-reviewer"
-      className="flex flex-wrap items-center gap-1.5 text-[11px] text-gray-500 dark:text-gray-400"
+      className="flex flex-wrap items-center gap-1.5 text-meta text-gray-500 dark:text-gray-400"
     >
       {/* Assign FIRST, so the buttons stand in one column whatever each reason's length. */}
       {body != null &&
@@ -1332,25 +1332,25 @@ function RoutingReviewerRow({
             disabled={state.status === 'pending'}
             aria-label={state.status === 'pending' ? `Assigning ${who}` : `Assign ${who}`}
             title={`Ask ${who} to review this PR on GitHub`}
-            className="hit min-w-[4.75rem] rounded border border-violet-300 px-1.5 py-0.5 font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-50 dark:border-violet-700 dark:text-violet-300 dark:hover:bg-violet-900/20"
+            className="hit min-w-[4.75rem] rounded-ui border border-violet-300 px-1.5 py-0.5 font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-50 dark:border-violet-700 dark:text-violet-300 dark:hover:bg-violet-900/20"
           >
             {state.status === 'pending' ? 'Assigning…' : 'Assign'}
           </button>
         ))}
       {s.kind === 'team' ? (
-        <span className="inline-flex items-center gap-1 rounded bg-gray-500/10 px-1.5 py-0.5 text-[11px] font-medium">
+        <span className="inline-flex items-center gap-1 rounded-ui bg-gray-500/10 px-1.5 py-0.5 text-meta font-medium">
           @{s.teamName}
         </span>
       ) : s.userId != null ? (
         <UserChip id={s.userId} usersById={usersById} />
       ) : (
-        <span className="inline-flex items-center gap-1 rounded bg-gray-500/10 px-1.5 py-0.5 text-[11px]">
+        <span className="inline-flex items-center gap-1 rounded-ui bg-gray-500/10 px-1.5 py-0.5 text-meta">
           @{s.login}
         </span>
       )}
       <span>{s.reason}</span>
       {body != null && state.status === 'error' && (
-        <span role="alert" className="basis-full text-[12px] text-red-600 dark:text-red-400">
+        <span role="alert" className="basis-full text-meta text-red-600 dark:text-red-400">
           {state.error}
         </span>
       )}
@@ -1396,7 +1396,7 @@ function ResolveThreadButton({ prId, threadId }: { prId: number; threadId: numbe
         {resolve.isPending ? 'Resolving…' : resolve.isSuccess ? 'Resolved' : 'Resolve'}
       </button>
       {resolve.isError && (
-        <span className="text-[12px] text-red-600 dark:text-red-400">
+        <span className="text-meta text-red-600 dark:text-red-400">
           {resolve.error instanceof Error && resolve.error.message !== ''
             ? resolve.error.message
             : 'Couldn’t resolve it.'}
@@ -1825,7 +1825,7 @@ function PendingConflictActions({
       {armed != null && (
         <>
           {/* ONE SPELLING of where a live intent stands, shared with the AutoMergeBanner stack. */}
-          <span className="text-[11px] text-gray-500 dark:text-gray-400">
+          <span className="text-meta text-gray-500 dark:text-gray-400">
             {armedPhaseHeadline(armed)}
           </span>
           <MergeWhenReadyControl prId={card.prId} eager={false} />
@@ -1971,21 +1971,21 @@ function SecurityDetail({
         target="_blank"
         rel="noreferrer noopener"
         onClick={(e) => e.stopPropagation()}
-        className={`inline-flex items-center gap-1 rounded px-1.5 py-px font-mono text-[11px] hover:underline ${tint}`}
+        className={`inline-flex items-center gap-1 rounded-ui px-1.5 py-px font-mono text-meta hover:underline ${tint}`}
         title="Open the advisory"
       >
         {c.id}
         <ExternalLinkIcon size={10} />
       </a>
     ) : (
-      <span key={key} className={`rounded px-1.5 py-px font-mono text-[11px] ${tint}`}>
+      <span key={key} className={`rounded-ui px-1.5 py-px font-mono text-meta ${tint}`}>
         {c.id}
       </span>
     );
   const words = (parts: AdvisoryPart[]): JSX.Element[] =>
     parts.map((p, i) => ('id' in p ? chip(p, `${i}`) : <span key={i}>{p.text}</span>));
   return (
-    <div className="mt-1.5 space-y-1 text-[12px] text-gray-600 dark:text-gray-300">
+    <div className="mt-1.5 space-y-1 text-meta text-gray-600 dark:text-gray-300">
       {fixParts.length > 0 && (
         <p className="flex items-start gap-1.5">
           <ShieldIcon size={12} className={`mt-0.5 shrink-0 ${mark}`} />
@@ -2017,7 +2017,7 @@ function SecurityDetail({
         </p>
       ))}
       {(chips.length > 0 || more > 0) && (
-        <div className="flex flex-wrap items-center gap-1.5 pl-[18px] text-[11px]">
+        <div className="flex flex-wrap items-center gap-1.5 pl-[18px] text-meta">
           {chips.map((c) => chip(c, c.id))}
           {more > 0 && <span className="text-gray-500 dark:text-gray-400">+{more} more</span>}
         </div>
@@ -2376,14 +2376,14 @@ function FactLine({
     }
   }
   if (plan === 'review' || plan === 'merge') {
-    if (blastRadius(card, blastConfig) != null) items.push(<BlastRadiusChip pr={card} wordOnly className="text-[12px]" />);
+    if (blastRadius(card, blastConfig) != null) items.push(<BlastRadiusChip pr={card} wordOnly className="text-meta" />);
   }
   if (plan === 'review' || plan === 'merge') {
-    if (largePrFlag(card, threshold) != null) items.push(<LargePrFlag pr={card} className="text-[12px]" />);
+    if (largePrFlag(card, threshold) != null) items.push(<LargePrFlag pr={card} className="text-meta" />);
   }
   if (items.length === 0) return null;
   return (
-    <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[12px] text-gray-600 dark:text-gray-400">
+    <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-meta text-gray-600 dark:text-gray-400">
       {joinWithSeps(items)}
     </div>
   );
@@ -2399,10 +2399,10 @@ function ThreadOpenerBlock({
 }): JSX.Element {
   return (
     <div className="mt-1.5 border-l-2 border-gray-300 pl-2 dark:border-gray-600">
-      <div className="mb-0.5 text-[11px] text-gray-500 dark:text-gray-400">
+      <div className="mb-0.5 text-meta text-gray-500 dark:text-gray-400">
         {name ?? 'Someone'} · <span title={dateTime(comment.at)}>{relativeTime(comment.at)}</span>
       </div>
-      <p className="line-clamp-3 text-[12px] text-gray-700 [overflow-wrap:anywhere] dark:text-gray-300">
+      <p className="line-clamp-3 text-meta text-gray-700 [overflow-wrap:anywhere] dark:text-gray-300">
         {comment.text}
       </p>
     </div>
@@ -2422,7 +2422,7 @@ function MoreFailingChecks({
   if (rest.names.length === 0 && rest.more === 0) return null;
   const FailedIcon = CHECK_STATE_META.failure.icon;
   return (
-    <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5 text-[12px] text-red-700 dark:text-red-400">
+    <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5 text-meta text-red-700 dark:text-red-400">
       <span className="sr-only">Also failing: </span>
       {rest.names.map((n) => (
         <span key={n} className="inline-flex min-w-0 items-center gap-1">
@@ -2449,7 +2449,7 @@ function LastLandedLine({
   const meta = landingPrMeta(card, board.usersById);
   if (line == null || meta == null) return null;
   return (
-    <p className="mt-1.5 min-w-0 text-[12px] text-gray-700 dark:text-gray-300">
+    <p className="mt-1.5 min-w-0 text-meta text-gray-700 dark:text-gray-300">
       Last landed:{' '}
       <button
         type="button"
@@ -2480,13 +2480,13 @@ function ReviewerChipsRow({
   const showMore = !chips.complete && chips.moreCount > 0;
   if (chips.humans.length === 0 && chips.bots == null && !showMore) return null;
   return (
-    <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+    <div className="flex flex-wrap items-center gap-1.5 text-meta">
       {chips.humans.map((r) => (
         <ReviewerChip key={r.userId} reviewer={r} usersById={usersById} />
       ))}
       {chips.bots != null && (
         <span
-          className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-medium ${
+          className={`inline-flex items-center gap-1 rounded-ui px-1.5 py-0.5 font-medium ${
             REVIEW_STATE_META[chips.bots.standing].cls
           }`}
           title={chips.bots.title}
@@ -2532,11 +2532,11 @@ function PrDetails({
   const LeadMark = leadMeta?.icon ?? null;
   return (
     <div
-      className="mt-2 space-y-1.5 rounded-md border border-gray-200 bg-gray-50/70 p-2 dark:border-gray-800 dark:bg-gray-900/60"
+      className="mt-2 space-y-1.5 rounded-ui border border-gray-200 bg-gray-50/70 p-2 dark:border-gray-800 dark:bg-gray-900/60"
       data-noactivate
     >
       {standingHere && lead != null && (
-        <div className={`inline-flex items-center gap-1 text-[12px] font-medium ${leadMeta?.ink ?? 'text-gray-600 dark:text-gray-400'}`}>
+        <div className={`inline-flex items-center gap-1 text-meta font-medium ${leadMeta?.ink ?? 'text-gray-600 dark:text-gray-400'}`}>
           {LeadMark != null && <LeadMark size={11} />}
           {lead.ours}
           {lead.github != null && lead.github !== 'GitHub: no review required' && (
@@ -2580,9 +2580,9 @@ function InsightThreadById({
   const { data: users } = useUsers();
   const usersById = useMemo(() => indexUsers(users), [users]);
   const prUrl = `https://github.com/${card.repoFullName}/pull/${card.prNumber}`;
-  if (isLoading) return <div className="px-1 py-1 text-[12px] text-gray-500 dark:text-gray-400">Loading conversation…</div>;
+  if (isLoading) return <div className="px-1 py-1 text-meta text-gray-500 dark:text-gray-400">Loading conversation…</div>;
   if (!thread)
-    return <div className="px-1 py-1 text-[12px] text-gray-500 dark:text-gray-400">Couldn’t load this conversation.</div>;
+    return <div className="px-1 py-1 text-meta text-gray-500 dark:text-gray-400">Couldn’t load this conversation.</div>;
   return <ThreadCard thread={thread} usersById={usersById} prUrl={prUrl} repoId={card.repoId} />;
 }
 
@@ -2890,7 +2890,7 @@ function PendingCard({
                   className="max-w-full truncate py-0.5 text-left text-ui-ink hover:underline touch:min-h-10"
                 >
                   {p.prTitle}{' '}
-                  <span className="font-mono text-[11px] text-gray-600 dark:text-gray-400">
+                  <span className="font-mono text-meta text-gray-600 dark:text-gray-400">
                     {repoRef(p.repoFullName, p.prNumber, ctx.sharedOwner)}
                   </span>
                 </button>

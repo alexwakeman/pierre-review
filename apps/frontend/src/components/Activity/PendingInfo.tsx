@@ -144,7 +144,7 @@ function InfoPopover({
             role="dialog"
             aria-label={label}
             data-noactivate
-            className={`z-[60] ${width} max-w-[92vw] cursor-default rounded-lg border border-gray-200 bg-white p-3 text-[12px] leading-relaxed text-gray-700 shadow-lg dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200`}
+            className={`z-[60] ${width} max-w-[92vw] cursor-default rounded-ui border border-gray-200 bg-white p-3 text-meta leading-relaxed text-gray-700 shadow-lg dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200`}
           >
             {children(() => setOpen(false))}
           </div>
@@ -159,7 +159,7 @@ function GuideLink({ onClick }: { onClick: () => void }): JSX.Element {
     <button
       type="button"
       onClick={onClick}
-      className="hit mt-2.5 text-[12px] font-medium text-sky-700 hover:underline dark:text-sky-400"
+      className="hit mt-2.5 text-meta font-medium text-sky-700 hover:underline dark:text-sky-400"
     >
       How Pending works
     </button>
@@ -263,7 +263,7 @@ function CardPlacementBody({
   return (
     <div className="space-y-2">
       <section>
-        <h3 className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+        <h3 className="text-meta font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
           Why it is here
         </h3>
         <p className="mt-0.5">{x.why}</p>
@@ -277,7 +277,7 @@ function CardPlacementBody({
         </p>
       </section>
       <section>
-        <h3 className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+        <h3 className="text-meta font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
           Where it sits
         </h3>
         <p className="mt-0.5 font-medium text-gray-900 dark:text-gray-50">{x.place}</p>
@@ -285,16 +285,16 @@ function CardPlacementBody({
       </section>
       {x.score != null && (
         <section>
-          <h3 className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+          <h3 className="text-meta font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
             Do next score: {x.score.total} of 100
           </h3>
-          <table className="mt-1 w-full border-collapse text-[12px]">
+          <table className="mt-1 w-full border-collapse text-meta">
             <tbody>
               {x.score.rows.map((r) => (
                 <tr key={r.key} className="border-t border-gray-100 align-top first:border-t-0 dark:border-gray-800">
                   <td className="py-1 pr-2">
                     <div className="font-medium">{r.label}</div>
-                    <div className="text-[11px] text-gray-500 dark:text-gray-400">{r.note}</div>
+                    <div className="text-meta text-gray-500 dark:text-gray-400">{r.note}</div>
                   </td>
                   <td className="whitespace-nowrap py-1 text-right tabular-nums text-gray-600 dark:text-gray-300">
                     {r.value} × {r.weight}%
@@ -318,13 +318,13 @@ function CardPlacementBody({
 function GuideSection({ title, children }: { title: string; children: ReactNode }): JSX.Element {
   return (
     <section className="space-y-2">
-      <h3 className="text-base font-semibold text-gray-900 dark:text-gray-50">{title}</h3>
+      <h3 className="text-title font-semibold text-gray-900 dark:text-gray-50">{title}</h3>
       {children}
     </section>
   );
 }
 
-const th = 'border-b border-gray-200 py-1.5 pr-3 text-left text-[13px] font-semibold text-gray-600 dark:border-gray-700 dark:text-gray-300';
+const th = 'border-b border-gray-200 py-1.5 pr-3 text-left text-body font-semibold text-gray-600 dark:border-gray-700 dark:text-gray-300';
 const td = 'border-b border-gray-100 py-1.5 pr-3 align-top dark:border-gray-800';
 
 function Dot({ severity }: { severity: InsightSeverity }): JSX.Element {
@@ -465,14 +465,14 @@ export function PendingGuideModal({
       role="presentation"
     >
       <div
-        className="flex max-h-[85vh] w-[46rem] max-w-[94vw] flex-col rounded-lg border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-900"
+        className="flex max-h-[85vh] w-[46rem] max-w-[94vw] flex-col rounded-ui border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-900"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
         aria-label="How Pending works"
       >
         <div className="flex items-center justify-between border-b border-gray-200 px-5 py-3 dark:border-gray-800">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-50">How Pending works</h2>
+          <h2 className="text-title font-semibold text-gray-900 dark:text-gray-50">How Pending works</h2>
           <button
             type="button"
             onClick={onClose}
@@ -483,7 +483,7 @@ export function PendingGuideModal({
           </button>
         </div>
 
-        <div className="min-h-0 flex-1 space-y-6 overflow-auto px-5 py-4 text-[15px] leading-relaxed text-gray-700 dark:text-gray-200">
+        <div className="min-h-0 flex-1 space-y-6 overflow-auto px-5 py-4 text-title leading-relaxed text-gray-700 dark:text-gray-200">
           <p>
             Pending is everything waiting on you or your workspace, in {PENDING_TABS.length} tabs.
             It is worked out fresh every time it loads. Nothing is stored and nothing can be
@@ -491,7 +491,7 @@ export function PendingGuideModal({
           </p>
 
           <GuideSection title="The tabs">
-            <table className="w-full border-collapse text-sm">
+            <table className="w-full border-collapse text-body">
               <thead>
                 <tr>
                   <th className={th}>Tab</th>
@@ -547,7 +547,7 @@ export function PendingGuideModal({
 
           <GuideSection title="The score">
             <p>Each card gets a score out of 100, made of three parts.</p>
-            <table className="w-full border-collapse text-sm">
+            <table className="w-full border-collapse text-body">
               <thead>
                 <tr>
                   <th className={th}>Part</th>
@@ -601,7 +601,7 @@ export function PendingGuideModal({
               <span className="font-medium text-ui-warn">amber</span> when it is urgent and neither of those
               applies, and grey otherwise. Neither colour nor urgency changes the order. How urgent each card is:
             </p>
-            <table className="w-full border-collapse text-sm">
+            <table className="w-full border-collapse text-body">
               <thead>
                 <tr>
                   <th className={th}>Card</th>
@@ -732,7 +732,7 @@ export function PendingGuideModal({
               turn groups them. A finished AI review follows the same rules but is listed in{' '}
               {TAB_LABEL.claude}.
             </p>
-            <table className="w-full border-collapse text-sm">
+            <table className="w-full border-collapse text-body">
               <thead>
                 <tr>
                   <th className={th}>Card</th>

@@ -349,7 +349,7 @@ export function WorkspaceSelector(): JSX.Element {
                   <span className="flex min-w-0 items-center gap-1.5">
                     <span
                       aria-hidden
-                      className={`inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full border text-[11px] leading-none ${
+                      className={`inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full border text-meta leading-none ${
                         selected
                           ? 'border-ui-accent-fill bg-ui-accent-fill text-ui-on-accent'
                           : 'border-ui-line'

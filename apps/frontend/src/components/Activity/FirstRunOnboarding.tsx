@@ -45,7 +45,7 @@ function OwnerAvatar({ login, src }: { login: string; src: string | null }): JSX
     );
   }
   return (
-    <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-gray-300 text-[11px] font-semibold text-gray-700 dark:bg-gray-700 dark:text-gray-200">
+    <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-gray-300 text-meta font-semibold text-gray-700 dark:bg-gray-700 dark:text-gray-200">
       {login.slice(0, 2).toUpperCase()}
     </span>
   );
@@ -151,10 +151,10 @@ export function FirstRunOnboarding(): JSX.Element {
   return (
     <div className="mx-auto max-w-2xl space-y-5 py-6">
       <header>
-        <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-100">
+        <h2 className="text-title font-semibold text-gray-800 dark:text-gray-100">
           Add the repos you work on
         </h2>
-        <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+        <p className="mt-1 text-body text-gray-500 dark:text-gray-400">
           Limn tracks the repos you care about &mdash; here&rsquo;s what you&rsquo;ve been
           working on.
         </p>
@@ -165,21 +165,21 @@ export function FirstRunOnboarding(): JSX.Element {
           {[0, 1, 2, 3].map((i) => (
             <div
               key={i}
-              className="h-14 animate-pulse rounded-lg border border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-900/40"
+              className="h-14 animate-pulse rounded-ui border border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-900/40"
             />
           ))}
         </div>
       ) : isError ? (
-        <p className="text-xs text-gray-400">
+        <p className="text-meta text-gray-400">
           Couldn&rsquo;t detect your recent repos &mdash; add one below to get started.
         </p>
       ) : suggestions.length === 0 ? (
-        <p className="text-xs text-gray-400">
+        <p className="text-meta text-gray-400">
           No recent activity found &mdash; add any repo below to get started.
         </p>
       ) : (
         <div className="space-y-3">
-          <div className="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-800">
+          <div className="overflow-hidden rounded-ui border border-gray-200 dark:border-gray-800">
             {suggestions.map((r: RepoSearchResult) => {
               const on = selected.has(r.githubNodeId);
               return (
@@ -200,28 +200,28 @@ export function FirstRunOnboarding(): JSX.Element {
                   <span className="min-w-0 flex-1">
                     <span className="flex items-center gap-1.5">
                       <span
-                        className="truncate text-xs font-medium text-gray-800 dark:text-gray-100"
+                        className="truncate text-meta font-medium text-gray-800 dark:text-gray-100"
                         title={r.fullName}
                       >
                         {r.fullName}
                       </span>
                       {r.isPrivate && (
-                        <span className="shrink-0 rounded bg-gray-200 px-1 text-[11px] uppercase tracking-wide text-gray-500 dark:bg-gray-700 dark:text-gray-300">
+                        <span className="shrink-0 rounded-ui bg-gray-200 px-1 text-meta uppercase tracking-wide text-gray-500 dark:bg-gray-700 dark:text-gray-300">
                           private
                         </span>
                       )}
                       {r.isOwnedOrMember && (
-                        <span className="shrink-0 rounded bg-sky-100 px-1 text-[11px] uppercase tracking-wide text-sky-700 dark:bg-sky-900/50 dark:text-sky-300">
+                        <span className="shrink-0 rounded-ui bg-sky-100 px-1 text-meta uppercase tracking-wide text-sky-700 dark:bg-sky-900/50 dark:text-sky-300">
                           yours
                         </span>
                       )}
                     </span>
                     {r.description && (
-                      <span className="mt-0.5 line-clamp-2 text-[11px] text-gray-500 dark:text-gray-400">
+                      <span className="mt-0.5 line-clamp-2 text-meta text-gray-500 dark:text-gray-400">
                         {r.description}
                       </span>
                     )}
-                    <span className="mt-0.5 flex items-center gap-2 text-[11px] text-gray-400">
+                    <span className="mt-0.5 flex items-center gap-2 text-meta text-gray-400">
                       <span
                         className="flex items-center gap-1"
                         title={`${r.stargazerCount} stars`}
@@ -245,7 +245,7 @@ export function FirstRunOnboarding(): JSX.Element {
               type="button"
               onClick={addSelected}
               disabled={running || chosen.length === 0}
-              className="hit rounded bg-sky-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-50"
+              className="hit rounded-ui bg-sky-600 px-3 py-1.5 text-meta font-medium text-white hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {running
                 ? progress
@@ -254,14 +254,14 @@ export function FirstRunOnboarding(): JSX.Element {
                 : `Add ${chosen.length} selected`}
             </button>
             {!running && (
-              <span className="text-[11px] text-gray-400">
+              <span className="text-meta text-gray-400">
                 {chosen.length} of {suggestions.length} selected
               </span>
             )}
           </div>
 
           {failures.length > 0 && (
-            <div className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-[11px] text-amber-700 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+            <div className="rounded-ui border border-amber-300 bg-amber-50 px-3 py-2 text-meta text-amber-700 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
               <div className="font-semibold">Couldn&rsquo;t add {failures.length} repo{failures.length === 1 ? '' : 's'}:</div>
               <ul className="mt-1 space-y-0.5">
                 {failures.map((f) => (
@@ -274,7 +274,7 @@ export function FirstRunOnboarding(): JSX.Element {
                 <button
                   type="button"
                   onClick={() => flushBatch(pendingSuccessIds)}
-                  className="hit mt-2 rounded bg-sky-600 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-sky-700"
+                  className="hit mt-2 rounded-ui bg-sky-600 px-2.5 py-1 text-meta font-medium text-white hover:bg-sky-700"
                 >
                   Continue with the {pendingSuccessIds.length} added repo
                   {pendingSuccessIds.length === 1 ? '' : 's'}
@@ -286,7 +286,7 @@ export function FirstRunOnboarding(): JSX.Element {
       )}
 
       <div className="border-t border-gray-200 pt-4 dark:border-gray-800">
-        <p className="mb-2 text-xs text-gray-500 dark:text-gray-400">
+        <p className="mb-2 text-meta text-gray-500 dark:text-gray-400">
           or add any repo by name
         </p>
         <RepoSearch placeholder="Search repos to add…" />

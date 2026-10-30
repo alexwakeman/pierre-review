@@ -162,12 +162,12 @@ export function SprintAskPanel({
               rows={2}
               aria-label="Your question"
               placeholder="Ask about this sprint"
-              className="min-w-0 flex-1 resize-none rounded border border-transparent bg-ui-raise px-2.5 py-1.5 text-body text-ui-ink ring-1 ring-ui-line placeholder:text-ui-faint focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent"
+              className="min-w-0 flex-1 resize-none rounded-ui border border-transparent bg-ui-raise px-2.5 py-1.5 text-body text-ui-ink ring-1 ring-ui-line placeholder:text-ui-faint focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent"
             />
             <button
               type="submit"
               disabled={asking || question.trim() === ''}
-              className="hit inline-flex items-center gap-1 rounded border border-ai-border px-2 py-1 text-meta font-medium text-ai-ink hover:bg-ai-surface-2 disabled:opacity-50"
+              className="hit inline-flex items-center gap-1 rounded-ui border border-ai-border px-2 py-1 text-meta font-medium text-ai-ink hover:bg-ai-surface-2 disabled:opacity-50"
             >
               Ask
             </button>

@@ -1320,7 +1320,7 @@ export function FeedView({
                   role="radio"
                   aria-checked={on}
                   onClick={() => setFeedAuthors(id)}
-                  className={`flex h-6 items-center gap-1.5 rounded-[4px] px-2 text-meta font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent motion-safe:transition-colors motion-safe:duration-ui-fast touch:h-9 ${
+                  className={`flex h-6 items-center gap-1.5 rounded-ui px-2 text-meta font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent motion-safe:transition-colors motion-safe:duration-ui-fast touch:h-9 ${
                     on ? 'bg-ui-sel text-ui-ink' : 'text-ui-mute hover:text-ui-ink'
                   }`}
                   title={
@@ -1567,11 +1567,11 @@ function InlineThread({ item }: { item: ConsolidatedFeedItem }): JSX.Element {
   const prUrl =
     item.prNumber != null ? `https://github.com/${item.repoFullName}/pull/${item.prNumber}` : '';
   if (isLoading) {
-    return <div className="px-1 py-2 text-xs text-gray-400">Loading conversation…</div>;
+    return <div className="px-1 py-2 text-meta text-gray-400">Loading conversation…</div>;
   }
   if (!thread) {
     return (
-      <div className="px-1 py-2 text-xs text-gray-400">Couldn’t load this conversation.</div>
+      <div className="px-1 py-2 text-meta text-gray-400">Couldn’t load this conversation.</div>
     );
   }
   // A resolved thread renders collapsed to a one-line summary that TOGGLES the full
@@ -1587,7 +1587,7 @@ function InlineThread({ item }: { item: ConsolidatedFeedItem }): JSX.Element {
           type="button"
           onClick={() => setExpanded((v) => !v)}
           aria-expanded={expanded}
-          className="hit group/rt flex w-full cursor-pointer items-center gap-1.5 rounded border border-gray-200 bg-white/60 px-2 py-1 text-left text-[11px] hover:border-sky-300 dark:border-gray-800 dark:bg-gray-900/40 dark:hover:border-sky-700"
+          className="hit group/rt flex w-full cursor-pointer items-center gap-1.5 rounded-ui border border-gray-200 bg-white/60 px-2 py-1 text-left text-meta hover:border-sky-300 dark:border-gray-800 dark:bg-gray-900/40 dark:hover:border-sky-700"
         >
           {/* ── COLLAPSE-ONLY CHROME ────────────────────────────────────────────────────────
               The Resolved pill, the anchor line and the comment tally are what make this row
@@ -1654,14 +1654,14 @@ function InlineThread({ item }: { item: ConsolidatedFeedItem }): JSX.Element {
 function PrOpenedSummary({ prId }: { prId: number }): JSX.Element {
   const { data: pr, isLoading } = usePr(prId);
   if (isLoading) {
-    return <div className="mt-1 px-1 text-xs text-gray-400">Loading summary…</div>;
+    return <div className="mt-1 px-1 text-meta text-gray-400">Loading summary…</div>;
   }
   const body = pr?.body?.trim();
   if (!body) {
-    return <div className="mt-1 px-1 text-xs text-gray-400">No description.</div>;
+    return <div className="mt-1 px-1 text-meta text-gray-400">No description.</div>;
   }
   return (
-    <div className="mt-1 max-h-72 overflow-auto rounded bg-gray-50 px-2 py-1.5 text-sm dark:bg-gray-900/50">
+    <div className="mt-1 max-h-72 overflow-auto rounded-ui bg-gray-50 px-2 py-1.5 text-body dark:bg-gray-900/50">
       <Markdown>{body}</Markdown>
     </div>
   );
@@ -1674,12 +1674,12 @@ function PrOpenedSummary({ prId }: { prId: number }): JSX.Element {
 function PrCommentBody({ prId, commentId }: { prId: number; commentId: number }): JSX.Element {
   const { data: pr, isLoading } = usePr(prId);
   if (isLoading) {
-    return <span className="text-xs text-gray-400">Loading comment…</span>;
+    return <span className="text-meta text-gray-400">Loading comment…</span>;
   }
   const body = pr?.comments.find((c) => c.id === commentId)?.body?.trim();
   if (!body) {
     return (
-      <span className="text-xs italic text-gray-400">
+      <span className="text-meta italic text-gray-400">
         Comment body unavailable — open the PR to view.
       </span>
     );
@@ -1697,7 +1697,7 @@ function PrOpenedExtras({ item }: { item: ConsolidatedFeedItem }): JSX.Element {
   return (
     <div className="mt-1.5 space-y-1.5">
       {(ci != null || files != null) && (
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-gray-500 dark:text-gray-400">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-meta text-gray-500 dark:text-gray-400">
           {ci != null && (
             <span className="inline-flex items-center gap-1 font-medium" style={{ color: ci.color }}>
               <span
@@ -1727,7 +1727,7 @@ function PrOpenedExtras({ item }: { item: ConsolidatedFeedItem }): JSX.Element {
           <button
             type="button"
             onClick={() => setShowSummary((s) => !s)}
-            className="hit text-[11px] font-medium text-sky-600 hover:underline dark:text-sky-400"
+            className="hit text-meta font-medium text-sky-600 hover:underline dark:text-sky-400"
           >
             {showSummary ? 'Hide summary' : 'Show summary'}
           </button>
@@ -1757,9 +1757,9 @@ function AffectedThreadRow({
       <button
         type="button"
         onClick={onOpen}
-        className="hit group/th block w-full rounded border border-gray-200 bg-white/60 px-2 py-1 text-left hover:border-sky-300 dark:border-gray-800 dark:bg-gray-900/40 dark:hover:border-sky-700"
+        className="hit group/th block w-full rounded-ui border border-gray-200 bg-white/60 px-2 py-1 text-left hover:border-sky-300 dark:border-gray-800 dark:bg-gray-900/40 dark:hover:border-sky-700"
       >
-        <span className="flex items-center gap-1.5 text-[11px]">
+        <span className="flex items-center gap-1.5 text-meta">
           <span
             aria-hidden="true"
             className="inline-block h-2 w-2 shrink-0 rounded-full"
@@ -1772,7 +1772,7 @@ function AffectedThreadRow({
           <span className="shrink-0 text-gray-400">{meta.label.toLowerCase()}</span>
         </span>
         {thread.excerpt.trim() !== '' && (
-          <span className="mt-0.5 block truncate text-xs italic text-gray-500 dark:text-gray-400">
+          <span className="mt-0.5 block truncate text-meta italic text-gray-500 dark:text-gray-400">
             {author != null ? `${userLabel(author, thread.authorId)}: ` : ''}“{thread.excerpt}”
           </span>
         )}
@@ -1815,7 +1815,7 @@ function AffectedThreadsList({
               e.stopPropagation();
               setShowResolved((v) => !v);
             }}
-            className="hit text-[11px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+            className="hit text-meta text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
           >
             {showResolved ? 'Hide' : 'Show'} {resolved.length} resolved{' '}
             {resolved.length === 1 ? 'thread' : 'threads'}

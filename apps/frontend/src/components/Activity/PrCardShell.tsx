@@ -17,7 +17,7 @@ import { CI_META } from '../../lib/ui.js';
 // the whole-card click, nothing else. It fetches nothing (the Pending board may not fetch on mount).
 
 export const CARD_CHIP =
-  'inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-2 py-px text-[11px] font-medium';
+  'inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-2 py-px text-meta font-medium';
 export const CARD_NEUTRAL_CHIP = `${CARD_CHIP} border-gray-200 text-gray-600 dark:border-gray-700 dark:text-gray-300`;
 export const CARD_TONE_CHIP = `${CARD_CHIP} border-transparent`;
 export const CARD_RED_CHIP = `${CARD_TONE_CHIP} bg-red-500/10 text-red-700 dark:text-red-400`;
@@ -129,7 +129,7 @@ export function PrCardFrame({
       aria-labelledby={labelledBy}
       onClick={onClick}
       onKeyDown={onKey}
-      className={`rounded-lg border border-gray-200 bg-white px-3.5 py-2 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-gray-800 ${ground}${hover}${
+      className={`rounded-ui border border-gray-200 bg-white px-3.5 py-2 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-gray-800 ${ground}${hover}${
         accentClass != null ? ` ${accentClass}` : ''
       }${flash ? ' ring-2 ring-sky-400/70' : ''}`}
     >
@@ -140,7 +140,7 @@ export function PrCardFrame({
 
 /** The title text's style — exported so a title that is a button (the Pending board's "open this
  *  PR on its Overview tab") reads exactly like one that is not. */
-export const CARD_TITLE_TEXT = 'min-w-0 truncate text-sm font-semibold text-gray-900 dark:text-gray-50';
+export const CARD_TITLE_TEXT = 'min-w-0 truncate text-body font-semibold text-gray-900 dark:text-gray-50';
 
 /** Line 1: the heading — the title, things that belong to it (`after`), and an end slot. */
 export function PrCardTitle({
@@ -197,7 +197,7 @@ export function PrCardMeta({
 }): JSX.Element {
   const shown = parts.filter((p) => p != null && p !== false && p !== '');
   return (
-    <div className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px] text-gray-500 dark:text-gray-400">
+    <div className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-meta text-gray-500 dark:text-gray-400">
       {shown.map((p, i) => (
         // Positional keys: the parts are a fixed, ordered list per card.
         <Fragment key={i}>
@@ -244,7 +244,7 @@ export function PrCardEventHeading({
   return (
     <h3
       id={id}
-      className="min-w-0 break-words text-sm font-semibold leading-snug text-gray-900 [overflow-wrap:anywhere] dark:text-gray-50"
+      className="min-w-0 break-words text-body font-semibold leading-snug text-gray-900 [overflow-wrap:anywhere] dark:text-gray-50"
     >
       {icon != null && (
         <span className="mr-1.5 inline-flex translate-y-[2px] align-baseline text-gray-500 dark:text-gray-400">
@@ -259,7 +259,7 @@ export function PrCardEventHeading({
         </>
       )}
       {age != null && (
-        <span className="whitespace-nowrap text-[12px] font-normal text-gray-500 dark:text-gray-400" title={ageTitle}>
+        <span className="whitespace-nowrap text-meta font-normal text-gray-500 dark:text-gray-400" title={ageTitle}>
           {' · '}
           {age}
         </span>

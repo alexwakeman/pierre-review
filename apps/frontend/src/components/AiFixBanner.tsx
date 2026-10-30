@@ -183,13 +183,13 @@ function AiFixBannerRow({
             type="button"
             onClick={() => dismiss(run.prId)}
             aria-label={`Dismiss the AI fix for ${run.repoFullName} #${run.prNumber}`}
-            className="hit text-[11px] text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+            className="hit text-meta text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
           >
             Dismiss
           </button>
         </div>
       ) : starting ? (
-        <div className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">Starting…</div>
+        <div className="mt-1 text-meta text-gray-500 dark:text-gray-400">Starting…</div>
       ) : live ? (
         <div className="mt-1">
           <RegenProgressBar
@@ -198,7 +198,7 @@ function AiFixBannerRow({
             value={fixProgressPct(status)}
             timeConstantSec={40}
           />
-          <div className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+          <div className="mt-1 text-meta text-gray-500 dark:text-gray-400">
             {PHASE_LABEL[status?.progress?.phase ?? ''] ?? 'Working…'}
           </div>
         </div>
@@ -207,7 +207,7 @@ function AiFixBannerRow({
         // WATCHING that is capped, and naming the run's state after our own connection budget
         // is a false claim about a paid agent turn the reader started. No bar either — a bar
         // that never moves is worse than no bar.
-        <div className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+        <div className="mt-1 text-meta text-gray-500 dark:text-gray-400">
           Running. Progress not shown.
         </div>
       )}

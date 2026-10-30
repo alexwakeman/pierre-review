@@ -23,7 +23,7 @@ export function Kbd({
   return (
     <kbd
       className={cx(
-        'inline-flex min-w-[18px] items-center justify-center rounded px-1 font-sans text-meta font-medium leading-[18px]',
+        'inline-flex min-w-[18px] items-center justify-center rounded-ui px-1 font-sans text-meta font-medium leading-[18px]',
         onAccent ? 'bg-white/20 text-ui-on-accent' : 'bg-ui-hover text-ui-mute',
         !keep && 'touch:hidden',
         className,

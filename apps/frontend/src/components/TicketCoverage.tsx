@@ -140,13 +140,13 @@ function TicketShare({
   const byRef = useMemo(() => itemsByRef(review.items), [review.items]);
   const card = prCardOf(review.members, pr.id);
   const openStory = useOpenStory();
-  if (share == null) return <p className={`text-xs ${MUTED}`}>No result stored.</p>;
+  if (share == null) return <p className={`text-meta ${MUTED}`}>No result stored.</p>;
   const ctx = { review, viewedPrId: pr.id, changedPaths, onOpenInChanges };
   const rest = shareRestLine(share);
   const empty = share.criteria.length === 0 && share.missing.length === 0 && share.notRequested.length === 0;
   return (
     <div className="space-y-3">
-      {empty && <p className={`text-xs ${MUTED}`}>No criteria are this PR’s.</p>}
+      {empty && <p className={`text-meta ${MUTED}`}>No criteria are this PR’s.</p>}
       <StoryGapsPost review={review} viewedPrId={pr.id} onlyThisPr />
       {share.criteria.length > 0 && (
         <ul className="space-y-1.5">
@@ -159,7 +159,7 @@ function TicketShare({
       <NotRequestedList items={share.notRequested} {...ctx} />
       <DocReferencesBlock references={shareDocReferences(a?.references, share)} />
       {card != null && <PrCardDisclosure card={card} />}
-      <p className={`text-xs ${MUTED}`}>
+      <p className={`text-meta ${MUTED}`}>
         {rest != null && <>{rest} </>}
         <button
           type="button"
@@ -234,10 +234,10 @@ function TicketBlock({
             (url != null ? (
               <JiraKeyLink ticketKey={entry.ticketKey} url={url} />
             ) : (
-              <span className="font-mono text-sm font-semibold text-gray-900 dark:text-gray-100">{entry.ticketKey}</span>
+              <span className="font-mono text-body font-semibold text-gray-900 dark:text-gray-100">{entry.ticketKey}</span>
             ))}
           {title != null && title !== '' && (
-            <span className="min-w-0 break-words text-sm font-semibold text-gray-900 dark:text-gray-100">{title}</span>
+            <span className="min-w-0 break-words text-body font-semibold text-gray-900 dark:text-gray-100">{title}</span>
           )}
         </h4>
         {state.alignment != null && (
@@ -245,10 +245,10 @@ function TicketBlock({
             {TICKET_ALIGNMENT_LABEL[state.alignment]}
           </span>
         )}
-        {!slim && counts != null && <span className={`text-xs ${MUTED}`}>{counts}</span>}
+        {!slim && counts != null && <span className={`text-meta ${MUTED}`}>{counts}</span>}
         {currency != null && <CurrencyPill currency={currency} />}
         {comments != null && (
-          <span className={`text-xs ${MUTED}`} title={comments.title} data-testid="ticket-new-comments">
+          <span className={`text-meta ${MUTED}`} title={comments.title} data-testid="ticket-new-comments">
             {comments.label}
           </span>
         )}
@@ -279,13 +279,13 @@ function TicketBlock({
         />
       </div>
       {running && (
-        <p className={`text-xs ${MUTED}`}>
+        <p className={`text-meta ${MUTED}`}>
           {stream.progress != null ? TICKET_PHASE_LABEL[stream.progress.phase] : 'Starting'}…
         </p>
       )}
-      {start.isError && <p className={`text-xs ${ERROR_TEXT}`}>{start.error.message || 'Could not start the check.'}</p>}
-      {refused != null && <p className={`text-xs ${ERROR_TEXT}`}>{refusalSentence(refused)}</p>}
-      {failed != null && <p className={`text-xs ${ERROR_TEXT}`}>{failed}</p>}
+      {start.isError && <p className={`text-meta ${ERROR_TEXT}`}>{start.error.message || 'Could not start the check.'}</p>}
+      {refused != null && <p className={`text-meta ${ERROR_TEXT}`}>{refusalSentence(refused)}</p>}
+      {failed != null && <p className={`text-meta ${ERROR_TEXT}`}>{failed}</p>}
       {shown != null ? (
         slim && entry.ticketKey != null ? (
           <TicketShare
@@ -301,7 +301,7 @@ function TicketBlock({
           <TicketResults review={shown} viewedPrId={pr.id} changedPaths={changedPaths} onOpenInChanges={onOpenInChanges} />
         )
       ) : (
-        !running && refused == null && failed == null && <p className={`text-xs ${MUTED}`}>Not checked yet.</p>
+        !running && refused == null && failed == null && <p className={`text-meta ${MUTED}`}>Not checked yet.</p>
       )}
     </div>
   );
@@ -353,7 +353,7 @@ function LegacyBlock({
       onOpenInChanges={onOpenInChanges}
       aside={
         <span className="ml-auto inline-flex flex-wrap items-center gap-2">
-          <span className={`text-xs ${MUTED}`}>Checked on this PR only</span>
+          <span className={`text-meta ${MUTED}`}>Checked on this PR only</span>
           <ReviewedAgo at={legacy.finishedAt} />
           <AiRunGate kind="ticket_review">
             <button
@@ -365,9 +365,9 @@ function LegacyBlock({
               {start.isPending ? 'Starting…' : 'Check'}
             </button>
           </AiRunGate>
-          {start.isError && <span className={`text-xs ${ERROR_TEXT}`}>{start.error.message || 'Could not start the check.'}</span>}
+          {start.isError && <span className={`text-meta ${ERROR_TEXT}`}>{start.error.message || 'Could not start the check.'}</span>}
           {refusals.map((r) => (
-            <span key={r.ident} className={`text-xs ${ERROR_TEXT}`}>
+            <span key={r.ident} className={`text-meta ${ERROR_TEXT}`}>
               {refusalSentence(r.refused!)}
             </span>
           ))}
@@ -452,11 +452,11 @@ function StoryInput({ pr, entries }: { pr: PrDetail; entries: readonly TicketEnt
               {start.isPending ? 'Starting…' : n === 1 ? 'Check this story' : `Check ${n} stories`}
             </button>
           </AiRunGate>
-          {start.isError && <span className={`text-xs ${ERROR_TEXT}`}>{start.error.message || 'Could not start the check.'}</span>}
+          {start.isError && <span className={`text-meta ${ERROR_TEXT}`}>{start.error.message || 'Could not start the check.'}</span>}
         </div>
       )}
       {refusals.map((r) => (
-        <p key={r.ident} className={`mt-1 text-xs ${ERROR_TEXT}`}>
+        <p key={r.ident} className={`mt-1 text-meta ${ERROR_TEXT}`}>
           {refusalSentence(r.refused!)}
         </p>
       ))}
@@ -506,8 +506,8 @@ export function TicketCoverageSection({
         </InfoButton>
       }
     >
-      {isLoading && <p className={`text-xs ${MUTED}`}>Loading…</p>}
-      {isError && <p className={`text-xs ${ERROR_TEXT}`}>Could not load the story checks.</p>}
+      {isLoading && <p className={`text-meta ${MUTED}`}>Loading…</p>}
+      {isError && <p className={`text-meta ${ERROR_TEXT}`}>Could not load the story checks.</p>}
       {n > 0 && (
         <div className="divide-y divide-gray-200 dark:divide-gray-800">
           {entries.map((e) => (

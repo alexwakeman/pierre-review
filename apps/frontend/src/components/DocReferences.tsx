@@ -46,7 +46,7 @@ export function DocLink({ target, children }: { target: ReferenceDocCitation; ch
   const workspaceId = target.workspaceId ?? null;
   if (workspaceId == null) {
     return (
-      <span className="inline-flex items-center gap-1 break-words text-left text-xs text-gray-700 dark:text-gray-300">
+      <span className="inline-flex items-center gap-1 break-words text-left text-meta text-gray-700 dark:text-gray-300">
         <BookIcon size={12} />
         {children}
       </span>
@@ -63,7 +63,7 @@ export function DocLink({ target, children }: { target: ReferenceDocCitation; ch
     <a
       href={href}
       onClick={onClick}
-      className="hit inline-flex items-center gap-1 break-words text-left text-xs text-blue-600 hover:underline dark:text-blue-400"
+      className="hit inline-flex items-center gap-1 break-words text-left text-meta text-blue-600 hover:underline dark:text-blue-400"
     >
       <BookIcon size={12} />
       {children}
@@ -77,7 +77,7 @@ export function DocReferenceList({ references }: { references: readonly ReviewDo
   return (
     <ul className="space-y-1.5">
       {references.map((r, i) => (
-        <li key={`${r.path}#${r.anchor ?? ''}-${i}`} className="rounded border border-gray-100 px-3 py-2 dark:border-gray-800">
+        <li key={`${r.path}#${r.anchor ?? ''}-${i}`} className="rounded-ui border border-gray-100 px-3 py-2 dark:border-gray-800">
           <div className="flex flex-wrap items-center gap-2">
             <span className={`${REVIEW_CHIP} ${VERDICT_TONE[r.verdict]}`}>{REVIEW_DOC_VERDICT_LABEL[r.verdict]}</span>
             <DocLink target={r}>
@@ -85,10 +85,10 @@ export function DocReferenceList({ references }: { references: readonly ReviewDo
             </DocLink>
             {r.about != null && <span className={REVIEW_META}>{r.about}</span>}
           </div>
-          <blockquote className="mt-1 border-l-2 border-gray-300 pl-2 text-xs italic text-gray-700 dark:border-gray-600 dark:text-gray-300">
+          <blockquote className="mt-1 border-l-2 border-gray-300 pl-2 text-meta italic text-gray-700 dark:border-gray-600 dark:text-gray-300">
             {r.quote}
           </blockquote>
-          {r.note !== '' && <p className="mt-1 text-xs text-gray-800 dark:text-gray-200">{r.note}</p>}
+          {r.note !== '' && <p className="mt-1 text-meta text-gray-800 dark:text-gray-200">{r.note}</p>}
         </li>
       ))}
     </ul>
@@ -158,7 +158,7 @@ export function DocReferencesBlock({ references }: { references: readonly Review
   return (
     <div className="space-y-1.5">
       <div className="flex items-center gap-1">
-        <h4 className="text-xs font-semibold text-gray-700 dark:text-gray-200">Reference docs</h4>
+        <h4 className="text-meta font-semibold text-gray-700 dark:text-gray-200">Reference docs</h4>
         <DocReferencesInfo />
       </div>
       <DocReferenceList references={references} />

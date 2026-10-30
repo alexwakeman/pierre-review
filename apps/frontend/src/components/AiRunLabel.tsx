@@ -8,7 +8,7 @@ import { aiRunLabel, type AiProviderId } from '@pierre-review/shared';
 export function AiRunLabel({
   provider,
   model,
-  className = 'text-xs',
+  className = 'text-meta',
 }: {
   provider: AiProviderId | null | undefined;
   model: string | null | undefined;

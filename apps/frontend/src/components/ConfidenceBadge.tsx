@@ -16,7 +16,7 @@ export function ConfidenceBadge({
   const title = reason ? `${meta.description}\nSignal: ${reason}` : meta.description;
   return (
     <span
-      className="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[11px] font-semibold"
+      className="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-meta font-semibold"
       style={{ backgroundColor: `${meta.color}1a`, ...vendorInk(meta.color) }}
       title={title}
     >

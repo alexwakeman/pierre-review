@@ -227,7 +227,7 @@ function currencyOf(review: ClaudeReview, prHeadSha: string | null): ReviewCurre
 function CurrencyPill({ currency }: { currency: ReviewCurrency }): JSX.Element {
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium ${currency.className}`}
+      className={`inline-flex items-center gap-1 rounded-ui px-1.5 py-0.5 text-meta font-medium ${currency.className}`}
       title={currency.title}
     >
       {currency.tone === 'current' ? <CheckIcon size={12} /> : <WarningIcon size={12} />}
@@ -343,7 +343,7 @@ function UsageBreakdown({ review }: { review: ClaudeReview }): JSX.Element | nul
     });
 
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 font-mono text-xs text-gray-500 dark:text-gray-400">
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 font-mono text-meta text-gray-500 dark:text-gray-400">
       {items.map((it) => (
         <span
           key={it.key}
@@ -373,7 +373,7 @@ function ActivityLog({ lines }: { lines: string[] }): JSX.Element | null {
   return (
     <div
       ref={ref}
-      className="mt-2 max-h-32 overflow-y-auto rounded border border-gray-100 bg-gray-50 px-2 py-1.5 font-mono text-[11px] leading-snug text-gray-500 dark:border-gray-800 dark:bg-gray-900/60 dark:text-gray-400"
+      className="mt-2 max-h-32 overflow-y-auto rounded-ui border border-gray-100 bg-gray-50 px-2 py-1.5 font-mono text-meta leading-snug text-gray-500 dark:border-gray-800 dark:bg-gray-900/60 dark:text-gray-400"
     >
       {lines.map((l, i) => (
         <div key={i} className="whitespace-pre-wrap break-words">
@@ -427,7 +427,7 @@ function PostReviewPreviewPanel({ preview }: { preview: PostReviewPreview }): JS
         <ul className="space-y-2">
           {preview.comments.map((c, i) => (
             <li key={`${c.path}:${c.line}:${i}`} className={`${REVIEW_ITEM_CARD} bg-white dark:bg-gray-900`}>
-              <div className="mb-1 break-all font-mono text-xs text-gray-600 dark:text-gray-300">
+              <div className="mb-1 break-all font-mono text-meta text-gray-600 dark:text-gray-300">
                 {c.path}:{c.line}
               </div>
               <Markdown>{c.body}</Markdown>
@@ -439,7 +439,7 @@ function PostReviewPreviewPanel({ preview }: { preview: PostReviewPreview }): JS
         <ul className="space-y-2">
           {preview.prComments.map((c) => (
             <li key={c.findingId} className={`${REVIEW_ITEM_CARD} bg-white dark:bg-gray-900`}>
-              <div className="mb-1 text-xs text-gray-600 dark:text-gray-300">
+              <div className="mb-1 text-meta text-gray-600 dark:text-gray-300">
                 PR comment
                 {c.path !== '' ? (
                   <>
@@ -523,7 +523,7 @@ function FindingHunk({ hunk, path }: { hunk: string; path?: string | null }): JS
         onClick={() => setExpanded(true)}
         aria-expanded={false}
         title="Show the code hunk"
-        className="hit mt-1 flex w-full items-center gap-2 overflow-hidden rounded bg-gray-50 px-2 py-1.5 text-left font-mono text-xs dark:bg-gray-900/60"
+        className="hit mt-1 flex w-full items-center gap-2 overflow-hidden rounded-ui bg-gray-50 px-2 py-1.5 text-left font-mono text-meta dark:bg-gray-900/60"
       >
         <ChevronIcon dir="right" className="shrink-0 text-gray-400" />
         <span className={`min-w-0 flex-1 truncate ${hunkLineClass(preview, previewHtml != null)}`}>
@@ -541,7 +541,7 @@ function FindingHunk({ hunk, path }: { hunk: string; path?: string | null }): JS
           )}
         </span>
         {lines.length > 1 && (
-          <span className="shrink-0 font-sans text-[11px] text-gray-500 dark:text-gray-400">
+          <span className="shrink-0 font-sans text-meta text-gray-500 dark:text-gray-400">
             {lines.length} lines
           </span>
         )}
@@ -550,8 +550,8 @@ function FindingHunk({ hunk, path }: { hunk: string; path?: string | null }): JS
   }
 
   return (
-    <div className="mt-1 rounded bg-gray-50 dark:bg-gray-900/60">
-      <pre className="overflow-x-auto px-2 py-1.5 font-mono text-xs leading-snug">
+    <div className="mt-1 rounded-ui bg-gray-50 dark:bg-gray-900/60">
+      <pre className="overflow-x-auto px-2 py-1.5 font-mono text-meta leading-snug">
         {lines.map((l, i) =>
           i === 0 && headerCollapses ? (
             <button
@@ -593,7 +593,7 @@ function FindingHunk({ hunk, path }: { hunk: string; path?: string | null }): JS
         type="button"
         onClick={() => setExpanded(false)}
         aria-expanded={true}
-        className="hit inline-flex items-center gap-1 px-2 pb-1.5 text-[11px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+        className="hit inline-flex items-center gap-1 px-2 pb-1.5 text-meta text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
       >
         <ChevronIcon dir="up" size={11} />
         Hide code
@@ -618,7 +618,7 @@ function SuggestionBlock({
     [suggestion, path],
   );
   return (
-    <pre className="mt-1 overflow-x-auto rounded bg-gray-100 px-2 py-1.5 font-mono text-xs dark:bg-gray-800">
+    <pre className="mt-1 overflow-x-auto rounded-ui bg-gray-100 px-2 py-1.5 font-mono text-meta dark:bg-gray-800">
       {html != null ? (
         <code className="code-hl" dangerouslySetInnerHTML={{ __html: html }} />
       ) : (
@@ -882,7 +882,7 @@ export function FindingRow({
       <div className="flex items-start gap-2">
         {selection}
         <span
-          className={`mt-0.5 inline-flex shrink-0 items-center rounded px-1.5 py-0.5 text-[11px] font-semibold capitalize ${SEVERITY_CLASS[finding.severity]}`}
+          className={`mt-0.5 inline-flex shrink-0 items-center rounded-ui px-1.5 py-0.5 text-meta font-semibold capitalize ${SEVERITY_CLASS[finding.severity]}`}
         >
           {finding.severity}
         </span>
@@ -892,27 +892,27 @@ export function FindingRow({
               <PrRefText text={finding.title} />
             </span>
             {finding.lens != null && (
-              <span className="rounded bg-gray-500/10 px-1.5 py-0.5 text-[11px] text-gray-600 dark:text-gray-300">
+              <span className="rounded-ui bg-gray-500/10 px-1.5 py-0.5 text-meta text-gray-600 dark:text-gray-300">
                 {CLAUDE_FINDING_LENS_LABELS[finding.lens]}
               </span>
             )}
             {/* A Claude + Codex pair's finding: who raised it, quietly (one neutral chip). */}
             {finding.source != null && (
               <span
-                className="rounded bg-gray-500/10 px-1.5 py-0.5 text-[11px] text-gray-600 dark:text-gray-300"
+                className="rounded-ui bg-gray-500/10 px-1.5 py-0.5 text-meta text-gray-600 dark:text-gray-300"
                 data-finding-source={finding.source}
               >
                 {findingSourceLabel(finding.source)}
               </span>
             )}
             {storyLabel != null && (
-              <span className="rounded bg-sky-500/10 px-1.5 py-0.5 text-[11px] text-sky-700 dark:text-sky-300">
+              <span className="rounded-ui bg-sky-500/10 px-1.5 py-0.5 text-meta text-sky-700 dark:text-sky-300">
                 {storyLabel}
               </span>
             )}
             {priorStatus != null && (
               <span
-                className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${RERAISED_CHIP[priorStatus].cls}`}
+                className={`rounded-ui px-1.5 py-0.5 text-meta font-medium ${RERAISED_CHIP[priorStatus].cls}`}
                 title="Raised in the previous review"
               >
                 {RERAISED_CHIP[priorStatus].label}
@@ -920,7 +920,7 @@ export function FindingRow({
             )}
             {alreadyPosted && !isPosted && (
               <span
-                className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${ALREADY_POSTED_CHIP.cls}`}
+                className={`rounded-ui px-1.5 py-0.5 text-meta font-medium ${ALREADY_POSTED_CHIP.cls}`}
                 title={ALREADY_POSTED_CHIP.title}
               >
                 {ALREADY_POSTED_CHIP.label}
@@ -932,14 +932,14 @@ export function FindingRow({
                   href={safeExternalUrl(commentUrl)}
                   target="_blank"
                   rel="noreferrer noopener"
-                  className="hit inline-flex items-center gap-1 rounded bg-green-500/10 px-1.5 py-0.5 text-[11px] text-green-700 hover:underline dark:text-green-400"
+                  className="hit inline-flex items-center gap-1 rounded-ui bg-green-500/10 px-1.5 py-0.5 text-meta text-green-700 hover:underline dark:text-green-400"
                   title="View this comment on GitHub"
                 >
                   {postedChipLabel(post!)}
                   <CheckIcon size={11} />
                 </a>
               ) : (
-                <span className="inline-flex items-center gap-1 rounded bg-green-500/10 px-1.5 py-0.5 text-[11px] text-green-700 dark:text-green-400">
+                <span className="inline-flex items-center gap-1 rounded-ui bg-green-500/10 px-1.5 py-0.5 text-meta text-green-700 dark:text-green-400">
                   {postedChipLabel(post!)}
                   <CheckIcon size={11} />
                 </span>
@@ -949,7 +949,7 @@ export function FindingRow({
                 href={safeExternalUrl(reminderUrl)}
                 target="_blank"
                 rel="noreferrer noopener"
-                className="hit inline-flex items-center gap-1 rounded bg-green-500/10 px-1.5 py-0.5 text-[11px] text-green-700 hover:underline dark:text-green-400"
+                className="hit inline-flex items-center gap-1 rounded-ui bg-green-500/10 px-1.5 py-0.5 text-meta text-green-700 hover:underline dark:text-green-400"
                 title="View the reminder on GitHub"
               >
                 {reminderChipLabel(finding.reminder)}
@@ -957,7 +957,7 @@ export function FindingRow({
             )}
             {autoResolveLabel(finding.autoResolve) != null && (
               <span
-                className={`rounded px-1.5 py-0.5 text-[11px] ${
+                className={`rounded-ui px-1.5 py-0.5 text-meta ${
                   finding.autoResolve?.status === 'failed'
                     ? 'bg-amber-500/10 text-amber-700 dark:text-amber-300'
                     : 'bg-green-500/10 text-green-700 dark:text-green-400'
@@ -967,35 +967,35 @@ export function FindingRow({
               </span>
             )}
             {hasReword && !isPosted && (
-              <span className="rounded bg-blue-500/10 px-1.5 py-0.5 text-[11px] text-blue-600 dark:text-blue-400">
+              <span className="rounded-ui bg-blue-500/10 px-1.5 py-0.5 text-meta text-blue-600 dark:text-blue-400">
                 Your wording
               </span>
             )}
             {!finding.anchored && !isPosted &&
               (noFile ? (
                 <span
-                  className="rounded bg-gray-500/10 px-1.5 py-0.5 text-[11px] text-gray-600 dark:text-gray-300"
+                  className="rounded-ui bg-gray-500/10 px-1.5 py-0.5 text-meta text-gray-600 dark:text-gray-300"
                   title="Posts as a PR comment"
                 >
                   PR comment
                 </span>
               ) : finding.fileInDiff ? (
                 <span
-                  className="rounded bg-gray-500/10 px-1.5 py-0.5 text-[11px] text-gray-600 dark:text-gray-300"
+                  className="rounded-ui bg-gray-500/10 px-1.5 py-0.5 text-meta text-gray-600 dark:text-gray-300"
                   title="Posts on the file's first change"
                 >
                   Line not in diff
                 </span>
               ) : (
                 <span
-                  className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[11px] text-amber-700 dark:text-amber-400"
+                  className="rounded-ui bg-amber-500/10 px-1.5 py-0.5 text-meta text-amber-700 dark:text-amber-400"
                   title="Posts as a PR comment"
                 >
                   File not in diff
                 </span>
               ))}
             {ignored && (
-              <span className="rounded bg-gray-500/10 px-1.5 py-0.5 text-[11px] text-gray-600 dark:text-gray-300">
+              <span className="rounded-ui bg-gray-500/10 px-1.5 py-0.5 text-meta text-gray-600 dark:text-gray-300">
                 Ignored
               </span>
             )}
@@ -1013,7 +1013,7 @@ export function FindingRow({
               kept as an explicit, visually secondary escape. A third "view file" link goes
               to the blob at the reviewed commit for collapsed/outdated diffs. */}
           {!noFile && (
-          <div className="mt-0.5 flex flex-wrap items-center gap-2 font-mono text-xs">
+          <div className="mt-0.5 flex flex-wrap items-center gap-2 font-mono text-meta">
             {canJumpInApp ? (
               <>
                 {/* A BUTTON, not an <a href="#…">: a hash navigation would write to the URL
@@ -1076,7 +1076,7 @@ export function FindingRow({
                 href={secondaryBlobHref}
                 target="_blank"
                 rel="noreferrer noopener"
-                className="hit font-sans text-[11px] text-gray-500 hover:text-gray-700 hover:underline dark:text-gray-400 dark:hover:text-gray-200"
+                className="hit font-sans text-meta text-gray-500 hover:text-gray-700 hover:underline dark:text-gray-400 dark:hover:text-gray-200"
                 title="Open the file at the reviewed commit"
               >
                 view file
@@ -1103,8 +1103,8 @@ export function FindingRow({
 
           {/* Your reword — shown when set, editable on the latest run. */}
           {hasReword && !rewording && (
-            <div className="mt-1.5 rounded border border-blue-200 bg-blue-50/50 px-2 py-1 dark:border-blue-900/50 dark:bg-blue-900/10">
-              <div className="text-[11px] font-medium text-blue-700 dark:text-blue-400">
+            <div className="mt-1.5 rounded-ui border border-blue-200 bg-blue-50/50 px-2 py-1 dark:border-blue-900/50 dark:bg-blue-900/10">
+              <div className="text-meta font-medium text-blue-700 dark:text-blue-400">
                 Your wording
               </div>
               <Markdown>{finding.editedBody as string}</Markdown>
@@ -1120,7 +1120,7 @@ export function FindingRow({
                 onChange={setDraft}
                 rows={4}
                 placeholder="Your wording (markdown)"
-                className="w-full rounded border border-gray-300 bg-white px-2 py-1.5 font-mono text-xs dark:border-gray-700 dark:bg-gray-900"
+                className="w-full rounded-ui border border-gray-300 bg-white px-2 py-1.5 font-mono text-meta dark:border-gray-700 dark:bg-gray-900"
               />
               <div className="flex flex-wrap gap-2">
                 <button type="button" onClick={saveReword} className={BTN_PRIMARY}>
@@ -1237,7 +1237,7 @@ export function FindingRow({
               </button>
             )}
             {postError != null && (
-              <span className="ml-auto text-xs text-red-500">{postError}</span>
+              <span className="ml-auto text-meta text-red-500">{postError}</span>
             )}
           </>
         )}
@@ -1391,22 +1391,22 @@ export function ClaudesReview({
             {currency != null && <CurrencyPill currency={currency} />}
             <ReviewedAgo at={review.finishedAt} />
             {review.trigger === 'auto' && (
-              <span className="rounded bg-gray-500/10 px-1.5 py-0.5 text-xs text-gray-600 dark:text-gray-300">
+              <span className="rounded-ui bg-gray-500/10 px-1.5 py-0.5 text-meta text-gray-600 dark:text-gray-300">
                 {AUTO_REVIEW_LABEL}
               </span>
             )}
             {review.fresh === true && (
-              <span className="rounded bg-gray-500/10 px-1.5 py-0.5 text-xs text-gray-600 dark:text-gray-300">
+              <span className="rounded-ui bg-gray-500/10 px-1.5 py-0.5 text-meta text-gray-600 dark:text-gray-300">
                 {FRESH_REVIEW_LABEL}
               </span>
             )}
             {review.kind === 'replies' && (
-              <span className="rounded bg-gray-500/10 px-1.5 py-0.5 text-xs text-gray-600 dark:text-gray-300">
+              <span className="rounded-ui bg-gray-500/10 px-1.5 py-0.5 text-meta text-gray-600 dark:text-gray-300">
                 {REPLIES_CHECK_LABEL}
               </span>
             )}
             {review.reviewMode != null && (
-              <span className="rounded bg-gray-500/10 px-1.5 py-0.5 text-xs text-gray-600 dark:text-gray-300">
+              <span className="rounded-ui bg-gray-500/10 px-1.5 py-0.5 text-meta text-gray-600 dark:text-gray-300">
                 {REVIEW_MODE_LABEL[review.reviewMode]} review
               </span>
             )}
@@ -1431,21 +1431,21 @@ export function ClaudesReview({
           </InfoButton>
         }
       >
-        <div className="text-xs text-gray-500 dark:text-gray-400">{metaLine(review, costText)}</div>
+        <div className="text-meta text-gray-500 dark:text-gray-400">{metaLine(review, costText)}</div>
         {/* WHY IT WAS NOT APPROVED (auto verdict on): one line under the verdict, always. */}
         {notApprovedLine(storedReview) != null && (
-          <div className="text-xs text-gray-700 dark:text-gray-200" data-not-approved>
+          <div className="text-meta text-gray-700 dark:text-gray-200" data-not-approved>
             {notApprovedLine(storedReview)}
           </div>
         )}
         {/* A pair whose other half did not finish: one plain line. */}
         {review.pair?.failedHalf != null && (
-          <div className="text-xs text-gray-600 dark:text-gray-300" data-pair-failed-half>
+          <div className="text-meta text-gray-600 dark:text-gray-300" data-pair-failed-half>
             {pairHalfFailedLine(review.pair.failedHalf)}
           </div>
         )}
         {review.alsoRead != null && review.alsoRead.length > 0 && (
-          <div className="text-xs text-gray-500 dark:text-gray-400">
+          <div className="text-meta text-gray-500 dark:text-gray-400">
             Also read: {review.alsoRead.map(reviewPeerReadLabel).join(', ')}
           </div>
         )}
@@ -1480,7 +1480,7 @@ export function ClaudesReview({
             <SectionCount>{plural(findings.length, 'finding', 'findings')}</SectionCount>
             <CopyAllFindingsButton findings={findings} editable={editable} />
             {placement.placed.size > 0 && (
-              <span className="text-xs text-gray-500 dark:text-gray-400">
+              <span className="text-meta text-gray-500 dark:text-gray-400">
                 {placement.placed.size} more under Story check
               </span>
             )}
@@ -1494,7 +1494,7 @@ export function ClaudesReview({
             )}
           </ul>
         ) : (
-          <div className="text-xs text-gray-500 dark:text-gray-400">
+          <div className="text-meta text-gray-500 dark:text-gray-400">
             {placement.placed.size > 0 ? 'None outside Story check.' : 'No line-level findings.'}
           </div>
         )}
@@ -1621,7 +1621,7 @@ function GenerateFixButton({
       <button
         type="button"
         onClick={() => openAiFixFromReview(prId, review.id)}
-        className="hit inline-flex items-center gap-1 whitespace-nowrap rounded border border-ai-border px-2.5 py-1 text-xs text-ai-signal hover:border-ai-signal/60 hover:bg-ai-surface-2"
+        className="hit inline-flex items-center gap-1 whitespace-nowrap rounded-ui border border-ai-border px-2.5 py-1 text-meta text-ai-signal hover:border-ai-signal/60 hover:bg-ai-surface-2"
       >
         Generate fix from this review
         <ArrowIcon dir="right" size={11} />
@@ -1824,7 +1824,7 @@ export function ClaudeReviewTab({
   );
 
   if (isLoading) {
-    return <div className="px-4 py-3 text-sm text-gray-400">Loading…</div>;
+    return <div className="px-4 py-3 text-body text-gray-400">Loading…</div>;
   }
 
   // Off here: the kill switch (nothing to run, nothing to say — the tab is not even listed then;
@@ -1987,7 +1987,7 @@ export function ClaudeReviewTab({
 
           {/* After an auto review of the reader's own PR: the auto fix started, or why not. */}
           {viewingLatest && autoFixOutcomeLine(data?.autoFix) != null && (
-            <div className="mt-2 text-xs text-gray-600 dark:text-gray-400">
+            <div className="mt-2 text-meta text-gray-600 dark:text-gray-400">
               {autoFixOutcomeLine(data?.autoFix)}
             </div>
           )}
@@ -1998,7 +1998,7 @@ export function ClaudeReviewTab({
           {/* An auto-review refusal is shown by the "Auto review queued/running" note instead,
               and is history once the hold ends. */}
           {generate.isError && !isAutoReviewHoldError(generate.error) && (
-            <div className="mt-2 text-xs text-red-600 dark:text-red-400">
+            <div className="mt-2 text-meta text-red-600 dark:text-red-400">
               {(generate.error as Error)?.message ?? 'Failed to start review.'}
             </div>
           )}
@@ -2017,7 +2017,7 @@ export function ClaudeReviewTab({
       </div>
       {isRunning && (
         <div>
-          <div className="flex flex-wrap items-center gap-2 text-sm">
+          <div className="flex flex-wrap items-center gap-2 text-body">
             {/* The ONE status line every agentic pass shows (components/AiStatusLine). The clock
                 runs from the run's own row when the latest one is this run, else from mount. */}
             <AiStatusLine
@@ -2025,23 +2025,23 @@ export function ClaudeReviewTab({
               since={
                 review != null && status?.reviewId === review.id ? review.createdAt : null
               }
-              className="text-sm"
+              className="text-body"
             />
             {review?.trigger === 'auto' && (
-              <span className="rounded bg-gray-500/10 px-1.5 py-0.5 text-xs text-gray-500 dark:text-gray-400">
+              <span className="rounded-ui bg-gray-500/10 px-1.5 py-0.5 text-meta text-gray-500 dark:text-gray-400">
                 {AUTO_REVIEW_LABEL}
               </span>
             )}
             {status?.progress?.reviewMode != null && (
               <span
-                className="rounded bg-blue-500/10 px-1.5 py-0.5 text-xs font-medium text-blue-700 dark:text-blue-400"
+                className="rounded-ui bg-blue-500/10 px-1.5 py-0.5 text-meta font-medium text-blue-700 dark:text-blue-400"
                 title="The review depth chosen for this run"
               >
                 {REVIEW_MODE_LABEL[status.progress.reviewMode]} review
               </span>
             )}
             {status?.progress?.message != null && (
-              <span className="text-xs text-gray-400">
+              <span className="text-meta text-gray-400">
                 {status.progress.message}
               </span>
             )}
@@ -2056,7 +2056,7 @@ export function ClaudeReviewTab({
           </div>
           {/* Live token usage + running cost estimate (once the agent has a turn). */}
           {status?.progress?.usage && (
-            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 font-mono text-xs text-gray-500 dark:text-gray-400">
+            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 font-mono text-meta text-gray-500 dark:text-gray-400">
               <span
                 className="inline-flex items-center gap-1"
                 title="Output tokens generated so far"
@@ -2109,13 +2109,13 @@ export function ClaudeReviewTab({
       )}
       {!isRunning && review?.status === 'failed' && review.trigger !== 'auto' && (
         <div>
-          <div className="rounded border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-700/60 dark:bg-red-900/20 dark:text-red-400">
+          <div className="rounded-ui border border-red-300 bg-red-50 px-3 py-2 text-body text-red-700 dark:border-red-700/60 dark:bg-red-900/20 dark:text-red-400">
             {review.error ?? 'The review failed.'}
           </div>
         </div>
       )}
       {!isRunning && review?.status === 'cancelled' && (
-        <div className="text-sm text-gray-500 dark:text-gray-400">Review cancelled.</div>
+        <div className="text-body text-gray-500 dark:text-gray-400">Review cancelled.</div>
       )}
 
       {/* The replies pass: "Check replies" while people's replies on Limn's findings wait, and the
@@ -2216,7 +2216,7 @@ export function ClaudeReviewTab({
           title="Post to GitHub"
           pills={
             review.postedAt != null ? (
-              <span className="text-xs text-gray-500 dark:text-gray-400">
+              <span className="text-meta text-gray-500 dark:text-gray-400">
                 {review.autoPost?.status === 'posted' || review.autoPost?.status === 'partial'
                   ? `Posted automatically · ${relativeTime(review.autoPost.at)}`
                   : `Posted ${formatDate(review.postedAt)}`}
@@ -2234,22 +2234,22 @@ export function ClaudeReviewTab({
             </InfoButton>
           }
         >
-          <div className="text-xs font-medium text-gray-700 dark:text-gray-300">Summary</div>
+          <div className="text-meta font-medium text-gray-700 dark:text-gray-300">Summary</div>
           {autoPostFailureLine(review.autoPost) != null && (
-            <p className="text-xs text-amber-700 dark:text-amber-300">{autoPostFailureLine(review.autoPost)}</p>
+            <p className="text-meta text-amber-700 dark:text-amber-300">{autoPostFailureLine(review.autoPost)}</p>
           )}
           {autoPostSkipLine(review.autoPost) != null && (
-            <p className="text-xs text-gray-600 dark:text-gray-300">{autoPostSkipLine(review.autoPost)}</p>
+            <p className="text-meta text-gray-600 dark:text-gray-300">{autoPostSkipLine(review.autoPost)}</p>
           )}
           {autoVerdictLine(review.autoPost, reviewByName(review)) != null && (
-            <p className="text-xs text-gray-600 dark:text-gray-300">{autoVerdictLine(review.autoPost, reviewByName(review))}</p>
+            <p className="text-meta text-gray-600 dark:text-gray-300">{autoVerdictLine(review.autoPost, reviewByName(review))}</p>
           )}
           {autoLiftLine(review.autoPost, reviewByName(review)) != null && (
             <p
               className={
                 review.autoPost?.liftedBlock?.how === 'dismiss_failed'
-                  ? 'text-xs text-amber-700 dark:text-amber-300'
-                  : 'text-xs text-gray-600 dark:text-gray-300'
+                  ? 'text-meta text-amber-700 dark:text-amber-300'
+                  : 'text-meta text-gray-600 dark:text-gray-300'
               }
             >
               {autoLiftLine(review.autoPost, reviewByName(review))}
@@ -2265,7 +2265,7 @@ export function ClaudeReviewTab({
             onBlur={() => updateReview.mutate({ reviewId: review.id, userBody })}
             rows={6}
             placeholder="Summary (markdown, @ to mention). Optional."
-            className="w-full rounded border border-gray-300 bg-white px-2 py-1.5 font-mono text-sm dark:border-gray-700 dark:bg-gray-900"
+            className="w-full rounded-ui border border-gray-300 bg-white px-2 py-1.5 font-mono text-body dark:border-gray-700 dark:bg-gray-900"
           />
           <div className="flex flex-wrap items-center gap-2">
             <button
@@ -2314,7 +2314,7 @@ export function ClaudeReviewTab({
               </button>
             ) : (
               <span className="inline-flex items-center gap-2">
-                <span className="text-xs text-gray-500 dark:text-gray-400">
+                <span className="text-meta text-gray-500 dark:text-gray-400">
                   Post as <strong>{VERDICT_LABEL[userVerdict]}</strong>?
                 </span>
                 <button
@@ -2335,7 +2335,7 @@ export function ClaudeReviewTab({
               </span>
             )}
             {postReview.isPending && (
-              <span className="text-xs text-gray-500 dark:text-gray-400">Posting…</span>
+              <span className="text-meta text-gray-500 dark:text-gray-400">Posting…</span>
             )}
           </div>
 
@@ -2344,14 +2344,14 @@ export function ClaudeReviewTab({
 
           {/* Post result. */}
           {postResult != null && (
-            <div className="rounded border border-green-300 bg-green-50 px-3 py-2 text-sm text-green-700 dark:border-green-700/60 dark:bg-green-900/20 dark:text-green-400">
+            <div className="rounded-ui border border-green-300 bg-green-50 px-3 py-2 text-body text-green-700 dark:border-green-700/60 dark:bg-green-900/20 dark:text-green-400">
               <div>
                 Posted review #{postResult.postedReviewId ?? '?'} ·{' '}
                 {postResult.postedCommentCount} inline comment
                 {postResult.postedCommentCount === 1 ? '' : 's'}
               </div>
               {postResult.prCommentCount > 0 && (
-                <div className="mt-1 text-xs">
+                <div className="mt-1 text-meta">
                   Plus {postResult.prCommentCount} PR comment
                   {postResult.prCommentCount === 1 ? '' : 's'}.
                 </div>
@@ -2360,7 +2360,7 @@ export function ClaudeReviewTab({
           )}
 
           {postReview.isError && (
-            <div className="text-xs text-red-600 dark:text-red-400">
+            <div className="text-meta text-red-600 dark:text-red-400">
               {(postReview.error as Error)?.message ??
                 'Failed to post review to GitHub.'}
             </div>
@@ -2404,7 +2404,7 @@ function FailedAutoReviewLine({
   const message = (error ?? 'no reason was given').replace(/\s+/g, ' ').trim();
   const canRetry = retry && ai.enabled && !held && autoReview?.workspaceId === workspaceId && autoReview?.autoReview.enabled === true;
   return (
-    <div className="flex flex-wrap items-center gap-2 text-sm">
+    <div className="flex flex-wrap items-center gap-2 text-body">
       <span className="min-w-0 flex-1 truncate text-red-700 dark:text-red-400" title={message}>
         Auto review failed: {message}
       </span>
@@ -2430,7 +2430,7 @@ function FailedAutoReviewLine({
         </AiRunGate>
       )}
       {line != null && (
-        <span role="status" className="text-xs text-gray-600 dark:text-gray-300">
+        <span role="status" className="text-meta text-gray-600 dark:text-gray-300">
           {line}
         </span>
       )}

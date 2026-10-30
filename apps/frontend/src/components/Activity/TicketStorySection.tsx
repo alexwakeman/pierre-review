@@ -151,7 +151,7 @@ function StoryBody({
       ) : (
         <>
           {summary.kind === 'brief' && <BriefSummary brief={summary.brief} docsItems={briefNotes.items} afterCriteria={designNode} />}
-          {summary.kind === 'reading' && <p className={`text-xs ${MUTED}`}>Reading this ticket…</p>}
+          {summary.kind === 'reading' && <p className={`text-meta ${MUTED}`}>Reading this ticket…</p>}
           {summary.kind !== 'brief' && designNode}
           {briefNotes.block}
           <StoryDisclosure
@@ -227,14 +227,14 @@ function BriefSummary({
       </div>
       {brief.criteria.length > 0 ? (
         <>
-          {brief.criteriaDerived && <p className={`text-xs ${MUTED}`}>Worked out from the description</p>}
+          {brief.criteriaDerived && <p className={`text-meta ${MUTED}`}>Worked out from the description</p>}
           <ol className="space-y-1" aria-label="Acceptance criteria">
             {shown.map((c) => {
               const docs = docsItems.get(c.n);
               return (
                 <li key={c.n} className="flex flex-col px-1 text-body text-ui-ink">
                   <div className="flex items-baseline gap-2">
-                    <span className={`w-5 shrink-0 text-right font-mono text-xs ${MUTED}`}>{c.n}</span>
+                    <span className={`w-5 shrink-0 text-right font-mono text-meta ${MUTED}`}>{c.n}</span>
                     <span className="min-w-0 break-words">{c.text}</span>
                   </div>
                   {docs != null && (
@@ -258,7 +258,7 @@ function BriefSummary({
           )}
         </>
       ) : (
-        <p className={`text-xs ${MUTED}`}>No acceptance criteria.</p>
+        <p className={`text-meta ${MUTED}`}>No acceptance criteria.</p>
       )}
       {afterCriteria}
     </div>
@@ -300,12 +300,12 @@ function ReviewSummary({
     [members],
   );
   const texts = useMemo(() => (review != null ? reviewTexts(null, [review]) : []), [review]);
-  if (isLoading) return <p className={`text-xs ${MUTED}`}>Loading…</p>;
+  if (isLoading) return <p className={`text-meta ${MUTED}`}>Loading…</p>;
   if (isError || review == null) {
     // The docs check does not need the review: with no criteria it draws the run's own numbered list.
     return (
       <div className="space-y-2">
-        <p className="text-xs text-red-600 dark:text-red-400">Could not load the story.</p>
+        <p className="text-meta text-red-600 dark:text-red-400">Could not load the story.</p>
         {design}
         {docsNotes.block}
       </div>
@@ -327,7 +327,7 @@ function ReviewSummary({
           <TicketResults review={review} viewedPrId={null} docsItems={docsNotes.items} afterCriteria={design} />
         ) : (
           <>
-            <p className={`text-xs ${MUTED}`}>No result stored.</p>
+            <p className={`text-meta ${MUTED}`}>No result stored.</p>
             {design}
           </>
         )}

@@ -285,7 +285,7 @@ export function DocsViewer({
           className="mx-4 flex items-center gap-2 rounded-ui bg-ui-raise px-3 py-1.5 text-body text-ui-ink"
           data-testid="docs-quote-strip"
         >
-          {strip === 'painted' && <span aria-hidden="true" className="doc-quote-swatch h-3 w-3 shrink-0 rounded-sm" />}
+          {strip === 'painted' && <span aria-hidden="true" className="doc-quote-swatch h-3 w-3 shrink-0 rounded-ui" />}
           <span className="min-w-0 flex-1">
             {quoteStripText(strip)}
           </span>

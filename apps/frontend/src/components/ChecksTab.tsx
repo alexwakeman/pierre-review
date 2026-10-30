@@ -83,9 +83,9 @@ export function PrBranchLine({
   return (
     <div className="flex items-start gap-1.5">
       <span className="min-w-0 break-all" data-testid="pr-branch">
-        <span className="font-mono text-xs text-gray-900 dark:text-gray-100">{headRefName}</span>
+        <span className="font-mono text-meta text-gray-900 dark:text-gray-100">{headRefName}</span>
         {baseRefName != null && (
-          <span className="text-xs text-gray-500 dark:text-gray-400"> → {baseRefName}</span>
+          <span className="text-meta text-gray-500 dark:text-gray-400"> → {baseRefName}</span>
         )}
       </span>
       <CopyButton text={headRefName} what="branch name" />
@@ -106,7 +106,7 @@ export function PrTicketBranchLine({
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1" data-testid="pr-ticket-branch">
       {tickets != null &&
         (tickets.length === 0 ? (
-          <span className="text-xs text-gray-500 dark:text-gray-400">No ticket found</span>
+          <span className="text-meta text-gray-500 dark:text-gray-400">No ticket found</span>
         ) : (
           <span className="flex flex-wrap gap-1.5">
             {tickets.map((t) => (
@@ -175,12 +175,12 @@ export function ChecksSummary({
         type="button"
         onClick={() => setOpen(!open)}
         aria-expanded={open}
-        className="hit flex w-full items-center gap-2 rounded px-1 py-0.5 text-left hover:bg-gray-50 dark:hover:bg-gray-800/40"
+        className="hit flex w-full items-center gap-2 rounded-ui px-1 py-0.5 text-left hover:bg-gray-50 dark:hover:bg-gray-800/40"
       >
         <ChevronIcon dir={open ? 'down' : 'right'} size={10} className="shrink-0 text-gray-400" />
         {passed > 0 && (
           <span
-            className="rounded bg-green-500/15 px-1 text-[11px] font-semibold text-green-700 dark:text-green-400"
+            className="rounded-ui bg-green-500/15 px-1 text-meta font-semibold text-green-700 dark:text-green-400"
             title="Checks that passed"
           >
             {allPassed && passed > 1 ? `all ${passed} passed` : `${passed} passed`}
@@ -188,7 +188,7 @@ export function ChecksSummary({
         )}
         {failing > 0 && (
           <span
-            className="rounded bg-red-500/15 px-1 text-[11px] font-semibold text-red-600 dark:text-red-400"
+            className="rounded-ui bg-red-500/15 px-1 text-meta font-semibold text-red-600 dark:text-red-400"
             title="Checks that failed"
           >
             {failing} failing
@@ -196,13 +196,13 @@ export function ChecksSummary({
         )}
         {running > 0 && (
           <span
-            className="rounded bg-amber-500/15 px-1 text-[11px] font-semibold text-amber-700 dark:text-amber-400"
+            className="rounded-ui bg-amber-500/15 px-1 text-meta font-semibold text-amber-700 dark:text-amber-400"
             title="Checks still running"
           >
             {running} running
           </span>
         )}
-        <span className="ml-auto text-[11px] text-gray-500 dark:text-gray-400">
+        <span className="ml-auto text-meta text-gray-500 dark:text-gray-400">
           {total} check{total === 1 ? '' : 's'}
         </span>
       </button>
@@ -277,14 +277,14 @@ function SuggestedReviewersRow({
 
   return (
     <Row label="Suggested">
-      <div className="flex flex-col gap-1.5 text-xs">
+      <div className="flex flex-col gap-1.5 text-meta">
         {suggestions.map((s) => {
           const k = keyOf(s);
           const done = requested.has(k);
           const u = s.userId != null ? usersById.get(s.userId) : undefined;
           return (
             <div key={k} className="flex flex-wrap items-center gap-1.5">
-              <span className="inline-flex items-center gap-1 rounded bg-gray-500/10 px-1.5 py-0.5">
+              <span className="inline-flex items-center gap-1 rounded-ui bg-gray-500/10 px-1.5 py-0.5">
                 {s.kind === 'team' ? (
                   <span className="font-medium">@{s.teamName}</span>
                 ) : u ? (
@@ -302,7 +302,7 @@ function SuggestedReviewersRow({
                   type="button"
                   onClick={() => assign(s)}
                   disabled={pendingKey !== null || done}
-                  className="hit rounded border border-violet-300 px-1.5 py-0.5 font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-50 dark:border-violet-700 dark:text-violet-300 dark:hover:bg-violet-900/20"
+                  className="hit rounded-ui border border-violet-300 px-1.5 py-0.5 font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-50 dark:border-violet-700 dark:text-violet-300 dark:hover:bg-violet-900/20"
                   title="Request this reviewer on GitHub"
                 >
                   {done ? (
@@ -321,7 +321,7 @@ function SuggestedReviewersRow({
         })}
       </div>
       {request.isError && (
-        <div className="mt-1 text-[11px] text-red-500">
+        <div className="mt-1 text-meta text-red-500">
           {(request.error as Error)?.message ?? 'Couldn’t request the reviewer.'}
         </div>
       )}
@@ -458,7 +458,7 @@ function PrSummary({ body }: { body: string }): JSX.Element {
           <button
             type="button"
             onClick={() => setExpanded((v) => !v)}
-            className="hit mt-1 text-xs font-medium text-blue-500 hover:underline"
+            className="hit mt-1 text-meta font-medium text-blue-500 hover:underline"
           >
             {expanded ? 'Show less' : 'Show more'}
           </button>
@@ -629,7 +629,7 @@ export function ChecksTab({
   return (
     <>
       {pr.authNotice?.kind === 'saml_sso' && (
-        <div className="mx-4 mt-2 rounded-md border border-amber-400/50 bg-amber-400/10 px-3 py-2 text-xs leading-relaxed text-amber-800 dark:text-amber-200">
+        <div className="mx-4 mt-2 rounded-ui border border-amber-400/50 bg-amber-400/10 px-3 py-2 text-meta leading-relaxed text-amber-800 dark:text-amber-200">
           <strong className="font-semibold">
             Some data from {pr.authNotice.org} is hidden.
           </strong>{' '}
@@ -700,7 +700,7 @@ export function ChecksTab({
                   />
                 </a>
                 {checks.length > 0 && (
-                  <span className="text-xs text-gray-400">
+                  <span className="text-meta text-gray-400">
                     ·{' '}
                     {[
                       counts.success ? `${counts.success} passed` : null,
@@ -748,7 +748,7 @@ export function ChecksTab({
                         reading the failure — the reported bug. The four healthy states keep
                         their sentence in the chip's title: waiting in a queue explains itself. */}
                     {queue.tone === 'bad' && (
-                      <span className="text-xs text-gray-500 dark:text-gray-400">
+                      <span className="text-meta text-gray-500 dark:text-gray-400">
                         · {queue.title}
                       </span>
                     )}
@@ -770,7 +770,7 @@ export function ChecksTab({
                         queue chip's replacement rule (above) already exists to prevent. The
                         sentence survives on the chip's own `title`, which is untouched. */}
                     {verdict.detail && verdict.verdict !== 'conflicts' && (
-                      <span className="text-xs text-gray-400">· {verdict.detail}</span>
+                      <span className="text-meta text-gray-400">· {verdict.detail}</span>
                     )}
                   </>
                 )}
@@ -807,7 +807,7 @@ export function ChecksTab({
             fetch. */}
         {conflictsRowVisible(pr.state, verdict.verdict) && (
           <Row label="Conflicts">
-            <div className="flex flex-wrap items-center gap-2 text-xs font-medium leading-relaxed text-gray-700 dark:text-gray-200">
+            <div className="flex flex-wrap items-center gap-2 text-meta font-medium leading-relaxed text-gray-700 dark:text-gray-200">
               {/* ⚠ THE BUTTON IS GATED, THE ROW IS NOT (see the ⚠ two paragraphs up). A reader
                   without push access sees the GitHub link alone, which is exactly what this row was before
                   the button existed. HIDE, never disable. And nothing here fetches:
@@ -862,7 +862,7 @@ export function ChecksTab({
             beneath it would be the loudest thing on a finished pane. */}
         {stoppedIntent != null && pr.state === 'open' && (
           <Row label="Auto-merge">
-            <div className="text-xs leading-relaxed">
+            <div className="text-meta leading-relaxed">
               <span className="font-medium text-gray-700 dark:text-gray-200">
                 <WarningIcon size={12} className="mr-1 inline-block align-[-0.1em]" />
                 {TERMINAL_LABEL[stoppedIntent.state] ?? 'Auto-merge stopped'}
@@ -903,7 +903,7 @@ export function ChecksTab({
               {blockers.map((b) => {
                 const clickable = b.kind === 'unresolved_threads' && onOpenThreads != null;
                 return (
-                  <li key={b.kind} className="text-xs leading-relaxed">
+                  <li key={b.kind} className="text-meta leading-relaxed">
                     {clickable ? (
                       <button
                         type="button"
@@ -936,13 +936,13 @@ export function ChecksTab({
 
       {botGroups.length > 0 && (
         <Row label="Bots">
-          <div className="flex flex-wrap gap-2 text-xs">
+          <div className="flex flex-wrap gap-2 text-meta">
             {botGroups.map((g) => (
               <button
                 key={g.kind}
                 type="button"
                 onClick={() => setThreadBotFilter(g.kind)}
-                className="hit inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-medium transition-opacity hover:opacity-80"
+                className="hit inline-flex items-center gap-1 rounded-ui px-1.5 py-0.5 font-medium transition-opacity hover:opacity-80"
                 style={{ color: g.color, background: `${g.color}1a` }}
                 title={`${g.label} opened ${g.threads} review thread${
                   g.threads === 1 ? '' : 's'
@@ -975,7 +975,7 @@ export function ChecksTab({
           <button
             type="button"
             onClick={onShowBotActivity}
-            className="hit inline-flex items-center gap-1 rounded bg-red-500/10 px-1.5 py-0.5 text-xs font-medium text-red-600 transition-opacity hover:opacity-80 dark:text-red-400"
+            className="hit inline-flex items-center gap-1 rounded-ui bg-red-500/10 px-1.5 py-0.5 text-meta font-medium text-red-600 transition-opacity hover:opacity-80 dark:text-red-400"
             title={slowBots
               .map((b) => `${b.label}: slower than its typical on this PR`)
               .join(' · ')}
@@ -1014,7 +1014,7 @@ export function ChecksTab({
 
       {pr.mergedById != null && (
         <Row label="Merged by">
-          <div className="text-xs">
+          <div className="text-meta">
             <span className="inline-flex items-center gap-1.5">
               <Avatar user={usersById.get(pr.mergedById)} size={14} />
               <UserName
@@ -1063,7 +1063,7 @@ export function ChecksTab({
             {pr.labels.map((l) => (
               <span
                 key={l.name}
-                className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs"
+                className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-meta"
                 style={{ borderColor: `#${l.color}` }}
               >
                 <span
@@ -1079,9 +1079,9 @@ export function ChecksTab({
 
       {pr.requestedReviewers.length > 0 && (
         <Row label="Requested">
-          <div className="flex flex-wrap gap-2 text-xs">
+          <div className="flex flex-wrap gap-2 text-meta">
             {pr.requestedReviewers.map((r, i) => (
-              <span key={i} className="rounded bg-gray-500/10 px-1.5 py-0.5">
+              <span key={i} className="rounded-ui bg-gray-500/10 px-1.5 py-0.5">
                 {r.teamName ? (
                   `@${r.teamName}`
                 ) : (
@@ -1102,7 +1102,7 @@ export function ChecksTab({
       )}
 
       <Row label="Meta">
-        <div className="space-y-0.5 text-xs text-gray-500 dark:text-gray-400">
+        <div className="space-y-0.5 text-meta text-gray-500 dark:text-gray-400">
           <div>{pr.repoFullName}</div>
           <div>opened {relativeTime(pr.openedAt)}</div>
           <div>updated {relativeTime(pr.updatedAt)}</div>
@@ -1129,7 +1129,7 @@ function PrTicketChip({ prId, ticket: t }: { prId: number; ticket: TicketRef }):
         <button
           type="button"
           onClick={() => openStory({ ident: t.ident!, key: t.key, title: null })}
-          className="hit inline-flex items-center rounded-l px-1.5 py-0.5 text-xs font-medium text-sky-700 hover:bg-sky-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 dark:text-sky-300 dark:hover:bg-sky-900"
+          className="hit inline-flex items-center rounded-l-ui px-1.5 py-0.5 text-meta font-medium text-sky-700 hover:bg-sky-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 dark:text-sky-300 dark:hover:bg-sky-900"
           title={`Open the ${t.key} story`}
           data-testid="pr-ticket-story"
         >
@@ -1143,7 +1143,7 @@ function PrTicketChip({ prId, ticket: t }: { prId: number; ticket: TicketRef }):
             aria-label={`Open ${t.key} in ${trackerLabel}`}
             title={`Open ${t.key} in ${trackerLabel}`}
             className={`inline-flex items-center self-stretch px-1 text-sky-700 hover:bg-sky-100 dark:text-sky-300 dark:hover:bg-sky-900 ${
-              t.manual ? '' : 'rounded-r'
+              t.manual ? '' : 'rounded-r-ui'
             }`}
           >
             <ExternalLinkIcon size={10} />
@@ -1155,8 +1155,8 @@ function PrTicketChip({ prId, ticket: t }: { prId: number; ticket: TicketRef }):
         href={external}
         target="_blank"
         rel="noreferrer noopener"
-        className={`inline-flex items-center px-1.5 py-0.5 text-xs font-medium text-sky-700 hover:bg-sky-100 dark:text-sky-300 ${
-          t.manual ? 'rounded-l' : 'rounded'
+        className={`inline-flex items-center px-1.5 py-0.5 text-meta font-medium text-sky-700 hover:bg-sky-100 dark:text-sky-300 ${
+          t.manual ? 'rounded-l-ui' : 'rounded-ui'
         }`}
         title={`Open ${t.key} in ${trackerLabel}`}
       >
@@ -1164,7 +1164,7 @@ function PrTicketChip({ prId, ticket: t }: { prId: number; ticket: TicketRef }):
       </a>
     );
   return (
-    <span className="inline-flex items-center rounded border border-sky-200 bg-sky-50 dark:border-sky-900 dark:bg-sky-950">
+    <span className="inline-flex items-center rounded-ui border border-sky-200 bg-sky-50 dark:border-sky-900 dark:bg-sky-950">
       {link}
       {t.manual === true && (
         <button
@@ -1172,13 +1172,13 @@ function PrTicketChip({ prId, ticket: t }: { prId: number; ticket: TicketRef }):
           disabled={remove.isPending}
           onClick={() => remove.mutate(t.key)}
           aria-label={`Remove ${t.key} (added by hand)`}
-          className="hit rounded-r px-1 py-1 text-sky-700 hover:bg-sky-100 disabled:opacity-50 dark:text-sky-300 dark:hover:bg-sky-900"
+          className="hit rounded-r-ui px-1 py-1 text-sky-700 hover:bg-sky-100 disabled:opacity-50 dark:text-sky-300 dark:hover:bg-sky-900"
         >
           <CloseIcon size={10} />
         </button>
       )}
       {remove.isError && (
-        <span role="alert" className="px-1 text-xs text-red-600 dark:text-red-400">
+        <span role="alert" className="px-1 text-meta text-red-600 dark:text-red-400">
           {remove.error.message || 'Could not remove it.'}
         </span>
       )}

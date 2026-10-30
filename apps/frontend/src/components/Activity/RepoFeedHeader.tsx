@@ -11,14 +11,14 @@ import { RepoStatsLine } from './RepoStats.js';
 export function RepoFeedHeader({ repo }: { repo: ActivityRepo }): JSX.Element {
   const maintainerCount = repo.maintainerIds.length;
   return (
-    <div className="space-y-2 rounded-lg border border-gray-200 p-3 dark:border-gray-800">
+    <div className="space-y-2 rounded-ui border border-gray-200 p-3 dark:border-gray-800">
       <div className="flex items-center gap-2">
-        <span className="min-w-0 truncate text-base font-semibold text-gray-800 dark:text-gray-100">
+        <span className="min-w-0 truncate text-title font-semibold text-gray-800 dark:text-gray-100">
           {repo.repoFullName}
         </span>
         {maintainerCount > 0 && (
           <span
-            className="flex shrink-0 items-center gap-0.5 text-[11px] text-gray-400"
+            className="flex shrink-0 items-center gap-0.5 text-meta text-gray-400"
             title={`${maintainerCount} maintainer${maintainerCount === 1 ? '' : 's'} (have merged here)`}
           >
             <MaintainerShield />
@@ -27,14 +27,14 @@ export function RepoFeedHeader({ repo }: { repo: ActivityRepo }): JSX.Element {
         )}
         {repo.attentionCount > 0 && (
           <span
-            className="flex shrink-0 items-center gap-0.5 rounded bg-amber-500/15 px-1 text-[11px] font-semibold text-amber-600 dark:text-amber-400"
+            className="flex shrink-0 items-center gap-0.5 rounded-ui bg-amber-500/15 px-1 text-meta font-semibold text-amber-600 dark:text-amber-400"
             title="PRs needing attention (review or reply · stalled · untouched threads)"
           >
             <WarningIcon size={10} />
             {repo.attentionCount}
           </span>
         )}
-        <span className="ml-auto shrink-0 text-[11px] tabular-nums text-gray-400">
+        <span className="ml-auto shrink-0 text-meta tabular-nums text-gray-400">
           {repo.stats.openPrs > 0 ? `[${repo.stats.openPrs}]` : '[—]'}
         </span>
       </div>

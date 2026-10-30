@@ -80,14 +80,14 @@ function MetaFileRow({ file }: { file: PrFileChange }): JSX.Element {
         href={file.githubUrl}
         target="_blank"
         rel="noreferrer noopener"
-        className="hit group flex min-w-0 flex-1 items-center gap-3 px-4 py-1.5 text-sm"
+        className="hit group flex min-w-0 flex-1 items-center gap-3 px-4 py-1.5 text-body"
         title={`${file.path} — view this file's diff on GitHub`}
       >
-        <code className="min-w-0 flex-1 truncate font-mono text-xs">
+        <code className="min-w-0 flex-1 truncate font-mono text-meta">
           {dir && <span className="text-gray-400">{dir}/</span>}
           <span className="font-semibold">{fileName}</span>
         </code>
-        <span className="shrink-0 font-mono text-xs tabular-nums">
+        <span className="shrink-0 font-mono text-meta tabular-nums">
           <span className="text-green-600 dark:text-green-400">+{file.additions}</span>{' '}
           <span className="text-red-500 dark:text-red-400">−{file.deletions}</span>
         </span>
@@ -132,8 +132,8 @@ function MoreFilesNote({
     <div
       className={
         compact
-          ? 'space-y-0.5 px-2 pb-1 pt-0.5 text-[11px] leading-snug text-amber-700 dark:text-amber-400'
-          : 'flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2 text-xs text-gray-500 dark:text-gray-400'
+          ? 'space-y-0.5 px-2 pb-1 pt-0.5 text-meta leading-snug text-amber-700 dark:text-amber-400'
+          : 'flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2 text-meta text-gray-500 dark:text-gray-400'
       }
     >
       {canLoadMore ? (
@@ -141,7 +141,7 @@ function MoreFilesNote({
           type="button"
           onClick={onLoadMore}
           disabled={loading}
-          className="hit rounded border border-blue-400 px-2 py-0.5 text-blue-600 hover:bg-blue-50 disabled:opacity-60 dark:border-blue-600 dark:text-blue-400 dark:hover:bg-blue-900/30"
+          className="hit rounded-ui border border-blue-400 px-2 py-0.5 text-blue-600 hover:bg-blue-50 disabled:opacity-60 dark:border-blue-600 dark:text-blue-400 dark:hover:bg-blue-900/30"
         >
           {loading ? 'Loading files…' : `Load next 100 files (${ofTotal})`}
         </button>
@@ -657,7 +657,7 @@ export function ChangesTab({
     return (
       <div style={rootStyle}>
         {bar(false)}
-        <div className="px-4 py-2 text-xs text-gray-500 dark:text-gray-400">
+        <div className="px-4 py-2 text-meta text-gray-500 dark:text-gray-400">
           {isError
             ? 'The full diff couldn’t be loaded — showing the changed-file list.'
             : 'Inline diffs aren’t available for this PR — showing the changed-file list.'}{' '}
@@ -777,7 +777,7 @@ export function ChangesTab({
             No divide-y: each file's (sticky) header carries its own bottom border. */}
         <div className={threadsOnly ? 'hidden' : 'min-w-0 flex-1'}>
           {focusMissing && focus != null && (
-            <div className="border-b border-amber-500/30 bg-amber-500/10 px-4 py-1.5 text-xs text-amber-700 dark:text-amber-300">
+            <div className="border-b border-amber-500/30 bg-amber-500/10 px-4 py-1.5 text-meta text-amber-700 dark:text-amber-300">
               <code className="font-mono">{focus.path}</code> isn’t in the diff shown here.
               {truncated
                 ? ' It may be in the files not loaded yet.'

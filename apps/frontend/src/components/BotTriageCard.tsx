@@ -249,7 +249,7 @@ export function BotTriageCard({
           <button
             type="button"
             onClick={onOpenThreads}
-            className="hit ml-auto rounded px-1.5 py-0.5 font-medium text-sky-600 underline-offset-2 hover:underline dark:text-sky-400"
+            className="hit ml-auto rounded-ui px-1.5 py-0.5 font-medium text-sky-600 underline-offset-2 hover:underline dark:text-sky-400"
             title={
               resolvableIds.length > 0
                 ? 'See the threads. The likely-addressed ones can be resolved there.'
@@ -283,7 +283,7 @@ export function BotTriageCard({
             type="button"
             onClick={() => setConfirming(true)}
             disabled={resolveBotThreads.isPending}
-            className="hit ml-auto rounded border border-green-600 px-2 py-0.5 font-medium text-green-700 hover:bg-green-50 disabled:opacity-60 dark:text-green-400 dark:hover:bg-green-950/30"
+            className="hit ml-auto rounded-ui border border-green-600 px-2 py-0.5 font-medium text-green-700 hover:bg-green-50 disabled:opacity-60 dark:text-green-400 dark:hover:bg-green-950/30"
             title="A later commit touched the file each of these threads flags — review the exact list, then resolve them on GitHub in one click."
           >
             Resolve the {resolvableIds.length} addressed
@@ -294,7 +294,7 @@ export function BotTriageCard({
       {/* Confirm step: the exact threads, listed — resolve is user-initiated and confirm-gated,
           always naming what it will touch (nothing ever auto-resolves). */}
       {confirming && (
-        <div className="mt-2 rounded border border-green-200 bg-white/60 p-2 dark:border-green-900 dark:bg-gray-950/40">
+        <div className="mt-2 rounded-ui border border-green-200 bg-white/60 p-2 dark:border-green-900 dark:bg-gray-950/40">
           <div className="mb-1 font-medium text-gray-700 dark:text-gray-200">
             Resolve {resolvableThreads.length} likely-addressed bot thread
             {resolvableThreads.length === 1 ? '' : 's'} on GitHub?
@@ -306,7 +306,7 @@ export function BotTriageCard({
               const excerpt = (t.comments[0]?.body ?? '').replace(/\s+/g, ' ').slice(0, 90);
               return (
                 <li key={t.id} className="flex items-baseline gap-1.5">
-                  <code className="shrink-0 font-mono text-[11px] text-gray-500 dark:text-gray-400">
+                  <code className="shrink-0 font-mono text-meta text-gray-500 dark:text-gray-400">
                     {t.path.split('/').pop() ?? t.path}
                     {t.line != null ? `:${t.line}` : ''}
                   </code>
@@ -327,7 +327,7 @@ export function BotTriageCard({
                   { onSettled: () => setConfirming(false) },
                 )
               }
-              className="hit rounded bg-green-600 px-2 py-0.5 font-medium text-white hover:bg-green-700 disabled:opacity-60"
+              className="hit rounded-ui bg-green-600 px-2 py-0.5 font-medium text-white hover:bg-green-700 disabled:opacity-60"
             >
               {resolveBotThreads.isPending ? 'Resolving…' : 'Yes, resolve'}
             </button>
@@ -335,7 +335,7 @@ export function BotTriageCard({
               type="button"
               disabled={resolveBotThreads.isPending}
               onClick={() => setConfirming(false)}
-              className="hit rounded px-2 py-0.5 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
+              className="hit rounded-ui px-2 py-0.5 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
             >
               Cancel
             </button>

@@ -11,7 +11,7 @@ export function StateBadge({
   const meta = DERIVED_STATE_META[state];
   return (
     <span
-      className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium"
+      className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-meta font-medium"
       style={{ backgroundColor: `${meta.color}22`, ...vendorInk(meta.color) }}
       title={meta.description}
     >

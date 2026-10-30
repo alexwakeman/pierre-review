@@ -219,7 +219,7 @@ export function MentionTextarea({
       {showPicker && (
         <ul
           role="listbox"
-          className="absolute left-0 right-0 z-30 mt-0.5 max-h-56 overflow-auto rounded-md border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-900"
+          className="absolute left-0 right-0 z-30 mt-0.5 max-h-56 overflow-auto rounded-ui border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-900"
         >
           {suggestions.map((u, i) => (
             <li key={u.id}>
@@ -233,7 +233,7 @@ export function MentionTextarea({
                   accept(u);
                 }}
                 onMouseEnter={() => setActive(i)}
-                className={`flex w-full items-center gap-2 px-2 py-1 text-left text-xs ${
+                className={`flex w-full items-center gap-2 px-2 py-1 text-left text-meta ${
                   i === active
                     ? 'bg-sky-50 dark:bg-sky-950/40'
                     : 'hover:bg-gray-50 dark:hover:bg-gray-800/60'

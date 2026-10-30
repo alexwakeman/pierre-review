@@ -25,7 +25,7 @@ import { avoidRects } from '../lib/avoidRects.js';
 const NO_OBSTACLES = (): DOMRect[] => [];
 
 export const HOVER_PANEL_CLASS =
-  'pointer-events-none z-[60] max-w-[min(20rem,90vw)] rounded-md border border-gray-200 bg-white px-2.5 py-2 text-[12px] leading-snug text-gray-800 shadow-lg dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100';
+  'pointer-events-none z-[60] max-w-[min(20rem,90vw)] rounded-ui border border-gray-200 bg-white px-2.5 py-2 text-meta leading-snug text-gray-800 shadow-lg dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100';
 
 /**
  * The trigger (`children`, wrapped in a focusable span) and its panel (`content`). `label` is the
@@ -71,7 +71,7 @@ export function HoverPopover({
         aria-label={label}
         aria-describedby={open ? popId : undefined}
         {...getReferenceProps()}
-        className={`rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 ${className ?? ''}`}
+        className={`rounded-ui focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 ${className ?? ''}`}
       >
         {children}
       </span>

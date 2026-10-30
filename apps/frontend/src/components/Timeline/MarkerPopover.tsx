@@ -61,7 +61,7 @@ function PrContext({
   const isForeign =
     ev.actorId != null && pr.authorId != null && ev.actorId !== pr.authorId;
   return (
-    <div className="flex items-baseline gap-1 text-[11px] text-gray-500 dark:text-gray-400">
+    <div className="flex items-baseline gap-1 text-meta text-gray-500 dark:text-gray-400">
       <span>on</span>
       {isForeign && (
         <span className="font-medium text-gray-600 dark:text-gray-300">
@@ -168,7 +168,7 @@ function SingleEvent({
 
   return (
     <div className="space-y-1.5">
-      <div className="flex items-center gap-1.5 text-[11px]">
+      <div className="flex items-center gap-1.5 text-meta">
         <span
           className="inline-block h-3 w-3"
           dangerouslySetInnerHTML={{ __html: vis.svg }}
@@ -183,10 +183,10 @@ function SingleEvent({
       )}
 
       {isCommit && (
-        <div className="text-[11px]">
+        <div className="text-meta">
           {commit ? (
             <div className="flex items-center gap-1.5">
-              <code className="rounded bg-gray-100 px-1 font-mono text-gray-600 dark:bg-gray-800 dark:text-gray-300">
+              <code className="rounded-ui bg-gray-100 px-1 font-mono text-gray-600 dark:bg-gray-800 dark:text-gray-300">
                 {commit.sha.slice(0, 7)}
               </code>
               {commit.message && (
@@ -202,7 +202,7 @@ function SingleEvent({
       )}
 
       {thread && (
-        <div className="flex items-center gap-1.5 text-[11px]">
+        <div className="flex items-center gap-1.5 text-meta">
           <code className="truncate font-mono text-gray-600 dark:text-gray-300">
             {thread.path}
             {thread.line != null ? `:${thread.line}` : ''}
@@ -215,7 +215,7 @@ function SingleEvent({
       {thread && <ClaudeThreadReason thread={thread} />}
 
       {anchor && (
-        <pre className="overflow-x-auto rounded border border-gray-200 bg-gray-50 px-2 py-1 font-mono text-[11px] leading-snug text-gray-600 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-300">
+        <pre className="overflow-x-auto rounded-ui border border-gray-200 bg-gray-50 px-2 py-1 font-mono text-meta leading-snug text-gray-600 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-300">
           {anchorHtml != null ? (
             <>
               {/* The +/-/space marker prints plain — it is diff notation, not code.
@@ -230,10 +230,10 @@ function SingleEvent({
       )}
 
       {threadComment && (
-        <div className="text-xs">
+        <div className="text-meta">
           <Markdown>{threadComment.body}</Markdown>
           {thread && thread.comments.length > 1 && (
-            <div className="mt-1 text-[11px] text-gray-400">
+            <div className="mt-1 text-meta text-gray-400">
               +{thread.comments.length - 1} more in thread
             </div>
           )}
@@ -241,7 +241,7 @@ function SingleEvent({
       )}
 
       {isPrComment && (
-        <div className="text-xs">
+        <div className="text-meta">
           {prComment ? (
             <Markdown>{prComment.body}</Markdown>
           ) : (
@@ -250,7 +250,7 @@ function SingleEvent({
         </div>
       )}
 
-      <div className="flex items-center gap-3 pt-0.5 text-[11px]">
+      <div className="flex items-center gap-3 pt-0.5 text-meta">
         {/* Commits (and lifecycle events, which never render a marker) drop the
             "Open in detail pane" link — clicking the marker already opens the PR
             in the detail pane, and commits get "View in Activity" instead. Other
@@ -491,7 +491,7 @@ export function MarkerPopover({
         {...getFloatingProps()}
         onPointerUp={persistSize}
         data-testid="marker-popover"
-        className="z-50 flex flex-col rounded-lg border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-900"
+        className="z-50 flex flex-col rounded-ui border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-900"
       >
         <div className="tl-modal-header" onPointerDown={onDragStart}>
           <svg className="tl-grip" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">

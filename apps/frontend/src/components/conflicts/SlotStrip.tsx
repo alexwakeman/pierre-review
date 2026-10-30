@@ -50,11 +50,11 @@ import { EDIT_REGION, INK_CLASS, actionLabels, regionGroupLabel, stateWord } fro
 // `gutterLabel` in `copy.ts`.
 
 const BTN =
-  'flex items-center gap-1 rounded border px-1 py-0.5 text-[11px] leading-none transition-colors ' +
+  'flex items-center gap-1 rounded-ui border px-1 py-0.5 text-meta leading-none transition-colors ' +
   'border-gray-300 text-gray-700 hover:border-gray-400 hover:bg-gray-100 ' +
   'dark:border-gray-700 dark:text-gray-200 dark:hover:border-gray-600 dark:hover:bg-gray-800';
 const BTN_ON =
-  'flex items-center gap-1 rounded border px-1 py-0.5 text-[11px] leading-none ' +
+  'flex items-center gap-1 rounded-ui border px-1 py-0.5 text-meta leading-none ' +
   'border-gray-500 bg-gray-100 text-gray-900 dark:border-gray-400 dark:bg-gray-800 dark:text-gray-50';
 
 export function SlotStrip({
@@ -142,7 +142,7 @@ export function SlotStrip({
         active ? 'bg-gray-100 dark:bg-gray-900' : ''
       }`}
     >
-      <span className={`mr-1 text-[11px] font-medium ${role == null ? '' : INK_CLASS[role]}`}>
+      <span className={`mr-1 text-meta font-medium ${role == null ? '' : INK_CLASS[role]}`}>
         {/* An edited region Claude wrote is not "Your text". */}
         {claude?.decision === 'edited' ? `${aiName}’s text` : stateWord(region, slot)}
       </span>
@@ -159,7 +159,7 @@ export function SlotStrip({
             onActivate();
             setWhyOpen((o) => !o);
           }}
-          className="hit inline-flex items-center gap-1 rounded bg-ai-signal-fill/10 px-1 py-0.5 text-[11px] font-medium leading-none text-ai-signal"
+          className="hit inline-flex items-center gap-1 rounded-ui bg-ai-signal-fill/10 px-1 py-0.5 text-meta font-medium leading-none text-ai-signal"
         >
           <SparkleIcon size={11} />
           {aiName}
@@ -224,7 +224,7 @@ export function SlotStrip({
       {slot.kind !== 'unapplied' &&
         button('undo', false, labels.undo, <UndoIcon size={13} />, null)}
       {claude != null && whyOpen && (
-        <span className="basis-full text-[12px] text-gray-700 dark:text-gray-200">
+        <span className="basis-full text-meta text-gray-700 dark:text-gray-200">
           {claude.rationale || `${aiName} gave no reason.`}
         </span>
       )}

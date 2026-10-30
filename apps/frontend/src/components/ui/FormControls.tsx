@@ -48,7 +48,7 @@ export const Checkbox = forwardRef<HTMLInputElement, BaseProps & { indeterminate
           type="checkbox"
           aria-checked={indeterminate ? 'mixed' : undefined}
           className={cx(
-            'peer h-4 w-4 cursor-[inherit] appearance-none rounded-[4px] bg-ui-raise ring-1 ring-inset ring-ui-line',
+            'peer h-4 w-4 cursor-[inherit] appearance-none rounded-ui bg-ui-raise ring-1 ring-inset ring-ui-line',
             'checked:bg-ui-accent-fill checked:ring-0 indeterminate:bg-ui-accent-fill indeterminate:ring-0',
             'motion-safe:transition-colors motion-safe:duration-ui-fast',
             FOCUS_RING,
@@ -84,7 +84,7 @@ export const CheckboxBox = forwardRef<HTMLInputElement, Omit<InputHTMLAttributes
         ref={ref}
         type="checkbox"
         className={cx(
-          'peer h-4 w-4 cursor-[inherit] appearance-none rounded-[4px] bg-ui-bg ring-1 ring-inset ring-ui-line',
+          'peer h-4 w-4 cursor-[inherit] appearance-none rounded-ui bg-ui-bg ring-1 ring-inset ring-ui-line',
           'checked:bg-ui-accent-fill checked:ring-0 disabled:opacity-50',
           'motion-safe:transition-colors motion-safe:duration-ui-fast',
           FOCUS_RING,

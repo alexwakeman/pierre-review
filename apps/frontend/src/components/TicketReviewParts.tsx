@@ -142,7 +142,7 @@ function EvidenceRef({
       <button
         type="button"
         onClick={() => onOpenInChanges(ev.path, ev.line, 'RIGHT')}
-        className="hit break-all text-left font-mono text-xs text-blue-600 hover:underline dark:text-blue-400"
+        className="hit break-all text-left font-mono text-meta text-blue-600 hover:underline dark:text-blue-400"
       >
         {label}
       </button>
@@ -150,7 +150,7 @@ function EvidenceRef({
   }
   const m = ev.prId != null && ev.prId !== viewedPrId ? members.find((x) => x.prId === ev.prId) : undefined;
   return (
-    <span className={`break-all font-mono text-xs ${MUTED}`}>
+    <span className={`break-all font-mono text-meta ${MUTED}`}>
       {m != null && (
         <>
           <MemberPrLink member={{ repo: m.repo, number: m.number, label: memberLabel(m) }} />
@@ -172,7 +172,7 @@ function StoryGapsPostButton({ group, review, viewedPrId }: { group: StoryGapGro
   const posting = useIsMutating({ mutationKey: storyGapsPostKey(review.id, group.prId) }) > 0;
   if (post.isSuccess) {
     return (
-      <span className={`text-xs ${MUTED}`}>
+      <span className={`text-meta ${MUTED}`}>
         {post.data.visible ? 'Posted' : 'Posted. It will show up here shortly.'}
       </span>
     );
@@ -180,7 +180,7 @@ function StoryGapsPostButton({ group, review, viewedPrId }: { group: StoryGapGro
   // ⚠ Only 'AlreadyPosted' means a comment exists. The route also 409s 'HeadMoved' and
   // 'Superseded', where nothing was posted: those keep the button and print the server's reason.
   const already = post.error instanceof ApiError && post.error.status === 409 && post.error.code === 'AlreadyPosted';
-  if (already) return <span className={`text-xs ${MUTED}`}>Already posted</span>;
+  if (already) return <span className={`text-meta ${MUTED}`}>Already posted</span>;
   return (
     <span className="inline-flex flex-wrap items-center gap-2">
       <button
@@ -191,7 +191,7 @@ function StoryGapsPostButton({ group, review, viewedPrId }: { group: StoryGapGro
       >
         {posting ? 'Posting…' : postGapsButtonLabel(group, viewedPrId)}
       </button>
-      {post.isError && <span className={`text-xs ${ERROR_TEXT}`}>{post.error.message || 'Could not post.'}</span>}
+      {post.isError && <span className={`text-meta ${ERROR_TEXT}`}>{post.error.message || 'Could not post.'}</span>}
     </span>
   );
 }
@@ -240,7 +240,7 @@ function ItemAction({ item, review, viewedPrId }: { item: TicketReviewItem; revi
     return (
       <div className="mt-1.5 flex flex-wrap items-center gap-2">
         {posted != null && (
-          <span className={`text-xs ${MUTED}`}>
+          <span className={`text-meta ${MUTED}`}>
             <PrRefText text={posted} />
           </span>
         )}
@@ -258,7 +258,7 @@ function ItemAction({ item, review, viewedPrId }: { item: TicketReviewItem; revi
   const posted = postedLabel(item, review.members, -1);
   if (posted == null) return null;
   return (
-    <div className={`mt-1 text-xs ${MUTED}`}>
+    <div className={`mt-1 text-meta ${MUTED}`}>
       <PrRefText text={posted} />
     </div>
   );
@@ -291,11 +291,11 @@ export function CriterionRow({
         <span className="shrink-0 self-center text-green-700 dark:text-green-400" aria-label="Met">
           <CheckIcon size={12} />
         </span>
-        <span className={`shrink-0 font-mono text-xs ${MUTED}`}>{c.ref}</span>
+        <span className={`shrink-0 font-mono text-meta ${MUTED}`}>{c.ref}</span>
         <span className="min-w-0 break-words">
           {criterionTextOnly(c.text, c.ref)}
           {done != null && (
-            <span className={`text-xs ${MUTED}`}>
+            <span className={`text-meta ${MUTED}`}>
               {' · '}
               <PrRefText text={done} />
             </span>
@@ -303,9 +303,9 @@ export function CriterionRow({
         </span>
       </>
     );
-    if (docs == null) return <li className="flex items-baseline gap-2 px-1 text-[13px]">{line}</li>;
+    if (docs == null) return <li className="flex items-baseline gap-2 px-1 text-body">{line}</li>;
     return (
-      <li className="flex flex-col px-1 text-[13px]">
+      <li className="flex flex-col px-1 text-body">
         <div className="flex items-baseline gap-2">{line}</div>
         <div className="pl-5">
           <StoryDocsCriterionDetail item={docs} />
@@ -320,11 +320,11 @@ export function CriterionRow({
         <span className={`${CHIP} ${TICKET_CRITERION_STATUS_CLASS[c.status]}`}>
           {TICKET_CRITERION_STATUS_LABEL[c.status]}
         </span>
-        <span className={`shrink-0 font-mono text-xs leading-5 ${MUTED}`}>{c.ref}</span>
+        <span className={`shrink-0 font-mono text-meta leading-5 ${MUTED}`}>{c.ref}</span>
         <span className="min-w-0 flex-1 whitespace-pre-wrap break-words font-semibold">{criterionTextOnly(c.text, c.ref)}</span>
       </div>
       {(done != null || belongs != null) && (
-        <div className={`mt-0.5 text-xs ${MUTED}`}>
+        <div className={`mt-0.5 text-meta ${MUTED}`}>
           <PrRefText text={[done, belongs].filter(Boolean).join(' · ')} />
         </div>
       )}
@@ -365,7 +365,7 @@ export function MissingRow({
         <span className="min-w-0 flex-1 whitespace-pre-wrap break-words font-semibold">{item.title}</span>
       </div>
       {owner != null && (
-        <div className={`mt-0.5 text-xs ${MUTED}`}>
+        <div className={`mt-0.5 text-meta ${MUTED}`}>
           Belongs in <MemberPrLink member={{ repo: owner.repo, number: owner.number, label: memberLabel(owner) }} />
         </div>
       )}
@@ -427,7 +427,7 @@ export function NotRequestedList({
               <PrRefText text={g.title} />
             </span>
             {notRequestedPostedLabel(review, i) != null && (
-              <span className={`ml-2 text-xs ${MUTED}`}>{notRequestedPostedLabel(review, i)}</span>
+              <span className={`ml-2 text-meta ${MUTED}`}>{notRequestedPostedLabel(review, i)}</span>
             )}
             {g.path != null && g.path !== '' && (
               <>
@@ -478,12 +478,12 @@ export function TicketResults({
   const byRef = useMemo(() => itemsByRef(review.items), [review.items]);
   const missing = useMemo(() => missingItems(review.items), [review.items]);
   const summary = useMemo(() => storySummaryProse(a?.summary), [a?.summary]);
-  if (a == null) return <p className={`text-xs ${MUTED}`}>No result stored.</p>;
+  if (a == null) return <p className={`text-meta ${MUTED}`}>No result stored.</p>;
   const ctx = { review, viewedPrId, changedPaths, onOpenInChanges };
   const autoPostFailed = autoPostFailureLine(review.autoPost);
   return (
     <div className="space-y-3">
-      {autoPostFailed != null && <p className="text-xs text-amber-700 dark:text-amber-300">{autoPostFailed}</p>}
+      {autoPostFailed != null && <p className="text-meta text-amber-700 dark:text-amber-300">{autoPostFailed}</p>}
       {/* Two plain sentences. An older run's stored summary also listed every gap as a bullet: only
           its leading prose is shown (the rows below carry the detail). */}
       {summary != null && <Markdown prRefs>{summary}</Markdown>}
@@ -500,7 +500,7 @@ export function TicketResults({
       <NotRequestedList items={a.notRequested} {...ctx} />
       <DocReferencesBlock references={a.references} />
       {review.members.some((m) => !m.checkedOut) && (
-        <p className={`text-xs ${MUTED}`}>
+        <p className={`text-meta ${MUTED}`}>
           Not checked out:{' '}
           <PrRefText
             text={review.members
@@ -532,14 +532,14 @@ export function PrCardDisclosure({ card, label }: { card: TicketPrCard; label?: 
         aria-expanded={open}
         aria-controls={bodyId}
         onClick={() => setOpen((v) => !v)}
-        className="hit inline-flex items-center gap-1.5 rounded px-1 py-0.5 text-left text-xs font-medium text-gray-600 hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-gray-300 dark:hover:text-gray-50"
+        className="hit inline-flex items-center gap-1.5 rounded-ui px-1 py-0.5 text-left text-meta font-medium text-gray-600 hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-gray-300 dark:hover:text-gray-50"
       >
         <ChevronIcon dir={open ? 'down' : 'right'} size={12} />
         {/* Under "What each PR adds" the PR ref IS the label; a bare mount (one PR's own coverage) names the card. */}
         {label != null ? <span className="font-mono">{label}</span> : 'What this PR adds'}
       </button>
       {open && (
-        <div id={bodyId} className="ml-5 mt-1 space-y-2 text-xs">
+        <div id={bodyId} className="ml-5 mt-1 space-y-2 text-meta">
           <p className="whitespace-pre-wrap break-words text-gray-800 dark:text-gray-200">
             <PrRefText text={card.summary} />
           </p>

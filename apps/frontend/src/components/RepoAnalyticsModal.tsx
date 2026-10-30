@@ -24,7 +24,7 @@ const sum = (a: number[]): number => a.reduce((s, v) => s + v, 0);
 function Section({ title, children }: { title: string; children: React.ReactNode }): JSX.Element {
   return (
     <div>
-      <h3 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+      <h3 className="mb-1.5 text-meta font-semibold uppercase tracking-wide text-gray-400">
         {title}
       </h3>
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">{children}</div>
@@ -324,7 +324,7 @@ export function Charts({
         <button
           type="button"
           onClick={() => setShowMore((s) => !s)}
-          className="hit flex items-center gap-1 text-[11px] font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+          className="hit flex items-center gap-1 text-meta font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
         >
           <ChevronIcon dir={showMore ? 'down' : 'right'} size={11} />
           More charts
@@ -367,7 +367,7 @@ export function RepoAnalyticsModal({
       role="presentation"
     >
       <div
-        className="flex max-h-[88vh] w-[60rem] max-w-[96vw] flex-col rounded-lg border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-900"
+        className="flex max-h-[88vh] w-[60rem] max-w-[96vw] flex-col rounded-ui border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-900"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
@@ -375,8 +375,8 @@ export function RepoAnalyticsModal({
       >
         <div className="flex items-center justify-between gap-3 border-b border-gray-200 px-4 py-2 dark:border-gray-800">
           <div className="min-w-0">
-            <h2 className="truncate text-sm font-semibold">{repoName ?? 'Analytics'}</h2>
-            <p className="text-[11px] text-gray-400">
+            <h2 className="truncate text-body font-semibold">{repoName ?? 'Analytics'}</h2>
+            <p className="text-meta text-gray-400">
               Charts over the last {data ? data.windowDays / 7 : 12} weeks
             </p>
           </div>
@@ -393,10 +393,10 @@ export function RepoAnalyticsModal({
 
         <div className="min-h-0 flex-1 overflow-auto px-4 py-3">
           {isLoading && !data && (
-            <div className="py-12 text-center text-sm text-gray-500 dark:text-gray-400">Loading analytics…</div>
+            <div className="py-12 text-center text-body text-gray-500 dark:text-gray-400">Loading analytics…</div>
           )}
           {error && (
-            <div className="py-12 text-center text-sm text-red-500">Failed to load analytics.</div>
+            <div className="py-12 text-center text-body text-red-500">Failed to load analytics.</div>
           )}
           {data && <Charts data={data} />}
         </div>

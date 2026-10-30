@@ -23,7 +23,7 @@ export function ResolveThread({
         : null;
   return (
     <span className="flex items-center gap-1.5">
-      {error && <span className="text-[11px] text-red-500">{error}</span>}
+      {error && <span className="text-meta text-red-500">{error}</span>}
       <button
         type="button"
         onClick={() => resolve.mutate({ prId, threadId, resolved: !isResolved })}
@@ -33,7 +33,7 @@ export function ResolveThread({
             ? 'Reopen this thread on GitHub'
             : 'Mark this thread resolved on GitHub'
         }
-        className="hit rounded border border-gray-300 px-1.5 py-0.5 text-[11px] font-semibold text-gray-600 hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:text-gray-300 dark:hover:border-gray-500"
+        className="hit rounded-ui border border-gray-300 px-1.5 py-0.5 text-meta font-semibold text-gray-600 hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:text-gray-300 dark:hover:border-gray-500"
       >
         {isResolved ? 'Unresolve' : 'Resolve'}
       </button>

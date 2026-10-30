@@ -93,7 +93,7 @@ export function AiUsageMenu({ variant = 'header' }: { variant?: 'header' | 'side
         className={
           variant === 'sidebar'
             ? `flex h-8 w-full min-w-0 items-center gap-2 rounded-ui px-2 text-left text-meta outline-none hover:bg-ui-hover focus-visible:ring-2 focus-visible:ring-ui-accent touch:h-11 ${SIDEBAR_TONE[head.tone]}`
-            : `inline-flex items-center gap-1 whitespace-nowrap rounded border px-2 py-0.5 text-xs tabular-nums hover:border-gray-400 dark:hover:border-gray-500 ${TONE[head.tone]}`
+            : `inline-flex items-center gap-1 whitespace-nowrap rounded-ui border px-2 py-0.5 text-meta tabular-nums hover:border-gray-400 dark:hover:border-gray-500 ${TONE[head.tone]}`
         }
       >
         <SparkleIcon size={variant === 'sidebar' ? 14 : 12} className="shrink-0" />
@@ -115,8 +115,8 @@ export function AiUsageMenu({ variant = 'header' }: { variant?: 'header' | 'side
           className={
             variant === 'sidebar'
               ? // Opens UP from the sidebar foot; never wider than the screen in the phone drawer.
-                'absolute bottom-full left-0 z-[60] mb-1 max-h-[calc(100vh-6rem)] w-[22rem] max-w-[calc(100vw-1.5rem)] overflow-y-auto overscroll-contain rounded-ui bg-ui-raise p-3 text-xs text-gray-700 shadow-xl shadow-black/30 motion-safe:animate-ui-pop dark:text-gray-200'
-              : 'absolute right-0 top-full z-[60] mt-1 max-h-[calc(100vh-4rem)] overflow-y-auto w-[22rem] max-w-[calc(100vw-1rem)] max-sm:fixed max-sm:inset-x-2 max-sm:top-auto max-sm:w-auto max-sm:max-w-none rounded-lg border border-gray-200 bg-white p-3 text-xs text-gray-700 shadow-lg dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200'
+                'absolute bottom-full left-0 z-[60] mb-1 max-h-[calc(100vh-6rem)] w-[22rem] max-w-[calc(100vw-1.5rem)] overflow-y-auto overscroll-contain rounded-ui bg-ui-raise p-3 text-meta text-gray-700 shadow-xl shadow-black/30 motion-safe:animate-ui-pop dark:text-gray-200'
+              : 'absolute right-0 top-full z-[60] mt-1 max-h-[calc(100vh-4rem)] overflow-y-auto w-[22rem] max-w-[calc(100vw-1rem)] max-sm:fixed max-sm:inset-x-2 max-sm:top-auto max-sm:w-auto max-sm:max-w-none rounded-ui border border-gray-200 bg-white p-3 text-meta text-gray-700 shadow-lg dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200'
           }
         >
           {details.map((detail, i) => (
@@ -126,7 +126,7 @@ export function AiUsageMenu({ variant = 'header' }: { variant?: 'header' | 'side
               className={i > 0 ? 'mt-3 border-t border-gray-200 pt-3 dark:border-gray-800' : undefined}
             >
               <div className="flex items-center gap-1">
-                <p className="text-[13px] font-semibold text-gray-900 dark:text-gray-50">{detail.heading}</p>
+                <p className="text-body font-semibold text-gray-900 dark:text-gray-50">{detail.heading}</p>
                 {i === infoAt && <LimnShareInfo />}
               </div>
               {detail.paused != null && (
@@ -134,7 +134,7 @@ export function AiUsageMenu({ variant = 'header' }: { variant?: 'header' | 'side
               )}
               {detail.sections.map((sec) => (
                 <div key={sec.title} className="mt-2.5">
-                  <p className="text-[11px] font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">{sec.title}</p>
+                  <p className="text-meta font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">{sec.title}</p>
                   <dl className="mt-1 space-y-1.5">
                     {sec.rows.map((r) => (
                       <div key={r.label}>
@@ -144,7 +144,7 @@ export function AiUsageMenu({ variant = 'header' }: { variant?: 'header' | 'side
                         </div>
                         {r.barPct != null && <UsageBar pct={r.barPct} />}
                         {r.note != null && (
-                          <p className="mt-0.5 text-[11px] text-gray-500 dark:text-gray-400">{r.note}</p>
+                          <p className="mt-0.5 text-meta text-gray-500 dark:text-gray-400">{r.note}</p>
                         )}
                       </div>
                     ))}
@@ -152,7 +152,7 @@ export function AiUsageMenu({ variant = 'header' }: { variant?: 'header' | 'side
                 </div>
               ))}
               {detail.updated != null && (
-                <p className="mt-1.5 text-[11px] text-gray-500 dark:text-gray-400">{detail.updated}</p>
+                <p className="mt-1.5 text-meta text-gray-500 dark:text-gray-400">{detail.updated}</p>
               )}
             </div>
           ))}
@@ -163,7 +163,7 @@ export function AiUsageMenu({ variant = 'header' }: { variant?: 'header' | 'side
                 setOpen(false);
                 openSettings('claude-spend');
               }}
-              className="hit rounded text-xs text-sky-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-sky-300"
+              className="hit rounded-ui text-meta text-sky-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-sky-300"
             >
               AI spend settings
             </button>

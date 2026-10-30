@@ -58,7 +58,7 @@ export function CodeAnchor({
           type="button"
           onClick={() => toggle(threadId)}
           aria-expanded={true}
-          className="hit inline-flex items-center gap-1 text-[11px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+          className="hit inline-flex items-center gap-1 text-meta text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
         >
           <ChevronIcon dir="up" size={11} />
           Hide code context
@@ -84,7 +84,7 @@ export function CodeAnchor({
   if (lines.length <= 1) {
     return (
       <pre
-        className={`overflow-x-auto border-l-2 bg-gray-50 py-0.5 pl-2 font-mono text-[12px] leading-snug dark:bg-gray-900/60 ${BORDER[kind]} ${ink}`}
+        className={`overflow-x-auto border-l-2 bg-gray-50 py-0.5 pl-2 font-mono text-meta leading-snug dark:bg-gray-900/60 ${BORDER[kind]} ${ink}`}
       >
         {body}
       </pre>
@@ -101,10 +101,10 @@ export function CodeAnchor({
       onClick={() => toggle(threadId)}
       aria-expanded={false}
       title="Show the full code context"
-      className={`flex w-full items-center gap-2 overflow-hidden rounded-r border-l-2 bg-gray-50 py-0.5 pl-2 pr-2 text-left font-mono text-[12px] leading-snug hover:bg-gray-100 dark:bg-gray-900/60 dark:hover:bg-gray-800/60 ${BORDER[kind]} ${ink}`}
+      className={`flex w-full items-center gap-2 overflow-hidden rounded-r-ui border-l-2 bg-gray-50 py-0.5 pl-2 pr-2 text-left font-mono text-meta leading-snug hover:bg-gray-100 dark:bg-gray-900/60 dark:hover:bg-gray-800/60 ${BORDER[kind]} ${ink}`}
     >
       <span className="min-w-0 flex-1 truncate">{body}</span>
-      <span className="inline-flex shrink-0 items-center gap-1 font-sans text-[11px] text-gray-400">
+      <span className="inline-flex shrink-0 items-center gap-1 font-sans text-meta text-gray-400">
         <ChevronIcon dir="down" size={10} />
         {lines.length} lines
       </span>

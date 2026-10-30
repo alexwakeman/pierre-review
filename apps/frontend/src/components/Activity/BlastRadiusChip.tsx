@@ -125,7 +125,7 @@ export function BlastRadiusChip({
     </>
   );
 
-  const shell = `inline-flex shrink-0 items-center gap-1 text-[11px] ${meta.className} ${className}`;
+  const shell = `inline-flex shrink-0 items-center gap-1 text-meta ${meta.className} ${className}`;
 
   // EVERY pull request expands, not only the multi-reason ones.
   //
@@ -153,14 +153,14 @@ export function BlastRadiusChip({
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className={`${shell} rounded hover:underline`}
+        className={`${shell} rounded-ui hover:underline`}
         aria-expanded={open}
         title={verdict.label}
       >
         {body}
       </button>
       {open && (
-        <div className="ml-4 flex flex-col gap-1 text-[11px] text-gray-600 dark:text-gray-300">
+        <div className="ml-4 flex flex-col gap-1 text-meta text-gray-600 dark:text-gray-300">
           <ul className="list-disc space-y-0.5">
             {/* EVERY reason, not just the headline one. This list is what makes the verdict
                 AUDITABLE — the known false positive (a repo whose product IS a database schema)

@@ -123,7 +123,7 @@ export function ThreadRow({
           </span>
         )}
         {t.carried && (
-          <span className={`text-xs ${MUTED}`}>
+          <span className={`text-meta ${MUTED}`}>
             Unchanged since <span className="font-mono">{t.assessedAtHead.slice(0, 7)}</span>
           </span>
         )}
@@ -132,7 +132,7 @@ export function ThreadRow({
             href={href}
             target="_blank"
             rel="noreferrer noopener"
-            className="hit ml-auto inline-flex items-center gap-1 text-xs text-blue-600 hover:underline dark:text-blue-400"
+            className="hit ml-auto inline-flex items-center gap-1 text-meta text-blue-600 hover:underline dark:text-blue-400"
           >
             GitHub
             <ExternalLinkIcon size={11} />
@@ -144,15 +144,15 @@ export function ThreadRow({
           <button
             type="button"
             onClick={() => onOpenThread(t.threadId)}
-            className="hit break-all text-left font-mono text-xs text-blue-600 hover:underline dark:text-blue-400"
+            className="hit break-all text-left font-mono text-meta text-blue-600 hover:underline dark:text-blue-400"
           >
             {label}
           </button>
         ) : (
-          <span className={`break-all font-mono text-xs ${MUTED}`}>{label}</span>
+          <span className={`break-all font-mono text-meta ${MUTED}`}>{label}</span>
         )}
         {t.commentCount > 1 && (
-          <span className={`ml-2 text-xs ${MUTED}`}>{t.commentCount} comments</span>
+          <span className={`ml-2 text-meta ${MUTED}`}>{t.commentCount} comments</span>
         )}
       </div>
       {t.excerpt !== '' && (
@@ -168,7 +168,7 @@ export function ThreadRow({
               type="button"
               onClick={() => setExpanded((e) => !e)}
               aria-expanded={expanded}
-              className={`text-xs ${MUTED} hover:text-gray-700 dark:hover:text-gray-200`}
+              className={`text-meta ${MUTED} hover:text-gray-700 dark:hover:text-gray-200`}
             >
               {expanded ? 'Less' : 'More'}
             </button>
@@ -186,7 +186,7 @@ export function ThreadRow({
                 type="button"
                 onClick={() => setWhyOpen((o) => !o)}
                 aria-expanded={whyOpen}
-                className={`text-xs ${MUTED} hover:text-gray-700 dark:hover:text-gray-200`}
+                className={`text-meta ${MUTED} hover:text-gray-700 dark:hover:text-gray-200`}
               >
                 {whyOpen ? 'Less' : 'More'}
               </button>
@@ -203,7 +203,7 @@ export function ThreadRow({
           <PrRefText text={explanation} />
         </p>
       ) : !judged ? (
-        <p className={`mt-1 text-xs ${MUTED}`}>{notCheckedNote ?? threadNotCheckedReason(t, by)}</p>
+        <p className={`mt-1 text-meta ${MUTED}`}>{notCheckedNote ?? threadNotCheckedReason(t, by)}</p>
       ) : null}
       {t.draftReply != null && t.draftReply !== '' && (
         <div className="mt-1">
@@ -213,7 +213,7 @@ export function ThreadRow({
               onClick={() => setReplyOpen((o) => !o)}
               aria-expanded={replyOpen}
               aria-controls={replyId}
-              className={`inline-flex items-center gap-1 text-xs ${MUTED} hover:text-gray-700 dark:hover:text-gray-200`}
+              className={`inline-flex items-center gap-1 text-meta ${MUTED} hover:text-gray-700 dark:hover:text-gray-200`}
             >
               <ChevronIcon dir={replyOpen ? 'down' : 'right'} size={11} />
               Suggested reply
@@ -223,7 +223,7 @@ export function ThreadRow({
           {replyOpen && (
             <p
               id={replyId}
-              className={`mt-0.5 rounded bg-gray-500/5 px-2 py-1 ${REVIEW_PROSE}`}
+              className={`mt-0.5 rounded-ui bg-gray-500/5 px-2 py-1 ${REVIEW_PROSE}`}
             >
               {t.draftReply}
             </p>
@@ -283,7 +283,7 @@ export function ClaudeReviewThreadsSection({
       }
     >
       {items.length === 0 ? (
-        <p className={`text-xs ${MUTED}`}>No other review threads.</p>
+        <p className={`text-meta ${MUTED}`}>No other review threads.</p>
       ) : (
         <>
           {parts.shown.length > 0 && (
@@ -299,7 +299,7 @@ export function ClaudeReviewThreadsSection({
                 type="button"
                 onClick={() => setMoreOpen((o) => !o)}
                 aria-expanded={moreOpen}
-                className={`inline-flex items-center gap-1 text-xs ${MUTED} hover:text-gray-700 dark:hover:text-gray-200`}
+                className={`inline-flex items-center gap-1 text-meta ${MUTED} hover:text-gray-700 dark:hover:text-gray-200`}
               >
                 <ChevronIcon dir={moreOpen ? 'down' : 'right'} size={11} />
                 {moreOpen ? 'Show fewer' : `Show ${parts.more.length} more`}

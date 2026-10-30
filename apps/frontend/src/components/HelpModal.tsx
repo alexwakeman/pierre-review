@@ -200,7 +200,7 @@ function Section({ title, children }: { title: string; children: ReactNode }): J
 
 function Code({ children }: { children: ReactNode }): JSX.Element {
   return (
-    <code className="rounded-[4px] bg-ui-hover px-1 font-mono text-meta text-ui-ink">
+    <code className="rounded-ui bg-ui-hover px-1 font-mono text-meta text-ui-ink">
       {children}
     </code>
   );
@@ -208,7 +208,7 @@ function Code({ children }: { children: ReactNode }): JSX.Element {
 
 function Kbd({ children }: { children: ReactNode }): JSX.Element {
   return (
-    <kbd className="rounded-[4px] bg-ui-hover px-1.5 py-px text-meta font-medium text-ui-ink">
+    <kbd className="rounded-ui bg-ui-hover px-1.5 py-px text-meta font-medium text-ui-ink">
       {children}
     </kbd>
   );

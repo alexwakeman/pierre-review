@@ -414,7 +414,7 @@ function TabChip({
           ) : (
             <span
               aria-hidden
-              className="flex shrink-0 items-center justify-center rounded-full bg-ui-hover text-[11px] font-semibold text-ui-ink"
+              className="flex shrink-0 items-center justify-center rounded-full bg-ui-hover text-meta font-semibold text-ui-ink"
               style={{ width: 16, height: 16 }}
             >
               {author.slice(0, 2).toUpperCase()}

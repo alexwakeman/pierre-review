@@ -25,7 +25,7 @@ export function Avatar({
   }
   return (
     <span
-      className="flex shrink-0 items-center justify-center rounded-full bg-gray-300 text-[11px] font-semibold text-gray-700 dark:bg-gray-700 dark:text-gray-200"
+      className="flex shrink-0 items-center justify-center rounded-full bg-gray-300 text-meta font-semibold text-gray-700 dark:bg-gray-700 dark:text-gray-200"
       style={{ width: size, height: size }}
     >
       {label.slice(0, 2).toUpperCase()}
@@ -46,8 +46,8 @@ export function CommentCard({
   return (
     <div className="flex gap-2">
       <Avatar user={user} />
-      <div className="min-w-0 flex-1 rounded-md border border-gray-200 dark:border-gray-800">
-        <div className="flex items-center gap-2 border-b border-gray-100 px-3 py-1 text-xs dark:border-gray-800">
+      <div className="min-w-0 flex-1 rounded-ui border border-gray-200 dark:border-gray-800">
+        <div className="flex items-center gap-2 border-b border-gray-100 px-3 py-1 text-meta dark:border-gray-800">
           <UserName
             user={user}
             fallbackId={comment.authorId}

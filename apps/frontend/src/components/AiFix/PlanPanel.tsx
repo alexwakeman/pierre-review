@@ -38,7 +38,7 @@ const BTN_PRIMARY =
 const BTN_SECONDARY =
   'inline-flex h-7 items-center whitespace-nowrap rounded-ui bg-ui-raise px-2.5 text-meta font-medium text-ui-ink hover:bg-ui-hover disabled:cursor-not-allowed disabled:opacity-50 touch:h-10 touch:px-3';
 const REF_CHIP =
-  'inline-flex items-center rounded bg-gray-500/10 px-1.5 py-px font-mono text-[11px] text-gray-700 dark:text-gray-200';
+  'inline-flex items-center rounded-ui bg-gray-500/10 px-1.5 py-px font-mono text-meta text-gray-700 dark:text-gray-200';
 
 function errText(err: unknown): string {
   if (err instanceof ApiError) return err.message;
@@ -49,7 +49,7 @@ function errText(err: unknown): string {
 /** The summary bullets — the plan at a glance. Shared with the build's "Built from your plan" note. */
 export function PlanBullets({ plan }: { plan: AiFixPlan }): JSX.Element {
   return (
-    <ul className="list-disc space-y-0.5 pl-5 text-[13px] text-gray-800 dark:text-gray-100">
+    <ul className="list-disc space-y-0.5 pl-5 text-body text-gray-800 dark:text-gray-100">
       {plan.summary.map((b, i) => (
         <li key={i}>{b}</li>
       ))}
@@ -64,14 +64,14 @@ function itemTitle(items: AiFixReviewItem[] | null, ref: string): string | null 
 /** The detailed plan: steps (files, change, refs), then what it leaves alone. */
 function PlanDetails({ plan, items }: { plan: AiFixPlan; items: AiFixReviewItem[] | null }): JSX.Element {
   return (
-    <div className="mt-2 space-y-3 text-xs text-gray-700 dark:text-gray-200">
+    <div className="mt-2 space-y-3 text-meta text-gray-700 dark:text-gray-200">
       {plan.steps.length > 0 && (
         <ol className="list-decimal space-y-2 pl-5">
           {plan.steps.map((s, i) => (
             <li key={i}>
               <div className="font-medium text-gray-800 dark:text-gray-100">{s.title}</div>
               {s.files.length > 0 && (
-                <div className="mt-0.5 font-mono text-[11px] text-gray-600 dark:text-gray-300">{s.files.join(', ')}</div>
+                <div className="mt-0.5 font-mono text-meta text-gray-600 dark:text-gray-300">{s.files.join(', ')}</div>
               )}
               <p className="mt-0.5 whitespace-pre-wrap">{s.change}</p>
               {s.refs.length > 0 && (
@@ -161,7 +161,7 @@ export function PlanPanel({
 
   return (
     <div className="mt-3 rounded-ui bg-ui-surface p-3">
-      <div className="mb-1 flex items-center gap-1 text-xs font-semibold text-gray-700 dark:text-gray-200">
+      <div className="mb-1 flex items-center gap-1 text-meta font-semibold text-gray-700 dark:text-gray-200">
         Plan
         {plan && state.revision > 1 && (
           <span className="font-normal text-gray-500 dark:text-gray-400">· version {state.revision}</span>
@@ -184,7 +184,7 @@ export function PlanPanel({
           <PlanBullets plan={plan} />
           <button
             type="button"
-            className="hit mt-2 inline-flex items-center gap-1 text-xs text-gray-600 hover:text-gray-800 dark:text-gray-300 dark:hover:text-gray-100"
+            className="hit mt-2 inline-flex items-center gap-1 text-meta text-gray-600 hover:text-gray-800 dark:text-gray-300 dark:hover:text-gray-100"
             aria-expanded={open}
             onClick={() => setOpen((v) => !v)}
           >
@@ -194,18 +194,18 @@ export function PlanPanel({
           {open && <PlanDetails plan={plan} items={fix.reviewItems} />}
         </>
       ) : (
-        !passRunning && <p className="text-xs text-gray-600 dark:text-gray-300">No plan yet.</p>
+        !passRunning && <p className="text-meta text-gray-600 dark:text-gray-300">No plan yet.</p>
       )}
 
       {/* A re-plan that failed keeps the plan above; the reason sits here. */}
       {fix.error && (
-        <p className="mt-2 rounded border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
+        <p className="mt-2 rounded-ui border border-amber-200 bg-amber-50 p-2 text-meta text-amber-800 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
           {fix.error}
         </p>
       )}
 
       {state.transcript.length > 0 && (
-        <ul className="mt-3 space-y-1.5 border-t border-gray-200 pt-2 text-xs dark:border-gray-800">
+        <ul className="mt-3 space-y-1.5 border-t border-gray-200 pt-2 text-meta dark:border-gray-800">
           {state.transcript.map((m, i) => (
             <li key={i} className="whitespace-pre-wrap text-gray-700 dark:text-gray-200">
               <span className="font-semibold">{m.role === 'reader' ? 'You' : plannedBy}: </span>
@@ -223,14 +223,14 @@ export function PlanPanel({
             value={fixProgressPct(liveStatus)}
             timeConstantSec={30}
           />
-          <div className="mt-1 flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+          <div className="mt-1 flex items-center gap-2 text-meta text-gray-500 dark:text-gray-400">
             {PHASE_LABEL[liveStatus?.progress?.phase ?? ''] ?? 'Working…'}
             <button type="button" className={BTN_SECONDARY} onClick={() => cancel.mutate()}>
               Cancel
             </button>
           </div>
           {liveStatus?.progress?.recentActivity && liveStatus.progress.recentActivity.length > 0 && (
-            <pre className="mt-1 max-h-32 overflow-auto rounded bg-gray-50 p-2 text-[11px] leading-relaxed text-gray-500 dark:bg-gray-900 dark:text-gray-400">
+            <pre className="mt-1 max-h-32 overflow-auto rounded-ui bg-gray-50 p-2 text-meta leading-relaxed text-gray-500 dark:bg-gray-900 dark:text-gray-400">
               {liveStatus.progress.recentActivity.slice(-8).join('\n')}
             </pre>
           )}
@@ -259,7 +259,7 @@ export function PlanPanel({
               }}
             />
             {tooLong && (
-              <p className="text-[12px] text-red-600 dark:text-red-400">
+              <p className="text-meta text-red-600 dark:text-red-400">
                 Keep it under {AI_FIX_PLAN_MAX_MESSAGE_CHARS.toLocaleString('en-US')} characters.
               </p>
             )}
@@ -281,7 +281,7 @@ export function PlanPanel({
           </div>
         </div>
       )}
-      {actionError != null && <p className="mt-1 text-[12px] text-red-600 dark:text-red-400">{errText(actionError)}</p>}
+      {actionError != null && <p className="mt-1 text-meta text-red-600 dark:text-red-400">{errText(actionError)}</p>}
     </div>
   );
 }
@@ -292,7 +292,7 @@ export function ApprovedPlanNote({ fix }: { fix: AiFix }): JSX.Element | null {
   if (!plan) return null;
   return (
     <div className="mb-2 rounded-ui bg-ui-surface p-2">
-      <div className="mb-1 text-xs font-semibold text-gray-600 dark:text-gray-300">Built from your plan</div>
+      <div className="mb-1 text-meta font-semibold text-gray-600 dark:text-gray-300">Built from your plan</div>
       <PlanBullets plan={plan} />
     </div>
   );

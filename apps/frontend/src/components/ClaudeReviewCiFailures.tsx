@@ -40,13 +40,13 @@ function FileRef({
       <button
         type="button"
         onClick={() => onOpenInChanges(path, line, 'RIGHT')}
-        className="hit break-all text-left font-mono text-xs text-blue-600 hover:underline dark:text-blue-400"
+        className="hit break-all text-left font-mono text-meta text-blue-600 hover:underline dark:text-blue-400"
       >
         {label}
       </button>
     );
   }
-  return <span className={`break-all font-mono text-xs ${MUTED}`}>{label}</span>;
+  return <span className={`break-all font-mono text-meta ${MUTED}`}>{label}</span>;
 }
 
 export function CiFailureRow({
@@ -74,7 +74,7 @@ export function CiFailureRow({
   const fixable = diagnosed && f.fixableInPr === true;
   return (
     <li
-      className={`rounded border px-3 py-2 text-sm ${
+      className={`rounded-ui border px-3 py-2 text-body ${
         fixable ? 'border-amber-300 dark:border-amber-700/60' : 'border-gray-100 dark:border-gray-800'
       }`}
     >
@@ -89,14 +89,14 @@ export function CiFailureRow({
         )}
         <span className={`break-all ${REVIEW_ITEM_TITLE}`}>{f.checkName}</span>
         {diagnosed && typeof f.confidence === 'number' && (
-          <span className={`text-xs ${MUTED}`}>Confidence {f.confidence}%</span>
+          <span className={`text-meta ${MUTED}`}>Confidence {f.confidence}%</span>
         )}
-        {f.step != null && <span className={`break-all text-xs ${MUTED}`}>Step: {f.step}</span>}
+        {f.step != null && <span className={`break-all text-meta ${MUTED}`}>Step: {f.step}</span>}
         {diagnosed && f.fixableInPr === false && (
-          <span className={`text-xs ${MUTED}`}>Not from this change</span>
+          <span className={`text-meta ${MUTED}`}>Not from this change</span>
         )}
         {f.carried && (
-          <span className={`text-xs ${MUTED}`}>
+          <span className={`text-meta ${MUTED}`}>
             Unchanged since <span className="font-mono">{f.assessedAtHead.slice(0, 7)}</span>
           </span>
         )}
@@ -105,7 +105,7 @@ export function CiFailureRow({
             href={href}
             target="_blank"
             rel="noreferrer noopener"
-            className="hit ml-auto inline-flex items-center gap-1 text-xs text-blue-600 hover:underline dark:text-blue-400"
+            className="hit ml-auto inline-flex items-center gap-1 text-meta text-blue-600 hover:underline dark:text-blue-400"
           >
             Details
             <ExternalLinkIcon size={11} />
@@ -132,7 +132,7 @@ export function CiFailureRow({
                 onClick={() => setOpen((o) => !o)}
                 aria-expanded={open}
                 aria-controls={explanationId}
-                className={`inline-flex items-center gap-1 text-xs ${MUTED} hover:text-gray-700 dark:hover:text-gray-200`}
+                className={`inline-flex items-center gap-1 text-meta ${MUTED} hover:text-gray-700 dark:hover:text-gray-200`}
               >
                 <ChevronIcon dir={open ? 'down' : 'right'} size={11} />
                 Why
@@ -159,7 +159,7 @@ export function CiFailureRow({
           )}
         </>
       ) : (
-        <p className={`mt-1 text-xs ${MUTED}`}>{ciNotCheckedSentence(f.notCheckedReason, by)}</p>
+        <p className={`mt-1 text-meta ${MUTED}`}>{ciNotCheckedSentence(f.notCheckedReason, by)}</p>
       )}
     </li>
   );

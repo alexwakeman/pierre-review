@@ -152,7 +152,7 @@ export function SprintStatusSettings({
 
   const btn =
     'rounded-ui p-1 text-ui-mute hover:bg-ui-hover hover:text-ui-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-ui-accent disabled:opacity-30 touch:p-2.5';
-  const line = 'pointer-events-none absolute inset-x-0 h-0.5 rounded bg-ui-accent';
+  const line = 'pointer-events-none absolute inset-x-0 h-0.5 rounded-ui bg-ui-accent';
   const field =
     'rounded-ui bg-ui-raise px-1.5 py-0.5 text-meta text-ui-ink ring-1 ring-ui-line focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent';
 
@@ -333,7 +333,7 @@ export function SprintStatusSettings({
                 {list.length === 0 ? (
                   <li
                     aria-hidden="true"
-                    className={`relative rounded border border-dashed px-2 py-2 text-center text-meta ${
+                    className={`relative rounded-ui border border-dashed px-2 py-2 text-center text-meta ${
                       endSlot ? 'border-ui-accent text-ui-accent' : `border-ui-line ${MUTED}`
                     }`}
                   >

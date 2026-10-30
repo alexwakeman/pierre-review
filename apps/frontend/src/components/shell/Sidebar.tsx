@@ -659,7 +659,7 @@ export function Sidebar({ dark, toggleDark }: { dark: boolean; toggleDark: () =>
       >
         <div className="flex shrink-0 items-center gap-2 px-4 pb-1 pt-3">
           <h1 className="min-w-0 flex-1" title="Limn — to depict, to make clear">
-            <Wordmark className="text-[15px]" />
+            <Wordmark className="text-title" />
           </h1>
           {drawer && (
             <button

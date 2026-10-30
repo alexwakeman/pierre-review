@@ -86,16 +86,16 @@ export function ThreadCard({
 
   return (
     <div
-      className={`rounded-md border px-2.5 py-2 ${
+      className={`rounded-ui border px-2.5 py-2 ${
         selected
           ? 'border-amber-400 bg-amber-400/5'
           : 'border-gray-200 dark:border-gray-800'
       }`}
     >
       <div
-        className={`mb-2 flex items-center gap-2 text-[11px] text-gray-400${
+        className={`mb-2 flex items-center gap-2 text-meta text-gray-400${
           onOpenInPr
-            ? ' -mx-1 cursor-pointer rounded px-1 hover:bg-sky-50 dark:hover:bg-sky-950/20'
+            ? ' -mx-1 cursor-pointer rounded-ui px-1 hover:bg-sky-50 dark:hover:bg-sky-950/20'
             : ''
         }`}
         role={onOpenInPr ? 'button' : undefined}
@@ -163,7 +163,7 @@ export function ThreadCard({
               e.stopPropagation();
               openInChanges.run();
             }}
-            className="hit shrink-0 rounded px-1 py-0.5 text-[11px] font-medium text-blue-600 hover:bg-blue-50 hover:text-blue-700 dark:text-blue-400 dark:hover:bg-blue-950/40"
+            className="hit shrink-0 rounded-ui px-1 py-0.5 text-meta font-medium text-blue-600 hover:bg-blue-50 hover:text-blue-700 dark:text-blue-400 dark:hover:bg-blue-950/40"
             title={
               openInChanges.line == null
                 ? 'Show this file’s code. This thread’s line is no longer in the diff.'
@@ -231,7 +231,7 @@ export function ThreadCard({
         ))}
       </div>
 
-      <div className="mt-2 space-y-1.5 pl-2 text-[11px]">
+      <div className="mt-2 space-y-1.5 pl-2 text-meta">
         <ReplyComposer prId={thread.prId} threadId={thread.id} />
         <div>
           <a

@@ -115,7 +115,7 @@ export function SyncProgressPanel({
   return (
     <div>
       <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-sm font-semibold">
+        <h2 className="text-body font-semibold">
           {cancelling
             ? 'Cancelling…'
             : repos.length === 0
@@ -144,7 +144,7 @@ export function SyncProgressPanel({
           const percent = running ? Math.round((s?.progress?.percent ?? 0) * 100) : 100;
           return (
             <li key={r.id}>
-              <div className="mb-1 flex items-baseline justify-between gap-2 text-xs">
+              <div className="mb-1 flex items-baseline justify-between gap-2 text-meta">
                 <span className="truncate font-medium" title={r.fullName}>
                   {r.fullName}
                 </span>
@@ -167,9 +167,9 @@ export function SyncProgressPanel({
                   )}
                 </span>
               </div>
-              <div className="h-2 w-full overflow-hidden rounded bg-gray-200 dark:bg-gray-800">
+              <div className="h-2 w-full overflow-hidden rounded-ui bg-gray-200 dark:bg-gray-800">
                 <div
-                  className={`h-2 rounded transition-all duration-500 ${
+                  className={`h-2 rounded-ui transition-all duration-500 ${
                     errored
                       ? 'bg-red-500'
                       : paused?.reason === 'rate_limit'
@@ -190,7 +190,7 @@ export function SyncProgressPanel({
 
       {showMlRow && (
         <div className="mt-3 border-t border-gray-100 pt-3 dark:border-gray-800">
-          <div className="mb-1 flex items-baseline justify-between gap-2 text-xs">
+          <div className="mb-1 flex items-baseline justify-between gap-2 text-meta">
             <span className="truncate font-medium" title="Local severity model — nothing billed">
               Scoring bot comments
             </span>
@@ -205,15 +205,15 @@ export function SyncProgressPanel({
               )}
             </span>
           </div>
-          <div className="h-2 w-full overflow-hidden rounded bg-gray-200 dark:bg-gray-800">
+          <div className="h-2 w-full overflow-hidden rounded-ui bg-gray-200 dark:bg-gray-800">
             <div
-              className={`h-2 rounded transition-all duration-500 ${
+              className={`h-2 rounded-ui transition-all duration-500 ${
                 scoring ? 'bg-ai-signal-fill' : 'bg-green-500'
               }`}
               style={{ width: `${scorePercent}%` }}
             />
           </div>
-          <p className="mt-1 text-[11px] leading-snug text-gray-500 dark:text-gray-400">
+          <p className="mt-1 text-meta leading-snug text-gray-500 dark:text-gray-400">
             {ml?.markerFallback
               ? 'Severity model unavailable — labelling from markers only.'
               : 'Severity + category labels for the bot comments this sync brought in.'}
@@ -227,7 +227,7 @@ export function SyncProgressPanel({
         </div>
       )}
 
-      <div className="mt-4 flex items-center justify-between gap-3 text-xs text-gray-500 dark:text-gray-400">
+      <div className="mt-4 flex items-center justify-between gap-3 text-meta text-gray-500 dark:text-gray-400">
         <span>
           {completeCount} of {repos.length} repo{repos.length === 1 ? '' : 's'} complete
         </span>
@@ -245,7 +245,7 @@ export function SyncProgressPanel({
                 ? 'Close this. Scoring keeps running in the background.'
                 : 'Close'
             }
-            className="hit rounded border border-gray-300 px-3 py-1 text-gray-600 hover:border-gray-400 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+            className="hit rounded-ui border border-gray-300 px-3 py-1 text-gray-600 hover:border-gray-400 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
           >
             {scoring ? 'Continue in background' : 'Close'}
           </button>
@@ -255,7 +255,7 @@ export function SyncProgressPanel({
             onClick={onCancel}
             disabled={cancelling}
             title="Stop the sync and remove any repos still loading for the first time"
-            className="hit rounded border border-red-300 px-3 py-1 text-red-600 hover:border-red-400 hover:bg-red-50 disabled:opacity-50 dark:border-red-900 dark:text-red-400 dark:hover:bg-red-950"
+            className="hit rounded-ui border border-red-300 px-3 py-1 text-red-600 hover:border-red-400 hover:bg-red-50 disabled:opacity-50 dark:border-red-900 dark:text-red-400 dark:hover:bg-red-950"
           >
             {cancelling ? 'Cancelling…' : 'Cancel'}
           </button>

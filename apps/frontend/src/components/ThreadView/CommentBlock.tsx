@@ -37,7 +37,7 @@ export function CommentBlock({
   const user = comment.authorId != null ? usersById.get(comment.authorId) : undefined;
   return (
     <div className={`pl-2 ${isNew ? 'comment-new' : ''}`}>
-      <div className="flex items-center gap-2 text-xs">
+      <div className="flex items-center gap-2 text-meta">
         {showLink && (
           <>
             {showLink}
@@ -60,7 +60,7 @@ export function CommentBlock({
         <CopyButton text={comment.body} className="ml-auto" />
       </div>
       {anchor && <div className="mt-1.5">{anchor}</div>}
-      <div className="mt-1 text-sm">
+      <div className="mt-1 text-body">
         <Markdown>{comment.body}</Markdown>
       </div>
       {/* Emoji reactions, directly under the text they react to. THIS ONE MOUNT reaches all

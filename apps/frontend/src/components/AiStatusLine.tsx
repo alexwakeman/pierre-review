@@ -56,7 +56,7 @@ export function AiStatusLine({
   return (
     <span
       data-testid="ai-status-line"
-      className={`inline-flex flex-wrap items-center gap-x-1.5 text-xs text-ai-ink ${className}`}
+      className={`inline-flex flex-wrap items-center gap-x-1.5 text-meta text-ai-ink ${className}`}
     >
       {/* ⚠ Only the stage is a live region: the clock ticks every second and would be announced
           every second. */}

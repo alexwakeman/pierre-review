@@ -234,7 +234,7 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
     return (
       <li
         key={r.id}
-        className="group rounded px-1 py-1 text-xs hover:bg-gray-100 dark:hover:bg-gray-800"
+        className="group rounded-ui px-1 py-1 text-meta hover:bg-gray-100 dark:hover:bg-gray-800"
       >
         <div className="flex items-center gap-2">
           <span className="min-w-0 flex-1 truncate" title={r.fullName}>
@@ -250,7 +250,7 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
               const next = Number(e.target.value);
               if (Number.isFinite(next) && next !== current) moveRepo(r.id, next);
             }}
-            className="max-w-[9rem] shrink-0 truncate rounded border border-gray-300 bg-transparent px-1 py-0.5 text-[11px] focus:border-blue-500 focus:outline-none disabled:opacity-40 dark:border-gray-700"
+            className="max-w-[9rem] shrink-0 truncate rounded-ui border border-gray-300 bg-transparent px-1 py-0.5 text-meta focus:border-blue-500 focus:outline-none disabled:opacity-40 dark:border-gray-700"
           >
             {list.map((w) => (
               <option key={w.id} value={w.id}>
@@ -279,7 +279,7 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
           </button>
         </div>
         {hint && (
-          <div className="pl-1 pt-0.5 text-[11px] text-amber-600 dark:text-amber-500">
+          <div className="pl-1 pt-0.5 text-meta text-amber-600 dark:text-amber-500">
             {hint.kind === 'cooldown'
               ? 'recently synced — try again in a moment'
               : 'couldn’t start the sync — check the header sync button for details'}
@@ -298,10 +298,10 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
         aria-label="Manage repos and workspaces"
         className={`flex max-h-[80vh] w-full ${
           syncRound.open ? 'max-w-5xl' : 'max-w-2xl'
-        } flex-col rounded-lg border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-900`}
+        } flex-col rounded-ui border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-900`}
       >
         <div className="flex items-center justify-between border-b border-gray-200 px-4 py-2.5 dark:border-gray-800">
-          <span className="text-sm font-semibold text-gray-800 dark:text-gray-100">
+          <span className="text-body font-semibold text-gray-800 dark:text-gray-100">
             Repos &amp; workspaces
           </span>
           <div className="flex items-center gap-2">
@@ -310,7 +310,7 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
               onClick={confirmDeepResyncAll}
               disabled={syncRound.syncing}
               title="Force a full backfill for all repos"
-              className="hit flex items-center gap-1.5 rounded border border-gray-300 px-2 py-1 text-[11px] text-gray-600 hover:border-gray-400 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+              className="hit flex items-center gap-1.5 rounded-ui border border-gray-300 px-2 py-1 text-meta text-gray-600 hover:border-gray-400 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
             >
               <DeepSyncIcon size={12} />
               Deep re-sync all
@@ -319,7 +319,7 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
               type="button"
               onClick={onClose}
               aria-label="Close"
-              className="hit rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+              className="hit rounded-ui p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-800 dark:hover:text-gray-200"
             >
               <CloseIcon size={14} />
             </button>
@@ -335,10 +335,10 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
             move and land on the pre-move membership. */}
         {noReposYet && (
           <div className="border-b border-gray-200 bg-sky-50/60 px-4 py-3 dark:border-gray-800 dark:bg-sky-950/20">
-            <div className="text-sm font-semibold text-gray-800 dark:text-gray-100">
+            <div className="text-body font-semibold text-gray-800 dark:text-gray-100">
               Add a repo to get started
             </div>
-            <p className="mt-0.5 text-xs text-gray-600 dark:text-gray-300">
+            <p className="mt-0.5 text-meta text-gray-600 dark:text-gray-300">
               Search GitHub for a repo by name, or pick one of the suggested public repos to try
               Limn out.
             </p>
@@ -375,13 +375,13 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
           ) : (
             <RepoSearch autoFocus={noReposYet} />
           )}
-          <span className="min-w-0 truncate text-[11px] text-gray-400">
+          <span className="min-w-0 truncate text-meta text-gray-400">
             {selected ? `New repos join “${selected.name}”` : ''}
           </span>
         </div>
 
         <div
-          className={`grid min-h-0 flex-1 grid-cols-1 gap-0 overflow-hidden rounded-b-lg ${
+          className={`grid min-h-0 flex-1 grid-cols-1 gap-0 overflow-hidden rounded-b-ui ${
             syncRound.open ? 'md:grid-cols-[1fr_1fr_20rem]' : 'md:grid-cols-2'
           }`}
         >
@@ -400,19 +400,19 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
                     }
                   }}
                   placeholder="New workspace name…"
-                  className="min-w-0 flex-1 rounded border border-gray-300 bg-transparent px-2 py-1 text-xs focus:border-blue-500 focus:outline-none dark:border-gray-700"
+                  className="min-w-0 flex-1 rounded-ui border border-gray-300 bg-transparent px-2 py-1 text-meta focus:border-blue-500 focus:outline-none dark:border-gray-700"
                 />
                 <button
                   type="button"
                   onClick={submitCreate}
                   disabled={!newName.trim() || createWorkspace.isPending}
-                  className="hit shrink-0 rounded bg-blue-600 px-2 py-1 text-xs font-medium text-white disabled:opacity-40"
+                  className="hit shrink-0 rounded-ui bg-blue-600 px-2 py-1 text-meta font-medium text-white disabled:opacity-40"
                 >
                   Create
                 </button>
               </div>
               {createWorkspace.error && (
-                <div className="mt-1 text-[11px] text-red-500">
+                <div className="mt-1 text-meta text-red-500">
                   {createWorkspace.error instanceof ApiError
                     ? createWorkspace.error.message
                     : 'Failed to create workspace'}
@@ -425,14 +425,14 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
                   account's Default row before it answers, so the list is only ever empty while the
                   query is in flight. */}
               {workspaces == null && (
-                <div className="px-1 py-3 text-xs text-gray-500 dark:text-gray-400">Loading workspaces…</div>
+                <div className="px-1 py-3 text-meta text-gray-500 dark:text-gray-400">Loading workspaces…</div>
               )}
               {list.map((w) => {
                 const isSelected = selected?.id === w.id;
                 return (
                   <div
                     key={w.id}
-                    className={`group flex items-center gap-1.5 rounded px-2 py-1 text-xs ${
+                    className={`group flex items-center gap-1.5 rounded-ui px-2 py-1 text-meta ${
                       isSelected
                         ? 'bg-sky-50 dark:bg-sky-950/30'
                         : 'hover:bg-gray-100 dark:hover:bg-gray-800'
@@ -453,7 +453,7 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
                           }
                         }}
                         onBlur={() => submitRename(w.id)}
-                        className="min-w-0 flex-1 rounded border border-gray-300 bg-transparent px-1.5 py-0.5 text-xs focus:border-blue-500 focus:outline-none dark:border-gray-700"
+                        className="min-w-0 flex-1 rounded-ui border border-gray-300 bg-transparent px-1.5 py-0.5 text-meta focus:border-blue-500 focus:outline-none dark:border-gray-700"
                       />
                     ) : (
                       <button
@@ -468,13 +468,13 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
                         </span>
                         {w.isDefault && (
                           <span
-                            className="shrink-0 rounded bg-gray-100 px-1 text-[11px] uppercase tracking-wide text-gray-500 dark:bg-gray-800 dark:text-gray-400"
+                            className="shrink-0 rounded-ui bg-gray-100 px-1 text-meta uppercase tracking-wide text-gray-500 dark:bg-gray-800 dark:text-gray-400"
                             title="New repos land here, and a deleted workspace's repos come back here."
                           >
                             default
                           </span>
                         )}
-                        <span className="shrink-0 tabular-nums text-[11px] text-gray-400">
+                        <span className="shrink-0 tabular-nums text-meta text-gray-400">
                           {w.repoCount}
                         </span>
                       </button>
@@ -489,7 +489,7 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
                       }}
                       title="Rename"
                       aria-label={`Rename ${w.name}`}
-                      className="hit shrink-0 rounded px-1 text-gray-400 opacity-0 hover:text-gray-700 focus:opacity-100 group-hover:opacity-100 dark:hover:text-gray-200"
+                      className="hit shrink-0 rounded-ui px-1 text-gray-400 opacity-0 hover:text-gray-700 focus:opacity-100 group-hover:opacity-100 dark:hover:text-gray-200"
                     >
                       <PencilIcon />
                     </button>
@@ -502,7 +502,7 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
                         disabled
                         title="The default workspace can’t be deleted — new repos land here, and a deleted workspace’s repos and bot settings come back here. You can rename it."
                         aria-label={`${w.name} is the default workspace and can’t be deleted`}
-                        className="hit shrink-0 cursor-not-allowed rounded px-1 decorative-mark text-gray-300 opacity-0 focus:opacity-100 group-hover:opacity-100 dark:text-gray-600"
+                        className="hit shrink-0 cursor-not-allowed rounded-ui px-1 decorative-mark text-gray-300 opacity-0 focus:opacity-100 group-hover:opacity-100 dark:text-gray-600"
                       >
                         <CloseIcon />
                       </button>
@@ -512,7 +512,7 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
                         onClick={() => confirmDeleteWorkspace(w)}
                         title="Delete workspace"
                         aria-label={`Delete ${w.name}`}
-                        className="hit shrink-0 rounded px-1 text-gray-400 opacity-0 hover:text-red-500 focus:opacity-100 group-hover:opacity-100"
+                        className="hit shrink-0 rounded-ui px-1 text-gray-400 opacity-0 hover:text-red-500 focus:opacity-100 group-hover:opacity-100"
                       >
                         <CloseIcon />
                       </button>
@@ -526,10 +526,10 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
           {/* RIGHT: the account's repos, each showing the ONE workspace it lives in */}
           <div className="flex min-h-0 flex-col">
             <div className="border-b border-gray-100 px-3 py-2 dark:border-gray-800">
-              <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+              <div className="text-meta font-semibold uppercase tracking-wide text-gray-400">
                 Repos
               </div>
-              <div className="text-[11px] text-gray-500 dark:text-gray-400">
+              <div className="text-meta text-gray-500 dark:text-gray-400">
                 Every repo lives in exactly one workspace. Changing a repo’s workspace MOVES it — it
                 leaves the one it’s in now.
               </div>
@@ -537,18 +537,18 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
 
             <div className="min-h-0 flex-1 overflow-y-auto p-2">
               {sortedRepos.length === 0 ? (
-                <div className="px-1 py-3 text-xs text-gray-500 dark:text-gray-400">
+                <div className="px-1 py-3 text-meta text-gray-500 dark:text-gray-400">
                   No repos yet — search to add one above.
                 </div>
               ) : (
                 <>
                   {selected && (
                     <>
-                      <div className="px-1 pb-1 pt-0.5 text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+                      <div className="px-1 pb-1 pt-0.5 text-meta font-semibold uppercase tracking-wide text-gray-400">
                         In “{selected.name}” · {inSelected.length}
                       </div>
                       {inSelected.length === 0 ? (
-                        <div className="px-1 pb-2 text-xs text-gray-500 dark:text-gray-400">
+                        <div className="px-1 pb-2 text-meta text-gray-500 dark:text-gray-400">
                           No repos in this workspace yet — move one in below, or add one above.
                         </div>
                       ) : (
@@ -558,7 +558,7 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
                   )}
                   {elsewhere.length > 0 && (
                     <>
-                      <div className="border-t border-gray-100 px-1 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:border-gray-800">
+                      <div className="border-t border-gray-100 px-1 pb-1 pt-2 text-meta font-semibold uppercase tracking-wide text-gray-400 dark:border-gray-800">
                         In other workspaces · {elsewhere.length}
                       </div>
                       <ul className="space-y-0.5">{elsewhere.map(RepoRow)}</ul>

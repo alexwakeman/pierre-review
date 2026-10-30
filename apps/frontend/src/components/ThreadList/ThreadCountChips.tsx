@@ -73,7 +73,7 @@ export function ThreadCountChips({
         ) : (
           <span
             key={s}
-            className="inline-flex items-center gap-0.5 text-[11px] font-semibold"
+            className="inline-flex items-center gap-0.5 text-meta font-semibold"
             style={vendorInk(meta.color)}
             title={`${meta.label}: ${counts[s]}`}
           >

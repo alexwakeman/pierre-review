@@ -756,7 +756,7 @@ export function ResolverPanes({
           className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden outline-none"
         >
           {activeFile == null ? (
-            <div className="px-4 py-3 text-xs text-gray-600 dark:text-gray-300">
+            <div className="px-4 py-3 text-meta text-gray-600 dark:text-gray-300">
               {activeEntry == null ? (
                 // ⚠ THIS IS THE ONLY SCREEN A PULL REQUEST WITH NOTHING RESOLVABLE EVER REACHES,
                 // so it has to carry the refusal. A binary-only conflict produces a `ready`
@@ -793,7 +793,7 @@ export function ResolverPanes({
                   <button
                     type="button"
                     onClick={() => onRetryFile(activeIndex)}
-                    className="hit rounded border border-gray-300 px-2 py-0.5 text-[11px] hover:bg-gray-100 dark:border-gray-600 dark:hover:bg-gray-800"
+                    className="hit rounded-ui border border-gray-300 px-2 py-0.5 text-meta hover:bg-gray-100 dark:border-gray-600 dark:hover:bg-gray-800"
                   >
                     Try again
                   </button>
@@ -938,7 +938,7 @@ function PaneHeader({ children }: { children?: React.ReactNode }): JSX.Element {
     // see `.mr-ribbons`' note on why the overlay carries no z-index at all.
     <div
       data-mr-pane-header
-      className="sticky top-0 z-10 border-b border-gray-200 bg-white px-2 py-1 text-[11px] font-medium text-gray-600 dark:border-gray-800 dark:bg-gray-950 dark:text-gray-300"
+      className="sticky top-0 z-10 border-b border-gray-200 bg-white px-2 py-1 text-meta font-medium text-gray-600 dark:border-gray-800 dark:bg-gray-950 dark:text-gray-300"
     >
       {children}
     </div>
@@ -964,7 +964,7 @@ function Banners({
   return (
     <div className="shrink-0 border-b border-gray-200 px-4 py-1.5 dark:border-gray-800">
       {lines.map((line) => (
-        <div key={line} className="text-[12px] text-gray-700 dark:text-gray-200">
+        <div key={line} className="text-meta text-gray-700 dark:text-gray-200">
           {line}
         </div>
       ))}

@@ -122,7 +122,7 @@ export function BlastImpactNote({
             type="button"
             onClick={() => run()}
             disabled={state.running}
-            className="hit inline-flex items-center gap-1 rounded text-[11px] text-gray-500 hover:text-gray-700 disabled:opacity-60 dark:text-gray-400 dark:hover:text-gray-200"
+            className="hit inline-flex items-center gap-1 rounded-ui text-meta text-gray-500 hover:text-gray-700 disabled:opacity-60 dark:text-gray-400 dark:hover:text-gray-200"
           >
             <SparkleIcon size={11} />
             What could this break?
@@ -137,7 +137,7 @@ export function BlastImpactNote({
         <button
           type="button"
           onClick={toggle}
-          className="hit inline-flex items-center gap-1 text-[11px] text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+          className="hit inline-flex items-center gap-1 text-meta text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
           aria-expanded={false}
         >
           <ChevronIcon size={11} dir="right" />
@@ -153,7 +153,7 @@ export function BlastImpactNote({
           <button
             type="button"
             onClick={toggle}
-            className="hit inline-flex items-center gap-1 text-[11px] text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+            className="hit inline-flex items-center gap-1 text-meta text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
             aria-expanded
           >
             <ChevronIcon size={11} dir="down" />
@@ -164,15 +164,15 @@ export function BlastImpactNote({
               and which half a model wrote; a panel that mixes them without labelling them apart
               is the defect the AI-surface rules name. */}
           {concern && (
-            <span className="inline-flex items-center gap-1 text-[11px] text-amber-600 dark:text-amber-500">
+            <span className="inline-flex items-center gap-1 text-meta text-amber-600 dark:text-amber-500">
               <WarningIcon size={11} className="inline-block align-[-0.1em]" />
               Flagged on a closer read
             </span>
           )}
-          <p className="max-w-prose text-[12px] leading-snug text-gray-600 dark:text-gray-300">
+          <p className="max-w-prose text-meta leading-snug text-gray-600 dark:text-gray-300">
             {note.body}
           </p>
-          <div className="flex items-center gap-2 text-[11px] text-gray-400 dark:text-gray-500">
+          <div className="flex items-center gap-2 text-meta text-gray-400 dark:text-gray-500">
             {/* Says who wrote it. Two sentences of prose beside a computed chip must not be
                 mistaken for another computed fact. */}
             <span>Written by {aiRunLabel(null, note.model)}</span>
@@ -199,7 +199,7 @@ export function BlastImpactNote({
       )}
 
       {state.error != null && (
-        <span className="text-[11px] text-red-500">{state.error}</span>
+        <span className="text-meta text-red-500">{state.error}</span>
       )}
     </div>
   );

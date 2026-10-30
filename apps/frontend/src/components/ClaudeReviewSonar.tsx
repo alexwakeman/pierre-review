@@ -43,7 +43,7 @@ const TYPE_LABEL: Record<string, string> = {
   QUALITY_GATE: 'Quality gate',
 };
 const BTN =
-  'rounded border border-gray-300 px-2 py-0.5 text-xs text-gray-700 hover:border-gray-400 disabled:cursor-not-allowed disabled:opacity-40 dark:border-gray-700 dark:text-gray-200 dark:hover:border-gray-500';
+  'rounded-ui border border-gray-300 px-2 py-0.5 text-meta text-gray-700 hover:border-gray-400 disabled:cursor-not-allowed disabled:opacity-40 dark:border-gray-700 dark:text-gray-200 dark:hover:border-gray-500';
 
 type OpenInChanges = (path: string, line: number | null, side: ClaudeFindingSide) => void;
 
@@ -73,19 +73,19 @@ export function SonarIssueRow({
   const type = it.type ? TYPE_LABEL[it.type] ?? it.type : null;
   const guidance = it.howToFix ?? it.whyIsThisAnIssue;
   return (
-    <li className="rounded border border-gray-100 px-3 py-2 text-sm dark:border-gray-800">
+    <li className="rounded-ui border border-gray-100 px-3 py-2 text-body dark:border-gray-800">
       <div className="flex flex-wrap items-center gap-2">
         {selection}
         <span className={`${REVIEW_CHIP} ${SEVERITY_TONE[it.severity]}`}>{SONAR_SEVERITY_LABEL[it.severity]}</span>
-        {type != null && <span className={`text-xs ${MUTED}`}>{type}</span>}
-        <span className={`break-all text-xs ${MUTED}`}>{it.ruleName ?? it.rule}</span>
-        {it.effort != null && <span className={`text-xs ${MUTED}`}>{it.effort} to fix</span>}
+        {type != null && <span className={`text-meta ${MUTED}`}>{type}</span>}
+        <span className={`break-all text-meta ${MUTED}`}>{it.ruleName ?? it.rule}</span>
+        {it.effort != null && <span className={`text-meta ${MUTED}`}>{it.effort} to fix</span>}
         {href != null && (
           <a
             href={href}
             target="_blank"
             rel="noreferrer noopener"
-            className="hit ml-auto inline-flex items-center gap-1 text-xs text-blue-600 hover:underline dark:text-blue-400"
+            className="hit ml-auto inline-flex items-center gap-1 text-meta text-blue-600 hover:underline dark:text-blue-400"
           >
             SonarCloud
             <ExternalLinkIcon size={11} />
@@ -98,15 +98,15 @@ export function SonarIssueRow({
           <button
             type="button"
             onClick={() => onOpenInChanges(it.path!, it.line, 'RIGHT')}
-            className="hit mt-0.5 break-all text-left font-mono text-xs text-blue-600 hover:underline dark:text-blue-400"
+            className="hit mt-0.5 break-all text-left font-mono text-meta text-blue-600 hover:underline dark:text-blue-400"
           >
             {loc}
           </button>
         ) : (
-          <div className={`mt-0.5 break-all font-mono text-xs ${MUTED}`}>{loc}</div>
+          <div className={`mt-0.5 break-all font-mono text-meta ${MUTED}`}>{loc}</div>
         ))}
       {it.code.length > 0 && (
-        <pre className="mt-1 overflow-x-auto rounded bg-gray-50 px-2 py-1 font-mono text-xs leading-snug dark:bg-gray-900">
+        <pre className="mt-1 overflow-x-auto rounded-ui bg-gray-50 px-2 py-1 font-mono text-meta leading-snug dark:bg-gray-900">
           {it.code.map((c) => (
             <div
               key={c.line}
@@ -125,7 +125,7 @@ export function SonarIssueRow({
             onClick={() => setOpen((o) => !o)}
             aria-expanded={open}
             aria-controls={fixId}
-            className={`inline-flex items-center gap-1 text-xs ${MUTED} hover:text-gray-700 dark:hover:text-gray-200`}
+            className={`inline-flex items-center gap-1 text-meta ${MUTED} hover:text-gray-700 dark:hover:text-gray-200`}
           >
             <ChevronIcon dir={open ? 'down' : 'right'} size={11} />
             {it.howToFix != null ? 'How to fix' : 'Why it matters'}
@@ -252,7 +252,7 @@ export function ClaudeReviewSonarSection({
               href={safeExternalUrl(snap.dashboardUrl)!}
               target="_blank"
               rel="noreferrer noopener"
-              className="hit inline-flex items-center gap-1 text-xs text-blue-600 hover:underline dark:text-blue-400"
+              className="hit inline-flex items-center gap-1 text-meta text-blue-600 hover:underline dark:text-blue-400"
             >
               Open in SonarCloud
               <ExternalLinkIcon size={11} />
@@ -266,7 +266,7 @@ export function ClaudeReviewSonarSection({
           {canPostNow && (
             <button
               type="button"
-              className="hit rounded bg-sky-600 px-2 py-0.5 text-xs font-medium text-white hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-40"
+              className="hit rounded-ui bg-sky-600 px-2 py-0.5 text-meta font-medium text-white hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-40"
               disabled={posting}
               onClick={() => post.mutate()}
             >
@@ -295,8 +295,8 @@ export function ClaudeReviewSonarSection({
         </>
       )}
       {line != null && <p className={REVIEW_META}>{line}</p>}
-      {refresh.isError && <p className="text-xs text-red-600 dark:text-red-400">{refresh.error.message}</p>}
-      {post.isError && <p className="text-xs text-red-600 dark:text-red-400">{post.error.message}</p>}
+      {refresh.isError && <p className="text-meta text-red-600 dark:text-red-400">{refresh.error.message}</p>}
+      {post.isError && <p className="text-meta text-red-600 dark:text-red-400">{post.error.message}</p>}
     </ReviewSection>
   );
 }

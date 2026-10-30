@@ -29,7 +29,7 @@ const MUTED = 'text-gray-500 dark:text-gray-400';
 const ERROR_TEXT = 'text-red-600 dark:text-red-400';
 const BTN =
   'inline-flex h-7 items-center whitespace-nowrap rounded-ui bg-ui-raise px-2.5 text-meta font-medium text-ui-ink hover:bg-ui-hover disabled:cursor-not-allowed disabled:opacity-50 touch:h-10 touch:px-3';
-const LINK_BTN = 'text-xs text-blue-700 hover:underline disabled:opacity-50 dark:text-blue-300';
+const LINK_BTN = 'text-meta text-blue-700 hover:underline disabled:opacity-50 dark:text-blue-300';
 
 /** The stored Jira row, with the criteria-field line and picker. */
 function JiraStory({
@@ -47,11 +47,11 @@ function JiraStory({
   // GitHub Issues: the criteria come from a fixed place (sub-issues, a task list, a section), so
   // there is no field to change.
   const fixedSource = hasFixedAcSource(jiraRef);
-  if (isLoading) return <p className={`text-xs ${MUTED}`}>Reading {jiraRef.key}…</p>;
+  if (isLoading) return <p className={`text-meta ${MUTED}`}>Reading {jiraRef.key}…</p>;
   if (isError || data == null) {
     return (
       <div className="space-y-2">
-        <p className={`text-xs ${ERROR_TEXT}`}>
+        <p className={`text-meta ${ERROR_TEXT}`}>
           {fixedSource && error instanceof Error && error.message !== '' ? error.message : `Could not read ${jiraRef.key}.`}
         </p>
         {fallback != null && <StoredStory ticket={fallback} url={jiraRef.url} />}
@@ -67,7 +67,7 @@ function JiraStory({
         draft={draft}
         fieldControl={
           <div className="space-y-1">
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-meta">
               <span className={MUTED}>Criteria from:</span>
               <span className="font-medium text-gray-800 dark:text-gray-200">{acFieldText(draft)}</span>
               {!fixedSource && (
@@ -84,7 +84,7 @@ function JiraStory({
               {setField.isPending && <span className={MUTED}>Saving…</span>}
             </div>
             {picking && (
-              <div className="rounded border border-gray-200 p-2 dark:border-gray-800">
+              <div className="rounded-ui border border-gray-200 p-2 dark:border-gray-800">
                 <AcFieldPicker
                   fetched={{ details: data, site: jiraSiteOf(jiraRef.url), chosen }}
                   allowNone={false}
@@ -107,7 +107,7 @@ function JiraStory({
               </div>
             )}
             {setField.isError && (
-              <p className={`text-xs ${ERROR_TEXT}`}>{setField.error.message || 'Could not save the field.'}</p>
+              <p className={`text-meta ${ERROR_TEXT}`}>{setField.error.message || 'Could not save the field.'}</p>
             )}
           </div>
         }
@@ -166,13 +166,13 @@ export function StoryDisclosure({
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
         aria-controls={bodyId}
-        className="hit inline-flex items-center gap-1 text-xs font-medium text-gray-700 hover:text-gray-900 dark:text-gray-200 dark:hover:text-gray-50"
+        className="hit inline-flex items-center gap-1 text-meta font-medium text-gray-700 hover:text-gray-900 dark:text-gray-200 dark:hover:text-gray-50"
       >
         <ChevronIcon dir={open ? 'down' : 'right'} className="shrink-0" />
         {label}
       </button>
       {open && (
-        <div id={bodyId} className="mt-1.5 rounded border border-gray-200 p-2 dark:border-gray-800">
+        <div id={bodyId} className="mt-1.5 rounded-ui border border-gray-200 p-2 dark:border-gray-800">
           {source.kind === 'jira' ? (
             // `source` is 'jira' only with a PR to read through (above).
             prId != null && <JiraStory prId={prId} jiraRef={source.ref} fallback={fallback} />

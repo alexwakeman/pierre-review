@@ -385,14 +385,14 @@ function LiveRow({ row }: { row: ArmedMergeRequest }): JSX.Element {
               position (an intent spending one tick taking its place in the landing order after
               its merge queue was disabled) has prose that says something the headline cannot. */}
           {row.lastReason && !(row.phase === 'queued_local' && row.queuePosition != null) && (
-            <div className="mt-0.5 text-[11px] leading-snug text-gray-400">{row.lastReason}</div>
+            <div className="mt-0.5 text-meta leading-snug text-gray-400">{row.lastReason}</div>
           )}
         </div>
         <button
           type="button"
           onClick={() => disarm.mutate()}
           disabled={disarm.isPending}
-          className="hit shrink-0 text-[11px] text-gray-400 hover:text-red-600 disabled:opacity-50 dark:hover:text-red-400"
+          className="hit shrink-0 text-meta text-gray-400 hover:text-red-600 disabled:opacity-50 dark:hover:text-red-400"
         >
           {disarm.isPending ? 'Cancelling…' : 'Cancel'}
         </button>
@@ -430,14 +430,14 @@ function OutcomeRow({
             {TERMINAL_LABEL[outcome.state] ?? 'Auto-merge finished'}
           </div>
           {outcome.reason && (
-            <div className="mt-0.5 text-[11px] leading-snug text-gray-400">{outcome.reason}</div>
+            <div className="mt-0.5 text-meta leading-snug text-gray-400">{outcome.reason}</div>
           )}
         </div>
         <button
           type="button"
           onClick={onDismiss}
           aria-label={`Dismiss the result for ${outcome.repoFullName} #${outcome.prNumber}`}
-          className="hit shrink-0 text-[11px] text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+          className="hit shrink-0 text-meta text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
         >
           Dismiss
         </button>

@@ -130,7 +130,7 @@ export function ClaudeReviewLine({
   if (ciPill != null && cell.kind === 'done') lead = null;
   return (
     <div
-      className="mt-1.5 flex min-w-0 cursor-default flex-wrap items-center gap-1.5 text-[12px]"
+      className="mt-1.5 flex min-w-0 cursor-default flex-wrap items-center gap-1.5 text-meta"
       onClick={(e) => e.stopPropagation()}
       role="group"
       aria-label="AI review"
@@ -163,8 +163,8 @@ export function ClaudeReviewLine({
         )
       )}
       {ciPill != null
-        ? !ciPill.running && <ReviewedAgo at={ciState?.checkedAt} className="text-[12px]" />
-        : cell.kind === 'done' && <ReviewedAgo at={state?.finishedAt ?? reviewedAt} className="text-[12px]" />}
+        ? !ciPill.running && <ReviewedAgo at={ciState?.checkedAt} className="text-meta" />
+        : cell.kind === 'done' && <ReviewedAgo at={state?.finishedAt ?? reviewedAt} className="text-meta" />}
     </div>
   );
 }
@@ -265,7 +265,7 @@ export function ClaudeReviewActions({
   }
   if (showError) {
     parts.push(
-      <span key="err" className="text-[12px] text-red-600 dark:text-red-400">
+      <span key="err" className="text-meta text-red-600 dark:text-red-400">
         {start.error.message || 'Could not start the review.'}
       </span>,
     );
@@ -314,7 +314,7 @@ export function ClaudeReviewExtras({
     return null;
   }
   return (
-    <div className="flex flex-wrap items-center gap-1.5 text-[12px]">
+    <div className="flex flex-wrap items-center gap-1.5 text-meta">
       <span className="inline-flex items-center gap-1 font-semibold text-ai-ink">
         <SparkleIcon size={12} className="text-ai-signal" />
         AI review

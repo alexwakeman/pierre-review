@@ -72,7 +72,7 @@ export const CodeCell = memo(function CodeCell({
     <div className="mr-filler min-w-0" aria-hidden={ariaHidden === true ? true : undefined}>
       <div
         data-mr-cell={anchor}
-        className={`min-w-0 font-mono text-[12px] leading-[18px] text-gray-900 dark:text-gray-100 ${
+        className={`min-w-0 font-mono text-meta leading-[18px] text-gray-900 dark:text-gray-100 ${
           paint ?? ''
         } ${rule != null ? `border-l-2 ${rule}` : ''} ${emptyButPainted ? 'h-[18px]' : ''}`}
       >

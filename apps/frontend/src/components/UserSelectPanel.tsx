@@ -86,7 +86,7 @@ export function MemberSectionList({
   const memberRow = (sec: MemberSection, u: User): JSX.Element => (
     <label
       key={`${sec.key}:${u.id}`}
-      className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 text-meta hover:bg-ui-hover"
+      className="flex cursor-pointer items-center gap-2 rounded-ui px-1 py-1 text-meta hover:bg-ui-hover"
     >
       <CheckboxBox checked={staged.has(u.id)} onChange={() => onToggle(u.id)} />
       <Avatar user={u} size={16} />
@@ -333,7 +333,7 @@ export function UserSelectPanel({
                   type="button"
                   onClick={() => toggleMany(ids, !allChecked)}
                   title="Select every maintainer in the current filter"
-                  className={`mb-2 flex w-full items-center gap-2 rounded px-2 py-1 text-meta transition ${
+                  className={`mb-2 flex w-full items-center gap-2 rounded-ui px-2 py-1 text-meta transition ${
                     allChecked
                       ? 'bg-[#8957e5]/15 text-[#8957e5]'
                       : 'text-ui-mute hover:bg-ui-hover hover:text-ui-ink'
@@ -393,7 +393,7 @@ export function UserSelectPanel({
                     {sec.members.map((u) => (
                       <label
                         key={`${sec.key}:${u.id}`}
-                        className={`flex items-center gap-2 rounded px-1 py-1 text-meta hover:bg-ui-hover ${
+                        className={`flex items-center gap-2 rounded-ui px-1 py-1 text-meta hover:bg-ui-hover ${
                           excludeBots ? 'cursor-pointer' : 'cursor-pointer opacity-60'
                         }`}
                         title={

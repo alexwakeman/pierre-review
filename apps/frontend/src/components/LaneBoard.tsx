@@ -160,7 +160,7 @@ export const useBoardObstacles = (): (() => readonly DOMRect[]) => useContext(Ob
 
 /** The numbered marker on an arrow and in its key. */
 const NUMBER_CLASS =
-  'flex h-4 min-w-4 items-center justify-center rounded-full ring-1 ring-ui-line px-0.5 text-[11px] font-semibold leading-none';
+  'flex h-4 min-w-4 items-center justify-center rounded-full ring-1 ring-ui-line px-0.5 text-meta font-semibold leading-none';
 
 /** What an arrow means, for its popover: the keyed words and the full sentence. */
 export interface ArrowDetail {
@@ -441,7 +441,7 @@ export function BorderKey({
           ) : it.dot != null ? (
             <span aria-hidden className={`inline-block h-2 w-2 rounded-full ${it.dot}`} />
           ) : (
-            <span aria-hidden className={`inline-block h-3.5 w-6 shrink-0 rounded ${it.swatch ?? ''}`} />
+            <span aria-hidden className={`inline-block h-3.5 w-6 shrink-0 rounded-ui ${it.swatch ?? ''}`} />
           )}
           {it.label}
         </li>

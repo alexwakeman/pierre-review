@@ -135,7 +135,7 @@ export function RepoSelectPanel({
                 return (
                   <div
                     key={r.id}
-                    className="group flex items-center gap-2 rounded px-1 py-1 text-meta hover:bg-ui-hover"
+                    className="group flex items-center gap-2 rounded-ui px-1 py-1 text-meta hover:bg-ui-hover"
                   >
                     <label
                       className={`flex min-w-0 flex-1 items-center gap-2 ${
@@ -174,7 +174,7 @@ export function RepoSelectPanel({
                         onClick={() => onOnly(r.id)}
                         title={`Show only ${r.fullName}`}
                         aria-label={`Show only ${r.fullName}`}
-                        className="hit shrink-0 rounded px-1.5 py-0.5 text-meta font-medium text-ui-faint opacity-0 hover:bg-ui-hover hover:text-ui-ink focus:opacity-100 group-hover:opacity-100 "
+                        className="hit shrink-0 rounded-ui px-1.5 py-0.5 text-meta font-medium text-ui-faint opacity-0 hover:bg-ui-hover hover:text-ui-ink focus:opacity-100 group-hover:opacity-100 "
                       >
                         only
                       </button>

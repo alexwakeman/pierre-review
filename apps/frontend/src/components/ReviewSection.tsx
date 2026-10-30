@@ -58,19 +58,19 @@ export function ReviewSection({
   return (
     <section
       aria-label={title}
-      className="rounded-lg border border-gray-300 bg-white dark:border-gray-700 dark:bg-gray-950"
+      className="rounded-ui border border-gray-300 bg-white dark:border-gray-700 dark:bg-gray-950"
     >
       <header
         className={`flex flex-wrap items-center gap-x-2 gap-y-1 bg-gray-50 px-3 py-2 dark:bg-gray-900 ${
-          hasBody ? 'rounded-t-lg border-b border-gray-200 dark:border-gray-800' : 'rounded-lg'
+          hasBody ? 'rounded-t-ui border-b border-gray-200 dark:border-gray-800' : 'rounded-ui'
         }`}
       >
-        <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">{title}</h3>
+        <h3 className="text-body font-semibold text-gray-900 dark:text-gray-100">{title}</h3>
         {pills}
         {info}
         {actions != null && <div className="ml-auto flex flex-wrap items-center gap-2">{actions}</div>}
       </header>
-      {hasBody && <div className="space-y-2 px-3 py-3 text-sm">{children}</div>}
+      {hasBody && <div className="space-y-2 px-3 py-3 text-body">{children}</div>}
     </section>
   );
 }

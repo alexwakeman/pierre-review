@@ -54,18 +54,18 @@ import { VerdictIcon } from '../VerdictIcon.js';
 // stops propagation (so a button does its own job, never also opening the tab), and the keyboard
 // route is the "Claude" label, a real button — never a role=button wrapper around buttons.
 
-export const PILL = 'inline-flex items-center gap-1 whitespace-nowrap rounded px-1.5 py-px text-[11px] font-medium';
+export const PILL = 'inline-flex items-center gap-1 whitespace-nowrap rounded-ui px-1.5 py-px text-meta font-medium';
 export const GREY_PILL = `${PILL} bg-gray-500/10 text-gray-600 dark:text-gray-300`;
 // The verdict is the panel's headline: a size up from the pills beside it. Shared with the Claude
 // Review tab's header, which leads with the same pill.
 export const VERDICT_PILL =
-  'inline-flex items-center gap-1 whitespace-nowrap rounded px-2 py-0.5 text-xs font-semibold';
-export const MUTED = 'text-[11px] text-ai-muted';
+  'inline-flex items-center gap-1 whitespace-nowrap rounded-ui px-2 py-0.5 text-meta font-semibold';
+export const MUTED = 'text-meta text-ai-muted';
 // The AI surface's own button (the Claude Review tab's Run button idiom).
 const AI_BUTTON =
-  'whitespace-nowrap rounded border border-ai-border bg-white/70 px-2 py-0.5 text-[11px] font-medium text-ai-signal hover:border-ai-signal/60 hover:bg-ai-surface-2 disabled:cursor-default disabled:opacity-60 dark:bg-gray-900/50';
+  'whitespace-nowrap rounded-ui border border-ai-border bg-white/70 px-2 py-0.5 text-meta font-medium text-ai-signal hover:border-ai-signal/60 hover:bg-ai-surface-2 disabled:cursor-default disabled:opacity-60 dark:bg-gray-900/50';
 const PLAIN_BUTTON =
-  'whitespace-nowrap rounded border border-ai-border bg-white/70 px-2 py-0.5 text-[11px] font-medium text-gray-700 hover:border-gray-400 dark:bg-gray-900/50 dark:text-gray-200 dark:hover:border-gray-500';
+  'whitespace-nowrap rounded-ui border border-ai-border bg-white/70 px-2 py-0.5 text-meta font-medium text-gray-700 hover:border-gray-400 dark:bg-gray-900/50 dark:text-gray-200 dark:hover:border-gray-500';
 
 // A ticket pill's colour by coverage (all met / some partly or can't tell / some not met).
 const TICKET_TONE: Record<CoverageTone, string> = {
@@ -160,13 +160,13 @@ export function ClaudeReviewPanel({
           Review failed
         </button>
       ) : teamClaimSkip ? (
-        <span className="text-xs text-ai-muted">
+        <span className="text-meta text-ai-muted">
           {teamClaimSkip.kind === 'reviewed'
             ? `Reviewed by @${teamClaimSkip.login}`
             : `Being reviewed by @${teamClaimSkip.login}`}
         </span>
       ) : (
-        <span className="text-xs text-ai-muted">Not reviewed</span>
+        <span className="text-meta text-ai-muted">Not reviewed</span>
       );
       action = (
         <button type="button" onClick={run} className={AI_BUTTON}>
@@ -271,7 +271,7 @@ export function ClaudeReviewPanel({
 
   return (
     <div
-      className={`mt-1.5 flex cursor-pointer flex-wrap items-center gap-x-2.5 gap-y-1.5 rounded-md border border-l-[3px] border-ai-border bg-ai-surface px-2.5 py-1.5 hover:bg-ai-surface-2 ${ACCENT[reviewTone(cell)]}`}
+      className={`mt-1.5 flex cursor-pointer flex-wrap items-center gap-x-2.5 gap-y-1.5 rounded-ui border border-l-[3px] border-ai-border bg-ai-surface px-2.5 py-1.5 hover:bg-ai-surface-2 ${ACCENT[reviewTone(cell)]}`}
       // The whole panel opens the Claude Review tab (mouse); the "Claude" button below is the
       // keyboard route. Inner controls stop propagation, so they never also land here.
       onClick={open}
@@ -282,7 +282,7 @@ export function ClaudeReviewPanel({
         type="button"
         onClick={open}
         title="Open the AI review"
-        className="hit inline-flex shrink-0 items-center gap-1 rounded text-[11px] font-semibold text-ai-ink hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+        className="hit inline-flex shrink-0 items-center gap-1 rounded-ui text-meta font-semibold text-ai-ink hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
       >
         <SparkleIcon size={12} className="text-ai-signal" />
         AI review
@@ -384,7 +384,7 @@ export function ClaudeReviewPanel({
       )}
 
       {showError && (
-        <span className="text-[11px] text-red-600 dark:text-red-400">
+        <span className="text-meta text-red-600 dark:text-red-400">
           {start.error.message || 'Could not start the review.'}
         </span>
       )}

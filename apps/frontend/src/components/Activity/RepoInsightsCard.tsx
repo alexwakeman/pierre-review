@@ -23,22 +23,22 @@ export function RepoInsightsCard({
   const hasData = series.some((s) => (s.values as number[]).some((v) => v > 0));
 
   return (
-    <div className="rounded-lg border border-gray-200 p-3 dark:border-gray-800">
+    <div className="rounded-ui border border-gray-200 p-3 dark:border-gray-800">
       <div className="mb-1.5 flex items-center justify-between gap-2">
-        <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+        <span className="text-meta font-semibold uppercase tracking-wide text-gray-400">
           PR merge rate{data ? ` · ${data.windowDays / 7}-wk` : ''}
         </span>
         <button
           type="button"
           onClick={onOpenCharts}
-          className="hit shrink-0 rounded border border-gray-300 px-2 py-0.5 text-[11px] font-medium text-gray-600 hover:border-gray-400 dark:border-gray-700 dark:text-gray-300 dark:hover:border-gray-500"
+          className="hit shrink-0 rounded-ui border border-gray-300 px-2 py-0.5 text-meta font-medium text-gray-600 hover:border-gray-400 dark:border-gray-700 dark:text-gray-300 dark:hover:border-gray-500"
           title="Open the full analytics charts for this repo"
         >
           <ChartIcon size={11} className="inline-block align-[-0.1em]" /> Charts
         </button>
       </div>
       {isLoading && data == null ? (
-        <div className="h-[132px] animate-pulse rounded bg-gray-50 dark:bg-gray-900/40" />
+        <div className="h-[132px] animate-pulse rounded-ui bg-gray-50 dark:bg-gray-900/40" />
       ) : hasData ? (
         <LineChart labels={weeks} series={series} area curved />
       ) : (

@@ -32,7 +32,7 @@ export function UserMenu({
     ) : (
       <span
         aria-hidden
-        className="flex shrink-0 items-center justify-center rounded-full bg-ui-hover text-[11px] font-semibold text-ui-ink"
+        className="flex shrink-0 items-center justify-center rounded-full bg-ui-hover text-meta font-semibold text-ui-ink"
         style={{ width: 20, height: 20 }}
       >
         {label.slice(0, 2).toUpperCase()}

@@ -109,7 +109,7 @@ export function DesignGrid({
         {layout.acts.map((a, i) => (
           <div
             key={a.id}
-            className="relative z-10 min-w-0 self-end break-words text-[12px] font-semibold text-gray-800 dark:text-gray-100"
+            className="relative z-10 min-w-0 self-end break-words text-meta font-semibold text-gray-800 dark:text-gray-100"
             style={{ gridRow: 1, gridColumn: i + col0 }}
           >
             <span className="sr-only">Stage {i + 1}: </span>
@@ -120,7 +120,7 @@ export function DesignGrid({
         {byRow.map((r, row) => (
           <Fragment key={r.layer}>
             <div
-              className={`relative z-10 min-w-0 break-words text-[11px] font-medium text-gray-600 dark:text-gray-300 ${
+              className={`relative z-10 min-w-0 break-words text-meta font-medium text-gray-600 dark:text-gray-300 ${
                 narrow ? 'mt-1 border-t border-gray-200 pt-1 dark:border-gray-800' : 'self-center'
               }`}
               style={narrow ? { gridRow: rowOf(row) - 1, gridColumn: '1 / -1' } : { gridRow: rowOf(row), gridColumn: 1 }}
@@ -205,7 +205,7 @@ function DesignCard({
       <span className="flex flex-wrap items-center gap-1">
         {word != null && (
           <span
-            className={`inline-flex items-center gap-0.5 text-[11px] font-semibold ${
+            className={`inline-flex items-center gap-0.5 text-meta font-semibold ${
               cell.change === 'new' ? 'text-ai-signal' : 'text-gray-700 dark:text-gray-200'
             }`}
           >
@@ -214,17 +214,17 @@ function DesignCard({
           </span>
         )}
         {cell.pattern != null && (
-          <span className="inline-block max-w-full break-words rounded bg-gray-100 px-1 text-[11px] text-gray-700 dark:bg-gray-800 dark:text-gray-200">
+          <span className="inline-block max-w-full break-words rounded-ui bg-gray-100 px-1 text-meta text-gray-700 dark:bg-gray-800 dark:text-gray-200">
             {cell.pattern}
           </span>
         )}
         {member != null && (
-          <span className="whitespace-nowrap rounded border border-gray-300 px-1 text-[11px] text-gray-700 dark:border-gray-700 dark:text-gray-200">
+          <span className="whitespace-nowrap rounded-ui border border-gray-300 px-1 text-meta text-gray-700 dark:border-gray-700 dark:text-gray-200">
             {badges.get(member.prId) ?? `#${member.number}`}
           </span>
         )}
       </span>
-      <span className="mt-0.5 line-clamp-2 block break-words text-[13px] leading-snug text-gray-900 dark:text-gray-50">
+      <span className="mt-0.5 line-clamp-2 block break-words text-body leading-snug text-gray-900 dark:text-gray-50">
         {cell.label}
       </span>
     </>
@@ -241,7 +241,7 @@ function DesignCard({
     .filter(Boolean)
     .join('; ');
 
-  const cls = `block w-full min-w-0 rounded-md px-2 py-1.5 text-left ${CARD_CHANGE[cell.change]}`;
+  const cls = `block w-full min-w-0 rounded-ui px-2 py-1.5 text-left ${CARD_CHANGE[cell.change]}`;
   if (!clickable) {
     return (
       <div ref={cardRef} className={cls} role="note" aria-label={name}>
@@ -279,7 +279,7 @@ function DesignCard({
               {...getFloatingProps({ onClick: (e) => e.stopPropagation() })}
               id={listId}
               data-noactivate
-              className="z-[60] max-w-[min(28rem,92vw)] rounded-md border border-gray-200 bg-white p-1 shadow-lg dark:border-gray-700 dark:bg-gray-900"
+              className="z-[60] max-w-[min(28rem,92vw)] rounded-ui border border-gray-200 bg-white p-1 shadow-lg dark:border-gray-700 dark:bg-gray-900"
             >
               <ul className="space-y-0.5">
                 {cell.files.map((f) => (
@@ -290,7 +290,7 @@ function DesignCard({
                         setOpen(false);
                         openFile!(cell, f);
                       }}
-                      className="hit block w-full break-all rounded px-2 py-1 text-left font-mono text-[12px] text-gray-800 hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 dark:text-gray-100 dark:hover:bg-gray-800"
+                      className="hit block w-full break-all rounded-ui px-2 py-1 text-left font-mono text-meta text-gray-800 hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 dark:text-gray-100 dark:hover:bg-gray-800"
                     >
                       {f}
                     </button>

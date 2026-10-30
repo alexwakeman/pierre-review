@@ -8,7 +8,7 @@ import { BotIcon, TimerIcon } from '../Icons.js';
 // the chart over a duplicate scalar).
 export function RepoStatsLine({ stats: s }: { stats: ActivityRepoStats }): JSX.Element {
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-meta text-gray-500 dark:text-gray-400">
       <span>
         <span className="font-semibold text-gray-700 dark:text-gray-200 tabular-nums">
           {s.openPrs}

@@ -61,7 +61,7 @@ export function OpenPrRow({
         type="button"
         onClick={onClick}
         title={`Open #${pr.number} — ${pr.title}`}
-        className="hit flex min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-left text-xs"
+        className="hit flex min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-left text-meta"
       >
         {/* CI rollup dot (a hollow ring when there are no checks) */}
         <span
@@ -114,13 +114,13 @@ export function OpenPrRow({
             takes it from the flexible title instead; every other row keeps the column still. */}
         <span className="flex min-w-28 shrink-0 items-center justify-end gap-1 whitespace-nowrap">
           {pr.isDraft && (
-            <span className="shrink-0 rounded bg-gray-500/15 px-1 text-[11px] font-medium text-gray-500 dark:text-gray-400">
+            <span className="shrink-0 rounded-ui bg-gray-500/15 px-1 text-meta font-medium text-gray-500 dark:text-gray-400">
               draft
             </span>
           )}
           {standing != null && (
             <span
-              className="shrink-0 rounded px-1 text-[11px] font-semibold"
+              className="shrink-0 rounded-ui px-1 text-meta font-semibold"
               style={{ color: standing.color, background: standing.color + '1a' }}
             >
               {standing.label}
@@ -128,7 +128,7 @@ export function OpenPrRow({
           )}
           {warn != null && (
             <span
-              className={`shrink-0 rounded px-1 text-[11px] font-medium ${MERGE_TONE_CHIP[warn.tone]}`}
+              className={`shrink-0 rounded-ui px-1 text-meta font-medium ${MERGE_TONE_CHIP[warn.tone]}`}
               title={warn.detail ?? warn.label}
             >
               {warn.label}
@@ -140,14 +140,14 @@ export function OpenPrRow({
         <span className="hidden w-20 shrink-0 justify-end text-right sm:flex">
           {reason.myTurn ? (
             <span
-              className="truncate rounded px-1 text-[11px] font-medium"
+              className="truncate rounded-ui px-1 text-meta font-medium"
               style={{ color: reason.color, background: reason.color + '1a' }}
               title={userLabel(author, pr.authorId)}
             >
               {reason.label}
             </span>
           ) : (
-            <span className="truncate text-[11px] text-gray-400">
+            <span className="truncate text-meta text-gray-400">
               {relativeTime(pr.updatedAt)}
             </span>
           )}
@@ -224,7 +224,7 @@ export function OpenPrRows({
         <button
           type="button"
           onClick={onShowAll}
-          className="hit flex w-full items-center justify-center gap-1 border-t border-gray-100 px-3 py-1.5 text-[11px] font-medium text-sky-600 hover:bg-gray-50 dark:border-gray-800/70 dark:text-sky-400 dark:hover:bg-gray-800/40"
+          className="hit flex w-full items-center justify-center gap-1 border-t border-gray-100 px-3 py-1.5 text-meta font-medium text-sky-600 hover:bg-gray-50 dark:border-gray-800/70 dark:text-sky-400 dark:hover:bg-gray-800/40"
         >
           Show all {prs.length} open PRs
           <span className="text-gray-400">· sortable</span>
@@ -273,12 +273,12 @@ export function RepoOpenPrList({
   const openCount = prs.length - draftCount;
 
   return (
-    <div className="rounded-lg border border-gray-200 dark:border-gray-800">
+    <div className="rounded-ui border border-gray-200 dark:border-gray-800">
       <button
         type="button"
         onClick={toggleCollapsed}
         aria-expanded={!collapsed}
-        className="hit flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500 hover:bg-gray-50 dark:text-gray-400 dark:hover:bg-gray-800/40"
+        className="hit flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-meta font-semibold uppercase tracking-wide text-gray-500 hover:bg-gray-50 dark:text-gray-400 dark:hover:bg-gray-800/40"
       >
         <ChevronIcon
           dir={collapsed ? 'right' : 'down'}

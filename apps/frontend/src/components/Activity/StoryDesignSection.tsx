@@ -21,7 +21,7 @@ import { InfoButton } from '../InfoModal.js';
 
 const MUTED = 'text-gray-500 dark:text-gray-400';
 const BTN =
-  'rounded border border-gray-300 px-2 py-0.5 text-xs text-gray-700 hover:border-gray-400 disabled:cursor-not-allowed disabled:opacity-40 dark:border-gray-700 dark:text-gray-200 dark:hover:border-gray-500';
+  'rounded-ui border border-gray-300 px-2 py-0.5 text-meta text-gray-700 hover:border-gray-400 disabled:cursor-not-allowed disabled:opacity-40 dark:border-gray-700 dark:text-gray-200 dark:hover:border-gray-500';
 
 /** The story design's read and its redraw mutation — ONE per Story section, shared by the heading's
  *  button and the block. `enabled` = `storyDesignOffered(ai.enabled, prCount)`. */
@@ -66,11 +66,11 @@ export function StoryDesignSection({ design }: { design: StoryDesign }): JSX.Ele
   return (
     <section aria-label="Story design" className="space-y-2" data-testid="story-design">
       <div className="flex items-center gap-1.5">
-        <h4 className="text-xs font-semibold text-gray-700 dark:text-gray-200">Story design</h4>
+        <h4 className="text-meta font-semibold text-gray-700 dark:text-gray-200">Story design</h4>
         <InfoButton title="Story design">
           <DesignLegend story />
         </InfoButton>
-        <span className={`text-xs ${MUTED}`}>{data.memberCount} pull requests</span>
+        <span className={`text-meta ${MUTED}`}>{data.memberCount} pull requests</span>
       </div>
       <DiagramSlotView
         slot={data}
@@ -81,8 +81,8 @@ export function StoryDesignSection({ design }: { design: StoryDesign }): JSX.Ele
           if (m != null) openMember(m, path, true);
         }}
       />
-      {refusal != null && <p className={`text-xs ${MUTED}`}>{refusal}</p>}
-      {redraw.isError && <p className="text-xs text-red-600 dark:text-red-400">{redraw.error.message}</p>}
+      {refusal != null && <p className={`text-meta ${MUTED}`}>{refusal}</p>}
+      {redraw.isError && <p className="text-meta text-red-600 dark:text-red-400">{redraw.error.message}</p>}
     </section>
   );
 }

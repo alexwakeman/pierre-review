@@ -328,7 +328,7 @@ export function OpenPrsViewToggle(): JSX.Element {
       type="button"
       aria-pressed={view === v}
       onClick={() => setView(v)}
-      className={`h-6 rounded-[4px] px-2 text-meta focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent touch:h-9 ${
+      className={`h-6 rounded-ui px-2 text-meta focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent touch:h-9 ${
         view === v ? 'bg-ui-sel font-medium text-ui-ink' : 'text-ui-mute hover:text-ui-ink'
       }`}
     >
@@ -597,17 +597,17 @@ export function OpenPrsCards({
     return (
       <div className="space-y-2" aria-busy="true" aria-label={merged ? 'Loading merged pull requests' : 'Loading open pull requests'}>
         {[0, 1, 2, 3].map((i) => (
-          <div key={i} className="h-24 animate-pulse rounded-lg bg-gray-100 dark:bg-gray-900/40" />
+          <div key={i} className="h-24 animate-pulse rounded-ui bg-gray-100 dark:bg-gray-900/40" />
         ))}
       </div>
     );
   }
   if (isError) {
-    return <div className="text-sm text-red-500">{merged ? 'Couldn’t load the merged PRs.' : 'Couldn’t load the open PRs.'}</div>;
+    return <div className="text-body text-red-500">{merged ? 'Couldn’t load the merged PRs.' : 'Couldn’t load the open PRs.'}</div>;
   }
   if (rows.length === 0 && story == null) {
     return (
-      <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
+      <div className="rounded-ui border border-dashed border-gray-300 p-6 text-center text-body text-gray-500 dark:border-gray-700 dark:text-gray-400">
         {emptyLabel}
       </div>
     );
@@ -764,13 +764,13 @@ export function OpenPrsCards({
   return (
     <>
       {offerGroups && (
-        <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
+        <div className="mb-2 flex flex-wrap items-center gap-2 text-meta text-gray-600 dark:text-gray-300">
           <TicketIcon size={13} className="shrink-0 text-sky-700 dark:text-sky-300" />
           <span>Tickets loaded.</span>
           <button
             type="button"
             onClick={ticketGate.release}
-            className="hit rounded border border-gray-300 px-1.5 py-0.5 font-medium hover:border-gray-400 dark:border-gray-700 dark:hover:border-gray-500"
+            className="hit rounded-ui border border-gray-300 px-1.5 py-0.5 font-medium hover:border-gray-400 dark:border-gray-700 dark:hover:border-gray-500"
           >
             Group by ticket
           </button>
@@ -812,7 +812,7 @@ export function TicketKeyButton({
         e.stopPropagation();
         openStory({ ident: ticket.ident, key: ticket.key, title: ticket.title ?? null });
       }}
-      className={`${className} rounded text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500`}
+      className={`${className} rounded-ui text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500`}
     >
       {children}
     </button>
@@ -932,7 +932,7 @@ function ShowMoreRow({
     <div
       ref={ref}
       data-testid="open-prs-more"
-      className="mt-3 flex items-center justify-center gap-3 text-xs text-gray-600 dark:text-gray-300"
+      className="mt-3 flex items-center justify-center gap-3 text-meta text-gray-600 dark:text-gray-300"
     >
       <span className="tabular-nums">
         {shown} of {total} PRs
@@ -943,7 +943,7 @@ function ShowMoreRow({
           focusFrom.current = drawnCards;
           onMore();
         }}
-        className="hit rounded border border-gray-300 px-2 py-0.5 font-medium hover:border-gray-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-gray-700 dark:hover:border-gray-500"
+        className="hit rounded-ui border border-gray-300 px-2 py-0.5 font-medium hover:border-gray-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-gray-700 dark:hover:border-gray-500"
       >
         Show more
       </button>
@@ -987,26 +987,26 @@ function StackCoverage({
         </span>
       )}
       {cov != null && cov.stale && currency != null && (
-        <span className="text-[11px] text-amber-800 dark:text-amber-300" title={currency.title}>
+        <span className="text-meta text-amber-800 dark:text-amber-300" title={currency.title}>
           {currency.label}
         </span>
       )}
-      {state?.checkedAt != null && <ReviewedAgo at={state.checkedAt} className="text-[11px]" />}
+      {state?.checkedAt != null && <ReviewedAgo at={state.checkedAt} className="text-meta" />}
       {ready && !running && (
         <button
           type="button"
           disabled={starting}
           onClick={() => start.mutate({ prId, ident })}
           title="Check this ticket against all its PRs"
-          className="hit whitespace-nowrap rounded border border-ai-border bg-white/70 px-2 py-0.5 text-[11px] font-medium text-ai-signal hover:border-ai-signal/60 hover:bg-ai-surface-2 disabled:opacity-60 dark:bg-gray-900/50"
+          className="hit whitespace-nowrap rounded-ui border border-ai-border bg-white/70 px-2 py-0.5 text-meta font-medium text-ai-signal hover:border-ai-signal/60 hover:bg-ai-surface-2 disabled:opacity-60 dark:bg-gray-900/50"
         >
           {starting ? 'Starting…' : cov == null ? 'Check story' : 'Re-check'}
         </button>
       )}
       {refused != null && (
-        <span className="text-xs text-red-700 dark:text-red-400">{refusalSentence(refused)}</span>
+        <span className="text-meta text-red-700 dark:text-red-400">{refusalSentence(refused)}</span>
       )}
-      {start.isError && <span className="text-xs text-red-700 dark:text-red-400">Could not start the check.</span>}
+      {start.isError && <span className="text-meta text-red-700 dark:text-red-400">Could not start the check.</span>}
     </span>
   );
 }
@@ -1036,12 +1036,12 @@ function TicketPeopleAndStatus({
           {cat == null && t.status != null && <span className={NEUTRAL_CHIP}>{t.status}</span>}
         </>
       )}
-      {t.issueType != null && <span className="text-[11px] text-gray-500 dark:text-gray-400">{t.issueType}</span>}
+      {t.issueType != null && <span className="text-meta text-gray-500 dark:text-gray-400">{t.issueType}</span>}
       {t.assignee != null && (
         <span className="inline-flex items-center gap-1.5">
           <span
             aria-hidden
-            className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-gray-200 text-[11px] font-semibold text-gray-700 dark:bg-gray-700 dark:text-gray-100"
+            className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-gray-200 text-meta font-semibold text-gray-700 dark:bg-gray-700 dark:text-gray-100"
           >
             {initialsOf(t.assignee.name)}
           </span>
@@ -1090,19 +1090,19 @@ function StoryViewHeader({
   const cov = checked ? ticketCoverage(review.state) : null;
   return (
     <header className="space-y-2 px-4 pb-3 pt-3.5" data-testid="story-header">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs">
-        <span className="inline-flex items-center gap-1 font-mono text-[13px] font-semibold text-gray-700 dark:text-gray-200">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-meta">
+        <span className="inline-flex items-center gap-1 font-mono text-body font-semibold text-gray-700 dark:text-gray-200">
           <TicketIcon size={13} className="shrink-0" />
           {t.key}
         </span>
         <TrackerLinkOut url={t.url} provider={t.provider} />
       </div>
-      <h3 id={headingId} className="break-words text-lg font-semibold leading-snug text-gray-900 dark:text-gray-50">
+      <h3 id={headingId} className="break-words text-title font-semibold leading-snug text-gray-900 dark:text-gray-50">
         <span className="sr-only">{t.key}: </span>
         {t.title ?? t.key}
       </h3>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-600 dark:text-gray-300">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-meta text-gray-600 dark:text-gray-300">
           <TicketPeopleAndStatus t={t} cat={cat} single />
         </div>
         <ul aria-label="Facts" className="flex flex-wrap items-center gap-1.5">
@@ -1150,12 +1150,12 @@ function StoryCurrencyLine({
   return (
     <div className="flex flex-wrap items-center gap-x-2 gap-y-1 sm:ml-auto">
       {comments != null && (
-        <span className="text-xs text-gray-600 dark:text-gray-300" title={comments.title} data-testid="ticket-new-comments">
+        <span className="text-meta text-gray-600 dark:text-gray-300" title={comments.title} data-testid="ticket-new-comments">
           {comments.label}
         </span>
       )}
       {(stale || state?.checkedAt != null) && (
-        <span className="text-xs text-gray-600 dark:text-gray-300">
+        <span className="text-meta text-gray-600 dark:text-gray-300">
           {stale && (
             <span className="text-amber-800 dark:text-amber-300" title={currency.title}>
               {currency.label}
@@ -1174,7 +1174,7 @@ function StoryCurrencyLine({
               {' · '}
             </span>
           )}
-          {state?.checkedAt != null && <ReviewedAgo at={state.checkedAt} className="text-xs" />}
+          {state?.checkedAt != null && <ReviewedAgo at={state.checkedAt} className="text-meta" />}
         </span>
       )}
       {ready && !running && (
@@ -1183,13 +1183,13 @@ function StoryCurrencyLine({
           disabled={starting}
           onClick={() => start.mutate({ prId, ident })}
           title="Check this ticket against all its PRs"
-          className="hit whitespace-nowrap rounded border border-ai-border bg-white/70 px-2 py-0.5 text-xs font-medium text-ai-signal hover:border-ai-signal/60 hover:bg-ai-surface-2 disabled:opacity-60 dark:bg-gray-900/50"
+          className="hit whitespace-nowrap rounded-ui border border-ai-border bg-white/70 px-2 py-0.5 text-meta font-medium text-ai-signal hover:border-ai-signal/60 hover:bg-ai-surface-2 disabled:opacity-60 dark:bg-gray-900/50"
         >
           {starting ? 'Starting…' : cov == null ? 'Check story' : 'Re-check'}
         </button>
       )}
-      {refused != null && <span className="text-xs text-red-700 dark:text-red-400">{refusalSentence(refused)}</span>}
-      {start.isError && <span className="text-xs text-red-700 dark:text-red-400">Could not start the check.</span>}
+      {refused != null && <span className="text-meta text-red-700 dark:text-red-400">{refusalSentence(refused)}</span>}
+      {start.isError && <span className="text-meta text-red-700 dark:text-red-400">Could not start the check.</span>}
     </div>
   );
 }
@@ -1239,7 +1239,7 @@ function TicketStack({
       id={stackDomId(stack.id)}
       aria-labelledby={headingId}
       tabIndex={-1}
-      className={`scroll-mt-4 rounded-xl focus:outline-none border bg-gray-50 dark:bg-gray-900/70 ${
+      className={`scroll-mt-4 rounded-ui focus:outline-none border bg-gray-50 dark:bg-gray-900/70 ${
         t == null ? 'border-dashed border-gray-300 dark:border-gray-700' : 'border-gray-200 dark:border-gray-800'
       }`}
     >
@@ -1250,20 +1250,20 @@ function TicketStack({
         <div className="min-w-0 flex-1 basis-[16rem]">
           <h3 id={headingId} className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
             {t == null ? (
-              <span className="text-base font-semibold text-gray-700 dark:text-gray-200">No ticket</span>
+              <span className="text-title font-semibold text-gray-700 dark:text-gray-200">No ticket</span>
             ) : !single && t.ident != null ? (
               // On the board the key AND title are ONE button: it opens the ticket's story view.
               <TicketKeyButton
                 ticket={{ ...t, ident: t.ident }}
                 className="group inline-flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5"
               >
-                <span className="inline-flex shrink-0 items-center gap-1 font-mono text-[13px] font-semibold text-sky-700 group-hover:underline dark:text-sky-300">
+                <span className="inline-flex shrink-0 items-center gap-1 font-mono text-body font-semibold text-sky-700 group-hover:underline dark:text-sky-300">
                   <TicketIcon size={13} className="shrink-0" />
                   {t.key}
                   <span className="sr-only">:</span>
                 </span>
                 {t.title != null && (
-                  <span className="min-w-0 text-base font-semibold leading-snug text-gray-900 group-hover:underline dark:text-gray-50">
+                  <span className="min-w-0 text-title font-semibold leading-snug text-gray-900 group-hover:underline dark:text-gray-50">
                     {t.title}
                   </span>
                 )}
@@ -1278,28 +1278,28 @@ function TicketStack({
                     target="_blank"
                     rel="noreferrer noopener"
                     title={`Open ${cardTicketLabel(t)}`}
-                    className="hit inline-flex shrink-0 items-center gap-1 font-mono text-[13px] font-semibold text-sky-700 hover:underline dark:text-sky-300"
+                    className="hit inline-flex shrink-0 items-center gap-1 font-mono text-body font-semibold text-sky-700 hover:underline dark:text-sky-300"
                   >
                     <TicketIcon size={13} className="shrink-0" />
                     {t.key}
                     <span className="sr-only">:</span>
                   </a>
                 ) : (
-                  <span className="inline-flex shrink-0 items-center gap-1 font-mono text-[13px] font-semibold text-gray-700 dark:text-gray-200">
+                  <span className="inline-flex shrink-0 items-center gap-1 font-mono text-body font-semibold text-gray-700 dark:text-gray-200">
                     <TicketIcon size={13} className="shrink-0" />
                     {t.key}
                     <span className="sr-only">:</span>
                   </span>
                 )}
                 {t.title != null && (
-                  <span className="min-w-0 text-base font-semibold leading-snug text-gray-900 dark:text-gray-50">
+                  <span className="min-w-0 text-title font-semibold leading-snug text-gray-900 dark:text-gray-50">
                     {t.title}
                   </span>
                 )}
               </>
             )}
           </h3>
-          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-600 dark:text-gray-300">
+          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-meta text-gray-600 dark:text-gray-300">
             {t != null && <TicketPeopleAndStatus t={t} cat={cat} single={false} />}
           </div>
         </div>
@@ -1311,7 +1311,7 @@ function TicketStack({
             <StackCoverage ident={review.ident} state={review.state} prId={review.prId} />
           )}
           {rollup.length > 0 && (
-            <span className="inline-flex flex-wrap items-center gap-x-1.5 text-xs">
+            <span className="inline-flex flex-wrap items-center gap-x-1.5 text-meta">
               {rollup.map((p, i) => (
                 <span key={p.text} className="inline-flex items-center gap-1.5">
                   {i > 0 && <Sep />}
@@ -1323,7 +1323,7 @@ function TicketStack({
             </span>
           )}
           {(!single || stack.rows.length > 0) && (
-            <span className="whitespace-nowrap rounded-full bg-white px-2 py-px text-[11px] font-medium text-gray-600 ring-1 ring-gray-200 dark:bg-gray-900 dark:text-gray-300 dark:ring-gray-700">
+            <span className="whitespace-nowrap rounded-full bg-white px-2 py-px text-meta font-medium text-gray-600 ring-1 ring-gray-200 dark:bg-gray-900 dark:text-gray-300 dark:ring-gray-700">
               {prCountLabel(stack.rows.length)}
             </span>
           )}
@@ -1378,7 +1378,7 @@ function MergedPanel({
         aria-expanded={open}
         aria-controls={listId}
         onClick={() => toggle(stackId)}
-        className="hit inline-flex items-center gap-1.5 rounded px-1 py-0.5 text-xs font-medium text-gray-600 hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-gray-300 dark:hover:text-gray-50"
+        className="hit inline-flex items-center gap-1.5 rounded-ui px-1 py-0.5 text-meta font-medium text-gray-600 hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-gray-300 dark:hover:text-gray-50"
       >
         <ChevronIcon dir={open ? 'down' : 'right'} size={12} />
         Merged ({prs.length})
@@ -1389,15 +1389,15 @@ function MergedPanel({
             <button
               type="button"
               onClick={() => onOpen(m)}
-              className="hit block w-full rounded-md border border-gray-200 bg-white px-3 py-1.5 text-left transition-colors hover:border-gray-300 hover:bg-gray-50/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-gray-800 dark:bg-gray-950 dark:hover:border-gray-700 dark:hover:bg-gray-900"
+              className="hit block w-full rounded-ui border border-gray-200 bg-white px-3 py-1.5 text-left transition-colors hover:border-gray-300 hover:bg-gray-50/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-gray-800 dark:bg-gray-950 dark:hover:border-gray-700 dark:hover:bg-gray-900"
             >
               <span className="flex min-w-0 items-center gap-1.5">
                 <MergeIcon size={13} className="shrink-0 text-gray-500 dark:text-gray-400" aria-hidden />
-                <span className="min-w-0 truncate text-[13px] font-medium text-gray-800 dark:text-gray-100" title={m.title}>
+                <span className="min-w-0 truncate text-body font-medium text-gray-800 dark:text-gray-100" title={m.title}>
                   {m.title}
                 </span>
               </span>
-              <span className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 pl-[19px] text-[11px] text-gray-500 dark:text-gray-400">
+              <span className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 pl-[19px] text-meta text-gray-500 dark:text-gray-400">
                 <span className="max-w-[18rem] truncate font-mono" title={`${m.repoFullName}#${m.number}`}>
                   {m.repoFullName}#{m.number}
                 </span>
@@ -1442,7 +1442,7 @@ function ClaudeWorkChip({
   if (work.length === 0) return null;
   return (
     <span
-      className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded bg-ai-signal/10 px-1.5 py-px text-[11px] font-medium text-ai-signal"
+      className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-ui bg-ai-signal/10 px-1.5 py-px text-meta font-medium text-ai-signal"
       title={`${aiName} is working on this PR`}
     >
       <span aria-hidden className="h-1.5 w-1.5 animate-pulse rounded-full bg-ai-signal-fill" />
@@ -1599,7 +1599,7 @@ function OpenPrCard({
         }
         after={
           pr.isDraft ? (
-            <span className="shrink-0 rounded border border-gray-300 px-1.5 text-[11px] font-medium text-gray-600 dark:border-gray-600 dark:text-gray-300">
+            <span className="shrink-0 rounded-ui border border-gray-300 px-1.5 text-meta font-medium text-gray-600 dark:border-gray-600 dark:text-gray-300">
               Draft
             </span>
           ) : null
@@ -1625,7 +1625,7 @@ function OpenPrCard({
 
       {/* 3 — the ticket row: absent when the PR names no ticket (never an empty row). */}
       {tickets.length > 0 && (
-        <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+        <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-meta">
           <TicketIcon size={13} className="shrink-0 text-sky-700 dark:text-sky-300" />
           {tickets.map((t) => {
             const href = safeExternalUrl(t.url);
@@ -1675,7 +1675,7 @@ function OpenPrCard({
 
       {/* 3b — inside a stack: the PR's other tickets, as jumps to their own stacks. */}
       {alsoIn.length > 0 && (
-        <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-600 dark:text-gray-300">
+        <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-meta text-gray-600 dark:text-gray-300">
           <TicketIcon size={13} className="shrink-0 text-sky-700 dark:text-sky-300" />
           <span>Also in</span>
           {alsoIn.map((t) => (
@@ -1687,7 +1687,7 @@ function OpenPrCard({
                 onJumpToStack(stackIdFor(t.key));
               }}
               title={`Go to ${cardTicketLabel(t)}`}
-              className="hit rounded font-mono font-medium text-sky-700 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-sky-300"
+              className="hit rounded-ui font-mono font-medium text-sky-700 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-sky-300"
             >
               {t.key}
             </button>

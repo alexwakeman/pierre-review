@@ -21,10 +21,10 @@ import { CheckIcon, CloseIcon, PlusIcon, WarningIcon } from './Icons.js';
 const MUTED = 'text-gray-500 dark:text-gray-400';
 const ERROR_TEXT = 'text-red-600 dark:text-red-400';
 const BTN =
-  'whitespace-nowrap rounded border border-gray-300 px-2 py-0.5 text-xs hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500';
+  'whitespace-nowrap rounded-ui border border-gray-300 px-2 py-0.5 text-meta hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500';
 const BTN_PRIMARY =
-  'whitespace-nowrap rounded border border-blue-400 px-2 py-0.5 text-xs text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:border-blue-600 dark:text-blue-400 dark:hover:bg-blue-900/30';
-const LINK_BTN = 'text-xs text-blue-700 hover:underline disabled:opacity-50 dark:text-blue-300';
+  'whitespace-nowrap rounded-ui border border-blue-400 px-2 py-0.5 text-meta text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:border-blue-600 dark:text-blue-400 dark:hover:bg-blue-900/30';
+const LINK_BTN = 'text-meta text-blue-700 hover:underline disabled:opacity-50 dark:text-blue-300';
 const SPINNER =
   'inline-block h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-gray-300 border-t-blue-500 dark:border-gray-600 dark:border-t-blue-400';
 
@@ -198,10 +198,10 @@ export function TicketPasteBox({
 
   return (
     <div className="mt-2 space-y-2">
-      <label htmlFor={inputId} className="block text-xs font-medium text-gray-700 dark:text-gray-200">
+      <label htmlFor={inputId} className="block text-meta font-medium text-gray-700 dark:text-gray-200">
         Add tickets
       </label>
-      <div className="flex flex-wrap items-center gap-1.5 rounded border border-gray-300 px-2 py-1.5 focus-within:border-blue-500 dark:border-gray-700">
+      <div className="flex flex-wrap items-center gap-1.5 rounded-ui border border-gray-300 px-2 py-1.5 focus-within:border-blue-500 dark:border-gray-700">
         {chips.length > 0 && (
           <ul className="contents" aria-label="Tickets to add">
             {chips.map((c, i) => (
@@ -220,10 +220,10 @@ export function TicketPasteBox({
           onBlur={commit}
           disabled={check.isPending}
           placeholder={chips.length === 0 ? 'Paste ticket links or keys, like PROJ-123' : 'Add another'}
-          className="min-w-[12rem] flex-1 bg-transparent py-0.5 text-xs text-gray-900 outline-none placeholder:text-gray-500 dark:text-gray-100 dark:placeholder:text-gray-400"
+          className="min-w-[12rem] flex-1 bg-transparent py-0.5 text-meta text-gray-900 outline-none placeholder:text-gray-500 dark:text-gray-100 dark:placeholder:text-gray-400"
         />
       </div>
-      {note != null && <p className={`text-xs ${MUTED}`}>{note}</p>}
+      {note != null && <p className={`text-meta ${MUTED}`}>{note}</p>}
       <div className="flex flex-wrap items-center gap-2">
         {n > 0 && (
           <AiRunGate kind="ticket_review">
@@ -238,7 +238,7 @@ export function TicketPasteBox({
           </AiRunGate>
         )}
         {reading && (
-          <span role="status" className={`inline-flex items-center gap-1.5 text-xs ${MUTED}`}>
+          <span role="status" className={`inline-flex items-center gap-1.5 text-meta ${MUTED}`}>
             <span className={SPINNER} aria-hidden="true" />
             Reading…
           </span>
@@ -249,11 +249,11 @@ export function TicketPasteBox({
           </button>
         )}
         {check.isError && (
-          <span className={`text-xs ${ERROR_TEXT}`}>{check.error.message || 'Could not start the check.'}</span>
+          <span className={`text-meta ${ERROR_TEXT}`}>{check.error.message || 'Could not start the check.'}</span>
         )}
       </div>
       {refusals.map((r) => (
-        <p key={r.ident} className={`text-xs ${ERROR_TEXT}`}>
+        <p key={r.ident} className={`text-meta ${ERROR_TEXT}`}>
           {refusalSentence(r.refused!)}
         </p>
       ))}
@@ -268,7 +268,7 @@ function ChipView({ chip, onRemove }: { chip: Chip; onRemove: () => void }): JSX
   const href = ok ? safeExternalUrl(r.url) : undefined;
   return (
     <li
-      className={`inline-flex max-w-full items-start gap-1 rounded-full border px-2 py-0.5 text-xs ${
+      className={`inline-flex max-w-full items-start gap-1 rounded-full border px-2 py-0.5 text-meta ${
         r == null
           ? 'border-gray-300 text-gray-700 dark:border-gray-700 dark:text-gray-200'
           : ok

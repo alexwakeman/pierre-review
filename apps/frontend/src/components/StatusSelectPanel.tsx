@@ -118,7 +118,7 @@ export function StatusSelectPanel({
             {ALL_PR_STATUSES.map((s) => (
               <label
                 key={s}
-                className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 text-meta hover:bg-ui-hover"
+                className="flex cursor-pointer items-center gap-2 rounded-ui px-1 py-1 text-meta hover:bg-ui-hover"
               >
                 <CheckboxBox
                   checked={statuses.includes(s)}
@@ -134,7 +134,7 @@ export function StatusSelectPanel({
 
             <label
               title={STALE_TOOLTIP}
-              className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 text-meta hover:bg-ui-hover"
+              className="flex cursor-pointer items-center gap-2 rounded-ui px-1 py-1 text-meta hover:bg-ui-hover"
             >
               <CheckboxBox
                 checked={!excludeStale}

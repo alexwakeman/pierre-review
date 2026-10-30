@@ -53,7 +53,7 @@ export function CheckThreadsButton({ prId }: { prId: number }): JSX.Element | nu
           type="button"
           onClick={() => cancel.mutate()}
           disabled={cancel.isPending}
-          className="hit rounded px-1 text-xs text-gray-600 underline decoration-dotted underline-offset-2 hover:text-gray-900 disabled:opacity-50 dark:text-gray-300 dark:hover:text-white"
+          className="hit rounded-ui px-1 text-meta text-gray-600 underline decoration-dotted underline-offset-2 hover:text-gray-900 disabled:opacity-50 dark:text-gray-300 dark:hover:text-white"
         >
           Cancel
         </button>
@@ -81,7 +81,7 @@ export function CheckThreadsButton({ prId }: { prId: number }): JSX.Element | nu
           type="button"
           onClick={() => start.mutate()}
           disabled={start.isPending}
-          className="hit inline-flex items-center gap-1 rounded border border-ai-border bg-ai-surface-2 px-2 py-0.5 text-xs font-medium text-ai-ink hover:bg-ai-surface disabled:opacity-50"
+          className="hit inline-flex items-center gap-1 rounded-ui border border-ai-border bg-ai-surface-2 px-2 py-0.5 text-meta font-medium text-ai-ink hover:bg-ai-surface disabled:opacity-50"
         >
           <PendingClaudeReviewIcon size={12} className="text-ai-signal" />
           {start.isPending ? 'Starting…' : 'Check threads'}
@@ -95,9 +95,9 @@ export function CheckThreadsButton({ prId }: { prId: number }): JSX.Element | nu
         <p>Each thread then shows whether the comment holds up and where the code stands.</p>
         <p>It runs on its own when auto review is on for this workspace.</p>
       </InfoButton>
-      {refusal != null && <span className="text-xs text-gray-600 dark:text-gray-300">{refusal}</span>}
-      {startError != null && <span className="text-xs text-red-600 dark:text-red-400">{startError}</span>}
-      {lastFailed != null && <span className="text-xs text-gray-600 dark:text-gray-300">{lastFailed}</span>}
+      {refusal != null && <span className="text-meta text-gray-600 dark:text-gray-300">{refusal}</span>}
+      {startError != null && <span className="text-meta text-red-600 dark:text-red-400">{startError}</span>}
+      {lastFailed != null && <span className="text-meta text-gray-600 dark:text-gray-300">{lastFailed}</span>}
     </span>
   );
 }

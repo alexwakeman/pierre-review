@@ -129,7 +129,7 @@ export function CheckRow({
 
   const dot = (
     <span
-      className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white"
+      className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-meta font-bold text-white"
       style={{ backgroundColor: m.color }}
       title={m.label}
     >
@@ -163,33 +163,33 @@ export function CheckRow({
     // nested anchors are invalid HTML. Previously a check with no url rendered a plain <div>
     // and could not be opened at all; checkHref's fallback removes that dead end.
     return (
-      <li className="text-xs">
+      <li className="text-meta">
         <a
           href={link.href}
           target="_blank"
           rel="noreferrer noopener"
           title={linkTitle}
-          className="hit flex items-center gap-2 rounded px-1 py-0.5 hover:bg-gray-100 dark:hover:bg-gray-800"
+          className="hit flex items-center gap-2 rounded-ui px-1 py-0.5 hover:bg-gray-100 dark:hover:bg-gray-800"
         >
           {dot}
           <span className="min-w-0 truncate">{check.name}</span>
           {/* Limn's own team-claim line (a status Limn posted): listed, never counted as CI. */}
           {check.limnOwned && (
             <span
-              className="shrink-0 rounded bg-gray-100 px-1 text-[11px] font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-300"
+              className="shrink-0 rounded-ui bg-gray-100 px-1 text-meta font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-300"
               title="Posted by Limn to mark an auto review. Not CI."
             >
               Limn
             </span>
           )}
-          <span className="ml-auto shrink-0 text-xs text-gray-400">{m.label}</span>
+          <span className="ml-auto shrink-0 text-meta text-gray-400">{m.label}</span>
         </a>
       </li>
     );
   }
 
   return (
-    <li className="text-xs">
+    <li className="text-meta">
       {/* An Actions check carries BOTH affordances, so the row is SPLIT rather than nested: the
           name is an <a> to the workflow run, the log toggle is a SIBLING <button>. This row used
           to be one big <button>, and an <a> inside a <button> is both invalid HTML and one click
@@ -199,7 +199,7 @@ export function CheckRow({
           body is a plain scroller); the stopPropagation on the anchor is there so that stays true
           if one is ever added. flex-1 + justify-end gives the button every pixel right of the
           name, so the row still toggles almost everywhere it used to. */}
-      <div className="flex items-center gap-2 rounded px-1 py-0.5 hover:bg-gray-100 dark:hover:bg-gray-800">
+      <div className="flex items-center gap-2 rounded-ui px-1 py-0.5 hover:bg-gray-100 dark:hover:bg-gray-800">
         {dot}
         <a
           href={link.href}
@@ -218,8 +218,8 @@ export function CheckRow({
           title={expanded ? 'Hide the job log' : 'Show the job log'}
           className="hit flex flex-1 items-center justify-end gap-1.5 text-gray-400"
         >
-          <span className="text-xs">{m.label}</span>
-          <span className="inline-flex items-center gap-0.5 text-[11px] font-medium text-blue-500">
+          <span className="text-meta">{m.label}</span>
+          <span className="inline-flex items-center gap-0.5 text-meta font-medium text-blue-500">
             <ChevronIcon dir={expanded ? 'down' : 'right'} size={10} />
             {expanded ? 'hide logs' : 'logs'}
           </span>
@@ -231,7 +231,7 @@ export function CheckRow({
             <div className="px-1 py-2 text-gray-400">Loading logs…</div>
           ) : view?.available ? (
             <>
-              <div className="mb-1 flex items-center justify-between gap-2 px-1 text-[11px] text-gray-400">
+              <div className="mb-1 flex items-center justify-between gap-2 px-1 text-meta text-gray-400">
                 <span>
                   {view.partial && view.loadedBytes != null
                     ? `${view.lines} lines · ${formatLogBytes(view.loadedBytes)}${
@@ -248,7 +248,7 @@ export function CheckRow({
                   {(logs.hasNextPage || logs.isFetchingNextPage) && (
                     <button
                       type="button"
-                      className="hit rounded border border-gray-300 px-1.5 py-0.5 text-[11px] hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
+                      className="hit rounded-ui border border-gray-300 px-1.5 py-0.5 text-meta hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
                       disabled={!canLoadEarlier}
                       onClick={loadEarlier}
                       title="Load the previous chunk of this log (or just scroll up)"
@@ -269,7 +269,7 @@ export function CheckRow({
               <pre
                 ref={preRef}
                 onScroll={onScroll}
-                className="max-h-[40rem] overflow-auto whitespace-pre rounded bg-gray-900 p-2 font-mono text-[11px] leading-[1.45] text-gray-100"
+                className="max-h-[40rem] overflow-auto whitespace-pre rounded-ui bg-gray-900 p-2 font-mono text-meta leading-[1.45] text-gray-100"
               >
                 {view.text || '(empty log)'}
               </pre>
@@ -348,7 +348,7 @@ export function CiRerunControl({
     <div className="mt-2 flex flex-wrap items-center gap-2">
       <button
         type="button"
-        className="hit whitespace-nowrap rounded border border-blue-400 px-2.5 py-1 text-xs text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:border-blue-600 dark:text-blue-400 dark:hover:bg-blue-900/30"
+        className="hit whitespace-nowrap rounded-ui border border-blue-400 px-2.5 py-1 text-meta text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:border-blue-600 dark:text-blue-400 dark:hover:bg-blue-900/30"
         disabled={rerun.isPending || failedRunIds.length === 0}
         onClick={() => fire('failed', failedRunIds)}
         title="Re-run only the failed jobs of the failing workflow run(s)"
@@ -357,7 +357,7 @@ export function CiRerunControl({
       </button>
       <button
         type="button"
-        className="hit whitespace-nowrap rounded border border-gray-300 px-2.5 py-1 text-xs hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
+        className="hit whitespace-nowrap rounded-ui border border-gray-300 px-2.5 py-1 text-meta hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
         disabled={rerun.isPending}
         onClick={() => fire('all', allRunIds)}
         title="Re-run the entire workflow run(s) from scratch"
@@ -365,7 +365,7 @@ export function CiRerunControl({
         Re-run all jobs
       </button>
       {outcome && !rerun.isPending && (
-        <span className="text-[11px] text-gray-500 dark:text-gray-400">
+        <span className="text-meta text-gray-500 dark:text-gray-400">
           Re-run requested — CI updates on the next sync.
           {outcome.failed > 0 &&
             ` (${outcome.failed} run${
@@ -374,7 +374,7 @@ export function CiRerunControl({
         </span>
       )}
       {rerun.isError && (
-        <span className="text-[11px] text-red-500">
+        <span className="text-meta text-red-500">
           {rerun.error instanceof Error ? rerun.error.message : 'Re-run failed'}
         </span>
       )}

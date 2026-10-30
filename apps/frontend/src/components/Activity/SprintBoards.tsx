@@ -100,7 +100,7 @@ export function SprintBoardFilters({ data }: { data: SprintGraphResponse }): JSX
       {chip('hasPrs', 'Has PRs')}
       {chip('needsCode', 'Needs code')}
       <InfoButton title="Filters">
-        <div className="space-y-2 text-sm">
+        <div className="space-y-2 text-body">
           <p>
             <strong>Has PRs</strong>: tickets with at least one pull request, open, merged or closed.
           </p>
@@ -114,7 +114,7 @@ export function SprintBoardFilters({ data }: { data: SprintGraphResponse }): JSX
         </div>
       </InfoButton>
       {cardFilterOn(filter) && (
-        <span data-testid="sprint-filter-count" className={`text-xs ${MUTED}`}>
+        <span data-testid="sprint-filter-count" className={`text-meta ${MUTED}`}>
           {shown} of {plural(sprint.length, 'ticket')}
         </span>
       )}
@@ -124,7 +124,7 @@ export function SprintBoardFilters({ data }: { data: SprintGraphResponse }): JSX
 
 /** One line when the filters leave a board empty. */
 function NoMatch(): JSX.Element {
-  return <p className={`text-xs ${MUTED}`}>No tickets match these filters.</p>;
+  return <p className={`text-meta ${MUTED}`}>No tickets match these filters.</p>;
 }
 
 type OpenTicket = (node: SprintGraphNode) => void;
@@ -315,7 +315,7 @@ function SegmentBar({
           <ul className="mt-1.5 space-y-0.5">
             {segments.map((s) => (
               <li key={s.column} className="flex items-center gap-1.5">
-                <span aria-hidden className={`inline-block h-2 w-3 shrink-0 rounded-sm ${SEGMENT_FILL[s.meaning ?? 'unknown']}`} />
+                <span aria-hidden className={`inline-block h-2 w-3 shrink-0 rounded-ui ${SEGMENT_FILL[s.meaning ?? 'unknown']}`} />
                 <span className="min-w-0 flex-1">{s.name}</span>
                 <span className="tabular-nums">{s.count}</span>
               </li>
@@ -378,14 +378,14 @@ export function SprintPathsView({ data, actions }: { data: SprintGraphResponse; 
       {data.pace != null && <PaceStrip pace={data.pace} productReview={productReview} />}
       {heading && (
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-          <h4 className="text-sm font-medium text-ui-ink">{calm ? 'No critical paths in this sprint.' : 'Critical paths'}</h4>
+          <h4 className="text-body font-medium text-ui-ink">{calm ? 'No critical paths in this sprint.' : 'Critical paths'}</h4>
           <InfoButton title="Critical paths">
             <PathsInfo aiEnabled={data.aiEnabled} />
           </InfoButton>
           {view.kind === 'paths' && data.paths != null && <AiRunLabel provider={data.paths.provider} model={data.paths.model} />}
-          {view.kind === 'paths' && view.note?.kind === 'updating' && <span className={`text-xs ${MUTED}`}>Updating</span>}
+          {view.kind === 'paths' && view.note?.kind === 'updating' && <span className={`text-meta ${MUTED}`}>Updating</span>}
           {view.kind === 'message' && (
-            <span className={`inline-flex items-center gap-2 text-xs ${MUTED}`}>
+            <span className={`inline-flex items-center gap-2 text-meta ${MUTED}`}>
               {view.writing && (
                 <SprintProgressBar
                   progress={{ kind: 'busy', label: 'Working out the critical paths' }}
@@ -396,11 +396,11 @@ export function SprintPathsView({ data, actions }: { data: SprintGraphResponse; 
               {view.text}
             </span>
           )}
-          {view.kind === 'off' && <span className={`text-xs ${MUTED}`}>AI is off here, so there are no critical paths.</span>}
+          {view.kind === 'off' && <span className={`text-meta ${MUTED}`}>AI is off here, so there are no critical paths.</span>}
           {view.kind === 'none' && <AiRunGate kind="sprint_paths">{null}</AiRunGate>}
         </div>
       )}
-      {view.kind === 'paths' && view.note?.kind === 'failed' && <p className={`text-xs ${MUTED}`}>{view.note.text}</p>}
+      {view.kind === 'paths' && view.note?.kind === 'failed' && <p className={`text-meta ${MUTED}`}>{view.note.text}</p>}
       {board.cards.length > 0 && (
         <SprintLaneBoard board={board} label="Critical paths" laneWidth="minmax(9rem, 13rem)" show="person" people={data.people} actions={actions} codeMarker={filter.needsCode} />
       )}
@@ -444,7 +444,7 @@ const GAP_MINUTES = Math.round(SPRINT_VISIT_GAP_MS / 60_000);
 function PathsInfo({ aiEnabled }: { aiEnabled: boolean }): JSX.Element {
   const name = useAiProviderName();
   return (
-    <div className="space-y-2 text-sm">
+    <div className="space-y-2 text-body">
       {aiEnabled && (
         <p>
           {name} picks up to five <strong>critical paths</strong> &mdash; the chains of tickets that most put the sprint at risk, riskiest
@@ -497,8 +497,8 @@ function Callouts({ data, onOpen }: { data: SprintGraphResponse; onOpen: OpenTic
         return (
           <li key={it.key} className="space-y-0.5 rounded-ui bg-ui-surface px-3 py-2.5">
             <p className={`text-meta font-medium ${MUTED}`}>{it.label}</p>
-            <p className="text-xs font-semibold text-ui-ink">{it.title}</p>
-            {it.sentence != null && <p className={`text-xs ${MUTED}`}>{it.sentence}</p>}
+            <p className="text-meta font-semibold text-ui-ink">{it.title}</p>
+            {it.sentence != null && <p className={`text-meta ${MUTED}`}>{it.sentence}</p>}
             {tickets.length > 0 && (
               <p className="flex flex-wrap gap-1 pt-0.5">
                 {tickets.map((n) => (
@@ -528,7 +528,7 @@ function CountTableView({ data }: { data: SprintGraphResponse }): JSX.Element | 
   return (
     <div className="overflow-x-auto">
       <table data-testid="sprint-count-table" className="min-w-full text-meta text-ui-ink">
-        <caption className="pb-1 text-left text-xs font-medium text-ui-ink">Every ticket, by theme and column</caption>
+        <caption className="pb-1 text-left text-meta font-medium text-ui-ink">Every ticket, by theme and column</caption>
         <thead className={MUTED}>
           <tr className="border-b border-ui-line">
             <th scope="col" className="px-2 py-1 text-left font-medium">
@@ -591,7 +591,7 @@ export function SprintThemesView({ data, actions }: { data: SprintGraphResponse;
   return (
     <section aria-label="By theme" className="space-y-2" data-testid="sprint-themes">
       {!themesOn && (
-        <p className={`text-xs ${MUTED}`}>
+        <p className={`text-meta ${MUTED}`}>
           {data.aiEnabled ? `Themes appear after ${aiName} reads the sprint.` : 'AI is off here, so the sprint has no themes.'}
         </p>
       )}

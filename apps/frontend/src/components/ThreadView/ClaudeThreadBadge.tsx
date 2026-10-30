@@ -59,7 +59,7 @@ export function ClaudeThreadPills({
     <span className="inline-flex shrink-0 items-center gap-1" data-noactivate>
       {marker.finding != null && (
         <span
-          className={`inline-flex items-center gap-1 rounded-full border border-ai-border bg-ai-surface-2 px-2 py-0.5 text-[11px] font-medium ${FINDING_TONE[marker.finding]}`}
+          className={`inline-flex items-center gap-1 rounded-full border border-ai-border bg-ai-surface-2 px-2 py-0.5 text-meta font-medium ${FINDING_TONE[marker.finding]}`}
           data-testid="claude-thread-finding"
         >
           <PendingClaudeReviewIcon size={12} className="shrink-0 text-ai-signal" />
@@ -71,7 +71,7 @@ export function ClaudeThreadPills({
       )}
       {marker.validity != null && (
         <span
-          className={`inline-flex items-center gap-1 rounded-full border border-ai-border bg-ai-surface-2 px-2 py-0.5 text-[11px] font-medium ${VALIDITY_TONE[marker.validity]}`}
+          className={`inline-flex items-center gap-1 rounded-full border border-ai-border bg-ai-surface-2 px-2 py-0.5 text-meta font-medium ${VALIDITY_TONE[marker.validity]}`}
           data-testid="claude-thread-validity"
         >
           <PendingClaudeReviewIcon size={12} className="shrink-0 text-ai-signal" />
@@ -83,7 +83,7 @@ export function ClaudeThreadPills({
       )}
       {marker.state != null && (
         <span
-          className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium ${STATE_TONE[marker.state]}`}
+          className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-meta font-medium ${STATE_TONE[marker.state]}`}
           data-testid="claude-thread-state"
         >
           {marker.validity == null && marker.finding == null && (
@@ -176,7 +176,7 @@ export function ClaudeThreadReason({
   const more = explanation != null && explanation.trim() !== '' && explanation.trim() !== reason;
   return (
     <div
-      className="mb-2 text-xs text-gray-700 dark:text-gray-300"
+      className="mb-2 text-meta text-gray-700 dark:text-gray-300"
       data-testid="claude-thread-reason"
     >
       <div className="flex items-start gap-1">
@@ -186,7 +186,7 @@ export function ClaudeThreadReason({
             type="button"
             onClick={() => setOpen((v) => !v)}
             aria-expanded={open}
-            className="hit inline-flex shrink-0 items-center gap-0.5 rounded px-1 text-[11px] text-sky-700 hover:bg-sky-50 dark:text-sky-300 dark:hover:bg-sky-950/40"
+            className="hit inline-flex shrink-0 items-center gap-0.5 rounded-ui px-1 text-meta text-sky-700 hover:bg-sky-50 dark:text-sky-300 dark:hover:bg-sky-950/40"
           >
             {open ? 'Less' : 'More'}
             <ChevronIcon dir={open ? 'up' : 'down'} size={10} />

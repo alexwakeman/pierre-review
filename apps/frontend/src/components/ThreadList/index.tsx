@@ -326,7 +326,7 @@ export function ThreadList({
           style={vendor ? { boxShadow: `inset 3px 0 0 ${vendor.color}` } : undefined}
         >
           <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+            <span className="text-meta font-semibold uppercase tracking-wide text-gray-400">
               State
             </span>
             {DERIVED_STATES.map((st) => {
@@ -339,7 +339,7 @@ export function ThreadList({
                   type="button"
                   onClick={() => toggleThreadStateFilter(st)}
                   aria-pressed={on}
-                  className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors ${
+                  className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-meta font-medium transition-colors ${
                     on
                       ? 'border-sky-400 bg-sky-50 text-sky-700 dark:border-sky-500/60 dark:bg-sky-950/30 dark:text-sky-300'
                       : 'border-gray-300 text-gray-500 hover:border-gray-400 dark:border-gray-700 dark:text-gray-400'
@@ -361,7 +361,7 @@ export function ThreadList({
                 type="button"
                 onClick={() => toggleThreadStateFilter('claude')}
                 aria-pressed={activeStates.has('claude')}
-                className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors ${
+                className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-meta font-medium transition-colors ${
                   activeStates.has('claude')
                     ? 'border-ai-border bg-ai-surface-2 text-ai-ink'
                     : 'border-gray-300 text-gray-500 hover:border-gray-400 dark:border-gray-700 dark:text-gray-400'
@@ -377,7 +377,7 @@ export function ThreadList({
               <button
                 type="button"
                 onClick={() => setThreadStateFilter(new Set())}
-                className="hit rounded px-1.5 py-0.5 text-[11px] text-gray-500 dark:text-gray-400 underline-offset-2 hover:underline"
+                className="hit rounded-ui px-1.5 py-0.5 text-meta text-gray-500 dark:text-gray-400 underline-offset-2 hover:underline"
               >
                 Clear
               </button>
@@ -389,7 +389,7 @@ export function ThreadList({
               advertise a filter that can only ever return nothing. */}
           {mlIndex != null && mlIndex.size > 0 && (
             <div className="flex flex-wrap items-center gap-1.5">
-              <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+              <span className="text-meta font-semibold uppercase tracking-wide text-gray-400">
                 Severity
               </span>
               {ML_SEVERITIES.map((sev) => {
@@ -403,7 +403,7 @@ export function ThreadList({
                     onClick={() => toggleThreadSeverityFilter(sev)}
                     aria-pressed={on}
                     disabled={count === 0 && !on}
-                    className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors disabled:opacity-40 ${
+                    className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-meta font-medium transition-colors disabled:opacity-40 ${
                       on
                         ? 'border-sky-400 bg-sky-50 text-sky-700 dark:border-sky-500/60 dark:bg-sky-950/30 dark:text-sky-300'
                         : 'border-gray-300 text-gray-500 hover:border-gray-400 dark:border-gray-700 dark:text-gray-400'
@@ -424,7 +424,7 @@ export function ThreadList({
                 <button
                   type="button"
                   onClick={() => setThreadSeverityFilter(new Set())}
-                  className="hit rounded px-1.5 py-0.5 text-[11px] text-gray-500 dark:text-gray-400 underline-offset-2 hover:underline"
+                  className="hit rounded-ui px-1.5 py-0.5 text-meta text-gray-500 dark:text-gray-400 underline-offset-2 hover:underline"
                 >
                   Clear
                 </button>
@@ -433,7 +433,7 @@ export function ThreadList({
           )}
 
           {vendor && (
-            <div className="flex flex-wrap items-center gap-2 text-xs">
+            <div className="flex flex-wrap items-center gap-2 text-meta">
               <span
                 className="inline-flex items-center gap-1 font-medium"
                 style={vendorInk(vendor.color)}
@@ -447,7 +447,7 @@ export function ThreadList({
               <button
                 type="button"
                 onClick={() => setThreadBotFilter(null)}
-                className="hit rounded px-1.5 py-0.5 text-gray-500 dark:text-gray-400 underline-offset-2 hover:underline"
+                className="hit rounded-ui px-1.5 py-0.5 text-gray-500 dark:text-gray-400 underline-offset-2 hover:underline"
               >
                 Show all threads
               </button>
@@ -465,7 +465,7 @@ export function ThreadList({
                     type="button"
                     disabled={resolveBotThreads.isPending}
                     onClick={runBulkResolve}
-                    className="hit rounded bg-green-600 px-2 py-0.5 font-medium text-white hover:bg-green-700 disabled:opacity-60"
+                    className="hit rounded-ui bg-green-600 px-2 py-0.5 font-medium text-white hover:bg-green-700 disabled:opacity-60"
                   >
                     {resolveBotThreads.isPending ? 'Resolving…' : 'Yes, resolve'}
                   </button>
@@ -473,7 +473,7 @@ export function ThreadList({
                     type="button"
                     disabled={resolveBotThreads.isPending}
                     onClick={() => setConfirming(false)}
-                    className="hit rounded px-2 py-0.5 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
+                    className="hit rounded-ui px-2 py-0.5 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
                   >
                     Cancel
                   </button>
@@ -482,7 +482,7 @@ export function ThreadList({
                 <button
                   type="button"
                   onClick={() => setConfirming(true)}
-                  className="hit rounded border px-2 py-0.5 font-medium hover:opacity-80"
+                  className="hit rounded-ui border px-2 py-0.5 font-medium hover:opacity-80"
                   style={{ borderColor: vendor.color, ...vendorInk(vendor.color) }}
                   title="A later commit touched the file these threads flag — resolve them in one click (you approve each batch)."
                 >
@@ -497,7 +497,7 @@ export function ThreadList({
       )}
 
       {resolveBotThreads.data && (resolveBotThreads.data.resolved > 0 || resolveBotThreads.data.failed > 0) && (
-        <div className="px-3 py-1.5 text-xs text-gray-500 dark:text-gray-400">
+        <div className="px-3 py-1.5 text-meta text-gray-500 dark:text-gray-400">
           Resolved {resolveBotThreads.data.resolved}
           {resolveBotThreads.data.failed > 0 && ` · ${resolveBotThreads.data.failed} failed`}.
         </div>
@@ -509,7 +509,7 @@ export function ThreadList({
       {dedupClusters.length > 0 && (
         <div
           data-testid="bot-dedup"
-          className="mx-3 my-2 rounded-md border border-sky-200 bg-sky-50/60 px-3 py-2 text-xs dark:border-sky-800 dark:bg-sky-950/30"
+          className="mx-3 my-2 rounded-ui border border-sky-200 bg-sky-50/60 px-3 py-2 text-meta dark:border-sky-800 dark:bg-sky-950/30"
         >
           <div className="mb-1.5 flex items-center gap-1.5 font-medium text-sky-800 dark:text-sky-200">
             <BotIcon />
@@ -539,7 +539,7 @@ export function ThreadList({
                         <button
                           type="button"
                           onClick={() => cycleToThread(clusterKey, m.userId, ids)}
-                          className="hit inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium hover:opacity-80"
+                          className="hit inline-flex items-center gap-1 rounded-ui px-1.5 py-0.5 text-meta font-medium hover:opacity-80"
                           style={{ ...vendorInk(meta.color), background: `${meta.color}1a` }}
                           title={
                             ids.length > 1
@@ -560,14 +560,14 @@ export function ThreadList({
                   </span>
                   {cluster.conflict ? (
                     <span
-                      className="rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-semibold text-amber-700 dark:bg-amber-900/40 dark:text-amber-300"
+                      className="rounded-ui bg-amber-100 px-1.5 py-0.5 text-meta font-semibold text-amber-700 dark:bg-amber-900/40 dark:text-amber-300"
                       title="The bots disagree on severity/verdict here — worth a human look."
                     >
                       bots disagree here
                     </span>
                   ) : cluster.consensus ? (
                     <span
-                      className="rounded bg-green-100 px-1.5 py-0.5 text-[11px] font-semibold text-green-700 dark:bg-green-900/40 dark:text-green-300"
+                      className="rounded-ui bg-green-100 px-1.5 py-0.5 text-meta font-semibold text-green-700 dark:bg-green-900/40 dark:text-green-300"
                       title="The bots agree here — one fix likely clears both."
                     >
                       consensus
@@ -581,7 +581,7 @@ export function ThreadList({
       )}
 
       {shown.length === 0 ? (
-        <div className="px-3 py-6 text-center text-sm text-gray-500 dark:text-gray-400">
+        <div className="px-3 py-6 text-center text-body text-gray-500 dark:text-gray-400">
           {activeStates.size > 0
             ? 'No threads in the selected state(s).'
             : visibleThreadIds != null

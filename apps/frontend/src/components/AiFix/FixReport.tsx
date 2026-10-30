@@ -14,7 +14,7 @@ import { InfoButton } from '../InfoModal.js';
 // dropped) — the diff below it is the authoritative changeset.
 
 const CHIP =
-  'inline-flex max-w-full items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium bg-gray-500/10 text-gray-700 dark:text-gray-200';
+  'inline-flex max-w-full items-center gap-1 rounded-ui px-1.5 py-0.5 text-meta font-medium bg-gray-500/10 text-gray-700 dark:text-gray-200';
 const HEADING =
   'mb-1 mt-3 flex items-center gap-1 text-meta font-medium text-ui-mute';
 
@@ -117,7 +117,7 @@ export function FixReport({ pr, fix }: { pr: PrDetail; fix: AiFix }): JSX.Elemen
   const hasRefs = items.size > 0;
 
   return (
-    <div className="mt-2 text-xs">
+    <div className="mt-2 text-meta">
       {report && (report.changes.length > 0 || undescribed.length > 0) && (
         <section>
           <div className={HEADING}>

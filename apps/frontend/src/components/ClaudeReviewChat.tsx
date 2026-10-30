@@ -50,10 +50,10 @@ export const answeringLine = (name: string): string => `${name} is reading the c
 const BTN_SMALL =
   'inline-flex h-7 items-center whitespace-nowrap rounded-ui bg-ui-raise px-2.5 text-meta font-medium text-ui-ink hover:bg-ui-hover disabled:cursor-not-allowed disabled:opacity-50 touch:h-10 touch:px-3';
 const BTN_ASK =
-  'whitespace-nowrap rounded-md bg-blue-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50 dark:bg-blue-500 dark:hover:bg-blue-400 dark:text-gray-950';
+  'whitespace-nowrap rounded-ui bg-blue-600 px-4 py-1.5 text-body font-semibold text-white hover:bg-blue-700 disabled:opacity-50 dark:bg-blue-500 dark:hover:bg-blue-400 dark:text-gray-950';
 const MUTED = 'text-gray-500 dark:text-gray-400';
 const PILL =
-  'inline-flex max-w-full items-center gap-1 rounded-full border border-blue-300 bg-blue-50 px-2.5 py-0.5 text-xs text-blue-800 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-200';
+  'inline-flex max-w-full items-center gap-1 rounded-full border border-blue-300 bg-blue-50 px-2.5 py-0.5 text-meta text-blue-800 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-200';
 
 const sameRef = (a: ClaudeReviewChatPinRef, b: ClaudeReviewChatPinRef): boolean => chatPinKey(a) === chatPinKey(b);
 
@@ -105,7 +105,7 @@ export function SendToChatButton({
         {pinned ? 'In chat' : 'Send to chat'}
       </button>
       {full && (
-        <span className="text-xs text-amber-700 dark:text-amber-300">
+        <span className="text-meta text-amber-700 dark:text-amber-300">
           The chat holds {CLAUDE_REVIEW_CHAT_MAX_PINS} items. Remove one first.
         </span>
       )}
@@ -175,7 +175,7 @@ function ExplanationCards({
         ))}
       </ul>
       {missing.length > 0 && (
-        <p className={`text-xs ${MUTED}`}>
+        <p className={`text-meta ${MUTED}`}>
           No explanation came back for: {missing.map((p) => p.label).join('; ')}.
         </p>
       )}
@@ -191,8 +191,8 @@ function ChatMessages({ messages }: { messages: readonly ClaudeReviewChatMessage
       {messages.map((m, i) => {
         if (m.role === 'user') {
           return (
-            <li key={m.id} className="text-sm">
-              <div className={`text-xs font-medium ${MUTED}`}>You</div>
+            <li key={m.id} className="text-body">
+              <div className={`text-meta font-medium ${MUTED}`}>You</div>
               <div className="whitespace-pre-wrap">{m.content}</div>
               {m.pins != null && m.pins.length > 0 && (
                 <ul className="mt-1 flex flex-wrap gap-1.5" aria-label="Items sent">
@@ -206,9 +206,9 @@ function ChatMessages({ messages }: { messages: readonly ClaudeReviewChatMessage
         }
         const question = messages[i - 1];
         return (
-          <li key={m.id} className="text-sm">
+          <li key={m.id} className="text-body">
             {/* Who answered (the provider and the model that ran); an older answer stored no model. */}
-            <div className={`text-xs font-medium ${MUTED}`}>{m.model ? aiRunLabel(m.provider, m.model) : 'Claude'}</div>
+            <div className={`text-meta font-medium ${MUTED}`}>{m.model ? aiRunLabel(m.provider, m.model) : 'Claude'}</div>
             {m.explanations != null ? (
               <ExplanationCards cards={m.explanations} pins={question?.role === 'user' ? (question.pins ?? []) : []} />
             ) : (
@@ -300,18 +300,18 @@ export function ReviewChatThread({
   const explaining = (pendingHere?.pins.length ?? 0) > 0;
 
   return (
-    <div className="mt-2 space-y-3 rounded border border-gray-200 bg-gray-50/60 p-3 dark:border-gray-800 dark:bg-gray-900/40">
+    <div className="mt-2 space-y-3 rounded-ui border border-gray-200 bg-gray-50/60 p-3 dark:border-gray-800 dark:bg-gray-900/40">
       {thread.data?.headMoved && (
-        <div className="text-xs text-amber-700 dark:text-amber-400">{CHAT_HEAD_MOVED_LINE}</div>
+        <div className="text-meta text-amber-700 dark:text-amber-400">{CHAT_HEAD_MOVED_LINE}</div>
       )}
-      {thread.isLoading && <div className={`text-xs ${MUTED}`}>Loading…</div>}
+      {thread.isLoading && <div className={`text-meta ${MUTED}`}>Loading…</div>}
       {thread.isError && (
-        <div className="text-xs text-red-600 dark:text-red-400">Could not load this conversation.</div>
+        <div className="text-meta text-red-600 dark:text-red-400">Could not load this conversation.</div>
       )}
       <ChatMessages messages={messages} />
       {pendingQuestion != null && (
-        <div className="text-sm">
-          <div className={`text-xs font-medium ${MUTED}`}>You</div>
+        <div className="text-body">
+          <div className={`text-meta font-medium ${MUTED}`}>You</div>
           <div className="whitespace-pre-wrap">{pendingQuestion}</div>
           {pendingHere != null && pendingHere.pins.length > 0 && (
             <ul className="mt-1 flex flex-wrap gap-1.5" aria-label="Items sent">
@@ -324,14 +324,14 @@ export function ReviewChatThread({
       )}
       {answering && (
         <div className="space-y-1">
-          <div className="text-xs text-ai-signal">{answeringLine(providerName)}</div>
+          <div className="text-meta text-ai-signal">{answeringLine(providerName)}</div>
           <RegenProgressBar active label={answeringLine(providerName)} timeConstantSec={explaining ? 40 : 20} />
         </div>
       )}
       <div className="space-y-2">
         {pins.length > 0 && (
           <div className="space-y-1">
-            <div className={`text-xs ${MUTED}`}>
+            <div className={`text-meta ${MUTED}`}>
               {pins.length === 1 ? '1 item' : `${pins.length} items`} to explain
               {pins.length >= CLAUDE_REVIEW_CHAT_MAX_PINS ? ` (the most one question can take)` : ''}
             </div>
@@ -360,7 +360,7 @@ export function ReviewChatThread({
                 : 'Ask about this review'
           }
           aria-label={findingId != null ? 'Question about this finding' : 'Question about this review'}
-          className="w-full resize-y rounded border border-gray-300 bg-white px-2.5 py-1.5 text-[15px] leading-normal dark:border-gray-700 dark:bg-gray-950"
+          className="w-full resize-y rounded-ui border border-gray-300 bg-white px-2.5 py-1.5 text-title leading-normal dark:border-gray-700 dark:bg-gray-950"
         />
         <div className="flex flex-wrap items-center gap-3">
           <AiRunGate kind="review_chat" followUp provider={chatProvider}>
@@ -369,14 +369,14 @@ export function ReviewChatThread({
             </button>
           </AiRunGate>
           {busy && pendingHere == null && (
-            <span className={`text-xs ${MUTED}`}>Answering another question…</span>
+            <span className={`text-meta ${MUTED}`}>Answering another question…</span>
           )}
           {tooLong && (
-            <span className="text-xs text-red-600 dark:text-red-400">
+            <span className="text-meta text-red-600 dark:text-red-400">
               Keep it under {CLAUDE_REVIEW_CHAT_MAX_QUESTION_CHARS.toLocaleString('en-US')} characters.
             </span>
           )}
-          {error != null && <span className="text-xs text-red-600 dark:text-red-400">{error}</span>}
+          {error != null && <span className="text-meta text-red-600 dark:text-red-400">{error}</span>}
         </div>
       </div>
     </div>
@@ -411,28 +411,28 @@ function EarlierChats({ prId, reviewId }: { prId: number; reviewId: number }): J
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="hit inline-flex items-center gap-1.5 text-xs font-medium text-gray-700 hover:underline dark:text-gray-200"
+        className="hit inline-flex items-center gap-1.5 text-meta font-medium text-gray-700 hover:underline dark:text-gray-200"
       >
         <ChevronIcon dir={open ? 'down' : 'right'} size={11} />
         Earlier reviews&apos; chats
       </button>
       {open && (
         <div className="mt-2 space-y-2">
-          {history.isLoading && <div className={`text-xs ${MUTED}`}>Loading…</div>}
+          {history.isLoading && <div className={`text-meta ${MUTED}`}>Loading…</div>}
           {history.isError && (
-            <div className="text-xs text-red-600 dark:text-red-400">Could not load earlier chats.</div>
+            <div className="text-meta text-red-600 dark:text-red-400">Could not load earlier chats.</div>
           )}
           {history.data != null && runs.length === 0 && (
-            <div className={`text-xs ${MUTED}`}>No earlier review of this PR has a chat.</div>
+            <div className={`text-meta ${MUTED}`}>No earlier review of this PR has a chat.</div>
           )}
           {run != null && (
             <>
-              <label className="flex flex-wrap items-center gap-2 text-xs">
+              <label className="flex flex-wrap items-center gap-2 text-meta">
                 <span className={MUTED}>Review</span>
                 <select
                   value={run.reviewId}
                   onChange={(e) => setPicked(Number(e.target.value))}
-                  className="rounded border border-gray-300 bg-white px-1.5 py-0.5 text-xs dark:border-gray-700 dark:bg-gray-950"
+                  className="rounded-ui border border-gray-300 bg-white px-1.5 py-0.5 text-meta dark:border-gray-700 dark:bg-gray-950"
                 >
                   {runs.map((r) => (
                     <option key={r.reviewId} value={r.reviewId}>
@@ -441,7 +441,7 @@ function EarlierChats({ prId, reviewId }: { prId: number; reviewId: number }): J
                   ))}
                 </select>
               </label>
-              <div className="rounded border border-gray-200 p-2 dark:border-gray-800">
+              <div className="rounded-ui border border-gray-200 p-2 dark:border-gray-800">
                 <ChatMessages messages={run.messages} />
               </div>
             </>
@@ -492,7 +492,7 @@ export function ReviewChatSection({
             type="button"
             onClick={() => setOpen((v) => !v)}
             aria-expanded={open}
-            className="hit inline-flex items-center gap-1.5 text-sm font-medium text-blue-600 hover:underline dark:text-blue-400"
+            className="hit inline-flex items-center gap-1.5 text-body font-medium text-blue-600 hover:underline dark:text-blue-400"
           >
             <CommentIcon size={13} />
             {open ? 'Hide' : `Ask ${providerName} about this review`}

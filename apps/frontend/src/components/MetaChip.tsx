@@ -38,7 +38,7 @@ export function MetaChip({
 }): JSX.Element {
   return (
     <span
-      className="shrink-0 rounded px-1 py-px text-[11px] font-medium tabular-nums"
+      className="shrink-0 rounded-ui px-1 py-px text-meta font-medium tabular-nums"
       style={{ ...vendorInk(meta.color), background: `${meta.color}1a` }}
       title={meta.description}
     >
