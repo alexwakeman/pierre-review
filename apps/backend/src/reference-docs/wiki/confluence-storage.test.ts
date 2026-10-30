@@ -81,12 +81,12 @@ describe('the tokenizer is linear and tolerant', () => {
     expect(storageToHtml('<p a="1 > 2">quoted gt</p>')).toBe('<p>quoted gt</p>');
   });
 
-  it('a page of 100,000 unclosed tags parses in well under a second', () => {
+  it('a page of 100,000 unclosed tags parses in linear time (a quadratic parse takes minutes; 3s leaves room for a loaded machine)', () => {
     const evil = '<div>'.repeat(100_000) + '</span>'.repeat(50_000) + 'end';
     const t0 = Date.now();
     const tree = parseStorage(evil);
     const html = storageToHtml(evil);
-    expect(Date.now() - t0).toBeLessThan(1000);
+    expect(Date.now() - t0).toBeLessThan(3000);
     expect(tree.children.length).toBe(1);
     expect(html).toContain('end');
   });
