@@ -501,12 +501,24 @@ export interface WorktreeStorage {
 }
 
 let storageCache: { at: number; value: WorktreeStorage } | null = null;
+let storageInFlight: Promise<WorktreeStorage> | null = null;
 
-/** Walk the clone cache once (cached for a minute — Settings may be opened repeatedly). */
+/**
+ * Walk the clone cache once (cached for a minute — Settings may be opened repeatedly). Concurrent
+ * callers share ONE walk: a large cache takes a while to stat, and a second tab must not start another.
+ */
 export async function getWorktreeStorage(now: number = Date.now()): Promise<WorktreeStorage> {
   if (storageCache && now - storageCache.at < 60_000) {
     return { ...storageCache.value, lastSweepAt: lastFinishedAt ? new Date(lastFinishedAt).toISOString() : null };
   }
+  if (storageInFlight) return storageInFlight;
+  storageInFlight = walkStorage(now).finally(() => {
+    storageInFlight = null;
+  });
+  return storageInFlight;
+}
+
+async function walkStorage(now: number): Promise<WorktreeStorage> {
   let cloneBytes = 0;
   let checkouts = 0;
   let checkoutBytes = 0;
