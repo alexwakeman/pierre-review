@@ -294,6 +294,23 @@ async function seedAccount(accountId: number, login: string): Promise<void> {
     .insert(s.prMentions)
     .values({ accountId, repoId: repo.id, prId: pr.id, login: `dev-${accountId}` })
     .execute();
+  // A worktree ledger row (migration 0146): which PR a checkout on disk was for.
+  await db
+    .insert(s.worktreeLedger)
+    .values({
+      accountId,
+      path: `/tmp/limn-erase-test/${accountId}/.worktrees/abc-1-1`,
+      cloneDir: `/tmp/limn-erase-test/${accountId}`,
+      owner: 'acme',
+      name: `repo-${accountId}`,
+      kind: 'review',
+      prId: pr.id,
+      pid: 1,
+      instance: 'test',
+      createdAt: new Date(),
+      lastUsedAt: new Date(),
+    })
+    .execute();
   // A Claude Review run with one finding and a chat thread about it (migration 0073 / pg 0060).
   // The chat rows are text this user typed or paid for, so their erasure check must not be vacuous.
   const [review] = (await db
