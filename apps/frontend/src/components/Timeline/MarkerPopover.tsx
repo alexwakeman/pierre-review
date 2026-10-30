@@ -215,7 +215,7 @@ function SingleEvent({
       {thread && <ClaudeThreadReason thread={thread} />}
 
       {anchor && (
-        <pre className="overflow-x-auto rounded-ui border border-ui-line bg-ui-surface px-2 py-1 font-mono text-meta leading-snug text-ui-mute">
+        <pre className="overflow-x-auto rounded-ui bg-ui-surface px-2 py-1 font-mono text-meta leading-snug text-ui-mute">
           {anchorHtml != null ? (
             <>
               {/* The +/-/space marker prints plain — it is diff notation, not code.
@@ -491,7 +491,7 @@ export function MarkerPopover({
         {...getFloatingProps()}
         onPointerUp={persistSize}
         data-testid="marker-popover"
-        className="z-50 flex flex-col rounded-ui border border-ui-line bg-ui-surface shadow-xl"
+        className="z-50 flex flex-col rounded-ui bg-ui-surface shadow-xl"
       >
         <div className="tl-modal-header" onPointerDown={onDragStart}>
           <svg className="tl-grip" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">

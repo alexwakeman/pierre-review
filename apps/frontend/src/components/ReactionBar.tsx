@@ -140,7 +140,7 @@ export function ReactionBar({
               setOpen(false);
             }
           }}
-          className="absolute bottom-full left-0 z-30 mb-1 flex gap-0.5 rounded-ui border border-ui-line bg-ui-surface p-1 shadow-lg"
+          className="absolute bottom-full left-0 z-30 mb-1 flex gap-0.5 rounded-ui bg-ui-surface p-1 shadow-lg"
         >
           {/* All eight, always. A curated subset would leave a reaction added on github.com
               with no chip to render it under, i.e. silently dropping data GitHub is showing

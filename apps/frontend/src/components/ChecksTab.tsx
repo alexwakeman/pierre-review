@@ -630,7 +630,7 @@ export function ChecksTab({
   return (
     <>
       {pr.authNotice?.kind === 'saml_sso' && (
-        <div className="mx-4 mt-2 rounded-ui border border-ui-line bg-ui-raise px-3 py-2 text-meta leading-relaxed text-ui-warn">
+        <div className="mx-4 mt-2 rounded-ui bg-ui-raise px-3 py-2 text-meta leading-relaxed text-ui-warn">
           <strong className="font-semibold">
             Some data from {pr.authNotice.org} is hidden.
           </strong>{' '}

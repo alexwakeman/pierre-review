@@ -298,7 +298,7 @@ export function PrBotBehaviourTab({ pr }: { pr: PrDetail }): JSX.Element {
       </div>
 
       {isLoading ? (
-        <div className="h-24 animate-pulse rounded-ui border border-ui-line bg-ui-surface" />
+        <div className="h-24 animate-pulse rounded-ui bg-ui-surface" />
       ) : isError ? (
         <div className="text-body text-ui-danger">Couldn’t load bot behaviour for this PR.</div>
       ) : bots.length === 0 ? (

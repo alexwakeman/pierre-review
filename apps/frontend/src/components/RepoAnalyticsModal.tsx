@@ -367,7 +367,7 @@ export function RepoAnalyticsModal({
       role="presentation"
     >
       <div
-        className="flex max-h-[88vh] w-[60rem] max-w-[96vw] flex-col rounded-ui border border-ui-line bg-ui-surface shadow-xl"
+        className="flex max-h-[88vh] w-[60rem] max-w-[96vw] flex-col rounded-ui bg-ui-surface shadow-xl"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"

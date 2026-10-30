@@ -1238,7 +1238,7 @@ function PrDescriptionBody({ prId }: { prId: number }): JSX.Element {
   if (!pr) return <div className="mt-1 text-meta text-ui-faint">Couldn’t load this PR.</div>;
   const hasBody = pr.body != null && pr.body.trim() !== '';
   return (
-    <div className="mt-1 space-y-2 rounded-ui border border-ui-line bg-ui-surface p-2">
+    <div className="mt-1 space-y-2 rounded-ui bg-ui-surface p-2">
       {hasBody ? (
         <div className="max-h-64 overflow-auto text-body">
           <Markdown>{pr.body as string}</Markdown>
@@ -2532,7 +2532,7 @@ function PrDetails({
   const LeadMark = leadMeta?.icon ?? null;
   return (
     <div
-      className="mt-2 space-y-1.5 rounded-ui border border-ui-line bg-ui-raise p-2"
+      className="mt-2 space-y-1.5 rounded-ui bg-ui-raise p-2"
       data-noactivate
     >
       {standingHere && lead != null && (

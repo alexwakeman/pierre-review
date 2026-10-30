@@ -770,7 +770,7 @@ export function OpenPrsCards({
           <button
             type="button"
             onClick={ticketGate.release}
-            className="hit rounded-ui border border-ui-line px-1.5 py-0.5 font-medium hover:border-ui-line"
+            className="hit bg-ui-raise rounded-ui px-1.5 py-0.5 font-medium hover:bg-ui-hover"
           >
             Group by ticket
           </button>
@@ -943,7 +943,7 @@ function ShowMoreRow({
           focusFrom.current = drawnCards;
           onMore();
         }}
-        className="hit rounded-ui border border-ui-line px-2 py-0.5 font-medium hover:border-ui-line focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent"
+        className="hit bg-ui-raise rounded-ui px-2 py-0.5 font-medium hover:bg-ui-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent"
       >
         Show more
       </button>
@@ -1389,7 +1389,7 @@ function MergedPanel({
             <button
               type="button"
               onClick={() => onOpen(m)}
-              className="hit block w-full rounded-ui border border-ui-line bg-ui-surface px-3 py-1.5 text-left transition-colors hover:border-ui-line hover:bg-ui-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent"
+              className="hit block w-full rounded-ui bg-ui-surface px-3 py-1.5 text-left transition-colors hover:bg-ui-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent"
             >
               <span className="flex min-w-0 items-center gap-1.5">
                 <MergeIcon size={13} className="shrink-0 text-ui-mute" aria-hidden />

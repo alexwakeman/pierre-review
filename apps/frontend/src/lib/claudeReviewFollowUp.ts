@@ -50,11 +50,12 @@ export const SEVERITY_RANK: Record<ClaudeFindingSeverity, number> = {
 };
 
 export const SEVERITY_CLASS: Record<ClaudeFindingSeverity, string> = {
+  // Only a blocker is coloured (it blocks); the rest are counts in grey (docs/redesign/DESIGN.md § 3).
   blocker: 'bg-ui-danger/10 text-ui-danger',
-  warning: 'bg-ui-raise text-ui-warn',
-  nit: 'bg-ui-raise text-ui-warn',
-  question: 'bg-ui-sel text-ui-accent',
-  praise: 'bg-ui-raise text-ui-success',
+  warning: 'bg-ui-raise text-ui-mute',
+  nit: 'bg-ui-raise text-ui-mute',
+  question: 'bg-ui-raise text-ui-mute',
+  praise: 'bg-ui-raise text-ui-mute',
 };
 
 // ---- praise: not a finding ----
@@ -105,7 +106,7 @@ const CHIP_RED = 'bg-ui-danger/10 text-ui-danger';
 const CHIP_ORANGE = 'bg-ui-raise text-ui-warn';
 const CHIP_GREEN = 'bg-ui-raise text-ui-success';
 const CHIP_GREY = 'bg-ui-raise text-ui-mute';
-const CHIP_SKY = 'bg-ui-sel text-ui-accent';
+const CHIP_SKY = 'bg-ui-raise text-ui-mute';
 
 // ⚠ `not_checked` is GREY, never amber: it is unknown, not "not addressed".
 export const FOLLOW_UP_STATUS_CLASS: Record<ClaudeFollowUpStatus, string> = {

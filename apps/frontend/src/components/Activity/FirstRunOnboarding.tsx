@@ -165,7 +165,7 @@ export function FirstRunOnboarding(): JSX.Element {
           {[0, 1, 2, 3].map((i) => (
             <div
               key={i}
-              className="h-14 animate-pulse rounded-ui border border-ui-line bg-ui-surface"
+              className="h-14 animate-pulse rounded-ui bg-ui-surface"
             />
           ))}
         </div>
@@ -261,7 +261,7 @@ export function FirstRunOnboarding(): JSX.Element {
           </div>
 
           {failures.length > 0 && (
-            <div className="rounded-ui border border-ui-line bg-ui-raise px-3 py-2 text-meta text-ui-warn">
+            <div className="rounded-ui bg-ui-raise px-3 py-2 text-meta text-ui-warn">
               <div className="font-semibold">Couldn&rsquo;t add {failures.length} repo{failures.length === 1 ? '' : 's'}:</div>
               <ul className="mt-1 space-y-0.5">
                 {failures.map((f) => (

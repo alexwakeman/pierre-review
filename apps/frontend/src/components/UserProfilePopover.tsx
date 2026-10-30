@@ -168,7 +168,7 @@ export function UserProfilePopover({
         style={{ ...floatingStyles, visibility: isPositioned ? 'visible' : 'hidden' }}
         {...getFloatingProps()}
         data-testid="user-profile-popover"
-        className="z-50 w-64 rounded-ui border border-ui-line bg-ui-surface p-3 shadow-xl"
+        className="z-50 w-64 rounded-ui bg-ui-surface p-3 shadow-xl"
       >
         <div className="flex items-center gap-2.5">
           {user?.avatarUrl ? (

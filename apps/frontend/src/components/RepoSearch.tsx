@@ -365,7 +365,7 @@ export function RepoSearch({
           id={listboxId}
           role="listbox"
           aria-label="Repository search results"
-          className="absolute left-0 top-full z-[60] mt-1 max-h-96 w-96 overflow-y-auto rounded-ui border border-ui-line bg-ui-surface shadow-lg"
+          className="absolute left-0 top-full z-[60] mt-1 max-h-96 w-96 overflow-y-auto rounded-ui bg-ui-surface shadow-lg"
         >
           {atRepoLimit && (
             <div className="sticky top-0 z-20 border-b border-ui-line bg-ui-raise px-3 py-1.5 text-meta text-ui-warn">

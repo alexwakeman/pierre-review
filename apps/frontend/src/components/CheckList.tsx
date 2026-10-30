@@ -248,7 +248,7 @@ export function CheckRow({
                   {(logs.hasNextPage || logs.isFetchingNextPage) && (
                     <button
                       type="button"
-                      className="hit rounded-ui border border-ui-line px-1.5 py-0.5 text-meta hover:border-ui-line disabled:opacity-50"
+                      className="hit bg-ui-raise rounded-ui px-1.5 py-0.5 text-meta hover:bg-ui-hover disabled:opacity-50"
                       disabled={!canLoadEarlier}
                       onClick={loadEarlier}
                       title="Load the previous chunk of this log (or just scroll up)"
@@ -348,7 +348,7 @@ export function CiRerunControl({
     <div className="mt-2 flex flex-wrap items-center gap-2">
       <button
         type="button"
-        className="hit whitespace-nowrap rounded-ui border border-ui-line px-2.5 py-1 text-meta text-ui-accent hover:bg-ui-hover disabled:opacity-50"
+        className="hit bg-ui-raise whitespace-nowrap rounded-ui px-2.5 py-1 text-meta text-ui-accent hover:bg-ui-hover disabled:opacity-50"
         disabled={rerun.isPending || failedRunIds.length === 0}
         onClick={() => fire('failed', failedRunIds)}
         title="Re-run only the failed jobs of the failing workflow run(s)"
@@ -357,7 +357,7 @@ export function CiRerunControl({
       </button>
       <button
         type="button"
-        className="hit whitespace-nowrap rounded-ui border border-ui-line px-2.5 py-1 text-meta hover:border-ui-line disabled:opacity-50"
+        className="hit bg-ui-raise whitespace-nowrap rounded-ui px-2.5 py-1 text-meta hover:bg-ui-hover disabled:opacity-50"
         disabled={rerun.isPending}
         onClick={() => fire('all', allRunIds)}
         title="Re-run the entire workflow run(s) from scratch"

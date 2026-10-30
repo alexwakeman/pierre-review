@@ -245,7 +245,7 @@ export function SyncProgressPanel({
                 ? 'Close this. Scoring keeps running in the background.'
                 : 'Close'
             }
-            className="hit rounded-ui border border-ui-line px-3 py-1 text-ui-mute hover:border-ui-line hover:bg-ui-hover"
+            className="hit bg-ui-raise rounded-ui px-3 py-1 text-ui-mute hover:bg-ui-hover hover:bg-ui-hover"
           >
             {scoring ? 'Continue in background' : 'Close'}
           </button>

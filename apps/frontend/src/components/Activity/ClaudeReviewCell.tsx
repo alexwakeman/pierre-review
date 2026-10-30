@@ -63,9 +63,9 @@ export const VERDICT_PILL =
 export const MUTED = 'text-meta text-ai-muted';
 // The AI surface's own button (the Claude Review tab's Run button idiom).
 const AI_BUTTON =
-  'whitespace-nowrap rounded-ui border border-ai-border bg-white/70 px-2 py-0.5 text-meta font-medium text-ai-signal hover:border-ai-signal/60 hover:bg-ai-surface-2 disabled:cursor-default disabled:opacity-60';
+  'hit whitespace-nowrap rounded-ui bg-ui-raise px-2 py-0.5 text-meta font-medium text-ui-ink hover:bg-ui-hover disabled:cursor-default disabled:opacity-60';
 const PLAIN_BUTTON =
-  'whitespace-nowrap rounded-ui border border-ai-border bg-white/70 px-2 py-0.5 text-meta font-medium text-ui-ink hover:border-ui-line';
+  'hit whitespace-nowrap rounded-ui bg-ui-raise px-2 py-0.5 text-meta font-medium text-ui-ink hover:bg-ui-hover';
 
 // A ticket pill's colour by coverage (all met / some partly or can't tell / some not met).
 const TICKET_TONE: Record<CoverageTone, string> = {
@@ -76,12 +76,14 @@ const TICKET_TONE: Record<CoverageTone, string> = {
 };
 
 // The panel's left accent, by outcome. `none` keeps the plain AI border (an offer, not a result).
+// No stripe any more (surfaces are separated by tone, not borders): a blocking outcome keeps a
+// faint danger ring so "Request changes" still reads from across the row.
 const ACCENT: Record<ReviewTone, string> = {
-  none: 'border-l-ai-border',
-  active: 'border-l-ui-line',
-  bad: 'border-l-ui-danger/40',
-  ok: 'border-l-ui-line',
-  neutral: 'border-l-ui-line',
+  none: '',
+  active: '',
+  bad: 'ring-1 ring-inset ring-ui-danger/30',
+  ok: '',
+  neutral: '',
 };
 
 // The small marker on a run the workspace's auto review started (queued, running or finished).
@@ -271,7 +273,7 @@ export function ClaudeReviewPanel({
 
   return (
     <div
-      className={`mt-1.5 flex cursor-pointer flex-wrap items-center gap-x-2.5 gap-y-1.5 rounded-ui border border-l-[3px] border-ai-border bg-ai-surface px-2.5 py-1.5 hover:bg-ai-surface-2 ${ACCENT[reviewTone(cell)]}`}
+      className={`mt-1.5 flex cursor-pointer flex-wrap items-center gap-x-2.5 gap-y-1.5 rounded-ui bg-ai-surface px-2.5 py-1.5 hover:bg-ai-surface-2 ${ACCENT[reviewTone(cell)]}`}
       // The whole panel opens the Claude Review tab (mouse); the "Claude" button below is the
       // keyboard route. Inner controls stop propagation, so they never also land here.
       onClick={open}

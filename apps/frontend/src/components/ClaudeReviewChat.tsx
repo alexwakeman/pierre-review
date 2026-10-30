@@ -54,7 +54,7 @@ const BTN_ASK =
   'whitespace-nowrap rounded-ui bg-ui-accent-fill px-4 py-1.5 text-body font-semibold text-ui-on-accent hover:bg-ui-accent-fill disabled:opacity-50';
 const MUTED = 'text-ui-mute';
 const PILL =
-  'inline-flex max-w-full items-center gap-1 rounded-full border border-ui-line bg-ui-sel px-2.5 py-0.5 text-meta text-ui-accent';
+  'inline-flex max-w-full items-center gap-1 rounded-full bg-ui-sel px-2.5 py-0.5 text-meta text-ui-accent';
 
 const sameRef = (a: ClaudeReviewChatPinRef, b: ClaudeReviewChatPinRef): boolean => chatPinKey(a) === chatPinKey(b);
 
@@ -301,7 +301,7 @@ export function ReviewChatThread({
   const explaining = (pendingHere?.pins.length ?? 0) > 0;
 
   return (
-    <div className="mt-2 space-y-3 rounded-ui border border-ui-line bg-ui-raise p-3">
+    <div className="mt-2 space-y-3 rounded-ui bg-ui-raise p-3">
       {thread.data?.headMoved && (
         <div className="text-meta text-ui-warn">{CHAT_HEAD_MOVED_LINE}</div>
       )}
@@ -361,7 +361,7 @@ export function ReviewChatThread({
                 : 'Ask about this review'
           }
           aria-label={findingId != null ? 'Question about this finding' : 'Question about this review'}
-          className="w-full resize-y rounded-ui border border-ui-line bg-ui-surface px-2.5 py-1.5 text-title leading-normal"
+          className="w-full resize-y rounded-ui bg-ui-surface px-2.5 py-1.5 text-title leading-normal"
         />
         <div className="flex flex-wrap items-center gap-3">
           <AiRunGate kind="review_chat" followUp provider={chatProvider}>

@@ -59,14 +59,14 @@ export function ReplyComposer({
         rows={3}
         autoFocus
         placeholder="Reply to this thread (markdown, @ to mention)…"
-        className="w-full rounded-ui border border-ui-line bg-ui-surface px-2 py-1.5 text-meta"
+        className="w-full rounded-ui bg-ui-surface px-2 py-1.5 text-meta"
       />
       <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
           onClick={send}
           disabled={reply.isPending || body.trim().length === 0}
-          className="hit whitespace-nowrap rounded-ui border border-ui-line px-2 py-0.5 text-meta text-ui-accent hover:bg-ui-hover disabled:opacity-50"
+          className="hit bg-ui-raise whitespace-nowrap rounded-ui px-2 py-0.5 text-meta text-ui-accent hover:bg-ui-hover disabled:opacity-50"
         >
           {reply.isPending ? 'Sending…' : 'Send'}
         </button>
@@ -78,7 +78,7 @@ export function ReplyComposer({
             reply.reset();
           }}
           disabled={reply.isPending}
-          className="hit whitespace-nowrap rounded-ui border border-ui-line px-2 py-0.5 text-meta hover:border-ui-line disabled:opacity-50"
+          className="hit bg-ui-raise whitespace-nowrap rounded-ui px-2 py-0.5 text-meta hover:bg-ui-hover disabled:opacity-50"
         >
           Cancel
         </button>

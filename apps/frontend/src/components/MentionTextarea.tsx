@@ -219,7 +219,7 @@ export function MentionTextarea({
       {showPicker && (
         <ul
           role="listbox"
-          className="absolute left-0 right-0 z-30 mt-0.5 max-h-56 overflow-auto rounded-ui border border-ui-line bg-ui-surface py-1 shadow-lg"
+          className="absolute left-0 right-0 z-30 mt-0.5 max-h-56 overflow-auto rounded-ui bg-ui-surface py-1 shadow-lg"
         >
           {suggestions.map((u, i) => (
             <li key={u.id}>

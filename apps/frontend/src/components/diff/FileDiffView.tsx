@@ -481,7 +481,7 @@ function InlineThread({
               ? 'rgb(var(--ai-signal-fill))'
               : meta.color,
         }}
-        className={`flex w-full items-center gap-1.5 rounded-ui border border-l-2 border-ui-line bg-ui-surface px-2 py-1 text-left text-meta hover:bg-ui-hover ${
+        className={`flex w-full items-center gap-1.5 rounded-ui border-l-2 bg-ui-surface px-2 py-1 text-left text-meta hover:bg-ui-hover ${
           resolved
             ? 'text-ui-faint opacity-70'
             : 'text-ui-mute'
@@ -825,7 +825,7 @@ function InlineCommentBox({
   };
 
   return (
-    <div className="space-y-1 rounded-ui border border-ui-line bg-ui-surface p-2 font-sans">
+    <div className="space-y-1 rounded-ui bg-ui-surface p-2 font-sans">
       <div className="text-meta text-ui-faint">
         Commenting on {side === 'LEFT' ? 'old' : 'new'} line {line}
       </div>
@@ -836,14 +836,14 @@ function InlineCommentBox({
         rows={3}
         autoFocus
         placeholder="Add an inline review comment (markdown)…"
-        className="w-full rounded-ui border border-ui-line bg-ui-surface px-2 py-1.5 text-meta"
+        className="w-full rounded-ui bg-ui-surface px-2 py-1.5 text-meta"
       />
       <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
           onClick={send}
           disabled={busy || body.trim().length === 0}
-          className="hit whitespace-nowrap rounded-ui border border-ui-line px-2 py-0.5 text-meta text-ui-accent hover:bg-ui-hover disabled:opacity-50"
+          className="hit bg-ui-raise whitespace-nowrap rounded-ui px-2 py-0.5 text-meta text-ui-accent hover:bg-ui-hover disabled:opacity-50"
         >
           {refreshing ? 'Loading it…' : add.isPending ? 'Posting…' : 'Send'}
         </button>
@@ -856,7 +856,7 @@ function InlineCommentBox({
             onClose();
           }}
           disabled={busy}
-          className="hit whitespace-nowrap rounded-ui border border-ui-line px-2 py-0.5 text-meta hover:border-ui-line disabled:opacity-50"
+          className="hit bg-ui-raise whitespace-nowrap rounded-ui px-2 py-0.5 text-meta hover:bg-ui-hover disabled:opacity-50"
         >
           {notice?.posted ? 'Close' : 'Cancel'}
         </button>
@@ -920,7 +920,7 @@ function NoPatchNote({
           type="button"
           onClick={onLoad}
           disabled={status === 'loading'}
-          className="hit rounded-ui border border-ui-line px-2 py-0.5 text-ui-accent hover:bg-ui-hover disabled:opacity-60"
+          className="hit bg-ui-raise rounded-ui px-2 py-0.5 text-ui-accent hover:bg-ui-hover disabled:opacity-60"
         >
           {status === 'loading' ? 'Loading full diff…' : 'Load full diff'}
         </button>

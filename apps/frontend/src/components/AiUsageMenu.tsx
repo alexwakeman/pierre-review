@@ -116,7 +116,7 @@ export function AiUsageMenu({ variant = 'header' }: { variant?: 'header' | 'side
             variant === 'sidebar'
               ? // Opens UP from the sidebar foot; never wider than the screen in the phone drawer.
                 'absolute bottom-full left-0 z-[60] mb-1 max-h-[calc(100vh-6rem)] w-[22rem] max-w-[calc(100vw-1.5rem)] overflow-y-auto overscroll-contain rounded-ui bg-ui-raise p-3 text-meta text-ui-ink shadow-xl shadow-black/30 motion-safe:animate-ui-pop'
-              : 'absolute right-0 top-full z-[60] mt-1 max-h-[calc(100vh-4rem)] overflow-y-auto w-[22rem] max-w-[calc(100vw-1rem)] max-sm:fixed max-sm:inset-x-2 max-sm:top-auto max-sm:w-auto max-sm:max-w-none rounded-ui border border-ui-line bg-ui-surface p-3 text-meta text-ui-ink shadow-lg'
+              : 'absolute right-0 top-full z-[60] mt-1 max-h-[calc(100vh-4rem)] overflow-y-auto w-[22rem] max-w-[calc(100vw-1rem)] max-sm:fixed max-sm:inset-x-2 max-sm:top-auto max-sm:w-auto max-sm:max-w-none rounded-ui bg-ui-surface p-3 text-meta text-ui-ink shadow-lg'
           }
         >
           {details.map((detail, i) => (

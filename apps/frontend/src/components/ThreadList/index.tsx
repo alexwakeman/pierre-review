@@ -509,7 +509,7 @@ export function ThreadList({
       {dedupClusters.length > 0 && (
         <div
           data-testid="bot-dedup"
-          className="mx-3 my-2 rounded-ui border border-ui-line bg-ui-sel px-3 py-2 text-meta"
+          className="mx-3 my-2 rounded-ui bg-ui-sel px-3 py-2 text-meta"
         >
           <div className="mb-1.5 flex items-center gap-1.5 font-medium text-ui-accent">
             <BotIcon />

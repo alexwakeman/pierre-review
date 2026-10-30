@@ -31,7 +31,7 @@ export function SyncProgressModal({
       role="presentation"
     >
       <div
-        className="w-[28rem] max-w-[90vw] rounded-ui border border-ui-line bg-ui-surface p-4 shadow-xl"
+        className="w-[28rem] max-w-[90vw] rounded-ui bg-ui-surface p-4 shadow-xl"
         role="dialog"
         aria-modal="true"
         aria-label="Sync progress"

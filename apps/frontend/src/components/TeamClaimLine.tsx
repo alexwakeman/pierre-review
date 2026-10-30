@@ -39,14 +39,14 @@ export function TeamClaimLine({ prId, data }: { prId: number; data: ClaudeReview
                   clear.mutate(pending.provider);
                 }}
                 disabled={clear.isPending}
-                className="hit rounded-ui border border-ui-line px-2 py-0.5 text-meta hover:border-ui-line disabled:opacity-50"
+                className="hit bg-ui-raise rounded-ui px-2 py-0.5 text-meta hover:bg-ui-hover disabled:opacity-50"
               >
                 Clear anyway
               </button>
               <button
                 type="button"
                 onClick={() => setConfirming(false)}
-                className="hit rounded-ui border border-ui-line px-2 py-0.5 text-meta hover:border-ui-line"
+                className="hit bg-ui-raise rounded-ui px-2 py-0.5 text-meta hover:bg-ui-hover"
               >
                 Cancel
               </button>
@@ -57,7 +57,7 @@ export function TeamClaimLine({ prId, data }: { prId: number; data: ClaudeReview
               onClick={() => (pending.mine ? clear.mutate(pending.provider) : setConfirming(true))}
               disabled={clear.isPending}
               title={`Replace the pending ${aiProviderName(pending.provider)} line with “Cleared by you”, so any Limn can review this commit.`}
-              className="hit rounded-ui border border-ui-line px-2 py-0.5 text-meta hover:border-ui-line disabled:opacity-50"
+              className="hit bg-ui-raise rounded-ui px-2 py-0.5 text-meta hover:bg-ui-hover disabled:opacity-50"
             >
               {clear.isPending ? 'Clearing…' : 'Clear'}
             </button>

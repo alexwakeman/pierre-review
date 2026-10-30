@@ -79,7 +79,7 @@ export function UserActivityDetail(): JSX.Element {
             href={profileUrl(login)}
             target="_blank"
             rel="noreferrer noopener"
-            className="hit ml-auto inline-flex items-center gap-0.5 rounded-ui border border-ui-line px-1.5 py-0.5 text-meta font-medium text-ui-mute hover:border-ui-line"
+            className="hit bg-ui-raise ml-auto inline-flex items-center gap-0.5 rounded-ui px-1.5 py-0.5 text-meta font-medium text-ui-mute hover:bg-ui-hover"
             title={`@${login} on GitHub`}
           >
             GitHub

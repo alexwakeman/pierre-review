@@ -373,7 +373,7 @@ function ActivityLog({ lines }: { lines: string[] }): JSX.Element | null {
   return (
     <div
       ref={ref}
-      className="mt-2 max-h-32 overflow-y-auto rounded-ui border border-ui-line bg-ui-surface px-2 py-1.5 font-mono text-meta leading-snug text-ui-mute"
+      className="mt-2 max-h-32 overflow-y-auto rounded-ui bg-ui-surface px-2 py-1.5 font-mono text-meta leading-snug text-ui-mute"
     >
       {lines.map((l, i) => (
         <div key={i} className="whitespace-pre-wrap break-words">
@@ -1103,7 +1103,7 @@ export function FindingRow({
 
           {/* Your reword — shown when set, editable on the latest run. */}
           {hasReword && !rewording && (
-            <div className="mt-1.5 rounded-ui border border-ui-line bg-ui-sel px-2 py-1">
+            <div className="mt-1.5 rounded-ui bg-ui-sel px-2 py-1">
               <div className="text-meta font-medium text-ui-accent">
                 Your wording
               </div>
@@ -1120,7 +1120,7 @@ export function FindingRow({
                 onChange={setDraft}
                 rows={4}
                 placeholder="Your wording (markdown)"
-                className="w-full rounded-ui border border-ui-line bg-ui-surface px-2 py-1.5 font-mono text-meta"
+                className="w-full rounded-ui bg-ui-surface px-2 py-1.5 font-mono text-meta"
               />
               <div className="flex flex-wrap gap-2">
                 <button type="button" onClick={saveReword} className={BTN_PRIMARY}>
@@ -2265,7 +2265,7 @@ export function ClaudeReviewTab({
             onBlur={() => updateReview.mutate({ reviewId: review.id, userBody })}
             rows={6}
             placeholder="Summary (markdown, @ to mention). Optional."
-            className="w-full rounded-ui border border-ui-line bg-ui-surface px-2 py-1.5 font-mono text-body"
+            className="w-full rounded-ui bg-ui-surface px-2 py-1.5 font-mono text-body"
           />
           <div className="flex flex-wrap items-center gap-2">
             <button
@@ -2344,7 +2344,7 @@ export function ClaudeReviewTab({
 
           {/* Post result. */}
           {postResult != null && (
-            <div className="rounded-ui border border-ui-line bg-ui-raise px-3 py-2 text-body text-ui-success">
+            <div className="rounded-ui bg-ui-raise px-3 py-2 text-body text-ui-success">
               <div>
                 Posted review #{postResult.postedReviewId ?? '?'} ·{' '}
                 {postResult.postedCommentCount} inline comment

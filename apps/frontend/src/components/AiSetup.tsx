@@ -115,7 +115,7 @@ export function AiRuntimeSetup(): JSX.Element | null {
       <button
         type="button"
         onClick={() => start()}
-        className="hit rounded-ui border border-ui-line px-2 py-1 text-meta hover:border-ui-line"
+        className="hit bg-ui-raise rounded-ui px-2 py-1 text-meta hover:bg-ui-hover"
       >
         {failure != null ? 'Retry' : aiSetupLabel(ai.provider)}
       </button>

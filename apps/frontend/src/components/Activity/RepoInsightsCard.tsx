@@ -31,7 +31,7 @@ export function RepoInsightsCard({
         <button
           type="button"
           onClick={onOpenCharts}
-          className="hit shrink-0 rounded-ui border border-ui-line px-2 py-0.5 text-meta font-medium text-ui-mute hover:border-ui-line"
+          className="hit bg-ui-raise shrink-0 rounded-ui px-2 py-0.5 text-meta font-medium text-ui-mute hover:bg-ui-hover"
           title="Open the full analytics charts for this repo"
         >
           <ChartIcon size={11} className="inline-block align-[-0.1em]" /> Charts

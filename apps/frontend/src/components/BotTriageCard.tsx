@@ -283,7 +283,7 @@ export function BotTriageCard({
             type="button"
             onClick={() => setConfirming(true)}
             disabled={resolveBotThreads.isPending}
-            className="hit ml-auto rounded-ui border border-ui-line px-2 py-0.5 font-medium text-ui-success hover:bg-ui-hover disabled:opacity-60"
+            className="hit bg-ui-raise ml-auto rounded-ui px-2 py-0.5 font-medium text-ui-success hover:bg-ui-hover disabled:opacity-60"
             title="A later commit touched the file each of these threads flags — review the exact list, then resolve them on GitHub in one click."
           >
             Resolve the {resolvableIds.length} addressed

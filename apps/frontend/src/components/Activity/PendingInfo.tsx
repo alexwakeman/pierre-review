@@ -144,7 +144,7 @@ function InfoPopover({
             role="dialog"
             aria-label={label}
             data-noactivate
-            className={`z-[60] ${width} max-w-[92vw] cursor-default rounded-ui border border-ui-line bg-ui-surface p-3 text-meta leading-relaxed text-ui-ink shadow-lg`}
+            className={`z-[60] ${width} max-w-[92vw] cursor-default rounded-ui bg-ui-surface p-3 text-meta leading-relaxed text-ui-ink shadow-lg`}
           >
             {children(() => setOpen(false))}
           </div>
@@ -465,7 +465,7 @@ export function PendingGuideModal({
       role="presentation"
     >
       <div
-        className="flex max-h-[85vh] w-[46rem] max-w-[94vw] flex-col rounded-ui border border-ui-line bg-ui-surface shadow-xl"
+        className="flex max-h-[85vh] w-[46rem] max-w-[94vw] flex-col rounded-ui bg-ui-surface shadow-xl"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"

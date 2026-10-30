@@ -164,7 +164,7 @@ export function ApproveControl({
               ? 'Comment to post with your approval (markdown)…'
               : `Optional. Left blank, this posts "${REQUEST_CHANGES_DEFAULT_BODY}"`
           }
-          className="w-full rounded-ui border border-ui-line bg-ui-surface px-2 py-1.5 text-body"
+          className="w-full rounded-ui bg-ui-surface px-2 py-1.5 text-body"
         />
         <div className="flex flex-wrap items-center gap-2">
           {isApprove ? (
@@ -198,7 +198,7 @@ export function ApproveControl({
             type="button"
             disabled
             title="Your approval stands"
-            className="hit inline-flex cursor-default items-center gap-1 rounded-ui border border-ui-line px-2 py-0.5 text-body font-medium text-ui-success"
+            className="hit bg-ui-raise inline-flex cursor-default items-center gap-1 rounded-ui px-2 py-0.5 text-body font-medium text-ui-success"
           >
             <CheckIcon /> Approved
           </button>

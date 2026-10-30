@@ -294,7 +294,7 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
         aria-label="Manage repos and workspaces"
         className={`flex max-h-[80vh] w-full ${
           syncRound.open ? 'max-w-5xl' : 'max-w-2xl'
-        } flex-col rounded-ui border border-ui-line bg-ui-surface shadow-xl`}
+        } flex-col rounded-ui bg-ui-surface shadow-xl`}
       >
         <div className="flex items-center justify-between border-b border-ui-line px-4 py-2.5">
           <span className="text-body font-semibold text-ui-ink">
@@ -306,7 +306,7 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
               onClick={confirmDeepResyncAll}
               disabled={syncRound.syncing}
               title="Force a full backfill for all repos"
-              className="hit flex items-center gap-1.5 rounded-ui border border-ui-line px-2 py-1 text-meta text-ui-mute hover:border-ui-line hover:bg-ui-hover disabled:opacity-50"
+              className="hit bg-ui-raise flex items-center gap-1.5 rounded-ui px-2 py-1 text-meta text-ui-mute hover:bg-ui-hover hover:bg-ui-hover disabled:opacity-50"
             >
               <DeepSyncIcon size={12} />
               Deep re-sync all

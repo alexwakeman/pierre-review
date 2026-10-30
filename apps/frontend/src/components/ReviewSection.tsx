@@ -58,7 +58,7 @@ export function ReviewSection({
   return (
     <section
       aria-label={title}
-      className="rounded-ui border border-ui-line bg-ui-surface"
+      className="rounded-ui bg-ui-surface"
     >
       <header
         className={`flex flex-wrap items-center gap-x-2 gap-y-1 bg-ui-surface px-3 py-2 ${

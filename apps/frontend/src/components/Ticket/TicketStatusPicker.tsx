@@ -90,7 +90,7 @@ export function TicketStatusPicker({
           role="menu"
           aria-label="Change status"
           onKeyDown={onMenuKey}
-          className="absolute left-0 top-full z-[60] mt-1 w-56 rounded-ui border border-ui-line bg-ui-surface p-1 shadow-lg"
+          className="absolute left-0 top-full z-[60] mt-1 w-56 rounded-ui bg-ui-surface p-1 shadow-lg"
         >
           {list.isLoading ? (
             <p aria-busy="true" className="px-2 py-1 text-meta text-ui-mute">

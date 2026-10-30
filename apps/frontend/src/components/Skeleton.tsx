@@ -8,7 +8,7 @@ import type { CSSProperties } from 'react';
 // Callers size it via `className` (e.g. "h-24", "h-3 w-1/2"); the pulse + theme-aware
 // border/background come baked in.
 const SURFACE =
-  'animate-pulse rounded-ui border border-ui-line bg-ui-surface';
+  'animate-pulse rounded-ui bg-ui-surface';
 
 // A structural block placeholder — a bordered card/bar silhouette. Pass sizing (and any
 // positional offsets) via `className` / `style`.

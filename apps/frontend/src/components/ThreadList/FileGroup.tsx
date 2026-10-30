@@ -97,7 +97,7 @@ export function FileGroup({
                   type="button"
                   onClick={() => onToggleResolved(t.id)}
                   aria-expanded={false}
-                  className="hit flex w-full min-w-0 items-center gap-2 rounded-ui border border-ui-line px-2.5 py-1.5 text-left text-meta text-ui-mute hover:bg-ui-hover"
+                  className="hit bg-ui-raise flex w-full min-w-0 items-center gap-2 rounded-ui px-2.5 py-1.5 text-left text-meta text-ui-mute hover:bg-ui-hover"
                 >
                   <ChevronIcon dir="right" className="shrink-0 text-ui-faint" />
                   <span className="shrink-0 tabular-nums">{lineLabel}</span>

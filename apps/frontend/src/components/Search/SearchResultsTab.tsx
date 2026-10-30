@@ -127,7 +127,7 @@ export function SearchResultsTab(): JSX.Element {
                   type="button"
                   data-testid="search-story"
                   onClick={() => openSearchStory(st)}
-                  className="hit flex w-full items-start gap-2 rounded-ui border border-ui-line bg-ui-sel px-3 py-2 text-left hover:bg-ui-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent"
+                  className="hit flex w-full items-start gap-2 rounded-ui bg-ui-sel px-3 py-2 text-left hover:bg-ui-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent"
                 >
                   <TicketIcon size={14} className="mt-0.5 shrink-0 text-ui-accent" />
                   <span className="min-w-0">
@@ -156,7 +156,7 @@ export function SearchResultsTab(): JSX.Element {
               key={p.id}
               type="button"
               onClick={() => openSearchDetail(p.login)}
-              className="hit flex items-center gap-1.5 rounded-full border border-ui-line px-2 py-0.5 text-meta hover:bg-ui-hover"
+              className="hit bg-ui-raise flex items-center gap-1.5 rounded-full px-2 py-0.5 text-meta hover:bg-ui-hover"
             >
               {p.avatarUrl != null ? (
                 <img src={p.avatarUrl} alt="" className="h-4 w-4 rounded-full" />
@@ -193,7 +193,7 @@ export function SearchResultsTab(): JSX.Element {
             type="button"
             onClick={fetchMore}
             disabled={isFetchingMore}
-            className="hit rounded-ui border border-ui-line px-3 py-1 text-meta text-ui-ink hover:bg-ui-hover disabled:opacity-50"
+            className="hit bg-ui-raise rounded-ui px-3 py-1 text-meta text-ui-ink hover:bg-ui-hover disabled:opacity-50"
           >
             {isFetchingMore ? 'Loading…' : `Load more (${total - hits.length} more)`}
           </button>

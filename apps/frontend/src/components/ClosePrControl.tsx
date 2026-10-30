@@ -25,7 +25,7 @@ export function ClosePrControl({ prId }: { prId: number }): JSX.Element {
         <button
           type="button"
           onClick={() => setOpen(true)}
-          className="hit inline-flex items-center gap-1 rounded-ui border border-ui-line px-2 py-0.5 text-body font-medium text-ui-mute hover:bg-ui-hover"
+          className="hit bg-ui-raise inline-flex items-center gap-1 rounded-ui px-2 py-0.5 text-body font-medium text-ui-mute hover:bg-ui-hover"
           title="Close this PR without merging (reversible on GitHub)"
         >
           <CloseIcon /> Close
@@ -57,7 +57,7 @@ export function ClosePrControl({ prId }: { prId: number }): JSX.Element {
           close.reset();
         }}
         disabled={close.isPending}
-        className="hit whitespace-nowrap rounded-ui border border-ui-line px-2 py-0.5 text-body hover:border-ui-line disabled:opacity-50"
+        className="hit bg-ui-raise whitespace-nowrap rounded-ui px-2 py-0.5 text-body hover:bg-ui-hover disabled:opacity-50"
       >
         Cancel
       </button>

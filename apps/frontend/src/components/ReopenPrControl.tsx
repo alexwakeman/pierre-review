@@ -25,7 +25,7 @@ export function ReopenPrControl({ prId }: { prId: number }): JSX.Element {
         type="button"
         onClick={() => reopen.mutate()}
         disabled={reopen.isPending}
-        className="hit inline-flex items-center gap-1 rounded-ui border border-ui-line px-2 py-0.5 text-body font-medium text-ui-mute hover:bg-ui-hover disabled:opacity-50"
+        className="hit bg-ui-raise inline-flex items-center gap-1 rounded-ui px-2 py-0.5 text-body font-medium text-ui-mute hover:bg-ui-hover disabled:opacity-50"
         title="Reopen this PR on GitHub"
       >
         <ReopenIcon /> {reopen.isPending ? 'Reopening…' : 'Reopen'}

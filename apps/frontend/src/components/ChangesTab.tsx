@@ -141,7 +141,7 @@ function MoreFilesNote({
           type="button"
           onClick={onLoadMore}
           disabled={loading}
-          className="hit rounded-ui border border-ui-line px-2 py-0.5 text-ui-accent hover:bg-ui-hover disabled:opacity-60"
+          className="hit bg-ui-raise rounded-ui px-2 py-0.5 text-ui-accent hover:bg-ui-hover disabled:opacity-60"
         >
           {loading ? 'Loading files…' : `Load next 100 files (${ofTotal})`}
         </button>

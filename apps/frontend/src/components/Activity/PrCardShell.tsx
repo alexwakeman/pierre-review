@@ -129,7 +129,7 @@ export function PrCardFrame({
       aria-labelledby={labelledBy}
       onClick={onClick}
       onKeyDown={onKey}
-      className={`rounded-ui border border-ui-line bg-ui-surface px-3.5 py-2 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent ${ground}${hover}${
+      className={`rounded-ui bg-ui-surface px-3.5 py-2 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent ${ground}${hover}${
         accentClass != null ? ` ${accentClass}` : ''
       }${flash ? ' ring-2 ring-ui-accent' : ''}`}
     >
