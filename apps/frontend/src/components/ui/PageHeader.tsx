@@ -105,18 +105,20 @@ export function PageHeader({
   return (
     <header data-testid={testId} className={cx('shrink-0 pt-5 max-md:pt-3', !flushBottom && 'pb-3', inset && PAGE_GUTTER, className)}>
       <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
-        <div className="min-w-0 basis-full md:basis-0 md:flex-1">
+        <div className="min-w-0 max-w-full basis-full md:basis-auto md:flex-[1_0_auto]">
           <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
             <h2 id={titleId} className="min-w-0 break-words text-display text-ui-ink">
               {title}
             </h2>
             {info}
           </div>
-          {typeof sub === 'string' ? <p className="mt-0.5 text-body text-ui-mute">{sub}</p> : sub}
         </div>
         {actions != null && actions !== false && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
         <PageToastSlot />
       </div>
+      {/* The line under the title takes the FULL width: inside the title's column it was squeezed
+          to a sliver by the actions and the seated toast strip beside it. */}
+      {typeof sub === 'string' ? <p className="mt-0.5 text-body text-ui-mute">{sub}</p> : sub}
       {children}
     </header>
   );

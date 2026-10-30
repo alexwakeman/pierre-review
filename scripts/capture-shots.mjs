@@ -213,21 +213,8 @@ async function proShots() {
     await c.close();
   });
 
-  await shot('pr-threads.png', async () => {
-    const c = await ctx({ height: 1100, pane: 980 });
-    const p = await c.newPage();
-    await open(p, '?pr=113');
-    await p
-      .getByTestId('detail-pane')
-      .getByRole('button', { name: /^Threads\d*$/ })
-      .first()
-      .click();
-    await p.waitForTimeout(1200);
-    await p.getByTestId('detail-pane').waitFor({ timeout: 25_000 });
-    await p.waitForTimeout(2500);
-    await crop(p, p.getByTestId('detail-pane'), 'pr-threads.png', { maxHeight: 1150 });
-    await c.close();
-  });
+  // ⚠ NO `pr-threads` SHOT. It clicked a "Threads" tab that no longer exists (threads live in
+  // Changes), and no landing page used it.
 
   // ⚠ NO `pr-changes` SHOT. The Changes tab hydrates its patches from GitHub on
   // demand, and the demo's repositories do not exist there — so against this

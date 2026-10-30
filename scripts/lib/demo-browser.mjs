@@ -12,6 +12,7 @@
 // SPA is responsive, so at 1180px the rail collapses to a chip strip and every
 // panel takes the full width. One panel fills the frame and its 12px body text
 // lands at a readable size once the frame is scaled into a marketing column.
+import { readFileSync } from 'node:fs';
 import { chromium } from 'playwright';
 
 export const DEMO_BASE = process.env.DEMO_BASE ?? 'http://localhost:5273/app/';
@@ -81,7 +82,44 @@ export async function ctx(
     if (document.head) install();
     else document.addEventListener('DOMContentLoaded', install, { once: true });
   }, CAPTURE_CSS);
+  // THE AI SPEND LINE. The capture stack runs signed out of Claude, so its own budget answer reads
+  // "Limn: pick your subscription". Answer it with the static demo's recorded reply instead, so the
+  // pictures carry the same "2% of your week · limit 5%" line the live demo does.
+  const budget = recordedBudget();
+  if (budget != null) {
+    await c.route(/\/api\/ai\/budget(\?|$)/, (route) =>
+      route.request().method() === 'GET'
+        ? route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(budget) })
+        : route.continue(),
+    );
+  }
   return c;
+}
+
+let budgetCache;
+function recordedBudget() {
+  if (budgetCache !== undefined) return budgetCache;
+  try {
+    const rec = JSON.parse(
+      readFileSync(new URL('../../apps/frontend/src/demo/data/recording.json', import.meta.url), 'utf8'),
+    );
+    const entries = Array.isArray(rec) ? rec : rec.entries;
+    const body = entries.find((e) => e.method === 'GET' && e.path === '/api/ai/budget')?.body ?? null;
+    // The recording is the recording machine's own answer (no subscription picked). Give it the
+    // static demo's figures (apps/frontend/src/demo/aiBudget.ts): Max 20x, a 5% share, 2% used.
+    if (body?.status?.subscription != null) {
+      body.settings = { ...body.settings, subscription: 'max20x', weekSharePct: 5 };
+      body.status = {
+        ...body.status,
+        reason: null,
+        subscription: { ...body.status.subscription, subscription: 'max20x', subscriptionSource: 'picked', sharePct: 5, usedSharePct: 2 },
+      };
+    }
+    budgetCache = body;
+  } catch {
+    budgetCache = null;
+  }
+  return budgetCache;
 }
 
 /**
@@ -111,6 +149,7 @@ export async function ctx(
 const CAPTURE_CSS = `
   [role="status"][aria-label="Background loading"] { display: none !important; }
   div.h-7.border-amber-200.bg-amber-50 { display: none !important; }
+  [data-testid="global-loading-bar"] { display: none !important; }
 `;
 
 /**
