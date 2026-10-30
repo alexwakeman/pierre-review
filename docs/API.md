@@ -401,6 +401,15 @@ reset is known; until Codex's usage has been read the
 `subscription` picker does not apply). An OpenAI API key is refused for now, so no Codex `api_key`
 mode is reachable.
 
+### Disk space (`api/routes/storage.ts`)
+
+Settings → AI → Disk space ([BACKEND.md](BACKEND.md) § Worktree cleanup). Registered only when AI is
+on (absent ⇒ 404). Machine-wide, no `?workspace=`. Tier `read` (a local walk; no model, no GitHub).
+
+| Route | Contract |
+|---|---|
+| `GET /api/storage/clones` | → `CloneStorageResponse {cloneBytes, checkouts, checkoutBytes, freedBytes30d, lastSweepAt}`: the shared repository copies (without checkouts), the per-run checkouts on disk now and their bytes, what the worktree sweep removed in the last 30 days (the ledger's closed rows; ⚠ `null` when unreadable, never 0), and when this process last finished a sweep (ISO, `null` before the first). One walk of the clone cache, cached for a minute. |
+
 ### CI review
 
 Why checks FAILED on a PR's head, as its own Claude process — the PR review no longer looks at CI

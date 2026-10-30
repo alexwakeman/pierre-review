@@ -114,13 +114,13 @@ pierre-review/
 │  ├─ backend/   src/{index,app,config,cli}.ts · auth/ · ai/ (provider, credentials, codex/) · db/
 │  │             (schema.sqlite.ts, client.ts, queries.ts, migrations/) · github/ · sync/ (+
 │  │             __fixtures__/threads/) · merge/ · conflict/ · review/ · coding/ · tracker/ ·
-│  │             sonar/ · reference-docs/ · ml/ · platform/ (formerly Pro) · api/{routes,plugins}/
+│  │             sonar/ · reference-docs/ · ml/ · platform/ · api/{routes,plugins}/
 │  ├─ frontend/  the SPA (base `/app/`): App.tsx · store/ · hooks/ · api/client.ts · components/ ·
 │  │             lib/ui.ts · src/demo/ (the static demo runtime, `--mode demo` only)
 │  ├─ landing/   the marketing site, PRERENDERED per route (served by apps/site, NOT the npm release)
 │  └─ site/      the website service: landing + /demo/ + /api/contact (node:http, no runtime deps)
 └─ packages/
-   ├─ shared/    the contract between the apps (types + the few shared folds; see Packaging)
+   ├─ shared/    the contract between the apps (types + the few shared folds)
    └─ ml/        pierre-ml submodule: model assets + the Python severity-api. NOT a pnpm workspace.
 ```
 
@@ -154,7 +154,7 @@ All from the repo root unless noted.
 ## Backend
 
 **Boot order** (`index.ts`): migrations → event cleanup → clone-cache sweep (bounded) →
-`ensureLocalAccount()` → `buildApp()` → `bindPlatform()` → scheduler → listen.
+`ensureLocalAccount()` → `buildApp()` → `bindPlatform()` → scheduler → listen → worktree sweep (bg).
 
 ### Sync pipeline (`src/sync/`)
 

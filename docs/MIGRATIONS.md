@@ -1306,6 +1306,15 @@ line). Additive, nullable, no backfill: NULL is today's rule everywhere. Both ta
 renumbered on merge (the reference-docs and tracker migrations had published 0139–0144); a database that
 had applied it as `0139` was re-applied by hand once.
 
+### `0146_worktree_ledger` — which run a checkout on disk belongs to
+`CREATE TABLE worktree_ledger` (path UNIQUE, clone dir, owner/name, `kind`, `pr_id`, `ticket`,
+`run_id`, `head_sha`, `pid`, `instance`, `pin_reason`, created / last-used / released / removed,
+`remove_reason`, `bytes_reclaimed`) + an index on `removed_at`. `account_id` is NULLABLE (a run that
+named no account; the clone cache is the machine's) and the table is on `accountScopedTables()` and
+erased with the account. No FKs. Additive, no backfill: a checkout made before it is an unledgered
+orphan the sweep collects by age. [BACKEND.md](BACKEND.md) § Worktree cleanup. Journal `idx` 146,
+`when` sqlite `1792137650016`.
+
 ### No migration — "Check against code" removed (2026-10-18): `sprint_ticket_repos` + `sprint_assessments` DORMANT
 
 The sprint drawer, its repo picker and "Check against code" (`review/sprint-assess/`) were removed with

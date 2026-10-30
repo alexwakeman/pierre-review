@@ -10,9 +10,9 @@
 ### Startup & auth
 
 `index.ts` runs migrations, prunes redundant events, sweeps the clone cache, ensures the local
-account, builds the app, starts the agentic background work, binds the platform
-(`bindPlatform`, `platform/context.ts` → `registerPlatform`), starts the tracker worker and the
-scheduler, listens. There is one synthesized account (id 1): `ensureLocalAccount()`
+account, builds the app, installs the worktree ledger, starts the agentic background work, binds
+the platform (`bindPlatform`, `platform/context.ts` → `registerPlatform`), starts the tracker worker
+and the scheduler, listens, then starts the worktree sweep in the background (§ Worktree cleanup). There is one synthesized account (id 1): `ensureLocalAccount()`
 shells out to `gh api user` at startup, caches the identity on the `accounts` row (refreshed
 ~daily; non-fatal offline — you lose "my turn" triage). API calls use `gh auth token`
 (`getAccessToken`); SQLite opens `journal_mode=WAL` + `foreign_keys=ON`. There is no sign-in,
@@ -158,6 +158,54 @@ Two rules: ⚠ a first sighting counts ONLY for an OPEN PR (the deep backfill's 
 otherwise cascade a refetch on every SPA poll), and ⚠ a moved `updatedAt` counts (it stands in for
 new reviews, comments, replies and commits, which are child rows). The merge-queue pair counts
 only when the response carried it.
+
+### Worktree cleanup (the ledger and the sweep)
+
+Every agentic run that reads code (Claude Review, chat, AI Fix and Plan first, Check threads, the
+replies pass, the CI review, the ticket review, diagrams, update-from-trunk, Resolve with Claude)
+checks a PR out into its own worktree, `<cloneDir>/<owner__name>/.worktrees/<sha>-<pid>-<n>`, made
+ONLY by `review/clone-manager.ts` `addWorktree` and removed by the run's own `finally`. A crash, a
+kill or a failed `git worktree remove` leaves a full checkout behind. Two pieces collect them:
+
+- **The ledger** — `worktree_ledger` (migration 0146), one row per checkout: path, clone, repo,
+  `kind` (`WorktreeKind`, `review/worktree-owner.ts`), `prId` / `ticket` / `runId`, the creating
+  `pid` + a per-boot `instance` token, `pinReason` (`'running'` until the run lets go), created /
+  last-used / released / removed, `removeReason`, `bytesReclaimed`. Account-scoped (`accountId`,
+  NULL when the run named none; on `accountScopedTables()`); closed rows are deleted after 30 days.
+  The OWNER is named by the run's manager around its call — `withWorktreeOwner({kind, accountId,
+  prId, runId}, () => …)` — an AsyncLocalStorage `addWorktree` reads, so no signature below the
+  manager (nor the platform contract) carries it. A checkout made with no owner in scope is ledgered
+  as `'other'`. The writes go through a seam the boot installs (`installWorktreeLedger` →
+  `setWorktreeLedgerHooks`), so the git helpers never open the DB in a unit test; every write is
+  best-effort and never fails a run.
+- **The sweep** — `review/worktree-gc.ts` `runWorktreeSweep`, with the policy pure in
+  `review/worktree-gc-policy.ts` (`decideLedgered`, `decideOrphan`; the ORDER of the rules is the
+  policy, read the header). Keep: in use by a job in this process (`liveWorktrees` — identity,
+  never age); made by another LIVE Limn process and not idle (`WORKTREE_IDLE_DAYS`, 3); holding a
+  fix the reader has not pushed (`ai_fixes` succeeded with a patch, not pushed — kept until pushed
+  or discarded, at most `WORKTREE_PIN_DAYS`, 14). Remove: PR merged / closed / gone; the run let go;
+  the run's row is over; the creating process has exited; idle. A directory with NO ledger row
+  (older builds, a failed write) goes after `WORKTREE_TTL_HOURS` (6) by its mtime. Removal is
+  `git worktree remove --force` under the repo lock, an rm of what is left, then one `git worktree
+  prune` per clone touched; the log line names the count, the reasons and the MB reclaimed.
+  - ⚠ **Nothing outside the clone cache.** A path is removed only when its REAL path is exactly
+    `<cloneDir>/<clone>/.worktrees/<entry>` (`isCacheWorktreePath`) and it is not a symlink.
+  - ⚠ **No ledger, no sweep.** If the ledger cannot be read the sweep stops: carrying on would judge
+    every ledgered tree by age alone and remove unpushed work.
+  - **When:** once after `listen` (never awaited, bounded by `WORKTREE_SWEEP_MAX_MS`), and when a
+    run makes a worktree — at most once per `WORKTREE_SWEEP_MIN_GAP_MIN` (10), fire-and-forget. One
+    at a time.
+  - The trees it keeps for a reason no clock sees (unpushed, another process) go into
+    `heldWorktrees` (`clone-hygiene.ts`), which the LRU's `hasFreshWorktrees` honours.
+  - ⚠ The boot hygiene sweep (`sweepCloneCache`, awaited before listen) **no longer deletes stale
+    worktree directories** — it ran before the ledger is read and would have deleted unpushed work.
+    It still repairs credentials, tightens permissions, prunes dead records and drops the
+    resolver's fetch refs.
+
+Settings → AI → **Disk space** reads `GET /api/storage/clones` (`CloneStorageResponse`: the shared
+clones, the checkouts on disk, what the sweep freed in 30 days — `null` when unreadable, never 0);
+one walk of the clone cache, cached for a minute. Tests: `worktree-gc-policy.test.ts` (each rule),
+`worktree-gc.test.ts` (real git: removal, prune, bytes, refusal outside the cache, the ledger end to end).
 
 ---
 
