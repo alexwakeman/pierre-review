@@ -1613,18 +1613,20 @@ function InlineThread({ item }: { item: ConsolidatedFeedItem }): JSX.Element {
               <ThreadStatePill thread={thread} noInfo />
             </span>
           )}
-          <code className="truncate font-mono text-ui-mute group-hover/rt:text-ui-accent">
+          {/* The file takes the row's remaining width (it was squeezed to "quer…" at 390px). */}
+          <code className="min-w-0 flex-1 truncate font-mono text-ui-mute group-hover/rt:text-ui-accent">
             {file}
             {!expanded && thread.line != null ? `:${thread.line}` : ''}
           </code>
           {!expanded && (
-            <span className="shrink-0 text-ui-faint">
-              {count === 1 ? '1 comment' : `${count} comments`}
+            <span className="shrink-0 text-ui-faint" title={count === 1 ? '1 comment' : `${count} comments`}>
+              {count}
+              <span className="max-sm:sr-only">{count === 1 ? ' comment' : ' comments'}</span>
             </span>
           )}
           <span
             className={`ml-auto shrink-0 text-ui-accent ${
-              expanded ? '' : 'opacity-0 group-hover/rt:opacity-100'
+              expanded ? '' : 'opacity-0 group-hover/rt:opacity-100 max-sm:hidden'
             }`}
           >
             {expanded ? 'Hide' : 'Show'}
@@ -1970,14 +1972,17 @@ function FeedRowImpl({
         {isMyTurn && <span aria-hidden className="absolute inset-y-2 left-0 w-0.5 rounded-full bg-ui-accent" />}
         {/* LINE 1 — who did what, and when: the category icon, the actor (+ bot vendor), the event,
             My Turn and why, New … the Focus button and the age on the right. */}
-        <div className="flex min-w-0 items-center gap-2">
+        {/* Below sm the line WRAPS: who + when stay on top, and what happened (the event, its
+            verdict, My Turn, New) takes a line of its own under the name — at 390px one line cut
+            both the name ("Priya N") and the verdict ("Review: Appr…"). */}
+        <div className="flex min-w-0 items-center gap-2 max-sm:flex-wrap max-sm:gap-y-0.5">
           {/* WHICH PILL THIS CARD BELONGS TO, by its shape. Decorative (the event words name it). */}
           {pill != null && <pill.icon size={13} className={`shrink-0 ${pill.ink}`} />}
           <Avatar user={actorUser} size={18} />
           {/* A real actor's name opens the user popover (stats + activity tab); the synthetic
               label ('A contributor') has no user behind it and stays plain text. */}
           {actorUser != null ? (
-            <span className="min-w-0 truncate font-medium text-ui-ink">
+            <span className="min-w-0 truncate font-medium text-ui-ink max-sm:flex-1 max-sm:basis-0">
               <UserName
                 user={actorUser}
                 fallbackId={item.actorId}
@@ -1985,7 +1990,7 @@ function FeedRowImpl({
               />
             </span>
           ) : (
-            <span className="min-w-0 truncate font-medium text-ui-ink">
+            <span className="min-w-0 truncate font-medium text-ui-ink max-sm:flex-1 max-sm:basis-0">
               {actorName}
             </span>
           )}
@@ -2016,6 +2021,7 @@ function FeedRowImpl({
               )}
             </span>
           )}
+          <span className="contents max-sm:order-last max-sm:flex max-sm:min-w-0 max-sm:basis-full max-sm:items-center max-sm:gap-2 max-sm:pl-[21px]">
           <span className={`min-w-0 shrink truncate text-meta ${glyphTone(item)}`}>{glyph.label}</span>
           {isMyTurn && (
             <span className="shrink-0 text-meta font-medium text-ui-accent">My Turn</span>
@@ -2038,6 +2044,7 @@ function FeedRowImpl({
               New
             </span>
           )}
+          </span>
           <span className="ml-auto flex shrink-0 items-center gap-1">
             {item.prId != null && (
               <button

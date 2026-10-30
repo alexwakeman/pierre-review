@@ -2,6 +2,7 @@ import { profileUrl } from '../lib/ui.js';
 import { ExternalLinkIcon, GearIcon } from './Icons.js';
 import { Menu, type MenuEntry } from './ui/Menu.js';
 import { cx, FOCUS_RING } from './ui/cx.js';
+import { Monogram } from './CommentCard.js';
 
 // The account menu at the foot of the sidebar: who is signed in (avatar + name, "@login" in the
 // trigger's title), Settings, and the GitHub profile. Built on the shared `Menu` (one popover at a
@@ -30,13 +31,7 @@ export function UserMenu({
         style={{ width: 20, height: 20 }}
       />
     ) : (
-      <span
-        aria-hidden
-        className="flex shrink-0 items-center justify-center rounded-full bg-ui-hover text-meta font-semibold text-ui-ink"
-        style={{ width: 20, height: 20 }}
-      >
-        {label.slice(0, 2).toUpperCase()}
-      </span>
+      <Monogram label={label} size={20} />
     );
 
   const items: MenuEntry[] = [

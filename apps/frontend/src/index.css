@@ -36,12 +36,13 @@
   --ai-hairline: 237 237 232;     /* #EDEDE8 rule-hair   */
   --ai-ink: 22 22 26;             /* #16161A ink         */
   --ai-muted: 90 90 94;           /* #5A5A5E muted       */
-  --ai-signal: 181 54 33;         /* #B53621 signal-text — darkened from the landing's #C13A20
-                                     so every text-on-wash recipe clears WCAG: /15 over
-                                     --ai-surface 4.55:1, /10 over a panel 4.92:1 (the brand hex
-                                     measured 4.14/4.46), and the chip ✕ at /70 clears the 3:1
-                                     non-text floor. Landing + Wordmark keep the brand hex. */
-  --ai-signal-fill: 226 73 44;    /* #E2492C signal-fill */
+  /* ⚠ VIOLET, NOT THE BRAND VERMILION. Vermilion (#B53621 here, #F26B4E on dark) sat within a few
+     degrees of --ui-danger (#B82A26 / #F07572), so every AI action and mark read as "blocked" —
+     against the colour rule (red = what blocks, docs/redesign/DESIGN.md § Colour). The landing and
+     the Wordmark keep the brand hex; inside the app the AI family is violet.
+     Measured: on the AI surface 6.49:1, /15 wash 5.17:1, /10 over white 5.83:1, on a selected row 5.42:1. */
+  --ai-signal: 107 63 192;        /* #6B3FC0 signal-text */
+  --ai-signal-fill: 124 77 219;   /* #7C4DDB signal-fill (non-text) */
 }
 
 .dark {
@@ -51,8 +52,8 @@
   --ai-hairline: 42 42 46;        /* #2A2A2E ink-body                   */
   --ai-ink: 220 220 214;          /* #DCDCD6 on-dark-body               */
   --ai-muted: 154 154 148;        /* #9A9A94 on-dark-secondary          */
-  --ai-signal: 242 107 78;        /* #F26B4E signal-on-dark             */
-  --ai-signal-fill: 242 107 78;   /* same — one dark vermilion          */
+  --ai-signal: 182 156 250;       /* #B69CFA violet on dark: 8.33:1 on the page, 6.67:1 on a selected row */
+  --ai-signal-fill: 182 156 250;  /* same — one dark violet             */
 }
 
 /* ── THE REDESIGN'S COLOUR ROLES (docs/redesign/DESIGN.md § Colour) ───────────────────────────
@@ -289,7 +290,8 @@ body {
   color: #3b82f6;
   text-decoration: underline;
 }
-.md-body code {
+.md-body code,
+.md-inline code {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.9em;
   background: rgba(127, 127, 127, 0.18);

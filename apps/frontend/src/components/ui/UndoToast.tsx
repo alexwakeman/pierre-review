@@ -13,6 +13,9 @@ export function UndoToast(): JSX.Element | null {
     <HeaderToast
       key={offer.id}
       testId="undo-toast"
+      // Wider than the other cards below sm: its summary names WHAT is being undone ("#116 —…"),
+      // and a 112px slot left one letter of it beside Undo and the X.
+      className="max-sm:w-48"
       tone={offer.tone}
       label={offer.label}
       icon={<UndoIcon size={13} />}

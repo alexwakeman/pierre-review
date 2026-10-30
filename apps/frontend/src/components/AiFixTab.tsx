@@ -47,6 +47,7 @@ import { RegenProgressBar } from './Activity/RegenProgressBar.js';
 import { InfoButton } from './InfoModal.js';
 import { ConflictAiCard, resolverTargetOf, usePrConflictsResolvable } from './AiFix/ConflictAiCard.js';
 import { startConflictAiRun } from '../hooks/useConflictAiResolve.js';
+import { CheckboxBox, RadioBox } from './ui/FormControls.js';
 
 const BTN_PRIMARY =
   'inline-flex h-7 items-center whitespace-nowrap rounded-ui bg-ui-raise px-2.5 text-meta font-medium text-ui-ink hover:bg-ui-hover disabled:cursor-not-allowed disabled:opacity-50 touch:h-10 touch:px-3';
@@ -305,9 +306,8 @@ function FixerSection({
                 )}
                 {preview.data && preview.data.items.length > 0 && conflictsResolvable && (
                   <label className="mt-3 flex cursor-pointer items-start gap-2 text-meta text-ui-ink">
-                    <input
-                      type="checkbox"
-                      className="mt-0.5 h-4 w-4 shrink-0 accent-ui-accent-fill"
+                    <CheckboxBox
+                      className="mt-0.5"
                       checked={alsoResolve}
                       disabled={fixStarting}
                       onChange={(e) => setAlsoResolve(e.target.checked)}
@@ -325,9 +325,7 @@ function FixerSection({
                     <ModelPicker state={modelPick} onPick={modelPick.pick} disabled={fixStarting} />
                     {canPlan && (
                       <label className="flex cursor-pointer items-center gap-1.5 text-meta text-ui-ink">
-                        <input
-                          type="checkbox"
-                          className="h-4 w-4 shrink-0 accent-ui-accent-fill"
+                        <CheckboxBox
                           checked={planFirst}
                           disabled={fixStarting}
                           onChange={(e) => setPlanFirst(e.target.checked)}
@@ -711,9 +709,8 @@ function PushControls({
             : 'The PR head is a fork you cannot push to — use a new branch'
         }
       >
-        <input
-          type="radio"
-          className="h-4 w-4 shrink-0 accent-ui-accent-fill"
+        <RadioBox
+          className="mt-0"
           checked={target === 'existing'}
           disabled={!canPushSameBranch || busy}
           onChange={() => setTarget('existing')}
@@ -724,9 +721,8 @@ function PushControls({
         )}
       </label>
       <label className="mt-1 flex items-center gap-2 text-meta">
-        <input
-          type="radio"
-          className="h-4 w-4 shrink-0 accent-ui-accent-fill"
+        <RadioBox
+          className="mt-0"
           checked={target === 'new'}
           disabled={busy}
           onChange={() => setTarget('new')}

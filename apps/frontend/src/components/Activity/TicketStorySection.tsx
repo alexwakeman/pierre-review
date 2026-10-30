@@ -52,6 +52,7 @@ import { StoryDisclosure } from '../TicketStory.js';
 import { StoryDesignButton, StoryDesignSection, useStoryDesign, type StoryDesign } from './StoryDesignSection.js';
 import { StoryDocsAlignmentBlock, StoryDocsButton, StoryDocsCriterionDetail } from './StoryDocsAlignment.js';
 import { aiModelWords } from '@pierre-review/shared';
+import { InlineMarkdown } from '../InlineMarkdown.js';
 
 const MUTED = 'text-ui-mute';
 /** Criteria listed before "Show all" (real stories itemise up to ~35). */
@@ -235,7 +236,7 @@ function BriefSummary({
                 <li key={c.n} className="flex flex-col px-1 text-body text-ui-ink">
                   <div className="flex items-baseline gap-2">
                     <span className={`w-5 shrink-0 text-right font-mono text-meta ${MUTED}`}>{c.n}</span>
-                    <span className="min-w-0 break-words">{c.text}</span>
+                    <InlineMarkdown className="min-w-0 break-words">{c.text}</InlineMarkdown>
                   </div>
                   {docs != null && (
                     <div className="pl-7">

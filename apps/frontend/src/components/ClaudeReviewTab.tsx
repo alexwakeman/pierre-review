@@ -85,6 +85,7 @@ import {
   ExternalLinkIcon,
   PencilIcon,
   RefreshIcon,
+  SparkleIcon,
   WarningIcon,
 } from './Icons.js';
 import { VerdictIcon } from './VerdictIcon.js';
@@ -223,14 +224,20 @@ function currencyOf(review: ClaudeReview, prHeadSha: string | null): ReviewCurre
   });
 }
 
-// The header pill: green "On latest commit · abc1234", or amber "2 newer commits" / "Branch changed".
+// The header fact: "On latest commit · abc1234", or "2 newer commits" / "Branch changed" (warn glyph).
 function CurrencyPill({ currency }: { currency: ReviewCurrency }): JSX.Element {
   return (
+    // Icon + grey words (a fact about the run, not a status that blocks or is ready): only the
+    // stale case's warning glyph carries the warn ink.
     <span
-      className={`inline-flex items-center gap-1 rounded-ui px-1.5 py-0.5 text-meta font-medium ${currency.className}`}
+      className="inline-flex items-center gap-1 py-0.5 text-meta font-medium text-ui-mute"
       title={currency.title}
     >
-      {currency.tone === 'current' ? <CheckIcon size={12} /> : <WarningIcon size={12} />}
+      {currency.tone === 'current' ? (
+        <CheckIcon size={12} className="text-ui-faint" />
+      ) : (
+        <WarningIcon size={12} className="text-ui-warn" />
+      )}
       {currency.label}
       {currency.tone === 'current' && <span className="font-mono">· {currency.sha}</span>}
     </span>
@@ -1391,22 +1398,22 @@ export function ClaudesReview({
             {currency != null && <CurrencyPill currency={currency} />}
             <ReviewedAgo at={review.finishedAt} />
             {review.trigger === 'auto' && (
-              <span className="rounded-ui bg-ui-raise px-1.5 py-0.5 text-meta text-ui-mute">
+              <span className="text-meta text-ui-mute">
                 {AUTO_REVIEW_LABEL}
               </span>
             )}
             {review.fresh === true && (
-              <span className="rounded-ui bg-ui-raise px-1.5 py-0.5 text-meta text-ui-mute">
+              <span className="text-meta text-ui-mute">
                 {FRESH_REVIEW_LABEL}
               </span>
             )}
             {review.kind === 'replies' && (
-              <span className="rounded-ui bg-ui-raise px-1.5 py-0.5 text-meta text-ui-mute">
+              <span className="text-meta text-ui-mute">
                 {REPLIES_CHECK_LABEL}
               </span>
             )}
             {review.reviewMode != null && (
-              <span className="rounded-ui bg-ui-raise px-1.5 py-0.5 text-meta text-ui-mute">
+              <span className="text-meta text-ui-mute">
                 {REVIEW_MODE_LABEL[review.reviewMode]} review
               </span>
             )}
@@ -1621,8 +1628,9 @@ function GenerateFixButton({
       <button
         type="button"
         onClick={() => openAiFixFromReview(prId, review.id)}
-        className="hit inline-flex items-center gap-1 whitespace-nowrap rounded-ui border border-ai-border px-2.5 py-1 text-meta text-ai-signal hover:border-ai-signal/60 hover:bg-ai-surface-2 touch:min-h-10"
+        className="inline-flex h-7 items-center gap-1.5 whitespace-nowrap rounded-ui bg-ui-raise px-2.5 text-meta font-medium text-ui-ink hover:bg-ui-hover touch:h-10 touch:px-3"
       >
+        <SparkleIcon size={12} className="text-ai-signal" />
         Generate fix from this review
         <ArrowIcon dir="right" size={11} />
       </button>
@@ -2028,7 +2036,7 @@ export function ClaudeReviewTab({
               className="text-body"
             />
             {review?.trigger === 'auto' && (
-              <span className="rounded-ui bg-ui-raise px-1.5 py-0.5 text-meta text-ui-mute">
+              <span className="text-meta text-ui-mute">
                 {AUTO_REVIEW_LABEL}
               </span>
             )}

@@ -50,12 +50,11 @@ import { EDIT_REGION, INK_CLASS, actionLabels, regionGroupLabel, stateWord } fro
 // `gutterLabel` in `copy.ts`.
 
 const BTN =
-  'flex items-center gap-1 rounded-ui border px-1 py-0.5 text-meta leading-none transition-colors ' +
-  'border-ui-line text-ui-ink hover:border-ui-line hover:bg-ui-hover ' +
-  '';
+  'flex items-center justify-center gap-1 rounded-ui bg-ui-raise px-1 py-0.5 text-meta leading-none transition-colors ' +
+  'text-ui-ink hover:bg-ui-hover touch:min-h-10 touch:min-w-10';
 const BTN_ON =
-  'flex items-center gap-1 rounded-ui border px-1 py-0.5 text-meta leading-none ' +
-  'border-ui-line bg-ui-raise text-ui-ink';
+  'flex items-center justify-center gap-1 rounded-ui px-1 py-0.5 text-meta leading-none ' +
+  'bg-ui-sel text-ui-ink touch:min-h-10 touch:min-w-10';
 
 export function SlotStrip({
   region,

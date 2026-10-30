@@ -49,7 +49,7 @@ import { anchorToastPanel } from '../lib/toastAnchor.js';
 //    on, wheeling "the page" afterwards kept rubber-banding the root instead of scrolling the
 //    content. Rows therefore never carry their own `max-h-* overflow-auto` (a second scroller is a
 //    second chain), and the strip is contained too, for a wheel over a collapsed card.
-//  • ITS BORDER NAMES ITS SOURCE (`tone`): AI vermilion, the merge violet, the sync sky, the
+//  • ITS BORDER NAMES ITS SOURCE (`tone`): AI violet, the merge accent, the sync sky, the
 //    Pending amber, the resolver's conflict red. Border only — the background stays neutral, and
 //    the icon + label still say the same thing in words, so the colour is never the only signal.
 //    A PROGRESS BAR wears the SAME tone: `HEADER_TOAST_TONE` is the one mapping for both.
@@ -264,7 +264,8 @@ const SLOT = 'relative h-7 w-28 shrink-0 sm:w-56 lg:w-64 touch:h-10';
 const PANEL_BASE = 'rounded-ui bg-ui-raise text-ui-ink';
 const PANEL_COLLAPSED = 'absolute inset-0 overflow-hidden';
 // ⚠ `overscroll-contain` is the scroll-bug fix, not polish — see the header comment.
-const PANEL_EXPANDED = 'z-50 overflow-y-auto overscroll-contain shadow-lg';
+// z-[60]: above a SidePanel sheet (z-50), which starts under the top bar.
+const PANEL_EXPANDED = 'z-[60] overflow-y-auto overscroll-contain shadow-lg';
 // The one inner divider every section of an expanded panel uses.
 const SECTION = 'border-t border-ui-line/60';
 

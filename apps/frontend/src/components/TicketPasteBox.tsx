@@ -21,9 +21,9 @@ import { CheckIcon, CloseIcon, PlusIcon, WarningIcon } from './Icons.js';
 const MUTED = 'text-ui-mute';
 const ERROR_TEXT = 'text-ui-danger';
 const BTN =
-  'whitespace-nowrap rounded-ui border border-ui-line px-2 py-0.5 text-meta hover:border-ui-line disabled:opacity-50';
+  'inline-flex h-7 items-center whitespace-nowrap rounded-ui bg-ui-raise px-2 text-meta text-ui-ink hover:bg-ui-hover disabled:opacity-50 touch:h-10 touch:px-3';
 const BTN_PRIMARY =
-  'whitespace-nowrap rounded-ui border border-ui-line px-2 py-0.5 text-meta text-ui-accent hover:bg-ui-hover disabled:opacity-50';
+  'inline-flex h-7 items-center whitespace-nowrap rounded-ui bg-ui-raise px-2 text-meta text-ui-accent hover:bg-ui-hover disabled:opacity-50 touch:h-10 touch:px-3';
 const LINK_BTN = 'text-meta text-ui-accent hover:underline disabled:opacity-50';
 const SPINNER =
   'inline-block h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-ui-line border-t-ui-line';

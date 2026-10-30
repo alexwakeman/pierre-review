@@ -1,5 +1,5 @@
 import type { DerivedState } from '@pierre-review/shared';
-import { DERIVED_STATE_META, vendorInk } from '../lib/ui.js';
+import { DERIVED_STATE_META } from '../lib/ui.js';
 
 export function StateBadge({
   state,
@@ -10,9 +10,12 @@ export function StateBadge({
 }): JSX.Element {
   const meta = DERIVED_STATE_META[state];
   return (
+    // Icon + words, no filled pill (docs/redesign/DESIGN.md § Colour): the state's hue rides the
+    // DOT only; the word is grey, except Resolved — the one state that is "done" (ready ink).
     <span
-      className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-meta font-medium"
-      style={{ backgroundColor: `${meta.color}22`, ...vendorInk(meta.color) }}
+      className={`inline-flex items-center gap-1 py-0.5 text-meta font-medium ${
+        state === 'resolved' ? 'text-ui-success' : 'text-ui-mute'
+      }`}
       title={meta.description}
     >
       <span

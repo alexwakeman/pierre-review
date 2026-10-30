@@ -36,13 +36,24 @@ export function TopBar({ toasts }: { toasts: ReactNode }): JSX.Element {
         : activeDynamic != null
           ? tabWords(activeDynamic)
           : '';
+  // Below lg the sidebar is a drawer and, from md to lg, there is no bottom bar either: the menu
+  // button carries what the phone's bottom bar shows — the Pending count, and a mark when other
+  // workspaces need you (the drawer's "Needs you elsewhere" strip) or a sync / AI alert stands.
+  const menuTone = signals.alert ?? (signals.elsewhere > 0 ? 'accent' : null);
+  const menuWords = [
+    signals.pending != null
+      ? `${signals.pending.count}${signals.pending.capped ? ' or more' : ''} need you in Pending`
+      : null,
+    signals.elsewhere > 0 ? `${signals.elsewhere} need you in other workspaces` : null,
+    signals.alertWords,
+  ].filter((w): w is string => w != null);
   return (
-    <header className="flex h-11 shrink-0 items-center gap-2 bg-ui-bg pl-2 pr-3 lg:pl-4">
+    <header data-shell-topbar className="flex h-11 shrink-0 items-center gap-2 bg-ui-bg pl-2 pr-3 lg:pl-4">
       <button
         type="button"
         onClick={() => setDrawerOpen(true)}
-        aria-label={signals.alertWords != null ? `Open menu. ${signals.alertWords}` : 'Open menu'}
-        title={signals.alertWords != null ? `Menu — ${signals.alertWords}` : 'Menu'}
+        aria-label={menuWords.length > 0 ? `Open menu. ${menuWords.join('; ')}` : 'Open menu'}
+        title={menuWords.length > 0 ? `Menu — ${menuWords.join('; ')}` : 'Menu'}
         data-alert={signals.alert ?? undefined}
         data-testid="topbar-menu"
         className={cx(
@@ -51,7 +62,18 @@ export function TopBar({ toasts }: { toasts: ReactNode }): JSX.Element {
         )}
       >
         <MenuIcon />
-        {signals.alert != null && <AlertDot tone={signals.alert} />}
+        {menuTone != null && <AlertDot tone={menuTone} />}
+        {/* md–lg only: below md the bottom bar's Pending tab shows the count. */}
+        {signals.pending != null && (
+          <span
+            aria-hidden
+            data-testid="topbar-pending-count"
+            className="absolute -bottom-0.5 -right-1 hidden min-w-[18px] rounded-full bg-ui-accent-fill px-1 text-center text-meta leading-[18px] tabular-nums text-ui-on-accent md:block"
+          >
+            {signals.pending.count}
+            {signals.pending.capped ? '+' : ''}
+          </span>
+        )}
       </button>
       {/* Where you are — for when the sidebar is not on screen (below lg). At lg+ the sidebar's
           highlight says it; on md+ a dynamic tab says it through its highlighted chip. */}

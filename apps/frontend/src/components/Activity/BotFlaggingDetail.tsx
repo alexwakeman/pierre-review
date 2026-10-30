@@ -548,7 +548,7 @@ export function BotFlaggingDetail(): JSX.Element {
                   setDisagree(seedDisagree);
                   setWindow(wOpt.key);
                 }}
-                className={`h-7 px-2 text-meta font-medium touch:h-10 touch:px-3 ${
+                className={`h-7 px-2 text-meta font-medium touch:h-10 touch:min-w-10 touch:px-3 ${
                   window === wOpt.key
                     ? 'bg-ai-signal/15 text-ai-signal'
                     : 'text-ui-mute hover:bg-ui-hover'

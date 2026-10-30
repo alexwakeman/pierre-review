@@ -413,7 +413,7 @@ export function BotDetailPanel(): JSX.Element {
               key={wOpt.key}
               type="button"
               onClick={() => setWindow(wOpt.key)}
-              className={`h-7 px-2 text-meta font-medium touch:h-10 touch:px-3 ${
+              className={`h-7 px-2 text-meta font-medium touch:h-10 touch:min-w-10 touch:px-3 ${
                 window === wOpt.key
                   ? 'bg-ui-sel text-ui-accent'
                   : 'text-ui-mute hover:bg-ui-hover'

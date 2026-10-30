@@ -18,7 +18,7 @@ import { CI_META } from '../../lib/ui.js';
 
 export const CARD_CHIP =
   'inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-2 py-px text-meta font-medium';
-export const CARD_NEUTRAL_CHIP = `${CARD_CHIP} border-ui-line text-ui-mute`;
+export const CARD_NEUTRAL_CHIP = `${CARD_CHIP} border-transparent bg-ui-raise text-ui-mute`; // tone, not a border
 export const CARD_TONE_CHIP = `${CARD_CHIP} border-transparent`;
 export const CARD_RED_CHIP = `${CARD_TONE_CHIP} bg-ui-danger/10 text-ui-danger`;
 

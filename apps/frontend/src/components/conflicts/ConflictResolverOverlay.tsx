@@ -647,7 +647,7 @@ function Notice({ text, onRetry }: { text: string; onRetry?: () => void }): JSX.
         <button
           type="button"
           onClick={onRetry}
-          className="hit rounded-ui border border-ui-line px-1.5 py-0.5 font-medium text-ui-ink hover:border-ui-line"
+          className="hit rounded-ui bg-ui-raise px-1.5 py-0.5 font-medium text-ui-ink hover:bg-ui-hover"
         >
           {/* Every `onRetry` here is `onRestart` — it opens a new session, it does not re-send
               anything — so the button says what it does, in the same words the landing step uses

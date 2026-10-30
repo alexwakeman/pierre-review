@@ -167,11 +167,14 @@ describe('MlSeverityBadge — the common path must not move', () => {
   const FROZEN =
     '<span class="inline-flex items-center gap-1" title="Minor: A small but genuine issue.\n' +
     'Confidence 62%. Category: Correctness, Testing.">' +
-    '<span class="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-meta font-semibold" ' +
-    'style="background-color:#0284c71a;--ink-light:#027ab8;--ink-dark:#0284c7">' +
+    '<span class="inline-flex items-center gap-1 py-0.5 text-meta font-semibold text-ui-mute">' +
     '<span class="inline-block h-1.5 w-1.5 rounded-full" style="background-color:#0284c7"></span>Minor</span>' +
     '<span class="rounded-ui bg-ui-raise px-1 py-0.5 text-meta font-medium text-ui-mute">Correctness · Testing</span></span>';
 
+  // ⚠ IT MOVED A THIRD TIME, DELIBERATELY: no filled pill. The redesign's colour rule tints only
+  // what blocks, so the severity hue rides the DOT and the word is grey (Critical alone is danger
+  // ink). The vendorInk pair below no longer applies to this word.
+  //
   // ⚠ IT MOVED A SECOND TIME, DELIBERATELY: the redesign's type scale and tokens (text-meta,
   // rounded-ui, the --ui-* inks, no uppercase-with-tracking labels).
   //
@@ -188,8 +191,7 @@ describe('MlSeverityBadge — the common path must not move', () => {
   const FROZEN_COMPACT =
     '<span class="inline-flex items-center gap-1" title="Minor: A small but genuine issue.\n' +
     'Confidence 62%. Category: Correctness, Testing.">' +
-    '<span class="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-meta font-semibold" ' +
-    'style="background-color:#0284c71a;--ink-light:#027ab8;--ink-dark:#0284c7">' +
+    '<span class="inline-flex items-center gap-1 py-0.5 text-meta font-semibold text-ui-mute">' +
     '<span class="inline-block h-1.5 w-1.5 rounded-full" style="background-color:#0284c7"></span>Minor</span></span>';
 
   it('renders byte-identically to the pre-change output', () => {

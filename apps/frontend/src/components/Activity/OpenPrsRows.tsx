@@ -577,8 +577,8 @@ function PrRow({
         </span>
         <span
           className={cx(
-            'flex w-9 shrink-0 items-center gap-1 text-meta tabular-nums max-md:hidden',
-            pr.threadCounts.untouched > 0 ? 'text-ui-warn' : 'text-ui-faint',
+            // ONE grey number; an untouched thread adds a small red dot, never an amber count.
+            'flex w-9 shrink-0 items-center gap-1 text-meta tabular-nums text-ui-faint max-md:hidden',
           )}
           title={threads != null ? `Review threads: ${threads.text}` : undefined}
         >
@@ -587,6 +587,9 @@ function PrRow({
               <ThreadsIcon size={12} aria-hidden />
               <span className="sr-only">Review threads: {threads.text}</span>
               <span aria-hidden>{openThreads}</span>
+              {pr.threadCounts.untouched > 0 && (
+                <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full bg-ui-danger" />
+              )}
             </>
           )}
         </span>
@@ -670,7 +673,7 @@ function TicketGroup({
               {t == null ? (
                 <span className="text-ui-mute">No ticket</span>
               ) : t.ident != null ? (
-                <TicketKeyButton ticket={{ ...t, ident: t.ident }} className="flex min-w-0 items-baseline gap-2 hover:underline">
+                <TicketKeyButton ticket={{ ...t, ident: t.ident }} className="flex min-w-0 items-baseline gap-2 hover:underline touch:min-h-10 touch:flex-1 touch:items-center">
                   <span className="inline-flex shrink-0 items-center gap-1 font-mono text-meta text-ui-mute">
                     <TicketIcon size={12} className="shrink-0 self-center" />
                     {t.key}
@@ -788,7 +791,7 @@ function TicketFacts({ t }: { t: NonNullable<OpenPrsStack['ticket']> }): JSX.Ele
         <span className="inline-flex shrink-0 items-center gap-1" title="Status in the tracker">
           <span
             aria-hidden
-            className={cx('h-1.5 w-1.5 rounded-full', cat === 'done' ? 'bg-ui-success' : cat === 'indeterminate' ? 'bg-ui-accent' : 'bg-ui-faint')}
+            className={cx('h-1.5 w-1.5 rounded-full', cat === 'done' ? 'bg-ui-success' : cat === 'indeterminate' ? 'bg-ui-mute' : 'bg-ui-faint')}
           />
           {status}
         </span>
@@ -826,7 +829,7 @@ function GroupCoverage({ ident, state, prId }: { ident: string; state: TicketRev
         </span>
       )}
       {cov != null && cov.stale && currency != null && (
-        <span className="text-ui-warn" title={currency.title}>
+        <span className="text-ui-mute" title={currency.title}>
           {currency.label}
         </span>
       )}
@@ -886,7 +889,7 @@ function PrPanelBody({ entry, data, onJump }: { entry: Entry; data: OpenPrsRowsD
         </Fact>
         <Fact label="Threads">
           {threads != null ? (
-            <span className={cx('inline-flex items-center gap-2', threads.warn ? 'text-ui-warn' : 'text-ui-ink')} title="Review threads: untouched · replied · likely addressed · resolved">
+            <span className={'inline-flex items-center gap-2 text-ui-ink'} title="Review threads: untouched · replied · likely addressed · resolved">
               <ThreadStateBar counts={pr.threadCounts} compact className="!w-10" />
               {threads.text}
             </span>

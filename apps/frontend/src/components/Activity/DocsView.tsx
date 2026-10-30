@@ -280,7 +280,7 @@ function DocTreeItem({
             onClick={() => onOpen(r.path, anchor)}
             aria-current={on ? 'true' : undefined}
             title={r.kind === 'section' && r.summary !== '' ? r.summary : undefined}
-            className={cx('hit block min-w-0 flex-1 rounded-ui px-1.5 py-1 text-left', r.kind === 'heading' ? 'text-meta' : 'text-body', on ? 'bg-ui-sel font-medium text-ui-ink' : 'text-ui-ink hover:bg-ui-hover', FOCUS_RING)}
+            className={cx('block min-w-0 flex-1 rounded-ui px-1.5 py-1 text-left touch:min-h-10', r.kind === 'heading' ? 'text-meta' : 'text-body', on ? 'bg-ui-sel font-medium text-ui-ink' : 'text-ui-ink hover:bg-ui-hover', FOCUS_RING)}
           >
             {r.title}
           </button>
@@ -363,7 +363,7 @@ function DocRow({
                 type="button"
                 onClick={() => onOpen(contentsPath, null)}
                 aria-current={onContents ? 'true' : undefined}
-                className={cx('hit block w-full min-w-0 truncate rounded-ui text-left text-body font-medium text-ui-ink', FOCUS_RING)}
+                className={cx('block w-full min-w-0 truncate rounded-ui text-left text-body font-medium text-ui-ink touch:min-h-10', FOCUS_RING)}
               >
                 {doc.title}
               </button>

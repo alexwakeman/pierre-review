@@ -63,9 +63,9 @@ export const VERDICT_PILL =
 export const MUTED = 'text-meta text-ai-muted';
 // The AI surface's own button (the Claude Review tab's Run button idiom).
 const AI_BUTTON =
-  'hit whitespace-nowrap rounded-ui bg-ui-raise px-2 py-0.5 text-meta font-medium text-ui-ink hover:bg-ui-hover disabled:cursor-default disabled:opacity-60';
+  'inline-flex h-6 items-center whitespace-nowrap rounded-ui bg-ui-raise px-2 text-meta font-medium text-ui-ink hover:bg-ui-hover disabled:cursor-default disabled:opacity-60 touch:h-10 touch:px-3';
 const PLAIN_BUTTON =
-  'hit whitespace-nowrap rounded-ui bg-ui-raise px-2 py-0.5 text-meta font-medium text-ui-ink hover:bg-ui-hover';
+  'inline-flex h-6 items-center whitespace-nowrap rounded-ui bg-ui-raise px-2 text-meta font-medium text-ui-ink hover:bg-ui-hover touch:h-10 touch:px-3';
 
 // A ticket pill's colour by coverage (all met / some partly or can't tell / some not met).
 const TICKET_TONE: Record<CoverageTone, string> = {

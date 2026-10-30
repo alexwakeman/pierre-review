@@ -134,7 +134,9 @@ export function ThreadCard({
         {/* The worst ML severity anywhere in this conversation (summaries excluded). Renders
             nothing when no comment in the thread is labelled — which is also the state of every
             thread on a deployment with no model. */}
-        <MlSeverityBadge label={threadWorst} compact />
+        {/* Only when the thread has more than one comment: with one, its comment's own badge
+            below says the same severity, and two "Critical"s 20px apart is noise. */}
+        {thread.comments.length > 1 && <MlSeverityBadge label={threadWorst} compact />}
         <ShowOnTimeline
           prId={thread.prId}
           at={thread.createdAt}
@@ -238,7 +240,7 @@ export function ThreadCard({
             href={safeExternalUrl(thread.url) ?? `${prUrl}/files`}
             target="_blank"
             rel="noreferrer noopener"
-            className="hit text-ui-accent hover:underline"
+            className="inline-flex items-center gap-1 text-ui-accent hover:underline touch:min-h-10"
           >
             <ExternalLinkIcon size={11} className="inline-block align-[-0.1em]" />{' '}
             {thread.url ? 'View thread on GitHub' : 'Reply on GitHub'}

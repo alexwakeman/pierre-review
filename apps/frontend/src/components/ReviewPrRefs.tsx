@@ -11,7 +11,7 @@
 //   <Markdown prRefs>       markdown with its refs linked (Markdown.tsx, via the rehype plugin).
 //
 // Outside a provider every ref is plain text, so nothing else in the app changes.
-import { createContext, useContext, useMemo, type ReactNode } from 'react';
+import { createContext, Fragment, useContext, useMemo, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client.js';
 import { usePinnedTabs } from '../store/pinnedTabs.js';
@@ -25,6 +25,7 @@ import {
   type KnownPr,
   type PrRefIndex,
 } from '../lib/reviewPrRefs.js';
+import { inlineMarkdownNodes } from './InlineMarkdown.js';
 
 interface PrRefsValue {
   index: PrRefIndex;
@@ -99,7 +100,7 @@ export function PrRefLink({
         })
       }
       title={pr.title != null ? `${pr.repoFullName}#${pr.number}: ${pr.title}` : `Open ${pr.repoFullName}#${pr.number}`}
-      className={`inline p-0 text-left ${LINK}`}
+      className={`hit inline p-0 text-left ${LINK}`}
     >
       {children}
     </button>
@@ -109,18 +110,20 @@ export function PrRefLink({
 /** Plain text with every PR ref in it linked. Renders exactly `text` outside a provider. */
 export function PrRefText({ text }: { text: string }): JSX.Element {
   const parts = useMemo(() => (text.includes('#') ? splitPrRefs(text) : [text]), [text]);
+  // The words between refs render inline markdown (`code`, **bold**, _em_): model text arrives
+  // with it, and raw backticks read as unfinished (components/InlineMarkdown.tsx).
   return (
-    <>
+    <span className="md-inline">
       {parts.map((p, i) =>
         typeof p === 'string' ? (
-          p
+          <Fragment key={i}>{inlineMarkdownNodes(p)}</Fragment>
         ) : (
           <PrRefLink key={i} repo={p.repo} number={p.number}>
             {text.slice(p.start, p.end)}
           </PrRefLink>
         ),
       )}
-    </>
+    </span>
   );
 }
 

@@ -112,7 +112,9 @@ describe('the strip figures', () => {
     const B = 'b'.repeat(40);
     const cur = reviewCurrency({ reviewedHeadSha: A, currentHeadSha: A, commitsSince: 0 });
     expect(cur).toMatchObject({ tone: 'current', label: 'On latest commit', sha: 'aaaaaaa' });
-    expect(cur!.className).toMatch(/ui-success/);
+    // Grey since the redesign's colour rule: "on the latest commit" is a fact about the run, not
+    // a status that is ready (green) or blocks (red).
+    expect(cur!.className).toMatch(/ui-mute/);
     // A stray count never makes a current review "behind".
     expect(reviewCurrency({ reviewedHeadSha: A, currentHeadSha: A, commitsSince: 3 })!.tone).toBe('current');
 

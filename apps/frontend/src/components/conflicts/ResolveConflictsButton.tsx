@@ -76,7 +76,7 @@ export function ResolveConflictsButton({
   if (!show) return null;
   const cls =
     buttonClass ??
-    `inline-flex items-center gap-1 rounded-ui border border-ui-line px-1.5 py-0.5 text-meta font-medium text-ui-ink hover:border-ui-line hover:bg-ui-hover ${className ?? ''}`;
+    `inline-flex h-7 items-center gap-1 rounded-ui bg-ui-raise px-2 text-meta font-medium text-ui-ink hover:bg-ui-hover touch:h-10 touch:px-3 ${className ?? ''}`;
   // ⚠ WITHOUT THE AGENTIC FEATURES (cloud, LIMN_AI_DISABLED) THERE IS ONE WAY TO RESOLVE, SO THERE
   // IS NO MENU: the plain button, exactly as before.
   if (!ai.enabled) {
@@ -149,7 +149,7 @@ function ResolveConflictsMenu({
   }
 
   const item =
-    'flex w-full items-center gap-2 px-3 py-1.5 text-left text-meta text-ui-ink hover:bg-ui-hover';
+    'flex w-full items-center gap-2 px-3 py-1.5 text-left text-meta text-ui-ink hover:bg-ui-hover touch:min-h-11';
   return (
     <div ref={rootRef} className="relative inline-flex flex-col items-start gap-1">
       <button

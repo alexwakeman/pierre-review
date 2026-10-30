@@ -24,6 +24,7 @@ import {
   ThreadsIcon,
 } from './Icons.js';
 import { storyTabLabels } from '../lib/ticketTab.js';
+import { Monogram } from './CommentCard.js';
 
 // Active-label tone per chip flavour (inactive is the shared gray).
 // The redesign drops the per-kind colours (docs/redesign/DESIGN.md § 3: colour means blocks /
@@ -412,13 +413,7 @@ function TabChip({
               style={{ width: 16, height: 16 }}
             />
           ) : (
-            <span
-              aria-hidden
-              className="flex shrink-0 items-center justify-center rounded-full bg-ui-hover text-meta font-semibold text-ui-ink"
-              style={{ width: 16, height: 16 }}
-            >
-              {author.slice(0, 2).toUpperCase()}
-            </span>
+            <Monogram label={author} size={16} />
           )}
           <span className={chipLabelClass(active, 'sky')}>
             <span className="tabular-nums text-ui-faint">#{meta?.number}</span> {meta?.title}

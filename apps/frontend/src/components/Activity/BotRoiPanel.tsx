@@ -1,5 +1,5 @@
-import { useMemo, useRef, type ReactNode } from 'react';
-import { useEdgeFade } from '../ui/index.js';
+import { useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEdgeFade, useIsPhone } from '../ui/index.js';
 import type {
   AutomatedReviewerKind,
   BotAnalyticsMlTotals,
@@ -1005,7 +1005,13 @@ function VendorTable({
   // on anything merged here" and renders a DASH, never a 0.
   const volumeByBot = useMemo(() => volumeByKey(volume?.bots), [volume?.bots]);
   const mergedPrs = volume?.totals.prs ?? 0;
-  return (
+  // ⚠ ON A PHONE THE JUDGEMENT LEADS. The full table is 1,000–1,560px wide, which put the Verdict,
+  // "$ per used thread" and "% not addressed" four or five screen-widths to the right. Below md a
+  // one-line-per-bot list carries those first (the name still opens the bot's drill-down), and the
+  // full table — every column, unchanged — sits behind "All figures" underneath.
+  const phone = useIsPhone();
+  const [allFigures, setAllFigures] = useState(false);
+  const fullTable = (
     // Its own scroll box with the Bot column sticky, so the wide table never widens the page.
     <div ref={scrollRef} style={fade} className={TABLE_SCROLL} data-testid="bot-roi-table">
       <table
@@ -1475,6 +1481,60 @@ function VendorTable({
       </table>
     </div>
   );
+  if (phone) {
+    return (
+      <div className="space-y-2" data-testid="bot-roi-list">
+        <ul className="divide-y divide-ui-line/60 rounded-ui bg-ui-surface">
+          {vendors.map((v) => {
+            const color = botColor({ login: v.login, kind: v.kind });
+            const verdict = VERDICT_META[v.verdict];
+            return (
+              <li key={v.key} className="flex min-h-11 items-center gap-2 px-2 py-1 text-meta">
+                <button
+                  type="button"
+                  onClick={() => onOpenVendor(v.key)}
+                  title="Open the bot drill-down — its comments (default) and the PRs it touched"
+                  className="flex min-h-10 min-w-0 flex-1 items-center gap-1.5 rounded-ui text-left font-medium text-ui-ink"
+                >
+                  <span aria-hidden className="flex shrink-0" style={vendorInk(color)}>
+                    <BotIcon size={11} />
+                  </span>
+                  <span className="truncate">{v.label}</span>
+                </button>
+                {v.dormant ? (
+                  <span className="shrink-0 text-ui-mute">dormant</span>
+                ) : (
+                  <>
+                    <span className="shrink-0 tabular-nums text-ui-mute" title="% not addressed">
+                      {pct(v.noiseRatioPct)} <span className="text-ui-faint">not addressed</span>
+                    </span>
+                    {showCost && (
+                      <span className="shrink-0 tabular-nums text-ui-mute" title="$ per used thread">
+                        {usd(v.costPerActedOnUsd)}
+                      </span>
+                    )}
+                    <span className={`w-[5.5rem] shrink-0 text-right font-semibold ${verdict.className}`} title={verdict.title}>
+                      {verdict.label}
+                    </span>
+                  </>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+        <button
+          type="button"
+          aria-expanded={allFigures}
+          onClick={() => setAllFigures((o) => !o)}
+          className="inline-flex min-h-10 items-center gap-1 rounded-ui px-2 text-meta font-medium text-ui-accent hover:bg-ui-hover"
+        >
+          {allFigures ? 'Hide all figures' : 'All figures'}
+        </button>
+        {allFigures && fullTable}
+      </div>
+    );
+  }
+  return fullTable;
 }
 
 // The workspace-wide "clear the stale-bot backlog" caution — rendered in BotsView directly beneath

@@ -61,14 +61,11 @@ export function LineChart({
   const [ref, w] = useChartWidth();
   const [hover, setHover] = useState<number | null>(null);
 
-  const PAD_L = 36;
   const PAD_R = 8;
   const PAD_T = 8;
   const PAD_B = 18;
   const n = labels.length;
-  const innerW = Math.max(w - PAD_L - PAD_R, 1);
   const innerH = height - PAD_T - PAD_B;
-  const x = (i: number): number => PAD_L + (n <= 1 ? innerW / 2 : (i / (n - 1)) * innerW);
   const baseY = PAD_T + innerH;
 
   // y-scale: linear (0 → niceMax) by default; log10 across whole decades when `logY` and there's
@@ -104,6 +101,12 @@ export function LineChart({
     y = (v: number): number => PAD_T + innerH * (1 - v / maxV);
     yTicks = [0, maxV];
   }
+
+  // The left pad fits the WIDEST y tick (12px type ≈ 6.6px a character): a word axis
+  // ("Critical") was clipped to "ritical" by a fixed 36px.
+  const PAD_L = Math.max(36, Math.ceil(Math.max(0, ...yTicks.map((v) => formatY(v).length)) * 6.6) + 8);
+  const innerW = Math.max(w - PAD_L - PAD_R, 1);
+  const x = (i: number): number => PAD_L + (n <= 1 ? innerW / 2 : (i / (n - 1)) * innerW);
 
   const linePath = (s: Series): string =>
     s.values

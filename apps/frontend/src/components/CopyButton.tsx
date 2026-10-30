@@ -119,7 +119,7 @@ export function CopyButton({
           : label
       }
       aria-label={label}
-      className={`inline-flex shrink-0 items-center gap-1 rounded-ui px-1 py-0.5 text-meta font-medium transition-colors ${
+      className={`hit inline-flex shrink-0 items-center gap-1 rounded-ui px-1 py-0.5 text-meta font-medium transition-colors ${
         state === 'copied'
           ? 'text-ui-success'
           : state === 'failed'

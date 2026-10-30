@@ -74,7 +74,7 @@ export function TicketStatusPicker({
         aria-controls={open ? menuId : undefined}
         aria-label={`Status: ${status}. Change status`}
         title="Change status in Jira"
-        className={`${chipClassName} inline-flex items-center gap-1 hover:ring-1 hover:ring-ui-line focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent disabled:opacity-60`}
+        className={`${chipClassName} inline-flex items-center gap-1 touch:min-h-10 touch:px-3 hover:ring-1 hover:ring-ui-line focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent disabled:opacity-60`}
       >
         {pending ? 'Saving…' : status}
         <CaretIcon dir="down" />
@@ -112,7 +112,7 @@ export function TicketStatusPicker({
                   setOpen(false);
                   change.mutate(t.id);
                 }}
-                className="hit flex w-full flex-col rounded-ui px-2 py-1 text-left text-meta text-ui-ink hover:bg-ui-hover focus:bg-ui-hover focus:outline-none"
+                className="flex w-full flex-col rounded-ui px-2 py-1 text-left text-meta text-ui-ink touch:min-h-10 touch:justify-center hover:bg-ui-hover focus:bg-ui-hover focus:outline-none"
               >
                 <span>{t.to.name}</span>
                 {dupes.has(t.to.name) && t.name !== t.to.name && (

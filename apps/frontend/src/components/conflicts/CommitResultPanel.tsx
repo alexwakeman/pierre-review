@@ -77,7 +77,7 @@ export function CommitResultPanel({
           <button
             type="button"
             onClick={onClose}
-            className="hit rounded-ui border border-ui-line px-2.5 py-1 text-meta text-ui-ink hover:border-ui-line"
+            className="rounded-ui bg-ui-raise px-2.5 py-1 text-meta text-ui-ink hover:bg-ui-hover touch:min-h-10"
           >
             {CLOSE_RESOLVER}
           </button>

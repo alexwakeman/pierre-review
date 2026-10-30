@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { useIsPhone } from './ui/media.js';
+import { useIsPhone, useTimelineListCapable } from './ui/media.js';
 import { type User } from '@pierre-review/shared';
 import { buildMemberSections } from '../hooks/useMemberSections.js';
 import { useMergers, useRepos, useSearchTimeline, useUsers } from '../hooks/useTimeline.js';
@@ -222,14 +222,16 @@ export function FilterBar(): JSX.Element | null {
   // is one tap away. Wider screens always draw the board.
   const phoneLayout = useTimelineLayout((s) => s.phone);
   const setPhoneLayout = useTimelineLayout((s) => s.setPhone);
+  // The List / Board choice also shows on a touch tablet below lg (not just a phone).
+  const listCapable = useTimelineListCapable();
 
   // ⌘K: the Timeline's own actions (range, Now, Clear filters, Board / List), while it is on screen.
-  useTimelineCommands({ enabled: isTimeline, phone });
+  useTimelineCommands({ enabled: isTimeline, phone: listCapable });
 
   // Nothing to filter off the board (every hook above still ran: rules of hooks).
   if (!showEvents) return null;
 
-  const layoutToggle = phone && isTimeline && (
+  const layoutToggle = listCapable && isTimeline && (
     <Segmented
       label="Show the timeline as"
       value={phoneLayout}

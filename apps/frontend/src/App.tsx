@@ -3,7 +3,7 @@ import { FilterBar } from './components/FilterBar.js';
 import { PrDetail } from './components/PrDetail.js';
 import { Timeline } from './components/Timeline/index.js';
 import { TimelineList } from './components/Timeline/TimelineList.js';
-import { useIsPhone } from './components/ui/media.js';
+import { useIsPhone, useTimelineListCapable } from './components/ui/media.js';
 import { useTimelineLayout } from './store/timelineLayout.js';
 import { ActivityView } from './components/Activity/index.js';
 import { SprintTabView } from './components/Sprint/SprintTabView.js';
@@ -172,7 +172,9 @@ export default function App(): JSX.Element {
   // A phone: the shared board reads as a list by default, and the detail pane is a full-screen sheet.
   const phone = useIsPhone();
   const phoneLayout = useTimelineLayout((s) => s.phone);
-  const phoneTimelineList = phone && phoneLayout === 'list' && boardMode == null;
+  // …and so may a touch tablet below lg (useTimelineListCapable).
+  const listCapable = useTimelineListCapable();
+  const phoneTimelineList = listCapable && phoneLayout === 'list' && boardMode == null;
 
   // Resizable detail pane (Fix 2). Default taller than the old fixed 320px, and
   // the dragged height is remembered across reloads. During a drag we set the
@@ -245,9 +247,13 @@ export default function App(): JSX.Element {
 
   // The ONE header toast strip (components/HeaderToasts.tsx), now in the slim top bar. Every toast in
   // the app is a one-line card in here — never an independent `fixed` element, never a second
-  // strip. Order = left to right: the agent runs, the one-shot results, then the ambient loading bar.
+  // strip. Order = left to right: the Undo card, the agent runs, the one-shot results, then the ambient loading bar.
   const toasts = (
     <HeaderToastStrip>
+      {/* Undo for an optimistic row removal (components/ui/undo.ts). FIRST, not last: it lives a
+          few seconds and is the one card a reader must reach NOW — at the end of the strip a merge
+          pill or a run pushed it past the bar's clipped right edge (768px), Undo out of reach. */}
+      <UndoToast />
       <ClaudeReviewBanner />
       {/* Agentic AI-Fix runs started this session — the progress UI for a fix started outside the
           AI Fix tab. */}
@@ -264,8 +270,6 @@ export default function App(): JSX.Element {
       <AutoMergeBanner />
       {/* Ambient heavy-work indicator (backfills + ML bot-comment scoring). Non-dismissible. */}
       <GlobalLoadingBar />
-      {/* Undo for an optimistic row removal (components/ui/undo.ts). */}
-      <UndoToast />
     </HeaderToastStrip>
   );
 

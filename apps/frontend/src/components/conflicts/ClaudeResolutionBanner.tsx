@@ -37,7 +37,7 @@ export function ClaudeResolutionBanner(): JSX.Element | null {
           <button
             type="button"
             onClick={undoAllClaudeChoices}
-            className="hit inline-flex items-center gap-1 rounded-ui border border-ui-line px-1.5 py-0.5 text-meta hover:border-ui-line"
+            className="hit inline-flex items-center gap-1 rounded-ui bg-ui-raise px-1.5 py-0.5 text-meta hover:bg-ui-hover"
           >
             <UndoIcon size={12} />
             Undo all {name}’s choices

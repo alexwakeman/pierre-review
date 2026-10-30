@@ -303,7 +303,7 @@ function SuggestedReviewersRow({
                   type="button"
                   onClick={() => assign(s)}
                   disabled={pendingKey !== null || done}
-                  className="hit rounded-ui border border-violet-300 px-1.5 py-0.5 font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-50 dark:border-violet-700 dark:text-violet-300 dark:hover:bg-violet-900/20"
+                  className="inline-flex h-6 items-center rounded-ui bg-ui-raise px-2 font-medium text-ui-ink hover:bg-ui-hover disabled:opacity-50 touch:h-10 touch:px-3"
                   title="Request this reviewer on GitHub"
                 >
                   {done ? (

@@ -43,10 +43,11 @@ import { InfoButton } from '../InfoModal.js';
 import { AiStatusLine } from '../AiStatusLine.js';
 import { AiRunLabel } from '../AiRunLabel.js';
 import { aiModelWords, aiRunProviderName } from '@pierre-review/shared';
+import { InlineMarkdown } from '../InlineMarkdown.js';
 
 const MUTED = 'text-ui-mute';
 const BTN =
-  'rounded-ui border border-ui-line px-2 py-0.5 text-meta text-ui-ink hover:border-ui-line disabled:cursor-not-allowed disabled:opacity-40';
+  'inline-flex h-7 items-center whitespace-nowrap rounded-ui bg-ui-raise px-2 text-meta text-ui-ink hover:bg-ui-hover disabled:cursor-not-allowed disabled:opacity-40 touch:h-10 touch:px-3';
 
 type Tone = 'good' | 'mid' | 'bad';
 const OVERALL_TONE: Record<StoryDocsOverallVerdict, Tone> = { aligned: 'good', mixed: 'mid', diverges: 'bad' };
@@ -254,7 +255,7 @@ function StoryDocsResultView({ run, attached }: { run: StoryDocsAlignmentRun; at
           <ul className="list-disc space-y-1.5 pl-5">
             {overall.actions.map((a, i) => (
               <li key={i} className="text-body text-ui-ink">
-                <span className="break-words">{a.text}</span>
+                <InlineMarkdown className="break-words">{a.text}</InlineMarkdown>
                 <StoryDocsRefLinks refs={a.refs} />
               </li>
             ))}
@@ -296,7 +297,7 @@ function StoryDocsResultView({ run, attached }: { run: StoryDocsAlignmentRun; at
                 <li key={c.n} className="flex flex-col px-1">
                   <div className="flex items-baseline gap-2 text-body text-ui-ink">
                     <span className={`w-5 shrink-0 text-right font-mono text-meta ${MUTED}`}>{c.n}</span>
-                    <span className="min-w-0 break-words">{c.text}</span>
+                    <InlineMarkdown className="min-w-0 break-words">{c.text}</InlineMarkdown>
                   </div>
                   {item != null && (
                     <div className="pl-7">

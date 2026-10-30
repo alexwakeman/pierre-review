@@ -11,6 +11,7 @@ import { useBlastConfig } from '../../hooks/useBlastRadius.js';
 import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
 import { AiRunGate } from '../AiSetup.js';
 import { aiRunLabel } from '@pierre-review/shared';
+import { InlineMarkdown } from '../InlineMarkdown.js';
 
 // ── THE IMPACT NOTE — blast radius's AI half ────────────────────────────────────────────────
 //
@@ -142,7 +143,7 @@ export function BlastImpactNote({
         <button
           type="button"
           onClick={toggle}
-          className="hit inline-flex items-center gap-1 text-meta text-ui-mute hover:text-ui-ink"
+          className="inline-flex items-center gap-1 text-meta text-ui-mute hover:text-ui-ink touch:min-h-10"
           aria-expanded={false}
         >
           <ChevronIcon size={11} dir="right" />
@@ -158,7 +159,7 @@ export function BlastImpactNote({
           <button
             type="button"
             onClick={toggle}
-            className="hit inline-flex items-center gap-1 text-meta text-ui-mute hover:text-ui-ink"
+            className="inline-flex items-center gap-1 text-meta text-ui-mute hover:text-ui-ink touch:min-h-10"
             aria-expanded
           >
             <ChevronIcon size={11} dir="down" />
@@ -175,7 +176,7 @@ export function BlastImpactNote({
             </span>
           )}
           <p className="max-w-prose text-meta leading-snug text-ui-mute">
-            {note.body}
+            <InlineMarkdown>{note.body}</InlineMarkdown>
           </p>
           <div className="flex items-center gap-2 text-meta text-ui-faint">
             {/* Says who wrote it. Two sentences of prose beside a computed chip must not be

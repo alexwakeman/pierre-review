@@ -22,7 +22,8 @@ export function Heatmap({
   const [ref, w] = useChartWidth();
   const [hover, setHover] = useState<{ row: number; col: number } | null>(null);
 
-  const PAD_L = 26;
+  // Room for a 12px weekday ('Wed' ≈ 26px) plus the 4px gap; 26 clipped 'Mon' to 'Ɱon' at 390px.
+  const PAD_L = 34;
   const PAD_T = 2;
   const cellH = 14;
   const gridW = Math.max(w - PAD_L - 2, 1);

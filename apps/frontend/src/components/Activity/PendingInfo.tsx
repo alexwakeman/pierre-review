@@ -127,7 +127,7 @@ function InfoPopover({
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
         aria-label={label}
-        className={`inline-flex shrink-0 items-center justify-center rounded-full p-0.5 transition-colors ${
+        className={`hit inline-flex shrink-0 items-center justify-center rounded-full p-0.5 transition-colors ${
           open
             ? 'text-ui-ink'
             : 'text-ui-mute hover:text-ui-ink'

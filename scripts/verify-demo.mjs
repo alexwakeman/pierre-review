@@ -23,14 +23,21 @@ const SHOTS = '/tmp/limn-demo-shots';
 const args = process.argv.slice(2);
 const LATER_DAYS = Number(args.find((a) => a.startsWith('--later='))?.slice(8) ?? 0);
 const ONLY = args.find((a) => a.startsWith('--only='))?.slice(7);
-mkdirSync(SHOTS, { recursive: true });
+// `--phone`: the same views at 390 × 844 on a touch screen (mobile is a first-class target,
+// docs/redesign/DESIGN.md § 6). Screenshots go to their own folder.
+const PHONE = args.includes('--phone');
+const SHOTS_DIR = PHONE ? `${SHOTS}-390` : SHOTS;
+mkdirSync(SHOTS_DIR, { recursive: true });
 
 const ident = (k) => encodeURIComponent(`ticket:jira:https://acme.atlassian.net#${k}`);
 const story = (k) => encodeURIComponent(`jira:https://acme.atlassian.net#${k}`);
 
 /** Open Settings from the account menu (the modal has no URL of its own). */
 async function openSettings(page) {
-  await page.locator('button[title^="Signed in as"]').first().click();
+  // Below lg the account button lives in the sidebar DRAWER: open it first.
+  const account = page.locator('button[title^="Signed in as"]').first();
+  if (!(await account.isVisible())) await page.locator('[data-testid=topbar-menu]').click();
+  await account.click();
   await page.getByRole('menuitem', { name: 'Settings' }).click();
   await page.getByRole('dialog', { name: 'Settings' }).or(page.locator('[aria-label="Settings"]')).first().waitFor({ timeout: 10_000 });
 }
@@ -38,7 +45,12 @@ async function openSettings(page) {
 /** Open Settings at one of its tabs (one area shows at a time; the rest are hidden). */
 const openSettingsTab = (tab) => async (page) => {
   await openSettings(page);
-  await page.getByRole('dialog', { name: 'Settings' }).getByRole('tab', { name: tab, exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Settings' });
+  // On a phone each area's tab carries its one-line summary under the name, so match the name line.
+  await (PHONE
+    ? dialog.getByRole('tab').filter({ has: page.getByText(tab, { exact: true }) }).first()
+    : dialog.getByRole('tab', { name: tab, exact: true })
+  ).click();
 };
 
 /**
@@ -63,6 +75,8 @@ const VIEWS = [
       // A document's facts and actions open with it (the row on show); a row that blocks says so regardless.
       act: async (page) => {
         await page.getByRole('button', { name: 'Checkout design notes', exact: true }).first().click();
+        // A phone shows ONE pane: opening a document goes to Read; its row's facts are back on Library.
+        if (PHONE) await page.getByRole('tab', { name: /^Library/ }).first().click();
         await page.getByText('1 figure described by AI').first().waitFor({ timeout: 10_000 });
       },
       expect: ['Release handbook', 'Confluence · 3 pages', 'Refresh now', 'Can’t reach this page in Confluence since', 'Checkout design notes', 'Notion · 2 pages', '1 figure described by AI'],
@@ -271,7 +285,11 @@ async function main() {
   }
 
   const browser = await chromium.launch({ headless: true });
-  const context = await browser.newContext({ viewport: { width: 1440, height: 950 }, colorScheme: 'dark', reducedMotion: 'reduce' });
+  const context = await browser.newContext(
+    PHONE
+      ? { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, colorScheme: 'dark', reducedMotion: 'reduce' }
+      : { viewport: { width: 1440, height: 950 }, colorScheme: 'dark', reducedMotion: 'reduce' },
+  );
   await context.addInitScript(() => localStorage.setItem('pierre:onboarded', '1'));
   const page = await context.newPage();
   if (LATER_DAYS > 0) await page.clock.install({ time: new Date(Date.now() + LATER_DAYS * 86_400_000) });
@@ -314,7 +332,7 @@ async function main() {
     if (text < 200) problems.push(`nearly blank (${text} chars)`);
     if (missing.length) problems.push(`missing: ${[...new Set(missing)].join(', ').slice(0, 600)}`);
     if (shot) {
-      const file = join(SHOTS, `${shot}.png`);
+      const file = join(SHOTS_DIR, `${shot}.png`);
       await page.screenshot({ path: file });
       shots.push(file);
     }
@@ -327,8 +345,8 @@ async function main() {
   }
   await browser.close();
   stopSite();
-  console.log(`\n${failures.length === 0 ? '✅' : '⚠'} ${VIEWS.length - failures.length} of ${VIEWS.length} views clean${LATER_DAYS ? ` (as if ${LATER_DAYS} days later)` : ''}`);
-  console.log(`screenshots (${shots.length}): ${SHOTS}`);
+  console.log(`\n${failures.length === 0 ? '✅' : '⚠'} ${VIEWS.length - failures.length} of ${VIEWS.length} views clean${LATER_DAYS ? ` (as if ${LATER_DAYS} days later)` : ''}${PHONE ? ' at 390px' : ''}`);
+  console.log(`screenshots (${shots.length}): ${SHOTS_DIR}`);
   process.exit(failures.length === 0 ? 0 : 1);
 }
 

@@ -3884,12 +3884,13 @@ selector) and exposed to Tailwind in `apps/frontend/tailwind.config.ts` as
   paints nothing.
 - Because the var flips, an `ai-*` class needs **no `dark:` twin**; the swap deleted the old
   `dark:` halves rather than duplicating them.
-- `--ai-signal` is the TEXT-SAFE accent and the only vermilion allowed to carry or back text. It
-  is `#B53621` in light — deliberately DARKER than the landing's brand `#C13A20` — because every
-  text-on-wash recipe has to clear WCAG (`/15` over `--ai-surface` measures 4.55:1, `/10` over a
-  panel 4.92:1; the brand hex measured 4.14 / 4.46). The landing and `Wordmark` keep the brand
-  hex. `--ai-signal-fill` (`#E2492C`) is **NON-TEXT ONLY** — meters, strokes, rules. Dark mode
-  collapses both to one vermilion (`#F26B4E`).
+- `--ai-signal` is the TEXT-SAFE accent. ⚠ **Since the redesign it is VIOLET, not vermilion**:
+  `#6B3FC0` light / `#B69CFA` dark. The brand vermilion (`#B53621` / `#F26B4E`) sat within a few
+  degrees of `--ui-danger` (`#B82A26` / `#F07572`), so every AI action and sparkle read as
+  "blocked" — against the colour rule (red = what blocks). Measured: on `--ai-surface` 6.49:1,
+  `/15` wash 5.17:1, on `--ui-sel` 5.42:1 (light); 8.33:1 on `--ui-bg`, 6.67:1 on `--ui-sel`
+  (dark). The landing and `Wordmark` keep the brand vermilion. `--ai-signal-fill` (`#7C4DDB`) is
+  **NON-TEXT ONLY** — meters, strokes, rules; dark collapses both to one violet.
 - Solid CTAs are `bg-ai-signal text-white dark:text-gray-950`.
 
 **⚠ The surviving `violet-`/`purple-`/`indigo-` hits are a deliberate KEEP-LIST, not leftovers.**
@@ -4503,9 +4504,11 @@ bottom-right column (itself the fix for three `fixed bottom-4 right-4` elements 
 each other) is GONE: every toast is now a horizontal card in the top header, in
 `<HeaderToastStrip>`, which fills the right of the slim `TopBar` (components/shell/TopBar.tsx; the
 controls that used to flank it — Sync · bell · ? · theme · AI usage · user — are in the sidebar's
-foot). App.tsx mounts, left to right: the Claude reviews frame, `AiFixBanner`, `AiBudgetToast`,
-`ClosedResolverToast`, `DependencyMergeToast`, `AutoMergeBanner`,
-`GlobalLoadingBar`, `UndoToast`.
+foot). App.tsx mounts, left to right: `UndoToast` (FIRST — it lives seconds and must be reachable
+now; last, a merge pill pushed it past the bar's clipped edge at 768px), the Claude reviews frame,
+`AiFixBanner`, `AiBudgetToast`, `ClosedResolverToast`, `DependencyMergeToast`, `AutoMergeBanner`,
+`GlobalLoadingBar`. ⚠ A `SidePanel` SHEET starts BELOW the top bar (`[data-shell-topbar]`), never over
+it, so the Undo for an action taken in the sheet stays on screen; an expanded card is `z-[60]`.
 
 - **EVERY CARD IS THE SAME CARD.** One `HeaderToast`, one slot size (`h-7`, `w-28 sm:w-56 lg:w-64`;
   below `sm` the words are `max-sm:sr-only`, leaving the icon, the action and the X), one line

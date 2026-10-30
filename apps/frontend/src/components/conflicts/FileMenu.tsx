@@ -107,7 +107,7 @@ export function FileMenu({
         onClick={() => onOpenChange(!open)}
         aria-haspopup="listbox"
         aria-expanded={open}
-        className="hit flex min-w-0 items-center gap-1.5 rounded-ui border border-ui-line px-2 py-1 text-meta text-ui-ink hover:border-ui-line"
+        className="flex min-w-0 items-center gap-1.5 rounded-ui bg-ui-raise px-2 py-1 text-meta text-ui-ink hover:bg-ui-hover touch:min-h-10"
       >
         <span className="truncate font-mono" title={active?.path}>
           {active == null ? 'No files' : truncateLeft(active.path, 44)}

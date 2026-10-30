@@ -50,6 +50,7 @@ import {
   strategyRebaseDetail,
   toDecide,
 } from './copy.js';
+import { CheckboxBox, RadioBox } from '../ui/FormControls.js';
 
 // ── THE LANDING STEP ─────────────────────────────────────────────────────────────────────────
 //
@@ -239,7 +240,7 @@ export function LandingStep({
                       // remainder out of the accessible name — and that remainder appears nowhere
                       // else for a screen-reader user.
                       aria-label={jumpToFileLabel(row.path, row.remaining)}
-                      className="flex w-full flex-wrap items-baseline gap-x-2 rounded-ui px-1 py-0.5 text-left text-meta hover:bg-ui-hover"
+                      className="flex w-full flex-wrap items-baseline gap-x-2 rounded-ui px-1 py-0.5 text-left text-meta hover:bg-ui-hover touch:min-h-10 touch:items-center"
                     >
                       <span className="font-mono text-ui-ink">{row.path}</span>
                       <span className="text-ui-mute">
@@ -349,9 +350,8 @@ export function LandingStep({
               {branchProblem != null && branch.trim() !== '' && (
                 <p className="mt-1 text-meta text-ui-ink">{branchProblem}</p>
               )}
-              <label className="mt-1.5 flex items-center gap-1.5 text-meta text-ui-ink">
-                <input
-                  type="checkbox"
+              <label className="mt-1.5 flex cursor-pointer items-center gap-1.5 text-meta text-ui-ink">
+                <CheckboxBox
                   checked={openPr}
                   onChange={(e) => setOpenPr(e.target.checked)}
                 />
@@ -509,13 +509,11 @@ function RadioCard({
           : 'border-ui-line'
       } ${disabled ? 'opacity-50' : 'cursor-pointer'}`}
     >
-      <input
-        type="radio"
+      <RadioBox
         name={name}
         checked={checked}
         disabled={disabled}
         onChange={onSelect}
-        className="mt-0.5"
       />
       <span className="min-w-0">
         <span className="flex items-center gap-1.5 text-meta font-medium text-ui-ink">
@@ -543,7 +541,7 @@ function SecondaryButton({
     <button
       type="button"
       onClick={onClick}
-      className="hit rounded-ui border border-ui-line px-2.5 py-1 text-meta text-ui-ink hover:border-ui-line"
+      className="rounded-ui bg-ui-raise px-2.5 py-1 text-meta text-ui-ink hover:bg-ui-hover touch:min-h-10"
     >
       {children}
     </button>

@@ -4,16 +4,16 @@ import { useApprovePr, useRequestChangesPr, useWithdrawApproval } from '../hooks
 import { ApiError } from '../api/client.js';
 import { MentionTextarea } from './MentionTextarea.js';
 import { CheckIcon, CommentIcon, WarningIcon } from './Icons.js';
+import { Button } from './ui/Button.js';
 
 type Standing = 'approved' | 'changes_requested' | null;
 type Panel = 'approve-comment' | 'request-changes' | 'withdraw' | null;
 
-const GREEN_BTN =
-  'inline-flex items-center gap-1 whitespace-nowrap rounded-ui border border-ui-line px-2 py-0.5 text-body font-medium text-ui-success hover:bg-ui-hover disabled:opacity-50';
-const AMBER_BTN =
-  'inline-flex items-center gap-1 whitespace-nowrap rounded-ui border border-ui-line px-2 py-0.5 text-body font-medium text-ui-warn hover:bg-ui-hover disabled:opacity-50';
-const GREY_BTN =
-  'whitespace-nowrap rounded-ui border border-ui-line px-2 py-0.5 text-body hover:border-ui-line disabled:opacity-50';
+// Built on the shared Button (sm: 28px, 40px on touch); tone, not borders. The verdict buttons keep
+// their verdict ink on the neutral ground (green approves, amber asks for changes).
+const GREEN_BTN = 'text-ui-success';
+const AMBER_BTN = 'text-ui-warn';
+const GREY_BTN = '';
 
 // The review verdict controls in the Overview's Actions row, rendered ONLY when the viewer may
 // review (pr.viewerCanApprove — author excluded, write+ required; the server re-checks and 403s).
@@ -137,12 +137,12 @@ export function ApproveControl({
     return (
       <div className="flex flex-wrap items-center gap-2" data-testid="withdraw-approval-confirm">
         <span className="text-body">Withdraw your approval?</span>
-        <button type="button" onClick={doWithdraw} disabled={busy} className={AMBER_BTN}>
+        <Button onClick={doWithdraw} disabled={busy} size="sm" className={AMBER_BTN}>
           {withdraw.isPending ? 'Withdrawing…' : 'Yes, withdraw'}
-        </button>
-        <button type="button" onClick={close} disabled={busy} className={GREY_BTN}>
+        </Button>
+        <Button onClick={close} disabled={busy} size="sm" className={GREY_BTN}>
           Cancel
-        </button>
+        </Button>
         {errorLine}
       </div>
     );
@@ -168,22 +168,22 @@ export function ApproveControl({
         />
         <div className="flex flex-wrap items-center gap-2">
           {isApprove ? (
-            <button
-              type="button"
+            <Button
               onClick={() => doApprove(message.trim())}
               disabled={busy || !canSubmit}
+              size="sm"
               className={GREEN_BTN}
             >
               <CheckIcon /> {approve.isPending ? 'Approving…' : 'Approve'}
-            </button>
+            </Button>
           ) : (
-            <button type="button" onClick={doRequestChanges} disabled={busy} className={AMBER_BTN}>
+            <Button onClick={doRequestChanges} disabled={busy} size="sm" className={AMBER_BTN}>
               <WarningIcon /> {requestChanges.isPending ? 'Sending…' : 'Request changes'}
-            </button>
+            </Button>
           )}
-          <button type="button" onClick={close} disabled={busy} className={GREY_BTN}>
+          <Button onClick={close} disabled={busy} size="sm" className={GREY_BTN}>
             Cancel
-          </button>
+          </Button>
           {errorLine}
         </div>
       </div>
@@ -198,18 +198,18 @@ export function ApproveControl({
             type="button"
             disabled
             title="Your approval stands"
-            className="hit bg-ui-raise inline-flex cursor-default items-center gap-1 rounded-ui px-2 py-0.5 text-body font-medium text-ui-success"
+            className="inline-flex h-7 cursor-default items-center gap-1.5 rounded-ui bg-ui-raise px-2 text-meta font-medium text-ui-success touch:h-10 touch:px-3"
           >
             <CheckIcon /> Approved
           </button>
-          <button
-            type="button"
+          <Button
             onClick={() => open('withdraw')}
             disabled={busy}
+            size="sm"
             className={GREY_BTN}
           >
             Withdraw approval
-          </button>
+          </Button>
         </>
       ) : (
         <>
@@ -218,32 +218,32 @@ export function ApproveControl({
               <WarningIcon /> Changes requested
             </span>
           )}
-          <button
-            type="button"
+          <Button
             onClick={() => doApprove(undefined)}
             disabled={busy}
+            size="sm"
             className={GREEN_BTN}
           >
             <CheckIcon /> {approve.isPending ? 'Approving…' : 'Approve'}
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
             onClick={() => open('approve-comment')}
             disabled={busy}
+            size="sm"
             className={GREEN_BTN}
           >
             <CommentIcon /> Approve with comment
-          </button>
+          </Button>
         </>
       )}
-      <button
-        type="button"
+      <Button
         onClick={() => open('request-changes')}
         disabled={busy}
+        size="sm"
         className={AMBER_BTN}
       >
         <WarningIcon /> Request changes
-      </button>
+      </Button>
       {errorLine}
     </div>
   );

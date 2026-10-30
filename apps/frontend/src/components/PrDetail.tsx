@@ -1615,7 +1615,7 @@ export function PrDetail({
                 <button
                 type="button"
                 onClick={() => goToTab('changes')}
-                className={cx('hit inline-flex shrink-0 items-center gap-1 rounded-ui px-0.5 tabular-nums hover:text-ui-ink', FOCUS_RING)}
+                className={cx('inline-flex shrink-0 items-center gap-1 rounded-ui px-0.5 tabular-nums hover:text-ui-ink touch:min-h-10', FOCUS_RING)}
                 title="View the files changed by this PR"
               >
                 <span>

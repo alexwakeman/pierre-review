@@ -92,7 +92,7 @@ function TreeRow({
           onClick={() => onToggleDir(node.path)}
           aria-expanded={open}
           style={pad}
-          className="hit flex w-full items-center gap-1.5 rounded-ui border-l-2 border-transparent py-0.5 pr-2 text-left text-meta hover:bg-ui-hover"
+          className="flex w-full items-center gap-1.5 rounded-ui border-l-2 border-transparent py-0.5 pr-2 text-left text-meta hover:bg-ui-hover touch:min-h-10"
           title={`${node.path} — ${node.fileCount} file${node.fileCount === 1 ? '' : 's'}`}
         >
           <span className="flex w-3 shrink-0 select-none justify-center text-ui-faint">
@@ -141,7 +141,7 @@ function TreeRow({
       onClick={() => onSelectFile(node.path)}
       aria-pressed={selected}
       style={pad}
-      className={`flex w-full items-center gap-1.5 rounded-ui border-l-2 py-0.5 pr-2 text-left text-meta ${
+      className={`flex w-full items-center gap-1.5 rounded-ui border-l-2 py-0.5 pr-2 text-left text-meta touch:min-h-10 ${
         selected
           ? `${SELECTED_BORDER} ${SELECTED_FILL}`
           : `${UNSELECTED_BORDER} hover:bg-ui-hover`

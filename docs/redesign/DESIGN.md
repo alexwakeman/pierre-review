@@ -65,8 +65,8 @@ Rules:
   only signal.
 - **Red and green are not decoration.** No red "Draft", no green "Comment", no coloured chip for a
   neutral fact. A row is red only when it blocks.
-- **Existing colour families stay where they carry meaning**: the AI surface `--ai-*` (vermilion,
-  for "a model produced this"), vendor colours through `vendorInk()` (identity, measured by
+- **Existing colour families stay where they carry meaning**: the AI surface `--ai-*` (violet —
+  moved off the brand vermilion, which read as danger red — for "a model produced this"), vendor colours through `vendorInk()` (identity, measured by
   `vendorInk.test.ts`), the derived-thread-state palette (`state-*`) inside thread surfaces, the
   conflict resolver's `--mr-*`. They do not spread to new places.
 - The `textContrast.test.ts` / `vendorInk.test.ts` rules still apply to legacy classes;

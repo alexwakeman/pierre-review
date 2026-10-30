@@ -6,6 +6,7 @@ import { useFilters } from '../../store/filters.js';
 import { ACTIVITY_QUERY_KEYS } from '../../hooks/useActivity.js';
 import { RepoSearch } from '../RepoSearch.js';
 import { StarIcon } from '../Icons.js';
+import { CheckboxBox } from '../ui/FormControls.js';
 
 // How many detected repos are pre-checked. Kept small so the one-click "Add selected" flow
 // doesn't kick off a 30-repo two-phase backfill storm on the user's very first action.
@@ -189,12 +190,11 @@ export function FirstRunOnboarding(): JSX.Element {
                     on ? 'bg-ui-sel' : 'hover:bg-ui-hover'
                   } ${running ? 'cursor-default opacity-70' : ''}`}
                 >
-                  <input
-                    type="checkbox"
+                  <CheckboxBox
                     checked={on}
                     disabled={running}
                     onChange={() => toggle(r.githubNodeId)}
-                    className="mt-1 h-3.5 w-3.5 shrink-0 accent-sky-500"
+                    className="mt-0.5"
                   />
                   <OwnerAvatar login={r.owner} src={r.ownerAvatarUrl} />
                   <span className="min-w-0 flex-1">

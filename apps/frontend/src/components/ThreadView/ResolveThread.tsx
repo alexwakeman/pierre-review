@@ -33,7 +33,7 @@ export function ResolveThread({
             ? 'Reopen this thread on GitHub'
             : 'Mark this thread resolved on GitHub'
         }
-        className="hit bg-ui-raise rounded-ui px-1.5 py-0.5 text-meta font-semibold text-ui-mute hover:bg-ui-hover disabled:opacity-50"
+        className="inline-flex items-center rounded-ui bg-ui-raise px-1.5 py-0.5 text-meta font-semibold text-ui-mute hover:bg-ui-hover disabled:opacity-50 touch:h-10 touch:px-3"
       >
         {isResolved ? 'Unresolve' : 'Resolve'}
       </button>

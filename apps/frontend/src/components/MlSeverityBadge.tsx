@@ -135,11 +135,12 @@ export function MlSeverityBadge({
 
   return (
     <span className="inline-flex items-center gap-1" title={title}>
+      {/* NO FILLED PILL (the colour rule: tint only what blocks). The severity hue rides the DOT;
+          the word is grey, except Critical, which is danger ink — the one severity that blocks. */}
       <span
-        className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-meta font-semibold${
-          dim ? ' opacity-70' : ''
-        }`}
-        style={{ backgroundColor: `${meta.color}1a`, ...vendorInk(meta.color) }}
+        className={`inline-flex items-center gap-1 py-0.5 text-meta font-semibold ${
+          label.severity === 'critical' ? 'text-ui-danger' : 'text-ui-mute'
+        }${dim ? ' opacity-70' : ''}`}
       >
         {/* The dot goes HOLLOW when calibration overrode the model's own pick — a different mark
             rather than a fainter one, because it is a different kind of statement. Drawn with an

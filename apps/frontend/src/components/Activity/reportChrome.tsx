@@ -148,7 +148,7 @@ export function Segmented<T extends string | number>({
             title={o.title}
             onClick={() => onChange(o.value)}
             className={cx(
-              'h-7 rounded-ui px-2.5 text-body tabular-nums touch:h-10 touch:px-3',
+              'h-7 rounded-ui px-2.5 text-body tabular-nums touch:h-10 touch:min-w-10 touch:px-3',
               on ? 'bg-ui-sel text-ui-ink' : 'text-ui-mute hover:text-ui-ink',
               FOCUS_RING,
             )}

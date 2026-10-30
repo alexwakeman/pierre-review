@@ -43,7 +43,7 @@ const TYPE_LABEL: Record<string, string> = {
   QUALITY_GATE: 'Quality gate',
 };
 const BTN =
-  'rounded-ui border border-ui-line px-2 py-0.5 text-meta text-ui-ink hover:border-ui-line disabled:cursor-not-allowed disabled:opacity-40';
+  'inline-flex h-7 items-center whitespace-nowrap rounded-ui bg-ui-raise px-2 text-meta text-ui-ink hover:bg-ui-hover disabled:cursor-not-allowed disabled:opacity-40 touch:h-10 touch:px-3';
 
 type OpenInChanges = (path: string, line: number | null, side: ClaudeFindingSide) => void;
 

@@ -49,6 +49,7 @@ export {
   pickedKeys,
   type PickerOverrides,
 } from './fixPickerModel.js';
+import { CheckboxBox } from '../ui/FormControls.js';
 
 const SEVERITY_LABEL: Record<ClaudeFindingSeverity, string> = {
   blocker: 'Blocker',
@@ -87,14 +88,15 @@ function PickCheck({
 }): JSX.Element {
   return (
     <span className="inline-flex shrink-0 items-center gap-1.5 pt-0.5">
-      <input
-        type="checkbox"
-        className="h-4 w-4 shrink-0 accent-ui-accent-fill"
-        checked={picked}
-        disabled={disabled}
-        onChange={(e) => onToggle(e.target.checked)}
-        aria-label={`Include in the fix: ${item.label}`}
-      />
+      {/* A label of its own, 40 × 40 on touch: the bare 16px box was the whole target. */}
+      <label className="flex cursor-pointer items-center touch:-my-3 touch:min-h-10 touch:min-w-10 touch:justify-center">
+        <CheckboxBox
+          checked={picked}
+          disabled={disabled}
+          onChange={(e) => onToggle(e.target.checked)}
+          aria-label={`Include in the fix: ${item.label}`}
+        />
+      </label>
       {picked && cut && <span className={WONT_FIT_CHIP}>Won’t fit</span>}
     </span>
   );
@@ -124,9 +126,8 @@ function PlainRow({
             : 'border-ui-line'
         }`}
       >
-        <input
-          type="checkbox"
-          className="mt-0.5 h-4 w-4 shrink-0 accent-ui-accent-fill"
+        <CheckboxBox
+          className="mt-0.5"
           checked={picked}
           disabled={disabled}
           onChange={(e) => onToggle(e.target.checked)}

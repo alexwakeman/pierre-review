@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, type ReactNode } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronIcon, CloseIcon } from '../Icons.js';
 import { IconButton } from './Button.js';
@@ -16,6 +16,9 @@ import { useIsDesktop, useIsPhone } from './media.js';
 // Escape closes it (capture phase, so the app's global Esc never also fires) unless an open
 // control or popover inside owns the key. As a sheet it traps Tab and returns focus to the opener.
 // `footer` is the action bar: pinned to the bottom, where a thumb reaches it on a phone.
+// ⚠ AS A SHEET IT STARTS BELOW THE TOP BAR (`[data-shell-topbar]`, measured at open), never over
+// it: the ONE header toast strip lives there, and an action taken in the sheet (Dismiss, Approve,
+// Merge) raises its Undo card in that strip. A sheet over the strip hid the only way back.
 
 export function SidePanel({
   open,
@@ -95,6 +98,19 @@ export function SidePanel({
     };
   }, [open, docked]);
 
+  // The top bar's bottom edge, so the sheet (and its scrim) start under the toast strip.
+  const [topInset, setTopInset] = useState(0);
+  useLayoutEffect(() => {
+    if (!open || docked) return;
+    const measure = (): void => {
+      const bar = document.querySelector<HTMLElement>('[data-shell-topbar]');
+      setTopInset(bar ? Math.max(0, Math.round(bar.getBoundingClientRect().bottom)) : 0);
+    };
+    measure();
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, [open, docked]);
+
   if (!open) return null;
 
   const header = (
@@ -146,7 +162,7 @@ export function SidePanel({
   }
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex justify-end">
+    <div className="fixed inset-x-0 bottom-0 z-50 flex justify-end" style={{ top: topInset }}>
       <div className="absolute inset-0 bg-ui-scrim/40 motion-safe:animate-ui-fade" onClick={onClose} aria-hidden />
       <section
         ref={panelRef as React.RefObject<HTMLElement>}
@@ -158,7 +174,7 @@ export function SidePanel({
         className={cx(
           'relative flex h-full min-h-0 flex-col bg-ui-surface outline-none',
           phone
-            ? 'w-full motion-safe:animate-ui-sheet-up pt-[env(safe-area-inset-top)]'
+            ? cx('w-full motion-safe:animate-ui-sheet-up', topInset === 0 && 'pt-[env(safe-area-inset-top)]')
             : 'w-[440px] max-w-full motion-safe:animate-ui-slide-in',
           className,
         )}

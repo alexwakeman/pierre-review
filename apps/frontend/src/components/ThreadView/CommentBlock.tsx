@@ -37,7 +37,8 @@ export function CommentBlock({
   const user = comment.authorId != null ? usersById.get(comment.authorId) : undefined;
   return (
     <div className={`pl-2 ${isNew ? 'comment-new' : ''}`}>
-      <div className="flex items-center gap-2 text-meta">
+      {/* Wraps rather than squeezing: the name and the age stay whole ("Gre…" at 390px). */}
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-meta">
         {showLink && (
           <>
             {showLink}
@@ -45,13 +46,17 @@ export function CommentBlock({
           </>
         )}
         <Avatar user={user} size={18} />
-        <UserName
-          user={user}
-          fallbackId={comment.authorId}
-          repoId={repoId}
-          className="font-semibold"
-        />
-        <span className="text-ui-faint">{relativeTime(comment.createdAt)}</span>
+        {/* One line each, never stacked: the name truncates, the age keeps its words together
+            ("1 hour ago" broke onto two lines at 390px). */}
+        <span className="min-w-0 max-w-full truncate whitespace-nowrap">
+          <UserName
+            user={user}
+            fallbackId={comment.authorId}
+            repoId={repoId}
+            className="font-semibold"
+          />
+        </span>
+        <span className="shrink-0 whitespace-nowrap text-ui-faint">{relativeTime(comment.createdAt)}</span>
         {isNew && <NewTag />}
         <MlSeverityBadge label={mlLabel} />
         {/* Right-aligned so it lands in the same place on every comment regardless of how many

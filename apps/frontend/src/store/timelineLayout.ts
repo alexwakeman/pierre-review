@@ -3,7 +3,8 @@ import { create } from 'zustand';
 // HOW A PHONE READS THE TIMELINE (the redesign; docs/redesign/DESIGN.md § 6): as a LIST of the
 // board's pull requests (components/Timeline/TimelineList.tsx) — the default, since a time-axis
 // canvas at 390px is mostly label gutter — or as the BOARD itself (vis-timeline, pan and pinch).
-// Wider screens always draw the board; this choice is read only below `md`.
+// Wider screens draw the board; this choice is read below `md`, and on a touch screen below `lg`
+// (components/ui/media.ts `useTimelineListCapable`).
 //
 // A per-viewer convenience like the sprint board's filters (store/sprintBoardFilter.ts):
 // localStorage ONLY — never the URL and never `FilterDefaults`, so deep links and "Clear filters"

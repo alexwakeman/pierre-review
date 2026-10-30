@@ -328,7 +328,7 @@ export function OpenPrsViewToggle(): JSX.Element {
       type="button"
       aria-pressed={view === v}
       onClick={() => setView(v)}
-      className={`h-6 rounded-ui px-2 text-meta focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent touch:h-10 ${
+      className={`h-6 rounded-ui px-2 text-meta focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent touch:h-10 touch:min-w-10 touch:px-3 ${
         view === v ? 'bg-ui-sel font-medium text-ui-ink' : 'text-ui-mute hover:text-ui-ink'
       }`}
     >
@@ -823,7 +823,7 @@ export function TicketKeyButton({
 
 const STATUS_PILL: Record<'new' | 'indeterminate' | 'done', string> = {
   new: 'bg-ui-raise text-ui-ink',
-  indeterminate: 'bg-ui-sel text-ui-accent',
+  indeterminate: 'bg-ui-raise text-ui-mute', // grey: accent is the selection + the one primary action
   done: 'bg-ui-raise text-ui-success',
 };
 const STATUS_WORD: Record<'new' | 'indeterminate' | 'done', string> = {
@@ -987,7 +987,7 @@ function StackCoverage({
         </span>
       )}
       {cov != null && cov.stale && currency != null && (
-        <span className="text-meta text-ui-warn" title={currency.title}>
+        <span className="text-meta text-ui-mute" title={currency.title}>
           {currency.label}
         </span>
       )}
@@ -998,7 +998,7 @@ function StackCoverage({
           disabled={starting}
           onClick={() => start.mutate({ prId, ident })}
           title="Check this ticket against all its PRs"
-          className="hit whitespace-nowrap rounded-ui bg-ui-raise px-2 py-0.5 text-meta font-medium text-ui-ink hover:bg-ui-hover disabled:opacity-60"
+          className="inline-flex h-6 items-center whitespace-nowrap rounded-ui bg-ui-raise px-2 text-meta font-medium text-ui-ink hover:bg-ui-hover disabled:opacity-60 touch:h-10 touch:px-3"
         >
           {starting ? 'Starting…' : cov == null ? 'Check story' : 'Re-check'}
         </button>
@@ -1183,7 +1183,7 @@ function StoryCurrencyLine({
           disabled={starting}
           onClick={() => start.mutate({ prId, ident })}
           title="Check this ticket against all its PRs"
-          className="hit whitespace-nowrap rounded-ui bg-ui-raise px-2 py-0.5 text-meta font-medium text-ui-ink hover:bg-ui-hover disabled:opacity-60"
+          className="inline-flex h-6 items-center whitespace-nowrap rounded-ui bg-ui-raise px-2 text-meta font-medium text-ui-ink hover:bg-ui-hover disabled:opacity-60 touch:h-10 touch:px-3"
         >
           {starting ? 'Starting…' : cov == null ? 'Check story' : 'Re-check'}
         </button>
@@ -1536,9 +1536,10 @@ export function RunAutoReviewsButton(): JSX.Element | null {
           onClick={run}
           disabled={sweep.isPending}
           title="Review every PR that is due now: new PRs, new commits or comments, and failed auto reviews. The daily limit still applies."
-          className="inline-flex h-7 items-center gap-1.5 rounded-ui px-2 text-meta font-medium text-ai-signal hover:bg-ui-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent disabled:opacity-60 touch:h-10"
+          className="inline-flex h-7 items-center gap-1.5 rounded-ui bg-ui-raise px-2 text-meta font-medium text-ui-ink hover:bg-ui-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent disabled:opacity-60 touch:h-10 touch:px-3"
         >
-          <SparkleIcon size={12} />
+          {/* A plain secondary button: only the sparkle carries the AI violet, never the label. */}
+          <SparkleIcon size={12} className="text-ai-signal" />
           {sweep.isPending ? 'Checking…' : 'Run auto reviews now'}
         </button>
       </AiRunGate>

@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import {
   HOURLY_COST_MAX_USD,
   FLOW_BUDGET_LABEL,
@@ -208,6 +208,53 @@ function prsLine(w: FlowTrendWeek): string {
 
 // ── (a) Where the working hours went, week by week ───────────────────────────────────────────
 
+// ── THE WIDE-CHART SCROLLER ─────────────────────────────────────────────────────────────────
+//
+// The weekly charts are `chartWidth` wide and scroll sideways on a narrow screen. Only the PLOT
+// may scroll: a legend or a caption inside the same box was cut at the phone's right edge
+// ("Waiting for the author · Appr…"), readable only by scrolling a chart. So the words are
+// `PINNED` — sticky at the scroller's left, no wider than what it shows (`--chart-vw`, measured,
+// less the fade) — and while more weeks hide past the right edge, that edge fades out (the edge-
+// fade idiom, docs/redesign/DESIGN.md § 6). Only the END fades: a start fade would eat the first
+// letters of the pinned words.
+const PINNED = 'sticky left-0 max-w-[var(--chart-vw,100%)]';
+const CHART_FADE = 28;
+
+function ChartScroller({ width, children }: { width: number; children: ReactNode }): JSX.Element {
+  const ref = useRef<HTMLDivElement>(null);
+  const [box, setBox] = useState<{ vw: number; atEnd: boolean } | null>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const measure = (): void => {
+      const vw = el.clientWidth;
+      const atEnd = el.scrollLeft + vw >= el.scrollWidth - 1;
+      setBox((b) => (b != null && b.vw === vw && b.atEnd === atEnd ? b : { vw, atEnd }));
+    };
+    measure();
+    el.addEventListener('scroll', measure, { passive: true });
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measure) : null;
+    ro?.observe(el);
+    return () => {
+      el.removeEventListener('scroll', measure);
+      ro?.disconnect();
+    };
+  }, []);
+  const overflows = box != null && box.vw < width;
+  const g = `linear-gradient(to right, black calc(100% - ${CHART_FADE}px), transparent)`;
+  const fade: CSSProperties | undefined =
+    overflows && !box.atEnd ? { maskImage: g, WebkitMaskImage: g } : undefined;
+  const inner = {
+    width,
+    '--chart-vw': overflows ? `${box.vw - CHART_FADE}px` : `${width}px`,
+  } as CSSProperties;
+  return (
+    <div ref={ref} className="overflow-x-auto overscroll-x-contain" style={fade}>
+      <div style={inner}>{children}</div>
+    </div>
+  );
+}
+
 function BallRiver({
   data,
   geo,
@@ -293,7 +340,7 @@ function BallRiver({
           <div>{coverageLine(hw)}</div>
         </FloatingTip>
       )}
-      <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
+      <div className={`mt-1 flex flex-wrap gap-x-3 gap-y-0.5 ${PINNED}`}>
         {COURT_ORDER.map((c) => (
           <span key={c} className="flex items-center gap-1 text-meta text-ui-mute">
             <span className={`inline-block h-2 w-2 rounded-[2px] ${COURT_SWATCH[c]}`} />
@@ -388,7 +435,7 @@ function BudgetWeather({
           {hw.thin && hw.measuredPrs > 0 && <div>Too few pull requests to compare this week</div>}
         </FloatingTip>
       )}
-      <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
+      <div className={`mt-1 flex flex-wrap gap-x-3 gap-y-0.5 ${PINNED}`}>
         {(['good', 'ok', 'slow'] as const).map((v) => (
           <span key={v} className="flex items-center gap-1 text-meta text-ui-mute">
             <span className={`inline-block h-2 w-2 rounded-[2px] ${VERDICT_SWATCH[v]}`} />
@@ -400,7 +447,7 @@ function BudgetWeather({
           Too few to judge
         </span>
       </div>
-      <p className={`mt-1 ${NOTE}`}>
+      <p className={`mt-1 ${NOTE} ${PINNED}`}>
         Coloured against today’s budgets: {FLOW_BUDGET_MEASURES.map((m) => `${FLOW_BUDGET_LABEL[m].toLowerCase()} ${data.budgets[m].good} h, limit ${data.budgets[m].ok} h`).join('; ')}.
       </p>
       <table className="sr-only">
@@ -581,7 +628,7 @@ function GainLine({
   const hw = hover == null ? null : weeks[hover];
   return (
     <div className="relative">
-      <div className="mb-1 flex flex-wrap items-baseline gap-x-4 gap-y-1">
+      <div className={`mb-1 flex flex-wrap items-baseline gap-x-4 gap-y-1 ${PINNED}`}>
         <div>
           <span className="text-title font-semibold tabular-nums text-ui-ink">{signedHours(last)}</span>{' '}
           <span className="text-meta text-ui-mute">
@@ -685,7 +732,7 @@ function GainLine({
           <div>Click to measure from this week</div>
         </FloatingTip>
       )}
-      <p className={`mt-1 ${NOTE}`}>
+      <p className={`mt-1 ${NOTE} ${PINNED}`}>
         Each week adds (baseline − that week’s half-merged-within time) × the pull requests merged
         that week, in working hours. A rising line means pull requests are merging faster than at
         the baseline. Click any week to measure from there.
@@ -955,12 +1002,10 @@ function ChronologyTrendFor({ workspaceId }: { workspaceId: number | null }): JS
 
             <div>
               <h5 className="mb-1 text-meta font-medium text-ui-ink">Where the working hours went</h5>
-              <div className="overflow-x-auto overscroll-x-contain">
-                <div style={{ width: chartWidth }}>
+              <ChartScroller width={chartWidth}>
                   <EventMarkerRail markers={markers} width={chartWidth} />
                   <BallRiver data={data} geo={geo} markers={markers} />
-                </div>
-              </div>
+              </ChartScroller>
             </div>
 
             {selected != null && (
@@ -974,20 +1019,17 @@ function ChronologyTrendFor({ workspaceId }: { workspaceId: number | null }): JS
 
             <div>
               <h5 className="mb-1 text-meta font-medium text-ui-ink">Each wait against its budget</h5>
-              <div className="overflow-x-auto overscroll-x-contain">
-                <div style={{ width: chartWidth }}>
+              <ChartScroller width={chartWidth}>
                   <EventMarkerRail markers={markers} width={chartWidth} interactive={false} />
                   <BudgetWeather data={data} geo={geo} markers={markers} />
-                </div>
-              </div>
+              </ChartScroller>
             </div>
 
             <div>
               <h5 className="mb-1 text-meta font-medium text-ui-ink">
                 Working hours saved, opened to merged
               </h5>
-              <div className="overflow-x-auto overscroll-x-contain">
-                <div style={{ width: chartWidth }}>
+              <ChartScroller width={chartWidth}>
                   <EventMarkerRail markers={markers} width={chartWidth} interactive={false} />
                   <GainLine
                     data={data}
@@ -997,8 +1039,7 @@ function ChronologyTrendFor({ workspaceId }: { workspaceId: number | null }): JS
                     onPickBaseline={setBaselineFrom}
                     workspaceId={workspaceId}
                   />
-                </div>
-              </div>
+              </ChartScroller>
             </div>
           </div>
         )}

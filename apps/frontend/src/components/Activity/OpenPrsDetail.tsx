@@ -164,7 +164,7 @@ export function OpenPrsDetail(): JSX.Element {
             disabled={isFetching}
             aria-label="Refresh"
             title="Refresh the open PRs"
-            className="ml-auto inline-flex h-7 items-center gap-1.5 self-center rounded-ui px-2 text-meta text-ui-mute hover:bg-ui-hover hover:text-ui-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent disabled:opacity-60 touch:h-10"
+            className="ml-auto inline-flex h-7 items-center gap-1.5 self-center rounded-ui px-2 text-meta text-ui-mute hover:bg-ui-hover hover:text-ui-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent disabled:opacity-60 touch:h-10 touch:min-w-10 touch:justify-center"
           >
             <RefreshIcon size={12} className={isFetching ? 'motion-safe:animate-spin' : ''} />
             <span className="max-sm:sr-only">Refresh</span>

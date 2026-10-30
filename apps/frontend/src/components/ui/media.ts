@@ -43,6 +43,17 @@ export function useIsPhone(): boolean {
   return useMediaQuery(PHONE_QUERY);
 }
 
+/**
+ * True where the Timeline may be read as a LIST (store/timelineLayout.ts): a phone, or a TOUCH
+ * screen below lg (a 768px tablet got the vis board only — bars cut, pills overlapping, 16px
+ * collapse buttons — with the one-line list that works at 390 out of reach).
+ */
+export function useTimelineListCapable(): boolean {
+  const phone = useMediaQuery(PHONE_QUERY);
+  const touchTablet = useMediaQuery(`${COARSE_POINTER_QUERY} and (max-width: ${BREAKPOINTS.lg - 1}px)`);
+  return phone || touchTablet;
+}
+
 /** True when the reader asked for less motion. Animations become instant state changes. */
 export function useReducedMotion(): boolean {
   return useMediaQuery(REDUCED_MOTION_QUERY);

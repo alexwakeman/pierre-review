@@ -152,14 +152,14 @@ export function RegionEditPanel({
           type="button"
           disabled={busy}
           onClick={() => onSave(text)}
-          className="hit rounded-ui border border-ui-line px-1.5 py-0.5 text-meta font-medium text-ui-ink hover:bg-ui-hover disabled:opacity-60"
+          className="hit rounded-ui bg-ui-raise px-1.5 py-0.5 text-meta font-medium text-ui-ink hover:bg-ui-hover disabled:opacity-60"
         >
           {busy ? EDIT_SAVING : EDIT_SAVE}
         </button>
         <button
           type="button"
           onClick={onCancel}
-          className="hit rounded-ui border border-ui-line px-1.5 py-0.5 text-meta text-ui-ink hover:border-ui-line"
+          className="hit rounded-ui bg-ui-raise px-1.5 py-0.5 text-meta text-ui-ink hover:bg-ui-hover"
         >
           {EDIT_CANCEL}
         </button>

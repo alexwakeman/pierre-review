@@ -9,7 +9,7 @@ export { nextIndex, resolveListKey, indexAfterRemoval, type ListMove, type ListK
 export { SidePanel } from './SidePanel.js';
 export { Menu, type MenuEntry } from './Menu.js';
 export { Select, type SelectOption } from './Select.js';
-export { Checkbox, CheckboxBox, Radio, RadioGroup, Switch } from './FormControls.js';
+export { Checkbox, CheckboxBox, Radio, RadioBox, RadioGroup, Switch } from './FormControls.js';
 export { CommandPalette } from './CommandPalette.js';
 export {
   useRegisterCommands,
@@ -38,6 +38,7 @@ export {
   useMediaQuery,
   useIsDesktop,
   useIsPhone,
+  useTimelineListCapable,
   useReducedMotion,
   prefersReducedMotion,
   BREAKPOINTS,

@@ -43,7 +43,7 @@ export function ReplyComposer({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="hit text-ui-accent hover:underline"
+        className="inline-flex items-center text-ui-accent hover:underline touch:min-h-10"
       >
         Reply
       </button>

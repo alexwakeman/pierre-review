@@ -117,6 +117,30 @@ export const Radio = forwardRef<HTMLInputElement, BaseProps>(function Radio({ la
   );
 });
 
+/**
+ * The radio DOT alone — the same restyled real <input> as `Radio`, without its own <label> — for a
+ * row that is ALREADY a label holding more than words (an icon, a title and a detail line).
+ */
+export const RadioBox = forwardRef<HTMLInputElement, Omit<InputHTMLAttributes<HTMLInputElement>, 'type' | 'size'>>(function RadioBox(
+  { className, ...rest },
+  ref,
+) {
+  return (
+    <input
+      ref={ref}
+      type="radio"
+      className={cx(
+        'relative mt-0.5 h-4 w-4 shrink-0 cursor-[inherit] appearance-none rounded-full bg-ui-raise ring-1 ring-inset ring-ui-line touch:mt-0',
+        'checked:ring-[5px] checked:ring-ui-accent-fill disabled:opacity-50',
+        'motion-safe:transition-[box-shadow] motion-safe:duration-ui-fast',
+        FOCUS_RING,
+        className,
+      )}
+      {...rest}
+    />
+  );
+});
+
 /** A titled group of radios (`role="radiogroup"`). Arrow keys move between them natively. */
 export function RadioGroup({
   label,

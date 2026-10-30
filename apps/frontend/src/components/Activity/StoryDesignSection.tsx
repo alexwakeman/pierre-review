@@ -21,7 +21,7 @@ import { InfoButton } from '../InfoModal.js';
 
 const MUTED = 'text-ui-mute';
 const BTN =
-  'rounded-ui border border-ui-line px-2 py-0.5 text-meta text-ui-ink hover:border-ui-line disabled:cursor-not-allowed disabled:opacity-40';
+  'inline-flex h-7 items-center whitespace-nowrap rounded-ui bg-ui-raise px-2 text-meta text-ui-ink hover:bg-ui-hover disabled:cursor-not-allowed disabled:opacity-40 touch:h-10 touch:px-3';
 
 /** The story design's read and its redraw mutation — ONE per Story section, shared by the heading's
  *  button and the block. `enabled` = `storyDesignOffered(ai.enabled, prCount)`. */

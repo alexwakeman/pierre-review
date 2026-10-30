@@ -63,11 +63,25 @@ export function BarChart({
   const [ref, w] = useChartWidth();
   const [hover, setHover] = useState<number | null>(null);
 
-  const PAD_L = rotateLabels ? 46 : 38;
+  const n = labels.length;
+  const isDateLabels = /^\d{4}-\d{2}-\d{2}T/.test(labels[0] ?? '');
+  // A ROTATED label runs up-LEFT from its bar's centre, so the FIRST one can reach past the SVG's
+  // left edge on a narrow card ("Correctness" read "ctness" at 390px). Reserve the left pad from
+  // its estimated drawn width (12px type ≈ 6.6px a character, × cos 35°) less half a band, and cap
+  // what any rotated label may show (ROTATED_MAX characters, the full words in the tooltip /
+  // accessible name).
+  const firstRotated = rotateLabels && !isDateLabels ? clipRotated(labels[0] ?? '') : '';
+  const estBand = (w - 46 - 8) / Math.max(n, 1);
+  const PAD_L = rotateLabels
+    ? Math.max(46, Math.ceil(firstRotated.length * 6.6 * 0.82 - estBand / 2 + 8))
+    : 38;
   const PAD_R = 8;
   const PAD_T = 8;
-  const PAD_B = rotateLabels ? 46 : 18;
-  const n = labels.length;
+  // …and the bottom band from the longest one (it runs DOWN-left: length × sin 35°), so its last
+  // letters are not cut at the SVG's bottom edge.
+  const longestRotated =
+    rotateLabels && !isDateLabels ? Math.max(0, ...labels.map((l) => clipRotated(l).length)) : 0;
+  const PAD_B = rotateLabels ? Math.min(72, Math.max(46, Math.ceil(longestRotated * 6.6 * 0.57) + 16)) : 18;
   const innerW = Math.max(w - PAD_L - PAD_R, 1);
   const innerH = height - PAD_T - PAD_B;
   const isDate = /^\d{4}-\d{2}-\d{2}T/.test(labels[0] ?? '');
@@ -93,6 +107,8 @@ export function BarChart({
     const l = labels[i] ?? '';
     return isDate ? fmtDate(l) : l;
   };
+  // What a rotated tick may draw: clipped so it stays inside the reserved bottom band.
+  const tickFor = (i: number): string => (rotateLabels && !isDate ? clipRotated(labelFor(i)) : labelFor(i));
   const showEveryLabel = !isDate || n <= 8;
 
   // Unambiguous only for a single-series chart — see `onSelectBar`.
@@ -186,7 +202,8 @@ export function BarChart({
                     transform={`rotate(-35 ${cx} ${ly})`}
                     className="fill-gray-500 dark:fill-gray-400 text-meta"
                   >
-                    {labelFor(i)}
+                    {tickFor(i)}
+                    <title>{labelFor(i)}</title>
                   </text>
                 );
               }
@@ -269,4 +286,11 @@ export function BarChart({
       {series.length > 1 && <Legend series={series} />}
     </div>
   );
+}
+
+// A rotated tick's longest drawn form: past this it would leave the chart's bottom band (46px at
+// −35° ≈ 14 characters of 12px type).
+const ROTATED_MAX = 14;
+function clipRotated(label: string): string {
+  return label.length > ROTATED_MAX ? `${label.slice(0, ROTATED_MAX - 1)}…` : label;
 }

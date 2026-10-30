@@ -14,7 +14,7 @@ import {
   vendorKindsForRole,
 } from '@pierre-review/shared';
 import { automatedReviewerMeta, safeExternalUrl, vendorInk } from '../../lib/ui.js';
-import { monogramFor, monogramInk } from '../../lib/botAvatar.js';
+import { monogramFor } from '../../lib/botAvatar.js';
 import { InfoButton } from '../InfoModal.js';
 import {
   costEditOutcome,
@@ -56,7 +56,7 @@ const FIELD_CLS =
 // The label in front of each control row on a card ("Counts as", "Role", "Vendor").
 const CONTROL_LABEL_CLS = 'w-16 shrink-0 text-meta font-medium text-ui-mute';
 const segmentCls = (active: boolean): string =>
-  `rounded-ui px-2.5 py-0.5 text-meta font-medium disabled:opacity-40 touch:py-2 ${
+  `rounded-ui px-2.5 py-0.5 text-meta font-medium disabled:opacity-40 inline-flex items-center justify-center touch:h-10 touch:px-3 ${
     active ? 'bg-ui-sel text-ui-ink' : 'text-ui-mute hover:text-ui-ink'
   }`;
 
@@ -384,7 +384,7 @@ export function DetectedReviewersTable({
                         onPatch(m.userId, { automated: true });
                         setQuery('');
                       }}
-                      className="ml-auto rounded-ui bg-ui-accent-fill px-2 py-0.5 text-meta font-medium text-ui-on-accent hover:opacity-90 disabled:opacity-40 touch:py-2"
+                      className="ml-auto rounded-ui bg-ui-accent-fill px-2 py-0.5 text-meta font-medium text-ui-on-accent hover:opacity-90 disabled:opacity-40 inline-flex items-center justify-center touch:h-10 touch:px-3"
                     >
                       Treat as a review bot in this Workspace
                     </button>
@@ -547,16 +547,12 @@ function ReviewerCard({
       }`}
       data-testid="bot-classification-card"
     >
-      {/* The vendor colour as a thin LEFT ACCENT — a non-text use of the raw brand hex. */}
-      <span
-        aria-hidden="true"
-        className="absolute inset-y-0 left-0 w-1"
-        style={{ backgroundColor: isPerson ? 'rgb(156 163 175)' : color }}
-      />
+      {/* No vendor-coloured left stripe (decoration by border): the vendor is ONE small dot
+          beside its name in the chip row below. */}
 
       {/* ── HEADER: logo · name + login · role and vendor chips ── */}
       <div className="flex min-w-0 items-start gap-2.5">
-        <BotAvatar avatarUrl={r.avatarUrl} name={title} color={color} muted={isPerson} />
+        <BotAvatar avatarUrl={r.avatarUrl} name={title} muted={isPerson} />
         <div className="min-w-0 flex-1">
           <div
             className="truncate text-body font-semibold text-ui-ink"
@@ -592,22 +588,20 @@ function ReviewerCard({
             <span className="font-medium">{REVIEWER_ROLE_LABEL[r.role]}</span>
           </span>
         )}
-        <span
-          className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-meta font-medium"
-          style={{ ...vendorInk(color), backgroundColor: `${color}1a` }}
-        >
-          <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: color }} />
+        {/* The vendor: grey words, its brand colour only on a decorative dot (never on text). */}
+        <span className="inline-flex items-center gap-1.5 px-1 text-meta font-medium text-ui-mute">
+          <span
+            aria-hidden="true"
+            className="decorative-mark h-2 w-2 shrink-0 rounded-full"
+            style={{ backgroundColor: isPerson ? 'rgb(156 163 175)' : color }}
+          />
           {vendorLabel}
         </span>
         {r.identitySource === 'manual' && (
-          <span className="rounded-ui bg-ui-sel px-1.5 py-0.5 text-meta font-medium text-ui-accent">
-            Named by you
-          </span>
+          <span className="px-1 text-meta font-medium text-ui-mute">Named by you</span>
         )}
         {r.isManualOverride ? (
-          <span className="rounded-ui bg-ui-sel px-1.5 py-0.5 text-meta font-medium text-ui-accent">
-            Set by you
-          </span>
+          <span className="px-1 text-meta font-medium text-ui-mute">Set by you</span>
         ) : (
           <span
             className="text-meta text-ui-mute"
@@ -689,7 +683,7 @@ function ReviewerCard({
               disabled={busy}
               onClick={() => onResetJudgement(r.userId)}
               title={`Forget your bot / person and role judgement for this Workspace and let detection decide again. The vendor name and the price are untouched.`}
-              className="hit rounded-ui px-2 py-0.5 text-meta font-medium text-ui-mute hover:bg-ui-hover disabled:opacity-40 bg-ui-surface"
+              className="inline-flex items-center rounded-ui px-2 py-0.5 touch:h-10 touch:px-3 text-meta font-medium text-ui-mute hover:bg-ui-hover disabled:opacity-40 bg-ui-surface"
             >
               Reset classification
             </button>
@@ -727,7 +721,7 @@ function ReviewerCard({
                   })
                 }
                 title={ROLE_HELP[role]}
-                className="rounded-ui bg-ui-accent-fill px-2 py-0.5 text-meta font-medium text-ui-on-accent hover:opacity-90 disabled:opacity-40 touch:py-2"
+                className="rounded-ui bg-ui-accent-fill px-2 py-0.5 text-meta font-medium text-ui-on-accent hover:opacity-90 disabled:opacity-40 inline-flex items-center justify-center touch:h-10 touch:px-3"
               >
                 Apply role
               </button>
@@ -793,7 +787,7 @@ function ReviewerCard({
               onPatch(r.userId, { kind, label: label.trim() === '' ? null : label })
             }
             title="Name this bot for this Workspace. It does not change whether it counts as a bot, and it does not reach your other Workspaces."
-            className="rounded-ui bg-ui-accent-fill px-2 py-0.5 text-meta font-medium text-ui-on-accent hover:opacity-90 disabled:opacity-40 touch:py-2"
+            className="rounded-ui bg-ui-accent-fill px-2 py-0.5 text-meta font-medium text-ui-on-accent hover:opacity-90 disabled:opacity-40 inline-flex items-center justify-center touch:h-10 touch:px-3"
           >
             Save name
           </button>
@@ -807,7 +801,7 @@ function ReviewerCard({
               disabled={busy}
               onClick={() => onResetIdentity(r.userId)}
               title={`Forget the vendor and label you set and let detection name this bot again in this Workspace. The monthly price is kept, and the bot / not-a-bot verdict is unchanged.`}
-              className="hit rounded-ui px-2 py-0.5 text-meta font-medium text-ui-mute hover:bg-ui-hover disabled:opacity-40 bg-ui-surface"
+              className="inline-flex items-center rounded-ui px-2 py-0.5 touch:h-10 touch:px-3 text-meta font-medium text-ui-mute hover:bg-ui-hover disabled:opacity-40 bg-ui-surface"
             >
               Reset name
             </button>
@@ -843,21 +837,18 @@ function ReviewerCard({
 
 /**
  * The card's logo: the account's own GitHub avatar (for a GitHub App bot that IS the vendor's
- * logo), else — no avatar, an unsafe URL, or a load error — a monogram tile on the vendor colour.
+ * logo), else — no avatar, an unsafe URL, or a load error — a monogram on a neutral tone tile.
  *
  * The URL goes through `safeExternalUrl` (a data-derived URL never reaches `src` raw); the SPA's CSP
- * `img-src … https:` already admits avatars.githubusercontent.com in both modes. The monogram's
- * text colour is picked by contrast against the tile (`monogramInk`), never the brand hex itself.
+ * `img-src … https:` already admits avatars.githubusercontent.com in both modes.
  */
 function BotAvatar({
   avatarUrl,
   name,
-  color,
   muted,
 }: {
   avatarUrl: string | null;
   name: string;
-  color: string;
   muted: boolean;
 }): JSX.Element {
   const src = safeExternalUrl(avatarUrl);
@@ -878,12 +869,13 @@ function BotAvatar({
       />
     );
   }
-  const bg = muted ? '#6b7280' : color;
+  // A neutral tone tile (the vendor's colour is the one dot in the chip row, not a filled square).
   return (
     <span
       aria-hidden="true"
-      className="flex h-9 w-9 shrink-0 select-none items-center justify-center rounded-ui text-meta font-semibold"
-      style={{ backgroundColor: bg, color: monogramInk(bg) }}
+      className={`flex h-9 w-9 shrink-0 select-none items-center justify-center rounded-ui bg-ui-raise text-meta font-semibold ${
+        muted ? 'text-ui-faint' : 'text-ui-mute'
+      }`}
     >
       {monogramFor(name)}
     </span>
@@ -892,12 +884,13 @@ function BotAvatar({
 
 // ── The price ───────────────────────────────────────────────────────────────────────────────
 
-// Per-state input chrome. The two states must be distinguishable at a glance, because emptying the
-// box means something different in each: on a priced bot it CLEARS, on an unpriced one it does
-// nothing.
+// Per-state input chrome. ONE neutral look for both: a coloured outline on a set price read as a
+// validation error on every priced card. The two states stay apart by their CONTENT (a number vs
+// the "—" placeholder) and by the grey hint line under the box, which names what Save would do —
+// emptying a priced box CLEARS it, emptying an unpriced one does nothing.
 const COST_INPUT_CLS: Record<CostState, string> = {
-  set: 'border-ai-signal/60 text-ui-ink',
-  none: 'border-ui-line text-ui-ink',
+  set: 'text-ui-ink',
+  none: 'text-ui-ink',
 };
 
 /**
@@ -978,7 +971,7 @@ function CostEditor({
     }
 
   const modeBtnCls = (active: boolean): string =>
-    `rounded-ui px-2 py-0.5 text-meta font-medium touch:py-2 ${
+    `inline-flex h-7 items-center rounded-ui px-2 text-meta font-medium touch:h-10 touch:px-3 ${
       active ? 'bg-ui-sel text-ui-ink' : 'text-ui-mute hover:text-ui-ink'
     }`;
 
@@ -994,7 +987,7 @@ function CostEditor({
         // Not `type="number"`: a number input in several browsers reports '' for a partially-typed
         // or invalid value, which would be indistinguishable from the CLEAR gesture. Parsing the
         // raw text keeps the two states honest.
-        className={`w-20 rounded-ui border bg-ui-raise px-1.5 py-0.5 text-meta tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-ui-accent touch:h-10 ${COST_INPUT_CLS[state]}`}
+        className={`w-20 rounded-ui bg-ui-raise px-1.5 py-0.5 text-meta tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-ui-accent touch:h-10 ${COST_INPUT_CLS[state]}`}
         value={text}
         placeholder="—"
         onChange={(e) => setText(e.target.value)}
@@ -1047,7 +1040,7 @@ function CostEditor({
           if (parsed.ok && outcome?.dirty === true) onApply(parsed.value, mode);
         }}
         title={hint}
-        className="hit rounded-ui px-2 py-0.5 text-meta font-medium text-ui-mute hover:bg-ui-hover disabled:opacity-40 bg-ui-surface"
+        className="inline-flex items-center rounded-ui px-2 py-0.5 touch:h-10 touch:px-3 text-meta font-medium text-ui-mute hover:bg-ui-hover disabled:opacity-40 bg-ui-surface"
       >
         {outcome?.kind === 'clear' ? 'Clear' : 'Save price'}
       </button>

@@ -793,7 +793,7 @@ export function ResolverPanes({
                   <button
                     type="button"
                     onClick={() => onRetryFile(activeIndex)}
-                    className="hit rounded-ui border border-ui-line px-2 py-0.5 text-meta hover:bg-ui-hover"
+                    className="hit rounded-ui bg-ui-raise px-2 py-0.5 text-meta hover:bg-ui-hover"
                   >
                     Try again
                   </button>

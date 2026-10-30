@@ -30,10 +30,10 @@ const VALIDITY_TONE: Record<ClaudeValidityPill, string> = {
 };
 
 const STATE_TONE: Record<ClaudeStatePill, string> = {
-  resolved: 'border-ui-line text-ui-success',
-  addressed: 'border-ui-line text-ui-success',
-  partly_addressed: 'border-ui-line text-ui-warn',
-  open: 'border-ui-line text-ui-ink',
+  resolved: 'text-ui-success',
+  addressed: 'text-ui-success',
+  partly_addressed: 'text-ui-warn',
+  open: 'text-ui-ink',
 };
 
 const FINDING_TONE: Record<ClaudeFindingPill, string> = {
@@ -59,7 +59,7 @@ export function ClaudeThreadPills({
     <span className="inline-flex shrink-0 items-center gap-1" data-noactivate>
       {marker.finding != null && (
         <span
-          className={`inline-flex items-center gap-1 rounded-full border border-ai-border bg-ai-surface-2 px-2 py-0.5 text-meta font-medium ${FINDING_TONE[marker.finding]}`}
+          className={`inline-flex items-center gap-1 rounded-full bg-ai-surface-2 px-2 py-0.5 text-meta font-medium ${FINDING_TONE[marker.finding]}`}
           data-testid="claude-thread-finding"
         >
           <PendingClaudeReviewIcon size={12} className="shrink-0 text-ai-signal" />
@@ -71,7 +71,7 @@ export function ClaudeThreadPills({
       )}
       {marker.validity != null && (
         <span
-          className={`inline-flex items-center gap-1 rounded-full border border-ai-border bg-ai-surface-2 px-2 py-0.5 text-meta font-medium ${VALIDITY_TONE[marker.validity]}`}
+          className={`inline-flex items-center gap-1 rounded-full bg-ai-surface-2 px-2 py-0.5 text-meta font-medium ${VALIDITY_TONE[marker.validity]}`}
           data-testid="claude-thread-validity"
         >
           <PendingClaudeReviewIcon size={12} className="shrink-0 text-ai-signal" />
@@ -83,7 +83,7 @@ export function ClaudeThreadPills({
       )}
       {marker.state != null && (
         <span
-          className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-meta font-medium ${STATE_TONE[marker.state]}`}
+          className={`inline-flex items-center gap-1 rounded-full bg-ui-raise px-2 py-0.5 text-meta font-medium ${STATE_TONE[marker.state]}`}
           data-testid="claude-thread-state"
         >
           {marker.validity == null && marker.finding == null && (

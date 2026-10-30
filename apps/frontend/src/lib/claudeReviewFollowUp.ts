@@ -102,11 +102,16 @@ export function sortFindingsForDisplay(findings: readonly ClaudeFinding[]): Clau
 
 // ---- chip palette (the file's existing contrast-safe pairs) ----
 
+// The colour rule (docs/redesign/DESIGN.md § Colour): red for what is still to fix (it blocks),
+// green only for an Approve verdict (ready). Every other count is grey words on the neutral raise, so a row of counts never
+// reads as a row of coloured pills.
 const CHIP_RED = 'bg-ui-danger/10 text-ui-danger';
-const CHIP_ORANGE = 'bg-ui-raise text-ui-warn';
-const CHIP_GREEN = 'bg-ui-raise text-ui-success';
+const CHIP_ORANGE = 'bg-ui-raise text-ui-mute';
+const CHIP_GREEN = 'bg-ui-raise text-ui-mute';
 const CHIP_GREY = 'bg-ui-raise text-ui-mute';
 const CHIP_SKY = 'bg-ui-raise text-ui-mute';
+// The one other tint: an APPROVE verdict — ready to land.
+const CHIP_READY = 'bg-ui-raise text-ui-success';
 
 // ⚠ `not_checked` is GREY, never amber: it is unknown, not "not addressed".
 export const FOLLOW_UP_STATUS_CLASS: Record<ClaudeFollowUpStatus, string> = {
@@ -131,11 +136,12 @@ export const TICKET_CRITERION_STATUS_CLASS: Record<ClaudeTicketCriterionStatus, 
 
 // The Open PRs strip: a finished run that found nothing to act on, and a review the PR moved past.
 export const CLEAN_CLASS = CHIP_GREEN;
-export const OUTDATED_CLASS = CHIP_ORANGE;
+// A review behind the head keeps the warn ink (the legacy attention mark: it may be stale).
+export const OUTDATED_CLASS = 'bg-ui-raise text-ui-warn';
 
 // The verdict badge (Claude Review tab) and the Open PRs strip's verdict pill.
 export const VERDICT_CLASS: Record<ClaudeReviewVerdict, string> = {
-  APPROVE: CHIP_GREEN,
+  APPROVE: CHIP_READY,
   REQUEST_CHANGES: CHIP_RED,
   COMMENT: CHIP_SKY,
 };

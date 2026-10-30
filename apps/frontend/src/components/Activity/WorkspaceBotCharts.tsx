@@ -608,10 +608,15 @@ function BotRepoWorkChart({
   const { columns, groups, singleRepo, legend } = model;
 
   const height = 210;
-  const PAD_L = 36;
+  // A rotated label runs up-LEFT from its column, so the first one can pass the SVG's left edge
+  // ("Cursor Bugbot" read "ursor Bugbot" at 390px): reserve the pad from its estimated width.
+  const firstTick = clipTick(columns[0] ? (singleRepo ? columns[0].botLabel : columns[0].repoName) : '');
+  const PAD_L = Math.max(36, Math.ceil(firstTick.length * 6.6 * 0.82 - (w - 44) / Math.max(columns.length * 2, 2) + 8));
   const PAD_R = 8;
   const PAD_T = 8;
-  const PAD_B = singleRepo ? 42 : 56; // rotated labels (repo/bot) + a bot band beneath (multi-repo)
+  // Rotated labels (repo/bot) run DOWN-left: reserve length × sin 35°; multi-repo adds a bot band.
+  const longestTick = Math.max(0, ...columns.map((c) => clipTick(singleRepo ? c.botLabel : c.repoName).length));
+  const PAD_B = singleRepo ? Math.max(42, Math.ceil(longestTick * 6.6 * 0.57) + 16) : 56;
   const innerW = Math.max(w - PAD_L - PAD_R, 1);
   const innerH = height - PAD_T - PAD_B;
   const baseY = PAD_T + innerH;
@@ -687,7 +692,8 @@ function BotRepoWorkChart({
               const ly = baseY + 9;
               return (
                 <text key={`lbl-${i}`} x={cx} y={ly} textAnchor="end" transform={`rotate(-35 ${cx} ${ly})`} className="fill-gray-500 dark:fill-gray-400 text-meta">
-                  {singleRepo ? c.botLabel : c.repoName}
+                  {clipTick(singleRepo ? c.botLabel : c.repoName)}
+                  <title>{singleRepo ? c.botLabel : c.repoName}</title>
                 </text>
               );
             })}
@@ -1028,4 +1034,9 @@ export function WorkspaceBotCharts({ repoId }: { repoId?: number } = {}): JSX.El
       )}
     </div>
   );
+}
+
+// A rotated tick's longest drawn form (it must stay inside the chart's bottom band).
+function clipTick(label: string): string {
+  return label.length > 14 ? `${label.slice(0, 13)}…` : label;
 }

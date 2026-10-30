@@ -23,12 +23,27 @@ export function Avatar({
       />
     );
   }
+  return <Monogram label={label} size={size} />;
+}
+
+/**
+ * The no-avatar fallback: initials on a VISIBLE tone circle, tinted per person (a hue hashed from
+ * the name, low alpha, so it reads on both themes and the ink keeps its contrast). ONE initial
+ * below 24px — two bold letters in a 14px circle spilled out of it and ran into the name
+ * ("MOMorgan Diaz"). Two only from 24px. Decorative: the name beside it (or the `title`) says who.
+ */
+export function Monogram({ label, size = 24 }: { label: string; size?: number }): JSX.Element {
+  const letters = (size < 24 ? label.slice(0, 1) : label.slice(0, 2)).toUpperCase();
+  let h = 0;
+  for (let i = 0; i < label.length; i++) h = (h * 31 + label.charCodeAt(i)) % 360;
   return (
     <span
-      className="flex shrink-0 items-center justify-center rounded-full bg-ui-hover text-meta font-semibold text-ui-ink"
-      style={{ width: size, height: size }}
+      aria-hidden
+      title={label}
+      className="flex shrink-0 select-none items-center justify-center overflow-hidden rounded-full bg-ui-sel text-meta font-semibold leading-none text-ui-ink"
+      style={{ width: size, height: size, backgroundImage: `linear-gradient(hsl(${h} 45% 55% / 0.28), hsl(${h} 45% 55% / 0.28))` }}
     >
-      {label.slice(0, 2).toUpperCase()}
+      {letters}
     </span>
   );
 }
@@ -46,15 +61,17 @@ export function CommentCard({
   return (
     <div className="flex gap-2">
       <Avatar user={user} />
-      <div className="min-w-0 flex-1 rounded-ui border border-ui-line">
-        <div className="flex items-center gap-2 border-b border-ui-line px-3 py-1 text-meta">
-          <UserName
-            user={user}
-            fallbackId={comment.authorId}
-            repoId={repoId}
-            className="font-semibold"
-          />
-          <span className="text-ui-faint">{relativeTime(comment.createdAt)}</span>
+      <div className="min-w-0 flex-1 rounded-ui bg-ui-surface">
+        <div className="flex min-w-0 items-center gap-2 px-3 pt-1.5 text-meta">
+          <span className="min-w-0 truncate whitespace-nowrap">
+            <UserName
+              user={user}
+              fallbackId={comment.authorId}
+              repoId={repoId}
+              className="font-semibold"
+            />
+          </span>
+          <span className="shrink-0 whitespace-nowrap text-ui-faint">{relativeTime(comment.createdAt)}</span>
         </div>
         <div className="px-3 py-2">
           <Markdown>{comment.body}</Markdown>

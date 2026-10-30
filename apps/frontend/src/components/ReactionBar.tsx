@@ -96,7 +96,7 @@ export function ReactionBar({
               e.stopPropagation();
               react(g.content, !g.viewerHasReacted);
             }}
-            className={`inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-meta leading-none transition-colors disabled:opacity-60 ${
+            className={`hit inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-meta leading-none transition-colors disabled:opacity-60 ${
               g.viewerHasReacted
                 ? 'border-ui-line bg-ui-sel text-ui-accent'
                 : 'border-ui-line text-ui-mute hover:border-ui-line'
@@ -122,7 +122,7 @@ export function ReactionBar({
             e.stopPropagation();
             setOpen((v) => !v);
           }}
-          className={`inline-flex items-center gap-0.5 rounded-full border border-dashed px-1.5 py-1 text-meta leading-none transition-opacity disabled:opacity-40 ${
+          className={`hit inline-flex items-center gap-0.5 rounded-full border border-dashed px-1.5 py-1 text-meta leading-none transition-opacity disabled:opacity-40 ${
             groups.length === 0 ? 'opacity-40 hover:opacity-100' : ''
           } border-ui-line text-ui-faint hover:text-ui-mute`}
         >
@@ -158,7 +158,7 @@ export function ReactionBar({
                   e.stopPropagation();
                   react(content, !mine);
                 }}
-                className={`rounded-ui px-1 py-0.5 text-body leading-none hover:bg-ui-hover ${
+                className={`rounded-ui px-1 py-0.5 text-body leading-none hover:bg-ui-hover touch:min-h-10 touch:min-w-10 ${
                   mine ? 'bg-ui-sel' : ''
                 }`}
               >

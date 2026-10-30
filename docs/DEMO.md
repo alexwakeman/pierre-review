@@ -108,6 +108,10 @@ a re-record **in the same commit**:
 
 Then: `pnpm demo:record` → `pnpm --filter @pierre-review/frontend build:demo` → `pnpm demo:verify` and
 `node scripts/verify-demo.mjs --later=40` → commit `apps/frontend/src/demo/data/recording.json`.
+`pnpm demo:verify:phone` (`--phone`) runs the same views and actions at 390 × 844 on a touch screen
+(screenshots in `/tmp/limn-demo-shots-390`); an `act` that differs on a phone branches on `PHONE`
+(Settings is reached through the drawer; a phone's Settings tab carries its summary line; Docs
+opens a document in Read, its row facts are back on Library). It is not in CI yet.
 A `VIEWS` row may carry `{ act, expect }`: a click the view hides behind (Settings has no URL) and
 text the page must then show (the run list and both providers' labels on #105 after picking Codex's model, "Default: Codex." after the switch).
 

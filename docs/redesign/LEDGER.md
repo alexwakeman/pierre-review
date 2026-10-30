@@ -11,6 +11,14 @@ an ⓘ `InfoButton`, every icon from `components/Icons.tsx`, every AI run button
 nothing under 11px, touch targets ≥ 40px on touch screens. The design rules are in
 [DESIGN.md](DESIGN.md).
 
+**State of the ticks (2026-10-30).** The HEADINGS are the audited claim: every heading but the
+ones still marked `[ ]` has been seen at 1440 and 390. Most SUB-ITEMS under a ticked heading are
+still `[ ]` — they were not re-ticked one by one; read a ticked heading as "the surface and its
+entry survive", not as a line-by-line proof of every fact under it. The phone pass is now
+scripted: `pnpm demo:verify:phone` (`scripts/verify-demo.mjs --phone`, 390 × 844, touch) runs every
+demo view and its actions at phone width. Surfaces the recording cannot raise (the SSO notice, the
+budget toast, a conflict-resolver session) were raised by patching the demo's in-page answers.
+
 Paths are relative to `apps/frontend/src` unless they start with `apps/`, `scripts/` or `docs/`.
 "Tests" lists what pins the surface today; a redesign that changes what a test pins updates the
 test deliberately and says so in the commit.
@@ -72,18 +80,18 @@ Known debts the redesign must clear here:
   - [ ] Shown only until `/api/me` settles. A failed `/api/me` falls through to the app with
     `meUser` null, so UserMenu is hidden
 
-### [ ] AuthNoticeBanner (GitHub SSO not authorized) → kept, unchanged, above the shell — checked 2026-10-30: still mounted at the top of App above the shell (palette moved to `--ui-*`); the demo has no `authNotices`, so not seen at 1440 / 390
+### [x] AuthNoticeBanner (GitHub SSO not authorized) → kept, unchanged, above the shell — SEEN 2026-10-30 at 1440 and 390 (the static demo with `/api/me` patched to carry `authNotices: [{kind:'saml_sso', org:'acme'}]` in the page; the recording itself has none). At 390 it wraps to four lines above the top bar; a SidePanel sheet still opens under the top bar (it measures `[data-shell-topbar]`)
 - Entry: automatic full-width strip above the header when `/api/me` `authNotices` is non-empty
 - Files: `components/AuthNoticeBanner.tsx`, `App.tsx`
 - Essential info:
-  - [ ] "Your GitHub login is not authorized for {orgs}." — lists every org
-  - [ ] Why it matters: that org's PRs, CI checks and comments can't be synced until the login is
+  - [x] "Your GitHub login is not authorized for {orgs}." — lists every org
+  - [x] Why it matters: that org's PRs, CI checks and comments can't be synced until the login is
     authorized for single sign-on
-  - [ ] The fix: run `gh auth refresh` in a terminal
+  - [x] The fix: run `gh auth refresh` in a terminal
 - Actions: none. Not dismissible; clears itself after the next clean sync
 - States:
-  - [ ] Hidden when there are no notices
-  - [ ] Amber tone today
+  - [x] Hidden when there are no notices (every demo view)
+  - [x] Amber tone today (warn ink on the surface)
 - Tests: `e2e/mock-api.ts` `/api/me` fixture (`authNotices`)
 
 ### [x] Header bar + wordmark → the wordmark (h1, same title) heads the sidebar; the header is the slim `TopBar` (h-11, fixed): menu button · location (below lg) · open tabs (md+) · toast strip
@@ -160,34 +168,34 @@ Known debts the redesign must clear here:
   - [ ] Hidden when there are no rows
 - Tests: `test/aiFixProgress.test.ts`, `test/aiFixRuns.test.ts`
 
-### [ ] Toast: automatic runs paused (AiBudgetToast) — checked 2026-10-30: mounted (App.tsx toast strip), drawn by the ONE `HeaderToast` (restyled: a toned card, no border, the source on the icon/fill only, `touch:h-10`). NOT raisable by the demo recording, so not yet seen at 1440 / 390 — leave unticked until a run raises it
+### [x] Toast: automatic runs paused (AiBudgetToast) — SEEN 2026-10-30 at 1440 and 390 (the static demo with `/api/ai/budget` patched to `overBudget: true` in the page). Collapsed at 390 it is the icon, Settings and × (words `max-sm:sr-only`, the strip rule); a tap expands the full sentence and the footer
 - Entry: appears when the AI spend budget is over
 - Files: `components/AiBudget.tsx`, `lib/aiBudget.ts`
 - Essential info:
-  - [ ] "Automatic {provider} runs paused" + a sentence on why and until when
+  - [x] "Automatic {provider} runs paused" + a sentence on why and until when
 - Actions:
-  - [ ] Settings: `openSettings('claude-spend')`
-  - [ ] Dismiss (remembered per budget key)
+  - [x] Settings: `openSettings('claude-spend')` (on the card's line)
+  - [x] Dismiss (remembered per budget key) — the ×
 - States:
-  - [ ] Shown only when `status.overBudget`
-  - [ ] tone ai
+  - [x] Shown only when `status.overBudget`
+  - [x] tone ai (now the VIOLET AI family, not the danger-like vermilion)
   - [ ] A subscription account never shows US$
 - Tests: `test/aiBudget.test.ts`, `test/claudeSpendForm.test.ts`
 
-### [ ] Toast: reopen closed conflict resolver (ClosedResolverToast) — checked 2026-10-30: mounted (App.tsx toast strip), drawn by the ONE `HeaderToast` (restyled: a toned card, no border, the source on the icon/fill only, `touch:h-10`). NOT raisable by the demo recording, so not yet seen at 1440 / 390 — leave unticked until a run raises it
+### [x] Toast: reopen closed conflict resolver (ClosedResolverToast) — SEEN 2026-10-30 at 1440, 768 and 390: one region decided in the synthetic resolver session, the resolver closed → "acme/api #105 · Conflict resolver closed — 1 decision kept, nothing pushed." with Reopen and × on the line (below sm the words are in the expanded card, the strip rule)
 - Entry: appears for 20s after the reader closes the resolver with decisions still held
 - Files: `components/conflicts/ClosedResolverToast.tsx`, `store/conflictResolver.ts`
 - Essential info:
-  - [ ] Label "owner/repo #N"
-  - [ ] Summary `closedToast(decidedCount)` — how many decisions are kept
-  - [ ] This is the ONLY route back into the resolver: it has no URL and no history entry
+  - [x] Label "owner/repo #N"
+  - [x] Summary `closedToast(decidedCount)` — how many decisions are kept
+  - [x] This is the ONLY route back into the resolver: it has no URL and no history entry
 - Actions:
-  - [ ] Reopen (`REOPEN`)
-  - [ ] Dismiss
+  - [x] Reopen (`REOPEN`)
+  - [x] Dismiss
 - States:
   - [ ] Never after a commit
   - [ ] Auto-hides after `TOAST_MS` 20000
-  - [ ] tone conflicts
+  - [x] tone conflicts
 - Tests: testId `closed-resolver-toast`
 
 ### [x] Toast: My Turn dismissed, with Undo (MyTurnDismissToast) → for Pending, the same words through the ONE `UndoToast` (testId `undo-toast`, 10s, Undo + `z`); the `my-turn-dismiss-toast` card stays mounted in the strip but nothing on Pending raises it now
@@ -656,7 +664,7 @@ Known debts the redesign must clear here:
   - [ ] user-activity, bot-detail and ticket are keyed on the tab so they remount
 - Tests: e2e and capture-shots use these data-testids
 
-### [ ] Conflict resolver overlay — see the mount line above (restyled by the palette pass, not yet seen) mount — checked 2026-10-30: still mounted once in App above main; its chrome moved to `--ui-*` by the palette pass (the gutter arrow keeps its MEASURED gray/sky pair — `resolverControls.test.ts`). The demo has no resolver session, so not seen at 1440 / 390
+### [x] Conflict resolver overlay — SEEN 2026-10-30 at 1440 / 768 / 390 (see § Conflict resolver overlay below); see the mount line above (restyled by the palette pass, not yet seen) mount — checked 2026-10-30: still mounted once in App above main; its chrome moved to `--ui-*` by the palette pass (the gutter arrow keeps its MEASURED gray/sky pair — `resolverControls.test.ts`). The demo has no resolver session, so not seen at 1440 / 390
 - Entry: mounted once in App, above main. Opened from PrDetail's Conflicts row, the merge panel,
   Pending's conflicts card, or ClosedResolverToast
 - Files: `components/conflicts/ConflictResolverOverlay.tsx`, `store/conflictResolver.ts`
@@ -1564,7 +1572,7 @@ Cross-cutting:
   - [ ] Caution row only with a ttfrAnomaly and a visible Bot activity tab
 - Tests: `test/botReviewerQueryKey.test.ts`
 
-### [x] Actions row: "Show actions" reveal and ApproveControl → unchanged (the NEW `a` key was NOT added on PR detail: an approve has no undo there; see the report)
+### [x] Actions row: "Show actions" reveal and ApproveControl → same controls, rebuilt 2026-10-30 on the shared `Button` (sm: 28px, 40px on touch; tone, no borders; verdict ink kept: green Approve, amber Request changes); the reveal is 40px on touch (the NEW `a` key was NOT added on PR detail: an approve has no undo there; see the report)
 - Entry: Overview "Actions" row; AI Review "Reviews and actions" → Actions
 - Files: `pr/PrActionsRow.tsx`, `ApproveControl.tsx`, `MentionTextarea.tsx`, `hooks/usePrWrites.ts`
 - Essential info:
@@ -2072,7 +2080,7 @@ Cross-cutting:
 - Tests: `test/fixPicker.test.ts`, `test/aiFixModelDefault.test.ts`, `test/perRunModelPicker.test.ts`,
   `test/aiGating.test.ts`, verify-demo `pr:113|114:ai_fix`
 
-### [ ] Conflict resolver overlay
+### [x] Conflict resolver overlay — SEEN 2026-10-30 at 1440, 768 and 390 with a synthetic two-file session (the static demo with `/api/me` `conflictResolver: true` and the `/api/prs/105/conflicts*` answers patched in the page; script: /tmp/redesign-fix/resolver.mjs). Three panes at 1440; stacked with the "too narrow" notice at 768 and 390; no page overflow; every toolbar, strip and file-menu control ≥ 40px on touch (measured with `elementFromPoint`, 0 small targets). Bordered buttons became tone (`bg-ui-raise`). Not seen: the Landing step, the commit progress and the result panel (no commit is simulated) — their controls carry the same touch sizes
 - Entry: ResolveConflictsButton → "Resolve manually" (Overview Conflicts row, MergeControl
   conflict box, Pending conflicts card) or a "Resolve with <provider>" run. Mounted once at App root
 - Files: `conflicts/ConflictResolverOverlay.tsx`, `ResolverToolbar.tsx`, `ResolverPanes.tsx`,
