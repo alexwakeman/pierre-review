@@ -157,7 +157,7 @@ function CodeAnchorRef({
       <button
         type="button"
         onClick={() => onOpenInChanges(path, line, side)}
-        className="hit break-all text-left font-mono text-meta text-ui-accent hover:underline"
+        className="hit break-all text-left font-mono text-meta text-ui-ink hover:underline"
       >
         {label}
       </button>
@@ -298,7 +298,7 @@ const TAB_ICON_BTN =
   'rounded-ui p-0.5 text-ui-mute hover:bg-ui-hover hover:text-ui-ink';
 const PRIMARY_BTN =
   'inline-flex h-7 items-center whitespace-nowrap rounded-ui bg-ui-raise px-2.5 text-meta font-medium text-ui-ink hover:bg-ui-hover disabled:cursor-not-allowed disabled:opacity-50 touch:h-10 touch:px-3';
-const LINK_BTN = 'text-meta text-ui-accent hover:underline disabled:opacity-50';
+const LINK_BTN = 'text-meta text-ui-ink hover:underline disabled:opacity-50';
 const SPINNER =
   'inline-block h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-ui-line border-t-ui-line';
 
@@ -783,7 +783,7 @@ export function ClaudeReviewTicketPanel({
               <button
                 type="button"
                 onClick={addStory}
-                className="hit flex items-center gap-1 px-2 py-1 text-meta text-ui-accent hover:underline"
+                className="hit flex items-center gap-1 px-2 py-1 text-meta text-ui-ink hover:underline"
               >
                 <PlusIcon size={11} />
                 Add story
@@ -1336,7 +1336,7 @@ export function FollowUpRow({
               .getElementById(`claude-finding-${reraised}`)
               ?.scrollIntoView({ block: 'center', behavior: 'smooth' })
           }
-          className="hit mt-1 inline-flex items-center gap-1 text-meta text-ui-accent hover:underline"
+          className="hit mt-1 inline-flex items-center gap-1 text-meta text-ui-ink hover:underline"
         >
           Raised again below
           <ChevronIcon dir="down" size={11} />

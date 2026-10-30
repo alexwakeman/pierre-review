@@ -522,7 +522,9 @@ function GridLaneBoard<L, C>({ label, layout, laneWidth, renderLane, renderCard,
     return m;
   }, [layout.lanes]);
   const gridRow = (logical: number): number => (narrow ? logical + 3 + (laneIndexOfRow[logical] ?? 0) : logical + 2);
-  const track = (c: (typeof layout.columns)[number]): string => (c.collapsed && !c.widened ? 'minmax(4.5rem, 6rem)' : narrow ? 'minmax(9rem, 1fr)' : 'minmax(7.5rem, 1fr)');
+  // An EMPTY column (no card in any lane) shrinks to its header, so the columns that hold cards get the
+  // width — at 1440 five equal tracks left every card ~140px and truncated titles and names.
+  const track = (c: (typeof layout.columns)[number]): string => (c.count === 0 ? 'min-content' : c.collapsed && !c.widened ? 'minmax(4.5rem, 6rem)' : narrow ? 'minmax(9rem, 1fr)' : 'minmax(7.5rem, 1fr)');
   const template = `${narrow ? '' : `${laneWidth} `}${layout.columns.map(track).join(' ')}`;
 
   return (

@@ -38,6 +38,7 @@ import { AttentionCards, KIND_LABEL, type PendingFocusRequest } from './Attentio
 import { pendingRowSummary } from './pendingRow.js';
 import {
   Button,
+  PageHeader,
   Tabs,
   cx,
   useEdgeFade,
@@ -590,18 +591,16 @@ export function AttentionView(): JSX.Element {
 
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="attention-view">
-      <header className="shrink-0 px-7 pb-2 pt-5 max-md:px-4 max-md:pt-3">
-        {/* On a phone the plan's controls drop under the title, full width; from md they sit at
-            the end of the title row. */}
-        <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
-          <div className="min-w-0 basis-full md:basis-0 md:flex-1">
-            <div className="flex items-center gap-1.5">
-              {/* LABEL-ONLY rename (the Insights→Reports precedent): the store/URL literal stays
-                  `'attention'`. */}
-              <h2 className="text-display text-ui-ink">Pending</h2>
-              {/* How the board is gathered and ordered — a short popover with a way into the guide. */}
-              <PendingOrderInfo onOpenGuide={openGuide} rules={data?.rules} />
-            </div>
+      {/* THE PAGE HEADER (components/ui/PageHeader.tsx). On a phone the plan's controls drop under
+          the title, full width; from md they sit at the end of the title row. LABEL-ONLY rename
+          (the Insights→Reports precedent): the store/URL literal stays `'attention'`. How the board
+          is gathered and ordered is the ⓘ — a short popover with a way into the guide. */}
+      <PageHeader
+        title="Pending"
+        info={<PendingOrderInfo onOpenGuide={openGuide} rules={data?.rules} />}
+        actions={planControls}
+        sub={
+          <>
             {/* GENERATED — the plan's framing sentences, quiet, labelled by their ink and mark. */}
             {/* The model's words are grey text; only the sparkle wears the AI colour. On a phone
                 the headline is one line until tapped (the parked line shows with it). */}
@@ -637,9 +636,9 @@ export function AttentionView(): JSX.Element {
               </p>
             )}
             {canNarrate && !generate.isError && notice != null && <p className="mt-0.5 text-meta text-ui-mute">{notice}</p>}
-          </div>
-          {planControls}
-        </div>
+          </>
+        }
+      >
 
         {/* ── THE TABS ─────────────────────────────────────────────────────────────────────
             Each count is the tab's WHOLE population (uncapped), the same figure `/api/daily-brief`
@@ -726,7 +725,7 @@ export function AttentionView(): JSX.Element {
                   <button
                     type="button"
                     aria-haspopup="dialog"
-                    className="inline-flex h-7 shrink-0 items-center gap-1 rounded-ui px-2 text-body text-ui-accent hover:bg-ui-hover outline-none focus-visible:ring-2 focus-visible:ring-ui-accent touch:h-10"
+                    className="inline-flex h-7 shrink-0 items-center gap-1 rounded-ui px-2 text-body text-ui-ink hover:bg-ui-hover outline-none focus-visible:ring-2 focus-visible:ring-ui-accent touch:h-10"
                     onClick={() => openSettings('my-turn')}
                   >
                     <GearIcon size={12} />
@@ -737,7 +736,7 @@ export function AttentionView(): JSX.Element {
             )}
           </div>
         )}
-      </header>
+      </PageHeader>
 
       <div
         id={panelId('pending', tabKey)}

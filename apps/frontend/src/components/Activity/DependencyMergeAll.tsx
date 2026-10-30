@@ -165,7 +165,7 @@ export function DependencyMergeAll({
                     run.mutate(ids);
                     setOpen(false);
                   }}
-                  className="inline-flex h-8 items-center rounded-ui bg-ui-accent-fill px-3 text-body font-medium text-ui-on-accent hover:brightness-110 disabled:opacity-50 touch:h-11"
+                  className="inline-flex h-8 items-center rounded-ui bg-ui-accent-fill disabled:bg-ui-raise disabled:text-ui-ink px-3 text-body font-medium text-ui-on-accent hover:brightness-110 disabled:opacity-50 touch:h-11"
                 >
                   {toMerge > 0 && toArm > 0
                     ? `Merge ${toMerge}, arm ${toArm}`

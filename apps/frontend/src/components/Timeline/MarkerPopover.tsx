@@ -71,7 +71,7 @@ function PrContext({
       <button
         type="button"
         onClick={onOpen}
-        className="hit font-medium text-ui-accent hover:underline"
+        className="hit font-medium text-ui-ink hover:underline"
       >
         #{pr.number}
       </button>
@@ -259,7 +259,7 @@ function SingleEvent({
           <button
             type="button"
             onClick={openInDetail}
-            className="hit text-ui-accent hover:underline"
+            className="hit text-ui-ink hover:underline"
           >
             Open in detail pane
           </button>
@@ -268,7 +268,7 @@ function SingleEvent({
           <button
             type="button"
             onClick={viewInActivity}
-            className="hit text-ui-accent hover:underline"
+            className="hit text-ui-ink hover:underline"
             title="Show this commit in the PR's Activity tab"
           >
             View in Activity
@@ -279,7 +279,7 @@ function SingleEvent({
             href={`${prDetail.githubUrl}/commits/${commit.sha}`}
             target="_blank"
             rel="noreferrer noopener"
-            className="hit text-ui-accent hover:underline"
+            className="hit text-ui-ink hover:underline"
           >
             Open commit on GitHub <ExternalLinkIcon size={11} className="inline-block align-[-0.1em]" />
           </a>
@@ -289,7 +289,7 @@ function SingleEvent({
             href={safeExternalUrl(prComment.url) ?? prDetail.githubUrl}
             target="_blank"
             rel="noreferrer noopener"
-            className="hit text-ui-accent hover:underline"
+            className="hit text-ui-ink hover:underline"
           >
             Open on GitHub <ExternalLinkIcon size={11} className="inline-block align-[-0.1em]" />
           </a>

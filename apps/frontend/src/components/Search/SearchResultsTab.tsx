@@ -129,10 +129,10 @@ export function SearchResultsTab(): JSX.Element {
                   onClick={() => openSearchStory(st)}
                   className="hit flex w-full items-start gap-2 rounded-ui bg-ui-sel px-3 py-2 text-left hover:bg-ui-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent"
                 >
-                  <TicketIcon size={14} className="mt-0.5 shrink-0 text-ui-accent" />
+                  <TicketIcon size={14} className="mt-0.5 shrink-0 text-ui-mute" />
                   <span className="min-w-0">
                     <span className="flex flex-wrap items-baseline gap-x-2 text-meta">
-                      <span className="font-semibold text-ui-accent">{highlightTerms(st.key, debounced)}</span>
+                      <span className="font-semibold text-ui-mute">{highlightTerms(st.key, debounced)}</span>
                       {st.title != null && <span className="font-medium text-ui-ink">{highlightTerms(st.title, debounced)}</span>}
                     </span>
                     <span className="mt-0.5 block text-meta text-ui-mute">
@@ -234,7 +234,7 @@ function HitHeader({ hit }: { hit: SearchHit }): JSX.Element {
           }
         }}
         title="Open this PR"
-        className="truncate rounded-ui font-medium text-ui-accent hover:underline"
+        className="truncate rounded-ui font-medium text-ui-ink hover:underline"
       >
         {hit.repoFullName} #{hit.prNumber}
       </span>

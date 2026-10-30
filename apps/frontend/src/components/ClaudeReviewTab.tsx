@@ -1035,7 +1035,7 @@ export function FindingRow({
                       finding.threadId ?? undefined,
                     )
                   }
-                  className="hit text-left text-ui-accent hover:underline"
+                  className="hit text-left text-ui-ink hover:underline"
                   title={
                     finding.threadId != null
                       ? 'Show this comment in the Changes tab'
@@ -1066,7 +1066,7 @@ export function FindingRow({
                 href={primaryHref}
                 target="_blank"
                 rel="noreferrer noopener"
-                className="hit text-ui-accent hover:underline"
+                className="hit text-ui-ink hover:underline"
                 title={
                   commentUrl != null
                     ? 'Open this posted comment on GitHub'

@@ -145,7 +145,7 @@ export function MemberSectionList({
                       onClick={() =>
                         setShownOthers((s) => ({ ...s, [sec.key]: (s[sec.key] ?? 0) + 10 }))
                       }
-                      className="hit font-medium text-ui-accent hover:underline"
+                      className="hit font-medium text-ui-ink hover:underline"
                     >
                       {/* Lead number == what THIS click reveals (always ≤10, since the
                           onClick bumps by 10); "· N hidden" is the total still collapsed. */}

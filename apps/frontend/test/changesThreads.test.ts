@@ -49,7 +49,8 @@ describe('the Changes tab sticky bar', () => {
   it('is sticky, carries the Threads only toggle, and no file delta', () => {
     const src = read('ChangesTab.tsx');
     const header = src.slice(src.indexOf('function Header('), src.indexOf('export function ChangesTab('));
-    expect(header).toMatch(/className="sticky top-0 z-30/);
+    // Pins under PrDetail's sticky tab strip below md (`--pr-tabs-h`, 0 from md up).
+    expect(header).toMatch(/className="sticky top-\[var\(--pr-tabs-h,0px\)\] z-30/);
     expect(header).toMatch(/aria-pressed=\{threadsOnly\}/);
     expect(header).toMatch(/Threads only/);
     // The PR header already states these.

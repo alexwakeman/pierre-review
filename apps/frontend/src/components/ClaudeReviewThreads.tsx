@@ -132,7 +132,7 @@ export function ThreadRow({
             href={href}
             target="_blank"
             rel="noreferrer noopener"
-            className="hit ml-auto inline-flex items-center gap-1 text-meta text-ui-accent hover:underline"
+            className="hit ml-auto inline-flex items-center gap-1 text-meta text-ui-ink hover:underline"
           >
             GitHub
             <ExternalLinkIcon size={11} />
@@ -144,7 +144,7 @@ export function ThreadRow({
           <button
             type="button"
             onClick={() => onOpenThread(t.threadId)}
-            className="hit break-all text-left font-mono text-meta text-ui-accent hover:underline"
+            className="hit break-all text-left font-mono text-meta text-ui-ink hover:underline"
           >
             {label}
           </button>

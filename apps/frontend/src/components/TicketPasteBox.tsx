@@ -23,8 +23,8 @@ const ERROR_TEXT = 'text-ui-danger';
 const BTN =
   'inline-flex h-7 items-center whitespace-nowrap rounded-ui bg-ui-raise px-2 text-meta text-ui-ink hover:bg-ui-hover disabled:opacity-50 touch:h-10 touch:px-3';
 const BTN_PRIMARY =
-  'inline-flex h-7 items-center whitespace-nowrap rounded-ui bg-ui-raise px-2 text-meta text-ui-accent hover:bg-ui-hover disabled:opacity-50 touch:h-10 touch:px-3';
-const LINK_BTN = 'text-meta text-ui-accent hover:underline disabled:opacity-50';
+  'inline-flex h-7 items-center whitespace-nowrap rounded-ui bg-ui-raise px-2 text-meta text-ui-ink hover:bg-ui-hover disabled:opacity-50 touch:h-10 touch:px-3';
+const LINK_BTN = 'text-meta text-ui-ink hover:underline disabled:opacity-50';
 const SPINNER =
   'inline-block h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-ui-line border-t-ui-line';
 

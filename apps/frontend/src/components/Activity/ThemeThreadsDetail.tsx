@@ -107,7 +107,7 @@ function ThemePrGroup({
         <button
           type="button"
           onClick={openThisPr}
-          className="shrink-0 rounded-ui bg-ui-raise px-2 py-0.5 text-meta font-medium text-ui-accent hover:bg-ui-hover touch:py-2"
+          className="shrink-0 rounded-ui bg-ui-raise px-2 py-0.5 text-meta font-medium text-ui-ink hover:bg-ui-hover touch:py-2"
         >
           Open PR →
         </button>

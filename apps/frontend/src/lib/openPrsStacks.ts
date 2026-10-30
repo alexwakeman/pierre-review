@@ -142,6 +142,9 @@ export interface StoryStackInput {
   ticket: CardTicket & { ident: string };
   /** The ticket's MERGED PRs — the stack's "Merged (n)" panel. */
   merged: readonly TicketMergedPr[];
+  /** The story TAB (not This Sprint's tray): the stack's header is the PAGE header and the stack is
+   *  the page itself, with no card around it. */
+  page?: boolean;
 }
 
 /** The story view's stack id — apart from the board's `ticket:<KEY>`, so open state never crosses. */

@@ -384,7 +384,7 @@ export function DetectedReviewersTable({
                         onPatch(m.userId, { automated: true });
                         setQuery('');
                       }}
-                      className="ml-auto rounded-ui bg-ui-accent-fill px-2 py-0.5 text-meta font-medium text-ui-on-accent hover:opacity-90 disabled:opacity-40 inline-flex items-center justify-center touch:h-10 touch:px-3"
+                      className="ml-auto rounded-ui bg-ui-accent-fill disabled:bg-ui-raise disabled:text-ui-ink px-2 py-0.5 text-meta font-medium text-ui-on-accent hover:opacity-90 disabled:opacity-50 inline-flex items-center justify-center touch:h-10 touch:px-3"
                     >
                       Treat as a review bot in this Workspace
                     </button>
@@ -722,7 +722,7 @@ function ReviewerCard({
                   })
                 }
                 title={ROLE_HELP[role]}
-                className="rounded-ui bg-ui-accent-fill px-2 py-0.5 text-meta font-medium text-ui-on-accent hover:opacity-90 disabled:opacity-40 inline-flex items-center justify-center touch:h-10 touch:px-3"
+                className="rounded-ui bg-ui-accent-fill disabled:bg-ui-raise disabled:text-ui-ink px-2 py-0.5 text-meta font-medium text-ui-on-accent hover:opacity-90 disabled:opacity-50 inline-flex items-center justify-center touch:h-10 touch:px-3"
               >
                 Apply role
               </button>
@@ -788,7 +788,7 @@ function ReviewerCard({
               onPatch(r.userId, { kind, label: label.trim() === '' ? null : label })
             }
             title="Name this bot for this Workspace. It does not change whether it counts as a bot, and it does not reach your other Workspaces."
-            className="rounded-ui bg-ui-accent-fill px-2 py-0.5 text-meta font-medium text-ui-on-accent hover:opacity-90 disabled:opacity-40 inline-flex items-center justify-center touch:h-10 touch:px-3"
+            className="rounded-ui bg-ui-accent-fill disabled:bg-ui-raise disabled:text-ui-ink px-2 py-0.5 text-meta font-medium text-ui-on-accent hover:opacity-90 disabled:opacity-50 inline-flex items-center justify-center touch:h-10 touch:px-3"
           >
             Save name
           </button>

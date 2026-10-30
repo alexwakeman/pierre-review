@@ -87,6 +87,7 @@ import { ClaudeReviewPanel, TicketPillsRow } from './ClaudeReviewCell.js';
 import { BlastRadiusChip } from './BlastRadiusChip.js';
 import { LargePrFlag } from './LargePrFlag.js';
 import { TicketStatusPicker } from '../Ticket/TicketStatusPicker.js';
+import { PageHeader } from '../ui/PageHeader.js';
 import {
   CARD_CHIP,
   CARD_NEUTRAL_CHIP,
@@ -732,6 +733,7 @@ export function OpenPrsCards({
             onOpenMerged={openMerged}
             showRollup={!merged}
             single={story != null}
+            page={story?.page === true}
             review={
               // Who starts the check: any PR on the ticket (the story view's merged ones count too).
               (ticketReviewOn || merged) && stack.ticket?.ident != null && (stack.rows[0]?.pr.id ?? story?.merged[0]?.prId) != null
@@ -765,7 +767,7 @@ export function OpenPrsCards({
     <>
       {offerGroups && (
         <div className="mb-2 flex flex-wrap items-center gap-2 text-meta text-ui-mute">
-          <TicketIcon size={13} className="shrink-0 text-ui-accent" />
+          <TicketIcon size={13} className="shrink-0 text-ui-mute" />
           <span>Tickets loaded.</span>
           <button
             type="button"
@@ -1069,6 +1071,7 @@ function StoryViewHeader({
   prCount,
   review,
   prs,
+  page = false,
 }: {
   headingId: string;
   t: NonNullable<OpenPrsStack['ticket']>;
@@ -1078,6 +1081,8 @@ function StoryViewHeader({
   review: { ident: string; state: TicketReviewState | undefined; prId: number; canCheck?: boolean } | null;
   /** Every PR the view knows (open and merged): one changed PR is named in the currency line. */
   prs: ReadonlyArray<{ prId: number; repoId: number | null; repoFullName: string | null; number: number }>;
+  /** The story TAB: drawn as THE page header (the shared one), the same facts in the same order. */
+  page?: boolean;
 }): JSX.Element {
   const { data: repos } = useRepos();
   const labelOf = useMemo(() => {
@@ -1088,20 +1093,17 @@ function StoryViewHeader({
   }, [prs, repos]);
   const checked = review != null && review.canCheck !== false;
   const cov = checked ? ticketCoverage(review.state) : null;
-  return (
-    <header className="space-y-2 px-4 pb-3 pt-3.5" data-testid="story-header">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-meta">
-        <span className="inline-flex items-center gap-1 font-mono text-body font-semibold text-ui-ink">
-          <TicketIcon size={13} className="shrink-0" />
-          {t.key}
-        </span>
-        <TrackerLinkOut url={t.url} provider={t.provider} />
-      </div>
-      <h3 id={headingId} className="break-words text-title font-semibold leading-snug text-ui-ink">
-        <span className="sr-only">{t.key}: </span>
-        {t.title ?? t.key}
-      </h3>
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+  const keyLine = (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-meta">
+      <span className="inline-flex items-center gap-1 font-mono text-body font-semibold text-ui-ink">
+        <TicketIcon size={13} className="shrink-0" />
+        {t.key}
+      </span>
+      <TrackerLinkOut url={t.url} provider={t.provider} />
+    </div>
+  );
+  const facts = (
+      <div className={`flex flex-wrap items-center gap-x-4 gap-y-2${page ? ' mt-1.5' : ''}`}>
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-meta text-ui-mute">
           <TicketPeopleAndStatus t={t} cat={cat} single />
         </div>
@@ -1121,6 +1123,34 @@ function StoryViewHeader({
         </ul>
         {checked && <StoryCurrencyLine ident={review.ident} state={review.state} prId={review.prId} labelOf={labelOf} />}
       </div>
+  );
+  if (page) {
+    // THE PAGE HEADER (the story tab): the title at the page gutter like every destination, the key
+    // and its link out beside it, the facts under it.
+    return (
+      <PageHeader
+        inset={false}
+        testId="story-header"
+        titleId={headingId}
+        title={
+          <>
+            <span className="sr-only">{t.key}: </span>
+            {t.title ?? t.key}
+          </>
+        }
+        info={keyLine}
+        sub={facts}
+      />
+    );
+  }
+  return (
+    <header className="space-y-2 px-4 pb-3 pt-3.5" data-testid="story-header">
+      {keyLine}
+      <h3 id={headingId} className="break-words text-title font-semibold leading-snug text-ui-ink">
+        <span className="sr-only">{t.key}: </span>
+        {t.title ?? t.key}
+      </h3>
+      {facts}
     </header>
   );
 }
@@ -1202,6 +1232,7 @@ function TicketStack({
   onOpenMerged,
   showRollup = true,
   single = false,
+  page = false,
   children,
 }: {
   stack: OpenPrsStack;
@@ -1209,6 +1240,8 @@ function TicketStack({
   storyState: TicketReviewState | undefined;
   /** The story view's ONE stack: plain key and title, and the Story section (always open). */
   single?: boolean;
+  /** The story TAB: the header is the page header (components/ui/PageHeader.tsx), no card tone. */
+  page?: boolean;
   /** false on Reports → "Merged so far": failing CI / ready to merge say nothing about landed work. */
   showRollup?: boolean;
   /** Every merged PR linked to this ticket (the "Merged (n)" panel); [] = no panel. */
@@ -1242,11 +1275,11 @@ function TicketStack({
       // A tone, not a border (a "no ticket" stack keeps its dashed edge: it says "not a ticket").
       // The story view (`single`) is the page itself, so below sm it drops even the tone.
       className={`scroll-mt-4 rounded-ui focus:outline-none ${
-        t == null ? 'border border-dashed border-ui-line bg-ui-surface' : single ? 'bg-ui-surface max-sm:-mx-3 max-sm:bg-transparent' : 'bg-ui-surface'
+        t == null ? 'border border-dashed border-ui-line bg-ui-surface' : single && page ? '' : single ? 'bg-ui-surface max-sm:-mx-3 max-sm:bg-transparent' : 'bg-ui-surface'
       }`}
     >
       {single && t != null ? (
-        <StoryViewHeader headingId={headingId} t={t} cat={cat} rollup={rollup} prCount={stack.rows.length} review={review} prs={knownPrs} />
+        <StoryViewHeader headingId={headingId} t={t} cat={cat} rollup={rollup} prCount={stack.rows.length} review={review} prs={knownPrs} page={page} />
       ) : (
       <div className="flex flex-wrap items-start gap-x-2 gap-y-1.5 px-3 py-3">
         <div className="min-w-0 flex-1 basis-[16rem]">
@@ -1259,7 +1292,7 @@ function TicketStack({
                 ticket={{ ...t, ident: t.ident }}
                 className="group inline-flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5"
               >
-                <span className="inline-flex shrink-0 items-center gap-1 font-mono text-body font-semibold text-ui-accent group-hover:underline">
+                <span className="inline-flex shrink-0 items-center gap-1 font-mono text-body font-semibold text-ui-ink group-hover:underline">
                   <TicketIcon size={13} className="shrink-0" />
                   {t.key}
                   <span className="sr-only">:</span>
@@ -1280,7 +1313,7 @@ function TicketStack({
                     target="_blank"
                     rel="noreferrer noopener"
                     title={`Open ${cardTicketLabel(t)}`}
-                    className="hit inline-flex shrink-0 items-center gap-1 font-mono text-body font-semibold text-ui-accent hover:underline"
+                    className="hit inline-flex shrink-0 items-center gap-1 font-mono text-body font-semibold text-ui-ink hover:underline"
                   >
                     <TicketIcon size={13} className="shrink-0" />
                     {t.key}
@@ -1629,7 +1662,7 @@ function OpenPrCard({
       {/* 3 — the ticket row: absent when the PR names no ticket (never an empty row). */}
       {tickets.length > 0 && (
         <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-meta">
-          <TicketIcon size={13} className="shrink-0 text-ui-accent" />
+          <TicketIcon size={13} className="shrink-0 text-ui-mute" />
           {tickets.map((t) => {
             const href = safeExternalUrl(t.url);
             const label = cardTicketLabel(t);
@@ -1648,7 +1681,7 @@ function OpenPrCard({
               <TicketKeyButton
                 key={t.key}
                 ticket={{ ...t, ident: t.ident }}
-                className="inline-flex min-w-0 max-w-full items-center gap-1 text-ui-accent hover:underline sm:max-w-[32rem]"
+                className="inline-flex min-w-0 max-w-full items-center gap-1 text-ui-ink hover:underline sm:max-w-[32rem]"
               >
                 {body}
               </TicketKeyButton>
@@ -1659,7 +1692,7 @@ function OpenPrCard({
                 target="_blank"
                 rel="noreferrer noopener"
                 title={`Open ${label}`}
-                className="hit inline-flex min-w-0 max-w-full items-center gap-1 text-ui-accent hover:underline sm:max-w-[32rem]"
+                className="hit inline-flex min-w-0 max-w-full items-center gap-1 text-ui-ink hover:underline sm:max-w-[32rem]"
               >
                 {body}
               </a>
@@ -1679,7 +1712,7 @@ function OpenPrCard({
       {/* 3b — inside a stack: the PR's other tickets, as jumps to their own stacks. */}
       {alsoIn.length > 0 && (
         <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-meta text-ui-mute">
-          <TicketIcon size={13} className="shrink-0 text-ui-accent" />
+          <TicketIcon size={13} className="shrink-0 text-ui-mute" />
           <span>Also in</span>
           {alsoIn.map((t) => (
             <button
@@ -1690,7 +1723,7 @@ function OpenPrCard({
                 onJumpToStack(stackIdFor(t.key));
               }}
               title={`Go to ${cardTicketLabel(t)}`}
-              className="hit rounded-ui font-mono font-medium text-ui-accent hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent"
+              className="hit rounded-ui font-mono font-medium text-ui-ink hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent"
             >
               {t.key}
             </button>

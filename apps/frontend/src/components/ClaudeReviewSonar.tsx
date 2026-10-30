@@ -85,7 +85,7 @@ export function SonarIssueRow({
             href={href}
             target="_blank"
             rel="noreferrer noopener"
-            className="hit ml-auto inline-flex items-center gap-1 text-meta text-ui-accent hover:underline"
+            className="hit ml-auto inline-flex items-center gap-1 text-meta text-ui-ink hover:underline"
           >
             SonarCloud
             <ExternalLinkIcon size={11} />
@@ -98,7 +98,7 @@ export function SonarIssueRow({
           <button
             type="button"
             onClick={() => onOpenInChanges(it.path!, it.line, 'RIGHT')}
-            className="hit mt-0.5 break-all text-left font-mono text-meta text-ui-accent hover:underline"
+            className="hit mt-0.5 break-all text-left font-mono text-meta text-ui-ink hover:underline"
           >
             {loc}
           </button>
@@ -252,7 +252,7 @@ export function ClaudeReviewSonarSection({
               href={safeExternalUrl(snap.dashboardUrl)!}
               target="_blank"
               rel="noreferrer noopener"
-              className="hit inline-flex items-center gap-1 text-meta text-ui-accent hover:underline"
+              className="hit inline-flex items-center gap-1 text-meta text-ui-ink hover:underline"
             >
               Open in SonarCloud
               <ExternalLinkIcon size={11} />
@@ -266,7 +266,7 @@ export function ClaudeReviewSonarSection({
           {canPostNow && (
             <button
               type="button"
-              className="hit rounded-ui bg-ui-accent-fill px-2 py-0.5 text-meta font-medium text-ui-on-accent hover:bg-ui-accent-fill disabled:cursor-not-allowed disabled:opacity-40"
+              className="hit rounded-ui bg-ui-accent-fill disabled:bg-ui-raise disabled:text-ui-ink px-2 py-0.5 text-meta font-medium text-ui-on-accent hover:bg-ui-accent-fill disabled:cursor-not-allowed disabled:opacity-50"
               disabled={posting}
               onClick={() => post.mutate()}
             >

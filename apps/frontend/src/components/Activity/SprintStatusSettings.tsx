@@ -394,7 +394,7 @@ export function SprintStatusSettings({
           type="button"
           disabled={save.isPending || !changed || problem != null}
           onClick={() => save.mutate(bucketsToSave(layout, draft), { onSuccess: (d) => setDraft(bucketsDraftOf(d.statusLayout)) })}
-          className="rounded-ui bg-ui-accent-fill px-3 py-1 text-body font-medium text-ui-on-accent hover:brightness-110 disabled:opacity-50 touch:min-h-10"
+          className="rounded-ui bg-ui-accent-fill disabled:bg-ui-raise disabled:text-ui-ink px-3 py-1 text-body font-medium text-ui-on-accent hover:brightness-110 disabled:opacity-50 touch:min-h-10"
         >
           {save.isPending ? 'Saving…' : 'Save statuses'}
         </button>

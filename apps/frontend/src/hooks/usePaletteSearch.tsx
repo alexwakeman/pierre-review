@@ -23,7 +23,9 @@ import { useWorkspaceOpenPrs } from './useTriage.js';
 // already has. Every command carries the query's words as keywords, so a body match whose title
 // says nothing of the query still survives the palette's every-word-must-match ranking — below a
 // real title match, which is the order the reader wants.
-export function usePaletteSearch(): void {
+/** Returns the server's total for the query it last answered (`null` until one has), for the
+ * "Search everything" row's hint. */
+export function usePaletteSearch(): { query: string; total: number } | null {
   const open = useCommandRegistry((s) => s.open);
   const query = useCommandRegistry((s) => s.query);
   const [debounced, setDebounced] = useState('');
@@ -77,12 +79,14 @@ export function usePaletteSearch(): void {
       if (h.kind === 'pr' && listed.has(h.prId)) continue;
       const Icon = KIND_ICON[h.kind];
       const short = h.repoFullName.split('/')[1] ?? h.repoFullName;
+      const snippet = h.kind === 'pr' ? '' : h.snippet.replace(/\s+/g, ' ').trim();
       out.push({
         id: `hit:${h.kind}:${h.refId}`,
         group: 'Search',
         // A PR hit reads as its title; a review, thread or comment as the words that matched.
-        title: h.kind === 'pr' ? h.prTitle : h.snippet.replace(/\s+/g, ' ').trim() || h.prTitle,
-        hint: `${KIND_LABEL[h.kind]} · ${short}#${h.prNumber}`,
+        title: snippet || h.prTitle,
+        // A non-PR hit's title is its snippet, so the hint names the PR it sits on.
+        hint: [`${KIND_LABEL[h.kind]} · ${short}#${h.prNumber}`, snippet === '' ? null : h.prTitle].filter(Boolean).join(' · '),
         keywords: [...words, h.prTitle],
         icon: <Icon size={14} />,
         run: () => openSearchHit(h),
@@ -93,4 +97,6 @@ export function usePaletteSearch(): void {
 
   const provider = useCallback((): readonly Command[] => commands, [commands]);
   useCommandProvider('search:server', provider);
+  // `placeholderData` keeps the previous answer while the next one loads: no total until it lands.
+  return data != null && !isFetching && debounced.length >= 2 ? { query: debounced, total: data.total } : null;
 }

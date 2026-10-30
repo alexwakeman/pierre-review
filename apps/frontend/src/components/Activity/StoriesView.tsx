@@ -84,7 +84,7 @@ function StoryLink({
       title={`Open the ${story.key} story`}
       className={`break-words text-left hover:underline ${className}`}
     >
-      <span className="font-medium text-ui-accent">{story.key}</span>
+      <span className="font-medium text-ui-mute">{story.key}</span>
       {title !== '' && <span className="text-ui-ink"> {title}</span>}
     </button>
   );

@@ -61,7 +61,7 @@ export function PrCommentComposer({
           type="button"
           onClick={send}
           disabled={comment.isPending || body.trim().length === 0}
-          className="inline-flex h-8 items-center whitespace-nowrap rounded-ui bg-ui-accent-fill px-3 text-body font-medium text-ui-on-accent hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50 touch:h-11 touch:px-4"
+          className="inline-flex h-8 items-center whitespace-nowrap rounded-ui bg-ui-accent-fill disabled:bg-ui-raise disabled:text-ui-ink px-3 text-body font-medium text-ui-on-accent hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50 touch:h-11 touch:px-4"
         >
           {comment.isPending ? 'Commenting…' : onCancel ? 'Reply' : 'Comment'}
         </button>

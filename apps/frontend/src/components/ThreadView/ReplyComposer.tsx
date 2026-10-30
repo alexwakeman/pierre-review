@@ -43,7 +43,7 @@ export function ReplyComposer({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="inline-flex items-center text-ui-accent hover:underline touch:min-h-10"
+        className="inline-flex items-center text-ui-ink hover:underline touch:min-h-10"
       >
         Reply
       </button>
@@ -66,7 +66,7 @@ export function ReplyComposer({
           type="button"
           onClick={send}
           disabled={reply.isPending || body.trim().length === 0}
-          className="hit bg-ui-raise whitespace-nowrap rounded-ui px-2 py-0.5 text-meta text-ui-accent hover:bg-ui-hover disabled:opacity-50"
+          className="hit bg-ui-raise whitespace-nowrap rounded-ui px-2 py-0.5 text-meta text-ui-ink hover:bg-ui-hover disabled:opacity-50"
         >
           {reply.isPending ? 'Sending…' : 'Send'}
         </button>

@@ -245,7 +245,7 @@ export function FirstRunOnboarding(): JSX.Element {
               type="button"
               onClick={addSelected}
               disabled={running || chosen.length === 0}
-              className="hit rounded-ui bg-ui-accent-fill px-3 py-1.5 text-meta font-medium text-ui-on-accent hover:bg-ui-accent-fill disabled:cursor-not-allowed disabled:opacity-50"
+              className="hit rounded-ui bg-ui-accent-fill disabled:bg-ui-raise disabled:text-ui-ink px-3 py-1.5 text-meta font-medium text-ui-on-accent hover:bg-ui-accent-fill disabled:cursor-not-allowed disabled:opacity-50"
             >
               {running
                 ? progress

@@ -50,7 +50,7 @@ export function RepoStatsLine({ stats: s }: { stats: ActivityRepoStats }): JSX.E
           here. "42% acted on" = threads a later commit touched vs the untouched backlog. */}
       {s.botThreads > 0 && (
         <span
-          className="text-ui-accent"
+          className="text-ui-mute"
           title="Review-bot threads on open PRs, and the share a later commit has likely addressed (resolved or likely_addressed). An approximate signal — likely_addressed is a heuristic."
         >
           <BotIcon size={12} className="inline-block align-[-0.1em]" />{' '}

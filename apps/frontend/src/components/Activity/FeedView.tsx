@@ -59,7 +59,7 @@ import {
   PullRequestIcon,
 } from '../Icons.js';
 import { Markdown } from '../Markdown.js';
-import { useEdgeFade, useRegisterCommands, type Command } from '../ui/index.js';
+import { PageHeader, useEdgeFade, useRegisterCommands, type Command } from '../ui/index.js';
 import { PrCommentComposer } from '../PrCommentComposer.js';
 import { ThreadStatePill } from '../ThreadView/ClaudeThreadBadge.js';
 import { ThreadCard } from '../ThreadView/index.js';
@@ -1286,10 +1286,11 @@ export function FeedView({
       {/* The page's one slim header — the cross-repo Feed only (a repo console and a person's tab
           head themselves). */}
       {repoId == null && userIds == null && (
-        <header className="flex flex-wrap items-baseline gap-x-3 px-1">
-          <h2 className="text-display text-ui-ink">Feed</h2>
-          <span className="text-body text-ui-mute">{feedAuthors === 'bots' ? 'What bots did' : 'What people did'}, newest first</span>
-        </header>
+        <PageHeader
+          inset={false}
+          title="Feed"
+          info={<span className="ml-1 text-body text-ui-mute">{feedAuthors === 'bots' ? 'What bots did' : 'What people did'}, newest first</span>}
+        />
       )}
       {/* THERE IS NO "New activity — Refresh" BANNER. Newly-arrived items are spliced into the
           stream where they belong (useFeedAutoInsert) and wear a "New" chip until the reader has
@@ -1614,7 +1615,7 @@ function InlineThread({ item }: { item: ConsolidatedFeedItem }): JSX.Element {
             </span>
           )}
           {/* The file takes the row's remaining width (it was squeezed to "quer…" at 390px). */}
-          <code className="min-w-0 flex-1 truncate font-mono text-ui-mute group-hover/rt:text-ui-accent">
+          <code className="min-w-0 flex-1 truncate font-mono text-ui-mute group-hover/rt:text-ui-ink">
             {file}
             {!expanded && thread.line != null ? `:${thread.line}` : ''}
           </code>
@@ -1625,7 +1626,7 @@ function InlineThread({ item }: { item: ConsolidatedFeedItem }): JSX.Element {
             </span>
           )}
           <span
-            className={`ml-auto shrink-0 text-ui-accent ${
+            className={`ml-auto shrink-0 text-ui-ink ${
               expanded ? '' : 'opacity-0 group-hover/rt:opacity-100 max-sm:hidden'
             }`}
           >
@@ -1736,7 +1737,7 @@ function PrOpenedExtras({ item }: { item: ConsolidatedFeedItem }): JSX.Element {
           <button
             type="button"
             onClick={() => setShowSummary((s) => !s)}
-            className="hit text-meta font-medium text-ui-accent hover:underline"
+            className="hit text-meta font-medium text-ui-ink hover:underline"
           >
             {showSummary ? 'Hide summary' : 'Show summary'}
           </button>
@@ -1774,7 +1775,7 @@ function AffectedThreadRow({
             className="inline-block h-2 w-2 shrink-0 rounded-full"
             style={{ background: meta.color }}
           />
-          <code className="truncate font-mono text-ui-mute group-hover/th:text-ui-accent">
+          <code className="truncate font-mono text-ui-mute group-hover/th:text-ui-ink">
             {file}
             {thread.line != null ? `:${thread.line}` : ''}
           </code>

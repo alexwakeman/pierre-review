@@ -63,7 +63,7 @@ export function DocLink({ target, children }: { target: ReferenceDocCitation; ch
     <a
       href={href}
       onClick={onClick}
-      className="hit inline-flex items-center gap-1 break-words text-left text-meta text-ui-accent hover:underline"
+      className="hit inline-flex items-center gap-1 break-words text-left text-meta text-ui-ink hover:underline"
     >
       <BookIcon size={12} />
       {children}

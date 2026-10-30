@@ -274,7 +274,7 @@ export function PrTable({
                       className="hit block text-left leading-snug hover:underline"
                       title={`${pr.repoFullName}#${pr.prNumber}${pr.title ? ` — ${pr.title}` : ''}`}
                     >
-                      <span className="font-semibold text-ui-accent">
+                      <span className="font-semibold text-ui-mute">
                         #{pr.prNumber}
                       </span>{' '}
                       <span className="text-ui-ink">{pr.title ?? ''}</span>

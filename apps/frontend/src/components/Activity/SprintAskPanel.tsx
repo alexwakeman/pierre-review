@@ -91,7 +91,7 @@ export function SprintAskPanel({
         </InfoButton>
         <span className="ml-auto" />
         {turns.length > 0 && (
-          <button type="button" onClick={() => clear(workspaceId)} className="hit text-meta text-ui-accent hover:underline">
+          <button type="button" onClick={() => clear(workspaceId)} className="hit text-meta text-ui-ink hover:underline">
             Clear
           </button>
         )}

@@ -4,6 +4,7 @@ import { MergedPrsView } from '../Activity/MergedPrsView.js';
 import { SprintView } from '../Activity/SprintView.js';
 import { effectiveSprintTab, SPRINT_RAIL_TABS } from '../Activity/sprintRailModel.js';
 import { panelId, tabId, Tabs, type TabItem } from '../ui/Tabs.js';
+import { PAGE_GUTTER, PageHeader } from '../ui/PageHeader.js';
 import type { SprintInnerTab } from '../../store/filters.js';
 
 const TABS: ReadonlyArray<TabItem<SprintInnerTab>> = SPRINT_RAIL_TABS.map((t) => ({ id: t.key, label: t.label }));
@@ -35,11 +36,10 @@ export function SprintTabView(): JSX.Element {
   // labelled by its tab.
   return (
     <div ref={scrollRef} className="pb-10" data-testid="sprint-tab-view">
-      <header className="space-y-3 px-4 pb-2 pt-4 md:px-7 md:pt-5">
-        <h2 className="text-display text-ui-ink">This Sprint</h2>
-        <Tabs tabs={TABS} value={tab} onChange={setTab} label="This Sprint views" numberKeys idPrefix="sprint" className="-mx-1" />
-      </header>
-      <div role="tabpanel" id={panelId('sprint', tab)} aria-labelledby={tabId('sprint', tab)} className="px-4 pt-3 md:px-7">
+      <PageHeader title="This Sprint">
+        <Tabs tabs={TABS} value={tab} onChange={setTab} label="This Sprint views" numberKeys idPrefix="sprint" className="-mx-1 mt-3" />
+      </PageHeader>
+      <div role="tabpanel" id={panelId('sprint', tab)} aria-labelledby={tabId('sprint', tab)} className={`pt-1 ${PAGE_GUTTER}`}>
         {tab === 'merged' ? <MergedPrsView /> : <SprintView view={tab} />}
       </div>
     </div>

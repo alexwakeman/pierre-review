@@ -51,7 +51,7 @@ export const answeringLine = (name: string): string => `${name} is reading the c
 const BTN_SMALL =
   'inline-flex h-7 items-center whitespace-nowrap rounded-ui bg-ui-raise px-2.5 text-meta font-medium text-ui-ink hover:bg-ui-hover disabled:cursor-not-allowed disabled:opacity-50 touch:h-10 touch:px-3';
 const BTN_ASK =
-  'whitespace-nowrap rounded-ui bg-ui-accent-fill px-4 py-1.5 text-body font-semibold text-ui-on-accent hover:bg-ui-accent-fill disabled:opacity-50';
+  'whitespace-nowrap rounded-ui bg-ui-accent-fill disabled:bg-ui-raise disabled:text-ui-ink px-4 py-1.5 text-body font-semibold text-ui-on-accent hover:bg-ui-accent-fill disabled:opacity-50';
 const MUTED = 'text-ui-mute';
 const PILL =
   'inline-flex max-w-full items-center gap-1 rounded-full bg-ui-sel px-2.5 py-0.5 text-meta text-ui-accent';
@@ -489,7 +489,7 @@ export function ReviewChatSection({
             type="button"
             onClick={() => setOpen((v) => !v)}
             aria-expanded={open}
-            className="hit inline-flex items-center gap-1.5 text-body font-medium text-ui-accent hover:underline"
+            className="hit inline-flex items-center gap-1.5 text-body font-medium text-ui-ink hover:underline"
           >
             <CommentIcon size={13} />
             {open ? 'Hide' : `Ask ${providerName} about this review`}

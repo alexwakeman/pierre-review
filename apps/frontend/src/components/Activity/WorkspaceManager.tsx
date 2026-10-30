@@ -259,7 +259,7 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
             onClick={() => confirmDeepResyncRepo(r)}
             title={`Deep re-sync ${r.fullName} — re-fetches its full backfill window`}
             aria-label={`Deep re-sync ${r.fullName}`}
-            className="hit shrink-0 px-1 text-ui-faint opacity-0 hover:text-ui-accent focus:opacity-100 group-hover:opacity-100"
+            className="hit shrink-0 px-1 text-ui-faint opacity-0 hover:text-ui-ink focus:opacity-100 group-hover:opacity-100"
           >
             <DeepSyncIcon size={12} />
           </button>
@@ -402,7 +402,7 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
                   type="button"
                   onClick={submitCreate}
                   disabled={!newName.trim() || createWorkspace.isPending}
-                  className="hit shrink-0 rounded-ui bg-ui-accent-fill px-2 py-1 text-meta font-medium text-ui-on-accent disabled:opacity-40"
+                  className="hit shrink-0 rounded-ui bg-ui-accent-fill disabled:bg-ui-raise disabled:text-ui-ink px-2 py-1 text-meta font-medium text-ui-on-accent disabled:opacity-50"
                 >
                   Create
                 </button>

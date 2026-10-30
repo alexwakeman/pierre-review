@@ -49,8 +49,8 @@ Tailwind `ui-*` colours. Dark is the default theme; both themes are first-class.
 | `sel` | `bg-ui-sel` | the selected row, the active tab or nav item |
 | `line` | `ring-ui-line` | the rare edge (an input's ring, a menu separator) |
 | `ink` / `mute` / `faint` | `text-ui-*` | primary / secondary / tertiary text — all AA on every surface |
-| `accent` | `text-ui-accent`, `ring-ui-accent` | selection marks, focus ring, a link |
-| `accent-fill` + `on-accent` | `bg-ui-accent-fill text-ui-on-accent` | the ONE primary button |
+| `accent` | `text-ui-accent`, `ring-ui-accent` | selection marks, focus ring — never a secondary link (those are `ink`/`mute`, underlined on hover) |
+| `accent-fill` + `on-accent` | `bg-ui-accent-fill text-ui-on-accent` | the ONE primary button (disabled, it drops to the neutral `raise` ground) |
 | `danger` | `text-ui-danger` | **blocks**: conflicts, failing CI, changes requested, security, errors |
 | `success` | `text-ui-success` | **ready**: can land, approved where approval is the news |
 | `warn` | `text-ui-warn` | attention marks the product already has (stale, near a limit) — sparingly |

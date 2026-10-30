@@ -314,7 +314,11 @@ export function useShellCommands({
   useRegisterCommands('shell:extras', shellExtras);
 
   // The server search (PR bodies, reviews, threads, comments, people, tickets) — the old search box.
-  usePaletteSearch();
+  // Its total (hits in the workspace) goes on the "Search everything" row, as the old dropdown's
+  // "See all results (N)" did.
+  const serverSearch = usePaletteSearch();
+  const searchedQ = serverSearch?.query ?? null;
+  const searchTotal = serverSearch?.total ?? null;
 
   // Every open PR in the workspace (data the Open PRs rail line already holds — no new request
   // shape), and the search fallback that reaches everything else.
@@ -363,7 +367,10 @@ export function useShellCommands({
                 // The query is NOT in the title, so a real match (a PR whose title starts with it)
                 // always ranks above this fallback; it matches through its keywords instead.
                 title: 'Search everything: PRs, threads, people, tickets',
-                hint: `“${q}”`,
+                hint:
+                  searchTotal != null && searchTotal > 0 && searchedQ === q
+                    ? `“${q}” · ${searchTotal} result${searchTotal === 1 ? '' : 's'}`
+                    : `“${q}”`,
                 icon: <MagnifierIcon size={14} />,
                 // Always matches: its keywords are the query itself.
                 keywords: q.toLowerCase().split(/\s+/),
@@ -373,7 +380,7 @@ export function useShellCommands({
           : [];
       return [...prCommands, ...search];
     },
-    [prCommands],
+    [prCommands, searchedQ, searchTotal],
   );
   useCommandProvider('shell:prs', provider);
 }

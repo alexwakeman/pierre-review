@@ -165,7 +165,7 @@ function PrRow({
             target="_blank"
             rel="noreferrer noopener"
             title={`#${pr.prNumber} on GitHub — not synced here`}
-            className="hit shrink-0 rounded-ui bg-ui-raise px-1 font-mono text-meta text-ui-mute hover:text-ui-accent"
+            className="hit shrink-0 rounded-ui bg-ui-raise px-1 font-mono text-meta text-ui-mute hover:text-ui-ink"
           >
             #{pr.prNumber}
           </a>

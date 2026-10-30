@@ -10,7 +10,7 @@ import { usePinnedTabs, type TabMeta } from '../../store/pinnedTabs.js';
 import { indexUsers } from '../../lib/ui.js';
 import { ArrowIcon, PullRequestIcon, RefreshIcon, RepoIcon, TicketIcon } from '../Icons.js';
 import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
-import { useRegisterCommands, type Command } from '../ui/index.js';
+import { PageHeader, useRegisterCommands, type Command } from '../ui/index.js';
 import { effectiveSort, pickSort, reverseSort, sortOptionsFor } from '../../lib/openPrsSort.js';
 import { MetricRepoFilter } from './MetricRepoFilter.js';
 import { FirstRunOnboarding } from './FirstRunOnboarding.js';
@@ -145,32 +145,37 @@ export function OpenPrsDetail(): JSX.Element {
   if (noReposAtAll) return <FirstRunOnboarding />;
 
   return (
-    <div data-testid="open-prs-view" className="mx-auto max-w-[100rem]">
+    <div data-testid="open-prs-view" className="max-w-[100rem]">
       {/* THE ONE SLIM HEADER (docs/redesign/DESIGN.md): the title and its counts, one quiet line
-          (the default branches + today's auto reviews), then the toolbar. */}
-      <header className="space-y-2 px-1 pb-3">
-        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
-          <h2 className="text-display text-ui-ink">Open pull requests</h2>
-          <span className="text-body tabular-nums text-ui-mute">
-            {/* Non-draft headline: the Flow tile and the sidebar's count are non-draft opens, and
-                this header must reconcile with the number the reader just clicked. */}
-            {rows.length - draftCount} open
-            {draftCount > 0 && ` · ${draftCount} draft${draftCount === 1 ? '' : 's'}`}
-            <span className="text-ui-faint"> · {scopeLabel}</span>
-          </span>
-          <button
-            type="button"
-            onClick={() => void refetch()}
-            disabled={isFetching}
-            aria-label="Refresh"
-            title="Refresh the open PRs"
-            className="ml-auto inline-flex h-7 items-center gap-1.5 self-center rounded-ui px-2 text-meta text-ui-mute hover:bg-ui-hover hover:text-ui-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent disabled:opacity-60 touch:h-10 touch:min-w-10 touch:justify-center"
-          >
-            <RefreshIcon size={12} className={isFetching ? 'motion-safe:animate-spin' : ''} />
-            <span className="max-sm:sr-only">Refresh</span>
-          </button>
-        </div>
-        <div className="flex flex-wrap items-start gap-x-4 gap-y-1">
+          (the default branches + today's auto reviews), then the toolbar. The Activity pane pads
+          by the page gutter, so the header adds none (`inset={false}`). */}
+      <PageHeader
+        inset={false}
+        title="Open pull requests"
+        info={
+          <>
+            <span className="text-body tabular-nums text-ui-mute">
+              {/* Non-draft headline: the Flow tile and the sidebar's count are non-draft opens, and
+                  this header must reconcile with the number the reader just clicked. */}
+              {rows.length - draftCount} open
+              {draftCount > 0 && ` · ${draftCount} draft${draftCount === 1 ? '' : 's'}`}
+              <span className="text-ui-faint"> · {scopeLabel}</span>
+            </span>
+            <button
+              type="button"
+              onClick={() => void refetch()}
+              disabled={isFetching}
+              aria-label="Refresh"
+              title="Refresh the open PRs"
+              className="ml-auto inline-flex h-7 items-center gap-1.5 self-center rounded-ui px-2 text-meta text-ui-mute hover:bg-ui-hover hover:text-ui-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent disabled:opacity-60 touch:h-10 touch:min-w-10 touch:justify-center"
+            >
+              <RefreshIcon size={12} className={isFetching ? 'motion-safe:animate-spin' : ''} />
+              <span className="max-sm:sr-only">Refresh</span>
+            </button>
+          </>
+        }
+      >
+        <div className="mt-2 flex flex-wrap items-start gap-x-4 gap-y-1">
           {/* The workspace's default branches — informational, never a count. */}
           <div className="min-w-0 flex-1 basis-64">{!emptyWorkspace && <DefaultBranchesSlot />}</div>
           {/* Today's auto reviews against the cap, and one sweep now — only while auto review is on. */}
@@ -179,12 +184,12 @@ export function OpenPrsDetail(): JSX.Element {
             <RunAutoReviewsButton />
           </div>
         </div>
-        <div role="toolbar" aria-label="Open PRs view" className="flex flex-wrap items-center gap-1.5">
+        <div role="toolbar" aria-label="Open PRs view" className="mt-2 flex flex-wrap items-center gap-1.5">
           {ticketsOn && <OpenPrsViewToggle />}
           <OpenPrsSortMenu sort={sort} onChange={setSort} />
           <MetricRepoFilter repos={repoOptions} selected={repoSel} onChange={setRepoSel} />
         </div>
-      </header>
+      </PageHeader>
 
       <OpenPrsCards
         layout="rows"

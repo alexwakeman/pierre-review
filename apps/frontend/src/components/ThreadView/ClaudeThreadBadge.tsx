@@ -186,7 +186,7 @@ export function ClaudeThreadReason({
             type="button"
             onClick={() => setOpen((v) => !v)}
             aria-expanded={open}
-            className="hit inline-flex shrink-0 items-center gap-0.5 rounded-ui px-1 text-meta text-ui-accent hover:bg-ui-hover"
+            className="hit inline-flex shrink-0 items-center gap-0.5 rounded-ui px-1 text-meta text-ui-ink hover:bg-ui-hover"
           >
             {open ? 'Less' : 'More'}
             <ChevronIcon dir={open ? 'up' : 'down'} size={10} />

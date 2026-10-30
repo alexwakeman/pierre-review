@@ -159,7 +159,7 @@ function GuideLink({ onClick }: { onClick: () => void }): JSX.Element {
     <button
       type="button"
       onClick={onClick}
-      className="hit mt-2.5 text-meta font-medium text-ui-accent hover:underline"
+      className="hit mt-2.5 text-meta font-medium text-ui-ink hover:underline"
     >
       How Pending works
     </button>

@@ -44,7 +44,7 @@ import { useDocsView, type DocsOpen } from '../../store/docsView.js';
 import { useFilters } from '../../store/filters.js';
 import { AiRunGate } from '../AiSetup.js';
 import { BookIcon, ChevronIcon, CollapseAllIcon, ConfluenceIcon, ExpandAllIcon, NotionIcon, RefreshIcon, SparkleIcon, UploadIcon, WarningIcon } from '../Icons.js';
-import { Button, Select, Tabs, cx, FOCUS_RING, useRegisterCommands, type Command } from '../ui/index.js';
+import { Button, PageHeader, Select, Tabs, cx, FOCUS_RING, useRegisterCommands, type Command } from '../ui/index.js';
 import { InfoButton } from '../InfoModal.js';
 import { DocsChat } from './DocsChat.js';
 import { DocsViewer } from './DocsViewer.js';
@@ -796,24 +796,29 @@ function DocsPane({ workspaceId }: { workspaceId: number }): JSX.Element {
   return (
     <div className="flex h-full min-h-[32rem] flex-col" data-testid="docs-view">
       {/* THE PAGE HEADER: the title, its ⓘ, the count — and, while the panes share a column, their tabs. */}
-      <header className="flex flex-wrap items-center gap-x-3 gap-y-2 pb-3">
-        <div className="flex items-center gap-1.5">
-          <h1 className="text-display text-ui-ink">Docs</h1>
-          {docsInfo}
-        </div>
-        {library.data != null && (
-          <span className="text-meta tabular-nums text-ui-mute">
-            {docs.length} document{docs.length === 1 ? '' : 's'}
-          </span>
-        )}
-        <Tabs
-          tabs={paneTabs}
-          value={pane}
-          onChange={(k) => setNarrowPane(k)}
-          label="Docs panes"
-          className="w-full xl:hidden sm:ml-auto sm:w-auto"
-        />
-      </header>
+      <PageHeader
+        inset={false}
+        title="Docs"
+        info={
+          <>
+            {docsInfo}
+            {library.data != null && (
+              <span className="ml-1 text-meta tabular-nums text-ui-mute">
+                {docs.length} document{docs.length === 1 ? '' : 's'}
+              </span>
+            )}
+          </>
+        }
+        actions={
+          <Tabs
+            tabs={paneTabs}
+            value={pane}
+            onChange={(k) => setNarrowPane(k)}
+            label="Docs panes"
+            className="w-full xl:hidden sm:w-auto"
+          />
+        }
+      />
 
       <div ref={rowRef} className="flex min-h-0 flex-1">
         {/* LEFT: the library — or, collapsed, a slim strip with the expand control and the count */}

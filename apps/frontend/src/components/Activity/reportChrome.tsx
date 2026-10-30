@@ -1,11 +1,12 @@
 import type { ReactNode } from 'react';
-import { cx, FOCUS_RING } from '../ui/index.js';
+import { cx, FOCUS_RING, PageHeader as SharedPageHeader } from '../ui/index.js';
 
 // The Reports + Bots Monitoring chrome (docs/redesign/DESIGN.md): ONE page header per page, quiet
 // section headings, callouts on a tone (never a coloured box), and the table look the two screens
 // share. Screen-local on purpose — the shared primitives live in `components/ui/`.
 
-/** The page header: the title (the page's one `text-display`), an optional sentence, the tabs. */
+/** The page header: the shared one (components/ui/PageHeader.tsx). Reports and Bots Monitoring sit
+ *  in the Activity pane, which already pads by the page gutter, so it adds none. */
 export function PageHeader({
   title,
   sub,
@@ -17,13 +18,9 @@ export function PageHeader({
   children?: ReactNode;
 }): JSX.Element {
   return (
-    <header className="space-y-3">
-      <div className="min-w-0">
-        <h2 className="text-display text-ui-ink">{title}</h2>
-        {sub != null && <p className="mt-0.5 text-body text-ui-mute">{sub}</p>}
-      </div>
-      {children}
-    </header>
+    <SharedPageHeader inset={false} title={title} sub={sub}>
+      {children != null && <div className="mt-3">{children}</div>}
+    </SharedPageHeader>
   );
 }
 
@@ -91,7 +88,7 @@ export function Callout({
       {icon != null && <span className={cx('mt-0.5 flex shrink-0', CALLOUT_ICON_TONE[tone])}>{icon}</span>}
       <span className="min-w-0 flex-1">{children}</span>
       {action != null && (
-        <span className="shrink-0 self-center whitespace-nowrap text-body font-medium text-ui-accent">{action}</span>
+        <span className="shrink-0 self-center whitespace-nowrap text-body font-medium text-ui-ink">{action}</span>
       )}
     </>
   );

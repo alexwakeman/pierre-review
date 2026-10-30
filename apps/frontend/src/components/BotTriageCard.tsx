@@ -249,7 +249,7 @@ export function BotTriageCard({
           <button
             type="button"
             onClick={onOpenThreads}
-            className="hit ml-auto rounded-ui px-1.5 py-0.5 font-medium text-ui-accent underline-offset-2 hover:underline"
+            className="hit ml-auto rounded-ui px-1.5 py-0.5 font-medium text-ui-ink underline-offset-2 hover:underline"
             title={
               resolvableIds.length > 0
                 ? 'See the threads. The likely-addressed ones can be resolved there.'

@@ -57,7 +57,7 @@ export function ShowOnTimeline({
       <button
         type="button"
         onClick={onClick}
-        className={`hit shrink-0 text-ui-accent hover:underline ${className}`}
+        className={`hit shrink-0 text-ui-ink hover:underline ${className}`}
         title={title}
       >
         {label}
@@ -69,7 +69,7 @@ export function ShowOnTimeline({
     <button
       type="button"
       onClick={onClick}
-      className={`hit shrink-0 rounded-ui p-0.5 text-ui-accent hover:text-ui-accent ${className}`}
+      className={`hit shrink-0 rounded-ui p-0.5 text-ui-mute hover:text-ui-ink ${className}`}
       title={title}
       aria-label={title}
     >

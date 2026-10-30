@@ -843,7 +843,7 @@ function InlineCommentBox({
           type="button"
           onClick={send}
           disabled={busy || body.trim().length === 0}
-          className="hit bg-ui-raise whitespace-nowrap rounded-ui px-2 py-0.5 text-meta text-ui-accent hover:bg-ui-hover disabled:opacity-50"
+          className="hit bg-ui-raise whitespace-nowrap rounded-ui px-2 py-0.5 text-meta text-ui-ink hover:bg-ui-hover disabled:opacity-50"
         >
           {refreshing ? 'Loading it…' : add.isPending ? 'Posting…' : 'Send'}
         </button>
@@ -872,7 +872,7 @@ function InlineCommentBox({
                 href={safeExternalUrl(notice.url)}
                 target="_blank"
                 rel="noreferrer noopener"
-                className="hit text-ui-accent hover:underline"
+                className="hit text-ui-ink hover:underline"
               >
                 Open on GitHub
                 <ExternalLinkIcon
@@ -920,7 +920,7 @@ function NoPatchNote({
           type="button"
           onClick={onLoad}
           disabled={status === 'loading'}
-          className="hit bg-ui-raise rounded-ui px-2 py-0.5 text-ui-accent hover:bg-ui-hover disabled:opacity-60"
+          className="hit bg-ui-raise rounded-ui px-2 py-0.5 text-ui-ink hover:bg-ui-hover disabled:opacity-60"
         >
           {status === 'loading' ? 'Loading full diff…' : 'Load full diff'}
         </button>
@@ -930,7 +930,7 @@ function NoPatchNote({
           href={githubUrl}
           target="_blank"
           rel="noreferrer noopener"
-          className="hit text-ui-accent hover:underline"
+          className="hit text-ui-ink hover:underline"
         >
           View on GitHub
           <ExternalLinkIcon size={10} className="ml-0.5 inline-block align-[-0.1em]" />
@@ -1419,7 +1419,7 @@ function FileDiffBlock({
             href={githubUrl}
             target="_blank"
             rel="noreferrer noopener"
-            className="hit inline-flex shrink-0 items-center text-ui-accent hover:underline"
+            className="hit inline-flex shrink-0 items-center text-ui-ink hover:underline"
             title="View this file's diff on GitHub"
           >
             <ExternalLinkIcon size={12} />
@@ -1452,7 +1452,7 @@ function FileDiffBlock({
                     href={githubUrl}
                     target="_blank"
                     rel="noreferrer noopener"
-                    className="hit text-ui-accent hover:underline"
+                    className="hit text-ui-ink hover:underline"
                   >
                     view on GitHub
                     <ExternalLinkIcon

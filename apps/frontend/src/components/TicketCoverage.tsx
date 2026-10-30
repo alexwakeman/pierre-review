@@ -164,7 +164,7 @@ function TicketShare({
         <button
           type="button"
           onClick={() => openStory({ ident, key: ticketKey, title: ticketTitle })}
-          className="hit text-ui-accent hover:underline"
+          className="hit text-ui-ink hover:underline"
         >
           See the whole story
         </button>

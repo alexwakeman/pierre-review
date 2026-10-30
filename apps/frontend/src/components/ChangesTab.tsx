@@ -91,7 +91,7 @@ function MetaFileRow({ file }: { file: PrFileChange }): JSX.Element {
           <span className="text-ui-success">+{file.additions}</span>{' '}
           <span className="text-ui-danger">−{file.deletions}</span>
         </span>
-        <span className="shrink-0 decorative-mark text-ui-faint group-hover:text-ui-accent">
+        <span className="shrink-0 decorative-mark text-ui-faint group-hover:text-ui-ink">
           <ExternalLinkIcon size={12} />
         </span>
       </a>
@@ -141,7 +141,7 @@ function MoreFilesNote({
           type="button"
           onClick={onLoadMore}
           disabled={loading}
-          className="hit bg-ui-raise rounded-ui px-2 py-0.5 text-ui-accent hover:bg-ui-hover disabled:opacity-60"
+          className="hit bg-ui-raise rounded-ui px-2 py-0.5 text-ui-ink hover:bg-ui-hover disabled:opacity-60"
         >
           {loading ? 'Loading files…' : `Load next 100 files (${ofTotal})`}
         </button>
@@ -154,7 +154,7 @@ function MoreFilesNote({
         href={`${githubUrl}/files`}
         target="_blank"
         rel="noreferrer noopener"
-        className={`text-ui-accent hover:underline ${compact ? 'block' : ''}`}
+        className={`text-ui-ink hover:underline ${compact ? 'block' : ''}`}
       >
         All on GitHub <ExternalLinkIcon size={11} className="inline-block align-[-0.1em]" />
       </a>
@@ -193,7 +193,9 @@ function Header({
     <div
       ref={barRef}
       data-testid="changes-bar"
-      className="sticky top-0 z-30 flex flex-wrap items-center gap-x-3 gap-y-1 bg-ui-bg px-4 py-1.5 text-meta text-ui-mute md:px-5"
+      // `--pr-tabs-h`: below md PrDetail's tab strip sticks at the top too, so this bar pins
+      // under it (PrDetail sets the variable on a phone only; 0 everywhere else).
+      className="sticky top-[var(--pr-tabs-h,0px)] z-30 flex flex-wrap items-center gap-x-3 gap-y-1 bg-ui-bg px-4 py-1.5 text-meta text-ui-mute md:px-5"
     >
       {filesMenu}
       {/* "Threads only": the review threads without the code. A toggle, so it says its state to
@@ -229,7 +231,7 @@ function Header({
           href={`${pr.githubUrl}/files`}
           target="_blank"
           rel="noreferrer noopener"
-          className="inline-flex items-center gap-1 text-ui-accent hover:underline touch:min-h-10"
+          className="inline-flex items-center gap-1 text-ui-ink hover:underline touch:min-h-10"
         >
           Files changed <ExternalLinkIcon size={11} className="inline-block align-[-0.1em]" />
         </a>
@@ -424,7 +426,8 @@ export function ChangesTab({
     ro.observe(el);
     barObserver.current = ro;
   }, []);
-  const rootStyle = { '--diff-sticky-top': `${barH}px` } as CSSProperties;
+  // Plus PrDetail's sticky tab strip below md (`--pr-tabs-h`, 0 from md up).
+  const rootStyle = { '--diff-sticky-top': `calc(var(--pr-tabs-h, 0px) + ${barH}px)` } as CSSProperties;
 
   // The Threads only view's file pick (the rail's click there): which file's threads to list.
   // EPHEMERAL, and dropped whenever the view is switched off, so turning it back on starts from
@@ -665,7 +668,7 @@ export function ChangesTab({
             href={`${pr.githubUrl}/files`}
             target="_blank"
             rel="noreferrer noopener"
-            className="hit text-ui-accent hover:underline"
+            className="hit text-ui-ink hover:underline"
           >
             View on GitHub <ExternalLinkIcon size={11} className="inline-block align-[-0.1em]" />
           </a>
@@ -760,7 +763,7 @@ export function ChangesTab({
                 <button
                   type="button"
                   onClick={() => setThreadsPath(null)}
-                  className="rounded-ui px-1.5 py-0.5 text-ui-accent underline-offset-2 hover:underline touch:min-h-10"
+                  className="rounded-ui px-1.5 py-0.5 text-ui-ink underline-offset-2 hover:underline touch:min-h-10"
                 >
                   All files
                 </button>
@@ -786,7 +789,7 @@ export function ChangesTab({
                 href={`${pr.githubUrl}/files`}
                 target="_blank"
                 rel="noreferrer noopener"
-                className="hit text-ui-accent hover:underline"
+                className="hit text-ui-ink hover:underline"
               >
                 View on GitHub <ExternalLinkIcon size={11} className="inline-block align-[-0.1em]" />
               </a>

@@ -1472,19 +1472,25 @@ export const useFilters = create<FilterState>((set, get) => ({
   // kind isolation goes with it for the same reason — the new workspace may have none of that
   // kind, and an empty board with an unexplained filter on it is the worse outcome.
   setWorkspace: (workspaceId, repoIds) =>
-    set({
-      workspaceId,
-      repoIds,
-      feedIsolatedPrId: null,
-      attentionIsolation: null,
-      // The relevance lens goes with them: it was seated by a count taken in the workspace being
-      // LEFT, so carrying it into the next one would filter a board against a number nobody
-      // showed the reader.
-      attentionRelevance: null,
-      // …and so does the author lens: the new workspace's board may hold nothing on that side.
-      attentionAuthorLens: null,
-      // …and the sprint's story tray: its ticket belongs to the workspace being left.
-      sprintStoryIdent: null,
+    set((s) => {
+      // The lenses below belong to the workspace being LEFT, so a real SWITCH between two ids
+      // clears them. The FIRST resolution (null → id) leaves nothing behind, and clearing there
+      // threw away a deep link (`?sprintStory=`, `?attnRel=`, …) before it could take effect.
+      const switching = s.workspaceId != null && s.workspaceId !== workspaceId;
+      if (!switching) return { workspaceId, repoIds };
+      return {
+        workspaceId,
+        repoIds,
+        feedIsolatedPrId: null,
+        attentionIsolation: null,
+        // The relevance lens was seated by a count taken in the workspace being left; carrying it
+        // into the next one would filter a board against a number nobody showed the reader.
+        attentionRelevance: null,
+        // …and the author lens: the new workspace's board may hold nothing on that side.
+        attentionAuthorLens: null,
+        // …and the sprint's story tray: its ticket belongs to the workspace being left.
+        sprintStoryIdent: null,
+      };
     }),
   toggleRepo: (id) =>
     set((s) => ({ repoIds: toggle(s.repoIds ?? [], id) })),

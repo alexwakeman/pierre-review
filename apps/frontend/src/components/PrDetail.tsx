@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type {
   EventType,
@@ -338,7 +338,7 @@ function ActivityList({
                   href={safeExternalUrl(r.href ?? `${pr.githubUrl}/commits/${r.sha}`)}
                   target="_blank"
                   rel="noreferrer noopener"
-                  className="hit font-mono text-ui-mute hover:text-ui-accent"
+                  className="hit font-mono text-ui-mute hover:text-ui-ink"
                   aria-label={`Commit ${r.sha.slice(0, 7)} on GitHub`}
                 >
                   {r.sha.slice(0, 7)}
@@ -371,7 +371,7 @@ function ActivityList({
                 href={href}
                 target="_blank"
                 rel="noreferrer noopener"
-                className="hit shrink-0 rounded-ui p-0.5 text-ui-mute hover:text-ui-accent"
+                className="hit shrink-0 rounded-ui p-0.5 text-ui-mute hover:text-ui-ink"
                 title="Open on GitHub"
                 aria-label="Open on GitHub"
               >
@@ -420,7 +420,8 @@ export function ActivitySection({
   return (
     <section
       ref={ref}
-      className="mt-2"
+      // scroll-mt: below md the sticky tab strip would cover a section scrolled to the top.
+      className="mt-2 scroll-mt-[var(--pr-tabs-h,0px)]"
       data-testid="pr-activity-section"
     >
       <button
@@ -675,7 +676,7 @@ function PrCommentsList({
                 <button
                   type="button"
                   onClick={() => setReplyingTo(rowKey)}
-                  className="text-ui-accent hover:underline touch:min-h-10"
+                  className="text-ui-ink hover:underline touch:min-h-10"
                 >
                   Reply
                 </button>
@@ -685,7 +686,7 @@ function PrCommentsList({
                   href={safeExternalUrl(it.url)}
                   target="_blank"
                   rel="noreferrer noopener"
-                  className="inline-flex items-center gap-1 text-ui-accent hover:underline touch:min-h-10"
+                  className="inline-flex items-center gap-1 text-ui-ink hover:underline touch:min-h-10"
                 >
                   <ExternalLinkIcon size={11} />
                   {isComment ? 'View comment on GitHub' : 'View review on GitHub'}
@@ -898,6 +899,24 @@ export function PrDetail({
   // afterwards does not snap the section shut under them.
   const [activityOpenLocal, setActivityOpenLocal] = useState(false);
   const [activityScroll, setActivityScroll] = useState<number | null>(null);
+  // PHONE HEADER (below md): the size/reach readings and the impact note fold behind "Details"
+  // (local, ephemeral — every fact stays one tap away), and the tab strip sticks to the top of
+  // the one scroller as the header scrolls away. Its height is measured into `--pr-tabs-measured`;
+  // the root maps it to `--pr-tabs-h` below md ONLY, so the Changes tab's own sticky bar pins
+  // under the strip on a phone and at 0 everywhere else (desktop unchanged).
+  const [headerDetailsOpen, setHeaderDetailsOpen] = useState(false);
+  const [tabsH, setTabsH] = useState(0);
+  const tabsObserver = useRef<ResizeObserver | null>(null);
+  const tabsBarRef = useCallback((el: HTMLDivElement | null) => {
+    tabsObserver.current?.disconnect();
+    tabsObserver.current = null;
+    if (el == null) return;
+    const measure = (): void => setTabsH(el.offsetHeight);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    tabsObserver.current = ro;
+  }, []);
   useEffect(() => {
     if (tab !== 'activity') return;
     setActivityOpenLocal(true);
@@ -1299,6 +1318,8 @@ export function PrDetail({
 
   const stateMeta = PR_STATE_META[pr.state];
   const headerCi = prHeaderCi(pr.state, pr.ciStatus);
+  // Something to fold behind the phone header's "Details": the size, the large-PR flag or reach.
+  const hasHeaderDetails = pr.changedFilesCount > 0 || blastFields.blast != null || codeLocFields.codeLoc != null;
   const author = pr.authorId != null ? usersById.get(pr.authorId) : undefined;
   const conversationCount = prConversationCount(pr);
 
@@ -1424,7 +1445,10 @@ export function PrDetail({
 
   return (
     <PrFocusMetaContext.Provider value={pinnedMetaOf(pr, usersById)}>
-    <div className="flex h-full flex-col bg-ui-bg max-md:overflow-y-auto max-md:overflow-x-clip">
+    <div
+      className="flex h-full flex-col bg-ui-bg max-md:overflow-y-auto max-md:overflow-x-clip max-md:[--pr-tabs-h:var(--pr-tabs-measured)]"
+      style={{ '--pr-tabs-measured': `${tabsH}px` } as CSSProperties}
+    >
       {/* THE ONE SLIM HEADER: title + toolbar, then one meta line (state, CI, repo, author, age,
           size, reach), then the tabs. pr-12 leaves room for DetailPane's close ✕ in the pane; the
           full-screen tab has none. */}
@@ -1610,6 +1634,31 @@ export function PrDetail({
           <span className="inline-flex shrink-0 items-center gap-2">
             <span title={dateTime(pr.openedAt)}>opened {relativeTime(pr.openedAt)}</span>
           </span>
+          {/* PHONE ONLY: the size and reach readings fold
+              behind this toggle; it and the folded group sort LAST so the line's other facts keep
+              their place. md+ never sees it — there the group is `contents`, exactly as before. */}
+          {hasHeaderDetails && (
+            <button
+              type="button"
+              onClick={() => setHeaderDetailsOpen((o) => !o)}
+              aria-expanded={headerDetailsOpen}
+              aria-controls={`pr-${pr.id}-header-details`}
+              className={cx(
+                'inline-flex shrink-0 items-center gap-1 rounded-ui px-1 text-ui-mute hover:bg-ui-hover hover:text-ui-ink touch:min-h-10 max-md:order-last md:hidden',
+                FOCUS_RING,
+              )}
+            >
+              Details
+              <ChevronIcon dir={headerDetailsOpen ? 'up' : 'down'} size={12} aria-hidden />
+            </button>
+          )}
+          <span
+            id={`pr-${pr.id}-header-details`}
+            className={cx(
+              'md:contents max-md:order-last max-md:w-full max-md:flex-wrap max-md:items-center max-md:gap-x-2 max-md:gap-y-1',
+              headerDetailsOpen ? 'max-md:flex' : 'max-md:hidden',
+            )}
+          >
           {pr.changedFilesCount > 0 && (
             <span className="inline-flex shrink-0 items-center gap-2">
                 <button
@@ -1641,6 +1690,7 @@ export function PrDetail({
               `codeLoc` the flag beside it reads, so the two can never quote different line counts
               for one pull request. */}
           <BlastRadiusChip pr={{ ...blastFields, ...codeLocFields }} expandable />
+          </span>
           {pr.isStalled && (
             <span
               className="inline-flex items-center gap-1 text-ui-warn"
@@ -1679,9 +1729,22 @@ export function PrDetail({
             need the width, and a click-gated button does not belong inline among the counts.
             ⚠ `hasBlast` gates it on the CHIP having something to explain: with no measurement
             there is no chip and no button. */}
+        {/* NOT behind the phone "Details": below md the note already folds itself to one line, and
+            that line carries the "flagged" escalation, which must stay in sight. */}
         <BlastImpactNote prId={prId} hasBlast={blastFields.blast != null} />
-        {/* THE TABS — counts as facts, 1–9 while this PR is the one on screen. Picking a tab by
-            hand drops any pending "show me this finding" target (`goToTab`'s whole job). */}
+      </header>
+      {/* THE TABS — counts as facts, 1–9 while this PR is the one on screen. Picking a tab by
+          hand drops any pending "show me this finding" target (`goToTab`'s whole job). A sibling
+          of the header (same gutters) so that, below md, it can STICK to the top of the one
+          scroller while the header scrolls away; md+ looks exactly as when it sat inside. */}
+      <div
+        ref={tabsBarRef}
+        className={cx(
+          'shrink-0 px-4 pt-2 md:px-5',
+          placement === 'pane' && 'pr-12 md:pr-12',
+          'max-md:sticky max-md:top-0 max-md:z-30 max-md:bg-ui-bg',
+        )}
+      >
         <Tabs
           tabs={tabItems}
           value={effectiveTab}
@@ -1689,9 +1752,9 @@ export function PrDetail({
           label={`Pull request #${pr.number} tabs`}
           numberKeys={liveVisible}
           idPrefix={`pr-${pr.id}`}
-          className="-mx-1 mt-2 pb-2"
+          className="-mx-1 pb-2"
         />
-      </header>
+      </div>
       <div
         // On a phone the header scrolls away with the content (one scroller, the outer box): a
         // fixed header would leave a third of the screen for the diff.

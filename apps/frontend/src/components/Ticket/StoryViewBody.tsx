@@ -30,7 +30,11 @@ const MUTED = 'text-ui-mute';
 export function StoryViewBody({
   ident,
   meta,
+  page = false,
 }: {
+  /** The story TAB (TicketTabView): the ticket's header is the page header and there is no card.
+   *  This Sprint's tray leaves it off. */
+  page?: boolean;
   /** Shared `trackerTicketIdent`. */
   ident: string | null;
   /** What the opener knew (the header's fallback until a read names the ticket). */
@@ -78,7 +82,7 @@ export function StoryViewBody({
       }),
     [data?.merged, usersById, repoNameById],
   );
-  const story = useMemo(() => (ticket != null ? { ticket, merged: mergedRows } : null), [ticket, mergedRows]);
+  const story = useMemo(() => (ticket != null ? { ticket, merged: mergedRows, page } : null), [ticket, mergedRows, page]);
 
   if (workspaceId == null || ident == null || story == null) return null;
 

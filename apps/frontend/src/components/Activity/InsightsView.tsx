@@ -75,7 +75,7 @@ export function InsightsView(): JSX.Element {
   useRegisterCommands('reports', commands);
 
   return (
-    <div className="mx-auto max-w-[1400px] space-y-6" data-testid="insights-view">
+    <div className="max-w-[1400px] space-y-6" data-testid="insights-view">
       {/* The page header: title + the sub-tab strip (the Tabs primitive; 1–3 pick a tab).
           `effectiveTab` (derived, never written back) picks the body. The strip scrolls inside
           itself on a phone, never the page. */}

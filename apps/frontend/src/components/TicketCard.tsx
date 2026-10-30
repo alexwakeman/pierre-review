@@ -153,8 +153,9 @@ export function TicketCard({
             </span>
           )}
         </span>
-        {/* Two lines held open (13px / 20px), so a one-line title is as tall as a two-line one. */}
-        <span aria-hidden className="mt-1 line-clamp-2 min-h-[40px] break-words text-body font-medium text-ui-ink">
+        {/* Two lines held open (13px / 20px), so a one-line title is as tall as a two-line one; up to
+            three before an ellipsis, so a board column's width never cuts a title short. */}
+        <span aria-hidden className="mt-1 line-clamp-3 min-h-[40px] break-words text-body font-medium text-ui-ink">
           {title}
         </span>
         {/* The brief's one line: always one line held open, so a card without one is as tall. */}

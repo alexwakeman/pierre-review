@@ -19,7 +19,11 @@ import type { ReactNode } from 'react';
 // disappearing never moves the page by a pixel (docs/FRONTEND.md § There is ONE header toast strip).
 // The right-hand controls the old header carried — Sync, the bell, Help, the theme, AI usage, the
 // account — moved to the sidebar's foot; the wordmark heads the sidebar.
-export function TopBar({ toasts }: { toasts: ReactNode }): JSX.Element {
+//
+// ⚠ COLLAPSED (`collapsed`, App.tsx) at ≥ lg when no tabs are open: the band would hold only the toast
+// strip, so the strip sits at the end of the page header's title row instead (components/ui/
+// PageHeader.tsx) and the bar is `lg:hidden`. Below lg it always stays (menu button + location).
+export function TopBar({ toasts, collapsed = false }: { toasts: ReactNode; collapsed?: boolean }): JSX.Element {
   const activeTab = usePinnedTabs((s) => s.activeTab);
   const tabs = usePinnedTabs((s) => s.tabs);
   const activityRepoId = useFilters((s) => s.activityRepoId);
@@ -48,7 +52,7 @@ export function TopBar({ toasts }: { toasts: ReactNode }): JSX.Element {
     signals.alertWords,
   ].filter((w): w is string => w != null);
   return (
-    <header data-shell-topbar className="flex h-11 shrink-0 items-center gap-2 bg-ui-bg pl-2 pr-3 lg:pl-4">
+    <header data-shell-topbar className={cx('flex h-11 shrink-0 items-center gap-2 bg-ui-bg pl-2 pr-3 lg:pl-4', collapsed && 'lg:hidden')}>
       <button
         type="button"
         onClick={() => setDrawerOpen(true)}

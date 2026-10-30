@@ -287,7 +287,7 @@ export function MergeWhenReadyControl({
             })
           }
           disabled={phase === 'arming'}
-          className="hit inline-flex shrink-0 items-center justify-center whitespace-nowrap rounded-ui bg-ui-accent-fill px-2 h-7 text-meta font-medium text-ui-on-accent hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50 touch:h-10 touch:px-3"
+          className="hit inline-flex shrink-0 items-center justify-center whitespace-nowrap rounded-ui bg-ui-accent-fill disabled:bg-ui-raise disabled:text-ui-ink px-2 h-7 text-meta font-medium text-ui-on-accent hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50 touch:h-10 touch:px-3"
         >
           {phase === 'arming' ? 'Arming…' : 'Arm auto-merge'}
         </button>

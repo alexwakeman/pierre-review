@@ -252,7 +252,7 @@ export function UserProfilePopover({
                 });
                 onDismiss();
               }}
-              className="hit rounded-ui px-1.5 py-1 text-meta font-medium text-ui-accent hover:bg-ui-hover"
+              className="hit rounded-ui px-1.5 py-1 text-meta font-medium text-ui-ink hover:bg-ui-hover"
               title={`Open ${label}'s last ${FEED_WINDOW_DAYS} days of activity in a tab`}
             >
               {`Last ${FEED_WINDOW_DAYS} days of activity →`}

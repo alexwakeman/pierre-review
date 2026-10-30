@@ -252,7 +252,7 @@ function BriefSummary({
               type="button"
               aria-expanded={all}
               onClick={() => setAll((v) => !v)}
-              className="px-1 text-meta text-ui-accent hover:underline touch:min-h-10"
+              className="px-1 text-meta text-ui-ink hover:underline touch:min-h-10"
             >
               {all ? 'Show fewer' : `Show all ${brief.criteria.length} criteria`}
             </button>

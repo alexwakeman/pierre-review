@@ -431,7 +431,7 @@ export function BotThreadsDetail(): JSX.Element {
                   type="button"
                   disabled={resolve.isPending || selectedThreadIds.length === 0}
                   onClick={runResolve}
-                  className="rounded-ui bg-ui-accent-fill px-2.5 py-1 text-meta font-medium text-ui-on-accent hover:opacity-90 disabled:opacity-60 touch:py-2"
+                  className="rounded-ui bg-ui-accent-fill disabled:bg-ui-raise disabled:text-ui-ink px-2.5 py-1 text-meta font-medium text-ui-on-accent hover:opacity-90 disabled:opacity-50 touch:py-2"
                 >
                   Yes, resolve
                 </button>
@@ -450,7 +450,7 @@ export function BotThreadsDetail(): JSX.Element {
                   type="button"
                   disabled={selectedThreadIds.length === 0}
                   onClick={() => setConfirming(true)}
-                  className="rounded-ui bg-ui-raise px-2.5 py-1 text-meta font-medium text-ui-accent hover:bg-ui-hover disabled:opacity-50 touch:py-2"
+                  className="rounded-ui bg-ui-raise px-2.5 py-1 text-meta font-medium text-ui-ink hover:bg-ui-hover disabled:opacity-50 touch:py-2"
                   title="These threads only LOOK addressed (a later commit touched their file) — you approve the batch before it resolves on GitHub."
                 >
                   Resolve {selectedThreadIds.length} thread

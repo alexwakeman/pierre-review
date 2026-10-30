@@ -459,7 +459,7 @@ function PrSummary({ body }: { body: string }): JSX.Element {
           <button
             type="button"
             onClick={() => setExpanded((v) => !v)}
-            className="hit mt-1 text-meta font-medium text-ui-accent hover:underline"
+            className="hit mt-1 text-meta font-medium text-ui-ink hover:underline"
           >
             {expanded ? 'Show less' : 'Show more'}
           </button>
@@ -1133,7 +1133,7 @@ function PrTicketChip({ prId, ticket: t }: { prId: number; ticket: TicketRef }):
         <button
           type="button"
           onClick={() => openStory({ ident: t.ident!, key: t.key, title: null })}
-          className="hit inline-flex items-center rounded-l-ui px-1.5 py-0.5 text-meta font-medium text-ui-accent hover:bg-ui-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent"
+          className="hit inline-flex items-center rounded-l-ui px-1.5 py-0.5 text-meta font-medium text-ui-ink hover:bg-ui-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent"
           title={`Open the ${t.key} story`}
           data-testid="pr-ticket-story"
         >
@@ -1146,7 +1146,7 @@ function PrTicketChip({ prId, ticket: t }: { prId: number; ticket: TicketRef }):
             rel="noreferrer noopener"
             aria-label={`Open ${t.key} in ${trackerLabel}`}
             title={`Open ${t.key} in ${trackerLabel}`}
-            className={`inline-flex items-center self-stretch px-1 text-ui-accent hover:bg-ui-hover ${
+            className={`inline-flex items-center self-stretch px-1 text-ui-ink hover:bg-ui-hover ${
               t.manual ? '' : 'rounded-r-ui'
             }`}
           >
@@ -1159,7 +1159,7 @@ function PrTicketChip({ prId, ticket: t }: { prId: number; ticket: TicketRef }):
         href={external}
         target="_blank"
         rel="noreferrer noopener"
-        className={`inline-flex items-center px-1.5 py-0.5 text-meta font-medium text-ui-accent hover:bg-ui-hover ${
+        className={`inline-flex items-center px-1.5 py-0.5 text-meta font-medium text-ui-ink hover:bg-ui-hover ${
           t.manual ? 'rounded-l-ui' : 'rounded-ui'
         }`}
         title={`Open ${t.key} in ${trackerLabel}`}
@@ -1176,7 +1176,7 @@ function PrTicketChip({ prId, ticket: t }: { prId: number; ticket: TicketRef }):
           disabled={remove.isPending}
           onClick={() => remove.mutate(t.key)}
           aria-label={`Remove ${t.key} (added by hand)`}
-          className="hit rounded-r-ui px-1 py-1 text-ui-accent hover:bg-ui-hover disabled:opacity-50"
+          className="hit rounded-r-ui px-1 py-1 text-ui-ink hover:bg-ui-hover disabled:opacity-50"
         >
           <CloseIcon size={10} />
         </button>

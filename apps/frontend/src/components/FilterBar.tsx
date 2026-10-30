@@ -16,6 +16,7 @@ import { UserSelectPanel } from './UserSelectPanel.js';
 import { useTimelineCommands } from './Timeline/useTimelineCommands.js';
 import { BotIcon, ChevronIcon, FilterIcon } from './Icons.js';
 import { cx, FOCUS_RING } from './ui/cx.js';
+import { PageHeader } from './ui/PageHeader.js';
 
 const PRESETS: Exclude<RangePreset, 'custom'>[] = ['7d', '14d', '30d', '90d'];
 
@@ -270,9 +271,7 @@ export function FilterBar(): JSX.Element | null {
         filters are its header row. Not on a phone (the top bar names the page) and not on a PR
         Focus tab (its tab chip names it). */}
     {isTimeline && !phone && (
-      <header className="shrink-0 bg-ui-bg px-7 pt-5" data-testid="timeline-header">
-        <h2 className="text-display text-ui-ink">Timeline</h2>
-      </header>
+      <PageHeader title="Timeline" flushBottom className="bg-ui-bg" testId="timeline-header" />
     )}
     <div data-testid="filter-bar" className={cx('flex shrink-0 flex-wrap items-center gap-x-1.5 gap-y-2 bg-ui-bg px-3 py-2', isTimeline && !phone ? 'md:px-[18px] md:pb-3' : 'md:px-4')}>
       {phone && (

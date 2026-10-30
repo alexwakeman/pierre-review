@@ -4,6 +4,7 @@ import { useRepos } from '../../hooks/useTimeline.js';
 import { useFilters } from '../../store/filters.js';
 import { BotIcon, GearIcon } from '../Icons.js';
 import { Tabs } from '../ui/Tabs.js';
+import { PAGE_GUTTER } from '../ui/PageHeader.js';
 import { openWorkspaceManager } from '../WorkspaceSelector.js';
 import { RepoFeedHeader } from './RepoFeedHeader.js';
 import { RepoInsightsPanel } from './RepoInsightsPanel.js';
@@ -124,6 +125,10 @@ export function ActivityView(): JSX.Element {
   // loading", where allRepos is undefined — we mustn't flash onboarding then). First-run onboarding
   // then replaces the whole pane REGARDLESS of the selected destination.
   const noReposAtAll = allRepos != null && !hasAnyRepo;
+  // The destinations that open on a PageHeader (components/ui/PageHeader.tsx): it carries the top
+  // padding; the pane carries the ONE page gutter, so every title starts at the same x.
+  const pageHeaded =
+    !noReposAtAll && (showingOpenPrs || showingBots || showingInsights || showingDocs || (showingFeed && !noRepos));
 
   return (
     // ⚠ `relative` IS LOAD-BEARING: it makes this pane the containing block for its own `absolute`
@@ -136,7 +141,9 @@ export function ActivityView(): JSX.Element {
     // box), so it takes no padding and no outer scroll.
     <div
       className={`relative h-full min-h-0 ${
-        showingAttention && !noRepos && !noReposAtAll ? 'flex flex-col overflow-hidden' : 'overflow-y-auto p-3 md:p-4'
+        showingAttention && !noRepos && !noReposAtAll
+          ? 'flex flex-col overflow-hidden'
+          : `overflow-y-auto pb-3 md:pb-4 ${PAGE_GUTTER} ${pageHeaded ? '' : 'pt-3 md:pt-4'}`
       }`}
     >
       {noReposAtAll ? (

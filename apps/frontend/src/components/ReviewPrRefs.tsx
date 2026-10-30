@@ -69,7 +69,7 @@ export function ReviewPrRefsProvider({
   return <PrRefsContext.Provider value={value}>{children}</PrRefsContext.Provider>;
 }
 
-const LINK = 'text-ui-accent hover:underline';
+const LINK = 'text-ui-ink hover:underline';
 
 /** One ref ("api#12"): opens that PR's tab in Limn; plain text when it names no known PR. */
 export function PrRefLink({

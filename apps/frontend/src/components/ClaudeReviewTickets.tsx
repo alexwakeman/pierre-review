@@ -30,7 +30,7 @@ export function JiraKeyLink({ ticketKey, url }: { ticketKey: string; url?: strin
       href={href}
       target="_blank"
       rel="noreferrer noopener"
-      className="hit inline-flex items-center gap-1 font-mono text-meta font-semibold text-ui-accent hover:underline"
+      className="hit inline-flex items-center gap-1 font-mono text-meta font-semibold text-ui-ink hover:underline"
     >
       {ticketKey}
       <ExternalLinkIcon size={11} />

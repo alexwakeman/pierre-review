@@ -1466,7 +1466,7 @@ function VendorTable({
                             })
                           }
                           title="Open this bot's depth tab — latency, cadence, coverage and consistency, plus its severity-over-time and category mix"
-                          className="whitespace-nowrap rounded-ui px-1.5 py-0.5 text-meta font-medium text-ui-accent hover:bg-ui-hover touch:py-2"
+                          className="whitespace-nowrap rounded-ui px-1.5 py-0.5 text-meta font-medium text-ui-ink hover:bg-ui-hover touch:py-2"
                         >
                           Depth →
                         </button>
@@ -1526,7 +1526,7 @@ function VendorTable({
           type="button"
           aria-expanded={allFigures}
           onClick={() => setAllFigures((o) => !o)}
-          className="inline-flex min-h-10 items-center gap-1 rounded-ui px-2 text-meta font-medium text-ui-accent hover:bg-ui-hover"
+          className="inline-flex min-h-10 items-center gap-1 rounded-ui px-2 text-meta font-medium text-ui-ink hover:bg-ui-hover"
         >
           {allFigures ? 'Hide all figures' : 'All figures'}
         </button>

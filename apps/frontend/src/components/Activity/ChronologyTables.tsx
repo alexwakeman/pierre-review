@@ -47,7 +47,7 @@ export function PrLink({ pr }: { pr: FlowPrLink }): JSX.Element {
         type="button"
         onClick={() => open(pr)}
         title={pr.prTitle}
-        className="hit inline-flex min-w-0 items-baseline gap-1 text-left font-medium text-ui-accent hover:underline"
+        className="hit inline-flex min-w-0 items-baseline gap-1 text-left font-medium text-ui-ink hover:underline"
       >
         <PullRequestIcon size={11} className="shrink-0 self-center" />
         <span className="shrink-0 whitespace-nowrap">

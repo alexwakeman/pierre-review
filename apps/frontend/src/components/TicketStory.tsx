@@ -29,7 +29,7 @@ const MUTED = 'text-ui-mute';
 const ERROR_TEXT = 'text-ui-danger';
 const BTN =
   'inline-flex h-7 items-center whitespace-nowrap rounded-ui bg-ui-raise px-2.5 text-meta font-medium text-ui-ink hover:bg-ui-hover disabled:cursor-not-allowed disabled:opacity-50 touch:h-10 touch:px-3';
-const LINK_BTN = 'text-meta text-ui-accent hover:underline disabled:opacity-50';
+const LINK_BTN = 'text-meta text-ui-ink hover:underline disabled:opacity-50';
 
 /** The stored Jira row, with the criteria-field line and picker. */
 function JiraStory({

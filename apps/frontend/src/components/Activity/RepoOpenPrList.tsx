@@ -224,7 +224,7 @@ export function OpenPrRows({
         <button
           type="button"
           onClick={onShowAll}
-          className="hit flex w-full items-center justify-center gap-1 border-t border-ui-line px-3 py-1.5 text-meta font-medium text-ui-accent hover:bg-ui-hover"
+          className="hit flex w-full items-center justify-center gap-1 border-t border-ui-line px-3 py-1.5 text-meta font-medium text-ui-ink hover:bg-ui-hover"
         >
           Show all {prs.length} open PRs
           <span className="text-ui-faint">· sortable</span>

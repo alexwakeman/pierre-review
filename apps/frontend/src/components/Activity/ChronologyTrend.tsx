@@ -498,7 +498,7 @@ function HourlyCost({ workspaceId, hours }: { workspaceId: number | null; hours:
   const save = (value: number | null): void => {
     update.mutate({ hourlyCostUsd: value }, { onSuccess: () => setEditing(false) });
   };
-  const link = 'text-meta font-medium text-ui-accent hover:underline';
+  const link = 'text-meta font-medium text-ui-ink hover:underline';
   const info = (
     <InfoButton title="Hours saved in dollars">
       <p>
@@ -605,7 +605,7 @@ function GainLine({
           ? `Not enough weeks yet to set a baseline: it needs ${FLOW_TREND.baselineWeeks} weeks with at least ${FLOW_TREND.thinWeekPrs} pull requests each.`
           : 'Too few usable weeks before that week to set a baseline there.'}
         {from != null && (
-          <button type="button" className="hit ml-2 font-medium text-ui-accent hover:underline" onClick={() => onPickBaseline(null)}>
+          <button type="button" className="hit ml-2 font-medium text-ui-ink hover:underline" onClick={() => onPickBaseline(null)}>
             Use the default baseline
           </button>
         )}
@@ -641,7 +641,7 @@ function GainLine({
           Baseline: half merged within {hoursShort(gain.baseline)} ({gain.baselineWeeks.length} weeks)
         </span>
         {from != null && (
-          <button type="button" className="hit text-meta font-medium text-ui-accent hover:underline" onClick={() => onPickBaseline(null)}>
+          <button type="button" className="hit text-meta font-medium text-ui-ink hover:underline" onClick={() => onPickBaseline(null)}>
             Use the default baseline
           </button>
         )}
@@ -856,7 +856,7 @@ function BeforeAfterLens({
       <button
         type="button"
         onClick={onUseAsBaseline}
-        className="hit mt-2 text-meta font-medium text-ui-accent hover:underline"
+        className="hit mt-2 text-meta font-medium text-ui-ink hover:underline"
       >
         Measure hours saved from this week
       </button>

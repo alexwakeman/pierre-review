@@ -40,7 +40,7 @@ function FileRef({
       <button
         type="button"
         onClick={() => onOpenInChanges(path, line, 'RIGHT')}
-        className="hit break-all text-left font-mono text-meta text-ui-accent hover:underline"
+        className="hit break-all text-left font-mono text-meta text-ui-ink hover:underline"
       >
         {label}
       </button>
@@ -105,7 +105,7 @@ export function CiFailureRow({
             href={href}
             target="_blank"
             rel="noreferrer noopener"
-            className="hit ml-auto inline-flex items-center gap-1 text-meta text-ui-accent hover:underline"
+            className="hit ml-auto inline-flex items-center gap-1 text-meta text-ui-ink hover:underline"
           >
             Details
             <ExternalLinkIcon size={11} />

@@ -236,7 +236,7 @@ export function ClaudeReviewBanner(): JSX.Element | null {
                 ) : (
                   <span className="inline-block h-2.5 w-2.5 shrink-0 animate-spin rounded-full border-2 border-ui-line border-t-ui-line" />
                 )}
-                <span className="truncate font-medium text-ui-accent hover:underline">
+                <span className="truncate font-medium text-ui-ink hover:underline">
                   {e.repoFullName} #{e.prNumber}
                 </span>
               </span>

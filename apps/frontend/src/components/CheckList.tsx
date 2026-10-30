@@ -150,7 +150,7 @@ export function CheckRow({
       target="_blank"
       rel="noreferrer noopener"
       onClick={(e) => e.stopPropagation()}
-      className="hit text-ui-accent hover:underline"
+      className="hit text-ui-ink hover:underline"
       title={linkTitle}
     >
       Open on GitHub <ExternalLinkIcon size={11} className="inline-block align-[-0.1em]" />
@@ -219,7 +219,7 @@ export function CheckRow({
           className="hit flex flex-1 items-center justify-end gap-1.5 text-ui-faint"
         >
           <span className="text-meta">{m.label}</span>
-          <span className="inline-flex items-center gap-0.5 text-meta font-medium text-ui-accent">
+          <span className="inline-flex items-center gap-0.5 text-meta font-medium text-ui-ink">
             <ChevronIcon dir={expanded ? 'down' : 'right'} size={10} />
             {expanded ? 'hide logs' : 'logs'}
           </span>
@@ -348,7 +348,7 @@ export function CiRerunControl({
     <div className="mt-2 flex flex-wrap items-center gap-2">
       <button
         type="button"
-        className="hit bg-ui-raise whitespace-nowrap rounded-ui px-2.5 py-1 text-meta text-ui-accent hover:bg-ui-hover disabled:opacity-50"
+        className="hit bg-ui-raise whitespace-nowrap rounded-ui px-2.5 py-1 text-meta text-ui-ink hover:bg-ui-hover disabled:opacity-50"
         disabled={rerun.isPending || failedRunIds.length === 0}
         onClick={() => fire('failed', failedRunIds)}
         title="Re-run only the failed jobs of the failing workflow run(s)"

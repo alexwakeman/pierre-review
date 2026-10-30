@@ -272,7 +272,7 @@ export function PrCardEventHeading({
  *  action (accent fill), the secondaries (raised tone), and the quiet text buttons (Details). The
  *  same shapes as the shared `Button` primitive — one radius, 32px (44px on touch). */
 export const CARD_PRIMARY_BUTTON =
-  'inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-ui bg-ui-accent-fill px-3 text-body font-medium text-ui-on-accent hover:brightness-110 outline-none focus-visible:ring-2 focus-visible:ring-ui-accent focus-visible:ring-offset-1 focus-visible:ring-offset-ui-bg disabled:opacity-50 touch:h-11 touch:px-4';
+  'inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-ui bg-ui-accent-fill disabled:bg-ui-raise disabled:text-ui-ink px-3 text-body font-medium text-ui-on-accent hover:brightness-110 outline-none focus-visible:ring-2 focus-visible:ring-ui-accent focus-visible:ring-offset-1 focus-visible:ring-offset-ui-bg disabled:opacity-50 touch:h-11 touch:px-4';
 export const CARD_SECONDARY_BUTTON =
   'inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-ui bg-ui-raise px-3 text-body font-medium text-ui-ink hover:bg-ui-hover outline-none focus-visible:ring-2 focus-visible:ring-ui-accent focus-visible:ring-offset-1 focus-visible:ring-offset-ui-bg disabled:opacity-50 touch:h-11 touch:px-4';
 export const CARD_QUIET_BUTTON =

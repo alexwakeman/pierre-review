@@ -1,5 +1,6 @@
 import { parseTicketTabKey, usePinnedTabs } from '../../store/pinnedTabs.js';
 import { StoryViewBody } from './StoryViewBody.js';
+import { PAGE_GUTTER } from '../ui/PageHeader.js';
 
 // THE STORY VIEW (the ticket tab; docs/FRONTEND.md § The story view): the active tab's ticket, drawn
 // by the ONE story body (StoryViewBody.tsx — This Sprint's tray draws the same body). Every entry point
@@ -12,8 +13,10 @@ export function TicketTabView(): JSX.Element | null {
   const meta = tabs.find((t) => t.key === activeTab)?.ticketMeta ?? null;
   if (ident == null) return null;
   return (
-    <div data-testid="ticket-tab-view" className="mx-auto max-w-5xl px-3 py-4 md:px-5 md:py-6">
-      <StoryViewBody ident={ident} meta={meta} />
+    // The page gutter (the ONE every destination's title sits on); the story's header is the PAGE
+    // header (`page`), with no card around the story.
+    <div data-testid="ticket-tab-view" className={`max-w-5xl pb-6 ${PAGE_GUTTER}`}>
+      <StoryViewBody ident={ident} meta={meta} page />
     </div>
   );
 }

@@ -313,7 +313,7 @@ function RowHeader({
     <button type="button" onClick={onOpen} className="hit block w-full text-left" title="Open this PR">
       <div className="flex items-center gap-1.5">
         <StatusDot tone={tone} />
-        <span className="truncate font-medium text-ui-accent hover:underline">
+        <span className="truncate font-medium text-ui-ink hover:underline">
           {repoFullName} #{prNumber}
         </span>
       </div>

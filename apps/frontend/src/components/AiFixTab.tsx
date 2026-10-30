@@ -321,7 +321,10 @@ function FixerSection({
                   </label>
                 )}
                 {preview.data && preview.data.items.length > 0 && (
-                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                  // THE RUN ROW. Below md it is a sticky footer (the side panel's action-bar look):
+                  // the picker list runs several screens on a phone, and the model, Plan first and
+                  // Start fix must stay in reach while ticking. Same controls, same AiRunGate.
+                  <div className="mt-3 flex flex-wrap items-center gap-2 max-md:sticky max-md:bottom-0 max-md:z-20 max-md:-mx-4 max-md:bg-ui-surface max-md:px-4 max-md:py-3">
                     <ModelPicker state={modelPick} onPick={modelPick.pick} disabled={fixStarting} />
                     {canPlan && (
                       <label className="flex cursor-pointer items-center gap-1.5 text-meta text-ui-ink">
