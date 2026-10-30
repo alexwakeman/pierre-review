@@ -15,7 +15,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import type { StoryBuildCoverage, StoryBuildPlan } from '@pierre-review/shared';
 
-const DB_PATH = `${process.env.DATABASE_URL ?? '/tmp/pierre-storybuild'}.storybuild-docs.sqlite`;
+const DB_PATH = `${process.env.DATABASE_URL ?? `${process.env.LIMN_TEST_RUN_DIR ?? '/tmp'}/pierre-storybuild`}.storybuild-docs.sqlite`;
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
 delete process.env.LIMN_AI_DISABLED;

@@ -20,7 +20,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import type { FastifyInstance } from 'fastify';
 import { fakeWiki, type FakeWiki } from './fake-wiki.js';
 
-const DB_PATH = `${process.env.DATABASE_URL ?? '/tmp/pierre-wikidocs'}.wiki-db.sqlite`;
+const DB_PATH = `${process.env.DATABASE_URL ?? `${process.env.LIMN_TEST_RUN_DIR ?? '/tmp'}/pierre-wikidocs`}.wiki-db.sqlite`;
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
 

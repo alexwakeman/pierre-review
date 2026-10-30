@@ -187,8 +187,9 @@ export default class TestBudgetReporter implements Reporter {
         tests: slowTests,
         testBudgetMs,
         allowlisted: entry != null,
-        // Enforced: every violation, unless a base narrows it to the files this change touched.
-        enforced: mode === 'enforce' && (changed == null || changed.has(file.filepath)),
+        // Enforced: every violation, unless a base narrows it to the files this change touched. A
+        // base git cannot diff against enforces nothing (a wobble must never fail an unrelated PR).
+        enforced: mode === 'enforce' && (base ? changed != null && changed.has(file.filepath) : true),
       });
     }
 
@@ -207,6 +208,9 @@ export default class TestBudgetReporter implements Reporter {
       return (file.result?.duration ?? 0) <= fileMs && tests.every((t) => t.ms <= testMs);
     });
 
+    if (mode === 'enforce' && base && changed == null) {
+      log(`Test time budget: could not diff against ${base}, so nothing is enforced this run.`);
+    }
     if (violations.length === 0 && staleFits.length === 0) return;
     const label = this.opts.label ?? 'tests';
     const [l1] = loadavg();

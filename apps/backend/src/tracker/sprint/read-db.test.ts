@@ -20,7 +20,7 @@ import { join } from 'node:path';
 //   • REFERENCED TICKETS: one lookup per read for keys the sprint names that no stored row knows,
 //     stored in `sprint_ref_tickets`, replaced next read, kept when the lookup fails, per tenant.
 
-const DB_PATH = join(tmpdir(), 'pierre-sprint-read-test.sqlite');
+const DB_PATH = join(process.env.LIMN_TEST_RUN_DIR ?? tmpdir(), 'pierre-sprint-read-test.sqlite');
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
 

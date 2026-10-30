@@ -17,7 +17,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import type { FastifyInstance } from 'fastify';
 import type { JiraTransport } from '../tracker/jira/fetch.js';
 
-const DB_PATH = `${process.env.DATABASE_URL ?? '/tmp/pierre-sonar'}.sonar-db.sqlite`;
+const DB_PATH = `${process.env.DATABASE_URL ?? `${process.env.LIMN_TEST_RUN_DIR ?? '/tmp'}/pierre-sonar`}.sonar-db.sqlite`;
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
 

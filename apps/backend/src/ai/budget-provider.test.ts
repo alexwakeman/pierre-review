@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
-const DB_PATH = `${process.env.DATABASE_URL ?? '/tmp/pierre-ai-budget-provider'}.ai-budget-provider.sqlite`;
+const DB_PATH = `${process.env.DATABASE_URL ?? `${process.env.LIMN_TEST_RUN_DIR ?? '/tmp'}/pierre-ai-budget-provider`}.ai-budget-provider.sqlite`;
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
 // Limn's Codex home sits under the data directory: an empty temp one, never ~/.limn. No key either.

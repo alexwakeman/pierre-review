@@ -82,8 +82,8 @@ Each one comes with the command that moves it (`test:move-slow <file> "<why>"`, 
 - **CI enforces on pull requests, and only on the test files the PR adds or changes**
   (`LIMN_TEST_BUDGET_BASE=origin/<base>`): a new or edited slow test fails its own PR; a timing
   wobble in a file nobody touched is printed and never fails somebody else's change. A source change
-  that makes an UNTOUCHED test slow is therefore only a warning — read the warnings. Main and the
-  nightly only warn.
+  that makes an UNTOUCHED test slow is therefore only a warning — read the warnings. A base git
+  cannot diff against enforces nothing (it says so). Main and the nightly only warn.
 - **Exceptions** live in `apps/backend/test-budget/allowlist.json`: a RAISED budget for one file
   (`testMs`, `fileMs`) with the reason, never an unlimited one. Every entry today is in-process work
   (an exhaustive sweep, a full board fold) — candidates to make quicker, not to move. The reporter
