@@ -867,7 +867,7 @@ export function PinnedTabsBar(): JSX.Element | null {
       data-testid="pinned-tabs"
       role="tablist"
       aria-label="Open tabs"
-      className="tab-scrollbar flex min-w-0 flex-1 items-center gap-1 overflow-x-auto overscroll-contain"
+      className="tab-scrollbar relative flex min-w-0 flex-1 items-center gap-1 overflow-x-auto overscroll-contain"
     >
       {displayTabs.map((t, i) => (
         <Fragment key={t.key}>

@@ -52,7 +52,7 @@ export function TopBar({ toasts }: { toasts: ReactNode }): JSX.Element {
       <p
         className={cx(
           'min-w-0 shrink truncate text-body font-medium text-ui-ink',
-          loc == null ? 'md:hidden' : 'max-w-[40%] md:max-w-[14rem] lg:hidden',
+          loc == null ? 'max-w-[55%] md:hidden' : 'max-w-[40%] md:max-w-[14rem] lg:hidden',
         )}
         data-testid="topbar-location"
       >

@@ -322,12 +322,17 @@ export function HeaderToast({
             <span
               data-toast-line
               className={`block min-w-0 flex-1 text-[12px] leading-[18px] ${
-                expanded ? 'whitespace-normal break-words py-1' : 'truncate max-sm:sr-only'
+                expanded ? 'whitespace-normal break-words py-1' : `truncate${summary == null ? ' max-sm:sr-only' : ''}`
               }`}
             >
-              <span className="font-semibold">{label}</span>
+              {/* Below `sm` a collapsed card with a summary shows the summary alone ("1 armed"), the
+                  label staying in the accessible name; a card without one shows its icon only. */}
+              <span className={`font-semibold${expanded ? '' : ' max-sm:sr-only'}`}>{label}</span>
               {summary != null && (
-                <span className="text-gray-600 dark:text-gray-300"> · {summary}</span>
+                <span className="text-gray-600 dark:text-gray-300">
+                  <span className={expanded ? undefined : 'max-sm:sr-only'}> · </span>
+                  {summary}
+                </span>
               )}
             </span>
           </button>
