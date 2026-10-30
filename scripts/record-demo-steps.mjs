@@ -224,7 +224,7 @@ export const STEPS = [
       };
       collect(await h.fetchGet('/api/docs/tree?workspace=1'));
       for (const d of docs?.docs ?? []) {
-        collect(await h.fetchGet(`/api/docs/tree?docId=${d.id}&workspace=1`));
+        collect(await h.fetchGet(`/api/docs/tree?workspace=1&doc=${d.id}`));
         paths.add(`${d.slug}/CONTENTS.md`);
       }
       for (const p of paths) await h.fetchGet(`/api/docs/section?path=${enc(p)}&workspace=1`);
