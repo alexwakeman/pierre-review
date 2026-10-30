@@ -23,6 +23,7 @@ import {
   acceptStoryPlan,
   cancelStoryBuild,
   discardStoryBuild,
+  registerStoryBuildManagerLane,
   isStoryBuildLive,
   sendStoryPlanMessage,
   startStoryBuild,
@@ -344,4 +345,6 @@ export function registerStoryBuildRoutes(app: FastifyInstance, ctx: AgentContext
 
   registerStoryBuildBuildRoutes(app, ctx);
   registerStoryBuildDocsRoutes(app, ctx);
+  // WP2's retry route builds through the manager's ONE build lane.
+  registerStoryBuildManagerLane();
 }

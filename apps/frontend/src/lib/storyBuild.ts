@@ -245,7 +245,8 @@ export function canRetryRepo(b: Pick<StoryBuild, 'status' | 'repos'>, r: Pick<St
 
 // ── errors ─────────────────────────────────────────────────────────────────────────────────────
 
-export const STORY_BUILD_ERROR_WORDS: Record<StoryBuildErrorCode, string> = {
+/** Our sentence per code. `BadRequest` has none: the server's own sentence says what to fix. */
+export const STORY_BUILD_ERROR_WORDS: Record<Exclude<StoryBuildErrorCode, 'BadRequest'>, string> = {
   NoClaudeAuth: 'Sign in to the AI first.',
   ModelNotOnProvider: 'That model is not available on this provider.',
   NoStory: 'Could not read this ticket’s story.',
@@ -262,6 +263,6 @@ export const STORY_BUILD_ERROR_WORDS: Record<StoryBuildErrorCode, string> = {
 export function storyBuildErrorText(err: { code?: string | null; message?: string } | null | undefined): string | null {
   if (err == null) return null;
   const code = err.code ?? null;
-  if (code != null && code in STORY_BUILD_ERROR_WORDS) return STORY_BUILD_ERROR_WORDS[code as StoryBuildErrorCode];
+  if (code != null && code in STORY_BUILD_ERROR_WORDS) return STORY_BUILD_ERROR_WORDS[code as keyof typeof STORY_BUILD_ERROR_WORDS];
   return err.message != null && err.message !== '' ? err.message : 'Something went wrong.';
 }

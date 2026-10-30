@@ -1,7 +1,6 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import {
   STORY_BUILD_API,
-  STORY_BUILD_MIN_BUDGET_LEFT_USD,
   storyBuildDocsDefaultDecision,
   storyBuildDocsEffectiveDecisions,
   type StoryBuildDocsBody,
@@ -13,9 +12,9 @@ import {
 } from '@pierre-review/shared';
 import type { AgentContext } from '../../review/agent-context.js';
 import { AGENTIC_AI_ENABLED } from '../../review/claude-review/manager.js';
-import { BUILD_DOCS_TEXT, buildDocsProvider, storyBuildBudgetLeftUsd } from './docs.js';
-import { reconcileStoryBuildDocsOnStartup, startStoryBuildDocs, storyBuildDocsHeld } from './docs-runner.js';
-import { getStoryBuildRow, listStoryBuildRepoRows, updateStoryBuild } from './persist.js';
+import { BUILD_DOCS_TEXT } from './docs.js';
+import { reconcileStoryBuildDocsOnStartup, requestStoryBuildDocs, storyBuildDocsHeld } from './docs-runner.js';
+import { getStoryBuildRow, updateStoryBuild } from './persist.js';
 
 // "IMPLEMENT STORY" — the docs routes, WORK PACKAGE 3 (docs/STORY-BUILD.md § Docs consideration; contracts
 // in docs/API.md). Registered from routes.ts → review/agentic.ts only, so AI off ⇒ 404.
@@ -89,20 +88,11 @@ export function registerStoryBuildDocsRoutes(app: FastifyInstance, ctx: AgentCon
     if (row.status !== 'plan_ready' || row.planJson == null) {
       return fail(reply, 409, 'NotReady', row.acceptedRevision != null ? 'The plan is accepted: the docs points are frozen.' : 'The plan has to be ready first.');
     }
-    if (body.force !== true && row.docsStatus === 'ready' && row.docsJson != null && row.docsJson.planRevision === row.planRevision) {
-      return { outcome: 'current', buildId: id, message: null };
-    }
-    const { listDocRows } = await import('../../reference-docs/store.js');
-    if ((await listDocRows(accountId, row.workspaceId)).every((r) => r.builtAt == null)) {
-      await updateStoryBuild(ctx, accountId, id, { docsStatus: 'refused', docsError: BUILD_DOCS_TEXT.noDocs });
-      return { outcome: 'refused', buildId: id, message: BUILD_DOCS_TEXT.noDocs };
-    }
-    const who = buildDocsProvider(ctx, row);
-    if (!who.ok) return fail(reply, 400, 'NoClaudeAuth', who.message);
-    if (storyBuildBudgetLeftUsd(row, await listStoryBuildRepoRows(ctx, accountId, id)) < STORY_BUILD_MIN_BUDGET_LEFT_USD) {
-      return fail(reply, 409, 'SessionBudgetSpent', BUILD_DOCS_TEXT.budget);
-    }
-    const r = await startStoryBuildDocs(ctx, { accountId, buildId: id, force: body.force === true });
+    const r = await requestStoryBuildDocs(ctx, row, body.force === true);
+    if (r.outcome === 'current') return { outcome: 'current', buildId: id, message: null };
+    if (r.outcome === 'refused') return { outcome: 'refused', buildId: id, message: r.message };
+    if (r.outcome === 'no_auth') return fail(reply, 400, 'NoClaudeAuth', r.message);
+    if (r.outcome === 'budget') return fail(reply, 409, 'SessionBudgetSpent', BUILD_DOCS_TEXT.budget);
     if (r.outcome === 'busy') return fail(reply, 409, 'Busy', 'Too many docs checks are waiting. Try again once some finish.');
     if (r.outcome === 'already_running') return { outcome: 'already_running', buildId: id, message: null };
     reply.status(202);

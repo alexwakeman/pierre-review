@@ -816,6 +816,7 @@ export const STORY_BUILD_PLAN_READY: StoryBuild = {
   transcript: [],
   design: null,
   docsStatus: 'none',
+  docsError: null,
   docs: null,
   docsDecisions: {},
   acceptedRevision: null,

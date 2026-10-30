@@ -1,10 +1,10 @@
 import { and, eq, notInArray } from 'drizzle-orm';
-import type { StoryBuildProgress } from '@pierre-review/shared';
+import { STORY_BUILD_MIN_BUDGET_LEFT_USD, type StoryBuildProgress } from '@pierre-review/shared';
 import { AiRuntimeMissingError } from '../../ai/runtime.js';
 import type { AgentContext } from '../../review/agent-context.js';
 import { pumpReviewLane, registerReviewSlotPeer, reviewLaneWaiting, reviewSlotFree } from '../../review/claude-review/manager.js';
-import { BUILD_DOCS_TEXT } from './docs.js';
-import { getStoryBuildRow, updateStoryBuild } from './persist.js';
+import { BUILD_DOCS_TEXT, buildDocsProvider, storyBuildBudgetLeftUsd } from './docs.js';
+import { getStoryBuildRow, listStoryBuildRepoRows, updateStoryBuild, type StoryBuildRow } from './persist.js';
 import { storyBuildDeps } from './seams.js';
 
 // THE DOCS CONSIDERATION'S QUEUE (WP3; docs/STORY-BUILD.md § Docs consideration). Every run is a CLICK
@@ -91,6 +91,34 @@ export async function startStoryBuildDocs(
   lane.push(job);
   pump();
   return { outcome: 'started' };
+}
+
+export type RequestBuildDocsResult =
+  | StartBuildDocsResult
+  | { outcome: 'current' }
+  | { outcome: 'refused'; message: string }
+  | { outcome: 'no_auth'; message: string }
+  | { outcome: 'budget' };
+
+/**
+ * THE ONE ENTRY for a docs run (the `POST …/docs` route, and the manager after a first plan when
+ * "Check against docs" was ticked): the session must be `plan_ready` (the CALLER checks); this checks
+ * "already weighed against this plan", that the workspace has built docs, the provider and the budget,
+ * then queues through `startStoryBuildDocs`.
+ */
+export async function requestStoryBuildDocs(ctx: AgentContext, row: StoryBuildRow, force: boolean): Promise<RequestBuildDocsResult> {
+  const { accountId, id } = row;
+  if (claimed.has(id)) return { outcome: 'already_running' };
+  if (!force && row.docsStatus === 'ready' && row.docsJson != null && row.docsJson.planRevision === row.planRevision) return { outcome: 'current' };
+  const { listDocRows } = await import('../../reference-docs/store.js');
+  if ((await listDocRows(accountId, row.workspaceId)).every((r) => r.builtAt == null)) {
+    await updateStoryBuild(ctx, accountId, id, { docsStatus: 'refused', docsError: BUILD_DOCS_TEXT.noDocs });
+    return { outcome: 'refused', message: BUILD_DOCS_TEXT.noDocs };
+  }
+  const who = buildDocsProvider(ctx, row);
+  if (!who.ok) return { outcome: 'no_auth', message: who.message };
+  if (storyBuildBudgetLeftUsd(row, await listStoryBuildRepoRows(ctx, accountId, id)) < STORY_BUILD_MIN_BUDGET_LEFT_USD) return { outcome: 'budget' };
+  return startStoryBuildDocs(ctx, { accountId, buildId: id, force });
 }
 
 /** Stop this session's docs run (Cancel / Discard / Accept): a queued one never starts, a running one is

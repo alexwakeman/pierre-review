@@ -64,7 +64,11 @@ import {
 } from './plan.js';
 import type { RunStoryPlanAgentArgs, RunStoryPlanAgentResult } from './plan-agent.js';
 import { buildStoryPlanSystemPrompt, buildStoryPlanUserPrompt, reposMd, storyPlanUntrustedTexts } from './prompts.js';
-import { storyBuildDeps, type RepoBuildResult } from './seams.js';
+import { releaseStoryBuildWorktree } from './build.js';
+import { plannedDocsFor, storyBuildDocsUntrustedTexts } from './docs.js';
+import { abortStoryBuildDocs, onStoryBuildDocsProgress, requestStoryBuildDocs, storyBuildDocsHeld } from './docs-runner.js';
+import { isStoryBuildRepoPushing } from './push.js';
+import { registerStoryBuildLane, storyBuildDeps, type RepoBuildResult, type StoryBuildLaneRefusal } from './seams.js';
 
 // THE "IMPLEMENT STORY" SESSION MANAGER (docs/STORY-BUILD.md § State machine). WP1 owns it; it reaches the
 // per-repository build + push (WP2) and the docs run (WP3) ONLY through seams.ts `storyBuildDeps()`.
@@ -172,15 +176,28 @@ function progress(buildId: number, p: StoryBuildProgress): void {
   emit(buildId, { type: 'progress', progress: p });
 }
 
-/** Is a pass of this session queued or running in this process? */
+/** Is a pass of this session — or its docs run (docs-runner.ts) — queued or running in this process? */
 export function isStoryBuildLive(buildId: number): boolean {
-  return live.has(buildId);
+  return live.has(buildId) || storyBuildDocsHeld(buildId);
 }
 
-/** The latest progress of the pass in flight, or null. */
+/** The latest progress of the pass in flight (else of the docs run), or null. */
 export function storyBuildLiveProgress(buildId: number): StoryBuildProgress | null {
-  return live.get(buildId)?.progress ?? null;
+  return live.get(buildId)?.progress ?? docsProgress.get(buildId) ?? null;
 }
+
+// THE DOCS RUN's progress reaches the session's SSE here (WP3's queue owns the run; one subscription).
+const docsProgress = new Map<number, StoryBuildProgress>();
+onStoryBuildDocsProgress((buildId, e) => {
+  if (e.kind === 'progress') {
+    docsProgress.set(buildId, e.progress);
+    emit(buildId, { type: 'progress', progress: e.progress });
+    return;
+  }
+  docsProgress.delete(buildId);
+  // A docs run's end closes the stream only when no other pass of the session is going.
+  if (!live.has(buildId)) emit(buildId, { type: 'done' });
+});
 
 function endPass(buildId: number): void {
   live.delete(buildId);
@@ -475,6 +492,7 @@ async function runPlanPass(ctx: AgentContext, row: StoryBuildRow, o: PlanPassOpt
     const nonce = pickReviewNonce([
       ...storyPlanUntrustedTexts({ seed, coverage, previous: o.previous, transcript: o.transcript, extra: candidates.map((c) => c.fullName) }),
       row.docsJson != null ? JSON.stringify(row.docsJson) : '',
+      ...storyBuildDocsUntrustedTexts(row, { frozen: false }),
     ]);
     const docs = row.docsJson != null ? deps.docsBlocksFor(row, { nonce, frozen: false }) : null;
     const effort = agenticRunEffort(o.provider, claudeModelChoice(o.model), 'worktree');
@@ -542,6 +560,8 @@ async function runPlanPass(ctx: AgentContext, row: StoryBuildRow, o: PlanPassOpt
       planRevision: o.revision,
       designJson: row.wantDiagram ? design : null,
       transcriptJson: transcript,
+      // The docs decisions this plan was made with ("n docs points aren't in the plan yet" reads 0).
+      ...(fresh.docsJson != null ? { docsJson: plannedDocsFor(fresh) } : {}),
     });
     // "Check against docs" asked for at Start: weigh the first plan (WP3's run, the same lane).
     if (first && row.wantDocs) queueDocsAfterPlan(ctx, accountId, buildId);
@@ -610,7 +630,8 @@ export async function sendStoryPlanMessage(
 ): Promise<StoryBuildActionResult> {
   const row = await getStoryBuildRow(ctx, input.accountId, input.buildId);
   if (row == null) return { status: 'not_found' };
-  if (row.status !== 'plan_ready' || row.planJson == null || live.has(row.id)) return { status: 'not_ready' };
+  // A docs run in flight writes the docs this pass would stamp: one at a time.
+  if (row.status !== 'plan_ready' || row.planJson == null || live.has(row.id) || storyBuildDocsHeld(row.id)) return { status: 'not_ready' };
   if (row.planRevision - 1 >= STORY_BUILD_PLAN_MAX_REVISIONS) return { status: 'revision_cap' };
   const { sessionLeft, planLeft } = await budgets(ctx, row);
   if (sessionLeft < STORY_BUILD_MIN_BUDGET_LEFT_USD) return { status: 'session_budget_spent' };
@@ -659,78 +680,24 @@ export async function sendStoryPlanMessage(
   }
 }
 
-// ---- docs (WP3's run, through the seam; the same read-only lane) ----------------------------------------
+// ---- docs (WP3's run: docs-runner.ts owns the queue, the claim, the abort and the reconcile) ---------------
 
+/** "Check against docs" ticked at Start: once the first plan pass has ENDED, queue WP3's docs run. */
 function queueDocsAfterPlan(ctx: AgentContext, accountId: number, buildId: number): void {
-  void startStoryBuildDocs(ctx, { accountId, buildId, force: false, afterPlan: true }).catch((err) =>
-    ctx.log.warn({ err }, `story build ${buildId}: docs run not started`),
-  );
-}
-
-/**
- * Weigh the plan against the workspace docs (WP3 `runBuildDocs`, which writes docs_status / docs_json /
- * docs_cost_usd). For WP3's `POST …/docs` route and for "Check against docs" ticked at Start. A plan must
- * be ready and nothing running. A throw from the run is recorded as `refused` with its sentence.
- */
-export async function startStoryBuildDocs(
-  ctx: AgentContext,
-  input: { accountId: number; buildId: number; force: boolean; afterPlan?: boolean },
-): Promise<StoryBuildActionResult> {
-  const row = await getStoryBuildRow(ctx, input.accountId, input.buildId);
-  if (row == null) return { status: 'not_found' };
-  // Right after the first plan the plan pass is still ending (its live marker clears a tick later).
-  const busy = live.has(row.id) && !(input.afterPlan && live.get(row.id)?.kind === 'assess');
-  if (row.status !== 'plan_ready' || row.planJson == null || busy || row.docsStatus === 'running') return { status: 'not_ready' };
-  const { sessionLeft } = await budgets(ctx, row);
-  if (sessionLeft < STORY_BUILD_MIN_BUDGET_LEFT_USD) return { status: 'session_budget_spent' };
-  if (planLane.length >= PLAN_LANE_MAX) return { status: 'busy' };
-  const start = (): void => {
-    live.set(row.id, { accountId: input.accountId, kind: 'docs', controller: new AbortController(), progress: { phase: 'docs_shortlisting' }, queued: true, cancelled: false });
-    queuePlanJob({
-      ctx,
-      buildId: row.id,
-      run: async (controller) => {
-        await updateStoryBuild(ctx, input.accountId, row.id, { docsStatus: 'running', docsError: null, phase: 'docs_shortlisting' });
-        try {
-          await storyBuildDeps().runBuildDocs(ctx, {
-            accountId: input.accountId,
-            buildId: row.id,
-            force: input.force,
-            onProgress: (p) => progress(row.id, p),
-            signal: controller.signal,
-          });
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          await updateStoryBuild(ctx, input.accountId, row.id, { docsStatus: 'refused', docsError: message.slice(0, 300) });
-        }
-        const after = await getStoryBuildRow(ctx, input.accountId, row.id);
-        if (after?.docsStatus === 'running') {
-          await updateStoryBuild(ctx, input.accountId, row.id, {
-            docsStatus: controller.signal.aborted ? 'none' : 'failed',
-            docsError: controller.signal.aborted ? null : 'The docs check did not finish.',
-          });
-        }
-        await updateStoryBuild(ctx, input.accountId, row.id, { phase: null });
-      },
-      dropped: async () => {},
-      crashed: async () => {
-        await updateStoryBuild(ctx, input.accountId, row.id, { docsStatus: 'failed', docsError: 'The docs check did not finish.', phase: null });
-      },
-    });
+  const go = (): void => {
+    void (async () => {
+      const row = await getStoryBuildRow(ctx, accountId, buildId);
+      if (row == null || row.status !== 'plan_ready' || row.planJson == null || live.has(buildId)) return;
+      await requestStoryBuildDocs(ctx, row, false);
+    })().catch((err) => ctx.log.warn({ err }, `story build ${buildId}: docs run not started`));
   };
-  if (input.afterPlan && live.has(row.id)) {
-    // Wait for the plan pass's own `done` before taking the session's one pass.
-    const unsub = subscribeStoryBuild(row.id, (e) => {
-      if (e.type !== 'done') return;
-      unsub();
-      setImmediate(() => {
-        if (!live.has(row.id)) start();
-      });
-    });
-    return { status: 'queued', id: row.id };
-  }
-  start();
-  return { status: 'queued', id: row.id };
+  if (!live.has(buildId)) return go();
+  // The plan pass is still ending (its live marker clears in its `finally`): wait for its `done`.
+  const unsub = subscribeStoryBuild(buildId, (e) => {
+    if (e.type !== 'done') return;
+    unsub();
+    setImmediate(go);
+  });
 }
 
 // ---- accept + the build lane --------------------------------------------------------------------------
@@ -769,6 +736,8 @@ export async function acceptStoryPlan(
   if (live.has(row.id)) return { status: 'not_ready' };
   // ⚠ THE STREAM GAP: the live marker before the next await.
   live.set(row.id, { accountId: input.accountId, kind: 'build', controller: new AbortController(), progress: { phase: 'preparing' }, queued: true, cancelled: false });
+  // The decisions freeze now: a docs run still going stops (it would weigh points no one can decide).
+  abortStoryBuildDocs(row.id);
   try {
     for (const r of repoRows) {
       const want = asked.get(r.repoId);
@@ -813,6 +782,8 @@ export async function retryStoryBuildRepo(
   const retryable: StoryBuildRepoStatus[] = ['ready', 'failed', 'cancelled'];
   if (!settled.includes(row.status) || row.acceptedRevision == null || live.has(row.id)) return { status: 'not_ready' };
   if (!repo.include || !retryable.includes(repo.status)) return { status: 'not_ready' };
+  // A push releases its kept tree, which a later repository's build reads: never both at once.
+  if (repos.some((r) => isStoryBuildRepoPushing(r.id))) return { status: 'not_ready' };
   const limits = storyBuildLimits();
   if (limits.sessionBudgetUsd - sessionSpent(row, repos) < STORY_BUILD_MIN_BUDGET_LEFT_USD) return { status: 'session_budget_spent' };
   if (buildQueue.length >= BUILD_QUEUE_MAX) return { status: 'busy' };
@@ -917,6 +888,7 @@ async function runBuilds(job: BuildJob, controller: AbortController): Promise<vo
       ...(row.seedJson?.cards ?? []).map((c) => c.text),
       row.planJson ? renderStoryPlanText(row.planJson) : '',
       row.docsJson != null ? JSON.stringify(row.docsJson) : '',
+      ...storyBuildDocsUntrustedTexts(row, { frozen: true }),
       ...earlier.map((e) => JSON.stringify(e.repo.changeReportJson ?? '')),
     ]);
     const docs = deps.docsBlocksFor(row, { nonce, frozen: true });
@@ -950,7 +922,6 @@ async function runBuilds(job: BuildJob, controller: AbortController): Promise<vo
       ctx.log.warn({ err }, `story build ${buildId}: repository ${next.repoId} failed`);
       res = failedResult(controller.signal.aborted ? null : 'The build failed. Retry it.', controller.signal.aborted);
     }
-    await recordBuildUsage(ctx, accountId, next.repoId, res);
     const tooBig = res.patch != null && Buffer.byteLength(res.patch, 'utf8') > limits.patchMaxBytes;
     const status: StoryBuildRepoStatus = res.cancelled || controller.signal.aborted ? 'cancelled' : res.ok && !tooBig ? 'ready' : 'failed';
     await updateStoryBuildRepo(ctx, accountId, next.id, {
@@ -1002,23 +973,6 @@ function failedResult(error: string | null, cancelled: boolean): RepoBuildResult
   };
 }
 
-/** The ledger row of one repository's build on CLAUDE (a Codex run wrote its own from `usageRecord`). */
-async function recordBuildUsage(ctx: AgentContext, accountId: number, repoId: number, res: RepoBuildResult): Promise<void> {
-  if (res.provider === 'codex' || res.costUsd == null || !(res.costUsd > 0)) return;
-  await ctx
-    .recordAiUsage({
-      accountId,
-      seam: 'agent',
-      feature: STORY_BUILD_LEDGER_FEATURES.build,
-      model: res.model ?? 'claude',
-      costUsd: res.costUsd,
-      inputTokens: res.inputTokens,
-      outputTokens: res.outputTokens,
-      repoId,
-    })
-    .catch((err) => ctx.log.warn({ err }, 'story build: usage record failed'));
-}
-
 /** Every included repository settled: ≥ 1 ready (or pushed) ⇒ ready; none ⇒ failed, or cancelled. */
 async function settleBuild(ctx: AgentContext, accountId: number, buildId: number, cancelled: boolean): Promise<void> {
   const repos = (await listStoryBuildRepoRows(ctx, accountId, buildId)).filter((r) => r.include);
@@ -1037,8 +991,9 @@ async function settleBuild(ctx: AgentContext, accountId: number, buildId: number
 export async function cancelStoryBuild(ctx: AgentContext, accountId: number, buildId: number): Promise<{ status: 'cancelling' | 'idle' } | { status: 'not_found' }> {
   const row = await getStoryBuildRow(ctx, accountId, buildId);
   if (row == null) return { status: 'not_found' };
+  const docsStopped = abortStoryBuildDocs(buildId);
   const l = live.get(buildId);
-  if (l == null) return { status: 'idle' };
+  if (l == null) return { status: docsStopped ? 'cancelling' : 'idle' };
   l.cancelled = true;
   l.controller.abort();
   // Not started yet: take it out of its lane and settle the row now.
@@ -1064,11 +1019,44 @@ export async function cancelStoryBuild(ctx: AgentContext, accountId: number, bui
 export async function discardStoryBuild(ctx: AgentContext, accountId: number, buildId: number): Promise<{ status: 'discarded' | 'not_ready' | 'not_found' }> {
   const row = await getStoryBuildRow(ctx, accountId, buildId);
   if (row == null) return { status: 'not_found' };
-  if (live.has(buildId) || isStoryBuildRunning(row.status) || row.docsStatus === 'running') return { status: 'not_ready' };
+  if (live.has(buildId) || isStoryBuildRunning(row.status)) return { status: 'not_ready' };
+  const repos = await listStoryBuildRepoRows(ctx, accountId, buildId);
+  if (repos.some((r) => isStoryBuildRepoPushing(r.id))) return { status: 'not_ready' };
+  // A docs run of a discarded session is never wanted (its late write is refused: docs.ts).
+  abortStoryBuildDocs(buildId);
   if (row.status !== 'discarded') {
     await updateStoryBuild(ctx, accountId, buildId, { status: 'discarded', phase: null, completedAt: new Date() });
   }
+  // The kept write trees go now (the ledger sweep would, later); the stored patches stay.
+  const names = await storyBuildRepoNames(ctx, accountId, repos.map((r) => r.repoId));
+  for (const r of repos) {
+    if (r.worktreePath == null) continue;
+    await releaseStoryBuildWorktree(names.get(r.repoId) ?? '', r.worktreePath).catch(() => {});
+    await updateStoryBuildRepo(ctx, accountId, r.id, { worktreePath: null }).catch(() => {});
+  }
   return { status: 'discarded' };
+}
+
+// ---- the lane WP2's retry route reaches (seams.ts) ------------------------------------------------------------
+
+const LANE_REFUSALS: Partial<Record<StoryBuildActionResult['status'], Omit<StoryBuildLaneRefusal, 'ok'>>> = {
+  not_found: { status: 404, error: 'NotFound', message: 'No such build.' },
+  not_ready: { status: 409, error: 'NotReady', message: 'This build is not waiting for that any more.' },
+  busy: { status: 409, error: 'Busy', message: 'Too many builds are waiting. Try again once some finish.' },
+  session_budget_spent: { status: 409, error: 'SessionBudgetSpent', message: "This build's budget is spent." },
+};
+
+/** Register the manager's build lane for `POST …/repos/:repoId/retry` (routes.ts, at registration). */
+export function registerStoryBuildManagerLane(): void {
+  registerStoryBuildLane({
+    async retryRepo(ctx, a) {
+      const res = await retryStoryBuildRepo(ctx, a);
+      if (res.status === 'queued') return { ok: true };
+      if (res.status === 'no_auth') return { ok: false, status: 400, error: 'NoClaudeAuth', message: res.message ?? 'Sign in to an AI provider first.' };
+      const r = LANE_REFUSALS[res.status] ?? LANE_REFUSALS.not_ready!;
+      return { ok: false, ...r };
+    },
+  });
 }
 
 // ---- restart -----------------------------------------------------------------------------------------------
