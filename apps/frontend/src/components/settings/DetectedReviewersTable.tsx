@@ -571,9 +571,10 @@ function ReviewerCard({
             Workspace this reviewer no longer touches". */}
         <span
           className="shrink-0 text-meta tabular-nums text-ui-mute"
-          title="Reviews / inline threads PR comments across this Workspace over the last 90 days"
+          title="Across this Workspace over the last 90 days"
         >
-          {f.reviews}r · {f.threads}t · {f.comments}c · 90d
+          {f.reviews} reviews · {f.threads} threads
+          {f.comments > 0 ? ` · ${f.comments} comments` : ''} · 90 days
         </span>
       </div>
 
@@ -626,7 +627,7 @@ function ReviewerCard({
             <span
               key={e.repoId}
               className="max-w-full truncate rounded-ui bg-ui-raise px-1.5 py-0.5 text-meta text-ui-mute"
-              title={`${e.reviews}r · ${e.threads}t · ${e.comments}c here over the last 90 days`}
+              title={`${e.reviews} reviews · ${e.threads} threads · ${e.comments} comments here over the last 90 days`}
             >
               {repoName.get(e.repoId) ?? `repo #${e.repoId}`}
             </span>

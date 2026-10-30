@@ -198,7 +198,7 @@ Known debts the redesign must clear here:
   - [x] tone conflicts
 - Tests: testId `closed-resolver-toast`
 
-### [x] Toast: My Turn dismissed, with Undo (MyTurnDismissToast) → for Pending, the same words through the ONE `UndoToast` (testId `undo-toast`, 10s, Undo + `z`); the `my-turn-dismiss-toast` card stays mounted in the strip but nothing on Pending raises it now
+### [x] Toast: My Turn dismissed, with Undo (MyTurnDismissToast) → for Pending, the same words through the ONE `UndoToast` (testId `undo-toast`, 10s, Undo + `z`); `MyTurnDismissToast` is DELETED (ce2a1895): only Pending raised it, and Pending uses `UndoToast`
 - Entry: appears for 10s after a Pending entry is dismissed
 - Files: `components/Activity/MyTurnDismissToast.tsx`, `hooks/useMyTurnDismiss.ts`
 - Essential info:

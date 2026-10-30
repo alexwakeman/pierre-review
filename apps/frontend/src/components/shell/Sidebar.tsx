@@ -41,8 +41,6 @@ import { Wordmark } from '../Wordmark.js';
 import { WorkspaceSelector } from '../WorkspaceSelector.js';
 import { openCommandPalette } from '../ui/commands.js';
 import { cx, FOCUS_RING } from '../ui/cx.js';
-import { Kbd } from '../ui/Kbd.js';
-import { modKeyLabel } from '../ui/keys.js';
 import { useIsDesktop } from '../ui/media.js';
 import { useEdgeFade } from '../ui/edgeFade.js';
 import {
@@ -694,7 +692,6 @@ export function Sidebar({ dark, toggleDark }: { dark: boolean; toggleDark: () =>
           >
             <MagnifierIcon size={14} className="shrink-0" />
             <span className="min-w-0 flex-1 truncate">Search or jump</span>
-            <Kbd>{`${modKeyLabel()}K`}</Kbd>
           </button>
         </div>
         {/* In the drawer the WHOLE aside scrolls, foot included: a pinned foot left the middle so

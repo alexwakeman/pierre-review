@@ -26,9 +26,8 @@ import { useBlastConfig } from '../../hooks/useBlastRadius.js';
 /** Text colour per level. Each pairing is a light shade with a dark-mode twin, measured against
  *  the page grounds by `test/textContrast.test.ts` — these are not eyeballed.
  *
- *  LOW is deliberately a calm emerald rather than the "success green" the CI dot uses: this is
- *  not a claim that anything passed, it is a claim about scope. MEDIUM is the same muted grey
- *  every other neutral metadata item on the row uses, so it recedes. HIGH borrows amber from
+ *  LOW and MEDIUM are grey: reach is a claim about scope, never that anything passed, and green
+ *  is kept for "ready to land". HIGH borrows amber from
  *  `LargePrFlag` on purpose — the two mean "look harder" and should read as one register — and
  *  the anti-double-count rule below stops them saying it twice. */
 const LEVEL_META: Record<

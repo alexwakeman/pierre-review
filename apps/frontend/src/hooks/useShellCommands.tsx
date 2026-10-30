@@ -36,7 +36,7 @@ import { useArmedMerges } from './useAutoMerge.js';
 import { useMyTurnByWorkspace } from './useMyTurnByWorkspace.js';
 import { useNotificationToggle } from './useNotificationPref.js';
 import { usePaletteSearch } from './usePaletteSearch.js';
-import { goTo } from '../components/shell/nav.js';
+import { DESTINATIONS, goTo } from '../components/shell/nav.js';
 import { tabWords } from '../components/shell/Sidebar.js';
 import { openWorkspaceManager } from '../components/WorkspaceSelector.js';
 import { useShell } from '../store/shell.js';
@@ -181,6 +181,12 @@ export function useShellCommands({
         hint: `${w.repoCount} repos`,
         run: () => useFilters.getState().switchWorkspaceToOpenPrs(w.id),
       });
+    }
+    // Every page's "g then letter" key, shown beside it here — the palette is where keys are listed.
+    const goCommand: Record<string, string> = { attention: 'pending', insights: 'reports' };
+    for (const d of DESTINATIONS) {
+      const c = out.find((x) => x.id === (goCommand[d.id] ?? d.id));
+      if (c) c.shortcut = `G ${d.goKey.toUpperCase()}`;
     }
     return out;
   }, [aiOn, workspaces, workspaceId, toggleTheme, openHelp]);

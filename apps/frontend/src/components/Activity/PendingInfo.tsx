@@ -519,8 +519,8 @@ export function PendingGuideModal({
             </p>
             <p>
               Every default branch and every open PR in the workspace are listed under{' '}
-              <strong>Open PRs</strong>, the first line in the Activity rail. Neither is scored or
-              counted in a tab.
+              <strong>Open pull requests</strong> in the sidebar. Neither is scored or counted in a
+              tab.
             </p>
           </GuideSection>
 

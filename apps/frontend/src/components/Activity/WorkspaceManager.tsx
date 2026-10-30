@@ -278,7 +278,7 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
           <div className="pl-1 pt-0.5 text-meta text-ui-warn">
             {hint.kind === 'cooldown'
               ? 'recently synced — try again in a moment'
-              : 'couldn’t start the sync — check the header sync button for details'}
+              : 'couldn’t start the sync — check Sync at the bottom of the sidebar for details'}
           </div>
         )}
       </li>
