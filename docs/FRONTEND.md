@@ -4830,7 +4830,8 @@ text's own colour at 50% (`color-mix` on `currentColor`), full strength on hover
 - **The drawer's threads link** goes through the store's `openPrThreadsView(meta)`: it opens the
   PR tab with the thread pills reset and sets the transient `threadsViewRequest = prId`, which
   PrDetail consumes ONCE (`seedThreadsView`) — the same landing as the bot-chip and state-pill
-  seeds. A request for another PR is left alone.
+  seeds. A request for another PR is left alone; `selectPr` of a different PR and
+  `clearSelection` drop an unconsumed one.
 - **Everywhere else, underline on a PHONE only** (`TEXT_LINK_PHONE`; a desktop keeps the element's
   own `hover:underline`, since a touch screen has no hover to reveal a link). Adopted on:
   doc citations (`DocLink`), "Open in Jira/Linear/…" (`TrackerLinkOut`), "Show on timeline", PR refs

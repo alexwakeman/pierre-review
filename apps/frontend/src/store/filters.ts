@@ -1662,14 +1662,17 @@ export const useFilters = create<FilterState>((set, get) => ({
     }),
   setThreadSeverityFilter: (severities) => set({ threadSeverityFilter: severities }),
   selectPr: (id) =>
-    set({
+    set((s) => ({
       selectedPrId: id,
       selectedThreadId: null,
       selectedCommentId: null,
       threadBotFilter: null,
       threadStateFilter: new Set<ThreadStateBucket>(),
       threadSeverityFilter: new Set<MlSeverity>(),
-    }),
+      // An unconsumed threads-view request belongs to ITS PR: moving to another drops it, so a
+      // later visit to that PR does not land on Threads only out of nowhere.
+      threadsViewRequest: s.threadsViewRequest === id ? s.threadsViewRequest : null,
+    })),
   selectThread: (prId, threadId) =>
     set((s) => ({
       selectedPrId: prId ?? s.selectedPrId,
@@ -1688,6 +1691,7 @@ export const useFilters = create<FilterState>((set, get) => ({
       selectedThreadId: null,
       selectedCommentId: null,
       threadBotFilter: null,
+      threadsViewRequest: null,
       threadStateFilter: new Set<ThreadStateBucket>(),
       threadSeverityFilter: new Set<MlSeverity>(),
     }),
