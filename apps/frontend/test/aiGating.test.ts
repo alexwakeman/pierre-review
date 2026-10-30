@@ -148,10 +148,11 @@ describe('the wiring', () => {
 
   it('no SPA file gates on a paid capability, a lock pane or the AI-credit meter', () => {
     // Nothing in Limn is paid: no capability read, no `me.pro`, no lock pane, no usage meter.
+    // (`useAiUsage` is the retired credit meter's hook; Reports → AI usage's `useAiUsageReport` is not it.)
     for (const f of files) {
       const s = read(f);
       expect(s, f).not.toMatch(
-        /useProCapabilities|useProGateState|ProLockPanel|ProBadge|ProGate\.js|useAiUsage|TrackUsage/,
+        /useProCapabilities|useProGateState|ProLockPanel|ProBadge|ProGate\.js|useAiUsage\b|TrackUsage/,
       );
       expect(s, f).not.toMatch(/\.data\?\.pro\b|\bme\??\.pro\b/);
     }
