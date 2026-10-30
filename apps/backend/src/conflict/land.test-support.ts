@@ -35,15 +35,20 @@
 // ⚠ IMPORT THIS FIRST in each suite. The `vi.mock` calls below register when this module is
 // evaluated, and every module under test is imported LATER, dynamically, in the `beforeAll` —
 // which is also why DATABASE_URL can be set here, before the client opens its connection.
-// Each suite gets its OWN temp database, so the three never share a file.
+// Each suite gets its OWN temp directory and database, so the three never share a file.
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterAll, beforeAll, beforeEach, vi } from 'vitest';
 
-const DB_DIR = mkdtempSync(join(tmpdir(), 'pierre-conflict-land-db-'));
-const DB_PATH = join(DB_DIR, 'land.sqlite');
+// ⚠ ONE TEMP DIRECTORY PER SUITE, AS THE PROCESS'S TMPDIR. The three suites run at once, and
+// "leaves no temp index behind" lists `pierre-conflict-land-*` in tmpdir() — so a shared tmpdir
+// would show it another suite's in-flight index (it did, on the first parallel run). os.tmpdir()
+// reads TMPDIR on every call, so land.ts, the fixtures and that check all land in here.
+const SUITE_TMP = mkdtempSync(join(tmpdir(), 'pierre-land-suite-'));
+process.env.TMPDIR = SUITE_TMP;
+const DB_PATH = join(SUITE_TMP, 'land.sqlite');
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
 
@@ -467,7 +472,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await closeDb?.();
-  rmSync(DB_DIR, { recursive: true, force: true });
+  rmSync(SUITE_TMP, { recursive: true, force: true });
   for (const d of tempDirs) {
     try {
       rmSync(d, { recursive: true, force: true });
