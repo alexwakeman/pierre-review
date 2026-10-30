@@ -1060,7 +1060,9 @@ Review finding deep-link. Do not add a third.
   'start'`); a row scrolls `block: 'center'` because the sticky per-file header would cover a
   top-aligned one. Then a 4s flash. **These are ordinary `scrollIntoView` calls — the gated
   programmatic-scroll rules are the vis TIMELINE's, and don't apply here; never write `scrollTop`
-  by hand either way.**
+  by hand either way.** Every one of them now goes through `revealIntoView` (`lib/settleScroll.ts`),
+  which holds the target while the lazily-mounted code around it settles — see *Lazy mounting*
+  below.
 - **A reveal for a file this view isn't rendering says so** (`focusMissing`): the live diff is
   capped at 100 files and a Claude Review finding describes the head sha ITS run read. An amber
   banner + a GitHub link, rather than letting the click land as a silent no-op.
@@ -1146,6 +1148,57 @@ KEEPS its header — it doubles as the collapse control there.
   stay OUT of `shouldDehydrateQuery`.
 - Each file header carries a `CopyButton` for its path (the NEW path on a rename), beside — never
   inside — the collapse button; the metadata fallback rows carry one too.
+
+#### Lazy mounting: the diff renders as it scrolls (`DiffChunk`, `lazyMount.ts`, `settleScroll.ts`)
+
+The Changes tab used to mount every expanded file's every row, and lex every one, on first paint.
+MEASURED on the e2e big diff (`e2e/big-diff.ts`: 100 files, 18,200 diff rows, 55 threads, every
+file under the collapse heuristic), production build, Chrome, 1280×720: clicking the Changes tab took
+**10.7–11.3s** to first paint (one 9.4s long task), mounted 18,355 rows and 248k DOM nodes; a
+`?thread=` deep link into the LAST file settled after **9.8–13.9s** from navigation start. After:
+**0.5–1.0s** to first paint (longest task 0.2–0.5s), 284 rows, 9.4k nodes; the same deep link settles
+in **1.0–1.8s**. (`MEASURE=1` runs the spec's two `measure` tests, which log both; see the spec's
+header.)
+
+- **Each file's rows are cut into chunks** (`diffChunks`, `lib/diff.ts`, ~120 rows, cut at a hunk
+  row, or inside one giant hunk at 240), each its own `<tbody>`. A chunk is a single placeholder row
+  of ESTIMATED height (`estimateChunkPx`: measured row, gap-row and pill heights; Wrap's long lines;
+  a pill open or shut by `inlineThreadStartsOpen`) until it comes within 1.5 panes of the visible
+  area, then mounts. ONE `IntersectionObserver` per `FileDiffView`, rooted on the scroll pane
+  (an observer on the viewport would clip at the pane's edge). Estimates land within a few px per
+  file on the fixture. Headers always render, so the rail, `n`/`p` and the file count see every file.
+- ⚠ **A MOUNTED CHUNK STAYS MOUNTED (latched).** Unmounting on the way out would drop a half-typed
+  inline comment, an expanded gap, a pill's flash. Scrolling the whole PR ends where the old tab
+  started; what changed is the first paint, a tab switch and every jump.
+- **Highlighting is per chunk** (`highlightDiffRows(rows, lang, max, {from, to})`): only hunks
+  overlapping the chunk are lexed, each hunk still WHOLE, and the whole-file line gate still counts
+  every hunk — a row comes out identical to the whole-file call (pinned in `test/diffChunks.test.ts`).
+  Code that never comes near the screen is never lexed. Still behind `expanded`, as before. A hunk's
+  lex is cached per `rows` array (`cachedSegment`), so a giant hunk spanning many chunks is lexed
+  once, not once per chunk.
+- ⚠ **A REVEAL FORCES ITS CHUNK.** `forcedChunks` holds the addressed line's chunk, the target
+  thread's (`focus.threadId`, through the same `anchorRowFor` ladder that places its pill) and the
+  just-posted thread's; a forced chunk mounts in that render and latches. File-grain pills
+  (unanchored threads) sit in their own `<tbody>` outside the chunks, always mounted when the file is
+  open. A new reveal grain must add its row here, or its pill/row will not exist to scroll to.
+- ⚠ **EVERY REVEAL SCROLL GOES THROUGH `revealIntoView`.** It scrolls (smooth for ≤ 1.5 panes,
+  instant past that — a long smooth scroll mounts placeholders mid-flight), waits for the scroll to
+  stop, then re-issues the same `scrollIntoView` whenever the target moves while the pane did not
+  (a placeholder above it mounted at a different height), until it holds still for 700ms (cap 4s).
+  The reader wins: wheel / touch / pointer / key input, or a frame where the pane scrolled by what
+  the target moved (a scrollbar drag), stops it; a newer reveal cancels an older one. Browser scroll
+  anchoring absorbs most shifts on its own (Chrome, Firefox); the settle covers the rest (Safari has
+  no `overflow-anchor`, so scrolling UP into placeholders there can nudge the view by the estimate's
+  error). ⚠ A pill's reveal is NOT stopped by its effect cleanup: the `consumedFocus` guard makes a
+  re-run a no-op, so StrictMode's mount-cleanup-mount would kill the settle for good.
+- **The Threads only view is unaffected**: it renders from `pr.threads`, never from the diff, so it
+  lists every thread whether or not its code has mounted. The hidden code under it intersects nothing
+  and mounts nothing while hidden.
+- **Caveat: the browser's find-in-page (⌘F) only finds code that has mounted** — a placeholder has
+  no text. Scroll past it, or open the file on GitHub. Accepted for the first-paint win; the rail and
+  `n`/`p` reach any file.
+- E2E: `e2e/changes-lazy.spec.ts` (deep link into the last file, "Show in context" from Threads
+  only, rail click, lock file, gap expander, first-paint mount count) over `e2e/big-diff.ts`.
 
 #### Inline thread indicators in the diff + per-file state rollups
 

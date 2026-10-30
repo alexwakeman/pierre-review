@@ -417,11 +417,18 @@ export function splitDiffMarker(row: DiffRow): { marker: string; body: string } 
  * `maxLines` is the line gate PER SIDE over the WHOLE FILE (every hunk's side lines summed),
  * checked before any lexing; only the Changes tab raises it (`MAX_FILE_DIFF_HIGHLIGHT_LINES`).
  * Over it, the whole file renders plain.
+ *
+ * `range` lexes only the hunks that overlap `rows[from, to)` and fills only those indices — the
+ * Changes tab's lazily-mounted chunks (`diffChunks`) colour what they draw and nothing else. The
+ * whole-file gate still counts EVERY hunk, so a chunk never colours a file the whole-file call would
+ * leave plain, and a hunk cut by a chunk edge is still lexed WHOLE (never from a mid-hunk start), so
+ * a row comes out identical either way.
  */
 export function highlightDiffRows(
   rows: readonly DiffRow[],
   language: string | null,
   maxLines: number = MAX_HIGHLIGHT_LINES,
+  range?: { from: number; to: number },
 ): (string | null)[] | null {
   if (language == null || rows.length === 0) return null;
   // The whole-file gate first: count each side across every hunk.
@@ -437,12 +444,17 @@ export function highlightDiffRows(
   const out: (string | null)[] = rows.map(() => null);
   let coloured = false;
   let segStart = 0;
+  const from = range?.from ?? 0;
+  const to = range?.to ?? rows.length;
   const flush = (end: number): void => {
-    if (end > segStart) {
-      const html = highlightSegment(rows, segStart, end, language, maxLines);
+    // Outside the range: not lexed at all.
+    if (end > segStart && end > from && segStart < to) {
+      const html = cachedSegment(rows, segStart, end, language, maxLines);
       if (html != null) {
-        coloured = true;
-        for (let i = segStart; i < end; i += 1) out[i] = html[i - segStart] ?? null;
+        for (let i = Math.max(segStart, from); i < Math.min(end, to); i += 1) {
+          out[i] = html[i - segStart] ?? null;
+          coloured = true;
+        }
       }
     }
   };
@@ -453,6 +465,32 @@ export function highlightDiffRows(
   });
   flush(rows.length);
   return coloured ? out : null;
+}
+
+// One hunk's lex, remembered per `rows` array: a hunk longer than a chunk (`diffChunks` cuts a giant
+// hunk every 240 rows) is lexed WHOLE by every chunk it spans, so without this a 2,000-line added
+// file would be lexed once per chunk as the reader scrolls through it. Keyed weakly on the rows
+// (FileDiffView memoises them per patch), so a new patch drops the old entries.
+const segmentCache = new WeakMap<readonly DiffRow[], Map<string, (string | null)[] | null>>();
+
+function cachedSegment(
+  rows: readonly DiffRow[],
+  from: number,
+  to: number,
+  language: string,
+  maxLines: number,
+): (string | null)[] | null {
+  let byKey = segmentCache.get(rows);
+  if (byKey == null) {
+    byKey = new Map();
+    segmentCache.set(rows, byKey);
+  }
+  const key = `${from}:${to}:${language}:${maxLines}`;
+  const hit = byKey.get(key);
+  if (hit !== undefined) return hit;
+  const html = highlightSegment(rows, from, to, language, maxLines);
+  byKey.set(key, html);
+  return html;
 }
 
 /** The two-pass lex (see `highlightDiffRows`) over `rows[from, to)` — ONE hunk. Null = refused. */
@@ -498,6 +536,38 @@ function highlightSegment(
     if (o != null) return oldHtml[o] ?? null;
     return null;
   });
+}
+
+/**
+ * The Changes tab's unit of LAZY MOUNTING: one file's rows cut into `[from, to)` chunks of about
+ * `target` rows. A cut prefers a HUNK row (the expander row then opens its chunk, and a chunk is
+ * whole hunks), and falls back to a mid-hunk cut once a chunk reaches twice the target — a newly
+ * added 5,000-line file is ONE hunk and must not be one chunk. Indices are the file's own row
+ * indices, so thread anchoring, the reveal and the gap reveals keep addressing rows exactly as
+ * before. Covers every row exactly once; an empty file is no chunks.
+ */
+export const DIFF_CHUNK_ROWS = 120;
+
+export function diffChunks(
+  rows: readonly DiffRow[],
+  target: number = DIFF_CHUNK_ROWS,
+): { from: number; to: number }[] {
+  const out: { from: number; to: number }[] = [];
+  let from = 0;
+  for (let i = 1; i < rows.length; i += 1) {
+    const size = i - from;
+    if (size >= target && (rows[i]!.kind === 'hunk' || size >= target * 2)) {
+      out.push({ from, to: i });
+      from = i;
+    }
+  }
+  if (rows.length > from) out.push({ from, to: rows.length });
+  return out;
+}
+
+/** The chunk (an index into `diffChunks`'s output) holding row `row`, or -1. */
+export function chunkIndexOf(chunks: readonly { from: number; to: number }[], row: number): number {
+  return chunks.findIndex((c) => row >= c.from && row < c.to);
 }
 
 // Total number of patch lines (used by the collapse-by-default size heuristic).

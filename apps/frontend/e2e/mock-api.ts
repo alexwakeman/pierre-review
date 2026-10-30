@@ -897,7 +897,7 @@ const THREAD_5001: ThreadDetail = {
 
 // A complete-but-empty PR detail so opening a PR never crashes the (error-boundary-less)
 // app. Self-contained: PrDetail renders from this object's own users/labels/etc.
-function prDetailFor(id: number): PrDetail {
+export function prDetailFor(id: number): PrDetail {
   const p = PRS.find((x) => x.id === id) ?? PRS[0]!;
   return {
     id,
