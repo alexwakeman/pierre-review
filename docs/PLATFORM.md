@@ -1839,7 +1839,12 @@ Read/Glob/Grep + Write/Edit/MultiEdit + `submit_fix`, and `DISALLOWED_TOOLS` is
 `['Bash','NotebookEdit']` — the same call Claude Review made (the comment above `WORKTREE_TOOLS` in
 `apps/backend/src/review/agent.ts` is the long version of the argument, and this is the identical
 input shape). The fixer reads and edits. It
-installs nothing, builds nothing and runs no tests.
+installs nothing, builds nothing and runs no tests — unless the reader ticks **Run tests**
+(2026-10-30): then Limn installs and runs the project's own declared checks in an OS sandbox, and the
+agent may ask for one by NAME (`run_check`), still with no shell ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md)
+§ Run tests, [SECURITY.md](SECURITY.md) § Sandboxed checks). The "speed and cost" argument below is
+answered there: a wall-clock timeout per check, capped output, Limn's own final run is what the row
+records, and a check never sees a token.
 
 **Why.** Two reasons, either sufficient.
 

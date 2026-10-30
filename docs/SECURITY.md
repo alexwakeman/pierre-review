@@ -122,9 +122,80 @@ list — an `err` from a failed HTTP call carries the outgoing `Authorization: t
   whose whole payload is comment bodies. The five `Bash(rm *)`/`Bash(git …)` prefixes it replaced
   were the same non-boundary. ⚠ The `Bash(git commit *)`/`Bash(git push *)` pair also encoded
   "the host owns the commit" — still true, and now enforced harder, but say so in prose because
-  the grep no longer finds it. The fixer's build/test capability went with the shell, and the SPA
-  says "Not built or tested here." beside the diff — it promises no CI (see
-  [PLATFORM.md](PLATFORM.md) § The fix agent has no shell).
+  the grep no longer finds it. The fixer's build/test capability went with the shell; "Run tests"
+  (2026-10-30, below) brought testing back WITHOUT it. When no check ran the SPA still says "Not
+  built or tested here." beside the diff — it promises no CI (see [PLATFORM.md](PLATFORM.md) § The
+  fix agent has no shell).
+
+### Sandboxed checks — AI Fix "Run tests" (`coding/checks/`, 2026-10-30)
+
+The fixer may run the project's OWN tests, lint and type checks. The agent still has **no shell**:
+it gets ONE tool, `run_check(name)` (Claude `mcp__checks__run_check`, in-process; Codex
+`mcp__workspace__run_check`, Limn's workspace MCP server), and a NAME is all it can send. Limn
+decides everything else, and runs every step in an OS sandbox. A reusable module (a story build will
+use it): `openCheckSession` → `agentTool()` / `verify()` / `runHook()` / `restoreGit()` / `close()`.
+
+- **THE ALLOW-LIST IS DERIVED, NEVER TYPED** (`discover.ts`): package.json scripts named `test`,
+  `test:*`, `lint`, `lint:*`, `typecheck`, `check`… (never `*:watch`, `*:fix`, `dev`, `start`…) run
+  through the package manager the LOCKFILE names (corepack's `packageManager` first); Makefile
+  `test`/`lint`/`check`/`typecheck` targets; pytest / tox / nox; `cargo test --offline`; `go test
+  ./...` + `go vet ./...`; `gradle test --offline`; `mvn -o test`. Each is a fixed argv. The picker
+  reads the same function over the PR head's manifest files (one GraphQL request,
+  `github/repo-files.ts`); the run discovers AGAIN on its own worktree, and a name the head no longer
+  declares is skipped. Manifest files are read only as REGULAR files (a symlinked `Makefile` or
+  `.husky` is ignored).
+- **THE DENY SCAN** (`deny-scan.ts`) refuses — listed with the reason, never runnable — a script
+  whose text, AND every script it calls (`npm run x`, `run-s lint:*`, npm's `pre`/`post`), every
+  Makefile prerequisite / sub-make / variable, and a hook's lint-staged commands, builds or starts
+  containers (`docker build|run|compose up`…), pipes a download into a shell, uses sudo, deletes
+  outside the tree (`rm -rf /|~|$VAR|..`), publishes, pushes or edits git config, talks to GitHub
+  (`gh`), ssh/scp, touches keychains or launch agents, writes home dotfiles, or `eval`s a variable. A
+  Makefile with `include` is refused (unreadable first). It is a CONSERVATIVE SECOND line: a script
+  that only TALKS to a service on localhost is fine; a monorepo's per-package scripts are not read —
+  the sandbox is the boundary.
+- **ARGV ONLY** (`spawn.ts`): `spawn(command, args, {shell:false, detached:true})`, its own process
+  group (a timeout or cancel kills the whole tree), a timeout (`AI_FIX_CHECK_TIMEOUT_MS`, 10 min;
+  install 15, hook 5), output ANSI-stripped and CAPPED (24k chars, head + tail, the cut named).
+- **THE SCRUBBED ENVIRONMENT** (`env.ts`) is an ALLOW-LIST (PATH, locale, TERM, a few toolchain
+  homes) + `NEVER_PASSED` belt and braces: no GH/ANTHROPIC/OPENAI/CLAUDE/AWS token, no
+  `SSH_AUTH_SOCK`, no `DOCKER_*`, no `LIMN_*`. HOME and TMPDIR move into the run's folder; npm reads
+  no real `~/.npmrc`; git runs with no system/global config; caches point at Limn's PRIVATE cache
+  (`<data dir>/check-cache`), never the reader's own.
+- **THE SANDBOX** (`sandbox.ts`) — macOS `sandbox-exec` with a generated Seatbelt profile (paths
+  only as `-D` PARAMETERS, never spliced into the text), Linux `bwrap`. Writes: the worktree, the
+  run's `sbx/` folder (and, for the install step only, the private cache; for Cargo only its lock
+  files); the worktree's `.git` FILE is read-only. Reads: everything outside the home folder and
+  Limn's data folder; inside them only the worktree, the clone, the caches and the toolchain homes
+  (`~/.nvm`, `~/.rustup`, PATH entries…); `~/.cargo/credentials*`, `~/.m2/settings*.xml`,
+  `~/.gradle/gradle.properties` stay dark. Network: a CHECK gets loopback only (macOS: `localhost`
+  in and out, so a test reaches a database the reader started; Linux `--unshare-net`: its OWN
+  loopback, so host services are NOT reachable); the INSTALL step gets the network but runs no
+  repository code (`--ignore-scripts`, `--ignore-pnpmfile`, yarn `--mode=skip-build`; a Yarn
+  `yarnPath`/plugins or Maven `.mvn/extensions.xml` repo gets NO install; Gradle never — its build
+  scripts are code). Unix sockets only inside the run's folder (never the Docker socket); the macOS
+  keychain daemon is denied. **No sandbox ⇒ refused** with one plain sentence; only
+  `LIMN_CHECKS_ALLOW_UNSANDBOXED=true` runs them bare, and the run says so.
+- **DOCKER FIRST** (`docker.ts`): a check that needs Docker (compose file, testcontainers, a script
+  naming docker) runs only after `docker info` answers (Limn's fixed argv, outside the sandbox);
+  otherwise it is skipped with one line and the rest run. A check never gets the Docker socket, so a
+  testcontainers suite cannot start containers — services must already run on localhost.
+- **THE FROZEN LIST** (`spec.ts`): before the agent starts, every check's wrapped argv, cwd, env,
+  timeout and cap are written to a spec file in the run's Limn-only `spec/` folder (under the data
+  folder: a check can neither read nor write it). Codex's MCP server reads it ONCE at start-up; the
+  path-guard hook allows `mcp__workspace__run_check` only when the run's guard roots carry
+  `checks: true`. An unknown name is refused; 12 calls per run.
+- **THE COMMIT HOOK** (`hooks.ts`): husky / lefthook / simple-git-hooks run INSIDE the sandbox, in a
+  THROWAWAY git folder (`sbx/hook-git`, objects borrowed from the clone through `alternates`, HEAD at
+  the base commit) — the shared clone's config, refs and objects (which every later run and every
+  push reads) are never writable. The pre-commit framework is refused (it installs over the
+  network). Push still commits the stored patch with `--no-verify`: the hook already ran.
+- ⚠ **`restoreGit()` BEFORE EVERY GIT COMMAND OF LIMN'S IN THE WORKTREE.** A check (or the agent's
+  Write) could point the worktree's `.git` file at a folder whose config sets `core.fsmonitor` — and
+  Limn's own git, outside the sandbox, would run it. The sandbox makes `.git` read-only AND Limn puts
+  it back byte for byte before `ls-files` / `add -A`; its own git also passes `core.fsmonitor=false`.
+- Output a check leaves untracked (node_modules, coverage, target/…) stays OUT of the patch: a
+  per-run `core.excludesFile` (known output names + every path that appeared during Limn's own
+  install / final run). Tracked files are never excluded; the reader sees the diff before Push.
 
 **The local clone cache (`~/.limn/clones`) — five fixes, and the standing invariant.**
 The AI-Fix agent, Claude Review and now the merge-conflict resolver all work inside this cache, so

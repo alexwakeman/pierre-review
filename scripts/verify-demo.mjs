@@ -154,6 +154,21 @@ const VIEWS = [
           : undefined,
     ]),
   ),
+  // AI Fix "Run tests": #114's fix ran the project's checks in the sandbox (results + the commit
+  // hook), and "New fix" → "Run tests" lists what the head declares, one refused by the deny scan.
+  [
+    'pr:114:ai_fix:run-tests',
+    '?view=pr-detail:114&prTab=ai_fix',
+    null,
+    {
+      act: async (page) => {
+        await page.getByRole('button', { name: 'New fix' }).first().click();
+        await page.getByRole('checkbox', { name: 'Run tests' }).first().check();
+        await page.getByText('test-integration', { exact: true }).first().waitFor({ timeout: 10_000 });
+      },
+      expect: ['The AI ran checks 2 times while it worked.', 'pre-commit hook', 'It starts or builds containers.'],
+    },
+  ],
   // The Changes tab's "Threads only" view (there is no Threads tab): the toggle on the sticky bar
   // swaps the code for the threads, each with a way back to its code.
   ...[113, 105].map((id) => [

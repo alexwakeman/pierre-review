@@ -10,6 +10,7 @@ import {
   isAiEffort,
   isAiProviderSetting,
   LARGE_PR_CODE_LOC_DEFAULT,
+  type AiFixChecksPreview,
   type NotionPropertyInfo,
   type NotionSchemaResponse,
   type NotionTrackerMapping,
@@ -21,6 +22,19 @@ import { getAiBudget, putAiBudget } from './aiBudget.js';
 import { activeProvider, aiState, DEMO_CODEX_PLAN, ranOnNow, setAiState } from './provider.js';
 
 const OK = (body: unknown): DemoReply => ({ status: 200, body });
+
+/** The "Run tests" picker's list in the demo (`AiFixChecksPreview`). */
+const DEMO_CHECKS_PREVIEW: AiFixChecksPreview = {
+  sandbox: 'seatbelt',
+  unavailable: null,
+  unsandboxed: false,
+  checks: [
+    { name: 'lint', kind: 'lint', command: 'make lint', source: 'Makefile target "lint"', defaultOn: true, needsDocker: false, refused: null },
+    { name: 'test', kind: 'test', command: 'make test', source: 'Makefile target "test"', defaultOn: true, needsDocker: false, refused: null },
+    { name: 'test-integration', kind: 'test', command: 'make test-integration', source: 'Makefile target "test-integration"', defaultOn: false, needsDocker: true, refused: 'It starts or builds containers.' },
+    { name: 'pre-commit hook', kind: 'hook', command: 'git commit (.husky/pre-commit)', source: '.husky/pre-commit', defaultOn: true, needsDocker: false, refused: null },
+  ],
+};
 
 /** The demo's Jira workflow for the story view's status picker (`TicketTransition[]`). */
 const DEMO_TRANSITIONS: Array<{ id: string; name: string; to: { name: string; category: 'new' | 'indeterminate' | 'done' } }> = [
@@ -1209,6 +1223,14 @@ export const GET_FALLBACKS: DemoRoute[] = [
     method: 'GET',
     re: /^\/api\/pro\/prs\/(\d+)\/ai-fix\/status$/,
     run: () => OK({ status: 'idle', fixId: null, progress: null }),
+  },
+  // AI Fix "Run tests": the checks a head declares (live, the backend reads the PR head's manifest
+  // files from GitHub — the demo has none). A fictional Acme project: three default checks, one
+  // refused by the deny scan, and its pre-commit hook.
+  {
+    method: 'GET',
+    re: /^\/api\/pro\/prs\/(\d+)\/ai-fix\/checks$/,
+    run: () => OK(DEMO_CHECKS_PREVIEW),
   },
   { method: 'GET', re: /^\/api\/prs\/(\d+)\/mention-candidates$/, run: (_r, _m, srv) => OK(srv.recorded('GET', '/api/users') ?? []) },
   { method: 'GET', re: /^\/api\/prs\/(\d+)\/suggested-reviewers$/, run: () => OK({ suggestedReviewers: [], users: [] }) },

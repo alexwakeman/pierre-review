@@ -403,18 +403,16 @@ history: [docs/CODEX-PLAN.md](docs/CODEX-PLAN.md). Non-negotiables:
   run): the review (+ specialists, follow-ups), AI Fix and Plan first, the SAME word on both providers.
   Default (NULL) = today: Claude medium, Codex by depth. `REVIEW_EFFORT` wins. ⚠ Opus 5.5 is NOT pinned;
   only adaptive thinking is. The run stores what it sent (`aiRunLabel(provider, model, effort)`).
-- **CODEX** (Phase 3 complete: every agent kind ported, `codexRunnable()` true) runs the pinned CLI
-  directly — `codex exec --json --strict-config` — in Limn's OWN Codex home `~/.limn/codex`
-  (`limn ai login codex` or Settings; a ChatGPT sign-in only — an OpenAI API key is REFUSED until it
-  can be priced). ⚠ The reader's `~/.codex` is NEVER read or written. The lockdown is ONE list
-  (`ai/codex/config.ts` `LOCKED_SETTINGS`: no shell, web, images, plugins or memories;
-  `project_doc_max_bytes=0`); files are read ONLY through Limn's workspace MCP server. ⚠ Codex skips
-  an untrusted hook SILENTLY, so every run refuses unless `verifyHookTrusted` proves the PreToolUse
-  ALLOW-list hook runs. Results are strict JSON Schemas (`ai/result-schemas.ts`) fed to the SAME
-  handlers, one retry via `exec resume`; Limn runs the specialists; writes are read from git; a
-  run's thread is deleted once its usage is recorded. Models: deep `gpt-6.1-sol`, standard
-  `gpt-6.1-terra`, fast `gpt-6-luna`. ⚠ A Codex change leaves Claude's prompts byte-identical
-  (`prompt-golden.json`); Codex wording goes through `ai/prompt-tools.ts`.
+- **CODEX** (every agent kind) runs the pinned CLI directly — `codex exec --json --strict-config` —
+  in Limn's OWN Codex home `~/.limn/codex` (`limn ai login codex` or Settings; a ChatGPT sign-in only
+  — an OpenAI API key is REFUSED until it can be priced). ⚠ The reader's `~/.codex` is NEVER read or
+  written. The lockdown is ONE list (`ai/codex/config.ts` `LOCKED_SETTINGS`: no shell, web, images,
+  plugins or memories; `project_doc_max_bytes=0`); files are read ONLY through Limn's workspace MCP
+  server. ⚠ Codex skips an untrusted hook SILENTLY, so every run refuses unless `verifyHookTrusted`
+  proves the PreToolUse ALLOW-list hook runs. Results are strict JSON Schemas (`ai/result-schemas.ts`)
+  fed to the SAME handlers, one retry via `exec resume`; Limn runs the specialists; writes are read
+  from git; a run's thread is deleted once its usage is recorded. ⚠ A Codex change leaves Claude's
+  prompts byte-identical (`prompt-golden.json`); Codex wording goes through `ai/prompt-tools.ts`.
 - **No AI SDK in the npm manifest** — downloaded on first use ("Set up AI" / `limn ai install
   [codex]`) and value-imported ONLY by `ai/runtime.ts` (`loadAgentSdk`/`loadAnthropicSdk`/`loadZod`);
   `build-release.mjs` asserts it.
@@ -427,9 +425,10 @@ history: [docs/CODEX-PLAN.md](docs/CODEX-PLAN.md). Non-negotiables:
   `loadAgentSdk` Query tap — never add per-runner forwarding) NEVER blocks. ChatGPT: TOKEN-WEIGHTED,
   Limn's tokens ÷ the account's tokens × Codex's own `usedPercent`, per window.
 - **The agents' tools**: the reviewer and every chat are read-only, **`Bash` denied**; the fixer has
-  file tools + `submit_fix`, `DISALLOWED_TOOLS = ['Bash','NotebookEdit']` — **it builds and tests
-  nothing**, and the SPA says "Not built or tested here." ⚠ `WORKTREE_RULES` and the tool list change
-  together (`no-shell.test.ts`). Every run sits behind the PATH GUARD (`review/path-guard.ts`).
+  file tools + `submit_fix`, `DISALLOWED_TOOLS = ['Bash','NotebookEdit']` — NEVER a shell. "Run tests"
+  adds ONE tool, `run_check(name)`: repo-DECLARED checks only, Limn's argv, an OS sandbox
+  (`coding/checks/`; none ⇒ refused); "Not built or tested here." only when none ran. ⚠
+  `WORKTREE_RULES` and the tool list change together (`no-shell.test.ts`). Every run sits behind the PATH GUARD (`review/path-guard.ts`).
   Anything an agent reads from a PR is UNTRUSTED.
 - **Nothing is posted or pushed until the reader presses the button**, except the per-workspace
   auto-post / Push automatically switches (OFF by default). Auto-posting is AUTO RUNS ONLY, under

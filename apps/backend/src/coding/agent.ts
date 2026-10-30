@@ -77,6 +77,11 @@ import { pickReviewNonce } from '../review/claude-review/prompts.js';
 // for context must now write the edit by hand or decline. That is the accepted trade — Claude
 // Review made the identical one. The way back is a container/VM boundary, or `canUseTool` under a
 // non-bypass permission mode — NOT re-adding 'Bash' with a longer blocklist.
+//
+// "RUN TESTS" (2026-10-30) IS THAT WAY BACK, FOR TESTS ONLY: an OS sandbox (coding/checks/) around
+// the project's own DECLARED checks, which the agent may ask for by NAME through ONE extra tool,
+// `run_check` (FIX_TOOLS_WITH_CHECKS below). Limn builds every argv; the agent never types a command,
+// and Bash stays in DISALLOWED_TOOLS. docs/SECURITY.md § Sandboxed checks.
 const FIX_TOOLS = [
   'Read',
   'Glob',

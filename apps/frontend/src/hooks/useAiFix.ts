@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
+  AiFixChecksPreview,
   AiFixPickerPreview,
   AiFixPushBody,
   AiFixResponse,
@@ -34,6 +35,18 @@ export function useAiFixPreview(prId: number, reviewId: number | null, enabled: 
     queryFn: () => api.aiFixPreview(prId, reviewId),
     enabled,
     retry: reviewId == null ? false : undefined,
+  });
+}
+
+// "Run tests": the checks the PR's head declares. CLICK-GATED — `enabled` only once the reader ticks
+// "Run tests" (it is one GitHub read). Cached per PR for the session.
+export function useAiFixChecks(prId: number, enabled: boolean) {
+  return useQuery<AiFixChecksPreview>({
+    queryKey: ['ai-fix-checks', prId],
+    queryFn: () => api.aiFixChecks(prId),
+    enabled,
+    staleTime: 5 * 60_000,
+    retry: false,
   });
 }
 

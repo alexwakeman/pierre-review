@@ -1306,6 +1306,14 @@ line). Additive, nullable, no backfill: NULL is today's rule everywhere. Both ta
 renumbered on merge (the reference-docs and tracker migrations had published 0139–0144); a database that
 had applied it as `0139` was re-applied by hand once.
 
+### `0146_ai_fix_checks` — AI Fix "Run tests"
+`ALTER TABLE ai_fixes ADD checks text` — JSON `AiFixChecks`: the check names the reader ticked
+(written at insert, so an approved plan's build runs the same), then what Limn ran (results, install
+steps, the commit hook). Additive, nullable, no backfill: NULL = no tests asked for (every older row,
+every auto fix). `ai_fixes` is already in `accountScopedTables()`, the erasure and the export.
+[CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Run tests. Journal `idx` 146, `when` sqlite `1792137642016`.
+⚠ Written on its own branch: renumber on merge if another branch published `0146` first.
+
 ### No migration — "Check against code" removed (2026-10-18): `sprint_ticket_repos` + `sprint_assessments` DORMANT
 
 The sprint drawer, its repo picker and "Check against code" (`review/sprint-assess/`) were removed with

@@ -41,6 +41,7 @@ import type {
   AiFixPlanMessageBody,
   AiFixPushBody,
   AiFixPushResult,
+  AiFixChecksPreview,
   AiFixResponse,
   AiFixStatusResponse,
   ApprovePrBody,
@@ -1656,6 +1657,8 @@ export const api = {
 
   // ---- AI Fix ----
   aiFix: (prId: number) => get<AiFixResponse>(`/api/pro/prs/${prId}/ai-fix`),
+  // "Run tests": the checks the PR's head declares (one GitHub read; asked when the box is ticked).
+  aiFixChecks: (prId: number) => get<AiFixChecksPreview>(`/api/pro/prs/${prId}/ai-fix/checks`),
   aiFixStatus: (prId: number) =>
     get<AiFixStatusResponse>(`/api/pro/prs/${prId}/ai-fix/status`),
   // The fix picker: every item a review-seeded fix would include, with stable keys + defaults.

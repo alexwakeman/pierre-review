@@ -772,6 +772,22 @@ async function seedCiReview(base: any, c: AgenticSeedCtx): Promise<number> {
 
 // ── 5. AI FIX ────────────────────────────────────────────────────────────────────────────────
 
+/** What "Run tests" recorded for the seeded #114 fix (an AiFixChecks; fictional Acme output). */
+const FIX_114_CHECKS = {
+  requested: ['lint', 'test', 'pre-commit hook'],
+  ran: true,
+  note: null,
+  sandbox: 'seatbelt',
+  install: [],
+  results: [
+    { name: 'lint', kind: 'lint', command: 'make lint', status: 'passed', exitCode: 0, durationMs: 2_140, output: 'terraform fmt -check -recursive\ntflint --recursive\n0 issue(s) found', truncated: false, note: null },
+    { name: 'test', kind: 'test', command: 'make test', status: 'passed', exitCode: 0, durationMs: 14_820, output: 'terraform init -backend=false -input=false\nterraform validate\nSuccess! The configuration is valid.\n\nterraform test\neks/tests/node_groups.tftest.hcl... in progress\n  run "scales_between_bounds"... pass\n  run "desired_inside_range"... pass\neks/tests/node_groups.tftest.hcl... tearing down\neks/tests/node_groups.tftest.hcl... pass\n\nSuccess! 2 passed, 0 failed.', truncated: false, note: null },
+  ],
+  hook: { name: 'pre-commit hook', kind: 'hook', command: 'git commit (.husky/pre-commit)', status: 'passed', exitCode: 0, durationMs: 1_960, output: 'terraform fmt: 1 file checked', truncated: false, note: null },
+  hookAttempts: 1,
+  agentRuns: 2,
+};
+
 const FIX_114_PATCH = [
   'diff --git a/terraform/eks/node-groups.tf b/terraform/eks/node-groups.tf',
   'index 3f1c2ab..9d4e7c1 100644',
@@ -864,6 +880,9 @@ async function seedAiFix(base: any, c: AgenticSeedCtx, runs: { run114: number; r
   const s1 = await settle(() => readStatus(fixId), 'ai fix');
   if (s1 !== 'succeeded') throw new Error(`ai fix ${s1}`);
   await db.update(schema.aiFixes).set({ createdAt: new Date(now.getTime() - 3.9 * HOUR), finishedAt: new Date(now.getTime() - 3.8 * HOUR) }).where(eq(schema.aiFixes.id, fixId)).execute();
+  // "Run tests" (coding/checks/): this fix ran the project's own checks in the sandbox — the results,
+  // the commit hook and the agent's own runs, as a real run stores them (AiFixChecks).
+  await db.update(schema.aiFixes).set({ checks: JSON.stringify(FIX_114_CHECKS) }).where(eq(schema.aiFixes.id, fixId)).execute();
 
   const plan = await startPlan(ctx, { accountId: 1, prId: 113, model: 'claude-opus-5-5', seed: 'review', sourceReviewId: runs.runB });
   if (plan.status !== 'queued') throw new Error(`ai plan: ${JSON.stringify(plan)}`);

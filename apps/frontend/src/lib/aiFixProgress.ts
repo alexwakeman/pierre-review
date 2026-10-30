@@ -8,7 +8,9 @@ import type { AiFixStatusResponse } from '@pierre-review/shared';
 export const PHASE_LABEL: Record<string, string> = {
   fetching_diff: 'Reading the PR',
   cloning: 'Checking out the code',
+  preparing_checks: 'Installing dependencies',
   fixing: 'Applying the fix',
+  running_checks: 'Running the tests',
   capturing: 'Capturing changes',
   persisting: 'Saving',
   planning: 'Making the plan',
@@ -25,6 +27,10 @@ export function fixProgressPct(status: AiFixStatusResponse | null): number | nul
       return 12;
     case 'cloning':
       return 28;
+    case 'preparing_checks':
+      return 34;
+    case 'running_checks':
+      return 88;
     case 'fixing':
       return Math.min(90, 45 + (p.recentActivity?.length ?? 0) * 3);
     case 'capturing':
