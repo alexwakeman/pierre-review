@@ -14,7 +14,7 @@ import type { ReviewThreadForReview } from '../../db/review-threads-for-review.j
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-const DB_PATH = '/tmp/pierre-thread-check.sqlite';
+const DB_PATH = `${process.env.LIMN_TEST_RUN_DIR ?? '/tmp'}/pierre-thread-check.sqlite`;
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
 

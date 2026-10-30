@@ -26,7 +26,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { ReviewerRoutingCard, ReviewerSuggestion } from '@pierre-review/shared';
 import { PENDING_LIMITS } from '@pierre-review/shared';
 
-const DB_PATH = '/tmp/pierre-pending-tabs-test.sqlite';
+const DB_PATH = `${process.env.LIMN_TEST_RUN_DIR ?? '/tmp'}/pierre-pending-tabs-test.sqlite`;
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
 

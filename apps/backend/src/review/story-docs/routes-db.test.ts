@@ -128,7 +128,6 @@ beforeAll(async () => {
     log: { info() {}, warn() {}, error() {} },
     accountIdOf: (req: any) => Number(req.headers['x-acct'] ?? 1),
     llm: { detectAuth: () => ({ status: 'ok' }) },
-    aiCredits: { check: async () => ({ agentBlocked: false }) },
     recordAiUsage: async (row: any) => {
       usage.push(row);
     },

@@ -14,8 +14,26 @@
 //
 // Vitest prefers this file over `vite.config.ts`, so the React plugin is not applied — fine, and
 // intentional: everything under `test/` is a pure `.ts` module, no JSX.
+//
+// THE TIME BUDGET (apps/backend/test-budget/reporter.ts, docs/TESTING.md): the same reporter the
+// backend's fast project uses, with its budget (a test over 2s, a file over 5s), warn-only here:
+// these tests do not run in CI. The source-scanning suites (designRules, textContrast, aiGating)
+// read the whole SPA and sit near the line under load; they are the ones to watch.
+import { fileURLToPath } from 'node:url';
+import TestBudgetReporter from '../backend/test-budget/reporter.js';
+
+const root = fileURLToPath(new URL('.', import.meta.url));
+
 export default {
   test: {
     include: ['test/**/*.test.ts'],
+    reporters: [
+      'default',
+      new TestBudgetReporter({
+        root,
+        label: 'frontend tests',
+        advice: ['Everything here is a pure module: make it faster (there is no slow project to move it to).'],
+      }),
+    ],
   },
 };

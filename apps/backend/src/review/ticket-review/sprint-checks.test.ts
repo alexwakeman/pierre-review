@@ -1,7 +1,7 @@
 // This Sprint's refresh → ticket checks (sprint-checks.ts), over fake deps. Pinned: only tickets with an
 // open or merged PR; skip a current check, a running one, a held one, an identical failed attempt and
 // a member count over the cap; never-checked first, then newest activity; at most `max` started, always
-// 'manual'; no credential / no credits starts nothing and says why.
+// 'manual'; no credential starts nothing and says why.
 import { describe, expect, it } from 'vitest';
 import { TICKET_REVIEW_MAX_PRS, type SprintGraphPr } from '@pierre-review/shared';
 import type { AgentContext } from '../agent-context.js';
@@ -40,11 +40,10 @@ const state = (o: Partial<{ latestFp: string; latestId: number; running: number;
   latestAttempt: o.attempt != null ? { id: o.attempt.id, status: 'failed', fingerprint: o.attempt.fp, refused: null } : null,
 });
 
-const ctx = (auth: 'ok' | 'none' = 'ok', blocked = false): AgentContext =>
+const ctx = (auth: 'ok' | 'none' = 'ok'): AgentContext =>
   ({
     log: { warn: () => {}, info: () => {}, error: () => {} },
     llm: { detectAuth: () => ({ status: auth, message: '' }) },
-    aiCredits: { check: async () => ({ agentBlocked: blocked }) },
   }) as unknown as AgentContext;
 
 function deps(over: Partial<SprintCheckDeps> = {}): SprintCheckDeps & { started: StartTicketArgs[] } {

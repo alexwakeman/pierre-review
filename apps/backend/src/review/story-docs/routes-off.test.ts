@@ -13,7 +13,7 @@ describe('story docs routes with agentic AI off', () => {
     vi.resetModules();
     process.env.LIMN_AI_DISABLED = 'true';
     process.env.DISABLE_SCHEDULER = 'true';
-    process.env.DATABASE_URL = '/tmp/pierre-storydocs-off.sqlite';
+    process.env.DATABASE_URL = `${process.env.LIMN_TEST_RUN_DIR ?? '/tmp'}/pierre-storydocs-off.sqlite`;
     const { registerStoryDocsRoutes } = await import('./routes.js');
     const { default: Fastify } = await import('fastify');
     const app = Fastify({ logger: false });

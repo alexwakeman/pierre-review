@@ -23,7 +23,7 @@ import type { ReviewThreadForReview } from '../../db/review-threads-for-review.j
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-const DB_PATH = '/tmp/pierre-claude-review-follow-up-unposted.sqlite';
+const DB_PATH = `${process.env.LIMN_TEST_RUN_DIR ?? '/tmp'}/pierre-claude-review-follow-up-unposted.sqlite`;
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
 delete process.env.LIMN_AI_DISABLED;
@@ -118,7 +118,6 @@ beforeAll(async () => {
     runTransaction: client.runTransaction,
     log: { warn: () => {}, info: () => {}, error: () => {} },
     recordAiUsage: async () => {},
-    aiCredits: { check: async () => ({ agentBlocked: false }) },
     review: {
       prepareReview: async () => ({
         strippedDiff: DIFF, promptDiff: DIFF, changedFiles: [PATH], excludedFiles: [], omittedFiles: [],

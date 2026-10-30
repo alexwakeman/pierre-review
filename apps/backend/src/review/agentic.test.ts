@@ -35,7 +35,7 @@ async function registered(env: Record<string, string | undefined>): Promise<bool
     if (v === undefined) delete process.env[k];
     else process.env[k] = v;
   }
-  process.env.DATABASE_URL = '/tmp/pierre-agentic-gate.sqlite';
+  process.env.DATABASE_URL = `${process.env.LIMN_TEST_RUN_DIR ?? '/tmp'}/pierre-agentic-gate.sqlite`;
   process.env.DISABLE_SCHEDULER = 'true';
   const { registerAgenticRoutes } = await import('./agentic.js');
   const { default: Fastify } = await import('fastify');

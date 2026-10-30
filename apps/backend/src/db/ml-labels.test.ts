@@ -12,7 +12,7 @@ import Database from 'better-sqlite3';
 import { and, eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-const DB_PATH = '/tmp/pierre-ml-labels-test.sqlite';
+const DB_PATH = `${process.env.LIMN_TEST_RUN_DIR ?? '/tmp'}/pierre-ml-labels-test.sqlite`;
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
 

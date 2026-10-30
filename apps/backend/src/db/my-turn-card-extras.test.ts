@@ -21,7 +21,7 @@ import {
   type MyTurnCard,
 } from '@pierre-review/shared';
 
-const DB_PATH = '/tmp/pierre-my-turn-card-extras-test.sqlite';
+const DB_PATH = `${process.env.LIMN_TEST_RUN_DIR ?? '/tmp'}/pierre-my-turn-card-extras-test.sqlite`;
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
 

@@ -14,7 +14,7 @@ import { rmSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { AgentContext } from '../agent-context.js';
 
-const DB_PATH = '/tmp/pierre-ci-review-persist-db.sqlite';
+const DB_PATH = `${process.env.LIMN_TEST_RUN_DIR ?? '/tmp'}/pierre-ci-review-persist-db.sqlite`;
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
 
@@ -159,7 +159,6 @@ beforeAll(async () => {
     recordAiUsage: async () => {},
     host: {},
     llm: { detectAuth: () => ({ status: 'ok' }) },
-    aiCredits: { check: async () => ({ agentBlocked: false }) },
     log: { info: () => {}, warn: () => {}, error: () => {} },
   } as any as AgentContext;
   for (const id of [1, 2]) {

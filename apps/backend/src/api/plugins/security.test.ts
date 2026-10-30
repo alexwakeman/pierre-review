@@ -8,7 +8,7 @@
 // pattern.
 import { beforeAll, describe, expect, it } from 'vitest';
 
-process.env.DATABASE_URL = '/tmp/pierre-security-test.sqlite';
+process.env.DATABASE_URL = `${process.env.LIMN_TEST_RUN_DIR ?? '/tmp'}/pierre-security-test.sqlite`;
 process.env.DISABLE_SCHEDULER = 'true';
 process.env.RATE_LIMIT_DISABLED = 'true'; // isolate the guards from the limiter
 

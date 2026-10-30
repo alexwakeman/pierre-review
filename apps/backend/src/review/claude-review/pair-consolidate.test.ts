@@ -23,7 +23,7 @@ import type { ClaudeFindingSeverity } from '@pierre-review/shared';
 import type { AgentContext } from '../agent-context.js';
 import type { CheapCompleteOpts } from '../llm.js';
 
-const DB_PATH = '/tmp/pierre-claude-pair-consolidate.sqlite';
+const DB_PATH = `${process.env.LIMN_TEST_RUN_DIR ?? '/tmp'}/pierre-claude-pair-consolidate.sqlite`;
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
 

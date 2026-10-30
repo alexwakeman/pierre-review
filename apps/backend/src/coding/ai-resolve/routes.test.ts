@@ -3,7 +3,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 
-process.env.DATABASE_URL = '/tmp/pierre-ai-resolve-routes-test.sqlite';
+process.env.DATABASE_URL = `${process.env.LIMN_TEST_RUN_DIR ?? '/tmp'}/pierre-ai-resolve-routes-test.sqlite`;
 process.env.DISABLE_SCHEDULER = 'true';
 
 type PrCtx = { state: string; viewerPermission: string | null } | null;
@@ -62,7 +62,6 @@ async function build(): Promise<FastifyInstance> {
     accountIdOf: () => caller,
     log: { warn: vi.fn(), info: vi.fn(), error: vi.fn() },
     llm: { detectAuth: () => ({ status: 'ok' }) },
-    aiCredits: { check: async () => ({ agentBlocked: false }) },
     recordAiUsage: vi.fn(async () => {}),
   } as unknown as AgentContext;
   registerAiResolveRoutes(app, ctx, { runOpen: runOpen as never });

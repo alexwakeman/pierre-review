@@ -702,7 +702,7 @@ describe('deep links back into the app', () => {
     );
   });
 
-  it('works in cloud, and tolerates a trailing slash', () => {
+  it('works on any https base, and tolerates a trailing slash', () => {
     const ctx = withBase('https://app.example.com/');
     expect(workspaceLink(ctx, 7)).toBe('https://app.example.com/app/?view=activity&workspace=7&activityRepo=feed');
   });

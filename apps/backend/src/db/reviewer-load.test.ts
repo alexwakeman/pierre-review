@@ -29,7 +29,7 @@ import { rmSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { InsightCard, ReviewerLoadCard, StalledReviewCard } from '@pierre-review/shared';
 
-const DB_PATH = '/tmp/pierre-reviewer-load-test.sqlite';
+const DB_PATH = `${process.env.LIMN_TEST_RUN_DIR ?? '/tmp'}/pierre-reviewer-load-test.sqlite`;
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
 

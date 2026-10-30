@@ -16,7 +16,7 @@ import { eq } from 'drizzle-orm';
 import { AUTO_POST_DEFAULT_KINDS, AUTO_POST_FOOTER, type TicketAssessment } from '@pierre-review/shared';
 import type { AgentContext } from '../agent-context.js';
 
-const DB_PATH = '/tmp/pierre-ticket-auto-post.sqlite';
+const DB_PATH = `${process.env.LIMN_TEST_RUN_DIR ?? '/tmp'}/pierre-ticket-auto-post.sqlite`;
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
 
@@ -147,7 +147,6 @@ beforeAll(async () => {
     accountIdOf: () => 1,
     host: {},
     llm: { detectAuth: () => ({ status: 'ok' }) },
-    aiCredits: { check: async () => ({ agentBlocked: false }) },
     review: { postFinding },
     log: { info: () => {}, warn: () => {}, error: () => {} },
   } as any as AgentContext;

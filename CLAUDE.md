@@ -132,7 +132,7 @@ All from the repo root unless noted.
 | `pnpm dev` | backend (`:4000`) + frontend (`:5173`); bot comments scored in-process |
 | `pnpm dev:backend` / `dev:frontend` / `dev:ml` / `dev:site` | run one side only |
 | `pnpm build` · `pnpm typecheck` | recursive build · `tsc --noEmit` everywhere — **run typecheck before calling work done** |
-| `pnpm test` · `test:all` | fast backend tests + site · plus the `slow` ones |
+| `pnpm test:changed` · `test` · `test:all` | what a change touches · fast + site · + `slow` |
 | `pnpm db:generate` · `db:migrate` · `db:studio` | Drizzle migration from `schema.sqlite.ts` · apply (also runs on boot) · studio |
 | `pnpm sync:once owner/repo` | one-off sync of one repo without the server |
 | `pnpm --filter @pierre-review/backend verify:isolation` | query-layer cross-account IDOR check |
@@ -592,7 +592,7 @@ AI route. `api/plugins/security.ts` (CSP, loopback-only CORS, cross-origin guard
 
 ## Verifying changes
 
-`pnpm test` + `pnpm typecheck` for backend/heuristic logic (+ touched `slow` files). For UI,
+`pnpm test:changed` (inner loop), `pnpm test` + `pnpm typecheck` for backend logic. For UI,
 `pnpm dev` is usually running (real-DB cases: `sqlite3`); deep-link with `?pr=<id>`, `?repos=<ids>`
 on `/app/`. New id-routes: `verify:isolation`.
 

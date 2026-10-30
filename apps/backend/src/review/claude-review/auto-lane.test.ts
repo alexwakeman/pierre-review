@@ -109,7 +109,6 @@ beforeEach(async () => {
   /* eslint-disable @typescript-eslint/no-explicit-any */
   ctx = {
     log: { error: () => {}, info: () => {}, warn: () => {} },
-    aiCredits: { check: async () => ({ agentBlocked: false }) },
     review: {
       prepareReview: ({ prNumber }: { prNumber: number }) =>
         new Promise((_res, rej) => {

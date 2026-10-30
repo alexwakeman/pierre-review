@@ -30,7 +30,7 @@ import type {
   PendingCardScore,
 } from '@pierre-review/shared';
 
-const DB_PATH = '/tmp/pierre-my-turn-settings-test.sqlite';
+const DB_PATH = `${process.env.LIMN_TEST_RUN_DIR ?? '/tmp'}/pierre-my-turn-settings-test.sqlite`;
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
 
@@ -938,7 +938,7 @@ describe('the board ranks by the reader\'s rules', () => {
   });
 });
 
-describe('the Pro plan does not change shape under a promotion', () => {
+describe('the work plan does not change shape under a promotion', () => {
   it('keeps a promoted red build as the same unblock_ci row, pointing at its my_turn card', async () => {
     const workPlan = await import('./work-plan.js');
     const { getMyTurnSettings } = await import('./my-turn-settings.js');

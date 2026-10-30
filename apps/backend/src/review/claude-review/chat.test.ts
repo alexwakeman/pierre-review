@@ -19,7 +19,7 @@ import type { AgentContext as ProContext } from '../agent-context.js';
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 
-const DB_PATH = '/tmp/pierre-claude-review-chat.sqlite';
+const DB_PATH = `${process.env.LIMN_TEST_RUN_DIR ?? '/tmp'}/pierre-claude-review-chat.sqlite`;
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
 
@@ -40,7 +40,6 @@ const chatCalls: ReviewChatArgs[] = [];
 let chatImpl: (a: ReviewChatArgs) => Promise<ReviewChatResult>;
 const prepareCalls: unknown[] = [];
 const usage: any[] = [];
-let blocked = false;
 
 const answer = (text: string, over: Partial<ReviewChatResult> = {}): ReviewChatResult => ({
   ok: true,
@@ -70,7 +69,6 @@ beforeAll(async () => {
     recordAiUsage: async (row: any) => {
       usage.push(row);
     },
-    aiCredits: { check: async () => ({ agentBlocked: blocked, blocked: false }) },
     review: {
       prepareReview: async (a: unknown) => {
         prepareCalls.push(a);
@@ -171,7 +169,6 @@ beforeEach(() => {
   chatCalls.length = 0;
   prepareCalls.length = 0;
   usage.length = 0;
-  blocked = false;
   chatImpl = async () => answer('Because the value can be null.');
 });
 

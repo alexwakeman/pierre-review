@@ -13,7 +13,7 @@ describe('story build routes with agentic AI off', () => {
     vi.resetModules();
     process.env.LIMN_AI_DISABLED = 'true';
     process.env.DISABLE_SCHEDULER = 'true';
-    process.env.DATABASE_URL = '/tmp/pierre-storybuild-off.sqlite';
+    process.env.DATABASE_URL = `${process.env.LIMN_TEST_RUN_DIR ?? '/tmp'}/pierre-storybuild-off.sqlite`;
     const { registerStoryBuildRoutes } = await import('./routes.js');
     const { default: Fastify } = await import('fastify');
     const app = Fastify({ logger: false });

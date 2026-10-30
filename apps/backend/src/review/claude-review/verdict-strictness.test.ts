@@ -37,7 +37,7 @@ import { repliesNotApproved, repliesVerdict } from './replies-pass.js';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-const DB_PATH = '/tmp/pierre-claude-verdict-strictness.sqlite';
+const DB_PATH = `${process.env.LIMN_TEST_RUN_DIR ?? '/tmp'}/pierre-claude-verdict-strictness.sqlite`;
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
 

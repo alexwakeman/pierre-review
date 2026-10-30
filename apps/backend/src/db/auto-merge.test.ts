@@ -64,7 +64,7 @@ vi.mock('../coding/merge.js', () => ({
   updatePrBranchFromTrunk: vi.fn(async () => ({ headSha: 'rebased1' })),
 }));
 
-const DB_PATH = '/tmp/pierre-auto-merge-test.sqlite';
+const DB_PATH = `${process.env.LIMN_TEST_RUN_DIR ?? '/tmp'}/pierre-auto-merge-test.sqlite`;
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
 

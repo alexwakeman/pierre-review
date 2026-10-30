@@ -156,9 +156,3 @@ describe.skipIf(!LIVE)('the review stream on Codex, live (LIMN_CODEX_LIVE=1)', (
     expect(res.usageRecorded).toBe(true);
   }, 300_000);
 });
-
-describe.skipIf(LIVE)('the review stream on Codex, live', () => {
-  it('is skipped unless LIMN_CODEX_LIVE=1', () => {
-    expect(LIVE).toBe(false);
-  });
-});

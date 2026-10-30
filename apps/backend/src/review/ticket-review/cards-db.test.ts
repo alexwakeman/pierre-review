@@ -11,7 +11,7 @@ import { rmSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { AgentContext } from '../agent-context.js';
 
-const DB_PATH = '/tmp/pierre-ticket-review-cards-db.sqlite';
+const DB_PATH = `${process.env.LIMN_TEST_RUN_DIR ?? '/tmp'}/pierre-ticket-review-cards-db.sqlite`;
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
 

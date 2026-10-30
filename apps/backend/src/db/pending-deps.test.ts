@@ -31,7 +31,7 @@ import type {
   DependencyBumpCard,
 } from '@pierre-review/shared';
 
-const DB_PATH = '/tmp/pierre-pending-deps-test.sqlite';
+const DB_PATH = `${process.env.LIMN_TEST_RUN_DIR ?? '/tmp'}/pierre-pending-deps-test.sqlite`;
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
 

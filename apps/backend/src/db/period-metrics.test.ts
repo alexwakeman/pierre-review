@@ -39,7 +39,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 // which is exactly what lets it prove the backend's mirrored key list has not drifted.
 import { PERIOD_METRIC_KEYS as SHARED_KEYS } from '@pierre-review/shared';
 
-const DB_PATH = '/tmp/pierre-period-metrics-test.sqlite';
+const DB_PATH = `${process.env.LIMN_TEST_RUN_DIR ?? '/tmp'}/pierre-period-metrics-test.sqlite`;
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
 

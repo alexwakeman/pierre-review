@@ -93,7 +93,6 @@ beforeAll(async () => {
     log: { info() {}, warn() {}, error() {} },
     accountIdOf: () => 1,
     llm: { detectAuth: () => ({ status: 'ok' }) },
-    aiCredits: { check: async () => ({ agentBlocked: false }) },
     recordAiUsage: async () => {},
   };
   const Fastify = (await import('fastify')).default;

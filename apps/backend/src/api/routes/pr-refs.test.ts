@@ -10,7 +10,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { PR_REF_RESOLVE_MAX, type ResolvePrRefsResponse } from '@pierre-review/shared';
 
-const DB_PATH = '/tmp/pierre-pr-refs-route.sqlite';
+const DB_PATH = `${process.env.LIMN_TEST_RUN_DIR ?? '/tmp'}/pierre-pr-refs-route.sqlite`;
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
 

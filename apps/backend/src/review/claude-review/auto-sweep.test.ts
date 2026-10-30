@@ -5,12 +5,11 @@
 //
 //   1. the FLOOR it asks with is the workspace's own `enabledAt`, and the day is the UTC day;
 //   2. ⚠ THE DAILY CAP counts runs already started today PLUS items still waiting in the lane;
-//   3. an account whose credits are spent sits the tick out (and its candidates are never read);
-//   4. ⚠ IT NEVER RUNS IN CLOUD, or on a host without the seam;
-//   5. a full lane stops the tick — the rest wait, since the database is the queue;
-//   6. ⚠ while AI is not set up (no runtime / no credential) it queues NOTHING, so no PR gets a
+//   3. it does nothing on a host without the seam;
+//   4. a full lane stops the tick — the rest wait, since the database is the queue;
+//   5. ⚠ while AI is not set up (no runtime / no credential) it queues NOTHING, so no PR gets a
 //      failed row that would use up its one automatic review;
-//   7. ⚠ a RE-REVIEW of a moved head is DEBOUNCED: queued once the head has held still for
+//   6. ⚠ a RE-REVIEW of a moved head is DEBOUNCED: queued once the head has held still for
 //      AUTO_REREVIEW_SETTLE_MS, once per head, and a burst of pushes costs one run.
 //
 //   pnpm --filter @pierre-review/backend test claude-review/auto-sweep
@@ -88,12 +87,10 @@ let answers: Map<
     retry?: Array<{ prId: number; headSha: string; failedReviewId: number; failedAtMs: number; error: string | null; provider: 'claude' | 'codex'; attempts: number }>;
   }
 >;
-let blocked: Set<number>;
 const makeCtx = (over: Record<string, unknown> = {}): ProContext =>
   ({
     host: {},
     log: { info: () => {}, warn: () => {}, error: () => {} },
-    aiCredits: { check: async (a: number) => ({ agentBlocked: blocked.has(a) }) },
     queries: {
       getAutoReviewCandidates: async (accountId: number, workspaceId: number, opts: any) => {
         calls.push({ accountId, workspaceId, ...opts });
@@ -116,7 +113,6 @@ beforeEach(() => {
   aiReady = true;
   calls = [];
   answers = new Map();
-  blocked = new Set();
   roster = [{ accountId: 1, workspaceId: 7, enabledAtMs: NOW - 3_600_000, dailyCap: 20 }];
   _resetAutoReReviewForTest();
 });

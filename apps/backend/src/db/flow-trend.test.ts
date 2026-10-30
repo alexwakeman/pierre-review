@@ -17,7 +17,7 @@ import { rmSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { FlowTrendWeek } from '@pierre-review/shared';
 
-const DB_PATH = `/tmp/pierre-flow-trend-test-${process.pid}.sqlite`;
+const DB_PATH = `${process.env.LIMN_TEST_RUN_DIR ?? '/tmp'}/pierre-flow-trend-test-${process.pid}.sqlite`;
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
 process.env.WORK_TIMEZONE = 'UTC';

@@ -11,7 +11,7 @@ import { rmSync } from 'node:fs';
 import { and, eq, isNull } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
-const DB_PATH = '/tmp/pierre-hydrate-backfill-test.sqlite';
+const DB_PATH = `${process.env.LIMN_TEST_RUN_DIR ?? '/tmp'}/pierre-hydrate-backfill-test.sqlite`;
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
 

@@ -9,7 +9,8 @@ import { defaultExclude, defineWorkspace } from 'vitest/config';
 //     scorer. Measured 2026-10-30 these cases were 20 of 419 files and 93% of the suite's test
 //     time (1,655s of 1,778s), and the longest file alone set the wall clock of the whole run.
 //
-// `pnpm test:all` (or a bare `vitest run`) runs both. Naming a file runs it whichever project it
+// `pnpm test:all` runs both. (A bare `vitest run` also runs the third project, `live`, whose
+// cases all skip without LIMN_CODEX_LIVE=1.) Naming a file runs it whichever project it
 // is in, so `vitest run src/conflict/land.test.ts` still works.
 //
 // CI never drops a slow file silently: a pull request runs the `slow` files that IMPORT anything
@@ -47,15 +48,32 @@ export const SLOW_TESTS = [
   // The ONNX model (runs only where packages/ml holds the weights; ~240 MB to load).
   'src/ml/local-scorer.test.ts',
   'src/ml/model.test.ts',
+  // Moved 2026-10-30 by the time budget: the workspace MCP server spawned under tsx (split from workspace-mcp.test.ts); measured 1.8s for its one case
+  'src/ai/codex/workspace-mcp-process.test.ts',
+  // Moved 2026-10-30 by the time budget: spawns node children and a stand-in docker script per case (runProcess, dockerPreflight); measured 3.1s, 1.3s for one case
+  'src/coding/checks/runner.test.ts',
+  // Moved 2026-10-30 by the time budget: real git per case (pins and sweeps base refs in a scratch repo); measured 4.3s for one case
+  'src/coding/story-build/base-refs.test.ts',
+  // Moved 2026-10-30 by the time budget: the fake Codex CLI, one node process per sign-in call, like the other Codex suites; measured 2.0s, 1.6s for one case
+  'src/api/routes/ai-codex.test.ts',
 ];
+
+// THE LIVE CODEX TESTS: a real `codex` binary and a real ChatGPT sign-in, spending real usage. Every
+// case is skipped unless LIMN_CODEX_LIVE=1, so in `fast`/`slow` they only paid the import. They are
+// their own project, run by hand: `pnpm --filter @pierre-review/backend test:live`.
+export const LIVE_TESTS = ['src/**/*.live.test.ts', 'src/**/*-live.test.ts', 'src/ai/codex/live.test.ts'];
 
 export default defineWorkspace([
   {
     extends: './vitest.config.ts',
-    test: { name: 'fast', exclude: [...defaultExclude, ...SLOW_TESTS] },
+    test: { name: 'fast', exclude: [...defaultExclude, ...SLOW_TESTS, ...LIVE_TESTS] },
   },
   {
     extends: './vitest.config.ts',
-    test: { name: 'slow', include: SLOW_TESTS },
+    test: { name: 'slow', include: SLOW_TESTS, exclude: [...defaultExclude, ...LIVE_TESTS] },
+  },
+  {
+    extends: './vitest.config.ts',
+    test: { name: 'live', include: LIVE_TESTS },
   },
 ]);

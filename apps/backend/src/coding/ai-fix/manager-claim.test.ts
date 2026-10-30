@@ -37,7 +37,6 @@ function fakeCtx(): AgentContext {
   return {
     log: { warn: vi.fn(), info: vi.fn() },
     llm: { detectAuth: () => ({ status: 'ok' }) },
-    aiCredits: { check: async () => ({ agentBlocked: false }) },
     github: {
       fetchPrHeadInfo: vi.fn(async () => ({ headSha: 'h1' })),
       fetchPrDiff: vi.fn(async () => ''),

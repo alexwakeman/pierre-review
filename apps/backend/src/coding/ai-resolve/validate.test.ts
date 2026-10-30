@@ -5,7 +5,7 @@
 // would all render as "Claude decided this" and land on the next commit.
 import { beforeEach, describe, expect, it } from 'vitest';
 
-process.env.DATABASE_URL = '/tmp/pierre-ai-resolve-validate-test.sqlite';
+process.env.DATABASE_URL = `${process.env.LIMN_TEST_RUN_DIR ?? '/tmp'}/pierre-ai-resolve-validate-test.sqlite`;
 process.env.DISABLE_SCHEDULER = 'true';
 
 import type { ConflictAiChoice } from '@pierre-review/shared';

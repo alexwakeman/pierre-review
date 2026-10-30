@@ -26,7 +26,7 @@ import type { LinkedPr } from './replies-linked-prs.js';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-const DB_PATH = '/tmp/pierre-claude-review-replies-related.sqlite';
+const DB_PATH = `${process.env.LIMN_TEST_RUN_DIR ?? '/tmp'}/pierre-claude-review-replies-related.sqlite`;
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
 delete process.env.LIMN_AI_DISABLED;

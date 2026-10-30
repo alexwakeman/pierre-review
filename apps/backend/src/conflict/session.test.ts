@@ -10,7 +10,7 @@
 //     will leave conflicted.
 import { beforeEach, describe, expect, it } from 'vitest';
 
-process.env.DATABASE_URL = '/tmp/pierre-conflict-session-test.sqlite';
+process.env.DATABASE_URL = `${process.env.LIMN_TEST_RUN_DIR ?? '/tmp'}/pierre-conflict-session-test.sqlite`;
 process.env.DISABLE_SCHEDULER = 'true';
 
 import type { ConflictSessionEvent } from '@pierre-review/shared';

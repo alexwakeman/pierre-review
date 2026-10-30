@@ -26,7 +26,7 @@ import { rmSync } from 'node:fs';
 import { and, eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-const DB_PATH = '/tmp/pierre-reparse-badges-test.sqlite';
+const DB_PATH = `${process.env.LIMN_TEST_RUN_DIR ?? '/tmp'}/pierre-reparse-badges-test.sqlite`;
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
 // The gate. Nothing is ever sent to this host — `fetch` is stubbed below — but it has to parse

@@ -1,0 +1,67 @@
+{
+  "$comment": "Fast-project files allowed over the time budget (test-budget/reporter.ts, docs/TESTING.md § The time budget). Each entry RAISES the budget for one file (testMs: any one test; fileMs: the file's run time) and says why; never unlimited, so an exempt file still cannot quietly get slower. Budgets are about twice what the file measured on 2026-10-30 (12-core macOS, load average ~30). None of these spawns a process: each is in-process work, slow for the reason given, so it stays in `fast` and is a candidate to make quicker. Remove an entry once its file fits the default budget (the reporter says so).",
+  "files": {
+    "src/db/my-turn-settings.test.ts": {
+      "testMs": 20000,
+      "fileMs": 40000,
+      "reason": "Exhaustive by design: every combination of the four promotion switches and three trunk scopes (48), two board folds each, and a full fold plus the daily brief per switched-off type. Measured 9.8s for the sweep, 20.9s for the file."
+    },
+    "src/platform/test/benchmark-rollup.test.ts": {
+      "testMs": 20000,
+      "fileMs": 20000,
+      "reason": "One property sweep over every estate shape that can reach a divisor in the money rollup (finite, bounded money or a refusal). Measured 9.9s."
+    },
+    "src/db/my-turn-card-facts.test.ts": {
+      "testMs": 8000,
+      "fileMs": 12000,
+      "reason": "The first case runs the whole board fold over the My Turn fixture (the later cases reuse it). Measured 3.5s for that case, 5.3s for the file."
+    },
+    "src/review/claude-review/auto-post.test.ts": {
+      "fileMs": 12000,
+      "reason": "70 cases on one throwaway database, none slow alone (the slowest 355ms). Measured 5.7s for the file."
+    },
+    "src/db/work-plan.test.ts": {
+      "fileMs": 12000,
+      "reason": "51 cases on one throwaway database, none slow alone (the slowest 500ms). Measured 5.4s for the file."
+    },
+    "src/db/pending-card-source.test.ts": {
+      "testMs": 6000,
+      "fileMs": 10000,
+      "reason": "The first case folds the whole Pending board over the shared fixture. Measured 2.8s for it, 4.3s for the file."
+    },
+    "src/db/ci-failing-cards.test.ts": {
+      "testMs": 6000,
+      "fileMs": 10000,
+      "reason": "The first case folds the whole Pending board over the shared fixture. Measured 2.8s for it, 4.1s for the file."
+    },
+    "src/db/failing-checks.test.ts": {
+      "testMs": 6000,
+      "fileMs": 10000,
+      "reason": "One case folds every card kind to prove none carries a check name. Measured 2.7s for it, 3.7s for the file."
+    },
+    "src/review/claude-review/team-review-fixes.test.ts": {
+      "testMs": 5000,
+      "reason": "Its first case imports the review pipeline. Measured 2.5s."
+    },
+    "src/sync/limn-ci.test.ts": {
+      "testMs": 5000,
+      "reason": "Its first case imports sync/upsert.ts, and with it the database client. Measured 2.5s."
+    },
+    "src/sync/limn-status-ci.test.ts": {
+      "testMs": 5000,
+      "reason": "Its first database case imports sync/upsert.ts, and with it the database client. Measured 2.3s."
+    },
+    "src/review/agentic.test.ts": {
+      "testMs": 5000,
+      "reason": "Resets the module graph and imports every agentic route family, once per case. Measured 2.2s."
+    },
+    "src/review/claude-review/routes.test.ts": {
+      "testMs": 5000,
+      "reason": "Its first case imports the review routes and their pipeline. Measured 2.2s."
+    },
+    "src/ml/markers.test.ts": {
+      "testMs": 5000,
+      "reason": "Its first case to run (the parity cases skip without packages/ml) pays the marker tables' first build. Measured 2.1s."
+    }
+  }
+}

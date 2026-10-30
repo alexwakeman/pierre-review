@@ -13,7 +13,7 @@ import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { setFakeCodex, writeFakeCodex } from '../../ai/codex/fake-codex.test-support.js';
 
-const DB_PATH = '/tmp/pierre-ai-codex-routes-test.sqlite';
+const DB_PATH = `${process.env.LIMN_TEST_RUN_DIR ?? '/tmp'}/pierre-ai-codex-routes-test.sqlite`;
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
 const root = mkdtempSync(join(tmpdir(), 'limn-ai-codex-routes-'));

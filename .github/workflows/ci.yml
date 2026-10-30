@@ -61,7 +61,15 @@ jobs:
       - run: pnpm typecheck
 
       # The fast project (every backend file except the spawn-bound ones) + the site's tests.
+      # THE TIME BUDGET (apps/backend/test-budget/reporter.ts, docs/TESTING.md): on a pull request a
+      # test file the PR adds or edits FAILS the run if a test in it is over 2s or the file over 5s —
+      # move it to the slow project (`pnpm --filter @pierre-review/backend test:move-slow <file>`),
+      # make it faster, or allowlist it with a reason. Files the PR did not touch only warn, so a
+      # timing wobble never fails somebody else's change. The nightly run only warns.
       - run: pnpm test
+        env:
+          LIMN_TEST_BUDGET: ${{ github.event_name == 'pull_request' && 'enforce' || 'warn' }}
+          LIMN_TEST_BUDGET_BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}
 
       # ---- The slow backend project (vitest.workspace.ts, docs/TESTING.md) ----
       # Real git, the fake Codex CLI, the runtime installer, the ONNX scorer: ~93% of the suite's

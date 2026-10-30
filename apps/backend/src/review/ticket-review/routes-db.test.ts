@@ -14,7 +14,7 @@ import type { FastifyInstance } from 'fastify';
 import type { TicketAssessment } from '@pierre-review/shared';
 import type { AgentContext } from '../agent-context.js';
 
-const DB_PATH = '/tmp/pierre-ticket-review-routes-db.sqlite';
+const DB_PATH = `${process.env.LIMN_TEST_RUN_DIR ?? '/tmp'}/pierre-ticket-review-routes-db.sqlite`;
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
 
@@ -118,7 +118,6 @@ beforeAll(async () => {
     accountIdOf: () => 1,
     host: {},
     llm: { detectAuth: () => ({ status: 'ok' }) },
-    aiCredits: { check: async () => ({ agentBlocked: false }) },
     review: { postFinding },
     log: { info: () => {}, warn: () => {}, error: () => {} },
   } as any as AgentContext;

@@ -13,7 +13,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 const ROOT = mkdtempSync(join(tmpdir(), 'pierre-janitor-'));
 const CLONE_DIR = join(ROOT, 'clones');
 process.env.CLONE_DIR = CLONE_DIR;
-process.env.DATABASE_URL = '/tmp/pierre-conflict-janitor-test.sqlite';
+process.env.DATABASE_URL = `${process.env.LIMN_TEST_RUN_DIR ?? '/tmp'}/pierre-conflict-janitor-test.sqlite`;
 process.env.DISABLE_SCHEDULER = 'true';
 
 // ⚠ DYNAMIC, IN `beforeAll`, AND THIS IS NOT A STYLE CHOICE. A static `import` is HOISTED above
@@ -81,7 +81,7 @@ beforeEach(() => {
 afterAll(() => {
   rmSync(ROOT, { recursive: true, force: true });
   for (const s of ['', '-shm', '-wal']) {
-    rmSync('/tmp/pierre-conflict-janitor-test.sqlite' + s, { force: true });
+    rmSync(`${process.env.LIMN_TEST_RUN_DIR ?? '/tmp'}/pierre-conflict-janitor-test.sqlite` + s, { force: true });
   }
 });
 

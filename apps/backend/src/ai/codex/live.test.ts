@@ -375,11 +375,3 @@ describe.skipIf(!LIVE)('Codex, live (LIMN_CODEX_LIVE=1)', () => {
     expect(existsSync(join(home, 'plugins', '.remote-plugin-install-staging'))).toBe(false);
   }, 60_000);
 });
-
-if (!LIVE) {
-  describe('Codex, live', () => {
-    it('is skipped unless LIMN_CODEX_LIVE=1', () => {
-      expect(LIVE).toBe(false);
-    });
-  });
-}

@@ -28,7 +28,7 @@ import type { FastifyInstance } from 'fastify';
 import { AUTO_POST_FOOTER, type ClaudeFindingSeverity } from '@pierre-review/shared';
 import type { AgentContext } from '../agent-context.js';
 
-const DB_PATH = '/tmp/pierre-claude-posted-state.sqlite';
+const DB_PATH = `${process.env.LIMN_TEST_RUN_DIR ?? '/tmp'}/pierre-claude-posted-state.sqlite`;
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
 

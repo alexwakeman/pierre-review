@@ -17,7 +17,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import { TICKET_REVIEW_MAX_PRS, type ClaudeReviewTicket } from '@pierre-review/shared';
 import type { AgentContext } from '../agent-context.js';
 
-const DB_PATH = '/tmp/pierre-ticket-review-sweep-db.sqlite';
+const DB_PATH = `${process.env.LIMN_TEST_RUN_DIR ?? '/tmp'}/pierre-ticket-review-sweep-db.sqlite`;
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
 
@@ -187,7 +187,6 @@ beforeAll(async () => {
     recordAiUsage: async () => {},
     host: {},
     llm: { detectAuth: () => ({ status: 'ok' }) },
-    aiCredits: { check: async () => ({ agentBlocked: false }) },
     log: { info: () => {}, warn: () => {}, error: () => {} },
   } as any as AgentContext;
   await db.insert(schema.accounts).values({ id: 1, githubUserId: 'U_me', githubLogin: 'me', isLocal: true }).onConflictDoNothing().execute();

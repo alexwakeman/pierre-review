@@ -12,7 +12,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { ClaudeCiFailuresRecord } from '@pierre-review/shared';
 import type { AgentContext } from '../agent-context.js';
 
-const DB_PATH = '/tmp/pierre-claude-review-ci-failures-db.sqlite';
+const DB_PATH = `${process.env.LIMN_TEST_RUN_DIR ?? '/tmp'}/pierre-claude-review-ci-failures-db.sqlite`;
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
 
