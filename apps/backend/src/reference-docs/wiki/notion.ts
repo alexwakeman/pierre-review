@@ -343,6 +343,16 @@ export function notionSource(deps: NotionDeps = {}): WikiSource {
       const blocks = await readBlockTree(id, opts, deps);
       return { ...page, body: JSON.stringify({ v: 1, blocks }) };
     },
+    async resolveRoot(ref, opts) {
+      const id = checkId(ref.pageId);
+      const raw = obj(await notionRequest(`/pages/${id}`, opts, deps));
+      const page = toNotionPage(raw);
+      // A TOP-LEVEL page (its parent is the workspace) is the wiki's home: the whole wiki is read.
+      // Traversal is the same either way — the page and every page below it.
+      const top = obj(raw?.parent)?.type === 'workspace';
+      const scope = top ? { kind: 'space' as const, name: page.title, key: null, id: null } : { kind: 'tree' as const };
+      return { ref: { ...ref, scope }, title: page.title, scope };
+    },
     async listDescendants(_site, rootId, depth, cap, opts) {
       const root = checkId(rootId);
       const pages: WikiPageMeta[] = [];

@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, gte, inArray, isNotNull, sql } from 'drizzle-orm';
 import { aiRunProvider, chatCitationsFromStored } from '@pierre-review/shared';
-import { REFERENCE_DOC_WIKI_MAX_DEPTH } from '@pierre-review/shared';
+import { REFERENCE_DOC_WIKI_ALL_DEPTH, REFERENCE_DOC_WIKI_MAX_DEPTH, type WikiScope } from '@pierre-review/shared';
 import type {
   ReferenceDoc,
   ReferenceDocCitation,
@@ -53,14 +53,17 @@ const isoMs = (ms: number | null | undefined): string | null => (typeof ms === '
 export function wikiStateOf(v: unknown): ReferenceDocWikiState | null {
   if (v == null || typeof v !== 'object') return null;
   const w = v as Partial<ReferenceDocWikiState>;
-  if ((w.provider !== 'confluence' && w.provider !== 'notion') || typeof w.origin !== 'string' || typeof w.rootPageId !== 'string') return null;
+  if ((w.provider !== 'confluence' && w.provider !== 'notion' && w.provider !== 'github') || typeof w.origin !== 'string' || typeof w.rootPageId !== 'string') return null;
   const n = (x: unknown): number | null => (typeof x === 'number' && Number.isFinite(x) ? x : null);
+  const scope = wikiScopeOf(w.scope);
+  // A scoped source reads every level; an older one its 0–3 child levels.
+  const depth = n(w.depth) ?? 0;
   return {
     provider: w.provider,
     origin: w.origin,
     rootPageId: w.rootPageId,
     rootUrl: typeof w.rootUrl === 'string' ? w.rootUrl : w.origin,
-    depth: Math.max(0, Math.min(REFERENCE_DOC_WIKI_MAX_DEPTH, n(w.depth) ?? 0)),
+    depth: scope ? REFERENCE_DOC_WIKI_ALL_DEPTH : Math.max(0, Math.min(REFERENCE_DOC_WIKI_MAX_DEPTH, depth)),
     pageCount: n(w.pageCount),
     pagesLeftOut: n(w.pagesLeftOut) ?? 0,
     lastCheckedAt: n(w.lastCheckedAt),
@@ -69,7 +72,22 @@ export function wikiStateOf(v: unknown): ReferenceDocWikiState | null {
     unreachableSince: n(w.unreachableSince),
     unreachableReason: w.unreachableReason ?? null,
     retryAfter: n(w.retryAfter),
+    scope,
+    rootTitle: typeof w.rootTitle === 'string' ? w.rootTitle.slice(0, 300) : null,
   };
+}
+
+/** A stored scope, checked field by field (the row is JSON), or null. */
+export function wikiScopeOf(v: unknown): WikiScope | null {
+  if (v == null || typeof v !== 'object') return null;
+  const o = v as Record<string, unknown>;
+  const s = (x: unknown): string | null => (typeof x === 'string' ? x : null);
+  if (o.kind === 'tree') return { kind: 'tree' };
+  if (o.kind === 'space') return { kind: 'space', name: s(o.name) ?? '', key: s(o.key), id: s(o.id) };
+  if (o.kind === 'repo' && s(o.owner) && s(o.repo) && s(o.branch) && typeof o.path === 'string') {
+    return { kind: 'repo', owner: s(o.owner)!, repo: s(o.repo)!, path: o.path, branch: s(o.branch)! };
+  }
+  return null;
 }
 
 /** The wire half of the stored wiki state. */
@@ -92,6 +110,7 @@ export function toWikiWire(s: ReferenceDocWikiState): ReferenceDocWiki {
     lastChangedAt: isoMs(s.lastChangedAt),
     unreachableSince: isoMs(s.unreachableSince),
     unreachableReason: s.unreachableReason,
+    ...(s.scope ? { scope: s.scope, rootTitle: s.rootTitle ?? null } : {}),
   };
 }
 

@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { parseConfluencePageUrl } from '@pierre-review/shared';
+import { parseConfluencePageUrl, parseConfluenceSpaceUrl } from '@pierre-review/shared';
 import type { JiraTransport, RawResponse } from '../../tracker/jira/fetch.js';
 import { confluenceGetJson, confluenceSource, cqlSince, nextUrl, orderTree, retryAfterMs } from './confluence.js';
 import { WikiSourceError, type WikiPageRef } from './source.js';
@@ -208,5 +208,100 @@ describe('figures (docs/REFERENCE-DOCS.md § Figures)', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+// THE WIZARD'S SCOPES: a space address, a page that is the space's home (→ the whole space), any other
+// page (→ it and every page below it, past the listing's 5 levels), and the space-wide change search.
+describe('scopes', () => {
+  const page = (id: string, parentId: string, depth: number, extra: Record<string, unknown> = {}): Record<string, unknown> => ({
+    id,
+    type: 'page',
+    status: 'current',
+    title: `Page ${id}`,
+    parentId,
+    depth,
+    childPosition: Number(id),
+    ...extra,
+  });
+
+  it('reads a space address and finds its home page', async () => {
+    expect(parseConfluenceSpaceUrl('https://acme.atlassian.net/wiki/spaces/ENG/overview')).toEqual({
+      origin: 'https://acme.atlassian.net',
+      host: 'acme.atlassian.net',
+      spaceKey: 'ENG',
+    });
+    expect(parseConfluenceSpaceUrl('https://acme.atlassian.net/wiki/spaces/~abc12')?.spaceKey).toBe('~abc12');
+    expect(parseConfluenceSpaceUrl('https://acme.atlassian.net/wiki/spaces/ENG/pages/1001')).toBeNull();
+    const src = confluenceSource({
+      transport: fakeTransport((u) =>
+        u.pathname === '/wiki/api/v2/spaces' ? json(JSON.stringify({ results: [{ id: '55', key: 'ENG', name: 'Engineering', homepageId: '900' }] })) : json('{}', 404),
+      ).transport,
+    });
+    const ref = src.resolveRef('https://acme.atlassian.net/wiki/spaces/ENG')!;
+    expect(ref.pageId).toBe('');
+    const root = await src.resolveRoot!(ref, CRED);
+    expect(root.ref.pageId).toBe('900');
+    expect(root.title).toBe('Engineering');
+    expect(root.scope).toEqual({ kind: 'space', name: 'Engineering', key: 'ENG', id: '55' });
+  });
+
+  it('a page that is the space home reads the whole space; any other page is a tree', async () => {
+    const route = (u: URL): RawResponse => {
+      if (u.pathname === '/wiki/api/v2/pages/900') return json(JSON.stringify({ id: '900', title: 'Home', spaceId: '55' }));
+      if (u.pathname === '/wiki/api/v2/pages/950') return json(JSON.stringify({ id: '950', title: 'Runbooks', spaceId: '55', parentId: '900' }));
+      if (u.pathname === '/wiki/api/v2/spaces/55') return json(JSON.stringify({ id: '55', key: 'ENG', name: 'Engineering', homepageId: '900' }));
+      return json('{}', 404);
+    };
+    const src = confluenceSource({ transport: fakeTransport(route).transport });
+    const home = await src.resolveRoot!({ ...SITE, pageId: '900' }, CRED);
+    expect(home.scope).toMatchObject({ kind: 'space', key: 'ENG' });
+    const child = await src.resolveRoot!({ ...SITE, pageId: '950' }, CRED);
+    expect(child.scope).toEqual({ kind: 'tree' });
+    expect(child.title).toBe('Runbooks');
+  });
+
+  it('a tree lists every level below the root, past the listing’s five, and never a sibling', async () => {
+    const { transport, calls } = fakeTransport((u) => {
+      if (u.pathname === '/wiki/api/v2/pages/1/descendants') {
+        // Levels 1–5 below 1; page 6 sits on the 5th level.
+        return json(JSON.stringify({ results: [page('2', '1', 1), page('3', '2', 2), page('4', '3', 3), page('5', '4', 4), page('6', '5', 5)] }));
+      }
+      if (u.pathname === '/wiki/api/v2/pages/6/descendants') return json(JSON.stringify({ results: [page('7', '6', 1)] }));
+      return json('{}', 404);
+    });
+    const res = await confluenceSource({ transport }).listDescendants(SITE, '1', 32, 99, CRED);
+    expect(res.pages.map((p) => [p.id, p.depth])).toEqual([
+      ['2', 1],
+      ['3', 2],
+      ['4', 3],
+      ['5', 4],
+      ['6', 5],
+      ['7', 6],
+    ]);
+    expect(calls.map((c) => new URL(c.url).pathname)).toEqual(['/wiki/api/v2/pages/1/descendants', '/wiki/api/v2/pages/6/descendants']);
+    expect(calls.every((c) => !c.url.includes('/spaces/'))).toBe(true);
+  });
+
+  it('a space adds its other top-level pages under the home page, and searches the whole space', async () => {
+    const { transport, calls } = fakeTransport((u) => {
+      if (u.pathname === '/wiki/api/v2/pages/900/descendants') return json(JSON.stringify({ results: [page('901', '900', 1)] }));
+      if (u.pathname === '/wiki/api/v2/spaces/55/pages') return json(JSON.stringify({ results: [{ id: '900', status: 'current', title: 'Home' }, { id: '980', status: 'current', title: 'Archive', position: 1 }] }));
+      if (u.pathname === '/wiki/api/v2/pages/980/descendants') return json(JSON.stringify({ results: [page('981', '980', 1)] }));
+      if (u.pathname === '/wiki/rest/api/content/search') return json(JSON.stringify({ results: [] }));
+      return json('{}', 404);
+    });
+    const space: WikiPageRef = { ...SITE, pageId: '900', scope: { kind: 'space', name: 'Engineering', key: 'ENG', id: '55' } };
+    const src = confluenceSource({ transport });
+    const res = await src.listDescendants(space, '900', 32, 99, CRED);
+    expect(res.pages.map((p) => [p.id, p.parentId, p.depth])).toEqual([
+      ['901', '900', 1],
+      ['980', '900', 1],
+      ['981', '980', 2],
+    ]);
+    await src.changedSince(space, '900', new Date('2026-10-20T00:00:00Z'), CRED);
+    const cql = new URL(calls[calls.length - 1]!.url).searchParams.get('cql');
+    expect(cql).toContain('space = "ENG"');
+    expect(cql).not.toContain('ancestor');
   });
 });

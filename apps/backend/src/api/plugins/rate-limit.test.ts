@@ -228,6 +228,18 @@ describe('tierFor — reference docs', () => {
     expect(tiers('POST', '/api/docs/wikis')).not.toContain('search');
     expect(tiers('GET', '/api/workspaces/3/wiki-credentials/check')).not.toContain('search');
   });
+  // The add-documents wizard: two counts (no model) and a GitHub folder add (GitHub + a build).
+  it('bills the wizard counts as an upstream read and a GitHub add as a read AND an AI run', () => {
+    expect(tiers('POST', '/api/docs/wiki/preflight')).toEqual(['search', 'read']);
+    expect(tiers('POST', '/api/docs/github/preflight')).toEqual(['search', 'read']);
+    expect(tiers('POST', '/api/docs/github')).toEqual(['search', 'ai', 'ai_hourly']);
+  });
+  it('a wizard near-miss is not swept in', () => {
+    expect(tiers('GET', '/api/docs/github')).not.toContain('search');
+    expect(tiers('POST', '/api/docs/github/preflights')).not.toContain('search');
+    expect(tiers('POST', '/api/docs/githubs')).not.toContain('search');
+    expect(tiers('POST', '/api/docs/wiki/preflight/x')).not.toContain('search');
+  });
 });
 
 // The issue tracker (CORE since apiVersion 23). The routes that can read the CUSTOMER'S tracker

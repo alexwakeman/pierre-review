@@ -1,4 +1,4 @@
-import type { WikiProviderId, WikiUnreachableReason } from '@pierre-review/shared';
+import type { WikiProviderId, WikiScope, WikiUnreachableReason } from '@pierre-review/shared';
 import type { FigureSink } from '../figures.js';
 
 // THE WIKI-SOURCE SEAM (docs/REFERENCE-DOCS.md § Wiki sources). A team wiki — Confluence or Notion — is
@@ -28,6 +28,16 @@ export interface WikiPageRef {
   origin: string;
   host: string;
   pageId: string;
+  /** What the source covers (shared `WikiScope`): a Confluence space's key and id, a repository's
+   *  owner / name / folder / branch. Absent ⇒ a page tree under `pageId`. */
+  scope?: WikiScope | null;
+}
+
+/** What `resolveRoot` found: the root page (a space's home page), its title, and the scope. */
+export interface WikiRoot {
+  ref: WikiPageRef;
+  title: string;
+  scope: WikiScope;
 }
 
 /** A page's place in the tree and its change markers — no body. */
@@ -86,6 +96,14 @@ export interface WikiSource {
   /** A page's body → markdown (the library's text). With `opts.figures`, its images and readable
    *  diagrams are read now (a Notion file address expires within the hour) and become figures. */
   toMarkdown(page: WikiPage, opts?: WikiMarkdownOptions): Promise<string>;
+  /**
+   * THE WIZARD'S ROOT (optional): a pasted reference → the page the import starts at, its title, and
+   * whether it is the WIKI'S HOME (a Confluence space's home page or space address, a Notion top-level
+   * page) — then the scope is `space` and the whole wiki is read — or any other page (`tree`: it and
+   * every page below it, never a sibling or an ancestor). Absent ⇒ `tree` at the page, titled by
+   * `getPage` (`resolveWikiRoot`).
+   */
+  resolveRoot?(ref: WikiPageRef, opts: WikiCallOptions): Promise<WikiRoot>;
   /** Settings' "Test connection": one cheap authenticated read of the site. Throws on failure. */
   checkAccess(site: Pick<WikiPageRef, 'provider' | 'origin' | 'host'>, opts: WikiCallOptions): Promise<void>;
   /** A page's address in the wiki (the chapter's "Source:" line). Pure. */
@@ -142,16 +160,21 @@ export function unreachableReasonOf(err: unknown): WikiUnreachableReason {
 export function wikiErrorMessage(providerName: string, err: unknown): string {
   const code = err instanceof WikiSourceError ? err.code : 'network';
   const notion = providerName === 'Notion';
+  const github = providerName === 'GitHub';
   switch (code) {
     case 'no_credential':
+      if (github) return 'Sign in to GitHub with gh auth login, then try again.';
       return notion
-        ? 'Add a Notion token in Settings → AI review → Notion, then try again.'
-        : `Add a ${providerName} API token in Settings → AI review → ${providerName}, then try again.`;
+        ? 'Add a Notion token in Settings → Docs, then try again.'
+        : `Add a ${providerName} API token in Settings → Docs, then try again.`;
     case 'unauthorized':
+      if (github) return 'GitHub did not accept your gh sign-in. Run gh auth login again.';
       return notion ? 'Notion did not accept the saved token.' : `${providerName} did not accept the saved email and token.`;
     case 'forbidden':
+      if (github) return 'Your gh sign-in may not read this repository.';
       return `The saved ${providerName} token may not read this page.`;
     case 'not_found':
+      if (github) return 'GitHub has no such repository or folder, or your gh sign-in cannot see it.';
       return notion
         ? 'Notion has no such page, or the page is not shared with the integration.'
         : `${providerName} has no such page, or the saved token cannot see it.`;
@@ -193,6 +216,14 @@ export function resolveWikiUrl(rawUrl: string): { source: WikiSource; ref: WikiP
     if (ref) return { source: s, ref };
   }
   return null;
+}
+
+/** The root an import starts at (the adapter's `resolveRoot`, else the page itself as a tree). */
+export async function resolveWikiRoot(source: WikiSource, ref: WikiPageRef, opts: WikiCallOptions): Promise<WikiRoot> {
+  if (source.resolveRoot) return source.resolveRoot(ref, opts);
+  if (ref.pageId === '') throw new WikiSourceError('bad_url');
+  const page = await source.getPage(ref, ref.pageId, { ...opts, body: false });
+  return { ref: { ...ref, scope: { kind: 'tree' } }, title: page.title, scope: { kind: 'tree' } };
 }
 
 /** Test seam: swap an adapter (a fake), returning the one it replaced. */

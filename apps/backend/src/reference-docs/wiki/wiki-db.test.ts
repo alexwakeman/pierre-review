@@ -302,6 +302,39 @@ describe('the cadence', () => {
   });
 });
 
+describe('the add-documents wizard: a subtree', () => {
+  const URL_CHILD = 'https://acme.atlassian.net/wiki/spaces/PAY/pages/2/Refunds';
+  it('counts the page and every page below it, never a sibling or an ancestor, then imports exactly those', async () => {
+    wiki.pages.set('20', { id: '20', title: 'Chargebacks', parentId: '2', version: 1, editedAt: T0, body: words('chargebacks', 60), position: 1 });
+    wiki.pages.set('21', { id: '21', title: 'Disputes', parentId: '20', version: 1, editedAt: T0, body: words('disputes', 60), position: 1 });
+    const pre = await app.inject({ method: 'POST', url: '/api/docs/wiki/preflight', headers: as(1), payload: { url: URL_CHILD } });
+    expect(pre.statusCode).toBe(200);
+    expect(pre.json()).toMatchObject({ provider: 'confluence', rootTitle: 'Refunds', scope: { kind: 'tree' }, pageCount: 3, more: false, existing: null });
+    const add = await app.inject({ method: 'POST', url: '/api/docs/wiki', headers: as(1), payload: { url: URL_CHILD, tree: true } });
+    expect(add.statusCode).toBe(202);
+    const id = add.json().doc.id;
+    expect(add.json().doc.wiki).toMatchObject({ rootPageId: '2', depth: 32, scope: { kind: 'tree' }, rootTitle: 'Refunds' });
+    await waitIdle(1, id);
+    expect((await pagesMod.listWikiPages(1, id)).map((p) => p.pageId)).toEqual(['2', '20', '21']);
+    // The same root again: the count names the document that already reads it.
+    const again = (await app.inject({ method: 'POST', url: '/api/docs/wiki/preflight', headers: as(1), payload: { url: URL_CHILD } })).json();
+    expect(again.existing).toMatchObject({ id });
+    // Rebuild reads the same subtree.
+    expect((await app.inject({ method: 'POST', url: `/api/docs/${id}/rebuild`, headers: as(1) })).statusCode).toBe(202);
+    await waitIdle(1, id);
+    expect((await pagesMod.listWikiPages(1, id)).map((p) => p.pageId)).toEqual(['2', '20', '21']);
+    expect((await app.inject({ method: 'DELETE', url: `/api/docs/${id}`, headers: as(1) })).statusCode).toBe(200);
+    wiki.pages.delete('20');
+    wiki.pages.delete('21');
+  });
+
+  it('another account cannot count with this workspace credential', async () => {
+    const pre = await app.inject({ method: 'POST', url: '/api/docs/wiki/preflight', headers: as(2), payload: { url: URL_CHILD } });
+    expect(pre.statusCode).toBe(400);
+    expect(pre.json().error).toBe('NoWikiCredential');
+  });
+});
+
 describe('tenancy and removal', () => {
   it("another account's document is a 404 on refresh, and its pages are never listed", async () => {
     expect((await app.inject({ method: 'POST', url: `/api/docs/${docId}/refresh`, headers: as(2) })).statusCode).toBe(404);
