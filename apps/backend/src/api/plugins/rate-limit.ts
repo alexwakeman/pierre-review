@@ -562,6 +562,11 @@ function tierFor(method: string, path: string): readonly Tier[] {
   if (mutating && /^\/api\/pro\/ai-fixes\/\d+\/plan\/(message|approve)$/.test(path))
     return [TIERS.ai, TIERS.aiHourly];
   if (/^\/api\/pro\/ai-fixes\/\d+\/plan\/discard$/.test(path)) return [TIERS.read];
+  // AI Fix "Run tests" picker: GET /api/pro/prs/:id/ai-fix/checks reads the PR head's manifest files —
+  // ONE GitHub GraphQL request per uncached (repo, head), no model. A GitHub read behind a click: the
+  // `search` bucket (one upstream call per request) + `read`, spelled exactly so the /api/pro/ GET
+  // catch-all below (600/min) never swallows it.
+  if (!mutating && /^\/api\/pro\/prs\/\d+\/ai-fix\/checks$/.test(path)) return [TIERS.search, TIERS.read];
   if (/^\/api\/claude-reviews\/[^/]+\/chat$/.test(path)) {
     return mutating ? [TIERS.ai, TIERS.aiHourly] : [TIERS.read];
   }

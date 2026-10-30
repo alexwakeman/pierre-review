@@ -241,6 +241,7 @@ export function mcpConfig(mcp: CodexMcpConfig): string[] {
     ...c(`${base}.args`, mcp.args),
     ...(mcp.env && Object.keys(mcp.env).length > 0 ? c(`${base}.env`, mcp.env) : []),
     ...c(`${base}.default_tools_approval_mode`, mcp.default_tools_approval_mode),
+    ...(mcp.tool_timeout_sec != null ? c(`${base}.tool_timeout_sec`, mcp.tool_timeout_sec) : []),
   ];
 }
 

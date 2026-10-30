@@ -51,6 +51,7 @@ vi.mock('./persist.js', async (importOriginal) => {
     saveFixSuccess: vi.fn(async () => {}),
     reconcileOrphanedFixes: vi.fn(async () => 0),
     parseReviewItems: real.parseReviewItems,
+    parseChecks: real.parseChecks,
   };
 });
 
@@ -298,6 +299,30 @@ describe('a pass that ends early still records what it spent', () => {
 });
 
 describe('approvePlan — "Approve and build"', () => {
+  // (Before the next test: its build never finishes, and holds the one fix slot for the file.)
+  it('"Run tests" ticked when the plan started: the build runs the same checks', async () => {
+    const { approvePlan } = await import('./manager.js');
+    row = readyRow(33, { checks: JSON.stringify({ requested: ['test', 'lint'], ran: false }) });
+    const ctx = fakeCtx({ generateFix: vi.fn(async () => { throw new Error('stop here'); }) });
+    expect((await approvePlan(ctx, { accountId: 1, fixId: row.id })).status).toBe('queued');
+    await vi.waitFor(() => expect(ctx.coding.generateFix).toHaveBeenCalled());
+    const gf = (ctx.coding.generateFix as Any).mock.calls.at(-1)[0];
+    expect(gf.checks).toEqual(['test', 'lint']);
+    expect(gf.systemPrompt).toContain('run_check tool, by NAME only');
+    expect(gf.systemPrompt).toContain('You have NO shell here');
+  });
+
+  it('a plan without "Run tests" builds without checks, its prompt unchanged', async () => {
+    const { approvePlan } = await import('./manager.js');
+    row = readyRow(34);
+    const ctx = fakeCtx({ generateFix: vi.fn(async () => { throw new Error('stop here'); }) });
+    await approvePlan(ctx, { accountId: 1, fixId: row.id });
+    await vi.waitFor(() => expect(ctx.coding.generateFix).toHaveBeenCalled());
+    const gf = (ctx.coding.generateFix as Any).mock.calls.at(-1)[0];
+    expect(gf).not.toHaveProperty('checks');
+    expect(gf.systemPrompt).toContain('Nothing is installed, built or tested here');
+  });
+
   it('the SAME row runs the normal build with the approved plan as the agreed brief, on the current head', async () => {
     const { approvePlan } = await import('./manager.js');
     row = readyRow(31);

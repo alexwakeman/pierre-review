@@ -320,7 +320,7 @@ async function runnableCredential(): Promise<{ route: 'login'; method: 'chatgpt'
 }
 
 /** The guard's trust entry is written into Limn's home, then Codex must prove it will RUN it. */
-async function trustedGuard(roots: { read: string[]; write: string[] }): Promise<{ hook: CodexHookConfig; home: string }> {
+async function trustedGuard(roots: { read: string[]; write: string[]; checks?: boolean }): Promise<{ hook: CodexHookConfig; home: string }> {
   const hook = pathGuardHook(roots);
   await ensureCodexHomeConfig(hook);
   const home = codexHome();
@@ -578,11 +578,14 @@ export async function runAgentUnchecked(spec: AgentRunSpec): Promise<AgentRunRes
   const z = await loadZod();
   if (resultTool) toolSchema = shapeToJsonSchema(z, resultTool.shape);
 
-  const mcp = workspaceMcpConfig(roots);
+  // THE PROJECT'S CHECKS (`mcp__workspace__run_check`, coding/checks/): the server reads Limn's frozen
+  // list once at start-up, and the guard lets the tool through ONLY on a run that carries checks.
+  const checks = spec.checks && spec.checks.names.length > 0 ? spec.checks : null;
+  const mcp = workspaceMcpConfig(roots, checks ? { checks: { specFile: checks.specFile, timeoutSec: checks.timeoutSec } } : {});
   // THE GUARD IS NOT OPTIONAL. Its trust entry is written into Limn's own home first, then Codex is
   // asked whether it will RUN the hook (and the hook must refuse a canary call). An untrusted hook is
   // skipped SILENTLY by Codex, so a run whose guard is not proven never starts — read-only or not.
-  const { hook, home } = await trustedGuard({ read: roots.read, write: roots.write });
+  const { hook, home } = await trustedGuard({ read: roots.read, write: roots.write, ...(checks ? { checks: true } : {}) });
   armCodexThreadSweeps(home);
 
   const before = isWrite ? await Promise.all(roots.write.map(gitSnapshot)) : [];
@@ -598,7 +601,8 @@ export async function runAgentUnchecked(spec: AgentRunSpec): Promise<AgentRunRes
       { home, mcp, hook, schemaPath, model, effort },
     );
     const env = codexExecEnv(credential, hook);
-    const timeoutMs = spec.codex?.timeoutMs ?? DEFAULT_AGENT_TIMEOUT_MS;
+    // A run that may run the project's checks gets longer: each may take up to its own limit.
+    const timeoutMs = spec.codex?.timeoutMs ?? (checks ? DEFAULT_AGENT_TIMEOUT_MS * 2 : DEFAULT_AGENT_TIMEOUT_MS);
     // THE NEUTRAL STREAM (ai/provider.ts): the status-line kinds, then the step the event makes (its
     // activity line, its text, the run's tokens so far — turn.completed carries the thread's total,
     // which for a run and its retry is the run's own).

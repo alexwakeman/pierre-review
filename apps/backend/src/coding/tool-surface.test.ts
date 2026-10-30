@@ -68,14 +68,16 @@ describe('the fixer is confined to its worktree', () => {
   // Since the provider seam (ai/provider.ts) the hook is built by the provider from the run's cwd and
   // roots (ai/providers/claude.ts), so the pin is split in two: the fixer hands the worktree as cwd
   // with NO other root, and the provider puts the path guard over exactly cwd + roots FIRST on
-  // PreToolUse, then the own-tools-only hook for the run's one server.
+  // PreToolUse, then the own-tools-only hook for the run's own servers (its result tools, plus
+  // `checks` when "Run tests" hands it run_check — and nothing else).
   it('runs behind the path guard rooted at the worktree', () => {
     expect(SRC).toContain('cwd: opts.worktreePath,\n    roots: [],\n    readOnlyRoots: [],');
     const provider = readFileSync(fileURLToPath(new URL('../ai/providers/claude.ts', import.meta.url)), 'utf8');
     expect(provider).toContain('const guard = createPathGuard(spec.cwd, spec.roots, { readOnlyRoots: spec.readOnlyRoots });');
     expect(provider).toMatch(
-      /PreToolUse: \[\s*pathGuardHook\(guard\),\s*ownToolsOnlyHook\(spec\.tools \? \[spec\.tools\.server\] : \[\]\),/,
+      /PreToolUse: \[\s*pathGuardHook\(guard\),\s*ownToolsOnlyHook\(ownServers\),/,
     );
+    expect(provider).toContain('const ownServers = Object.keys(mcpServers);');
   });
 });
 
@@ -139,5 +141,20 @@ describe('the plan pass reads and cannot write', () => {
     const open = SRC.indexOf('[', at) + 1;
     const mutated = `${SRC.slice(0, open)}'Edit',${SRC.slice(open)}`;
     expect(toolList('PLAN_TOOLS', mutated).filter((t) => WRITE_TOOLS.includes(t))).toEqual(['Edit']);
+  });
+});
+
+// "RUN TESTS" (coding/checks/): the fixer may run the project's own checks through ONE extra tool,
+// `run_check`, which takes a check NAME — never a command. The shell stays denied either way.
+describe('"Run tests" adds run_check and nothing else', () => {
+  it('FIX_TOOLS_WITH_CHECKS is FIX_TOOLS plus the one checks tool, still no shell', async () => {
+    const start = SRC.indexOf('const FIX_TOOLS_WITH_CHECKS = [');
+    expect(start).toBeGreaterThan(-1);
+    const line = SRC.slice(start, SRC.indexOf('];', start) + 2);
+    expect(line).toBe("const FIX_TOOLS_WITH_CHECKS = [...FIX_TOOLS, 'mcp__checks__run_check'];");
+    const { CHECKS_TOOL_SERVER, RUN_CHECK_TOOL } = await import('../ai/check-tool.js');
+    expect(`mcp__${CHECKS_TOOL_SERVER}__${RUN_CHECK_TOOL}`).toBe('mcp__checks__run_check');
+    // Whatever the allow list, a run with checks is still handed DISALLOWED_TOOLS (Bash denied).
+    expect(SRC).toMatch(/allowedTools: checkTool \? FIX_TOOLS_WITH_CHECKS : FIX_TOOLS,\s*\n\s*disallowedTools: DISALLOWED_TOOLS,/);
   });
 });

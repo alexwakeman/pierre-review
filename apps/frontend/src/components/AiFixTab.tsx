@@ -48,6 +48,7 @@ import { InfoButton } from './InfoModal.js';
 import { ConflictAiCard, resolverTargetOf, usePrConflictsResolvable } from './AiFix/ConflictAiCard.js';
 import { startConflictAiRun } from '../hooks/useConflictAiResolve.js';
 import { CheckboxBox, RadioBox } from './ui/FormControls.js';
+import { ChecksReport, ChecksStatus, RunTestsOption, useRunTests } from './AiFix/RunTests.js';
 
 const BTN_PRIMARY =
   'inline-flex h-7 items-center whitespace-nowrap rounded-ui bg-ui-raise px-2.5 text-meta font-medium text-ui-ink hover:bg-ui-hover disabled:cursor-not-allowed disabled:opacity-50 touch:h-10 touch:px-3';
@@ -211,6 +212,9 @@ function FixerSection({
   // lands from the resolver as its own commit, never folded into the fix.
   const conflictsResolvable = usePrConflictsResolvable(pr);
   const [alsoResolve, setAlsoResolve] = useState(false);
+  // "Run tests": the project's own checks, in a sandbox, by name (AiFix/RunTests.tsx). Remembered per
+  // repository; the list is read only once the box is ticked.
+  const runTests = useRunTests(pr.id, pr.repoFullName);
 
   const picked = preview.data ? pickedKeys(preview.data, overrides) : [];
   const cutCount = preview.data ? budgetCutKeys(preview.data, overrides).size : 0;
@@ -225,6 +229,7 @@ function FixerSection({
       seed: 'review' as const,
       ...(reviewId != null ? { sourceReviewId: reviewId } : {}),
       include: picked,
+      ...(runTests.names.length > 0 ? { checks: runTests.names } : {}),
     };
     if (planFirst) {
       // A plan is read in this tab; the banner follows the BUILD, from "Approve and build".
@@ -256,8 +261,8 @@ function FixerSection({
         info={
           <InfoButton title="AI Fix">
             <p>
-              {pickedName} reads the PR's code and edits files in a private copy. It has no shell, so it
-              installs, builds and tests nothing.
+              {pickedName} reads the PR's code and edits files in a private copy. It has no shell. Tick
+              Run tests to let it run the project's own test, lint and type checks in a sandbox.
             </p>
             <p>
               A fix starts from an AI review. Pick what it should work on: the review's findings,
@@ -353,6 +358,9 @@ function FixerSection({
                   </label>
                 )}
                 {preview.data && preview.data.items.length > 0 && (
+                  <RunTestsOption state={runTests} disabled={fixStarting} />
+                )}
+                {preview.data && preview.data.items.length > 0 && (
                   // THE RUN ROW. Below md it is a sticky footer (the side panel's action-bar look):
                   // the picker list runs several screens on a phone, and the model, Plan first and
                   // Start fix must stay in reach while ticking. Same controls, same AiRunGate.
@@ -376,7 +384,8 @@ function FixerSection({
                       <button
                         type="button"
                         className={BTN_PRIMARY}
-                        disabled={fixStarting || picked.length === 0}
+                        // "Run tests" ticked: wait for the checks list, or the run would start without them.
+                        disabled={fixStarting || picked.length === 0 || (runTests.on && runTests.query.isLoading)}
                         onClick={startFromReview}
                       >
                         {planFirst ? 'Make a plan' : 'Start fix'}
@@ -553,6 +562,8 @@ function FixResult({
       {/* Mounted ABOVE the "no changes" branch: a run that judged every item wrong produces no
           diff at all, and that is exactly the run whose "Not addressed" list matters most. */}
       <FixReport pr={pr} fix={fix} />
+      {/* "Run tests": Limn's own run of the chosen checks, the install and the commit hook. */}
+      <ChecksReport fix={fix} />
       {noChanges ? (
         <p className="mt-2 text-meta text-ui-mute">
           No files changed.
@@ -560,14 +571,15 @@ function FixResult({
       ) : (
         <>
           <div className="mb-1 mt-2 flex items-center justify-between gap-3 text-meta text-ui-mute">
-            {/* "Not built or tested here." is TEMPLATED and sits beside the diff, above Push: the
-                fixer has no shell (coding/agent.ts FIX_TOOLS), and a diff above a Push button
-                invites the reader to assume verification. It states what we know and STOPS —
-                it must not promise CI either (`ciStatusFrom(null)` is 'unknown' for whole repos;
-                CLAUDE.md § The fix agent has no shell). */}
+            {/* "Not built or tested here." is TEMPLATED and sits beside the diff, above Push, ONLY
+                when no check ran: the fixer has no shell (coding/agent.ts FIX_TOOLS), and a diff
+                above a Push button invites the reader to assume verification. It states what we
+                know and STOPS — it must not promise CI either (`ciStatusFrom(null)` is 'unknown'
+                for whole repos). When "Run tests" ran, the results above and beside Push say it. */}
             <span>
               {fix.filesChanged.length} file
-              {fix.filesChanged.length === 1 ? '' : 's'} changed · Not built or tested here.
+              {fix.filesChanged.length === 1 ? '' : 's'} changed
+              {!fix.checks?.ran && ' · Not built or tested here.'}
             </span>
             <DiffWrapToggle />
           </div>
@@ -784,6 +796,8 @@ function PushControls({
         >
           {busy ? 'Pushing…' : target === 'new' ? 'Push + open PR' : 'Push'}
         </button>
+        {/* "Run tests": the results' one line. Push works whatever they say. */}
+        <ChecksStatus fix={fix} />
       </div>
 
       {push.isError && (

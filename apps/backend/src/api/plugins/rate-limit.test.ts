@@ -18,6 +18,8 @@ describe('tierFor — AI generation', () => {
     expect(tiers('POST', '/api/pro/prs/12/ai-fix')).toEqual(['ai', 'ai_hourly']);
     // AI Fix plan mode: every pass and the approve spend an agent run; discard is one DB update.
     expect(tiers('POST', '/api/pro/prs/12/ai-fix/plan')).toEqual(['ai', 'ai_hourly']);
+    // "Run tests" picker: one GitHub read per click, never the 600/min GET catch-all.
+    expect(tiers('GET', '/api/pro/prs/12/ai-fix/checks')).toEqual(['search', 'read']);
     expect(tiers('POST', '/api/pro/ai-fixes/7/plan/message')).toEqual(['ai', 'ai_hourly']);
     expect(tiers('POST', '/api/pro/ai-fixes/7/plan/approve')).toEqual(['ai', 'ai_hourly']);
     expect(tiers('POST', '/api/pro/ai-fixes/7/plan/discard')).toEqual(['read']);

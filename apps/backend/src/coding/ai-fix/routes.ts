@@ -8,6 +8,7 @@ import {
 } from '@pierre-review/shared';
 import type {
   AiFix,
+  AiFixChecksPreview,
   AiFixModel,
   AiProviderId,
   AiFixPickerPreview,
@@ -40,12 +41,14 @@ import {
 } from './manager.js';
 import { planStateOf } from './plan.js';
 import { pushFix } from './push.js';
+import { loadChecksPreview } from './checks-preview.js';
 import { getLatestSucceededReviewId } from '../../review/claude-review/persist.js';
 import {
   getFixById,
   getLatestFix,
   listFixHistory,
   parseChangeReport,
+  parseChecks,
   parseFilesChanged,
   parseReviewItems,
   parseTrigger,
@@ -100,6 +103,7 @@ function rowToAiFix(row: AiFixRow): AiFix {
     reviewItems: parseReviewItems(row.reviewItems),
     changeReport: parseChangeReport(row.changeReport),
     plan: planStateOf(row),
+    checks: parseChecks(row.checks),
     sourceReviewId: row.sourceReviewId,
     costUsd: row.costUsd,
     numTurns: row.numTurns,
@@ -146,8 +150,28 @@ type ParsedStartBody =
       instruction: string | undefined;
       sourceReviewId: number | null;
       include: string[] | null;
+      // "Run tests": check names (validated shape only; the run keeps only declared ones).
+      checks: string[] | null;
     }
   | { error: string; message: string };
+
+// The longest "Run tests" list the start route takes, and the longest name.
+const MAX_CHECK_NAMES = 30;
+const MAX_CHECK_NAME_CHARS = 120;
+
+/** "Run tests": absent ⇒ null; an array of short strings ⇒ them (deduplicated); anything else ⇒ error. */
+export function parseChecksField(raw: unknown): string[] | null | { error: string; message: string } {
+  if (raw === undefined || raw === null) return null;
+  if (
+    !Array.isArray(raw) ||
+    raw.length > MAX_CHECK_NAMES ||
+    !raw.every((n) => typeof n === 'string' && n.length > 0 && n.length <= MAX_CHECK_NAME_CHARS && !/[\0\r\n]/.test(n))
+  ) {
+    return { error: 'BadChecks', message: 'Pick the checks to run again.' };
+  }
+  const names = [...new Set(raw as string[])];
+  return names.length > 0 ? names : null;
+}
 
 // The start body, validated in the handler (no ajv schema — see resolveFixModel). Shared by the
 // fix start and the "Plan first" start, which take the same body.
@@ -164,6 +188,8 @@ function parseStartBody(
   );
   if (!choice.ok) return { error: choice.error, message: choice.message };
   const { model, provider } = choice;
+  const checks = parseChecksField((body as { checks?: unknown }).checks);
+  if (checks && !Array.isArray(checks)) return checks;
   // Two entry points. The removed ones get a sentence a stale tab can show, not a run.
   const rawSeed = (body as { seed?: unknown }).seed ?? 'plain';
   if (rawSeed === 'comments' || rawSeed === 'ci_analysis') {
@@ -182,7 +208,7 @@ function parseStartBody(
         message: `Keep the instruction under ${AI_FIX_MAX_INSTRUCTION_CHARS.toLocaleString('en-US')} characters.`,
       };
     }
-    return { model, provider, seed, instruction, sourceReviewId: null, include: null };
+    return { model, provider, seed, instruction, sourceReviewId: null, include: null, checks };
   }
   // Absent / null ⇒ THE CI-ONLY SEED (no AI review: the CI check's fixable items at the current
   // head — manager.ts `loadCiOnlySeed`). Anything else must be a positive integer id.
@@ -205,7 +231,7 @@ function parseStartBody(
     }
     include = inc as string[];
   }
-  return { model, provider, seed, instruction: undefined, sourceReviewId: raw, include };
+  return { model, provider, seed, instruction: undefined, sourceReviewId: raw, include, checks };
 }
 
 function sendPlanResult(reply: FastifyReply, res: PlanActionResult) {
@@ -332,6 +358,7 @@ export function registerAiFixRoutes(app: FastifyInstance, ctx: AgentContext): vo
           sourceReviewId: parsed.sourceReviewId,
           trigger: 'manual' as const,
           selection: parsed.include ? { kind: 'keys' as const, keys: parsed.include } : undefined,
+          ...(parsed.checks ? { checks: parsed.checks } : {}),
         };
         const res = mode === 'fix' ? await startFix(ctx, input) : await startPlan(ctx, input);
 
@@ -455,6 +482,24 @@ export function registerAiFixRoutes(app: FastifyInstance, ctx: AgentContext): vo
       return reply.send(resp);
     },
   );
+
+  // "Run tests": the checks the PR's head declares and whether this machine can sandbox them. ONE
+  // GitHub request (the manifest files), asked when the reader ticks "Run tests" — never on mount.
+  app.get<{ Params: { id: string } }>('/api/pro/prs/:id/ai-fix/checks', async (req, reply) => {
+    const accountId = ctx.accountIdOf(req);
+    const prId = parseId(req.params.id);
+    if (prId == null) return reply.code(404).send({ error: 'not found' });
+    if (!AIFIX_ENABLED) return reply.code(404).send({ error: 'AiFixDisabled' });
+    try {
+      const preview = await loadChecksPreview(ctx, { accountId, prId });
+      if (!preview) return reply.code(404).send({ error: 'not found' });
+      const resp: AiFixChecksPreview = preview;
+      return reply.send(resp);
+    } catch (err) {
+      ctx.log.warn({ err }, 'ai-fix checks preview failed');
+      return reply.code(502).send({ error: 'ChecksUnavailable', message: 'Could not read the project’s checks from GitHub.' });
+    }
+  });
 
   // Poll status.
   app.get<{ Params: { id: string } }>(

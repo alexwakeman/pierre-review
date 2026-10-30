@@ -1326,6 +1326,14 @@ today's behaviour everywhere: the merge switch keeps merging every size. [MERGE-
 § Dependency automation. Journal `idx` 147, `when` sqlite `1792137651016` (built as `0146`, renumbered on merge after
 `0146_worktree_ledger`).
 
+### `0148_ai_fix_checks` — AI Fix "Run tests"
+`ALTER TABLE ai_fixes ADD checks text` — JSON `AiFixChecks`: the check names the reader ticked
+(written at insert, so an approved plan's build runs the same), then what Limn ran (results, install
+steps, the commit hook). Additive, nullable, no backfill: NULL = no tests asked for (every older row,
+every auto fix). `ai_fixes` is already in `accountScopedTables()`, the erasure and the export.
+[CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Run tests. Journal `idx` 148, `when` sqlite `1792137652016`
+(built as `0146`, renumbered on merge after `0146_worktree_ledger` and `0147_dependency_automation`).
+
 ### No migration — "Check against code" removed (2026-10-18): `sprint_ticket_repos` + `sprint_assessments` DORMANT
 
 The sprint drawer, its repo picker and "Check against code" (`review/sprint-assess/`) were removed with

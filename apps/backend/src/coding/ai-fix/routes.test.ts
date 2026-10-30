@@ -98,6 +98,7 @@ vi.mock('./persist.js', async (importOriginal) => {
     listFixHistory: vi.fn(async () => []),
     markFixPushed: (...args: unknown[]) => (markFixPushed as (...a: unknown[]) => unknown)(...args),
     parseReviewItems: real.parseReviewItems,
+    parseChecks: real.parseChecks,
     parseChangeReport: real.parseChangeReport,
     parseTrigger: real.parseTrigger,
     parseFilesChanged: real.parseFilesChanged,
@@ -116,6 +117,15 @@ vi.mock('./pr-context.js', () => ({
   })),
   getViewerCanPush: vi.fn(async () => true),
 }));
+
+// "Run tests" picker: the manifest files at the head (one GitHub request in real life).
+const fetchRepoFiles = vi.fn(async (_accountId: number, a: { paths: readonly string[] }) => {
+  const files: Record<string, string> = {
+    'package.json': JSON.stringify({ scripts: { test: 'vitest run', lint: 'eslint .', release: 'npm publish', 'test:docker': 'docker compose up -d && vitest' } }),
+    'pnpm-lock.yaml': '',
+  };
+  return Object.fromEntries(a.paths.map((p) => [p, files[p] ?? null]));
+});
 
 const applyAndPush = vi.fn(async (args: { target: { kind: string } }) => ({
   pushedBranch: args.target.kind === 'existing' ? 'feature' : 'feature-ai-fix',
@@ -145,6 +155,7 @@ async function build(signedIn: { claude: boolean; codex: boolean } = { claude: t
     },
     coding: { applyAndPush },
   } as any as ProContext;
+  (ctx as any).github.fetchRepoFiles = fetchRepoFiles;
   const { default: Fastify } = await import('fastify');
   const { registerAiFixRoutes } = await import('./routes.js');
   const app = Fastify({ logger: false });
@@ -597,6 +608,52 @@ describe('POST /api/pro/prs/:id/ai-fix — the provider', () => {
     expect(res.statusCode).toBe(400);
     expect(res.json()).toEqual({ error: 'NoClaudeAuth', message: 'Sign in to Codex.' });
     expect(startFix).not.toHaveBeenCalled();
+    await app.close();
+  });
+});
+
+
+describe('"Run tests"', () => {
+  it('the start body’s check names reach startFix (deduplicated); none ⇒ nothing sent', async () => {
+    const app = await build();
+    const res = await start(app, { seed: 'review', sourceReviewId: 5, checks: ['test', 'lint', 'test'] });
+    expect(res.statusCode).toBe(202);
+    expect(startArg().checks).toEqual(['test', 'lint']);
+    startFix.mockClear();
+    await start(app, { seed: 'review', sourceReviewId: 5 });
+    expect(startArg()).not.toHaveProperty('checks');
+    await app.close();
+  });
+
+  it('a malformed list is a 400 before anything starts', async () => {
+    const app = await build();
+    for (const checks of ['test', [1], ['a\nb'], Array.from({ length: 31 }, (_, i) => `t${i}`)]) {
+      const res = await start(app, { seed: 'review', sourceReviewId: 5, checks });
+      expect(res.statusCode).toBe(400);
+      expect(res.json()).toMatchObject({ error: 'BadChecks' });
+    }
+    expect(startFix).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('GET …/ai-fix/checks lists what the head declares, refused ones with their reason', async () => {
+    const { clearChecksPreviewCache } = await import('./checks-preview.js');
+    clearChecksPreviewCache();
+    const app = await build();
+    const res = await app.inject({ method: 'GET', url: '/api/pro/prs/7/ai-fix/checks' });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { checks: Array<{ name: string; command: string; defaultOn: boolean; refused: string | null }> };
+    expect(body.checks.map((c) => [c.name, c.command, c.defaultOn])).toEqual([
+      ['lint', 'pnpm run lint', true],
+      ['test', 'pnpm run test', true],
+      ['test:docker', 'pnpm run test:docker', false],
+    ]);
+    expect(body.checks.find((c) => c.name === 'test:docker')!.refused).toMatch(/containers/);
+    expect(body.checks.some((c) => c.name === 'release')).toBe(false);
+    // Cached per (repo, head): a second open asks GitHub nothing.
+    fetchRepoFiles.mockClear();
+    await app.inject({ method: 'GET', url: '/api/pro/prs/7/ai-fix/checks' });
+    expect(fetchRepoFiles).not.toHaveBeenCalled();
     await app.close();
   });
 });

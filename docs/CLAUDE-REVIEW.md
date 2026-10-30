@@ -3028,9 +3028,47 @@ CORE since 2026-10 (`apps/backend/src/coding/ai-fix/`: `manager.ts`,
   `POST /api/claude-review/states`; "ready" = the same waiting rule); "Auto fix started" / "No auto
   fix: <why>" under the Claude Review controls.
 - **No shell.** `WORKTREE_RULES` (the one fix system prompt) and the tool list change together
-  (`coding/ai-fix/no-shell.test.ts`).
+  (`coding/ai-fix/no-shell.test.ts`). "Run tests" (below) adds `run_check(name)`, never a shell.
 - A finished fix PUSHES AS-IS (no trunk step) and only when the reader presses Push — or, for an
   auto fix, under "Push automatically".
+
+### Run tests (sandboxed checks, manual fixes only)
+
+2026-10-30; migration `0148`. The security model — allow-list, deny scan, sandbox profiles, env
+scrub, the frozen list, the throwaway hook repository — is [SECURITY.md](SECURITY.md) § Sandboxed
+checks. The runner is the reusable `coding/checks/` module; this is how AI Fix uses it.
+
+- **THE CHOICE.** The picker's **Run tests** checkbox (`components/AiFix/RunTests.tsx`, remembered
+  per repository in localStorage) fetches `GET /api/pro/prs/:id/ai-fix/checks` → `AiFixChecksPreview`
+  ONLY when ticked (one GitHub read, cached ten minutes per (repo, head); rate tier `search` +
+  `read`): the checks the head declares, `defaultOn` = plain `test` / `lint` / `typecheck` and the
+  pre-commit hook; refused ones are listed, unticked and inert, with the reason; `needsDocker` says
+  so; `unavailable` (no sandbox, not allowed) ⇒ one line and the fix runs without. Start / "Make a
+  plan" send `checks: [names]` (`GenerateFixBody.checks`; ≤ 30, else `400 BadChecks`). The names are
+  stored at insert (`ai_fixes.checks.requested`), so an approved plan's build runs the same. An AUTO
+  fix never runs checks.
+- **THE PROMPT.** `buildFixSystemPrompt(provider, {checks: true})` swaps ONE line ("Nothing is
+  installed, built or tested here") for `CHECKS_RULE` — run_check by NAME, fix what YOUR change
+  broke, say so when a failure is not yours; "You have NO shell here" stays. Without checks the
+  prompt is byte-identical. At RUN time `checksSection` appends the actual names (or why none could
+  start — then the text says nothing is built or tested).
+- **THE RUN** (`coding/agent.ts runCodingAgent`): `preparing_checks` (sandbox, Docker preflight,
+  dependency install) → the agent, with `run_check` (FIX_TOOLS + `mcp__checks__run_check`;
+  `DISALLOWED_TOOLS` unchanged) → `running_checks`: Limn runs every chosen check ONCE MORE itself
+  (`verify()` — what the reader sees; the agent's own calls are counted, not shown), then the commit
+  with the pre-commit hook. A FAILING HOOK goes back to the agent (`buildHookRepairPrompt`, its
+  output fenced) for a short follow-up pass in the same worktree, at most `MAX_HOOK_REPAIRS` = 2 and
+  only with ≥ $0.25 of the run's budget left; after a repair the checks run again. Spend of every
+  pass is summed into the row. Tests that cannot start NEVER fail the fix: the run goes on as before
+  and `checks.note` says why.
+- **STORED** on `ai_fixes.checks` (JSON `AiFixChecks`: `requested`, `ran`, `note`, `sandbox`,
+  `install[]`, `results[]` (Limn's run + the skipped, each `AiFixCheckResult {name, kind, command,
+  status: passed|failed|timed_out|skipped|error, exitCode, durationMs, output, truncated, note}`),
+  `hook`, `hookAttempts`, `agentRuns`), on the wire as `AiFix.checks` (null = not asked).
+- **SHOWN** (`ChecksReport` under the fix's report): per check the status (icon + words), duration
+  and a collapsible output; the install steps behind one toggle; the hook. **Beside Push**:
+  `ChecksStatus` — "Tests: 3 passed, 1 failed" / "Tests did not run." The reader can push whatever it
+  says. "Not built or tested here." shows only when no check ran.
 
 ### Plan mode ("Plan first", manual fixes only)
 

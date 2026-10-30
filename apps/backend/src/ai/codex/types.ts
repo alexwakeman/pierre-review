@@ -20,6 +20,8 @@ export interface CodexMcpConfig {
   /** Extra environment for the server (Codex starts MCP servers with a reduced environment). Empty ⇒ not sent. */
   env: Record<string, string>;
   default_tools_approval_mode: 'approve';
+  /** Seconds one tool call may take (Codex's default is 60). Set when the run carries `run_check`. */
+  tool_timeout_sec?: number;
 }
 
 /**

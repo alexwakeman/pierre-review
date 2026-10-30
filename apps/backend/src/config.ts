@@ -517,6 +517,12 @@ export const config = {
   // Refuse a fix whose captured patch exceeds this (a runaway diff shouldn't bloat a
   // DB row). ~1 MiB of unified diff is already a very large change.
   aiFixPatchMaxBytes: intFromEnv('AI_FIX_PATCH_MAX_BYTES', 1024 * 1024),
+  // AI Fix "Run tests" (coding/checks/; docs/SECURITY.md § Sandboxed checks). A check runs ONLY inside
+  // an OS sandbox (macOS sandbox-exec, Linux bubblewrap); with neither, tests are refused unless the
+  // reader sets LIMN_CHECKS_ALLOW_UNSANDBOXED=true — then they run without one, and the run says so.
+  checksAllowUnsandboxed: process.env.LIMN_CHECKS_ALLOW_UNSANDBOXED === 'true',
+  // The longest one check may run (the agent's and Limn's own run alike).
+  aiFixCheckTimeoutMs: intFromEnv('AI_FIX_CHECK_TIMEOUT_MS', 10 * 60_000),
   // Cap the continue/skip loop of CORE "Update branch from trunk"'s rebase
   // (coding/merge.ts): a stop with no conflicted file (a commit that became empty) is
   // continued or skipped up to this many times, then the rebase is aborted rather than
