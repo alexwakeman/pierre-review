@@ -7,7 +7,8 @@
 // Neither ⇒ DEFAULT (null). No DB import here, for the same reason as ai/provider-setting.ts.
 //
 // WHO IT REACHES (`agenticRunEffort`): the PR review (lead, specialists, follow-up re-reviews), AI Fix
-// and Plan first, on BOTH providers — and NOTHING ELSE. REVIEW_EFFORT and REVIEW_DIFF_ONLY_EFFORT reach
+// and Plan first, and "Implement story"'s plan and build passes (`story_plan`, `story_build`; owner
+// decision 7, docs/STORY-BUILD.md), on BOTH providers — and NOTHING ELSE. REVIEW_EFFORT and REVIEW_DIFF_ONLY_EFFORT reach
 // exactly the same runs as the Settings control (REVIEW_EFFORT IS the control, locked), so "Set by
 // REVIEW_EFFORT" under it is the whole story. Every other agent kind (CI review, ticket review,
 // diagrams, Check threads, chats, Resolve with Claude) runs at its provider's own fixed depth
@@ -102,7 +103,7 @@ export function diffOnlyEffortAt(level: AiEffort, atDefault: AiEffort): AiEffort
 }
 
 /**
- * THE EFFORT of a review / AI Fix / Plan first run on `provider`: the chosen level on a worktree run;
+ * THE EFFORT of a review / AI Fix / Plan first / story plan / story build run on `provider`: the chosen level on a worktree run;
  * diff-only, REVIEW_DIFF_ONLY_EFFORT when set (at any level, on both providers), else
  * `diffOnlyEffortAt`; Default ⇒ `defaultRunEffort`. Read once per run, at its start; the run stores
  * what it used.
