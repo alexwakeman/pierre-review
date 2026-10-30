@@ -33,9 +33,10 @@ describe('autoInstallProviders', () => {
     expect(autoInstallProviders(st('installing'), st('absent'))).toBeNull();
     expect(autoInstallProviders(st('ready'), st('installing'))).toBeNull();
   });
-  it('a missing Codex brings both (Claude always rides the download); a missing Claude alone, Claude', () => {
+  it('a ready Claude is left alone: only what is missing is asked for', () => {
     expect(autoInstallProviders(st('absent'), st('absent'))).toEqual(['claude', 'codex']);
-    expect(autoInstallProviders(st('ready'), st('failed'))).toEqual(['claude', 'codex']);
+    expect(autoInstallProviders(st('ready'), st('failed'))).toEqual(['codex']);
+    expect(autoInstallProviders(st('ready'), st('absent'))).toEqual(['codex']);
     expect(autoInstallProviders(st('absent'), st('ready'))).toEqual(['claude']);
   });
 });

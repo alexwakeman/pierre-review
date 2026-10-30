@@ -151,7 +151,8 @@ export function AiProviderSection(): JSX.Element | null {
                 type="button"
                 className={BTN}
                 disabled={install.state.phase === 'running'}
-                onClick={() => install.start('codex')}
+                // Where Limn sets both up by itself, a Retry fetches both; otherwise Claude's Set up is Claude's.
+                onClick={() => install.start(ai.autoInstall === true ? 'codex' : 'claude')}
               >
                 {claudeRuntime === 'failed' ? 'Retry' : 'Set up'}
               </button>

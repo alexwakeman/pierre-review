@@ -414,8 +414,9 @@ export interface AiRuntimeOptions {
 
 export interface InstallOptions {
   timeoutMs?: number;
-  /** Which providers' packages to install. Claude's set always comes; 'codex' adds the Codex CLI.
-   *  An already-installed Codex is kept whatever this says. Default: ['claude']. */
+  /** Which providers' packages to install. Claude's set comes too, except that ['codex'] alone over
+   *  a Claude that is already ready downloads Codex only. An already-installed Codex is kept
+   *  whatever this says. Default: ['claude']. */
   providers?: AiRuntimeProvider[];
   /** Test seam: the program and leading args that stand in for npm. */
   npm?: { command: string; args: string[] };
@@ -760,6 +761,60 @@ export function createAiRuntime(opts: AiRuntimeOptions = {}) {
     return moved;
   }
 
+  /** Codex was asked for WITHOUT Claude, and Claude needs nothing (the workspace's SDK in dev, or a
+   *  runtime directory at its pins): only Codex is downloaded. */
+  function codexOnly(installOpts: InstallOptions): boolean {
+    const providers = installOpts.providers ?? ['claude'];
+    if (providers.includes('claude') || !providers.includes('codex')) return false;
+    return workspaceReady() || runtimeDirState() === 'ready';
+  }
+
+  /** Download Codex into its own staging prefix, then move it into the runtime directory as it is. */
+  async function runCodexOnly(
+    codexWant: string,
+    npm: { command: string; args: string[] },
+    timeoutMs: number,
+    fail: (message: string) => AiRuntimeInstallResult,
+  ): Promise<AiRuntimeInstallResult> {
+    lastCodexFailure = null;
+    emit({ phase: 'starting', message: 'Downloading Codex (about 360 MB unpacked).' });
+    const codexStaging = `${runtimeDir}.codex-staging-${process.pid}-${Date.now()}`;
+    let error: string | null = null;
+    try {
+      writeStagingManifest(codexStaging, { [CODEX_PACKAGE]: codexWant });
+      // ⚠ Never --omit=optional: Codex's platform program IS an optional dependency.
+      error = await npmInto(codexStaging, npm, { omitOptional: false, timeoutMs, retry: 'limn ai install codex' });
+    } catch (err) {
+      error = `Could not write to ${dataDir}: ${(err as Error).message}`;
+    }
+    if (!error) {
+      emit({ phase: 'verifying', message: 'Checking the download.' });
+      const codexDir = findPackageDirIn(CODEX_PACKAGE, codexStaging);
+      if (!codexDir || installedVersion(codexDir) !== codexWant) {
+        error = `The download finished but ${CODEX_PACKAGE} ${codexWant} is missing from it. Try again: limn ai install codex`;
+      } else if (!codexBinaryIn(codexStaging)) {
+        error = `The download finished but the Codex program for ${process.platform}-${process.arch} is missing from it. Try again: limn ai install codex`;
+      }
+    }
+    if (!error) {
+      try {
+        // The manifest keeps the Claude pins it lists (none in a dev checkout without a runtime).
+        const prior = readJson(join(runtimeDir, 'package.json'))?.dependencies;
+        moveCodex(codexStaging, runtimeDir);
+        writeStagingManifest(runtimeDir, {
+          ...(prior && typeof prior === 'object' ? (prior as Record<string, string>) : {}),
+          [CODEX_PACKAGE]: codexWant,
+        });
+      } catch (err) {
+        error = `Could not finish setting up Codex in ${runtimeDir}: ${(err as Error).message}`;
+      }
+    }
+    rmSync(codexStaging, { recursive: true, force: true });
+    if (error) return fail(error);
+    emit({ phase: 'done', message: 'Codex is set up.' });
+    return { ok: true };
+  }
+
   // ⚠ A CODEX PROBLEM NEVER BLOCKS CLAUDE'S INSTALL OR REPAIR. Claude's packages are staged on their
   // own; Codex — only when asked for — in a SEPARATE staging prefix, and a Codex failure is recorded as
   // Codex's alone (`lastCodexFailure`), never as Claude's. Whatever Codex the old runtime had is
@@ -791,7 +846,17 @@ export function createAiRuntime(opts: AiRuntimeOptions = {}) {
       return codexOnlyFailure('This copy of Limn does not list which Codex version to download. Update Limn and try again.');
     }
     const npm = installOpts.npm ?? resolveNpm(env);
-    if (!npm) return failWith('npm was not found. Install Node.js with npm, then try again.');
+    if (!npm) {
+      const message = 'npm was not found. Install Node.js with npm, then try again.';
+      return codexOnly(installOpts) ? codexOnlyFailure(message) : failWith(message);
+    }
+
+    // ⚠ CODEX ALONE when Claude was not asked for and is ALREADY ready (the first boot of an existing
+    // install adding Codex; a Codex Retry): Claude's packages are neither downloaded again nor swapped
+    // out from under a run that may be using them.
+    if (codexWant && codexOnly(installOpts)) {
+      return runCodexOnly(codexWant, npm, installOpts.timeoutMs ?? 10 * 60_000, codexOnlyFailure);
+    }
 
     lastFailure = null;
     if (codexRequested) lastCodexFailure = null;

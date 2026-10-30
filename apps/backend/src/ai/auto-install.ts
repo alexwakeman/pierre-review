@@ -2,9 +2,10 @@
 //
 // The SDKs and the Codex CLI stay OUT of the npm manifest (a fast `npx limn-review`; the guardrails in
 // scripts/build-release.mjs are unchanged), so on a boot that finds either runtime missing, stale or
-// without its native program, Limn downloads BOTH in the background — the same single-flight
-// `installAiRuntime` that `limn ai install codex` and the SPA's Retry run. After it, signing in to
-// each provider is the only step.
+// without its native program, Limn downloads what is missing in the background — the same
+// single-flight `installAiRuntime` that `limn ai install codex` and the SPA's Retry run. ⚠ A Claude
+// that is already ready is never fetched again or swapped (`['codex']` alone: the existing install
+// adding Codex). After it, signing in to each provider is the only step.
 //
 // ⚠ IT NEVER DELAYS THE SERVER. `index.ts` calls `startAiAutoInstall` AFTER `listen`, with `void`;
 // nothing awaits it. `/api/me` reads `runtime: 'installing'` (and the current step in
@@ -43,8 +44,8 @@ export interface AutoInstallDeps {
 }
 
 /**
- * The providers a download must bring, or null when nothing is missing. Claude's packages always
- * come with any download (ai/runtime.ts stages them first), so Codex missing means ['claude', 'codex'].
+ * The providers a download must bring, or null when nothing is missing. ['codex'] alone over a ready
+ * Claude downloads Codex only (ai/runtime.ts): an existing install neither fetches nor swaps Claude.
  */
 export function autoInstallProviders(claude: AiRuntimeStatus, codex: AiRuntimeStatus): AiRuntimeProvider[] | null {
   // Already running (a `limn ai install` started by the same process cannot be, but a Retry can).
@@ -52,7 +53,8 @@ export function autoInstallProviders(claude: AiRuntimeStatus, codex: AiRuntimeSt
   const needClaude = claude.runtime !== 'ready';
   const needCodex = codex.runtime !== 'ready';
   if (!needClaude && !needCodex) return null;
-  return needCodex ? ['claude', 'codex'] : ['claude'];
+  if (!needCodex) return ['claude'];
+  return needClaude ? ['claude', 'codex'] : ['codex'];
 }
 
 /** The testable body: one attempt, and on failure ONE scheduled retry. */
@@ -60,12 +62,13 @@ export function runAutoInstall(deps: AutoInstallDeps, attempt = 1): void {
   if (!deps.enabled) return;
   const providers = autoInstallProviders(deps.claude(), deps.codex());
   if (!providers) return;
-  deps.log.info(`ai: downloading ${providers.includes('codex') ? 'Claude and Codex' : 'Claude'} in the background`);
+  const names = providers.map((p) => (p === 'codex' ? 'Codex' : 'Claude')).join(' and ');
+  deps.log.info(`ai: downloading ${names} in the background`);
   void deps
     .install(providers)
     .then((r) => {
       if (r.ok) {
-        deps.log.info('ai: Claude and Codex are downloaded — sign in to use them');
+        deps.log.info(`ai: ${names} downloaded — sign in to use ${providers.length > 1 ? 'them' : 'it'}`);
         return;
       }
       deps.log.warn(`ai: the download did not finish: ${r.message}`);

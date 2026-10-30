@@ -138,8 +138,9 @@ them by default, and a dependent package cannot switch off its dependency's plat
   `ai/runtime.ts` — and the script fails if they diverge.
 - **Claude and Codex are INCLUDED BY DEFAULT — no click** (`ai/auto-install.ts`). After `listen`
   (never before, never awaited — it cannot slow the boot), a boot that finds either runtime not
-  `ready` (absent, stale, no native program) downloads BOTH (`providers: ['claude', 'codex']`; Claude
-  alone when only Claude is missing). `MeResponse.ai.autoInstall` says it is on; while it runs,
+  `ready` (absent, stale, no native program) downloads what is missing (`['claude', 'codex']`;
+  `['claude']` when only Claude is; ⚠ `['codex']` ALONE over a ready Claude, which `runCodexOnly`
+  stages apart and moves in WITHOUT re-downloading or swapping Claude's packages under a live run). `MeResponse.ai.autoInstall` says it is on; while it runs,
   `runtime: 'installing'` with the current STEP in `runtimeMessage` (Limn's own words, never npm's
   lines — `currentStep` in `ai/runtime.ts`), polled by the SPA where "Set up AI" used to be. A failure
   is retried ONCE automatically (3 min later), then left to the SPA's Retry (which re-POSTs with
@@ -198,7 +199,8 @@ provider). Limn runs the Codex CLI's native program; it never imports a Codex pa
   every bump.
 - **Downloaded on the first boot with Claude's packages** (the automatic download above), into the
   same `~/.limn/ai-runtime`; by hand, `limn ai install codex` or the SPA's Retry
-  (`POST /api/ai/runtime/install {provider: 'codex'}`). A plain `limn ai install` stays Claude-only. npm brings the
+  (`POST /api/ai/runtime/install {provider: 'codex'}`: Codex only when Claude is ready, else both). A
+  plain `limn ai install` stays Claude-only. npm brings the
   platform package (`@openai/codex-<platform>`); `codexBinaryIn` finds the native program the way
   the package's own `bin/codex.js` does. ⚠ Codex is STAGED APART from Claude's packages: a Codex
   failure is recorded as Codex's alone and never fails Claude's install, and a Claude-only "Set up
