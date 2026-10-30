@@ -37,7 +37,7 @@ import { aiRunLabel } from '@pierre-review/shared';
 export { redrawRefusalText };
 
 const BTN =
-  'rounded-ui border border-gray-300 px-2 py-0.5 text-meta text-gray-700 hover:border-gray-400 disabled:cursor-not-allowed disabled:opacity-40 dark:border-gray-700 dark:text-gray-200 dark:hover:border-gray-500';
+  'rounded-ui border border-ui-line px-2 py-0.5 text-meta text-ui-ink hover:border-ui-line disabled:cursor-not-allowed disabled:opacity-40';
 
 type OpenInChanges = (path: string, line: number | null, side: 'LEFT' | 'RIGHT') => void;
 
@@ -161,7 +161,7 @@ export function ClaudeReviewDiagramsSection({
     >
       <DiagramSlotView slot={data.pr} redrawing={redrawing} label="Design of this pull request" openFile={openOwn} />
       {refusal != null && <p className={REVIEW_META}>{refusal}</p>}
-      {redraw.isError && <p className="text-meta text-red-600 dark:text-red-400">{redraw.error.message}</p>}
+      {redraw.isError && <p className="text-meta text-ui-danger">{redraw.error.message}</p>}
       {data.stories.map((s) => (
         <StorySlotBlock
           key={s.ident}
@@ -191,9 +191,9 @@ function StorySlotBlock({
   const drawing = redrawing || slotDrawing(slot);
   const refusal = redrawRefusalText(redraw.data);
   return (
-    <div className="space-y-1.5 border-t border-gray-200 pt-3 dark:border-gray-800">
+    <div className="space-y-1.5 border-t border-ui-line pt-3">
       <div className="flex flex-wrap items-center gap-2">
-        <h4 className="text-meta font-semibold text-gray-700 dark:text-gray-200">
+        <h4 className="text-meta font-semibold text-ui-ink">
           Story design{slot.ticketKey != null ? ` · ${slot.ticketKey}` : ''} · {slot.memberCount} pull requests
         </h4>
         {slot.memberCount >= 2 && (
@@ -204,7 +204,7 @@ function StorySlotBlock({
       </div>
       <DiagramSlotView slot={slot} redrawing={redrawing} label="Design of the whole story" openFile={openFile} />
       {refusal != null && <p className={REVIEW_META}>{refusal}</p>}
-      {redraw.isError && <p className="text-meta text-red-600 dark:text-red-400">{redraw.error.message}</p>}
+      {redraw.isError && <p className="text-meta text-ui-danger">{redraw.error.message}</p>}
     </div>
   );
 }

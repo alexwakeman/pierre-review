@@ -63,18 +63,18 @@ export function ConflictAiCard({ pr }: { pr: PrDetail }): JSX.Element {
 
   return (
     <div className="mb-3 rounded-ui bg-ui-surface p-3">
-      <div className="flex items-center gap-1.5 text-body font-medium text-gray-800 dark:text-gray-100">
+      <div className="flex items-center gap-1.5 text-body font-medium text-ui-ink">
         <SparkleIcon size={13} className="text-ai-signal" />
         This branch conflicts with {base}
       </div>
-      <p className="mt-1 text-meta text-gray-600 dark:text-gray-300">
+      <p className="mt-1 text-meta text-ui-mute">
         {name} reads the code and picks a result for each conflict. You check its choices in the
         resolver before anything is pushed.
       </p>
       {active && run != null ? (
         <div className="mt-2">
           <RegenProgressBar active label={`Resolving conflicts with ${name}`} timeConstantSec={60} />
-          <div className="mt-1 flex items-center gap-2 text-meta text-gray-600 dark:text-gray-300">
+          <div className="mt-1 flex items-center gap-2 text-meta text-ui-mute">
             {conflictAiPhaseLabel(run.phase, name)}
             <button type="button" className={BTN_SECONDARY} onClick={() => cancelConflictAiRun(pr.id)}>
               Cancel
@@ -93,17 +93,17 @@ export function ConflictAiCard({ pr }: { pr: PrDetail }): JSX.Element {
               <button type="button" className={BTN_SECONDARY} onClick={() => openConflictResolver(target)}>
                 Open the resolver
               </button>
-              <span className="text-meta text-gray-600 dark:text-gray-300">
+              <span className="text-meta text-ui-mute">
                 {aiRunProviderName(done)} decided {done.choices.length} of {done.decidableTotal} change
                 {done.decidableTotal === 1 ? '' : 's'}.
               </span>
             </>
           )}
           {run?.phase === 'failed' && run.error != null && (
-            <span className="text-meta text-red-600 dark:text-red-400">{run.error}</span>
+            <span className="text-meta text-ui-danger">{run.error}</span>
           )}
           {run?.phase === 'cancelled' && (
-            <span className="text-meta text-gray-600 dark:text-gray-300">Cancelled.</span>
+            <span className="text-meta text-ui-mute">Cancelled.</span>
           )}
         </div>
       )}

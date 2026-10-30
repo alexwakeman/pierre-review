@@ -199,9 +199,9 @@ function startsCollapsed(file: DiffFile): boolean {
 }
 
 const ROW_BG: Record<DiffRow['kind'], string> = {
-  hunk: 'bg-sky-500/5 text-sky-600 dark:text-sky-400 select-none',
-  add: 'bg-green-500/10',
-  del: 'bg-red-500/10',
+  hunk: 'bg-ui-accent/10 text-ui-accent select-none',
+  add: 'bg-ui-success/10',
+  del: 'bg-ui-danger/10',
   context: '',
 };
 
@@ -270,14 +270,14 @@ function DiffLine({
       <tr
         ref={rowRef}
         className={`group transition-colors ${
-          flash ? 'bg-amber-300/40 dark:bg-amber-400/25' : ROW_BG[row.kind]
+          flash ? 'bg-ui-warn/10' : ROW_BG[row.kind]
         }`}
       >
         {/* Widths come from the table's `<colgroup>` (see `DiffColumns`), never from these cells. */}
-        <td className="select-none border-r border-gray-200 px-1 text-right align-top text-gray-400 dark:border-gray-800">
+        <td className="select-none border-r border-ui-line px-1 text-right align-top text-ui-faint">
           {gutterText(row.oldLine)}
         </td>
-        <td className="select-none border-r border-gray-200 px-1 text-right align-top text-gray-400 dark:border-gray-800">
+        <td className="select-none border-r border-ui-line px-1 text-right align-top text-ui-faint">
           {gutterText(row.newLine)}
         </td>
         <td className="select-none px-1 align-top">
@@ -289,7 +289,7 @@ function DiffLine({
                 type="button"
                 onClick={onOpen}
                 title="Comment on this line"
-                className="hit rounded-ui bg-blue-500 px-1 text-meta font-bold leading-tight text-white opacity-0 transition-opacity hover:bg-blue-600 group-hover:opacity-100"
+                className="hit rounded-ui bg-ui-accent-fill px-1 text-meta font-bold leading-tight text-ui-on-accent opacity-0 transition-opacity hover:bg-ui-accent-fill group-hover:opacity-100"
               >
                 +
               </button>
@@ -456,7 +456,7 @@ function InlineThread({
   const ringed = focused || flash;
 
   return (
-    <div className={`rounded-ui font-sans ${ringed ? 'ring-2 ring-amber-400/70' : ''}`}>
+    <div className={`rounded-ui font-sans ${ringed ? 'ring-2 ring-ui-warn/40' : ''}`}>
       <button
         ref={headerRef}
         type="button"
@@ -481,16 +481,16 @@ function InlineThread({
               ? 'rgb(var(--ai-signal-fill))'
               : meta.color,
         }}
-        className={`flex w-full items-center gap-1.5 rounded-ui border border-l-2 border-gray-200 bg-white px-2 py-1 text-left text-meta hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:hover:bg-gray-800 ${
+        className={`flex w-full items-center gap-1.5 rounded-ui border border-l-2 border-ui-line bg-ui-surface px-2 py-1 text-left text-meta hover:bg-ui-hover ${
           resolved
-            ? 'text-gray-400 opacity-70 dark:text-gray-500'
-            : 'text-gray-600 dark:text-gray-300'
+            ? 'text-ui-faint opacity-70'
+            : 'text-ui-mute'
         }`}
       >
         {resolved ? (
           <CheckIcon
             size={11}
-            className="shrink-0 text-emerald-600 dark:text-emerald-400"
+            className="shrink-0 text-ui-success"
           />
         ) : claude != null ? (
           // Shut, the Claude pills below carry the mark themselves.
@@ -504,7 +504,7 @@ function InlineThread({
         {/* `outdated` drops once open — ThreadCard's own header prints it. "line not in this diff"
             stays: it is a fact about where this pill had to be PARKED, which the card never states. */}
         {fileChip && !(open && thread.isOutdated) && (
-          <span className="shrink-0 text-gray-400 dark:text-gray-500">
+          <span className="shrink-0 text-ui-faint">
             {thread.isOutdated ? 'outdated' : 'line not in this diff'} ·
           </span>
         )}
@@ -525,7 +525,7 @@ function InlineThread({
         {!open && (
           <>
             <span className="shrink-0 font-medium">{author}</span>
-            <span className="shrink-0 text-gray-400 dark:text-gray-500">
+            <span className="shrink-0 text-ui-faint">
               · {relativeTime(thread.createdAt)}
             </span>
           </>
@@ -534,20 +534,20 @@ function InlineThread({
             the conversation below never makes. */}
         {approximate && (
           <span
-            className="shrink-0 text-gray-400 dark:text-gray-500"
+            className="shrink-0 text-ui-faint"
             title="Reconstructed from the code it was written against — may be a few lines off"
           >
             ~
           </span>
         )}
         {!open && replies > 0 && (
-          <span className="shrink-0 text-gray-400 dark:text-gray-500">
+          <span className="shrink-0 text-ui-faint">
             · {replies} repl{replies === 1 ? 'y' : 'ies'}
           </span>
         )}
         {!open && excerpt && (
           // Plain text ONLY — bodies are untrusted, so markdown/images/links stay inert here.
-          <span className="min-w-0 flex-1 truncate text-gray-400 dark:text-gray-500">
+          <span className="min-w-0 flex-1 truncate text-ui-faint">
             · {excerpt}
           </span>
         )}
@@ -555,14 +555,14 @@ function InlineThread({
             the ACTION rather than the thread: every description of the thread is now in the card
             below, and a state word here would just be the StateBadge again. */}
         {open && (
-          <span className="min-w-0 flex-1 truncate text-gray-400 dark:text-gray-500">
+          <span className="min-w-0 flex-1 truncate text-ui-faint">
             Hide thread
           </span>
         )}
         <ChevronIcon
           dir={open ? 'up' : 'down'}
           size={11}
-          className="ml-auto shrink-0 text-gray-400"
+          className="ml-auto shrink-0 text-ui-faint"
         />
       </button>
       {open && (
@@ -600,7 +600,7 @@ function InlineThreadRow({
 }): JSX.Element {
   return (
     <tr>
-      <td colSpan={4} className="bg-gray-50 px-2 py-1 dark:bg-gray-900/40">
+      <td colSpan={4} className="bg-ui-surface px-2 py-1">
         <FullWidthCell wrap={wrap}>
           <InlineThread
             thread={thread}
@@ -825,8 +825,8 @@ function InlineCommentBox({
   };
 
   return (
-    <div className="space-y-1 rounded-ui border border-gray-300 bg-white p-2 font-sans dark:border-gray-700 dark:bg-gray-900">
-      <div className="text-meta text-gray-400">
+    <div className="space-y-1 rounded-ui border border-ui-line bg-ui-surface p-2 font-sans">
+      <div className="text-meta text-ui-faint">
         Commenting on {side === 'LEFT' ? 'old' : 'new'} line {line}
       </div>
       <MentionTextarea
@@ -836,14 +836,14 @@ function InlineCommentBox({
         rows={3}
         autoFocus
         placeholder="Add an inline review comment (markdown)…"
-        className="w-full rounded-ui border border-gray-300 bg-white px-2 py-1.5 text-meta dark:border-gray-700 dark:bg-gray-950"
+        className="w-full rounded-ui border border-ui-line bg-ui-surface px-2 py-1.5 text-meta"
       />
       <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
           onClick={send}
           disabled={busy || body.trim().length === 0}
-          className="hit whitespace-nowrap rounded-ui border border-blue-400 px-2 py-0.5 text-meta text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:border-blue-600 dark:text-blue-400 dark:hover:bg-blue-900/30"
+          className="hit whitespace-nowrap rounded-ui border border-ui-accent/50 px-2 py-0.5 text-meta text-ui-accent hover:bg-ui-accent/10 disabled:opacity-50"
         >
           {refreshing ? 'Loading it…' : add.isPending ? 'Posting…' : 'Send'}
         </button>
@@ -856,14 +856,14 @@ function InlineCommentBox({
             onClose();
           }}
           disabled={busy}
-          className="hit whitespace-nowrap rounded-ui border border-gray-300 px-2 py-0.5 text-meta hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
+          className="hit whitespace-nowrap rounded-ui border border-ui-line px-2 py-0.5 text-meta hover:border-ui-line disabled:opacity-50"
         >
           {notice?.posted ? 'Close' : 'Cancel'}
         </button>
-        {error && <span className="text-meta text-red-500">{error}</span>}
+        {error && <span className="text-meta text-ui-danger">{error}</span>}
       </div>
       {notice && (
-        <div className="text-meta text-amber-600 dark:text-amber-400">
+        <div className="text-meta text-ui-warn">
           {notice.text}
           {notice.url && (
             <>
@@ -872,7 +872,7 @@ function InlineCommentBox({
                 href={safeExternalUrl(notice.url)}
                 target="_blank"
                 rel="noreferrer noopener"
-                className="hit text-blue-500 hover:underline"
+                className="hit text-ui-accent hover:underline"
               >
                 Open on GitHub
                 <ExternalLinkIcon
@@ -920,7 +920,7 @@ function NoPatchNote({
           type="button"
           onClick={onLoad}
           disabled={status === 'loading'}
-          className="hit rounded-ui border border-blue-400 px-2 py-0.5 text-blue-600 hover:bg-blue-50 disabled:opacity-60 dark:border-blue-600 dark:text-blue-400 dark:hover:bg-blue-900/30"
+          className="hit rounded-ui border border-ui-accent/50 px-2 py-0.5 text-ui-accent hover:bg-ui-accent/10 disabled:opacity-60"
         >
           {status === 'loading' ? 'Loading full diff…' : 'Load full diff'}
         </button>
@@ -930,7 +930,7 @@ function NoPatchNote({
           href={githubUrl}
           target="_blank"
           rel="noreferrer noopener"
-          className="hit text-blue-500 hover:underline"
+          className="hit text-ui-accent hover:underline"
         >
           View on GitHub
           <ExternalLinkIcon size={10} className="ml-0.5 inline-block align-[-0.1em]" />
@@ -973,8 +973,8 @@ function GapRow({
       ? gapSummary(remaining, gap.context)
       : [GAP_STATUS_TEXT[status] ?? '', gap.context].filter((p) => p !== '').join(' · ');
   return (
-    <tr className="bg-sky-500/10">
-      <td colSpan={2} className="border-r border-gray-200 p-0 align-middle dark:border-gray-800">
+    <tr className="bg-ui-accent/10">
+      <td colSpan={2} className="border-r border-ui-line p-0 align-middle">
         {controls.length > 0 && (
           <div className="flex flex-col">
             {controls.map((c) => {
@@ -986,7 +986,7 @@ function GapRow({
                   onClick={() => onExpand(c)}
                   aria-label={label}
                   title={label}
-                  className="hit flex h-5 w-full items-center justify-center text-gray-500 hover:bg-blue-500 hover:text-white focus-visible:bg-blue-500 focus-visible:text-white focus-visible:outline-none dark:text-gray-400 dark:hover:bg-blue-600 dark:focus-visible:bg-blue-600"
+                  className="hit flex h-5 w-full items-center justify-center text-ui-mute hover:bg-ui-accent-fill hover:text-white focus-visible:bg-ui-accent-fill focus-visible:text-white focus-visible:outline-none"
                 >
                   {c === 'all' ? <UnfoldIcon size={16} /> : <FoldIcon dir={c} size={16} />}
                 </button>
@@ -997,7 +997,7 @@ function GapRow({
       </td>
       <td
         colSpan={2}
-        className={`px-2 py-0.5 align-middle text-gray-500 dark:text-gray-400 ${
+        className={`px-2 py-0.5 align-middle text-ui-mute ${
           wrap ? 'whitespace-pre-wrap [overflow-wrap:anywhere]' : 'whitespace-pre'
         }`}
       >
@@ -1043,10 +1043,10 @@ function ExpandedLines({
     const h = html?.[at] ?? null;
     out.push(
       <tr key={k}>
-        <td className="select-none border-r border-gray-200 px-1 text-right align-top text-gray-400 dark:border-gray-800">
+        <td className="select-none border-r border-ui-line px-1 text-right align-top text-ui-faint">
           {oldLine}
         </td>
-        <td className="select-none border-r border-gray-200 px-1 text-right align-top text-gray-400 dark:border-gray-800">
+        <td className="select-none border-r border-ui-line px-1 text-right align-top text-ui-faint">
           {newLine}
         </td>
         <td className="select-none px-1 align-top" />
@@ -1376,8 +1376,8 @@ function FileDiffBlock({
       <div
         className={`sticky top-[var(--diff-sticky-top,0px)] z-10 flex items-center gap-2 border-b px-3 py-1.5 text-meta ${
           focus != null
-            ? `${SELECTED_FILL} border-cyan-300 dark:border-cyan-600`
-            : 'border-gray-100 bg-white hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-950 dark:hover:bg-gray-900'
+            ? `${SELECTED_FILL} border-ui-accent/50`
+            : 'border-ui-line bg-ui-surface hover:bg-ui-hover'
         }`}
       >
         <button
@@ -1386,7 +1386,7 @@ function FileDiffBlock({
           className="hit flex min-w-0 flex-1 items-center gap-2 text-left"
           title={expanded ? 'Collapse this file' : 'Expand this file'}
         >
-          <span className="flex w-3 shrink-0 select-none items-center text-gray-400">
+          <span className="flex w-3 shrink-0 select-none items-center text-ui-faint">
             <ChevronIcon dir={expanded ? 'down' : 'right'} />
           </span>
           <span
@@ -1411,15 +1411,15 @@ function FileDiffBlock({
           </span>
         )}
         <span className="shrink-0 font-mono tabular-nums">
-          <span className="text-green-600 dark:text-green-400">+{file.additions}</span>{' '}
-          <span className="text-red-500 dark:text-red-400">−{file.deletions}</span>
+          <span className="text-ui-success">+{file.additions}</span>{' '}
+          <span className="text-ui-danger">−{file.deletions}</span>
         </span>
         {githubUrl && (
           <a
             href={githubUrl}
             target="_blank"
             rel="noreferrer noopener"
-            className="hit inline-flex shrink-0 items-center text-blue-500 hover:underline"
+            className="hit inline-flex shrink-0 items-center text-ui-accent hover:underline"
             title="View this file's diff on GitHub"
           >
             <ExternalLinkIcon size={12} />
@@ -1428,9 +1428,9 @@ function FileDiffBlock({
       </div>
 
       {expanded && (
-        <div className="border-b border-gray-100 dark:border-gray-800">
+        <div className="border-b border-ui-line">
           {patch == null ? (
-            <div className="px-3 py-3 text-center text-meta text-gray-500 dark:text-gray-400">
+            <div className="px-3 py-3 text-center text-meta text-ui-mute">
               {fileSource != null ? (
                 <NoPatchNote
                   status={
@@ -1452,7 +1452,7 @@ function FileDiffBlock({
                     href={githubUrl}
                     target="_blank"
                     rel="noreferrer noopener"
-                    className="hit text-blue-500 hover:underline"
+                    className="hit text-ui-accent hover:underline"
                   >
                     view on GitHub
                     <ExternalLinkIcon
@@ -1467,7 +1467,7 @@ function FileDiffBlock({
               {fileGrainPills}
             </div>
           ) : rows.length === 0 ? (
-            <div className="px-3 py-3 text-center text-meta text-gray-500 dark:text-gray-400">
+            <div className="px-3 py-3 text-center text-meta text-ui-mute">
               No textual diff for this file.
               {fileGrainPills}
             </div>

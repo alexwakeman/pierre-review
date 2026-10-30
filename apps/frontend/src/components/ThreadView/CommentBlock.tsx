@@ -41,7 +41,7 @@ export function CommentBlock({
         {showLink && (
           <>
             {showLink}
-            <span className="decorative-mark text-gray-300 dark:text-gray-600">·</span>
+            <span className="decorative-mark text-ui-faint">·</span>
           </>
         )}
         <Avatar user={user} size={18} />
@@ -51,7 +51,7 @@ export function CommentBlock({
           repoId={repoId}
           className="font-semibold"
         />
-        <span className="text-gray-400">{relativeTime(comment.createdAt)}</span>
+        <span className="text-ui-faint">{relativeTime(comment.createdAt)}</span>
         {isNew && <NewTag />}
         <MlSeverityBadge label={mlLabel} />
         {/* Right-aligned so it lands in the same place on every comment regardless of how many

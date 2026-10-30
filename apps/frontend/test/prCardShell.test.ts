@@ -64,8 +64,8 @@ describe('CiChip', () => {
     expect(renderToStaticMarkup(createElement(CiChip, { ci: null }))).toBe('');
   });
   it('is red-toned when CI failed, neutral when it passed', () => {
-    expect(renderToStaticMarkup(createElement(CiChip, { ci: 'failure' }))).toContain('bg-red-500/10');
-    expect(renderToStaticMarkup(createElement(CiChip, { ci: 'success' }))).not.toContain('bg-red-500/10');
+    expect(renderToStaticMarkup(createElement(CiChip, { ci: 'failure' }))).toContain('bg-ui-danger/10');
+    expect(renderToStaticMarkup(createElement(CiChip, { ci: 'success' }))).not.toContain('bg-ui-danger/10');
   });
 });
 
@@ -84,7 +84,7 @@ describe('PrCardFrame + PrCardTitle + PrCardChips', () => {
       createElement(PrCardFrame, { accentClass: 'border-l-4 border-l-red-400', flash: true }, 'x'),
     );
     expect(html).toContain('border-l-4 border-l-red-400');
-    expect(html).toContain('ring-sky-400/70');
+    expect(html).toContain('ring-ui-accent');
   });
 
   it('names the card by its title, and keeps the end slot outside the heading', () => {

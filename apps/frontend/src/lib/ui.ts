@@ -771,22 +771,22 @@ export const REVIEW_STATE_META: Record<ReviewState, ReviewStateMeta> = {
   approved: reviewStateMeta(
     'Approved',
     CheckIcon,
-    'bg-green-500/10',
-    'text-green-700 dark:text-green-400',
+    'bg-ui-success/10',
+    'text-ui-success',
     'Approved',
   ),
   changes_requested: reviewStateMeta(
     'Changes requested',
     CloseIcon,
-    'bg-red-500/10',
-    'text-red-700 dark:text-red-400',
+    'bg-ui-danger/10',
+    'text-ui-danger',
     'Requested changes',
   ),
   commented: reviewStateMeta(
     'Commented',
     CommentIcon,
-    'bg-gray-500/10',
-    'text-gray-600 dark:text-gray-300',
+    'bg-ui-raise',
+    'text-ui-mute',
     'Reviewed with comments — no verdict',
   ),
   // A dismissed review is quieter than a commented one, but still LEGIBLE — 4.83:1 on white and
@@ -794,16 +794,16 @@ export const REVIEW_STATE_META: Record<ReviewState, ReviewStateMeta> = {
   dismissed: reviewStateMeta(
     'Dismissed',
     MinusIcon,
-    'bg-gray-500/10',
-    'text-gray-500 dark:text-gray-400',
+    'bg-ui-raise',
+    'text-ui-mute',
     'Review dismissed',
   ),
   // Requested and not yet answered — nothing has happened, so there is no mark to draw.
   pending: reviewStateMeta(
     'Pending',
     null,
-    'bg-gray-500/10',
-    'text-gray-500 dark:text-gray-400',
+    'bg-ui-raise',
+    'text-ui-mute',
     'Review pending',
   ),
 };
@@ -1181,10 +1181,10 @@ export const MERGE_TONE_CLASS: Record<MergeVerdictInfo['tone'], string> = {
 
 // Chip backgrounds for the dense list rows (RepoOpenPrList).
 export const MERGE_TONE_CHIP: Record<MergeVerdictInfo['tone'], string> = {
-  ok: 'bg-green-500/15 text-green-700 dark:text-green-400',
-  warn: 'bg-orange-500/15 text-orange-600 dark:text-orange-400',
-  bad: 'bg-red-500/15 text-red-600 dark:text-red-400',
-  muted: 'bg-gray-500/10 text-gray-500 dark:text-gray-400',
+  ok: 'bg-ui-success/10 text-ui-success',
+  warn: 'bg-ui-warn/10 text-ui-warn',
+  bad: 'bg-ui-danger/10 text-ui-danger',
+  muted: 'bg-ui-raise text-ui-mute',
 };
 
 // Which verdicts deserve the ⚠ on the COMPACT surfaces (open-PR rows, timeline tooltips).

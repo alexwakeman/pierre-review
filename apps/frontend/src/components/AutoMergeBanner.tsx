@@ -281,17 +281,17 @@ function StatusDot({
 }): JSX.Element {
   if (tone === 'working') {
     return (
-      <span className="inline-block h-2.5 w-2.5 shrink-0 animate-spin rounded-full border-2 border-gray-300 border-t-blue-500" />
+      <span className="inline-block h-2.5 w-2.5 shrink-0 animate-spin rounded-full border-2 border-ui-line border-t-ui-accent/50" />
     );
   }
   const color =
     tone === 'good'
-      ? 'bg-green-500'
+      ? 'bg-ui-success'
       : tone === 'bad'
-        ? 'bg-red-500'
+        ? 'bg-ui-danger'
         : tone === 'stalled'
-          ? 'bg-amber-500'
-          : 'bg-sky-500 animate-pulse';
+          ? 'bg-ui-warn'
+          : 'bg-ui-accent-fill animate-pulse';
   return <span className={`inline-block h-2 w-2 shrink-0 rounded-full ${color}`} />;
 }
 
@@ -313,11 +313,11 @@ function RowHeader({
     <button type="button" onClick={onOpen} className="hit block w-full text-left" title="Open this PR">
       <div className="flex items-center gap-1.5">
         <StatusDot tone={tone} />
-        <span className="truncate font-medium text-blue-600 hover:underline dark:text-blue-400">
+        <span className="truncate font-medium text-ui-accent hover:underline">
           {repoFullName} #{prNumber}
         </span>
       </div>
-      <div className="mt-0.5 truncate text-gray-500 dark:text-gray-400">{prTitle}</div>
+      <div className="mt-0.5 truncate text-ui-mute">{prTitle}</div>
     </button>
   );
 }
@@ -370,9 +370,9 @@ function LiveRow({ row }: { row: ArmedMergeRequest }): JSX.Element {
       />
       <div className="mt-0.5 flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <div className="text-gray-500 dark:text-gray-400">{headline}</div>
+          <div className="text-ui-mute">{headline}</div>
           {row.armedByPolicy && (
-            <div className="text-gray-500 dark:text-gray-400">{ARMED_BY_POLICY_LABEL}</div>
+            <div className="text-ui-mute">{ARMED_BY_POLICY_LABEL}</div>
           )}
           {/* ⚠ `lastReason` is the SPECIFICS under the headline — which branch, which error. For
               a POSITIONED `queued_local` alone it is not: the watcher writes "waiting its turn —
@@ -385,14 +385,14 @@ function LiveRow({ row }: { row: ArmedMergeRequest }): JSX.Element {
               position (an intent spending one tick taking its place in the landing order after
               its merge queue was disabled) has prose that says something the headline cannot. */}
           {row.lastReason && !(row.phase === 'queued_local' && row.queuePosition != null) && (
-            <div className="mt-0.5 text-meta leading-snug text-gray-400">{row.lastReason}</div>
+            <div className="mt-0.5 text-meta leading-snug text-ui-faint">{row.lastReason}</div>
           )}
         </div>
         <button
           type="button"
           onClick={() => disarm.mutate()}
           disabled={disarm.isPending}
-          className="hit shrink-0 text-meta text-gray-400 hover:text-red-600 disabled:opacity-50 dark:hover:text-red-400"
+          className="hit shrink-0 text-meta text-ui-faint hover:text-ui-danger disabled:opacity-50"
         >
           {disarm.isPending ? 'Cancelling…' : 'Cancel'}
         </button>
@@ -421,7 +421,7 @@ function OutcomeRow({
       />
       <div className="mt-0.5 flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <div className={merged ? 'text-green-600 dark:text-green-400' : 'text-gray-500 dark:text-gray-400'}>
+          <div className={merged ? 'text-ui-success' : 'text-ui-mute'}>
             {merged ? (
               <CheckIcon size={11} className="mr-1 inline-block align-[-0.1em]" />
             ) : (
@@ -430,14 +430,14 @@ function OutcomeRow({
             {TERMINAL_LABEL[outcome.state] ?? 'Auto-merge finished'}
           </div>
           {outcome.reason && (
-            <div className="mt-0.5 text-meta leading-snug text-gray-400">{outcome.reason}</div>
+            <div className="mt-0.5 text-meta leading-snug text-ui-faint">{outcome.reason}</div>
           )}
         </div>
         <button
           type="button"
           onClick={onDismiss}
           aria-label={`Dismiss the result for ${outcome.repoFullName} #${outcome.prNumber}`}
-          className="hit shrink-0 text-meta text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+          className="hit shrink-0 text-meta text-ui-mute hover:text-ui-ink"
         >
           Dismiss
         </button>

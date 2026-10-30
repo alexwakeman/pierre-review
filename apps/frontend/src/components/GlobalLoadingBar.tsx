@@ -384,7 +384,7 @@ export function GlobalLoadingBar(): JSX.Element | null {
   const headline = !active ? (
     'Done'
   ) : pausedHeadline ? (
-    <span className="text-amber-700 dark:text-amber-400">
+    <span className="text-ui-warn">
       {rateLimited
         ? `Paused — GitHub rate limit, ${resumeLabel(rateLimited.paused?.resumeAt)}`
         : 'Paused — waiting for another sync'}

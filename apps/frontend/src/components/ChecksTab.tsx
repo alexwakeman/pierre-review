@@ -83,9 +83,9 @@ export function PrBranchLine({
   return (
     <div className="flex items-start gap-1.5">
       <span className="min-w-0 break-all" data-testid="pr-branch">
-        <span className="font-mono text-meta text-gray-900 dark:text-gray-100">{headRefName}</span>
+        <span className="font-mono text-meta text-ui-ink">{headRefName}</span>
         {baseRefName != null && (
-          <span className="text-meta text-gray-500 dark:text-gray-400"> → {baseRefName}</span>
+          <span className="text-meta text-ui-mute"> → {baseRefName}</span>
         )}
       </span>
       <CopyButton text={headRefName} what="branch name" />
@@ -106,7 +106,7 @@ export function PrTicketBranchLine({
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1" data-testid="pr-ticket-branch">
       {tickets != null &&
         (tickets.length === 0 ? (
-          <span className="text-meta text-gray-500 dark:text-gray-400">No ticket found</span>
+          <span className="text-meta text-ui-mute">No ticket found</span>
         ) : (
           <span className="flex flex-wrap gap-1.5">
             {tickets.map((t) => (
@@ -175,12 +175,12 @@ export function ChecksSummary({
         type="button"
         onClick={() => setOpen(!open)}
         aria-expanded={open}
-        className="hit flex w-full items-center gap-2 rounded-ui px-1 py-0.5 text-left hover:bg-gray-50 dark:hover:bg-gray-800/40"
+        className="hit flex w-full items-center gap-2 rounded-ui px-1 py-0.5 text-left hover:bg-ui-hover"
       >
-        <ChevronIcon dir={open ? 'down' : 'right'} size={10} className="shrink-0 text-gray-400" />
+        <ChevronIcon dir={open ? 'down' : 'right'} size={10} className="shrink-0 text-ui-faint" />
         {passed > 0 && (
           <span
-            className="rounded-ui bg-green-500/15 px-1 text-meta font-semibold text-green-700 dark:text-green-400"
+            className="rounded-ui bg-ui-success/10 px-1 text-meta font-semibold text-ui-success"
             title="Checks that passed"
           >
             {allPassed && passed > 1 ? `all ${passed} passed` : `${passed} passed`}
@@ -188,7 +188,7 @@ export function ChecksSummary({
         )}
         {failing > 0 && (
           <span
-            className="rounded-ui bg-red-500/15 px-1 text-meta font-semibold text-red-600 dark:text-red-400"
+            className="rounded-ui bg-ui-danger/10 px-1 text-meta font-semibold text-ui-danger"
             title="Checks that failed"
           >
             {failing} failing
@@ -196,13 +196,13 @@ export function ChecksSummary({
         )}
         {running > 0 && (
           <span
-            className="rounded-ui bg-amber-500/15 px-1 text-meta font-semibold text-amber-700 dark:text-amber-400"
+            className="rounded-ui bg-ui-warn/10 px-1 text-meta font-semibold text-ui-warn"
             title="Checks still running"
           >
             {running} running
           </span>
         )}
-        <span className="ml-auto text-meta text-gray-500 dark:text-gray-400">
+        <span className="ml-auto text-meta text-ui-mute">
           {total} check{total === 1 ? '' : 's'}
         </span>
       </button>
@@ -284,7 +284,7 @@ function SuggestedReviewersRow({
           const u = s.userId != null ? usersById.get(s.userId) : undefined;
           return (
             <div key={k} className="flex flex-wrap items-center gap-1.5">
-              <span className="inline-flex items-center gap-1 rounded-ui bg-gray-500/10 px-1.5 py-0.5">
+              <span className="inline-flex items-center gap-1 rounded-ui bg-ui-raise px-1.5 py-0.5">
                 {s.kind === 'team' ? (
                   <span className="font-medium">@{s.teamName}</span>
                 ) : u ? (
@@ -296,7 +296,7 @@ function SuggestedReviewersRow({
                   <span>@{s.login}</span>
                 )}
               </span>
-              <span className="text-gray-400">{s.reason}</span>
+              <span className="text-ui-faint">{s.reason}</span>
               {pr.viewerCanPush && (
                 <button
                   type="button"
@@ -321,7 +321,7 @@ function SuggestedReviewersRow({
         })}
       </div>
       {request.isError && (
-        <div className="mt-1 text-meta text-red-500">
+        <div className="mt-1 text-meta text-ui-danger">
           {(request.error as Error)?.message ?? 'Couldn’t request the reviewer.'}
         </div>
       )}
@@ -458,7 +458,7 @@ function PrSummary({ body }: { body: string }): JSX.Element {
           <button
             type="button"
             onClick={() => setExpanded((v) => !v)}
-            className="hit mt-1 text-meta font-medium text-blue-500 hover:underline"
+            className="hit mt-1 text-meta font-medium text-ui-accent hover:underline"
           >
             {expanded ? 'Show less' : 'Show more'}
           </button>
@@ -629,7 +629,7 @@ export function ChecksTab({
   return (
     <>
       {pr.authNotice?.kind === 'saml_sso' && (
-        <div className="mx-4 mt-2 rounded-ui border border-amber-400/50 bg-amber-400/10 px-3 py-2 text-meta leading-relaxed text-amber-800 dark:text-amber-200">
+        <div className="mx-4 mt-2 rounded-ui border border-ui-warn/40 bg-ui-warn/10 px-3 py-2 text-meta leading-relaxed text-ui-warn">
           <strong className="font-semibold">
             Some data from {pr.authNotice.org} is hidden.
           </strong>{' '}
@@ -662,7 +662,7 @@ export function ChecksTab({
         <div
           ref={statusRowRef}
           tabIndex={-1}
-          className="outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sky-500"
+          className="outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ui-accent"
         >
         <Row label="Status">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -696,11 +696,11 @@ export function ChecksTab({
                   {ci.label}
                   <ExternalLinkIcon
                     size={11}
-                    className="inline-block align-[-0.1em] text-gray-400"
+                    className="inline-block align-[-0.1em] text-ui-faint"
                   />
                 </a>
                 {checks.length > 0 && (
-                  <span className="text-meta text-gray-400">
+                  <span className="text-meta text-ui-faint">
                     ·{' '}
                     {[
                       counts.success ? `${counts.success} passed` : null,
@@ -713,11 +713,11 @@ export function ChecksTab({
                 )}
               </span>
             ) : (
-              <span className="text-gray-400">no checks</span>
+              <span className="text-ui-faint">no checks</span>
             )}
             {showVerdict && (
               <>
-                <span className="decorative-mark text-gray-300 dark:text-gray-600" aria-hidden>
+                <span className="decorative-mark text-ui-faint" aria-hidden>
                   |
                 </span>
                 {/* GitHub owns the landing, so the queue's own state IS the answer to "can this
@@ -731,8 +731,8 @@ export function ChecksTab({
                     <span
                       className={`font-medium ${
                         queue.tone === 'bad'
-                          ? 'text-red-700 dark:text-red-300'
-                          : 'text-gray-700 dark:text-gray-200'
+                          ? 'text-ui-danger'
+                          : 'text-ui-ink'
                       }`}
                       title={queue.title}
                     >
@@ -748,7 +748,7 @@ export function ChecksTab({
                         reading the failure — the reported bug. The four healthy states keep
                         their sentence in the chip's title: waiting in a queue explains itself. */}
                     {queue.tone === 'bad' && (
-                      <span className="text-meta text-gray-500 dark:text-gray-400">
+                      <span className="text-meta text-ui-mute">
                         · {queue.title}
                       </span>
                     )}
@@ -770,7 +770,7 @@ export function ChecksTab({
                         queue chip's replacement rule (above) already exists to prevent. The
                         sentence survives on the chip's own `title`, which is untouched. */}
                     {verdict.detail && verdict.verdict !== 'conflicts' && (
-                      <span className="text-meta text-gray-400">· {verdict.detail}</span>
+                      <span className="text-meta text-ui-faint">· {verdict.detail}</span>
                     )}
                   </>
                 )}
@@ -807,7 +807,7 @@ export function ChecksTab({
             fetch. */}
         {conflictsRowVisible(pr.state, verdict.verdict) && (
           <Row label="Conflicts">
-            <div className="flex flex-wrap items-center gap-2 text-meta font-medium leading-relaxed text-gray-700 dark:text-gray-200">
+            <div className="flex flex-wrap items-center gap-2 text-meta font-medium leading-relaxed text-ui-ink">
               {/* ⚠ THE BUTTON IS GATED, THE ROW IS NOT (see the ⚠ two paragraphs up). A reader
                   without push access sees the GitHub link alone, which is exactly what this row was before
                   the button existed. HIDE, never disable. And nothing here fetches:
@@ -863,16 +863,16 @@ export function ChecksTab({
         {stoppedIntent != null && pr.state === 'open' && (
           <Row label="Auto-merge">
             <div className="text-meta leading-relaxed">
-              <span className="font-medium text-gray-700 dark:text-gray-200">
+              <span className="font-medium text-ui-ink">
                 <WarningIcon size={12} className="mr-1 inline-block align-[-0.1em]" />
                 {TERMINAL_LABEL[stoppedIntent.state] ?? 'Auto-merge stopped'}
               </span>
               {stoppedIntent.lastReason && (
-                <span className="ml-1 text-gray-500 dark:text-gray-400">
+                <span className="ml-1 text-ui-mute">
                   — {stoppedIntent.lastReason}
                 </span>
               )}
-              <span className="ml-1 text-gray-400">
+              <span className="ml-1 text-ui-faint">
                 · armed {relativeTime(stoppedIntent.armedAt)}
               </span>
             </div>
@@ -908,12 +908,12 @@ export function ChecksTab({
                       <button
                         type="button"
                         onClick={onOpenThreads}
-                        className="hit font-medium text-gray-700 first-letter:uppercase hover:underline dark:text-gray-200"
+                        className="hit font-medium text-ui-ink first-letter:uppercase hover:underline"
                       >
                         {b.text}
                       </button>
                     ) : (
-                      <span className="font-medium text-gray-700 first-letter:uppercase dark:text-gray-200">
+                      <span className="font-medium text-ui-ink first-letter:uppercase">
                         {b.text}
                       </span>
                     )}
@@ -975,7 +975,7 @@ export function ChecksTab({
           <button
             type="button"
             onClick={onShowBotActivity}
-            className="hit inline-flex items-center gap-1 rounded-ui bg-red-500/10 px-1.5 py-0.5 text-meta font-medium text-red-600 transition-opacity hover:opacity-80 dark:text-red-400"
+            className="hit inline-flex items-center gap-1 rounded-ui bg-ui-danger/10 px-1.5 py-0.5 text-meta font-medium text-ui-danger transition-opacity hover:opacity-80"
             title={slowBots
               .map((b) => `${b.label}: slower than its typical on this PR`)
               .join(' · ')}
@@ -1026,7 +1026,7 @@ export function ChecksTab({
             {pr.mergedAt != null && (
               // The exact merge moment — date AND time of day — on its own line under the
               // merger (`dateTime` carries the time; the title repeats it for hover parity).
-              <div className="mt-0.5 text-gray-400" title={dateTime(pr.mergedAt)}>
+              <div className="mt-0.5 text-ui-faint" title={dateTime(pr.mergedAt)}>
                 {dateTime(pr.mergedAt)}
               </div>
             )}
@@ -1081,7 +1081,7 @@ export function ChecksTab({
         <Row label="Requested">
           <div className="flex flex-wrap gap-2 text-meta">
             {pr.requestedReviewers.map((r, i) => (
-              <span key={i} className="rounded-ui bg-gray-500/10 px-1.5 py-0.5">
+              <span key={i} className="rounded-ui bg-ui-raise px-1.5 py-0.5">
                 {r.teamName ? (
                   `@${r.teamName}`
                 ) : (
@@ -1102,7 +1102,7 @@ export function ChecksTab({
       )}
 
       <Row label="Meta">
-        <div className="space-y-0.5 text-meta text-gray-500 dark:text-gray-400">
+        <div className="space-y-0.5 text-meta text-ui-mute">
           <div>{pr.repoFullName}</div>
           <div>opened {relativeTime(pr.openedAt)}</div>
           <div>updated {relativeTime(pr.updatedAt)}</div>
@@ -1129,7 +1129,7 @@ function PrTicketChip({ prId, ticket: t }: { prId: number; ticket: TicketRef }):
         <button
           type="button"
           onClick={() => openStory({ ident: t.ident!, key: t.key, title: null })}
-          className="hit inline-flex items-center rounded-l-ui px-1.5 py-0.5 text-meta font-medium text-sky-700 hover:bg-sky-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 dark:text-sky-300 dark:hover:bg-sky-900"
+          className="hit inline-flex items-center rounded-l-ui px-1.5 py-0.5 text-meta font-medium text-ui-accent hover:bg-ui-accent/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent"
           title={`Open the ${t.key} story`}
           data-testid="pr-ticket-story"
         >
@@ -1142,7 +1142,7 @@ function PrTicketChip({ prId, ticket: t }: { prId: number; ticket: TicketRef }):
             rel="noreferrer noopener"
             aria-label={`Open ${t.key} in ${trackerLabel}`}
             title={`Open ${t.key} in ${trackerLabel}`}
-            className={`inline-flex items-center self-stretch px-1 text-sky-700 hover:bg-sky-100 dark:text-sky-300 dark:hover:bg-sky-900 ${
+            className={`inline-flex items-center self-stretch px-1 text-ui-accent hover:bg-ui-accent/10 ${
               t.manual ? '' : 'rounded-r-ui'
             }`}
           >
@@ -1155,7 +1155,7 @@ function PrTicketChip({ prId, ticket: t }: { prId: number; ticket: TicketRef }):
         href={external}
         target="_blank"
         rel="noreferrer noopener"
-        className={`inline-flex items-center px-1.5 py-0.5 text-meta font-medium text-sky-700 hover:bg-sky-100 dark:text-sky-300 ${
+        className={`inline-flex items-center px-1.5 py-0.5 text-meta font-medium text-ui-accent hover:bg-ui-accent/10 ${
           t.manual ? 'rounded-l-ui' : 'rounded-ui'
         }`}
         title={`Open ${t.key} in ${trackerLabel}`}
@@ -1164,7 +1164,7 @@ function PrTicketChip({ prId, ticket: t }: { prId: number; ticket: TicketRef }):
       </a>
     );
   return (
-    <span className="inline-flex items-center rounded-ui border border-sky-200 bg-sky-50 dark:border-sky-900 dark:bg-sky-950">
+    <span className="inline-flex items-center rounded-ui border border-ui-accent/50 bg-ui-accent/10">
       {link}
       {t.manual === true && (
         <button
@@ -1172,13 +1172,13 @@ function PrTicketChip({ prId, ticket: t }: { prId: number; ticket: TicketRef }):
           disabled={remove.isPending}
           onClick={() => remove.mutate(t.key)}
           aria-label={`Remove ${t.key} (added by hand)`}
-          className="hit rounded-r-ui px-1 py-1 text-sky-700 hover:bg-sky-100 disabled:opacity-50 dark:text-sky-300 dark:hover:bg-sky-900"
+          className="hit rounded-r-ui px-1 py-1 text-ui-accent hover:bg-ui-accent/10 disabled:opacity-50"
         >
           <CloseIcon size={10} />
         </button>
       )}
       {remove.isError && (
-        <span role="alert" className="px-1 text-meta text-red-600 dark:text-red-400">
+        <span role="alert" className="px-1 text-meta text-ui-danger">
           {remove.error.message || 'Could not remove it.'}
         </span>
       )}

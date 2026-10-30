@@ -44,9 +44,9 @@ import { AiStatusLine } from '../AiStatusLine.js';
 import { AiRunLabel } from '../AiRunLabel.js';
 import { aiModelWords, aiRunProviderName } from '@pierre-review/shared';
 
-const MUTED = 'text-gray-500 dark:text-gray-400';
+const MUTED = 'text-ui-mute';
 const BTN =
-  'rounded-ui border border-gray-300 px-2 py-0.5 text-meta text-gray-700 hover:border-gray-400 disabled:cursor-not-allowed disabled:opacity-40 dark:border-gray-700 dark:text-gray-200 dark:hover:border-gray-500';
+  'rounded-ui border border-ui-line px-2 py-0.5 text-meta text-ui-ink hover:border-ui-line disabled:cursor-not-allowed disabled:opacity-40';
 
 type Tone = 'good' | 'mid' | 'bad';
 const OVERALL_TONE: Record<StoryDocsOverallVerdict, Tone> = { aligned: 'good', mixed: 'mid', diverges: 'bad' };
@@ -72,7 +72,7 @@ export function StoryDocsRefLinks({ refs }: { refs: readonly StoryDocsRef[] }): 
       {refs.map((r, i) => (
         <li key={`${r.path}#${r.anchor ?? ''}-${i}`}>
           <DocLink target={r}>{citationLabel(r)}</DocLink>
-          <blockquote className="mt-0.5 border-l-2 border-gray-300 pl-2 text-meta italic text-gray-700 dark:border-gray-600 dark:text-gray-300">
+          <blockquote className="mt-0.5 border-l-2 border-ui-line pl-2 text-meta italic text-ui-ink">
             {r.quote}
           </blockquote>
         </li>
@@ -85,13 +85,13 @@ export function StoryDocsRefLinks({ refs }: { refs: readonly StoryDocsRef[] }): 
 export function StoryDocsCriterionDetail({ item }: { item: StoryDocsCriterionItem }): JSX.Element {
   const tone = ITEM_TONE[item.verdict];
   return (
-    <div className="mt-1 rounded-ui border-l-2 border-gray-200 py-0.5 pl-2 dark:border-gray-700" data-testid="story-docs-criterion">
+    <div className="mt-1 rounded-ui border-l-2 border-ui-line py-0.5 pl-2" data-testid="story-docs-criterion">
       <div className="flex flex-wrap items-baseline gap-1.5">
         <span className={`${REVIEW_CHIP} ${TONE_CLASS[tone]}`}>
           <ToneIcon tone={tone} />
           {`Docs: ${STORY_DOCS_ITEM_VERDICT_LABEL[item.verdict]}`}
         </span>
-        {item.note !== '' && <span className="min-w-0 break-words text-meta text-gray-800 dark:text-gray-200">{item.note}</span>}
+        {item.note !== '' && <span className="min-w-0 break-words text-meta text-ui-ink">{item.note}</span>}
       </div>
       <StoryDocsRefLinks refs={item.refs} />
     </div>
@@ -212,10 +212,10 @@ export function StoryDocsAlignmentBlock({
           since={!starting && data.run != null ? data.run.createdAt : null}
         />
       )}
-      {failed != null && <p className="text-meta text-red-600 dark:text-red-400">{failed.error ?? 'The docs check failed.'}</p>}
+      {failed != null && <p className="text-meta text-ui-danger">{failed.error ?? 'The docs check failed.'}</p>}
       {refusal != null && <p className={`text-meta ${MUTED}`}>{refusal}</p>}
       {reused && <p className={`text-meta ${MUTED}`}>Nothing has changed since this check.</p>}
-      {start.isError && !clickStale && <p className="text-meta text-red-600 dark:text-red-400">{start.error.message}</p>}
+      {start.isError && !clickStale && <p className="text-meta text-ui-danger">{start.error.message}</p>}
       {shown != null && <StoryDocsResultView run={shown} attached={attached} />}
     </section>
   );
@@ -270,13 +270,13 @@ function StoryDocsResultView({ run, attached }: { run: StoryDocsAlignmentRun; at
               return (
                 <li key={i} className="rounded-ui bg-ui-raise px-3 py-2">
                   <div className="flex flex-wrap items-baseline gap-1.5">
-                    <span className="text-body font-semibold text-gray-800 dark:text-gray-100">{p.part}</span>
+                    <span className="text-body font-semibold text-ui-ink">{p.part}</span>
                     <span className={`${REVIEW_CHIP} ${TONE_CLASS[t]}`}>
                       <ToneIcon tone={t} />
                       {STORY_DOCS_ITEM_VERDICT_LABEL[p.verdict]}
                     </span>
                   </div>
-                  {p.note !== '' && <p className="mt-0.5 break-words text-meta text-gray-800 dark:text-gray-200">{p.note}</p>}
+                  {p.note !== '' && <p className="mt-0.5 break-words text-meta text-ui-ink">{p.note}</p>}
                   <StoryDocsRefLinks refs={p.refs} />
                 </li>
               );
@@ -286,7 +286,7 @@ function StoryDocsResultView({ run, attached }: { run: StoryDocsAlignmentRun; at
       )}
       {ownList.length > 0 && (
         <div className="space-y-1">
-          <h5 className="text-meta font-semibold text-gray-700 dark:text-gray-200">
+          <h5 className="text-meta font-semibold text-ui-ink">
             {derived ? 'Criteria worked out from the description' : 'Criteria as they read when checked'}
           </h5>
           <ol className="space-y-1" aria-label="Criteria checked against the docs">
@@ -294,7 +294,7 @@ function StoryDocsResultView({ run, attached }: { run: StoryDocsAlignmentRun; at
               const item = itemsByN.get(c.n);
               return (
                 <li key={c.n} className="flex flex-col px-1">
-                  <div className="flex items-baseline gap-2 text-body text-gray-800 dark:text-gray-100">
+                  <div className="flex items-baseline gap-2 text-body text-ui-ink">
                     <span className={`w-5 shrink-0 text-right font-mono text-meta ${MUTED}`}>{c.n}</span>
                     <span className="min-w-0 break-words">{c.text}</span>
                   </div>

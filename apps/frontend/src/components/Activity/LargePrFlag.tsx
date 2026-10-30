@@ -32,7 +32,7 @@ export function LargePrFlag({
   if (flag == null) return null;
   return (
     <span
-      className={`inline-flex shrink-0 items-center gap-1 text-meta text-amber-600/90 dark:text-amber-500/80 ${className}`}
+      className={`inline-flex shrink-0 items-center gap-1 text-meta text-ui-warn ${className}`}
       title={flag.label}
     >
       <WarningIcon size={11} className="inline-block align-[-0.1em]" />

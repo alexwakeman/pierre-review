@@ -80,11 +80,11 @@ import {
 export type OpenInChanges = (path: string, line: number | null, side: ClaudeFindingSide) => void;
 
 const CHIP = REVIEW_CHIP;
-const MUTED = 'text-gray-500 dark:text-gray-400';
-const ERROR_TEXT = 'text-red-600 dark:text-red-400';
+const MUTED = 'text-ui-mute';
+const ERROR_TEXT = 'text-ui-danger';
 const BTN_PRIMARY =
   'inline-flex h-7 items-center whitespace-nowrap rounded-ui bg-ui-raise px-2.5 text-meta font-medium text-ui-ink hover:bg-ui-hover disabled:cursor-not-allowed disabled:opacity-50 touch:h-10 touch:px-3';
-const RUNNING_CLASS = 'bg-sky-500/10 text-sky-700 dark:text-sky-300';
+const RUNNING_CLASS = 'bg-ui-accent/10 text-ui-accent';
 const NO_PATHS: ReadonlySet<string> = new Set();
 
 const CURRENCY_CLASS: Record<TicketCurrency['tone'], string> = {
@@ -101,7 +101,7 @@ export function CurrencyPill({ currency }: { currency: TicketCurrency }): JSX.El
       ) : currency.tone === 'stale' ? (
         <WarningIcon size={11} />
       ) : (
-        <span aria-hidden className="h-1.5 w-1.5 animate-pulse rounded-full bg-sky-500" />
+        <span aria-hidden className="h-1.5 w-1.5 animate-pulse rounded-full bg-ui-accent-fill" />
       )}
       {currency.label}
     </span>
@@ -142,7 +142,7 @@ function EvidenceRef({
       <button
         type="button"
         onClick={() => onOpenInChanges(ev.path, ev.line, 'RIGHT')}
-        className="hit break-all text-left font-mono text-meta text-blue-600 hover:underline dark:text-blue-400"
+        className="hit break-all text-left font-mono text-meta text-ui-accent hover:underline"
       >
         {label}
       </button>
@@ -288,7 +288,7 @@ export function CriterionRow({
   if (c.status === 'met') {
     const line = (
       <>
-        <span className="shrink-0 self-center text-green-700 dark:text-green-400" aria-label="Met">
+        <span className="shrink-0 self-center text-ui-success" aria-label="Met">
           <CheckIcon size={12} />
         </span>
         <span className={`shrink-0 font-mono text-meta ${MUTED}`}>{c.ref}</span>
@@ -483,7 +483,7 @@ export function TicketResults({
   const autoPostFailed = autoPostFailureLine(review.autoPost);
   return (
     <div className="space-y-3">
-      {autoPostFailed != null && <p className="text-meta text-amber-700 dark:text-amber-300">{autoPostFailed}</p>}
+      {autoPostFailed != null && <p className="text-meta text-ui-warn">{autoPostFailed}</p>}
       {/* Two plain sentences. An older run's stored summary also listed every gap as a bullet: only
           its leading prose is shown (the rows below carry the detail). */}
       {summary != null && <Markdown prRefs>{summary}</Markdown>}
@@ -516,9 +516,9 @@ export function TicketResults({
 }
 
 const CARD_CHANGE_CLASS: Record<TicketPrCard['interfaces'][number]['change'], string> = {
-  added: 'bg-green-500/10 text-green-800 dark:text-green-300',
-  changed: 'bg-amber-500/10 text-amber-800 dark:text-amber-300',
-  removed: 'bg-red-500/10 text-red-800 dark:text-red-300',
+  added: 'bg-ui-success/10 text-ui-success',
+  changed: 'bg-ui-warn/10 text-ui-warn',
+  removed: 'bg-ui-danger/10 text-ui-danger',
 };
 
 /** One member's contribution card, collapsed by default: summary, interfaces, loose ends. */
@@ -532,7 +532,7 @@ export function PrCardDisclosure({ card, label }: { card: TicketPrCard; label?: 
         aria-expanded={open}
         aria-controls={bodyId}
         onClick={() => setOpen((v) => !v)}
-        className="hit inline-flex items-center gap-1.5 rounded-ui px-1 py-0.5 text-left text-meta font-medium text-gray-600 hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-gray-300 dark:hover:text-gray-50"
+        className="hit inline-flex items-center gap-1.5 rounded-ui px-1 py-0.5 text-left text-meta font-medium text-ui-mute hover:text-ui-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent"
       >
         <ChevronIcon dir={open ? 'down' : 'right'} size={12} />
         {/* Under "What each PR adds" the PR ref IS the label; a bare mount (one PR's own coverage) names the card. */}
@@ -540,7 +540,7 @@ export function PrCardDisclosure({ card, label }: { card: TicketPrCard; label?: 
       </button>
       {open && (
         <div id={bodyId} className="ml-5 mt-1 space-y-2 text-meta">
-          <p className="whitespace-pre-wrap break-words text-gray-800 dark:text-gray-200">
+          <p className="whitespace-pre-wrap break-words text-ui-ink">
             <PrRefText text={card.summary} />
           </p>
           {card.interfaces.length > 0 && (
@@ -551,7 +551,7 @@ export function PrCardDisclosure({ card, label }: { card: TicketPrCard; label?: 
                   <li key={k} className="flex flex-wrap items-baseline gap-x-1.5">
                     <span className={`${CHIP} ${CARD_CHANGE_CLASS[i.change]}`}>{TICKET_PR_CARD_CHANGE_LABEL[i.change]}</span>
                     <span className={MUTED}>{TICKET_PR_CARD_KIND_LABEL[i.kind]}</span>
-                    <span className="break-all font-mono text-gray-900 dark:text-gray-100">{i.name}</span>
+                    <span className="break-all font-mono text-ui-ink">{i.name}</span>
                     {i.note != null && i.note !== '' && (
                       <span className={`min-w-0 break-words ${MUTED}`}>
                         <PrRefText text={i.note} />
@@ -565,7 +565,7 @@ export function PrCardDisclosure({ card, label }: { card: TicketPrCard; label?: 
           {card.looseEnds.length > 0 && (
             <div className="space-y-1">
               <h6 className={REVIEW_SUBHEAD}>{`Loose ends (${card.looseEnds.length})`}</h6>
-              <ul className="list-disc space-y-0.5 pl-4 text-gray-800 dark:text-gray-200">
+              <ul className="list-disc space-y-0.5 pl-4 text-ui-ink">
                 {card.looseEnds.map((l, k) => (
                   <li key={k} className="break-words">
                     <PrRefText text={l} />

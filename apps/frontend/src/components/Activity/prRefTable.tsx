@@ -274,15 +274,15 @@ export function PrTable({
                       className="hit block text-left leading-snug hover:underline"
                       title={`${pr.repoFullName}#${pr.prNumber}${pr.title ? ` — ${pr.title}` : ''}`}
                     >
-                      <span className="font-semibold text-sky-600 dark:text-sky-400">
+                      <span className="font-semibold text-ui-accent">
                         #{pr.prNumber}
                       </span>{' '}
-                      <span className="text-gray-700 dark:text-gray-200">{pr.title ?? ''}</span>
+                      <span className="text-ui-ink">{pr.title ?? ''}</span>
                     </button>
                   </td>
                   <td className="py-1 pr-2">
                     <span
-                      className="inline-flex items-center gap-1 text-meta text-gray-500 dark:text-gray-400"
+                      className="inline-flex items-center gap-1 text-meta text-ui-mute"
                       title={ci?.label ?? 'no checks'}
                     >
                       <span
@@ -292,11 +292,11 @@ export function PrTable({
                       />
                     </span>
                   </td>
-                  <td className="whitespace-nowrap py-1 pr-2 text-meta text-gray-500 dark:text-gray-400">
+                  <td className="whitespace-nowrap py-1 pr-2 text-meta text-ui-mute">
                     {pr.openedAt ? relativeTime(pr.openedAt) : '—'}
                   </td>
                   <td className="overflow-hidden py-1 pr-2">
-                    <span className="flex min-w-0 items-center gap-1 text-meta text-gray-600 dark:text-gray-300">
+                    <span className="flex min-w-0 items-center gap-1 text-meta text-ui-mute">
                       <span className="shrink-0">
                         <Avatar user={u} size={13} />
                       </span>
@@ -310,13 +310,13 @@ export function PrTable({
                     </span>
                   </td>
                   <td className="whitespace-nowrap py-1 pr-2 text-meta">
-                    <span className="font-mono text-green-600 dark:text-green-400">+{fmtDelta(pr.additions)}</span>{' '}
-                    <span className="font-mono text-red-500 dark:text-red-400">−{fmtDelta(pr.deletions)}</span>
+                    <span className="font-mono text-ui-success">+{fmtDelta(pr.additions)}</span>{' '}
+                    <span className="font-mono text-ui-danger">−{fmtDelta(pr.deletions)}</span>
                   </td>
                   {ri === 0 && (
                     <td
                       rowSpan={g.prs.length}
-                      className="py-1 align-top text-meta leading-relaxed text-gray-700 dark:text-gray-200"
+                      className="py-1 align-top text-meta leading-relaxed text-ui-ink"
                     >
                       {g.summary
                         ? renderInlineMarkdown(g.summary, index, onOpenPr)
@@ -351,7 +351,7 @@ function MdTable({
     <div className="overflow-x-auto">
       <table className="w-full min-w-[480px] border-collapse text-meta">
         <thead>
-          <tr className="text-left text-meta font-semibold uppercase tracking-wide text-gray-400">
+          <tr className="text-left text-meta font-semibold uppercase tracking-wide text-ui-faint">
             {table.header.map((h, ci) => (
               <th key={ci} className="pb-1 pr-2 font-semibold">
                 {renderInlineMarkdown(h, index, onOpenPr)}
@@ -363,12 +363,12 @@ function MdTable({
           {table.rows.map((row, ri) => (
             <tr
               key={ri}
-              className="border-t border-gray-100 align-top dark:border-gray-800/60"
+              className="border-t border-ui-line align-top"
             >
               {table.header.map((_, ci) => (
                 <td
                   key={ci}
-                  className="py-1 pr-2 text-meta leading-relaxed text-gray-700 dark:text-gray-200"
+                  className="py-1 pr-2 text-meta leading-relaxed text-ui-ink"
                 >
                   {renderInlineMarkdown(row[ci] ?? '', index, onOpenPr)}
                 </td>
@@ -419,7 +419,7 @@ export function SummaryMarkdown({
           return (
             <div
               key={i}
-              className="border-l-2 border-ai-signal-fill pl-2 text-body font-semibold leading-relaxed text-gray-800 dark:text-gray-100"
+              className="border-l-2 border-ai-signal-fill pl-2 text-body font-semibold leading-relaxed text-ui-ink"
             >
               {render(renderInlineMarkdown(b.text ?? '', index, onOpenPr))}
             </div>
@@ -429,7 +429,7 @@ export function SummaryMarkdown({
           return (
             <div
               key={i}
-              className="pt-1 text-meta font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400"
+              className="pt-1 text-meta font-semibold uppercase tracking-wide text-ui-mute"
             >
               {render(renderInlineMarkdown(b.text ?? '', index, onOpenPr))}
             </div>
@@ -439,7 +439,7 @@ export function SummaryMarkdown({
           return (
             <div
               key={i}
-              className="pt-1.5 text-meta font-semibold text-gray-700 dark:text-gray-200"
+              className="pt-1.5 text-meta font-semibold text-ui-ink"
             >
               {render(renderInlineMarkdown(b.text ?? '', index, onOpenPr))}
             </div>
@@ -448,9 +448,9 @@ export function SummaryMarkdown({
         return (
           <div
             key={i}
-            className="flex gap-1.5 text-body leading-relaxed text-gray-700 dark:text-gray-200"
+            className="flex gap-1.5 text-body leading-relaxed text-ui-ink"
           >
-            <span aria-hidden="true" className="select-none text-gray-400">
+            <span aria-hidden="true" className="select-none text-ui-faint">
               •
             </span>
             <span className="min-w-0">

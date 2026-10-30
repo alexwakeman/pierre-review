@@ -88,14 +88,14 @@ export function ThreadCard({
     <div
       className={`rounded-ui border px-2.5 py-2 ${
         selected
-          ? 'border-amber-400 bg-amber-400/5'
-          : 'border-gray-200 dark:border-gray-800'
+          ? 'border-ui-warn/40 bg-ui-warn/10'
+          : 'border-ui-line'
       }`}
     >
       <div
-        className={`mb-2 flex items-center gap-2 text-meta text-gray-400${
+        className={`mb-2 flex items-center gap-2 text-meta text-ui-faint${
           onOpenInPr
-            ? ' -mx-1 cursor-pointer rounded-ui px-1 hover:bg-sky-50 dark:hover:bg-sky-950/20'
+            ? ' -mx-1 cursor-pointer rounded-ui px-1 hover:bg-ui-accent/10'
             : ''
         }`}
         role={onOpenInPr ? 'button' : undefined}
@@ -141,11 +141,11 @@ export function ThreadCard({
           event={{ type: 'review_comment', refId: thread.id }}
           title="Show this thread on the timeline"
         />
-        <span className="decorative-mark text-gray-300 dark:text-gray-600">·</span>
+        <span className="decorative-mark text-ui-faint">·</span>
         <span
           className={
             onOpenInPr
-              ? 'font-medium text-gray-500 underline decoration-dotted underline-offset-2 dark:text-gray-400'
+              ? 'font-medium text-ui-mute underline decoration-dotted underline-offset-2'
               : undefined
           }
         >
@@ -163,7 +163,7 @@ export function ThreadCard({
               e.stopPropagation();
               openInChanges.run();
             }}
-            className="hit shrink-0 rounded-ui px-1 py-0.5 text-meta font-medium text-blue-600 hover:bg-blue-50 hover:text-blue-700 dark:text-blue-400 dark:hover:bg-blue-950/40"
+            className="hit shrink-0 rounded-ui px-1 py-0.5 text-meta font-medium text-ui-accent hover:bg-ui-accent/10 hover:text-ui-accent"
             title={
               openInChanges.line == null
                 ? 'Show this file’s code. This thread’s line is no longer in the diff.'
@@ -238,7 +238,7 @@ export function ThreadCard({
             href={safeExternalUrl(thread.url) ?? `${prUrl}/files`}
             target="_blank"
             rel="noreferrer noopener"
-            className="hit text-blue-500 hover:underline"
+            className="hit text-ui-accent hover:underline"
           >
             <ExternalLinkIcon size={11} className="inline-block align-[-0.1em]" />{' '}
             {thread.url ? 'View thread on GitHub' : 'Reply on GitHub'}

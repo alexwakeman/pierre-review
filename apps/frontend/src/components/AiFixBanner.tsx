@@ -160,36 +160,36 @@ function AiFixBannerRow({
       >
         <div className="flex items-center gap-1.5">
           {run.status === 'succeeded' ? (
-            <span className="inline-block h-2 w-2 shrink-0 rounded-full bg-green-500" />
+            <span className="inline-block h-2 w-2 shrink-0 rounded-full bg-ui-success" />
           ) : done ? (
-            <span className="inline-block h-2 w-2 shrink-0 rounded-full bg-gray-400" />
+            <span className="inline-block h-2 w-2 shrink-0 rounded-full bg-ui-faint" />
           ) : (
-            <span className="inline-block h-2.5 w-2.5 shrink-0 animate-spin rounded-full border-2 border-gray-300 border-t-blue-500" />
+            <span className="inline-block h-2.5 w-2.5 shrink-0 animate-spin rounded-full border-2 border-ui-line border-t-ui-accent/50" />
           )}
-          <span className="truncate font-medium text-blue-600 hover:underline dark:text-blue-400">
+          <span className="truncate font-medium text-ui-accent hover:underline">
             {run.repoFullName} #{run.prNumber}
           </span>
         </div>
-        <div className="mt-0.5 truncate text-gray-500 dark:text-gray-400">
+        <div className="mt-0.5 truncate text-ui-mute">
           {run.prTitle}
         </div>
       </button>
       {finished != null ? (
         <div className="mt-1 flex items-center justify-between gap-2">
-          <span className="text-gray-500 dark:text-gray-400">{finished}</span>
+          <span className="text-ui-mute">{finished}</span>
           {/* Dismiss only once the run is over — a row you can clear mid-run is a row that
               loses the only handle on a paid agent turn. */}
           <button
             type="button"
             onClick={() => dismiss(run.prId)}
             aria-label={`Dismiss the AI fix for ${run.repoFullName} #${run.prNumber}`}
-            className="hit text-meta text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+            className="hit text-meta text-ui-mute hover:text-ui-ink"
           >
             Dismiss
           </button>
         </div>
       ) : starting ? (
-        <div className="mt-1 text-meta text-gray-500 dark:text-gray-400">Starting…</div>
+        <div className="mt-1 text-meta text-ui-mute">Starting…</div>
       ) : live ? (
         <div className="mt-1">
           <RegenProgressBar
@@ -198,7 +198,7 @@ function AiFixBannerRow({
             value={fixProgressPct(status)}
             timeConstantSec={40}
           />
-          <div className="mt-1 text-meta text-gray-500 dark:text-gray-400">
+          <div className="mt-1 text-meta text-ui-mute">
             {PHASE_LABEL[status?.progress?.phase ?? ''] ?? 'Working…'}
           </div>
         </div>
@@ -207,7 +207,7 @@ function AiFixBannerRow({
         // WATCHING that is capped, and naming the run's state after our own connection budget
         // is a false claim about a paid agent turn the reader started. No bar either — a bar
         // that never moves is worse than no bar.
-        <div className="mt-1 text-meta text-gray-500 dark:text-gray-400">
+        <div className="mt-1 text-meta text-ui-mute">
           Running. Progress not shown.
         </div>
       )}

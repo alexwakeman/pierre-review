@@ -43,7 +43,7 @@ export function ReplyComposer({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="hit text-blue-500 hover:underline"
+        className="hit text-ui-accent hover:underline"
       >
         Reply
       </button>
@@ -59,14 +59,14 @@ export function ReplyComposer({
         rows={3}
         autoFocus
         placeholder="Reply to this thread (markdown, @ to mention)…"
-        className="w-full rounded-ui border border-gray-300 bg-white px-2 py-1.5 text-meta dark:border-gray-700 dark:bg-gray-900"
+        className="w-full rounded-ui border border-ui-line bg-ui-surface px-2 py-1.5 text-meta"
       />
       <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
           onClick={send}
           disabled={reply.isPending || body.trim().length === 0}
-          className="hit whitespace-nowrap rounded-ui border border-blue-400 px-2 py-0.5 text-meta text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:border-blue-600 dark:text-blue-400 dark:hover:bg-blue-900/30"
+          className="hit whitespace-nowrap rounded-ui border border-ui-accent/50 px-2 py-0.5 text-meta text-ui-accent hover:bg-ui-accent/10 disabled:opacity-50"
         >
           {reply.isPending ? 'Sending…' : 'Send'}
         </button>
@@ -78,11 +78,11 @@ export function ReplyComposer({
             reply.reset();
           }}
           disabled={reply.isPending}
-          className="hit whitespace-nowrap rounded-ui border border-gray-300 px-2 py-0.5 text-meta hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
+          className="hit whitespace-nowrap rounded-ui border border-ui-line px-2 py-0.5 text-meta hover:border-ui-line disabled:opacity-50"
         >
           Cancel
         </button>
-        {error && <span className="text-meta text-red-500">{error}</span>}
+        {error && <span className="text-meta text-ui-danger">{error}</span>}
       </div>
     </div>
   );

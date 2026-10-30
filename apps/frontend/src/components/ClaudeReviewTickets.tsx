@@ -17,7 +17,7 @@ import { criteriaHasOwnHeading } from '../lib/storyTabs.js';
 import { Markdown } from './Markdown.js';
 import { ExternalLinkIcon } from './Icons.js';
 
-const MUTED = 'text-gray-500 dark:text-gray-400';
+const MUTED = 'text-ui-mute';
 
 /** A Jira key as a link to the ticket (plain text when the URL is not http/https). */
 export function JiraKeyLink({ ticketKey, url }: { ticketKey: string; url?: string | null }): JSX.Element {
@@ -30,7 +30,7 @@ export function JiraKeyLink({ ticketKey, url }: { ticketKey: string; url?: strin
       href={href}
       target="_blank"
       rel="noreferrer noopener"
-      className="hit inline-flex items-center gap-1 font-mono text-meta font-semibold text-blue-600 hover:underline dark:text-blue-400"
+      className="hit inline-flex items-center gap-1 font-mono text-meta font-semibold text-ui-accent hover:underline"
     >
       {ticketKey}
       <ExternalLinkIcon size={11} />
@@ -103,7 +103,7 @@ export function StoryText({
             <Markdown>{acceptanceCriteria}</Markdown>
           </div>
         ) : (
-          <p className="text-meta text-gray-700 dark:text-gray-300">None taken from this ticket.</p>
+          <p className="text-meta text-ui-ink">None taken from this ticket.</p>
         )}
       </div>
     </>

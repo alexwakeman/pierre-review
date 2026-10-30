@@ -295,7 +295,7 @@ function Reviewers({
         return (
           <span
             key={id}
-            className="inline-flex items-center gap-1 rounded-ui bg-gray-500/10 px-1 py-0.5 text-meta"
+            className="inline-flex items-center gap-1 rounded-ui bg-ui-raise px-1 py-0.5 text-meta"
           >
             <Avatar user={u} size={11} />
             <UserName user={u} fallbackId={id} />

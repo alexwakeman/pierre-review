@@ -50,7 +50,7 @@ export function CommitResultPanel({
   return (
     <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
       <div
-        className="mx-auto flex w-full max-w-2xl flex-col gap-2 text-meta text-gray-800 dark:text-gray-100"
+        className="mx-auto flex w-full max-w-2xl flex-col gap-2 text-meta text-ui-ink"
         aria-live="polite"
       >
         <p>
@@ -61,23 +61,23 @@ export function CommitResultPanel({
         {stillConflicting.length > 0 && <p>{stillConflictSentence(stillConflicting)}</p>}
 
         {result.baseAdvanced && (
-          <p className="text-gray-700 dark:text-gray-200">
+          <p className="text-ui-ink">
             {baseAdvancedSentence(session.baseRef)}
           </p>
         )}
 
         {result.autoMergeDisarmed && (
-          <p className="text-gray-700 dark:text-gray-200">{AUTO_MERGE_DISARMED}</p>
+          <p className="text-ui-ink">{AUTO_MERGE_DISARMED}</p>
         )}
 
         {/* ⚠ NEVER "it failed", NEVER a retry. See the module header. */}
-        {!result.visible && <p className="text-gray-700 dark:text-gray-200">{NOT_YET_VISIBLE}</p>}
+        {!result.visible && <p className="text-ui-ink">{NOT_YET_VISIBLE}</p>}
 
         <div className="mt-1 flex items-center gap-2">
           <button
             type="button"
             onClick={onClose}
-            className="hit rounded-ui border border-gray-300 px-2.5 py-1 text-meta text-gray-800 hover:border-gray-400 dark:border-gray-700 dark:text-gray-100 dark:hover:border-gray-600"
+            className="hit rounded-ui border border-ui-line px-2.5 py-1 text-meta text-ui-ink hover:border-ui-line"
           >
             {CLOSE_RESOLVER}
           </button>
@@ -86,7 +86,7 @@ export function CommitResultPanel({
               href={compareUrl}
               target="_blank"
               rel="noreferrer noopener"
-              className="hit text-meta text-gray-600 underline underline-offset-2 hover:text-gray-800 dark:text-gray-300 dark:hover:text-gray-100"
+              className="hit text-meta text-ui-mute underline underline-offset-2 hover:text-ui-ink"
             >
               {OPEN_COMPARE}
               <ExternalLinkIcon size={11} className="ml-0.5 inline-block align-[-0.1em]" />

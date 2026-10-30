@@ -8,7 +8,7 @@ import { dateTime, formatDate } from '../lib/ui.js';
 import { ChevronIcon } from './Icons.js';
 import { Markdown } from './Markdown.js';
 
-const MUTED = 'text-gray-600 dark:text-gray-300';
+const MUTED = 'text-ui-mute';
 
 export function TicketComments({ comments }: { comments: readonly TicketComment[] | undefined }): JSX.Element | null {
   const [open, setOpen] = useState(false);
@@ -21,17 +21,17 @@ export function TicketComments({ comments }: { comments: readonly TicketComment[
         aria-expanded={open}
         aria-controls={listId}
         onClick={() => setOpen((v) => !v)}
-        className="hit inline-flex items-center gap-1 text-meta font-medium text-gray-700 hover:text-gray-900 dark:text-gray-200 dark:hover:text-gray-50"
+        className="hit inline-flex items-center gap-1 text-meta font-medium text-ui-ink hover:text-ui-ink"
       >
         <ChevronIcon dir={open ? 'down' : 'right'} className="shrink-0" />
         Comments ({comments.length})
       </button>
       <ol id={listId} hidden={!open} aria-label="Ticket comments" className="mt-1.5 space-y-2">
         {comments.map((c) => (
-          <li key={c.id} className="rounded-ui border border-gray-200 px-2 py-1.5 dark:border-gray-800">
+          <li key={c.id} className="rounded-ui border border-ui-line px-2 py-1.5">
             <div className={`text-meta ${MUTED}`}>
-              <span className="font-medium text-gray-800 dark:text-gray-100">{c.author !== '' ? c.author : 'Someone'}</span>
-              <span aria-hidden className="decorative-mark text-gray-400 dark:text-gray-500">
+              <span className="font-medium text-ui-ink">{c.author !== '' ? c.author : 'Someone'}</span>
+              <span aria-hidden className="decorative-mark text-ui-faint">
                 {' · '}
               </span>
               <time dateTime={c.createdAt} title={dateTime(c.createdAt)}>

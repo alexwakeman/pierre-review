@@ -33,16 +33,16 @@ const ROW_KIND: Record<LineKind, DiffRowKind> = {
 // colours for the same pixels — so it is dropped there (see `lineClass`). The `@@` header and
 // context rows keep theirs: neither is an add/del claim, and both are deliberately quieter.
 const LINE_BG: Record<LineKind, string> = {
-  add: 'bg-green-500/10 dark:bg-green-500/15',
-  del: 'bg-red-500/10 dark:bg-red-500/15',
-  meta: 'bg-sky-500/5 dark:bg-transparent',
+  add: 'bg-ui-success/10',
+  del: 'bg-ui-danger/10',
+  meta: 'bg-ui-accent/10 dark:bg-transparent',
   ctx: '',
 };
 const LINE_INK: Record<LineKind, string> = {
-  add: 'text-green-700 dark:text-green-300',
-  del: 'text-red-700 dark:text-red-300',
-  meta: 'text-sky-600 dark:text-sky-400',
-  ctx: 'text-gray-600 dark:text-gray-400',
+  add: 'text-ui-success',
+  del: 'text-ui-danger',
+  meta: 'text-ui-accent',
+  ctx: 'text-ui-mute',
 };
 
 function lineClass(kind: LineKind, highlighted: boolean): string {
@@ -106,7 +106,7 @@ export function DiffHunk({
   const collapse =
     onCollapse != null && classify(lines[0] ?? '') === 'meta' ? onCollapse : null;
   return (
-    <pre className="overflow-x-auto rounded-ui border border-gray-200 bg-gray-50 text-meta leading-[1.45] dark:border-gray-800 dark:bg-gray-900">
+    <pre className="overflow-x-auto rounded-ui border border-ui-line bg-ui-surface text-meta leading-[1.45]">
       {/* w-max min-w-full so a row's tint (and the header's hover) spans the whole
           scrolled width, not just the visible content box. */}
       <code className="block w-max min-w-full font-mono">
@@ -127,7 +127,7 @@ export function DiffHunk({
                 aria-expanded={true}
                 aria-label="Hide code context"
                 title="Hide code context"
-                className={`block w-full whitespace-pre px-3 text-left hover:bg-sky-500/15 dark:hover:bg-sky-500/10 ${lineClass(kind, false)}`}
+                className={`block w-full whitespace-pre px-3 text-left hover:bg-ui-accent/10 ${lineClass(kind, false)}`}
               >
                 {line || ' '}
               </button>

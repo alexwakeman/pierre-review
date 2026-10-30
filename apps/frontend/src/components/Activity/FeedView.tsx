@@ -1567,11 +1567,11 @@ function InlineThread({ item }: { item: ConsolidatedFeedItem }): JSX.Element {
   const prUrl =
     item.prNumber != null ? `https://github.com/${item.repoFullName}/pull/${item.prNumber}` : '';
   if (isLoading) {
-    return <div className="px-1 py-2 text-meta text-gray-400">Loading conversation…</div>;
+    return <div className="px-1 py-2 text-meta text-ui-faint">Loading conversation…</div>;
   }
   if (!thread) {
     return (
-      <div className="px-1 py-2 text-meta text-gray-400">Couldn’t load this conversation.</div>
+      <div className="px-1 py-2 text-meta text-ui-faint">Couldn’t load this conversation.</div>
     );
   }
   // A resolved thread renders collapsed to a one-line summary that TOGGLES the full
@@ -1587,7 +1587,7 @@ function InlineThread({ item }: { item: ConsolidatedFeedItem }): JSX.Element {
           type="button"
           onClick={() => setExpanded((v) => !v)}
           aria-expanded={expanded}
-          className="hit group/rt flex w-full cursor-pointer items-center gap-1.5 rounded-ui border border-gray-200 bg-white/60 px-2 py-1 text-left text-meta hover:border-sky-300 dark:border-gray-800 dark:bg-gray-900/40 dark:hover:border-sky-700"
+          className="hit group/rt flex w-full cursor-pointer items-center gap-1.5 rounded-ui border border-ui-line bg-white/60 px-2 py-1 text-left text-meta hover:border-ui-accent/50"
         >
           {/* ── COLLAPSE-ONLY CHROME ────────────────────────────────────────────────────────
               The Resolved pill, the anchor line and the comment tally are what make this row
@@ -1606,17 +1606,17 @@ function InlineThread({ item }: { item: ConsolidatedFeedItem }): JSX.Element {
               <ThreadStatePill thread={thread} noInfo />
             </span>
           )}
-          <code className="truncate font-mono text-gray-600 group-hover/rt:text-sky-600 dark:text-gray-300">
+          <code className="truncate font-mono text-ui-mute group-hover/rt:text-ui-accent">
             {file}
             {!expanded && thread.line != null ? `:${thread.line}` : ''}
           </code>
           {!expanded && (
-            <span className="shrink-0 text-gray-400">
+            <span className="shrink-0 text-ui-faint">
               {count === 1 ? '1 comment' : `${count} comments`}
             </span>
           )}
           <span
-            className={`ml-auto shrink-0 text-sky-600 dark:text-sky-400 ${
+            className={`ml-auto shrink-0 text-ui-accent ${
               expanded ? '' : 'opacity-0 group-hover/rt:opacity-100'
             }`}
           >
@@ -1654,14 +1654,14 @@ function InlineThread({ item }: { item: ConsolidatedFeedItem }): JSX.Element {
 function PrOpenedSummary({ prId }: { prId: number }): JSX.Element {
   const { data: pr, isLoading } = usePr(prId);
   if (isLoading) {
-    return <div className="mt-1 px-1 text-meta text-gray-400">Loading summary…</div>;
+    return <div className="mt-1 px-1 text-meta text-ui-faint">Loading summary…</div>;
   }
   const body = pr?.body?.trim();
   if (!body) {
-    return <div className="mt-1 px-1 text-meta text-gray-400">No description.</div>;
+    return <div className="mt-1 px-1 text-meta text-ui-faint">No description.</div>;
   }
   return (
-    <div className="mt-1 max-h-72 overflow-auto rounded-ui bg-gray-50 px-2 py-1.5 text-body dark:bg-gray-900/50">
+    <div className="mt-1 max-h-72 overflow-auto rounded-ui bg-ui-surface px-2 py-1.5 text-body">
       <Markdown>{body}</Markdown>
     </div>
   );
@@ -1674,12 +1674,12 @@ function PrOpenedSummary({ prId }: { prId: number }): JSX.Element {
 function PrCommentBody({ prId, commentId }: { prId: number; commentId: number }): JSX.Element {
   const { data: pr, isLoading } = usePr(prId);
   if (isLoading) {
-    return <span className="text-meta text-gray-400">Loading comment…</span>;
+    return <span className="text-meta text-ui-faint">Loading comment…</span>;
   }
   const body = pr?.comments.find((c) => c.id === commentId)?.body?.trim();
   if (!body) {
     return (
-      <span className="text-meta italic text-gray-400">
+      <span className="text-meta italic text-ui-faint">
         Comment body unavailable — open the PR to view.
       </span>
     );
@@ -1697,7 +1697,7 @@ function PrOpenedExtras({ item }: { item: ConsolidatedFeedItem }): JSX.Element {
   return (
     <div className="mt-1.5 space-y-1.5">
       {(ci != null || files != null) && (
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-meta text-gray-500 dark:text-gray-400">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-meta text-ui-mute">
           {ci != null && (
             <span className="inline-flex items-center gap-1 font-medium" style={{ color: ci.color }}>
               <span
@@ -1727,7 +1727,7 @@ function PrOpenedExtras({ item }: { item: ConsolidatedFeedItem }): JSX.Element {
           <button
             type="button"
             onClick={() => setShowSummary((s) => !s)}
-            className="hit text-meta font-medium text-sky-600 hover:underline dark:text-sky-400"
+            className="hit text-meta font-medium text-ui-accent hover:underline"
           >
             {showSummary ? 'Hide summary' : 'Show summary'}
           </button>
@@ -1757,7 +1757,7 @@ function AffectedThreadRow({
       <button
         type="button"
         onClick={onOpen}
-        className="hit group/th block w-full rounded-ui border border-gray-200 bg-white/60 px-2 py-1 text-left hover:border-sky-300 dark:border-gray-800 dark:bg-gray-900/40 dark:hover:border-sky-700"
+        className="hit group/th block w-full rounded-ui border border-ui-line bg-white/60 px-2 py-1 text-left hover:border-ui-accent/50"
       >
         <span className="flex items-center gap-1.5 text-meta">
           <span
@@ -1765,14 +1765,14 @@ function AffectedThreadRow({
             className="inline-block h-2 w-2 shrink-0 rounded-full"
             style={{ background: meta.color }}
           />
-          <code className="truncate font-mono text-gray-600 group-hover/th:text-sky-600 dark:text-gray-300">
+          <code className="truncate font-mono text-ui-mute group-hover/th:text-ui-accent">
             {file}
             {thread.line != null ? `:${thread.line}` : ''}
           </code>
-          <span className="shrink-0 text-gray-400">{meta.label.toLowerCase()}</span>
+          <span className="shrink-0 text-ui-faint">{meta.label.toLowerCase()}</span>
         </span>
         {thread.excerpt.trim() !== '' && (
-          <span className="mt-0.5 block truncate text-meta italic text-gray-500 dark:text-gray-400">
+          <span className="mt-0.5 block truncate text-meta italic text-ui-mute">
             {author != null ? `${userLabel(author, thread.authorId)}: ` : ''}“{thread.excerpt}”
           </span>
         )}
@@ -1815,7 +1815,7 @@ function AffectedThreadsList({
               e.stopPropagation();
               setShowResolved((v) => !v);
             }}
-            className="hit text-meta text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+            className="hit text-meta text-ui-faint hover:text-ui-mute"
           >
             {showResolved ? 'Hide' : 'Show'} {resolved.length} resolved{' '}
             {resolved.length === 1 ? 'thread' : 'threads'}

@@ -32,7 +32,7 @@ export function ThreadStateBar({
   if (compact) {
     return (
       <span
-        className={`inline-flex h-1.5 w-16 overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700 ${className}`}
+        className={`inline-flex h-1.5 w-16 overflow-hidden rounded-full bg-ui-hover ${className}`}
         aria-hidden="true"
       >
         {sum > 0 &&
@@ -53,7 +53,7 @@ export function ThreadStateBar({
 
   return (
     <div className={className}>
-      <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700">
+      <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-ui-hover">
         {sum === 0 ? null : (
           ORDER.map((s) => {
             if (counts[s] === 0) return null;
@@ -105,7 +105,7 @@ export function ThreadStateBar({
             </>
           );
           const cls = `flex items-center gap-1 text-meta ${
-            dim ? 'text-gray-400 opacity-60' : 'text-gray-600 dark:text-gray-300'
+            dim ? 'text-ui-faint opacity-60' : 'text-ui-mute'
           }`;
           return onSegmentClick ? (
             <button
@@ -124,7 +124,7 @@ export function ThreadStateBar({
             </span>
           );
         })}
-        <span className="ml-auto text-meta tabular-nums text-gray-400">{sum}</span>
+        <span className="ml-auto text-meta tabular-nums text-ui-faint">{sum}</span>
       </div>
     </div>
   );

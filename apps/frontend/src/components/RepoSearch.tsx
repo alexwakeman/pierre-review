@@ -57,7 +57,7 @@ function OwnerAvatar({
     );
   }
   return (
-    <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-gray-300 text-meta font-semibold text-gray-700 dark:bg-gray-700 dark:text-gray-200">
+    <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-ui-faint text-meta font-semibold text-ui-ink">
       {login.slice(0, 2).toUpperCase()}
     </span>
   );
@@ -66,7 +66,7 @@ function OwnerAvatar({
 // Small inline spinner (matches the convention used in the Claude Review tab).
 function Spinner(): JSX.Element {
   return (
-    <span className="inline-block h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-gray-300 border-t-blue-500 dark:border-gray-600 dark:border-t-blue-400" />
+    <span className="inline-block h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-ui-line border-t-ui-accent/50" />
   );
 }
 
@@ -284,8 +284,8 @@ export function RepoSearch({
       <div
         key={`${s.owner}/${s.name}`}
         className={`flex items-stretch ${
-          idx === active ? 'bg-gray-100 dark:bg-gray-800' : ''
-        } hover:bg-gray-100 dark:hover:bg-gray-800`}
+          idx === active ? 'bg-ui-raise' : ''
+        } hover:bg-ui-hover`}
       >
         <button
           id={`${listboxId}-opt-${idx}`}
@@ -302,20 +302,20 @@ export function RepoSearch({
           <span className="min-w-0 flex-1">
             <span className="flex items-center gap-1.5">
               <span
-                className="truncate text-meta font-medium text-gray-800 dark:text-gray-100"
+                className="truncate text-meta font-medium text-ui-ink"
                 title={`${s.owner}/${s.name}`}
               >
                 {s.owner}/{s.name}
               </span>
-              <span className="shrink-0 rounded-ui bg-gray-100 px-1 text-meta uppercase tracking-wide text-gray-500 dark:bg-gray-800 dark:text-gray-400">
+              <span className="shrink-0 rounded-ui bg-ui-raise px-1 text-meta uppercase tracking-wide text-ui-mute">
                 {s.category}
               </span>
             </span>
-            <span className="mt-0.5 line-clamp-2 text-meta text-gray-500 dark:text-gray-400">
+            <span className="mt-0.5 line-clamp-2 text-meta text-ui-mute">
               {s.why}
             </span>
           </span>
-          <span className="mt-0.5 shrink-0 rounded-ui bg-blue-600 px-1.5 py-0.5 text-meta text-white">
+          <span className="mt-0.5 shrink-0 rounded-ui bg-ui-accent-fill px-1.5 py-0.5 text-meta text-ui-on-accent">
             {adding ? 'Adding…' : 'Add'}
           </span>
         </button>
@@ -326,7 +326,7 @@ export function RepoSearch({
           onClick={(e) => e.stopPropagation()}
           title="Open on GitHub"
           aria-label={`Open ${s.owner}/${s.name} on GitHub`}
-          className="hit flex shrink-0 items-center px-2 text-meta text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+          className="hit flex shrink-0 items-center px-2 text-meta text-ui-faint hover:text-ui-ink"
         >
           <ExternalLinkIcon size={12} />
         </a>
@@ -357,7 +357,7 @@ export function RepoSearch({
             ? `${listboxId}-opt-${active}`
             : undefined
         }
-        className="w-44 rounded-ui border border-gray-300 bg-transparent px-2 py-0.5 text-meta focus:border-blue-500 focus:outline-none dark:border-gray-700"
+        className="w-44 rounded-ui border border-ui-line bg-transparent px-2 py-0.5 text-meta focus:border-ui-accent/50 focus:outline-none"
       />
 
       {panelOpen && (
@@ -365,10 +365,10 @@ export function RepoSearch({
           id={listboxId}
           role="listbox"
           aria-label="Repository search results"
-          className="absolute left-0 top-full z-[60] mt-1 max-h-96 w-96 overflow-y-auto rounded-ui border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-900"
+          className="absolute left-0 top-full z-[60] mt-1 max-h-96 w-96 overflow-y-auto rounded-ui border border-ui-line bg-ui-surface shadow-lg"
         >
           {atRepoLimit && (
-            <div className="sticky top-0 z-20 border-b border-amber-300 bg-amber-50 px-3 py-1.5 text-meta text-amber-700 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+            <div className="sticky top-0 z-20 border-b border-ui-warn/40 bg-ui-warn/10 px-3 py-1.5 text-meta text-ui-warn">
               You&rsquo;ve added the maximum of {MAX_REPOS_PER_ACCOUNT} repos.
               Remove one to add another.
             </div>
@@ -379,10 +379,10 @@ export function RepoSearch({
             <div ref={listRef}>
               {botSuggestions.length === 0 && suggestions.length === 0 ? (
                 <div>
-                  <div className="sticky top-0 z-10 border-b border-gray-200 bg-white px-3 py-1.5 text-meta font-semibold uppercase tracking-wide text-gray-400 dark:border-gray-700 dark:bg-gray-900">
+                  <div className="sticky top-0 z-10 border-b border-ui-line bg-ui-surface px-3 py-1.5 text-meta font-semibold uppercase tracking-wide text-ui-faint">
                     Suggested repos
                   </div>
-                  <div className="px-3 py-2 text-meta text-gray-500 dark:text-gray-400">
+                  <div className="px-3 py-2 text-meta text-ui-mute">
                     You&rsquo;ve already added all the suggestions.
                   </div>
                 </div>
@@ -390,11 +390,11 @@ export function RepoSearch({
                 <>
                   {botSuggestions.length > 0 && (
                     <div>
-                      <div className="sticky top-0 z-10 border-b border-gray-200 bg-white px-3 py-1.5 dark:border-gray-700 dark:bg-gray-900">
-                        <div className="text-meta font-semibold uppercase tracking-wide text-gray-400">
+                      <div className="sticky top-0 z-10 border-b border-ui-line bg-ui-surface px-3 py-1.5">
+                        <div className="text-meta font-semibold uppercase tracking-wide text-ui-faint">
                           Bot monitoring demos
                         </div>
-                        <div className="mt-0.5 text-meta leading-snug text-gray-400 dark:text-gray-500">
+                        <div className="mt-0.5 text-meta leading-snug text-ui-faint">
                           Several AI review bots are active in these — good for
                           exploring the Bots tab. First sync can take a few
                           minutes.
@@ -405,7 +405,7 @@ export function RepoSearch({
                   )}
                   {suggestions.length > 0 && (
                     <div>
-                      <div className="sticky top-0 z-10 border-b border-gray-200 bg-white px-3 py-1.5 text-meta font-semibold uppercase tracking-wide text-gray-400 dark:border-gray-700 dark:bg-gray-900">
+                      <div className="sticky top-0 z-10 border-b border-ui-line bg-ui-surface px-3 py-1.5 text-meta font-semibold uppercase tracking-wide text-ui-faint">
                         Suggested repos
                       </div>
                       {suggestions.map((s, idx) =>
@@ -419,24 +419,24 @@ export function RepoSearch({
               )}
             </div>
           ) : query.isError ? (
-            <div className="px-3 py-2 text-meta text-red-500">
+            <div className="px-3 py-2 text-meta text-ui-danger">
               {query.error instanceof ApiError
                 ? query.error.message
                 : 'Search failed'}
             </div>
           ) : searching && results.length === 0 ? (
-            <div className="flex items-center justify-center gap-2 px-3 py-6 text-meta text-gray-500 dark:text-gray-400">
+            <div className="flex items-center justify-center gap-2 px-3 py-6 text-meta text-ui-mute">
               <Spinner />
               <span>Searching…</span>
             </div>
           ) : results.length === 0 ? (
-            <div className="px-3 py-2 text-meta text-gray-500 dark:text-gray-400">
+            <div className="px-3 py-2 text-meta text-ui-mute">
               No matching repositories.
             </div>
           ) : (
             <div ref={listRef}>
               {searching && (
-                <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-gray-200 bg-white/95 px-3 py-1.5 text-meta text-gray-500 backdrop-blur dark:border-gray-700 dark:bg-gray-900/95 dark:text-gray-400">
+                <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-ui-line bg-white/95 px-3 py-1.5 text-meta text-ui-mute backdrop-blur">
                   <Spinner />
                   <span>Searching…</span>
                 </div>
@@ -454,8 +454,8 @@ export function RepoSearch({
                   <div
                     key={r.githubNodeId}
                     className={`flex items-stretch ${
-                      idx === active ? 'bg-gray-100 dark:bg-gray-800' : ''
-                    } hover:bg-gray-100 dark:hover:bg-gray-800`}
+                      idx === active ? 'bg-ui-raise' : ''
+                    } hover:bg-ui-hover`}
                   >
                     <button
                       id={`${listboxId}-opt-${idx}`}
@@ -472,28 +472,28 @@ export function RepoSearch({
                       <span className="min-w-0 flex-1">
                         <span className="flex items-center gap-1.5">
                           <span
-                            className="truncate text-meta font-medium text-gray-800 dark:text-gray-100"
+                            className="truncate text-meta font-medium text-ui-ink"
                             title={r.fullName}
                           >
                             {r.fullName}
                           </span>
                           {r.isPrivate && (
-                            <span className="shrink-0 rounded-ui bg-gray-200 px-1 text-meta uppercase tracking-wide text-gray-500 dark:bg-gray-700 dark:text-gray-300">
+                            <span className="shrink-0 rounded-ui bg-ui-hover px-1 text-meta uppercase tracking-wide text-ui-mute">
                               private
                             </span>
                           )}
                           {r.isOwnedOrMember && (
-                            <span className="shrink-0 rounded-ui bg-sky-100 px-1 text-meta uppercase tracking-wide text-sky-700 dark:bg-sky-900/50 dark:text-sky-300">
+                            <span className="shrink-0 rounded-ui bg-ui-accent/10 px-1 text-meta uppercase tracking-wide text-ui-accent">
                               yours
                             </span>
                           )}
                         </span>
                         {r.description && (
-                          <span className="mt-0.5 line-clamp-2 text-meta text-gray-500 dark:text-gray-400">
+                          <span className="mt-0.5 line-clamp-2 text-meta text-ui-mute">
                             {r.description}
                           </span>
                         )}
-                        <span className="mt-0.5 flex items-center gap-2 text-meta text-gray-400">
+                        <span className="mt-0.5 flex items-center gap-2 text-meta text-ui-faint">
                           <span
                             className="flex items-center gap-1"
                             title={`${r.stargazerCount} stars`}
@@ -508,7 +508,7 @@ export function RepoSearch({
                           </span>
                         </span>
                       </span>
-                      <span className="mt-0.5 shrink-0 rounded-ui bg-blue-600 px-1.5 py-0.5 text-meta text-white">
+                      <span className="mt-0.5 shrink-0 rounded-ui bg-ui-accent-fill px-1.5 py-0.5 text-meta text-ui-on-accent">
                         {adding ? 'Adding…' : 'Add'}
                       </span>
                     </button>
@@ -522,7 +522,7 @@ export function RepoSearch({
                       onClick={(e) => e.stopPropagation()}
                       title="Open on GitHub"
                       aria-label={`Open ${r.fullName} on GitHub`}
-                      className="hit flex shrink-0 items-center px-2 text-meta text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+                      className="hit flex shrink-0 items-center px-2 text-meta text-ui-faint hover:text-ui-ink"
                     >
                       <ExternalLinkIcon size={12} />
                     </a>
@@ -533,22 +533,22 @@ export function RepoSearch({
           )}
 
           {!showSuggestions && (pageIdx > 0 || hasNextPage) && (
-            <div className="sticky bottom-0 flex items-center justify-between border-t border-gray-200 bg-white px-3 py-1.5 text-meta dark:border-gray-700 dark:bg-gray-900">
+            <div className="sticky bottom-0 flex items-center justify-between border-t border-ui-line bg-ui-surface px-3 py-1.5 text-meta">
               <button
                 type="button"
                 onClick={gotoPrev}
                 disabled={pageIdx === 0}
-                className="hit flex items-center gap-1 text-gray-500 hover:text-gray-800 disabled:opacity-30 dark:text-gray-400 dark:hover:text-gray-100"
+                className="hit flex items-center gap-1 text-ui-mute hover:text-ui-ink disabled:opacity-30"
               >
                 <ChevronIcon dir="left" size={11} />
                 Prev
               </button>
-              <span className="text-gray-400">Page {pageIdx + 1}</span>
+              <span className="text-ui-faint">Page {pageIdx + 1}</span>
               <button
                 type="button"
                 onClick={gotoNext}
                 disabled={!hasNextPage}
-                className="hit flex items-center gap-1 text-gray-500 hover:text-gray-800 disabled:opacity-30 dark:text-gray-400 dark:hover:text-gray-100"
+                className="hit flex items-center gap-1 text-ui-mute hover:text-ui-ink disabled:opacity-30"
               >
                 Next
                 <ChevronIcon dir="right" size={11} />
@@ -557,7 +557,7 @@ export function RepoSearch({
           )}
 
           {addRepo.error && (
-            <div className="border-t border-gray-200 px-3 py-1.5 text-meta text-red-500 dark:border-gray-700">
+            <div className="border-t border-ui-line px-3 py-1.5 text-meta text-ui-danger">
               {addRepo.error instanceof ApiError
                 ? addRepo.error.message
                 : 'Failed to add repo'}

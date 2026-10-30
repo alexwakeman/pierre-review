@@ -292,17 +292,17 @@ function ResolverShell({ target }: { target: ResolverTarget }): JSX.Element {
 
   return (
     <div
-      className="fixed inset-0 z-[60] flex flex-col bg-white dark:bg-gray-950"
+      className="fixed inset-0 z-[60] flex flex-col bg-ui-surface"
       role="dialog"
       aria-modal="true"
       aria-label={`Resolve conflicts in ${target.repoFullName} #${target.prNumber}`}
     >
-      <header className="flex shrink-0 items-center gap-3 border-b border-gray-200 px-4 py-2 dark:border-gray-800">
+      <header className="flex shrink-0 items-center gap-3 border-b border-ui-line px-4 py-2">
         <div className="min-w-0 flex-1">
-          <div className="truncate text-body font-medium text-gray-900 dark:text-gray-100">
+          <div className="truncate text-body font-medium text-ui-ink">
             {target.prTitle}
           </div>
-          <div className="truncate text-meta text-gray-500 dark:text-gray-400">
+          <div className="truncate text-meta text-ui-mute">
             {target.repoFullName} #{target.prNumber}
             {session != null && session.status !== 'preparing' && (
               <>
@@ -319,7 +319,7 @@ function ResolverShell({ target }: { target: ResolverTarget }): JSX.Element {
             href={githubUrl}
             target="_blank"
             rel="noreferrer noopener"
-            className="hit text-meta text-gray-500 underline underline-offset-2 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+            className="hit text-meta text-ui-mute underline underline-offset-2 hover:text-ui-ink"
           >
             Open on GitHub
             <ExternalLinkIcon size={11} className="ml-0.5 inline-block align-[-0.1em]" />
@@ -331,7 +331,7 @@ function ResolverShell({ target }: { target: ResolverTarget }): JSX.Element {
         <button
           type="button"
           onClick={() => close({ reason: closeReason('user') })}
-          className="hit flex items-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+          className="hit flex items-center text-ui-faint hover:text-ui-mute"
           title="Close"
           aria-label="Close"
         >
@@ -342,7 +342,7 @@ function ResolverShell({ target }: { target: ResolverTarget }): JSX.Element {
       {livePollOwner && <ResolverLivePoll prId={target.prId} />}
 
       {stranded && (
-        <div className="shrink-0 border-b border-gray-200 px-4 py-1.5 text-meta text-gray-700 dark:border-gray-800 dark:text-gray-200">
+        <div className="shrink-0 border-b border-ui-line px-4 py-1.5 text-meta text-ui-ink">
           {BRANCH_MOVED_RESTART}
         </div>
       )}
@@ -405,7 +405,7 @@ function ResolverShell({ target }: { target: ResolverTarget }): JSX.Element {
 
           The second line replaces the old "nothing here is saved": decisions ARE kept, under the
           pinned key, and that is precisely what makes an accidental Escape survivable. */}
-      <footer className="flex shrink-0 flex-wrap items-baseline gap-x-3 border-t border-gray-200 px-4 py-1.5 text-meta text-gray-600 dark:border-gray-800 dark:text-gray-300">
+      <footer className="flex shrink-0 flex-wrap items-baseline gap-x-3 border-t border-ui-line px-4 py-1.5 text-meta text-ui-mute">
         <span>
           {/* ⚠ THE FALLBACK IS "still reading", NOT "nothing to decide". `plan` is null until
               the session is ready, and `decisionsDecided(0, 0)` already owns the sentence that
@@ -641,13 +641,13 @@ const EMPTY_DECISIONS: Readonly<Record<string, ConflictDecision>> = Object.freez
 
 function Notice({ text, onRetry }: { text: string; onRetry?: () => void }): JSX.Element {
   return (
-    <div className="flex items-baseline gap-2 px-4 py-3 text-meta text-gray-600 dark:text-gray-300">
+    <div className="flex items-baseline gap-2 px-4 py-3 text-meta text-ui-mute">
       <span>{text}</span>
       {onRetry != null && (
         <button
           type="button"
           onClick={onRetry}
-          className="hit rounded-ui border border-gray-300 px-1.5 py-0.5 font-medium text-gray-700 hover:border-gray-400 dark:border-gray-700 dark:text-gray-200"
+          className="hit rounded-ui border border-ui-line px-1.5 py-0.5 font-medium text-ui-ink hover:border-ui-line"
         >
           {/* Every `onRetry` here is `onRestart` — it opens a new session, it does not re-send
               anything — so the button says what it does, in the same words the landing step uses

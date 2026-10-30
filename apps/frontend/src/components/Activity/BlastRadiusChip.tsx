@@ -35,9 +35,9 @@ const LEVEL_META: Record<
   BlastVerdict['level'],
   { rings: 1 | 2 | 3; className: string; word: string }
 > = {
-  low: { rings: 1, className: 'text-emerald-700 dark:text-emerald-400', word: 'Low' },
-  medium: { rings: 2, className: 'text-gray-500 dark:text-gray-400', word: 'Medium' },
-  high: { rings: 3, className: 'text-amber-600 dark:text-amber-500', word: 'High' },
+  low: { rings: 1, className: 'text-ui-success', word: 'Low' },
+  medium: { rings: 2, className: 'text-ui-mute', word: 'Medium' },
+  high: { rings: 3, className: 'text-ui-warn', word: 'High' },
 };
 
 /** The signal vector, in words. Every figure here is computed — see the note in `BlastRadiusChip`
@@ -52,7 +52,7 @@ function BlastEvidence({ pr }: { pr: BlastPrFields }): JSX.Element | null {
   ];
   const spread = `${count(b.dirs, 'directory', 'directories')} · ${count(b.subsystems, 'top-level area', 'top-level areas')}`;
   return (
-    <div className="border-t border-gray-200 pt-1 text-gray-500 dark:border-gray-700 dark:text-gray-400">
+    <div className="border-t border-ui-line pt-1 text-ui-mute">
       <div>{parts.join(', ')}</div>
       <div>{spread}</div>
       {/* ⚠ The line count comes from the SAME `codeLoc` the large-PR flag reads. A lower bound
@@ -160,7 +160,7 @@ export function BlastRadiusChip({
         {body}
       </button>
       {open && (
-        <div className="ml-4 flex flex-col gap-1 text-meta text-gray-600 dark:text-gray-300">
+        <div className="ml-4 flex flex-col gap-1 text-meta text-ui-mute">
           <ul className="list-disc space-y-0.5">
             {/* EVERY reason, not just the headline one. This list is what makes the verdict
                 AUDITABLE — the known false positive (a repo whose product IS a database schema)

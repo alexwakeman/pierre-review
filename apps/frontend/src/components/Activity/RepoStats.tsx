@@ -8,9 +8,9 @@ import { BotIcon, TimerIcon } from '../Icons.js';
 // the chart over a duplicate scalar).
 export function RepoStatsLine({ stats: s }: { stats: ActivityRepoStats }): JSX.Element {
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-meta text-gray-500 dark:text-gray-400">
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-meta text-ui-mute">
       <span>
-        <span className="font-semibold text-gray-700 dark:text-gray-200 tabular-nums">
+        <span className="font-semibold text-ui-ink tabular-nums">
           {s.openPrs}
         </span>{' '}
         open
@@ -19,7 +19,7 @@ export function RepoStatsLine({ stats: s }: { stats: ActivityRepoStats }): JSX.E
         <span className="tabular-nums">{s.draftPrs}</span> draft
       </span>
       {s.stalledPrs > 0 && (
-        <span className="text-amber-500">
+        <span className="text-ui-warn">
           <span className="tabular-nums">{s.stalledPrs}</span> stalled{' '}
           <TimerIcon size={12} className="inline-block align-[-0.1em]" />
         </span>
@@ -50,7 +50,7 @@ export function RepoStatsLine({ stats: s }: { stats: ActivityRepoStats }): JSX.E
           here. "42% acted on" = threads a later commit touched vs the untouched backlog. */}
       {s.botThreads > 0 && (
         <span
-          className="text-sky-600 dark:text-sky-400"
+          className="text-ui-accent"
           title="Review-bot threads on open PRs, and the share a later commit has likely addressed (resolved or likely_addressed). An approximate signal — likely_addressed is a heuristic."
         >
           <BotIcon size={12} className="inline-block align-[-0.1em]" />{' '}

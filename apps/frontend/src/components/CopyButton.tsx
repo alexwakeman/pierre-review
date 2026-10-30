@@ -121,11 +121,11 @@ export function CopyButton({
       aria-label={label}
       className={`inline-flex shrink-0 items-center gap-1 rounded-ui px-1 py-0.5 text-meta font-medium transition-colors ${
         state === 'copied'
-          ? 'text-emerald-600 dark:text-emerald-400'
+          ? 'text-ui-success'
           : state === 'failed'
-            ? 'text-amber-600 dark:text-amber-400'
+            ? 'text-ui-warn'
             : (idleClassName ??
-              'text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-800 dark:hover:text-gray-200')
+              'text-ui-faint hover:bg-ui-hover hover:text-ui-mute')
       } ${className}`}
     >
       {state === 'copied' ? <CheckIcon /> : (icon ?? <CopyIcon />)}

@@ -50,10 +50,10 @@ export const answeringLine = (name: string): string => `${name} is reading the c
 const BTN_SMALL =
   'inline-flex h-7 items-center whitespace-nowrap rounded-ui bg-ui-raise px-2.5 text-meta font-medium text-ui-ink hover:bg-ui-hover disabled:cursor-not-allowed disabled:opacity-50 touch:h-10 touch:px-3';
 const BTN_ASK =
-  'whitespace-nowrap rounded-ui bg-blue-600 px-4 py-1.5 text-body font-semibold text-white hover:bg-blue-700 disabled:opacity-50 dark:bg-blue-500 dark:hover:bg-blue-400 dark:text-gray-950';
-const MUTED = 'text-gray-500 dark:text-gray-400';
+  'whitespace-nowrap rounded-ui bg-ui-accent-fill px-4 py-1.5 text-body font-semibold text-ui-on-accent hover:bg-ui-accent-fill disabled:opacity-50';
+const MUTED = 'text-ui-mute';
 const PILL =
-  'inline-flex max-w-full items-center gap-1 rounded-full border border-blue-300 bg-blue-50 px-2.5 py-0.5 text-meta text-blue-800 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-200';
+  'inline-flex max-w-full items-center gap-1 rounded-full border border-ui-accent/50 bg-ui-accent/10 px-2.5 py-0.5 text-meta text-ui-accent';
 
 const sameRef = (a: ClaudeReviewChatPinRef, b: ClaudeReviewChatPinRef): boolean => chatPinKey(a) === chatPinKey(b);
 
@@ -105,7 +105,7 @@ export function SendToChatButton({
         {pinned ? 'In chat' : 'Send to chat'}
       </button>
       {full && (
-        <span className="text-meta text-amber-700 dark:text-amber-300">
+        <span className="text-meta text-ui-warn">
           The chat holds {CLAUDE_REVIEW_CHAT_MAX_PINS} items. Remove one first.
         </span>
       )}
@@ -122,7 +122,7 @@ function PinPill({ label, onRemove }: { label: string; onRemove?: () => void }):
           type="button"
           onClick={onRemove}
           aria-label={`Remove ${label} from the chat`}
-          className="hit -mr-1 shrink-0 rounded-full p-0.5 hover:bg-blue-200/60 dark:hover:bg-blue-800/60"
+          className="hit -mr-1 shrink-0 rounded-full p-0.5 hover:bg-ui-accent/10"
         >
           <CloseIcon size={10} />
         </button>
@@ -300,13 +300,13 @@ export function ReviewChatThread({
   const explaining = (pendingHere?.pins.length ?? 0) > 0;
 
   return (
-    <div className="mt-2 space-y-3 rounded-ui border border-gray-200 bg-gray-50/60 p-3 dark:border-gray-800 dark:bg-gray-900/40">
+    <div className="mt-2 space-y-3 rounded-ui border border-ui-line bg-ui-raise p-3">
       {thread.data?.headMoved && (
-        <div className="text-meta text-amber-700 dark:text-amber-400">{CHAT_HEAD_MOVED_LINE}</div>
+        <div className="text-meta text-ui-warn">{CHAT_HEAD_MOVED_LINE}</div>
       )}
       {thread.isLoading && <div className={`text-meta ${MUTED}`}>Loading…</div>}
       {thread.isError && (
-        <div className="text-meta text-red-600 dark:text-red-400">Could not load this conversation.</div>
+        <div className="text-meta text-ui-danger">Could not load this conversation.</div>
       )}
       <ChatMessages messages={messages} />
       {pendingQuestion != null && (
@@ -360,7 +360,7 @@ export function ReviewChatThread({
                 : 'Ask about this review'
           }
           aria-label={findingId != null ? 'Question about this finding' : 'Question about this review'}
-          className="w-full resize-y rounded-ui border border-gray-300 bg-white px-2.5 py-1.5 text-title leading-normal dark:border-gray-700 dark:bg-gray-950"
+          className="w-full resize-y rounded-ui border border-ui-line bg-ui-surface px-2.5 py-1.5 text-title leading-normal"
         />
         <div className="flex flex-wrap items-center gap-3">
           <AiRunGate kind="review_chat" followUp provider={chatProvider}>
@@ -372,11 +372,11 @@ export function ReviewChatThread({
             <span className={`text-meta ${MUTED}`}>Answering another question…</span>
           )}
           {tooLong && (
-            <span className="text-meta text-red-600 dark:text-red-400">
+            <span className="text-meta text-ui-danger">
               Keep it under {CLAUDE_REVIEW_CHAT_MAX_QUESTION_CHARS.toLocaleString('en-US')} characters.
             </span>
           )}
-          {error != null && <span className="text-meta text-red-600 dark:text-red-400">{error}</span>}
+          {error != null && <span className="text-meta text-ui-danger">{error}</span>}
         </div>
       </div>
     </div>
@@ -406,12 +406,12 @@ function EarlierChats({ prId, reviewId }: { prId: number; reviewId: number }): J
   const [picked, setPicked] = useState<number | null>(null);
   const run = runs.find((r) => r.reviewId === picked) ?? runs[0] ?? null;
   return (
-    <div className="mt-3 border-t border-gray-200 pt-2 dark:border-gray-800">
+    <div className="mt-3 border-t border-ui-line pt-2">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="hit inline-flex items-center gap-1.5 text-meta font-medium text-gray-700 hover:underline dark:text-gray-200"
+        className="hit inline-flex items-center gap-1.5 text-meta font-medium text-ui-ink hover:underline"
       >
         <ChevronIcon dir={open ? 'down' : 'right'} size={11} />
         Earlier reviews&apos; chats
@@ -420,7 +420,7 @@ function EarlierChats({ prId, reviewId }: { prId: number; reviewId: number }): J
         <div className="mt-2 space-y-2">
           {history.isLoading && <div className={`text-meta ${MUTED}`}>Loading…</div>}
           {history.isError && (
-            <div className="text-meta text-red-600 dark:text-red-400">Could not load earlier chats.</div>
+            <div className="text-meta text-ui-danger">Could not load earlier chats.</div>
           )}
           {history.data != null && runs.length === 0 && (
             <div className={`text-meta ${MUTED}`}>No earlier review of this PR has a chat.</div>
@@ -432,7 +432,7 @@ function EarlierChats({ prId, reviewId }: { prId: number; reviewId: number }): J
                 <select
                   value={run.reviewId}
                   onChange={(e) => setPicked(Number(e.target.value))}
-                  className="rounded-ui border border-gray-300 bg-white px-1.5 py-0.5 text-meta dark:border-gray-700 dark:bg-gray-950"
+                  className="rounded-ui border border-ui-line bg-ui-surface px-1.5 py-0.5 text-meta"
                 >
                   {runs.map((r) => (
                     <option key={r.reviewId} value={r.reviewId}>
@@ -441,7 +441,7 @@ function EarlierChats({ prId, reviewId }: { prId: number; reviewId: number }): J
                   ))}
                 </select>
               </label>
-              <div className="rounded-ui border border-gray-200 p-2 dark:border-gray-800">
+              <div className="rounded-ui border border-ui-line p-2">
                 <ChatMessages messages={run.messages} />
               </div>
             </>
@@ -492,7 +492,7 @@ export function ReviewChatSection({
             type="button"
             onClick={() => setOpen((v) => !v)}
             aria-expanded={open}
-            className="hit inline-flex items-center gap-1.5 text-body font-medium text-blue-600 hover:underline dark:text-blue-400"
+            className="hit inline-flex items-center gap-1.5 text-body font-medium text-ui-accent hover:underline"
           >
             <CommentIcon size={13} />
             {open ? 'Hide' : `Ask ${providerName} about this review`}

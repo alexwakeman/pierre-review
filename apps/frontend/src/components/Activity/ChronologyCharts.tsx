@@ -40,14 +40,14 @@ export const COURT_FILL: Record<PrCourt, string> = {
   landing: 'fill-indigo-500 dark:fill-indigo-500',
 };
 export const COURT_SWATCH: Record<PrCourt, string> = {
-  reviewer: 'bg-amber-500 dark:bg-amber-600',
-  author: 'bg-teal-600 dark:bg-teal-600',
+  reviewer: 'bg-ui-warn',
+  author: 'bg-ui-success',
   landing: 'bg-indigo-500 dark:bg-indigo-500',
 };
 /** A court's figure as TEXT — the darker/lighter shades, so it reads on either ground. */
 export const COURT_TEXT: Record<PrCourt, string> = {
   reviewer: 'text-ui-warn',
-  author: 'text-teal-700 dark:text-teal-400',
+  author: 'text-ui-success',
   landing: 'text-indigo-600 dark:text-indigo-400',
 };
 
@@ -314,15 +314,15 @@ export function BudgetChart({
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-meta text-ui-mute">
         <span className="inline-flex items-center gap-1.5">
-          <span className="h-2.5 w-4 rounded-ui bg-emerald-500/25 dark:bg-emerald-400/25" />
+          <span className="h-2.5 w-4 rounded-ui bg-ui-success/10" />
           within budget
         </span>
         <span className="inline-flex items-center gap-1.5">
-          <span className="h-2.5 w-4 rounded-ui bg-amber-400/30 dark:bg-amber-400/25" />
+          <span className="h-2.5 w-4 rounded-ui bg-ui-warn/10" />
           acceptable
         </span>
         <span className="inline-flex items-center gap-1.5">
-          <span className="h-2.5 w-4 rounded-ui bg-rose-500/15 dark:bg-rose-400/20" />
+          <span className="h-2.5 w-4 rounded-ui bg-ui-danger/10" />
           past limit
         </span>
         <span className="inline-flex items-center gap-1.5">

@@ -118,7 +118,7 @@ describe('the ci_failing body’s names line', () => {
 
   it('is red ink at 12px, with the failure mark hidden from assistive technology', () => {
     const html = lineHtml('failure', ['smoke'], 1);
-    expect(html).toContain('text-xs text-red-600 dark:text-red-400');
+    expect(html).toContain('text-meta text-ui-danger');
     expect(html).toMatch(/<svg[^>]*aria-hidden="true"/);
   });
 

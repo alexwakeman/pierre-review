@@ -237,8 +237,8 @@ export default function App(): JSX.Element {
   // reappeared empty, the first keys typed into it were lost).
   if (me.data == null && me.isPending) {
     return (
-      <div className="flex h-full min-h-screen items-center justify-center bg-gray-950">
-        <Wordmark className="text-4xl text-gray-100" />
+      <div className="flex h-full min-h-screen items-center justify-center bg-ui-raise">
+        <Wordmark className="text-4xl text-ui-ink" />
       </div>
     );
   }

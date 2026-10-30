@@ -219,7 +219,7 @@ export function MentionTextarea({
       {showPicker && (
         <ul
           role="listbox"
-          className="absolute left-0 right-0 z-30 mt-0.5 max-h-56 overflow-auto rounded-ui border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-900"
+          className="absolute left-0 right-0 z-30 mt-0.5 max-h-56 overflow-auto rounded-ui border border-ui-line bg-ui-surface py-1 shadow-lg"
         >
           {suggestions.map((u, i) => (
             <li key={u.id}>
@@ -235,18 +235,18 @@ export function MentionTextarea({
                 onMouseEnter={() => setActive(i)}
                 className={`flex w-full items-center gap-2 px-2 py-1 text-left text-meta ${
                   i === active
-                    ? 'bg-sky-50 dark:bg-sky-950/40'
-                    : 'hover:bg-gray-50 dark:hover:bg-gray-800/60'
+                    ? 'bg-ui-accent/10'
+                    : 'hover:bg-ui-hover'
                 }`}
               >
                 <Avatar user={u} size={18} />
-                <span className="font-medium text-gray-800 dark:text-gray-100">
+                <span className="font-medium text-ui-ink">
                   @{u.githubLogin}
                 </span>
                 {u.isMaintainer && (
                   <MaintainerShield title="Maintainer — has merged a PR here" />
                 )}
-                {u.displayName && <span className="truncate text-gray-400">{u.displayName}</span>}
+                {u.displayName && <span className="truncate text-ui-faint">{u.displayName}</span>}
               </button>
             </li>
           ))}

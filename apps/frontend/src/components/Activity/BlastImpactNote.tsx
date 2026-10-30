@@ -122,7 +122,7 @@ export function BlastImpactNote({
             type="button"
             onClick={() => run()}
             disabled={state.running}
-            className="hit inline-flex items-center gap-1 rounded-ui text-meta text-gray-500 hover:text-gray-700 disabled:opacity-60 dark:text-gray-400 dark:hover:text-gray-200"
+            className="hit inline-flex items-center gap-1 rounded-ui text-meta text-ui-mute hover:text-ui-ink disabled:opacity-60"
           >
             <SparkleIcon size={11} />
             What could this break?
@@ -137,14 +137,14 @@ export function BlastImpactNote({
         <button
           type="button"
           onClick={toggle}
-          className="hit inline-flex items-center gap-1 text-meta text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+          className="hit inline-flex items-center gap-1 text-meta text-ui-mute hover:text-ui-ink"
           aria-expanded={false}
         >
           <ChevronIcon size={11} dir="right" />
           Impact note
           {/* The escalation survives the fold. Hiding the fact that something was flagged is the
               one thing a collapse may not do. */}
-          {concern && <span className="text-amber-600 dark:text-amber-500">· flagged</span>}
+          {concern && <span className="text-ui-warn">· flagged</span>}
         </button>
       )}
 
@@ -153,7 +153,7 @@ export function BlastImpactNote({
           <button
             type="button"
             onClick={toggle}
-            className="hit inline-flex items-center gap-1 text-meta text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+            className="hit inline-flex items-center gap-1 text-meta text-ui-mute hover:text-ui-ink"
             aria-expanded
           >
             <ChevronIcon size={11} dir="down" />
@@ -164,15 +164,15 @@ export function BlastImpactNote({
               and which half a model wrote; a panel that mixes them without labelling them apart
               is the defect the AI-surface rules name. */}
           {concern && (
-            <span className="inline-flex items-center gap-1 text-meta text-amber-600 dark:text-amber-500">
+            <span className="inline-flex items-center gap-1 text-meta text-ui-warn">
               <WarningIcon size={11} className="inline-block align-[-0.1em]" />
               Flagged on a closer read
             </span>
           )}
-          <p className="max-w-prose text-meta leading-snug text-gray-600 dark:text-gray-300">
+          <p className="max-w-prose text-meta leading-snug text-ui-mute">
             {note.body}
           </p>
-          <div className="flex items-center gap-2 text-meta text-gray-400 dark:text-gray-500">
+          <div className="flex items-center gap-2 text-meta text-ui-faint">
             {/* Says who wrote it. Two sentences of prose beside a computed chip must not be
                 mistaken for another computed fact. */}
             <span>Written by {aiRunLabel(null, note.model)}</span>
@@ -188,7 +188,7 @@ export function BlastImpactNote({
                   type="button"
                   onClick={() => run()}
                   disabled={state.running}
-                  className="hit underline hover:text-gray-600 disabled:opacity-60 dark:hover:text-gray-300"
+                  className="hit underline hover:text-ui-mute disabled:opacity-60"
                 >
                   Out of date — read again
                 </button>
@@ -199,7 +199,7 @@ export function BlastImpactNote({
       )}
 
       {state.error != null && (
-        <span className="text-meta text-red-500">{state.error}</span>
+        <span className="text-meta text-ui-danger">{state.error}</span>
       )}
     </div>
   );

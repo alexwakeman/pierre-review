@@ -58,12 +58,12 @@ const SEVERITY_LABEL: Record<ClaudeFindingSeverity, string> = {
   praise: 'Praise',
 };
 const SEVERITY_CLASS: Partial<Record<ClaudeFindingSeverity, string>> = {
-  blocker: 'bg-red-500/10 text-red-700 dark:text-red-300',
-  warning: 'bg-amber-500/10 text-amber-700 dark:text-amber-300',
-  nit: 'bg-gray-500/10 text-gray-600 dark:text-gray-300',
+  blocker: 'bg-ui-danger/10 text-ui-danger',
+  warning: 'bg-ui-warn/10 text-ui-warn',
+  nit: 'bg-ui-raise text-ui-mute',
 };
 const WONT_FIT_CHIP =
-  'whitespace-nowrap rounded-ui bg-amber-500/10 px-1 py-px text-meta text-amber-700 dark:text-amber-300';
+  'whitespace-nowrap rounded-ui bg-ui-warn/10 px-1 py-px text-meta text-ui-warn';
 const NO_PATHS: ReadonlySet<string> = new Set();
 
 function where(path: string | null, line: number | null): string | null {
@@ -120,8 +120,8 @@ function PlainRow({
       <label
         className={`flex cursor-pointer items-start gap-2 rounded-ui border px-2 py-1.5 text-meta ${
           picked
-            ? 'border-blue-300 bg-blue-50/50 dark:border-blue-800 dark:bg-blue-950/20'
-            : 'border-gray-200 dark:border-gray-800'
+            ? 'border-ui-accent/50 bg-ui-accent/10'
+            : 'border-ui-line'
         }`}
       >
         <input
@@ -138,11 +138,11 @@ function PlainRow({
                 {SEVERITY_LABEL[item.severity]}
               </span>
             )}
-            <span className="break-words text-gray-800 dark:text-gray-100">{item.label}</span>
+            <span className="break-words text-ui-ink">{item.label}</span>
             {picked && cut && <span className={WONT_FIT_CHIP}>Won’t fit</span>}
           </span>
           {(loc || item.detail) && (
-            <span className="mt-0.5 block break-words text-meta text-gray-500 dark:text-gray-400">
+            <span className="mt-0.5 block break-words text-meta text-ui-mute">
               {loc && <span className="font-mono">{loc}</span>}
               {loc && item.detail ? ' · ' : ''}
               {item.detail}
@@ -227,7 +227,7 @@ export function FixPicker({
   }, [latestRuns, fetchedRuns]);
 
   if (preview.items.length === 0) {
-    return <p className="text-meta text-gray-500 dark:text-gray-400">The review found nothing to fix.</p>;
+    return <p className="text-meta text-ui-mute">The review found nothing to fix.</p>;
   }
 
   const headSha = source?.headSha ?? pr.headSha;
@@ -340,15 +340,15 @@ export function FixPicker({
         return (
           <section key={section} aria-label={pickerSectionLabel(section, by)}>
             <div className="mb-1 flex items-center gap-2">
-              <h4 className="text-meta font-semibold text-gray-700 dark:text-gray-200">
+              <h4 className="text-meta font-semibold text-ui-ink">
                 {pickerSectionLabel(section, by)}
               </h4>
-              <span className="text-meta text-gray-500 dark:text-gray-400">
+              <span className="text-meta text-ui-mute">
                 {on} of {items.length}
               </span>
               <button
                 type="button"
-                className="hit ml-auto text-meta text-blue-600 hover:underline disabled:opacity-50 dark:text-blue-400"
+                className="hit ml-auto text-meta text-ui-accent hover:underline disabled:opacity-50"
                 disabled={disabled}
                 onClick={() =>
                   set(
@@ -365,7 +365,7 @@ export function FixPicker({
         );
       })}
       {cut.size > 0 && (
-        <p className="text-meta text-amber-700 dark:text-amber-300">
+        <p className="text-meta text-ui-warn">
           {cut.size} ticked {cut.size === 1 ? 'item does' : 'items do'} not fit in one fix and will be left out.
           Untick something to make room.
         </p>

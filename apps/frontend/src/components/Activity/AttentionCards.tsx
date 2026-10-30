@@ -203,9 +203,9 @@ import {
 
 // Left-accent + label per severity — the same visual grammar as the Feed's cards.
 const SEV: Record<InsightSeverity, { border: string; dot: string }> = {
-  high: { border: 'border-l-red-400 dark:border-l-red-500', dot: 'bg-red-500' },
-  warn: { border: 'border-l-amber-400 dark:border-l-amber-500', dot: 'bg-amber-500' },
-  info: { border: 'border-l-sky-400 dark:border-l-sky-500', dot: 'bg-sky-500' },
+  high: { border: 'border-l-ui-danger/40', dot: 'bg-ui-danger' },
+  warn: { border: 'border-l-ui-warn/40', dot: 'bg-ui-warn' },
+  info: { border: 'border-l-ui-accent/50', dot: 'bg-ui-accent-fill' },
 };
 
 // The kind and card labels live in `pendingLabels.ts` (the Pending info popovers read them too, and
@@ -464,7 +464,7 @@ function UserChip({
 }): JSX.Element {
   const u = usersById.get(id);
   return (
-    <span className="inline-flex items-center gap-1 rounded-ui bg-gray-500/10 px-1.5 py-0.5 text-meta">
+    <span className="inline-flex items-center gap-1 rounded-ui bg-ui-raise px-1.5 py-0.5 text-meta">
       <Avatar user={u} size={13} />
       <UserName user={u} fallbackId={id} />
     </span>
@@ -496,7 +496,7 @@ function BotVendorPill({
   return (
     <span
       className={`inline-flex items-center gap-1 rounded-ui px-1.5 py-0.5 text-meta font-medium${
-        meta == null ? ' bg-gray-500/10 text-gray-600 dark:text-gray-300' : ''
+        meta == null ? ' bg-ui-raise text-ui-mute' : ''
       }`}
       style={meta != null ? { ...vendorInk(meta.color), background: `${meta.color}1a` } : undefined}
       title={title ?? 'This thread was opened by an automated reviewer'}
@@ -686,7 +686,7 @@ export function PrByline({
           <span
             key={part}
             className={`inline-flex items-center gap-1 rounded-ui px-1.5 py-0.5 font-medium${
-              meta == null ? ' bg-gray-500/10 text-gray-600 dark:text-gray-300' : ''
+              meta == null ? ' bg-ui-raise text-ui-mute' : ''
             }`}
             style={meta != null ? { ...vendorInk(meta.color), background: `${meta.color}1a` } : undefined}
           >
@@ -705,7 +705,7 @@ export function PrByline({
     }
   };
   return (
-    <span className="inline-flex min-w-0 flex-wrap items-center gap-1 text-meta text-gray-600 dark:text-gray-300">
+    <span className="inline-flex min-w-0 flex-wrap items-center gap-1 text-meta text-ui-mute">
       {bylineParts(b).map(draw)}
     </span>
   );
@@ -822,7 +822,7 @@ export function FailingChecksLine({
   if (failing == null) return null;
   const FailedIcon = CHECK_STATE_META.failure.icon;
   return (
-    <div className="mt-1 flex min-w-0 items-center gap-1 text-meta text-red-600 dark:text-red-400">
+    <div className="mt-1 flex min-w-0 items-center gap-1 text-meta text-ui-danger">
       <FailedIcon size={12} className="shrink-0" />
       <span className="sr-only">Failing checks: </span>
       <FailingCheckNames parts={failing} />
@@ -847,7 +847,7 @@ export function PrMetaRow({
 }): JSX.Element {
   const byline = usersById != null && 'automation' in pr;
   return (
-    <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-meta text-gray-500 dark:text-gray-400">
+    <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-meta text-ui-mute">
       {byline && (
         <PrByline pr={{ authorId: pr.authorId ?? null, automation: pr.automation }} usersById={usersById} />
       )}
@@ -858,8 +858,8 @@ export function PrMetaRow({
         {pr.changedFiles} file{pr.changedFiles === 1 ? '' : 's'}
       </span>
       <span className="font-mono">
-        <span className="text-green-600 dark:text-green-400">+{pr.additions}</span>{' '}
-        <span className="text-red-500 dark:text-red-400">−{pr.deletions}</span>
+        <span className="text-ui-success">+{pr.additions}</span>{' '}
+        <span className="text-ui-danger">−{pr.deletions}</span>
       </span>
       {/* A Dependabot bump and a colleague's refactor are the same shape of row and want
           completely different attention, so the SOURCE has to be legible without opening the PR.
@@ -1121,11 +1121,11 @@ function MyTurnReplyBody({
     if (el && !expanded) setOverflows(el.scrollHeight > el.clientHeight + 1);
   }, [reply.body, expanded]);
   return (
-    <div className="mt-1.5 border-l-2 border-gray-300 pl-2 dark:border-gray-600" data-noactivate>
-      {byline != null && <div className="mb-0.5 text-meta text-gray-500 dark:text-gray-400">{byline}</div>}
+    <div className="mt-1.5 border-l-2 border-ui-line pl-2" data-noactivate>
+      {byline != null && <div className="mb-0.5 text-meta text-ui-mute">{byline}</div>}
       <div
         ref={boxRef}
-        className={`text-meta text-gray-700 dark:text-gray-300 ${
+        className={`text-meta text-ui-ink ${
           expanded ? '' : 'max-h-[4.6rem] overflow-hidden [&_img]:hidden'
         }`}
       >
@@ -1136,7 +1136,7 @@ function MyTurnReplyBody({
           {(overflows || expanded) && (
             <button
               type="button"
-              className="hit text-gray-600 hover:underline dark:text-gray-300"
+              className="hit text-ui-mute hover:underline"
               onClick={() => setExpanded((v) => !v)}
             >
               {expanded ? 'Show less' : 'Show more'}
@@ -1145,7 +1145,7 @@ function MyTurnReplyBody({
           {reply.truncated && (expanded || !overflows) && (
             <button
               type="button"
-              className="hit text-gray-600 hover:underline dark:text-gray-300"
+              className="hit text-ui-mute hover:underline"
               onClick={onOpen}
             >
               {openLabel}
@@ -1176,29 +1176,29 @@ function PushedCommitList({
   const nameAuthors = authors.size > 1;
   const more = Math.max(0, (ball.humanCommitsAfter ?? list.length) - list.length);
   return (
-    <ul className="mt-1.5 space-y-0.5 text-meta text-gray-700 dark:text-gray-300">
+    <ul className="mt-1.5 space-y-0.5 text-meta text-ui-ink">
       {list.map((c) => {
         const login = c.authorId != null ? usersById.get(c.authorId)?.githubLogin : undefined;
         return (
           <li key={c.sha} className="flex min-w-0 items-baseline gap-2">
-            <span className="shrink-0 font-mono text-meta text-gray-500 dark:text-gray-400">
+            <span className="shrink-0 font-mono text-meta text-ui-mute">
               {c.sha.slice(0, 7)}
             </span>
             {c.headline != null ? (
               <span className="min-w-0 truncate">{c.headline}</span>
             ) : (
-              <span className="min-w-0 truncate text-gray-500 dark:text-gray-400">
+              <span className="min-w-0 truncate text-ui-mute">
                 Message not synced yet
               </span>
             )}
             {nameAuthors && login != null && (
-              <span className="shrink-0 text-meta text-gray-500 dark:text-gray-400">@{login}</span>
+              <span className="shrink-0 text-meta text-ui-mute">@{login}</span>
             )}
           </li>
         );
       })}
       {more > 0 && (
-        <li className="text-meta text-gray-500 dark:text-gray-400">
+        <li className="text-meta text-ui-mute">
           and {more} more
         </li>
       )}
@@ -1218,7 +1218,7 @@ export function PrDescriptionToggle({ prId }: { prId: number }): JSX.Element {
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
-        className="hit text-meta font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+        className="hit text-meta font-medium text-ui-mute hover:text-ui-ink"
       >
         <ChevronIcon
           dir={open ? 'down' : 'right'}
@@ -1234,17 +1234,17 @@ export function PrDescriptionToggle({ prId }: { prId: number }): JSX.Element {
 
 function PrDescriptionBody({ prId }: { prId: number }): JSX.Element {
   const { data: pr, isLoading } = usePr(prId);
-  if (isLoading) return <div className="mt-1 text-meta text-gray-400">Loading…</div>;
-  if (!pr) return <div className="mt-1 text-meta text-gray-400">Couldn’t load this PR.</div>;
+  if (isLoading) return <div className="mt-1 text-meta text-ui-faint">Loading…</div>;
+  if (!pr) return <div className="mt-1 text-meta text-ui-faint">Couldn’t load this PR.</div>;
   const hasBody = pr.body != null && pr.body.trim() !== '';
   return (
-    <div className="mt-1 space-y-2 rounded-ui border border-gray-200 bg-gray-50 p-2 dark:border-gray-800 dark:bg-gray-900/40">
+    <div className="mt-1 space-y-2 rounded-ui border border-ui-line bg-ui-surface p-2">
       {hasBody ? (
         <div className="max-h-64 overflow-auto text-body">
           <Markdown>{pr.body as string}</Markdown>
         </div>
       ) : (
-        <div className="text-meta italic text-gray-500 dark:text-gray-400">No PR description.</div>
+        <div className="text-meta italic text-ui-mute">No PR description.</div>
       )}
     </div>
   );
@@ -1275,7 +1275,7 @@ function RoutingReviewers({
     // data-noactivate: CardShell opens the PR on any other click; a click that just misses a button
     // here must not navigate away mid-request (the PendingMergeActions rule).
     <div className="mt-1.5 space-y-1" data-noactivate>
-      <div className="text-meta font-medium text-gray-500 dark:text-gray-400">
+      <div className="text-meta font-medium text-ui-mute">
         Suggested reviewers
       </div>
       <ul className="space-y-1">
@@ -1314,14 +1314,14 @@ function RoutingReviewerRow({
   return (
     <li
       data-testid="suggested-reviewer"
-      className="flex flex-wrap items-center gap-1.5 text-meta text-gray-500 dark:text-gray-400"
+      className="flex flex-wrap items-center gap-1.5 text-meta text-ui-mute"
     >
       {/* Assign FIRST, so the buttons stand in one column whatever each reason's length. */}
       {body != null &&
         (state.status === 'success' ? (
           <span
             role="status"
-            className="inline-flex min-w-[4.75rem] items-center gap-1 font-medium text-green-700 dark:text-green-400"
+            className="inline-flex min-w-[4.75rem] items-center gap-1 font-medium text-ui-success"
           >
             <CheckIcon size={11} className="inline-block align-[-0.1em]" /> Requested
           </span>
@@ -1338,19 +1338,19 @@ function RoutingReviewerRow({
           </button>
         ))}
       {s.kind === 'team' ? (
-        <span className="inline-flex items-center gap-1 rounded-ui bg-gray-500/10 px-1.5 py-0.5 text-meta font-medium">
+        <span className="inline-flex items-center gap-1 rounded-ui bg-ui-raise px-1.5 py-0.5 text-meta font-medium">
           @{s.teamName}
         </span>
       ) : s.userId != null ? (
         <UserChip id={s.userId} usersById={usersById} />
       ) : (
-        <span className="inline-flex items-center gap-1 rounded-ui bg-gray-500/10 px-1.5 py-0.5 text-meta">
+        <span className="inline-flex items-center gap-1 rounded-ui bg-ui-raise px-1.5 py-0.5 text-meta">
           @{s.login}
         </span>
       )}
       <span>{s.reason}</span>
       {body != null && state.status === 'error' && (
-        <span role="alert" className="basis-full text-meta text-red-600 dark:text-red-400">
+        <span role="alert" className="basis-full text-meta text-ui-danger">
           {state.error}
         </span>
       )}
@@ -1396,7 +1396,7 @@ function ResolveThreadButton({ prId, threadId }: { prId: number; threadId: numbe
         {resolve.isPending ? 'Resolving…' : resolve.isSuccess ? 'Resolved' : 'Resolve'}
       </button>
       {resolve.isError && (
-        <span className="text-meta text-red-600 dark:text-red-400">
+        <span className="text-meta text-ui-danger">
           {resolve.error instanceof Error && resolve.error.message !== ''
             ? resolve.error.message
             : 'Couldn’t resolve it.'}
@@ -1825,7 +1825,7 @@ function PendingConflictActions({
       {armed != null && (
         <>
           {/* ONE SPELLING of where a live intent stands, shared with the AutoMergeBanner stack. */}
-          <span className="text-meta text-gray-500 dark:text-gray-400">
+          <span className="text-meta text-ui-mute">
             {armedPhaseHeadline(armed)}
           </span>
           <MergeWhenReadyControl prId={card.prId} eager={false} />
@@ -1947,9 +1947,9 @@ function SecurityDetail({
   // Amber only for Dependabot's inferred fix with nothing else behind it — the card's own colour.
   const inferredOnly = card.fix === 'inferred' && card.alertCount === 0;
   const tint = inferredOnly
-    ? 'bg-amber-500/10 text-amber-700 dark:text-amber-400'
-    : 'bg-red-500/10 text-red-700 dark:text-red-300';
-  const mark = inferredOnly ? 'text-amber-600 dark:text-amber-400' : 'text-red-600 dark:text-red-400';
+    ? 'bg-ui-warn/10 text-ui-warn'
+    : 'bg-ui-danger/10 text-ui-danger';
+  const mark = inferredOnly ? 'text-ui-warn' : 'text-ui-danger';
   const ids = card.advisoryIds;
   const fixParts = card.detail !== '' ? advisoryParts(card.detail, ids) : [];
   const alertLines = card.alerts.map((alert) => {
@@ -1985,7 +1985,7 @@ function SecurityDetail({
   const words = (parts: AdvisoryPart[]): JSX.Element[] =>
     parts.map((p, i) => ('id' in p ? chip(p, `${i}`) : <span key={i}>{p.text}</span>));
   return (
-    <div className="mt-1.5 space-y-1 text-meta text-gray-600 dark:text-gray-300">
+    <div className="mt-1.5 space-y-1 text-meta text-ui-mute">
       {fixParts.length > 0 && (
         <p className="flex items-start gap-1.5">
           <ShieldIcon size={12} className={`mt-0.5 shrink-0 ${mark}`} />
@@ -2019,11 +2019,11 @@ function SecurityDetail({
       {(chips.length > 0 || more > 0) && (
         <div className="flex flex-wrap items-center gap-1.5 pl-[18px] text-meta">
           {chips.map((c) => chip(c, c.id))}
-          {more > 0 && <span className="text-gray-500 dark:text-gray-400">+{more} more</span>}
+          {more > 0 && <span className="text-ui-mute">+{more} more</span>}
         </div>
       )}
       {moreAlerts > 0 && (
-        <p className="pl-[18px] text-gray-500 dark:text-gray-400">
+        <p className="pl-[18px] text-ui-mute">
           +{moreAlerts} more {moreAlerts === 1 ? 'alert' : 'alerts'}
         </p>
       )}
@@ -2041,7 +2041,7 @@ function ExternalCardLink({ href, title }: { href: string | null; title: string 
       target="_blank"
       rel="noreferrer noopener"
       onClick={(e) => e.stopPropagation()}
-      className="hit inline-flex shrink-0 items-center text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200"
+      className="hit inline-flex shrink-0 items-center text-ui-mute hover:text-ui-ink"
       title={title}
       aria-label={title}
     >
@@ -2383,7 +2383,7 @@ function FactLine({
   }
   if (items.length === 0) return null;
   return (
-    <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-meta text-gray-600 dark:text-gray-400">
+    <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-meta text-ui-mute">
       {joinWithSeps(items)}
     </div>
   );
@@ -2398,11 +2398,11 @@ function ThreadOpenerBlock({
   name: string | null;
 }): JSX.Element {
   return (
-    <div className="mt-1.5 border-l-2 border-gray-300 pl-2 dark:border-gray-600">
-      <div className="mb-0.5 text-meta text-gray-500 dark:text-gray-400">
+    <div className="mt-1.5 border-l-2 border-ui-line pl-2">
+      <div className="mb-0.5 text-meta text-ui-mute">
         {name ?? 'Someone'} · <span title={dateTime(comment.at)}>{relativeTime(comment.at)}</span>
       </div>
-      <p className="line-clamp-3 text-meta text-gray-700 [overflow-wrap:anywhere] dark:text-gray-300">
+      <p className="line-clamp-3 text-meta text-ui-ink [overflow-wrap:anywhere]">
         {comment.text}
       </p>
     </div>
@@ -2422,7 +2422,7 @@ function MoreFailingChecks({
   if (rest.names.length === 0 && rest.more === 0) return null;
   const FailedIcon = CHECK_STATE_META.failure.icon;
   return (
-    <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5 text-meta text-red-700 dark:text-red-400">
+    <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5 text-meta text-ui-danger">
       <span className="sr-only">Also failing: </span>
       {rest.names.map((n) => (
         <span key={n} className="inline-flex min-w-0 items-center gap-1">
@@ -2432,7 +2432,7 @@ function MoreFailingChecks({
           </span>
         </span>
       ))}
-      {rest.more > 0 && <span className="text-gray-600 dark:text-gray-400">and {rest.more} more</span>}
+      {rest.more > 0 && <span className="text-ui-mute">and {rest.more} more</span>}
     </div>
   );
 }
@@ -2449,12 +2449,12 @@ function LastLandedLine({
   const meta = landingPrMeta(card, board.usersById);
   if (line == null || meta == null) return null;
   return (
-    <p className="mt-1.5 min-w-0 text-meta text-gray-700 dark:text-gray-300">
+    <p className="mt-1.5 min-w-0 text-meta text-ui-ink">
       Last landed:{' '}
       <button
         type="button"
         onClick={() => board.openMeta(meta, card.id)}
-        className="hit text-left text-gray-900 underline-offset-2 hover:underline dark:text-gray-100"
+        className="hit text-left text-ui-ink underline-offset-2 hover:underline"
         title="Open this PR on its Overview tab"
       >
         {line.pr}
@@ -2463,7 +2463,7 @@ function LastLandedLine({
       {line.mergedBy != null && <>, merged by {line.mergedBy}</>}
       {/* ⚠ THE HONEST CAVEAT. Trunk CI is non-monotone and nothing stored names the commit that
           turned it red, so landing it is never a claim of breaking it. */}
-      <span className="text-gray-600 dark:text-gray-400"> — not necessarily the cause</span>
+      <span className="text-ui-mute"> — not necessarily the cause</span>
     </p>
   );
 }
@@ -2497,7 +2497,7 @@ function ReviewerChipsRow({
       )}
       {showMore && (
         <span
-          className="text-gray-500 dark:text-gray-400"
+          className="text-ui-mute"
           title={`${chips.total} reviewers have a standing on this pull request. The other ${chips.moreCount} are past the cap, or have no GitHub account left to name.`}
         >
           {chips.humans.length > 0 || chips.bots != null
@@ -2532,15 +2532,15 @@ function PrDetails({
   const LeadMark = leadMeta?.icon ?? null;
   return (
     <div
-      className="mt-2 space-y-1.5 rounded-ui border border-gray-200 bg-gray-50/70 p-2 dark:border-gray-800 dark:bg-gray-900/60"
+      className="mt-2 space-y-1.5 rounded-ui border border-ui-line bg-ui-raise p-2"
       data-noactivate
     >
       {standingHere && lead != null && (
-        <div className={`inline-flex items-center gap-1 text-meta font-medium ${leadMeta?.ink ?? 'text-gray-600 dark:text-gray-400'}`}>
+        <div className={`inline-flex items-center gap-1 text-meta font-medium ${leadMeta?.ink ?? 'text-ui-mute'}`}>
           {LeadMark != null && <LeadMark size={11} />}
           {lead.ours}
           {lead.github != null && lead.github !== 'GitHub: no review required' && (
-            <span className="ml-1 font-normal text-gray-600 dark:text-gray-400">{lead.github}</span>
+            <span className="ml-1 font-normal text-ui-mute">{lead.github}</span>
           )}
         </div>
       )}
@@ -2580,9 +2580,9 @@ function InsightThreadById({
   const { data: users } = useUsers();
   const usersById = useMemo(() => indexUsers(users), [users]);
   const prUrl = `https://github.com/${card.repoFullName}/pull/${card.prNumber}`;
-  if (isLoading) return <div className="px-1 py-1 text-meta text-gray-500 dark:text-gray-400">Loading conversation…</div>;
+  if (isLoading) return <div className="px-1 py-1 text-meta text-ui-mute">Loading conversation…</div>;
   if (!thread)
-    return <div className="px-1 py-1 text-meta text-gray-500 dark:text-gray-400">Couldn’t load this conversation.</div>;
+    return <div className="px-1 py-1 text-meta text-ui-mute">Couldn’t load this conversation.</div>;
   return <ThreadCard thread={thread} usersById={usersById} prUrl={prUrl} repoId={card.repoId} />;
 }
 
@@ -2890,7 +2890,7 @@ function PendingCard({
                   className="max-w-full truncate py-0.5 text-left text-ui-ink hover:underline touch:min-h-10"
                 >
                   {p.prTitle}{' '}
-                  <span className="font-mono text-meta text-gray-600 dark:text-gray-400">
+                  <span className="font-mono text-meta text-ui-mute">
                     {repoRef(p.repoFullName, p.prNumber, ctx.sharedOwner)}
                   </span>
                 </button>

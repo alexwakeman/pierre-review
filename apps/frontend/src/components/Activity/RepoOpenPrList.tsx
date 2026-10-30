@@ -56,7 +56,7 @@ export function OpenPrRow({
       ? { label: 'changes', color: '#ef4444' }
       : null;
   return (
-    <li className="flex items-stretch hover:bg-gray-50 dark:hover:bg-gray-800/40">
+    <li className="flex items-stretch hover:bg-ui-hover">
       <button
         type="button"
         onClick={onClick}
@@ -76,14 +76,14 @@ export function OpenPrRow({
           <span
             aria-hidden="true"
             title="Needs attention (review or reply · stalled · untouched threads · CI / conflicts)"
-            className="flex shrink-0 items-center text-amber-500 dark:text-amber-400"
+            className="flex shrink-0 items-center text-ui-warn"
           >
             <WarningIcon size={12} />
           </span>
         )}
         <span className="min-w-0 flex-1 truncate">
-          <span className="text-gray-400">#{pr.number}</span>{' '}
-          <span className="font-medium text-gray-700 dark:text-gray-200">{pr.title}</span>
+          <span className="text-ui-faint">#{pr.number}</span>{' '}
+          <span className="font-medium text-ui-ink">{pr.title}</span>
         </span>
         {/* ── THE TRAILING CELLS ARE FIXED-WIDTH COLUMNS, NOT AN INLINE RUN ──────────────
             Every cell below is `shrink-0` at a pinned width, so author, status, bar and time
@@ -99,7 +99,7 @@ export function OpenPrRow({
         <span className="hidden w-36 shrink-0 items-center gap-1.5 overflow-hidden sm:flex">
           <Avatar user={author} size={16} />
           <span
-            className="truncate text-gray-500 dark:text-gray-400"
+            className="truncate text-ui-mute"
             title={userLabel(author, pr.authorId)}
           >
             {userLabel(author, pr.authorId)}
@@ -114,7 +114,7 @@ export function OpenPrRow({
             takes it from the flexible title instead; every other row keeps the column still. */}
         <span className="flex min-w-28 shrink-0 items-center justify-end gap-1 whitespace-nowrap">
           {pr.isDraft && (
-            <span className="shrink-0 rounded-ui bg-gray-500/15 px-1 text-meta font-medium text-gray-500 dark:text-gray-400">
+            <span className="shrink-0 rounded-ui bg-ui-raise px-1 text-meta font-medium text-ui-mute">
               draft
             </span>
           )}
@@ -147,7 +147,7 @@ export function OpenPrRow({
               {reason.label}
             </span>
           ) : (
-            <span className="truncate text-meta text-gray-400">
+            <span className="truncate text-meta text-ui-faint">
               {relativeTime(pr.updatedAt)}
             </span>
           )}
@@ -207,7 +207,7 @@ export function OpenPrRows({
 
   return (
     <>
-      <ul className="divide-y divide-gray-100 dark:divide-gray-800/70">
+      <ul className="divide-y divide-ui-line">
         {shown.map((pr) => {
           const author = pr.authorId != null ? usersById.get(pr.authorId) : undefined;
           return (
@@ -224,10 +224,10 @@ export function OpenPrRows({
         <button
           type="button"
           onClick={onShowAll}
-          className="hit flex w-full items-center justify-center gap-1 border-t border-gray-100 px-3 py-1.5 text-meta font-medium text-sky-600 hover:bg-gray-50 dark:border-gray-800/70 dark:text-sky-400 dark:hover:bg-gray-800/40"
+          className="hit flex w-full items-center justify-center gap-1 border-t border-ui-line px-3 py-1.5 text-meta font-medium text-ui-accent hover:bg-ui-hover"
         >
           Show all {prs.length} open PRs
-          <span className="text-gray-400">· sortable</span>
+          <span className="text-ui-faint">· sortable</span>
         </button>
       )}
     </>
@@ -273,29 +273,29 @@ export function RepoOpenPrList({
   const openCount = prs.length - draftCount;
 
   return (
-    <div className="rounded-ui border border-gray-200 dark:border-gray-800">
+    <div className="rounded-ui border border-ui-line">
       <button
         type="button"
         onClick={toggleCollapsed}
         aria-expanded={!collapsed}
-        className="hit flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-meta font-semibold uppercase tracking-wide text-gray-500 hover:bg-gray-50 dark:text-gray-400 dark:hover:bg-gray-800/40"
+        className="hit flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-meta font-semibold uppercase tracking-wide text-ui-mute hover:bg-ui-hover"
       >
         <ChevronIcon
           dir={collapsed ? 'right' : 'down'}
-          className="shrink-0 text-gray-400"
+          className="shrink-0 text-ui-faint"
         />
         Open PRs · {openCount}
         {draftCount > 0 && (
-          <span className="font-normal normal-case text-gray-400">
+          <span className="font-normal normal-case text-ui-faint">
             · {draftCount} draft{draftCount === 1 ? '' : 's'}
           </span>
         )}
-        <span className="ml-auto font-normal normal-case text-gray-400">
+        <span className="ml-auto font-normal normal-case text-ui-faint">
           click a PR to open it
         </span>
       </button>
       {!collapsed && (
-        <div className="border-t border-gray-200 dark:border-gray-800">
+        <div className="border-t border-ui-line">
           <OpenPrRows
             prs={sorted}
             usersById={usersById}

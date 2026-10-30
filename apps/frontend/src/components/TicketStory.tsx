@@ -25,11 +25,11 @@ import { JiraStoryView, StoryText } from './ClaudeReviewTickets.js';
 import { ChevronIcon, ExternalLinkIcon } from './Icons.js';
 import { TicketComments } from './TicketComments.js';
 
-const MUTED = 'text-gray-500 dark:text-gray-400';
-const ERROR_TEXT = 'text-red-600 dark:text-red-400';
+const MUTED = 'text-ui-mute';
+const ERROR_TEXT = 'text-ui-danger';
 const BTN =
   'inline-flex h-7 items-center whitespace-nowrap rounded-ui bg-ui-raise px-2.5 text-meta font-medium text-ui-ink hover:bg-ui-hover disabled:cursor-not-allowed disabled:opacity-50 touch:h-10 touch:px-3';
-const LINK_BTN = 'text-meta text-blue-700 hover:underline disabled:opacity-50 dark:text-blue-300';
+const LINK_BTN = 'text-meta text-ui-accent hover:underline disabled:opacity-50';
 
 /** The stored Jira row, with the criteria-field line and picker. */
 function JiraStory({
@@ -69,7 +69,7 @@ function JiraStory({
           <div className="space-y-1">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-meta">
               <span className={MUTED}>Criteria from:</span>
-              <span className="font-medium text-gray-800 dark:text-gray-200">{acFieldText(draft)}</span>
+              <span className="font-medium text-ui-ink">{acFieldText(draft)}</span>
               {!fixedSource && (
               <button
                 type="button"
@@ -84,7 +84,7 @@ function JiraStory({
               {setField.isPending && <span className={MUTED}>Saving…</span>}
             </div>
             {picking && (
-              <div className="rounded-ui border border-gray-200 p-2 dark:border-gray-800">
+              <div className="rounded-ui border border-ui-line p-2">
                 <AcFieldPicker
                   fetched={{ details: data, site: jiraSiteOf(jiraRef.url), chosen }}
                   allowNone={false}
@@ -166,13 +166,13 @@ export function StoryDisclosure({
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
         aria-controls={bodyId}
-        className="hit inline-flex items-center gap-1 text-meta font-medium text-gray-700 hover:text-gray-900 dark:text-gray-200 dark:hover:text-gray-50"
+        className="hit inline-flex items-center gap-1 text-meta font-medium text-ui-ink hover:text-ui-ink"
       >
         <ChevronIcon dir={open ? 'down' : 'right'} className="shrink-0" />
         {label}
       </button>
       {open && (
-        <div id={bodyId} className="mt-1.5 rounded-ui border border-gray-200 p-2 dark:border-gray-800">
+        <div id={bodyId} className="mt-1.5 rounded-ui border border-ui-line p-2">
           {source.kind === 'jira' ? (
             // `source` is 'jira' only with a PR to read through (above).
             prId != null && <JiraStory prId={prId} jiraRef={source.ref} fallback={fallback} />

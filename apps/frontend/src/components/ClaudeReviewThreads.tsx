@@ -34,7 +34,7 @@ import { REVIEW_CHIP, REVIEW_PROSE } from '../lib/reviewStyles.js';
 import { useAiProviderName } from '../hooks/useAiCapabilities.js';
 
 const CHIP = REVIEW_CHIP;
-const MUTED = 'text-gray-500 dark:text-gray-400';
+const MUTED = 'text-ui-mute';
 
 // EXPORTED FOR THE AI FIX PICKER (AiFix/FixPicker.tsx): the same card with `actions={false}` (no
 // Copy on the suggested reply) and its tick box in `selection`.
@@ -99,7 +99,7 @@ export function ThreadRow({
           <span
             className={`${CHIP} ${
               t.resolved === true
-                ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+                ? 'bg-ui-success/10 text-ui-success'
                 : threadAddressedClass(t)
             }`}
           >
@@ -112,12 +112,12 @@ export function ThreadRow({
           </span>
         )}
         {t.authorLogin != null && (
-          <span className={muted ? 'text-gray-600 dark:text-gray-400' : 'font-medium'}>
+          <span className={muted ? 'text-ui-mute' : 'font-medium'}>
             @{t.authorLogin}
           </span>
         )}
         {t.authorIsBot && (
-          <span className={`${CHIP} gap-1 bg-gray-500/10 text-gray-600 dark:text-gray-300`}>
+          <span className={`${CHIP} gap-1 bg-ui-raise text-ui-mute`}>
             <BotIcon size={12} />
             Bot
           </span>
@@ -132,7 +132,7 @@ export function ThreadRow({
             href={href}
             target="_blank"
             rel="noreferrer noopener"
-            className="hit ml-auto inline-flex items-center gap-1 text-meta text-blue-600 hover:underline dark:text-blue-400"
+            className="hit ml-auto inline-flex items-center gap-1 text-meta text-ui-accent hover:underline"
           >
             GitHub
             <ExternalLinkIcon size={11} />
@@ -144,7 +144,7 @@ export function ThreadRow({
           <button
             type="button"
             onClick={() => onOpenThread(t.threadId)}
-            className="hit break-all text-left font-mono text-meta text-blue-600 hover:underline dark:text-blue-400"
+            className="hit break-all text-left font-mono text-meta text-ui-accent hover:underline"
           >
             {label}
           </button>
@@ -168,7 +168,7 @@ export function ThreadRow({
               type="button"
               onClick={() => setExpanded((e) => !e)}
               aria-expanded={expanded}
-              className={`text-meta ${MUTED} hover:text-gray-700 dark:hover:text-gray-200`}
+              className={`text-meta ${MUTED} hover:text-ui-ink`}
             >
               {expanded ? 'Less' : 'More'}
             </button>
@@ -186,7 +186,7 @@ export function ThreadRow({
                 type="button"
                 onClick={() => setWhyOpen((o) => !o)}
                 aria-expanded={whyOpen}
-                className={`text-meta ${MUTED} hover:text-gray-700 dark:hover:text-gray-200`}
+                className={`text-meta ${MUTED} hover:text-ui-ink`}
               >
                 {whyOpen ? 'Less' : 'More'}
               </button>
@@ -213,7 +213,7 @@ export function ThreadRow({
               onClick={() => setReplyOpen((o) => !o)}
               aria-expanded={replyOpen}
               aria-controls={replyId}
-              className={`inline-flex items-center gap-1 text-meta ${MUTED} hover:text-gray-700 dark:hover:text-gray-200`}
+              className={`inline-flex items-center gap-1 text-meta ${MUTED} hover:text-ui-ink`}
             >
               <ChevronIcon dir={replyOpen ? 'down' : 'right'} size={11} />
               Suggested reply
@@ -223,7 +223,7 @@ export function ThreadRow({
           {replyOpen && (
             <p
               id={replyId}
-              className={`mt-0.5 rounded-ui bg-gray-500/5 px-2 py-1 ${REVIEW_PROSE}`}
+              className={`mt-0.5 rounded-ui bg-ui-raise px-2 py-1 ${REVIEW_PROSE}`}
             >
               {t.draftReply}
             </p>
@@ -299,7 +299,7 @@ export function ClaudeReviewThreadsSection({
                 type="button"
                 onClick={() => setMoreOpen((o) => !o)}
                 aria-expanded={moreOpen}
-                className={`inline-flex items-center gap-1 text-meta ${MUTED} hover:text-gray-700 dark:hover:text-gray-200`}
+                className={`inline-flex items-center gap-1 text-meta ${MUTED} hover:text-ui-ink`}
               >
                 <ChevronIcon dir={moreOpen ? 'down' : 'right'} size={11} />
                 {moreOpen ? 'Show fewer' : `Show ${parts.more.length} more`}

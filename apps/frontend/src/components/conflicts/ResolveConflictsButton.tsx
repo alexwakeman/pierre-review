@@ -76,7 +76,7 @@ export function ResolveConflictsButton({
   if (!show) return null;
   const cls =
     buttonClass ??
-    `inline-flex items-center gap-1 rounded-ui border border-gray-300 px-1.5 py-0.5 text-meta font-medium text-gray-700 hover:border-gray-400 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:border-gray-600 dark:hover:bg-gray-800 ${className ?? ''}`;
+    `inline-flex items-center gap-1 rounded-ui border border-ui-line px-1.5 py-0.5 text-meta font-medium text-ui-ink hover:border-ui-line hover:bg-ui-hover ${className ?? ''}`;
   // ⚠ WITHOUT THE AGENTIC FEATURES (cloud, LIMN_AI_DISABLED) THERE IS ONE WAY TO RESOLVE, SO THERE
   // IS NO MENU: the plain button, exactly as before.
   if (!ai.enabled) {
@@ -132,13 +132,13 @@ function ResolveConflictsMenu({
   if (active && run != null) {
     return (
       <div className="inline-flex min-w-[14rem] flex-col gap-1">
-        <div className="flex items-center gap-2 text-meta text-gray-700 dark:text-gray-200">
+        <div className="flex items-center gap-2 text-meta text-ui-ink">
           <SparkleIcon size={12} className="text-ai-signal" />
           <span>{conflictAiPhaseLabel(run.phase, name)}</span>
           <button
             type="button"
             onClick={() => cancelConflictAiRun(target.prId)}
-            className="hit ml-auto text-meta text-gray-600 underline underline-offset-2 hover:text-gray-800 dark:text-gray-300 dark:hover:text-gray-100"
+            className="hit ml-auto text-meta text-ui-mute underline underline-offset-2 hover:text-ui-ink"
           >
             Cancel
           </button>
@@ -149,7 +149,7 @@ function ResolveConflictsMenu({
   }
 
   const item =
-    'flex w-full items-center gap-2 px-3 py-1.5 text-left text-meta text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800';
+    'flex w-full items-center gap-2 px-3 py-1.5 text-left text-meta text-ui-ink hover:bg-ui-hover';
   return (
     <div ref={rootRef} className="relative inline-flex flex-col items-start gap-1">
       <button
@@ -165,13 +165,13 @@ function ResolveConflictsMenu({
         <CaretIcon dir="down" className="shrink-0 opacity-70" />
       </button>
       {run?.phase === 'failed' && run.error != null && (
-        <span className="text-meta text-red-600 dark:text-red-400">{run.error}</span>
+        <span className="text-meta text-ui-danger">{run.error}</span>
       )}
       {open && (
         <div
           role="menu"
           aria-label="Resolve conflicts"
-          className="absolute left-0 top-full z-[55] mt-1 w-56 rounded-ui border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-900"
+          className="absolute left-0 top-full z-[55] mt-1 w-56 rounded-ui border border-ui-line bg-ui-surface py-1 shadow-lg"
         >
           <button
             role="menuitem"
@@ -207,7 +207,7 @@ function ResolveConflictsMenu({
               </AiRunGate>
             </div>
           )}
-          <p className="px-3 pb-1 pt-0.5 text-meta text-gray-600 dark:text-gray-300">
+          <p className="px-3 pb-1 pt-0.5 text-meta text-ui-mute">
             You check {name}’s choices before anything is pushed.
           </p>
         </div>

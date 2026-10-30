@@ -27,7 +27,7 @@ export function ClaudeResolutionBanner(): JSX.Element | null {
         : `${name} decided ${live} of ${run.decidableTotal} change${run.decidableTotal === 1 ? '' : 's'}. Check each one before you commit.`;
 
   return (
-    <div className="shrink-0 border-b border-gray-200 px-4 py-1.5 text-meta text-gray-700 dark:border-gray-800 dark:text-gray-200">
+    <div className="shrink-0 border-b border-ui-line px-4 py-1.5 text-meta text-ui-ink">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <span className="inline-flex items-center gap-1">
           <SparkleIcon size={12} className="text-ai-signal" />
@@ -37,7 +37,7 @@ export function ClaudeResolutionBanner(): JSX.Element | null {
           <button
             type="button"
             onClick={undoAllClaudeChoices}
-            className="hit inline-flex items-center gap-1 rounded-ui border border-gray-300 px-1.5 py-0.5 text-meta hover:border-gray-400 dark:border-gray-700 dark:hover:border-gray-500"
+            className="hit inline-flex items-center gap-1 rounded-ui border border-ui-line px-1.5 py-0.5 text-meta hover:border-ui-line"
           >
             <UndoIcon size={12} />
             Undo all {name}’s choices
@@ -48,7 +48,7 @@ export function ClaudeResolutionBanner(): JSX.Element | null {
             type="button"
             aria-expanded={notesOpen}
             onClick={() => setNotesOpen((o) => !o)}
-            className="hit inline-flex items-center gap-1 text-meta text-gray-600 underline-offset-2 hover:underline dark:text-gray-300"
+            className="hit inline-flex items-center gap-1 text-meta text-ui-mute underline-offset-2 hover:underline"
           >
             <ChevronIcon dir={notesOpen ? 'down' : 'right'} size={11} />
             {name}’s notes
@@ -56,7 +56,7 @@ export function ClaudeResolutionBanner(): JSX.Element | null {
         )}
       </div>
       {notesOpen && run.summary != null && (
-        <p className="mt-1 max-w-3xl whitespace-pre-wrap text-meta text-gray-600 dark:text-gray-300">
+        <p className="mt-1 max-w-3xl whitespace-pre-wrap text-meta text-ui-mute">
           {run.summary}
         </p>
       )}

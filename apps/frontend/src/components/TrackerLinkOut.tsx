@@ -27,7 +27,7 @@ export function TrackerLinkOut({
       target="_blank"
       rel="noreferrer noopener"
       data-testid="tracker-link-out"
-      className={`inline-flex items-center gap-1 whitespace-nowrap rounded-ui text-meta font-medium text-sky-700 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 dark:text-sky-300 ${className}`}
+      className={`inline-flex items-center gap-1 whitespace-nowrap rounded-ui text-meta font-medium text-ui-accent hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent ${className}`}
     >
       Open in {name}
       <ExternalLinkIcon size={11} />

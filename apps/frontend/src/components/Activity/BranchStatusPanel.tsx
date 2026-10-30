@@ -79,12 +79,12 @@ function FailingCheck({ check }: { check: BranchCheckRun }): JSX.Element {
       href={href}
       target="_blank"
       rel="noreferrer noopener"
-      className="hit min-w-0 text-red-600 hover:underline dark:text-red-400"
+      className="hit min-w-0 text-ui-danger hover:underline"
     >
       {inner}
     </a>
   ) : (
-    <span className="min-w-0 text-red-600 dark:text-red-400">{inner}</span>
+    <span className="min-w-0 text-ui-danger">{inner}</span>
   );
 }
 
@@ -98,12 +98,12 @@ function FailingSummary({ checks }: { checks: BranchCheckRun[] }): JSX.Element |
   if (first == null) return null;
   return (
     <span className="flex min-w-0 shrink items-center gap-1 text-meta">
-      <span aria-hidden="true" className="shrink-0 decorative-mark text-gray-300 dark:text-gray-600">
+      <span aria-hidden="true" className="shrink-0 decorative-mark text-ui-faint">
         ·
       </span>
       <FailingCheck check={first} />
       {rest.length > 0 && (
-        <span className="shrink-0 text-gray-400" title={rest.map(checkLabel).join('\n')}>
+        <span className="shrink-0 text-ui-faint" title={rest.map(checkLabel).join('\n')}>
           +{rest.length}
         </span>
       )}
@@ -152,7 +152,7 @@ function PrRow({
               })
             }
             title={`Open #${pr.prNumber} in this app`}
-            className="hit shrink-0 rounded-ui bg-sky-500/10 px-1 font-mono text-meta text-sky-700 hover:bg-sky-500/20 dark:text-sky-300"
+            className="hit shrink-0 rounded-ui bg-ui-accent/10 px-1 font-mono text-meta text-ui-accent hover:bg-ui-accent/10"
           >
             #{pr.prNumber}
           </button>
@@ -165,23 +165,23 @@ function PrRow({
             target="_blank"
             rel="noreferrer noopener"
             title={`#${pr.prNumber} on GitHub — not synced here`}
-            className="hit shrink-0 rounded-ui bg-gray-500/10 px-1 font-mono text-meta text-gray-500 hover:text-sky-600 dark:text-gray-400 dark:hover:text-sky-400"
+            className="hit shrink-0 rounded-ui bg-ui-raise px-1 font-mono text-meta text-ui-mute hover:text-ui-accent"
           >
             #{pr.prNumber}
           </a>
         ) : (
-          <span className="shrink-0 font-mono text-meta text-gray-400">#{pr.prNumber}</span>
+          <span className="shrink-0 font-mono text-meta text-ui-faint">#{pr.prNumber}</span>
         )}
         {/* UNTRUSTED text (a PR title / commit message) — a plain text node, never markdown. */}
-        <span className="min-w-0 flex-1 truncate text-gray-700 dark:text-gray-200">
+        <span className="min-w-0 flex-1 truncate text-ui-ink">
           {trimTrailingPrRef(title, pr.prNumber)}
         </span>
         {/* The consolidation's size — the visible hint that the tooltip has the commit list. */}
-        <span className="shrink-0 text-gray-400">
+        <span className="shrink-0 text-ui-faint">
           {pr.commits.length} commit{pr.commits.length === 1 ? '' : 's'}
         </span>
         {(avatar != null || pr.authorLogin != null) && (
-          <span className="flex shrink-0 items-center gap-1 text-gray-400">
+          <span className="flex shrink-0 items-center gap-1 text-ui-faint">
             {avatar != null && (
               <img src={avatar} alt="" className="h-3.5 w-3.5 rounded-full" loading="lazy" />
             )}
@@ -191,7 +191,7 @@ function PrRow({
           </span>
         )}
         <span
-          className="shrink-0 tabular-nums text-gray-400"
+          className="shrink-0 tabular-nums text-ui-faint"
           title={new Date(pr.mergedAt).toLocaleString()}
         >
           {relativeTime(pr.mergedAt)}
@@ -224,7 +224,7 @@ function BranchTrends({
   const daily = data?.daily ?? [];
   const hasData = daily.length > 0;
   const placeholder = (label: string): JSX.Element => (
-    <div className="flex h-full items-center justify-center text-meta text-gray-400">
+    <div className="flex h-full items-center justify-center text-meta text-ui-faint">
       {label}
     </div>
   );
@@ -287,8 +287,8 @@ function BranchTrends({
   // The cross-repo strip (Activity → Open PRs) lives in a max-h-64 scroll box — same chart,
   // caption instead of a card.
   return (
-    <div className="mb-1 border-b border-gray-100 pb-1 dark:border-gray-800/60">
-      <div className="flex items-center gap-1 text-meta text-gray-400">
+    <div className="mb-1 border-b border-ui-line pb-1">
+      <div className="flex items-center gap-1 text-meta text-ui-faint">
         <span>Trunk CI · daily</span>
         {legend('Trunk CI')}
       </div>
@@ -322,7 +322,7 @@ function BranchRow({
   // history, so a collapsed strip of N repos issues zero trend requests.
   const trends = useBranchTrends(status.repoId, open);
   return (
-    <li className="border-b border-gray-100 last:border-b-0 dark:border-gray-800/60">
+    <li className="border-b border-ui-line last:border-b-0">
       {/* The row is a DIV, not one big button: the failing-check names are real <a> links to
           GitHub, and an <a> inside a <button> is invalid interactive nesting — the browser hoists
           the anchor out and the click target becomes unpredictable. The expand toggle is its own
@@ -330,7 +330,7 @@ function BranchRow({
           lives on the wrapper (so hovering a link still tints the row, the correct affordance now
           that the row is not a single control), and `disabled` stays on the toggle ALONE — a red
           trunk with no synced commits still has clickable failing-check links. */}
-      <div className="flex items-center gap-2 px-2 py-1 text-meta hover:bg-gray-50 dark:hover:bg-gray-800/40">
+      <div className="flex items-center gap-2 px-2 py-1 text-meta hover:bg-ui-hover">
         <button
           type="button"
           onClick={() => setOpen((o) => !o)}
@@ -341,30 +341,30 @@ function BranchRow({
         >
           <span
             aria-hidden="true"
-            className={`w-2 shrink-0 text-meta text-gray-400 ${hasHistory ? '' : 'opacity-0'}`}
+            className={`w-2 shrink-0 text-meta text-ui-faint ${hasHistory ? '' : 'opacity-0'}`}
           >
             <ChevronIcon dir={open ? 'down' : 'right'} size={10} />
           </span>
           <CiDot status={status.ciStatus} />
           {showRepoName && (
-            <span className="min-w-0 max-w-[14rem] truncate font-medium text-gray-700 dark:text-gray-200">
+            <span className="min-w-0 max-w-[14rem] truncate font-medium text-ui-ink">
               {fullName ?? `repo ${status.repoId}`}
             </span>
           )}
-          <span className="min-w-0 truncate font-mono text-meta text-gray-500 dark:text-gray-400">
+          <span className="min-w-0 truncate font-mono text-meta text-ui-mute">
             {status.branchName ?? '—'}
           </span>
-          <span className="shrink-0 text-meta text-gray-400">
+          <span className="shrink-0 text-meta text-ui-faint">
             {ciMeta?.label ?? 'no CI reported'}
           </span>
         </button>
         <FailingSummary checks={status.failingChecks} />
-        <span className="shrink-0 text-meta tabular-nums text-gray-400">
+        <span className="shrink-0 text-meta tabular-nums text-ui-faint">
           {status.lastCommitAt != null ? relativeTime(status.lastCommitAt) : 'never synced'}
         </span>
       </div>
       {open && hasHistory && (
-        <div className="border-t border-gray-100 px-2 py-1 pl-6 dark:border-gray-800/60">
+        <div className="border-t border-ui-line px-2 py-1 pl-6">
           <BranchTrends
             data={trends.data}
             isLoading={trends.isLoading}
@@ -380,7 +380,7 @@ function BranchRow({
           ) : (
             // Real state, not a gap: a branch fed only by direct pushes has trunk history (the
             // strip above) but nothing that arrived via a PR.
-            <div className="py-0.5 text-meta text-gray-400">
+            <div className="py-0.5 text-meta text-ui-faint">
               No merged PRs in the retained window — direct pushes only.
             </div>
           )}
@@ -478,14 +478,14 @@ export function BranchStatusPanel({
         className={
           quiet
             ? 'shrink-0 text-meta font-medium text-ui-mute'
-            : 'text-meta font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400'
+            : 'text-meta font-semibold uppercase tracking-wide text-ui-mute'
         }
       >
         Default branches
       </span>
       {green > 0 && (
         <span
-          className={quiet ? 'shrink-0 text-meta text-ui-mute' : 'rounded-ui bg-green-500/15 px-1 text-meta font-semibold text-green-700 dark:text-green-400'}
+          className={quiet ? 'shrink-0 text-meta text-ui-mute' : 'rounded-ui bg-ui-success/10 px-1 text-meta font-semibold text-ui-success'}
           title="Default branches whose latest CI passed"
         >
           {allGreen && green > 1 ? `all ${green} green` : `${green} green`}
@@ -493,7 +493,7 @@ export function BranchStatusPanel({
       )}
       {failing > 0 && (
         <span
-          className={quiet ? 'shrink-0 text-meta font-medium text-ui-danger' : 'rounded-ui bg-red-500/15 px-1 text-meta font-semibold text-red-600 dark:text-red-400'}
+          className={quiet ? 'shrink-0 text-meta font-medium text-ui-danger' : 'rounded-ui bg-ui-danger/10 px-1 text-meta font-semibold text-ui-danger'}
           title="Default branches whose latest CI is failing"
         >
           {failing} failing
@@ -501,13 +501,13 @@ export function BranchStatusPanel({
       )}
       {running > 0 && (
         <span
-          className={quiet ? 'shrink-0 text-meta text-ui-mute' : 'rounded-ui bg-amber-500/15 px-1 text-meta font-semibold text-amber-700 dark:text-amber-400'}
+          className={quiet ? 'shrink-0 text-meta text-ui-mute' : 'rounded-ui bg-ui-warn/10 px-1 text-meta font-semibold text-ui-warn'}
           title="Default branches whose latest CI is still running"
         >
           {running} running
         </span>
       )}
-      <span className={quiet ? 'shrink-0 text-meta text-ui-faint' : 'ml-auto text-meta text-gray-500 dark:text-gray-400'}>
+      <span className={quiet ? 'shrink-0 text-meta text-ui-faint' : 'ml-auto text-meta text-ui-mute'}>
         {quiet && <span aria-hidden>· </span>}
         {rows.length} repo{rows.length === 1 ? '' : 's'}
       </span>
@@ -516,7 +516,7 @@ export function BranchStatusPanel({
 
   return (
     <section
-      className={quiet ? `rounded-ui ${expanded ? 'bg-ui-surface' : ''}` : 'rounded-ui border border-gray-200 dark:border-gray-800'}
+      className={quiet ? `rounded-ui ${expanded ? 'bg-ui-surface' : ''}` : 'rounded-ui border border-ui-line'}
       data-testid="branch-status-panel"
     >
       {/* The WHOLE header bar is the toggle on the cross-repo mount (the Open PRs panel beside it
@@ -541,7 +541,7 @@ export function BranchStatusPanel({
       ) : (
         <div
           className={`flex items-center gap-2 px-2 py-1 ${
-            expanded ? 'border-b border-gray-100 dark:border-gray-800/60' : ''
+            expanded ? 'border-b border-ui-line' : ''
           }`}
         >
           {header}

@@ -25,19 +25,19 @@ export function ClosePrControl({ prId }: { prId: number }): JSX.Element {
         <button
           type="button"
           onClick={() => setOpen(true)}
-          className="hit inline-flex items-center gap-1 rounded-ui border border-gray-400 px-2 py-0.5 text-body font-medium text-gray-600 hover:bg-gray-100 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800"
+          className="hit inline-flex items-center gap-1 rounded-ui border border-ui-line px-2 py-0.5 text-body font-medium text-ui-mute hover:bg-ui-hover"
           title="Close this PR without merging (reversible on GitHub)"
         >
           <CloseIcon /> Close
         </button>
-        {error && <span className="text-meta text-red-500">{error}</span>}
+        {error && <span className="text-meta text-ui-danger">{error}</span>}
       </div>
     );
   }
 
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <span className="text-meta text-gray-500 dark:text-gray-400">Close without merging?</span>
+      <span className="text-meta text-ui-mute">Close without merging?</span>
       <button
         type="button"
         onClick={() =>
@@ -46,7 +46,7 @@ export function ClosePrControl({ prId }: { prId: number }): JSX.Element {
           })
         }
         disabled={close.isPending}
-        className="hit whitespace-nowrap rounded-ui border border-red-400 px-2 py-0.5 text-body font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 dark:border-red-600 dark:text-red-400 dark:hover:bg-red-900/30"
+        className="hit whitespace-nowrap rounded-ui border border-ui-danger/40 px-2 py-0.5 text-body font-medium text-ui-danger hover:bg-ui-danger/10 disabled:opacity-50"
       >
         {close.isPending ? 'Closing…' : 'Close PR'}
       </button>
@@ -57,11 +57,11 @@ export function ClosePrControl({ prId }: { prId: number }): JSX.Element {
           close.reset();
         }}
         disabled={close.isPending}
-        className="hit whitespace-nowrap rounded-ui border border-gray-300 px-2 py-0.5 text-body hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
+        className="hit whitespace-nowrap rounded-ui border border-ui-line px-2 py-0.5 text-body hover:border-ui-line disabled:opacity-50"
       >
         Cancel
       </button>
-      {error && <span className="text-meta text-red-500">{error}</span>}
+      {error && <span className="text-meta text-ui-danger">{error}</span>}
     </div>
   );
 }

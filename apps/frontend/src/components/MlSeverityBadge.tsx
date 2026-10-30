@@ -161,7 +161,7 @@ export function MlSeverityBadge({
           an arrow + a muted word rather than as a second chip repeating the same fact. */}
       {vendorMeta && (
         <span
-          className="inline-flex items-center gap-1 text-meta font-medium text-gray-400 dark:text-gray-500"
+          className="inline-flex items-center gap-1 text-meta font-medium text-ui-faint"
           title={
             vendorClaim && dir != null
               ? `The bot badged this ${vendorMeta.label}; our model rated it ${meta.label}. The direction is the two severity ordinals — not anyone's confidence. Ours is the more accurate rating (70% agreement with human adjudication against the bot's 47%), so this is a disagreement to look at, not one to resolve.`
@@ -182,20 +182,20 @@ export function MlSeverityBadge({
       )}
       {quietVendorState && (
         <span
-          className="text-meta text-gray-400 dark:text-gray-500"
+          className="text-meta text-ui-faint"
           title={quietVendorState.title}
         >
           {quietVendorState.text}
         </span>
       )}
       {!compact && categoryText && (
-        <span className="rounded-ui bg-gray-100 px-1 py-0.5 text-meta font-medium uppercase tracking-wide text-gray-500 dark:bg-gray-800 dark:text-gray-400">
+        <span className="rounded-ui bg-ui-raise px-1 py-0.5 text-meta font-medium text-ui-mute">
           {categoryText}
         </span>
       )}
       {!compact && label.isSummary && (
         <span
-          className="text-meta font-medium text-gray-400 dark:text-gray-500"
+          className="text-meta font-medium text-ui-faint"
           title="A PR walkthrough/summary comment rather than a specific finding."
         >
           summary
@@ -282,10 +282,10 @@ export function SeverityBar({
   total: number;
 }): JSX.Element {
   if (total === 0) {
-    return <div className="h-2 w-full rounded-full bg-gray-100 dark:bg-gray-800" />;
+    return <div className="h-2 w-full rounded-full bg-ui-raise" />;
   }
   return (
-    <div className="flex h-2 w-full overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800">
+    <div className="flex h-2 w-full overflow-hidden rounded-full bg-ui-raise">
       {BAR_ORDER.map((s) => {
         const n = counts[s];
         if (n === 0) return null;

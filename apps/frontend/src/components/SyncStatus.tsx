@@ -516,7 +516,7 @@ export function SyncStatus({ variant = 'header' }: { variant?: 'header' | 'sideb
         className={
           variant === 'sidebar'
             ? 'relative flex h-8 w-full min-w-0 items-center gap-2 rounded-ui px-2 text-left text-meta text-ui-mute outline-none hover:bg-ui-hover hover:text-ui-ink focus-visible:ring-2 focus-visible:ring-ui-accent touch:h-11'
-            : 'relative flex items-center gap-1 rounded-ui px-1.5 py-0.5 text-meta font-medium text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800'
+            : 'relative flex items-center gap-1 rounded-ui px-1.5 py-0.5 text-meta font-medium text-ui-mute hover:bg-ui-hover'
         }
       >
         {/* Spins for BOTH halves. Stopping it when the GitHub walk ends was the visible form
@@ -537,7 +537,7 @@ export function SyncStatus({ variant = 'header' }: { variant?: 'header' | 'sideb
             className={
               variant === 'sidebar'
                 ? 'h-1.5 w-1.5 shrink-0 rounded-full bg-ui-danger'
-                : 'absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-red-500 ring-1 ring-white dark:ring-gray-900'
+                : 'absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-ui-danger ring-1 ring-white'
             }
           />
         )}

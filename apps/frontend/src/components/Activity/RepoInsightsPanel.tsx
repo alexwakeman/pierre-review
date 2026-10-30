@@ -49,7 +49,7 @@ export function RepoInsightsPanel({
   // Header still loading (nothing to show yet) → skeleton, mirroring RepoInsightsCard.
   if (rmLoading && rm == null) {
     return (
-      <div className="h-44 animate-pulse rounded-ui border border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-900/40" />
+      <div className="h-44 animate-pulse rounded-ui border border-ui-line bg-ui-surface" />
     );
   }
 
@@ -59,7 +59,7 @@ export function RepoInsightsPanel({
   // expander, rather than dumping the whole grid expanded.
   if (analytics) {
     return (
-      <div className="rounded-ui border border-gray-200 bg-gray-50/50 p-3 dark:border-gray-800 dark:bg-gray-900/20">
+      <div className="rounded-ui border border-ui-line bg-ui-raise p-3">
         <Charts data={analytics} collapsible />
       </div>
     );
@@ -67,7 +67,7 @@ export function RepoInsightsPanel({
 
   if (analyticsLoading) {
     return (
-      <div className="h-44 animate-pulse rounded-ui border border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-900/40" />
+      <div className="h-44 animate-pulse rounded-ui border border-ui-line bg-ui-surface" />
     );
   }
 

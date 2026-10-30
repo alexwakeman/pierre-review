@@ -32,13 +32,13 @@ function ClusterLines({ synthesis }: { synthesis: StoredSynthesis }): JSX.Elemen
     <div className="mt-2 space-y-1">
       {synthesis.clusters.map((c, i) => (
         <div key={`${i}-${c.label}`} className="flex items-baseline gap-2 text-meta">
-          <span className="shrink-0 tabular-nums font-semibold text-gray-800 dark:text-gray-100">
+          <span className="shrink-0 tabular-nums font-semibold text-ui-ink">
             {c.count.toLocaleString()}
           </span>
-          <span className="min-w-0 flex-1 text-gray-700 dark:text-gray-200">{c.label}</span>
+          <span className="min-w-0 flex-1 text-ui-ink">{c.label}</span>
           {c.configFixable && (
             <span
-              className="shrink-0 rounded-ui bg-amber-500/10 px-1 py-0.5 text-meta font-medium text-amber-600 dark:text-amber-400"
+              className="shrink-0 rounded-ui bg-ui-warn/10 px-1 py-0.5 text-meta font-medium text-ui-warn"
               title="This whole cluster looks fixable in the bot's own configuration. A hint, never an action."
             >
               config-fixable
@@ -47,7 +47,7 @@ function ClusterLines({ synthesis }: { synthesis: StoredSynthesis }): JSX.Elemen
         </div>
       ))}
       {synthesis.remainderCount > 0 && (
-        <div className="flex items-baseline gap-2 text-meta text-gray-400">
+        <div className="flex items-baseline gap-2 text-meta text-ui-faint">
           <span className="shrink-0 tabular-nums">{synthesis.remainderCount.toLocaleString()}</span>
           <span>more without a recurring pattern</span>
         </div>
@@ -58,7 +58,7 @@ function ClusterLines({ synthesis }: { synthesis: StoredSynthesis }): JSX.Elemen
 
 function CoverageLine({ synthesis }: { synthesis: StoredSynthesis }): JSX.Element {
   return (
-    <div className="mt-2 border-t border-ai-hairline pt-1.5 text-meta text-gray-400">
+    <div className="mt-2 border-t border-ai-hairline pt-1.5 text-meta text-ui-faint">
       Summarised {synthesis.analyzedCount.toLocaleString()} of{' '}
       {synthesis.totalCount.toLocaleString()} item{synthesis.totalCount === 1 ? '' : 's'}
       {synthesis.truncated ? ' (the newest — items beyond the cap were not analysed)' : ''}.
@@ -108,10 +108,10 @@ export function SynthesisCard({
         data-testid="synthesis-card"
       >
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-body font-semibold text-gray-800 dark:text-gray-100">{title}</span>
+          <span className="text-body font-semibold text-ui-ink">{title}</span>
           {synthesis && resp?.stale && (
             <span
-              className="shrink-0 rounded-ui bg-amber-500/10 px-1.5 py-0.5 text-meta font-medium text-amber-600 dark:text-amber-400"
+              className="shrink-0 rounded-ui bg-ui-warn/10 px-1.5 py-0.5 text-meta font-medium text-ui-warn"
               title="The items below have changed since this summary was generated — the counts still describe the set it was computed over."
             >
               stale
@@ -123,7 +123,7 @@ export function SynthesisCard({
                 type="button"
                 onClick={() => generate.mutate()}
                 disabled={busy || workspaceId == null}
-                className="hit rounded-ui bg-ai-signal px-2.5 py-0.5 text-meta font-semibold text-white hover:opacity-90 disabled:opacity-50 dark:text-gray-950"
+                className="hit rounded-ui bg-ai-signal px-2.5 py-0.5 text-meta font-semibold text-white hover:opacity-90 disabled:opacity-50"
                 title="Group this list into recurring clusters (runs the Haiku model; unchanged items are not re-read)"
               >
                 {busy ? (
@@ -142,12 +142,12 @@ export function SynthesisCard({
         </div>
 
         {generate.isError && (
-          <div className="mt-1.5 text-meta text-red-500">
+          <div className="mt-1.5 text-meta text-ui-danger">
             {(generate.error as Error)?.message ?? 'Couldn’t generate the summary.'}
           </div>
         )}
         {!generate.isError && generateNotice && (
-          <div className="mt-1.5 text-meta text-gray-400">{generateNotice}</div>
+          <div className="mt-1.5 text-meta text-ui-faint">{generateNotice}</div>
         )}
 
         {synthesis ? (
@@ -158,7 +158,7 @@ export function SynthesisCard({
         ) : busy ? (
           <div className="mt-2 h-12 animate-pulse rounded-ui bg-ai-surface-2" />
         ) : (
-          <p className="mt-1 text-meta text-gray-500 dark:text-gray-400">
+          <p className="mt-1 text-meta text-ui-mute">
             No summary yet. Summarise groups this list into recurring themes; every count comes
             from the items themselves.
           </p>

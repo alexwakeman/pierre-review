@@ -276,10 +276,10 @@ function LaneHeader({ lane }: { lane: BoardLayout<SprintLaneData, SprintCardData
 
 const SEGMENT_FILL: Record<SprintStage | 'unknown', string> = {
   not_started: 'bg-ui-faint',
-  in_progress: 'bg-sky-500',
-  in_review: 'bg-amber-500',
-  product_review: 'bg-emerald-400',
-  done: 'bg-emerald-700 dark:bg-emerald-500',
+  in_progress: 'bg-ui-accent-fill',
+  in_review: 'bg-ui-warn',
+  product_review: 'bg-ui-success',
+  done: 'bg-ui-success',
   unknown: 'bg-ui-line',
 };
 

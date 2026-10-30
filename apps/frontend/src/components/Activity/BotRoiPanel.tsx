@@ -311,7 +311,7 @@ const TILE_CLASS = 'rounded-ui px-2 py-1.5 bg-ui-surface';
 // matters — a <button> centres its text, which would silently re-align every tile.
 const TILE_INTERACTIVE_CLASS =
   'block w-full text-left transition focus:outline-none' +
-  ' focus-visible:ring-1 focus-visible:ring-sky-400';
+  ' focus-visible:ring-1 focus-visible:ring-ui-accent';
 
 // One tile: a plain <div> card, or a <button> when the parent supplied a handler — the
 // WorkspaceMetricsPanel `TileShell` rule (a tile becomes clickable only when someone is there to
@@ -486,7 +486,7 @@ function MlTotalsStrip({
               onClick={() => onOpen({ kind: 'findings' })}
               // No aria-label — it would displace "Findings 2,147" as the accessible name. See Tile.
               title="Show the findings behind this number"
-              className="hit block w-full text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-sky-400"
+              className="hit block w-full text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ui-accent"
             >
               <div className="text-meta text-ui-faint">Findings</div>
               <div className="text-title font-semibold tabular-nums">
@@ -506,7 +506,7 @@ function MlTotalsStrip({
               type="button"
               onClick={() => onOpen({ kind: 'summaries' })}
               title="Show the walkthroughs and summaries — a separate population, not counted as findings"
-              className="hit block w-full text-left text-meta text-ui-faint hover:text-ui-mute focus:outline-none focus-visible:ring-1 focus-visible:ring-sky-400"
+              className="hit block w-full text-left text-meta text-ui-faint hover:text-ui-mute focus:outline-none focus-visible:ring-1 focus-visible:ring-ui-accent"
             >
               + {ml.summaries.toLocaleString()} walkthrough/summary
             </button>
@@ -594,7 +594,7 @@ function MlTotalsStrip({
               type="button"
               onClick={() => onOpen({ kind: 'category', category: c.category })}
               title={`Show the findings categorised as ${ML_CATEGORY_LABEL[c.category] ?? c.category}`}
-              className="hit rounded-ui bg-ui-raise px-1 py-0.5 font-medium text-ui-mute hover:bg-ui-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-sky-400"
+              className="hit rounded-ui bg-ui-raise px-1 py-0.5 font-medium text-ui-mute hover:bg-ui-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ui-accent"
             >
               {ML_CATEGORY_LABEL[c.category] ?? c.category} {c.count}
             </button>
@@ -706,7 +706,7 @@ function QualityCheckSection({
                       {/* A dormant gate is the interesting case here: it usually means the
                           integration broke, not that the bot got quieter. */}
                       {v.dormant && (
-                        <span className="rounded-ui bg-gray-500/10 px-1 py-px text-meta text-ui-mute">
+                        <span className="rounded-ui bg-ui-raise px-1 py-px text-meta text-ui-mute">
                           dormant
                         </span>
                       )}

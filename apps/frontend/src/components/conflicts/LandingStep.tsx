@@ -208,7 +208,7 @@ export function LandingStep({
     <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-5">
         {headMoved && (
-          <p className="flex items-start gap-1.5 text-meta text-gray-800 dark:text-gray-100">
+          <p className="flex items-start gap-1.5 text-meta text-ui-ink">
             <WarningIcon size={13} className="mt-px shrink-0" />
             <span>{HEAD_MOVED}</span>
           </p>
@@ -216,7 +216,7 @@ export function LandingStep({
 
         <section>
           <SectionHeading>{WHAT_GOES_IN}</SectionHeading>
-          <p className="text-meta text-gray-800 dark:text-gray-100">
+          <p className="text-meta text-ui-ink">
             {filesResolved(plan.resolved.length, plan.totalFiles)}
           </p>
           <PathList rows={plan.resolved} />
@@ -225,7 +225,7 @@ export function LandingStep({
               <button> — it navigates, so it needs the keyboard. */}
           {plan.outstanding.length > 0 && (
             <>
-              <p className="mt-2 text-meta text-gray-800 dark:text-gray-100">
+              <p className="mt-2 text-meta text-ui-ink">
                 {STILL_TO_DECIDE}
               </p>
               <ul className="mt-0.5">
@@ -239,10 +239,10 @@ export function LandingStep({
                       // remainder out of the accessible name — and that remainder appears nowhere
                       // else for a screen-reader user.
                       aria-label={jumpToFileLabel(row.path, row.remaining)}
-                      className="flex w-full flex-wrap items-baseline gap-x-2 rounded-ui px-1 py-0.5 text-left text-meta hover:bg-gray-100 dark:hover:bg-gray-800"
+                      className="flex w-full flex-wrap items-baseline gap-x-2 rounded-ui px-1 py-0.5 text-left text-meta hover:bg-ui-hover"
                     >
-                      <span className="font-mono text-gray-800 dark:text-gray-100">{row.path}</span>
-                      <span className="text-gray-600 dark:text-gray-300">
+                      <span className="font-mono text-ui-ink">{row.path}</span>
+                      <span className="text-ui-mute">
                         {toDecide(row.remaining)}
                       </span>
                     </button>
@@ -253,15 +253,15 @@ export function LandingStep({
           )}
           {cantFinishHere.length > 0 && (
             <>
-              <p className="mt-2 text-meta text-gray-800 dark:text-gray-100">
+              <p className="mt-2 text-meta text-ui-ink">
                 {STILL_CONFLICTED}
               </p>
               <PathList rows={cantFinishHere} withLabel />
-              <p className="mt-1 text-meta text-gray-700 dark:text-gray-200">
+              <p className="mt-1 text-meta text-ui-ink">
                 {STAYS_CONFLICTED}
               </p>
               {/* The one sentence that needs more words, not fewer — see copy.ts. */}
-              <p className="mt-2 text-meta text-gray-700 dark:text-gray-200">
+              <p className="mt-2 text-meta text-ui-ink">
                 {PARTIAL_COMMIT_NOTE}
               </p>
             </>
@@ -304,7 +304,7 @@ export function LandingStep({
           {/* The server's sentence, verbatim and once. It names the fact; the missing option is
               the consequence, and a second sentence from us restating it is verbiage. */}
           {targets.prBranchNote != null && (
-            <p className="mb-1.5 text-meta text-gray-800 dark:text-gray-100">
+            <p className="mb-1.5 text-meta text-ui-ink">
               {targets.prBranchNote}
             </p>
           )}
@@ -330,7 +330,7 @@ export function LandingStep({
             <div className="mt-2">
               <label
                 htmlFor="conflict-branch-name"
-                className="block text-meta text-gray-600 dark:text-gray-300"
+                className="block text-meta text-ui-mute"
               >
                 {NEW_BRANCH_FIELD}
               </label>
@@ -344,12 +344,12 @@ export function LandingStep({
                 spellCheck={false}
                 autoComplete="off"
                 onChange={(e) => setBranch(e.target.value)}
-                className="mt-0.5 w-full rounded-ui border border-gray-300 px-2 py-1 font-mono text-meta text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+                className="mt-0.5 w-full rounded-ui border border-ui-line px-2 py-1 font-mono text-meta text-ui-ink"
               />
               {branchProblem != null && branch.trim() !== '' && (
-                <p className="mt-1 text-meta text-gray-800 dark:text-gray-100">{branchProblem}</p>
+                <p className="mt-1 text-meta text-ui-ink">{branchProblem}</p>
               )}
-              <label className="mt-1.5 flex items-center gap-1.5 text-meta text-gray-700 dark:text-gray-200">
+              <label className="mt-1.5 flex items-center gap-1.5 text-meta text-ui-ink">
                 <input
                   type="checkbox"
                   checked={openPr}
@@ -361,12 +361,12 @@ export function LandingStep({
           )}
         </section>
 
-        <section className="flex flex-col gap-2 border-t border-gray-200 pt-3 dark:border-gray-800">
-          <p className="text-meta text-gray-600 dark:text-gray-300">
+        <section className="flex flex-col gap-2 border-t border-ui-line pt-3">
+          <p className="text-meta text-ui-mute">
             {pinnedOn(session.headSha, session.baseSha)}
           </p>
           {autoMergeArmed && (
-            <p className="text-meta text-gray-800 dark:text-gray-100">{AUTO_MERGE_ARMED}</p>
+            <p className="text-meta text-ui-ink">{AUTO_MERGE_ARMED}</p>
           )}
 
           {failed ? (
@@ -375,7 +375,7 @@ export function LandingStep({
             // sentence renders verbatim beside ours — it names the fact (`ModelStale`, `HeadMoved`,
             // `BranchExists`) and this screen cannot.
             <div className="flex flex-col gap-2">
-              <p className="text-meta text-gray-800 dark:text-gray-100">
+              <p className="text-meta text-ui-ink">
                 {NOTHING_PUSHED} {commit?.error?.message ?? commitError ?? ''}
               </p>
               <div className="flex items-center gap-2">
@@ -396,7 +396,7 @@ export function LandingStep({
             // pushed".
             <div className="flex flex-col gap-2">
               <p
-                className="text-meta text-gray-800 dark:text-gray-100"
+                className="text-meta text-ui-ink"
                 aria-live="polite"
                 role="status"
               >
@@ -410,7 +410,7 @@ export function LandingStep({
             </div>
           ) : running ? (
             <div
-              className="text-meta text-gray-700 dark:text-gray-200"
+              className="text-meta text-ui-ink"
               aria-live="polite"
               role="status"
             >
@@ -421,7 +421,7 @@ export function LandingStep({
               {/* The reason sits ABOVE the button and is its description — a disabled control
                   whose reason lives nowhere is the defect this replaces. */}
               {blockedReason != null && (
-                <p id={BLOCKED_REASON_ID} className="text-meta text-gray-800 dark:text-gray-100">
+                <p id={BLOCKED_REASON_ID} className="text-meta text-ui-ink">
                   {blockedReason}
                 </p>
               )}
@@ -440,7 +440,7 @@ export function LandingStep({
                     strategy === 'rebase' ? REBASE_AND_FORCE_PUSH : COMMIT_AND_PUSH,
                   )}
                   aria-describedby={blockedReason != null ? BLOCKED_REASON_ID : undefined}
-                  className="hit rounded-ui bg-gray-900 px-3 py-1 text-meta font-medium text-white disabled:opacity-40 dark:bg-gray-100 dark:text-gray-900"
+                  className="hit rounded-ui bg-ui-raise px-3 py-1 text-meta font-medium text-ui-ink disabled:opacity-40"
                 >
                   {strategy === 'rebase' ? REBASE_AND_FORCE_PUSH : COMMIT_AND_PUSH}
                 </button>
@@ -455,7 +455,7 @@ export function LandingStep({
 
 function SectionHeading({ children }: { children: React.ReactNode }): JSX.Element {
   return (
-    <h2 className="mb-1 text-meta font-medium text-gray-600 dark:text-gray-300">{children}</h2>
+    <h2 className="mb-1 text-meta font-medium text-ui-mute">{children}</h2>
   );
 }
 
@@ -474,8 +474,8 @@ function PathList({
     <ul className="mt-0.5">
       {rows.map((row) => (
         <li key={row.index} className="flex flex-wrap items-baseline gap-x-2 text-meta">
-          <span className="font-mono text-gray-800 dark:text-gray-100">{row.path}</span>
-          {withLabel && <span className="text-gray-600 dark:text-gray-300">{row.label}</span>}
+          <span className="font-mono text-ui-ink">{row.path}</span>
+          {withLabel && <span className="text-ui-mute">{row.label}</span>}
         </li>
       ))}
     </ul>
@@ -505,8 +505,8 @@ function RadioCard({
     <label
       className={`flex items-start gap-2 rounded-ui border px-2.5 py-1.5 ${
         checked
-          ? 'border-gray-400 dark:border-gray-500'
-          : 'border-gray-200 dark:border-gray-800'
+          ? 'border-ui-line'
+          : 'border-ui-line'
       } ${disabled ? 'opacity-50' : 'cursor-pointer'}`}
     >
       <input
@@ -518,12 +518,12 @@ function RadioCard({
         className="mt-0.5"
       />
       <span className="min-w-0">
-        <span className="flex items-center gap-1.5 text-meta font-medium text-gray-900 dark:text-gray-100">
+        <span className="flex items-center gap-1.5 text-meta font-medium text-ui-ink">
           {icon}
           {title}
         </span>
         {detail != null && (
-          <span className="mt-0.5 block text-meta text-gray-600 dark:text-gray-300">
+          <span className="mt-0.5 block text-meta text-ui-mute">
             {detail}
           </span>
         )}
@@ -543,7 +543,7 @@ function SecondaryButton({
     <button
       type="button"
       onClick={onClick}
-      className="hit rounded-ui border border-gray-300 px-2.5 py-1 text-meta text-gray-800 hover:border-gray-400 dark:border-gray-700 dark:text-gray-100 dark:hover:border-gray-600"
+      className="hit rounded-ui border border-ui-line px-2.5 py-1 text-meta text-ui-ink hover:border-ui-line"
     >
       {children}
     </button>

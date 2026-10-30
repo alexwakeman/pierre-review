@@ -72,7 +72,7 @@ export function ClaudeReviewLine({
     e.stopPropagation();
     onOpenReview();
   };
-  const LINK = 'cursor-pointer hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500';
+  const LINK = 'cursor-pointer hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent';
   let lead: ReactNode = null;
   switch (cell.kind) {
     case 'start':
@@ -111,7 +111,7 @@ export function ClaudeReviewLine({
           onClick={open}
           title="Open the review"
           className={`${PILL} ${
-            cell.verdict != null ? VERDICT_CLASS[cell.verdict] : 'bg-gray-500/10 text-gray-600 dark:text-gray-300'
+            cell.verdict != null ? VERDICT_CLASS[cell.verdict] : 'bg-ui-raise text-ui-mute'
           } ${LINK}`}
         >
           {cell.verdict != null && <VerdictIcon verdict={cell.verdict} size={11} />}
@@ -141,7 +141,7 @@ export function ClaudeReviewLine({
       </span>
       {lead}
       {ciPill != null ? (
-        <button type="button" onClick={open} title="Open the CI check" className={`text-gray-700 dark:text-gray-300 ${LINK}`}>
+        <button type="button" onClick={open} title="Open the CI check" className={`text-ui-ink ${LINK}`}>
           {ciPill.label}
         </button>
       ) : (
@@ -265,7 +265,7 @@ export function ClaudeReviewActions({
   }
   if (showError) {
     parts.push(
-      <span key="err" className="text-meta text-red-600 dark:text-red-400">
+      <span key="err" className="text-meta text-ui-danger">
         {start.error.message || 'Could not start the review.'}
       </span>,
     );

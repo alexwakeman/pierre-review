@@ -232,16 +232,16 @@ export function ClaudeReviewBanner(): JSX.Element | null {
             >
               <span className="flex items-center gap-1.5">
                 {e.done ? (
-                  <CheckIcon size={11} className="shrink-0 text-green-600 dark:text-green-400" />
+                  <CheckIcon size={11} className="shrink-0 text-ui-success" />
                 ) : (
-                  <span className="inline-block h-2.5 w-2.5 shrink-0 animate-spin rounded-full border-2 border-gray-300 border-t-blue-500" />
+                  <span className="inline-block h-2.5 w-2.5 shrink-0 animate-spin rounded-full border-2 border-ui-line border-t-ui-accent/50" />
                 )}
-                <span className="truncate font-medium text-blue-600 hover:underline dark:text-blue-400">
+                <span className="truncate font-medium text-ui-accent hover:underline">
                   {e.repoFullName} #{e.prNumber}
                 </span>
               </span>
-              <span className="mt-0.5 block truncate text-gray-600 dark:text-gray-300">{e.prTitle}</span>
-              <span className="mt-0.5 block text-gray-600 dark:text-gray-300">
+              <span className="mt-0.5 block truncate text-ui-mute">{e.prTitle}</span>
+              <span className="mt-0.5 block text-ui-mute">
                 {e.done ? 'Ready — open it' : `${e.phase != null ? (PHASE_LABEL[e.phase] ?? e.phase) : 'Starting'}…`}
               </span>
             </button>
@@ -250,7 +250,7 @@ export function ClaudeReviewBanner(): JSX.Element | null {
                 type="button"
                 onClick={() => dismissOne(e.reviewId)}
                 aria-label={`Dismiss ${e.repoFullName} #${e.prNumber}`}
-                className="hit shrink-0 rounded-ui p-0.5 text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-100"
+                className="hit shrink-0 rounded-ui p-0.5 text-ui-mute hover:text-ui-ink"
               >
                 <CloseIcon size={10} />
               </button>

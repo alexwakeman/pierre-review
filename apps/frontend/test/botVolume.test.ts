@@ -152,13 +152,13 @@ describe('ratioDetail — the expectation rides BESIDE the multiplier', () => {
 
 describe('ratioTone — an absent comparison is muted, not scored low', () => {
   it('null is grey, not the "well under expectation" colour', () => {
-    expect(ratioTone(null)).toBe('text-gray-400');
+    expect(ratioTone(null)).toBe('text-ui-faint');
   });
 
   it('bands escalate', () => {
-    expect(ratioTone(0.4)).toContain('gray');
-    expect(ratioTone(2)).toContain('amber');
-    expect(ratioTone(3.68)).toContain('red');
+    expect(ratioTone(0.4)).toMatch(/ui-(mute|faint|raise|ink)/);
+    expect(ratioTone(2)).toMatch(/ui-warn/);
+    expect(ratioTone(3.68)).toMatch(/ui-danger/);
   });
 });
 

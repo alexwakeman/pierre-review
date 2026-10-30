@@ -78,9 +78,9 @@ const VERDICT_FILL: Record<'good' | 'ok' | 'slow', string> = {
   slow: 'fill-rose-500 dark:fill-rose-500',
 };
 const VERDICT_SWATCH: Record<'good' | 'ok' | 'slow', string> = {
-  good: 'bg-emerald-500',
-  ok: 'bg-amber-400 dark:bg-amber-500',
-  slow: 'bg-rose-500',
+  good: 'bg-ui-success',
+  ok: 'bg-ui-warn',
+  slow: 'bg-ui-danger',
 };
 
 const LENS_LABEL: Record<FlowTrendLensRow['measure'], string> = {
@@ -94,8 +94,8 @@ const LENS_LABEL: Record<FlowTrendLensRow['measure'], string> = {
 };
 
 const LENS_SIGNIFICANT: Record<'better' | 'worse', { word: string; bar: string; ink: string }> = {
-  better: { word: 'Real improvement', bar: 'bg-emerald-500', ink: 'text-ui-success' },
-  worse: { word: 'Real slowdown', bar: 'bg-rose-500', ink: 'text-ui-danger' },
+  better: { word: 'Real improvement', bar: 'bg-ui-success', ink: 'text-ui-success' },
+  worse: { word: 'Real slowdown', bar: 'bg-ui-danger', ink: 'text-ui-danger' },
 };
 
 interface Geometry {

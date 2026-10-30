@@ -3,7 +3,7 @@
 // comment block (see index.css).
 export function NewTag(): JSX.Element {
   return (
-    <span className="rounded-ui bg-sky-500/20 px-1 text-meta font-semibold uppercase text-sky-500">
+    <span className="rounded-ui bg-ui-accent/10 px-1 text-meta font-semibold uppercase text-ui-accent">
       new
     </span>
   );

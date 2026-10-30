@@ -18,7 +18,7 @@ import { PrRefText } from './ReviewPrRefs.js';
 import { REVIEW_CHIP, REVIEW_ITEM_TITLE, REVIEW_PROSE } from '../lib/reviewStyles.js';
 
 const CHIP = REVIEW_CHIP;
-const MUTED = 'text-gray-500 dark:text-gray-400';
+const MUTED = 'text-ui-mute';
 
 type OpenInChanges = (path: string, line: number | null, side: ClaudeFindingSide) => void;
 
@@ -40,7 +40,7 @@ function FileRef({
       <button
         type="button"
         onClick={() => onOpenInChanges(path, line, 'RIGHT')}
-        className="hit break-all text-left font-mono text-meta text-blue-600 hover:underline dark:text-blue-400"
+        className="hit break-all text-left font-mono text-meta text-ui-accent hover:underline"
       >
         {label}
       </button>
@@ -75,7 +75,7 @@ export function CiFailureRow({
   return (
     <li
       className={`rounded-ui border px-3 py-2 text-body ${
-        fixable ? 'border-amber-300 dark:border-amber-700/60' : 'border-gray-100 dark:border-gray-800'
+        fixable ? 'border-ui-warn/40' : 'border-ui-line'
       }`}
     >
       <div className="flex flex-wrap items-center gap-2">
@@ -105,7 +105,7 @@ export function CiFailureRow({
             href={href}
             target="_blank"
             rel="noreferrer noopener"
-            className="hit ml-auto inline-flex items-center gap-1 text-meta text-blue-600 hover:underline dark:text-blue-400"
+            className="hit ml-auto inline-flex items-center gap-1 text-meta text-ui-accent hover:underline"
           >
             Details
             <ExternalLinkIcon size={11} />
@@ -132,7 +132,7 @@ export function CiFailureRow({
                 onClick={() => setOpen((o) => !o)}
                 aria-expanded={open}
                 aria-controls={explanationId}
-                className={`inline-flex items-center gap-1 text-meta ${MUTED} hover:text-gray-700 dark:hover:text-gray-200`}
+                className={`inline-flex items-center gap-1 text-meta ${MUTED} hover:text-ui-ink`}
               >
                 <ChevronIcon dir={open ? 'down' : 'right'} size={11} />
                 Why

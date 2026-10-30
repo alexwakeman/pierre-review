@@ -9,11 +9,11 @@ type Standing = 'approved' | 'changes_requested' | null;
 type Panel = 'approve-comment' | 'request-changes' | 'withdraw' | null;
 
 const GREEN_BTN =
-  'inline-flex items-center gap-1 whitespace-nowrap rounded-ui border border-green-500 px-2 py-0.5 text-body font-medium text-green-700 hover:bg-green-50 disabled:opacity-50 dark:border-green-600 dark:text-green-400 dark:hover:bg-green-900/30';
+  'inline-flex items-center gap-1 whitespace-nowrap rounded-ui border border-ui-success/40 px-2 py-0.5 text-body font-medium text-ui-success hover:bg-ui-success/10 disabled:opacity-50';
 const AMBER_BTN =
-  'inline-flex items-center gap-1 whitespace-nowrap rounded-ui border border-amber-500 px-2 py-0.5 text-body font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-50 dark:border-amber-600 dark:text-amber-400 dark:hover:bg-amber-900/30';
+  'inline-flex items-center gap-1 whitespace-nowrap rounded-ui border border-ui-warn/40 px-2 py-0.5 text-body font-medium text-ui-warn hover:bg-ui-warn/10 disabled:opacity-50';
 const GREY_BTN =
-  'whitespace-nowrap rounded-ui border border-gray-300 px-2 py-0.5 text-body hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500';
+  'whitespace-nowrap rounded-ui border border-ui-line px-2 py-0.5 text-body hover:border-ui-line disabled:opacity-50';
 
 // The review verdict controls in the Overview's Actions row, rendered ONLY when the viewer may
 // review (pr.viewerCanApprove — author excluded, write+ required; the server re-checks and 403s).
@@ -130,7 +130,7 @@ export function ApproveControl({
   };
 
   const errorLine = error && (
-    <span className="text-meta text-red-600 dark:text-red-400">{error}</span>
+    <span className="text-meta text-ui-danger">{error}</span>
   );
 
   if (panel === 'withdraw') {
@@ -164,7 +164,7 @@ export function ApproveControl({
               ? 'Comment to post with your approval (markdown)…'
               : `Optional. Left blank, this posts "${REQUEST_CHANGES_DEFAULT_BODY}"`
           }
-          className="w-full rounded-ui border border-gray-300 bg-white px-2 py-1.5 text-body dark:border-gray-700 dark:bg-gray-900"
+          className="w-full rounded-ui border border-ui-line bg-ui-surface px-2 py-1.5 text-body"
         />
         <div className="flex flex-wrap items-center gap-2">
           {isApprove ? (
@@ -198,7 +198,7 @@ export function ApproveControl({
             type="button"
             disabled
             title="Your approval stands"
-            className="hit inline-flex cursor-default items-center gap-1 rounded-ui border border-green-500/40 px-2 py-0.5 text-body font-medium text-green-700/70 dark:border-green-700/50 dark:text-green-400/70"
+            className="hit inline-flex cursor-default items-center gap-1 rounded-ui border border-ui-success/40 px-2 py-0.5 text-body font-medium text-ui-success"
           >
             <CheckIcon /> Approved
           </button>
@@ -214,7 +214,7 @@ export function ApproveControl({
       ) : (
         <>
           {effective === 'changes_requested' && (
-            <span className="inline-flex items-center gap-1 rounded-ui bg-amber-500/10 px-2 py-0.5 text-body font-medium text-amber-700 dark:text-amber-400">
+            <span className="inline-flex items-center gap-1 rounded-ui bg-ui-warn/10 px-2 py-0.5 text-body font-medium text-ui-warn">
               <WarningIcon /> Changes requested
             </span>
           )}

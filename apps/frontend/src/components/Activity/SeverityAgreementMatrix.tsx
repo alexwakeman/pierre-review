@@ -261,7 +261,7 @@ export function SeverityAgreementMatrixView({
                           // to switch off under the cursor that is about to clear it.
                           className={`w-full rounded-ui px-3 py-2 text-center text-body tabular-nums transition-colors disabled:cursor-default ${
                             active
-                              ? 'ring-2 ring-sky-500 ring-offset-1 ring-offset-white dark:ring-offset-gray-950'
+                              ? 'ring-2 ring-ui-accent ring-offset-1 ring-offset-white dark:ring-offset-gray-950'
                               : count > 0
                                 ? 'hover:ring-1 hover:ring-ui-line'
                                 : ''

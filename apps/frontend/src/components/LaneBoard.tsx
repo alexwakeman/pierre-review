@@ -215,7 +215,7 @@ export function ArrowLayer({
   };
   return (
     <>
-      <svg aria-hidden className="pointer-events-none absolute inset-0 z-0 h-full w-full overflow-visible text-gray-500 dark:text-gray-400">
+      <svg aria-hidden className="pointer-events-none absolute inset-0 z-0 h-full w-full overflow-visible text-ui-mute">
         <defs>
           <marker id={plain} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto-start-reverse">
             <path d="M0,0 L10,5 L0,10 z" fill="currentColor" />
@@ -243,7 +243,7 @@ export function ArrowLayer({
                 d={p.d}
                 fill="none"
                 stroke="currentColor"
-                className={on ? 'text-ai-signal-fill' : lit ? 'text-gray-800 dark:text-gray-100' : undefined}
+                className={on ? 'text-ai-signal-fill' : lit ? 'text-ui-ink' : undefined}
                 strokeWidth={(on ? 2.25 : 1.75) + (lit ? 1 : 0)}
                 strokeLinejoin="round"
                 strokeLinecap="round"
@@ -369,7 +369,7 @@ function ArrowMarker({
                   {n != null && <span className={NUMBER_CLASS}>{n}</span>}
                   {detail.label}
                 </p>
-                <p className="mt-1 text-gray-700 dark:text-gray-300">{detail.text}</p>
+                <p className="mt-1 text-ui-ink">{detail.text}</p>
               </>
             ) : (
               <p className="flex items-start gap-1.5">

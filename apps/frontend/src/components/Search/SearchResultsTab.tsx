@@ -62,9 +62,9 @@ export function SearchResultsTab(): JSX.Element {
   return (
     <div className="mx-auto max-w-[100rem] p-4">
       <div className="mb-3 flex flex-wrap items-center gap-3">
-        <h2 className="text-body font-semibold text-gray-700 dark:text-gray-200">Search</h2>
+        <h2 className="text-body font-semibold text-ui-ink">Search</h2>
         <div className="relative">
-          <div className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-gray-400">
+          <div className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-ui-faint">
             <MagnifierIcon size={14} />
           </div>
           <input
@@ -76,7 +76,7 @@ export function SearchResultsTab(): JSX.Element {
             onKeyDown={(e) => {
               if (e.key === 'Enter') openSearchDetail(q.trim());
             }}
-            className="w-96 rounded-ui border border-gray-300 bg-transparent py-1 pl-8 pr-2 text-body focus:border-blue-500 focus:outline-none dark:border-gray-700"
+            className="w-96 rounded-ui border border-ui-line bg-transparent py-1 pl-8 pr-2 text-body focus:border-ui-accent/50 focus:outline-none"
           />
         </div>
         <div className="flex items-center gap-1">
@@ -89,8 +89,8 @@ export function SearchResultsTab(): JSX.Element {
                 onClick={() => toggleKind(f.key)}
                 className={`rounded-full border px-2 py-0.5 text-meta ${
                   on
-                    ? 'border-sky-500 bg-sky-50 text-sky-700 dark:bg-sky-950 dark:text-sky-300'
-                    : 'border-gray-300 text-gray-600 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800'
+                    ? 'border-ui-accent/50 bg-ui-accent/10 text-ui-accent'
+                    : 'border-ui-line text-ui-mute hover:bg-ui-hover'
                 }`}
               >
                 {f.label}
@@ -101,13 +101,13 @@ export function SearchResultsTab(): JSX.Element {
             <button
               type="button"
               onClick={() => setKinds([])}
-              className="hit px-2 py-0.5 text-meta text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+              className="hit px-2 py-0.5 text-meta text-ui-faint hover:text-ui-ink"
             >
               Clear
             </button>
           )}
         </div>
-        <span className="ml-auto text-meta text-gray-400">
+        <span className="ml-auto text-meta text-ui-faint">
           {debounced.length < 1
             ? 'Type to search'
             : isLoading
@@ -119,7 +119,7 @@ export function SearchResultsTab(): JSX.Element {
       {/* Ticket matches FIRST: each opens the ticket's story tab. */}
       {stories.length > 0 && (
         <section aria-label="Stories" className="mb-3">
-          <h3 className="mb-1 text-meta font-semibold text-gray-500 dark:text-gray-400">Stories</h3>
+          <h3 className="mb-1 text-meta font-semibold text-ui-mute">Stories</h3>
           <ul className="space-y-2">
             {stories.map((st) => (
               <li key={st.ident}>
@@ -127,15 +127,15 @@ export function SearchResultsTab(): JSX.Element {
                   type="button"
                   data-testid="search-story"
                   onClick={() => openSearchStory(st)}
-                  className="hit flex w-full items-start gap-2 rounded-ui border border-sky-200 bg-sky-50/60 px-3 py-2 text-left hover:bg-sky-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 dark:border-sky-900 dark:bg-sky-950/40 dark:hover:bg-sky-950"
+                  className="hit flex w-full items-start gap-2 rounded-ui border border-ui-accent/50 bg-ui-accent/10 px-3 py-2 text-left hover:bg-ui-accent/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent"
                 >
-                  <TicketIcon size={14} className="mt-0.5 shrink-0 text-sky-700 dark:text-sky-300" />
+                  <TicketIcon size={14} className="mt-0.5 shrink-0 text-ui-accent" />
                   <span className="min-w-0">
                     <span className="flex flex-wrap items-baseline gap-x-2 text-meta">
-                      <span className="font-semibold text-sky-700 dark:text-sky-300">{highlightTerms(st.key, debounced)}</span>
-                      {st.title != null && <span className="font-medium text-gray-900 dark:text-gray-50">{highlightTerms(st.title, debounced)}</span>}
+                      <span className="font-semibold text-ui-accent">{highlightTerms(st.key, debounced)}</span>
+                      {st.title != null && <span className="font-medium text-ui-ink">{highlightTerms(st.title, debounced)}</span>}
                     </span>
-                    <span className="mt-0.5 block text-meta text-gray-500 dark:text-gray-400">
+                    <span className="mt-0.5 block text-meta text-ui-mute">
                       {[st.status, storyPrWords(st)].filter(Boolean).join(' · ')} · Open the story
                     </span>
                   </span>
@@ -148,7 +148,7 @@ export function SearchResultsTab(): JSX.Element {
 
       {people.length > 0 && (
         <div className="mb-3 flex flex-wrap items-center gap-2">
-          <span className="text-meta font-semibold uppercase tracking-wide text-gray-400">
+          <span className="text-meta font-semibold uppercase tracking-wide text-ui-faint">
             People
           </span>
           {people.map((p) => (
@@ -156,22 +156,22 @@ export function SearchResultsTab(): JSX.Element {
               key={p.id}
               type="button"
               onClick={() => openSearchDetail(p.login)}
-              className="hit flex items-center gap-1.5 rounded-full border border-gray-200 px-2 py-0.5 text-meta hover:bg-gray-100 dark:border-gray-700 dark:hover:bg-gray-800"
+              className="hit flex items-center gap-1.5 rounded-full border border-ui-line px-2 py-0.5 text-meta hover:bg-ui-hover"
             >
               {p.avatarUrl != null ? (
                 <img src={p.avatarUrl} alt="" className="h-4 w-4 rounded-full" />
               ) : (
-                <span className="h-4 w-4 rounded-full bg-gray-300 dark:bg-gray-700" />
+                <span className="h-4 w-4 rounded-full bg-ui-faint" />
               )}
               <span>{p.login}</span>
-              <span className="text-gray-400">{p.matchCount}</span>
+              <span className="text-ui-faint">{p.matchCount}</span>
             </button>
           ))}
         </div>
       )}
 
       {debounced.length >= 1 && !isLoading && hits.length === 0 && stories.length === 0 ? (
-        <div className="rounded-ui border border-dashed border-gray-300 py-10 text-center text-body text-gray-500 dark:text-gray-400 dark:border-gray-700">
+        <div className="rounded-ui border border-dashed border-ui-line py-10 text-center text-body text-ui-mute">
           No matches for “{debounced}”{kinds.length > 0 ? ' with the selected filters' : ''}.
         </div>
       ) : (
@@ -193,14 +193,14 @@ export function SearchResultsTab(): JSX.Element {
             type="button"
             onClick={fetchMore}
             disabled={isFetchingMore}
-            className="hit rounded-ui border border-gray-300 px-3 py-1 text-meta text-gray-700 hover:bg-gray-100 disabled:opacity-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
+            className="hit rounded-ui border border-ui-line px-3 py-1 text-meta text-ui-ink hover:bg-ui-hover disabled:opacity-50"
           >
             {isFetchingMore ? 'Loading…' : `Load more (${total - hits.length} more)`}
           </button>
         </div>
       )}
       {isFetching && !isLoading && (
-        <div className="mt-2 text-center text-meta text-gray-400">Updating…</div>
+        <div className="mt-2 text-center text-meta text-ui-faint">Updating…</div>
       )}
     </div>
   );
@@ -212,10 +212,10 @@ export function SearchResultsTab(): JSX.Element {
 function HitHeader({ hit }: { hit: SearchHit }): JSX.Element {
   const KindIcon = KIND_ICON[hit.kind];
   return (
-    <div className="flex items-center gap-1.5 text-meta text-gray-400">
+    <div className="flex items-center gap-1.5 text-meta text-ui-faint">
       <KindIcon size={12} />
-      <span className="font-medium text-gray-500 dark:text-gray-400">{KIND_LABEL[hit.kind]}</span>
-      <span aria-hidden className="decorative-mark text-gray-300 dark:text-gray-600">
+      <span className="font-medium text-ui-mute">{KIND_LABEL[hit.kind]}</span>
+      <span aria-hidden className="decorative-mark text-ui-faint">
         ·
       </span>
       <span
@@ -234,13 +234,13 @@ function HitHeader({ hit }: { hit: SearchHit }): JSX.Element {
           }
         }}
         title="Open this PR"
-        className="truncate rounded-ui font-medium text-sky-600 hover:underline dark:text-sky-400"
+        className="truncate rounded-ui font-medium text-ui-accent hover:underline"
       >
         {hit.repoFullName} #{hit.prNumber}
       </span>
       {hit.authorLogin ? (
         <>
-          <span aria-hidden className="decorative-mark text-gray-300 dark:text-gray-600">
+          <span aria-hidden className="decorative-mark text-ui-faint">
             ·
           </span>
           <span className="truncate">{hit.authorLogin}</span>
@@ -280,15 +280,15 @@ function ThreadHitCard({
   const { data: thread, isLoading } = useThread(hit.threadId);
   const prUrl = `https://github.com/${hit.repoFullName}/pull/${hit.prNumber}`;
   return (
-    <li className="rounded-ui border border-gray-200 p-3 dark:border-gray-800">
+    <li className="rounded-ui border border-ui-line p-3">
       <div className="mb-2">
         <HitHeader hit={hit} />
-        <div className="mt-0.5 truncate text-body font-medium text-gray-800 dark:text-gray-100">
+        <div className="mt-0.5 truncate text-body font-medium text-ui-ink">
           {highlightTerms(hit.prTitle, query)}
         </div>
       </div>
       {isLoading || !thread ? (
-        <div className="h-16 animate-pulse rounded-ui bg-gray-100 dark:bg-gray-900" />
+        <div className="h-16 animate-pulse rounded-ui bg-ui-raise" />
       ) : (
         <ThreadCard
           thread={thread}
@@ -347,7 +347,7 @@ function PrHitCard({ hit, query }: { hit: SearchHit; query: string }): JSX.Eleme
             activate();
           }
         }}
-        className="cursor-pointer rounded-ui border border-gray-200 p-3 hover:bg-gray-50/70 dark:border-gray-800 dark:hover:bg-gray-900/60"
+        className="cursor-pointer rounded-ui border border-ui-line p-3 hover:bg-ui-hover"
       >
         <div className="flex items-center gap-2">
           <span
@@ -360,12 +360,12 @@ function PrHitCard({ hit, query }: { hit: SearchHit; query: string }): JSX.Eleme
             <HitHeader hit={hit} />
           </div>
         </div>
-        <div className="mt-0.5 text-body font-medium text-gray-800 dark:text-gray-100">
+        <div className="mt-0.5 text-body font-medium text-ui-ink">
           {highlightTerms(hit.prTitle, query)}
         </div>
         {metaRef && <PrMetaRow pr={metaRef} />}
         {hit.snippet && hit.kind !== 'pr' ? (
-          <div className="mt-1 line-clamp-3 text-meta text-gray-500 dark:text-gray-400">
+          <div className="mt-1 line-clamp-3 text-meta text-ui-mute">
             {highlightTerms(hit.snippet, query)}
           </div>
         ) : null}

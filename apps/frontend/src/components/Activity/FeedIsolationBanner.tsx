@@ -19,7 +19,7 @@ export function FeedIsolationBanner(): JSX.Element | null {
   if (feedIsolatedPrId == null) return null;
   const isolatedPr = openPrsData?.prs.find((p) => p.id === feedIsolatedPrId) ?? null;
   return (
-    <div className="flex items-center gap-2 rounded-ui border border-sky-300 bg-sky-50 px-3 py-1.5 text-meta text-sky-800 shadow-sm dark:border-sky-500/50 dark:bg-sky-950/60 dark:text-sky-200">
+    <div className="flex items-center gap-2 rounded-ui border border-ui-accent/50 bg-ui-accent/10 px-3 py-1.5 text-meta text-ui-accent shadow-sm">
       <FilterIcon className="shrink-0" />
       <span className="min-w-0 flex-1 truncate">
         Showing only{' '}
@@ -34,7 +34,7 @@ export function FeedIsolationBanner(): JSX.Element | null {
       <button
         type="button"
         onClick={() => setFeedIsolatedPrId(null)}
-        className="hit shrink-0 rounded-ui border border-sky-400 px-2 py-0.5 font-medium hover:bg-sky-100 dark:border-sky-500/60 dark:hover:bg-sky-900/40"
+        className="hit shrink-0 rounded-ui border border-ui-accent/50 px-2 py-0.5 font-medium hover:bg-ui-accent/10"
       >
         Clear
       </button>

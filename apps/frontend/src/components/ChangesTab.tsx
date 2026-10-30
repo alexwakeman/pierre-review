@@ -75,7 +75,7 @@ function MetaFileRow({ file }: { file: PrFileChange }): JSX.Element {
   // The copy button sits BESIDE the link, never inside it: a <button> inside an <a> is invalid
   // markup, and a click on it would navigate as well as copy.
   return (
-    <div className="flex items-center pr-3 hover:bg-gray-50 dark:hover:bg-gray-900">
+    <div className="flex items-center pr-3 hover:bg-ui-hover">
       <a
         href={file.githubUrl}
         target="_blank"
@@ -84,14 +84,14 @@ function MetaFileRow({ file }: { file: PrFileChange }): JSX.Element {
         title={`${file.path} — view this file's diff on GitHub`}
       >
         <code className="min-w-0 flex-1 truncate font-mono text-meta">
-          {dir && <span className="text-gray-400">{dir}/</span>}
+          {dir && <span className="text-ui-faint">{dir}/</span>}
           <span className="font-semibold">{fileName}</span>
         </code>
         <span className="shrink-0 font-mono text-meta tabular-nums">
-          <span className="text-green-600 dark:text-green-400">+{file.additions}</span>{' '}
-          <span className="text-red-500 dark:text-red-400">−{file.deletions}</span>
+          <span className="text-ui-success">+{file.additions}</span>{' '}
+          <span className="text-ui-danger">−{file.deletions}</span>
         </span>
-        <span className="shrink-0 decorative-mark text-gray-300 group-hover:text-blue-500 dark:text-gray-600">
+        <span className="shrink-0 decorative-mark text-ui-faint group-hover:text-ui-accent">
           <ExternalLinkIcon size={12} />
         </span>
       </a>
@@ -132,8 +132,8 @@ function MoreFilesNote({
     <div
       className={
         compact
-          ? 'space-y-0.5 px-2 pb-1 pt-0.5 text-meta leading-snug text-amber-700 dark:text-amber-400'
-          : 'flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2 text-meta text-gray-500 dark:text-gray-400'
+          ? 'space-y-0.5 px-2 pb-1 pt-0.5 text-meta leading-snug text-ui-warn'
+          : 'flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2 text-meta text-ui-mute'
       }
     >
       {canLoadMore ? (
@@ -141,20 +141,20 @@ function MoreFilesNote({
           type="button"
           onClick={onLoadMore}
           disabled={loading}
-          className="hit rounded-ui border border-blue-400 px-2 py-0.5 text-blue-600 hover:bg-blue-50 disabled:opacity-60 dark:border-blue-600 dark:text-blue-400 dark:hover:bg-blue-900/30"
+          className="hit rounded-ui border border-ui-accent/50 px-2 py-0.5 text-ui-accent hover:bg-ui-accent/10 disabled:opacity-60"
         >
           {loading ? 'Loading files…' : `Load next 100 files (${ofTotal})`}
         </button>
       ) : (
         <span>{ofTotal}.</span>
       )}
-      {error && <span className="text-amber-700 dark:text-amber-400">Couldn’t load more files.</span>}
+      {error && <span className="text-ui-warn">Couldn’t load more files.</span>}
       {ceilingReached && <span>GitHub lists at most 3,000 files.</span>}
       <a
         href={`${githubUrl}/files`}
         target="_blank"
         rel="noreferrer noopener"
-        className={`text-blue-500 hover:underline ${compact ? 'block' : ''}`}
+        className={`text-ui-accent hover:underline ${compact ? 'block' : ''}`}
       >
         All on GitHub <ExternalLinkIcon size={11} className="inline-block align-[-0.1em]" />
       </a>
@@ -657,7 +657,7 @@ export function ChangesTab({
     return (
       <div style={rootStyle}>
         {bar(false)}
-        <div className="px-4 py-2 text-meta text-gray-500 dark:text-gray-400">
+        <div className="px-4 py-2 text-meta text-ui-mute">
           {isError
             ? 'The full diff couldn’t be loaded — showing the changed-file list.'
             : 'Inline diffs aren’t available for this PR — showing the changed-file list.'}{' '}
@@ -665,13 +665,13 @@ export function ChangesTab({
             href={`${pr.githubUrl}/files`}
             target="_blank"
             rel="noreferrer noopener"
-            className="hit text-blue-500 hover:underline"
+            className="hit text-ui-accent hover:underline"
           >
             View on GitHub <ExternalLinkIcon size={11} className="inline-block align-[-0.1em]" />
           </a>
         </div>
         {pr.files.length > 0 && (
-          <div className="divide-y divide-gray-100 dark:divide-gray-800">
+          <div className="divide-y divide-ui-line">
             {pr.files.map((f) => (
               <MetaFileRow key={f.path} file={f} />
             ))}
@@ -777,7 +777,7 @@ export function ChangesTab({
             No divide-y: each file's (sticky) header carries its own bottom border. */}
         <div className={threadsOnly ? 'hidden' : 'min-w-0 flex-1'}>
           {focusMissing && focus != null && (
-            <div className="border-b border-amber-500/30 bg-amber-500/10 px-4 py-1.5 text-meta text-amber-700 dark:text-amber-300">
+            <div className="border-b border-ui-warn/40 bg-ui-warn/10 px-4 py-1.5 text-meta text-ui-warn">
               <code className="font-mono">{focus.path}</code> isn’t in the diff shown here.
               {truncated
                 ? ' It may be in the files not loaded yet.'
@@ -786,7 +786,7 @@ export function ChangesTab({
                 href={`${pr.githubUrl}/files`}
                 target="_blank"
                 rel="noreferrer noopener"
-                className="hit text-blue-500 hover:underline"
+                className="hit text-ui-accent hover:underline"
               >
                 View on GitHub <ExternalLinkIcon size={11} className="inline-block align-[-0.1em]" />
               </a>

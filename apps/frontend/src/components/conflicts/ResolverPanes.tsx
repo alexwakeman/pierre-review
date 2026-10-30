@@ -756,7 +756,7 @@ export function ResolverPanes({
           className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden outline-none"
         >
           {activeFile == null ? (
-            <div className="px-4 py-3 text-meta text-gray-600 dark:text-gray-300">
+            <div className="px-4 py-3 text-meta text-ui-mute">
               {activeEntry == null ? (
                 // ⚠ THIS IS THE ONLY SCREEN A PULL REQUEST WITH NOTHING RESOLVABLE EVER REACHES,
                 // so it has to carry the refusal. A binary-only conflict produces a `ready`
@@ -770,13 +770,13 @@ export function ResolverPanes({
                   <div>{landBlockedReason ?? 'Nothing to resolve here.'}</div>
                   {plan.notCarried.length > 0 && (
                     <div>
-                      <div className="font-medium text-gray-700 dark:text-gray-200">
+                      <div className="font-medium text-ui-ink">
                         {STILL_CONFLICTED}
                       </div>
                       <ul className="mt-0.5">
                         {plan.notCarried.map((row) => (
                           <li key={row.index} className="flex flex-wrap items-baseline gap-x-2">
-                            <span className="font-mono text-gray-800 dark:text-gray-100">
+                            <span className="font-mono text-ui-ink">
                               {row.path}
                             </span>
                             <span>{row.label}</span>
@@ -793,7 +793,7 @@ export function ResolverPanes({
                   <button
                     type="button"
                     onClick={() => onRetryFile(activeIndex)}
-                    className="hit rounded-ui border border-gray-300 px-2 py-0.5 text-meta hover:bg-gray-100 dark:border-gray-600 dark:hover:bg-gray-800"
+                    className="hit rounded-ui border border-ui-line px-2 py-0.5 text-meta hover:bg-ui-hover"
                   >
                     Try again
                   </button>
@@ -938,7 +938,7 @@ function PaneHeader({ children }: { children?: React.ReactNode }): JSX.Element {
     // see `.mr-ribbons`' note on why the overlay carries no z-index at all.
     <div
       data-mr-pane-header
-      className="sticky top-0 z-10 border-b border-gray-200 bg-white px-2 py-1 text-meta font-medium text-gray-600 dark:border-gray-800 dark:bg-gray-950 dark:text-gray-300"
+      className="sticky top-0 z-10 border-b border-ui-line bg-ui-surface px-2 py-1 text-meta font-medium text-ui-mute"
     >
       {children}
     </div>
@@ -962,9 +962,9 @@ function Banners({
   if (wandMessage != null) lines.push(wandMessage);
   if (lines.length === 0) return null;
   return (
-    <div className="shrink-0 border-b border-gray-200 px-4 py-1.5 dark:border-gray-800">
+    <div className="shrink-0 border-b border-ui-line px-4 py-1.5">
       {lines.map((line) => (
-        <div key={line} className="text-meta text-gray-700 dark:text-gray-200">
+        <div key={line} className="text-meta text-ui-ink">
           {line}
         </div>
       ))}

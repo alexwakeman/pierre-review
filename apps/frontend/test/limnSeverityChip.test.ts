@@ -21,8 +21,8 @@ describe('LimnSeverityChip', () => {
       const html = render(sev);
       expect(html).toContain(`>${word}</span>`);
       expect(html).toContain(`data-limn-severity="${sev}"`);
-      // The 11px label floor.
-      expect(html).toContain('text-[11px]');
+      // The label floor: the 12px meta size (nothing under 11px anywhere).
+      expect(html).toContain('text-meta');
     }
   });
 

@@ -113,12 +113,12 @@ export function OutstandingPopover({
         aria-haspopup="dialog"
         aria-expanded={open}
         title={OUTSTANDING_TITLE}
-        className="hit flex items-center gap-1 rounded-ui px-1 py-0.5 text-meta text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"
+        className="hit flex items-center gap-1 rounded-ui px-1 py-0.5 text-meta text-ui-mute hover:bg-ui-hover"
       >
         {/* ⚠ WHAT IS LEFT, NOT WHAT IS DONE — the population and the denominator are the footer's,
             the direction is the question this control answers. See `allChangesLeft`. */}
         {allChangesLeft(total - decided, total)}
-        <CaretIcon size={11} className="shrink-0 text-gray-500 dark:text-gray-400" />
+        <CaretIcon size={11} className="shrink-0 text-ui-mute" />
       </button>
 
       {open && (
@@ -135,9 +135,9 @@ export function OutstandingPopover({
             // `-1`: the panel takes focus itself when it has no rows to hand it to, and must not
             // become a tab stop of its own once the reader is past it.
             tabIndex={-1}
-            className="z-[70] w-[26rem] max-w-[92vw] overflow-hidden rounded-ui border border-gray-200 bg-white shadow-lg outline-none dark:border-gray-800 dark:bg-gray-900"
+            className="z-[70] w-[26rem] max-w-[92vw] overflow-hidden rounded-ui border border-ui-line bg-ui-surface shadow-lg outline-none"
           >
-            <p className="border-b border-gray-200 px-2.5 py-1.5 text-meta text-gray-800 dark:border-gray-800 dark:text-gray-100">
+            <p className="border-b border-ui-line px-2.5 py-1.5 text-meta text-ui-ink">
               {blockedReason ?? ALL_DECIDED}
             </p>
             {outstanding.length > 0 && (
@@ -155,12 +155,12 @@ export function OutstandingPopover({
                       // alone drops the per-file remainder out of the accessible name — and that
                       // remainder is nowhere else on this screen.
                       aria-label={jumpToFileLabel(row.path, row.remaining)}
-                      className="flex w-full flex-wrap items-baseline gap-x-2 px-2.5 py-1 text-left text-meta hover:bg-gray-100 dark:hover:bg-gray-800"
+                      className="flex w-full flex-wrap items-baseline gap-x-2 px-2.5 py-1 text-left text-meta hover:bg-ui-hover"
                     >
-                      <span className="min-w-0 font-mono text-gray-800 dark:text-gray-100">
+                      <span className="min-w-0 font-mono text-ui-ink">
                         {row.path}
                       </span>
-                      <span className="text-gray-600 dark:text-gray-300">
+                      <span className="text-ui-mute">
                         {toDecide(row.remaining)}
                       </span>
                     </button>

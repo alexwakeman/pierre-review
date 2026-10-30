@@ -113,7 +113,7 @@ export function DependencyMergeAll({
               {plan.isLoading ? (
                 <p>Checking {prIds.length} pull requests…</p>
               ) : plan.isError ? (
-                <p className="text-red-600 dark:text-red-400">Couldn’t check these pull requests.</p>
+                <p className="text-ui-danger">Couldn’t check these pull requests.</p>
               ) : (
                 <>
                   <p>
@@ -122,12 +122,12 @@ export function DependencyMergeAll({
                     {actionable === 0 && <>Nothing here can be merged or armed.</>}
                   </p>
                   {actionable > 0 && (
-                    <p className="text-gray-500 dark:text-gray-400">
+                    <p className="text-ui-mute">
                       Each one goes out under your GitHub account. A PR GitHub can’t land yet is armed instead.
                     </p>
                   )}
                   {leftOut > 0 && (
-                    <p className="text-gray-500 dark:text-gray-400">
+                    <p className="text-ui-mute">
                       Leaves out {leftOut} more; run it again after these land.
                     </p>
                   )}
@@ -242,7 +242,7 @@ export function DependencyMergeToast(): JSX.Element | null {
         <ToastList id={listId}>
           {(showAll ? failed : failed.slice(0, FAILED_ROWS)).map((i) => (
             <ToastRow key={i.prId}>
-              <span className="text-red-700 dark:text-red-400">
+              <span className="text-ui-danger">
                 <WarningIcon size={11} className="mr-1 inline-block align-[-0.1em]" />
                 Failed — {label(i)}: {i.outcome.action === 'failed' ? i.outcome.message : ''}
               </span>

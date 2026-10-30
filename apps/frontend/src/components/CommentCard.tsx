@@ -25,7 +25,7 @@ export function Avatar({
   }
   return (
     <span
-      className="flex shrink-0 items-center justify-center rounded-full bg-gray-300 text-meta font-semibold text-gray-700 dark:bg-gray-700 dark:text-gray-200"
+      className="flex shrink-0 items-center justify-center rounded-full bg-ui-faint text-meta font-semibold text-ui-ink"
       style={{ width: size, height: size }}
     >
       {label.slice(0, 2).toUpperCase()}
@@ -46,15 +46,15 @@ export function CommentCard({
   return (
     <div className="flex gap-2">
       <Avatar user={user} />
-      <div className="min-w-0 flex-1 rounded-ui border border-gray-200 dark:border-gray-800">
-        <div className="flex items-center gap-2 border-b border-gray-100 px-3 py-1 text-meta dark:border-gray-800">
+      <div className="min-w-0 flex-1 rounded-ui border border-ui-line">
+        <div className="flex items-center gap-2 border-b border-ui-line px-3 py-1 text-meta">
           <UserName
             user={user}
             fallbackId={comment.authorId}
             repoId={repoId}
             className="font-semibold"
           />
-          <span className="text-gray-400">{relativeTime(comment.createdAt)}</span>
+          <span className="text-ui-faint">{relativeTime(comment.createdAt)}</span>
         </div>
         <div className="px-3 py-2">
           <Markdown>{comment.body}</Markdown>

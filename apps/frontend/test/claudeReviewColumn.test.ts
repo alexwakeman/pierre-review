@@ -112,13 +112,13 @@ describe('the strip figures', () => {
     const B = 'b'.repeat(40);
     const cur = reviewCurrency({ reviewedHeadSha: A, currentHeadSha: A, commitsSince: 0 });
     expect(cur).toMatchObject({ tone: 'current', label: 'On latest commit', sha: 'aaaaaaa' });
-    expect(cur!.className).toContain('green');
+    expect(cur!.className).toMatch(/ui-success/);
     // A stray count never makes a current review "behind".
     expect(reviewCurrency({ reviewedHeadSha: A, currentHeadSha: A, commitsSince: 3 })!.tone).toBe('current');
 
     const many = reviewCurrency({ reviewedHeadSha: A, currentHeadSha: B, commitsSince: 4 });
     expect(many).toMatchObject({ tone: 'behind', label: '4 newer commits', sha: 'bbbbbbb' });
-    expect(many!.className).toContain('orange');
+    expect(many!.className).toMatch(/ui-warn/);
     expect(reviewCurrency({ reviewedHeadSha: A, currentHeadSha: B, commitsSince: 1 })!.label).toBe('1 newer commit');
     expect(reviewCurrency({ reviewedHeadSha: A, currentHeadSha: B, commitsSince: 0 })!.label).toBe('Branch changed');
     expect(reviewCurrency({ reviewedHeadSha: A, currentHeadSha: B, commitsSince: null })!.label).toBe('Branch changed');

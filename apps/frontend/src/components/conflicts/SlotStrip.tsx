@@ -51,11 +51,11 @@ import { EDIT_REGION, INK_CLASS, actionLabels, regionGroupLabel, stateWord } fro
 
 const BTN =
   'flex items-center gap-1 rounded-ui border px-1 py-0.5 text-meta leading-none transition-colors ' +
-  'border-gray-300 text-gray-700 hover:border-gray-400 hover:bg-gray-100 ' +
-  'dark:border-gray-700 dark:text-gray-200 dark:hover:border-gray-600 dark:hover:bg-gray-800';
+  'border-ui-line text-ui-ink hover:border-ui-line hover:bg-ui-hover ' +
+  '';
 const BTN_ON =
   'flex items-center gap-1 rounded-ui border px-1 py-0.5 text-meta leading-none ' +
-  'border-gray-500 bg-gray-100 text-gray-900 dark:border-gray-400 dark:bg-gray-800 dark:text-gray-50';
+  'border-ui-line bg-ui-raise text-ui-ink';
 
 export function SlotStrip({
   region,
@@ -139,7 +139,7 @@ export function SlotStrip({
       onFocus={onActivate}
       onMouseDown={onActivate}
       className={`flex flex-wrap items-center gap-1 px-1 py-1 ${
-        active ? 'bg-gray-100 dark:bg-gray-900' : ''
+        active ? 'bg-ui-raise' : ''
       }`}
     >
       <span className={`mr-1 text-meta font-medium ${role == null ? '' : INK_CLASS[role]}`}>
@@ -224,7 +224,7 @@ export function SlotStrip({
       {slot.kind !== 'unapplied' &&
         button('undo', false, labels.undo, <UndoIcon size={13} />, null)}
       {claude != null && whyOpen && (
-        <span className="basis-full text-meta text-gray-700 dark:text-gray-200">
+        <span className="basis-full text-meta text-ui-ink">
           {claude.rationale || `${aiName} gave no reason.`}
         </span>
       )}

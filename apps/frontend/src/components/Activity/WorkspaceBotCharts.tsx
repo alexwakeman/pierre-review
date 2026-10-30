@@ -671,7 +671,7 @@ function BotRepoWorkChart({
               </g>
             ))}
             {hover != null && (
-              <rect x={colLeft[hover]!} y={PAD_T} width={unitW} height={innerH} className="text-gray-400/10" fill="currentColor" />
+              <rect x={colLeft[hover]!} y={PAD_T} width={unitW} height={innerH} className="text-ui-faint" fill="currentColor" />
             )}
             {columns.map((c, i) => {
               let acc = 0;

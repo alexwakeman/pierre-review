@@ -254,14 +254,14 @@ function FixerSection({
       <div className="px-4">
         {conflictsResolvable && <ConflictAiCard pr={pr} />}
         {data?.enabled === false ? (
-          <p className="text-body text-gray-500 dark:text-gray-400">
+          <p className="text-body text-ui-mute">
             The agentic fixer is turned off.
           </p>
         ) : (
           <>
             {!isRunning && !planOpen && reviewId == null && !reviewLoading && (
               <div className="flex flex-wrap items-center gap-2">
-                <p className="text-meta text-gray-600 dark:text-gray-300">
+                <p className="text-meta text-ui-mute">
                   {latest?.status === 'running' || latest?.status === 'queued'
                     ? 'A fix starts from an AI review. One is running.'
                     : 'A fix starts from a finished AI review.'}
@@ -285,13 +285,13 @@ function FixerSection({
             {!isRunning && reviewId != null && showPicker && (
               <div>
                 {olderNote && (
-                  <p className="mb-2 text-meta text-gray-500 dark:text-gray-400">{olderNote}</p>
+                  <p className="mb-2 text-meta text-ui-mute">{olderNote}</p>
                 )}
                 {preview.isLoading && (
-                  <p className="text-meta text-gray-500 dark:text-gray-400">Loading…</p>
+                  <p className="text-meta text-ui-mute">Loading…</p>
                 )}
                 {preview.isError && (
-                  <p className="text-meta text-red-600 dark:text-red-400">{errText(preview.error)}</p>
+                  <p className="text-meta text-ui-danger">{errText(preview.error)}</p>
                 )}
                 {preview.data && (
                   <FixPicker
@@ -304,7 +304,7 @@ function FixerSection({
                   />
                 )}
                 {preview.data && preview.data.items.length > 0 && conflictsResolvable && (
-                  <label className="mt-3 flex cursor-pointer items-start gap-2 text-meta text-gray-800 dark:text-gray-100">
+                  <label className="mt-3 flex cursor-pointer items-start gap-2 text-meta text-ui-ink">
                     <input
                       type="checkbox"
                       className="mt-0.5 h-4 w-4 shrink-0 accent-ui-accent-fill"
@@ -314,7 +314,7 @@ function FixerSection({
                     />
                     <span>
                       Also resolve merge conflicts with {pr.baseRefName ?? 'the base branch'}
-                      <span className="block text-meta text-gray-600 dark:text-gray-300">
+                      <span className="block text-meta text-ui-mute">
                         You check the merge in the resolver. It lands as its own commit, apart from the fix.
                       </span>
                     </span>
@@ -324,7 +324,7 @@ function FixerSection({
                   <div className="mt-3 flex flex-wrap items-center gap-2">
                     <ModelPicker state={modelPick} onPick={modelPick.pick} disabled={fixStarting} />
                     {canPlan && (
-                      <label className="flex cursor-pointer items-center gap-1.5 text-meta text-gray-800 dark:text-gray-100">
+                      <label className="flex cursor-pointer items-center gap-1.5 text-meta text-ui-ink">
                         <input
                           type="checkbox"
                           className="h-4 w-4 shrink-0 accent-ui-accent-fill"
@@ -349,7 +349,7 @@ function FixerSection({
                         {planFirst ? 'Make a plan' : 'Start fix'}
                       </button>
                     </AiRunGate>
-                    <span className="text-meta text-gray-500 dark:text-gray-400">
+                    <span className="text-meta text-ui-mute">
                       {picked.length === 0
                         ? 'Nothing ticked.'
                         : `${picked.length - cutCount} item${picked.length - cutCount === 1 ? '' : 's'}`}
@@ -374,7 +374,7 @@ function FixerSection({
               </button>
             )}
             {(startFix.isError || startPlan.isError) && (
-              <p className="mt-1 text-meta text-red-600 dark:text-red-400">
+              <p className="mt-1 text-meta text-ui-danger">
                 {errText(startFix.error ?? startPlan.error)}
               </p>
             )}
@@ -398,13 +398,13 @@ function FixerSection({
                   value={fixProgressPct(liveStatus)}
                   timeConstantSec={40}
                 />
-                <div className="mt-1 flex items-center gap-2 text-meta text-gray-500 dark:text-gray-400">
+                <div className="mt-1 flex items-center gap-2 text-meta text-ui-mute">
                   {fix?.trigger === 'auto' && <AutoFixChip />}
                   {PHASE_LABEL[liveStatus?.progress?.phase ?? ''] ?? 'Working…'}
                 </div>
                 {liveStatus?.progress?.recentActivity &&
                   liveStatus.progress.recentActivity.length > 0 && (
-                    <pre className="mt-1 max-h-32 overflow-auto rounded-ui bg-gray-50 p-2 text-meta leading-relaxed text-gray-500 dark:text-gray-400 dark:bg-gray-900">
+                    <pre className="mt-1 max-h-32 overflow-auto rounded-ui bg-ui-surface p-2 text-meta leading-relaxed text-ui-mute">
                       {liveStatus.progress.recentActivity.slice(-8).join('\n')}
                     </pre>
                   )}
@@ -420,7 +420,7 @@ function FixerSection({
               />
             )}
             {isLoading && !fix && (
-              <p className="mt-3 text-meta text-gray-500 dark:text-gray-400">Loading…</p>
+              <p className="mt-3 text-meta text-ui-mute">Loading…</p>
             )}
           </>
         )}
@@ -437,7 +437,7 @@ function FixerSection({
 // like any other, unless the workspace switched "Push automatically" on.
 function AutoFixChip(): JSX.Element {
   return (
-    <span className="inline-flex items-center rounded-ui bg-gray-500/10 px-1.5 py-px text-meta font-medium text-gray-600 dark:text-gray-300">
+    <span className="inline-flex items-center rounded-ui bg-ui-raise px-1.5 py-px text-meta font-medium text-ui-mute">
       Auto fix
     </span>
   );
@@ -467,24 +467,24 @@ function FixResult({
   // Plan mode: a first planning pass that produced no plan, and a plan the reader discarded.
   if (fix.status === 'failed' && fix.plan?.status === 'failed') {
     return (
-      <div className="mt-3 rounded-ui border border-red-200 bg-red-50 p-2 text-meta text-red-700 dark:border-red-800 dark:bg-red-950/30 dark:text-red-300">
+      <div className="mt-3 rounded-ui border border-ui-danger/40 bg-ui-danger/10 p-2 text-meta text-ui-danger">
         {aiRunProviderName(fix.plan ?? fix)} could not make a plan: {fix.error ?? 'unknown error'}
       </div>
     );
   }
   if (fix.status === 'cancelled' && fix.plan?.status === 'discarded') {
-    return <p className="mt-3 text-meta text-gray-500 dark:text-gray-400">The plan was discarded.</p>;
+    return <p className="mt-3 text-meta text-ui-mute">The plan was discarded.</p>;
   }
   if (fix.status === 'failed') {
     return (
-      <div className="mt-3 rounded-ui border border-red-200 bg-red-50 p-2 text-meta text-red-700 dark:border-red-800 dark:bg-red-950/30 dark:text-red-300">
+      <div className="mt-3 rounded-ui border border-ui-danger/40 bg-ui-danger/10 p-2 text-meta text-ui-danger">
         The fix run failed: {fix.error ?? 'unknown error'}
       </div>
     );
   }
   if (fix.status === 'cancelled') {
     return (
-      <p className="mt-3 text-meta text-gray-500 dark:text-gray-400">The fix run was cancelled.</p>
+      <p className="mt-3 text-meta text-ui-mute">The fix run was cancelled.</p>
     );
   }
   if (fix.status !== 'succeeded') return <></>;
@@ -492,8 +492,8 @@ function FixResult({
   const noChanges = !fix.patch || fix.filesChanged.length === 0;
 
   return (
-    <div className="mt-3 border-t border-gray-200 pt-3 dark:border-gray-800">
-      <p className="mb-1 text-meta text-gray-500 dark:text-gray-400">
+    <div className="mt-3 border-t border-ui-line pt-3">
+      <p className="mb-1 text-meta text-ui-mute">
         {fix.trigger === 'auto' && (
           <>
             <AutoFixChip />{' '}
@@ -507,7 +507,7 @@ function FixResult({
       {/* An AUTOMATIC push that failed (auto-push.ts): recorded on the succeeded row's `error`,
           never retried — Push below still works. */}
       {fix.pushedAt == null && fix.error && (
-        <p className="mb-2 rounded-ui border border-amber-200 bg-amber-50 p-2 text-meta text-amber-800 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
+        <p className="mb-2 rounded-ui border border-ui-warn/40 bg-ui-warn/10 p-2 text-meta text-ui-warn">
           {fix.error}
         </p>
       )}
@@ -521,12 +521,12 @@ function FixResult({
           diff at all, and that is exactly the run whose "Not addressed" list matters most. */}
       <FixReport pr={pr} fix={fix} />
       {noChanges ? (
-        <p className="mt-2 text-meta text-gray-500 dark:text-gray-400">
+        <p className="mt-2 text-meta text-ui-mute">
           No files changed.
         </p>
       ) : (
         <>
-          <div className="mb-1 mt-2 flex items-center justify-between gap-3 text-meta text-gray-500 dark:text-gray-400">
+          <div className="mb-1 mt-2 flex items-center justify-between gap-3 text-meta text-ui-mute">
             {/* "Not built or tested here." is TEMPLATED and sits beside the diff, above Push: the
                 fixer has no shell (coding/agent.ts FIX_TOOLS), and a diff above a Push button
                 invites the reader to assume verification. It states what we know and STOPS —
@@ -555,7 +555,7 @@ function FixResult({
 
 function PushedCard({ fix }: { fix: AiFix }): JSX.Element {
   return (
-    <div className="mb-2 rounded-ui border border-green-200 bg-green-50 p-2 text-meta text-green-700 dark:border-green-800 dark:bg-green-950/30 dark:text-green-300">
+    <div className="mb-2 rounded-ui border border-ui-success/40 bg-ui-success/10 p-2 text-meta text-ui-success">
       <div>
         Pushed to <span className="font-mono">{fix.pushedBranch}</span>
         {fix.pushedPrUrl && (
@@ -574,7 +574,7 @@ function PushedCard({ fix }: { fix: AiFix }): JSX.Element {
         {fix.pushedAt && <> · {relativeTime(fix.pushedAt)}</>}
       </div>
       {fix.commitMessage && (
-        <div className="mt-1 font-mono text-meta text-green-800 dark:text-green-300">
+        <div className="mt-1 font-mono text-meta text-ui-success">
           {fix.commitMessage}
         </div>
       )}
@@ -604,10 +604,10 @@ function FixHistory({
       <ul className="space-y-2">
         {pushed.map((h) => (
           <li key={h.id} className="text-meta">
-            <div className="font-mono text-gray-700 dark:text-gray-200">
+            <div className="font-mono text-ui-ink">
               {h.commitMessage ?? '(no commit message)'}
             </div>
-            <div className="mt-0.5 text-meta text-gray-400">
+            <div className="mt-0.5 text-meta text-ui-faint">
               {h.pushedBranch && (
                 <span className="font-mono">{h.pushedBranch}</span>
               )}
@@ -671,7 +671,7 @@ function PushControls({
 
   if (!viewerCanPush) {
     return (
-      <p className="mt-2 text-meta text-gray-500 dark:text-gray-400">
+      <p className="mt-2 text-meta text-ui-mute">
         You need write access to push this fix.
       </p>
     );
@@ -694,7 +694,7 @@ function PushControls({
     <div className="mt-3 rounded-ui bg-ui-surface p-2">
       {fix.commitMessage && (
         <div
-          className="mb-2 rounded-ui bg-gray-50 px-2 py-1 font-mono text-meta text-gray-700 dark:bg-gray-900 dark:text-gray-200"
+          className="mb-2 rounded-ui bg-ui-surface px-2 py-1 font-mono text-meta text-ui-ink"
           title="Commit message"
         >
           {fix.commitMessage}
@@ -720,7 +720,7 @@ function PushControls({
         />
         Push to the PR branch
         {headInfo?.headRef && (
-          <span className="font-mono text-gray-400">({headInfo.headRef})</span>
+          <span className="font-mono text-ui-faint">({headInfo.headRef})</span>
         )}
       </label>
       <label className="mt-1 flex items-center gap-2 text-meta">
@@ -756,7 +756,7 @@ function PushControls({
       </div>
 
       {push.isError && (
-        <div className="mt-2 text-meta text-red-500">{errText(push.error)}</div>
+        <div className="mt-2 text-meta text-ui-danger">{errText(push.error)}</div>
       )}
     </div>
   );

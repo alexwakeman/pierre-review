@@ -14,7 +14,7 @@ import { InfoButton } from '../InfoModal.js';
 // dropped) — the diff below it is the authoritative changeset.
 
 const CHIP =
-  'inline-flex max-w-full items-center gap-1 rounded-ui px-1.5 py-0.5 text-meta font-medium bg-gray-500/10 text-gray-700 dark:text-gray-200';
+  'inline-flex max-w-full items-center gap-1 rounded-ui px-1.5 py-0.5 text-meta font-medium bg-ui-raise text-ui-ink';
 const HEADING =
   'mb-1 mt-3 flex items-center gap-1 text-meta font-medium text-ui-mute';
 
@@ -74,7 +74,7 @@ function RefChip({
         type="button"
         onClick={() => onJump(anchor)}
         aria-label={`${label}: ${item?.title ?? ''}. Show in AI Review`}
-        className={`${CHIP} max-w-[22rem] hover:bg-gray-500/20`}
+        className={`${CHIP} max-w-[22rem] hover:bg-ui-hover`}
       >
         {body}
       </button>
@@ -136,8 +136,8 @@ export function FixReport({ pr, fix }: { pr: PrDetail; fix: AiFix }): JSX.Elemen
           <ul className="space-y-2">
             {report.changes.map((c) => (
               <li key={c.path}>
-                <div className="break-all font-mono text-gray-800 dark:text-gray-100">{c.path}</div>
-                {c.summary && <p className="mt-0.5 text-gray-700 dark:text-gray-300">{c.summary}</p>}
+                <div className="break-all font-mono text-ui-ink">{c.path}</div>
+                {c.summary && <p className="mt-0.5 text-ui-ink">{c.summary}</p>}
                 {c.refs.length > 0 && (
                   <div className="mt-1 flex flex-wrap gap-1">
                     {c.refs.map((r) => (
@@ -149,8 +149,8 @@ export function FixReport({ pr, fix }: { pr: PrDetail; fix: AiFix }): JSX.Elemen
             ))}
             {undescribed.map((p) => (
               <li key={p}>
-                <div className="break-all font-mono text-gray-800 dark:text-gray-100">{p}</div>
-                <p className="mt-0.5 text-gray-500 dark:text-gray-400">No summary reported.</p>
+                <div className="break-all font-mono text-ui-ink">{p}</div>
+                <p className="mt-0.5 text-ui-mute">No summary reported.</p>
               </li>
             ))}
           </ul>
@@ -164,7 +164,7 @@ export function FixReport({ pr, fix }: { pr: PrDetail; fix: AiFix }): JSX.Elemen
             {report.unaddressed.map((u) => (
               <li key={u.ref}>
                 <RefChip refId={u.ref} item={items.get(u.ref)} onJump={jump} />
-                <p className="mt-0.5 text-gray-700 dark:text-gray-300">{u.reason}</p>
+                <p className="mt-0.5 text-ui-ink">{u.reason}</p>
               </li>
             ))}
           </ul>

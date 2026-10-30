@@ -19,9 +19,9 @@ import { memberForRef } from '../../lib/designGrid.js';
 import { DesignLegend, DiagramSlotView, redrawRefusalText, useOpenMemberFile } from '../ClaudeReviewDiagrams.js';
 import { InfoButton } from '../InfoModal.js';
 
-const MUTED = 'text-gray-500 dark:text-gray-400';
+const MUTED = 'text-ui-mute';
 const BTN =
-  'rounded-ui border border-gray-300 px-2 py-0.5 text-meta text-gray-700 hover:border-gray-400 disabled:cursor-not-allowed disabled:opacity-40 dark:border-gray-700 dark:text-gray-200 dark:hover:border-gray-500';
+  'rounded-ui border border-ui-line px-2 py-0.5 text-meta text-ui-ink hover:border-ui-line disabled:cursor-not-allowed disabled:opacity-40';
 
 /** The story design's read and its redraw mutation — ONE per Story section, shared by the heading's
  *  button and the block. `enabled` = `storyDesignOffered(ai.enabled, prCount)`. */
@@ -66,7 +66,7 @@ export function StoryDesignSection({ design }: { design: StoryDesign }): JSX.Ele
   return (
     <section aria-label="Story design" className="space-y-2" data-testid="story-design">
       <div className="flex items-center gap-1.5">
-        <h4 className="text-meta font-semibold text-gray-700 dark:text-gray-200">Story design</h4>
+        <h4 className="text-meta font-semibold text-ui-ink">Story design</h4>
         <InfoButton title="Story design">
           <DesignLegend story />
         </InfoButton>
@@ -82,7 +82,7 @@ export function StoryDesignSection({ design }: { design: StoryDesign }): JSX.Ele
         }}
       />
       {refusal != null && <p className={`text-meta ${MUTED}`}>{refusal}</p>}
-      {redraw.isError && <p className="text-meta text-red-600 dark:text-red-400">{redraw.error.message}</p>}
+      {redraw.isError && <p className="text-meta text-ui-danger">{redraw.error.message}</p>}
     </section>
   );
 }

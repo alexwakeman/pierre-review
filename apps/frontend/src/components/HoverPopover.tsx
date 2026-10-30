@@ -71,7 +71,7 @@ export function HoverPopover({
         aria-label={label}
         aria-describedby={open ? popId : undefined}
         {...getReferenceProps()}
-        className={`rounded-ui focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 ${className ?? ''}`}
+        className={`rounded-ui focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent ${className ?? ''}`}
       >
         {children}
       </span>

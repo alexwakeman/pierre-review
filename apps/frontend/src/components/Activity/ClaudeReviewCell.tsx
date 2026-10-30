@@ -55,7 +55,7 @@ import { VerdictIcon } from '../VerdictIcon.js';
 // route is the "Claude" label, a real button — never a role=button wrapper around buttons.
 
 export const PILL = 'inline-flex items-center gap-1 whitespace-nowrap rounded-ui px-1.5 py-px text-meta font-medium';
-export const GREY_PILL = `${PILL} bg-gray-500/10 text-gray-600 dark:text-gray-300`;
+export const GREY_PILL = `${PILL} bg-ui-raise text-ui-mute`;
 // The verdict is the panel's headline: a size up from the pills beside it. Shared with the Claude
 // Review tab's header, which leads with the same pill.
 export const VERDICT_PILL =
@@ -63,25 +63,25 @@ export const VERDICT_PILL =
 export const MUTED = 'text-meta text-ai-muted';
 // The AI surface's own button (the Claude Review tab's Run button idiom).
 const AI_BUTTON =
-  'whitespace-nowrap rounded-ui border border-ai-border bg-white/70 px-2 py-0.5 text-meta font-medium text-ai-signal hover:border-ai-signal/60 hover:bg-ai-surface-2 disabled:cursor-default disabled:opacity-60 dark:bg-gray-900/50';
+  'whitespace-nowrap rounded-ui border border-ai-border bg-white/70 px-2 py-0.5 text-meta font-medium text-ai-signal hover:border-ai-signal/60 hover:bg-ai-surface-2 disabled:cursor-default disabled:opacity-60';
 const PLAIN_BUTTON =
-  'whitespace-nowrap rounded-ui border border-ai-border bg-white/70 px-2 py-0.5 text-meta font-medium text-gray-700 hover:border-gray-400 dark:bg-gray-900/50 dark:text-gray-200 dark:hover:border-gray-500';
+  'whitespace-nowrap rounded-ui border border-ai-border bg-white/70 px-2 py-0.5 text-meta font-medium text-ui-ink hover:border-ui-line';
 
 // A ticket pill's colour by coverage (all met / some partly or can't tell / some not met).
 const TICKET_TONE: Record<CoverageTone, string> = {
   ok: CLEAN_CLASS,
   partial: OUTDATED_CLASS,
   bad: SEVERITY_CLASS.blocker,
-  muted: 'bg-gray-500/10 text-gray-600 dark:text-gray-300',
+  muted: 'bg-ui-raise text-ui-mute',
 };
 
 // The panel's left accent, by outcome. `none` keeps the plain AI border (an offer, not a result).
 const ACCENT: Record<ReviewTone, string> = {
   none: 'border-l-ai-border',
-  active: 'border-l-sky-400 dark:border-l-sky-500',
-  bad: 'border-l-red-500',
-  ok: 'border-l-green-500',
-  neutral: 'border-l-gray-400 dark:border-l-gray-500',
+  active: 'border-l-ui-accent/50',
+  bad: 'border-l-ui-danger/40',
+  ok: 'border-l-ui-success/40',
+  neutral: 'border-l-ui-line',
 };
 
 // The small marker on a run the workspace's auto review started (queued, running or finished).
@@ -148,7 +148,7 @@ export function ClaudeReviewPanel({
     onOpenReview();
   };
   const OUTCOME_LINK =
-    'cursor-pointer hover:brightness-95 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:hover:brightness-125';
+    'cursor-pointer hover:brightness-95 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent dark:hover:brightness-125';
 
   // ---- the outcome (the panel's headline) and the action on the right ----
   let outcome: JSX.Element;
@@ -175,12 +175,12 @@ export function ClaudeReviewPanel({
       );
       break;
     case 'starting':
-      outcome = <span className={`${VERDICT_PILL} bg-gray-500/10 text-gray-600 dark:text-gray-300`}>Starting…</span>;
+      outcome = <span className={`${VERDICT_PILL} bg-ui-raise text-ui-mute`}>Starting…</span>;
       break;
     case 'queued':
       outcome = (
         <>
-          <span className={`${VERDICT_PILL} bg-gray-500/10 text-gray-600 dark:text-gray-300`}>Queued</span>
+          <span className={`${VERDICT_PILL} bg-ui-raise text-ui-mute`}>Queued</span>
           {cell.auto && <AutoMark />}
         </>
       );
@@ -213,7 +213,7 @@ export function ClaudeReviewPanel({
             onClick={open}
             title="Open the review"
             className={`${VERDICT_PILL} ${
-              cell.verdict != null ? VERDICT_CLASS[cell.verdict] : 'bg-gray-500/10 text-gray-600 dark:text-gray-300'
+              cell.verdict != null ? VERDICT_CLASS[cell.verdict] : 'bg-ui-raise text-ui-mute'
             } ${OUTCOME_LINK}`}
           >
             {cell.verdict != null && <VerdictIcon verdict={cell.verdict} size={13} />}
@@ -282,7 +282,7 @@ export function ClaudeReviewPanel({
         type="button"
         onClick={open}
         title="Open the AI review"
-        className="hit inline-flex shrink-0 items-center gap-1 rounded-ui text-meta font-semibold text-ai-ink hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+        className="hit inline-flex shrink-0 items-center gap-1 rounded-ui text-meta font-semibold text-ai-ink hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent"
       >
         <SparkleIcon size={12} className="text-ai-signal" />
         AI review
@@ -384,7 +384,7 @@ export function ClaudeReviewPanel({
       )}
 
       {showError && (
-        <span className="text-meta text-red-600 dark:text-red-400">
+        <span className="text-meta text-ui-danger">
           {start.error.message || 'Could not start the review.'}
         </span>
       )}

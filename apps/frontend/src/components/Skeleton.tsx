@@ -8,7 +8,7 @@ import type { CSSProperties } from 'react';
 // Callers size it via `className` (e.g. "h-24", "h-3 w-1/2"); the pulse + theme-aware
 // border/background come baked in.
 const SURFACE =
-  'animate-pulse rounded-ui border border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-900/40';
+  'animate-pulse rounded-ui border border-ui-line bg-ui-surface';
 
 // A structural block placeholder — a bordered card/bar silhouette. Pass sizing (and any
 // positional offsets) via `className` / `style`.
@@ -34,7 +34,7 @@ export function SkeletonLine({
 }): JSX.Element {
   return (
     <div
-      className={`animate-pulse rounded-ui bg-gray-200 dark:bg-gray-800 ${className}`}
+      className={`animate-pulse rounded-ui bg-ui-hover ${className}`}
       style={style}
       aria-hidden="true"
     />

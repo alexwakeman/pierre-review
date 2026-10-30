@@ -167,11 +167,11 @@ const Sep = CardSep;
 
 function ReviewChip({ pr }: { pr: TimelinePr }): JSX.Element | null {
   if (pr.isChangesRequested) {
-    return <span className={`${TONE_CHIP} bg-red-500/10 text-red-700 dark:text-red-400`}>Changes requested</span>;
+    return <span className={`${TONE_CHIP} bg-ui-danger/10 text-ui-danger`}>Changes requested</span>;
   }
   if (pr.isApproved) {
     return (
-      <span className={`${TONE_CHIP} bg-green-500/10 text-green-700 dark:text-green-400`}>
+      <span className={`${TONE_CHIP} bg-ui-success/10 text-ui-success`}>
         <CheckIcon size={11} />
         Approved
       </span>
@@ -195,7 +195,7 @@ function ThreadsChip({ pr }: { pr: TimelinePr }): JSX.Element | null {
   if (label == null) return null;
   return (
     <span
-      className={label.warn ? `${TONE_CHIP} bg-amber-500/10 text-amber-700 dark:text-amber-400` : NEUTRAL_CHIP}
+      className={label.warn ? `${TONE_CHIP} bg-ui-warn/10 text-ui-warn` : NEUTRAL_CHIP}
       title="Review threads: untouched · replied · likely addressed · resolved"
     >
       <ThreadStateBar counts={pr.threadCounts} compact className="!w-8" />
@@ -360,7 +360,7 @@ export function OpenPrsCards({
   onOpenPr,
   emptyLabel = (
     <>
-      <CheckCircleIcon className="mr-1.5 inline-block align-[-0.15em] decorative-mark text-gray-300 dark:text-gray-600" />
+      <CheckCircleIcon className="mr-1.5 inline-block align-[-0.15em] decorative-mark text-ui-faint" />
       No open PRs here.
     </>
   ),
@@ -597,17 +597,17 @@ export function OpenPrsCards({
     return (
       <div className="space-y-2" aria-busy="true" aria-label={merged ? 'Loading merged pull requests' : 'Loading open pull requests'}>
         {[0, 1, 2, 3].map((i) => (
-          <div key={i} className="h-24 animate-pulse rounded-ui bg-gray-100 dark:bg-gray-900/40" />
+          <div key={i} className="h-24 animate-pulse rounded-ui bg-ui-raise" />
         ))}
       </div>
     );
   }
   if (isError) {
-    return <div className="text-body text-red-500">{merged ? 'Couldn’t load the merged PRs.' : 'Couldn’t load the open PRs.'}</div>;
+    return <div className="text-body text-ui-danger">{merged ? 'Couldn’t load the merged PRs.' : 'Couldn’t load the open PRs.'}</div>;
   }
   if (rows.length === 0 && story == null) {
     return (
-      <div className="rounded-ui border border-dashed border-gray-300 p-6 text-center text-body text-gray-500 dark:border-gray-700 dark:text-gray-400">
+      <div className="rounded-ui border border-dashed border-ui-line p-6 text-center text-body text-ui-mute">
         {emptyLabel}
       </div>
     );
@@ -764,13 +764,13 @@ export function OpenPrsCards({
   return (
     <>
       {offerGroups && (
-        <div className="mb-2 flex flex-wrap items-center gap-2 text-meta text-gray-600 dark:text-gray-300">
-          <TicketIcon size={13} className="shrink-0 text-sky-700 dark:text-sky-300" />
+        <div className="mb-2 flex flex-wrap items-center gap-2 text-meta text-ui-mute">
+          <TicketIcon size={13} className="shrink-0 text-ui-accent" />
           <span>Tickets loaded.</span>
           <button
             type="button"
             onClick={ticketGate.release}
-            className="hit rounded-ui border border-gray-300 px-1.5 py-0.5 font-medium hover:border-gray-400 dark:border-gray-700 dark:hover:border-gray-500"
+            className="hit rounded-ui border border-ui-line px-1.5 py-0.5 font-medium hover:border-ui-line"
           >
             Group by ticket
           </button>
@@ -812,7 +812,7 @@ export function TicketKeyButton({
         e.stopPropagation();
         openStory({ ident: ticket.ident, key: ticket.key, title: ticket.title ?? null });
       }}
-      className={`${className} rounded-ui text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500`}
+      className={`${className} rounded-ui text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent`}
     >
       {children}
     </button>
@@ -822,9 +822,9 @@ export function TicketKeyButton({
 // ---- one ticket stack ----
 
 const STATUS_PILL: Record<'new' | 'indeterminate' | 'done', string> = {
-  new: 'bg-gray-500/10 text-gray-700 dark:text-gray-300',
-  indeterminate: 'bg-blue-500/10 text-blue-700 dark:text-blue-300',
-  done: 'bg-green-500/15 text-green-700 dark:text-green-400',
+  new: 'bg-ui-raise text-ui-ink',
+  indeterminate: 'bg-ui-accent/10 text-ui-accent',
+  done: 'bg-ui-success/10 text-ui-success',
 };
 const STATUS_WORD: Record<'new' | 'indeterminate' | 'done', string> = {
   new: 'To do',
@@ -932,7 +932,7 @@ function ShowMoreRow({
     <div
       ref={ref}
       data-testid="open-prs-more"
-      className="mt-3 flex items-center justify-center gap-3 text-meta text-gray-600 dark:text-gray-300"
+      className="mt-3 flex items-center justify-center gap-3 text-meta text-ui-mute"
     >
       <span className="tabular-nums">
         {shown} of {total} PRs
@@ -943,7 +943,7 @@ function ShowMoreRow({
           focusFrom.current = drawnCards;
           onMore();
         }}
-        className="hit rounded-ui border border-gray-300 px-2 py-0.5 font-medium hover:border-gray-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-gray-700 dark:hover:border-gray-500"
+        className="hit rounded-ui border border-ui-line px-2 py-0.5 font-medium hover:border-ui-line focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent"
       >
         Show more
       </button>
@@ -952,10 +952,10 @@ function ShowMoreRow({
 }
 
 const COVERAGE_TONE: Record<CoverageTone, string> = {
-  ok: 'bg-green-500/15 text-green-700 dark:text-green-400',
-  partial: 'bg-amber-500/15 text-amber-800 dark:text-amber-300',
-  bad: 'bg-red-500/10 text-red-700 dark:text-red-400',
-  muted: 'bg-gray-500/10 text-gray-700 dark:text-gray-300',
+  ok: 'bg-ui-success/10 text-ui-success',
+  partial: 'bg-ui-warn/10 text-ui-warn',
+  bad: 'bg-ui-danger/10 text-ui-danger',
+  muted: 'bg-ui-raise text-ui-ink',
 };
 
 /**
@@ -982,12 +982,12 @@ function StackCoverage({
     <span className="inline-flex flex-wrap items-center gap-1.5">
       {cov != null && (
         <span className={`${CHIP} border-transparent ${COVERAGE_TONE[cov.tone]}`} title={cov.title}>
-          {cov.running && <span aria-hidden className="h-1.5 w-1.5 animate-pulse rounded-full bg-sky-500" />}
+          {cov.running && <span aria-hidden className="h-1.5 w-1.5 animate-pulse rounded-full bg-ui-accent-fill" />}
           {cov.label}
         </span>
       )}
       {cov != null && cov.stale && currency != null && (
-        <span className="text-meta text-amber-800 dark:text-amber-300" title={currency.title}>
+        <span className="text-meta text-ui-warn" title={currency.title}>
           {currency.label}
         </span>
       )}
@@ -998,15 +998,15 @@ function StackCoverage({
           disabled={starting}
           onClick={() => start.mutate({ prId, ident })}
           title="Check this ticket against all its PRs"
-          className="hit whitespace-nowrap rounded-ui border border-ai-border bg-white/70 px-2 py-0.5 text-meta font-medium text-ai-signal hover:border-ai-signal/60 hover:bg-ai-surface-2 disabled:opacity-60 dark:bg-gray-900/50"
+          className="hit whitespace-nowrap rounded-ui border border-ai-border bg-white/70 px-2 py-0.5 text-meta font-medium text-ai-signal hover:border-ai-signal/60 hover:bg-ai-surface-2 disabled:opacity-60"
         >
           {starting ? 'Starting…' : cov == null ? 'Check story' : 'Re-check'}
         </button>
       )}
       {refused != null && (
-        <span className="text-meta text-red-700 dark:text-red-400">{refusalSentence(refused)}</span>
+        <span className="text-meta text-ui-danger">{refusalSentence(refused)}</span>
       )}
-      {start.isError && <span className="text-meta text-red-700 dark:text-red-400">Could not start the check.</span>}
+      {start.isError && <span className="text-meta text-ui-danger">Could not start the check.</span>}
     </span>
   );
 }
@@ -1036,19 +1036,19 @@ function TicketPeopleAndStatus({
           {cat == null && t.status != null && <span className={NEUTRAL_CHIP}>{t.status}</span>}
         </>
       )}
-      {t.issueType != null && <span className="text-meta text-gray-500 dark:text-gray-400">{t.issueType}</span>}
+      {t.issueType != null && <span className="text-meta text-ui-mute">{t.issueType}</span>}
       {t.assignee != null && (
         <span className="inline-flex items-center gap-1.5">
           <span
             aria-hidden
-            className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-gray-200 text-meta font-semibold text-gray-700 dark:bg-gray-700 dark:text-gray-100"
+            className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-ui-hover text-meta font-semibold text-ui-ink"
           >
             {initialsOf(t.assignee.name)}
           </span>
           <span>{t.assignee.name}</span>
         </span>
       )}
-      {t.assignee == null && t.status != null && <span className="text-gray-500 dark:text-gray-400">Unassigned</span>}
+      {t.assignee == null && t.status != null && <span className="text-ui-mute">Unassigned</span>}
     </>
   );
 }
@@ -1091,24 +1091,24 @@ function StoryViewHeader({
   return (
     <header className="space-y-2 px-4 pb-3 pt-3.5" data-testid="story-header">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-meta">
-        <span className="inline-flex items-center gap-1 font-mono text-body font-semibold text-gray-700 dark:text-gray-200">
+        <span className="inline-flex items-center gap-1 font-mono text-body font-semibold text-ui-ink">
           <TicketIcon size={13} className="shrink-0" />
           {t.key}
         </span>
         <TrackerLinkOut url={t.url} provider={t.provider} />
       </div>
-      <h3 id={headingId} className="break-words text-title font-semibold leading-snug text-gray-900 dark:text-gray-50">
+      <h3 id={headingId} className="break-words text-title font-semibold leading-snug text-ui-ink">
         <span className="sr-only">{t.key}: </span>
         {t.title ?? t.key}
       </h3>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-meta text-gray-600 dark:text-gray-300">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-meta text-ui-mute">
           <TicketPeopleAndStatus t={t} cat={cat} single />
         </div>
         <ul aria-label="Facts" className="flex flex-wrap items-center gap-1.5">
           {cov != null && (
             <li className={`${CHIP} border-transparent ${COVERAGE_TONE[cov.tone]}`} title={cov.title}>
-              {cov.running && <span aria-hidden className="h-1.5 w-1.5 animate-pulse rounded-full bg-sky-500" />}
+              {cov.running && <span aria-hidden className="h-1.5 w-1.5 animate-pulse rounded-full bg-ui-accent-fill" />}
               {cov.label}
             </li>
           )}
@@ -1150,27 +1150,27 @@ function StoryCurrencyLine({
   return (
     <div className="flex flex-wrap items-center gap-x-2 gap-y-1 sm:ml-auto">
       {comments != null && (
-        <span className="text-meta text-gray-600 dark:text-gray-300" title={comments.title} data-testid="ticket-new-comments">
+        <span className="text-meta text-ui-mute" title={comments.title} data-testid="ticket-new-comments">
           {comments.label}
         </span>
       )}
       {(stale || state?.checkedAt != null) && (
-        <span className="text-meta text-gray-600 dark:text-gray-300">
+        <span className="text-meta text-ui-mute">
           {stale && (
-            <span className="text-amber-800 dark:text-amber-300" title={currency.title}>
+            <span className="text-ui-warn" title={currency.title}>
               {currency.label}
             </span>
           )}
           {why != null && (
             <>
-              <span aria-hidden className="decorative-mark text-gray-400 dark:text-gray-500">
+              <span aria-hidden className="decorative-mark text-ui-faint">
                 {' · '}
               </span>
               <span title={why.title}>{why.label}</span>
             </>
           )}
           {stale && state?.checkedAt != null && (
-            <span aria-hidden className="decorative-mark text-gray-400 dark:text-gray-500">
+            <span aria-hidden className="decorative-mark text-ui-faint">
               {' · '}
             </span>
           )}
@@ -1183,13 +1183,13 @@ function StoryCurrencyLine({
           disabled={starting}
           onClick={() => start.mutate({ prId, ident })}
           title="Check this ticket against all its PRs"
-          className="hit whitespace-nowrap rounded-ui border border-ai-border bg-white/70 px-2 py-0.5 text-meta font-medium text-ai-signal hover:border-ai-signal/60 hover:bg-ai-surface-2 disabled:opacity-60 dark:bg-gray-900/50"
+          className="hit whitespace-nowrap rounded-ui border border-ai-border bg-white/70 px-2 py-0.5 text-meta font-medium text-ai-signal hover:border-ai-signal/60 hover:bg-ai-surface-2 disabled:opacity-60"
         >
           {starting ? 'Starting…' : cov == null ? 'Check story' : 'Re-check'}
         </button>
       )}
-      {refused != null && <span className="text-meta text-red-700 dark:text-red-400">{refusalSentence(refused)}</span>}
-      {start.isError && <span className="text-meta text-red-700 dark:text-red-400">Could not start the check.</span>}
+      {refused != null && <span className="text-meta text-ui-danger">{refusalSentence(refused)}</span>}
+      {start.isError && <span className="text-meta text-ui-danger">Could not start the check.</span>}
     </div>
   );
 }
@@ -1239,8 +1239,8 @@ function TicketStack({
       id={stackDomId(stack.id)}
       aria-labelledby={headingId}
       tabIndex={-1}
-      className={`scroll-mt-4 rounded-ui focus:outline-none border bg-gray-50 dark:bg-gray-900/70 ${
-        t == null ? 'border-dashed border-gray-300 dark:border-gray-700' : 'border-gray-200 dark:border-gray-800'
+      className={`scroll-mt-4 rounded-ui focus:outline-none border bg-ui-surface ${
+        t == null ? 'border-dashed border-ui-line' : 'border-ui-line'
       }`}
     >
       {single && t != null ? (
@@ -1250,20 +1250,20 @@ function TicketStack({
         <div className="min-w-0 flex-1 basis-[16rem]">
           <h3 id={headingId} className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
             {t == null ? (
-              <span className="text-title font-semibold text-gray-700 dark:text-gray-200">No ticket</span>
+              <span className="text-title font-semibold text-ui-ink">No ticket</span>
             ) : !single && t.ident != null ? (
               // On the board the key AND title are ONE button: it opens the ticket's story view.
               <TicketKeyButton
                 ticket={{ ...t, ident: t.ident }}
                 className="group inline-flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5"
               >
-                <span className="inline-flex shrink-0 items-center gap-1 font-mono text-body font-semibold text-sky-700 group-hover:underline dark:text-sky-300">
+                <span className="inline-flex shrink-0 items-center gap-1 font-mono text-body font-semibold text-ui-accent group-hover:underline">
                   <TicketIcon size={13} className="shrink-0" />
                   {t.key}
                   <span className="sr-only">:</span>
                 </span>
                 {t.title != null && (
-                  <span className="min-w-0 text-title font-semibold leading-snug text-gray-900 group-hover:underline dark:text-gray-50">
+                  <span className="min-w-0 text-title font-semibold leading-snug text-ui-ink group-hover:underline">
                     {t.title}
                   </span>
                 )}
@@ -1278,28 +1278,28 @@ function TicketStack({
                     target="_blank"
                     rel="noreferrer noopener"
                     title={`Open ${cardTicketLabel(t)}`}
-                    className="hit inline-flex shrink-0 items-center gap-1 font-mono text-body font-semibold text-sky-700 hover:underline dark:text-sky-300"
+                    className="hit inline-flex shrink-0 items-center gap-1 font-mono text-body font-semibold text-ui-accent hover:underline"
                   >
                     <TicketIcon size={13} className="shrink-0" />
                     {t.key}
                     <span className="sr-only">:</span>
                   </a>
                 ) : (
-                  <span className="inline-flex shrink-0 items-center gap-1 font-mono text-body font-semibold text-gray-700 dark:text-gray-200">
+                  <span className="inline-flex shrink-0 items-center gap-1 font-mono text-body font-semibold text-ui-ink">
                     <TicketIcon size={13} className="shrink-0" />
                     {t.key}
                     <span className="sr-only">:</span>
                   </span>
                 )}
                 {t.title != null && (
-                  <span className="min-w-0 text-title font-semibold leading-snug text-gray-900 dark:text-gray-50">
+                  <span className="min-w-0 text-title font-semibold leading-snug text-ui-ink">
                     {t.title}
                   </span>
                 )}
               </>
             )}
           </h3>
-          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-meta text-gray-600 dark:text-gray-300">
+          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-meta text-ui-mute">
             {t != null && <TicketPeopleAndStatus t={t} cat={cat} single={false} />}
           </div>
         </div>
@@ -1315,7 +1315,7 @@ function TicketStack({
               {rollup.map((p, i) => (
                 <span key={p.text} className="inline-flex items-center gap-1.5">
                   {i > 0 && <Sep />}
-                  <span className={p.tone === 'bad' ? 'text-red-700 dark:text-red-400' : 'text-green-700 dark:text-green-400'}>
+                  <span className={p.tone === 'bad' ? 'text-ui-danger' : 'text-ui-success'}>
                     {p.text}
                   </span>
                 </span>
@@ -1323,7 +1323,7 @@ function TicketStack({
             </span>
           )}
           {(!single || stack.rows.length > 0) && (
-            <span className="whitespace-nowrap rounded-full bg-white px-2 py-px text-meta font-medium text-gray-600 ring-1 ring-gray-200 dark:bg-gray-900 dark:text-gray-300 dark:ring-gray-700">
+            <span className="whitespace-nowrap rounded-full bg-ui-surface px-2 py-px text-meta font-medium text-ui-mute ring-1 ring-ui-line">
               {prCountLabel(stack.rows.length)}
             </span>
           )}
@@ -1378,7 +1378,7 @@ function MergedPanel({
         aria-expanded={open}
         aria-controls={listId}
         onClick={() => toggle(stackId)}
-        className="hit inline-flex items-center gap-1.5 rounded-ui px-1 py-0.5 text-meta font-medium text-gray-600 hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-gray-300 dark:hover:text-gray-50"
+        className="hit inline-flex items-center gap-1.5 rounded-ui px-1 py-0.5 text-meta font-medium text-ui-mute hover:text-ui-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent"
       >
         <ChevronIcon dir={open ? 'down' : 'right'} size={12} />
         Merged ({prs.length})
@@ -1389,22 +1389,22 @@ function MergedPanel({
             <button
               type="button"
               onClick={() => onOpen(m)}
-              className="hit block w-full rounded-ui border border-gray-200 bg-white px-3 py-1.5 text-left transition-colors hover:border-gray-300 hover:bg-gray-50/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-gray-800 dark:bg-gray-950 dark:hover:border-gray-700 dark:hover:bg-gray-900"
+              className="hit block w-full rounded-ui border border-ui-line bg-ui-surface px-3 py-1.5 text-left transition-colors hover:border-ui-line hover:bg-ui-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent"
             >
               <span className="flex min-w-0 items-center gap-1.5">
-                <MergeIcon size={13} className="shrink-0 text-gray-500 dark:text-gray-400" aria-hidden />
-                <span className="min-w-0 truncate text-body font-medium text-gray-800 dark:text-gray-100" title={m.title}>
+                <MergeIcon size={13} className="shrink-0 text-ui-mute" aria-hidden />
+                <span className="min-w-0 truncate text-body font-medium text-ui-ink" title={m.title}>
                   {m.title}
                 </span>
               </span>
-              <span className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 pl-[19px] text-meta text-gray-500 dark:text-gray-400">
+              <span className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 pl-[19px] text-meta text-ui-mute">
                 <span className="max-w-[18rem] truncate font-mono" title={`${m.repoFullName}#${m.number}`}>
                   {m.repoFullName}#{m.number}
                 </span>
                 {m.authorLogin != null && (
                   <>
                     <Sep />
-                    <span className="truncate text-gray-600 dark:text-gray-300">{m.authorDisplayName ?? m.authorLogin}</span>
+                    <span className="truncate text-ui-mute">{m.authorDisplayName ?? m.authorLogin}</span>
                   </>
                 )}
                 <Sep />
@@ -1599,7 +1599,7 @@ function OpenPrCard({
         }
         after={
           pr.isDraft ? (
-            <span className="shrink-0 rounded-ui border border-gray-300 px-1.5 text-meta font-medium text-gray-600 dark:border-gray-600 dark:text-gray-300">
+            <span className="shrink-0 rounded-ui border border-ui-line px-1.5 text-meta font-medium text-ui-mute">
               Draft
             </span>
           ) : null
@@ -1626,7 +1626,7 @@ function OpenPrCard({
       {/* 3 — the ticket row: absent when the PR names no ticket (never an empty row). */}
       {tickets.length > 0 && (
         <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-meta">
-          <TicketIcon size={13} className="shrink-0 text-sky-700 dark:text-sky-300" />
+          <TicketIcon size={13} className="shrink-0 text-ui-accent" />
           {tickets.map((t) => {
             const href = safeExternalUrl(t.url);
             const label = cardTicketLabel(t);
@@ -1635,7 +1635,7 @@ function OpenPrCard({
                 <span className="shrink-0 whitespace-nowrap font-mono font-medium">{t.key}</span>
                 {t.title != null && (
                   <>
-                    <span aria-hidden className="decorative-mark shrink-0 text-gray-400 dark:text-gray-500">·</span>
+                    <span aria-hidden className="decorative-mark shrink-0 text-ui-faint">·</span>
                     <span className="min-w-0 truncate">{t.title}</span>
                   </>
                 )}
@@ -1645,7 +1645,7 @@ function OpenPrCard({
               <TicketKeyButton
                 key={t.key}
                 ticket={{ ...t, ident: t.ident }}
-                className="inline-flex min-w-0 max-w-full items-center gap-1 text-sky-700 hover:underline dark:text-sky-300 sm:max-w-[32rem]"
+                className="inline-flex min-w-0 max-w-full items-center gap-1 text-ui-accent hover:underline sm:max-w-[32rem]"
               >
                 {body}
               </TicketKeyButton>
@@ -1656,7 +1656,7 @@ function OpenPrCard({
                 target="_blank"
                 rel="noreferrer noopener"
                 title={`Open ${label}`}
-                className="hit inline-flex min-w-0 max-w-full items-center gap-1 text-sky-700 hover:underline dark:text-sky-300 sm:max-w-[32rem]"
+                className="hit inline-flex min-w-0 max-w-full items-center gap-1 text-ui-accent hover:underline sm:max-w-[32rem]"
               >
                 {body}
               </a>
@@ -1664,7 +1664,7 @@ function OpenPrCard({
               <span
                 key={t.key}
                 title={label}
-                className="inline-flex min-w-0 max-w-full items-center gap-1 text-gray-700 dark:text-gray-200 sm:max-w-[32rem]"
+                className="inline-flex min-w-0 max-w-full items-center gap-1 text-ui-ink sm:max-w-[32rem]"
               >
                 {body}
               </span>
@@ -1675,8 +1675,8 @@ function OpenPrCard({
 
       {/* 3b — inside a stack: the PR's other tickets, as jumps to their own stacks. */}
       {alsoIn.length > 0 && (
-        <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-meta text-gray-600 dark:text-gray-300">
-          <TicketIcon size={13} className="shrink-0 text-sky-700 dark:text-sky-300" />
+        <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-meta text-ui-mute">
+          <TicketIcon size={13} className="shrink-0 text-ui-accent" />
           <span>Also in</span>
           {alsoIn.map((t) => (
             <button
@@ -1687,7 +1687,7 @@ function OpenPrCard({
                 onJumpToStack(stackIdFor(t.key));
               }}
               title={`Go to ${cardTicketLabel(t)}`}
-              className="hit rounded-ui font-mono font-medium text-sky-700 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-sky-300"
+              className="hit rounded-ui font-mono font-medium text-ui-accent hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent"
             >
               {t.key}
             </button>
@@ -1702,7 +1702,7 @@ function OpenPrCard({
           <span className="max-w-[18rem] truncate" title={repoName}>
             {repoName}
           </span>,
-          <span className="inline-flex min-w-0 items-center gap-1 text-gray-600 dark:text-gray-300">
+          <span className="inline-flex min-w-0 items-center gap-1 text-ui-mute">
             <Avatar user={author} size={14} />
             <span className="truncate">{userLabel(author, pr.authorId)}</span>
           </span>,

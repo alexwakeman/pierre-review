@@ -107,12 +107,12 @@ export function FileMenu({
         onClick={() => onOpenChange(!open)}
         aria-haspopup="listbox"
         aria-expanded={open}
-        className="hit flex min-w-0 items-center gap-1.5 rounded-ui border border-gray-300 px-2 py-1 text-meta text-gray-800 hover:border-gray-400 dark:border-gray-700 dark:text-gray-100 dark:hover:border-gray-600"
+        className="hit flex min-w-0 items-center gap-1.5 rounded-ui border border-ui-line px-2 py-1 text-meta text-ui-ink hover:border-ui-line"
       >
         <span className="truncate font-mono" title={active?.path}>
           {active == null ? 'No files' : truncateLeft(active.path, 44)}
         </span>
-        <CaretIcon size={11} className="shrink-0 text-gray-500 dark:text-gray-400" />
+        <CaretIcon size={11} className="shrink-0 text-ui-mute" />
       </button>
 
       {open && (
@@ -121,9 +121,9 @@ export function FileMenu({
             ref={refs.setFloating}
             style={floatingStyles}
             {...getFloatingProps()}
-            className="z-[70] w-[26rem] max-w-[92vw] overflow-hidden rounded-ui border border-gray-200 bg-white shadow-lg dark:border-gray-800 dark:bg-gray-900"
+            className="z-[70] w-[26rem] max-w-[92vw] overflow-hidden rounded-ui border border-ui-line bg-ui-surface shadow-lg"
           >
-            <div className="flex items-center justify-between border-b border-gray-200 px-2.5 py-1.5 text-meta text-gray-600 dark:border-gray-800 dark:text-gray-300">
+            <div className="flex items-center justify-between border-b border-ui-line px-2.5 py-1.5 text-meta text-ui-mute">
               <span>{fileCount(resolvedFiles, files.length)}</span>
               {unsupportedCount > 0 && <span>{unsupportedHeadline(unsupportedCount)}</span>}
             </div>
@@ -176,9 +176,9 @@ export function FileMenu({
                           // reason the file has to be resolved on GitHub — so it clears AA like
                           // any other sentence; the disabled-ness is carried by the mark, the
                           // words and `aria-disabled`, not by making it hard to read.
-                          'text-gray-500 dark:text-gray-400'
-                        : 'text-gray-800 hover:bg-gray-100 dark:text-gray-100 dark:hover:bg-gray-800'
-                    } ${isActive ? 'bg-gray-100 dark:bg-gray-800' : ''}`}
+                          'text-ui-mute'
+                        : 'text-ui-ink hover:bg-ui-hover'
+                    } ${isActive ? 'bg-ui-raise' : ''}`}
                   >
                     <span className={`shrink-0 ${ROW_STATE_INK[row.state]}`}>
                       {Mark != null ? <Mark size={12} /> : <PartialSpacer />}

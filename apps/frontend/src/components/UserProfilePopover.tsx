@@ -168,7 +168,7 @@ export function UserProfilePopover({
         style={{ ...floatingStyles, visibility: isPositioned ? 'visible' : 'hidden' }}
         {...getFloatingProps()}
         data-testid="user-profile-popover"
-        className="z-50 w-64 rounded-ui border border-gray-200 bg-white p-3 shadow-xl dark:border-gray-700 dark:bg-gray-900"
+        className="z-50 w-64 rounded-ui border border-ui-line bg-ui-surface p-3 shadow-xl"
       >
         <div className="flex items-center gap-2.5">
           {user?.avatarUrl ? (
@@ -179,37 +179,37 @@ export function UserProfilePopover({
               alt=""
               loading="lazy"
               referrerPolicy="no-referrer"
-              className="h-11 w-11 shrink-0 rounded-full bg-gray-100 dark:bg-gray-800"
+              className="h-11 w-11 shrink-0 rounded-full bg-ui-raise"
             />
           ) : (
-            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gray-200 text-title font-semibold text-gray-500 dark:bg-gray-800 dark:text-gray-400">
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-ui-hover text-title font-semibold text-ui-mute">
               {(label[0] ?? '?').toUpperCase()}
             </span>
           )}
           <div className="min-w-0">
             <div
-              className="truncate text-body font-semibold text-gray-800 dark:text-gray-100"
+              className="truncate text-body font-semibold text-ui-ink"
               title={label}
             >
               {label}
             </div>
             {login && (
-              <div className="truncate text-meta text-gray-500 dark:text-gray-400" title={`@${login}`}>
+              <div className="truncate text-meta text-ui-mute" title={`@${login}`}>
                 @{login}
               </div>
             )}
           </div>
         </div>
 
-        <div className="mt-2.5 text-meta text-gray-500 dark:text-gray-400" title={scopeLabel}>
+        <div className="mt-2.5 text-meta text-ui-mute" title={scopeLabel}>
           Last {USER_STATS_WINDOW_DAYS} days · {scopeLabel}
         </div>
 
         {isLoading && (
-          <div className="py-3 text-meta text-gray-400 dark:text-gray-500">Loading activity…</div>
+          <div className="py-3 text-meta text-ui-faint">Loading activity…</div>
         )}
         {isError && (
-          <div className="py-3 text-meta text-red-500 dark:text-red-400">Couldn't load stats.</div>
+          <div className="py-3 text-meta text-ui-danger">Couldn't load stats.</div>
         )}
         {stats && (
           <table className="mt-1 w-full text-meta">
@@ -217,9 +217,9 @@ export function UserProfilePopover({
               {rows.map((r) => (
                 <tr
                   key={r.label}
-                  className="border-t border-gray-100 first:border-0 dark:border-gray-800"
+                  className="border-t border-ui-line first:border-0"
                 >
-                  <td className="py-1 pr-2 text-gray-500 dark:text-gray-400">
+                  <td className="py-1 pr-2 text-ui-mute">
                     <span className="inline-flex items-center gap-1.5">
                       {r.dot && (
                         <span
@@ -230,7 +230,7 @@ export function UserProfilePopover({
                       {r.label}
                     </span>
                   </td>
-                  <td className="py-1 text-right font-medium tabular-nums text-gray-800 dark:text-gray-100">
+                  <td className="py-1 text-right font-medium tabular-nums text-ui-ink">
                     {r.value}
                   </td>
                 </tr>
@@ -239,7 +239,7 @@ export function UserProfilePopover({
           </table>
         )}
 
-        <div className="mt-2.5 flex items-center justify-between gap-2 border-t border-gray-100 pt-2 dark:border-gray-800">
+        <div className="mt-2.5 flex items-center justify-between gap-2 border-t border-ui-line pt-2">
           <div className="flex items-center gap-1">
             <button
               type="button"
@@ -252,7 +252,7 @@ export function UserProfilePopover({
                 });
                 onDismiss();
               }}
-              className="hit rounded-ui px-1.5 py-1 text-meta font-medium text-sky-600 hover:bg-sky-50 dark:text-sky-400 dark:hover:bg-sky-950/40"
+              className="hit rounded-ui px-1.5 py-1 text-meta font-medium text-ui-accent hover:bg-ui-accent/10"
               title={`Open ${label}'s last ${FEED_WINDOW_DAYS} days of activity in a tab`}
             >
               {`Last ${FEED_WINDOW_DAYS} days of activity →`}
@@ -264,7 +264,7 @@ export function UserProfilePopover({
               target="_blank"
               rel="noreferrer noopener"
               onClick={(e) => e.stopPropagation()}
-              className="hit inline-flex items-center gap-1 rounded-ui px-1.5 py-1 text-meta text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+              className="hit inline-flex items-center gap-1 rounded-ui px-1.5 py-1 text-meta text-ui-mute hover:bg-ui-hover hover:text-ui-ink"
               title={`@${login} on GitHub`}
             >
               GitHub

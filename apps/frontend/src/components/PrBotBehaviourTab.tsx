@@ -103,10 +103,10 @@ const TOUCH_GROUP_CAP = 40;
 function Stat({ label, value, tone }: { label: string; value: string; tone?: 'warn' | 'default' }): JSX.Element {
   return (
     <div>
-      <div className="text-meta font-semibold text-gray-500 dark:text-gray-400">{label}</div>
+      <div className="text-meta font-semibold text-ui-mute">{label}</div>
       <div
         className={`text-body font-semibold ${
-          tone === 'warn' ? 'text-red-600 dark:text-red-400' : 'text-gray-800 dark:text-gray-100'
+          tone === 'warn' ? 'text-ui-danger' : 'text-ui-ink'
         }`}
       >
         {value}
@@ -163,9 +163,9 @@ function BotBlock({ bot, color }: { bot: PrBotBehaviour; color: string }): JSX.E
   // argument about a bot you have not measured.
 
   return (
-    <div className="space-y-2 rounded-ui border border-gray-200 p-3 dark:border-gray-800">
+    <div className="space-y-2 rounded-ui border border-ui-line p-3">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="inline-flex items-center gap-1.5 text-body font-semibold text-gray-800 dark:text-gray-100">
+        <span className="inline-flex items-center gap-1.5 text-body font-semibold text-ui-ink">
           <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: color }} aria-hidden />
           {bot.label}
         </span>
@@ -176,14 +176,14 @@ function BotBlock({ bot, color }: { bot: PrBotBehaviour; color: string }): JSX.E
           {meta.label}
         </span>
         {bot.firstTouchAt && (
-          <span className="text-meta text-gray-500 dark:text-gray-400">
+          <span className="text-meta text-ui-mute">
             first touch {relativeTime(bot.firstTouchAt)}
           </span>
         )}
         {anomaly && (
           // A flag, not a figure — see the note above `anomaly`. The size lives in the `<Stat>`
           // and the typical in `ttfrNote`, each once.
-          <span className="rounded-ui bg-red-500/10 px-1.5 py-0.5 text-meta font-semibold text-red-600 dark:text-red-400">
+          <span className="rounded-ui bg-ui-danger/10 px-1.5 py-0.5 text-meta font-semibold text-ui-danger">
             <WarningIcon size={11} className="inline-block align-[-0.1em]" /> slower than usual
           </span>
         )}
@@ -196,9 +196,9 @@ function BotBlock({ bot, color }: { bot: PrBotBehaviour; color: string }): JSX.E
         <Stat label="Touches" value={String(bot.touchCount)} />
       </div>
 
-      <div className="text-meta text-gray-500 dark:text-gray-400">
+      <div className="text-meta text-ui-mute">
         {/* TTFR vs the bot's own typical — the "vs typical" evidence. */}
-        <span className={anomaly ? 'font-medium text-red-600 dark:text-red-400' : ''}>
+        <span className={anomaly ? 'font-medium text-ui-danger' : ''}>
           {!building && anomaly && (
             <WarningIcon size={11} className="mr-1 inline-block align-[-0.1em]" />
           )}
@@ -227,7 +227,7 @@ function BotBlock({ bot, color }: { bot: PrBotBehaviour; color: string }): JSX.E
           {shownGroups.map((g, i) => (
             <span
               key={i}
-              className="inline-flex items-center gap-1 rounded-ui bg-gray-500/10 px-1.5 py-0.5 text-meta text-gray-600 dark:text-gray-300"
+              className="inline-flex items-center gap-1 rounded-ui bg-ui-raise px-1.5 py-0.5 text-meta text-ui-mute"
               // Everything the fold collapsed: the run's review/comment split (only when it stands
               // for more than one touch — for a single touch the icon already says which kind it
               // was), then the only absolute timestamps on the whole tab, which for a group are a
@@ -249,7 +249,7 @@ function BotBlock({ bot, color }: { bot: PrBotBehaviour; color: string }): JSX.E
           {hiddenTouches > 0 && (
             // Named in TOUCHES, not groups: the cap is on chips but the reader's denominator is
             // the "Touches" Stat on this same card, and the two have to reconcile.
-            <span className="text-meta text-gray-500 dark:text-gray-400">
+            <span className="text-meta text-ui-mute">
               +{hiddenTouches} more touches
             </span>
           )}
@@ -292,17 +292,17 @@ export function PrBotBehaviourTab({ pr }: { pr: PrDetail }): JSX.Element {
             counts as four.
           </p>
         </InfoButton>
-        <span className="text-meta text-gray-500 dark:text-gray-400">
+        <span className="text-meta text-ui-mute">
           Each bot against its own usual
         </span>
       </div>
 
       {isLoading ? (
-        <div className="h-24 animate-pulse rounded-ui border border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-900/40" />
+        <div className="h-24 animate-pulse rounded-ui border border-ui-line bg-ui-surface" />
       ) : isError ? (
-        <div className="text-body text-red-500">Couldn’t load bot behaviour for this PR.</div>
+        <div className="text-body text-ui-danger">Couldn’t load bot behaviour for this PR.</div>
       ) : bots.length === 0 ? (
-        <div className="rounded-ui border border-dashed border-gray-300 p-6 text-center text-body text-gray-500 dark:border-gray-700 dark:text-gray-400">
+        <div className="rounded-ui border border-dashed border-ui-line p-6 text-center text-body text-ui-mute">
           No automated-reviewer activity on this PR.
         </div>
       ) : (

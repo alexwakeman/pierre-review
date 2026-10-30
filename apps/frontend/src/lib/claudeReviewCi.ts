@@ -8,9 +8,9 @@ import type {
   ClaudeCiNotCheckedReason,
 } from '@pierre-review/shared';
 
-const CHIP_RED = 'bg-red-500/10 text-red-700 dark:text-red-400';
-const CHIP_ORANGE = 'bg-orange-500/10 text-orange-700 dark:text-orange-400';
-const CHIP_GREY = 'bg-gray-500/10 text-gray-600 dark:text-gray-300';
+const CHIP_RED = 'bg-ui-danger/10 text-ui-danger';
+const CHIP_ORANGE = 'bg-ui-warn/10 text-ui-warn';
+const CHIP_GREY = 'bg-ui-raise text-ui-mute';
 
 export const CI_CATEGORY_LABEL: Record<ClaudeCiFailureCategory, string> = {
   code: 'Code',

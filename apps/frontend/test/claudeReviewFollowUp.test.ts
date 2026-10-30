@@ -147,9 +147,9 @@ describe('partitionFollowUp', () => {
   });
 
   it('paints not checked grey, never amber or red', () => {
-    expect(FOLLOW_UP_STATUS_CLASS.not_checked).toContain('gray');
-    expect(FOLLOW_UP_STATUS_CLASS.not_checked).not.toMatch(/amber|red|orange/);
-    expect(FOLLOW_UP_STATUS_CLASS.not_addressed).toContain('red');
+    expect(FOLLOW_UP_STATUS_CLASS.not_checked).toMatch(/ui-(mute|faint|raise|ink)/);
+    expect(FOLLOW_UP_STATUS_CLASS.not_checked).not.toMatch(/ui-(warn|danger)/);
+    expect(FOLLOW_UP_STATUS_CLASS.not_addressed).toMatch(/ui-danger/);
   });
 });
 
@@ -260,7 +260,7 @@ describe('alreadyPostedReraiseIds', () => {
     });
     expect([...ids]).toEqual([10]);
     expect(ALREADY_POSTED_CHIP.label).toBe('Already posted');
-    expect(ALREADY_POSTED_CHIP.cls).toContain('gray');
+    expect(ALREADY_POSTED_CHIP.cls).toMatch(/ui-(mute|faint|raise|ink)/);
   });
 
   it('falls back to the record head flag, and is empty without a follow-up', () => {

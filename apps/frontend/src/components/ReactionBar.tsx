@@ -98,8 +98,8 @@ export function ReactionBar({
             }}
             className={`inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-meta leading-none transition-colors disabled:opacity-60 ${
               g.viewerHasReacted
-                ? 'border-blue-400 bg-blue-50 text-blue-700 dark:border-blue-500 dark:bg-blue-950/40 dark:text-blue-300'
-                : 'border-gray-200 text-gray-500 hover:border-gray-300 dark:border-gray-800 dark:text-gray-400 dark:hover:border-gray-700'
+                ? 'border-ui-accent/50 bg-ui-accent/10 text-ui-accent'
+                : 'border-ui-line text-ui-mute hover:border-ui-line'
             }`}
           >
             <span aria-hidden>{REACTION_EMOJI[g.content]}</span>
@@ -124,7 +124,7 @@ export function ReactionBar({
           }}
           className={`inline-flex items-center gap-0.5 rounded-full border border-dashed px-1.5 py-1 text-meta leading-none transition-opacity disabled:opacity-40 ${
             groups.length === 0 ? 'opacity-40 hover:opacity-100' : ''
-          } border-gray-300 text-gray-400 hover:text-gray-600 dark:border-gray-700 dark:text-gray-500 dark:hover:text-gray-200`}
+          } border-ui-line text-ui-faint hover:text-ui-mute`}
         >
           <SmileyIcon />
           <span aria-hidden>+</span>
@@ -140,7 +140,7 @@ export function ReactionBar({
               setOpen(false);
             }
           }}
-          className="absolute bottom-full left-0 z-30 mb-1 flex gap-0.5 rounded-ui border border-gray-200 bg-white p-1 shadow-lg dark:border-gray-700 dark:bg-gray-900"
+          className="absolute bottom-full left-0 z-30 mb-1 flex gap-0.5 rounded-ui border border-ui-line bg-ui-surface p-1 shadow-lg"
         >
           {/* All eight, always. A curated subset would leave a reaction added on github.com
               with no chip to render it under, i.e. silently dropping data GitHub is showing
@@ -158,8 +158,8 @@ export function ReactionBar({
                   e.stopPropagation();
                   react(content, !mine);
                 }}
-                className={`rounded-ui px-1 py-0.5 text-body leading-none hover:bg-gray-100 dark:hover:bg-gray-800 ${
-                  mine ? 'bg-blue-50 dark:bg-blue-950/40' : ''
+                className={`rounded-ui px-1 py-0.5 text-body leading-none hover:bg-ui-hover ${
+                  mine ? 'bg-ui-accent/10' : ''
                 }`}
               >
                 <span aria-hidden>{REACTION_EMOJI[content]}</span>

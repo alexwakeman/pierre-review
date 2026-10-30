@@ -150,7 +150,7 @@ export function CheckRow({
       target="_blank"
       rel="noreferrer noopener"
       onClick={(e) => e.stopPropagation()}
-      className="hit text-blue-500 hover:underline"
+      className="hit text-ui-accent hover:underline"
       title={linkTitle}
     >
       Open on GitHub <ExternalLinkIcon size={11} className="inline-block align-[-0.1em]" />
@@ -169,20 +169,20 @@ export function CheckRow({
           target="_blank"
           rel="noreferrer noopener"
           title={linkTitle}
-          className="hit flex items-center gap-2 rounded-ui px-1 py-0.5 hover:bg-gray-100 dark:hover:bg-gray-800"
+          className="hit flex items-center gap-2 rounded-ui px-1 py-0.5 hover:bg-ui-hover"
         >
           {dot}
           <span className="min-w-0 truncate">{check.name}</span>
           {/* Limn's own team-claim line (a status Limn posted): listed, never counted as CI. */}
           {check.limnOwned && (
             <span
-              className="shrink-0 rounded-ui bg-gray-100 px-1 text-meta font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-300"
+              className="shrink-0 rounded-ui bg-ui-raise px-1 text-meta font-medium text-ui-mute"
               title="Posted by Limn to mark an auto review. Not CI."
             >
               Limn
             </span>
           )}
-          <span className="ml-auto shrink-0 text-meta text-gray-400">{m.label}</span>
+          <span className="ml-auto shrink-0 text-meta text-ui-faint">{m.label}</span>
         </a>
       </li>
     );
@@ -199,7 +199,7 @@ export function CheckRow({
           body is a plain scroller); the stopPropagation on the anchor is there so that stays true
           if one is ever added. flex-1 + justify-end gives the button every pixel right of the
           name, so the row still toggles almost everywhere it used to. */}
-      <div className="flex items-center gap-2 rounded-ui px-1 py-0.5 hover:bg-gray-100 dark:hover:bg-gray-800">
+      <div className="flex items-center gap-2 rounded-ui px-1 py-0.5 hover:bg-ui-hover">
         {dot}
         <a
           href={link.href}
@@ -216,10 +216,10 @@ export function CheckRow({
           onClick={toggle}
           aria-expanded={expanded}
           title={expanded ? 'Hide the job log' : 'Show the job log'}
-          className="hit flex flex-1 items-center justify-end gap-1.5 text-gray-400"
+          className="hit flex flex-1 items-center justify-end gap-1.5 text-ui-faint"
         >
           <span className="text-meta">{m.label}</span>
-          <span className="inline-flex items-center gap-0.5 text-meta font-medium text-blue-500">
+          <span className="inline-flex items-center gap-0.5 text-meta font-medium text-ui-accent">
             <ChevronIcon dir={expanded ? 'down' : 'right'} size={10} />
             {expanded ? 'hide logs' : 'logs'}
           </span>
@@ -228,10 +228,10 @@ export function CheckRow({
       {expanded && (
         <div className="mb-1 mt-1">
           {logs.isLoading ? (
-            <div className="px-1 py-2 text-gray-400">Loading logs…</div>
+            <div className="px-1 py-2 text-ui-faint">Loading logs…</div>
           ) : view?.available ? (
             <>
-              <div className="mb-1 flex items-center justify-between gap-2 px-1 text-meta text-gray-400">
+              <div className="mb-1 flex items-center justify-between gap-2 px-1 text-meta text-ui-faint">
                 <span>
                   {view.partial && view.loadedBytes != null
                     ? `${view.lines} lines · ${formatLogBytes(view.loadedBytes)}${
@@ -248,7 +248,7 @@ export function CheckRow({
                   {(logs.hasNextPage || logs.isFetchingNextPage) && (
                     <button
                       type="button"
-                      className="hit rounded-ui border border-gray-300 px-1.5 py-0.5 text-meta hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
+                      className="hit rounded-ui border border-ui-line px-1.5 py-0.5 text-meta hover:border-ui-line disabled:opacity-50"
                       disabled={!canLoadEarlier}
                       onClick={loadEarlier}
                       title="Load the previous chunk of this log (or just scroll up)"
@@ -269,13 +269,13 @@ export function CheckRow({
               <pre
                 ref={preRef}
                 onScroll={onScroll}
-                className="max-h-[40rem] overflow-auto whitespace-pre rounded-ui bg-gray-900 p-2 font-mono text-meta leading-[1.45] text-gray-100"
+                className="max-h-[40rem] overflow-auto whitespace-pre rounded-ui bg-ui-raise p-2 font-mono text-meta leading-[1.45] text-ui-ink"
               >
                 {view.text || '(empty log)'}
               </pre>
             </>
           ) : (
-            <div className="px-1 py-2 text-gray-400">
+            <div className="px-1 py-2 text-ui-faint">
               {view?.reason ?? "Couldn't load logs."} {gitHubLink}
             </div>
           )}
@@ -348,7 +348,7 @@ export function CiRerunControl({
     <div className="mt-2 flex flex-wrap items-center gap-2">
       <button
         type="button"
-        className="hit whitespace-nowrap rounded-ui border border-blue-400 px-2.5 py-1 text-meta text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:border-blue-600 dark:text-blue-400 dark:hover:bg-blue-900/30"
+        className="hit whitespace-nowrap rounded-ui border border-ui-accent/50 px-2.5 py-1 text-meta text-ui-accent hover:bg-ui-accent/10 disabled:opacity-50"
         disabled={rerun.isPending || failedRunIds.length === 0}
         onClick={() => fire('failed', failedRunIds)}
         title="Re-run only the failed jobs of the failing workflow run(s)"
@@ -357,7 +357,7 @@ export function CiRerunControl({
       </button>
       <button
         type="button"
-        className="hit whitespace-nowrap rounded-ui border border-gray-300 px-2.5 py-1 text-meta hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
+        className="hit whitespace-nowrap rounded-ui border border-ui-line px-2.5 py-1 text-meta hover:border-ui-line disabled:opacity-50"
         disabled={rerun.isPending}
         onClick={() => fire('all', allRunIds)}
         title="Re-run the entire workflow run(s) from scratch"
@@ -365,7 +365,7 @@ export function CiRerunControl({
         Re-run all jobs
       </button>
       {outcome && !rerun.isPending && (
-        <span className="text-meta text-gray-500 dark:text-gray-400">
+        <span className="text-meta text-ui-mute">
           Re-run requested — CI updates on the next sync.
           {outcome.failed > 0 &&
             ` (${outcome.failed} run${
@@ -374,7 +374,7 @@ export function CiRerunControl({
         </span>
       )}
       {rerun.isError && (
-        <span className="text-meta text-red-500">
+        <span className="text-meta text-ui-danger">
           {rerun.error instanceof Error ? rerun.error.message : 'Re-run failed'}
         </span>
       )}

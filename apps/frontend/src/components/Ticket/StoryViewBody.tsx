@@ -25,7 +25,7 @@ import { ChevronIcon } from '../Icons.js';
 // listed; PRs elsewhere are counted. `workspaceId === null` renders nothing (not resolved).
 
 const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
-const MUTED = 'text-gray-600 dark:text-gray-300';
+const MUTED = 'text-ui-mute';
 
 export function StoryViewBody({
   ident,
@@ -123,7 +123,7 @@ export function StoryViewBody({
             </p>
           )}
           {total > 0 && outside > 0 && <p className={`px-1 text-meta ${MUTED}`}>{plural(outside, 'pull request')} in other workspaces.</p>}
-          {data.truncated && <p className="px-1 text-meta text-amber-800 dark:text-amber-300">Showing the latest pull requests only.</p>}
+          {data.truncated && <p className="px-1 text-meta text-ui-warn">Showing the latest pull requests only.</p>}
           {closed.length > 0 && <ClosedList prs={closed} repoNameById={repoNameById} onOpenPr={openTab} />}
         </>
       )}

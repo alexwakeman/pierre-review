@@ -193,7 +193,7 @@ export function BotTriageCard({
   const segments: JSX.Element[] = [];
   if (hasProFold) {
     segments.push(
-      <span key="real" className="inline-flex items-center gap-1 font-medium text-red-600 dark:text-red-400">
+      <span key="real" className="inline-flex items-center gap-1 font-medium text-ui-danger">
         <Dot color="#e11d48" />
         {proFold.real} real issue{proFold.real === 1 ? '' : 's'}
       </span>,
@@ -225,13 +225,13 @@ export function BotTriageCard({
 
   const headline = (
     <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-      <span className="inline-flex items-center gap-1 font-medium text-gray-700 dark:text-gray-200">
+      <span className="inline-flex items-center gap-1 font-medium text-ui-ink">
         <BotIcon size={12} />
         {botCommentCount} bot comments
       </span>
       {segments.map((s, i) => (
         <span key={i} className="inline-flex items-center gap-2">
-          {i === 0 ? <span className="text-gray-400">:</span> : <span className="text-gray-400">·</span>}
+          {i === 0 ? <span className="text-ui-faint">:</span> : <span className="text-ui-faint">·</span>}
           {s}
         </span>
       ))}
@@ -249,7 +249,7 @@ export function BotTriageCard({
           <button
             type="button"
             onClick={onOpenThreads}
-            className="hit ml-auto rounded-ui px-1.5 py-0.5 font-medium text-sky-600 underline-offset-2 hover:underline dark:text-sky-400"
+            className="hit ml-auto rounded-ui px-1.5 py-0.5 font-medium text-ui-accent underline-offset-2 hover:underline"
             title={
               resolvableIds.length > 0
                 ? 'See the threads. The likely-addressed ones can be resolved there.'
@@ -276,14 +276,14 @@ export function BotTriageCard({
         {headline}
         {/* Threads the latest Claude review did not judge; this card never runs one. */}
         {hasProFold && proFold.unjudged > 0 && (
-          <span className="text-gray-500 dark:text-gray-400">{proFold.unjudged} not judged</span>
+          <span className="text-ui-mute">{proFold.unjudged} not judged</span>
         )}
         {resolvableIds.length > 0 && !confirming && (
           <button
             type="button"
             onClick={() => setConfirming(true)}
             disabled={resolveBotThreads.isPending}
-            className="hit ml-auto rounded-ui border border-green-600 px-2 py-0.5 font-medium text-green-700 hover:bg-green-50 disabled:opacity-60 dark:text-green-400 dark:hover:bg-green-950/30"
+            className="hit ml-auto rounded-ui border border-ui-success/40 px-2 py-0.5 font-medium text-ui-success hover:bg-ui-success/10 disabled:opacity-60"
             title="A later commit touched the file each of these threads flags — review the exact list, then resolve them on GitHub in one click."
           >
             Resolve the {resolvableIds.length} addressed
@@ -294,8 +294,8 @@ export function BotTriageCard({
       {/* Confirm step: the exact threads, listed — resolve is user-initiated and confirm-gated,
           always naming what it will touch (nothing ever auto-resolves). */}
       {confirming && (
-        <div className="mt-2 rounded-ui border border-green-200 bg-white/60 p-2 dark:border-green-900 dark:bg-gray-950/40">
-          <div className="mb-1 font-medium text-gray-700 dark:text-gray-200">
+        <div className="mt-2 rounded-ui border border-ui-success/40 bg-white/60 p-2">
+          <div className="mb-1 font-medium text-ui-ink">
             Resolve {resolvableThreads.length} likely-addressed bot thread
             {resolvableThreads.length === 1 ? '' : 's'} on GitHub?
           </div>
@@ -306,11 +306,11 @@ export function BotTriageCard({
               const excerpt = (t.comments[0]?.body ?? '').replace(/\s+/g, ' ').slice(0, 90);
               return (
                 <li key={t.id} className="flex items-baseline gap-1.5">
-                  <code className="shrink-0 font-mono text-meta text-gray-500 dark:text-gray-400">
+                  <code className="shrink-0 font-mono text-meta text-ui-mute">
                     {t.path.split('/').pop() ?? t.path}
                     {t.line != null ? `:${t.line}` : ''}
                   </code>
-                  <span className="truncate text-gray-500 dark:text-gray-400" title={t.comments[0]?.body ?? ''}>
+                  <span className="truncate text-ui-mute" title={t.comments[0]?.body ?? ''}>
                     {userLabel(author, authorId)}: {excerpt}
                   </span>
                 </li>
@@ -327,7 +327,7 @@ export function BotTriageCard({
                   { onSettled: () => setConfirming(false) },
                 )
               }
-              className="hit rounded-ui bg-green-600 px-2 py-0.5 font-medium text-white hover:bg-green-700 disabled:opacity-60"
+              className="hit rounded-ui bg-ui-success px-2 py-0.5 font-medium text-white hover:bg-ui-success disabled:opacity-60"
             >
               {resolveBotThreads.isPending ? 'Resolving…' : 'Yes, resolve'}
             </button>
@@ -335,7 +335,7 @@ export function BotTriageCard({
               type="button"
               disabled={resolveBotThreads.isPending}
               onClick={() => setConfirming(false)}
-              className="hit rounded-ui px-2 py-0.5 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
+              className="hit rounded-ui px-2 py-0.5 text-ui-mute hover:text-ui-ink"
             >
               Cancel
             </button>
@@ -345,7 +345,7 @@ export function BotTriageCard({
 
       {resolveBotThreads.data &&
         (resolveBotThreads.data.resolved > 0 || resolveBotThreads.data.failed > 0) && (
-          <div className="mt-1 text-gray-500 dark:text-gray-400">
+          <div className="mt-1 text-ui-mute">
             Resolved {resolveBotThreads.data.resolved}
             {resolveBotThreads.data.failed > 0 && ` · ${resolveBotThreads.data.failed} failed`}.
           </div>

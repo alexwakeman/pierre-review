@@ -23,7 +23,7 @@ export function TeamClaimLine({ prId, data }: { prId: number; data: ClaudeReview
     pending?.mine && skipLine == null ? 'Your auto review didn’t finish. Limn releases its pending GitHub line on its own.' : null;
   const refused = clear.data && !clear.data.ok ? (clear.data.message ?? 'Couldn’t clear it.') : null;
   return (
-    <div className="mt-2 space-y-1 text-meta text-gray-600 dark:text-gray-400">
+    <div className="mt-2 space-y-1 text-meta text-ui-mute">
       {skipLine != null && <div>{skipLine}</div>}
       {skipLine == null && recordLine != null && pendingLine == null && <div>{recordLine}</div>}
       {pendingLine != null && <div>{pendingLine}</div>}
@@ -39,14 +39,14 @@ export function TeamClaimLine({ prId, data }: { prId: number; data: ClaudeReview
                   clear.mutate(pending.provider);
                 }}
                 disabled={clear.isPending}
-                className="hit rounded-ui border border-gray-300 px-2 py-0.5 text-meta hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
+                className="hit rounded-ui border border-ui-line px-2 py-0.5 text-meta hover:border-ui-line disabled:opacity-50"
               >
                 Clear anyway
               </button>
               <button
                 type="button"
                 onClick={() => setConfirming(false)}
-                className="hit rounded-ui border border-gray-300 px-2 py-0.5 text-meta hover:border-gray-400 dark:border-gray-700 dark:hover:border-gray-500"
+                className="hit rounded-ui border border-ui-line px-2 py-0.5 text-meta hover:border-ui-line"
               >
                 Cancel
               </button>
@@ -57,13 +57,13 @@ export function TeamClaimLine({ prId, data }: { prId: number; data: ClaudeReview
               onClick={() => (pending.mine ? clear.mutate(pending.provider) : setConfirming(true))}
               disabled={clear.isPending}
               title={`Replace the pending ${aiProviderName(pending.provider)} line with “Cleared by you”, so any Limn can review this commit.`}
-              className="hit rounded-ui border border-gray-300 px-2 py-0.5 text-meta hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500"
+              className="hit rounded-ui border border-ui-line px-2 py-0.5 text-meta hover:border-ui-line disabled:opacity-50"
             >
               {clear.isPending ? 'Clearing…' : 'Clear'}
             </button>
           )}
           {(refused != null || clear.isError) && (
-            <span className="text-red-600 dark:text-red-400">
+            <span className="text-ui-danger">
               {refused ?? (clear.error as Error)?.message ?? 'Couldn’t clear it.'}
             </span>
           )}

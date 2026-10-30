@@ -41,8 +41,8 @@ import { PencilIcon, PlusIcon } from './Icons.js';
 export type OpenDesignFile = (cell: DesignCell, path: string) => void;
 
 const CARD_CHANGE: Record<DesignCell['change'], string> = {
-  new: 'border-2 border-solid border-ai-signal-fill bg-white dark:bg-gray-950',
-  changed: 'border-2 border-dashed border-ai-signal-fill/70 bg-white dark:bg-gray-950',
+  new: 'border-2 border-solid border-ai-signal-fill bg-ui-surface',
+  changed: 'border-2 border-dashed border-ai-signal-fill/70 bg-ui-surface',
   unchanged: 'border border-solid border-ai-border bg-ai-surface-2',
 };
 
@@ -109,7 +109,7 @@ export function DesignGrid({
         {layout.acts.map((a, i) => (
           <div
             key={a.id}
-            className="relative z-10 min-w-0 self-end break-words text-meta font-semibold text-gray-800 dark:text-gray-100"
+            className="relative z-10 min-w-0 self-end break-words text-meta font-semibold text-ui-ink"
             style={{ gridRow: 1, gridColumn: i + col0 }}
           >
             <span className="sr-only">Stage {i + 1}: </span>
@@ -120,8 +120,8 @@ export function DesignGrid({
         {byRow.map((r, row) => (
           <Fragment key={r.layer}>
             <div
-              className={`relative z-10 min-w-0 break-words text-meta font-medium text-gray-600 dark:text-gray-300 ${
-                narrow ? 'mt-1 border-t border-gray-200 pt-1 dark:border-gray-800' : 'self-center'
+              className={`relative z-10 min-w-0 break-words text-meta font-medium text-ui-mute ${
+                narrow ? 'mt-1 border-t border-ui-line pt-1' : 'self-center'
               }`}
               style={narrow ? { gridRow: rowOf(row) - 1, gridColumn: '1 / -1' } : { gridRow: rowOf(row), gridColumn: 1 }}
             >
@@ -206,7 +206,7 @@ function DesignCard({
         {word != null && (
           <span
             className={`inline-flex items-center gap-0.5 text-meta font-semibold ${
-              cell.change === 'new' ? 'text-ai-signal' : 'text-gray-700 dark:text-gray-200'
+              cell.change === 'new' ? 'text-ai-signal' : 'text-ui-ink'
             }`}
           >
             {cell.change === 'new' ? <PlusIcon size={10} /> : <PencilIcon size={10} />}
@@ -214,17 +214,17 @@ function DesignCard({
           </span>
         )}
         {cell.pattern != null && (
-          <span className="inline-block max-w-full break-words rounded-ui bg-gray-100 px-1 text-meta text-gray-700 dark:bg-gray-800 dark:text-gray-200">
+          <span className="inline-block max-w-full break-words rounded-ui bg-ui-raise px-1 text-meta text-ui-ink">
             {cell.pattern}
           </span>
         )}
         {member != null && (
-          <span className="whitespace-nowrap rounded-ui border border-gray-300 px-1 text-meta text-gray-700 dark:border-gray-700 dark:text-gray-200">
+          <span className="whitespace-nowrap rounded-ui border border-ui-line px-1 text-meta text-ui-ink">
             {badges.get(member.prId) ?? `#${member.number}`}
           </span>
         )}
       </span>
-      <span className="mt-0.5 line-clamp-2 block break-words text-body leading-snug text-gray-900 dark:text-gray-50">
+      <span className="mt-0.5 line-clamp-2 block break-words text-body leading-snug text-ui-ink">
         {cell.label}
       </span>
     </>
@@ -266,7 +266,7 @@ function DesignCard({
           if (many) setOpen((o) => !o);
           else openFile!(cell, cell.files[0]!);
         }}
-        className={`${cls} cursor-pointer hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500`}
+        className={`${cls} cursor-pointer hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent`}
       >
         {body}
       </button>
@@ -290,7 +290,7 @@ function DesignCard({
                         setOpen(false);
                         openFile!(cell, f);
                       }}
-                      className="hit block w-full break-all rounded-ui px-2 py-1 text-left font-mono text-meta text-gray-800 hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 dark:text-gray-100 dark:hover:bg-gray-800"
+                      className="hit block w-full break-all rounded-ui px-2 py-1 text-left font-mono text-meta text-ui-ink hover:bg-ui-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent"
                     >
                       {f}
                     </button>

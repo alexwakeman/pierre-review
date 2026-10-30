@@ -98,7 +98,7 @@ export function ciCurrency(state: Pick<CiReviewState, 'status' | 'staleBecause' 
 export const CI_CURRENCY_CLASS: Record<CiCurrencyTone, string> = {
   current: CLEAN_CLASS,
   stale: OUTDATED_CLASS,
-  running: 'bg-sky-500/10 text-sky-700 dark:text-sky-300',
+  running: 'bg-ui-accent/10 text-ui-accent',
 };
 
 /** Why the server did not run Claude. One sentence each. */

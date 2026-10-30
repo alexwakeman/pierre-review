@@ -72,7 +72,7 @@ export const CodeCell = memo(function CodeCell({
     <div className="mr-filler min-w-0" aria-hidden={ariaHidden === true ? true : undefined}>
       <div
         data-mr-cell={anchor}
-        className={`min-w-0 font-mono text-meta leading-[18px] text-gray-900 dark:text-gray-100 ${
+        className={`min-w-0 font-mono text-meta leading-[18px] text-ui-ink ${
           paint ?? ''
         } ${rule != null ? `border-l-2 ${rule}` : ''} ${emptyButPainted ? 'h-[18px]' : ''}`}
       >
@@ -81,7 +81,7 @@ export const CodeCell = memo(function CodeCell({
             <div key={`gap-${i}`} className="mr-filler h-[18px]" />
           ) : (
             <div key={`${row.n ?? 'r'}-${i}`} className="flex">
-              <span className="w-9 shrink-0 select-none pr-2 text-right tabular-nums text-gray-500 dark:text-gray-400">
+              <span className="w-9 shrink-0 select-none pr-2 text-right tabular-nums text-ui-mute">
                 {row.n ?? ''}
               </span>
               {row.html != null ? (

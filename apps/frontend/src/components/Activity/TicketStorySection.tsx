@@ -53,7 +53,7 @@ import { StoryDesignButton, StoryDesignSection, useStoryDesign, type StoryDesign
 import { StoryDocsAlignmentBlock, StoryDocsButton, StoryDocsCriterionDetail } from './StoryDocsAlignment.js';
 import { aiModelWords } from '@pierre-review/shared';
 
-const MUTED = 'text-gray-500 dark:text-gray-400';
+const MUTED = 'text-ui-mute';
 /** Criteria listed before "Show all" (real stories itemise up to ~35). */
 const CRITERIA_SHOWN = 10;
 const NO_DOCS_ITEMS: ReadonlyMap<number, StoryDocsCriterionItem> = new Map();
@@ -305,7 +305,7 @@ function ReviewSummary({
     // The docs check does not need the review: with no criteria it draws the run's own numbered list.
     return (
       <div className="space-y-2">
-        <p className="text-meta text-red-600 dark:text-red-400">Could not load the story.</p>
+        <p className="text-meta text-ui-danger">Could not load the story.</p>
         {design}
         {docsNotes.block}
       </div>

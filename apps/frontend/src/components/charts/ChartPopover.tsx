@@ -124,7 +124,7 @@ export function ChartPopover({ label, content, children, anchorX, testId }: Char
         data-testid={testId}
         aria-label={label}
         aria-expanded={open}
-        className="hit block w-full cursor-pointer rounded-ui text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
+        className="hit block w-full cursor-pointer rounded-ui text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent"
         {...getReferenceProps({
           // A click pins; a second one unpins AND closes, even with the pointer still over it.
           onClick: () => {

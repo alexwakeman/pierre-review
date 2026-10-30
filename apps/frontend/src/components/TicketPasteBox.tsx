@@ -18,15 +18,15 @@ import { CheckIcon, CloseIcon, PlusIcon, WarningIcon } from './Icons.js';
 // found. Check adds the readable ones to the PR and starts ONE ticket review per ticket. "Input
 // manually" reveals the typed-story form (ClaudeReviewTicketPanel), unchanged.
 
-const MUTED = 'text-gray-500 dark:text-gray-400';
-const ERROR_TEXT = 'text-red-600 dark:text-red-400';
+const MUTED = 'text-ui-mute';
+const ERROR_TEXT = 'text-ui-danger';
 const BTN =
-  'whitespace-nowrap rounded-ui border border-gray-300 px-2 py-0.5 text-meta hover:border-gray-400 disabled:opacity-50 dark:border-gray-700 dark:hover:border-gray-500';
+  'whitespace-nowrap rounded-ui border border-ui-line px-2 py-0.5 text-meta hover:border-ui-line disabled:opacity-50';
 const BTN_PRIMARY =
-  'whitespace-nowrap rounded-ui border border-blue-400 px-2 py-0.5 text-meta text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:border-blue-600 dark:text-blue-400 dark:hover:bg-blue-900/30';
-const LINK_BTN = 'text-meta text-blue-700 hover:underline disabled:opacity-50 dark:text-blue-300';
+  'whitespace-nowrap rounded-ui border border-ui-accent/50 px-2 py-0.5 text-meta text-ui-accent hover:bg-ui-accent/10 disabled:opacity-50';
+const LINK_BTN = 'text-meta text-ui-accent hover:underline disabled:opacity-50';
 const SPINNER =
-  'inline-block h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-gray-300 border-t-blue-500 dark:border-gray-600 dark:border-t-blue-400';
+  'inline-block h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-ui-line border-t-ui-accent/50';
 
 interface Chip {
   ref: string;
@@ -198,10 +198,10 @@ export function TicketPasteBox({
 
   return (
     <div className="mt-2 space-y-2">
-      <label htmlFor={inputId} className="block text-meta font-medium text-gray-700 dark:text-gray-200">
+      <label htmlFor={inputId} className="block text-meta font-medium text-ui-ink">
         Add tickets
       </label>
-      <div className="flex flex-wrap items-center gap-1.5 rounded-ui border border-gray-300 px-2 py-1.5 focus-within:border-blue-500 dark:border-gray-700">
+      <div className="flex flex-wrap items-center gap-1.5 rounded-ui border border-ui-line px-2 py-1.5 focus-within:border-ui-accent/50">
         {chips.length > 0 && (
           <ul className="contents" aria-label="Tickets to add">
             {chips.map((c, i) => (
@@ -220,7 +220,7 @@ export function TicketPasteBox({
           onBlur={commit}
           disabled={check.isPending}
           placeholder={chips.length === 0 ? 'Paste ticket links or keys, like PROJ-123' : 'Add another'}
-          className="min-w-[12rem] flex-1 bg-transparent py-0.5 text-meta text-gray-900 outline-none placeholder:text-gray-500 dark:text-gray-100 dark:placeholder:text-gray-400"
+          className="min-w-[12rem] flex-1 bg-transparent py-0.5 text-meta text-ui-ink outline-none placeholder:text-ui-mute"
         />
       </div>
       {note != null && <p className={`text-meta ${MUTED}`}>{note}</p>}
@@ -270,19 +270,19 @@ function ChipView({ chip, onRemove }: { chip: Chip; onRemove: () => void }): JSX
     <li
       className={`inline-flex max-w-full items-start gap-1 rounded-full border px-2 py-0.5 text-meta ${
         r == null
-          ? 'border-gray-300 text-gray-700 dark:border-gray-700 dark:text-gray-200'
+          ? 'border-ui-line text-ui-ink'
           : ok
-            ? 'border-green-300 text-gray-800 dark:border-green-800 dark:text-gray-100'
-            : 'border-red-300 text-gray-800 dark:border-red-800 dark:text-gray-100'
+            ? 'border-ui-success/40 text-ui-ink'
+            : 'border-ui-danger/40 text-ui-ink'
       }`}
     >
       <span className="mt-px shrink-0" aria-hidden="true">
         {r == null ? (
           <span className={SPINNER} />
         ) : ok ? (
-          <CheckIcon size={12} className="text-green-600 dark:text-green-400" />
+          <CheckIcon size={12} className="text-ui-success" />
         ) : (
-          <WarningIcon size={12} className="text-red-600 dark:text-red-400" />
+          <WarningIcon size={12} className="text-ui-danger" />
         )}
       </span>
       <span className="min-w-0 break-words">
@@ -305,7 +305,7 @@ function ChipView({ chip, onRemove }: { chip: Chip; onRemove: () => void }): JSX
         type="button"
         onClick={onRemove}
         aria-label={`Remove ${label}`}
-        className="hit mt-px shrink-0 rounded-full p-0.5 text-gray-500 hover:bg-gray-200 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100"
+        className="hit mt-px shrink-0 rounded-full p-0.5 text-ui-mute hover:bg-ui-hover hover:text-ui-ink"
       >
         <CloseIcon size={10} />
       </button>

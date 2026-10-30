@@ -22,9 +22,9 @@ import { SparkleIcon } from './Icons.js';
 // other provider that is signed in. The label ("AI quota for Limn:") is screen-reader only: the item shows the icon and the figure.
 
 const TONE: Record<'normal' | 'near' | 'over', string> = {
-  normal: 'border-gray-300 text-gray-700 dark:border-gray-700 dark:text-gray-200',
-  near: 'border-amber-400 text-amber-800 dark:border-amber-600 dark:text-amber-300',
-  over: 'border-red-400 text-red-700 dark:border-red-700 dark:text-red-300',
+  normal: 'border-ui-line text-ui-ink',
+  near: 'border-ui-warn/40 text-ui-warn',
+  over: 'border-ui-danger/40 text-ui-danger',
 };
 
 const SIDEBAR_TONE: Record<'normal' | 'near' | 'over', string> = {
@@ -93,7 +93,7 @@ export function AiUsageMenu({ variant = 'header' }: { variant?: 'header' | 'side
         className={
           variant === 'sidebar'
             ? `flex h-8 w-full min-w-0 items-center gap-2 rounded-ui px-2 text-left text-meta outline-none hover:bg-ui-hover focus-visible:ring-2 focus-visible:ring-ui-accent touch:h-11 ${SIDEBAR_TONE[head.tone]}`
-            : `inline-flex items-center gap-1 whitespace-nowrap rounded-ui border px-2 py-0.5 text-meta tabular-nums hover:border-gray-400 dark:hover:border-gray-500 ${TONE[head.tone]}`
+            : `inline-flex items-center gap-1 whitespace-nowrap rounded-ui border px-2 py-0.5 text-meta tabular-nums hover:border-ui-line ${TONE[head.tone]}`
         }
       >
         <SparkleIcon size={variant === 'sidebar' ? 14 : 12} className="shrink-0" />
@@ -115,36 +115,36 @@ export function AiUsageMenu({ variant = 'header' }: { variant?: 'header' | 'side
           className={
             variant === 'sidebar'
               ? // Opens UP from the sidebar foot; never wider than the screen in the phone drawer.
-                'absolute bottom-full left-0 z-[60] mb-1 max-h-[calc(100vh-6rem)] w-[22rem] max-w-[calc(100vw-1.5rem)] overflow-y-auto overscroll-contain rounded-ui bg-ui-raise p-3 text-meta text-gray-700 shadow-xl shadow-black/30 motion-safe:animate-ui-pop dark:text-gray-200'
-              : 'absolute right-0 top-full z-[60] mt-1 max-h-[calc(100vh-4rem)] overflow-y-auto w-[22rem] max-w-[calc(100vw-1rem)] max-sm:fixed max-sm:inset-x-2 max-sm:top-auto max-sm:w-auto max-sm:max-w-none rounded-ui border border-gray-200 bg-white p-3 text-meta text-gray-700 shadow-lg dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200'
+                'absolute bottom-full left-0 z-[60] mb-1 max-h-[calc(100vh-6rem)] w-[22rem] max-w-[calc(100vw-1.5rem)] overflow-y-auto overscroll-contain rounded-ui bg-ui-raise p-3 text-meta text-ui-ink shadow-xl shadow-black/30 motion-safe:animate-ui-pop'
+              : 'absolute right-0 top-full z-[60] mt-1 max-h-[calc(100vh-4rem)] overflow-y-auto w-[22rem] max-w-[calc(100vw-1rem)] max-sm:fixed max-sm:inset-x-2 max-sm:top-auto max-sm:w-auto max-sm:max-w-none rounded-ui border border-ui-line bg-ui-surface p-3 text-meta text-ui-ink shadow-lg'
           }
         >
           {details.map((detail, i) => (
             <div
               key={detail.provider}
               data-testid={`ai-usage-provider-${detail.provider}`}
-              className={i > 0 ? 'mt-3 border-t border-gray-200 pt-3 dark:border-gray-800' : undefined}
+              className={i > 0 ? 'mt-3 border-t border-ui-line pt-3' : undefined}
             >
               <div className="flex items-center gap-1">
-                <p className="text-body font-semibold text-gray-900 dark:text-gray-50">{detail.heading}</p>
+                <p className="text-body font-semibold text-ui-ink">{detail.heading}</p>
                 {i === infoAt && <LimnShareInfo />}
               </div>
               {detail.paused != null && (
-                <p className="mt-1 font-medium text-amber-700 dark:text-amber-300">{detail.paused}</p>
+                <p className="mt-1 font-medium text-ui-warn">{detail.paused}</p>
               )}
               {detail.sections.map((sec) => (
                 <div key={sec.title} className="mt-2.5">
-                  <p className="text-meta font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">{sec.title}</p>
+                  <p className="text-meta font-medium uppercase tracking-wide text-ui-mute">{sec.title}</p>
                   <dl className="mt-1 space-y-1.5">
                     {sec.rows.map((r) => (
                       <div key={r.label}>
                         <div className="flex items-baseline justify-between gap-3">
-                          <dt className="shrink-0 text-gray-600 dark:text-gray-300">{r.label}</dt>
-                          <dd className="text-right tabular-nums text-gray-900 dark:text-gray-50">{r.value}</dd>
+                          <dt className="shrink-0 text-ui-mute">{r.label}</dt>
+                          <dd className="text-right tabular-nums text-ui-ink">{r.value}</dd>
                         </div>
                         {r.barPct != null && <UsageBar pct={r.barPct} />}
                         {r.note != null && (
-                          <p className="mt-0.5 text-meta text-gray-500 dark:text-gray-400">{r.note}</p>
+                          <p className="mt-0.5 text-meta text-ui-mute">{r.note}</p>
                         )}
                       </div>
                     ))}
@@ -152,18 +152,18 @@ export function AiUsageMenu({ variant = 'header' }: { variant?: 'header' | 'side
                 </div>
               ))}
               {detail.updated != null && (
-                <p className="mt-1.5 text-meta text-gray-500 dark:text-gray-400">{detail.updated}</p>
+                <p className="mt-1.5 text-meta text-ui-mute">{detail.updated}</p>
               )}
             </div>
           ))}
-          <div className="mt-3 flex items-center justify-end gap-2 border-t border-gray-200 pt-2 dark:border-gray-800">
+          <div className="mt-3 flex items-center justify-end gap-2 border-t border-ui-line pt-2">
             <button
               type="button"
               onClick={() => {
                 setOpen(false);
                 openSettings('claude-spend');
               }}
-              className="hit rounded-ui text-meta text-sky-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-sky-300"
+              className="hit rounded-ui text-meta text-ui-accent hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent"
             >
               AI spend settings
             </button>
@@ -194,9 +194,9 @@ function LimnShareInfo(): JSX.Element {
 
 /** One row's bar: how full it is, amber from 80%, red at 100%. Decorative — the row's text says the figure. */
 function UsageBar({ pct }: { pct: number }) {
-  const fill = pct >= 100 ? 'bg-red-500' : pct >= 80 ? 'bg-amber-500' : 'bg-sky-500';
+  const fill = pct >= 100 ? 'bg-ui-danger' : pct >= 80 ? 'bg-ui-warn' : 'bg-ui-accent-fill';
   return (
-    <div aria-hidden="true" className="mt-0.5 h-1.5 w-full overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700">
+    <div aria-hidden="true" className="mt-0.5 h-1.5 w-full overflow-hidden rounded-full bg-ui-hover">
       <div className={`h-full rounded-full ${fill}`} style={{ width: `${pct}%` }} />
     </div>
   );

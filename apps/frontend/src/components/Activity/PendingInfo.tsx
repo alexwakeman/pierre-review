@@ -129,8 +129,8 @@ function InfoPopover({
         aria-label={label}
         className={`inline-flex shrink-0 items-center justify-center rounded-full p-0.5 transition-colors ${
           open
-            ? 'text-gray-800 dark:text-gray-100'
-            : 'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-100'
+            ? 'text-ui-ink'
+            : 'text-ui-mute hover:text-ui-ink'
         }`}
       >
         <InfoIcon size={13} />
@@ -144,7 +144,7 @@ function InfoPopover({
             role="dialog"
             aria-label={label}
             data-noactivate
-            className={`z-[60] ${width} max-w-[92vw] cursor-default rounded-ui border border-gray-200 bg-white p-3 text-meta leading-relaxed text-gray-700 shadow-lg dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200`}
+            className={`z-[60] ${width} max-w-[92vw] cursor-default rounded-ui border border-ui-line bg-ui-surface p-3 text-meta leading-relaxed text-ui-ink shadow-lg`}
           >
             {children(() => setOpen(false))}
           </div>
@@ -159,7 +159,7 @@ function GuideLink({ onClick }: { onClick: () => void }): JSX.Element {
     <button
       type="button"
       onClick={onClick}
-      className="hit mt-2.5 text-meta font-medium text-sky-700 hover:underline dark:text-sky-400"
+      className="hit mt-2.5 text-meta font-medium text-ui-accent hover:underline"
     >
       How Pending works
     </button>
@@ -182,7 +182,7 @@ export function PendingOrderInfo({
     <InfoPopover label="How Pending is ordered" align="start">
       {(close) => (
         <>
-          <p className="font-semibold text-gray-900 dark:text-gray-50">How Pending is ordered</p>
+          <p className="font-semibold text-ui-ink">How Pending is ordered</p>
           <p className="mt-1">
             Everything waiting on you or your workspace, in {PENDING_TABS.length} tabs. The number on
             a tab is everything in it. Dependency updates and security alerts have their own tab,
@@ -263,7 +263,7 @@ function CardPlacementBody({
   return (
     <div className="space-y-2">
       <section>
-        <h3 className="text-meta font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+        <h3 className="text-meta font-semibold uppercase tracking-wide text-ui-mute">
           Why it is here
         </h3>
         <p className="mt-0.5">{x.why}</p>
@@ -277,26 +277,26 @@ function CardPlacementBody({
         </p>
       </section>
       <section>
-        <h3 className="text-meta font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+        <h3 className="text-meta font-semibold uppercase tracking-wide text-ui-mute">
           Where it sits
         </h3>
-        <p className="mt-0.5 font-medium text-gray-900 dark:text-gray-50">{x.place}</p>
+        <p className="mt-0.5 font-medium text-ui-ink">{x.place}</p>
         <p className="mt-0.5">{x.order}</p>
       </section>
       {x.score != null && (
         <section>
-          <h3 className="text-meta font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+          <h3 className="text-meta font-semibold uppercase tracking-wide text-ui-mute">
             Do next score: {x.score.total} of 100
           </h3>
           <table className="mt-1 w-full border-collapse text-meta">
             <tbody>
               {x.score.rows.map((r) => (
-                <tr key={r.key} className="border-t border-gray-100 align-top first:border-t-0 dark:border-gray-800">
+                <tr key={r.key} className="border-t border-ui-line align-top first:border-t-0">
                   <td className="py-1 pr-2">
                     <div className="font-medium">{r.label}</div>
-                    <div className="text-meta text-gray-500 dark:text-gray-400">{r.note}</div>
+                    <div className="text-meta text-ui-mute">{r.note}</div>
                   </td>
-                  <td className="whitespace-nowrap py-1 text-right tabular-nums text-gray-600 dark:text-gray-300">
+                  <td className="whitespace-nowrap py-1 text-right tabular-nums text-ui-mute">
                     {r.value} × {r.weight}%
                   </td>
                   <td className="whitespace-nowrap py-1 pl-2 text-right font-medium tabular-nums">
@@ -318,14 +318,14 @@ function CardPlacementBody({
 function GuideSection({ title, children }: { title: string; children: ReactNode }): JSX.Element {
   return (
     <section className="space-y-2">
-      <h3 className="text-title font-semibold text-gray-900 dark:text-gray-50">{title}</h3>
+      <h3 className="text-title font-semibold text-ui-ink">{title}</h3>
       {children}
     </section>
   );
 }
 
-const th = 'border-b border-gray-200 py-1.5 pr-3 text-left text-body font-semibold text-gray-600 dark:border-gray-700 dark:text-gray-300';
-const td = 'border-b border-gray-100 py-1.5 pr-3 align-top dark:border-gray-800';
+const th = 'border-b border-ui-line py-1.5 pr-3 text-left text-body font-semibold text-ui-mute';
+const td = 'border-b border-ui-line py-1.5 pr-3 align-top';
 
 function Dot({ severity }: { severity: InsightSeverity }): JSX.Element {
   return (
@@ -465,25 +465,25 @@ export function PendingGuideModal({
       role="presentation"
     >
       <div
-        className="flex max-h-[85vh] w-[46rem] max-w-[94vw] flex-col rounded-ui border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-900"
+        className="flex max-h-[85vh] w-[46rem] max-w-[94vw] flex-col rounded-ui border border-ui-line bg-ui-surface shadow-xl"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
         aria-label="How Pending works"
       >
-        <div className="flex items-center justify-between border-b border-gray-200 px-5 py-3 dark:border-gray-800">
-          <h2 className="text-title font-semibold text-gray-900 dark:text-gray-50">How Pending works</h2>
+        <div className="flex items-center justify-between border-b border-ui-line px-5 py-3">
+          <h2 className="text-title font-semibold text-ui-ink">How Pending works</h2>
           <button
             type="button"
             onClick={onClose}
-            className="hit flex items-center self-stretch text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-100"
+            className="hit flex items-center self-stretch text-ui-mute hover:text-ui-ink"
             aria-label="Close (Esc)"
           >
             <CloseIcon size={16} />
           </button>
         </div>
 
-        <div className="min-h-0 flex-1 space-y-6 overflow-auto px-5 py-4 text-title leading-relaxed text-gray-700 dark:text-gray-200">
+        <div className="min-h-0 flex-1 space-y-6 overflow-auto px-5 py-4 text-title leading-relaxed text-ui-ink">
           <p>
             Pending is everything waiting on you or your workspace, in {PENDING_TABS.length} tabs.
             It is worked out fresh every time it loads. Nothing is stored and nothing can be
@@ -503,7 +503,7 @@ export function PendingGuideModal({
                   <tr key={t.key}>
                     <td className={`${td} whitespace-nowrap font-medium`}>
                       <span className="inline-flex items-center gap-1.5">
-                        <PendingTabIcon tab={t.key} className="shrink-0 text-gray-500 dark:text-gray-400" />
+                        <PendingTabIcon tab={t.key} className="shrink-0 text-ui-mute" />
                         {TAB_LABEL[t.key]}
                       </span>
                     </td>
@@ -746,7 +746,7 @@ export function PendingGuideModal({
                   <tr key={reason}>
                     <td className={`${td} font-medium`}>
                       <span className="inline-flex items-center gap-1.5">
-                        <PendingReasonIcon reason={reason} className="shrink-0 text-gray-500 dark:text-gray-400" />
+                        <PendingReasonIcon reason={reason} className="shrink-0 text-ui-mute" />
                         {MY_TURN_REASON_LABEL[reason]}
                       </span>
                     </td>

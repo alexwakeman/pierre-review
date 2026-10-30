@@ -123,15 +123,15 @@ describe('threadCountPills', () => {
       notChecked: 1,
     });
     expect(pills.map((p) => p.key)).toEqual(['toFix', 'addressed', 'notValid', 'notChecked']);
-    expect(pills[0]?.cls).toMatch(/red/);
-    expect(pills[3]?.cls).toMatch(/gray/);
-    expect(pills[3]?.cls).not.toMatch(/amber|orange/);
+    expect(pills[0]?.cls).toMatch(/ui-danger/);
+    expect(pills[3]?.cls).toMatch(/ui-(mute|faint|raise|ink)/);
+    expect(pills[3]?.cls).not.toMatch(/ui-warn/);
   });
 });
 
 it('a not-valid comment never wears a red "Not addressed"', () => {
-  expect(threadAddressedClass(thread('valid', 'not_addressed'))).toMatch(/red/);
-  expect(threadAddressedClass(thread('not_valid', 'not_addressed'))).not.toMatch(/red/);
+  expect(threadAddressedClass(thread('valid', 'not_addressed'))).toMatch(/ui-danger/);
+  expect(threadAddressedClass(thread('not_valid', 'not_addressed'))).not.toMatch(/ui-danger/);
 });
 
 it('threadNotCheckedReason tells over-the-cap apart from unreported', () => {

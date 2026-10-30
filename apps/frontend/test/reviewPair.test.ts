@@ -199,7 +199,7 @@ describe('the consolidated review (one view)', () => {
     expect(html).toMatch(/data-finding-source="claude"[^>]*>Claude</);
     expect(html).toMatch(/data-finding-source="codex"[^>]*>Codex</);
     // The source label is the same neutral 11px chip as the lens: no colour per provider.
-    expect(html).toMatch(/class="rounded bg-gray-500\/10 px-1\.5 py-0\.5 text-\[11px\] text-gray-600 dark:text-gray-300" data-finding-source/);
+    expect(html).toMatch(/class="rounded-ui bg-ui-raise px-1\.5 py-0\.5 text-meta text-ui-mute" data-finding-source/);
     // One list (never a grouped view per half), and the consolidation is not narrated.
     expect(html.match(/id="claude-finding-/g)?.length).toBe(3);
     expect(html).not.toMatch(/consolidat|merged by/i);

@@ -170,7 +170,7 @@ export function SlotRow({
     <button
       type="button"
       onClick={() => setExpanded((v) => !v)}
-      className="hit flex w-full items-center gap-1 px-1 py-0.5 text-left text-meta text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100"
+      className="hit flex w-full items-center gap-1 px-1 py-0.5 text-left text-meta text-ui-mute hover:text-ui-ink"
     >
       <ChevronIcon dir={expanded ? 'down' : 'right'} size={11} />
       {expanded ? HIDE_UNCHANGED : showUnchanged(hiddenCount)}
@@ -335,7 +335,7 @@ export function SlotRow({
         // them, and a pointer would have no route to "take this side".
         // State lives above this component, so widening the window restores the panes with every
         // decision intact.
-        <div className="col-span-full border-t border-gray-200 py-1 dark:border-gray-800">
+        <div className="col-span-full border-t border-ui-line py-1">
           <StackedSide label={PANE_OURS} rows={left} paint={leftPaint} anchor={anchor('left')} />
           {strip}
           <StackedSide
@@ -356,22 +356,22 @@ export function SlotRow({
         </div>
       ) : (
         <>
-          <div className="min-w-0 border-t border-gray-200 dark:border-gray-800">
+          <div className="min-w-0 border-t border-ui-line">
             <CodeCell rows={left} paint={leftPaint} anchor={anchor('left')} ariaHidden />
             {foldControl}
           </div>
-          <div className="border-t border-gray-200 dark:border-gray-800">
+          <div className="border-t border-ui-line">
             {gutter('left')}
           </div>
-          <div className="min-w-0 border-t border-gray-200 dark:border-gray-800">
+          <div className="min-w-0 border-t border-ui-line">
             {strip}
             <CodeCell rows={middle} paint={centrePaint} rule={rule} anchor={anchor('centre')} />
             {editor}
           </div>
-          <div className="border-t border-gray-200 dark:border-gray-800">
+          <div className="border-t border-ui-line">
             {gutter('right')}
           </div>
-          <div className="min-w-0 border-t border-gray-200 dark:border-gray-800">
+          <div className="min-w-0 border-t border-ui-line">
             <CodeCell rows={right} paint={rightPaint} anchor={anchor('right')} ariaHidden />
           </div>
         </>
@@ -395,7 +395,7 @@ function StackedSide({
 }): JSX.Element {
   return (
     <div className="min-w-0">
-      <div className="px-1 text-meta font-medium text-gray-500 dark:text-gray-400">{label}</div>
+      <div className="px-1 text-meta font-medium text-ui-mute">{label}</div>
       <CodeCell rows={rows} paint={paint} rule={rule} anchor={anchor} />
     </div>
   );

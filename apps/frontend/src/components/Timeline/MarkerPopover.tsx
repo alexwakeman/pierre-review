@@ -61,21 +61,21 @@ function PrContext({
   const isForeign =
     ev.actorId != null && pr.authorId != null && ev.actorId !== pr.authorId;
   return (
-    <div className="flex items-baseline gap-1 text-meta text-gray-500 dark:text-gray-400">
+    <div className="flex items-baseline gap-1 text-meta text-ui-mute">
       <span>on</span>
       {isForeign && (
-        <span className="font-medium text-gray-600 dark:text-gray-300">
+        <span className="font-medium text-ui-mute">
           {userLabel(owner, pr.authorId)}&rsquo;s
         </span>
       )}
       <button
         type="button"
         onClick={onOpen}
-        className="hit font-medium text-blue-500 hover:underline"
+        className="hit font-medium text-ui-accent hover:underline"
       >
         #{pr.number}
       </button>
-      <span className="truncate text-gray-400" title={pr.title}>
+      <span className="truncate text-ui-faint" title={pr.title}>
         {pr.title}
       </span>
     </div>
@@ -174,8 +174,8 @@ function SingleEvent({
           dangerouslySetInnerHTML={{ __html: vis.svg }}
         />
         <span className="font-semibold">{who}</span>
-        <span className="text-gray-500 dark:text-gray-400">· {vis.label}</span>
-        <span className="ml-auto text-gray-400">{relativeTime(ev.occurredAt)}</span>
+        <span className="text-ui-mute">· {vis.label}</span>
+        <span className="ml-auto text-ui-faint">{relativeTime(ev.occurredAt)}</span>
       </div>
 
       {pr && (
@@ -186,24 +186,24 @@ function SingleEvent({
         <div className="text-meta">
           {commit ? (
             <div className="flex items-center gap-1.5">
-              <code className="rounded-ui bg-gray-100 px-1 font-mono text-gray-600 dark:bg-gray-800 dark:text-gray-300">
+              <code className="rounded-ui bg-ui-raise px-1 font-mono text-ui-mute">
                 {commit.sha.slice(0, 7)}
               </code>
               {commit.message && (
-                <span className="truncate text-gray-600 dark:text-gray-300">
+                <span className="truncate text-ui-mute">
                   {commit.message.split('\n')[0]}
                 </span>
               )}
             </div>
           ) : (
-            <span className="text-gray-400">loading commit…</span>
+            <span className="text-ui-faint">loading commit…</span>
           )}
         </div>
       )}
 
       {thread && (
         <div className="flex items-center gap-1.5 text-meta">
-          <code className="truncate font-mono text-gray-600 dark:text-gray-300">
+          <code className="truncate font-mono text-ui-mute">
             {thread.path}
             {thread.line != null ? `:${thread.line}` : ''}
           </code>
@@ -215,7 +215,7 @@ function SingleEvent({
       {thread && <ClaudeThreadReason thread={thread} />}
 
       {anchor && (
-        <pre className="overflow-x-auto rounded-ui border border-gray-200 bg-gray-50 px-2 py-1 font-mono text-meta leading-snug text-gray-600 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-300">
+        <pre className="overflow-x-auto rounded-ui border border-ui-line bg-ui-surface px-2 py-1 font-mono text-meta leading-snug text-ui-mute">
           {anchorHtml != null ? (
             <>
               {/* The +/-/space marker prints plain — it is diff notation, not code.
@@ -233,7 +233,7 @@ function SingleEvent({
         <div className="text-meta">
           <Markdown>{threadComment.body}</Markdown>
           {thread && thread.comments.length > 1 && (
-            <div className="mt-1 text-meta text-gray-400">
+            <div className="mt-1 text-meta text-ui-faint">
               +{thread.comments.length - 1} more in thread
             </div>
           )}
@@ -245,7 +245,7 @@ function SingleEvent({
           {prComment ? (
             <Markdown>{prComment.body}</Markdown>
           ) : (
-            <span className="text-gray-400">loading comment…</span>
+            <span className="text-ui-faint">loading comment…</span>
           )}
         </div>
       )}
@@ -259,7 +259,7 @@ function SingleEvent({
           <button
             type="button"
             onClick={openInDetail}
-            className="hit text-blue-500 hover:underline"
+            className="hit text-ui-accent hover:underline"
           >
             Open in detail pane
           </button>
@@ -268,7 +268,7 @@ function SingleEvent({
           <button
             type="button"
             onClick={viewInActivity}
-            className="hit text-blue-500 hover:underline"
+            className="hit text-ui-accent hover:underline"
             title="Show this commit in the PR's Activity tab"
           >
             View in Activity
@@ -279,7 +279,7 @@ function SingleEvent({
             href={`${prDetail.githubUrl}/commits/${commit.sha}`}
             target="_blank"
             rel="noreferrer noopener"
-            className="hit text-blue-500 hover:underline"
+            className="hit text-ui-accent hover:underline"
           >
             Open commit on GitHub <ExternalLinkIcon size={11} className="inline-block align-[-0.1em]" />
           </a>
@@ -289,7 +289,7 @@ function SingleEvent({
             href={safeExternalUrl(prComment.url) ?? prDetail.githubUrl}
             target="_blank"
             rel="noreferrer noopener"
-            className="hit text-blue-500 hover:underline"
+            className="hit text-ui-accent hover:underline"
           >
             Open on GitHub <ExternalLinkIcon size={11} className="inline-block align-[-0.1em]" />
           </a>
@@ -491,7 +491,7 @@ export function MarkerPopover({
         {...getFloatingProps()}
         onPointerUp={persistSize}
         data-testid="marker-popover"
-        className="z-50 flex flex-col rounded-ui border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-900"
+        className="z-50 flex flex-col rounded-ui border border-ui-line bg-ui-surface shadow-xl"
       >
         <div className="tl-modal-header" onPointerDown={onDragStart}>
           <svg className="tl-grip" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
@@ -530,7 +530,7 @@ export function MarkerPopover({
               onNavigate={onNavigate}
             />
           ) : (
-            <div className="divide-y divide-gray-200 dark:divide-gray-800">
+            <div className="divide-y divide-ui-line">
               {events.map((ev) => (
                 <div key={ev.id} className="py-2 first:pt-0 last:pb-0">
                   <SingleEvent

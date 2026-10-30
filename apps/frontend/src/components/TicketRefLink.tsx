@@ -33,7 +33,7 @@ export function TicketRefLink({
           open({ ident, key: ticketKey, title });
         }}
         title={title != null ? `${ticketKey} ${title}` : `Open ${ticketKey}`}
-        className="hit text-left text-sky-700 underline decoration-sky-700/40 underline-offset-2 hover:decoration-sky-700 dark:text-sky-300 dark:decoration-sky-300/40"
+        className="hit text-left text-ui-accent underline decoration-ui-accent underline-offset-2 hover:decoration-ui-accent"
         data-testid="ticket-ref-link"
       >
         {children}
@@ -45,7 +45,7 @@ export function TicketRefLink({
           rel="noreferrer noopener"
           onClick={stop}
           aria-label={`Open ${ticketKey} in the tracker`}
-          className="hit self-center text-gray-500 hover:text-sky-700 dark:text-gray-400 dark:hover:text-sky-300"
+          className="hit self-center text-ui-mute hover:text-ui-accent"
         >
           <ExternalLinkIcon size={10} />
         </a>

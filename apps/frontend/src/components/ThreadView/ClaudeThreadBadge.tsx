@@ -25,22 +25,22 @@ import { InfoButton } from '../InfoModal.js';
 const VALIDITY_TONE: Record<ClaudeValidityPill, string> = {
   holds_up: 'text-ai-ink',
   partly: 'text-ai-ink',
-  doesnt_hold: 'text-gray-600 dark:text-gray-300',
-  unclear: 'text-gray-600 dark:text-gray-300',
+  doesnt_hold: 'text-ui-mute',
+  unclear: 'text-ui-mute',
 };
 
 const STATE_TONE: Record<ClaudeStatePill, string> = {
-  resolved: 'border-emerald-500/40 text-emerald-700 dark:text-emerald-300',
-  addressed: 'border-emerald-500/40 text-emerald-700 dark:text-emerald-300',
-  partly_addressed: 'border-amber-500/40 text-amber-800 dark:text-amber-300',
-  open: 'border-gray-300 text-gray-700 dark:border-gray-600 dark:text-gray-200',
+  resolved: 'border-ui-success/40 text-ui-success',
+  addressed: 'border-ui-success/40 text-ui-success',
+  partly_addressed: 'border-ui-warn/40 text-ui-warn',
+  open: 'border-ui-line text-ui-ink',
 };
 
 const FINDING_TONE: Record<ClaudeFindingPill, string> = {
-  addressed: 'text-emerald-700 dark:text-emerald-300',
-  no_longer_applies: 'text-emerald-700 dark:text-emerald-300',
+  addressed: 'text-ui-success',
+  no_longer_applies: 'text-ui-success',
   reply_accepted: 'text-ai-ink',
-  partly_addressed: 'text-amber-800 dark:text-amber-300',
+  partly_addressed: 'text-ui-warn',
   fix_later: 'text-ai-ink',
   not_addressed: 'text-ai-ink',
   pushed_back: 'text-ai-ink',
@@ -65,7 +65,7 @@ export function ClaudeThreadPills({
           <PendingClaudeReviewIcon size={12} className="shrink-0 text-ai-signal" />
           {CLAUDE_FINDING_LABEL[marker.finding]}
           {marker.state == null && marker.stale && (
-            <span className="text-gray-500 dark:text-gray-400">· earlier commit</span>
+            <span className="text-ui-mute">· earlier commit</span>
           )}
         </span>
       )}
@@ -77,7 +77,7 @@ export function ClaudeThreadPills({
           <PendingClaudeReviewIcon size={12} className="shrink-0 text-ai-signal" />
           {CLAUDE_VALIDITY_LABEL[marker.validity]}
           {marker.state == null && marker.stale && (
-            <span className="text-gray-500 dark:text-gray-400">· earlier commit</span>
+            <span className="text-ui-mute">· earlier commit</span>
           )}
         </span>
       )}
@@ -90,7 +90,7 @@ export function ClaudeThreadPills({
             <PendingClaudeReviewIcon size={12} className="shrink-0 text-ai-signal" />
           )}
           {CLAUDE_STATE_LABEL[marker.state]}
-          {marker.stale && <span className="text-gray-500 dark:text-gray-400">· earlier commit</span>}
+          {marker.stale && <span className="text-ui-mute">· earlier commit</span>}
         </span>
       )}
       {!noInfo && (
@@ -118,7 +118,7 @@ export function ClaudeThreadPills({
           ) : (
             <p>The pill says whether the comment holds up. {by} did not check the code for this one.</p>
           )}
-          <p className="text-gray-500 dark:text-gray-400">
+          <p className="text-ui-mute">
             Shown instead of “Likely addressed”, which only checks whether a later commit touched
             the file.
           </p>
@@ -176,7 +176,7 @@ export function ClaudeThreadReason({
   const more = explanation != null && explanation.trim() !== '' && explanation.trim() !== reason;
   return (
     <div
-      className="mb-2 text-meta text-gray-700 dark:text-gray-300"
+      className="mb-2 text-meta text-ui-ink"
       data-testid="claude-thread-reason"
     >
       <div className="flex items-start gap-1">
@@ -186,7 +186,7 @@ export function ClaudeThreadReason({
             type="button"
             onClick={() => setOpen((v) => !v)}
             aria-expanded={open}
-            className="hit inline-flex shrink-0 items-center gap-0.5 rounded-ui px-1 text-meta text-sky-700 hover:bg-sky-50 dark:text-sky-300 dark:hover:bg-sky-950/40"
+            className="hit inline-flex shrink-0 items-center gap-0.5 rounded-ui px-1 text-meta text-ui-accent hover:bg-ui-accent/10"
           >
             {open ? 'Less' : 'More'}
             <ChevronIcon dir={open ? 'up' : 'down'} size={10} />

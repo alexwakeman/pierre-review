@@ -100,8 +100,8 @@ import {
 } from './TicketReviewParts.js';
 
 const CHIP = REVIEW_CHIP;
-const MUTED = 'text-gray-500 dark:text-gray-400';
-const ERROR_TEXT = 'text-red-600 dark:text-red-400';
+const MUTED = 'text-ui-mute';
+const ERROR_TEXT = 'text-ui-danger';
 const BTN =
   'inline-flex h-7 items-center whitespace-nowrap rounded-ui bg-ui-raise px-2.5 text-meta font-medium text-ui-ink hover:bg-ui-hover disabled:cursor-not-allowed disabled:opacity-50 touch:h-10 touch:px-3';
 const BTN_PRIMARY =
@@ -164,7 +164,7 @@ function TicketShare({
         <button
           type="button"
           onClick={() => openStory({ ident, key: ticketKey, title: ticketTitle })}
-          className="hit text-blue-600 hover:underline dark:text-blue-400"
+          className="hit text-ui-accent hover:underline"
         >
           See the whole story
         </button>
@@ -234,10 +234,10 @@ function TicketBlock({
             (url != null ? (
               <JiraKeyLink ticketKey={entry.ticketKey} url={url} />
             ) : (
-              <span className="font-mono text-body font-semibold text-gray-900 dark:text-gray-100">{entry.ticketKey}</span>
+              <span className="font-mono text-body font-semibold text-ui-ink">{entry.ticketKey}</span>
             ))}
           {title != null && title !== '' && (
-            <span className="min-w-0 break-words text-body font-semibold text-gray-900 dark:text-gray-100">{title}</span>
+            <span className="min-w-0 break-words text-body font-semibold text-ui-ink">{title}</span>
           )}
         </h4>
         {state.alignment != null && (
@@ -509,7 +509,7 @@ export function TicketCoverageSection({
       {isLoading && <p className={`text-meta ${MUTED}`}>Loading…</p>}
       {isError && <p className={`text-meta ${ERROR_TEXT}`}>Could not load the story checks.</p>}
       {n > 0 && (
-        <div className="divide-y divide-gray-200 dark:divide-gray-800">
+        <div className="divide-y divide-ui-line">
           {entries.map((e) => (
             <div key={e.ident} className="py-4 first:pt-0 last:pb-0">
               <TicketBlock entry={e} pr={pr} changedPaths={changedPaths} onOpenInChanges={onOpenInChanges} />

@@ -1342,7 +1342,7 @@ export function PeriodReportsPanel(): JSX.Element | null {
               )}
               {current?.archived && (
                 <span
-                  className="rounded-ui bg-gray-500/10 px-1.5 py-0.5 text-meta font-semibold text-ui-mute"
+                  className="rounded-ui bg-ui-raise px-1.5 py-0.5 text-meta font-semibold text-ui-mute"
                   title="Generated under a sprint cadence this workspace no longer runs. It is kept exactly as it was written and cannot be regenerated — its window is not on the current period grid."
                 >
                   archived · {current.cadenceDays}-day cadence

@@ -157,7 +157,7 @@ function ReviewTabOutcome({ pill }: { pill: ReviewTabPill }): JSX.Element {
         ? SEVERITY_CLASS.blocker
         : pill.kind === 'running'
           ? 'bg-ai-signal/10 text-ai-signal'
-          : 'bg-gray-500/10 text-gray-600 dark:text-gray-300';
+          : 'bg-ui-raise text-ui-mute';
   return (
     <span className={`${TAB_PILL} ${tone}`}>
       {pill.kind === 'running' && (
@@ -297,14 +297,14 @@ function ActivityList({
   // COMPACT: one line per entry (it used to be a whole tab of three-line cards). Same rows, same
   // order, same two controls — the timeline magnifier and the GitHub link — as icons at the end.
   return (
-    <ul className="divide-y divide-gray-100 dark:divide-gray-800" data-testid="pr-activity-list">
+    <ul className="divide-y divide-ui-line" data-testid="pr-activity-list">
       {since && (
-        <li className="flex items-center gap-2 bg-sky-500/5 px-4 py-1 text-meta text-sky-700 dark:text-sky-400">
+        <li className="flex items-center gap-2 bg-ui-accent/10 px-4 py-1 text-meta text-ui-accent">
           <span>Showing {rows.length} since you last looked</span>
           <button
             type="button"
             onClick={onClearSince}
-            className="hit ml-auto text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+            className="hit ml-auto text-ui-mute hover:text-ui-ink"
           >
             Show all
           </button>
@@ -331,14 +331,14 @@ function ActivityList({
               repoId={pr.repoId}
               className="shrink-0 font-medium"
             />
-            <span className="shrink-0 text-gray-500 dark:text-gray-400">{r.label}</span>
+            <span className="shrink-0 text-ui-mute">{r.label}</span>
             {r.sha && (
               <span className="inline-flex shrink-0 items-center gap-0.5">
                 <a
                   href={safeExternalUrl(r.href ?? `${pr.githubUrl}/commits/${r.sha}`)}
                   target="_blank"
                   rel="noreferrer noopener"
-                  className="hit font-mono text-gray-500 hover:text-blue-500 dark:text-gray-400"
+                  className="hit font-mono text-ui-mute hover:text-ui-accent"
                   aria-label={`Commit ${r.sha.slice(0, 7)} on GitHub`}
                 >
                   {r.sha.slice(0, 7)}
@@ -347,13 +347,13 @@ function ActivityList({
               </span>
             )}
             <span
-              className="min-w-0 flex-1 truncate text-gray-500 dark:text-gray-400"
+              className="min-w-0 flex-1 truncate text-ui-mute"
               title={r.detail}
             >
               {r.detail?.split('\n')[0]}
             </span>
             <span
-              className="shrink-0 tabular-nums text-gray-500 dark:text-gray-400"
+              className="shrink-0 tabular-nums text-ui-mute"
               title={dateTime(r.time)}
             >
               {relativeTime(r.time)}
@@ -371,7 +371,7 @@ function ActivityList({
                 href={href}
                 target="_blank"
                 rel="noreferrer noopener"
-                className="hit shrink-0 rounded-ui p-0.5 text-gray-500 hover:text-blue-500 dark:text-gray-400"
+                className="hit shrink-0 rounded-ui p-0.5 text-ui-mute hover:text-ui-accent"
                 title="Open on GitHub"
                 aria-label="Open on GitHub"
               >
@@ -457,14 +457,14 @@ export const prConversationCount = (pr: PrDetailT): number =>
 // Small state pill next to a review author in the conversation, so an approval-with-note
 // reads differently from a plain review comment or a change request.
 const REVIEW_TAG: Record<ReviewState, { label: string; cls: string }> = {
-  approved: { label: 'approved', cls: 'bg-green-500/10 text-green-700 dark:text-green-400' },
+  approved: { label: 'approved', cls: 'bg-ui-success/10 text-ui-success' },
   changes_requested: {
     label: 'changes requested',
-    cls: 'bg-amber-500/10 text-amber-700 dark:text-amber-400',
+    cls: 'bg-ui-warn/10 text-ui-warn',
   },
-  commented: { label: 'review', cls: 'bg-sky-500/10 text-sky-700 dark:text-sky-400' },
-  dismissed: { label: 'dismissed', cls: 'bg-gray-500/10 text-gray-500 dark:text-gray-400' },
-  pending: { label: 'pending', cls: 'bg-gray-500/10 text-gray-500 dark:text-gray-400' },
+  commented: { label: 'review', cls: 'bg-ui-accent/10 text-ui-accent' },
+  dismissed: { label: 'dismissed', cls: 'bg-ui-raise text-ui-mute' },
+  pending: { label: 'pending', cls: 'bg-ui-raise text-ui-mute' },
 };
 
 function ReviewStateTag({ state }: { state: ReviewState }): JSX.Element {
@@ -608,7 +608,7 @@ function PrCommentsList({
             }}
             // A tone, not a border; the selected comment keeps its permanent amber ring.
             className={`rounded-ui bg-ui-surface px-3 py-2.5 ${
-              selected ? 'ring-1 ring-amber-400' : ''
+              selected ? 'ring-1 ring-ui-warn/40' : ''
             } ${isNew ? 'comment-new' : ''} ${flashing ? 'activity-flash' : ''}`}
           >
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-meta text-ui-mute">
@@ -1590,7 +1590,7 @@ export function PrDetail({
                 size={10}
                 title="Show CI status in Overview"
                 className={
-                  headerCi.status === 'unknown' ? '' : 'ring-1 ring-black/15 dark:ring-white/20'
+                  headerCi.status === 'unknown' ? '' : 'ring-1 ring-black/15'
                 }
               />
               {headerCi.label}
@@ -1621,10 +1621,10 @@ export function PrDetail({
                 <span>
                   {pr.changedFilesCount} file{pr.changedFilesCount === 1 ? '' : 's'}
                 </span>
-                <span className="text-green-700 dark:text-green-400">
+                <span className="text-ui-success">
                   +{pr.additions.toLocaleString()}
                 </span>
-                <span className="text-red-600 dark:text-red-400">
+                <span className="text-ui-danger">
                   −{pr.deletions.toLocaleString()}
                 </span>
               </button>

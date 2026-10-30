@@ -8,7 +8,7 @@ export function AuthNoticeBanner({ notices }: { notices: AuthNotice[] }): JSX.El
   if (notices.length === 0) return null;
   const orgs = notices.map((n) => n.org).join(', ');
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-amber-400/50 bg-amber-400/10 px-4 py-2 text-meta text-amber-800 dark:text-amber-200">
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-ui-warn/40 bg-ui-warn/10 px-4 py-2 text-meta text-ui-warn">
       <span className="min-w-0">
         <strong className="font-semibold">
           Your GitHub login is not authorized for {orgs}.

@@ -157,7 +157,7 @@ export function RepoSelectPanel({
                       {r.lastSyncStatus === 'error' && (
                         <span
                           role="img"
-                          className="flex shrink-0 items-center text-red-500"
+                          className="flex shrink-0 items-center text-ui-danger"
                           title={r.lastSyncError ?? 'Last sync failed'}
                           aria-label="Last sync failed"
                         >

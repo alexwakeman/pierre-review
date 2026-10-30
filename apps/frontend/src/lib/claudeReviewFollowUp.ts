@@ -50,11 +50,11 @@ export const SEVERITY_RANK: Record<ClaudeFindingSeverity, number> = {
 };
 
 export const SEVERITY_CLASS: Record<ClaudeFindingSeverity, string> = {
-  blocker: 'bg-red-500/10 text-red-700 dark:text-red-400',
-  warning: 'bg-orange-500/10 text-orange-700 dark:text-orange-400',
-  nit: 'bg-yellow-500/10 text-yellow-700 dark:text-yellow-500',
-  question: 'bg-blue-500/10 text-blue-700 dark:text-blue-400',
-  praise: 'bg-green-500/10 text-green-700 dark:text-green-400',
+  blocker: 'bg-ui-danger/10 text-ui-danger',
+  warning: 'bg-ui-warn/10 text-ui-warn',
+  nit: 'bg-ui-warn/10 text-ui-warn',
+  question: 'bg-ui-accent/10 text-ui-accent',
+  praise: 'bg-ui-success/10 text-ui-success',
 };
 
 // ---- praise: not a finding ----
@@ -101,11 +101,11 @@ export function sortFindingsForDisplay(findings: readonly ClaudeFinding[]): Clau
 
 // ---- chip palette (the file's existing contrast-safe pairs) ----
 
-const CHIP_RED = 'bg-red-500/10 text-red-700 dark:text-red-400';
-const CHIP_ORANGE = 'bg-orange-500/10 text-orange-700 dark:text-orange-400';
-const CHIP_GREEN = 'bg-green-500/10 text-green-700 dark:text-green-400';
-const CHIP_GREY = 'bg-gray-500/10 text-gray-600 dark:text-gray-300';
-const CHIP_SKY = 'bg-sky-500/15 text-sky-700 dark:text-sky-300';
+const CHIP_RED = 'bg-ui-danger/10 text-ui-danger';
+const CHIP_ORANGE = 'bg-ui-warn/10 text-ui-warn';
+const CHIP_GREEN = 'bg-ui-success/10 text-ui-success';
+const CHIP_GREY = 'bg-ui-raise text-ui-mute';
+const CHIP_SKY = 'bg-ui-accent/10 text-ui-accent';
 
 // ⚠ `not_checked` is GREY, never amber: it is unknown, not "not addressed".
 export const FOLLOW_UP_STATUS_CLASS: Record<ClaudeFollowUpStatus, string> = {

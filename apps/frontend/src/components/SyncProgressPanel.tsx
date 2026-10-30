@@ -148,11 +148,11 @@ export function SyncProgressPanel({
                 <span className="truncate font-medium" title={r.fullName}>
                   {r.fullName}
                 </span>
-                <span className="shrink-0 text-gray-500 dark:text-gray-400">
+                <span className="shrink-0 text-ui-mute">
                   {errored ? (
-                    <span className="text-red-500">error</span>
+                    <span className="text-ui-danger">error</span>
                   ) : paused?.reason === 'rate_limit' ? (
-                    <span className="text-amber-600 dark:text-amber-400">
+                    <span className="text-ui-warn">
                       Paused — GitHub rate limit, {resumeLabel(paused.resumeAt)}
                     </span>
                   ) : paused?.reason === 'queued' ? (
@@ -160,25 +160,25 @@ export function SyncProgressPanel({
                   ) : running ? (
                     `${percent}%${prs > 0 ? ` · ${prs} PRs` : ''}`
                   ) : (
-                    <span className="inline-flex items-center gap-1 text-green-600 dark:text-green-400">
+                    <span className="inline-flex items-center gap-1 text-ui-success">
                       <CheckIcon size={12} />
                       done{prs > 0 ? ` · ${prs} PRs` : ''}
                     </span>
                   )}
                 </span>
               </div>
-              <div className="h-2 w-full overflow-hidden rounded-ui bg-gray-200 dark:bg-gray-800">
+              <div className="h-2 w-full overflow-hidden rounded-ui bg-ui-hover">
                 <div
                   className={`h-2 rounded-ui transition-all duration-500 ${
                     errored
-                      ? 'bg-red-500'
+                      ? 'bg-ui-danger'
                       : paused?.reason === 'rate_limit'
-                        ? 'bg-amber-500'
+                        ? 'bg-ui-warn'
                         : paused?.reason === 'queued'
-                          ? 'bg-gray-400 dark:bg-gray-600'
+                          ? 'bg-ui-faint'
                           : running
-                            ? 'bg-blue-500'
-                            : 'bg-green-500'
+                            ? 'bg-ui-accent-fill'
+                            : 'bg-ui-success'
                   }`}
                   style={{ width: `${errored ? 100 : percent}%` }}
                 />
@@ -189,31 +189,31 @@ export function SyncProgressPanel({
       </ul>
 
       {showMlRow && (
-        <div className="mt-3 border-t border-gray-100 pt-3 dark:border-gray-800">
+        <div className="mt-3 border-t border-ui-line pt-3">
           <div className="mb-1 flex items-baseline justify-between gap-2 text-meta">
             <span className="truncate font-medium" title="Local severity model — nothing billed">
               Scoring bot comments
             </span>
-            <span className="shrink-0 text-gray-500 dark:text-gray-400">
+            <span className="shrink-0 text-ui-mute">
               {scoring ? (
                 `${scorePercent}%${ml && ml.pending > 0 ? ` · ${ml.pending.toLocaleString()} to go` : ''}`
               ) : (
-                <span className="inline-flex items-center gap-1 text-green-600 dark:text-green-400">
+                <span className="inline-flex items-center gap-1 text-ui-success">
                   <CheckIcon size={12} />
                   scored{scored > 0 ? ` · ${scored.toLocaleString()}` : ''}
                 </span>
               )}
             </span>
           </div>
-          <div className="h-2 w-full overflow-hidden rounded-ui bg-gray-200 dark:bg-gray-800">
+          <div className="h-2 w-full overflow-hidden rounded-ui bg-ui-hover">
             <div
               className={`h-2 rounded-ui transition-all duration-500 ${
-                scoring ? 'bg-ai-signal-fill' : 'bg-green-500'
+                scoring ? 'bg-ai-signal-fill' : 'bg-ui-success'
               }`}
               style={{ width: `${scorePercent}%` }}
             />
           </div>
-          <p className="mt-1 text-meta leading-snug text-gray-500 dark:text-gray-400">
+          <p className="mt-1 text-meta leading-snug text-ui-mute">
             {ml?.markerFallback
               ? 'Severity model unavailable — labelling from markers only.'
               : 'Severity + category labels for the bot comments this sync brought in.'}
@@ -227,7 +227,7 @@ export function SyncProgressPanel({
         </div>
       )}
 
-      <div className="mt-4 flex items-center justify-between gap-3 text-meta text-gray-500 dark:text-gray-400">
+      <div className="mt-4 flex items-center justify-between gap-3 text-meta text-ui-mute">
         <span>
           {completeCount} of {repos.length} repo{repos.length === 1 ? '' : 's'} complete
         </span>
@@ -245,7 +245,7 @@ export function SyncProgressPanel({
                 ? 'Close this. Scoring keeps running in the background.'
                 : 'Close'
             }
-            className="hit rounded-ui border border-gray-300 px-3 py-1 text-gray-600 hover:border-gray-400 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+            className="hit rounded-ui border border-ui-line px-3 py-1 text-ui-mute hover:border-ui-line hover:bg-ui-hover"
           >
             {scoring ? 'Continue in background' : 'Close'}
           </button>
@@ -255,7 +255,7 @@ export function SyncProgressPanel({
             onClick={onCancel}
             disabled={cancelling}
             title="Stop the sync and remove any repos still loading for the first time"
-            className="hit rounded-ui border border-red-300 px-3 py-1 text-red-600 hover:border-red-400 hover:bg-red-50 disabled:opacity-50 dark:border-red-900 dark:text-red-400 dark:hover:bg-red-950"
+            className="hit rounded-ui border border-ui-danger/40 px-3 py-1 text-ui-danger hover:border-ui-danger/40 hover:bg-ui-danger/10 disabled:opacity-50"
           >
             {cancelling ? 'Cancelling…' : 'Cancel'}
           </button>

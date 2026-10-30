@@ -63,7 +63,7 @@ export function AiStatusLine({
       <span role="status" aria-live="polite">
         {aiStatusText(stage, count)}
       </span>
-      <span aria-hidden="true" className="tabular-nums text-gray-500 dark:text-gray-400">
+      <span aria-hidden="true" className="tabular-nums text-ui-mute">
         {formatElapsed(now - start)}
       </span>
       {children}

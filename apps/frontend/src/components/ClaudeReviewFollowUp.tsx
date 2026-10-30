@@ -129,8 +129,8 @@ const FOLLOW_UP_PILL_ORDER: ClaudeFollowUpStatus[] = [
 ];
 
 const CHIP = REVIEW_CHIP;
-const MUTED = 'text-gray-500 dark:text-gray-400';
-const ERROR_TEXT = 'text-red-600 dark:text-red-400';
+const MUTED = 'text-ui-mute';
+const ERROR_TEXT = 'text-ui-danger';
 const BTN =
   'inline-flex h-7 items-center whitespace-nowrap rounded-ui bg-ui-raise px-2.5 text-meta font-medium text-ui-ink hover:bg-ui-hover disabled:cursor-not-allowed disabled:opacity-50 touch:h-10 touch:px-3';
 const INPUT =
@@ -157,7 +157,7 @@ function CodeAnchorRef({
       <button
         type="button"
         onClick={() => onOpenInChanges(path, line, side)}
-        className="hit break-all text-left font-mono text-meta text-blue-600 hover:underline dark:text-blue-400"
+        className="hit break-all text-left font-mono text-meta text-ui-accent hover:underline"
       >
         {label}
       </button>
@@ -186,7 +186,7 @@ function TicketField({
   const counter = fieldCounter(field, value);
   return (
     <div>
-      <label htmlFor={id} className="text-meta font-medium text-gray-700 dark:text-gray-200">
+      <label htmlFor={id} className="text-meta font-medium text-ui-ink">
         {label}
       </label>
       {children}
@@ -295,12 +295,12 @@ const storyPullMemory = createStoryPullMemory();
 const JIRA_TICKET_STALE_MS = 60_000;
 
 const TAB_ICON_BTN =
-  'rounded-ui p-0.5 text-gray-500 hover:bg-gray-200 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100';
+  'rounded-ui p-0.5 text-ui-mute hover:bg-ui-hover hover:text-ui-ink';
 const PRIMARY_BTN =
   'inline-flex h-7 items-center whitespace-nowrap rounded-ui bg-ui-raise px-2.5 text-meta font-medium text-ui-ink hover:bg-ui-hover disabled:cursor-not-allowed disabled:opacity-50 touch:h-10 touch:px-3';
-const LINK_BTN = 'text-meta text-blue-700 hover:underline disabled:opacity-50 dark:text-blue-300';
+const LINK_BTN = 'text-meta text-ui-accent hover:underline disabled:opacity-50';
 const SPINNER =
-  'inline-block h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-gray-300 border-t-blue-500 dark:border-gray-600 dark:border-t-blue-400';
+  'inline-block h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-ui-line border-t-ui-accent/50';
 
 /**
  * The optional user stories — up to CLAUDE_REVIEW_MAX_TICKETS, ONE TAB EACH (`lib/storyTabs.ts`).
@@ -685,21 +685,21 @@ export function ClaudeReviewTicketPanel({
   return (
     <div className="mt-2 rounded-ui bg-ui-surface">
       <div className="flex flex-wrap items-center gap-2 px-2 py-1.5">
-        <span className="text-meta font-medium text-gray-700 dark:text-gray-200">Stories to check</span>
+        <span className="text-meta font-medium text-ui-ink">Stories to check</span>
         {hintText !== '' && <span className={`text-meta ${check.ok ? MUTED : ERROR_TEXT}`}>{hintText}</span>}
         {pullButton}
         {info}
         <button
           type="button"
           onClick={close}
-          className={`ml-auto inline-flex items-center gap-1 text-meta ${MUTED} hover:text-gray-800 hover:underline dark:hover:text-gray-100`}
+          className={`ml-auto inline-flex items-center gap-1 text-meta ${MUTED} hover:text-ui-ink hover:underline`}
         >
           <CloseIcon size={10} />
           Close
         </button>
       </div>
       {open && (
-        <div className="border-t border-gray-200 px-2 pb-2 pt-1.5 dark:border-gray-800">
+        <div className="border-t border-ui-line px-2 pb-2 pt-1.5">
           {pullable.length > 1 && !busy && (
             <div className="mb-1.5 flex flex-wrap items-center gap-1">
               <span className={`text-meta ${MUTED}`}>Or pull one:</span>
@@ -723,7 +723,7 @@ export function ClaudeReviewTicketPanel({
               {prWorkspaceName != null ? `${prWorkspaceName} workspace` : 'workspace this repository is in'}.
             </p>
           )}
-          <div className="flex flex-wrap items-end gap-x-1 gap-y-1 border-b border-gray-200 dark:border-gray-800">
+          <div className="flex flex-wrap items-end gap-x-1 gap-y-1 border-b border-ui-line">
             <div role="tablist" aria-label="User stories" className="flex min-w-0 flex-wrap items-end gap-1">
               {value.map((d, i) => {
                 const label = storyTabLabel(value, i);
@@ -736,8 +736,8 @@ export function ClaudeReviewTicketPanel({
                     role="presentation"
                     className={`-mb-px flex items-center rounded-t-ui border ${
                       active
-                        ? 'border-gray-200 border-b-white bg-white dark:border-gray-800 dark:border-b-gray-950 dark:bg-gray-950'
-                        : 'border-transparent hover:bg-gray-100 dark:hover:bg-gray-900'
+                        ? 'border-ui-line border-b-white bg-ui-surface'
+                        : 'border-transparent hover:bg-ui-hover'
                     }`}
                   >
                     <button
@@ -753,7 +753,7 @@ export function ClaudeReviewTicketPanel({
                       onClick={() => setSelected(i)}
                       onKeyDown={(e) => onTabKeyDown(e, i)}
                       className={`py-1 pl-2 pr-1 text-meta font-medium ${jira ? 'font-mono' : ''} ${
-                        bad ? ERROR_TEXT : active ? 'text-gray-900 dark:text-gray-100' : MUTED
+                        bad ? ERROR_TEXT : active ? 'text-ui-ink' : MUTED
                       }`}
                     >
                       {label}
@@ -783,7 +783,7 @@ export function ClaudeReviewTicketPanel({
               <button
                 type="button"
                 onClick={addStory}
-                className="hit flex items-center gap-1 px-2 py-1 text-meta text-blue-700 hover:underline dark:text-blue-300"
+                className="hit flex items-center gap-1 px-2 py-1 text-meta text-ui-accent hover:underline"
               >
                 <PlusIcon size={11} />
                 Add story
@@ -805,7 +805,7 @@ export function ClaudeReviewTicketPanel({
               id={`${tabsId}-panel`}
               aria-labelledby={`${tabsId}-tab-${selected}`}
               tabIndex={0}
-              className="pt-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+              className="pt-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent"
             >
               {isJiraDraft(current) ? (
                 <JiraStoryView
@@ -822,7 +822,7 @@ export function ClaudeReviewTicketPanel({
                     <div className="space-y-1">
                       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-meta">
                         <span className={MUTED}>Criteria from:</span>
-                        <span className="font-medium text-gray-800 dark:text-gray-200">{acFieldText(current)}</span>
+                        <span className="font-medium text-ui-ink">{acFieldText(current)}</span>
                         {current.key != null && refFor(current.key) != null && (
                           <button
                             type="button"
@@ -938,11 +938,11 @@ function CriterionRow({
   if (c.status === 'met') {
     return (
       <li className="flex items-baseline gap-2 px-1 text-body">
-        <span className="shrink-0 self-center text-green-700 dark:text-green-400" aria-label="Met">
+        <span className="shrink-0 self-center text-ui-success" aria-label="Met">
           <CheckIcon size={12} />
         </span>
         <span className={`shrink-0 font-mono text-meta ${MUTED}`}>{c.ref}</span>
-        <span className="min-w-0 break-words text-gray-800 dark:text-gray-200">
+        <span className="min-w-0 break-words text-ui-ink">
           {c.text}
           {c.path != null && c.path !== '' && (
             <>
@@ -1077,13 +1077,13 @@ export function ClaudeReviewTicketResults({
         <h4 className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
           {label != null && (
             <span
-              className={`text-body font-semibold text-gray-900 dark:text-gray-100 ${ticket.key != null ? 'font-mono' : ''}`}
+              className={`text-body font-semibold text-ui-ink ${ticket.key != null ? 'font-mono' : ''}`}
             >
               {label}
             </span>
           )}
           {ticket.title != null && ticket.title !== '' && (
-            <span className="min-w-0 break-words text-body font-semibold text-gray-900 dark:text-gray-100">
+            <span className="min-w-0 break-words text-body font-semibold text-ui-ink">
               {ticket.title}
             </span>
           )}
@@ -1301,7 +1301,7 @@ export function FollowUpRow({
           {SEVERITY_WORD[item.severity]}
         </span>
         <span
-          className={`min-w-0 break-words ${muted ? 'text-gray-600 dark:text-gray-400' : REVIEW_ITEM_TITLE}`}
+          className={`min-w-0 break-words ${muted ? 'text-ui-mute' : REVIEW_ITEM_TITLE}`}
         >
           <PrRefText text={item.title} />
         </span>
@@ -1336,7 +1336,7 @@ export function FollowUpRow({
               .getElementById(`claude-finding-${reraised}`)
               ?.scrollIntoView({ block: 'center', behavior: 'smooth' })
           }
-          className="hit mt-1 inline-flex items-center gap-1 text-meta text-blue-600 hover:underline dark:text-blue-400"
+          className="hit mt-1 inline-flex items-center gap-1 text-meta text-ui-accent hover:underline"
         >
           Raised again below
           <ChevronIcon dir="down" size={11} />
@@ -1361,13 +1361,13 @@ function SettledEarlierRow({
   onOpenInChanges?: OpenInChanges;
 }): JSX.Element {
   return (
-    <li className="rounded-ui border border-gray-100 px-3 py-2 text-body dark:border-gray-800">
+    <li className="rounded-ui border border-ui-line px-3 py-2 text-body">
       <div className="flex flex-wrap items-center gap-2">
         <span className={`${CHIP} ${FOLLOW_UP_STATUS_CLASS.reply_accepted}`}>{settledEarlierHeading(item)}</span>
         {item.severity != null && (
           <span className={`${CHIP} ${SEVERITY_CLASS[item.severity]}`}>{SEVERITY_WORD[item.severity]}</span>
         )}
-        <span className="min-w-0 break-words text-gray-600 dark:text-gray-400">
+        <span className="min-w-0 break-words text-ui-mute">
           <PrRefText text={item.title} />
         </span>
         <span className={`text-meta ${MUTED}`}>settled in an earlier review</span>
@@ -1481,7 +1481,7 @@ export function ClaudeReviewFollowUpSection({
             type="button"
             onClick={() => setClosedOpen((o) => !o)}
             aria-expanded={closedOpen}
-            className={`inline-flex items-center gap-1 text-meta ${MUTED} hover:text-gray-700 dark:hover:text-gray-200`}
+            className={`inline-flex items-center gap-1 text-meta ${MUTED} hover:text-ui-ink`}
           >
             <ChevronIcon dir={closedOpen ? 'down' : 'right'} size={11} />
             Addressed, settled or no longer applies ({closedCount})

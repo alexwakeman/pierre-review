@@ -49,19 +49,19 @@ export function RepliesCheckLine({
             type="button"
             onClick={() => cancel.mutate()}
             disabled={cancel.isPending}
-            className="hit rounded-ui px-1 text-meta text-gray-600 underline decoration-dotted underline-offset-2 hover:text-gray-900 disabled:opacity-50 dark:text-gray-300 dark:hover:text-white"
+            className="hit rounded-ui px-1 text-meta text-ui-mute underline decoration-dotted underline-offset-2 hover:text-ui-ink disabled:opacity-50"
           >
             Cancel
           </button>
         </AiStatusLine>
       ) : (
         <>
-          {line != null && <span className="text-gray-700 dark:text-gray-300">{line}</span>}
+          {line != null && <span className="text-ui-ink">{line}</span>}
           {line != null && latest != null && latest.status === 'succeeded' && (
             <button
               type="button"
               onClick={() => onShow(latest.reviewId)}
-              className="hit rounded-ui px-1 text-meta text-gray-600 underline decoration-dotted underline-offset-2 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white"
+              className="hit rounded-ui px-1 text-meta text-ui-mute underline decoration-dotted underline-offset-2 hover:text-ui-ink"
             >
               Show
             </button>
@@ -96,8 +96,8 @@ export function RepliesCheckLine({
           outcome.
         </p>
       </InfoButton>
-      {refusal != null && <span className="text-gray-600 dark:text-gray-300">{refusal}</span>}
-      {startError != null && <span className="text-red-600 dark:text-red-400">{startError}</span>}
+      {refusal != null && <span className="text-ui-mute">{refusal}</span>}
+      {startError != null && <span className="text-ui-danger">{startError}</span>}
     </div>
   );
 }

@@ -133,10 +133,10 @@ export function ratioDetail(row: BotVolumePrRow): string | null {
  * as precision. Null (no baseline) is muted — the absence of a comparison is not a low score.
  */
 export function ratioTone(ratio: number | null): string {
-  if (ratio == null) return 'text-gray-400';
-  if (ratio >= 3) return 'text-red-600 dark:text-red-400';
-  if (ratio >= 1.5) return 'text-amber-600 dark:text-amber-400';
-  return 'text-gray-500 dark:text-gray-400';
+  if (ratio == null) return 'text-ui-faint';
+  if (ratio >= 3) return 'text-ui-danger';
+  if (ratio >= 1.5) return 'text-ui-warn';
+  return 'text-ui-mute';
 }
 
 /**

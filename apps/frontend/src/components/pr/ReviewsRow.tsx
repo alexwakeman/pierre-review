@@ -136,7 +136,7 @@ export function ReviewsChips({
           cheaper than a row that quietly says fewer people looked than did. */}
       {unnamedReviewers > 0 && (
         <span
-          className="inline-flex items-center rounded-ui bg-gray-500/10 px-1.5 py-0.5 text-gray-500 dark:text-gray-400"
+          className="inline-flex items-center rounded-ui bg-ui-raise px-1.5 py-0.5 text-ui-mute"
           title="GitHub no longer has an account for these reviews, so they cannot be named here."
         >
           {unnamedReviewers === 1
@@ -147,7 +147,7 @@ export function ReviewsChips({
       {onlyBotsReviewed && (
         <span
           data-testid="only-bots-reviewed"
-          className="inline-flex items-center gap-1 rounded-ui bg-amber-400/10 px-1.5 py-0.5 font-medium text-amber-700 dark:text-amber-300"
+          className="inline-flex items-center gap-1 rounded-ui bg-ui-warn/10 px-1.5 py-0.5 font-medium text-ui-warn"
           title="Every review on this PR came from an automated reviewer — no human has reviewed it yet."
         >
           <BotIcon size={12} />

@@ -316,7 +316,7 @@ function RefusalNote({
 function BasisChip({ basis }: { basis: CostBasis }): JSX.Element {
   return (
     <span
-      className="rounded-ui bg-gray-500/10 px-1 text-meta font-semibold text-ui-mute"
+      className="rounded-ui bg-ui-raise px-1 text-meta font-semibold text-ui-mute"
       data-testid={`benchmark-cost-basis-${basis}`}
     >
       {COST_BASIS_LABEL[basis]}
@@ -1124,7 +1124,7 @@ function PooledCounters({ counters }: { counters: BotBenchmarkPlacementCounters 
             <div key={group}>
               <div className="text-meta font-semibold text-ui-faint">
                 {meta.label}{' '}
-                <span className="font-normal normal-case tracking-normal text-gray-400/80">
+                <span className="font-normal normal-case tracking-normal text-ui-faint">
                   · {meta.population}
                 </span>
               </div>
