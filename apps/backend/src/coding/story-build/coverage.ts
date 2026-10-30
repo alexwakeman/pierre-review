@@ -22,8 +22,9 @@ import type { StoryBuildTicketPr } from './inputs.js';
 //     · it fails / times out  every criterion a gap, said in one line                 state 'failed'
 //     · it cannot start       the last check's verdicts, said in one line             state 'stale'
 //
-// Owner decision 4 shows the button only for a ticket with NO PR, so the wait is rare; it stays here
-// because it is cheap (owner decision 5). The fold itself (`foldCoverage`) is PURE.
+// "Implement" needs a ticket with NO PR, and "Fill gaps" needs a CURRENT check (shared
+// `storyBuildOffered`), so the wait is rare: it runs when the ticket TEXT changed since that check, which
+// the card's DB-only staleness cannot see (owner decision 5). The fold itself (`foldCoverage`) is PURE.
 
 export const COVERAGE_CHECK_FAILED = "Couldn't check the existing PRs: building every criterion.";
 export const COVERAGE_CHECK_STALE = 'The ticket check is out of date: building from the last one.';
