@@ -350,43 +350,95 @@ function checksNotRun(requested: string[], note: string, skipped: CheckRunResult
   return { requested, ran: false, note, sandbox: null, install: [], results: skipped.map(toWire), hook: null, hookAttempts: 0, agentRuns: 0 };
 }
 
+/** The progress a build in a worktree reports; the caller maps `working` onto its own word. */
+export interface WorktreeBuildProgress {
+  phase: 'preparing_checks' | 'working' | 'running_checks' | 'capturing';
+  message?: string;
+  recentActivity?: string[];
+  usage?: LiveUsage & { estCostUsd: number };
+}
+
+/** The result tool a build in a worktree reports through (the `submit_fix` shape, under its own name). */
+export interface WorktreeBuildResultTool {
+  /** The MCP server's name (`fix` ⇒ `mcp__fix__submit_fix`). */
+  server: string;
+  name: string;
+  description: string;
+  /** The tool's reply to an accepted call. */
+  ack: string;
+}
+
+export interface BuildInWorktreeArgs {
+  accountId: number;
+  /** The agent kind (ai/provider.ts): `fix` for AI Fix. */
+  kind: AgentKind;
+  worktreePath: string;
+  repoCloneDir: string;
+  /** The commit the worktree is checked out at (the pre-commit hook diffs against it). */
+  baseSha: string;
+  model: string;
+  systemPrompt?: string;
+  prompt: string;
+  maxTurns: number;
+  maxBudgetUsd: number;
+  abortController: AbortController;
+  onProgress: (p: WorktreeBuildProgress) => void;
+  /**
+   * The tool lists for the pass: the caller's own LITERAL lists (pinned by its tool-surface test), the
+   * allow list chosen by whether the run carries `run_check`. ⚠ The deny list must deny Bash outright —
+   * a list that does not is refused here before anything runs.
+   */
+  toolsFor: (checkTool: AgentCheckTool | undefined) => { allowedTools: string[]; disallowedTools: string[] };
+  resultTool: WorktreeBuildResultTool;
+  /** The ledger row a provider that records its own usage (Codex) writes. */
+  usageRecord: AgentUsageRecord;
+  /** "Run tests": the check names the reader ticked. Empty ⇒ none. */
+  checks: string[];
+  /** The commit message the hook is tried with when the agent reported none. */
+  defaultCommitMessage: string;
+  /** The follow-up prompt after a failing pre-commit hook (its output, fenced with `nonce`). */
+  hookRepairPrompt: (output: string, nonce: string) => string;
+  provider?: AgentProviderId;
+  codex?: CodexRunOptions;
+  effort?: AiEffort;
+}
+
+export type BuildInWorktreeResult =
+  | { aborted: true; usageRecorded: boolean }
+  | {
+      aborted: false;
+      /** The agent's last accepted report (UNVALIDATED), or null when it never called the tool. */
+      captured: SubmitFixPayload | null;
+      patch: string;
+      filesChanged: string[];
+      usage: LiveUsage;
+      costUsd: number | null;
+      numTurns: number | null;
+      usageRecorded: boolean;
+      /** "Run tests": what ran (null when no tests were asked for). */
+      checks: AiFixChecks | null;
+    };
+
 /**
- * Run the write-capable coding agent against a PR's head in an ephemeral worktree and
- * return the captured changeset (a binary-safe unified diff) + a prose summary. This
- * is the implementation behind ctx.coding.generateFix; it owns the worktree prep +
- * diff capture + teardown, and delegates the sandboxed SDK run to runAgentInWorktree.
- * Never commits or pushes — the host's git-ops does that later from the STORED patch.
+ * THE BUILD IN A WORKTREE that is already checked out (the body AI Fix's `runCodingAgent` and the story
+ * build's `buildRepo` share): the "Run tests" check session, the result tool, the agent pass, Limn's own
+ * check run, the pre-commit hook with at most MAX_HOOK_REPAIRS repair passes, then `restoreGit` and the
+ * diff capture. It never preps, removes or pushes the worktree — the caller owns those. The check
+ * session is opened and closed here.
  *
  * "RUN TESTS" (`args.checks`; coding/checks/, docs/CLAUDE-REVIEW.md § AI Fix "Run tests"): after the
  * worktree is ready, Limn opens a check session (sandbox, Docker preflight, dependency install) and
  * hands the agent `run_check`; after the agent, Limn runs every chosen check ONCE MORE itself (the
  * result the reader sees), then the commit with the pre-commit hook in the sandbox — a failing hook
- * goes back to the agent, at most twice. Tests that cannot start never fail the fix: the run goes on
- * as before and the note says why.
+ * goes back to the agent, at most twice. Tests that cannot start never fail the run: it goes on as
+ * before and the note says why.
  */
-export async function runCodingAgent(
-  args: GenerateFixArgs,
-): Promise<GenerateFixResult> {
-  const { owner, name, prNumber, baseSha, abortController, onProgress } = args;
-  const model = args.model;
-  const token = await getAccessToken(args.accountId);
-
-  let repoCloneDir: string | null = null;
-  let worktreePath: string | null = null;
+export async function buildInWorktree(args: BuildInWorktreeArgs): Promise<BuildInWorktreeResult> {
+  const { worktreePath, repoCloneDir, baseSha, abortController, onProgress } = args;
   let checkSession: CheckSession | null = null;
-
   try {
-    onProgress({ phase: 'cloning' });
-    ({ repoCloneDir, worktreePath } = await prepWorktree(
-      owner,
-      name,
-      prNumber,
-      baseSha,
-      token,
-    ));
-
     // "Run tests": open the session BEFORE the agent, so it gets the tool and its prompt the list.
-    const requested = (args.checks ?? []).filter((n) => typeof n === 'string' && n !== '');
+    const requested = args.checks.filter((n) => typeof n === 'string' && n !== '');
     let checks: AiFixChecks | null = null;
     if (requested.length > 0) {
       onProgress({ phase: 'preparing_checks' });
@@ -423,22 +475,22 @@ export async function runCodingAgent(
     const fixShape = await submitFixShape();
     let captured: SubmitFixPayload | null = null;
     const tools: AgentToolServer = {
-      server: 'fix',
+      server: args.resultTool.server,
       tools: [
         {
-          name: 'submit_fix',
-          description: 'Report the fix you applied. Call this EXACTLY once, at the very end, after editing files.',
+          name: args.resultTool.name,
+          description: args.resultTool.description,
           shape: fixShape,
           handle: (a) => {
             const p = a as unknown as SubmitFixPayload;
             captured = {
               summary: p.summary,
               commitMessage: p.commitMessage,
-              // Passed through verbatim; the AI Fix manager validates refs + clips text.
+              // Passed through verbatim; the caller validates refs + clips text.
               changes: p.changes,
               unaddressed: p.unaddressed,
             };
-            return { text: 'Fix recorded.' };
+            return { text: args.resultTool.ack };
           },
         },
       ],
@@ -454,51 +506,42 @@ export async function runCodingAgent(
       if (o.numTurns != null) total.numTurns = (total.numTurns ?? 0) + o.numTurns;
       if (o.usageRecorded) total.usageRecorded = true;
     };
-    const maxBudgetUsd = args.maxBudgetUsd ?? config.aiFixBudgetUsd;
+    const maxBudgetUsd = args.maxBudgetUsd;
+    const toolLists = args.toolsFor(checkTool);
+    // NO SHELL, EVER (the comment above FIX_TOOLS): a caller whose deny list lost Bash runs nothing.
+    if (!toolLists.disallowedTools.includes('Bash') || toolLists.allowedTools.some((t) => /^Bash\b/.test(t))) {
+      throw new Error('A coding run must deny Bash outright.');
+    }
     const pass = (prompt: string, budgetUsd: number): Promise<AgentRunOutcome> =>
       runAgentInWorktree({
-        kind: 'fix',
-        worktreePath: worktreePath!,
-        model,
+        kind: args.kind,
+        worktreePath,
+        model: args.model,
         systemPrompt,
         prompt,
-        allowedTools: checkTool ? FIX_TOOLS_WITH_CHECKS : FIX_TOOLS,
-        disallowedTools: DISALLOWED_TOOLS,
+        ...toolLists,
         tools,
         ...(checkTool ? { checks: checkTool } : {}),
         writes: true,
-        maxTurns: args.maxTurns ?? config.aiFixMaxTurns,
+        maxTurns: args.maxTurns,
         maxBudgetUsd: budgetUsd,
         abortController,
         onActivity: (activity, usage) =>
-          onProgress({ phase: 'fixing', recentActivity: activity, usage }),
+          onProgress({ phase: 'working', recentActivity: activity, usage }),
         ...(args.provider ? { provider: args.provider } : {}),
-        usageRecord: { accountId: args.accountId, seam: 'agent', feature: 'ai_fix', prId: args.prId ?? null },
+        usageRecord: args.usageRecord,
         ...(args.codex ? { codex: args.codex } : {}),
         ...(args.effort ? { effort: args.effort } : {}),
       });
 
-    onProgress({ phase: 'fixing' });
+    onProgress({ phase: 'working' });
     const outcome = await pass(args.prompt, maxBudgetUsd);
     add(outcome);
 
-    // A user cancel aborts the SDK iterator; surface a clean aborted result (the
-    // manager marks the row cancelled — no worktree changes are captured).
+    // A user cancel aborts the SDK iterator; surface a clean aborted result (the caller marks its
+    // row cancelled — no worktree changes are captured).
     const aborted = (): boolean => abortController.signal.aborted;
-    if (outcome.aborted || aborted()) {
-      return {
-        summary: '',
-        commitMessage: '',
-        patch: '',
-        filesChanged: [],
-        baseSha,
-        usage: emptyUsage(),
-        costUsd: null,
-        numTurns: null,
-        aborted: true,
-        ...(outcome.usageRecorded ? { usageRecorded: true } : {}),
-      };
-    }
+    if (outcome.aborted || aborted()) return { aborted: true, usageRecorded: outcome.usageRecorded };
 
     // "Run tests": Limn's own run, then the commit hook (and its bounded repair passes).
     if (checkSession) {
@@ -511,14 +554,14 @@ export async function runCodingAgent(
         for (;;) {
           const fix = captured as SubmitFixPayload | null;
           onProgress({ phase: 'running_checks', message: 'Running the pre-commit hook' });
-          hook = await checkSession.runHook(fix?.commitMessage ?? 'AI fix', baseSha);
+          hook = await checkSession.runHook(fix?.commitMessage ?? args.defaultCommitMessage, baseSha);
           if (hook) hookAttempts++;
           const left = maxBudgetUsd - (total.costUsd ?? 0);
           if (!hook || hook.status !== 'failed' || hookAttempts > MAX_HOOK_REPAIRS || aborted() || left < MIN_REPAIR_BUDGET_USD) break;
           // The hook's output goes back to the agent: one short follow-up pass in the same worktree.
-          onProgress({ phase: 'fixing', message: 'Fixing what the pre-commit hook reported' });
+          onProgress({ phase: 'working', message: 'Fixing what the pre-commit hook reported' });
           const nonce = pickReviewNonce([hook.output]);
-          const again = await pass(buildHookRepairPrompt({ output: hook.output, nonce, ...(args.provider ? { provider: args.provider } : {}) }), left);
+          const again = await pass(args.hookRepairPrompt(hook.output, nonce), left);
           add(again);
           repaired = true;
           if (again.aborted || aborted()) break;
@@ -537,9 +580,7 @@ export async function runCodingAgent(
         hookAttempts,
         agentRuns: checkSession.agentRuns().length,
       };
-      if (aborted()) {
-        return { summary: '', commitMessage: '', patch: '', filesChanged: [], baseSha, usage: emptyUsage(), costUsd: null, numTurns: null, aborted: true, ...(total.usageRecorded ? { usageRecorded: true } : {}) };
-      }
+      if (aborted()) return { aborted: true, usageRecorded: total.usageRecorded };
     }
 
     onProgress({ phase: 'capturing' });
@@ -550,16 +591,109 @@ export async function runCodingAgent(
       worktreePath,
       checkSession ? { excludesFile: checkSession.excludesFile } : {},
     );
+
+    return {
+      aborted: false,
+      // A cast so the closure-assigned `captured` reads back as its declared union.
+      // (TS flow-narrows it to `null` because its only assignment is inside the tool
+      // callback, which it can't prove ran — a plain annotation wouldn't break that.)
+      captured: captured as SubmitFixPayload | null,
+      patch,
+      filesChanged,
+      usage: total.usage,
+      costUsd: total.costUsd,
+      numTurns: total.numTurns,
+      usageRecorded: total.usageRecorded,
+      checks,
+    };
+  } finally {
+    await checkSession?.close().catch(() => {});
+  }
+}
+
+/**
+ * Run the write-capable coding agent against a PR's head in an ephemeral worktree and
+ * return the captured changeset (a binary-safe unified diff) + a prose summary. This
+ * is the implementation behind ctx.coding.generateFix; it owns the worktree prep +
+ * teardown, and delegates the run itself (checks, agent, hook, capture) to buildInWorktree.
+ * Never commits or pushes — the host's git-ops does that later from the STORED patch.
+ */
+export async function runCodingAgent(
+  args: GenerateFixArgs,
+): Promise<GenerateFixResult> {
+  const { owner, name, prNumber, baseSha, abortController, onProgress } = args;
+  const model = args.model;
+  const token = await getAccessToken(args.accountId);
+
+  let repoCloneDir: string | null = null;
+  let worktreePath: string | null = null;
+
+  try {
+    onProgress({ phase: 'cloning' });
+    ({ repoCloneDir, worktreePath } = await prepWorktree(
+      owner,
+      name,
+      prNumber,
+      baseSha,
+      token,
+    ));
+
+    const built = await buildInWorktree({
+      accountId: args.accountId,
+      kind: 'fix',
+      worktreePath,
+      repoCloneDir,
+      baseSha,
+      model,
+      ...(args.systemPrompt !== undefined ? { systemPrompt: args.systemPrompt } : {}),
+      prompt: args.prompt,
+      maxTurns: args.maxTurns ?? config.aiFixMaxTurns,
+      maxBudgetUsd: args.maxBudgetUsd ?? config.aiFixBudgetUsd,
+      abortController,
+      onProgress: (p) => onProgress({ ...p, phase: p.phase === 'working' ? 'fixing' : p.phase }),
+      toolsFor: (checkTool) => ({
+        allowedTools: checkTool ? FIX_TOOLS_WITH_CHECKS : FIX_TOOLS,
+        disallowedTools: DISALLOWED_TOOLS,
+      }),
+      resultTool: {
+        server: 'fix',
+        name: 'submit_fix',
+        description: 'Report the fix you applied. Call this EXACTLY once, at the very end, after editing files.',
+        ack: 'Fix recorded.',
+      },
+      usageRecord: { accountId: args.accountId, seam: 'agent', feature: 'ai_fix', prId: args.prId ?? null },
+      checks: args.checks ?? [],
+      defaultCommitMessage: 'AI fix',
+      hookRepairPrompt: (output, nonce) =>
+        buildHookRepairPrompt({ output, nonce, ...(args.provider ? { provider: args.provider } : {}) }),
+      ...(args.provider ? { provider: args.provider } : {}),
+      ...(args.codex ? { codex: args.codex } : {}),
+      ...(args.effort ? { effort: args.effort } : {}),
+    });
+
+    if (built.aborted) {
+      return {
+        summary: '',
+        commitMessage: '',
+        patch: '',
+        filesChanged: [],
+        baseSha,
+        usage: emptyUsage(),
+        costUsd: null,
+        numTurns: null,
+        aborted: true,
+        ...(built.usageRecorded ? { usageRecorded: true } : {}),
+      };
+    }
+
+    const { patch, filesChanged } = built;
     if (patch.length > config.aiFixPatchMaxBytes) {
       throw new Error(
         `fix patch too large (${patch.length} bytes > ${config.aiFixPatchMaxBytes})`,
       );
     }
 
-    // A cast so the closure-assigned `captured` reads back as its declared union.
-    // (TS flow-narrows it to `null` because its only assignment is inside the tool
-    // callback, which it can't prove ran — a plain annotation wouldn't break that.)
-    const fix = captured as SubmitFixPayload | null;
+    const fix = built.captured;
     return {
       summary:
         fix?.summary ??
@@ -575,15 +709,14 @@ export async function runCodingAgent(
       patch,
       filesChanged,
       baseSha,
-      usage: total.usage,
-      costUsd: total.costUsd,
-      numTurns: total.numTurns,
+      usage: built.usage,
+      costUsd: built.costUsd,
+      numTurns: built.numTurns,
       aborted: false,
-      ...(total.usageRecorded ? { usageRecorded: true } : {}),
-      ...(checks ? { checks } : {}),
+      ...(built.usageRecorded ? { usageRecorded: true } : {}),
+      ...(built.checks ? { checks: built.checks } : {}),
     };
   } finally {
-    await checkSession?.close().catch(() => {});
     if (repoCloneDir && worktreePath) {
       await removeWorktreeLocked(owner, name, repoCloneDir, worktreePath).catch(
         () => {},
