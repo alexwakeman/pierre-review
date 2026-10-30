@@ -153,7 +153,7 @@ export function BlastRadiusChip({
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className={`${shell} rounded-ui hover:underline touch:min-h-10`}
+        className={`${shell} rounded-ui text-left hover:underline touch:min-h-10`}
         aria-expanded={open}
         title={verdict.label}
       >

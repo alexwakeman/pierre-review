@@ -105,7 +105,7 @@ import { ReviewSection } from './ReviewSection.js';
 import { Select } from './ui/index.js';
 import { PrRefText } from './ReviewPrRefs.js';
 import { Markdown } from './Markdown.js';
-import { REVIEW_CHIP, REVIEW_ITEM_CARD, REVIEW_ITEM_TITLE, REVIEW_PROSE, REVIEW_SUBHEAD } from '../lib/reviewStyles.js';
+import { REVIEW_CHIP, REVIEW_ITEM_CARD, REVIEW_ITEM_GROUP, REVIEW_ITEM_TITLE, REVIEW_PROSE, REVIEW_SUBHEAD } from '../lib/reviewStyles.js';
 
 type OpenInChanges = (path: string, line: number | null, side: ClaudeFindingSide) => void;
 
@@ -1361,7 +1361,7 @@ function SettledEarlierRow({
   onOpenInChanges?: OpenInChanges;
 }): JSX.Element {
   return (
-    <li className="rounded-ui border border-ui-line px-3 py-2 text-body">
+    <li className="rounded-ui bg-ui-surface px-3 py-2.5 text-body">
       <div className="flex flex-wrap items-center gap-2">
         <span className={`${CHIP} ${FOLLOW_UP_STATUS_CLASS.reply_accepted}`}>{settledEarlierHeading(item)}</span>
         {item.severity != null && (
@@ -1464,7 +1464,7 @@ export function ClaudeReviewFollowUpSection({
       }
     >
       {open.length > 0 && (
-        <ul className="space-y-1.5">
+        <ul className={REVIEW_ITEM_GROUP}>
           {open.map((it) => (
             <FollowUpRow key={it.priorFindingId} item={it} muted={false} {...rowProps} />
           ))}
@@ -1487,7 +1487,7 @@ export function ClaudeReviewFollowUpSection({
             Addressed, settled or no longer applies ({closedCount})
           </button>
           {closedOpen && (
-            <ul className="mt-1.5 space-y-1.5">
+            <ul className={`mt-1.5 ${REVIEW_ITEM_GROUP}`}>
               {closed.map((it) => (
                 <FollowUpRow key={it.priorFindingId} item={it} muted {...rowProps} />
               ))}

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { FloatingPortal } from '@floating-ui/react';
 import { claimActivePopover } from '../../lib/activePopover.js';
 import { cx, FOCUS_RING } from './cx.js';
+import { useAnchoredFloat } from './floating.js';
 import { Kbd } from './Kbd.js';
 import { useIsPhone } from './media.js';
 
@@ -63,8 +65,11 @@ export function Menu({
   const [active, setActive] = useState(0);
   const menuId = useId();
   const triggerRef = useRef<HTMLButtonElement | null>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  // The menu is portalled and mounts a render after `open` flips: focus follows the element.
+  const [menuEl, setMenuEl] = useState<HTMLDivElement | null>(null);
   const phone = useIsPhone();
+  const float = useAnchoredFloat({ open: open && !phone, side, align, maxHeight: 320 });
   const actions = items.filter(isAction);
   const enabled = actions.map((a, i) => (a.disabled ? -1 : i)).filter((i) => i >= 0);
 
@@ -89,8 +94,8 @@ export function Menu({
   }, [open]);
 
   useEffect(() => {
-    if (open) menuRef.current?.querySelector<HTMLElement>(`[data-menu-index="${active}"]`)?.focus();
-  }, [open, active]);
+    if (open) menuEl?.querySelector<HTMLElement>(`[data-menu-index="${active}"]`)?.focus();
+  }, [open, active, menuEl]);
 
   const openAt = (where: 'first' | 'last'): void => {
     setActive(where === 'first' ? (enabled[0] ?? 0) : (enabled[enabled.length - 1] ?? 0));
@@ -154,6 +159,7 @@ export function Menu({
       {trigger({
         ref: (el) => {
           triggerRef.current = el;
+          float.refs.setReference(el);
         },
         onClick: () => (open ? close() : openAt('first')),
         onKeyDown: (e) => {
@@ -170,23 +176,25 @@ export function Menu({
         'aria-controls': open ? menuId : undefined,
       })}
       {open && (
-        <>
-          {phone && <div className="fixed inset-0 z-50 bg-ui-scrim/40 motion-safe:animate-ui-fade" aria-hidden />}
+        <FloatingPortal>
+          {phone && <div className="fixed inset-0 z-[90] bg-ui-scrim/40 motion-safe:animate-ui-fade" aria-hidden />}
           <div
-            ref={menuRef}
+            ref={(el) => {
+              menuRef.current = el;
+              setMenuEl(el);
+              if (!phone) float.refs.setFloating(el);
+            }}
+            style={phone ? undefined : float.floatingStyles}
             id={menuId}
+            data-floating-layer=""
             role="menu"
             aria-label={label}
             onKeyDown={onMenuKey}
             className={cx(
-              'z-50 overflow-y-auto overscroll-contain bg-ui-raise p-1 shadow-xl shadow-black/20',
+              'z-[90] overflow-y-auto overscroll-contain bg-ui-raise p-1 shadow-xl shadow-black/20',
               phone
                 ? 'fixed inset-x-0 bottom-0 max-h-[70vh] rounded-t-xl pb-[max(8px,env(safe-area-inset-bottom))] motion-safe:animate-ui-sheet-up'
-                : cx(
-                    'absolute max-h-80 min-w-[200px] rounded-ui motion-safe:animate-ui-pop',
-                    side === 'top' ? 'bottom-full mb-1' : 'top-full mt-1',
-                    align === 'end' ? 'right-0' : 'left-0',
-                  ),
+                : 'min-w-[200px] rounded-ui motion-safe:animate-ui-pop',
             )}
           >
             {items.map((it) => {
@@ -226,7 +234,7 @@ export function Menu({
               );
             })}
           </div>
-        </>
+        </FloatingPortal>
       )}
     </div>
   );

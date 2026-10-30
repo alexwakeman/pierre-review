@@ -5,7 +5,8 @@ import { PrDetail } from './PrDetail.js';
 import { ChevronIcon, CloseIcon } from './Icons.js';
 import { FOCUS_RING } from './ui/cx.js';
 
-// The bottom pane's content:
+// The bottom pane's content — on a PR FOCUS tab only (App.tsx `paneVisible`; the shared board
+// opens a PR as a popover, then its own tab — components/Timeline/PrPopover.tsx):
 //  • a PR is selected → its detail (PrDetail)
 //  • else             → a hint to pick a PR
 // The old My Turn / Feed panels are gone: that state-of-play now lives in the Activity

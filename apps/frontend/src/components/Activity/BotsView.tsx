@@ -97,7 +97,7 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
   ];
 
   return (
-    <div className="max-w-[1400px] space-y-5" data-testid="bots-view">
+    <div className="space-y-5" data-testid="bots-view">
       {/* One page header (the rail mount) — the per-repo console mount already has its own header
           and tab strip, so there the title drops to a section heading and the 1–9 keys stay with
           the console. Both mounts are one BotsView body. */}

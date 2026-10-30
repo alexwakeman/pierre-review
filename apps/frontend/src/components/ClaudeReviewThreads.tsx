@@ -30,7 +30,7 @@ import { BotIcon, ChevronIcon, ExternalLinkIcon } from './Icons.js';
 import { InfoButton } from './InfoModal.js';
 import { ReviewSection } from './ReviewSection.js';
 import { PrRefText } from './ReviewPrRefs.js';
-import { REVIEW_CHIP, REVIEW_PROSE } from '../lib/reviewStyles.js';
+import { REVIEW_CHIP, REVIEW_ITEM_GROUP, REVIEW_PROSE } from '../lib/reviewStyles.js';
 import { useAiProviderName } from '../hooks/useAiCapabilities.js';
 
 const CHIP = REVIEW_CHIP;
@@ -287,7 +287,7 @@ export function ClaudeReviewThreadsSection({
       ) : (
         <>
           {parts.shown.length > 0 && (
-            <ul className="space-y-1.5">
+            <ul className={REVIEW_ITEM_GROUP}>
               {parts.shown.map((t) => (
                 <ThreadRow key={t.threadId} t={t} muted={false} onOpenThread={onOpenThread} by={by} />
               ))}
@@ -305,7 +305,7 @@ export function ClaudeReviewThreadsSection({
                 {moreOpen ? 'Show fewer' : `Show ${parts.more.length} more`}
               </button>
               {moreOpen && (
-                <ul className="mt-1.5 space-y-1.5">
+                <ul className={`mt-1.5 ${REVIEW_ITEM_GROUP}`}>
                   {parts.more.map((t) => (
                     <ThreadRow key={t.threadId} t={t} muted onOpenThread={onOpenThread} by={by} />
                   ))}

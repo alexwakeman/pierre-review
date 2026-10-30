@@ -66,7 +66,7 @@ import {
   type StatusTone,
 } from '../ui/index.js';
 import { ThreadStateBar } from './ThreadStateBar.js';
-import { ClaudeReviewPanel } from './ClaudeReviewCell.js';
+import { DrawerAiReview, Fact } from './OpenPrsAiReview.js';
 import { BlastRadiusChip } from './BlastRadiusChip.js';
 import { LargePrFlag } from './LargePrFlag.js';
 import { filesLabel } from './PrCardShell.js';
@@ -854,15 +854,6 @@ function GroupCoverage({ ident, state, prId }: { ident: string; state: TicketRev
 
 // ---- the side panel's body ----
 
-function Fact({ label, children }: { label: string; children: ReactNode }): JSX.Element {
-  return (
-    <div className="flex min-h-7 items-start gap-3 py-1">
-      <dt className="w-24 shrink-0 pt-px text-meta text-ui-faint">{label}</dt>
-      <dd className="m-0 min-w-0 flex-1 text-body text-ui-ink">{children}</dd>
-    </div>
-  );
-}
-
 function PrPanelBody({ entry, data, onJump }: { entry: Entry; data: OpenPrsRowsData; onJump: (stackId: string) => void }): JSX.Element {
   const { pr } = entry;
   const author = pr.authorId != null ? data.usersById.get(pr.authorId) : undefined;
@@ -985,18 +976,15 @@ function PrPanelBody({ entry, data, onJump }: { entry: Entry; data: OpenPrsRowsD
       </section>
 
       {data.claudeOn && (
-        <section>
-          <h3 className="mb-1.5 text-meta text-ui-faint">AI review</h3>
-          <ClaudeReviewPanel
-            prId={pr.id}
-            state={data.claudeStates.get(pr.id)}
-            ciState={data.ciStates.get(pr.id)}
-            teamClaimSkip={data.teamClaimSkips.get(pr.id) ?? null}
-            onOpenReview={() => data.onOpenReview(pr)}
-            onOpenFix={() => data.onOpenFix(pr)}
-            ticketPills={data.ticketReviewOn ? cardTicketPills(tickets, data.ticketStates, entry.ticketKey) : []}
-          />
-        </section>
+        <DrawerAiReview
+          prId={pr.id}
+          state={data.claudeStates.get(pr.id)}
+          ciState={data.ciStates.get(pr.id)}
+          teamClaimSkip={data.teamClaimSkips.get(pr.id) ?? null}
+          onOpenReview={() => data.onOpenReview(pr)}
+          onOpenFix={() => data.onOpenFix(pr)}
+          ticketPills={data.ticketReviewOn ? cardTicketPills(tickets, data.ticketStates, entry.ticketKey) : []}
+        />
       )}
     </div>
   );

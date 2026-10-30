@@ -145,7 +145,7 @@ export function OpenPrsDetail(): JSX.Element {
   if (noReposAtAll) return <FirstRunOnboarding />;
 
   return (
-    <div data-testid="open-prs-view" className="max-w-[100rem]">
+    <div data-testid="open-prs-view">
       {/* THE ONE SLIM HEADER (docs/redesign/DESIGN.md): the title and its counts, one quiet line
           (the default branches + today's auto reviews), then the toolbar. The Activity pane pads
           by the page gutter, so the header adds none (`inset={false}`). */}

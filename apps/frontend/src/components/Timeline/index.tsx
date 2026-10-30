@@ -49,6 +49,10 @@ import {
   type ContextFocus,
   type PopoverState,
 } from './MarkerPopover.js';
+import { PrPopover } from './PrPopover.js';
+import { useTimelineLayout } from '../../store/timelineLayout.js';
+import { isTypingTarget, shortcutBlocked } from '../ui/keys.js';
+import { useIsPhone, useTimelineListCapable } from '../ui/media.js';
 
 const ZOOM_MIN_MS = 1000 * 60 * 60;
 
@@ -481,6 +485,23 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
   // Latest popover state, readable from stable callbacks without re-binding.
   const popoverRef = useRef<PopoverState | null>(null);
   popoverRef.current = popover;
+  // The PR POPOVER (PrPopover.tsx) — the shared board's answer to a PR-bar click (or ↵ on the
+  // selected PR); it replaced the bottom detail pane there. It always shows the SELECTED PR, so
+  // this holds only "is it open" + the click's x (null = the bar's middle). Never on an isolate tab
+  // (its detail pane stays). One floating thing at a time: the marker popover and this close each other.
+  const [prPop, setPrPop] = useState<{ x: number | null } | null>(null);
+  const prPopRef = useRef(prPop);
+  prPopRef.current = prPop;
+  // While the popover is open the bar's hover tooltip would say the same thing over the top of it:
+  // index.css hides `.vis-tooltip` under this flag.
+  const prPopOpen = prPop != null;
+  useEffect(() => {
+    if (!prPopOpen) return;
+    document.body.dataset.prPopover = '';
+    return () => {
+      delete document.body.dataset.prPopover;
+    };
+  }, [prPopOpen]);
   // The contributor popover (opened by clicking a row-label name). Holds the row's group
   // id + the clicked uid + the row's repo (which scopes the popover's numbers) + the click
   // point (fallback anchor). Local state, like `popover` — transient UI, not filter/URL state.
@@ -1806,6 +1827,7 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
       // The marker popover and the metrics popover are mutually exclusive — opening
       // one closes the other so two floating panels never overlap.
       setStatsPopover(null);
+      setPrPop(null);
       setPopover({ x, y, eventIds });
     },
     [applyContext],
@@ -1830,7 +1852,10 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
   // final click tidies the leftover anchor pulse. Shared by vis's own empty-canvas
   // click and the pane-gap click (the timeline pane beyond vis's drawn surface).
   const dismissEmptyCanvas = useCallback(() => {
-    if (popoverRef.current) {
+    // The PR popover is the top level when it is open (it and the marker popover never co-exist).
+    if (prPopRef.current) {
+      setPrPop(null);
+    } else if (popoverRef.current) {
       closeModal();
     } else if (!focusedGroupIdsRef.current) {
       if (selectedPrIdRef.current != null) useFilters.getState().clearSelection();
@@ -1852,10 +1877,9 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
     applySelectGlow(popover && !focusActive ? (popover.eventIds[0] ?? null) : null);
   }, [popover, focusActive, applySelectGlow]);
 
-  // Clicking any marker/cluster loads its PR into the detail pane. Every popover
-  // (a single event or a PR-partitioned cluster) belongs to one PR, so select that
-  // PR. PR-level (selectPr); the popover's "Open in detail pane" remains the route to
-  // a specific thread.
+  // Clicking any marker/cluster SELECTS its PR (the bar's ring; on a Focus tab, its pane).
+  // Every popover (a single event or a PR-partitioned cluster) belongs to one PR. The popover's
+  // "Open details" ("Open in detail pane" on a Focus tab) is the route to a specific thread.
   const popoverEventId = popover?.eventIds[0] ?? null;
   useEffect(() => {
     if (popoverEventId == null) return;
@@ -1884,6 +1908,63 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
       authorAvatarUrl: author?.avatarUrl ?? null,
     };
   }, []);
+
+  // ── The PR popover (shared board only) ──────────────────────────────────────────────────────
+  // A selected PR's lean row: the board's payload first, then the payloads a force-shown bar comes
+  // from (an open PR outside the window, one the member filter hides).
+  const prRecordOf = useCallback(
+    (prId: number): TimelinePr | undefined =>
+      prsByIdRef.current.get(prId) ??
+      openPrsData?.prs.find((p) => p.id === prId) ??
+      searchData?.prs.find((p) => p.id === prId) ??
+      searchOpenPrsData?.prs.find((p) => p.id === prId),
+    [openPrsData, searchData, searchOpenPrsData],
+  );
+
+  // "Open details": the PR's own tab — the same path every PR tab takes (pinnedTabs).
+  const openPrDetails = useCallback(
+    (prId: number): boolean => {
+      const pr = prRecordOf(prId);
+      if (pr == null) return false;
+      setPrPop(null);
+      usePinnedTabs.getState().openPrDetailTab(metaOf(pr));
+      return true;
+    },
+    [prRecordOf, metaOf],
+  );
+
+  // The popover follows the selection (j/k while it is closed, a marker's PR) and closes with it, and
+  // whenever the board is not the page (a tab or Activity covering the warm board).
+  const activeTab = usePinnedTabs((s) => s.activeTab);
+  const phone = useIsPhone();
+  const listCapable = useTimelineListCapable();
+  const phoneLayout = useTimelineLayout((s) => s.phone);
+  // The phone's List view covers this board (App.tsx); its rows open the PR tab directly.
+  const listShown = embeddedPrId == null && listCapable && phoneLayout === 'list';
+  const boardShowing = embeddedPrId == null && activeTab === 'timeline' && !listShown;
+  useEffect(() => {
+    if (selectedPrId == null || !boardShowing) setPrPop(null);
+  }, [selectedPrId, boardShowing]);
+
+  // ↵ on the selected PR opens its popover (j/k select; the global keys own those). Only when the
+  // key is not someone else's: a focused control keeps its own Enter.
+  useEffect(() => {
+    if (!boardShowing) return;
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== 'Enter' || shortcutBlocked(e) || isTypingTarget(e.target)) return;
+      const t = e.target as HTMLElement | null;
+      const onPage = t == null || t === document.body || containerRef.current?.contains(t) === true;
+      if (!onPage) return;
+      const id = useFilters.getState().selectedPrId;
+      if (id == null || prPopRef.current != null) return;
+      e.preventDefault();
+      setPopover(null);
+      setStatsPopover(null);
+      setPrPop({ x: null });
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [boardShowing]);
 
   // Create the timeline once.
   useEffect(() => {
@@ -1954,6 +2035,12 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
           closeModal();
         }
         selectPr(Number.parseInt(key.slice(3), 10));
+        // The shared board opens the PR popover at the click (an isolate tab keeps its pane).
+        if (embeddedPrId == null) {
+          setStatsPopover(null);
+          setPopover(null);
+          setPrPop({ x });
+        }
       } else if (key.startsWith('ev:')) {
         const evId = Number.parseInt(key.slice(3), 10);
         // Isolate-focus tab: clicking an event highlights it and opens its popover —
@@ -3155,8 +3242,30 @@ export function Timeline({ mode }: { mode?: TimelineMode } = {}): JSX.Element {
           onContextFocus={onPopoverContext}
           onDismiss={closeModal}
           onNavigate={navigatePopover}
+          // The shared board has no detail pane: the popover's links open the PR's tab. An isolate
+          // tab keeps "Open in detail pane" (its pane is under the board).
+          openDetails={embeddedPrId == null ? openPrDetails : undefined}
         />
       )}
+      {prPop != null && boardShowing && selectedPrId != null && (() => {
+        const pr = prRecordOf(selectedPrId);
+        if (pr == null) return null;
+        return (
+          <PrPopover
+            key={pr.id}
+            pr={pr}
+            repo={reposById.get(pr.repoId)}
+            author={pr.authorId != null ? usersById.get(pr.authorId) : undefined}
+            container={containerRef.current}
+            anchorX={prPop.x}
+            phone={phone}
+            onClose={() => setPrPop(null)}
+            onOpenDetails={() => {
+              openPrDetails(pr.id);
+            }}
+          />
+        );
+      })()}
       {statsPopover && (
         <UserProfilePopover
           userId={statsPopover.uid}

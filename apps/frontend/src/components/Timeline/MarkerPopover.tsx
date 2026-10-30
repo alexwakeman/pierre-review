@@ -87,11 +87,15 @@ function SingleEvent({
   usersById,
   prsById,
   onNavigate,
+  openDetails,
 }: {
   ev: TimelineEvent;
   usersById: Map<number, User>;
   prsById: Map<number, TimelinePr>;
   onNavigate: () => void;
+  /** The shared board (no detail pane): open the PR's own TAB first, then land on the event in it.
+   *  Absent on an isolate tab, whose detail pane is right under the board. */
+  openDetails?: (prId: number) => boolean;
 }): JSX.Element {
   const selectThread = useFilters((s) => s.selectThread);
   const selectPr = useFilters((s) => s.selectPr);
@@ -144,7 +148,13 @@ function SingleEvent({
 
   const pr = ev.prId != null ? prsById.get(ev.prId) : undefined;
 
+  // On the shared board the PR's TAB opens first (the same order every PR-tab opener uses:
+  // tab, then the selection / signal the mounted PrDetail consumes — `showThread` for a thread).
+  const openTab = (): void => {
+    if (openDetails != null && ev.prId != null) openDetails(ev.prId);
+  };
   const openInDetail = () => {
+    openTab();
     if (ev.threadId != null) selectThread(ev.prId, ev.threadId);
     // A PR comment lives in the Overview tab's "PR comments" section — select the
     // PR and ask PrDetail to scroll to + flash that specific card (refId is the
@@ -162,6 +172,7 @@ function SingleEvent({
   // Jump to this commit's row in the PR-detail Activity tab.
   const viewInActivity = () => {
     if (ev.prId == null) return;
+    openTab();
     showActivityEntry(ev.prId, { type: ev.type, refId: ev.refId });
     onNavigate();
   };
@@ -252,16 +263,17 @@ function SingleEvent({
 
       <div className="flex items-center gap-3 pt-0.5 text-meta">
         {/* Commits (and lifecycle events, which never render a marker) drop the
-            "Open in detail pane" link — clicking the marker already opens the PR
-            in the detail pane, and commits get "View in Activity" instead. Other
-            types keep it: a review comment opens its specific thread, etc. */}
+            "Open details" / "Open in detail pane" link — commits get "View in Activity"
+            instead. Other types keep it: a review comment opens its specific thread
+            (PrDetail's showThread), a PR comment its card, a review its Activity entry —
+            in the PR's own tab on the shared board, in the pane on a Focus tab. */}
         {!isCommit && (
           <button
             type="button"
             onClick={openInDetail}
             className="hit text-ui-ink hover:underline"
           >
-            Open in detail pane
+            {openDetails != null ? 'Open details' : 'Open in detail pane'}
           </button>
         )}
         {isCommit && ev.prId != null && (
@@ -308,6 +320,7 @@ export function MarkerPopover({
   onContextFocus,
   onDismiss,
   onNavigate,
+  openDetails,
 }: {
   state: PopoverState;
   eventsById: Map<number, TimelineEvent>;
@@ -319,6 +332,7 @@ export function MarkerPopover({
   onContextFocus: (ctx: ContextFocus) => void;
   onDismiss: () => void;
   onNavigate: () => void;
+  openDetails?: (prId: number) => boolean;
 }): JSX.Element {
   // Persisted across reloads so the user's chosen size becomes the default for
   // every marker modal going forward (Fix 2).
@@ -528,6 +542,7 @@ export function MarkerPopover({
               usersById={usersById}
               prsById={prsById}
               onNavigate={onNavigate}
+              openDetails={openDetails}
             />
           ) : (
             <div className="divide-y divide-ui-line">
@@ -538,6 +553,7 @@ export function MarkerPopover({
                     usersById={usersById}
                     prsById={prsById}
                     onNavigate={onNavigate}
+                    openDetails={openDetails}
                   />
                 </div>
               ))}

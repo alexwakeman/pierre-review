@@ -396,7 +396,7 @@ export function ThemeThreadsDetail(): JSX.Element {
   const hiddenGroups = groups.length - shown.length;
 
   return (
-    <div className="mx-auto max-w-[100rem] space-y-4 p-4">
+    <div className="space-y-4 p-4">
       <div>
         <div className="flex flex-wrap items-center gap-2">
           <SeverityPill severity={theme.severity} />

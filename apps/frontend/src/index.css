@@ -2150,3 +2150,8 @@ details > summary::before {
 details[open] > summary::before {
   transform: rotate(90deg);
 }
+
+/* The Timeline's PR popover replaces the bar's hover tooltip while it is open (Timeline/index.tsx). */
+body[data-pr-popover] .vis-tooltip {
+  display: none !important;
+}

@@ -1081,6 +1081,10 @@ export async function getLatestReviewStates(
       kind: cr.kind,
       pairId: cr.pairId,
       pairConsolidation: cr.pairConsolidation,
+      provider: cr.provider,
+      model: cr.model,
+      effort: cr.effort,
+      reviewMode: cr.reviewMode,
     })
     .from(cr)
     .innerJoin(prs, eq(prs.id, cr.prId))
@@ -1100,6 +1104,10 @@ export async function getLatestReviewStates(
     kind: string | null;
     pairId: number | null;
     pairConsolidation: unknown;
+    provider: string | null;
+    model: string | null;
+    effort: string | null;
+    reviewMode: string | null;
   }>;
   const out: ClaudeReviewPrState[] = [];
   const latestByPr = new Map<number, (typeof rows)[number] & { halfIds: number[] }>();
@@ -1150,11 +1158,27 @@ export async function getLatestReviewStates(
       headMoved: r.prHeadSha != null && r.prHeadSha !== r.headSha,
       currentHeadSha: r.prHeadSha ?? null,
       trigger: r.trigger === 'auto' ? 'auto' : 'manual',
+      ...ranOnOf(halves),
     });
   }
   await foldStateSummaries(ctx, out, latestByPr, repliesAfter);
   if (fixRunning) await foldFixStates(ctx, out, latestByPr, accountId, fixRunning);
   return out;
+}
+
+/**
+ * What the run ran on (`ClaudeReviewPrState.ranOn`), oldest half first: one entry for a single run,
+ * both halves for a Claude + Codex pair. A skipped run ran no model, and a row with no model names
+ * none — the field is then ABSENT, never a guess.
+ */
+function ranOnOf(
+  halves: ReadonlyArray<{ reviewId: number; provider: string | null; model: string | null; effort: string | null; reviewMode: string | null }>,
+): Pick<ClaudeReviewPrState, 'ranOn'> {
+  const ran = [...halves]
+    .sort((a, b) => a.reviewId - b.reviewId)
+    .filter((h) => h.reviewMode !== 'skip' && h.model != null && h.model.trim() !== '')
+    .map((h) => ({ provider: aiRunProvider(h.provider, h.model), model: h.model as string, effort: h.effort ?? null }));
+  return ran.length > 0 ? { ranOn: ran } : {};
 }
 
 /**
@@ -2373,16 +2397,30 @@ export async function markFindingReminder(
   return reminder;
 }
 
-// On startup, heal runs left mid-flight by a crash/restart.
-export async function reconcileOrphanedReviews(ctx: AgentContext): Promise<number> {
+/** A run the startup reconcile just marked failed: enough to find (and end) its pair. */
+export interface ReconciledReviewRun {
+  id: number;
+  accountId: number;
+  prId: number;
+  pairId: number | null;
+  pairRole: string | null;
+}
+
+// On startup, heal runs left mid-flight by a crash/restart. Returns exactly the rows THIS call
+// changed (a second boot finds them already failed and returns none), so the caller can end a pair
+// whose second half was among them (manager.ts `finishInterruptedPairs`).
+export async function reconcileOrphanedReviewRuns(ctx: AgentContext): Promise<ReconciledReviewRun[]> {
   const { cr } = tables(ctx);
-  const changed = (await ctx.db
+  return (await ctx.db
     .update(cr)
     .set({ status: 'failed', error: 'interrupted by restart', finishedAt: new Date() })
     .where(inArray(cr.status, ['queued', 'running']))
-    .returning({ id: cr.id })
-    .execute()) as Array<{ id: number }>;
-  return changed.length;
+    .returning({ id: cr.id, accountId: cr.accountId, prId: cr.prId, pairId: cr.pairId, pairRole: cr.pairRole })
+    .execute()) as ReconciledReviewRun[];
+}
+
+export async function reconcileOrphanedReviews(ctx: AgentContext): Promise<number> {
+  return (await reconcileOrphanedReviewRuns(ctx)).length;
 }
 
 // Record a run's cost on the shared AI-usage ledger (agent seam). Reads accountId/model/prId

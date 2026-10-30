@@ -388,7 +388,7 @@ export function BotDetailPanel(): JSX.Element {
   }
 
   return (
-    <div className="mx-auto max-w-[100rem] space-y-3 p-4">
+    <div className="space-y-3 p-4">
       <div className="flex flex-wrap items-center gap-2">
         <h2 className="inline-flex items-center gap-1.5 text-title font-semibold text-ui-ink">
           <BotIcon size={15} />

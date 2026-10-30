@@ -3,6 +3,8 @@ import type { TimelinePr, User } from '@pierre-review/shared';
 import { useRepos, useTimeline, useUsers } from '../../hooks/useTimeline.js';
 import { indexUsers, userLabel } from '../../lib/ui.js';
 import { useFilters } from '../../store/filters.js';
+import { usePinnedTabs } from '../../store/pinnedTabs.js';
+import { shortcutBlocked } from '../ui/keys.js';
 import { useTimelineLayout } from '../../store/timelineLayout.js';
 import { CloseIcon, MergeIcon, PullRequestIcon, RequestChangesIcon, TimerIcon, TimelineIcon, WarningIcon, CheckCircleIcon } from '../Icons.js';
 import { List, ListGroup, Row, RowLead, RowMeta, RowTitle, rowDomId } from '../ui/List.js';
@@ -14,8 +16,9 @@ import { timelineListModel } from './listModel.js';
 // gutter, so a phone opens the Timeline as ONE LINE PER PULL REQUEST the board would draw a bar for
 // (`timelineListModel` — the board's own payload and its two client-side narrowings, Members and
 // Threads), grouped by repository, most recently active first: state · #number title · author ·
-// events in the window · last activity. Tapping a row SELECTS the PR exactly as a bar click does
-// (`selectPr` → `?pr=`), which opens its detail — full screen on a phone (App.tsx).
+// events in the window · last activity. Tapping a row OPENS THE PR'S TAB (the board's PR popover is
+// skipped here: on a phone that card would only be a sheet in the way of the same tab, one tap
+// later — the tab is full screen, and Back returns to this list). ↵ on the j/k selection does the same.
 //
 // Nothing is lost: the BOARD is one tap away (the FilterBar's Board / List switch, ⌘K "Timeline: show
 // the board"; store/timelineLayout.ts), and the markers' detail (each event) is in the PR's own
@@ -61,6 +64,21 @@ export function TimelineList(): JSX.Element {
   const setLayout = useTimelineLayout((s) => s.setPhone);
   const listRef = useRef<HTMLUListElement>(null);
 
+  // The PR's own tab — the path every PR tab takes (pinnedTabs).
+  const openPr = (pr: TimelinePr): void => {
+    const author = pr.authorId != null ? usersById.get(pr.authorId) : undefined;
+    selectPr(pr.id);
+    usePinnedTabs.getState().openPrDetailTab({
+      id: pr.id,
+      number: pr.number,
+      title: pr.title,
+      repoFullName: reposById.get(pr.repoId)?.fullName ?? `repo ${pr.repoId}`,
+      authorLogin: author?.githubLogin ?? null,
+      authorDisplayName: author?.displayName ?? null,
+      authorAvatarUrl: author?.avatarUrl ?? null,
+    });
+  };
+
   const usersById = useMemo(() => indexUsers(users), [users]);
   const reposById = useMemo(() => new Map((repos ?? []).map((r) => [r.id, r])), [repos]);
   const groups = useMemo(
@@ -74,6 +92,23 @@ export function TimelineList(): JSX.Element {
   const flat = useMemo(() => groups.flatMap((g) => g.rows), [groups]);
   const selectedIndex = selectedPrId == null ? null : flat.findIndex((r) => r.pr.id === selectedPrId);
   const sel = selectedIndex != null && selectedIndex >= 0 ? selectedIndex : null;
+
+  // ↵ opens the selected row's PR (only while the list is the page and nothing else owns the key).
+  const openRef = useRef<(() => void) | null>(null);
+  openRef.current = sel != null && flat[sel] != null ? () => openPr(flat[sel]!.pr) : null;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== 'Enter' || shortcutBlocked(e)) return;
+      if (usePinnedTabs.getState().activeTab !== 'timeline') return;
+      const t = e.target as HTMLElement | null;
+      if (t != null && t !== document.body && !listRef.current?.contains(t)) return;
+      if (openRef.current == null) return;
+      e.preventDefault();
+      openRef.current();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   // j/k (the app's global keys) move the selection: keep the selected row on screen.
   useEffect(() => {
@@ -121,6 +156,7 @@ export function TimelineList(): JSX.Element {
                     index={i}
                     selected={sel === i}
                     onSelect={() => selectPr(r.pr.id)}
+                    onOpen={() => openPr(r.pr)}
                     title={`#${r.pr.number} ${r.pr.title} — ${st.label}, by ${who}, ${r.events} ${r.events === 1 ? 'event' : 'events'} in this window, last ${when}`}
                   >
                     <RowLead>

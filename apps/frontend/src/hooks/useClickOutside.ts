@@ -16,7 +16,11 @@ export function useClickOutside(
     if (!enabled) return;
     function handle(e: Event): void {
       const el = ref.current;
-      if (el && !el.contains(e.target as Node)) cb.current(e);
+      const t = e.target as Node;
+      // A Menu / Select list is portalled to <body> (components/ui/floating.ts): a press on one
+      // opened from inside this panel is not "outside" it.
+      if (t instanceof Element && t.closest('[data-floating-layer]') != null) return;
+      if (el && !el.contains(t)) cb.current(e);
     }
     // Listen on `pointerdown` in the CAPTURE phase. vis-timeline (Hammer.js) drives
     // the canvas with Pointer events and preventDefault()s pointerdown, which

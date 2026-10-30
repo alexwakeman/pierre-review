@@ -39,14 +39,14 @@ export function UserActivityDetail(): JSX.Element {
 
   if (userId == null) {
     return (
-      <div className="mx-auto max-w-[100rem] p-4 text-body text-ui-mute">
+      <div className="p-4 text-body text-ui-mute">
         No contributor selected.
       </div>
     );
   }
 
   return (
-    <div className="mx-auto max-w-[100rem] space-y-3 p-4">
+    <div className="space-y-3 p-4">
       <div className="flex flex-wrap items-center gap-2.5">
         {avatarUrl ? (
           <img

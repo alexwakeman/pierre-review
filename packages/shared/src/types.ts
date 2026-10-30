@@ -7775,6 +7775,10 @@ export interface ClaudeReviewPrState {
   /** AI Fix on this PR: `'running'` while a fix is queued or running; `'ready'` when a finished,
    *  unpushed fix with changes exists for the PR's CURRENT synced head. Absent otherwise. DB-only. */
   fix?: 'running' | 'ready';
+  /** What the run ran on, for `aiRunLabel` / `pairModelsLabel`: one entry, or both halves of a
+   *  Claude + Codex pair (oldest first). Absent for a skipped run, a row with no model, an auto
+   *  review still waiting in its lane, and older servers — never a guess. */
+  ranOn?: Array<{ provider: AiProviderId; model: string; effort: string | null }>;
 }
 
 /** The Open PRs strip's per-run figures, folded server-side from the stored run (DB-only). */

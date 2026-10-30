@@ -785,7 +785,7 @@ export function BotFlaggingDetail(): JSX.Element {
       );
 
   return (
-    <div className="mx-auto max-w-[100rem] space-y-4 p-4">
+    <div className="space-y-4 p-4">
       {header}
       {/* P2.2 — the synthesis VERDICT leads, carrying this drill-down's exact scope. With no
           expressible descriptor (overlap tile / matrix cell / multi-bot set) the list renders

@@ -546,7 +546,7 @@ export function MetricsDetail(): JSX.Element {
   };
 
   return (
-    <div className="mx-auto max-w-[100rem] space-y-4 p-4">
+    <div className="space-y-4 p-4">
       <div className="flex flex-wrap items-baseline gap-2">
         <div className="flex items-center gap-1">
           <h2 className="text-title font-semibold text-ui-ink">Flow metrics</h2>

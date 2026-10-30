@@ -283,10 +283,11 @@ One sidebar, one slim top bar, the page (`components/shell/`, docs/redesign/DESI
   collapse** (shows all matches flat) so no member is unreachable. Its sticky per-repo headers
   (member + bots sections) carry `z-10` + an opaque bg so scrolling rows don't bleed through.
 - **Timeline** — the centerpiece (below).
-- **DetailPane** — resizable bottom pane (height persisted) under the board slot. **Hidden
-  until a PR is selected** (`selectedPrId != null && !overlayActive`); no selection → the
-  Timeline takes the full height (App fires a synthetic `resize` on the transition so vis
-  refits). Shows **PrDetail** for the selected PR. **App lands on Activity → Open PRs by
+- **DetailPane** — resizable bottom pane (height persisted) under a **PR Focus tab's** board
+  slot ONLY (`selectedPrId != null && !overlayActive && boardMode != null`; App fires a synthetic
+  `resize` on the transition so vis refits). Shows **PrDetail** for the selected PR. ⚠ **The
+  SHARED board has no pane**: a PR-bar click (or ↵ on the j/k selection) opens the **PR popover**
+  (`Timeline/PrPopover.tsx`, below) and "Open details" opens the PR's own tab. **App lands on Activity → Open PRs by
   default** (a bare load → `?view=activity`; Pending is `?view=activity&activityRepo=attention`;
   `?pr=`/`?thread=` deep links keep the timeline).
 - **`AutoMergeBanner`** — the armed-merge PROGRESS STACK, a header toast card fed by `GET /api/auto-merge`. One row per armed PR from the click that
@@ -543,10 +544,13 @@ filters quiet buttons. ⌘K while the Timeline is the page (`Timeline/useTimelin
 "centre on now", "clear filters", and on a phone Board / List. ⚠ **A PHONE READS THE TIMELINE AS A LIST** by
 default (`Timeline/TimelineList.tsx` over the board, which stays mounted): one line per PR the board would
 draw a bar for (`Timeline/listModel.ts` — the board's payload plus its Members and Threads narrowings,
-the selected PR always kept), grouped by repo, newest activity first; a tap = a bar click (`selectPr`).
+the selected PR always kept), grouped by repo, newest activity first; a tap (or ↵ on the j/k selection)
+OPENS THE PR'S TAB directly (`openPrDetailTab`) — a popover there would only be a sheet in front of the
+same full-screen tab.
 The choice is `store/timelineLayout.ts` (localStorage only, never the URL); the BOARD is one tap away.
-On a phone the selected PR's detail is a FULL-SCREEN sheet (App.tsx, `DetailPane sheet`, Back clears
-the selection) instead of the resizable bottom pane.
+On a phone a Focus tab's detail is a FULL-SCREEN sheet (App.tsx, `DetailPane sheet`, Back clears
+the selection) instead of the resizable bottom pane; on the phone's BOARD view a bar tap opens the PR
+popover as a bottom sheet.
 
 `vis-timeline` with `stack:false` + `stackSubgroups:true`. Rows are nested groups
 **repo → contributor** (ids `repo:<rid>`, `repo:<rid>:user:<uid>`); within a contributor
@@ -555,8 +559,24 @@ band. PR bars pack into lanes (`lanes.ts`); events are type-shaped SVG markers t
 **cluster** at coarse zoom (`clustering.ts`).
 
 Key behaviors to know about:
-- **Selection & highlight.** Clicking an event marker/cluster loads its PR into the
-  detail pane + opens a popover; clicking a PR bar selects it. Every highlight (selected
+- **The PR popover** (`Timeline/PrPopover.tsx`, shared board only). A PR-bar click selects the PR
+  AND opens a card under the clicked point of the bar (re-anchored every frame on `.pr-bar.vis-selected`,
+  so it rides scroll/zoom/rebuilds): repo#N + title, state, author, Merge (`leadStatus` →
+  `mergeVerdict()`), CI, review standing, size, age / last activity, ticket (one batched
+  `ticket-links` read, only with a tracker) — all from the lean `TimelinePr`, nothing else fetched.
+  "Open details" (primary, focused on open, so ↵ ↵ goes bar → tab) = `openPrDetailTab`; "Open on
+  GitHub" = `githubPrUrl` (→ `safeExternalUrl`). It holds the ONE popover slot
+  (`claimActivePopover`, so j/k are blocked while it is open), captures Escape (a second Escape then
+  clears the selection), closes on an outside press — except a press on the board, which the board
+  routes (another bar re-targets it, a marker opens the marker popover instead, empty canvas closes it
+  as the first of `dismissEmptyCanvas`'s levels) — and closes whenever the selection clears or the
+  board stops being the page. ↵ on the j/k selection opens it (not from a focused control). A Focus
+  tab never shows it (its pane stays). The **marker popover's** "Open details" (on the board; "Open in
+  detail pane" on a Focus tab) opens the PR TAB first, then lands on the event in it: a thread through
+  `selectThread` → `showThread`, a PR comment through `showPrComment`, a review / commit through
+  `showActivityEntry`.
+- **Selection & highlight.** Clicking an event marker/cluster selects its PR (on a Focus tab: its
+  pane) + opens the marker popover; clicking a PR bar selects it (+ the PR popover on the board). Every highlight (selected
   bar, open popover's marker `ev-selected`, focus glows `pr-cross-linked` /
   `ev-cross-linked`) is the **same soft sky pulse** (`ev-select-pulse`). Outside focus,
   clicking empty canvas dismisses **one level at a time**: popover, else selected bar,

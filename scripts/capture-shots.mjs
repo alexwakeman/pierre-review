@@ -204,12 +204,14 @@ async function proShots() {
   });
 
   await shot('pr-detail.png', async () => {
-    const c = await ctx({ height: 1100, pane: 980 });
+    // The shared Timeline has no bottom pane any more (a bar opens a popover, then the PR's own
+    // tab), so the shot is the PR tab itself.
+    const c = await ctx({ height: 1100 });
     const p = await c.newPage();
-    await open(p, '?pr=113');
-    await p.getByTestId('detail-pane').waitFor({ timeout: 25_000 });
+    await open(p, '?view=pr-detail:113');
+    await p.getByTestId('pinned-pr-overlay').waitFor({ timeout: 25_000 });
     await p.waitForTimeout(2500);
-    await crop(p, p.getByTestId('detail-pane'), 'pr-detail.png', { maxHeight: 1150 });
+    await crop(p, p.getByTestId('pinned-pr-overlay'), 'pr-detail.png', { maxHeight: 1150 });
     await c.close();
   });
 

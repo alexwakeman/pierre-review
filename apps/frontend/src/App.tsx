@@ -175,9 +175,10 @@ export default function App(): JSX.Element {
     userActivityActive ||
     botDetailActive ||
     ticketActive;
-  // The detail pane is shown at the bottom of any board-slot Timeline (shared or
-  // pr-focus) once a PR is selected there.
-  const paneVisible = selectedPrId != null && !overlayActive;
+  // The detail pane is shown at the bottom of a PR FOCUS tab's Timeline (the tab's own PR is
+  // selected). The SHARED board has no pane: a bar click opens the PR popover there
+  // (components/Timeline/PrPopover.tsx), whose "Open details" opens the PR's own tab.
+  const paneVisible = selectedPrId != null && !overlayActive && boardMode != null;
   // A phone: the shared board reads as a list by default, and the detail pane is a full-screen sheet.
   const phone = useIsPhone();
   const phoneLayout = useTimelineLayout((s) => s.phone);
@@ -313,8 +314,8 @@ export default function App(): JSX.Element {
               {phoneTimelineList && <TimelineList />}
             </section>
 
-            {/* Item 7: the resize handle + detail pane exist only once a PR is selected on
-                the board. No selection → the Timeline takes the full height. */}
+            {/* The resize handle + detail pane: a PR Focus tab only (its PR is selected on boot).
+                The shared board takes the full height — its PRs open as a popover, then a tab. */}
             {paneVisible && !phone && (
               <>
                 <div

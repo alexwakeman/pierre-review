@@ -109,7 +109,7 @@ import { ClaudeReviewSonarSection } from './ClaudeReviewSonar.js';
 import { ClaudeReviewDiagramsSection } from './ClaudeReviewDiagrams.js';
 import { DocCitationLinks, DocReferencesSection } from './DocReferences.js';
 import { PrRefText, ReviewPrRefsProvider } from './ReviewPrRefs.js';
-import { REVIEW_ITEM_CARD, REVIEW_ITEM_TITLE, REVIEW_META } from '../lib/reviewStyles.js';
+import { REVIEW_ITEM_CARD, REVIEW_ITEM_GROUP, REVIEW_ITEM_TITLE, REVIEW_META } from '../lib/reviewStyles.js';
 import { reviewTexts, type KnownPr } from '../lib/reviewPrRefs.js';
 import { TicketCoverageSection, type LegacyStories } from './TicketCoverage.js';
 import { useTicketReviews } from '../hooks/useTicketReview.js';
@@ -1164,7 +1164,7 @@ export function FindingRow({
           Ignore, plus posted/error status. Ignored findings show only the
           re-expand + un-ignore controls. */}
       {actions && (
-      <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-ui-line pt-2">
+      <div className="mt-2.5 flex flex-wrap items-center gap-2">
         {ignored ? (
           <>
             <button
@@ -1495,7 +1495,7 @@ export function ClaudesReview({
         }
       >
         {findings.length > 0 ? (
-          <ul className="space-y-2">
+          <ul className={REVIEW_ITEM_GROUP}>
             {findings.map((f) =>
               findingCard(f, f.story != null ? storyChipLabel(f.story, review.tickets) : null),
             )}

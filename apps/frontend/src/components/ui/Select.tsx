@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { FloatingPortal } from '@floating-ui/react';
 import { claimActivePopover } from '../../lib/activePopover.js';
 import { CaretIcon, CheckIcon } from '../Icons.js';
 import { cx, FOCUS_RING } from './cx.js';
+import { useAnchoredFloat } from './floating.js';
 import { useIsPhone } from './media.js';
 
 // THE SELECT (docs/redesign/DESIGN.md § Controls) — the "select-only combobox" pattern.
@@ -56,9 +58,12 @@ export function Select<T extends string>({
   const listId = `${autoId}-list`;
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
-  const buttonRef = useRef<HTMLButtonElement>(null);
-  const listRef = useRef<HTMLUListElement>(null);
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
+  const listRef = useRef<HTMLUListElement | null>(null);
+  // The list is portalled and mounts a render after `open` flips.
+  const [listEl, setListEl] = useState<HTMLUListElement | null>(null);
   const phone = useIsPhone();
+  const float = useAnchoredFloat({ open: open && !phone, maxHeight: 288, matchWidth: true });
   const current = options.find((o) => o.value === value) ?? null;
 
   const textOf = (o: SelectOption<T>): string => o.text ?? (typeof o.label === 'string' ? o.label : String(o.value));
@@ -97,8 +102,14 @@ export function Select<T extends string>({
   }, [open, close]);
 
   useEffect(() => {
-    if (open) listRef.current?.querySelector(`[data-opt-index="${active}"]`)?.scrollIntoView?.({ block: 'nearest' });
-  }, [open, active]);
+    // Scroll the LIST only — scrollIntoView would also scroll every ancestor, shoving the page.
+    const list = listEl;
+    const opt = open ? list?.querySelector<HTMLElement>(`[data-opt-index="${active}"]`) : null;
+    if (list == null || opt == null) return;
+    if (opt.offsetTop < list.scrollTop) list.scrollTop = opt.offsetTop;
+    else if (opt.offsetTop + opt.offsetHeight > list.scrollTop + list.clientHeight)
+      list.scrollTop = opt.offsetTop + opt.offsetHeight - list.clientHeight;
+  }, [open, active, listEl]);
 
   const step = (delta: 1 | -1): void => {
     for (let i = 1; i <= options.length; i++) {
@@ -148,7 +159,10 @@ export function Select<T extends string>({
   return (
     <div className={cx('relative inline-flex min-w-0', className)}>
       <button
-        ref={buttonRef}
+        ref={(el) => {
+          buttonRef.current = el;
+          float.refs.setReference(el);
+        }}
         id={buttonId}
         type="button"
         role="combobox"
@@ -175,18 +189,24 @@ export function Select<T extends string>({
       </button>
       {name != null && <input type="hidden" name={name} value={value ?? ''} />}
       {open && (
-        <>
-          {phone && <div className="fixed inset-0 z-50 bg-ui-scrim/40" aria-hidden />}
+        <FloatingPortal>
+          {phone && <div className="fixed inset-0 z-[90] bg-ui-scrim/40" aria-hidden />}
           <ul
-            ref={listRef}
+            ref={(el) => {
+              listRef.current = el;
+              setListEl(el);
+              if (!phone) float.refs.setFloating(el);
+            }}
+            style={phone ? undefined : float.floatingStyles}
             id={listId}
+            data-floating-layer=""
             role="listbox"
             aria-labelledby={labelledBy ?? buttonId}
             className={cx(
-              'z-50 m-0 list-none overflow-y-auto overscroll-contain bg-ui-raise p-1 shadow-xl shadow-black/20',
+              'z-[90] m-0 list-none overflow-y-auto overscroll-contain bg-ui-raise p-1 shadow-xl shadow-black/20',
               phone
                 ? 'fixed inset-x-0 bottom-0 max-h-[70vh] rounded-t-xl pb-[max(8px,env(safe-area-inset-bottom))] motion-safe:animate-ui-sheet-up'
-                : 'absolute left-0 top-full mt-1 max-h-72 min-w-full rounded-ui motion-safe:animate-ui-pop',
+                : 'rounded-ui motion-safe:animate-ui-pop',
             )}
           >
             {options.map((o, i) => {
@@ -216,7 +236,7 @@ export function Select<T extends string>({
               );
             })}
           </ul>
-        </>
+        </FloatingPortal>
       )}
     </div>
   );

@@ -663,7 +663,7 @@ export function BotThreadsDetail(): JSX.Element {
   );
 
   return (
-    <div className="mx-auto max-w-[100rem] space-y-4 p-4">
+    <div className="space-y-4 p-4">
       {header}
       {/* P2.2 — the synthesis VERDICT leads, carrying this tab's exact scope (the workspace-wide
           windowless backlog, focus-repo narrowed). Under a client-side repo filter or the

@@ -88,6 +88,7 @@ import { BlastRadiusChip } from './BlastRadiusChip.js';
 import { LargePrFlag } from './LargePrFlag.js';
 import { TicketStatusPicker } from '../Ticket/TicketStatusPicker.js';
 import { PageHeader } from '../ui/PageHeader.js';
+import { FloatingLayer } from '../ui/FloatingLayer.js';
 import {
   CARD_CHIP,
   CARD_NEUTRAL_CHIP,
@@ -230,6 +231,7 @@ export function OpenPrsSortMenu({
   const shown = effectiveSort(sort, claudeOn);
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const menuId = useId();
   useClickOutside(rootRef, () => setOpen(false), open);
   useEffect(() => {
@@ -246,7 +248,11 @@ export function OpenPrsSortMenu({
   // Focus the chosen row when the menu opens, so arrows / Tab start from it.
   useEffect(() => {
     if (!open) return;
-    rootRef.current?.querySelector<HTMLButtonElement>('[role="menuitemradio"][aria-checked="true"]')?.focus();
+    // The menu is portalled (FloatingLayer) and mounts a frame later.
+    const raf = requestAnimationFrame(() =>
+      menuRef.current?.querySelector<HTMLButtonElement>('[role="menuitemradio"][aria-checked="true"]')?.focus(),
+    );
+    return () => cancelAnimationFrame(raf);
   }, [open]);
 
   const onMenuKey = (e: KeyboardEvent<HTMLDivElement>): void => {
@@ -301,19 +307,21 @@ export function OpenPrsSortMenu({
         </button>
       )}
       {open && (
-        <div
+        <FloatingLayer
+          anchorRef={rootRef}
+          ref={menuRef}
           id={menuId}
           role="menu"
           aria-label="Sort open PRs"
           onKeyDown={onMenuKey}
-          className="absolute left-0 top-full z-[60] mt-1 max-h-[70vh] w-60 overflow-y-auto rounded-ui bg-ui-raise p-1 shadow-lg ring-1 ring-ui-line motion-safe:animate-ui-pop"
+          className="z-[60] w-60 overflow-y-auto rounded-ui bg-ui-raise p-1 shadow-lg ring-1 ring-ui-line motion-safe:animate-ui-pop"
         >
           {item('default', 'Recent activity', shown == null, () => onChange(null))}
           <div aria-hidden className="mx-2 my-1 h-px bg-ui-line" />
           {sortOptionsFor(claudeOn).map((o) =>
             item(o.key, o.name, shown?.key === o.key, () => onChange(pickSort(o.key))),
           )}
-        </div>
+        </FloatingLayer>
       )}
     </div>
   );

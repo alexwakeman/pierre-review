@@ -71,8 +71,9 @@ import {
   markReviewCancelled,
   markReviewFailed,
   markReviewRouted,
-  reconcileOrphanedReviews,
+  reconcileOrphanedReviewRuns,
   saveReviewSuccess,
+  type ReconciledReviewRun,
   type ReviewPrContext,
 } from './persist.js';
 import { emitClaudeReviewCompleted } from '../../platform/event-hooks.js';
@@ -709,9 +710,14 @@ function endOf(item: QueueItem, succeeded: boolean): RunEnd {
   return p.firstSucceeded ? { reviewId: p.pairId, succeeded: true } : { reviewId: item.reviewId, succeeded: false };
 }
 
+/** What `runEnded` reads off the run: a live queue item, or a pair ended at boot (`finishInterruptedPairs`). */
+type RunEndedItem = Pick<QueueItem, 'ctx' | 'accountId' | 'prId' | 'trigger' | 'headSha'>;
+
 /** After a run (or a whole pair): the Slack signal, diagrams and the auto hooks — ONCE per pair.
- *  Returns the auto-post it started (null when none), which the team claim's final line waits for. */
-function runEnded(item: QueueItem, end: RunEnd): Promise<AutoPostOutcome | null> {
+ *  Returns the auto-post it started (null when none), which the team claim's final line waits for.
+ *  `slackSignal: false` (a pair ended at boot): no Slack "ran" signal — the platform is not bound yet
+ *  at the startup reconcile, and an event signal is announced only when seen live. */
+function runEnded(item: RunEndedItem, end: RunEnd, opts: { slackSignal?: boolean } = {}): Promise<AutoPostOutcome | null> {
   let autoPosted: Promise<AutoPostOutcome | null> = Promise.resolve(null);
   const { ctx, prId } = item;
   const { reviewId, succeeded } = end;
@@ -719,7 +725,7 @@ function runEnded(item: QueueItem, end: RunEnd): Promise<AutoPostOutcome | null>
   // its trigger; the listener posts for AUTO runs only (platform/slack/signals.ts) — a run the
   // reader started never reaches Slack. Fire-and-forget, never thrown into the review. A pair
   // announces ONCE, at its end.
-  if (succeeded) {
+  if (succeeded && opts.slackSignal !== false) {
     emitClaudeReviewCompleted({
       accountId: item.accountId,
       prId,
@@ -1610,7 +1616,60 @@ export async function listActiveReviews(accountId: number): Promise<ActiveReview
   return out;
 }
 
-export async function reconcileReviewsOnStartup(ctx: AgentContext): Promise<void> {
-  const n = await reconcileOrphanedReviews(ctx);
-  if (n > 0) ctx.log.info(`reconciled ${n} orphaned claude review(s) -> failed`);
+/**
+ * Boot: mark every run left `queued` / `running` by a restart as failed, then END each pair whose
+ * SECOND half was among them (`finishInterruptedPairs`, in the background — it may call GitHub, so it
+ * never delays the boot). `pairsFinished` resolves to the pairs ended (the tests await it).
+ */
+export async function reconcileReviewsOnStartup(
+  ctx: AgentContext,
+): Promise<{ pairsFinished: Promise<number[]> }> {
+  const runs = await reconcileOrphanedReviewRuns(ctx);
+  if (runs.length > 0) ctx.log.info(`reconciled ${runs.length} orphaned claude review(s) -> failed`);
+  const pairsFinished = finishInterruptedPairs(ctx, runs).catch((err) => {
+    ctx.log.warn(`claude review: ending interrupted pairs failed: ${err instanceof Error ? err.message : String(err)}`);
+    return [] as number[];
+  });
+  return { pairsFinished };
+}
+
+/**
+ * A pair whose SECOND half a restart interrupted never reached its END (`consolidateAtPairEnd` +
+ * `runEnded` live in that half's promise chain), so its first half's findings were never made the
+ * pair's ONE review nor auto-posted — and auto review will not retry, a succeeded run exists at the
+ * head. End it now exactly as a live failed second half does: consolidate (one half succeeded ⇒ the
+ * CODE path, no model call) and run the run-end hooks on the FIRST half (`endOf`: `{ reviewId: first,
+ * succeeded: true }`) — auto-post (+ resolve, pushback), Sonar's comment, diagrams, auto fix; the
+ * model-running ones (diagrams, auto fix) ask the spend budget themselves. No Slack signal (see
+ * `runEnded`). Acts ONLY on `runs`, the rows THIS boot's reconcile changed: a later boot finds them
+ * already failed and does nothing, and the auto-post record is claimed compare-and-set before any
+ * GitHub write, so nothing posts twice. A FIRST half interrupted (its second never started) has no
+ * succeeded half — nothing to end. Never throws per pair. Returns the pair ids ended.
+ */
+export async function finishInterruptedPairs(
+  ctx: AgentContext,
+  runs: readonly ReconciledReviewRun[],
+): Promise<number[]> {
+  const ended: number[] = [];
+  for (const r of runs) {
+    if (r.pairRole !== 'second' || r.pairId == null) continue;
+    const pairId = r.pairId;
+    try {
+      const first = await getClaudeReviewById(ctx, pairId, r.accountId);
+      if (!first || first.prId !== r.prId || first.status !== 'succeeded') continue;
+      markPairBusy(pairId, true);
+      try {
+        await consolidatePair(ctx, { accountId: r.accountId, prId: r.prId, pairId, secondId: r.id });
+      } finally {
+        markPairBusy(pairId, false);
+      }
+      const item: RunEndedItem = { ctx, accountId: r.accountId, prId: r.prId, trigger: first.trigger === 'auto' ? 'auto' : 'manual', headSha: first.headSha };
+      await runEnded(item, { reviewId: pairId, succeeded: true }, { slackSignal: false });
+      ended.push(pairId);
+      ctx.log.info(`claude review pr ${r.prId}: ended pair ${pairId} interrupted by a restart`);
+    } catch (err) {
+      ctx.log.warn(`claude review pr ${r.prId}: ending interrupted pair ${pairId} failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  return ended;
 }

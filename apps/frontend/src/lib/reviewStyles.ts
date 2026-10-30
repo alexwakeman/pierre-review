@@ -16,6 +16,16 @@
 // ⚠ Nothing under 11px (test/designTokens.test.ts); muted pairings are measured by
 // test/textContrast.test.ts and the --ui-* inks by designTokens.test.ts.
 export const REVIEW_ITEM_CARD = 'rounded-ui bg-ui-surface px-3 py-2.5 text-body text-ui-ink';
+// THE ITEM GROUP: a section's list of items (Findings, Previous review, Review threads) reads as ONE
+// raised block on the page ground, its items split by a 1px GAP that lets the ground show through —
+// a hairline made of spacing, not a border. Inside it every item takes the `raise` tone (square
+// corners; the group carries the one radius), and the controls and chips that sit on `raise` step
+// up one tone (raise → hover, hover → sel) so they keep their ground. No new colour: the existing
+// tone ladder, one step up. Both themes.
+export const REVIEW_ITEM_GROUP =
+  'flex flex-col gap-px overflow-hidden rounded-ui ' +
+  '[&>li]:rounded-none [&>li]:bg-ui-raise ' +
+  '[&_.bg-ui-raise]:bg-ui-hover [&_.bg-ui-raise:hover]:bg-ui-sel';
 export const REVIEW_ITEM_TITLE = 'font-medium text-ui-ink';
 export const REVIEW_PROSE = 'whitespace-pre-wrap break-words text-body leading-normal';
 export const REVIEW_META = 'text-meta text-ui-mute';

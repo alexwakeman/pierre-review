@@ -754,14 +754,6 @@ function PrDetailSkeleton(): JSX.Element {
 const EMPTY_THREAD_STATE_FILTER: Set<ThreadStateBucket> = new Set();
 const EMPTY_THREAD_SEVERITY_FILTER: Set<MlSeverity> = new Set();
 
-// Every icon button in the header toolbar wears ONE class, so the cluster reads as one set: mute
-// ink, the one radius, 32px (40px on touch). Hidden below md, where the overflow menu says every
-// one of them in words. Refresh's warn-ink stale state is the one exception (it means something,
-// so it also stays on screen on a phone).
-export const PR_HEADER_ICON_BTN =
-  'hidden h-8 w-8 shrink-0 items-center justify-center rounded-ui text-ui-mute hover:bg-ui-hover hover:text-ui-ink md:inline-flex touch:h-10 touch:w-10 motion-safe:transition-colors motion-safe:duration-ui-fast ' +
-  FOCUS_RING;
-
 export function PrDetail({
   prId,
   selectedThreadId,
@@ -1253,6 +1245,14 @@ export function PrDetail({
     prId,
     liveVisible && pr?.state === 'open',
   );
+  // "Copy the GitHub link" from the … menu: a short "Link copied" note beside the menu (the menu
+  // closes on select, so the note is the only confirmation). Cleared on a timer.
+  const [linkCopied, setLinkCopied] = useState<'copied' | 'failed' | null>(null);
+  useEffect(() => {
+    if (linkCopied == null) return;
+    const t = window.setTimeout(() => setLinkCopied(null), 1600);
+    return () => window.clearTimeout(t);
+  }, [linkCopied]);
 
   // This account's live auto-merge intent — drives the header's "Auto-merge armed" chip. A
   // selector over the polled armed list (no new request); MUST sit above the early returns
@@ -1347,6 +1347,9 @@ export function PrDetail({
     setActivityScroll((n) => (n ?? 0) + 1);
   };
   const githubHref = safeExternalUrl(pr.githubUrl);
+  const copyLink = (href: string): void => {
+    void writeClipboard(href).then((ok) => setLinkCopied(ok ? 'copied' : 'failed'));
+  };
   const newSince = newSummary(pr.newSinceLastViewed);
   cmdLive.current = {
     tab: goToTab,
@@ -1356,7 +1359,7 @@ export function PrDetail({
       else if (id === 'focus') openPrFocusTab(pinnedMetaOf(pr, usersById));
       else if (id === 'feed') showInFeed();
       else if (id === 'refresh') refreshNow();
-      else if (id === 'copy' && githubHref != null) void writeClipboard(githubHref);
+      else if (id === 'copy' && githubHref != null) copyLink(githubHref);
       else if (id === 'github' && githubHref != null) window.open(githubHref, '_blank', 'noopener,noreferrer');
       else if (id === 'ci') showCiStatus();
       else if (id === 'threads-view') openThreadsView();
@@ -1431,13 +1434,14 @@ export function PrDetail({
     {
       id: 'refresh',
       label: isRefreshing ? 'Refreshing…' : 'Refresh from GitHub',
+      hint: isStale && !isRefreshing ? 'Last try failed' : undefined,
       icon: <RefreshIcon size={14} />,
       disabled: isRefreshing,
       onSelect: refreshNow,
     },
     ...(githubHref != null
       ? [
-          { id: 'copy', label: 'Copy the GitHub link', icon: <LinkIcon size={14} />, onSelect: () => void writeClipboard(githubHref) },
+          { id: 'copy', label: 'Copy the GitHub link', icon: <LinkIcon size={14} />, onSelect: () => copyLink(githubHref) },
           { id: 'gh', label: 'Open on GitHub', icon: <OctocatIcon size={14} />, onSelect: () => window.open(githubHref, '_blank', 'noopener,noreferrer') },
         ]
       : []),
@@ -1459,11 +1463,10 @@ export function PrDetail({
         )}
       >
         <div className="flex items-start gap-2">
-          {/* In the PANE, the title + the ↗ icon both open this PR full-screen as its own
-              (focused) tab. Opening a tab IS pinning it, so there's no separate pin control.
-              FULL-SCREEN already is that tab: the title is a plain heading and ↗ is absent. */}
+          {/* In the PANE, the title opens this PR full-screen as its own (focused) tab (the …
+              menu says the same in words). Opening a tab IS pinning it, so there's no separate pin
+              control. FULL-SCREEN already is that tab: the title is a plain heading. */}
           {placement === 'pane' ? (
-            <>
               <button
                 type="button"
                 onClick={() => openPrDetailTab(pinnedMetaOf(pr, usersById))}
@@ -1472,103 +1475,32 @@ export function PrDetail({
               >
                 <span className="font-normal text-ui-faint">#{pr.number}</span> {pr.title}
               </button>
-              <button
-                type="button"
-                onClick={() => openPrDetailTab(pinnedMetaOf(pr, usersById))}
-                className={PR_HEADER_ICON_BTN}
-                title="Open full-screen — this PR in its own tab"
-                aria-label="Open this PR full-screen in its own tab"
-              >
-                <ExternalLinkIcon size={13} />
-              </button>
-            </>
           ) : (
             <h2 className="min-w-0 text-title text-ui-ink [overflow-wrap:anywhere] md:truncate" title={pr.title}>
               <span className="font-normal text-ui-faint">#{pr.number}</span> {pr.title}
             </h2>
           )}
-          {/* THE TOOLBAR — labelled icon buttons (the label is the tooltip and the accessible
-              name). Below md only the overflow menu stays (plus Refresh while it is stale); the
-              menu says every one of them in words. */}
-          <div className="ml-auto flex shrink-0 items-center gap-0.5" role="toolbar" aria-label="This pull request">
-            {/* Show on the shared timeline (centre + glow; distinct from Focus Mode). */}
-            <button
-              type="button"
-              onClick={() => openPrFocused(pr.id)}
-              className={PR_HEADER_ICON_BTN}
-              title="Show this PR on the timeline"
-              aria-label="Show this PR on the timeline"
-            >
-              <TimelineIcon size={15} />
-            </button>
-            {/* Focus — a magnifier that opens this PR's own isolated timeline tab. */}
-            <button
-              type="button"
-              onClick={() => openPrFocusTab(pinnedMetaOf(pr, usersById))}
-              className={PR_HEADER_ICON_BTN}
-              title="Focus — open this PR in its own isolated timeline tab (the close button on the tab closes it)"
-              aria-label="Focus this PR in its own timeline tab"
-            >
-              <MagnifierIcon size={15} />
-            </button>
-            {/* Show in the Activity feed — this PR's repo console with the feed isolated to it. */}
-            <button
-              type="button"
-              onClick={showInFeed}
-              className={PR_HEADER_ICON_BTN}
-              title="Show this PR in its repo's Activity feed (filtered to this PR)"
-              aria-label="Show this PR in the Activity feed"
-            >
-              <FeedIcon size={15} />
-            </button>
-            {/* Copy the PR's GitHub link. */}
-            {githubHref != null && (
-              <span className="hidden md:inline-flex">
-                <CopyButton
-                  text={githubHref}
-                  what="PR link"
-                  title="Copy the GitHub link to this PR"
-                  icon={<LinkIcon size={14} />}
-                  className="h-8 w-8 justify-center"
-                  idleClassName="text-ui-mute hover:bg-ui-hover hover:text-ui-ink"
-                />
-              </span>
+          {/* THE ONE ACTION CONTROL — the "…" menu says every PR action in words (and ⌘K lists
+              the same set, registered above). No icon row: the menu is the toolbar. */}
+          <div className="ml-auto flex shrink-0 items-center gap-1" role="toolbar" aria-label="This pull request">
+            {/* The two states the old icon row showed, in words: a failed re-read of GitHub (a
+                stale note, never an error — the shown data is valid; click retries) and the
+                copy confirmation. Nothing renders in the normal case. */}
+            {isStale && (
+              <button
+                type="button"
+                onClick={refreshNow}
+                disabled={isRefreshing}
+                className={cx('hit inline-flex h-8 items-center gap-1 rounded-ui px-1.5 text-meta text-ui-warn hover:bg-ui-hover disabled:opacity-60', FOCUS_RING)}
+                title="Couldn't refresh from GitHub — showing the last synced state. Click to retry."
+              >
+                <RefreshIcon size={12} className={isRefreshing ? 'motion-safe:animate-spin' : undefined} aria-hidden />
+                Not refreshed
+              </button>
             )}
-            {/* Refresh — re-read this PR from GitHub now. Shares in-flight state with the
-                ~5s live poll via the ['pr-refresh', prId] query key: one spinner, and a
-                click can never double a request the poll already has running. Copy stays
-                modest ("Refresh"): a targeted sync pages reviewThreads(first:50), so a
-                refresh can honestly change nothing. Amber = the last attempt couldn't
-                re-read GitHub (a stale note, never an error — the shown data is valid). */}
-            <button
-              type="button"
-              onClick={refreshNow}
-              disabled={isRefreshing}
-              className={
-                isStale
-                  ? `${PR_HEADER_ICON_BTN} !inline-flex !text-ui-warn disabled:opacity-60`
-                  : `${PR_HEADER_ICON_BTN} disabled:opacity-60`
-              }
-              title={
-                isStale
-                  ? "Couldn't refresh from GitHub — showing the last synced state. Click to retry."
-                  : 'Refresh — re-check GitHub for new activity on this PR'
-              }
-              aria-label="Refresh this PR from GitHub"
-            >
-              <RefreshIcon size={14} className={isRefreshing ? 'motion-safe:animate-spin' : undefined} />
-            </button>
-            {/* Open on GitHub (Octocat). */}
-            <a
-              href={pr.githubUrl}
-              target="_blank"
-              rel="noreferrer noopener"
-              className={PR_HEADER_ICON_BTN}
-              title="Open this PR on GitHub"
-              aria-label="Open this PR on GitHub"
-            >
-              <OctocatIcon size={15} />
-            </a>
+            <span role="status" className="text-meta text-ui-mute empty:hidden">
+              {linkCopied === 'copied' ? 'Link copied' : linkCopied === 'failed' ? "Couldn't copy" : ''}
+            </span>
             <Menu
               label="More actions for this pull request"
               align="end"

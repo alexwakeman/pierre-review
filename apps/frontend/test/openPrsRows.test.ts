@@ -88,12 +88,29 @@ describe('the wiring', () => {
     }
     expect(panel).toMatch(/<LargePrFlag pr=\{pr\} \/>/);
     expect(panel).toMatch(/<BlastRadiusChip pr=\{pr\} expandable \/>/);
-    expect(panel).toMatch(/<ClaudeReviewPanel/);
+    expect(panel).toMatch(/<DrawerAiReview/);
     expect(panel).toMatch(/openStory\(/);
     expect(rows).toMatch(/Open pull request/);
     expect(rows).toMatch(/what="PR link"/);
     // The AI work chip ("<provider> is working on this PR") survives in the panel and the row.
     expect(rows.match(/is working on this PR/g)?.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("the panel's AI review is a fact list that keeps every fact and action the strip had", () => {
+    const ai = src('components/Activity/OpenPrsAiReview.tsx');
+    for (const f of [
+      'Review failed', 'Not reviewed', 'Starting…', 'Queued', 'Reviewing…', 'AUTO_REVIEW_LABEL', 'Reviewed by @', 'Being reviewed by @',
+      'Commit', 'Findings', 'No issues', 'Earlier', 'still open', "label=\"CI\"", 'Story check', 'Posted', 'Last run', 'AI Fix',
+      'Re-review', 'Open review', 'Could not start the review.',
+    ]) {
+      expect(ai, f).toContain(f);
+    }
+    // The ONE gate around the run button; what it ran on through the shared labeller.
+    expect(ai).toMatch(/<AiRunGate kind="review">\s*<Button/);
+    expect(ai).toMatch(/pairModelsLabel\(state\.ranOn\)/);
+    // A red mark only for blockers; no chips, no nested box.
+    expect(ai.match(/bg-ui-danger/g)).toHaveLength(1);
+    expect(ai).not.toMatch(/PILL|rounded-ui bg-|bg-ai-surface|ring-1/);
   });
 
   it('a ticket group folds (per session, never stored) and keeps its ticket line', () => {

@@ -43,8 +43,8 @@
 
 /** The overlay that every Activity-console screen scrolls inside. */
 const CONSOLE = '[data-testid="activity-overlay"] .overflow-y-auto';
-/** The pull-request detail pane's own scroller. */
-const PANE = '[data-testid="detail-pane"] .overflow-auto';
+/** The pull-request tab's own scroller (the shared Timeline has no bottom pane any more). */
+const PANE = '[data-testid="pinned-pr-overlay"] .overflow-auto';
 
 export default {
   name: 'limn-walkthrough',
@@ -151,10 +151,9 @@ export default {
       id: 'pr-detail',
       title: 'One pull request',
       text: 'Review standing, every bot that has looked at it, and whether it can land.',
-      url: '?pr=2348',
-      ready: '[data-testid="detail-pane"]',
+      url: '?view=pr-detail:2348',
+      ready: '[data-testid="pinned-pr-overlay"]',
       settleMs: 5000,
-      pane: 430,
       steps: [
         { hold: 1900 },
         // ⚠ THE ANCHOR IS THE PANE'S OWN CHROME, NOT ANYTHING IN ITS CONTENT, and
@@ -170,7 +169,7 @@ export default {
         // "EWS", "ONS", which reads as a broken capture.
         {
           zoom: {
-            selector: '[data-testid="detail-pane"] button:has-text("Overview")',
+            selector: '[data-testid="pinned-pr-overlay"] button:has-text("Overview")',
             ms: 480,
             pad: 14,
             maxWidth: 760,
@@ -192,13 +191,12 @@ export default {
       id: 'addressed',
       title: 'Was it dealt with?',
       text: 'A bot raised a concern and the branch moved on. This reads the diff since, and says what is still open.',
-      url: '?pr=2348',
-      ready: '[data-testid="detail-pane"]',
+      url: '?view=pr-detail:2348',
+      ready: '[data-testid="pinned-pr-overlay"]',
       settleMs: 5000,
-      pane: 520,
       before: async (page) => {
         await page
-          .getByTestId('detail-pane')
+          .getByTestId('pinned-pr-overlay')
           .getByRole('button', { name: /^Threads\d*$/ })
           .first()
           .click();

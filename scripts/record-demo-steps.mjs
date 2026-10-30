@@ -7,6 +7,7 @@
 // is a verb that changes something (merge, post, run, save …); every finished agentic run in the
 // recording is a row the seeder wrote.
 
+import { createRequire } from 'node:module';
 const PENDING_TABS = ['my_turn', 'claude', 'fixing', 'review', 'threads', 'land', 'deps'];
 // Activity is a collapsed section of Overview now (opened below); Comments is its own tab.
 const PR_TABS = ['overview', 'comments', 'changes', 'bot_activity', 'claude_review', 'ai_fix'];
@@ -32,6 +33,31 @@ const BOTS = [8, 9, 10, 20];
 
 /** Expand everything a reader would expand on this view (tabs, disclosures), never a write. */
 const explore = (h, opts) => h.explore(opts);
+
+/** The PRs a workspace's 30-day Timeline draws, read from the seeded record DB (the same window the
+ *  `timeline` steps visit). Already-recorded PRs are skipped. Called from a step's `run`, never at
+ *  import: the DB exists only once the recorder has seeded it. */
+function timelinePrIds() {
+  const already = new Set([...DEEP_PRS, ...MORE_PRS, ...WEB_PRS]);
+  const require = createRequire(new URL('../apps/backend/package.json', import.meta.url));
+  const Database = require('better-sqlite3');
+  const db = new Database(process.env.RECORD_DB ?? '/tmp/limn-record.sqlite', { readonly: true });
+  try {
+    const since = Math.floor(Date.now() / 1000) - 30 * 86400;
+    return db
+      .prepare(
+        `SELECT DISTINCT p.id AS id, wr.workspace_id AS workspaceId
+           FROM pull_requests p JOIN workspace_repos wr ON wr.repo_id = p.repo_id
+          WHERE coalesce(p.merged_at, p.closed_at, p.updated_at) >= ? OR p.state = 'open'
+          ORDER BY wr.workspace_id, p.id`,
+      )
+      .all(since)
+      .filter((r) => !already.has(r.id));
+  } finally {
+    db.close();
+  }
+}
+
 
 export const STEPS = [
   // ── Activity → Open PRs (the landing view) ──
@@ -272,6 +298,17 @@ export const STEPS = [
       run: (h) => h.go(`?view=pr-detail:${id}&prTab=${t}`),
     })),
   ),
+  // THE TIMELINE'S "Open details". Every PR bar on a workspace's 30-day Timeline opens a popover
+  // whose primary action is the PR's tab, so every one of them needs at least its Overview
+  // recorded — or the demo answers "Not available in the demo." on most bars.
+  {
+    name: 'timeline:open-details',
+    run: async (h) => {
+      for (const { id, workspaceId } of timelinePrIds()) {
+        await h.go(`?view=pr-detail:${id}&prTab=overview${workspaceId === 1 ? '' : `&workspace=${workspaceId}`}`);
+      }
+    },
+  },
 
   // ── People ──
   ...PEOPLE.map((id) => ({

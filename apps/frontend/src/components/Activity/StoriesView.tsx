@@ -198,8 +198,11 @@ function StoriesBlock({
         </p>
       )}
 
-      <TimeChart stories={data.stories} workingDayHours={data.workingDayHours} />
-      <SizeChart stories={data.stories} shortfall={data.shortfall} />
+      {/* Full-width page: the two charts sit side by side once there is room for both. */}
+      <div className="grid grid-cols-1 gap-4 2xl:grid-cols-2">
+        <TimeChart stories={data.stories} workingDayHours={data.workingDayHours} />
+        <SizeChart stories={data.stories} shortfall={data.shortfall} />
+      </div>
 
       <div data-testid="stories-all">
         <button
