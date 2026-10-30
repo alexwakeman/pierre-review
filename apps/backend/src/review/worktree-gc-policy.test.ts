@@ -4,6 +4,7 @@ import {
   decideOrphan,
   fixRowStates,
   isCacheWorktreePath,
+  storyBuildRepoStates,
   type LedgeredFacts,
 } from './worktree-gc-policy.js';
 
@@ -137,6 +138,32 @@ describe('fixRowStates', () => {
     expect(fixRowStates({ status: 'succeeded', pushedAt: 1, hasPatch: true }).workState).toBe('pushed');
     expect(fixRowStates({ status: 'succeeded', pushedAt: null, hasPatch: false }).workState).toBe('none');
     expect(fixRowStates({ status: 'cancelled', pushedAt: null, hasPatch: false }).workState).toBe('discarded');
+  });
+});
+
+describe('storyBuildRepoStates — a story build keeps its tree until pushed or discarded', () => {
+  const row = (status: string, over: { sessionStatus?: string; hasPatch?: boolean; pushedAt?: number | null } = {}) => ({
+    status,
+    sessionStatus: over.sessionStatus ?? 'ready',
+    hasPatch: over.hasPatch ?? false,
+    pushedAt: over.pushedAt ?? null,
+  });
+  it('reads a story_build_repos row', () => {
+    expect(storyBuildRepoStates(null)).toEqual({ runState: 'unknown', workState: 'none' });
+    for (const s of ['preparing', 'building', 'checking']) expect(storyBuildRepoStates(row(s, { sessionStatus: 'building' })).runState).toBe('running');
+    expect(storyBuildRepoStates(row('ready', { hasPatch: true }))).toEqual({ runState: 'finished', workState: 'unpushed' });
+    expect(storyBuildRepoStates(row('pushed', { hasPatch: true, pushedAt: 1 })).workState).toBe('pushed');
+    expect(storyBuildRepoStates(row('ready', { hasPatch: false })).workState).toBe('none');
+    expect(storyBuildRepoStates(row('failed')).workState).toBe('discarded');
+  });
+  it('a discarded or cancelled session releases every tree, even a ready one', () => {
+    expect(storyBuildRepoStates(row('ready', { hasPatch: true, sessionStatus: 'discarded' })).workState).toBe('discarded');
+    expect(storyBuildRepoStates(row('ready', { hasPatch: true, sessionStatus: 'cancelled' })).workState).toBe('discarded');
+  });
+  it('an unpushed ready tree is pinned until pinMaxMs, then removed', () => {
+    const st = storyBuildRepoStates(row('ready', { hasPatch: true }));
+    expect(decideLedgered(facts({ ...st, lastUsedAt: NOW - 5 * DAY }), NOW, POLICY)).toEqual({ action: 'keep', reason: 'unpushed' });
+    expect(decideLedgered(facts({ ...st, lastUsedAt: NOW - 15 * DAY }), NOW, POLICY)).toEqual({ action: 'remove', reason: 'pin_expired' });
   });
 });
 

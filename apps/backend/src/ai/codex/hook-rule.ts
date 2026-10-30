@@ -7,6 +7,9 @@
 //     paths inside the run's WRITE roots. A read-only run has none, so every write is denied. A patch
 //     is read for its `*** Add File:` / `*** Update File:` / `*** Delete File:` / `*** Move to:`
 //     headers; a write naming NO path we can find is denied (fail closed).
+//   • On a STORY BUILD (`roots.protect`) a write inside the write roots is ALSO denied when it touches
+//     the build's deny-list (review/write-deny.ts: CI / git / hook / package-manager config, lockfiles,
+//     agent settings) — the same rule the Claude hook applies.
 //   • `mcp__workspace__*` (Limn's own server) is allowed when every `path` it names is inside a READ
 //     root (the server checks again) — except `mcp__workspace__run_check` (the project's own checks,
 //     coding/checks/), allowed ONLY when the run carries checks (`roots.checks`) and the call names a
@@ -22,6 +25,7 @@
 // workspace server use — and tested with `isWithin`.
 import { isAbsolute } from 'node:path';
 import { isWithin, realPathFor, resolveReal } from '../../review/path-guard.js';
+import { protectedWriteFor } from '../../review/write-deny.js';
 
 export const WRITE_TOOLS: ReadonlySet<string> = new Set(['apply_patch', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 export const WORKSPACE_TOOL_PREFIX = 'mcp__workspace__';
@@ -35,6 +39,8 @@ export interface GuardRoots {
   write: string[];
   /** The run may call `mcp__workspace__run_check` (AI Fix with "Run tests"). Absent ⇒ never. */
   checks?: boolean;
+  /** The build's write deny-list applies (a story build, `AgentRunSpec.protectWrites`). Absent ⇒ off. */
+  protect?: boolean;
 }
 
 export const RUN_CHECK_TOOL_NAME = 'mcp__workspace__run_check';
@@ -120,6 +126,10 @@ export function decideCodexToolCall(toolName: string, toolInput: unknown, roots:
       if (real == null || !writeRoots.some((r) => isWithin(r, real))) {
         return deny(`refused: ${raw} is outside the folders this run may change.`);
       }
+      if (roots.protect === true) {
+        const why = protectedWriteFor(raw, from, writeRoots);
+        if (why) return deny(`refused: ${why}`);
+      }
     }
     return { allow: true };
   }
@@ -152,7 +162,12 @@ export function decideCodexToolCall(toolName: string, toolInput: unknown, roots:
 export const GUARD_ENV = 'LIMN_CODEX_GUARD';
 
 export function encodeGuardRoots(roots: GuardRoots): string {
-  return JSON.stringify({ read: roots.read, write: roots.write, ...(roots.checks ? { checks: true } : {}) });
+  return JSON.stringify({
+    read: roots.read,
+    write: roots.write,
+    ...(roots.checks ? { checks: true } : {}),
+    ...(roots.protect ? { protect: true } : {}),
+  });
 }
 
 /** Null when the variable is missing or malformed — the hook then denies everything it sees. */
@@ -161,10 +176,10 @@ export function decodeGuardRoots(raw: string | undefined): GuardRoots | null {
   try {
     const v = JSON.parse(raw) as unknown;
     if (!v || typeof v !== 'object') return null;
-    const { read, write, checks } = v as { read?: unknown; write?: unknown; checks?: unknown };
+    const { read, write, checks, protect } = v as { read?: unknown; write?: unknown; checks?: unknown; protect?: unknown };
     const ok = (a: unknown): a is string[] => Array.isArray(a) && a.every((x) => typeof x === 'string' && isAbsolute(x));
     if (!ok(read) || !ok(write)) return null;
-    return checks === true ? { read, write, checks: true } : { read, write };
+    return { read, write, ...(checks === true ? { checks: true } : {}), ...(protect === true ? { protect: true } : {}) };
   } catch {
     return null;
   }

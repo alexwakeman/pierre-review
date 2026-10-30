@@ -1083,6 +1083,8 @@ export async function createPullRequest(
     base: string;
     title: string;
     body: string;
+    /** Open it as a DRAFT (a story build's default). Absent ⇒ the field is not sent (ready for review). */
+    draft?: boolean;
   },
 ): Promise<{ number: number; url: string }> {
   const res = await ghRestPostFor<RestCreatedPull>(
@@ -1093,6 +1095,7 @@ export async function createPullRequest(
       head: args.head,
       base: args.base,
       body: args.body,
+      ...(args.draft === true ? { draft: true } : {}),
     },
   );
   return { number: res.number, url: res.html_url };

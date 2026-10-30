@@ -345,6 +345,35 @@ export async function prepWorktree(
 }
 
 /**
+ * A WRITE worktree at a BRANCH's commit, for a run that opens no PR of its own (a story build, its push).
+ * One entry of `prepDefaultBranchCheckouts`, under the repo lock: ensure the clone; when `sha` is given
+ * and already in the object store, no fetch at all; otherwise fetch `remoteRef` into the NAMESPACED
+ * `destRef` (never FETCH_HEAD — the clone is shared). When the branch has moved past `sha`, the commit is
+ * fetched by itself (GitHub serves an unadvertised commit by its sha). The worktree is checked out at
+ * `sha` (or the fetched tip), detached; the caller owns its removal.
+ */
+export async function prepBranchWorktree(
+  owner: string,
+  name: string,
+  ref: { remoteRef: string; destRef: string; sha?: string | null },
+  token: string = getGithubToken(),
+): Promise<{ repoCloneDir: string; worktreePath: string; sha: string }> {
+  return withRepoLock(`${owner}/${name}`, async () => {
+    const dir = await ensureClone(owner, name, token);
+    let sha = ref.sha ?? null;
+    if (sha == null || !(await hasCommit(dir, sha))) {
+      const tip = await fetchRefIntoClone({ cloneDir: dir, owner, name, token, remoteRef: ref.remoteRef, destRef: ref.destRef });
+      if (sha == null) sha = tip;
+      else if (!(await hasCommit(dir, sha))) {
+        await git(['-C', dir, 'fetch', '--no-tags', '--force', tokenizedUrl(owner, name, token), sha]);
+      }
+    }
+    const worktreePath = await addWorktree(dir, sha, { owner, name });
+    return { repoCloneDir: dir, worktreePath, sha };
+  });
+}
+
+/**
  * A PR's diff computed LOCALLY, for when GitHub refuses to serve it (HTTP 406 `too_large`: more
  * than 20,000 lines). Same view as GitHub's: three-dot, i.e. from the merge base of the base
  * branch and the head. The base branch is fetched into a NAMESPACED ref (never FETCH_HEAD — the

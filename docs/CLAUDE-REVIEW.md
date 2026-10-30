@@ -3062,6 +3062,12 @@ checks. The runner is the reusable `coding/checks/` module; this is how AI Fix u
   only with ≥ $0.25 of the run's budget left; after a repair the checks run again. Spend of every
   pass is summed into the row. Tests that cannot start NEVER fail the fix: the run goes on as before
   and `checks.note` says why.
+- **SHARED WITH THE STORY BUILD:** everything from the check session to the diff capture is
+  `coding/agent.ts buildInWorktree` (extracted 2026-10-30 with no behaviour change; the caller states its
+  own literal tool lists through `toolsFor`, and a deny list without Bash is refused).
+  `runCodingAgent` keeps the worktree prep, the teardown and the patch cap; the story build
+  (docs/STORY-BUILD.md § The builder) calls it on a kept worktree with read-only roots and the write
+  deny-list.
 - **STORED** on `ai_fixes.checks` (JSON `AiFixChecks`: `requested`, `ran`, `note`, `sandbox`,
   `install[]`, `results[]` (Limn's run + the skipped, each `AiFixCheckResult {name, kind, command,
   status: passed|failed|timed_out|skipped|error, exitCode, durationMs, output, truncated, note}`),

@@ -134,6 +134,38 @@ export interface RunBuildDocsArgs {
 /** Weigh the plan against the workspace docs; writes `docs_status` / `docs_json` / `docs_cost_usd`. */
 export type RunBuildDocsFn = (ctx: AgentContext, args: RunBuildDocsArgs) => Promise<void>;
 
+// ---- the manager's lane (WP1 registers it; WP2's retry route calls it) ------------------------------
+
+/** Why a retry was refused: an HTTP status, a shared error code, and one plain sentence. */
+export interface StoryBuildLaneRefusal {
+  ok: false;
+  status: number;
+  error: string;
+  message: string;
+}
+
+/**
+ * THE BUILD LANE's entry points the build-side routes need (owner decision 3: ONE build at a time per
+ * machine, sequential, owned by the manager). The manager (WP1) registers it at route registration;
+ * until it does, the retry route answers 503 with a plain sentence. Retry puts ONE repository back to
+ * `queued` and runs it through the same lane (and the same `buildRepo`) as Accept did.
+ */
+export interface StoryBuildLane {
+  retryRepo(ctx: AgentContext, a: { accountId: number; buildId: number; repoId: number }): Promise<{ ok: true } | StoryBuildLaneRefusal>;
+}
+
+let lane: StoryBuildLane | null = null;
+
+/** The manager registers its lane (once, from routes.ts); `null` unregisters (tests). */
+export function registerStoryBuildLane(l: StoryBuildLane | null): void {
+  lane = l;
+}
+
+/** The lane in force, or null when no manager registered one. */
+export function storyBuildLane(): StoryBuildLane | null {
+  return lane;
+}
+
 // ---- the bundle -------------------------------------------------------------------------------------
 
 export interface StoryBuildDeps {

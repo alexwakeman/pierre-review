@@ -320,7 +320,7 @@ async function runnableCredential(): Promise<{ route: 'login'; method: 'chatgpt'
 }
 
 /** The guard's trust entry is written into Limn's home, then Codex must prove it will RUN it. */
-async function trustedGuard(roots: { read: string[]; write: string[]; checks?: boolean }): Promise<{ hook: CodexHookConfig; home: string }> {
+async function trustedGuard(roots: { read: string[]; write: string[]; checks?: boolean; protect?: boolean }): Promise<{ hook: CodexHookConfig; home: string }> {
   const hook = pathGuardHook(roots);
   await ensureCodexHomeConfig(hook);
   const home = codexHome();
@@ -585,7 +585,13 @@ export async function runAgentUnchecked(spec: AgentRunSpec): Promise<AgentRunRes
   // THE GUARD IS NOT OPTIONAL. Its trust entry is written into Limn's own home first, then Codex is
   // asked whether it will RUN the hook (and the hook must refuse a canary call). An untrusted hook is
   // skipped SILENTLY by Codex, so a run whose guard is not proven never starts — read-only or not.
-  const { hook, home } = await trustedGuard({ read: roots.read, write: roots.write, ...(checks ? { checks: true } : {}) });
+  // A story build (`protectWrites`) also carries the write deny-list into the guard (hook-rule.ts).
+  const { hook, home } = await trustedGuard({
+    read: roots.read,
+    write: roots.write,
+    ...(checks ? { checks: true } : {}),
+    ...(spec.protectWrites && roots.write.length > 0 ? { protect: true } : {}),
+  });
   armCodexThreadSweeps(home);
 
   const before = isWrite ? await Promise.all(roots.write.map(gitSnapshot)) : [];

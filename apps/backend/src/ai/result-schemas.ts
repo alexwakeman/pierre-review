@@ -50,6 +50,8 @@ export const RESULT_TOOL_NAMES = [
   'submit_document',
   // "Implement story": the read-only plan pass (coding/story-build/schema.ts).
   'submit_story_plan',
+  // "Implement story": one repository's build (coding/story-build/build.ts) — the `submit_fix` shape.
+  'submit_build',
 ] as const;
 export type ResultToolName = (typeof RESULT_TOOL_NAMES)[number];
 
@@ -81,6 +83,7 @@ const BUILDERS: Record<ResultToolName, ShapeBuilder> = {
   finish_document: async (z) => (await import('../reference-docs/schema.js')).buildFinishShape(z),
   submit_document: async (z) => (await import('../reference-docs/schema.js')).buildSubmitDocumentShape(z),
   submit_story_plan: async (z) => (await import('../coding/story-build/schema.js')).buildSubmitStoryPlanShape(z),
+  submit_build: async (z) => (await import('../coding/schema.js')).buildSubmitFixShape(z),
 };
 
 /** The raw zod shape the Claude tool `name` is registered with. `z` defaults to the AI runtime's. */
