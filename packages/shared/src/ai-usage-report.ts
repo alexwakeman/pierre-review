@@ -68,7 +68,8 @@ export function aiUsageFeatureGroup(feature: string): AiUsageFeatureGroup {
   if (f === 'ai_fix' || f === 'ai_fix_plan') return 'fix';
   if (f === 'claude_review_chat') return 'chat';
   if (f === 'sequence_diagram') return 'diagrams';
-  if (f.startsWith('sprint_')) return 'sprint';
+  // `sprint_report` is the Reports sprint narration (a summary), not the Sprint view.
+  if (f.startsWith('sprint_') && f !== 'sprint_report') return 'sprint';
   if (f.startsWith('reference_docs_') || f.startsWith('docs_') || f.startsWith('story_docs_')) return 'docs';
   if (f === 'ai_resolve') return 'resolve';
   return 'other';

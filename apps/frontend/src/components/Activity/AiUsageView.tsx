@@ -150,7 +150,7 @@ function Report({ data }: { data: AiUsageReportResponse }): JSX.Element {
         <Stat label="Tokens" value={formatTokens(data.totals.tokens)} />
         <Stat label="Runs" value={String(data.totals.runs)} />
         {usageCostText(data.totals.claudeCost, unit) != null && (
-          <Stat label={unit === 'usd' ? 'Claude cost' : 'Claude, share of a week'} value={usageCostText(data.totals.claudeCost, unit)!} />
+          <Stat label={unit === 'usd' ? 'Claude cost' : 'Claude'} value={usageCostText(data.totals.claudeCost, unit)!} />
         )}
         {split != null && <span className={`text-meta ${MUTED}`}>{split}</span>}
         {data.machineWideRuns > 0 && (

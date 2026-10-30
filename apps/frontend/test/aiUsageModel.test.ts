@@ -100,6 +100,7 @@ describe('aiUsageFeatureGroup', () => {
       sprint_briefs: 'sprint',
       sprint_paths: 'sprint',
       sprint_ask: 'sprint',
+      sprint_report: 'other',
       reference_docs_build: 'docs',
       docs_figure_describe: 'docs',
       story_docs_alignment: 'docs',
