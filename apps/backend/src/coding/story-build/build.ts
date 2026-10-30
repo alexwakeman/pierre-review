@@ -14,6 +14,7 @@ import { followUpProvider, preflightFor } from '../../ai/run-choice.js';
 import { getAccessToken } from '../../auth/account.js';
 import { prepBranchWorktree, removeWorktreeLocked, scrubGitError } from '../../review/clone-manager.js';
 import { withWorktreeOwner } from '../../review/worktree-owner.js';
+import { protectedWriteReason } from '../../review/write-deny.js';
 import type { AgentContext } from '../../review/agent-context.js';
 import { buildInWorktree, type BuildInWorktreeResult } from '../agent.js';
 import { normalizeChangeReport } from '../ai-fix/review-seed.js';
@@ -100,6 +101,9 @@ export function refsForRepo(plan: { criteria: Array<{ ref: string; how: string; 
   return out;
 }
 
+/** A plan / criterion ref as the plan pass writes it (`AC2`, `M1`, `R1`). */
+export const STORY_BUILD_REF_SHAPE = /^[A-Za-z]{1,8}\d{1,4}$/;
+
 const clip = (s: string, n: number): string => (s.length <= n ? s : `${s.slice(0, n - 1).trimEnd()}…`);
 const mb = (bytes: number): string => `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 
@@ -124,6 +128,11 @@ export const buildRepo: BuildRepoFn = async (ctx, a) => {
   }
   const planRepo = plan.repos.find((r) => r.repoId === a.repo.repoId) ?? plan.repos.find((r) => r.ref === a.repo.ref);
   if (planRepo == null) return fail('This repository is not in the accepted plan.');
+
+  // The refs are quoted OUTSIDE the fences (YOUR REFS, the report labels), and they came from a model
+  // pass over the story: only the plain `AC2` / `M1` / `R1` shape is sent.
+  const badRef = [planRepo.ref, ...plan.repos.map((r) => r.ref), ...refsForRepo(plan, planRepo)].find((r) => !STORY_BUILD_REF_SHAPE.test(r));
+  if (badRef != null) return fail('The accepted plan is not in a shape that can be built. Plan it again.');
 
   const limits = storyBuildLimits();
   const budgetUsd = Math.min(a.budgetLeftUsd, limits.repoBudgetUsd);
@@ -290,6 +299,17 @@ export const buildRepo: BuildRepoFn = async (ctx, a) => {
 
     if (built.patch.length === 0 || built.filesChanged.length === 0) {
       return fail(summary ? `Nothing was changed in ${a.fullName}. ${clip(summary, 600)}` : `Nothing was changed in ${a.fullName}.`, {
+        ...labelled,
+        ...spend,
+        checks: built.checks,
+      });
+    }
+    // THE DENY-LIST, ONCE MORE ON THE RESULT: the hooks judge each write call, but a check or the
+    // pre-commit hook (the repository's own code) also runs in this tree. A change to a protected file
+    // never reaches a pull request, whoever made it.
+    const protectedHit = built.filesChanged.map((f) => protectedWriteReason(f)).find((w): w is string => w != null);
+    if (protectedHit) {
+      return fail(`The change touched a file a build may not change, so it was not kept. ${protectedHit}`, {
         ...labelled,
         ...spend,
         checks: built.checks,

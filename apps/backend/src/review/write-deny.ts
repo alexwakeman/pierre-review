@@ -84,6 +84,9 @@ const PROTECTED_FILES: ReadonlySet<string> = new Set([
   'AGENTS.md',
 ]);
 
+// Compared case-INSENSITIVELY: on a case-folding filesystem (macOS) `cargo.lock` IS `Cargo.lock`.
+const PROTECTED_FILES_LOWER: ReadonlySet<string> = new Set([...PROTECTED_FILES].map((f) => f.toLowerCase()));
+
 /** Why `relPath` (relative to the repository root, `/`-separated or the OS separator) is off-limits, or null. */
 export function protectedWriteReason(relPath: string): string | null {
   const parts = relPath.split(/[\\/]+/).filter((p) => p !== '' && p !== '.');
@@ -99,7 +102,7 @@ export function protectedWriteReason(relPath: string): string | null {
   // `.git` itself, `.gitignore`, `.gitattributes`, `.gitmodules`, `.git-blame-ignore-revs` …
   if (lower.startsWith('.git')) return `${relPath} is git's own configuration, which a build may not change.`;
   if (lower.startsWith('.yarnrc')) return `${relPath} is package-manager configuration, which a build may not change.`;
-  if (PROTECTED_FILES.has(file) || PROTECTED_FILES.has(lower)) {
+  if (PROTECTED_FILES_LOWER.has(lower)) {
     return `${relPath} is a lockfile, CI or tool configuration file, which a build may not change.`;
   }
   return null;

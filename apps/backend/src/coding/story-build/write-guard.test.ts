@@ -51,6 +51,11 @@ describe('protectedWriteReason', () => {
     'CLAUDE.md',
     'AGENTS.md',
     '.envrc',
+    // a case-folding filesystem: these ARE the protected files
+    'cargo.lock',
+    'claude.md',
+    'JENKINSFILE',
+    'Package-Lock.json',
   ])('denies %s', (p) => {
     expect(protectedWriteReason(p)).toMatch(/may not change/);
   });
