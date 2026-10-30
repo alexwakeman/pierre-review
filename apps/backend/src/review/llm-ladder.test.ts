@@ -1,5 +1,5 @@
 // THE ONE LADDER, end to end through `cheapComplete` and the platform's clients (makeHaikuClient,
-// makeReportClient — every report, synthesis, work-plan, pointer, bot-theme, impact-note, refine
+// makeReportClient — every report, synthesis, work-plan, pointer, bot-theme, refine
 // and Slack call goes through one of the two):
 //   • login present → the Agent SDK, with ANTHROPIC_API_KEY hidden from the run;
 //   • no login + key → the Anthropic API with that key;

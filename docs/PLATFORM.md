@@ -10,7 +10,7 @@
 
 **What it is.** `apps/backend/src/platform/` holds reporting (Reports, period reports, Chronology
 pointers, the work-plan wording), Bots Monitoring (ROI, behaviour, the peer benchmark, bot
-themes, bot classification), the synthesis seam, the blast-radius impact note, the Slack digest and
+themes, bot classification), the synthesis seam, the Slack digest and
 the per-workspace settings behind them. Until 2026-10-22 it was **`@pierre/pro`**, a private git
 submodule at `packages/pro`, loaded by file path through `pro/bind.ts` behind an `apiVersion`
 handshake and gated by `ProCapabilities`, a 402 on `/api/pro/*` and per-account entitlement.
@@ -570,16 +570,10 @@ are all gone.)
 `trunk_ci_failed` / `claude_review` feed kinds, their builders and their pills are DELETED — Pending
 owns those. Every feed item is an `events` row.
 
-**The annotations module (`platform/annotations/`) holds ONE kind, `impact`** — the blast-radius
-impact note ([BLAST-RADIUS.md](BLAST-RADIUS.md)). Its table `pr_comment_annotations` (platform
-migration `0017`) is keyed `(accountId, kind, targetKind, targetId)`; the comment kinds
-(`validity` / `addressed` / `simplify`, the "Check review" platform) were REMOVED 2026-10-18 and
-their rows are DORMANT, skipped by the read. What it kept from that platform: the GET is a pure
-cached read (nothing generates on PR open), the POST `{kind:'impact'}` is the ONE billing path,
-and the run route watches `reply.raw.on('close')` (never `req.raw` — BACKEND.md § the POST close)
-to stop a run the reader walked away from. ⚠ **A run answers 200 for outcomes that produce
-nothing** (no credential), so `AnnotationRunResponse.noAuth?` says it outright and
-`lib/annotationRun.ts` `annotationRunMessage` turns it into words — a click must never be silent.
+**The annotations module is gone** (2026-10-30): its last kind, the blast-radius impact note, was
+REMOVED with its routes and runner ([BLAST-RADIUS.md](BLAST-RADIUS.md) § The impact note (removed)).
+Only `platform/annotations/schema.sqlite.ts` stays, declaring the DORMANT `pr_comment_annotations`
+so retention and the account erasure still reach it.
 (The per-repo digests, Retro, preset prompts and the Reports chat that used to be described here
 are gone; their tables are DORMANT.)
 

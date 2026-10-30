@@ -87,9 +87,6 @@ export function resolveBlastConfig(
     // Overrides land ON TOP of the dial rather than replacing it, so an account that pinned one
     // number still tracks the product defaults for the other five.
     thresholds: { ...base, ...(stored?.overrides ?? {}) },
-    // ⚠ ABSENT MEANS SHOWN. `?? true`, never `=== true` — an account that has never expressed an
-    // opinion must get the feature, not lose it.
-    showImpactNote: stored?.showImpactNote ?? true,
     isDefault: stored == null,
   };
 }

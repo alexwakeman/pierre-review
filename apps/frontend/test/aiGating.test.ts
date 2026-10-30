@@ -218,7 +218,7 @@ describe('the wiring', () => {
   });
 
   it('every one-shot AI surface shows only while AI is on and runs behind the one gate', () => {
-    // Themes, synthesis cards, Chronology pointers, the period-report write-up, the impact note,
+    // Themes, synthesis cards, Chronology pointers, the period-report write-up,
     // the work-plan narration, sprint Ask Claude and the docs: one visibility rule (`me.ai.enabled`)
     // and one Run-button swap (AiRunGate), the same as the agentic surfaces.
     const activity = (n: string): string => read(join(root, 'components', 'Activity', n));
@@ -226,7 +226,6 @@ describe('the wiring', () => {
       'BotThemesPanel.tsx',
       'SynthesisCard.tsx',
       'FlowPointersPanel.tsx',
-      'BlastImpactNote.tsx',
       'AttentionView.tsx',
     ]) {
       const s = activity(n);

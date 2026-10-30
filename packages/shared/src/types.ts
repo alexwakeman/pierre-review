@@ -3648,12 +3648,6 @@ export interface BlastRadiusConfig {
   surfacesOff: BlastSurface[];
   /** Per-threshold overrides on top of the dial. Stored and honoured; no UI in v1. */
   overrides?: Partial<BlastThresholds>;
-  /** Show the Pro AI impact note on the PR-detail pane. Absent = SHOWN, so the feature stays
-   *  visible for every account that has never expressed an opinion — the same two-state rule the
-   *  rest of this object follows, and the reason it is `hide`-shaped nowhere: an absent field
-   *  must mean the default, and the default is on. Hiding removes the whole affordance (button
-   *  included), not just a generated note. */
-  showImpactNote?: boolean;
 }
 
 /** What the shared `resolveBlastConfig()` hands every renderer — the dial applied and the
@@ -3663,8 +3657,6 @@ export interface ResolvedBlastConfig {
   sensitivity: BlastSensitivity;
   surfacesOff: BlastSurface[];
   thresholds: BlastThresholds;
-  /** Whether the Pro impact note's affordance appears at all. Defaults to true. */
-  showImpactNote: boolean;
   /** True when NOTHING is stored and the settings above are entirely the product default — the
    *  one thing the resolved values cannot say about themselves, and what lets the Settings panel
    *  show "Default" rather than a choice the user never made. */
@@ -11465,70 +11457,6 @@ export interface BranchTrendsResponse {
   daily: BranchTrendDay[];
 }
 
-// ---- The blast-radius IMPACT NOTE (Pro; plugin-owned storage) ------------------------------
-//
-// The plugin's `pr_comment_annotations` table once held several AI judgements about review
-// comments (validity / addressed / simplify — the "Check review" button). Those kinds are REMOVED
-// (Claude Review's own thread judgements replaced them); their stored rows are DORMANT and the read
-// skips them. What is left is ONE kind:
-//
-//   impact — what could this pull request BREAK, and what should a reviewer look at first?
-//            The Pro half of BLAST RADIUS. Its target is the PULL REQUEST (`pullRequests.id`).
-export type AnnotationKind = 'impact';
-
-// What an annotation hangs off. `pull_request` → `pullRequests.id`. (The comment target kinds
-// left with the comment judgements.)
-export type AnnotationTargetKind = 'pull_request';
-
-// The kind a RUN may ask for — the same single member now.
-export type AnnotationRunKind = AnnotationKind;
-
-// One stored note. `verdict` is `concern` | `none`, `confidence` is always null for `impact`,
-// `body` is the note's prose. `stale` is computed on READ: the pull request has changed since the
-// note was written.
-export interface CommentAnnotation {
-  kind: AnnotationKind;
-  targetKind: AnnotationTargetKind;
-  targetId: number;
-  prId: number;
-  verdict: string | null;
-  confidence: number | null;
-  body: string;
-  model: string;
-  createdAt: string; // ISO-8601
-  stale: boolean;
-}
-
-// GET /api/pro/prs/:id/annotations — the stored impact note for one PR (or none).
-export interface PrAnnotationsResponse {
-  prId: number;
-  annotations: CommentAnnotation[];
-  counts: Record<AnnotationKind, number>;
-  staleCount: number;
-  generatedAt: string; // ISO-8601 — when this response was assembled
-}
-
-// POST /api/pro/prs/:id/annotations/run — write (or refresh) the impact note. Billed.
-export interface AnnotationRunBody {
-  kind: AnnotationRunKind;
-}
-
-// The outcome of a run. `cached` = a payload-hash hit ($0); `skipped` = nothing to explain (an
-// unmeasured PR); `creditsExhausted` = the metered plan ran out.
-export interface AnnotationRunResponse {
-  kind: AnnotationRunKind;
-  requested: number;
-  generated: number;
-  cached: number;
-  skipped: number;
-  failed: number;
-  truncated: boolean;
-  creditsExhausted: boolean;
-  // No usable Anthropic credential, so the run returned before billing anything (a refusal, not
-  // a failure). Optional so an older plugin build simply omits it.
-  noAuth?: boolean;
-}
-
 // ── ML severity + category enrichment of bot comments (CORE, free tier) ──────────────────
 //
 // Labels produced by the `severity-api` microservice (the sibling `pierre-ml` repo): a
@@ -11579,9 +11507,8 @@ export const ML_CATEGORIES: MlCategory[] = [
 //   review_comment → reviewComments.id
 //   pr_comment     → prComments.id
 //   review         → reviews.id            (the review BODY — a bot's summary verdict)
-// NOTE this is NOT `AnnotationTargetKind`: that union has `thread` and no `review`, and the
-// two id spaces do not overlap. A badge that looks a review id up as a pr_comment finds the
-// wrong row, so the unions stay separate.
+// The id spaces do not overlap: a badge that looks a review id up as a pr_comment finds the
+// wrong row.
 export type MlLabelTargetKind = 'review_comment' | 'pr_comment' | 'review';
 
 // How sure the service's deterministic marker reader is that it read a REAL vendor-declared
@@ -11630,7 +11557,7 @@ export interface MlLabel {
   createdAt: string;
 }
 
-// The ONE per-PR index every badge reads (mirrors PrAnnotationsResponse). Cached with
+// The ONE per-PR index every badge reads. Cached with
 // staleTime Infinity: N cards on a PR share one request, and a target with no label renders
 // nothing and issues nothing.
 export interface PrMlLabelsResponse {

@@ -12,14 +12,13 @@ import { registerSynthesisRoutes } from './synthesis/routes.js';
 import { registerWorkPlanRoutes } from './work-plan/routes.js';
 import { registerFlowPointerRoutes } from './flow-pointers/routes.js';
 import { registerBotThemesRoutes } from './bot-themes/routes.js';
-import { registerAnnotationRoutes } from './annotations/routes.js';
 import { registerSettingsRoutes } from './settings/routes.js';
 import { getComparisonWindow } from './settings/store.js';
 import { registerSlackFeature } from './slack/cron.js';
 import { eraseProByAccountId, pruneProByPrIds } from './retention.js';
 
 // THE PLATFORM — reporting (Reports, Chronology pointers, period reports), Bots Monitoring (ROI,
-// behaviour, the peer benchmark, bot themes), the work-plan wording, the impact note,
+// behaviour, the peer benchmark, bot themes), the work-plan wording,
 // the Slack digest and the settings behind them. It was the private @pierre/pro plugin; it is core
 // now, free, and registered statically at boot (platform/context.ts builds the context, index.ts
 // calls this). Every feature is on for every account — there is no capability or entitlement.
@@ -94,9 +93,8 @@ export async function registerPlatform(app: FastifyInstance, ctx: ProContext): P
   // (The Bot Tuning Advisor's /api/pro/advisor/* routes are REMOVED, 2026-10-26; its three
   // advisor_* tables stay dormant and erased — advisor/schema.sqlite.ts.)
 
-  // The blast-radius IMPACT NOTE — the one kind left on the annotations platform
-  // (`pr_comment_annotations`). Older stored kinds are DORMANT (the read skips unknown kinds).
-  registerAnnotationRoutes(app, ctx, llm);
+  // (The blast-radius impact note and its /api/pro/prs/:id/annotations routes are REMOVED,
+  // 2026-10-30; `pr_comment_annotations` stays DORMANT and erased — annotations/schema.sqlite.ts.)
 
   // Slack digest delivery: a ticking cron sends the sprint report to a configured webhook at the
   // workspace's cadence, plus POST /api/pro/slack/test and the two per-workspace event signals

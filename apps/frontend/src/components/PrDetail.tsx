@@ -78,7 +78,6 @@ import { CheckThreadsButton } from './CheckThreadsButton.js';
 import { BotTriageCard } from './BotTriageCard.js';
 import { LargePrFlag } from './Activity/LargePrFlag.js';
 import { BlastRadiusChip } from './Activity/BlastRadiusChip.js';
-import { BlastImpactNote } from './Activity/BlastImpactNote.js';
 import { ChecksTab } from './ChecksTab.js';
 import type { LimnSeverity, MlSeverity } from '@pierre-review/shared';
 import { MlSeverityBadge } from './MlSeverityBadge.js';
@@ -891,7 +890,7 @@ export function PrDetail({
   // afterwards does not snap the section shut under them.
   const [activityOpenLocal, setActivityOpenLocal] = useState(false);
   const [activityScroll, setActivityScroll] = useState<number | null>(null);
-  // PHONE HEADER (below md): the size/reach readings and the impact note fold behind "Details"
+  // PHONE HEADER (below md): the size/reach readings fold behind "Details"
   // (local, ephemeral — every fact stays one tap away), and the tab strip sticks to the top of
   // the one scroller as the header scrolls away. Its height is measured into `--pr-tabs-measured`;
   // the root maps it to `--pr-tabs-h` below md ONLY, so the Changes tab's own sticky bar pins
@@ -1657,13 +1656,6 @@ export function PrDetail({
             </button>
           )}
         </div>
-        {/* The AI half of blast radius, on its own line under the metadata row — two sentences
-            need the width, and a click-gated button does not belong inline among the counts.
-            ⚠ `hasBlast` gates it on the CHIP having something to explain: with no measurement
-            there is no chip and no button. */}
-        {/* NOT behind the phone "Details": below md the note already folds itself to one line, and
-            that line carries the "flagged" escalation, which must stay in sight. */}
-        <BlastImpactNote prId={prId} hasBlast={blastFields.blast != null} />
       </header>
       {/* THE TABS — counts as facts, 1–9 while this PR is the one on screen. Picking a tab by
           hand drops any pending "show me this finding" target (`goToTab`'s whole job). A sibling

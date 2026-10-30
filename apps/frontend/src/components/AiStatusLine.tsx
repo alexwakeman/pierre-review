@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 
 // THE ONE STATUS LINE FOR EVERY AGENTIC PASS while it loads or runs — Claude Review, Check threads,
-// the impact note, the work-plan wording, sprint summaries and themes, sprint Ask, the docs check.
+// the work-plan wording, sprint summaries and themes, sprint Ask, the docs check.
 // Plain text, no spinner: the stage in words, an optional count ("4 of 12"), and the time since it
 // started. Each surface feeds it what it already has (a live stream, a poll, or a request's own
 // pending state); this component fetches nothing.

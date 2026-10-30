@@ -16,7 +16,6 @@ import type {
   PostReviewPreview,
   SynthesisInput,
   SynthesisScope,
-  BlastSignals,
   FlowPointerEvidence,
   PendingBoardSnapshot,
   SprintComparisonMode,
@@ -936,22 +935,6 @@ export interface ProHostQueries {
     windowDays: number,
     opts?: { reporting?: boolean },
   ): Promise<FlowPointerEvidence>;
-
-  // BLAST RADIUS: the signal vector for ONE pull request — how far it can reach, folded by core's
-  // `db/blast-radius.ts` from the stored `files[]` (which never leaves the backend) plus the
-  // repo's co-change index. The plugin's `impact` annotation grounds its two sentences on this
-  // rather than re-classifying paths itself: a SECOND path classifier on the plugin side could
-  // disagree with the chip rendered inches away, and the whole point of the note is to explain
-  // the chip.
-  //
-  // ⚠ THE MODEL MAY NOT MOVE THE LEVEL, so this seam is one-way: the plugin READS the deterministic
-  // evidence and writes prose. Nothing it returns feeds back into a level.
-  // ⚠ Returns null for the same population the chip renders nothing for — an unmeasured pull
-  // request. The caller must skip rather than invent a description of a diff nobody measured.
-  // ⚠ OPTIONAL ON PURPOSE — apiVersion STAYS 21, the `getWorkPlan` precedent verbatim. A newer
-  // plugin against an older host finds it `undefined` and disables the impact note ALONE, rather
-  // than a required addition demanding a bump across four literals in two repositories.
-  getBlastSignals?(accountId: number, prId: number): Promise<BlastSignals | null>;
 
   // The workspace's derived HUMAN SEAT COUNT (core db/queries.ts `workspaceHumanSeatCount`):
   // distinct human PR authors across the workspace's repos over a FIXED trailing 30 days, judged

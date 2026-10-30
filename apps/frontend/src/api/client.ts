@@ -136,10 +136,6 @@ import type {
   ArmedMergeListResponse,
   BranchStatusResponse,
   BranchTrendsResponse,
-  AnnotationKind,
-  AnnotationRunBody,
-  AnnotationRunResponse,
-  PrAnnotationsResponse,
   PrMlLabelsResponse,
   MlEnrichmentStatus,
   ClosePrResult,
@@ -1133,23 +1129,6 @@ export const api = {
       ),
       jsonBody('POST', body),
     ).then((r) => handle<PeriodReportGenerateResponse>(r)),
-  // ---- The blast-radius impact note ----
-  // The stored note for this PR. A pure cache read; the run POST below is the only model call.
-  prAnnotations: (prId: number, kinds?: AnnotationKind[]) =>
-    get<PrAnnotationsResponse>(
-      withQuery(
-        `/api/pro/prs/${prId}/annotations`,
-        kinds && kinds.length > 0 ? `kinds=${kinds.join(',')}` : '',
-      ),
-    ),
-  // Write (or refresh) the impact note. Pass `signal` — without it the server's
-  // `reply.raw.on('close')` abort never fires, so a cancelled run keeps billing to completion.
-  runPrAnnotations: (prId: number, body: AnnotationRunBody, signal?: AbortSignal) =>
-    fetch(`/api/pro/prs/${prId}/annotations/run`, {
-      ...jsonBody('POST', body),
-      ...(signal ? { signal } : {}),
-    }).then((r) => handle<AnnotationRunResponse>(r)),
-
   // ---- ML severity/category labels (CORE, FREE TIER — not under /api/pro/) ----------------
   // Both are pure DB reads: the model runs in a background worker on the server, never on a
   // request, so neither of these can spend anything. They answer normally on a deployment with

@@ -247,7 +247,7 @@ async function fetchGhPrTextUncached(
     );
   } catch (err) {
     // A rate-limited hydration must TELL the budget, not just fail quietly. Hydration is one
-    // of the app's hottest GitHub spenders (every PR open, plus every annotation run), and it
+    // of the app's hottest GitHub spenders (every PR open), and it
     // used to be completely invisible to `github/rate-budget.ts` — so the sync's `gateBudget`
     // stood down while this kept firing. Same classification the compare seam uses.
     const rl = isRateLimitError(err);

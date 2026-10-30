@@ -8,9 +8,9 @@
 // rather than one table + route + hook per judgement type. The 0017 migration backfills the
 // existing comment_assessments rows in as kind='validity'/targetKind='review_comment';
 // comment_assessments is deliberately LEFT IN PLACE (readable, no longer written).
-// ⚠ LIVE FOR ONE KIND ONLY: `impact` (the blast-radius impact note, targetKind 'pull_request').
-// The comment kinds 'addressed' | 'validity' | 'simplify' (the removed "Check review") are DORMANT
-// rows: never written, skipped on read, still erased with the account. Never drop them.
+// ⚠ DORMANT (2026-10-30): the last live kind, `impact` (the blast-radius impact note), is REMOVED
+// with its routes and runner, as were the comment kinds before it. Nothing reads or writes this
+// table; it is kept, pruned (retention.ts) and erased with the account. Never drop it.
 import { sqliteTable, text, integer, real, index, uniqueIndex } from 'drizzle-orm/sqlite-core';
 import { sql } from 'drizzle-orm';
 

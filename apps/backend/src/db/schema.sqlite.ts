@@ -2608,7 +2608,7 @@ export const searchIndex = sqliteTable(
 //
 // TARGET IDS ARE NOT FOREIGN KEYS. `target_id` lives in three different id spaces
 // (reviewComments.id / prComments.id / reviews.id) so no single FK can express it — the same
-// shape the plugin's `pr_comment_annotations` uses. Cleanup rides the CASCADING pr_id FK
+// shape the dormant `pr_comment_annotations` table used. Cleanup rides the CASCADING pr_id FK
 // instead: deleting a PR (deleteRepo, the retention sweep) takes its labels with it, which is
 // why this table is deliberately absent from both hand-written delete paths (the `search_index`
 // precedent). Its own comments can only be deleted WITH their PR, so nothing dangles.
@@ -2625,8 +2625,7 @@ export const mlCommentLabels = sqliteTable(
     prId: integer('pr_id')
       .notNull()
       .references(() => pullRequests.id, { onDelete: 'cascade' }),
-    // MlLabelTargetKind — 'review_comment' | 'pr_comment' | 'review'. NOT the plugin's
-    // AnnotationTargetKind (that one has 'thread' and no 'review').
+    // MlLabelTargetKind — 'review_comment' | 'pr_comment' | 'review'.
     targetKind: text('target_kind', {
       enum: ['review_comment', 'pr_comment', 'review'],
     }).notNull(),

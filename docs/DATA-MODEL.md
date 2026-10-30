@@ -909,9 +909,11 @@ tables):
 | `pinned_prompts` | the Reports chat's pinned prompts (DORMANT since 2026-10-22) |
 | `sprint_chat_history` | the Reports chat's stored answers, "Ask about this period" (DORMANT since 2026-10-22) |
 
-DORMANT **rows** inside live tables: `pr_comment_annotations` kinds `validity` / `addressed` /
-`simplify` (the table stays live for `impact`, the blast-radius impact note; the read skips other
-kinds), and `pro_synthesis` kinds `brief` / `rollup` and, since 2026-10-22, `person` / `person_report`
+**Removed 2026-10-30: the blast-radius impact note** — `pr_comment_annotations` (its last live kind,
+`impact`; the comment kinds `validity` / `addressed` / `simplify` went 2026-10-18) is now a DORMANT
+table, still pruned and erased ([BLAST-RADIUS.md](BLAST-RADIUS.md) § The impact note (removed)).
+
+DORMANT **rows** inside live tables: `pro_synthesis` kinds `brief` / `rollup` and, since 2026-10-22, `person` / `person_report`
 (the 1:1 prep and People report narrations; their scope keys carry a `u:`/`pw:` tail no live kind
 mints, so no live read can reach them).
 

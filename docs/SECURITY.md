@@ -70,7 +70,7 @@ Per-`(account, repo)` TTL caches make repeats free, but a cache-cold loop spends
 doubt, follow the token** — and note that the passing test was pinning the wrong answer, so a test
 agreeing with the code is only evidence of intent when the code is right. Genuinely DB-only and
 correctly on `read`: `/bot-behaviour`, `/bot-dedup`, `/mention-candidates`, the retrieval-only
-`/claude-review`, the cached `GET …/annotations`, `GET /api/auto-merge` and `GET /api/branch-status`.
+`/claude-review`, `GET /api/auto-merge` and `GET /api/branch-status`.
 
 **Fastify factory hardening** (`app.ts`): `trustProxy: false` (it would let a client choose its
 own rate-limit key), `bodyLimit` 256 KiB (one route raises it: the 25 MB reference-docs upload), `requestTimeout` 60s,

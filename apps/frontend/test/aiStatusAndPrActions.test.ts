@@ -31,7 +31,6 @@ describe('AiStatusLine', () => {
     for (const p of [
       'components/ClaudeReviewTab.tsx',
       'components/CheckThreadsButton.tsx',
-      'components/Activity/BlastImpactNote.tsx',
       'components/Activity/AttentionView.tsx',
       'components/Activity/SprintView.tsx',
       'components/Activity/SprintAskPanel.tsx',

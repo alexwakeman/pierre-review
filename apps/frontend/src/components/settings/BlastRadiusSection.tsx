@@ -61,19 +61,17 @@ export function BlastRadiusSection(): JSX.Element {
 
   const [sensitivity, setSensitivity] = useState<BlastSensitivity>(resolved.sensitivity);
   const [off, setOff] = useState<BlastSurface[]>(resolved.surfacesOff);
-  const [showNote, setShowNote] = useState<boolean>(resolved.showImpactNote);
 
   // Re-seed when the server value changes (first load, and after a successful save).
-  const storedKey = `${resolved.sensitivity}|${[...resolved.surfacesOff].sort().join(',')}|${resolved.showImpactNote}`;
+  const storedKey = `${resolved.sensitivity}|${[...resolved.surfacesOff].sort().join(',')}`;
   useEffect(() => {
     setSensitivity(resolved.sensitivity);
     setOff(resolved.surfacesOff);
-    setShowNote(resolved.showImpactNote);
     // Keyed on the resolved values rather than the object, which is rebuilt on every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storedKey]);
 
-  const draftKey = `${sensitivity}|${[...off].sort().join(',')}|${showNote}`;
+  const draftKey = `${sensitivity}|${[...off].sort().join(',')}`;
   const dirty = draftKey !== storedKey;
 
   const toggle = (s: BlastSurface): void =>
@@ -143,39 +141,16 @@ export function BlastRadiusSection(): JSX.Element {
         </div>
       </Field>
 
-      {/* The impact note's visibility — a READING PREFERENCE. The copy names what it controls
-          rather than assuming the reader knows the feature exists. */}
-      <Field
-        label="AI impact note"
-        htmlFor="blast-impact-note"
-        hint="A short AI-written note on the pull request pane saying what a change could break. It is never generated until you ask for it, and turning this off removes the button too."
-      >
-        <label className="flex cursor-pointer items-center gap-2 text-body">
-          <CheckInput
-            id="blast-impact-note"
-            checked={showNote}
-            onChange={(e) => setShowNote(e.target.checked)}
-          />
-          <span className="text-ui-mute">
-            Offer the impact note on pull requests
-          </span>
-        </label>
-      </Field>
-
       <SaveButton
         dirty={dirty}
         saving={save.isPending}
         onClick={() => {
           // ⚠ Save the DEFAULTS as null, not as a stored blob. A blob saying "balanced, nothing
-          // off, note shown" would freeze this account against any future change to the product
+          // off" would freeze this account against any future change to the product
           // defaults — the same two-state rule the large-PR threshold follows.
-          const isDefaults = sensitivity === 'balanced' && off.length === 0 && showNote;
+          const isDefaults = sensitivity === 'balanced' && off.length === 0;
           save.mutate(
-            isDefaults
-              ? null
-              : // ⚠ Only `false` is sent: the backend stores the field only when it is off, so
-                // sending `true` here would persist the product default as a choice.
-                { sensitivity, surfacesOff: off, ...(showNote ? {} : { showImpactNote: false }) },
+            isDefaults ? null : { sensitivity, surfacesOff: off },
           );
         }}
       />

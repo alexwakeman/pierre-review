@@ -21,9 +21,6 @@ describe('tierFor — AI generation', () => {
     expect(tiers('POST', '/api/pro/ai-fixes/7/plan/message')).toEqual(['ai', 'ai_hourly']);
     expect(tiers('POST', '/api/pro/ai-fixes/7/plan/approve')).toEqual(['ai', 'ai_hourly']);
     expect(tiers('POST', '/api/pro/ai-fixes/7/plan/discard')).toEqual(['read']);
-    // The blast-radius impact note: the annotations run POST is its ONLY billing path, so it must
-    // not be left uncovered.
-    expect(tiers('POST', '/api/pro/prs/12/annotations/run')).toEqual(['ai', 'ai_hourly']);
   });
 
   // Load-bearing: Claude Review kept its PRE-PLUGIN paths for frontend compatibility, so it does
@@ -48,9 +45,6 @@ describe('tierFor — AI generation', () => {
     expect(tiers('GET', '/api/prs/42/claude-review')).toEqual(['read']);
     expect(tiers('GET', '/api/prs/42/claude-review/status')).toEqual(['read']);
     expect(tiers('GET', '/api/claude-reviews')).toEqual(['read']);
-    // Reading the stored impact note is a pure cache hit — it must NOT land on the ai tier, or
-    // simply opening a PR would burn the 20/min generation budget.
-    expect(tiers('GET', '/api/pro/prs/12/annotations')).toEqual(['read']);
   });
 
   it('does not bill cancels or config writes as generation', () => {

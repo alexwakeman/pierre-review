@@ -13,9 +13,9 @@
 //     developer's real login), and `ANTHROPIC_BASE_URL` points that rung here. All three are restored
 //     afterwards. Each answer is built from the request's own JSON (the ids it may cite), so the
 //     product's validators accept it.
-//   • THE WORK-PLAN WORDING and the IMPACT NOTES run on the local Claude route in the product, so
-//     they are stored through their own exported pieces (the evidence fold, the payload hash, the
-//     output parser, the runner) with a written answer.
+//   • THE WORK-PLAN WORDING runs on the local Claude route in the product, so it is stored through
+//     its own exported pieces (the evidence fold, the payload hash, the output parser) with a
+//     written answer.
 // Nothing leaves the machine.
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -340,58 +340,6 @@ export async function seedDemoPlatform(c: PlatformSeedCtx): Promise<Record<strin
     out.workPlanSteps = validated.steps.length;
   }
 
-  // ---- 6. impact notes on the main open PRs ----
-  {
-    // The runner's own steps (runner.ts `runAnnotations`) without its 30-second billing gate:
-    // the corpus, the target (its prompt and payload hash), the parse, the one writer.
-    const { upsertAnnotation } = await import('../src/platform/annotations/runner.js');
-    const { loadPrCorpus, impactForPr } = await import('../src/platform/annotations/targets.js');
-    const { parseSingle } = await import('../src/platform/annotations/prompts.js');
-    const { getBlastSignalsForPr } = await import('../src/db/blast-radius-query.js');
-    const { runTransaction } = await import('../src/db/client.js');
-    const NOTES: Record<number, string> = {
-      113: 'VERDICT: concern\nThe sync upsert is on every repository’s write path, and the new columns on `review_threads` need a migration that this change does not include. A deploy without it fails the first sync of every repository, not just the ones this team watches.',
-      114: 'VERDICT: concern\nThis changes the node group every sync worker runs on. While the bounds are inverted the plan fails, so nothing is applied; once fixed, the scale-down evicts pods that have no disruption budget.',
-      105: 'VERDICT: concern\nA new public endpoint that accepts GitHub deliveries. Its signature check decides who can write pull request data, so a mistake here is reachable from outside.',
-      116: 'VERDICT: none\nTwo new alarms in their own module. Nothing else reads them, so the change cannot break existing infrastructure; at worst an alarm is noisy.',
-      111: 'VERDICT: none\nAn extra streaming route beside the existing one; the sync itself only gains an event emit after each page.',
-    };
-    const ctx = {
-      db,
-      schema,
-      runTransaction,
-      log: { warn: () => {}, info: () => {}, error: () => {} },
-      llm: { detectAuth: () => ({ status: 'ok' }) },
-      recordAiUsage: async () => {},
-      queries: { getBlastSignals: (a: number, p: number) => getBlastSignalsForPr(a, p) },
-    };
-    let n = 0;
-    for (const [prId, text] of Object.entries(NOTES)) {
-      const corpus = await loadPrCorpus(ctx as never, 1, Number(prId));
-      const target = corpus != null ? impactForPr(corpus) : null;
-      if (target == null) continue;
-      const p = parseSingle('impact', text);
-      await upsertAnnotation(ctx as never, {
-        accountId: 1,
-        repoId: target.repoId,
-        prId: target.prId,
-        kind: 'impact',
-        targetKind: target.targetKind,
-        targetId: target.targetId,
-        verdict: p.verdict,
-        confidence: p.confidence,
-        body: p.body,
-        payloadHash: target.payloadHash,
-        // #105's note was written on Codex (its fast model), the rest on Claude Haiku.
-        ...(Number(prId) === 105 ? { provider: 'codex' as const, model: 'gpt-6-luna', costUsd: 0 } : { provider: 'claude' as const, model: 'claude-haiku-5-5', costUsd: 0.0007 }),
-        inputTokens: 2_400,
-        outputTokens: 90,
-        createdAt: new Date(nowMs - 3 * 3_600_000),
-      });
-      n++;
-    }
-    out.impactNotes = n;
-  }
   void and;
   void inArray;
   return out;

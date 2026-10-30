@@ -136,7 +136,7 @@ export function BlastRadiusChip({
   // makes the click worth making on every pull request.
   //
   // Every line below is computed by `blastRadius()` and `blastSignalsFor()`. No model is in this
-  // call path. The AI half of blast radius is the impact NOTE, which is a different component.
+  // call path.
   if (!expandable) {
     return (
       <span className={shell} title={verdict.label}>

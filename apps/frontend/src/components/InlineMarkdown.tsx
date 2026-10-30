@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 
-// INLINE MARKDOWN for ONE-LINE / short model text — an impact note, a finding's title, a story
+// INLINE MARKDOWN for ONE-LINE / short model text — a finding's title, a story
 // criterion. These used to print raw: "`review_threads`", "_⚠️ Potential issue_ —". The full
 // `Markdown` renderer is a block (paragraphs, lists) and too heavy for a sentence inside a row.
 //

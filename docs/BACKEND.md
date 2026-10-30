@@ -21,7 +21,7 @@ no session and no hosted mode.
 ### One-shot model calls (`review/llm.ts` `cheapComplete`)
 
 Every tool-less, one-shot model call (the platform's report narration, syntheses, bot themes,
-Chronology pointers, impact note, work-plan wording and Slack report via
+Chronology pointers, work-plan wording and Slack report via
 `ctx.llm.complete`; core's sprint briefs, themes and Ask, story labels, docs ranking and the
 docs-check shortlist) goes through `cheapComplete`, and every one takes THE ONE CREDENTIAL LADDER
 (`ai/credentials.ts`), the same as the agent runs:
@@ -43,7 +43,7 @@ Every agentic pass exposes enough state for the SPA's ONE status line: Claude Re
 Check threads (`GET /api/prs/:id/claude-review/thread-check` → `progress.phase` + `threadsSent` /
 `threadsCarried`), the sprint passes (`SprintGraphResponse.briefs {current, pending}` for progress,
 `passes {briefsRunning, themesRunning}` — the in-memory `db/sprint-pass-flights.ts` — and
-`pathsStatus.state`), the docs check (its run's `status`). The impact note, work-plan wording and
+`pathsStatus.state`), the docs check (its run's `status`). The work-plan wording and
 sprint Ask are request/response — the mutation's pending state is the status.
 
 ### Sync pipeline (`src/sync/`)
@@ -216,14 +216,14 @@ at all, and while the client is still sitting there waiting for the response. So
 // ❌ permanently true before the first iteration
 let aborted = false;
 req.raw.on('close', () => { aborted = true; });
-await runAnnotations(…, { shouldStop: () => aborted });
+await runBilledLoop(…, { shouldStop: () => aborted });
 ```
 
 The run breaks out of its very first iteration and every `send()` is suppressed.
 
 **The failure mode is SILENT, not loud.** Nothing throws, nothing logs, no status code changes:
 
-- the annotations run routes returned **`generated: 0` inside a normal `200`** — indistinguishable
+- the (since removed) annotations run routes returned **`generated: 0` inside a normal `200`** — indistinguishable
   from "everything was already cached";
 - the digest **Regenerate** SSE twin returned a 200 with an **empty body** and no progress at
   all, even though the digests really were being generated behind it.
@@ -246,8 +246,8 @@ one-line swap rather than a redesign.
 ### What was fixed, and what must NOT be "fixed"
 
 Fixed at four sites: the platform's annotations run routes (**JSON and SSE**), the
-digest-regenerate SSE, and the per-item resolution-check route. (Only the annotations run route —
-now the impact note's — survives; the others were REMOVED 2026-10-18.)
+digest-regenerate SSE, and the per-item resolution-check route. (All four are gone: the others were REMOVED 2026-10-18, the annotations run route — the impact
+note's — on 2026-10-30.)
 
 ⚠ **The `…/stream` endpoints that are GETs are unaffected and must not be changed.** Claude
 Review and AI Fix stream over a **GET with no body**, correctly using the hijacked `raw`; a
@@ -255,8 +255,7 @@ GET's `req.raw` does not close early (see the probe above), so "harmonising" the
 change with no upside and a real risk of reintroducing the asymmetry.
 
 **Any NEW POST that wants a client-disconnect abort needs this** — it is the shape every billed
-loop here uses. The in-code comment at `platform/annotations/routes.ts` restates the reasoning at the call
-site so a reader does not have to find this doc first.
+loop here uses.
 
 ## My Turn — the ball rule
 
