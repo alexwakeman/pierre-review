@@ -117,7 +117,7 @@ copy fails ONLY in the release: dev reads it from `src/` and looks perfect, whil
 answers the benchmark with `available:false`), a leaked `.ts`, an un-rewritten shared
 specifier, **any AI SDK in `dependencies` / `optionalDependencies` / `peerDependencies`**, a
 missing or inexact AI-runtime pin, or **an AI SDK specifier in any emitted JS file other than
-`dist/ai/runtime.js`**. `better-sqlite3` is a native runtime dep.
+`dist/ai/runtime.js`**. `better-sqlite3` is a native runtime dep: ⚠ keep it ≥ 13 (N-API, binaries INSIDE the package, no install script). 11.x had no Node 24 prebuild and relied on an install script; under npx that left no binary ("Could not locate the bindings file").
 
 ### No AI SDK in the manifest; installed on first use
 

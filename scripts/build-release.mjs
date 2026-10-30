@@ -308,7 +308,7 @@ const manifest = {
     // rename notice when the stub starts it under the old name.
   },
   files: ['dist', 'public', 'README.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md'],
-  engines: { node: '>=20' },
+  engines: { node: '>=22' },
   // NO AI SDK IS A DEPENDENCY. The agentic features ship as code, but the four SDKs they run on
   // (@anthropic-ai/claude-agent-sdk, @anthropic-ai/sdk, @modelcontextprotocol/sdk, zod) are
   // installed ON FIRST USE into ~/.limn/ai-runtime, at the exact versions in `limnAiRuntime`

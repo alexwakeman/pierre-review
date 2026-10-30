@@ -47,7 +47,7 @@ Every review thread already triaged, and every bot comment graded for severity:
 
 ## Prerequisites
 
-- Node ≥ 20 (developed on 24)
+- Node ≥ 22 (developed on 24)
 - pnpm ≥ 9 (from a checkout)
 - GitHub CLI (`gh`) authenticated: `gh auth login`. For org repos behind SSO you
   may need `gh auth refresh -h github.com -s read:org`.

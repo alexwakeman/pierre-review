@@ -97,7 +97,7 @@ credits, Stripe billing and the cloud benchmark collection (the full list:
 
 ## Stack
 
-- **Monorepo:** pnpm workspaces, TypeScript + ESM throughout, Node ≥20 (dev on 24).
+- **Monorepo:** pnpm workspaces, TypeScript + ESM throughout, Node ≥22 (dev on 24).
 - **Backend:** Fastify + Drizzle ORM (SQLite), `node-cron`, pino.
 - **Frontend:** React + Vite + Tailwind + `vis-timeline`, Zustand, TanStack Query.
 - **GitHub:** `@octokit/graphql` (one fat query per repo) + occasional REST.

@@ -503,6 +503,18 @@ main().catch((err) => {
   // than shared's PRODUCT_NAME on purpose: this module has no top-level imports outside
   // `node:*` (everything else is a dynamic import, to keep `npx` startup lean) and one word is
   // not worth loading shared before the failure can be printed.
+  // The SQLite driver is the one native module. better-sqlite3 ≥ 13 ships its binaries inside the
+  // package (N-API, no install script), so a missing binding means a broken or partial install:
+  // say how to get a clean one instead of a page of searched paths.
+  const message = err instanceof Error ? err.message : String(err);
+  if (/bindings file|better_sqlite3\.node|NODE_MODULE_VERSION/.test(message)) {
+    console.error(
+      'Failed to start Limn: the SQLite driver did not install correctly for this machine ' +
+        `(Node ${process.version}, ${process.platform}-${process.arch}).\n` +
+        'Clear the npx cache and try again:  rm -rf ~/.npm/_npx && npx limn-review@latest',
+    );
+    process.exit(1);
+  }
   console.error('Failed to start Limn:', err);
   process.exit(1);
 });
