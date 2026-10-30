@@ -90,7 +90,9 @@ export function fixSourceLine(fix: AiFix): string {
   switch (fix.seed) {
     case 'review': {
       const n = fix.reviewItems?.length ?? 0;
-      return `Fix from the AI review${n > 0 ? ` (${n} item${n === 1 ? '' : 's'})` : ''}.`;
+      // No source review ⇒ the CI-only seed ("Fix with AI" beside a finished CI check).
+      const from = fix.sourceReviewId == null ? 'the CI check' : 'the AI review';
+      return `Fix from ${from}${n > 0 ? ` (${n} item${n === 1 ? '' : 's'})` : ''}.`;
     }
     case 'plain':
       return 'Fix from your instruction.';

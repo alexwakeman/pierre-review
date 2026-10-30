@@ -18,6 +18,7 @@ import {
   ciCheckButtonLabel,
   ciCountsLabel,
   ciCurrency,
+  ciFixableCount,
   ciProgressPct,
   ciRefusalSentence,
   ciRunAtCurrentHead,
@@ -214,5 +215,27 @@ describe('source guards', () => {
   it('"+ Add story" names no element it does not render', () => {
     const src = code('components/ClaudeReviewFollowUp.tsx');
     expect(src).not.toMatch(/aria-controls=\{bodyId\}/);
+  });
+});
+
+describe('the CI check → AI Fix hand-off', () => {
+  it('counts only explained failures this PR can fix (the server’s C-item rule)', () => {
+    expect(
+      ciFixableCount([
+        { status: 'diagnosed', fixableInPr: true },
+        { status: 'diagnosed', fixableInPr: false },
+        { status: 'diagnosed', fixableInPr: null },
+        { status: 'not_checked', fixableInPr: true },
+      ]),
+    ).toBe(1);
+    expect(ciFixableCount([])).toBe(0);
+  });
+
+  it('the section offers "Fix with AI" through openAiFixForCi, gated on a fixable current run', () => {
+    const src = code('components/CiCheckSection.tsx');
+    expect(src).toMatch(/show === 'ci' && shown != null && !running && ciFixableCount\(items\) > 0/);
+    expect(src).toContain('openAiFixForCi(pr.id)');
+    // Opening the tab never starts a run: no fix mutation here.
+    expect(src).not.toMatch(/useStartFix|startAiFix/);
   });
 });

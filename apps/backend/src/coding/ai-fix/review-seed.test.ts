@@ -585,6 +585,36 @@ describe('the fix picker — sections, stable keys, defaults, selection, budget'
   });
 });
 
+// ---- THE CI-ONLY SEED: no AI review, a finished CI check ("Fix with AI" in the CI check section) ----
+describe('the CI-only seed (review === null)', () => {
+  const fixable = ci({ id: 900 });
+  const flaky = ci({ id: 901, fixableInPr: false });
+  const others = {
+    threads: [openThread({ threadId: 70 })],
+    ticketItems: [] as SeedTicketItem[],
+  };
+
+  it('offers ONLY the CI check’s fixable items — never threads, Sonar or ticket items', () => {
+    const p = buildPickerPreview(null, { ciItems: [fixable, flaky], ...others });
+    expect(p.sourceReviewId).toBeNull();
+    expect(p.items.map((i) => [i.key, i.section, i.defaultIncluded])).toEqual([['ci:900', 'ci_failures', true]]);
+  });
+
+  it('builds a C-only prompt with the CI intro and no review summary', () => {
+    const s = buildReviewSeed(null, { nonce, ciItems: [fixable, flaky], ...others });
+    expect(s.sentRefs).toEqual(['C1']);
+    expect(s.items.map((i) => [i.ref, i.kind])).toEqual([['C1', 'ci_failure']]);
+    expect(s.text).toMatch(/^Fix the failing CI checks below\./);
+    expect(s.text).not.toContain('REVIEW SUMMARY');
+    expect(s.text).toContain(`---BEGIN`);
+  });
+
+  it('nothing fixable ⇒ an empty seed (the caller’s NothingToFix)', () => {
+    expect(buildReviewSeed(null, { nonce, ciItems: [flaky] }).sentRefs).toEqual([]);
+    expect(buildPickerPreview(null, { ciItems: [] }).items).toEqual([]);
+  });
+});
+
 // ---- SonarCloud items (docs/SONARCLOUD.md § AI Fix) ----
 describe('SonarCloud items', () => {
   const sonar = (key: string, severity: 'blocker' | 'major' | 'info', over: Partial<SonarIssue> = {}): SonarIssue =>

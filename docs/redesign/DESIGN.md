@@ -177,6 +177,7 @@ Lists (`useListKeyboard`):
 | `↓` / `↑`, `Home` / `End` | same, while focus is in the list |
 | `G` | last row |
 | `↵` | open the selected row (side panel, or the row's primary action when the panel is open) |
+| `⇧↵` | go straight to the item, past the panel (Pending; the same as a double-click on the row — on touch, the panel's labelled Open button) |
 | `a` | approve (only where approving is allowed) |
 | `m` | merge (only when `mergeVerdict()` says it can land) |
 | `e` | done / dismiss (My turn) |

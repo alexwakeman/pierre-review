@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type {
   BranchCheckRun,
   BranchMergedPr,
@@ -10,6 +10,7 @@ import { useBranchTrends } from '../../hooks/useBranchTrends.js';
 import { useRepos } from '../../hooks/useTimeline.js';
 import { trimTrailingPrRef } from '../../lib/prRef.js';
 import { CHECK_STATE_META, CI_META, relativeTime, safeExternalUrl, vendorInk } from '../../lib/ui.js';
+import { useFilters } from '../../store/filters.js';
 import { usePinnedTabs, type TabMeta } from '../../store/pinnedTabs.js';
 import { ChartCard, PALETTE } from '../charts/common.js';
 import { DayStrip } from '../charts/DayStrip.js';
@@ -307,13 +308,22 @@ function BranchRow({
   fullName,
   showRepoName,
   fullTrends,
+  focused = false,
 }: {
   status: RepoBranchStatus;
   fullName: string | undefined;
   showRepoName: boolean;
   fullTrends: boolean;
+  /** A Pending "main is red" item asked for this repo: arrive expanded and scrolled to. */
+  focused?: boolean;
 }): JSX.Element {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(focused && status.lastCommitAt != null);
+  const rowRef = useRef<HTMLLIElement>(null);
+  useEffect(() => {
+    if (!focused) return;
+    if (status.lastCommitAt != null) setOpen(true);
+    rowRef.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [focused, status.lastCommitAt]);
   const ciMeta = CI_META[status.ciStatus];
   // Any retained trunk history at all (merged PRs OR direct pushes) — the expandable content is
   // the trend strip + the merged-PR list, and the strip has data whenever commits were synced.
@@ -322,7 +332,11 @@ function BranchRow({
   // history, so a collapsed strip of N repos issues zero trend requests.
   const trends = useBranchTrends(status.repoId, open);
   return (
-    <li className="border-b border-ui-line last:border-b-0">
+    <li
+      ref={rowRef}
+      className={`border-b border-ui-line last:border-b-0${focused ? ' bg-ui-sel' : ''}`}
+      data-trunk-repo-id={status.repoId}
+    >
       {/* The row is a DIV, not one big button: the failing-check names are real <a> links to
           GitHub, and an <a> inside a <button> is invalid interactive nesting — the browser hoists
           the anchor out and the click target becomes unpredictable. The expand toggle is its own
@@ -424,6 +438,20 @@ export function BranchStatusPanel({
   // which made the chevron a dead control on a red trunk — never derive `expanded` from data.)
   // Per-mount only, deliberately: this is a "let me look" toggle, not a remembered preference.
   const [userExpanded, setUserExpanded] = useState<boolean | null>(null);
+  // ONE-SHOT: a Pending "main is red" item (`openTrunkStatus`) asked for one repo. The strip opens
+  // on it once the rows are in, then the seed is consumed — the next arrival is collapsed again.
+  const trunkFocus = useFilters((s) => (compact ? null : s.trunkFocusRepoId));
+  const consumeTrunkFocus = useFilters((s) => s.consumeTrunkFocus);
+  const [focusedRepoId, setFocusedRepoId] = useState<number | null>(null);
+  const focusRows = data?.repos;
+  useEffect(() => {
+    if (trunkFocus == null || focusRows == null) return;
+    if (focusRows.some((r) => r.repoId === trunkFocus)) {
+      setUserExpanded(true);
+      setFocusedRepoId(trunkFocus);
+    }
+    consumeTrunkFocus();
+  }, [trunkFocus, focusRows, consumeTrunkFocus]);
 
   if (isLoading && data == null) return null;
   const rows = data?.repos ?? [];
@@ -561,6 +589,7 @@ export function BranchStatusPanel({
             // the cross-repo strip on Activity → Open PRs, whose rows live in the max-h-64 scroll
             // box above and get the two-line compact strips instead.
             fullTrends={compact}
+            focused={r.repoId === focusedRepoId}
           />
         ))}
       </ul>

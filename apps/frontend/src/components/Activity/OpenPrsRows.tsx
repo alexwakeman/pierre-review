@@ -646,7 +646,7 @@ function TicketGroup({
       ? { ident: t.ident, state: data.ticketStates.get(t.ident), prId: stack.rows[0].pr.id }
       : null;
   return (
-    <li role="presentation" className="mt-3 first:mt-0">
+    <li role="presentation" className="mt-5 first:mt-0">
       <div
         role="group"
         aria-labelledby={headId}
@@ -724,12 +724,20 @@ function TicketGroup({
             <span className="shrink-0 tabular-nums text-ui-faint">{prCountLabel(stack.rows.length)}</span>
           </div>
         </div>
+        {/* The group's rows sit INSIDE the ticket: inset so a row's status icon lines up with the
+            ticket icon (12px on a phone), with a quiet guide line under the chevron. Every row of
+            the grouped list carries the same inset, so the right-hand columns still line up. */}
         {!folded && (
-          <ul role="presentation" aria-label={t != null ? `Pull requests for ${t.key}` : 'Pull requests with no ticket'} className="m-0 list-none p-0">
-            {children}
-          </ul>
+          <div
+            data-testid="open-prs-group-body"
+            className="relative pl-[22px] before:absolute before:bottom-1 before:left-[15px] before:top-0 before:w-px before:bg-ui-line max-sm:pl-3 max-sm:before:left-[5px]"
+          >
+            <ul role="presentation" aria-label={t != null ? `Pull requests for ${t.key}` : 'Pull requests with no ticket'} className="m-0 list-none p-0">
+              {children}
+            </ul>
+            {complete && merged.length > 0 && <MergedRows stackId={stack.id} prs={merged} onOpen={data.onOpenMerged} />}
+          </div>
         )}
-        {!folded && complete && merged.length > 0 && <MergedRows stackId={stack.id} prs={merged} onOpen={data.onOpenMerged} />}
       </div>
     </li>
   );
@@ -741,13 +749,13 @@ function MergedRows({ stackId, prs, onOpen }: { stackId: string; prs: readonly T
   const toggle = useMergedPanelOpen((s) => s.toggle);
   const id = useId();
   return (
-    <div className="pl-[30px] pt-0.5">
+    <div className="pt-0.5">
       <button
         type="button"
         aria-expanded={open}
         aria-controls={id}
         onClick={() => toggle(stackId)}
-        className="inline-flex h-7 items-center gap-1.5 rounded-ui px-1.5 text-meta text-ui-mute hover:bg-ui-hover hover:text-ui-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent touch:h-10"
+        className="inline-flex h-7 items-center gap-1.5 rounded-ui px-3 text-meta text-ui-mute hover:bg-ui-hover hover:text-ui-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent touch:h-10"
       >
         <ChevronIcon dir={open ? 'down' : 'right'} size={11} />
         Merged ({prs.length})
@@ -758,7 +766,7 @@ function MergedRows({ stackId, prs, onOpen }: { stackId: string; prs: readonly T
             <button
               type="button"
               onClick={() => onOpen(m)}
-              className="flex h-row w-full min-w-0 items-center gap-3 rounded-ui px-2 text-left text-body hover:bg-ui-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ui-accent touch:h-row-touch"
+              className="flex h-row w-full min-w-0 items-center gap-3 rounded-ui px-3 text-left text-body hover:bg-ui-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ui-accent touch:h-row-touch"
             >
               <MergeIcon size={13} className="shrink-0 text-ui-faint" aria-hidden />
               <span className="min-w-0 flex-1 truncate text-ui-mute" title={m.title}>

@@ -1663,7 +1663,13 @@ CURRENT head — an earlier commit's is hidden whether the head is green or red
   or "Couldn’t post automatically: …".
 - **AI Fix:** the review seed's `C<n>` items are the `diagnosed` + `fixableInPr` items of the latest
   succeeded CI review AT THE PR'S CURRENT SYNCED HEAD (`getFixableCiItemsForPr`), manual and auto
-  fixes alike — never the code review's legacy `ciFailures` (§ AI Fix).
+  fixes alike — never the code review's legacy `ciFailures` (§ AI Fix). **"Fix with AI"** (2026-10-30)
+  sits under a CURRENT run's rows when any item is fixable (`ciFixableCount`): it opens the AI Fix tab
+  (`openAiFixForCi`) with ONLY the CI failures ticked — the latest AI review's picker when there is
+  one, else THE CI-ONLY SEED (a `review` seed with no `sourceReviewId`: the C items alone, no
+  threads, Sonar or ticket items; the fix row reads "Fix from the CI check"). Nothing starts until
+  the tab's Start fix (`AiRunGate kind="fix"`). Not a revival of the removed `ci_analysis` seed (the
+  OLD code review's free-text diagnosis): the items are the CI review's, nonce-fenced as data.
 
 ## Design diagrams (how a change is built — its own process)
 
@@ -2893,7 +2899,8 @@ CORE since 2026-10 (`apps/backend/src/coding/ai-fix/`: `manager.ts`,
 - **ONE ENTRY POINT IN THE SPA, TWO ON THE ROUTE** (`AiFixSeed`): `review` (the FIX PICKER in the
   AI Fix tab, reached also from the Claude Review tab) and `plain` (an instruction — the route still
   accepts it, the SPA no longer offers it; the tab's CI list, AI summary and text box are gone). With
-  no succeeded Claude review the tab says so and offers "Open Claude Review". ⚠ The picked-comments
+  no succeeded Claude review the tab says so and offers "Open Claude Review" — unless the CI review
+  has fixable items at the current head: then it shows THE CI-ONLY picker (§ CI review, AI Fix). ⚠ The picked-comments
   basket (`comments`) and the old CI diagnosis (`ci_analysis`) were REMOVED as seeds: the route
   answers `400 SeedRemoved`, but rows stored under them still READ (`AiFixStoredSeed`) and render
   as history ("no longer offered"). Their `comment_targets` / `comment_verdicts` columns are dormant.

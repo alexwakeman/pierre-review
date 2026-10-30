@@ -32,6 +32,8 @@ export interface ListKeyboardOptions {
   onSelect: (index: number) => void;
   /** Enter, or a click on the selected row. */
   onOpen?: (index: number) => void;
+  /** Shift+Enter: go straight to the row's item. Without it, Shift+Enter is Enter. */
+  onGo?: (index: number) => void;
   /** Single-letter action keys for the SELECTED row: `{ a: approve, m: merge, e: done }`. */
   actions?: Record<string, (index: number) => void>;
   /** Off while the screen is not the visible one (a hidden overlay must not answer j/k). */
@@ -45,12 +47,13 @@ export function useListKeyboard({
   selected,
   onSelect,
   onOpen,
+  onGo,
   actions,
   enabled = true,
 }: ListKeyboardOptions): void {
   // Latest values without re-binding the listener on every render.
-  const live = useRef({ count, selected, onSelect, onOpen, actions });
-  live.current = { count, selected, onSelect, onOpen, actions };
+  const live = useRef({ count, selected, onSelect, onOpen, onGo, actions });
+  live.current = { count, selected, onSelect, onOpen, onGo, actions };
 
   useEffect(() => {
     if (!enabled) return;
@@ -58,7 +61,7 @@ export function useListKeyboard({
       if (shortcutBlocked(e)) return;
       const el = containerRef.current;
       const focusInside = el != null && e.target instanceof Node && el.contains(e.target);
-      const { count: n, selected: sel, onSelect: select, onOpen: open, actions: acts } = live.current;
+      const { count: n, selected: sel, onSelect: select, onOpen: open, onGo: go, actions: acts } = live.current;
       const res = resolveListKey(e.key, {
         focusInside,
         actionKeys: Object.keys(acts ?? {}),
@@ -74,10 +77,11 @@ export function useListKeyboard({
         return;
       }
       if (sel == null || sel >= n) return;
-      if (res.kind === 'open') {
-        if (open) {
+      if (res.kind === 'open' || res.kind === 'go') {
+        const fn = res.kind === 'go' ? (go ?? open) : open;
+        if (fn) {
           e.preventDefault();
-          open(sel);
+          fn(sel);
         }
         return;
       }
@@ -170,6 +174,7 @@ export function Row({
   selected,
   onSelect,
   onOpen,
+  onGo,
   leaving = false,
   flash = false,
   children,
@@ -182,6 +187,9 @@ export function Row({
   onSelect: (index: number) => void;
   /** Clicking the already-selected row (or any row, if `openOnClick`) opens it. */
   onOpen?: (index: number) => void;
+  /** A double-click: go straight to the row's item (past the panel). Not a touch gesture — a
+   *  screen that offers it also puts the same action in its panel, as a labelled button. */
+  onGo?: (index: number) => void;
   /** The row is sliding out (an optimistic removal): fades and shifts left, then the parent drops it. */
   leaving?: boolean;
   /** Back-navigation landed here: a one-off highlight (the Back-flash rule). */
@@ -196,6 +204,10 @@ export function Row({
     onSelect(index);
     onOpen?.(index);
   };
+  const onDoubleClick = (e: MouseEvent): void => {
+    if (onGo == null || (e.target as HTMLElement).closest('a,button,input,label')) return;
+    onGo(index);
+  };
   return (
     <li
       id={rowDomId(listId, index)}
@@ -204,6 +216,9 @@ export function Row({
       data-row-index={index}
       title={title}
       onClick={onClick}
+      onDoubleClick={onGo != null ? onDoubleClick : undefined}
+      // The double-click is a gesture here, not a word selection.
+      onMouseDown={onGo != null ? (e) => e.detail > 1 && e.preventDefault() : undefined}
       className={cx(
         'group/row flex h-row cursor-default items-center gap-3 rounded-ui px-3 text-body text-ui-ink touch:h-row-touch',
         'motion-safe:transition-[background-color,opacity,transform] motion-safe:duration-ui motion-safe:ease-ui',

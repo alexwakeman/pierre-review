@@ -26,11 +26,14 @@ export function useAiFix(prId: number | null, enabled: boolean) {
 // The fix picker's items for one review (DB-only on the server). Refetched after a fix finishes
 // (the ['ai-fix', prId] prefix is NOT shared, so it is keyed on its own and invalidated by the
 // start/push hooks below).
+// `reviewId === null` ⇒ THE CI-ONLY preview (the caller enables it only when the PR has no
+// succeeded AI review); a 409 there just means "nothing to fix without a review", so no retry.
 export function useAiFixPreview(prId: number, reviewId: number | null, enabled: boolean) {
   return useQuery<AiFixPickerPreview>({
     queryKey: ['ai-fix-preview', prId, reviewId],
-    queryFn: () => api.aiFixPreview(prId, reviewId as number),
-    enabled: enabled && reviewId != null,
+    queryFn: () => api.aiFixPreview(prId, reviewId),
+    enabled,
+    retry: reviewId == null ? false : undefined,
   });
 }
 

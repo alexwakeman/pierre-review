@@ -8972,10 +8972,12 @@ export interface GenerateFixBody {
   provider?: AiProviderId;
   // Omitted ⇒ 'plain'. 'comments' / 'ci_analysis' ⇒ 400 SeedRemoved; anything else ⇒ 400 UnknownSeed.
   seed?: AiFixSeed;
-  // seed === 'review' (required): the Claude review to fix from. The SERVER builds the whole seed
+  // seed === 'review': the Claude review to fix from. The SERVER builds the whole seed
   // from the stored run; nothing about the review travels in the body. Not this PR's / account's,
   // or not succeeded ⇒ 409 ReviewUnavailable; nothing to fix in it ⇒ 409 NothingToFix.
-  sourceReviewId?: number;
+  // Absent / null ⇒ THE CI-ONLY SEED: the latest CI check's fixable items at the PR's current head
+  // and nothing else (no AI review needed); none ⇒ 409 NothingToFix.
+  sourceReviewId?: number | null;
   // seed === 'plain' (required, non-blank, at most AI_FIX_MAX_INSTRUCTION_CHARS): what to fix.
   // (The SPA no longer offers a plain fix; the route still accepts it.)
   instruction?: string;
@@ -9044,7 +9046,8 @@ export type AiFixPickerCard =
   | { kind: 'sonar'; issue: SonarIssue }
   | { kind: 'story'; ticketReviewId: number; itemId: number };
 export interface AiFixPickerPreview {
-  sourceReviewId: number;
+  // null ⇒ THE CI-ONLY preview (no succeeded AI review; only the CI check's `ci_failures` items).
+  sourceReviewId: number | null;
   items: AiFixPickerItem[];
   // The prompt budget in characters, and the keys the budget would cut from the DEFAULT selection
   // (the SPA re-folds the cut for the reader's own selection with `chars` and this budget, in

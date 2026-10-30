@@ -184,8 +184,11 @@ function parseStartBody(
     }
     return { model, provider, seed, instruction, sourceReviewId: null, include: null };
   }
-  const raw = (body as { sourceReviewId?: unknown }).sourceReviewId;
-  if (typeof raw !== 'number' || !Number.isInteger(raw) || raw <= 0) {
+  // Absent / null ⇒ THE CI-ONLY SEED (no AI review: the CI check's fixable items at the current
+  // head — manager.ts `loadCiOnlySeed`). Anything else must be a positive integer id.
+  const rawId = (body as { sourceReviewId?: unknown }).sourceReviewId;
+  const raw = rawId ?? null;
+  if (raw !== null && (typeof raw !== 'number' || !Number.isInteger(raw) || raw <= 0)) {
     return { error: 'ReviewRequired', message: 'Pick an AI review to fix from.' };
   }
   // The fix picker's selection: picker keys. Absent ⇒ the server's defaults. Anything but an
@@ -353,7 +356,11 @@ export function registerAiFixRoutes(app: FastifyInstance, ctx: AgentContext): vo
           case 'nothing_to_fix':
             return reply.code(409).send({
               error: 'NothingToFix',
-              message: parsed.include ? 'Nothing is ticked.' : 'The review found nothing to fix.',
+              message: parsed.include
+                ? 'Nothing is ticked.'
+                : parsed.sourceReviewId == null
+                  ? 'The CI check found nothing this PR can fix.'
+                  : 'The review found nothing to fix.',
             });
           default:
             return reply.code(404).send({ error: 'not found' });
@@ -426,11 +433,18 @@ export function registerAiFixRoutes(app: FastifyInstance, ctx: AgentContext): vo
       const pr = await getFixPrContext(ctx, accountId, prId);
       if (!pr) return reply.code(404).send({ error: 'not found' });
       const reviewId = picked ?? (await getLatestSucceededReviewId(ctx, prId, accountId));
-      if (reviewId == null)
-        return reply.code(409).send({
-          error: 'ReviewUnavailable',
-          message: 'Run an AI review on this PR first.',
-        });
+      // No succeeded AI review: THE CI-ONLY preview (the CI check's fixable items at the current
+      // head, `sourceReviewId: null`) — unless there are none, which is the old 409.
+      if (reviewId == null) {
+        const ciOnly = await loadFixPreview(ctx, { accountId, prId, reviewId: null });
+        if (ciOnly == null || ciOnly.items.length === 0)
+          return reply.code(409).send({
+            error: 'ReviewUnavailable',
+            message: 'Run an AI review on this PR first.',
+          });
+        const resp: AiFixPickerPreview = ciOnly;
+        return reply.send(resp);
+      }
       const preview = await loadFixPreview(ctx, { accountId, prId, reviewId });
       if (!preview)
         return reply.code(409).send({

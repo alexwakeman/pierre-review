@@ -28,6 +28,7 @@ import {
   CI_PHASE_LABEL,
   ciCheckButtonLabel,
   ciCurrency,
+  ciFixableCount,
   ciProgressPct,
   ciRefusalSentence,
   ciRunAtCurrentHead,
@@ -38,7 +39,8 @@ import { ciCountPills, ciFailingLabel, orderCiFailures } from '../lib/claudeRevi
 import { REVIEW_CHIP, REVIEW_META } from '../lib/reviewStyles.js';
 import { AiRunGate } from './AiSetup.js';
 import { CiFailureRow } from './ClaudeReviewCiFailures.js';
-import { CheckIcon, WarningIcon } from './Icons.js';
+import { useFilters } from '../store/filters.js';
+import { ArrowIcon, CheckIcon, SparkleIcon, WarningIcon } from './Icons.js';
 import { InfoButton } from './InfoModal.js';
 import { Markdown } from './Markdown.js';
 import { ReviewSection } from './ReviewSection.js';
@@ -108,6 +110,7 @@ export function CiCheckSection({
   const legacyFailures = legacy != null && ciRunAtCurrentHead(legacy.headSha, pr.headSha) ? legacy.ciFailures : null;
   const items = useMemo(() => orderCiFailures(shown?.items ?? []), [shown]);
   const legacyItems = useMemo(() => orderCiFailures(legacyFailures ?? []), [legacyFailures]);
+  const openAiFixForCi = useFilters((s) => s.openAiFixForCi);
 
   if (!ai.enabled || isLoading) return null;
   // A refusal of the newest attempt at the PR's current head (the server says which), and a run
@@ -235,6 +238,29 @@ export function CiCheckSection({
                 />
               ))}
         </ul>
+      )}
+      {/* THE HAND-OFF TO AI FIX: only the CURRENT run's items this PR can fix (never the legacy
+          history). It opens the AI Fix tab with just the CI failures ticked; the fix starts only
+          on that tab's Start fix (its AiRunGate kind="fix"). */}
+      {show === 'ci' && shown != null && !running && ciFixableCount(items) > 0 && (
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => openAiFixForCi(pr.id)}
+            className="inline-flex h-7 items-center gap-1.5 whitespace-nowrap rounded-ui bg-ui-raise px-2.5 text-meta font-medium text-ui-ink hover:bg-ui-hover touch:h-10 touch:px-3"
+          >
+            <SparkleIcon size={12} className="text-ai-signal" />
+            Fix with AI
+            <ArrowIcon dir="right" size={11} />
+          </button>
+          <InfoButton title="Fix the failing CI">
+            <p>
+              Opens AI Fix with the failures this PR can fix ticked. {ai.providerName} edits the code in a
+              private copy. Nothing changes until you press Start fix, and nothing is pushed until you
+              press Push.
+            </p>
+          </InfoButton>
+        </div>
       )}
       {show !== 'legacy' && shown == null && !running && refused == null && failed == null && (
         <p className={`text-meta ${MUTED}`}>Not checked yet.</p>

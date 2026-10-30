@@ -184,6 +184,7 @@ export interface StartFixInput {
   model: string;
   seed: AiFixSeed;
   // seed === 'review': the Claude review to fix from. The seed is built from the STORED run.
+  // null/absent ⇒ THE CI-ONLY SEED (the CI review's fixable items at the current head, nothing else).
   sourceReviewId?: number | null;
   // seed === 'plain': the reader's instruction.
   instruction?: string;
@@ -290,14 +291,38 @@ export async function loadReviewSeed(
 }
 
 /**
+ * THE CI-ONLY SEED (a MANUAL fix with no AI review — "Fix with AI" beside a finished CI check): the
+ * CI review's fixable items at the PR's current head, nothing else (review-seed.ts
+ * `collectSeedCandidates` with a null review). Never throws; an empty seed is the caller's
+ * `nothing_to_fix`.
+ */
+export async function loadCiOnlySeed(
+  ctx: AgentContext,
+  input: { accountId: number; prId: number; selection?: SeedSelection },
+): Promise<ReviewSeed> {
+  try {
+    const ciItems = await getFixableCiItemsForPr(ctx, input.accountId, input.prId);
+    return buildReviewSeed(null, { nonce: pickReviewNonce, ciItems, selection: input.selection });
+  } catch (err) {
+    ctx.log.warn({ err }, 'ai-fix: loading the CI-only seed failed');
+    return { items: [], sentRefs: [], text: '' };
+  }
+}
+
+/**
  * The fix picker's preview for a MANUAL fix (ticket items included, like the manual start). null
- * when the review is not this PR's succeeded run. Never throws.
+ * when the review is not this PR's succeeded run. `reviewId === null` ⇒ the CI-ONLY preview (the CI
+ * check's fixable items alone; `sourceReviewId: null`). Never throws.
  */
 export async function loadFixPreview(
   ctx: AgentContext,
-  input: { accountId: number; prId: number; reviewId: number },
+  input: { accountId: number; prId: number; reviewId: number | null },
 ): Promise<AiFixPickerPreview | null> {
   try {
+    if (input.reviewId == null) {
+      const ciItems = await getFixableCiItemsForPr(ctx, input.accountId, input.prId);
+      return buildPickerPreview(null, { ciItems });
+    }
     const review = await loadSourceReview(ctx, input.accountId, input.prId, input.reviewId);
     if (!review) return null;
     const inputs = await loadSeedInputs(ctx, input.accountId, input.prId, true);
@@ -400,7 +425,17 @@ async function startRun(
     let reviewItems: AiFixReviewItem[] | null = null;
     let sentRefs: string[] = [];
     let seed: FixSeed;
-    if (input.seed === 'review') {
+    if (input.seed === 'review' && input.sourceReviewId == null) {
+      // No AI review named: the CI-only seed (manual starts only — the auto path always names one).
+      const ciSeed = await loadCiOnlySeed(ctx, { accountId, prId, selection: input.selection });
+      if (ciSeed.sentRefs.length === 0) {
+        claimed.delete(prId);
+        return { status: 'nothing_to_fix' };
+      }
+      reviewItems = ciSeed.items;
+      sentRefs = ciSeed.sentRefs;
+      seed = { kind: 'review', text: ciSeed.text };
+    } else if (input.seed === 'review') {
       const loaded = await loadReviewSeed(ctx, {
         accountId,
         prId,

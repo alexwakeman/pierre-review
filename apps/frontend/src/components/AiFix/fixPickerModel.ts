@@ -62,3 +62,13 @@ export function budgetCutKeys(preview: AiFixPickerPreview, overrides: PickerOver
   }
   return cut;
 }
+
+/**
+ * Ticks exactly one section ("Fix with AI" from the CI check section: only the CI failures), every
+ * other item unticked — the reader can still tick more before Start fix.
+ */
+export function onlySectionOverrides(preview: AiFixPickerPreview, section: AiFixPickerSection): PickerOverrides {
+  const out: PickerOverrides = {};
+  for (const i of preview.items) out[i.key] = i.section === section;
+  return out;
+}

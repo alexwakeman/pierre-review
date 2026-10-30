@@ -289,14 +289,33 @@ describe('POST /api/pro/prs/:id/ai-fix — the two entry points', () => {
     await app.close();
   });
 
-  it('review needs a positive integer review id', async () => {
+  it('review needs a positive integer review id — or none at all (the CI-only seed)', async () => {
     const app = await build();
-    for (const sourceReviewId of [undefined, 0, -3, 1.5, '41']) {
+    for (const sourceReviewId of [0, -3, 1.5, '41']) {
       const res = await start(app, { seed: 'review', sourceReviewId });
       expect(res.statusCode).toBe(400);
       expect(res.json()).toMatchObject({ error: 'ReviewRequired' });
     }
     expect(startFix).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('no review id ⇒ the CI-only seed reaches startFix with sourceReviewId null', async () => {
+    const app = await build();
+    for (const body of [{ seed: 'review' }, { seed: 'review', sourceReviewId: null }]) {
+      startFix.mockClear();
+      const res = await start(app, { ...body, include: ['ci:3'] });
+      expect(res.statusCode).toBe(202);
+      expect(startFix.mock.calls[0]?.[1]).toMatchObject({
+        seed: 'review',
+        sourceReviewId: null,
+        selection: { kind: 'keys', keys: ['ci:3'] },
+      });
+    }
+    startFix.mockResolvedValueOnce({ status: 'nothing_to_fix' } as never);
+    const none = await start(app, { seed: 'review' });
+    expect(none.statusCode).toBe(409);
+    expect(none.json()).toMatchObject({ error: 'NothingToFix', message: 'The CI check found nothing this PR can fix.' });
     await app.close();
   });
 
@@ -421,10 +440,29 @@ describe('the fix picker — preview and selection', () => {
     expect(res.statusCode).toBe(200);
     expect(getLatestSucceededReviewId.mock.calls[0]?.slice(1)).toEqual([7, 1]);
     expect(loadFixPreview.mock.calls[0]?.[1]).toEqual({ accountId: 1, prId: 7, reviewId: 4 });
+    // No succeeded review and no fixable CI item ⇒ 409, as before.
     getLatestSucceededReviewId.mockResolvedValueOnce(null);
+    loadFixPreview.mockResolvedValueOnce({ ...PREVIEW, sourceReviewId: null as never, items: [] });
     const none = await app.inject({ method: 'GET', url: '/api/pro/prs/7/ai-fix/preview' });
     expect(none.statusCode).toBe(409);
     expect(none.json()).toMatchObject({ error: 'ReviewUnavailable', message: 'Run an AI review on this PR first.' });
+    await app.close();
+  });
+
+  it('no succeeded review but a CI check with fixable items ⇒ the CI-only preview', async () => {
+    const app = await build();
+    loadFixPreview.mockClear();
+    getLatestSucceededReviewId.mockResolvedValueOnce(null);
+    const ciOnly = {
+      ...PREVIEW,
+      sourceReviewId: null as never,
+      items: [{ ...PREVIEW.items[0]!, key: 'ci:3', section: 'ci_failures', severity: null as never }],
+    };
+    loadFixPreview.mockResolvedValueOnce(ciOnly);
+    const res = await app.inject({ method: 'GET', url: '/api/pro/prs/7/ai-fix/preview' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual(ciOnly);
+    expect(loadFixPreview.mock.calls[0]?.[1]).toEqual({ accountId: 1, prId: 7, reviewId: null });
     await app.close();
   });
 

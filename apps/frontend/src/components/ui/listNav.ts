@@ -1,6 +1,7 @@
 // THE ONE-LINE LIST'S KEYBOARD MODEL, PURE (test/uiPrimitives.test.ts pins it).
 //
-// j / ↓ next, k / ↑ previous, Home / End (and g / G) first / last, Enter open, and a screen's own
+// j / ↓ next, k / ↑ previous, Home / End (and g / G) first / last, Enter open (Shift+Enter: go
+// straight to the item, where the screen offers it), and a screen's own
 // single-letter ACTION keys (a approve, m merge, e done …). Arrows and Enter only act when focus is
 // inside the list (so they never steal page scrolling or a focused button's Enter); the letters
 // act from anywhere on the page that is not a field, a popover or a modal (`shortcutBlocked`).
@@ -28,6 +29,8 @@ export function nextIndex(current: number | null, count: number, move: ListMove)
 export type ListKeyResult =
   | { kind: 'move'; move: ListMove }
   | { kind: 'open' }
+  /** Shift+Enter: go straight to the row's item (past the panel). */
+  | { kind: 'go' }
   | { kind: 'action'; key: string }
   | null;
 
@@ -48,7 +51,7 @@ export function resolveListKey(
     if (key === 'ArrowUp') return { kind: 'move', move: 'prev' };
     if (key === 'Home') return { kind: 'move', move: 'first' };
     if (key === 'End') return { kind: 'move', move: 'last' };
-    if (key === 'Enter') return { kind: 'open' };
+    if (key === 'Enter') return opts.shift ? { kind: 'go' } : { kind: 'open' };
   }
   const lower = key.length === 1 ? key.toLowerCase() : key;
   if (opts.actionKeys.includes(lower) && lower !== 'j' && lower !== 'k') return { kind: 'action', key: lower };

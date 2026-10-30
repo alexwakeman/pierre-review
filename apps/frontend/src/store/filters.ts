@@ -636,7 +636,8 @@ export interface FilterState {
 
   // transient: "Generate fix from this review" → open the PR's AI Fix tab, seeded
   // with the review text. Matched by `prId`; cleared by PrDetail once it switches.
-  aiFixTabFocus: { prId: number; reviewId?: number } | null;
+  // `only` ("Fix with AI" in the CI check section): tick just that picker section.
+  aiFixTabFocus: { prId: number; reviewId?: number; only?: 'ci_failures' } | null;
 
   // transient: a clicked flow-metric tile → which metric the drill-down tab should show.
   // Seeds/re-jumps the MetricsDetail sub-tab (the tab itself is a singleton). null = none.
@@ -657,6 +658,10 @@ export interface FilterState {
   // ⚠ NOT `repoIds` — that is the Timeline picker, and the repo picker never scopes another screen.
   // Ignored when its `workspaceId` is not the current one (OpenPrsDetail compares).
   openPrsRepoFilter: OpenPrsRepoFilter | null;
+  // transient, ONE-SHOT: the repo whose default branch a Pending "main is red" item asked to see.
+  // The Default branches strip (BranchStatusPanel, cross-repo mount) arrives OPEN with that repo's
+  // row expanded and scrolled to, then consumes it — so the next arrival is collapsed again.
+  trunkFocusRepoId: number | null;
 
   // transient: the repo the bot-only-PRs drill-down was opened FROM (the per-repo Bots tab).
   // null = the whole active workspace (the cross-repo Bots rail). Read-not-consumed, like above.
@@ -1033,6 +1038,10 @@ export interface FilterState {
   // Open a PR's AI Fix tab with a Claude review to fix from. AiFixTab consumes it. `reviewId`
   // names the review; the server builds the whole seed from the stored run.
   openAiFixFromReview: (prId: number, reviewId?: number) => void;
+  // "Fix with AI" beside a finished CI check (CiCheckSection, inside a mounted PrDetail): the AI
+  // Fix tab with only the CI failures ticked — the latest AI review's picker, or the CI-only seed
+  // when the PR has no succeeded review. Nothing starts until the reader presses Start fix.
+  openAiFixForCi: (prId: number) => void;
   // Open a PR's AI Fix tab from OUTSIDE a mounted PrDetail (the bottom-right AiFixBanner).
   // Mounts the pr-detail tab first — see openClaudeReview for why openAiFixFromReview's
   // signal-only shape is not reusable here.
@@ -1060,6 +1069,9 @@ export interface FilterState {
   // Reveal Activity → Open PRs. A repoId pre-selects that repo in the pane's dropdown (the
   // per-repo footer, which promised that repo's count); no argument clears the dropdown.
   openOpenPrsDetail: (repoId?: number | null) => void;
+  // Reveal Activity → Open PRs with the Default branches strip open on this repo's row.
+  openTrunkStatus: (repoId: number) => void;
+  consumeTrunkFocus: () => void;
   // The tab's dropdown writes here (null = every repo).
   setOpenPrsRepoFilter: (repoIds: number[] | null) => void;
   // Open (or re-focus) the bot-only-PRs drill-down tab (the amber "only a bot reviewed
@@ -1373,6 +1385,7 @@ function freshDefaults(): FilterData {
     botPrsFocusKey: null,
     botPrsFocusRepoId: null,
     openPrsRepoFilter: null,
+    trunkFocusRepoId: null,
     botOnlyFocusRepoId: null,
     botThreadsFocusRepoId: null,
     themeThreadsSeed: null,
@@ -1769,6 +1782,13 @@ export const useFilters = create<FilterState>((set, get) => ({
       aiFixTabFocus: { prId, reviewId },
     }),
   // ⚠ The pr-detail TAB is mounted FIRST, exactly like openClaudeReview and NOT like
+  openAiFixForCi: (prId) =>
+    set({
+      selectedPrId: prId,
+      selectedThreadId: null,
+      selectedCommentId: null,
+      aiFixTabFocus: { prId, only: 'ci_failures' },
+    }),
   // openAiFixFromReview above: `aiFixTabFocus` is consumed by an effect inside a MOUNTED
   // PrDetail, and the banner fires from wherever the reader happens to be — over the Feed, the
   // Pending board, a full-screen overlay. openAiFixFromReview survives without this only
@@ -1818,6 +1838,12 @@ export const useFilters = create<FilterState>((set, get) => ({
     usePinnedTabs.getState().showActivity();
     get().setActivityRepo('open-prs');
   },
+  openTrunkStatus: (repoId) => {
+    set({ trunkFocusRepoId: repoId });
+    usePinnedTabs.getState().showActivity();
+    get().setActivityRepo('open-prs');
+  },
+  consumeTrunkFocus: () => set({ trunkFocusRepoId: null }),
   setOpenPrsRepoFilter: (repoIds) =>
     set({ openPrsRepoFilter: repoIds != null ? { workspaceId: get().workspaceId, repoIds } : null }),
   openBotOnlyDetail: (repoId) => {

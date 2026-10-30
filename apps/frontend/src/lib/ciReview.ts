@@ -183,3 +183,14 @@ export function ciCheckButtonLabel(hasResult: boolean, starting: boolean): strin
   if (starting) return 'Starting…';
   return hasResult ? 'Re-check' : 'Check CI';
 }
+
+// ---- the hand-off to AI Fix ----
+
+/**
+ * How many of a CI check's items AI Fix can work on: explained (`diagnosed`) AND judged fixable in
+ * this PR — the server's own rule for the fix seed's C items (review-seed.ts `fixableCiItems`). The
+ * section offers "Fix with AI" only when this is above zero.
+ */
+export function ciFixableCount(items: ReadonlyArray<Pick<ClaudeCiFailure, 'status' | 'fixableInPr'>>): number {
+  return items.filter((f) => f.status === 'diagnosed' && f.fixableInPr === true).length;
+}

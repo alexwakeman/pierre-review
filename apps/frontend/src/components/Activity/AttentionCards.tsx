@@ -49,6 +49,7 @@ import {
   pendingActionLine,
   pendingCardEvent,
   pendingCardPrLabel,
+  pendingDestinationLabel,
   pendingFactPlan,
   pendingHeading,
   queueFact,
@@ -2230,6 +2231,9 @@ interface PendingBoardApi {
    *  comment or review body → Overview, scrolled to it. */
   openComment: (card: PrCardRef & { id: string }, comment: MyTurnCommentRef) => void;
   openReview: (card: PrCardRef) => void;
+  /** A red build on the reader's PR: its CI check (AI Review tab, with "Fix with AI") when AI is on,
+   *  else the PR's Overview. */
+  openCi: (meta: PinnedPr, returnItemId?: string) => void;
   openFix: (meta: PinnedPr) => void;
   claudeOn: boolean;
   claudeStates: Map<number, ClaudeReviewPrState>;
@@ -2241,8 +2245,64 @@ interface PendingBoardApi {
   approveOk: (card: InsightCard) => boolean;
   /** The reason a row's last action failed, shown on the row and at the top of its panel. */
   rowError: (id: string) => string | null;
-  /** The open panel publishes what Enter (with the panel open) does — the card's own "open". */
-  activateRef: { current: (() => void) | null };
+  /** A red default branch: Open pull requests, the Default branches strip open on that repo. */
+  openTrunk: (repoId: number) => void;
+}
+
+/** A card's trunk (red build) view, when it is one — the ci_failing card or a promoted red trunk. */
+function trunkOf(card: InsightCard): CiFailingCard | null {
+  if (card.kind === 'ci_failing') return card;
+  if (card.kind === 'my_turn' && card.reason === 'trunk_red') return asCiFailingCard(card);
+  return null;
+}
+
+/**
+ * GO TO THE ITEM: what the panel's Open, Enter on an open panel, Shift+Enter and a double-click on the
+ * row all do — ONE mapping (`pendingCardEvent`) turned into ONE action. `undefined` = nothing to go
+ * to (a reviewer's load): the panel is the destination. Reads only the card; fetches nothing.
+ */
+export function pendingActivation(
+  card: InsightCard,
+  board: Pick<PendingBoardApi, 'usersById' | 'openPr' | 'openMeta' | 'openCi' | 'openThreadOn' | 'openComment' | 'openReview' | 'openTrunk'>,
+): { label: string; run: () => void } | undefined {
+  const event = pendingCardEvent(card);
+  const label = pendingDestinationLabel(event);
+  if (label == null) return undefined;
+  const prRef: (PrCardRef & InsightPrRef & { id: string }) | null =
+    'inMergeQueue' in card ? (card as PrCardRef & InsightPrRef & { id: string }) : null;
+  const trunk = trunkOf(card);
+  const landing = trunk != null ? landingPrMeta(trunk, board.usersById) : null;
+  const run = ((): (() => void) | undefined => {
+    switch (event.kind) {
+      case 'thread':
+        return prRef != null ? () => board.openThreadOn(prRef, event.threadId) : undefined;
+      case 'comment':
+        return prRef != null ? () => board.openComment(prRef, event.comment) : undefined;
+      case 'pr':
+        return prRef != null ? () => board.openPr(prRef, event.tab) : undefined;
+      case 'claude_review':
+        return prRef != null ? () => board.openReview(prRef) : undefined;
+      case 'landing_pr':
+        return landing != null ? () => board.openCi(landing, card.id) : undefined;
+      case 'trunk':
+        return () => board.openTrunk(event.repoId);
+      case 'external': {
+        // No page here: the failing jobs (the checks page) when the URL has one, else the commit.
+        const href =
+          trunk != null ? (checksPageHref(trunk.githubUrl) ?? safeExternalUrl(trunk.githubUrl) ?? null) : null;
+        return href != null
+          ? () => {
+              window.open(href, '_blank', 'noopener,noreferrer');
+            }
+          : landing != null
+            ? () => board.openMeta(landing, card.id)
+            : undefined;
+      }
+      default:
+        return undefined;
+    }
+  })();
+  return run != null ? { label, run } : undefined;
 }
 
 /** "·" between action-line and fact-line items. */
@@ -2631,7 +2691,6 @@ function PendingCard({
   const heading = pendingHeading(card, ctx);
   const line = pendingActionLine(card, ctx);
   const plan = pendingFactPlan(card);
-  const event = pendingCardEvent(card);
   const ageText = heading.at != null ? compactAge(heading.at, ctx.now) : null;
   const age = ageText != null ? (heading.atPrefix != null ? `${heading.atPrefix} ${ageText}` : ageText) : null;
 
@@ -2654,33 +2713,8 @@ function PendingCard({
 
   // ── what a whole-card click opens: the EVENT ──
   const externalHref = trunk != null ? safeExternalUrl(trunk.githubUrl) : null;
-  const activate = ((): (() => void) | undefined => {
-    switch (event.kind) {
-      case 'thread':
-        return prRef != null ? () => board.openThreadOn(prRef, event.threadId) : undefined;
-      case 'comment':
-        return prRef != null ? () => board.openComment(prRef, event.comment) : undefined;
-      case 'pr':
-        return prRef != null ? () => board.openPr(prRef, event.tab) : undefined;
-      case 'claude_review':
-        return prRef != null ? () => board.openReview(prRef) : undefined;
-      case 'landing_pr':
-        return landing != null ? () => board.openMeta(landing, card.id) : undefined;
-      case 'external': {
-        // The failing jobs (the checks page) when the URL has one, else the commit itself.
-        const href = (trunk != null ? checksPageHref(trunk.githubUrl) : null) ?? externalHref;
-        return href != null
-          ? () => {
-              window.open(href, '_blank', 'noopener,noreferrer');
-            }
-          : landing != null
-            ? () => board.openMeta(landing, card.id)
-            : undefined;
-      }
-      default:
-        return undefined;
-    }
-  })();
+  const activation = pendingActivation(card, board);
+  const activate = activation?.run;
 
   // ── the event's own content, and the action row ──
   const content: ReactNode[] = [];
@@ -2992,17 +3026,6 @@ function PendingCard({
         ? card.threadId
         : null;
 
-  // Enter, with the panel open, does what a click on the old card did: open the event.
-  useEffect(() => {
-    board.activateRef.current = activate ?? null;
-  });
-  useEffect(
-    () => () => {
-      board.activateRef.current = null;
-    },
-    [board.activateRef],
-  );
-
   const tone = pendingRowTone(card);
   const dismissable = dismissTargetOf(card) != null;
   const canApprove = board.approveOk(card);
@@ -3029,12 +3052,33 @@ function PendingCard({
       subtitle={subtitleRef}
       testId="pending-panel"
       headerActions={
-        activate != null ? (
-          <IconButton label="Open (Enter)" icon={<ArrowIcon dir="right" size={14} />} size="sm" onClick={activate} />
+        activation != null ? (
+          // Pointer: the arrow up here. Touch (a double-tap is unreliable): the labelled button that
+          // leads the footer below — the same action.
+          <IconButton
+            label={activation.label}
+            title={`${activation.label} (⇧↵)`}
+            aria-keyshortcuts="Shift+Enter"
+            icon={<ArrowIcon dir="right" size={14} />}
+            size="sm"
+            onClick={activation.run}
+            className="touch:hidden"
+          />
         ) : undefined
       }
       footer={
         <>
+          {activation != null && (
+            <Button
+              variant={buttons.length === 0 ? 'primary' : 'secondary'}
+              icon={<ArrowIcon dir="right" size={12} />}
+              onClick={activation.run}
+              className="hidden touch:inline-flex"
+              data-testid="pending-go"
+            >
+              {activation.label}
+            </Button>
+          )}
           {buttons}
           {canApprove && (
             <Button
@@ -3536,7 +3580,7 @@ export function AttentionCards({
     window.open(href, '_blank', 'noopener,noreferrer');
   };
 
-  const activateRef = useRef<(() => void) | null>(null);
+  const openTrunkStatus = useFilters((s) => s.openTrunkStatus);
   const board: PendingBoardApi = {
     usersById,
     ctx,
@@ -3545,6 +3589,8 @@ export function AttentionCards({
     openThreadOn,
     openComment,
     openReview: (pr) => openClaudeReview(metaFor(pr, usersById), { fromActivity: true }),
+    openCi: (meta, returnItemId) =>
+      claudeOn ? openClaudeReview(meta, { fromActivity: true }) : open(meta, returnItemId),
     openFix: (meta) => openAiFix(meta),
     claudeOn,
     claudeStates,
@@ -3553,14 +3599,26 @@ export function AttentionCards({
     approve,
     approveOk,
     rowError: (id) => errors[id] ?? null,
-    activateRef,
+    openTrunk: openTrunkStatus,
   };
 
   // ── keys ──
-  const onOpen = (i: number): void => {
+  // GO: straight to the item (`pendingActivation`) — a double-click, Shift+Enter, Enter on an open
+  // panel. A card with nowhere to go (a reviewer's load) opens its panel instead.
+  const onGo = (i: number): void => {
+    const c = flat[i];
+    if (c == null) return;
     select(i);
-    if (panelOpen && i === selIndex && activateRef.current != null) activateRef.current();
+    const go = pendingActivation(c, board);
+    if (go != null) go.run();
     else setPanelOpen(true);
+  };
+  const onOpen = (i: number): void => {
+    if (panelOpen && i === selIndex) onGo(i);
+    else {
+      select(i);
+      setPanelOpen(true);
+    }
   };
   const withSelected =
     (fn: (c: InsightCard) => void) =>
@@ -3574,6 +3632,7 @@ export function AttentionCards({
     selected: selIndex,
     onSelect: select,
     onOpen,
+    onGo,
     actions: {
       a: withSelected(approve),
       m: withSelected(merge),
@@ -3584,8 +3643,8 @@ export function AttentionCards({
   });
   // Enter also opens while focus rests on the page itself (nothing focused): the inbox's main
   // gesture must not depend on clicking into the list first. A focused control keeps its Enter.
-  const onOpenRef = useRef(onOpen);
-  onOpenRef.current = onOpen;
+  const onOpenRef = useRef({ onOpen, onGo });
+  onOpenRef.current = { onOpen, onGo };
   const selIndexRef = useRef(selIndex);
   selIndexRef.current = selIndex;
   useEffect(() => {
@@ -3596,7 +3655,8 @@ export function AttentionCards({
       const i = selIndexRef.current;
       if (i == null) return;
       e.preventDefault();
-      onOpenRef.current(i);
+      if (e.shiftKey) onOpenRef.current.onGo(i);
+      else onOpenRef.current.onOpen(i);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -3614,8 +3674,9 @@ export function AttentionCards({
     !selectedGate.queued &&
     selectedRowCard != null &&
     !armedPrIds.has(selectedRowCard.prId);
-  const live = useRef({ approve, merge, dismiss, openOnGitHub, onOpen, selIndex });
-  live.current = { approve, merge, dismiss, openOnGitHub, onOpen, selIndex };
+  const selectedGoLabel = selected != null ? pendingDestinationLabel(pendingCardEvent(selected)) : null;
+  const live = useRef({ approve, merge, dismiss, openOnGitHub, onOpen, onGo, selIndex });
+  live.current = { approve, merge, dismiss, openOnGitHub, onOpen, onGo, selIndex };
   const commandsKey = [
     selected?.id ?? '',
     panelOpen,
@@ -3623,18 +3684,32 @@ export function AttentionCards({
     undoOffer?.id ?? '',
     viewerId ?? '',
     selectedSummary?.title ?? '',
+    selectedGoLabel ?? '',
   ].join('|');
   const commands = useMemo<Command[] | null>(() => {
     const out: Command[] = [];
     if (selected != null && selectedSummary != null) {
       const name = selectedSummary.ref ?? selectedSummary.title;
-      out.push({
-        id: 'pending:open-selected',
-        group: 'Actions',
-        title: panelOpen ? `Open ${name}` : `Show details: ${selectedSummary.title}`,
-        shortcut: '↵',
-        run: () => live.current.onOpen(live.current.selIndex ?? 0),
-      });
+      if (!panelOpen) {
+        out.push({
+          id: 'pending:open-selected',
+          group: 'Actions',
+          title: `Show details: ${selectedSummary.title}`,
+          shortcut: '↵',
+          run: () => live.current.onOpen(live.current.selIndex ?? 0),
+        });
+      }
+      // Straight to the item — what a double-click on the row does (and Enter with the panel open).
+      if (selectedGoLabel != null) {
+        out.push({
+          id: 'pending:go-selected',
+          group: 'Actions',
+          title: `${selectedGoLabel}: ${name}`,
+          shortcut: '⇧↵',
+          keywords: ['go to', 'open', 'jump'],
+          run: () => live.current.onGo(live.current.selIndex ?? 0),
+        });
+      }
       if (approveOffered(selected, viewerId)) {
         out.push({
           id: 'pending:approve',
@@ -3711,6 +3786,7 @@ export function AttentionCards({
         selected={i === selIndex}
         onSelect={select}
         onOpen={() => setPanelOpen(true)}
+        onGo={onGo}
         leaving={isLeaving(card)}
         flash={flashId === card.id}
         className="gap-2.5"

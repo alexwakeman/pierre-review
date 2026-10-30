@@ -924,22 +924,53 @@ export function factDropsNoReviews(card: InsightCard): boolean {
   return card.kind === 'reviewer_routing';
 }
 
-/** What a WHOLE-CARD click opens: the event, never just "the PR". */
+/** Where a card GOES — the panel's Open, Enter on an open panel, Shift+Enter and a double-click
+ *  on the row all land here: the event, never just "the PR".
+ *
+ *  • `thread` — Changes, the thread shown in the code (`selectThread` → PrDetail `showThread`).
+ *  • `pr` — the PR's own tab on that inner tab (a review asked of you opens Changes).
+ *  • `trunk` — a red default branch: Open pull requests, the Default branches strip open on that
+ *    repo's row (`openTrunkStatus`).
+ *  • `external` — no in-app page (a red head no local PR names): its GitHub checks page.
+ *  • `none` — nothing to go to (a reviewer's load lists several PRs): the panel is the destination. */
 export type PendingCardEvent =
   | { kind: 'thread'; threadId: number }
   // A mention / comment-after-yours card that knows WHICH comment: land on it — a comment on a
   // line of code in Changes (its thread opened), a conversation comment on the Comments tab.
   | { kind: 'comment'; comment: MyTurnCommentRef }
-  | { kind: 'pr'; tab: 'overview' | 'activity' | 'comments' }
+  | { kind: 'pr'; tab: 'overview' | 'activity' | 'comments' | 'changes' }
   | { kind: 'claude_review' }
+  | { kind: 'trunk'; repoId: number }
   | { kind: 'external' }
   | { kind: 'landing_pr' }
   | { kind: 'none' };
 
+/** The words for a card's destination — the panel's Open button and the ⌘K "go" command. */
+export function pendingDestinationLabel(event: PendingCardEvent): string | null {
+  switch (event.kind) {
+    case 'thread':
+      return 'Open thread';
+    case 'comment':
+      return 'Open comment';
+    case 'pr':
+      return event.tab === 'changes' ? 'Open changes' : 'Open PR';
+    case 'claude_review':
+      return 'Open review';
+    case 'trunk':
+      return 'Open default branch';
+    case 'landing_pr':
+      return 'Open CI check';
+    case 'external':
+      return 'Open on GitHub';
+    case 'none':
+      return null;
+  }
+}
+
 export function pendingCardEvent(card: InsightCard): PendingCardEvent {
   switch (card.kind) {
     case 'my_turn':
-      if (card.reason === 'trunk_red') return { kind: 'external' };
+      if (card.reason === 'trunk_red') return { kind: 'trunk', repoId: card.repoId };
       if (
         card.threadId != null &&
         (card.reason === 'thread' || card.reason === 'thread_reply' || card.reason === 'own_thread')
@@ -947,6 +978,8 @@ export function pendingCardEvent(card: InsightCard): PendingCardEvent {
         return { kind: 'thread', threadId: card.threadId };
       }
       if (card.reason === 'claude_review') return { kind: 'claude_review' };
+      // A review asked of you: the diff is the work.
+      if (card.reason === 'review_request') return { kind: 'pr', tab: 'changes' };
       if ((card.reason === 'mention' || card.reason === 'comment_reply') && card.comment != null) {
         return { kind: 'comment', comment: card.comment };
       }
@@ -963,7 +996,7 @@ export function pendingCardEvent(card: InsightCard): PendingCardEvent {
       }
       return { kind: 'pr', tab: 'overview' };
     case 'ci_failing':
-      if (card.arm === 'trunk') return { kind: 'external' };
+      if (card.arm === 'trunk') return { kind: 'trunk', repoId: card.repoId };
       return card.prId != null ? { kind: 'landing_pr' } : { kind: 'external' };
     case 'untouched_thread':
       return { kind: 'thread', threadId: card.threadId };

@@ -34,6 +34,8 @@ describe('list keyboard model', () => {
     expect(resolveListKey('Enter', out)).toBeNull();
     expect(resolveListKey('ArrowDown', inside)).toEqual({ kind: 'move', move: 'next' });
     expect(resolveListKey('Enter', inside)).toEqual({ kind: 'open' });
+    // Shift+Enter: straight to the item (Pending's double-click), past the panel.
+    expect(resolveListKey('Enter', { ...inside, shift: true })).toEqual({ kind: 'go' });
     expect(resolveListKey('End', inside)).toEqual({ kind: 'move', move: 'last' });
     expect(resolveListKey('G', out)).toEqual({ kind: 'move', move: 'last' });
   });

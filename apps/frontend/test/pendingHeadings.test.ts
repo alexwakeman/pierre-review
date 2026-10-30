@@ -472,7 +472,7 @@ describe('a red default branch is a repository, not a PR', () => {
     expect(line.where[0]).toEqual({ text: 'you maintain this repo' });
     expect(line.where[1]).toMatchObject({ text: 'at f48aec5', mono: true, href: t.githubUrl });
     expect(JSON.stringify({ h: pendingHeading(t, ctx()), line })).not.toMatch(/\bPR\b/);
-    expect(pendingCardEvent(t)).toEqual({ kind: 'external' });
+    expect(pendingCardEvent(t)).toEqual({ kind: 'trunk', repoId: 6 });
   });
 
   it('the ci_failing trunk arm reads the branch from its sentence', () => {
@@ -724,7 +724,7 @@ describe('what a whole-card click opens — the event', () => {
     expect(pendingCardEvent(myTurn({ reason: 'thread_reply', threadId: 9 }))).toEqual({ kind: 'thread', threadId: 9 });
     expect(pendingCardEvent(myTurn({ reason: 'pushed_since' }))).toEqual({ kind: 'pr', tab: 'activity' });
     expect(pendingCardEvent(myTurn({ reason: 'claude_review' }))).toEqual({ kind: 'claude_review' });
-    expect(pendingCardEvent(myTurn({ reason: 'review_request' }))).toEqual({ kind: 'pr', tab: 'overview' });
+    expect(pendingCardEvent(myTurn({ reason: 'review_request' }))).toEqual({ kind: 'pr', tab: 'changes' });
     // "3 new comments and 1 new commit on your PR" — the new things live on Activity.
     expect(pendingCardEvent(myTurn({ reason: 'your_pr' }))).toEqual({ kind: 'pr', tab: 'activity' });
   });

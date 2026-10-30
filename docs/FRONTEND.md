@@ -5049,3 +5049,15 @@ removed from the card; it moved one click (or Enter) away.
   buys the live merge options only when the deferred merge fires.
 - ⌘K: the selected row's actions (`pending-row`), the page's controls (`pending-page`), and every
   Pending item across tabs (provider `pending-items`, which switches tab, selects and opens it).
+- **GO TO THE ITEM** — a double-click on a row (`Row onGo`), Shift+Enter, Enter on an open panel,
+  the panel header's arrow, ⌘K "Open …" (`⇧↵`) and, on touch (a double-tap is unreliable), the
+  labelled "Open …" button that leads the panel footer (`data-testid="pending-go"`, `touch:` only)
+  are ONE action: `pendingActivation` (AttentionCards) over ONE mapping, `pendingCardEvent`
+  (`lib/pendingHeadings.ts`), named by `pendingDestinationLabel`. A review asked of you → Changes;
+  a thread → `selectThread` → `showThread`; an AI review → the AI Review tab; mention / reply → the
+  comment; new commits → Activity; red CI on a PR, conflicts, ready-to-land, waiting-on-review and
+  dependency cards → Overview; a red default branch → Open PRs with the Default branches strip open
+  on that repo's row (`openTrunkStatus` → the ONE-SHOT `trunkFocusRepoId`, consumed by the cross-repo
+  `BranchStatusPanel`); a red head no local PR names → its GitHub checks page (`safeExternalUrl`,
+  new tab); a reviewer's load has nowhere to go → the panel. Pinned in
+  `test/pendingDestination.test.ts`. It reads only the card; nothing fetches before the reader acts.

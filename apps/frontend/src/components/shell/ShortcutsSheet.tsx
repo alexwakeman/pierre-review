@@ -32,6 +32,7 @@ function sections(): ReadonlyArray<readonly [string, readonly Line[]]> {
         [['j'], 'Next row'],
         [['k'], 'Previous row'],
         [['↵'], 'Open the selected row'],
+        [['⇧↵'], 'Go straight to the item (Pending; also a double-click)'],
         [['a'], 'Approve, where approving is allowed'],
         [['m'], 'Merge, when it can land'],
         [['e'], 'Done'],

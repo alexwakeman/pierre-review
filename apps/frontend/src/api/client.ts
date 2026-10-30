@@ -1659,8 +1659,14 @@ export const api = {
   aiFixStatus: (prId: number) =>
     get<AiFixStatusResponse>(`/api/pro/prs/${prId}/ai-fix/status`),
   // The fix picker: every item a review-seeded fix would include, with stable keys + defaults.
-  aiFixPreview: (prId: number, sourceReviewId: number) =>
-    get<AiFixPickerPreview>(`/api/pro/prs/${prId}/ai-fix/preview?sourceReviewId=${sourceReviewId}`),
+  // null ⇒ no review named: the latest succeeded review's picker, else the CI-only preview (409
+  // ReviewUnavailable when there is neither).
+  aiFixPreview: (prId: number, sourceReviewId: number | null) =>
+    get<AiFixPickerPreview>(
+      sourceReviewId == null
+        ? `/api/pro/prs/${prId}/ai-fix/preview`
+        : `/api/pro/prs/${prId}/ai-fix/preview?sourceReviewId=${sourceReviewId}`,
+    ),
   startAiFix: (prId: number, body: GenerateFixBody) =>
     fetch(`/api/pro/prs/${prId}/ai-fix`, jsonBody('POST', body)).then((r) =>
       handle<{ fixId: number; status: string }>(r),

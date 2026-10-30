@@ -39,7 +39,7 @@ import { fixSourceReviewId, olderSourceNote } from '../lib/aiFixSource.js';
 import { ApiError } from '../api/client.js';
 import { FixReport, fixSourceLine } from './AiFix/FixReport.js';
 import { FixPicker } from './AiFix/FixPicker.js';
-import { budgetCutKeys, pickedKeys, type PickerOverrides } from './AiFix/fixPickerModel.js';
+import { budgetCutKeys, onlySectionOverrides, pickedKeys, type PickerOverrides } from './AiFix/fixPickerModel.js';
 import { Markdown } from './Markdown.js';
 import { DiffWrapToggle, FileDiffView, type DiffFile } from './diff/FileDiffView.js';
 import { parseGitPatch } from '../lib/diff.js';
@@ -89,9 +89,12 @@ export function AiFixTab({ pr }: { pr: PrDetail }): JSX.Element {
   // The review picked in the Claude Review tab ("Generate fix from this review"), delivered via the
   // store and consumed into local state on arrival. Absent ⇒ the PR's latest review.
   const [handoffReviewId, setHandoffReviewId] = useState<number | null>(null);
+  // "Fix with AI" from the CI check section: tick only the CI failures once the picker loads.
+  const [onlySection, setOnlySection] = useState<'ci_failures' | null>(null);
   useEffect(() => {
     if (aiFixTabFocus && aiFixTabFocus.prId === pr.id) {
       if (aiFixTabFocus.reviewId != null) setHandoffReviewId(aiFixTabFocus.reviewId);
+      if (aiFixTabFocus.only != null) setOnlySection(aiFixTabFocus.only);
       consumeAiFixTabFocus();
     }
   }, [aiFixTabFocus, pr.id, consumeAiFixTabFocus]);
@@ -100,7 +103,12 @@ export function AiFixTab({ pr }: { pr: PrDetail }): JSX.Element {
 
   return (
     <div className="pb-6">
-      <FixerSection pr={pr} handoffReviewId={handoffReviewId} />
+      <FixerSection
+        pr={pr}
+        handoffReviewId={handoffReviewId}
+        onlySection={onlySection}
+        onOnlySectionApplied={() => setOnlySection(null)}
+      />
     </div>
   );
 }
@@ -110,9 +118,13 @@ export function AiFixTab({ pr }: { pr: PrDetail }): JSX.Element {
 function FixerSection({
   pr,
   handoffReviewId,
+  onlySection,
+  onOnlySectionApplied,
 }: {
   pr: PrDetail;
   handoffReviewId: number | null;
+  onlySection: 'ci_failures' | null;
+  onOnlySectionApplied: () => void;
 }): JSX.Element {
   const { data, isLoading } = useAiFix(pr.id, true);
   // The review the fix is built from: the one handed over from the Claude Review tab, else the
@@ -170,7 +182,11 @@ function FixerSection({
 
   // The picker: the server's items for this review, the reader's ticks on top. A new review (or a
   // hand-over) starts from the defaults again.
-  const preview = useAiFixPreview(pr.id, reviewId, data?.enabled !== false);
+  // With NO succeeded AI review, the same read without an id answers THE CI-ONLY preview (the CI
+  // check's fixable items at the current head) — or a 409, which simply leaves "Open AI Review".
+  const preview = useAiFixPreview(pr.id, reviewId, data?.enabled !== false && (reviewId != null || !reviewLoading));
+  const ciOnly = reviewId == null && preview.data != null && preview.data.sourceReviewId == null && preview.data.items.length > 0;
+  const fixSource = reviewId != null || ciOnly;
   // The source review in full, so the picker can draw each item with the Claude Review tab's own
   // card: the latest is already loaded; an older hand-over is one DB-only read (the history
   // selector's query).
@@ -180,6 +196,14 @@ function FixerSection({
   useEffect(() => setOverrides({}), [reviewId]);
   // With a finished fix on screen the picker folds away behind "New fix"; it is open otherwise.
   const [pickerOpen, setPickerOpen] = useState(false);
+  // Declared AFTER the reset above, so a hand-over that also changes the review keeps its ticks.
+  // The reader asked for a fix, so the picker opens even over a finished one.
+  useEffect(() => {
+    if (onlySection == null || !preview.data) return;
+    setOverrides(onlySectionOverrides(preview.data, onlySection));
+    setPickerOpen(true);
+    onOnlySectionApplied();
+  }, [onlySection, preview.data, onOnlySectionApplied]);
   const showPicker = !planOpen && (pickerOpen || !fix || fix.status !== 'succeeded');
 
   // "Resolve with Claude", offered beside a review fix ONLY when the branch conflicts (the
@@ -192,13 +216,14 @@ function FixerSection({
   const cutCount = preview.data ? budgetCutKeys(preview.data, overrides).size : 0;
 
   const startFromReview = (): void => {
-    if (reviewId == null || !preview.data || picked.length === 0) return;
-    // The run goes to the provider the menu picked (the server validates the pair).
+    if (!fixSource || !preview.data || picked.length === 0) return;
+    // The run goes to the provider the menu picked (the server validates the pair). No review id ⇒
+    // the CI-only seed.
     const body = {
       model: modelPick.chosen.model,
       provider: modelPick.chosen.provider,
       seed: 'review' as const,
-      sourceReviewId: reviewId,
+      ...(reviewId != null ? { sourceReviewId: reviewId } : {}),
       include: picked,
     };
     if (planFirst) {
@@ -240,6 +265,10 @@ function FixerSection({
               failures and ticket gaps are ticked; style bot comments are not.
             </p>
             <p>
+              With no AI review, a fix can start from a finished CI check: it works on the failures
+              the check says this PR can fix.
+            </p>
+            <p>
               Tick Plan first to read {pickedName}'s plan, steer it and approve it before anything changes.
             </p>
             <p>{pickedName} reports what it changed in each file and what it left alone, and why.</p>
@@ -260,7 +289,7 @@ function FixerSection({
           </p>
         ) : (
           <>
-            {!isRunning && !planOpen && reviewId == null && !reviewLoading && (
+            {!isRunning && !planOpen && !fixSource && !reviewLoading && !preview.isLoading && (
               <div className="flex flex-wrap items-center gap-2">
                 <p className="text-meta text-ui-mute">
                   {latest?.status === 'running' || latest?.status === 'queued'
@@ -277,21 +306,24 @@ function FixerSection({
               </div>
             )}
 
-            {!isRunning && !planOpen && reviewId != null && !showPicker && (
+            {!isRunning && !planOpen && fixSource && !showPicker && (
               <button type="button" className={BTN_SECONDARY} onClick={() => setPickerOpen(true)}>
                 New fix
               </button>
             )}
 
-            {!isRunning && reviewId != null && showPicker && (
+            {!isRunning && fixSource && showPicker && (
               <div>
                 {olderNote && (
                   <p className="mb-2 text-meta text-ui-mute">{olderNote}</p>
                 )}
+                {ciOnly && (
+                  <p className="mb-2 text-meta text-ui-mute">No AI review yet. This fix works on the CI check’s failures.</p>
+                )}
                 {preview.isLoading && (
                   <p className="text-meta text-ui-mute">Loading…</p>
                 )}
-                {preview.isError && (
+                {preview.isError && reviewId != null && (
                   <p className="text-meta text-ui-danger">{errText(preview.error)}</p>
                 )}
                 {preview.data && (

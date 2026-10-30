@@ -5,7 +5,7 @@
 //   ./apps/backend/node_modules/.bin/vitest run --root apps/frontend fixPicker
 import { describe, expect, it } from 'vitest';
 import type { AiFixPickerItem, AiFixPickerPreview } from '@pierre-review/shared';
-import { budgetCutKeys, pickedKeys } from '../src/components/AiFix/fixPickerModel.js';
+import { budgetCutKeys, onlySectionOverrides, pickedKeys } from '../src/components/AiFix/fixPickerModel.js';
 
 const item = (key: string, chars: number, defaultIncluded = true): AiFixPickerItem => ({
   key,
@@ -36,5 +36,24 @@ describe('the fix picker folds', () => {
     expect([...budgetCutKeys(preview, { 'finding:2': false })]).toEqual([]);
     // The first ticked item always fits, however big.
     expect([...budgetCutKeys({ ...preview, budgetChars: 10 }, { 'finding:2': false, 'finding:3': false })]).toEqual([]);
+  });
+});
+
+describe('"Fix with AI" from the CI check — only the CI failures ticked', () => {
+  const withCi: AiFixPickerPreview = {
+    ...preview,
+    items: [{ ...item('ci:4', 300), section: 'ci_failures' }, ...preview.items],
+  };
+
+  it('ticks every CI item and unticks everything else, defaults included', () => {
+    const o = onlySectionOverrides(withCi, 'ci_failures');
+    expect(pickedKeys(withCi, o)).toEqual(['ci:4']);
+    // The reader can still tick more on top.
+    expect(pickedKeys(withCi, { ...o, 'finding:2': true })).toEqual(['ci:4', 'finding:2']);
+  });
+
+  it('the CI-only preview (no review) sends its CI items', () => {
+    const ciOnly: AiFixPickerPreview = { ...withCi, sourceReviewId: null, items: [withCi.items[0]!] };
+    expect(pickedKeys(ciOnly, onlySectionOverrides(ciOnly, 'ci_failures'))).toEqual(['ci:4']);
   });
 });

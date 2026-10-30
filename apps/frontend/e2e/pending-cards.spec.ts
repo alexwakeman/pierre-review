@@ -152,6 +152,32 @@ test.describe('Pending: one line per item, the event-first card in the panel', (
     await expect(page.getByTestId('undo-toast')).toContainText('until something new happens on it');
   });
 
+  test('a double-click goes straight to the thread: the PR’s own tab, on Changes', async ({ page }) => {
+    await openMyTurn(page);
+    await expect(row(page)).toBeVisible();
+    await row(page).dblclick();
+    await expect(page).toHaveURL(/view=pr-detail(:|%3A)101/);
+    await expect(page).toHaveURL(/thread=5001/);
+  });
+
+  test('Shift+Enter goes straight to the item; Enter on an open panel does the same', async ({ page }) => {
+    await openMyTurn(page);
+    await expect(row(page)).toBeVisible();
+    await page.getByRole('listbox', { name: 'Pending items' }).focus();
+    await page.keyboard.press('Shift+Enter');
+    await expect(page).toHaveURL(/view=pr-detail(:|%3A)101/);
+    await page.goBack();
+    await expect(page.getByTestId('attention-view')).toBeVisible();
+    await page.getByRole('listbox', { name: 'Pending items' }).focus();
+    await page.keyboard.press('Enter');
+    await expect(panel(page)).toBeVisible();
+    // The panel names where it goes (the arrow in its header).
+    await expect(panel(page).getByRole('button', { name: 'Open thread' })).toBeVisible();
+    await page.getByRole('listbox', { name: 'Pending items' }).focus();
+    await page.keyboard.press('Enter');
+    await expect(page).toHaveURL(/view=pr-detail(:|%3A)101/);
+  });
+
   test('the conversation waits for Details — nothing is fetched to paint, select or open', async ({ page }) => {
     const { threadHits } = await openMyTurn(page);
     await expect(row(page)).toBeVisible();
