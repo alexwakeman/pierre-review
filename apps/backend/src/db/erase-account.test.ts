@@ -82,6 +82,8 @@ const SEEDED_TABLES = [
   'trackerTickets',
   'jiraAcFields',
   'workspaceTrackers',
+  'storyBuilds',
+  'storyBuildRepos',
 ];
 
 /**
@@ -409,6 +411,25 @@ async function seedAccount(accountId: number, login: string): Promise<void> {
     .insert(s.workspaceTrackers)
     .values({ accountId, workspaceId: defaultWorkspaceId, provider: 'jira', baseUrl: 'https://x.atlassian.net', authToken: 'plain:secret' })
     .execute();
+  // "IMPLEMENT STORY" (migration 0149): a session with one repository row holding a patch — the reader's
+  // plan, chat and built work. The prompt seed is written so the export can be shown to WITHHOLD it.
+  const [build] = (await db
+    .insert(s.storyBuilds)
+    .values({
+      accountId,
+      workspaceId: defaultWorkspaceId,
+      ident: `jira:x.atlassian.net:T-${accountId}`,
+      ticketKey: `T-${accountId}`,
+      status: 'ready',
+      seedJson: { version: 1, secret: 'seed-text-never-exported' },
+      transcriptJson: [{ role: 'reader', text: 'keep it small', revision: 1, at: now.toISOString() }],
+    })
+    .returning()
+    .execute()) as any[];
+  await db
+    .insert(s.storyBuildRepos)
+    .values({ accountId, buildId: build.id, repoId: repo.id, ref: 'R1', status: 'ready', baseRef: 'main', baseSha: 'abc', patch: 'diff --git a/x b/x' })
+    .execute();
 }
 
 beforeAll(async () => {
@@ -552,6 +573,15 @@ describe('exportAccountData', () => {
     expect(serialized).not.toContain('accessTokenEnc');
     // It reports only that a token EXISTS.
     expect(out.account.hasStoredGithubToken).toBe(true);
+  });
+
+  // "Implement story": the session and its repository (with the patch, the reader's own work) are
+  // exported; the frozen prompt seed is not.
+  it('includes story builds and their repositories, never the prompt seed', async () => {
+    const out = await exportAccountData(DOOMED);
+    expect(out.storyBuilds).toEqual([expect.objectContaining({ ticketKey: `T-${DOOMED}`, status: 'ready' })]);
+    expect(out.storyBuildRepos).toEqual([expect.objectContaining({ ref: 'R1', patch: 'diff --git a/x b/x', patchTruncated: false })]);
+    expect(JSON.stringify(out)).not.toContain('seed-text-never-exported');
   });
 
   it('returns null for an account that does not exist', async () => {

@@ -9657,6 +9657,13 @@ export async function deleteRepo(id: number, accountId: number): Promise<boolean
         and(eq(schema.myTurnDismissals.accountId, accountId), eq(schema.myTurnDismissals.repoId, id)),
       )
       .execute();
+    // "Implement story" (migration 0149): this repository's rows in build sessions. Keyed on the REPO
+    // through a composite FK (cascade), deleted explicitly for the same dialect reason as above. The
+    // SESSION stays (it belongs to its workspace and may hold other repositories).
+    await tx
+      .delete(schema.storyBuildRepos)
+      .where(and(eq(schema.storyBuildRepos.accountId, accountId), eq(schema.storyBuildRepos.repoId, id)))
+      .execute();
     await tx.delete(syncState).where(eq(syncState.repoId, id)).execute();
     await tx.delete(repos).where(eq(repos.id, id)).execute();
   });

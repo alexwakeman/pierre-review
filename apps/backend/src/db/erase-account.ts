@@ -234,6 +234,12 @@ export async function eraseAccountData(accountId: number): Promise<EraseResult> 
     await tx.delete(schema.referenceDocs).where(eq(schema.referenceDocs.accountId, accountId)).execute();
     // Story docs checks (migration 0121 / pg 0108): cascade from workspaces too, and are explicit anyway.
     await tx.delete(schema.storyDocsAlignments).where(eq(schema.storyDocsAlignments.accountId, accountId)).execute();
+    // "Implement story" sessions (migration 0149): the reader's plans, chat, docs decisions and the
+    // patches built from them. Both cascade (workspaces / repos / the session), and are explicit anyway —
+    // repositories first, then their sessions (composite FK). The worktrees on disk are ledgered and
+    // collected by the worktree sweep.
+    await tx.delete(schema.storyBuildRepos).where(eq(schema.storyBuildRepos.accountId, accountId)).execute();
+    await tx.delete(schema.storyBuilds).where(eq(schema.storyBuilds.accountId, accountId)).execute();
     // Workspace settings history (migration 0096 / pg 0083) — cascades from workspaces too, and is
     // explicit anyway.
     await tx
@@ -428,6 +434,9 @@ export function accountScopedTables(): {
     },
     // Story docs checks (migration 0121 / pg 0108), erased explicitly above.
     { name: 'storyDocsAlignments', col: schema.storyDocsAlignments.accountId, table: schema.storyDocsAlignments },
+    // "Implement story" (migration 0149), erased explicitly above.
+    { name: 'storyBuilds', col: schema.storyBuilds.accountId, table: schema.storyBuilds },
+    { name: 'storyBuildRepos', col: schema.storyBuildRepos.accountId, table: schema.storyBuildRepos },
     // Chronology's settings history (migration 0096 / pg 0083), erased explicitly above.
     {
       name: 'workspaceSettingEvents',

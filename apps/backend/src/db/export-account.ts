@@ -128,7 +128,22 @@ export interface AccountExport {
    * yes/no and one short reason per not-started ticket, per workspace.
    */
   sprintCodeJudgements: Record<string, unknown>[];
+  /**
+   * "Implement story" sessions (core `story_builds`, migration 0149): the ticket, the plan the reader
+   * steered, the chat they typed, the docs decisions they made, spend. The frozen prompt seed is NOT
+   * exported (it is the ticket's own text re-assembled, regenerable from the tracker).
+   */
+  storyBuilds: Record<string, unknown>[];
+  /**
+   * Each session's repositories (`story_build_repos`): base, branch, change report, tests, the push —
+   * and the PATCH, which is the reader's own work, cut at STORY_BUILD_EXPORT_PATCH_MAX characters
+   * (`patchTruncated` says so).
+   */
+  storyBuildRepos: Record<string, unknown>[];
 }
+
+/** A stored story-build patch is exported up to this many characters. */
+const STORY_BUILD_EXPORT_PATCH_MAX = 256 * 1024;
 
 /** Build the full export document for one account. Returns null if the account is gone. */
 export async function exportAccountData(accountId: number): Promise<AccountExport | null> {
@@ -316,6 +331,74 @@ export async function exportAccountData(accountId: number): Promise<AccountExpor
     .where(eq(schema.sprintCodeJudgements.accountId, accountId))
     .execute();
 
+  // "Implement story" — explicit columns (the frozen prompt seed and worktree paths stay out).
+  const storyBuildRows = await db
+    .select({
+      id: schema.storyBuilds.id,
+      workspaceId: schema.storyBuilds.workspaceId,
+      ident: schema.storyBuilds.ident,
+      ticketKey: schema.storyBuilds.ticketKey,
+      ticketTitle: schema.storyBuilds.ticketTitle,
+      status: schema.storyBuilds.status,
+      error: schema.storyBuilds.error,
+      provider: schema.storyBuilds.provider,
+      model: schema.storyBuilds.model,
+      effort: schema.storyBuilds.effort,
+      wantDiagram: schema.storyBuilds.wantDiagram,
+      wantDocs: schema.storyBuilds.wantDocs,
+      criteriaSource: schema.storyBuilds.criteriaSource,
+      criteria: schema.storyBuilds.criteriaJson,
+      coverage: schema.storyBuilds.coverageJson,
+      candidates: schema.storyBuilds.candidatesJson,
+      plan: schema.storyBuilds.planJson,
+      planRevision: schema.storyBuilds.planRevision,
+      transcript: schema.storyBuilds.transcriptJson,
+      design: schema.storyBuilds.designJson,
+      docsStatus: schema.storyBuilds.docsStatus,
+      docs: schema.storyBuilds.docsJson,
+      docsDecisions: schema.storyBuilds.docsDecisionsJson,
+      acceptedRevision: schema.storyBuilds.acceptedRevision,
+      acceptedDocs: schema.storyBuilds.acceptedDocsJson,
+      planCostUsd: schema.storyBuilds.planCostUsd,
+      docsCostUsd: schema.storyBuilds.docsCostUsd,
+      createdAt: schema.storyBuilds.createdAt,
+      completedAt: schema.storyBuilds.completedAt,
+    })
+    .from(schema.storyBuilds)
+    .where(eq(schema.storyBuilds.accountId, accountId))
+    .execute();
+  const storyBuildRepoRows = await db
+    .select({
+      buildId: schema.storyBuildRepos.buildId,
+      repoId: schema.storyBuildRepos.repoId,
+      ref: schema.storyBuildRepos.ref,
+      include: schema.storyBuildRepos.include,
+      status: schema.storyBuildRepos.status,
+      baseRef: schema.storyBuildRepos.baseRef,
+      baseSha: schema.storyBuildRepos.baseSha,
+      stackedOnPrId: schema.storyBuildRepos.stackedOnPrId,
+      branch: schema.storyBuildRepos.branch,
+      summary: schema.storyBuildRepos.summary,
+      commitMessage: schema.storyBuildRepos.commitMessage,
+      filesChanged: schema.storyBuildRepos.filesChangedJson,
+      changeReport: schema.storyBuildRepos.changeReportJson,
+      checks: schema.storyBuildRepos.checksJson,
+      patch: schema.storyBuildRepos.patch,
+      prTitle: schema.storyBuildRepos.prTitle,
+      prBody: schema.storyBuildRepos.prBody,
+      pushedBranch: schema.storyBuildRepos.pushedBranch,
+      pushedPrNumber: schema.storyBuildRepos.pushedPrNumber,
+      pushedPrUrl: schema.storyBuildRepos.pushedPrUrl,
+      pushedAt: schema.storyBuildRepos.pushedAt,
+      provider: schema.storyBuildRepos.provider,
+      model: schema.storyBuildRepos.model,
+      costUsd: schema.storyBuildRepos.costUsd,
+      completedAt: schema.storyBuildRepos.completedAt,
+    })
+    .from(schema.storyBuildRepos)
+    .where(eq(schema.storyBuildRepos.accountId, accountId))
+    .execute();
+
   const [
     reviewRows,
     threadRows,
@@ -459,5 +542,13 @@ export async function exportAccountData(accountId: number): Promise<AccountExpor
     repoRelations: repoRelationRows,
     sprintCodeJudgements: capped('sprintCodeJudgements', codeJudgementRows),
     referenceDocChatMessages: capped('referenceDocChatMessages', docChatRows),
+    storyBuilds: capped('storyBuilds', storyBuildRows),
+    storyBuildRepos: capped(
+      'storyBuildRepos',
+      storyBuildRepoRows.map((r) => {
+        const long = r.patch != null && r.patch.length > STORY_BUILD_EXPORT_PATCH_MAX;
+        return { ...r, patch: long ? r.patch!.slice(0, STORY_BUILD_EXPORT_PATCH_MAX) : r.patch, patchTruncated: long };
+      }),
+    ),
   };
 }
