@@ -22,6 +22,7 @@ export type SettingsTabId =
   | 'dependencies'
   | 'ai'
   | 'ai-review'
+  | 'docs'
   | 'reports'
   | 'integrations'
   | 'bots';
@@ -61,10 +62,19 @@ export const SETTINGS_TABS: readonly SettingsTabDef[] = [
   },
   {
     id: 'ai-review',
-    label: 'AI review', summary: 'Auto review, reference docs, Confluence, Notion, related repos',
+    label: 'AI review', summary: 'Auto review, related repos',
     aiOnly: true,
     global: [],
-    workspace: ['AutoReviewSection', 'ReferenceDocsSection', 'ConfluenceSection', 'NotionSection', 'RelatedReposSection'],
+    workspace: ['AutoReviewSection', 'RelatedReposSection'],
+  },
+  // EVERYTHING DOCS-RELATED, in one place: whether reviews read the library, and the wiki connections
+  // the add-documents wizard reads with (GitHub needs none — it uses the reader's gh sign-in).
+  {
+    id: 'docs',
+    label: 'Docs', summary: 'Docs in reviews, Confluence, Notion',
+    aiOnly: true,
+    global: [],
+    workspace: ['ReferenceDocsSection', 'ConfluenceSection', 'NotionSection'],
   },
   {
     id: 'reports',

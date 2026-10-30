@@ -4899,6 +4899,22 @@ conversation on screen, the narrow-width Read / Ask tab) per WORKSPACE in the mo
   `quoteFor` lookup gives a library result the checked `quote` it carries (the chat's citations).
 - Headings get `data-doc-anchor` from a rehype plugin run AFTER the sanitizer (which prefixes every
   `id`), using a copy of the server's `headingAnchor` + duplicate numbering, so `#anchor` lands.
+- **Adding is a WIZARD** (2026-10-30, `Activity/DocsAddWizard.tsx`, steps as data in
+  `lib/docsWizard.ts`, test/docsWizard.test.ts): the Library header's "+" (shown only when
+  `aiReadyFor(ai, 'docs_build')`; ⌘K "Add documents to Docs") opens a real dialog — the type (web page
+  or site, Confluence, Notion, GitHub repository), then per type the address + links to follow, the
+  CONNECTION (the settings' own `ConfluenceForm` / `NotionForm`, so a token typed here is the same
+  sealed write-only row) then the page, or the repository then the folder, then a REVIEW that states
+  the server's count. ⚠ The counts are click-gated MUTATIONS ("Next"), never a query on mount. ⚠
+  Start sits behind `AiRunGate kind="docs_build"`. The drop zone stays for files.
+- **The document list is an ACCORDION** (`store/docsView.ts` keeps at most ONE expanded id): a
+  document's title opens its contents AND expands it, closing any other. Refresh now, Rebuild, "Open
+  the source" and Remove live in the row's "…" `Menu` (Remove still confirms in the row); only
+  Cancel, a failure's "Try again" and the confirmation stay inline.
+- **A citation REVEALS its section** (`openDocsSection` and a deep link pass `reveal`): the pane
+  expands the cited document (whatever opens a file of a document expands it), and `DocTree` opens
+  every branch above the row (`docTreeTrail`), scrolls it into view (`scrollIntoView` of the LIST,
+  `block: 'nearest'`) and marks it for 1.8 s (`data-revealed`). Keyed on the open's `seq`, once.
 - The left tree is built from the structured `sections` (`docTreeRows`, the shape of CONTENTS.md),
   never by parsing CONTENTS.md; it is fetched only while that document is expanded, keyed on
   `builtAt` so a finished rebuild shows its new tree.
@@ -4939,8 +4955,8 @@ conversation on screen, the narrow-width Read / Ask tab) per WORKSPACE in the mo
   `pierre:docsChatWidth`, `pierre:docsLibraryCollapsed`), never the store or the URL. ⚠ Widths are
   applied inline ONLY while the columns sit side by side (`useMediaQuery`), so a stacked layout is never
   pinned to a dragged width.
-- **Settings → AI review → Reference docs** (`settings/ReferenceDocsSection.tsx`, beside Auto review,
-  only on `me.ai.enabled`): "Use reference docs in Claude Review", draft + Save, OFF by default.
+- **Settings → Docs → Reference docs** (`settings/ReferenceDocsSection.tsx`, beside Confluence and
+  Notion, only on `me.ai.enabled`): "Use reference docs in Claude Review", draft + Save, OFF by default.
 
 **Reference links from reviews.** `components/DocReferences.tsx` draws a run's checked `docReferences`
 (the Claude Review tab's "Reference docs" section after SonarCloud; a compact block in Story check — the

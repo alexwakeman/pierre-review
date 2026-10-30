@@ -2,6 +2,7 @@ import { and, eq } from 'drizzle-orm';
 import { NOTION_TOKEN_RE, type WikiCredentialsSettings, type WikiProviderId } from '@pierre-review/shared';
 import { decryptToken, encryptToken, sealingAvailable } from '../../auth/crypto.js';
 import { db, schema } from '../../db/client.js';
+import { getAccessToken } from '../../auth/account.js';
 import { openTrackerToken, storeTrackerToken, type HostSeal } from '../../tracker/secret.js';
 import type { WikiCredential, WikiPageRef } from './source.js';
 
@@ -13,6 +14,9 @@ import type { WikiCredential, WikiPageRef } from './source.js';
 //      page's host (Confluence Cloud and Jira Cloud share `<x>.atlassian.net` and one API token), and
 //      an email and a token are saved;
 //   3. else none — the import / refresh says "Add a Confluence API token in Settings".
+//
+// GITHUB has ONE rung and nothing saved: the reader's own `gh` sign-in (auth/account.ts
+// `getAccessToken`), the same token every sync uses. No `gh`, or signed out ⇒ none.
 //
 // NOTION has ONE rung: the workspace's own Notion row (provider 'notion', token only — api.notion.com is
 // the only host, so there is no site to match). The integration must be SHARED with the pages in Notion.
@@ -151,7 +155,7 @@ export async function writeWikiCredentials(
 }
 
 export type ResolvedCredential =
-  | { state: 'ok'; credential: WikiCredential; from: 'wiki' | 'jira' }
+  | { state: 'ok'; credential: WikiCredential; from: 'wiki' | 'jira' | 'gh' }
   | { state: 'none' }
   | { state: 'unreadable' };
 
@@ -163,6 +167,13 @@ export async function resolveWikiCredential(
   seal: HostSeal = hostSeal(),
 ): Promise<ResolvedCredential> {
   const host = ref.host.toLowerCase();
+  if (ref.provider === 'github') {
+    try {
+      return { state: 'ok', credential: { email: null, token: await getAccessToken(accountId) }, from: 'gh' };
+    } catch {
+      return { state: 'none' };
+    }
+  }
   const own = await readRow(accountId, workspaceId, ref.provider);
   // Notion: one token per workspace, for its one API host.
   if (ref.provider === 'notion') {

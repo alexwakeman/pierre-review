@@ -14,6 +14,11 @@ import type {
   AddReferenceDocWikiBody,
   WikiCredentialsCheckResponse,
   WikiProviderId,
+  WikiPreflightBody,
+  WikiPreflightResponse,
+  GithubDocsPreflightBody,
+  GithubDocsPreflightResponse,
+  AddReferenceDocGithubBody,
   WikiCredentialsSettings,
   WikiCredentialsUpdate,
   SetReferenceDocsSettingsBody,
@@ -1592,6 +1597,24 @@ export const api = {
       '/api/docs/wiki',
       jsonBody('POST', { workspaceId, url, ...(childDepth ? { childDepth } : {}) } satisfies AddReferenceDocWikiBody),
     ).then((r) => handle<ReferenceDocMutationResponse>(r)),
+  // THE ADD-DOCUMENTS WIZARD: a wiki page and EVERY page below it (or the whole wiki at its home),
+  // counted first by the preflight; a GitHub repository folder's text documents, its folders counted first.
+  addReferenceDocWikiTree: (workspaceId: number, url: string) =>
+    fetch('/api/docs/wiki', jsonBody('POST', { workspaceId, url, tree: true } satisfies AddReferenceDocWikiBody)).then((r) =>
+      handle<ReferenceDocMutationResponse>(r),
+    ),
+  preflightWikiDocs: (workspaceId: number, url: string) =>
+    fetch('/api/docs/wiki/preflight', jsonBody('POST', { workspaceId, url } satisfies WikiPreflightBody)).then((r) =>
+      handle<WikiPreflightResponse>(r),
+    ),
+  preflightGithubDocs: (workspaceId: number, repo: string) =>
+    fetch('/api/docs/github/preflight', jsonBody('POST', { workspaceId, repo } satisfies GithubDocsPreflightBody)).then((r) =>
+      handle<GithubDocsPreflightResponse>(r),
+    ),
+  addReferenceDocGithub: (workspaceId: number, repo: string, path: string) =>
+    fetch('/api/docs/github', jsonBody('POST', { workspaceId, repo, path } satisfies AddReferenceDocGithubBody)).then((r) =>
+      handle<ReferenceDocMutationResponse>(r),
+    ),
   // A wiki document: check the wiki now; only changed pages are read and only changed sections summarised.
   refreshReferenceDoc: (docId: number) =>
     fetch(`/api/docs/${docId}/refresh`, jsonBody('POST')).then((r) => handle<ReferenceDocMutationResponse>(r)),

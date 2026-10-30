@@ -86,7 +86,58 @@ const VIEWS = [
         if (PHONE) await page.getByRole('tab', { name: /^Library/ }).first().click();
         await page.getByText('1 figure described by AI').first().waitFor({ timeout: 10_000 });
       },
-      expect: ['Release handbook', 'Confluence · 3 pages', 'Refresh now', 'Can’t reach this page in Confluence since', 'Checkout design notes', 'Notion · 2 pages', '1 figure described by AI'],
+      expect: ['Release handbook', 'Confluence · 3 pages', 'Can’t reach this page in Confluence since', 'Checkout design notes', 'Notion · 2 pages', '1 figure described by AI', 'On-call runbooks', 'GitHub · 3 pages'],
+    },
+  ],
+  // A document's "…" menu holds Refresh now, Rebuild and Remove (docs/REFERENCE-DOCS.md § The SPA).
+  [
+    'docs:menu',
+    '?view=activity&activityRepo=docs',
+    null,
+    {
+      act: async (page) => {
+        await page.getByRole('button', { name: 'More actions for Release handbook' }).first().click();
+      },
+      expect: ['Refresh now', 'Rebuild', 'Remove…'],
+    },
+  ],
+  // THE ADD-DOCUMENTS WIZARD: a GitHub folder (its folders counted), and a whole Confluence space.
+  [
+    'docs:wizard-github',
+    '?view=activity&activityRepo=docs',
+    'docs-wizard',
+    {
+      act: async (page) => {
+        if (PHONE) await page.getByRole('tab', { name: /^Library/ }).first().click();
+        await page.getByRole('button', { name: 'Add documents' }).first().click();
+        const wizard = page.getByTestId('docs-add-wizard');
+        await wizard.getByText('GitHub repository', { exact: true }).first().click();
+        await wizard.getByRole('button', { name: 'Next' }).click();
+        await wizard.getByPlaceholder('owner/name').fill('acme/web');
+        await wizard.getByRole('button', { name: 'Next' }).click();
+        await wizard.getByText('docs/adr', { exact: true }).waitFor({ timeout: 10_000 });
+        await wizard.getByText('docs', { exact: true }).first().click();
+        await wizard.getByRole('button', { name: 'Next' }).click();
+      },
+      expect: ['This will add 11 documents from acme/web/docs.', 'Start'],
+    },
+  ],
+  [
+    'docs:wizard-confluence',
+    '?view=activity&activityRepo=docs',
+    null,
+    {
+      act: async (page) => {
+        if (PHONE) await page.getByRole('tab', { name: /^Library/ }).first().click();
+        await page.getByRole('button', { name: 'Add documents' }).first().click();
+        const wizard = page.getByTestId('docs-add-wizard');
+        await wizard.getByText('Confluence', { exact: true }).first().click();
+        await wizard.getByRole('button', { name: 'Next' }).click();
+        await wizard.getByRole('button', { name: 'Next' }).click();
+        await wizard.getByPlaceholder(/atlassian\.net/).fill('https://acme.atlassian.net/wiki/spaces/ENG/overview');
+        await wizard.getByRole('button', { name: 'Next' }).click();
+      },
+      expect: ['This will add 42 pages from the whole Engineering wiki.', 'Read with your Jira connection.'],
     },
   ],
   ...['themes', 'paths', 'people', 'merged'].map((t) => [`sprint:${t}`, `?view=sprint&sprintTab=${t}`, t === 'themes' ? 'sprint-themes' : t === 'paths' ? 'sprint-paths' : null]),
@@ -258,20 +309,20 @@ const VIEWS = [
     null,
     { act: openSettingsTab('AI review'), expect: ['Related repos', 'Reviewed together with', 'acme/api and acme/infrastructure'] },
   ],
-  // Settings → AI review → Confluence: the site and email saved, the token never shown; pages on the
+  // Settings → Docs → Confluence: the site and email saved, the token never shown; pages on the
   // demo's Jira site read with the Jira token.
   [
     'settings:confluence',
     '?view=activity',
     null,
-    { act: openSettingsTab('AI review'), expect: ['Confluence', 'Pages on acme.atlassian.net use your Jira token.', 'Test connection'] },
+    { act: openSettingsTab('Docs'), expect: ['Confluence', 'Pages on acme.atlassian.net use your Jira token.', 'Test connection'] },
   ],
-  // Settings → AI review → Notion: a token saved (never shown), the sharing rule behind the ⓘ.
+  // Settings → Docs → Notion: a token saved (never shown), the sharing rule behind the ⓘ.
   [
     'settings:notion',
     '?view=activity',
     null,
-    { act: openSettingsTab('AI review'), expect: ['Notion', 'Add Notion pages to Docs.', 'Integration token'] },
+    { act: openSettingsTab('Docs'), expect: ['Notion', 'Add Notion pages to Docs.', 'Integration token'] },
   ],
   ['user-activity:2', '?view=user-activity:2', null],
   ['ws2:open-prs', '?view=activity&workspace=2', null],

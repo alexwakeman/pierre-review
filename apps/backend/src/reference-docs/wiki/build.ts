@@ -43,7 +43,7 @@ interface Ready {
 }
 
 function siteOf(state: ReferenceDocWikiState): WikiPageRef {
-  return { provider: state.provider, origin: state.origin, host: new URL(state.origin).host.toLowerCase(), pageId: state.rootPageId };
+  return { provider: state.provider, origin: state.origin, host: new URL(state.origin).host.toLowerCase(), pageId: state.rootPageId, scope: state.scope ?? null };
 }
 
 async function prepare(row: DocRow): Promise<Ready> {

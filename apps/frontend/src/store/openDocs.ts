@@ -11,7 +11,8 @@ import { usePinnedTabs } from './pinnedTabs.js';
 export function openDocsSection(workspaceId: number, path: string, anchor: string | null, quote: string | null = null): void {
   const filters = useFilters.getState();
   if (filters.workspaceId !== workspaceId) filters.setWorkspace(workspaceId, null);
-  useDocsView.getState().openPath(workspaceId, path, anchor, quote);
+  // `reveal`: the contents tree opens the cited section's branch, scrolls to it and marks it.
+  useDocsView.getState().openPath(workspaceId, path, anchor, quote, true);
   usePinnedTabs.getState().showActivity();
   useFilters.getState().setActivityRepo('docs');
 }

@@ -45,6 +45,10 @@ import type { StoredPrFile } from '@pierre-review/shared';
 //      and blast-radius.ts adds only the two judgements this file has no opinion
 //      about — is it a test, and is it a contract.
 //
+// (`reference-docs/wiki/github.ts` `isRepoDocPath` — "is this repository file a text document for
+// the Docs library?" — CALLS `isNonCodeFile` as its first gate and narrows from there. It composes this
+// classifier; it is not folded into it, and nothing here changes for it.)
+//
 // ---- THE THREE DATA TRAPS (all measured on the real corpus) -----------------
 //
 // See `codeLocFor` for how each is handled. In one line each:

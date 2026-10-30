@@ -206,6 +206,33 @@ export function docTreeBranchKeys(nodes: readonly DocTreeNode[]): string[] {
   return out;
 }
 
+/**
+ * REVEAL IN THE TREE (a citation opened from a review, a chat or a story check): the row the open file
+ * is — the heading row of `#anchor` when there is one, else the section row — and the keys of every row
+ * ABOVE it, outermost first, so the tree can open exactly those branches. Null when no row is that file
+ * (INDEX.md, a CONTENTS.md, another document). Pure.
+ */
+export function docTreeTrail(nodes: readonly DocTreeNode[], path: string, anchor: string | null): { key: string; ancestors: string[] } | null {
+  let sectionHit: { key: string; ancestors: string[] } | null = null;
+  const walk = (ns: readonly DocTreeNode[], above: string[]): { key: string; ancestors: string[] } | null => {
+    for (const n of ns) {
+      const r = n.row;
+      if (r.kind === 'heading' && anchor != null && r.path === path && r.anchor === anchor) return { key: r.key, ancestors: above };
+      if (r.kind === 'section' && r.path === path && sectionHit == null) sectionHit = { key: r.key, ancestors: above };
+      const deeper = walk(n.children, [...above, r.key]);
+      if (deeper) return deeper;
+    }
+    return null;
+  };
+  return walk(nodes, []) ?? sectionHit;
+}
+
+/** The document slug a library path names (`<slug>/…`), or null for INDEX.md. */
+export const slugOfLibraryPath = (path: string): string | null => {
+  const i = path.indexOf('/');
+  return i > 0 ? path.slice(0, i) : null;
+};
+
 /** A chat citation's words: the document, then the section when there is one. */
 export function citationLabel(c: ReferenceDocCitation): string {
   return c.sectionTitle != null && c.sectionTitle !== '' ? `${c.docTitle} › ${c.sectionTitle}` : c.docTitle;

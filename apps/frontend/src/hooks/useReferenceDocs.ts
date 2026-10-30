@@ -19,6 +19,8 @@ import type {
   ReferenceDocsSettings,
   WikiCredentialsCheckResponse,
   WikiProviderId,
+  WikiPreflightResponse,
+  GithubDocsPreflightResponse,
   WikiCredentialsSettings,
   WikiCredentialsUpdate,
 } from '@pierre-review/shared';
@@ -202,11 +204,24 @@ export function useAddReferenceDocWiki(workspaceId: number | null) {
     api.addReferenceDocWiki(workspaceId!, v.url, v.childDepth),
   );
 }
+export function useAddReferenceDocWikiTree(workspaceId: number | null) {
+  return useLibraryMutation(workspaceId, (url: string) => api.addReferenceDocWikiTree(workspaceId!, url));
+}
+export function useAddReferenceDocGithub(workspaceId: number | null) {
+  return useLibraryMutation(workspaceId, (v: { repo: string; path: string }) => api.addReferenceDocGithub(workspaceId!, v.repo, v.path));
+}
+/** The wizard's counts: CLICK-gated mutations (each reads the wiki or GitHub), never a query on mount. */
+export function usePreflightWikiDocs(workspaceId: number | null) {
+  return useMutation<WikiPreflightResponse, Error, string>({ mutationFn: (url) => api.preflightWikiDocs(workspaceId!, url) });
+}
+export function usePreflightGithubDocs(workspaceId: number | null) {
+  return useMutation<GithubDocsPreflightResponse, Error, string>({ mutationFn: (repo) => api.preflightGithubDocs(workspaceId!, repo) });
+}
 export function useRefreshReferenceDoc(workspaceId: number | null) {
   return useLibraryMutation(workspaceId, (docId: number) => api.refreshReferenceDoc(docId));
 }
 
-// ---- the workspace's wiki credential (Settings → AI review → Confluence / Notion) ----
+// ---- the workspace's wiki credential (Settings → Docs → Confluence / Notion) ----
 const wikiCredentialsKey = (workspaceId: number | null) => ['wiki-credentials', workspaceId] as const;
 
 export function useWikiCredentials(workspaceId: number | null) {

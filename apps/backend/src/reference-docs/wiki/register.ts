@@ -1,4 +1,5 @@
 import { confluenceSource } from './confluence.js';
+import { githubDocsSource } from './github.js';
 import { notionSource } from './notion.js';
 import { registerWikiSource, wikiSourceFor } from './source.js';
 
@@ -7,3 +8,4 @@ import { registerWikiSource, wikiSourceFor } from './source.js';
 // provider union on the wire).
 if (!wikiSourceFor('confluence')) registerWikiSource(confluenceSource());
 if (!wikiSourceFor('notion')) registerWikiSource(notionSource());
+if (!wikiSourceFor('github')) registerWikiSource(githubDocsSource());

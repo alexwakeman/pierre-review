@@ -1,4 +1,4 @@
-import { parseConfluencePageUrl } from '@pierre-review/shared';
+import { parseConfluencePageUrl, parseConfluenceSpaceUrl } from '@pierre-review/shared';
 import {
   JiraFetchError,
   checkJiraUrl,
@@ -27,6 +27,14 @@ import {
 //   tree        GET /wiki/api/v2/pages/{id}/descendants?depth=N&limit=   ids, parents, depth, order
 //   changes     GET /wiki/rest/api/content/search?cql=ancestor = {id} AND type = page AND
 //                   lastmodified > "yyyy-MM-dd HH:mm"&expand=version        (v2 has no CQL search)
+//   space       GET /wiki/api/v2/spaces?keys=KEY | /wiki/api/v2/spaces/{id}  name, homepageId
+//               GET /wiki/api/v2/spaces/{id}/pages?depth=root                 the space's top-level pages
+//
+// SCOPES (shared `WikiScope`): a `tree` is the root page and EVERY page below it — the descendants
+// listing goes at most 5 levels per request, so the pages on the 5th level are listed again from there
+// (`collectDescendants`); never a sibling or an ancestor. A `space` is the whole space: its home page,
+// every page below it, AND the space's other top-level pages with theirs, filed under the home page;
+// its change search is `space = "KEY"` instead of `ancestor = <root>`.
 //
 // ⚠ THE SITE IS TYPED BY THE CUSTOMER, so every request goes through the tracker's guarded transport
 // (tracker/jira/fetch.ts): https ONLY and PUBLIC addresses only (the cloud policy — Confluence Cloud is
@@ -192,6 +200,8 @@ const obj = (v: unknown): Obj | null => (v != null && typeof v === 'object' && !
 const str = (v: unknown): string | null => (typeof v === 'string' ? v : typeof v === 'number' ? String(v) : null);
 const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 const PAGE_ID = /^\d{1,20}$/;
+const SPACE_KEY = /^[A-Za-z0-9_~-]{1,255}$/;
+const SPACE_ID = /^\d{1,20}$/;
 const date = (v: unknown): Date | null => {
   const s = str(v);
   if (!s) return null;
@@ -253,7 +263,43 @@ export function confluenceSource(deps: ConfluenceDeps = {}): WikiSource {
     provider: 'confluence',
     resolveRef(rawUrl) {
       const a = parseConfluencePageUrl(rawUrl);
-      return a ? { provider: 'confluence', origin: a.origin, host: a.host, pageId: a.pageId } : null;
+      if (a) return { provider: 'confluence', origin: a.origin, host: a.host, pageId: a.pageId };
+      // A SPACE's address names no page: `resolveRoot` finds its home page.
+      const sp = parseConfluenceSpaceUrl(rawUrl);
+      return sp ? { provider: 'confluence', origin: sp.origin, host: sp.host, pageId: '', scope: { kind: 'space', name: '', key: sp.spaceKey, id: null } } : null;
+    },
+    async resolveRoot(ref, opts) {
+      // A space address: its home page is the root, the whole space the scope.
+      if (ref.pageId === '') {
+        const key = ref.scope?.kind === 'space' ? ref.scope.key : null;
+        if (!key || !SPACE_KEY.test(key)) throw new WikiSourceError('bad_url');
+        const raw = obj(await get(`${ref.origin}/wiki/api/v2/spaces?keys=${encodeURIComponent(key)}&limit=1`, opts));
+        const sp = obj(Array.isArray(raw?.results) ? raw!.results[0] : null);
+        const home = str(sp?.homepageId);
+        const id = str(sp?.id);
+        if (!sp || !home || !PAGE_ID.test(home)) throw new WikiSourceError('not_found', 404);
+        const scope = { kind: 'space' as const, name: cleanTitle(sp.name), key, id: id && SPACE_ID.test(id) ? id : null };
+        return { ref: { ...ref, pageId: home, scope }, title: scope.name, scope };
+      }
+      // A page: the whole space when it IS the space's home page, else it and every page below it.
+      if (!PAGE_ID.test(ref.pageId)) throw new WikiSourceError('bad_url');
+      const page = obj(await get(`${ref.origin}/wiki/api/v2/pages/${ref.pageId}`, opts));
+      const title = cleanTitle(page?.title);
+      const spaceId = str(page?.spaceId);
+      if (spaceId && SPACE_ID.test(spaceId)) {
+        try {
+          const sp = obj(await get(`${ref.origin}/wiki/api/v2/spaces/${spaceId}`, opts));
+          const key = str(sp?.key);
+          if (sp && str(sp.homepageId) === ref.pageId && key && SPACE_KEY.test(key)) {
+            const scope = { kind: 'space' as const, name: cleanTitle(sp.name), key, id: spaceId };
+            return { ref: { ...ref, scope }, title: scope.name, scope };
+          }
+        } catch (err) {
+          // Not allowed to read the space itself: the page is still readable, as a tree.
+          if (!(err instanceof WikiSourceError) || (err.code !== 'forbidden' && err.code !== 'not_found')) throw err;
+        }
+      }
+      return { ref: { ...ref, scope: { kind: 'tree' } }, title, scope: { kind: 'tree' } };
     },
     async getPage(site: WikiPageRef, pageId, opts) {
       if (!PAGE_ID.test(pageId)) throw new WikiSourceError('bad_url');
@@ -263,35 +309,42 @@ export function confluenceSource(deps: ConfluenceDeps = {}): WikiSource {
     async listDescendants(site, rootId, depth, cap, opts) {
       if (!PAGE_ID.test(rootId)) throw new WikiSourceError('bad_url');
       if (depth <= 0) return { pages: [], more: false };
-      const all: Array<WikiPageMeta & { type: string }> = [];
-      let url: string | null = `${site.origin}/wiki/api/v2/pages/${rootId}/descendants?depth=${Math.min(5, depth)}&limit=${LIST_PAGE_LIMIT}`;
-      for (let n = 0; url && n < MAX_LIST_REQUESTS; n++) {
-        const raw = obj(await get(url, opts));
-        const results = Array.isArray(raw?.results) ? raw!.results : [];
-        for (const r of results) {
-          const o = obj(r);
-          const id = str(o?.id);
-          if (!o || !id || !PAGE_ID.test(id)) continue;
-          if (str(o.status) && str(o.status) !== 'current') continue;
-          const parent = str(o.parentId);
-          all.push({
-            id,
-            type: str(o.type) ?? 'page',
-            title: cleanTitle(o.title),
-            parentId: parent && PAGE_ID.test(parent) ? parent : null,
-            version: null,
-            editedAt: null,
-            depth: num(o.depth) ?? 1,
-            position: num(o.childPosition),
-          });
+      const budget = { requests: MAX_LIST_REQUESTS };
+      // Enough items to fill the cap and know there is more (folders count towards the stop, so a
+      // folder-heavy tree may list a little more than the cap — orderTree applies it exactly).
+      const stopAfter = cap + 1;
+      const all = await collectDescendants(get, site.origin, rootId, depth, stopAfter, budget, opts);
+      const scope = site.scope;
+      const pageCount = (): number => all.filter((i) => i.type === 'page').length;
+      if (scope?.kind === 'space' && scope.id && SPACE_ID.test(scope.id) && pageCount() < stopAfter) {
+        // The space's OTHER top-level pages (a space may have more than its home page at the top):
+        // filed under the home page, one level down, after its own children.
+        let url: string | null = `${site.origin}/wiki/api/v2/spaces/${scope.id}/pages?depth=root&status=current&limit=${LIST_PAGE_LIMIT}`;
+        const tops: Array<WikiPageMeta & { type: string }> = [];
+        for (; url && budget.requests > 0; budget.requests--) {
+          const raw = obj(await get(url, opts));
+          for (const r of Array.isArray(raw?.results) ? raw!.results : []) {
+            const o = obj(r);
+            const id = str(o?.id);
+            if (!o || !id || !PAGE_ID.test(id) || id === rootId) continue;
+            if (str(o.status) && str(o.status) !== 'current') continue;
+            tops.push({ id, type: 'page', title: cleanTitle(o.title), parentId: rootId, version: null, editedAt: null, depth: 1, position: 1_000_000 + (num(o.position) ?? tops.length) });
+          }
+          url = nextUrl(site.origin, obj(raw?._links)?.next, `/wiki/api/v2/spaces/${scope.id}/pages`);
         }
-        url = nextUrl(site.origin, obj(raw?._links)?.next, `/wiki/api/v2/pages/${rootId}/descendants`);
+        for (const t of tops) {
+          if (pageCount() >= stopAfter || budget.requests <= 0) break;
+          all.push(t);
+          if (depth > 1) all.push(...(await collectDescendants(get, site.origin, t.id, depth - 1, stopAfter, budget, opts)));
+        }
       }
       return orderTree(rootId, all, depth, cap);
     },
     async changedSince(site, rootId, since, opts) {
       if (!PAGE_ID.test(rootId)) throw new WikiSourceError('bad_url');
-      const cql = `ancestor = ${rootId} AND type = page AND lastmodified > "${cqlSince(since)}"`;
+      const scope = site.scope;
+      const within = scope?.kind === 'space' && scope.key && SPACE_KEY.test(scope.key) ? `space = "${scope.key}"` : `ancestor = ${rootId}`;
+      const cql = `${within} AND type = page AND lastmodified > "${cqlSince(since)}"`;
       const out: WikiPageMeta[] = [];
       let url: string | null = `${site.origin}/wiki/rest/api/content/search?cql=${encodeURIComponent(cql)}&expand=version&limit=${SEARCH_LIMIT}`;
       for (let n = 0; url && n < MAX_LIST_REQUESTS; n++) {
@@ -387,6 +440,63 @@ async function readFigures(
     if (marker) out.set(r.key, marker);
   }
   return out;
+}
+
+/**
+ * Every descendant of `rootId` down to `depth` levels, as the listing reports them (pages AND folders,
+ * with their own parents). The listing reaches 5 levels a request, so a page or folder on the 5th
+ * level is listed again from there, until `depth`, `stopAfter` items or the request budget. Depths are
+ * relative to `rootId`. Exported for its test.
+ */
+export async function collectDescendants(
+  get: (url: string, opts: WikiCallOptions) => Promise<unknown>,
+  origin: string,
+  rootId: string,
+  depth: number,
+  stopAfter: number,
+  budget: { requests: number },
+  opts: WikiCallOptions,
+): Promise<Array<WikiPageMeta & { type: string }>> {
+  const all: Array<WikiPageMeta & { type: string }> = [];
+  const seen = new Set<string>([rootId]);
+  let pages = 0;
+  // (id, its depth below rootId) — each listed to at most 5 more levels.
+  const queue: Array<{ id: string; base: number }> = [{ id: rootId, base: 0 }];
+  while (queue.length > 0 && pages < stopAfter && budget.requests > 0) {
+    const { id: from, base } = queue.shift()!;
+    const levels = Math.min(5, depth - base);
+    if (levels <= 0) continue;
+    let url: string | null = `${origin}/wiki/api/v2/pages/${from}/descendants?depth=${levels}&limit=${LIST_PAGE_LIMIT}`;
+    for (; url && budget.requests > 0 && pages < stopAfter; budget.requests--) {
+      const raw = obj(await get(url, opts));
+      const results = Array.isArray(raw?.results) ? raw!.results : [];
+      for (const r of results) {
+        const o = obj(r);
+        const id = str(o?.id);
+        if (!o || !id || !PAGE_ID.test(id) || seen.has(id)) continue;
+        if (str(o.status) && str(o.status) !== 'current') continue;
+        seen.add(id);
+        const parent = str(o.parentId);
+        const rel = num(o.depth) ?? 1;
+        const type = str(o.type) ?? 'page';
+        if (type === 'page') pages += 1;
+        all.push({
+          id,
+          type,
+          title: cleanTitle(o.title),
+          parentId: parent && PAGE_ID.test(parent) ? parent : null,
+          version: null,
+          editedAt: null,
+          depth: base + rel,
+          position: num(o.childPosition),
+        });
+        // The listing stops at `levels`: whatever sits there may have more below it.
+        if (rel >= levels && base + rel < depth) queue.push({ id, base: base + rel });
+      }
+      url = nextUrl(origin, obj(raw?._links)?.next, `/wiki/api/v2/pages/${from}/descendants`);
+    }
+  }
+  return all;
 }
 
 /**

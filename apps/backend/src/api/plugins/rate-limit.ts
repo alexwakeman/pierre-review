@@ -460,6 +460,15 @@ function tierFor(method: string, path: string): readonly Tier[] {
   if (method === 'POST' && (path === '/api/docs/wiki' || /^\/api\/docs\/\d+\/refresh$/.test(path))) {
     return [TIERS.search, TIERS.ai, TIERS.aiHourly];
   }
+  // THE ADD-DOCUMENTS WIZARD (same file): the two COUNTS read the source and run no model —
+  //   POST /api/docs/wiki/preflight     the root + its page tree, on the customer's Confluence / Notion
+  //   POST /api/docs/github/preflight   the repository + its file tree, on the reader's GitHub quota
+  // → search + read; adding a GitHub folder (`POST /api/docs/github`) reads GitHub AND queues a build
+  // → search + ai + ai_hourly. Spelled EXACTLY here, above the family's `read` line: these GitHub reads
+  // never reach the `hitsGithub` alternation below (that is the GitHub WRITE bucket, and this family
+  // returns first).
+  if (method === 'POST' && (path === '/api/docs/wiki/preflight' || path === '/api/docs/github/preflight')) return [TIERS.search, TIERS.read];
+  if (method === 'POST' && path === '/api/docs/github') return [TIERS.search, TIERS.ai, TIERS.aiHourly];
   if (path === '/api/docs' || path.startsWith('/api/docs/')) return [TIERS.read];
   if (/^\/api\/workspaces\/\d+\/docs-settings$/.test(path)) return [TIERS.read];
   if (!mutating && /^\/api\/prs\/\d+\/tracker-ticket$/.test(path)) return [TIERS.search, TIERS.read];

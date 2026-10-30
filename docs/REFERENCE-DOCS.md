@@ -6,7 +6,7 @@ that an agent navigates by REASONING over contents, not by embedding search. COR
 does the content building. Code: `apps/backend/src/reference-docs/`. Wire types:
 `packages/shared/src/reference-docs.ts`. Routes: [API.md](API.md) § Reference docs.
 
-The backend, the SPA (Activity → Docs, Settings → AI review → Reference docs — § The SPA) and the review
+The backend, the SPA (Activity → Docs, Settings → Docs — § The SPA) and the review
 integration (§ Use in reviews) are built.
 
 ## The idea (PageIndex, without the vectors)
@@ -248,8 +248,8 @@ name]` (an attachment of ANOTHER page keeps its name); task lists →
 private-use sentinels so they are not escaped. ⚠ The body is a stranger's: ONE forward tokenizer pass,
 quote-aware tag ends, an element stack capped at 256 (no quadratic close-tag matching), scripts dropped.
 
-**Credentials** (`wiki/credentials.ts`, `workspace_wiki_credentials`; Settings → AI review →
-**Confluence** / **Notion**): for Confluence, ONE ladder — the workspace's own Confluence credential when its site's host is the
+**Credentials** (`wiki/credentials.ts`, `workspace_wiki_credentials`; Settings → **Docs** →
+**Confluence** / **Notion**, and the add-documents wizard's connection step, which renders the same forms): for Confluence, ONE ladder — the workspace's own Confluence credential when its site's host is the
 page's host; else the workspace's JIRA credential when Jira is its tracker, the hosts match and an email
 + token are saved (Atlassian Cloud shares one API token); else none (`400 NoWikiCredential`, "Add a
 Confluence API token in Settings"). HTTP Basic `email:apiToken`. ⚠ The token is SEALED exactly like a
@@ -298,6 +298,51 @@ cancelled or budget-skipped refresh never advances a version, so the next check 
 mark — `ConfluenceIcon` / `NotionIcon`), then "Checked 2 hours ago · last edited <date>" or the can't-reach
 line, then the figures line (§ Figures); "Refresh now" beside Rebuild. The form's ⓘ explains the import,
 the credential and the refresh. The address box is TEXT (`inputMode="url"`): a bare Notion id is accepted.
+
+### Scopes — a subtree, or the whole wiki (the add-documents wizard; 2026-10-30)
+
+The wizard imports with `tree: true` (`POST /api/docs/wiki`), after a COUNT (`POST /api/docs/wiki/preflight`,
+no model). What a source covers is stored on the row (`wiki_json.scope`, shared `WikiScope`, + `rootTitle`;
+no migration — the column is JSON), so Rebuild and every refresh read exactly the same pages:
+
+- **`tree`** — the pasted page and EVERY page below it (`depth` = `REFERENCE_DOC_WIKI_ALL_DEPTH`, 32), ⚠ never a
+  sibling or an ancestor. Confluence's descendants listing reaches 5 levels a request, so whatever sits on the
+  5th level is listed again from there (`collectDescendants`, inside the request budget); Notion recurses.
+- **`space`** — the WHOLE wiki, when the address is its home: a Confluence space address
+  (`parseConfluenceSpaceUrl`: `/wiki/spaces/<KEY>`, `…/overview`, `…/pages`) or a page that IS the space's home
+  page (`resolveRoot` reads `spaces/{id}.homepageId`); a Notion page whose parent is the workspace. A Confluence
+  space adds its OTHER top-level pages under the home page (`spaces/{id}/pages?depth=root`), and its change
+  search is `space = "KEY"` instead of `ancestor = <root>`.
+- The adapter's optional `resolveRoot(ref)` decides (`resolveWikiRoot` falls back to a `tree` at the page).
+  The cap is unchanged (`REFERENCE_DOC_WIKI_MAX_PAGES`, 100 pages, root included, reading order): the count says
+  `more`, and the wizard says to add the rest as separate sections. Two sections of one wiki are two sources,
+  each its own root; the count names a document that already reads the same root (`existing`).
+- A document added before scopes keeps its `depth` (0–3) and reads as before.
+
+### GitHub repositories (`wiki/github.ts`)
+
+A repository folder's TEXT documents as ONE document — the third `WikiSource` (provider `github`), so the
+import, the cheap check, the per-page cache and the incremental rebuild are the wiki's own. Read with the
+reader's `gh` sign-in (the credential ladder's `github` rung: `getAccessToken`, nothing saved), on the default
+branch at the time it was added (`scope.repo.branch`).
+
+- **Which files** (`isRepoDocPath`): `isNonCodeFile` FIRST (so anything counted as code is out — it composes
+  that classifier and folds nothing into it), then only `md`/`markdown`/`mdx`/`rst`/`txt`/`adoc`/`asciidoc`/`org`,
+  never under a dot-folder or a vendored / generated / build folder (`node_modules`, `vendor`, `dist`, `build`,
+  `fixtures`, …), never licence / changelog / ownership boilerplate, ≤ 1 MB each.
+- **The tree**: the chosen folder is the root page; each folder below holding a document is a page (its
+  README or index is ITS text, not a child); each document is a page. Reading order: a folder's documents,
+  then its sub-folders, by path.
+- **Ids and versions**: a page id is `g` + base64url(path) (`h` + sha256 for a path too long for the 64-character
+  cache file name); the version is a number from the file's blob sha, so the sync's version compare reads
+  exactly the files whose bytes changed. `changedSince` lists the tree (ONE request, cached for a minute) and
+  reports every page the capped listing holds — over, never under. ⚠ Never a document past the cap: it is
+  never stored, so it would read as a NEW page on every check and rebuild a large folder for nothing.
+- **Converting** (`repoDocToMarkdown`): markdown as is; MDX without its import / export lines; AsciiDoc `=`,
+  Org `*` and reStructuredText under/overlined titles become `#` headings; text as is. Images keep their names.
+- Requests: `GET /repos/{o}/{r}`, `GET /repos/{o}/{r}/git/trees/{branch}?recursive=1`,
+  `GET /repos/{o}/{r}/git/blobs/{sha}` — on the account's GitHub quota; a 404 / 401 / 403 / rate limit map to
+  the wiki codes (`githubErrorCode`), and the document line says "Can't reach this folder on GitHub".
 
 ### Notion (`wiki/notion.ts`, `wiki/notion-blocks.ts`)
 
@@ -553,13 +598,20 @@ with rows under it has its own disclosure button with `aria-expanded`, and two i
 the nesting is `docTreeNodes(docTreeRows(…))` in `lib/referenceDocs.ts`, the open set local to the
 mount), a viewer that shows one library file at a time with every link followed
 in-app, and the chat (beside the viewer when wide, a Read / Ask tab when narrow). Adding: drag and
-drop or a file picker (PDF, .docx, .txt, .md, HTML), or "Add web page" with a "Links to follow"
-select (This page only / 1–3 levels; its ⓘ explains the crawl). A crawled document's line reads
+drop or a file picker (PDF, .docx, .txt, .md, HTML), or the Library's **"+"** — the ADD-DOCUMENTS WIZARD
+(`DocsAddWizard.tsx`): the source type (web page or site, Confluence, Notion, GitHub repository), then the
+address and "Links to follow" (web), the connection and the page (a wiki; § Scopes), or the repository and
+the folder (GitHub), then a review that states the server's count ("This will add 12 pages from Payments
+handbook") and Start. The list is an ACCORDION (opening a document closes the other); Refresh now, Rebuild
+and Remove sit in each document's "…" menu; a citation opened from anywhere REVEALS its section in the
+contents tree (ancestors opened, scrolled to, marked briefly). A crawled document's line reads
 "Web page · N pages · M sections". A building document shows a progress bar with the server's stage
 words ("Crawling 6 of 25", "Summarising sections (3 of 12)") from its SSE stream
 (only while the server is working on it — a queued row is polled, at most 2 streams open), the list
-polled as the fallback; a failed one shows its error and "Try again". Remove confirms inline. The
-Settings switch is "Use reference docs in Claude Review" (draft + Save, off by default). Detail and the
+polled as the fallback; a failed one shows its error and "Try again". Remove confirms inline. Settings → **Docs** holds
+everything else: "Use reference docs in AI Review" (draft + Save, off by default), Confluence (READY as "Using
+your Jira connection" when Jira is the tracker and no Confluence token is saved — "Use a different token"
+overrides it) and Notion. Detail and the
 landmines: [FRONTEND.md](FRONTEND.md) § Activity → Docs.
 
 **The quote highlight.** Every link that carries a server-checked quote — a review reference, a ticket
@@ -783,7 +835,11 @@ the grounding cut; draw.io plain + compressed and Gliffy outlines; the HTML / Co
 · `wiki/notion-figures-db.test.ts` (end to end over a scratch DB with an in-memory Notion: token shape and
 write-only, the check, import with a described figure, a refresh describes nothing again, a failed
 description retried by the cheap check, the budget skip, Codex, erasure of the cache) ·
-`review/story-docs/validate.test.ts` (a quote only a figure description holds is dropped) · `wiki/sync.test.ts` (the cheap check reads no body;
+`review/story-docs/validate.test.ts` (a quote only a figure description holds is dropped) · `wiki/github.test.ts` (which files are documents, folder counts, page ids, the converters, the README as the
+folder, missing folder / 401, a refresh reads only the changed blob) · `wiki/confluence.test.ts` § scopes (a
+space address, the home page = whole space, a tree past five levels, the space's other top pages and its
+change search) · `wiki/wiki-db.test.ts` § the wizard (the count, a subtree import never reads a sibling,
+Rebuild reads the same pages, another account cannot count) · `wiki/sync.test.ts` (the cheap check reads no body;
 child / root edits, the daily list; only changed pages read; a same-text bump changes nothing; child and
 root failures) · `wiki/wiki-db.test.ts` (end to end over a scratch DB with an in-memory wiki and a fake
 agent: credentials incl. Jira reuse and write-only token, import, refresh with nothing changed = no

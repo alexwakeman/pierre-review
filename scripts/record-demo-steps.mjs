@@ -231,6 +231,10 @@ export const STEPS = [
       const chats = await h.fetchGet('/api/docs/chats?workspace=1');
       for (const c of chats?.conversations ?? []) await h.fetchGet(`/api/docs/chats/${enc(c.conversationId ?? c.id)}?workspace=1`);
       await h.fetchGet('/api/workspaces/1/docs-settings');
+      // The add-documents wizard reads the wiki connection and the repository list (its counts are the
+      // demo's own fixed answers, demo/routes.ts).
+      await h.fetchGet('/api/workspaces/1/wiki-credentials');
+      await h.fetchGet('/api/repos');
     },
   },
 
@@ -373,7 +377,7 @@ export const STEPS = [
       // Related repos (Settings → Workspace), both workspaces.
       await h.fetchGet('/api/workspaces/1/related-repos');
       await h.fetchGet('/api/workspaces/2/related-repos');
-      // Settings → AI review → Confluence + Notion (the reference docs' wiki sources: one answer), both workspaces.
+      // Settings → Docs → Confluence + Notion (the reference docs' wiki sources: one answer), both workspaces.
       await h.fetchGet('/api/workspaces/1/wiki-credentials');
       await h.fetchGet('/api/workspaces/2/wiki-credentials');
     },
