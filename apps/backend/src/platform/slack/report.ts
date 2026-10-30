@@ -13,8 +13,9 @@ import { workspaceScope } from '../insights/workspace-request.js';
 import { getComparisonWindow } from '../settings/store.js';
 import { fitSections, toSlackMrkdwn } from './format.js';
 import { escapeSlack, prLink, repoLink, slackLink, workspaceLink } from './links.js';
-import { buildPendingBlocks } from './pending-blocks.js';
+import { buildPendingSections, type PendingSlackSection } from './pending-blocks.js';
 import { readTargetRow } from './targets.js';
+import { BOTS_EMOJI, SPRINT_EMOJI, toneAttachment, type SlackAttachment } from './tones.js';
 
 const SECTION_MAX = 2900; // Slack section text hard limit is 3000 chars
 // A summary that outgrows its budget is split at LINE boundaries (format.ts `fitSections`) and the
@@ -24,9 +25,10 @@ const SECTION_MAX = 2900; // Slack section text hard limit is 3000 chars
 //
 // The sprint summary is SHORT now: it follows the Pending sections, which carry the PRs.
 const SPRINT_MAX_SECTIONS = 1;
-// The block budget: header 1 + Pending 6 tabs × ≤2 sections (pending-blocks.ts) + dividers 2 +
-// sprint 1 + bot 1 + footer 1 = 18, far under Slack's 50. The final `slice(0, SLACK_MAX_BLOCKS)`
-// backstop is kept anyway, and keeps the footer: it drops body blocks, never the last one.
+// The block budget, counted across the top level AND every attachment: header 1 + Pending 5 team
+// tabs × ≤2 sections (pending-blocks.ts) + sprint 1 + bot 1 + footer 1 = 14, far under Slack's 50.
+// The `SLACK_MAX_BLOCKS` backstop is kept anyway, and keeps the footer: it drops body blocks from
+// the end, never the footer.
 export const SLACK_MAX_BLOCKS = 48;
 
 // For link-free text only (the bot block). Anything carrying `<url|text>` goes through
@@ -42,8 +44,13 @@ const mrkdwn = (text: string) => ({ type: 'mrkdwn', text, verbatim: true });
 const section = (text: string) => ({ type: 'section', text: mrkdwn(text) });
 const fmtDate = (iso: string): string => (iso ? iso.slice(0, 10) : '');
 
+// ⚠ COLOUR LIVES ON ATTACHMENTS. Slack paints a bar only beside an attachment (`color`), so each
+// part of a message — a Pending tab, the sprint summary, the bot block, an event signal — is one
+// attachment carrying its own blocks, toned by slack/tones.ts. Top-level `blocks` hold only what
+// sits above every bar (the digest's header). The words never depend on the colour.
 export interface SlackMessage {
   blocks: unknown[];
+  attachments?: SlackAttachment[];
   text: string; // notification fallback
 }
 
@@ -124,7 +131,7 @@ async function buildBotBlocks(
 
   const pct = card.actedOnPct == null ? '—' : `${Math.round(card.actedOnPct)}%`;
   const oldest = card.oldestUntouchedDays == null ? '' : ` (oldest ${card.oldestUntouchedDays}d)`;
-  const headline = `*Review bots* — ${card.totalThreads} comments · ${pct} acted on · ${card.totalUntouched} untouched${oldest}`;
+  const headline = `${BOTS_EMOJI} *Review bots* — ${card.totalThreads} comments · ${pct} acted on · ${card.totalUntouched} untouched${oldest}`;
   const vendorLines = card.vendors
     .map((v) => {
       const vpct = v.threads === 0 ? '—' : `${Math.round((v.actedOn / v.threads) * 100)}%`;
@@ -167,11 +174,11 @@ export async function buildSlackReport(
 ): Promise<SlackMessage | null> {
   // The board first. Optional seam: an older host has none, and the message is then the sprint
   // summary and bot block alone. A failed read degrades the same way rather than losing the send.
-  let pendingBlocks: unknown[] = [];
+  let pendingSections: PendingSlackSection[] = [];
   if (ctx.queries.getPendingBoard != null) {
     try {
       const board = await ctx.queries.getPendingBoard(accountId, workspaceId);
-      pendingBlocks = buildPendingBlocks(ctx, board, section);
+      pendingSections = buildPendingSections(ctx, board, section);
     } catch (err) {
       ctx.log.warn({ err, accountId, workspaceId }, 'slack: pending board read failed');
     }
@@ -191,37 +198,36 @@ export async function buildSlackReport(
   const repoUrl = (repoId: number): string | null => repoLink(ctx, workspaceId, repoId);
   const workspaceName = await workspaceNameFor(ctx, accountId, workspaceId);
 
-  const body: unknown[] = [...pendingBlocks];
+  // One coloured part per Pending tab, then the sprint summary and the bot block in grey.
+  const parts: SlackAttachment[] = pendingSections.map((p) =>
+    toneAttachment(p.tone, p.fallback, p.blocks),
+  );
   const hasSprint = sprint != null && sprint.summary.trim() !== '';
   if (hasSprint) {
-    if (body.length > 0) body.push({ type: 'divider' });
     // Narrowed to THIS workspace's repos. `enrichedPrRefs` resolves any `owner/name#N` across the
     // whole account, so a stray token naming another workspace's PR stays plain text and never
     // prints that PR's title into this team's channel.
     const sprintRefs = sprint.prRefs.filter((r) => workspaceRepoIds.has(r.repoId));
-    const heading = `*Sprint summary* · ${fmtDate(sprint.sprint.from)} – ${fmtDate(sprint.sprint.to)}`;
-    for (const chunk of fitSections(
+    const range = `${fmtDate(sprint.sprint.from)} – ${fmtDate(sprint.sprint.to)}`;
+    const heading = `${SPRINT_EMOJI} *Sprint summary* · ${range}`;
+    const chunks = fitSections(
       `${heading}\n${toSlackMrkdwn(sprint.summary, sprintRefs, { prUrl, repoUrl })}`,
       SECTION_MAX,
       SPRINT_MAX_SECTIONS,
-    )) {
-      body.push(section(chunk));
-    }
+    );
+    parts.push(toneAttachment('info', `Sprint summary · ${range}`, chunks.map(section)));
   }
 
   // The bot signal-to-noise block is DETERMINISTIC (no AI) — it may be the only content, so the
   // empty-guard below accepts a bot-only message.
   const botBlocks = await buildBotBlocks(ctx, accountId, workspaceId);
-  if (botBlocks.length > 0) {
-    if (body.length > 0) body.push({ type: 'divider' });
-    body.push(...botBlocks);
-  }
+  if (botBlocks.length > 0) parts.push(toneAttachment('info', 'Review bots', botBlocks));
 
-  if (body.length === 0) return null;
+  if (parts.length === 0) return null;
 
   // What the message leads with — the header and the notification fallback say the same thing.
   const lead =
-    pendingBlocks.length > 0 ? 'Pending' : hasSprint ? 'sprint summary' : 'review bots';
+    pendingSections.length > 0 ? 'Pending' : hasSprint ? 'sprint summary' : 'review bots';
   const blocks: unknown[] = [
     {
       type: 'header',
@@ -232,7 +238,6 @@ export async function buildSlackReport(
         text: `${workspaceName} · ${lead}`.slice(0, 150),
       },
     },
-    ...body,
   ];
 
   // The footer link back into the app, for the workspace this message describes. Emitted only
@@ -246,15 +251,23 @@ export async function buildSlackReport(
           // can neither end the link early nor ping the channel.
           elements: [mrkdwn(slackLink(wsUrl, `Open ${workspaceName} in Limn`))],
         };
-  // Backstop: never over Slack's limit, and never at the footer's expense.
-  const room = SLACK_MAX_BLOCKS - (footer == null ? 0 : 1);
-  const out = blocks.slice(0, room);
-  if (footer != null) out.push(footer);
+  // Backstop: never over Slack's limit (counted across the top level and every part), and never
+  // at the footer's expense — body blocks go from the END. The footer closes the last part.
+  let room = SLACK_MAX_BLOCKS - blocks.length - (footer == null ? 0 : 1);
+  const attachments: SlackAttachment[] = [];
+  for (const p of parts) {
+    if (room <= 0) break;
+    const kept = p.blocks.slice(0, room);
+    room -= kept.length;
+    attachments.push({ ...p, blocks: kept });
+  }
+  const last = attachments[attachments.length - 1];
+  if (footer != null && last != null) last.blocks.push(footer);
 
   // The notification fallback is parsed as mrkdwn too, so the name is escaped here as well.
   const name = escapeSlack(workspaceName);
   const text = `${name} · ${lead}`;
-  return { blocks: out, text };
+  return { blocks, attachments, text };
 }
 
 // The workspace's display name, for the header and the footer link. Falls back to a neutral label

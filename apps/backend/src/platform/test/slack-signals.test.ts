@@ -17,12 +17,12 @@ import * as slackSchema from '../slack/schema.sqlite.js';
 const posted: { url: string; text: string; body: string }[] = [];
 let failNextPost = false;
 vi.mock('../slack/send.js', () => ({
-  postToSlack: async (url: string, message: { text: string; blocks: unknown[] }) => {
+  postToSlack: async (url: string, message: { text: string; blocks: unknown[]; attachments?: unknown[] }) => {
     if (failNextPost) {
       failNextPost = false;
       throw new Error('Slack webhook responded 500');
     }
-    posted.push({ url, text: message.text, body: JSON.stringify(message.blocks) });
+    posted.push({ url, text: message.text, body: JSON.stringify([message.blocks, message.attachments]) });
   },
 }));
 

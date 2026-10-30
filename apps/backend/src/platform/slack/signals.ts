@@ -6,6 +6,7 @@ import { escapeSlack, prLink, slackLink } from './links.js';
 import type { SlackMessage } from './report.js';
 import { postToSlack } from './send.js';
 import { readTargetRow, type SlackTargetRow } from './targets.js';
+import { MERGED_EMOJI, toneAttachment, verdictEmoji, verdictTone } from './tones.js';
 import { aiRunProviderName, PAIR_RUN_LABEL } from '@pierre-review/shared';
 
 // ── THE TWO SLACK EVENT SIGNALS (Pro, `slackDigest`; plugin migration 0040) ──────────────────
@@ -26,6 +27,10 @@ import { aiRunProviderName, PAIR_RUN_LABEL } from '@pierre-review/shared';
 // logged and stays claimed: a retry double-posts whenever Slack accepted but answered late.
 // ⚠ GATED BY the row's own switch (`notify_reviews` / `notify_merges`, both off by default).
 // ⚠ NEVER LOG THE WEBHOOK URL.
+//
+// Each signal is ONE coloured attachment (slack/tones.ts): a merge purple; a review by its verdict —
+// Approve green, Request changes red, a comment grey. The verdict and "Merged" are always written
+// out; the colour and the one heading emoji only repeat them.
 
 const SUMMARY_MAX = 700;
 
@@ -152,14 +157,21 @@ export function reviewMessage(
   ranBy: string = 'Claude',
 ): SlackMessage {
   const by = f.authorLogin ? ` by @${escapeSlack(f.authorLogin)}` : '';
-  const head = `*${ranBy} Review ran* on ${prLine(ctx, workspaceId, f)}${by}`;
+  const head = `${verdictEmoji(verdict)} *${ranBy} Review ran* on ${prLine(ctx, workspaceId, f)}${by}`;
   const lines = [head];
   if (verdict != null) lines.push(`Verdict: *${VERDICT_TEXT[verdict] ?? verdict}*`);
   const body = summary == null ? '' : trimSummary(summary);
   if (body !== '') lines.push(body.split('\n').map((l) => `> ${escapeSlack(l)}`).join('\n'));
+  const text = `${ranBy} Review ran on ${escapeSlack(`${f.owner}/${f.name}#${f.number}`)}`;
+  const fallback = verdict == null ? text : `${text}: ${VERDICT_TEXT[verdict] ?? verdict}`;
   return {
-    blocks: [{ type: 'section', text: mrkdwn(lines.join('\n')) }],
-    text: `${ranBy} Review ran on ${escapeSlack(`${f.owner}/${f.name}#${f.number}`)}`,
+    blocks: [],
+    attachments: [
+      toneAttachment(verdictTone(verdict), fallback, [
+        { type: 'section', text: mrkdwn(lines.join('\n')) },
+      ]),
+    ],
+    text,
   };
 }
 
@@ -167,14 +179,18 @@ export function reviewMessage(
 export function mergeMessage(ctx: ProContext, workspaceId: number, f: PrFacts): SlackMessage {
   const who = f.mergedByLogin ? `@${escapeSlack(f.mergedByLogin)}` : 'Someone';
   const author = f.authorLogin ? ` (opened by @${escapeSlack(f.authorLogin)})` : '';
+  const text = `${who} merged ${escapeSlack(`${f.owner}/${f.name}#${f.number}`)}`;
   return {
-    blocks: [
-      {
-        type: 'section',
-        text: mrkdwn(`*Merged* · ${who} merged ${prLine(ctx, workspaceId, f)}${author}`),
-      },
+    blocks: [],
+    attachments: [
+      toneAttachment('merged', text, [
+        {
+          type: 'section',
+          text: mrkdwn(`${MERGED_EMOJI} *Merged* · ${who} merged ${prLine(ctx, workspaceId, f)}${author}`),
+        },
+      ]),
     ],
-    text: `${who} merged ${escapeSlack(`${f.owner}/${f.name}#${f.number}`)}`,
+    text,
   };
 }
 

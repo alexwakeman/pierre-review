@@ -9,6 +9,7 @@ import {
 import type { ProContext } from '../contract.js';
 import { fitSections } from './format.js';
 import { escapeSlack, pendingLink, prLink, repoLink, slackLink } from './links.js';
+import { PENDING_TAB_EMOJI, PENDING_TAB_TONE, pendingCardEmoji, type SlackTone } from './tones.js';
 
 // ── THE PENDING BOARD, AS SLACK SECTIONS ─────────────────────────────────────────────────────
 //
@@ -32,6 +33,10 @@ import { escapeSlack, pendingLink, prLink, repoLink, slackLink } from './links.j
 //     and do not count it, so "and N more" is what that tab holds that this message did not name.
 //   • Top `PENDING_DO_NEXT_SIZE` per section in the board's own order (`tab.cardIds` — score
 //     order, grouped where the board groups).
+//   • Each tab is its own COLOURED part (slack/tones.ts `PENDING_TAB_TONE`: Needs fixing red,
+//     waiting amber, Ready to land green, Dependencies grey), its heading carries one emoji and
+//     each line opens with the card kind's icon in place of a bullet. The words stay: colour and
+//     icons only repeat them.
 //
 // ⚠ THE WORDING IS A SECOND COPY. The SPA's chips live in apps/frontend/.../pendingLabels.ts, which
 // the plugin cannot import. Keep this map small and plain; test/slack-pending-blocks.test.ts pins
@@ -46,7 +51,7 @@ const TAB_MAX_SECTIONS = 2;
 
 /** Tabs that read ONE person's board — never sent to a team channel. */
 export const PERSONAL_PENDING_TABS = new Set<PendingTabKey>(['my_turn', 'claude']);
-type TeamPendingTabKey = Exclude<PendingTabKey, 'my_turn' | 'claude'>;
+export type TeamPendingTabKey = Exclude<PendingTabKey, 'my_turn' | 'claude'>;
 
 // ⚠ A NEW TAB KEY FAILS TO COMPILE HERE until someone decides: a team label, or personal.
 export const PENDING_TAB_LABEL: Record<TeamPendingTabKey, string> = {
@@ -147,7 +152,8 @@ function subjectKey(card: InsightCard): string | null {
   return null;
 }
 
-/** One card as one mrkdwn line: `• <link|acme/api#12 Title> by @login — what it needs`. */
+/** One card as one mrkdwn line: `:x: <link|acme/api#12 Title> by @login — what it needs`, the
+ *  card kind's icon in place of a bullet. */
 function cardLine(
   ctx: ProContext,
   workspaceId: number,
@@ -161,7 +167,7 @@ function cardLine(
     (card.kind === 'ci_failing' && card.arm === 'trunk');
   if (isTrunk && 'repoFullName' in card) {
     const branch = 'branchName' in card && card.branchName ? ` ${card.branchName}` : '';
-    return `• ${slackLink(repoLink(ctx, workspaceId, card.repoId), `${card.repoFullName}${branch}`)} — ${escapeSlack(what)}`;
+    return `${pendingCardEmoji(card)} ${slackLink(repoLink(ctx, workspaceId, card.repoId), `${card.repoFullName}${branch}`)} — ${escapeSlack(what)}`;
   }
   if (!('prId' in card) || card.prId == null || !('prNumber' in card) || card.prNumber == null) {
     return null;
@@ -172,27 +178,37 @@ function cardLine(
   const authorId = 'authorId' in card ? card.authorId : null;
   const login = authorId == null ? undefined : logins.get(authorId);
   const by = login ? ` by @${escapeSlack(login)}` : '';
-  return `• ${link}${by} — ${escapeSlack(what)}`;
+  return `${pendingCardEmoji(card)} ${link}${by} — ${escapeSlack(what)}`;
 }
 
-/** The Pending sections, as Slack `section` blocks (`mk` builds one — the caller's verbatim
- *  helper). Empty when the board has nothing to list. */
-export function buildPendingBlocks(
+/** One team tab as one coloured part of the message. */
+export interface PendingSlackSection {
+  key: TeamPendingTabKey;
+  tone: SlackTone;
+  /** Plain words for the attachment's fallback: `Needs fixing · 3`. */
+  fallback: string;
+  blocks: unknown[];
+}
+
+/** The Pending sections, one per team tab, each as Slack `section` blocks (`mk` builds one — the
+ *  caller's verbatim helper). Empty when the board has nothing to list. */
+export function buildPendingSections(
   ctx: ProContext,
   board: PendingBoardSnapshot,
   mk: (text: string) => unknown,
-): unknown[] {
+): PendingSlackSection[] {
   const workspaceId = board.workspaceId;
   const byId = new Map(board.cards.map((c) => [c.id, c]));
   const logins = new Map(board.users.map((u) => [u.id, u.githubLogin]));
   const tabs = new Map((board.tabs ?? []).map((t) => [t.key, t]));
   const seen = new Set<string>();
-  const blocks: unknown[] = [];
+  const sections: PendingSlackSection[] = [];
 
   for (const def of PENDING_TABS) {
     if (PERSONAL_PENDING_TABS.has(def.key)) continue;
     const tab = tabs.get(def.key);
     if (tab == null) continue;
+    const key = def.key as TeamPendingTabKey;
     const lines: string[] = [];
     let alreadyNamed = 0;
     let viewerScoped = 0;
@@ -203,15 +219,15 @@ export function buildPendingBlocks(
         viewerScoped += 1;
         continue;
       }
-      const key = subjectKey(card) ?? `card:${card.id}`;
-      if (seen.has(key)) {
+      const subject = subjectKey(card) ?? `card:${card.id}`;
+      if (seen.has(subject)) {
         alreadyNamed += 1;
         continue;
       }
       if (lines.length >= PENDING_SLACK_PER_TAB) continue;
       const line = cardLine(ctx, workspaceId, card, logins);
       if (line == null) continue;
-      seen.add(key);
+      seen.add(subject);
       lines.push(line);
     }
     // What the tab holds that this message did not name: its whole count, less what is listed
@@ -219,14 +235,27 @@ export function buildPendingBlocks(
     const more = Math.max(0, tab.total - lines.length - alreadyNamed - viewerScoped);
     if (lines.length === 0 && more === 0) continue;
 
-    const label = PENDING_TAB_LABEL[def.key as TeamPendingTabKey];
-    const body = [`*${escapeSlack(label)}* · ${lines.length + more}`, ...lines];
+    const label = PENDING_TAB_LABEL[key];
+    const count = lines.length + more;
+    const body = [`${PENDING_TAB_EMOJI[key]} *${escapeSlack(label)}* · ${count}`, ...lines];
     if (more > 0) {
       body.push(slackLink(pendingLink(ctx, workspaceId, def.key), `and ${more} more`));
     }
-    for (const chunk of fitSections(body.join('\n'), SECTION_MAX, TAB_MAX_SECTIONS)) {
-      blocks.push(mk(chunk));
-    }
+    sections.push({
+      key,
+      tone: PENDING_TAB_TONE[key],
+      fallback: `${label} · ${count}`,
+      blocks: fitSections(body.join('\n'), SECTION_MAX, TAB_MAX_SECTIONS).map(mk),
+    });
   }
-  return blocks;
+  return sections;
+}
+
+/** Every Pending section's blocks, in order, uncoloured. */
+export function buildPendingBlocks(
+  ctx: ProContext,
+  board: PendingBoardSnapshot,
+  mk: (text: string) => unknown,
+): unknown[] {
+  return buildPendingSections(ctx, board, mk).flatMap((s) => s.blocks);
 }
